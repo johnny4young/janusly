@@ -25,6 +25,7 @@ vi.mock("../http", async (importOriginal) => {
 });
 
 vi.mock("@janusly/data", () => ({
+  recordSystemAudit: vi.fn(async () => undefined),
   ensureOnboardingRow: vi.fn(),
   getOnboardingProgress: vi.fn(),
   advanceOnboardingHighWater: vi.fn(),

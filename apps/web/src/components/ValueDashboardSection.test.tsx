@@ -80,6 +80,47 @@ describe('<ValueDashboardSection />', () => {
     expect(badges.length).toBeGreaterThanOrEqual(3)
   })
 
+  it('uses the canonical recovery duration for measured downtime', () => {
+    render(
+      <ValueDashboardSection
+        mttrMs={60_000}
+        mttrDisplay="1m"
+        terminalRunsZero={false}
+        windowDays={30}
+        downtimeEndedMs={(3 * 60 + 14) * 60_000}
+      />,
+    )
+
+    expect(screen.getByTestId('value-downtime-ended')).toHaveTextContent('3h 14m')
+  })
+
+  it('renders a quiet lifetime ledger only after the first recovered failure', () => {
+    const { rerender } = render(
+      <ValueDashboardSection
+        mttrMs={60_000}
+        mttrDisplay="1m"
+        terminalRunsZero={false}
+        windowDays={30}
+        ledger={{ totalRecovered: 1, downtimeEndedMs: 11_700_000, sinceIso: '2026-01-01T00:00:00.000Z' }}
+      />,
+    )
+
+    expect(screen.getByTestId('recovery-lifetime-ledger')).toHaveTextContent(
+      'Since day one: 1 failure recovered · 3h 15m of downtime ended',
+    )
+
+    rerender(
+      <ValueDashboardSection
+        mttrMs={null}
+        mttrDisplay="—"
+        terminalRunsZero
+        windowDays={30}
+        ledger={{ totalRecovered: 0, downtimeEndedMs: 0, sinceIso: null }}
+      />,
+    )
+    expect(screen.queryByTestId('recovery-lifetime-ledger')).not.toBeInTheDocument()
+  })
+
   it('renders "Awaiting private-beta data" when baseline is unset (sentinel 0)', () => {
     render(
       <ValueDashboardSection

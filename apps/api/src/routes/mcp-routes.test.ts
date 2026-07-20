@@ -203,7 +203,7 @@ beforeEach(() => {
     onboarding: {} as never,
   });
   vi.mocked(withMcpClient).mockReset();
-  vi.mocked(withMcpClient).mockImplementation(async (factory, fn) => {
+  vi.mocked(withMcpClient).mockImplementation(async (_factory, fn) => {
     return (fn as (c: unknown) => Promise<unknown>)({});
   });
 });

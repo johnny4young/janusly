@@ -11,7 +11,12 @@
  */
 
 import { enqueueNode } from "../queue";
-import type { QueueAdapter, EnqueueNodeInput, DeadLetterInput } from "../core/types";
+import type {
+  QueueAdapter,
+  EnqueueNodeInput,
+  DeadLetterInput,
+  TerminalFailureInput,
+} from "../core/types";
 import { DeadLetterQueueAdapter } from "./dead-letter-queue";
 
 /** `QueueAdapter` implementation backed by BullMQ + Redis. */
@@ -21,6 +26,11 @@ export class BullMQQueueAdapter implements QueueAdapter {
   /** Enqueue a ready-to-run node onto the BullMQ workflow queue. */
   async enqueueNode(input: EnqueueNodeInput): Promise<void> {
     await enqueueNode(input);
+  }
+
+  /** Commit the exhausted execution generation and its DLQ row atomically. */
+  async persistTerminalFailure(input: TerminalFailureInput): Promise<boolean> {
+    return this.deadLetters.persistTerminalFailure(input);
   }
 
   /** Insert a row into `dead_letters` for a job that exhausted its retries. */

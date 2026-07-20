@@ -30,8 +30,8 @@
  *   cross-org retention sweeps which use `orgId: "system"`), `userId: null`.
  */
 
-import { auditLogs, db } from "@janusly/db";
 import {
+  recordSystemAudit,
   DEFAULT_CALIBRATION_WINDOW_DAYS,
   listCalibratableApproaches,
   listCalibrationSamples,
@@ -106,23 +106,9 @@ export async function registerConfidenceCalibrationScheduler(
  * user free text, so the `safePersistPayload` chokepoint is not needed
  * here (same posture as `retention-scheduler.ts`'s per-org audit).
  */
-async function writeCalibrationAudit(orgId: string, metadata: Record<string, unknown>): Promise<void> {
-  try {
-    await db.insert(auditLogs).values({
-      id: crypto.randomUUID(),
-      orgId,
-      userId: null,
-      action: "confidence.calibration.computed",
-      targetType: null,
-      targetId: null,
-      metadata,
-    });
-  } catch (err) {
-    console.warn("[confidence-calibration] audit write failed", {
-      orgId,
-      err: err instanceof Error ? err.message : String(err),
-    });
-  }
+function writeCalibrationAudit(orgId: string, metadata: Record<string, unknown>): Promise<void> {
+  // Chokepoint fix: previously wrote RAW metadata without safePersistPayload.
+  return recordSystemAudit({ orgId, action: "confidence.calibration.computed", metadata, logTag: "[confidence-calibration]" });
 }
 
 /**
@@ -196,9 +182,7 @@ export async function runOrgCalibration(
  * (listing orgs) degrades to a warn log; per-org errors are isolated
  * inside `runOrgCalibration`.
  */
-export async function handleConfidenceCalibrationTrigger(
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<void> {
+export async function handleConfidenceCalibrationTrigger(): Promise<void> {
   const windowDays = DEFAULT_CALIBRATION_WINDOW_DAYS;
   let orgIds: string[];
   try {

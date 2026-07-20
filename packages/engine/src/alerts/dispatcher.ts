@@ -6,10 +6,10 @@
  * api-side events (budget-gate) do.
  *
  * Lives in `@janusly/engine` (not `apps/api`) so both processes can
- * register the same function. Audit writes happen inline via
- * `db.insert(auditLogs)` + the shared `safePersistPayload` chokepoint
- * (same posture as `autoHealingRepo.ts` and `rate-limit-degradation.ts`)
- * because the api-side `audit()` helper isn't importable from engine.
+ * register the same function. Audit writes go through the shared
+ * `recordSystemAudit` chokepoint in `@janusly/data` (keeping this
+ * dispatcher's historical 64 KB cap) because the api-side `audit()`
+ * helper isn't importable from engine.
  *
  * Invariants:
  *  - Never throws. Per-channel failures land as `{ ok: false, error, latencyMs }`.
@@ -19,7 +19,6 @@
  *    write `alert.policy.suppressed` audit (no `alert_dispatches` row).
  */
 
-import { db, auditLogs } from "@janusly/db";
 import {
   composeAlertMessage,
   matchGlob,
@@ -29,6 +28,7 @@ import {
   type AlertParamsByTrigger,
 } from "@janusly/shared";
 import {
+  recordSystemAudit,
   getEnabledPoliciesByTrigger,
   type AlertPolicy,
   getLastDispatchAt,
@@ -42,7 +42,6 @@ import {
   callSlackPost,
   callWebhookSend,
 } from "../integration-dispatch";
-import { safePersistPayload } from "../safe-persist";
 import { buildDedupeKey } from "./dedupe-key";
 
 const AUDIT_METADATA_MAX_BYTES = 64_000;
@@ -52,31 +51,22 @@ const RECOVERY_CENTER_URL = (() => {
 })();
 
 /**
- * Inline audit writer used by the dispatcher. Mirrors `apps/api/src/audit.ts`
- * exactly — same `safePersistPayload` chokepoint, same 64 KB cap, same
- * never-throw posture. Lives here because engine cannot import from api.
+ * Dispatcher audit via the shared data-layer chokepoint, keeping the
+ * historical 64 KB cap (the api route-layer convention).
  */
-async function writeAuditRow(input: {
+function writeAuditRow(input: {
   orgId: string;
   action: string;
   targetType: string;
   targetId: string;
   metadata: Record<string, unknown>;
 }): Promise<void> {
-  try {
-    await db.insert(auditLogs).values({
-      id: crypto.randomUUID(),
-      orgId: input.orgId,
-      userId: "system",
-      action: input.action,
-      targetType: input.targetType,
-      targetId: input.targetId,
-      metadata: safePersistPayload(input.metadata, { maxBytes: AUDIT_METADATA_MAX_BYTES }),
-    });
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.warn("[alerts] audit write failed", { action: input.action, err });
-  }
+  return recordSystemAudit({
+    ...input,
+    actor: "system",
+    logTag: "[alerts]",
+    maxBytes: AUDIT_METADATA_MAX_BYTES,
+  });
 }
 
 /**

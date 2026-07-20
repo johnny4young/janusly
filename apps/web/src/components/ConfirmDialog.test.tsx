@@ -55,12 +55,25 @@ describe('<ConfirmProvider /> / useConfirm', () => {
     await waitFor(() => expect(results).toEqual([false]))
   })
 
-  it('resolves false on Escape', async () => {
+  it('focuses, traps both Tab directions, closes on Escape, and restores the trigger', async () => {
     const results = renderHarness()
-    fireEvent.click(screen.getByText('open'))
-    await screen.findByRole('alertdialog')
+    const trigger = screen.getByText('open')
+    trigger.focus()
+    fireEvent.click(trigger)
+    const dialog = await screen.findByRole('alertdialog')
+    const cancel = screen.getByTestId('confirm-dialog-cancel')
+    const confirm = screen.getByTestId('confirm-dialog-confirm')
+
+    await waitFor(() => expect(document.activeElement).toBe(confirm))
+    fireEvent.keyDown(document, { key: 'Tab' })
+    expect(document.activeElement).toBe(cancel)
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(confirm)
+
     fireEvent.keyDown(window, { key: 'Escape' })
     await waitFor(() => expect(results).toEqual([false]))
+    await waitFor(() => expect(dialog).not.toBeInTheDocument())
+    await waitFor(() => expect(document.activeElement).toBe(trigger))
   })
 
   it('rejects a re-entrant confirm without replacing the active dialog', async () => {

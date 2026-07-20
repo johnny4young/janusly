@@ -5,6 +5,7 @@ const {
   buildRunExplainReportMock,
   composeRecoveryMetricsMock,
   queryRecoveryMetricsSignalsMock,
+  queryRecoveryLedgerMock,
   getOrgConfigSnapshotMock,
   selectRowsBox,
   sendJsonMock,
@@ -17,6 +18,7 @@ const {
   buildRunExplainReportMock: vi.fn(),
   composeRecoveryMetricsMock: vi.fn(),
   queryRecoveryMetricsSignalsMock: vi.fn(),
+  queryRecoveryLedgerMock: vi.fn(),
   getOrgConfigSnapshotMock: vi.fn(),
   selectRowsBox: { rows: [] as unknown[][] },
   sendJsonMock: vi.fn((_res: unknown, payload: unknown, status = 200) => ({ payload, status })),
@@ -59,6 +61,7 @@ vi.mock("@janusly/db", () => {
       where: vi.fn(() => chain),
       orderBy: vi.fn(() => chain),
       limit: vi.fn(() => chain),
+      // oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are intentionally thenable.
       then: ((resolve, reject) => settle().then(resolve, reject)) as PromiseLike<unknown[]>["then"],
     };
     return chain;
@@ -88,6 +91,7 @@ vi.mock("@janusly/engine/src/recovery-metrics", () => ({
 
 vi.mock("@janusly/data/src/recoveryMetricsRepo", () => ({
   queryRecoveryMetricsSignals: queryRecoveryMetricsSignalsMock,
+  queryRecoveryLedger: queryRecoveryLedgerMock,
 }));
 
 vi.mock("@janusly/data/src/orgConfigRepo", () => ({
@@ -146,7 +150,7 @@ function valueDashboardRoute() {
 /** Build a Node-`http`-shaped request that yields a JSON body via the
  *  same `data` / `end` events the `readJson` helper subscribes to. */
 function makeJsonRequest(body: unknown) {
-  let handlers: Record<string, ((chunk?: unknown) => void)[]> = { data: [], end: [], error: [] };
+  const handlers: Record<string, ((chunk?: unknown) => void)[]> = { data: [], end: [], error: [] };
   const req = {
     url: "/reports/run-explain/deliver",
     on(event: string, handler: (chunk?: unknown) => void) {
@@ -160,8 +164,12 @@ function makeJsonRequest(body: unknown) {
   // next tick after the listener subscribes.
   queueMicrotask(() => {
     const json = JSON.stringify(body);
-    handlers.data.forEach((handler) => handler(json));
-    handlers.end.forEach((handler) => handler());
+    handlers.data.forEach((handler) => {
+      handler(json);
+    });
+    handlers.end.forEach((handler) => {
+      handler();
+    });
   });
   return req;
 }
@@ -236,6 +244,7 @@ beforeEach(() => {
   buildRunExplainReportMock.mockReset();
   composeRecoveryMetricsMock.mockReset();
   queryRecoveryMetricsSignalsMock.mockReset();
+  queryRecoveryLedgerMock.mockReset();
   getOrgConfigSnapshotMock.mockReset();
   sendJsonMock.mockClear();
   resWriteHeadMock.mockReset();
@@ -244,6 +253,11 @@ beforeEach(() => {
   enforceRateLimitMock.mockReset();
   buildRunExplainReportMock.mockReturnValue(baseReport);
   queryRecoveryMetricsSignalsMock.mockResolvedValue(valueSignals);
+  queryRecoveryLedgerMock.mockResolvedValue({
+    totalRecovered: 4,
+    downtimeEndedMs: 12_000,
+    sinceIso: "2026-01-02T03:04:05.000Z",
+  });
   getOrgConfigSnapshotMock.mockResolvedValue({ value: valueAssumptions });
   composeRecoveryMetricsMock.mockReturnValue(valueMetrics);
 });
@@ -275,7 +289,7 @@ describe("/reports/run-explain — happy path", () => {
     expect(writeHeadArgs[0]).toBe(200);
     const headers = writeHeadArgs[1] as Record<string, string>;
     expect(headers["Content-Type"]).toBe("text/markdown; charset=utf-8");
-    expect(headers["Access-Control-Expose-Headers"]).toBe("Content-Disposition");
+    expect(headers["Access-Control-Expose-Headers"]).toBe("Content-Disposition, X-Request-Id");
     // Filename pattern: janusly-<slug(workflow_name)>-<status>-<YYYY-MM-DD>-<short_id>.<ext>
     expect(headers["Content-Disposition"]).toContain('filename="janusly-billing-flow-failed-2026-05-12-run_abc.md"');
     expect(headers["Content-Disposition"]).toContain("filename*=UTF-8''");
@@ -358,7 +372,7 @@ describe("/reports/run-explain — happy path", () => {
     const headers = resWriteHeadMock.mock.calls[0]![1] as Record<string, string>;
     expect(headers["Content-Type"]).toBe("application/json");
     expect(headers["Content-Disposition"]).toContain('filename="janusly-billing-flow-failed-2026-05-12-run_xyz.json"');
-    expect(headers["Access-Control-Expose-Headers"]).toBe("Content-Disposition");
+    expect(headers["Access-Control-Expose-Headers"]).toBe("Content-Disposition, X-Request-Id");
     // sendJsonMock should NOT have been called — we wrote the response manually.
     expect(sendJsonMock).not.toHaveBeenCalled();
   });
@@ -505,6 +519,8 @@ describe("/reports/value-dashboard — export", () => {
     expect(headers["Content-Disposition"]).toContain("-30d.md");
     const markdown = resEndMock.mock.calls[0]![0] as string;
     expect(markdown).toContain("**SLA attainment**: 90.0% — 9 of 10 resolved within SLA.");
+    expect(markdown).toContain("**Failures recovered**: 4");
+    expect(markdown).toContain("**Downtime ended (measured)**: 12000 ms");
     expect(markdown).toContain("Estimate based on operator-supplied assumptions");
     expect(markdown).toContain("dollarSaved = hoursSaved");
     expect(markdown).toContain("Engineer hourly cost: $80.00");
@@ -529,9 +545,18 @@ describe("/reports/value-dashboard — export", () => {
     const headers = resWriteHeadMock.mock.calls[0]![1] as Record<string, string>;
     expect(headers["Content-Type"]).toBe("application/json");
     expect(headers["Content-Disposition"]).toContain("-7d.json");
-    const body = JSON.parse(resEndMock.mock.calls[0]![0] as string) as { org: { orgId: string; windowDays: number }; metrics: unknown };
+    const body = JSON.parse(resEndMock.mock.calls[0]![0] as string) as {
+      org: { orgId: string; windowDays: number };
+      metrics: unknown;
+      ledger: unknown;
+    };
     expect(body.org).toMatchObject({ orgId: "org-1", windowDays: 7 });
     expect(body.metrics).toEqual(valueMetrics);
+    expect(body.ledger).toEqual({
+      totalRecovered: 4,
+      downtimeEndedMs: 12_000,
+      sinceIso: "2026-01-02T03:04:05.000Z",
+    });
   });
 
   it("rejects unknown formats before querying metrics or writing audit", async () => {
@@ -565,7 +590,7 @@ function stageReportLoad(run: { id: string; status: string; inputJson?: unknown 
   // `Object.hasOwn(run, "inputJson")` distinguishes "caller wanted null"
   // from "caller didn't set it" so a test exercising the ad-hoc-workflow
   // fallback path can pass `inputJson: null` explicitly.
-  const inputJson = Object.prototype.hasOwnProperty.call(run, "inputJson") ? run.inputJson : DEFAULT_INPUT_JSON;
+  const inputJson = Object.hasOwn(run, "inputJson") ? run.inputJson : DEFAULT_INPUT_JSON;
   selectRowsBox.rows = [
     [{
       id: run.id,

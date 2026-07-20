@@ -31,8 +31,10 @@ import { db, runs, runNodes, runEvents } from "@janusly/db";
 import { eq } from "drizzle-orm";
 import type { DeadLetterReplayAdapter, DeadLetterReplayInput } from "../core/types";
 import type { Workflow, WorkflowNode } from "@janusly/shared";
-import { enqueueNode } from "../queue";
-import { markNodeQueued, appendEvent, resetRunForReplay, setRunWorkflowSnapshot } from "../persistence";
+import {
+  claimReplayTransition,
+} from "../persistence";
+import { publishInitialNode } from "../initial-node-publication";
 import { safePersistPayload } from "../safe-persist";
 
 const INITIAL_NODE_STATE_MAX_BYTES = 1_000_000;
@@ -50,6 +52,8 @@ export type DeadLetterValidationInput = {
   failingNode: WorkflowNode;
   /** User who triggered the validation; recorded as `createdBy`. */
   createdBy?: string | null;
+  /** Explicit Recovery Playbook invocation, persisted for outcome attestation. */
+  recoveryPlaybookId?: string | null;
 };
 
 function collectAncestorNodeIds(workflow: Workflow, nodeId: string): Set<string> {
@@ -71,6 +75,25 @@ function collectAncestorNodeIds(workflow: Workflow, nodeId: string): Set<string>
   return ancestors;
 }
 
+function collectDescendantNodeIds(workflow: Workflow, nodeId: string): Set<string> {
+  const childrenByNode = new Map<string, string[]>();
+  for (const edge of workflow.edges) {
+    const children = childrenByNode.get(edge.from) ?? [];
+    children.push(edge.to);
+    childrenByNode.set(edge.from, children);
+  }
+
+  const descendants = new Set<string>();
+  const stack = [...(childrenByNode.get(nodeId) ?? [])];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current || descendants.has(current)) continue;
+    descendants.add(current);
+    stack.push(...(childrenByNode.get(current) ?? []));
+  }
+  return descendants;
+}
+
 /** `DeadLetterReplayAdapter` implementation backed by the BullMQ queue. */
 export class DLQReplayAdapter implements DeadLetterReplayAdapter {
   /** Re-enqueue the failed node with attempt counter reset to 1. */
@@ -82,28 +105,33 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
       nodeId: node.id,
     });
 
-    // Make the replayed workflow authoritative for the run BEFORE enqueueing.
-    // Slim jobs carry only `{ runId, nodeId }`; the worker reloads the DAG
-    // from `runs.inputJson.workflow`. Writing it here means an auto-healing /
-    // recovery replay against a PATCHED workflow has its downstream cascade
-    // reload the patched DAG — matching the pre-slim behaviour where the
-    // replayed workflow flowed in-memory into `enqueueReadyNodes`. For a
-    // normal replay (workflow identical to the snapshot) this is a no-op.
-    await setRunWorkflowSnapshot(runId, workflow);
+    // Atomically un-terminate the run + reset the failed node to `queued`.
+    // One transaction closes the previous gap where a cancel landing
+    // between the reset and the queue left a queued node on a cancelled run
+    // that the runtime guard skips forever (silent false recovery). Claim
+    // FIRST — before the snapshot write — so a `node_mid_retry` /
+    // `run_not_replayable` rejection mutates nothing: no snapshot is written
+    // under an in-flight retry, no job is enqueued. Throws
+    // `ReplayNotClaimableError`, mapped to 409 by the `/dlq/replay` route.
+    const replayClaim = await claimReplayTransition(
+      runId,
+      node.id,
+      {
+        deadLetterId: input.deadLetterId ?? null,
+        recoveryActorId: input.recoveryActorId ?? null,
+        recoveryPlaybookId: input.recoveryPlaybookId ?? null,
+        recoveryValidationRunId: input.recoveryValidationRunId ?? null,
+      },
+      workflow,
+    );
 
-    // Un-terminate the run + reset the failed node so the replay actually
-    // re-executes it. Without BOTH, the re-enqueued job is skipped: the
-    // runtime's guard drops queued jobs on a `failed`/`cancelled` run, and
-    // `markNodeRunning` only claims a `queued` node. `resetRunForReplay` only
-    // touches a `failed` run (never un-cancels); `markNodeQueued` mirrors
-    // start-run / retry / replay-lab.
-    await resetRunForReplay(runId);
-    await markNodeQueued(runId, node.id);
-
-    await enqueueNode({
+    await publishInitialNode({
       runId,
       nodeId: node.id,
       attempt: 1,
+      publicationGeneration: replayClaim.publicationGeneration,
+      recoveryClaimToken: replayClaim.recoveryClaimToken,
+      recordQueuedEvent: false,
     });
   }
 
@@ -114,10 +142,11 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
    * caller can poll until terminal status.
    */
   async replayDeadLetterAsValidation(input: DeadLetterValidationInput): Promise<{ runId: string }> {
-    const { orgId, originalRunId, suggestedWorkflow, failingNode, createdBy } = input;
+    const { orgId, originalRunId, suggestedWorkflow, failingNode, createdBy, recoveryPlaybookId } = input;
 
     const runId = crypto.randomUUID();
     const ancestorNodeIds = collectAncestorNodeIds(suggestedWorkflow, failingNode.id);
+    const descendantNodeIds = collectDescendantNodeIds(suggestedWorkflow, failingNode.id);
     const originalNodeRows = await db.select().from(runNodes).where(eq(runNodes.runId, originalRunId));
     const originalNodeById = new Map(originalNodeRows.map((row) => [row.nodeId, row]));
 
@@ -126,6 +155,7 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
     // snapshot lives in `runs.inputJson` and is loaded by the queue at
     // execution time.
     const workflowVersionId = runId;
+    const publicationMarkedAt = new Date();
 
     await db.transaction(async (tx) => {
       await tx.insert(runs).values({
@@ -144,37 +174,60 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
         inputJson: {
           workflow: suggestedWorkflow,
           failingNodeId: failingNode.id,
+          ...(recoveryPlaybookId ? { recoveryPlaybookId } : {}),
         },
         parentRunId: originalRunId,
         parentNodeId: null,
+        parentLinkKind: "replay",
         traceId: null,
       });
 
       // Seed `run_nodes` rows for every node in the suggested workflow
       // so the runtime's status-rollup queries see the same shape they
-      // see for production runs. `markNodeQueued` will flip the failing
-      // node specifically below. Ancestor nodes copy terminal context from
-      // the original run so templates on the failing node see the same
-      // upstream outputs the production replay would have had.
+      // see for production runs. The failing node's queued generation and
+      // publication marker commit in this same transaction. Ancestor nodes
+      // copy terminal context from the original run so templates on the
+      // failing node see the same upstream outputs the production replay
+      // would have had.
       if (suggestedWorkflow.nodes.length > 0) {
         await tx.insert(runNodes).values(suggestedWorkflow.nodes.map((node) => {
           const original = originalNodeById.get(node.id);
-          const canCopyContext = ancestorNodeIds.has(node.id)
+          const startsQueued = node.id === failingNode.id;
+          const canCopyContext = !startsQueued
+            && ancestorNodeIds.has(node.id)
             && original
             && COPYABLE_ANCESTOR_STATUSES.has(original.status);
+          const continuesValidation = descendantNodeIds.has(node.id);
+          const outsideValidationPath = !startsQueued && !canCopyContext && !continuesValidation;
 
           return {
             id: crypto.randomUUID(),
             runId,
             nodeId: node.id,
-            status: canCopyContext ? original.status : "pending",
+            status: canCopyContext
+              ? original.status
+              : startsQueued
+                ? "queued"
+                : continuesValidation
+                  ? "pending"
+                  : "skipped",
             stateJson: safePersistPayload(
-              canCopyContext ? (original.stateJson ?? {}) : {},
+              canCopyContext
+                ? (original.stateJson ?? {})
+                : outsideValidationPath
+                  ? { skipped: { reason: "outside_validation_path", failingNodeId: failingNode.id } }
+                  : {},
               { maxBytes: INITIAL_NODE_STATE_MAX_BYTES },
             ),
-            attempts: canCopyContext ? original.attempts : 0,
+            attempts: canCopyContext ? original.attempts : startsQueued ? 1 : 0,
+            queuePublicationRepairAfter: startsQueued ? publicationMarkedAt : null,
+            queuePublicationGeneration: startsQueued ? 1 : 0,
             startedAt: canCopyContext ? original.startedAt : null,
-            finishedAt: canCopyContext ? original.finishedAt : null,
+            finishedAt: canCopyContext
+              ? original.finishedAt
+              : outsideValidationPath
+                ? publicationMarkedAt
+                : null,
             errorJson: canCopyContext ? original.errorJson : null,
           };
         }));
@@ -189,6 +242,7 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
           workflowVersionId,
           originalRunId,
           failingNodeId: failingNode.id,
+          ...(recoveryPlaybookId ? { recoveryPlaybookId } : {}),
         }),
       });
     });
@@ -202,13 +256,12 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
     // Enqueue ONLY the failing node — the runtime's
     // `enqueueReadyNodes` cascade will pick up downstream nodes as the
     // failing node terminates.
-    await markNodeQueued(runId, failingNode.id);
-    await enqueueNode({
+    await publishInitialNode({
       runId,
       nodeId: failingNode.id,
       attempt: 1,
+      publicationGeneration: 1,
     });
-    await appendEvent(runId, failingNode.id, "node.queued", {});
 
     return { runId };
   }

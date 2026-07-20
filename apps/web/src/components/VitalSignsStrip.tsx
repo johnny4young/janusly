@@ -1,8 +1,8 @@
 /**
  * Cross-surface "vital signs" strip. Renders a `.we-ops-grid` containing
  * one card per `VitalSignsTile`. Used today by the Operations dashboard
- * (header strip, 6 read-only tiles) and the home page (4 interactive tiles
- * that navigate to other tabs on click).
+ * (read-only tiles) and the home page (interactive tiles that navigate to
+ * other tabs on click).
  *
  * Tiles are presentational — every label, display value, severity, and
  * optional rationale comes in as a prop. The strip never owns its own data
@@ -58,6 +58,10 @@ export type VitalSignsTile = {
   sparklineLabel?: string
   /** Native hover tooltip for the sparkline (e.g. the exact per-day values). */
   sparklineTitle?: string
+  /** One localized accessible label per sparkline point. */
+  sparklinePointLabels?: string[]
+  /** Makes the sparkline a roving keyboard control without nesting it in the tile button. */
+  onSelectSparklinePoint?: (index: number) => void
   /** Optional aria-label override. Defaults to the tile's `label`. */
   ariaLabel?: string
   /** Pre-translated severity word (e.g. "Healthy" / "Needs attention") announced
@@ -112,25 +116,26 @@ export function VitalSignsStrip({
 
 function VitalSignsTileCard({ tile }: { tile: VitalSignsTile }) {
   const isClickable = typeof tile.onClick === 'function'
+  const hasInteractiveSparkline = Boolean(tile.sparkline && tile.onSelectSparklinePoint)
   const className = [
-    'panel-card',
+    'we-card',
     'we-ops-metric-card',
     `we-ops-metric-card--${tile.severity}`,
-    isClickable ? 'we-ops-metric-card--button' : '',
+    isClickable && !hasInteractiveSparkline ? 'we-ops-metric-card--button' : '',
+    isClickable && hasInteractiveSparkline ? 'we-ops-metric-card--split-action' : '',
   ]
     .filter(Boolean)
     .join(' ')
 
   const animatedValue = useTileDisplayValue(tile.numericValue, tile.display)
 
-  const body = (
+  const primaryBody = (
     <>
       <div className="we-ops-metric-card__head">
         <span className="we-ops-metric-card__icon" aria-hidden="true">{tile.icon}</span>
         <span className="section-kicker we-ops-metric-card__label">{tile.label}</span>
       </div>
       <div className="we-ops-metric-card__value">{animatedValue}</div>
-      {tile.sparkline && <Sparkline points={tile.sparkline} ariaLabel={tile.sparklineLabel} title={tile.sparklineTitle} />}
       {/* Screen-reader-only severity word — the visible severity is color-only
           (border + value tint). Read after the value: "…, 95.0%, Healthy". On
           the clickable variant the button's aria-label carries it instead (an
@@ -151,6 +156,35 @@ function VitalSignsTileCard({ tile }: { tile: VitalSignsTile }) {
       )}
     </>
   )
+
+  const sparkline = tile.sparkline && (
+    <Sparkline
+      points={tile.sparkline}
+      ariaLabel={tile.sparklineLabel}
+      title={tile.sparklineTitle}
+      pointLabels={tile.sparklinePointLabels}
+      onSelectPoint={tile.onSelectSparklinePoint}
+    />
+  )
+
+  if (isClickable && hasInteractiveSparkline) {
+    return (
+      <section className={className}>
+        <button
+          type="button"
+          className="we-ops-metric-card__main-action"
+          onClick={tile.onClick}
+          aria-label={clickableTileAriaLabel(tile)}
+          data-testid={tile.testId}
+        >
+          {primaryBody}
+        </button>
+        {sparkline}
+      </section>
+    )
+  }
+
+  const body = <>{primaryBody}{sparkline}</>
 
   if (isClickable) {
     return (
@@ -186,7 +220,21 @@ function VitalSignsTileCard({ tile }: { tile: VitalSignsTile }) {
  * red otherwise. Returns null below 2 points — a single dot tells no story.
  * Pure SVG, no animation, so reduced-motion is a non-issue.
  */
-export function Sparkline({ points, ariaLabel, title }: { points: number[]; ariaLabel?: string; title?: string }) {
+export function Sparkline({
+  points,
+  ariaLabel,
+  title,
+  pointLabels,
+  onSelectPoint,
+}: {
+  points: number[]
+  ariaLabel?: string
+  title?: string
+  pointLabels?: string[]
+  onSelectPoint?: (index: number) => void
+}) {
+  const [activeIndex, setActiveIndex] = React.useState(() => Math.max(0, points.length - 1))
+  const pointRefs = React.useRef<Array<SVGRectElement | null>>([])
   if (points.length < 2) return null
   const width = 80
   const height = 16
@@ -195,12 +243,13 @@ export function Sparkline({ points, ariaLabel, title }: { points: number[]; aria
   const max = Math.max(...points)
   const range = max - min || 1
   const stepX = (width - pad * 2) / (points.length - 1)
-  const coords = points
-    .map((value, i) => {
+  const pointCoords = points.map((value, i) => {
       const x = pad + i * stepX
       const y = pad + (height - pad * 2) * (1 - (value - min) / range)
-      return `${x.toFixed(1)},${y.toFixed(1)}`
+      return { x, y }
     })
+  const coords = pointCoords
+    .map(({ x, y }) => `${x.toFixed(1)},${y.toFixed(1)}`)
     .join(' ')
   const mean = points.reduce((sum, value) => sum + value, 0) / points.length
   const trend = points[points.length - 1] <= mean ? 'down' : 'up'
@@ -208,14 +257,48 @@ export function Sparkline({ points, ariaLabel, title }: { points: number[]; aria
   // to a tile that already carries its own text + numeric value, so mark it
   // decorative (`aria-hidden`, no `role="img"`) rather than leaving an unnamed
   // image in the accessibility tree. With a label it stays an announced image.
-  const decorative = ariaLabel === undefined || ariaLabel === ''
+  const interactive = typeof onSelectPoint === 'function'
+  const decorative = !interactive && (ariaLabel === undefined || ariaLabel === '')
+  const safeActiveIndex = Math.min(activeIndex, points.length - 1)
+  const focusPoint = (index: number) => {
+    const next = Math.max(0, Math.min(points.length - 1, index))
+    setActiveIndex(next)
+    pointRefs.current[next]?.focus()
+  }
+  const onPointKeyDown = (event: React.KeyboardEvent<SVGRectElement>, index: number) => {
+    switch (event.key) {
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        event.preventDefault()
+        focusPoint(index - 1)
+        break
+      case 'ArrowRight':
+      case 'ArrowDown':
+        event.preventDefault()
+        focusPoint(index + 1)
+        break
+      case 'Home':
+        event.preventDefault()
+        focusPoint(0)
+        break
+      case 'End':
+        event.preventDefault()
+        focusPoint(points.length - 1)
+        break
+      case 'Enter':
+      case ' ':
+        event.preventDefault()
+        onSelectPoint?.(index)
+        break
+    }
+  }
   return (
     <svg
       className={`we-sparkline we-sparkline--${trend}`}
       viewBox={`0 0 ${width} ${height}`}
       width={width}
       height={height}
-      role={decorative ? undefined : 'img'}
+      role={decorative ? undefined : interactive ? 'group' : 'img'}
       aria-label={ariaLabel}
       aria-hidden={decorative || undefined}
       preserveAspectRatio="none"
@@ -224,6 +307,40 @@ export function Sparkline({ points, ariaLabel, title }: { points: number[]; aria
     >
       {title && <title>{title}</title>}
       <polyline points={coords} fill="none" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+      {interactive && points.map((value, index) => {
+        const { x, y } = pointCoords[index] ?? { x: pad, y: height / 2 }
+        const hitWidth = index === 0 || index === points.length - 1 ? stepX / 2 + pad : stepX
+        const hitX = index === 0 ? 0 : index === points.length - 1 ? x - stepX / 2 : x - stepX / 2
+        const pointLabel = pointLabels?.[index] ?? `${index + 1}: ${value}`
+        return (
+          <g key={index}>
+            <rect
+              ref={(node) => { pointRefs.current[index] = node }}
+              className="we-sparkline__hit-target"
+              x={hitX}
+              y={0}
+              width={hitWidth}
+              height={height}
+              role="button"
+              tabIndex={index === safeActiveIndex ? 0 : -1}
+              aria-label={pointLabel}
+              data-testid={`vitals-sparkline-point-${index}`}
+              onFocus={() => setActiveIndex(index)}
+              onKeyDown={(event) => onPointKeyDown(event, index)}
+              onClick={() => onSelectPoint(index)}
+            >
+              <title>{pointLabel}</title>
+            </rect>
+            <circle
+              className="we-sparkline__focus-dot"
+              cx={x}
+              cy={y}
+              r="2.5"
+              aria-hidden="true"
+            />
+          </g>
+        )
+      })}
     </svg>
   )
 }

@@ -12,9 +12,9 @@
  * text. The list collapses on a second click and is independent from the
  * tabbed panel — operators see it without leaving the canvas.
  *
- * Refetches on the platform-version tick (the cross-panel reactivity hook
- * the store bumps on save / run / DLQ replay), so an operator who fixes a
- * blocker and saves sees the badge flip without manual refresh.
+ * Refetches on semantic workflow revisions and the platform-version tick (the
+ * cross-panel reactivity hook bumped on save / run / DLQ replay). Semantic
+ * edits are debounced; canvas-only position changes do not trigger a request.
  *
  * Used in `App.tsx`'s header next to the workflow name. Self-contained —
  * no `react-flow` / `zustand` imports beyond `useWorkflowStore` for the
@@ -24,36 +24,39 @@
 import { useEffect, useState } from 'react'
 import { ShieldCheck, AlertTriangle, ShieldAlert } from 'lucide-react'
 import { api } from '../api'
+import { useShallow } from 'zustand/react/shallow'
 import { useWorkflowStore } from '../store'
 import { tReadinessIssue, useT } from '../i18n'
 import type { ReadinessIssue as ServerReadinessIssue } from '../i18n/server-events'
+import { requestResilienceFocus } from './resilience-focus-bus'
+import type { ReadinessIssue, ReadinessResult } from '../types'
 
-type ReadinessSeverity = 'warn' | 'fail'
+const resilienceIssueCodes = new Set(['external_node_missing_retry', 'http_missing_bounds'])
+const resilienceNodeTypes = new Set(['http', 'tool', 'agent', 'mcp_tool'])
 
-type ReadinessIssue = {
-  code: string
-  severity: ReadinessSeverity
-  message: string
-  nodeId?: string
-  suggestion?: string
-}
-
-type ReadinessResult = {
-  status: 'pass' | 'warn' | 'fail'
-  issues: ReadinessIssue[]
-}
-
-export function WorkflowReadinessBadge() {
+export function WorkflowReadinessBadge({ onResult }: { onResult?: (result: ReadinessResult | null) => void }) {
   const { t } = useT()
   // Select the canvas-to-JSON helper directly off the store rather than
   // accepting it as a prop. App.tsx's destructuring of the whole store
   // produces a fresh local binding on every re-render (which happens on
   // every node drag, every polling tick), and a prop-based dependency
   // would refetch readiness on every one of those. The selector path
-  // returns the stable function reference, so the effect below only
-  // refires when `platformVersion` ticks.
+  // returns the stable function reference, so the effect below only refires
+  // for an explicit platform tick or serialized-workflow revision.
   const getWorkflowJson = useWorkflowStore((state) => state.getWorkflowJson)
   const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const workflowRevision = useWorkflowStore((state) => state.workflowRevision)
+  // Same anti-re-render discipline as above: a raw `state.nodes` subscription
+  // would re-render this always-mounted header badge on EVERY canvas drag
+  // frame (each position change is a new array). Project down to the ids of
+  // resilience-capable nodes with a shallow-equal selector — position changes
+  // keep ids/types stable, so the badge only re-renders when membership moves.
+  const resilienceNodeIds = useWorkflowStore(useShallow((state) =>
+    state.nodes
+      .filter((node) => resilienceNodeTypes.has(node.data.type))
+      .map((node) => node.id)))
+  const selectNode = useWorkflowStore((state) => state.selectNode)
+  const setActiveTab = useWorkflowStore((state) => state.setActiveTab)
   const [result, setResult] = useState<ReadinessResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -63,20 +66,33 @@ export function WorkflowReadinessBadge() {
     let cancelled = false
     setLoading(true)
     setError(null)
-    const workflow = getWorkflowJson()
-    api('/workflows/readiness', { method: 'POST', body: JSON.stringify({ workflow }) })
-      .then((payload) => {
-        if (cancelled) return
-        setResult(payload as ReadinessResult)
-        setLoading(false)
-      })
-      .catch((err) => {
-        if (cancelled) return
-        setError(err instanceof Error ? err.message : t('badges.readiness.unavailable'))
-        setLoading(false)
-      })
-    return () => { cancelled = true }
-  }, [getWorkflowJson, platformVersion, t])
+    setResult(null)
+    onResult?.(null)
+    // Semantic edits can arrive on every keystroke. Debounce the deterministic
+    // API check while still clearing stale findings immediately; canvas drags
+    // never increment `workflowRevision` and therefore never reach this path.
+    const timer = window.setTimeout(() => {
+      const workflow = getWorkflowJson()
+      api('/workflows/readiness', { method: 'POST', body: JSON.stringify({ workflow }) })
+        .then((payload) => {
+          if (cancelled) return
+          const next = payload as ReadinessResult
+          setResult(next)
+          onResult?.(next)
+          setLoading(false)
+        })
+        .catch((err) => {
+          if (cancelled) return
+          setError(err instanceof Error ? err.message : t('badges.readiness.unavailable'))
+          onResult?.(null)
+          setLoading(false)
+        })
+    }, 180)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [getWorkflowJson, onResult, platformVersion, t, workflowRevision])
 
   if (error) {
     return <span className="we-readiness-badge we-readiness-badge--error">{t('badges.readiness.unavailable')}</span>
@@ -99,6 +115,20 @@ export function WorkflowReadinessBadge() {
       ? t('badges.readiness.warnings', { count: warnCount })
       : t('badges.readiness.blockers', { count: failCount })
   const Icon = status === 'pass' ? ShieldCheck : status === 'warn' ? AlertTriangle : ShieldAlert
+
+  const canOpenResilienceControls = (issue: ReadinessIssue) => Boolean(
+    issue.nodeId
+    && resilienceIssueCodes.has(issue.code)
+    && resilienceNodeIds.includes(issue.nodeId),
+  )
+
+  const openResilienceControls = (issue: ReadinessIssue) => {
+    if (!issue.nodeId || !canOpenResilienceControls(issue)) return
+    requestResilienceFocus(issue.nodeId)
+    selectNode(issue.nodeId)
+    setActiveTab('inspector')
+    setExpanded(false)
+  }
 
   return (
     <div className={`we-readiness-badge we-readiness-badge--${status}`}>
@@ -124,6 +154,15 @@ export function WorkflowReadinessBadge() {
                 {issue.nodeId && <span className="we-readiness-issue__node"> · {issue.nodeId}</span>}
                 <p className="we-readiness-issue__message">{localised}</p>
                 {issue.suggestion && <p className="we-readiness-issue__suggestion">{issue.suggestion}</p>}
+                {canOpenResilienceControls(issue) && (
+                  <button
+                    type="button"
+                    className="we-readiness-issue__action"
+                    onClick={() => openResilienceControls(issue)}
+                  >
+                    {t('badges.readiness.openResilience')}
+                  </button>
+                )}
               </li>
             )
           })}

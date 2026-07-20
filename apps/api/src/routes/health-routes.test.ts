@@ -1,5 +1,5 @@
 /**
- * Route-level tests for the liveness probe + admin rate-limiter snapshot.
+ * Route-level tests for liveness + admin infrastructure snapshots.
  *
  * Covers:
  * - ``GET /health`` returns ``{ ok: true, rateLimiter }`` when healthy
@@ -7,13 +7,22 @@
  * - Public ``/health`` shape does NOT leak Redis internal error text,
  *   tenant-chosen MCP aliases/tool names, or the bucket key
  *   (``lastObservedKey``)
+ * - ``GET /health`` exposes only coarse queue degradation and fails open
  * - ``GET /system/rate-limiter`` exposes the admin shape with the full
  *   error string + key for incident triage
+ * - ``GET /system/queue`` exposes queue numbers only behind the admin gate
  * - ``/system/rate-limiter`` declares ``role: "admin"`` so the dispatcher
  *   gates non-admins; this pin verifies the route entry
  */
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const queueMocks = vi.hoisted(() => ({
+  getPublicQueueHealth: vi.fn(),
+  getQueueHealthSnapshot: vi.fn(),
+}));
+
+vi.mock("../queue-health", () => queueMocks);
 
 vi.mock("../http", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../http")>();
@@ -75,6 +84,16 @@ async function callRoute(method: string, path: string) {
   });
 }
 
+beforeEach(() => {
+  queueMocks.getPublicQueueHealth.mockReset().mockResolvedValue({ degraded: false });
+  queueMocks.getQueueHealthSnapshot.mockReset().mockResolvedValue({
+    waiting: 0,
+    active: 0,
+    oldestWaitingSeconds: null,
+    warnSeconds: 60,
+  });
+});
+
 afterEach(() => {
   _resetRateLimiterDegradationForTests();
   sendJsonMock.mockClear();
@@ -91,6 +110,26 @@ describe("GET /health", () => {
     expect(payload.ok).toBe(true);
     expect(payload.rateLimiter.healthy).toBe(true);
     expect(payload.rateLimiter.degradedBuckets).toEqual([]);
+    expect((payload as { queue?: unknown }).queue).toEqual({ degraded: false });
+  });
+
+  it("publishes only coarse queue degradation, never live counts or latency", async () => {
+    queueMocks.getPublicQueueHealth.mockResolvedValueOnce({ degraded: true });
+    await callRoute("GET", "/health");
+    const payload = sendJsonMock.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(payload.queue).toEqual({ degraded: true });
+    const serializedQueue = JSON.stringify(payload.queue);
+    expect(serializedQueue).not.toContain("waiting");
+    expect(serializedQueue).not.toContain("active");
+    expect(serializedQueue).not.toContain("oldest");
+    expect(serializedQueue).not.toContain("warnSeconds");
+  });
+
+  it("keeps liveness healthy and returns queue: null when Redis cannot be read", async () => {
+    queueMocks.getPublicQueueHealth.mockResolvedValueOnce(null);
+    await callRoute("GET", "/health");
+    const payload = sendJsonMock.mock.calls[0]?.[1] as { ok: boolean; queue: unknown };
+    expect(payload).toMatchObject({ ok: true, queue: null });
   });
 
   it("surfaces the degraded block when a bucket is failing", async () => {
@@ -171,5 +210,35 @@ describe("GET /system/rate-limiter", () => {
   it("declares role: admin so the dispatcher gates non-admins", () => {
     const route = findRoute("GET", "/system/rate-limiter");
     expect(route.role).toBe("admin");
+  });
+});
+
+describe("GET /system/queue", () => {
+  it("returns the detailed cached queue snapshot", async () => {
+    queueMocks.getQueueHealthSnapshot.mockResolvedValueOnce({
+      waiting: 7,
+      active: 3,
+      oldestWaitingSeconds: 91,
+      warnSeconds: 60,
+    });
+    await callRoute("GET", "/system/queue");
+    expect(sendJsonMock).toHaveBeenLastCalledWith({}, {
+      waiting: 7,
+      active: 3,
+      oldestWaitingSeconds: 91,
+      warnSeconds: 60,
+    });
+  });
+
+  it("declares role: admin so live queue telemetry is never public", () => {
+    const route = findRoute("GET", "/system/queue");
+    expect(route.role).toBe("admin");
+    expect(route.skipAuth).not.toBe(true);
+  });
+
+  it("returns null without changing the admin route contract during Redis failure", async () => {
+    queueMocks.getQueueHealthSnapshot.mockResolvedValueOnce(null);
+    await callRoute("GET", "/system/queue");
+    expect(sendJsonMock).toHaveBeenLastCalledWith({}, null);
   });
 });

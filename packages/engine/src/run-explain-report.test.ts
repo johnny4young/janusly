@@ -14,7 +14,6 @@ import {
   buildRunExplainReport,
   RUN_EXPLAIN_TIMELINE_CAP,
   type RunExplainEventSnapshot,
-  type RunExplainNodeSnapshot,
   type RunExplainRecoveryAudit,
   type RunExplainRunSnapshot,
 } from "./run-explain-report";

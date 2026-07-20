@@ -100,7 +100,7 @@ export const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
   /(^|[^A-Za-z0-9])(AKIA[0-9A-Z]{16})(?=$|[^A-Za-z0-9])/g, // AWS access key id
   /(^|[^A-Za-z0-9])(AIza[A-Za-z0-9_-]{35})(?=$|[^A-Za-z0-9])/g, // Google API key (fixed 4-char prefix + 35)
   /(^|[^A-Za-z0-9])(Bearer\s+[A-Za-z0-9_\-.]{16,})(?=$|[^A-Za-z0-9])/gi, // Authorization header value
-  /(^|[^A-Za-z0-9])(eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,})(?=$|[^A-Za-z0-9])/g, // JWT (3-segment base64url)
+  /(^|[^A-Za-z0-9])(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})(?=$|[^A-Za-z0-9])/g, // JWT (3-segment base64url)
 ];
 
 /**

@@ -1,7 +1,7 @@
 /**
  * A single workflow row in the active Flows list (name, tag pills, folder pill,
- * last-run status, health badge, per-row folder/tag controls, the inline-confirm
- * Delete, and the open affordance). Rendered by `WorkflowsDashboard.tsx` in both
+ * last-run status, paused pill + breaker Resume, health badge, per-row
+ * folder/tag controls, the inline-confirm Delete, and the open affordance). Rendered by `WorkflowsDashboard.tsx` in both
  * the flat and folder-grouped views.
  *
  * Presentation only: the container owns all state (drag, selection, delete
@@ -9,8 +9,8 @@
  * props.
  */
 
-import type { Dispatch, SetStateAction } from 'react'
-import { Folder, GripVertical, Trash2, Workflow, X } from 'lucide-react'
+import { memo, type Dispatch, type SetStateAction } from 'react'
+import { Folder, GripVertical, PlayCircle, Trash2, Workflow, X } from 'lucide-react'
 import type { SavedWorkflow } from '../types'
 import { WorkflowHealthBadge } from './WorkflowHealthBadge'
 import { formatStatusLabel } from '../constants'
@@ -35,10 +35,15 @@ export type FlowRowProps = {
   setRowTag: (workflowId: string, tag: string, op: 'add' | 'remove') => void | Promise<void>
   moveToFolder: (workflowId: string, folderKey: string) => void | Promise<void>
   deleteWorkflow: (workflowId: string) => void | Promise<void>
+  resumeWorkflow: (workflowId: string) => void | Promise<void>
+  recoveryBusy: boolean
   t: TFunc
 }
 
-export function FlowRow({
+/** `workflows.status` for a workflow its circuit breaker paused. */
+const STATUS_PAUSED_CIRCUIT_BREAKER = 'paused_circuit_breaker'
+
+export const FlowRow = memo(function FlowRow({
   workflow,
   folderOptions,
   tagOptions,
@@ -55,8 +60,14 @@ export function FlowRow({
   setRowTag,
   moveToFolder,
   deleteWorkflow,
+  resumeWorkflow,
+  recoveryBusy,
   t,
 }: FlowRowProps) {
+  // `status` is absent on older cached rows; treat that as active.
+  const pausedByBreaker = workflow.status === STATUS_PAUSED_CIRCUIT_BREAKER
+  const isPaused = Boolean(workflow.status) && workflow.status !== 'active'
+  const hasBufferedTriggers = (workflow.bufferedTriggerCount ?? 0) > 0
   // Folder choices for the per-row "Move to folder" select: the org-wide
   // folder list plus the row's own folder if a stale value isn't already in it
   // (so the native select can always render its current value as a real option).
@@ -86,7 +97,7 @@ export function FlowRow({
             checked={selectedIds.has(workflow.id)}
             onClick={(event) => event.stopPropagation()}
             onChange={(event) => { event.stopPropagation(); toggleSelected(workflow.id) }}
-            aria-label={t('workflowsDashboard.selectRowAria', { name: workflow.name }) as string}
+            aria-label={t('workflowsDashboard.selectRowAria', { name: workflow.name })}
             data-testid={`workflows-select-row-${workflow.id}`}
           />
         )}
@@ -107,8 +118,8 @@ export function FlowRow({
               setDropTarget(null)
             }}
             onClick={(event) => event.stopPropagation()}
-            title={t('workflowsDashboard.dragHandleTitle') as string}
-            aria-label={t('workflowsDashboard.dragHandleTitle') as string}
+            title={t('workflowsDashboard.dragHandleTitle')}
+            aria-label={t('workflowsDashboard.dragHandleTitle')}
             data-testid={`workflows-drag-${workflow.id}`}
           >
             <GripVertical size={14} aria-hidden="true" />
@@ -126,13 +137,13 @@ export function FlowRow({
           {(rowTags.length > 0 || addableTags.length > 0) && (
             <span className="we-list-row__tags">
               {rowTags.map(tag => (
-                <span key={tag} className="we-pill we-pill--ghost we-list-row__tag">
+                <span key={tag} className="we-pill we-list-row__tag" data-tone="ghost">
                   {tag}
                   <button
                     type="button"
                     className="we-list-row__tag-remove"
-                    aria-label={t('workflowsDashboard.removeTagAria', { tag }) as string}
-                    title={t('workflowsDashboard.removeTagAria', { tag }) as string}
+                    aria-label={t('workflowsDashboard.removeTagAria', { tag })}
+                    title={t('workflowsDashboard.removeTagAria', { tag })}
                     onClick={(event) => { event.stopPropagation(); void setRowTag(workflow.id, tag, 'remove') }}
                     data-testid={`workflows-row-tag-remove-${workflow.id}-${tag}`}
                   >
@@ -144,7 +155,7 @@ export function FlowRow({
                 <select
                   className="we-list-row__tag-add"
                   value=""
-                  aria-label={t('workflowsDashboard.addTagAria', { name: workflow.name }) as string}
+                  aria-label={t('workflowsDashboard.addTagAria', { name: workflow.name })}
                   onClick={(event) => event.stopPropagation()}
                   onChange={(event) => { event.stopPropagation(); if (event.target.value) void setRowTag(workflow.id, event.target.value, 'add') }}
                   data-testid={`workflows-row-tag-add-${workflow.id}`}
@@ -159,18 +170,26 @@ export function FlowRow({
           )}
           {workflow.folder && (
             <span className="we-list-row__folder">
-              <span className="we-pill we-pill--ghost" title={t('workflowsDashboard.inFolder', { folder: workflow.folder }) as string}>
+              <span className="we-pill" data-tone="ghost" title={t('workflowsDashboard.inFolder', { folder: workflow.folder })}>
                 <Folder size={12} aria-hidden="true" /> {workflow.folder}
               </span>
             </span>
           )}
         </div>
         <div className="we-list-row__meta">
+          {/* A paused workflow refuses new runs, so the list says so before the
+              operator clicks Run and gets a 409. The reason carries the
+              evidence (which is why it's the tooltip, not a truncated pill). */}
+          {isPaused && (
+            <span className="status-pill" data-status="paused" title={workflow.pausedReason ?? undefined}>
+              {t(pausedByBreaker ? 'workflowsDashboard.pausedByBreaker' : 'workflowsDashboard.paused')}
+            </span>
+          )}
           {workflow.lastRunStatus && (
             <span className="status-pill" data-status={workflow.lastRunStatus}>{formatStatusLabel(workflow.lastRunStatus)}</span>
           )}
           {typeof workflow.runCount === 'number' && (
-            <span className="we-list-row__count" title={t('workflowsDashboard.runCountTitle', { count: workflow.runCount }) as string}>{workflow.runCount}</span>
+            <span className="we-list-row__count" title={t('workflowsDashboard.runCountTitle', { count: workflow.runCount })}>{workflow.runCount}</span>
           )}
           <WorkflowHealthBadge workflowId={workflow.id} showLabel={false} />
           {/* Keyboard / screen-reader equivalent of drag-to-folder: a native
@@ -181,7 +200,7 @@ export function FlowRow({
             <select
               className="we-list-row__folder-select"
               value={workflow.folder ?? ''}
-              aria-label={t('workflowsDashboard.moveToFolderAria', { name: workflow.name }) as string}
+              aria-label={t('workflowsDashboard.moveToFolderAria', { name: workflow.name })}
               onClick={(event) => event.stopPropagation()}
               onChange={(event) => { event.stopPropagation(); void moveToFolder(workflow.id, event.target.value) }}
               data-testid={`workflows-move-folder-${workflow.id}`}
@@ -191,6 +210,31 @@ export function FlowRow({
                 <option key={folder} value={folder}>{folder}</option>
               ))}
             </select>
+          )}
+          {/* Only breaker pauses get a Resume: an upstream-outage pause clears
+              itself when the status page recovers. An active workflow can
+              continue a capped buffered window without changing pause state. */}
+          {pausedByBreaker && (
+            <button
+              onClick={(event) => { event.stopPropagation(); void resumeWorkflow(workflow.id) }}
+              className="small-command"
+              title={t('workflowsDashboard.resumeFlowTitle')}
+              data-testid={`workflows-resume-${workflow.id}`}
+              disabled={recoveryBusy}
+            >
+              <PlayCircle size={12} aria-hidden="true" /> {t('workflowsDashboard.resumeFlow')}
+            </button>
+          )}
+          {!isPaused && hasBufferedTriggers && (
+            <button
+              onClick={(event) => { event.stopPropagation(); void resumeWorkflow(workflow.id) }}
+              className="small-command"
+              title={t('workflowsDashboard.continueBackfillTitle', { count: workflow.bufferedTriggerCount ?? 0 })}
+              data-testid={`workflows-backfill-${workflow.id}`}
+              disabled={recoveryBusy}
+            >
+              <PlayCircle size={12} aria-hidden="true" /> {t('workflowsDashboard.continueBackfill')}
+            </button>
           )}
           <button onClick={(event) => { event.stopPropagation(); onOpen(workflow.id) }} className="small-command">{t('workflowsDashboard.openFlow')}</button>
           {/* Soft-delete affordance: an inline confirm (one row at a time) so a
@@ -220,8 +264,8 @@ export function FlowRow({
               type="button"
               className="small-command danger we-list-row__delete"
               onClick={(event) => { event.stopPropagation(); setConfirmDeleteId(workflow.id) }}
-              title={t('workflowsDashboard.deleteFlow', { name: workflow.name }) as string}
-              aria-label={t('workflowsDashboard.deleteFlow', { name: workflow.name }) as string}
+              title={t('workflowsDashboard.deleteFlow', { name: workflow.name })}
+              aria-label={t('workflowsDashboard.deleteFlow', { name: workflow.name })}
               data-testid={`workflows-delete-${workflow.id}`}
             >
               <Trash2 size={14} aria-hidden="true" />
@@ -231,4 +275,4 @@ export function FlowRow({
       </div>
     </li>
   )
-}
+})

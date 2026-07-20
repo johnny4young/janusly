@@ -176,8 +176,8 @@ export const evalDatasetsRoutes: Route[] = [
         res.writeHead(200, {
           "Content-Type": "application/json",
           "Content-Disposition": contentDispositionAttachment(asciiFilename, utf8Filename),
-          "Access-Control-Expose-Headers": "Content-Disposition",
           ...corsHeaders(res),
+          "Access-Control-Expose-Headers": "Content-Disposition, X-Request-Id",
         });
         res.end(JSON.stringify({ dataset, examples: rows }));
         return;
@@ -189,8 +189,8 @@ export const evalDatasetsRoutes: Route[] = [
       res.writeHead(200, {
         "Content-Type": "application/x-ndjson; charset=utf-8",
         "Content-Disposition": contentDispositionAttachment(jsonlAscii, jsonlUtf8),
-        "Access-Control-Expose-Headers": "Content-Disposition",
         ...corsHeaders(res),
+        "Access-Control-Expose-Headers": "Content-Disposition, X-Request-Id",
       });
       res.end(jsonl);
     },

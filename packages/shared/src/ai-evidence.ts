@@ -63,6 +63,8 @@ import { scrubSecretShapes } from './error-signature'
  *    the failing node. `sourceRef` is the rule `category`.
  *  - `tool_contract` — the failing tool's registered input contract (required
  *    / optional field names). `sourceRef` is the tool name.
+ *  - `recovery_playbook` — a manually promoted, evidence-gated recovery
+ *    procedure. `sourceRef` is the playbook id.
  */
 export const EVIDENCE_KINDS = [
   'recovery_feedback',
@@ -71,6 +73,7 @@ export const EVIDENCE_KINDS = [
   'recent_error',
   'signature_rule',
   'tool_contract',
+  'recovery_playbook',
 ] as const
 
 export type EvidenceKind = (typeof EVIDENCE_KINDS)[number]

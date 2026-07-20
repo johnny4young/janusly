@@ -608,6 +608,11 @@ export type AiPatchApproachLabelValue = z.infer<typeof AiPatchApproachLabel>;
 /** Hard upper bound on suggestions per call. Mirrors the Zod `.max(3)`. */
 export const PATCH_MAX_SUGGESTIONS = 3;
 
+const AiPatchConsideredAlternative = z.object({
+  approach: z.string().min(1).max(120),
+  rejectedBecause: z.string().min(1).max(280),
+});
+
 function suggestionItemSchema<T extends z.ZodTypeAny>(configSchema: T) {
   return z.object({
     patchedConfig: configSchema,
@@ -618,6 +623,7 @@ function suggestionItemSchema<T extends z.ZodTypeAny>(configSchema: T) {
     // don't over-trust raw scores. Future calibration pass will rebase
     // these against past acceptance rates per `approachLabel`.
     confidence: z.number().int().min(0).max(100),
+    consideredAlternatives: z.array(AiPatchConsideredAlternative).max(2).default([]),
   });
 }
 
@@ -712,6 +718,7 @@ const AiPatchStructuralSuggestionItem = z.object({
   rationale: z.string().min(1),
   approachLabel: z.literal("add_approval"),
   confidence: z.number().int().min(0).max(100),
+  consideredAlternatives: z.array(AiPatchConsideredAlternative).max(2).default([]),
 });
 
 export const AiPatchStructuralEnvelope = z.object({

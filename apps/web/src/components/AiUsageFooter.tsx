@@ -11,7 +11,6 @@
  *   focused jsdom test can mount it without the whole RightPanel).
  */
 
-import React from 'react'
 import type { JsonObject } from '../types'
 
 export function AiUsageFooter({ stateJson }: { stateJson?: JsonObject | null }) {

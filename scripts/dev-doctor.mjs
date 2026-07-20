@@ -27,15 +27,14 @@ import { promisify } from "node:util";
 const run = promisify(execFile);
 
 /**
- * Ports the host-side dev stack listens on. Vite normally uses :5173 but can
- * fall back to :5174 when a stale web process is already bound; both are in
- * API_ALLOWED_ORIGINS, so the doctor cleans both. Postgres :5432, Redis :6379,
+ * Ports the host-side dev stack listens on. Vite uses strict :5173; :5174 is
+ * retained for cleanup of older/manual development runs. Postgres :5432, Redis :6379,
  * and Ollama :11434 live inside Compose and are torn down only with --compose.
  */
 const HOST_PORTS = [
   { port: 3001, label: "api (apps/api)" },
   { port: 5173, label: "web (apps/web)" },
-  { port: 5174, label: "web fallback (apps/web)" },
+  { port: 5174, label: "legacy web (apps/web)" },
 ];
 
 const KILL_GRACE_MS = 2_000;

@@ -51,6 +51,28 @@ The default `http` node buffers the entire response into `output.body` before an
 
 Set `bodyMode: "stream"` on the node config to opt into the streaming primitive. The executor reads the response chunk-by-chunk and captures the first N bytes into a bounded preview that gets persisted to `run_nodes.state_json.output.body`; the full body still flows through the byte cap (the stream aborts mid-flight if the cap is exceeded). The preview size is controlled per-org by `http.streamPreviewBytes` (default 64 KB, range 1 KB..1 MB) or per-call via the `streamPreviewBytes` config field.
 
+Buffered HTTP nodes and the `http.request` tool preserve the decoded text in
+`output.body`. When the final response declares `application/json` or an
+`application/*+json` media type and parsing succeeds, the same output also
+contains the native value at `output.json`. A lying upstream that declares JSON
+but returns invalid text leaves `output.json` absent and sets
+`output.jsonParseError: true`; non-JSON media types are never guessed from body
+content. Automatic projection is capped at 64 KiB so storing both forms does not
+exhaust the node-state persistence budget; a larger declared JSON body remains
+at `output.body` and sets `output.jsonParseSkipped: "body_too_large"`. Streaming
+previews are not parsed because they may be truncated. Use the read-side
+`json.parse` tool when the operator explicitly wants to parse a larger buffered
+body or a string whose response did not declare JSON.
+
+Node-config templates remain backward compatible: an absent `context.*` or
+`inputs.*` path renders as an empty value and writes one bounded
+`template.unresolved_path` event for that resolution phase. Set the workflow's
+top-level `templatePolicy` to `"strict"` to fail instead of consuming an
+accidental empty value. Ordinary config paths fail before the executor runs;
+loop `item`/`index` and sequential-agent `previousAgents` paths fail at their
+later binding point. Missing `{{secret.*}}` references retain their existing
+immediate hard failure.
+
 ```jsonc
 {
   "id": "ingest_invoices_csv",
@@ -108,14 +130,32 @@ For true row-by-row CSV processing, use the `csv.fetch` tool instead of `http.re
 
 Evaluates a sandboxed boolean expression and emits `{ result: boolean }`. Combine with edge `condition` to branch the graph.
 
-Supported operators: `===`, `!==`, `==`, `!=`, `>`, `<`, `>=`, `<=`, `&&`, `||`, `!`, parentheses, string and numeric literals, and dotted paths under `context.*` and `inputs.*`. Anything else is rejected (no arbitrary JS).
+Supported operators: `===`, `!==`, `==`, `!=`, `>`, `<`, `>=`, `<=`, `contains`, `startsWith`, `matches`, `in`, `&&`, `||`, `!`, and parentheses. Values may be strings, numbers, booleans, `null`, primitive array literals, or dotted/indexed paths under `context.*` and `inputs.*`. Anything else is rejected (no arbitrary JavaScript or function calls).
+
+- `contains` is case-sensitive substring matching for strings and membership for arrays.
+- `startsWith` is a case-sensitive string-prefix check.
+- `matches` is a bounded whole-string glob match: `*` matches any run of characters and `?` matches one character. Patterns are capped at 256 characters and values at 16,384 characters; it is intentionally not a regular-expression engine.
+- `in` checks whether the left value is a member of an array path or literal, for example `'billing' in context.input.tags`.
+- Ordered comparisons are numeric for two numbers and lexicographic for two strings, so equal-width ISO 8601 timestamps compare naturally. A number paired with a numeric string preserves the legacy numeric coercion; incompatible runtime values remain non-fatal and evaluate `false`, while statically invalid literal/operator combinations are rejected during validation.
 
 ```jsonc
 {
-  "id": "is_ok",
+  "id": "is_example_domain",
   "type": "condition",
   "config": {
-    "expression": "context.fetch_user.output.statusCode === 200"
+    "expression": "context.fetch_user.output.email matches '*@example.com'"
+  }
+}
+```
+
+A string-and-collection expression can compose the new operators:
+
+```jsonc
+{
+  "id": "is_priority_customer",
+  "type": "condition",
+  "config": {
+    "expression": "context.fetch_user.output.email matches '*@example.com' && 'priority' in context.fetch_user.output.tags"
   }
 }
 ```
@@ -144,7 +184,7 @@ Runs `mapInput` over `config.mapping`, expanding all `{{...}}` placeholders agai
 
 ## `loop`
 
-Iterates over `config.items` (array, comma-separated string, or template that resolves to one). For each item, expands `mapping` with `item` and `index` in scope.
+Iterates over `config.items` (array, comma-separated string, or template that resolves to one). The omitted/default `mode: "map"` preserves the original projection contract: for each item, it expands `mapping` with `item` and `index` in scope.
 
 ```jsonc
 {
@@ -158,6 +198,27 @@ Iterates over `config.items` (array, comma-separated string, or template that re
 ```
 
 **Output:** `{ count: 3, items: [{key:"alpha",position:"0"}, {key:"beta",position:"1"}, {key:"gamma",position:"2"}] }`
+
+`mode: "for_each"` invokes one registered tool per item with bounded in-node concurrency. The per-item `input` can reference `item` and `index`; all inputs are rendered before the first tool call so a strict unresolved-template failure cannot partially process the batch.
+
+```jsonc
+{
+  "id": "parse_batch",
+  "type": "loop",
+  "config": {
+    "items": "1,invalid,2",
+    "mode": "for_each",
+    "tool": "json.parse",
+    "input": { "value": "{{item}}" },
+    "concurrency": 2,
+    "toleratedFailureCount": 1
+  }
+}
+```
+
+The node accepts at most 1,000 items. `concurrency` defaults to 4 and is limited to 1..20. A failure is either a thrown tool error or a registered-tool envelope with `ok: false`. With no configured budget, any failure fails the node; exactly one of `toleratedFailureCount` (0..1,000) or `toleratedFailurePercentage` (0..100) can permit failures up to and including the threshold. Crossing it fails the node with `LOOP_FAILURE_BUDGET_EXCEEDED`, preserving structured counts, all failed indices, and a bounded failure sample for retries and DLQ inspection. Validation/sandbox runs skip write-side tools through the same registry gate as ordinary `tool` nodes.
+
+**Output:** `{ mode: "for_each", tool, count, succeededCount, skippedCount, failedCount, failedPercentage, failedIndices, failures, failureDetailsTruncated, resultTruncatedCount, toleratedFailureCount?, toleratedFailurePercentage?, items }`. Per-item results preserve input order, are capped at 64 KB, and the aggregate item list is capped at 700 KB with explicit truncation sentinels. Failed-items-only redrive remains separate recovery work. Read-side failures may retry the whole node under its retry policy; possibly committed write-side failures do not retry automatically and require operator-gated DLQ replay.
 
 ## `tool`
 
@@ -217,7 +278,7 @@ Aggregation strategies for the final answer: `last` (default), `first`, `all`, `
     "continueOnError": false,
     "agents": [
       { "name": "analyzer", "role": "Data analyst", "goal": "uppercase the input" },
-      { "name": "validator", "role": "QA reviewer", "goal": "uppercase the previous output" }
+      { "name": "validator", "role": "QA reviewer", "goal": "review {{previousAgents.0.result.finalAnswer}}" }
     ]
   }
 }
@@ -291,15 +352,25 @@ Pauses the run and emits a `node.waiting` event with a resume token of the form 
 
 ## `approval`
 
-Same wait/resume mechanic as `webhook`, intended for human-in-the-loop. The UI surfaces an Approve button under the Runs panel for each waiting node. The resume token is the legacy `<runId>:<nodeId>` shape; the approval decision is represented by the timeline/audit trail, while node output stays `{}` for backward compatibility.
+Same wait/resume mechanic as `webhook`, intended for human-in-the-loop. The UI surfaces an Approve button under the Runs panel for each waiting node. The resume token is the legacy `<runId>:<nodeId>` shape; the approval decision is represented by the timeline/audit trail, while node output stays `{}` for backward compatibility. `assignee` is visible operational ownership, not an authorization boundary: any editor who can resume the run may still approve it.
 
 ```jsonc
 {
   "id": "human_approval",
   "type": "approval",
-  "config": { "message": "Please review the report and approve to publish." }
+  "config": {
+    "message": "Please review the report and approve to publish.",
+    "assignee": "tier-1-on-call",
+    "decisionTimeoutMs": 600000,
+    "onTimeout": "escalate",
+    "escalateTo": "tier-2-on-call"
+  }
 }
 ```
+
+The optional deadline is either a positive integer `decisionTimeoutMs` relative to when the node begins waiting, or an absolute ISO 8601 `until` instant with an explicit timezone; never set both. `decisionTimeoutMs` is deliberately separate from the universal executor `timeoutMs`. Without either deadline field the legacy indefinite wait remains unchanged. A deadline defaults to `onTimeout: "fail"`; the other policies are `"auto_reject"` (terminal failure without advancing downstream work) and `"escalate"` (atomically reassign to the non-empty `escalateTo` owner and remain waiting). A stale timeout delivery cannot overwrite a manual resume, cancellation, replay, or a newer deadline generation.
+
+**Waiting metadata:** `{ kind, assignee?, decisionTimeoutMs?, deadlineAt?, onTimeout?, escalateTo?, timeoutState? }`. Timeout outcomes emit `approval.timed_out`, `approval.auto_rejected`, or `approval.escalated` timeline events.
 
 **Output (on resume):** `{}`. The approval decision is recorded in events/audit, not node state.
 
@@ -331,7 +402,7 @@ Pauses the run and asks an operator for structured input. The node config carrie
 
 ## `subworkflow`
 
-Starts another saved workflow as a child run and pauses until the child reaches a terminal status. The child workflow lookup is scoped to the same org, `config.input` is forwarded when present, otherwise the parent's run input is inherited, and subworkflow nesting is bounded by `runs.subworkflowMaxDepth`.
+Starts another active saved workflow as a child run and pauses until the child reaches a terminal status. The child workflow lookup is scoped to the same org and excludes soft-deleted workflows. Set the optional `config.version` integer from 1 through 2,147,483,647 to execute that exact immutable saved version; omit it to resolve the latest version when the node starts. `config.input` is forwarded when present, otherwise the parent's run input is inherited, and subworkflow nesting is bounded by `runs.subworkflowMaxDepth`.
 
 ```jsonc
 {
@@ -339,16 +410,17 @@ Starts another saved workflow as a child run and pauses until the child reaches 
   "type": "subworkflow",
   "config": {
     "workflowId": "customer-enrichment",
+    "version": 3,
     "input": { "customerId": "{{context.fetch_user.output.body.id}}" }
   }
 }
 ```
 
-**Output:** the child run's `outputJson` after the child succeeds. If the child fails or is cancelled, the parent node fails.
+**Output:** the child run's `outputJson` after the child succeeds. Child creation atomically checkpoints the parent before publishing child roots. Executable parent links are distinct from Replay Lab lineage, so replay provenance does not consume nesting depth; a validation parent passes its sandbox mode to every nested child and still receives the child's terminal handoff. If the child fails, the parent error retains the earliest failed child node and its persisted error; cancellation also fails the parent node, and every failed sibling is settled even when another child already made the parent terminal. If that exact child later succeeds after a recovery replay, the engine reattaches its output with a generation-bound compare-and-set and reopens the parent only when no sibling failures remain. Separate durable outboxes restore both a lost terminal executable child→parent handoff and any parent queue generation consumed during the failed→running transition without bypassing retry backoff.
 
 ## `wait_until`
 
-Pauses the run for an ISO 8601 duration, then resumes automatically through a delayed BullMQ job. Manual `POST /resume` can short-circuit the wait, and the delayed wake-up is idempotent if the node has already advanced.
+Pauses the run until either a positive ISO 8601 duration elapses or an absolute ISO 8601 instant arrives, then resumes automatically through a delayed BullMQ job. Absolute instants require an explicit timezone. Set exactly one of `duration` and `until`. Manual `POST /resume` can short-circuit the wait, elapsed absolute instants resume immediately, and delayed wake-up is idempotent if the node has already advanced.
 
 ```jsonc
 {
@@ -358,7 +430,17 @@ Pauses the run for an ISO 8601 duration, then resumes automatically through a de
 }
 ```
 
-**Waiting metadata:** `{ wakeAt, durationMs }`. **Output on resume:** `{}`.
+Absolute example:
+
+```jsonc
+{
+  "id": "wait_for_window",
+  "type": "wait_until",
+  "config": { "until": "2026-07-15T21:00:00-05:00" }
+}
+```
+
+**Waiting metadata:** `{ kind: "timer", wakeAt, durationMs, source }`, where `source` is `"duration"` or `"until"`. **Output on resume:** `{}`.
 
 ## `parallel_fork` / `join`
 

@@ -132,6 +132,27 @@ describe("LoopNodeConfigSchema", () => {
     const parsed = LoopNodeConfigSchema.parse({ items: [1, 2, 3] });
     expect(Array.isArray(parsed.items)).toBe(true);
   });
+  it("accepts a bounded for_each tool contract", () => {
+    const parsed = LoopNodeConfigSchema.parse({
+      mode: "for_each",
+      items: ["a", "b"],
+      tool: "text.uppercase",
+      input: { value: "{{item}}" },
+      concurrency: 20,
+      toleratedFailurePercentage: 25,
+    });
+    expect(parsed.mode).toBe("for_each");
+  });
+  it.each([
+    { mode: "for_each" },
+    { mode: "for_each", tool: "text.uppercase", concurrency: 0 },
+    { mode: "for_each", tool: "text.uppercase", concurrency: 21 },
+    { mode: "for_each", tool: "text.uppercase", toleratedFailureCount: -1 },
+    { mode: "for_each", tool: "text.uppercase", toleratedFailurePercentage: 101 },
+    { mode: "for_each", tool: "text.uppercase", toleratedFailureCount: 1, toleratedFailurePercentage: 10 },
+  ])("rejects malformed for_each config %j", (config) => {
+    expect(() => LoopNodeConfigSchema.parse(config)).toThrow();
+  });
 });
 
 describe("RouterNodeConfigSchema", () => {
@@ -174,6 +195,25 @@ describe("ApprovalNodeConfigSchema", () => {
   it("accepts an empty config (message optional)", () => {
     expect(() => ApprovalNodeConfigSchema.parse({})).not.toThrow();
   });
+  it("accepts a bounded escalation policy", () => {
+    const parsed = ApprovalNodeConfigSchema.parse({
+      assignee: "operator-1",
+      decisionTimeoutMs: 60_000,
+      onTimeout: "escalate",
+      escalateTo: "operator-2",
+    });
+    expect(parsed.onTimeout).toBe("escalate");
+  });
+  it("rejects conflicting deadlines and incomplete escalation", () => {
+    expect(() => ApprovalNodeConfigSchema.parse({
+      decisionTimeoutMs: 60_000,
+      until: "2026-07-14T12:00:00Z",
+    })).toThrow(/either config.decisionTimeoutMs or config.until/);
+    expect(() => ApprovalNodeConfigSchema.parse({
+      decisionTimeoutMs: 60_000,
+      onTimeout: "escalate",
+    })).toThrow(/requires a non-empty config.escalateTo/);
+  });
 });
 
 describe("HumanFormNodeConfigSchema", () => {
@@ -200,12 +240,20 @@ describe("SubworkflowNodeConfigSchema", () => {
 });
 
 describe("WaitUntilNodeConfigSchema", () => {
-  it("rejects missing duration", () => {
+  it("rejects a missing schedule", () => {
     expect(() => WaitUntilNodeConfigSchema.parse({})).toThrow();
   });
-  it("accepts canonical shape", () => {
-    const parsed = WaitUntilNodeConfigSchema.parse({ duration: "5m" });
-    expect(parsed.duration).toBe("5m");
+  it("accepts canonical duration and absolute shapes", () => {
+    const duration = WaitUntilNodeConfigSchema.parse({ duration: "PT5M" });
+    const absolute = WaitUntilNodeConfigSchema.parse({ until: "2026-07-14T12:00:00Z" });
+    expect(duration.duration).toBe("PT5M");
+    expect(absolute.until).toBe("2026-07-14T12:00:00Z");
+  });
+  it("rejects both scheduling modes at once", () => {
+    expect(() => WaitUntilNodeConfigSchema.parse({
+      duration: "PT5M",
+      until: "2026-07-14T12:00:00Z",
+    })).toThrow(/either config.duration or config.until/);
   });
 });
 

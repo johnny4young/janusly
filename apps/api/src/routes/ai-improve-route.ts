@@ -59,10 +59,20 @@ export const aiImproveRoutes: Route[] = [
       }
 
       const workflow = parsed.data;
+      // Display identity, layout, and template failure policy are operator-
+      // authored controls, not part of an LLM's semantic improvement remit.
+      // Keep them out of the prompt and restore the originals after validating
+      // each full replacement.
+      const workflowForImprovement: Workflow = {
+        ...workflow,
+        nodes: workflow.nodes.map(({ label: _label, ...node }) => node),
+        ui: undefined,
+        templatePolicy: undefined,
+      };
       const helperResult: SuggestImprovementResult = await suggestWorkflowImprovement({
         llm,
         envelopeSchema: AiSuggestImprovementEnvelope,
-        workflow,
+        workflow: workflowForImprovement,
         focus,
         model: surfaceModel,
         cacheSystemPrompt: true,
@@ -108,7 +118,7 @@ export const aiImproveRoutes: Route[] = [
             const parsedWorkflow = JSON.parse(item.patchedWorkflowJson);
             const reparsed = WorkflowSchema.safeParse(parsedWorkflow);
             if (!reparsed.success) continue;
-            const sanitized = sanitizeAiWorkflow(reparsed.data);
+            const sanitized = preserveAuthoringMetadata(workflow, sanitizeAiWorkflow(reparsed.data));
             validated.push({
               workflow: sanitized,
               rationale: item.rationale,
@@ -196,3 +206,23 @@ export const aiImproveRoutes: Route[] = [
       return sendJson(res, withBudgetWarning(response, budgetGate));
     } },
 ];
+
+/** Keep operator-authored labels, layout, and failure policy stable across AI replacements. */
+function preserveAuthoringMetadata(original: Workflow, suggestion: Workflow): Workflow {
+  const { templatePolicy: _suggestedTemplatePolicy, ...suggestionWithoutPolicy } = suggestion
+  const originalNodes = new Map(original.nodes.map(node => [node.id, node]))
+  const nodes = suggestion.nodes.map(({ label: _suggestedLabel, ...node }) => {
+    const label = originalNodes.get(node.id)?.label
+    return label ? { ...node, label } : node
+  })
+  const positions = Object.fromEntries(nodes.flatMap(node => {
+    const position = original.ui?.positions?.[node.id]
+    return position ? [[node.id, position] as const] : []
+  }))
+  return {
+    ...suggestionWithoutPolicy,
+    nodes,
+    ...(Object.keys(positions).length > 0 ? { ui: { positions } } : { ui: undefined }),
+    ...(original.templatePolicy ? { templatePolicy: original.templatePolicy } : {}),
+  }
+}

@@ -119,9 +119,8 @@ describe('ScheduleHistoryPanel', () => {
     apiMock.mockResolvedValueOnce(EMPTY_RESPONSE)
     const { container } = render(<ScheduleHistoryPanel />)
     await waitFor(() => {
-      expect(container.querySelector('.we-schedule-panel')).not.toBeNull()
+      expect(container.textContent).toContain('No scheduled fires recorded yet')
     })
-    expect(container.textContent).toContain('No scheduled fires recorded yet')
     // The SVG grid still renders (7 days × 24 hours = 168 cell rects).
     const gridCells = container.querySelectorAll('.we-schedule-heatmap rect.we-schedule-heatmap__cell')
     expect(gridCells.length).toBe(168)
@@ -176,12 +175,11 @@ describe('ScheduleHistoryPanel', () => {
     apiMock.mockResolvedValueOnce(EMPTY_RESPONSE)
     const { container } = render(<ScheduleHistoryPanel />)
     await waitFor(() => {
-      expect(container.querySelector('.we-schedule-panel')).not.toBeNull()
+      expect(container.textContent).toContain('Aún no hay disparos programados registrados')
     })
     // ES title kicker + empty-state copy. "Schedule" stays English (accepted
     // technical noun), but the kicker + body are translated.
     expect(container.textContent).toContain('Observabilidad de cron')
-    expect(container.textContent).toContain('Aún no hay disparos programados registrados')
   })
 })
 

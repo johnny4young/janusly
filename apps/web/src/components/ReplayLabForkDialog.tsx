@@ -22,7 +22,7 @@
  * Used by `RightPanel.tsx`'s `RunsPanel` per-node fork buttons.
  */
 
-import React, { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, FlaskConical, GitBranch, X } from 'lucide-react'
 import { api } from '../api'
@@ -94,7 +94,7 @@ export function ReplayLabForkDialog({
     // Parse override client-side. Empty textarea = no override field
     // on the POST body (the route accepts that; it falls through to
     // the source run's original input value at the fork node).
-    let inputOverride: unknown = undefined
+    let inputOverride: unknown
     const trimmed = overrideText.trim()
     if (trimmed.length > 0) {
       // Pre-flight the 64 KiB cap the route enforces so an over-cap
@@ -102,13 +102,13 @@ export function ReplayLabForkDialog({
       // TextEncoder (UTF-8), not UTF-16 code units.
       const overrideBytes = new TextEncoder().encode(trimmed).byteLength
       if (overrideBytes > 64_000) {
-        setParseError(t('replayLab.fork.overrideTooLarge', { bytes: overrideBytes }) as string)
+        setParseError(t('replayLab.fork.overrideTooLarge', { bytes: overrideBytes }))
         return
       }
       try {
         inputOverride = JSON.parse(trimmed)
       } catch {
-        setParseError(t('replayLab.fork.invalidJson') as string)
+        setParseError(t('replayLab.fork.invalidJson'))
         return
       }
       // The route's adapter seeds the fork node's stateJson with
@@ -122,7 +122,7 @@ export function ReplayLabForkDialog({
         || typeof inputOverride !== 'object'
         || Array.isArray(inputOverride)
       ) {
-        setParseError(t('replayLab.fork.overrideNotObject') as string)
+        setParseError(t('replayLab.fork.overrideNotObject'))
         return
       }
     }
@@ -151,7 +151,7 @@ export function ReplayLabForkDialog({
       // returns typed codes (fork_node_not_found, predecessor_not_succeeded,
       // nested_replay_lab, override_too_large, etc.) — every one has
       // an apiErrors.* catalog entry in en/es common.json.
-      const message = tApiError(err) || (t('replayLab.fork.errorStart') as string)
+      const message = tApiError(err) || (t('replayLab.fork.errorStart'))
       setStep({ kind: 'error', message })
     }
   }
@@ -181,7 +181,7 @@ export function ReplayLabForkDialog({
             type="button"
             className="run-input-dialog__close"
             onClick={onBackdrop}
-            aria-label={t('replayLab.fork.close') as string}
+            aria-label={t('replayLab.fork.close')}
             disabled={step.kind === 'starting'}
           >
             <X size={16} aria-hidden="true" />

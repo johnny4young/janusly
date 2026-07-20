@@ -21,11 +21,13 @@ function Harness<T>(props: {
   overscan?: number
   clientHeight?: number
   captured: CapturedHandle<T>
+  getItemKey?: (item: T) => string | number
 }) {
   const result = useVirtualList({
     items: props.items,
     rowHeight: props.rowHeight,
     overscan: props.overscan,
+    getItemKey: props.getItemKey,
   })
   props.captured.current = result
   const containerRef = result.containerRef
@@ -225,5 +227,96 @@ describe('useVirtualList', () => {
     const captured: CapturedHandle<typeof items[number]> = { current: null }
     render(<Harness items={items} rowHeight={60} clientHeight={0} captured={captured} />)
     expect(captured.current?.totalHeight).toBe(7 * 60)
+  })
+
+  it('scrolls to a bounded index with center alignment', async () => {
+    const items = Array.from({ length: 100 }, (_, i) => ({ id: `row-${i}` }))
+    const captured: CapturedHandle<typeof items[number]> = { current: null }
+    render(<Harness items={items} rowHeight={50} clientHeight={250} captured={captured} />)
+    await act(async () => { /* flush initial measurement */ })
+    const container = captured.current?.containerRef.current
+    if (!container) throw new Error('container ref not bound')
+
+    await act(async () => captured.current?.scrollToIndex(20, 'center'))
+
+    // Row 20 starts at 1000; centering subtracts (250 - 50) / 2.
+    expect(container.scrollTop).toBe(900)
+    expect(captured.current?.visibleItems.some(item => item.index === 20)).toBe(true)
+  })
+
+  it('attaches measurement and scroll listeners when an async list mounts its container', async () => {
+    const captured: CapturedHandle<{ id: string }> = { current: null }
+    function AsyncList() {
+      const [items, setItems] = useState<Array<{ id: string }>>([])
+      const result = useVirtualList({ items, rowHeight: 50 })
+      captured.current = result
+      useEffect(() => {
+        const container = result.containerRef.current
+        if (!container) return
+        Object.defineProperty(container, 'clientHeight', { configurable: true, value: 100 })
+        container.dispatchEvent(new Event('scroll'))
+      }, [items.length, result.containerRef])
+      return (
+        <>
+          <button
+            data-testid="load"
+            onClick={() => setItems(Array.from({ length: 30 }, (_, index) => ({ id: `row-${index}` })))}
+          >
+            load
+          </button>
+          {items.length > 0 ? <div ref={result.containerRef} data-testid="async-container" /> : null}
+        </>
+      )
+    }
+    const { getByTestId } = render(<AsyncList />)
+
+    await act(async () => getByTestId('load').click())
+
+    expect(getByTestId('async-container')).toBeInTheDocument()
+    expect(captured.current?.visibleItems.length).toBeLessThan(30)
+    expect(captured.current?.visibleItems.at(-1)?.index).toBe(6)
+  })
+
+  it('preserves the visible item and intra-row offset when live items are prepended', async () => {
+    const captured: CapturedHandle<{ id: string }> = { current: null }
+    function LivePrepender() {
+      const [items, setItems] = useState(() => Array.from({ length: 40 }, (_, i) => ({ id: `row-${i}` })))
+      return (
+        <>
+          <Harness
+            items={items}
+            rowHeight={50}
+            clientHeight={250}
+            captured={captured}
+            getItemKey={item => item.id}
+          />
+          <button
+            data-testid="prepend"
+            onClick={() => setItems(current => [
+              { id: 'new-0' },
+              { id: 'new-1' },
+              ...current,
+            ])}
+          >
+            prepend
+          </button>
+        </>
+      )
+    }
+    const { getByTestId } = render(<LivePrepender />)
+    await act(async () => { /* flush initial measurement */ })
+    const container = captured.current?.containerRef.current
+    if (!container) throw new Error('container ref not bound')
+    await act(async () => {
+      container.scrollTop = 525
+      container.dispatchEvent(new Event('scroll'))
+    })
+
+    await act(async () => getByTestId('prepend').click())
+
+    // row-10 was 25px into the viewport. Two prepended rows move its index
+    // from 10 to 12, so preserving the anchor requires +100px.
+    expect(container.scrollTop).toBe(625)
+    expect(captured.current?.visibleItems.some(({ item }) => item.id === 'row-10')).toBe(true)
   })
 })

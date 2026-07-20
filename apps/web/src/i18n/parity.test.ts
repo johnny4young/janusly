@@ -13,7 +13,7 @@
 import { describe, expect, it } from 'vitest'
 import en from './locales/en/common.json'
 import es from './locales/es/common.json'
-import { COMMON_RESOURCES, SUPPORTED_LANGUAGES } from './resources'
+import { loadLocaleCatalog, SUPPORTED_LANGUAGES } from './resources'
 
 function keysOf(obj: Record<string, unknown>): string[] {
   return Object.keys(obj).sort()
@@ -25,10 +25,9 @@ function diff(a: string[], b: string[]): string[] {
 }
 
 describe('i18n parity', () => {
-  it('every supported locale has a registered resource', () => {
+  it('every supported locale has a demand loader', async () => {
     for (const lng of SUPPORTED_LANGUAGES) {
-      expect(COMMON_RESOURCES[lng], `resource missing for ${lng}`).toBeDefined()
-      expect(COMMON_RESOURCES[lng].common, `common namespace missing for ${lng}`).toBeDefined()
+      expect(await loadLocaleCatalog(lng), `catalog missing for ${lng}`).toBeDefined()
     }
   })
 

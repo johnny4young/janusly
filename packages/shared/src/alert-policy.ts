@@ -34,6 +34,7 @@ export const ALERT_TRIGGERS = [
   'recovery_item.sla_breached',
   'workflow.schedule_anomaly',
   'credential.expiring',
+  'workflow.circuit_breaker_tripped',
 ] as const
 
 export const AlertTriggerSchema = z.enum(ALERT_TRIGGERS)
@@ -117,6 +118,13 @@ export const AlertParamsCredentialExpiringSchema = z
   })
   .strict()
 
+export const AlertParamsWorkflowCircuitBreakerTrippedSchema = z
+  .object({
+    // Optional allowlist — absent/empty means every workflow in the org.
+    workflowIds: z.array(z.string().min(1).max(120)).max(50).optional(),
+  })
+  .strict()
+
 /**
  * Per-trigger parameters dispatch table. Caller picks the schema by the
  * value of `policy.trigger` then runs `.safeParse(policy.parameters)`.
@@ -132,6 +140,7 @@ export const ALERT_PARAMS_SCHEMAS = {
   'recovery_item.sla_breached': AlertParamsRecoveryItemSlaBreachedSchema,
   'workflow.schedule_anomaly': AlertParamsWorkflowScheduleAnomalySchema,
   'credential.expiring': AlertParamsCredentialExpiringSchema,
+  'workflow.circuit_breaker_tripped': AlertParamsWorkflowCircuitBreakerTrippedSchema,
 } as const satisfies Record<AlertTrigger, z.ZodTypeAny>
 
 export type AlertParamsByTrigger = {
@@ -145,6 +154,7 @@ export type AlertParamsByTrigger = {
   'recovery_item.sla_breached': z.infer<typeof AlertParamsRecoveryItemSlaBreachedSchema>
   'workflow.schedule_anomaly': z.infer<typeof AlertParamsWorkflowScheduleAnomalySchema>
   'credential.expiring': z.infer<typeof AlertParamsCredentialExpiringSchema>
+  'workflow.circuit_breaker_tripped': z.infer<typeof AlertParamsWorkflowCircuitBreakerTrippedSchema>
 }
 
 // ---------- channels ----------

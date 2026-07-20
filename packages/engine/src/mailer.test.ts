@@ -108,7 +108,7 @@ describe("ResendMailer.send", () => {
     const [url, init] = fetchHttpTargetMock.mock.calls[0]!;
     expect(url).toBe("https://api.resend.com/emails");
     expect(init?.method).toBe("POST");
-    expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer re_test_key");
+    expect((init!.headers as Record<string, string>).Authorization).toBe("Bearer re_test_key");
     const body = JSON.parse(init?.body as string);
     expect(body.from).toBe("sender@example.com");
     expect(body.to).toEqual(["user@example.com"]);

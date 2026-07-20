@@ -7,7 +7,6 @@
  * input.
  */
 
-import React from 'react'
 import type { WorkflowInputSchemaShape } from '../types'
 import { RunInputDialog } from './RunInputDialog'
 import { useT } from '../i18n'

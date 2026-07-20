@@ -73,7 +73,7 @@ export function substituteVariables(
   variables: Record<string, string | number | boolean> = {},
 ): string {
   return template.replace(/{{\s*([a-zA-Z0-9_.-]+)\s*}}/g, (match, name) => {
-    if (Object.prototype.hasOwnProperty.call(variables, name)) {
+    if (Object.hasOwn(variables, name)) {
       return String(variables[name])
     }
     return match

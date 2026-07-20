@@ -29,11 +29,10 @@
  *   intentionally cross-org.
  */
 
-import { auditLogs, db } from "@janusly/db";
-import { pruneOldProcessedEvents } from "@janusly/data";
+import {
+  recordSystemAudit, pruneOldProcessedEvents } from "@janusly/data";
 
 import { workflowQueue } from "./queue";
-import { safePersistPayload } from "./safe-persist";
 import { validateCronExpression } from "./schedule";
 
 export const SCIM_EVENTS_RETENTION_JOB_ID = "system:scim-events-retention";
@@ -128,20 +127,8 @@ export async function registerScimEventsRetentionScheduler(
  * + logged so the sweep itself stays observable through the regular
  * log path.
  */
-async function writeSystemAudit(action: string, metadata: Record<string, unknown>): Promise<void> {
-  try {
-    await db.insert(auditLogs).values({
-      id: crypto.randomUUID(),
-      orgId: "system",
-      userId: null,
-      action,
-      targetType: null,
-      targetId: null,
-      metadata: safePersistPayload(metadata) as Record<string, unknown>,
-    });
-  } catch (err) {
-    console.warn("[scim-events-retention] audit write failed", { action, err: err instanceof Error ? err.message : String(err) });
-  }
+function writeSystemAudit(action: string, metadata: Record<string, unknown>): Promise<void> {
+  return recordSystemAudit({ orgId: "system", action, metadata, logTag: "[scim-events-retention]" });
 }
 
 /**

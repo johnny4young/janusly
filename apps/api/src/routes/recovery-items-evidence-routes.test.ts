@@ -34,6 +34,7 @@ vi.mock("@janusly/engine/src/tool-registry", () => ({ executeTool: executeToolMo
 vi.mock("../rate-limit", () => ({ enforceRateLimit: enforceRateLimitMock }));
 
 vi.mock("@janusly/data", () => ({
+  recordSystemAudit: vi.fn(async () => undefined),
   // Only the symbols the route file imports from the barrel are stubbed.
   acknowledgeRecoveryItem: vi.fn(),
   appendCommentToRecoveryItem: vi.fn(),
@@ -219,7 +220,7 @@ describe("POST /recovery/items/:id/evidence", () => {
     expect(res.headers?.["Content-Type"]).toBe("application/json");
     expect(res.headers?.["Content-Disposition"]).toContain("attachment");
     expect(res.headers?.["Content-Disposition"]).toContain(".json");
-    expect(res.headers?.["Access-Control-Expose-Headers"]).toBe("Content-Disposition");
+    expect(res.headers?.["Access-Control-Expose-Headers"]).toBe("Content-Disposition, X-Request-Id");
     expect(JSON.parse(res.body ?? "{}").incident.recoveryItemId).toBe("ri_1");
   });
 

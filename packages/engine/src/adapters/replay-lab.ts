@@ -25,11 +25,10 @@
  *   is created (sandbox runs never produce reusable versions).
  */
 
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db, runs, runNodes, runEvents } from "@janusly/db";
 import type { Workflow } from "@janusly/shared";
-import { enqueueNode } from "../queue";
-import { markNodeQueued, appendEvent } from "../persistence";
+import { publishInitialNode } from "../initial-node-publication";
 import { safePersistPayload } from "../safe-persist";
 
 const INITIAL_NODE_STATE_MAX_BYTES = 1_000_000;
@@ -69,7 +68,8 @@ export type ReplayLabInput = {
 
 /**
  * Standalone sandbox replay — write a fresh `runs.replayMode="validation"`
- * row, seed every node as `pending`, then enqueue root nodes. The
+ * row, commit root nodes as durably marked `queued`, and leave downstream
+ * nodes `pending`. The
  * runtime's `enqueueReadyNodes` cascade picks up downstream nodes as
  * each terminates. Returns the new run id so the caller can poll until
  * terminal status.
@@ -84,6 +84,12 @@ export async function replayRunAsValidation(
   // No row in `workflow_versions` is created; the workflow snapshot lives
   // in `runs.inputJson` and is loaded by the queue worker at execution time.
   const workflowVersionId = runId;
+  const startNodeIds = new Set(
+    workflow.nodes
+      .filter((node) => !workflow.edges.some((edge) => edge.to === node.id))
+      .map((node) => node.id),
+  );
+  const publicationMarkedAt = new Date();
 
   await db.transaction(async (tx) => {
     await tx.insert(runs).values({
@@ -101,22 +107,28 @@ export async function replayRunAsValidation(
       inputJson: { workflow, input: input ?? {} },
       parentRunId: sourceRunId,
       parentNodeId: null,
+      parentLinkKind: "replay",
       traceId: null,
     });
 
     if (workflow.nodes.length > 0) {
       await tx.insert(runNodes).values(
-        workflow.nodes.map((node) => ({
-          id: crypto.randomUUID(),
-          runId,
-          nodeId: node.id,
-          status: "pending" as const,
-          stateJson: safePersistPayload({}, { maxBytes: INITIAL_NODE_STATE_MAX_BYTES }),
-          attempts: 0,
-          startedAt: null,
-          finishedAt: null,
-          errorJson: null,
-        })),
+        workflow.nodes.map((node) => {
+          const startsQueued = startNodeIds.has(node.id);
+          return {
+            id: crypto.randomUUID(),
+            runId,
+            nodeId: node.id,
+            status: startsQueued ? ("queued" as const) : ("pending" as const),
+            stateJson: safePersistPayload({}, { maxBytes: INITIAL_NODE_STATE_MAX_BYTES }),
+            attempts: startsQueued ? 1 : 0,
+            queuePublicationRepairAfter: startsQueued ? publicationMarkedAt : null,
+            queuePublicationGeneration: startsQueued ? 1 : 0,
+            startedAt: null,
+            finishedAt: null,
+            errorJson: null,
+          };
+        }),
       );
     }
 
@@ -136,14 +148,15 @@ export async function replayRunAsValidation(
   // Discover root nodes (no incoming edges) and enqueue them. The
   // runtime's ALL-AND readiness cascade picks up downstream nodes as
   // each predecessor terminates.
-  const startNodes = workflow.nodes.filter((node) => {
-    return !workflow.edges.some((edge) => edge.to === node.id);
-  });
+  const startNodes = workflow.nodes.filter((node) => startNodeIds.has(node.id));
 
   for (const node of startNodes) {
-    await markNodeQueued(runId, node.id);
-    await enqueueNode({ runId, nodeId: node.id, attempt: 1 });
-    await appendEvent(runId, node.id, "node.queued", {});
+    await publishInitialNode({
+      runId,
+      nodeId: node.id,
+      attempt: 1,
+      publicationGeneration: 1,
+    });
   }
 
   return { runId };
@@ -302,6 +315,7 @@ export async function replayRunAsValidationFork(
   // Synthetic version id — mirrors the ad-hoc pattern in `startRun` and the
   // sibling whole-run `replayRunAsValidation`. No `workflow_versions` row.
   const workflowVersionId = runId;
+  const publicationMarkedAt = new Date();
 
   await db.transaction(async (tx) => {
     await tx.insert(runs).values({
@@ -316,6 +330,7 @@ export async function replayRunAsValidationFork(
       inputJson: { workflow, input: input ?? {}, fork: { sourceRunId, forkNodeId, hasOverride: inputOverride !== undefined } },
       parentRunId: sourceRunId,
       parentNodeId: forkNodeId,
+      parentLinkKind: "replay",
       traceId: null,
     });
 
@@ -341,8 +356,8 @@ export async function replayRunAsValidationFork(
           }
           if (node.id === forkNodeId) {
             // The fork node — seed `stateJson` with the override input
-            // (or an empty bag if no override). Status `pending` so the
-            // enqueue at the end of this function picks it up.
+            // (or an empty bag if no override). The queued state and durable
+            // marker commit with the run so publication is crash-repairable.
             const seedState = inputOverride !== undefined
               ? { input: inputOverride }
               : {};
@@ -350,9 +365,11 @@ export async function replayRunAsValidationFork(
               id: crypto.randomUUID(),
               runId,
               nodeId: node.id,
-              status: "pending" as const,
+              status: "queued" as const,
               stateJson: safePersistPayload(seedState, { maxBytes: INITIAL_NODE_STATE_MAX_BYTES }),
-              attempts: 0,
+              attempts: 1,
+              queuePublicationRepairAfter: publicationMarkedAt,
+              queuePublicationGeneration: 1,
               startedAt: null,
               finishedAt: null,
               errorJson: null,
@@ -414,9 +431,12 @@ export async function replayRunAsValidationFork(
   //    flip to `succeeded` after execution).
   const forkNode = workflow.nodes.find((n) => n.id === forkNodeId);
   if (forkNode) {
-    await markNodeQueued(runId, forkNode.id);
-    await enqueueNode({ runId, nodeId: forkNode.id, attempt: 1 });
-    await appendEvent(runId, forkNode.id, "node.queued", {});
+    await publishInitialNode({
+      runId,
+      nodeId: forkNode.id,
+      attempt: 1,
+      publicationGeneration: 1,
+    });
   }
 
   return { ok: true, runId, predecessorCount: predIds.size };

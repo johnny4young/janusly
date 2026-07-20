@@ -13,6 +13,7 @@ import type { WorkflowDefinition } from '../../types'
 import { WorkflowDiffView } from '../WorkflowDiffView'
 import type { DeadLetter } from '../DeadLettersPanel'
 import { classifyRecoveryError, pickErrorMessage } from './helpers'
+import { RecoveryPassportCard } from './RecoveryPassportCard'
 import type { PatchSuggestion } from './types'
 
 export function ValidationFailedBody({
@@ -21,12 +22,16 @@ export function ValidationFailedBody({
   dlq,
   runId,
   errorJson,
+  failureSignature,
+  playbookRetired = false,
 }: {
   suggestion: PatchSuggestion
   selectedIndex: number
   dlq: DeadLetter
   runId: string
   errorJson: unknown
+  failureSignature: string
+  playbookRetired?: boolean
 }) {
   const { t } = useT()
   const message = pickErrorMessage(errorJson)
@@ -45,21 +50,35 @@ export function ValidationFailedBody({
           />
         </div>
       </div>
+      {playbookRetired ? (
+        <div className="we-recovery-playbook-regression" data-testid="recovery-playbook-regression" role="status">
+          <strong>{t('recoveryDialog.playbook.regressionTitle')}</strong>
+          <span>{t('recoveryDialog.playbook.regressionBody')}</span>
+        </div>
+      ) : null}
       {category ? (
         <p className="helper-text we-recovery-error-summary">
-          {t(`recoveryDialog.errorSummary.${category}` as never) as string}
+          {t(`recoveryDialog.errorSummary.${category}` as never)}
         </p>
       ) : null}
       {message ? (
-        <pre className="we-recovery-error-detail" aria-label={t('recoveryDialog.validationFailed.errorDetailAria') as string}>
+        <pre className="we-recovery-error-detail" aria-label={t('recoveryDialog.validationFailed.errorDetailAria')}>
           {message}
         </pre>
       ) : null}
+      <RecoveryPassportCard
+        dlq={dlq}
+        suggestion={suggestion}
+        selected={selected}
+        actionable={true}
+        sandboxStatus="failed"
+        failureSignature={failureSignature}
+      />
       <WorkflowDiffView
         before={(dlq.workflowJson ?? {}) as WorkflowDefinition}
         after={selected.workflow}
-        beforeLabel={t('recoveryDialog.review.beforeLabel') as string}
-        afterLabel={t('recoveryDialog.validationFailed.suggestedRejected') as string}
+        beforeLabel={t('recoveryDialog.review.beforeLabel')}
+        afterLabel={t('recoveryDialog.validationFailed.suggestedRejected')}
         aiPatchRationale={selected.rationale}
       />
     </>

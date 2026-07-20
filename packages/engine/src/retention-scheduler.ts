@@ -45,8 +45,8 @@
  *   throws) BEFORE the per-table purge for that org.
  */
 
-import { auditLogs, db } from "@janusly/db";
 import {
+  recordSystemAudit,
   deleteExpiredAuditLogsForOrg,
   deleteExpiredMemoryEntriesForOrg,
   deleteExpiredRecoveryFeedbackForOrg,
@@ -158,23 +158,11 @@ export async function registerRetentionScheduler(
  * user-supplied free text, so the `safePersistPayload` chokepoint is not
  * needed at this layer (same posture as the sibling retention sweeps).
  */
-async function writeOrgRetentionAudit(orgId: string, metadata: Record<string, unknown>): Promise<void> {
-  try {
-    await db.insert(auditLogs).values({
-      id: crypto.randomUUID(),
-      orgId,
-      userId: null,
-      action: "retention.purged",
-      targetType: null,
-      targetId: null,
-      metadata,
-    });
-  } catch (err) {
-    console.warn("[retention] audit write failed", {
-      orgId,
-      err: err instanceof Error ? err.message : String(err),
-    });
-  }
+function writeOrgRetentionAudit(orgId: string, metadata: Record<string, unknown>): Promise<void> {
+  // Now routed through the chokepoint: this writer previously inserted RAW
+  // metadata, skipping the safePersistPayload redaction+cap every other
+  // audit_logs.metadata write gets (an AGENTS.md invariant).
+  return recordSystemAudit({ orgId, action: "retention.purged", metadata, logTag: "[retention]" });
 }
 
 export type RetentionTableOutcome = {

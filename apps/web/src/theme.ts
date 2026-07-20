@@ -1,7 +1,7 @@
 /**
  * Theme manager — persists the user's theme preference (`system` / `light` /
  * `dark`) in localStorage and applies it to `<html data-theme>` so the
- * `:root` + `[data-theme="dark"]` token blocks in `index.css` resolve.
+ * `:root` + `[data-theme="dark"]` token blocks in `styles/foundations.css` resolve.
  *
  * `applyTheme` is called from `main.tsx` BEFORE `createRoot` so the dark
  * tokens are in place during first paint (no light→dark flicker). UserMenu's

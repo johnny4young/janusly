@@ -7,9 +7,36 @@ token (`Authorization: Bearer <jwt>` for Supabase or service-token mode, or
 than one membership. The org header is a scope selector; authorization is
 granted by the server-side `org_members` row, not by a client-side claim.
 
-CORS allowed origins come from `API_ALLOWED_ORIGINS` (default: `http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174`). The `5174` ports are included so dev still works when Vite falls back from `5173` due to a port collision. Body limit defaults to 1 MiB (`API_MAX_JSON_BODY_BYTES`).
+CORS allowed origins come from `API_ALLOWED_ORIGINS` (default: `http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174`). Root `pnpm dev` binds loopback on strict port `5173`; the `5174` origins remain for legacy/manual development setups. Body limit defaults to 1 MiB (`API_MAX_JSON_BODY_BYTES`).
 
 All examples below assume the dev-headers shorthand `-H "x-org-id: default" -H "x-user-id: dev-user"`.
+
+## Stable v1 contract
+
+Janusly retains every unversioned route for compatibility. Contracted reads
+also resolve under `/v1` and return stable envelopes. The current v1 set is:
+
+- `GET /v1/recovery/metrics`
+- `GET /v1/workflows`
+- `GET /v1/workflows/versions`
+- `GET /v1/workflows/latest`
+- `GET /v1/runs`
+- `GET /v1/run`
+- `GET /v1/status`
+
+Successful responses are `{ "apiVersion": "v1", "requestId": "...", "data":
+<legacy-payload> }`. Errors are `{ "apiVersion": "v1", "requestId": "...",
+"error": { "code": "...", "message": "...", "params": {} } }`. Every
+response also carries `X-Request-Id`; pass a safe `X-Request-Id` request header
+to retain your own correlation ID or let Janusly generate one.
+
+The generated OpenAPI 3.1 document is public at `GET /v1/openapi.json` and
+checked in at [`apps/api/openapi.v1.json`](../apps/api/openapi.v1.json). Run
+`pnpm contract:generate` after an intentional contract change and `pnpm
+contract:check` to verify there is no drift. Routes not present in that document
+remain available only at their legacy URL; `/v1/<uncontracted-route>` fails
+closed with 404. See [`docs/architecture/api-contract.md`](architecture/api-contract.md)
+for maintainer invariants.
 
 This file gives worked examples for the stable public HTTP surface. The
 authoritative route registry is the composed `routes: Route[]` in
@@ -41,6 +68,7 @@ that permission is the authorization gate.
 
 | Surface | Endpoint(s) | Access | Notes |
 | --- | --- | --- | --- |
+| API contract | `GET /v1/openapi.json` | public | Generated OpenAPI 3.1 document for explicitly contracted `/v1` aliases. |
 | Health | `GET /health` | public | Liveness plus additive public rate-limiter degradation snapshot. |
 | Rate limiter admin | `GET /system/rate-limiter` | admin | Process-local Redis limiter degradation details. |
 | Tools/templates/plugins | `GET /tools`, `GET /templates`, `GET /plugins`, `POST /plugins/install` | authenticated / admin install | Tool registry, static workflow templates, installed-plugin catalog. |
@@ -52,7 +80,7 @@ that permission is the authorization gate.
 | MCP client | `GET /mcp/connections`, `POST /mcp/connections`, `POST /mcp/connections/:alias`, `DELETE /mcp/connections/:alias`, `POST /mcp/connections/:alias/rediscover`, `GET /mcp/connections/:alias/tools`, `POST /mcp/connections/:alias/tools/:toolName` | viewer/admin + `mcp.connections.*` | External MCP server registry, descriptor discovery, tool enable/write/rate/expose flags. |
 | Workflow CRUD/readiness | `GET /workflows`, `POST /workflows/save`, `GET /workflows/versions`, `GET /workflows/latest`, `DELETE /workflows/:id`, `POST /validate`, `POST /workflows/readiness` | viewer/editor | Structural validation plus production-readiness checks. |
 | Workflow operations | `POST /workflows/rollback`, `POST /workflows/:id/slo`, `GET /workflows/:id/schedule-history`, `GET /workflows/health`, `GET /workflows/health/delta`, `GET /workflows/:id/metadata`, `POST /workflows/:id/metadata`, `GET /billing/budget`, `POST /workflows/:id/budget` | viewer/editor/admin by route | Rollback, SLO, schedule observability, health scoring, metadata, and cost-budget overrides. |
-| Runs | `POST /start`, `GET /runs`, `GET /run`, `GET /status`, `GET /runs/:id/stream`, `POST /resume`, `POST /run/cancel`, `POST /runs/replay-lab`, `POST /runs/replay-lab/fork`, `GET /runs/compare`, `GET /causal` | viewer/editor + run perms | Start, poll, stream, resume, cancel, sandbox replay, fork, compare, and router explainability. |
+| Runs | `POST /start`, `GET /runs`, `GET /run`, `GET /run/usage`, `GET /status`, `GET /runs/:id/stream`, `POST /resume`, `POST /run/cancel`, `POST /runs/replay-lab`, `POST /runs/replay-lab/fork`, `GET /runs/compare`, `GET /causal` | viewer/editor + run perms | Start, poll, inspect bounded resource usage, stream, resume, cancel, sandbox replay, fork, compare, and router explainability. |
 | Credentials | `GET /credentials`, `GET /credentials/health`, `POST /credentials`, `POST /credentials/:name/bulk-update`, `POST /credentials/:name/expiry` | viewer/admin + credential perms | Operator-facing credential rows; health and rotation never echo `secretRef`. Optional operator-declared `expiresAt` powers the expiry-warning alert. |
 | AI helpers | `GET /ai/health`, `POST /ai/generate-workflow`, `POST /ai/explain-workflow`, `POST /ai/review-workflow`, `POST /ai/patch-workflow`, `POST /ai/suggest-improvement`, `POST /ai/explain-run` | authenticated; editor where mutating | Provider-neutral LLM surfaces with deterministic fallback/audit contracts. |
 | DLQ/recovery loop | `GET /dlq`, `GET /dlq/clusters`, `GET /dlq/cluster-members`, `POST /dlq/resolve`, `POST /dlq/validate-fix`, `POST /dlq/cluster-apply`, `POST /dlq/replay`, `GET /recovery/metrics`, `POST /recovery/feedback` | viewer/editor + DLQ perms | Dead-letter triage, validation sandbox, clustered replay, metrics, and feedback. |
@@ -325,7 +353,11 @@ Common issue codes:
 | `multi_agent_missing_agents` | `multi_agent.config.agents` is empty |
 | `human_form_invalid_schema` | `human_form.config.schema` is missing or outside the supported JSON-schema subset |
 | `human_form_empty_schema` | `human_form.config.schema.properties` is empty |
-| `wait_until_missing_duration` / `wait_until_invalid_duration` / `wait_until_non_positive_duration` | `wait_until.config.duration` is absent or not a positive ISO 8601 duration |
+| `approval_conflicting_deadline` / `approval_invalid_timeout` / `approval_invalid_until` | Approval `decisionTimeoutMs` / `until` fields conflict or do not resolve to a supported instant |
+| `approval_invalid_timeout_policy` / `approval_timeout_policy_without_deadline` | Approval timeout policy is unknown or has no deadline |
+| `approval_escalation_missing_assignee` / `approval_escalation_without_policy` | Approval escalation has no target or appears outside the `escalate` policy |
+| `wait_until_missing_duration` / `wait_until_invalid_duration` / `wait_until_non_positive_duration` | `wait_until` has no time or its duration is invalid/non-positive |
+| `wait_until_conflicting_time` / `wait_until_invalid_until` | `wait_until` sets both time forms or has an invalid absolute instant |
 | `parallel_fork_invalid_branches` | `parallel_fork.config.branches` is malformed |
 | `join_invalid_sources` | `join.config.sources` is malformed |
 | `schedule_invalid_cron` | `schedule.config.cronExpression` is malformed |
@@ -414,6 +446,43 @@ returned in chronological order even though the DB query reads newest-first.
 Run statuses: `created`, `running`, `waiting`, `succeeded`, `failed`, `cancelled`, `timed_out`.
 Node statuses: `pending`, `queued`, `running`, `waiting`, `succeeded`, `failed`, `skipped`, `cancelled`.
 
+### `GET /run/usage?runId=<uuid>`
+
+Returns the tenant-scoped resource-usage projection for one run. The endpoint is
+also contracted at `GET /v1/run/usage`; the web uses the versioned alias and
+unwraps its stable envelope. It reads the newest 10,000 matching
+`usage_events` rows, reports `truncated: true` when older records exist, and
+never derives tokens, cost, or memory activity from the paginated event
+timeline. A missing or foreign run returns the same non-enumerating `403` used
+by run detail.
+
+**Response 200**
+```json
+{
+  "loadedRows": 6,
+  "truncated": false,
+  "rowCap": 10000,
+  "llm": {
+    "calls": 3,
+    "inputTokens": 12000,
+    "outputTokens": 2500,
+    "totalTokens": 14500,
+    "cachedInputTokens": 8000,
+    "cacheCreationInputTokens": 1000,
+    "knownCostUsd": 0.0425,
+    "unknownCostCalls": 1
+  },
+  "memory": {
+    "recalls": 2,
+    "commits": 1,
+    "failures": 0,
+    "kinds": [
+      { "kind": "agent_episode", "recalls": 2, "commits": 1, "failures": 0 }
+    ]
+  }
+}
+```
+
 ### `GET /status?runId=<uuid>`
 
 Same shape as `/run` (run + nodes + latest event page). Supports
@@ -493,13 +562,15 @@ Returns the per-node comparison bundle consumed by Replay Lab. Requires
 `viewer` role. Both runs are org-scoped; missing or cross-org ids return the
 same 404 envelope to avoid enumeration.
 
-### `GET /causal?runId=<uuid>&nodeId=<nodeId>`
+### `GET /causal?runId=<uuid>&eventId=<eventId>&nodeId=<nodeId>`
 
-Replays a recorded router decision for explainability. The route finds the
-`decision.made` event for the given node, re-runs the deterministic causal
+Replays a recorded router decision for explainability. Requires `runs.read`.
+The route finds the exact
+`decision.made` event for the given run, event, and node, re-runs the deterministic causal
 replay helper over the recorded candidate bundle, and returns the chosen route
 analysis. Cross-org or missing runs return `403`; missing decision events
-return `404`.
+return `404`. This endpoint explains recorded router candidates only; it does
+not model generic condition or skipped-node counterfactuals.
 
 ### `POST /resume`
 
@@ -810,7 +881,7 @@ Recovery before/after rollup. Splits the same time window by version cutoff: run
 
 ### `GET /recovery/metrics?windowDays=30`
 
-Org-level Operations dashboard payload — recovery metric cards (success rate, MTTR, p95 latency, approvals pending, replay rate, SLA attainment, cost) each with `value` / `display` / `severity` / `rationale`. `slaAttainment` additionally carries `resolvedInWindow` and `metSla`; when no items resolved in-window its `value` is `null`/neutral, not `0%`. Severity bands are tunable constants in the engine module.
+Org-level Operations dashboard payload — recovery metric cards (success rate, MTTR, p95 latency, approvals pending, replay rate, SLA attainment, cost) each with `value` / `display` / `severity` / `rationale`. `slaAttainment` additionally carries `resolvedInWindow` and `metSla`; when no items resolved in-window its `value` is `null`/neutral, not `0%`. The cost/cache projection aggregates every `llm.completion` in the requested rolling window in PostgreSQL, returns the highest-value 100 provider/model groups, and folds any remaining groups into one row with `aggregated: true`; totals and cache share still include that remainder. Severity bands are tunable constants in the engine module.
 
 ### `POST /recovery/feedback`
 

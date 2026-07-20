@@ -105,8 +105,12 @@ nodes. Do not split the transactional bootstrap back into per-node writes.
 
 `resumeRun` is the only path that completes waiting `approval`, `webhook`, and
 `human_form` nodes. `human_form` resumes require an engine-signed token and
-schema validation; `webhook` resumes capture the inbound payload as node output;
-`approval` preserves the historical empty-output behavior.
+schema validation. New tokens bind the org/run/node/purpose tuple and sign both
+`issuedAt` and `expiresAt`; `runs.humanFormResumeTtlSeconds` controls only newly
+issued links in the 300..604800-second range, while legacy tokens without an
+explicit expiry keep the original seven-day boundary. `webhook` resumes capture
+the inbound payload as node output; `approval` preserves the historical
+empty-output behavior.
 
 ## Remaining portability work
 

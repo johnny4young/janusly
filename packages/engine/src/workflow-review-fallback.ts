@@ -84,6 +84,7 @@ export function buildReviewFallback(workflow: Workflow): ReviewFindings {
       severity: issue.severity,
       message: issue.message,
       nodeId: issue.nodeId,
+      edgeId: issue.edgeId,
       rationale: "Local rules-only review. AI semantic review unavailable — see suggestion for the deterministic fix.",
       suggestion: issue.suggestion ?? "No automatic suggestion available.",
     })),

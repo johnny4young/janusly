@@ -22,32 +22,57 @@
  *   `{ mode: "fallback", aiError, ... }` on failure — see AGENTS.md.
  * - `http` and the `http.request` tool both go through `fetchHttpTarget`,
  *   preserving the SSRF + DNS-rebinding pin.
+ * - `tool` and agent tool dispatch both pass the cached org-config snapshot
+ *   through the execution context; do not reintroduce a tool-name allowlist.
  * - Adding a new node type requires updating `nodeTypeValues` in
  *   `@janusly/shared` so the schema and the registry stay in lockstep.
  */
 
 import { loadRootEnv } from "@janusly/db";
 import { createLlmClient, resolveLlmConfig, type LlmClient } from "@janusly/ai";
-import { WorkflowInputSchema } from "@janusly/shared";
+import {
+  AGENT_REASONING_AGENT_MAX_CHARS,
+  AGENT_REASONING_REASON_MAX_CHARS,
+  AGENT_REASONING_SCOPE_MAX_CHARS,
+  AGENT_REASONING_TOOL_MAX_CHARS,
+  scrubOperatorGuidanceSecrets,
+  WorkflowInputSchema,
+  type AgentReasoningEventPayload,
+} from "@janusly/shared";
 import {
   applyOrgConfigToEnv,
   getOrgConfigSnapshot,
   type OrgConfigSnapshot,
 } from "@janusly/data";
 import { evaluateExpression } from "./expression";
-import { executeTool, isToolWriteSide } from "./tool-registry";
+import { HttpResponseError } from "./core/http-error";
+import { withTimeout } from "./core/timeout";
 import { planAgentTool, planAgentToolWithLLM, type AgentPlanResult } from "./agent-planner";
 import type { AgentNodeConfig } from "./node-configs";
 import { appendEvent } from "./persistence";
 import { resolvePromptRef } from "./prompt-resolver";
 import { getRunMemory, summarizeMemory } from "./memory";
 import { recallAgentEpisodes, recordAgentEpisode } from "./agent-memory";
-import { mapInput } from "./template";
+import { mapInput, renderTemplateWithRedactions } from "./template";
+import {
+  enforceLateBoundTemplatePolicy,
+  mergeLateBoundRedactions,
+} from "./late-bound-template";
+import { executeLoop, isForEachLoopWriteSide } from "./loop-executor";
+import {
+  dryRunToolSkipPayload,
+  executeToolForRun,
+  isToolInvocationWriteSide,
+  SAFE_HTTP_METHODS,
+  withHttpToolDefaults,
+} from "./tool-execution";
 import { consumeStreamToPreview, fetchHttpTarget } from "./http-policy";
+import { projectHttpJson } from "./http-json";
 import { hasFailureSignal } from "./failure-signal";
 import { checkBudget } from "./budget";
 import { subworkflowExecutor } from "./subworkflow";
 import { waitUntilExecutor } from "./wait-until";
+import { approvalExecutor } from "./approval-timeout";
 import { joinExecutor, parallelForkExecutor } from "./parallel-fork";
 import { scheduleExecutor } from "./schedule";
 import { emailReceivedExecutor, fileDroppedExecutor, mcpServerEventExecutor } from "./triggers";
@@ -76,6 +101,13 @@ export type NodeContext = {
   context: Record<string, any>;
   /** Resolved secret values that must never be persisted by executors. */
   redactedValues?: string[];
+  /** Active DLQ replay generation, used by executor-owned atomic checkpoints. */
+  recoveryClaimToken?: string;
+  /** Cooperative cancellation for executors that can stop starting bounded work after a node timeout. */
+  signal?: AbortSignal;
+  /** Immutable policy copied from the run's workflow snapshot. Executors use
+   * it only for scopes that cannot be bound at dispatcher time. */
+  templatePolicy?: "lenient" | "strict";
   /**
    * True when this node is executing inside a sandbox/validation run
    * (`runs.replayMode === "validation"`). Plumbed by `executeNode` from
@@ -89,12 +121,39 @@ export type NodeContext = {
   dryRun?: boolean;
 };
 
-/** HTTP methods that read state without mutating it; safe to execute in dryRun mode. */
-const SAFE_HTTP_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+/**
+ * True when a node could commit an external side effect — a non-safe HTTP
+ * method or a `writeSide` tool. Same taxonomy the sandbox uses to dry-run-skip
+ * write-side actions; reused by `execute-node.ts` to flag a `NODE_TIMEOUT`
+ * whose executor may have partially completed its effect. Conservative:
+ * node types whose write-side-ness isn't statically known (agent tool calls,
+ * subworkflows) return `false` here — those loops carry their own timeouts.
+ */
+export function isWriteSideNode(node: {
+  type: string;
+  config?: Record<string, unknown>;
+}): boolean {
+  if (node.type === "http") {
+    return !SAFE_HTTP_METHODS.has(String(node.config?.method ?? "GET").toUpperCase());
+  }
+  if (node.type === "tool") {
+    return isToolInvocationWriteSide(node.config?.tool, node.config?.input);
+  }
+  if (node.type === "loop") {
+    return isForEachLoopWriteSide(node.config ?? {});
+  }
+  return false;
+}
 
 export type NodeExecutionResult =
   | { status: "completed"; output?: Record<string, unknown> }
-  | { status: "waiting"; reason?: string; metadata?: Record<string, unknown> };
+  | {
+      status: "waiting";
+      reason?: string;
+      metadata?: Record<string, unknown>;
+      /** The executor already committed this waiting checkpoint atomically with owned side effects. */
+      checkpointPersisted?: boolean;
+    };
 
 export type NodeExecutor = (ctx: NodeContext) => Promise<NodeExecutionResult>;
 
@@ -112,17 +171,6 @@ function previewText(value: string, maxLength = 700) {
   return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs?: number, label = "operation") {
-  if (!timeoutMs) return promise;
-
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) => {
-      setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
-    }),
-  ]);
-}
-
 function createTenantLlmClient(orgConfig: OrgConfigSnapshot): LlmClient | null {
   const llmConfig = resolveLlmConfig(applyOrgConfigToEnv(orgConfig));
   return llmConfig ? createLlmClient(llmConfig) : null;
@@ -130,38 +178,6 @@ function createTenantLlmClient(orgConfig: OrgConfigSnapshot): LlmClient | null {
 
 async function getTenantLlmClient(orgId: string): Promise<LlmClient | null> {
   return createTenantLlmClient(await getOrgConfigSnapshot(orgId));
-}
-
-function withHttpToolDefaults(
-  tool: string,
-  input: unknown,
-  orgConfig: OrgConfigSnapshot,
-): unknown {
-  if (tool !== "http.request" || typeof input !== "object" || input === null || Array.isArray(input)) return input;
-  const next = { ...(input as Record<string, unknown>) };
-  next.timeoutMs ??= orgConfig.http.timeoutMs;
-  next.maxResponseBytes ??= orgConfig.http.maxResponseBytes;
-  next.maxRedirects ??= orgConfig.http.maxRedirects;
-  // When the operator opted into streaming and didn't pass a per-call
-  // preview cap, fall back to the tenant default so a low per-org cap
-  // applies without the operator having to set it on every node.
-  if (next.bodyMode === "stream") {
-    next.streamPreviewBytes ??= orgConfig.http.streamPreviewBytes;
-  }
-  return next;
-}
-
-function dryRunToolSkipPayload(tool: string, input: unknown): Record<string, unknown> | null {
-  if (!isToolWriteSide(tool)) return null;
-  const inputObj = (input ?? {}) as Record<string, unknown>;
-  const method = typeof inputObj.method === "string" ? inputObj.method.toUpperCase() : "GET";
-  const isHttpRead = tool === "http.request" && SAFE_HTTP_METHODS.has(method);
-  if (isHttpRead) return null;
-  return {
-    reason: "write-side tool skipped in validation mode",
-    tool,
-    method: tool === "http.request" ? method : undefined,
-  };
 }
 
 /** One recorded agent-loop step: the plan, the tool result, and the reflection (when enabled). */
@@ -180,6 +196,20 @@ type AgentReflection = {
   reason: string;
 };
 
+/**
+ * Produce one bounded field written to `agent.reasoning`.
+ * This is an operational summary, never hidden chain-of-thought: inputs,
+ * workflow context, recalled episodes, tool output, and provider errors stay
+ * out of the event entirely.
+ */
+function sanitizeAgentReasoningText(value: string, maxChars: number): string {
+  return scrubOperatorGuidanceSecrets(value)
+    .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxChars);
+}
+
 async function runAgentLoop(ctx: NodeContext, agentConfig: AgentNodeConfig, eventPrefix = "agent") {
   const planner = agentConfig.planner ?? "rules";
   const maxSteps = agentConfig.maxSteps ?? 3;
@@ -194,13 +224,14 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: AgentNodeConfig, even
   // rules planner ignores memory) — skip the embedding call otherwise. Empty
   // when memory is off / the episodic kind is disallowed, so the prompt is then
   // byte-for-byte today's.
-  const episodicBlock = planner === "openai"
-    ? (await recallAgentEpisodes({
+  const episodicRecall = planner === "openai" && llm
+    ? await recallAgentEpisodes({
         orgId: ctx.orgId,
         workflowId: ctx.workflowId ?? undefined,
+        runId: ctx.runId,
         goal: agentConfig.goal ?? "",
-      })).block
-    : "";
+      })
+    : { block: "", count: 0, fingerprints: [] };
 
   await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.started`, {
     name: agentConfig.name,
@@ -216,6 +247,7 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: AgentNodeConfig, even
   const steps: AgentLoopStepRecord[] = [];
   let lastResult: unknown = null;
   let lastReflection: AgentReflection | null = null;
+  let memoryInfluenceEmitted = false;
 
   for (let i = 0; i < maxSteps; i++) {
     await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.step.started`, { agent: agentConfig.name, iteration: i });
@@ -227,10 +259,36 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: AgentNodeConfig, even
           runId: ctx.runId,
           nodeId: ctx.nodeId,
           workflowId: ctx.workflowId ?? undefined,
-        }, episodicBlock)
+        }, episodicRecall.block, { dryRun: ctx.dryRun })
       : planAgentTool(agentConfig, planningContext);
 
-    await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.step.planned`, { agent: agentConfig.name, iteration: i, plan });
+    if (!memoryInfluenceEmitted && episodicRecall.count > 0 && plan.mode === "ai") {
+      await appendEvent(ctx.runId, ctx.nodeId, "agent.memory.recalled", {
+        count: episodicRecall.count,
+        fingerprints: episodicRecall.fingerprints,
+      });
+      memoryInfluenceEmitted = true;
+    }
+
+    const plannedEventId = await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.step.planned`, { agent: agentConfig.name, iteration: i, plan });
+    const reasoningEvent: AgentReasoningEventPayload = {
+      agent: sanitizeAgentReasoningText(
+        agentConfig.name ?? "agent",
+        AGENT_REASONING_AGENT_MAX_CHARS,
+      ) || "agent",
+      iteration: i,
+      planner,
+      mode: planner === "rules" ? "rules" : (plan.mode ?? "fallback"),
+      scope: sanitizeAgentReasoningText(eventPrefix, AGENT_REASONING_SCOPE_MAX_CHARS) || "agent",
+      replacesEventId: plannedEventId,
+      decision: plan.done ? "finish" : "use_tool",
+      tool: plan.done
+        ? null
+        : sanitizeAgentReasoningText(plan.tool, AGENT_REASONING_TOOL_MAX_CHARS) || "unknown",
+      reason: sanitizeAgentReasoningText(plan.reason, AGENT_REASONING_REASON_MAX_CHARS)
+        || "Planner did not provide an operational rationale.",
+    };
+    await appendEvent(ctx.runId, ctx.nodeId, "agent.reasoning", reasoningEvent);
 
     if (plan.done) {
       await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.completed`, {
@@ -286,22 +344,18 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: AgentNodeConfig, even
     });
 
     const result = await withTimeout(
-      executeTool(
-        plan.tool,
+      executeToolForRun({
+        tool: plan.tool,
         toolInput,
-        ctx.context,
-        {
-          orgId: ctx.orgId,
-          runId: ctx.runId,
-          nodeId: ctx.nodeId,
-          workflowId: ctx.workflowId ?? undefined,
-          email: orgConfig.email,
-          integrations: orgConfig.integrations,
-          objectstore: orgConfig.objectstore,
-        },
-      ),
+        context: ctx.context,
+        orgConfig,
+        orgId: ctx.orgId,
+        runId: ctx.runId,
+        nodeId: ctx.nodeId,
+        workflowId: ctx.workflowId ?? undefined,
+      }),
       agentConfig.timeoutMs,
-      `${agentConfig.name ?? "agent"}.${plan.tool}`
+      { label: `${agentConfig.name ?? "agent"}.${plan.tool}` }
     );
 
     await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.tool.completed`, {
@@ -362,7 +416,18 @@ function safeOutcome(value: unknown): string {
   }
 }
 
-function buildAgentConfig(ctx: NodeContext, agent: any, index: number, sharedContext: any, results: any[]) {
+async function buildAgentConfig(ctx: NodeContext, agent: any, index: number, sharedContext: any, results: any[]) {
+  const goal = renderTemplateWithRedactions(
+    agent.goal ?? ctx.config.goal ?? "Complete the task",
+    {
+      context: sharedContext,
+      previousAgents: results,
+    },
+  );
+
+  mergeLateBoundRedactions(ctx, goal.redactedValues);
+  await enforceLateBoundTemplatePolicy(ctx, goal.unresolvedPaths);
+
   return {
     ...agent,
     name: agent.name ?? `agent_${index + 1}`,
@@ -370,10 +435,7 @@ function buildAgentConfig(ctx: NodeContext, agent: any, index: number, sharedCon
     maxSteps: agent.maxSteps ?? ctx.config.maxSteps ?? 2,
     timeoutMs: agent.timeoutMs ?? ctx.config.timeoutMs,
     reflection: agent.reflection ?? ctx.config.reflection ?? true,
-    goal: mapInput(agent.goal ?? ctx.config.goal ?? "Complete the task", {
-      context: sharedContext,
-      previousAgents: results,
-    }),
+    goal: goal.rendered,
   };
 }
 
@@ -434,7 +496,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
         // Drain the stream so the socket releases — `streamBoundedBody`'s
         // cancel path aborts the shared controller cleanly.
         try { await streaming.body.cancel(); } catch { /* best effort */ }
-        throw new Error(`HTTP failed: ${streaming.statusCode}`);
+        throw new HttpResponseError(streaming.statusCode);
       }
       const { preview, originalBytes, truncated } = await consumeStreamToPreview(streaming.body, previewCap);
       return {
@@ -461,8 +523,16 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
       maxRedirects: resolvedMaxRedirects,
     });
 
-    if (!result.ok) throw new Error(`HTTP failed: ${result.statusCode}`);
-    return { status: "completed", output: { statusCode: result.statusCode, ok: result.ok, body: result.body } };
+    if (!result.ok) throw new HttpResponseError(result.statusCode);
+    return {
+      status: "completed",
+      output: {
+        statusCode: result.statusCode,
+        ok: result.ok,
+        body: result.body,
+        ...projectHttpJson(result.body, result.headers),
+      },
+    };
   },
 
   condition: async (ctx) => {
@@ -476,34 +546,17 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
     return { status: "completed", output };
   },
 
-  loop: async (ctx) => {
-    const rawItems = mapInput(ctx.config.items, { context: ctx.context, inputs: ctx.config });
-    const items = Array.isArray(rawItems) ? rawItems : typeof rawItems === "string" ? rawItems.split(",").map(item => item.trim()).filter(Boolean) : [];
-    const results = items.map((item, index) => mapInput(ctx.config.mapping ?? { item: "{{item}}", index: "{{index}}" }, { context: ctx.context, inputs: ctx.config, item, index }));
-    await appendEvent(ctx.runId, ctx.nodeId, "loop.completed", { count: results.length, items: results });
-    return { status: "completed", output: { count: results.length, items: results } };
-  },
+  loop: executeLoop,
 
   tool: async (ctx) => {
     const { tool, input } = ctx.config;
     const mappedInput = mapInput(input, { context: ctx.context, inputs: ctx.config });
-    const tenantAwareTools = new Set([
-      "http.request",
-      "email.send",
-      "slack.post",
-      "github.create_issue",
-      "github.add_issue_comment",
-      "webhook.send",
-      "db.schema.describe",
-      "db.query.read",
-      "db.query.write",
-      "db.query.transaction",
-    ]);
-    const orgConfig = tenantAwareTools.has(tool)
-      ? await getOrgConfigSnapshot(ctx.orgId)
-      : null;
+    // One cached snapshot feeds every tool node. Keeping a name allowlist
+    // here let newly registered tools (for example pdf.generate) silently
+    // fall back to process defaults instead of their tenant configuration.
+    const orgConfig = await getOrgConfigSnapshot(ctx.orgId);
     const toolInput = tool === "http.request"
-      ? withHttpToolDefaults(tool, mappedInput, orgConfig!)
+      ? withHttpToolDefaults(tool, mappedInput, orgConfig)
       : mappedInput;
 
     // In sandbox/validation mode, skip write-side tool invocations.
@@ -518,14 +571,15 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
     }
 
     await appendEvent(ctx.runId, ctx.nodeId, "tool.started", { tool, input: toolInput });
-    const result = await executeTool(tool, toolInput, ctx.context, {
+    const result = await executeToolForRun({
+      tool,
+      toolInput,
+      context: ctx.context,
+      orgConfig,
       orgId: ctx.orgId,
       runId: ctx.runId,
       nodeId: ctx.nodeId,
       workflowId: ctx.workflowId ?? undefined,
-      email: orgConfig?.email,
-      integrations: orgConfig?.integrations,
-      objectstore: orgConfig?.objectstore,
     });
     await appendEvent(ctx.runId, ctx.nodeId, "tool.completed", { tool, result });
     return { status: "completed", output: { tool, result } };
@@ -549,7 +603,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
     if (mode === "parallel") {
       const parallelResults = await Promise.allSettled(
         agents.map(async (agent: any, index: number) => {
-          const agentConfig = buildAgentConfig(ctx, agent, index, sharedContext, results);
+          const agentConfig = await buildAgentConfig(ctx, agent, index, sharedContext, results);
 
           await appendEvent(ctx.runId, ctx.nodeId, "multi_agent.agent.started", {
             index,
@@ -583,7 +637,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
       }
     } else {
       for (const [index, agent] of agents.entries()) {
-        const agentConfig = buildAgentConfig(ctx, agent, index, sharedContext, results);
+        const agentConfig = await buildAgentConfig(ctx, agent, index, sharedContext, results);
 
         await appendEvent(ctx.runId, ctx.nodeId, "multi_agent.agent.started", {
           index,
@@ -797,10 +851,15 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   // mostly lets the UI/API point at the waiting node. `human_form` below uses
   // an HMAC-signed token because form links can leave the app context and
   // carry user-submitted data that becomes node output.
-  webhook: async (ctx) => ({ status: "waiting", reason: "Waiting for external webhook resume", metadata: { resumeToken: `${ctx.runId}:${ctx.nodeId}` } }),
-  approval: async (ctx) => ({ status: "waiting", reason: "Waiting for human approval", metadata: { resumeToken: `${ctx.runId}:${ctx.nodeId}` } }),
+  webhook: async (ctx) => ({
+    status: "waiting",
+    reason: "Waiting for external webhook resume",
+    metadata: { kind: "webhook", resumeToken: `${ctx.runId}:${ctx.nodeId}` },
+  }),
+  approval: approvalExecutor,
   human_form: async (ctx) => {
     const schema = WorkflowInputSchema.parse(ctx.config.schema);
+    const orgConfig = await getOrgConfigSnapshot(ctx.orgId);
     const title = typeof ctx.config.title === "string" && ctx.config.title.trim()
       ? ctx.config.title.trim()
       : "Human input required";
@@ -815,7 +874,10 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
         title,
         description,
         schema,
-        resumeToken: signResumeToken({ orgId: ctx.orgId, runId: ctx.runId, nodeId: ctx.nodeId, purpose: "human_form" }),
+        resumeToken: signResumeToken(
+          { orgId: ctx.orgId, runId: ctx.runId, nodeId: ctx.nodeId, purpose: "human_form" },
+          { ttlSeconds: orgConfig.runs.humanFormResumeTtlSeconds },
+        ),
       },
     };
   },

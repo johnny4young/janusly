@@ -10,24 +10,21 @@
  * - Event-type strings are part of the cross-process contract. Renaming any
  *   string here means updating the web consumers (`MultiAgentTimeline.tsx`,
  *   `eventUtils.ts`) and any downstream analytics that filter on them.
+ * - Every member must have a matching `runEvents.<type>` label in the web i18n
+ *   catalog (both `en` and `es`); `server-events.test.ts` asserts this union is
+ *   fully covered so no lifecycle event renders as a raw type string.
+ * - Most members are emitted via `workflowEvent()` from `core/runtime.ts`, but
+ *   the run-level ones (`run.*`) and `node.resumed` are appended directly via
+ *   `appendEvent()` in `start-run.ts` / `persistence.ts` / `resume-run.ts`.
  */
 
 import type { WorkflowEvent } from "./types";
 
-/** Closed enum of event types the runtime emits to `run_events`. */
-export type WorkflowEventType =
-  | "node.queued"
-  | "node.running"
-  | "node.retry"
-  | "node.waiting"
-  | "node.succeeded"
-  | "node.failed"
-  | "node.skipped"
-  | "decision.made"
-  | "improvement.evaluated"
-  | "rollback.triggered"
-  | "rollback.completed"
-  | "run.status_checked";
+// The catalogue + union live in `@janusly/shared` (zero-dep) so the web can
+// reference the same source of truth without depending on the engine. Re-export
+// here so engine-internal consumers keep importing from `./events`.
+export { WORKFLOW_EVENT_TYPES, type WorkflowEventType } from "@janusly/shared/src/run-events";
+import type { WorkflowEventType } from "@janusly/shared/src/run-events";
 
 /** Build a `WorkflowEvent` with a fresh timestamp and defaulted `payload`. */
 export function workflowEvent(input: {

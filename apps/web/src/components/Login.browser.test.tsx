@@ -13,9 +13,8 @@
  * exercised end-to-end in a real Chromium browser, not just a hook test.
  */
 
-import React from 'react'
 import { describe, expect, it } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Login } from './Login'
 import { initI18n } from '../i18n'
 
@@ -45,7 +44,9 @@ describe('<Login /> + LocaleSwitcher (browser smoke)', () => {
     const select = await screen.findByLabelText(/change language|cambiar idioma/i)
     fireEvent.change(select, { target: { value: 'es' } })
 
-    expect(window.localStorage.getItem('janusly:locale')).toBe('es')
+    await waitFor(() => {
+      expect(window.localStorage.getItem('janusly:locale')).toBe('es')
+    })
   })
 
   it('survives a simulated refresh (initI18n re-read of storage)', async () => {
@@ -53,7 +54,9 @@ describe('<Login /> + LocaleSwitcher (browser smoke)', () => {
     const { unmount } = render(<Login onAuthenticated={() => undefined} />)
     const select = await screen.findByLabelText(/change language|cambiar idioma/i)
     fireEvent.change(select, { target: { value: 'es' } })
-    expect(window.localStorage.getItem('janusly:locale')).toBe('es')
+    await waitFor(() => {
+      expect(window.localStorage.getItem('janusly:locale')).toBe('es')
+    })
     unmount()
 
     // Simulate refresh — this is what `main.tsx` does at boot.

@@ -29,10 +29,58 @@
 import { create } from 'zustand'
 import type { Connection, OnEdgesChange, OnNodesChange } from '@xyflow/react'
 import type { Session, User } from '@supabase/supabase-js'
-import type { ActiveTab, JsonObject, RunEvent, RunNode, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
+import type { ActiveTab, JsonObject, RunEvent, RunNode, RunSummary, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
 import type { OnboardingState } from '@janusly/shared/src/onboarding'
 import { getNodePreset } from './constants'
 import { t } from './i18n/runtime'
+import { workflowToGraph } from './canvas-projections'
+
+/**
+ * Build the config for an explicit step-kind change.
+ *
+ * The transition starts from the localized target preset, keeps only valid
+ * runtime-wide retry/timeout controls, and drops source-kind fields. MCP calls
+ * cap timeout at 120 seconds, so a larger source value cannot cross the seam.
+ */
+function getNodeTypeChangeConfig(type: string, previous: JsonObject): JsonObject {
+  const next = getNodePreset(type)
+  const retry = sanitizeRetryPolicy(previous.retry)
+  if (retry) next.retry = retry
+
+  const timeoutMs = previous.timeoutMs
+  if (
+    typeof timeoutMs === 'number'
+    && Number.isFinite(timeoutMs)
+    && Number.isInteger(timeoutMs)
+    && timeoutMs > 0
+    && (type !== 'mcp_tool' || timeoutMs <= 120_000)
+  ) next.timeoutMs = timeoutMs
+
+  return next
+}
+
+/** Copy only the closed, runtime-supported subset of a serialized retry policy. */
+function sanitizeRetryPolicy(value: unknown): JsonObject | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null
+  const source = value as Record<string, unknown>
+  const retry: JsonObject = {}
+
+  if (typeof source.maxAttempts === 'number' && Number.isInteger(source.maxAttempts) && source.maxAttempts > 0) {
+    retry.maxAttempts = source.maxAttempts
+  }
+  for (const key of ['delayMs', 'maxDelayMs'] as const) {
+    const candidate = source[key]
+    if (typeof candidate === 'number' && Number.isFinite(candidate) && candidate >= 0) retry[key] = candidate
+  }
+  if (source.backoff === 'fixed' || source.backoff === 'exponential') retry.backoff = source.backoff
+  if (typeof source.jitter === 'boolean') retry.jitter = source.jitter
+  for (const key of ['retryOn', 'ignoreOn'] as const) {
+    const candidate = source[key]
+    if (Array.isArray(candidate) && candidate.every((entry) => typeof entry === 'string')) retry[key] = [...candidate]
+  }
+
+  return Object.keys(retry).length > 0 ? retry : null
+}
 
 /**
  * React Flow's change-appliers, registered lazily by `CanvasWorkspace` when
@@ -48,6 +96,17 @@ type FlowOps = Pick<typeof import('@xyflow/react'), 'applyNodeChanges' | 'applyE
 let flowOps: FlowOps | null = null
 export function registerFlowOps(ops: FlowOps): void {
   flowOps = ops
+}
+
+type NodePlacementResolver = () => { x: number; y: number } | null
+let nodePlacementResolver: NodePlacementResolver | null = null
+
+/** Register a lazy-canvas placement resolver without importing React Flow here. */
+export function registerNodePlacementResolver(resolver: NodePlacementResolver): () => void {
+  nodePlacementResolver = resolver
+  return () => {
+    if (nodePlacementResolver === resolver) nodePlacementResolver = null
+  }
 }
 
 type StreamStatus = 'idle' | 'connecting' | 'connected' | 'closed' | 'error'
@@ -85,16 +144,35 @@ type WorkflowStore = {
    * never-saved workflow doesn't 404 the health/metadata endpoints on load.
    */
   currentWorkflowSaved: boolean
+  /**
+   * Whether the canvas holds semantic edits not yet persisted as a workflow
+   * version. False for the untouched sample and right after hydrate/new/save;
+   * true after any persisted node/edge/config/name/layout mutation. Drives the unsaved-work guards
+   * (confirm-before-replace, beforeunload) and the local draft autosave.
+   */
+  workflowDirty: boolean
+  /** Monotonic semantic-workflow revision. Canvas position/selection changes
+   * never increment it; authoring checks use it to invalidate stale findings. */
+  workflowRevision: number
   /** Declared input shape — surfaced in the Inspector + validated at run start. */
   currentWorkflowInputs: WorkflowDefinition['inputs']
   /** Declared output projection map — engine renders templates at terminal status. */
   currentWorkflowOutputs: WorkflowDefinition['outputs']
+  /** Opt-in strict handling for unresolved node-config templates. */
+  currentWorkflowTemplatePolicy: WorkflowDefinition['templatePolicy']
   nodes: WorkflowGraphNode[]
   edges: WorkflowGraphEdge[]
   selectedNodeId: string | null
   selectedEdgeId: string | null
 
   runId: string | null
+  /** Monotonic ownership generation for async run requests. Any identity,
+   *  workflow, or active-run transition increments it atomically with the
+   *  associated reset so late responses can fail closed. */
+  runTransitionGeneration: number
+  /** Full detail for the selected run. Unlike `/runs`, this preserves the
+   *  immutable input snapshot used by the observation canvas. */
+  runDetail: RunSummary | null
   runNodes: RunNode[]
   events: RunEvent[]
   eventsCursor: string | null
@@ -108,21 +186,28 @@ type WorkflowStore = {
    *  AI Studio top-of-canvas BudgetBlockedBanner reads this slot; the
    *  api() wrapper sets it on every 402; clearBudgetBlocked() unsets. */
   budgetBlocked: BudgetBlockedEnvelope | null
-  /** Latest "first recovered run" onboarding snapshot. The OnboardingBanner
-   *  overlay self-fetches `/onboarding` on mount + every platformVersion bump
+  /** Latest "first recovered run" onboarding snapshot. The contextual
+   *  OnboardingBanner self-fetches `/onboarding` on mount + every platformVersion bump
    *  and stores the result here; renders only while `status === 'active'`. */
   onboarding: OnboardingState | null
+  /** Session-only Recovery Center walkthrough dismissal. Fresh workspaces do
+   *  not persist this preference until they have real terminal history. */
+  recoveryIntroDismissedThisSession: boolean
 
   setAuth: (payload: { session: Session | null; user: User | null; userId: string | null; orgId: string | null }) => void
   clearAuth: () => void
   setAuthReady: (ready: boolean) => void
+  dismissRecoveryIntroThisSession: () => void
 
-  addNode: (type: string) => void
-  hydrateWorkflow: (workflow: WorkflowDefinition) => void
+  addNode: (type: string, position?: { x: number; y: number }) => void
+  duplicateNode: (nodeId: string) => void
+  hydrateWorkflow: (workflow: WorkflowDefinition, options?: { saved?: boolean; dirty?: boolean }) => void
   getWorkflowJson: () => WorkflowDefinition
   newWorkflow: () => void
   /** Mark the current workflow as persisted server-side (after a successful save). */
   markWorkflowSaved: () => void
+  /** Force the dirty flag on — used after restoring a local draft (the restored content isn't server-side). */
+  markWorkflowDirty: () => void
   setWorkflowName: (name: string) => void
   setNodes: (nodes: WorkflowGraphNode[]) => void
   setEdges: (edges: WorkflowGraphEdge[]) => void
@@ -133,9 +218,14 @@ type WorkflowStore = {
   selectEdge: (id: string | null) => void
   updateSelectedNodeConfig: (config: JsonObject) => void
   updateSelectedNodeType: (type: string) => void
+  updateNodeLabel: (nodeId: string, label: string) => void
+  updateWorkflowInputs: (inputs: WorkflowDefinition['inputs']) => void
+  updateWorkflowOutputs: (outputs: WorkflowDefinition['outputs']) => void
+  updateWorkflowTemplatePolicy: (policy: WorkflowDefinition['templatePolicy']) => void
   updateEdgeCondition: (id: string, condition: string | null) => void
 
   setRunId: (id: string | null) => void
+  setRunDetail: (run: RunSummary | null) => void
   setRunNodes: (nodes: RunNode[]) => void
   mergeRunNode: (node: RunNode) => void
   addEvents: (events: RunEvent[]) => void
@@ -176,7 +266,7 @@ const TOAST_TTL_ERROR_MS = 6000
 const ACTIVE_TAB_KEY = 'janusly:activeTab'
 const PERSISTED_TABS: readonly ActiveTab[] = [
   'home', 'workflows', 'members', 'copilot', 'marketplace', 'templates',
-  'packs', 'credentials', 'inspector', 'runs', 'reasoning', 'multiAgent', 'operations',
+  'packs', 'credentials', 'inspector', 'runs', 'reasoning', 'multiAgent', 'operations', 'experiments',
 ]
 function readStoredActiveTab(): ActiveTab {
   try {
@@ -199,11 +289,29 @@ function persistActiveTab(tab: ActiveTab): void {
 // re-evaluates through the i18n runtime on locale toggles. Leaving
 // the field empty lets the OR-fallback (`data.label || ...`) kick in.
 const initialNodes: WorkflowGraphNode[] = [
-  { id: '1', position: { x: 0, y: 0 }, data: { label: '', type: 'http', config: { url: 'https://api.github.com' } } },
-  { id: '2', position: { x: 260, y: 90 }, data: { label: '', type: 'multi_agent', config: getNodePreset('multi_agent') } },
+  { id: 'fetch', position: { x: 0, y: 0 }, data: { label: '', type: 'http', config: { url: 'https://api.github.com' } } },
+  { id: 'check', position: { x: 280, y: 90 }, data: { label: '', type: 'condition', config: { expression: 'context.fetch.output.statusCode === 200' } } },
+  { id: 'approve', position: { x: 560, y: 180 }, data: { label: '', type: 'approval', config: getNodePreset('approval') } },
 ]
 
-const initialEdges: WorkflowGraphEdge[] = [{ id: 'e1-2', source: '1', target: '2', data: {} }]
+const initialEdges: WorkflowGraphEdge[] = [
+  { id: 'e-fetch-check', source: 'fetch', target: 'check', data: {} },
+  { id: 'e-check-approve', source: 'check', target: 'approve', data: { condition: 'context.check.output.result === true' } },
+]
+
+function clearedRunProjection(runTransitionGeneration: number) {
+  return {
+    runId: null,
+    runTransitionGeneration: runTransitionGeneration + 1,
+    runDetail: null,
+    runNodes: [],
+    events: [],
+    eventsCursor: null,
+    eventsHasMore: false,
+    streamStatus: 'idle' as const,
+    streamTransport: 'idle' as const,
+  }
+}
 
 function graphToWorkflow(
   id: string,
@@ -212,6 +320,7 @@ function graphToWorkflow(
   edges: WorkflowGraphEdge[],
   inputs: WorkflowDefinition['inputs'],
   outputs: WorkflowDefinition['outputs'],
+  templatePolicy: WorkflowDefinition['templatePolicy'],
 ): WorkflowDefinition {
   return {
     id,
@@ -219,6 +328,7 @@ function graphToWorkflow(
     nodes: nodes.map((node) => ({
       id: node.id,
       type: node.data.type,
+      ...(node.data.label.trim() ? { label: node.data.label.trim() } : {}),
       config: node.data.config ?? {},
     })),
     edges: edges.map((edge) => ({
@@ -228,6 +338,12 @@ function graphToWorkflow(
     })),
     ...(inputs ? { inputs } : {}),
     ...(outputs ? { outputs } : {}),
+    ...(templatePolicy ? { templatePolicy } : {}),
+    ui: {
+      positions: Object.fromEntries(nodes
+        .filter(node => Number.isFinite(node.position.x) && Number.isFinite(node.position.y))
+        .map(node => [node.id, { x: node.position.x, y: node.position.y }])),
+    },
   }
 }
 
@@ -239,15 +355,20 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   authReady: false,
 
   currentWorkflowId: 'ui-test',
-  currentWorkflowName: t('workflow.sampleName') as string,
+  currentWorkflowName: t('workflow.sampleName'),
   currentWorkflowSaved: false,
+  workflowDirty: false,
+  workflowRevision: 0,
   currentWorkflowInputs: undefined,
   currentWorkflowOutputs: undefined,
+  currentWorkflowTemplatePolicy: undefined,
   nodes: initialNodes,
   edges: initialEdges,
   selectedNodeId: null,
   selectedEdgeId: null,
   runId: null,
+  runTransitionGeneration: 0,
+  runDetail: null,
   runNodes: [],
   events: [],
   eventsCursor: null,
@@ -263,17 +384,41 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   platformVersion: 0,
   budgetBlocked: null,
   onboarding: null,
+  recoveryIntroDismissedThisSession: false,
 
-  setAuth: ({ session, user, userId, orgId }) => set({ session, user, userId, orgId, authReady: true }),
-  clearAuth: () => set({ session: null, user: null, userId: null, orgId: null, authReady: true }),
+  setAuth: ({ session, user, userId, orgId }) => set((state) => ({
+    session,
+    user,
+    userId,
+    orgId,
+    authReady: true,
+    ...(state.userId !== userId || state.orgId !== orgId
+      ? {
+          ...clearedRunProjection(state.runTransitionGeneration),
+          recoveryIntroDismissedThisSession: false,
+        }
+      : {}),
+  })),
+  clearAuth: () => set((state) => ({
+    session: null,
+    user: null,
+    userId: null,
+    orgId: null,
+    authReady: true,
+    recoveryIntroDismissedThisSession: false,
+    ...clearedRunProjection(state.runTransitionGeneration),
+  })),
   setAuthReady: (authReady) => set({ authReady }),
+  dismissRecoveryIntroThisSession: () => set({ recoveryIntroDismissedThisSession: true }),
 
-  addNode: (type) => {
+  addNode: (type, position) => {
     const id = crypto.randomUUID().slice(0, 8)
     set((state) => ({
+      workflowDirty: true,
+      workflowRevision: state.workflowRevision + 1,
       nodes: state.nodes.concat({
         id,
-        position: { x: 120 + state.nodes.length * 80, y: 120 + state.nodes.length * 40 },
+        position: position ?? nodePlacementResolver?.() ?? { x: 120 + state.nodes.length * 80, y: 120 + state.nodes.length * 40 },
         // Leave `data.label` empty so the canvas component resolves the
         // human label via `getNodeLabel(type)` at render time.
         data: { label: '', type, config: getNodePreset(type) },
@@ -281,40 +426,52 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     }))
   },
 
-  hydrateWorkflow: (workflow) => {
-    set({
-      currentWorkflowId: workflow.id ?? 'ui-test',
-      currentWorkflowName: workflow.name ?? workflow.id ?? (t('workflow.defaultName') as string),
-      currentWorkflowSaved: true,
-      currentWorkflowInputs: workflow.inputs,
-      currentWorkflowOutputs: workflow.outputs,
-      nodes: (workflow.nodes ?? []).map((node, index) => ({
-        id: node.id,
-        position: { x: 80 + index * 230, y: 80 + (index % 3) * 120 },
-        // `data.label` stays empty; `WorkflowStepNode` resolves the
-        // human label via `getNodeLabel(type)` so a locale toggle
-        // re-renders the leaf without re-projecting the full graph.
-        data: { label: '', type: node.type, config: node.config ?? {} },
-      })),
-      edges: (workflow.edges ?? []).map((edge, index) => ({
-        id: `e${index}`,
-        source: edge.from,
-        target: edge.to,
-        label: edge.condition ? 'condition' : undefined,
-        animated: Boolean(edge.condition),
-        data: { condition: edge.condition },
-      })),
-      selectedNodeId: null,
-      selectedEdgeId: null,
-      events: [],
-      eventsCursor: null,
-      eventsHasMore: false,
-      runNodes: [],
-      runId: null,
+  duplicateNode: (nodeId) => {
+    const id = crypto.randomUUID().slice(0, 8)
+    set((state) => {
+      const source = state.nodes.find((node) => node.id === nodeId)
+      if (!source) return state
+      return {
+        workflowDirty: true,
+        workflowRevision: state.workflowRevision + 1,
+        selectedNodeId: id,
+        selectedEdgeId: null,
+        nodes: state.nodes.concat({
+          id,
+          type: source.type,
+          position: { x: source.position.x + 32, y: source.position.y + 32 },
+          data: {
+            ...source.data,
+            config: structuredClone(source.data.config),
+          },
+        }),
+      }
     })
   },
 
-  markWorkflowSaved: () => set({ currentWorkflowSaved: true }),
+  hydrateWorkflow: (workflow, options) => {
+    const saved = options?.saved ?? true
+    const dirty = options?.dirty ?? false
+    const graph = workflowToGraph(workflow)
+    set((state) => ({
+      currentWorkflowId: workflow.id ?? 'ui-test',
+      currentWorkflowName: workflow.name ?? workflow.id ?? (t('workflow.defaultName')),
+      currentWorkflowSaved: saved,
+      workflowDirty: dirty,
+      currentWorkflowInputs: workflow.inputs,
+      currentWorkflowOutputs: workflow.outputs,
+      currentWorkflowTemplatePolicy: workflow.templatePolicy,
+      nodes: graph.nodes,
+      edges: graph.edges,
+      selectedNodeId: null,
+      selectedEdgeId: null,
+      ...clearedRunProjection(state.runTransitionGeneration),
+      workflowRevision: state.workflowRevision + 1,
+    }))
+  },
+
+  markWorkflowSaved: () => set({ currentWorkflowSaved: true, workflowDirty: false }),
+  markWorkflowDirty: () => set({ workflowDirty: true }),
 
   getWorkflowJson: () => {
     const state = get()
@@ -325,36 +482,60 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       state.edges,
       state.currentWorkflowInputs,
       state.currentWorkflowOutputs,
+      state.currentWorkflowTemplatePolicy,
     )
   },
 
   newWorkflow: () => {
     const id = `workflow_${crypto.randomUUID().slice(0, 8)}`
-    set({
+    set((state) => ({
       currentWorkflowId: id,
-      currentWorkflowName: t('workflow.defaultName') as string,
+      currentWorkflowName: t('workflow.defaultName'),
       currentWorkflowSaved: false,
+      workflowDirty: false,
       currentWorkflowInputs: undefined,
       currentWorkflowOutputs: undefined,
+      currentWorkflowTemplatePolicy: undefined,
       nodes: [],
       edges: [],
       selectedNodeId: null,
       selectedEdgeId: null,
-      events: [],
-      eventsCursor: null,
-      eventsHasMore: false,
-      runNodes: [],
-      runId: null,
+      ...clearedRunProjection(state.runTransitionGeneration),
       activeTab: 'copilot',
-    })
+      workflowRevision: state.workflowRevision + 1,
+    }))
   },
 
-  setWorkflowName: (currentWorkflowName) => set({ currentWorkflowName }),
-  setNodes: (nodes) => set({ nodes }),
-  setEdges: (edges) => set({ edges }),
-  onNodesChange: (changes) => set((state) => (flowOps ? { nodes: flowOps.applyNodeChanges(changes, state.nodes) } : state)),
-  onEdgesChange: (changes) => set((state) => (flowOps ? { edges: flowOps.applyEdgeChanges(changes, state.edges) } : state)),
-  connect: (connection) => set((state) => (flowOps ? { edges: flowOps.addEdge({ ...connection, data: {} }, state.edges) } : state)),
+  setWorkflowName: (currentWorkflowName) => set((state) => ({ currentWorkflowName, workflowDirty: true, workflowRevision: state.workflowRevision + 1 })),
+  setNodes: (nodes) => set((state) => ({ nodes, workflowDirty: true, workflowRevision: state.workflowRevision + 1 })),
+  setEdges: (edges) => set((state) => ({ edges, workflowDirty: true, workflowRevision: state.workflowRevision + 1 })),
+  // A completed position change is persisted and marks the draft dirty, but it
+  // does not invalidate semantic readiness/AI findings. Removal does both.
+  onNodesChange: (changes) => set((state) => (flowOps
+    ? {
+        nodes: flowOps.applyNodeChanges(changes, state.nodes),
+        ...(changes.some((c) => c.type === 'remove')
+          ? { workflowDirty: true, workflowRevision: state.workflowRevision + 1 }
+          : changes.some((c) => c.type === 'position' && c.dragging !== true)
+            ? { workflowDirty: true }
+          : {}),
+      }
+    : state)),
+  onEdgesChange: (changes) => set((state) => (flowOps
+    ? {
+        edges: flowOps.applyEdgeChanges(changes, state.edges),
+        ...(changes.some((c) => c.type === 'remove')
+          ? { workflowDirty: true, workflowRevision: state.workflowRevision + 1 }
+          : {}),
+      }
+    : state)),
+  connect: (connection) => set((state) => (flowOps
+    ? {
+        edges: flowOps.addEdge({ ...connection, data: {} }, state.edges),
+        workflowDirty: true,
+        workflowRevision: state.workflowRevision + 1,
+      }
+    : state)),
 
   selectNode: (id) => set({ selectedNodeId: id, selectedEdgeId: null }),
   selectEdge: (id) => set({ selectedEdgeId: id, selectedNodeId: null }),
@@ -363,6 +544,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     const selectedNodeId = get().selectedNodeId
     if (!selectedNodeId) return
     set((state) => ({
+      workflowDirty: true,
+      workflowRevision: state.workflowRevision + 1,
       nodes: state.nodes.map((node) => node.id === selectedNodeId ? { ...node, data: { ...node.data, config } } : node)
     }))
   },
@@ -370,16 +553,54 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   updateSelectedNodeType: (type) => {
     const selectedNodeId = get().selectedNodeId
     if (!selectedNodeId) return
-    set((state) => ({
-      nodes: state.nodes.map((node) => node.id === selectedNodeId
-        // Same as `addNode` / `hydrateWorkflow`: leave `data.label`
-        // empty so the canvas resolves it via `getNodeLabel(type)`.
-        ? { ...node, data: { label: '', type, config: getNodePreset(type) } }
-        : node)
-    }))
+    set((state) => {
+      const selectedNode = state.nodes.find((node) => node.id === selectedNodeId)
+      if (!selectedNode || selectedNode.data.type === type) return state
+      return {
+        workflowDirty: true,
+        workflowRevision: state.workflowRevision + 1,
+        nodes: state.nodes.map((node) => node.id === selectedNodeId
+          ? { ...node, data: { ...node.data, type, config: getNodeTypeChangeConfig(type, node.data.config) } }
+          : node),
+      }
+    })
   },
 
+  updateNodeLabel: (nodeId, label) => {
+    set((state) => {
+      const targetNode = state.nodes.find(node => node.id === nodeId)
+      if (!targetNode || targetNode.data.label === label) return state
+      return {
+        workflowDirty: true,
+        workflowRevision: state.workflowRevision + 1,
+        nodes: state.nodes.map(node => node.id === nodeId
+          ? { ...node, data: { ...node.data, label } }
+          : node),
+      }
+    })
+  },
+
+  updateWorkflowInputs: (currentWorkflowInputs) => set((state) => ({
+    currentWorkflowInputs,
+    workflowDirty: true,
+    workflowRevision: state.workflowRevision + 1,
+  })),
+
+  updateWorkflowOutputs: (currentWorkflowOutputs) => set((state) => ({
+    currentWorkflowOutputs,
+    workflowDirty: true,
+    workflowRevision: state.workflowRevision + 1,
+  })),
+
+  updateWorkflowTemplatePolicy: (currentWorkflowTemplatePolicy) => set((state) => ({
+    currentWorkflowTemplatePolicy,
+    workflowDirty: true,
+    workflowRevision: state.workflowRevision + 1,
+  })),
+
   updateEdgeCondition: (id, condition) => set((state) => ({
+    workflowDirty: true,
+    workflowRevision: state.workflowRevision + 1,
     edges: state.edges.map((edge) => edge.id === id
       ? {
           ...edge,
@@ -390,7 +611,10 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       : edge),
   })),
 
-  setRunId: (id) => set({ runId: id }),
+  setRunId: (id) => set((state) => state.runId === id
+    ? { runId: id }
+    : { ...clearedRunProjection(state.runTransitionGeneration), runId: id }),
+  setRunDetail: (runDetail) => set({ runDetail }),
   setRunNodes: (nodes) => set({ runNodes: nodes }),
   mergeRunNode: (incoming) => set((state) => {
     const index = state.runNodes.findIndex((node) => node.nodeId === incoming.nodeId)
@@ -425,7 +649,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   },
   setStreamStatus: (streamStatus) => set({ streamStatus }),
   setStreamTransport: (streamTransport) => set({ streamTransport }),
-  resetRun: () => set({ runId: null, runNodes: [], events: [], eventsCursor: null, eventsHasMore: false, streamStatus: 'idle', streamTransport: 'idle' }),
+  resetRun: () => set((state) => clearedRunProjection(state.runTransitionGeneration)),
   addToast: (message, tone = 'info') => {
     const id = crypto.randomUUID()
     set((state) => ({ toasts: [...state.toasts, { id, message, tone }] }))

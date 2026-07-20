@@ -22,7 +22,7 @@
  * button) and `RecoveryItemDrawer.tsx` (Deliver button in the evidence section).
  */
 
-import React, { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, CheckCircle2, ExternalLink, Send, X } from 'lucide-react'
 import { api } from '../api'
@@ -182,14 +182,14 @@ export function ReportDeliveryDialog({
         // `report.run_explain.delivered` row.
         bumpPlatformVersion()
       } else {
-        const message = result.error ?? (t('reportDelivery.errorDefault') as string)
+        const message = result.error ?? (t('reportDelivery.errorDefault'))
         setStep({ kind: 'failed', message })
       }
     } catch (err) {
       if (!aliveRef.current) return
       setStep({
         kind: 'failed',
-        message: err instanceof Error ? err.message : (t('reportDelivery.errorDefault') as string),
+        message: err instanceof Error ? err.message : (t('reportDelivery.errorDefault')),
       })
     }
   }
@@ -217,7 +217,7 @@ export function ReportDeliveryDialog({
             type="button"
             className="run-input-dialog__close"
             onClick={onBackdrop}
-            aria-label={t('reportDelivery.close') as string}
+            aria-label={t('reportDelivery.close')}
             disabled={step.kind === 'submitting'}
           >
             <X size={16} aria-hidden="true" />
@@ -299,11 +299,11 @@ export function ReportDeliveryDialog({
                     type="text"
                     value={credentialName}
                     onChange={(event) => setCredentialName(event.target.value)}
-                    placeholder={(destination === 'slack'
+                    placeholder={destination === 'slack'
                       ? t('reportDelivery.placeholder.slack')
                       : destination === 'github'
                         ? t('reportDelivery.placeholder.github')
-                        : t('reportDelivery.placeholder.webhook')) as string}
+                        : t('reportDelivery.placeholder.webhook')}
                     autoComplete="off"
                     spellCheck={false}
                     disabled={step.kind === 'submitting'}
@@ -320,7 +320,7 @@ export function ReportDeliveryDialog({
                         type="text"
                         value={owner}
                         onChange={(event) => setOwner(event.target.value)}
-                        placeholder={t('reportDelivery.field.ownerPlaceholder') as string}
+                        placeholder={t('reportDelivery.field.ownerPlaceholder')}
                         autoComplete="off"
                         disabled={step.kind === 'submitting'}
                         data-testid="report-delivery-owner"
@@ -332,7 +332,7 @@ export function ReportDeliveryDialog({
                         type="text"
                         value={repo}
                         onChange={(event) => setRepo(event.target.value)}
-                        placeholder={t('reportDelivery.field.repoPlaceholder') as string}
+                        placeholder={t('reportDelivery.field.repoPlaceholder')}
                         autoComplete="off"
                         disabled={step.kind === 'submitting'}
                         data-testid="report-delivery-repo"
@@ -344,7 +344,7 @@ export function ReportDeliveryDialog({
                         type="text"
                         value={labels}
                         onChange={(event) => setLabels(event.target.value)}
-                        placeholder={t('reportDelivery.field.labelsPlaceholder') as string}
+                        placeholder={t('reportDelivery.field.labelsPlaceholder')}
                         autoComplete="off"
                         disabled={step.kind === 'submitting'}
                         data-testid="report-delivery-labels"
@@ -360,7 +360,7 @@ export function ReportDeliveryDialog({
                       type="url"
                       value={webhookUrl}
                       onChange={(event) => setWebhookUrl(event.target.value)}
-                      placeholder={t('reportDelivery.field.urlPlaceholder') as string}
+                      placeholder={t('reportDelivery.field.urlPlaceholder')}
                       autoComplete="off"
                       disabled={step.kind === 'submitting'}
                       aria-invalid={webhookInvalid}

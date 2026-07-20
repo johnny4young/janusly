@@ -28,8 +28,8 @@
 
 import { db, runs, runNodes, runEvents } from "@janusly/db";
 import type { Workflow } from "@janusly/shared";
-import { enqueueNode } from "../queue";
-import { markNodeQueued, appendEvent, updateRunStatusFromNodes } from "../persistence";
+import { appendEvent, updateRunStatusFromNodes } from "../persistence";
+import { publishInitialNode } from "../initial-node-publication";
 import { safePersistPayload } from "../safe-persist";
 
 const INITIAL_NODE_STATE_MAX_BYTES = 1_000_000;
@@ -81,8 +81,9 @@ function nodesReadyAfterSeededRoots(workflow: Workflow, rootIds: Set<string>): W
 }
 
 /**
- * Write a fresh `runs.replayMode="validation"` row, seed every node as
- * `pending`, then enqueue root nodes. The runtime's `enqueueReadyNodes`
+ * Write a fresh `runs.replayMode="validation"` row, seed root triggers as
+ * succeeded, and commit their immediately-ready successors as durably marked
+ * `queued`. The runtime's `enqueueReadyNodes`
  * cascade picks up downstream nodes as each terminates. Returns the new
  * run id so the caller can poll / stream until terminal status.
  */
@@ -108,6 +109,8 @@ export async function startSandboxRun(args: SandboxRunInput): Promise<{ runId: s
   // dry-run-skipped (validation mode), and approval / human_form gates pause
   // live so the operator sees the human checkpoint.
   const rootIds = rootNodeIds(workflow);
+  const readyNodes = nodesReadyAfterSeededRoots(workflow, rootIds);
+  const readyNodeIds = new Set(readyNodes.map((node) => node.id));
 
   await db.transaction(async (tx) => {
     await tx.insert(runs).values({
@@ -130,15 +133,22 @@ export async function startSandboxRun(args: SandboxRunInput): Promise<{ runId: s
       await tx.insert(runNodes).values(
         workflow.nodes.map((node) => {
           const isRoot = rootIds.has(node.id);
+          const startsQueued = readyNodeIds.has(node.id);
           return {
             id: crypto.randomUUID(),
             runId,
             nodeId: node.id,
-            status: isRoot ? ("succeeded" as const) : ("pending" as const),
+            status: isRoot
+              ? ("succeeded" as const)
+              : startsQueued
+                ? ("queued" as const)
+                : ("pending" as const),
             stateJson: safePersistPayload(isRoot ? { output: seededOutput } : {}, {
               maxBytes: INITIAL_NODE_STATE_MAX_BYTES,
             }),
-            attempts: 0,
+            attempts: startsQueued ? 1 : 0,
+            queuePublicationRepairAfter: startsQueued ? now : null,
+            queuePublicationGeneration: startsQueued ? 1 : 0,
             startedAt: isRoot ? now : null,
             finishedAt: isRoot ? now : null,
             errorJson: null,
@@ -164,16 +174,17 @@ export async function startSandboxRun(args: SandboxRunInput): Promise<{ runId: s
     await appendEvent(runId, rootId, "node.completed", { output: seededOutput, sandboxTrigger: true });
   }
 
-  // Enqueue every pending node whose predecessors are ALL seeded-succeeded
-  // (the direct successors of the roots). The runtime's `enqueueReadyNodes`
+  // Publish every durably queued node whose predecessors are ALL
+  // seeded-succeeded (the direct successors of the roots). The runtime's `enqueueReadyNodes`
   // cascade picks up the rest as each node terminates — the same pattern
   // `replayDeadLetterAsValidation` uses after seeding ancestor state.
-  const readyNodes = nodesReadyAfterSeededRoots(workflow, rootIds);
-
   for (const node of readyNodes) {
-    await markNodeQueued(runId, node.id);
-    await enqueueNode({ runId, nodeId: node.id, attempt: 1 });
-    await appendEvent(runId, node.id, "node.queued", {});
+    await publishInitialNode({
+      runId,
+      nodeId: node.id,
+      attempt: 1,
+      publicationGeneration: 1,
+    });
   }
 
   // Edge case: a workflow with no edges (every node is a root → all seeded

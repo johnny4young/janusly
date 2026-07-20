@@ -66,7 +66,7 @@ export const RECOVERY_ITEM_RESOLUTION_REASONS = [
   'upstream_fixed',
   'accepted_loss',
   'not_a_bug',
-  /** Auto-set by `/dlq/replay` and `/dlq/cluster-apply` on successful replay. */
+  /** Set only after a generation-matched replay reaches terminal node success. */
   'sandbox_replay_succeeded',
 ] as const
 export const RecoveryItemResolutionReasonSchema = z.enum(RECOVERY_ITEM_RESOLUTION_REASONS)

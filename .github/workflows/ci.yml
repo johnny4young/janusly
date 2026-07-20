@@ -16,8 +16,13 @@ permissions:
 
 jobs:
   build_test:
-    name: Build + jsdom test
+    name: Build + jsdom test (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    strategy:
+      # Node 22 LTS is the supported self-host FLOOR (engines >=22.12); 24 is
+      # the dev/prod baseline. Both must stay green or the floor is fiction.
+      matrix:
+        node: [22, 24]
     steps:
       - uses: actions/checkout@v6
 
@@ -28,17 +33,26 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: ${{ matrix.node }}
           cache: pnpm
 
       - name: Install
         run: pnpm install --frozen-lockfile
+
+      - name: Lint (Oxlint)
+        run: pnpm lint
+
+      - name: Check generated API contract
+        run: pnpm contract:check
 
       - name: Build
         run: pnpm build
 
       - name: Test (jsdom)
         run: pnpm test
+
+      - name: Test script utilities
+        run: pnpm test:scripts
 
   test_browser:
     name: Browser tests
@@ -75,6 +89,26 @@ jobs:
 
       - name: Test (browser mode)
         run: pnpm test:browser
+
+      - name: Build production web bundle
+        run: pnpm --filter @janusly/web build
+
+      - name: Enforce bundle budgets
+        run: pnpm bundle-check
+
+      - name: Test route performance budgets
+        env:
+          JANUSLY_PERF_REPORT: artifacts/web-route-performance.json
+        run: pnpm --filter @janusly/web test:performance
+
+      - name: Upload web performance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: web-performance
+          path: artifacts/
+          if-no-files-found: ignore
+          retention-days: 30
 
   test_e2e:
     name: E2E (Compose + Playwright)
@@ -119,6 +153,25 @@ jobs:
           name: playwright-report
           path: apps/web/playwright-report/
           retention-days: 7
+
+  test_compat_pg15:
+    name: Integration lanes on Postgres 15 (oldest supported)
+    runs-on: ubuntu-latest
+    env:
+      # The compose file parametrizes the postgres image; the script owns the
+      # full lifecycle (AGENTS.md: no compose orchestration in workflow YAML).
+      JANUSLY_POSTGRES_IMAGE: pgvector/pgvector:pg15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Integration lanes (real Postgres 15)
+        run: pnpm test:integration
 
   dep_audit:
     name: Dependency audit

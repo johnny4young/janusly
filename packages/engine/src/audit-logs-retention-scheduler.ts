@@ -32,11 +32,10 @@
  *   apply.
  */
 
-import { auditLogs, db } from "@janusly/db";
-import { deleteExpiredAuditLogs } from "@janusly/data";
+import {
+  recordSystemAudit, deleteExpiredAuditLogs } from "@janusly/data";
 
 import { workflowQueue } from "./queue";
-import { safePersistPayload } from "./safe-persist";
 import { validateCronExpression } from "./schedule";
 
 /** Deterministic global id for the BullMQ scheduler. */
@@ -139,20 +138,8 @@ export async function registerAuditLogsRetentionScheduler(
  * log path. Mirrors the inline `writeAudit` helper in
  * `packages/data/src/memoryEntriesRepo.ts`.
  */
-async function writeSystemAudit(action: string, metadata: Record<string, unknown>): Promise<void> {
-  try {
-    await db.insert(auditLogs).values({
-      id: crypto.randomUUID(),
-      orgId: "system",
-      userId: null,
-      action,
-      targetType: null,
-      targetId: null,
-      metadata: safePersistPayload(metadata) as Record<string, unknown>,
-    });
-  } catch (err) {
-    console.warn("[audit-logs-retention] audit write failed", { action, err: err instanceof Error ? err.message : String(err) });
-  }
+function writeSystemAudit(action: string, metadata: Record<string, unknown>): Promise<void> {
+  return recordSystemAudit({ orgId: "system", action, metadata, logTag: "[audit-logs-retention]" });
 }
 
 /**

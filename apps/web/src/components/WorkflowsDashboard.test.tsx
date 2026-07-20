@@ -16,6 +16,8 @@ type Flow = {
   folder?: string | null
   lastRunStatus?: string | null
   runCount?: number
+  bufferedTriggerCount?: number
+  status?: string
   updatedAt?: string
   createdAt?: string
   deletedAt?: string | null
@@ -102,6 +104,43 @@ describe('<WorkflowsDashboard />', () => {
     expect(within(row1).getByText('urgent')).toBeInTheDocument()
     const row2 = screen.getByTestId('workflows-row-wf2')
     expect(within(row2).getByText('onboarding')).toBeInTheDocument()
+  })
+
+  it('drains a remaining buffered page once and removes the action when it reaches zero', async () => {
+    let bufferedTriggerCount = 3
+    let resumeCalls = 0
+    let releaseResume: ((value: { backfilled: number; remaining: number }) => void) | undefined
+    vi.mocked(api).mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/workflows/tags') return { tags: [] }
+      if (url === '/workflows/folders') return { folders: [] }
+      if (url === '/workflows/wf1/resume' && options?.method === 'POST') {
+        resumeCalls += 1
+        return new Promise((resolve) => {
+          releaseResume = (value) => {
+            bufferedTriggerCount = value.remaining
+            resolve(value)
+          }
+        })
+      }
+      return [{
+        id: 'wf1',
+        orgId: 'o',
+        name: 'Billing sync',
+        status: 'active',
+        bufferedTriggerCount,
+      }]
+    })
+
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    const action = await screen.findByTestId('workflows-backfill-wf1')
+    fireEvent.click(action)
+    fireEvent.click(action)
+
+    expect(resumeCalls).toBe(1)
+    expect(action).toBeDisabled()
+
+    await act(async () => releaseResume?.({ backfilled: 3, remaining: 0 }))
+    await waitFor(() => expect(screen.queryByTestId('workflows-backfill-wf1')).not.toBeInTheDocument())
   })
 
   it('populates the add-tag picker from GET /workflows/tags (placeholder + one option per org tag)', async () => {
@@ -416,14 +455,18 @@ describe('<WorkflowsDashboard />', () => {
     })
     render(<WorkflowsDashboard onOpen={() => {}} />)
     const billing = (await screen.findByTestId('workflows-folder-Billing')) as HTMLDetailsElement
-    // Simulate the operator collapsing the section (jsdom doesn't auto-toggle on
-    // summary click, so drive the native open state + toggle event directly).
-    billing.open = false
-    fireEvent(billing, new Event('toggle'))
-    await waitFor(() => {
-      const raw = window.localStorage.getItem(FILTERS_KEY)
-      expect(raw && JSON.parse(raw).collapsedFolders).toContain('Billing')
-    })
+    fireEvent.click(billing.querySelector('summary')!)
+    // The native details element changes before React commits, so persistence
+    // must already be complete when the toggle handler returns. This protects
+    // an immediate browser reload without relying on a deferred effect.
+    const raw = window.localStorage.getItem(FILTERS_KEY)
+    expect(raw && JSON.parse(raw).collapsedFolders).toContain('Billing')
+
+    // A second click may arrive before the browser's asynchronous toggle event;
+    // its intent still wins and clears the persisted collapse.
+    fireEvent.click(billing.querySelector('summary')!)
+    const expandedRaw = window.localStorage.getItem(FILTERS_KEY)
+    expect(expandedRaw && JSON.parse(expandedRaw).collapsedFolders).not.toContain('Billing')
   })
 
   it('keeps the name search narrowing within folder sections', async () => {

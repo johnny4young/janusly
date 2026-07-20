@@ -15,7 +15,7 @@ vi.mock('./queue', () => ({
 import { getRunNodeStatus } from './persistence'
 import { enqueueWaitUntilResume } from './queue'
 import { resumeRun } from './resume-run'
-import { handleWaitResume, resolveWaitUntilDelay } from './wait-until'
+import { handleWaitResume, resolveWaitUntilDelay, waitUntilExecutor } from './wait-until'
 
 const getRunNodeStatusMock = vi.mocked(getRunNodeStatus)
 const enqueueWaitUntilResumeMock = vi.mocked(enqueueWaitUntilResume)
@@ -27,10 +27,10 @@ describe('resolveWaitUntilDelay', () => {
     expect(resolveWaitUntilDelay({ duration: 'P3D' })).toBe(3 * 86_400_000)
   })
 
-  it('rejects empty / missing duration', () => {
-    expect(() => resolveWaitUntilDelay({})).toThrow(/duration is required/)
-    expect(() => resolveWaitUntilDelay(null)).toThrow(/duration is required/)
-    expect(() => resolveWaitUntilDelay({ duration: '' })).toThrow(/duration is required/)
+  it('rejects empty / missing scheduling input', () => {
+    expect(() => resolveWaitUntilDelay({})).toThrow(/requires config.duration or config.until/)
+    expect(() => resolveWaitUntilDelay(null)).toThrow(/requires config.duration or config.until/)
+    expect(() => resolveWaitUntilDelay({ duration: '' })).toThrow(/valid ISO 8601 duration/)
   })
 
   it('rejects malformed durations with a clear error', () => {
@@ -43,6 +43,49 @@ describe('resolveWaitUntilDelay', () => {
     expect(() => resolveWaitUntilDelay({ duration: 'PT0S' })).toThrow(/positive number of milliseconds/)
     expect(() => resolveWaitUntilDelay({ duration: 'P0D' })).toThrow(/positive number of milliseconds/)
     expect(() => resolveWaitUntilDelay({ duration: 'P' })).toThrow(/valid ISO 8601 duration/)
+  })
+
+  it('resolves absolute instants and treats elapsed instants as due now', () => {
+    const now = Date.parse('2026-07-14T12:00:00Z')
+    expect(resolveWaitUntilDelay({ until: '2026-07-14T12:05:00Z' }, now)).toBe(300_000)
+    expect(resolveWaitUntilDelay({ until: '2026-07-14T11:59:00Z' }, now)).toBe(0)
+  })
+})
+
+describe('waitUntilExecutor', () => {
+  it('persists timer kind and wake-up metadata for the run UI', async () => {
+    const before = Date.now()
+    const result = await waitUntilExecutor({
+      runId: 'r1',
+      nodeId: 'pause',
+      orgId: 'org-1',
+      workflowId: null,
+      config: { duration: 'PT1M' },
+      context: {},
+      redactedValues: [],
+    })
+
+    expect(result).toMatchObject({ status: 'waiting', metadata: { kind: 'timer', durationMs: 60_000 } })
+    if (result.status === 'waiting') {
+      expect(Date.parse(String(result.metadata?.wakeAt))).toBeGreaterThanOrEqual(before + 60_000)
+    }
+    expect(enqueueWaitUntilResumeMock).toHaveBeenCalledWith('r1', 'pause', 60_000)
+  })
+
+  it('persists the exact absolute target instead of recalculating it from delay', async () => {
+    const wakeAt = new Date(Date.now() + 60_000).toISOString()
+    const result = await waitUntilExecutor({
+      runId: 'r1',
+      nodeId: 'pause',
+      orgId: 'org-1',
+      workflowId: null,
+      config: { until: wakeAt },
+      context: {},
+      redactedValues: [],
+    })
+
+    expect(result).toMatchObject({ status: 'waiting', metadata: { kind: 'timer', wakeAt, source: 'until' } })
+    expect(enqueueWaitUntilResumeMock).toHaveBeenLastCalledWith('r1', 'pause', expect.any(Number))
   })
 })
 
@@ -68,16 +111,16 @@ describe('handleWaitResume — idempotency guard', () => {
 
     await handleWaitResume({ runId: 'r1', nodeId: 'w1' })
 
-    expect(enqueueWaitUntilResumeMock).toHaveBeenCalledWith('r1', 'w1', 1000, 1)
+    expect(enqueueWaitUntilResumeMock).toHaveBeenCalledWith('r1', 'w1', 1000)
     expect(resumeRunMock).not.toHaveBeenCalled()
   })
 
-  it('caps early wake-up status retries', async () => {
+  it('keeps the durable handoff alive until the node leaves execution', async () => {
     getRunNodeStatusMock.mockResolvedValueOnce('running')
 
     await handleWaitResume({ runId: 'r1', nodeId: 'w1', statusCheckAttempts: 60 })
 
-    expect(enqueueWaitUntilResumeMock).not.toHaveBeenCalled()
+    expect(enqueueWaitUntilResumeMock).toHaveBeenCalledWith('r1', 'w1', 1000)
     expect(resumeRunMock).not.toHaveBeenCalled()
   })
 

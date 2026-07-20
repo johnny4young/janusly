@@ -32,6 +32,7 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof BuilderSidebar>>
     onNew: vi.fn(),
     onStart: vi.fn(),
     onOpenTab: vi.fn(),
+    onOpenHelp: vi.fn(),
     ...overrides,
   }
   render(<BuilderSidebar {...props} />)
@@ -66,5 +67,27 @@ describe('<BuilderSidebar />', () => {
     expect(saveButton).toHaveAttribute('aria-busy', 'false')
     expect(validateButton).not.toBeDisabled()
     expect(runButton).not.toBeDisabled()
+  })
+
+  it('keeps palette steps clickable while exposing a copy drag payload', () => {
+    const props = renderSidebar()
+    const setData = vi.fn()
+    const dataTransfer = { setData, effectAllowed: 'all' } as unknown as DataTransfer
+    const step = screen.getAllByRole('button', { name: 'Call an API' })[0]
+
+    expect(step).toHaveAttribute('draggable', 'true')
+    fireEvent.dragStart(step, { dataTransfer })
+    expect(setData).toHaveBeenCalledWith('application/x-janusly-node-type', 'http')
+    expect(dataTransfer.effectAllowed).toBe('copy')
+
+    fireEvent.click(step)
+    expect(props.onAdd).toHaveBeenCalledWith('http')
+  })
+
+  it('opens real keyboard help and does not render the dead whats-new affordance', () => {
+    const props = renderSidebar()
+    fireEvent.click(screen.getByRole('button', { name: 'Help' }))
+    expect(props.onOpenHelp).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: "What's new" })).not.toBeInTheDocument()
   })
 })

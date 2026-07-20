@@ -19,7 +19,7 @@
  * Used by `App.tsx` (Inspector "Insert snippet…" button + Cmd+K palette).
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Layers, Search, X } from 'lucide-react'
 import {
   BUILTIN_SNIPPET_ID_PREFIX,
@@ -117,18 +117,24 @@ export function SnippetInsertMenu({ open, onClose }: SnippetInsertMenuProps) {
   }, [open, onClose])
 
   /** Resolve the display name (built-ins use i18n; custom use their stored name). */
-  const nameFor = (snippet: SnippetDefinition): string =>
-    snippet.builtin
-      ? (t(`snippets.builtin.${builtinSlug(snippet.id)}.name` as never) as string)
-      : snippet.name
+  const nameFor = useCallback(
+    (snippet: SnippetDefinition): string => snippet.builtin
+      ? (t(`snippets.builtin.${builtinSlug(snippet.id)}.name` as never))
+      : snippet.name,
+    [t],
+  )
 
-  const descriptionFor = (snippet: SnippetDefinition): string =>
-    snippet.builtin
-      ? (t(`snippets.builtin.${builtinSlug(snippet.id)}.description` as never) as string)
-      : snippet.description
+  const descriptionFor = useCallback(
+    (snippet: SnippetDefinition): string => snippet.builtin
+      ? (t(`snippets.builtin.${builtinSlug(snippet.id)}.description` as never))
+      : snippet.description,
+    [t],
+  )
 
-  const categoryLabel = (category: SnippetCategory): string =>
-    t(`snippets.category.${category}` as never) as string
+  const categoryLabel = useCallback(
+    (category: SnippetCategory): string => t(`snippets.category.${category}` as never),
+    [t],
+  )
 
   const filtered = useMemo<SnippetDefinition[]>(() => {
     const normalised = query.trim().toLowerCase()
@@ -137,8 +143,7 @@ export function SnippetInsertMenu({ open, onClose }: SnippetInsertMenuProps) {
       const hay = `${nameFor(snippet)} ${descriptionFor(snippet)} ${snippet.tags.join(' ')} ${categoryLabel(snippet.category)}`.toLowerCase()
       return hay.includes(normalised)
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snippets, query, t])
+  }, [categoryLabel, descriptionFor, nameFor, query, snippets])
 
   if (!open) return null
 
@@ -192,7 +197,7 @@ export function SnippetInsertMenu({ open, onClose }: SnippetInsertMenuProps) {
       t('snippets.toast.inserted', {
         name: nameFor(snippet),
         count: result.insertedNodeIds.length,
-      }) as string,
+      }),
       'success',
     )
 
@@ -225,14 +230,14 @@ export function SnippetInsertMenu({ open, onClose }: SnippetInsertMenuProps) {
             type="text"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder={t('snippets.menu.searchPlaceholder') as string}
-            aria-label={t('snippets.menu.searchPlaceholder') as string}
+            placeholder={t('snippets.menu.searchPlaceholder')}
+            aria-label={t('snippets.menu.searchPlaceholder')}
           />
           <button
             type="button"
             className="we-shortcuts-close"
             onClick={onClose}
-            aria-label={t('snippets.menu.cancel') as string}
+            aria-label={t('snippets.menu.cancel')}
           >
             <X size={16} aria-hidden="true" />
           </button>
@@ -276,7 +281,7 @@ export function SnippetInsertMenu({ open, onClose }: SnippetInsertMenuProps) {
                 <span className="we-snippet-row__desc">{descriptionFor(snippet)}</span>
               </span>
               <span className="we-cmdk-row__group">{categoryLabel(snippet.category)}</span>
-              <span className={`we-pill ${snippet.builtin ? 'we-pill--cobalt' : 'we-pill--neutral'}`}>
+              <span className="we-pill" data-tone={snippet.builtin ? 'primary' : 'neutral'}>
                 {isBuiltinSnippetId(snippet.id)
                   ? t('snippets.menu.builtinBadge')
                   : t('snippets.menu.customBadge')}

@@ -396,7 +396,7 @@ async function seed(): Promise<void> {
     { name: "datadog-webhook", kind: "webhook_secret", secretRef: "DATADOG_WEBHOOK_SECRET" },
     { name: "support-slack", kind: "slack_webhook", secretRef: "SLACK_SUPPORT_WEBHOOK_URL" },
   ];
-  await insertChunked(credentials, CREDS.map((c, i) => ({
+  await insertChunked(credentials, CREDS.map((c, _i) => ({
     id: uid("cred"), orgId: ORG, name: c.name, kind: c.kind, secretRef: c.secretRef,
     metadata: { seededBy: "seed-full", note: `${c.kind} for demo` }, createdBy: sample(adminIds),
     createdAt: daysAgo(randInt(20, 130)), updatedAt: daysAgo(randInt(0, 19)),
@@ -659,7 +659,7 @@ async function seed(): Promise<void> {
     const owner = chance(0.7) ? sample(members).userId : null;
     const itemId = uid("recitem");
     const comments = chance(0.5)
-      ? Array.from({ length: randInt(1, 3) }, (_, ci) => ({
+      ? Array.from({ length: randInt(1, 3) }, (_, _ci) => ({
           id: uid("cmt"), authorUserId: sample(members).userId,
           body: sample(["Looking into this now.", "Upstream confirmed an outage.", "Replayed in sandbox — green.", "Paging the on-call owner.", "Root cause is a rotated token."]),
           createdAt: hoursAgo(randInt(1, 40)).toISOString(),
@@ -678,7 +678,6 @@ async function seed(): Promise<void> {
 
     // failure-storm children for some
     if (chance(0.35)) {
-      const others = sample(dlqTargets);
       childRows.push({ id: uid("recchild"), orgId: ORG, recoveryItemId: itemId, deadLetterId: uid("dlqchild"), occurredAt: hoursAgo(randInt(1, 30)) });
     }
     // handoffs for some
@@ -791,7 +790,7 @@ async function seed(): Promise<void> {
     usageRows.push({
       id: uid("use"), orgId: ORG, userId: someUser(), runId: chance(0.7) ? sample(runRefs).id : null,
       metric: "llm.completion", quantity: inTok + outTok,
-      metadata: { provider: model.startsWith("gpt") ? "openai" : "anthropic", model, inputTokens: inTok, outputTokens: outTok, latencyMs: randInt(300, 6000), costUsd: round2((inTok + outTok) / 1_000_000 * sample([3, 5, 15])), nodeId: "classify_1", workflowId: wf.id, mode: chance(0.95) ? "ai" : "fallback" },
+      metadata: { provider: model.startsWith("gpt") ? "openai" : "anthropic", model, inputTokens: inTok, outputTokens: outTok, latencyMs: randInt(300, 6000), costUsd: cost, nodeId: "classify_1", workflowId: wf.id, mode: chance(0.95) ? "ai" : "fallback" },
       createdAt,
     });
   }

@@ -15,14 +15,18 @@
  *   breaks the UI without a TypeScript error.
  */
 
-import { WorkflowInputSchema, WorkflowSchema, nodeTypeValues } from "@janusly/shared";
+import { WorkflowInputSchema, WorkflowSchema, nodeTypeValues, workflowVersionMax } from "@janusly/shared";
 import { validateExpression } from "./expression";
-import { parseIsoDuration } from "./iso-duration";
 import { resolveJoinSources, resolveParallelForkBranches } from "./parallel-fork";
 import { resolveScheduleConfig } from "./schedule";
 import { resolveTriggerConfig } from "./triggers";
 import { isTriggerNodeType } from "@janusly/shared/src/trigger-types";
 import { isRegisteredTool, validateToolInput } from "./tool-registry";
+import {
+  resolveApprovalWaitingConfig,
+  resolveWaitUntilSchedule,
+  WaitingConfigError,
+} from "./waiting-time";
 
 const supportedNodeTypes = new Set<string>(nodeTypeValues);
 
@@ -89,6 +93,14 @@ export function validateWorkflow(workflow: unknown, options: ValidateWorkflowOpt
     if (nodeIds.has(node.id)) issues.push({ code: "duplicate_node_id", message: `Duplicate node id: ${node.id}`, nodeId: node.id });
     nodeIds.add(node.id);
 
+    // `context.input` is where `executeNode` merges the run's start/trigger
+    // input — a node with the literal id "input" would collide with that
+    // slot in the template scope (legacy workflows keep today's behaviour:
+    // the merge in `execute-node.ts` is guarded and never clobbers a node).
+    if (node.id === "input") {
+      issues.push({ code: "node_id_reserved", message: `Node id "input" is reserved for the run input (context.input)`, nodeId: node.id });
+    }
+
     if (!supportedNodeTypes.has(node.type)) issues.push({ code: "unsupported_node_type", message: `Unsupported node type: ${node.type}`, nodeId: node.id });
     if (node.type === "http" && !node.config.url) issues.push({ code: "http_missing_url", message: "HTTP node requires config.url", nodeId: node.id });
     if (node.type === "tool" && !node.config.tool) issues.push({ code: "tool_missing_name", message: "Tool node requires config.tool", nodeId: node.id });
@@ -100,6 +112,27 @@ export function validateWorkflow(workflow: unknown, options: ValidateWorkflowOpt
         issues.push({ code: "tool_invalid_input", message: validation.issues.join(", "), nodeId: node.id });
       }
     }
+    if (node.type === "subworkflow") {
+      const workflowId = typeof node.config.workflowId === "string" ? node.config.workflowId.trim() : "";
+      if (!workflowId) {
+        issues.push({ code: "subworkflow_missing_workflow", message: "Subworkflow node requires config.workflowId", nodeId: node.id });
+      } else if (parsed.data.id && workflowId === parsed.data.id) {
+        issues.push({ code: "subworkflow_self_reference", message: "A workflow cannot call itself directly", nodeId: node.id });
+      }
+      const version = node.config.version;
+      if (version !== undefined && (
+        typeof version !== "number"
+        || !Number.isSafeInteger(version)
+        || version < 1
+        || version > workflowVersionMax
+      )) {
+        issues.push({
+          code: "subworkflow_invalid_version",
+          message: `Subworkflow config.version must be an integer between 1 and ${workflowVersionMax}`,
+          nodeId: node.id,
+        });
+      }
+    }
     if (node.type === "condition") {
       if (!node.config.expression) {
         issues.push({ code: "condition_missing_expression", message: "Condition node requires config.expression", nodeId: node.id });
@@ -108,18 +141,82 @@ export function validateWorkflow(workflow: unknown, options: ValidateWorkflowOpt
         if (!expression.valid) issues.push({ code: "condition_invalid_expression", message: expression.message ?? "Invalid condition expression", nodeId: node.id });
       }
     }
-    if (node.type === "loop" && !node.config.items) issues.push({ code: "loop_missing_items", message: "Loop node requires config.items", nodeId: node.id });
-    if (node.type === "wait_until") {
-      const duration = typeof node.config.duration === "string" ? node.config.duration : "";
-      if (!duration) {
-        issues.push({ code: "wait_until_missing_duration", message: "Wait node requires config.duration", nodeId: node.id });
-      } else {
-        const delayMs = parseIsoDuration(duration);
-        if (delayMs === null) {
-          issues.push({ code: "wait_until_invalid_duration", message: "Wait node requires a valid ISO 8601 config.duration", nodeId: node.id });
-        } else if (delayMs <= 0) {
-          issues.push({ code: "wait_until_non_positive_duration", message: "Wait node duration must resolve to a positive number of milliseconds", nodeId: node.id });
+    if ((node.type === "router" || node.type === "router_llm") && Array.isArray(node.config.candidates)) {
+      // The runtime routes a decision by SKIPPING every non-chosen candidate
+      // that is a direct successor of the router (core/runtime.ts). A
+      // candidate without an incoming edge from the router is unroutable:
+      // if it is a root it runs at t=0 regardless of the decision, and if
+      // it hangs elsewhere the skip can never reach it. Fail at save time.
+      const outgoing = new Set(edges.filter((edge) => edge.from === node.id).map((edge) => edge.to));
+      for (const entry of node.config.candidates) {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+        const e = entry as Record<string, unknown>;
+        const candidateId =
+          typeof e.nodeId === "string" && e.nodeId.trim()
+            ? e.nodeId.trim()
+            : typeof e.id === "string" && e.id.trim()
+              ? e.id.trim()
+              : "";
+        if (!candidateId) continue;
+        if (!allNodeIds.has(candidateId)) {
+          issues.push({ code: "router_candidate_unknown", message: `Router candidate does not exist: ${candidateId}`, nodeId: node.id });
+        } else if (!outgoing.has(candidateId)) {
+          issues.push({
+            code: "router_candidate_not_successor",
+            message: `Router candidate "${candidateId}" must be a direct successor (add an edge ${node.id} → ${candidateId}) or the decision cannot route`,
+            nodeId: node.id,
+          });
         }
+      }
+    }
+    if (node.type === "loop") {
+      if (!node.config.items) {
+        issues.push({ code: "loop_missing_items", message: "Loop node requires config.items", nodeId: node.id });
+      }
+      if (node.config.mode !== undefined && node.config.mode !== "map" && node.config.mode !== "for_each") {
+        issues.push({ code: "loop_invalid_mode", message: "Loop mode must be map or for_each", nodeId: node.id });
+      }
+      if (node.config.mode === "for_each" && (typeof node.config.tool !== "string" || !node.config.tool.trim())) {
+        issues.push({ code: "loop_for_each_missing_tool", message: "For-each loop requires config.tool", nodeId: node.id });
+      } else if (node.config.mode === "for_each" && typeof node.config.tool === "string" && !isRegisteredTool(node.config.tool)) {
+        issues.push({ code: "loop_for_each_unknown_tool", message: `Unknown tool: ${node.config.tool}`, nodeId: node.id });
+      }
+      const concurrency = node.config.concurrency;
+      if (concurrency !== undefined && (!Number.isInteger(concurrency) || Number(concurrency) < 1 || Number(concurrency) > 20)) {
+        issues.push({ code: "loop_invalid_concurrency", message: "Loop concurrency must be an integer from 1 to 20", nodeId: node.id });
+      }
+      const failureCount = node.config.toleratedFailureCount;
+      if (failureCount !== undefined && (!Number.isInteger(failureCount) || Number(failureCount) < 0 || Number(failureCount) > 1_000)) {
+        issues.push({ code: "loop_invalid_failure_count", message: "Loop tolerated failure count must be an integer from 0 to 1000", nodeId: node.id });
+      }
+      const failurePercentage = node.config.toleratedFailurePercentage;
+      if (failurePercentage !== undefined && (typeof failurePercentage !== "number" || !Number.isFinite(failurePercentage) || failurePercentage < 0 || failurePercentage > 100)) {
+        issues.push({ code: "loop_invalid_failure_percentage", message: "Loop tolerated failure percentage must be from 0 to 100", nodeId: node.id });
+      }
+      if (failureCount !== undefined && failurePercentage !== undefined) {
+        issues.push({ code: "loop_conflicting_failure_budgets", message: "Loop failure budget must use either count or percentage, not both", nodeId: node.id });
+      }
+    }
+    if (node.type === "approval") {
+      try {
+        resolveApprovalWaitingConfig(node.config);
+      } catch (err) {
+        issues.push({
+          code: err instanceof WaitingConfigError ? err.code : "approval_invalid_deadline",
+          message: err instanceof Error ? err.message : "Approval node has an invalid deadline",
+          nodeId: node.id,
+        });
+      }
+    }
+    if (node.type === "wait_until") {
+      try {
+        resolveWaitUntilSchedule(node.config);
+      } catch (err) {
+        issues.push({
+          code: err instanceof WaitingConfigError ? err.code : "wait_until_invalid_time",
+          message: err instanceof Error ? err.message : "Wait node has an invalid schedule",
+          nodeId: node.id,
+        });
       }
     }
     // Future AI generation strategies may produce looser node shapes,
@@ -230,6 +327,19 @@ export function validateWorkflow(workflow: unknown, options: ValidateWorkflowOpt
     if (edge.condition) {
       const expression = validateExpression(edge.condition);
       if (!expression.valid) issues.push({ code: "edge_invalid_condition", message: expression.message ?? "Invalid edge condition", edgeId });
+      // The `inputs.` scope means "this node's config" and only exists while
+      // a node executes — edges evaluate with `inputs: {}` (core/runtime),
+      // so an `inputs.*` path on an edge is always undefined→falsy and the
+      // branch silently never fires. Reject it at
+      // save time with a pointer to the run-input path that DOES work.
+      // Quoted string literals are stripped first to avoid false positives.
+      if (/\binputs(?:\.|\[)/.test(edge.condition.replace(/'[^']*'|"[^"]*"/g, ""))) {
+        issues.push({
+          code: "edge_condition_inputs_scope",
+          message: "Edge conditions cannot reference inputs.* (node config does not exist on an edge) — use context.input.* for the run input or context.<nodeId>.output.* for a step's output",
+          edgeId,
+        });
+      }
     }
   }
 

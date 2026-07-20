@@ -56,6 +56,7 @@ vi.mock("@janusly/db", () => ({
     workflowId: "workflow_id_col",
     owners: "owners_col",
     runbookMarkdown: "runbook_col",
+    aiGuidanceMarkdown: "ai_guidance_col",
     description: "description_col",
     tags: "tags_col",
     folder: "folder_col",
@@ -94,6 +95,7 @@ const SAMPLE_ROW = {
   workflowId: "wf_1",
   owners: ["alice"],
   runbookMarkdown: "# hi",
+  aiGuidanceMarkdown: "Prefer explicit approval gates.",
   description: "demo",
   tags: ["billing"],
   folder: "Billing",
@@ -266,6 +268,39 @@ describe("upsertWorkflowMetadata", () => {
     expect(record.folder).toBe("Onboarding");
   });
 
+  it("preserves stored AI guidance when a legacy update omits the field", async () => {
+    limitMock.mockResolvedValueOnce([SAMPLE_ROW]);
+    onConflictMock.mockResolvedValueOnce(undefined);
+    limitMock.mockResolvedValueOnce([{ ...SAMPLE_ROW, description: "Updated elsewhere" }]);
+
+    await upsertWorkflowMetadata({
+      orgId: "default",
+      workflowId: "wf_1",
+      metadata: { owners: ["alice"], tags: ["billing"], description: "Updated elsewhere" },
+      actorUserId: "alice",
+    });
+
+    const conflictArg = onConflictMock.mock.calls[0][0] as { set: Record<string, unknown> };
+    expect(conflictArg.set).not.toHaveProperty("aiGuidanceMarkdown");
+    expect(valuesMock).toHaveBeenCalledWith(expect.objectContaining({ aiGuidanceMarkdown: null }));
+  });
+
+  it("clears stored AI guidance only when the field is explicitly null", async () => {
+    limitMock.mockResolvedValueOnce([SAMPLE_ROW]);
+    onConflictMock.mockResolvedValueOnce(undefined);
+    limitMock.mockResolvedValueOnce([{ ...SAMPLE_ROW, aiGuidanceMarkdown: null }]);
+
+    await upsertWorkflowMetadata({
+      orgId: "default",
+      workflowId: "wf_1",
+      metadata: { owners: ["alice"], tags: ["billing"], aiGuidanceMarkdown: null },
+      actorUserId: "alice",
+    });
+
+    const conflictArg = onConflictMock.mock.calls[0][0] as { set: Record<string, unknown> };
+    expect(conflictArg.set).toHaveProperty("aiGuidanceMarkdown", null);
+  });
+
   it("coerces an absent folder to null on write (ungrouped)", async () => {
     limitMock.mockResolvedValueOnce([]);
     onConflictMock.mockResolvedValueOnce(undefined);
@@ -339,6 +374,7 @@ describe("setWorkflowFolder", () => {
         owners: [],
         tags: [],
         runbookMarkdown: null,
+        aiGuidanceMarkdown: null,
         description: null,
         slackChannel: null,
         linearProject: null,

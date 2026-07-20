@@ -42,6 +42,8 @@
 
 import { z } from "zod";
 
+export { utf8ByteLength } from "./utf8";
+
 /**
  * Closed set of event-driven trigger node-type discriminators. A strict
  * subset of `nodeTypeValues` — every entry here must ALSO appear in
@@ -244,19 +246,19 @@ export type FileDroppedPayload = z.infer<typeof FileDroppedPayloadSchema>;
 export type McpServerEventPayload = z.infer<typeof McpServerEventPayloadSchema>;
 
 /** Closed enum of structured trigger-event lifecycle statuses persisted in `trigger_events`. */
-export const triggerEventStatusValues = ["received", "started", "skipped", "failed"] as const;
+/**
+ * `buffered` is the pause state: the workflow was paused when the event
+ * arrived, so no run was spawned but the payload is kept verbatim for
+ * backfill on resume. It is deliberately NOT `skipped` — a skipped event is
+ * discarded on purpose (deduped, rate-limited); a buffered one is still owed
+ * a run. `backfilling` is the leased in-progress state; an expired lease can
+ * return to the claim pool after a process crash.
+ */
+export const triggerEventStatusValues = ["received", "started", "skipped", "failed", "buffered", "backfilling"] as const;
 /** Zod enum derived from `triggerEventStatusValues`. */
 export const TriggerEventStatusSchema = z.enum(triggerEventStatusValues);
 /** One structured trigger-event status. */
 export type TriggerEventStatus = (typeof triggerEventStatusValues)[number];
-
-/**
- * Compute the byte length of a string under UTF-8. Shared so the schema cap,
- * the ingestion guard, and tests all measure bytes the same way.
- */
-export function utf8ByteLength(value: string): number {
-  return Buffer.byteLength(value, "utf8");
-}
 
 /**
  * Resolve the effective per-trigger rate limit from a node config's optional

@@ -22,7 +22,6 @@ import {
   deadLetters,
   runs,
   workflows,
-  workflowMetadata,
   workflowVersions,
 } from "@janusly/db";
 import {
@@ -36,8 +35,11 @@ import {
   listWorkflowsWithRunSummary,
   queryScheduleFires,
   setWorkflowSlo,
+  getWorkflowBreakerStatus,
+  resumeWorkflowCircuitBreaker,
 } from "@janusly/data";
 import { unregisterAllForWorkflow, syncWorkflowSchedules } from "@janusly/engine/src/schedule-scheduler";
+import { validateCronExpression } from "@janusly/engine/src/schedule";
 import {
   bucketScheduleFires,
   computeNextFires,
@@ -65,8 +67,15 @@ import {
   productionSecretRefResolver,
 } from "../readiness-helpers";
 import type { Route } from "../routes";
+import { backfillBufferedTriggerEvents } from "./trigger-ingest-routes";
 import { rollbackAuditMetadata, rollbackWorkflowToVersion } from "../workflows-rollback";
 import { saveWorkflowVersion } from "../workflows-save";
+import {
+  getSchedulePreviewContract,
+  getLatestWorkflowVersionContract,
+  listWorkflowsContract,
+  listWorkflowVersionsContract,
+} from "../api-contracts";
 
 /**
  * Parse a `?before=<iso>|<id>` keyset cursor for the Flows-list "Load more" into
@@ -83,6 +92,7 @@ export const workflowsRoutes: Route[] = [
   // NOTE: `/workflows/versions` and `/workflows/latest` come BEFORE `/workflows`
   // so the prefix-but-not-`/workflows/` matcher doesn't shadow them.
   { method: "GET", match: (url) => url.startsWith("/workflows/versions"),
+    contract: listWorkflowVersionsContract,
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = url.searchParams.get("workflowId");
@@ -97,6 +107,7 @@ export const workflowsRoutes: Route[] = [
       return sendJson(res, versions);
     } },
   { method: "GET", match: (url) => url.startsWith("/workflows/latest"),
+    contract: getLatestWorkflowVersionContract,
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = url.searchParams.get("workflowId");
@@ -143,7 +154,27 @@ export const workflowsRoutes: Route[] = [
       const rows = await listDeletedWorkflowsWithRunSummary(auth.orgId, limitValue, before);
       return sendJson(res, rows);
     } },
+  // Stateless authoring preview for an unsaved schedule node. Keeping cron
+  // parsing on the server reuses the engine's canonical cron-parser grammar
+  // without adding a second parser (or a new dependency) to the browser.
+  { method: "GET", match: (url) => url === "/workflows/schedule-preview" || url.startsWith("/workflows/schedule-preview?"),
+    role: "viewer", permission: "workflows.read", contract: getSchedulePreviewContract,
+    handler: async ({ req, res }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const cron = url.searchParams.get("cron")?.trim() ?? "";
+      if (!cron || cron.length > 100) return sendJson(res, { valid: false, nextFires: [] });
+      try {
+        validateCronExpression(cron);
+      } catch {
+        return sendJson(res, { valid: false, nextFires: [] });
+      }
+      const nextFires = computeNextFires(cron, 3);
+      return nextFires.length === 3
+        ? sendJson(res, { valid: true, nextFires })
+        : sendJson(res, { valid: false, nextFires: [] });
+    } },
   { method: "GET", match: (url) => url.startsWith("/workflows") && !url.startsWith("/workflows/"),
+    contract: listWorkflowsContract,
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const limitParam = Number(url.searchParams.get("limit"));
@@ -408,7 +439,7 @@ export const workflowsRoutes: Route[] = [
       const rest = url.slice("/workflows/".length).split("?")[0];
       if (rest.length === 0 || rest.includes("/")) return false;
       const reserved = new Set([
-        "save", "rollback", "versions", "latest", "validate", "readiness", "health", "tags", "folders", "trash",
+        "save", "rollback", "versions", "latest", "validate", "readiness", "health", "tags", "folders", "trash", "schedule-preview",
       ]);
       return !reserved.has(rest);
     },
@@ -515,6 +546,7 @@ export const workflowsRoutes: Route[] = [
           severity: "fail" as const,
           message: issue.message,
           nodeId: issue.nodeId,
+          edgeId: issue.edgeId,
         }));
         return sendJson(res, { status: "fail", issues } satisfies ReadinessResult);
       }
@@ -789,5 +821,66 @@ export const workflowsRoutes: Route[] = [
         slo: sloEntry?.slo ?? null,
       });
       return sendJson(res, health);
+    } },
+
+  // Resume a workflow the circuit breaker paused. Deliberately manual and
+  // deliberately narrow: `resumeWorkflowCircuitBreaker` only clears a
+  // `paused_circuit_breaker` status, so this can never un-pause an
+  // upstream-outage pause (that one clears itself when the status page
+  // recovers). Without this route the breaker is a trap — it stops the flood,
+  // then leaves the operator with no way to turn the workflow back on.
+  { method: "POST",
+    match: (url) => {
+      const path = url.split("?")[0];
+      return path.startsWith("/workflows/") && path.endsWith("/resume");
+    },
+    permission: "workflows.write",
+    handler: async ({ req, res, auth }) => {
+      const resumeMcpGate = await guardMcpWrite(auth, "workflows.resume");
+      if (!resumeMcpGate.ok) return sendJson(res, resumeMcpGate.body, resumeMcpGate.status);
+      const url = new URL(req.url ?? "", "http://localhost");
+      const workflowId = url.pathname.match(/^\/workflows\/([^/]+)\/resume$/)?.[1];
+      if (!workflowId) return sendError(res, "workflows_workflow_id_required", "workflowId is required", 400);
+
+      const id = decodeURIComponent(workflowId);
+      const resumed = await resumeWorkflowCircuitBreaker({
+        orgId: auth.orgId,
+        workflowId: id,
+        userId: auth.userId,
+      });
+      // The repo audits the flip inside its own transaction, so a losing
+      // caller writes nothing. An already-active workflow may still have a
+      // capped buffered window, so repeated calls drain the next page. Other
+      // pause sources remain distinct operator situations and are rejected.
+      if (!resumed) {
+        const status = await getWorkflowBreakerStatus(auth.orgId, id);
+        if (status === null) return sendError(res, "workflow_not_found", "Workflow not found", 404);
+        if (status !== "active") {
+          return sendError(
+            res,
+            "workflow_not_circuit_breaker_paused",
+            `Workflow is not paused by its circuit breaker (status: ${status})`,
+            409,
+            { status },
+          );
+        }
+      }
+      // The pause is over, so the events it buffered are owed their runs.
+      // Backfill AFTER the flip and never let it fail the resume: the
+      // workflow IS active now, and reporting otherwise would send the
+      // operator to un-pause something that isn't paused.
+      const backfill = await backfillBufferedTriggerEvents({ auth, workflowId: id });
+      // The repo already audited the flip inside its own transaction; this is
+      // a DIFFERENT fact (an operator action spawned N runs), so it gets its
+      // own action rather than a second `resumed` row. Silent when the pause
+      // buffered nothing — an empty backfill is not an event.
+      if (backfill.backfilled > 0 || backfill.failed > 0) {
+        await auditAction(auth, "workflow.trigger_backfill", {
+          targetType: "workflow",
+          targetId: id,
+          metadata: { backfilled: backfill.backfilled, failed: backfill.failed, remaining: backfill.remaining },
+        });
+      }
+      return sendJson(res, { ok: true, workflowId: id, status: "active", ...backfill });
     } },
 ];

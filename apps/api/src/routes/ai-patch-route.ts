@@ -19,7 +19,10 @@ import { desc, eq } from "drizzle-orm";
 import { RUN_EVENT_PROMPT_CAP, STRUCTURAL_PATCH_SYSTEM_PROMPT, suggestWorkflowPatch, type PatchSuggestion } from "@janusly/ai";
 import {
   summarizePastFeedback,
+  findLatestOutcomeBySignature,
   listCalibrations,
+  queryRecoveryFeedbackHealth,
+  type RecoveryFeedbackHealthSnapshot,
   type StoredCalibration,
 } from "@janusly/data";
 import { db, runEvents, runs } from "@janusly/db";
@@ -28,11 +31,14 @@ import { safePersistPayload } from "@janusly/engine/src/safe-persist";
 import { listTools } from "@janusly/engine/src/tool-registry";
 import { hasApprovalAncestor, isSensitiveAction } from "@janusly/engine/src/workflow-readiness";
 import { NodeSchema, WorkflowSchema, type EvidenceRow, type Workflow } from "@janusly/shared";
+import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { assembleRecoveryEvidence } from "../ai-evidence";
 import { composeFeedbackHint } from "../ai-patch-feedback";
+import { sanitizeConsideredAlternatives, type ConsideredAlternative } from "../ai-patch-alternatives";
 import { composeRecoveryMemoryHint } from "../ai-recovery-memory";
+import { loadOperatorGuidance } from "../ai-operator-guidance";
 import { orgLlmRuntime, resolveSurfaceModel, sanitizeAiWorkflow } from "../ai-runtime";
 import { AiPatchStructuralEnvelope, patchEnvelopeForNodeType, type AiPatchStructuralSuggestion } from "../ai-schemas";
 import { auditAction } from "../audit-helper";
@@ -45,6 +51,7 @@ import { budgetBlockedResponse, gateBudget } from "../budget-gate";
 import { localeFromRequest } from "../locale";
 import { withBudgetWarning } from "../ai-route-helpers";
 import type { Route } from "../routes";
+import { recoverySuggestionSafety, type RecoverySuggestionSafety } from "../recovery-suggestion-safety";
 
 /**
  * Index the stored calibration curves by `approachLabel` for O(1) lookup
@@ -133,6 +140,20 @@ export const aiPatchRoutes: Route[] = [
       // `oneOf` keyword (works for OpenAI strict mode too).
       const failingNode = NodeSchema.safeParse(dlq.nodeJson);
       const failingNodeType = failingNode.success ? failingNode.data.type : "unknown";
+      const failureSignature = normalizeErrorSignature(dlq.errorJson, {
+        nodeId: dlq.nodeId,
+        nodeType: failingNode.success ? failingNode.data.type : undefined,
+      }).signature;
+      const priorSameSignatureOutcome = await findLatestOutcomeBySignature(
+        auth.orgId,
+        failureSignature,
+        deadLetterId,
+      ).then((row) => row ? ({
+        status: row.status,
+        approachLabel: row.approachLabel,
+        declineReason: row.declineReason,
+        occurredAt: row.updatedAt.toISOString(),
+      }) : null).catch(() => null);
       const configEnvelope = patchEnvelopeForNodeType(failingNodeType);
 
       // Structural-patch dispatch: when the failing node is a write-side
@@ -205,6 +226,21 @@ export const aiPatchRoutes: Route[] = [
         : [];
       const pastFeedbackSummary = failingWorkflowId ? composeFeedbackHint(feedbackSummaries) : "";
 
+      // The feedback summary above is prompt-only and intentionally returns
+      // an empty array after its rolling window expires. Surface the separate
+      // lifetime aggregate alongside the patch response so the dialog can
+      // distinguish a cold approach from a formerly-active learning loop
+      // whose accepted fixes have gone stale. This is best-effort: a health
+      // read must never weaken the patch route's fallback contract.
+      let feedbackHealth: RecoveryFeedbackHealthSnapshot | undefined;
+      if (failingWorkflowId) {
+        try {
+          feedbackHealth = await queryRecoveryFeedbackHealth(auth.orgId, failingWorkflowId);
+        } catch {
+          feedbackHealth = undefined;
+        }
+      }
+
       // Memory-assisted recovery: when org memory is enabled, recall a
       // small bounded set of similar prior failures + accepted/rejected
       // fixes scoped to the same org (and preferably workflow) and slip
@@ -218,18 +254,26 @@ export const aiPatchRoutes: Route[] = [
       // the conditional spread below keeps the `extraContext` shape
       // byte-for-byte identical to the pre-enrichment case.
       const memoryHint = failingNode.success
-        ? await composeRecoveryMemoryHint({
+          ? await composeRecoveryMemoryHint({
             orgId: auth.orgId,
+            runId: dlq.runId,
             workflowId: failingWorkflowId,
             failingNode: { id: failingNode.data.id, type: failingNode.data.type },
             errorEnvelope: dlq.errorJson,
           })
         : { snippets: "", hitCount: 0, recallOk: true, entries: [] };
 
+      const operatorGuidance = await loadOperatorGuidance({
+        orgId: auth.orgId,
+        orgGuidance: orgConfig.ai.operatorGuidance,
+        workflowId: failingWorkflowId,
+      });
+
       const extraContext: Record<string, unknown> = {
         ...(toolInputContract ? { toolInputContract } : {}),
         ...(pastFeedbackSummary ? { pastFeedbackSummary } : {}),
         ...(memoryHint.snippets ? { memorySnippets: memoryHint.snippets } : {}),
+        ...(operatorGuidance ? { operatorGuidance } : {}),
       };
 
       // Cast: the structural envelope's `suggestions` items have a
@@ -302,6 +346,10 @@ export const aiPatchRoutes: Route[] = [
          * only when the two differ by ≥ CALIBRATION_SUBTITLE_DELTA points.
          */
         calibratedConfidence: number;
+        /** Deterministic write-side + approval posture for this candidate. */
+        safety: RecoverySuggestionSafety;
+        /** Bounded operator-facing alternatives, separate from deterministic evidence. */
+        consideredAlternatives: ConsideredAlternative[];
       };
       // Resolve raw + calibrated confidence for one approach. Calibration
       // is monotonic in `raw` (the fit only ever returns positive-slope
@@ -321,6 +369,17 @@ export const aiPatchRoutes: Route[] = [
          *  AI and fallback paths — the operator can still see what context
          *  was available even when the LLM degraded). */
         evidence: EvidenceRow[];
+        /** Freshness of the operator feedback loop for the failing workflow. */
+        feedbackHealth?: RecoveryFeedbackHealthSnapshot;
+        recoveryPassport: {
+          failureSignature: string;
+          priorSameSignatureOutcome: {
+            status: string;
+            approachLabel: string | null;
+            declineReason: string | null;
+            occurredAt: string;
+          } | null;
+        };
         model?: string;
         provider?: string;
         aiError?: string;
@@ -356,6 +415,8 @@ export const aiPatchRoutes: Route[] = [
                 approachLabel: rawItem.approachLabel,
                 confidence: rawItem.confidence,
                 calibratedConfidence: calibrate(rawItem.approachLabel, rawItem.confidence),
+                safety: recoverySuggestionSafety(sanitized, dlq.nodeId),
+                consideredAlternatives: sanitizeConsideredAlternatives(rawItem.consideredAlternatives),
               });
             } catch {
               // Drop this suggestion; keep going. If none survive, the
@@ -376,6 +437,7 @@ export const aiPatchRoutes: Route[] = [
             rationale: top.rationale,
             suggestions: validated,
             evidence: [],
+            recoveryPassport: { failureSignature, priorSameSignatureOutcome },
             model: helperResult.model,
             provider: helperResult.provider,
           };
@@ -394,8 +456,11 @@ export const aiPatchRoutes: Route[] = [
               approachLabel: "other",
               confidence: 0,
               calibratedConfidence: 0,
+              safety: recoverySuggestionSafety(dlq.workflowJson, dlq.nodeId),
+              consideredAlternatives: [],
             }],
             evidence: [],
+            recoveryPassport: { failureSignature, priorSameSignatureOutcome },
             model: helperResult.model,
             provider: helperResult.provider,
             aiError: helperResult.aiError ?? "no_valid_suggestions",
@@ -413,8 +478,11 @@ export const aiPatchRoutes: Route[] = [
             approachLabel: fallbackItem.approachLabel,
             confidence: fallbackItem.confidence,
             calibratedConfidence: calibrate(fallbackItem.approachLabel, fallbackItem.confidence),
+            safety: recoverySuggestionSafety(dlq.workflowJson, dlq.nodeId),
+            consideredAlternatives: sanitizeConsideredAlternatives(fallbackItem.consideredAlternatives),
           }],
           evidence: [],
+          recoveryPassport: { failureSignature, priorSameSignatureOutcome },
           model: helperResult.model,
           provider: helperResult.provider,
           aiError: helperResult.aiError,
@@ -447,6 +515,7 @@ export const aiPatchRoutes: Route[] = [
         memoryEntries: memoryHint.entries,
         toolContract: toolInputContract ?? null,
       });
+      response.feedbackHealth = feedbackHealth;
 
       await auditAction(auth, "ai.workflow.patch_suggested", { targetType: "dlq", targetId: deadLetterId, metadata: {
         mode: response.mode,

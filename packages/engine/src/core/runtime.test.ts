@@ -36,13 +36,24 @@ function makeStore(overrides: Partial<ExecutionStore> = {}): ExecutionStore {
       createdBy: null,
     }),
     getNodeStatus: vi.fn().mockResolvedValue('pending'),
-    markNodeQueued: vi.fn().mockResolvedValue(undefined),
-    tryClaimNodeForQueue: vi.fn().mockResolvedValue(true),
-    markNodeRunning: vi.fn().mockResolvedValue(true),
-    markNodeSucceeded: vi.fn().mockResolvedValue(undefined),
-    markNodeSucceededWithEvent: vi.fn().mockResolvedValue(undefined),
-    markNodeFailed: vi.fn().mockResolvedValue(undefined),
-    markNodeWaiting: vi.fn().mockResolvedValue(undefined),
+    markNodeQueued: vi.fn().mockImplementation(
+      async (_runId, _nodeId, attempt = 1, recoveryClaimToken) => ({
+        attempt,
+        recoveryClaimToken: recoveryClaimToken ?? null,
+        publicationGeneration: 1,
+      }),
+    ),
+    tryClaimNodeForQueue: vi.fn().mockResolvedValue({
+      attempt: 1,
+      recoveryClaimToken: null,
+      publicationGeneration: 1,
+    }),
+    claimNodeForExecution: vi.fn().mockResolvedValue('claimed'),
+    markQueuePublicationSucceeded: vi.fn().mockResolvedValue(true),
+    markNodeSucceeded: vi.fn().mockResolvedValue(true),
+    markNodeSucceededWithEvent: vi.fn().mockResolvedValue(true),
+    markNodeFailed: vi.fn().mockResolvedValue(true),
+    markNodeWaiting: vi.fn().mockResolvedValue(true),
     markNodeSkipped: vi.fn().mockResolvedValue(undefined),
     appendEvent: vi.fn().mockResolvedValue(undefined),
     updateRunStatusFromNodes: vi.fn().mockResolvedValue(undefined),
@@ -53,6 +64,7 @@ function makeStore(overrides: Partial<ExecutionStore> = {}): ExecutionStore {
 function makeQueue(): QueueAdapter {
   return {
     enqueueNode: vi.fn().mockResolvedValue(undefined),
+    persistTerminalFailure: vi.fn().mockResolvedValue(true),
     enqueueDeadLetter: vi.fn().mockResolvedValue(undefined),
   }
 }
@@ -77,38 +89,30 @@ describe('executeQueuedNode — cancellation guards', () => {
   beforeEach(() => vi.clearAllMocks())
 
   it('skips a queued job when the run is already cancelled', async () => {
-    const store = makeStore({ getRunStatus: vi.fn().mockResolvedValue('cancelled') })
+    const store = makeStore({ claimNodeForExecution: vi.fn().mockResolvedValue('run_cancelled') })
     const executors = makeExecutors()
     const runtime = new WorkflowRuntime(store, makeQueue(), executors)
 
     await runtime.executeQueuedNode(input)
 
-    expect(store.markNodeRunning).not.toHaveBeenCalled()
     expect(executors.execute).not.toHaveBeenCalled()
-    expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'node.skipped',
-      payload: expect.objectContaining({ reason: 'Run cancelled' }),
-    }))
+    expect(store.claimNodeForExecution).toHaveBeenCalledWith('r1', 'n1', 1, undefined, 0)
   })
 
   it('skips a queued job when the run has already failed', async () => {
-    const store = makeStore({ getRunStatus: vi.fn().mockResolvedValue('failed') })
+    const store = makeStore({ claimNodeForExecution: vi.fn().mockResolvedValue('run_failed') })
     const executors = makeExecutors()
     const runtime = new WorkflowRuntime(store, makeQueue(), executors)
 
     await runtime.executeQueuedNode(input)
 
     expect(executors.execute).not.toHaveBeenCalled()
-    expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'node.skipped',
-      payload: expect.objectContaining({ reason: 'Run failed' }),
-    }))
+    expect(store.claimNodeForExecution).toHaveBeenCalledWith('r1', 'n1', 1, undefined, 0)
   })
 
-  it('skips when markNodeRunning fails to claim the node (already advanced past queued)', async () => {
+  it('skips when the execution claim finds the node already advanced past queued', async () => {
     const store = makeStore({
-      getRunStatus: vi.fn().mockResolvedValue('running'),
-      markNodeRunning: vi.fn().mockResolvedValue(false),
+      claimNodeForExecution: vi.fn().mockResolvedValue('not_claimed'),
     })
     const executors = makeExecutors()
     const runtime = new WorkflowRuntime(store, makeQueue(), executors)
@@ -129,13 +133,80 @@ describe('executeQueuedNode — cancellation guards', () => {
 
     await runtime.executeQueuedNode(input)
 
-    expect(store.markNodeRunning).toHaveBeenCalledWith('r1', 'n1', 1)
+    expect(store.claimNodeForExecution).toHaveBeenCalledWith('r1', 'n1', 1, undefined, 0)
     expect(executors.execute).toHaveBeenCalled()
     // The succeeded transition + its node.succeeded event commit together via
     // markNodeSucceededWithEvent (not markNodeSucceeded + a separate appendEvent).
-    expect(store.markNodeSucceededWithEvent).toHaveBeenCalledWith('r1', 'n1', { x: 1 }, 1)
+    expect(store.markNodeSucceededWithEvent).toHaveBeenCalledWith('r1', 'n1', { x: 1 }, 1, undefined)
     // appendEvent still fires for node.running (and enqueueReadyNodes events).
     expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'node.running' }))
+  })
+
+  it('stops a stale recovery generation before success events or downstream scheduling', async () => {
+    const store = makeStore({
+      markNodeSucceededWithEvent: vi.fn().mockResolvedValue(false),
+    })
+    const queue = makeQueue()
+    const executors = makeExecutors({ status: 'completed', output: { stale: true } })
+    const runtime = new WorkflowRuntime(store, queue, executors)
+
+    await runtime.executeQueuedNode({ ...input, recoveryClaimToken: 'claim-old' })
+
+    expect(store.claimNodeForExecution).toHaveBeenCalledWith('r1', 'n1', 1, 'claim-old', 0)
+    expect(store.markNodeSucceededWithEvent).toHaveBeenCalledWith(
+      'r1',
+      'n1',
+      { stale: true },
+      1,
+      'claim-old',
+    )
+    expect(queue.enqueueNode).not.toHaveBeenCalled()
+    expect(store.updateRunStatusFromNodes).not.toHaveBeenCalled()
+  })
+
+  it('stamps one waitingSince value into persistence and the live event', async () => {
+    const store = makeStore()
+    const executors = makeExecutors({ status: 'waiting', metadata: { kind: 'approval', title: 'Approve refund' } })
+    const runtime = new WorkflowRuntime(store, makeQueue(), executors)
+
+    await runtime.executeQueuedNode(input)
+
+    expect(store.markNodeWaiting).toHaveBeenCalledWith('r1', 'n1', expect.objectContaining({
+      kind: 'approval',
+      title: 'Approve refund',
+      waitingSince: expect.any(String),
+    }), undefined)
+    const persistedMetadata = vi.mocked(store.markNodeWaiting).mock.calls[0]?.[2] as { waitingSince: string }
+    expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'node.waiting',
+      payload: expect.objectContaining({
+        metadata: expect.objectContaining({ waitingSince: persistedMetadata.waitingSince }),
+      }),
+    }))
+    expect(store.markNodeSucceededWithEvent).not.toHaveBeenCalled()
+  })
+
+  it('starts a relative approval deadline from the persisted checkpoint clock', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-14T12:00:00.000Z'))
+    try {
+      const store = makeStore()
+      const executors = makeExecutors({
+        status: 'waiting',
+        metadata: { kind: 'approval', decisionTimeoutMs: 60_000, onTimeout: 'fail' },
+      })
+      const runtime = new WorkflowRuntime(store, makeQueue(), executors)
+
+      await runtime.executeQueuedNode(input)
+
+      expect(store.markNodeWaiting).toHaveBeenCalledWith('r1', 'n1', expect.objectContaining({
+        decisionTimeoutMs: 60_000,
+        deadlineAt: '2026-07-14T12:01:00.000Z',
+        waitingSince: '2026-07-14T12:00:00.000Z',
+      }), undefined)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('skips downstream scheduling when the run is cancelled while a node was running', async () => {
@@ -147,7 +218,10 @@ describe('executeQueuedNode — cancellation guards', () => {
     const store = makeStore({ getRunStatus })
     const executors = makeExecutors({ status: 'completed', output: { x: 1 } })
     const enqueueNode = vi.fn().mockResolvedValue(undefined)
-    const queue: QueueAdapter = { enqueueNode }
+    const queue: QueueAdapter = {
+      enqueueNode,
+      persistTerminalFailure: vi.fn().mockResolvedValue(true),
+    }
     const runtime = new WorkflowRuntime(store, queue, executors)
 
     await runtime.executeQueuedNode(input)
@@ -162,9 +236,7 @@ describe('executeQueuedNode — cancellation guards', () => {
     const retryNode = { ...node, config: { retry: { maxAttempts: 2 } } }
     const retryWorkflow = { ...workflow, nodes: [retryNode] }
     const store = makeStore({
-      getRunStatus: vi.fn()
-        .mockResolvedValueOnce('running') // pre-execution check
-        .mockResolvedValueOnce('running'), // retry scheduling check
+      getRunStatus: vi.fn().mockResolvedValue('running'),
     })
     const queue = makeQueue()
     const executors = makeFailingExecutors()
@@ -172,7 +244,7 @@ describe('executeQueuedNode — cancellation guards', () => {
 
     await runtime.executeQueuedNode({ runId: 'r1', node: retryNode, workflow: retryWorkflow })
 
-    expect(store.markNodeQueued).toHaveBeenCalledWith('r1', 'n1', 2)
+    expect(store.markNodeQueued).toHaveBeenCalledWith('r1', 'n1', 2, undefined, expect.any(Number))
     expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
       type: 'node.retry',
       payload: expect.objectContaining({ attempt: 2 }),
@@ -182,16 +254,59 @@ describe('executeQueuedNode — cancellation guards', () => {
       nodeId: 'n1',
       attempt: 2,
     }))
+    expect(store.markQueuePublicationSucceeded).toHaveBeenCalledWith('r1', 'n1', 2, 1, undefined)
     expect(store.markNodeFailed).not.toHaveBeenCalled()
+  })
+
+  it('never retries a possibly committed write-side failure as a whole node', async () => {
+    const retryNode = { ...node, config: { retry: { maxAttempts: 3 } } }
+    const retryWorkflow = { ...workflow, nodes: [retryNode] }
+    const error = Object.assign(new Error('partial batch failure'), {
+      code: 'LOOP_FAILURE_BUDGET_EXCEEDED',
+      writeSide: true,
+    })
+    const store = makeStore()
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(store, queue, makeFailingExecutors(error))
+
+    await expect(runtime.executeQueuedNode({ runId: 'r1', node: retryNode, workflow: retryWorkflow }))
+      .rejects.toThrow('partial batch failure')
+
+    expect(store.markNodeQueued).not.toHaveBeenCalled()
+    expect(queue.enqueueNode).not.toHaveBeenCalled()
+    expect(queue.persistTerminalFailure).toHaveBeenCalledWith(expect.objectContaining({
+      error: expect.objectContaining({ writeSide: true }),
+    }))
+  })
+
+  it('preserves write-side risk when success persistence fails after the effect', async () => {
+    const retryNode = { ...node, config: { retry: { maxAttempts: 3 } } }
+    const retryWorkflow = { ...workflow, nodes: [retryNode] }
+    const store = makeStore({
+      markNodeSucceededWithEvent: vi.fn().mockRejectedValue(new Error('database unavailable')),
+    })
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(store, queue, makeExecutors({
+      status: 'completed',
+      output: { ok: true },
+      writeSideExecuted: true,
+    }))
+
+    await expect(runtime.executeQueuedNode({ runId: 'r1', node: retryNode, workflow: retryWorkflow }))
+      .rejects.toThrow('database unavailable')
+
+    expect(store.markNodeQueued).not.toHaveBeenCalled()
+    expect(queue.enqueueNode).not.toHaveBeenCalled()
+    expect(queue.persistTerminalFailure).toHaveBeenCalledWith(expect.objectContaining({
+      error: expect.objectContaining({ writeSide: true }),
+    }))
   })
 
   it('does not schedule a retry when cancellation lands during the failed attempt', async () => {
     const retryNode = { ...node, config: { retry: { maxAttempts: 2 } } }
     const retryWorkflow = { ...workflow, nodes: [retryNode] }
     const store = makeStore({
-      getRunStatus: vi.fn()
-        .mockResolvedValueOnce('running') // pre-execution check
-        .mockResolvedValueOnce('cancelled'), // retry scheduling check
+      getRunStatus: vi.fn().mockResolvedValue('cancelled'),
     })
     const queue = makeQueue()
     const runtime = new WorkflowRuntime(store, queue, makeFailingExecutors())
@@ -209,13 +324,60 @@ describe('executeQueuedNode — cancellation guards', () => {
 
     await expect(runtime.executeQueuedNode(input)).rejects.toThrow('temporary outage')
 
-    expect(queue.enqueueDeadLetter).toHaveBeenCalledWith(expect.objectContaining({
+    expect(queue.persistTerminalFailure).toHaveBeenCalledWith(expect.objectContaining({
       runId: 'r1',
       orgId: 'test-org',
       workflowId: 'wf-1',
       node,
       attempt: 1,
     }))
+  })
+
+  it('persists bounded structured executor diagnostics with a terminal failure', async () => {
+    const queue = makeQueue()
+    const error = Object.assign(new Error('batch failed'), {
+      code: 'LOOP_FAILURE_BUDGET_EXCEEDED',
+      details: { failedCount: 2, failedIndices: [1, 3] },
+    })
+    const runtime = new WorkflowRuntime(makeStore(), queue, makeFailingExecutors(error))
+
+    await expect(runtime.executeQueuedNode(input)).rejects.toThrow('batch failed')
+    expect(queue.persistTerminalFailure).toHaveBeenCalledWith(expect.objectContaining({
+      error: expect.objectContaining({
+        code: 'LOOP_FAILURE_BUDGET_EXCEEDED',
+        details: { failedCount: 2, failedIndices: [1, 3] },
+      }),
+    }))
+  })
+
+  it('does not update routing rewards when a stale generation loses terminal ownership', async () => {
+    const { updateRoutingStats } = await import('@janusly/data/src/routingStatsRepo')
+    const queue = makeQueue()
+    vi.mocked(queue.persistTerminalFailure).mockResolvedValueOnce(false)
+    const runtime = new WorkflowRuntime(makeStore(), queue, makeFailingExecutors())
+
+    await expect(runtime.executeQueuedNode({ ...input, recoveryClaimToken: 'stale-claim' }))
+      .resolves.toBeUndefined()
+
+    expect(updateRoutingStats).not.toHaveBeenCalled()
+    expect(queue.persistTerminalFailure).toHaveBeenCalledWith(expect.objectContaining({
+      recoveryClaimToken: 'stale-claim',
+    }))
+  })
+
+  it('updates a retry failure reward only after the running-to-queued CAS wins', async () => {
+    const { updateRoutingStats } = await import('@janusly/data/src/routingStatsRepo')
+    const retryNode = { ...node, config: { retry: { maxAttempts: 2 } } }
+    const retryWorkflow = { ...workflow, nodes: [retryNode] }
+    const store = makeStore({
+      getRunStatus: vi.fn().mockResolvedValue('running'),
+      markNodeQueued: vi.fn().mockResolvedValue(false),
+    })
+    const runtime = new WorkflowRuntime(store, makeQueue(), makeFailingExecutors())
+
+    await runtime.executeQueuedNode({ runId: 'r1', node: retryNode, workflow: retryWorkflow })
+
+    expect(updateRoutingStats).not.toHaveBeenCalled()
   })
 })
 
@@ -239,7 +401,7 @@ describe('executeQueuedNode — router candidate normalization', () => {
         chosenNodeId: 'fast_path',
         ranking: expect.arrayContaining([expect.objectContaining({ nodeId: 'fast_path' })]),
       }),
-    }))
+    }), undefined)
     expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
       type: 'decision.made',
       payload: expect.objectContaining({ chosenNodeId: 'fast_path' }),
@@ -269,7 +431,7 @@ describe('executeQueuedNode — router candidate normalization', () => {
 
     expect(store.markNodeSucceeded).toHaveBeenCalledWith('r1', 'pick', expect.objectContaining({
       decision: expect.objectContaining({ chosenNodeId: 'fast' }),
-    }))
+    }), undefined)
   })
 
   it('preserves scoring fields across mixed-shape candidates so the cheaper one wins under default scoring', async () => {
@@ -295,7 +457,7 @@ describe('executeQueuedNode — router candidate normalization', () => {
 
     expect(store.markNodeSucceeded).toHaveBeenCalledWith('r1', 'pick', expect.objectContaining({
       decision: expect.objectContaining({ chosenNodeId: 'cheap' }),
-    }))
+    }), undefined)
   })
 })
 
@@ -360,7 +522,7 @@ describe('executeQueuedNode — runtime learning metadata', () => {
     // shape) and that chosenNodeId is real.
     expect(store.markNodeSucceeded).toHaveBeenCalledWith('r1', 'pick', expect.objectContaining({
       decision: expect.objectContaining({ chosenNodeId: 'fast_path' }),
-    }))
+    }), undefined)
   })
 
   it('records workflow improvement when metadata.workflowId is present', async () => {
@@ -456,23 +618,16 @@ describe('executeQueuedNode — runtime learning metadata', () => {
     await expect(runtime.executeQueuedNode(input)).rejects.toThrow('metadata query failed')
 
     expect(executors.execute).not.toHaveBeenCalled()
-    expect(queue.enqueueDeadLetter).toHaveBeenCalledWith(expect.objectContaining({
+    expect(queue.persistTerminalFailure).toHaveBeenCalledWith(expect.objectContaining({
       runId: 'r1',
       orgId: 'default',
       node,
       attempt: 1,
       error: expect.objectContaining({ message: 'metadata query failed' }),
     }))
-    expect(store.markNodeFailed).toHaveBeenCalledWith('r1', 'n1', expect.objectContaining({
-      message: 'metadata query failed',
-    }))
-    expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'node.failed',
-      payload: expect.objectContaining({
-        error: expect.objectContaining({ message: 'metadata query failed' }),
-      }),
-    }))
-    expect(store.updateRunStatusFromNodes).toHaveBeenCalledWith('r1')
+    expect(store.markNodeFailed).not.toHaveBeenCalled()
+    expect(store.appendEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'node.failed' }))
+    expect(store.updateRunStatusFromNodes).not.toHaveBeenCalled()
   })
 })
 
@@ -498,6 +653,23 @@ describe('enqueueReadyNodes — cancellation head guard', () => {
 
     expect(await runtime.enqueueReadyNodes({ runId: 'r1', workflow })).toBe(0)
     expect(store.tryClaimNodeForQueue).not.toHaveBeenCalled()
+  })
+
+  it('requeues a pending root restored by the publication reconciler', async () => {
+    const store = makeStore({
+      getRunContext: vi.fn().mockResolvedValue({ n1: { status: 'pending' } }),
+    })
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(store, queue, makeExecutors())
+
+    await expect(runtime.enqueueReadyNodes({ runId: 'r1', workflow })).resolves.toBe(1)
+    expect(store.markNodeSkipped).not.toHaveBeenCalled()
+    expect(store.tryClaimNodeForQueue).toHaveBeenCalledWith('r1', 'n1', 1)
+    expect(queue.enqueueNode).toHaveBeenCalledWith(expect.objectContaining({
+      runId: 'r1',
+      nodeId: 'n1',
+      publicationGeneration: 1,
+    }))
   })
 })
 
@@ -656,5 +828,215 @@ describe('enqueueReadyNodes — snapshot-based readiness', () => {
     expect(store.markNodeSkipped).toHaveBeenCalledWith('r1', 'b', { reason: 'Condition not met' })
     expect(queued).toBe(1)
     expect(queue.enqueueNode).toHaveBeenCalledWith(expect.objectContaining({ nodeId: 'c' }))
+  })
+})
+
+describe('executeQueuedNode — router routes the decision', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  const routerNode = {
+    id: 'pick',
+    type: 'router' as const,
+    config: {
+      strategy: 'fastest',
+      candidates: [
+        { nodeId: 'slow', avgLatencyMs: 1500 },
+        { nodeId: 'fast', avgLatencyMs: 200 },
+      ],
+    },
+  }
+  const wiredWorkflow = {
+    dslVersion: '1.0' as const,
+    nodes: [
+      routerNode,
+      { id: 'fast', type: 'noop' as const, config: {} },
+      { id: 'slow', type: 'noop' as const, config: {} },
+    ],
+    edges: [
+      { from: 'pick', to: 'fast' },
+      { from: 'pick', to: 'slow' },
+    ],
+  }
+  const pendingContext = {
+    pick: { status: 'running' },
+    fast: { status: 'pending' },
+    slow: { status: 'pending' },
+  }
+
+  it('marks the non-chosen successor candidate skipped so only the winner runs', async () => {
+    const store = makeStore({ getRunContext: vi.fn().mockResolvedValue(pendingContext) })
+    const runtime = new WorkflowRuntime(store, makeQueue(), makeExecutors())
+
+    await runtime.executeQueuedNode({ runId: 'r1', node: routerNode, workflow: wiredWorkflow })
+
+    // strategy=fastest → 'fast' wins; 'slow' must be skipped BEFORE the
+    // readiness scan (which treats skipped as satisfied for joins).
+    expect(store.markNodeSkipped).toHaveBeenCalledWith('r1', 'slow', { reason: 'Router pick chose fast' })
+    expect(store.markNodeSkipped).not.toHaveBeenCalledWith('r1', 'fast', expect.anything())
+    expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
+      nodeId: 'slow',
+      type: 'node.skipped',
+    }))
+  })
+
+  it('never skips a candidate that is not wired as a direct successor', async () => {
+    const unwiredWorkflow = { ...wiredWorkflow, edges: [{ from: 'pick', to: 'fast' }] }
+    const store = makeStore({ getRunContext: vi.fn().mockResolvedValue(pendingContext) })
+    const runtime = new WorkflowRuntime(store, makeQueue(), makeExecutors())
+
+    await runtime.executeQueuedNode({ runId: 'r1', node: routerNode, workflow: unwiredWorkflow })
+
+    // 'slow' has no pick→slow edge — the ROUTER's skip cannot reach it
+    // (validation rejects this shape on new saves via
+    // router_candidate_not_successor). The readiness scan may still skip the
+    // orphan for its own reason; what matters is the router reason never fires.
+    expect(store.markNodeSkipped).not.toHaveBeenCalledWith(
+      'r1',
+      'slow',
+      expect.objectContaining({ reason: expect.stringContaining('Router') }),
+    )
+  })
+
+  it('never flips a candidate that already advanced past pending', async () => {
+    const store = makeStore({
+      getRunContext: vi.fn().mockResolvedValue({
+        ...pendingContext,
+        slow: { status: 'succeeded', output: { done: true } },
+      }),
+    })
+    const runtime = new WorkflowRuntime(store, makeQueue(), makeExecutors())
+
+    await runtime.executeQueuedNode({ runId: 'r1', node: routerNode, workflow: wiredWorkflow })
+
+    expect(store.markNodeSkipped).not.toHaveBeenCalled()
+  })
+})
+
+describe('executeQueuedNode — transient fast path', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  /** An error the classifier reads as transient (a provider rate limit). */
+  function rateLimited(): Error & { statusCode: number } {
+    const err = new Error('Anthropic 429: rate-limit exceeded') as Error & { statusCode: number }
+    err.statusCode = 429
+    return err
+  }
+
+  it('re-enqueues a transient failure on the ladder instead of dead-lettering it', async () => {
+    const store = makeStore()
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(store, queue, makeFailingExecutors(rateLimited()))
+
+    await expect(runtime.executeQueuedNode(input)).resolves.toBeUndefined()
+
+    // The wedge's point: the operator is NOT paged for a 429 that will heal.
+    expect(queue.persistTerminalFailure).not.toHaveBeenCalled()
+    // Rung 0 of the rate_limit ladder, published through the same
+    // claim → enqueue → mark machinery as an ordinary retry.
+    expect(store.markNodeQueued).toHaveBeenCalledWith('r1', 'n1', 2, undefined, 30_000)
+    expect(queue.enqueueNode).toHaveBeenCalledWith(expect.objectContaining({
+      runId: 'r1',
+      nodeId: 'n1',
+      delayMs: 30_000,
+      attempt: 2,
+    }))
+    expect(store.markQueuePublicationSucceeded).toHaveBeenCalled()
+    expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'node.transient_retry',
+      payload: expect.objectContaining({ transientClass: 'rate_limit', transientAttempt: 1, ladderLength: 3 }),
+    }))
+  })
+
+  it('dead-letters once the ladder is spent', async () => {
+    const store = makeStore()
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(store, queue, makeFailingExecutors(rateLimited()))
+
+    // attempt 4 with maxAttempts 1 → ladder position 3 = past the last rung.
+    await expect(
+      runtime.executeQueuedNode({ ...input, attempt: 4 }),
+    ).rejects.toThrow('rate-limit exceeded')
+
+    expect(queue.persistTerminalFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: 'r1', attempt: 4 }),
+    )
+    expect(queue.enqueueNode).not.toHaveBeenCalled()
+  })
+
+  it('dead-letters a write-side transient failure without re-running it', async () => {
+    const writeSideRateLimit = rateLimited() as Error & { statusCode: number; writeSide?: boolean }
+    writeSideRateLimit.writeSide = true
+    const store = makeStore()
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(store, queue, makeFailingExecutors(writeSideRateLimit))
+
+    await expect(runtime.executeQueuedNode(input)).rejects.toThrow('rate-limit exceeded')
+
+    // The hard line: a possibly-committed external write is an operator
+    // decision — duplicate side effects beat a quiet auto-retry.
+    expect(queue.enqueueNode).not.toHaveBeenCalled()
+    expect(queue.persistTerminalFailure).toHaveBeenCalled()
+  })
+
+  it('leaves an ordinary application failure on the dead-letter path', async () => {
+    const notFound = new Error('HTTP 404 on http node') as Error & { statusCode: number }
+    notFound.statusCode = 404
+    const store = makeStore()
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(store, queue, makeFailingExecutors(notFound))
+
+    await expect(runtime.executeQueuedNode(input)).rejects.toThrow('404')
+
+    expect(queue.enqueueNode).not.toHaveBeenCalled()
+    expect(queue.persistTerminalFailure).toHaveBeenCalled()
+  })
+
+  it('runs the ordinary retry policy first, and only tiers once those are spent', async () => {
+    const retryNode = { id: 'n1', type: 'noop' as const, config: { retry: { maxAttempts: 3, delayMs: 1_000 } } }
+    const retryWorkflow = { dslVersion: '1.0' as const, nodes: [retryNode], edges: [] }
+    const store = makeStore()
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(store, queue, makeFailingExecutors(rateLimited()))
+
+    // attempt 1 of 3 → the node's OWN policy owns this one (1s, not the ladder's 30s).
+    await runtime.executeQueuedNode({ runId: 'r1', node: retryNode, workflow: retryWorkflow, attempt: 1 })
+    expect(queue.enqueueNode).toHaveBeenCalledWith(expect.objectContaining({ delayMs: 1_000, attempt: 2 }))
+    expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'node.retry' }))
+
+    vi.clearAllMocks()
+
+    // attempt 3 of 3 → policy exhausted, ladder rung 0 takes over.
+    await runtime.executeQueuedNode({ runId: 'r1', node: retryNode, workflow: retryWorkflow, attempt: 3 })
+    expect(queue.enqueueNode).toHaveBeenCalledWith(expect.objectContaining({ delayMs: 30_000, attempt: 4 }))
+    expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'node.transient_retry' }))
+    expect(queue.persistTerminalFailure).not.toHaveBeenCalled()
+  })
+
+  it('does not re-enqueue onto a cancelled run', async () => {
+    const store = makeStore({
+      // `claimNodeForExecution` let the node run, and the operator cancelled
+      // while it was in flight — the ladder's own status guard must catch it.
+      getRunStatus: vi.fn().mockResolvedValue('cancelled'),
+    })
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(store, queue, makeFailingExecutors(rateLimited()))
+
+    await expect(runtime.executeQueuedNode(input)).resolves.toBeUndefined()
+
+    expect(queue.enqueueNode).not.toHaveBeenCalled()
+    expect(queue.persistTerminalFailure).not.toHaveBeenCalled()
+  })
+
+  it('honours the kill switch', async () => {
+    vi.stubEnv('JANUSLY_TRANSIENT_TIER_ENABLED', 'false')
+    const store = makeStore()
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(store, queue, makeFailingExecutors(rateLimited()))
+
+    await expect(runtime.executeQueuedNode(input)).rejects.toThrow('rate-limit exceeded')
+
+    expect(queue.enqueueNode).not.toHaveBeenCalled()
+    expect(queue.persistTerminalFailure).toHaveBeenCalled()
+    vi.unstubAllEnvs()
   })
 })

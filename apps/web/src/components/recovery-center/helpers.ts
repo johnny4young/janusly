@@ -9,7 +9,8 @@
  * (`./RecoveryCenterTiles.tsx`), and `./HealthRing.tsx`.
  *
  * The data-shape types mirror the API envelopes the existing panels read
- * (`GET /recovery/metrics`, `GET /dlq/clusters`, `GET /billing/budget`).
+ * (`GET /recovery/metrics`, `GET /recovery/ledger`,
+ * `GET /recovery/my-wins`, `GET /dlq/clusters`, `GET /billing/budget`).
  *
  * Used by `../RecoveryCenterPanel.test.tsx` — `computeRecommendedActions`
  * and `buildGreeting` are unit-tested here directly (no React render
@@ -61,6 +62,8 @@ export type RecoveryMetrics = {
   approvalsPending: RecoveryMetric
   replayRate: RecoveryMetric
   slaAttainment?: RecoveryMetric
+  timeToFirstAction?: RecoveryMetric
+  recurrenceRate?: RecoveryMetric
   clustersResolved?: ClustersResolvedMetric
   valueEstimate?: ValueEstimate
   windowDays: number
@@ -69,6 +72,17 @@ export type RecoveryMetrics = {
   mttrTrend?: MttrTrendPoint[]
   /** Total automation downtime closed in the window (ms). Optional — older API responses omit it. */
   downtimeEndedMs?: number
+}
+
+export type RecoveryLedger = {
+  totalRecovered: number
+  downtimeEndedMs: number
+  sinceIso: string | null
+}
+
+export type OperatorWins = {
+  recovered: number
+  windowDays: number
 }
 
 export type ClusterCategory =
@@ -88,6 +102,8 @@ export type FailureCluster = {
   frequency: number
   suggestedOwner: ClusterOwner
   lastSeen: string
+  /** True when this normalized signature returned after a terminal recovery. */
+  recurredAfterRecovery?: boolean
 }
 
 export type ClustersResponse = {
@@ -105,6 +121,21 @@ export type BudgetEnvelope = {
   warningThresholdCrossed?: boolean
   exceededAt?: 'org' | 'workflow' | null
   resolvedScope?: 'org' | 'workflow' | null
+}
+
+/** Read-only calibration status returned by `GET /recovery/calibration-status`. */
+export type CalibrationStatusEnvelope = {
+  enabled: boolean
+  windowDays: number
+  minimumSampleSize: number
+  calibrations: Array<{
+    approachLabel: string
+    acceptRate: number
+    sampleSize: number
+    curveSlope: number
+    curveIntercept: number
+    lastComputedAt: string | null
+  }>
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -299,6 +330,8 @@ export function shouldShowOnboarding(input: {
 export type HeatmapDay = { day: string; failures: number; recovered: number; mttrSeconds: number }
 export type HeatmapOutcome = 'none' | 'recovered' | 'partial' | 'unrecovered'
 export type HeatmapCell = { day: string; failures: number; recovered: number; outcome: HeatmapOutcome }
+export type StreakSummary = { current: number; longest: number }
+export type OpenDowntimeSummary = { createdAt: string; durationMs: number }
 
 /** Classify a day's failure/recovery counts into a heatmap color band. */
 export function heatmapOutcome(failures: number, recovered: number): HeatmapOutcome {
@@ -329,6 +362,54 @@ export function buildHeatmapCells(days: HeatmapDay[], windowDays: number, nowMs:
   return cells
 }
 
+/**
+ * Count contiguous clean days from the first observable recovery activity.
+ * Empty densified cells after that anchor are clean, but leading cells are not
+ * evidence that a newly observed workspace has been healthy for the full
+ * reporting window.
+ */
+export function computeStreaks(cells: HeatmapCell[]): StreakSummary {
+  const firstObservedIndex = cells.findIndex((cell) => cell.failures > 0 || cell.recovered > 0)
+  if (firstObservedIndex < 0) return { current: 0, longest: 0 }
+  const observedCells = cells.slice(firstObservedIndex)
+  let current = 0
+  let longest = 0
+  let running = 0
+
+  for (const cell of observedCells) {
+    const clean = cell.failures === 0 || cell.recovered >= cell.failures
+    running = clean ? running + 1 : 0
+    longest = Math.max(longest, running)
+  }
+
+  for (let index = observedCells.length - 1; index >= 0; index -= 1) {
+    const cell = observedCells[index]
+    if (!cell || (cell.failures > 0 && cell.recovered < cell.failures)) break
+    current += 1
+  }
+
+  return { current, longest }
+}
+
+/** Find the oldest valid open failure using the Recovery Center's shared clock. */
+export function computeLongestOpenDowntime(
+  items: ReadonlyArray<{ createdAt?: string }>,
+  nowMs: number | null,
+): OpenDowntimeSummary | null {
+  if (nowMs === null || !Number.isFinite(nowMs)) return null
+  let longest: OpenDowntimeSummary | null = null
+  for (const item of items) {
+    if (!item.createdAt) continue
+    const createdAtMs = new Date(item.createdAt).getTime()
+    const durationMs = nowMs - createdAtMs
+    if (!Number.isFinite(durationMs) || durationMs < 0) continue
+    if (!longest || durationMs > longest.durationMs) {
+      longest = { createdAt: item.createdAt, durationMs }
+    }
+  }
+  return longest
+}
+
 export type DowntimeSeverity = 'ok' | 'warn' | 'danger'
 
 /** Downtime-clock thresholds in minutes (amber ≥1h, red ≥4h). */
@@ -351,10 +432,26 @@ export function downtimeSeverity(iso: string | undefined, nowMs: number | null):
   return 'ok'
 }
 
-/** Compact downtime duration for the "recovered after" toast: "3h 14m" / "12m" / "45s". Empty for bad input. */
-export function formatDowntime(ms: number): string {
+export type DurationStyle = 'clock' | 'age'
+
+/**
+ * Canonical compact duration formatter for every Recovery Center surface.
+ * `clock` is terse measured time (`3h 14m`); `age` is localized relative
+ * copy (`3h ago`). Invalid or negative input stays empty rather than leaking
+ * `NaN` into operator-facing text.
+ */
+export function formatDuration(ms: number, style: DurationStyle = 'clock'): string {
   if (!Number.isFinite(ms) || ms < 0) return ''
   const totalSeconds = Math.round(ms / 1000)
+  if (style === 'age') {
+    if (totalSeconds < 60) return runtimeT('recoveryCenter.relative.seconds', { count: totalSeconds })
+    const totalMinutes = Math.floor(totalSeconds / 60)
+    if (totalMinutes < 60) return runtimeT('recoveryCenter.relative.minutes', { count: totalMinutes })
+    const hours = Math.floor(totalMinutes / 60)
+    if (hours < 48) return runtimeT('recoveryCenter.relative.hours', { count: hours })
+    return runtimeT('recoveryCenter.relative.days', { count: Math.floor(hours / 24) })
+  }
+
   if (totalSeconds < 60) return `${totalSeconds}s`
   const totalMinutes = Math.floor(totalSeconds / 60)
   if (totalMinutes < 60) return `${totalMinutes}m`
@@ -363,19 +460,17 @@ export function formatDowntime(ms: number): string {
   return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`
 }
 
+/** @deprecated Prefer `formatDuration(ms)` in new Recovery Center code. */
+export function formatDowntime(ms: number): string {
+  return formatDuration(ms)
+}
+
 export function humanizeAge(iso: string | undefined, nowMs: number | null): string {
   if (nowMs === null) return ''
   if (!iso) return ''
   const then = new Date(iso).getTime()
   if (Number.isNaN(then)) return ''
-  const secs = Math.max(0, Math.round((nowMs - then) / 1000))
-  if (secs < 60) return runtimeT('recoveryCenter.relative.seconds', { count: secs })
-  const mins = Math.floor(secs / 60)
-  if (mins < 60) return runtimeT('recoveryCenter.relative.minutes', { count: mins })
-  const hours = Math.floor(mins / 60)
-  if (hours < 48) return runtimeT('recoveryCenter.relative.hours', { count: hours })
-  const days = Math.floor(hours / 24)
-  return runtimeT('recoveryCenter.relative.days', { count: days })
+  return formatDuration(Math.max(0, nowMs - then), 'age')
 }
 
 export function readErrorSignature(errorJson: unknown): string {

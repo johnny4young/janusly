@@ -1,5 +1,5 @@
 /**
- * "First recovered run" onboarding banner — a compact top overlay that
+ * "First recovered run" onboarding checklist — a compact contextual card
  * guides a new operator through the six setup milestones (configure a
  * credential → install a pack → run it → break it → recover it).
  *
@@ -10,8 +10,9 @@
  * renders only while `status === 'active'` and a next step remains. The
  * server derives progress, so it survives logout/login.
  *
- * Mounted unconditionally in `App.tsx`'s overlay layer beside
- * `BudgetBlockedBanner`; renders `null` when there's nothing to nudge.
+ * Mounted inside `RecoveryCenterPanel`, directly below the operational hero;
+ * renders `null` when there's nothing to nudge. Keeping the checklist in the
+ * product home means setup guidance never obscures a queue, dialog, or editor.
  */
 
 import { useEffect } from 'react'
@@ -87,7 +88,7 @@ export function OnboardingBanner({ onOpenTab }: { onOpenTab: (tab: ActiveTab) =>
   }
 
   return (
-    <div className="we-onboarding-banner" role="status" data-testid="onboarding-banner">
+    <aside className="we-onboarding-banner" role="status" data-testid="onboarding-banner">
       <span className="we-onboarding-banner__icon" aria-hidden="true">
         <Sparkles size={18} />
       </span>
@@ -137,6 +138,6 @@ export function OnboardingBanner({ onOpenTab }: { onOpenTab: (tab: ActiveTab) =>
           {t('onboarding.action.skip')}
         </button>
       </div>
-    </div>
+    </aside>
   )
 }

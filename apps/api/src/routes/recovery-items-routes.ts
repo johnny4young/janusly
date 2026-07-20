@@ -561,8 +561,8 @@ export const recoveryItemsRoutes: Route[] = [
         res.writeHead(200, {
           "Content-Type": "application/json",
           "Content-Disposition": contentDispositionAttachment(asciiFilename, utf8Filename),
-          "Access-Control-Expose-Headers": "Content-Disposition",
           ...corsHeaders(res),
+          "Access-Control-Expose-Headers": "Content-Disposition, X-Request-Id",
         });
         res.end(JSON.stringify(report.json));
         return;
@@ -571,8 +571,8 @@ export const recoveryItemsRoutes: Route[] = [
       res.writeHead(200, {
         "Content-Type": "text/markdown; charset=utf-8",
         "Content-Disposition": contentDispositionAttachment(asciiFilename, utf8Filename),
-        "Access-Control-Expose-Headers": "Content-Disposition",
         ...corsHeaders(res),
+        "Access-Control-Expose-Headers": "Content-Disposition, X-Request-Id",
       });
       res.end(report.markdown);
     },

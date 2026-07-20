@@ -14,7 +14,11 @@
  *   transient blip auto-recovers to live mode.
  * - On a terminal `run.status` it hands back to `'polling'` so the existing
  *   poll-loop terminal path (`bumpPlatformVersion` + platform refresh) runs in
- *   one place, then stops.
+ *   one place, but keeps draining the current SSE response until the server's
+ *   grace close so trailing cancellation/node frames are not lost.
+ * - A `catchup-truncated` frame means the bounded reconnect page has more
+ *   history. Buffered events land first, then the hook reconnects immediately
+ *   from the new cursor instead of silently skipping to the live tail.
  *
  * Used by `apps/web/src/App.tsx` alongside the polling effect.
  *
@@ -33,6 +37,7 @@ import { openRunEventStream } from '../api'
 import { useWorkflowStore } from '../store'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
 import type { JsonObject, RunEvent, RunNode } from '../types'
+import type { RunSummaryPatcher } from './useRunPolling'
 
 /** Abort the connect attempt if no byte arrives — catches proxy buffering. */
 const FIRST_BYTE_TIMEOUT_MS = 8_000
@@ -64,6 +69,11 @@ function skippedStateJson(payload: unknown): JsonObject {
   return { skipped: record.reason ?? record }
 }
 
+function escalatedWaitingStateJson(payload: unknown): JsonObject {
+  const record = isJsonObject(payload) ? payload : {}
+  return { waiting: isJsonObject(record.waiting) ? record.waiting : {} }
+}
+
 function errorJson(payload: unknown): JsonObject {
   const record = isJsonObject(payload) ? payload : {}
   const error = record.error
@@ -80,6 +90,12 @@ function runNodeFromEvent(event: RunEvent): RunNode | null {
   if (event.type === 'node.succeeded') return { nodeId: event.nodeId, status: 'succeeded', stateJson: outputStateJson(event.payload) }
   if (event.type === 'node.resumed') return { nodeId: event.nodeId, status: 'succeeded', stateJson: outputStateJson(event.payload) }
   if (event.type === 'node.failed') return { nodeId: event.nodeId, status: 'failed', errorJson: errorJson(event.payload) }
+  if (event.type === 'approval.timed_out' || event.type === 'approval.auto_rejected') {
+    return { nodeId: event.nodeId, status: 'failed', errorJson: errorJson(event.payload) }
+  }
+  if (event.type === 'approval.escalated') {
+    return { nodeId: event.nodeId, status: 'waiting', stateJson: escalatedWaitingStateJson(event.payload) }
+  }
   if (event.type === 'node.skipped') return { nodeId: event.nodeId, status: 'skipped', stateJson: skippedStateJson(event.payload) }
   return null
 }
@@ -102,7 +118,7 @@ function parseFrame(raw: string): ParsedFrame | null {
   return { id, event, data: dataLines.join('\n') }
 }
 
-export function useRunEventStream(runId: string | null): void {
+export function useRunEventStream(runId: string | null, patchRunSummary?: RunSummaryPatcher): void {
   useEffect(() => {
     if (!runId) {
       useWorkflowStore.getState().setStreamTransport('idle')
@@ -111,6 +127,7 @@ export function useRunEventStream(runId: string | null): void {
 
     let stopped = false
     let failures = 0
+    let terminalSeen = false
     let controller: AbortController | null = null
     let retryTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -156,7 +173,7 @@ export function useRunEventStream(runId: string | null): void {
       if (flushHandle === null) flushHandle = requestAnimationFrame(flushPending)
     }
 
-    const handleData = (frame: ParsedFrame): 'terminal' | 'ok' => {
+    const handleData = (frame: ParsedFrame): 'terminal' | 'catchup-truncated' | 'ok' => {
       let parsed: unknown
       try {
         parsed = JSON.parse(frame.data)
@@ -165,7 +182,9 @@ export function useRunEventStream(runId: string | null): void {
       }
       if (!parsed || typeof parsed !== 'object') return 'ok'
       const signal = parsed as { kind?: string; status?: string; id?: string; nodeId?: string | null; type?: string; payload?: unknown; createdAt?: string }
+      if (signal.kind === 'catchup-truncated') return 'catchup-truncated'
       if (signal.kind === 'run.status') {
+        if (typeof signal.status === 'string') patchRunSummary?.(runId, { status: signal.status })
         return isTerminalRunStatus(signal.status) ? 'terminal' : 'ok'
       }
       if (signal.kind === 'event' && typeof signal.id === 'string' && typeof signal.type === 'string') {
@@ -219,25 +238,49 @@ export function useRunEventStream(runId: string | null): void {
             buffer = buffer.slice(sep + 2)
             const frame = parseFrame(rawFrame)
             if (!frame) continue
-            if (handleData(frame) === 'terminal') {
-              // Hand finalization (platform refresh) back to the poll loop.
-              // Flip transport BEFORE marking stopped — `fallbackToPolling`
-              // is guarded on `stopped`, so the order matters.
-              clearTimeout(firstByteTimer)
-              flushPending() // land any buffered events before handing off
+            const outcome = handleData(frame)
+            if (outcome === 'terminal') {
+              // Resume polling immediately for final state convergence, but
+              // keep consuming the SSE response until the server's terminal
+              // grace closes it. Cancellation can publish trailing node events
+              // after run.status, and aborting here would drop those frames.
+              terminalSeen = true
+              flushPending()
               if (!stopped) store.getState().setStreamTransport('polling')
-              stopped = true
+              continue
+            }
+            if (outcome === 'catchup-truncated') {
+              // Land the page before deriving the next Last-Event-ID. The
+              // server intentionally closes truncated responses; reconnect
+              // immediately rather than counting this protocol signal as a
+              // transport failure/backoff.
+              clearTimeout(firstByteTimer)
+              flushPending()
+              if (!stopped) store.getState().setStreamTransport('polling')
               controller?.abort()
+              if (!stopped) retryTimer = setTimeout(() => { void connect() }, 0)
               return
             }
           }
         }
-        // Stream ended without a terminal signal (server grace close or a
-        // dropped connection) — reconnect from the last cursor.
+        // A terminal stream ends after the server's grace window. Polling is
+        // already active, so there is no reason to reconnect the live channel.
         clearTimeout(firstByteTimer)
+        flushPending()
+        if (terminalSeen) {
+          stopped = true
+          return
+        }
+        // Stream ended without a terminal signal — reconnect from the last
+        // composite cursor.
         if (!stopped) { failures += 1; fallbackToPolling(); scheduleReconnect() }
       } catch {
         clearTimeout(firstByteTimer)
+        flushPending()
+        if (terminalSeen) {
+          stopped = true
+          return
+        }
         if (!stopped) { failures += 1; fallbackToPolling(); scheduleReconnect() }
       }
     }
@@ -251,5 +294,5 @@ export function useRunEventStream(runId: string | null): void {
       controller?.abort()
       useWorkflowStore.getState().setStreamTransport('idle')
     }
-  }, [runId])
+  }, [patchRunSummary, runId])
 }

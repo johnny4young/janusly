@@ -31,10 +31,10 @@ type Props = {
   onOpen?: () => void
 }
 
-const SEVERITY_TONE: Record<RecoveryItemSeverity, string> = {
-  p1: 'red',
-  p2: 'amber',
-  p3: 'cobalt',
+const SEVERITY_TONE: Record<RecoveryItemSeverity, 'danger' | 'warning' | 'primary' | 'neutral'> = {
+  p1: 'danger',
+  p2: 'warning',
+  p3: 'primary',
   p4: 'neutral',
 }
 
@@ -83,9 +83,9 @@ export function RecoveryItemBadge({ item, onOpen }: Props): React.ReactElement |
     item.status === 'resolved' || Number.isNaN(slaTargetMs)
       ? null
       : Date.now() >= slaTargetMs
-        ? (t('recoveryItems.sla.overdue') as string)
+        ? (t('recoveryItems.sla.overdue'))
         : remaining
-  const ariaLabel = (
+  const ariaLabel =
     slaDescriptor
       ? t('recoveryItems.badge.openSla', {
           severity: t(`recoveryItems.severity.${item.severity}`),
@@ -96,7 +96,6 @@ export function RecoveryItemBadge({ item, onOpen }: Props): React.ReactElement |
           severity: t(`recoveryItems.severity.${item.severity}`),
           status: t(`recoveryItems.status.${item.status}`),
         })
-  ) as string
 
   return (
     <button
@@ -105,24 +104,28 @@ export function RecoveryItemBadge({ item, onOpen }: Props): React.ReactElement |
       data-testid="recovery-item-badge"
       data-severity={item.severity}
       data-status={item.status}
-      onClick={onOpen}
+      onClick={(event) => {
+        event.stopPropagation()
+        onOpen?.()
+      }}
       aria-label={ariaLabel}
     >
       <span
-        className={`we-pill we-pill--${severityTone}`}
+        className="we-pill"
+        data-tone={severityTone}
         data-testid="recovery-item-severity"
       >
         {t(`recoveryItems.severity.${item.severity}`)}
       </span>
       <span
-        className="we-pill we-pill--neutral"
+        className="we-pill" data-tone="neutral"
         data-testid="recovery-item-status"
       >
         {t(`recoveryItems.status.${item.status}`)}
       </span>
       {item.occurrenceCount > 1 && (
         <span
-          className="we-pill we-pill--amber"
+          className="we-pill" data-tone="warning"
           data-testid="recovery-item-occurrences"
         >
           {t('recoveryItems.occurrences.badge', { count: item.occurrenceCount })}

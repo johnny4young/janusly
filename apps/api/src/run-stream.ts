@@ -58,7 +58,7 @@ type Subscriber = { orgId: string; write: StreamWriter; onUnavailable?: () => vo
 
 /** Outcome of an `addSubscriber` attempt. */
 export type AddSubscriberResult =
-  | { ok: true; remove: () => void }
+  | { ok: true; ready: Promise<void>; remove: () => void }
   | { ok: false; reason: "cap_exceeded" };
 
 /**
@@ -71,11 +71,26 @@ export type SubscriberClient = {
   on(event: "message", listener: (channel: string, message: string) => void): unknown;
 };
 
+/**
+ * Return the API process's dedicated Redis subscriber connection.
+ *
+ * The run-event hub owns the connection lifecycle. Other API-only pub/sub
+ * consumers can attach a channel listener here rather than opening another
+ * subscriber connection per replica.
+ */
+export function getRunStreamSubscriber(): IORedis {
+  getRunStreamHub();
+  if (!subscriberConn) throw new Error("Run stream subscriber was not initialized");
+  return subscriberConn;
+}
+
 export type RunStreamHub = {
   /**
    * Attach a client to a run's stream. Refcounts the Redis SUBSCRIBE and
-   * enforces the per-org cap. Returns a `remove()` the caller invokes on
-   * disconnect (idempotent).
+   * enforces the per-org cap. `ready` resolves only after Redis acknowledges
+   * the channel subscription; callers must await it before taking a database
+   * catch-up snapshot. Returns a `remove()` the caller invokes on disconnect
+   * (idempotent).
    */
   addSubscriber(runId: string, orgId: string, write: StreamWriter, cap: number, onUnavailable?: () => void): AddSubscriberResult;
   /** Current open-connection count for an org (for tests / observability). */
@@ -88,6 +103,7 @@ export type RunStreamHub = {
  */
 export function createRunStreamHub(subscriber: SubscriberClient): RunStreamHub {
   const byRun = new Map<string, Set<Subscriber>>();
+  const readyByRun = new Map<string, Promise<void>>();
   const orgCounts = new Map<string, number>();
 
   subscriber.on("message", (channel, message) => {
@@ -124,6 +140,7 @@ export function createRunStreamHub(subscriber: SubscriberClient): RunStreamHub {
     const current = byRun.get(runId);
     if (current !== expectedSet) return;
     byRun.delete(runId);
+    readyByRun.delete(runId);
     for (const sub of current) {
       if (sub.removed) continue;
       sub.removed = true;
@@ -150,10 +167,18 @@ export function createRunStreamHub(subscriber: SubscriberClient): RunStreamHub {
         // must close the affected SSE clients so the browser falls back to
         // polling; leaving a heartbeat-only stream open would suppress the
         // poll loop while no live events can arrive.
-        void Promise.resolve(subscriber.subscribe(runEventChannel(runId))).catch((err) => {
-          console.warn("[run-stream] subscribe failed", { runId, err });
-          dropRunSubscribers(runId, subscribedSet);
-        });
+        const ready = Promise.resolve(subscriber.subscribe(runEventChannel(runId)))
+          .then(() => undefined)
+          .catch((err) => {
+            console.warn("[run-stream] subscribe failed", { runId, err });
+            dropRunSubscribers(runId, subscribedSet);
+            throw err;
+          });
+        // The route awaits this promise. Keep an internal rejection handler as
+        // well so an early client disconnect cannot turn a subscribe failure
+        // into an unhandled process-level rejection.
+        void ready.catch(() => {});
+        readyByRun.set(runId, ready);
       }
       const sub: Subscriber = { orgId, write, removed: false };
       if (onUnavailable) sub.onUnavailable = onUnavailable;
@@ -170,6 +195,7 @@ export function createRunStreamHub(subscriber: SubscriberClient): RunStreamHub {
           current.delete(sub);
           if (current.size === 0) {
             byRun.delete(runId);
+            readyByRun.delete(runId);
             void Promise.resolve(subscriber.unsubscribe(runEventChannel(runId))).catch((err) => {
               console.warn("[run-stream] unsubscribe failed", { runId, err });
             });
@@ -177,7 +203,7 @@ export function createRunStreamHub(subscriber: SubscriberClient): RunStreamHub {
         }
         bumpOrg(orgId, -1);
       };
-      return { ok: true, remove };
+      return { ok: true, ready: readyByRun.get(runId) ?? Promise.resolve(), remove };
     },
     activeCount(orgId) {
       return orgCounts.get(orgId) ?? 0;
@@ -200,6 +226,9 @@ export function getRunStreamHub(): RunStreamHub {
     enableReadyCheck: true,
     lazyConnect: false,
   });
+  // Redis pub/sub is best-effort. An outage falls back to each cache's TTL,
+  // so a connection error must not become an unhandled process-level event.
+  subscriberConn.on("error", () => {});
   hubSingleton = createRunStreamHub(subscriberConn);
   return hubSingleton;
 }
@@ -209,7 +238,15 @@ export async function closeRunStreamHub(): Promise<void> {
   const conn = subscriberConn;
   subscriberConn = null;
   hubSingleton = null;
-  if (conn) await conn.quit();
+  if (!conn) return;
+  try {
+    await conn.quit();
+  } catch {
+    // The stream and cache subscribers are both best-effort. A disconnected
+    // Redis server must not turn an otherwise graceful API shutdown into a
+    // failed process exit.
+    conn.disconnect();
+  }
 }
 
 /** Wire the engine's run-event seam to a Redis PUBLISH. Call once at boot. */

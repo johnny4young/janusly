@@ -40,22 +40,22 @@ export function SolutionPacksPanel({ packs, credentials, onInstall, onSampleRun,
     const q = query.trim().toLowerCase()
     if (!q) return packs
     return packs.filter((pack) => {
-      const packName = t(`packs.${pack.id}.name`, { defaultValue: pack.name }) as string
-      const packDescription = t(`packs.${pack.id}.description`, { defaultValue: pack.description }) as string
-      const categoryLabel = t(`packs.category.${pack.category}`, { defaultValue: pack.category }) as string
+      const packName = t(`packs.${pack.id}.name`, { defaultValue: pack.name })
+      const packDescription = t(`packs.${pack.id}.description`, { defaultValue: pack.description })
+      const categoryLabel = t(`packs.category.${pack.category}`, { defaultValue: pack.category })
       return `${packName} ${packDescription} ${categoryLabel}`.toLowerCase().includes(q)
     })
   }, [packs, query, t, i18n.language])
 
   if (packs.length === 0) {
     return (
-      <PanelChrome title={t('packs.title') as string} description={t('packs.description') as string} icon={<Package size={18} />}>
+      <PanelChrome title={t('packs.title')} description={t('packs.description')} icon={<Package size={18} />}>
         <div className="panel-list">
           <EmptyView
             icon={<Package size={22} />}
-            title={t('packs.empty.title') as string}
-            body={t('packs.empty.body') as string}
-            cta={{ label: t('packs.empty.cta') as string, onClick: () => setActiveTab('templates') }}
+            title={t('packs.empty.title')}
+            body={t('packs.empty.body')}
+            cta={{ label: t('packs.empty.cta'), onClick: () => setActiveTab('templates') }}
           />
         </div>
       </PanelChrome>
@@ -63,23 +63,23 @@ export function SolutionPacksPanel({ packs, credentials, onInstall, onSampleRun,
   }
 
   return (
-    <PanelChrome title={t('packs.title') as string} description={t('packs.description') as string} icon={<Package size={18} />}>
-      <PanelSearch value={query} onChange={setQuery} placeholder={t('packs.searchPlaceholder') as string} />
+    <PanelChrome title={t('packs.title')} description={t('packs.description')} icon={<Package size={18} />}>
+      <PanelSearch value={query} onChange={setQuery} placeholder={t('packs.searchPlaceholder')} />
       {filtered.length === 0 && (
         <div className="panel-list">
           <EmptyView
             icon={<Search size={22} />}
-            title={t('packs.noMatches.title') as string}
-            body={t('packs.noMatches.body') as string}
-            cta={{ label: t('common.clearFilter') as string, onClick: () => setQuery('') }}
+            title={t('packs.noMatches.title')}
+            body={t('packs.noMatches.body')}
+            cta={{ label: t('common.clearFilter'), onClick: () => setQuery('') }}
           />
         </div>
       )}
       <div className="we-recipe-grid">
         {filtered.map((pack) => {
-          const packName = t(`packs.${pack.id}.name`, { defaultValue: pack.name }) as string
-          const packDescription = t(`packs.${pack.id}.description`, { defaultValue: pack.description }) as string
-          const categoryLabel = t(`packs.category.${pack.category}`, { defaultValue: pack.category }) as string
+          const packName = t(`packs.${pack.id}.name`, { defaultValue: pack.name })
+          const packDescription = t(`packs.${pack.id}.description`, { defaultValue: pack.description })
+          const categoryLabel = t(`packs.category.${pack.category}`, { defaultValue: pack.category })
           return (
             <div key={pack.id} className="list-card">
               <div className="split-row" style={{ width: '100%' }}>
@@ -98,7 +98,7 @@ export function SolutionPacksPanel({ packs, credentials, onInstall, onSampleRun,
                       const statusLabel = t(
                         missing ? 'packs.credential.missing' : 'packs.credential.ready',
                         { name: cred.name, kind: cred.kind },
-                      ) as string
+                      )
                       return (
                         <span
                           key={`cred-${cred.name}`}

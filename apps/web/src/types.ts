@@ -14,7 +14,17 @@
 import type { Edge, Node } from '@xyflow/react'
 
 export type JsonObject = Record<string, unknown>
-export type RunNode = { nodeId: string; status: string; stateJson?: JsonObject | null; errorJson?: JsonObject | null }
+export type RunNode = {
+  nodeId: string
+  status: string
+  stateJson?: JsonObject | null
+  errorJson?: JsonObject | null
+  /** Retry attempt count (defaults to 0 in the DB). Present on `/run` + `/status` rows and SSE. */
+  attempts?: number | null
+  /** ISO timestamps from the run_nodes row — used to render node duration. */
+  startedAt?: string | null
+  finishedAt?: string | null
+}
 export type RunEvent = { id: string; nodeId?: string | null; type: string; payload?: JsonObject | null; createdAt?: string }
 type WorkflowNodeData = {
   label: string
@@ -26,6 +36,19 @@ type WorkflowNodeData = {
 }
 type WorkflowEdgeData = { condition?: string }
 export type ValidationIssue = { code: string; message: string; nodeId?: string; edgeId?: string }
+export type ReadinessIssue = ValidationIssue & {
+  severity: 'warn' | 'fail'
+  suggestion?: string
+}
+export type ReadinessResult = {
+  status: 'pass' | 'warn' | 'fail'
+  issues: ReadinessIssue[]
+}
+export type AiReviewIssue = ValidationIssue & {
+  severity: 'info' | 'warn' | 'fail'
+  rationale: string
+  suggestion: string
+}
 export type ToolSchema = {
   name: string
   description: string
@@ -69,15 +92,28 @@ export type SolutionPackPublic = {
   samplePayloadIds: string[]
   failureFixtureIds: string[]
 }
-export type ReasoningMessage = { id: string; title: string; body: string; meta?: string; tone: 'info' | 'success' | 'warning' | 'error' }
-export type SavedWorkflow = { id: string; orgId: string; name: string; createdBy?: string; createdAt?: string; updatedAt?: string; lastRunStatus?: string | null; runCount?: number; tags?: string[]; folder?: string | null; deletedAt?: string | null }
+/**
+ * `status` / `pausedReason` are the workflow's OPERATIONAL state (`active`,
+ * `paused_upstream_degraded`, `paused_circuit_breaker`) — distinct from
+ * `lastRunStatus`, which is the outcome of its most recent run. A paused
+ * workflow refuses new runs, so the list must say so.
+ */
+export type SavedWorkflow = { id: string; orgId: string; name: string; createdBy?: string; createdAt?: string; updatedAt?: string; lastRunStatus?: string | null; runCount?: number; bufferedTriggerCount?: number; status?: string; pausedReason?: string | null; tags?: string[]; folder?: string | null; deletedAt?: string | null }
 export type RunSummary = {
   id: string
   orgId?: string
+  /** Resolved owning workflow id from the bounded `/runs` projection. */
+  workflowId?: string
+  /** Captured workflow display name without the full run input snapshot. */
+  workflowName?: string | null
   workflowVersionId?: string
   status: string
   createdBy?: string
   createdAt?: string
+  /** Full run-start envelope. Present on `/run` and `/status`; omitted from the bounded `/runs` list. */
+  inputJson?: JsonObject | null
+  /** Correlation id shared by a subworkflow chain. Null on historical root runs that predate trace assignment. */
+  traceId?: string | null
   /** Projected workflow output. Populated only when the run reached `succeeded` AND the workflow declared `outputs`. */
   outputJson?: JsonObject | null
   /**
@@ -130,8 +166,27 @@ export type McpToolDescriptor = {
 }
 
 export type AiMode = 'ai' | 'fallback' | 'error'
+
+/** Budget-driven reduction of Best-of-N candidates for one AI generation. */
+export type AiCandidateBackoff = { from: number; to: number }
+
+/** Validate optional Best-of-N metadata before user-facing interpolation. */
+export function parseAiCandidateBackoff(value: unknown): AiCandidateBackoff | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const { from, to } = value as Record<string, unknown>
+  if (
+    typeof from !== 'number'
+    || typeof to !== 'number'
+    || !Number.isSafeInteger(from)
+    || !Number.isSafeInteger(to)
+    || from <= 0
+    || to <= 0
+    || to >= from
+  ) return undefined
+  return { from, to }
+}
 export type AiHealth = { enabled: boolean; provider?: string; model: string; timeoutMs: number; maxRetries: number }
-export type ActiveTab = 'home' | 'workflows' | 'members' | 'copilot' | 'marketplace' | 'templates' | 'packs' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'multiAgent' | 'operations'
+export type ActiveTab = 'home' | 'workflows' | 'members' | 'copilot' | 'experiments' | 'marketplace' | 'templates' | 'packs' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'multiAgent' | 'operations'
 
 /**
  * Tabs that NEED the React Flow canvas mounted as their main slot. Today
@@ -164,9 +219,10 @@ export const isCanvasTab = (tab: ActiveTab): tab is CanvasTab =>
  *   page never pay the React Flow runtime cost.
  * - Canvas tab (`copilot` / `inspector`): canvas mounted AND visible;
  *   contextual slot is NOT rendered (the right rail handles the panel).
- * - Any other tab: canvas mounted but HIDDEN via `display: none` so the
- *   root-level `<ReactFlowProvider>` retains viewport state across the
- *   navigation; the contextual main slot renders alongside.
+ * - Any other tab: the contextual main slot renders. The canvas stays
+ *   unmounted until a canvas tab has activated it in the current non-home
+ *   workspace session; after activation it remains mounted but HIDDEN via
+ *   `display: none` so `<ReactFlowProvider>` retains viewport state.
  *
  * Returning a small struct (vs three boolean call sites) keeps the dispatcher
  * inside `App.tsx` legible and lets a unit test cover every tab cheaply.
@@ -180,12 +236,12 @@ export type CanvasVisibility = {
   contextualSlot: boolean
 }
 
-export function getCanvasVisibility(activeTab: ActiveTab): CanvasVisibility {
+export function getCanvasVisibility(activeTab: ActiveTab, canvasActivated = false): CanvasVisibility {
   if (activeTab === 'home') {
     return { mounted: false, visible: false, contextualSlot: false }
   }
   const canvas = isCanvasTab(activeTab)
-  return { mounted: true, visible: canvas, contextualSlot: !canvas }
+  return { mounted: canvas || canvasActivated, visible: canvas, contextualSlot: !canvas }
 }
 /**
  * JSON-Schema-subset describing one input field on a workflow's declared
@@ -204,12 +260,16 @@ export type WorkflowInputSchemaShape = {
 export type WorkflowDefinition = {
   id?: string
   name?: string
-  nodes: Array<{ id: string; type: string; config: JsonObject }>
+  nodes: Array<{ id: string; type: string; label?: string; config: JsonObject }>
   edges: Array<{ from: string; to: string; condition?: string }>
   /** Typed inputs surfaced in the Inspector + validated at run start. */
   inputs?: WorkflowInputSchemaShape
   /** Output projection map; engine renders each template at terminal `succeeded`. */
   outputs?: Record<string, string>
+  /** Missing template paths stay empty by default; strict fails before node execution. */
+  templatePolicy?: 'lenient' | 'strict'
+  /** Editor-only layout metadata; runtime consumers ignore it. */
+  ui?: { positions?: Record<string, { x: number; y: number }> }
 }
 export type WorkflowGraphNode = Node<WorkflowNodeData>
 export type WorkflowGraphEdge = Edge<WorkflowEdgeData>

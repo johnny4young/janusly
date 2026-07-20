@@ -6,7 +6,7 @@ vi.mock('./http-policy', () => ({
 }))
 
 import { consumeStreamToPreview, fetchHttpTarget } from './http-policy'
-import { listTools, validateToolInput, executeTool, isToolWriteSide } from './tool-registry'
+import { listPlannerTools, listTools, validateToolInput, executeTool, isToolWriteSide } from './tool-registry'
 
 const fetchHttpTargetMock = vi.mocked(fetchHttpTarget)
 const consumeStreamToPreviewMock = vi.mocked(consumeStreamToPreview)
@@ -19,7 +19,7 @@ describe('tool-registry', () => {
 
   it('listTools exposes the registered schemas', () => {
     const names = listTools().map(tool => tool.name)
-    expect(names).toEqual(expect.arrayContaining(['http.request', 'text.uppercase', 'json.pick', 'db.schema.describe', 'db.query.read', 'db.query.write', 'db.query.transaction', 'vector.search', 'vector.upsert']))
+    expect(names).toEqual(expect.arrayContaining(['http.request', 'text.uppercase', 'json.parse', 'json.pick', 'db.schema.describe', 'db.query.read', 'db.query.write', 'db.query.transaction', 'vector.search', 'vector.upsert']))
   })
 
   it('validateToolInput rejects unknown tools', () => {
@@ -84,6 +84,29 @@ describe('tool-registry', () => {
   it('executeTool returns parsed output that matches the declared shape', async () => {
     const result = await executeTool('json.pick', { path: 'x.y' }, { x: { y: 7 } })
     expect(result).toEqual({ value: 7 })
+  })
+
+  it('http.request exposes parsed JSON only for a declared JSON media type', async () => {
+    fetchHttpTargetMock.mockResolvedValueOnce({
+      statusCode: 200,
+      ok: true,
+      body: '{"id":42}',
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+    })
+    expect(await executeTool('http.request', { url: 'https://example.com/customer' }, {})).toEqual({
+      statusCode: 200,
+      ok: true,
+      body: '{"id":42}',
+      json: { id: 42 },
+    })
+
+    fetchHttpTargetMock.mockResolvedValueOnce({
+      statusCode: 200,
+      ok: true,
+      body: '{"id":42}',
+      headers: { 'content-type': 'text/plain' },
+    })
+    expect(await executeTool('http.request', { url: 'https://example.com/plain' }, {})).not.toHaveProperty('json')
   })
 
   it('executeTool rejects outputs that do not match the declared schema', async () => {
@@ -184,6 +207,43 @@ describe('tool-registry', () => {
     expect(vectorUpsert?.optional).toEqual(['metadata'])
   })
 
+  it('derives a typed planner catalog and omits write-side tools in dry-run mode', () => {
+    const publicTools = listTools()
+    const plannerTools = listPlannerTools()
+    expect(plannerTools).toHaveLength(publicTools.length)
+
+    const http = plannerTools.find(tool => tool.name === 'http.request')
+    expect(http).toMatchObject({ writeSide: true })
+    expect(http?.inputSchema).toMatchObject({
+      type: 'object',
+      required: ['url'],
+      properties: {
+        url: { type: 'string' },
+        method: { type: 'string' },
+      },
+    })
+
+    const dryRunTools = listPlannerTools({ dryRun: true })
+    expect(dryRunTools.every(tool => !tool.writeSide)).toBe(true)
+    expect(dryRunTools.map(tool => tool.name)).toEqual(expect.arrayContaining([
+      'db.query.read',
+      'json.parse',
+      'text.uppercase',
+      'vector.search',
+    ]))
+    expect(dryRunTools.map(tool => tool.name)).not.toEqual(expect.arrayContaining([
+      'db.query.write',
+      'email.send',
+      'http.request',
+      'vector.upsert',
+    ]))
+
+    // The web-facing contract remains compact; planner-only schemas do not
+    // increase the GET /tools payload.
+    expect(publicTools[0]).not.toHaveProperty('inputSchema')
+    expect(publicTools[0]).not.toHaveProperty('writeSide')
+  })
+
   /* -------- text.* -------- */
 
   it('text.lowercase happy path + Zod rejection', async () => {
@@ -240,6 +300,19 @@ describe('tool-registry', () => {
   })
 
   /* -------- json.* -------- */
+
+  it('json.parse returns native JSON values and rejects invalid text without echoing it', async () => {
+    expect(await executeTool('json.parse', { value: '{"customer":{"id":42}}' }, {})).toEqual({
+      value: { customer: { id: 42 } },
+    })
+    expect(await executeTool('json.parse', { value: 'true' }, {})).toEqual({ value: true })
+    expect(await executeTool('json.parse', { value: 'null' }, {})).toEqual({ value: null })
+    expect(validateToolInput('json.parse', {}).issues).toContain('Missing required input: value')
+    const error = await executeTool('json.parse', { value: 'secret-body {' }, {}).catch(value => value)
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toBe('json.parse received invalid JSON')
+    expect((error as Error).message).not.toContain('secret-body')
+  })
 
   it('json.set returns a copy with the path set, leaving the source untouched', async () => {
     const source = { user: { id: 1 } }
@@ -418,7 +491,7 @@ describe('tool-registry', () => {
     const names = listTools().map(tool => tool.name)
     expect(names).toEqual(expect.arrayContaining([
       'text.lowercase', 'text.trim', 'text.replace', 'text.regex',
-      'json.set', 'json.merge', 'json.jq',
+      'json.parse', 'json.set', 'json.merge', 'json.jq',
       'csv.parse', 'csv.stringify', 'csv.filter', 'csv.fetch',
       'time.now', 'time.parse', 'time.format', 'time.diff', 'time.add',
       'crypto.sha256', 'crypto.hmac', 'crypto.uuid',

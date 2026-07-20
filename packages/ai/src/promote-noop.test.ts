@@ -55,7 +55,7 @@ describe("promoteNoopPlaceholders — happy path", () => {
 
     const promoted = result.workflow.nodes.find((n) => n.id === "wait_3_days");
     expect(promoted?.type).toBe("wait_until");
-    expect((promoted?.config as { duration: string }).duration).toBe("P3D");
+    expect((promoted!.config as { duration: string }).duration).toBe("P3D");
 
     // Sibling nodes untouched.
     expect(result.workflow.nodes.find((n) => n.id === "start")?.type).toBe("noop");
@@ -332,7 +332,7 @@ describe("promoteNoopPlaceholders — schedule happy path", () => {
 
     const promoted = result.workflow.nodes.find((n) => n.id === "schedule_weekdays_9am");
     expect(promoted?.type).toBe("schedule");
-    expect((promoted?.config as { cronExpression: string }).cronExpression).toBe("0 9 * * 1-5");
+    expect((promoted!.config as { cronExpression: string }).cronExpression).toBe("0 9 * * 1-5");
   });
 
   it("recognises every documented schedule-intent prefix (case-insensitive)", async () => {

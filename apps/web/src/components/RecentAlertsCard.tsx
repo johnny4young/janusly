@@ -95,12 +95,12 @@ export function RecentAlertsCard(): React.ReactElement {
         </h3>
       </div>
       <div className="we-recent-alerts__list" data-testid="recent-alerts-list">
-        {loading && <LoadingSkeleton rows={3} label={t('common.loading') as string} />}
+        {loading && <LoadingSkeleton rows={3} label={t('common.loading')} />}
         {!loading && items.length === 0 && (
           <EmptyState
             icon={<BellOff />}
-            kicker={t('emptyState.alerts.kicker') as string}
-            body={t('emptyState.alerts.body') as string}
+            kicker={t('emptyState.alerts.kicker')}
+            body={t('emptyState.alerts.body')}
             testId="recent-alerts-empty"
           />
         )}
@@ -115,11 +115,11 @@ export function RecentAlertsCard(): React.ReactElement {
               <div className="we-list-row__main">
                 <strong>{item.policyName ?? t('alerts.recent.unknownPolicy')}</strong>
                 {item.trigger && (
-                  <span className="we-pill we-pill--neutral">
+                  <span className="we-pill" data-tone="neutral">
                     {t(`alerts.triggers.${item.trigger}`)}
                   </span>
                 )}
-                <span className="we-pill we-pill--neutral">
+                <span className="we-pill" data-tone="neutral">
                   {t(`alerts.outcomes.${item.outcome}`)}
                 </span>
                 <span className="we-list-row__hint">{relativeTime(item.dispatchedAt, locale)}</span>

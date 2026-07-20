@@ -42,6 +42,7 @@ function hydrate(row: WorkflowMetadataRow): WorkflowMetadataRecord {
     workflowId: row.workflowId,
     owners: Array.isArray(row.owners) ? (row.owners as string[]) : [],
     runbookMarkdown: row.runbookMarkdown,
+    aiGuidanceMarkdown: row.aiGuidanceMarkdown,
     description: row.description,
     tags: Array.isArray(row.tags) ? (row.tags as string[]) : [],
     folder: row.folder ?? null,
@@ -152,6 +153,23 @@ export async function upsertWorkflowMetadata(
 
   const id = previous ? `existing-${input.workflowId}` : crypto.randomUUID();
   const now = new Date();
+  const updateValues = {
+    owners: input.metadata.owners ?? [],
+    runbookMarkdown: input.metadata.runbookMarkdown ?? null,
+    description: input.metadata.description ?? null,
+    tags: input.metadata.tags ?? [],
+    folder: input.metadata.folder ?? null,
+    slackChannel: input.metadata.slackChannel ?? null,
+    linearProject: input.metadata.linearProject ?? null,
+    severityDefault: input.metadata.severityDefault ?? null,
+    updatedAt: now,
+    // Omission preserves a value written by a newer client. Explicit null is
+    // still the supported clear operation. This keeps legacy full-row clients
+    // from erasing a field they do not know exists.
+    ...(input.metadata.aiGuidanceMarkdown !== undefined
+      ? { aiGuidanceMarkdown: input.metadata.aiGuidanceMarkdown }
+      : {}),
+  };
 
   await db
     .insert(workflowMetadata)
@@ -161,6 +179,7 @@ export async function upsertWorkflowMetadata(
       workflowId: input.workflowId,
       owners: input.metadata.owners ?? [],
       runbookMarkdown: input.metadata.runbookMarkdown ?? null,
+      aiGuidanceMarkdown: input.metadata.aiGuidanceMarkdown ?? null,
       description: input.metadata.description ?? null,
       tags: input.metadata.tags ?? [],
       folder: input.metadata.folder ?? null,
@@ -173,17 +192,7 @@ export async function upsertWorkflowMetadata(
     })
     .onConflictDoUpdate({
       target: [workflowMetadata.orgId, workflowMetadata.workflowId],
-      set: {
-        owners: input.metadata.owners ?? [],
-        runbookMarkdown: input.metadata.runbookMarkdown ?? null,
-        description: input.metadata.description ?? null,
-        tags: input.metadata.tags ?? [],
-        folder: input.metadata.folder ?? null,
-        slackChannel: input.metadata.slackChannel ?? null,
-        linearProject: input.metadata.linearProject ?? null,
-        severityDefault: input.metadata.severityDefault ?? null,
-        updatedAt: now,
-      },
+      set: updateValues,
     });
 
   const record = await getWorkflowMetadata(input.orgId, input.workflowId);
@@ -226,6 +235,7 @@ export async function setWorkflowFolder(
       workflowId: input.workflowId,
       owners: [],
       runbookMarkdown: null,
+      aiGuidanceMarkdown: null,
       description: null,
       tags: [],
       folder: input.folder,
@@ -337,6 +347,7 @@ export async function assignWorkflowsToFolder(
         workflowId,
         owners: [],
         runbookMarkdown: null,
+        aiGuidanceMarkdown: null,
         description: null,
         tags: [],
         folder: input.folder,
@@ -427,6 +438,7 @@ export async function assignTagToWorkflows(
         workflowId,
         owners: [],
         runbookMarkdown: null,
+        aiGuidanceMarkdown: null,
         description: null,
         tags: [input.tag],
         folder: null,

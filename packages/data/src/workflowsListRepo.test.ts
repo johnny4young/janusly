@@ -12,6 +12,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let baseRows: Array<Record<string, unknown>> = [];
 let aggRows: Array<Record<string, unknown>> = [];
+let bufferedRows: Array<Record<string, unknown>> = [];
+let aggregateCall = 0;
 
 // One chainable stub shared by both queries: base ends at .limit(), the
 // aggregate ends at .groupBy(). Every other builder method returns `this`.
@@ -22,13 +24,14 @@ const chain: Record<string, unknown> = {
   orderBy: () => chain,
   innerJoin: () => chain,
   limit: () => Promise.resolve(baseRows),
-  groupBy: () => Promise.resolve(aggRows),
+  groupBy: () => Promise.resolve(aggregateCall++ === 0 ? aggRows : bufferedRows),
 };
 
 vi.mock("@janusly/db", () => ({
   db: { select: () => chain },
   runs: { id: "id", status: "status", createdAt: "created_at", replayMode: "replay_mode", workflowVersionId: "workflow_version_id" },
-  workflows: { id: "id", orgId: "org_id", name: "name", createdBy: "created_by", createdAt: "created_at", status: "status", pausedReason: "paused_reason" },
+  triggerEvents: { id: "id", orgId: "org_id", workflowId: "workflow_id", status: "status", backfillClaimedAt: "backfill_claimed_at" },
+  workflows: { id: "id", orgId: "org_id", name: "name", createdBy: "created_by", createdAt: "created_at", status: "status", pausedReason: "paused_reason", deletedAt: "deleted_at" },
   workflowVersions: { id: "id", orgId: "org_id", workflowId: "workflow_id" },
   workflowMetadata: { tags: "tags", folder: "folder", orgId: "org_id", workflowId: "workflow_id" },
 }));
@@ -38,6 +41,8 @@ import { listDeletedWorkflowsWithRunSummary, listWorkflowsWithRunSummary } from 
 beforeEach(() => {
   baseRows = [];
   aggRows = [];
+  bufferedRows = [];
+  aggregateCall = 0;
 });
 
 describe("listWorkflowsWithRunSummary", () => {
@@ -54,12 +59,13 @@ describe("listWorkflowsWithRunSummary", () => {
       { id: "wf-b", orgId: "org-1", name: "B", createdBy: null, createdAt: new Date("2026-01-02T00:00:00Z"), status: "active", pausedReason: null, tags: [], folder: null },
     ];
     aggRows = [{ workflowId: "wf-a", runCount: 3, lastRunStatus: "failed" }];
+    bufferedRows = [{ workflowId: "wf-a", count: 7 }];
 
     const rows = await listWorkflowsWithRunSummary("org-1", 100);
 
     expect(rows).toEqual([
-      { id: "wf-a", orgId: "org-1", name: "A", createdBy: "u", createdAt: new Date("2026-01-01T00:00:00Z"), lastRunStatus: "failed", runCount: 3, status: "paused_upstream_degraded", pausedReason: "Upstream \"stripe\" degraded", tags: [], folder: "Billing", deletedAt: null },
-      { id: "wf-b", orgId: "org-1", name: "B", createdBy: null, createdAt: new Date("2026-01-02T00:00:00Z"), lastRunStatus: null, runCount: 0, status: "active", pausedReason: null, tags: [], folder: null, deletedAt: null },
+      { id: "wf-a", orgId: "org-1", name: "A", createdBy: "u", createdAt: new Date("2026-01-01T00:00:00Z"), lastRunStatus: "failed", runCount: 3, bufferedTriggerCount: 7, status: "paused_upstream_degraded", pausedReason: "Upstream \"stripe\" degraded", tags: [], folder: "Billing", deletedAt: null },
+      { id: "wf-b", orgId: "org-1", name: "B", createdBy: null, createdAt: new Date("2026-01-02T00:00:00Z"), lastRunStatus: null, runCount: 0, bufferedTriggerCount: 0, status: "active", pausedReason: null, tags: [], folder: null, deletedAt: null },
     ]);
   });
 
@@ -192,8 +198,8 @@ describe("listDeletedWorkflowsWithRunSummary", () => {
     const rows = await listDeletedWorkflowsWithRunSummary("org-1", 100);
 
     expect(rows).toEqual([
-      { id: "wf-a", orgId: "org-1", name: "A", createdBy: null, createdAt: new Date("2026-01-01T00:00:00Z"), lastRunStatus: "succeeded", runCount: 5, status: "active", pausedReason: null, tags: ["billing"], folder: "Billing", deletedAt: new Date("2026-03-02T00:00:00Z") },
-      { id: "wf-b", orgId: "org-1", name: "B", createdBy: null, createdAt: new Date("2026-01-02T00:00:00Z"), lastRunStatus: null, runCount: 0, status: "active", pausedReason: null, tags: [], folder: null, deletedAt: new Date("2026-03-01T00:00:00Z") },
+      { id: "wf-a", orgId: "org-1", name: "A", createdBy: null, createdAt: new Date("2026-01-01T00:00:00Z"), lastRunStatus: "succeeded", runCount: 5, bufferedTriggerCount: 0, status: "active", pausedReason: null, tags: ["billing"], folder: "Billing", deletedAt: new Date("2026-03-02T00:00:00Z") },
+      { id: "wf-b", orgId: "org-1", name: "B", createdBy: null, createdAt: new Date("2026-01-02T00:00:00Z"), lastRunStatus: null, runCount: 0, bufferedTriggerCount: 0, status: "active", pausedReason: null, tags: [], folder: null, deletedAt: new Date("2026-03-01T00:00:00Z") },
     ]);
   });
 

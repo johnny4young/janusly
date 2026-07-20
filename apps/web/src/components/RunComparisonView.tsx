@@ -1,15 +1,15 @@
 /**
- * Per-node comparison renderer for the Replay Lab. Reads the typed
+ * Per-node comparison renderer for replay and historical diagnosis. Reads the typed
  * payload `GET /runs/compare` returns and displays one row per node
  * with status pills, output equality, latency delta, and cost delta.
  *
- * Used by `ReplayLabDialog.tsx` after the lab run reaches terminal
- * status; the dialog fetches the comparison and hands the result to
- * this component for rendering.
+ * Used by:
+ * - `ReplayLabDialog.tsx` after the lab run reaches terminal status.
+ * - `RunHistoryComparisonDialog.tsx` for a selected run and its prior success.
  */
 
-import React, { useMemo } from 'react'
-import { ArrowRight, Minus, Check, AlertCircle, Beaker } from 'lucide-react'
+import { useMemo } from 'react'
+import { ArrowRight, Minus, Check, AlertCircle, Beaker, GitCompareArrows } from 'lucide-react'
 import { useT } from '../i18n'
 import { formatStatusLabel } from '../constants'
 
@@ -151,7 +151,14 @@ const EQUALITY_KEY: Record<Equality, string> = {
   'only-replay': 'comparison.equality.onlyReplay',
 }
 
-export function RunComparisonView({ payload }: { payload: RunComparisonPayload }) {
+/** Render a node-by-node comparison for either a sandbox replay or history pair. */
+export function RunComparisonView({
+  payload,
+  context = 'replay',
+}: {
+  payload: RunComparisonPayload
+  context?: 'replay' | 'history'
+}) {
   const { t } = useT()
   const summary = useMemo(() => computeSummary(payload.perNode), [payload.perNode])
 
@@ -165,16 +172,21 @@ export function RunComparisonView({ payload }: { payload: RunComparisonPayload }
 
   return (
     <div className="we-comparison">
-      <header className="we-comparison-summary" aria-label={t('comparison.summaryAria')}>
+      <header
+        className="we-comparison-summary"
+        aria-label={t(context === 'history' ? 'comparison.historySummaryAria' : 'comparison.summaryAria')}
+      >
         <div className="we-comparison-summary__line">
-          <Beaker size={14} aria-hidden="true" />
+          {context === 'history'
+            ? <GitCompareArrows size={14} aria-hidden="true" />
+            : <Beaker size={14} aria-hidden="true" />}
           <span>
             {t('comparison.changedNodes', { changed: summary.changedNodes, total: summary.totalNodes, count: summary.totalNodes })}
           </span>
           <span aria-hidden="true">·</span>
-          <span>{t('comparison.replayStatus', { status: formatStatusLabel(payload.replayRun.status) })}</span>
+          <span>{t(context === 'history' ? 'comparison.selectedStatus' : 'comparison.replayStatus', { status: formatStatusLabel(payload.replayRun.status) })}</span>
           <span aria-hidden="true">·</span>
-          <span>
+          <span className="we-comparison-summary__metric">
             {t('comparison.latency')} {formatLatency(summary.baseTotalLatencyMs)}
             <ArrowRight size={12} aria-hidden="true" style={{ verticalAlign: 'middle', margin: '0 4px' }} />
             {formatLatency(summary.replayTotalLatencyMs)}
@@ -183,7 +195,7 @@ export function RunComparisonView({ payload }: { payload: RunComparisonPayload }
             </span>
           </span>
           <span aria-hidden="true">·</span>
-          <span>
+          <span className="we-comparison-summary__metric">
             {t('comparison.cost')} {formatCost(summary.baseTotalCostUsd)}
             <ArrowRight size={12} aria-hidden="true" style={{ verticalAlign: 'middle', margin: '0 4px' }} />
             {formatCost(summary.replayTotalCostUsd)}
@@ -194,47 +206,53 @@ export function RunComparisonView({ payload }: { payload: RunComparisonPayload }
         </div>
       </header>
 
-      <table className="we-comparison-table" role="table" aria-label={t('comparison.tableAria')}>
-        <thead>
-          <tr>
-            <th scope="col">{t('comparison.col.node')}</th>
-            <th scope="col">{t('comparison.col.base')}</th>
-            <th scope="col">{t('comparison.col.replay')}</th>
-            <th scope="col">{t('comparison.col.output')}</th>
-            <th scope="col">{t('comparison.col.latencyDelta')}</th>
-            <th scope="col">{t('comparison.col.costDelta')}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {payload.perNode.map((node) => {
-            const equality = classifyEquality(node)
-            return (
-              <tr
-                key={node.nodeId}
-                className={`we-comparison-row we-comparison-row--${equality}`}
-                data-testid={`comparison-row-${node.nodeId}`}
-              >
-                <td className="we-comparison-cell-node">{node.nodeId}</td>
-                <td>
-                  <StatusPill status={node.base.status} />
-                </td>
-                <td>
-                  <StatusPill status={node.replay.status} />
-                </td>
-                <td>
-                  <EqualityChip equality={equality} />
-                </td>
-                <td className="we-comparison-cell-num">
-                  {formatLatencyDelta(node.base.latencyMs, node.replay.latencyMs)}
-                </td>
-                <td className="we-comparison-cell-num">
-                  {formatCostDelta(node.base.costUsd, node.replay.costUsd)}
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
+      <div className="we-comparison-table-scroll">
+        <table
+          className="we-comparison-table"
+          role="table"
+          aria-label={t(context === 'history' ? 'comparison.historyTableAria' : 'comparison.tableAria')}
+        >
+          <thead>
+            <tr>
+              <th scope="col">{t('comparison.col.node')}</th>
+              <th scope="col">{t(context === 'history' ? 'comparison.col.lastSuccessful' : 'comparison.col.base')}</th>
+              <th scope="col">{t(context === 'history' ? 'comparison.col.selected' : 'comparison.col.replay')}</th>
+              <th scope="col">{t('comparison.col.output')}</th>
+              <th scope="col">{t('comparison.col.latencyDelta')}</th>
+              <th scope="col">{t('comparison.col.costDelta')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {payload.perNode.map((node) => {
+              const equality = classifyEquality(node)
+              return (
+                <tr
+                  key={node.nodeId}
+                  className={`we-comparison-row we-comparison-row--${equality}`}
+                  data-testid={`comparison-row-${node.nodeId}`}
+                >
+                  <td className="we-comparison-cell-node">{node.nodeId}</td>
+                  <td>
+                    <StatusPill status={node.base.status} />
+                  </td>
+                  <td>
+                    <StatusPill status={node.replay.status} />
+                  </td>
+                  <td>
+                    <EqualityChip equality={equality} />
+                  </td>
+                  <td className="we-comparison-cell-num">
+                    {formatLatencyDelta(node.base.latencyMs, node.replay.latencyMs)}
+                  </td>
+                  <td className="we-comparison-cell-num">
+                    {formatCostDelta(node.base.costUsd, node.replay.costUsd)}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
@@ -262,7 +280,7 @@ function EqualityChip({ equality }: { equality: Equality }) {
   const { t } = useT()
   return (
     <span className={`we-comparison-chip we-comparison-chip--${equality}`}>
-      {t(EQUALITY_KEY[equality] as never) as string}
+      {t(EQUALITY_KEY[equality] as never)}
     </span>
   )
 }

@@ -3,7 +3,8 @@
  *
  * Maps 1:1 to `GET /recovery/metrics?windowDays=…`. The response carries
  * `successRate`, `mttr`, `p95Latency`, `approvalsPending`, `replayRate`,
- * `slaAttainment`, and `costThisWindow` (with per-provider rows).
+ * `slaAttainment`, `timeToFirstAction`, `recurrenceRate`, resolved clusters,
+ * value estimates, and `costThisWindow` (with per-provider rows).
  * Severity + rationale are
  * server-emitted so the SDK doesn't re-derive them.
  */

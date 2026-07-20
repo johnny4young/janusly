@@ -63,6 +63,8 @@ export type RecoveryItem = {
   resolutionReason: RecoveryItemResolutionReason | null;
   resolvedBy: string | null;
   resolvedAt: Date | null;
+  /** First meaningful recovery action; set once and never moved by later transitions. */
+  firstActionAt: Date | null;
   comments: RecoveryItemComment[];
   /** Normalized failure signature — the debounce match key alongside org + workflow. Null on items created before debounce or from a signature-less DLQ row. */
   errorSignature: string | null;
@@ -90,6 +92,7 @@ function hydrate(row: RecoveryItemRow): RecoveryItem {
     resolutionReason: row.resolutionReason as RecoveryItemResolutionReason | null,
     resolvedBy: row.resolvedBy,
     resolvedAt: row.resolvedAt,
+    firstActionAt: row.firstActionAt,
     comments: (row.comments as RecoveryItemComment[]) ?? [],
     errorSignature: row.errorSignature,
     occurrenceCount: row.occurrenceCount,
@@ -247,6 +250,7 @@ export async function createRecoveryItem(
       resolutionReason: null,
       resolvedBy: null,
       resolvedAt: null,
+      firstActionAt: null,
       comments: [],
       errorSignature: input.errorSignature ?? null,
       occurrenceCount: 1,
@@ -419,7 +423,11 @@ async function applyCas(
 
   const result = await db
     .update(recoveryItems)
-    .set({ ...patch, updatedAt: new Date() })
+    .set({
+      ...patch,
+      firstActionAt: sql`coalesce(${recoveryItems.firstActionAt}, now())`,
+      updatedAt: new Date(),
+    })
     .where(
       and(
         eq(recoveryItems.orgId, orgId),
@@ -494,6 +502,7 @@ export async function escalateRecoveryItem(
     .set({
       severity: input.severity,
       slaTargetAt,
+      firstActionAt: sql`coalesce(${recoveryItems.firstActionAt}, now())`,
       updatedAt: new Date(),
     })
     .where(
@@ -523,7 +532,11 @@ export async function assignOwnerRecoveryItem(
 
   const result = await db
     .update(recoveryItems)
-    .set({ owner: input.owner, updatedAt: new Date() })
+    .set({
+      owner: input.owner,
+      firstActionAt: sql`coalesce(${recoveryItems.firstActionAt}, now())`,
+      updatedAt: new Date(),
+    })
     .where(
       and(
         eq(recoveryItems.orgId, orgId),
@@ -600,7 +613,11 @@ export async function appendCommentToRecoveryItem(
   const nextComments = [...item.comments, comment];
   await db
     .update(recoveryItems)
-    .set({ comments: nextComments, updatedAt: new Date() })
+    .set({
+      comments: nextComments,
+      firstActionAt: sql`coalesce(${recoveryItems.firstActionAt}, now())`,
+      updatedAt: new Date(),
+    })
     .where(and(eq(recoveryItems.orgId, input.orgId), eq(recoveryItems.id, input.id)));
   return { ok: true, comment, total: nextComments.length };
 }

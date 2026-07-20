@@ -33,6 +33,9 @@ import {
 } from "./_helpers/demo-helpers";
 
 type WorkflowJson = { nodes: Array<{ id: string; type: string; config: Record<string, unknown> }> };
+const API_URL = process.env.E2E_API_URL ?? "http://localhost:3001";
+const AUTH = { "x-org-id": "default", "x-user-id": "dev-user" };
+const OTHER_AUTH = { "x-org-id": "recovery-loop-other", "x-user-id": "other-user" };
 
 /** Deep-clone F3 and replace the failing `charge` http node with a `noop` of
  *  the same id — a real fix that succeeds in the sandbox AND a real replay. */
@@ -47,6 +50,16 @@ test.describe.configure({ mode: "serial" });
 
 test.describe("Recovery loop", () => {
   test("fail → DLQ → sandbox rejects the non-fix, accepts a real fix → replay resolves the entry", async ({ request }) => {
+    const ledgerBefore = await request.get(`${API_URL}/recovery/ledger`, { headers: AUTH });
+    const winsBefore = await request.get(`${API_URL}/recovery/my-wins?days=30`, { headers: AUTH });
+    const otherLedgerBefore = await request.get(`${API_URL}/recovery/ledger`, { headers: OTHER_AUTH });
+    expect(ledgerBefore.ok()).toBe(true);
+    expect(winsBefore.ok()).toBe(true);
+    expect(otherLedgerBefore.ok()).toBe(true);
+    const ledgerBaseline = await ledgerBefore.json() as { totalRecovered: number };
+    const winsBaseline = await winsBefore.json() as { recovered: number };
+    const otherLedgerBaseline = await otherLedgerBefore.json() as { totalRecovered: number };
+
     // 1. Run F3 to failure — `charge` throws "Missing secret" → DLQ.
     const workflow = (await loadTemplate(request, "failed-workflow-recovery")) as unknown as WorkflowJson;
     const payload = { customer: "leah@example.com", amountUsd: 49 };
@@ -88,5 +101,54 @@ test.describe("Recovery loop", () => {
     const recovered = await pollUntilTerminal(request, runId);
     expect(recovered.status, "replaying against the applied fix must recover the run").toBe("succeeded");
     expect(recovered.nodes.find((n) => n.nodeId === "charge")?.status).toBe("succeeded");
+
+    // 5. The SAME real replay must atomically materialize lifetime impact,
+    // personal operator momentum, and incident closure — with no cross-tenant
+    // leakage. This intentionally does not seed recovery-impact tables.
+    const ledgerAfter = await request.get(`${API_URL}/recovery/ledger`, { headers: AUTH });
+    const winsAfter = await request.get(`${API_URL}/recovery/my-wins?days=30`, { headers: AUTH });
+    const itemsAfter = await request.get(`${API_URL}/recovery/items?limit=200`, { headers: AUTH });
+    const otherLedgerAfter = await request.get(`${API_URL}/recovery/ledger`, { headers: OTHER_AUTH });
+    expect(ledgerAfter.ok()).toBe(true);
+    expect(winsAfter.ok()).toBe(true);
+    expect(itemsAfter.ok()).toBe(true);
+    expect(otherLedgerAfter.ok()).toBe(true);
+
+    // These are organization/operator rollups, so another parallel E2E using
+    // the shared dev tenant may legitimately add a recovery after our
+    // baseline read. The linked incident assertion below proves this replay's
+    // own terminal effect; the rollups must advance by at least one.
+    expect((await ledgerAfter.json() as { totalRecovered: number }).totalRecovered)
+      .toBeGreaterThanOrEqual(ledgerBaseline.totalRecovered + 1);
+    const winsAfterPayload = await winsAfter.json() as { recovered: number; windowDays: number };
+    expect(winsAfterPayload.recovered).toBeGreaterThanOrEqual(winsBaseline.recovered + 1);
+    expect(winsAfterPayload.windowDays).toBe(30);
+    const recoveryItems = await itemsAfter.json() as {
+      items: Array<{ id: string; deadLetterId: string; status: string; resolutionReason: string | null }>;
+    };
+    let linkedItem = recoveryItems.items.find((item) => item.deadLetterId === dl!.id);
+    if (!linkedItem) {
+      for (const item of recoveryItems.items) {
+        const childrenResponse = await request.get(
+          `${API_URL}/recovery/items/${encodeURIComponent(item.id)}/children`,
+          { headers: AUTH },
+        );
+        if (!childrenResponse.ok()) continue;
+        const payload = await childrenResponse.json() as {
+          children: Array<{ deadLetterId: string }>;
+        };
+        if (payload.children.some((child) => child.deadLetterId === dl!.id)) {
+          linkedItem = item;
+          break;
+        }
+      }
+    }
+    expect(linkedItem).toMatchObject({
+      status: "resolved",
+      resolutionReason: "sandbox_replay_succeeded",
+    });
+    expect(await otherLedgerAfter.json()).toMatchObject({
+      totalRecovered: otherLedgerBaseline.totalRecovered,
+    });
   });
 });

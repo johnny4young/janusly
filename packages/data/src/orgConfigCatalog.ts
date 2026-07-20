@@ -13,7 +13,12 @@
  * - Importing this module runs the boot-time self-check over every definition.
  */
 
-import { RECOVERY_ITEM_SEVERITIES } from "@janusly/shared";
+import {
+  AI_OPERATOR_GUIDANCE_SCOPE_MAX_BYTES,
+  containsOperatorGuidanceSecret,
+  RECOVERY_ITEM_SEVERITIES,
+  utf8ByteLength,
+} from "@janusly/shared";
 
 import { MEMORY_KINDS, isMemoryKind } from "./memory-kinds";
 
@@ -189,6 +194,17 @@ function validateAiSurfaceModels(value: string | number | boolean): void {
   }
 }
 
+/** Keep tenant guidance bounded before it enters the hot config snapshot. */
+function validateAiOperatorGuidance(value: string | number | boolean): void {
+  if (typeof value !== "string") throw new Error("ai.operatorGuidance must be a string");
+  if (utf8ByteLength(value) > AI_OPERATOR_GUIDANCE_SCOPE_MAX_BYTES) {
+    throw new Error("ai.operatorGuidance exceeds 8 KiB cap");
+  }
+  if (containsOperatorGuidanceSecret(value)) {
+    throw new Error("ai.operatorGuidance must not contain secret-like values");
+  }
+}
+
 /**
  * Validate the JSON-encoded `recovery.slaPolicies` map: a JSON object whose
  * keys are recovery severities (`p1`..`p4`) and whose values are positive
@@ -289,6 +305,16 @@ export const ORG_CONFIG_DEFINITIONS = [
     defaultValue: "",
     allowEmpty: true,
     validate: validateAiSurfaceModels,
+  },
+  {
+    key: "ai.operatorGuidance",
+    category: "ai",
+    description:
+      "Bounded Janusly operator guidance for AI generation and recovery. Preferences only: cannot override security, workflow contracts, or system policy. Do not store secrets.",
+    valueType: "string",
+    defaultValue: "",
+    allowEmpty: true,
+    validate: validateAiOperatorGuidance,
   },
   {
     key: "ai.timeoutMs",
@@ -452,6 +478,26 @@ export const ORG_CONFIG_DEFINITIONS = [
     envKeys: ["JANUSLY_STREAM_MAX_SUBSCRIPTIONS"],
     min: 1,
     max: 1000,
+  },
+  {
+    key: "runs.circuitBreakerThreshold",
+    category: "runs",
+    description:
+      "Consecutive failed ordinary runs that pause a workflow via its circuit breaker. Range 2..100, default 5 (a threshold of 1 would be a hair trigger). A per-workflow `config.recovery.circuitBreaker.consecutiveFailures` overrides this; setting that to `false` opts a workflow out entirely.",
+    valueType: "number",
+    defaultValue: 5,
+    min: 2,
+    max: 100,
+  },
+  {
+    key: "runs.humanFormResumeTtlSeconds",
+    category: "runs",
+    description:
+      "Lifetime of newly-issued human-form resume tokens, in seconds. Range 300..604800 (5 minutes..7 days), default 604800. Each token carries its signed expiry, so changing this affects only tokens issued afterwards.",
+    valueType: "number",
+    defaultValue: 604_800,
+    min: 300,
+    max: 604_800,
   },
   {
     key: "mcp.writeConsent",

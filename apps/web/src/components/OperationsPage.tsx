@@ -6,7 +6,7 @@
  * mount their own cards on demand — inactive sub-tabs literally don't
  * render, so their `useEffect` fetches never fire. This drops the
  * per-refresh API call count from ~9 (every card self-fetched on mount)
- * to ~2-3 (header `/recovery/metrics` + `/health`, plus whichever cards
+ * to ~3-4 (header metrics + public/admin infra health, plus whichever cards
  * the active sub-tab carries).
  *
  * Active sub-tab is persisted to localStorage under
@@ -24,10 +24,12 @@ import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { FailureClustersCard } from './FailureClustersCard'
 import { BudgetSettingsPanel } from './BudgetSettingsPanel'
+import { AiGuidanceSettingsPanel } from './AiGuidanceSettingsPanel'
 import { AuthPolicySettingsPanel } from './AuthPolicySettingsPanel'
 import { ScimDirectorySettingsPanel } from './ScimDirectorySettingsPanel'
 import { AuditLogPanel } from './AuditLogPanel'
 import { PermissionGrantsPanel } from './PermissionGrantsPanel'
+import { MemoryGovernancePanel } from './MemoryGovernancePanel'
 import { CredentialHealthCard } from './CredentialHealthCard'
 import { AlertPoliciesPanel } from './AlertPoliciesPanel'
 import { UpstreamHealthPanel } from './UpstreamHealthPanel'
@@ -35,6 +37,13 @@ import { RecentAlertsCard } from './RecentAlertsCard'
 import { McpConnectionsPanel } from './McpConnectionsPanel'
 import { VitalSignsStrip } from './VitalSignsStrip'
 import { RunStreamChip } from './RunStreamChip'
+import {
+  parseQueueHealth,
+  QueueLagChip,
+  queueNeedsAttention,
+  type QueueHealth,
+  type QueueUnavailableReason,
+} from './QueueLagChip'
 import { buildOperationsTiles } from './operations-tiles'
 import {
   OPERATIONS_SECTION_REQUEST_EVENT as SECTION_REQUEST_EVENT,
@@ -80,7 +89,18 @@ type CostProviderRow = {
   model: string
   usd: number
   tokens: number
+  inputTokens: number
+  cachedInputTokens: number
+  cacheCreationInputTokens: number
   calls: number
+  aggregated?: boolean
+}
+
+type CacheEfficiency = {
+  inputTokens: number
+  readTokens: number
+  creationTokens: number
+  readSharePercent: number | null
 }
 
 type RecoveryMetrics = {
@@ -90,7 +110,7 @@ type RecoveryMetrics = {
   approvalsPending: RecoveryMetric
   replayRate: RecoveryMetric
   slaAttainment?: RecoveryMetric
-  costThisWindow: RecoveryMetric & { providers: CostProviderRow[] }
+  costThisWindow: RecoveryMetric & { providers: CostProviderRow[]; cache: CacheEfficiency }
   windowDays: number
   terminalRuns: number
 }
@@ -114,7 +134,11 @@ function neutralizeSandboxZeros(metrics: RecoveryMetrics | null): RecoveryMetric
     mttr: neutral(metrics.mttr),
     p95Latency: neutral(metrics.p95Latency),
     replayRate: neutral(metrics.replayRate),
-    costThisWindow: { ...neutral(metrics.costThisWindow), providers: metrics.costThisWindow.providers },
+    costThisWindow: {
+      ...neutral(metrics.costThisWindow),
+      providers: metrics.costThisWindow.providers,
+      cache: metrics.costThisWindow.cache,
+    },
   }
 }
 
@@ -128,11 +152,25 @@ export type { OpsSection } from './operations-section-bus'
 type SignalSummary = {
   /** `/health` rate-limiter snapshot. Drives the chip and Reliability dot. */
   rateLimiter: RateLimiterHealth | null
+  /** Admin queue snapshot; null means unavailable, undefined means not checked yet. */
+  queue: QueueHealth | null | undefined
   /** Most recent 402 envelope captured by the API wrapper. Drives Reliability dot. */
   budgetBlocked: unknown
   /** True when at least one `/recovery/metrics` value is in the "unhealthy" band.
    *  Drives Overview dot — a proxy for "operator should look at this tab". */
   overviewUnhealthy: boolean
+}
+
+type QueueSignalState = {
+  health: QueueHealth | null
+  unavailableReason: QueueUnavailableReason
+}
+
+function isForbiddenApiError(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'statusCode' in error
+    && (error as { statusCode?: unknown }).statusCode === 403
 }
 
 export function OperationsPage() {
@@ -148,6 +186,8 @@ export function OperationsPage() {
   // When the last /health snapshot landed — shown as an "as of" on the chip so a
   // stalled poll (the snapshot frozen) reads as stale rather than current.
   const [rateLimiterCheckedAt, setRateLimiterCheckedAt] = useState<number | null>(null)
+  const [queueSignal, setQueueSignal] = useState<QueueSignalState | undefined>(undefined)
+  const [queueCheckedAt, setQueueCheckedAt] = useState<number | null>(null)
   const [section, setSection] = useState<OpsSection>(() => loadStoredSection())
 
   // Persist on every section change. Tiny write — no debounce needed.
@@ -176,7 +216,7 @@ export function OperationsPage() {
       })
       .catch((err) => {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : (t('operations.metricsUnavailable', { detail: '' }) as string))
+        setError(err instanceof Error ? err.message : (t('operations.metricsUnavailable', { detail: '' })))
         setLoading(false)
       })
     return () => { cancelled = true }
@@ -184,6 +224,7 @@ export function OperationsPage() {
 
   useEffect(() => {
     let cancelled = false
+    let queueForbidden = false
     const loadHealth = () => {
       api('/health')
         .then((payload) => {
@@ -197,10 +238,37 @@ export function OperationsPage() {
           // Keep the last successful snapshot visible. The checked-at timestamp
           // freezing is the staleness signal when a later /health poll fails.
         })
+      // Live queue numbers intentionally stay off unauthenticated `/health`.
+      // Poll the admin projection on the same cadence and preserve the last
+      // successful snapshot if a later request fails.
+      if (queueForbidden) return
+      api('/system/queue')
+        .then((payload) => {
+          if (cancelled) return
+          const health = parseQueueHealth(payload)
+          setQueueSignal({
+            health,
+            unavailableReason: payload === null ? 'redis' : 'transport',
+          })
+          setQueueCheckedAt(Date.now())
+        })
+        .catch((error) => {
+          if (cancelled) return
+          if (isForbiddenApiError(error)) {
+            queueForbidden = true
+            setQueueSignal(undefined)
+            setQueueCheckedAt(null)
+            return
+          }
+          setQueueSignal(current => current ?? {
+            health: null,
+            unavailableReason: 'transport',
+          })
+        })
     }
     loadHealth()
-    // `/health` is infra state (the rate limiter), independent of workflow
-    // saves — poll it on a fixed cadence instead of refiring on every
+    // Infrastructure health is independent of workflow saves — poll both
+    // projections on a fixed cadence instead of refiring on every
     // platformVersion bump. A save no longer refetches it, and a Redis
     // degradation is still caught within the interval even while idle.
     const id = window.setInterval(loadHealth, 20_000)
@@ -219,9 +287,11 @@ export function OperationsPage() {
     ? [displayMetrics.successRate, displayMetrics.mttr, displayMetrics.p95Latency, displayMetrics.replayRate, displayMetrics.costThisWindow]
         .some((m) => m.severity === 'unhealthy')
     : false
+  const queueHealth = queueSignal === undefined ? undefined : queueSignal.health
 
   const signals: SignalSummary = {
     rateLimiter: rateLimiterHealth,
+    queue: queueHealth,
     budgetBlocked,
     overviewUnhealthy,
   }
@@ -234,6 +304,9 @@ export function OperationsPage() {
         error={error}
         rateLimiterHealth={rateLimiterHealth}
         rateLimiterCheckedAt={rateLimiterCheckedAt}
+        queueHealth={queueHealth}
+        queueCheckedAt={queueCheckedAt}
+        queueUnavailableReason={queueSignal?.unavailableReason}
       />
       <div className="we-operations-page__body">
         <OperationsRail section={section} onChange={setSection} signals={signals} />
@@ -256,12 +329,18 @@ function OperationsHeader({
   error,
   rateLimiterHealth,
   rateLimiterCheckedAt,
+  queueHealth,
+  queueCheckedAt,
+  queueUnavailableReason,
 }: {
   metrics: RecoveryMetrics | null
   loading: boolean
   error: string | null
   rateLimiterHealth: RateLimiterHealth | null
   rateLimiterCheckedAt: number | null
+  queueHealth: QueueHealth | null | undefined
+  queueCheckedAt: number | null
+  queueUnavailableReason?: QueueUnavailableReason
 }) {
   const { t } = useT()
   return (
@@ -275,17 +354,26 @@ function OperationsHeader({
         <span className="panel-heading-icon"><Gauge size={18} aria-hidden="true" /></span>
       </div>
 
-      <RunStreamChip />
-      {rateLimiterHealth && <RateLimiterStatusChip health={rateLimiterHealth} checkedAt={rateLimiterCheckedAt} />}
+      <div className="we-operations-header__signals">
+        <RunStreamChip />
+        {rateLimiterHealth && <RateLimiterStatusChip health={rateLimiterHealth} checkedAt={rateLimiterCheckedAt} />}
+        {queueHealth !== undefined && (
+          <QueueLagChip
+            health={queueHealth}
+            checkedAt={queueCheckedAt}
+            unavailableReason={queueUnavailableReason}
+          />
+        )}
+      </div>
 
       {error && (
-        <section className="panel-card">
+        <section className="we-card">
           <p className="helper-text">{t('operations.metricsUnavailable', { detail: error })}</p>
         </section>
       )}
 
       {!error && (loading || !metrics) && (
-        <section className="panel-card">
+        <section className="we-card">
           <p className="helper-text" aria-live="polite">{t('operations.computing')}</p>
         </section>
       )}
@@ -325,6 +413,8 @@ function OperationsRail({
         ? 'danger'
         : signals.rateLimiter && !signals.rateLimiter.healthy
           ? 'warning'
+          : signals.queue !== undefined && queueNeedsAttention(signals.queue)
+            ? 'warning'
           : null,
     access: null,
     integrations: null,
@@ -333,7 +423,7 @@ function OperationsRail({
   return (
     <nav
       className="we-operations-rail"
-      aria-label={t('operations.section.railLabel') as string}
+      aria-label={t('operations.section.railLabel')}
       data-testid="operations-rail"
     >
       <ul>
@@ -353,14 +443,14 @@ function OperationsRail({
               >
                 <span className="we-operations-rail__icon" aria-hidden="true">{item.icon}</span>
                 <span className="we-operations-rail__label">
-                  {t(`operations.section.${item.section}.label` as never) as string}
+                  {t(`operations.section.${item.section}.label` as never)}
                 </span>
                 {dot && (
                   <span
                     className="we-operations-rail__dot"
                     data-severity={dot}
                     data-testid={`operations-rail-dot-${item.section}`}
-                    aria-label={t('operations.section.attentionDot') as string}
+                    aria-label={t('operations.section.attentionDot')}
                   />
                 )}
               </button>
@@ -374,33 +464,61 @@ function OperationsRail({
 
 function OverviewSection({ metrics }: { metrics: RecoveryMetrics | null }) {
   const { t } = useT()
+  const locale = getResolvedLocale()
   return (
     <>
       {metrics && metrics.costThisWindow.providers.length > 0 && (
-        <section className="panel-card">
+        <section className="we-card">
           <div className="section-kicker">{t('operations.cost.heading')}</div>
-          <table className="we-ops-cost-table">
-            <thead>
-              <tr>
-                <th>{t('operations.cost.col.provider')}</th>
-                <th>{t('operations.cost.col.model')}</th>
-                <th>{t('operations.cost.col.usd')}</th>
-                <th>{t('operations.cost.col.tokens')}</th>
-                <th>{t('operations.cost.col.calls')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {metrics.costThisWindow.providers.map((row) => (
-                <tr key={`${row.provider}::${row.model}`}>
-                  <td>{row.provider}</td>
-                  <td><code>{row.model}</code></td>
-                  <td>${row.usd.toFixed(4)}</td>
-                  <td>{row.tokens.toLocaleString(getResolvedLocale())}</td>
-                  <td>{row.calls.toLocaleString(getResolvedLocale())}</td>
+          <dl className="we-ops-cache-summary" aria-label={t('operations.cost.cache.summaryLabel')}>
+            <div>
+              <dt>{t('operations.cost.cache.readShare')}</dt>
+              <dd>{metrics.costThisWindow.cache.readSharePercent == null
+                ? '—'
+                : `${metrics.costThisWindow.cache.readSharePercent.toLocaleString(locale, { maximumFractionDigits: 1 })}%`}</dd>
+            </div>
+            <div>
+              <dt>{t('operations.cost.cache.readTokens')}</dt>
+              <dd>{metrics.costThisWindow.cache.readTokens.toLocaleString(locale)}</dd>
+            </div>
+            <div>
+              <dt>{t('operations.cost.cache.creationTokens')}</dt>
+              <dd>{metrics.costThisWindow.cache.creationTokens.toLocaleString(locale)}</dd>
+            </div>
+          </dl>
+          <div
+            className="we-ops-cost-table-wrap"
+            role="region"
+            aria-label={t('operations.cost.tableAria')}
+            tabIndex={0}
+          >
+            <table className="we-ops-cost-table">
+              <thead>
+                <tr>
+                  <th>{t('operations.cost.col.provider')}</th>
+                  <th>{t('operations.cost.col.model')}</th>
+                  <th>{t('operations.cost.col.usd')}</th>
+                  <th>{t('operations.cost.col.tokens')}</th>
+                  <th>{t('operations.cost.col.cacheRead')}</th>
+                  <th>{t('operations.cost.col.cacheCreated')}</th>
+                  <th>{t('operations.cost.col.calls')}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {metrics.costThisWindow.providers.map((row) => (
+                  <tr key={`${row.aggregated ? 'aggregate' : 'detail'}::${row.provider}::${row.model}`}>
+                    <td>{row.aggregated ? t('operations.cost.otherProviderModel') : row.provider}</td>
+                    <td>{row.aggregated ? '—' : <code>{row.model}</code>}</td>
+                    <td>${row.usd.toFixed(4)}</td>
+                    <td>{row.tokens.toLocaleString(locale)}</td>
+                    <td>{row.cachedInputTokens.toLocaleString(locale)}</td>
+                    <td>{row.cacheCreationInputTokens.toLocaleString(locale)}</td>
+                    <td>{row.calls.toLocaleString(locale)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
       <FailureClustersCard />
@@ -415,6 +533,7 @@ function ReliabilitySection() {
       <RecentAlertsCard />
       <UpstreamHealthPanel />
       <BudgetSettingsPanel />
+      <AiGuidanceSettingsPanel />
     </>
   )
 }
@@ -425,6 +544,7 @@ function AccessSection() {
       <AuthPolicySettingsPanel />
       <ScimDirectorySettingsPanel />
       <PermissionGrantsPanel />
+      <MemoryGovernancePanel />
       <AuditLogPanel />
     </>
   )
@@ -449,7 +569,7 @@ function RateLimiterStatusChip({ health, checkedAt }: { health: RateLimiterHealt
   // needed — the 20s poll re-renders with a fresh timestamp; a failed poll
   // leaves the last one frozen, which is the staleness signal.
   const checkedLabel = typeof checkedAt === 'number'
-    ? (t('operations.rateLimiter.checkedAt', { time: new Date(checkedAt).toLocaleTimeString(getResolvedLocale()) }) as string)
+    ? (t('operations.rateLimiter.checkedAt', { time: new Date(checkedAt).toLocaleTimeString(getResolvedLocale()) }))
     : null
   const age = checkedLabel ? <span className="we-ops-rate-limiter-chip__age">· {checkedLabel}</span> : null
   if (health.healthy) {
@@ -457,7 +577,7 @@ function RateLimiterStatusChip({ health, checkedAt }: { health: RateLimiterHealt
       <span
         className="we-ops-rate-limiter-chip we-ops-rate-limiter-chip--healthy"
         role="status"
-        aria-label={checkedLabel ? `${t('operations.rateLimiter.label')} · ${checkedLabel}` : (t('operations.rateLimiter.label') as string)}
+        aria-label={checkedLabel ? `${t('operations.rateLimiter.label')} · ${checkedLabel}` : (t('operations.rateLimiter.label'))}
       >
         <span className="we-ops-rate-limiter-chip__dot" aria-hidden="true" />
         <span>{t('operations.rateLimiter.healthy')}</span>
@@ -467,12 +587,12 @@ function RateLimiterStatusChip({ health, checkedAt }: { health: RateLimiterHealt
   }
   const bucketCount = health.degradedBuckets.length
   const bucketNames = health.degradedBuckets.map((b) => b.bucket).join(', ')
-  const tooltip = t('operations.rateLimiter.degradedBucketsTooltip', { buckets: bucketNames }) as string
+  const tooltip = t('operations.rateLimiter.degradedBucketsTooltip', { buckets: bucketNames })
   return (
     <span
       className="we-ops-rate-limiter-chip we-ops-rate-limiter-chip--degraded"
       role="status"
-      aria-label={checkedLabel ? `${t('operations.rateLimiter.label')} · ${checkedLabel}` : (t('operations.rateLimiter.label') as string)}
+      aria-label={checkedLabel ? `${t('operations.rateLimiter.label')} · ${checkedLabel}` : (t('operations.rateLimiter.label'))}
       title={tooltip}
     >
       <span className="we-ops-rate-limiter-chip__dot" aria-hidden="true" />

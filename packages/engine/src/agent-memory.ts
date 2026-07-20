@@ -28,6 +28,8 @@
  *   recall prompts — recalled content is never trusted as instructions.
  */
 
+import { createHash } from "node:crypto";
+
 import { commitMemory, getMemoryConfig, recallMemory, type MemoryRecallEntry } from "@janusly/data";
 import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
 
@@ -42,11 +44,14 @@ const MAX_EPISODE_CONTENT_CHARS = 2000;
 export type AgentEpisodeRecall = {
   block: string;
   count: number;
+  /** Stable, content-free identifiers for the recalled rows. Safe for run-event telemetry. */
+  fingerprints: string[];
 };
 
 export type RecallAgentEpisodesInput = {
   orgId: string;
   workflowId?: string;
+  runId?: string;
   /** The agent goal — the semantic query for similar past episodes. */
   goal: string;
 };
@@ -60,18 +65,24 @@ export async function recallAgentEpisodes(input: RecallAgentEpisodesInput): Prom
   // Defensive: `runAgentLoop` feeds the goal from an `any` config, so coerce
   // before `.trim()` — a non-string goal must degrade to empty, not throw.
   const goal = typeof input.goal === "string" ? input.goal.trim() : "";
-  if (!input.orgId || !goal) return { block: "", count: 0 };
+  if (!input.orgId || !goal) return emptyRecall();
 
   try {
     // Short-circuit BEFORE any recall/embedding when memory is off or the
     // episodic kind is not enabled for this tenant.
     const config = await getMemoryConfig(input.orgId);
     if (!config.enabled || !config.allowedKinds.has(AGENT_EPISODE_KIND)) {
-      return { block: "", count: 0 };
+      return emptyRecall();
     }
 
-    const { entries } = await recallMemory({ orgId: input.orgId, kind: AGENT_EPISODE_KIND, query: goal });
-    if (entries.length === 0) return { block: "", count: 0 };
+    const { entries } = await recallMemory({
+      orgId: input.orgId,
+      workflowId: input.workflowId,
+      runId: input.runId,
+      kind: AGENT_EPISODE_KIND,
+      query: goal,
+    });
+    if (entries.length === 0) return emptyRecall();
 
     // Same-workflow episodes are the most relevant prior context; fill the rest
     // with cross-workflow matches. `recallMemory` already returns by similarity.
@@ -81,8 +92,16 @@ export async function recallAgentEpisodes(input: RecallAgentEpisodesInput): Prom
 
     return renderEpisodeBlock(ranked, input.workflowId);
   } catch {
-    return { block: "", count: 0 };
+    return emptyRecall();
   }
+}
+
+function emptyRecall(): AgentEpisodeRecall {
+  return { block: "", count: 0, fingerprints: [] };
+}
+
+function episodeFingerprint(id: string): string {
+  return createHash("sha256").update(id).digest("hex").slice(0, 12);
 }
 
 function renderEpisodeBlock(entries: MemoryRecallEntry[], workflowId: string | undefined): AgentEpisodeRecall {
@@ -92,6 +111,7 @@ function renderEpisodeBlock(entries: MemoryRecallEntry[], workflowId: string | u
   ];
   let used = 0;
   let count = 0;
+  const fingerprints: string[] = [];
   for (const entry of entries) {
     const where = entry.workflowId === workflowId ? "this workflow" : "other workflow";
     const content = scrubSecretShapes(entry.content).replace(/\s+/g, " ").trim().slice(0, MAX_LINE_CHARS);
@@ -99,11 +119,12 @@ function renderEpisodeBlock(entries: MemoryRecallEntry[], workflowId: string | u
     const lineBytes = Buffer.byteLength(line, "utf8");
     if (used + lineBytes > MAX_BLOCK_BYTES) break;
     lines.push(line);
+    fingerprints.push(episodeFingerprint(entry.id));
     used += lineBytes;
     count += 1;
   }
-  if (count === 0) return { block: "", count: 0 };
-  return { block: lines.join("\n"), count };
+  if (count === 0) return emptyRecall();
+  return { block: lines.join("\n"), count, fingerprints };
 }
 
 export type RecordAgentEpisodeInput = {

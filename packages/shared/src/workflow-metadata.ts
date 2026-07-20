@@ -1,7 +1,7 @@
 /**
- * Per-workflow metadata contract — owners, runbook Markdown, description,
- * tags, folder, Slack / Linear coordinates, and a default severity for
- * incidents spawned from the workflow.
+ * Per-workflow metadata contract — owners, runbook Markdown, AI operator
+ * guidance, description, tags, folder, Slack / Linear coordinates, and a
+ * default severity for incidents spawned from the workflow.
  *
  * Pure, zero-I/O — safe to import from web bundle + engine + api + data.
  *
@@ -16,6 +16,9 @@
  * Invariants:
  *  - `runbookMarkdown` is capped at 32 KiB of UTF-8 data so an
  *    unbounded paste cannot inflate the row or the audit metadata.
+ *  - `aiGuidanceMarkdown` is capped at 8 KiB of UTF-8 data. It is an
+ *    operator preference layer, never a secret store or a system-policy
+ *    override; AI prompt composers scrub and frame it before use.
  *  - `slackChannel` MUST start with `#` and match the Slack channel-name
  *    grammar. Pasted channel ids (`channels/C12345`) are intentionally
  *    rejected with a clear message — v2 may add channel-id support.
@@ -31,9 +34,17 @@
 import { z } from 'zod'
 
 import { RECOVERY_ITEM_SEVERITIES } from './recovery-item'
+import {
+  AI_OPERATOR_GUIDANCE_SCOPE_MAX_BYTES,
+  containsOperatorGuidanceSecret,
+} from './operator-guidance'
+import { utf8ByteLength } from './utf8'
 
 /** Runbook size cap (32 KiB by UTF-8 bytes). */
 export const WORKFLOW_METADATA_RUNBOOK_MAX_BYTES = 32 * 1024
+
+/** Per-workflow AI guidance cap (8 KiB by UTF-8 bytes). */
+export const WORKFLOW_METADATA_AI_GUIDANCE_MAX_BYTES = AI_OPERATOR_GUIDANCE_SCOPE_MAX_BYTES
 
 /** Maximum owner user ids per workflow. First entry is the primary owner. */
 export const WORKFLOW_METADATA_OWNERS_MAX = 10
@@ -74,12 +85,6 @@ const LinearProjectSchema = z
     'linear project must be a linear.app URL or `workspace/project` slug',
   )
 
-const utf8Encoder = new TextEncoder()
-
-function utf8ByteLength(value: string): number {
-  return utf8Encoder.encode(value).byteLength
-}
-
 /** Closed-key partial-update schema. Every field is optional / nullable. */
 export const WorkflowMetadataSchema = z
   .object({
@@ -92,6 +97,18 @@ export const WorkflowMetadataSchema = z
       .refine(
         (value) => utf8ByteLength(value) <= WORKFLOW_METADATA_RUNBOOK_MAX_BYTES,
         'runbook exceeds 32 KiB cap',
+      )
+      .nullable()
+      .optional(),
+    aiGuidanceMarkdown: z
+      .string()
+      .refine(
+        (value) => utf8ByteLength(value) <= WORKFLOW_METADATA_AI_GUIDANCE_MAX_BYTES,
+        'AI guidance exceeds 8 KiB cap',
+      )
+      .refine(
+        (value) => !containsOperatorGuidanceSecret(value),
+        'AI guidance must not contain secret-like values',
       )
       .nullable()
       .optional(),

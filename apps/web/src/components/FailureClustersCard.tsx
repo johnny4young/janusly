@@ -10,12 +10,14 @@
  *
  * Refetches on the platform-version tick — same cross-panel reactivity
  * hook the readiness/health badges use, so a DLQ replay or a fresh
- * failure flips this surface without a manual refresh.
+ * failure flips this surface without a manual refresh. A refresh preserves
+ * the last successful card and any nested recovery dialog while its next
+ * payload is in flight; applying a fix must not discard its success state.
  *
  * Used in `DeadLettersPanel.tsx` (Runs tab → Operations card).
  */
 
-import React, { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, RefreshCw, Sparkles, Users } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState } from './EmptyState'
@@ -153,7 +155,7 @@ export function FailureClustersCard() {
         // patch against that row instead.
         const fallback = membersResp.deadLetterIds[0]
         if (!fallback) {
-          setRecovery({ kind: 'error', signature: cluster.signature, message: t('clusters.noOpenMembers') as string })
+          setRecovery({ kind: 'error', signature: cluster.signature, message: t('clusters.noOpenMembers') })
           return
         }
         selectedDlq = await api(`/dlq?id=${encodeURIComponent(fallback)}`) as DeadLetter
@@ -170,7 +172,7 @@ export function FailureClustersCard() {
       setRecovery({
         kind: 'error',
         signature: cluster.signature,
-        message: err instanceof Error ? err.message : (t('clusters.errorMembers') as string),
+        message: err instanceof Error ? err.message : (t('clusters.errorMembers')),
       })
     }
   }
@@ -187,26 +189,45 @@ export function FailureClustersCard() {
       })
       .catch((err) => {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : (t('clusters.unavailable', { detail: '' }) as string))
+        setError(err instanceof Error ? err.message : (t('clusters.unavailable', { detail: '' })))
         setLoading(false)
       })
     return () => { cancelled = true }
   }, [platformVersion, t])
 
-  if (error) {
+  const recoveryDialog = recovery?.kind === 'open' ? (
+    <Suspense fallback={null}>
+      <RecoveryDialog
+        dlq={recovery.dlq}
+        clusterMembers={recovery.members}
+        clusterSignature={recovery.signature}
+        clusterMembersCapped={recovery.capped}
+        clusterMembersTotal={recovery.total}
+        onClose={() => setRecovery(null)}
+      />
+    </Suspense>
+  ) : null
+
+  if (error && !data) {
     return (
-      <section className="panel-card">
-        <div className="section-kicker">{t('clusters.heading')}</div>
-        <p className="helper-text">{t('clusters.unavailable', { detail: error })}</p>
-      </section>
+      <>
+        <section className="we-card">
+          <div className="section-kicker">{t('clusters.heading')}</div>
+          <p className="helper-text">{t('clusters.unavailable', { detail: error })}</p>
+        </section>
+        {recoveryDialog}
+      </>
     )
   }
-  if (loading || !data) {
+  if (!data) {
     return (
-      <section className="panel-card">
-        <div className="section-kicker">{t('clusters.heading')}</div>
-        <p className="helper-text" aria-live="polite">{t('clusters.scoring')}</p>
-      </section>
+      <>
+        <section className="we-card" aria-busy={loading || undefined}>
+          <div className="section-kicker">{t('clusters.heading')}</div>
+          <p className="helper-text" aria-live="polite">{t('clusters.scoring')}</p>
+        </section>
+        {recoveryDialog}
+      </>
     )
   }
 
@@ -214,15 +235,18 @@ export function FailureClustersCard() {
 
   if (clusters.length === 0) {
     return (
-      <section className="panel-card">
-        <div className="section-kicker">{t('clusters.heading')}</div>
-        <EmptyState
-          icon={<CheckCircle2 />}
-          kicker={t('emptyState.clusters.kicker') as string}
-          body={t('emptyState.clusters.body') as string}
-          testId="clusters-empty"
-        />
-      </section>
+      <>
+        <section className="we-card" aria-busy={loading || undefined}>
+          <div className="section-kicker">{t('clusters.heading')}</div>
+          <EmptyState
+            icon={<CheckCircle2 />}
+            kicker={t('emptyState.clusters.kicker')}
+            body={t('emptyState.clusters.body')}
+            testId="clusters-empty"
+          />
+        </section>
+        {recoveryDialog}
+      </>
     )
   }
 
@@ -234,8 +258,8 @@ export function FailureClustersCard() {
       ? 'warning'
       : undefined
 
-  return (
-    <section className="panel-card" data-severity={cardSeverity}>
+  const clusterCard = (
+    <section className="we-card" data-severity={cardSeverity} aria-busy={loading || undefined}>
       <div className="split-row">
         <div>
           <div className="section-kicker">{t('clusters.heading')}</div>
@@ -249,6 +273,11 @@ export function FailureClustersCard() {
       {Number.isFinite(fetchedAtMs) && (
         <p className="helper-text we-cluster-asof">
           {t('clusters.asOf', { time: new Date(fetchedAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })}
+        </p>
+      )}
+      {error && (
+        <p className="helper-text we-recovery-warning" role="status">
+          {t('clusters.unavailable', { detail: error })}
         </p>
       )}
 
@@ -266,11 +295,11 @@ export function FailureClustersCard() {
                 onClick={() => setExpanded((prev) => ({ ...prev, [cluster.signature]: !isOpen }))}
                 aria-expanded={isOpen}
                 aria-label={t('clusters.rowAria', {
-                  category: t(CATEGORY_KEYS[cluster.category] as never) as string,
+                  category: t(CATEGORY_KEYS[cluster.category] as never),
                   signature: cluster.signature,
                   occurrences: t('clusters.occurrences', { count: cluster.frequency }),
                   workflows: t('clusters.workflows', { count: cluster.affectedWorkflows.length }),
-                }) as string}
+                })}
               >
                 <span className="we-cluster-row__icon" aria-hidden="true">
                   {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -281,14 +310,14 @@ export function FailureClustersCard() {
                     <strong>{cluster.signature}</strong>
                   </span>
                   <span className="we-cluster-row__meta">
-                    <span className={`mode-pill we-cluster-pill--${cluster.category}`}>{t(CATEGORY_KEYS[cluster.category] as never) as string}</span>
+                    <span className={`mode-pill we-cluster-pill--${cluster.category}`}>{t(CATEGORY_KEYS[cluster.category] as never)}</span>
                     <span className="we-cluster-meta-sep">{t('clusters.occurrences', { count: cluster.frequency })}</span>
                     <span className="we-cluster-meta-sep">{t('clusters.workflows', { count: cluster.affectedWorkflows.length })}</span>
                     <span className="we-cluster-meta-sep">{t('clusters.lastSeen', { rel: lastSeenLabel })}</span>
                   </span>
                 </span>
-                <span className="we-cluster-row__owner" title={t('clusters.suggestedOwner') as string}>
-                  <Users size={12} aria-hidden="true" /> {t(OWNER_KEYS[cluster.suggestedOwner] as never) as string}
+                <span className="we-cluster-row__owner" title={t('clusters.suggestedOwner')}>
+                  <Users size={12} aria-hidden="true" /> {t(OWNER_KEYS[cluster.suggestedOwner] as never)}
                 </span>
               </button>
 
@@ -366,20 +395,13 @@ export function FailureClustersCard() {
           )
         })}
       </ul>
-
-      {recovery?.kind === 'open' && (
-        <Suspense fallback={null}>
-          <RecoveryDialog
-            dlq={recovery.dlq}
-            clusterMembers={recovery.members}
-            clusterSignature={recovery.signature}
-            clusterMembersCapped={recovery.capped}
-            clusterMembersTotal={recovery.total}
-            onClose={() => setRecovery(null)}
-          />
-        </Suspense>
-      )}
     </section>
+  )
+  return (
+    <>
+      {clusterCard}
+      {recoveryDialog}
+    </>
   )
 }
 

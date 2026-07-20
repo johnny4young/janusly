@@ -32,6 +32,7 @@ import { SENSITIVE_KEY_PATTERN } from "./sensitive-keys";
 export type DiffableNode = {
   id: string;
   type: string;
+  label?: string;
   config?: unknown;
 };
 
@@ -48,6 +49,7 @@ export type DiffableWorkflow = {
   metadata?: unknown;
   inputs?: unknown;
   outputs?: unknown;
+  templatePolicy?: unknown;
   nodes?: DiffableNode[];
   edges?: DiffableEdge[];
 };
@@ -109,7 +111,7 @@ export type DiffSummary = {
 
 /** Full structural diff between two workflows. */
 export type WorkflowDiff = {
-  /** Top-level workflow fields (`name`, `metadata.*`, `inputs`, `outputs`, `dslVersion`). */
+  /** Top-level workflow fields (`name`, `metadata.*`, `inputs`, `outputs`, `templatePolicy`, `dslVersion`). */
   workflow: FieldChange[];
   nodes: NodeChange[];
   edges: EdgeChange[];
@@ -145,7 +147,7 @@ export function computeWorkflowDiff(before: DiffableWorkflow, after: DiffableWor
 
 /* ----------------------------- Workflow-level ----------------------------- */
 
-const WORKFLOW_LEVEL_FIELDS = ["dslVersion", "name", "metadata", "inputs", "outputs"] as const;
+const WORKFLOW_LEVEL_FIELDS = ["dslVersion", "name", "metadata", "inputs", "outputs", "templatePolicy"] as const;
 
 function diffWorkflowLevel(before: DiffableWorkflow, after: DiffableWorkflow): FieldChange[] {
   const changes: FieldChange[] = [];
@@ -194,6 +196,7 @@ function diffNodes(before: DiffableNode[], after: DiffableNode[]): NodeChange[] 
     if (!afterNode) continue;
     const fields: FieldChange[] = [];
     walkValue("type", beforeNode.type, afterNode.type, fields);
+    walkValue("label", beforeNode.label, afterNode.label, fields);
     walkValue("config", beforeNode.config, afterNode.config, fields);
     if (fields.length > 0) {
       fields.sort((a, b) => a.path.localeCompare(b.path));
@@ -328,7 +331,7 @@ const SECRET_TEMPLATE_PATTERN = /\{\{(?:secret|env)\.[^}]+\}\}/;
 export function classifyTag(path: string, before: unknown, after: unknown): ChangeTag | null {
   // 1. Retry / timeout / bounds — config-resilience knobs.
   if (path === "config.retry" || path.startsWith("config.retry.")) return "retry";
-  if (path === "config.timeoutMs") return "timeout";
+  if (path === "config.timeoutMs" || path === "config.decisionTimeoutMs") return "timeout";
   if (path === "config.maxResponseBytes" || path === "config.maxRedirects") return "bounds";
 
   // 2. Secret-ref — by key name (last segment matches the chokepoint

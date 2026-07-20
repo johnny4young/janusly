@@ -1,8 +1,11 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { StrictMode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
+import { copyText } from '../clipboard'
 import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
 import { DeadLettersPanel, type DeadLetter, type DeadLetterRecovery } from './DeadLettersPanel'
+import { requestRecoveryQueueFocus } from './recovery-queue-focus-bus'
 
 // `DeadLettersPanel`'s hook fetches `/dlq/queue?…` itself now — the server
 // filters + sorts before the page cap, folds the recovery overlay inline, and
@@ -17,6 +20,10 @@ vi.mock('../api', () => ({
     return { items: [], clusters: [], runs: [], proposals: [] }
   }),
   downloadFromApi: vi.fn(),
+}))
+
+vi.mock('../clipboard', () => ({
+  copyText: vi.fn(async () => true),
 }))
 
 const initialState = useWorkflowStore.getState()
@@ -130,6 +137,7 @@ describe('<DeadLettersPanel />', () => {
   beforeEach(() => {
     __resetBumpCoalesceForTests()
     localStorage.clear()
+    sessionStorage.clear()
     vi.mocked(api).mockClear()
     vi.mocked(api).mockImplementation(defaultApiMock)
     useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
@@ -265,6 +273,58 @@ describe('<DeadLettersPanel />', () => {
     const rowB = screen.getByTestId('dlq-row-b')
     fireEvent.click(rowB)
     expect(rowB).toBeInTheDocument()
+  })
+
+  it('focuses the queue heading after a queue-level navigation handoff', async () => {
+    requestRecoveryQueueFocus()
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a')]))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+
+    const queue = await screen.findByTestId('recovery-queue')
+    await waitFor(() => expect(queue).toHaveFocus())
+    expect(queue).toHaveAccessibleName('Recovery queue')
+  })
+
+  it('selects and focuses a requested dead-letter row after data loads', async () => {
+    requestRecoveryQueueFocus('target')
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('other'), mockDeadLetter('target')]))
+    render(
+      <StrictMode>
+        <DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />
+      </StrictMode>,
+    )
+
+    const target = await screen.findByTestId('dlq-row-target')
+    await waitFor(() => expect(target).toHaveFocus())
+    expect(target).toHaveAttribute('data-selected', 'true')
+  })
+
+  it('tells the operator when a deep-linked failure is gone, instead of showing a blank box', async () => {
+    // A stale alert link (retention purged the row, or the id is wrong) must
+    // not read as "nothing selected".
+    requestRecoveryQueueFocus('ghost')
+    vi.mocked(api).mockImplementation(async (path: unknown, options?: unknown) => {
+      if (typeof path === 'string' && path.startsWith('/dlq?id=ghost')) throw new Error('404')
+      return dlqMock([mockDeadLetter('unrelated')])(path as string, options as RequestInit)
+    })
+
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByTestId('dlq-requested-not-found')).toBeInTheDocument())
+  })
+
+  it('uses the live handoff when session storage is unavailable', async () => {
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('target')]))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    const target = await screen.findByTestId('dlq-row-target')
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
+      throw new Error('storage blocked')
+    })
+
+    requestRecoveryQueueFocus('target')
+
+    await waitFor(() => expect(target).toHaveFocus())
+    expect(target).toHaveAttribute('data-selected', 'true')
   })
 
   it('renders the owner filter with All selected by default', async () => {
@@ -653,7 +713,7 @@ describe('<DeadLettersPanel /> — bulk replay', () => {
       expect(screen.getByTestId('dlq-bulk-bar')).toHaveTextContent('1 selected')
       expect(screen.getByTestId('dlq-select-row-a')).not.toBeChecked()
       expect(screen.getByTestId('dlq-select-row-b')).toBeChecked()
-      expect(useWorkflowStore.getState().toasts.at(-1)?.message).toContain('1 replayed, 1 failed')
+      expect(useWorkflowStore.getState().toasts.at(-1)?.message).toContain('1 queued; 1 could not be queued')
     })
   })
 })
@@ -691,5 +751,257 @@ describe('<DeadLettersPanel /> — search', () => {
     await waitFor(() => expect(screen.getByTestId('dlq-empty-search')).toBeInTheDocument())
     expect(screen.queryByTestId('dlq-row-alpha')).toBeNull()
     expect(screen.queryByTestId('dlq-empty')).toBeNull()
+  })
+})
+
+describe('<DeadLettersPanel /> — keyboard triage and copy', () => {
+  beforeEach(() => {
+    __resetBumpCoalesceForTests()
+    localStorage.clear()
+    sessionStorage.clear()
+    vi.mocked(api).mockClear()
+    vi.mocked(copyText).mockClear()
+    vi.mocked(copyText).mockResolvedValue(true)
+    useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
+  })
+
+  it('moves roving focus with J and K', async () => {
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a'), mockDeadLetter('b')]))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    const first = await screen.findByTestId('dlq-row-a')
+    const second = screen.getByTestId('dlq-row-b')
+
+    first.focus()
+    fireEvent.keyDown(first, { key: 'j' })
+    expect(second).toHaveFocus()
+    expect(second).toHaveAttribute('data-selected', 'true')
+
+    fireEvent.keyDown(second, { key: 'k' })
+    expect(first).toHaveFocus()
+    expect(first).toHaveAttribute('data-selected', 'true')
+  })
+
+  it('exposes virtual row selection and position to assistive technology', async () => {
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a'), mockDeadLetter('b')]))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    const grid = await screen.findByRole('grid', { name: /dlq\.queue|recovery queue/i })
+    const first = screen.getByTestId('dlq-row-a')
+    const second = screen.getByTestId('dlq-row-b')
+
+    expect(grid).toHaveAttribute('aria-multiselectable', 'false')
+    expect(grid).toHaveAttribute('aria-rowcount', '2')
+    expect(first).toHaveAttribute('role', 'row')
+    expect(first).toHaveAttribute('aria-selected', 'true')
+    expect(first).toHaveAttribute('aria-rowindex', '1')
+    expect(second).toHaveAttribute('aria-rowindex', '2')
+    expect(Array.from(first.children).every((child) => child.getAttribute('role') === 'gridcell')).toBe(true)
+  })
+
+  it('keeps virtual offsets aligned while keyboard focus crosses the rendered window', async () => {
+    const rows = Array.from({ length: 20 }, (_, index) => mockDeadLetter(String(index + 1)))
+    vi.mocked(api).mockImplementation(dlqMock(rows))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    const virtualList = await screen.findByTestId('dlq-virtual-list')
+    await act(async () => {
+      Object.defineProperty(virtualList, 'clientHeight', { configurable: true, value: 60 })
+      virtualList.dispatchEvent(new Event('scroll'))
+    })
+    await waitFor(() => expect(screen.queryByTestId('dlq-row-20')).toBeNull())
+    const first = await screen.findByTestId('dlq-row-1')
+    first.focus()
+
+    for (let index = 0; index < 8; index += 1) {
+      fireEvent.keyDown(document.activeElement ?? first, { key: 'j' })
+      await waitFor(() => expect(document.activeElement).toHaveAttribute('aria-rowindex', String(index + 2)))
+    }
+
+    expect(document.activeElement).toHaveAttribute('data-dead-letter-id', '9')
+    expect(virtualList.scrollTop).toBeGreaterThan(0)
+  })
+
+  it('routes R and Cmd/Ctrl+Enter through the same replay and resolve callbacks', async () => {
+    const onReplay = vi.fn(async () => true)
+    const onResolve = vi.fn()
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a')]))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={onReplay} onResolve={onResolve} />)
+    const row = await screen.findByTestId('dlq-row-a')
+    row.focus()
+
+    await act(async () => {
+      fireEvent.keyDown(row, { key: 'r' })
+    })
+    await waitFor(() => expect(screen.queryByTestId('dlq-recovering-a')).toBeNull())
+    fireEvent.keyDown(row, { key: 'Enter', metaKey: true })
+    fireEvent.keyDown(row, { key: 'Enter', ctrlKey: true })
+
+    expect(onReplay).toHaveBeenCalledOnce()
+    expect(onReplay).toHaveBeenCalledWith('a', '2026-05-25T12:00:00Z')
+    expect(onResolve).toHaveBeenCalledTimes(2)
+    expect(onResolve).toHaveBeenNthCalledWith(1, 'a')
+  })
+
+  it('shows Recovering immediately, blocks duplicate actions, and clears after failure', async () => {
+    let finishReplay: ((value: boolean) => void) | undefined
+    const onReplay = vi.fn(() => new Promise<boolean>((resolve) => { finishReplay = resolve }))
+    const onResolve = vi.fn()
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a')]))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={onReplay} onResolve={onResolve} />)
+    const row = await screen.findByTestId('dlq-row-a')
+
+    fireEvent.keyDown(row, { key: 'r' })
+
+    const recovering = await screen.findByTestId('dlq-recovering-a')
+    expect(recovering).toHaveTextContent('Recovering')
+    expect(recovering).toHaveAttribute('role', 'status')
+    expect(recovering).toHaveAttribute('aria-live', 'polite')
+    expect(onReplay).toHaveBeenCalledWith('a', '2026-05-25T12:00:00Z')
+    const retry = screen.getByRole('button', { name: /retry/i })
+    const resolve = screen.getByRole('button', { name: /resolve/i })
+    expect(retry).toBeDisabled()
+    expect(resolve).toBeDisabled()
+
+    fireEvent.keyDown(row, { key: 'r' })
+    fireEvent.keyDown(row, { key: 'Enter', ctrlKey: true })
+    expect(onReplay).toHaveBeenCalledOnce()
+    expect(onResolve).not.toHaveBeenCalled()
+
+    await act(async () => { finishReplay?.(false) })
+    await waitFor(() => expect(screen.queryByTestId('dlq-recovering-a')).toBeNull())
+    expect(retry).toBeEnabled()
+    expect(resolve).toBeEnabled()
+  })
+
+  it('keeps an in-flight replay out of bulk selection and mutations', async () => {
+    let finishReplay: ((value: boolean) => void) | undefined
+    const onReplay = vi.fn(() => new Promise<boolean>((resolve) => { finishReplay = resolve }))
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a')]))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={onReplay} onResolve={vi.fn()} />)
+    const row = await screen.findByTestId('dlq-row-a')
+
+    fireEvent.keyDown(row, { key: 'r' })
+    await screen.findByTestId('dlq-recovering-a')
+    fireEvent.click(screen.getByTestId('dlq-select-toggle'))
+
+    expect(screen.getByTestId('dlq-select-row-a')).toBeDisabled()
+    fireEvent.click(screen.getByTestId('dlq-select-all'))
+    expect(screen.queryByTestId('dlq-bulk-replay')).toBeNull()
+    expect(screen.queryByTestId('dlq-bulk-resolve')).toBeNull()
+    expect(vi.mocked(api).mock.calls.some(([path]) => path === '/dlq/bulk-replay')).toBe(false)
+    expect(vi.mocked(api).mock.calls.some(([path]) => path === '/dlq/bulk-resolve')).toBe(false)
+
+    await act(async () => { finishReplay?.(false) })
+  })
+
+  it('moves focus to the neighboring row after an action removes the active failure', async () => {
+    let rows = [mockDeadLetter('a'), mockDeadLetter('b')]
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.startsWith('/dlq/counts')) return countsFromRows(rows)
+      if (path.startsWith('/dlq/queue')) return { items: rows, nextCursor: null, hasMore: false }
+      return { items: [], clusters: [], runs: [], proposals: [] }
+    })
+    const onReplay = vi.fn(async (id: string) => {
+      rows = rows.filter((row) => row.id !== id)
+      useWorkflowStore.setState((state) => ({ platformVersion: state.platformVersion + 1 }))
+    })
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={onReplay} onResolve={vi.fn()} />)
+    const first = await screen.findByTestId('dlq-row-a')
+    first.focus()
+
+    fireEvent.keyDown(first, { key: 'r' })
+
+    const remaining = await screen.findByTestId('dlq-row-b')
+    await waitFor(() => expect(remaining).toHaveFocus())
+    fireEvent.keyDown(remaining, { key: 'k' })
+    expect(remaining).toHaveFocus()
+  })
+
+  it('does not reserve action shortcuts when the queue has no selected failure', async () => {
+    const onReplay = vi.fn()
+    const onResolve = vi.fn()
+    vi.mocked(api).mockImplementation(dlqMock([]))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={onReplay} onResolve={onResolve} />)
+    const queue = await screen.findByTestId('recovery-queue')
+
+    expect(fireEvent.keyDown(queue, { key: 'r' })).toBe(true)
+    expect(fireEvent.keyDown(queue, { key: 'Enter', ctrlKey: true })).toBe(true)
+    expect(onReplay).not.toHaveBeenCalled()
+    expect(onResolve).not.toHaveBeenCalled()
+  })
+
+  it('cancels pending focus restoration when an action reports failure', async () => {
+    let rows = [mockDeadLetter('a'), mockDeadLetter('b')]
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.startsWith('/dlq/counts')) return countsFromRows(rows)
+      if (path.startsWith('/dlq/queue')) return { items: rows, nextCursor: null, hasMore: false }
+      return { items: [], clusters: [], runs: [], proposals: [] }
+    })
+    const onReplay = vi.fn(async () => false)
+    render(
+      <>
+        <button type="button">Outside focus</button>
+        <DeadLettersPanel onRefresh={vi.fn()} onReplay={onReplay} onResolve={vi.fn()} />
+      </>,
+    )
+    const first = await screen.findByTestId('dlq-row-a')
+    fireEvent.keyDown(first, { key: 'r' })
+    await waitFor(() => expect(onReplay).toHaveBeenCalledOnce())
+
+    const outside = screen.getByRole('button', { name: 'Outside focus' })
+    outside.focus()
+    rows = [mockDeadLetter('b')]
+    act(() => {
+      useWorkflowStore.setState((state) => ({ platformVersion: state.platformVersion + 1 }))
+    })
+
+    await waitFor(() => expect(screen.queryByTestId('dlq-row-a')).toBeNull())
+    expect(outside).toHaveFocus()
+  })
+
+  it('keeps triage shortcuts inert in form controls and for key repeats', async () => {
+    const onReplay = vi.fn()
+    const onResolve = vi.fn()
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a')]))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={onReplay} onResolve={onResolve} />)
+
+    const search = await screen.findByTestId('dlq-search')
+    fireEvent.keyDown(search, { key: 'r' })
+    fireEvent.keyDown(search, { key: 'Enter', ctrlKey: true })
+    fireEvent.keyDown(screen.getByTestId('dlq-row-a'), { key: 'r', repeat: true })
+
+    expect(onReplay).not.toHaveBeenCalled()
+    expect(onResolve).not.toHaveBeenCalled()
+  })
+
+  it('copies the selected failure summary and reports success', async () => {
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a', {
+      workflowName: 'Refund triage',
+      nodeId: 'charge-card',
+      nodeType: 'http',
+      errorJson: { message: 'HTTP 503 from billing' },
+      createdAt: '2026-07-13T12:34:56-05:00',
+      runId: 'run-123',
+    })]))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await screen.findByTestId('dlq-row-a')
+
+    fireEvent.click(screen.getByTestId('dlq-copy-error'))
+
+    await waitFor(() => expect(copyText).toHaveBeenCalledWith(
+      'Refund triage · charge-card (http) · HTTP 503 from billing · 2026-07-13T17:34:56.000Z · run-123',
+    ))
+    expect(useWorkflowStore.getState().toasts.at(-1)?.message).toBe('Error summary copied')
+  })
+
+  it('reports a clipboard failure without claiming success', async () => {
+    vi.mocked(copyText).mockRejectedValue(new Error('clipboard unavailable'))
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a')]))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await screen.findByTestId('dlq-row-a')
+
+    fireEvent.click(screen.getByTestId('dlq-copy-error'))
+
+    await waitFor(() => {
+      expect(useWorkflowStore.getState().toasts.at(-1)?.message).toBe('Could not copy the error summary')
+    })
   })
 })

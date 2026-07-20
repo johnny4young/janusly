@@ -16,11 +16,12 @@
  * the dashboard ships before the private-beta MTTR experiment closes.
  */
 
-import React, { useState } from 'react'
-import { Award, Download, FileText } from 'lucide-react'
+import { useState } from 'react'
+import { Award, Download, FileText, History } from 'lucide-react'
 
 import { downloadFromApi } from '../api'
 import { getResolvedLocale, useT } from '../i18n'
+import { formatDuration, type RecoveryLedger } from './recovery-center/helpers'
 
 export type ClustersResolvedMetric = {
   value: number | null
@@ -50,18 +51,10 @@ export type ValueDashboardSectionProps = {
   windowDays: number
   /** Total automation downtime CLOSED in the window (ms) — a measured figure, no estimate badge. */
   downtimeEndedMs?: number
+  /** Lifetime measured recovery value; hidden until at least one replay succeeds. */
+  ledger?: RecoveryLedger | null
   /** When true, the section renders the private-beta-pending empty state. */
   terminalRunsZero: boolean
-}
-
-/** Compact hours/minutes for the "downtime ended" figure: "3h 12m" / "45m" / "0m". */
-function formatDurationHm(ms: number): string {
-  if (!Number.isFinite(ms) || ms <= 0) return '0m'
-  const totalMinutes = Math.round(ms / 60000)
-  const hours = Math.floor(totalMinutes / 60)
-  const minutes = totalMinutes % 60
-  if (hours === 0) return `${minutes}m`
-  return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`
 }
 
 function formatCurrency(amount: number): string {
@@ -101,6 +94,15 @@ export function ValueDashboardSection(props: ValueDashboardSectionProps) {
   const baselineMttrSeconds = valueEstimate?.assumptions.baselineMttrSeconds ?? 0
   const baselineUnset = baselineMttrSeconds === 0
   const mttrSeconds = props.mttrMs != null ? Math.round(props.mttrMs / 1000) : null
+  const ledgerLine = props.ledger && props.ledger.totalRecovered > 0 ? (
+    <p className="we-recovery-center-value__lifetime" data-testid="recovery-lifetime-ledger">
+      <History size={14} aria-hidden="true" />
+      {t('recoveryCenter.value.lifetimeImpact', {
+        count: props.ledger.totalRecovered,
+        duration: formatDuration(props.ledger.downtimeEndedMs),
+      })}
+    </p>
+  ) : null
 
   // Empty state when the org has no terminal runs in the window —
   // dashboard sits dormant until the operator runs at least one workflow.
@@ -112,6 +114,7 @@ export function ValueDashboardSection(props: ValueDashboardSectionProps) {
           {t('recoveryCenter.value.title')}
         </h2>
         <p className="we-recovery-center-value__empty">{t('recoveryCenter.value.privateBetaPending')}</p>
+        {ledgerLine}
       </section>
     )
   }
@@ -135,6 +138,7 @@ export function ValueDashboardSection(props: ValueDashboardSectionProps) {
             {t('recoveryCenter.value.title')}
           </h2>
           <p className="we-recovery-center-value__subtitle">{t('recoveryCenter.value.subtitle')}</p>
+          {ledgerLine}
         </div>
         <div className="we-recovery-center-value__actions">
           <button
@@ -206,7 +210,7 @@ export function ValueDashboardSection(props: ValueDashboardSectionProps) {
             {t('recoveryCenter.value.downtimeEnded.label')}
           </div>
           <div className="we-recovery-center-value__value">
-            {formatDurationHm(props.downtimeEndedMs ?? 0)}
+            {formatDuration(props.downtimeEndedMs ?? 0)}
           </div>
         </div>
 

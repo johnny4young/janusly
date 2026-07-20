@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const getWorkflowStatusMock = vi.hoisted(() => vi.fn(async () => ({ status: "active", pausedReason: null })));
+
 vi.mock("./queue", () => ({
   workflowQueue: {
     upsertJobScheduler: vi.fn(),
@@ -32,6 +34,12 @@ vi.mock("@janusly/data/src/scheduleEntriesRepo", () => ({
     createdAt: new Date(),
     updatedAt: new Date(),
   })),
+}));
+
+vi.mock("@janusly/data/src/upstreamHealthSourcesRepo", () => ({
+  getWorkflowStatus: getWorkflowStatusMock,
+  WORKFLOW_STATUS_ACTIVE: "active",
+  WORKFLOW_STATUS_PAUSED_UPSTREAM: "paused_upstream_degraded",
 }));
 
 vi.mock("@janusly/db", () => ({
@@ -368,5 +376,64 @@ describe("handleScheduleTrigger", () => {
     // The property under test is the LOOKUP path, not the run-spawn
     // path: payload.orgId never reaches the DB.
     expect(startRunMock).not.toHaveBeenCalled();
+  });
+
+  describe("pause gate", () => {
+    function activeEntry() {
+      return {
+        id: "e1", orgId: "org-1", workflowId: "wf1", workflowVersionId: "v1", nodeId: "trigger",
+        cronExpression: "0 9 * * *", enabled: true, lastRunAt: null, lastRunId: null,
+        createdBy: null, createdAt: new Date(), updatedAt: new Date(),
+      };
+    }
+
+    it("skips the tick when the workflow is paused — a cron that ignores the pause IS the flood", async () => {
+      // The breaker exists to stop repeated failing runs, and in production
+      // those come from the schedule. A pause only `/start` respected would
+      // pause the button nobody was pressing.
+      getScheduleEntryByIdMock.mockResolvedValueOnce(activeEntry());
+      getWorkflowStatusMock.mockResolvedValueOnce({ status: "paused_circuit_breaker", pausedReason: "5 consecutive" } as never);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      await handleScheduleTrigger({ scheduleEntryId: "e1" });
+
+      expect(startRunMock).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+
+    it("skips an upstream-outage pause too", async () => {
+      getScheduleEntryByIdMock.mockResolvedValueOnce(activeEntry());
+      getWorkflowStatusMock.mockResolvedValueOnce({ status: "paused_upstream_degraded", pausedReason: "stripe" } as never);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      await handleScheduleTrigger({ scheduleEntryId: "e1" });
+
+      expect(startRunMock).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+
+    it("reads the status with the ROW's orgId, never a payload hint", async () => {
+      getScheduleEntryByIdMock.mockResolvedValueOnce(activeEntry());
+      getWorkflowStatusMock.mockResolvedValueOnce({ status: "paused_circuit_breaker", pausedReason: null } as never);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      await handleScheduleTrigger({ scheduleEntryId: "e1", orgId: "attacker-org", workflowVersionId: "x", nodeId: "y" });
+
+      expect(getWorkflowStatusMock).toHaveBeenCalledWith("org-1", "wf1");
+      warn.mockRestore();
+    });
+
+    it("does not gate an active workflow (the snapshot load is still reached)", async () => {
+      getScheduleEntryByIdMock.mockResolvedValueOnce(activeEntry());
+      getWorkflowStatusMock.mockResolvedValueOnce({ status: "active", pausedReason: null } as never);
+      const err = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      await handleScheduleTrigger({ scheduleEntryId: "e1" });
+
+      // The db mock resolves the snapshot select to [], so the handler stops
+      // at "snapshot missing" — past the gate, which is the point.
+      expect(err).toHaveBeenCalledWith("[schedule] workflow snapshot missing", expect.anything());
+      err.mockRestore();
+    });
   });
 });

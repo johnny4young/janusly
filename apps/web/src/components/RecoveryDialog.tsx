@@ -15,10 +15,12 @@
  *   5. **Validation-failed** — the sandbox run reached `failed` /
  *      `cancelled`; surfaces the failed node's `errorJson` plus an
  *      "Iterate" button that re-opens the suggestion flow.
- *   6. **Applying** — sandbox passed; `POST /workflows/save` followed
+ *   6. **Validated** — sandbox passed; show the updated confidence passport
+ *      and require an explicit operator Apply decision.
+ *   7. **Applying** — `POST /workflows/save` followed
  *      by `POST /dlq/replay` (the production replay) chained together.
- *   7. **Applied** — success ribbon + production replay run id.
- *   8. **Error** — surfaces a transport / unexpected failure with a
+ *   8. **Applied** — success ribbon + production replay run id.
+ *   9. **Error** — surfaces a transport / unexpected failure with a
  *      Retry button that re-enters Idle.
  *
  * Reuses the `run-input-*` modal CSS tokens from the run-input dialog
@@ -27,7 +29,7 @@
  *
  * This parent owns the `Step` state machine, the three effects (focus,
  * ESC, the validation polling loop), and the apply-flow callbacks
- * (`generateSuggestion`, `validateAndApply`, `applyAfterValidation`,
+ * (`generateSuggestion`, `validateSuggestion`, `applyAfterValidation`,
  * `recordFeedback`, `onBackdropClick`). The pure helpers + the per-step
  * render bodies live under `./recovery-dialog/` (each body receives its
  * data via explicit props — no shared closures).
@@ -36,14 +38,13 @@
  * this dialog with the selected DLQ row.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, Play, RefreshCcw, Sparkles, X } from 'lucide-react'
 import { normalizeErrorSignature } from '@janusly/shared/src/error-signature'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { DeadLetter } from './DeadLettersPanel'
-import { formatDowntime } from './recovery-center/helpers'
 import { Trans, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { AppliedBody } from './recovery-dialog/AppliedBody'
@@ -60,12 +61,16 @@ import type {
   PatchSuggestion,
   PreSaveBeforeSnapshot,
   RunStatusPayload,
+  RecoveryPlaybookSummary,
   Step,
   SuggestionTab,
 } from './recovery-dialog/types'
 
 const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'cancelled'])
 const VALIDATION_POLL_INTERVAL_MS = 1500
+const PlaybookMatchCard = lazy(() => import('./recovery-dialog/PlaybookMatchCard').then((module) => ({
+  default: module.PlaybookMatchCard,
+})))
 
 type RecoveryDialogProps = {
   dlq: DeadLetter
@@ -95,7 +100,7 @@ type RecoveryDialogProps = {
  */
 async function recordFeedback(input: {
   deadLetterId: string
-  suggestionMode: 'ai' | 'fallback'
+  suggestionMode: 'ai' | 'fallback' | 'playbook'
   approachLabel: string
   accepted: boolean
   comment?: string
@@ -109,15 +114,17 @@ async function recordFeedback(input: {
    *  confidence-calibration sweep can bucket decisions by raw confidence
    *  and fit the per-approach curve. Omitted by headless callers. */
   rawConfidence?: number
-}): Promise<void> {
+}): Promise<boolean> {
   try {
     await api('/recovery/feedback', {
       method: 'POST',
       body: JSON.stringify(input),
     })
+    return true
   } catch (error) {
     // Non-blocking — feedback is supplementary signal.
     console.warn('[recovery-feedback] write failed', error)
+    return false
   }
 }
 
@@ -133,6 +140,8 @@ export function RecoveryDialog({
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const addToast = useWorkflowStore((state) => state.addToast)
   const [step, setStep] = useState<Step>({ kind: 'idle' })
+  const [matchingPlaybook, setMatchingPlaybook] = useState<RecoveryPlaybookSummary | null>(null)
+  const [playbookBusy, setPlaybookBusy] = useState<'use' | 'retire' | null>(null)
 
   // Derive the original failure's signature once when the source DLQ
   // mounts. The delta route uses this to count "same failure since
@@ -161,12 +170,15 @@ export function RecoveryDialog({
   const primaryRef = useRef<HTMLButtonElement | null>(null)
   const dialogRef = useRef<HTMLDivElement | null>(null)
   useDialogFocusTrap(dialogRef)
-  const reviewSuggestions = step.kind === 'review' ? step.suggestion.suggestions : []
+  const reviewSuggestions = step.kind === 'review' || step.kind === 'validated'
+    ? step.suggestion.suggestions
+    : []
   const safeSelectedIndex = Math.min(selectedSuggestionIndex, Math.max(reviewSuggestions.length - 1, 0))
-  const selectedSuggestion: SuggestionTab | null = step.kind === 'review'
-    ? (reviewSuggestions[safeSelectedIndex] ?? null)
+  const selectedIndex = step.kind === 'validated' ? step.selectedIndex : safeSelectedIndex
+  const selectedSuggestion: SuggestionTab | null = step.kind === 'review' || step.kind === 'validated'
+    ? (reviewSuggestions[selectedIndex] ?? null)
     : null
-  const canApplyPatch = step.kind === 'review' && selectedSuggestion
+  const canApplyPatch = (step.kind === 'review' || step.kind === 'validated') && selectedSuggestion
     ? isActionableSuggestion(dlq.workflowJson, step.suggestion, selectedSuggestion)
     : false
 
@@ -186,6 +198,25 @@ export function RecoveryDialog({
 
   // Focus the primary action on mount so keyboard users can hit Enter.
   useEffect(() => { primaryRef.current?.focus() }, [])
+
+  // Offer only the server-derived exact workflow + signature match. A miss or
+  // transient read failure never blocks the normal AI recovery path.
+  useEffect(() => {
+    const savedWorkflowId = (dlq.workflowJson as { id?: unknown } | null)?.id
+    if (typeof savedWorkflowId !== 'string' || savedWorkflowId.length === 0) {
+      setMatchingPlaybook(null)
+      return
+    }
+    let cancelled = false
+    api(`/recovery/playbooks/match?deadLetterId=${encodeURIComponent(dlq.id)}`)
+      .then((result) => {
+        if (!cancelled) setMatchingPlaybook((result as { playbook?: RecoveryPlaybookSummary | null }).playbook ?? null)
+      })
+      .catch(() => {
+        if (!cancelled) setMatchingPlaybook(null)
+      })
+    return () => { cancelled = true }
+  }, [dlq.id])
 
   // ESC closes — but only when no async work is in flight, otherwise
   // the operator could lose an in-progress save. The cancelling step
@@ -233,8 +264,29 @@ export function RecoveryDialog({
         // polls would call `applyAfterValidation` twice (and therefore
         // double-save and double-replay).
         cancelled = true
+        let playbookRetired = false
+        if (step.suggestion.playbook) {
+          try {
+            const outcome = await api(`/recovery/playbooks/${encodeURIComponent(step.suggestion.playbook.id)}/outcome`, {
+              method: 'POST',
+              body: JSON.stringify({ deadLetterId: dlq.id, validationRunId: step.runId, phase: 'validation' }),
+            }) as { playbook?: RecoveryPlaybookSummary | null }
+            if (outcome.playbook?.status === 'retired') {
+              playbookRetired = true
+              setMatchingPlaybook(null)
+            }
+          } catch (error) {
+            console.warn('[recovery-playbook] validation outcome write failed', error)
+          }
+        }
         if (status === 'succeeded') {
-          await applyAfterValidation(step.suggestion, step.selectedIndex)
+          setSelectedSuggestionIndex(step.selectedIndex)
+          setStep({
+            kind: 'validated',
+            suggestion: step.suggestion,
+            selectedIndex: step.selectedIndex,
+            runId: step.runId,
+          })
           return
         }
         const errorJson = pickFailedNodeErrorJson(result.nodes ?? [], dlq.nodeId)
@@ -244,6 +296,7 @@ export function RecoveryDialog({
           selectedIndex: step.selectedIndex,
           runId: step.runId,
           errorJson,
+          playbookRetired,
         })
       } catch (error) {
         if (cancelled) return
@@ -259,11 +312,7 @@ export function RecoveryDialog({
       cancelled = true
       window.clearInterval(handle)
     }
-    // applyAfterValidation closes over `bumpPlatformVersion` and `dlq.id`
-    // which don't change between renders; intentionally exclude from deps
-    // so the poll restarts only on a real step transition.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step.kind, step.kind === 'validating' ? step.runId : null])
+  }, [dlq.id, dlq.nodeId, step])
 
   const generateSuggestion = async () => {
     setStep({ kind: 'loading' })
@@ -278,12 +327,46 @@ export function RecoveryDialog({
     } catch (error) {
       setStep({
         kind: 'error',
-        message: error instanceof Error ? error.message : (t('recoveryDialog.errors.suggestionRequest') as string),
+        message: error instanceof Error ? error.message : (t('recoveryDialog.errors.suggestionRequest')),
       })
     }
   }
 
-  const validateAndApply = async () => {
+  const loadMatchingPlaybook = async () => {
+    if (!matchingPlaybook) return
+    setPlaybookBusy('use')
+    try {
+      const result = await api(`/recovery/playbooks/${encodeURIComponent(matchingPlaybook.id)}/use`, {
+        method: 'POST',
+        body: JSON.stringify({ deadLetterId: dlq.id }),
+      }) as { suggestion: PatchSuggestion }
+      setSelectedSuggestionIndex(0)
+      setStep({ kind: 'review', suggestion: normalisePatchSuggestion(result.suggestion) })
+    } catch (error) {
+      setStep({ kind: 'error', message: error instanceof Error ? error.message : (t('recoveryDialog.playbook.useFailed')) })
+    } finally {
+      setPlaybookBusy(null)
+    }
+  }
+
+  const retireMatchingPlaybook = async () => {
+    if (!matchingPlaybook) return
+    setPlaybookBusy('retire')
+    try {
+      await api(`/recovery/playbooks/${encodeURIComponent(matchingPlaybook.id)}/retire`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      })
+      setMatchingPlaybook(null)
+      bumpPlatformVersion()
+    } catch (error) {
+      setStep({ kind: 'error', message: error instanceof Error ? error.message : (t('recoveryDialog.playbook.retireFailed')) })
+    } finally {
+      setPlaybookBusy(null)
+    }
+  }
+
+  const validateSuggestion = async () => {
     if (step.kind !== 'review') return
     const suggestion = step.suggestion
     const selected = suggestion.suggestions[safeSelectedIndex]
@@ -294,21 +377,22 @@ export function RecoveryDialog({
         body: JSON.stringify({
           deadLetterId: dlq.id,
           suggestedWorkflow: selected.workflow,
+          ...(suggestion.playbook ? { recoveryPlaybookId: suggestion.playbook.id } : {}),
         }),
       }) as { runId: string }
       setStep({ kind: 'validating', suggestion, selectedIndex: safeSelectedIndex, runId: result.runId })
     } catch (error) {
       setStep({
         kind: 'error',
-        message: error instanceof Error ? error.message : (t('recoveryDialog.errors.validationRequest') as string),
+        message: error instanceof Error ? error.message : (t('recoveryDialog.errors.validationRequest')),
       })
     }
   }
 
-  const applyAfterValidation = async (suggestion: PatchSuggestion, selectedIndex: number) => {
+  const applyAfterValidation = async (suggestion: PatchSuggestion, selectedIndex: number, validationRunId: string) => {
     const selected = suggestion.suggestions[selectedIndex]
     if (!selected) {
-      setStep({ kind: 'error', message: t('recoveryDialog.errors.selectedSuggestionUnavailable') as string })
+      setStep({ kind: 'error', message: t('recoveryDialog.errors.selectedSuggestionUnavailable') })
       return
     }
     const mode: 'single' | 'cluster' = isClusterMode ? 'cluster' : 'single'
@@ -319,7 +403,12 @@ export function RecoveryDialog({
     // the delta card can render the "before" pills statically without a
     // loading flash. Non-blocking: when this fails the card falls back
     // to fetching everything via /workflows/health/delta.
-    const targetWorkflowId = selected.workflow.id ?? null
+    // Recovery-list rows distinguish the source template/demo id from a
+    // persisted workflow id. Only the explicit metadata id is eligible for
+    // health reads; workflowJson.id may be a template id even when the row has
+    // no recovery overlay yet. If this projection is unavailable, the delta
+    // card fetches both sides after save instead of risking an expected 404.
+    const targetWorkflowId = dlq.recovery?.metadataWorkflowId ?? null
     let preSaveBeforeSnapshot: PreSaveBeforeSnapshot | null = null
     if (targetWorkflowId) {
       try {
@@ -350,6 +439,7 @@ export function RecoveryDialog({
         body: JSON.stringify(selected.workflow),
       }) as { workflowId?: string; versionId?: string; version?: number }
       const appliedWorkflowId = typeof saveResponse.workflowId === 'string' ? saveResponse.workflowId : undefined
+      const sourceWorkflowVersionId = typeof saveResponse.versionId === 'string' ? saveResponse.versionId : undefined
       const appliedVersion = typeof saveResponse.version === 'number' ? saveResponse.version : undefined
 
       // Save is durable. Bump now so sibling panels (Workflows list,
@@ -370,16 +460,13 @@ export function RecoveryDialog({
             // Apply the fix to same-workflow members so they recover, not just
             // re-run the broken snapshot; cross-workflow members re-run plainly.
             suggestedWorkflow: selected.workflow,
+            ...(suggestion.playbook ? {
+              recoveryPlaybookId: suggestion.playbook.id,
+              recoveryValidationRunId: validationRunId,
+              recoveryPlaybookDeadLetterId: dlq.id,
+            } : {}),
           }),
         }) as ClusterApplyResult
-        setStep({
-          kind: 'applied',
-          cluster: result,
-          appliedWorkflowId,
-          appliedVersion,
-          priorFailureSignature,
-          preSaveBeforeSnapshot,
-        })
         bumpPlatformVersion()
         // Operator → system feedback: Apply succeeded, so the operator
         // accepted this approach for THIS workflow. Future patch
@@ -387,13 +474,31 @@ export function RecoveryDialog({
         // Passing `rationale` lets the api seed a `patch_rationale`
         // memory entry alongside the standard `recovery_rationale`.
         // Fire-and-forget: a feedback-write failure must not block the UX.
-        void recordFeedback({
+        const feedbackRecorded = await recordFeedback({
           deadLetterId: dlq.id,
           suggestionMode: suggestion.mode,
           approachLabel: selected.approachLabel,
           accepted: true,
           rationale: selected.rationale,
-          rawConfidence: selected.confidence,
+          rawConfidence: suggestion.mode === 'playbook' ? undefined : selected.confidence,
+        })
+        setStep({
+          kind: 'applied',
+          cluster: result,
+          appliedWorkflowId,
+          appliedVersion,
+          priorFailureSignature,
+          preSaveBeforeSnapshot,
+          playbookUsePending: Boolean(suggestion.playbook),
+          ...(!suggestion.playbook && feedbackRecorded && sourceWorkflowVersionId ? {
+            playbookPromotionSource: {
+              deadLetterId: dlq.id,
+              validationRunId,
+              sourceWorkflowVersionId,
+              defaultTitle: t('recoveryDialog.playbook.defaultTitle', { nodeId: dlq.nodeId }),
+              defaultInstructions: selected.rationale,
+            },
+          } : {}),
         })
         return
       }
@@ -402,8 +507,29 @@ export function RecoveryDialog({
       // as the sandbox and writes it as the run's authoritative workflow.
       const replay = await api('/dlq/replay', {
         method: 'POST',
-        body: JSON.stringify({ deadLetterId: dlq.id, suggestedWorkflow: selected.workflow }),
+        body: JSON.stringify({
+          deadLetterId: dlq.id,
+          suggestedWorkflow: selected.workflow,
+          ...(suggestion.playbook ? {
+            recoveryPlaybookId: suggestion.playbook.id,
+            recoveryValidationRunId: validationRunId,
+          } : {}),
+        }),
       }) as { runId?: string }
+      bumpPlatformVersion()
+      addToast(t('toasts.deadLetterReplayed'), 'success')
+      // Operator → system feedback: same as cluster mode above. The
+      // `rationale` here seeds the `patch_rationale` memory kind so
+      // future similar failures recall the LLM's explanation, not just
+      // the approachLabel.
+      const feedbackRecorded = await recordFeedback({
+        deadLetterId: dlq.id,
+        suggestionMode: suggestion.mode,
+        approachLabel: selected.approachLabel,
+        accepted: true,
+        rationale: selected.rationale,
+        rawConfidence: suggestion.mode === 'playbook' ? undefined : selected.confidence,
+      })
       setStep({
         kind: 'applied',
         runId: replay.runId,
@@ -411,36 +537,21 @@ export function RecoveryDialog({
         appliedVersion,
         priorFailureSignature,
         preSaveBeforeSnapshot,
-      })
-      bumpPlatformVersion()
-      // Wedge moment: name the time we just gave back. The dead letter's
-      // `createdAt` is the failure instant; recovering it now closes that
-      // downtime window, so surface "Recovered after 3h 14m".
-      if (dlq.createdAt) {
-        const downtimeMs = Date.now() - new Date(dlq.createdAt).getTime()
-        if (Number.isFinite(downtimeMs) && downtimeMs > 0) {
-          addToast(
-            t('recoveryDialog.recoveredAfter', { duration: formatDowntime(downtimeMs) }) as string,
-            'success',
-          )
-        }
-      }
-      // Operator → system feedback: same as cluster mode above. The
-      // `rationale` here seeds the `patch_rationale` memory kind so
-      // future similar failures recall the LLM's explanation, not just
-      // the approachLabel.
-      void recordFeedback({
-        deadLetterId: dlq.id,
-        suggestionMode: suggestion.mode,
-        approachLabel: selected.approachLabel,
-        accepted: true,
-        rationale: selected.rationale,
-        rawConfidence: selected.confidence,
+        playbookUsePending: Boolean(suggestion.playbook),
+        ...(!suggestion.playbook && feedbackRecorded && sourceWorkflowVersionId ? {
+          playbookPromotionSource: {
+            deadLetterId: dlq.id,
+            validationRunId,
+            sourceWorkflowVersionId,
+            defaultTitle: t('recoveryDialog.playbook.defaultTitle', { nodeId: dlq.nodeId }),
+            defaultInstructions: selected.rationale,
+          },
+        } : {}),
       })
     } catch (error) {
       setStep({
         kind: 'error',
-        message: error instanceof Error ? error.message : (t('recoveryDialog.errors.applyFailed') as string),
+        message: error instanceof Error ? error.message : (t('recoveryDialog.errors.applyFailed')),
       })
     }
   }
@@ -481,7 +592,7 @@ export function RecoveryDialog({
             type="button"
             className="run-input-dialog__close"
             onClick={onClose}
-            aria-label={t('recoveryDialog.closeAria') as string}
+            aria-label={t('recoveryDialog.closeAria')}
             disabled={
               step.kind === 'loading'
               || step.kind === 'applying'
@@ -495,6 +606,7 @@ export function RecoveryDialog({
 
         <div className="run-input-dialog__body" aria-live="polite">
           {step.kind === 'idle' && (
+            <>
             <p className="helper-text">
               {t('recoveryDialog.idle.failingNodeIs')} <code>{dlq.nodeId}</code> {t('recoveryDialog.idle.onRun')} <code>{dlq.runId.slice(0, 8)}…</code>{' '}
               {t('recoveryDialog.idle.afterAttempts', { count: dlq.attempt })}
@@ -514,6 +626,17 @@ export function RecoveryDialog({
               ) : null}
               {' '}<Trans i18nKey="recoveryDialog.idle.clickGenerate" components={{ strong: <strong /> }} />
             </p>
+            {matchingPlaybook ? (
+              <Suspense fallback={<p className="helper-text">{t('recoveryDialog.playbook.loading')}</p>}>
+              <PlaybookMatchCard
+                playbook={matchingPlaybook}
+                busy={playbookBusy}
+                onUse={() => void loadMatchingPlaybook()}
+                onRetire={() => void retireMatchingPlaybook()}
+              />
+              </Suspense>
+            ) : null}
+            </>
           )}
 
           {step.kind === 'loading' && (
@@ -530,6 +653,21 @@ export function RecoveryDialog({
               onSelectIndex={setSelectedSuggestionIndex}
               dlq={dlq}
               canApplyPatch={canApplyPatch}
+              failureSignature={priorFailureSignature}
+            />
+          )}
+
+          {step.kind === 'validated' && selectedSuggestion && (
+            <ReviewBody
+              suggestion={step.suggestion}
+              selected={selectedSuggestion}
+              selectedIndex={step.selectedIndex}
+              onSelectIndex={() => undefined}
+              dlq={dlq}
+              canApplyPatch={canApplyPatch}
+              sandboxStatus="passed"
+              failureSignature={priorFailureSignature}
+              selectionLocked
             />
           )}
 
@@ -551,6 +689,8 @@ export function RecoveryDialog({
               dlq={dlq}
               runId={step.runId}
               errorJson={step.errorJson}
+              failureSignature={priorFailureSignature}
+              playbookRetired={step.playbookRetired}
             />
           )}
 
@@ -568,7 +708,7 @@ export function RecoveryDialog({
                     approachLabel: selected.approachLabel,
                     accepted: false,
                     comment: comment.length > 0 ? comment : undefined,
-                    rawConfidence: selected.confidence,
+                    rawConfidence: step.suggestion.mode === 'playbook' ? undefined : selected.confidence,
                   })
                 }
                 onClose()
@@ -576,6 +716,13 @@ export function RecoveryDialog({
               onBack={() => {
                 if (step.sourceStep === 'review') {
                   setStep({ kind: 'review', suggestion: step.suggestion })
+                } else if (step.sourceStep === 'validated') {
+                  setStep({
+                    kind: 'validated',
+                    suggestion: step.suggestion,
+                    selectedIndex: step.selectedIndex,
+                    runId: step.runId ?? '',
+                  })
                 } else {
                   setStep({
                     kind: 'validation-failed',
@@ -583,6 +730,7 @@ export function RecoveryDialog({
                     selectedIndex: step.selectedIndex,
                     runId: step.runId ?? '',
                     errorJson: step.errorJson,
+                    playbookRetired: step.playbookRetired,
                   })
                 }
               }}
@@ -608,6 +756,8 @@ export function RecoveryDialog({
               appliedVersion={step.appliedVersion}
               priorFailureSignature={step.priorFailureSignature ?? null}
               preSaveBeforeSnapshot={step.preSaveBeforeSnapshot ?? null}
+              playbookPromotionSource={step.playbookPromotionSource}
+              playbookUsePending={step.playbookUsePending}
             />
           )}
 
@@ -655,16 +805,46 @@ export function RecoveryDialog({
                 type="button"
                 ref={primaryRef}
                 className="command-button command-button-primary"
-                onClick={validateAndApply}
+                onClick={validateSuggestion}
                 disabled={!canApplyPatch}
-                title={!canApplyPatch ? (t('recoveryDialog.footer.applyDisabledReason') as string) : undefined}
+                title={!canApplyPatch ? (t('recoveryDialog.footer.applyDisabledReason')) : undefined}
               >
                 <Play size={14} aria-hidden="true" />
                 <span>
                   {isClusterMode
-                    ? t('recoveryDialog.footer.applyValidateCluster', { count: clusterMembers!.length })
-                    : t('recoveryDialog.footer.applyValidate')}
+                    ? t('recoveryDialog.footer.validateCluster', { count: clusterMembers!.length })
+                    : t('recoveryDialog.footer.validate')}
                 </span>
+              </button>
+            </>
+          )}
+
+          {step.kind === 'validated' && (
+            <>
+              <button
+                type="button"
+                className="command-button"
+                onClick={() => setStep({
+                  kind: 'cancelling',
+                  suggestion: step.suggestion,
+                  selectedIndex: step.selectedIndex,
+                  sourceStep: 'validated',
+                  runId: step.runId,
+                })}
+              >
+                {t('recoveryDialog.footer.cancel')}
+              </button>
+              <button
+                type="button"
+                ref={primaryRef}
+                className="command-button command-button-primary"
+                onClick={() => void applyAfterValidation(step.suggestion, step.selectedIndex, step.runId)}
+                disabled={!canApplyPatch}
+              >
+                <Play size={14} aria-hidden="true" />
+                <span>{isClusterMode
+                  ? t('recoveryDialog.footer.applyCluster', { count: clusterMembers!.length })
+                  : t('recoveryDialog.footer.apply')}</span>
               </button>
             </>
           )}
@@ -681,6 +861,7 @@ export function RecoveryDialog({
                   sourceStep: 'validation-failed',
                   runId: step.runId,
                   errorJson: step.errorJson,
+                  playbookRetired: step.playbookRetired,
                 })}
               >
                 {t('recoveryDialog.footer.cancel')}
@@ -704,7 +885,7 @@ export function RecoveryDialog({
                       approachLabel: selected.approachLabel,
                       accepted: false,
                       comment: 'validation_failed',
-                      rawConfidence: selected.confidence,
+                      rawConfidence: step.suggestion.mode === 'playbook' ? undefined : selected.confidence,
                     })
                   }
                   generateSuggestion()

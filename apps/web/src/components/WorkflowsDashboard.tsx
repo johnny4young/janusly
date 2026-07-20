@@ -6,7 +6,7 @@
  * Used by `RightPanel.tsx` (the `workflows` tab).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { LoadingSkeleton } from './LoadingSkeleton'
 import { CircleCheck, FolderPlus, ListChecks, Pencil, RefreshCw, Trash, Trash2, Workflow } from 'lucide-react'
 import { api } from '../api'
@@ -21,6 +21,7 @@ import { TrashPanel } from './TrashPanel'
 /** Run statuses that count as "failed" for the failed-first sort (mirrors
  *  the server's terminal-failure set). */
 const FAILED_RUN_STATUSES = new Set(['failed', 'cancelled', 'timed_out'])
+const STATUS_PAUSED_CIRCUIT_BREAKER = 'paused_circuit_breaker'
 
 /** Flows-list page size — the initial load and each "Load more" page fetch this
  *  many rows. A full page (`=== PAGE_SIZE`) means another page may exist; a short
@@ -43,6 +44,15 @@ const DEFAULT_RETENTION_DAYS = 30
  *  its workflows, in the same order the global filter+sort produced. */
 type FolderGroup = { key: string; items: SavedWorkflow[] }
 
+/** Return the persisted collapsed-folder set after a details section reaches
+ *  `open`. Reuses the current array for no-op native toggle notifications. */
+function updateCollapsedFolders(current: string[], key: string, open: boolean): string[] {
+  const collapsed = current.includes(key)
+  if (open && collapsed) return current.filter((entry) => entry !== key)
+  if (!open && !collapsed) return [...current, key]
+  return current
+}
+
 /** Render the saved-workflows list with click-to-open + manual refresh. */
 export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void }) {
   const { t } = useT()
@@ -51,6 +61,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   const bumpPlatformVersion = useWorkflowStore(state => state.bumpPlatformVersion)
   const [workflows, setWorkflows] = useState<SavedWorkflow[]>([])
   const [loading, setLoading] = useState(false)
+  const recoveryBusyRef = useRef(new Set<string>())
+  const [recoveryBusyIds, setRecoveryBusyIds] = useState<Set<string>>(() => new Set())
   // "Load more" keyset pagination. `hasMore` is true when the last page came back
   // full (so another page may exist); `loadingMore` guards the in-flight append.
   const [hasMore, setHasMore] = useState(false)
@@ -93,6 +105,10 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   const [collapsedFolders, setCollapsedFolders] = useState<string[]>(
     () => readFlowsFilters()?.collapsedFolders ?? [],
   )
+  // Native <details> emits `toggle` asynchronously. Track click intent outside
+  // React state so a second click or immediate reload observes the latest value
+  // even before the first toggle event commits.
+  const collapsedFoldersRef = useRef(collapsedFolders)
   // Folder management (rename / delete) transient state — at most one folder is
   // being renamed or delete-confirmed at a time. `renameDraft` holds the in-progress
   // new name while `renamingFolder` is set.
@@ -214,10 +230,11 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     return () => clearTimeout(id)
   }, [query])
 
-  // Persist the tag / folder / search / sort / collapsed-folders view
-  // per-browser so it survives navigation + reload. The initial run re-writes
-  // the restored values (a harmless no-op).
-  useEffect(() => {
+  // Persist the tag / folder / search / sort / collapsed-folders view before
+  // the browser paints the committed state. In particular, this closes the
+  // window where an operator can collapse a section and immediately reload
+  // before a deferred effect has written the new preference.
+  useLayoutEffect(() => {
     writeFlowsFilters({ tags: tagFilters, folder: folderFilter, query, sort, collapsedFolders })
   }, [tagFilters, folderFilter, query, sort, collapsedFolders])
 
@@ -371,14 +388,19 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   // so an org that never uses folders sees no change.
   const hasFolders = groups.some((group) => group.key !== UNGROUPED)
 
+  const persistCollapsedFolders = useCallback((nextCollapsed: string[]) => {
+    collapsedFoldersRef.current = nextCollapsed
+    writeFlowsFilters({ tags: tagFilters, folder: folderFilter, query, sort, collapsedFolders: nextCollapsed })
+  }, [folderFilter, query, sort, tagFilters])
+
   const toggleFolder = useCallback((key: string, open: boolean) => {
-    setCollapsedFolders((prev) => {
-      const collapsed = prev.includes(key)
-      if (open && collapsed) return prev.filter((entry) => entry !== key)
-      if (!open && !collapsed) return [...prev, key]
-      return prev
-    })
-  }, [])
+    const current = collapsedFoldersRef.current
+    const nextCollapsed = updateCollapsedFolders(current, key, open)
+    if (nextCollapsed !== current) persistCollapsedFolders(nextCollapsed)
+    // A preceding summary click may already have persisted the intent, but the
+    // later native toggle still owns reconciliation into controlled React state.
+    setCollapsedFolders(nextCollapsed)
+  }, [persistCollapsedFolders])
 
   // Reset the three stackable filters (search / tags / folder) in one click.
   // `debouncedQuery` is reset alongside `query` so the unfiltered refetch fires
@@ -412,8 +434,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         })
         addToast(
           folder
-            ? (t('workflowsDashboard.movedToFolder', { folder }) as string)
-            : (t('workflowsDashboard.movedToUngrouped') as string),
+            ? (t('workflowsDashboard.movedToFolder', { folder }))
+            : (t('workflowsDashboard.movedToUngrouped')),
           'success',
         )
         bumpPlatformVersion()
@@ -421,7 +443,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         setWorkflows((prev) =>
           prev.map((w) => (w.id === workflowId ? { ...w, folder: previousFolder } : w)),
         )
-        addToast(tApiError(err) || (t('workflowsDashboard.moveFailed') as string), 'error')
+        addToast(tApiError(err) || (t('workflowsDashboard.moveFailed')), 'error')
       }
     },
     [workflows, addToast, bumpPlatformVersion, t],
@@ -449,14 +471,14 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         })
         addToast(
           op === 'add'
-            ? (t('workflowsDashboard.rowTagAdded', { tag }) as string)
-            : (t('workflowsDashboard.rowTagRemoved', { tag }) as string),
+            ? (t('workflowsDashboard.rowTagAdded', { tag }))
+            : (t('workflowsDashboard.rowTagRemoved', { tag })),
           'success',
         )
         bumpPlatformVersion()
       } catch (err) {
         setWorkflows((prev) => prev.map((w) => (w.id === workflowId ? { ...w, tags: prior } : w)))
-        addToast(tApiError(err) || (t('workflowsDashboard.rowTagFailed') as string), 'error')
+        addToast(tApiError(err) || (t('workflowsDashboard.rowTagFailed')), 'error')
       }
     },
     [workflows, addToast, bumpPlatformVersion, t],
@@ -499,11 +521,11 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
           method: 'POST',
           body: JSON.stringify({ from, to: trimmed }),
         })
-        addToast(t('workflowsDashboard.folderRenamed', { folder: trimmed }) as string, 'success')
+        addToast(t('workflowsDashboard.folderRenamed', { folder: trimmed }), 'success')
         bumpPlatformVersion()
       } catch (err) {
         setWorkflows((prev) => prev.map((w) => (affectedIds.has(w.id) ? { ...w, folder: from } : w)))
-        addToast(tApiError(err) || (t('workflowsDashboard.renameFailed') as string), 'error')
+        addToast(tApiError(err) || (t('workflowsDashboard.renameFailed')), 'error')
       }
     },
     [workflows, addToast, bumpPlatformVersion, t],
@@ -524,11 +546,11 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
           method: 'POST',
           body: JSON.stringify({ folder }),
         })
-        addToast(t('workflowsDashboard.folderDeleted') as string, 'success')
+        addToast(t('workflowsDashboard.folderDeleted'), 'success')
         bumpPlatformVersion()
       } catch (err) {
         setWorkflows((prev) => prev.map((w) => (affectedIds.has(w.id) ? { ...w, folder } : w)))
-        addToast(tApiError(err) || (t('workflowsDashboard.folderDeleteFailed') as string), 'error')
+        addToast(tApiError(err) || (t('workflowsDashboard.folderDeleteFailed')), 'error')
       }
     },
     [workflows, addToast, bumpPlatformVersion, t],
@@ -562,7 +584,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       setTagFilters((prev) => [...new Set(prev.map((tg) => (tg === from ? trimmed : tg)))])
       try {
         await api('/workflows/tags/rename', { method: 'POST', body: JSON.stringify({ from, to: trimmed }) })
-        addToast(t('workflowsDashboard.tagRenamed', { tag: trimmed }) as string, 'success')
+        addToast(t('workflowsDashboard.tagRenamed', { tag: trimmed }), 'success')
         bumpPlatformVersion()
       } catch (err) {
         setWorkflows((prev) => prev.map((w) => (priorTags.has(w.id) ? { ...w, tags: priorTags.get(w.id) ?? [] } : w)))
@@ -572,7 +594,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
           return next.sort((a, b) => a.localeCompare(b, getResolvedLocale()))
         })
         setTagFilters((prev) => [...new Set(prev.map((tg) => (tg === trimmed ? from : tg)))])
-        addToast(tApiError(err) || (t('workflowsDashboard.renameTagFailed') as string), 'error')
+        addToast(tApiError(err) || (t('workflowsDashboard.renameTagFailed')), 'error')
       }
     },
     [workflows, addToast, bumpPlatformVersion, t],
@@ -595,13 +617,72 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       setTagFilters((prev) => prev.filter((tg) => tg !== tag))
       try {
         await api('/workflows/tags/delete', { method: 'POST', body: JSON.stringify({ tag }) })
-        addToast(t('workflowsDashboard.tagDeleted') as string, 'success')
+        addToast(t('workflowsDashboard.tagDeleted'), 'success')
         bumpPlatformVersion()
       } catch (err) {
         setWorkflows((prev) => prev.map((w) => (priorTags.has(w.id) ? { ...w, tags: priorTags.get(w.id) ?? [] } : w)))
         setTagOptions((prev) => (prev.includes(tag) ? prev : [...prev, tag].sort((a, b) => a.localeCompare(b, getResolvedLocale()))))
         setTagFilters((prev) => (prev.includes(tag) ? prev : [...prev, tag]))
-        addToast(tApiError(err) || (t('workflowsDashboard.deleteTagFailed') as string), 'error')
+        addToast(tApiError(err) || (t('workflowsDashboard.deleteTagFailed')), 'error')
+      }
+    },
+    [workflows, addToast, bumpPlatformVersion, t],
+  )
+
+  // Resume a breaker pause or drain the next capped buffered page from an
+  // already-active workflow. The per-row lock prevents duplicate production
+  // continuations while either request is in flight.
+  const resumeWorkflow = useCallback(
+    async (workflowId: string) => {
+      if (recoveryBusyRef.current.has(workflowId)) return
+      const prior = workflows.find((w) => w.id === workflowId)
+      if (!prior) return
+      recoveryBusyRef.current.add(workflowId)
+      setRecoveryBusyIds((current) => new Set(current).add(workflowId))
+      const wasPausedByBreaker = prior.status === STATUS_PAUSED_CIRCUIT_BREAKER
+      setWorkflows((prev) =>
+        prev.map((w) => (w.id === workflowId ? { ...w, status: 'active', pausedReason: null } : w)),
+      )
+      try {
+        const res = await api<{ backfilled?: number; remaining?: number }>(
+          `/workflows/${encodeURIComponent(workflowId)}/resume`,
+          { method: 'POST' },
+        )
+        // Say what actually happened to the events the pause held. "Resumed"
+        // alone leaves the operator guessing whether the webhooks that arrived
+        // during the outage were replayed or dropped.
+        const backfilled = res?.backfilled ?? 0
+        const remaining = res?.remaining ?? 0
+        setWorkflows((prev) => prev.map((w) => (
+          w.id === workflowId ? { ...w, bufferedTriggerCount: remaining } : w
+        )))
+        addToast(
+          wasPausedByBreaker
+            ? remaining > 0
+              ? t('workflowsDashboard.resumedWithRemaining', { count: backfilled, remaining })
+              : backfilled > 0
+                ? t('workflowsDashboard.resumedWithBackfill', { count: backfilled })
+                : t('workflowsDashboard.resumed')
+            : remaining > 0
+              ? t('workflowsDashboard.backfillWithRemaining', { count: backfilled, remaining })
+              : t('workflowsDashboard.backfillCompleted', { count: backfilled }),
+          'success',
+        )
+        bumpPlatformVersion()
+      } catch (err) {
+        setWorkflows((prev) =>
+          prev.map((w) => (w.id === workflowId && prior
+            ? { ...w, status: prior.status, pausedReason: prior.pausedReason }
+            : w)),
+        )
+        addToast(tApiError(err) || t('workflowsDashboard.resumeFailed'), 'error')
+      } finally {
+        recoveryBusyRef.current.delete(workflowId)
+        setRecoveryBusyIds((current) => {
+          const next = new Set(current)
+          next.delete(workflowId)
+          return next
+        })
       }
     },
     [workflows, addToast, bumpPlatformVersion, t],
@@ -668,8 +749,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         const count = typeof result?.count === 'number' ? result.count : ids.length
         addToast(
           folder
-            ? (t('workflowsDashboard.bulkMoved', { folder, count }) as string)
-            : (t('workflowsDashboard.bulkMovedUngrouped', { count }) as string),
+            ? (t('workflowsDashboard.bulkMoved', { folder, count }))
+            : (t('workflowsDashboard.bulkMovedUngrouped', { count })),
           'success',
         )
         bumpPlatformVersion()
@@ -677,7 +758,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         setWorkflows((prev) =>
           prev.map((w) => (priorFolders.has(w.id) ? { ...w, folder: priorFolders.get(w.id) ?? null } : w)),
         )
-        addToast(tApiError(err) || (t('workflowsDashboard.bulkMoveFailed') as string), 'error')
+        addToast(tApiError(err) || (t('workflowsDashboard.bulkMoveFailed')), 'error')
       }
     },
     [selectedIds, workflows, addToast, bumpPlatformVersion, t],
@@ -720,8 +801,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         const count = typeof result?.count === 'number' ? result.count : ids.length
         addToast(
           op === 'add'
-            ? (t('workflowsDashboard.bulkTagAdded', { tag, count }) as string)
-            : (t('workflowsDashboard.bulkTagRemoved', { tag, count }) as string),
+            ? (t('workflowsDashboard.bulkTagAdded', { tag, count }))
+            : (t('workflowsDashboard.bulkTagRemoved', { tag, count })),
           'success',
         )
         bumpPlatformVersion()
@@ -729,7 +810,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         setWorkflows((prev) =>
           prev.map((w) => (priorTags.has(w.id) ? { ...w, tags: priorTags.get(w.id) ?? [] } : w)),
         )
-        addToast(tApiError(err) || (t('workflowsDashboard.bulkTagFailed') as string), 'error')
+        addToast(tApiError(err) || (t('workflowsDashboard.bulkTagFailed')), 'error')
       }
     },
     [selectedIds, bulkTagDraft, workflows, addToast, bumpPlatformVersion, t],
@@ -756,11 +837,11 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       })
       try {
         await api(`/workflows/${encodeURIComponent(workflowId)}`, { method: 'DELETE' })
-        addToast(t('workflowsDashboard.workflowDeleted', { name: current.name }) as string, 'success')
+        addToast(t('workflowsDashboard.workflowDeleted', { name: current.name }), 'success')
         bumpPlatformVersion()
       } catch (err) {
         setWorkflows((prev) => (prev.some((w) => w.id === workflowId) ? prev : [current, ...prev]))
-        addToast(tApiError(err) || (t('workflowsDashboard.deleteFailed') as string), 'error')
+        addToast(tApiError(err) || (t('workflowsDashboard.deleteFailed')), 'error')
       }
     },
     [workflows, addToast, bumpPlatformVersion, t],
@@ -782,11 +863,11 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       })
       try {
         await api(`/workflows/${encodeURIComponent(workflowId)}/restore`, { method: 'POST' })
-        addToast(t('workflowsDashboard.workflowRestored', { name: current.name }) as string, 'success')
+        addToast(t('workflowsDashboard.workflowRestored', { name: current.name }), 'success')
         bumpPlatformVersion()
       } catch (err) {
         setWorkflows((prev) => (prev.some((w) => w.id === workflowId) ? prev : [current, ...prev]))
-        addToast(tApiError(err) || (t('workflowsDashboard.restoreFailed') as string), 'error')
+        addToast(tApiError(err) || (t('workflowsDashboard.restoreFailed')), 'error')
       }
     },
     [workflows, addToast, bumpPlatformVersion, t],
@@ -808,8 +889,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         ids.map((id) => api(`/workflows/${encodeURIComponent(id)}/restore`, { method: 'POST' })),
       )
       const ok = results.filter((r) => r.status === 'fulfilled').length
-      if (ok > 0) addToast(t('workflowsDashboard.bulkRestored', { count: ok }) as string, 'success')
-      if (ok < ids.length) addToast(t('workflowsDashboard.bulkRestoreFailed') as string, 'error')
+      if (ok > 0) addToast(t('workflowsDashboard.bulkRestored', { count: ok }), 'success')
+      if (ok < ids.length) addToast(t('workflowsDashboard.bulkRestoreFailed'), 'error')
       bumpPlatformVersion()
     },
     [selectedIds, workflows, addToast, bumpPlatformVersion, t],
@@ -838,6 +919,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       setRowTag={setRowTag}
       moveToFolder={moveToFolder}
       deleteWorkflow={deleteWorkflow}
+      resumeWorkflow={resumeWorkflow}
+      recoveryBusy={recoveryBusyIds.has(workflow.id)}
       t={t}
     />
   )
@@ -929,8 +1012,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
             value={bulkFolderDraft}
             maxLength={60}
             onChange={event => setBulkFolderDraft(event.target.value)}
-            placeholder={t('workflowsDashboard.bulkFolderPlaceholder') as string}
-            aria-label={t('workflowsDashboard.bulkFolderPlaceholder') as string}
+            placeholder={t('workflowsDashboard.bulkFolderPlaceholder')}
+            aria-label={t('workflowsDashboard.bulkFolderPlaceholder')}
             data-testid="workflows-bulk-folder-input"
           />
           <datalist id="we-bulk-folder-options">
@@ -965,8 +1048,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
             value={bulkTagDraft}
             maxLength={40}
             onChange={event => setBulkTagDraft(event.target.value)}
-            placeholder={t('workflowsDashboard.bulkTagPlaceholder') as string}
-            aria-label={t('workflowsDashboard.bulkTagPlaceholder') as string}
+            placeholder={t('workflowsDashboard.bulkTagPlaceholder')}
+            aria-label={t('workflowsDashboard.bulkTagPlaceholder')}
             data-testid="workflows-bulk-tag-input"
           />
           <datalist id="we-bulk-tag-options">
@@ -1001,7 +1084,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       {/* Initial load (active or trash) — skeleton rows instead of a blank gap
           until the first page arrives. */}
       {loading && workflows.length === 0 && (
-        <LoadingSkeleton rows={5} label={t('workflowsDashboard.loading') as string} />
+        <LoadingSkeleton rows={5} label={t('workflowsDashboard.loading')} />
       )}
 
       {/* Trash view — a flat, filter-free list of soft-deleted workflows (uses
@@ -1058,7 +1141,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       {!showTrashed && visible.length > 0 && hasFolders && (
         <div className="we-list-folders" data-testid="workflows-folder-groups">
           {groups.map(group => {
-            const label = group.key === UNGROUPED ? (t('workflowsDashboard.ungroupedFolder') as string) : group.key
+            const label = group.key === UNGROUPED ? (t('workflowsDashboard.ungroupedFolder')) : group.key
             return (
               <details
                 key={group.key === UNGROUPED ? '__ungrouped__' : group.key}
@@ -1098,7 +1181,22 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                 data-drop-target={dropTarget === group.key && draggingId ? 'true' : undefined}
                 data-testid={`workflows-folder-${group.key === UNGROUPED ? 'ungrouped' : group.key}`}
               >
-                <summary className="we-list-folder__summary">
+                <summary
+                  className="we-list-folder__summary"
+                  onClick={event => {
+                    if (folderFilter !== '') return
+                    const details = event.currentTarget.parentElement as HTMLDetailsElement
+                    // The browser dispatches `toggle` asynchronously after the
+                    // summary's default action. Record the intended next state
+                    // during `click`, before an immediate reload can cancel it.
+                    // Do not set React state here: changing the controlled
+                    // `open` prop before the default action would make the
+                    // browser toggle it back in the opposite direction.
+                    const current = collapsedFoldersRef.current
+                    const nextCollapsed = updateCollapsedFolders(current, group.key, !details.open)
+                    if (nextCollapsed !== current) persistCollapsedFolders(nextCollapsed)
+                  }}
+                >
                   {renamingFolder === group.key ? (
                     // Inline rename: the controls preventDefault so a click never
                     // toggles the <details>; Enter saves, Esc cancels.
@@ -1108,7 +1206,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                         value={renameDraft}
                         autoFocus
                         maxLength={60}
-                        aria-label={t('workflowsDashboard.renameFolderLabel') as string}
+                        aria-label={t('workflowsDashboard.renameFolderLabel')}
                         onChange={event => setRenameDraft(event.target.value)}
                         onClick={event => event.stopPropagation()}
                         onKeyDown={event => {
@@ -1147,15 +1245,15 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                           className="small-command we-list-folder__selectall"
                           aria-pressed={group.items.every((w) => selectedIds.has(w.id))}
                           onClick={event => { event.preventDefault(); event.stopPropagation(); toggleSelectFolder(group.items) }}
-                          title={t('workflowsDashboard.selectAllInFolderAria', { folder: label }) as string}
-                          aria-label={t('workflowsDashboard.selectAllInFolderAria', { folder: label }) as string}
+                          title={t('workflowsDashboard.selectAllInFolderAria', { folder: label })}
+                          aria-label={t('workflowsDashboard.selectAllInFolderAria', { folder: label })}
                           data-testid={`workflows-select-folder-${group.key === UNGROUPED ? 'ungrouped' : group.key}`}
                         >
                           <ListChecks size={12} aria-hidden="true" />
                         </button>
                       )}
                       <span className="we-list-folder__name">{label}</span>
-                      <span className="we-pill we-pill--ghost">{t('workflowsDashboard.folderCount', { count: group.items.length })}</span>
+                      <span className="we-pill" data-tone="ghost">{t('workflowsDashboard.folderCount', { count: group.items.length })}</span>
                       {/* Rename / delete only for NAMED folders — "Ungrouped" is a
                           synthetic bucket, not a real folder to manage. */}
                       {group.key !== UNGROUPED && (
@@ -1164,8 +1262,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                             type="button"
                             className="small-command"
                             onClick={event => { event.preventDefault(); event.stopPropagation(); setConfirmDeleteFolder(null); setRenameDraft(group.key); setRenamingFolder(group.key) }}
-                            title={t('workflowsDashboard.renameFolder', { folder: group.key }) as string}
-                            aria-label={t('workflowsDashboard.renameFolder', { folder: group.key }) as string}
+                            title={t('workflowsDashboard.renameFolder', { folder: group.key })}
+                            aria-label={t('workflowsDashboard.renameFolder', { folder: group.key })}
                             data-testid={`workflows-renamefolder-${group.key}`}
                           >
                             <Pencil size={12} aria-hidden="true" />
@@ -1174,8 +1272,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                             type="button"
                             className="small-command danger"
                             onClick={event => { event.preventDefault(); event.stopPropagation(); setRenamingFolder(null); setConfirmDeleteFolder(group.key) }}
-                            title={t('workflowsDashboard.deleteFolder', { folder: group.key }) as string}
-                            aria-label={t('workflowsDashboard.deleteFolder', { folder: group.key }) as string}
+                            title={t('workflowsDashboard.deleteFolder', { folder: group.key })}
+                            aria-label={t('workflowsDashboard.deleteFolder', { folder: group.key })}
                             data-testid={`workflows-deletefolder-${group.key}`}
                           >
                             <Trash2 size={12} aria-hidden="true" />
@@ -1203,8 +1301,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                 value={newFolderDraft}
                 autoFocus
                 maxLength={60}
-                placeholder={t('workflowsDashboard.newFolderPlaceholder') as string}
-                aria-label={t('workflowsDashboard.newFolderLabel') as string}
+                placeholder={t('workflowsDashboard.newFolderPlaceholder')}
+                aria-label={t('workflowsDashboard.newFolderLabel')}
                 onChange={event => setNewFolderDraft(event.target.value)}
                 onKeyDown={event => {
                   if (event.key === 'Enter') { event.preventDefault(); commitNewFolder() }

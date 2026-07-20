@@ -27,6 +27,7 @@ import {
   ClipboardList,
   Database,
   FileInput,
+  FlaskConical,
   Gauge,
   GitBranch,
   GitFork,
@@ -37,7 +38,6 @@ import {
   Layers3,
   Mail,
   ListTree,
-  Megaphone,
   Network,
   Package,
   PanelLeftClose,
@@ -64,6 +64,8 @@ import {
 import { getNodeHelper, getNodeLabel, nodeTypes } from '../constants'
 import type { ActiveTab, AiHealth } from '../types'
 import { useT } from '../i18n'
+import { MOBILE_WORKSPACE_QUERY, useMediaQuery } from '../hooks/useMediaQuery'
+import { writeNodePaletteDrag } from '../canvas-node-drag'
 
 type BuilderSidebarProps = {
   workflowName: string
@@ -80,6 +82,7 @@ type BuilderSidebarProps = {
   onNew: () => void
   onStart: () => void | Promise<void>
   onOpenTab: (tab: ActiveTab) => void
+  onOpenHelp: () => void
 }
 
 const STORAGE_KEY = 'janusly:sidebar:state'
@@ -171,6 +174,7 @@ const NAV_GROUPS: NavGroup[] = [
     labelKey: 'sidebar.group.build',
     items: [
       { tab: 'copilot', labelKey: 'sidebar.nav.copilot.label', helperKey: 'sidebar.nav.copilot.helper', icon: <Sparkles size={13} />, meta: '⌘2' },
+      { tab: 'experiments', labelKey: 'sidebar.nav.experiments.label', helperKey: 'sidebar.nav.experiments.helper', icon: <FlaskConical size={13} /> },
       { tab: 'workflows', labelKey: 'sidebar.nav.workflows.label', helperKey: 'sidebar.nav.workflows.helper', icon: <Database size={13} /> },
       { tab: 'inspector', labelKey: 'sidebar.nav.inspector.label', helperKey: 'sidebar.nav.inspector.helper', icon: <GitBranch size={13} /> },
       { tab: 'templates', labelKey: 'sidebar.nav.templates.label', helperKey: 'sidebar.nav.templates.helper', icon: <Workflow size={13} /> },
@@ -257,9 +261,11 @@ export function BuilderSidebar({
   onNew,
   onStart,
   onOpenTab,
+  onOpenHelp,
   onWorkflowNameChange,
 }: BuilderSidebarProps) {
   const { t } = useT()
+  const isMobile = useMediaQuery(MOBILE_WORKSPACE_QUERY)
   // Surface unsaved canvas edits in the header so the operator never loses
   // track of save state before navigating away or running.
   const currentWorkflowSaved = useWorkflowStore(state => state.currentWorkflowSaved)
@@ -291,10 +297,12 @@ export function BuilderSidebar({
 
   // Reflect collapsed state on the workspace shell so the grid column
   // shrinks from 300px to 56px. The data attribute is read by CSS.
+  const visuallyCollapsed = collapsed && !isMobile
+
   useEffect(() => {
-    document.documentElement.dataset.sidebarCollapsed = collapsed ? 'true' : 'false'
+    document.documentElement.dataset.sidebarCollapsed = visuallyCollapsed ? 'true' : 'false'
     return () => { document.documentElement.dataset.sidebarCollapsed = 'false' }
-  }, [collapsed])
+  }, [visuallyCollapsed])
 
   const toggleGroup = (key: string) => {
     setOpenGroups(prev => {
@@ -319,8 +327,8 @@ export function BuilderSidebar({
     return NAV_GROUPS.map(group => ({
       ...group,
       items: group.items.filter(item => {
-        const label = (t(item.labelKey as never) as string).toLowerCase()
-        const helper = (t(item.helperKey as never) as string).toLowerCase()
+        const label = (t(item.labelKey as never)).toLowerCase()
+        const helper = (t(item.helperKey as never)).toLowerCase()
         return label.includes(normalisedQuery) || helper.includes(normalisedQuery)
       }),
     })).filter(group => group.items.length > 0)
@@ -360,7 +368,7 @@ export function BuilderSidebar({
   const connectionLabel = streamStatus === 'connected' ? t('sidebar.footer.connected') : streamStatus
 
   return (
-    <aside className="builder-sidebar" data-collapsed={collapsed ? 'true' : 'false'}>
+    <aside className="builder-sidebar" data-collapsed={visuallyCollapsed ? 'true' : 'false'}>
       {/* Workflow header card */}
       <div className={`sb-workflow ${isProduction ? 'sb-workflow--prod' : 'sb-workflow--sandbox'}`}>
         <div className="sb-workflow__top">
@@ -423,7 +431,8 @@ export function BuilderSidebar({
         className="sb-ai-strip"
         type="button"
         onClick={() => onOpenTab('copilot')}
-        title={(aiHealth?.enabled ? t('sidebar.aiMode.liveHint') : t('sidebar.aiMode.localHint')) as string}
+        data-mobile-nav-close="true"
+        title={aiHealth?.enabled ? t('sidebar.aiMode.liveHint') : t('sidebar.aiMode.localHint')}
       >
         <span className="sb-ai-strip__ic" aria-hidden="true"><Sparkles size={12} /></span>
         <span className="sb-ai-strip__body">
@@ -465,8 +474,8 @@ export function BuilderSidebar({
               {isOpen && (
                 <ul className="sb-group__list">
                   {group.items.map(item => {
-                    const label = t(item.labelKey as never) as string
-                    const helper = t(item.helperKey as never) as string
+                    const label = t(item.labelKey as never)
+                    const helper = t(item.helperKey as never)
                     const active = activeTab === item.tab
                     return (
                       <li key={item.tab}>
@@ -475,6 +484,7 @@ export function BuilderSidebar({
                           type="button"
                           aria-current={active ? 'page' : undefined}
                           onClick={() => onOpenTab(item.tab)}
+                          data-mobile-nav-close="true"
                           title={`${label} — ${helper}`}
                         >
                           <span className="sb-view__ic" aria-hidden="true">{item.icon}</span>
@@ -510,6 +520,8 @@ export function BuilderSidebar({
                   key={`pinned-${type}`}
                   className="sb-chip sb-chip--pinned"
                   type="button"
+                  draggable
+                  onDragStart={(event) => writeNodePaletteDrag(event.dataTransfer, type)}
                   onClick={() => onAdd(type)}
                   title={`${label} — ${helper}`}
                 >
@@ -549,6 +561,8 @@ export function BuilderSidebar({
                         key={type}
                         className="sb-chip"
                         type="button"
+                        draggable
+                        onDragStart={(event) => writeNodePaletteDrag(event.dataTransfer, type)}
                         onClick={() => onAdd(type)}
                         title={`${label} — ${helper}`}
                       >
@@ -581,10 +595,7 @@ export function BuilderSidebar({
           >
             {collapsed ? <PanelLeftOpen size={13} aria-hidden="true" /> : <PanelLeftClose size={13} aria-hidden="true" />}
           </button>
-          <button type="button" className="sb-footer__whatsnew" title={t('sidebar.footer.whatsnew')} aria-label={t('sidebar.footer.whatsnew')}>
-            <Megaphone size={13} aria-hidden="true" />
-          </button>
-          <button type="button" className="sb-footer__help" title={t('sidebar.footer.help')} aria-label={t('sidebar.footer.help')}>
+          <button type="button" className="sb-footer__help" title={t('sidebar.footer.help')} aria-label={t('sidebar.footer.help')} onClick={onOpenHelp}>
             <HelpCircle size={13} aria-hidden="true" />
           </button>
         </span>

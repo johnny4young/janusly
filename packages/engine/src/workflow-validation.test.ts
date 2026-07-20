@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { workflowVersionMax } from '@janusly/shared'
 import { validateWorkflow } from './workflow-validation'
 
 describe('validateWorkflow', () => {
@@ -243,12 +244,14 @@ describe('validateWorkflow', () => {
     }))
   })
 
-  it('rejects wait_until nodes with missing, malformed, or non-positive duration', () => {
+  it('rejects wait_until nodes with missing, malformed, conflicting, or non-positive timing', () => {
     const result = validateWorkflow({
       nodes: [
         { id: 'wait_missing', type: 'wait_until', config: {} },
         { id: 'wait_words', type: 'wait_until', config: { duration: '3 days' } },
         { id: 'wait_zero', type: 'wait_until', config: { duration: 'PT0S' } },
+        { id: 'wait_bad_until', type: 'wait_until', config: { until: 'tomorrow' } },
+        { id: 'wait_both', type: 'wait_until', config: { duration: 'PT1M', until: '2026-07-14T12:00:00Z' } },
       ],
       edges: [],
     })
@@ -266,18 +269,44 @@ describe('validateWorkflow', () => {
       code: 'wait_until_non_positive_duration',
       nodeId: 'wait_zero',
     }))
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'wait_until_invalid_until',
+      nodeId: 'wait_bad_until',
+    }))
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'wait_until_conflicting_time',
+      nodeId: 'wait_both',
+    }))
   })
 
-  it('accepts wait_until nodes with a positive ISO 8601 duration', () => {
+  it('accepts wait_until nodes with a positive duration or absolute ISO instant', () => {
     const result = validateWorkflow({
       nodes: [
         { id: 'wait', type: 'wait_until', config: { duration: 'P3D' } },
+        { id: 'wait_absolute', type: 'wait_until', config: { until: '2026-07-14T12:00:00Z' } },
         { id: 'next', type: 'noop', config: {} },
       ],
-      edges: [{ from: 'wait', to: 'next' }],
+      edges: [{ from: 'wait', to: 'wait_absolute' }, { from: 'wait_absolute', to: 'next' }],
     })
 
     expect(result.issues.find(issue => issue.code.startsWith('wait_until_'))).toBeUndefined()
+  })
+
+  it('rejects malformed approval deadline policies without requiring a deadline for legacy approvals', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'legacy', type: 'approval', config: { message: 'Approve' } },
+        { id: 'bad_timeout', type: 'approval', config: { decisionTimeoutMs: 0 } },
+        { id: 'bad_escalation', type: 'approval', config: { decisionTimeoutMs: 1000, onTimeout: 'escalate' } },
+        { id: 'orphan_policy', type: 'approval', config: { onTimeout: 'auto_reject' } },
+      ],
+      edges: [],
+    })
+
+    expect(result.issues.find(issue => issue.nodeId === 'legacy')).toBeUndefined()
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: 'approval_invalid_timeout', nodeId: 'bad_timeout' }))
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: 'approval_escalation_missing_assignee', nodeId: 'bad_escalation' }))
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: 'approval_timeout_policy_without_deadline', nodeId: 'orphan_policy' }))
   })
 
   it('accepts schedule nodes with a valid cron expression', () => {
@@ -409,7 +438,9 @@ describe('validateWorkflow', () => {
         { id: 'pick', type: 'router', config: { candidates: [{ nodeId: 'fast' }] } },
         { id: 'fast', type: 'noop', config: {} },
       ],
-      edges: [{ from: 'start', to: 'pick' }],
+      // candidates must be wired as direct successors — the runtime
+      // routes the decision by skipping the non-chosen wired candidates.
+      edges: [{ from: 'start', to: 'pick' }, { from: 'pick', to: 'fast' }],
     })
 
     expect(result).toEqual({ valid: true, issues: [] })
@@ -422,7 +453,7 @@ describe('validateWorkflow', () => {
         { id: 'pick', type: 'router_llm', config: { candidates: [{ id: 'legacy_path' }] } },
         { id: 'legacy_path', type: 'noop', config: {} },
       ],
-      edges: [{ from: 'start', to: 'pick' }],
+      edges: [{ from: 'start', to: 'pick' }, { from: 'pick', to: 'legacy_path' }],
     })
 
     expect(result).toEqual({ valid: true, issues: [] })
@@ -458,5 +489,194 @@ describe('validateWorkflow', () => {
       code: 'router_candidate_unknown_node_id',
       nodeId: 'pick',
     }))
+  })
+})
+
+describe('validateWorkflow — subworkflow composition', () => {
+  it('accepts an exact positive version pin', () => {
+    const result = validateWorkflow({
+      id: 'parent',
+      nodes: [{ id: 'child', type: 'subworkflow', config: { workflowId: 'child-flow', version: 2 } }],
+      edges: [],
+    })
+
+    expect(result).toEqual({ valid: true, issues: [] })
+    expect(validateWorkflow({
+      id: 'parent',
+      nodes: [{ id: 'child', type: 'subworkflow', config: { workflowId: 'child-flow', version: workflowVersionMax } }],
+      edges: [],
+    })).toEqual({ valid: true, issues: [] })
+  })
+
+  it.each([
+    [{}, 'subworkflow_missing_workflow'],
+    [{ workflowId: 'parent' }, 'subworkflow_self_reference'],
+    [{ workflowId: 'child-flow', version: 0 }, 'subworkflow_invalid_version'],
+    [{ workflowId: 'child-flow', version: 1.5 }, 'subworkflow_invalid_version'],
+    [{ workflowId: 'child-flow', version: workflowVersionMax + 1 }, 'subworkflow_invalid_version'],
+    [{ workflowId: 'child-flow', version: '2' }, 'subworkflow_invalid_version'],
+    [{ workflowId: ' parent ' }, 'subworkflow_self_reference'],
+  ] as const)('rejects malformed composition config %j', (config, expectedCode) => {
+    const result = validateWorkflow({
+      id: 'parent',
+      nodes: [{ id: 'child', type: 'subworkflow', config }],
+      edges: [],
+    })
+
+    expect(result.valid).toBe(false)
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: expectedCode, nodeId: 'child' }))
+  })
+})
+
+describe('validateWorkflow — bounded loop execution', () => {
+  it('accepts the legacy map shape and a bounded per-item tool shape', () => {
+    expect(validateWorkflow({
+      nodes: [{ id: 'map', type: 'loop', config: { items: 'a,b', mapping: { value: '{{item}}' } } }],
+      edges: [],
+    })).toEqual({ valid: true, issues: [] })
+
+    expect(validateWorkflow({
+      nodes: [{ id: 'batch', type: 'loop', config: {
+        mode: 'for_each',
+        items: 'a,b',
+        tool: 'text.uppercase',
+        input: { value: '{{item}}' },
+        concurrency: 4,
+        toleratedFailurePercentage: 10,
+      } }],
+      edges: [],
+    })).toEqual({ valid: true, issues: [] })
+  })
+
+  it.each([
+    [{ mode: 'parallel', items: 'a' }, 'loop_invalid_mode'],
+    [{ mode: 'for_each', items: 'a' }, 'loop_for_each_missing_tool'],
+    [{ mode: 'for_each', items: 'a', tool: 'missing.tool' }, 'loop_for_each_unknown_tool'],
+    [{ mode: 'for_each', items: 'a', tool: 'text.uppercase', concurrency: 0 }, 'loop_invalid_concurrency'],
+    [{ mode: 'for_each', items: 'a', tool: 'text.uppercase', concurrency: 21 }, 'loop_invalid_concurrency'],
+    [{ mode: 'for_each', items: 'a', tool: 'text.uppercase', toleratedFailureCount: 1.5 }, 'loop_invalid_failure_count'],
+    [{ mode: 'for_each', items: 'a', tool: 'text.uppercase', toleratedFailurePercentage: 101 }, 'loop_invalid_failure_percentage'],
+    [{ mode: 'for_each', items: 'a', tool: 'text.uppercase', toleratedFailureCount: 1, toleratedFailurePercentage: 10 }, 'loop_conflicting_failure_budgets'],
+  ] as const)('rejects malformed loop config %j', (config, expectedCode) => {
+    const result = validateWorkflow({
+      nodes: [{ id: 'batch', type: 'loop', config }],
+      edges: [],
+    })
+    expect(result.valid).toBe(false)
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: expectedCode, nodeId: 'batch' }))
+  })
+})
+
+describe('validateWorkflow — reserved ids + edge scopes', () => {
+  it('rejects the reserved node id "input" (collides with the run-input context slot)', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'input', type: 'noop', config: {} },
+        { id: 'next', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'input', to: 'next' }],
+    })
+
+    expect(result.valid).toBe(false)
+    const issue = result.issues.find(i => i.code === 'node_id_reserved')
+    expect(issue).toBeDefined()
+    expect(issue?.nodeId).toBe('input')
+  })
+
+  it('rejects inputs.* paths in edge conditions (edges evaluate with an empty inputs scope)', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'a', type: 'noop', config: {} },
+        { id: 'b', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'a', to: 'b', condition: 'inputs.priority === "high"' }],
+    })
+
+    expect(result.valid).toBe(false)
+    expect(result.issues.map(i => i.code)).toContain('edge_condition_inputs_scope')
+  })
+
+  it('also rejects bracket-indexed inputs paths in edge conditions', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'a', type: 'noop', config: {} },
+        { id: 'b', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'a', to: 'b', condition: 'inputs[0].priority === "high"' }],
+    })
+
+    expect(result.valid).toBe(false)
+    expect(result.issues.map(i => i.code)).toContain('edge_condition_inputs_scope')
+  })
+
+  it('does NOT flag a quoted string literal that merely contains "inputs."', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'a', type: 'noop', config: {} },
+        { id: 'b', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'a', to: 'b', condition: 'context.a.output.source === "inputs.file"' }],
+    })
+
+    expect(result.issues.map(i => i.code)).not.toContain('edge_condition_inputs_scope')
+  })
+
+  it('still accepts context.input.* paths on edges (the sanctioned run-input scope)', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'a', type: 'noop', config: {} },
+        { id: 'b', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'a', to: 'b', condition: 'context.input.priority === "high"' }],
+    })
+
+    expect(result.issues.map(i => i.code)).not.toContain('edge_condition_inputs_scope')
+  })
+})
+
+describe('validateWorkflow — router candidate wiring', () => {
+  it('accepts a router whose candidates are wired as direct successors', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'pick', type: 'router', config: { candidates: [{ nodeId: 'a' }, { nodeId: 'b' }] } },
+        { id: 'a', type: 'noop', config: {} },
+        { id: 'b', type: 'noop', config: {} },
+      ],
+      edges: [
+        { from: 'pick', to: 'a' },
+        { from: 'pick', to: 'b' },
+      ],
+    })
+
+    expect(result).toEqual({ valid: true, issues: [] })
+  })
+
+  it('rejects a candidate that is not a direct successor of the router', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'pick', type: 'router', config: { candidates: [{ nodeId: 'a' }, { nodeId: 'b' }] } },
+        { id: 'a', type: 'noop', config: {} },
+        { id: 'b', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'pick', to: 'a' }, { from: 'a', to: 'b' }],
+    })
+
+    expect(result.valid).toBe(false)
+    const issue = result.issues.find(i => i.code === 'router_candidate_not_successor')
+    expect(issue?.nodeId).toBe('pick')
+    expect(issue?.message).toContain('"b"')
+  })
+
+  it('rejects a candidate that does not exist, honoring the legacy { id } field', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'pick', type: 'router', config: { candidates: [{ id: 'ghost' }] } },
+        { id: 'a', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'pick', to: 'a' }],
+    })
+
+    expect(result.valid).toBe(false)
+    expect(result.issues.map(i => i.code)).toContain('router_candidate_unknown')
   })
 })

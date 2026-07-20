@@ -4,7 +4,7 @@
  * guard, and the rate-limit resolver clamp.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   ATTACHMENT_MAX_BYTES,
   EMAIL_BODY_MAX_BYTES,
@@ -131,6 +131,16 @@ describe("inbound payload schemas (size caps + shape)", () => {
     expect(utf8ByteLength(overCap)).toBe(EMAIL_BODY_MAX_BYTES + 1);
     // Multi-byte chars count their encoded length, not their JS string length.
     expect(utf8ByteLength("é")).toBe(2);
+  });
+
+  it("does not require the Node Buffer global", () => {
+    const originalBuffer = (globalThis as { Buffer?: unknown }).Buffer;
+    vi.stubGlobal("Buffer", undefined);
+    try {
+      expect(utf8ByteLength("Janusly 🧭")).toBe(12);
+    } finally {
+      vi.stubGlobal("Buffer", originalBuffer);
+    }
   });
 
   it("accepts a normalized file-dropped payload", () => {

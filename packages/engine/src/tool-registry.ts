@@ -75,6 +75,21 @@ export type ToolSchema = {
   inputExample?: Record<string, unknown>;
 };
 
+/**
+ * Planner-only projection of a registered tool.
+ *
+ * Unlike the stable public `ToolSchema`, this shape carries the input's JSON
+ * Schema so the LLM sees field types and enum constraints instead of only
+ * field names. It stays internal to the engine prompt and never expands the
+ * `GET /tools` response consumed by the web app.
+ */
+export type PlannerToolSchema = {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  writeSide: boolean;
+};
+
 /** Slugify a tool `name` (`slack.post` → `slack-post`) for catalog keys. */
 export function toolDescriptionCode(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -168,6 +183,34 @@ export function listTools(): ToolSchema[] {
       inputExample: tool.inputExample,
     };
   });
+}
+
+let plannerToolsCache: PlannerToolSchema[] | null = null;
+
+/**
+ * Return the registered tool catalog shaped for the agent-planner prompt.
+ *
+ * The catalog is derived from the same Zod schemas execution validates, then
+ * cached because registration is process-static. Validation/sandbox planners
+ * omit write-side tools before the model sees them; execution still retains
+ * its independent dry-run gate as defense in depth.
+ */
+export function listPlannerTools(options: { dryRun?: boolean } = {}): PlannerToolSchema[] {
+  if (!plannerToolsCache) {
+    plannerToolsCache = Object.values(tools).map((tool) => {
+      const { $schema: _schemaDialect, ...inputSchema } = z.toJSONSchema(tool.inputSchema);
+      return {
+        name: tool.name,
+        description: tool.description,
+        inputSchema: inputSchema as Record<string, unknown>,
+        writeSide: tool.writeSide === true,
+      };
+    });
+  }
+
+  return options.dryRun
+    ? plannerToolsCache.filter((tool) => !tool.writeSide)
+    : plannerToolsCache;
 }
 
 export function isRegisteredTool(name: string): name is RegisteredTool {

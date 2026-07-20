@@ -13,10 +13,11 @@
 Janusly may store summaries of past runs and approved recovery outcomes so AI
 suggestions improve over time. Memory is **off by default**, requires explicit
 org-level opt-in, is scoped per tenant, is treated as customer data (never as
-training data for model providers), and respects bounded retention plus planned
-operator-driven deletion and export. Recalled memory is framed to the LLM as
-data, never as instructions. Embedding failures degrade to empty recall — they
-never break workflow execution or recovery.
+training data for model providers), and respects bounded retention plus the
+shipped consent-revocation purge. Per-entry deletion and export remain planned
+admin surfaces. Recalled memory is framed to the LLM as data, never as
+instructions. Embedding failures degrade to empty recall — they never break
+workflow execution or recovery.
 
 ## 1. Why this policy exists
 
@@ -115,6 +116,12 @@ Memory is **opt-in per organization**. There is no implicit consent and no
   enabled memory kinds (e.g. `episodic,recovery_rationale`). An admin can
   enable memory for recovery rationales but not for run summaries. Anything
   not in the CSV is rejected at write time.
+- **Operator transparency:** `GET /memory/consent-status` returns the effective
+  two-flag posture and a safe `none` / `scheduled` / `running` / `unknown`
+  projection of the org's purge job. Operations → Access renders both gates,
+  the Recovery Center warns with a deletion countdown after revocation, and
+  the audit viewer's `memory.` preset shows the grant/revoke/purge trail. Queue
+  keys, environment names, and raw Redis failures never cross the API.
 
 Both flags must be true for any memory write. Either being false rejects the
 write with a stable `memory_disabled` error code that the caller can render to
@@ -171,9 +178,12 @@ identically to other retention-managed tables.
 
 ### 6.3 Org deletion cascade
 
-When a Janusly org is deleted (the operational path is the existing tenant
-offboarding flow), all memory entries for that org are purged before the
-`organizations` row is removed. The cascade is the standard `eq(memory_entries.orgId, orgId)` delete; there are no FK references from other tables.
+Janusly currently has no public organization-deletion route and applies no
+automatic database cascade. Operator-led tenant offboarding must explicitly
+purge memory before removing the organization record; otherwise orphaned rows
+remain, and recreating the same org id inherits that state. This matches the
+repository-wide orphan-tolerant cascade posture and must not be represented as
+an automatic product guarantee.
 
 ### 6.4 User deletion
 
@@ -384,9 +394,9 @@ implemented repo work from human rollout approvals:
 - [ ] Legal review (DPA language in §10 confirmed by counsel).
 - [ ] Engineering review (one approver familiar with `org_configs` catalog and
   `safe-persist` chokepoint).
-- [x] `docs/ROADMAP.md` §3c memory gate line updated to point here.
+- [x] Memory gate documented here as the source of truth.
 - [x] `docs/ai.md` §10 "Memory privacy notes" added pointing here.
-- [x] `docs/PLAN.md` §7.1 updated to reference this doc.
+- [x] Memory consent + governance documented in this policy doc.
 - [x] `org_configs.memory.*` catalog entries merged (`packages/data/src/orgConfigRepo.ts`).
 - [x] Spanish-language parity shipped (`docs/memory-policy-es.md`).
 

@@ -1,9 +1,11 @@
-import React from 'react'
+
 import { describe, expect, it, vi } from 'vitest'
 import { render, waitFor } from '@testing-library/react'
 import { ReactFlowProvider } from '@xyflow/react'
 import { WorkflowCanvas } from './WorkflowCanvas'
 import type { WorkflowGraphEdge, WorkflowGraphNode } from '../types'
+import { initI18n } from '../i18n'
+import { useWorkflowStore } from '../store'
 
 function makeNode(id: string, label: string, position: { x: number; y: number }, hasValidationError = false): WorkflowGraphNode {
   return {
@@ -43,7 +45,9 @@ function mountCanvas(overrides: Partial<Parameters<typeof WorkflowCanvas>[0]> = 
   // canvas room to render handles and observe layout.
   const utils = render(
     <div style={{ width: 1024, height: 720, position: 'relative' }}>
-      <WorkflowCanvas {...props} />
+      <ReactFlowProvider>
+        <WorkflowCanvas {...props} />
+      </ReactFlowProvider>
     </div>,
   )
 
@@ -61,6 +65,16 @@ describe('WorkflowCanvas (browser mode)', () => {
     expect(getByText('2 paths')).toBeInTheDocument()
     // React Flow renders one DOM node per workflow node.
     expect(container.querySelectorAll('.react-flow__node')).toHaveLength(3)
+  })
+
+  it('falls back to the localized kind name for a whitespace-only custom label', async () => {
+    const { findByText, queryByText } = mountCanvas({
+      nodes: [makeNode('blank-label', '   ', { x: 100, y: 100 })],
+      edges: [],
+    })
+
+    expect(await findByText('Do nothing')).toBeInTheDocument()
+    expect(queryByText(/^\s+$/)).toBeNull()
   })
 
   it('fires onNodeClick with the matching node when a node is clicked', async () => {
@@ -131,6 +145,228 @@ describe('WorkflowCanvas (browser mode)', () => {
     // Default Controls renders four interactive buttons; the count is stable
     // across @xyflow/react patch releases.
     expect(controls!.querySelectorAll('button').length).toBeGreaterThanOrEqual(3)
+  })
+
+  it('accepts a palette drop at the pointer while retaining click-based authoring', async () => {
+    const onAddNode = vi.fn()
+    const { container, findByText } = mountCanvas({
+      paletteNodeTypes: ['http'],
+      onAddNode,
+    })
+    await findByText('Alpha step')
+    const pane = container.querySelector('.react-flow__pane') as HTMLElement
+    const bounds = pane.getBoundingClientRect()
+    const dataTransfer = new DataTransfer()
+    dataTransfer.setData('application/x-janusly-node-type', 'http')
+
+    pane.dispatchEvent(new DragEvent('dragover', {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer,
+      clientX: bounds.left + 700,
+      clientY: bounds.top + 420,
+    }))
+    pane.dispatchEvent(new DragEvent('drop', {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer,
+      clientX: bounds.left + 700,
+      clientY: bounds.top + 420,
+    }))
+
+    expect(onAddNode).toHaveBeenCalledTimes(1)
+    expect(onAddNode).toHaveBeenCalledWith('http', {
+      x: expect.any(Number),
+      y: expect.any(Number),
+    })
+    const position = onAddNode.mock.calls[0][1]
+    expect(Number.isFinite(position.x)).toBe(true)
+    expect(Number.isFinite(position.y)).toBe(true)
+  })
+
+  it('does not create a node when a palette payload is dropped on canvas chrome', async () => {
+    const onAddNode = vi.fn()
+    const nodes = Array.from({ length: 6 }, (_, index) => makeNode(
+      `chrome-${index}`,
+      index === 0 ? 'Alpha step' : `Chrome ${index}`,
+      { x: index * 140, y: 0 },
+    ))
+    const { container, findByText } = mountCanvas({
+      nodes,
+      edges: [],
+      paletteNodeTypes: ['http'],
+      onAddNode,
+    })
+    await findByText('Alpha step')
+    const targets = [
+      container.querySelector('.canvas-toolbar'),
+      container.querySelector('.canvas-palette'),
+      container.querySelector('.react-flow__controls'),
+      container.querySelector('.react-flow__minimap'),
+    ]
+
+    for (const target of targets) {
+      expect(target).toBeTruthy()
+      const dataTransfer = new DataTransfer()
+      dataTransfer.setData('application/x-janusly-node-type', 'http')
+      target!.dispatchEvent(new DragEvent('drop', {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer,
+        clientX: 32,
+        clientY: 32,
+      }))
+    }
+
+    expect(onAddNode).not.toHaveBeenCalled()
+  })
+
+  it('lets the blank-canvas teaching card pass a first palette drop through to the flow surface', async () => {
+    const onAddNode = vi.fn()
+    const { findByTestId } = mountCanvas({
+      nodes: [],
+      edges: [],
+      paletteNodeTypes: ['http'],
+      onAddNode,
+    })
+    const empty = await findByTestId('canvas-empty')
+    const card = empty.querySelector('.canvas-empty__card') as HTMLElement
+    const bounds = card.getBoundingClientRect()
+    // The browser-test viewport can clip the fixed-size 1024px canvas host;
+    // choose a visible point inside the card rather than its off-screen center.
+    const clientX = Math.min(bounds.left + 20, document.documentElement.clientWidth - 1)
+    const clientY = Math.min(bounds.top + 20, document.documentElement.clientHeight - 1)
+    const target = document.elementFromPoint(clientX, clientY)
+    expect(target?.closest('.canvas-flow-surface')).toBeTruthy()
+
+    const dataTransfer = new DataTransfer()
+    dataTransfer.setData('application/x-janusly-node-type', 'http')
+    target!.dispatchEvent(new DragEvent('drop', {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer,
+      clientX,
+      clientY,
+    }))
+
+    expect(onAddNode).toHaveBeenCalledOnce()
+    expect(onAddNode).toHaveBeenCalledWith('http', {
+      x: expect.any(Number),
+      y: expect.any(Number),
+    })
+  })
+
+  it('reveals the interactive minimap only for larger authoring graphs', async () => {
+    const fiveNodes = Array.from({ length: 5 }, (_, index) => makeNode(`small-${index}`, `Small ${index}`, { x: index * 140, y: 0 }))
+    const small = mountCanvas({ nodes: fiveNodes, edges: [] })
+    await small.findByText('Small 0')
+    expect(small.queryByRole('img', { name: 'Workflow overview map' })).toBeNull()
+    small.unmount()
+
+    const sixNodes = Array.from({ length: 6 }, (_, index) => makeNode(`large-${index}`, `Large ${index}`, { x: index * 140, y: 0 }))
+    const large = mountCanvas({ nodes: sixNodes, edges: [] })
+    await large.findByText('Large 0')
+    expect(await large.findByRole('img', { name: 'Workflow overview map' })).toBeInTheDocument()
+  })
+
+  it('renders run observation mode as immutable while keeping pan, zoom, focus, and live status visible', async () => {
+    const running = makeNode('running', 'Running step', { x: 100, y: 100 })
+    running.data.status = 'running'
+    const waiting = makeNode('waiting', 'Waiting step', { x: 340, y: 100 })
+    const { container, findByText, getByText } = mountCanvas({
+      mode: 'observe',
+      nodes: [running, waiting],
+      edges: [makeEdge('running-waiting', 'running', 'waiting')],
+    })
+
+    await findByText('Running step')
+    expect(getByText('Run snapshot')).toBeInTheDocument()
+    expect(container.querySelector('.canvas-toolbar__meta .we-pill')).toHaveTextContent('Read only')
+    const canvas = container.querySelector('[data-testid="run-observation-canvas"]') as HTMLElement
+    const nodeWrapper = container.querySelector('.react-flow__node[data-id="running"]') as HTMLElement
+    const node = nodeWrapper.querySelector('.workflow-node') as HTMLElement
+    expect(canvas).toHaveAttribute('data-mode', 'observe')
+    expect(nodeWrapper.classList.contains('draggable')).toBe(false)
+    expect(node).toHaveAttribute('data-status', 'running')
+    expect(getComputedStyle(node).animationName).toContain('we-running-node-pulse')
+    expect(getComputedStyle(container.querySelector('.workflow-handle') as HTMLElement).display).toBe('none')
+    expect(container.querySelector('.react-flow__controls-interactive')).toBeNull()
+    const edgeWrapper = container.querySelector('.react-flow__edge[aria-label="Path from Running step to Waiting step"]') as HTMLElement
+    expect(edgeWrapper).toBeTruthy()
+    expect(nodeWrapper).toHaveAttribute('aria-label', 'Step: Running step. Status: Running. Read only')
+    expect(document.getElementById(edgeWrapper.getAttribute('aria-describedby') ?? '')).toHaveTextContent('Read only')
+    expect(container.querySelector('[aria-label="Zoom in"]')).toBeTruthy()
+  })
+
+  it('centers blank-canvas insertion under a restored non-default zoom', async () => {
+    initI18n('en')
+    const storageKey = 'janusly:canvasViewport:wf-empty-zoom'
+    window.localStorage.setItem(storageKey, JSON.stringify({ x: 0, y: 0, zoom: 0.5 }))
+    const previous = useWorkflowStore.getState()
+    useWorkflowStore.setState({ nodes: [], edges: [], workflowDirty: false })
+    try {
+      const props = {
+        nodes: [],
+        edges: [],
+        onNodesChange: vi.fn(),
+        onEdgesChange: vi.fn(),
+        onConnect: vi.fn(),
+        onNodeClick: vi.fn(),
+        onEdgeClick: vi.fn(),
+        paletteNodeTypes: ['noop'],
+        onAddNode: (type: string) => useWorkflowStore.getState().addNode(type),
+        viewportWorkflowId: 'wf-empty-zoom',
+      }
+      const { container, getByRole } = render(
+        <ReactFlowProvider>
+          <div style={{ width: 1024, height: 720, position: 'relative' }}>
+            <WorkflowCanvas {...props} />
+          </div>
+        </ReactFlowProvider>,
+      )
+
+      await waitFor(() => {
+        const viewport = container.querySelector('.react-flow__viewport') as HTMLElement
+        expect(viewport.style.transform).toMatch(/translate\(\s*0px,\s*0px\s*\)\s*scale\(\s*0\.5\s*\)/)
+      })
+      getByRole('button', { name: 'Do nothing', exact: true }).click()
+
+      const [added] = useWorkflowStore.getState().nodes
+      expect(added.position.x).toBeCloseTo(905, 0)
+      expect(added.position.y).toBeCloseTo(672, 0)
+    } finally {
+      window.localStorage.removeItem(storageKey)
+      useWorkflowStore.setState({
+        nodes: previous.nodes,
+        edges: previous.edges,
+        workflowDirty: previous.workflowDirty,
+        workflowRevision: previous.workflowRevision,
+      })
+    }
+  })
+
+  it('localizes observe-mode controls, edge names, and read-only instructions in Spanish', async () => {
+    initI18n('es')
+    const { container, findByText } = mountCanvas({
+      mode: 'observe',
+      nodes: [
+        makeNode('inicio', 'Inicio', { x: 100, y: 100 }),
+        makeNode('fin', 'Final', { x: 340, y: 100 }),
+      ],
+      edges: [makeEdge('inicio-fin', 'inicio', 'fin')],
+    })
+
+    await findByText('Inicio')
+    const nodeWrapper = container.querySelector('.react-flow__node[data-id="inicio"]') as HTMLElement
+    const edgeWrapper = container.querySelector('.react-flow__edge[aria-label="Camino de Inicio a Final"]') as HTMLElement
+    expect(edgeWrapper).toBeTruthy()
+    expect(nodeWrapper).toHaveAttribute('aria-label', 'Paso: Inicio. Estado: Listo. Solo lectura')
+    expect(document.getElementById(edgeWrapper.getAttribute('aria-describedby') ?? '')).toHaveTextContent('Solo lectura')
+    expect(container.querySelector('[aria-label="Instantánea de la ejecución"]')).toBeTruthy()
+    expect(container.querySelector('[aria-label="Acercar"]')).toBeTruthy()
+    expect(container.querySelector('[aria-label="Alejar"]')).toBeTruthy()
+    expect(container.querySelector('[aria-label="Ajustar ejecución a la vista"]')).toBeTruthy()
+    expect(container.textContent).not.toContain('Press delete')
   })
 
   it('renders the dotted Background layer with a pattern definition', async () => {

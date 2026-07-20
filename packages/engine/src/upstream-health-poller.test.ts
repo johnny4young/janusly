@@ -22,12 +22,14 @@ vi.mock("./queue", () => ({
 }));
 
 const auditInsertValues = vi.fn();
+const recordSystemAuditMock = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock("@janusly/db", () => ({
   db: { insert: () => ({ values: auditInsertValues }) },
   auditLogs: {},
 }));
 
 vi.mock("@janusly/data", () => ({
+  recordSystemAudit: recordSystemAuditMock,
   WORKFLOW_STATUS_PAUSED_UPSTREAM: "paused_upstream_degraded",
   listSourcesToPoll: vi.fn(),
   listWorkflowIdsTaggedWithSource: vi.fn(),
@@ -87,6 +89,8 @@ function source(overrides: Partial<UpstreamHealthSource> = {}): UpstreamHealthSo
 beforeEach(() => {
   vi.clearAllMocks();
   auditInsertValues.mockResolvedValue(undefined);
+  recordSystemAuditMock.mockReset();
+  recordSystemAuditMock.mockResolvedValue(undefined);
   recordStatusMock.mockResolvedValue(undefined);
   recordErrorMock.mockResolvedValue(undefined);
   listTaggedMock.mockResolvedValue([]);
@@ -112,8 +116,8 @@ describe("pollOneSource — degraded → pause", () => {
     expect(pauseMock).toHaveBeenCalledWith({ orgId: "org-a", workflowIds: ["wf-1", "wf-2"], reason: expect.stringContaining("degraded") });
     expect(result.pausedWorkflowIds).toEqual(["wf-1", "wf-2"]);
     // One audit row per actually-flipped workflow.
-    expect(auditInsertValues).toHaveBeenCalledTimes(2);
-    expect(auditInsertValues).toHaveBeenCalledWith(expect.objectContaining({ action: "workflow.paused.upstream", orgId: "org-a" }));
+    expect(recordSystemAuditMock).toHaveBeenCalledTimes(2);
+    expect(recordSystemAuditMock).toHaveBeenCalledWith(expect.objectContaining({ action: "workflow.paused.upstream", orgId: "org-a" }));
   });
 
   it("is idempotent — already-paused workflows (repo returns []) write no audit", async () => {
@@ -127,7 +131,7 @@ describe("pollOneSource — degraded → pause", () => {
 
     const result = await pollOneSource(source(), fetcher);
     expect(result.pausedWorkflowIds).toEqual([]);
-    expect(auditInsertValues).not.toHaveBeenCalled();
+    expect(recordSystemAuditMock).not.toHaveBeenCalled();
   });
 });
 
@@ -146,7 +150,7 @@ describe("pollOneSource — recovery → resume", () => {
     expect(resumeMock).toHaveBeenCalledWith({ orgId: "org-a", workflowIds: ["wf-1"] });
     expect(result.resumedWorkflowIds).toEqual(["wf-1"]);
     expect(pauseMock).not.toHaveBeenCalled();
-    expect(auditInsertValues).toHaveBeenCalledWith(expect.objectContaining({ action: "workflow.resumed.upstream" }));
+    expect(recordSystemAuditMock).toHaveBeenCalledWith(expect.objectContaining({ action: "workflow.resumed.upstream" }));
   });
 });
 

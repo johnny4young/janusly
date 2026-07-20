@@ -57,8 +57,8 @@ export function WorkflowDiffView({
   aiPatchRationale,
 }: WorkflowDiffViewProps) {
   const { t } = useT()
-  const resolvedBeforeLabel = beforeLabel ?? (t('diff.beforeLabel') as string)
-  const resolvedAfterLabel = afterLabel ?? (t('diff.afterLabel') as string)
+  const resolvedBeforeLabel = beforeLabel ?? (t('diff.beforeLabel'))
+  const resolvedAfterLabel = afterLabel ?? (t('diff.afterLabel'))
   const diff = useMemo(() => computeWorkflowDiff(before, after), [before, after])
 
   if (diff.summary.totalChanges === 0) {
@@ -250,7 +250,7 @@ function FieldChangeRow({ change }: { change: FieldChange }) {
   // would leak it through the diff. Mask both sides with `[redacted]`
   // and rely on the path + tag pill to communicate the change.
   const isSecret = change.tag === 'secret_ref'
-  const redacted = t('diff.redacted') as string
+  const redacted = t('diff.redacted')
   const beforeDisplay = isSecret ? redacted : formatValue(change.before)
   const afterDisplay = isSecret ? redacted : formatValue(change.after)
   return (
@@ -271,7 +271,7 @@ function TagPill({ tag }: { tag: ChangeTag }) {
   return (
     <span className={`we-diff-tag we-diff-tag--${tag}`}>
       {tag === 'secret_ref' && <ShieldAlert size={11} aria-hidden="true" />}
-      {t(TAG_KEYS[tag] as never) as string}
+      {t(TAG_KEYS[tag] as never)}
     </span>
   )
 }

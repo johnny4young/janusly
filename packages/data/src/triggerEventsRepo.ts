@@ -5,9 +5,10 @@
  *
  * The API ingestion seam (`apps/api/src/routes/trigger-ingest-routes.ts`)
  * persists one `received` row for every accepted inbound event BEFORE the run
- * is spawned, then flips the row to `started` / `skipped` / `failed`. The row
- * is the DLQ-style replay anchor: an operator can re-submit the same
- * normalized `payloadJson` to re-run the workflow.
+ * is spawned. `startRun` consumes `received → started` atomically with run
+ * creation; pause, validation, and storm guards move it to their terminal or
+ * buffered state. The row is the DLQ-style replay anchor: an operator can
+ * re-submit the same normalized `payloadJson` to re-run the workflow.
  *
  * Used by:
  * - `apps/api/src/routes/trigger-ingest-routes.ts` — ingestion + replay.
@@ -21,13 +22,13 @@
  *   `ON CONFLICT DO NOTHING` so a relay retry with the same upstream message
  *   id converges to one row (and one run). The `wasCreated` flag tells the
  *   caller whether to spawn a run or short-circuit a duplicate.
- * - Resolution of the matching trigger node walks the org's LATEST workflow
- *   versions (org-scoped) — adding a trigger to a draft that was never saved
- *   does not fire.
+ * - Resolution of the matching trigger node walks the org's LATEST active
+ *   workflow versions (org-scoped) — drafts and soft-deleted workflows do not
+ *   fire.
  */
 
-import { and, desc, eq, lt, sql } from "drizzle-orm";
-import { db, triggerEvents, workflowVersions } from "@janusly/db";
+import { and, asc, desc, eq, lt, or, sql } from "drizzle-orm";
+import { db, triggerEvents, workflows, workflowVersions } from "@janusly/db";
 import {
   isTriggerNodeType,
   type TriggerEventStatus,
@@ -122,27 +123,201 @@ export async function findTriggerEventByDedupeKey(
   return rows[0] ?? null;
 }
 
-/** Flip a trigger-event row to `started`, attaching the spawned `runId`. Org-scoped. */
-export async function markTriggerEventStarted(orgId: string, id: string, runId: string): Promise<void> {
-  await db
-    .update(triggerEvents)
-    .set({ status: "started", runId })
-    .where(and(eq(triggerEvents.orgId, orgId), eq(triggerEvents.id, id)));
-}
-
 /** Flip a trigger-event row to `skipped` with a human-readable reason. Org-scoped. */
 export async function markTriggerEventSkipped(orgId: string, id: string, reason: string): Promise<void> {
   await db
     .update(triggerEvents)
-    .set({ status: "skipped", skippedReason: reason.slice(0, 512) })
+    .set({ status: "skipped", skippedReason: reason.slice(0, 512), backfillClaimToken: null, backfillClaimedAt: null })
     .where(and(eq(triggerEvents.orgId, orgId), eq(triggerEvents.id, id)));
+}
+
+/**
+ * Park a trigger-event row as `buffered`: its workflow was paused when the
+ * event arrived, so no run was spawned and the payload is owed one on resume.
+ * Distinct from `skipped` (deliberately discarded) — backfill reads exactly
+ * this status. Org-scoped.
+ */
+export async function markTriggerEventBuffered(orgId: string, id: string, reason: string): Promise<void> {
+  await db
+    .update(triggerEvents)
+    .set({ status: "buffered", skippedReason: reason.slice(0, 512), backfillClaimToken: null, backfillClaimedAt: null })
+    .where(and(eq(triggerEvents.orgId, orgId), eq(triggerEvents.id, id)));
+}
+
+/**
+ * Oldest-first page of the events a workflow buffered while paused — the
+ * backfill window. Oldest-first because the payloads are a causal sequence:
+ * replaying "order updated" before "order created" inverts the story the
+ * upstream system actually told.
+ *
+ * `limit` bounds the window: a long pause can buffer more than one resume
+ * should replay in a single breath, and the caller paces what it gets.
+ */
+export async function listBufferedTriggerEvents(
+  orgId: string,
+  workflowId: string,
+  limit: number,
+): Promise<Array<{ id: string; workflowVersionId: string; nodeId: string; triggerType: string }>> {
+  if (limit <= 0) return [];
+  return db
+    .select({
+      id: triggerEvents.id,
+      workflowVersionId: triggerEvents.workflowVersionId,
+      nodeId: triggerEvents.nodeId,
+      triggerType: triggerEvents.triggerType,
+    })
+    .from(triggerEvents)
+    .where(and(
+      eq(triggerEvents.orgId, orgId),
+      eq(triggerEvents.workflowId, workflowId),
+      eq(triggerEvents.status, "buffered"),
+    ))
+    .orderBy(asc(triggerEvents.createdAt))
+    .limit(limit);
+}
+
+export type ClaimedTriggerEvent = {
+  id: string;
+  workflowVersionId: string;
+  nodeId: string;
+  triggerType: string;
+  claimToken: string;
+};
+
+/** Lease duration shared by claims and operator-facing backlog projections. */
+export const TRIGGER_BACKFILL_CLAIM_LEASE_MS = 5 * 60 * 1000;
+
+/**
+ * Atomically lease the next buffered page oldest-first. Concurrent callers
+ * cannot receive the same row; a claim abandoned before run creation becomes
+ * eligible again after the bounded lease.
+ */
+export async function claimBufferedTriggerEvents(
+  orgId: string,
+  workflowId: string,
+  limit: number,
+): Promise<ClaimedTriggerEvent[]> {
+  if (!Number.isFinite(limit) || limit <= 0) return [];
+  const boundedLimit = Math.min(1000, Math.max(1, Math.trunc(limit)));
+  const claimToken = crypto.randomUUID();
+  const staleBefore = new Date(Date.now() - TRIGGER_BACKFILL_CLAIM_LEASE_MS);
+  const rows = await db.execute<{
+    id: string;
+    workflow_version_id: string;
+    node_id: string;
+    trigger_type: string;
+  }>(sql`
+    WITH candidates AS (
+      SELECT ${triggerEvents.id}
+      FROM ${triggerEvents}
+      WHERE ${triggerEvents.orgId} = ${orgId}
+        AND ${triggerEvents.workflowId} = ${workflowId}
+        AND (
+          ${triggerEvents.status} = 'buffered'
+          OR (
+            ${triggerEvents.status} = 'backfilling'
+            AND ${triggerEvents.backfillClaimedAt} < ${sql.param(staleBefore, triggerEvents.backfillClaimedAt)}
+          )
+        )
+      ORDER BY ${triggerEvents.createdAt} ASC
+      FOR UPDATE SKIP LOCKED
+      LIMIT ${boundedLimit}
+    )
+    UPDATE ${triggerEvents} AS event
+    SET
+      status = 'backfilling',
+      backfill_claim_token = ${claimToken},
+      backfill_claimed_at = NOW()
+    FROM candidates
+    WHERE event.id = candidates.id
+    RETURNING
+      event.id AS id,
+      event.workflow_version_id AS workflow_version_id,
+      event.node_id AS node_id,
+      event.trigger_type AS trigger_type
+  `);
+  return rows.map((row) => ({
+    id: row.id,
+    workflowVersionId: row.workflow_version_id,
+    nodeId: row.node_id,
+    triggerType: row.trigger_type,
+    claimToken,
+  }));
+}
+
+/** Return an unconsumed lease to the buffered queue without losing its payload. */
+export async function releaseTriggerEventBackfillClaim(
+  orgId: string,
+  id: string,
+  claimToken: string,
+): Promise<boolean> {
+  const rows = await db
+    .update(triggerEvents)
+    .set({ status: "buffered", backfillClaimToken: null, backfillClaimedAt: null })
+    .where(and(
+      eq(triggerEvents.orgId, orgId),
+      eq(triggerEvents.id, id),
+      eq(triggerEvents.status, "backfilling"),
+      eq(triggerEvents.backfillClaimToken, claimToken),
+    ))
+    .returning({ id: triggerEvents.id });
+  return rows.length === 1;
+}
+
+/**
+ * Retire a claimed event only while the caller still owns its lease. This
+ * prevents an expired worker from overwriting a newer claim or a started run.
+ */
+export async function retireTriggerEventBackfillClaim(
+  orgId: string,
+  id: string,
+  claimToken: string,
+  status: "skipped" | "failed",
+  reason: string,
+): Promise<boolean> {
+  const rows = await db
+    .update(triggerEvents)
+    .set({
+      status,
+      skippedReason: reason.slice(0, 512),
+      backfillClaimToken: null,
+      backfillClaimedAt: null,
+    })
+    .where(and(
+      eq(triggerEvents.orgId, orgId),
+      eq(triggerEvents.id, id),
+      eq(triggerEvents.status, "backfilling"),
+      eq(triggerEvents.backfillClaimToken, claimToken),
+    ))
+    .returning({ id: triggerEvents.id });
+  return rows.length === 1;
+}
+
+/** How many events a workflow has buffered. Drives the operator-facing count. */
+export async function countBufferedTriggerEvents(orgId: string, workflowId: string): Promise<number> {
+  const staleBefore = new Date(Date.now() - TRIGGER_BACKFILL_CLAIM_LEASE_MS);
+  const rows = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(triggerEvents)
+    .where(and(
+      eq(triggerEvents.orgId, orgId),
+      eq(triggerEvents.workflowId, workflowId),
+      or(
+        eq(triggerEvents.status, "buffered"),
+        and(
+          eq(triggerEvents.status, "backfilling"),
+          lt(triggerEvents.backfillClaimedAt, staleBefore),
+        ),
+      ),
+    ));
+  return rows[0]?.count ?? 0;
 }
 
 /** Flip a trigger-event row to `failed` with a human-readable reason. Org-scoped. */
 export async function markTriggerEventFailed(orgId: string, id: string, reason: string): Promise<void> {
   await db
     .update(triggerEvents)
-    .set({ status: "failed", skippedReason: reason.slice(0, 512) })
+    .set({ status: "failed", skippedReason: reason.slice(0, 512), backfillClaimToken: null, backfillClaimedAt: null })
     .where(and(eq(triggerEvents.orgId, orgId), eq(triggerEvents.id, id)));
 }
 
@@ -207,24 +382,34 @@ type LatestVersionRow = {
 const RESOLVER_VERSION_CAP = 1000;
 
 /**
- * Load the org's LATEST workflow version per workflow id, capped. Used by the
- * trigger resolver to find a node whose authored config matches an inbound
- * event. Org-scoped — a relay authenticating as org A can only fire org A's
- * triggers (a trigger node in org B's workflow is structurally unreachable).
+ * Load the org's LATEST active workflow version per workflow id, capped. Used
+ * by the trigger resolver to find a node whose authored config matches an
+ * inbound event. Org-scoped — a relay authenticating as org A can only fire
+ * org A's triggers. A workflow id narrows replay and backfill to the workflow
+ * that originally received the event.
  *
  * One round-trip via `DISTINCT ON` (mirrors
  * `credentialHealthRepo.loadLatestWorkflowVersions`): the latest version per
  * workflow id, ordered by `version DESC`, covered by the
  * `(org_id, workflow_id, version)` index.
  */
-async function loadLatestVersionsForOrg(orgId: string): Promise<LatestVersionRow[]> {
+async function loadLatestVersionsForOrg(orgId: string, workflowId?: string): Promise<LatestVersionRow[]> {
+  const workflowPredicate = workflowId
+    ? sql`AND ${workflowVersions.workflowId} = ${workflowId}`
+    : sql``;
   const rows = await db.execute<{ id: string; workflow_id: string; dag_json: unknown }>(sql`
     SELECT DISTINCT ON (${workflowVersions.workflowId})
       ${workflowVersions.id} AS id,
       ${workflowVersions.workflowId} AS workflow_id,
       ${workflowVersions.dagJson} AS dag_json
     FROM ${workflowVersions}
+    INNER JOIN ${workflows}
+      ON ${workflows.id} = ${workflowVersions.workflowId}
+      AND ${workflows.orgId} = ${workflowVersions.orgId}
     WHERE ${workflowVersions.orgId} = ${orgId}
+      AND ${workflows.orgId} = ${orgId}
+      AND ${workflows.deletedAt} IS NULL
+      ${workflowPredicate}
     ORDER BY ${workflowVersions.workflowId}, ${workflowVersions.version} DESC
     LIMIT ${RESOLVER_VERSION_CAP}
   `);
@@ -261,19 +446,22 @@ function extractTriggerNodes(dagJson: unknown): Array<{ id: string; type: Trigge
  * inbound event. The `matcher` is a predicate over the node's `(type, config)`
  * supplied by the seam (e.g. "config.aliasKey === inbound.aliasKey"). Returns
  * the FIRST match — an operator should keep trigger keys unique per org, and
- * a duplicate just fires the first-found workflow. Returns null when no node
+ * a duplicate just fires the first-found workflow. Recovery can constrain the
+ * lookup to the persisted workflow and node ids. Returns null when no node
  * matches (the seam records the inbound event as `skipped`).
  */
 export async function resolveTriggerNode(
   orgId: string,
   triggerType: TriggerNodeType,
   matcher: (config: Record<string, unknown>) => boolean,
+  options: { workflowId?: string; nodeId?: string } = {},
 ): Promise<ResolvedTriggerNode | null> {
-  const versions = await loadLatestVersionsForOrg(orgId);
+  const versions = await loadLatestVersionsForOrg(orgId, options.workflowId);
   for (const version of versions) {
     const triggerNodes = extractTriggerNodes(version.dagJson);
     for (const node of triggerNodes) {
       if (node.type !== triggerType) continue;
+      if (options.nodeId && node.id !== options.nodeId) continue;
       if (!matcher(node.config)) continue;
       return {
         workflowId: version.workflowId,

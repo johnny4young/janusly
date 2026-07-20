@@ -52,6 +52,8 @@ import {
   deleteAllForWorkflow,
   deletePriorVersions,
   getScheduleEntryById,
+  getWorkflowStatus,
+  resolveWorkflowPauseAction,
   listAllEnabled,
   listForWorkflow,
   recordFire,
@@ -297,6 +299,19 @@ export async function handleScheduleTrigger(data: unknown, repeatJobKey?: string
         nodeId: entry.nodeId,
       }),
     );
+    return;
+  }
+
+  // Pause gate via the shared decision table (workflowPausePolicy.ts): a
+  // cron tick is dropped, not buffered — the WHY lives with the table.
+  const wfStatus = await getWorkflowStatus(entry.orgId, entry.workflowId);
+  const pauseAction = resolveWorkflowPauseAction(wfStatus?.status, "schedule");
+  if (pauseAction.kind !== "proceed") {
+    console.warn("[schedule] tick skipped — workflow paused", {
+      entryId: entry.id,
+      workflowId: entry.workflowId,
+      status: pauseAction.kind === "drop" ? pauseAction.reason : wfStatus?.status,
+    });
     return;
   }
 

@@ -4,7 +4,7 @@
  *  - Active-run card with cancel + open-in-Lab + workflow-output details.
  *  - RunExplainChat for the active run ("Ask Janusly", above usage).
  *  - Usage summary card (per-org cost/quota breakdown).
- *  - Paused-nodes action cards (human-form + approval pickers).
+ *  - Classified paused-node cards with safe resume actions.
  *  - Failed-nodes action cards (per-node retry).
  *  - Fork-eligible nodes action cards (per-node Lab fork).
  *  - DeadLettersPanel.
@@ -16,12 +16,11 @@
  * - `RightPanel.tsx` (mounted in the runs branch of the dispatcher).
  */
 
-import React, { useState } from 'react'
-import { Activity, CheckCircle2, CircleX, Download, FlaskConical, GitBranch, ListChecks, Send } from 'lucide-react'
-import type { RunNode, RunSummary, WorkflowInputSchemaShape } from '../types'
+import { useEffect, useState } from 'react'
+import { Activity, CheckCircle2, CircleX, Copy, FlaskConical, GitBranch, ListChecks } from 'lucide-react'
+import type { RunEvent, RunNode, RunSummary, SavedWorkflow, WorkflowInputSchemaShape } from '../types'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
-import { formatStatusLabel } from '../constants'
-import { downloadFromApi } from '../api'
+import { formatCompactDuration, formatStatusLabel, formatNodeDuration } from '../constants'
 import { useWorkflowStore } from '../store'
 import { getResolvedLocale, useT } from '../i18n'
 import { DeadLettersPanel } from './DeadLettersPanel'
@@ -30,17 +29,13 @@ import { HumanFormDialog } from './HumanFormDialog'
 import { ReplayLabDialog } from './ReplayLabDialog'
 import { ReplayLabForkDialog } from './ReplayLabForkDialog'
 import { ReportDeliveryDialog } from './ReportDeliveryDialog'
-import { EmptyView, PanelChrome } from './panel-primitives'
+import { PanelChrome } from './panel-primitives'
 import { UsageSummaryCard } from './UsageSummaryCard'
 import { RunStreamChip } from './RunStreamChip'
 import { VitalSignsStrip, withSeverityLabels, type VitalSignsTile } from './VitalSignsStrip'
-import { useVirtualList } from '../hooks/useVirtualList'
-
-/** Fixed row PITCH (CSS px) for the virtualized run-history list. The history
- *  cards are made uniform-height (the optional "Lab" action reserves its slot),
- *  so a single pitch windows the list correctly. Tuned to the rendered card +
- *  its bottom margin; verify in a real browser when the card layout changes. */
-const RUN_ROW_HEIGHT = 226
+import { pickErrorMessage } from './recovery-dialog/helpers'
+import { getRunFinishedAt, getRunTerminalAt, getRunTriggerInput, getRunWaitingInfo, getRunWorkflowIdentity, type RunWaitKind } from '../run-observability'
+import { RunHistoryList } from './RunHistoryList'
 
 type HumanFormWaiting = {
   title?: string
@@ -82,20 +77,23 @@ function isWorkflowInputSchemaShape(value: unknown): value is WorkflowInputSchem
 
 type RunsPanelProps = {
   runs: RunSummary[]
+  workflows: SavedWorkflow[]
   usage: Record<string, number>
   runNodes: RunNode[]
+  runEvents?: RunEvent[]
   activeRunId?: string | null
   onOpenRun: (id: string) => void
   onRefreshPlatform: () => void
   onApproveNode: (nodeId: string) => void
   onSubmitHumanForm: SubmitHumanFormHandler
   onReplayNode: (nodeId: string) => void
+  onRedriveNode: (nodeId: string) => void
   onCancelActiveRun?: () => void | Promise<void>
-  onReplayDeadLetter: (id: string) => void
-  onResolveDeadLetter: (id: string) => void
+  onReplayDeadLetter: (id: string, createdAtIso?: string) => boolean | Promise<boolean> | undefined
+  onResolveDeadLetter: (id: string) => boolean | Promise<boolean> | undefined
 }
 
-type SubmitHumanFormResult = string[] | void
+type SubmitHumanFormResult = string[] | undefined
 type SubmitHumanFormPromise = Promise<
   SubmitHumanFormResult
 >
@@ -105,32 +103,41 @@ type SubmitHumanFormHandler = (
   resumeToken: string,
 ) => SubmitHumanFormResult | SubmitHumanFormPromise
 
+function waitKindLabelKey(kind: RunWaitKind): string {
+  return `rightPanel.runs.waitKind.${kind}`
+}
+
+function waitActionLabelKey(kind: RunWaitKind): string {
+  if (kind === 'approval') return 'rightPanel.runs.approveAndResume'
+  if (kind === 'timer') return 'rightPanel.runs.resumeNow'
+  if (kind === 'webhook') return 'rightPanel.runs.resumeManually'
+  return 'rightPanel.runs.resume'
+}
+
+function canResumeWaitingKind(kind: RunWaitKind): boolean {
+  // A child-run completion is the only safe resume signal for subworkflow
+  // waits. Manually advancing the parent would violate the join boundary.
+  return kind !== 'subworkflow'
+}
+
 export function RunsPanel({
   runs,
+  workflows,
   usage,
   runNodes,
+  runEvents = [],
   activeRunId,
   onOpenRun,
   onRefreshPlatform,
   onApproveNode,
   onSubmitHumanForm,
   onReplayNode,
+  onRedriveNode,
   onCancelActiveRun,
   onReplayDeadLetter,
   onResolveDeadLetter,
 }: RunsPanelProps) {
   const { t } = useT()
-  // Window the run-history list so a large org's history (capped 100/200 by the
-  // API) doesn't mount hundreds of multi-button cards on every platformVersion
-  // bump. No resetScrollKey — the list refetches on each bump (a new `runs`
-  // reference with identical content), and resetting scroll there would jump the
-  // operator to the top on every tick. Mirrors DeadLettersPanel's windowing.
-  const {
-    containerRef: runListRef,
-    visibleItems: visibleRuns,
-    totalHeight: runListTotalHeight,
-    startOffset: runListStartOffset,
-  } = useVirtualList({ items: runs, rowHeight: RUN_ROW_HEIGHT })
   const waitingNodes = runNodes.filter(node => node.status === 'waiting')
   const failedNodes = runNodes.filter(node => node.status === 'failed')
   const completedRuns = runs.filter(run => run.status === 'succeeded').length
@@ -161,6 +168,24 @@ export function RunsPanel({
 
   // Cancellable when the active run is in a non-terminal status.
   const activeRun = activeRunId ? runs.find(run => run.id === activeRunId) : null
+  const activeRunTraceId = activeRun?.traceId ?? null
+  const activeRunIdentity = activeRun ? getRunWorkflowIdentity(activeRun) : null
+  const activeRunInput = activeRun ? getRunTriggerInput(activeRun) : undefined
+  const activeRunFinishedAt = getRunTerminalAt(runEvents) ?? getRunFinishedAt(runNodes)
+  const [clockNow, setClockNow] = useState(() => Date.now())
+  const shouldTickClock = Boolean(activeRun && !isTerminalRunStatus(activeRun.status)) || waitingNodes.length > 0
+  useEffect(() => {
+    if (!shouldTickClock) return
+    setClockNow(Date.now())
+    const interval = window.setInterval(() => setClockNow(Date.now()), 1_000)
+    return () => window.clearInterval(interval)
+  }, [shouldTickClock])
+
+  const startedAtMs = activeRun?.createdAt ? Date.parse(activeRun.createdAt) : Number.NaN
+  const finishedAtMs = activeRunFinishedAt ? Date.parse(activeRunFinishedAt) : Number.NaN
+  const activeRunDuration = Number.isFinite(startedAtMs)
+    ? formatCompactDuration(Math.max(0, (Number.isFinite(finishedAtMs) && activeRun && isTerminalRunStatus(activeRun.status) ? finishedAtMs : clockNow) - startedAtMs))
+    : null
   const isActiveRunCancellable = Boolean(
     activeRunId && onCancelActiveRun && (!activeRun || !isTerminalRunStatus(activeRun.status)),
   )
@@ -181,62 +206,70 @@ export function RunsPanel({
   const runMetricTiles: VitalSignsTile[] = [
     {
       icon: <ListChecks size={15} aria-hidden="true" />,
-      label: t('rightPanel.runs.metric.total') as string,
+      label: t('rightPanel.runs.metric.total'),
       display: String(runs.length),
       severity: 'neutral',
       numericValue: runs.length,
-      rationale: t('rightPanel.runs.metric.totalSub') as string,
+      rationale: t('rightPanel.runs.metric.totalSub'),
       testId: 'runs-metric-total',
     },
     {
       icon: <Activity size={15} aria-hidden="true" />,
-      label: t('rightPanel.runs.metric.active') as string,
+      label: t('rightPanel.runs.metric.active'),
       display: String(activeRuns),
       severity: 'info',
       numericValue: activeRuns,
-      rationale: t('rightPanel.runs.metric.activeSub') as string,
+      rationale: t('rightPanel.runs.metric.activeSub'),
       testId: 'runs-metric-active',
     },
     {
       icon: <CheckCircle2 size={15} aria-hidden="true" />,
-      label: t('rightPanel.runs.metric.done') as string,
+      label: t('rightPanel.runs.metric.done'),
       display: String(completedRuns),
       severity: 'healthy',
       numericValue: completedRuns,
-      rationale: t('rightPanel.runs.metric.doneSub') as string,
+      rationale: t('rightPanel.runs.metric.doneSub'),
       testId: 'runs-metric-done',
     },
     {
       icon: <CircleX size={15} aria-hidden="true" />,
-      label: t('rightPanel.runs.metric.failed') as string,
+      label: t('rightPanel.runs.metric.failed'),
       display: String(failedRuns),
       severity: failedRuns > 0 ? 'unhealthy' : 'healthy',
       numericValue: failedRuns,
       rationale: failedRuns > 0
-        ? (t('rightPanel.runs.metric.failedOpen') as string)
-        : (t('rightPanel.runs.metric.failedClear') as string),
+        ? (t('rightPanel.runs.metric.failedOpen'))
+        : (t('rightPanel.runs.metric.failedClear')),
       onClick: failedRuns > 0 ? () => setActiveTab('home') : undefined,
-      ariaLabel: failedRuns > 0 ? (t('rightPanel.runs.metric.failedAria') as string) : undefined,
+      ariaLabel: failedRuns > 0 ? (t('rightPanel.runs.metric.failedAria')) : undefined,
       testId: 'runs-metric-failed',
     },
   ]
 
   return (
-    <PanelChrome title={t('rightPanel.runs.title') as string} description={t('rightPanel.runs.description') as string} icon={<Activity size={18} />}>
+    <PanelChrome title={t('rightPanel.runs.title')} description={t('rightPanel.runs.description')} icon={<Activity size={18} />}>
       <VitalSignsStrip
         tiles={withSeverityLabels(runMetricTiles, t)}
-        ariaLabel={t('rightPanel.runs.summaryAria') as string}
+        ariaLabel={t('rightPanel.runs.summaryAria')}
         testId="runs-metric-strip"
       />
 
       {activeRunId && (
-        <section className="panel-card">
-          <div className="split-row">
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              <strong>{t('rightPanel.runs.activeRun')}</strong>
+        <section className="we-card we-run-overview" data-testid="run-overview">
+          <div className="split-row we-run-overview__header">
+            <span className="we-run-overview__title">
+              <strong>{activeRunIdentity?.name ?? activeRunIdentity?.id ?? t('rightPanel.runs.activeRun')}</strong>
+              {activeRun && <span className="status-pill" data-status={activeRun.status}>{formatStatusLabel(activeRun.status)}</span>}
               <RunStreamChip />
             </span>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div className="we-run-overview__actions">
+              <button
+                type="button"
+                className="small-command"
+                onClick={() => setActiveTab('reasoning')}
+              >
+                <Activity size={12} aria-hidden="true" /> {t('rightPanel.runs.viewTimeline')}
+              </button>
               {activeRun && !activeRun.replayMode && isTerminalRunStatus(activeRun.status) && (
                 <button
                   type="button"
@@ -257,17 +290,67 @@ export function RunsPanel({
               </button>
             </div>
           </div>
-          <p className="helper-text">
+          <dl className="we-run-overview__facts">
+            <div>
+              <dt>{t('rightPanel.runs.runId')}</dt>
+              <dd><code title={activeRunId}>{activeRunId.slice(0, 12)}…</code></dd>
+            </div>
+            {activeRun?.workflowVersionId && (
+              <div>
+                <dt>{t('rightPanel.runs.versionRef')}</dt>
+                <dd><code title={activeRun.workflowVersionId}>{activeRun.workflowVersionId.slice(0, 12)}…</code></dd>
+              </div>
+            )}
+            <div>
+              <dt>{t('rightPanel.runs.startedAt')}</dt>
+              <dd>{activeRun?.createdAt ? new Date(activeRun.createdAt).toLocaleString(getResolvedLocale()) : '—'}</dd>
+            </div>
+            <div>
+              <dt>{t('rightPanel.runs.duration')}</dt>
+              <dd>{activeRunDuration ?? '—'}</dd>
+            </div>
+            {activeRunTraceId && (
+              <div className="we-run-overview__trace">
+                <dt>{t('rightPanel.runs.traceId')}</dt>
+                <dd>
+                  <code title={activeRunTraceId}>{activeRunTraceId.slice(0, 12)}…</code>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={t('rightPanel.runs.copyTrace')}
+                    title={t('rightPanel.runs.copyTrace')}
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(activeRunTraceId)
+                        addToast(t('rightPanel.runs.traceCopied'), 'success')
+                      } catch {
+                        addToast(t('rightPanel.runs.traceCopyFailed'), 'error')
+                      }
+                    }}
+                  >
+                    <Copy size={13} aria-hidden="true" />
+                  </button>
+                </dd>
+              </div>
+            )}
+          </dl>
+          <p className="helper-text we-run-overview__status-copy">
             {activeRun
               ? (isActiveRunCancellable
-                ? t('rightPanel.runs.activeRunStatusCancellable', { status: activeRun.status })
-                : t('rightPanel.runs.activeRunStatusFinished', { status: activeRun.status }))
+                ? t('rightPanel.runs.activeRunStatusCancellable', { status: formatStatusLabel(activeRun.status) })
+                : t('rightPanel.runs.activeRunStatusFinished', { status: formatStatusLabel(activeRun.status) }))
               : t('rightPanel.runs.activeRunLoading')}
           </p>
+          {activeRunInput !== undefined && (
+            <details data-testid="run-trigger-input" className="we-run-overview__payload">
+              <summary>{t('rightPanel.runs.triggerInput')}</summary>
+              <pre className="code-field">{JSON.stringify(activeRunInput, null, 2)}</pre>
+            </details>
+          )}
           {activeRun?.status === 'succeeded' && activeRun.outputJson && Object.keys(activeRun.outputJson).length > 0 && (
-            <details data-testid="workflow-output" style={{ marginTop: 12 }}>
+            <details data-testid="workflow-output" className="we-run-overview__payload">
               <summary>{t('rightPanel.runs.workflowOutput')}</summary>
-              <pre className="code-field" style={{ marginTop: 8, padding: 8 }}>
+              <pre className="code-field">
                 {JSON.stringify(activeRun.outputJson, null, 2)}
               </pre>
             </details>
@@ -280,17 +363,72 @@ export function RunsPanel({
       <UsageSummaryCard usage={usage} onRefreshPlatform={onRefreshPlatform} />
 
       {waitingNodes.length > 0 && (
-        <section className="panel-card action-card">
+        <section className="we-card action-card" data-testid="waiting-steps">
           <div>
             <strong>{t('rightPanel.runs.pausedTitle')}</strong>
             <p className="helper-text">{t('rightPanel.runs.pausedDescription')}</p>
           </div>
           {waitingNodes.map(node => {
             const form = readHumanFormWaiting(node)
-            if (form) {
-              return (
+            const waiting = getRunWaitingInfo(node)
+            const waitingSinceMs = waiting.waitingSince ? Date.parse(waiting.waitingSince) : Number.NaN
+            const wakeAtMs = waiting.wakeAt ? Date.parse(waiting.wakeAt) : Number.NaN
+            const deadlineAtMs = waiting.deadlineAt ? Date.parse(waiting.deadlineAt) : Number.NaN
+            const waitDuration = Number.isFinite(waitingSinceMs) ? formatCompactDuration(Math.max(0, clockNow - waitingSinceMs)) : null
+            const wakeDuration = Number.isFinite(wakeAtMs) ? formatCompactDuration(Math.max(0, wakeAtMs - clockNow)) : null
+            const deadlineDuration = Number.isFinite(deadlineAtMs) ? formatCompactDuration(Math.max(0, deadlineAtMs - clockNow)) : null
+            const approvalOwnerCopy = waiting.assignee
+              ? waiting.timeoutState === 'escalated'
+                ? t('rightPanel.runs.approvalEscalated', {
+                  previous: waiting.escalatedFrom ?? t('rightPanel.runs.unassigned'),
+                  assignee: waiting.assignee,
+                })
+                : t('rightPanel.runs.approvalAssignee', { assignee: waiting.assignee })
+              : null
+            return (
+              <article key={node.nodeId} className="we-wait-card" data-wait-kind={waiting.kind} data-testid={`waiting-step-${node.nodeId}`}>
+                <div className="split-row">
+                  <span className="we-pill" data-tone="warning">{t(waitKindLabelKey(waiting.kind))}</span>
+                  <code>{node.nodeId}</code>
+                </div>
+                <div>
+                  <strong>{waiting.title ?? t('rightPanel.runs.waitingStep', { nodeId: node.nodeId })}</strong>
+                  {waiting.description && <p className="helper-text">{waiting.description}</p>}
+                </div>
+                {(waitDuration || wakeDuration || deadlineDuration || waiting.assignee || waiting.kind === 'approval') && (
+                  <div className="we-wait-card__timing">
+                    {waitDuration && <span>{t('rightPanel.runs.waitingFor', { duration: waitDuration })}</span>}
+                    {wakeDuration && (
+                      <span>{wakeAtMs <= clockNow
+                        ? t('rightPanel.runs.wakeDue')
+                        : t('rightPanel.runs.wakesIn', { duration: wakeDuration })}</span>
+                    )}
+                    {approvalOwnerCopy && (
+                      <span data-testid={`waiting-owner-${node.nodeId}`}>{approvalOwnerCopy}</span>
+                    )}
+                    {waiting.kind === 'approval' && (
+                      <span
+                        className="we-sr-only"
+                        data-testid={`waiting-owner-announcement-${node.nodeId}`}
+                        role="status"
+                        aria-live="polite"
+                        aria-atomic="true"
+                      >
+                        {waiting.timeoutState === 'escalated' ? approvalOwnerCopy : ''}
+                      </span>
+                    )}
+                    {deadlineDuration && waiting.timeoutState !== 'escalated' && (
+                      <span>{deadlineAtMs <= clockNow
+                        ? t('rightPanel.runs.approvalDeadlineDue')
+                        : t('rightPanel.runs.approvalDeadlineIn', { duration: deadlineDuration })}</span>
+                    )}
+                    {waiting.onTimeout === 'escalate' && waiting.escalateTo && waiting.timeoutState !== 'escalated' && (
+                      <span>{t('rightPanel.runs.approvalEscalatesTo', { assignee: waiting.escalateTo })}</span>
+                    )}
+                  </div>
+                )}
+                {form ? (
                 <button
-                  key={node.nodeId}
                   className="small-command small-command--primary"
                   onClick={() => {
                     setHumanFormErrors([])
@@ -299,12 +437,14 @@ export function RunsPanel({
                 >
                   {t('rightPanel.runs.fillForm', { nodeId: node.nodeId })}
                 </button>
-              )
-            }
-            return (
-              <button key={node.nodeId} className="small-command" onClick={() => onApproveNode(node.nodeId)}>
-                {t('rightPanel.runs.resume', { nodeId: node.nodeId })}
-              </button>
+                ) : canResumeWaitingKind(waiting.kind) ? (
+                  <button className="small-command" onClick={() => onApproveNode(node.nodeId)}>
+                    {t(waitActionLabelKey(waiting.kind), { nodeId: node.nodeId })}
+                  </button>
+                ) : (
+                  <span className="helper-text">{t('rightPanel.runs.waitAutomatic')}</span>
+                )}
+              </article>
             )
           })}
         </section>
@@ -339,21 +479,51 @@ export function RunsPanel({
       )}
 
       {failedNodes.length > 0 && (
-        <section className="panel-card action-card">
+        <section className="we-card action-card">
           <div>
             <strong>{t('rightPanel.runs.attentionTitle')}</strong>
             <p className="helper-text">{t('rightPanel.runs.attentionDescription')}</p>
           </div>
-          {failedNodes.map(node => (
-            <button key={node.nodeId} className="small-command" onClick={() => onReplayNode(node.nodeId)}>
-              {t('rightPanel.runs.retry', { nodeId: node.nodeId })}
-            </button>
-          ))}
+          {failedNodes.map(node => {
+            const errorMessage = pickErrorMessage(node.errorJson)
+            const duration = formatNodeDuration(node.startedAt, node.finishedAt)
+            const meta: string[] = []
+            if (typeof node.attempts === 'number' && node.attempts > 0) {
+              meta.push(t('rightPanel.runs.nodeAttempt', { count: node.attempts }))
+            }
+            if (duration) meta.push(duration)
+            return (
+              <div key={node.nodeId} className="we-failed-node" data-testid={`failed-node-${node.nodeId}`}>
+                <div className="split-row">
+                  <code className="we-failed-node__id">{node.nodeId}</code>
+                  {meta.length > 0 && (
+                    <span className="helper-text we-failed-node__meta">{meta.join(' · ')}</span>
+                  )}
+                </div>
+                {errorMessage && (
+                  <p className="we-failed-node__error" title={errorMessage}>{errorMessage}</p>
+                )}
+                <div className="split-row">
+                  <button className="small-command" onClick={() => onReplayNode(node.nodeId)}>
+                    {t('rightPanel.runs.retry', { nodeId: node.nodeId })}
+                  </button>
+                  <button
+                    className="small-command small-command--primary"
+                    onClick={() => onRedriveNode(node.nodeId)}
+                    title={t('rightPanel.runs.redriveTitle')}
+                    data-testid={`redrive-node-${node.nodeId}`}
+                  >
+                    {t('rightPanel.runs.redrive')}
+                  </button>
+                </div>
+              </div>
+            )
+          })}
         </section>
       )}
 
       {forkableNodes.length > 0 && (
-        <section className="panel-card action-card">
+        <section className="we-card action-card">
           <div>
             <strong>{t('replayLab.fork.sectionKicker')}</strong>
             <p className="helper-text">{t('replayLab.fork.sectionDescription')}</p>
@@ -382,76 +552,13 @@ export function RunsPanel({
         onResolve={onResolveDeadLetter}
       />
 
-      <div className="panel-list">
-        <div className="section-kicker">{t('rightPanel.runs.historyKicker')}</div>
-        {runs.length === 0 && <EmptyView icon={<Activity size={22} />} title={t('rightPanel.runs.historyEmpty.title') as string} body={t('rightPanel.runs.historyEmpty.body') as string} />}
-        {runs.length > 0 && (
-          <div ref={runListRef} className="we-virtual-list" data-testid="runs-history-virtual-list">
-            <div style={{ height: runListTotalHeight, position: 'relative' }}>
-              <div style={{ transform: `translateY(${runListStartOffset}px)` }}>
-                {visibleRuns.map(({ item: run }) => {
-                  const showLabAction = !run.replayMode && isTerminalRunStatus(run.status)
-                  return (
-                    <div key={run.id} className="list-card we-run-history-card" role="group">
-                      <button type="button" className="list-card-row" onClick={() => onOpenRun(run.id)}>
-                        <div className="split-row" style={{ width: '100%' }}>
-                          <strong>{run.id.slice(0, 8)}…</strong>
-                          <span className="status-pill" data-status={run.status}>{formatStatusLabel(run.status)}</span>
-                        </div>
-                        <span>{run.createdAt ? new Date(run.createdAt).toLocaleString(getResolvedLocale()) : (t('rightPanel.runs.runFallback') as string)}</span>
-                        <span className="list-card-action">{t('rightPanel.runs.openTimeline')}</span>
-                      </button>
-                      {/* The Lab action reserves its slot even when not applicable so
-                          every card is the same height — the virtual window needs a
-                          fixed row pitch. Hidden + non-interactive when the run isn't
-                          lab-eligible (non-terminal or already a replay). */}
-                      <button
-                        type="button"
-                        className="small-command we-replay-lab-history-button"
-                        onClick={showLabAction ? () => setLabSourceRun(run) : undefined}
-                        disabled={!showLabAction}
-                        aria-hidden={showLabAction ? undefined : true}
-                        tabIndex={showLabAction ? undefined : -1}
-                        style={showLabAction ? undefined : { visibility: 'hidden' }}
-                        data-testid={showLabAction ? `history-replay-in-lab-${run.id}` : undefined}
-                        aria-label={t('rightPanel.runs.replayInLabAria', { id: run.id }) as string}
-                      >
-                        <FlaskConical size={12} aria-hidden="true" /> {t('rightPanel.runs.lab')}
-                      </button>
-                      <button
-                        type="button"
-                        className="small-command we-run-history-export-button"
-                        onClick={async () => {
-                          try {
-                            await downloadFromApi(`/reports/run-explain?runId=${encodeURIComponent(run.id)}`)
-                            addToast(t('rightPanel.runs.exportSuccess') as string, 'success')
-                          } catch (err) {
-                            const message = err instanceof Error ? err.message : (t('rightPanel.runs.exportFailed') as string)
-                            addToast(message, 'error')
-                          }
-                        }}
-                        data-testid={`history-export-${run.id}`}
-                        aria-label={t('rightPanel.runs.exportAria', { id: run.id }) as string}
-                      >
-                        <Download size={12} aria-hidden="true" /> {t('rightPanel.runs.export')}
-                      </button>
-                      <button
-                        type="button"
-                        className="small-command we-run-history-send-button"
-                        onClick={() => setDeliveryRun(run)}
-                        data-testid={`history-send-${run.id}`}
-                        aria-label={t('rightPanel.runs.sendAria', { id: run.id }) as string}
-                      >
-                        <Send size={12} aria-hidden="true" /> {t('rightPanel.runs.send')}
-                      </button>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+      <RunHistoryList
+        runs={runs}
+        workflows={workflows}
+        onOpenRun={onOpenRun}
+        onOpenLab={setLabSourceRun}
+        onSend={setDeliveryRun}
+      />
 
       {labSourceRun && (
         <ReplayLabDialog

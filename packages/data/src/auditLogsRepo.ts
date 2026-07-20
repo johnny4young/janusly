@@ -1,11 +1,12 @@
 /**
- * Read / delete helpers for `audit_logs`. The INSERT chokepoint lives
+ * Read and delete helpers for `audit_logs`. The INSERT chokepoint lives
  * elsewhere (`apps/api/src/audit.ts` is the canonical write path, plus
  * the inline `writeAudit` helper in `memoryEntriesRepo.ts` for system
- * sweeps that fire from the worker); this module only owns retention
- * pruning.
+ * sweeps that fire from the worker); this module owns bounded reads and
+ * retention pruning.
  *
  * Used by:
+ * - `apps/api/src/routes/audit-routes.ts` — tenant audit viewer.
  * - `packages/engine/src/audit-logs-retention-scheduler.ts` — daily
  *   cron sweep that calls `deleteExpiredAuditLogs`.
  *

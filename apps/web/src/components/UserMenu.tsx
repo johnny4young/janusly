@@ -11,7 +11,7 @@
  * Used by `App.tsx` (top-bar header).
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   BookOpen,
   Building2,
@@ -45,11 +45,13 @@ import {
 } from '../theme'
 import { LocaleSwitcher } from '../i18n/LocaleSwitcher'
 import type { ActiveTab, AiHealth } from '../types'
+import { parseDocsUrl } from '../docs-link'
 
-const BUILD_PLACEHOLDER = '2026.05.14-90f3a77'
 type UserMenuProps = {
   aiHealth?: AiHealth | null
   budgetGuardOn?: boolean | null
+  /** Validated build-time docs capability; absent hides the menu item. */
+  docsUrl?: string | null
   onOpenTab?: (tab: ActiveTab) => void
   onOpenShortcuts?: () => void
 }
@@ -89,8 +91,9 @@ function resolveEnv(): 'sandbox' | 'production' {
   return 'sandbox'
 }
 
-export function UserMenu({ aiHealth = null, budgetGuardOn = null, onOpenTab, onOpenShortcuts }: UserMenuProps) {
+export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null, onOpenTab, onOpenShortcuts }: UserMenuProps) {
   const { t } = useT()
+  const safeDocsUrl = parseDocsUrl(docsUrl)
   const user = useWorkflowStore(state => state.user)
   const userId = useWorkflowStore(state => state.userId)
   const orgId = useWorkflowStore(state => state.orgId)
@@ -170,7 +173,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, onOpenTab, onO
       })) as OnboardingState
       setOnboarding(next)
     } catch (err) {
-      addToast(tApiError(err) || (t('userMenu.item.resumeOnboardingFailed') as string), 'error')
+      addToast(tApiError(err) || (t('userMenu.item.resumeOnboardingFailed')), 'error')
     }
   }
 
@@ -200,7 +203,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, onOpenTab, onO
               <strong>{name}</strong>
               <span>{email}</span>
             </div>
-            <span className="user-menu__id-role" aria-label={t(`userMenu.role.${role}` as never) as string}>
+            <span className="user-menu__id-role" aria-label={t(`userMenu.role.${role}` as never)}>
               {t(`userMenu.role.${role}` as never)}
             </span>
           </div>
@@ -215,7 +218,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, onOpenTab, onO
               <strong>{orgId ?? 'default'}</strong>
               <small>
                 <span className={`user-menu__env user-menu__env--${env}`}>{envLabel}</span>
-                <span className="user-menu__build">build {BUILD_PLACEHOLDER}</span>
+                <span className="user-menu__build">build {__BUILD_ID__}</span>
               </small>
             </div>
             <button
@@ -295,7 +298,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, onOpenTab, onO
             <span className="user-menu__section-label">{t('userMenu.appearance.heading')}</span>
           </div>
           <div className="user-menu__row">
-            <span className="user-menu__row-label" title={t('userMenu.appearance.themeHint') as string}>{t('userMenu.appearance.themeLabel')}</span>
+            <span className="user-menu__row-label" title={t('userMenu.appearance.themeHint')}>{t('userMenu.appearance.themeLabel')}</span>
             <div className="user-menu__seg" role="radiogroup" aria-label={t('userMenu.appearance.themeLabel')}>
               <button
                 type="button"
@@ -330,7 +333,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, onOpenTab, onO
             </div>
           </div>
           <div className="user-menu__row">
-            <span className="user-menu__row-label" title={t('userMenu.appearance.densityHint') as string}>{t('userMenu.appearance.densityLabel')}</span>
+            <span className="user-menu__row-label" title={t('userMenu.appearance.densityHint')}>{t('userMenu.appearance.densityLabel')}</span>
             <div className="user-menu__seg" role="radiogroup" aria-label={t('userMenu.appearance.densityLabel')}>
               <button
                 type="button"
@@ -388,17 +391,20 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, onOpenTab, onO
               <strong>{t('userMenu.item.shortcuts')}</strong>
               <span className="user-menu__item-kbd">?</span>
             </button>
-            <button
-              type="button"
-              className="user-menu__item"
-              onClick={comingSoon}
-              title={t('userMenu.item.docsUnavailable')}
-              aria-label={t('userMenu.item.docsUnavailable')}
-            >
-              <span className="user-menu__item-ic" aria-hidden="true"><BookOpen size={12} /></span>
-              <strong>{t('userMenu.item.docs')}</strong>
-              <span></span>
-            </button>
+            {safeDocsUrl && (
+              <a
+                className="user-menu__item"
+                href={safeDocsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="user-menu-docs"
+                onClick={() => setOpen(false)}
+              >
+                <span className="user-menu__item-ic" aria-hidden="true"><BookOpen size={12} /></span>
+                <strong>{t('userMenu.item.docs')}</strong>
+                <span></span>
+              </a>
+            )}
             {isSupabaseConfigured && (user || userId) && (
               <button type="button" className="user-menu__item user-menu__item--danger" onClick={handleSignOut}>
                 <span className="user-menu__item-ic" aria-hidden="true"><LogOut size={12} /></span>

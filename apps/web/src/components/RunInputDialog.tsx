@@ -12,7 +12,7 @@
  * `.` to map each error to the field it targets. Errors whose path
  * doesn't match any field render in the top-of-form banner.
  *
- * Visual posture: a lifted-up `panel-card` with the workflow name in the
+ * Visual posture: a lifted-up `we-card` with the workflow name in the
  * header, the same `section-kicker` + `<h2>` grammar the inspector uses,
  * cobalt primary on the Run button, and a soft fade-in. ESC closes.
  *
@@ -76,11 +76,11 @@ export function RunInputDialog({
   onCancel,
 }: RunInputDialogProps) {
   const { t } = useT()
-  const resolvedKicker = kicker ?? (t('runInput.kicker') as string)
-  const resolvedDescription = description ?? (t('runInput.description') as string)
-  const resolvedSubmitLabel = submitLabel ?? (t('runInput.submit') as string)
-  const resolvedSubmittingLabel = submittingLabel ?? (t('runInput.starting') as string)
-  const resolvedCloseLabel = closeLabel ?? (t('runInput.close') as string)
+  const resolvedKicker = kicker ?? (t('runInput.kicker'))
+  const resolvedDescription = description ?? (t('runInput.description'))
+  const resolvedSubmitLabel = submitLabel ?? (t('runInput.submit'))
+  const resolvedSubmittingLabel = submittingLabel ?? (t('runInput.starting'))
+  const resolvedCloseLabel = closeLabel ?? (t('runInput.close'))
   const isObjectRoot = inputs.type === 'object' && inputs.properties
   const [state, setState] = useState<FormState>(() => initialFormState(inputs))
   const [localErrors, setLocalErrors] = useState<ErrorMap>({})
@@ -167,7 +167,7 @@ export function RunInputDialog({
           </span>
           <div className="run-input-dialog__heading">
             <div className="section-kicker">{resolvedKicker}</div>
-            <h2 id="run-input-title">{title?.trim() || workflowName?.trim() || (t('runInput.title') as string)}</h2>
+            <h2 id="run-input-title">{title?.trim() || workflowName?.trim() || (t('runInput.title'))}</h2>
             <p className="helper-text">{resolvedDescription}</p>
           </div>
           <button

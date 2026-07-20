@@ -26,13 +26,13 @@ const MISSING = '__MISSING__'
  * `t(key as any)` casts; add the key to the catalog or route through here.
  */
 function tServerCode(key: string, options: Record<string, unknown> = {}): string {
-  return t(key as never, { defaultValue: MISSING, ...options }) as string
+  return t(key as never, { defaultValue: MISSING, ...options })
 }
 
 /** Generic free-form wrapper. Returns the message verbatim today; one place to prefix later. */
 export function tServerFallback(message: string | undefined | null): string {
   if (!message) return ''
-  return t('serverEvents.fallback', { message }) as string
+  return t('serverEvents.fallback', { message })
 }
 
 /** Translate a `ValidationIssue.code` to a localized string, falling back to its `message`. */
@@ -59,7 +59,15 @@ export function tReadinessIssue(issue: ReadinessIssue): string {
     nodeId: issue.nodeId ?? '',
     edgeId: issue.edgeId ?? '',
   })
-  return translated === MISSING ? tServerFallback(issue.message) : translated
+  if (translated !== MISSING) return translated
+  const validationPrefix = 'invalid_workflow_'
+  if (issue.code.startsWith(validationPrefix)) {
+    return tValidationIssue({
+      ...issue,
+      code: issue.code.slice(validationPrefix.length),
+    })
+  }
+  return tServerFallback(issue.message)
 }
 
 /** AI review issue (from `/ai/review-workflow`). */
@@ -129,7 +137,7 @@ export function tHealthRationale(entry: HealthBreakdownEntryLike): string {
         ? t('healthRationale.maintainability.multipleVersions', { count: asNumber(meta.versionCount) })
         : t('healthRationale.maintainability.singleVersion'),
       approval: t(meta.hasApprovalNode ? 'healthRationale.maintainability.approvalPresent' : 'healthRationale.maintainability.noApproval'),
-    }) as string
+    })
   }
 
   const key = `healthRationale.${entry.rationaleCode}`

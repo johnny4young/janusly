@@ -26,6 +26,7 @@ vi.mock("../http", async (importOriginal) => {
 // The route imports `getCredentialByName` + `listOrgConfig` from the barrel;
 // mocking the barrel directly keeps the transitive DB import out of the test.
 vi.mock("@janusly/data", () => ({
+  recordSystemAudit: vi.fn(async () => undefined),
   getCredentialByName: vi.fn(),
   listOrgConfig: vi.fn(),
 }));

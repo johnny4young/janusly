@@ -38,6 +38,11 @@ import {
   FileDroppedConfigSchema,
   McpServerEventConfigSchema,
 } from "@janusly/shared/src/trigger-types";
+import {
+  approvalTimeoutPolicyValues,
+  resolveApprovalWaitingConfig,
+  resolveWaitUntilSchedule,
+} from "./waiting-time";
 
 export const HttpNodeConfigSchema = z
   .object({
@@ -118,9 +123,32 @@ export const LoopNodeConfigSchema = z
     // Executor handles undefined items gracefully (falls back to empty
     // iteration) so the field is optional at this layer.
     items: z.unknown().optional(),
+    mode: z.enum(["map", "for_each"]).optional(),
     mapping: z.unknown().optional(),
+    tool: z.string().trim().optional(),
+    input: z.unknown().optional(),
+    concurrency: z.number().int().min(1).max(20).optional(),
+    toleratedFailureCount: z.number().int().min(0).max(1_000).optional(),
+    toleratedFailurePercentage: z.number().min(0).max(100).optional(),
   })
-  .passthrough();
+  .passthrough()
+  .superRefine((value, ctx) => {
+    if (value.mode === "for_each" && !value.tool) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["tool"],
+        message: "loop.tool is required in for_each mode",
+      });
+    }
+    if (value.toleratedFailureCount !== undefined
+      && value.toleratedFailurePercentage !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["toleratedFailurePercentage"],
+        message: "loop failure budget must use either count or percentage, not both",
+      });
+    }
+  });
 
 export const RouterNodeConfigSchema = z
   .object({
@@ -158,8 +186,25 @@ export const AiNodeConfigSchema = z
 export const ApprovalNodeConfigSchema = z
   .object({
     message: z.string().optional(),
+    title: z.string().optional(),
+    description: z.string().optional(),
+    assignee: z.string().optional(),
+    decisionTimeoutMs: z.number().optional(),
+    until: z.string().optional(),
+    onTimeout: z.enum(approvalTimeoutPolicyValues).optional(),
+    escalateTo: z.string().optional(),
   })
-  .passthrough();
+  .passthrough()
+  .superRefine((value, ctx) => {
+    try {
+      resolveApprovalWaitingConfig(value);
+    } catch (err) {
+      ctx.addIssue({
+        code: "custom",
+        message: err instanceof Error ? err.message : "Invalid approval deadline config",
+      });
+    }
+  });
 
 export const HumanFormNodeConfigSchema = z
   .object({
@@ -181,9 +226,20 @@ export const SubworkflowNodeConfigSchema = z
 
 export const WaitUntilNodeConfigSchema = z
   .object({
-    duration: z.string().min(1, "wait_until.duration is required"),
+    duration: z.string().optional(),
+    until: z.string().optional(),
   })
-  .passthrough();
+  .passthrough()
+  .superRefine((value, ctx) => {
+    try {
+      resolveWaitUntilSchedule(value);
+    } catch (err) {
+      ctx.addIssue({
+        code: "custom",
+        message: err instanceof Error ? err.message : "Invalid wait_until config",
+      });
+    }
+  });
 
 export const ScheduleNodeConfigSchema = z
   .object({

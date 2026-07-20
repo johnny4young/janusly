@@ -33,11 +33,39 @@ export type AlertMessage = {
     trigger: AlertTrigger
     payload: Record<string, unknown>
     recoveryCenterUrl: string | null
+    /**
+     * Deep link to the exact failure, when the trigger payload identified one.
+     * Null for triggers with no single dead letter to point at (a tripped
+     * breaker is about the workflow, not one row).
+     */
+    deepLinkUrl: string | null
     dispatchedAtIso: string
   }
 }
 
+/**
+ * Build the one-click jump from an alert to the failure it is about.
+ *
+ * The MTTR clock starts at the alert, so a link to a generic queue costs the
+ * operator the first minutes of every incident: they arrive knowing something
+ * broke and have to hunt for which row. Only emitted when the payload carries
+ * a `deadLetterId` — a link that lands on the wrong failure is worse than no
+ * link, so an id-less trigger keeps the plain Recovery Center link.
+ *
+ * The id is URL-encoded and length-bounded: it reaches here from a persisted
+ * payload, and this string ends up in outbound Slack/GitHub/email content.
+ */
+function buildDeepLinkUrl(baseUrl: string | undefined, payload: Record<string, unknown>): string | null {
+  if (!baseUrl) return null
+  const id = payload.deadLetterId
+  if (typeof id !== 'string' || id.length === 0 || id.length > MAX_DEEP_LINK_ID_LEN) return null
+  return `${baseUrl}?deadLetterId=${encodeURIComponent(id)}`
+}
+
 const MAX_FIELD_VALUE_LEN = 400
+// Dead-letter ids are UUIDs; the bound is a sanity gate on a value that
+// reaches outbound message bodies, mirroring the web-side focus-bus cap.
+const MAX_DEEP_LINK_ID_LEN = 256
 
 function formatPayloadValue(value: unknown): string {
   if (value === null || value === undefined) return '—'
@@ -86,9 +114,14 @@ export function composeAlertMessage(input: AlertMessageInput): AlertMessage {
 
   const subject = `[Janusly] ${input.policyName} — ${input.trigger}`
 
-  const recoveryLine = input.recoveryCenterUrl
-    ? `\n\n[Open Recovery Center](${input.recoveryCenterUrl})`
-    : ''
+  // Prefer the specific failure over the generic queue: same one link slot,
+  // but it lands the operator on the row the alert is actually about.
+  const deepLinkUrl = buildDeepLinkUrl(input.recoveryCenterUrl, scrubbedPayload)
+  const recoveryLine = deepLinkUrl
+    ? `\n\n[Open this failure in Recovery](${deepLinkUrl})`
+    : input.recoveryCenterUrl
+      ? `\n\n[Open Recovery Center](${input.recoveryCenterUrl})`
+      : ''
 
   const markdown = [
     `**${subject}**`,
@@ -107,6 +140,7 @@ export function composeAlertMessage(input: AlertMessageInput): AlertMessage {
       trigger: input.trigger,
       payload: scrubbedPayload,
       recoveryCenterUrl: input.recoveryCenterUrl ?? null,
+      deepLinkUrl,
       dispatchedAtIso: new Date().toISOString(),
     },
   }

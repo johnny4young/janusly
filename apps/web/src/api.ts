@@ -28,7 +28,8 @@
  *   post-write refreshes cannot reuse pre-write snapshots.
  */
 
-import { getActiveOrg, getSessionToken, supabase } from './auth'
+import { getActiveOrg, getSessionToken, getSupabaseAccessToken } from './auth'
+import { isV1ReadPath } from '@janusly/shared/src/api-contract'
 import { getResolvedLocale, t } from './i18n/runtime'
 import { useWorkflowStore } from './store'
 
@@ -103,13 +104,16 @@ export class ApiError extends Error {
   readonly params?: Record<string, unknown>
   /** HTTP status code (4xx / 5xx). Optional — request-failed paths omit it. */
   readonly statusCode?: number
+  /** Correlation ID returned in `X-Request-Id` and v1 envelopes. */
+  readonly requestId?: string
 
-  constructor(message: string, opts: { code?: string; params?: Record<string, unknown>; statusCode?: number } = {}) {
+  constructor(message: string, opts: { code?: string; params?: Record<string, unknown>; statusCode?: number; requestId?: string } = {}) {
     super(message)
     this.name = 'ApiError'
     if (opts.code !== undefined) this.code = opts.code
     if (opts.params !== undefined) this.params = opts.params
     if (opts.statusCode !== undefined) this.statusCode = opts.statusCode
+    if (opts.requestId !== undefined) this.requestId = opts.requestId
   }
 }
 
@@ -141,9 +145,7 @@ export async function api(path: string, options: RequestInit = {}): Promise<unkn
   // resolves synchronously from the in-memory cache (no network round
   // trip), so the extra `await` costs microseconds. SSO mode + dev
   // mode skip this branch entirely.
-  const supabaseAccessToken = !sessionToken && supabase
-    ? (await supabase.auth.getSession()).data.session?.access_token ?? null
-    : null
+  const supabaseAccessToken = !sessionToken ? await getSupabaseAccessToken() : null
   const requestScope: ApiRequestScope = {
     activeOrg: getActiveOrg(),
     resolvedLocale: getResolvedLocale(),
@@ -229,12 +231,16 @@ async function doApiFetch(path: string, options: RequestInit, requestScope: ApiR
   }
 
   let res: Response
+  const method = (options.method ?? 'GET').toUpperCase()
+  const wirePath = versionedWirePath(path, method)
   try {
-    res = await fetch(`${API_URL}${path}`, { ...options, headers })
+    res = await fetch(`${API_URL}${wirePath}`, { ...options, headers })
   } catch {
-    throw new Error(t('api.error.offline') as string)
+    throw new Error(t('api.error.offline'))
   }
-  const payload = await res.json().catch(() => ({}))
+  const rawPayload = await res.json().catch(() => ({}))
+  const { payload, requestId: envelopeRequestId } = unwrapVersionedPayload(rawPayload, res.ok)
+  const requestId = envelopeRequestId ?? res.headers.get('x-request-id') ?? undefined
 
   if (!res.ok) {
     if ((path === '/start' || path === '/resume') && res.status === 400 && isFieldErrorEnvelope(payload)) {
@@ -252,7 +258,7 @@ async function doApiFetch(path: string, options: RequestInit, requestScope: ApiR
         // Non-fatal — the throw below still surfaces the original 402.
       }
     }
-    const message = typeof payload?.error === 'string' ? payload.error : t('api.error.requestFailed', { status: res.status }) as string
+    const message = typeof payload?.error === 'string' ? payload.error : t('api.error.requestFailed', { status: res.status })
     // Preserve the structured envelope on the thrown error so toast
     // call sites can translate via `tApiError(err)`. Plain string-message
     // consumers (`err.message`) keep working unchanged — the new fields
@@ -262,10 +268,43 @@ async function doApiFetch(path: string, options: RequestInit, requestScope: ApiR
     const params = rawParams && typeof rawParams === 'object' && !Array.isArray(rawParams)
       ? (rawParams as Record<string, unknown>)
       : undefined
-    throw new ApiError(message, { code, params, statusCode: res.status })
+    throw new ApiError(message, { code, params, statusCode: res.status, requestId })
   }
 
   return payload
+}
+
+function versionedWirePath(path: string, method: string): string {
+  if (method !== 'GET') return path
+  const queryIndex = path.indexOf('?')
+  const pathname = queryIndex === -1 ? path : path.slice(0, queryIndex)
+  return isV1ReadPath(pathname) ? `/v1${path}` : path
+}
+
+function unwrapVersionedPayload(
+  payload: unknown,
+  ok: boolean,
+): { payload: unknown; requestId?: string } {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return { payload }
+  const envelope = payload as Record<string, unknown>
+  if (envelope.apiVersion !== 'v1') return { payload }
+  const requestId = typeof envelope.requestId === 'string' ? envelope.requestId : undefined
+
+  if (ok && Object.hasOwn(envelope, 'data')) {
+    return { payload: envelope.data, requestId }
+  }
+  if (!ok && envelope.error && typeof envelope.error === 'object' && !Array.isArray(envelope.error)) {
+    const error = envelope.error as Record<string, unknown>
+    return {
+      requestId,
+      payload: {
+        error: typeof error.message === 'string' ? error.message : undefined,
+        code: error.code,
+        params: error.params,
+      },
+    }
+  }
+  return { payload, requestId }
 }
 
 /**
@@ -285,9 +324,7 @@ export async function openRunEventStream(
   options: { lastEventId?: string | null; signal?: AbortSignal } = {},
 ): Promise<Response> {
   const sessionToken = getSessionToken()
-  const token = !sessionToken && supabase
-    ? (await supabase.auth.getSession()).data.session?.access_token ?? null
-    : null
+  const token = !sessionToken ? await getSupabaseAccessToken() : null
 
   const headers: Record<string, string> = {
     Accept: 'text/event-stream',
@@ -306,10 +343,10 @@ export async function openRunEventStream(
       signal: options.signal,
     })
   } catch {
-    throw new Error(t('api.error.offline') as string)
+    throw new Error(t('api.error.offline'))
   }
   if (!res.ok || !res.body) {
-    throw new ApiError(t('api.error.requestFailed', { status: res.status }) as string, { statusCode: res.status })
+    throw new ApiError(t('api.error.requestFailed', { status: res.status }), { statusCode: res.status })
   }
   return res
 }
@@ -374,10 +411,7 @@ export async function downloadFromApi(
   const filename = options.filename
 
   const sessionToken = getSessionToken()
-  const session = !sessionToken && supabase
-    ? await supabase.auth.getSession()
-    : { data: { session: null } }
-  const token = session.data.session?.access_token
+  const token = !sessionToken ? await getSupabaseAccessToken() : null
 
   const headers: Record<string, string> = {
     'x-org-id': getActiveOrg(),
@@ -395,11 +429,11 @@ export async function downloadFromApi(
   try {
     res = await fetch(`${API_URL}${path}`, init)
   } catch {
-    throw new Error(t('api.error.offline') as string)
+    throw new Error(t('api.error.offline'))
   }
 
   if (!res.ok) {
-    let errorMessage = t('api.error.downloadFailed', { status: res.status }) as string
+    let errorMessage = t('api.error.downloadFailed', { status: res.status })
     try {
       const payload = await res.json()
       if (typeof payload?.error === 'string') errorMessage = payload.error

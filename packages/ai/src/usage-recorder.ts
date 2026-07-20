@@ -46,6 +46,10 @@ export type UsageRecord = {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
+  /** Input tokens served from a provider prompt cache. */
+  cachedInputTokens?: number;
+  /** Input tokens written while creating or refreshing a provider cache. */
+  cacheCreationInputTokens?: number;
   /** Wall-clock latency from the abstraction's POV (ms). */
   latencyMs: number;
   /** Cost in USD; null when no price entry exists for the model. */

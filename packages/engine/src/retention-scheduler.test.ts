@@ -13,17 +13,29 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+type RetentionAuditInput = {
+  orgId: string;
+  actor?: string | null;
+  action: string;
+  metadata: {
+    totalRowsDeleted: number;
+    tables: unknown[];
+  };
+};
+
 vi.mock("./queue", () => ({
   workflowQueue: { upsertJobScheduler: vi.fn() },
 }));
 
 const auditInsertValuesMock = vi.fn();
+const recordSystemAuditMock = vi.hoisted(() => vi.fn(async (_input: RetentionAuditInput) => undefined));
 vi.mock("@janusly/db", () => ({
   db: { insert: vi.fn(() => ({ values: auditInsertValuesMock })) },
   auditLogs: { id: "id_col" },
 }));
 
 vi.mock("@janusly/data", () => ({
+  recordSystemAudit: recordSystemAuditMock,
   listOrgIdsForRetention: vi.fn(),
   getRetentionPolicyConfig: vi.fn(),
   runRetentionExport: vi.fn(),
@@ -86,6 +98,8 @@ beforeEach(() => {
   upsertJobSchedulerMock.mockResolvedValue(undefined as never);
   auditInsertValuesMock.mockReset();
   auditInsertValuesMock.mockResolvedValue(undefined);
+  recordSystemAuditMock.mockReset();
+  recordSystemAuditMock.mockResolvedValue(undefined);
   listOrgIdsMock.mockReset();
   getConfigMock.mockReset();
   getConfigMock.mockResolvedValue({ ...DEFAULT_POLICY });
@@ -193,10 +207,10 @@ describe("purgeRetentionForOrg — per-org bounds + ordering", () => {
     runEventsPurgeMock.mockResolvedValueOnce(purgeResult(5));
     auditLogsPurgeMock.mockResolvedValueOnce(purgeResult(2));
     await purgeRetentionForOrg("org_a");
-    expect(auditInsertValuesMock).toHaveBeenCalledTimes(1);
-    const row = auditInsertValuesMock.mock.calls[0]?.[0];
+    expect(recordSystemAuditMock).toHaveBeenCalledTimes(1);
+    const row = recordSystemAuditMock.mock.calls[0]?.[0];
     expect(row.orgId).toBe("org_a");
-    expect(row.userId).toBeNull();
+    expect(row.actor ?? null).toBeNull();
     expect(row.action).toBe("retention.purged");
     expect(row.metadata.totalRowsDeleted).toBe(7);
     expect(Array.isArray(row.metadata.tables)).toBe(true);
@@ -214,8 +228,8 @@ describe("purgeRetentionForOrg — per-org bounds + ordering", () => {
     }
     expect(usageEventsPurgeMock).toHaveBeenCalledTimes(1);
     expect(memoryEntriesPurgeMock).toHaveBeenCalledTimes(1);
-    expect(auditInsertValuesMock).toHaveBeenCalledTimes(1);
-    const row = auditInsertValuesMock.mock.calls[0]?.[0];
+    expect(recordSystemAuditMock).toHaveBeenCalledTimes(1);
+    const row = recordSystemAuditMock.mock.calls[0]?.[0];
     // The failed table contributes 0, the rest are counted.
     expect(row.metadata.totalRowsDeleted).toBe(3);
   });
@@ -239,7 +253,7 @@ describe("handleRetentionTrigger — cross-org isolation", () => {
     expect(runEventsPurgeMock).toHaveBeenCalledWith({ orgId: "org_a", retentionDays: 7 });
     expect(runEventsPurgeMock).toHaveBeenCalledWith({ orgId: "org_b", retentionDays: 365 });
     // One audit row per org.
-    const auditedOrgs = auditInsertValuesMock.mock.calls.map((c) => c[0].orgId).sort();
+    const auditedOrgs = recordSystemAuditMock.mock.calls.map((c) => c[0].orgId).sort();
     expect(auditedOrgs).toEqual(["org_a", "org_b"]);
   });
 
