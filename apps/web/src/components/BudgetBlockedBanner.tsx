@@ -13,7 +13,6 @@
  * envelope is set.
  */
 
-import React from 'react'
 import { Coins, ShieldAlert, X } from 'lucide-react'
 import type { ActiveTab } from '../types'
 import { useWorkflowStore } from '../store'

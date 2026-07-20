@@ -13,11 +13,12 @@
  *  - Traps Tab / Shift+Tab so focus wraps within the dialog instead of escaping
  *    to the background. It only acts while focus is already inside the dialog,
  *    so it never yanks focus from a nested dialog or the page.
- *  - With `initialFocus: true`, focuses the first focusable on open (use for
- *    dialogs that don't focus a control themselves, e.g. ShortcutsModal).
+ *  - With `initialFocus: true`, focuses the first focusable on open. A ref can
+ *    select a preferred initial control and falls back to the first focusable
+ *    if that control is unavailable.
  *
- * Used by the app's modal dialogs. The always-mounted ConfirmDialog provider
- * manages focus itself (it can't use this) — see `ConfirmDialog.tsx`.
+ * Used by every `aria-modal="true"` surface in the app. Dialog-specific Escape
+ * and state-machine behavior remains with each component.
  */
 
 import { useEffect, useRef } from 'react'
@@ -34,7 +35,10 @@ const FOCUSABLE_SELECTOR = [
 
 export function useDialogFocusTrap(
   dialogRef: RefObject<HTMLElement | null>,
-  options?: { active?: boolean; initialFocus?: boolean },
+  options?: {
+    active?: boolean
+    initialFocus?: boolean | RefObject<HTMLElement | null>
+  },
 ): void {
   const active = options?.active ?? true
   const initialFocus = options?.initialFocus ?? false
@@ -43,6 +47,7 @@ export function useDialogFocusTrap(
   // dialog's own initial-focus moves focus inward — so it can be restored when
   // the dialog closes. (Guarded ref write during render: idempotent.)
   const triggerRef = useRef<HTMLElement | null>(null)
+  const restoreFrameRef = useRef<number | null>(null)
   const prevActive = useRef(false)
   if (active && !prevActive.current) {
     prevActive.current = true
@@ -55,10 +60,22 @@ export function useDialogFocusTrap(
 
   useEffect(() => {
     if (!active) return
+    // React Strict Mode runs setup → cleanup → setup once on mount. Cancel the
+    // first cleanup's pending restoration so it cannot steal focus from the
+    // live dialog after the second setup focuses its initial control.
+    if (restoreFrameRef.current !== null) {
+      cancelAnimationFrame(restoreFrameRef.current)
+      restoreFrameRef.current = null
+    }
     const root = dialogRef.current
 
     if (initialFocus && root) {
-      root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)[0]?.focus()
+      const firstFocusable = root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)[0]
+      const preferred = initialFocus === true ? null : initialFocus.current
+      const target = preferred && root.contains(preferred) && preferred.matches(FOCUSABLE_SELECTOR)
+        ? preferred
+        : firstFocusable
+      target?.focus()
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
@@ -84,9 +101,12 @@ export function useDialogFocusTrap(
       document.removeEventListener('keydown', onKeyDown)
       // Restore focus to the trigger on close / unmount (if it still exists).
       const trigger = triggerRef.current
-      triggerRef.current = null
       if (trigger && document.contains(trigger)) {
-        requestAnimationFrame(() => trigger.focus())
+        restoreFrameRef.current = requestAnimationFrame(() => {
+          restoreFrameRef.current = null
+          trigger.focus()
+          if (triggerRef.current === trigger) triggerRef.current = null
+        })
       }
     }
   }, [active, initialFocus, dialogRef])

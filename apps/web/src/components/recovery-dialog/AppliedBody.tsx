@@ -7,10 +7,16 @@
  * + version, falling back to ribbon-only otherwise.
  */
 
-import { CheckCircle2 } from 'lucide-react'
+import { lazy, Suspense } from 'react'
+import { CheckCircle2, RefreshCw } from 'lucide-react'
 import { useT } from '../../i18n'
 import { RecoveryDeltaCard } from '../RecoveryDeltaCard'
 import type { ClusterApplyResult, PreSaveBeforeSnapshot } from './types'
+import type { RecoveryPlaybookPromotionSource } from './types'
+
+const PlaybookPromotionCard = lazy(() => import('./PlaybookPromotionCard').then((module) => ({
+  default: module.PlaybookPromotionCard,
+})))
 
 export function AppliedBody({
   runId,
@@ -19,6 +25,8 @@ export function AppliedBody({
   appliedVersion,
   priorFailureSignature,
   preSaveBeforeSnapshot,
+  playbookPromotionSource,
+  playbookUsePending,
 }: {
   runId?: string
   cluster?: ClusterApplyResult
@@ -26,6 +34,8 @@ export function AppliedBody({
   appliedVersion?: number
   priorFailureSignature?: string | null
   preSaveBeforeSnapshot?: PreSaveBeforeSnapshot | null
+  playbookPromotionSource?: RecoveryPlaybookPromotionSource
+  playbookUsePending?: boolean
 }) {
   const { t } = useT()
   const ribbon = cluster ? (
@@ -72,6 +82,19 @@ export function AppliedBody({
   const nextSteps = (
     <p className="helper-text we-recovery-applied-next">{t('recoveryDialog.applied.nextSteps')}</p>
   )
+  const playbookResult = playbookUsePending ? (
+    <section className="we-recovery-playbook-promotion we-recovery-playbook-promotion--active" data-testid="recovery-playbook-use-pending" role="status">
+      <RefreshCw size={18} aria-hidden="true" />
+      <div>
+        <strong>{t('recoveryDialog.playbook.usePending')}</strong>
+        <p className="helper-text">{t('recoveryDialog.playbook.usePendingBody')}</p>
+      </div>
+    </section>
+  ) : playbookPromotionSource ? (
+    <Suspense fallback={<p className="helper-text">{t('recoveryDialog.playbook.loading')}</p>}>
+      <PlaybookPromotionCard source={playbookPromotionSource} />
+    </Suspense>
+  ) : null
 
   // Mount the delta card alongside the ribbon when the save response
   // gave us the workflow id + version. Defensive fall-through to
@@ -80,6 +103,7 @@ export function AppliedBody({
     return (
       <div className="we-recovery-applied">
         {ribbon}
+        {playbookResult}
         {nextSteps}
       </div>
     )
@@ -94,6 +118,7 @@ export function AppliedBody({
         priorFailureSignature={priorFailureSignature ?? null}
         preSaveBeforeSnapshot={preSaveBeforeSnapshot ?? null}
       />
+      {playbookResult}
       {nextSteps}
     </div>
   )

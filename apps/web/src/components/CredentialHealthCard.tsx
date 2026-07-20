@@ -16,7 +16,7 @@
  * - `lastErrorMessage` is server-scrubbed via `scrubSecretShapes`.
  */
 
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Info, KeyRound, ShieldCheck } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState } from './EmptyState'
@@ -131,7 +131,7 @@ export function CredentialHealthCard() {
 
   if (error) {
     return (
-      <section className="panel-card we-ops-credential-card" aria-label={t('operations.credentialHealth.title') as string}>
+      <section className="we-card we-ops-credential-card" aria-label={t('operations.credentialHealth.title')}>
         <div className="we-ops-credential-card__section">
           <div className="section-kicker">{t('operations.credentialHealth.kicker')}</div>
           <h3 style={{ margin: 0 }}>{t('operations.credentialHealth.title')}</h3>
@@ -153,14 +153,14 @@ export function CredentialHealthCard() {
       : credentialSeverities.includes('warn') || mcpSeverities.includes('warn')
         ? 'warning'
         : undefined
-  const aboutSectionLabel = t('common.aboutSection') as string
-  const intro = t('operations.credentialHealth.intro') as string
+  const aboutSectionLabel = t('common.aboutSection')
+  const intro = t('operations.credentialHealth.intro')
 
   return (
     <section
-      className="panel-card we-ops-credential-card"
+      className="we-card we-ops-credential-card"
       data-severity={cardSeverity}
-      aria-label={t('operations.credentialHealth.title') as string}
+      aria-label={t('operations.credentialHealth.title')}
     >
       <div className="panel-heading">
         <div className="panel-heading-copy">
@@ -183,8 +183,8 @@ export function CredentialHealthCard() {
       {isEmpty && (
         <EmptyState
           icon={<KeyRound />}
-          kicker={t('emptyState.credentials.kicker') as string}
-          body={t('emptyState.credentials.body') as string}
+          kicker={t('emptyState.credentials.kicker')}
+          body={t('emptyState.credentials.body')}
           testId="credentials-empty"
         />
       )}
@@ -196,10 +196,10 @@ export function CredentialHealthCard() {
             {payload.credentials.map((entry) => {
               const severity = severityForCredential(entry)
               const statusLabel = !entry.secretRefPresent
-                ? (t('operations.credentialHealth.status.missing') as string)
+                ? (t('operations.credentialHealth.status.missing'))
                 : severity === 'warn'
-                  ? (t('operations.credentialHealth.status.recentError') as string)
-                  : (t('operations.credentialHealth.status.healthy') as string)
+                  ? (t('operations.credentialHealth.status.recentError'))
+                  : (t('operations.credentialHealth.status.healthy'))
               return (
                 <li key={entry.id} className={`we-ops-credential-card__row we-ops-credential-card__row--${severity}`}>
                   <div className="we-ops-credential-card__row-name" title={`${entry.name} · ${entry.kind}`}>
@@ -240,16 +240,16 @@ export function CredentialHealthCard() {
               const isStale = entry.staleDays !== null && entry.staleDays > STALE_DISCOVERY_DAYS
               const isMissingRefs = entry.envRefsMissingKeys.length > 0
               const statusLabel = isMissingRefs
-                ? (t('operations.credentialHealth.status.missing') as string)
+                ? (t('operations.credentialHealth.status.missing'))
                 : isStale
-                  ? (t('operations.credentialHealth.status.staleMcp') as string)
-                  : (t('operations.credentialHealth.status.healthy') as string)
+                  ? (t('operations.credentialHealth.status.staleMcp'))
+                  : (t('operations.credentialHealth.status.healthy'))
               const meta: string[] = []
               if (isStale && entry.staleDays !== null) {
-                meta.push(t('operations.credentialHealth.staleDays', { count: entry.staleDays }) as string)
+                meta.push(t('operations.credentialHealth.staleDays', { count: entry.staleDays }))
               }
               if (isMissingRefs) {
-                meta.push(t('operations.credentialHealth.mcpMissingEnvRefs', { count: entry.envRefsMissingKeys.length }) as string)
+                meta.push(t('operations.credentialHealth.mcpMissingEnvRefs', { count: entry.envRefsMissingKeys.length }))
               }
               return (
                 <li key={entry.alias} className={`we-ops-credential-card__row we-ops-credential-card__row--${severity}`}>

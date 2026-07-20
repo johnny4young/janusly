@@ -86,8 +86,8 @@ export function FlowsFilterBar({
           className="text-field"
           value={query}
           onChange={event => setQuery(event.target.value)}
-          placeholder={t('workflowsDashboard.searchPlaceholder') as string}
-          aria-label={t('workflowsDashboard.searchPlaceholder') as string}
+          placeholder={t('workflowsDashboard.searchPlaceholder')}
+          aria-label={t('workflowsDashboard.searchPlaceholder')}
           data-testid="workflows-search"
         />
       </span>
@@ -96,13 +96,13 @@ export function FlowsFilterBar({
       {(tagOptions.length > 0 || tagFilters.length > 0) && (
         <span className="we-list-filter-tags" data-testid="workflows-tag-filter">
           {tagFilters.map(tag => (
-            <span key={tag} className="we-pill we-pill--ghost we-list-row__tag">
+            <span key={tag} className="we-pill we-list-row__tag" data-tone="ghost">
               {tag}
               <button
                 type="button"
                 className="we-list-row__tag-remove"
-                aria-label={t('workflowsDashboard.removeTagFromFilterAria', { tag }) as string}
-                title={t('workflowsDashboard.removeTagFromFilterAria', { tag }) as string}
+                aria-label={t('workflowsDashboard.removeTagFromFilterAria', { tag })}
+                title={t('workflowsDashboard.removeTagFromFilterAria', { tag })}
                 onClick={() => setTagFilters(prev => prev.filter(tg => tg !== tag))}
                 data-testid={`workflows-tag-filter-remove-${tag}`}
               >
@@ -114,7 +114,7 @@ export function FlowsFilterBar({
             <select
               className="text-field we-list-row__tag-add"
               value=""
-              aria-label={t('workflowsDashboard.tagFilterAria') as string}
+              aria-label={t('workflowsDashboard.tagFilterAria')}
               onChange={event => { if (event.target.value) setTagFilters(prev => prev.includes(event.target.value) ? prev : [...prev, event.target.value]) }}
               data-testid="workflows-tag-filter-add"
             >
@@ -137,7 +137,7 @@ export function FlowsFilterBar({
               value={tagRenameDraft}
               autoFocus
               maxLength={40}
-              aria-label={t('workflowsDashboard.renameTagLabel') as string}
+              aria-label={t('workflowsDashboard.renameTagLabel')}
               onChange={event => setTagRenameDraft(event.target.value)}
               onKeyDown={event => {
                 if (event.key === 'Enter') { event.preventDefault(); void renameTag(soleTagFilter, tagRenameDraft) }
@@ -168,8 +168,8 @@ export function FlowsFilterBar({
               type="button"
               className="small-command"
               onClick={() => { setConfirmDeleteTag(false); setTagRenameDraft(soleTagFilter); setRenamingTag(true) }}
-              title={t('workflowsDashboard.renameTag', { tag: soleTagFilter }) as string}
-              aria-label={t('workflowsDashboard.renameTag', { tag: soleTagFilter }) as string}
+              title={t('workflowsDashboard.renameTag', { tag: soleTagFilter })}
+              aria-label={t('workflowsDashboard.renameTag', { tag: soleTagFilter })}
               data-testid="workflows-tag-rename"
             >
               <Pencil size={12} aria-hidden="true" />
@@ -178,8 +178,8 @@ export function FlowsFilterBar({
               type="button"
               className="small-command danger"
               onClick={() => { setRenamingTag(false); setConfirmDeleteTag(true) }}
-              title={t('workflowsDashboard.deleteTag', { tag: soleTagFilter }) as string}
-              aria-label={t('workflowsDashboard.deleteTag', { tag: soleTagFilter }) as string}
+              title={t('workflowsDashboard.deleteTag', { tag: soleTagFilter })}
+              aria-label={t('workflowsDashboard.deleteTag', { tag: soleTagFilter })}
               data-testid="workflows-tag-delete"
             >
               <Trash2 size={12} aria-hidden="true" />
@@ -192,7 +192,7 @@ export function FlowsFilterBar({
           className="text-field"
           value={folderFilter}
           onChange={event => setFolderFilter(event.target.value)}
-          aria-label={t('workflowsDashboard.folderFilterAria') as string}
+          aria-label={t('workflowsDashboard.folderFilterAria')}
           data-testid="workflows-folder-filter"
         >
           <option value="">{t('workflowsDashboard.allFolders')}</option>
@@ -208,14 +208,14 @@ export function FlowsFilterBar({
           type="button"
           className="small-command"
           onClick={clearAllFilters}
-          aria-label={t('workflowsDashboard.clearFilters') as string}
+          aria-label={t('workflowsDashboard.clearFilters')}
           data-testid="workflows-clear-filters"
         >
           <FilterX size={12} aria-hidden="true" />
           {t('workflowsDashboard.clearFilters')}
         </button>
       )}
-      <div className="we-seg" role="group" aria-label={t('workflowsDashboard.sortAria') as string}>
+      <div className="we-seg" role="group" aria-label={t('workflowsDashboard.sortAria')}>
         <button type="button" aria-pressed={sort === 'recent'} onClick={() => setSort('recent')}>
           {t('workflowsDashboard.sortRecent')}
         </button>

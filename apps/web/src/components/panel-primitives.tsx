@@ -36,7 +36,7 @@ export function PanelChrome({
   icon?: React.ReactNode
 }) {
   const { t } = useT()
-  const resolvedKicker = kicker ?? (t('rightPanel.chrome.kicker') as string)
+  const resolvedKicker = kicker ?? (t('rightPanel.chrome.kicker'))
   return (
     <div className="panel-stack">
       <div className="panel-heading">

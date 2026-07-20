@@ -18,7 +18,7 @@
  * hide instead of rendering an error).
  */
 
-import React, { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useT } from '../i18n'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
@@ -94,32 +94,32 @@ export function AutoHealingPendingCard() {
   if (hidden) return null
 
   return (
-    <section className="panel-card">
+    <section className="we-card">
       <div className="section-kicker">{t('autoHealing.card.kicker')}</div>
-      <h3 className="panel-card__title">{t('autoHealing.card.title')}</h3>
-      <p className="panel-card__subtitle">{t('autoHealing.card.subtitle')}</p>
+      <h3 className="we-card__title">{t('autoHealing.card.title')}</h3>
+      <p className="we-card__subtitle">{t('autoHealing.card.subtitle')}</p>
 
-      {error && <div className="panel-card__error">{error}</div>}
+      {error && <div className="we-card__error">{error}</div>}
 
       {rows === null && !error && (
-        <div className="panel-card__empty">{t('autoHealing.card.loading')}</div>
+        <div className="we-card__empty">{t('autoHealing.card.loading')}</div>
       )}
 
       {rows && rows.length === 0 && (
-        <div className="panel-card__empty">{t('autoHealing.card.empty')}</div>
+        <div className="we-card__empty">{t('autoHealing.card.empty')}</div>
       )}
 
       {rows && rows.length > 0 && (
-        <ul className="panel-card__list">
+        <ul className="we-card__list">
           {rows.map((row) => {
             const approachKey = row.approachLabel
               ? APPROACH_LABEL_KEY[row.approachLabel] ?? 'autoHealing.approach.other'
               : 'autoHealing.approach.other'
             return (
-              <li key={row.id} className="panel-card__list-item">
-                <div className="panel-card__list-item-main">
+              <li key={row.id} className="we-card__list-item">
+                <div className="we-card__list-item-main">
                   <strong>{row.signature}</strong>
-                  <div className="panel-card__list-item-meta">
+                  <div className="we-card__list-item-meta">
                     <span className="chip">{t(approachKey)}</span>
                     {row.confidence != null && (
                       <span className="chip chip--muted">
@@ -128,7 +128,7 @@ export function AutoHealingPendingCard() {
                     )}
                   </div>
                 </div>
-                <div className="panel-card__list-item-actions">
+                <div className="we-card__list-item-actions">
                   <button
                     type="button"
                     className="small-command small-command--primary"

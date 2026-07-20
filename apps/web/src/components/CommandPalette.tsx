@@ -1,7 +1,7 @@
 /**
  * Command palette — Cmd+K (or Ctrl+K) opens a searchable list of every
  * navigation tab + frequent action (Save / Validate / Run / Toggle theme /
- * Sign out / Docs availability). Mirrors Linear / Raycast / Cursor's palette UX.
+ * Sign out / configured Docs capability). Mirrors Linear / Raycast / Cursor's palette UX.
  *
  * Used by `App.tsx` (mounted in the `overlay` slot, controlled by
  * `paletteOpen` state). The topbar ⌘K button calls `onOpen()` to surface
@@ -41,9 +41,16 @@ import {
 import type { ActiveTab } from '../types'
 import { useT } from '../i18n'
 import { applyTheme, type ThemePreference } from '../theme'
+import { openDocsUrl, parseDocsUrl } from '../docs-link'
+import { rankPaletteMatches } from '../command-palette-search'
 
 const STORAGE_KEY = 'janusly:palette:recent'
 const RECENT_LIMIT = 4
+const COMMAND_LISTBOX_ID = 'janusly-command-palette-options'
+
+function commandOptionId(index: number): string {
+  return `janusly-command-palette-option-${index}`
+}
 
 type CommandId = string
 
@@ -56,7 +63,7 @@ type Command = {
   group: 'nav' | 'action' | 'system'
   shortcut?: string
   /** Returns `true` to keep the palette open after execution. */
-  run: (ctx: CommandContext) => boolean | void
+  run: (ctx: CommandContext) => boolean | undefined
 }
 
 type CommandContext = {
@@ -66,7 +73,6 @@ type CommandContext = {
   onStart: () => void
   onNew: () => void
   onSignOut: () => void
-  onDocsUnavailable: () => void
   onInsertSnippet: () => void
 }
 
@@ -76,6 +82,8 @@ export type PaletteRecipe = { id: string; name: string }
 export type CommandPaletteProps = CommandContext & {
   open: boolean
   onClose: () => void
+  /** Validated build-time docs capability; absent means no Docs command. */
+  docsUrl?: string | null
   /** Dynamic results: saved workflows the operator can open directly. */
   workflows?: PaletteWorkflow[]
   /** Dynamic results: recipes the operator can browse. */
@@ -105,7 +113,7 @@ function persistRecent(ids: CommandId[]): void {
   }
 }
 
-function buildCommands(): Command[] {
+function buildCommands(docsUrl: string | null | undefined): Command[] {
   const navCommands: Command[] = [
     { id: 'go.home', labelKey: 'palette.nav.home', icon: <Home size={14} />, group: 'nav', shortcut: '⌘1', run: ({ openTab }) => { openTab('home') } },
     { id: 'go.copilot', labelKey: 'palette.nav.copilot', icon: <Sparkles size={14} />, group: 'nav', shortcut: '⌘2', run: ({ openTab }) => { openTab('copilot') } },
@@ -146,14 +154,13 @@ function buildCommands(): Command[] {
       group: 'system',
       run: () => { applyTheme('dark' as ThemePreference); try { localStorage.setItem('janusly:theme', 'dark') } catch {} },
     },
-    {
+    ...(docsUrl ? [{
       id: 'system.docs',
       labelKey: 'palette.system.docs',
-      hintKey: 'palette.system.docsUnavailable',
       icon: <Search size={14} />,
-      group: 'system',
-      run: ({ onDocsUnavailable }) => { onDocsUnavailable() },
-    },
+      group: 'system' as const,
+      run: () => { openDocsUrl(docsUrl) },
+    }] : []),
     { id: 'system.signOut', labelKey: 'palette.system.signOut', icon: <LogOut size={14} />, group: 'system', run: ({ onSignOut }) => { onSignOut() } },
   ]
 
@@ -176,14 +183,15 @@ export function CommandPalette({
   onStart,
   onNew,
   onSignOut,
-  onDocsUnavailable,
   onInsertSnippet,
+  docsUrl = null,
   workflows = [],
   recipes = [],
   onOpenWorkflow,
   onOpenRecipe,
 }: CommandPaletteProps) {
   const { t } = useT()
+  const safeDocsUrl = parseDocsUrl(docsUrl)
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
   const [recent, setRecent] = useState<CommandId[]>(() => readRecent())
@@ -194,7 +202,7 @@ export function CommandPalette({
   useDialogFocusTrap(dialogRef, { active: open })
 
   const commands = useMemo<Command[]>(() => {
-    const base = buildCommands()
+    const base = buildCommands(safeDocsUrl)
     const dynamicCommands: Command[] = [
       ...workflows.slice(0, 20).map<Command>((wf) => ({
         id: `workflow.${wf.id}`,
@@ -219,7 +227,7 @@ export function CommandPalette({
     // rather than a translation key. We attach the name via a closure on
     // a separate map below.
     return [...base, ...dynamicCommands]
-  }, [workflows, recipes, onOpenWorkflow, onOpenRecipe])
+  }, [safeDocsUrl, workflows, recipes, onOpenWorkflow, onOpenRecipe])
 
   // Map of dynamic display labels keyed by command id — keeps the
   // translation table untouched while letting the palette show real names.
@@ -253,33 +261,35 @@ export function CommandPalette({
     return () => document.removeEventListener('keydown', handler)
   }, [open, onClose])
 
-  const labelFor = (cmd: Command): string => dynamicLabels.get(cmd.id) ?? (t(cmd.labelKey as never) as string)
+  const labelFor = (cmd: Command): string => dynamicLabels.get(cmd.id) ?? (t(cmd.labelKey as never))
 
   const ordered = useMemo<Command[]>(() => {
-    const normalised = query.trim().toLowerCase()
     const byId = new Map(commands.map(cmd => [cmd.id, cmd]))
     const recentEntries = recent.map(id => byId.get(id)).filter((cmd): cmd is Command => Boolean(cmd))
     const rest = commands.filter(cmd => !recent.includes(cmd.id))
     const all = [...recentEntries, ...rest]
-    if (!normalised) return all
-    return all.filter(cmd => {
-      const label = labelFor(cmd).toLowerCase()
-      return label.includes(normalised) || cmd.id.toLowerCase().includes(normalised)
-    })
+    return rankPaletteMatches(
+      query,
+      all.map((cmd) => ({ item: cmd, label: labelFor(cmd), keywords: [cmd.id] })),
+    )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [commands, recent, query, t, dynamicLabels])
+
+  useEffect(() => {
+    setActiveIndex(0)
+  }, [query])
 
   useEffect(() => {
     setActiveIndex(idx => Math.min(idx, Math.max(0, ordered.length - 1)))
   }, [ordered.length])
 
   const runCommand = (cmd: Command) => {
-    const ctx: CommandContext = { openTab, onValidate, onSave, onStart, onNew, onSignOut, onDocsUnavailable, onInsertSnippet }
+    const ctx: CommandContext = { openTab, onValidate, onSave, onStart, onNew, onSignOut, onInsertSnippet }
     const keepOpen = cmd.run(ctx)
     const nextRecent = [cmd.id, ...recent.filter(id => id !== cmd.id)].slice(0, RECENT_LIMIT)
     setRecent(nextRecent)
     persistRecent(nextRecent)
-    if (!keepOpen) onClose()
+    if (keepOpen !== true) onClose()
   }
 
   if (!open) return null
@@ -302,6 +312,7 @@ export function CommandPalette({
           <input
             ref={inputRef}
             type="text"
+            role="combobox"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => {
@@ -319,11 +330,21 @@ export function CommandPalette({
             }}
             placeholder={t('palette.placeholder')}
             aria-label={t('palette.placeholder')}
+            aria-autocomplete="list"
+            aria-controls={COMMAND_LISTBOX_ID}
+            aria-expanded="true"
+            aria-activedescendant={ordered[activeIndex] ? commandOptionId(activeIndex) : undefined}
           />
           <kbd>{t('palette.key.escape')}</kbd>
         </div>
 
-        <ul ref={listRef} className="we-cmdk-list" role="listbox" aria-label={t('palette.title')}>
+        <ul
+          ref={listRef}
+          id={COMMAND_LISTBOX_ID}
+          className="we-cmdk-list"
+          role="listbox"
+          aria-label={t('palette.title')}
+        >
           {ordered.length === 0 && (
             <li className="we-cmdk-empty" role="presentation">{t('palette.empty', { query })}</li>
           )}
@@ -332,9 +353,10 @@ export function CommandPalette({
             return (
               <li
                 key={cmd.id}
+                id={commandOptionId(idx)}
                 role="option"
                 aria-selected={idx === activeIndex}
-                title={cmd.hintKey ? (t(cmd.hintKey as never) as string) : labelFor(cmd)}
+                title={cmd.hintKey ? (t(cmd.hintKey as never)) : labelFor(cmd)}
                 className={idx === activeIndex ? 'we-cmdk-row we-cmdk-row--active' : 'we-cmdk-row'}
                 onMouseEnter={() => setActiveIndex(idx)}
                 onMouseDown={(event) => { event.preventDefault(); runCommand(cmd) }}

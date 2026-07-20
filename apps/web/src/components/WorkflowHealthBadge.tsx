@@ -152,10 +152,10 @@ export function WorkflowHealthBadge({ workflowId, showLabel = true }: WorkflowHe
   }
   const severity = statusToSeverity[result.status]
   const summaryLabel = showLabel ? t('badges.health.label', { score: result.score }) : `${result.score}`
-  const localisedStatus = t(STATUS_LABEL_KEYS[result.status] as never) as string
+  const localisedStatus = t(STATUS_LABEL_KEYS[result.status] as never)
 
   const sloBreaching = result.slo?.breaches.anyBreach === true
-  const sloLabel = t('badges.slo.breachPill') as string
+  const sloLabel = t('badges.slo.breachPill')
 
   return (
     <div className={`we-readiness-badge we-readiness-badge--${severity}`}>
@@ -172,7 +172,7 @@ export function WorkflowHealthBadge({ workflowId, showLabel = true }: WorkflowHe
       {sloBreaching && (
         <span
           className="we-readiness-badge__slo-pill"
-          aria-label={t('badges.slo.breachAria') as string}
+          aria-label={t('badges.slo.breachAria')}
           title={sloLabel}
         >
           {sloLabel}
@@ -185,7 +185,7 @@ export function WorkflowHealthBadge({ workflowId, showLabel = true }: WorkflowHe
             // Same severity bands as the rollup but per category — green
             // (pass) for ≥80, amber (warn) for ≥60, red (fail) below.
             const cellSeverity: 'pass' | 'warn' | 'fail' = entry.score >= 80 ? 'pass' : entry.score >= 60 ? 'warn' : 'fail'
-            const categoryLabel = t(CATEGORY_LABEL_KEYS[category] as never) as string
+            const categoryLabel = t(CATEGORY_LABEL_KEYS[category] as never)
             return (
               <li key={category} className={`we-readiness-issue we-readiness-issue--${cellSeverity}`}>
                 <strong className="we-readiness-issue__code">{t('badges.health.cellLabel', { category: categoryLabel, score: entry.score })}</strong>
@@ -198,14 +198,14 @@ export function WorkflowHealthBadge({ workflowId, showLabel = true }: WorkflowHe
             return (
               <li className={`we-readiness-issue we-readiness-issue--${sloBreaching ? 'fail' : 'pass'}`}>
                 <strong className="we-readiness-issue__code">
-                  {t('badges.slo.sectionTitle', { windowDays: sloBlock.slo.windowDays }) as string}
+                  {t('badges.slo.sectionTitle', { windowDays: sloBlock.slo.windowDays })}
                 </strong>
                 <ul className="we-readiness-badge__slo-list">
                   {(Object.keys(SLO_METRIC_LABEL_KEYS) as SloMetric[]).map((metric) => {
                     const target = sloBlock.slo[metric]
                     if (target === null) return null
                     const breaching = sloBlock.breaches[metric]
-                    const metricLabel = t(SLO_METRIC_LABEL_KEYS[metric] as never) as string
+                    const metricLabel = t(SLO_METRIC_LABEL_KEYS[metric] as never)
                     return (
                       <li
                         key={metric}
@@ -214,8 +214,8 @@ export function WorkflowHealthBadge({ workflowId, showLabel = true }: WorkflowHe
                         <span>{metricLabel}</span>
                         <span>
                           {breaching
-                            ? (t('badges.slo.metricBreach', { target }) as string)
-                            : (t('badges.slo.metricPass', { target }) as string)}
+                            ? (t('badges.slo.metricBreach', { target }))
+                            : (t('badges.slo.metricPass', { target }))}
                         </span>
                       </li>
                     )

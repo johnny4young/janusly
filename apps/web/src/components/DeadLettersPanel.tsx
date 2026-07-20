@@ -6,13 +6,15 @@
  * Used by `RightPanel.tsx` (`runs` tab → Operations card).
  */
 
-import { lazy, Suspense, useEffect, useState } from 'react'
-import { CircleCheck, Download, FlaskConical, Inbox, Sparkles, X } from 'lucide-react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { CircleCheck, Copy, Download, FlaskConical, GitCompare, Inbox, RefreshCw, Sparkles, X } from 'lucide-react'
 
 import { downtimeSeverity, humanizeAge } from './recovery-center/helpers'
 import { api, downloadFromApi } from '../api'
 import { formatStatusLabel } from '../constants'
 import { useWorkflowStore } from '../store'
+import { WorkflowDiffView } from './WorkflowDiffView'
+import type { WorkflowDefinition } from '../types'
 import { EmptyState } from './EmptyState'
 import { LoadingSkeleton } from './LoadingSkeleton'
 import { FailureClustersCard } from './FailureClustersCard'
@@ -24,6 +26,9 @@ import { RecoveryItemBadge } from './RecoveryItemBadge'
 import { RecoveryItemDrawer } from './RecoveryItemDrawer'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { useVirtualList } from '../hooks/useVirtualList'
+import { isKeyboardShortcutTypingTarget } from '../keyboard-shortcut-target'
+import { copyText } from '../clipboard'
+import { buildRecoveryErrorSummary } from '../recovery-error-summary'
 import {
   SEVERITIES,
   SORT_KEYS,
@@ -35,17 +40,18 @@ import {
   toStatusFilter,
   useRecoveryQueueFilters,
 } from '../hooks/useRecoveryQueueFilters'
+import {
+  consumeRecoveryQueueFocus,
+  parseRecoveryQueueFocusEvent,
+  RECOVERY_QUEUE_FOCUS_EVENT,
+  type RecoveryQueueFocusRequest,
+} from './recovery-queue-focus-bus'
+import { requestRecoveryAllClearIfQueueEmpty } from './recovery-all-clear-coordinator'
 
-/** Row PITCH in CSS pixels for the virtualized DLQ list — the full
- *  distance from one row's top to the next row's top in the flex
- *  flow. That's the visual height of `.we-list-row` (~48px) PLUS the
- *  `gap: 6px` `.we-list` applies between flex children. Using row
- *  pitch (54px) instead of just the row height keeps the windowing
- *  math aligned with the actual scroll surface — otherwise the
- *  spacer undercounts by `(items.length - 1) × 6px` and the operator
- *  can't reach the bottom of long lists. Tune here if either value
- *  changes (row chrome height or `.we-list`'s gap). */
-const DLQ_ROW_HEIGHT = 54
+/** Fixed DLQ row height (54px) plus the 6px `.we-list` gap. The matching
+ *  `.we-dlq-row` rule prevents metadata wrapping so virtual offsets stay
+ *  exact even when the queue is long. */
+const DLQ_ROW_PITCH = 60
 
 /** The recovery-item overlay the API folds inline onto each recovery-queue
  *  row, so the panel renders the badge/drawer from one cap-correct fetch. */
@@ -63,6 +69,21 @@ export type DeadLetterRecovery = {
   metadataWorkflowId?: string | null
   occurrenceCount?: number
   lastOccurredAt?: string
+}
+
+/** Change-correlation envelope from the `/dlq?id=` detail read: the
+ *  failing run executed `version`, saved within the suspect window before the
+ *  failure; both DAG snapshots ride along so the diff renders with no extra
+ *  fetch. Copy stays temporal ("started after ... was saved"), never causal. */
+export type SuspectVersionInfo = {
+  workflowId: string
+  version: number
+  versionId: string
+  savedAt: string
+  previousVersion: number
+  previousVersionId: string
+  dagJson: WorkflowDefinition
+  previousDagJson: WorkflowDefinition
 }
 
 /** Web-side `dead_letters` row shape (matches the API's response). `recovery`
@@ -89,6 +110,8 @@ export type DeadLetter = {
   createdAt?: string
   replayedAt?: string
   recovery?: DeadLetterRecovery | null
+  /** Suspect-version correlation — detail reads only; null when no recent-save correlation. */
+  suspectVersion?: SuspectVersionInfo | null
 }
 
 type BulkResolveResult = {
@@ -126,8 +149,20 @@ const BULK_ERROR_PREVIEW = 6
 
 type DeadLettersPanelProps = {
   onRefresh: () => void | Promise<void>
-  onReplay: (id: string) => void
-  onResolve: (id: string) => void
+  onReplay: (id: string, createdAtIso?: string) => boolean | Promise<boolean> | undefined
+  onResolve: (id: string) => boolean | Promise<boolean> | undefined
+}
+
+type PendingTriageFocus = {
+  actionId: string
+  neighborIds: string[]
+  fallbackIndex: number
+  queueSignature: string
+  settled: boolean
+}
+
+function triageQueueSignature(items: DeadLetter[]): string {
+  return items.map((item) => `${item.id}:${item.status}`).join('|')
 }
 
 /** Render the DLQ list with status filter, replay, and resolve controls. */
@@ -159,7 +194,20 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     loadingMore,
     counts,
   } = useRecoveryQueueFilters()
+  const queueSectionRef = useRef<HTMLElement | null>(null)
+  const queueRowRefs = useRef<Map<string, HTMLLIElement>>(new Map())
+  const [queueFocusRequest, setQueueFocusRequest] = useState<RecoveryQueueFocusRequest | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // An id someone explicitly asked for (alert deep link / queue CTA), as
+  // opposed to one the operator clicked. Kept apart from `selectedId` because
+  // the two get different treatment when the row isn't on the loaded page: a
+  // request is honoured off-list, a click can't be off-list by construction.
+  const [requestedId, setRequestedId] = useState<string | null>(null)
+  const [offListSelected, setOffListSelected] = useState<DeadLetter | null>(null)
+  const [requestedNotFound, setRequestedNotFound] = useState(false)
+  const [pendingKeyboardFocusId, setPendingKeyboardFocusId] = useState<string | null>(null)
+  const [pendingTriageFocus, setPendingTriageFocus] = useState<PendingTriageFocus | null>(null)
+  const [replayingIds, setReplayingIds] = useState<ReadonlySet<string>>(() => new Set())
   const [openRecoveryItemId, setOpenRecoveryItemId] = useState<string | null>(null)
   const openRecoveryItem = openRecoveryItemId
     ? recoveryItems.find((it) => it.id === openRecoveryItemId) ?? null
@@ -188,10 +236,11 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
 
   // Select-all operates over the loaded (filtered) rows, so appended
   // "Load more" pages are included; the virtual window is only a render detail.
-  const loadedIds = filtered.map((item) => item.id)
+  const loadedIds = filtered.filter((item) => !replayingIds.has(item.id)).map((item) => item.id)
   const allLoadedSelected = loadedIds.length > 0 && loadedIds.every((id) => selectedIds.has(id))
 
   const toggleSelect = (id: string) => {
+    if (replayingIds.has(id)) return
     setSelectedIds((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
@@ -206,6 +255,14 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     )
   }
 
+  useEffect(() => {
+    if (replayingIds.size === 0) return
+    setSelectedIds((current) => {
+      const next = new Set([...current].filter((id) => !replayingIds.has(id)))
+      return next.size === current.size ? current : next
+    })
+  }, [replayingIds])
+
   const exitSelection = () => {
     setSelectionMode(false)
     setSelectedIds(new Set())
@@ -218,14 +275,15 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   // 200 partial-success envelope, so inspect it before deciding whether to
   // clear or keep the remaining failed selections.
   const bulkResolve = async () => {
-    const ids = [...selectedIds]
+    const ids = [...selectedIds].filter((id) => !replayingIds.has(id))
     if (ids.length === 0) return
     setBulkErrors([])
     try {
       const result = await api('/dlq/bulk-resolve', { method: 'POST', body: JSON.stringify({ deadLetterIds: ids }) })
-      if (!isBulkResolveResult(result)) throw new Error(t('dlq.bulkResolveFailed') as string)
+      if (!isBulkResolveResult(result)) throw new Error(t('dlq.bulkResolveFailed'))
 
       if (result.resolved > 0) {
+        await requestRecoveryAllClearIfQueueEmpty()
         bumpPlatformVersion()
         refreshQueue()
         void onRefresh()
@@ -235,14 +293,14 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
         const failedIds = result.errors.map((entry) => entry.deadLetterId).filter(Boolean)
         setSelectedIds(new Set(failedIds))
         setBulkErrors(result.errors)
-        addToast(t('dlq.bulkResolvePartial', { resolved: result.resolved, failed: result.failed }) as string, 'error')
+        addToast(t('dlq.bulkResolvePartial', { resolved: result.resolved, failed: result.failed }), 'error')
         return
       }
 
-      addToast(t('dlq.bulkResolveSuccess', { count: result.resolved }) as string, 'success')
+      addToast(t('dlq.bulkResolveSuccess', { count: result.resolved }), 'success')
       exitSelection()
     } catch (error) {
-      addToast(tApiError(error) || (t('dlq.bulkResolveFailed') as string), 'error')
+      addToast(tApiError(error) || (t('dlq.bulkResolveFailed')), 'error')
     }
   }
 
@@ -253,12 +311,12 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   // already-replayed/resolved row in the selection comes back in the failed set.
   const bulkReplay = async () => {
     setConfirmBulkReplay(false)
-    const ids = [...selectedIds]
+    const ids = [...selectedIds].filter((id) => !replayingIds.has(id))
     if (ids.length === 0) return
     setBulkErrors([])
     try {
       const result = await api('/dlq/bulk-replay', { method: 'POST', body: JSON.stringify({ deadLetterIds: ids }) })
-      if (!isBulkReplayResult(result)) throw new Error(t('dlq.bulkReplayFailed') as string)
+      if (!isBulkReplayResult(result)) throw new Error(t('dlq.bulkReplayFailed'))
 
       if (result.replayed > 0) {
         bumpPlatformVersion()
@@ -270,14 +328,14 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
         const failedIds = result.errors.map((entry) => entry.deadLetterId).filter(Boolean)
         setSelectedIds(new Set(failedIds))
         setBulkErrors(result.errors)
-        addToast(t('dlq.bulkReplayPartial', { replayed: result.replayed, failed: result.failed }) as string, 'error')
+        addToast(t('dlq.bulkReplayPartial', { replayed: result.replayed, failed: result.failed }), 'error')
         return
       }
 
-      addToast(t('dlq.bulkReplaySuccess', { count: result.replayed }) as string, 'success')
+      addToast(t('dlq.bulkReplaySuccess', { count: result.replayed }), 'success')
       exitSelection()
     } catch (error) {
-      addToast(tApiError(error) || (t('dlq.bulkReplayFailed') as string), 'error')
+      addToast(tApiError(error) || (t('dlq.bulkReplayFailed')), 'error')
     }
   }
 
@@ -286,13 +344,53 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   const hasOpenEntry = counts.open > 0
   const cardSeverity: 'warning' | undefined = hasOpenEntry ? 'warning' : undefined
 
-  const selected = filtered.find(item => item.id === selectedId) ?? filtered[0] ?? null
+  // An id the operator ASKED for (a deep link from an alert, a queue CTA) must
+  // never silently resolve to a different failure. The list is one filtered,
+  // paginated page: an alert can point at a row that is resolved, older than
+  // the page, or excluded by the filters the operator left persisted. Falling
+  // back to `filtered[0]` there lands them on an unrelated incident with no
+  // sign anything went wrong — worse than showing nothing. So a requested id
+  // that is off-list is fetched on its own below, and only an UNREQUESTED
+  // selection defaults to the first row.
+  const listSelected = filtered.find(item => item.id === selectedId) ?? null
+  // Off-list is a fact about the REQUESTED id versus the loaded page — not
+  // about `selectedId`, which lags a render behind the request and would send
+  // an in-list request down the by-id fetch for nothing.
+  const requestedOffList = Boolean(requestedId) && !filtered.some(item => item.id === requestedId)
+  const selected = listSelected ?? (requestedId ? offListSelected : filtered[0] ?? null) ?? null
+
+  // Resolve a requested id the current page doesn't contain. `/dlq?id=` is
+  // org-scoped and unconstrained by filters or pagination, so it can originate
+  // a selection the list never had. A 404 is surfaced, not swallowed: a stale
+  // alert link must say "this failure is gone", not quietly show another one.
+  useEffect(() => {
+    if (!requestedOffList || !requestedId) {
+      setOffListSelected(null)
+      setRequestedNotFound(false)
+      return
+    }
+    let cancelled = false
+    setRequestedNotFound(false)
+    api(`/dlq?id=${encodeURIComponent(requestedId)}`)
+      .then((row) => {
+        if (!cancelled) setOffListSelected(row as DeadLetter)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setOffListSelected(null)
+          setRequestedNotFound(true)
+        }
+      })
+    return () => { cancelled = true }
+  }, [requestedOffList, requestedId])
 
   // List rows are summary projections (no workflowJson / nodeJson). Fetch the
   // full `/dlq?id=` detail for the selected row so the detail blocks and the
   // Recovery dialog get the real snapshots; the summary row is the graceful
   // fallback while loading or on fetch failure.
   const [selectedDetail, setSelectedDetail] = useState<DeadLetter | null>(null)
+  // Suspect-version diff visibility — per selection, collapsed by default.
+  const [showSuspectDiff, setShowSuspectDiff] = useState(false)
   const selectedRowId = selected?.id ?? null
   useEffect(() => {
     if (!selectedRowId) {
@@ -301,6 +399,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     }
     let cancelled = false
     setSelectedDetail(null)
+    setShowSuspectDiff(false)
     api(`/dlq?id=${encodeURIComponent(selectedRowId)}`)
       .then((row) => {
         if (!cancelled) setSelectedDetail(row as DeadLetter)
@@ -328,9 +427,10 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     visibleItems: visibleDeadLetters,
     totalHeight: virtualTotalHeight,
     startOffset: virtualStartOffset,
+    scrollToIndex: scrollToQueueIndex,
   } = useVirtualList({
     items: filtered,
-    rowHeight: DLQ_ROW_HEIGHT,
+    rowHeight: DLQ_ROW_PITCH,
     // Reset scroll on filter swap, NOT on every refetch — the
     // `platformVersion`-driven refetch produces a new `filtered`
     // reference even when the content is identical, and resetting
@@ -339,15 +439,234 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     resetScrollKey: `${status}|${ownerScope}|${severityFilter}|${sortKey}`,
   })
 
+  const focusQueueRow = useCallback((index: number) => {
+    const next = filtered[index]
+    if (!next) return
+    setSelectedId(next.id)
+    const row = queueRowRefs.current.get(next.id)
+    if (row) {
+      row.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+      row.focus({ preventScroll: true })
+      return
+    }
+    scrollToQueueIndex(index, 'center')
+    setPendingKeyboardFocusId(next.id)
+  }, [filtered, scrollToQueueIndex])
+
+  useEffect(() => {
+    if (!pendingKeyboardFocusId) return
+    const row = queueRowRefs.current.get(pendingKeyboardFocusId)
+    if (!row) return
+    row.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+    row.focus({ preventScroll: true })
+    setPendingKeyboardFocusId(null)
+  }, [pendingKeyboardFocusId, visibleDeadLetters])
+
+  const runSelectedTriageAction = async (
+    action: (id: string) => boolean | Promise<boolean> | undefined,
+  ) => {
+    if (!selected) return
+    const actionIndex = filtered.findIndex((item) => item.id === selected.id)
+    const neighborIds = [filtered[actionIndex + 1]?.id, filtered[actionIndex - 1]?.id]
+      .filter((id): id is string => Boolean(id))
+    const request: PendingTriageFocus = {
+      actionId: selected.id,
+      neighborIds,
+      fallbackIndex: Math.max(0, actionIndex),
+      queueSignature: triageQueueSignature(filtered),
+      settled: false,
+    }
+    setPendingTriageFocus(request)
+    try {
+      const succeeded = await action(selected.id)
+      setPendingTriageFocus((current) => (
+        current?.actionId === request.actionId
+          ? succeeded === false ? null : { ...current, settled: true }
+          : current
+      ))
+    } catch {
+      setPendingTriageFocus((current) => current?.actionId === request.actionId ? null : current)
+    }
+  }
+
+  const replaySelected = async () => {
+    if (!selected || selected.status === 'replayed' || replayingIds.has(selected.id)) return
+    const replayingId = selected.id
+    setReplayingIds((current) => new Set(current).add(replayingId))
+    try {
+      await runSelectedTriageAction((id) => onReplay(id, selected.createdAt))
+    } finally {
+      setReplayingIds((current) => {
+        const next = new Set(current)
+        next.delete(replayingId)
+        return next
+      })
+    }
+  }
+
+  const resolveSelected = async () => {
+    if (!selected || selected.status === 'resolved' || replayingIds.has(selected.id)) return
+    await runSelectedTriageAction(onResolve)
+  }
+
+  useEffect(() => {
+    if (!pendingTriageFocus?.settled || recoveryFilterLoading) return
+    if (triageQueueSignature(filtered) === pendingTriageFocus.queueSignature) return
+
+    const actionIndex = filtered.findIndex((item) => item.id === pendingTriageFocus.actionId)
+    if (actionIndex >= 0) {
+      focusQueueRow(actionIndex)
+      setPendingTriageFocus(null)
+      return
+    }
+
+    const neighborId = pendingTriageFocus.neighborIds.find((id) => filtered.some((item) => item.id === id))
+    const neighborIndex = neighborId ? filtered.findIndex((item) => item.id === neighborId) : -1
+    if (neighborIndex >= 0) {
+      focusQueueRow(neighborIndex)
+    } else if (filtered.length > 0) {
+      focusQueueRow(Math.min(pendingTriageFocus.fallbackIndex, filtered.length - 1))
+    } else {
+      queueSectionRef.current?.focus({ preventScroll: true })
+    }
+    setPendingTriageFocus(null)
+  }, [filtered, focusQueueRow, pendingTriageFocus, recoveryFilterLoading])
+
+  useEffect(() => {
+    if (!pendingTriageFocus?.settled) return
+    const actionId = pendingTriageFocus.actionId
+    const timeout = window.setTimeout(() => {
+      setPendingTriageFocus((current) => current?.actionId === actionId ? null : current)
+    }, 5_000)
+    return () => window.clearTimeout(timeout)
+  }, [pendingTriageFocus?.actionId, pendingTriageFocus?.settled])
+
+  const handleQueueKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.repeat || isKeyboardShortcutTypingTarget(event.target)) return
+    const key = event.key.toLowerCase()
+    const hasCommandModifier = event.metaKey || event.ctrlKey
+
+    if (!hasCommandModifier && !event.altKey && !event.shiftKey && (key === 'j' || key === 'k')) {
+      const currentIndex = selected ? filtered.findIndex((item) => item.id === selected.id) : -1
+      const nextIndex = key === 'j'
+        ? Math.min(filtered.length - 1, Math.max(0, currentIndex + 1))
+        : Math.max(0, currentIndex <= 0 ? 0 : currentIndex - 1)
+      if (filtered[nextIndex]) {
+        event.preventDefault()
+        event.stopPropagation()
+        focusQueueRow(nextIndex)
+      }
+      return
+    }
+
+    if (selectionMode) return
+    if (!hasCommandModifier && !event.altKey && !event.shiftKey && key === 'r') {
+      if (selected && selected.status !== 'replayed' && !replayingIds.has(selected.id)) {
+        event.preventDefault()
+        event.stopPropagation()
+        void replaySelected()
+      }
+      return
+    }
+
+    if (hasCommandModifier && !event.altKey && !event.shiftKey && event.key === 'Enter') {
+      if (selected && selected.status !== 'resolved' && !replayingIds.has(selected.id)) {
+        event.preventDefault()
+        event.stopPropagation()
+        void resolveSelected()
+      }
+    }
+  }
+
+  const copySelectedError = async () => {
+    const item = selectedFull ?? selected
+    if (!item) return
+    let copied = false
+    try {
+      copied = await copyText(buildRecoveryErrorSummary(item, {
+        workflow: t('dlq.copy.unknownWorkflow'),
+        nodeType: t('dlq.copy.unknownNodeType'),
+        error: t('dlq.copy.unknownError'),
+        timestamp: t('dlq.copy.unknownTimestamp'),
+      }))
+    } catch {
+      // A browser implementation can still throw outside the guarded APIs.
+    }
+    addToast(
+      copied ? (t('dlq.copy.success')) : (t('dlq.copy.failed')),
+      copied ? 'success' : 'error',
+    )
+  }
+
+  // A queue CTA may fire before this panel mounts or while it is already open.
+  // Adopt both paths, then wait for the server-filtered first page before
+  // scrolling/focusing. No extra fetch is introduced: the handoff consumes the
+  // same bounded page the panel already owns.
+  useEffect(() => {
+    const pendingRequest = consumeRecoveryQueueFocus()
+    if (pendingRequest) setQueueFocusRequest(pendingRequest)
+
+    const onQueueFocus = (event: Event) => {
+      const request = consumeRecoveryQueueFocus() ?? parseRecoveryQueueFocusEvent(event)
+      if (request) setQueueFocusRequest(request)
+    }
+    window.addEventListener(RECOVERY_QUEUE_FOCUS_EVENT, onQueueFocus)
+    return () => window.removeEventListener(RECOVERY_QUEUE_FOCUS_EVENT, onQueueFocus)
+  }, [])
+
+  useEffect(() => {
+    if (!queueFocusRequest || recoveryFilterLoading) return
+    const targetId = queueFocusRequest.deadLetterId
+    if (targetId) {
+      // Record the ASK before resolving it. If the row isn't on this page the
+      // off-list fetch takes over; without this the request would fall through
+      // to "focus the queue heading" and silently drop.
+      setRequestedId(targetId)
+      const targetIndex = filtered.findIndex((item) => item.id === targetId)
+      const targetRow = queueRowRefs.current.get(targetId)
+      if (!targetRow && targetIndex >= 0 && virtualContainerRef.current) {
+        scrollToQueueIndex(targetIndex, 'center')
+        return
+      }
+      if (targetRow) {
+        setSelectedId(targetId)
+        targetRow.scrollIntoView?.({ block: 'center', inline: 'nearest' })
+        targetRow.focus({ preventScroll: true })
+        setQueueFocusRequest(null)
+        return
+      }
+      // Off-list: the detail box renders it via the by-id fetch, so stop here
+      // rather than falling through to the generic queue-heading focus.
+      if (requestedOffList) {
+        setQueueFocusRequest(null)
+        return
+      }
+    }
+
+    const queue = queueSectionRef.current
+    queue?.scrollIntoView?.({ block: 'start', inline: 'nearest' })
+    queue?.focus({ preventScroll: true })
+    setQueueFocusRequest(null)
+  }, [filtered, queueFocusRequest, recoveryFilterLoading, scrollToQueueIndex, visibleDeadLetters])
+
   return (
     <>
       <FailureClustersCard />
       <AutoHealingPendingCard />
-      <section className="panel-card" data-severity={cardSeverity}>
+      <section
+        ref={queueSectionRef}
+        className="we-card"
+        data-severity={cardSeverity}
+        data-testid="recovery-queue"
+        tabIndex={-1}
+        aria-labelledby="recovery-queue-heading"
+        aria-keyshortcuts="J K R Meta+Enter Control+Enter"
+        onKeyDown={handleQueueKeyDown}
+      >
       <div className="split-row">
         <div>
           <div className="section-kicker">{t('dlq.kicker')}</div>
-          <strong>{t('dlq.queue')}</strong>
+          <strong id="recovery-queue-heading">{t('dlq.queue')}</strong>
         </div>
         <div className="split-row">
           <button
@@ -374,12 +693,12 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
 
       {dayFilter && (
         <div className="we-dlq-day-chip" data-testid="dlq-day-filter-chip">
-          <span>{t('dlq.dayFilter.label', { day: dayFilter }) as string}</span>
+          <span>{t('dlq.dayFilter.label', { day: dayFilter })}</span>
           <button
             type="button"
             className="we-dlq-day-chip__clear"
             onClick={clearDayFilter}
-            aria-label={t('dlq.dayFilter.clear') as string}
+            aria-label={t('dlq.dayFilter.clear')}
             data-testid="dlq-day-filter-clear"
           >
             <X size={12} aria-hidden="true" />
@@ -394,17 +713,17 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
         className="text-field"
         value={searchInput}
         onChange={event => setSearchInput(event.target.value)}
-        placeholder={t('dlq.search.placeholder') as string}
+        placeholder={t('dlq.search.placeholder')}
         data-testid="dlq-search"
       />
 
       <label className="field-label" htmlFor="dlq-filter">{t('dlq.show')}</label>
       <select id="dlq-filter" className="text-field" value={status} onChange={event => setStatus(toStatusFilter(event.target.value))}>
-        {statuses.map(item => <option key={item} value={item}>{t(STATUS_FILTER_KEYS[item] as never) as string}</option>)}
+        {statuses.map(item => <option key={item} value={item}>{t(STATUS_FILTER_KEYS[item] as never)}</option>)}
       </select>
 
       <div className="field-label">{t('dlq.owner.label')}</div>
-      <div className="we-seg" role="group" aria-label={t('dlq.owner.aria') as string}>
+      <div className="we-seg" role="group" aria-label={t('dlq.owner.aria')}>
         <button
           type="button"
           aria-pressed={ownerScope === 'all'}
@@ -433,7 +752,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
       >
         <option value="all">{t('dlq.severity.all')}</option>
         {SEVERITIES.map(sev => (
-          <option key={sev} value={sev}>{t(`recoveryItems.severity.${sev}` as never) as string}</option>
+          <option key={sev} value={sev}>{t(`recoveryItems.severity.${sev}` as never)}</option>
         ))}
       </select>
 
@@ -446,7 +765,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
         data-testid="dlq-sort"
       >
         {SORT_KEYS.map(key => (
-          <option key={key} value={key}>{t(SORT_KEY_LABELS[key] as never) as string}</option>
+          <option key={key} value={key}>{t(SORT_KEY_LABELS[key] as never)}</option>
         ))}
       </select>
 
@@ -544,7 +863,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
 
       <div className="panel-list">
         {recoveryFilterLoading && filtered.length === 0 && (
-          <LoadingSkeleton rows={4} label={t('common.loading') as string} />
+          <LoadingSkeleton rows={4} label={t('common.loading')} />
         )}
         {filtered.length === 0 && !recoveryFilterLoading && (
           <EmptyState
@@ -557,7 +876,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
                   : ownerScope === 'mine'
                     ? 'emptyState.dlq.mine.kicker'
                     : 'emptyState.dlq.kicker',
-            ) as string}
+            )}
             body={t(
               searchInput.trim() !== ''
                 ? 'emptyState.dlq.search.body'
@@ -566,7 +885,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
                   : ownerScope === 'mine'
                     ? 'emptyState.dlq.mine.body'
                     : 'emptyState.dlq.body',
-            ) as string}
+            )}
             testId={
               searchInput.trim() !== ''
                 ? 'dlq-empty-search'
@@ -580,52 +899,85 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
         )}
         {filtered.length > 0 && (
           <>
-          <div ref={virtualContainerRef} className="we-virtual-list" data-testid="dlq-virtual-list">
+          <div ref={virtualContainerRef} className="we-virtual-list we-dlq-virtual-list" data-testid="dlq-virtual-list">
             <div style={{ height: virtualTotalHeight, position: 'relative' }}>
-              <ul className="we-list" style={{ transform: `translateY(${virtualStartOffset}px)` }}>
-                {visibleDeadLetters.map(({ item }) => {
+              <ul
+                className="we-list"
+                style={{ transform: `translateY(${virtualStartOffset}px)` }}
+                role="grid"
+                aria-labelledby="recovery-queue-heading"
+                aria-multiselectable={selectionMode}
+                aria-rowcount={filtered.length}
+              >
+                {visibleDeadLetters.map(({ item, index }) => {
                   const severity = rowSeverity(item.status)
+                  const isReplaying = replayingIds.has(item.id)
                   return (
-                    <li key={item.id}>
-                      <div
-                        className="we-list-row"
-                        data-clickable="true"
-                        data-severity={severity}
-                        data-testid={`dlq-row-${item.id}`}
-                        onClick={() => (selectionMode ? toggleSelect(item.id) : setSelectedId(item.id))}
-                      >
+                    <li
+                      key={item.id}
+                      ref={(node) => {
+                        if (node) queueRowRefs.current.set(item.id, node)
+                        else queueRowRefs.current.delete(item.id)
+                      }}
+                      className="we-list-row we-dlq-row"
+                      role="row"
+                      data-clickable="true"
+                      data-selection-mode={selectionMode ? 'true' : undefined}
+                      data-severity={severity}
+                      data-testid={`dlq-row-${item.id}`}
+                      data-dead-letter-id={item.id}
+                      data-selected={selected?.id === item.id ? 'true' : undefined}
+                      tabIndex={selected?.id === item.id ? 0 : -1}
+                      aria-label={`${item.nodeId} — ${isReplaying ? t('dlq.recovering') : formatStatusLabel(item.status)}`}
+                      aria-selected={selectionMode ? selectedIds.has(item.id) : selected?.id === item.id}
+                      aria-rowindex={index + 1}
+                      onFocus={() => setSelectedId(item.id)}
+                      onClick={() => (selectionMode ? toggleSelect(item.id) : setSelectedId(item.id))}
+                    >
                         {selectionMode && (
-                          <input
-                            type="checkbox"
-                            className="we-list-row__select"
-                            checked={selectedIds.has(item.id)}
-                            onClick={event => event.stopPropagation()}
-                            onChange={event => { event.stopPropagation(); toggleSelect(item.id) }}
-                            aria-label={t('dlq.selectRowAria', { node: item.nodeId }) as string}
-                            data-testid={`dlq-select-row-${item.id}`}
-                          />
+                          <span role="gridcell" className="we-dlq-row__selection-cell">
+                            <input
+                              type="checkbox"
+                              className="we-list-row__select"
+                              checked={selectedIds.has(item.id)}
+                              disabled={isReplaying}
+                              onClick={event => event.stopPropagation()}
+                              onChange={event => { event.stopPropagation(); toggleSelect(item.id) }}
+                              aria-label={t('dlq.selectRowAria', { node: item.nodeId })}
+                              data-testid={`dlq-select-row-${item.id}`}
+                            />
+                          </span>
                         )}
-                        <span className="we-list-row__avatar" aria-hidden="true"><Inbox size={14} /></span>
-                        <div className="we-list-row__body">
-                          <strong>{item.nodeId}</strong>
-                          <small>
-                            {t('dlq.runMeta', { runIdShort: item.runId.slice(0, 8), attempt: item.attempt })}
-                            {item.createdAt ? ` · ${new Date(item.createdAt).toLocaleString(getResolvedLocale())}` : ''}
-                          </small>
+                        <div className="we-dlq-row__identity" role="gridcell">
+                          <span className="we-list-row__avatar" aria-hidden="true"><Inbox size={14} /></span>
+                          <div className="we-list-row__body">
+                            <strong>{item.nodeId}</strong>
+                            <small>
+                              {t('dlq.runMeta', { runIdShort: item.runId.slice(0, 8), attempt: item.attempt })}
+                              {item.createdAt ? ` · ${new Date(item.createdAt).toLocaleString(getResolvedLocale())}` : ''}
+                            </small>
+                          </div>
                         </div>
-                        <div className="we-list-row__meta">
+                        <div className="we-list-row__meta" role="gridcell">
                           {item.status === 'open' && item.createdAt && (
                             <span
                               className="we-list-row__downtime"
                               data-severity={downtimeSeverity(item.createdAt, Date.now())}
-                              title={t('dlq.downtimeTitle') as string}
+                              title={t('dlq.downtimeTitle')}
                               data-testid={`dlq-downtime-${item.id}`}
                             >
                               {humanizeAge(item.createdAt, Date.now())}
                             </span>
                           )}
-                          <span className={`we-list-row__pill we-list-row__pill--${severity}`}>
-                            {formatStatusLabel(item.status)}
+                          <span
+                            className={`we-list-row__pill we-list-row__pill--${isReplaying ? 'cyan' : severity}`}
+                            data-testid={isReplaying ? `dlq-recovering-${item.id}` : undefined}
+                            role="status"
+                            aria-live="polite"
+                            aria-atomic="true"
+                          >
+                            {isReplaying && <RefreshCw size={11} className="we-spin" aria-hidden="true" />}
+                            {isReplaying ? t('dlq.recovering') : formatStatusLabel(item.status)}
                           </span>
                           <RecoveryItemBadge
                             item={recoveryByDeadLetterId.get(item.id) ?? null}
@@ -635,7 +987,6 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
                             }}
                           />
                         </div>
-                      </div>
                     </li>
                   )
                 })}
@@ -665,6 +1016,17 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
         )}
       </div>
 
+      {/* A link from an alert can outlive its failure (purged by retention, or
+          the id is simply wrong). Say so plainly: an empty detail box next to
+          an unrelated list would read as "nothing was selected", and the
+          operator would never learn their link pointed at a ghost. */}
+      {requestedNotFound && !selectionMode && (
+        <section className="detail-box" data-testid="dlq-requested-not-found">
+          <div className="section-kicker">{t('dlq.selected')}</div>
+          <p className="helper-text">{t('dlq.deepLinkNotFound')}</p>
+        </section>
+      )}
+
       {selected && !selectionMode && (
         <section className="detail-box">
           <div className="split-row">
@@ -672,7 +1034,9 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
               <div className="section-kicker">{t('dlq.selected')}</div>
               <strong>{selected.nodeId}</strong>
             </div>
-            <span className="status-pill" data-status={selected.status}>{formatStatusLabel(selected.status)}</span>
+            <span className="status-pill" data-status={replayingIds.has(selected.id) ? 'running' : selected.status}>
+              {replayingIds.has(selected.id) ? t('dlq.recovering') : formatStatusLabel(selected.status)}
+            </span>
           </div>
 
           <div className="split-row">
@@ -683,11 +1047,27 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
             >
               <Sparkles size={12} aria-hidden="true" /> {t('dlq.action.suggest')}
             </button>
-            <button className="small-command" disabled={selected.status === 'replayed'} onClick={() => onReplay(selected.id)}>
-              {t('dlq.action.retry')}
+            <button
+              className="small-command we-command-with-kbd"
+              disabled={selected.status === 'replayed' || replayingIds.has(selected.id)}
+              onClick={() => { void replaySelected() }}
+            >
+              <span>{t('dlq.action.retry')}</span><kbd aria-hidden="true">R</kbd>
             </button>
-            <button className="small-command" disabled={selected.status === 'resolved'} onClick={() => onResolve(selected.id)}>
-              {t('dlq.action.resolve')}
+            <button
+              className="small-command we-command-with-kbd"
+              disabled={selected.status === 'resolved' || replayingIds.has(selected.id)}
+              onClick={() => { void resolveSelected() }}
+            >
+              <span>{t('dlq.action.resolve')}</span><kbd aria-hidden="true">⌘/Ctrl ↵</kbd>
+            </button>
+            <button
+              type="button"
+              className="small-command"
+              onClick={() => { void copySelectedError() }}
+              data-testid="dlq-copy-error"
+            >
+              <Copy size={12} aria-hidden="true" /> {t('dlq.action.copyError')}
             </button>
             <button
               className="small-command"
@@ -703,19 +1083,49 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
                   await downloadFromApi(`/reports/run-explain?runId=${encodeURIComponent(selected.runId)}`)
                   addToast(t('dlq.exportSuccess'), 'success')
                 } catch (err) {
-                  addToast(tApiError(err) || (t('dlq.exportFailed') as string), 'error')
+                  addToast(tApiError(err) || (t('dlq.exportFailed')), 'error')
                 }
               }}
               data-testid="dlq-export-run-explain"
-              aria-label={t('dlq.action.exportAria', { runId: selected.runId }) as string}
+              aria-label={t('dlq.action.exportAria', { runId: selected.runId })}
             >
               <Download size={12} aria-hidden="true" /> {t('dlq.action.export')}
             </button>
           </div>
 
-          <DetailBlock title={t('dlq.detail.error') as string} value={(selectedFull ?? selected).errorJson} />
-          <DetailBlock title={t('dlq.detail.node') as string} value={(selectedFull ?? selected).nodeJson ?? null} />
-          <DetailBlock title={t('dlq.detail.workflow') as string} value={(selectedFull ?? selected).workflowJson ?? null} />
+          {selectedFull?.suspectVersion && (
+            <div className="we-suspect-version" data-testid="dlq-suspect-version">
+              <div className="split-row">
+                <span className="we-suspect-version__chip">
+                  <GitCompare size={12} aria-hidden="true" />
+                  {t('dlq.suspectVersion.chip', {
+                    version: selectedFull.suspectVersion.version,
+                    time: new Date(selectedFull.suspectVersion.savedAt).toLocaleString(getResolvedLocale()),
+                  })}
+                </span>
+                <button
+                  type="button"
+                  className="small-command"
+                  onClick={() => setShowSuspectDiff(value => !value)}
+                  data-testid="dlq-suspect-version-toggle"
+                >
+                  {showSuspectDiff ? t('dlq.suspectVersion.hideDiff') : t('dlq.suspectVersion.viewDiff')}
+                </button>
+              </div>
+              {showSuspectDiff && (
+                <WorkflowDiffView
+                  before={selectedFull.suspectVersion.previousDagJson}
+                  after={selectedFull.suspectVersion.dagJson}
+                  beforeLabel={t('dlq.suspectVersion.versionLabel', { version: selectedFull.suspectVersion.previousVersion })}
+                  afterLabel={t('dlq.suspectVersion.versionLabel', { version: selectedFull.suspectVersion.version })}
+                />
+              )}
+            </div>
+          )}
+
+          <DetailBlock title={t('dlq.detail.error')} value={(selectedFull ?? selected).errorJson} />
+          <DetailBlock title={t('dlq.detail.node')} value={(selectedFull ?? selected).nodeJson ?? null} />
+          <DetailBlock title={t('dlq.detail.workflow')} value={(selectedFull ?? selected).workflowJson ?? null} />
         </section>
       )}
       </section>
@@ -742,7 +1152,7 @@ function DetailBlock({ title, value }: { title: string; value: unknown }) {
   const { t } = useT()
   // Default-open the error block. Compare against both locales' rendered
   // strings so the reset-to-en between tests doesn't break the UX.
-  const errorTitleEn = t('dlq.detail.error') as string
+  const errorTitleEn = t('dlq.detail.error')
   const [open, setOpen] = useState(title === errorTitleEn)
 
   return (

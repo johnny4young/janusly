@@ -28,6 +28,20 @@ export function consumeRecoveryFocusDay(): string | null {
   }
 }
 
+/** Clear a pending handoff only when it still belongs to the mounted queue
+ *  that adopted `day`. A newer request must never be consumed by an older
+ *  render committing late. */
+export function acknowledgeRecoveryFocusDay(day: string): void {
+  if (!isDayString(day)) return
+  try {
+    if (window.sessionStorage.getItem(STORAGE_KEY) === day) {
+      window.sessionStorage.removeItem(STORAGE_KEY)
+    }
+  } catch {
+    // sessionStorage unavailable — the live event remains sufficient.
+  }
+}
+
 /** Request the recovery queue focus one UTC day — stashes it for a not-yet-mounted
  *  panel and emits the live event for an already-mounted one. Ignores bad input. */
 export function requestRecoveryDayFocus(day: string): void {

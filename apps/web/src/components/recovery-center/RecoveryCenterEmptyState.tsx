@@ -40,7 +40,7 @@ export function RecoveryFlowDemo({
   /** When set, renders a primary "try a demo recovery" CTA that injects a real
    *  demo failure so the operator can experience the loop, not just read it. */
   onTryDemo?: () => void | Promise<void>
-  /** When set, renders a dismiss control that hides the walkthrough for good. */
+  /** When set, renders a dismiss control whose persistence policy belongs to the parent. */
   onDismiss?: () => void
 }) {
   const { t } = useT()
@@ -51,7 +51,7 @@ export function RecoveryFlowDemo({
           type="button"
           className="we-flow-demo__dismiss"
           onClick={onDismiss}
-          aria-label={t('recoveryCenter.flowDemo.dismiss') as string}
+          aria-label={t('recoveryCenter.flowDemo.dismiss')}
           data-testid="recovery-flow-demo-dismiss"
         >
           <X size={14} aria-hidden="true" />

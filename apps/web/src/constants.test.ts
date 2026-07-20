@@ -5,8 +5,17 @@
  * cases where one of those forgets to land.
  */
 import { describe, expect, it } from 'vitest'
-import { nodePresets, nodeTypes, getNodeLabel, getNodeHelper, getNodeConfigSummary, getNodePreset } from './constants'
+import { formatCompactDuration, nodePresets, nodeTypes, getNodeLabel, getNodeHelper, getNodeConfigSummary, getNodePreset } from './constants'
 import { changeAppLanguage } from './i18n'
+
+describe('run metadata formatting', () => {
+  it('formats dense durations without noisy zero units', () => {
+    expect(formatCompactDuration(250)).toBe('250ms')
+    expect(formatCompactDuration(1_250)).toBe('1s')
+    expect(formatCompactDuration(62_000)).toBe('1m 2s')
+    expect(formatCompactDuration(3_720_000)).toBe('1h 2m')
+  })
+})
 
 describe('node-type catalogue', () => {
   it('declares parallel_fork and join in the preset map and ordered list', () => {
@@ -24,6 +33,36 @@ describe('node-type catalogue', () => {
   })
 
   describe('getNodeConfigSummary', () => {
+    it('surfaces an exact subworkflow version pin', () => {
+      expect(getNodeConfigSummary('subworkflow', { workflowId: 'child-flow', version: 3 }))
+        .toBe('child-flow · v3')
+      expect(getNodeConfigSummary('subworkflow', { workflowId: 'child-flow', version: 2_147_483_647 }))
+        .toBe('child-flow · v2147483647')
+      expect(getNodeConfigSummary('subworkflow', { workflowId: 'child-flow' })).toBe('child-flow')
+    })
+
+    it('does not present an out-of-range subworkflow version as an active pin', () => {
+      expect(getNodeConfigSummary('subworkflow', { workflowId: 'child-flow', version: 2_147_483_648 }))
+        .toBe('child-flow')
+    })
+
+    it('summarises the executable loop mode by tool and bounded concurrency', () => {
+      expect(getNodeConfigSummary('loop', {
+        mode: 'for_each',
+        tool: 'json.parse',
+        concurrency: 8,
+      })).toBe('json.parse for each item · 8 concurrent calls')
+      expect(getNodeConfigSummary('loop', {
+        mode: 'for_each',
+        tool: 'text.uppercase',
+      })).toBe('text.uppercase for each item · 4 concurrent calls')
+      expect(getNodeConfigSummary('loop', {
+        mode: 'for_each',
+        tool: 'json.parse',
+        concurrency: 1,
+      })).toBe('json.parse for each item · 1 concurrent call')
+    })
+
     it('summarises parallel_fork by branch count', () => {
       expect(getNodeConfigSummary('parallel_fork', { branches: [{ label: 'a' }, { label: 'b' }, { label: 'c' }] }))
         .toBe('3 branches')

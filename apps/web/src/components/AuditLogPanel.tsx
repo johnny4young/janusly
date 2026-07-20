@@ -83,7 +83,7 @@ export function AuditLogPanel() {
         setHasMore(Boolean(page.hasMore));
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : (t("audit.error") as string));
+        if (!cancelled) setError(err instanceof Error ? err.message : (t("audit.error")));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -103,7 +103,7 @@ export function AuditLogPanel() {
       setCursor(page.nextCursor ?? null);
       setHasMore(Boolean(page.hasMore));
     } catch (err) {
-      setError(err instanceof Error ? err.message : (t("audit.error") as string));
+      setError(err instanceof Error ? err.message : (t("audit.error")));
     } finally {
       setLoadingMore(false);
     }
@@ -119,13 +119,30 @@ export function AuditLogPanel() {
     setAppliedAction("");
   };
 
+  const applyMemoryPreset = () => {
+    setFilterInput("memory.");
+    setAppliedAction("memory.");
+  };
+
   return (
-    <section className="we-budget-settings" aria-labelledby="audit-heading">
+    <section className="we-budget-settings" aria-labelledby="audit-heading" data-testid="audit-log-panel">
       <header className="we-budget-settings__header">
         <ListChecks size={18} aria-hidden="true" />
         <h3 id="audit-heading">{t("audit.heading")}</h3>
       </header>
       <p className="we-field__hint">{t("audit.intro")}</p>
+
+      <div className="we-audit-presets" role="group" aria-label={t("audit.presets.aria")}>
+        <span>{t("audit.presets.label")}</span>
+        <button
+          type="button"
+          className={`we-audit-preset${appliedAction === "memory." ? " we-audit-preset--active" : ""}`}
+          aria-pressed={appliedAction === "memory."}
+          onClick={applyMemoryPreset}
+        >
+          {t("audit.presets.memory")}
+        </button>
+      </div>
 
       <form className="we-budget-settings__form" onSubmit={applyFilter} noValidate>
         <label className="we-field">
@@ -133,7 +150,7 @@ export function AuditLogPanel() {
           <input
             type="text"
             className="we-field__input"
-            placeholder={t("audit.filter.placeholder") as string}
+            placeholder={t("audit.filter.placeholder")}
             value={filterInput}
             onChange={(e) => setFilterInput(e.target.value)}
           />
@@ -155,39 +172,41 @@ export function AuditLogPanel() {
       )}
 
       {loading ? (
-        <LoadingSkeleton rows={4} label={t("audit.loading") as string} />
+        <LoadingSkeleton rows={4} label={t("audit.loading")} />
       ) : rows.length === 0 ? (
         <p className="we-budget-settings__status">{t("audit.empty")}</p>
       ) : (
         <>
-          <table className="we-table we-table--compact" aria-label={t("audit.list.aria")}>
-            <thead>
-              <tr>
-                <th>{t("audit.col.time")}</th>
-                <th>{t("audit.col.action")}</th>
-                <th>{t("audit.col.actor")}</th>
-                <th>{t("audit.col.target")}</th>
-                <th>{t("audit.col.details")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => {
-                const target = row.targetType
-                  ? `${row.targetType}${row.targetId ? `:${row.targetId}` : ""}`
-                  : "—";
-                const details = metadataPreview(row.metadata);
-                return (
-                  <tr key={row.id}>
-                    <td>{row.createdAt ? new Date(row.createdAt).toLocaleString(getResolvedLocale()) : "—"}</td>
-                    <td><code>{row.action}</code></td>
-                    <td>{row.userId || "—"}</td>
-                    <td>{target}</td>
-                    <td>{details ? <code>{details}</code> : "—"}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="we-audit-table-wrap">
+            <table className="we-table we-table--compact we-audit-table" aria-label={t("audit.list.aria")}>
+              <thead>
+                <tr>
+                  <th>{t("audit.col.time")}</th>
+                  <th>{t("audit.col.action")}</th>
+                  <th>{t("audit.col.actor")}</th>
+                  <th>{t("audit.col.target")}</th>
+                  <th>{t("audit.col.details")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const target = row.targetType
+                    ? `${row.targetType}${row.targetId ? `:${row.targetId}` : ""}`
+                    : "—";
+                  const details = metadataPreview(row.metadata);
+                  return (
+                    <tr key={row.id}>
+                      <td>{row.createdAt ? new Date(row.createdAt).toLocaleString(getResolvedLocale()) : "—"}</td>
+                      <td><code>{row.action}</code></td>
+                      <td>{row.userId || "—"}</td>
+                      <td>{target}</td>
+                      <td>{details ? <code>{details}</code> : "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
 
           {hasMore && (
             <button

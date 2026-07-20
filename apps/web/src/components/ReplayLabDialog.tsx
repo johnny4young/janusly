@@ -19,7 +19,7 @@
  * and `DeadLettersPanel.tsx` (selected-entry action bar).
  */
 
-import React, { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, FlaskConical, Play, RefreshCcw, X } from 'lucide-react'
 import { api } from '../api'
@@ -135,14 +135,14 @@ export function ReplayLabDialog({
           if (!aliveRef.current) return
           setStep({
             kind: 'error',
-            message: err instanceof Error ? err.message : (t('replayLab.errorComparison') as string),
+            message: err instanceof Error ? err.message : (t('replayLab.errorComparison')),
           })
         }
       } catch (err) {
         if (cancelled || !aliveRef.current) return
         setStep({
           kind: 'error',
-          message: err instanceof Error ? err.message : (t('replayLab.errorPolling') as string),
+          message: err instanceof Error ? err.message : (t('replayLab.errorPolling')),
         })
       }
     }
@@ -168,7 +168,7 @@ export function ReplayLabDialog({
       if (!aliveRef.current) return
       setStep({
         kind: 'error',
-        message: err instanceof Error ? err.message : (t('replayLab.errorStart') as string),
+        message: err instanceof Error ? err.message : (t('replayLab.errorStart')),
       })
     }
   }
@@ -205,7 +205,7 @@ export function ReplayLabDialog({
             type="button"
             className="run-input-dialog__close"
             onClick={onBackdrop}
-            aria-label={t('replayLab.close') as string}
+            aria-label={t('replayLab.close')}
             disabled={step.kind === 'starting' || step.kind === 'replaying' || step.kind === 'comparing'}
           >
             <X size={16} aria-hidden="true" />

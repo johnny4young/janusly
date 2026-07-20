@@ -7,7 +7,7 @@
  * the backdrop also closes.
  */
 
-import React, { useEffect, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { Keyboard, X } from 'lucide-react'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { useT } from '../i18n'
@@ -38,25 +38,36 @@ export function ShortcutsModal({ open, onClose }: { open: boolean; onClose: () =
 
   const groups: Group[] = [
     {
-      title: t('shortcuts.group.global') as string,
+      title: t('shortcuts.group.global'),
       items: [
-        { keys: ['⌘', 'K'], description: t('shortcuts.cmdk') as string },
-        { keys: ['?'], description: t('shortcuts.helpThis') as string },
-        { keys: ['⌃', '⇧', 'Q'], description: t('shortcuts.signOut') as string },
+        { keys: ['⌘', 'K'], description: t('shortcuts.cmdk') },
+        { keys: ['⌘', 'S'], description: t('shortcuts.save') },
+        { keys: ['⌘', '1'], description: t('shortcuts.home') },
+        { keys: ['⌘', '2'], description: t('shortcuts.studio') },
+        { keys: ['?'], description: t('shortcuts.helpThis') },
+        { keys: ['⌃', '⇧', 'Q'], description: t('shortcuts.signOut') },
       ],
     },
     {
-      title: t('shortcuts.group.palette') as string,
+      title: t('shortcuts.group.palette'),
       items: [
-        { keys: ['↑', '↓'], description: t('shortcuts.paletteNav') as string },
-        { keys: ['↵'], description: t('shortcuts.paletteRun') as string },
-        { keys: ['ESC'], description: t('shortcuts.paletteClose') as string },
+        { keys: ['↑', '↓'], description: t('shortcuts.paletteNav') },
+        { keys: ['↵'], description: t('shortcuts.paletteRun') },
+        { keys: ['ESC'], description: t('shortcuts.paletteClose') },
       ],
     },
     {
-      title: t('shortcuts.group.sidebar') as string,
+      title: t('shortcuts.group.sidebar'),
       items: [
-        { keys: ['/'], description: t('shortcuts.sidebarSearch') as string },
+        { keys: ['/'], description: t('shortcuts.sidebarSearch') },
+      ],
+    },
+    {
+      title: t('shortcuts.group.recovery'),
+      items: [
+        { keys: ['J', 'K'], description: t('shortcuts.recoveryMove') },
+        { keys: ['R'], description: t('shortcuts.recoveryReplay') },
+        { keys: ['⌘/Ctrl', '↵'], description: t('shortcuts.recoveryResolve') },
       ],
     },
   ]
@@ -67,7 +78,7 @@ export function ShortcutsModal({ open, onClose }: { open: boolean; onClose: () =
       className="we-shortcuts-backdrop"
       role="dialog"
       aria-modal="true"
-      aria-label={t('shortcuts.title') as string}
+      aria-label={t('shortcuts.title')}
       data-testid="shortcuts-modal"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose()
@@ -80,7 +91,7 @@ export function ShortcutsModal({ open, onClose }: { open: boolean; onClose: () =
             <div className="section-kicker">{t('shortcuts.kicker')}</div>
             <h2>{t('shortcuts.title')}</h2>
           </div>
-          <button type="button" className="we-shortcuts-close" onClick={onClose} aria-label={t('shortcuts.close') as string}>
+          <button type="button" className="we-shortcuts-close" onClick={onClose} aria-label={t('shortcuts.close')}>
             <X size={14} aria-hidden="true" />
           </button>
         </header>

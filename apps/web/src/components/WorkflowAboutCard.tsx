@@ -193,14 +193,14 @@ export function WorkflowAboutCard({ workflowId }: Props): React.ReactElement | n
       {metadata.folder && (
         <div className="we-workflow-about-card__folder" data-testid="workflow-about-card-folder">
           <span className="we-list-row__hint">{t('workflowMetadata.field.folder')}</span>
-          <span className="we-pill we-pill--cobalt">{metadata.folder}</span>
+          <span className="we-pill" data-tone="primary">{metadata.folder}</span>
         </div>
       )}
 
       {metadata.tags.length > 0 && (
         <div className="we-workflow-about-card__tags" data-testid="workflow-about-card-tags">
           {metadata.tags.map((tag) => (
-            <span key={tag} className="we-pill we-pill--ghost">
+            <span key={tag} className="we-pill" data-tone="ghost">
               {tag}
             </span>
           ))}
@@ -221,8 +221,8 @@ export function WorkflowAboutCard({ workflowId }: Props): React.ReactElement | n
                     void navigator.clipboard.writeText(metadata.slackChannel!)
                   }
                 }}
-                aria-label={t('workflowMetadata.action.copy') as string}
-                title={t('workflowMetadata.action.copy') as string}
+                aria-label={t('workflowMetadata.action.copy')}
+                title={t('workflowMetadata.action.copy')}
               >
                 <Copy size={12} aria-hidden />
               </button>
@@ -262,8 +262,8 @@ export function WorkflowAboutCard({ workflowId }: Props): React.ReactElement | n
             onClick={() => setRunbookExpanded((v) => !v)}
           >
             {runbookExpanded
-              ? (t('workflowMetadata.action.collapseRunbook') as string)
-              : (t('workflowMetadata.action.expandRunbook') as string)}
+              ? (t('workflowMetadata.action.collapseRunbook'))
+              : (t('workflowMetadata.action.expandRunbook'))}
           </button>
         </div>
       )}

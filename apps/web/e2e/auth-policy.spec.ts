@@ -13,9 +13,11 @@ test('Operations auth policy panel validates and saves org settings', async ({ p
     .getByRole('textbox')
   const mfaToggle = page.getByRole('checkbox', { name: /Require multi-factor authentication/i })
   const ttlInput = page.getByRole('spinbutton', { name: /Session TTL/i })
+  const resumeTtlInput = page.getByRole('spinbutton', { name: /Human-form link TTL/i })
 
   await expect(domainInput).toBeVisible()
   await expect(ttlInput).toHaveValue('28800')
+  await expect(resumeTtlInput).toHaveValue('604800')
 
   await ttlInput.fill('60')
   await expect(page.getByRole('alert')).toContainText('between 300 and 86400')
@@ -24,10 +26,16 @@ test('Operations auth policy panel validates and saves org settings', async ({ p
   await domainInput.fill('acme.com, partner.com')
   await mfaToggle.check()
   await ttlInput.fill('1800')
+  await resumeTtlInput.fill('299')
+  await expect(page.getByRole('alert')).toContainText('between 300 and 604800')
+  await expect(page.getByRole('button', { name: /Save policies/i })).toBeDisabled()
+
+  await resumeTtlInput.fill('900')
   await page.getByRole('button', { name: /Save policies/i }).click()
 
   await expect(page.getByRole('button', { name: 'Authentication policies saved' })).toBeVisible()
   await expect(domainInput).toHaveValue('acme.com, partner.com')
   await expect(mfaToggle).toBeChecked()
   await expect(ttlInput).toHaveValue('1800')
+  await expect(resumeTtlInput).toHaveValue('900')
 })

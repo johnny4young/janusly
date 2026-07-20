@@ -161,41 +161,41 @@ export function ScheduleHistoryPanel({ workflowId: explicit }: ScheduleHistoryPa
   const fires = data?.heatmap.totalFires ?? 0
 
   return (
-    <section className="panel-card we-schedule-panel" aria-labelledby="we-schedule-panel-title">
+    <section className="we-card we-schedule-panel" aria-labelledby="we-schedule-panel-title">
       <div className="split-row">
         <div>
-          <div className="section-kicker">{t('scheduleHistory.kicker') as string}</div>
-          <h3 id="we-schedule-panel-title" className="section-title">{t('scheduleHistory.title') as string}</h3>
+          <div className="section-kicker">{t('scheduleHistory.kicker')}</div>
+          <h3 id="we-schedule-panel-title" className="section-title">{t('scheduleHistory.title')}</h3>
         </div>
         <CalendarClock size={18} aria-hidden="true" />
       </div>
-      <p className="helper-text">{t('scheduleHistory.description') as string}</p>
+      <p className="helper-text">{t('scheduleHistory.description')}</p>
 
-      {loading && <p className="helper-text">{t('scheduleHistory.loading') as string}</p>}
-      {errored && !loading && <p className="helper-text helper-text--error" role="alert">{t('scheduleHistory.error') as string}</p>}
+      {loading && <p className="helper-text">{t('scheduleHistory.loading')}</p>}
+      {errored && !loading && <p className="helper-text helper-text--error" role="alert">{t('scheduleHistory.error')}</p>}
 
       {!loading && !errored && data && (
         <>
           <div className="we-schedule-summary">
-            <span className="we-pill we-pill--neutral">
-              {t('scheduleHistory.summary.window', { days: data.windowDays }) as string}
+            <span className="we-pill" data-tone="neutral">
+              {t('scheduleHistory.summary.window', { days: data.windowDays })}
             </span>
-            <span className="we-pill we-pill--neutral">
-              {t('scheduleHistory.summary.fires', { count: fires }) as string}
+            <span className="we-pill" data-tone="neutral">
+              {t('scheduleHistory.summary.fires', { count: fires })}
             </span>
-            <span className="we-pill we-pill--green">
-              {t('scheduleHistory.summary.success', { count: data.heatmap.totalSuccess }) as string}
+            <span className="we-pill" data-tone="success">
+              {t('scheduleHistory.summary.success', { count: data.heatmap.totalSuccess })}
             </span>
-            <span className="we-pill we-pill--amber">
-              {t('scheduleHistory.summary.fail', { count: data.heatmap.totalFail }) as string}
+            <span className="we-pill" data-tone="warning">
+              {t('scheduleHistory.summary.fail', { count: data.heatmap.totalFail })}
             </span>
-            <span className="we-pill we-pill--neutral" title={t('scheduleHistory.timezoneHint') as string}>
-              {t('scheduleHistory.summary.timezone', { zone: data.heatmap.timezone }) as string}
+            <span className="we-pill" data-tone="neutral" title={t('scheduleHistory.timezoneHint')}>
+              {t('scheduleHistory.summary.timezone', { zone: data.heatmap.timezone })}
             </span>
           </div>
 
           {fires === 0 ? (
-            <p className="helper-text we-schedule-empty">{t('scheduleHistory.empty') as string}</p>
+            <p className="helper-text we-schedule-empty">{t('scheduleHistory.empty')}</p>
           ) : null}
 
           {/* Hand-written SVG heatmap. role=img + aria-label gives screen
@@ -207,7 +207,7 @@ export function ScheduleHistoryPanel({ workflowId: explicit }: ScheduleHistoryPa
               height={svgHeight}
               viewBox={`0 0 ${svgWidth} ${svgHeight}`}
               role="img"
-              aria-label={t('scheduleHistory.aria.grid', { count: fires }) as string}
+              aria-label={t('scheduleHistory.aria.grid', { count: fires })}
             >
               {/* Hour column labels — every 3rd hour to avoid clutter. */}
               {HOURS.map((hour) =>
@@ -243,15 +243,15 @@ export function ScheduleHistoryPanel({ workflowId: explicit }: ScheduleHistoryPa
                           total: cell.total,
                           success: cell.success,
                           fail: cell.fail,
-                        }) as string)
+                        }))
                       : (t('scheduleHistory.cell.empty', {
                           day: dayLabels[rowIdx],
                           hour: String(hour).padStart(2, '0'),
-                        }) as string)
+                        }))
                     // Anomalous cells append a note so the red dot's meaning
                     // is reachable via the same hover tooltip.
                     const title = cell?.anomaly
-                      ? `${baseTitle}\n${t('scheduleHistory.cell.anomaly') as string}`
+                      ? `${baseTitle}\n${t('scheduleHistory.cell.anomaly')}`
                       : baseTitle
                     return (
                       <g key={`c-${day}-${hour}`}>
@@ -288,43 +288,43 @@ export function ScheduleHistoryPanel({ workflowId: explicit }: ScheduleHistoryPa
           </div>
 
           {data.capped && (
-            <p className="helper-text">{t('scheduleHistory.cappedNote', { cap: data.rowCap }) as string}</p>
+            <p className="helper-text">{t('scheduleHistory.cappedNote', { cap: data.rowCap })}</p>
           )}
 
           {/* Legend. */}
           <div className="we-schedule-legend">
-            <span className="we-schedule-legend__label">{t('scheduleHistory.legend.less') as string}</span>
+            <span className="we-schedule-legend__label">{t('scheduleHistory.legend.less')}</span>
             <span className="we-schedule-heatmap__cell we-schedule-heatmap__cell--empty we-schedule-legend__swatch" />
             <span className="we-schedule-heatmap__cell we-schedule-heatmap__cell--success-1 we-schedule-legend__swatch" />
             <span className="we-schedule-heatmap__cell we-schedule-heatmap__cell--success-2 we-schedule-legend__swatch" />
             <span className="we-schedule-heatmap__cell we-schedule-heatmap__cell--success-3 we-schedule-legend__swatch" />
-            <span className="we-schedule-legend__label">{t('scheduleHistory.legend.more') as string}</span>
+            <span className="we-schedule-legend__label">{t('scheduleHistory.legend.more')}</span>
             <span className="we-schedule-heatmap__cell we-schedule-heatmap__cell--fail-2 we-schedule-legend__swatch we-schedule-legend__swatch--gap" />
-            <span className="we-schedule-legend__label">{t('scheduleHistory.legend.fail') as string}</span>
+            <span className="we-schedule-legend__label">{t('scheduleHistory.legend.fail')}</span>
             <span className="we-schedule-legend__anomaly-dot we-schedule-legend__swatch--gap" aria-hidden="true" />
-            <span className="we-schedule-legend__label">{t('scheduleHistory.legend.anomaly') as string}</span>
+            <span className="we-schedule-legend__label">{t('scheduleHistory.legend.anomaly')}</span>
           </div>
 
           {/* Next-fires preview per schedule entry. */}
           <div className="we-schedule-upcoming">
-            <h4 className="we-schedule-upcoming__title">{t('scheduleHistory.upcoming.title') as string}</h4>
+            <h4 className="we-schedule-upcoming__title">{t('scheduleHistory.upcoming.title')}</h4>
             {data.schedules.length === 0 ? (
-              <p className="helper-text">{t('scheduleHistory.upcoming.none') as string}</p>
+              <p className="helper-text">{t('scheduleHistory.upcoming.none')}</p>
             ) : (
               data.schedules.map((schedule) => (
                 <div key={schedule.nodeId} className="we-schedule-entry list-card">
                   <div className="split-row" style={{ width: '100%' }}>
                     <strong className="mono">{schedule.nodeId}</strong>
-                    <span className={`we-pill ${schedule.enabled ? 'we-pill--green' : 'we-pill--neutral'}`}>
+                    <span className="we-pill" data-tone={schedule.enabled ? 'success' : 'neutral'}>
                       {schedule.enabled
-                        ? (t('scheduleHistory.entry.enabled') as string)
-                        : (t('scheduleHistory.entry.disabled') as string)}
+                        ? (t('scheduleHistory.entry.enabled'))
+                        : (t('scheduleHistory.entry.disabled'))}
                     </span>
                   </div>
                   <code className="we-schedule-entry__cron">{schedule.cronExpression}</code>
                   {schedule.lastRunAt && (
                     <span className="helper-text">
-                      {t('scheduleHistory.entry.lastFired') as string}: {new Date(schedule.lastRunAt).toLocaleString(locale)}
+                      {t('scheduleHistory.entry.lastFired')}: {new Date(schedule.lastRunAt).toLocaleString(locale)}
                     </span>
                   )}
                   {schedule.enabled ? (
@@ -335,10 +335,10 @@ export function ScheduleHistoryPanel({ workflowId: explicit }: ScheduleHistoryPa
                         ))}
                       </ul>
                     ) : (
-                      <span className="helper-text">{t('scheduleHistory.entry.noPreview') as string}</span>
+                      <span className="helper-text">{t('scheduleHistory.entry.noPreview')}</span>
                     )
                   ) : (
-                    <span className="helper-text">{t('scheduleHistory.entry.pausedPreview') as string}</span>
+                    <span className="helper-text">{t('scheduleHistory.entry.pausedPreview')}</span>
                   )}
                 </div>
               ))

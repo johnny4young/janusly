@@ -11,7 +11,7 @@
  *   grants admin UI. Sourced from `GET /org/roles`.
  */
 
-import React, { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { AlertCircle, CircleCheck, Info, Trash2, UserPlus } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState } from './EmptyState'
@@ -72,7 +72,7 @@ export function MembersPanel() {
       const data = await api('/members')
       setMembers(Array.isArray(data) ? data : [])
     } catch (error) {
-      addToast(tApiError(error) || (t('members.loadFailed') as string), 'error')
+      addToast(tApiError(error) || (t('members.loadFailed')), 'error')
     }
   }, [addToast, t])
 
@@ -115,7 +115,7 @@ export function MembersPanel() {
       bumpPlatformVersion()
       await load()
     } catch (error) {
-      addToast(tApiError(error) || (t('members.inviteFailed') as string), 'error')
+      addToast(tApiError(error) || (t('members.inviteFailed')), 'error')
     } finally {
       setPending(false)
     }
@@ -131,7 +131,7 @@ export function MembersPanel() {
       bumpPlatformVersion()
       await load()
     } catch (error) {
-      addToast(tApiError(error) || (t('members.updateFailed') as string), 'error')
+      addToast(tApiError(error) || (t('members.updateFailed')), 'error')
     }
   }
 
@@ -143,13 +143,13 @@ export function MembersPanel() {
       bumpPlatformVersion()
       await load()
     } catch (error) {
-      addToast(tApiError(error) || (t('members.removeFailed') as string), 'error')
+      addToast(tApiError(error) || (t('members.removeFailed')), 'error')
     }
   }
 
   return (
     <div className="panel-list">
-      <section className="panel-card">
+      <section className="we-card">
         <div className="split-row">
           <div>
             <div className="section-kicker">{t('members.kicker')}</div>
@@ -163,7 +163,7 @@ export function MembersPanel() {
             id="member-email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            placeholder={t('members.emailPlaceholder') as string}
+            placeholder={t('members.emailPlaceholder')}
             className={`text-field${emailInvalid ? ' text-field--error' : ''}`}
             type="email"
             autoComplete="off"
@@ -176,7 +176,7 @@ export function MembersPanel() {
             </span>
           )}
           <span className="field-label">{t('members.role')}</span>
-          <div className="we-role-options" role="radiogroup" aria-label={t('members.role') as string}>
+          <div className="we-role-options" role="radiogroup" aria-label={t('members.role')}>
             {orgRoles.map(option => {
               const selected = role === option.name
               return (
@@ -190,7 +190,7 @@ export function MembersPanel() {
                   />
                   <span className="we-role-option__copy">
                     <span className="we-role-option__name">
-                      {option.name}{option.isBuiltin ? '' : (t('members.role.customSuffix') as string)}
+                      {option.name}{option.isBuiltin ? '' : (t('members.role.customSuffix'))}
                     </span>
                     <span className="we-role-option__desc">{describeRole(option.name, option)}</span>
                   </span>
@@ -212,8 +212,8 @@ export function MembersPanel() {
       {members.length === 0 && (
         <EmptyState
           icon={<CircleCheck />}
-          kicker={t('emptyState.members.kicker') as string}
-          body={t('emptyState.members.body') as string}
+          kicker={t('emptyState.members.kicker')}
+          body={t('emptyState.members.body')}
           testId="members-empty"
         />
       )}
@@ -237,11 +237,11 @@ export function MembersPanel() {
                       className="text-field text-field--compact"
                       value={member.role}
                       onChange={(event) => updateRole(member.userId, event.target.value)}
-                      aria-label={t('members.row.roleAria', { member: label }) as string}
+                      aria-label={t('members.row.roleAria', { member: label })}
                     >
                       {orgRoles.map(option => (
                         <option key={option.name} value={option.name}>
-                          {option.name}{option.isBuiltin ? '' : (t('members.role.customSuffix') as string)}
+                          {option.name}{option.isBuiltin ? '' : (t('members.role.customSuffix'))}
                         </option>
                       ))}
                     </select>
@@ -271,8 +271,8 @@ export function MembersPanel() {
                         type="button"
                         className="small-command danger"
                         onClick={() => setConfirmRemoveId(member.userId)}
-                        aria-label={t('members.row.removeAria', { member: label }) as string}
-                        title={t('members.row.removeTitle') as string}
+                        aria-label={t('members.row.removeAria', { member: label })}
+                        title={t('members.row.removeTitle')}
                         data-testid={`members-remove-${member.userId}`}
                       >
                         <Trash2 size={14} aria-hidden="true" />

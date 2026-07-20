@@ -7,7 +7,7 @@
 
 import React from 'react'
 import { createRoot } from 'react-dom/client'
-import { getStoredLanguage, initI18n, resolveAppLanguage } from './i18n'
+import { bootstrapI18n, FALLBACK_LOCALE, getStoredLanguage, resolveAppLanguage } from './i18n'
 import { bootTheme } from './theme'
 import { ConfirmProvider } from './components/ConfirmDialog'
 import './index.css'
@@ -17,14 +17,38 @@ import './index.css'
 // `'system'` sentinel resolves once against `navigator.languages`; explicit
 // choices win indefinitely.
 const stored = getStoredLanguage()
-initI18n(resolveAppLanguage(stored))
+const initialLocale = resolveAppLanguage(stored)
 
-// Apply the stored theme + density preference BEFORE createRoot so the
-// dark token block resolves during first paint — avoids a light→dark flicker
-// when the user reloads with a non-default theme.
+// Theme does not depend on the locale chunk. Apply it immediately so a slow
+// catalog request cannot reintroduce a light→dark first-paint flicker.
 bootTheme()
 
-void import('./App').then(({ default: App }) => {
+// Kick off the two heaviest boot downloads TOGETHER. The locale catalog
+// (~51 KiB gzip) and the App chunk (~50 KiB gzip) are the whole JS boot
+// beyond the entry; awaiting the catalog BEFORE starting the App import
+// serialized them — one full network round-trip of pure waiting on every
+// cold start. App is only USED after both resolve, so starting its fetch
+// early changes nothing semantically.
+const appModulePromise = import('./App')
+// Mark the early-started promise as handled: if i18n bootstrap throws on the
+// fallback path below, mountApp exits before awaiting App, and an ALSO-failed
+// App fetch would otherwise surface as an unhandled rejection on top of the
+// real error. Awaiting the original promise later still receives rejections.
+appModulePromise.catch(() => {})
+const i18nReadyPromise = bootstrapI18n(initialLocale)
+
+async function mountApp(): Promise<void> {
+  try {
+    await i18nReadyPromise
+  } catch (error) {
+    if (initialLocale === FALLBACK_LOCALE) throw error
+    // A transient non-English chunk failure should not leave a blank screen.
+    // Keep the stored preference untouched so the next reload retries it.
+    console.warn(`[i18n] Failed to load ${initialLocale}; using ${FALLBACK_LOCALE}`)
+    await bootstrapI18n(FALLBACK_LOCALE)
+  }
+
+  const { default: App } = await appModulePromise
   // `<App>` is dynamically imported so the entry chunk stays lean. The React
   // Flow provider is deliberately NOT mounted here — it lives inside the lazy
   // `CanvasWorkspace` (`apps/web/src/components/CanvasWorkspace.tsx`), mounted
@@ -40,4 +64,8 @@ void import('./App').then(({ default: App }) => {
       </ConfirmProvider>
     </React.StrictMode>
   )
+}
+
+void mountApp().catch((error: unknown) => {
+  console.error('[web] Failed to bootstrap Janusly', error)
 })

@@ -48,7 +48,7 @@ export function EvidencePanel({ evidence }: { evidence: readonly EvidenceRow[] }
           >
             <span className="we-recovery-evidence__kind">{row.label || evidenceKindLabel(row.kind)}</span>
             <span className="we-recovery-evidence__snippet">{row.snippet}</span>
-            <code className="we-recovery-evidence__ref" title={t('recoveryDialog.evidence.sourceRefTitle') as string}>
+            <code className="we-recovery-evidence__ref" title={t('recoveryDialog.evidence.sourceRefTitle')}>
               {row.sourceRef}
             </code>
           </li>

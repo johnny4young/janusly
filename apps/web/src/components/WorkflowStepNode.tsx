@@ -46,7 +46,7 @@ export function WorkflowStepNode({ data, selected }: NodeProps<WorkflowGraphNode
   useT()
   const status = data.status ?? 'pending'
   const type = data.type
-  const title = data.label || getNodeLabel(type)
+  const title = data.label?.trim() || getNodeLabel(type)
   const helper = data.helper || getNodeHelper(type)
   const summary = getNodeConfigSummary(type, data.config ?? {})
   const tone = data.hasValidationError ? 'error' : status

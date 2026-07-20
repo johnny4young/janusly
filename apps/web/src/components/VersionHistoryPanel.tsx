@@ -12,7 +12,7 @@
  * Used by `RightPanel.tsx` (Inspector tab → version history).
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { GitCompare, History, RotateCcw, Sparkles, X } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
@@ -20,6 +20,7 @@ import type { OrgMember, OrgRole, WorkflowDefinition } from '../types'
 import { RollbackConfirmDialog } from './RollbackConfirmDialog'
 import { WorkflowDiffView } from './WorkflowDiffView'
 import { EmptyState } from './EmptyState'
+import { useConfirm } from './ConfirmDialog'
 import { getResolvedLocale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 
@@ -93,7 +94,9 @@ function approachLabelText(label: string): string {
 /** Render the version-history list for the active workflow with click-to-hydrate. */
 export function VersionHistoryPanel() {
   const { t } = useT()
+  const confirm = useConfirm()
   const currentWorkflowId = useWorkflowStore(state => state.currentWorkflowId)
+  const currentWorkflowSaved = useWorkflowStore(state => state.currentWorkflowSaved)
   const session = useWorkflowStore(state => state.session)
   const userId = useWorkflowStore(state => state.userId)
   const orgId = useWorkflowStore(state => state.orgId)
@@ -138,7 +141,10 @@ export function VersionHistoryPanel() {
     let cancelled = false
 
     const loadVersions = async () => {
-      if (!currentWorkflowId) return
+      if (!currentWorkflowId || !currentWorkflowSaved) {
+        setVersions([])
+        return
+      }
       try {
         const data = await api(`/workflows/versions?workflowId=${encodeURIComponent(currentWorkflowId)}`)
         if (cancelled) return
@@ -148,7 +154,7 @@ export function VersionHistoryPanel() {
         if (rows.length < 2) setCompareMode(false)
       } catch (error) {
         if (!cancelled) {
-          addToast(error instanceof Error ? error.message : (t('versionHistory.loadFailed') as string), 'error')
+          addToast(error instanceof Error ? error.message : (t('versionHistory.loadFailed')), 'error')
         }
       }
     }
@@ -157,7 +163,7 @@ export function VersionHistoryPanel() {
     return () => {
       cancelled = true
     }
-  }, [addToast, currentWorkflowId, platformVersion, t])
+  }, [addToast, currentWorkflowId, currentWorkflowSaved, platformVersion, t])
 
   useEffect(() => {
     let cancelled = false
@@ -210,8 +216,21 @@ export function VersionHistoryPanel() {
       toggleSelected(version.id)
       return
     }
-    hydrateWorkflow(version.dagJson)
-    addToast(t('versionHistory.loaded', { version: version.version }), 'success')
+    void (async () => {
+      // Loading an old version replaces the canvas — same unsaved-work guard
+      // as the App-level hydrate paths.
+      if (useWorkflowStore.getState().workflowDirty) {
+        const proceed = await confirm({
+          title: t('unsavedGuard.title'),
+          body: t('unsavedGuard.body'),
+          confirmLabel: t('unsavedGuard.discard'),
+          tone: 'danger',
+        })
+        if (!proceed) return
+      }
+      hydrateWorkflow(version.dagJson)
+      addToast(t('versionHistory.loaded', { version: version.version }), 'success')
+    })()
   }
 
   const toggleSelected = (id: string) => {
@@ -276,14 +295,14 @@ export function VersionHistoryPanel() {
       } else {
         setImprovement({
           kind: 'fallback',
-          aiError: data.aiError ?? (t('versionHistory.aiUnavailableDefault') as string),
+          aiError: data.aiError ?? (t('versionHistory.aiUnavailableDefault')),
         })
       }
     } catch (error) {
       if (suggestCancelRef.current) return
       setImprovement({
         kind: 'fallback',
-        aiError: error instanceof Error ? error.message : (t('versionHistory.aiRequestFailed') as string),
+        aiError: error instanceof Error ? error.message : (t('versionHistory.aiRequestFailed')),
       })
     }
   }
@@ -301,7 +320,7 @@ export function VersionHistoryPanel() {
     improvement.kind !== 'fallback'
 
   return (
-    <div className="panel-card">
+    <div className="we-card">
       <div className="version-history__head">
         <div className="section-kicker">
           <History size={11} aria-hidden="true" style={{ marginRight: 4, verticalAlign: '-1px' }} />
@@ -322,8 +341,8 @@ export function VersionHistoryPanel() {
       {versions.length === 0 && (
         <EmptyState
           icon={<History />}
-          kicker={t('versionHistory.emptyKicker') as string}
-          body={t('versionHistory.empty') as string}
+          kicker={t('versionHistory.emptyKicker')}
+          body={t('versionHistory.empty')}
           testId="version-history-empty"
         />
       )}
@@ -362,8 +381,8 @@ export function VersionHistoryPanel() {
                 type="button"
                 className="version-row__rollback"
                 onClick={() => setRollbackPair({ currentId: versions[0]!.id, targetId: version.id })}
-                aria-label={t('versionHistory.rollbackAria', { version: version.version }) as string}
-                title={t('versionHistory.rollbackAria', { version: version.version }) as string}
+                aria-label={t('versionHistory.rollbackAria', { version: version.version })}
+                title={t('versionHistory.rollbackAria', { version: version.version })}
               >
                 <RotateCcw size={12} aria-hidden="true" />
               </button>
@@ -407,7 +426,7 @@ export function VersionHistoryPanel() {
       {improvement.kind === 'ai' && comparePair && improvement.suggestions[improvement.activeIdx] && (() => {
         const active = improvement.suggestions[improvement.activeIdx]!
         return (
-          <div className="we-suggest-result" aria-label={t('versionHistory.aiSuggestionsAria') as string}>
+          <div className="we-suggest-result" aria-label={t('versionHistory.aiSuggestionsAria')}>
             <div className="we-suggest-header">
               <span className="section-kicker">
                 <Sparkles size={11} aria-hidden="true" style={{ marginRight: 4, verticalAlign: '-1px' }} />
@@ -417,14 +436,14 @@ export function VersionHistoryPanel() {
                 type="button"
                 className="we-suggest-close"
                 onClick={onResetImprovement}
-                aria-label={t('versionHistory.dismissAi') as string}
-                title={t('versionHistory.dismissShort') as string}
+                aria-label={t('versionHistory.dismissAi')}
+                title={t('versionHistory.dismissShort')}
               >
                 <X size={12} aria-hidden="true" />
               </button>
             </div>
             {improvement.suggestions.length > 1 && (
-              <div className="we-suggest-chips" role="tablist" aria-label={t('versionHistory.anglesAria') as string}>
+              <div className="we-suggest-chips" role="tablist" aria-label={t('versionHistory.anglesAria')}>
                 {improvement.suggestions.map((suggestion, idx) => (
                   <button
                     key={`${suggestion.approachLabel}:${idx}`}
@@ -443,7 +462,7 @@ export function VersionHistoryPanel() {
               before={improvement.baseWorkflow}
               after={active.workflow}
               beforeLabel={improvement.baseLabel}
-              afterLabel={t('versionHistory.suggested', { approach: approachLabelText(active.approachLabel) }) as string}
+              afterLabel={t('versionHistory.suggested', { approach: approachLabelText(active.approachLabel) })}
               aiPatchRationale={active.rationale}
             />
           </div>
@@ -458,7 +477,7 @@ export function VersionHistoryPanel() {
             type="button"
             className="we-suggest-fallback__close"
             onClick={onResetImprovement}
-            aria-label={t('versionHistory.dismissFallback') as string}
+            aria-label={t('versionHistory.dismissFallback')}
           >
             <X size={12} aria-hidden="true" />
           </button>

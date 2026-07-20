@@ -12,12 +12,18 @@
  * limits as the operator types.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import {
   RECOVERY_ITEM_SEVERITIES,
   type RecoveryItemSeverity,
 } from '@janusly/shared/src/recovery-item'
+import {
+  WorkflowMetadataSchema,
+  WORKFLOW_METADATA_AI_GUIDANCE_MAX_BYTES,
+  WORKFLOW_METADATA_RUNBOOK_MAX_BYTES,
+} from '@janusly/shared/src/workflow-metadata'
+import { containsOperatorGuidanceSecret } from '@janusly/shared/src/operator-guidance'
 import { api } from '../api'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
@@ -25,6 +31,7 @@ import { useWorkflowStore } from '../store'
 type WorkflowMetadataForm = {
   owners: string[]
   runbookMarkdown: string
+  aiGuidanceMarkdown: string
   description: string
   tags: string[]
   folder: string
@@ -36,6 +43,7 @@ type WorkflowMetadataForm = {
 const EMPTY_FORM: WorkflowMetadataForm = {
   owners: [],
   runbookMarkdown: '',
+  aiGuidanceMarkdown: '',
   description: '',
   tags: [],
   folder: '',
@@ -45,8 +53,54 @@ const EMPTY_FORM: WorkflowMetadataForm = {
 }
 
 const WORKFLOW_METADATA_FOLDER_MAX_LENGTH = 60
+type WorkflowMetadataLoadState = 'idle' | 'loading' | 'ready' | 'error'
 
-const WORKFLOW_METADATA_RUNBOOK_MAX_BYTES = 32 * 1024
+type ParsedWorkflowMetadata =
+  | { ok: true; form: WorkflowMetadataForm }
+  | { ok: false }
+
+function freshEmptyForm(): WorkflowMetadataForm {
+  return { ...EMPTY_FORM, owners: [], tags: [] }
+}
+
+/** Runtime boundary for the legacy, non-v1 metadata envelope. */
+function parseWorkflowMetadataPayload(payload: unknown): ParsedWorkflowMetadata {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return { ok: false }
+  const envelope = payload as Record<string, unknown>
+  if (!Object.hasOwn(envelope, 'metadata')) return { ok: false }
+  if (envelope.metadata === null) return { ok: true, form: freshEmptyForm() }
+  if (typeof envelope.metadata !== 'object' || Array.isArray(envelope.metadata)) {
+    return { ok: false }
+  }
+  const record = envelope.metadata as Record<string, unknown>
+  const parsed = WorkflowMetadataSchema.safeParse({
+    owners: record.owners,
+    runbookMarkdown: record.runbookMarkdown,
+    aiGuidanceMarkdown: record.aiGuidanceMarkdown,
+    description: record.description,
+    tags: record.tags,
+    folder: record.folder,
+    slackChannel: record.slackChannel,
+    linearProject: record.linearProject,
+    severityDefault: record.severityDefault,
+  })
+  if (!parsed.success) return { ok: false }
+  const metadata = parsed.data
+  return {
+    ok: true,
+    form: {
+      owners: metadata.owners,
+      runbookMarkdown: metadata.runbookMarkdown ?? '',
+      aiGuidanceMarkdown: metadata.aiGuidanceMarkdown ?? '',
+      description: metadata.description ?? '',
+      tags: metadata.tags,
+      folder: metadata.folder ?? '',
+      slackChannel: metadata.slackChannel ?? '',
+      linearProject: metadata.linearProject ?? '',
+      severityDefault: metadata.severityDefault ?? '',
+    },
+  }
+}
 
 function parseChipList(value: string): string[] {
   return value
@@ -71,63 +125,96 @@ export function WorkflowMetadataPanel({ workflowId: explicit }: WorkflowMetadata
   // metadata would 404; an explicit id (e.g. the recovery drawer) always resolves.
   const workflowId = explicit ?? (storeWorkflowSaved ? storeWorkflowId : undefined)
 
-  const [form, setForm] = useState<WorkflowMetadataForm>(EMPTY_FORM)
+  const [form, setForm] = useState<WorkflowMetadataForm>(() => freshEmptyForm())
   const [ownersRaw, setOwnersRaw] = useState('')
   const [tagsRaw, setTagsRaw] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [loadState, setLoadState] = useState<WorkflowMetadataLoadState>('idle')
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [reloadNonce, setReloadNonce] = useState(0)
   const [saving, setSaving] = useState(false)
+  const activeWorkflowRef = useRef<string | null>(null)
+  const readyWorkflowRef = useRef<string | null>(null)
+  const dirtyRef = useRef(false)
+  const requestEpochRef = useRef(0)
 
   useEffect(() => {
-    if (!workflowId) return
+    if (!workflowId) {
+      activeWorkflowRef.current = null
+      readyWorkflowRef.current = null
+      dirtyRef.current = false
+      requestEpochRef.current += 1
+      setForm(freshEmptyForm())
+      setOwnersRaw('')
+      setTagsRaw('')
+      setLoadState('idle')
+      setLoadError(null)
+      return
+    }
     let cancelled = false
-    setLoading(true)
-    api(`/workflows/${encodeURIComponent(workflowId)}/metadata`)
+    const controller = new AbortController()
+    const epoch = requestEpochRef.current + 1
+    requestEpochRef.current = epoch
+    const workflowChanged = activeWorkflowRef.current !== workflowId
+    if (workflowChanged) {
+      activeWorkflowRef.current = workflowId
+      readyWorkflowRef.current = null
+      dirtyRef.current = false
+      setForm(freshEmptyForm())
+      setOwnersRaw('')
+      setTagsRaw('')
+    }
+    if (readyWorkflowRef.current !== workflowId) {
+      setLoadState('loading')
+      setLoadError(null)
+    }
+    api(`/workflows/${encodeURIComponent(workflowId)}/metadata`, { signal: controller.signal })
       .then((payload) => {
-        if (cancelled) return
-        const metadata = (payload as { metadata?: WorkflowMetadataForm | null } | null)?.metadata
-        if (metadata) {
-          const next: WorkflowMetadataForm = {
-            owners: metadata.owners ?? [],
-            runbookMarkdown: metadata.runbookMarkdown ?? '',
-            description: metadata.description ?? '',
-            tags: metadata.tags ?? [],
-            folder: metadata.folder ?? '',
-            slackChannel: metadata.slackChannel ?? '',
-            linearProject: metadata.linearProject ?? '',
-            severityDefault: metadata.severityDefault ?? '',
-          }
-          setForm(next)
-          setOwnersRaw(next.owners.join(', '))
-          setTagsRaw(next.tags.join(', '))
-        } else {
-          setForm(EMPTY_FORM)
-          setOwnersRaw('')
-          setTagsRaw('')
+        if (cancelled || requestEpochRef.current !== epoch) return
+        const parsed = parseWorkflowMetadataPayload(payload)
+        if (!parsed.ok) {
+          if (readyWorkflowRef.current !== workflowId) setLoadState('error')
+          setLoadError(t('workflowMetadata.panel.loadError'))
+          return
         }
-        setLoading(false)
+        if (!dirtyRef.current || readyWorkflowRef.current !== workflowId) {
+          setForm(parsed.form)
+          setOwnersRaw(parsed.form.owners.join(', '))
+          setTagsRaw(parsed.form.tags.join(', '))
+        }
+        readyWorkflowRef.current = workflowId
+        setLoadState('ready')
+        setLoadError(null)
       })
-      .catch(() => {
-        if (cancelled) return
-        setForm(EMPTY_FORM)
-        setOwnersRaw('')
-        setTagsRaw('')
-        setLoading(false)
+      .catch((error) => {
+        if (cancelled || requestEpochRef.current !== epoch) return
+        if (readyWorkflowRef.current !== workflowId) setLoadState('error')
+        setLoadError(tApiError(error) || t('workflowMetadata.panel.loadError'))
       })
     return () => {
       cancelled = true
+      controller.abort()
     }
-  }, [workflowId, platformVersion])
+  }, [workflowId, platformVersion, reloadNonce, t])
 
   if (!workflowId) return null
 
   async function onSave(e: React.FormEvent) {
     e.preventDefault()
-    if (!workflowId || saving) return
+    if (
+      !workflowId
+      || saving
+      || loadState !== 'ready'
+      || runbookOverCap
+      || aiGuidanceOverCap
+      || aiGuidanceHasSecret
+    ) return
+    const targetWorkflowId = workflowId
     setSaving(true)
     try {
       const metadata = {
         owners: parseChipList(ownersRaw),
         runbookMarkdown: form.runbookMarkdown.trim().length > 0 ? form.runbookMarkdown : null,
+        aiGuidanceMarkdown: form.aiGuidanceMarkdown.trim().length > 0 ? form.aiGuidanceMarkdown : null,
         description: form.description.trim().length > 0 ? form.description : null,
         tags: parseChipList(tagsRaw),
         folder: form.folder.trim().length > 0 ? form.folder.trim() : null,
@@ -139,10 +226,17 @@ export function WorkflowMetadataPanel({ workflowId: explicit }: WorkflowMetadata
         method: 'POST',
         body: JSON.stringify({ metadata }),
       })
-      addToast(t('workflowMetadata.toast.saved') as string, 'success')
+      if (activeWorkflowRef.current === targetWorkflowId) {
+        // A platform refresh may still be carrying the pre-save snapshot.
+        // Invalidate it before marking the successful form as clean so that
+        // its late response cannot replace the values the operator just saved.
+        requestEpochRef.current += 1
+        dirtyRef.current = false
+      }
+      addToast(t('workflowMetadata.toast.saved'), 'success')
       bumpPlatformVersion()
     } catch (err) {
-      addToast(tApiError(err) || (t('workflowMetadata.toast.saveFailed') as string), 'error')
+      addToast(tApiError(err) || (t('workflowMetadata.toast.saveFailed')), 'error')
     } finally {
       setSaving(false)
     }
@@ -150,100 +244,125 @@ export function WorkflowMetadataPanel({ workflowId: explicit }: WorkflowMetadata
 
   const runbookByteLength = new TextEncoder().encode(form.runbookMarkdown).length
   const runbookOverCap = runbookByteLength > WORKFLOW_METADATA_RUNBOOK_MAX_BYTES
+  const aiGuidanceByteLength = new TextEncoder().encode(form.aiGuidanceMarkdown).length
+  const aiGuidanceOverCap = aiGuidanceByteLength > WORKFLOW_METADATA_AI_GUIDANCE_MAX_BYTES
+  const aiGuidanceHasSecret = containsOperatorGuidanceSecret(form.aiGuidanceMarkdown)
+  const loading = loadState === 'loading'
+  const editorDisabled = loadState !== 'ready' || saving
+
+  function updateForm<K extends keyof WorkflowMetadataForm>(key: K, value: WorkflowMetadataForm[K]) {
+    dirtyRef.current = true
+    setForm((current) => ({ ...current, [key]: value }))
+  }
 
   return (
-    <section className="panel-card we-workflow-metadata-panel" aria-labelledby="we-workflow-metadata-title">
+    <section className="we-card we-workflow-metadata-panel" aria-labelledby="we-workflow-metadata-title">
       <h3 id="we-workflow-metadata-title" className="section-title">
-        {t('workflowMetadata.panel.title') as string}
+        {t('workflowMetadata.panel.title')}
       </h3>
-      <p className="helper-text">{t('workflowMetadata.panel.description') as string}</p>
+      <p className="helper-text">{t('workflowMetadata.panel.description')}</p>
+      {loadError && (
+        <div data-testid="workflow-metadata-load-error">
+          <p className="helper-text we-helper-text--error" role="alert">{loadError}</p>
+          <button
+            type="button"
+            className="command-button"
+            onClick={() => setReloadNonce((value) => value + 1)}
+            disabled={saving || loading}
+            data-testid="workflow-metadata-retry"
+          >
+            {t('workflowMetadata.action.retry')}
+          </button>
+        </div>
+      )}
       <form className="we-workflow-metadata-panel__form" onSubmit={onSave}>
         <label className="we-field">
-          <span>{t('workflowMetadata.field.owners') as string}</span>
+          <span>{t('workflowMetadata.field.owners')}</span>
           <input
             type="text"
             value={ownersRaw}
-            onChange={(e) => setOwnersRaw(e.target.value)}
-            placeholder={t('workflowMetadata.field.ownersPlaceholder') as string}
-            disabled={loading || saving}
+            onChange={(e) => {
+              dirtyRef.current = true
+              setOwnersRaw(e.target.value)
+            }}
+            placeholder={t('workflowMetadata.field.ownersPlaceholder')}
+            disabled={editorDisabled}
             data-testid="workflow-metadata-owners"
           />
-          <span className="helper-text">{t('workflowMetadata.field.ownersHelp') as string}</span>
+          <span className="helper-text">{t('workflowMetadata.field.ownersHelp')}</span>
         </label>
 
         <label className="we-field">
-          <span>{t('workflowMetadata.field.description') as string}</span>
+          <span>{t('workflowMetadata.field.description')}</span>
           <input
             type="text"
             value={form.description}
             maxLength={2000}
-            onChange={(e) => setForm({ ...form, description: e.target.value })}
-            disabled={loading || saving}
+            onChange={(e) => updateForm('description', e.target.value)}
+            disabled={editorDisabled}
           />
         </label>
 
         <label className="we-field">
-          <span>{t('workflowMetadata.field.tags') as string}</span>
+          <span>{t('workflowMetadata.field.tags')}</span>
           <input
             type="text"
             value={tagsRaw}
-            onChange={(e) => setTagsRaw(e.target.value)}
-            placeholder={t('workflowMetadata.field.tagsPlaceholder') as string}
-            disabled={loading || saving}
+            onChange={(e) => {
+              dirtyRef.current = true
+              setTagsRaw(e.target.value)
+            }}
+            placeholder={t('workflowMetadata.field.tagsPlaceholder')}
+            disabled={editorDisabled}
           />
         </label>
 
         <label className="we-field">
-          <span>{t('workflowMetadata.field.folder') as string}</span>
+          <span>{t('workflowMetadata.field.folder')}</span>
           <input
             type="text"
             value={form.folder}
             maxLength={WORKFLOW_METADATA_FOLDER_MAX_LENGTH}
-            onChange={(e) => setForm({ ...form, folder: e.target.value })}
-            placeholder={t('workflowMetadata.field.folderPlaceholder') as string}
-            disabled={loading || saving}
+            onChange={(e) => updateForm('folder', e.target.value)}
+            placeholder={t('workflowMetadata.field.folderPlaceholder')}
+            disabled={editorDisabled}
             data-testid="workflow-metadata-folder"
           />
         </label>
 
         <label className="we-field">
-          <span>{t('workflowMetadata.field.slackChannel') as string}</span>
+          <span>{t('workflowMetadata.field.slackChannel')}</span>
           <input
             type="text"
             value={form.slackChannel}
             maxLength={80}
-            onChange={(e) => setForm({ ...form, slackChannel: e.target.value })}
-            placeholder={t('workflowMetadata.field.slackChannelPlaceholder') as string}
-            disabled={loading || saving}
+            onChange={(e) => updateForm('slackChannel', e.target.value)}
+            placeholder={t('workflowMetadata.field.slackChannelPlaceholder')}
+            disabled={editorDisabled}
           />
         </label>
 
         <label className="we-field">
-          <span>{t('workflowMetadata.field.linearProject') as string}</span>
+          <span>{t('workflowMetadata.field.linearProject')}</span>
           <input
             type="text"
             value={form.linearProject}
             maxLength={200}
-            onChange={(e) => setForm({ ...form, linearProject: e.target.value })}
-            placeholder={t('workflowMetadata.field.linearProjectPlaceholder') as string}
-            disabled={loading || saving}
+            onChange={(e) => updateForm('linearProject', e.target.value)}
+            placeholder={t('workflowMetadata.field.linearProjectPlaceholder')}
+            disabled={editorDisabled}
           />
         </label>
 
         <label className="we-field">
-          <span>{t('workflowMetadata.field.severityDefault') as string}</span>
+          <span>{t('workflowMetadata.field.severityDefault')}</span>
           <select
             value={form.severityDefault}
-            onChange={(e) =>
-              setForm({
-                ...form,
-                severityDefault: e.target.value as RecoveryItemSeverity | '',
-              })
-            }
-            disabled={loading || saving}
+            onChange={(e) => updateForm('severityDefault', e.target.value as RecoveryItemSeverity | '')}
+            disabled={editorDisabled}
             data-testid="workflow-metadata-severity"
           >
-            <option value="">{t('workflowMetadata.field.severityDefaultNone') as string}</option>
+            <option value="">{t('workflowMetadata.field.severityDefaultNone')}</option>
             {RECOVERY_ITEM_SEVERITIES.map((s) => (
               <option key={s} value={s}>
                 {s.toUpperCase()}
@@ -254,24 +373,55 @@ export function WorkflowMetadataPanel({ workflowId: explicit }: WorkflowMetadata
 
         <label className="we-field">
           <span>
-            {t('workflowMetadata.field.runbook') as string}
+            {t('workflowMetadata.field.aiGuidance')}
+            <span className="helper-text">
+              {' '}
+              ({aiGuidanceByteLength.toLocaleString(getResolvedLocale())}/{WORKFLOW_METADATA_AI_GUIDANCE_MAX_BYTES.toLocaleString(getResolvedLocale())}{' '}
+              {t('workflowMetadata.field.runbookUnit')})
+            </span>
+          </span>
+          <textarea
+            rows={7}
+            value={form.aiGuidanceMarkdown}
+            onChange={(e) => updateForm('aiGuidanceMarkdown', e.target.value)}
+            placeholder={t('workflowMetadata.field.aiGuidancePlaceholder')}
+            disabled={editorDisabled}
+            aria-invalid={aiGuidanceOverCap || aiGuidanceHasSecret}
+            data-testid="workflow-metadata-ai-guidance"
+          />
+          <span className="helper-text">{t('workflowMetadata.field.aiGuidanceHelp')}</span>
+          {aiGuidanceOverCap && (
+            <span className="helper-text we-helper-text--error">
+              {t('workflowMetadata.field.aiGuidanceOverCap')}
+            </span>
+          )}
+          {aiGuidanceHasSecret && (
+            <span className="helper-text we-helper-text--error">
+              {t('workflowMetadata.field.aiGuidanceSecret')}
+            </span>
+          )}
+        </label>
+
+        <label className="we-field">
+          <span>
+            {t('workflowMetadata.field.runbook')}
             <span className="helper-text">
               {' '}
               ({runbookByteLength.toLocaleString(getResolvedLocale())}/{WORKFLOW_METADATA_RUNBOOK_MAX_BYTES.toLocaleString(getResolvedLocale())}{' '}
-              {t('workflowMetadata.field.runbookUnit') as string})
+              {t('workflowMetadata.field.runbookUnit')})
             </span>
           </span>
           <textarea
             rows={10}
             value={form.runbookMarkdown}
-            onChange={(e) => setForm({ ...form, runbookMarkdown: e.target.value })}
-            placeholder={t('workflowMetadata.field.runbookPlaceholder') as string}
-            disabled={loading || saving}
+            onChange={(e) => updateForm('runbookMarkdown', e.target.value)}
+            placeholder={t('workflowMetadata.field.runbookPlaceholder')}
+            disabled={editorDisabled}
             data-testid="workflow-metadata-runbook"
           />
           {runbookOverCap && (
             <span className="helper-text we-helper-text--error">
-              {t('workflowMetadata.field.runbookOverCap') as string}
+              {t('workflowMetadata.field.runbookOverCap')}
             </span>
           )}
         </label>
@@ -280,11 +430,12 @@ export function WorkflowMetadataPanel({ workflowId: explicit }: WorkflowMetadata
           <button
             type="submit"
             className="command-button command-button-primary"
-            disabled={loading || saving || runbookOverCap}
+            disabled={loadState !== 'ready' || saving || runbookOverCap || aiGuidanceOverCap || aiGuidanceHasSecret}
+            data-testid="workflow-metadata-save"
           >
             {saving
-              ? (t('workflowMetadata.action.saving') as string)
-              : (t('workflowMetadata.action.save') as string)}
+              ? (t('workflowMetadata.action.saving'))
+              : (t('workflowMetadata.action.save'))}
           </button>
         </div>
       </form>

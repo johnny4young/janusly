@@ -25,6 +25,27 @@ export type PatchApproachLabel =
   | 'fix_url'
   | 'other'
 
+export type FeedbackHealthState = 'active' | 'stale' | 'no_accepted_fix'
+
+/** Read-only freshness signal returned with a patch response. */
+export type FeedbackApproachHealth = {
+  approachLabel: PatchApproachLabel
+  feedbackLastSeen: string
+  acceptedFixLastSeen: string | null
+  acceptedFixAgeDays: number | null
+  state: FeedbackHealthState
+}
+
+export type RecoveryFeedbackHealthSnapshot = {
+  windowDays: number
+  approaches: FeedbackApproachHealth[]
+}
+
+export type ConsideredAlternative = {
+  approach: string
+  rejectedBecause: string
+}
+
 export type SuggestionTab = {
   workflow: WorkflowDefinition
   rationale: string
@@ -40,10 +61,25 @@ export type SuggestionTab = {
    * absent.
    */
   calibratedConfidence?: number
+  /** Server-derived from the canonical workflow-readiness sensitivity rule. */
+  safety?: {
+    writeSide: boolean
+    approvalRequired: boolean
+    approvalPresent: boolean
+  }
+  /** Model-authored trade-off summaries; never hidden chain-of-thought. */
+  consideredAlternatives?: ConsideredAlternative[]
+}
+
+export type PriorSameSignatureOutcome = {
+  status: string
+  approachLabel: string | null
+  declineReason: string | null
+  occurredAt: string
 }
 
 export type PatchSuggestion = {
-  mode: 'ai' | 'fallback'
+  mode: 'ai' | 'fallback' | 'playbook'
   /** Legacy mirror of `suggestions[0]` — kept so older test fixtures and callers still work. */
   suggestedWorkflow: WorkflowDefinition
   /** Legacy mirror of `suggestions[0].rationale`. */
@@ -58,9 +94,46 @@ export type PatchSuggestion = {
    * the renderer treats `undefined` as `[]` and hides the panel.
    */
   evidence?: EvidenceRow[]
+  /**
+   * Feedback-loop freshness for the failing workflow. Optional so legacy or
+   * cached patch responses remain renderable; the dialog hides the badge when
+   * the read-only side channel is unavailable.
+   */
+  feedbackHealth?: RecoveryFeedbackHealthSnapshot
+  recoveryPassport?: {
+    failureSignature: string
+    priorSameSignatureOutcome: PriorSameSignatureOutcome | null
+  }
   model?: string
   provider?: string
   aiError?: string
+  playbook?: RecoveryPlaybookSummary
+}
+
+export type RecoveryPlaybookSummary = {
+  id: string
+  workflowId: string | null
+  signature: string
+  version: number
+  status: 'draft' | 'active' | 'retired'
+  title: string
+  instructionsMarkdown: string
+  approachLabel: string
+  successfulUses: number
+  regressions: number
+  lastValidatedAt: string | null
+  activatedAt: string | null
+  retiredAt: string | null
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export type RecoveryPlaybookPromotionSource = {
+  deadLetterId: string
+  validationRunId: string
+  sourceWorkflowVersionId: string
+  defaultTitle: string
+  defaultInstructions: string
 }
 
 export type ClusterApplyError = {
@@ -72,6 +145,8 @@ export type ClusterApplyResult = {
   replayed: number
   failed: number
   errors: ClusterApplyError[]
+  /** Summed (now − failure createdAt) across successfully replayed members. */
+  downtimeEndedMs?: number
 }
 
 export type Step =
@@ -79,7 +154,8 @@ export type Step =
   | { kind: 'loading' }
   | { kind: 'review'; suggestion: PatchSuggestion }
   | { kind: 'validating'; suggestion: PatchSuggestion; selectedIndex: number; runId: string }
-  | { kind: 'validation-failed'; suggestion: PatchSuggestion; selectedIndex: number; runId: string; errorJson: unknown }
+  | { kind: 'validated'; suggestion: PatchSuggestion; selectedIndex: number; runId: string }
+  | { kind: 'validation-failed'; suggestion: PatchSuggestion; selectedIndex: number; runId: string; errorJson: unknown; playbookRetired?: boolean }
   | {
       kind: 'cancelling'
       suggestion: PatchSuggestion
@@ -87,11 +163,12 @@ export type Step =
       // Where the operator came from — drives the back button when they
       // change their mind. `validation-failed` returns to the failure
       // body; `review` returns to the diff.
-      sourceStep: 'review' | 'validation-failed'
+      sourceStep: 'review' | 'validated' | 'validation-failed'
       // Validation-failed cancels carry the runId / errorJson so the
       // back button can restore the prior step without losing context.
       runId?: string
       errorJson?: unknown
+      playbookRetired?: boolean
     }
   | { kind: 'applying'; mode: 'single' | 'cluster'; total?: number }
   | {
@@ -105,6 +182,8 @@ export type Step =
       appliedVersion?: number
       priorFailureSignature?: string | null
       preSaveBeforeSnapshot?: PreSaveBeforeSnapshot | null
+      playbookPromotionSource?: RecoveryPlaybookPromotionSource
+      playbookUsePending?: boolean
     }
   | { kind: 'error'; message: string }
 

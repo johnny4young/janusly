@@ -6,7 +6,7 @@
  * Used by `RightPanel.tsx` (Runs tab → AI Run Explainer card).
  */
 
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { api } from '../api'
 import { formatAiModeLabel } from '../constants'
 import type { AiMode } from '../types'
@@ -44,9 +44,9 @@ export function RunExplainChat({ runId }: { runId?: string | null }) {
   }
 
   const starterQuestions: string[] = [
-    t('runExplain.starter1') as string,
-    t('runExplain.starter2') as string,
-    t('runExplain.starter3') as string,
+    t('runExplain.starter1'),
+    t('runExplain.starter2'),
+    t('runExplain.starter3'),
   ]
 
   const ask = async () => {
@@ -65,7 +65,7 @@ export function RunExplainChat({ runId }: { runId?: string | null }) {
 
       if (response.error) throw new Error(response.error)
 
-      const baseAnswer = response.answer ?? (t('runExplain.noAnswer') as string)
+      const baseAnswer = response.answer ?? (t('runExplain.noAnswer'))
       const body = response.aiError
         ? `${baseAnswer}\n\n${t('runExplain.noteFailed', { detail: describeAiError(response.aiError) })}`
         : baseAnswer
@@ -84,7 +84,7 @@ export function RunExplainChat({ runId }: { runId?: string | null }) {
         ...current,
         {
           role: 'assistant',
-          content: error instanceof Error ? error.message : (t('runExplain.failed') as string),
+          content: error instanceof Error ? error.message : (t('runExplain.failed')),
           isError: true,
         },
       ])
@@ -94,7 +94,7 @@ export function RunExplainChat({ runId }: { runId?: string | null }) {
   }
 
   return (
-    <section className="panel-card">
+    <section className="we-card">
       <div className="split-row">
         <div>
           <strong>{t('runExplain.title')}</strong>

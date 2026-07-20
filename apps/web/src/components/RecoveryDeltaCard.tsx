@@ -25,7 +25,7 @@
  * sibling save/replay bumps it — so the card animates as runs accumulate.
  */
 
-import React, { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { AlertCircle, ArrowDownRight, ArrowUpRight, Minus, RotateCcw } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
@@ -126,7 +126,7 @@ export function RecoveryDeltaCard({
         if (cancelled) return
         setState({
           kind: 'error',
-          message: error instanceof Error ? error.message : (t('recoveryDelta.errorLoad') as string),
+          message: error instanceof Error ? error.message : (t('recoveryDelta.errorLoad')),
         })
       })
     return () => {
@@ -170,7 +170,7 @@ export function RecoveryDeltaCard({
       const current = versions.find((v) => v.version === afterVersion)
       const target = versions.find((v) => v.version === priorVersionNumber)
       if (!current || !target) {
-        setRollback({ kind: 'error', message: t('recoveryDelta.errorBothVersions') as string })
+        setRollback({ kind: 'error', message: t('recoveryDelta.errorBothVersions') })
         return
       }
       // Defense-in-depth: the `RollbackConfirmDialog` consumes the
@@ -179,14 +179,14 @@ export function RecoveryDeltaCard({
       // renamed) the soft cast above wouldn't catch it — guard here so
       // the operator sees a usable error instead of a blank diff.
       if (!current.dagJson || !target.dagJson) {
-        setRollback({ kind: 'error', message: t('recoveryDelta.errorIncomplete') as string })
+        setRollback({ kind: 'error', message: t('recoveryDelta.errorIncomplete') })
         return
       }
       setRollback({ kind: 'open', current, target })
     } catch (error) {
       setRollback({
         kind: 'error',
-        message: error instanceof Error ? error.message : (t('recoveryDelta.errorVersions') as string),
+        message: error instanceof Error ? error.message : (t('recoveryDelta.errorVersions')),
       })
     }
   }, [workflowId, afterVersion, t])
@@ -224,7 +224,7 @@ export function RecoveryDeltaCard({
 
   return (
     <>
-      <div className="we-recovery-delta-card" aria-label={t('recoveryDelta.aria') as string}>
+      <div className="we-recovery-delta-card" aria-label={t('recoveryDelta.aria')}>
         {priorFailureSignature ? (
           <div className="we-recovery-delta-card__head">
             <span className="we-recovery-delta-card__title">{t('recoveryDelta.headTitle')}</span>
@@ -282,7 +282,7 @@ export function RecoveryDeltaCard({
             disabled={rollback.kind === 'fetching'}
           >
             <RotateCcw size={14} aria-hidden="true" />
-            <span>{rollback.kind === 'fetching' ? t('recoveryDelta.loadingVersions') : (t('recoveryDelta.rollbackTo', { version: data.priorVersion.version }) as string)}</span>
+            <span>{rollback.kind === 'fetching' ? t('recoveryDelta.loadingVersions') : (t('recoveryDelta.rollbackTo', { version: data.priorVersion.version }))}</span>
           </button>
         ) : null}
 

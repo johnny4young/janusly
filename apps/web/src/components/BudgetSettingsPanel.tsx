@@ -16,7 +16,7 @@
  * Used by `OperationsPage.tsx`.
  */
 
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Coins, Info, Save, ShieldAlert } from "lucide-react";
 import { api } from "../api";
 import { useWorkflowStore } from "../store";
@@ -115,7 +115,7 @@ export function BudgetSettingsPanel() {
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : (t("budget.errorLoad") as string));
+        setError(err instanceof Error ? err.message : (t("budget.errorLoad")));
         setLoading(false);
       });
     return () => { cancelled = true; };
@@ -190,9 +190,9 @@ export function BudgetSettingsPanel() {
     try {
       const monthlyUsd = Number(form.monthlyUsd);
       const warnPercent = Number(form.warnPercent);
-      if (!Number.isFinite(monthlyUsd) || monthlyUsd < 0) throw new Error(t("budget.errorMonthly") as string);
+      if (!Number.isFinite(monthlyUsd) || monthlyUsd < 0) throw new Error(t("budget.errorMonthly"));
       if (!Number.isInteger(warnPercent) || warnPercent < 0 || warnPercent > 100) {
-        throw new Error(t("budget.errorWarn") as string);
+        throw new Error(t("budget.errorWarn"));
       }
       await api("/org/config", {
         method: "POST",
@@ -211,7 +211,7 @@ export function BudgetSettingsPanel() {
     } catch (err) {
       // Surface the failure inline only — the persistent form error below is
       // the single feedback channel here (no duplicate transient toast).
-      const message = tApiError(err) || (t("budget.errorSave") as string);
+      const message = tApiError(err) || (t("budget.errorSave"));
       setError(message);
     } finally {
       setSaving(false);
@@ -225,9 +225,9 @@ export function BudgetSettingsPanel() {
     try {
       const monthlyUsd = Number(wfMonthly);
       const warnPercent = Number(wfWarnPercent);
-      if (!Number.isFinite(monthlyUsd) || monthlyUsd < 0) throw new Error(t("budget.errorMonthly") as string);
+      if (!Number.isFinite(monthlyUsd) || monthlyUsd < 0) throw new Error(t("budget.errorMonthly"));
       if (!Number.isInteger(warnPercent) || warnPercent < 0 || warnPercent > 100) {
-        throw new Error(t("budget.errorWarn") as string);
+        throw new Error(t("budget.errorWarn"));
       }
       await api(`/workflows/${encodeURIComponent(selectedWorkflowId)}/budget`, {
         method: "POST",
@@ -239,7 +239,7 @@ export function BudgetSettingsPanel() {
     } catch (err) {
       // Inline-only feedback (the per-workflow status line renders the error);
       // no duplicate transient toast.
-      const message = tApiError(err) || (t("budget.errorSave") as string);
+      const message = tApiError(err) || (t("budget.errorSave"));
       setWfStatus(message);
     } finally {
       setWfSaving(false);
@@ -249,8 +249,8 @@ export function BudgetSettingsPanel() {
   const orgBudgetDisabled = useMemo(() => {
     return Number(form.monthlyUsd) === 0;
   }, [form.monthlyUsd]);
-  const aboutSectionLabel = t("common.aboutSection") as string;
-  const budgetIntro = t("budget.intro") as string;
+  const aboutSectionLabel = t("common.aboutSection");
+  const budgetIntro = t("budget.intro");
   // Live field validation mirrors the save-handler guards so the operator sees
   // a bad value (and the disabled save) before the round-trip.
   const orgMonthlyInvalid = isMonthlyInvalid(form.monthlyUsd);
@@ -259,7 +259,7 @@ export function BudgetSettingsPanel() {
   const wfWarnInvalid = isWarnInvalid(wfWarnPercent);
 
   return (
-    <section className="panel-card we-budget-settings" aria-labelledby="budget-settings-heading" data-testid="budget-settings-panel">
+    <section className="we-card we-budget-settings" aria-labelledby="budget-settings-heading" data-testid="budget-settings-panel">
       <div className="we-budget-settings__head">
         <span className="we-budget-settings__icon" aria-hidden="true"><Coins size={18} /></span>
         <div>

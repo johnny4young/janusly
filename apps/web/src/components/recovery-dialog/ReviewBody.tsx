@@ -16,6 +16,10 @@ import type { WorkflowDefinition } from '../../types'
 import { WorkflowDiffView } from '../WorkflowDiffView'
 import type { DeadLetter } from '../DeadLettersPanel'
 import { EvidencePanel } from './EvidencePanel'
+import { AlternativeHypothesesPanel } from './AlternativeHypothesesPanel'
+import { LearningHealthBadge } from './LearningHealthBadge'
+import { RecoveryPassportCard } from './RecoveryPassportCard'
+import type { RecoverySandboxStatus } from './recovery-passport'
 import { approachLabelDisplay, resolveConfidenceDisplay, suggestionTabKey } from './helpers'
 import type { PatchSuggestion, SuggestionTab } from './types'
 
@@ -26,6 +30,9 @@ export function ReviewBody({
   onSelectIndex,
   dlq,
   canApplyPatch,
+  sandboxStatus = 'not_run',
+  failureSignature,
+  selectionLocked = false,
 }: {
   suggestion: PatchSuggestion
   selected: SuggestionTab
@@ -33,6 +40,9 @@ export function ReviewBody({
   onSelectIndex: (index: number) => void
   dlq: DeadLetter
   canApplyPatch: boolean
+  sandboxStatus?: RecoverySandboxStatus
+  failureSignature: string
+  selectionLocked?: boolean
 }) {
   const { t } = useT()
   const tabs = suggestion.suggestions
@@ -75,8 +85,22 @@ export function ReviewBody({
           </div>
         </div>
       )}
+      {suggestion.mode === 'playbook' && suggestion.playbook && (
+        <div className="we-recovery-playbook-source" role="status" data-testid="recovery-playbook-revalidation">
+          <strong>{t('recoveryDialog.playbook.reviewSource', { title: suggestion.playbook.title, version: suggestion.playbook.version })}</strong>
+          <span>{t('recoveryDialog.playbook.reviewGate')}</span>
+        </div>
+      )}
+      <RecoveryPassportCard
+        dlq={dlq}
+        suggestion={suggestion}
+        selected={selected}
+        actionable={canApplyPatch}
+        sandboxStatus={sandboxStatus}
+        failureSignature={failureSignature}
+      />
       {showTabs && (
-        <div className="we-recovery-tabs" role="tablist" aria-label={t('recoveryDialog.review.tabsAriaLabel') as string}>
+        <div className="we-recovery-tabs" role="tablist" aria-label={t('recoveryDialog.review.tabsAriaLabel')}>
           {tabs.map((tab, index) => (
             <button
               key={suggestionTabKey(tab)}
@@ -87,13 +111,14 @@ export function ReviewBody({
               aria-selected={index === selectedIndex}
               tabIndex={index === selectedIndex ? 0 : -1}
               className={`we-recovery-tab${index === selectedIndex ? ' we-recovery-tab--active' : ''}`}
+              disabled={selectionLocked}
               onClick={() => onSelectIndex(index)}
               onKeyDown={(event) => onTabKeyDown(event, index)}
               title={(() => {
                 const { primary, showSelfRated, selfRated } = resolveConfidenceDisplay(tab)
                 return showSelfRated
-                  ? t('recoveryDialog.review.tabCalibratedTitle', { confidence: primary, selfRated }) as string
-                  : t('recoveryDialog.review.tabConfidenceTitle', { confidence: primary }) as string
+                  ? t('recoveryDialog.review.tabCalibratedTitle', { confidence: primary, selfRated })
+                  : t('recoveryDialog.review.tabConfidenceTitle', { confidence: primary })
               })()}
             >
               <span className="we-recovery-tab__label">{approachLabelDisplay(tab.approachLabel)}</span>
@@ -114,6 +139,10 @@ export function ReviewBody({
           ))}
         </div>
       )}
+      <LearningHealthBadge
+        feedbackHealth={suggestion.feedbackHealth}
+        approachLabel={selected.approachLabel}
+      />
       <div
         id="we-recovery-tabpanel"
         role={showTabs ? 'tabpanel' : undefined}
@@ -122,12 +151,13 @@ export function ReviewBody({
         <WorkflowDiffView
           before={(dlq.workflowJson ?? {}) as WorkflowDefinition}
           after={selected.workflow}
-          beforeLabel={t('recoveryDialog.review.beforeLabel') as string}
+          beforeLabel={t('recoveryDialog.review.beforeLabel')}
           afterLabel={showTabs
-            ? (t('recoveryDialog.review.suggestedLabelWithApproach', { approach: approachLabelDisplay(selected.approachLabel) }) as string)
-            : (t('recoveryDialog.review.suggestedLabel') as string)}
+            ? (t('recoveryDialog.review.suggestedLabelWithApproach', { approach: approachLabelDisplay(selected.approachLabel) }))
+            : (t('recoveryDialog.review.suggestedLabel'))}
           aiPatchRationale={selected.rationale}
         />
+        <AlternativeHypothesesPanel alternatives={selected.consideredAlternatives ?? []} />
         <EvidencePanel evidence={suggestion.evidence ?? []} />
       </div>
     </>

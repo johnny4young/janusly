@@ -72,10 +72,16 @@ test('Flows list groups by folder and persists a collapsed section across reload
   await sectionA.locator('summary').click()
   await expect(sectionA.locator(`[data-testid="workflows-row-${alphaId}"]`)).toBeHidden()
 
-  // Reload → navigate back to Flows → folder A is still collapsed (persisted).
+  // Reload immediately, without waiting for a React effect: the native toggle
+  // handler itself must have persisted the collapse before it returned.
   await page.reload()
+  await expect.poll(() => page.evaluate(() => {
+    const raw = window.localStorage.getItem('janusly:flowsFilters')
+    return raw ? (JSON.parse(raw) as { collapsedFolders?: string[] }).collapsedFolders ?? [] : []
+  })).toContain(folderA)
   await expect(page.getByText('dev-user')).toBeVisible()
   await page.getByRole('button', { name: 'Flows' }).click()
+  await expect(sectionA).toHaveJSProperty('open', false)
   await page.getByRole('button', { name: 'Refresh' }).click()
   await expect(sectionA).toBeVisible()
   await expect(sectionA.locator(`[data-testid="workflows-row-${alphaId}"]`)).toBeHidden()
@@ -144,9 +150,15 @@ test('Flows list drag-to-folder reassigns a workflow by dropping its row on a fo
   // Native HTML5 drag-drop: share ONE DataTransfer across the dispatched events
   // (Playwright's reliable pattern — dragstart's setData persists into drop's getData).
   const dataTransfer = await page.evaluateHandle(() => new DataTransfer())
+  const folderWrite = page.waitForResponse(response => {
+    const request = response.request()
+    return request.method() === 'POST'
+      && new URL(response.url()).pathname === `/workflows/${bId}/folder`
+  })
   await handleB.dispatchEvent('dragstart', { dataTransfer })
   await sectionA.dispatchEvent('dragover', { dataTransfer })
   await sectionA.dispatchEvent('drop', { dataTransfer })
+  expect((await folderWrite).ok()).toBe(true)
 
   // The row moves into folder A (optimistic, then confirmed by the refetch).
   await expect(sectionA.locator(`[data-testid="workflows-row-${bId}"]`)).toBeVisible()

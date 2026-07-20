@@ -12,7 +12,7 @@
  * - `UsageSummaryCard.test.tsx` (pins the contract independently).
  */
 
-import React, { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Gauge } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState } from './EmptyState'
@@ -165,7 +165,7 @@ export function UsageSummaryCard({
       })
       .catch((error) => {
         if (cancelled) return
-        addToast(error instanceof Error ? error.message : (t('rightPanel.usage.breakdownLoadFailed') as string), 'error')
+        addToast(error instanceof Error ? error.message : (t('rightPanel.usage.breakdownLoadFailed')), 'error')
         setBreakdown([])
       })
       .finally(() => {
@@ -189,7 +189,7 @@ export function UsageSummaryCard({
   const hiddenCount = sortedBreakdown ? Math.max(0, sortedBreakdown.length - TOP_BUCKETS) : 0
 
   return (
-    <section className="panel-card">
+    <section className="we-card">
       <div className="split-row">
         <strong>{t('rightPanel.usage.title')}</strong>
         <button className="small-command" onClick={refreshUsage}>{t('rightPanel.usage.refresh')}</button>
@@ -197,8 +197,8 @@ export function UsageSummaryCard({
       {Object.keys(usage).length === 0 ? (
         <EmptyState
           icon={<Gauge />}
-          kicker={t('rightPanel.usage.emptyKicker') as string}
-          body={t('rightPanel.usage.empty') as string}
+          kicker={t('rightPanel.usage.emptyKicker')}
+          body={t('rightPanel.usage.empty')}
           testId="usage-empty"
         />
       ) : (
@@ -211,7 +211,7 @@ export function UsageSummaryCard({
 
       <div className="we-usage-breakdown-controls">
         <span className="section-kicker">{t('rightPanel.usage.groupBy')}</span>
-        <div className="we-usage-breakdown-chips" role="group" aria-label={t('rightPanel.usage.dimensionsAria') as string}>
+        <div className="we-usage-breakdown-chips" role="group" aria-label={t('rightPanel.usage.dimensionsAria')}>
           {USAGE_BREAKDOWN_DIMENSIONS.map((dim) => {
             const active = activeDims.includes(dim)
             return (
@@ -236,7 +236,7 @@ export function UsageSummaryCard({
       )}
 
       {!loading && visibleBuckets.length > 0 && (
-        <ul className="we-usage-breakdown-list" aria-label={t('rightPanel.usage.bucketsAria') as string}>
+        <ul className="we-usage-breakdown-list" aria-label={t('rightPanel.usage.bucketsAria')}>
           {visibleBuckets.map((b) => (
             <li key={b.key} className="we-usage-breakdown-row">
               <span className="we-usage-breakdown-label">{bucketLabel(b, activeDims)}</span>
