@@ -26,7 +26,12 @@ from typing import Any, Awaitable, Callable, Optional, Union
 
 import httpx
 
-from .errors import JanuslyApiError, JanuslyRateLimitError, error_from_response
+from .errors import (
+    JanuslyApiError,
+    JanuslyProtocolError,
+    JanuslyRateLimitError,
+    error_from_response,
+)
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
 
@@ -324,6 +329,42 @@ def _raise_for_status(response: httpx.Response) -> httpx.Response:
     )
 
 
+def response_json(response: httpx.Response) -> Any:
+    """Decode JSON and unwrap the stable envelope for ``/v1`` responses.
+
+    Legacy routes retain their raw JSON shape. Stable success responses fail
+    closed when ``apiVersion``, ``requestId``, or ``data`` is missing so the
+    typed clients never silently accept server contract drift.
+    """
+    versioned = response.request.url.path.startswith("/v1/")
+    try:
+        payload = response.json()
+    except (json.JSONDecodeError, ValueError):
+        if not versioned:
+            raise
+        raise _protocol_error(response) from None
+    if not versioned:
+        return payload
+    if (
+        not isinstance(payload, dict)
+        or payload.get("apiVersion") != "v1"
+        or not isinstance(payload.get("requestId"), str)
+        or not payload.get("requestId")
+        or "data" not in payload
+    ):
+        raise _protocol_error(response)
+    return payload["data"]
+
+
+def _protocol_error(response: httpx.Response) -> JanuslyProtocolError:
+    return JanuslyProtocolError(
+        "Invalid Janusly v1 response envelope",
+        status_code=response.status_code,
+        code="invalid_response_envelope",
+        response_body=response.text or None,
+    )
+
+
 __all__ = [
     "AuthLike",
     "BearerAuth",
@@ -334,4 +375,5 @@ __all__ = [
     "build_headers",
     "make_config",
     "request",
+    "response_json",
 ]

@@ -23,6 +23,9 @@ retroactively.
 - The private Node SDK now consumes stable `/v1` envelopes and builds a normal
   ESM package with declarations, source maps, and an isolated tarball consumer
   smoke test. Registry publication remains disabled.
+- The Python SDK's synchronous and asynchronous run/recovery resources now use
+  the same stable `/v1` envelopes, typed protocol-drift errors, filters, and
+  keyset cursor semantics as the Node SDK.
 
 ### Added
 

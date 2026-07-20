@@ -46,6 +46,7 @@ from ._http import (
     ServiceTokenAuth,
     async_request,
     make_config,
+    response_json,
 )
 from .client import (
     TERMINAL_STATUSES,
@@ -119,28 +120,31 @@ class AsyncRunsResource:
         *,
         workflow_id: str,
         input: Optional[dict[str, Any]] = None,
+        force_run_during_pause: Optional[bool] = None,
     ) -> dict[str, Any]:
         """Start a saved workflow by id.
 
         Two-step flow matching the sync client + TS SDK:
-        ``GET /workflows/latest?workflowId=…`` to extract the DAG, then
-        ``POST /start`` with the DAG + optional ``input``. Returns
+        ``GET /v1/workflows/latest?workflowId=…`` to extract the DAG, then
+        ``POST /v1/start`` with the DAG + optional ``input``. Returns
         ``{"runId": str}``.
         """
         latest_response = await async_request(
             self._config,
             method="GET",
-            path=f"/workflows/latest?workflowId={quote(workflow_id, safe='')}",
+            path=f"/v1/workflows/latest?workflowId={quote(workflow_id, safe='')}",
         )
-        latest = latest_response.json()
+        latest = response_json(latest_response)
         workflow = _extract_workflow_dag(latest, workflow_id)
         body: dict[str, Any] = {"workflow": workflow}
         if input is not None:
             body["input"] = input
+        if force_run_during_pause is not None:
+            body["forceRunDuringPause"] = force_run_during_pause
         response = await async_request(
-            self._config, method="POST", path="/start", json_body=body
+            self._config, method="POST", path="/v1/start", json_body=body
         )
-        return cast("dict[str, Any]", response.json())
+        return cast("dict[str, Any]", response_json(response))
 
     async def get(
         self,
@@ -149,7 +153,7 @@ class AsyncRunsResource:
         events_limit: Optional[int] = None,
         events_cursor: Optional[str] = None,
     ) -> dict[str, Any]:
-        """``GET /run?runId=…`` — fetch a single run with paginated events."""
+        """``GET /v1/run?runId=…`` — fetch a single run with paginated events."""
         params: dict[str, str] = {"runId": run_id}
         if events_limit is not None:
             params["eventsLimit"] = str(events_limit)
@@ -158,17 +162,19 @@ class AsyncRunsResource:
         response = await async_request(
             self._config,
             method="GET",
-            path=f"/run?{urlencode(params)}",
+            path=f"/v1/run?{urlencode(params)}",
         )
-        return cast("dict[str, Any]", response.json())
+        return cast("dict[str, Any]", response_json(response))
 
     async def list(
         self,
         *,
         workflow_id: Optional[str] = None,
+        status: Optional[str] = None,
+        run_kind: Optional[Literal["production", "validation"]] = None,
         limit: Optional[int] = None,
     ) -> AsyncIterator[dict[str, Any]]:
-        """``GET /runs`` — yield run summaries lazily.
+        """``GET /v1/runs`` — yield run summaries lazily.
 
         Async generator: ``async for row in client.runs.list(...)``. Caps
         at 100 rows by default (max 200 via ``limit``); stops when the
@@ -185,14 +191,18 @@ class AsyncRunsResource:
             params: dict[str, str] = {"limit": str(per_page)}
             if workflow_id is not None:
                 params["workflowId"] = workflow_id
+            if status is not None:
+                params["status"] = status
+            if run_kind is not None:
+                params["runKind"] = run_kind
             if cursor is not None:
-                params["cursor"] = cursor
+                params["before"] = cursor
             response = await async_request(
                 self._config,
                 method="GET",
-                path=f"/runs?{urlencode(params)}",
+                path=f"/v1/runs?{urlencode(params)}",
             )
-            payload = response.json()
+            payload = response_json(response)
             if isinstance(payload, dict):
                 rows = payload.get("runs")
                 next_cursor = payload.get("nextCursor")
@@ -217,7 +227,7 @@ class AsyncRunsResource:
         interval_ms: int = 1000,
         timeout_ms: int = 300_000,
     ) -> dict[str, Any]:
-        """Poll ``GET /run`` until the run reaches a terminal status.
+        """Poll ``GET /v1/run`` until the run reaches a terminal status.
 
         Returns the final response. Raises
         :class:`janusly.errors.JanuslyTimeoutError` when the wall-clock
@@ -250,7 +260,7 @@ class AsyncRunsResource:
         Async generator. Stops once the run reaches a terminal status.
         Dedupes across polls via each event's ``id`` field. ``since_cursor``
         participates ONLY in the first poll (the ``eventsCursor`` on
-        ``GET /run`` is the backward-history walker — using it on every
+        ``GET /v1/run`` is the backward-history walker — using it on every
         poll would walk into the past instead of streaming new events at
         the head); after the first call the dedup set filters seen events.
         """
@@ -284,7 +294,7 @@ class AsyncRunsResource:
         input: Optional[dict[str, Any]] = None,
         resume_token: Optional[str] = None,
     ) -> dict[str, Any]:
-        """``POST /resume`` — resume a waiting human_form or approval node."""
+        """``POST /v1/resume`` — resume a waiting human_form or approval node."""
         body: dict[str, Any] = {"runId": run_id, "nodeId": node_id}
         if input is not None:
             body["input"] = input
@@ -293,25 +303,25 @@ class AsyncRunsResource:
         response = await async_request(
             self._config,
             method="POST",
-            path="/resume",
+            path="/v1/resume",
             json_body=body,
         )
-        return cast("dict[str, Any]", response.json())
+        return cast("dict[str, Any]", response_json(response))
 
     async def cancel(
         self, *, run_id: str, reason: Optional[str] = None
     ) -> dict[str, Any]:
-        """``POST /run/cancel`` — cancel an in-flight run."""
+        """``POST /v1/run/cancel`` — cancel an in-flight run."""
         body: dict[str, Any] = {"runId": run_id}
         if reason is not None:
             body["reason"] = reason
         response = await async_request(
             self._config,
             method="POST",
-            path="/run/cancel",
+            path="/v1/run/cancel",
             json_body=body,
         )
-        return cast("dict[str, Any]", response.json())
+        return cast("dict[str, Any]", response_json(response))
 
 
 class AsyncReportsResource:
@@ -354,7 +364,7 @@ class AsyncRecoveryResource:
         self._config = config
 
     async def get_metrics(self, *, window_days: int = 30) -> dict[str, Any]:
-        """``GET /recovery/metrics?windowDays=N`` — fetch the rollup.
+        """``GET /v1/recovery/metrics?windowDays=N`` — fetch the rollup.
 
         Includes ``timeToFirstAction`` and ``recurrenceRate`` alongside the
         existing recovery, SLA, cluster, cost, and value signals.
@@ -363,9 +373,9 @@ class AsyncRecoveryResource:
         response = await async_request(
             self._config,
             method="GET",
-            path=f"/recovery/metrics?{urlencode(params)}",
+            path=f"/v1/recovery/metrics?{urlencode(params)}",
         )
-        return cast("dict[str, Any]", response.json())
+        return cast("dict[str, Any]", response_json(response))
 
 
 __all__ = [

@@ -13,22 +13,33 @@ All examples below assume the dev-headers shorthand `-H "x-org-id: default" -H "
 
 ## Stable v1 contract
 
-Janusly retains every unversioned route for compatibility. Contracted reads
-also resolve under `/v1` and return stable envelopes. The current v1 set is:
+Janusly retains every unversioned route for compatibility. Contracted
+operations also resolve under `/v1` and return stable envelopes. The current v1
+set is:
 
+- `GET /v1/memory/consent-status`
 - `GET /v1/recovery/metrics`
+- `GET /v1/recovery/ledger`
+- `GET /v1/recovery/my-wins`
 - `GET /v1/workflows`
+- `GET /v1/workflows/schedule-preview`
 - `GET /v1/workflows/versions`
 - `GET /v1/workflows/latest`
 - `GET /v1/runs`
 - `GET /v1/run`
+- `GET /v1/run/usage`
 - `GET /v1/status`
+- `POST /v1/start`
+- `POST /v1/resume`
+- `POST /v1/run/cancel`
 
 Successful responses are `{ "apiVersion": "v1", "requestId": "...", "data":
 <legacy-payload> }`. Errors are `{ "apiVersion": "v1", "requestId": "...",
 "error": { "code": "...", "message": "...", "params": {} } }`. Every
 response also carries `X-Request-Id`; pass a safe `X-Request-Id` request header
 to retain your own correlation ID or let Janusly generate one.
+Contracted mutations validate strict JSON bodies at the dispatcher before the
+shared legacy handler runs; unknown top-level keys fail with `invalid_input`.
 
 The generated OpenAPI 3.1 document is public at `GET /v1/openapi.json` and
 checked in at [`apps/api/openapi.v1.json`](../apps/api/openapi.v1.json). Run
@@ -928,7 +939,8 @@ Sources from the `usage_events` table.
 A typed Node.js client wraps the routes above. It ships with the monorepo
 as the workspace-private package `@janusly/sdk` under
 [`packages/sdk-node/`](../packages/sdk-node/). It follows the repo's Node
-24 source-package baseline, has zero runtime dependencies, and exposes a
+24 ESM baseline, has zero runtime dependencies, emits declarations and source
+maps under `dist/`, and exposes a
 resource-style API:
 
 ```typescript
@@ -967,11 +979,14 @@ Python 3.10+) with the same core resource bindings (`runs`, `reports`,
 pip install -e packages/sdk-python
 ```
 
-PyPI publish is a separate release step. See [`docs/sdk-python.md`](sdk-python.md)
+Registry publication remains disabled until licensing and release readiness are
+approved. See [`docs/sdk-python.md`](sdk-python.md)
 and [`packages/sdk-python/README.md`](../packages/sdk-python/README.md) for the
 surface table, examples, and v1 non-goals.
 
-Typed error hierarchy: `JanuslyApiError` base + `JanuslyAuthError` (401/403) + `JanuslyValidationError` (400/422 with `code` + `params`) + `JanuslyRateLimitError` (429, carries `retryAfterSeconds`) + `JanuslyServerError` (5xx) + `JanuslyTimeoutError` (polling deadline) + `JanuslyWebhookSignatureError`. Consumers `instanceof` instead of switching on `statusCode`.
+Both SDKs expose typed HTTP/auth/validation/rate-limit/server errors plus a
+protocol error when a successful `/v1` envelope drifts. Polling timeouts and
+webhook-signature failures remain distinct client-side errors.
 
 Optional config-level affordances: structured `logger` hook, opt-in `retry` layer (default OFF; respects `Retry-After` on 429s), per-call `{ signal, headers, timeoutMs }` options on every method. AbortSignals propagate everywhere via `AbortSignal.any` composition.
 

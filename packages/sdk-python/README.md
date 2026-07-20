@@ -6,7 +6,20 @@ A typed Python client for the Janusly platform, plus a stdlib-only HMAC verifier
 pip install -e packages/sdk-python
 ```
 
-Requires Python 3.10+. The package is not published to PyPI yet; after the release ticket publishes it, consumers can use `pip install janusly`.
+Requires Python 3.10+. The package is not published to PyPI; registry
+distribution remains disabled until licensing and release readiness are
+explicitly approved.
+
+Maintainers can build and inspect normal wheel and source-distribution
+artifacts without publishing:
+
+```bash
+cd packages/sdk-python
+python scripts/check_package.py
+```
+
+The smoke builds both artifacts, installs the wheel into an isolated temporary
+target, and imports its public protocol-error surface.
 
 ## Quickstart
 
@@ -70,6 +83,10 @@ for summary in client.runs.list(workflow_id="wf-billing", limit=50):
 ```
 
 The API caps at 100 rows by default (max 200 via `limit`). The iterator is lazy and respects the soft `limit` without buffering.
+
+Run and recovery resources consume the stable `/v1` API envelope. A successful
+response that omits `apiVersion`, `requestId`, or `data` raises
+`JanuslyProtocolError` rather than being silently cast.
 
 **Resume a human-form / approval node.**
 

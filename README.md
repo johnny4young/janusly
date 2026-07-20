@@ -360,7 +360,7 @@ See [`docs/ai.md`](docs/ai.md) for the full guide.
 | `packages/mcp-server`      | Vitest 4 for MCP stdio protocol, tool descriptors, auth headers, and dispatch. |
 | `packages/solution-packs`  | Vitest 4 for pack schema validity, fixture integrity, and public catalog shape. |
 | `packages/sdk-node`        | Vitest 4 for typed client headers, stable envelopes, polling/streaming, reports, recovery, and webhooks; isolated npm-tarball consumer smoke. |
-| `packages/sdk-python`      | Pytest for auth, errors, runs, reports, recovery, webhook signatures, and packaging. |
+| `packages/sdk-python`      | Pytest for auth, stable envelopes, runs, reports, recovery, and webhooks; mypy/ruff plus isolated wheel/sdist smoke. |
 
 ```bash
 pnpm test               # full Vitest workspace suite
@@ -405,7 +405,7 @@ Acronyms used throughout this README and the wider Janusly codebase ([`AGENTS.md
 | **RL** | Reinforcement Learning | The decision-engine layer that reads per-node `routing_stats` and shifts future router scoring after enough observed successes / failures. |
 | **RPA** | Robotic Process Automation | Click-record desktop automation (UiPath / Automation Anywhere shape). Janusly is *not* this — it operates AI workflows, not desktop scripts. |
 | **SCIM** | System for Cross-domain Identity Management | The IdP-side standard for pushing user / group lifecycle into a SaaS. Janusly consumes SCIM through WorkOS Directory Sync via `POST /webhooks/workos/directory`, normalizing events into `org_members` upserts / deactivations. |
-| **SDK** | Software Development Kit | The first-party clients: `packages/sdk-node` (`@janusly/sdk`) and `packages/sdk-python` (`janusly`, local install until the PyPI release ticket ships). |
+| **SDK** | Software Development Kit | The first-party clients: `packages/sdk-node` (`@janusly/sdk`) and `packages/sdk-python` (`janusly`); both are locally installable while registry publication remains disabled. |
 | **SLO** | Service Level Objective | The per-workflow reliability contract (success rate %, p95 duration, MTTR seconds, etc.) persisted on `workflow_versions.slo_json`. Breaches surface on `GET /workflows/health` and in the Inspector's SLO panel; they do *not* change the numeric health score, they are an orthogonal alert signal. |
 | **SSO** | Single Sign-On | The "log in once with my company IdP" flow. Janusly's SSO is WorkOS-backed: `GET /auth/sso/start` → IdP → `GET /auth/sso/callback` issues the `x-janusly-session` HMAC token. Per-org `enforced_sso: true` rejects non-SSO modes outside dev. |
 | **SSRF** | Server-Side Request Forgery | The attack class where a workflow author tricks the engine into hitting an internal endpoint (e.g. `169.254.169.254` AWS metadata). Defence is the `fetchHttpTarget` / `validateHttpTarget` chokepoint plus DNS-pinning the validated IP onto the actual TCP connect via an `undici.Agent`. |
