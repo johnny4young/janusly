@@ -14,6 +14,8 @@ import { WorkflowSchema } from "@janusly/shared";
 import {
   checkWorkflowReadinessContract,
   getWorkflowHealthContract,
+  rollbackWorkflowContract,
+  saveWorkflowContract,
   validateWorkflowContract,
 } from "./api-contracts";
 
@@ -61,5 +63,28 @@ describe("workflow stable contracts", () => {
       slo: null,
     });
     expect(getWorkflowHealthContract.response.safeParse(result).success).toBe(true);
+  });
+
+  it("keeps stable save input explicit while allowing bounded upstream subscriptions", () => {
+    const bodySchema = saveWorkflowContract.request.body;
+    expect(bodySchema.safeParse({ ...workflow, upstreamHealthSources: ["github"] }).success).toBe(true);
+    expect(bodySchema.safeParse({ ...workflow, unexpected: true }).success).toBe(false);
+    expect(saveWorkflowContract.response.safeParse({
+      workflowId: "contract-smoke",
+      versionId: "version-2",
+      version: 2,
+    }).success).toBe(true);
+  });
+
+  it("requires both rollback identifiers and validates its version response", () => {
+    const bodySchema = rollbackWorkflowContract.request.body;
+    expect(bodySchema.safeParse({ workflowId: "contract-smoke", sourceVersionId: "version-1" }).success).toBe(true);
+    expect(bodySchema.safeParse({ workflowId: "contract-smoke" }).success).toBe(false);
+    expect(rollbackWorkflowContract.response.safeParse({
+      workflowId: "contract-smoke",
+      versionId: "version-3",
+      version: 3,
+      sourceVersion: 1,
+    }).success).toBe(true);
   });
 });

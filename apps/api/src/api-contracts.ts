@@ -7,7 +7,12 @@
  * emission.
  */
 
-import { WorkflowSchema, WorkflowSloBreachesSchema, WorkflowSloSchema } from "@janusly/shared";
+import {
+  UpstreamHealthSourceTagsSchema,
+  WorkflowSchema,
+  WorkflowSloBreachesSchema,
+  WorkflowSloSchema,
+} from "@janusly/shared";
 import { V1_MCP_PATHS, V1_READ_PATHS, V1_WRITE_PATHS } from "@janusly/shared/src/api-contract";
 import { nodeStatusValues, runStatusValues } from "@janusly/shared/src/status";
 import { z } from "zod";
@@ -121,6 +126,18 @@ const WorkflowHealthSchema = z.object({
 // identifying structural failures is the purpose of these endpoints. Their
 // successful result schemas remain strict enough to protect the stable wire.
 const WorkflowCandidateBodySchema = z.record(z.string(), z.unknown());
+const SaveWorkflowBodySchema = WorkflowSchema.safeExtend({
+  upstreamHealthSources: UpstreamHealthSourceTagsSchema.optional(),
+}).strict();
+const RollbackWorkflowBodySchema = z.object({
+  workflowId: z.string().trim().min(1).max(256),
+  sourceVersionId: z.string().trim().min(1).max(256),
+}).strict();
+const SavedWorkflowVersionSchema = z.object({
+  workflowId: z.string().min(1),
+  versionId: z.string().min(1),
+  version: z.number().int().positive(),
+});
 
 const WorkflowListRowSchema = z.object({
   id: z.string(),
@@ -505,6 +522,43 @@ export const getWorkflowHealthContract = {
   ],
 } satisfies ApiRouteContract;
 
+export const saveWorkflowContract = {
+  operationId: "saveWorkflow",
+  path: V1_WRITE_PATHS.saveWorkflow,
+  summary: "Save a validated workflow as a new immutable version",
+  tags: ["Workflows"],
+  request: { body: SaveWorkflowBodySchema },
+  response: SavedWorkflowVersionSchema,
+  errorCodes: [
+    "invalid_input",
+    "workflow_not_found",
+    "workflows_validation_failed",
+    "workflows_upstream_health_sources_invalid",
+    "workflows_save_conflict",
+    ...MCP_WRITE_ERROR_CODES,
+  ],
+} satisfies ApiRouteContract;
+
+export const rollbackWorkflowContract = {
+  operationId: "rollbackWorkflow",
+  path: V1_WRITE_PATHS.rollbackWorkflow,
+  summary: "Append a prior workflow snapshot as the new latest version",
+  tags: ["Workflows"],
+  request: { body: RollbackWorkflowBodySchema },
+  response: SavedWorkflowVersionSchema.extend({
+    sourceVersion: z.number().int().positive(),
+  }),
+  errorCodes: [
+    "invalid_input",
+    "workflow_not_found",
+    "workflows_rollback_ids_required",
+    "workflows_source_version_not_found",
+    "workflows_version_malformed",
+    "workflows_rollback_conflict",
+    ...MCP_WRITE_ERROR_CODES,
+  ],
+} satisfies ApiRouteContract;
+
 export const listWorkflowsContract = {
   operationId: "listWorkflows",
   path: V1_READ_PATHS.workflows,
@@ -847,6 +901,8 @@ export const V1_CONTRACT_ROUTES: readonly ApiContractRouteDescriptor[] = [
   { method: "POST", role: "editor", contract: validateWorkflowContract },
   { method: "POST", role: "editor", contract: checkWorkflowReadinessContract },
   { method: "GET", role: "viewer", contract: getWorkflowHealthContract },
+  { method: "POST", role: "editor", permission: "workflows.write", contract: saveWorkflowContract },
+  { method: "POST", role: "editor", permission: "workflows.write", contract: rollbackWorkflowContract },
   { method: "GET", contract: listWorkflowsContract },
   { method: "GET", role: "viewer", permission: "workflows.read", contract: getSchedulePreviewContract },
   { method: "GET", contract: listWorkflowVersionsContract },

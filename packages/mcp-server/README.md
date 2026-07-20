@@ -71,8 +71,8 @@ Write tools are advertised only when `JANUSLY_MCP_WRITES_ENABLED=true` is set in
 
 | MCP tool | API endpoint | Notes |
 | --- | --- | --- |
-| `workflows.save` | `POST /workflows/save` | Save a workflow version; `dryRun: true` uses `/v1/validate` instead. |
-| `workflows.rollback` | `POST /workflows/rollback` | Append a prior DAG as the new latest version. |
+| `workflows.save` | `POST /v1/workflows/save` | Save a workflow version; `dryRun: true` uses `/v1/validate` instead. |
+| `workflows.rollback` | `POST /v1/workflows/rollback` | Append a prior DAG as the new latest version. |
 | `runs.start` | `POST /v1/start` | Start a production run. |
 | `runs.resume` | `POST /v1/resume` | Resume a waiting approval or human-form node. |
 | `runs.cancel` | `POST /v1/run/cancel` | Cancel an in-flight run. |

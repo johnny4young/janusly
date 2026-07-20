@@ -77,6 +77,8 @@ import {
   getWorkflowHealthContract,
   listWorkflowsContract,
   listWorkflowVersionsContract,
+  rollbackWorkflowContract,
+  saveWorkflowContract,
   validateWorkflowContract,
 } from "../api-contracts";
 
@@ -210,7 +212,7 @@ export const workflowsRoutes: Route[] = [
       const rows = await listWorkflowsWithRunSummary(auth.orgId, limitValue, { tags, folder, search, before });
       return sendJson(res, rows);
     } },
-  { method: "POST", match: "/workflows/save", role: "editor", permission: "workflows.write",
+  { method: "POST", match: "/workflows/save", role: "editor", permission: "workflows.write", contract: saveWorkflowContract,
     handler: async ({ req, res, auth }) => {
       // MCP-source mutations gate on the process-wide env AND the tenant's
       // `mcp.writeConsent` flag (+ per-tool rate limit). No-op for non-MCP
@@ -220,7 +222,13 @@ export const workflowsRoutes: Route[] = [
 
       const workflow = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const validation = validateWorkflow(workflow);
-      if (!validation.valid) return sendJson(res, { error: "Validation failed", issues: validation.issues }, 400);
+      if (!validation.valid) {
+        return sendJson(res, {
+          error: "Validation failed",
+          code: "workflows_validation_failed",
+          issues: validation.issues,
+        }, 400);
+      }
       const parsedWorkflow = WorkflowSchema.parse(workflow);
 
       // Optional upstream-health source tags — a sibling field on the save body
@@ -232,7 +240,11 @@ export const workflowsRoutes: Route[] = [
       if (Object.hasOwn(workflow, "upstreamHealthSources")) {
         const parsedTags = UpstreamHealthSourceTagsSchema.safeParse(workflow.upstreamHealthSources);
         if (!parsedTags.success) {
-          return sendJson(res, { error: "invalid upstreamHealthSources", issues: parsedTags.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })) }, 422);
+          return sendJson(res, {
+            error: "Invalid upstream health sources",
+            code: "workflows_upstream_health_sources_invalid",
+            issues: parsedTags.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
+          }, 422);
         }
         upstreamHealthSources = parsedTags.data;
       }
@@ -252,7 +264,9 @@ export const workflowsRoutes: Route[] = [
       if (result.kind === "conflict") {
         return sendJson(res, {
           error: "Concurrent save conflict — please retry",
+          code: "workflows_save_conflict",
           attempts: result.attempts,
+          params: { attempts: result.attempts },
         }, 409);
       }
 
@@ -273,7 +287,7 @@ export const workflowsRoutes: Route[] = [
         version: result.version,
       });
     } },
-  { method: "POST", match: "/workflows/rollback", role: "editor",
+  { method: "POST", match: "/workflows/rollback", role: "editor", permission: "workflows.write", contract: rollbackWorkflowContract,
     handler: async ({ req, res, auth }) => {
       const rollbackMcpGate = await guardMcpWrite(auth, "workflows.rollback");
       if (!rollbackMcpGate.ok) return sendJson(res, rollbackMcpGate.body, rollbackMcpGate.status);
@@ -291,8 +305,19 @@ export const workflowsRoutes: Route[] = [
       });
       if (!result.ok) {
         // A soft-deleted workflow behaves as "not found" for writes too.
-        if (result.code === "deleted") {
+        if (result.code === "deleted" || result.code === "parent_not_found") {
           return sendError(res, "workflow_not_found", "Workflow not found", 404);
+        }
+        if (result.code === "malformed") {
+          return sendError(res, "workflows_version_malformed", "Workflow version is malformed", 422);
+        }
+        if (result.code === "conflict") {
+          return sendJson(res, {
+            error: "Concurrent rollback conflict — please retry",
+            code: "workflows_rollback_conflict",
+            attempts: result.attempts,
+            params: { attempts: result.attempts },
+          }, 409);
         }
         return sendError(res, "workflows_source_version_not_found", "Source version not found", 404);
       }

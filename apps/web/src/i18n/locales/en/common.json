@@ -276,8 +276,12 @@
   "apiErrors.workflow_metadata_workflow_id_required": "workflowId required",
   "apiErrors.workflows_after_version_invalid": "afterVersion must be a positive integer",
   "apiErrors.workflows_no_versions": "Workflow has no versions",
+  "apiErrors.workflows_rollback_conflict": "Concurrent rollback conflict — please retry",
   "apiErrors.workflows_rollback_ids_required": "workflowId and sourceVersionId are required",
+  "apiErrors.workflows_save_conflict": "Concurrent save conflict — please retry",
   "apiErrors.workflows_source_version_not_found": "Source version not found",
+  "apiErrors.workflows_upstream_health_sources_invalid": "Invalid upstream health sources",
+  "apiErrors.workflows_validation_failed": "Workflow validation failed",
   "apiErrors.workflows_version_malformed": "Workflow version is malformed",
   "apiErrors.workflows_workflow_id_required": "workflowId is required",
 

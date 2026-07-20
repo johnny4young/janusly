@@ -69,12 +69,12 @@ const WRITE_TOOLS: Tool[] = [
         workflow: {
           type: "object",
           description:
-            "Full workflow DAG: { dslVersion, nodes, edges, optional id/name/inputs/outputs/metadata }. Same shape `POST /workflows/save` accepts.",
+            "Full workflow DAG: { dslVersion, nodes, edges, optional id/name/inputs/outputs/metadata }. Same shape `POST /v1/workflows/save` accepts.",
         },
         dryRun: {
           type: "boolean",
           description:
-            "When true, route to /validate instead of /workflows/save. Returns `{ mode: 'dry-run', valid, issues }` without writing a new version.",
+            "When true, route to `/v1/validate` instead of `/v1/workflows/save`. Returns `{ mode: 'dry-run', valid, issues }` without writing a new version.",
         },
       },
     },
@@ -702,7 +702,7 @@ async function runOne(
       if (typeof args.workflowId !== "string" || typeof args.sourceVersionId !== "string") {
         throw new Error("workflows.rollback requires `workflowId` and `sourceVersionId` (strings)");
       }
-      return callApi("/workflows/rollback", {
+      return callApi("/v1/workflows/rollback", {
         method: "POST",
         body: JSON.stringify({ workflowId: args.workflowId, sourceVersionId: args.sourceVersionId }),
       });
@@ -752,7 +752,7 @@ async function runOne(
         });
         return { mode: "dry-run", validation };
       }
-      return callApi("/workflows/save", {
+      return callApi("/v1/workflows/save", {
         method: "POST",
         body: JSON.stringify(args.workflow),
       });

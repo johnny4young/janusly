@@ -29,6 +29,8 @@ export type V1ReadPath = typeof V1_READ_PATHS[keyof typeof V1_READ_PATHS];
 export const V1_WRITE_PATHS = {
   validateWorkflow: "/validate",
   workflowReadiness: "/workflows/readiness",
+  saveWorkflow: "/workflows/save",
+  rollbackWorkflow: "/workflows/rollback",
   startRun: "/start",
   resumeRun: "/resume",
   cancelRun: "/run/cancel",

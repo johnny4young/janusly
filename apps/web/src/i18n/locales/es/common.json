@@ -276,8 +276,12 @@
   "apiErrors.workflow_metadata_workflow_id_required": "workflowId es obligatorio",
   "apiErrors.workflows_after_version_invalid": "afterVersion debe ser un entero positivo",
   "apiErrors.workflows_no_versions": "El workflow no tiene versiones",
+  "apiErrors.workflows_rollback_conflict": "Conflicto durante el rollback simultáneo; vuelve a intentarlo",
   "apiErrors.workflows_rollback_ids_required": "workflowId y sourceVersionId son obligatorios",
+  "apiErrors.workflows_save_conflict": "Conflicto durante el guardado simultáneo; vuelve a intentarlo",
   "apiErrors.workflows_source_version_not_found": "Versión de origen no encontrada",
+  "apiErrors.workflows_upstream_health_sources_invalid": "Las fuentes de salud upstream no son válidas",
+  "apiErrors.workflows_validation_failed": "La validación del workflow falló",
   "apiErrors.workflows_version_malformed": "La versión del workflow está mal formada",
   "apiErrors.workflows_workflow_id_required": "workflowId es obligatorio",
 

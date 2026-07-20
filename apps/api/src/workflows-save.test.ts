@@ -9,7 +9,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Workflow } from '@janusly/shared'
 
-let existingVersionsByAttempt: { version: number }[][] = []
+type ExistingVersionRow = {
+  version: number
+  sloJson?: unknown
+  upstreamHealthSources?: string[] | null
+}
+
+let existingVersionsByAttempt: ExistingVersionRow[][] = []
 let existingWorkflowRows: { id: string; name: string }[] = []
 let existingWorkflowRowsByAttempt: { id: string; name: string }[][] | null = null
 const insertedWorkflowsRows: Record<string, unknown>[] = []
@@ -36,13 +42,15 @@ class SyntheticPgError extends Error {
 
 type SelectChain = {
   from: () => SelectChain
-  where: (...args: unknown[]) => Promise<unknown> | { orderBy: () => Promise<unknown> }
+  where: (...args: unknown[]) => Promise<unknown> | {
+    orderBy: () => { limit: () => Promise<unknown> }
+  }
 }
 
 function makeTx(currentAttempt: number) {
   return {
     // The save helper issues two `select()` calls per attempt:
-    //   1. workflow_versions list (terminates with .orderBy())
+    //   1. latest workflow_version (terminates with .orderBy().limit(1))
     //   2. workflows lookup (terminates with .where())
     select: (() => {
       let callCount = 0
@@ -55,7 +63,9 @@ function makeTx(currentAttempt: number) {
           const chain: SelectChain = {
             from: () => chain,
             where: () => ({
-              orderBy: () => Promise.resolve(existingVersionsByAttempt[currentAttempt - 1] ?? []),
+              orderBy: () => ({
+                limit: () => Promise.resolve(existingVersionsByAttempt[currentAttempt - 1]?.slice(0, 1) ?? []),
+              }),
             }),
           }
           return chain
@@ -224,6 +234,28 @@ describe('saveWorkflowVersion — happy path', () => {
 
     expect(updatedWorkflowsRows).toHaveLength(1)
     expect(updatedWorkflowsRows[0]!.name).toBe('New name')
+  })
+
+  it('carries reliability declarations from the single latest version', async () => {
+    const sloJson = { targetSuccessRate: 0.99 }
+    existingVersionsByAttempt = [[{
+      version: 7,
+      sloJson,
+      upstreamHealthSources: ['github'],
+    }]]
+    existingWorkflowRows = [{ id: 'wf-test', name: 'Test workflow' }]
+
+    const result = await saveWorkflowVersion({
+      orgId: 'org-1',
+      userId: 'user-a',
+      parsedWorkflow: baseWorkflow,
+    })
+
+    expect(result).toMatchObject({ kind: 'ok', version: 8 })
+    expect(insertedVersionRows[0]).toMatchObject({
+      sloJson,
+      upstreamHealthSources: ['github'],
+    })
   })
 
   it('generates a workflow id when the parsed workflow has none', async () => {

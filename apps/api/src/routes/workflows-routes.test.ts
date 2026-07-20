@@ -131,6 +131,8 @@ function findRoute(match: string): Route {
 beforeEach(() => {
   vi.clearAllMocks();
   bodyBox.value = { workflowId: "wf-1", sourceVersionId: "v1", dslVersion: "1.0", nodes: [], edges: [] };
+  saveMock.mockResolvedValue({ kind: "ok", workflowId: "wf-1", versionId: "v2", version: 2, workflowName: "Flow", attempts: 1 });
+  rollbackMock.mockResolvedValue({ ok: true, workflowId: "wf-1", versionId: "v2", version: 2, sourceVersion: 1, sourceVersionId: "v1", attempts: 1 });
 });
 
 afterEach(() => {
@@ -159,9 +161,55 @@ describe("workflow-mutating routes — MCP-source write consent gate", () => {
     expect(rollbackMock).not.toHaveBeenCalled();
   });
 
-  it("both routes are declared editor-gated (RBAC layered under the MCP gate)", () => {
+  it("both routes require editor rank and workflows.write permission", () => {
     expect(findRoute("/workflows/save").role).toBe("editor");
+    expect(findRoute("/workflows/save").permission).toBe("workflows.write");
     expect(findRoute("/workflows/rollback").role).toBe("editor");
+    expect(findRoute("/workflows/rollback").permission).toBe("workflows.write");
+  });
+});
+
+describe("workflow version-write error mapping", () => {
+  const auth = { orgId: "org-1", userId: "editor-1", mode: "dev-headers", source: "dev" } as never;
+
+  it("maps exhausted save allocation to a stable 409 with attempts", async () => {
+    saveMock.mockResolvedValueOnce({ kind: "conflict", attempts: 3 });
+    await findRoute("/workflows/save").handler({ req: { url: "/workflows/save" } as never, res: {} as never, auth });
+
+    expect(sendJsonMock).toHaveBeenLastCalledWith({}, {
+      error: "Concurrent save conflict — please retry",
+      code: "workflows_save_conflict",
+      attempts: 3,
+      params: { attempts: 3 },
+    }, 409);
+  });
+
+  it("maps exhausted rollback allocation to a stable 409 with attempts", async () => {
+    rollbackMock.mockResolvedValueOnce({ ok: false, code: "conflict", attempts: 3 });
+    await findRoute("/workflows/rollback").handler({ req: { url: "/workflows/rollback" } as never, res: {} as never, auth });
+
+    expect(sendJsonMock).toHaveBeenLastCalledWith({}, {
+      error: "Concurrent rollback conflict — please retry",
+      code: "workflows_rollback_conflict",
+      attempts: 3,
+      params: { attempts: 3 },
+    }, 409);
+  });
+
+  it("rejects missing parents and malformed source snapshots explicitly", async () => {
+    rollbackMock.mockResolvedValueOnce({ ok: false, code: "parent_not_found" });
+    await findRoute("/workflows/rollback").handler({ req: { url: "/workflows/rollback" } as never, res: {} as never, auth });
+    expect(sendJsonMock).toHaveBeenLastCalledWith({}, {
+      error: "Workflow not found",
+      code: "workflow_not_found",
+    }, 404);
+
+    rollbackMock.mockResolvedValueOnce({ ok: false, code: "malformed" });
+    await findRoute("/workflows/rollback").handler({ req: { url: "/workflows/rollback" } as never, res: {} as never, auth });
+    expect(sendJsonMock).toHaveBeenLastCalledWith({}, {
+      error: "Workflow version is malformed",
+      code: "workflows_version_malformed",
+    }, 422);
   });
 });
 

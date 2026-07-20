@@ -144,13 +144,13 @@ describe("dispatchTool", () => {
     expect(mock).not.toHaveBeenCalled();
   });
 
-  it("workflows.save POSTs to /workflows/save when env is on", async () => {
+  it("workflows.save POSTs to the stable save contract when env is on", async () => {
     vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "true");
     const { mock } = makeMockCallApi();
     const workflow = { dslVersion: "1.0", id: "wf1", nodes: [{ id: "n1", type: "noop", config: {} }], edges: [] };
     await dispatchTool(mock, "workflows.save", { workflow });
     const [path, init] = mock.mock.calls[0];
-    expect(path).toBe("/workflows/save");
+    expect(path).toBe("/v1/workflows/save");
     expect(init?.method).toBe("POST");
     expect(JSON.parse(init?.body as string)).toEqual(workflow);
   });
@@ -476,12 +476,12 @@ describe("dispatchTool", () => {
     await expect(dispatchTool(mock, "dlq.replay", {})).rejects.toThrow(/deadLetterId/);
   });
 
-  it("workflows.rollback POSTs { workflowId, sourceVersionId } to /workflows/rollback", async () => {
+  it("workflows.rollback POSTs identifiers to the stable rollback contract", async () => {
     vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "true");
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "workflows.rollback", { workflowId: "wf1", sourceVersionId: "v2" });
     const [path, init] = mock.mock.calls[0];
-    expect(path).toBe("/workflows/rollback");
+    expect(path).toBe("/v1/workflows/rollback");
     expect(JSON.parse(init?.body as string)).toEqual({ workflowId: "wf1", sourceVersionId: "v2" });
   });
 

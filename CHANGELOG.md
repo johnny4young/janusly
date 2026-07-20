@@ -39,8 +39,16 @@ retroactively.
   required OpenAPI path parameters.
 - Stable `/v1` workflow validation, production-readiness, and health contracts,
   with the web and MCP clients migrated to versioned health and preflight calls.
+- Stable `/v1` workflow save and rollback contracts with explicit request,
+  response, conflict, validation, and authorization guarantees.
 
 ### Fixed
+
+- Workflow rollback now requires `workflows.write`, rejects missing parents and
+  malformed source snapshots, retries concurrent version allocation, and
+  reconciles schedule entries after committing the new latest version.
+- Workflow save and rollback now read only the latest version's bounded
+  reliability projection instead of loading the complete immutable history.
 
 - Structured AI generation now uses the stable AI SDK 7 output API while
   preserving validated object results and deterministic fallbacks.

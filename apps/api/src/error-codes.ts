@@ -319,8 +319,12 @@ export type ApiErrorCode =
   // workflows
   | "workflows_after_version_invalid"
   | "workflows_no_versions"
+  | "workflows_rollback_conflict"
   | "workflows_rollback_ids_required"
+  | "workflows_save_conflict"
   | "workflows_source_version_not_found"
+  | "workflows_upstream_health_sources_invalid"
+  | "workflows_validation_failed"
   | "workflows_version_malformed"
   | "workflows_workflow_id_required";
 
