@@ -163,6 +163,15 @@ beforeEach(() => {
   recordExemplarMock.mockResolvedValue(undefined);
 });
 
+describe("POST /ai/generate-workflow — authorization and contract", () => {
+  it("requires ai.write without imposing a role-rank floor", () => {
+    const route = findRoute("POST", "/ai/generate-workflow");
+    expect(route.role).toBeUndefined();
+    expect(route.permission).toBe("ai.write");
+    expect(route.contract?.operationId).toBe("generateWorkflow");
+  });
+});
+
 describe("POST /ai/generate-workflow — generationMode dispatch", () => {
   it("free_json: parses generateText output and audits generationMode=free_json", async () => {
     const llm = makeLlm({ text: [VALID_JSON] });
@@ -175,6 +184,9 @@ describe("POST /ai/generate-workflow — generationMode dispatch", () => {
     expect(res.payload.mode).toBe("ai");
     expect(res.payload.model).toBe("claude-haiku-4-5-20251001");
     expect(res.payload.nodes[0].type).toBe("http");
+    expect(findRoute("POST", "/ai/generate-workflow").contract?.response.safeParse(
+      JSON.parse(JSON.stringify(res.payload)),
+    ).success).toBe(true);
 
     const meta = (auditMock.mock.calls[0]?.[2]?.metadata ?? {}) as Record<string, unknown>;
     expect(meta.mode).toBe("ai");

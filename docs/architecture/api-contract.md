@@ -107,6 +107,13 @@ the response header and v1 envelope. CORS exposes `X-Request-Id` and
     JSON envelope; downloadable Markdown and JSON attachments deliberately stay
     on the unversioned route so version negotiation never changes an artifact's
     bytes or filename.
+11. Stable AI drafting exposes generation and patching without persisting a
+    workflow version. Both require `ai.write`; patching additionally preserves
+    its editor-rank floor. Deterministic AI fallbacks remain successful response
+    data, while cost-policy rejection uses the catalogued `budget_exceeded`
+    error with scalar budget parameters. A fallback patch may carry a malformed
+    historical workflow snapshot for diagnosis, but `mode: "ai"` suggestions
+    must validate against `WorkflowSchema` at the wire boundary.
 
 ## Adding a contracted route
 
@@ -127,9 +134,9 @@ the response header and v1 envelope. CORS exposes `X-Request-Id` and
 
 The MCP proxy consumes `/v1` only for operations present in this manifest and
 unwraps the stable envelope in `packages/mcp-server/src/api-client.ts`. Its
-remaining legacy calls must migrate operation-by-operation after their route
-schemas are explicit; adding `/v1` to an uncontracted path intentionally yields
-404.
+JSON operation calls are contracted; downloadable artifact routes remain
+unversioned because the v1 envelope would change their bytes. Adding `/v1` to
+an uncontracted path intentionally yields 404.
 
 Do not add a schema with opaque top-level payloads merely to increase route
 count. SDK methods may consume only explicitly contracted `/v1` operations;

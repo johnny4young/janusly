@@ -101,10 +101,10 @@ beforeEach(() => {
 });
 
 describe("POST /ai/review-workflow — auth gate", () => {
-  it("is auth-only (no elevated role — read-shaped review surface)", () => {
+  it("uses ai.write without imposing an elevated role rank", () => {
     const route = findRoute();
     expect(route.role).toBeUndefined();
-    expect(route.permission).toBeUndefined();
+    expect(route.permission).toBe("ai.write");
   });
 });
 

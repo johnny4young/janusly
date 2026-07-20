@@ -15,10 +15,12 @@ import { WorkflowSchema } from "@janusly/shared";
 
 import {
   checkWorkflowReadinessContract,
+  generateWorkflowContract,
   getWorkflowHealthContract,
   getRunExplainReportContract,
   listDeadLettersContract,
   listFailureClustersContract,
+  patchWorkflowContract,
   replayDeadLetterContract,
   rollbackWorkflowContract,
   saveWorkflowContract,
@@ -30,6 +32,92 @@ const workflow = WorkflowSchema.parse({
   id: "contract-smoke",
   nodes: [{ id: "start", type: "noop", config: {} }],
   edges: [],
+});
+
+describe("AI authoring stable contracts", () => {
+  const budget = {
+    allowed: true,
+    monthlyUsdSpent: 8,
+    monthlyUsdLimit: 10,
+    policy: "warn",
+    warningPercent: 80,
+    warningThresholdCrossed: true,
+    exceededAt: null,
+    resolvedScope: "org",
+  } as const;
+
+  it("requires explicit bounded inputs and rejects unknown fields", () => {
+    expect(generateWorkflowContract.request.body.safeParse({ prompt: "Draft incident triage" }).success).toBe(true);
+    expect(generateWorkflowContract.request.body.safeParse({ prompt: "   " }).success).toBe(false);
+    const spacedPrompt = generateWorkflowContract.request.body.safeParse({ prompt: "  Draft incident triage  " });
+    expect(spacedPrompt.success && spacedPrompt.data.prompt).toBe("  Draft incident triage  ");
+    expect(generateWorkflowContract.request.body.safeParse({ prompt: "Draft", unknown: true }).success).toBe(false);
+    expect(patchWorkflowContract.request.body.safeParse({ deadLetterId: "dlq-1" }).success).toBe(true);
+    expect(patchWorkflowContract.request.body.safeParse({ deadLetterId: "" }).success).toBe(false);
+    expect(patchWorkflowContract.request.body.safeParse({ deadLetterId: " dlq-1 " }).success).toBe(false);
+  });
+
+  it("accepts real generation modes and the optional warning envelope", () => {
+    expect(generateWorkflowContract.response.safeParse({
+      ...workflow,
+      mode: "ai",
+      model: "claude-haiku-4-5-20251001",
+      provider: "anthropic",
+      candidateCount: 1,
+      budget,
+    }).success).toBe(true);
+    expect(generateWorkflowContract.response.safeParse({
+      ...workflow,
+      mode: "fallback",
+      aiError: "provider unavailable",
+      candidateCount: 1,
+      bonBackoff: { from: 4, to: 1 },
+    }).success).toBe(true);
+  });
+
+  it("keeps AI patches strict while allowing a malformed original only in fallback mode", () => {
+    const common = {
+      rationale: "Retry a transient failure.",
+      approachLabel: "add_retry",
+      confidence: 72,
+      calibratedConfidence: 68,
+      safety: { writeSide: false, approvalRequired: false, approvalPresent: true },
+      consideredAlternatives: [],
+    } as const;
+    const responseBase = {
+      rationale: common.rationale,
+      evidence: [],
+      recoveryPassport: {
+        failureSignature: "HTTP 500",
+        priorSameSignatureOutcome: {
+          status: "validation_failed",
+          approachLabel: "add_retry",
+          declineReason: "validation_failed",
+          occurredAt: "2026-07-10T12:00:00.000Z",
+        },
+      },
+    };
+
+    expect(patchWorkflowContract.response.safeParse({
+      mode: "ai",
+      suggestedWorkflow: workflow,
+      suggestions: [{ workflow, ...common }],
+      ...responseBase,
+    }).success).toBe(true);
+    expect(patchWorkflowContract.response.safeParse({
+      mode: "ai",
+      suggestedWorkflow: { corrupt: true },
+      suggestions: [{ workflow: { corrupt: true }, ...common }],
+      ...responseBase,
+    }).success).toBe(false);
+    expect(patchWorkflowContract.response.safeParse({
+      mode: "fallback",
+      suggestedWorkflow: { corrupt: true },
+      suggestions: [{ workflow: { corrupt: true }, ...common }],
+      aiError: "stored snapshot is malformed",
+      ...responseBase,
+    }).success).toBe(true);
+  });
 });
 
 describe("run-explanation stable contract", () => {

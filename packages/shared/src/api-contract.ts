@@ -30,6 +30,8 @@ export type V1ReadPath = typeof V1_READ_PATHS[keyof typeof V1_READ_PATHS];
 
 /** Stable mutation paths exposed to first-party and SDK callers. */
 export const V1_WRITE_PATHS = {
+  generateWorkflow: "/ai/generate-workflow",
+  patchWorkflow: "/ai/patch-workflow",
   validateWorkflow: "/validate",
   workflowReadiness: "/workflows/readiness",
   saveWorkflow: "/workflows/save",

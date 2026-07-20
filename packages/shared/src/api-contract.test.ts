@@ -32,7 +32,9 @@ describe("v1 API mutation paths", () => {
   it("keeps the closed mutation catalog unique and complete", () => {
     const paths = Object.values(V1_WRITE_PATHS);
     expect(new Set(paths).size).toBe(paths.length);
-    expect(paths).toHaveLength(8);
+    expect(paths).toHaveLength(10);
+    expect(paths).toContain("/ai/generate-workflow");
+    expect(paths).toContain("/ai/patch-workflow");
     expect(paths).toContain("/workflows/save");
     expect(paths).toContain("/workflows/rollback");
     expect(paths).toContain("/dlq/replay");

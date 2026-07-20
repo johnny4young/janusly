@@ -353,11 +353,11 @@ describe("dispatchTool", () => {
 
   // -------- ai.patch_workflow --------
 
-  it("ai.patch_workflow POSTs the deadLetterId to /ai/patch-workflow", async () => {
+  it("ai.patch_workflow POSTs the deadLetterId to the stable patch contract", async () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "ai.patch_workflow", { deadLetterId: "dlq-99" });
     const [path, init] = mock.mock.calls[0];
-    expect(path).toBe("/ai/patch-workflow");
+    expect(path).toBe("/v1/ai/patch-workflow");
     expect(init?.method).toBe("POST");
     expect(JSON.parse(init?.body as string)).toEqual({ deadLetterId: "dlq-99" });
   });
@@ -376,12 +376,12 @@ describe("dispatchTool", () => {
 
   // -------- ai.generate_workflow (read-only surface) --------
 
-  it("ai.generate_workflow POSTs the prompt to /ai/generate-workflow (no write flag needed)", async () => {
+  it("ai.generate_workflow POSTs the prompt to the stable generation contract (no write flag needed)", async () => {
     vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "");
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "ai.generate_workflow", { prompt: "email a receipt when a payment lands" });
     const [path, init] = mock.mock.calls[0];
-    expect(path).toBe("/ai/generate-workflow");
+    expect(path).toBe("/v1/ai/generate-workflow");
     expect(init?.method).toBe("POST");
     expect(JSON.parse(init?.body as string)).toEqual({ prompt: "email a receipt when a payment lands" });
   });

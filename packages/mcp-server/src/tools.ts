@@ -635,7 +635,7 @@ async function runOne(
       if (typeof args.deadLetterId !== "string" || args.deadLetterId.length === 0) {
         throw new Error("ai.patch_workflow requires `deadLetterId` (non-empty string)");
       }
-      return callApi("/ai/patch-workflow", {
+      return callApi("/v1/ai/patch-workflow", {
         method: "POST",
         body: JSON.stringify({ deadLetterId: args.deadLetterId }),
       });
@@ -644,7 +644,7 @@ async function runOne(
       if (typeof args.prompt !== "string" || args.prompt.trim().length === 0) {
         throw new Error("ai.generate_workflow requires `prompt` (non-empty string)");
       }
-      return callApi("/ai/generate-workflow", {
+      return callApi("/v1/ai/generate-workflow", {
         method: "POST",
         body: JSON.stringify({ prompt: args.prompt }),
       });

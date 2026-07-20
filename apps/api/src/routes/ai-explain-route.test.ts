@@ -133,9 +133,11 @@ beforeEach(() => {
 });
 
 describe("explain routes — auth gate", () => {
-  it("explain-workflow + explain-run are auth-only (no elevated role)", () => {
+  it("uses ai.write without imposing an elevated role rank", () => {
     expect(findRoute("/ai/explain-workflow").role).toBeUndefined();
     expect(findRoute("/ai/explain-run").role).toBeUndefined();
+    expect(findRoute("/ai/explain-workflow").permission).toBe("ai.write");
+    expect(findRoute("/ai/explain-run").permission).toBe("ai.write");
   });
 });
 

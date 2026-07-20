@@ -59,10 +59,10 @@ invariants and operational contracts live under [`docs/architecture/`](docs/arch
 
 ## What Janusly does
 
-- **Build**: generate a workflow DAG from a prompt (`POST /ai/generate-workflow`), draft / edit on a React Flow canvas with Run timeline + Step setup panels, save versions automatically.
+- **Build**: generate a workflow DAG from a prompt (`POST /ai/generate-workflow`, stable alias `/v1/ai/generate-workflow`), draft / edit on a React Flow canvas with Run timeline + Step setup panels, save versions automatically.
 - **Run**: execute on a Postgres-backed runtime + BullMQ workers with retries, dead-letter queue, timeouts, and per-org rate limits.
 - **Recover** (the differentiator):
-  - **Suggest a fix.** When a run lands in DLQ, `POST /ai/patch-workflow` returns 1–3 alternative patches with self-rated confidence (0–100) and an `approachLabel` per option (`add_retry` / `raise_timeout` / `swap_secret_ref` / `add_approval` / `fix_url` / `other`). The Recovery dialog renders them as tabs sorted by confidence desc.
+  - **Suggest a fix.** When a run lands in DLQ, `POST /ai/patch-workflow` (stable alias `/v1/ai/patch-workflow`) returns 1–3 alternative patches with self-rated confidence (0–100) and an `approachLabel` per option (`add_retry` / `raise_timeout` / `swap_secret_ref` / `add_approval` / `fix_url` / `other`). The Recovery dialog renders them as tabs sorted by confidence desc.
   - **Sandbox before commit.** `POST /dlq/validate-fix` runs the proposed patch against a writes-skipped sandbox replay. Save + production replay only fire when the sandbox terminates `succeeded`.
   - **Apply across the cluster.** `GET /dlq/clusters` (stable alias `/v1/dlq/clusters`) groups DLQ entries by failure signature; `POST /dlq/cluster-apply` replays every entry that shares the cluster signature in one bulk action with per-row signature recheck. Stable clients list bounded summaries through `/v1/dlq` and replay an exact entry through `POST /v1/dlq/replay` with its `deadLetterId`.
   - **Rollback.** `POST /workflows/rollback` (also contracted as `/v1/workflows/rollback`) validates the historical DAG, appends it as the new latest version with bounded conflict retries, reconciles schedules after commit, and writes a `workflow.rolled_back` audit row.

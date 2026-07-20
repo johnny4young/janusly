@@ -93,6 +93,7 @@ export type ApiErrorCode =
   | "ai_question_too_long"
   | "ai_run_id_required"
   | "ai_run_not_found"
+  | "budget_exceeded"
   // alerts
   | "alerts_policy_id_required"
   | "alerts_policy_invalid"

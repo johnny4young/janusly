@@ -29,7 +29,7 @@ import { withBudgetWarning } from "../ai-route-helpers";
 import type { Route } from "../routes";
 
 export const aiExplainRoutes: Route[] = [
-  { method: "POST", match: "/ai/explain-workflow",
+  { method: "POST", match: "/ai/explain-workflow", permission: "ai.write",
     handler: async ({ req, res, auth }) => {
       const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
@@ -75,7 +75,7 @@ export const aiExplainRoutes: Route[] = [
       }
     } },
 
-  { method: "POST", match: "/ai/explain-run",
+  { method: "POST", match: "/ai/explain-run", permission: "ai.write",
     handler: async ({ req, res, auth }) => {
       const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
       const explainRunBody = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));

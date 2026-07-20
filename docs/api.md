@@ -21,6 +21,19 @@ set is:
 - `GET /v1/recovery/metrics`
 - `GET /v1/recovery/ledger`
 - `GET /v1/recovery/my-wins`
+- `GET /v1/templates`
+- `GET /v1/tools`
+- `POST /v1/ai/generate-workflow`
+- `POST /v1/ai/patch-workflow`
+- `POST /v1/validate`
+- `POST /v1/workflows/readiness`
+- `GET /v1/workflows/health`
+- `GET /v1/reports/run-explain`
+- `POST /v1/workflows/save`
+- `POST /v1/workflows/rollback`
+- `GET /v1/dlq`
+- `GET /v1/dlq/clusters`
+- `POST /v1/dlq/replay`
 - `GET /v1/workflows`
 - `GET /v1/workflows/schedule-preview`
 - `GET /v1/workflows/versions`
@@ -32,6 +45,13 @@ set is:
 - `POST /v1/start`
 - `POST /v1/resume`
 - `POST /v1/run/cancel`
+- `GET /v1/mcp/connections`
+- `POST /v1/mcp/connections`
+- `POST /v1/mcp/connections/{alias}`
+- `DELETE /v1/mcp/connections/{alias}`
+- `POST /v1/mcp/connections/{alias}/rediscover`
+- `GET /v1/mcp/connections/{alias}/tools`
+- `POST /v1/mcp/connections/{alias}/tools/{toolName}`
 
 Successful responses are `{ "apiVersion": "v1", "requestId": "...", "data":
 <legacy-payload> }`. Errors are `{ "apiVersion": "v1", "requestId": "...",
@@ -93,7 +113,7 @@ that permission is the authorization gate.
 | Workflow operations | `POST /workflows/rollback`, `POST /workflows/:id/slo`, `GET /workflows/:id/schedule-history`, `GET /workflows/health`, `GET /workflows/health/delta`, `GET /workflows/:id/metadata`, `POST /workflows/:id/metadata`, `GET /billing/budget`, `POST /workflows/:id/budget` | viewer/editor/admin by route | Rollback, SLO, schedule observability, health scoring, metadata, and cost-budget overrides. |
 | Runs | `POST /start`, `GET /runs`, `GET /run`, `GET /run/usage`, `GET /status`, `GET /runs/:id/stream`, `POST /resume`, `POST /run/cancel`, `POST /runs/replay-lab`, `POST /runs/replay-lab/fork`, `GET /runs/compare`, `GET /causal` | viewer/editor + run perms | Start, poll, inspect bounded resource usage, stream, resume, cancel, sandbox replay, fork, compare, and router explainability. |
 | Credentials | `GET /credentials`, `GET /credentials/health`, `POST /credentials`, `POST /credentials/:name/bulk-update`, `POST /credentials/:name/expiry` | viewer/admin + credential perms | Operator-facing credential rows; health and rotation never echo `secretRef`. Optional operator-declared `expiresAt` powers the expiry-warning alert. |
-| AI helpers | `GET /ai/health`, `POST /ai/generate-workflow`, `POST /ai/explain-workflow`, `POST /ai/review-workflow`, `POST /ai/patch-workflow`, `POST /ai/suggest-improvement`, `POST /ai/explain-run` | authenticated; editor where mutating | Provider-neutral LLM surfaces with deterministic fallback/audit contracts. |
+| AI helpers | `GET /ai/health`, `POST /ai/generate-workflow`, `POST /ai/explain-workflow`, `POST /ai/review-workflow`, `POST /ai/patch-workflow`, `POST /ai/suggest-improvement`, `POST /ai/explain-run` | `ai.write`; editor additionally required for patch/suggest | Provider-neutral LLM surfaces with deterministic fallback/audit contracts. Generation and patch also expose strict `/v1` aliases. |
 | DLQ/recovery loop | `GET /dlq`, `GET /dlq/clusters`, `GET /dlq/cluster-members`, `POST /dlq/resolve`, `POST /dlq/validate-fix`, `POST /dlq/cluster-apply`, `POST /dlq/replay`, `GET /recovery/metrics`, `POST /recovery/feedback` | viewer/editor + DLQ perms | Dead-letter triage, validation sandbox, clustered replay, metrics, and feedback. |
 | Recovery items | `GET /recovery/items`, `GET /recovery/items/:id`, `GET /recovery/items/:id/children`, `POST /recovery/items/:id/acknowledge`, `POST /recovery/items/:id/in-progress`, `POST /recovery/items/:id/waiting-external`, `POST /recovery/items/:id/escalate`, `POST /recovery/items/:id/assign`, `POST /recovery/items/:id/resolve`, `POST /recovery/items/:id/reopen`, `POST /recovery/items/:id/comment`, `POST /recovery/items/:id/evidence`, `POST /recovery/items/:id/handoff` | viewer/editor + recovery perms | Incident workflow, evidence export, and cross-team handoff. |
 | Auto-healing/alerts | `GET /auto-healing/pending`, `GET /auto-healing/:id`, `POST /auto-healing/:id/decide`, `POST /auto-healing/scan`, `GET /alerts/policies`, `POST /alerts/policies`, `POST /alerts/policies/:id`, `DELETE /alerts/policies/:id`, `GET /alerts/recent` | viewer/editor/admin + feature perms | Supervised repair decisions, on-demand scan, alert policies, recent dispatch feed. |
@@ -696,7 +716,7 @@ Returns the effective tenant AI status without exposing credentials:
 { "enabled": true, "provider": "anthropic", "model": "claude-haiku-4-5-20251001", "generationMode": "free_json", "timeoutMs": 30000, "maxRetries": 2 }
 ```
 
-### `POST /ai/generate-workflow`
+### `POST /ai/generate-workflow` (`POST /v1/ai/generate-workflow`)
 
 Generates a workflow JSON from a natural-language prompt. In the supported MVP
 setup this uses Anthropic through `JANUSLY_LLM_PROVIDER=anthropic`; other
@@ -719,6 +739,11 @@ counts; those are observability metadata, not response fields.
 ```json
 { "prompt": "Fetch GitHub trending repos and uppercase the names." }
 ```
+
+The stable alias rejects blank prompts and unknown top-level fields before
+dispatch. It preserves the operator prompt exactly rather than normalizing it,
+so the shared legacy generation, audit, and memory paths receive identical
+text.
 
 **Response 200 (AI mode)**
 ```json
@@ -786,11 +811,16 @@ unavailable or no useful improvement is justified.
 
 These routes power the Recovery dialog, the Failure Clusters card, and the Operations recovery metrics. The deterministic surfaces (validate-fix, cluster-apply, rollback, clusters, metrics, health) are always available; only `/ai/patch-workflow` requires a provider key. See [`docs/ai.md`](ai.md) §1b for the full feature matrix.
 
-### `POST /ai/patch-workflow`
+### `POST /ai/patch-workflow` (`POST /v1/ai/patch-workflow`)
 
 ```json
 { "deadLetterId": "<uuid>" }
 ```
+
+The stable alias requires a canonical `deadLetterId` without surrounding
+whitespace and rejects unknown top-level fields. Its AI-mode suggestions must
+contain valid workflow DAGs; fallback mode may preserve a malformed historical
+snapshot so an operator can still diagnose legacy data.
 
 Returns 1–3 alternative config patches for the failing node, sorted by self-rated `confidence` desc:
 

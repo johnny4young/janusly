@@ -8,6 +8,7 @@
  */
 
 import {
+  EvidenceListSchema,
   UpstreamHealthSourceTagsSchema,
   WorkflowSchema,
   WorkflowSloBreachesSchema,
@@ -22,6 +23,17 @@ import type { ApiContractRouteDescriptor, ApiRouteContract } from "./api-contrac
 const IsoDateSchema = z.iso.datetime({ offset: true });
 const NullableIsoDateSchema = IsoDateSchema.nullable();
 const JsonValueSchema = z.unknown();
+
+const BudgetCheckResultSchema = z.object({
+  allowed: z.boolean(),
+  monthlyUsdSpent: z.number().nonnegative(),
+  monthlyUsdLimit: z.number().nonnegative().nullable(),
+  policy: z.enum(["warn", "block"]),
+  warningPercent: z.number().min(0).max(100),
+  warningThresholdCrossed: z.boolean(),
+  exceededAt: z.enum(["org", "workflow"]).nullable(),
+  resolvedScope: z.enum(["org", "workflow"]).nullable(),
+}).strict();
 
 const PositiveLimitSchema = z.coerce.number().int().min(1).max(200)
   .describe("Maximum number of rows to return (1-200).");
@@ -175,6 +187,126 @@ const RunExplainReportSchema = z.object({
 // identifying structural failures is the purpose of these endpoints. Their
 // successful result schemas remain strict enough to protect the stable wire.
 const WorkflowCandidateBodySchema = z.record(z.string(), z.unknown());
+const AiModelOverrideSchema = z.string().trim().min(1).max(256);
+const GenerateWorkflowBodySchema = z.object({
+  // Validation must not normalize the request: the v1 dispatcher validates a
+  // cached body and the shared legacy handler deliberately consumes the raw
+  // operator prompt for byte-compatible prompt/audit behavior.
+  prompt: z.string().min(1).refine((value) => value.trim().length > 0, {
+    message: "prompt must not be blank",
+  }),
+  model: AiModelOverrideSchema.optional(),
+}).strict();
+const GenerationBackoffSchema = z.object({
+  from: z.number().int().min(2).max(5),
+  to: z.literal(1),
+}).strict();
+const GenerateWorkflowResponseSchema = WorkflowSchema.safeExtend({
+  mode: z.enum(["ai", "fallback"]),
+  model: z.string().min(1).optional(),
+  provider: z.string().min(1).optional(),
+  aiError: z.string().optional(),
+  candidateCount: z.number().int().min(1).max(5).optional(),
+  bonBackoff: GenerationBackoffSchema.optional(),
+  budget: BudgetCheckResultSchema.optional(),
+}).strict();
+
+const RecoveryApproachLabelSchema = z.enum([
+  "add_retry",
+  "raise_timeout",
+  "swap_secret_ref",
+  "add_approval",
+  "fix_url",
+  "other",
+]);
+const RecoverySuggestionSafetySchema = z.object({
+  writeSide: z.boolean(),
+  approvalRequired: z.boolean(),
+  approvalPresent: z.boolean(),
+}).strict();
+const ConsideredAlternativeSchema = z.object({
+  approach: z.string().max(120),
+  rejectedBecause: z.string().max(280),
+}).strict();
+const PatchSuggestionFields = {
+  rationale: z.string(),
+  approachLabel: RecoveryApproachLabelSchema,
+  confidence: z.number().min(0).max(100),
+  calibratedConfidence: z.number().min(0).max(100),
+  safety: RecoverySuggestionSafetySchema,
+  consideredAlternatives: z.array(ConsideredAlternativeSchema).max(2),
+} as const;
+const AiPatchSuggestionSchema = z.object({
+  workflow: WorkflowSchema,
+  ...PatchSuggestionFields,
+}).strict();
+const FallbackPatchSuggestionSchema = z.object({
+  workflow: JsonValueSchema,
+  ...PatchSuggestionFields,
+}).strict();
+const RecoveryFeedbackHealthSchema = z.object({
+  windowDays: z.number().int().positive(),
+  approaches: z.array(z.object({
+    approachLabel: RecoveryApproachLabelSchema,
+    feedbackLastSeen: IsoDateSchema,
+    acceptedFixLastSeen: NullableIsoDateSchema,
+    acceptedFixAgeDays: z.number().int().nonnegative().nullable(),
+    state: z.enum(["active", "stale", "no_accepted_fix"]),
+  }).strict()).max(20),
+}).strict();
+const RecoveryPassportSchema = z.object({
+  failureSignature: z.string(),
+  priorSameSignatureOutcome: z.object({
+    status: z.enum(["validation_failed", "applied", "declined", "failed"]),
+    approachLabel: z.string().nullable(),
+    declineReason: z.enum([
+      "loop_breaker_tripped",
+      "budget_exceeded",
+      "validation_failed",
+      "signature_changed",
+      "auto_apply_disabled",
+      "manual_review",
+      "signature_already_resolved",
+      "validation_timeout",
+      "scanner_error",
+      "feature_disabled",
+    ]).nullable(),
+    occurredAt: IsoDateSchema,
+  }).strict().nullable(),
+}).strict();
+const PatchWorkflowResponseFields = {
+  rationale: z.string(),
+  evidence: EvidenceListSchema,
+  feedbackHealth: RecoveryFeedbackHealthSchema.optional(),
+  recoveryPassport: RecoveryPassportSchema,
+  model: z.string().min(1).optional(),
+  provider: z.string().min(1).optional(),
+  budget: BudgetCheckResultSchema.optional(),
+} as const;
+const PatchWorkflowResponseSchema = z.discriminatedUnion("mode", [
+  z.object({
+    mode: z.literal("ai"),
+    suggestedWorkflow: WorkflowSchema,
+    suggestions: z.array(AiPatchSuggestionSchema).min(1).max(3),
+    ...PatchWorkflowResponseFields,
+  }).strict(),
+  z.object({
+    mode: z.literal("fallback"),
+    suggestedWorkflow: JsonValueSchema,
+    suggestions: z.array(FallbackPatchSuggestionSchema).min(1).max(3),
+    aiError: z.string().optional(),
+    ...PatchWorkflowResponseFields,
+  }).strict(),
+]);
+const PatchWorkflowBodySchema = z.object({
+  // Stable resource identifiers are canonical. Reject surrounding whitespace
+  // rather than accepting a value that the byte-compatible legacy handler
+  // would look up verbatim.
+  deadLetterId: z.string().min(1).max(256).refine((value) => value === value.trim(), {
+    message: "deadLetterId must not contain surrounding whitespace",
+  }),
+  model: AiModelOverrideSchema.optional(),
+}).strict();
 const SaveWorkflowBodySchema = WorkflowSchema.safeExtend({
   upstreamHealthSources: UpstreamHealthSourceTagsSchema.optional(),
 }).strict();
@@ -604,6 +736,32 @@ export const listToolsContract = {
   tags: ["Catalogs"],
   response: z.array(PublicToolSchema),
   errorCodes: [],
+} satisfies ApiRouteContract;
+
+export const generateWorkflowContract = {
+  operationId: "generateWorkflow",
+  path: V1_WRITE_PATHS.generateWorkflow,
+  summary: "Generate a validated workflow draft from an operator prompt",
+  tags: ["AI"],
+  request: { body: GenerateWorkflowBodySchema },
+  response: GenerateWorkflowResponseSchema,
+  errorCodes: ["invalid_input", "ai_prompt_too_long", "budget_exceeded"],
+} satisfies ApiRouteContract;
+
+export const patchWorkflowContract = {
+  operationId: "patchWorkflow",
+  path: V1_WRITE_PATHS.patchWorkflow,
+  summary: "Suggest bounded recovery patches for one dead letter",
+  tags: ["AI", "Recovery"],
+  request: { body: PatchWorkflowBodySchema },
+  response: PatchWorkflowResponseSchema,
+  errorCodes: [
+    "invalid_input",
+    "ai_dead_letter_id_required",
+    "ai_run_not_found",
+    "dlq_not_found",
+    "budget_exceeded",
+  ],
 } satisfies ApiRouteContract;
 
 export const validateWorkflowContract = {
@@ -1095,6 +1253,8 @@ export const V1_CONTRACT_ROUTES: readonly ApiContractRouteDescriptor[] = [
   { method: "GET", role: "viewer", contract: recoveryMyWinsContract },
   { method: "GET", contract: listTemplatesContract },
   { method: "GET", contract: listToolsContract },
+  { method: "POST", permission: "ai.write", contract: generateWorkflowContract },
+  { method: "POST", role: "editor", permission: "ai.write", contract: patchWorkflowContract },
   { method: "POST", role: "editor", contract: validateWorkflowContract },
   { method: "POST", role: "editor", contract: checkWorkflowReadinessContract },
   { method: "GET", role: "viewer", contract: getWorkflowHealthContract },

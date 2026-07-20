@@ -47,6 +47,9 @@ retroactively.
 - A stable JSON-only `/v1/reports/run-explain` contract for deterministic run
   evidence. MCP uses the validated envelope while web and SDK artifact
   downloads keep their existing filenames and raw bytes.
+- Stable `/v1` contracts for AI workflow generation and recovery patch drafts,
+  including strict request validation, runtime response validation, and MCP
+  migration without persisting suggestions.
 
 ### Fixed
 
@@ -59,6 +62,9 @@ retroactively.
   viewer rank, so custom roles cannot bypass a tenant's permission override.
 - Run/value report exports and report delivery now enforce their existing
   `reports.read` and `reports.deliver` permissions in addition to role rank.
+- Every LLM-backed HTTP surface now enforces the existing `ai.write`
+  permission, and stable budget blocks retain a catalogued `budget_exceeded`
+  code plus bounded scalar context.
 - Structured AI generation now uses the stable AI SDK 7 output API while
   preserving validated object results and deterministic fallbacks.
 - Repository ratchets that inspect TypeScript and TSX source now use the Oxc

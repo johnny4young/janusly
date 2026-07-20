@@ -31,7 +31,7 @@ import { withBudgetWarning } from "../ai-route-helpers";
 import type { Route } from "../routes";
 
 export const aiImproveRoutes: Route[] = [
-  { method: "POST", match: "/ai/suggest-improvement", role: "editor",
+  { method: "POST", match: "/ai/suggest-improvement", role: "editor", permission: "ai.write",
     handler: async ({ req, res, auth }) => {
       const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));

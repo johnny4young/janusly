@@ -116,6 +116,7 @@
   "apiErrors.ai_question_too_long": "question exceeds {{maxChars}} characters",
   "apiErrors.ai_run_id_required": "runId is required",
   "apiErrors.ai_run_not_found": "Run not found",
+  "apiErrors.budget_exceeded": "The configured AI budget has been exceeded",
   "apiErrors.alerts_policy_id_required": "policy id required",
   "apiErrors.alerts_policy_invalid": "invalid alert policy body",
   "apiErrors.alerts_policy_not_found": "policy not found",

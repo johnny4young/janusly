@@ -25,6 +25,7 @@ import { composeGenerationSystemPrompt, GENERATE_WORKFLOW_SYSTEM_PROMPT } from "
 import { loadOperatorGuidance } from "../ai-operator-guidance";
 import { fallbackWorkflowForPrompt, orgLlmRuntime, resolveSurfaceModel, sanitizeAiWorkflow } from "../ai-runtime";
 import { AiGenerationWorkflowSchema } from "../ai-schemas";
+import { generateWorkflowContract } from "../api-contracts";
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { asRecord, readJson, sendError, sendJson } from "../http";
@@ -34,7 +35,7 @@ import { withBudgetWarning } from "../ai-route-helpers";
 import type { Route } from "../routes";
 
 export const aiGenerateRoutes: Route[] = [
-  { method: "POST", match: "/ai/generate-workflow",
+  { method: "POST", match: "/ai/generate-workflow", permission: "ai.write", contract: generateWorkflowContract,
     handler: async ({ req, res, auth }) => {
       const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));

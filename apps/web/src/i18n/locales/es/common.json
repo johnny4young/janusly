@@ -116,6 +116,7 @@
   "apiErrors.ai_question_too_long": "la pregunta supera los {{maxChars}} caracteres",
   "apiErrors.ai_run_id_required": "runId es obligatorio",
   "apiErrors.ai_run_not_found": "Ejecución no encontrada",
+  "apiErrors.budget_exceeded": "Se superó el presupuesto configurado para IA",
   "apiErrors.alerts_policy_id_required": "el id de la política es obligatorio",
   "apiErrors.alerts_policy_invalid": "cuerpo de política de alerta no válido",
   "apiErrors.alerts_policy_not_found": "política no encontrada",

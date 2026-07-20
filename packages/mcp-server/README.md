@@ -60,8 +60,8 @@ Boot story: Claude Desktop reads its config file (`~/Library/Application Support
 | `dlq.clusters` | `GET /v1/dlq/clusters` | Group recent failures by normalized signature. |
 | `recovery.metrics` | `GET /v1/recovery/metrics` | Read the tenant recovery rollup. |
 | `reports.run_explain` | `GET /v1/reports/run-explain` | Explain one run with structured evidence. |
-| `ai.patch_workflow` | `POST /ai/patch-workflow` | Suggest patches without saving a workflow version. |
-| `ai.generate_workflow` | `POST /ai/generate-workflow` | Generate a workflow suggestion without saving it. |
+| `ai.patch_workflow` | `POST /v1/ai/patch-workflow` | Suggest patches without saving a workflow version. |
+| `ai.generate_workflow` | `POST /v1/ai/generate-workflow` | Generate a workflow suggestion without saving it. |
 | `workflows.validate` | `POST /v1/validate` | Validate workflow shape and graph rules without saving. |
 | `workflows.readiness` | `POST /v1/workflows/readiness` | Evaluate safety, rollback, approval, and secret readiness. |
 | `mcp.connections.list` | `GET /v1/mcp/connections` | List outbound MCP connections and tool counts. |
