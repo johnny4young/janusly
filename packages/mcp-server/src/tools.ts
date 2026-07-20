@@ -123,13 +123,12 @@ const WRITE_TOOLS: Tool[] = [
   {
     name: "dlq.replay",
     description:
-      "Replay a dead-letter entry — re-enqueue the failed node so the run advances past the failure (after the cause is fixed, e.g. a patched workflow saved). Identify the entry by `deadLetterId` (from `dlq.list`) OR by `runId` + `nodeId`. Two-flag write consent + rate limit apply.",
+      "Replay a dead-letter entry — re-enqueue the failed node through its generation-bound recovery claim so the run can advance after the cause is fixed. Requires the stable `deadLetterId` from `dlq.list`. Two-flag write consent + rate limit apply.",
     inputSchema: {
       type: "object",
+      required: ["deadLetterId"],
       properties: {
         deadLetterId: { type: "string", description: "Stable dead-letter id (from `dlq.list`)." },
-        runId: { type: "string", description: "Alternative to `deadLetterId`: the failed run id (requires `nodeId`)." },
-        nodeId: { type: "string", description: "The failed node id (used with `runId`)." },
       },
     },
   },
@@ -607,7 +606,7 @@ async function runOne(
         params.set("limit", String(args.limit));
       }
       const query = params.toString();
-      return callApi(query ? `/dlq?${query}` : "/dlq");
+      return callApi(query ? `/v1/dlq?${query}` : "/v1/dlq");
     }
     case "dlq.clusters": {
       const params = new URLSearchParams();
@@ -615,7 +614,7 @@ async function runOne(
         params.set("windowDays", String(args.windowDays));
       }
       const query = params.toString();
-      return callApi(query ? `/dlq/clusters?${query}` : "/dlq/clusters");
+      return callApi(query ? `/v1/dlq/clusters?${query}` : "/v1/dlq/clusters");
     }
     case "recovery.metrics": {
       const params = new URLSearchParams();
@@ -686,16 +685,13 @@ async function runOne(
     }
     case "dlq.replay": {
       requireWrites(name);
-      const payload: Record<string, unknown> = {};
-      if (typeof args.deadLetterId === "string" && args.deadLetterId.length > 0) {
-        payload.deadLetterId = args.deadLetterId;
-      } else if (typeof args.runId === "string" && typeof args.nodeId === "string") {
-        payload.runId = args.runId;
-        payload.nodeId = args.nodeId;
-      } else {
-        throw new Error("dlq.replay requires `deadLetterId` OR both `runId` and `nodeId`");
+      if (typeof args.deadLetterId !== "string" || args.deadLetterId.trim().length === 0) {
+        throw new Error("dlq.replay requires `deadLetterId` (non-empty string)");
       }
-      return callApi("/dlq/replay", { method: "POST", body: JSON.stringify(payload) });
+      return callApi("/v1/dlq/replay", {
+        method: "POST",
+        body: JSON.stringify({ deadLetterId: args.deadLetterId.trim() }),
+      });
     }
     case "workflows.rollback": {
       requireWrites(name);

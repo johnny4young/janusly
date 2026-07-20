@@ -64,7 +64,7 @@ invariants and operational contracts live under [`docs/architecture/`](docs/arch
 - **Recover** (the differentiator):
   - **Suggest a fix.** When a run lands in DLQ, `POST /ai/patch-workflow` returns 1–3 alternative patches with self-rated confidence (0–100) and an `approachLabel` per option (`add_retry` / `raise_timeout` / `swap_secret_ref` / `add_approval` / `fix_url` / `other`). The Recovery dialog renders them as tabs sorted by confidence desc.
   - **Sandbox before commit.** `POST /dlq/validate-fix` runs the proposed patch against a writes-skipped sandbox replay. Save + production replay only fire when the sandbox terminates `succeeded`.
-  - **Apply across the cluster.** `GET /dlq/clusters` groups DLQ entries by failure signature; `POST /dlq/cluster-apply` replays every entry that shares the cluster signature in one bulk action with per-row signature recheck.
+  - **Apply across the cluster.** `GET /dlq/clusters` (stable alias `/v1/dlq/clusters`) groups DLQ entries by failure signature; `POST /dlq/cluster-apply` replays every entry that shares the cluster signature in one bulk action with per-row signature recheck. Stable clients list bounded summaries through `/v1/dlq` and replay an exact entry through `POST /v1/dlq/replay` with its `deadLetterId`.
   - **Rollback.** `POST /workflows/rollback` (also contracted as `/v1/workflows/rollback`) validates the historical DAG, appends it as the new latest version with bounded conflict retries, reconciles schedules after commit, and writes a `workflow.rolled_back` audit row.
 - **Decide**: `router` / `router_llm` nodes pick a route via a decision engine (cost / latency / quality + RL on past pulls).
 - **Learn**: executed nodes write org-scoped `routing_stats`; router candidates read those per-node counters, so repeated successes / failures bias future route scoring. When an evaluated workflow change has a baseline version and confidence falls below 30%, the improvement engine rolls back to that base version.
@@ -163,7 +163,7 @@ When you're done, press `Ctrl+C` in the `pnpm dev` terminal. The orchestrator sh
 
 ### Use Janusly from Claude Desktop / Cursor (MCP)
 
-`packages/mcp-server` ships an MCP server over stdio. It exposes fifteen non-persisting tools (`workflows.list`, `workflows.get`, `workflows.versions`, `workflows.health`, `recipes.list`, `tools.list`, `runs.get`, `runs.list`, `dlq.list`, `dlq.clusters`, `recovery.metrics`, `reports.run_explain`, `ai.patch_workflow`, `workflows.validate`, `workflows.readiness`) plus the gated `workflows.save` write tool when both MCP write-consent flags are enabled. With `pnpm dev` running, drop this into `~/Library/Application Support/Claude/claude_desktop_config.json` (or your platform equivalent) and restart Claude Desktop:
+`packages/mcp-server` ships an MCP server over stdio. It always advertises read-only inspection, preflight, and AI-authoring tools; when both MCP write-consent flags are enabled it additionally advertises workflow authoring, run operation, exact-DLQ replay, rollback, and outbound-connection management. Contracted tools use runtime-validated `/v1` envelopes; `dlq.replay` requires the `deadLetterId` returned by `dlq.list` so terminal recovery evidence stays attributable. With `pnpm dev` running, drop this into `~/Library/Application Support/Claude/claude_desktop_config.json` (or your platform equivalent) and restart Claude Desktop:
 
 ```jsonc
 {

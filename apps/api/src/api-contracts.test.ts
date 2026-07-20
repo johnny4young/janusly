@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 
 import { computeWorkflowHealth } from "@janusly/engine/src/workflow-health";
+import { clusterFailureSamples } from "@janusly/engine/src/cluster-failures";
 import { checkWorkflowReadiness } from "@janusly/engine/src/workflow-readiness";
 import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
 import { WorkflowSchema } from "@janusly/shared";
@@ -14,6 +15,9 @@ import { WorkflowSchema } from "@janusly/shared";
 import {
   checkWorkflowReadinessContract,
   getWorkflowHealthContract,
+  listDeadLettersContract,
+  listFailureClustersContract,
+  replayDeadLetterContract,
   rollbackWorkflowContract,
   saveWorkflowContract,
   validateWorkflowContract,
@@ -86,5 +90,83 @@ describe("workflow stable contracts", () => {
       version: 3,
       sourceVersion: 1,
     }).success).toBe(true);
+  });
+});
+
+describe("DLQ stable contracts", () => {
+  const summary = {
+    id: "dl-1",
+    orgId: "org-1",
+    runId: "run-1",
+    nodeId: "http-1",
+    attempt: 2,
+    errorJson: { message: "Request timed out" },
+    status: "open",
+    replayedAt: null,
+    createdAt: "2026-07-19T12:00:00.000Z",
+    nodeType: "http",
+    workflowName: "Invoice delivery",
+    recovery: {
+      id: "recovery-1",
+      owner: "operator-1",
+      severity: "p1",
+      status: "open",
+      slaTargetAt: "2026-07-19T12:30:00.000Z",
+      resolutionReason: null,
+      comments: [{ body: "Investigating" }],
+      workflowId: "workflow-1",
+      metadataWorkflowId: "workflow-1",
+      occurrenceCount: 3,
+      lastOccurredAt: "2026-07-19T12:05:00.000Z",
+    },
+  };
+
+  it("accepts only the bounded dead-letter summary projection", () => {
+    expect(listDeadLettersContract.response.safeParse([summary]).success).toBe(true);
+    expect(listDeadLettersContract.response.safeParse([{
+      ...summary,
+      workflowJson: { nodes: Array.from({ length: 1_000 }, () => ({ id: "large" })) },
+    }]).success).toBe(false);
+  });
+
+  it("keeps the stable list query separate from the legacy detail query", () => {
+    const querySchema = listDeadLettersContract.request.query;
+    expect(querySchema.safeParse({ status: "open", severity: "p1", sort: "sla", limit: "25" }).success).toBe(true);
+    expect(querySchema.safeParse({ id: "dl-1" }).success).toBe(false);
+    expect(querySchema.safeParse({ limit: "201" }).success).toBe(false);
+  });
+
+  it("accepts real scrubbed failure-cluster output with recurrence evidence", () => {
+    const clusters = clusterFailureSamples([{
+      source: "dead_letter",
+      id: "dl-1",
+      workflowId: "workflow-1",
+      workflowName: "Invoice delivery",
+      runId: "run-1",
+      nodeId: "http-1",
+      nodeType: "http",
+      errorJson: { message: "Request timed out after 10 seconds" },
+      createdAt: new Date("2026-07-19T12:00:00.000Z"),
+    }]).map((cluster) => ({ ...cluster, recurredAfterRecovery: false }));
+
+    expect(listFailureClustersContract.response.safeParse({
+      clusters,
+      totalSamples: 1,
+      windowDays: 30,
+    }).success).toBe(true);
+    expect(listFailureClustersContract.request.query.safeParse({ windowDays: "91" }).success).toBe(false);
+  });
+
+  it("requires canonical dead-letter identity and paired playbook evidence for replay", () => {
+    const bodySchema = replayDeadLetterContract.request.body;
+    expect(bodySchema.safeParse({ deadLetterId: "dl-1" }).success).toBe(true);
+    expect(bodySchema.safeParse({
+      deadLetterId: "dl-1",
+      recoveryPlaybookId: "playbook-1",
+      recoveryValidationRunId: "validation-1",
+    }).success).toBe(true);
+    expect(bodySchema.safeParse({ runId: "run-1", nodeId: "http-1" }).success).toBe(false);
+    expect(bodySchema.safeParse({ deadLetterId: "dl-1", recoveryPlaybookId: "playbook-1" }).success).toBe(false);
+    expect(replayDeadLetterContract.response.safeParse({ ok: true }).success).toBe(true);
   });
 });

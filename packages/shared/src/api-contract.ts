@@ -21,6 +21,8 @@ export const V1_READ_PATHS = {
   run: "/run",
   runUsage: "/run/usage",
   runStatus: "/status",
+  deadLetters: "/dlq",
+  failureClusters: "/dlq/clusters",
 } as const;
 
 export type V1ReadPath = typeof V1_READ_PATHS[keyof typeof V1_READ_PATHS];
@@ -34,6 +36,7 @@ export const V1_WRITE_PATHS = {
   startRun: "/start",
   resumeRun: "/resume",
   cancelRun: "/run/cancel",
+  replayDeadLetter: "/dlq/replay",
 } as const;
 
 export type V1WritePath = typeof V1_WRITE_PATHS[keyof typeof V1_WRITE_PATHS];

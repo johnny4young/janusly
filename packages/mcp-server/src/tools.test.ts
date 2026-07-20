@@ -266,17 +266,17 @@ describe("dispatchTool", () => {
     expect(mock).toHaveBeenCalledWith("/v1/runs");
   });
 
-  it("dlq.list with no args hits /dlq without query params", async () => {
+  it("dlq.list with no args hits the stable endpoint without query params", async () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "dlq.list", {});
-    expect(mock).toHaveBeenCalledWith("/dlq");
+    expect(mock).toHaveBeenCalledWith("/v1/dlq");
   });
 
   it("dlq.list threads status + limit when provided", async () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "dlq.list", { status: "open", limit: 25 });
     const path = mock.mock.calls[0][0] as string;
-    expect(path).toMatch(/^\/dlq\?/);
+    expect(path).toMatch(/^\/v1\/dlq\?/);
     expect(path).toContain("status=open");
     expect(path).toContain("limit=25");
   });
@@ -289,22 +289,22 @@ describe("dispatchTool", () => {
 
   // -------- dlq.clusters --------
 
-  it("dlq.clusters with no args hits /dlq/clusters without query params", async () => {
+  it("dlq.clusters with no args hits the stable endpoint without query params", async () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "dlq.clusters", {});
-    expect(mock).toHaveBeenCalledWith("/dlq/clusters");
+    expect(mock).toHaveBeenCalledWith("/v1/dlq/clusters");
   });
 
   it("dlq.clusters threads windowDays when provided", async () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "dlq.clusters", { windowDays: 14 });
-    expect(mock).toHaveBeenCalledWith("/dlq/clusters?windowDays=14");
+    expect(mock).toHaveBeenCalledWith("/v1/dlq/clusters?windowDays=14");
   });
 
   it("dlq.clusters drops out-of-shape windowDays values (no NaN injection)", async () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "dlq.clusters", { windowDays: "not-a-number" as unknown as number });
-    expect(mock).toHaveBeenCalledWith("/dlq/clusters");
+    expect(mock).toHaveBeenCalledWith("/v1/dlq/clusters");
   });
 
   // -------- recovery.metrics --------
@@ -466,14 +466,15 @@ describe("dispatchTool", () => {
     expect(JSON.parse(init?.body as string)).toEqual({ runId: "r1", reason: "superseded" });
   });
 
-  it("dlq.replay accepts deadLetterId OR runId+nodeId, and rejects neither", async () => {
+  it("dlq.replay requires canonical dead-letter identity on the stable endpoint", async () => {
     vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "true");
     const { mock } = makeMockCallApi();
-    await dispatchTool(mock, "dlq.replay", { deadLetterId: "dlq-1" });
+    await dispatchTool(mock, "dlq.replay", { deadLetterId: "  dlq-1  " });
+    expect(mock.mock.calls[0][0]).toBe("/v1/dlq/replay");
     expect(JSON.parse(mock.mock.calls[0][1]?.body as string)).toEqual({ deadLetterId: "dlq-1" });
-    await dispatchTool(mock, "dlq.replay", { runId: "r1", nodeId: "n1" });
-    expect(JSON.parse(mock.mock.calls[1][1]?.body as string)).toEqual({ runId: "r1", nodeId: "n1" });
+    await expect(dispatchTool(mock, "dlq.replay", { runId: "r1", nodeId: "n1" })).rejects.toThrow(/deadLetterId/);
     await expect(dispatchTool(mock, "dlq.replay", {})).rejects.toThrow(/deadLetterId/);
+    expect(mock).toHaveBeenCalledTimes(1);
   });
 
   it("workflows.rollback POSTs identifiers to the stable rollback contract", async () => {

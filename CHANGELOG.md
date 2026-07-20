@@ -41,6 +41,9 @@ retroactively.
   with the web and MCP clients migrated to versioned health and preflight calls.
 - Stable `/v1` workflow save and rollback contracts with explicit request,
   response, conflict, validation, and authorization guarantees.
+- Stable `/v1` DLQ summary, failure-cluster, and exact dead-letter replay
+  contracts. The MCP server now uses those envelopes and requires
+  `deadLetterId` for generation-bound replay attribution.
 
 ### Fixed
 
@@ -49,7 +52,8 @@ retroactively.
   reconciles schedule entries after committing the new latest version.
 - Workflow save and rollback now read only the latest version's bounded
   reliability projection instead of loading the complete immutable history.
-
+- DLQ reads now enforce the existing `dlq.read` permission in addition to
+  viewer rank, so custom roles cannot bypass a tenant's permission override.
 - Structured AI generation now uses the stable AI SDK 7 output API while
   preserving validated object results and deterministic fallbacks.
 - Repository ratchets that inspect TypeScript and TSX source now use the Oxc

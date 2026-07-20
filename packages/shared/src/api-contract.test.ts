@@ -6,7 +6,7 @@ describe("v1 API read paths", () => {
   it("keeps the closed path catalog unique", () => {
     const paths = Object.values(V1_READ_PATHS);
     expect(new Set(paths).size).toBe(paths.length);
-    expect(paths).toHaveLength(15);
+    expect(paths).toHaveLength(17);
   });
 
   it("matches exact paths only", () => {
@@ -18,6 +18,8 @@ describe("v1 API read paths", () => {
     expect(isV1ReadPath("/templates")).toBe(true);
     expect(isV1ReadPath("/tools")).toBe(true);
     expect(isV1ReadPath("/workflows/health")).toBe(true);
+    expect(isV1ReadPath("/dlq")).toBe(true);
+    expect(isV1ReadPath("/dlq/clusters")).toBe(true);
     expect(isV1ReadPath("/memory/consent-status/extra")).toBe(false);
     expect(isV1ReadPath("/workflows/schedule-preview/extra")).toBe(false);
     expect(isV1ReadPath("/workflows/tags")).toBe(false);
@@ -29,8 +31,9 @@ describe("v1 API mutation paths", () => {
   it("keeps the closed mutation catalog unique and complete", () => {
     const paths = Object.values(V1_WRITE_PATHS);
     expect(new Set(paths).size).toBe(paths.length);
-    expect(paths).toHaveLength(7);
+    expect(paths).toHaveLength(8);
     expect(paths).toContain("/workflows/save");
     expect(paths).toContain("/workflows/rollback");
+    expect(paths).toContain("/dlq/replay");
   });
 });

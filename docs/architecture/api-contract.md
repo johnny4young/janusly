@@ -94,6 +94,12 @@ the response header and v1 envelope. CORS exposes `X-Request-Id` and
    Rollback additionally requires an active parent, validates the historical
    DAG before copying it, and reconciles schedules only after the transaction
    commits.
+9. Stable DLQ reads require both viewer rank and `dlq.read`. `/v1/dlq` exposes
+   only the bounded summary projection (never replay-fidelity workflow/node
+   snapshots), while `/v1/dlq/clusters` exposes scrubbed deterministic cluster
+   evidence. `/v1/dlq/replay` requires `deadLetterId`; run/node replay aliases
+   remain legacy-only because they cannot identify a dead-letter recovery claim
+   for terminal-impact attribution.
 
 ## Adding a contracted route
 

@@ -139,6 +139,81 @@ const SavedWorkflowVersionSchema = z.object({
   version: z.number().int().positive(),
 });
 
+const DlqStatusSchema = z.enum(["open", "replayed", "resolved"]);
+const DlqSeveritySchema = z.enum(["p1", "p2", "p3", "p4"]);
+const DlqSortSchema = z.enum(["newest", "oldest", "severity", "sla"]);
+const DeadLetterRecoveryOverlaySchema = z.object({
+  id: z.string().min(1),
+  owner: z.string().nullable(),
+  severity: DlqSeveritySchema,
+  status: z.string().min(1),
+  slaTargetAt: IsoDateSchema,
+  resolutionReason: z.string().nullable(),
+  comments: JsonValueSchema,
+  workflowId: z.string().nullable(),
+  metadataWorkflowId: z.string().nullable(),
+  occurrenceCount: z.number().int().positive(),
+  lastOccurredAt: IsoDateSchema,
+}).strict();
+const DeadLetterSummarySchema = z.object({
+  id: z.string().min(1),
+  orgId: z.string().min(1),
+  runId: z.string().min(1),
+  nodeId: z.string().min(1),
+  attempt: z.number().int().positive(),
+  errorJson: JsonValueSchema,
+  status: DlqStatusSchema,
+  replayedAt: NullableIsoDateSchema,
+  createdAt: NullableIsoDateSchema,
+  nodeType: z.string().nullable(),
+  workflowName: z.string().nullable(),
+  recovery: DeadLetterRecoveryOverlaySchema.nullable(),
+}).strict();
+const FailureClusterSchema = z.object({
+  signature: z.string().min(1),
+  category: z.enum([
+    "secret_missing",
+    "http_error",
+    "network_timeout",
+    "ai_provider",
+    "parse_error",
+    "tool_input",
+    "unknown",
+  ]),
+  frequency: z.number().int().positive(),
+  affectedWorkflows: z.array(z.object({
+    workflowId: z.string().min(1),
+    workflowName: z.string().min(1),
+    count: z.number().int().positive(),
+  }).strict()),
+  firstSeen: IsoDateSchema,
+  lastSeen: IsoDateSchema,
+  suggestedOwner: z.enum(["ops", "workflow_author", "platform"]),
+  samples: z.array(z.object({
+    source: z.enum(["dead_letter", "failed_run_node"]),
+    id: z.string().min(1),
+    runId: z.string().min(1),
+  }).strict()).max(5),
+  recurredAfterRecovery: z.boolean(),
+}).strict();
+const ReplayDeadLetterBaseSchema = z.object({
+  deadLetterId: z.string().trim().min(1).max(256),
+  suggestedWorkflow: WorkflowSchema.optional(),
+});
+const ReplayDeadLetterBodySchema = ReplayDeadLetterBaseSchema.extend({
+  recoveryPlaybookId: z.string().trim().min(1).max(256).optional()
+    .describe("Recovery playbook id; requires recoveryValidationRunId."),
+  recoveryValidationRunId: z.string().trim().min(1).max(256).optional()
+    .describe("Successful validation run id; requires recoveryPlaybookId."),
+}).strict().superRefine((value, ctx) => {
+  if (Boolean(value.recoveryPlaybookId) === Boolean(value.recoveryValidationRunId)) return;
+  ctx.addIssue({
+    code: "custom",
+    path: [value.recoveryPlaybookId ? "recoveryValidationRunId" : "recoveryPlaybookId"],
+    message: "Recovery playbook id and validation run id must be provided together",
+  });
+});
+
 const WorkflowListRowSchema = z.object({
   id: z.string(),
   orgId: z.string(),
@@ -559,6 +634,63 @@ export const rollbackWorkflowContract = {
   ],
 } satisfies ApiRouteContract;
 
+export const listDeadLettersContract = {
+  operationId: "listDeadLetters",
+  path: V1_READ_PATHS.deadLetters,
+  summary: "List bounded dead-letter summaries with recovery ownership state",
+  tags: ["Recovery"],
+  request: {
+    query: z.object({
+      status: DlqStatusSchema.optional(),
+      severity: DlqSeveritySchema.optional(),
+      sort: DlqSortSchema.optional(),
+      owner: z.string().trim().min(1).max(200).optional(),
+      search: z.string().trim().min(1).max(100).optional(),
+      limit: PositiveLimitSchema.optional(),
+    }).strict(),
+  },
+  response: z.array(DeadLetterSummarySchema),
+  errorCodes: ["invalid_input"],
+} satisfies ApiRouteContract;
+
+export const listFailureClustersContract = {
+  operationId: "listFailureClusters",
+  path: V1_READ_PATHS.failureClusters,
+  summary: "Group recent production failures by scrubbed normalized signature",
+  tags: ["Recovery"],
+  request: {
+    query: z.object({
+      windowDays: z.coerce.number().int().min(1).max(90).optional()
+        .describe("Failure lookback window in days (1-90, default 30)."),
+    }).strict(),
+  },
+  response: z.object({
+    clusters: z.array(FailureClusterSchema),
+    totalSamples: z.number().int().nonnegative(),
+    windowDays: z.number().int().min(1).max(90),
+  }).strict(),
+  errorCodes: ["invalid_input"],
+} satisfies ApiRouteContract;
+
+export const replayDeadLetterContract = {
+  operationId: "replayDeadLetter",
+  path: V1_WRITE_PATHS.replayDeadLetter,
+  summary: "Replay one dead letter through the generation-bound recovery claim path",
+  tags: ["Recovery"],
+  request: { body: ReplayDeadLetterBodySchema },
+  response: z.object({ ok: z.literal(true) }).strict(),
+  errorCodes: [
+    "invalid_input",
+    "dlq_not_found",
+    "dlq_failing_node_missing",
+    "dlq_node_mid_retry",
+    "dlq_replay_conflict",
+    "dlq_workflow_sanitize_failed",
+    "recovery_playbook_outcome_invalid",
+    ...MCP_WRITE_ERROR_CODES,
+  ],
+} satisfies ApiRouteContract;
+
 export const listWorkflowsContract = {
   operationId: "listWorkflows",
   path: V1_READ_PATHS.workflows,
@@ -903,6 +1035,9 @@ export const V1_CONTRACT_ROUTES: readonly ApiContractRouteDescriptor[] = [
   { method: "GET", role: "viewer", contract: getWorkflowHealthContract },
   { method: "POST", role: "editor", permission: "workflows.write", contract: saveWorkflowContract },
   { method: "POST", role: "editor", permission: "workflows.write", contract: rollbackWorkflowContract },
+  { method: "GET", role: "viewer", permission: "dlq.read", contract: listDeadLettersContract },
+  { method: "GET", role: "viewer", permission: "dlq.read", contract: listFailureClustersContract },
+  { method: "POST", role: "editor", permission: "dlq.replay", contract: replayDeadLetterContract },
   { method: "GET", contract: listWorkflowsContract },
   { method: "GET", role: "viewer", permission: "workflows.read", contract: getSchedulePreviewContract },
   { method: "GET", contract: listWorkflowVersionsContract },

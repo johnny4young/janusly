@@ -56,8 +56,8 @@ Boot story: Claude Desktop reads its config file (`~/Library/Application Support
 | `tools.list` | `GET /v1/tools` | List the runtime tool catalog. |
 | `runs.get` | `GET /v1/run` | Fetch one run with paginated events. |
 | `runs.list` | `GET /v1/runs` | List recent runs with workflow, status, and run-kind filters. |
-| `dlq.list` | `GET /dlq` | List bounded DLQ entries. |
-| `dlq.clusters` | `GET /dlq/clusters` | Group recent failures by normalized signature. |
+| `dlq.list` | `GET /v1/dlq` | List bounded DLQ entries. |
+| `dlq.clusters` | `GET /v1/dlq/clusters` | Group recent failures by normalized signature. |
 | `recovery.metrics` | `GET /v1/recovery/metrics` | Read the tenant recovery rollup. |
 | `reports.run_explain` | `GET /reports/run-explain` | Explain one run with structured evidence. |
 | `ai.patch_workflow` | `POST /ai/patch-workflow` | Suggest patches without saving a workflow version. |
@@ -76,7 +76,7 @@ Write tools are advertised only when `JANUSLY_MCP_WRITES_ENABLED=true` is set in
 | `runs.start` | `POST /v1/start` | Start a production run. |
 | `runs.resume` | `POST /v1/resume` | Resume a waiting approval or human-form node. |
 | `runs.cancel` | `POST /v1/run/cancel` | Cancel an in-flight run. |
-| `dlq.replay` | `POST /dlq/replay` | Replay one failed node through the recovery claim path. |
+| `dlq.replay` | `POST /v1/dlq/replay` | Replay one dead letter through its generation-bound recovery claim. Requires `deadLetterId` from `dlq.list`. |
 | `mcp.connections.create` | `POST /v1/mcp/connections` | Register and discover an outbound connection. |
 | `mcp.connections.rediscover` | `POST /v1/mcp/connections/{alias}/rediscover` | Refresh cached descriptors while preserving opt-ins. |
 | `mcp.connections.set_tool` | `POST /v1/mcp/connections/{alias}/tools/{toolName}` | Update enabled, write-side, exposure, or rate-limit flags. |
