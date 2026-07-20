@@ -21,6 +21,9 @@ scripts/model-eval-results.*
 # Internal working docs — planning, roadmap, analysis, audits, refactor notes,
 # and go-to-market strategy. These stay local and must never be cited by
 # public docs, source comments, commit messages, or release material.
+.planning/
+.agents/
+.claude/skills/
 docs/private/
 docs/ROADMAP.md
 docs/PLAN.md

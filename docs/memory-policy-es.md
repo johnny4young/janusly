@@ -2,9 +2,9 @@
 
 > 🇬🇧 English: [`memory-policy.md`](memory-policy.md) · 🇪🇸 Español: este documento.
 
-> Estado: política canónica. ENG-114 cerró la compuerta de política; ENG-115
-> entregó el sustrato `memory_entries` y ENG-116 entregó recuperación asistida
-> por memoria. La memoria sigue apagada por default y la habilitación para
+> Estado: política canónica. La compuerta de política, el sustrato
+> `memory_entries` y la recuperación asistida por memoria están implementados.
+> La memoria sigue apagada por default y la habilitación para
 > clientes requiere consentimiento a nivel proceso y tenant, además de las
 > aprobaciones de rollout rastreadas en §16.
 
@@ -32,10 +32,10 @@ ventana acotada de una sola corrida, puede arrastrar fragmentos con forma de
 secreto, y puede ser explotada como vector de prompt-injection si no se
 enmarca correctamente.
 
-Esta política es la compuerta que mantiene seguro ese sustrato. Todo ticket
-aguas abajo (ENG-115 vector store, ENG-116 recuperación asistida por
-memoria, ENG-117 auto-healing supervisado, ENG-127 datasets de evals,
-ENG-133 retención) hereda las reglas definidas aquí.
+Esta política es la compuerta que mantiene seguro ese sustrato. Cada consumidor
+de memoria —incluidos la búsqueda vectorial, la recuperación asistida por memoria,
+el auto-healing supervisado, los datasets de evaluación y la retención— hereda
+las reglas definidas aquí.
 
 ## 2. Alcance
 
@@ -54,7 +54,7 @@ No cubre:
 
 - El contexto transitorio que ya vive dentro de las filas de `run_events` /
   `run_nodes` de una sola corrida (esa superficie está gobernada por el
-  chokepoint `safe-persist` existente + la retención de ENG-133).
+  chokepoint `safe-persist` existente y el barrido de retención).
 - Las definiciones de workflow en sí (`workflow_versions` no son memoria).
 - Los logs de auditoría (`audit_logs` se rigen por la política de retención,
   no por el consentimiento de memoria).
@@ -76,8 +76,8 @@ Sólo las siguientes entradas son elegibles para memoria persistente:
    por el camino fallback de `/ai/explain-run`. Las salidas crudas de nodos
    NO son elegibles.
 3. **Fragmentos de runbook etiquetados por el operador.** Fragmentos en
-   Markdown que el operador marca explícitamente para reutilizar (la
-   superficie de runbook de ENG-139, cuando se lance).
+   Markdown que el operador marca explícitamente para reutilizar (por ejemplo,
+   un fragmento de runbook redactado por el operador).
 4. **Rationales de parche IA (post-aceptación).** Cuando un operador aplica
    un parche de recuperación, la cadena del rationale (no el workflow JSON
    parchado) es elegible.
@@ -98,8 +98,8 @@ Explícitamente NO elegible (lista de defense-in-depth):
 
 La verificación de elegibilidad corre en **dos capas**:
 
-- **Write-time** — el helper de datos `commitMemory(entry)` (introducido por
-  ENG-115) rechaza entradas cuyo `kind` no esté en la lista cerrada de
+- **Write-time** — el helper de datos `commitMemory(entry)` rechaza entradas
+  cuyo `kind` no esté en la lista cerrada de
   elegibilidad Y re-depura el `content` a través de `scrubSecretShapes`
   incluso si el caller ya lo depuró.
 - **Read-time** — `recallMemory(query)` re-aplica `scrubSecretShapes` antes
@@ -120,8 +120,8 @@ ni modo "encendido por default" en producción.
   ISO.
 - **Revocación:** poner `org_configs.memory.enabled` de vuelta en `false`
   escribe `memory.consent.revoked` Y encola un job de borrado que elimina
-  todas las filas de `memory_entries` de la org dentro de 7 días (la AC de
-  ENG-133 retention impone esto).
+  todas las filas de `memory_entries` de la org dentro de 7 días (el contrato
+  de retención impone esto).
 - **Granularidad por kind:** `org_configs.memory.allowedKinds` es un CSV de
   kinds de memoria habilitados (por ejemplo `episodic,recovery_rationale`).
   Un admin puede habilitar memoria para rationales de recuperación pero no
@@ -151,7 +151,7 @@ coincidencia.
 | --- | --- | --- | --- | --- |
 | `recovery_rationale` | `/recovery/feedback` accept/reject | 180 días | 730 días | Se guarda con `approachLabel` + outcome + texto del rationale depurado. |
 | `run_summary` | Narrativa determinística de explain-run en éxito terminal | 90 días | 365 días | Salidas crudas de nodos NO incluidas. |
-| `runbook_fragment` | Markdown etiquetado por el operador (ENG-139) | 365 días | 36.500 días (tope efectivo de 100 años) | Subset de Markdown compartido con `pdf.generate`. |
+| `runbook_fragment` | Markdown etiquetado por el operador | 365 días | 36.500 días (tope efectivo de 100 años) | Subset de Markdown compartido con `pdf.generate`. |
 | `patch_rationale` | Rationale de parche de recuperación post-aceptación | 365 días | 730 días | Sólo el rationale — el workflow JSON parchado NO se guarda aquí (vive en `workflow_versions`). |
 | `generated_workflow` | `/ai/generate-workflow` exitoso (fire-and-forget) | 365 días | 730 días | Prior de few-shot: `content` es el prompt de generación (la clave del embedding); `metadata.workflowShape` guarda SOLO tipos de nodos + cantidad de edges + claves de outputs — nunca valores de config. Se recupera como ejemplos DATA etiquetados para guiar futuras generaciones. |
 | `workflow_vector` | Herramienta de workflow `vector.upsert` | 180 días | 730 días | Memoria RAG escrita por el operador desde herramientas de workflow y recuperada sólo por el filtro de kind dedicado de `vector.search`. |
@@ -160,7 +160,7 @@ coincidencia.
 Los defaults de retención viven en `org_configs.memory.retentionDaysByKind`
 como una cadena JSON validada contra el set cerrado de kinds y los rangos
 máximos por kind. La cadena vacía significa "usar los defaults"; `{}` también
-se acepta y tiene el mismo efecto. El job de retención (ENG-133) procesa
+se acepta y tiene el mismo efecto. El job de retención procesa
 entradas de memoria de manera idéntica a otras tablas con retención.
 
 ## 6. Semántica de borrado y exportación
@@ -261,7 +261,7 @@ Lo que significa en la práctica:
 
 - Ninguna herramienta interna de Janusly lee `memory_entries` entre orgs por
   ningún motivo — incluyendo analítica, mejora de modelo o evals.
-- La funcionalidad de dataset de evals (ENG-127) ingesta memoria sólo con la
+- La ruta de datasets de evaluación ingresa memoria sólo con la
   flag explícita `evalConsent: true` del operador en la fila origen, y sólo
   para la misma org.
 - Janusly no negocia opt-in de training del lado del proveedor en nombre de
@@ -279,7 +279,7 @@ malicioso con acceso de autoría podría plantar texto que parezca decir
 enmarcarse al LLM como dato, nunca como parte de la superficie de
 instrucciones del system prompt.
 
-Reglas de implementación (vinculantes para ENG-116 y cualquier consumidor
+Reglas de implementación (vinculantes para cualquier consumidor
 futuro de memoria):
 
 - Los snippets de memoria se anexan a los prompts bajo un encabezado
@@ -296,7 +296,7 @@ futuro de memoria):
 - Los snippets pasan por `scrubSecretShapes` en read-time aunque ya hayan
   sido depurados en write-time.
 
-Estas reglas aplican idénticamente a los prompts de recuperación (ENG-116),
+Estas reglas aplican idénticamente a los prompts de recuperación,
 a los planners de agentes que recuerdan memoria procedural, y a cualquier
 futuro nodo `vector_search`.
 
@@ -418,17 +418,17 @@ secreto apareciendo en un payload de recall, fallo del job de retención):
 - No enumera todos los posibles consumidores de memoria. Los consumidores
   nuevos deben citar esta política y respetar §3, §9, y §11.
 - No negocia opt-in de training del lado del proveedor. Ver §7.
-- No autoriza almacenamiento de memoria multi-región. Una historia
-  multi-región está fuera de scope hasta que el trabajo ENG-114-followup la
-  abra explícitamente.
+- No autoriza almacenamiento de memoria multi-región. Una historia multi-región
+  está fuera de alcance hasta que un cambio de arquitectura aprobado la abra
+  explícitamente.
 
 ## 16. Bitácora de aprobación
 
-ENG-114 ya cerró su alcance de ingeniería. Las casillas de abajo distinguen
-trabajo implementado en el repo de aprobaciones humanas de rollout:
+El alcance de ingeniería está implementado. Las casillas de abajo distinguen
+el trabajo del repositorio de las aprobaciones humanas para el despliegue:
 
-- [ ] Revisión de producto (sign-off de PM registrado en los comentarios del
-  ticket).
+- [ ] Revisión de producto (aprobación de PM registrada en el expediente de
+  despliegue).
 - [ ] Revisión legal (lenguaje del DPA en §10 confirmado por consejería).
 - [ ] Revisión de ingeniería (un approver familiarizado con el catálogo de
   `org_configs` y el chokepoint `safe-persist`).

@@ -92,14 +92,10 @@ success/failure metadata. Generate-workflow audit metadata includes
 `generationMode`, `generationAttempts`, `repairAttempts`, and noop-promotion
 counts so operators can see reliability pressure without reading logs.
 
-## Active follow-ups
+## Evolution policy
 
-The current roadmap keeps AI-generation reliability work explicit instead of
-hiding it in this architecture doc:
-
-- ENG-191: best-of-N generation + selection.
-- ENG-192: eval-suite expansion and optional CI/scheduled gate.
-- ENG-193: retrieval exemplars for generation.
-- ENG-194: verify and enable OpenAI only after harness proof.
-- ENG-195: widen direct emission / generalize noop promotion.
-- ENG-196: per-surface model routing and prompt caching.
+AI-generation changes must remain evidence-driven. Provider expansion, new direct
+node emission, and model-routing changes require representative eval coverage,
+reliability and quality thresholds, cost evidence, and explicit fallback tests.
+Current supported behavior is documented in [`ai-pipeline.md`](ai-pipeline.md);
+private planning must not be used as an architectural dependency.

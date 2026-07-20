@@ -46,7 +46,7 @@ Pause execution at an approval node; resume manually via `POST /resume`.
 
 ### `incident-triage` — Incident triage → GitHub + Slack (Operations)
 
-Webhook → AI summarize → GitHub issue → Slack notify. Was the proof-of-concept for the integration tools (ENG-070).
+Webhook → AI summarize → GitHub issue → Slack notify. This template also exercises the integration-tool execution path end to end.
 
 - **Required credentials:** `github_token`, `slack_webhook`.
 - **Inputs:** consumed from the inbound webhook payload — `{ alertName, … }`.

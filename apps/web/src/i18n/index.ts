@@ -1,7 +1,7 @@
 /**
  * Public surface of the i18n module. Components import from here — never
  * directly from `i18next` / `react-i18next` (enforced by the AGENTS.md
- * Web-deps invariant and by the janus-ship/janus-review skill rule).
+ * Web dependency and localization invariants).
  *
  * Two flavours of consumer:
  *   - React components: `const { t } = useT()` — subscribes to language changes.

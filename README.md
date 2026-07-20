@@ -42,6 +42,9 @@ The recovery loop is production-shaped end to end:
 
 **In one line:** Run critical AI workflows, explain failures, propose sandbox-validated fixes, redrive on the fix, and evolve workflow versions with full auditability — under human supervision.
 
+See [`CHANGELOG.md`](CHANGELOG.md) for release-facing traceability. Architecture
+invariants and operational contracts live under [`docs/architecture/`](docs/architecture/).
+
 ## What Janusly is NOT
 
 - Not a "better Zapier UI." Recovery, not integration breadth, is the wedge.
