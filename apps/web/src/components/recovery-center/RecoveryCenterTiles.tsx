@@ -199,7 +199,7 @@ export function RecoveryQueueTile({
   deadLetters: DeadLetter[]
   runs: RunSummary[]
   nowMs: number | null
-  onOpenRun: (runId: string) => void | Promise<void>
+  onOpenRun: (runId: string, targetTab?: ActiveTab) => void | Promise<void>
   onOpenQueue: () => void
 }) {
   const { t } = useT()
@@ -345,7 +345,7 @@ export function PendingApprovalsTile({
 }: {
   waitingNodes: RunNode[]
   runs: RunSummary[]
-  onOpenRun: (runId: string) => void | Promise<void>
+  onOpenRun: (runId: string, targetTab?: ActiveTab) => void | Promise<void>
   onOpenTab: (tab: ActiveTab) => void
   onApproveNode: (nodeId: string) => void | Promise<void>
 }) {

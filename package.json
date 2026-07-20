@@ -12,6 +12,7 @@
     "clean": "docker compose down -v",
     "build": "pnpm -r build",
     "lint": "oxlint --max-warnings 0 && node scripts/check-i18n-casts.mjs && node scripts/check-css-classes.mjs && node scripts/check-public-repo-hygiene.mjs",
+    "typecheck": "pnpm -r --if-present typecheck",
     "lint:fix": "oxlint --fix",
     "bundle-report": "node scripts/bundle-report.mjs",
     "bundle-check": "node scripts/bundle-report.mjs --check --markdown artifacts/web-bundle-report.md --json artifacts/web-bundle-report.json",

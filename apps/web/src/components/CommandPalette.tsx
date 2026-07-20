@@ -62,8 +62,7 @@ type Command = {
   /** Display section grouping: nav (view jump) / action (do thing) / system (theme, sign out). */
   group: 'nav' | 'action' | 'system'
   shortcut?: string
-  /** Returns `true` to keep the palette open after execution. */
-  run: (ctx: CommandContext) => boolean | undefined
+  run: (ctx: CommandContext) => void
 }
 
 type CommandContext = {
@@ -287,11 +286,11 @@ export function CommandPalette({
 
   const runCommand = (cmd: Command) => {
     const ctx: CommandContext = { openTab, onValidate, onSave, onStart, onNew, onSignOut, onInsertSnippet }
-    const keepOpen = cmd.run(ctx)
+    cmd.run(ctx)
     const nextRecent = [cmd.id, ...recent.filter(id => id !== cmd.id)].slice(0, RECENT_LIMIT)
     setRecent(nextRecent)
     persistRecent(nextRecent)
-    if (keepOpen !== true) onClose()
+    onClose()
   }
 
   if (!open) return null

@@ -11,11 +11,11 @@
  */
 
 import { Trans, useTranslation } from 'react-i18next'
-import type i18next from 'i18next'
+import type { i18n as I18nInstance } from 'i18next'
 import { bootstrapI18n, changeRuntimeLocale, initI18n } from './init'
 import { resolveSystemLocale, getBrowserSystemLanguages } from './resolve'
 import { getStoredLanguage, setStoredLanguage } from './storage'
-import { COMMON_NAMESPACE, FALLBACK_LOCALE, isSupportedLanguage, SUPPORTED_LANGUAGES, type AppLanguage, type RuntimeLocale } from './resources'
+import { COMMON_NAMESPACE, FALLBACK_LOCALE, isSupportedLanguage, SUPPORTED_LANGUAGES, type AppLanguage, type RuntimeLocale, type Translate } from './resources'
 
 export { initI18n }
 export { bootstrapI18n }
@@ -65,7 +65,7 @@ export function changeAppLanguage(language: AppLanguage): Promise<void> {
 }
 
 /** Read the currently-active runtime locale. */
-export function useT(): { t: ReturnType<typeof useTranslation>['t']; i18n: i18next.i18n } {
+export function useT(): { t: Translate; i18n: I18nInstance } {
   const { t, i18n } = useTranslation(COMMON_NAMESPACE)
-  return { t, i18n }
+  return { t: t as unknown as Translate, i18n }
 }

@@ -221,7 +221,7 @@ describe('<DeadLettersPanel />', () => {
   })
 
   it('disables Load more while the next page is in flight', async () => {
-    let resolveNext: ((value: unknown) => void) | null = null
+    let resolveNext: (value: unknown) => void = () => { throw new Error('next-page request did not start') }
     vi.mocked(api).mockImplementation((path: string) => {
       if (!path.startsWith('/dlq/queue')) return Promise.resolve({ items: [], clusters: [], runs: [], proposals: [] })
       const params = new URL(path, 'http://x').searchParams
@@ -236,7 +236,7 @@ describe('<DeadLettersPanel />', () => {
     await waitFor(() => expect(screen.getByTestId('dlq-load-more')).toBeInTheDocument())
     fireEvent.click(screen.getByTestId('dlq-load-more'))
     await waitFor(() => expect(screen.getByTestId('dlq-load-more')).toBeDisabled())
-    resolveNext?.({ items: [mockDeadLetter('b')], nextCursor: null, hasMore: false })
+    resolveNext({ items: [mockDeadLetter('b')], nextCursor: null, hasMore: false })
     await waitFor(() => expect(screen.getByTestId('dlq-row-b')).toBeInTheDocument())
   })
 
@@ -442,7 +442,7 @@ describe('<DeadLettersPanel /> — severity filter', () => {
 
   it('does not flash the severity empty state while the /dlq/queue fetch is in flight', async () => {
     const rows = [mockDeadLetter('a', { recovery: overlay('ri-a', 'p3') })]
-    let resolvePending: ((value: unknown) => void) | null = null
+    let resolvePending: (value: unknown) => void = () => { throw new Error('filtered request did not start') }
     vi.mocked(api).mockImplementation((path: string) => {
       if (!path.startsWith('/dlq/queue')) return Promise.resolve({ items: [], clusters: [], runs: [], proposals: [] })
       const params = new URL(path, 'http://x').searchParams
@@ -460,7 +460,7 @@ describe('<DeadLettersPanel /> — severity filter', () => {
     // (stale-while-loading) and must NOT flash the severity empty state.
     expect(screen.queryByTestId('dlq-empty-severity')).toBeNull()
     // Once the empty p1 page lands, the severity empty state renders.
-    resolvePending?.({ items: [], nextCursor: null, hasMore: false })
+    resolvePending({ items: [], nextCursor: null, hasMore: false })
     await waitFor(() => expect(screen.getByTestId('dlq-empty-severity')).toBeInTheDocument())
   })
 })
@@ -902,6 +902,7 @@ describe('<DeadLettersPanel /> — keyboard triage and copy', () => {
     const onReplay = vi.fn(async (id: string) => {
       rows = rows.filter((row) => row.id !== id)
       useWorkflowStore.setState((state) => ({ platformVersion: state.platformVersion + 1 }))
+      return true
     })
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={onReplay} onResolve={vi.fn()} />)
     const first = await screen.findByTestId('dlq-row-a')

@@ -52,11 +52,9 @@ const baseProps = {
   runs: [],
   runNodes: [],
   deadLetters: [],
-  activeRunId: null,
   onOpenTab: vi.fn(),
   onOpenRun: vi.fn(),
   onApproveNode: vi.fn(),
-  onSubmitHumanForm: vi.fn(),
   onOpenRecoveryQueue: vi.fn(),
 }
 
@@ -89,7 +87,6 @@ beforeEach(() => {
   baseProps.onOpenTab = vi.fn()
   baseProps.onOpenRun = vi.fn()
   baseProps.onApproveNode = vi.fn()
-  baseProps.onSubmitHumanForm = vi.fn()
   baseProps.onOpenRecoveryQueue = vi.fn()
 })
 

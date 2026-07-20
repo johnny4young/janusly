@@ -45,7 +45,7 @@
 
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Hourglass, RefreshCw, ShieldCheck, Target, Users, Zap } from 'lucide-react'
-import type { ActiveTab, JsonObject, RunNode, RunSummary } from '../types'
+import type { ActiveTab, RunNode, RunSummary } from '../types'
 import { api } from '../api'
 import { useMemoryConsentStatus } from '../hooks/useMemoryConsentStatus'
 import { getMemoryPurgeCountdown } from '../memory-consent-status'
@@ -100,11 +100,9 @@ type RecoveryCenterPanelProps = {
   runs: RunSummary[]
   runNodes: RunNode[]
   deadLetters: DeadLetter[]
-  activeRunId: string | null
   onOpenTab: (tab: ActiveTab) => void
-  onOpenRun: (runId: string) => void | Promise<void>
+  onOpenRun: (runId: string, targetTab?: ActiveTab) => void | Promise<void>
   onApproveNode: (nodeId: string) => void | Promise<void>
-  onSubmitHumanForm: (nodeId: string, input: JsonObject) => void | Promise<void>
   /** Navigate to Runs and land keyboard focus on the Recovery Queue. */
   onOpenRecoveryQueue: () => void
   /** Inject a demo failure so a fresh operator can try the recovery loop for real. */

@@ -52,7 +52,7 @@ const WorkflowMetadataPanel = lazy(() => import('./WorkflowMetadataPanel').then(
 import { api } from '../api'
 import { expiryStatus } from '../credential-expiry'
 import { useWorkflowStore } from '../store'
-import { tTemplateCategory, tTemplateDescription, tTemplateName, tToolDescription, useT } from '../i18n'
+import { getResolvedLocale, tTemplateCategory, tTemplateDescription, tTemplateName, tToolDescription, useT } from '../i18n'
 
 export type RightPanelAuthoring = {
   aiHealth: AiHealth | null

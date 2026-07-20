@@ -193,9 +193,10 @@ pnpm clean           # docker compose down -v (removes local volumes)
 pnpm migrate         # apply Drizzle migrations against DATABASE_URL
 pnpm contract:generate # regenerate apps/api/openapi.v1.json from Zod route contracts
 pnpm contract:check  # fail when the checked-in OpenAPI 3.1 contract has drifted
+pnpm typecheck       # TypeScript 7 gate across every typed workspace, including web tests
 pnpm test            # Vitest across the workspace packages
 pnpm test:browser    # Vitest browser mode for *.browser.test.tsx (Playwright/Chromium)
-pnpm build           # type-check + Vite production build (Rolldown, manualChunks)
+pnpm build           # workspace production builds, including the Vite/Rolldown web bundle
 pnpm test:e2e        # Playwright; boots Compose, runs UI flow, tears Compose down
 pnpm test:integration # data integration lane: Compose Postgres + migrate + real-DB SQL tests, down
 pnpm evals           # scripts/run-evals.mjs against /ai/generate-workflow (assumes pnpm dev is up)
@@ -366,7 +367,8 @@ See [`docs/ai.md`](docs/ai.md) for the full guide.
 pnpm test               # full Vitest workspace suite
 pnpm test:browser       # Vitest browser-mode (Playwright/Chromium) for `*.browser.test.tsx`
 pnpm test:e2e           # Playwright with automatic Compose up/down
-pnpm build              # type-check + web build
+pnpm typecheck          # TypeScript 7 across typed production and test sources
+pnpm build              # workspace production builds
 pnpm dev:doctor         # free orphaned dev ports (:3001, :5173, legacy :5174) after a crashed local run
 pnpm --filter @janusly/web test:watch   # Vitest watch
 ```

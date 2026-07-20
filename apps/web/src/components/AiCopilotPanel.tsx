@@ -19,7 +19,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Bot, BrainCircuit, CheckCircle2, GitBranch, KeyRound, MessageSquareText, RefreshCw, Route, ShieldCheck, Sparkles, Workflow } from 'lucide-react'
 import { formatAiModeLabel } from '../constants'
-import type { AiCandidateBackoff, AiHealth, AiMode, WorkflowDefinition } from '../types'
+import type { AiCandidateBackoff, AiHealth, AiMode, ReviewFindings, WorkflowDefinition } from '../types'
 import { estimatePromptCostUsd, formatEstimateLabel } from '@janusly/shared/src/llm-pricing'
 import { tAiReviewIssue, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
@@ -27,29 +27,12 @@ import { BrandMark } from './BrandMark'
 
 // Action-specific assumed token budgets used by the predicted-spend label.
 // Real spend varies; these are order-of-magnitude indicators chosen from
-// typical run sizes against `anthropic/claude-haiku-4-5-20251001`. Future
-// tickets can refine these with measured medians from `usage_events`.
+// typical run sizes against `anthropic/claude-haiku-4-5-20251001`. Refine
+// these values only with measured medians from `usage_events`.
 const ASSUMED_TOKEN_BUDGETS: Record<'generate' | 'explain' | 'review', { input: number; output: number }> = {
   generate: { input: 4_000, output: 2_000 },
   explain: { input: 2_000, output: 1_000 },
   review: { input: 4_000, output: 1_500 },
-}
-
-type ReviewSeverity = 'info' | 'warn' | 'fail'
-
-type ReviewFinding = {
-  code: string
-  severity: ReviewSeverity
-  message: string
-  nodeId?: string
-  edgeId?: string
-  rationale: string
-  suggestion: string
-}
-
-type ReviewFindings = {
-  status: 'pass' | 'warn' | 'fail'
-  issues: ReviewFinding[]
 }
 
 type AiCopilotPanelProps = {

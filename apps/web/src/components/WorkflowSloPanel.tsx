@@ -2,9 +2,8 @@
  * Admin panel for declaring a workflow's reliability SLO. Two bounded
  * numeric inputs (success-rate % + p95 duration ms) plus a windowDays
  * select. v1 evaluates only those two metrics against the existing
- * `HealthSignals`; the other three SLO fields persist in the schema but
- * are not evaluated yet (a future ticket will wire them when the
- * corresponding signals land).
+ * `HealthSignals`; the other three SLO fields persist for contract
+ * compatibility but remain informational until matching signals exist.
  *
  * Multi-tenant: every fetch carries the org-id header (via `api()`).
  * Role gate: the server route declares `role: admin` — non-admins see

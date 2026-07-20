@@ -645,7 +645,7 @@ describe('useWorkflowStore semantic workflow signals', () => {
         }),
       applyEdgeChanges: (_changes, edges) => edges,
       addEdge: (_connection, edges) => edges,
-    } as never)
+    })
   })
 
   it('starts clean and turns dirty on semantic mutations', () => {

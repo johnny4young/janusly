@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
-import type { WorkflowDefinition } from '../types'
+import type { OrgMember, WorkflowDefinition } from '../types'
 import { VersionHistoryPanel } from './VersionHistoryPanel'
 
 vi.mock('../api', () => ({
@@ -24,7 +24,7 @@ const editorMember = { id: 'member-1', orgId: 'default', userId: 'dev-user', rol
 
 function mockVersionHistoryApi(
   versionsByWorkflow: Record<string, Array<{ id: string; version: number; dagJson: WorkflowDefinition }>>,
-  members = [editorMember],
+  members: OrgMember[] = [editorMember],
 ) {
   vi.mocked(api).mockImplementation(async (path) => {
     if (path === '/members') return members

@@ -49,6 +49,10 @@ export type AiReviewIssue = ValidationIssue & {
   rationale: string
   suggestion: string
 }
+export type ReviewFindings = {
+  status: 'pass' | 'warn' | 'fail'
+  issues: AiReviewIssue[]
+}
 export type ToolSchema = {
   name: string
   description: string
@@ -258,8 +262,10 @@ export type WorkflowInputSchemaShape = {
 }
 
 export type WorkflowDefinition = {
+  dslVersion?: '1.0'
   id?: string
   name?: string
+  metadata?: JsonObject
   nodes: Array<{ id: string; type: string; label?: string; config: JsonObject }>
   edges: Array<{ from: string; to: string; condition?: string }>
   /** Typed inputs surfaced in the Inspector + validated at run start. */
@@ -272,4 +278,4 @@ export type WorkflowDefinition = {
   ui?: { positions?: Record<string, { x: number; y: number }> }
 }
 export type WorkflowGraphNode = Node<WorkflowNodeData>
-export type WorkflowGraphEdge = Edge<WorkflowEdgeData>
+export type WorkflowGraphEdge = Edge<WorkflowEdgeData & { hasCondition?: boolean }>

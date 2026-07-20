@@ -22,7 +22,7 @@
  * rejecting workflows that ship extra metadata the executor ignores.
  * Tightening individual schemas is a per-node follow-up; the
  * compounding type-safety payoff arrives when `NodeContext.config`
- * itself becomes generic on the executor signature (separate ticket).
+ * itself becomes generic on the executor signature.
  *
  * Used by:
  * - `packages/engine/src/execute-node.ts` — the dispatcher's parse

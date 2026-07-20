@@ -37,6 +37,9 @@ jobs:
       - name: Lint (Oxlint)
         run: pnpm lint
 
+      - name: Typecheck
+        run: pnpm typecheck
+
       - name: Check generated API contract
         run: pnpm contract:check
 

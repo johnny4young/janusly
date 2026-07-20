@@ -756,7 +756,9 @@ export default function App() {
       request: () => api('/resume', { method: 'POST', body: JSON.stringify({ runId, nodeId }) }),
       failureMessage: t('toasts.resumeFailed'),
       successToast: { message: t('toasts.stepApproved', { nodeId }), tone: 'success' },
-      onSuccess: () => loadStatus(runId),
+      onSuccess: async () => {
+        await loadStatus(runId)
+      },
     })
   }, [loadStatus, runId, runPlatformMutation, t])
 
@@ -1136,7 +1138,9 @@ export default function App() {
           workflowRunsCount={runs.length}
           onWorkflowNameChange={setWorkflowName}
           onAdd={addNode}
-          onValidate={validateWorkflow}
+          onValidate={async () => {
+            await validateWorkflow()
+          }}
           onSave={saveWorkflow}
           onOpenTab={setActiveTab}
           onOpenHelp={openShortcuts}
@@ -1168,11 +1172,9 @@ export default function App() {
               runs={runs}
               runNodes={runNodes}
               deadLetters={deadLetters}
-              activeRunId={runId}
               onOpenTab={setActiveTab}
               onOpenRun={openRun}
               onApproveNode={approveNode}
-              onSubmitHumanForm={submitHumanForm}
               onOpenRecoveryQueue={() => openRecoveryQueue()}
               onTryDemoRecovery={() => injectPackFailure('failed-payment-recovery')}
             />

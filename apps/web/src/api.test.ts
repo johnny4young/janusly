@@ -13,7 +13,7 @@ vi.mock('./auth', () => ({
 }))
 
 function mockJsonResponse(status: number, payload: unknown) {
-  vi.stubGlobal('fetch', vi.fn(async () => (
+  vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => (
     new Response(JSON.stringify(payload), {
       status,
       headers: { 'Content-Type': 'application/json' },
@@ -68,7 +68,7 @@ describe('api', () => {
 
   it('localizes offline failures through the active locale', async () => {
     changeAppLanguage('es')
-    vi.stubGlobal('fetch', vi.fn(async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => {
       throw new TypeError('network unavailable')
     }))
 
@@ -77,7 +77,7 @@ describe('api', () => {
 
   it('sends x-janusly-session instead of x-user-id when a session token is set', async () => {
     mockSessionToken = 'js-session-token-abc'
-    const fetchMock = vi.fn(async () => new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
     vi.stubGlobal('fetch', fetchMock)
 
     await api('/ping')
@@ -109,7 +109,7 @@ describe('api', () => {
   })
 
   it('uses and unwraps the v1 envelope for contracted read paths', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       apiVersion: 'v1',
       requestId: 'req-workflows',
       data: [{ id: 'wf-1', name: 'Billing recovery' }],
@@ -141,7 +141,7 @@ describe('api', () => {
   })
 
   it('routes discovery catalogs and workflow health through stable read contracts', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       apiVersion: 'v1',
       requestId: 'req-catalog',
       data: [],
@@ -162,7 +162,7 @@ describe('api', () => {
   })
 
   it('leaves uncontracted and mutating paths unversioned', async () => {
-    const fetchMock = vi.fn(async () => new Response('{}', {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('{}', {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }))
@@ -178,7 +178,7 @@ describe('api', () => {
   })
 
   it('dedups identical GETs within the in-flight window', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ items: [] }), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ items: [] }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }))
@@ -195,7 +195,7 @@ describe('api', () => {
   })
 
   it('does not dedup across active org changes inside the TTL window', async () => {
-    const fetchMock = vi.fn(async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const fetchMock = vi.fn<typeof fetch>(async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
       const headers = init?.headers as Record<string, string>
       return new Response(JSON.stringify({ orgId: headers['x-org-id'] }), {
         status: 200,
@@ -214,7 +214,7 @@ describe('api', () => {
   })
 
   it('does not dedup across locale changes inside the TTL window', async () => {
-    const fetchMock = vi.fn(async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const fetchMock = vi.fn<typeof fetch>(async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
       const headers = init?.headers as Record<string, string>
       return new Response(JSON.stringify({ locale: headers['Accept-Language'] }), {
         status: 200,
@@ -236,7 +236,7 @@ describe('api', () => {
     // User A authenticates, makes a request; within 500ms User A logs
     // out and User B logs in (or User A's token refreshes). The
     // second call must NOT share User A's cached response.
-    const fetchMock = vi.fn(async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const fetchMock = vi.fn<typeof fetch>(async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
       const headers = init?.headers as Record<string, string>
       return new Response(JSON.stringify({ token: headers['Authorization'] ?? null }), {
         status: 200,
@@ -256,7 +256,7 @@ describe('api', () => {
   })
 
   it('does not dedup when the request body differs', async () => {
-    const fetchMock = vi.fn(async () => new Response('{}', {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('{}', {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }))
@@ -295,7 +295,7 @@ describe('api', () => {
 
   it('does not dedup across the TTL boundary', async () => {
     vi.useFakeTimers()
-    const fetchMock = vi.fn(async () => new Response('{}', {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('{}', {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }))
@@ -310,7 +310,7 @@ describe('api', () => {
   })
 
   it('skips dedup when the caller passes an AbortSignal', async () => {
-    const fetchMock = vi.fn(async () => new Response('{}', {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('{}', {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }))

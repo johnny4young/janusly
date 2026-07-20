@@ -92,8 +92,9 @@ describe('WorkflowCanvas (browser mode)', () => {
     // routes it to the node's onClick handler that calls onNodeClick.
     alphaWrapper.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }))
 
-    expect(props.onNodeClick).toHaveBeenCalledTimes(1)
-    const calledNode = props.onNodeClick.mock.calls[0][1]
+    const onNodeClick = vi.mocked(props.onNodeClick)
+    expect(onNodeClick).toHaveBeenCalledTimes(1)
+    const calledNode = onNodeClick.mock.calls[0][1]
     expect(calledNode.id).toBe('alpha')
   })
 
@@ -110,8 +111,8 @@ describe('WorkflowCanvas (browser mode)', () => {
     // writes the viewport transform on a follow-up frame; let waitFor poll the
     // assertion itself instead of binding to a fixed rAF count.
     await waitFor(() => {
-      const dimensionChanges = props.onNodesChange.mock.calls
-        .flatMap((call) => call[0] as Array<{ id: string; type: string; dimensions?: { width: number; height: number } }>)
+      const dimensionChanges = vi.mocked(props.onNodesChange).mock.calls
+        .flatMap((call) => call[0])
         .filter((change) => change.type === 'dimensions')
       expect(dimensionChanges.length).toBeGreaterThanOrEqual(3)
       expect(dimensionChanges.every((c) => (c.dimensions?.width ?? 0) > 0 && (c.dimensions?.height ?? 0) > 0)).toBe(true)
@@ -329,7 +330,7 @@ describe('WorkflowCanvas (browser mode)', () => {
         const viewport = container.querySelector('.react-flow__viewport') as HTMLElement
         expect(viewport.style.transform).toMatch(/translate\(\s*0px,\s*0px\s*\)\s*scale\(\s*0\.5\s*\)/)
       })
-      getByRole('button', { name: 'Do nothing', exact: true }).click()
+      getByRole('button', { name: /^Do nothing$/ }).click()
 
       const [added] = useWorkflowStore.getState().nodes
       expect(added.position.x).toBeCloseTo(905, 0)

@@ -320,7 +320,7 @@ describe('useRecoveryQueueFilters', () => {
   })
 
   it('drops a stale loadMore append when a filter change reset the queue mid-fetch', async () => {
-    let resolveLoadMore: (() => void) | null = null
+    let resolveLoadMore: () => void = () => { throw new Error('load-more request did not start') }
     vi.mocked(api).mockImplementation(async (path) => {
       const params = new URL(String(path), 'http://x').searchParams
       if (params.get('cursor') === 'c1') {
@@ -341,7 +341,7 @@ describe('useRecoveryQueueFilters', () => {
     fireEvent.click(screen.getByTestId('set-sort-oldest'))
     await waitFor(() => expect(screen.getByTestId('filtered')).toHaveTextContent('x'))
 
-    resolveLoadMore?.()
+    resolveLoadMore()
     // The stale append must NOT graft onto the new page-1 set.
     await waitFor(() => expect(screen.getByTestId('loading-more')).toHaveTextContent('false'))
     expect(screen.getByTestId('filtered')).toHaveTextContent('x')
@@ -381,7 +381,7 @@ describe('useRecoveryQueueFilters', () => {
   it('flags recoveryFilterLoading while the first-page fetch is in flight', async () => {
     // Hang only the queue fetch (which drives `recoveryFilterLoading`); the
     // sibling /dlq/counts fetch resolves immediately so it doesn't interfere.
-    let resolveQueue: ((value: ReturnType<typeof emptyPage>) => void) | null = null
+    let resolveQueue: (value: ReturnType<typeof emptyPage>) => void = () => { throw new Error('queue request did not start') }
     vi.mocked(api).mockImplementation((path) => {
       if (String(path).startsWith('/dlq/counts')) return Promise.resolve({ total: 0, open: 0, replayed: 0, resolved: 0 }) as unknown as Promise<unknown>
       return new Promise((resolve) => {
@@ -390,7 +390,7 @@ describe('useRecoveryQueueFilters', () => {
     })
     render(<Harness />)
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('true'))
-    resolveQueue?.(emptyPage())
+    resolveQueue(emptyPage())
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'))
   })
 

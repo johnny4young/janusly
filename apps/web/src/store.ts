@@ -92,7 +92,17 @@ function sanitizeRetryPolicy(value: unknown): JsonObject | null {
  * the `return state` guard is a defensive no-op for the impossible
  * "change before canvas mount" case.
  */
-type FlowOps = Pick<typeof import('@xyflow/react'), 'applyNodeChanges' | 'applyEdgeChanges' | 'addEdge'>
+type FlowOps = {
+  applyNodeChanges: (
+    changes: Parameters<OnNodesChange<WorkflowGraphNode>>[0],
+    nodes: WorkflowGraphNode[],
+  ) => WorkflowGraphNode[]
+  applyEdgeChanges: (
+    changes: Parameters<OnEdgesChange<WorkflowGraphEdge>>[0],
+    edges: WorkflowGraphEdge[],
+  ) => WorkflowGraphEdge[]
+  addEdge: (edge: Connection | WorkflowGraphEdge, edges: WorkflowGraphEdge[]) => WorkflowGraphEdge[]
+}
 let flowOps: FlowOps | null = null
 export function registerFlowOps(ops: FlowOps): void {
   flowOps = ops
@@ -211,8 +221,8 @@ type WorkflowStore = {
   setWorkflowName: (name: string) => void
   setNodes: (nodes: WorkflowGraphNode[]) => void
   setEdges: (edges: WorkflowGraphEdge[]) => void
-  onNodesChange: OnNodesChange
-  onEdgesChange: OnEdgesChange
+  onNodesChange: OnNodesChange<WorkflowGraphNode>
+  onEdgesChange: OnEdgesChange<WorkflowGraphEdge>
   connect: (connection: Connection) => void
   selectNode: (id: string | null) => void
   selectEdge: (id: string | null) => void

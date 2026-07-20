@@ -644,10 +644,10 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         prev.map((w) => (w.id === workflowId ? { ...w, status: 'active', pausedReason: null } : w)),
       )
       try {
-        const res = await api<{ backfilled?: number; remaining?: number }>(
+        const res = await api(
           `/workflows/${encodeURIComponent(workflowId)}/resume`,
           { method: 'POST' },
-        )
+        ) as { backfilled?: number; remaining?: number }
         // Say what actually happened to the events the pause held. "Resumed"
         // alone leaves the operator guessing whether the webhooks that arrived
         // during the outage were replayed or dropped.

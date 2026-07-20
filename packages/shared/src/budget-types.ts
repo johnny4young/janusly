@@ -42,9 +42,8 @@ export type BudgetCheckResult = {
 export type CheckBudgetInput = {
   orgId: string;
   workflowId?: string | null;
-  /** Optional predicted cost in USD. Reserved for future ticket; v1 ignores
-   *  it and gates on `spent >= limit` only. Kept on the surface so callers
-   *  can start threading it through now. */
+  /** Optional predicted cost in USD. The current gate ignores it and checks
+   *  `spent >= limit` only; callers must not treat it as enforced spend. */
   predictedCostUsd?: number;
 };
 

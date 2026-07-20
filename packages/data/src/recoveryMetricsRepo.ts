@@ -995,7 +995,8 @@ async function queryReplayOutcomes(orgId: string, since: Date): Promise<ReplayOu
  * NOTE: the cap is on the row count, not the cluster count. An org with
  * many entries per signature gets a true cluster count even when capped,
  * because the distinct-signature math runs over whatever rows came back.
- * For true scale move to pre-aggregated signatures (a future ticket).
+ * Higher-cardinality deployments should replace this bounded scan with
+ * pre-aggregated signatures.
  */
 export async function queryFailureClustersResolved(
   orgId: string,

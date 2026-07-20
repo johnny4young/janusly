@@ -206,8 +206,11 @@ export function AlertPoliciesPanel(): React.ReactElement {
     ])
       .then(([policyResp, credResp]) => {
         if (cancelled) return
-        setPolicies((policyResp?.policies as AlertPolicy[]) ?? [])
-        setCredentials((credResp as Credential[]) ?? [])
+        const policyEnvelope = policyResp && typeof policyResp === 'object' && !Array.isArray(policyResp)
+          ? policyResp as Record<string, unknown>
+          : undefined
+        setPolicies(Array.isArray(policyEnvelope?.policies) ? policyEnvelope.policies as AlertPolicy[] : [])
+        setCredentials(Array.isArray(credResp) ? credResp as Credential[] : [])
         setLoading(false)
       })
       .catch(() => {
@@ -500,6 +503,7 @@ export function AlertPoliciesPanel(): React.ReactElement {
                         destination: e.target.value as AlertDestination,
                         credentialName: '',
                         params: {},
+                        _key: channel._key,
                       }
                       setForm({ ...form, channels: newChannels })
                     }}

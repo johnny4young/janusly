@@ -20,6 +20,8 @@ retroactively.
   7, Vite 8, Vitest 4, Oxlint, and Vercel AI SDK 7.
 - CI, containers, workspace metadata, SDK metadata, and contributor
   documentation now describe the same Node.js 24 runtime boundary.
+- CI now runs an explicit TypeScript 7 gate across every typed workspace; the
+  web package checks both its production tree and its complete test tree.
 - The private Node SDK now consumes stable `/v1` envelopes and builds a normal
   ESM package with declarations, source maps, and an isolated tarball consumer
   smoke test. Registry publication remains disabled.
@@ -71,6 +73,9 @@ retroactively.
   parser, preserving their binding and selector checks under TypeScript 7.
 - Outbound MCP connection updates now pass through the same two-flag consent
   gate as every other MCP-originated connection mutation.
+- Web API boundaries, React Flow adapters, asynchronous callbacks, and test
+  fixtures now retain their concrete contracts under TypeScript 7 instead of
+  relying on Vite's transpilation to hide static drift.
 
 ## Development milestone: recovery platform hardening
 

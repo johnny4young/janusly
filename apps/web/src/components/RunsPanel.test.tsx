@@ -32,6 +32,7 @@ const handlers = {
   onApproveNode: vi.fn(),
   onSubmitHumanForm: vi.fn(),
   onReplayNode: vi.fn(),
+  onRedriveNode: vi.fn(),
   onCancelActiveRun: vi.fn(),
   onReplayDeadLetter: vi.fn(),
   onResolveDeadLetter: vi.fn(),

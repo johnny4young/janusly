@@ -192,7 +192,7 @@ export function McpConnectionsPanel() {
         addToast(t('mcpConnections.toasts.connectedDiscovered', { count }), 'success')
       } else {
         const reason = discovery?.error ?? (t('mcpConnections.toasts.unknownReason'))
-        addToast(t('mcpConnections.toasts.connectedNoDiscovery', { reason }), 'warning')
+        addToast(t('mcpConnections.toasts.connectedNoDiscovery', { reason }), 'info')
       }
       setForm(EMPTY_FORM)
       bumpPlatformVersion()

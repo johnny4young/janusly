@@ -144,8 +144,11 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
     if (!occurrencesOpen || children !== null) return
     let cancelled = false
     api(`/recovery/items/${item.id}/children`)
-      .then((resp: { children?: OccurrenceChild[] }) => {
-        if (!cancelled) setChildren(resp?.children ?? [])
+      .then((resp) => {
+        const envelope = resp && typeof resp === 'object' && !Array.isArray(resp)
+          ? resp as { children?: unknown }
+          : undefined
+        if (!cancelled) setChildren(Array.isArray(envelope?.children) ? envelope.children as OccurrenceChild[] : [])
       })
       .catch(() => {
         if (!cancelled) setChildrenError(true)

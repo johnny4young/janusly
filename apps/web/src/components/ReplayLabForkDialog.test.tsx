@@ -192,7 +192,7 @@ describe('<ReplayLabForkDialog />', () => {
   })
 
   it('does not redirect when the dialog unmounts mid-POST', async () => {
-    let resolveApi: ((value: unknown) => void) | null = null
+    let resolveApi: (value: unknown) => void = () => { throw new Error('fork request did not start') }
     vi.mocked(api).mockImplementationOnce(
       () => new Promise((resolve) => { resolveApi = resolve }),
     )
@@ -209,7 +209,7 @@ describe('<ReplayLabForkDialog />', () => {
     unmount()
     // Resolve the POST after unmount — the aliveRef guard prevents
     // setRunId / bumpPlatformVersion / onClose from firing.
-    resolveApi?.(forkResponse)
+    resolveApi(forkResponse)
     await Promise.resolve()
     await Promise.resolve()
 

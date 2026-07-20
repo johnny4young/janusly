@@ -258,13 +258,18 @@ async function doApiFetch(path: string, options: RequestInit, requestScope: ApiR
         // Non-fatal — the throw below still surfaces the original 402.
       }
     }
-    const message = typeof payload?.error === 'string' ? payload.error : t('api.error.requestFailed', { status: res.status })
+    const errorPayload = payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? payload as Record<string, unknown>
+      : undefined
+    const message = typeof errorPayload?.error === 'string'
+      ? errorPayload.error
+      : t('api.error.requestFailed', { status: res.status })
     // Preserve the structured envelope on the thrown error so toast
     // call sites can translate via `tApiError(err)`. Plain string-message
     // consumers (`err.message`) keep working unchanged — the new fields
     // are additive.
-    const code = typeof payload?.code === 'string' ? payload.code : undefined
-    const rawParams = payload?.params
+    const code = typeof errorPayload?.code === 'string' ? errorPayload.code : undefined
+    const rawParams = errorPayload?.params
     const params = rawParams && typeof rawParams === 'object' && !Array.isArray(rawParams)
       ? (rawParams as Record<string, unknown>)
       : undefined
