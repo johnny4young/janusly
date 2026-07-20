@@ -45,9 +45,17 @@ export function scanPublicContent(file, content) {
 
 /** Read the current Git index so ignored local planning is never inspected. */
 export function listTrackedFiles() {
-  return execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" })
-    .split("\0")
-    .filter(Boolean);
+  try {
+    return execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" })
+      .split("\0")
+      .filter(Boolean);
+  } catch (error) {
+    throw new Error(
+      "check-public-repo-hygiene needs a git checkout with `git` on PATH: it reads the tracked file list via `git ls-files`. " +
+        "Run it from inside the repository (source tarballs and git-less environments cannot be scanned).",
+      { cause: error },
+    );
+  }
 }
 
 export function checkTrackedFiles(files = listTrackedFiles()) {

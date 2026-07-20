@@ -32,7 +32,8 @@
     "**/dist/**",
     "packages/db/migrations/**",
     "**/playwright-report/**",
-    "**/test-results/**"
+    "**/test-results/**",
+    ".claude/**"
   ],
   "env": {
     "builtin": true
