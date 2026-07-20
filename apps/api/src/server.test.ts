@@ -311,6 +311,48 @@ describe("createApiServer", () => {
     }
   });
 
+  it("validates decoded path parameters before dispatching dynamic v1 aliases", async () => {
+    const handler = vi.fn(async ({ req, res }) => sendJson(res, { value: req.url ?? "" }));
+    const contract: ApiRouteContract = {
+      ...testContract("getConnection", "/connections/{alias}"),
+      request: {
+        path: z.object({ alias: z.string().regex(/^[a-z0-9_-]{1,32}$/) }).strict(),
+      },
+    };
+    const server = createApiServer({
+      routes: [{
+        method: "GET",
+        match: (url) => /^\/connections\/[^/?]+$/.test(url),
+        contract,
+        handler,
+      }],
+    });
+    const baseUrl = await listen(server);
+
+    try {
+      const valid = await fetch(`${baseUrl}/v1/connections/demo-one`);
+      expect(valid.status).toBe(200);
+      await expect(valid.json()).resolves.toMatchObject({
+        apiVersion: "v1",
+        data: { value: "/connections/demo-one" },
+      });
+
+      const invalid = await fetch(`${baseUrl}/v1/connections/Bad%20Alias`);
+      expect(invalid.status).toBe(400);
+      await expect(invalid.json()).resolves.toMatchObject({
+        apiVersion: "v1",
+        error: {
+          code: "invalid_input",
+          message: "Invalid request path",
+          params: { field: "alias" },
+        },
+      });
+      expect(handler).toHaveBeenCalledTimes(1);
+    } finally {
+      await close(server);
+    }
+  });
+
   it("keeps authentication failures inside the stable v1 error contract", async () => {
     const handler = vi.fn(async ({ res }) => sendJson(res, { value: "ok" }));
     const unauthorized = new Error("Unauthorized") as Error & { statusCode?: number };

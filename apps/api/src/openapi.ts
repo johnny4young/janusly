@@ -140,18 +140,36 @@ function requestIdResponseHeader(): Record<string, unknown> {
 
 function buildRequest(contract: ApiRouteContract): Record<string, unknown> {
   const request: Record<string, unknown> = {};
+  const parameters: Array<Record<string, unknown>> = [];
+  const path = contract.request?.path;
+  const pathProperties = path
+    ? asObject(toJsonSchema(path).properties)
+    : {};
+  const pathParameterNames = assertPathParameterParity(contract.path, pathProperties);
+  for (const name of pathParameterNames) {
+    const propertySchema = pathProperties[name];
+    if (propertySchema) {
+      parameters.push({
+        name,
+        in: "path",
+        required: true,
+        schema: propertySchema,
+      });
+    }
+  }
   const query = contract.request?.query;
   if (query) {
     const schema = toJsonSchema(query);
     const properties = asObject(schema.properties);
     const required = new Set(Array.isArray(schema.required) ? schema.required.filter((item): item is string => typeof item === "string") : []);
-    request.parameters = Object.entries(properties).map(([name, propertySchema]) => ({
+    parameters.push(...Object.entries(properties).map(([name, propertySchema]) => ({
       name,
       in: "query",
       required: required.has(name),
       schema: propertySchema,
-    }));
+    })));
   }
+  if (parameters.length > 0) request.parameters = parameters;
   const body = contract.request?.body;
   if (body) {
     request.requestBody = {
@@ -160,6 +178,26 @@ function buildRequest(contract: ApiRouteContract): Record<string, unknown> {
     };
   }
   return request;
+}
+
+function assertPathParameterParity(
+  contractPath: string,
+  properties: Record<string, unknown>,
+): string[] {
+  const templateNames = contractPath
+    .split("/")
+    .map((segment) => segment.match(/^\{([^{}]+)\}$/)?.[1])
+    .filter((name): name is string => Boolean(name));
+  const schemaNames = Object.keys(properties);
+  if (
+    templateNames.length !== schemaNames.length
+    || templateNames.some((name) => !schemaNames.includes(name))
+  ) {
+    throw new Error(
+      `API contract path parameters do not match ${contractPath}: template=[${templateNames.join(",")}] schema=[${schemaNames.join(",")}]`,
+    );
+  }
+  return templateNames;
 }
 
 function toJsonSchema(schema: z.ZodType): JsonSchema {

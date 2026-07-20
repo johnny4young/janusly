@@ -1,13 +1,14 @@
 /**
  * Zod contracts for the first stable `/v1` API lane.
  *
- * Used by the recovery, workflow, and run route registries. These schemas
- * describe the JSON wire representation (dates are ISO strings, never Date
- * objects) and are reused for runtime output validation and OpenAPI emission.
+ * Used by the recovery, workflow, run, and MCP connection route registries.
+ * These schemas describe the JSON wire representation (dates are ISO strings,
+ * never Date objects) and are reused for runtime output validation and OpenAPI
+ * emission.
  */
 
 import { WorkflowSchema } from "@janusly/shared";
-import { V1_READ_PATHS, V1_WRITE_PATHS } from "@janusly/shared/src/api-contract";
+import { V1_MCP_PATHS, V1_READ_PATHS, V1_WRITE_PATHS } from "@janusly/shared/src/api-contract";
 import { nodeStatusValues, runStatusValues } from "@janusly/shared/src/status";
 import { z } from "zod";
 
@@ -139,6 +140,87 @@ const RunUsageSchema = z.object({
   message: "loadedRows must not exceed rowCap",
   path: ["loadedRows"],
 });
+
+const McpAliasSchema = z.string().trim().regex(/^[a-z0-9_-]{1,32}$/);
+const McpToolNameSchema = z.string().trim().min(1).max(512);
+const McpConnectionPathSchema = z.object({ alias: McpAliasSchema }).strict();
+const McpConnectionToolPathSchema = z.object({
+  alias: McpAliasSchema,
+  toolName: McpToolNameSchema,
+}).strict();
+const McpEnvRefKeySchema = z.string().regex(/^(?:[a-z0-9_-]{1,32}|[A-Z][A-Z0-9_]{0,63})$/);
+const McpEnvRefsSchema = z.record(
+  McpEnvRefKeySchema,
+  z.object({ kind: z.literal("env"), name: z.string().trim().min(1).max(128) }).strict(),
+);
+const McpConnectionSchema = z.object({
+  id: z.string(),
+  orgId: z.string(),
+  alias: McpAliasSchema,
+  transport: z.enum(["stdio", "sse", "http"]),
+  command: z.string().nullable(),
+  args: z.array(z.string()).nullable(),
+  url: z.string().nullable(),
+  envRefs: McpEnvRefsSchema,
+  enabled: z.boolean(),
+  status: z.enum(["pending", "active", "failed", "disabled"]),
+  statusReason: z.string().nullable(),
+  exposeToAi: z.boolean(),
+  lastDiscoveryAt: NullableIsoDateSchema,
+  createdBy: z.string().nullable(),
+  createdAt: NullableIsoDateSchema,
+  updatedAt: NullableIsoDateSchema,
+});
+const McpToolDescriptorSchema = z.object({
+  id: z.string(),
+  connectionId: z.string(),
+  name: McpToolNameSchema,
+  description: z.string().nullable(),
+  inputSchema: z.record(z.string(), z.unknown()).nullable(),
+  writeSide: z.boolean(),
+  enabled: z.boolean(),
+  rateLimitPerMin: z.number().int().min(1).max(10_000).nullable(),
+  exposeToAi: z.boolean(),
+  createdAt: NullableIsoDateSchema,
+  updatedAt: NullableIsoDateSchema,
+});
+const McpDiscoverySchema = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), tools: z.number().int().min(0).max(200) }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+const McpCreateConnectionBodySchema = z.object({
+  alias: McpAliasSchema,
+  transport: z.enum(["stdio", "sse", "http"]),
+  command: z.string().trim().min(1).max(512).optional(),
+  args: z.array(z.string().min(1).max(200)).max(32).optional(),
+  url: z.string().trim().min(1).max(2048).optional(),
+  envRefs: McpEnvRefsSchema.optional(),
+}).strict();
+const McpUpdateConnectionBodySchema = z.object({
+  enabled: z.boolean().optional(),
+  envRefs: McpEnvRefsSchema.optional(),
+  args: z.array(z.string().min(1).max(200)).max(32).optional(),
+  url: z.string().trim().min(1).max(2048).optional(),
+  command: z.string().trim().min(1).max(512).optional(),
+  exposeToAi: z.boolean().optional(),
+}).strict().refine((body) => Object.keys(body).length > 0, {
+  message: "At least one updatable field is required",
+});
+const McpSetToolBodySchema = z.object({
+  enabled: z.boolean().optional(),
+  writeSide: z.boolean().optional(),
+  rateLimitPerMin: z.number().int().min(1).max(10_000).nullable().optional(),
+  exposeToAi: z.boolean().optional(),
+}).strict().refine((body) => Object.keys(body).length > 0, {
+  message: "At least one updatable field is required",
+});
+
+const MCP_CONNECTION_ERROR_CODES = [
+  "mcp_alias_invalid",
+  "mcp_alias_required",
+  "mcp_connection_not_found",
+] as const;
+const MCP_WRITE_ERROR_CODES = ["mcp_process_disabled", "mcp_tenant_disabled"] as const;
 
 const RecoveryMetricSchema = z.object({
   value: z.number().nullable(),
@@ -393,8 +475,6 @@ export const getRunUsageContract = {
   errorCodes: ["invalid_input", "runs_run_id_required", "runs_forbidden"],
 } satisfies ApiRouteContract;
 
-const MCP_WRITE_ERROR_CODES = ["mcp_process_disabled", "mcp_tenant_disabled"] as const;
-
 export const startRunContract = {
   operationId: "startRun",
   path: V1_WRITE_PATHS.startRun,
@@ -474,6 +554,128 @@ export const cancelRunContract = {
   ],
 } satisfies ApiRouteContract;
 
+export const listMcpConnectionsContract = {
+  operationId: "listMcpConnections",
+  path: V1_MCP_PATHS.connections,
+  summary: "List outbound MCP connections for the tenant",
+  tags: ["MCP Connections"],
+  response: z.object({
+    connections: z.array(McpConnectionSchema.extend({
+      toolCount: z.number().int().nonnegative(),
+      enabledToolCount: z.number().int().nonnegative(),
+    })),
+  }),
+  errorCodes: [],
+} satisfies ApiRouteContract;
+
+export const createMcpConnectionContract = {
+  operationId: "createMcpConnection",
+  path: V1_MCP_PATHS.connections,
+  summary: "Register and discover an outbound MCP connection",
+  tags: ["MCP Connections"],
+  request: { body: McpCreateConnectionBodySchema },
+  response: z.object({
+    connection: McpConnectionSchema.nullable(),
+    tools: z.array(McpToolDescriptorSchema),
+    discovery: McpDiscoverySchema,
+  }),
+  errorCodes: [
+    "invalid_input",
+    "mcp_alias_invalid",
+    "mcp_transport_invalid",
+    "mcp_command_required",
+    "mcp_command_allowlist_empty",
+    "mcp_command_not_allowed",
+    "mcp_url_required",
+    "mcp_connection_duplicate",
+    ...MCP_WRITE_ERROR_CODES,
+  ],
+} satisfies ApiRouteContract;
+
+export const updateMcpConnectionContract = {
+  operationId: "updateMcpConnection",
+  path: V1_MCP_PATHS.connection,
+  summary: "Update an outbound MCP connection",
+  tags: ["MCP Connections"],
+  request: {
+    path: McpConnectionPathSchema,
+    body: McpUpdateConnectionBodySchema,
+  },
+  response: McpConnectionSchema.nullable(),
+  errorCodes: [
+    "invalid_input",
+    ...MCP_CONNECTION_ERROR_CODES,
+    "mcp_url_invalid",
+    "mcp_command_invalid",
+    "mcp_command_not_allowed",
+    "mcp_no_updatable_fields",
+    ...MCP_WRITE_ERROR_CODES,
+  ],
+} satisfies ApiRouteContract;
+
+export const deleteMcpConnectionContract = {
+  operationId: "deleteMcpConnection",
+  path: V1_MCP_PATHS.connection,
+  summary: "Delete an outbound MCP connection",
+  tags: ["MCP Connections"],
+  request: { path: McpConnectionPathSchema },
+  response: z.object({ ok: z.literal(true) }),
+  errorCodes: ["invalid_input", ...MCP_CONNECTION_ERROR_CODES, ...MCP_WRITE_ERROR_CODES],
+} satisfies ApiRouteContract;
+
+export const rediscoverMcpConnectionContract = {
+  operationId: "rediscoverMcpConnection",
+  path: V1_MCP_PATHS.rediscoverConnection,
+  summary: "Rediscover tools for an outbound MCP connection",
+  tags: ["MCP Connections"],
+  request: {
+    path: McpConnectionPathSchema,
+    body: z.object({}).strict(),
+  },
+  response: z.object({
+    connection: McpConnectionSchema.nullable(),
+    tools: z.array(McpToolDescriptorSchema),
+    discovery: McpDiscoverySchema,
+  }),
+  errorCodes: [
+    "invalid_input",
+    ...MCP_CONNECTION_ERROR_CODES,
+    "mcp_rate_limited",
+    ...MCP_WRITE_ERROR_CODES,
+  ],
+} satisfies ApiRouteContract;
+
+export const listMcpConnectionToolsContract = {
+  operationId: "listMcpConnectionTools",
+  path: V1_MCP_PATHS.connectionTools,
+  summary: "List cached tools for an outbound MCP connection",
+  tags: ["MCP Connections"],
+  request: { path: McpConnectionPathSchema },
+  response: z.object({ tools: z.array(McpToolDescriptorSchema) }),
+  errorCodes: ["invalid_input", ...MCP_CONNECTION_ERROR_CODES],
+} satisfies ApiRouteContract;
+
+export const setMcpConnectionToolContract = {
+  operationId: "setMcpConnectionTool",
+  path: V1_MCP_PATHS.connectionTool,
+  summary: "Update operator-controlled MCP tool flags",
+  tags: ["MCP Connections"],
+  request: {
+    path: McpConnectionToolPathSchema,
+    body: McpSetToolBodySchema,
+  },
+  response: McpToolDescriptorSchema.nullable(),
+  errorCodes: [
+    "invalid_input",
+    ...MCP_CONNECTION_ERROR_CODES,
+    "mcp_alias_tool_required",
+    "mcp_tool_not_found",
+    "mcp_rate_limit_invalid",
+    "mcp_no_updatable_fields",
+    ...MCP_WRITE_ERROR_CODES,
+  ],
+} satisfies ApiRouteContract;
+
 /**
  * Side-effect-free contract manifest. The generator imports this instead of
  * the handler registry so contract checks never create Redis/DB clients.
@@ -495,4 +697,11 @@ export const V1_CONTRACT_ROUTES: readonly ApiContractRouteDescriptor[] = [
   { method: "POST", role: "editor", permission: "runs.start", contract: startRunContract },
   { method: "POST", role: "editor", contract: resumeRunContract },
   { method: "POST", role: "editor", permission: "runs.cancel", contract: cancelRunContract },
+  { method: "GET", role: "viewer", permission: "mcp.connections.read", contract: listMcpConnectionsContract },
+  { method: "POST", role: "admin", permission: "mcp.connections.write", contract: createMcpConnectionContract },
+  { method: "POST", role: "admin", permission: "mcp.connections.write", contract: updateMcpConnectionContract },
+  { method: "DELETE", role: "admin", permission: "mcp.connections.write", contract: deleteMcpConnectionContract },
+  { method: "POST", role: "admin", permission: "mcp.connections.write", contract: rediscoverMcpConnectionContract },
+  { method: "GET", role: "viewer", permission: "mcp.connections.read", contract: listMcpConnectionToolsContract },
+  { method: "POST", role: "admin", permission: "mcp.connections.write", contract: setMcpConnectionToolContract },
 ];

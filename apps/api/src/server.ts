@@ -146,6 +146,18 @@ async function dispatchRequest(
       }
     }
 
+    if (versionedAlias && matched.contract?.request?.path) {
+      const path = parseContractPath(matched.contract.path, handlerUrl);
+      const result = path === null
+        ? null
+        : matched.contract.request.path.safeParse(path);
+      if (!result?.success) {
+        const field = result?.error.issues[0]?.path.join(".") || "path";
+        sendError(response, "invalid_input", "Invalid request path", 400, { field });
+        return;
+      }
+    }
+
     if (versionedAlias && matched.contract?.request?.query) {
       const query = parseContractQuery(handlerUrl, matched.contract.request.repeatableQueryParams);
       const result = matched.contract.request.query.safeParse(query);
@@ -213,6 +225,31 @@ export function matchesContractPath(contractPath: string, url: string): boolean 
   return contractSegments.every((segment, index) => {
     return /^\{[^{}]+\}$/.test(segment) || segment === actualSegments[index];
   });
+}
+
+/** Decode `{name}` path-template values for runtime contract validation. */
+function parseContractPath(contractPath: string, url: string): Record<string, string> | null {
+  const actualSegments = new URL(url, "http://localhost").pathname.split("/").filter(Boolean);
+  const contractSegments = contractPath.split("/").filter(Boolean);
+  if (actualSegments.length !== contractSegments.length) return null;
+
+  const params: Record<string, string> = {};
+  for (let index = 0; index < contractSegments.length; index += 1) {
+    const contractSegment = contractSegments[index];
+    const actualSegment = actualSegments[index];
+    if (!contractSegment || actualSegment === undefined) return null;
+    const name = contractSegment.match(/^\{([^{}]+)\}$/)?.[1];
+    if (!name) {
+      if (contractSegment !== actualSegment) return null;
+      continue;
+    }
+    try {
+      params[name] = decodeURIComponent(actualSegment);
+    } catch {
+      return null;
+    }
+  }
+  return params;
 }
 
 /** Convert URLSearchParams into the raw object a route's Zod query schema expects. */

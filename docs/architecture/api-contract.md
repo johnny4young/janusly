@@ -9,8 +9,9 @@ by prefix alone.
 
 - `apps/api/src/api-contracts.ts` — Zod request/response schemas and the pure
   `V1_CONTRACT_ROUTES` manifest.
-- `packages/shared/src/api-contract.ts` — zero-dependency exact-path catalogs
-  for stable reads and writes, shared by API contracts and first-party clients.
+- `packages/shared/src/api-contract.ts` — zero-dependency path catalogs for
+  stable reads, writes, and dynamic MCP connection templates, shared by API
+  contracts and first-party clients.
 - `apps/api/src/routes.ts` — optional `contract` field on a route entry.
 - `apps/api/src/server.ts` — exact-route-first dispatch, `/v1` alias resolution,
   query/body validation, request ID assignment, and unchanged auth/RBAC ordering.
@@ -62,8 +63,10 @@ the response header and v1 envelope. CORS exposes `X-Request-Id` and
 1. Exact routes resolve before aliasing, so `/v1/openapi.json` is a public raw
    OpenAPI document rather than an enveloped data route.
 2. The dispatcher runs auth, role, and permission gates in the same order for
-   legacy and v1 requests. It validates v1 queries and declared JSON bodies
-   only after authorization. Strict body schemas reject unknown top-level keys.
+   legacy and v1 requests. It validates decoded path parameters, queries, and
+   declared JSON bodies only after authorization. Strict body schemas reject
+   unknown top-level keys; malformed or out-of-contract path values fail before
+   the handler runs.
 3. A v1 handler receives the legacy URL (`/v1/run?...` becomes `/run?...`), so
    tenant-scoped handler logic is shared rather than forked.
 4. A contracted mutation handler reuses the memoized raw JSON parse after the
@@ -87,14 +90,23 @@ the response header and v1 envelope. CORS exposes `X-Request-Id` and
 1. Define precise Zod wire schemas and an `ApiRouteContract` in
    `api-contracts.ts`. Dates are ISO strings because validation occurs after
    JSON serialization.
-2. Attach the contract to the real route entry without changing its role,
+2. For a dynamic path, declare a strict `request.path` schema whose keys match
+   every `{parameter}` in the OpenAPI path template. The dispatcher validates
+   decoded values and the generator emits required OpenAPI path parameters.
+3. Attach the contract to the real route entry without changing its role,
    permission, or tenant-scoped handler.
-3. Add the matching method/gates/contract to `V1_CONTRACT_ROUTES`.
-4. Add a stable read or mutation to the matching exact-path catalog in
+4. Add the matching method/gates/contract to `V1_CONTRACT_ROUTES`.
+5. Add a stable read, mutation, or path template to the matching catalog in
    `packages/shared/src/api-contract.ts`. If the browser should migrate a GET
    immediately, its transport reads `V1_READ_PATHS` directly.
-5. Run `pnpm contract:generate`, review `apps/api/openapi.v1.json`, then run
+6. Run `pnpm contract:generate`, review `apps/api/openapi.v1.json`, then run
    `pnpm contract:check` and the legacy/v1 parity tests.
+
+The MCP proxy consumes `/v1` only for operations present in this manifest and
+unwraps the stable envelope in `packages/mcp-server/src/api-client.ts`. Its
+remaining legacy calls must migrate operation-by-operation after their route
+schemas are explicit; adding `/v1` to an uncontracted path intentionally yields
+404.
 
 Do not add a schema with opaque top-level payloads merely to increase route
 count. SDK methods may consume only explicitly contracted `/v1` operations;

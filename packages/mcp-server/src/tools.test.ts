@@ -84,22 +84,22 @@ describe("MCP tool catalog", () => {
 });
 
 describe("dispatchTool", () => {
-  it("workflows.list with no args hits /workflows", async () => {
+  it("workflows.list with no args hits the stable API", async () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "workflows.list", {});
-    expect(mock).toHaveBeenCalledWith("/workflows");
+    expect(mock).toHaveBeenCalledWith("/v1/workflows");
   });
 
   it("workflows.list threads the limit query param when provided", async () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "workflows.list", { limit: 50 });
-    expect(mock).toHaveBeenCalledWith("/workflows?limit=50");
+    expect(mock).toHaveBeenCalledWith("/v1/workflows?limit=50");
   });
 
   it("workflows.get URL-encodes the workflowId", async () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "workflows.get", { workflowId: "wf with space" });
-    expect(mock).toHaveBeenCalledWith("/workflows/latest?workflowId=wf%20with%20space");
+    expect(mock).toHaveBeenCalledWith("/v1/workflows/latest?workflowId=wf%20with%20space");
   });
 
   it("workflows.get throws when workflowId is missing", async () => {
@@ -123,7 +123,7 @@ describe("dispatchTool", () => {
       eventsCursor: "2024-01-01T00:00:00.000Z|evt-x",
     });
     const path = mock.mock.calls[0][0];
-    expect(path).toMatch(/^\/run\?/);
+    expect(path).toMatch(/^\/v1\/run\?/);
     expect(path).toContain("runId=run-42");
     expect(path).toContain("eventsLimit=50");
     expect(path).toContain(
@@ -207,7 +207,7 @@ describe("dispatchTool", () => {
   it("workflows.versions URL-encodes the workflowId", async () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "workflows.versions", { workflowId: "wf with space" });
-    expect(mock).toHaveBeenCalledWith("/workflows/versions?workflowId=wf%20with%20space");
+    expect(mock).toHaveBeenCalledWith("/v1/workflows/versions?workflowId=wf%20with%20space");
   });
 
   it("workflows.versions throws when workflowId is missing", async () => {
@@ -248,14 +248,14 @@ describe("dispatchTool", () => {
   it("runs.list with no args hits /runs without query params", async () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "runs.list", {});
-    expect(mock).toHaveBeenCalledWith("/runs");
+    expect(mock).toHaveBeenCalledWith("/v1/runs");
   });
 
   it("runs.list threads workflowId + limit when provided", async () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "runs.list", { workflowId: "wf-1", limit: 50 });
     const path = mock.mock.calls[0][0] as string;
-    expect(path).toMatch(/^\/runs\?/);
+    expect(path).toMatch(/^\/v1\/runs\?/);
     expect(path).toContain("workflowId=wf-1");
     expect(path).toContain("limit=50");
   });
@@ -263,7 +263,7 @@ describe("dispatchTool", () => {
   it("runs.list drops out-of-shape limit values", async () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "runs.list", { limit: "not-a-number" as unknown as number });
-    expect(mock).toHaveBeenCalledWith("/runs");
+    expect(mock).toHaveBeenCalledWith("/v1/runs");
   });
 
   it("dlq.list with no args hits /dlq without query params", async () => {
@@ -312,19 +312,19 @@ describe("dispatchTool", () => {
   it("recovery.metrics with no args hits /recovery/metrics without query params", async () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "recovery.metrics", {});
-    expect(mock).toHaveBeenCalledWith("/recovery/metrics");
+    expect(mock).toHaveBeenCalledWith("/v1/recovery/metrics");
   });
 
   it("recovery.metrics threads windowDays when provided", async () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "recovery.metrics", { windowDays: 7 });
-    expect(mock).toHaveBeenCalledWith("/recovery/metrics?windowDays=7");
+    expect(mock).toHaveBeenCalledWith("/v1/recovery/metrics?windowDays=7");
   });
 
   it("recovery.metrics drops zero/negative windowDays as no-op", async () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "recovery.metrics", { windowDays: 0 });
-    expect(mock).toHaveBeenCalledWith("/recovery/metrics");
+    expect(mock).toHaveBeenCalledWith("/v1/recovery/metrics");
   });
 
   // -------- reports.run_explain --------
@@ -394,16 +394,23 @@ describe("dispatchTool", () => {
 
   // -------- read-only MCP connection surface --------
 
-  it("mcp.connections.list is a no-arg passthrough to /mcp/connections", async () => {
+  it("mcp.connections.list is a no-arg passthrough to the stable API", async () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "mcp.connections.list", {});
-    expect(mock).toHaveBeenCalledWith("/mcp/connections");
+    expect(mock).toHaveBeenCalledWith("/v1/mcp/connections");
   });
 
-  it("mcp.connections.tools URL-encodes the alias", async () => {
+  it("mcp.connections.tools uses a contract-valid alias", async () => {
     const { mock } = makeMockCallApi();
-    await dispatchTool(mock, "mcp.connections.tools", { alias: "note book" });
-    expect(mock).toHaveBeenCalledWith("/mcp/connections/note%20book/tools");
+    await dispatchTool(mock, "mcp.connections.tools", { alias: "note-book" });
+    expect(mock).toHaveBeenCalledWith("/v1/mcp/connections/note-book/tools");
+  });
+
+  it("mcp.connections.tools rejects aliases outside the stable path contract", async () => {
+    const { mock } = makeMockCallApi();
+    await expect(dispatchTool(mock, "mcp.connections.tools", { alias: "note book" }))
+      .rejects.toThrow(/matching/);
+    expect(mock).not.toHaveBeenCalled();
   });
 
   // -------- gated write surface: env-off rejection --------
@@ -430,13 +437,13 @@ describe("dispatchTool", () => {
 
   // -------- gated write surface: dispatch shape when env-on --------
 
-  it("runs.start POSTs { workflow, input } to /start", async () => {
+  it("runs.start POSTs { workflow, input } to the stable API", async () => {
     vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "true");
     const { mock } = makeMockCallApi();
     const workflow = { dslVersion: "1.0", id: "wf1", nodes: [{ id: "n1", type: "noop", config: {} }], edges: [] };
     await dispatchTool(mock, "runs.start", { workflow, input: { amount: 42 } });
     const [path, init] = mock.mock.calls[0];
-    expect(path).toBe("/start");
+    expect(path).toBe("/v1/start");
     expect(init?.method).toBe("POST");
     expect(JSON.parse(init?.body as string)).toEqual({ workflow, input: { amount: 42 } });
   });
@@ -446,7 +453,7 @@ describe("dispatchTool", () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "runs.resume", { runId: "r1", nodeId: "n1", input: { ok: true }, resumeToken: "tok" });
     const [path, init] = mock.mock.calls[0];
-    expect(path).toBe("/resume");
+    expect(path).toBe("/v1/resume");
     expect(JSON.parse(init?.body as string)).toEqual({ runId: "r1", nodeId: "n1", input: { ok: true }, resumeToken: "tok" });
   });
 
@@ -455,7 +462,7 @@ describe("dispatchTool", () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "runs.cancel", { runId: "r1", reason: "superseded" });
     const [path, init] = mock.mock.calls[0];
-    expect(path).toBe("/run/cancel");
+    expect(path).toBe("/v1/run/cancel");
     expect(JSON.parse(init?.body as string)).toEqual({ runId: "r1", reason: "superseded" });
   });
 
@@ -478,15 +485,25 @@ describe("dispatchTool", () => {
     expect(JSON.parse(init?.body as string)).toEqual({ workflowId: "wf1", sourceVersionId: "v2" });
   });
 
-  it("mcp.connections.create POSTs the full body to /mcp/connections", async () => {
+  it("mcp.connections.create POSTs the full body to the stable API", async () => {
     vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "true");
     const { mock } = makeMockCallApi();
     const body = { alias: "notion", transport: "http", url: "https://mcp.example/notion" };
     await dispatchTool(mock, "mcp.connections.create", body);
     const [path, init] = mock.mock.calls[0];
-    expect(path).toBe("/mcp/connections");
+    expect(path).toBe("/v1/mcp/connections");
     expect(init?.method).toBe("POST");
     expect(JSON.parse(init?.body as string)).toEqual(body);
+  });
+
+  it("mcp.connections.rediscover POSTs an empty body to the stable alias path", async () => {
+    vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "true");
+    const { mock } = makeMockCallApi();
+    await dispatchTool(mock, "mcp.connections.rediscover", { alias: "note-book" });
+    const [path, init] = mock.mock.calls[0];
+    expect(path).toBe("/v1/mcp/connections/note-book/rediscover");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe("{}");
   });
 
   it("mcp.connections.set_tool strips alias/toolName from the body and puts them in the path", async () => {
@@ -494,7 +511,7 @@ describe("dispatchTool", () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "mcp.connections.set_tool", { alias: "notion", toolName: "pages.update", enabled: true, writeSide: false });
     const [path, init] = mock.mock.calls[0];
-    expect(path).toBe("/mcp/connections/notion/tools/pages.update");
+    expect(path).toBe("/v1/mcp/connections/notion/tools/pages.update");
     expect(init?.method).toBe("POST");
     expect(JSON.parse(init?.body as string)).toEqual({ enabled: true, writeSide: false });
   });
@@ -504,7 +521,7 @@ describe("dispatchTool", () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "mcp.connections.delete", { alias: "notion" });
     const [path, init] = mock.mock.calls[0];
-    expect(path).toBe("/mcp/connections/notion");
+    expect(path).toBe("/v1/mcp/connections/notion");
     expect(init?.method).toBe("DELETE");
   });
 });

@@ -26,11 +26,16 @@ retroactively.
 - The Python SDK's synchronous and asynchronous run/recovery resources now use
   the same stable `/v1` envelopes, typed protocol-drift errors, filters, and
   keyset cursor semantics as the Node SDK.
+- The stdio MCP server now consumes stable envelopes for contracted workflow,
+  run, recovery, and outbound-connection operations while preserving legacy
+  calls for routes that do not yet have explicit contracts.
 
 ### Added
 
 - Stable `/v1` contracts and OpenAPI operations for starting, resuming, and
   cancelling runs, including runtime validation of strict JSON request bodies.
+- Stable `/v1` contracts for outbound MCP connection management, including
+  decoded dynamic-path validation and required OpenAPI path parameters.
 
 ### Fixed
 
@@ -38,6 +43,8 @@ retroactively.
   preserving validated object results and deterministic fallbacks.
 - Repository ratchets that inspect TypeScript and TSX source now use the Oxc
   parser, preserving their binding and selector checks under TypeScript 7.
+- Outbound MCP connection updates now pass through the same two-flag consent
+  gate as every other MCP-originated connection mutation.
 
 ## Development milestone: recovery platform hardening
 

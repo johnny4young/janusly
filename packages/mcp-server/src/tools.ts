@@ -49,6 +49,7 @@ import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { CallApi } from "./api-client";
 
 const DLQ_STATUSES = ["open", "replayed", "resolved"] as const;
+const MCP_ALIAS_PATTERN = /^[a-z0-9_-]{1,32}$/;
 
 /** True when the process-wide opt-in flag is on. */
 export function mcpWritesEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -153,7 +154,7 @@ const WRITE_TOOLS: Tool[] = [
       type: "object",
       required: ["alias", "transport"],
       properties: {
-        alias: { type: "string", description: "Unique per-org alias, /^[a-z0-9_-]{1,32}$/." },
+        alias: { type: "string", pattern: "^[a-z0-9_-]{1,32}$", description: "Unique per-org alias." },
         transport: { type: "string", enum: ["stdio", "sse", "http"], description: "MCP transport." },
         command: { type: "string", description: "stdio only: the allowlisted command to spawn." },
         args: { type: "array", items: { type: "string" }, description: "stdio only: command arguments." },
@@ -173,7 +174,7 @@ const WRITE_TOOLS: Tool[] = [
     inputSchema: {
       type: "object",
       required: ["alias"],
-      properties: { alias: { type: "string", description: "Connection alias." } },
+      properties: { alias: { type: "string", pattern: "^[a-z0-9_-]{1,32}$", description: "Connection alias." } },
     },
   },
   {
@@ -184,8 +185,8 @@ const WRITE_TOOLS: Tool[] = [
       type: "object",
       required: ["alias", "toolName"],
       properties: {
-        alias: { type: "string" },
-        toolName: { type: "string" },
+        alias: { type: "string", pattern: "^[a-z0-9_-]{1,32}$" },
+        toolName: { type: "string", minLength: 1, maxLength: 512 },
         enabled: { type: "boolean" },
         writeSide: { type: "boolean" },
         exposeToAi: { type: "boolean" },
@@ -205,7 +206,7 @@ const WRITE_TOOLS: Tool[] = [
     inputSchema: {
       type: "object",
       required: ["alias"],
-      properties: { alias: { type: "string", description: "Connection alias." } },
+      properties: { alias: { type: "string", pattern: "^[a-z0-9_-]{1,32}$", description: "Connection alias." } },
     },
   },
 ];
@@ -475,7 +476,7 @@ const READ_TOOLS: Tool[] = [
       type: "object",
       required: ["alias"],
       properties: {
-        alias: { type: "string", description: "Connection alias (from `mcp.connections.list`)." },
+        alias: { type: "string", pattern: "^[a-z0-9_-]{1,32}$", description: "Connection alias (from `mcp.connections.list`)." },
       },
     },
   },
@@ -510,6 +511,16 @@ function isPositiveNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
+function requireMcpAlias(value: unknown, toolName: string): string {
+  if (typeof value === "string" && MCP_ALIAS_PATTERN.test(value)) return value;
+  throw new Error(`${toolName} requires \`alias\` matching /^[a-z0-9_-]{1,32}$/`);
+}
+
+function requireMcpToolName(value: unknown): string {
+  if (typeof value === "string" && value.trim().length > 0 && value.length <= 512) return value;
+  throw new Error("mcp.connections.set_tool requires `toolName` (1-512 characters)");
+}
+
 async function runOne(
   callApi: CallApi,
   name: string,
@@ -522,13 +533,13 @@ async function runOne(
         params.set("limit", String(args.limit));
       }
       const query = params.toString();
-      return callApi(query ? `/workflows?${query}` : "/workflows");
+      return callApi(query ? `/v1/workflows?${query}` : "/v1/workflows");
     }
     case "workflows.get": {
       if (typeof args.workflowId !== "string" || args.workflowId.length === 0) {
         throw new Error("workflows.get requires `workflowId` (non-empty string)");
       }
-      return callApi(`/workflows/latest?workflowId=${encodeURIComponent(args.workflowId)}`);
+      return callApi(`/v1/workflows/latest?workflowId=${encodeURIComponent(args.workflowId)}`);
     }
     case "recipes.list":
       return callApi("/templates");
@@ -541,7 +552,7 @@ async function runOne(
       const params = new URLSearchParams({ runId: args.runId });
       if (typeof args.eventsLimit === "number") params.set("eventsLimit", String(args.eventsLimit));
       if (typeof args.eventsCursor === "string") params.set("eventsCursor", args.eventsCursor);
-      return callApi(`/run?${params.toString()}`);
+      return callApi(`/v1/run?${params.toString()}`);
     }
     case "workflows.validate": {
       if (!isObject(args.workflow)) {
@@ -556,7 +567,7 @@ async function runOne(
       if (typeof args.workflowId !== "string" || args.workflowId.length === 0) {
         throw new Error("workflows.versions requires `workflowId` (non-empty string)");
       }
-      return callApi(`/workflows/versions?workflowId=${encodeURIComponent(args.workflowId)}`);
+      return callApi(`/v1/workflows/versions?workflowId=${encodeURIComponent(args.workflowId)}`);
     }
     case "workflows.health": {
       if (typeof args.workflowId !== "string" || args.workflowId.length === 0) {
@@ -582,7 +593,7 @@ async function runOne(
         params.set("limit", String(args.limit));
       }
       const query = params.toString();
-      return callApi(query ? `/runs?${query}` : "/runs");
+      return callApi(query ? `/v1/runs?${query}` : "/v1/runs");
     }
     case "dlq.list": {
       const params = new URLSearchParams();
@@ -612,7 +623,7 @@ async function runOne(
         params.set("windowDays", String(args.windowDays));
       }
       const query = params.toString();
-      return callApi(query ? `/recovery/metrics?${query}` : "/recovery/metrics");
+      return callApi(query ? `/v1/recovery/metrics?${query}` : "/v1/recovery/metrics");
     }
     case "reports.run_explain": {
       if (typeof args.runId !== "string" || args.runId.length === 0) {
@@ -640,12 +651,10 @@ async function runOne(
       });
     }
     case "mcp.connections.list":
-      return callApi("/mcp/connections");
+      return callApi("/v1/mcp/connections");
     case "mcp.connections.tools": {
-      if (typeof args.alias !== "string" || args.alias.length === 0) {
-        throw new Error("mcp.connections.tools requires `alias` (non-empty string)");
-      }
-      return callApi(`/mcp/connections/${encodeURIComponent(args.alias)}/tools`);
+      const alias = requireMcpAlias(args.alias, name);
+      return callApi(`/v1/mcp/connections/${encodeURIComponent(alias)}/tools`);
     }
     case "runs.start": {
       requireWrites(name);
@@ -654,7 +663,7 @@ async function runOne(
       }
       const payload: Record<string, unknown> = { workflow: args.workflow };
       if (args.input !== undefined) payload.input = args.input;
-      return callApi("/start", { method: "POST", body: JSON.stringify(payload) });
+      return callApi("/v1/start", { method: "POST", body: JSON.stringify(payload) });
     }
     case "runs.resume": {
       requireWrites(name);
@@ -664,7 +673,7 @@ async function runOne(
       const payload: Record<string, unknown> = { runId: args.runId, nodeId: args.nodeId };
       if (args.input !== undefined) payload.input = args.input;
       if (typeof args.resumeToken === "string") payload.resumeToken = args.resumeToken;
-      return callApi("/resume", { method: "POST", body: JSON.stringify(payload) });
+      return callApi("/v1/resume", { method: "POST", body: JSON.stringify(payload) });
     }
     case "runs.cancel": {
       requireWrites(name);
@@ -673,7 +682,7 @@ async function runOne(
       }
       const payload: Record<string, unknown> = { runId: args.runId };
       if (typeof args.reason === "string") payload.reason = args.reason;
-      return callApi("/run/cancel", { method: "POST", body: JSON.stringify(payload) });
+      return callApi("/v1/run/cancel", { method: "POST", body: JSON.stringify(payload) });
     }
     case "dlq.replay": {
       requireWrites(name);
@@ -700,41 +709,36 @@ async function runOne(
     }
     case "mcp.connections.create": {
       requireWrites(name);
-      if (typeof args.alias !== "string" || args.alias.length === 0) {
-        throw new Error("mcp.connections.create requires `alias` (non-empty string)");
-      }
+      requireMcpAlias(args.alias, name);
       if (typeof args.transport !== "string") {
         throw new Error("mcp.connections.create requires `transport` (string)");
       }
-      return callApi("/mcp/connections", { method: "POST", body: JSON.stringify(args) });
+      return callApi("/v1/mcp/connections", { method: "POST", body: JSON.stringify(args) });
     }
     case "mcp.connections.rediscover": {
       requireWrites(name);
-      if (typeof args.alias !== "string" || args.alias.length === 0) {
-        throw new Error("mcp.connections.rediscover requires `alias` (non-empty string)");
-      }
-      return callApi(`/mcp/connections/${encodeURIComponent(args.alias)}/rediscover`, {
+      const alias = requireMcpAlias(args.alias, name);
+      return callApi(`/v1/mcp/connections/${encodeURIComponent(alias)}/rediscover`, {
         method: "POST",
         body: "{}",
       });
     }
     case "mcp.connections.set_tool": {
       requireWrites(name);
-      if (typeof args.alias !== "string" || typeof args.toolName !== "string") {
-        throw new Error("mcp.connections.set_tool requires `alias` and `toolName` (strings)");
-      }
-      const { alias, toolName, ...patch } = args;
+      const alias = requireMcpAlias(args.alias, name);
+      const toolName = requireMcpToolName(args.toolName);
+      const patch = { ...args };
+      delete patch.alias;
+      delete patch.toolName;
       return callApi(
-        `/mcp/connections/${encodeURIComponent(alias)}/tools/${encodeURIComponent(toolName)}`,
+        `/v1/mcp/connections/${encodeURIComponent(alias)}/tools/${encodeURIComponent(toolName)}`,
         { method: "POST", body: JSON.stringify(patch) },
       );
     }
     case "mcp.connections.delete": {
       requireWrites(name);
-      if (typeof args.alias !== "string" || args.alias.length === 0) {
-        throw new Error("mcp.connections.delete requires `alias` (non-empty string)");
-      }
-      return callApi(`/mcp/connections/${encodeURIComponent(args.alias)}`, { method: "DELETE" });
+      const alias = requireMcpAlias(args.alias, name);
+      return callApi(`/v1/mcp/connections/${encodeURIComponent(alias)}`, { method: "DELETE" });
     }
     case "workflows.save": {
       requireWrites(name);
