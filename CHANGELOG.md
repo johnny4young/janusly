@@ -34,8 +34,9 @@ retroactively.
 
 - Stable `/v1` contracts and OpenAPI operations for starting, resuming, and
   cancelling runs, including runtime validation of strict JSON request bodies.
-- Stable `/v1` contracts for outbound MCP connection management, including
-  decoded dynamic-path validation and required OpenAPI path parameters.
+- Stable `/v1` contracts for outbound MCP connection management and the recipe
+  and runtime-tool catalogs, including decoded dynamic-path validation and
+  required OpenAPI path parameters.
 
 ### Fixed
 

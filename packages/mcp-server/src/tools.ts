@@ -542,9 +542,9 @@ async function runOne(
       return callApi(`/v1/workflows/latest?workflowId=${encodeURIComponent(args.workflowId)}`);
     }
     case "recipes.list":
-      return callApi("/templates");
+      return callApi("/v1/templates");
     case "tools.list":
-      return callApi("/tools");
+      return callApi("/v1/tools");
     case "runs.get": {
       if (typeof args.runId !== "string" || args.runId.length === 0) {
         throw new Error("runs.get requires `runId` (non-empty string)");

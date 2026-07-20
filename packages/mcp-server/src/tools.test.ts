@@ -111,8 +111,8 @@ describe("dispatchTool", () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "recipes.list", {});
     await dispatchTool(mock, "tools.list", {});
-    expect(mock).toHaveBeenNthCalledWith(1, "/templates");
-    expect(mock).toHaveBeenNthCalledWith(2, "/tools");
+    expect(mock).toHaveBeenNthCalledWith(1, "/v1/templates");
+    expect(mock).toHaveBeenNthCalledWith(2, "/v1/tools");
   });
 
   it("runs.get builds a URLSearchParams query with eventsLimit + cursor", async () => {

@@ -140,6 +140,25 @@ describe('api', () => {
     })
   })
 
+  it('routes recipe and tool catalogs through their stable read contracts', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      apiVersion: 'v1',
+      requestId: 'req-catalog',
+      data: [],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(api('/templates')).resolves.toEqual([])
+    await expect(api('/tools')).resolves.toEqual([])
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      'http://localhost:3001/v1/templates',
+      'http://localhost:3001/v1/tools',
+    ])
+  })
+
   it('leaves uncontracted and mutating paths unversioned', async () => {
     const fetchMock = vi.fn(async () => new Response('{}', {
       status: 200,

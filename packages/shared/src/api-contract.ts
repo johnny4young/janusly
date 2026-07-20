@@ -10,6 +10,8 @@ export const V1_READ_PATHS = {
   recoveryMetrics: "/recovery/metrics",
   recoveryLedger: "/recovery/ledger",
   recoveryMyWins: "/recovery/my-wins",
+  templates: "/templates",
+  tools: "/tools",
   workflows: "/workflows",
   schedulePreview: "/workflows/schedule-preview",
   workflowVersions: "/workflows/versions",

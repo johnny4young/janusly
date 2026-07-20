@@ -14,7 +14,8 @@ import { describe, expect, it } from "vitest";
 import { WorkflowSchema } from "@janusly/shared";
 import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
 import { listTools } from "@janusly/engine/src/tool-registry";
-import { workflowTemplates } from "./templates";
+import { listTemplatesContract, listToolsContract } from "./api-contracts";
+import { asPublicTemplate, workflowTemplates } from "./templates";
 
 /**
  * Mapping from a tool name to the credential `kind` that tool needs
@@ -31,6 +32,13 @@ const TOOL_TO_CREDENTIAL_KIND: Record<string, string> = {
 const REGISTERED_TOOL_NAMES = new Set(listTools().map((t) => t.name));
 
 describe("workflowTemplates — catalog shape", () => {
+  it("keeps both public catalogs inside their stable wire contracts", () => {
+    expect(listTemplatesContract.response.safeParse(
+      workflowTemplates.map(asPublicTemplate),
+    ).success).toBe(true);
+    expect(listToolsContract.response.safeParse(listTools()).success).toBe(true);
+  });
+
   it("every id is unique", () => {
     const ids = workflowTemplates.map((t) => t.id);
     expect(new Set(ids).size).toBe(ids.length);

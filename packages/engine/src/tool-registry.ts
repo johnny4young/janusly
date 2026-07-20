@@ -167,9 +167,9 @@ function describeShape(schema: z.ZodObject<z.ZodRawShape>): { required: string[]
 /**
  * Public list of registered tools, shaped for the AI Studio inspector.
  *
- * Called from `apps/api/src/routes/tools-routes.ts` `GET /tools`. The JSON
- * shape is part of the contract `apps/web` consumes via `ToolSchema` in
- * `apps/web/src/types.ts` — the field names must stay stable.
+ * Called from `apps/api/src/routes/tools-routes.ts` and exposed as stable
+ * `GET /v1/tools`. The JSON shape is part of the contract `apps/web` consumes
+ * via `ToolSchema` in `apps/web/src/types.ts` — the field names must stay stable.
  */
 export function listTools(): ToolSchema[] {
   return Object.values(tools).map((tool) => {

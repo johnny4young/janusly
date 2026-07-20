@@ -24,6 +24,27 @@ const PositiveLimitSchema = z.coerce.number().int().min(1).max(200)
 const KeysetCursorSchema = z.string().min(3).max(512)
   .describe("Opaque `<iso>|<id>` keyset cursor returned by the preceding page.");
 
+const WorkflowTemplateSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string(),
+  category: z.string().min(1),
+  requiredCredentials: z.array(z.string()).optional(),
+  workflow: WorkflowSchema,
+  nameCode: z.string().min(1),
+  descriptionCode: z.string().min(1),
+  categoryCode: z.string().min(1),
+});
+
+const PublicToolSchema = z.object({
+  name: z.string().min(1),
+  description: z.string(),
+  descriptionCode: z.string().min(1),
+  required: z.array(z.string()).optional(),
+  optional: z.array(z.string()).optional(),
+  inputExample: z.record(z.string(), z.unknown()).optional(),
+});
+
 const WorkflowListRowSchema = z.object({
   id: z.string(),
   orgId: z.string(),
@@ -347,6 +368,24 @@ export const recoveryMyWinsContract = {
     windowDays: z.number().int().min(1).max(90),
   }),
   errorCodes: ["invalid_input"],
+} satisfies ApiRouteContract;
+
+export const listTemplatesContract = {
+  operationId: "listTemplates",
+  path: V1_READ_PATHS.templates,
+  summary: "List built-in workflow recipes",
+  tags: ["Catalogs"],
+  response: z.array(WorkflowTemplateSchema),
+  errorCodes: [],
+} satisfies ApiRouteContract;
+
+export const listToolsContract = {
+  operationId: "listTools",
+  path: V1_READ_PATHS.tools,
+  summary: "List workflow runtime tools and their input fields",
+  tags: ["Catalogs"],
+  response: z.array(PublicToolSchema),
+  errorCodes: [],
 } satisfies ApiRouteContract;
 
 export const listWorkflowsContract = {
@@ -686,6 +725,8 @@ export const V1_CONTRACT_ROUTES: readonly ApiContractRouteDescriptor[] = [
   { method: "GET", role: "viewer", contract: recoveryMetricsContract },
   { method: "GET", role: "viewer", contract: recoveryLedgerContract },
   { method: "GET", role: "viewer", contract: recoveryMyWinsContract },
+  { method: "GET", contract: listTemplatesContract },
+  { method: "GET", contract: listToolsContract },
   { method: "GET", contract: listWorkflowsContract },
   { method: "GET", role: "viewer", permission: "workflows.read", contract: getSchedulePreviewContract },
   { method: "GET", contract: listWorkflowVersionsContract },

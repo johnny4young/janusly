@@ -52,8 +52,8 @@ Boot story: Claude Desktop reads its config file (`~/Library/Application Support
 | `workflows.get` | `GET /v1/workflows/latest` | Fetch the latest active workflow version. |
 | `workflows.versions` | `GET /v1/workflows/versions` | List immutable versions newest-first. |
 | `workflows.health` | `GET /workflows/health` | Compute workflow health and SLO signals. |
-| `recipes.list` | `GET /templates` | List built-in workflow recipes. |
-| `tools.list` | `GET /tools` | List the runtime tool catalog. |
+| `recipes.list` | `GET /v1/templates` | List built-in workflow recipes. |
+| `tools.list` | `GET /v1/tools` | List the runtime tool catalog. |
 | `runs.get` | `GET /v1/run` | Fetch one run with paginated events. |
 | `runs.list` | `GET /v1/runs` | List recent runs with workflow, status, and run-kind filters. |
 | `dlq.list` | `GET /dlq` | List bounded DLQ entries. |
