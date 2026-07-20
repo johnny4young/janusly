@@ -1,7 +1,10 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
+import { sendError, sendJson } from "./http";
+import type { ApiRouteContract } from "./api-contract-types";
 import type { Route } from "./routes";
 
 vi.mock("./auth", () => ({
@@ -19,7 +22,7 @@ vi.mock("./permissions", () => ({
 
 import { requireAuth } from "./auth";
 import { requirePermission, requireRole } from "./permissions";
-import { configureApiServerTimeouts, createApiServer } from "./server";
+import { configureApiServerTimeouts, createApiServer, matchesContractPath } from "./server";
 
 const requireAuthMock = vi.mocked(requireAuth);
 const requirePermissionMock = vi.mocked(requirePermission);
@@ -186,7 +189,172 @@ describe("createApiServer", () => {
       await close(server);
     }
   });
+
+  it("keeps legacy responses unchanged and wraps contracted v1 aliases", async () => {
+    const contract = testContract();
+    const routes: Route[] = [{
+      method: "GET",
+      match: (url) => url === "/stable" || url.startsWith("/stable?"),
+      contract,
+      handler: async ({ req, res }) => sendJson(res, { value: req.url }),
+    }];
+    const server = createApiServer({ routes });
+    const baseUrl = await listen(server);
+
+    try {
+      const legacy = await fetch(`${baseUrl}/stable?limit=2`);
+      expect(legacy.status).toBe(200);
+      await expect(legacy.json()).resolves.toEqual({ value: "/stable?limit=2" });
+
+      const versioned = await fetch(`${baseUrl}/v1/stable?limit=2`, {
+        headers: { "X-Request-Id": "browser-request-42" },
+      });
+      expect(versioned.status).toBe(200);
+      expect(versioned.headers.get("x-request-id")).toBe("browser-request-42");
+      await expect(versioned.json()).resolves.toEqual({
+        apiVersion: "v1",
+        requestId: "browser-request-42",
+        data: { value: "/stable?limit=2" },
+      });
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("rejects unknown query keys and uncontracted v1 aliases", async () => {
+    const handler = vi.fn(async ({ res }) => sendJson(res, { value: "ok" }));
+    const routes: Route[] = [
+      {
+        method: "GET",
+        match: (url) => url.startsWith("/stable"),
+        contract: testContract(),
+        handler,
+      },
+      { method: "GET", match: "/legacy-only", handler },
+    ];
+    const server = createApiServer({ routes });
+    const baseUrl = await listen(server);
+
+    try {
+      const invalid = await fetch(`${baseUrl}/v1/stable?unknown=yes`);
+      expect(invalid.status).toBe(400);
+      await expect(invalid.json()).resolves.toMatchObject({
+        apiVersion: "v1",
+        error: { code: "invalid_input", message: "Invalid request query" },
+      });
+
+      const unavailable = await fetch(`${baseUrl}/v1/legacy-only`);
+      expect(unavailable.status).toBe(404);
+      await expect(unavailable.json()).resolves.toMatchObject({
+        apiVersion: "v1",
+        error: { code: "server_not_found", message: "Not found" },
+      });
+
+      const broadMatcherBypass = await fetch(`${baseUrl}/v1/stable-extra`);
+      expect(broadMatcherBypass.status).toBe(404);
+      await expect(broadMatcherBypass.json()).resolves.toMatchObject({
+        apiVersion: "v1",
+        error: { code: "server_not_found" },
+      });
+      expect(handler).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("keeps authentication failures inside the stable v1 error contract", async () => {
+    const handler = vi.fn(async ({ res }) => sendJson(res, { value: "ok" }));
+    const unauthorized = new Error("Unauthorized") as Error & { statusCode?: number };
+    unauthorized.statusCode = 401;
+    requireAuthMock.mockRejectedValueOnce(unauthorized);
+    const server = createApiServer({
+      routes: [{ method: "GET", match: "/stable", contract: testContract(), handler }],
+    });
+    const baseUrl = await listen(server);
+
+    try {
+      const response = await fetch(`${baseUrl}/v1/stable`, {
+        headers: { "X-Request-Id": "unauthorized-request" },
+      });
+      expect(response.status).toBe(401);
+      expect(response.headers.get("x-request-id")).toBe("unauthorized-request");
+      await expect(response.json()).resolves.toEqual({
+        apiVersion: "v1",
+        requestId: "unauthorized-request",
+        error: { code: "server_request_failed", message: "Unauthorized" },
+      });
+      expect(handler).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("uses the stable v1 error shape and fails closed on response drift", async () => {
+    const routes: Route[] = [
+      {
+        method: "GET",
+        match: "/denied",
+        contract: { ...testContract("getDenied", "/denied"), errorCodes: ["runs_forbidden", "invalid_input"] },
+        handler: async ({ res }) => sendError(res, "runs_forbidden", "Forbidden", 403),
+      },
+      {
+        method: "GET",
+        match: "/drifted",
+        contract: testContract("getDrifted", "/drifted"),
+        handler: async ({ res }) => sendJson(res, { unexpected: true }),
+      },
+    ];
+    const server = createApiServer({ routes });
+    const baseUrl = await listen(server);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      const denied = await fetch(`${baseUrl}/v1/denied`);
+      expect(denied.status).toBe(403);
+      await expect(denied.json()).resolves.toMatchObject({
+        apiVersion: "v1",
+        error: { code: "runs_forbidden", message: "Forbidden" },
+      });
+
+      const drifted = await fetch(`${baseUrl}/v1/drifted`);
+      expect(drifted.status).toBe(500);
+      await expect(drifted.json()).resolves.toMatchObject({
+        apiVersion: "v1",
+        error: { code: "server_internal_error", message: "Server error" },
+      });
+      expect(consoleError).toHaveBeenCalledWith(
+        "[api] v1 response contract violation",
+        expect.objectContaining({ operationId: "getDrifted" }),
+      );
+    } finally {
+      consoleError.mockRestore();
+      await close(server);
+    }
+  });
 });
+
+describe("matchesContractPath", () => {
+  it("matches exact paths and OpenAPI parameter segments only", () => {
+    expect(matchesContractPath("/workflows", "/workflows?limit=20")).toBe(true);
+    expect(matchesContractPath("/runs/{runId}", "/runs/run-1?detail=true")).toBe(true);
+    expect(matchesContractPath("/workflows", "/workflows-extra")).toBe(false);
+    expect(matchesContractPath("/runs/{runId}", "/runs/a/stream")).toBe(false);
+  });
+});
+
+function testContract(operationId = "getStable", path: `/${string}` = "/stable"): ApiRouteContract {
+  return {
+    operationId,
+    path,
+    summary: "Test contract",
+    tags: ["Test"],
+    request: {
+      query: z.object({ limit: z.coerce.number().int().positive().optional() }).strict(),
+    },
+    response: z.object({ value: z.string() }),
+    errorCodes: ["invalid_input"],
+  };
+}
 
 async function listen(server: http.Server): Promise<string> {
   return new Promise((resolve) => {

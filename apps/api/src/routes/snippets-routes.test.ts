@@ -29,6 +29,7 @@ vi.mock("../http", async (importOriginal) => {
 });
 
 vi.mock("@janusly/data", () => ({
+  recordSystemAudit: vi.fn(async () => undefined),
   createSnippet: vi.fn(),
   deleteSnippet: vi.fn(),
   findSnippetByName: vi.fn(),

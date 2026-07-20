@@ -22,6 +22,7 @@ import { composeGenerationExemplars, recordGenerationExemplar, type GenerationEx
 import { generateWorkflowFreeJson } from "../ai-generate-freejson";
 import { MAX_REPAIR_ATTEMPTS, repairGeneratedWorkflow } from "../ai-repair-workflow";
 import { composeGenerationSystemPrompt, GENERATE_WORKFLOW_SYSTEM_PROMPT } from "../ai-prompts";
+import { loadOperatorGuidance } from "../ai-operator-guidance";
 import { fallbackWorkflowForPrompt, orgLlmRuntime, resolveSurfaceModel, sanitizeAiWorkflow } from "../ai-runtime";
 import { AiGenerationWorkflowSchema } from "../ai-schemas";
 import { auditAction } from "../audit-helper";
@@ -73,6 +74,7 @@ export const aiGenerateRoutes: Route[] = [
       // passed the strict validity gate (null = single-shot / not applicable).
       let candidateCount = 1;
       let validCandidates: number | null = null;
+      let bonBackoff: { from: number; to: number } | null = null;
       // Few-shot exemplars recalled from memory (empty when memory is off).
       // Hoisted so BOTH the success and fallback audits can log the count/ids.
       let exemplars: GenerationExemplarsResult = { block: "", ids: [], count: 0 };
@@ -95,7 +97,16 @@ export const aiGenerateRoutes: Route[] = [
         // when memory is off) and frame them as DATA in the system prompt so
         // they steer every generation mode + Best-of-N candidate.
         exemplars = await composeGenerationExemplars(auth.orgId, promptText);
-        const systemPrompt = composeGenerationSystemPrompt(GENERATE_WORKFLOW_SYSTEM_PROMPT, exposedMcpTools, exemplars.block);
+        const operatorGuidance = await loadOperatorGuidance({
+          orgId: auth.orgId,
+          orgGuidance: orgConfig.ai.operatorGuidance,
+        });
+        const systemPrompt = composeGenerationSystemPrompt(
+          GENERATE_WORKFLOW_SYSTEM_PROMPT,
+          exposedMcpTools,
+          exemplars.block,
+          operatorGuidance,
+        );
         const generationMode = orgConfig.ai.generationMode;
         let pass1Workflow: Workflow;
         let genModel: string;
@@ -114,6 +125,16 @@ export const aiGenerateRoutes: Route[] = [
             orgConfig.ai.generationCandidates,
             budgetGate.envelope,
           );
+          if (candidateTarget < orgConfig.ai.generationCandidates) {
+            bonBackoff = { from: orgConfig.ai.generationCandidates, to: candidateTarget };
+            await auditAction(auth, "ai.generation.candidates_backoff", {
+              targetType: "ai",
+              metadata: {
+                ...bonBackoff,
+                reason: "budget_warning_threshold",
+              },
+            });
+          }
           if (candidateTarget > 1) {
             // Best-of-N: sample N independent drafts and keep the best by a
             // deterministic readiness score. The winner flows through the same
@@ -233,6 +254,7 @@ export const aiGenerateRoutes: Route[] = [
           // the strict validity gate (null = single-shot / not applicable).
           candidateCount,
           validCandidates,
+          bonBackoff,
           // Few-shot exemplars recalled from memory and framed into the prompt
           // (0 / [] when memory is off). Ids only — never raw exemplar content.
           exemplarCount: exemplars.count,
@@ -249,14 +271,22 @@ export const aiGenerateRoutes: Route[] = [
           // without breaking existing readers.
           promotionsByFamily: promotion.promotionsByFamily,
         } });
-        return sendJson(res, withBudgetWarning({ mode: "ai", model: genModel, provider: genProvider, candidateCount, ...workflow }, budgetGate));
+        return sendJson(res, withBudgetWarning({
+          mode: "ai",
+          model: genModel,
+          provider: genProvider,
+          candidateCount,
+          ...(bonBackoff ? { bonBackoff } : {}),
+          ...workflow,
+        }, budgetGate));
       } catch (err) {
         const message = err instanceof Error ? err.message : "AI request failed";
-        await auditAction(auth, "ai.workflow.generated", { targetType: "ai", targetId: fallbackWorkflow?.id, metadata: { mode: "fallback", error: message, generationMode: orgConfig.ai.generationMode, repairAttempts, candidateCount, validCandidates, exemplarCount: exemplars.count, exemplarIds: exemplars.ids } });
+        await auditAction(auth, "ai.workflow.generated", { targetType: "ai", targetId: fallbackWorkflow?.id, metadata: { mode: "fallback", error: message, generationMode: orgConfig.ai.generationMode, repairAttempts, candidateCount, validCandidates, bonBackoff, exemplarCount: exemplars.count, exemplarIds: exemplars.ids } });
         return sendJson(res, withBudgetWarning({
           mode: "fallback",
           aiError: message,
           candidateCount,
+          ...(bonBackoff ? { bonBackoff } : {}),
           ...(fallbackWorkflow ?? {}),
         }, budgetGate));
       }

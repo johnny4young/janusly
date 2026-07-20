@@ -371,7 +371,7 @@ describe("handleScimEvent — resurrection guard", () => {
     expect(captured.upsertedByEmail).toHaveLength(1);
     const audit = captured.audits.find((a) => a.action === "scim.user.provisioned");
     expect(audit).toBeDefined();
-    expect((audit?.metadata as { reactivated: boolean }).reactivated).toBe(true);
+    expect((audit!.metadata as { reactivated: boolean }).reactivated).toBe(true);
   });
 });
 
@@ -397,7 +397,7 @@ describe("handleScimEvent — out-of-order guard", () => {
   });
 
   it("skips an active user.created with timestamp <= lastEventTimestamp", async () => {
-    const { deps, captured } = makeDeps({
+    const { deps } = makeDeps({
       existingState: {
         id: "state_1",
         orgId: "org-A",
@@ -671,7 +671,7 @@ describe("handleScimEvent — group events", () => {
     expect(captured.deletedUserGroupsForGroup).toEqual([{ providerGroupId: "directory_group_1" }]);
     expect(captured.upsertedByEmail[0]).toMatchObject({ email: "ada@example.com", role: "viewer" });
     const audit = captured.audits.find((a) => a.action === "scim.group.membership_changed");
-    expect((audit?.metadata as { roleRecomputed: boolean; providerGroupId: string }).roleRecomputed).toBe(true);
+    expect((audit!.metadata as { roleRecomputed: boolean; providerGroupId: string }).roleRecomputed).toBe(true);
   });
 });
 
@@ -726,7 +726,7 @@ describe("handleScimEvent — group→role derivation", () => {
     expect(result).toEqual({ processed: true, action: "provisioned" });
     expect(captured.upsertedByEmail[0]).toMatchObject({ role: "admin" });
     const audit = captured.audits.find((a) => a.action === "scim.user.provisioned");
-    expect((audit?.metadata as { role: string }).role).toBe("admin");
+    expect((audit!.metadata as { role: string }).role).toBe("admin");
   });
 
   it("provisions at defaultRole when the user's groups map to nothing", async () => {
@@ -769,7 +769,7 @@ describe("handleScimEvent — group→role derivation", () => {
     // ...then the role recomputed to the mapped admin.
     expect(captured.upsertedByEmail[0]).toMatchObject({ email: "ada@example.com", role: "admin" });
     const audit = captured.audits.find((a) => a.action === "scim.group.membership_changed");
-    expect((audit?.metadata as { roleRecomputed: boolean }).roleRecomputed).toBe(true);
+    expect((audit!.metadata as { roleRecomputed: boolean }).roleRecomputed).toBe(true);
   });
 
   it("group.user_removed drops the join row then lowers the role back toward defaultRole", async () => {
@@ -820,7 +820,7 @@ describe("handleScimEvent — group→role derivation", () => {
     expect(captured.addedUserGroups).toHaveLength(1);
     expect(captured.upsertedByEmail).toHaveLength(0);
     const audit = captured.audits.find((a) => a.action === "scim.group.membership_changed");
-    expect((audit?.metadata as { roleRecomputed: boolean }).roleRecomputed).toBe(false);
+    expect((audit!.metadata as { roleRecomputed: boolean }).roleRecomputed).toBe(false);
   });
 
   it("rejects a membership event missing user_id / directory_group_id", async () => {

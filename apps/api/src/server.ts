@@ -11,6 +11,7 @@
  * - Node HTTP timeouts are set explicitly so slow clients cannot pin sockets forever.
  */
 import http from "http";
+import { randomUUID } from "node:crypto";
 
 import { requireAuth, type AuthContext } from "./auth";
 import { corsHeaders, sendError, type CorsAwareResponse } from "./http";
@@ -21,6 +22,8 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 const DEFAULT_KEEP_ALIVE_TIMEOUT_MS = 5_000;
 const DEFAULT_HEADERS_TIMEOUT_MS = 65_000;
 const MIN_HEADERS_TIMEOUT_DELTA_MS = 1_000;
+const VERSION_PREFIX = "/v1";
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 
 export type ApiServerTimeouts = {
   requestTimeoutMs?: number;
@@ -86,6 +89,7 @@ async function dispatchRequest(
   response.requestAcceptEncoding = Array.isArray(acceptEncoding)
     ? acceptEncoding.join(", ")
     : acceptEncoding;
+  response.requestId = resolveRequestId(req.headers["x-request-id"]);
 
   if (req.method === "OPTIONS") {
     const headers = corsHeaders(response);
@@ -96,9 +100,32 @@ async function dispatchRequest(
 
   try {
     const url = req.url ?? "";
-    const matched = routes.find((route) => {
+    let matched = routes.find((route) => {
       return route.method === req.method && matchesRoute(route.match, url);
     });
+    let handlerUrl = url;
+    let versionedAlias = false;
+
+    // Exact routes win first so `/v1/openapi.json` can be a real public route
+    // without receiving the normal data envelope. Every other `/v1/*` path is
+    // an alias of a legacy route and resolves only when that route declares a
+    // contract. This makes accidental API exposure fail closed.
+    if (!matched && isVersionedAliasUrl(url)) {
+      const legacyUrl = url.slice(VERSION_PREFIX.length) || "/";
+      const candidate = routes.find((route) => {
+        return route.method === req.method &&
+          route.contract !== undefined &&
+          matchesContractPath(route.contract.path, legacyUrl) &&
+          matchesRoute(route.match, legacyUrl);
+      });
+      response.apiVersion = "v1";
+      if (candidate?.contract) {
+        matched = candidate;
+        handlerUrl = legacyUrl;
+        versionedAlias = true;
+        response.contract = candidate.contract;
+      }
+    }
 
     if (!matched) {
       sendError(response, "server_not_found", "Not found", 404);
@@ -118,6 +145,17 @@ async function dispatchRequest(
       }
     }
 
+    if (versionedAlias && matched.contract?.request?.query) {
+      const query = parseContractQuery(handlerUrl, matched.contract.request.repeatableQueryParams);
+      const result = matched.contract.request.query.safeParse(query);
+      if (!result.success) {
+        const field = result.error.issues[0]?.path.join(".") || "query";
+        sendError(response, "invalid_input", "Invalid request query", 400, { field });
+        return;
+      }
+    }
+
+    req.url = handlerUrl;
     await matched.handler({ req, res: response, auth });
   } catch (err) {
     const statusCode = resolveErrorStatusCode(err);
@@ -140,6 +178,45 @@ async function dispatchRequest(
     const message = err instanceof Error ? err.message : "Server error";
     sendError(response, "server_request_failed", message, statusCode);
   }
+}
+
+/** Keep caller-supplied correlation IDs when safe; otherwise mint a UUID. */
+export function resolveRequestId(value: string | string[] | undefined): string {
+  const candidate = Array.isArray(value) ? value[0] : value;
+  return candidate && REQUEST_ID_PATTERN.test(candidate) ? candidate : randomUUID();
+}
+
+function isVersionedAliasUrl(url: string): boolean {
+  return url === VERSION_PREFIX || url.startsWith(`${VERSION_PREFIX}/`);
+}
+
+/**
+ * Match an OpenAPI path template against the URL pathname. Requiring both this
+ * and the legacy route matcher prevents broad `startsWith` handlers from
+ * exposing undeclared aliases such as `/v1/workflows-extra`.
+ */
+export function matchesContractPath(contractPath: string, url: string): boolean {
+  const actualSegments = new URL(url, "http://localhost").pathname.split("/").filter(Boolean);
+  const contractSegments = contractPath.split("/").filter(Boolean);
+  if (actualSegments.length !== contractSegments.length) return false;
+  return contractSegments.every((segment, index) => {
+    return /^\{[^{}]+\}$/.test(segment) || segment === actualSegments[index];
+  });
+}
+
+/** Convert URLSearchParams into the raw object a route's Zod query schema expects. */
+function parseContractQuery(
+  url: string,
+  repeatableKeys: readonly string[] = [],
+): Record<string, string | string[]> {
+  const searchParams = new URL(url, "http://localhost").searchParams;
+  const repeatable = new Set(repeatableKeys);
+  const query: Record<string, string | string[]> = {};
+  for (const key of new Set(searchParams.keys())) {
+    const values = searchParams.getAll(key);
+    query[key] = repeatable.has(key) || values.length > 1 ? values : (values[0] ?? "");
+  }
+  return query;
 }
 
 function normalizeTimeout(value: number | undefined, fallback: number): number {

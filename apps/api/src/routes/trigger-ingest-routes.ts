@@ -50,9 +50,14 @@ import {
 } from "@janusly/shared/src/trigger-types";
 import { WorkflowSchema } from "@janusly/shared";
 import {
+  countBufferedTriggerEvents,
   findTriggerEventByDedupeKey,
   getTriggerEvent,
+  getWorkflowStatus,
+  listBufferedTriggerEvents,
+  resolveWorkflowPauseAction,
   listTriggerEvents,
+  markTriggerEventBuffered,
   markTriggerEventFailed,
   markTriggerEventSkipped,
   markTriggerEventStarted,
@@ -174,7 +179,31 @@ async function persistEventAndSpawnRun(args: {
     throw err;
   }
 
-  // 3. Spawn the run with the normalized event as the input. The trigger
+  // 3. Pause gate. A paused workflow must not spawn runs from ANY entry
+  //    point — `/start` alone was never the flood. But an inbound event is
+  //    data the upstream system already committed and will not re-send, so
+  //    dropping it trades a run flood for silent data loss. Park it as
+  //    `buffered` instead; resume backfills the window. 202, not 200: the
+  //    event is accepted, its run is deferred — 200 would claim it ran, and
+  //    a 4xx/5xx would make the relay retry or give up.
+  if (resolved.workflowId) {
+    const wfStatus = await getWorkflowStatus(auth.orgId, resolved.workflowId);
+    const pauseAction = resolveWorkflowPauseAction(wfStatus?.status, "trigger");
+    if (pauseAction.kind === "buffer") {
+      await markTriggerEventBuffered(auth.orgId, event.id, pauseAction.reason);
+      await auditAction(auth, "trigger.event.buffered", {
+        targetType: "trigger_event",
+        targetId: event.id,
+        metadata: { triggerType, reason: pauseAction.reason, workflowId: resolved.workflowId, nodeId: resolved.nodeId },
+      });
+      return {
+        status: 202,
+        body: { ok: true, buffered: true, reason: pauseAction.reason, triggerEventId: event.id },
+      };
+    }
+  }
+
+  // 4. Spawn the run with the normalized event as the input. The trigger
   //    executor reads `input.event` and passes it to downstream nodes.
   const parsed = WorkflowSchema.safeParse(resolved.dagJson);
   if (!parsed.success) {
@@ -258,6 +287,102 @@ async function offloadEmailAttachments(args: {
     });
   }
   return out;
+}
+
+/**
+ * Cap on how many buffered events one resume replays. A long pause can buffer
+ * more than a single resume should fire in one breath: dumping the whole
+ * window back into the queue re-creates the flood the pause just stopped.
+ * The remainder stays `buffered` and the caller reports it.
+ */
+export const TRIGGER_BACKFILL_MAX_PER_RESUME = 100;
+
+/**
+ * Replay the events a workflow buffered while paused, oldest first.
+ *
+ * Deliberately does NOT go through `persistEventAndSpawnRun`, for two reasons
+ * a live backfill made obvious:
+ *
+ * 1. That path is guarded by the per-trigger INGEST rate limit — a storm
+ *    guard against an upstream flooding us. A backfill is the opposite: it is
+ *    operator-initiated, already capped, and replaying a storm that was
+ *    already absorbed. Running it through the guard throttles the backfill
+ *    into failure.
+ * 2. That path RECORDS A NEW EVENT ROW (correct for `/replay`, where a replay
+ *    is genuinely a new event). For a backfill the buffered row IS the event
+ *    that is owed a run — cloning it doubles the table and leaves the original
+ *    still owed.
+ *
+ * So this transitions the existing row `buffered -> started` against the
+ * CURRENT latest version: the operator resumed because they fixed something,
+ * and the backfill should run on the fix.
+ *
+ * Never throws: the workflow is already resumed by the time this runs, and a
+ * backfill fault must not read as a failed resume. A per-event failure is
+ * counted and the rest continue — one poisoned payload can't strand the
+ * window behind it.
+ */
+export async function backfillBufferedTriggerEvents(args: {
+  auth: AuthContext;
+  workflowId: string;
+  limit?: number;
+}): Promise<{ backfilled: number; failed: number; remaining: number }> {
+  const limit = Math.min(args.limit ?? TRIGGER_BACKFILL_MAX_PER_RESUME, TRIGGER_BACKFILL_MAX_PER_RESUME);
+  let backfilled = 0;
+  let failed = 0;
+  try {
+    const pending = await listBufferedTriggerEvents(args.auth.orgId, args.workflowId, limit);
+    for (const row of pending) {
+      try {
+        const event = await getTriggerEvent(args.auth.orgId, row.id);
+        if (!event) continue;
+
+        const triggerType = event.triggerType as TriggerNodeType;
+        const resolved = await resolveTriggerNode(args.auth.orgId, triggerType, () => true);
+        if (!resolved) {
+          // The trigger node is gone from the current version — the event can
+          // never run again. Retire it so it stops counting as owed work.
+          await markTriggerEventSkipped(args.auth.orgId, row.id, "backfill_no_trigger_node");
+          failed += 1;
+          continue;
+        }
+
+        const parsed = WorkflowSchema.safeParse(resolved.dagJson);
+        if (!parsed.success) {
+          await markTriggerEventFailed(args.auth.orgId, row.id, "workflow_parse_failed");
+          failed += 1;
+          continue;
+        }
+
+        const storedPayload = (event.payloadJson && typeof event.payloadJson === "object" && !Array.isArray(event.payloadJson)
+          ? (event.payloadJson as { event?: Record<string, unknown> }).event
+          : undefined) ?? {};
+
+        const { runId } = await startRun({
+          ...parsed.data,
+          orgId: args.auth.orgId,
+          versionId: resolved.workflowVersionId,
+          createdBy: args.auth.userId,
+          input: { triggeredBy: triggerType, triggerEventId: row.id, backfilled: true, event: storedPayload },
+        });
+        await markTriggerEventStarted(args.auth.orgId, row.id, runId);
+        await auditAction(args.auth, "trigger.event.started", {
+          targetType: "trigger_event",
+          targetId: row.id,
+          metadata: { triggerType, runId, workflowId: args.workflowId, nodeId: resolved.nodeId, backfilled: true },
+        });
+        backfilled += 1;
+      } catch (err) {
+        await markTriggerEventFailed(args.auth.orgId, row.id, err instanceof Error ? err.message : "backfill_failed")
+          .catch(() => {});
+        failed += 1;
+      }
+    }
+    const remaining = await countBufferedTriggerEvents(args.auth.orgId, args.workflowId);
+    return { backfilled, failed, remaining };
+  } catch {
+    return { backfilled, failed, remaining: 0 };
+  }
 }
 
 export const triggerIngestRoutes: Route[] = [

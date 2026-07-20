@@ -47,6 +47,7 @@ import type { AuthContext } from "./auth";
  */
 export type AuditAction =
   // ai
+  | "ai.generation.candidates_backoff"
   | "ai.workflow.generated"
   | "ai.workflow.explained"
   | "ai.workflow.reviewed"
@@ -72,6 +73,13 @@ export type AuditAction =
   | "dlq.replayed"
   | "recovery.validation_started"
   | "recovery.cluster_apply"
+  | "recovery.playbook.created"
+  | "recovery.playbook.activated"
+  | "recovery.playbook.retired"
+  | "recovery.playbook.used"
+  | "recovery.playbook.validated"
+  | "recovery.playbook.regressed"
+  | "recovery.playbook.applied"
   // mcp
   | "mcp.connection.created"
   | "mcp.connection.updated"
@@ -147,6 +155,7 @@ export type AuditAction =
   | "run.started.adhoc"
   | "run.resumed"
   | "run.cancelled"
+  | "run.redrive"
   | "replay_lab.started"
   | "replay_lab.fork_started"
   // scim directory admin (authenticated routes; webhook receiver stays on audit())
@@ -165,6 +174,9 @@ export type AuditAction =
   | "org.sso.connection_updated"
   | "org.sso.connection_revoked"
   // workflows
+  | "workflow.circuit_breaker.tripped"
+  | "workflow.trigger_backfill"
+  | "workflow.circuit_breaker.resumed"
   | "workflow.metadata.set"
   | "workflow.folder.renamed"
   | "workflow.folder.deleted"
@@ -195,6 +207,7 @@ export type AuditAction =
   // inbound trigger events (email_received / file_dropped / mcp_server_event)
   | "trigger.event.received"
   | "trigger.event.started"
+  | "trigger.event.buffered"
   | "trigger.event.skipped"
   | "trigger.event.replayed";
 

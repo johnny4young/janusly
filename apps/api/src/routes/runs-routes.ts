@@ -12,16 +12,18 @@
  * runs.
  */
 
-import { and, asc, desc, eq, gt, isNull, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
 
 import {
   getOrgConfigSnapshot,
   getRunComparison,
+  queryRunUsage,
   getWorkflowStatus,
-  WORKFLOW_STATUS_ACTIVE,
+  resolveWorkflowPauseAction,
 } from "@janusly/data";
 import { db, runEvents, runNodes, runs, workflows, workflowVersions } from "@janusly/db";
 import { replayDecision } from "@janusly/domain";
+import { redriveRun } from "@janusly/engine/src/adapters/redrive";
 import { replayRunAsValidation, replayRunAsValidationFork } from "@janusly/engine/src/adapters/replay-lab";
 import { WorkflowInputValidationError } from "@janusly/engine/src/inputs-validator";
 import { cancelRun } from "@janusly/engine/src/persistence";
@@ -31,7 +33,7 @@ import { startRun } from "@janusly/engine/src/start-run";
 import { checkWorkflowReadiness } from "@janusly/engine/src/workflow-readiness";
 import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
 import { WorkflowSchema, type Workflow } from "@janusly/shared";
-import { isTerminalRunStatus } from "@janusly/shared/src/status";
+import { isTerminalRunStatus, runStatusValues } from "@janusly/shared/src/status";
 
 import { decisionCandidatesFromPayload, orgLlmRuntime, sanitizeAiWorkflow } from "../ai-runtime";
 import { auditAction } from "../audit-helper";
@@ -39,7 +41,7 @@ import { MAX_JSON_BODY_BYTES, RUN_EVENTS_DEFAULT_LIMIT, RUN_EVENTS_MAX_LIMIT } f
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { asRecord, corsHeaders, readJson, sendEventFrame, sendError, sendJson, sendSseComment } from "../http";
 import { guardMcpWrite } from "../mcp-consent";
-import { paginateRunEvents, parseEventsCursor, parseEventsLimit } from "../run-pagination";
+import { paginateRunEvents, parseEventsCursor, parseEventsLimit, parseKeysetCursor } from "../run-pagination";
 import { enforceRateLimit } from "../rate-limit";
 import { getRunStreamHub } from "../run-stream";
 import {
@@ -49,6 +51,7 @@ import {
   productionSecretRefResolver,
 } from "../readiness-helpers";
 import type { Route } from "../routes";
+import { getRunContract, getRunStatusContract, getRunUsageContract, listRunsContract } from "../api-contracts";
 
 // SSE heartbeat cadence. The server destroys idle sockets after 60s
 // (`server.setTimeout`); a comment well under that keeps an idle run's
@@ -62,6 +65,18 @@ const STREAM_RETRY_HINT_MS = 3_000;
 // Cap the per-connect Last-Event-ID catch-up replay so a long-disconnected
 // client can't pull an unbounded backlog in one shot.
 const STREAM_CATCHUP_MAX = 500;
+// Bound publications waiting behind catch-up or socket backpressure. Persisted
+// events remain recoverable through Last-Event-ID, so closing and reconnecting
+// is safer than allowing one slow client to consume unbounded process memory.
+const STREAM_LIVE_QUEUE_MAX_BYTES = 1_048_576;
+
+function publishedRunEventBytes(event: PublishedRunEvent): number {
+  try {
+    return Buffer.byteLength(JSON.stringify(event), "utf8") + 128;
+  } catch {
+    return STREAM_LIVE_QUEUE_MAX_BYTES + 1;
+  }
+}
 
 // Summary projection for the `/runs` LIST surfaces. Deliberately excludes
 // `inputJson`: it carries the full workflow snapshot captured by `startRun`,
@@ -70,6 +85,13 @@ const STREAM_CATCHUP_MAX = 500;
 const runListColumns = {
   id: runs.id,
   orgId: runs.orgId,
+  // Run rows created from the live authoring surface carry the workflow id
+  // directly, while scheduled/triggered runs carry an immutable version id.
+  // Resolve both into one stable list field without exposing the full version.
+  workflowId: sql<string>`coalesce(${workflowVersions.workflowId}, ${runs.workflowVersionId})`,
+  // Project only the captured display name from input_json. The list still
+  // avoids returning the workflow snapshot and trigger payload.
+  workflowName: sql<string | null>`${runs.inputJson}->'workflow'->>'name'`,
   workflowVersionId: runs.workflowVersionId,
   status: runs.status,
   outputJson: runs.outputJson,
@@ -81,6 +103,21 @@ const runListColumns = {
   createdAt: runs.createdAt,
 };
 
+// Public run-node projection shared by legacy and `/v1` detail reads.
+// Recovery claim columns are internal worker CAS state and must never become
+// an accidental wire-contract addition through Drizzle's select-all shape.
+const runNodePublicColumns = {
+  id: runNodes.id,
+  runId: runNodes.runId,
+  nodeId: runNodes.nodeId,
+  status: runNodes.status,
+  stateJson: runNodes.stateJson,
+  attempts: runNodes.attempts,
+  startedAt: runNodes.startedAt,
+  finishedAt: runNodes.finishedAt,
+  errorJson: runNodes.errorJson,
+};
+
 export const runsRoutes: Route[] = [
   // Live run stream (SSE over Redis pub/sub). MUST precede the `/runs` list
   // matcher below — both are GET and `/runs/<id>/stream` starts with `/runs`,
@@ -88,22 +125,27 @@ export const runsRoutes: Route[] = [
   // engine's run-event seam through Redis; the per-run channel + the
   // `run.orgId === auth.orgId` gate + the hub's per-publish org re-check are
   // the tenant boundary. Initial timeline history comes from the regular
-  // `/run` fetch; this stream carries live signals (and, on reconnect with
-  // `Last-Event-ID`, the missed gap).
+  // `/run` fetch; this stream carries live signals plus a bounded overlap/gap
+  // replay from the newest `Last-Event-ID` (or the beginning when the timeline
+  // was empty at connect time).
   { method: "GET", match: (url) => /^\/runs\/[^/?]+\/stream(\?|$)/.test(url), permission: "runs.read",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const runId = decodeURIComponent(url.pathname.split("/")[2] ?? "");
       if (!runId) return sendError(res, "runs_run_id_required", "runId is required", 400);
 
-      const run = await db.select().from(runs).where(eq(runs.id, runId));
-      if (!run[0] || run[0].orgId !== auth.orgId) return sendError(res, "runs_forbidden", "Forbidden", 403);
+      const run = await db
+        .select({ status: runs.status })
+        .from(runs)
+        .where(and(eq(runs.id, runId), eq(runs.orgId, auth.orgId)));
+      if (!run[0]) return sendError(res, "runs_forbidden", "Forbidden", 403);
 
       const { runs: runConfig } = await getOrgConfigSnapshot(auth.orgId);
 
       let torn = false;
       let graceTimer: ReturnType<typeof setTimeout> | null = null;
       let heartbeat: ReturnType<typeof setInterval> | null = null;
+      let heartbeatWaitingForDrain = false;
       let removeSubscriber: (() => void) | null = null;
       const teardown = (endResponse: boolean) => {
         if (torn) return;
@@ -119,27 +161,86 @@ export const runsRoutes: Route[] = [
         graceTimer.unref?.();
       }
 
-      const writeFrame = (event: PublishedRunEvent) => {
+      const waitForDrain = async () => {
         if (torn || res.writableEnded) return;
-        try {
-          if (event.kind === "event") {
-            sendEventFrame(res, { id: `${event.createdAt}|${event.id}`, event: "run-event", data: event });
-          } else {
-            sendEventFrame(res, { event: "run-status", data: event });
-            if (isTerminalRunStatus(event.status)) armGraceClose();
-          }
-        } catch {
-          // Socket may have closed between the writableEnded check and write.
-          // `req.on("close")` will run teardown; nothing else to do here.
+        await new Promise<void>((resolve) => {
+          const done = () => {
+            res.off("drain", done);
+            res.off("close", done);
+            res.off("finish", done);
+            req.off("close", done);
+            resolve();
+          };
+          res.once("drain", done);
+          res.once("close", done);
+          res.once("finish", done);
+          req.once("close", done);
+        });
+      };
+      const writeSseFrame = async (frame: { id?: string; event?: string; data: unknown }) => {
+        if (torn || res.writableEnded) return;
+        if (!sendEventFrame(res, frame)) await waitForDrain();
+      };
+      const writeFrame = async (event: PublishedRunEvent) => {
+        if (event.kind === "event") {
+          await writeSseFrame({ id: `${event.createdAt}|${event.id}`, event: "run-event", data: event });
+          return;
         }
+        await writeSseFrame({ event: "run-status", data: event });
+        if (isTerminalRunStatus(event.status)) armGraceClose();
+      };
+
+      // Subscribe before reading the reconnect gap so no publication can land
+      // between the database snapshot and the live channel. Live frames are
+      // buffered until catch-up finishes; otherwise a newly-published event
+      // could advance the browser's Last-Event-ID beyond an older missing page.
+      let catchingUp = true;
+      const bufferedLiveFrames: Array<{ event: PublishedRunEvent; bytes: number }> = [];
+      let pendingLiveBytes = 0;
+      let deliveryTail = Promise.resolve();
+      const writeLiveFrame = (event: PublishedRunEvent) => {
+        const bytes = publishedRunEventBytes(event);
+        if (pendingLiveBytes + bytes > STREAM_LIVE_QUEUE_MAX_BYTES) {
+          teardown(true);
+          return;
+        }
+        pendingLiveBytes += bytes;
+        if (catchingUp) {
+          bufferedLiveFrames.push({ event, bytes });
+          return;
+        }
+        deliveryTail = deliveryTail
+          .then(() => writeFrame(event))
+          .catch(() => teardown(true))
+          .finally(() => { pendingLiveBytes -= bytes; });
       };
 
       const hub = getRunStreamHub();
-      const added = hub.addSubscriber(runId, auth.orgId, writeFrame, runConfig.streamMaxSubscriptions, () => teardown(true));
+      const added = hub.addSubscriber(
+        runId,
+        auth.orgId,
+        writeLiveFrame,
+        runConfig.streamMaxSubscriptions,
+        () => teardown(res.headersSent),
+      );
       if (!added.ok) {
         return sendError(res, "stream_cap_exceeded", "Too many live run streams for this organization", 429);
       }
       removeSubscriber = added.remove;
+
+      try {
+        // SUBSCRIBE acknowledgment is the ordering barrier: only after it
+        // resolves can the database catch-up snapshot safely overlap with the
+        // live publication buffer.
+        await added.ready;
+      } catch {
+        teardown(false);
+        if (!res.headersSent && !res.writableEnded) {
+          return sendError(res, "stream_unavailable", "Live run stream is unavailable", 503);
+        }
+        return;
+      }
+      if (torn) return;
 
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
@@ -149,44 +250,54 @@ export const runsRoutes: Route[] = [
         "X-Accel-Buffering": "no",
         ...corsHeaders(res),
       });
-      res.write(`retry: ${STREAM_RETRY_HINT_MS}\n\n`);
-      sendSseComment(res, "connected");
-
-      heartbeat = setInterval(() => {
-        if (torn || res.writableEnded) return;
-        try {
-          sendSseComment(res, "keep-alive");
-        } catch {
-          // ignore — teardown runs on close
-        }
-      }, STREAM_HEARTBEAT_MS);
-
       req.on("close", () => teardown(false));
 
-      // Last-Event-ID catch-up: replay the gap since the client's last seen
-      // event (ascending keyset after the cursor), then live signals follow.
-      // Overlap with live events is harmless — the web dedupes by id.
-      // orgId is intentionally NOT in this WHERE: the run was org-gated above
-      // (run[0].orgId !== auth.orgId → 403) and run_events are run-scoped, so a
-      // cross-tenant runId can't reach here. Don't "simplify" the up-front gate.
-      const rawLastId = req.headers["last-event-id"];
-      const lastEventId = Array.isArray(rawLastId) ? rawLastId[0] : rawLastId;
-      const cursor = parseEventsCursor(lastEventId ?? null);
-      if (cursor && !torn) {
+      try {
+        if (!res.write(`retry: ${STREAM_RETRY_HINT_MS}\n\n`)) await waitForDrain();
+        if (!sendSseComment(res, "connected")) await waitForDrain();
+
+        heartbeat = setInterval(() => {
+          if (torn || res.writableEnded) return;
+          try {
+            if (!heartbeatWaitingForDrain && !sendSseComment(res, "keep-alive")) {
+              heartbeatWaitingForDrain = true;
+              void waitForDrain()
+                .catch(() => teardown(true))
+                .finally(() => { heartbeatWaitingForDrain = false; });
+            }
+          } catch {
+            teardown(true);
+          }
+        }, STREAM_HEARTBEAT_MS);
+
+        // Replay from the client's composite cursor. With no Last-Event-ID we
+        // replay from the beginning: this closes the initial-empty-timeline
+        // race between the regular `/run` fetch and Redis subscription. Web
+        // state dedupes the intentional overlap by event id.
+        const rawLastId = req.headers["last-event-id"];
+        const lastEventId = Array.isArray(rawLastId) ? rawLastId[0] : rawLastId;
+        const cursor = parseEventsCursor(lastEventId ?? null);
+        const eventBoundary = cursor
+          ? or(
+              gt(runEvents.createdAt, cursor.createdAt),
+              and(eq(runEvents.createdAt, cursor.createdAt), gt(runEvents.id, cursor.id)),
+            )
+          : undefined;
         const rows = await db
           .select()
           .from(runEvents)
-          .where(and(
-            eq(runEvents.runId, runId),
-            or(
-              gt(runEvents.createdAt, cursor.createdAt),
-              and(eq(runEvents.createdAt, cursor.createdAt), gt(runEvents.id, cursor.id)),
-            ),
-          ))
+          .where(eventBoundary
+            ? and(eq(runEvents.runId, runId), eventBoundary)
+            : eq(runEvents.runId, runId))
           .orderBy(asc(runEvents.createdAt), asc(runEvents.id))
-          .limit(STREAM_CATCHUP_MAX);
-        for (const row of rows) {
-          writeFrame({
+          // Read one sentinel row beyond the wire cap so the protocol can
+          // report that another bounded reconnect page is required.
+          .limit(STREAM_CATCHUP_MAX + 1);
+        if (torn) return;
+
+        const replayRows = rows.slice(0, STREAM_CATCHUP_MAX);
+        for (const row of replayRows) {
+          await writeFrame({
             kind: "event",
             id: row.id,
             nodeId: row.nodeId,
@@ -194,58 +305,150 @@ export const runsRoutes: Route[] = [
             payload: row.payload,
             createdAt: (row.createdAt ?? new Date()).toISOString(),
           });
+          if (torn) return;
         }
-      }
+        if (rows.length > STREAM_CATCHUP_MAX) {
+          await writeSseFrame({
+            event: "catchup-truncated",
+            data: { kind: "catchup-truncated", replayed: replayRows.length },
+          });
+          // Do not flush live frames after a truncated page: the browser must
+          // reconnect from the last replayed cursor before it can safely join
+          // the live tail.
+          teardown(true);
+          return;
+        }
 
-      // If the run is ALREADY terminal at connect time, arm the grace close so
-      // a reconnecting client to a finished run doesn't hang open forever.
-      if (isTerminalRunStatus(run[0].status)) armGraceClose();
+        // The pre-subscription run row may be stale after catch-up. Re-read the
+        // tenant-scoped status, then fold statuses buffered during that query
+        // into the snapshot while delivering their event frames first.
+        const latestRun = await db
+          .select({ status: runs.status })
+          .from(runs)
+          .where(and(eq(runs.id, runId), eq(runs.orgId, auth.orgId)));
+        if (!latestRun[0] || torn) {
+          teardown(true);
+          return;
+        }
+        let effectiveStatus = latestRun[0].status;
+        while (bufferedLiveFrames.length > 0 && !torn) {
+          const buffered = bufferedLiveFrames.shift();
+          if (!buffered) break;
+          if (buffered.event.kind === "run.status") {
+            effectiveStatus = buffered.event.status;
+            pendingLiveBytes -= buffered.bytes;
+          } else {
+            try {
+              await writeFrame(buffered.event);
+            } finally {
+              pendingLiveBytes -= buffered.bytes;
+            }
+          }
+        }
+        await writeFrame({ kind: "run.status", status: effectiveStatus });
+
+        // A slow socket can yield while the snapshot is written. Drain any
+        // publications that arrived in that interval before switching the hub
+        // callback to its serialized steady-state delivery queue.
+        while (bufferedLiveFrames.length > 0 && !torn) {
+          const buffered = bufferedLiveFrames.shift();
+          if (!buffered) break;
+          try {
+            await writeFrame(buffered.event);
+          } finally {
+            pendingLiveBytes -= buffered.bytes;
+          }
+        }
+        catchingUp = false;
+      } catch {
+        // Headers may already be committed. Never bubble into the JSON error
+        // dispatcher; close the SSE response and release every stream resource.
+        teardown(true);
+      }
+    } },
+
+  // Resource-backed run diagnostics. This exact read must precede the broad
+  // `/runs` list matcher below. The run lookup preserves the legacy
+  // non-enumerating forbidden response for missing and cross-tenant ids.
+  { method: "GET", match: (url) => url === "/run/usage" || url.startsWith("/run/usage?"), permission: "runs.read",
+    contract: getRunUsageContract,
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const runId = url.searchParams.get("runId");
+      if (!runId) return sendError(res, "runs_run_id_required", "runId is required", 400);
+      const run = await db
+        .select({ id: runs.id })
+        .from(runs)
+        .where(and(eq(runs.id, runId), eq(runs.orgId, auth.orgId)))
+        .limit(1);
+      if (!run[0]) return sendError(res, "runs_forbidden", "Forbidden", 403);
+      return sendJson(res, await queryRunUsage(auth.orgId, runId));
     } },
 
   // Runs — list + reads
   // NOTE: `/runs` prefix excludes `/run?` so the GET `/run?…` entry below
   // can claim it, and excludes `/runs/compare` so the Replay Lab compare
   // route below can claim it (both are first-match-wins).
-  // Optional `?workflowId=<id>` filter joins through `workflow_versions` so
-  // the caller can scope the listing to one workflow's runs.
+  // Optional workflow/status filters compose with a stable keyset boundary.
+  // The `workflow_versions` join is tenant-scoped: an inconsistent cross-org
+  // version reference cannot resolve another tenant's workflow identity.
   { method: "GET", match: (url) => url.startsWith("/runs") && !url.startsWith("/run?") && !url.startsWith("/runs/compare"),
+    contract: listRunsContract,
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const limitParam = Number(url.searchParams.get("limit"));
       const limitValue = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 200) : 100;
       const workflowIdFilter = url.searchParams.get("workflowId");
-
+      const statusParam = url.searchParams.get("status");
+      const runKindParam = url.searchParams.get("runKind");
+      if (statusParam && !runStatusValues.some((status) => status === statusParam)) {
+        return sendError(res, "invalid_input", "status must be a valid run status", 400);
+      }
+      if (runKindParam && runKindParam !== "production" && runKindParam !== "validation") {
+        return sendError(res, "invalid_input", "runKind must be production or validation", 400);
+      }
+      const before = parseKeysetCursor(url.searchParams.get("before"));
+      const filters = [eq(runs.orgId, auth.orgId)];
       if (workflowIdFilter) {
-        const rows = await db
-          .select(runListColumns)
-          .from(runs)
-          .leftJoin(workflowVersions, eq(workflowVersions.id, runs.workflowVersionId))
-          .where(and(
-            eq(runs.orgId, auth.orgId),
-            or(
-              and(
-                eq(workflowVersions.orgId, auth.orgId),
-                eq(workflowVersions.workflowId, workflowIdFilter),
-              ),
-              eq(runs.workflowVersionId, workflowIdFilter),
-            ),
-          ))
-          .orderBy(desc(runs.createdAt))
-          .limit(limitValue);
-        return sendJson(res, rows);
+        filters.push(or(
+          eq(workflowVersions.workflowId, workflowIdFilter),
+          and(
+            isNull(workflowVersions.id),
+            eq(runs.workflowVersionId, workflowIdFilter),
+          ),
+        )!);
+      }
+      if (statusParam) filters.push(eq(runs.status, statusParam));
+      if (runKindParam === "production") filters.push(isNull(runs.replayMode));
+      if (runKindParam === "validation") filters.push(eq(runs.replayMode, "validation"));
+      if (before) {
+        filters.push(or(
+          lt(runs.createdAt, before.createdAt),
+          and(eq(runs.createdAt, before.createdAt), lt(runs.id, before.id)),
+        )!);
       }
 
-      const rows = await db.select(runListColumns).from(runs).where(eq(runs.orgId, auth.orgId)).orderBy(desc(runs.createdAt)).limit(limitValue);
+      const rows = await db
+        .select(runListColumns)
+        .from(runs)
+        .leftJoin(workflowVersions, and(
+          eq(workflowVersions.id, runs.workflowVersionId),
+          eq(workflowVersions.orgId, auth.orgId),
+        ))
+        .where(and(...filters))
+        .orderBy(desc(runs.createdAt), desc(runs.id))
+        .limit(limitValue);
       return sendJson(res, rows);
     } },
   { method: "GET", match: (url) => url.startsWith("/run?"),
+    contract: getRunContract,
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const runId = url.searchParams.get("runId");
       if (!runId) return sendError(res, "runs_run_id_required", "runId is required", 400);
       const run = await db.select().from(runs).where(eq(runs.id, runId));
       if (!run[0] || run[0].orgId !== auth.orgId) return sendError(res, "runs_forbidden", "Forbidden", 403);
-      const nodes = await db.select().from(runNodes).where(eq(runNodes.runId, runId)).orderBy(asc(runNodes.startedAt), asc(runNodes.nodeId));
+      const nodes = await db.select(runNodePublicColumns).from(runNodes).where(eq(runNodes.runId, runId)).orderBy(asc(runNodes.startedAt), asc(runNodes.nodeId));
       const limit = parseEventsLimit(url.searchParams.get("eventsLimit"), RUN_EVENTS_DEFAULT_LIMIT, RUN_EVENTS_MAX_LIMIT);
       const cursor = parseEventsCursor(url.searchParams.get("eventsCursor"));
       // Composite (createdAt, id) keyset cursor: events sharing exact createdAt
@@ -273,13 +476,14 @@ export const runsRoutes: Route[] = [
   // Historical pages use `/run?eventsCursor=...` so polling cannot get
   // stuck walking older history while the run is still changing.
   { method: "GET", match: (url) => url.startsWith("/status"),
+    contract: getRunStatusContract,
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const runId = url.searchParams.get("runId");
       if (!runId) return sendError(res, "runs_run_id_required", "runId is required", 400);
       const run = await db.select().from(runs).where(eq(runs.id, runId));
       if (!run[0] || run[0].orgId !== auth.orgId) return sendError(res, "runs_forbidden", "Forbidden", 403);
-      const nodes = await db.select().from(runNodes).where(eq(runNodes.runId, runId)).orderBy(asc(runNodes.startedAt), asc(runNodes.nodeId));
+      const nodes = await db.select(runNodePublicColumns).from(runNodes).where(eq(runNodes.runId, runId)).orderBy(asc(runNodes.startedAt), asc(runNodes.nodeId));
       const limit = parseEventsLimit(url.searchParams.get("eventsLimit"), RUN_EVENTS_DEFAULT_LIMIT, RUN_EVENTS_MAX_LIMIT);
       const rows = await db
         .select()
@@ -289,6 +493,138 @@ export const runsRoutes: Route[] = [
         .limit(limit + 1);
       const page = paginateRunEvents(rows, limit);
       return sendJson(res, { run: run[0], nodes, ...page });
+    } },
+  // Production redrive — resume a FAILED run from its failed node on the
+  // latest (or an explicit) saved workflow version, reusing every upstream
+  // output that already succeeded. The wedge's last mile: DLQ → patch →
+  // save v(n+1) → redrive continues the work instead of re-running it.
+  { method: "POST", match: "/runs/redrive", role: "editor",
+    handler: async ({ req, res, auth }) => {
+      const redriveMcpGate = await guardMcpWrite(auth, "runs.redrive");
+      if (!redriveMcpGate.ok) return sendJson(res, redriveMcpGate.body, redriveMcpGate.status);
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const runId = typeof body.runId === "string" ? body.runId : null;
+      if (!runId) return sendError(res, "runs_run_id_required", "runId is required", 400);
+      const requestedNodeId = typeof body.nodeId === "string" && body.nodeId.length > 0 ? body.nodeId : null;
+      const requestedVersionId = typeof body.workflowVersionId === "string" && body.workflowVersionId.length > 0
+        ? body.workflowVersionId
+        : null;
+
+      const sourceRows = await db.select().from(runs).where(eq(runs.id, runId));
+      const sourceRun = sourceRows[0];
+      if (!sourceRun || sourceRun.orgId !== auth.orgId) {
+        return sendError(res, "runs_forbidden", "Forbidden", 403);
+      }
+      if (sourceRun.status !== "failed") {
+        return sendError(res, "runs_redrive_source_not_failed", "Only a failed run can be redriven", 409);
+      }
+
+      // Resolve the failed node: explicit `nodeId` must actually be failed;
+      // otherwise exactly one failed node is required (ambiguity → 400 with
+      // the candidate list so the client can re-ask precisely).
+      const nodeRows = await db
+        .select({ nodeId: runNodes.nodeId, status: runNodes.status })
+        .from(runNodes)
+        .where(eq(runNodes.runId, runId));
+      const failedNodeIds = nodeRows.filter((row) => row.status === "failed").map((row) => row.nodeId);
+      if (failedNodeIds.length === 0) {
+        return sendError(res, "runs_redrive_source_not_failed", "The run has no failed node to resume from", 409);
+      }
+      let failedNodeId: string;
+      if (requestedNodeId) {
+        if (!failedNodeIds.includes(requestedNodeId)) {
+          return sendError(res, "runs_redrive_node_not_failed", "nodeId is not a failed node of this run", 400, { nodeId: requestedNodeId });
+        }
+        failedNodeId = requestedNodeId;
+      } else if (failedNodeIds.length > 1) {
+        return sendError(res, "runs_redrive_node_ambiguous", "Multiple failed nodes — pass nodeId", 400, { nodeIds: failedNodeIds.join(", ") });
+      } else {
+        failedNodeId = failedNodeIds[0]!;
+      }
+
+      // Resolve the TARGET version. The source run's version row anchors the
+      // workflow id; an ad-hoc run (synthetic version id, no row) has no
+      // saved lineage to redrive onto — that's what /dlq/replay covers.
+      const sourceVersionRows = await db
+        .select({ workflowId: workflowVersions.workflowId })
+        .from(workflowVersions)
+        .where(and(eq(workflowVersions.id, sourceRun.workflowVersionId), eq(workflowVersions.orgId, auth.orgId)));
+      const workflowId = sourceVersionRows[0]?.workflowId;
+      if (!workflowId) {
+        return sendError(res, "runs_redrive_requires_saved_workflow", "Redrive needs a saved workflow version — this run was ad-hoc", 409);
+      }
+      const workflowRows = await db
+        .select({ id: workflows.id, status: workflows.status })
+        .from(workflows)
+        .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId), isNull(workflows.deletedAt)));
+      const workflowRow = workflowRows[0];
+      if (!workflowRow) return sendError(res, "workflow_not_found", "Workflow not found", 404);
+      if (workflowRow.status !== "active") {
+        return sendError(res, "runs_redrive_workflow_paused", "Workflow is paused — restore it before redriving", 409);
+      }
+
+      let targetVersionRow: { id: string; workflowId: string; dagJson: unknown } | undefined;
+      if (requestedVersionId) {
+        const rows = await db
+          .select({ id: workflowVersions.id, workflowId: workflowVersions.workflowId, dagJson: workflowVersions.dagJson })
+          .from(workflowVersions)
+          .where(and(eq(workflowVersions.id, requestedVersionId), eq(workflowVersions.orgId, auth.orgId)));
+        targetVersionRow = rows[0];
+        if (!targetVersionRow || targetVersionRow.workflowId !== workflowId) {
+          return sendError(res, "runs_redrive_version_not_found", "workflowVersionId does not belong to this run's workflow", 404);
+        }
+      } else {
+        const rows = await db
+          .select({ id: workflowVersions.id, workflowId: workflowVersions.workflowId, dagJson: workflowVersions.dagJson })
+          .from(workflowVersions)
+          .where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, auth.orgId)))
+          .orderBy(desc(workflowVersions.version))
+          .limit(1);
+        targetVersionRow = rows[0];
+        if (!targetVersionRow) {
+          return sendError(res, "runs_redrive_requires_saved_workflow", "Redrive needs a saved workflow version", 409);
+        }
+      }
+
+      const parsedTarget = WorkflowSchema.safeParse(targetVersionRow.dagJson);
+      if (!parsedTarget.success) {
+        return sendError(res, "runs_redrive_version_invalid", "Target version failed schema validation", 422);
+      }
+      // Same production-mode posture as POST /start: fail-level readiness
+      // issues block a redrive that would execute write-side work.
+      if (process.env.JANUSLY_PRODUCTION_MODE === "true") {
+        const readiness = checkWorkflowReadiness(parsedTarget.data);
+        if (readiness.status === "fail") {
+          return sendError(res, "runs_not_production_ready", "Workflow not production-ready", 422);
+        }
+      }
+
+      const sourceInput = asRecord(sourceRun.inputJson).input;
+      const result = await redriveRun({
+        orgId: auth.orgId,
+        sourceRunId: runId,
+        failedNodeId,
+        workflow: parsedTarget.data,
+        targetWorkflowVersionId: targetVersionRow.id,
+        input: sourceInput && typeof sourceInput === "object" && !Array.isArray(sourceInput)
+          ? sourceInput as Record<string, unknown>
+          : {},
+        createdBy: auth.userId,
+      });
+      if (!result.ok) {
+        const code = result.code === "node_not_in_version"
+          ? "runs_redrive_node_missing_in_version"
+          : "runs_redrive_predecessor_not_succeeded";
+        return sendError(res, code, result.message, 409);
+      }
+
+      await auditAction(auth, "run.redrive", { targetType: "run", targetId: result.runId, metadata: {
+        sourceRunId: runId,
+        failedNodeId,
+        targetWorkflowVersionId: targetVersionRow.id,
+        predecessorCount: result.predecessorCount,
+      } });
+      return sendJson(res, { runId: result.runId });
     } },
   // Run lifecycle (start / resume / cancel)
   { method: "POST", match: "/start", role: "editor",
@@ -361,14 +697,18 @@ export const runsRoutes: Route[] = [
       let forcedDuringPause = false;
       if (!isAdhoc && typeof parsedWorkflow.id === "string" && parsedWorkflow.id) {
         const wfStatus = await getWorkflowStatus(auth.orgId, parsedWorkflow.id);
-        if (wfStatus && wfStatus.status !== WORKFLOW_STATUS_ACTIVE) {
+        // Shared decision table (workflowPausePolicy.ts): /start REJECTS,
+        // naming the actual pause cause — breaker vs upstream send the
+        // operator to different places.
+        const pauseAction = resolveWorkflowPauseAction(wfStatus?.status, "start");
+        if (wfStatus && pauseAction.kind === "reject") {
           if (!forceRunDuringPause) {
             return sendError(
               res,
-              "upstream_degraded",
+              pauseAction.code,
               wfStatus.pausedReason ?? "Workflow is paused because an upstream dependency is degraded",
               409,
-              { status: wfStatus.status },
+              { status: pauseAction.status },
             );
           }
           forcedDuringPause = true;
@@ -706,18 +1046,30 @@ export const runsRoutes: Route[] = [
     } },
 
   // Causal replay
-  { method: "GET", match: (url) => url.startsWith("/causal"),
+  { method: "GET", match: (url) => url === "/causal" || url.startsWith("/causal?"), permission: "runs.read",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const runId = url.searchParams.get("runId");
+      const eventId = url.searchParams.get("eventId");
       const nodeId = url.searchParams.get("nodeId");
-      if (!runId || !nodeId) return sendError(res, "runs_run_id_and_node_id_required", "runId and nodeId are required", 400);
+      if (!runId || !eventId || !nodeId) {
+        return sendError(res, "runs_run_id_event_id_and_node_id_required", "runId, eventId, and nodeId are required", 400);
+      }
 
-      const run = await db.select().from(runs).where(eq(runs.id, runId));
-      if (!run[0] || run[0].orgId !== auth.orgId) return sendError(res, "runs_forbidden", "Forbidden", 403);
+      const run = await db.select().from(runs)
+        .where(and(eq(runs.id, runId), eq(runs.orgId, auth.orgId)))
+        .limit(1);
+      if (!run[0]) return sendError(res, "runs_forbidden", "Forbidden", 403);
 
-      const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId));
-      const decisionEvent = events.find(event => event.type === "decision.made" && event.nodeId === nodeId);
+      const events = await db.select().from(runEvents)
+        .where(and(
+          eq(runEvents.id, eventId),
+          eq(runEvents.runId, runId),
+          eq(runEvents.nodeId, nodeId),
+          eq(runEvents.type, "decision.made"),
+        ))
+        .limit(1);
+      const decisionEvent = events[0];
       if (!decisionEvent) return sendError(res, "runs_no_decision_event", "No decision event", 404);
 
       const payload = asRecord(decisionEvent.payload);

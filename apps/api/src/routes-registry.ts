@@ -16,6 +16,7 @@
  */
 
 import type { Route } from "./routes";
+import { openApiRoutes } from "./openapi-route";
 
 import { aiRoutes } from "./routes/ai-routes";
 import { alertsRoutes } from "./routes/alerts-routes";
@@ -29,12 +30,14 @@ import { experimentsRoutes } from "./routes/experiments-routes";
 import { healthRoutes } from "./routes/health-routes";
 import { mcpRoutes } from "./routes/mcp-routes";
 import { membersRoutes } from "./routes/members-routes";
+import { memoryRoutes } from "./routes/memory-routes";
 import { onboardingRoutes } from "./routes/onboarding-routes";
 import { orgRoutes } from "./routes/org-routes";
 import { pluginsRoutes } from "./routes/plugins-routes";
 import { promptsRoutes } from "./routes/prompts-routes";
 import { recoveryHandoffRoutes } from "./routes/recovery-handoff-routes";
 import { recoveryItemsRoutes } from "./routes/recovery-items-routes";
+import { recoveryPlaybooksRoutes } from "./routes/recovery-playbooks-routes";
 import { recoveryRoutes } from "./routes/recovery-routes";
 import { reportsRoutes } from "./routes/reports-routes";
 import { rolesRoutes } from "./routes/roles-routes";
@@ -51,11 +54,13 @@ import { workflowMetadataRoutes } from "./routes/workflow-metadata-routes";
 import { workflowsRoutes } from "./routes/workflows-routes";
 
 export const routes: Route[] = [
+  ...openApiRoutes,
   ...healthRoutes,
   ...toolsRoutes,
   ...templatesRoutes,
   ...billingRoutes,
   ...orgRoutes,
+  ...memoryRoutes,
   ...membersRoutes,
   ...ssoRoutes,
   ...scimRoutes,
@@ -70,6 +75,7 @@ export const routes: Route[] = [
   ...credentialsRoutes,
   ...promptsRoutes,
   ...auditRoutes,
+  ...recoveryPlaybooksRoutes,
   ...recoveryRoutes,
   ...reportsRoutes,
   ...aiRoutes,

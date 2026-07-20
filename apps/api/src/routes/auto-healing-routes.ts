@@ -190,6 +190,8 @@ export const autoHealingRoutes: Route[] = [
           runId: dlqRow[0]!.runId,
           workflow: patchedWorkflow!,
           node: failingNode!,
+          deadLetterId: row.deadLetterId,
+          recoveryActorId: auth.userId,
         });
         await markDeadLetterReplayed(auth.orgId, row.deadLetterId);
       } catch (err) {

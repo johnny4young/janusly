@@ -22,6 +22,30 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const {
+  findMatchingPlaybookMock,
+  queryFailureSamplesMock,
+  queryRecoveryRecurrenceMock,
+  replayDeadLetterMock,
+  replayValidationMock,
+} = vi.hoisted(() => ({
+  findMatchingPlaybookMock: vi.fn(),
+  queryFailureSamplesMock: vi.fn(),
+  queryRecoveryRecurrenceMock: vi.fn(),
+  replayDeadLetterMock: vi.fn(),
+  replayValidationMock: vi.fn(),
+}));
+
+vi.mock("@janusly/data", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@janusly/data")>();
+  return {
+    ...actual,
+    findMatchingActiveRecoveryPlaybook: findMatchingPlaybookMock,
+    queryFailureSamples: queryFailureSamplesMock,
+    queryRecoveryRecurrence: queryRecoveryRecurrenceMock,
+  };
+});
+
 vi.mock("../auth", () => ({
   requireAuth: vi.fn(),
 }));
@@ -49,8 +73,28 @@ vi.mock("../dlq", async (importOriginal) => {
 
 // Bulk-resolve also audits per entry + auto-closes the linked recovery item.
 vi.mock("../audit-helper", () => ({ auditAction: vi.fn() }));
+
+// The detail read attaches the suspect-version correlation; mocked so
+// the route tests control hit/miss without a DB.
+vi.mock("../suspect-version", () => ({ resolveSuspectVersion: vi.fn() }));
+
+// Cluster-apply gates on the org's AI rate limit before the loop; both are
+// infra chokepoints (DB org-config read + Redis) irrelevant to route logic.
+vi.mock("../ai-runtime", () => ({
+  orgLlmRuntime: vi.fn(async () => ({ orgConfig: { ai: { rateLimitPerMin: 60 } } })),
+  sanitizeAiWorkflow: vi.fn((workflow: unknown) => workflow),
+}));
+vi.mock("../rate-limit", () => ({ enforceRateLimit: vi.fn() }));
+
+// The signature recheck guards against stale member lists; route tests pin
+// the downtime accounting, not the signature algebra (covered in
+// cluster-recovery's own tests) — force a match.
+vi.mock("../cluster-recovery", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../cluster-recovery")>();
+  return { ...actual, recheckSignature: vi.fn(() => true) };
+});
 vi.mock("@janusly/engine/src/recovery/recovery-item-hook", () => ({
-  autoResolveRecoveryItemFromReplay: vi.fn(),
+  resolveRecoveryItemForDismiss: vi.fn(),
   createRecoveryItemForDeadLetter: vi.fn(),
 }));
 
@@ -59,19 +103,24 @@ vi.mock("@janusly/engine/src/recovery/recovery-item-hook", () => ({
 // cleanly (vitest `Reflect.construct`s a `new`-ed mock — an arrow factory
 // would throw "not a constructor"). Each instance's replayDeadLetter is the
 // shared hoisted mock we assert on / make reject.
-const { replayDeadLetterMock } = vi.hoisted(() => ({ replayDeadLetterMock: vi.fn() }));
 vi.mock("@janusly/engine/src/adapters/dlq-replay", () => ({
   DLQReplayAdapter: class {
     replayDeadLetter = replayDeadLetterMock;
-    replayDeadLetterAsValidation = vi.fn();
+    replayDeadLetterAsValidation = replayValidationMock;
   },
 }));
+
+// The real claim error is not mocked, so the route's `instanceof` check and this
+// test agree on the same class (the persistence module is loaded transitively
+// by the route import; importing the class adds no DB connection).
+import { ReplayNotClaimableError } from "@janusly/engine/src/persistence";
 
 import { requireAuth } from "../auth";
 import { requireRole } from "../permissions";
 import { countDeadLettersByStatus, encodeRecoveryQueueCursor, getDeadLetter, listRecoveryQueue, markDeadLetterReplayed, markDeadLetterResolved, queryRecoveryQueuePage, type RecoveryQueueRow } from "../dlq";
 import { auditAction } from "../audit-helper";
-import { autoResolveRecoveryItemFromReplay } from "@janusly/engine/src/recovery/recovery-item-hook";
+import { resolveSuspectVersion } from "../suspect-version";
+import { resolveRecoveryItemForDismiss } from "@janusly/engine/src/recovery/recovery-item-hook";
 import { createApiServer } from "../server";
 import { dlqRoutes } from "./dlq-routes";
 import type { Route } from "../routes";
@@ -85,7 +134,8 @@ const getDeadLetterMock = vi.mocked(getDeadLetter);
 const markDeadLetterResolvedMock = vi.mocked(markDeadLetterResolved);
 const markDeadLetterReplayedMock = vi.mocked(markDeadLetterReplayed);
 const auditActionMock = vi.mocked(auditAction);
-const autoResolveMock = vi.mocked(autoResolveRecoveryItemFromReplay);
+const resolveForDismissMock = vi.mocked(resolveRecoveryItemForDismiss);
+const resolveSuspectVersionMock = vi.mocked(resolveSuspectVersion);
 
 /** A cursor minted by the REAL encoder, for the /dlq/queue wiring tests. */
 function cursorFor(sort: "newest" | "oldest" | "severity" | "sla", id: string, severity = "p1"): string {
@@ -139,7 +189,7 @@ describe("GET /dlq route declaration", () => {
     expect(route.role).toBe("viewer");
   });
 
-  it("does NOT declare a permission gate (no migration to permission: form per ROADMAP non-goal)", () => {
+  it("does NOT declare a permission gate because this read still uses the role gate", () => {
     const route = findRoute("GET", "/dlq");
     expect(route.permission).toBeUndefined();
   });
@@ -147,6 +197,65 @@ describe("GET /dlq route declaration", () => {
   it("matches the role posture of its sibling list routes", () => {
     expect(findRoute("GET", "/dlq/clusters").role).toBe("viewer");
     expect(findRoute("GET", "/dlq/cluster-members?signature=x").role).toBe("viewer");
+  });
+});
+
+describe("GET /dlq/clusters recovery recurrence", () => {
+  it("marks only signatures that re-failed after a terminal recovery", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("viewer");
+    const samples = [
+      {
+        source: "dead_letter",
+        id: "dl-1",
+        workflowId: "wf-1",
+        workflowName: "Orders",
+        runId: "run-1",
+        nodeId: "http-1",
+        nodeType: "http",
+        errorJson: { message: "Connection refused" },
+        createdAt: new Date("2026-07-12T12:00:00.000Z"),
+      },
+      {
+        source: "dead_letter",
+        id: "dl-2",
+        workflowId: "wf-2",
+        workflowName: "Invoices",
+        runId: "run-2",
+        nodeId: "http-2",
+        nodeType: "http",
+        errorJson: { message: "Request timed out" },
+        createdAt: new Date("2026-07-12T13:00:00.000Z"),
+      },
+    ] satisfies import("@janusly/engine/src/cluster-failures").FailureSample[];
+    queryFailureSamplesMock.mockResolvedValueOnce(samples);
+
+    const firstClusters = (await import("@janusly/engine/src/cluster-failures")).clusterFailureSamples(
+      samples,
+    );
+    queryRecoveryRecurrenceMock.mockResolvedValueOnce({
+      resolved: 2,
+      recurred: 1,
+      recurredSignatures: [firstClusters[0]!.signature],
+    });
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/clusters?windowDays=14`);
+      expect(response.status).toBe(200);
+      const payload = await response.json() as {
+        clusters: Array<{ signature: string; recurredAfterRecovery: boolean }>;
+      };
+      expect(payload.clusters).toEqual(expect.arrayContaining([
+        expect.objectContaining({ signature: firstClusters[0]!.signature, recurredAfterRecovery: true }),
+        expect.objectContaining({ signature: firstClusters[1]!.signature, recurredAfterRecovery: false }),
+      ]));
+      expect(queryFailureSamplesMock).toHaveBeenCalledWith("org-1", 14);
+      expect(queryRecoveryRecurrenceMock).toHaveBeenCalledWith("org-1", expect.any(Date));
+    } finally {
+      await close(server);
+    }
   });
 });
 
@@ -452,7 +561,7 @@ describe("POST /dlq/bulk-resolve", () => {
     requireRoleMock.mockResolvedValueOnce("editor");
     getDeadLetterMock.mockImplementation(async (_orgId: string, id: string) => ({ id, orgId: "org-1", runId: "r", nodeId: "n", status: "open" } as never));
     markDeadLetterResolvedMock.mockResolvedValue(undefined as never);
-    autoResolveMock.mockResolvedValue(undefined as never);
+    resolveForDismissMock.mockResolvedValue(undefined as never);
 
     const server = createApiServer({ routes: dlqRoutes });
     const baseUrl = await listen(server);
@@ -464,12 +573,18 @@ describe("POST /dlq/bulk-resolve", () => {
       });
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ resolved: 2, failed: 0, errors: [] });
-      // Each id is org-scoped, marked resolved, audited (bulk flag), auto-closed.
+      // Each id is org-scoped, marked resolved, audited (bulk flag), and
+      // dismissed as an explicitly accepted loss.
       expect(markDeadLetterResolvedMock).toHaveBeenCalledWith("org-1", "dl-1");
       expect(markDeadLetterResolvedMock).toHaveBeenCalledWith("org-1", "dl-2");
       expect(auditActionMock).toHaveBeenCalledTimes(2);
       expect(auditActionMock).toHaveBeenCalledWith(expect.anything(), "dlq.resolved", expect.objectContaining({ targetType: "dlq", targetId: "dl-1", metadata: { bulk: true } }));
-      expect(autoResolveMock).toHaveBeenCalledWith(expect.objectContaining({ orgId: "org-1", deadLetterId: "dl-2", resolutionReason: "accepted_loss", via: "dlq_resolve" }));
+      expect(resolveForDismissMock).toHaveBeenCalledWith({
+        orgId: "org-1",
+        deadLetterId: "dl-2",
+        actor: "user-1",
+        via: "dlq_resolve",
+      });
     } finally {
       await close(server);
     }
@@ -481,7 +596,7 @@ describe("POST /dlq/bulk-resolve", () => {
     // dl-1 exists in the org; ghost is not found (cross-org / bogus → null).
     getDeadLetterMock.mockImplementation(async (_orgId: string, id: string) => (id === "dl-1" ? ({ id, orgId: "org-1", runId: "r", nodeId: "n", status: "open" } as never) : (null as never)));
     markDeadLetterResolvedMock.mockResolvedValue(undefined as never);
-    autoResolveMock.mockResolvedValue(undefined as never);
+    resolveForDismissMock.mockResolvedValue(undefined as never);
 
     const server = createApiServer({ routes: dlqRoutes });
     const baseUrl = await listen(server);
@@ -559,7 +674,7 @@ describe("POST /dlq/replay suggestedWorkflow (apply-a-fix)", () => {
     getDeadLetterMock.mockResolvedValueOnce(failedItem as never);
     replayDeadLetterMock.mockResolvedValue(undefined as never);
     markDeadLetterReplayedMock.mockResolvedValue(undefined as never);
-    autoResolveMock.mockResolvedValue(undefined as never);
+    resolveForDismissMock.mockResolvedValue(undefined as never);
 
     const fix = { id: "wf-1", name: "WF", nodes: [{ id: "n", type: "noop", config: {} }], edges: [] };
     const server = createApiServer({ routes: dlqRoutes });
@@ -572,8 +687,13 @@ describe("POST /dlq/replay suggestedWorkflow (apply-a-fix)", () => {
       });
       expect(response.status).toBe(200);
       // The adapter receives the FIX (node `n` is now a noop), not the original http node.
-      const call = replayDeadLetterMock.mock.calls[0][0] as { workflow: { nodes: Array<{ id: string; type: string }> } };
+      const call = replayDeadLetterMock.mock.calls[0][0] as {
+        deadLetterId: string;
+        recoveryActorId: string;
+        workflow: { nodes: Array<{ id: string; type: string }> };
+      };
       expect(call.workflow.nodes.find((x) => x.id === "n")?.type).toBe("noop");
+      expect(call).toMatchObject({ deadLetterId: "dl-1", recoveryActorId: "user-1" });
     } finally {
       await close(server);
     }
@@ -596,6 +716,131 @@ describe("POST /dlq/replay suggestedWorkflow (apply-a-fix)", () => {
       });
       expect(response.status).toBe(400);
       expect(replayDeadLetterMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("maps a run_not_replayable rejection to 409 dlq_replay_conflict (not a silent no-op)", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    getDeadLetterMock.mockResolvedValueOnce(failedItem as never);
+    replayDeadLetterMock.mockReset();
+    replayDeadLetterMock.mockRejectedValueOnce(new ReplayNotClaimableError("run_not_replayable"));
+    markDeadLetterReplayedMock.mockReset();
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/replay`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deadLetterId: "dl-1" }),
+      });
+      expect(response.status).toBe(409);
+      expect(((await response.json()) as { code: string }).code).toBe("dlq_replay_conflict");
+      // A rejected claim must NOT mark the DLQ row replayed.
+      expect(markDeadLetterReplayedMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("maps a node_mid_retry rejection to 409 dlq_node_mid_retry", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    getDeadLetterMock.mockResolvedValueOnce(failedItem as never);
+    replayDeadLetterMock.mockReset();
+    replayDeadLetterMock.mockRejectedValueOnce(new ReplayNotClaimableError("node_mid_retry"));
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/replay`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deadLetterId: "dl-1" }),
+      });
+      expect(response.status).toBe(409);
+      expect(((await response.json()) as { code: string }).code).toBe("dlq_node_mid_retry");
+    } finally {
+      await close(server);
+    }
+  });
+});
+
+describe("POST /dlq/validate-fix with a Recovery Playbook", () => {
+  const sourceWorkflow = {
+    id: "wf-1",
+    name: "WF",
+    dslVersion: "1.0",
+    nodes: [{ id: "n", type: "http", config: { url: "https://example.com", method: "GET", timeoutMs: 5000 } }],
+    edges: [],
+  };
+  const item = {
+    id: "dl-1",
+    orgId: "org-1",
+    runId: "run-1",
+    nodeId: "n",
+    status: "open",
+    workflowJson: sourceWorkflow,
+    nodeJson: sourceWorkflow.nodes[0],
+    errorJson: { message: "request timed out" },
+  };
+
+  it("attests only an active exact-match playbook on the validation run", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    getDeadLetterMock.mockResolvedValueOnce(item as never);
+    findMatchingPlaybookMock.mockResolvedValueOnce({ id: "pb-1", sourceWorkflow });
+    replayValidationMock.mockResolvedValueOnce({ runId: "validation-1" });
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/validate-fix`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deadLetterId: "dl-1", suggestedWorkflow: sourceWorkflow, recoveryPlaybookId: "pb-1" }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ runId: "validation-1" });
+      expect(findMatchingPlaybookMock).toHaveBeenCalledWith("org-1", "wf-1", expect.any(String));
+      expect(replayValidationMock).toHaveBeenCalledWith(expect.objectContaining({
+        orgId: "org-1",
+        originalRunId: "run-1",
+        recoveryPlaybookId: "pb-1",
+      }));
+      expect(auditActionMock).toHaveBeenCalledWith(expect.anything(), "recovery.validation_started", expect.objectContaining({
+        metadata: { validationRunId: "validation-1", recoveryPlaybookId: "pb-1" },
+      }));
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("rejects a stale or modified playbook source before starting sandbox", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    getDeadLetterMock.mockResolvedValueOnce(item as never);
+    findMatchingPlaybookMock.mockResolvedValueOnce({ id: "pb-1", sourceWorkflow });
+    replayValidationMock.mockReset();
+    const modified = {
+      ...sourceWorkflow,
+      nodes: [{ ...sourceWorkflow.nodes[0], config: { ...sourceWorkflow.nodes[0].config, timeoutMs: 9000 } }],
+    };
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/validate-fix`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deadLetterId: "dl-1", suggestedWorkflow: modified, recoveryPlaybookId: "pb-1" }),
+      });
+      expect(response.status).toBe(409);
+      expect(((await response.json()) as { code: string }).code).toBe("recovery_playbook_match_changed");
+      expect(replayValidationMock).not.toHaveBeenCalled();
     } finally {
       await close(server);
     }
@@ -627,7 +872,7 @@ describe("POST /dlq/bulk-replay", () => {
     getDeadLetterMock.mockImplementation(async (_orgId: string, id: string) => openItem(id) as never);
     replayDeadLetterMock.mockResolvedValue(undefined as never);
     markDeadLetterReplayedMock.mockResolvedValue(undefined as never);
-    autoResolveMock.mockResolvedValue(undefined as never);
+    resolveForDismissMock.mockResolvedValue(undefined as never);
 
     const server = createApiServer({ routes: dlqRoutes });
     const baseUrl = await listen(server);
@@ -639,9 +884,17 @@ describe("POST /dlq/bulk-replay", () => {
       });
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ replayed: 2, failed: 0, errors: [] });
-      // Each id is replayed via the shared adapter, marked replayed, audited
-      // (bulk flag), and its recovery item auto-closed.
+      // Each id is queued via the shared adapter, marked replayed, and audited.
+      // Terminal node success closes the linked recovery item later.
       expect(replayDeadLetterMock).toHaveBeenCalledTimes(2);
+      expect(replayDeadLetterMock).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        deadLetterId: "dl-1",
+        recoveryActorId: "user-1",
+      }));
+      expect(replayDeadLetterMock).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        deadLetterId: "dl-2",
+        recoveryActorId: "user-1",
+      }));
       expect(markDeadLetterReplayedMock).toHaveBeenCalledWith("org-1", "dl-1");
       expect(markDeadLetterReplayedMock).toHaveBeenCalledWith("org-1", "dl-2");
       expect(auditActionMock).toHaveBeenCalledTimes(2);
@@ -650,7 +903,7 @@ describe("POST /dlq/bulk-replay", () => {
         "dlq.replayed",
         expect.objectContaining({ targetType: "dlq", targetId: "dl-1", metadata: expect.objectContaining({ bulk: true }) }),
       );
-      expect(autoResolveMock).toHaveBeenCalledWith(expect.objectContaining({ orgId: "org-1", deadLetterId: "dl-2", actor: "user-1" }));
+      expect(resolveForDismissMock).not.toHaveBeenCalled();
     } finally {
       await close(server);
     }
@@ -663,7 +916,7 @@ describe("POST /dlq/bulk-replay", () => {
     getDeadLetterMock.mockImplementation(async (_orgId: string, id: string) => (id === "dl-1" ? (openItem(id) as never) : (null as never)));
     replayDeadLetterMock.mockResolvedValue(undefined as never);
     markDeadLetterReplayedMock.mockResolvedValue(undefined as never);
-    autoResolveMock.mockResolvedValue(undefined as never);
+    resolveForDismissMock.mockResolvedValue(undefined as never);
 
     const server = createApiServer({ routes: dlqRoutes });
     const baseUrl = await listen(server);
@@ -696,7 +949,7 @@ describe("POST /dlq/bulk-replay", () => {
     );
     replayDeadLetterMock.mockResolvedValue(undefined as never);
     markDeadLetterReplayedMock.mockResolvedValue(undefined as never);
-    autoResolveMock.mockResolvedValue(undefined as never);
+    resolveForDismissMock.mockResolvedValue(undefined as never);
 
     const server = createApiServer({ routes: dlqRoutes });
     const baseUrl = await listen(server);
@@ -781,6 +1034,174 @@ describe("POST /dlq/replay — MCP-source write consent gate", () => {
       // Gate fired before the DLQ lookup + the replay adapter.
       expect(getDeadLetterMock).not.toHaveBeenCalled();
       expect(replayDeadLetterMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+});
+
+describe("GET /dlq?id= detail read with suspect version", () => {
+  const DETAIL_ROW = {
+    id: "dl-1",
+    orgId: "org-1",
+    runId: "run-1",
+    nodeId: "n-1",
+    status: "open",
+    replayClaimToken: "internal-claim-token",
+    replayClaimedAt: new Date("2026-07-10T12:00:01.000Z"),
+    createdAt: new Date("2026-07-10T12:00:00.000Z"),
+    errorJson: { message: "boom" },
+  };
+
+  it("attaches the resolver's envelope to the detail response", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("viewer");
+    getDeadLetterMock.mockResolvedValueOnce(DETAIL_ROW as never);
+    const envelope = {
+      workflowId: "wf-1",
+      version: 4,
+      versionId: "wfv-4",
+      savedAt: "2026-07-10T11:30:00.000Z",
+      previousVersion: 3,
+      previousVersionId: "wfv-3",
+      dagJson: { id: "wf-1", nodes: [] },
+      previousDagJson: { id: "wf-1", nodes: [] },
+    };
+    resolveSuspectVersionMock.mockResolvedValueOnce(envelope as never);
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq?id=dl-1`);
+      expect(response.status).toBe(200);
+      const payload = await response.json() as Record<string, unknown> & { id: string; suspectVersion: unknown };
+      expect(payload.id).toBe("dl-1");
+      expect(payload.suspectVersion).toEqual(envelope);
+      expect(payload).not.toHaveProperty("replayClaimToken");
+      expect(payload).not.toHaveProperty("replayClaimedAt");
+      // The resolver gets the row's own runId + failure timestamp.
+      expect(resolveSuspectVersionMock).toHaveBeenCalledWith("org-1", "run-1", DETAIL_ROW.createdAt);
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("attaches null when no correlation, and a resolver throw never breaks the detail read", async () => {
+    requireAuthMock.mockResolvedValue({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValue("viewer");
+    getDeadLetterMock.mockResolvedValue(DETAIL_ROW as never);
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      resolveSuspectVersionMock.mockResolvedValueOnce(null);
+      const missResponse = await fetch(`${baseUrl}/dlq?id=dl-1`);
+      expect(missResponse.status).toBe(200);
+      expect(((await missResponse.json()) as { suspectVersion: unknown }).suspectVersion).toBeNull();
+
+      resolveSuspectVersionMock.mockRejectedValueOnce(new Error("db hiccup"));
+      const errorResponse = await fetch(`${baseUrl}/dlq?id=dl-1`);
+      expect(errorResponse.status).toBe(200);
+      expect(((await errorResponse.json()) as { suspectVersion: unknown }).suspectVersion).toBeNull();
+    } finally {
+      await close(server);
+    }
+  });
+});
+
+describe("POST /dlq/cluster-apply enqueue accounting", () => {
+  function openMember(id: string, createdAt: Date | null) {
+    return {
+      id,
+      orgId: "org-1",
+      runId: `run-${id}`,
+      nodeId: "n",
+      status: "open",
+      createdAt,
+      workflowJson: { id: "wf-1", name: "WF", nodes: [{ id: "n", type: "http", config: { url: "https://x", method: "GET" } }], edges: [] },
+      nodeJson: { id: "n", type: "http", config: { url: "https://x", method: "GET" } },
+    };
+  }
+
+  function editorAuth() {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+  }
+
+  async function applyCluster(baseUrl: string, deadLetterIds: string[]) {
+    return fetch(`${baseUrl}/dlq/cluster-apply`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ clusterSignature: "sig-1", deadLetterIds }),
+    });
+  }
+
+  it("keeps downtime at zero until accepted replays reach terminal success", async () => {
+    editorAuth();
+    const now = Date.now();
+    getDeadLetterMock
+      .mockResolvedValueOnce(openMember("dl-1", new Date(now - 60_000)) as never)
+      .mockResolvedValueOnce(openMember("dl-2", new Date(now - 120_000)) as never);
+    replayDeadLetterMock.mockResolvedValue(undefined as never);
+    markDeadLetterReplayedMock.mockResolvedValue(undefined as never);
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await applyCluster(baseUrl, ["dl-1", "dl-2"]);
+      expect(response.status).toBe(200);
+      const payload = await response.json() as { replayed: number; failed: number; downtimeEndedMs: number };
+      expect(payload.replayed).toBe(2);
+      expect(payload.failed).toBe(0);
+      expect(replayDeadLetterMock).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        deadLetterId: "dl-1",
+        recoveryActorId: "user-1",
+      }));
+      expect(replayDeadLetterMock).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        deadLetterId: "dl-2",
+        recoveryActorId: "user-1",
+      }));
+      expect(payload.downtimeEndedMs).toBe(0);
+      expect(resolveForDismissMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("reports partial enqueue acceptance without manufacturing downtime", async () => {
+    editorAuth();
+    const now = Date.now();
+    getDeadLetterMock
+      .mockResolvedValueOnce(openMember("dl-1", new Date(now - 60_000)) as never)
+      .mockResolvedValueOnce(null as never) // dl-2 vanished → per-row error
+      .mockResolvedValueOnce(openMember("dl-3", null) as never); // legacy row
+    replayDeadLetterMock.mockResolvedValue(undefined as never);
+    markDeadLetterReplayedMock.mockResolvedValue(undefined as never);
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await applyCluster(baseUrl, ["dl-1", "dl-2", "dl-3"]);
+      expect(response.status).toBe(200);
+      const payload = await response.json() as { replayed: number; failed: number; downtimeEndedMs: number };
+      expect(payload.replayed).toBe(2);
+      expect(payload.failed).toBe(1);
+      expect(payload.downtimeEndedMs).toBe(0);
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("downtimeEndedMs is 0 (not absent/NaN) when every member fails", async () => {
+    editorAuth();
+    getDeadLetterMock.mockResolvedValueOnce(null as never);
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await applyCluster(baseUrl, ["dl-1"]);
+      expect(response.status).toBe(200);
+      const payload = await response.json() as { replayed: number; downtimeEndedMs: number };
+      expect(payload.replayed).toBe(0);
+      expect(payload.downtimeEndedMs).toBe(0);
     } finally {
       await close(server);
     }

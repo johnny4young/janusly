@@ -57,9 +57,10 @@ import {
 } from "@janusly/data";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
-import { WorkflowSchema, type Workflow, type WorkflowNode } from "@janusly/shared";
+import { WorkflowSchema, type WorkflowNode } from "@janusly/shared";
 
 import { audit } from "./audit";
+import { markDeadLetterReplayed } from "./dlq";
 import {
   isAutoApplyAllowed,
   isAutoHealingAllowed,
@@ -294,7 +295,10 @@ async function maybeAutoApply(row: AutoHealingRun): Promise<void> {
       runId: dlqRow.runId,
       workflow: patchedWorkflow,
       node: failingNode,
+      deadLetterId: row.deadLetterId,
+      recoveryActorId: "system:auto-healing",
     });
+    await markDeadLetterReplayed(row.orgId, row.deadLetterId);
     // Distinct action so we don't double-write `auto_healing.applied`
     // (the row-state transition audit lives inside `recordDecision`
     // and fires once per `validated → applied`). The replay-triggered

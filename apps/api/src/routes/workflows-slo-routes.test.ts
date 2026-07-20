@@ -43,6 +43,15 @@ vi.mock("@janusly/data/src/workflowsListRepo", () => ({
   listDeletedWorkflowsWithRunSummary: vi.fn(),
 }));
 
+// `workflows-routes` reaches the trigger backfill on the resume path, which
+// pulls `startRun` -> the BullMQ queue module. Stubbed here for the same
+// reason the engine modules below are: this suite is about SLO routes.
+vi.mock("./trigger-ingest-routes", () => ({
+  backfillBufferedTriggerEvents: vi.fn(async () => ({ backfilled: 0, failed: 0, remaining: 0 })),
+  TRIGGER_BACKFILL_MAX_PER_RESUME: 100,
+  triggerIngestRoutes: [],
+}));
+
 vi.mock("@janusly/engine/src/schedule-scheduler", () => ({
   unregisterAllForWorkflow: vi.fn(),
   syncWorkflowSchedules: vi.fn(),
@@ -113,7 +122,7 @@ import { audit } from "../audit";
 import { setWorkflowSlo } from "@janusly/data/src/workflowSloRepo";
 import { findScheduleEntriesForWorkflow, queryScheduleFires } from "@janusly/data/src/scheduleHistoryRepo";
 import { listDeletedWorkflowsWithRunSummary } from "@janusly/data/src/workflowsListRepo";
-import { workflowMetadata, workflows } from "@janusly/db";
+import { workflows } from "@janusly/db";
 import type { Route } from "../routes";
 
 const sendJsonMock = vi.mocked(sendJson);
@@ -452,5 +461,45 @@ describe("GET /workflows/:id/schedule-history handler", () => {
     const payload = sendJsonMock.mock.calls.at(-1)?.[1] as { windowDays: number };
     expect(payload.windowDays).toBe(90);
     expect(queryScheduleFiresMock).toHaveBeenCalledWith("org-1", "wf-1", 90, expect.any(Number));
+  });
+});
+
+describe("GET /workflows/schedule-preview", () => {
+  it("declares the read gates and stable contract", () => {
+    const route = findRoute("GET", "/workflows/schedule-preview?cron=0%209%20*%20*%20*");
+    expect(route.role).toBe("viewer");
+    expect(route.permission).toBe("workflows.read");
+    expect(route.contract?.operationId).toBe("getSchedulePreview");
+    expect(route.contract?.response.safeParse({ valid: true, nextFires: [] }).success).toBe(false);
+    expect(route.contract?.response.safeParse({ valid: false, nextFires: ["2026-07-15T09:00:00.000Z"] }).success).toBe(false);
+    expect(route.contract?.response.safeParse({
+      valid: true,
+      nextFires: [
+        "2026-07-15T09:00:00.000Z",
+        "2026-07-16T09:00:00.000Z",
+        "2026-07-17T09:00:00.000Z",
+      ],
+    }).success).toBe(true);
+    expect(() => findRoute("GET", "/workflows/schedule-preview-extra?cron=0%209%20*%20*%20*")).toThrow();
+  });
+
+  it("returns three canonical future instants for a valid cron", async () => {
+    await callRoute("GET", "/workflows/schedule-preview?cron=0%209%20*%20*%20*", {});
+
+    const payload = sendJsonMock.mock.calls.at(-1)?.[1] as { valid: boolean; nextFires: string[] };
+    expect(payload.valid).toBe(true);
+    expect(payload.nextFires).toHaveLength(3);
+    expect(payload.nextFires.every((value) => Number.isFinite(Date.parse(value)))).toBe(true);
+  });
+
+  it("degrades malformed or oversized expressions to an invalid preview", async () => {
+    await callRoute("GET", "/workflows/schedule-preview?cron=not-a-cron", {});
+    expect(sendJsonMock.mock.calls.at(-1)?.[1]).toEqual({ valid: false, nextFires: [] });
+
+    await callRoute("GET", "/workflows/schedule-preview?cron=0%200%209%20*%20*%20*", {});
+    expect(sendJsonMock.mock.calls.at(-1)?.[1]).toEqual({ valid: false, nextFires: [] });
+
+    await callRoute("GET", `/workflows/schedule-preview?cron=${"x".repeat(101)}`, {});
+    expect(sendJsonMock.mock.calls.at(-1)?.[1]).toEqual({ valid: false, nextFires: [] });
   });
 });

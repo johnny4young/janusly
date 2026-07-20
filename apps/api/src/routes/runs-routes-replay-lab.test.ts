@@ -28,6 +28,7 @@ vi.mock("drizzle-orm", () => ({
   gt: vi.fn(() => ({})),
   lt: vi.fn(() => ({})),
   or: vi.fn(() => ({})),
+  sql: vi.fn(() => ({})),
 }));
 
 vi.mock("@janusly/data/src/orgConfigRepo", () => ({
@@ -65,6 +66,7 @@ vi.mock("@janusly/domain", () => ({
   replayDecision: vi.fn(),
 }));
 
+vi.mock("@janusly/engine/src/adapters/redrive", () => ({ redriveRun: vi.fn() }));
 vi.mock("@janusly/engine/src/adapters/replay-lab", () => ({
   replayRunAsValidation: replayRunAsValidationMock,
 }));

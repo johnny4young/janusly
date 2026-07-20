@@ -10,6 +10,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const hoisted = vi.hoisted(() => ({
   selectFromMock: vi.fn(),
   upsertJobSchedulerMock: vi.fn(),
+  replayDeadLetterMock: vi.fn(),
+  markDeadLetterReplayedMock: vi.fn(),
 }));
 
 vi.mock("@janusly/db", () => ({
@@ -44,10 +46,12 @@ vi.mock("./auto-healing-consent", () => ({
 
 vi.mock("@janusly/engine/src/adapters/dlq-replay", () => ({
   DLQReplayAdapter: class {
-    async replayDeadLetter() {
-      return undefined;
-    }
+    replayDeadLetter = hoisted.replayDeadLetterMock;
   },
+}));
+
+vi.mock("./dlq", () => ({
+  markDeadLetterReplayed: hoisted.markDeadLetterReplayedMock,
 }));
 
 vi.mock("./audit", () => ({
@@ -83,6 +87,8 @@ const isAutoHealingAllowedMock = vi.mocked(isAutoHealingAllowed);
 const isAutoApplyAllowedMock = vi.mocked(isAutoApplyAllowed);
 const snapshotMock = vi.mocked(getOrgConfigSnapshot);
 const countMock = vi.mocked(countRecentAttemptsBySignature);
+const replayDeadLetterMock = hoisted.replayDeadLetterMock;
+const markDeadLetterReplayedMock = hoisted.markDeadLetterReplayedMock;
 
 function fakeRow(overrides: Partial<{ status: string; signature: string; validationRunId: string; proposedPatchJson: unknown }> = {}) {
   return {
@@ -125,6 +131,8 @@ beforeEach(() => {
     autoHealing: { enabled: true, autoApply: false, maxAttemptsPerSignature: 3, loopWindowDays: 14 },
   } as never);
   countMock.mockReset().mockResolvedValue(0);
+  replayDeadLetterMock.mockReset().mockResolvedValue(undefined);
+  markDeadLetterReplayedMock.mockReset().mockResolvedValue(undefined);
 });
 
 describe("registerAutoHealingWatcherScheduler", () => {
@@ -148,6 +156,31 @@ describe("handleAutoHealingWatchTrigger", () => {
     expect(outcomeMock).toHaveBeenCalledWith("row-1", expect.objectContaining({
       outcome: "validated",
     }));
+  });
+
+  it("attributes an auto-applied replay and marks the DLQ row after enqueue", async () => {
+    listMock.mockResolvedValueOnce([fakeRow({
+      proposedPatchJson: {
+        id: "wf-1",
+        name: "Workflow",
+        nodes: [{ id: "n-1", type: "noop", config: {} }],
+        edges: [],
+      },
+    })]);
+    mockTerminalRunStatus("succeeded");
+    const limit = vi.fn().mockResolvedValue([{ runId: "run-1", nodeId: "n-1" }]);
+    selectFromMock.mockReturnValueOnce({ where: vi.fn(() => ({ limit })) } as never);
+    isAutoApplyAllowedMock.mockResolvedValueOnce({ allowed: true });
+
+    await handleAutoHealingWatchTrigger();
+
+    expect(decisionMock).toHaveBeenCalledWith("row-1", { actor: "auto", accepted: true });
+    expect(replayDeadLetterMock).toHaveBeenCalledWith(expect.objectContaining({
+      runId: "run-1",
+      deadLetterId: "dlq-1",
+      recoveryActorId: "system:auto-healing",
+    }));
+    expect(markDeadLetterReplayedMock).toHaveBeenCalledWith("org-1", "dlq-1");
   });
 
   it("skips rows whose validation run belongs to another org", async () => {
@@ -195,7 +228,7 @@ describe("handleAutoHealingWatchTrigger", () => {
 
     const call = outcomeMock.mock.calls[0];
     expect(call?.[1]).toMatchObject({ outcome: "validation_failed" });
-    expect((call?.[1] as { reason: string }).reason).toBe("signature_changed");
+    expect((call![1] as { reason: string }).reason).toBe("signature_changed");
   });
 
   it("invokes the stale sweep at the start of every tick", async () => {

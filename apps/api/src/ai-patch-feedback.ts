@@ -34,7 +34,7 @@ import {
  */
 export const RecoveryFeedbackBodySchema = z.object({
   deadLetterId: z.string().min(1).max(256),
-  suggestionMode: z.enum(["ai", "fallback"]),
+  suggestionMode: z.enum(["ai", "fallback", "playbook"]),
   approachLabel: z.enum([
     "add_retry",
     "raise_timeout",

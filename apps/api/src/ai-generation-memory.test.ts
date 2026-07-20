@@ -6,6 +6,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@janusly/data", () => ({
+  recordSystemAudit: vi.fn(async () => undefined),
   isMemoryAllowed: vi.fn(),
   getMemoryConfig: vi.fn(),
   recallMemory: vi.fn(),

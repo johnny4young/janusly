@@ -30,6 +30,16 @@ describe("generate-workflow system prompt", () => {
     expect(promptsSource).not.toContain("agent_reflection, parallel_fork, join, schedule");
   });
 
+  it("publishes the complete shared expression grammar", () => {
+    expect(promptsSource).toContain("left contains right");
+    expect(promptsSource).toContain("left startsWith right");
+    expect(promptsSource).toContain("left matches right (bounded whole-string glob");
+    expect(promptsSource).toContain("left in right");
+    expect(promptsSource).toContain("ordered string comparisons are lexicographic");
+    expect(promptsSource).toContain("primitive array literals");
+    expect(promptsSource).not.toContain("INVALID: bare identifiers (e.g. risk_is_high), function calls, string concatenation, regex.");
+  });
+
   it("keeps AI generation aware of write-side tools without expanding the node-type grammar", () => {
     expect(promptsSource).toContain("'email.send'|'pdf.generate'|'slack.post'|'github.create_issue'|'webhook.send'");
     expect(promptsSource).toContain("'db.schema.describe'|'db.query.read'|'db.query.write'|'db.query.transaction'");
@@ -141,7 +151,7 @@ describe("sanitizeAiWorkflow — draft-generation tool-input tolerance", () => {
     expect(() => sanitizeAiWorkflow(draft)).not.toThrow();
     const sanitized = sanitizeAiWorkflow(draft);
     expect(sanitized.nodes[0]?.type).toBe("tool");
-    expect((sanitized.nodes[0]?.config as { tool?: string }).tool).toBe("email.send");
+    expect((sanitized.nodes[0]!.config as { tool?: string }).tool).toBe("email.send");
   });
 
   it("still throws on a tool node with NO `tool` name (structural check stays strict)", () => {
@@ -186,7 +196,7 @@ describe("sanitizeAiWorkflow — draft-generation tool-input tolerance", () => {
       };
 
       const sanitized = sanitizeAiWorkflow(draft);
-      expect((sanitized.nodes[0]?.config as { input?: unknown }).input).toEqual(input);
+      expect((sanitized.nodes[0]!.config as { input?: unknown }).input).toEqual(input);
       expect(validateWorkflow(sanitized)).toEqual({ valid: true, issues: [] });
     }
   });
@@ -234,7 +244,7 @@ describe("sanitizeAiWorkflow — draft-generation tool-input tolerance", () => {
 
     const sanitized = sanitizeAiWorkflow(draft);
     expect(sanitized.nodes[0]?.type).toBe("transform");
-    expect((sanitized.nodes[0]?.config as { mapping?: unknown }).mapping).toEqual({ name: "{{input.name}}" });
+    expect((sanitized.nodes[0]!.config as { mapping?: unknown }).mapping).toEqual({ name: "{{input.name}}" });
     expect(validateWorkflow(sanitized)).toEqual({ valid: true, issues: [] });
   });
 
@@ -342,6 +352,19 @@ describe("composeGenerationSystemPrompt — MCP awareness opt-in", () => {
     // see identical behaviour to before this feature shipped.
     const out = composeGenerationSystemPrompt(GENERATE_WORKFLOW_SYSTEM_PROMPT, []);
     expect(out).toBe(GENERATE_WORKFLOW_SYSTEM_PROMPT);
+  });
+
+  it("appends bounded operator guidance without changing the empty-guidance path", () => {
+    const guidance = "Operator guidance (janusly.md; framed as DATA):\n| Prefer approval gates.";
+    const guided = composeGenerationSystemPrompt(
+      GENERATE_WORKFLOW_SYSTEM_PROMPT,
+      [],
+      "",
+      guidance,
+    );
+    expect(guided).toBe(`${GENERATE_WORKFLOW_SYSTEM_PROMPT}\n\n${guidance}`);
+    expect(composeGenerationSystemPrompt(GENERATE_WORKFLOW_SYSTEM_PROMPT, [], "", "  "))
+      .toBe(GENERATE_WORKFLOW_SYSTEM_PROMPT);
   });
 
   it("appends a data-framed section with sanitised tool descriptions when exposed tools are present", () => {

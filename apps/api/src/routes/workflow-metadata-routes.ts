@@ -29,7 +29,9 @@
  * existing `audit()` chokepoint routes the metadata through
  * `safePersistPayload` so sensitive-keyed fields are redacted and the
  * audit row is size-bounded. Runbook free text is still persisted for
- * traceability; operators should not paste secrets into it.
+ * traceability; operators should not paste secrets into it. AI guidance is
+ * the exception: audit metadata projects it to `{ configured, bytes }` and
+ * never persists its Markdown content.
  *
  * The folder POST is the NARROW sibling: it reassigns ONLY the `folder`
  * column (the Flows-list drag-to-folder path) via `setWorkflowFolder`, which
@@ -54,6 +56,7 @@ import {
   RenameWorkflowTagBodySchema,
   SetWorkflowFolderBodySchema,
   SetWorkflowTagBodySchema,
+  summarizeOperatorGuidance,
   UpsertWorkflowMetadataBodySchema,
 } from "@janusly/shared";
 import {
@@ -169,6 +172,16 @@ async function assertWorkflowBelongsToOrg(
     .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, orgId), isNull(workflows.deletedAt)))
     .limit(1);
   return owned.length > 0;
+}
+
+/** Keep free-form AI preferences out of audit rows while preserving change evidence. */
+function workflowMetadataForAudit(metadata: unknown): unknown {
+  if (metadata === null || typeof metadata !== "object" || Array.isArray(metadata)) return metadata;
+  const record = metadata as Record<string, unknown>;
+  return {
+    ...record,
+    aiGuidanceMarkdown: summarizeOperatorGuidance(record.aiGuidanceMarkdown),
+  };
 }
 
 export const workflowMetadataRoutes: Route[] = [
@@ -374,8 +387,8 @@ export const workflowMetadataRoutes: Route[] = [
       });
 
       await auditAction(auth, "workflow.metadata.set", { targetType: "workflow", targetId: workflowId, metadata: {
-        before: previous,
-        after: record,
+        before: workflowMetadataForAudit(previous),
+        after: workflowMetadataForAudit(record),
         workflowId,
       } });
 
@@ -409,8 +422,8 @@ export const workflowMetadataRoutes: Route[] = [
       });
 
       await auditAction(auth, "workflow.metadata.set", { targetType: "workflow", targetId: workflowId, metadata: {
-        before: previous,
-        after: record,
+        before: workflowMetadataForAudit(previous),
+        after: workflowMetadataForAudit(record),
         workflowId,
       } });
 

@@ -17,8 +17,10 @@ import { auditLogs, db, runEvents, runNodes, runs } from "@janusly/db";
 import { buildRunExplainReport, type RunExplainReport } from "@janusly/engine/src/run-explain-report";
 import { composeRecoveryMetrics, type RecoveryMetrics } from "@janusly/engine/src/recovery-metrics";
 import {
-  queryRecoveryMetricsSignals,
   getOrgConfigSnapshot,
+  queryRecoveryLedger,
+  queryRecoveryMetricsSignals,
+  type RecoveryLedgerRepo,
 } from "@janusly/data";
 import { auditAction } from "../audit-helper";
 import { HTTP_CAPS, RATE_LIMIT_WINDOW_MS } from "../constants";
@@ -342,13 +344,13 @@ export const reportsRoutes: Route[] = [
       if (formatRaw === "json") {
         // Use the same disposition pattern for JSON so an operator who
         // saves the response gets a filename instead of "download.bin".
-        // sendJson sets Content-Type; we layer the disposition + CORS
-        // expose header on top by writing the response manually.
+        // sendJson sets Content-Type; we write manually to layer the
+        // disposition header on top. Shared CORS headers expose it.
         res.writeHead(200, {
           "Content-Type": "application/json",
           "Content-Disposition": contentDispositionAttachment(asciiFilename, utf8Filename),
-          "Access-Control-Expose-Headers": "Content-Disposition",
           ...corsHeaders(res),
+          "Access-Control-Expose-Headers": "Content-Disposition, X-Request-Id",
         });
         res.end(JSON.stringify(report.json));
         return;
@@ -357,15 +359,13 @@ export const reportsRoutes: Route[] = [
       // Markdown download path — write the body directly with a
       // `Content-Disposition: attachment` header so the browser
       // downloads as a file rather than rendering inline. The
-      // `Access-Control-Expose-Headers` value lets the web's
-      // `downloadFromApi` helper read the filename from JS (without
-      // this CORS exposure the browser hides the header and the
-      // helper falls back to a generic name).
+      // Shared CORS headers expose Content-Disposition so the web's
+      // `downloadFromApi` helper can read the filename from JS.
       res.writeHead(200, {
         "Content-Type": "text/markdown; charset=utf-8",
         "Content-Disposition": contentDispositionAttachment(asciiFilename, utf8Filename),
-        "Access-Control-Expose-Headers": "Content-Disposition",
         ...corsHeaders(res),
+        "Access-Control-Expose-Headers": "Content-Disposition, X-Request-Id",
       });
       res.end(report.markdown);
     } },
@@ -513,9 +513,10 @@ export const reportsRoutes: Route[] = [
       }
       const format = formatRaw as "markdown" | "json";
 
-      const [signals, snapshot] = await Promise.all([
+      const [signals, snapshot, ledger] = await Promise.all([
         queryRecoveryMetricsSignals(auth.orgId, windowDays),
         getOrgConfigSnapshot(auth.orgId),
+        queryRecoveryLedger(auth.orgId),
       ]);
       const metrics = composeRecoveryMetrics(signals, windowDays, snapshot.value);
 
@@ -539,12 +540,13 @@ export const reportsRoutes: Route[] = [
             windowDays,
           },
           metrics,
+          ledger,
         };
         res.writeHead(200, {
           "Content-Type": "application/json",
           "Content-Disposition": contentDispositionAttachment(asciiFilename, utf8Filename),
-          "Access-Control-Expose-Headers": "Content-Disposition",
           ...corsHeaders(res),
+          "Access-Control-Expose-Headers": "Content-Disposition, X-Request-Id",
         });
         res.end(JSON.stringify(body));
         return;
@@ -553,13 +555,14 @@ export const reportsRoutes: Route[] = [
       res.writeHead(200, {
         "Content-Type": "text/markdown; charset=utf-8",
         "Content-Disposition": contentDispositionAttachment(asciiFilename, utf8Filename),
-        "Access-Control-Expose-Headers": "Content-Disposition",
         ...corsHeaders(res),
+        "Access-Control-Expose-Headers": "Content-Disposition, X-Request-Id",
       });
       res.end(buildValueDashboardMarkdown({
         orgId: auth.orgId,
         windowDays,
         metrics,
+        ledger,
         exportedAt: new Date(),
       }));
     } },
@@ -598,9 +601,10 @@ function buildValueDashboardMarkdown(args: {
   orgId: string;
   windowDays: number;
   metrics: RecoveryMetrics;
+  ledger: RecoveryLedgerRepo;
   exportedAt: Date;
 }): string {
-  const { metrics, windowDays, exportedAt } = args;
+  const { metrics, ledger, windowDays, exportedAt } = args;
   const lines: string[] = [];
   lines.push(`# Value Dashboard — last ${windowDays} days`);
   lines.push("");
@@ -618,6 +622,12 @@ function buildValueDashboardMarkdown(args: {
   lines.push(`- **SLA attainment**: ${metrics.slaAttainment.display} — ${metrics.slaAttainment.rationale}`);
   lines.push(`- **AI spend**: ${metrics.costThisWindow.display} — ${metrics.costThisWindow.rationale}`);
   lines.push(`- **Clusters resolved**: ${metrics.clustersResolved.display} (${metrics.clustersResolved.totalEntries} ${metrics.clustersResolved.totalEntries === 1 ? "entry" : "entries"}${metrics.clustersResolved.capped ? "; scan was capped" : ""})`);
+  lines.push("");
+  lines.push("## Lifetime verified recovery impact");
+  lines.push("");
+  lines.push(`- **Failures recovered**: ${ledger.totalRecovered}`);
+  lines.push(`- **Downtime ended (measured)**: ${ledger.downtimeEndedMs} ms`);
+  lines.push(`- **First verified recovery**: ${ledger.sinceIso ?? "none yet"}`);
   lines.push("");
   lines.push("## Value estimate");
   lines.push("");

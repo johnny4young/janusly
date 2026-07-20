@@ -2,9 +2,10 @@
  * Route-level tests for the `/start` upstream-health pause gate + force-run
  * override (the "manual override" acceptance case).
  *
- * The gate: a saved workflow whose `workflows.status` is
- * `paused_upstream_degraded` rejects new run starts with HTTP 409 +
- * `code: "upstream_degraded"` — UNLESS the body carries
+ * The gate: a saved workflow whose `workflows.status` is any non-active
+ * pause rejects new run starts with HTTP 409, coded by the ACTUAL pause
+ * source (`upstream_degraded` vs `workflow_circuit_breaker_paused`) —
+ * UNLESS the body carries
  * `forceRunDuringPause: true`, in which case the run proceeds and a
  * `workflow.force_run_during_pause` audit row is written.
  */
@@ -40,13 +41,22 @@ vi.mock("drizzle-orm", () => ({
   isNull: vi.fn(() => ({})),
   lt: vi.fn(() => ({})),
   or: vi.fn(() => ({})),
+  sql: vi.fn(() => ({})),
 }));
 
 vi.mock("@janusly/data", () => ({
+  recordSystemAudit: vi.fn(async () => undefined),
   getOrgConfigSnapshot: getOrgConfigSnapshotMock,
   getRunComparison: vi.fn(),
   getWorkflowStatus: getWorkflowStatusMock,
   WORKFLOW_STATUS_ACTIVE: "active",
+  WORKFLOW_STATUS_PAUSED_CIRCUIT_BREAKER: "paused_circuit_breaker",
+  resolveWorkflowPauseAction: (status: string | null | undefined, entryPoint: string) => {
+    if (!status || status === "active") return { kind: "proceed" };
+    if (entryPoint === "start") return { kind: "reject", code: status === "paused_circuit_breaker" ? "workflow_circuit_breaker_paused" : "upstream_degraded", status };
+    if (entryPoint === "trigger") return { kind: "buffer", reason: status };
+    return { kind: "drop", reason: status };
+  },
 }));
 
 vi.mock("@janusly/db", () => ({
@@ -65,6 +75,7 @@ vi.mock("@janusly/db", () => ({
 }));
 
 vi.mock("@janusly/domain", () => ({ replayDecision: vi.fn() }));
+vi.mock("@janusly/engine/src/adapters/redrive", () => ({ redriveRun: vi.fn() }));
 vi.mock("@janusly/engine/src/adapters/replay-lab", () => ({
   replayRunAsValidation: vi.fn(),
   replayRunAsValidationFork: vi.fn(),
@@ -150,6 +161,40 @@ describe("/start upstream-health pause gate", () => {
     expect(startRunMock).not.toHaveBeenCalled();
   });
 
+  it("names the circuit breaker as the cause instead of blaming an upstream outage", async () => {
+    // The gate is generic over pause sources but the error code must not be:
+    // reporting a breaker pause as `upstream_degraded` sends the operator to
+    // check a status page for an outage that isn't there.
+    bodyBox.value = SAVED_WORKFLOW;
+    ownedRowsBox.rows = [{ id: "wf-1" }];
+    getWorkflowStatusMock.mockResolvedValue({
+      status: "paused_circuit_breaker",
+      pausedReason: "Circuit breaker: 5 consecutive failed runs",
+    });
+
+    await callStart();
+
+    const last = sendJsonMock.mock.calls.at(-1);
+    expect(last?.[2]).toBe(409);
+    expect(last?.[1]).toMatchObject({
+      code: "workflow_circuit_breaker_paused",
+      error: "Circuit breaker: 5 consecutive failed runs",
+    });
+    expect(startRunMock).not.toHaveBeenCalled();
+  });
+
+  it("still honours the force-run override for a breaker pause", async () => {
+    // Containment is a safety net, not a lock — the operator who knows better
+    // keeps the same escape hatch the upstream pause has.
+    bodyBox.value = { ...SAVED_WORKFLOW, forceRunDuringPause: true };
+    ownedRowsBox.rows = [{ id: "wf-1" }];
+    getWorkflowStatusMock.mockResolvedValue({ status: "paused_circuit_breaker", pausedReason: "breaker" });
+
+    await callStart();
+
+    expect(startRunMock).toHaveBeenCalledTimes(1);
+  });
+
   it("allows the run when forceRunDuringPause is set + writes the force-run audit", async () => {
     bodyBox.value = { ...SAVED_WORKFLOW, forceRunDuringPause: true };
     ownedRowsBox.rows = [{ id: "wf-1" }];
@@ -209,7 +254,7 @@ describe("operate routes — MCP-source write consent gate", () => {
       await findRoute(match).handler({ req: { url: match } as never, res: {} as never, auth: mcpAuth });
       const last = sendJsonMock.mock.calls.at(-1);
       expect(last?.[2]).toBe(403);
-      expect((last?.[1] as { code?: string }).code).toBe("mcp_process_disabled");
+      expect((last![1] as { code?: string }).code).toBe("mcp_process_disabled");
       // The gate short-circuited before any run mutation.
       expect(startRunMock).not.toHaveBeenCalled();
     });

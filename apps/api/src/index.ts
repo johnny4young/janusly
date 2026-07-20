@@ -42,6 +42,8 @@ import {
   recordMemoryUsage,
   recordPdfUsage,
   recordUsage,
+  getRateLimiterAdminHealth,
+  invalidateOrgConfigCache,
   setMemoryUsageRecorder,
   productionBudgetChecker,
   setRecoveryItemCreator,
@@ -53,7 +55,17 @@ import { setMcpUsageRecorder } from "@janusly/engine/src/mcp-usage";
 import { setPdfUsageRecorder } from "@janusly/engine/src/pdf-usage";
 import { setEngineRateLimiter } from "@janusly/engine/src/rate-limit";
 import { setBudgetChecker } from "@janusly/engine/src/budget";
-import { closeRunStreamHub, registerRunEventPublisher } from "./run-stream";
+import { registerRateLimiterObservables } from "@janusly/engine/src/observability/metrics";
+import {
+  API_METRICS_DEFAULT_PORT,
+  shutdownPrometheusMetrics,
+  startPrometheusMetrics,
+} from "@janusly/engine/src/observability/prometheus";
+import { closeRunStreamHub, getRunStreamSubscriber, registerRunEventPublisher } from "./run-stream";
+import { configureCacheInvalidationBus, startCacheInvalidationSubscriber } from "./cache-invalidation-bus";
+import { invalidateRecoveryMetricsCache } from "./metrics-cache";
+import { redis } from "./redis";
+import { closeQueueHealth } from "./queue-health";
 // Side-effect import — registers the `subworkflow` node type with the
 // engine's node registry. Without this, workflows that include a
 // `subworkflow` node throw "Unknown node type" at execute time.
@@ -67,7 +79,6 @@ import {
   PORT,
 } from "./api-config";
 import { enforceRateLimit } from "./rate-limit";
-import type { Route } from "./routes";
 import { bootstrapAutoHealing, shutdownAutoHealing } from "./auto-healing-bootstrap";
 import { bootstrapAlerts, shutdownAlerts } from "./alerts-bootstrap";
 import { createRecoveryItemForDeadLetter } from "@janusly/engine/src/recovery/recovery-item-hook";
@@ -90,6 +101,11 @@ const server = createApiServer({
 });
 
 await assertMigrationsApplied();
+
+await startPrometheusMetrics({ defaultPort: API_METRICS_DEFAULT_PORT, processName: "api" });
+const unregisterRateLimiterMetrics = registerRateLimiterObservables(
+  () => getRateLimiterAdminHealth().degradedBuckets.length,
+);
 
 // Register the usage_events writer once at boot. Every LLM client call fires
 // it fire-and-forget through the provider-neutral AI package.
@@ -133,6 +149,17 @@ console.log("[budget] checker registered (api)");
 registerRunEventPublisher();
 console.log("[run-stream] publisher registered (api)");
 
+// Keep API and worker process-local caches convergent after tenant mutations.
+// The bus reuses the run-stream subscriber connection, which is closed by
+// `closeRunStreamHub()` during shutdown below.
+configureCacheInvalidationBus({
+  publisher: redis,
+  getSubscriber: getRunStreamSubscriber,
+  invalidateRecoveryMetrics: invalidateRecoveryMetricsCache,
+  invalidateOrgConfig: invalidateOrgConfigCache,
+});
+startCacheInvalidationSubscriber();
+
 let shutdownStarted = false;
 
 async function shutdownApi(signal: NodeJS.Signals): Promise<void> {
@@ -155,7 +182,10 @@ async function shutdownApi(signal: NodeJS.Signals): Promise<void> {
     });
     await shutdownAutoHealing();
     await shutdownAlerts();
+    await closeQueueHealth();
     await closeRunStreamHub();
+    unregisterRateLimiterMetrics();
+    await shutdownPrometheusMetrics();
     clearTimeout(forceCloseTimer);
     console.log("[api] HTTP server stopped");
     process.exit(0);

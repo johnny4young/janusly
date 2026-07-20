@@ -22,6 +22,10 @@ vi.mock("../audit", () => ({
   audit: vi.fn(),
 }));
 
+vi.mock("../cache-invalidation-bus", () => ({
+  publishCacheInvalidation: vi.fn(),
+}));
+
 vi.mock("../http", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../http")>();
   return {
@@ -38,6 +42,7 @@ import {
 } from "@janusly/engine/src/memory-purge-scheduler";
 
 import { audit } from "../audit";
+import { publishCacheInvalidation } from "../cache-invalidation-bus";
 import { readJson, sendJson } from "../http";
 import type { Route } from "../routes";
 import { orgRoutes } from "./org-routes";
@@ -47,6 +52,7 @@ const upsertOrgConfigMock = vi.mocked(upsertOrgConfig);
 const cancelPendingMemoryPurgeMock = vi.mocked(cancelPendingMemoryPurge);
 const schedulePendingMemoryPurgeMock = vi.mocked(schedulePendingMemoryPurge);
 const auditMock = vi.mocked(audit);
+const publishCacheInvalidationMock = vi.mocked(publishCacheInvalidation);
 const readJsonMock = vi.mocked(readJson);
 const sendJsonMock = vi.mocked(sendJson);
 
@@ -84,6 +90,7 @@ beforeEach(() => {
   cancelPendingMemoryPurgeMock.mockReset();
   schedulePendingMemoryPurgeMock.mockReset();
   auditMock.mockReset();
+  publishCacheInvalidationMock.mockReset();
   readJsonMock.mockReset();
   sendJsonMock.mockClear();
   upsertOrgConfigMock.mockImplementation(async ({ orgId, key, value, userId }) => ({
@@ -109,6 +116,7 @@ describe("POST /org/config memory consent", () => {
       status: 200,
       payload: { orgId: "org-1", key: "memory.enabled", value: false },
     });
+    expect(publishCacheInvalidationMock).toHaveBeenCalledWith({ kind: "org-config", orgId: "org-1" });
     expect(auditMock).toHaveBeenCalledWith(
       "org-1",
       "user-1",
@@ -134,6 +142,7 @@ describe("POST /org/config memory consent", () => {
       status: 200,
       payload: { orgId: "org-1", key: "memory.enabled", value: true },
     });
+    expect(publishCacheInvalidationMock).toHaveBeenCalledWith({ kind: "org-config", orgId: "org-1" });
     expect(cancelPendingMemoryPurgeMock).toHaveBeenCalledWith({ orgId: "org-1" });
     expect(auditMock).toHaveBeenCalledWith(
       "org-1",
@@ -147,5 +156,21 @@ describe("POST /org/config memory consent", () => {
     const grantAuditOrder = auditMock.mock.invocationCallOrder[1];
     expect(cancelOrder).toBeLessThan(grantAuditOrder);
     expect(schedulePendingMemoryPurgeMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /org/config AI operator guidance", () => {
+  it("audits only presence and byte size, never the Markdown", async () => {
+    const guidance = "Prefer bounded retries. 🧭";
+
+    await callConfig({ key: "ai.operatorGuidance", value: guidance });
+
+    const configAudit = auditMock.mock.calls.find((call) => call[2] === "org.config.updated");
+    expect(configAudit?.[5]).toEqual(expect.objectContaining({
+      key: "ai.operatorGuidance",
+      configured: true,
+      bytes: new TextEncoder().encode(guidance).byteLength,
+    }));
+    expect(JSON.stringify(configAudit)).not.toContain(guidance);
   });
 });

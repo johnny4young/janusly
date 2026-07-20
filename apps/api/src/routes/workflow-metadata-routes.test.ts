@@ -191,15 +191,31 @@ describe("POST /workflows/:id/metadata", () => {
     expect(sendJsonMock.mock.calls.at(-1)?.[2]).toBe(422);
   });
 
+  it("returns 422 when AI guidance contains a secret-shaped value", async () => {
+    limitMock.mockResolvedValueOnce([{ id: "wf-1" }]);
+    readJsonMock.mockResolvedValueOnce({
+      metadata: { aiGuidanceMarkdown: `Do this with sk-${"a".repeat(20)}` },
+    });
+    await callRoute("POST", "/workflows/wf-1/metadata");
+    expect(sendJsonMock.mock.calls.at(-1)?.[2]).toBe(422);
+    expect(upsertMock).not.toHaveBeenCalled();
+  });
+
   it("upserts + audits with { before, after, workflowId } on success", async () => {
     limitMock.mockResolvedValueOnce([{ id: "wf-1" }]);
     readJsonMock.mockResolvedValueOnce({
-      metadata: { owners: ["alice"], tags: ["billing"], severityDefault: "p1" },
+      metadata: {
+        owners: ["alice"],
+        tags: ["billing"],
+        severityDefault: "p1",
+        aiGuidanceMarkdown: "Prefer bounded retries.",
+      },
     });
     upsertMock.mockResolvedValueOnce({
       record: {
         workflowId: "wf-1",
         owners: ["alice"],
+        aiGuidanceMarkdown: "Prefer bounded retries.",
         runbookMarkdown: null,
         description: null,
         tags: ["billing"],
@@ -232,6 +248,14 @@ describe("POST /workflows/:id/metadata", () => {
         after: expect.objectContaining({ owners: ["alice"] }),
       }),
     );
+    const metadataAudit = auditMock.mock.calls.find((call) => call[2] === "workflow.metadata.set");
+    expect(metadataAudit?.[5]).toEqual(expect.objectContaining({
+      before: null,
+      after: expect.objectContaining({
+        aiGuidanceMarkdown: { configured: true, bytes: 23 },
+      }),
+    }));
+    expect(JSON.stringify(metadataAudit)).not.toContain("Prefer bounded retries.");
   });
 });
 
@@ -266,6 +290,7 @@ describe("POST /workflows/:id/folder", () => {
         workflowId: "wf-1",
         owners: ["alice"],
         runbookMarkdown: "# keep me",
+        aiGuidanceMarkdown: "Prefer bounded retries.",
         description: null,
         tags: ["billing"],
         folder: "Onboarding",
@@ -280,6 +305,7 @@ describe("POST /workflows/:id/folder", () => {
         workflowId: "wf-1",
         owners: ["alice"],
         runbookMarkdown: "# keep me",
+        aiGuidanceMarkdown: "Prefer bounded retries.",
         description: null,
         tags: ["billing"],
         folder: "Billing",
@@ -310,6 +336,8 @@ describe("POST /workflows/:id/folder", () => {
         after: expect.objectContaining({ folder: "Onboarding" }),
       }),
     );
+    const folderAudit = auditMock.mock.calls.find((call) => call[2] === "workflow.metadata.set");
+    expect(JSON.stringify(folderAudit)).not.toContain("Prefer bounded retries.");
   });
 
   it("accepts folder: null (ungroup)", async () => {

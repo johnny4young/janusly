@@ -27,6 +27,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@janusly/data", () => ({
+  recordSystemAudit: vi.fn(async () => undefined),
   createEvalDataset: vi.fn(),
   deleteEvalDataset: vi.fn(),
   findEvalDatasetByName: vi.fn(),

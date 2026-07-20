@@ -14,6 +14,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@janusly/data", () => ({
+  recordSystemAudit: vi.fn(async () => undefined),
   summarizePastFeedback: vi.fn(),
   listExposedMcpToolsForAi: vi.fn(async () => []),
   listCalibrations: vi.fn(async () => []),
@@ -53,6 +54,9 @@ vi.mock("../ai-generation-memory", () => ({
   composeGenerationExemplars: vi.fn(async () => ({ block: "", ids: [], count: 0 })),
   recordGenerationExemplar: vi.fn(async () => {}),
 }));
+vi.mock("../ai-operator-guidance", () => ({
+  loadOperatorGuidance: vi.fn(async () => ""),
+}));
 
 vi.mock("../audit-helper", () => ({ auditAction: vi.fn() }));
 vi.mock("../rate-limit", () => ({ enforceRateLimit: vi.fn() }));
@@ -72,9 +76,11 @@ vi.mock("../http", async (importOriginal) => {
 });
 
 import { composeGenerationExemplars, recordGenerationExemplar } from "../ai-generation-memory";
+import { loadOperatorGuidance } from "../ai-operator-guidance";
 import { orgLlmRuntime } from "../ai-runtime";
 import { auditAction } from "../audit-helper";
-import { readJson, sendJson } from "../http";
+import { gateBudget } from "../budget-gate";
+import { readJson } from "../http";
 import type { Route } from "../routes";
 import { aiRoutes } from "./ai-routes";
 import { promoteNoopPlaceholders } from "@janusly/ai";
@@ -85,9 +91,10 @@ const promoteMock = vi.mocked(promoteNoopPlaceholders);
 const exposedMcpMock = vi.mocked(listExposedMcpToolsForAi);
 const exemplarsMock = vi.mocked(composeGenerationExemplars);
 const recordExemplarMock = vi.mocked(recordGenerationExemplar);
+const operatorGuidanceMock = vi.mocked(loadOperatorGuidance);
 const auditMock = vi.mocked(auditAction);
+const gateBudgetMock = vi.mocked(gateBudget);
 const readJsonMock = vi.mocked(readJson);
-const sendJsonMock = vi.mocked(sendJson);
 
 const auth = { orgId: "org-1", userId: "user-1", mode: "dev-headers", source: "dev" } as const;
 
@@ -126,7 +133,7 @@ function setRuntime(
   surfaceModels: Record<string, string> = {},
 ) {
   orgLlmMock.mockResolvedValue({
-    orgConfig: { ai: { generationMode, generationCandidates, promptMaxChars: 4000, rateLimitPerMin: 60, surfaceModels } } as never,
+    orgConfig: { ai: { generationMode, generationCandidates, promptMaxChars: 4000, rateLimitPerMin: 60, surfaceModels, operatorGuidance: "Prefer approval gates." } } as never,
     llm: llm as never,
     llmConfig: {} as never,
   });
@@ -147,6 +154,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   auditMock.mockResolvedValue(undefined as never);
   readJsonMock.mockResolvedValue({ prompt: "make a flow" } as never);
+  gateBudgetMock.mockResolvedValue({
+    envelope: { allowed: true, warningThresholdCrossed: false },
+    blocked: false,
+  } as never);
   // Default: memory off → no exemplars (each test that wants few-shot opts in).
   exemplarsMock.mockResolvedValue({ block: "", ids: [], count: 0 });
   recordExemplarMock.mockResolvedValue(undefined);
@@ -231,6 +242,38 @@ describe("POST /ai/generate-workflow — generationMode dispatch", () => {
     expect(meta.validCandidates).toBe(0);
   });
 
+  it("free_json: reports and audits a budget-driven Best-of-N backoff", async () => {
+    gateBudgetMock.mockResolvedValueOnce({
+      envelope: { allowed: true, warningThresholdCrossed: true },
+      blocked: false,
+    } as never);
+    const llm = makeLlm({ text: [VALID_JSON] });
+    setRuntime("free_json", llm, 4);
+
+    const res = await callGenerate();
+
+    expect(llm.generateText).toHaveBeenCalledTimes(1);
+    expect(res.payload).toMatchObject({
+      mode: "ai",
+      candidateCount: 1,
+      bonBackoff: { from: 4, to: 1 },
+    });
+    expect(auditMock).toHaveBeenNthCalledWith(
+      1,
+      auth,
+      "ai.generation.candidates_backoff",
+      {
+        targetType: "ai",
+        metadata: { from: 4, to: 1, reason: "budget_warning_threshold" },
+      },
+    );
+    const generatedAudit = auditMock.mock.calls.find((call) => call[1] === "ai.workflow.generated");
+    expect(generatedAudit?.[2]?.metadata).toMatchObject({
+      candidateCount: 1,
+      bonBackoff: { from: 4, to: 1 },
+    });
+  });
+
   it("free_json: retries then falls back when parsing never succeeds", async () => {
     const llm = makeLlm({ text: ["garbage", "still garbage"] });
     setRuntime("free_json", llm);
@@ -288,6 +331,20 @@ describe("POST /ai/generate-workflow — system-prompt caching + per-surface mod
     await callGenerate();
 
     expect(firstCall(llm.generateObject).cacheSystemPrompt).toBe(true);
+  });
+
+  it("threads organization guidance into every generation mode's system prompt", async () => {
+    operatorGuidanceMock.mockResolvedValueOnce("Organization guidance:\n| Prefer approval gates.");
+    const llm = makeLlm({ text: [VALID_JSON] });
+    setRuntime("free_json", llm);
+
+    await callGenerate();
+
+    expect(operatorGuidanceMock).toHaveBeenCalledWith({
+      orgId: "org-1",
+      orgGuidance: "Prefer approval gates.",
+    });
+    expect(firstCall(llm.generateText).system).toContain("Organization guidance:\n| Prefer approval gates.");
   });
 
   it("threads the per-surface model as the modelHint when no request override", async () => {
