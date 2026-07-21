@@ -44,6 +44,9 @@ retroactively.
 - A controlled worker-interruption drill that creates one scoped stale claim,
   honors the configured reaper threshold, exercises the production CAS/DLQ
   path, and reports measured scan, reap, dead-letter, and runtime evidence.
+- Measured Recovery Drill outcomes in Recovery Queue, including elapsed time,
+  verified terminal-success or accepted-loss evidence, replay-chain attempts,
+  and seven-day production recurrence monitoring.
 - Stable `/v1` contracts and OpenAPI operations for starting, resuming, and
   cancelling runs, including runtime validation of strict JSON request bodies.
 - Stable `/v1` contracts for outbound MCP connection management and the recipe
@@ -76,6 +79,9 @@ retroactively.
   process interruption cannot leave a failed node beneath a non-terminal run.
 - Recovery Queue detail now labels controlled drills and their actual recovery
   path without changing classifier-facing errors or stable `/v1` summaries.
+- Direct deterministic drills now create recovery ownership through the same
+  post-commit seam as production DLQ writes, and selected DLQ detail refreshes
+  after platform mutations instead of retaining stale evidence.
 - Recovery-queue selections now keep the legacy full-detail `GET /dlq?id=`
   path instead of being misrouted through the bounded `/v1/dlq` list contract
   and failing with HTTP 400.

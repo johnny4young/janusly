@@ -28,8 +28,10 @@
  *   as the recovery-matrix seeder.
  */
 
+import { recordRecoveryItemCreationEvent } from "@janusly/data";
 import { db, runs, runNodes, runEvents, deadLetters } from "@janusly/db";
 import type { Workflow } from "@janusly/shared";
+import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 import { safePersistPayload } from "../safe-persist";
 
 /** Durable provenance for a code-authored solution-pack failure. */
@@ -117,6 +119,22 @@ export async function injectSampleFailure(
       errorJson: safePersistPayload(errorJson),
       status: "open",
     });
+  });
+
+  // Mirror the production DLQ adapter's post-commit ownership hook. This is
+  // intentionally outside the transaction: configuration, audit, and alert
+  // failures must never roll back the durable drill failure.
+  const errorSignature = normalizeErrorSignature(errorJson, {
+    nodeId: failedNodeId,
+    nodeType: failingNode.type,
+    toolName: typeof failingNode.config?.tool === "string" ? failingNode.config.tool : undefined,
+  }).signature;
+  await recordRecoveryItemCreationEvent({
+    orgId,
+    deadLetterId,
+    workflowId: workflow.id ?? null,
+    errorSignature,
+    createdBy: createdBy ?? "system",
   });
 
   return { runId, deadLetterId };

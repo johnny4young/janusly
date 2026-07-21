@@ -7,6 +7,7 @@ const {
   runsTable,
   transactionMock,
   txInsertMock,
+  recordRecoveryItemCreationEventMock,
 } = vi.hoisted(() => ({
   deadLettersTable: { name: "deadLetters" },
   runEventsTable: { name: "runEvents" },
@@ -14,6 +15,11 @@ const {
   runsTable: { name: "runs" },
   transactionMock: vi.fn(),
   txInsertMock: vi.fn(),
+  recordRecoveryItemCreationEventMock: vi.fn(),
+}));
+
+vi.mock("@janusly/data", () => ({
+  recordRecoveryItemCreationEvent: recordRecoveryItemCreationEventMock,
 }));
 
 vi.mock("@janusly/db", () => ({
@@ -52,6 +58,8 @@ const source = {
 };
 
 beforeEach(() => {
+  recordRecoveryItemCreationEventMock.mockReset();
+  recordRecoveryItemCreationEventMock.mockResolvedValue(undefined);
   txInsertMock.mockReset();
   transactionMock.mockReset();
   transactionMock.mockImplementation(async (handler: (tx: unknown) => Promise<void>) => handler({
@@ -112,6 +120,13 @@ describe("injectSampleFailure", () => {
       status: "open",
     });
     expect((deadLetterInsert as { errorJson: unknown }).errorJson).not.toHaveProperty("drill");
+    expect(recordRecoveryItemCreationEventMock).toHaveBeenCalledWith({
+      orgId: "org-1",
+      deadLetterId: result.deadLetterId,
+      workflowId: "incident-triage",
+      errorSignature: expect.any(String),
+      createdBy: "user-1",
+    });
   });
 
   it("rejects a fixture whose node is absent before opening a transaction", async () => {
@@ -124,5 +139,6 @@ describe("injectSampleFailure", () => {
     })).rejects.toThrow("node missing not found");
 
     expect(transactionMock).not.toHaveBeenCalled();
+    expect(recordRecoveryItemCreationEventMock).not.toHaveBeenCalled();
   });
 });

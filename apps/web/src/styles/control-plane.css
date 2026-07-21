@@ -540,6 +540,79 @@
   gap: 6px;
 }
 
+.we-recovery-drill-outcome {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--we-line);
+  border-radius: 10px;
+  background: var(--we-surface-muted);
+}
+
+.we-recovery-drill-outcome[data-status="recovered"] {
+  border-color: var(--we-success-border-30);
+  background: var(--we-success-soft);
+}
+
+.we-recovery-drill-outcome[data-status="accepted_loss"] {
+  border-color: var(--we-line-strong);
+}
+
+.we-recovery-drill-outcome__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.we-recovery-drill-outcome__header p,
+.we-recovery-drill-outcome__recurrence {
+  margin: 3px 0 0;
+  color: var(--we-muted);
+  font-size: 12px;
+}
+
+.we-recovery-drill-outcome__facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.we-recovery-drill-outcome__facts > div {
+  min-width: 0;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--we-surface);
+}
+
+.we-recovery-drill-outcome__facts dt {
+  color: var(--we-muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.we-recovery-drill-outcome__facts dd {
+  margin: 3px 0 0;
+  color: var(--we-text-1);
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.we-recovery-drill-outcome__recurrence[data-status="recurred"] {
+  color: var(--we-danger-text);
+  font-weight: 650;
+}
+
+@media (max-width: 620px) {
+  .we-recovery-drill-outcome__facts {
+    grid-template-columns: 1fr;
+  }
+}
+
 .we-suspect-version__chip {
   display: inline-flex;
   align-items: center;

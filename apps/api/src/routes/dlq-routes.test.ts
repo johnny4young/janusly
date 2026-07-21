@@ -19,12 +19,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const {
   findMatchingPlaybookMock,
   queryFailureSamplesMock,
+  queryRecoveryDrillOutcomeMock,
   queryRecoveryRecurrenceMock,
   replayDeadLetterMock,
   replayValidationMock,
 } = vi.hoisted(() => ({
   findMatchingPlaybookMock: vi.fn(),
   queryFailureSamplesMock: vi.fn(),
+  queryRecoveryDrillOutcomeMock: vi.fn(),
   queryRecoveryRecurrenceMock: vi.fn(),
   replayDeadLetterMock: vi.fn(),
   replayValidationMock: vi.fn(),
@@ -36,6 +38,7 @@ vi.mock("@janusly/data", async (importOriginal) => {
     ...actual,
     findMatchingActiveRecoveryPlaybook: findMatchingPlaybookMock,
     queryFailureSamples: queryFailureSamplesMock,
+    queryRecoveryDrillOutcome: queryRecoveryDrillOutcomeMock,
     queryRecoveryRecurrence: queryRecoveryRecurrenceMock,
   };
 });
@@ -1186,12 +1189,28 @@ describe("GET /dlq?id= detail read with suspect version", () => {
       fixtureId: "worker_interrupted_during_page",
       recoveryPath: "stalled_node_reaper",
     });
+    const drillOutcome = {
+      status: "recovered",
+      startedAt: "2026-07-10T12:00:00.000Z",
+      completedAt: "2026-07-10T12:02:00.000Z",
+      elapsedMs: 120_000,
+      evidence: "terminal_impact",
+      attemptCount: 1,
+      latestDeadLetterId: "dl-1",
+      chainCapped: false,
+      recurrence: {
+        status: "monitoring",
+        windowEndsAt: "2026-07-17T12:02:00.000Z",
+        recurredAt: null,
+      },
+    };
+    queryRecoveryDrillOutcomeMock.mockResolvedValueOnce(drillOutcome);
     const server = createApiServer({ routes: dlqRoutes });
     const baseUrl = await listen(server);
     try {
       const response = await fetch(`${baseUrl}/dlq?id=dl-1`);
       expect(response.status).toBe(200);
-      const payload = await response.json() as Record<string, unknown> & { id: string; suspectVersion: unknown; drill: unknown };
+      const payload = await response.json() as Record<string, unknown> & { id: string; suspectVersion: unknown; drill: unknown; drillOutcome: unknown };
       expect(payload.id).toBe("dl-1");
       expect(payload.suspectVersion).toEqual(envelope);
       expect(payload.drill).toEqual({
@@ -1200,11 +1219,13 @@ describe("GET /dlq?id= detail read with suspect version", () => {
         fixtureId: "worker_interrupted_during_page",
         recoveryPath: "stalled_node_reaper",
       });
+      expect(payload.drillOutcome).toEqual(drillOutcome);
       expect(payload).not.toHaveProperty("replayClaimToken");
       expect(payload).not.toHaveProperty("replayClaimedAt");
       // The resolver gets the row's own runId + failure timestamp.
       expect(resolveSuspectVersionMock).toHaveBeenCalledWith("org-1", "run-1", DETAIL_ROW.createdAt);
       expect(getRecoveryDrillProvenanceMock).toHaveBeenCalledWith("org-1", "run-1");
+      expect(queryRecoveryDrillOutcomeMock).toHaveBeenCalledWith("org-1", "dl-1");
     } finally {
       await close(server);
     }
@@ -1222,6 +1243,7 @@ describe("GET /dlq?id= detail read with suspect version", () => {
       const missResponse = await fetch(`${baseUrl}/dlq?id=dl-1`);
       expect(missResponse.status).toBe(200);
       expect(((await missResponse.json()) as { suspectVersion: unknown }).suspectVersion).toBeNull();
+      expect(queryRecoveryDrillOutcomeMock).not.toHaveBeenCalled();
 
       resolveSuspectVersionMock.mockRejectedValueOnce(new Error("db hiccup"));
       const errorResponse = await fetch(`${baseUrl}/dlq?id=dl-1`);

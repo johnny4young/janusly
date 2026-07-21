@@ -47,6 +47,10 @@ import {
   type RecoveryQueueFocusRequest,
 } from './recovery-queue-focus-bus'
 import { requestRecoveryAllClearIfQueueEmpty } from './recovery-all-clear-coordinator'
+import {
+  RecoveryDrillOutcomeCard,
+  type RecoveryDrillOutcome,
+} from './recovery/RecoveryDrillOutcomeCard'
 
 /** Fixed DLQ row height (54px) plus the 6px `.we-list` gap. The matching
  *  `.we-dlq-row` rule prevents metadata wrapping so virtual offsets stay
@@ -122,6 +126,8 @@ export type DeadLetter = {
   suspectVersion?: SuspectVersionInfo | null
   /** Code-authored recovery drill context — detail reads only. */
   drill?: RecoveryDrillProvenance | null
+  /** Server-derived terminal outcome and recurrence — drill detail reads only. */
+  drillOutcome?: RecoveryDrillOutcome | null
 }
 
 type BulkResolveResult = {
@@ -226,6 +232,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   const [labSourceRunId, setLabSourceRunId] = useState<string | null>(null)
   const addToast = useWorkflowStore((state) => state.addToast)
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
+  const platformVersion = useWorkflowStore((state) => state.platformVersion)
   // Multi-select for bulk resolve. `selectionMode` reveals per-row checkboxes;
   // `selectedIds` holds the ticked rows. Orthogonal to `selectedId` (the
   // single-row detail box), which is hidden while selecting.
@@ -420,7 +427,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     return () => {
       cancelled = true
     }
-  }, [selectedRowId])
+  }, [selectedRowId, platformVersion])
   // Merge keeps the list row's `recovery` overlay (the detail read is the raw
   // dead_letters row) while the snapshot fields come from the detail.
   const selectedFull = selected && selectedDetail && selectedDetail.id === selected.id
@@ -1104,14 +1111,19 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
           </div>
 
           {selectedFull?.drill && (
-            <div className="we-recovery-drill-context" data-testid="dlq-recovery-drill-context">
-              <span className="we-pill" data-tone="info">{t('dlq.drill.label')}</span>
-              <span className="we-pill" data-tone="neutral">
-                {t(`packs.drill.path.${selectedFull.drill.recoveryPath}`, {
-                  defaultValue: selectedFull.drill.recoveryPath,
-                })}
-              </span>
-            </div>
+            <>
+              <div className="we-recovery-drill-context" data-testid="dlq-recovery-drill-context">
+                <span className="we-pill" data-tone="info">{t('dlq.drill.label')}</span>
+                <span className="we-pill" data-tone="neutral">
+                  {t(`packs.drill.path.${selectedFull.drill.recoveryPath}`, {
+                    defaultValue: selectedFull.drill.recoveryPath,
+                  })}
+                </span>
+              </div>
+              {selectedFull.drillOutcome && (
+                <RecoveryDrillOutcomeCard outcome={selectedFull.drillOutcome} />
+              )}
+            </>
           )}
 
           {selectedFull?.suspectVersion && (

@@ -18,6 +18,7 @@ import { eq } from "drizzle-orm";
 import {
   findMatchingActiveRecoveryPlaybook,
   queryFailureSamples,
+  queryRecoveryDrillOutcome,
   queryRecoveryRecurrence,
   resolveRecoveryPlaybookOutcomeFacts,
 } from "@janusly/data";
@@ -282,8 +283,11 @@ export const dlqRoutes: Route[] = [
           ).catch(() => null),
           getRecoveryDrillProvenance(auth.orgId, item.runId).catch(() => null),
         ]);
+        const drillOutcome = drill
+          ? await queryRecoveryDrillOutcome(auth.orgId, item.id).catch(() => null)
+          : null;
         const { replayClaimToken: _replayClaimToken, replayClaimedAt: _replayClaimedAt, ...publicItem } = item;
-        return sendJson(res, { ...publicItem, suspectVersion, drill });
+        return sendJson(res, { ...publicItem, suspectVersion, drill, drillOutcome });
       }
       if (status && !isDeadLetterStatus(status)) {
         return sendError(res, "dlq_invalid_status", "Invalid DLQ status", 400);

@@ -162,10 +162,13 @@ describe('<DeadLettersPanel />', () => {
 
   it('labels a selected recovery drill with its actual recovery path', async () => {
     const row = mockDeadLetter('worker-drill')
+    let recovered = false
+    let detailCalls = 0
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path.startsWith('/dlq/counts')) return countsFromRows([row])
       if (path.startsWith('/dlq/queue')) return { items: [row], nextCursor: null, hasMore: false }
       if (path === '/dlq?id=worker-drill') {
+        detailCalls += 1
         return {
           ...row,
           drill: {
@@ -174,6 +177,33 @@ describe('<DeadLettersPanel />', () => {
             fixtureId: 'worker_interrupted_during_page',
             recoveryPath: 'stalled_node_reaper',
           },
+          drillOutcome: recovered
+            ? {
+                status: 'recovered',
+                startedAt: '2026-07-01T10:00:00.000Z',
+                completedAt: '2026-07-01T10:02:00.000Z',
+                elapsedMs: 120_000,
+                evidence: 'terminal_impact',
+                attemptCount: 1,
+                latestDeadLetterId: 'worker-drill',
+                chainCapped: false,
+                recurrence: {
+                  status: 'monitoring',
+                  windowEndsAt: '2026-07-08T10:02:00.000Z',
+                  recurredAt: null,
+                },
+              }
+            : {
+                status: 'awaiting_action',
+                startedAt: '2026-07-01T10:00:00.000Z',
+                completedAt: null,
+                elapsedMs: null,
+                evidence: null,
+                attemptCount: 1,
+                latestDeadLetterId: 'worker-drill',
+                chainCapped: false,
+                recurrence: { status: 'not_applicable', windowEndsAt: null, recurredAt: null },
+              },
         }
       }
       return { items: [], clusters: [], runs: [], proposals: [] }
@@ -184,6 +214,14 @@ describe('<DeadLettersPanel />', () => {
     const context = await screen.findByTestId('dlq-recovery-drill-context')
     expect(context).toHaveTextContent('Recovery drill')
     expect(context).toHaveTextContent('Real reaper path')
+    expect(screen.getByTestId('dlq-recovery-drill-outcome')).toHaveTextContent('Action needed')
+
+    recovered = true
+    act(() => useWorkflowStore.getState().bumpPlatformVersion())
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-recovery-drill-outcome')).toHaveTextContent('Recovered')
+    })
+    expect(detailCalls).toBeGreaterThanOrEqual(2)
   })
 
   it('refetches /dlq with the chosen status when the status filter changes', async () => {
