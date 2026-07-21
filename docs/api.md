@@ -216,7 +216,15 @@ Returns the public catalog. Requires `packs.read`.
       "requiredCredentials": [{ "name": "ops_slack", "kind": "slack_webhook", "purpose": "Pages your on-call channel" }],
       "nodeCount": 4,
       "samplePayloadIds": ["default"],
-      "failureFixtureIds": ["slack_5xx_transient"]
+      "failureFixtureIds": ["slack_5xx_transient", "classification_output_invalid", "github_contract_drift"],
+      "failureFixtures": [
+        {
+          "id": "classification_output_invalid",
+          "label": "AI severity output malformed",
+          "description": "The model returns text outside the expected severity contract and the classification step fails safely.",
+          "failureMode": "ai_output_invalid"
+        }
+      ]
     }
   ]
 }
@@ -258,11 +266,22 @@ Starts a writes-skipped sandbox sample using a bundled sample payload. Requires
 
 ### `POST /solution-packs/:id/inject-failure`
 
-Seeds a demo failed run + DLQ row using a bundled failure fixture. Requires
-`packs.install`.
+Seeds a deterministic failed run + DLQ row using the selected bundled fixture.
+The run and `node.failed` event retain a `solution_pack_drill` source block;
+raw error envelopes and workflow node ids remain absent from the catalog.
+Requires `packs.install`.
 
 ```json
-{ "fixtureId": "slack_5xx_transient" }
+{ "fixtureId": "classification_output_invalid" }
+```
+
+```json
+{
+  "runId": "run-id",
+  "deadLetterId": "dead-letter-id",
+  "fixtureId": "classification_output_invalid",
+  "failureMode": "ai_output_invalid"
+}
 ```
 
 ---

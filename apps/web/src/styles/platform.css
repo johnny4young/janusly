@@ -6566,6 +6566,44 @@ button.we-authoring-problems__row:focus-visible {
 .we-recipe-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 760px) { .we-recipe-grid { grid-template-columns: 1fr; } }
 
+/* Solution-pack drills — explicit scenario selection keeps synthetic failures
+   truthful and inspectable before the operator opens the real recovery queue. */
+.we-pack-drill {
+  border-top: 1px solid var(--we-line);
+  margin-top: 8px;
+  padding-top: 12px;
+  width: 100%;
+}
+.we-pack-drill__header {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+.we-pack-drill__header strong {
+  align-items: center;
+  color: var(--we-ink);
+  display: inline-flex;
+  gap: 6px;
+}
+.we-pack-drill__select { margin-top: 0; }
+.we-pack-drill__summary {
+  align-items: flex-start;
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.we-pack-drill__summary .mode-pill { flex: 0 0 auto; margin-top: 2px; }
+.we-pack-drill__summary .helper-text { margin: 0; }
+.we-pack-drill__action { margin-top: 12px; width: 100%; }
+.we-pack-cred-legend {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.we-pack-cred-legend > span { align-items: center; display: inline-flex; gap: 3px; }
+
 /* Tools — required (cobalt), missing (warning), and optional (muted) params in one wrap row. */
 .we-tool-params { display: flex; flex-wrap: wrap; gap: 6px; }
 .we-param {

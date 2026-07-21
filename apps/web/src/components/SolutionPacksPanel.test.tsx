@@ -1,5 +1,5 @@
 import { render, screen, fireEvent } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Credential, SolutionPackPublic } from '../types'
 import { SolutionPacksPanel } from './SolutionPacksPanel'
@@ -16,9 +16,23 @@ const PACK: SolutionPackPublic = {
   requiredOrgConfigs: [],
   nodeCount: 4,
   sampleCount: 1,
-  failureCount: 1,
+  failureCount: 2,
   samplePayloadIds: ['default'],
-  failureFixtureIds: ['slack_5xx_transient'],
+  failureFixtureIds: ['slack_5xx_transient', 'classification_output_invalid'],
+  failureFixtures: [
+    {
+      id: 'slack_5xx_transient',
+      label: 'Slack page returned HTTP 500',
+      description: 'The notification provider is temporarily unavailable.',
+      failureMode: 'upstream_unavailable',
+    },
+    {
+      id: 'classification_output_invalid',
+      label: 'AI severity output malformed',
+      description: 'The model output does not satisfy the severity contract.',
+      failureMode: 'ai_output_invalid',
+    },
+  ],
 }
 
 const handlers = {
@@ -40,6 +54,10 @@ function renderPanel(credentials: Credential[]) {
 }
 
 describe('<SolutionPacksPanel />', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it('treats a credential as present only when both kind and name match', () => {
     const { container, rerender } = renderPanel([
       { id: 'cred-1', name: 'ops_slack', kind: 'github_token' },
@@ -86,5 +104,20 @@ describe('<SolutionPacksPanel />', () => {
       />,
     )
     expect(screen.getByTestId('empty-state-cta')).toHaveTextContent('Explore templates')
+  })
+
+  it('explains the selected drill and sends its explicit fixture id', () => {
+    renderPanel([])
+
+    const select = screen.getByLabelText('Failure scenario')
+    expect(select).toHaveValue('slack_5xx_transient')
+    expect(screen.getByText('The on-call notification provider is temporarily unavailable after the incident issue is created.')).toBeVisible()
+
+    fireEvent.change(select, { target: { value: 'classification_output_invalid' } })
+    expect(screen.getByText('Invalid AI output')).toBeVisible()
+    expect(screen.getByText('The model returns text outside the expected severity contract and the classification step fails safely.')).toBeVisible()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start recovery drill' }))
+    expect(handlers.onInjectFailure).toHaveBeenCalledWith('incident-triage', 'classification_output_invalid')
   })
 })

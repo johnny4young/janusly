@@ -1,13 +1,13 @@
 /**
  * Solution-pack routes — list the code-resident catalog, surface per-org
  * dependency hints, install a pack as a draft workflow, run a one-click
- * sandbox sample, and inject a demo failure to drive the recovery loop.
+ * sandbox sample, and start a deterministic drill in the recovery loop.
  *
  * Five routes:
  *   - `GET  /solution-packs`                      (viewer, packs.read)    — catalog
  *   - `GET  /solution-packs/:id`                  (viewer, packs.read)    — detail + per-org missing deps
  *   - `POST /solution-packs/:id/sample-run`       (editor, packs.install) — sandbox sample run
- *   - `POST /solution-packs/:id/inject-failure`   (editor, packs.install) — seed a demo DLQ failure
+ *   - `POST /solution-packs/:id/inject-failure`   (editor, packs.install) — seed a selected recovery drill
  *   - `POST /workflows/import-pack`               (editor, packs.install) — install as a draft workflow
  *
  * Multi-tenant: every install / sample / inject / dependency-diff is
@@ -186,6 +186,12 @@ export const solutionPacksRoutes: Route[] = [
         workflow: pack.workflowJson,
         failedNodeId: fixture.failedNodeId,
         errorJson: fixture.errorJson,
+        source: {
+          kind: "solution_pack_drill",
+          packId: pack.id,
+          fixtureId: fixture.id,
+          failureMode: fixture.failureMode,
+        },
       });
 
       await auditAction(auth, "solution_pack.failure_injected", {
@@ -194,13 +200,19 @@ export const solutionPacksRoutes: Route[] = [
         metadata: {
           packId: pack.id,
           fixtureId: fixture.id,
+          failureMode: fixture.failureMode,
           failedNodeId: fixture.failedNodeId,
           runId,
           deadLetterId,
         },
       });
 
-      return sendJson(res, { runId, deadLetterId, fixtureId: fixture.id });
+      return sendJson(res, {
+        runId,
+        deadLetterId,
+        fixtureId: fixture.id,
+        failureMode: fixture.failureMode,
+      });
     },
   },
   {

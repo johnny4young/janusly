@@ -77,6 +77,23 @@ export const SamplePayloadSchema = z.object({
 export type SamplePayload = z.infer<typeof SamplePayloadSchema>;
 
 /**
+ * Failure modes that can be reproduced safely by inserting a deterministic
+ * failed run. Process-failure simulation is intentionally absent: worker
+ * interruption must exercise the stalled-node reaper rather than bypass it.
+ */
+export const SOLUTION_PACK_FAILURE_MODES = [
+  "credential_unavailable",
+  "credential_expired",
+  "ai_output_invalid",
+  "rate_limited",
+  "contract_drift",
+  "upstream_unavailable",
+] as const;
+
+export const SolutionPackFailureModeSchema = z.enum(SOLUTION_PACK_FAILURE_MODES);
+export type SolutionPackFailureMode = (typeof SOLUTION_PACK_FAILURE_MODES)[number];
+
+/**
  * A known, intentional failure the operator can inject to watch the
  * recovery loop run. `failedNodeId` must exist in the pack's workflow;
  * `errorJson` is the persisted error envelope shape the recovery dialog
@@ -85,10 +102,18 @@ export type SamplePayload = z.infer<typeof SamplePayloadSchema>;
 export const FailureFixtureSchema = z.object({
   id: z.string().trim().min(1),
   label: z.string().trim().min(1),
+  description: z.string().trim().min(1),
+  failureMode: SolutionPackFailureModeSchema,
   failedNodeId: z.string().trim().min(1),
   errorJson: z.record(z.string(), z.unknown()),
 });
 export type FailureFixture = z.infer<typeof FailureFixtureSchema>;
+
+/** Public-safe drill descriptor. Raw errors and workflow node ids stay server-side. */
+export type FailureFixturePublic = Pick<
+  FailureFixture,
+  "id" | "label" | "description" | "failureMode"
+>;
 
 /** The full, code-resident definition of one solution pack. */
 export const SolutionPackSchema = z
@@ -131,6 +156,7 @@ export type SolutionPackPublic = {
   failureCount: number;
   samplePayloadIds: string[];
   failureFixtureIds: string[];
+  failureFixtures: FailureFixturePublic[];
 };
 
 /** Pure projection of a pack into its catalog-safe public shape. */
@@ -148,5 +174,11 @@ export function toPublicPack(pack: SolutionPack): SolutionPackPublic {
     failureCount: pack.failureFixtures.length,
     samplePayloadIds: pack.samplePayloads.map((s) => s.id),
     failureFixtureIds: pack.failureFixtures.map((f) => f.id),
+    failureFixtures: pack.failureFixtures.map(({ id, label, description, failureMode }) => ({
+      id,
+      label,
+      description,
+      failureMode,
+    })),
   };
 }

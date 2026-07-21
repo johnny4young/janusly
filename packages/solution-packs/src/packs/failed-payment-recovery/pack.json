@@ -98,12 +98,43 @@
   "failureFixtures": [
     {
       "id": "billing_secret_unbound",
-      "label": "Billing webhook secret unbound",
+      "label": "Billing credential unavailable",
+      "description": "The billing connector cannot resolve its configured credential before the retry starts.",
+      "failureMode": "credential_unavailable",
       "failedNodeId": "retry_charge",
       "errorJson": {
         "name": "CredentialMissingError",
         "code": "credential_missing",
         "message": "credential secret missing for billing_webhook",
+        "node": "retry_charge"
+      }
+    },
+    {
+      "id": "billing_credential_expired",
+      "label": "Billing credential expired",
+      "description": "The billing provider rejects an expired credential and the charge retry moves into recovery.",
+      "failureMode": "credential_expired",
+      "failedNodeId": "retry_charge",
+      "errorJson": {
+        "name": "CredentialExpiredError",
+        "code": "credential_expired",
+        "message": "billing_webhook credential expired before the retry request",
+        "statusCode": 401,
+        "node": "retry_charge"
+      }
+    },
+    {
+      "id": "billing_rate_limited",
+      "label": "Billing provider rate limited",
+      "description": "The billing provider returns HTTP 429 so operators can inspect retry-safe recovery evidence.",
+      "failureMode": "rate_limited",
+      "failedNodeId": "retry_charge",
+      "errorJson": {
+        "name": "ToolError",
+        "code": "rate_limit",
+        "message": "billing retry was rate limited by the upstream provider",
+        "statusCode": 429,
+        "retryAfterSeconds": 60,
         "node": "retry_charge"
       }
     }

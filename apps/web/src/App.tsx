@@ -732,11 +732,11 @@ export default function App() {
     if (deepLink?.deadLetterId) openRecoveryQueue(deepLink.deadLetterId)
   }, [openRecoveryQueue])
 
-  const injectPackFailure = useCallback(async (packId: string) => {
+  const injectPackFailure = useCallback(async (packId: string, fixtureId: string) => {
     await runPlatformMutation<{ deadLetterId?: string }>({
       request: () => api(
         `/solution-packs/${encodeURIComponent(packId)}/inject-failure`,
-        { method: 'POST', body: JSON.stringify({}) },
+        { method: 'POST', body: JSON.stringify({ fixtureId }) },
       ) as Promise<{ deadLetterId?: string }>,
       failureMessage: t('packs.toast.injectFailed'),
       successToast: { message: t('packs.toast.failureInjected'), tone: 'success' },
@@ -1176,7 +1176,7 @@ export default function App() {
               onOpenRun={openRun}
               onApproveNode={approveNode}
               onOpenRecoveryQueue={() => openRecoveryQueue()}
-              onTryDemoRecovery={() => injectPackFailure('failed-payment-recovery')}
+              onTryDemoRecovery={() => injectPackFailure('failed-payment-recovery', 'billing_secret_unbound')}
             />
           )
         }

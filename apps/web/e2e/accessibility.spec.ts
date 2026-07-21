@@ -111,6 +111,22 @@ test('AI Studio and command palette meet the accessibility floor', async ({ page
   expect(errors).toEqual([])
 })
 
+test('Solution Packs recovery-drill selection meets the accessibility floor', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const errors = installBrowserErrorGuards(page)
+  await page.goto('/')
+
+  await page.getByRole('button', { name: 'Packs', exact: true }).click()
+  const pack = page.locator('.list-card').filter({ hasText: 'Incident triage' }).first()
+  await expect(pack).toBeVisible()
+  await pack.getByLabel('Failure scenario').selectOption('classification_output_invalid')
+  await expect(pack.getByText('Invalid AI output')).toBeVisible()
+
+  await expectNoBlockingAccessibilityViolations(page, 'Solution Packs recovery drill')
+  await capture(pack, 'accessibility-en-solution-pack-drill')
+  expect(errors).toEqual([])
+})
+
 test('mobile navigation meets the accessibility floor while open', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const errors = installBrowserErrorGuards(page)

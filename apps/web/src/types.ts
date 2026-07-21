@@ -81,6 +81,19 @@ export type Credential = { id: string; name: string; kind: string; metadata?: Js
 type PackRequiredCredential = { name: string; kind: string; purpose: string }
 /** One required org-config key a solution pack declares. */
 type PackRequiredOrgConfig = { key: string; purpose: string }
+export type SolutionPackFailureMode =
+  | 'credential_unavailable'
+  | 'credential_expired'
+  | 'ai_output_invalid'
+  | 'rate_limited'
+  | 'contract_drift'
+  | 'upstream_unavailable'
+type PackFailureFixture = {
+  id: string
+  label: string
+  description: string
+  failureMode: SolutionPackFailureMode
+}
 /** Catalog-safe projection of a solution pack returned by `GET /solution-packs`. */
 export type SolutionPackPublic = {
   id: string
@@ -95,6 +108,7 @@ export type SolutionPackPublic = {
   failureCount: number
   samplePayloadIds: string[]
   failureFixtureIds: string[]
+  failureFixtures: PackFailureFixture[]
 }
 /**
  * `status` / `pausedReason` are the workflow's OPERATIONAL state (`active`,

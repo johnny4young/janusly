@@ -24,5 +24,7 @@ then point `retry_charge.input.url` at your real billing endpoint in the Inspect
   "card declined" payload. Write-side steps (the retry + the Slack post) are skipped
   in sandbox mode, so no real charge or message goes out; the run pauses at the
   approval gate so you can see the human checkpoint.
-- **Break a node** injects a "billing webhook secret unbound" failure on
-  `retry_charge` so you can drive the recovery dialog and watch the AI propose a fix.
+- **Start recovery drill** lets you reproduce an unavailable credential, an
+  expired credential, or an HTTP 429 on `retry_charge`. The selected drill
+  records its source before opening the recovery queue, where you can inspect
+  evidence and validate a proposed fix.

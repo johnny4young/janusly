@@ -6,7 +6,7 @@
  * and the save chokepoint. Covers: gate declarations, catalog projection
  * (no workflow JSON / secret leak), per-org dependency diff, install
  * (creates a version + audits + never auto-creates credentials + lands
- * under auth.orgId), sandbox sample-run, demo failure injection, and 404s.
+ * under auth.orgId), sandbox sample-run, selected recovery drills, and 404s.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -81,7 +81,7 @@ function findRoute(method: string, path: string): Route {
 
 async function callRoute(method: string, path: string, body?: unknown) {
   const route = findRoute(method, path);
-  if (body !== undefined) readJsonMock.mockResolvedValueOnce(body);
+  if (body !== undefined) readJsonMock.mockResolvedValue(body);
   return route.handler({ req: { url: path } as never, res: {} as never, auth: AUTH as never }) as Promise<{
     payload: Record<string, unknown>;
     status: number;
@@ -89,6 +89,8 @@ async function callRoute(method: string, path: string, body?: unknown) {
 }
 
 beforeEach(() => {
+  readJsonMock.mockReset();
+  readJsonMock.mockResolvedValue({});
   // Default: org has no credentials configured and no tenant org-config rows.
   getCredentialByNameMock.mockResolvedValue(null);
   listOrgConfigMock.mockResolvedValue([] as never);
@@ -134,15 +136,24 @@ describe("route gate declarations", () => {
 });
 
 describe("GET /solution-packs (catalog)", () => {
-  it("returns the public projection without workflow JSON", async () => {
+  it("returns safe drill descriptors without workflow JSON or raw error internals", async () => {
     const { payload } = await callRoute("GET", "/solution-packs");
     const packs = payload.packs as Array<Record<string, unknown>>;
     expect(packs.length).toBe(3);
     for (const pack of packs) {
       expect(pack).not.toHaveProperty("workflowJson");
       expect(pack).not.toHaveProperty("samplePayloads");
-      expect(pack).not.toHaveProperty("failureFixtures");
       expect(typeof pack.nodeCount).toBe("number");
+      const fixtures = pack.failureFixtures as Array<Record<string, unknown>>;
+      expect(fixtures.length).toBeGreaterThan(0);
+      expect(fixtures[0]).toMatchObject({
+        id: expect.any(String),
+        label: expect.any(String),
+        description: expect.any(String),
+        failureMode: expect.any(String),
+      });
+      expect(fixtures[0]).not.toHaveProperty("failedNodeId");
+      expect(fixtures[0]).not.toHaveProperty("errorJson");
     }
     expect(JSON.stringify(payload)).not.toContain("secretRef");
   });
@@ -227,17 +238,47 @@ describe("POST /solution-packs/:id/sample-run", () => {
 });
 
 describe("POST /solution-packs/:id/inject-failure", () => {
-  it("seeds a demo DLQ failure on the fixture's node and audits", async () => {
-    const { payload, status } = await callRoute("POST", "/solution-packs/incident-triage/inject-failure", {});
+  it("seeds the selected drill with durable provenance and audits its failure mode", async () => {
+    const { payload, status } = await callRoute(
+      "POST",
+      "/solution-packs/incident-triage/inject-failure",
+      { fixtureId: "classification_output_invalid" },
+    );
     expect(status).toBe(200);
     expect(payload.deadLetterId).toBe("dlq-9");
+    expect(payload.fixtureId).toBe("classification_output_invalid");
+    expect(payload.failureMode).toBe("ai_output_invalid");
 
     expect(injectSampleFailureMock).toHaveBeenCalledTimes(1);
     const arg = injectSampleFailureMock.mock.calls[0][0];
     expect(arg.orgId).toBe("org-1");
-    expect(arg.failedNodeId).toBe("page_oncall");
-    expect(arg.errorJson).toMatchObject({ code: "http_error" });
+    expect(arg.failedNodeId).toBe("classify");
+    expect(arg.errorJson).toMatchObject({ code: "E_AI_OUTPUT_INVALID" });
+    expect(arg.source).toEqual({
+      kind: "solution_pack_drill",
+      packId: "incident-triage",
+      fixtureId: "classification_output_invalid",
+      failureMode: "ai_output_invalid",
+    });
 
     expect(auditActionMock.mock.calls[0][1]).toBe("solution_pack.failure_injected");
+    expect(auditActionMock.mock.calls[0][2]).toMatchObject({
+      metadata: {
+        fixtureId: "classification_output_invalid",
+        failureMode: "ai_output_invalid",
+      },
+    });
+  });
+
+  it("rejects an unknown fixture id without creating an untraceable default", async () => {
+    const { payload, status } = await callRoute(
+      "POST",
+      "/solution-packs/incident-triage/inject-failure",
+      { fixtureId: "not-a-drill" },
+    );
+
+    expect(status).toBe(400);
+    expect(payload.code).toBe("pack_no_failure_fixture");
+    expect(injectSampleFailureMock).not.toHaveBeenCalled();
   });
 });

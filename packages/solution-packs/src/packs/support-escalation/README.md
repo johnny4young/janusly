@@ -24,5 +24,6 @@ configured mailer provider, not a per-tool credential.
 - **Preview sample run** runs the workflow in sandbox mode against the bundled
   "can't log in" ticket. The Slack + email steps are skipped in sandbox mode, and
   the run pauses at the agent-review form so you can see the human checkpoint.
-- **Break a node** injects a "timed out" failure on `escalate` so you can drive the
-  recovery dialog and watch the AI propose a raise-timeout fix.
+- **Start recovery drill** reproduces a bounded notification timeout on
+  `escalate`, records the drill source, and opens the recovery queue so you can
+  diagnose and validate a proposed timeout fix.

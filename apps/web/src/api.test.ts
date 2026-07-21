@@ -177,6 +177,22 @@ describe('api', () => {
     ])
   })
 
+  it('keeps full DLQ detail on the legacy route while versioning bounded lists', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('{}', {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await api('/dlq?id=dead-letter-1')
+    await api('/dlq?status=open&limit=25')
+
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      'http://localhost:3001/dlq?id=dead-letter-1',
+      'http://localhost:3001/v1/dlq?status=open&limit=25',
+    ])
+  })
+
   it('dedups identical GETs within the in-flight window', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ items: [] }), {
       status: 200,

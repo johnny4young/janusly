@@ -105,7 +105,7 @@ export type RightPanelCatalog = {
   onInstallPlugin: (pluginId: string) => void
   onInstallPack: (packId: string) => void
   onSampleRunPack: (packId: string) => void
-  onInjectPackFailure: (packId: string) => void
+  onInjectPackFailure: (packId: string, fixtureId: string) => void
   onCreateCredential: (credential: { name: string; kind: string; secretRef: string; expiresAt?: string }) => void
 }
 

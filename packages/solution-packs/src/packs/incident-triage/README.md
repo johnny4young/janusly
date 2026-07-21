@@ -22,5 +22,7 @@ set the real `owner` / `repo` on `open_issue` in the Inspector.
 - **Preview sample run** runs the workflow in sandbox mode against the bundled
   "DB pool exhausted" alert. The GitHub + Slack steps are skipped in sandbox mode,
   so no issue or page goes out.
-- **Break a node** injects an "HTTP 500" failure on `page_oncall` so you can drive
-  the recovery dialog and watch the AI propose a retry/backoff fix.
+- **Start recovery drill** lets you reproduce malformed AI classification,
+  GitHub response-contract drift, or a temporary Slack outage. The selected
+  drill records its source before opening the recovery queue for diagnosis and
+  sandbox validation.

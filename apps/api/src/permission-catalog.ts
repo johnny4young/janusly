@@ -116,7 +116,7 @@ export const PERMISSION_CATALOG = [
   { key: "triggers.ingest",      category: "triggers",    description: "Submit a normalized inbound trigger event (relay / forwarder)", defaultRoles: ["editor", "admin"] },
   // solution packs (installable, ICP-shaped workflow starters)
   { key: "packs.read",           category: "packs",       description: "View the solution-pack catalog + per-org dependency hints", defaultRoles: ["viewer", "editor", "admin"] },
-  { key: "packs.install",        category: "packs",       description: "Install a pack as a draft workflow, run a sandbox sample, or inject a demo failure", defaultRoles: ["editor", "admin"] },
+  { key: "packs.install",        category: "packs",       description: "Install a pack as a draft workflow, run a sandbox sample, or start a recovery drill", defaultRoles: ["editor", "admin"] },
   // onboarding ("first recovered run" guided checklist — per-user self-service)
   { key: "onboarding.read",      category: "onboarding",  description: "View own onboarding checklist progress",                    defaultRoles: ["viewer", "editor", "admin"] },
   { key: "onboarding.write",     category: "onboarding",  description: "Skip or resume own onboarding checklist",                   defaultRoles: ["viewer", "editor", "admin"] },

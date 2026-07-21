@@ -28,13 +28,14 @@ type SolutionPacksPanelProps = {
   credentials: Credential[]
   onInstall: (packId: string) => void
   onSampleRun: (packId: string) => void
-  onInjectFailure: (packId: string) => void
+  onInjectFailure: (packId: string, fixtureId: string) => void
 }
 
 export function SolutionPacksPanel({ packs, credentials, onInstall, onSampleRun, onInjectFailure }: SolutionPacksPanelProps) {
   const { t, i18n } = useT()
   const setActiveTab = useWorkflowStore((state) => state.setActiveTab)
   const [query, setQuery] = useState('')
+  const [selectedDrills, setSelectedDrills] = useState<Record<string, string>>({})
   const credentialKeys = new Set(credentials.map((c) => `${c.kind}:${c.name}`))
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -43,7 +44,12 @@ export function SolutionPacksPanel({ packs, credentials, onInstall, onSampleRun,
       const packName = t(`packs.${pack.id}.name`, { defaultValue: pack.name })
       const packDescription = t(`packs.${pack.id}.description`, { defaultValue: pack.description })
       const categoryLabel = t(`packs.category.${pack.category}`, { defaultValue: pack.category })
-      return `${packName} ${packDescription} ${categoryLabel}`.toLowerCase().includes(q)
+      const drills = pack.failureFixtures.map((fixture) => [
+        t(`packs.${pack.id}.drills.${fixture.id}.label`, { defaultValue: fixture.label }),
+        t(`packs.${pack.id}.drills.${fixture.id}.description`, { defaultValue: fixture.description }),
+        t(`packs.drill.mode.${fixture.failureMode}`, { defaultValue: fixture.failureMode }),
+      ].join(' ')).join(' ')
+      return `${packName} ${packDescription} ${categoryLabel} ${drills}`.toLowerCase().includes(q)
     })
   }, [packs, query, t, i18n.language])
 
@@ -80,6 +86,10 @@ export function SolutionPacksPanel({ packs, credentials, onInstall, onSampleRun,
           const packName = t(`packs.${pack.id}.name`, { defaultValue: pack.name })
           const packDescription = t(`packs.${pack.id}.description`, { defaultValue: pack.description })
           const categoryLabel = t(`packs.category.${pack.category}`, { defaultValue: pack.category })
+          const requestedFixtureId = selectedDrills[pack.id]
+          const selectedFixture = pack.failureFixtures.find((fixture) => fixture.id === requestedFixtureId)
+            ?? pack.failureFixtures[0]
+          const drillDescriptionId = `pack-drill-description-${pack.id}`
           return (
             <div key={pack.id} className="list-card">
               <div className="split-row" style={{ width: '100%' }}>
@@ -119,9 +129,13 @@ export function SolutionPacksPanel({ packs, credentials, onInstall, onSampleRun,
                   </div>
                   {pack.requiredCredentials.length > 0 && (
                     <small className="helper-text we-pack-cred-legend">
-                      <AlertTriangle size={10} aria-hidden="true" /> {t('packs.credential.legendMissing')}
-                      {' · '}
-                      <KeyRound size={10} aria-hidden="true" /> {t('packs.credential.legendReady')}
+                      <span>
+                        <AlertTriangle size={10} aria-hidden="true" /> {t('packs.credential.legendMissing')}
+                      </span>
+                      <span aria-hidden="true">·</span>
+                      <span>
+                        <KeyRound size={10} aria-hidden="true" /> {t('packs.credential.legendReady')}
+                      </span>
                     </small>
                   )}
                 </>
@@ -134,10 +148,61 @@ export function SolutionPacksPanel({ packs, credentials, onInstall, onSampleRun,
                 <button type="button" className="command-button" onClick={() => onSampleRun(pack.id)}>
                   <Play size={13} aria-hidden="true" /> {t('packs.action.sampleRun')}
                 </button>
-                <button type="button" className="command-button" onClick={() => onInjectFailure(pack.id)}>
-                  <Bug size={13} aria-hidden="true" /> {t('packs.action.breakNode')}
-                </button>
               </div>
+
+              {selectedFixture && (
+                <section className="we-pack-drill" aria-labelledby={`pack-drill-title-${pack.id}`}>
+                  <div className="we-pack-drill__header">
+                    <strong id={`pack-drill-title-${pack.id}`}>
+                      <Bug size={14} aria-hidden="true" /> {t('packs.drill.title')}
+                    </strong>
+                    <span className="mode-pill mode-pill-neutral">
+                      {t('packs.drill.count', { count: pack.failureFixtures.length })}
+                    </span>
+                  </div>
+                  <p className="helper-text">{t('packs.drill.helper')}</p>
+                  <label className="field-label" htmlFor={`pack-drill-${pack.id}`}>
+                    {t('packs.drill.scenarioLabel')}
+                  </label>
+                  <select
+                    id={`pack-drill-${pack.id}`}
+                    className="text-field text-field--compact we-pack-drill__select"
+                    value={selectedFixture.id}
+                    aria-describedby={drillDescriptionId}
+                    data-testid={`pack-drill-select-${pack.id}`}
+                    onChange={(event) => setSelectedDrills((current) => ({
+                      ...current,
+                      [pack.id]: event.target.value,
+                    }))}
+                  >
+                    {pack.failureFixtures.map((fixture) => (
+                      <option key={fixture.id} value={fixture.id}>
+                        {t(`packs.${pack.id}.drills.${fixture.id}.label`, { defaultValue: fixture.label })}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="we-pack-drill__summary" id={drillDescriptionId} aria-live="polite">
+                    <span className="mode-pill mode-pill-neutral">
+                      {t(`packs.drill.mode.${selectedFixture.failureMode}`, {
+                        defaultValue: selectedFixture.failureMode,
+                      })}
+                    </span>
+                    <p className="helper-text">
+                      {t(`packs.${pack.id}.drills.${selectedFixture.id}.description`, {
+                        defaultValue: selectedFixture.description,
+                      })}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="command-button we-pack-drill__action"
+                    data-testid={`pack-drill-start-${pack.id}`}
+                    onClick={() => onInjectFailure(pack.id, selectedFixture.id)}
+                  >
+                    <Bug size={13} aria-hidden="true" /> {t('packs.action.startDrill')}
+                  </button>
+                </section>
+              )}
             </div>
           )
         })}

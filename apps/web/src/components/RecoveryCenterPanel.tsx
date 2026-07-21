@@ -107,7 +107,7 @@ type RecoveryCenterPanelProps = {
   onApproveNode: (nodeId: string) => void | Promise<void>
   /** Navigate to Runs and land keyboard focus on the Recovery Queue. */
   onOpenRecoveryQueue: () => void
-  /** Inject a demo failure so a fresh operator can try the recovery loop for real. */
+  /** Start a deterministic drill so a fresh operator can try the recovery loop for real. */
   onTryDemoRecovery?: () => void | Promise<void>
 }
 

@@ -87,6 +87,8 @@
     {
       "id": "slack_5xx_transient",
       "label": "Slack page returned HTTP 500",
+      "description": "The on-call notification provider is temporarily unavailable after the incident issue is created.",
+      "failureMode": "upstream_unavailable",
       "failedNodeId": "page_oncall",
       "errorJson": {
         "name": "ToolError",
@@ -94,6 +96,33 @@
         "message": "slack.post failed: upstream returned HTTP 500",
         "statusCode": 500,
         "node": "page_oncall"
+      }
+    },
+    {
+      "id": "classification_output_invalid",
+      "label": "AI severity output malformed",
+      "description": "The model returns text outside the expected severity contract and the classification step fails safely.",
+      "failureMode": "ai_output_invalid",
+      "failedNodeId": "classify",
+      "errorJson": {
+        "name": "AiOutputValidationError",
+        "code": "E_AI_OUTPUT_INVALID",
+        "message": "AI output did not match the required severity response contract",
+        "node": "classify"
+      }
+    },
+    {
+      "id": "github_contract_drift",
+      "label": "GitHub response contract drifted",
+      "description": "The issue provider returns a success response without the URL required by the next workflow step.",
+      "failureMode": "contract_drift",
+      "failedNodeId": "open_issue",
+      "errorJson": {
+        "name": "ToolOutputValidationError",
+        "code": "upstream_contract_drift",
+        "message": "github.create_issue response omitted the required result.url field",
+        "statusCode": 200,
+        "node": "open_issue"
       }
     }
   ]

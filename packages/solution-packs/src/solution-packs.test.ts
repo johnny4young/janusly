@@ -6,6 +6,7 @@ import {
   getSolutionPack,
   SolutionPackSchema,
   SOLUTION_PACK_CATEGORIES,
+  SOLUTION_PACK_FAILURE_MODES,
 } from "./index";
 
 describe("solution packs catalog", () => {
@@ -38,10 +39,18 @@ describe("solution packs catalog", () => {
   it("every failure fixture references a node that exists in its workflow", () => {
     for (const pack of packs) {
       const nodeIds = new Set(pack.workflowJson.nodes.map((n) => n.id));
+      const fixtureIds = new Set<string>();
       for (const fixture of pack.failureFixtures) {
         expect(nodeIds.has(fixture.failedNodeId), `${pack.id}:${fixture.id}`).toBe(true);
+        expect(fixtureIds.has(fixture.id), `${pack.id}:${fixture.id} duplicated`).toBe(false);
+        fixtureIds.add(fixture.id);
       }
     }
+  });
+
+  it("covers every deterministic failure mode in the catalog", () => {
+    const covered = new Set(packs.flatMap((pack) => pack.failureFixtures.map((fixture) => fixture.failureMode)));
+    expect([...covered].sort()).toEqual([...SOLUTION_PACK_FAILURE_MODES].sort());
   });
 
   it("every pack has at least one sample payload and one failure fixture", () => {
@@ -66,16 +75,26 @@ describe("solution packs catalog", () => {
     expect(getSolutionPack("does-not-exist")).toBeNull();
   });
 
-  it("public projection omits the workflow JSON and keeps only catalog-safe fields", () => {
+  it("public projection exposes safe drill descriptors but not raw workflow or error internals", () => {
     const publicPacks = listPublicSolutionPacks();
     expect(publicPacks.length).toBe(3);
     for (const pub of publicPacks) {
       expect(pub).not.toHaveProperty("workflowJson");
       expect(pub).not.toHaveProperty("samplePayloads");
-      expect(pub).not.toHaveProperty("failureFixtures");
       expect(pub.nodeCount).toBeGreaterThan(0);
       expect(pub.samplePayloadIds.length).toBe(pub.sampleCount);
       expect(pub.failureFixtureIds.length).toBe(pub.failureCount);
+      expect(pub.failureFixtures.length).toBe(pub.failureCount);
+      for (const fixture of pub.failureFixtures) {
+        expect(fixture).toEqual({
+          id: expect.any(String),
+          label: expect.any(String),
+          description: expect.any(String),
+          failureMode: expect.any(String),
+        });
+        expect(fixture).not.toHaveProperty("failedNodeId");
+        expect(fixture).not.toHaveProperty("errorJson");
+      }
     }
   });
 });

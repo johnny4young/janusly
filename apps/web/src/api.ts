@@ -283,6 +283,14 @@ function versionedWirePath(path: string, method: string): string {
   if (method !== 'GET') return path
   const queryIndex = path.indexOf('?')
   const pathname = queryIndex === -1 ? path : path.slice(0, queryIndex)
+  // `/dlq?id=` is the legacy full-detail read. The stable `/v1/dlq`
+  // contract intentionally exposes bounded list summaries only and rejects
+  // unknown query fields, so routing detail reads through the alias turns a
+  // valid recovery selection into HTTP 400.
+  if (pathname === '/dlq' && queryIndex !== -1) {
+    const query = new URLSearchParams(path.slice(queryIndex + 1))
+    if (query.has('id')) return path
+  }
   return isV1ReadPath(pathname) ? `/v1${path}` : path
 }
 

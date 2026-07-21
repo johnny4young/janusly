@@ -37,6 +37,10 @@ retroactively.
 
 ### Added
 
+- Selectable Recovery Drills in Solution Packs for credential availability and
+  expiry, malformed AI output, rate limits, upstream contract drift, and
+  provider outages. Drill runs retain durable source evidence and enter the
+  real recovery queue without exposing raw fixture errors in the catalog.
 - Stable `/v1` contracts and OpenAPI operations for starting, resuming, and
   cancelling runs, including runtime validation of strict JSON request bodies.
 - Stable `/v1` contracts for outbound MCP connection management and the recipe
@@ -64,6 +68,9 @@ retroactively.
 
 ### Fixed
 
+- Recovery-queue selections now keep the legacy full-detail `GET /dlq?id=`
+  path instead of being misrouted through the bounded `/v1/dlq` list contract
+  and failing with HTTP 400.
 - Workflow rollback now requires `workflows.write`, rejects missing parents and
   malformed source snapshots, retries concurrent version allocation, and
   reconciles schedule entries after committing the new latest version.

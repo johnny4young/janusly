@@ -90,7 +90,10 @@ the response header and v1 envelope. CORS exposes `X-Request-Id` and
    dispatcher rejection itself fails the versioned error contract.
 7. Legacy response bodies remain unchanged. The web client opts contracted GET
    paths into `/v1` and unwraps them inside `apps/web/src/api.ts`, so components
-   keep their existing payload types.
+   keep their existing payload types. The path catalog is query-aware where a
+   legacy endpoint multiplexes incompatible shapes: `/dlq?id=` stays
+   unversioned because it returns full replay-fidelity detail, while bounded
+   `/dlq` list queries use the stable `/v1/dlq` summary contract.
 8. Stable workflow authoring keeps save and rollback on the same
    `workflows.write` permission and bounded version-allocation retry policy.
    Rollback additionally requires an active parent, validates the historical
