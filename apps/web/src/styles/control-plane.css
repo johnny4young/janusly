@@ -534,6 +534,12 @@
   background: var(--we-surface-muted);
 }
 
+.we-recovery-drill-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .we-suspect-version__chip {
   display: inline-flex;
   align-items: center;

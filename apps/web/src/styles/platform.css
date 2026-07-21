@@ -6593,7 +6593,8 @@ button.we-authoring-problems__row:focus-visible {
   gap: 8px;
   margin-top: 8px;
 }
-.we-pack-drill__summary .mode-pill { flex: 0 0 auto; margin-top: 2px; }
+.we-pack-pills { display: flex; flex: 0 0 auto; flex-direction: column; gap: 4px; }
+.we-pack-drill__summary .mode-pill { flex: 0 0 auto; }
 .we-pack-drill__summary .helper-text { margin: 0; }
 .we-pack-drill__action { margin-top: 12px; width: 100%; }
 .we-pack-cred-legend {

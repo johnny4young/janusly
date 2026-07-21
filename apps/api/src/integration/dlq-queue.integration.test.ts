@@ -9,8 +9,8 @@
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { db, deadLetters } from "@janusly/db";
-import { listRecoveryQueue } from "../dlq";
+import { db, deadLetters, runs } from "@janusly/db";
+import { getRecoveryDrillProvenance, listRecoveryQueue } from "../dlq";
 
 const RUN_TAG = `${Date.now()}-${process.pid}`;
 const ORG = `it-dlq-${RUN_TAG}`;
@@ -19,6 +19,8 @@ const ORG_OTHER = `it-dlq-other-${RUN_TAG}`;
 afterAll(async () => {
   await db.delete(deadLetters).where(eq(deadLetters.orgId, ORG));
   await db.delete(deadLetters).where(eq(deadLetters.orgId, ORG_OTHER));
+  await db.delete(runs).where(eq(runs.orgId, ORG));
+  await db.delete(runs).where(eq(runs.orgId, ORG_OTHER));
 });
 
 async function seedDl(org: string, id: string, createdAt: Date): Promise<void> {
@@ -64,5 +66,36 @@ describe("listRecoveryQueue day filter (real Postgres)", () => {
     const ids = mine.map((r) => r.id);
     expect(ids).toContain(`${RUN_TAG}-iso-a`);
     expect(ids).not.toContain(`${RUN_TAG}-iso-b`);
+  });
+});
+
+describe("getRecoveryDrillProvenance (real Postgres)", () => {
+  it("returns only the bounded projection and reasserts org scope", async () => {
+    const runId = `${RUN_TAG}-drill-run`;
+    await db.insert(runs).values({
+      id: runId,
+      orgId: ORG,
+      workflowVersionId: `${runId}-version`,
+      status: "failed",
+      inputJson: {
+        workflow: { private: "not returned" },
+        drill: {
+          kind: "solution_pack_drill",
+          packId: "incident-triage",
+          fixtureId: "worker_interrupted_during_page",
+          failureMode: "worker_stalled",
+          recoveryPath: "stalled_node_reaper",
+          thresholdMinutes: 60,
+        },
+      },
+    });
+
+    await expect(getRecoveryDrillProvenance(ORG, runId)).resolves.toEqual({
+      kind: "solution_pack_drill",
+      packId: "incident-triage",
+      fixtureId: "worker_interrupted_during_page",
+      recoveryPath: "stalled_node_reaper",
+    });
+    await expect(getRecoveryDrillProvenance(ORG_OTHER, runId)).resolves.toBeNull();
   });
 });

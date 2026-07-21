@@ -11,7 +11,9 @@ import { DeadLetterQueueAdapter } from "../adapters/dead-letter-queue";
 
 const TAG = `${Date.now()}-${process.pid}`;
 const ORG = `it-terminal-failure-${TAG}`;
-const RUN_IDS = ["committed", "rollback", "stale"].map((suffix) => `${TAG}-${suffix}`);
+const RUN_IDS = ["committed", "rollback", "stale", "stalled-dlq", "stalled-no-dlq"].map(
+  (suffix) => `${TAG}-${suffix}`,
+);
 const workflow = {
   dslVersion: "1.0" as const,
   id: "workflow-terminal-failure",
@@ -20,12 +22,16 @@ const workflow = {
 };
 const node = workflow.nodes[0]!;
 
-async function seedRunning(runId: string, recoveryClaimToken: string | null = null): Promise<void> {
+async function seedRunning(
+  runId: string,
+  recoveryClaimToken: string | null = null,
+  runStatus = "running",
+): Promise<void> {
   await db.insert(runs).values({
     id: runId,
     orgId: ORG,
     workflowVersionId: `${runId}-version`,
-    status: "running",
+    status: runStatus,
   });
   await db.insert(runNodes).values({
     id: `${runId}-node`,
@@ -147,5 +153,83 @@ describe("DeadLetterQueueAdapter.persistTerminalFailure (real Postgres)", () => 
     const dlq = await db.select().from(deadLetters).where(eq(deadLetters.runId, runId));
     expect(runNode?.status).toBe("running");
     expect(dlq).toHaveLength(0);
+  });
+
+  it("atomically persists the stalled-node CAS, DLQ, causal event, and run failure", async () => {
+    const runId = RUN_IDS[3]!;
+    await seedRunning(runId);
+    const adapter = new DeadLetterQueueAdapter();
+
+    await expect(adapter.persistStalledTerminalFailure({
+      runId,
+      orgId: ORG,
+      nodeId: node.id,
+      attempt: 1,
+      error: { name: "WorkerStalledError", code: "worker_stalled", message: "worker interrupted" },
+      deadLetter: {
+        deadLetterId: `${runId}-dlq`,
+        workflowId: workflow.id,
+        workflow,
+        node,
+      },
+      eventMetadata: { drill: { kind: "solution_pack_drill" } },
+    })).resolves.toEqual({
+      persisted: true,
+      deadLettered: true,
+      deadLetterId: `${runId}-dlq`,
+    });
+
+    const [run] = await db.select({ status: runs.status }).from(runs).where(eq(runs.id, runId));
+    const [runNode] = await db
+      .select({ status: runNodes.status })
+      .from(runNodes)
+      .where(eq(runNodes.runId, runId));
+    const dlq = await db.select({ id: deadLetters.id }).from(deadLetters).where(eq(deadLetters.runId, runId));
+    const events = await db
+      .select({ type: runEvents.type, payload: runEvents.payload })
+      .from(runEvents)
+      .where(eq(runEvents.runId, runId));
+
+    expect(run?.status).toBe("failed");
+    expect(runNode?.status).toBe("failed");
+    expect(dlq).toEqual([{ id: `${runId}-dlq` }]);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "node.failed",
+        payload: expect.objectContaining({
+          reason: "worker_stalled",
+          drill: { kind: "solution_pack_drill" },
+        }),
+      }),
+      expect.objectContaining({ type: "run.failed" }),
+    ]));
+  });
+
+  it("atomically terminates an unreplayable stalled run without a DLQ row", async () => {
+    const runId = RUN_IDS[4]!;
+    await seedRunning(runId, null, "waiting");
+    const adapter = new DeadLetterQueueAdapter();
+
+    await expect(adapter.persistStalledTerminalFailure({
+      runId,
+      orgId: ORG,
+      nodeId: node.id,
+      attempt: 1,
+      error: { name: "WorkerStalledError", code: "worker_stalled", message: "snapshot missing" },
+      deadLetter: null,
+    })).resolves.toEqual({ persisted: true, deadLettered: false, deadLetterId: null });
+
+    const [run] = await db.select({ status: runs.status }).from(runs).where(eq(runs.id, runId));
+    const [runNode] = await db
+      .select({ status: runNodes.status })
+      .from(runNodes)
+      .where(eq(runNodes.runId, runId));
+    const dlq = await db.select().from(deadLetters).where(eq(deadLetters.runId, runId));
+    const events = await db.select({ type: runEvents.type }).from(runEvents).where(eq(runEvents.runId, runId));
+
+    expect(run?.status).toBe("failed");
+    expect(runNode?.status).toBe("failed");
+    expect(dlq).toHaveLength(0);
+    expect(events.map((event) => event.type).sort()).toEqual(["node.failed", "run.failed"]);
   });
 });

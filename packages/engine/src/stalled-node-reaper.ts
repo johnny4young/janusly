@@ -25,7 +25,9 @@
  *   clobbered), dead-letters it through the existing `DeadLetterQueueAdapter`
  *   (so a recovery item + alert fire and `/dlq/replay` works), emits a
  *   `node.failed` run event, and rolls the run up to a terminal `failed`
- *   status. The node-level recovery is INTENTIONALLY a fail-into-DLQ, not an
+ *   status. Those writes commit through one atomic terminal-failure boundary,
+ *   so a process crash cannot strand a half-reaped run. The node-level recovery
+ *   is INTENTIONALLY a fail-into-DLQ, not an
  *   automatic re-execute: a stalled node may have already run a non-idempotent
  *   side effect (sent an email, charged a card), so the operator decides
  *   whether to replay — same posture as every other DLQ entry.
@@ -41,28 +43,25 @@
  * - The threshold has a 15-minute floor so an operator can't accidentally
  *   configure the reaper to kill legitimately long-running nodes; the default
  *   is 60 minutes.
- * - The CAS fail (`failStalledRunningNode`) is the per-node claim: concurrent
- *   worker replicas sweeping at once can't double-process a node, and a node
- *   that legitimately completed is left alone.
- * - Dead-lettering is BEST-EFFORT (it needs the workflow snapshot from
- *   `runs.input_json`): if the snapshot is missing/unparseable the node is
- *   still failed and the run still terminates, so the recoverability promise
- *   holds even without a replay surface.
- * - Known residual: unlike the ordinary runtime's atomic terminal-failure
- *   transaction, this recovery sweep still performs its CAS fail, DLQ write,
- *   event, and status rollup as separate best-effort steps. A process crash in
- *   the sub-millisecond window after the CAS can therefore leave a `failed`
- *   node under a non-terminal run that the running-node scan won't re-find.
- *   Another stalled node can trigger a later rollup; otherwise an operator
- *   must repair the run. Do not copy this posture into normal execution.
+ * - The running-node CAS, optional DLQ row, node.failed event, and parent-run
+ *   failure commit together through `persistStalledTerminalFailure`.
+ *   Concurrent replicas cannot double-process a node, and a node that
+ *   legitimately completed is left alone.
+ * - Dead-letter payload reconstruction is BEST-EFFORT (it needs the workflow
+ *   snapshot from `runs.input_json`): if the snapshot is missing/unparseable,
+ *   the same transaction still fails the node, records the event, and
+ *   terminates the run without a replay surface.
  */
 
 import {
   recordSystemAudit, findStalledRunningNodes, type StalledRunningNode } from "@janusly/data";
 import { WorkflowSchema } from "@janusly/shared";
 
-import { DeadLetterQueueAdapter } from "./adapters/dead-letter-queue";
-import { appendEvent, failStalledRunningNode, updateRunStatusFromNodes } from "./persistence";
+import {
+  DeadLetterQueueAdapter,
+  type StalledTerminalFailureInput,
+  type StalledTerminalFailureResult,
+} from "./adapters/dead-letter-queue";
 import { workflowQueue } from "./queue";
 import { validateCronExpression } from "./schedule";
 import type { DeadLetterInput, SerializedError } from "./core/types";
@@ -104,11 +103,8 @@ export type StalledNodeError = SerializedError & { code: "worker_stalled" };
  *  in {@link handleStalledNodeReaperTrigger}, mocks in tests. */
 export type StalledNodeReaperDeps = {
   findStalled: (input: { olderThan: Date; limit: number }) => Promise<StalledRunningNode[]>;
-  /** CAS fail (`running → failed`). Returns `true` only when it flipped. */
-  failNode: (runId: string, nodeId: string, error: StalledNodeError) => Promise<boolean>;
-  enqueueDeadLetter: (input: DeadLetterInput) => Promise<void>;
-  appendNodeFailedEvent: (runId: string, nodeId: string, payload: unknown) => Promise<void>;
-  rollupRunStatus: (runId: string) => Promise<void>;
+  /** Atomic running-node CAS + optional DLQ + timeline + run failure. */
+  persistFailure: (input: StalledTerminalFailureInput) => Promise<StalledTerminalFailureResult>;
   /** Injected clock so tests are deterministic. */
   now: () => Date;
 };
@@ -131,6 +127,8 @@ export type ReapStalledNodesResult = {
   deadLettered: number;
   /** Stalled nodes whose CAS lost — they had already advanced. */
   skipped: number;
+  /** Bounded DLQ identities created by this sweep; useful for focused drills. */
+  deadLetterIds: string[];
 };
 
 /** Build the stable `worker_stalled` error stamped onto a reaped node. */
@@ -171,11 +169,27 @@ function reconstructDeadLetterPayload(
   };
 }
 
+/** Keep only the bounded drill provenance fields authored by the server. */
+function readDrillProvenance(inputJson: unknown): Record<string, string> | undefined {
+  if (!inputJson || typeof inputJson !== "object") return undefined;
+  const drill = (inputJson as { drill?: unknown }).drill;
+  if (!drill || typeof drill !== "object") return undefined;
+  const record = drill as Record<string, unknown>;
+  if (record.kind !== "solution_pack_drill") return undefined;
+  const keys = ["kind", "packId", "fixtureId", "failureMode", "recoveryPath"] as const;
+  const bounded: Record<string, string> = {};
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.length > 0) bounded[key] = value.slice(0, 120);
+  }
+  return bounded.kind ? bounded : undefined;
+}
+
 /**
- * Pure reaper core. Scans for stalled nodes and, for each it can claim via the
- * CAS fail, dead-letters (best-effort) + emits a `node.failed` event + rolls
- * the run up to terminal. Never throws — per-node faults are isolated so one
- * bad row can't abort the sweep.
+ * Pure reaper core. Scans for stalled nodes and passes each candidate through
+ * the atomic terminal boundary. Replay payload reconstruction remains
+ * best-effort. Never throws — per-node faults are isolated so one malformed
+ * legacy row or database blip cannot abort the sweep.
  */
 export async function reapStalledNodes(
   deps: StalledNodeReaperDeps,
@@ -184,52 +198,42 @@ export async function reapStalledNodes(
   const olderThan = new Date(deps.now().getTime() - config.thresholdMs);
   const stalled = await deps.findStalled({ olderThan, limit: config.limit });
 
-  const result: ReapStalledNodesResult = { scanned: stalled.length, reaped: 0, deadLettered: 0, skipped: 0 };
+  const result: ReapStalledNodesResult = {
+    scanned: stalled.length,
+    reaped: 0,
+    deadLettered: 0,
+    skipped: 0,
+    deadLetterIds: [],
+  };
 
   for (const node of stalled) {
     try {
       const error = buildStalledError(node, config.thresholdMs);
 
-      // CAS claim: only proceed if this sweep is the one that flipped the node.
-      const flipped = await deps.failNode(node.runId, node.nodeId, error);
-      if (!flipped) {
+      const payload = reconstructDeadLetterPayload(node);
+      const drill = readDrillProvenance(node.inputJson);
+      const persisted = await deps.persistFailure({
+        runId: node.runId,
+        orgId: node.orgId,
+        nodeId: node.nodeId,
+        attempt: node.attempt,
+        error,
+        deadLetter: payload
+          ? {
+              workflowId: payload.workflowId,
+              workflow: payload.workflow,
+              node: payload.node,
+            }
+          : null,
+        ...(drill ? { eventMetadata: { drill } } : {}),
+      });
+      if (!persisted.persisted) {
         result.skipped += 1;
         continue;
       }
       result.reaped += 1;
-
-      // Best-effort dead-letter so the operator gets a recovery item + replay.
-      const payload = reconstructDeadLetterPayload(node);
-      if (payload) {
-        try {
-          await deps.enqueueDeadLetter({
-            runId: node.runId,
-            orgId: node.orgId,
-            workflowId: payload.workflowId,
-            workflow: payload.workflow,
-            node: payload.node,
-            attempt: node.attempt,
-            error,
-          });
-          result.deadLettered += 1;
-        } catch (err) {
-          console.warn("[stalled-node-reaper] dead-letter write failed (node already failed)", {
-            runId: node.runId,
-            nodeId: node.nodeId,
-            err: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
-
-      // Timeline event + terminal rollup so the run stops being stuck. Done
-      // even when the DLQ write was skipped, so the recoverability promise
-      // (run reaches a terminal state) holds regardless of the snapshot.
-      await deps.appendNodeFailedEvent(node.runId, node.nodeId, {
-        error,
-        attempt: node.attempt,
-        reason: "worker_stalled",
-      });
-      await deps.rollupRunStatus(node.runId);
+      if (persisted.deadLettered) result.deadLettered += 1;
+      if (persisted.deadLetterId) result.deadLetterIds.push(persisted.deadLetterId);
     } catch (err) {
       console.warn("[stalled-node-reaper] failed to reap node", {
         runId: node.runId,
@@ -349,10 +353,7 @@ export async function handleStalledNodeReaperTrigger(
     const result = await reapStalledNodes(
       {
         findStalled: (input) => findStalledRunningNodes(input),
-        failNode: (runId, nodeId, error) => failStalledRunningNode(runId, nodeId, error),
-        enqueueDeadLetter: (input) => deadLetterAdapter.enqueueDeadLetter(input),
-        appendNodeFailedEvent: (runId, nodeId, payload) => appendEvent(runId, nodeId, "node.failed", payload).then(() => undefined),
-        rollupRunStatus: (runId) => updateRunStatusFromNodes(runId).then(() => undefined),
+        persistFailure: (input) => deadLetterAdapter.persistStalledTerminalFailure(input),
         now: () => new Date(),
       },
       { thresholdMs, limit: STALLED_NODE_REAPER_LIMIT },

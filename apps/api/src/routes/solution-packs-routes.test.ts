@@ -39,6 +39,10 @@ vi.mock("@janusly/engine/src/adapters/sample-failure", () => ({
   injectSampleFailure: vi.fn(),
 }));
 
+vi.mock("@janusly/engine/src/adapters/stalled-node-drill", () => ({
+  runStalledNodeDrill: vi.fn(),
+}));
+
 vi.mock("@janusly/engine/src/workflow-validation", () => ({
   validateWorkflow: vi.fn(() => ({ valid: true, issues: [] })),
 }));
@@ -56,6 +60,7 @@ import { readJson } from "../http";
 import { getCredentialByName, listOrgConfig } from "@janusly/data";
 import { startSandboxRun } from "@janusly/engine/src/adapters/sandbox-run";
 import { injectSampleFailure } from "@janusly/engine/src/adapters/sample-failure";
+import { runStalledNodeDrill } from "@janusly/engine/src/adapters/stalled-node-drill";
 import { saveWorkflowVersion } from "../workflows-save";
 import { auditAction } from "../audit-helper";
 import type { Route } from "../routes";
@@ -65,6 +70,7 @@ const getCredentialByNameMock = vi.mocked(getCredentialByName);
 const listOrgConfigMock = vi.mocked(listOrgConfig);
 const startSandboxRunMock = vi.mocked(startSandboxRun);
 const injectSampleFailureMock = vi.mocked(injectSampleFailure);
+const runStalledNodeDrillMock = vi.mocked(runStalledNodeDrill);
 const saveWorkflowVersionMock = vi.mocked(saveWorkflowVersion);
 const auditActionMock = vi.mocked(auditAction);
 
@@ -104,6 +110,19 @@ beforeEach(() => {
   } as never);
   startSandboxRunMock.mockResolvedValue({ runId: "run-1" } as never);
   injectSampleFailureMock.mockResolvedValue({ runId: "run-9", deadLetterId: "dlq-9" } as never);
+  runStalledNodeDrillMock.mockResolvedValue({
+    runId: "run-stalled",
+    deadLetterId: "dlq-stalled",
+    evidence: {
+      recoveryPath: "stalled_node_reaper",
+      thresholdMinutes: 60,
+      simulatedStallMs: 3_601_000,
+      reaperRuntimeMs: 12,
+      scanned: 1,
+      reaped: 1,
+      deadLettered: 1,
+    },
+  } as never);
 });
 
 afterEach(() => {
@@ -151,6 +170,7 @@ describe("GET /solution-packs (catalog)", () => {
         label: expect.any(String),
         description: expect.any(String),
         failureMode: expect.any(String),
+        recoveryPath: expect.any(String),
       });
       expect(fixtures[0]).not.toHaveProperty("failedNodeId");
       expect(fixtures[0]).not.toHaveProperty("errorJson");
@@ -248,6 +268,7 @@ describe("POST /solution-packs/:id/inject-failure", () => {
     expect(payload.deadLetterId).toBe("dlq-9");
     expect(payload.fixtureId).toBe("classification_output_invalid");
     expect(payload.failureMode).toBe("ai_output_invalid");
+    expect(payload.recoveryPath).toBe("direct_failure");
 
     expect(injectSampleFailureMock).toHaveBeenCalledTimes(1);
     const arg = injectSampleFailureMock.mock.calls[0][0];
@@ -259,6 +280,7 @@ describe("POST /solution-packs/:id/inject-failure", () => {
       packId: "incident-triage",
       fixtureId: "classification_output_invalid",
       failureMode: "ai_output_invalid",
+      recoveryPath: "direct_failure",
     });
 
     expect(auditActionMock.mock.calls[0][1]).toBe("solution_pack.failure_injected");
@@ -266,8 +288,55 @@ describe("POST /solution-packs/:id/inject-failure", () => {
       metadata: {
         fixtureId: "classification_output_invalid",
         failureMode: "ai_output_invalid",
+        recoveryPath: "direct_failure",
       },
     });
+  });
+
+  it("runs a worker interruption through the scoped stalled-node reaper path", async () => {
+    const { payload, status } = await callRoute(
+      "POST",
+      "/solution-packs/incident-triage/inject-failure",
+      { fixtureId: "worker_interrupted_during_page" },
+    );
+
+    expect(status).toBe(200);
+    expect(payload).toMatchObject({
+      runId: "run-stalled",
+      deadLetterId: "dlq-stalled",
+      fixtureId: "worker_interrupted_during_page",
+      failureMode: "worker_stalled",
+      recoveryPath: "stalled_node_reaper",
+      evidence: {
+        thresholdMinutes: 60,
+        scanned: 1,
+        reaped: 1,
+        deadLettered: 1,
+      },
+    });
+    expect(injectSampleFailureMock).not.toHaveBeenCalled();
+    expect(runStalledNodeDrillMock).toHaveBeenCalledWith(expect.objectContaining({
+      orgId: "org-1",
+      createdBy: "user-1",
+      failedNodeId: "page_oncall",
+      source: {
+        kind: "solution_pack_drill",
+        packId: "incident-triage",
+        fixtureId: "worker_interrupted_during_page",
+        failureMode: "worker_stalled",
+        recoveryPath: "stalled_node_reaper",
+      },
+    }));
+    expect(auditActionMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "solution_pack.failure_injected",
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          recoveryPath: "stalled_node_reaper",
+          evidence: expect.objectContaining({ reaperRuntimeMs: 12 }),
+        }),
+      }),
+    );
   });
 
   it("rejects an unknown fixture id without creating an untraceable default", async () => {

@@ -88,11 +88,14 @@ export type SolutionPackFailureMode =
   | 'rate_limited'
   | 'contract_drift'
   | 'upstream_unavailable'
+  | 'worker_stalled'
+export type SolutionPackRecoveryPath = 'direct_failure' | 'stalled_node_reaper'
 type PackFailureFixture = {
   id: string
   label: string
   description: string
   failureMode: SolutionPackFailureMode
+  recoveryPath: SolutionPackRecoveryPath
 }
 /** Catalog-safe projection of a solution pack returned by `GET /solution-packs`. */
 export type SolutionPackPublic = {

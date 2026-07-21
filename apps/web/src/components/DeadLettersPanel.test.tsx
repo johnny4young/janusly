@@ -160,6 +160,32 @@ describe('<DeadLettersPanel />', () => {
     })
   })
 
+  it('labels a selected recovery drill with its actual recovery path', async () => {
+    const row = mockDeadLetter('worker-drill')
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.startsWith('/dlq/counts')) return countsFromRows([row])
+      if (path.startsWith('/dlq/queue')) return { items: [row], nextCursor: null, hasMore: false }
+      if (path === '/dlq?id=worker-drill') {
+        return {
+          ...row,
+          drill: {
+            kind: 'solution_pack_drill',
+            packId: 'incident-triage',
+            fixtureId: 'worker_interrupted_during_page',
+            recoveryPath: 'stalled_node_reaper',
+          },
+        }
+      }
+      return { items: [], clusters: [], runs: [], proposals: [] }
+    })
+
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+
+    const context = await screen.findByTestId('dlq-recovery-drill-context')
+    expect(context).toHaveTextContent('Recovery drill')
+    expect(context).toHaveTextContent('Real reaper path')
+  })
+
   it('refetches /dlq with the chosen status when the status filter changes', async () => {
     const rows = [
       mockDeadLetter('open-1', { status: 'open' }),

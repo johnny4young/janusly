@@ -103,6 +103,7 @@
       "label": "Escalation post timed out",
       "description": "The support-channel notification exceeds its bounded request timeout before the customer reply is sent.",
       "failureMode": "upstream_unavailable",
+      "recoveryPath": "direct_failure",
       "failedNodeId": "escalate",
       "errorJson": {
         "name": "ToolError",

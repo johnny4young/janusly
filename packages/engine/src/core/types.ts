@@ -244,8 +244,6 @@ export interface QueueAdapter {
   enqueueNode(input: EnqueueNodeInput): Promise<void>;
   /** Atomically persist an exhausted attempt and its DLQ/timeline effects. */
   persistTerminalFailure(input: TerminalFailureInput): Promise<boolean>;
-  /** Used by the stalled-node reaper after it has already acquired its CAS. */
-  enqueueDeadLetter?(input: DeadLetterInput): Promise<void>;
 }
 
 /** DLQ replay boundary used by `apps/api/src/routes/dlq-routes.ts:/dlq/replay`. */

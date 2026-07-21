@@ -89,6 +89,7 @@
       "label": "Slack page returned HTTP 500",
       "description": "The on-call notification provider is temporarily unavailable after the incident issue is created.",
       "failureMode": "upstream_unavailable",
+      "recoveryPath": "direct_failure",
       "failedNodeId": "page_oncall",
       "errorJson": {
         "name": "ToolError",
@@ -103,6 +104,7 @@
       "label": "AI severity output malformed",
       "description": "The model returns text outside the expected severity contract and the classification step fails safely.",
       "failureMode": "ai_output_invalid",
+      "recoveryPath": "direct_failure",
       "failedNodeId": "classify",
       "errorJson": {
         "name": "AiOutputValidationError",
@@ -116,6 +118,7 @@
       "label": "GitHub response contract drifted",
       "description": "The issue provider returns a success response without the URL required by the next workflow step.",
       "failureMode": "contract_drift",
+      "recoveryPath": "direct_failure",
       "failedNodeId": "open_issue",
       "errorJson": {
         "name": "ToolOutputValidationError",
@@ -124,6 +127,14 @@
         "statusCode": 200,
         "node": "open_issue"
       }
+    },
+    {
+      "id": "worker_interrupted_during_page",
+      "label": "Worker interrupted during on-call page",
+      "description": "A controlled stale running claim crosses the configured age threshold and is terminated by the real stalled-node reaper.",
+      "failureMode": "worker_stalled",
+      "recoveryPath": "stalled_node_reaper",
+      "failedNodeId": "page_oncall"
     }
   ]
 }

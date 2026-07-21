@@ -101,6 +101,7 @@
       "label": "Billing credential unavailable",
       "description": "The billing connector cannot resolve its configured credential before the retry starts.",
       "failureMode": "credential_unavailable",
+      "recoveryPath": "direct_failure",
       "failedNodeId": "retry_charge",
       "errorJson": {
         "name": "CredentialMissingError",
@@ -114,6 +115,7 @@
       "label": "Billing credential expired",
       "description": "The billing provider rejects an expired credential and the charge retry moves into recovery.",
       "failureMode": "credential_expired",
+      "recoveryPath": "direct_failure",
       "failedNodeId": "retry_charge",
       "errorJson": {
         "name": "CredentialExpiredError",
@@ -128,6 +130,7 @@
       "label": "Billing provider rate limited",
       "description": "The billing provider returns HTTP 429 so operators can inspect retry-safe recovery evidence.",
       "failureMode": "rate_limited",
+      "recoveryPath": "direct_failure",
       "failedNodeId": "retry_charge",
       "errorJson": {
         "name": "ToolError",

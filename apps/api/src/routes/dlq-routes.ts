@@ -39,7 +39,7 @@ import {
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { CLUSTER_MEMBERS_DEFAULT_LIMIT, CLUSTER_MEMBERS_MAX_LIMIT, findClusterMembers, pickClusterReplayWorkflow, recheckSignature } from "../cluster-recovery";
-import { countDeadLettersByStatus, decodeRecoveryQueueCursor, getDeadLetter, isDeadLetterStatus, isRecoveryQueueSort, listRecoveryQueue, markDeadLetterReplayed, markDeadLetterResolved, queryRecoveryQueuePage } from "../dlq";
+import { countDeadLettersByStatus, decodeRecoveryQueueCursor, getDeadLetter, getRecoveryDrillProvenance, isDeadLetterStatus, isRecoveryQueueSort, listRecoveryQueue, markDeadLetterReplayed, markDeadLetterResolved, queryRecoveryQueuePage } from "../dlq";
 import { RECOVERY_ITEM_SEVERITIES, type RecoveryItemSeverity } from "@janusly/shared";
 import {
   resolveRecoveryItemForDismiss,
@@ -274,13 +274,16 @@ export const dlqRoutes: Route[] = [
         // saved shortly before the failure, attach the suspect version + both
         // DAG snapshots so the panel renders "Started after vN was saved" +
         // the diff. Null on any miss — the detail read never fails over it.
-        const suspectVersion = await resolveSuspectVersion(
-          auth.orgId,
-          item.runId,
-          item.createdAt ?? null,
-        ).catch(() => null);
+        const [suspectVersion, drill] = await Promise.all([
+          resolveSuspectVersion(
+            auth.orgId,
+            item.runId,
+            item.createdAt ?? null,
+          ).catch(() => null),
+          getRecoveryDrillProvenance(auth.orgId, item.runId).catch(() => null),
+        ]);
         const { replayClaimToken: _replayClaimToken, replayClaimedAt: _replayClaimedAt, ...publicItem } = item;
-        return sendJson(res, { ...publicItem, suspectVersion });
+        return sendJson(res, { ...publicItem, suspectVersion, drill });
       }
       if (status && !isDeadLetterStatus(status)) {
         return sendError(res, "dlq_invalid_status", "Invalid DLQ status", 400);

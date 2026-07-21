@@ -86,6 +86,14 @@ export type SuspectVersionInfo = {
   previousDagJson: WorkflowDefinition
 }
 
+/** Bounded recovery-drill provenance from the legacy DLQ detail read. */
+export type RecoveryDrillProvenance = {
+  kind: 'solution_pack_drill'
+  packId: string
+  fixtureId: string
+  recoveryPath: 'direct_failure' | 'stalled_node_reaper'
+}
+
 /** Web-side `dead_letters` row shape (matches the API's response). `recovery`
  *  is the inline overlay (null when the row has no paired recovery item).
  *  LIST rows (`/dlq`, `/dlq/queue`) are summary projections: they carry
@@ -112,6 +120,8 @@ export type DeadLetter = {
   recovery?: DeadLetterRecovery | null
   /** Suspect-version correlation — detail reads only; null when no recent-save correlation. */
   suspectVersion?: SuspectVersionInfo | null
+  /** Code-authored recovery drill context — detail reads only. */
+  drill?: RecoveryDrillProvenance | null
 }
 
 type BulkResolveResult = {
@@ -1092,6 +1102,17 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
               <Download size={12} aria-hidden="true" /> {t('dlq.action.export')}
             </button>
           </div>
+
+          {selectedFull?.drill && (
+            <div className="we-recovery-drill-context" data-testid="dlq-recovery-drill-context">
+              <span className="we-pill" data-tone="info">{t('dlq.drill.label')}</span>
+              <span className="we-pill" data-tone="neutral">
+                {t(`packs.drill.path.${selectedFull.drill.recoveryPath}`, {
+                  defaultValue: selectedFull.drill.recoveryPath,
+                })}
+              </span>
+            </div>
+          )}
 
           {selectedFull?.suspectVersion && (
             <div className="we-suspect-version" data-testid="dlq-suspect-version">

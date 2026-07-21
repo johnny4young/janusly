@@ -23,6 +23,8 @@ set the real `owner` / `repo` on `open_issue` in the Inspector.
   "DB pool exhausted" alert. The GitHub + Slack steps are skipped in sandbox mode,
   so no issue or page goes out.
 - **Start recovery drill** lets you reproduce malformed AI classification,
-  GitHub response-contract drift, or a temporary Slack outage. The selected
+  GitHub response-contract drift, a temporary Slack outage, or the durable
+  stale-node state left by an interrupted worker. The worker scenario crosses
+  the configured age threshold and uses the real stalled-node reaper; every
   drill records its source before opening the recovery queue for diagnosis and
   sandbox validation.

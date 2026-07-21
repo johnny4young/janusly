@@ -39,6 +39,7 @@ import { getCredentialByName, listOrgConfig } from "@janusly/data";
 import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
 import { startSandboxRun } from "@janusly/engine/src/adapters/sandbox-run";
 import { injectSampleFailure } from "@janusly/engine/src/adapters/sample-failure";
+import { runStalledNodeDrill } from "@janusly/engine/src/adapters/stalled-node-drill";
 import { WorkflowSchema } from "@janusly/shared";
 
 import { auditAction } from "../audit-helper";
@@ -180,19 +181,30 @@ export const solutionPacksRoutes: Route[] = [
         return sendError(res, "pack_no_failure_fixture", "No matching failure fixture for this pack", 400);
       }
 
-      const { runId, deadLetterId } = await injectSampleFailure({
-        orgId: auth.orgId,
-        createdBy: auth.userId,
-        workflow: pack.workflowJson,
-        failedNodeId: fixture.failedNodeId,
-        errorJson: fixture.errorJson,
-        source: {
-          kind: "solution_pack_drill",
-          packId: pack.id,
-          fixtureId: fixture.id,
-          failureMode: fixture.failureMode,
-        },
-      });
+      const sourceBase = {
+        kind: "solution_pack_drill" as const,
+        packId: pack.id,
+        fixtureId: fixture.id,
+        failureMode: fixture.failureMode,
+      };
+      const result = fixture.recoveryPath === "stalled_node_reaper"
+        ? await runStalledNodeDrill({
+            orgId: auth.orgId,
+            createdBy: auth.userId,
+            workflow: pack.workflowJson,
+            failedNodeId: fixture.failedNodeId,
+            source: { ...sourceBase, recoveryPath: "stalled_node_reaper" },
+          })
+        : await injectSampleFailure({
+            orgId: auth.orgId,
+            createdBy: auth.userId,
+            workflow: pack.workflowJson,
+            failedNodeId: fixture.failedNodeId,
+            errorJson: fixture.errorJson,
+            source: { ...sourceBase, recoveryPath: "direct_failure" },
+          });
+      const { runId, deadLetterId } = result;
+      const evidence = "evidence" in result ? result.evidence : undefined;
 
       await auditAction(auth, "solution_pack.failure_injected", {
         targetType: "solution_pack",
@@ -201,9 +213,11 @@ export const solutionPacksRoutes: Route[] = [
           packId: pack.id,
           fixtureId: fixture.id,
           failureMode: fixture.failureMode,
+          recoveryPath: fixture.recoveryPath,
           failedNodeId: fixture.failedNodeId,
           runId,
           deadLetterId,
+          ...(evidence ? { evidence } : {}),
         },
       });
 
@@ -212,6 +226,8 @@ export const solutionPacksRoutes: Route[] = [
         deadLetterId,
         fixtureId: fixture.id,
         failureMode: fixture.failureMode,
+        recoveryPath: fixture.recoveryPath,
+        ...(evidence ? { evidence } : {}),
       });
     },
   },

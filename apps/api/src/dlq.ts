@@ -11,7 +11,7 @@
  */
 
 import { db } from "@janusly/db";
-import { deadLetters, recoveryItems, workflows } from "@janusly/db";
+import { deadLetters, recoveryItems, runs, workflows } from "@janusly/db";
 import { eq, desc, asc, and, or, lt, gt, gte, ilike, isNull, count, sql, type SQL } from "drizzle-orm";
 import { escapeLikePattern } from "@janusly/data";
 import type { RecoveryItemSeverity } from "@janusly/shared";
@@ -23,6 +23,46 @@ import { publishCacheInvalidation } from "./cache-invalidation-bus";
 export const deadLetterStatuses = ["open", "replayed", "resolved"] as const;
 /** Inferred string-literal union for `deadLetterStatuses`. */
 export type DeadLetterStatus = typeof deadLetterStatuses[number];
+
+/** Safe, bounded provenance attached only to code-authored recovery drills. */
+export type RecoveryDrillProvenance = {
+  kind: "solution_pack_drill";
+  packId: string;
+  fixtureId: string;
+  recoveryPath: "direct_failure" | "stalled_node_reaper";
+};
+
+const DRILL_PROVENANCE_TEXT_MAX = 128;
+
+function boundedDrillText(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 && value.length <= DRILL_PROVENANCE_TEXT_MAX
+    ? value
+    : null;
+}
+
+/**
+ * Project persisted run input into the closed public drill envelope. Arbitrary
+ * run input, timestamps, thresholds, and future private metadata never ride on
+ * the DLQ detail response.
+ */
+export function parseRecoveryDrillProvenance(inputJson: unknown): RecoveryDrillProvenance | null {
+  if (!inputJson || typeof inputJson !== "object" || Array.isArray(inputJson)) return null;
+  const drill = (inputJson as { drill?: unknown }).drill;
+  if (!drill || typeof drill !== "object" || Array.isArray(drill)) return null;
+  const candidate = drill as Record<string, unknown>;
+  const packId = boundedDrillText(candidate.packId);
+  const fixtureId = boundedDrillText(candidate.fixtureId);
+  const recoveryPath = candidate.recoveryPath;
+  if (
+    candidate.kind !== "solution_pack_drill"
+    || !packId
+    || !fixtureId
+    || (recoveryPath !== "direct_failure" && recoveryPath !== "stalled_node_reaper")
+  ) {
+    return null;
+  }
+  return { kind: "solution_pack_drill", packId, fixtureId, recoveryPath };
+}
 
 /** Type guard for `DeadLetterStatus`. */
 export function isDeadLetterStatus(value: unknown): value is DeadLetterStatus {
@@ -434,6 +474,19 @@ export async function countDeadLettersByStatus(orgId: string): Promise<DeadLette
 export async function getDeadLetter(orgId: string, id: string) {
   const rows = await db.select().from(deadLetters).where(and(eq(deadLetters.id, id), eq(deadLetters.orgId, orgId)));
   return rows[0] ?? null;
+}
+
+/** Resolve the safe drill provenance for one org-scoped run, if present. */
+export async function getRecoveryDrillProvenance(
+  orgId: string,
+  runId: string,
+): Promise<RecoveryDrillProvenance | null> {
+  const rows = await db
+    .select({ inputJson: runs.inputJson })
+    .from(runs)
+    .where(and(eq(runs.id, runId), eq(runs.orgId, orgId)))
+    .limit(1);
+  return parseRecoveryDrillProvenance(rows[0]?.inputJson);
 }
 
 /** Flip status to `replayed` and stamp `replayedAt`. Called after re-enqueue. */

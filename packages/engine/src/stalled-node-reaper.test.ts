@@ -39,14 +39,15 @@ function stalledNode(overrides: Partial<StalledRunningNode> = {}): StalledRunnin
   };
 }
 
-/** Assemble reaper deps with vi mocks; `failNode` resolves `true` (CAS wins) by default. */
+/** Assemble reaper deps with an atomic persistence mock that wins by default. */
 function makeDeps(overrides: Partial<StalledNodeReaperDeps> = {}): StalledNodeReaperDeps {
   return {
     findStalled: vi.fn(async () => []),
-    failNode: vi.fn(async () => true),
-    enqueueDeadLetter: vi.fn(async () => undefined),
-    appendNodeFailedEvent: vi.fn(async () => undefined),
-    rollupRunStatus: vi.fn(async () => undefined),
+    persistFailure: vi.fn(async (input) => ({
+      persisted: true,
+      deadLettered: input.deadLetter !== null,
+      deadLetterId: input.deadLetter ? "dlq_1" : null,
+    })),
     now: () => new Date("2026-06-10T12:00:00Z"),
     ...overrides,
   };
@@ -71,44 +72,44 @@ describe("reapStalledNodes", () => {
 
     const result = await reapStalledNodes(deps, { thresholdMs: 60 * 60_000, limit: 500 });
 
-    expect(result).toEqual({ scanned: 1, reaped: 1, deadLettered: 1, skipped: 0 });
+    expect(result).toEqual({
+      scanned: 1,
+      reaped: 1,
+      deadLettered: 1,
+      skipped: 0,
+      deadLetterIds: ["dlq_1"],
+    });
 
-    // CAS fail with the stable worker_stalled code.
-    expect(deps.failNode).toHaveBeenCalledTimes(1);
-    const [runId, nodeId, error] = (deps.failNode as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(runId).toBe("run_1");
-    expect(nodeId).toBe("call_api");
-    expect(error.code).toBe("worker_stalled");
-
-    // DLQ row reconstructed from the snapshot — workflow + the matching node.
-    expect(deps.enqueueDeadLetter).toHaveBeenCalledTimes(1);
-    const dlqArg = (deps.enqueueDeadLetter as ReturnType<typeof vi.fn>).mock.calls[0][0];
-    expect(dlqArg.orgId).toBe("org_1");
-    expect(dlqArg.workflowId).toBe("wf_1");
-    expect(dlqArg.node.id).toBe("call_api");
-    expect(dlqArg.error.code).toBe("worker_stalled");
-
-    // Timeline event + terminal rollup.
-    expect(deps.appendNodeFailedEvent).toHaveBeenCalledWith(
-      "run_1",
-      "call_api",
-      expect.objectContaining({ reason: "worker_stalled", attempt: 1 }),
-    );
-    expect(deps.rollupRunStatus).toHaveBeenCalledWith("run_1");
+    expect(deps.persistFailure).toHaveBeenCalledTimes(1);
+    const atomicInput = (deps.persistFailure as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(atomicInput).toMatchObject({
+      runId: "run_1",
+      orgId: "org_1",
+      nodeId: "call_api",
+      attempt: 1,
+      error: { code: "worker_stalled" },
+      deadLetter: {
+        workflowId: "wf_1",
+        node: { id: "call_api" },
+      },
+    });
   });
 
-  it("skips a node whose CAS lost (it already advanced) — no DLQ, event, or rollup", async () => {
+  it("skips a node whose atomic CAS lost because it already advanced", async () => {
     const deps = makeDeps({
       findStalled: vi.fn(async () => [stalledNode()]),
-      failNode: vi.fn(async () => false), // lost the claim
+      persistFailure: vi.fn(async () => ({ persisted: false, deadLettered: false, deadLetterId: null })),
     });
 
     const result = await reapStalledNodes(deps, { thresholdMs: 60 * 60_000, limit: 500 });
 
-    expect(result).toEqual({ scanned: 1, reaped: 0, deadLettered: 0, skipped: 1 });
-    expect(deps.enqueueDeadLetter).not.toHaveBeenCalled();
-    expect(deps.appendNodeFailedEvent).not.toHaveBeenCalled();
-    expect(deps.rollupRunStatus).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      scanned: 1,
+      reaped: 0,
+      deadLettered: 0,
+      skipped: 1,
+      deadLetterIds: [],
+    });
   });
 
   it("still fails + terminates the run when the snapshot can't be reconstructed (best-effort DLQ)", async () => {
@@ -119,10 +120,14 @@ describe("reapStalledNodes", () => {
     const result = await reapStalledNodes(deps, { thresholdMs: 60 * 60_000, limit: 500 });
 
     // Reaped + run terminated, but no DLQ row (no snapshot to rebuild the job).
-    expect(result).toEqual({ scanned: 1, reaped: 1, deadLettered: 0, skipped: 0 });
-    expect(deps.enqueueDeadLetter).not.toHaveBeenCalled();
-    expect(deps.appendNodeFailedEvent).toHaveBeenCalledTimes(1);
-    expect(deps.rollupRunStatus).toHaveBeenCalledWith("run_1");
+    expect(result).toEqual({
+      scanned: 1,
+      reaped: 1,
+      deadLettered: 0,
+      skipped: 0,
+      deadLetterIds: [],
+    });
+    expect(deps.persistFailure).toHaveBeenCalledWith(expect.objectContaining({ deadLetter: null }));
   });
 
   it("does not dead-letter when the node id is absent from the snapshot", async () => {
@@ -134,41 +139,72 @@ describe("reapStalledNodes", () => {
 
     expect(result.reaped).toBe(1);
     expect(result.deadLettered).toBe(0);
-    expect(deps.enqueueDeadLetter).not.toHaveBeenCalled();
-    expect(deps.rollupRunStatus).toHaveBeenCalledWith("run_1");
+    expect(deps.persistFailure).toHaveBeenCalledWith(expect.objectContaining({ deadLetter: null }));
   });
 
   it("isolates a per-node fault so one bad row can't abort the sweep", async () => {
     const good = stalledNode({ runId: "run_good", nodeId: "call_api" });
     const bad = stalledNode({ runId: "run_bad", nodeId: "call_api" });
-    const failNode = vi.fn(async (runId: string) => {
-      if (runId === "run_bad") throw new Error("db blip");
-      return true;
+    const persistFailure = vi.fn(async (input: Parameters<StalledNodeReaperDeps["persistFailure"]>[0]) => {
+      if (input.runId === "run_bad") throw new Error("db blip");
+      return { persisted: true, deadLettered: true, deadLetterId: "dlq_good" };
     });
-    const deps = makeDeps({ findStalled: vi.fn(async () => [bad, good]), failNode });
+    const deps = makeDeps({ findStalled: vi.fn(async () => [bad, good]), persistFailure });
 
     const result = await reapStalledNodes(deps, { thresholdMs: 60 * 60_000, limit: 500 });
 
-    // The bad row is swallowed; the good row is still reaped + terminated.
+    // The bad row is swallowed; the good row still reaches the atomic boundary.
     expect(result.reaped).toBe(1);
-    expect(deps.rollupRunStatus).toHaveBeenCalledWith("run_good");
-    expect(deps.rollupRunStatus).not.toHaveBeenCalledWith("run_bad");
+    expect(result.deadLetterIds).toEqual(["dlq_good"]);
+    expect(persistFailure).toHaveBeenCalledTimes(2);
   });
 
-  it("still fails the node + rolls up even when the DLQ write throws (DLQ is best-effort)", async () => {
+  it("does not count a half-reap when the atomic persistence boundary throws", async () => {
     const deps = makeDeps({
       findStalled: vi.fn(async () => [stalledNode()]),
-      enqueueDeadLetter: vi.fn(async () => {
-        throw new Error("dlq insert failed");
+      persistFailure: vi.fn(async () => {
+        throw new Error("transaction failed");
       }),
     });
 
     const result = await reapStalledNodes(deps, { thresholdMs: 60 * 60_000, limit: 500 });
 
-    expect(result.reaped).toBe(1);
-    expect(result.deadLettered).toBe(0); // throw means it wasn't counted
-    expect(deps.appendNodeFailedEvent).toHaveBeenCalledTimes(1);
-    expect(deps.rollupRunStatus).toHaveBeenCalledWith("run_1");
+    expect(result).toEqual({
+      scanned: 1,
+      reaped: 0,
+      deadLettered: 0,
+      skipped: 0,
+      deadLetterIds: [],
+    });
+  });
+
+  it("forwards only bounded server-authored drill provenance", async () => {
+    const inputJson = {
+      ...snapshot("call_api"),
+      drill: {
+        kind: "solution_pack_drill",
+        packId: "incident-triage",
+        fixtureId: "worker_interrupted",
+        failureMode: "worker_stalled",
+        recoveryPath: "stalled_node_reaper",
+        ignored: "not forwarded",
+      },
+    };
+    const deps = makeDeps({ findStalled: vi.fn(async () => [stalledNode({ inputJson })]) });
+
+    await reapStalledNodes(deps, { thresholdMs: 60 * 60_000, limit: 1 });
+
+    expect(deps.persistFailure).toHaveBeenCalledWith(expect.objectContaining({
+      eventMetadata: {
+        drill: {
+          kind: "solution_pack_drill",
+          packId: "incident-triage",
+          fixtureId: "worker_interrupted",
+          failureMode: "worker_stalled",
+          recoveryPath: "stalled_node_reaper",
+        },
+      },
+    }));
   });
 });
 

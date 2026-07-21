@@ -41,6 +41,9 @@ retroactively.
   expiry, malformed AI output, rate limits, upstream contract drift, and
   provider outages. Drill runs retain durable source evidence and enter the
   real recovery queue without exposing raw fixture errors in the catalog.
+- A controlled worker-interruption drill that creates one scoped stale claim,
+  honors the configured reaper threshold, exercises the production CAS/DLQ
+  path, and reports measured scan, reap, dead-letter, and runtime evidence.
 - Stable `/v1` contracts and OpenAPI operations for starting, resuming, and
   cancelling runs, including runtime validation of strict JSON request bodies.
 - Stable `/v1` contracts for outbound MCP connection management and the recipe
@@ -68,6 +71,11 @@ retroactively.
 
 ### Fixed
 
+- Stalled-node recovery now commits the running-node claim, optional replayable
+  DLQ row, causal node event, and parent-run failure in one transaction, so a
+  process interruption cannot leave a failed node beneath a non-terminal run.
+- Recovery Queue detail now labels controlled drills and their actual recovery
+  path without changing classifier-facing errors or stable `/v1` summaries.
 - Recovery-queue selections now keep the legacy full-detail `GET /dlq?id=`
   path instead of being misrouted through the bounded `/v1/dlq` list contract
   and failing with HTTP 400.

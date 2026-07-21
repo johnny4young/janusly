@@ -4,13 +4,35 @@ import {
   listSolutionPacks,
   listPublicSolutionPacks,
   getSolutionPack,
+  FailureFixtureSchema,
   SolutionPackSchema,
   SOLUTION_PACK_CATEGORIES,
   SOLUTION_PACK_FAILURE_MODES,
+  SOLUTION_PACK_RECOVERY_PATHS,
 } from "./index";
 
 describe("solution packs catalog", () => {
   const packs = listSolutionPacks();
+
+  it("binds worker stalls exclusively to the real reaper path", () => {
+    const base = {
+      id: "worker",
+      label: "Worker stopped",
+      description: "The worker stopped while the node was running.",
+      failedNodeId: "node-1",
+    };
+    expect(FailureFixtureSchema.safeParse({
+      ...base,
+      failureMode: "worker_stalled",
+      recoveryPath: "direct_failure",
+      errorJson: { message: "synthetic" },
+    }).success).toBe(false);
+    expect(FailureFixtureSchema.safeParse({
+      ...base,
+      failureMode: "upstream_unavailable",
+      recoveryPath: "stalled_node_reaper",
+    }).success).toBe(false);
+  });
 
   it("loads the three ICP packs with unique ids", () => {
     expect(packs.length).toBe(3);
@@ -43,6 +65,13 @@ describe("solution packs catalog", () => {
       for (const fixture of pack.failureFixtures) {
         expect(nodeIds.has(fixture.failedNodeId), `${pack.id}:${fixture.id}`).toBe(true);
         expect(fixtureIds.has(fixture.id), `${pack.id}:${fixture.id} duplicated`).toBe(false);
+        if (fixture.recoveryPath === "direct_failure") {
+          expect(fixture.errorJson, `${pack.id}:${fixture.id} direct error`).toBeTypeOf("object");
+          expect(fixture.failureMode, `${pack.id}:${fixture.id} direct mode`).not.toBe("worker_stalled");
+        } else {
+          expect(fixture, `${pack.id}:${fixture.id} must not bypass the reaper`).not.toHaveProperty("errorJson");
+          expect(fixture.failureMode, `${pack.id}:${fixture.id} reaper mode`).toBe("worker_stalled");
+        }
         fixtureIds.add(fixture.id);
       }
     }
@@ -51,6 +80,11 @@ describe("solution packs catalog", () => {
   it("covers every deterministic failure mode in the catalog", () => {
     const covered = new Set(packs.flatMap((pack) => pack.failureFixtures.map((fixture) => fixture.failureMode)));
     expect([...covered].sort()).toEqual([...SOLUTION_PACK_FAILURE_MODES].sort());
+  });
+
+  it("covers every supported recovery path in the catalog", () => {
+    const covered = new Set(packs.flatMap((pack) => pack.failureFixtures.map((fixture) => fixture.recoveryPath)));
+    expect([...covered].sort()).toEqual([...SOLUTION_PACK_RECOVERY_PATHS].sort());
   });
 
   it("every pack has at least one sample payload and one failure fixture", () => {
@@ -91,6 +125,7 @@ describe("solution packs catalog", () => {
           label: expect.any(String),
           description: expect.any(String),
           failureMode: expect.any(String),
+          recoveryPath: expect.any(String),
         });
         expect(fixture).not.toHaveProperty("failedNodeId");
         expect(fixture).not.toHaveProperty("errorJson");

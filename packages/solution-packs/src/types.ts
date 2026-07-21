@@ -88,31 +88,60 @@ export const SOLUTION_PACK_FAILURE_MODES = [
   "rate_limited",
   "contract_drift",
   "upstream_unavailable",
+  "worker_stalled",
 ] as const;
 
 export const SolutionPackFailureModeSchema = z.enum(SOLUTION_PACK_FAILURE_MODES);
 export type SolutionPackFailureMode = (typeof SOLUTION_PACK_FAILURE_MODES)[number];
 
+export const SOLUTION_PACK_RECOVERY_PATHS = [
+  "direct_failure",
+  "stalled_node_reaper",
+] as const;
+
+export const SolutionPackRecoveryPathSchema = z.enum(SOLUTION_PACK_RECOVERY_PATHS);
+export type SolutionPackRecoveryPath = (typeof SOLUTION_PACK_RECOVERY_PATHS)[number];
+
 /**
  * A known, intentional failure the operator can inject to watch the
  * recovery loop run. `failedNodeId` must exist in the pack's workflow;
- * `errorJson` is the persisted error envelope shape the recovery dialog
- * reads (mirrors `dead_letters.error_json`).
+ * direct fixtures carry the persisted `errorJson` envelope the Recovery
+ * dialog reads. Stalled-node fixtures deliberately omit it because the real
+ * reaper authors the `worker_stalled` error.
  */
-export const FailureFixtureSchema = z.object({
+const FailureFixtureBaseSchema = z.object({
   id: z.string().trim().min(1),
   label: z.string().trim().min(1),
   description: z.string().trim().min(1),
   failureMode: SolutionPackFailureModeSchema,
   failedNodeId: z.string().trim().min(1),
-  errorJson: z.record(z.string(), z.unknown()),
+});
+
+export const FailureFixtureSchema = z.discriminatedUnion("recoveryPath", [
+  FailureFixtureBaseSchema.extend({
+    recoveryPath: z.literal("direct_failure"),
+    errorJson: z.record(z.string(), z.unknown()),
+  }).strict(),
+  FailureFixtureBaseSchema.extend({
+    recoveryPath: z.literal("stalled_node_reaper"),
+  }).strict(),
+]).superRefine((fixture, ctx) => {
+  const isWorkerStall = fixture.failureMode === "worker_stalled";
+  const usesStalledReaper = fixture.recoveryPath === "stalled_node_reaper";
+  if (isWorkerStall !== usesStalledReaper) {
+    ctx.addIssue({
+      code: "custom",
+      message: "worker_stalled fixtures must use stalled_node_reaper, and that path is reserved for worker_stalled",
+      path: ["recoveryPath"],
+    });
+  }
 });
 export type FailureFixture = z.infer<typeof FailureFixtureSchema>;
 
 /** Public-safe drill descriptor. Raw errors and workflow node ids stay server-side. */
 export type FailureFixturePublic = Pick<
   FailureFixture,
-  "id" | "label" | "description" | "failureMode"
+  "id" | "label" | "description" | "failureMode" | "recoveryPath"
 >;
 
 /** The full, code-resident definition of one solution pack. */
@@ -174,11 +203,12 @@ export function toPublicPack(pack: SolutionPack): SolutionPackPublic {
     failureCount: pack.failureFixtures.length,
     samplePayloadIds: pack.samplePayloads.map((s) => s.id),
     failureFixtureIds: pack.failureFixtures.map((f) => f.id),
-    failureFixtures: pack.failureFixtures.map(({ id, label, description, failureMode }) => ({
+    failureFixtures: pack.failureFixtures.map(({ id, label, description, failureMode, recoveryPath }) => ({
       id,
       label,
       description,
       failureMode,
+      recoveryPath,
     })),
   };
 }

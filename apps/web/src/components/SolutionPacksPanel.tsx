@@ -182,11 +182,16 @@ export function SolutionPacksPanel({ packs, credentials, onInstall, onSampleRun,
                     ))}
                   </select>
                   <div className="we-pack-drill__summary" id={drillDescriptionId} aria-live="polite">
-                    <span className="mode-pill mode-pill-neutral">
-                      {t(`packs.drill.mode.${selectedFixture.failureMode}`, {
-                        defaultValue: selectedFixture.failureMode,
-                      })}
-                    </span>
+                    <div className="we-pack-pills">
+                      <span className="mode-pill mode-pill-neutral">
+                        {t(`packs.drill.mode.${selectedFixture.failureMode}`, {
+                          defaultValue: selectedFixture.failureMode,
+                        })}
+                      </span>
+                      <span className="mode-pill mode-pill-neutral">
+                        {t(`packs.drill.path.${selectedFixture.recoveryPath}`)}
+                      </span>
+                    </div>
                     <p className="helper-text">
                       {t(`packs.${pack.id}.drills.${selectedFixture.id}.description`, {
                         defaultValue: selectedFixture.description,

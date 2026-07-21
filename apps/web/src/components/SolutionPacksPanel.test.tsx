@@ -16,21 +16,30 @@ const PACK: SolutionPackPublic = {
   requiredOrgConfigs: [],
   nodeCount: 4,
   sampleCount: 1,
-  failureCount: 2,
+  failureCount: 3,
   samplePayloadIds: ['default'],
-  failureFixtureIds: ['slack_5xx_transient', 'classification_output_invalid'],
+  failureFixtureIds: ['slack_5xx_transient', 'classification_output_invalid', 'worker_interrupted_during_page'],
   failureFixtures: [
     {
       id: 'slack_5xx_transient',
       label: 'Slack page returned HTTP 500',
       description: 'The notification provider is temporarily unavailable.',
       failureMode: 'upstream_unavailable',
+      recoveryPath: 'direct_failure',
     },
     {
       id: 'classification_output_invalid',
       label: 'AI severity output malformed',
       description: 'The model output does not satisfy the severity contract.',
       failureMode: 'ai_output_invalid',
+      recoveryPath: 'direct_failure',
+    },
+    {
+      id: 'worker_interrupted_during_page',
+      label: 'Worker interrupted during on-call page',
+      description: 'A stale running claim crosses the configured threshold.',
+      failureMode: 'worker_stalled',
+      recoveryPath: 'stalled_node_reaper',
     },
   ],
 }
@@ -115,9 +124,27 @@ describe('<SolutionPacksPanel />', () => {
 
     fireEvent.change(select, { target: { value: 'classification_output_invalid' } })
     expect(screen.getByText('Invalid AI output')).toBeVisible()
+    expect(screen.getByText('Deterministic fixture')).toBeVisible()
     expect(screen.getByText('The model returns text outside the expected severity contract and the classification step fails safely.')).toBeVisible()
 
     fireEvent.click(screen.getByRole('button', { name: 'Start recovery drill' }))
     expect(handlers.onInjectFailure).toHaveBeenCalledWith('incident-triage', 'classification_output_invalid')
+  })
+
+  it('identifies the real stalled-node reaper path before starting it', () => {
+    renderPanel([])
+
+    fireEvent.change(screen.getByLabelText('Failure scenario'), {
+      target: { value: 'worker_interrupted_during_page' },
+    })
+
+    expect(screen.getByText('Worker interrupted')).toBeVisible()
+    expect(screen.getByText('Real reaper path')).toBeVisible()
+    expect(screen.getByText(/controlled stale running claim/)).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Start recovery drill' }))
+    expect(handlers.onInjectFailure).toHaveBeenCalledWith(
+      'incident-triage',
+      'worker_interrupted_during_page',
+    )
   })
 })

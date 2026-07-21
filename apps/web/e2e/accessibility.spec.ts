@@ -119,8 +119,8 @@ test('Solution Packs recovery-drill selection meets the accessibility floor', as
   await page.getByRole('button', { name: 'Packs', exact: true }).click()
   const pack = page.locator('.list-card').filter({ hasText: 'Incident triage' }).first()
   await expect(pack).toBeVisible()
-  await pack.getByLabel('Failure scenario').selectOption('classification_output_invalid')
-  await expect(pack.getByText('Invalid AI output')).toBeVisible()
+  await pack.getByLabel('Failure scenario').selectOption('worker_interrupted_during_page')
+  await expect(pack.getByText('Real reaper path')).toBeVisible()
 
   await expectNoBlockingAccessibilityViolations(page, 'Solution Packs recovery drill')
   await capture(pack, 'accessibility-en-solution-pack-drill')

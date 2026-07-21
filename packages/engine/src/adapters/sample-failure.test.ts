@@ -48,6 +48,7 @@ const source = {
   packId: "incident-triage",
   fixtureId: "classification_output_invalid",
   failureMode: "ai_output_invalid",
+  recoveryPath: "direct_failure" as const,
 };
 
 beforeEach(() => {

@@ -60,6 +60,7 @@ vi.mock("../dlq", async (importOriginal) => {
     countDeadLettersByStatus: vi.fn(),
     // Bulk-resolve + bulk-replay writers (the loops touch these per entry).
     getDeadLetter: vi.fn(),
+    getRecoveryDrillProvenance: vi.fn(),
     markDeadLetterResolved: vi.fn(),
     markDeadLetterReplayed: vi.fn(),
   };
@@ -111,7 +112,7 @@ import { ReplayNotClaimableError } from "@janusly/engine/src/persistence";
 
 import { requireAuth } from "../auth";
 import { requirePermission, requireRole } from "../permissions";
-import { countDeadLettersByStatus, encodeRecoveryQueueCursor, getDeadLetter, listRecoveryQueue, markDeadLetterReplayed, markDeadLetterResolved, queryRecoveryQueuePage, type RecoveryQueueRow } from "../dlq";
+import { countDeadLettersByStatus, encodeRecoveryQueueCursor, getDeadLetter, getRecoveryDrillProvenance, listRecoveryQueue, markDeadLetterReplayed, markDeadLetterResolved, queryRecoveryQueuePage, type RecoveryQueueRow } from "../dlq";
 import { auditAction } from "../audit-helper";
 import { resolveSuspectVersion } from "../suspect-version";
 import { resolveRecoveryItemForDismiss } from "@janusly/engine/src/recovery/recovery-item-hook";
@@ -126,6 +127,7 @@ const listRecoveryQueueMock = vi.mocked(listRecoveryQueue);
 const queryRecoveryQueuePageMock = vi.mocked(queryRecoveryQueuePage);
 const countDeadLettersByStatusMock = vi.mocked(countDeadLettersByStatus);
 const getDeadLetterMock = vi.mocked(getDeadLetter);
+const getRecoveryDrillProvenanceMock = vi.mocked(getRecoveryDrillProvenance);
 const markDeadLetterResolvedMock = vi.mocked(markDeadLetterResolved);
 const markDeadLetterReplayedMock = vi.mocked(markDeadLetterReplayed);
 const auditActionMock = vi.mocked(auditAction);
@@ -1178,18 +1180,31 @@ describe("GET /dlq?id= detail read with suspect version", () => {
       previousDagJson: { id: "wf-1", nodes: [] },
     };
     resolveSuspectVersionMock.mockResolvedValueOnce(envelope as never);
+    getRecoveryDrillProvenanceMock.mockResolvedValueOnce({
+      kind: "solution_pack_drill",
+      packId: "incident-triage",
+      fixtureId: "worker_interrupted_during_page",
+      recoveryPath: "stalled_node_reaper",
+    });
     const server = createApiServer({ routes: dlqRoutes });
     const baseUrl = await listen(server);
     try {
       const response = await fetch(`${baseUrl}/dlq?id=dl-1`);
       expect(response.status).toBe(200);
-      const payload = await response.json() as Record<string, unknown> & { id: string; suspectVersion: unknown };
+      const payload = await response.json() as Record<string, unknown> & { id: string; suspectVersion: unknown; drill: unknown };
       expect(payload.id).toBe("dl-1");
       expect(payload.suspectVersion).toEqual(envelope);
+      expect(payload.drill).toEqual({
+        kind: "solution_pack_drill",
+        packId: "incident-triage",
+        fixtureId: "worker_interrupted_during_page",
+        recoveryPath: "stalled_node_reaper",
+      });
       expect(payload).not.toHaveProperty("replayClaimToken");
       expect(payload).not.toHaveProperty("replayClaimedAt");
       // The resolver gets the row's own runId + failure timestamp.
       expect(resolveSuspectVersionMock).toHaveBeenCalledWith("org-1", "run-1", DETAIL_ROW.createdAt);
+      expect(getRecoveryDrillProvenanceMock).toHaveBeenCalledWith("org-1", "run-1");
     } finally {
       await close(server);
     }
@@ -1199,6 +1214,7 @@ describe("GET /dlq?id= detail read with suspect version", () => {
     requireAuthMock.mockResolvedValue({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
     requireRoleMock.mockResolvedValue("viewer");
     getDeadLetterMock.mockResolvedValue(DETAIL_ROW as never);
+    getRecoveryDrillProvenanceMock.mockResolvedValue(null);
     const server = createApiServer({ routes: dlqRoutes });
     const baseUrl = await listen(server);
     try {

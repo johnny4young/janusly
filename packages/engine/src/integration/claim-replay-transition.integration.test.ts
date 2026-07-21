@@ -21,12 +21,12 @@ import {
   cancelRun,
   claimNodeForExecution,
   claimReplayTransition,
-  failStalledRunningNode,
   markExecutingNodeQueued,
   markExecutingNodeFailed,
   markNodeSucceededWithEvent,
   ReplayNotClaimableError,
 } from "../persistence";
+import { DeadLetterQueueAdapter } from "../adapters/dead-letter-queue";
 
 const RUN_TAG = `${Date.now()}-${process.pid}`;
 const ORG = `it-claim-${RUN_TAG}`;
@@ -355,7 +355,15 @@ describe("claimReplayTransition (real Postgres)", () => {
       oldClaim.recoveryClaimToken,
       oldClaim.publicationGeneration,
     )).toBe("claimed");
-    expect(await failStalledRunningNode(runId, "n1", { message: "stalled" })).toBe(true);
+    const reaperResult = await new DeadLetterQueueAdapter().persistStalledTerminalFailure({
+      runId,
+      orgId: ORG,
+      nodeId: "n1",
+      attempt: 1,
+      error: { message: "stalled" },
+      deadLetter: null,
+    });
+    expect(reaperResult).toMatchObject({ persisted: true, deadLettered: false });
 
     const newClaim = await claimReplayTransition(runId, "n1", {
       deadLetterId: newDlqId,

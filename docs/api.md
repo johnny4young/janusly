@@ -216,13 +216,14 @@ Returns the public catalog. Requires `packs.read`.
       "requiredCredentials": [{ "name": "ops_slack", "kind": "slack_webhook", "purpose": "Pages your on-call channel" }],
       "nodeCount": 4,
       "samplePayloadIds": ["default"],
-      "failureFixtureIds": ["slack_5xx_transient", "classification_output_invalid", "github_contract_drift"],
+      "failureFixtureIds": ["slack_5xx_transient", "classification_output_invalid", "github_contract_drift", "worker_interrupted_during_page"],
       "failureFixtures": [
         {
           "id": "classification_output_invalid",
           "label": "AI severity output malformed",
           "description": "The model returns text outside the expected severity contract and the classification step fails safely.",
-          "failureMode": "ai_output_invalid"
+          "failureMode": "ai_output_invalid",
+          "recoveryPath": "direct_failure"
         }
       ]
     }
@@ -266,10 +267,13 @@ Starts a writes-skipped sandbox sample using a bundled sample payload. Requires
 
 ### `POST /solution-packs/:id/inject-failure`
 
-Seeds a deterministic failed run + DLQ row using the selected bundled fixture.
-The run and `node.failed` event retain a `solution_pack_drill` source block;
-raw error envelopes and workflow node ids remain absent from the catalog.
-Requires `packs.install`.
+Starts the selected bundled recovery drill. A `direct_failure` fixture seeds a
+deterministic failed run + DLQ row. A `stalled_node_reaper` fixture instead
+creates one old `running` claim at the configured threshold and invokes the
+real org/run-scoped reaper, including its CAS and atomic DLQ/terminal path. The
+run and `node.failed` event retain a `solution_pack_drill` source block; raw
+error envelopes and workflow node ids remain absent from the catalog. Requires
+`packs.install`.
 
 ```json
 { "fixtureId": "classification_output_invalid" }
@@ -280,9 +284,37 @@ Requires `packs.install`.
   "runId": "run-id",
   "deadLetterId": "dead-letter-id",
   "fixtureId": "classification_output_invalid",
-  "failureMode": "ai_output_invalid"
+  "failureMode": "ai_output_invalid",
+  "recoveryPath": "direct_failure"
 }
 ```
+
+The worker-interruption response also includes bounded measured evidence:
+
+```json
+{
+  "runId": "run-id",
+  "deadLetterId": "dead-letter-id",
+  "fixtureId": "worker_interrupted_during_page",
+  "failureMode": "worker_stalled",
+  "recoveryPath": "stalled_node_reaper",
+  "evidence": {
+    "recoveryPath": "stalled_node_reaper",
+    "thresholdMinutes": 60,
+    "simulatedStallMs": 3601000,
+    "reaperRuntimeMs": 12,
+    "scanned": 1,
+    "reaped": 1,
+    "deadLettered": 1
+  }
+}
+```
+
+The legacy full-detail `GET /dlq?id=<deadLetterId>` response attaches a
+bounded `drill` projection (`kind`, `packId`, `fixtureId`, `recoveryPath`) when
+the failure came from a code-authored drill. Arbitrary run input and private
+measurement fields are not returned. Stable `/v1/dlq` summaries remain
+unchanged.
 
 ---
 
