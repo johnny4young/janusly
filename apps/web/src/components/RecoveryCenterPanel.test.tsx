@@ -929,7 +929,7 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
         sinceIso: '2026-07-13T12:00:00.000Z',
       }
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(10_000)
+        await vi.advanceTimersByTimeAsync(60_000)
       })
 
       expect(screen.getByTestId('recovery-lifetime-ledger')).toHaveTextContent('1 failure recovered')
@@ -937,6 +937,40 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
       expect(screen.getByTestId('recovery-center-all-clear-summary')).toHaveTextContent('2m of downtime ended')
     } finally {
       view.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('pauses fallback reads while hidden and refreshes immediately on return', async () => {
+    vi.useFakeTimers()
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+    recoveryLedger = { totalRecovered: 0, downtimeEndedMs: 0, sinceIso: null }
+    mockAllClearApis()
+    const view = render(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
+
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      const ledgerCalls = () => vi.mocked(api).mock.calls
+        .filter(([path]) => path === '/recovery/ledger')
+        .length
+      expect(ledgerCalls()).toBe(1)
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(120_000)
+      })
+      expect(ledgerCalls()).toBe(1)
+
+      hidden.mockReturnValue(false)
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'))
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(ledgerCalls()).toBe(2)
+    } finally {
+      view.unmount()
+      hidden.mockRestore()
       vi.useRealTimers()
     }
   })

@@ -20,6 +20,7 @@
     "contract:check": "pnpm --filter @janusly/api contract:check",
     "test": "pnpm -r test",
     "test:browser": "pnpm --filter @janusly/web test:browser",
+    "test:accessibility": "node scripts/run-e2e.mjs accessibility.spec.ts",
     "test:performance": "pnpm --filter @janusly/web build && pnpm --filter @janusly/web test:performance",
     "test:e2e": "node scripts/run-e2e.mjs",
     "migrate": "pnpm --filter @janusly/db db:migrate",

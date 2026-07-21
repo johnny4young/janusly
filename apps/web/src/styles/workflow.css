@@ -796,17 +796,17 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 .sb-view__meta {
   font-family: var(--font-mono);
   font-size: 10px;
-  color: var(--we-faint);
+  color: var(--we-muted);
 }
 
 .sb-view--on {
   background: var(--we-primary-soft);
-  color: var(--we-primary);
+  color: var(--we-primary-text);
   font-weight: 600;
 }
 
-.sb-view--on .sb-view__ic { color: var(--we-primary); }
-.sb-view--on .sb-view__meta { color: var(--we-primary); }
+.sb-view--on .sb-view__ic { color: var(--we-primary-text); }
+.sb-view--on .sb-view__meta { color: var(--we-primary-text); }
 
 /* Step palette */
 .sb-categories { display: contents; }

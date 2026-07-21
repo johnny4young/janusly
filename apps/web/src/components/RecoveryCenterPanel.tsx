@@ -23,7 +23,8 @@
  * Data sources (all already shipped):
  * - `GET /recovery/metrics` → metric strip, health badge, severities.
  * - `GET /recovery/ledger` + `GET /recovery/my-wins` → verified lifetime and
- *   operator impact; polled cheaply so background-run completions surface.
+ *   operator impact; refreshed from platform signals plus a bounded fallback
+ *   so background-run completions still surface.
  * - `GET /dlq/counts` + oldest-first `GET /dlq/queue` → authoritative hero
  *   count and longest open downtime; the bounded bootstrap page feeds tiles.
  * - `GET /dlq/clusters` → failure-clusters tile.
@@ -32,8 +33,9 @@
  * The Recovery Center is composition over the recovery API + engine metrics.
  * Its heavier metrics, clusters, and heatmap reads start together on the
  * cross-panel `platformVersion` tick. Ledger, personal wins, and queue counts
- * use a separate bounded poll because the completing worker may belong to a
- * run that is not the operator's active SSE target.
+ * use a visibility-aware fallback because the completing worker may belong to
+ * a run that is not the operator's active SSE target. Open recovery work keeps
+ * a short convergence window; a healthy Home uses a slower fallback.
  *
  * Used by `App.tsx` for `activeTab === 'home'`.
  *
@@ -128,7 +130,8 @@ type RecoveryQueueOverview = {
 // Terminal recovery may complete in a worker for a run that is not the
 // operator's active SSE/polling target. Keep this cheap projection live without
 // repeatedly running the heavier metrics, cluster, and heatmap queries.
-const RECOVERY_IMPACT_POLL_MS = 10_000
+const RECOVERY_IMPACT_ACTIVE_POLL_MS = 10_000
+const RECOVERY_IMPACT_IDLE_POLL_MS = 60_000
 
 export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const { t, i18n } = useT()
@@ -253,13 +256,6 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   }, [platformVersion, resolvedOrgId])
 
   useEffect(() => {
-    const id = window.setInterval(() => {
-      setImpactPollVersion((version) => version + 1)
-    }, RECOVERY_IMPACT_POLL_MS)
-    return () => window.clearInterval(id)
-  }, [])
-
-  useEffect(() => {
     let cancelled = false
     const ledgerRequest = api('/recovery/ledger')
     const winsRequest = api('/recovery/my-wins?days=30')
@@ -345,6 +341,45 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     ? openDeadLetters.filter((deadLetter) => !currentQueueOverview.observedOpenIds.includes(deadLetter.id)).length
     : openDeadLetters.length
   const openFailureCount = Math.max(currentQueueOverview?.openCount ?? 0, unobservedVisibleFailures)
+
+  // Local mutations and active-run terminal events already bump
+  // `platformVersion`, so polling is only a convergence fallback for work
+  // completed by another worker/run. Stay responsive while failures are open,
+  // reduce healthy-home reads sixfold, and stop all background-tab polling.
+  const impactPollMs = openFailureCount > 0
+    ? RECOVERY_IMPACT_ACTIVE_POLL_MS
+    : RECOVERY_IMPACT_IDLE_POLL_MS
+  useEffect(() => {
+    let timeoutId: number | null = null
+
+    const clearScheduledPoll = () => {
+      if (timeoutId === null) return
+      window.clearTimeout(timeoutId)
+      timeoutId = null
+    }
+    const schedulePoll = () => {
+      clearScheduledPoll()
+      if (document.hidden) return
+      timeoutId = window.setTimeout(() => {
+        timeoutId = null
+        setImpactPollVersion((version) => version + 1)
+        schedulePoll()
+      }, impactPollMs)
+    }
+    const handleVisibilityChange = () => {
+      clearScheduledPoll()
+      if (document.hidden) return
+      setImpactPollVersion((version) => version + 1)
+      schedulePoll()
+    }
+
+    schedulePoll()
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      clearScheduledPoll()
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [impactPollMs])
 
   const celebrateAllClear = useCallback((request?: RecoveryAllClearRequest | null) => {
     setAllClearDowntimeOverride(request?.downtimeMs ?? null)

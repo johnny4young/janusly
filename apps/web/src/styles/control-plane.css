@@ -1920,7 +1920,7 @@
 
 .we-cmdk-row--active {
   background: var(--we-primary-soft);
-  color: var(--we-primary);
+  color: var(--we-primary-text);
 }
 
 .we-cmdk-row__ic {
@@ -1937,7 +1937,7 @@
 .we-cmdk-row--active .we-cmdk-row__ic {
   background: var(--we-surface);
   border-color: color-mix(in srgb, var(--we-primary) 30%, transparent);
-  color: var(--we-primary);
+  color: var(--we-primary-text);
 }
 
 .we-cmdk-row__label {
@@ -1964,10 +1964,10 @@
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--we-faint);
+  color: var(--we-muted);
 }
 
-.we-cmdk-row--active .we-cmdk-row__group { color: color-mix(in srgb, var(--we-primary) 60%, var(--we-muted) 40%); }
+.we-cmdk-row--active .we-cmdk-row__group { color: var(--we-primary-text); }
 
 .we-cmdk-row__kbd {
   font-family: var(--font-mono);

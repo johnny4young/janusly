@@ -5987,7 +5987,7 @@ button.we-recovery-heatmap__cell:focus-visible {
   padding: 2px 8px;
   border-radius: var(--we-radius-pill);
   background: color-mix(in srgb, var(--we-primary) 12%, transparent);
-  color: var(--we-primary);
+  color: var(--we-ink-soft);
   font-size: 10px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;

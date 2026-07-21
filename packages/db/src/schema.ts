@@ -10,6 +10,9 @@
  *
  * Used by:
  * - Every Drizzle query across `packages/data`, `packages/engine`, `apps/api`.
+ * - `packages/db/src/schema-contract.test.ts`, which compares every table,
+ *   column, default, primary key, and index with the latest migration snapshot
+ *   and protects selected operational index shapes and lifecycle defaults.
  * - `packages/db/migrations/20260610175420_baseline/migration.sql` — the
  *   development baseline (pre-production squash of the first 31 migrations)
  *   was emitted from this exact shape, plus the three documented hand-edits

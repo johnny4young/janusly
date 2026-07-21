@@ -13,6 +13,7 @@
 @theme {
   --color-we-primary: #245bff;
   --color-we-primary-strong: #1537cc;
+  --color-we-primary-text: #245bff;
   --color-we-primary-soft: #eef4ff;
   --color-we-accent: #06b6d4;
   --color-we-accent-soft: #ecfeff;
@@ -56,6 +57,7 @@
 :root {
   --we-primary: var(--color-we-primary);
   --we-primary-strong: var(--color-we-primary-strong);
+  --we-primary-text: var(--color-we-primary-text);
   --we-primary-soft: var(--color-we-primary-soft);
   --we-primary-ring: color-mix(in srgb, var(--we-primary) 18%, transparent);
   --we-primary-shadow: color-mix(in srgb, var(--we-primary) 55%, transparent);
@@ -126,8 +128,9 @@
    Re-binds raw color tokens + semantic aliases (Tailwind v4 @theme values
    need an explicit re-resolve at the override scope or descendants keep
    the :root resolution). Brand hues (cobalt + cyan) stay at their
-   canonical hex; only neutrals + soft fills shift. Token source values
-   come from the design-system zip's colors_and_type.css dark theme.
+   canonical hex; only neutrals, soft fills, and the accessible text tint shift.
+   Token source values come from the design-system zip's colors_and_type.css
+   dark theme, with the text tint raised to meet WCAG AA on dark soft fills.
    -------------------------------------------------------------------------- */
 [data-theme="dark"] {
   --color-we-bg: #0a0f1f;
@@ -142,6 +145,7 @@
   --color-we-faint: #5d6886;
   --color-we-primary: #245bff;
   --color-we-primary-strong: #4d7bff;
+  --color-we-primary-text: #7aa2ff;
   --color-we-primary-soft: #1a2548;
   --color-we-accent: #06b6d4;
   --color-we-accent-soft: #0d2a32;
@@ -182,6 +186,7 @@
   --we-faint: var(--color-we-faint);
   --we-primary: var(--color-we-primary);
   --we-primary-strong: var(--color-we-primary-strong);
+  --we-primary-text: var(--color-we-primary-text);
   --we-primary-soft: var(--color-we-primary-soft);
   --we-primary-ring: color-mix(in srgb, var(--color-we-primary) 28%, transparent);
   --we-primary-shadow: color-mix(in srgb, var(--color-we-primary) 55%, transparent);
@@ -700,7 +705,7 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 
 /* Shared typographic helper for compact section labels. */
 .section-kicker {
-  color: var(--we-primary);
+  color: var(--we-primary-text);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.08em;

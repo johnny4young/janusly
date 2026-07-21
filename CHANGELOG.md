@@ -22,6 +22,9 @@ retroactively.
   documentation now describe the same Node.js 24 runtime boundary.
 - CI now runs an explicit TypeScript 7 gate across every typed workspace; the
   web package checks both its production tree and its complete test tree.
+- Recovery Center refreshes now follow platform and terminal-run invalidations,
+  with a 10-second fallback during active failures, a 60-second healthy
+  fallback, and no background-tab polling.
 - The private Node SDK now consumes stable `/v1` envelopes and builds a normal
   ESM package with declarations, source maps, and an isolated tarball consumer
   smoke test. Registry publication remains disabled.
@@ -52,6 +55,12 @@ retroactively.
 - Stable `/v1` contracts for AI workflow generation and recovery patch drafts,
   including strict request validation, runtime response validation, and MCP
   migration without persisting suggestions.
+- A Playwright + axe accessibility floor for Recovery Center, recovery queue,
+  AI Studio, command palette, and mobile navigation across light English and
+  dark Spanish states, with optional screenshot evidence.
+- Database contracts that compare all Drizzle tables, columns, defaults,
+  primary keys, and indexes with the latest migration snapshot and protect
+  operationally critical index shapes.
 
 ### Fixed
 
@@ -76,6 +85,8 @@ retroactively.
 - Web API boundaries, React Flow adapters, asynchronous callbacks, and test
   fixtures now retain their concrete contracts under TypeScript 7 instead of
   relying on Vite's transpilation to hide static drift.
+- Operator metadata, AI cost chips, active navigation, section kickers, and
+  command-palette text now retain WCAG AA contrast in light and dark themes.
 
 ## Development milestone: recovery platform hardening
 

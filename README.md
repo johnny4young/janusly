@@ -196,6 +196,7 @@ pnpm contract:check  # fail when the checked-in OpenAPI 3.1 contract has drifted
 pnpm typecheck       # TypeScript 7 gate across every typed workspace, including web tests
 pnpm test            # Vitest across the workspace packages
 pnpm test:browser    # Vitest browser mode for *.browser.test.tsx (Playwright/Chromium)
+pnpm test:accessibility # Playwright + axe on high-value operator journeys
 pnpm build           # workspace production builds, including the Vite/Rolldown web bundle
 pnpm test:e2e        # Playwright; boots Compose, runs UI flow, tears Compose down
 pnpm test:integration # data integration lane: Compose Postgres + migrate + real-DB SQL tests, down
@@ -351,13 +352,14 @@ See [`docs/ai.md`](docs/ai.md) for the full guide.
 
 | Package                  | Stack                                                                              |
 | ------------------------ | ---------------------------------------------------------------------------------- |
-| `apps/web`               | Vitest 4 + jsdom + Testing Library (utilities, store, components, recovery dialog tabs). Playwright e2e. Browser-mode pool for `*.browser.test.tsx`. |
+| `apps/web`               | Vitest 4 + jsdom + Testing Library (utilities, store, components, recovery dialog tabs). Playwright e2e, including an axe serious/critical accessibility floor. Browser-mode pool for `*.browser.test.tsx`. |
 | `packages/shared`        | Vitest 4 over the Zod workflow contracts + `computeWorkflowDiff` + status enums.   |
 | `packages/engine`        | Vitest 4 for expressions, validation, templates, tool registry, secrets, memory, planner, error-signature classifier, recovery metrics, workflow health, cluster failures. |
 | `packages/domain`        | Vitest 4 for decision engine, causal reasoning, improvement engine, RL.            |
 | `packages/ai`            | Vitest 4 for the provider-neutral `LlmClient`, run explainer, multi-suggestion patch helper (mocked LLM). |
 | `apps/api`               | Vitest 4 for the patch envelopes (multi-suggestion array), the recovery-fixture matrix, rollback transaction, cluster recovery glue, route registry, rate limiter, run pagination. |
-| `packages/db`, `packages/data` | Vitest 4 for migrations/env/schema helpers and data repos; `tsc --noEmit` as a type guard. |
+| `packages/db`            | Vitest 4 for migration layout, full Drizzle/latest-snapshot parity, hot-path indexes, and lifecycle defaults; `tsc --noEmit` as a type guard. |
+| `packages/data`          | Vitest 4 for bounded repositories and real-Postgres integration behavior; `tsc --noEmit` as a type guard. |
 | `packages/mcp-server`      | Vitest 4 for MCP stdio protocol, tool descriptors, auth headers, and dispatch. |
 | `packages/solution-packs`  | Vitest 4 for pack schema validity, fixture integrity, and public catalog shape. |
 | `packages/sdk-node`        | Vitest 4 for typed client headers, stable envelopes, polling/streaming, reports, recovery, and webhooks; isolated npm-tarball consumer smoke. |
@@ -366,6 +368,7 @@ See [`docs/ai.md`](docs/ai.md) for the full guide.
 ```bash
 pnpm test               # full Vitest workspace suite
 pnpm test:browser       # Vitest browser-mode (Playwright/Chromium) for `*.browser.test.tsx`
+pnpm test:accessibility # axe serious/critical gate on settled Playwright UI states
 pnpm test:e2e           # Playwright with automatic Compose up/down
 pnpm typecheck          # TypeScript 7 across typed production and test sources
 pnpm build              # workspace production builds
