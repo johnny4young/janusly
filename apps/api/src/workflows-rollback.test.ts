@@ -19,56 +19,34 @@ let existingVersions: {
 // Parent-workflow pre-check rows. The default is one active workflow; `[]`
 // represents a missing parent and a dated row represents a tombstone.
 let gateWorkflowRows: { deletedAt: Date | null }[] = [{ deletedAt: null }]
+let activeRolloutRows: { id: string }[] = []
 const insertedRows: Record<string, unknown>[] = []
 let transactionFailures: unknown[] = []
 
-type SourceSelectChain = {
-  from: () => SourceSelectChain
-  where: () => Promise<typeof sourceRows>
-}
-
-type ExistingVersionsOrderChain = {
-  orderBy: () => { limit: () => Promise<typeof existingVersions> }
-}
-
-type ExistingVersionsSelectChain = {
-  from: () => ExistingVersionsSelectChain
-  where: () => ExistingVersionsOrderChain
-}
-
 function makeTx() {
   return {
-    // The rollback helper issues three `select()` calls. We disambiguate by
-    // call-count: first → workflows soft-delete gate (terminates after
-    // `limit()`); second → source-version load (after `where()`); third →
-    // existing-versions list (after `orderBy()`).
-    select: (() => {
-      let callCount = 0
-      return () => {
-        callCount += 1
-        if (callCount === 1) {
-          const chain = {
-            from: () => chain,
-            where: () => ({ limit: () => Promise.resolve(gateWorkflowRows) }),
-          }
-          return chain as unknown as SourceSelectChain
-        }
-        if (callCount === 2) {
-          const chain: SourceSelectChain = {
-            from: () => chain,
-            where: () => Promise.resolve(sourceRows),
-          }
+    select: (selection?: unknown) => {
+      let tableName = ''
+      const chain = {
+        from: (table: unknown) => {
+          tableName = (table as { __tableName?: string })?.__tableName ?? ''
           return chain
-        }
-        const chain: ExistingVersionsSelectChain = {
-          from: () => chain,
-          where: () => ({
+        },
+        where: () => {
+          if (tableName === 'workflows') {
+            return { limit: () => ({ for: () => Promise.resolve(gateWorkflowRows) }) }
+          }
+          if (tableName === 'workflow_rollouts') {
+            return { limit: () => Promise.resolve(activeRolloutRows) }
+          }
+          if (selection === undefined) return Promise.resolve(sourceRows)
+          return {
             orderBy: () => ({ limit: () => Promise.resolve(existingVersions.slice(0, 1)) }),
-          }),
-        }
-        return chain
+          }
+        },
       }
-    })(),
+      return chain
+    },
     insert: () => ({
       values: (row: Record<string, unknown>) => {
         insertedRows.push(row)
@@ -91,11 +69,20 @@ vi.mock('@janusly/db', () => ({
     orgId: 'workflow_versions.org_id',
     workflowId: 'workflow_versions.workflow_id',
     version: 'workflow_versions.version',
+    __tableName: 'workflow_versions',
+  },
+  workflowRollouts: {
+    id: 'workflow_rollouts.id',
+    orgId: 'workflow_rollouts.org_id',
+    workflowId: 'workflow_rollouts.workflow_id',
+    status: 'workflow_rollouts.status',
+    __tableName: 'workflow_rollouts',
   },
   workflows: {
     id: 'workflows.id',
     orgId: 'workflows.org_id',
     deletedAt: 'workflows.deleted_at',
+    __tableName: 'workflows',
   },
 }))
 
@@ -109,6 +96,7 @@ afterEach(() => {
   sourceRows = []
   existingVersions = []
   gateWorkflowRows = [{ deletedAt: null }]
+  activeRolloutRows = []
   transactionFailures = []
   insertedRows.length = 0
   syncWorkflowSchedulesMock.mockReset()
@@ -116,6 +104,20 @@ afterEach(() => {
 })
 
 describe('rollbackWorkflowToVersion', () => {
+  it('does not mint a rollback version while a deployment is active', async () => {
+    activeRolloutRows = [{ id: 'rollout-1' }]
+
+    const result = await rollbackWorkflowToVersion({
+      orgId: 'org-1',
+      userId: 'user-1',
+      workflowId: 'wf-1',
+      sourceVersionId: 'ver-1',
+    })
+
+    expect(result).toEqual({ ok: false, code: 'rollout_active' })
+    expect(insertedRows).toHaveLength(0)
+  })
+
   it('inserts a new version whose dagJson matches the source exactly', async () => {
     const dag = { dslVersion: '1.0', id: 'wf-1', name: 'My Flow', nodes: [{ id: 'n1', type: 'noop', config: {} }], edges: [] }
     sourceRows = [{ id: 'ver-3', orgId: 'org-1', workflowId: 'wf-1', version: 3, dagJson: dag }]

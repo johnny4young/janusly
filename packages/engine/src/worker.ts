@@ -114,6 +114,11 @@ import {
   SUBWORKFLOW_TERMINAL_RECONCILER_JOB_NAME,
 } from "./subworkflow-terminal-reconciler";
 import {
+  handleWorkflowRolloutReconcilerTrigger,
+  registerWorkflowRolloutReconciler,
+  WORKFLOW_ROLLOUT_RECONCILER_JOB_NAME,
+} from "./workflow-rollout-reconciler";
+import {
   handleReplayCampaignReconcilerTrigger,
   handleReplayCampaignStep,
   registerReplayCampaignReconciler,
@@ -276,6 +281,15 @@ try {
   if (registered) console.log("[subworkflow-terminal-reconciler] sweep scheduler registered");
 } catch (err) {
   console.error("[subworkflow-terminal-reconciler] scheduler registration failed", err);
+}
+
+// Once-per-minute repair for terminal production runs whose rollout outcome
+// receipt was not durably recorded by the immediate terminal observer.
+try {
+  const registered = await registerWorkflowRolloutReconciler();
+  if (registered) console.log("[workflow-rollout-reconciler] sweep scheduler registered");
+} catch (err) {
+  console.error("[workflow-rollout-reconciler] scheduler registration failed", err);
 }
 
 // Durable paced-replay repair. Each campaign step drains at most one item;
@@ -489,7 +503,10 @@ export const worker = new Worker(
       return;
     }
     if (job.name === "schedule-trigger") {
-      await handleScheduleTrigger(job.data, job.repeatJobKey);
+      await handleScheduleTrigger(job.data, job.repeatJobKey, {
+        id: job.id,
+        timestamp: job.timestamp,
+      });
       return;
     }
     if (job.name === MEMORY_RETENTION_JOB_NAME) {
@@ -530,6 +547,10 @@ export const worker = new Worker(
     }
     if (job.name === SUBWORKFLOW_TERMINAL_RECONCILER_JOB_NAME) {
       await handleSubworkflowTerminalReconcilerTrigger();
+      return;
+    }
+    if (job.name === WORKFLOW_ROLLOUT_RECONCILER_JOB_NAME) {
+      await handleWorkflowRolloutReconcilerTrigger();
       return;
     }
     if (job.name === REPLAY_CAMPAIGN_RECONCILER_JOB_NAME) {

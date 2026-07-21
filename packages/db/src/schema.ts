@@ -21,7 +21,9 @@
  * Tables:
  * - `organizations`, `users`, `org_members` — multi-tenant scope.
  * - `org_configs` — tenant-level runtime configuration overrides.
- * - `workflows`, `workflow_versions` — versioned DAG storage.
+ * - `workflows`, `workflow_versions`, `workflow_rollouts`,
+ *   `workflow_rollout_outcomes` — versioned DAG storage and bounded rollout
+ *   assignment/evidence.
  * - `runs`, `run_nodes`, `run_events` — execution history (timeline events
  *   are paginated by `(run_id, created_at)`).
  * - `dead_letters`, `replay_campaigns`, `replay_campaign_items` — durable
@@ -169,12 +171,58 @@ export const workflowVersions = pgTable(
   ],
 );
 
+/**
+ * Durable deployment decision between one baseline and one newer canary.
+ *
+ * One partial unique index permits at most one active rollout per workflow.
+ * Historical rows remain inspectable after promotion, rollback, or operator
+ * cancellation. No foreign keys: workflow/version history is intentionally
+ * orphan-tolerant and retention owns eventual cleanup.
+ */
+export const workflowRollouts = pgTable(
+  "workflow_rollouts",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    baselineVersionId: text("baseline_version_id").notNull(),
+    canaryVersionId: text("canary_version_id").notNull(),
+    trafficPercent: integer("traffic_percent").notNull(),
+    minimumSampleSize: integer("minimum_sample_size").notNull(),
+    minimumSuccessRatePercent: integer("minimum_success_rate_percent").notNull(),
+    status: text("status")
+      .$type<"active" | "promoted" | "rolled_back" | "cancelled">()
+      .notNull()
+      .default("active"),
+    baselineSucceeded: integer("baseline_succeeded").notNull().default(0),
+    baselineFailed: integer("baseline_failed").notNull().default(0),
+    canarySucceeded: integer("canary_succeeded").notNull().default(0),
+    canaryFailed: integer("canary_failed").notNull().default(0),
+    rolledBackReason: text("rolled_back_reason"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    lastOutcomeAt: timestamp("last_outcome_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("workflow_rollouts_one_active_idx")
+      .on(table.orgId, table.workflowId)
+      .where(sql`status = 'active'`),
+    index("workflow_rollouts_org_workflow_created_idx")
+      .on(table.orgId, table.workflowId, table.createdAt.desc()),
+  ],
+);
+
 export const runs = pgTable(
   "runs",
   {
     id: text("id").primaryKey(),
     orgId: text("org_id").notNull().default("default"),
     workflowVersionId: text("workflow_version_id").notNull(),
+    /** Rollout assignment captured once at start; retries never recalculate it. */
+    workflowRolloutId: text("workflow_rollout_id"),
+    workflowRolloutVariant: text("workflow_rollout_variant").$type<"baseline" | "canary">(),
     status: text("status").notNull(),
     inputJson: jsonb("input_json"),
     /**
@@ -226,9 +274,34 @@ export const runs = pgTable(
       .on(table.parentNotificationAfter, table.id)
       .where(sql`"parent_notification_after" IS NOT NULL`),
     index("runs_org_replay_mode_idx").on(table.orgId, table.replayMode),
+    index("runs_rollout_idx").on(table.workflowRolloutId, table.createdAt.desc()),
     uniqueIndex("runs_redrive_idempotency_idx")
       .on(table.orgId, table.parentRunId, table.parentNodeId, table.workflowVersionId)
       .where(sql`"parent_link_kind" = 'replay' AND "replay_mode" IS NULL AND "input_json" ? 'redrive'`),
+  ],
+);
+
+/**
+ * Idempotency receipt for terminal rollout evidence.
+ *
+ * One run contributes at most one outcome across worker retries and repair
+ * sweeps. Rows are operationally meaningless without their rollout aggregate,
+ * but remain orphan-tolerant to match workflow history's no-FK posture.
+ */
+export const workflowRolloutOutcomes = pgTable(
+  "workflow_rollout_outcomes",
+  {
+    runId: text("run_id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    rolloutId: text("rollout_id").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    variant: text("variant").$type<"baseline" | "canary">().notNull(),
+    status: text("status").$type<"succeeded" | "failed" | "cancelled">().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("workflow_rollout_outcomes_rollout_created_idx")
+      .on(table.rolloutId, table.createdAt),
   ],
 );
 
@@ -2212,6 +2285,10 @@ export const triggerEvents = pgTable(
     workflowId: text("workflow_id"),
     /** The workflow version whose trigger node matched the inbound event. */
     workflowVersionId: text("workflow_version_id").notNull(),
+    /** Canary deployment captured when the event was first accepted. */
+    workflowRolloutId: text("workflow_rollout_id"),
+    /** Stable deployment variant; retries and buffered backfill never recalculate it. */
+    workflowRolloutVariant: text("workflow_rollout_variant").$type<"baseline" | "canary">(),
     /** The trigger node id inside that version. */
     nodeId: text("node_id").notNull(),
     /** Lifecycle status — one of the closed `triggerEventStatusValues`, including buffered leases. */

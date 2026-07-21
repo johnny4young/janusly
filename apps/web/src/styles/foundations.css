@@ -27,6 +27,7 @@
   --color-we-warning-soft: #fffbeb;
   --color-we-warning-text: #9a5108;
   --color-we-danger: #ef4444;
+  --color-we-danger-solid: #b42318;
   --color-we-danger-soft: #fef2f2;
   --color-we-danger-text: #b42318;
   --color-we-info: #3b82f6;
@@ -102,6 +103,7 @@
   --we-warning-border-30: color-mix(in srgb, var(--we-warning) 30%, transparent);
   --we-warning-border-35: color-mix(in srgb, var(--we-warning) 35%, transparent);
   --we-danger: var(--color-we-danger);
+  --we-danger-solid: var(--color-we-danger-solid);
   --we-success-text: var(--color-we-success-text);
   --we-warning-text: var(--color-we-warning-text);
   --we-danger-text: var(--color-we-danger-text);
@@ -158,6 +160,7 @@
   --color-we-warning-soft: #2c1f08;
   --color-we-warning-text: #f59e0b;
   --color-we-danger: #ef4444;
+  --color-we-danger-solid: #b42318;
   --color-we-danger-soft: #2c1414;
   --color-we-danger-text: #ef4444;
   --color-we-info: #3b82f6;
@@ -199,6 +202,7 @@
   --we-warning: var(--color-we-warning);
   --we-warning-soft: var(--color-we-warning-soft);
   --we-danger: var(--color-we-danger);
+  --we-danger-solid: var(--color-we-danger-solid);
   --we-danger-soft: var(--color-we-danger-soft);
   --we-info: var(--color-we-info);
   --we-info-soft: var(--color-we-info-soft);
@@ -842,7 +846,7 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 /* Destructive variant — used by the confirm dialog's confirm button. */
 .command-button-danger {
   border-color: transparent;
-  background: var(--we-danger);
+  background: var(--we-danger-solid);
   color: var(--we-surface);
   font-weight: 600;
 }

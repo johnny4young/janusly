@@ -66,7 +66,9 @@ import {
   recordTriggerEvent,
   releaseTriggerEventBackfillClaim,
   retireTriggerEventBackfillClaim,
+  resolveWorkflowRolloutAssignment,
   resolveTriggerNode,
+  resolveTriggerNodeInVersion,
   type TriggerEvent,
   type ResolvedTriggerNode,
 } from "@janusly/data";
@@ -135,6 +137,33 @@ async function persistEventAndSpawnRun(args: {
 }): Promise<{ status: number; body: unknown }> {
   const { auth, triggerType, resolved, payload, dedupeKey, replayOfEventId, eventId, existingEvent } = args;
 
+  const durableEventId = existingEvent?.id ?? eventId ?? crypto.randomUUID();
+  let selectedResolved = resolved;
+  let selectedRollout: { id: string; variant: "baseline" | "canary" } | null = null;
+  if (!existingEvent && !replayOfEventId && resolved.workflowId) {
+    const assignment = await resolveWorkflowRolloutAssignment({
+      orgId: auth.orgId,
+      workflowId: resolved.workflowId,
+      assignmentKey: durableEventId,
+    });
+    if (assignment) {
+      const exactNode = await resolveTriggerNodeInVersion(
+        auth.orgId,
+        assignment.versionId,
+        triggerType,
+        resolved.nodeId,
+      );
+      if (!exactNode) {
+        return {
+          status: 409,
+          body: errorEnvelope("trigger_no_matching_node", "Assigned workflow version no longer contains the trigger node"),
+        };
+      }
+      selectedResolved = exactNode;
+      selectedRollout = { id: assignment.rollout.id, variant: assignment.variant };
+    }
+  }
+
   // 1. Persist the structured event BEFORE the run (DLQ-style replay anchor),
   //    idempotent on (orgId, dedupeKey) so a relay retry converges.
   const recorded = existingEvent
@@ -142,12 +171,14 @@ async function persistEventAndSpawnRun(args: {
     : await recordTriggerEvent({
         orgId: auth.orgId,
         triggerType,
-        workflowId: resolved.workflowId,
-        workflowVersionId: resolved.workflowVersionId,
-        nodeId: resolved.nodeId,
+        workflowId: selectedResolved.workflowId,
+        workflowVersionId: selectedResolved.workflowVersionId,
+        workflowRolloutId: selectedRollout?.id ?? null,
+        workflowRolloutVariant: selectedRollout?.variant ?? null,
+        nodeId: selectedResolved.nodeId,
         dedupeKey,
         payloadJson: safePersistPayload({ event: payload }),
-        id: eventId,
+        id: durableEventId,
       });
   const { event, wasCreated } = recorded;
 
@@ -161,8 +192,9 @@ async function persistEventAndSpawnRun(args: {
   }
 
   let effectiveTriggerType = triggerType;
-  let effectiveResolved = resolved;
+  let effectiveResolved = selectedResolved;
   let effectivePayload = payload;
+  let effectiveRollout = selectedRollout;
   if (!wasCreated) {
     if (!isTriggerNodeType(event.triggerType)) {
       await markTriggerEventFailed(auth.orgId, event.id, "invalid_persisted_trigger_type");
@@ -171,11 +203,11 @@ async function persistEventAndSpawnRun(args: {
         body: errorEnvelope("trigger_invalid_payload", "Persisted trigger event has an invalid type"),
       };
     }
-    const persistedResolved = await resolveTriggerNode(
+    const persistedResolved = await resolveTriggerNodeInVersion(
       auth.orgId,
+      event.workflowVersionId,
       event.triggerType,
-      () => true,
-      event.workflowId ? { workflowId: event.workflowId, nodeId: event.nodeId } : undefined,
+      event.nodeId,
     );
     if (!persistedResolved) {
       await markTriggerEventFailed(auth.orgId, event.id, "persisted_trigger_node_missing");
@@ -186,6 +218,10 @@ async function persistEventAndSpawnRun(args: {
     }
     effectiveTriggerType = event.triggerType;
     effectiveResolved = persistedResolved;
+    effectiveRollout = event.workflowRolloutId
+      && (event.workflowRolloutVariant === "baseline" || event.workflowRolloutVariant === "canary")
+      ? { id: event.workflowRolloutId, variant: event.workflowRolloutVariant }
+      : null;
     effectivePayload = (event.payloadJson && typeof event.payloadJson === "object" && !Array.isArray(event.payloadJson)
       ? (event.payloadJson as { event?: Record<string, unknown> }).event
       : undefined) ?? {};
@@ -265,6 +301,7 @@ async function persistEventAndSpawnRun(args: {
       versionId: effectiveResolved.workflowVersionId,
       createdBy: auth.userId,
       input: { triggeredBy: effectiveTriggerType, triggerEventId: event.id, event: effectivePayload },
+      ...(effectiveRollout ? { rollout: effectiveRollout } : {}),
       triggerEventStart: { id: event.id },
     });
     await auditAction(auth, replayOfEventId ? "trigger.event.replayed" : "trigger.event.started", {
@@ -377,9 +414,9 @@ export const TRIGGER_BACKFILL_MAX_PER_RESUME = 100;
  *    still owed.
  *
  * So this leases and transitions the existing row
- * `buffered -> backfilling -> started` against the CURRENT latest version:
- * the operator resumed because they fixed something, and the backfill should
- * run on the fix.
+ * `buffered -> backfilling -> started` against the exact version and optional
+ * rollout variant captured when the event was accepted. Mutable deployment
+ * state cannot silently change the semantics of already-owed input.
  *
  * Never throws: the workflow is already resumed by the time this runs, and a
  * backfill fault must not read as a failed resume. A per-event failure is
@@ -405,13 +442,16 @@ export async function backfillBufferedTriggerEvents(args: {
         }
 
         const triggerType = event.triggerType as TriggerNodeType;
-        const resolved = await resolveTriggerNode(args.auth.orgId, triggerType, () => true, {
-          workflowId: args.workflowId,
-          nodeId: event.nodeId,
-        });
+        const resolved = await resolveTriggerNodeInVersion(
+          args.auth.orgId,
+          event.workflowVersionId,
+          triggerType,
+          event.nodeId,
+        );
         if (!resolved) {
-          // The trigger node is gone from the current version — the event can
-          // never run again. Retire it so it stops counting as owed work.
+          // The exact accepted version or trigger node is no longer available,
+          // so the event can never run again. Retire it so it stops counting as
+          // owed work without silently changing its execution semantics.
           const retired = await retireTriggerEventBackfillClaim(
             args.auth.orgId,
             row.id,
@@ -446,6 +486,10 @@ export async function backfillBufferedTriggerEvents(args: {
           versionId: resolved.workflowVersionId,
           createdBy: args.auth.userId,
           input: { triggeredBy: triggerType, triggerEventId: row.id, backfilled: true, event: storedPayload },
+          ...(event.workflowRolloutId
+            && (event.workflowRolloutVariant === "baseline" || event.workflowRolloutVariant === "canary")
+            ? { rollout: { id: event.workflowRolloutId, variant: event.workflowRolloutVariant } }
+            : {}),
           triggerEventStart: { id: row.id, claimToken: row.claimToken },
         });
         await auditAction(args.auth, "trigger.event.started", {

@@ -37,6 +37,7 @@ import {
   setWorkflowSlo,
   getWorkflowBreakerStatus,
   resumeWorkflowCircuitBreaker,
+  softDeleteWorkflow,
 } from "@janusly/data";
 import { unregisterAllForWorkflow, syncWorkflowSchedules } from "@janusly/engine/src/schedule-scheduler";
 import { validateCronExpression } from "@janusly/engine/src/schedule";
@@ -275,6 +276,14 @@ export const workflowsRoutes: Route[] = [
       if (result.kind === "deleted") {
         return sendError(res, "workflow_not_found", "Workflow not found", 404);
       }
+      if (result.kind === "rollout_active") {
+        return sendError(
+          res,
+          "workflow_rollout_active",
+          "Finish the active workflow rollout before saving a new version",
+          409,
+        );
+      }
 
       const auditMetadata: Record<string, unknown> = {
         version: result.version,
@@ -318,6 +327,14 @@ export const workflowsRoutes: Route[] = [
             attempts: result.attempts,
             params: { attempts: result.attempts },
           }, 409);
+        }
+        if (result.code === "rollout_active") {
+          return sendError(
+            res,
+            "workflow_rollout_active",
+            "Finish the active workflow rollout before creating a rollback version",
+            409,
+          );
         }
         return sendError(res, "workflows_source_version_not_found", "Source version not found", 404);
       }
@@ -479,14 +496,12 @@ export const workflowsRoutes: Route[] = [
 
       // Only an active (not already soft-deleted) workflow can be deleted;
       // an absent/already-deleted id returns the same enumeration-safe 404.
-      // The `RETURNING` makes the active→deleted transition a CAS, so two
-      // concurrent DELETEs cannot both audit the same tombstone.
-      const deleted = await db
-        .update(workflows)
-        .set({ deletedAt: new Date() })
-        .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId), isNull(workflows.deletedAt)))
-        .returning({ id: workflows.id });
-      if (deleted.length === 0) return sendError(res, "workflow_not_found", "Workflow not found", 404);
+      // The data-layer transaction locks the parent, makes the active→deleted
+      // transition a CAS, and cancels any active rollout in the same commit.
+      // Concurrent DELETEs cannot both audit the same tombstone, and restore
+      // can never revive an accidentally live deployment.
+      const deleted = await softDeleteWorkflow(auth.orgId, workflowId);
+      if (!deleted) return sendError(res, "workflow_not_found", "Workflow not found", 404);
 
       // Schedule teardown fails open — a Redis blip shouldn't block a
       // workflow delete from completing. A soft-deleted workflow is excluded
@@ -495,7 +510,7 @@ export const workflowsRoutes: Route[] = [
       try {
         await unregisterAllForWorkflow(auth.orgId, workflowId);
       } catch (err) {
-        console.error("[workflows-delete] schedule teardown failed", { workflowId, err });
+        console.error("[workflows-delete] operational teardown failed", { workflowId, err });
       }
 
       await auditAction(auth, "workflow.deleted", { targetType: "workflow", targetId: workflowId, metadata: { soft: true } });

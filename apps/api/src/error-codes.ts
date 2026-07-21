@@ -55,6 +55,10 @@ export type ApiErrorCode =
   | "upstream_degraded"
   | "workflow_circuit_breaker_paused"
   | "workflow_not_circuit_breaker_paused"
+  | "workflow_rollout_active"
+  | "workflow_rollout_invalid"
+  | "workflow_rollout_not_found"
+  | "workflow_rollout_not_active"
   // upstream health sources
   | "upstream_source_not_found"
   | "upstream_source_duplicate"

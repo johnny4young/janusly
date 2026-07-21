@@ -22,12 +22,12 @@
  *   `ON CONFLICT DO NOTHING` so a relay retry with the same upstream message
  *   id converges to one row (and one run). The `wasCreated` flag tells the
  *   caller whether to spawn a run or short-circuit a duplicate.
- * - Resolution of the matching trigger node walks the org's LATEST active
- *   workflow versions (org-scoped) — drafts and soft-deleted workflows do not
- *   fire.
+ * - Initial resolution walks the org's latest active workflow versions. Once
+ *   accepted, the exact version and optional rollout assignment are durable;
+ *   retries and buffered backfill never re-resolve mutable latest state.
  */
 
-import { and, asc, desc, eq, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { db, triggerEvents, workflows, workflowVersions } from "@janusly/db";
 import {
   isTriggerNodeType,
@@ -42,6 +42,8 @@ export type RecordTriggerEventInput = {
   triggerType: TriggerNodeType;
   workflowId: string | null;
   workflowVersionId: string;
+  workflowRolloutId?: string | null;
+  workflowRolloutVariant?: "baseline" | "canary" | null;
   nodeId: string;
   /** Idempotency key — relay retries with the same key converge to one row. */
   dedupeKey: string | null;
@@ -78,6 +80,8 @@ export async function recordTriggerEvent(input: RecordTriggerEventInput): Promis
       triggerType: input.triggerType,
       workflowId: input.workflowId,
       workflowVersionId: input.workflowVersionId,
+      workflowRolloutId: input.workflowRolloutId ?? null,
+      workflowRolloutVariant: input.workflowRolloutVariant ?? null,
       nodeId: input.nodeId,
       status: "received",
       dedupeKey: input.dedupeKey,
@@ -372,6 +376,43 @@ export type ResolvedTriggerNode = {
   /** The full DAG JSON the run will execute. */
   dagJson: unknown;
 };
+
+/** Resolve one exact persisted trigger node without consulting latest state. */
+export async function resolveTriggerNodeInVersion(
+  orgId: string,
+  workflowVersionId: string,
+  triggerType: TriggerNodeType,
+  nodeId: string,
+): Promise<ResolvedTriggerNode | null> {
+  const rows = await db
+    .select({
+      workflowId: workflowVersions.workflowId,
+      dagJson: workflowVersions.dagJson,
+    })
+    .from(workflowVersions)
+    .innerJoin(workflows, and(
+      eq(workflows.id, workflowVersions.workflowId),
+      eq(workflows.orgId, workflowVersions.orgId),
+    ))
+    .where(and(
+      eq(workflowVersions.orgId, orgId),
+      eq(workflowVersions.id, workflowVersionId),
+      isNull(workflows.deletedAt),
+    ))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  const node = extractTriggerNodes(row.dagJson)
+    .find((candidate) => candidate.id === nodeId && candidate.type === triggerType);
+  if (!node) return null;
+  return {
+    workflowId: row.workflowId,
+    workflowVersionId,
+    nodeId: node.id,
+    nodeConfig: node.config,
+    dagJson: row.dagJson,
+  };
+}
 
 type LatestVersionRow = {
   id: string;

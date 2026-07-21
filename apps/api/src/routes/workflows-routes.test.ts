@@ -74,6 +74,7 @@ vi.mock("@janusly/data", () => ({
   listWorkflowsWithRunSummary: vi.fn(),
   queryScheduleFires: vi.fn(),
   setWorkflowSlo: vi.fn(),
+  softDeleteWorkflow: vi.fn(async () => true),
 }));
 
 vi.mock("@janusly/engine/src/schedule-scheduler", () => ({

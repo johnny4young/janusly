@@ -18,6 +18,7 @@ import {
   getOrgConfigSnapshot,
   getRunComparison,
   queryRunUsage,
+  resolveWorkflowRolloutAssignment,
   getWorkflowStatus,
   resolveWorkflowPauseAction,
 } from "@janusly/data";
@@ -656,15 +657,24 @@ export const runsRoutes: Route[] = [
         ? asRecord(body.workflow)
         : body;
       const inputValue = Object.hasOwn(body, "input") ? body.input : {};
+      const requestedWorkflowId = typeof workflow.id === "string" ? workflow.id : null;
+      const rolloutAssignment = requestedWorkflowId
+        ? await resolveWorkflowRolloutAssignment({
+            orgId: auth.orgId,
+            workflowId: requestedWorkflowId,
+            assignmentKey: crypto.randomUUID(),
+          })
+        : null;
+      const effectiveWorkflow = rolloutAssignment?.workflow ?? workflow;
       // Explicit operator override to start a run even when the workflow is
       // paused by an upstream-health degradation. Surfaced as the "Force run"
       // button on the paused-workflow UI; audited separately so the override
       // is traceable.
       const forceRunDuringPause = body.forceRunDuringPause === true;
 
-      const validation = validateWorkflow(workflow);
+      const validation = validateWorkflow(effectiveWorkflow);
       if (!validation.valid) return sendError(res, "runs_validation_failed", "Validation failed", 400);
-      const parsedWorkflow = WorkflowSchema.parse(workflow);
+      const parsedWorkflow = WorkflowSchema.parse(effectiveWorkflow);
 
       // Production-mode opt-in gate: when `JANUSLY_PRODUCTION_MODE=true`, the
       // deterministic readiness check runs before `startRun` and rejects
@@ -742,10 +752,26 @@ export const runsRoutes: Route[] = [
           input: inputValue,
           orgId: auth.orgId,
           createdBy: auth.userId,
+          ...(rolloutAssignment
+            ? {
+                versionId: rolloutAssignment.versionId,
+                rollout: {
+                  id: rolloutAssignment.rollout.id,
+                  variant: rolloutAssignment.variant,
+                },
+              }
+            : {}),
         });
         await auditAction(auth, isAdhoc ? "run.started.adhoc" : "run.started", { targetType: "run", targetId: result.runId, metadata: {
           workflowId: parsedWorkflow.id,
           adhoc: isAdhoc,
+          ...(rolloutAssignment
+            ? {
+                workflowVersionId: rolloutAssignment.versionId,
+                workflowRolloutId: rolloutAssignment.rollout.id,
+                workflowRolloutVariant: rolloutAssignment.variant,
+              }
+            : {}),
           ...(forcedDuringPause ? { forcedDuringPause: true } : {}),
         } });
         return sendJson(res, result);

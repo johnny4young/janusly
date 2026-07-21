@@ -11,6 +11,14 @@
 /** Maximum transaction attempts, including the first allocation attempt. */
 export const MAX_VERSION_WRITE_ATTEMPTS = 3;
 
+/** Version appends are blocked while a deployment is actively splitting traffic. */
+export class ActiveWorkflowRolloutError extends Error {
+  constructor() {
+    super("Workflow has an active rollout");
+    this.name = "ActiveWorkflowRolloutError";
+  }
+}
+
 const PG_UNIQUE_VIOLATION = "23505";
 const RETRYABLE_VERSION_WRITE_CONSTRAINTS: ReadonlySet<string> = new Set([
   "workflow_versions_org_workflow_version_idx",

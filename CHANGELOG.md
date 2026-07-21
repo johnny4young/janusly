@@ -37,6 +37,12 @@ retroactively.
 
 ### Added
 
+- Progressive baseline/canary workflow deployments with deterministic traffic
+  assignment across manual starts, inbound triggers, schedules, and unpinned
+  production subworkflows; immutable version capture, strict trigger
+  compatibility, idempotent terminal evidence, bounded repair, and
+  minimum-sample automatic rollback are included with responsive
+  English/Spanish Inspector controls.
 - Signed Slack recovery actions that let explicitly mapped operators
   acknowledge, assign, or open recovery work from Block Kit alerts. Exact-body
   HMAC verification, team binding, normal recovery authorization, atomic

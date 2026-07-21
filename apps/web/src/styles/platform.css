@@ -637,6 +637,121 @@
   margin-top: 4px;
 }
 
+/* ── Workflow deployment rollout ──────────────────────────────────────── */
+.we-rollout-panel {
+  margin-top: 12px;
+}
+
+.we-rollout-panel .eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 0 3px;
+}
+
+.we-rollout-panel__status,
+.we-rollout-panel__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--we-line);
+}
+
+.we-rollout-panel__versions,
+.we-rollout-panel__pair,
+.we-rollout-panel__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.we-rollout-panel__versions span,
+.we-rollout-panel__canary span,
+.we-rollout-panel__metrics span {
+  color: var(--we-muted);
+  font-size: 11px;
+}
+
+.we-rollout-panel__versions strong {
+  color: var(--we-primary);
+  font-size: 12px;
+}
+
+.we-rollout-panel__progress {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--we-primary);
+}
+
+.we-rollout-panel__metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.we-rollout-panel__metrics > div,
+.we-rollout-panel__canary {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  background: var(--we-surface-muted);
+}
+
+.we-rollout-panel__metrics strong,
+.we-rollout-panel__canary strong {
+  color: var(--we-text-1);
+  font-size: 13px;
+}
+
+.we-rollout-panel__decision {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: var(--we-text-2);
+  font-size: 12px;
+}
+
+.we-rollout-panel__empty {
+  margin: 12px 0 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--we-surface-muted);
+  color: var(--we-muted);
+  font-size: 12px;
+}
+
+.we-rollout-panel__pair {
+  align-items: stretch;
+}
+
+.we-rollout-panel__pair > * {
+  flex: 1;
+}
+
+.we-rollout-panel__fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.we-rollout-panel__fields input {
+  min-width: 0;
+}
+
+@media (max-width: 760px) {
+  .we-rollout-panel__fields {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ── Schedule observability (cron heatmap) ─────────────────────────────── */
 .we-schedule-panel {
   margin-top: 12px;

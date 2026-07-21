@@ -34,13 +34,14 @@
  */
 
 import { and, desc, eq } from "drizzle-orm";
-import { db, workflowVersions, workflows } from "@janusly/db";
+import { db, workflowRollouts, workflowVersions, workflows } from "@janusly/db";
 import type { Workflow } from "@janusly/shared";
 import { syncWorkflowSchedules } from "@janusly/engine/src/schedule-scheduler";
 
 import {
   isRetryableVersionWriteViolation,
   MAX_VERSION_WRITE_ATTEMPTS,
+  ActiveWorkflowRolloutError,
 } from "./workflow-version-write";
 
 /**
@@ -76,7 +77,8 @@ export type SaveWorkflowResult =
        * every other soft-delete gate. The operator restores explicitly first.
        */
       kind: "deleted";
-    };
+    }
+  | { kind: "rollout_active" };
 
 /** Backward-compatible aliases retained for focused save-helper tests. */
 export const MAX_SAVE_ATTEMPTS = MAX_VERSION_WRITE_ATTEMPTS;
@@ -126,6 +128,24 @@ export async function saveWorkflowVersion(args: {
     const versionId = crypto.randomUUID();
     try {
       const { nextVersion } = await db.transaction(async (tx) => {
+        // Lock the parent before rollout/version reads. Rollout creation takes
+        // the same lock, closing the save-vs-deploy race across replicas.
+        const existingWorkflow = await tx.select().from(workflows)
+          .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, orgId)))
+          .limit(1)
+          .for("update");
+        if (existingWorkflow[0]) {
+          const activeRollout = await tx.select({ id: workflowRollouts.id })
+            .from(workflowRollouts)
+            .where(and(
+              eq(workflowRollouts.orgId, orgId),
+              eq(workflowRollouts.workflowId, workflowId),
+              eq(workflowRollouts.status, "active"),
+            ))
+            .limit(1);
+          if (activeRollout[0]) throw new ActiveWorkflowRolloutError();
+        }
+
         const latestVersions = await tx.select({
           version: workflowVersions.version,
           sloJson: workflowVersions.sloJson,
@@ -147,8 +167,6 @@ export async function saveWorkflowVersion(args: {
             ? upstreamHealthSources
             : ((latestVersion?.upstreamHealthSources as string[] | null) ?? null);
 
-        const existingWorkflow = await tx.select().from(workflows)
-          .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, orgId)));
         if (existingWorkflow[0]) {
           if (existingWorkflow[0].name !== workflowName) {
             await tx.update(workflows).set({ name: workflowName })
@@ -198,6 +216,7 @@ export async function saveWorkflowVersion(args: {
         attempts: attempt,
       };
     } catch (err) {
+      if (err instanceof ActiveWorkflowRolloutError) return { kind: "rollout_active" };
       if (isRetryableVersionWriteViolation(err) && attempt < MAX_VERSION_WRITE_ATTEMPTS) {
         // Lost the version-uniqueness race against a concurrent saver.
         // The other writer's row has committed; the next loop

@@ -18,13 +18,14 @@
  */
 
 import { and, desc, eq } from "drizzle-orm";
-import { db, workflowVersions, workflows } from "@janusly/db";
+import { db, workflowRollouts, workflowVersions, workflows } from "@janusly/db";
 import { syncWorkflowSchedules } from "@janusly/engine/src/schedule-scheduler";
 import { WorkflowSchema, type WorkflowNode } from "@janusly/shared";
 
 import {
   isRetryableVersionWriteViolation,
   MAX_VERSION_WRITE_ATTEMPTS,
+  ActiveWorkflowRolloutError,
 } from "./workflow-version-write";
 
 /** Result of an attempted rollback. `ok: false` cases are non-throwing so
@@ -43,7 +44,7 @@ export type RollbackResult =
       /** Number of allocation attempts before the version was appended. */
       attempts: number;
     }
-  | { ok: false; code: "source_not_found" | "parent_not_found" | "deleted" | "malformed" }
+  | { ok: false; code: "source_not_found" | "parent_not_found" | "deleted" | "malformed" | "rollout_active" }
   | { ok: false; code: "conflict"; attempts: number };
 
 /** Successful rollback payload narrowed for callers that need audit metadata. */
@@ -79,9 +80,19 @@ export async function rollbackWorkflowToVersion(args: {
           .select({ deletedAt: workflows.deletedAt })
           .from(workflows)
           .where(and(eq(workflows.id, args.workflowId), eq(workflows.orgId, args.orgId)))
-          .limit(1);
+          .limit(1)
+          .for("update");
         if (!workflowRows[0]) return { ok: false, code: "parent_not_found" } as const;
         if (workflowRows[0].deletedAt) return { ok: false, code: "deleted" } as const;
+        const activeRollout = await tx.select({ id: workflowRollouts.id })
+          .from(workflowRollouts)
+          .where(and(
+            eq(workflowRollouts.orgId, args.orgId),
+            eq(workflowRollouts.workflowId, args.workflowId),
+            eq(workflowRollouts.status, "active"),
+          ))
+          .limit(1);
+        if (activeRollout[0]) throw new ActiveWorkflowRolloutError();
 
         const sourceRows = await tx
           .select()
@@ -166,6 +177,7 @@ export async function rollbackWorkflowToVersion(args: {
       }
       return result;
     } catch (error) {
+      if (error instanceof ActiveWorkflowRolloutError) return { ok: false, code: "rollout_active" };
       if (isRetryableVersionWriteViolation(error) && attempt < MAX_VERSION_WRITE_ATTEMPTS) continue;
       if (isRetryableVersionWriteViolation(error)) {
         return { ok: false, code: "conflict", attempts: MAX_VERSION_WRITE_ATTEMPTS };

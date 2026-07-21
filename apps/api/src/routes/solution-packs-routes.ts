@@ -300,6 +300,9 @@ export const solutionPacksRoutes: Route[] = [
         // installs mint a fresh workflow id, but the save contract requires it.)
         return sendError(res, "workflow_not_found", "Workflow not found", 404);
       }
+      if (result.kind === "rollout_active") {
+        return sendError(res, "workflow_rollout_active", "Finish the active workflow rollout before installing a pack version", 409);
+      }
 
       const { missingCredentials, missingOrgConfigs } = await computeMissingDeps(auth.orgId, pack);
 

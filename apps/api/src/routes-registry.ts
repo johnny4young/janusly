@@ -53,6 +53,7 @@ import { toolsRoutes } from "./routes/tools-routes";
 import { triggerIngestRoutes } from "./routes/trigger-ingest-routes";
 import { upstreamHealthRoutes } from "./routes/upstream-health-routes";
 import { workflowMetadataRoutes } from "./routes/workflow-metadata-routes";
+import { workflowRolloutsRoutes } from "./routes/workflow-rollouts-routes";
 import { workflowsRoutes } from "./routes/workflows-routes";
 
 export const routes: Route[] = [
@@ -73,6 +74,7 @@ export const routes: Route[] = [
   // resolves here before any `/workflows/*` matcher can shadow it.
   ...solutionPacksRoutes,
   ...onboardingRoutes,
+  ...workflowRolloutsRoutes,
   ...workflowsRoutes,
   ...pluginsRoutes,
   ...credentialsRoutes,

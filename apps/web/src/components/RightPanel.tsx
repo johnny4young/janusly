@@ -46,6 +46,7 @@ const RunWorkspace = lazy(() => import('./RunWorkspace').then((m) => ({ default:
 const ReasoningPanel = lazy(() => import('./ReasoningPanel').then((m) => ({ default: m.ReasoningPanel })))
 const CredentialRotateModal = lazy(() => import('./CredentialRotateModal').then((m) => ({ default: m.CredentialRotateModal })))
 const VersionHistoryPanel = lazy(() => import('./VersionHistoryPanel').then((m) => ({ default: m.VersionHistoryPanel })))
+const WorkflowRolloutPanel = lazy(() => import('./WorkflowRolloutPanel').then((m) => ({ default: m.WorkflowRolloutPanel })))
 const WorkflowSloPanel = lazy(() => import('./WorkflowSloPanel').then((m) => ({ default: m.WorkflowSloPanel })))
 const ScheduleHistoryPanel = lazy(() => import('./ScheduleHistoryPanel').then((m) => ({ default: m.ScheduleHistoryPanel })))
 const WorkflowMetadataPanel = lazy(() => import('./WorkflowMetadataPanel').then((m) => ({ default: m.WorkflowMetadataPanel })))
@@ -234,6 +235,7 @@ function RightPanelRouter(props: RightPanelProps) {
           spuriously under a ready config. */}
       <Suspense fallback={null}>
         <VersionHistoryPanel />
+        <WorkflowRolloutPanel />
         <WorkflowSloPanel />
         <ScheduleHistoryPanel />
         <WorkflowMetadataPanel />

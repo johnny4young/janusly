@@ -17,7 +17,7 @@
  */
 
 import { db, deadLetters, runNodes, runEvents, runs, workflowVersions } from "@janusly/db";
-import { recordRecoveryImpactTx } from "@janusly/data";
+import { recordRecoveryImpactTx, recordWorkflowRolloutOutcome } from "@janusly/data";
 import { eq, ne, and, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { WorkflowSchema, type Workflow } from "@janusly/shared";
 import { isOpenNodeStatus, nodeCancellableStatusValues } from "@janusly/shared/src/status";
@@ -1570,6 +1570,15 @@ export async function notifyCommittedRunTerminal(
   status: "succeeded" | "failed" | "cancelled",
   expectedMarker?: Date,
 ): Promise<boolean> {
+  try {
+    await recordWorkflowRolloutOutcome(runId, status);
+  } catch (error) {
+    // Rollout evidence and automatic rollback are durable operational
+    // sidecars. A transient observer failure must never unwind a terminal run;
+    // the maintenance reconciler can safely retry because outcomes are keyed
+    // by run id.
+    console.warn("[workflow-rollout] terminal outcome recording failed", { runId, status, error });
+  }
   try {
     let marker = expectedMarker;
     if (!marker) {
