@@ -7,7 +7,8 @@
  * replay / fix durability / SLA),
  * the operator composer + content tiles (recovery queue / failure
  * clusters / pending approvals / recommended actions / budget / today),
- * the value dashboard, and a teaching empty-state hero for new operators.
+ * controlled-drill validation, the value dashboard, and a teaching empty-state
+ * hero for new operators.
  *
  * This file is the thin data-fetching wrapper. The presentational pieces
  * live in sibling files under `./recovery-center/`:
@@ -22,6 +23,7 @@
  *
  * Data sources (all already shipped):
  * - `GET /recovery/metrics` → metric strip, health badge, severities.
+ * - `GET /recovery/validation` → bounded controlled-drill evidence.
  * - `GET /recovery/ledger` + `GET /recovery/my-wins` → verified lifetime and
  *   operator impact; refreshed from platform signals plus a bounded fallback
  *   so background-run completions still surface.
@@ -56,6 +58,10 @@ import type { DeadLetter } from './DeadLettersPanel'
 import { tRecoveryMetricRationale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { ValueDashboardSection } from './ValueDashboardSection'
+import {
+  RecoveryValidationSection,
+  type RecoveryValidationReport,
+} from './RecoveryValidationSection'
 import { OnboardingReplayButton } from './OnboardingReplayButton'
 import { OnboardingBanner } from './OnboardingBanner'
 import { VitalSignsStrip, withSeverityLabels, type VitalSignsTile } from './VitalSignsStrip'
@@ -151,12 +157,14 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const [metricsSnapshot, setMetricsSnapshot] = useState<OrgSnapshot<RecoveryMetrics> | null>(null)
   const [clustersSnapshot, setClustersSnapshot] = useState<OrgSnapshot<ClustersResponse | null> | null>(null)
   const [heatmapSnapshot, setHeatmapSnapshot] = useState<OrgSnapshot<HeatmapDay[]> | null>(null)
+  const [validationSnapshot, setValidationSnapshot] = useState<OrgSnapshot<RecoveryValidationReport | null> | null>(null)
   const [ledgerSnapshot, setLedgerSnapshot] = useState<OrgSnapshot<RecoveryLedger | null> | null>(null)
   const [winsSnapshot, setWinsSnapshot] = useState<IdentitySnapshot<OperatorWins | null> | null>(null)
   const [impactPollVersion, setImpactPollVersion] = useState(0)
   const metrics = metricsSnapshot?.orgId === resolvedOrgId ? metricsSnapshot.value : null
   const clusters = clustersSnapshot?.orgId === resolvedOrgId ? clustersSnapshot.value : null
   const heatmap = heatmapSnapshot?.orgId === resolvedOrgId ? heatmapSnapshot.value : []
+  const validation = validationSnapshot?.orgId === resolvedOrgId ? validationSnapshot.value : undefined
   const ledger = ledgerSnapshot?.orgId === resolvedOrgId ? ledgerSnapshot.value : null
   const operatorWins = winsSnapshot?.orgId === resolvedOrgId && winsSnapshot.userId === resolvedUserId
     ? winsSnapshot.value
@@ -193,12 +201,13 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     setMetricsLoading(true)
     setMetricsErrorSnapshot(null)
 
-    // Invoke all three heavier reads before attaching handlers so one render commits
+    // Invoke all heavier reads before attaching handlers so one render commits
     // one coordinated request burst without making any result wait for a
     // slower sibling endpoint.
     const metricsRequest = api('/recovery/metrics')
     const clustersRequest = api('/dlq/clusters')
     const heatmapRequest = api('/recovery/heatmap?days=90')
+    const validationRequest = api('/recovery/validation?windowDays=30')
 
     void metricsRequest
       .then((payload) => {
@@ -249,6 +258,23 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
         if (cancelled) return
         startTransition(() => {
           setHeatmapSnapshot({ orgId: resolvedOrgId, value: [] })
+        })
+      })
+
+    void validationRequest
+      .then((payload) => {
+        if (cancelled) return
+        startTransition(() => {
+          setValidationSnapshot({
+            orgId: resolvedOrgId,
+            value: payload as RecoveryValidationReport,
+          })
+        })
+      })
+      .catch(() => {
+        if (cancelled) return
+        startTransition(() => {
+          setValidationSnapshot({ orgId: resolvedOrgId, value: null })
         })
       })
 
@@ -791,6 +817,8 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
           <BudgetTile onOpenTab={props.onOpenTab} />
         </aside>
       </div>
+
+      <RecoveryValidationSection report={validation} />
 
       <ValueDashboardSection
         mttrMs={metrics?.mttr.value ?? null}

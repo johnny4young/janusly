@@ -20,6 +20,7 @@ import {
   getOrgConfigSnapshot,
   queryRecoveryLedger,
   queryRecoveryMetricsSignals,
+  queryRecoveryValidation,
   type RecoveryLedgerRepo,
 } from "@janusly/data";
 import { auditAction } from "../audit-helper";
@@ -39,6 +40,10 @@ import {
   contentDispositionAttachment,
   slugify,
 } from "../report-download";
+import {
+  buildRecoveryValidationFilename,
+  buildRecoveryValidationMarkdown,
+} from "../recovery-validation-report";
 import type { Route } from "../routes";
 
 /**
@@ -572,6 +577,54 @@ export const reportsRoutes: Route[] = [
         ledger,
         exportedAt: new Date(),
       }));
+    } },
+
+  // GET /reports/recovery-validation?windowDays=N&format=markdown|json
+  // Downloadable, per-org controlled-drill evidence. External private-beta
+  // criteria remain explicit limitations in both representations.
+  { method: "GET", match: (url) => url === "/reports/recovery-validation" || url.startsWith("/reports/recovery-validation?"), role: "viewer", permission: "reports.read",
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const rawWindow = Number.parseInt(url.searchParams.get("windowDays") ?? "", 10);
+      const windowDays = Number.isFinite(rawWindow) ? Math.min(90, Math.max(1, rawWindow)) : 30;
+      const rawFormat = (url.searchParams.get("format") ?? "markdown").toLowerCase();
+      if (rawFormat !== "markdown" && rawFormat !== "json") {
+        return sendError(res, "reports_unknown_format", `Unknown format: {{format}}. Use "markdown" or "json".`, 400, { format: rawFormat });
+      }
+      const format = rawFormat as "markdown" | "json";
+      const report = await queryRecoveryValidation(auth.orgId, windowDays);
+      await auditAction(auth, "report.recovery_validation.exported", {
+        targetType: "org",
+        targetId: auth.orgId,
+        metadata: { format, windowDays, drills: report.totals.drills, sampleCapped: report.sampleCapped },
+      });
+
+      const filenames = buildRecoveryValidationFilename({
+        orgId: auth.orgId,
+        windowDays,
+        exportedAt: new Date(report.generatedAt),
+        format,
+      });
+      const headers = {
+        "Content-Disposition": contentDispositionAttachment(filenames.asciiFilename, filenames.utf8Filename),
+        ...corsHeaders(res),
+        "Access-Control-Expose-Headers": "Content-Disposition, X-Request-Id",
+      };
+      if (format === "json") {
+        res.writeHead(200, { "Content-Type": "application/json", ...headers });
+        res.end(JSON.stringify({
+          scope: {
+            orgId: auth.orgId,
+            evidence: "controlled_recovery_drills",
+            limitations: ["external_partner_count", "setup_time", "willingness_to_pay"],
+          },
+          report,
+        }));
+        return;
+      }
+
+      res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8", ...headers });
+      res.end(buildRecoveryValidationMarkdown({ orgId: auth.orgId, report }));
     } },
 ];
 

@@ -18,6 +18,7 @@ vi.mock("@janusly/data", () => ({
   queryRecoveryHeatmap: vi.fn(),
   queryRecoveryLedger: vi.fn(),
   queryRecoveryMetricsSignals: vi.fn(),
+  queryRecoveryValidation: vi.fn(),
   recordRecoveryFeedback: vi.fn(),
 }));
 vi.mock("@janusly/engine/src/confidence-calibration", () => ({ MIN_CALIBRATION_SAMPLES: 20 }));
@@ -34,7 +35,7 @@ vi.mock("../http", async (importOriginal) => {
   };
 });
 
-import { queryOperatorRecoveryCount, queryRecoveryLedger } from "@janusly/data";
+import { queryOperatorRecoveryCount, queryRecoveryLedger, queryRecoveryValidation } from "@janusly/data";
 import type { Route } from "../routes";
 import { recoveryRoutes } from "./recovery-routes";
 
@@ -64,6 +65,11 @@ beforeEach(() => {
     sinceIso: "2026-01-02T03:04:05.000Z",
   });
   vi.mocked(queryOperatorRecoveryCount).mockResolvedValue(3);
+  vi.mocked(queryRecoveryValidation).mockResolvedValue({
+    generatedAt: "2026-07-21T12:00:00.000Z",
+    windowDays: 30,
+    totals: { drills: 0 },
+  } as never);
 });
 
 describe("GET /recovery/ledger", () => {
@@ -81,6 +87,30 @@ describe("GET /recovery/ledger", () => {
       },
     });
     expect(queryRecoveryLedger).toHaveBeenCalledWith("org-impact");
+  });
+});
+
+describe("GET /recovery/validation", () => {
+  it("is viewer-readable, permission-scoped, and delegates only the authenticated tenant", async () => {
+    const route = findGetRoute("/recovery/validation?windowDays=365");
+    expect(route.role).toBe("viewer");
+    expect(route.permission).toBe("reports.read");
+
+    await expect(call("/recovery/validation?windowDays=365")).resolves.toEqual({
+      status: 200,
+      payload: expect.objectContaining({ generatedAt: "2026-07-21T12:00:00.000Z" }),
+    });
+    expect(queryRecoveryValidation).toHaveBeenCalledWith("org-impact", 90);
+  });
+
+  it.each([
+    ["", 30],
+    ["?windowDays=0", 1],
+    ["?windowDays=7", 7],
+    ["?windowDays=garbage", 30],
+  ])("normalizes the %s window", async (query, expectedDays) => {
+    await call(`/recovery/validation${query}`);
+    expect(queryRecoveryValidation).toHaveBeenLastCalledWith("org-impact", expectedDays);
   });
 });
 

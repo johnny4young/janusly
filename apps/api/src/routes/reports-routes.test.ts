@@ -6,6 +6,7 @@ const {
   composeRecoveryMetricsMock,
   queryRecoveryMetricsSignalsMock,
   queryRecoveryLedgerMock,
+  queryRecoveryValidationMock,
   getOrgConfigSnapshotMock,
   selectRowsBox,
   sendJsonMock,
@@ -19,6 +20,7 @@ const {
   composeRecoveryMetricsMock: vi.fn(),
   queryRecoveryMetricsSignalsMock: vi.fn(),
   queryRecoveryLedgerMock: vi.fn(),
+  queryRecoveryValidationMock: vi.fn(),
   getOrgConfigSnapshotMock: vi.fn(),
   selectRowsBox: { rows: [] as unknown[][] },
   sendJsonMock: vi.fn((_res: unknown, payload: unknown, status = 200) => ({ payload, status })),
@@ -98,6 +100,10 @@ vi.mock("@janusly/data/src/orgConfigRepo", () => ({
   getOrgConfigSnapshot: getOrgConfigSnapshotMock,
 }));
 
+vi.mock("@janusly/data/src/recoveryValidationRepo", () => ({
+  queryRecoveryValidation: queryRecoveryValidationMock,
+}));
+
 vi.mock("@janusly/engine/src/tool-registry", () => ({
   executeTool: executeToolMock,
 }));
@@ -145,6 +151,10 @@ function deliverRoute() {
 
 function valueDashboardRoute() {
   return reportsRoutes[2]!;
+}
+
+function recoveryValidationRoute() {
+  return reportsRoutes[3]!;
 }
 
 /** Build a Node-`http`-shaped request that yields a JSON body via the
@@ -238,6 +248,36 @@ const valueMetrics = {
   terminalRuns: 10,
 };
 
+const validationReport = {
+  generatedAt: "2026-07-21T12:00:00.000Z",
+  windowDays: 30,
+  sampleLimit: 100,
+  sampleCapped: false,
+  totals: {
+    drills: 2,
+    completed: 2,
+    recovered: 1,
+    acceptedLoss: 1,
+    awaitingAction: 0,
+    replayInProgress: 0,
+    measurementIncomplete: 0,
+    missingEvidence: 0,
+    completionRatePercent: 100,
+    recoveryRatePercent: 50,
+  },
+  resolution: { operator: 1, automated: 1, unknown: 0, operatorInterventionRatePercent: 50 },
+  timing: {
+    medianElapsedMs: 60_000,
+    p90ElapsedMs: 60_000,
+    averageElapsedMs: 60_000,
+    p95ElapsedMs: 60_000,
+    sampleSize: 1,
+  },
+  byFailureMode: [],
+  byRecoveryPath: [],
+  samples: [],
+};
+
 beforeEach(() => {
   selectRowsBox.rows = [];
   auditMock.mockReset();
@@ -245,6 +285,7 @@ beforeEach(() => {
   composeRecoveryMetricsMock.mockReset();
   queryRecoveryMetricsSignalsMock.mockReset();
   queryRecoveryLedgerMock.mockReset();
+  queryRecoveryValidationMock.mockReset();
   getOrgConfigSnapshotMock.mockReset();
   sendJsonMock.mockClear();
   resWriteHeadMock.mockReset();
@@ -260,6 +301,7 @@ beforeEach(() => {
   });
   getOrgConfigSnapshotMock.mockResolvedValue({ value: valueAssumptions });
   composeRecoveryMetricsMock.mockReturnValue(valueMetrics);
+  queryRecoveryValidationMock.mockResolvedValue(validationReport);
 });
 
 describe("/reports/run-explain — happy path", () => {
@@ -602,6 +644,69 @@ describe("/reports/value-dashboard — export", () => {
     );
     expect(queryRecoveryMetricsSignalsMock).not.toHaveBeenCalled();
     expect(getOrgConfigSnapshotMock).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("/reports/recovery-validation — export", () => {
+  it("returns an honest Markdown dossier and records bounded export metadata", async () => {
+    const route = recoveryValidationRoute();
+    expect(route).toMatchObject({ method: "GET", role: "viewer", permission: "reports.read" });
+
+    await route.handler({
+      req: { url: "/reports/recovery-validation?windowDays=30&format=markdown" } as never,
+      res: makeRes() as never,
+      auth,
+    });
+
+    expect(queryRecoveryValidationMock).toHaveBeenCalledWith("org-1", 30);
+    const headers = resWriteHeadMock.mock.calls[0]![1] as Record<string, string>;
+    expect(headers["Content-Type"]).toBe("text/markdown; charset=utf-8");
+    expect(headers["Content-Disposition"]).toContain("janusly-recovery-validation-org-1-");
+    expect(resEndMock.mock.calls[0]![0]).toContain("does not measure external partner count or setup time");
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-1",
+      "user-1",
+      "report.recovery_validation.exported",
+      "org",
+      "org-1",
+      expect.objectContaining({ format: "markdown", windowDays: 30, drills: 2, sampleCapped: false }),
+    );
+  });
+
+  it("returns JSON with explicit scope limitations", async () => {
+    await recoveryValidationRoute().handler({
+      req: { url: "/reports/recovery-validation?windowDays=7&format=json" } as never,
+      res: makeRes() as never,
+      auth,
+    });
+
+    expect(queryRecoveryValidationMock).toHaveBeenCalledWith("org-1", 7);
+    const payload = JSON.parse(resEndMock.mock.calls[0]![0] as string) as {
+      scope: { orgId: string; limitations: string[] };
+      report: typeof validationReport;
+    };
+    expect(payload.scope).toEqual({
+      orgId: "org-1",
+      evidence: "controlled_recovery_drills",
+      limitations: ["external_partner_count", "setup_time", "willingness_to_pay"],
+    });
+    expect(payload.report).toEqual(validationReport);
+  });
+
+  it("rejects unknown formats before querying or auditing", async () => {
+    await recoveryValidationRoute().handler({
+      req: { url: "/reports/recovery-validation?format=pdf" } as never,
+      res: makeRes() as never,
+      auth,
+    });
+
+    expect(sendJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ error: expect.stringContaining("Unknown format") }),
+      400,
+    );
+    expect(queryRecoveryValidationMock).not.toHaveBeenCalled();
     expect(auditMock).not.toHaveBeenCalled();
   });
 });

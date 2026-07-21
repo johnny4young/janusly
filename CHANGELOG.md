@@ -47,6 +47,10 @@ retroactively.
 - Measured Recovery Drill outcomes in Recovery Queue, including elapsed time,
   verified terminal-success or accepted-loss evidence, replay-chain attempts,
   and seven-day production recurrence monitoring.
+- A bounded Recovery Validation dossier in Recovery Center that aggregates
+  controlled drills by completion, recovery rate, operator intervention,
+  measured timing, failure mode, and recovery path, with tenant-scoped
+  Markdown/JSON exports and explicit external-validation limitations.
 - Stable `/v1` contracts and OpenAPI operations for starting, resuming, and
   cancelling runs, including runtime validation of strict JSON request bodies.
 - Stable `/v1` contracts for outbound MCP connection management and the recipe

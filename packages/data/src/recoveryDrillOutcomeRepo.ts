@@ -19,7 +19,7 @@
 import { db } from "@janusly/db";
 import { sql } from "drizzle-orm";
 
-const REPLAY_CHAIN_LIMIT = 100;
+export const RECOVERY_DRILL_REPLAY_CHAIN_LIMIT = 100;
 const RECURRENCE_WINDOW_MS = 7 * 24 * 60 * 60 * 1_000;
 
 export type RecoveryDrillOutcomeStatus =
@@ -133,7 +133,7 @@ export function buildRecoveryDrillOutcome(
   }
 
   const attemptCount = Number.isFinite(facts.attemptCount)
-    ? Math.max(1, Math.min(REPLAY_CHAIN_LIMIT, Math.floor(facts.attemptCount)))
+    ? Math.max(1, Math.min(RECOVERY_DRILL_REPLAY_CHAIN_LIMIT, Math.floor(facts.attemptCount)))
     : 1;
   return {
     status,
@@ -221,12 +221,12 @@ export async function queryRecoveryDrillOutcome(
         ON impact."org_id" = root."org_id"
        AND impact."dead_letter_id" = dl."id"
       ORDER BY dl."created_at" ASC NULLS FIRST, dl."id" ASC
-      LIMIT ${REPLAY_CHAIN_LIMIT + 1}
+      LIMIT ${RECOVERY_DRILL_REPLAY_CHAIN_LIMIT + 1}
     ), chain AS MATERIALIZED (
       SELECT *
       FROM chain_scan
       ORDER BY "created_at" ASC NULLS FIRST, "id" ASC
-      LIMIT ${REPLAY_CHAIN_LIMIT}
+      LIMIT ${RECOVERY_DRILL_REPLAY_CHAIN_LIMIT}
     ), latest AS (
       SELECT "id", "status"
       FROM chain
@@ -323,7 +323,7 @@ export async function queryRecoveryDrillOutcome(
       latest."id" AS latest_dead_letter_id,
       latest."status" AS latest_status,
       (SELECT count(*)::int FROM chain) AS attempt_count,
-      (SELECT count(*) > ${REPLAY_CHAIN_LIMIT} FROM chain_scan) AS chain_capped,
+      (SELECT count(*) > ${RECOVERY_DRILL_REPLAY_CHAIN_LIMIT} FROM chain_scan) AS chain_capped,
       (SELECT min(replay_started_at) FROM chain) AS replay_started_at,
       recovered."recovered_at" AS recovered_at,
       accepted_item.accepted_at AS accepted_item_at,

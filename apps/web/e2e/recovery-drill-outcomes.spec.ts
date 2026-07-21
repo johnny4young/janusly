@@ -134,6 +134,22 @@ test('a successful drill replay exposes terminal recovery time and recurrence mo
   await dismissToasts(page)
   await captureEvidence(recoveredOutcome, 'recovery-drill-outcome-en-recovered')
 
+  await page.getByRole('button', { name: /^Home\b/ }).click()
+  const validation = page.getByTestId('recovery-validation-section')
+  await expect(validation).toContainText('Recovery validation')
+  await expect(validation).toContainText('1/1')
+  await expect(validation).toContainText('1 recovered')
+  await expect(validation).toContainText('100%')
+  await captureEvidence(validation, 'recovery-validation-en-recovered')
+
+  const exportResponse = await request.get(
+    `${API_URL}/reports/recovery-validation?windowDays=30&format=markdown`,
+    { headers: authHeaders(orgId) },
+  )
+  expect(exportResponse.ok()).toBe(true)
+  expect(exportResponse.headers()['content-disposition']).toContain('janusly-recovery-validation-')
+  expect(await exportResponse.text()).toContain('Recovery rate among completed outcomes**: 1/1 (100.0%)')
+
   expect(browserErrors).toEqual([])
 })
 
@@ -168,6 +184,20 @@ test('Spanish mobile resolve records accepted loss and refreshes the selected dr
   expect(overflow).toBeLessThanOrEqual(2)
   await dismissToasts(page)
   await captureEvidence(outcome, 'recovery-drill-outcome-es-accepted-loss-mobile')
+
+  await page.getByRole('button', { name: 'Navegación' }).click()
+  await page.locator('#workspace-sidebar').getByRole('button', { name: /^Inicio\b/ }).click()
+  const validation = page.getByTestId('recovery-validation-section')
+  await expect(validation).toContainText('Validación de recuperación')
+  await expect(validation).toContainText('1/1')
+  await expect(validation).toContainText('1 pérdida aceptada')
+  await expect(validation).toContainText('0%')
+  const validationOverflow = await validation.evaluate((node) => node.scrollWidth - node.clientWidth)
+  expect(validationOverflow).toBeLessThanOrEqual(2)
+  await page.setViewportSize({ width: 390, height: 1_200 })
+  await expect(page.locator('#workspace-sidebar')).toBeHidden()
+  await page.waitForTimeout(300)
+  await captureEvidence(validation, 'recovery-validation-es-accepted-loss-mobile')
 
   expect(browserErrors).toEqual([])
 })

@@ -17,6 +17,7 @@ import {
   queryRecoveryFeedbackHealth,
   queryOperatorRecoveryCount,
   queryRecoveryLedger,
+  queryRecoveryValidation,
   recordRecoveryFeedback,
   queryRecoveryMetricsSignals,
   queryRecoveryHeatmap,
@@ -86,6 +87,18 @@ export const recoveryRoutes: Route[] = [
     role: "viewer",
     contract: recoveryLedgerContract,
     handler: async ({ res, auth }) => sendJson(res, await queryRecoveryLedger(auth.orgId)) },
+
+  // Controlled-drill evidence is separate from aggregate production metrics.
+  // It stays bounded to the newest 100 drills and exposes no actor identifiers.
+  { method: "GET", match: (url) => url === "/recovery/validation" || url.startsWith("/recovery/validation?"),
+    role: "viewer",
+    permission: "reports.read",
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const rawWindow = Number.parseInt(url.searchParams.get("windowDays") ?? "", 10);
+      const windowDays = Number.isFinite(rawWindow) ? Math.min(90, Math.max(1, rawWindow)) : 30;
+      return sendJson(res, await queryRecoveryValidation(auth.orgId, windowDays));
+    } },
 
   // Personal momentum for the authenticated operator. The route accepts no
   // user id from the caller; identity comes exclusively from AuthContext.

@@ -4,13 +4,13 @@
  * response.
  *
  * Extracted from `routes/reports-routes.ts` so every report download
- * surface (run-explain, value-dashboard, recovery evidence export)
+ * surface (run-explain, value-dashboard, recovery validation/evidence export)
  * produces filenames and Content-Disposition headers with identical
  * rules — slugified, length-clamped, RFC 6266 ASCII + RFC 5987 UTF-8
  * dual form, secret-scrubbed.
  *
  * Used by:
- *  - `apps/api/src/routes/reports-routes.ts` (run-explain + value-dashboard)
+ *  - `apps/api/src/routes/reports-routes.ts` (run-explain + value/validation dashboards)
  *  - `apps/api/src/routes/recovery-items-routes.ts` (evidence export)
  */
 

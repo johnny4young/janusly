@@ -72,6 +72,33 @@ const baseMetrics = {
 }
 
 const baseClusters = { clusters: [], totalSamples: 0, windowDays: 30 }
+const baseValidation = {
+  generatedAt: '2026-07-21T12:00:00.000Z',
+  windowDays: 30,
+  sampleLimit: 100,
+  sampleCapped: false,
+  totals: {
+    drills: 1,
+    completed: 1,
+    recovered: 1,
+    acceptedLoss: 0,
+    awaitingAction: 0,
+    replayInProgress: 0,
+    measurementIncomplete: 0,
+    missingEvidence: 0,
+    completionRatePercent: 100,
+    recoveryRatePercent: 100,
+  },
+  resolution: { operator: 0, automated: 1, unknown: 0, operatorInterventionRatePercent: 0 },
+  timing: {
+    medianElapsedMs: 60_000,
+    p90ElapsedMs: 60_000,
+    averageElapsedMs: 60_000,
+    p95ElapsedMs: 60_000,
+    sampleSize: 1,
+  },
+  byFailureMode: [],
+}
 
 beforeEach(() => {
   consumeRecoveryAllClear()
@@ -282,6 +309,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return readyClusters
       if (path === '/recovery/heatmap?days=90') return pendingHeatmap
+      if (path === '/recovery/validation?windowDays=30') return baseValidation
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
         return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn' }
       }
@@ -296,13 +324,18 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
         '/recovery/metrics',
         '/dlq/clusters',
         '/recovery/heatmap?days=90',
+        '/recovery/validation?windowDays=30',
         '/recovery/ledger',
         '/recovery/my-wins?days=30',
       ]))
       expect(screen.getByTestId('recovery-center-metric-mttr')).toHaveTextContent('12m')
       expect(screen.getByText('Slow heatmap cluster')).toBeInTheDocument()
+      expect(screen.getByTestId('recovery-validation-section')).toHaveTextContent('1/1')
     })
-    releaseHeatmap?.({ days: [] })
+    await act(async () => {
+      releaseHeatmap?.({ days: [] })
+      await pendingHeatmap
+    })
   })
 
   it('waits for terminal-run history before exposing the walkthrough dismissal', async () => {

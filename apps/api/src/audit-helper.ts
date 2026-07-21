@@ -139,6 +139,7 @@ export type AuditAction =
   | "report.run_explain.exported"
   | "report.run_explain.delivered"
   | "report.value_dashboard.exported"
+  | "report.recovery_validation.exported"
   | "report.evidence.exported"
   | "report.evidence.delivered"
   // retention (per-org daily purge sweep; written by the engine scheduler
