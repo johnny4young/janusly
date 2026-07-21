@@ -1,9 +1,9 @@
 /**
  * Right-side workspace panel — the tab-aware router that switches between
- * AI Studio, Inspector, Templates, Tools, Credentials, Runs, Multi-agent
- * timeline, Operations, Members, Reasoning, and Workflows tabs.
+ * AI Studio, Inspector, Templates, Tools, Credentials, the unified Runs
+ * workspace, Operations, Members, and the expert full-view tabs.
  *
- * Heavier tabs live in sibling files (`InspectorPanel.tsx`, `RunsPanel.tsx`,
+ * Heavier tabs live in sibling files (`InspectorPanel.tsx`, `RunWorkspace.tsx`,
  * `UsageSummaryCard.tsx`, `QuickConfigEditor.tsx`, `McpToolConfigField.tsx`,
  * `AiUsageFooter.tsx`). The thinner tabs (Templates / Tools / Credentials /
  * Reasoning) stay here because they're small and single-purpose. `PanelChrome`
@@ -42,7 +42,7 @@ const MembersPanel = lazy(() => import('./MembersPanel').then((m) => ({ default:
 const SolutionPacksPanel = lazy(() => import('./SolutionPacksPanel').then((m) => ({ default: m.SolutionPacksPanel })))
 const OperationsPage = lazy(() => import('./OperationsPage').then((m) => ({ default: m.OperationsPage })))
 const ExperimentsPanel = lazy(() => import('./ExperimentsPanel').then((m) => ({ default: m.ExperimentsPanel })))
-const RunsPanel = lazy(() => import('./RunsPanel').then((m) => ({ default: m.RunsPanel })))
+const RunWorkspace = lazy(() => import('./RunWorkspace').then((m) => ({ default: m.RunWorkspace })))
 const ReasoningPanel = lazy(() => import('./ReasoningPanel').then((m) => ({ default: m.ReasoningPanel })))
 const CredentialRotateModal = lazy(() => import('./CredentialRotateModal').then((m) => ({ default: m.CredentialRotateModal })))
 const VersionHistoryPanel = lazy(() => import('./VersionHistoryPanel').then((m) => ({ default: m.VersionHistoryPanel })))
@@ -164,6 +164,10 @@ function RightPanelRouter(props: RightPanelProps) {
   const { authoring, catalog, execution, navigation } = props
   const loadRunUsage = useCallback((runId: string, signal: AbortSignal) =>
     api(`/run/usage?runId=${encodeURIComponent(runId)}`, { signal }), [])
+  const replayDecision = useCallback((eventId: string, nodeId: string, signal: AbortSignal) => {
+    if (!execution.activeRunId) return Promise.resolve(null)
+    return api(`/causal?runId=${encodeURIComponent(execution.activeRunId)}&eventId=${encodeURIComponent(eventId)}&nodeId=${encodeURIComponent(nodeId)}`, { signal })
+  }, [execution.activeRunId])
   if (props.tab === 'copilot') return (
     <AiCopilotPanel
       health={authoring.aiHealth}
@@ -249,12 +253,14 @@ function RightPanelRouter(props: RightPanelProps) {
   if (props.tab === 'marketplace') return <ToolsPanel tools={catalog.tools} onInstallPlugin={catalog.onInstallPlugin} />
   if (props.tab === 'credentials') return <CredentialsPanel credentials={catalog.credentials} onCreateCredential={catalog.onCreateCredential} />
   if (props.tab === 'runs') return (
-    <RunsPanel
+    <RunWorkspace
       runs={execution.runs}
       workflows={execution.workflows}
       usage={execution.usage}
       runNodes={execution.runNodes}
       runEvents={execution.events}
+      eventsHasMore={execution.eventsHasMore}
+      onLoadOlderEvents={execution.onLoadOlderEvents}
       activeRunId={execution.activeRunId}
       onOpenRun={execution.onOpenRun}
       onRefreshPlatform={execution.onRefreshPlatform}
@@ -265,6 +271,9 @@ function RightPanelRouter(props: RightPanelProps) {
       onCancelActiveRun={execution.onCancelActiveRun}
       onReplayDeadLetter={execution.onReplayDeadLetter}
       onResolveDeadLetter={execution.onResolveDeadLetter}
+      onLoadRunUsage={loadRunUsage}
+      onReplayDecision={execution.activeRunId ? replayDecision : undefined}
+      onOpenFullView={navigation.onOpenTab}
     />
   )
   return (
@@ -275,9 +284,7 @@ function RightPanelRouter(props: RightPanelProps) {
         onLoadOlderEvents={execution.onLoadOlderEvents}
         activeRunId={execution.activeRunId}
         onLoadRunUsage={loadRunUsage}
-        onReplayDecision={execution.activeRunId
-          ? (eventId, nodeId, signal) => api(`/causal?runId=${encodeURIComponent(execution.activeRunId!)}&eventId=${encodeURIComponent(eventId)}&nodeId=${encodeURIComponent(nodeId)}`, { signal })
-          : undefined}
+        onReplayDecision={execution.activeRunId ? replayDecision : undefined}
       />
     </PanelChrome>
   )

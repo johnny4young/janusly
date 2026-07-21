@@ -146,6 +146,8 @@ async function capture(locator: Locator, name: string): Promise<void> {
 
 async function openRunFromHistory(page: Page, runId: string, locale: Locale): Promise<void> {
   await page.getByRole('button', { name: copy[locale].runs, exact: true }).click()
+  const overviewTab = page.getByTestId('run-workspace-tab-overview')
+  if (await overviewTab.isVisible().catch(() => false)) await overviewTab.click()
   const history = page.getByTestId('runs-history-virtual-list')
   await expect(history).toBeVisible()
   await expect.poll(() => history.getByRole('article').count()).toBeGreaterThan(0)

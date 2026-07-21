@@ -4,7 +4,8 @@
  * "Multi-agent timeline" tab consumes this view; the engine
  * (`packages/engine/src/node-registry.ts`) emits the matching event types.
  *
- * Used by `components/RightPanel.tsx` (the `multiAgent` tab).
+ * Used by `components/RightPanel.tsx` (the `multiAgent` tab) and
+ * `components/RunWorkspace.tsx` (the inline Agents projection).
  *
  * Invariants:
  * - The event-type strings parsed here match the runtime emitter exactly.
@@ -128,16 +129,21 @@ function readNumber(value: unknown) {
   return typeof value === 'number' ? value : 0
 }
 
+export type MultiAgentTimelineProps = {
+  events: RunEvent[]
+  eventsHasMore?: boolean
+  onLoadOlderEvents?: () => void | Promise<void>
+  /** Hide the local heading when a composing panel already owns the title. */
+  showHeader?: boolean
+}
+
 /** Render the per-agent timeline with selectable items and "Load older events" support. */
 export function MultiAgentTimeline({
   events,
   eventsHasMore,
   onLoadOlderEvents,
-}: {
-  events: RunEvent[]
-  eventsHasMore?: boolean
-  onLoadOlderEvents?: () => void | Promise<void>
-}) {
+  showHeader = true,
+}: MultiAgentTimelineProps) {
   const { t, i18n } = useT()
   const setActiveTab = useWorkflowStore(state => state.setActiveTab)
   const [selected, setSelected] = useState<TimelineItem | null>(null)
@@ -207,13 +213,15 @@ export function MultiAgentTimeline({
 
   return (
     <div className="timeline-shell">
-      <div className="timeline-header">
-        <div>
-          <h3>{t('multiAgent.heading')}</h3>
-          <p className="helper-text">{t('multiAgent.headerHelper')}</p>
+      {showHeader && (
+        <div className="timeline-header">
+          <div>
+            <h3>{t('multiAgent.heading')}</h3>
+            <p className="helper-text">{t('multiAgent.headerHelper')}</p>
+          </div>
+          <span className="mode-pill mode-pill-neutral">{t('multiAgent.eventCount', { count: items.length })}</span>
         </div>
-        <span className="mode-pill mode-pill-neutral">{t('multiAgent.eventCount', { count: items.length })}</span>
-      </div>
+      )}
 
       <ul className="we-timeline-legend" aria-label={t('multiAgent.legend.label')}>
         {LEGEND_TONES.map(tone => (

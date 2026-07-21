@@ -13,7 +13,6 @@ const views = [
   { button: /^Home\b/, selector: '.we-recovery-center-hero .section-kicker', text: 'Recovery Center' },
   { button: /^AI Studio\b/, text: 'Describe the outcome. Janusly builds the flow.' },
   { button: 'Flows', heading: 'Flows' },
-  { button: 'Multi-agent timeline', heading: 'Multi-agent timeline' },
   { button: 'Step setup', heading: 'Step setup' },
   { button: 'Runs', heading: 'Runs' },
   { button: 'Team', heading: 'Team' },
@@ -49,6 +48,20 @@ test('workspace views can be opened independently', async ({ page }) => {
     }
   }
 
+  expect(browserErrors).toEqual([])
+})
+
+test('expert multi-agent view remains directly accessible from the command palette', async ({ page }) => {
+  const browserErrors = installConsoleErrorGuards(page)
+  await page.goto('/')
+
+  await page.getByRole('button', { name: 'Open quick-jump command palette' }).click()
+  const palette = page.getByTestId('command-palette')
+  await expect(palette).toBeVisible()
+  await palette.getByRole('combobox').fill('multi-agent')
+  await palette.getByRole('option', { name: 'Go to Multi-agent timeline' }).click()
+
+  await expect(page.getByRole('heading', { name: 'Multi-agent timeline', exact: true })).toBeVisible()
   expect(browserErrors).toEqual([])
 })
 

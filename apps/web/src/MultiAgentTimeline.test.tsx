@@ -31,4 +31,11 @@ describe('<MultiAgentTimeline />', () => {
     expect(screen.queryByLabelText('What the colors mean')).not.toBeInTheDocument()
     expect(screen.getByTestId('multi-agent-empty')).toBeInTheDocument()
   })
+
+  it('can omit its local heading when a parent panel owns the title', () => {
+    render(<MultiAgentTimeline events={events} showHeader={false} />)
+
+    expect(screen.queryByRole('heading', { name: 'Multi-agent timeline' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('What the colors mean')).toBeInTheDocument()
+  })
 })

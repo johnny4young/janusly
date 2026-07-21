@@ -32,7 +32,7 @@ This is the destination, not a claim that every edge is finished today. The dire
 
 The recovery loop is production-shaped end to end:
 
-- **Observable runtime.** Postgres-backed DAG execution with per-node `run_events`, live SSE run streaming, a Recovery Center home surfacing failed runs / failure clusters / pending approvals / MTTR-style recovery metrics, and OpenTelemetry traces + Prometheus metrics.
+- **Observable runtime.** Postgres-backed DAG execution with per-node `run_events`, live SSE run streaming, a unified Runs workspace for overview / chronology / agent activity, a Recovery Center home surfacing failed runs / failure clusters / pending approvals / MTTR-style recovery metrics, and OpenTelemetry traces + Prometheus metrics.
 - **Diagnosis + patch.** AI failure explanation and 1–3 patch suggestions with self-rated confidence, calibrated per approach against the team's own accept/reject history, with a Recovery Confidence Passport that scores whether a patch is safe to apply.
 - **Safe recovery.** Sandbox validation (write-side effects skipped) before any patch saves, cluster-level apply across a shared failure signature, one-click rollback through version history, and production redrive that continues a failed run on the patched version.
 - **Reproducible recovery drills.** Solution Packs expose safe, selectable credential, AI-output, rate-limit, contract-drift, upstream-failure, and worker-interruption scenarios. Every drill records its source and enters the same recovery queue used by runtime failures; the worker-interruption scenario crosses the configured age threshold and exercises the real stalled-node reaper rather than inserting a synthetic terminal failure. Recovery Queue measures each drill from failure to verified terminal success or accepted loss and then observes the existing seven-day production recurrence window. Recovery Center turns those bounded facts into a per-organization validation dossier with explicit completion, recovery, operator-intervention, timing, and failure-mode denominators plus Markdown/JSON exports; partner count, setup time, and willingness-to-pay remain external evidence.
@@ -154,7 +154,7 @@ pnpm dev
 # http://127.0.0.1:5173
 ```
 
-Open <http://127.0.0.1:5173> after `pnpm dev` prints its ready line — Janusly signs you in as `dev-user` in org `default`. Click **Validate**, **Save**, **Run**. Open the **Runs** tab and chat with the **AI Run Explainer**. The first reply will be `mode: "fallback"` until you add an `ANTHROPIC_API_KEY` to `.env` — see [§ AI](#ai-janusly-as-an-ai-operator). Port `5173` is strict: if another process owns it, startup fails instead of silently moving the Studio. Use `pnpm dev:doctor` to clear an orphan.
+Open <http://127.0.0.1:5173> after `pnpm dev` prints its ready line — Janusly signs you in as `dev-user` in org `default`. Click **Validate**, **Save**, **Run**. Open **Runs** to move between **Overview**, **Timeline**, and **Agents** without losing the active execution, or chat with the **AI Run Explainer**. The first reply will be `mode: "fallback"` until you add an `ANTHROPIC_API_KEY` to `.env` — see [§ AI](#ai-janusly-as-an-ai-operator). Port `5173` is strict: if another process owns it, startup fails instead of silently moving the Studio. Use `pnpm dev:doctor` to clear an orphan.
 
 The web server binds loopback-only by default. Deliberate LAN or container exposure is explicit: `JANUSLY_DEV_HOST=0.0.0.0 pnpm dev`.
 

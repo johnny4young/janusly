@@ -63,6 +63,8 @@ function matchesRunsFilter(rawUrl: string, workflowId: string, status: string): 
 
 async function openRuns(page: Page, locale: 'en' | 'es'): Promise<void> {
   await page.getByRole('button', { name: locale === 'en' ? 'Runs' : 'Ejecuciones', exact: true }).click()
+  const overview = page.getByTestId('run-workspace-tab-overview')
+  if (await overview.isVisible().catch(() => false)) await overview.click()
   await expect(page.getByTestId('runs-history-virtual-list')).toBeVisible()
 }
 

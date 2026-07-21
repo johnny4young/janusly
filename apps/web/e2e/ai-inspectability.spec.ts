@@ -211,6 +211,8 @@ async function openRunTimeline(page: Page, locale: Locale, runId: string): Promi
     name: locale === 'en' ? 'Runs' : 'Ejecuciones',
     exact: true,
   }).click()
+  const overviewTab = page.getByTestId('run-workspace-tab-overview')
+  if (await overviewTab.isVisible().catch(() => false)) await overviewTab.click()
   const history = page.getByTestId('runs-history-virtual-list')
   await expect(history).toBeVisible()
   const prefix = `${runId.slice(0, 8)}…`

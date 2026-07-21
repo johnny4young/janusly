@@ -75,7 +75,7 @@ function isWorkflowInputSchemaShape(value: unknown): value is WorkflowInputSchem
   return true
 }
 
-type RunsPanelProps = {
+export type RunsPanelProps = {
   runs: RunSummary[]
   workflows: SavedWorkflow[]
   usage: Record<string, number>
@@ -91,6 +91,9 @@ type RunsPanelProps = {
   onCancelActiveRun?: () => void | Promise<void>
   onReplayDeadLetter: (id: string, createdAtIso?: string) => boolean | Promise<boolean> | undefined
   onResolveDeadLetter: (id: string) => boolean | Promise<boolean> | undefined
+  /** Opens the run's timeline. RunWorkspace overrides this to stay in-context;
+   * direct/legacy mounts retain the Reasoning-tab fallback. */
+  onViewTimeline?: () => void
 }
 
 type SubmitHumanFormResult = string[] | undefined
@@ -136,6 +139,7 @@ export function RunsPanel({
   onCancelActiveRun,
   onReplayDeadLetter,
   onResolveDeadLetter,
+  onViewTimeline,
 }: RunsPanelProps) {
   const { t } = useT()
   const waitingNodes = runNodes.filter(node => node.status === 'waiting')
@@ -266,7 +270,7 @@ export function RunsPanel({
               <button
                 type="button"
                 className="small-command"
-                onClick={() => setActiveTab('reasoning')}
+                onClick={() => onViewTimeline ? onViewTimeline() : setActiveTab('reasoning')}
               >
                 <Activity size={12} aria-hidden="true" /> {t('rightPanel.runs.viewTimeline')}
               </button>

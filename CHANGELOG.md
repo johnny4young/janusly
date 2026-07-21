@@ -37,6 +37,9 @@ retroactively.
 
 ### Added
 
+- A unified Runs workspace with accessible Overview, Timeline, and Agents
+  views, preserving direct expert access to the full reasoning and multi-agent
+  surfaces through the command palette.
 - Selectable Recovery Drills in Solution Packs for credential availability and
   expiry, malformed AI output, rate limits, upstream contract drift, and
   provider outages. Drill runs retain durable source evidence and enter the

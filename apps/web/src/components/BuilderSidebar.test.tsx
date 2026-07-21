@@ -90,4 +90,11 @@ describe('<BuilderSidebar />', () => {
     expect(props.onOpenHelp).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole('button', { name: "What's new" })).not.toBeInTheDocument()
   })
+
+  it('keeps run evidence in one primary destination', () => {
+    renderSidebar()
+
+    expect(screen.getByRole('button', { name: /^Runs$/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Multi-agent timeline$/ })).not.toBeInTheDocument()
+  })
 })

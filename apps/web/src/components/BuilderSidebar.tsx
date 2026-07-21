@@ -187,7 +187,6 @@ const NAV_GROUPS: NavGroup[] = [
     labelKey: 'sidebar.group.run',
     items: [
       { tab: 'runs', labelKey: 'sidebar.nav.runs.label', helperKey: 'sidebar.nav.runs.helper', icon: <Activity size={13} /> },
-      { tab: 'multiAgent', labelKey: 'sidebar.nav.multiAgent.label', helperKey: 'sidebar.nav.multiAgent.helper', icon: <Layers3 size={13} /> },
       { tab: 'operations', labelKey: 'sidebar.nav.operations.label', helperKey: 'sidebar.nav.operations.helper', icon: <Gauge size={13} /> },
       { tab: 'credentials', labelKey: 'sidebar.nav.credentials.label', helperKey: 'sidebar.nav.credentials.helper', icon: <KeyRound size={13} /> },
       { tab: 'members', labelKey: 'sidebar.nav.members.label', helperKey: 'sidebar.nav.members.helper', icon: <Users size={13} /> },

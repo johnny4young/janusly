@@ -134,6 +134,26 @@ describe('<RunsPanel /> observability', () => {
     expect(useWorkflowStore.getState().activeTab).toBe('reasoning')
   })
 
+  it('delegates timeline navigation when hosted by the Runs workspace', () => {
+    const onViewTimeline = vi.fn()
+    render(
+      <RunsPanel
+        {...handlers}
+        activeRunId="run-1"
+        workflows={[]}
+        runs={[{ id: 'run-1', status: 'succeeded' }]}
+        runNodes={[]}
+        usage={{}}
+        onViewTimeline={onViewTimeline}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'View timeline' }))
+
+    expect(onViewTimeline).toHaveBeenCalledTimes(1)
+    expect(useWorkflowStore.getState().activeTab).toBe('runs')
+  })
+
   it('labels approval and timer waits with actionable copy and timing', () => {
     render(
       <RunsPanel

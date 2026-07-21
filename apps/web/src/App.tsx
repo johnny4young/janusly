@@ -561,7 +561,7 @@ export default function App() {
       status: 'running',
       inputJson: { workflow, ...(input !== undefined ? { input } : {}) },
     })
-    setActiveTab('multiAgent')
+    setActiveTab('runs')
     addToast(t('toasts.runStarted', { runIdShort: result.runId.slice(0, 8) }), 'success')
     bumpPlatformVersion()
     await refreshPlatform()
@@ -622,8 +622,8 @@ export default function App() {
   const openRun = useCallback(async (id: string, targetTab?: ActiveTab) => {
     // Switch tabs BEFORE the fetch resolves so the panel changes immediately.
     // A caller-pinned `targetTab` is honoured verbatim; otherwise default to the
-    // runs timeline — the default used to be `multiAgent`, which dropped every
-    // ordinary run onto an empty multi-agent panel.
+    // unified Runs workspace. Explicit legacy targets remain honoured for
+    // command-palette and expert deep access.
     const requestId = runTransitionGuard.begin()
     setActiveTab(targetTab ?? 'runs')
     try {
@@ -635,11 +635,6 @@ export default function App() {
       setRunNodes(data.nodes ?? [])
       setEvents(data.events ?? [])
       setEventsPagination(data.eventsCursor ?? null, Boolean(data.eventsHasMore))
-      // Only auto-route to the multi-agent timeline when the caller didn't pin a
-      // tab AND the run actually produced `multi_agent.*` events.
-      if (!targetTab && (data.events ?? []).some(event => event.type.startsWith('multi_agent.'))) {
-        setActiveTab('multiAgent')
-      }
     } catch (error) {
       if (!runTransitionGuard.isCurrent(requestId)) return
       addToast(error instanceof Error ? error.message : t('toasts.runOpenFailed'), 'error')
