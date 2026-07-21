@@ -6,7 +6,7 @@ import {
 import type { DueQueuePublicationRepair } from "./persistence";
 
 vi.mock("./queue", () => ({
-  workflowQueue: { upsertJobScheduler: vi.fn() },
+  maintenanceQueue: { upsertJobScheduler: vi.fn() },
 }));
 
 const workflow = {

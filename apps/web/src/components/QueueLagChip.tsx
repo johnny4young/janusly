@@ -1,5 +1,5 @@
 /**
- * Compact workflow-queue pressure status for the Operations header.
+ * Compact workflow or maintenance queue pressure for Operations.
  *
  * Used by `OperationsPage.tsx` with the authenticated `/system/queue`
  * snapshot. `null` means telemetry is unavailable; `unavailableReason`
@@ -15,6 +15,11 @@ export type QueueHealth = {
   active: number
   oldestWaitingSeconds: number | null
   warnSeconds: number
+}
+
+export type QueueHealthOverview = {
+  workflow: QueueHealth | null
+  maintenance: QueueHealth | null | undefined
 }
 
 export type QueueUnavailableReason = 'redis' | 'transport'
@@ -42,6 +47,15 @@ export function parseQueueHealth(value: unknown): QueueHealth | null {
   }
 }
 
+/** Parse the additive admin shape while remaining compatible with older APIs. */
+export function parseQueueHealthOverview(value: unknown): QueueHealthOverview {
+  const workflow = parseQueueHealth(value)
+  const maintenance = isRecord(value) && 'maintenance' in value
+    ? parseQueueHealth(value.maintenance)
+    : undefined
+  return { workflow, maintenance }
+}
+
 /** Delayed and unavailable snapshots both deserve the Reliability dot. */
 export function queueNeedsAttention(health: QueueHealth | null): boolean {
   return health === null
@@ -50,11 +64,13 @@ export function queueNeedsAttention(health: QueueHealth | null): boolean {
 }
 
 function QueueLagFrame({
+  kind,
   state,
   message,
   announcement,
   checkedLabel,
 }: {
+  kind: 'workflow' | 'maintenance'
   state: 'clear' | 'processing' | 'delayed'
   | 'unavailable'
   message: string
@@ -66,12 +82,14 @@ function QueueLagFrame({
     <span
       className={`we-ops-queue-lag-chip we-ops-queue-lag-chip--${state}`}
       data-state={state}
-      data-testid="queue-lag-chip"
+      data-testid={kind === 'workflow' ? 'queue-lag-chip' : 'maintenance-queue-lag-chip'}
     >
       <span
         className="we-sr-only"
         role="status"
-        aria-label={`${t('operations.queueLag.label')}: ${announcement}`}
+        aria-label={`${t(kind === 'workflow'
+          ? 'operations.queueLag.label'
+          : 'operations.maintenanceQueueLag.label')}: ${announcement}`}
       >
         {announcement}
       </span>
@@ -92,12 +110,37 @@ export function QueueLagChip({
   health,
   checkedAt,
   unavailableReason = 'redis',
+  kind = 'workflow',
 }: {
   health: QueueHealth | null
   checkedAt?: number | null
   unavailableReason?: QueueUnavailableReason
+  kind?: 'workflow' | 'maintenance'
 }) {
   const { t } = useT()
+  const keys = kind === 'workflow'
+    ? {
+        clear: 'operations.queueLag.clear' as const,
+        processingStatus: 'operations.queueLag.processingStatus' as const,
+        delayedActiveStatus: 'operations.queueLag.delayedActiveStatus' as const,
+        delayedIdleStatus: 'operations.queueLag.delayedIdleStatus' as const,
+        processing: 'operations.queueLag.processing' as const,
+        delayedActive: 'operations.queueLag.delayedActive' as const,
+        delayedIdle: 'operations.queueLag.delayedIdle' as const,
+        unavailableRedis: 'operations.queueLag.unavailableRedis' as const,
+        unavailableTransport: 'operations.queueLag.unavailableTransport' as const,
+      }
+    : {
+        clear: 'operations.maintenanceQueueLag.clear' as const,
+        processingStatus: 'operations.maintenanceQueueLag.processingStatus' as const,
+        delayedActiveStatus: 'operations.maintenanceQueueLag.delayedActiveStatus' as const,
+        delayedIdleStatus: 'operations.maintenanceQueueLag.delayedIdleStatus' as const,
+        processing: 'operations.maintenanceQueueLag.processing' as const,
+        delayedActive: 'operations.maintenanceQueueLag.delayedActive' as const,
+        delayedIdle: 'operations.maintenanceQueueLag.delayedIdle' as const,
+        unavailableRedis: 'operations.maintenanceQueueLag.unavailableRedis' as const,
+        unavailableTransport: 'operations.maintenanceQueueLag.unavailableTransport' as const,
+      }
   const checkedLabel = typeof checkedAt === 'number'
     ? (t('operations.queueLag.checkedAt', {
         time: new Date(checkedAt).toLocaleTimeString(getResolvedLocale()),
@@ -106,10 +149,11 @@ export function QueueLagChip({
 
   if (health === null) {
     const message = t(unavailableReason === 'redis'
-      ? 'operations.queueLag.unavailableRedis'
-      : 'operations.queueLag.unavailableTransport')
+      ? keys.unavailableRedis
+      : keys.unavailableTransport)
     return (
       <QueueLagFrame
+        kind={kind}
         state="unavailable"
         message={message}
         announcement={message}
@@ -119,9 +163,10 @@ export function QueueLagChip({
   }
 
   if (health.waiting === 0) {
-    const message = t('operations.queueLag.clear')
+    const message = t(keys.clear)
     return (
       <QueueLagFrame
+        kind={kind}
         state="clear"
         message={message}
         announcement={message}
@@ -142,20 +187,21 @@ export function QueueLagChip({
   const message = t(
     delayed
       ? health.active > 0
-        ? 'operations.queueLag.delayedActive'
-        : 'operations.queueLag.delayedIdle'
-      : 'operations.queueLag.processing',
+        ? keys.delayedActive
+        : keys.delayedIdle
+      : keys.processing,
     { count: health.waiting, duration },
   )
   return (
     <QueueLagFrame
+      kind={kind}
       state={delayed ? 'delayed' : 'processing'}
       message={message}
       announcement={t(delayed
         ? health.active > 0
-          ? 'operations.queueLag.delayedActiveStatus'
-          : 'operations.queueLag.delayedIdleStatus'
-        : 'operations.queueLag.processingStatus')}
+          ? keys.delayedActiveStatus
+          : keys.delayedIdleStatus
+        : keys.processingStatus)}
       checkedLabel={checkedLabel}
     />
   )

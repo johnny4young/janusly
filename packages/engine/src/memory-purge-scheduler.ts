@@ -8,7 +8,7 @@
  *
  * Sister to `memory-retention-scheduler.ts`: that one is a recurring
  * daily cron (`upsertJobScheduler`); this one is a one-shot delayed
- * job (`workflowQueue.add` with `{ delay, jobId }`). Different BullMQ
+ * job (`maintenanceQueue.add` with `{ delay, jobId }`). Different BullMQ
  * primitives, same architectural posture — never throws, audit log is
  * the canonical observable signal, env-driven cadence with safe
  * fallback.
@@ -57,7 +57,7 @@ import {
 } from "@janusly/data";
 import { createHash } from "node:crypto";
 
-import { workflowQueue } from "./queue";
+import { maintenanceQueue, workflowQueue } from "./queue";
 
 /** The `job.name` the worker dispatch matches on. */
 export const MEMORY_BULK_PURGE_JOB_NAME = "memory-bulk-purge-trigger";
@@ -86,6 +86,31 @@ export type MemoryPurgeStatus =
   | { status: "running"; scheduledFor: string | null }
   | { status: "unknown"; scheduledFor: null };
 
+const PURGE_QUEUES = [
+  { label: "maintenance", queue: maintenanceQueue },
+  { label: "legacy-workflow", queue: workflowQueue },
+] as const;
+
+async function readMemoryPurgeJobStatus(
+  job: Awaited<ReturnType<typeof maintenanceQueue.getJob>>,
+): Promise<MemoryPurgeStatus> {
+  if (!job) return { status: "none", scheduledFor: null };
+  const state = await withQueueTimeout(job.getState(), "memory purge get job state");
+  const scheduledAtMs = Number(job.timestamp) + Number(job.delay);
+  const scheduledFor = Number.isFinite(scheduledAtMs)
+    ? new Date(scheduledAtMs).toISOString()
+    : null;
+
+  if (state === "active") return { status: "running", scheduledFor };
+  if (state === "delayed" || state === "waiting" || state === "waiting-children") {
+    return scheduledFor
+      ? { status: "scheduled", scheduledFor }
+      : { status: "unknown", scheduledFor: null };
+  }
+  if (state === "completed" || state === "failed") return { status: "none", scheduledFor: null };
+  return { status: "unknown", scheduledFor: null };
+}
+
 /**
  * Inspect the deterministic per-org purge job without exposing BullMQ or
  * Redis details to callers. Queue failures and unrecognised states degrade to
@@ -95,29 +120,31 @@ export async function getMemoryPurgeStatus(input: {
   orgId: string;
 }): Promise<MemoryPurgeStatus> {
   const jobId = buildMemoryPurgeJobId(input.orgId);
+  const observed: MemoryPurgeStatus[] = [];
+  let readFailed = false;
   try {
-    const job = await withQueueTimeout(
-      workflowQueue.getJob(jobId),
-      "memory purge get status job",
-    );
-    if (!job) return { status: "none", scheduledFor: null };
-
-    const state = await withQueueTimeout(job.getState(), "memory purge get job state");
-    const scheduledAtMs = Number(job.timestamp) + Number(job.delay);
-    const scheduledFor = Number.isFinite(scheduledAtMs)
-      ? new Date(scheduledAtMs).toISOString()
-      : null;
-
-    if (state === "active") return { status: "running", scheduledFor };
-    if (state === "delayed" || state === "waiting" || state === "waiting-children") {
-      return scheduledFor
-        ? { status: "scheduled", scheduledFor }
-        : { status: "unknown", scheduledFor: null };
+    for (const target of PURGE_QUEUES) {
+      try {
+        const job = await withQueueTimeout(
+          target.queue.getJob(jobId),
+          `memory purge get ${target.label} status job`,
+        );
+        observed.push(await readMemoryPurgeJobStatus(job));
+      } catch (error) {
+        readFailed = true;
+        console.warn("[memory-purge] queue-specific status read failed", {
+          orgId: input.orgId,
+          queue: target.label,
+          error,
+        });
+      }
     }
-    if (state === "completed" || state === "failed") {
-      return { status: "none", scheduledFor: null };
-    }
-    return { status: "unknown", scheduledFor: null };
+    return observed.find((status) => status.status === "running")
+      ?? observed.find((status) => status.status === "scheduled")
+      ?? observed.find((status) => status.status === "unknown")
+      ?? (readFailed
+        ? { status: "unknown", scheduledFor: null }
+        : { status: "none", scheduledFor: null });
   } catch (err) {
     console.warn("[memory-purge] status read failed", { orgId: input.orgId, jobId, err });
     return { status: "unknown", scheduledFor: null };
@@ -210,23 +237,26 @@ export async function schedulePendingMemoryPurge(input: {
     // logged but doesn't block the add: if remove fails AND the add's
     // jobId collides, the add silently keeps the older delay, which
     // is fail-safe (the next handler fire still re-checks consent).
-    try {
-      const existing = await withQueueTimeout(
-        workflowQueue.getJob(jobId),
-        "memory purge get existing job",
-      );
-      if (existing) {
-        await withQueueTimeout(existing.remove(), "memory purge remove existing job");
+    for (const target of PURGE_QUEUES) {
+      try {
+        const existing = await withQueueTimeout(
+          target.queue.getJob(jobId),
+          `memory purge get ${target.label} existing job`,
+        );
+        if (existing) {
+          await withQueueTimeout(existing.remove(), `memory purge remove ${target.label} existing job`);
+        }
+      } catch (removeErr) {
+        console.warn("[memory-purge] failed to remove pre-existing job before re-schedule", {
+          orgId: input.orgId,
+          jobId,
+          queue: target.label,
+          err: removeErr,
+        });
       }
-    } catch (removeErr) {
-      console.warn("[memory-purge] failed to remove pre-existing job before re-schedule", {
-        orgId: input.orgId,
-        jobId,
-        err: removeErr,
-      });
     }
     await withQueueTimeout(
-      workflowQueue.add(
+      maintenanceQueue.add(
         MEMORY_BULK_PURGE_JOB_NAME,
         { orgId: input.orgId },
         {
@@ -291,22 +321,26 @@ export async function cancelPendingMemoryPurge(input: {
   orgId: string;
 }): Promise<boolean> {
   const jobId = buildMemoryPurgeJobId(input.orgId);
-  try {
-    const existing = await withQueueTimeout(
-      workflowQueue.getJob(jobId),
-      "memory purge get pending job",
-    );
-    if (!existing) return false;
-    await withQueueTimeout(existing.remove(), "memory purge remove pending job");
-    return true;
-  } catch (err) {
-    console.warn("[memory-purge] cancel failed", {
-      orgId: input.orgId,
-      jobId,
-      err,
-    });
-    return false;
+  let removed = false;
+  for (const target of PURGE_QUEUES) {
+    try {
+      const existing = await withQueueTimeout(
+        target.queue.getJob(jobId),
+        `memory purge get ${target.label} pending job`,
+      );
+      if (!existing) continue;
+      await withQueueTimeout(existing.remove(), `memory purge remove ${target.label} pending job`);
+      removed = true;
+    } catch (err) {
+      console.warn("[memory-purge] cancel failed", {
+        orgId: input.orgId,
+        jobId,
+        queue: target.label,
+        err,
+      });
+    }
   }
+  return removed;
 }
 
 /**

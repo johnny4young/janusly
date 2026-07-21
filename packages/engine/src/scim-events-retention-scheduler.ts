@@ -32,7 +32,7 @@
 import {
   recordSystemAudit, pruneOldProcessedEvents } from "@janusly/data";
 
-import { workflowQueue } from "./queue";
+import { maintenanceQueue } from "./queue";
 import { validateCronExpression } from "./schedule";
 
 export const SCIM_EVENTS_RETENTION_JOB_ID = "system:scim-events-retention";
@@ -106,7 +106,7 @@ export async function registerScimEventsRetentionScheduler(
 ): Promise<boolean> {
   const pattern = resolveCronPattern(env);
   try {
-    await workflowQueue.upsertJobScheduler(
+    await maintenanceQueue.upsertJobScheduler(
       SCIM_EVENTS_RETENTION_JOB_ID,
       { pattern },
       { name: SCIM_EVENTS_RETENTION_JOB_NAME, data: {} },

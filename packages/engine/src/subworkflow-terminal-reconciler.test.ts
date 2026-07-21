@@ -12,7 +12,7 @@ const { upsertJobScheduler } = vi.hoisted(() => ({
   upsertJobScheduler: vi.fn(),
 }));
 vi.mock("./queue", () => ({
-  workflowQueue: { upsertJobScheduler },
+  maintenanceQueue: { upsertJobScheduler },
 }));
 
 describe("subworkflow terminal reconciler", () => {

@@ -11,6 +11,7 @@
  */
 
 import { Queue } from "bullmq";
+import { MAINTENANCE_QUEUE_NAME, WORKFLOW_QUEUE_NAME } from "../queue-names";
 
 export const QUEUE_OBSERVABILITY_COMMAND_TIMEOUT_MS = 1_000;
 export const QUEUE_OBSERVABILITY_READ_TIMEOUT_MS = 1_500;
@@ -18,9 +19,9 @@ export const QUEUE_OBSERVABILITY_READ_TIMEOUT_MS = 1_500;
 type QueueCountClient = Pick<Queue, "getJobCounts" | "close">;
 type QueueCountClientFactory = () => QueueCountClient;
 
-/** Create a workflow-queue client whose Redis operations fail in bounded time. */
-export function createBoundedWorkflowQueue(): Queue {
-  const queue = new Queue("workflow-nodes", {
+/** Create a named queue client whose Redis operations fail in bounded time. */
+export function createBoundedQueue(queueName: string): Queue {
+  const queue = new Queue(queueName, {
     connection: {
       url: process.env.REDIS_URL ?? "redis://localhost:6379",
       maxRetriesPerRequest: 1,
@@ -33,6 +34,16 @@ export function createBoundedWorkflowQueue(): Queue {
   });
   queue.on("error", () => undefined);
   return queue;
+}
+
+/** Create a bounded client for the customer workflow lane. */
+export function createBoundedWorkflowQueue(): Queue {
+  return createBoundedQueue(WORKFLOW_QUEUE_NAME);
+}
+
+/** Create a bounded client for the isolated maintenance lane. */
+export function createBoundedMaintenanceQueue(): Queue {
+  return createBoundedQueue(MAINTENANCE_QUEUE_NAME);
 }
 
 /** Bound a BullMQ observation independently of the Redis client's retries. */
@@ -65,8 +76,9 @@ export async function closeWorkflowQueueObservationClient(
  * Own a bounded queue client and coalesce concurrent count scrapes. A failed
  * read is not cached; the next scrape can observe Redis recovery immediately.
  */
-export function createWorkflowQueueCountReader(
-  createClient: QueueCountClientFactory = createBoundedWorkflowQueue,
+export function createQueueCountReader(
+  createClient: QueueCountClientFactory,
+  queueLabel: string,
 ): {
   getCounts: () => Promise<{ waiting: number; active: number }>;
   close: () => Promise<void>;
@@ -79,7 +91,7 @@ export function createWorkflowQueueCountReader(
     if (inFlight) return inFlight;
     inFlight = Promise.resolve()
       .then(async () => {
-        if (closed) throw new Error("Workflow queue count reader is closed");
+        if (closed) throw new Error(`${queueLabel} queue count reader is closed`);
         const current = client ?? createClient();
         client = current;
         try {
@@ -108,4 +120,18 @@ export function createWorkflowQueueCountReader(
   };
 
   return { getCounts, close };
+}
+
+/** Own a coalesced bounded count reader for workflow metrics. */
+export function createWorkflowQueueCountReader(
+  createClient: QueueCountClientFactory = createBoundedWorkflowQueue,
+) {
+  return createQueueCountReader(createClient, "Workflow");
+}
+
+/** Own a coalesced bounded count reader for maintenance metrics. */
+export function createMaintenanceQueueCountReader(
+  createClient: QueueCountClientFactory = createBoundedMaintenanceQueue,
+) {
+  return createQueueCountReader(createClient, "Maintenance");
 }

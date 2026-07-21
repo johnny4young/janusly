@@ -18,7 +18,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./queue", () => ({
-  workflowQueue: { upsertJobScheduler: vi.fn() },
+  maintenanceQueue: { upsertJobScheduler: vi.fn() },
 }));
 
 const auditInsertValues = vi.fn();
@@ -56,14 +56,14 @@ import {
   registerUpstreamHealthScheduler,
   UPSTREAM_HEALTH_JOB_ID,
 } from "./upstream-health-poller";
-import { workflowQueue } from "./queue";
+import { maintenanceQueue } from "./queue";
 
 const listTaggedMock = vi.mocked(listWorkflowIdsTaggedWithSource);
 const pauseMock = vi.mocked(pauseWorkflowsForUpstream);
 const resumeMock = vi.mocked(resumeWorkflowsForUpstream);
 const recordStatusMock = vi.mocked(recordUpstreamStatus);
 const recordErrorMock = vi.mocked(recordUpstreamPollError);
-const upsertSchedulerMock = vi.mocked(workflowQueue.upsertJobScheduler);
+const upsertSchedulerMock = vi.mocked(maintenanceQueue.upsertJobScheduler);
 
 function source(overrides: Partial<UpstreamHealthSource> = {}): UpstreamHealthSource {
   return {

@@ -62,7 +62,7 @@ import {
   type StalledTerminalFailureInput,
   type StalledTerminalFailureResult,
 } from "./adapters/dead-letter-queue";
-import { workflowQueue } from "./queue";
+import { maintenanceQueue } from "./queue";
 import { validateCronExpression } from "./schedule";
 import type { DeadLetterInput, SerializedError } from "./core/types";
 
@@ -306,7 +306,7 @@ export async function registerStalledNodeReaperScheduler(
 ): Promise<boolean> {
   const pattern = resolveCronPattern(env);
   try {
-    await workflowQueue.upsertJobScheduler(
+    await maintenanceQueue.upsertJobScheduler(
       STALLED_NODE_REAPER_JOB_ID,
       { pattern },
       { name: STALLED_NODE_REAPER_JOB_NAME, data: {} },

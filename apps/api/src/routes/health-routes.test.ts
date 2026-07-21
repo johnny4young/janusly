@@ -91,6 +91,12 @@ beforeEach(() => {
     active: 0,
     oldestWaitingSeconds: null,
     warnSeconds: 60,
+    maintenance: {
+      waiting: 0,
+      active: 0,
+      oldestWaitingSeconds: null,
+      warnSeconds: 300,
+    },
   });
 });
 
@@ -220,6 +226,12 @@ describe("GET /system/queue", () => {
       active: 3,
       oldestWaitingSeconds: 91,
       warnSeconds: 60,
+      maintenance: {
+        waiting: 2,
+        active: 1,
+        oldestWaitingSeconds: 120,
+        warnSeconds: 300,
+      },
     });
     await callRoute("GET", "/system/queue");
     expect(sendJsonMock).toHaveBeenLastCalledWith({}, {
@@ -227,6 +239,12 @@ describe("GET /system/queue", () => {
       active: 3,
       oldestWaitingSeconds: 91,
       warnSeconds: 60,
+      maintenance: {
+        waiting: 2,
+        active: 1,
+        oldestWaitingSeconds: 120,
+        warnSeconds: 300,
+      },
     });
   });
 

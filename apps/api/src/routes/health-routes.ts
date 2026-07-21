@@ -15,8 +15,8 @@
  *   The queue block is deliberately coarse: ``{ degraded }`` or ``null``.
  * - ``GET /system/rate-limiter`` (admin) — full snapshot including
  *   per-bucket ``lastError`` + ``lastObservedKey`` for incident triage.
- * - ``GET /system/queue`` (admin) — live waiting/active counts, oldest
- *   waiting age, and the server-owned warning threshold.
+ * - ``GET /system/queue`` (admin) — workflow counts/age at the stable top
+ *   level plus an independent nullable maintenance snapshot.
  *
  * Invariants:
  * - ``/health`` stays additive — ``body.ok: true`` still anchors any probe

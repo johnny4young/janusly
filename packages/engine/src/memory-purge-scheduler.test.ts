@@ -9,7 +9,7 @@
  *   - malformed env warn-logs + falls back to default
  *   - schedule removes any existing job FIRST, then adds (rapid
  *     revoke-grant-revoke convergence)
- *   - schedule never throws when workflowQueue.add rejects (Redis down)
+ *   - schedule never throws when maintenanceQueue.add rejects (Redis down)
  *   - cancel returns true on found+removed, false on not-found
  *   - handler purges when memory.enabled === false at fire time
  *   - handler SKIPS the purge when memory.enabled === true at fire
@@ -19,8 +19,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./queue", () => ({
-  workflowQueue: {
+  maintenanceQueue: {
     add: vi.fn(),
+    getJob: vi.fn(),
+  },
+  workflowQueue: {
     getJob: vi.fn(),
   },
 }));
@@ -46,10 +49,11 @@ import {
   MEMORY_PURGE_QUEUE_TIMEOUT_MS,
   schedulePendingMemoryPurge,
 } from "./memory-purge-scheduler";
-import { workflowQueue } from "./queue";
+import { maintenanceQueue, workflowQueue } from "./queue";
 
-const addMock = vi.mocked(workflowQueue.add);
-const getJobMock = vi.mocked(workflowQueue.getJob);
+const addMock = vi.mocked(maintenanceQueue.add);
+const getJobMock = vi.mocked(maintenanceQueue.getJob);
+const getLegacyJobMock = vi.mocked(workflowQueue.getJob);
 const getOrgConfigSnapshotMock = vi.mocked(getOrgConfigSnapshot);
 const purgeMemoryForOrgMock = vi.mocked(purgeMemoryForOrg);
 
@@ -64,6 +68,8 @@ beforeEach(() => {
   addMock.mockResolvedValue(undefined as never);
   getJobMock.mockReset();
   getJobMock.mockResolvedValue(null as never);
+  getLegacyJobMock.mockReset();
+  getLegacyJobMock.mockResolvedValue(null as never);
   getOrgConfigSnapshotMock.mockReset();
   purgeMemoryForOrgMock.mockReset();
   purgeMemoryForOrgMock.mockResolvedValue({ entriesPurged: 0, kindsAffected: [] });
@@ -161,7 +167,7 @@ describe("schedulePendingMemoryPurge", () => {
     expect(removeOrder).toBeLessThan(addOrder);
   });
 
-  it("never throws when workflowQueue.add rejects (Redis down, returns false)", async () => {
+  it("never throws when maintenanceQueue.add rejects (Redis down, returns false)", async () => {
     addMock.mockRejectedValueOnce(new Error("redis down"));
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
@@ -174,7 +180,7 @@ describe("schedulePendingMemoryPurge", () => {
     }
   });
 
-  it("returns false when workflowQueue.add never settles (bounded Redis outage)", async () => {
+  it("returns false when maintenanceQueue.add never settles (bounded Redis outage)", async () => {
     vi.useFakeTimers();
     addMock.mockReturnValueOnce(new Promise(() => {}) as never);
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -210,7 +216,15 @@ describe("cancelPendingMemoryPurge", () => {
     ).resolves.toBe(false);
   });
 
-  it("returns false when workflowQueue.getJob never settles (bounded Redis outage)", async () => {
+  it("also cancels a job left on the legacy workflow queue", async () => {
+    const removeMock = vi.fn().mockResolvedValue(undefined);
+    getLegacyJobMock.mockResolvedValueOnce({ remove: removeMock } as never);
+
+    await expect(cancelPendingMemoryPurge({ orgId: "org-1" })).resolves.toBe(true);
+    expect(removeMock).toHaveBeenCalledOnce();
+  });
+
+  it("returns false when maintenanceQueue.getJob never settles (bounded Redis outage)", async () => {
     vi.useFakeTimers();
     getJobMock.mockReturnValueOnce(new Promise(() => {}) as never);
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -229,6 +243,19 @@ describe("cancelPendingMemoryPurge", () => {
 describe("getMemoryPurgeStatus", () => {
   it("returns the scheduled timestamp for a delayed purge", async () => {
     getJobMock.mockResolvedValueOnce({
+      timestamp: Date.parse("2026-01-01T00:00:00.000Z"),
+      delay: 5_000,
+      getState: vi.fn().mockResolvedValue("delayed"),
+    } as never);
+
+    await expect(getMemoryPurgeStatus({ orgId: "org-1" })).resolves.toEqual({
+      status: "scheduled",
+      scheduledFor: "2026-01-01T00:00:05.000Z",
+    });
+  });
+
+  it("reports a delayed purge materialized on the legacy workflow queue", async () => {
+    getLegacyJobMock.mockResolvedValueOnce({
       timestamp: Date.parse("2026-01-01T00:00:00.000Z"),
       delay: 5_000,
       getState: vi.fn().mockResolvedValue("delayed"),

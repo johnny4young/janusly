@@ -221,8 +221,8 @@ export async function handleReplayCampaignStep(data: unknown): Promise<void> {
 /** Register the bounded Postgres→BullMQ repair sweep. */
 export async function registerReplayCampaignReconciler(): Promise<boolean> {
   try {
-    const { workflowQueue } = await import("./queue");
-    await workflowQueue.upsertJobScheduler(
+    const { maintenanceQueue } = await import("./queue");
+    await maintenanceQueue.upsertJobScheduler(
       REPLAY_CAMPAIGN_RECONCILER_JOB_ID,
       { every: REPLAY_CAMPAIGN_RECONCILER_EVERY_MS },
       { name: REPLAY_CAMPAIGN_RECONCILER_JOB_NAME, data: {} },

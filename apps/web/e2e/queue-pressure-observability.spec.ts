@@ -15,7 +15,7 @@ type QueueState = {
   warnSeconds: number
 } | null
 
-type QueueRouteState = QueueState | 'protocol-error'
+type QueueRouteState = (NonNullable<QueueState> & { maintenance?: QueueState }) | null | 'protocol-error'
 
 const copy = {
   en: {
@@ -26,6 +26,8 @@ const copy = {
     delayedIdle: 'Jobs are waiting for a worker',
     unavailable: 'Queue status unavailable',
     transportUnavailable: 'request failed',
+    maintenanceClear: 'Maintenance queue clear',
+    maintenanceDelayed: 'Maintenance delayed',
   },
   es: {
     operations: 'Operaciones',
@@ -35,6 +37,8 @@ const copy = {
     delayedIdle: 'Los trabajos están esperando un proceso de ejecución',
     unavailable: 'Estado de la cola no disponible',
     transportUnavailable: 'falló la solicitud',
+    maintenanceClear: 'Cola de mantenimiento sin espera',
+    maintenanceDelayed: 'Mantenimiento con demora',
   },
 } as const
 
@@ -101,11 +105,14 @@ test('queue pressure stays private, observable, and clear in English and Spanish
 
   const adminResponse = await request.get(`${API_URL}/system/queue`, { headers: headers(orgId) })
   expect(adminResponse.ok()).toBe(true)
-  const adminBody = await adminResponse.json() as QueueState
+  const adminBody = await adminResponse.json() as QueueRouteState
   expect(adminBody).not.toBeNull()
+  expect(adminBody).not.toBe('protocol-error')
+  if (adminBody === null || adminBody === 'protocol-error') throw new Error('queue health unavailable')
   expect(adminBody).toMatchObject({ warnSeconds: 60 })
-  expect(adminBody?.waiting).toBeGreaterThanOrEqual(0)
-  expect(adminBody?.active).toBeGreaterThanOrEqual(0)
+  expect(adminBody.waiting).toBeGreaterThanOrEqual(0)
+  expect(adminBody.active).toBeGreaterThanOrEqual(0)
+  expect(adminBody.maintenance).toMatchObject({ warnSeconds: 300 })
 
   expect(API_METRICS_URL).toBeTruthy()
   expect(WORKER_METRICS_URL).toBeTruthy()
@@ -119,6 +126,8 @@ test('queue pressure stays private, observable, and clear in English and Spanish
   const workerMetricsText = await workerMetrics.text()
   expect(workerMetricsText).toContain('workflow_queue_waiting_jobs')
   expect(workerMetricsText).toContain('workflow_queue_active_jobs')
+  expect(workerMetricsText).toContain('maintenance_queue_waiting_jobs')
+  expect(workerMetricsText).toContain('maintenance_queue_active_jobs')
   expect(workerMetricsText).toContain('janusly_rate_limit_degraded_buckets')
 
   let queueState: QueueRouteState = 'protocol-error'
@@ -218,7 +227,36 @@ test('queue pressure stays private, observable, and clear in English and Spanish
       await hideUnrelatedOverlays(page)
       await capture(chip, `web-${locale}-queue-lag-${state.name}`)
     }
+
+    const requestsBeforeMaintenance = queueRequestCount
+    queueState = {
+      waiting: 0,
+      active: 1,
+      oldestWaitingSeconds: null,
+      warnSeconds: 60,
+      maintenance: locale === 'en'
+        ? { waiting: 2, active: 0, oldestWaitingSeconds: 301, warnSeconds: 300 }
+        : { waiting: 0, active: 1, oldestWaitingSeconds: null, warnSeconds: 300 },
+    }
+    const maintenanceChip = page.getByTestId('maintenance-queue-lag-chip')
+    await expect.poll(() => queueRequestCount).toBeGreaterThan(requestsBeforeMaintenance)
+    await expect(chip).toHaveAttribute('data-state', 'clear')
+    await expect(maintenanceChip).toHaveAttribute('data-state', locale === 'en' ? 'delayed' : 'clear')
+    await expect(maintenanceChip).toContainText(locale === 'en'
+      ? copy.en.maintenanceDelayed
+      : copy.es.maintenanceClear)
+    await hideUnrelatedOverlays(page)
+    await capture(
+      page.locator('.we-operations-header'),
+      `web-${locale}-workflow-maintenance-queues`,
+    )
   }
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  const mobileHeader = page.locator('.we-operations-header')
+  await expect(page.getByTestId('maintenance-queue-lag-chip')).toBeVisible()
+  expect(await mobileHeader.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
+  await capture(mobileHeader, 'web-es-workflow-maintenance-queues-mobile')
 
   expect(browserErrors).toEqual([])
 })

@@ -24,7 +24,7 @@ type RetentionAuditInput = {
 };
 
 vi.mock("./queue", () => ({
-  workflowQueue: { upsertJobScheduler: vi.fn() },
+  maintenanceQueue: { upsertJobScheduler: vi.fn() },
 }));
 
 const auditInsertValuesMock = vi.fn();
@@ -67,9 +67,9 @@ import {
   RETENTION_JOB_NAME,
   registerRetentionScheduler,
 } from "./retention-scheduler";
-import { workflowQueue } from "./queue";
+import { maintenanceQueue } from "./queue";
 
-const upsertJobSchedulerMock = vi.mocked(workflowQueue.upsertJobScheduler);
+const upsertJobSchedulerMock = vi.mocked(maintenanceQueue.upsertJobScheduler);
 const listOrgIdsMock = vi.mocked(listOrgIdsForRetention);
 const getConfigMock = vi.mocked(getRetentionPolicyConfig);
 const exportMock = vi.mocked(runRetentionExport);

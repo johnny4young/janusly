@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createWorkflowQueueCountReader } from "./queue-reader";
+import {
+  createMaintenanceQueueCountReader,
+  createWorkflowQueueCountReader,
+} from "./queue-reader";
 
 describe("createWorkflowQueueCountReader", () => {
   it("coalesces concurrent scrapes and closes its client", async () => {
@@ -50,5 +53,15 @@ describe("createWorkflowQueueCountReader", () => {
 
     await reader.close();
     expect(secondClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives the maintenance reader the same bounded/coalesced lifecycle", async () => {
+    const getJobCounts = vi.fn().mockResolvedValue({ waiting: 3, active: 1 });
+    const close = vi.fn().mockResolvedValue(undefined);
+    const reader = createMaintenanceQueueCountReader(() => ({ getJobCounts, close } as never));
+
+    await expect(reader.getCounts()).resolves.toEqual({ waiting: 3, active: 1 });
+    await reader.close();
+    expect(close).toHaveBeenCalledOnce();
   });
 });

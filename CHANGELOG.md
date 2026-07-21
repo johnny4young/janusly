@@ -16,6 +16,11 @@ retroactively.
 
 ### Changed
 
+- Retention, calibration, upstream-health polling, repair reconcilers, and
+  consent-revocation purges now run on an isolated low-concurrency BullMQ
+  maintenance lane. Rolling upgrades preserve already-materialized jobs,
+  shutdown drains both workers, and Operations/Prometheus expose workflow and
+  maintenance pressure independently without widening public health details.
 - The JavaScript toolchain now requires Node.js 24 and pnpm 11, with TypeScript
   7, Vite 8, Vitest 4, Oxlint, and Vercel AI SDK 7.
 - CI, containers, workspace metadata, SDK metadata, and contributor

@@ -1,7 +1,12 @@
 import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
-import { parseQueueHealth, QueueLagChip, queueNeedsAttention } from './QueueLagChip'
+import {
+  parseQueueHealth,
+  parseQueueHealthOverview,
+  QueueLagChip,
+  queueNeedsAttention,
+} from './QueueLagChip'
 
 describe('queue health browser boundary', () => {
   it('accepts the exact admin shape and rejects malformed or contradictory values', () => {
@@ -20,6 +25,18 @@ describe('queue health browser boundary', () => {
     expect(queueNeedsAttention(null)).toBe(true)
     expect(queueNeedsAttention({ waiting: 1, active: 0, oldestWaitingSeconds: 60, warnSeconds: 60 })).toBe(false)
     expect(queueNeedsAttention({ waiting: 1, active: 0, oldestWaitingSeconds: 61, warnSeconds: 60 })).toBe(true)
+  })
+
+  it('parses additive maintenance telemetry without rejecting older APIs', () => {
+    const workflow = { waiting: 0, active: 1, oldestWaitingSeconds: null, warnSeconds: 60 }
+    expect(parseQueueHealthOverview(workflow)).toEqual({ workflow, maintenance: undefined })
+    expect(parseQueueHealthOverview({
+      ...workflow,
+      maintenance: { waiting: 1, active: 0, oldestWaitingSeconds: 301, warnSeconds: 300 },
+    })).toEqual({
+      workflow,
+      maintenance: { waiting: 1, active: 0, oldestWaitingSeconds: 301, warnSeconds: 300 },
+    })
   })
 
   it('does not call a waiting queue clear while its oldest age is racing', () => {
@@ -64,5 +81,20 @@ describe('queue health browser boundary', () => {
 
     rerender(<QueueLagChip health={null} unavailableReason="transport" />)
     expect(chip).toHaveTextContent('Queue status unavailable — request failed')
+  })
+
+  it('identifies maintenance queue state independently', () => {
+    render(
+      <QueueLagChip
+        kind="maintenance"
+        health={{ waiting: 0, active: 1, oldestWaitingSeconds: null, warnSeconds: 300 }}
+      />,
+    )
+    const chip = screen.getByTestId('maintenance-queue-lag-chip')
+    expect(chip).toHaveTextContent('Maintenance queue clear')
+    expect(within(chip).getByRole('status')).toHaveAttribute(
+      'aria-label',
+      'Maintenance queue: Maintenance queue clear',
+    )
   })
 })

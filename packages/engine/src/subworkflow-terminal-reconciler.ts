@@ -13,7 +13,7 @@ import {
   claimDueParentNotifications,
   notifyCommittedRunTerminal,
 } from "./persistence";
-import { workflowQueue } from "./queue";
+import { maintenanceQueue } from "./queue";
 
 export const SUBWORKFLOW_TERMINAL_RECONCILER_JOB_ID = "system:subworkflow-terminal-reconciler";
 export const SUBWORKFLOW_TERMINAL_RECONCILER_JOB_NAME = "subworkflow-terminal-reconciler-trigger";
@@ -59,7 +59,7 @@ export async function reconcileSubworkflowTerminals(
 /** Idempotently register the once-per-minute terminal handoff repair sweep. */
 export async function registerSubworkflowTerminalReconciler(): Promise<boolean> {
   try {
-    await workflowQueue.upsertJobScheduler(
+    await maintenanceQueue.upsertJobScheduler(
       SUBWORKFLOW_TERMINAL_RECONCILER_JOB_ID,
       { pattern: SUBWORKFLOW_TERMINAL_RECONCILER_CRON },
       { name: SUBWORKFLOW_TERMINAL_RECONCILER_JOB_NAME, data: {} },

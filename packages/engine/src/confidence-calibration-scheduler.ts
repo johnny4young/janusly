@@ -40,7 +40,7 @@ import {
 } from "@janusly/data";
 
 import { fitCalibrationCurve } from "./confidence-calibration";
-import { workflowQueue } from "./queue";
+import { maintenanceQueue } from "./queue";
 import { validateCronExpression } from "./schedule";
 
 /** Deterministic global id for the BullMQ scheduler. */
@@ -83,7 +83,7 @@ export async function registerConfidenceCalibrationScheduler(
 ): Promise<boolean> {
   const pattern = resolveCronPattern(env);
   try {
-    await workflowQueue.upsertJobScheduler(
+    await maintenanceQueue.upsertJobScheduler(
       CONFIDENCE_CALIBRATION_JOB_ID,
       { pattern },
       { name: CONFIDENCE_CALIBRATION_JOB_NAME, data: {} },

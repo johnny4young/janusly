@@ -14,7 +14,7 @@ const { upsertJobScheduler } = vi.hoisted(() => ({
 }));
 
 vi.mock("./queue", () => ({
-  workflowQueue: { upsertJobScheduler },
+  maintenanceQueue: { upsertJobScheduler },
 }));
 
 vi.mock("@janusly/data", () => ({

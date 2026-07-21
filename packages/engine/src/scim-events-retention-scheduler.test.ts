@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const insertValuesMock = vi.fn();
 
 vi.mock("./queue", () => ({
-  workflowQueue: {
+  maintenanceQueue: {
     upsertJobScheduler: vi.fn(),
   },
 }));
@@ -37,9 +37,9 @@ import {
   SCIM_EVENTS_RETENTION_JOB_ID,
   SCIM_EVENTS_RETENTION_JOB_NAME,
 } from "./scim-events-retention-scheduler";
-import { workflowQueue } from "./queue";
+import { maintenanceQueue } from "./queue";
 
-const upsertJobSchedulerMock = vi.mocked(workflowQueue.upsertJobScheduler);
+const upsertJobSchedulerMock = vi.mocked(maintenanceQueue.upsertJobScheduler);
 const pruneOldProcessedEventsMock = vi.mocked(pruneOldProcessedEvents);
 
 beforeEach(() => {

@@ -7,6 +7,7 @@ import {
   createQueueHealthSource,
   getWaitingEligibleTimestamp,
   readQueueHealthSnapshot,
+  resolveMaintenanceQueueLagWarnSeconds,
   resolveQueueLagWarnSeconds,
   toPublicQueueHealth,
   type QueueHealthSource,
@@ -101,6 +102,21 @@ describe("queue health projection and cache", () => {
     expect(toPublicQueueHealth(null)).toBeNull();
   });
 
+  it("marks the public signal degraded when only maintenance is delayed", () => {
+    expect(toPublicQueueHealth({
+      waiting: 0,
+      active: 1,
+      oldestWaitingSeconds: null,
+      warnSeconds: 60,
+      maintenance: {
+        waiting: 1,
+        active: 0,
+        oldestWaitingSeconds: 301,
+        warnSeconds: 300,
+      },
+    })).toEqual({ degraded: true });
+  });
+
   it("coalesces concurrent reads and caches success for five seconds", async () => {
     let now = 1_000;
     const load = vi.fn().mockResolvedValue({
@@ -184,5 +200,16 @@ describe("resolveQueueLagWarnSeconds", () => {
   it("accepts the closed positive range", () => {
     expect(resolveQueueLagWarnSeconds("1")).toBe(1);
     expect(resolveQueueLagWarnSeconds("86400")).toBe(86_400);
+  });
+});
+
+describe("resolveMaintenanceQueueLagWarnSeconds", () => {
+  it.each([undefined, "", "0", "1.5", "86401", "nope"])(
+    "falls back for %s",
+    (raw) => expect(resolveMaintenanceQueueLagWarnSeconds(raw)).toBe(300),
+  );
+  it("accepts the closed positive range", () => {
+    expect(resolveMaintenanceQueueLagWarnSeconds("1")).toBe(1);
+    expect(resolveMaintenanceQueueLagWarnSeconds("86400")).toBe(86_400);
   });
 });

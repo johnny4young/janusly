@@ -14,7 +14,7 @@ import {
   type UnrecordedWorkflowRolloutOutcome,
 } from "@janusly/data";
 
-import { workflowQueue } from "./queue";
+import { maintenanceQueue } from "./queue";
 
 export const WORKFLOW_ROLLOUT_RECONCILER_JOB_ID = "system:workflow-rollout-reconciler";
 export const WORKFLOW_ROLLOUT_RECONCILER_JOB_NAME = "workflow-rollout-reconciler-trigger";
@@ -69,7 +69,7 @@ export async function reconcileWorkflowRolloutOutcomes(
 /** Idempotently register the once-per-minute rollout evidence repair sweep. */
 export async function registerWorkflowRolloutReconciler(): Promise<boolean> {
   try {
-    await workflowQueue.upsertJobScheduler(
+    await maintenanceQueue.upsertJobScheduler(
       WORKFLOW_ROLLOUT_RECONCILER_JOB_ID,
       { pattern: WORKFLOW_ROLLOUT_RECONCILER_CRON },
       { name: WORKFLOW_ROLLOUT_RECONCILER_JOB_NAME, data: {} },

@@ -65,6 +65,18 @@ describe("observable metrics", () => {
     }), 2);
   });
 
+  it("publishes maintenance queue counts on independent instruments", async () => {
+    registerQueueObservables(() => ({ waiting: 5, active: 2 }), "maintenance");
+    const observe = vi.fn();
+    await meterMock.callbacks[0]?.callback({ observe });
+    expect(observe).toHaveBeenCalledWith(expect.objectContaining({
+      name: "maintenance_queue_waiting_jobs",
+    }), 5);
+    expect(observe).toHaveBeenCalledWith(expect.objectContaining({
+      name: "maintenance_queue_active_jobs",
+    }), 2);
+  });
+
   it("omits malformed values and swallowed loader failures", async () => {
     registerQueueObservables(() => ({ waiting: -1, active: 1 }));
     registerRateLimiterObservables(async () => { throw new Error("snapshot failed"); });

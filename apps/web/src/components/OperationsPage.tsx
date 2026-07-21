@@ -39,7 +39,7 @@ import { SlackInteractionsPanel } from './SlackInteractionsPanel'
 import { VitalSignsStrip } from './VitalSignsStrip'
 import { RunStreamChip } from './RunStreamChip'
 import {
-  parseQueueHealth,
+  parseQueueHealthOverview,
   QueueLagChip,
   queueNeedsAttention,
   type QueueHealth,
@@ -155,6 +155,8 @@ type SignalSummary = {
   rateLimiter: RateLimiterHealth | null
   /** Admin queue snapshot; null means unavailable, undefined means not checked yet. */
   queue: QueueHealth | null | undefined
+  /** Independent maintenance queue snapshot; absent against an older API. */
+  maintenanceQueue: QueueHealth | null | undefined
   /** Most recent 402 envelope captured by the API wrapper. Drives Reliability dot. */
   budgetBlocked: unknown
   /** True when at least one `/recovery/metrics` value is in the "unhealthy" band.
@@ -163,8 +165,18 @@ type SignalSummary = {
 }
 
 type QueueSignalState = {
-  health: QueueHealth | null
-  unavailableReason: QueueUnavailableReason
+  workflow: QueueHealth | null
+  maintenance: QueueHealth | null | undefined
+  workflowUnavailableReason: QueueUnavailableReason
+  maintenanceUnavailableReason: QueueUnavailableReason
+}
+
+function hasNullMaintenanceSnapshot(value: unknown): boolean {
+  return typeof value === 'object'
+    && value !== null
+    && !Array.isArray(value)
+    && 'maintenance' in value
+    && (value as { maintenance?: unknown }).maintenance === null
 }
 
 function isForbiddenApiError(error: unknown): boolean {
@@ -246,10 +258,12 @@ export function OperationsPage() {
       api('/system/queue')
         .then((payload) => {
           if (cancelled) return
-          const health = parseQueueHealth(payload)
+          const health = parseQueueHealthOverview(payload)
           setQueueSignal({
-            health,
-            unavailableReason: payload === null ? 'redis' : 'transport',
+            workflow: health.workflow,
+            maintenance: health.maintenance,
+            workflowUnavailableReason: payload === null ? 'redis' : 'transport',
+            maintenanceUnavailableReason: hasNullMaintenanceSnapshot(payload) ? 'redis' : 'transport',
           })
           setQueueCheckedAt(Date.now())
         })
@@ -262,8 +276,10 @@ export function OperationsPage() {
             return
           }
           setQueueSignal(current => current ?? {
-            health: null,
-            unavailableReason: 'transport',
+            workflow: null,
+            maintenance: null,
+            workflowUnavailableReason: 'transport',
+            maintenanceUnavailableReason: 'transport',
           })
         })
     }
@@ -288,11 +304,13 @@ export function OperationsPage() {
     ? [displayMetrics.successRate, displayMetrics.mttr, displayMetrics.p95Latency, displayMetrics.replayRate, displayMetrics.costThisWindow]
         .some((m) => m.severity === 'unhealthy')
     : false
-  const queueHealth = queueSignal === undefined ? undefined : queueSignal.health
+  const queueHealth = queueSignal === undefined ? undefined : queueSignal.workflow
+  const maintenanceQueueHealth = queueSignal === undefined ? undefined : queueSignal.maintenance
 
   const signals: SignalSummary = {
     rateLimiter: rateLimiterHealth,
     queue: queueHealth,
+    maintenanceQueue: maintenanceQueueHealth,
     budgetBlocked,
     overviewUnhealthy,
   }
@@ -306,8 +324,10 @@ export function OperationsPage() {
         rateLimiterHealth={rateLimiterHealth}
         rateLimiterCheckedAt={rateLimiterCheckedAt}
         queueHealth={queueHealth}
+        maintenanceQueueHealth={maintenanceQueueHealth}
         queueCheckedAt={queueCheckedAt}
-        queueUnavailableReason={queueSignal?.unavailableReason}
+        queueUnavailableReason={queueSignal?.workflowUnavailableReason}
+        maintenanceQueueUnavailableReason={queueSignal?.maintenanceUnavailableReason}
       />
       <div className="we-operations-page__body">
         <OperationsRail section={section} onChange={setSection} signals={signals} />
@@ -331,8 +351,10 @@ function OperationsHeader({
   rateLimiterHealth,
   rateLimiterCheckedAt,
   queueHealth,
+  maintenanceQueueHealth,
   queueCheckedAt,
   queueUnavailableReason,
+  maintenanceQueueUnavailableReason,
 }: {
   metrics: RecoveryMetrics | null
   loading: boolean
@@ -340,8 +362,10 @@ function OperationsHeader({
   rateLimiterHealth: RateLimiterHealth | null
   rateLimiterCheckedAt: number | null
   queueHealth: QueueHealth | null | undefined
+  maintenanceQueueHealth: QueueHealth | null | undefined
   queueCheckedAt: number | null
   queueUnavailableReason?: QueueUnavailableReason
+  maintenanceQueueUnavailableReason?: QueueUnavailableReason
 }) {
   const { t } = useT()
   return (
@@ -363,6 +387,14 @@ function OperationsHeader({
             health={queueHealth}
             checkedAt={queueCheckedAt}
             unavailableReason={queueUnavailableReason}
+          />
+        )}
+        {maintenanceQueueHealth !== undefined && (
+          <QueueLagChip
+            kind="maintenance"
+            health={maintenanceQueueHealth}
+            checkedAt={queueCheckedAt}
+            unavailableReason={maintenanceQueueUnavailableReason}
           />
         )}
       </div>
@@ -407,6 +439,9 @@ function OperationsRail({
   // Dot-badge derivation is intentionally limited to page-level signals.
   // Reading child-card health here would force those cards to fetch while
   // inactive, which would break the lazy-mount traffic reduction.
+  const queueAttention = (signals.queue !== undefined && queueNeedsAttention(signals.queue))
+    || (signals.maintenanceQueue !== undefined
+      && queueNeedsAttention(signals.maintenanceQueue))
   const dotKind: Record<OpsSection, 'danger' | 'warning' | null> = {
     overview: signals.overviewUnhealthy ? 'warning' : null,
     reliability:
@@ -414,7 +449,7 @@ function OperationsRail({
         ? 'danger'
         : signals.rateLimiter && !signals.rateLimiter.healthy
           ? 'warning'
-          : signals.queue !== undefined && queueNeedsAttention(signals.queue)
+          : queueAttention
             ? 'warning'
           : null,
     access: null,

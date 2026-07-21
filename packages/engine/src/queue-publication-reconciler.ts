@@ -19,7 +19,7 @@ import {
   loadRunWorkflowRaw,
   markQueuePublicationSucceeded,
 } from "./persistence";
-import { workflowQueue } from "./queue";
+import { maintenanceQueue } from "./queue";
 
 export const QUEUE_PUBLICATION_RECONCILER_JOB_ID = "system:queue-publication-reconciler";
 export const QUEUE_PUBLICATION_RECONCILER_JOB_NAME = "queue-publication-reconciler-trigger";
@@ -92,7 +92,7 @@ export async function reconcileQueuePublications(
 /** Idempotently register the once-per-minute publication repair sweep. */
 export async function registerQueuePublicationReconciler(): Promise<boolean> {
   try {
-    await workflowQueue.upsertJobScheduler(
+    await maintenanceQueue.upsertJobScheduler(
       QUEUE_PUBLICATION_RECONCILER_JOB_ID,
       { pattern: QUEUE_PUBLICATION_RECONCILER_CRON },
       { name: QUEUE_PUBLICATION_RECONCILER_JOB_NAME, data: {} },
