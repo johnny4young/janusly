@@ -35,6 +35,7 @@ import { AlertPoliciesPanel } from './AlertPoliciesPanel'
 import { UpstreamHealthPanel } from './UpstreamHealthPanel'
 import { RecentAlertsCard } from './RecentAlertsCard'
 import { McpConnectionsPanel } from './McpConnectionsPanel'
+import { SlackInteractionsPanel } from './SlackInteractionsPanel'
 import { VitalSignsStrip } from './VitalSignsStrip'
 import { RunStreamChip } from './RunStreamChip'
 import {
@@ -553,6 +554,7 @@ function AccessSection() {
 function IntegrationsSection() {
   return (
     <>
+      <SlackInteractionsPanel />
       <CredentialHealthCard />
       <McpConnectionsPanel />
     </>

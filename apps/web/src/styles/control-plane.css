@@ -1796,10 +1796,93 @@
 }
 
 .we-alert-policies,
-.we-recent-alerts {
+.we-recent-alerts,
+.we-slack-interactions {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.we-slack-interactions__intro {
+  margin: 0;
+}
+
+.we-slack-interactions__form {
+  background: color-mix(in srgb, var(--we-primary) 3%, var(--we-surface) 97%);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.we-slack-interactions__form > label:not(.we-slack-interactions__enabled) {
+  color: var(--we-muted);
+  display: grid;
+  font-size: 12px;
+  gap: 5px;
+}
+
+.we-slack-interactions__form input:not([type="checkbox"]),
+.we-slack-interactions__form select {
+  background: var(--we-surface);
+  border: 1px solid var(--we-line-strong);
+  border-radius: 8px;
+  color: var(--we-ink);
+  font-size: 13px;
+  min-height: 34px;
+  min-width: 0;
+  padding: 0 10px;
+}
+
+.we-slack-interactions__mappings {
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px;
+}
+
+.we-slack-interactions__mappings legend {
+  color: var(--we-muted);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 4px;
+}
+
+.we-slack-interactions__mapping {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(130px, 0.8fr) minmax(180px, 1fr) auto;
+}
+
+.we-slack-interactions__enabled {
+  align-items: center;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 8px;
+}
+
+.we-slack-interactions__list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.we-slack-interactions__list .we-list-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.we-slack-interactions__callback {
+  color: var(--we-muted);
+  display: block;
+  font-size: 11px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .we-alert-policies__form {
@@ -1910,6 +1993,11 @@
 
   .we-list-row__actions {
     justify-content: flex-start;
+  }
+
+  .we-slack-interactions__mapping,
+  .we-slack-interactions__list .we-list-row {
+    grid-template-columns: 1fr;
   }
 }
 

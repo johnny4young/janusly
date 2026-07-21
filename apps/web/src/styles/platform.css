@@ -2147,6 +2147,27 @@ button.we-ops-metric-card--button {
   background: var(--we-warning);
 }
 
+@media (max-width: 760px) {
+  .we-operations-page__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .we-operations-rail {
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    position: static;
+  }
+
+  .we-operations-rail > ul {
+    display: flex;
+    min-width: max-content;
+  }
+
+  .we-operations-rail__tab {
+    min-height: 42px;
+  }
+}
+
 /* ----------------- Recovery dialog -------------------------------------- */
 
 .we-recovery-dialog {

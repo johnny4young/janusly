@@ -31,8 +31,9 @@
  * - `routing_stats`, `workflow_improvements` — RL counters and
  *   improvement-engine bookkeeping.
  * - `usage_events` — billing telemetry (LLM calls and write-side tool usage).
- * - `credentials`, `installed_plugins` — secret references and plugin
- *   manifests.
+ * - `credentials`, `slack_interaction_connections`,
+ *   `slack_interaction_receipts`, `installed_plugins` — secret references,
+ *   signed operator-action identity, replay claims, and plugin manifests.
  * - `audit_logs` — append-only mutation log (`audit()` redacts sensitive
  *   keys before insertion).
  *
@@ -554,6 +555,62 @@ export const credentials = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true, precision: 3 }).defaultNow(),
   },
   (table) => [index("credentials_org_idx").on(table.orgId)],
+);
+
+/**
+ * One Slack app/team binding for signed recovery-item interactions.
+ *
+ * The signing secret remains in the credentials/env substrate; this row stores
+ * only the credential name plus a bounded Slack-user → Janusly-user mapping.
+ * Callback lookup by opaque connection id is the deliberate cross-tenant
+ * system exception, but the signed team id must still match before any mapped
+ * identity is authorized. No foreign keys keep the integration orphan-tolerant
+ * when a credential or member is rotated/deleted.
+ */
+export const slackInteractionConnections = pgTable(
+  "slack_interaction_connections",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    name: text("name").notNull(),
+    teamId: text("team_id").notNull(),
+    signingCredentialName: text("signing_credential_name").notNull(),
+    userMappings: jsonb("user_mappings")
+      .$type<Array<{ slackUserId: string; userId: string }>>()
+      .notNull()
+      .default([]),
+    enabled: boolean("enabled").notNull().default(true),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("slack_interaction_connections_org_name_idx").on(table.orgId, table.name),
+    uniqueIndex("slack_interaction_connections_org_team_idx").on(table.orgId, table.teamId),
+    index("slack_interaction_connections_org_enabled_idx").on(table.orgId, table.enabled),
+  ],
+);
+
+/**
+ * Durable replay claims for signed Slack callbacks.
+ *
+ * The id is a SHA-256 digest of connection id + signed timestamp + exact raw
+ * body. Claim insertion and opportunistic expiry cleanup share a transaction,
+ * so retries across API replicas cannot repeat a recovery mutation and storage
+ * remains bounded to the recent verification window for active connections.
+ */
+export const slackInteractionReceipts = pgTable(
+  "slack_interaction_receipts",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    connectionId: text("connection_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("slack_interaction_receipts_connection_created_idx")
+      .on(table.connectionId, table.createdAt),
+  ],
 );
 
 export const installedPlugins = pgTable(

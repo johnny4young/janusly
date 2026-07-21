@@ -42,6 +42,9 @@ vi.mock('./RecentAlertsCard', () => ({
 vi.mock('./McpConnectionsPanel', () => ({
   McpConnectionsPanel: () => <section data-testid="stub-McpConnectionsPanel">Mcp</section>,
 }))
+vi.mock('./SlackInteractionsPanel', () => ({
+  SlackInteractionsPanel: () => <section data-testid="stub-SlackInteractionsPanel">SlackInteractions</section>,
+}))
 
 const initialState = useWorkflowStore.getState()
 const STORAGE_KEY = 'janusly:operations:section'
@@ -213,6 +216,7 @@ describe('<OperationsPage />', () => {
 
     await screen.findByTestId('stub-CredentialHealthCard')
     expect(screen.getByTestId('stub-McpConnectionsPanel')).toBeInTheDocument()
+    expect(screen.getByTestId('stub-SlackInteractionsPanel')).toBeInTheDocument()
     expect(screen.getByTestId('operations-rail-tab-integrations')).toHaveAttribute('aria-current', 'page')
     // Overview cards are NOT mounted because we hydrated to integrations.
     expect(screen.queryByTestId('stub-FailureClustersCard')).toBeNull()

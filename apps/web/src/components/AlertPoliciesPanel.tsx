@@ -47,6 +47,12 @@ type Credential = {
   kind: string
 }
 
+type SlackInteractionConnection = {
+  id: string
+  name: string
+  enabled: boolean
+}
+
 /**
  * Form-only channel: the persisted `Channel` plus a stable client key. A list
  * keyed by array index corrupts controlled-input state when a middle row is
@@ -179,6 +185,7 @@ export function AlertPoliciesPanel(): React.ReactElement {
 
   const [policies, setPolicies] = useState<AlertPolicy[]>([])
   const [credentials, setCredentials] = useState<Credential[]>([])
+  const [slackInteractions, setSlackInteractions] = useState<SlackInteractionConnection[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
@@ -203,14 +210,24 @@ export function AlertPoliciesPanel(): React.ReactElement {
     Promise.all([
       api('/alerts/policies').catch(() => ({ policies: [] })),
       api('/credentials').catch(() => []),
+      api('/integrations/slack/interactions').catch(() => ({ connections: [] })),
     ])
-      .then(([policyResp, credResp]) => {
+      .then(([policyResp, credResp, slackResp]) => {
         if (cancelled) return
         const policyEnvelope = policyResp && typeof policyResp === 'object' && !Array.isArray(policyResp)
           ? policyResp as Record<string, unknown>
           : undefined
         setPolicies(Array.isArray(policyEnvelope?.policies) ? policyEnvelope.policies as AlertPolicy[] : [])
         setCredentials(Array.isArray(credResp) ? credResp as Credential[] : [])
+        const slackEnvelope = slackResp && typeof slackResp === 'object' && !Array.isArray(slackResp)
+          ? slackResp as { connections?: unknown }
+          : undefined
+        setSlackInteractions(Array.isArray(slackEnvelope?.connections)
+          ? (slackEnvelope.connections as SlackInteractionConnection[]).filter((connection) =>
+              typeof connection?.id === 'string'
+              && typeof connection.name === 'string'
+              && typeof connection.enabled === 'boolean')
+          : [])
         setLoading(false)
       })
       .catch(() => {
@@ -546,6 +563,32 @@ export function AlertPoliciesPanel(): React.ReactElement {
                       }}
                     />
                   )}
+                  {dest === 'slack'
+                    && (form.trigger === 'recovery_item.created' || form.trigger === 'recovery_item.sla_breached')
+                    && (
+                      <select
+                        aria-label={t('alerts.form.slackInteraction')}
+                        value={(params as { interactionConnectionId?: string }).interactionConnectionId ?? ''}
+                        onChange={(e) => {
+                          const newChannels = [...form.channels]
+                          const interactionConnectionId = e.target.value
+                          newChannels[idx] = {
+                            ...channel,
+                            params: interactionConnectionId ? { interactionConnectionId } : {},
+                          }
+                          setForm({ ...form, channels: newChannels })
+                        }}
+                      >
+                        <option value="">{t('alerts.form.slackInteractionNone')}</option>
+                        {slackInteractions.map((connection) => (
+                          <option key={connection.id} value={connection.id} disabled={!connection.enabled}>
+                            {connection.enabled
+                              ? connection.name
+                              : t('alerts.form.slackInteractionDisabled', { name: connection.name })}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   {dest === 'email' && (
                     <input
                       type="email"

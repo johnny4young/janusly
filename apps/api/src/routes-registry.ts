@@ -44,6 +44,7 @@ import { reportsRoutes } from "./routes/reports-routes";
 import { rolesRoutes } from "./routes/roles-routes";
 import { runsRoutes } from "./routes/runs-routes";
 import { scimRoutes } from "./routes/scim-routes";
+import { slackInteractionsRoutes } from "./routes/slack-interactions-routes";
 import { snippetsRoutes } from "./routes/snippets-routes";
 import { solutionPacksRoutes } from "./routes/solution-packs-routes";
 import { ssoRoutes } from "./routes/sso-routes";
@@ -65,6 +66,7 @@ export const routes: Route[] = [
   ...membersRoutes,
   ...ssoRoutes,
   ...scimRoutes,
+  ...slackInteractionsRoutes,
   ...rolesRoutes,
   ...mcpRoutes,
   // Solution packs register before workflows so `POST /workflows/import-pack`

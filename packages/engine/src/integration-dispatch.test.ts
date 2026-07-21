@@ -28,6 +28,18 @@ describe("integration-dispatch — shared per-tool invocation helpers", () => {
     expect(executeToolMock).toHaveBeenCalledWith("slack.post", { credential: "ops", text: "hi" }, {}, ctx);
   });
 
+  it("callSlackPost includes Block Kit blocks when present", async () => {
+    executeToolMock.mockResolvedValueOnce({ ok: true, latencyMs: 1 });
+    const blocks = [{ type: "section", text: { type: "mrkdwn", text: "Incident" } }];
+    await callSlackPost(ctx, { credential: "ops", text: "fallback", blocks });
+    expect(executeToolMock).toHaveBeenCalledWith(
+      "slack.post",
+      { credential: "ops", text: "fallback", blocks },
+      {},
+      ctx,
+    );
+  });
+
   it("callGithubCreateIssue omits labels/assignees when absent", async () => {
     executeToolMock.mockResolvedValueOnce({ ok: true });
     await callGithubCreateIssue(ctx, { credential: "gh", owner: "o", repo: "r", title: "t", body: "b" });

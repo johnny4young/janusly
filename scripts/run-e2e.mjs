@@ -431,9 +431,11 @@ try {
   // this disposable E2E stack. Tenant consent still defaults off, so existing
   // scenarios remain unchanged while governance tests can exercise both gates.
   const e2eApiBootstrap = [
-    'import("@janusly/db").then(() => {',
+    'import("@janusly/db").then(async ({ db, orgMembers }) => {',
     'process.env.JANUSLY_MEMORY_ENABLED = "true";',
+    'process.env.JANUSLY_E2E_SLACK_SIGNING_SECRET = "janusly-e2e-slack-signing-secret";',
     `process.env.OTEL_METRICS_PORT = "${apiMetricsPort}";`,
+    'await db.insert(orgMembers).values({ id: "e2e-dev-user", orgId: "default", userId: "dev-user", email: "dev-user@janusly.local", role: "admin" }).onConflictDoNothing();',
     'return import("./src/index.ts");',
     "});",
   ].join("");

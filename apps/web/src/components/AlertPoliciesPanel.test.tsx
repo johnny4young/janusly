@@ -10,6 +10,8 @@ vi.mock('../api', () => ({
   api: vi.fn(),
 }))
 
+const slackInteractionId = 'f36c0018-ae36-4d96-96c2-c7ed81669e9e'
+
 beforeEach(() => {
   vi.mocked(api).mockReset()
   useWorkflowStore.setState({ orgId: 'default', platformVersion: 0 })
@@ -122,6 +124,56 @@ describe('<AlertPoliciesPanel />', () => {
     fireEvent.change(cooldown, { target: { value: '600' } })
     expect(screen.queryByText(/between 60 and 86400/i)).not.toBeInTheDocument()
     expect(save).toBeEnabled()
+  })
+
+  it('offers an enabled interaction connection for recovery Slack alerts', async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === '/alerts/policies') return { policies: [] }
+      if (path === '/credentials') return [{ id: 'c1', name: 'Ops Slack', kind: 'slack_webhook' }]
+      if (path === '/integrations/slack/interactions') {
+        return { connections: [{ id: slackInteractionId, name: 'Recovery operations', enabled: true }] }
+      }
+      return null
+    })
+
+    render(<AlertPoliciesPanel />)
+    fireEvent.click(await screen.findByRole('button', { name: /New policy/i }))
+    fireEvent.change(screen.getByLabelText('Trigger'), { target: { value: 'recovery_item.created' } })
+
+    const interaction = screen.getByLabelText('Interactive Slack connection')
+    expect(within(interaction).getByRole('option', { name: 'Recovery operations' })).toBeInTheDocument()
+    fireEvent.change(interaction, { target: { value: slackInteractionId } })
+    expect(interaction).toHaveValue(slackInteractionId)
+  })
+
+  it('preserves a disabled interaction selection while preventing new selection', async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === '/alerts/policies') {
+        return { policies: [{
+          id: 'p-disabled',
+          name: 'Recovery alert',
+          trigger: 'recovery_item.created',
+          parameters: {},
+          channels: [{
+            destination: 'slack',
+            credentialName: 'Ops Slack',
+            params: { interactionConnectionId: slackInteractionId },
+          }],
+          cooldownSeconds: 600,
+          enabled: true,
+        }] }
+      }
+      if (path === '/credentials') return [{ id: 'c1', name: 'Ops Slack', kind: 'slack_webhook' }]
+      if (path === '/integrations/slack/interactions') {
+        return { connections: [{ id: slackInteractionId, name: 'Recovery operations', enabled: false }] }
+      }
+      return null
+    })
+    render(<AlertPoliciesPanel />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    const interaction = screen.getByLabelText('Interactive Slack connection')
+    expect(interaction).toHaveValue(slackInteractionId)
+    expect(within(interaction).getByRole('option', { name: 'Recovery operations (disabled)' })).toBeDisabled()
   })
 })
 

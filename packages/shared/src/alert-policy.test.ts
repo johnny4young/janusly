@@ -174,6 +174,15 @@ describe('ALERT_PARAMS_SCHEMAS', () => {
 })
 
 describe('ALERT_CHANNEL_PARAMS_SCHEMAS', () => {
+  it('slack params accept only a UUID interaction connection id', () => {
+    expect(ALERT_CHANNEL_PARAMS_SCHEMAS.slack.safeParse({
+      interactionConnectionId: 'f36c0018-ae36-4d96-96c2-c7ed81669e9e',
+    }).success).toBe(true)
+    expect(ALERT_CHANNEL_PARAMS_SCHEMAS.slack.safeParse({
+      interactionConnectionId: 'connection-1',
+    }).success).toBe(false)
+  })
+
   it('webhook params require url', () => {
     const parsed = ALERT_CHANNEL_PARAMS_SCHEMAS.webhook.safeParse({})
     expect(parsed.success).toBe(false)

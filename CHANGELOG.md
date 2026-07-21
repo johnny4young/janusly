@@ -37,6 +37,11 @@ retroactively.
 
 ### Added
 
+- Signed Slack recovery actions that let explicitly mapped operators
+  acknowledge, assign, or open recovery work from Block Kit alerts. Exact-body
+  HMAC verification, team binding, normal recovery authorization, atomic
+  replay protection, audit parity, text-only fallback, and responsive
+  English/Spanish administration are included.
 - Paced replay campaigns for 2–100 matching Recovery Queue failures, with a
   server-derived cohort preview, durable per-item progress, 1–60 second
   pacing, cancellation, Redis publication repair, audit evidence, and

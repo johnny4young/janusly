@@ -26,10 +26,12 @@ import {
   type AlertChannelResult,
   type AlertOutcome,
   type AlertParamsByTrigger,
+  type AlertTrigger,
 } from "@janusly/shared";
 import {
   recordSystemAudit,
   getEnabledPoliciesByTrigger,
+  getSlackInteractionConnection,
   type AlertPolicy,
   getLastDispatchAt,
   recordDispatch,
@@ -43,6 +45,7 @@ import {
   callWebhookSend,
 } from "../integration-dispatch";
 import { buildDedupeKey } from "./dedupe-key";
+import { buildSlackRecoveryBlocks } from "./slack-actions";
 
 const AUDIT_METADATA_MAX_BYTES = 64_000;
 const RECOVERY_CENTER_URL = (() => {
@@ -198,6 +201,34 @@ type ChannelDispatchInput = {
   structured: Record<string, unknown>;
 };
 
+async function buildOptionalSlackBlocks(input: ChannelDispatchInput) {
+  const interactionConnectionId = (input.channel.params as
+    | { interactionConnectionId?: string }
+    | undefined)?.interactionConnectionId;
+  if (!interactionConnectionId) return undefined;
+  try {
+    const connection = await getSlackInteractionConnection(input.orgId, interactionConnectionId);
+    if (!connection?.enabled) return undefined;
+    return buildSlackRecoveryBlocks({
+      trigger: input.structured.trigger as AlertTrigger,
+      markdown: input.markdown,
+      payload: (input.structured.payload as Record<string, unknown> | undefined) ?? {},
+      deepLinkUrl: typeof input.structured.deepLinkUrl === "string"
+        ? input.structured.deepLinkUrl
+        : null,
+    }) ?? undefined;
+  } catch (error) {
+    // Keep alert delivery available when optional interaction configuration
+    // cannot be read. The plain-text fallback remains useful and safe.
+    console.warn("[alerts] Slack interaction lookup failed; sending text only", {
+      error,
+      orgId: input.orgId,
+      interactionConnectionId,
+    });
+    return undefined;
+  }
+}
+
 async function dispatchOneChannel(input: ChannelDispatchInput): Promise<AlertChannelResult> {
   const started = Date.now();
   const base = { destination: input.channel.destination, credentialName: input.channel.credentialName };
@@ -206,11 +237,14 @@ async function dispatchOneChannel(input: ChannelDispatchInput): Promise<AlertCha
     let result: Record<string, unknown> | undefined;
     switch (input.channel.destination) {
       case "slack":
-        result = await callSlackPost(
-          { orgId: input.orgId },
-          { credential: input.channel.credentialName, text: input.markdown },
-        );
-        break;
+        {
+          const blocks = await buildOptionalSlackBlocks(input);
+          result = await callSlackPost(
+            { orgId: input.orgId },
+            { credential: input.channel.credentialName, text: input.markdown, blocks },
+          );
+          break;
+        }
       case "webhook": {
         const url = (input.channel.params as { url?: string } | undefined)?.url;
         if (!url) {

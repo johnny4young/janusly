@@ -293,6 +293,11 @@ export type ApiErrorCode =
   // server
   | "server_internal_error"
   | "server_not_found"
+  | "slack_interaction_conflict"
+  | "slack_interaction_invalid_request"
+  | "slack_interaction_invalid_signature"
+  | "slack_interaction_not_found"
+  | "slack_interaction_unauthorized"
   | "server_request_failed"
   // snippets
   | "snippet_id_required"

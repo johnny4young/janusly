@@ -58,6 +58,9 @@ export type AuditAction =
   | "alert.policy.created"
   | "alert.policy.updated"
   | "alert.policy.deleted"
+  | "slack.interaction.created"
+  | "slack.interaction.updated"
+  | "slack.interaction.deleted"
   // auto-healing
   | "auto_healing.scan.triggered"
   | "auto_healing.decline.manual"
