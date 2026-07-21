@@ -113,6 +113,13 @@ import {
   registerSubworkflowTerminalReconciler,
   SUBWORKFLOW_TERMINAL_RECONCILER_JOB_NAME,
 } from "./subworkflow-terminal-reconciler";
+import {
+  handleReplayCampaignReconcilerTrigger,
+  handleReplayCampaignStep,
+  registerReplayCampaignReconciler,
+  REPLAY_CAMPAIGN_RECONCILER_JOB_NAME,
+  REPLAY_CAMPAIGN_STEP_JOB_NAME,
+} from "./replay-campaign";
 import { parseWorkflowCached } from "./workflow-parse-cache";
 import { loadRunWorkflowRaw } from "./persistence";
 import { withSpan } from "./observability/tracer";
@@ -269,6 +276,16 @@ try {
   if (registered) console.log("[subworkflow-terminal-reconciler] sweep scheduler registered");
 } catch (err) {
   console.error("[subworkflow-terminal-reconciler] scheduler registration failed", err);
+}
+
+// Durable paced-replay repair. Each campaign step drains at most one item;
+// this scheduler only republishes Postgres due clocks lost across Redis or
+// process failure, while database leases prevent duplicate drains.
+try {
+  const registered = await registerReplayCampaignReconciler();
+  if (registered) console.log("[replay-campaign] reconciler registered");
+} catch (err) {
+  console.error("[replay-campaign] scheduler registration failed", err);
 }
 
 // Register the usage_events writer once at boot. Every LLM call
@@ -513,6 +530,14 @@ export const worker = new Worker(
     }
     if (job.name === SUBWORKFLOW_TERMINAL_RECONCILER_JOB_NAME) {
       await handleSubworkflowTerminalReconcilerTrigger();
+      return;
+    }
+    if (job.name === REPLAY_CAMPAIGN_RECONCILER_JOB_NAME) {
+      await handleReplayCampaignReconcilerTrigger();
+      return;
+    }
+    if (job.name === REPLAY_CAMPAIGN_STEP_JOB_NAME) {
+      await handleReplayCampaignStep(job.data);
       return;
     }
     // One-shot delayed job — scheduled on demand from the

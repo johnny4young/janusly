@@ -300,6 +300,148 @@
   }
 }
 
+/* Paced recovery campaigns — durable progress stays compact above the queue. */
+.we-replay-campaigns__list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.we-replay-campaign {
+  background: var(--we-surface-2);
+  border: 1px solid var(--we-line);
+  border-radius: 10px;
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+}
+
+.we-replay-campaign__identity {
+  align-items: center;
+  display: flex;
+  gap: 9px;
+  min-width: 0;
+}
+
+.we-replay-campaign__identity > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.we-replay-campaign__identity strong,
+.we-replay-campaign__identity small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.we-replay-campaign__identity small {
+  color: var(--we-muted);
+  font-size: 11px;
+}
+
+.we-replay-campaign__icon {
+  align-items: center;
+  background: var(--we-info-soft);
+  border-radius: 8px;
+  color: var(--we-info);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+
+.we-replay-campaign__icon[data-status="completed"] {
+  background: var(--we-success-soft);
+  color: var(--we-success-text);
+}
+
+.we-replay-campaign__icon[data-status="cancelled"] {
+  background: var(--we-surface-muted);
+  color: var(--we-muted);
+}
+
+.we-replay-campaign__progress {
+  background: var(--we-line);
+  border-radius: var(--we-radius-pill);
+  height: 6px;
+  overflow: hidden;
+}
+
+.we-replay-campaign__progress > span {
+  background: linear-gradient(90deg, var(--we-primary), var(--we-accent));
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+  transition: width 180ms ease;
+}
+
+.we-replay-campaign__meta {
+  color: var(--we-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 11px;
+  gap: 6px 14px;
+}
+
+.we-replay-campaign__actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.we-replay-campaign__actions .helper-text { margin: 0 auto 0 0; }
+
+.we-replay-campaign-dialog { max-width: 600px; }
+
+.we-campaign-preview {
+  background: var(--we-surface-2);
+  border: 1px solid var(--we-line);
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.we-campaign-preview__rejections {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.we-campaign-preview__rejections li {
+  align-items: center;
+  color: var(--we-warning-text);
+  display: flex;
+  font-size: 11px;
+  gap: 8px;
+}
+
+.we-campaign-preview__rejections code {
+  background: var(--we-warning-soft);
+  border-radius: 4px;
+  padding: 2px 5px;
+}
+
+.we-campaign-pace-helper {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  margin: -8px 0 0;
+}
+
+@media (max-width: 640px) {
+  .we-replay-campaign__meta { display: grid; gap: 3px; }
+  .we-replay-campaign__actions { justify-content: stretch; }
+  .we-replay-campaign__actions > button { flex: 1 1 auto; }
+}
+
 @media (max-width: 480px) {
   .mini-grid {
     grid-template-columns: 1fr;

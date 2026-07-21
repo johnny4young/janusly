@@ -37,6 +37,10 @@ retroactively.
 
 ### Added
 
+- Paced replay campaigns for 2–100 matching Recovery Queue failures, with a
+  server-derived cohort preview, durable per-item progress, 1–60 second
+  pacing, cancellation, Redis publication repair, audit evidence, and
+  responsive English/Spanish controls.
 - A unified Runs workspace with accessible Overview, Timeline, and Agents
   views, preserving direct expert access to the full reasoning and multi-agent
   surfaces through the command palette.

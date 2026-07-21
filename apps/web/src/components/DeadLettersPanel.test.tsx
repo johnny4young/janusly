@@ -754,6 +754,37 @@ describe('<DeadLettersPanel /> — bulk replay', () => {
     await waitFor(() => expect(screen.queryByTestId('dlq-bulk-bar')).not.toBeInTheDocument())
   })
 
+  it('opens a paced campaign preview only after at least two rows are selected', async () => {
+    const rows = [mockDeadLetter('a'), mockDeadLetter('b')]
+    vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/recovery/campaigns/preview') {
+        expect(JSON.parse(String(options?.body))).toEqual({ deadLetterIds: ['a', 'b'] })
+        return {
+          canCreate: true,
+          clusterSignature: 'sig-1',
+          eligible: [
+            { deadLetterId: 'a', runId: 'run-a', nodeId: 'node-a' },
+            { deadLetterId: 'b', runId: 'run-b', nodeId: 'node-b' },
+          ],
+          rejected: [],
+        }
+      }
+      return dlqMock(rows)(path, options)
+    })
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await screen.findByTestId('dlq-row-a')
+
+    fireEvent.click(screen.getByTestId('dlq-select-toggle'))
+    fireEvent.click(screen.getByTestId('dlq-select-row-a'))
+    expect(screen.getByTestId('dlq-create-replay-campaign')).toBeDisabled()
+    fireEvent.click(screen.getByTestId('dlq-select-row-b'))
+    expect(screen.getByTestId('dlq-create-replay-campaign')).toBeEnabled()
+    fireEvent.click(screen.getByTestId('dlq-create-replay-campaign'))
+
+    expect(await screen.findByTestId('replay-campaign-dialog')).toBeInTheDocument()
+    expect(await screen.findByText('2 of 2 eligible')).toBeInTheDocument()
+  })
+
   it('keeps failed rows selected and warns on a partial-success bulk replay', async () => {
     const rows = [mockDeadLetter('a'), mockDeadLetter('b')]
     vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {

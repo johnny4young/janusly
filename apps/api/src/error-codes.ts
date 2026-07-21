@@ -218,6 +218,11 @@ export type ApiErrorCode =
   | "recovery_playbook_not_found"
   | "recovery_playbook_outcome_invalid"
   | "recovery_playbook_source_invalid"
+  | "replay_campaign_invalid_body"
+  | "replay_campaign_invalid_cohort"
+  | "replay_campaign_invalid_path"
+  | "replay_campaign_not_found"
+  | "replay_campaign_not_running"
   | "recovery_playbook_source_mismatch"
   | "recovery_playbook_validation_required"
   // reports

@@ -24,7 +24,8 @@
  * - `workflows`, `workflow_versions` — versioned DAG storage.
  * - `runs`, `run_nodes`, `run_events` — execution history (timeline events
  *   are paginated by `(run_id, created_at)`).
- * - `dead_letters` — DLQ rows; replayed via `POST /dlq/replay`.
+ * - `dead_letters`, `replay_campaigns`, `replay_campaign_items` — durable
+ *   failure anchors and paced bulk-recovery coordination.
  * - `recovery_impact_events`, `recovery_impact_rollups` — terminally verified
  *   recovery value and its constant-time tenant lifetime projection.
  * - `routing_stats`, `workflow_improvements` — RL counters and
@@ -341,6 +342,84 @@ export const deadLetters = pgTable(
       table.runId,
       table.nodeId,
       table.createdAt,
+    ),
+  ],
+);
+
+/**
+ * A named, bounded replay campaign over an immutable DLQ cohort snapshot.
+ *
+ * Campaigns deliberately keep counters on the parent row so progress reads
+ * remain O(1); item transitions update the row in the same transaction. The
+ * `nextDispatchAt` clock is a Postgres-owned repair boundary: a BullMQ publish
+ * failure leaves the campaign discoverable by the scheduler instead of
+ * stranding it in Redis. No foreign keys are intentional — campaign evidence
+ * remains inspectable after ordinary DLQ/run retention.
+ */
+export const replayCampaigns = pgTable(
+  "replay_campaigns",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    name: text("name").notNull(),
+    clusterSignature: text("cluster_signature").notNull(),
+    filterJson: jsonb("filter_json").notNull().default({}),
+    pacingMs: integer("pacing_ms").notNull().default(1000),
+    status: text("status").notNull().default("running"),
+    totalCount: integer("total_count").notNull(),
+    replayedCount: integer("replayed_count").notNull().default(0),
+    failedCount: integer("failed_count").notNull().default(0),
+    cancelledCount: integer("cancelled_count").notNull().default(0),
+    createdBy: text("created_by").notNull(),
+    cancelledBy: text("cancelled_by"),
+    nextDispatchAt: timestamp("next_dispatch_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("replay_campaigns_org_created_idx").on(table.orgId, table.createdAt.desc()),
+    index("replay_campaigns_due_idx")
+      .on(table.nextDispatchAt, table.id)
+      .where(sql`"status" = 'running'`),
+  ],
+);
+
+/**
+ * Per-DLQ outcome ledger for one replay campaign.
+ *
+ * The claim token + timestamp form a recoverable lease. A worker crash can
+ * reclaim a stale `processing` item, while the DLQ replay generation claim
+ * prevents duplicate external execution. Campaign cancellation marks every
+ * still-pending row cancelled; an already-processing row may finish and is
+ * reported truthfully in the final counters.
+ */
+export const replayCampaignItems = pgTable(
+  "replay_campaign_items",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    campaignId: text("campaign_id").notNull(),
+    deadLetterId: text("dead_letter_id").notNull(),
+    position: integer("position").notNull(),
+    status: text("status").notNull().default("pending"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    claimToken: text("claim_token"),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    error: text("error"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("replay_campaign_items_campaign_dlq_idx").on(table.campaignId, table.deadLetterId),
+    uniqueIndex("replay_campaign_items_campaign_position_idx").on(table.campaignId, table.position),
+    index("replay_campaign_items_org_campaign_status_idx").on(
+      table.orgId,
+      table.campaignId,
+      table.status,
+      table.position,
     ),
   ],
 );

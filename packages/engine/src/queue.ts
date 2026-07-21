@@ -33,7 +33,7 @@ import { Queue } from "bullmq";
 import IORedis from "ioredis";
 import { loadRootEnv } from "@janusly/db";
 import type { EnqueueNodeInput } from "./core/types";
-import { buildExecuteNodeJobId } from "./queue-job-id";
+import { buildExecuteNodeJobId, buildReplayCampaignJobId } from "./queue-job-id";
 
 loadRootEnv();
 
@@ -131,6 +131,29 @@ export async function enqueueApprovalTimeout(
       attempts: 20,
       backoff: { type: "exponential", delay: 1_000 },
       delay: Math.max(0, delayMs),
+      removeOnComplete: 1000,
+      removeOnFail: REMOVE_ON_FAIL,
+    },
+  );
+}
+
+/**
+ * Publish one paced replay-campaign step. The due timestamp is part of the
+ * BullMQ id so API publication and the Postgres reconciler converge on the
+ * same delivery; the database dispatch lease still prevents parallel drains.
+ */
+export async function enqueueReplayCampaignStep(
+  campaignId: string,
+  dueAt: Date,
+): Promise<void> {
+  await workflowQueue.add(
+    "replay-campaign-step",
+    { campaignId },
+    {
+      attempts: 20,
+      backoff: { type: "exponential", delay: 1_000 },
+      delay: Math.max(0, dueAt.getTime() - Date.now()),
+      jobId: buildReplayCampaignJobId(campaignId, dueAt),
       removeOnComplete: 1000,
       removeOnFail: REMOVE_ON_FAIL,
     },

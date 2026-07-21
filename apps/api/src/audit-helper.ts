@@ -73,6 +73,8 @@ export type AuditAction =
   | "dlq.replayed"
   | "recovery.validation_started"
   | "recovery.cluster_apply"
+  | "recovery.campaign.created"
+  | "recovery.campaign.cancelled"
   | "recovery.playbook.created"
   | "recovery.playbook.activated"
   | "recovery.playbook.retired"

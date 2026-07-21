@@ -7,7 +7,7 @@
  */
 
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { CircleCheck, Copy, Download, FlaskConical, GitCompare, Inbox, RefreshCw, Sparkles, X } from 'lucide-react'
+import { CircleCheck, Copy, Download, FlaskConical, GitCompare, Inbox, RefreshCw, Sparkles, TimerReset, X } from 'lucide-react'
 
 import { downtimeSeverity, humanizeAge } from './recovery-center/helpers'
 import { api, downloadFromApi } from '../api'
@@ -24,6 +24,8 @@ const RecoveryDialog = lazy(() => import('./RecoveryDialog').then((m) => ({ defa
 import { ReplayLabDialog } from './ReplayLabDialog'
 import { RecoveryItemBadge } from './RecoveryItemBadge'
 import { RecoveryItemDrawer } from './RecoveryItemDrawer'
+import { ReplayCampaignDialog } from './ReplayCampaignDialog'
+import { ReplayCampaignsCard } from './ReplayCampaignsCard'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { useVirtualList } from '../hooks/useVirtualList'
 import { isKeyboardShortcutTypingTarget } from '../keyboard-shortcut-target'
@@ -245,6 +247,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   // envelope. The count toast says HOW MANY failed; this surfaces WHY (and which
   // rows), so the operator can tell a transient blip from "already replayed".
   const [bulkErrors, setBulkErrors] = useState<Array<{ deadLetterId: string; error: string }>>([])
+  const [campaignDeadLetterIds, setCampaignDeadLetterIds] = useState<string[] | null>(null)
 
   const handleRefresh = () => {
     refreshQueue()
@@ -354,6 +357,23 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     } catch (error) {
       addToast(tApiError(error) || (t('dlq.bulkReplayFailed')), 'error')
     }
+  }
+
+  const campaignCreated = (result: {
+    campaign: { id: string; name: string; totalCount: number; pacingMs: number }
+    publicationDeferred?: boolean
+  }) => {
+    setCampaignDeadLetterIds(null)
+    addToast(
+      result.publicationDeferred
+        ? t('replayCampaign.createdDeferred', { name: result.campaign.name })
+        : t('replayCampaign.created', { name: result.campaign.name, count: result.campaign.totalCount }),
+      'success',
+    )
+    bumpPlatformVersion()
+    refreshQueue()
+    void onRefresh()
+    exitSelection()
   }
 
   // Org-wide open count drives the warning stripe — there are opens to work
@@ -669,6 +689,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   return (
     <>
       <FailureClustersCard />
+      <ReplayCampaignsCard />
       <AutoHealingPendingCard />
       <section
         ref={queueSectionRef}
@@ -838,6 +859,16 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
                   {t('dlq.bulkReplayCta')}
                 </button>
               )}
+              <button
+                type="button"
+                className="small-command"
+                disabled={selectedIds.size < 2}
+                title={selectedIds.size < 2 ? t('replayCampaign.minimumSelection') : undefined}
+                onClick={() => setCampaignDeadLetterIds([...selectedIds])}
+                data-testid="dlq-create-replay-campaign"
+              >
+                <TimerReset size={12} aria-hidden="true" /> {t('replayCampaign.createCta')}
+              </button>
               <button
                 type="button"
                 className="small-command"
@@ -1175,6 +1206,13 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
         <ReplayLabDialog
           sourceRun={{ id: labSourceRunId, status: 'failed' }}
           onClose={() => setLabSourceRunId(null)}
+        />
+      )}
+      {campaignDeadLetterIds && (
+        <ReplayCampaignDialog
+          deadLetterIds={campaignDeadLetterIds}
+          onClose={() => setCampaignDeadLetterIds(null)}
+          onCreated={campaignCreated}
         />
       )}
     </>
