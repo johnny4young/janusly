@@ -63,4 +63,24 @@ describe('<HumanFormDialog />', () => {
     expect(screen.getByRole('heading', { name: 'Complete form' })).toBeInTheDocument()
     expect(screen.getByText(/Submit the requested fields/i)).toBeInTheDocument()
   })
+
+  it('prefills a schema-valid AI draft and submits operator edits', () => {
+    const onSubmit = vi.fn()
+    render(
+      <HumanFormDialog
+        title="Review reply"
+        schema={schema}
+        initialValues={{ requester: 'AI draft', days: 2 }}
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByLabelText(/requester/i)).toHaveValue('AI draft')
+    expect(screen.getByLabelText(/days/i)).toHaveValue(2)
+    fireEvent.change(screen.getByLabelText(/requester/i), { target: { value: 'Operator edit' } })
+    fireEvent.click(screen.getByRole('button', { name: /Submit form/i }))
+
+    expect(onSubmit).toHaveBeenCalledWith({ requester: 'Operator edit', days: 2 })
+  })
 })

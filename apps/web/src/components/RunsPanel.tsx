@@ -41,6 +41,7 @@ type HumanFormWaiting = {
   title?: string
   description?: string
   schema: WorkflowInputSchemaShape
+  initialValues?: unknown
   resumeToken: string
 }
 
@@ -55,6 +56,7 @@ function readHumanFormWaiting(node: RunNode): HumanFormWaiting | null {
     title: typeof data.title === 'string' ? data.title : undefined,
     description: typeof data.description === 'string' ? data.description : undefined,
     schema: data.schema,
+    initialValues: data.initialValues,
     resumeToken: data.resumeToken,
   }
 }
@@ -456,9 +458,11 @@ export function RunsPanel({
 
       {activeHumanFormNode && activeHumanForm && (
         <HumanFormDialog
+          key={activeHumanFormNode.nodeId}
           title={activeHumanForm.title}
           description={activeHumanForm.description}
           schema={activeHumanForm.schema}
+          initialValues={activeHumanForm.initialValues}
           serverErrors={humanFormErrors}
           submitting={humanFormSubmitting}
           onCancel={() => {

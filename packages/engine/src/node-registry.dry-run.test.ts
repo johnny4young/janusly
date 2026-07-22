@@ -6,6 +6,16 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+const llmGenerateTextMock = vi.hoisted(() => vi.fn())
+
+vi.mock('@janusly/ai', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@janusly/ai')>()
+  return {
+    ...actual,
+    createLlmClient: vi.fn(() => ({ generateText: llmGenerateTextMock })),
+  }
+})
+
 vi.mock('./http-policy', () => ({
   consumeStreamToPreview: vi.fn(),
   fetchHttpTarget: vi.fn(),
@@ -90,6 +100,7 @@ beforeEach(() => {
   recallAgentEpisodesMock.mockClear()
   recordAgentEpisodeMock.mockClear()
   planAgentToolWithLLMMock.mockReset()
+  llmGenerateTextMock.mockReset()
   applyOrgConfigToEnvMock.mockReturnValue({ JANUSLY_LLM_PROVIDER: 'openai', OPENAI_API_KEY: 'test-key' })
   setMailerForTests(null)
 })
@@ -446,12 +457,111 @@ describe('human_form node — waiting metadata', () => {
     expect(payload.expiresAt! - payload.issuedAt).toBe(900)
   })
 
+  it('persists schema-valid initial values for the operator form', async () => {
+    const result = await nodeRegistry.human_form({
+      ...baseCtx,
+      nodeId: 'collect',
+      config: {
+        schema: {
+          type: 'object',
+          properties: { summary: { type: 'string' }, approved: { type: 'boolean' } },
+          required: ['summary'],
+        },
+        initialValues: { summary: 'AI draft', approved: false },
+      },
+    })
+
+    expect(result).toMatchObject({
+      status: 'waiting',
+      metadata: { initialValues: { summary: 'AI draft', approved: false } },
+    })
+  })
+
+  it('rejects initial values that do not satisfy the form contract', async () => {
+    await expect(nodeRegistry.human_form({
+      ...baseCtx,
+      nodeId: 'collect',
+      config: {
+        schema: {
+          type: 'object',
+          properties: { summary: { type: 'string' } },
+          required: ['summary'],
+        },
+        initialValues: { summary: 42 },
+      },
+    })).rejects.toThrow(/human_form\.initialValues invalid/)
+  })
+
   it('rejects invalid schemas instead of parking an unusable form', async () => {
     await expect(nodeRegistry.human_form({
       ...baseCtx,
       nodeId: 'collect',
       config: { schema: { type: 'object', properties: { bad: { type: 'date' } } } },
     })).rejects.toThrow()
+  })
+})
+
+describe('ai node — structured output contract', () => {
+  const outputSchema = {
+    type: 'object',
+    properties: {
+      severity: { type: 'string', enum: ['low', 'high'] },
+      rationale: { type: 'string' },
+    },
+    required: ['severity', 'rationale'],
+  }
+
+  it('returns parsed data only when model JSON satisfies the declared contract', async () => {
+    llmGenerateTextMock.mockResolvedValueOnce({
+      text: '{"severity":"high","rationale":"database unavailable"}',
+      model: 'test-model',
+      provider: 'anthropic',
+      usage: { inputTokens: 4, outputTokens: 6, totalTokens: 10 },
+      latencyMs: 12,
+    })
+
+    const result = await nodeRegistry.ai({
+      ...baseCtx,
+      nodeId: 'classify',
+      config: { prompt: 'Classify incident', outputSchema },
+    })
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      output: {
+        mode: 'ai',
+        valid: true,
+        data: { severity: 'high', rationale: 'database unavailable' },
+      },
+    })
+    expect(llmGenerateTextMock).toHaveBeenCalledWith(expect.objectContaining({ responseFormat: 'json' }))
+  })
+
+  it('degrades invalid model output to the stable fallback envelope', async () => {
+    llmGenerateTextMock.mockResolvedValueOnce({
+      text: '{"severity":"critical"}',
+      model: 'test-model',
+      provider: 'anthropic',
+      usage: { inputTokens: 4, outputTokens: 3, totalTokens: 7 },
+      latencyMs: 10,
+    })
+
+    const result = await nodeRegistry.ai({
+      ...baseCtx,
+      nodeId: 'classify',
+      config: { prompt: 'Classify incident', outputSchema },
+    })
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      output: { mode: 'fallback', valid: false, aiError: 'output_invalid' },
+    })
+    expect(appendEventMock).toHaveBeenCalledWith(
+      'run-1',
+      'classify',
+      'ai.output_invalid',
+      expect.objectContaining({ provider: 'anthropic', model: 'test-model' }),
+    )
   })
 })
 

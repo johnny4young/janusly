@@ -2970,6 +2970,7 @@
   "readiness.workflow_missing_evals": "Workflow has no evaluation coverage",
   "readiness.http_missing_bounds": "HTTP step is missing timeout / max-bytes bounds",
   "readiness.external_node_missing_retry": "External step is missing a retry policy",
+  "readiness.tool_result_policy_missing": "Write-side tool can hide a failed provider result",
   "readiness.raw_secret_in_config": "Raw secret detected in step config",
   "readiness.sensitive_action_missing_approval": "Write-side step has no approval upstream",
   "readiness.fork_without_join_pair": "Parallel fork has no matching join downstream",

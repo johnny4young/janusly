@@ -2970,6 +2970,7 @@
   "readiness.workflow_missing_evals": "El flujo no tiene cobertura de evaluación",
   "readiness.http_missing_bounds": "El paso HTTP no tiene timeout / max-bytes",
   "readiness.external_node_missing_retry": "El paso externo no tiene política de reintento",
+  "readiness.tool_result_policy_missing": "La herramienta de escritura puede ocultar un resultado fallido del proveedor",
   "readiness.raw_secret_in_config": "Se detectó un secreto crudo en la configuración del paso",
   "readiness.sensitive_action_missing_approval": "El paso de escritura no tiene aprobación previa",
   "readiness.fork_without_join_pair": "El fork paralelo no tiene un join correspondiente",

@@ -70,6 +70,12 @@ export const ToolNodeConfigSchema = z
   .object({
     tool: z.string().min(1, "tool.tool is required"),
     input: z.unknown().optional(),
+    /**
+     * Legacy/default tools expose their typed result envelope to downstream
+     * conditions. `require_ok` turns a valid `{ ok: false }` envelope into a
+     * node failure so retries/DLQ/recovery can observe the failed effect.
+     */
+    resultPolicy: z.enum(["envelope", "require_ok"]).optional(),
   })
   .passthrough();
 
@@ -180,6 +186,9 @@ export const AiNodeConfigSchema = z
       .optional(),
     variables: z.record(z.string(), z.unknown()).optional(),
     model: z.string().optional(),
+    responseFormat: z.enum(["text", "json"]).optional(),
+    /** Optional JSON contract for model-written output. */
+    outputSchema: z.unknown().optional(),
   })
   .passthrough();
 
@@ -214,6 +223,8 @@ export const HumanFormNodeConfigSchema = z
     // `WorkflowInputSchema`, which throws on undefined / bad shape — so
     // the real gate lives downstream. Kept loose here.
     schema: z.unknown().optional(),
+    /** Template-resolved values shown when the form first opens. */
+    initialValues: z.unknown().optional(),
   })
   .passthrough();
 

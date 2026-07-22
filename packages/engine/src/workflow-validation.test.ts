@@ -173,6 +173,36 @@ describe('validateWorkflow', () => {
     expect(valid).toEqual({ valid: true, issues: [] })
   })
 
+  it('validates structured AI output schemas and human-form initial values before execution', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'classify', type: 'ai', config: { prompt: 'Classify', outputSchema: { type: 'date' } } },
+        {
+          id: 'review',
+          type: 'human_form',
+          config: {
+            schema: {
+              type: 'object',
+              properties: { summary: { type: 'string' } },
+              required: ['summary'],
+            },
+            initialValues: { summary: 42 },
+          },
+        },
+      ],
+      edges: [],
+    })
+
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'ai_invalid_output_schema',
+      nodeId: 'classify',
+    }))
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'human_form_invalid_initial_values',
+      nodeId: 'review',
+    }))
+  })
+
   it('rejects malformed parallel_fork and join config before runtime execution', () => {
     const result = validateWorkflow({
       nodes: [

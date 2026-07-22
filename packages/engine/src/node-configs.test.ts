@@ -77,8 +77,16 @@ describe("ToolNodeConfigSchema", () => {
     expect(() => ToolNodeConfigSchema.parse({ input: {} })).toThrow();
   });
   it("accepts canonical shape", () => {
-    const parsed = ToolNodeConfigSchema.parse({ tool: "http.request", input: { url: "https://example.com" } });
+    const parsed = ToolNodeConfigSchema.parse({
+      tool: "http.request",
+      input: { url: "https://example.com" },
+      resultPolicy: "require_ok",
+    });
     expect(parsed.tool).toBe("http.request");
+    expect(parsed.resultPolicy).toBe("require_ok");
+  });
+  it("rejects unknown result policies", () => {
+    expect(() => ToolNodeConfigSchema.parse({ tool: "http.request", resultPolicy: "throw" })).toThrow();
   });
 });
 
@@ -221,8 +229,10 @@ describe("HumanFormNodeConfigSchema", () => {
     const parsed = HumanFormNodeConfigSchema.parse({
       title: "Approve",
       schema: { type: "object", properties: { ok: { type: "boolean" } } },
+      initialValues: { ok: true },
     });
     expect(parsed.title).toBe("Approve");
+    expect(parsed.initialValues).toEqual({ ok: true });
   });
   it("accepts a missing schema (downstream parse is the real gate)", () => {
     expect(() => HumanFormNodeConfigSchema.parse({ title: "Approve" })).not.toThrow();

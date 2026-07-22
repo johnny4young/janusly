@@ -41,7 +41,7 @@ import { acquireJanuslyComposeLock, composeUpPullArgs } from "./process-lock.mjs
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
 const DEFAULT_API_PORT = 3001;
-const webBaseUrl = "http://127.0.0.1:5173";
+const DEFAULT_WEB_PORT = 5173;
 const children = new Set();
 let shutdownPromise = null;
 let composeStarted = false;
@@ -202,11 +202,11 @@ async function allocateUniqueEphemeralPort(excludedPorts) {
   throw new Error("failed to allocate a collision-free service port");
 }
 
-async function resolveApiPort(preferredPort) {
+async function resolveServicePort(preferredPort, label) {
   if (await isPortAvailable(preferredPort)) return preferredPort;
 
   const fallbackPort = await allocateEphemeralPort();
-  console.error(`[e2e] API port ${preferredPort} is busy; using ${fallbackPort} for this run`);
+  console.error(`[e2e] ${label} port ${preferredPort} is busy; using ${fallbackPort} for this run`);
   return fallbackPort;
 }
 
@@ -394,9 +394,11 @@ try {
     return release;
   });
   await lockAcquisitionPromise;
-  const apiPort = await resolveApiPort(DEFAULT_API_PORT);
+  const apiPort = await resolveServicePort(DEFAULT_API_PORT, "API");
   const apiUrl = `http://127.0.0.1:${apiPort}`;
-  const allocatedServicePorts = new Set([apiPort, Number(new URL(webBaseUrl).port)]);
+  const webPort = await resolveServicePort(DEFAULT_WEB_PORT, "web");
+  const webBaseUrl = `http://127.0.0.1:${webPort}`;
+  const allocatedServicePorts = new Set([apiPort, webPort]);
   const apiMetricsPort = await allocateUniqueEphemeralPort(allocatedServicePorts);
   const workerMetricsPort = await allocateUniqueEphemeralPort(allocatedServicePorts);
   const apiMetricsUrl = `http://127.0.0.1:${apiMetricsPort}/metrics`;
@@ -434,6 +436,7 @@ try {
     'import("@janusly/db").then(async ({ db, orgMembers }) => {',
     'process.env.JANUSLY_MEMORY_ENABLED = "true";',
     'process.env.JANUSLY_E2E_SLACK_SIGNING_SECRET = "janusly-e2e-slack-signing-secret";',
+    `process.env.API_ALLOWED_ORIGINS = "${webBaseUrl}";`,
     `process.env.OTEL_METRICS_PORT = "${apiMetricsPort}";`,
     'await db.insert(orgMembers).values({ id: "e2e-dev-user", orgId: "default", userId: "dev-user", email: "dev-user@janusly.local", role: "admin" }).onConflictDoNothing();',
     'return import("./src/index.ts");',

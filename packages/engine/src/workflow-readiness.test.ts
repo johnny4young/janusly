@@ -34,7 +34,7 @@ describe('checkWorkflowReadiness', () => {
     expect(result.issues.find((issue) => issue.code === 'http_missing_bounds')).toBeUndefined()
   })
 
-  it('flags external-call nodes with no retry policy as fail', () => {
+  it('flags retry-safe external calls with no retry policy as fail', () => {
     const workflow = makeWorkflow({
       nodes: [
         { id: 'fetch', type: 'http', config: { url: 'https://api.example.com', method: 'GET' } },
@@ -44,8 +44,26 @@ describe('checkWorkflowReadiness', () => {
     })
     const result = checkWorkflowReadiness(workflow)
     const failures = result.issues.filter((issue) => issue.code === 'external_node_missing_retry')
-    expect(failures.map((issue) => issue.nodeId)).toEqual(['fetch', 'summarise'])
+    expect(failures.map((issue) => issue.nodeId)).toEqual(['fetch'])
     expect(failures.every((issue) => issue.severity === 'fail')).toBe(true)
+  })
+
+  it('requires failed-envelope promotion on write-side tools instead of unsafe retries', () => {
+    const workflow = makeWorkflow({
+      nodes: [
+        { id: 'send', type: 'tool', config: { tool: 'email.send', input: { to: 'user@example.com' } } },
+        { id: 'send_safe', type: 'tool', config: { tool: 'email.send', input: { to: 'user@example.com' }, resultPolicy: 'require_ok' } },
+      ],
+    })
+    const result = checkWorkflowReadiness(workflow)
+
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'tool_result_policy_missing',
+      severity: 'fail',
+      nodeId: 'send',
+    }))
+    expect(result.issues.find((issue) => issue.code === 'tool_result_policy_missing' && issue.nodeId === 'send_safe')).toBeUndefined()
+    expect(result.issues.find((issue) => issue.code === 'external_node_missing_retry' && issue.nodeId === 'send_safe')).toBeUndefined()
   })
 
   it('does not flag external_node_missing_retry when maxAttempts >= 2', () => {
@@ -112,7 +130,7 @@ describe('checkWorkflowReadiness', () => {
     const workflow = makeWorkflow({
       nodes: [
         { id: 'start', type: 'noop', config: {} },
-        { id: 'send', type: 'tool', config: { tool: 'email.send', input: { to: 'user@example.com' }, retry: { maxAttempts: 3 } } },
+        { id: 'send', type: 'tool', config: { tool: 'email.send', input: { to: 'user@example.com' }, resultPolicy: 'require_ok' } },
       ],
       edges: [{ from: 'start', to: 'send' }],
     })
@@ -127,7 +145,7 @@ describe('checkWorkflowReadiness', () => {
     const workflow = makeWorkflow({
       nodes: [
         { id: 'start', type: 'noop', config: {} },
-        { id: 'write_db', type: 'tool', config: { tool: 'db.query.write', input: { credential: 'customer-db', sql: 'update customers set active = $1', params: [true] }, retry: { maxAttempts: 3 } } },
+        { id: 'write_db', type: 'tool', config: { tool: 'db.query.write', input: { credential: 'customer-db', sql: 'update customers set active = $1', params: [true] }, resultPolicy: 'require_ok' } },
         { id: 'read_db', type: 'tool', config: { tool: 'db.query.read', input: { credential: 'customer-db', sql: 'select id from customers' }, retry: { maxAttempts: 3 } } },
       ],
       edges: [{ from: 'start', to: 'write_db' }, { from: 'write_db', to: 'read_db' }],

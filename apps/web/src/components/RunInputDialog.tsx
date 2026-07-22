@@ -31,6 +31,8 @@ import { t as runtimeT } from '../i18n/runtime'
 type RunInputDialogProps = {
   /** Declared `inputs` schema for the current workflow. Required because the dialog is only mounted when inputs exist. */
   inputs: WorkflowInputSchemaShape
+  /** Optional schema-valid value used to prefill the form on mount. */
+  initialValue?: unknown
   /** Run-friendly workflow name to anchor the header. */
   workflowName?: string
   /** Optional header kicker for reuse by other schema-driven operator forms. */
@@ -63,6 +65,7 @@ type ErrorMap = Record<string, string>
 
 export function RunInputDialog({
   inputs,
+  initialValue,
   workflowName,
   kicker,
   title,
@@ -82,7 +85,7 @@ export function RunInputDialog({
   const resolvedSubmittingLabel = submittingLabel ?? (t('runInput.starting'))
   const resolvedCloseLabel = closeLabel ?? (t('runInput.close'))
   const isObjectRoot = inputs.type === 'object' && inputs.properties
-  const [state, setState] = useState<FormState>(() => initialFormState(inputs))
+  const [state, setState] = useState<FormState>(() => initialFormState(inputs, initialValue))
   const [localErrors, setLocalErrors] = useState<ErrorMap>({})
   const firstFieldRef = useRef<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null>(null)
   const dialogRef = useRef<HTMLDivElement | null>(null)
@@ -452,18 +455,29 @@ function PrimitiveOrArrayField({
 
 /* ----------------------------- Form state I/O ----------------------------- */
 
-function initialFormState(schema: WorkflowInputSchemaShape): FormState {
+function initialFormState(schema: WorkflowInputSchemaShape, initialValue?: unknown): FormState {
   if (schema.type === 'object' && schema.properties) {
     const obj: FormState = {}
+    const supplied = isRecord(initialValue) ? initialValue : {}
     for (const [key, child] of Object.entries(schema.properties)) {
-      obj[key] = initialLeafValue(child)
+      obj[key] = initialLeafValue(child, supplied[key])
     }
     return obj
   }
-  return { __root__: initialLeafValue(schema) }
+  return { __root__: initialLeafValue(schema, initialValue) }
 }
 
-function initialLeafValue(schema: WorkflowInputSchemaShape): unknown {
+function initialLeafValue(schema: WorkflowInputSchemaShape, supplied?: unknown): unknown {
+  if (supplied !== undefined) {
+    if (schema.type === 'object' && schema.properties && isRecord(supplied)) {
+      const nested: Record<string, unknown> = {}
+      for (const [key, child] of Object.entries(schema.properties)) {
+        nested[key] = initialLeafValue(child, supplied[key])
+      }
+      return nested
+    }
+    return supplied
+  }
   if (schema.type === 'boolean') return false
   if (schema.type === 'object' && schema.properties) {
     const nested: Record<string, unknown> = {}
@@ -473,6 +487,10 @@ function initialLeafValue(schema: WorkflowInputSchemaShape): unknown {
     return nested
   }
   return ''
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function getAtPath(state: FormState, path: string): unknown {

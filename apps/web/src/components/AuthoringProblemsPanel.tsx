@@ -9,7 +9,7 @@ import { buildAuthoringProblems, type AuthoringProblem } from './authoring-probl
 import { requestAuthoringFocus } from './authoring-focus-bus'
 import { requestResilienceFocus } from './resilience-focus-bus'
 
-const resilienceIssueCodes = new Set(['external_node_missing_retry', 'http_missing_bounds'])
+const resilienceIssueCodes = new Set(['external_node_missing_retry', 'http_missing_bounds', 'tool_result_policy_missing'])
 
 function localizeProblem(problem: AuthoringProblem): string {
   const issue = {
