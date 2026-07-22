@@ -111,7 +111,7 @@ export const PERMISSION_CATALOG = [
   // eval datasets (built from opted-in accepted recovery feedback)
   { key: "evals.read",           category: "evals",       description: "View + export eval datasets built from recovery decisions", defaultRoles: ["viewer", "editor", "admin"] },
   { key: "evals.write",          category: "evals",       description: "Create / delete eval datasets from opted-in recovery feedback", defaultRoles: ["admin"] },
-  // inbound trigger events (email_received / file_dropped / mcp_server_event)
+  // inbound trigger events (webhook_received / email_received / file_dropped / mcp_server_event)
   { key: "triggers.read",        category: "triggers",    description: "View structured inbound-trigger events + replay history", defaultRoles: ["viewer", "editor", "admin"] },
   { key: "triggers.ingest",      category: "triggers",    description: "Submit a normalized inbound trigger event (relay / forwarder)", defaultRoles: ["editor", "admin"] },
   // solution packs (installable, ICP-shaped workflow starters)

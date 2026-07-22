@@ -2249,7 +2249,7 @@ export const confidenceCalibrations = pgTable(
 
 /**
  * Structured inbound-trigger events for the event-driven trigger node types
- * (`email_received`, `file_dropped`, `mcp_server_event`).
+ * (`webhook_received`, `email_received`, `file_dropped`, `mcp_server_event`).
  *
  * One row is persisted by the API ingestion seam
  * (`apps/api/src/routes/trigger-ingest-routes.ts`) for EVERY accepted inbound
@@ -2280,7 +2280,7 @@ export const triggerEvents = pgTable(
   {
     id: text("id").primaryKey(),
     orgId: text("org_id").notNull(),
-    /** One of the closed `triggerNodeTypeValues` (`email_received` / `file_dropped` / `mcp_server_event`). */
+    /** One of the closed event-driven `triggerNodeTypeValues`. */
     triggerType: text("trigger_type").notNull(),
     workflowId: text("workflow_id"),
     /** The workflow version whose trigger node matched the inbound event. */

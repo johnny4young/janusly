@@ -34,6 +34,7 @@
 import { z } from "zod";
 import { nodeTypeValues, type NodeType } from "@janusly/shared/src/workflow";
 import {
+  WebhookReceivedConfigSchema,
   EmailReceivedConfigSchema,
   FileDroppedConfigSchema,
   McpServerEventConfigSchema,
@@ -323,6 +324,7 @@ export const NODE_CONFIG_SCHEMAS = {
   // Event-driven trigger node types — the authoring-side config schemas live
   // in `@janusly/shared/src/trigger-types` so the API ingestion seam and the
   // web Inspector share one contract.
+  webhook_received: WebhookReceivedConfigSchema,
   email_received: EmailReceivedConfigSchema,
   file_dropped: FileDroppedConfigSchema,
   mcp_server_event: McpServerEventConfigSchema,

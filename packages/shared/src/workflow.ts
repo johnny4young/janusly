@@ -69,6 +69,7 @@ export const nodeTypeValues = [
   // `trigger-types.ts`). NOT emitted by AI generation — operators promote a
   // `noop` placeholder in the Inspector, mirroring the `wait_*` / `schedule_*`
   // convention. The grammar cap on `/ai/generate-workflow` stays at 11.
+  "webhook_received",
   "email_received",
   "file_dropped",
   "mcp_server_event",

@@ -1,7 +1,7 @@
 /**
  * Inbound-trigger ingestion seam + replay + recent-event feed.
  *
- * The three event-driven trigger node types (`email_received`,
+ * The event-driven trigger node types (`webhook_received`, `email_received`,
  * `file_dropped`, `mcp_server_event`) start runs through this surface. Each
  * `POST /triggers/<kind>/ingest` route accepts a NORMALIZED inbound payload
  * (a real SMTP relay, an SES/Mailgun forwarder, a bucket-event listener, or
@@ -42,6 +42,7 @@ import {
   EmailReceivedPayloadSchema,
   FileDroppedPayloadSchema,
   McpServerEventPayloadSchema,
+  WebhookReceivedPayloadSchema,
   EMAIL_BODY_MAX_BYTES,
   FILE_METADATA_MAX_BYTES,
   MCP_EVENT_PAYLOAD_MAX_BYTES,
@@ -511,6 +512,44 @@ export async function backfillBufferedTriggerEvents(args: {
 }
 
 export const triggerIngestRoutes: Route[] = [
+  // ── webhook_received ──────────────────────────────────────────────────
+  {
+    method: "POST",
+    match: "/triggers/webhook/ingest",
+    role: "editor",
+    permission: "triggers.ingest",
+    handler: async ({ req, res, auth }) => {
+      const raw = asRecord(await readJson(req, TRIGGER_INGEST_MAX_JSON_BYTES));
+      const parsed = WebhookReceivedPayloadSchema.safeParse(raw);
+      if (!parsed.success) {
+        return sendError(res, "trigger_invalid_payload", parsed.error.issues[0]?.message ?? "Invalid webhook payload", 400);
+      }
+      const payload = parsed.data;
+      const resolved = await resolveTriggerNode(auth.orgId, "webhook_received", (config) => {
+        return typeof config.endpointKey === "string"
+          && config.endpointKey.trim().toLowerCase() === payload.endpointKey.toLowerCase();
+      });
+      if (!resolved) {
+        return sendError(res, "trigger_no_matching_node", "No webhook_received trigger matches this endpoint key", 404);
+      }
+
+      const result = await persistEventAndSpawnRun({
+        auth,
+        triggerType: "webhook_received",
+        resolved,
+        payload: {
+          endpointKey: payload.endpointKey,
+          eventId: payload.eventId,
+          eventType: payload.eventType,
+          payload: payload.payload,
+          receivedAt: payload.receivedAt ?? new Date().toISOString(),
+        },
+        dedupeKey: `webhook:${payload.endpointKey.toLowerCase()}:${payload.eventId}`,
+      });
+      return sendJson(res, result.body, result.status);
+    },
+  },
+
   // ── email_received ────────────────────────────────────────────────────
   {
     method: "POST",

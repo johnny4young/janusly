@@ -193,6 +193,7 @@
                                   "join",
                                   "schedule",
                                   "mcp_tool",
+                                  "webhook_received",
                                   "email_received",
                                   "file_dropped",
                                   "mcp_server_event"
@@ -691,6 +692,7 @@
                                           "join",
                                           "schedule",
                                           "mcp_tool",
+                                          "webhook_received",
                                           "email_received",
                                           "file_dropped",
                                           "mcp_server_event"
@@ -871,6 +873,7 @@
                                                 "join",
                                                 "schedule",
                                                 "mcp_tool",
+                                                "webhook_received",
                                                 "email_received",
                                                 "file_dropped",
                                                 "mcp_server_event"
@@ -2648,6 +2651,7 @@
                                 "join",
                                 "schedule",
                                 "mcp_tool",
+                                "webhook_received",
                                 "email_received",
                                 "file_dropped",
                                 "mcp_server_event"
@@ -8739,6 +8743,7 @@
                                 "join",
                                 "schedule",
                                 "mcp_tool",
+                                "webhook_received",
                                 "email_received",
                                 "file_dropped",
                                 "mcp_server_event"
@@ -9630,6 +9635,7 @@
                                         "join",
                                         "schedule",
                                         "mcp_tool",
+                                        "webhook_received",
                                         "email_received",
                                         "file_dropped",
                                         "mcp_server_event"
@@ -11340,6 +11346,7 @@
                                           "join",
                                           "schedule",
                                           "mcp_tool",
+                                          "webhook_received",
                                           "email_received",
                                           "file_dropped",
                                           "mcp_server_event"
@@ -12095,6 +12102,7 @@
                             "join",
                             "schedule",
                             "mcp_tool",
+                            "webhook_received",
                             "email_received",
                             "file_dropped",
                             "mcp_server_event"
@@ -12712,6 +12720,7 @@
                                         "join",
                                         "schedule",
                                         "mcp_tool",
+                                        "webhook_received",
                                         "email_received",
                                         "file_dropped",
                                         "mcp_server_event"

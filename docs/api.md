@@ -443,7 +443,7 @@ Common issue codes:
 | `parallel_fork_invalid_branches` | `parallel_fork.config.branches` is malformed |
 | `join_invalid_sources` | `join.config.sources` is malformed |
 | `schedule_invalid_cron` | `schedule.config.cronExpression` is malformed |
-| `trigger_invalid_config` | `email_received`, `file_dropped`, or `mcp_server_event` config failed its trigger schema |
+| `trigger_invalid_config` | An event-driven trigger config failed its trigger schema |
 | `router_missing_candidates` / `router_invalid_candidate` | `router` / `router_llm` candidates are absent or not objects |
 | `router_candidate_missing_node_id` / `router_candidate_unknown_node_id` | A router candidate lacks a target id or points at an unknown node |
 | `edge_invalid_from` / `edge_invalid_to` | Edge references unknown node id |

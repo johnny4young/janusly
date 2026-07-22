@@ -65,6 +65,7 @@ export const nodePresets: Record<string, JsonObject> = {
   join: { sources: { a: '', b: '' } },
   schedule: { cronExpression: '0 9 * * *', enabled: true },
   mcp_tool: { connectionAlias: '', toolName: '', input: {} },
+  webhook_received: { endpointKey: '' },
   email_received: { aliasKey: '', dkimRequired: true },
   file_dropped: { bucket: '', prefix: '' },
   mcp_server_event: { connectionAlias: '', resourceUri: '' },
@@ -213,6 +214,12 @@ export function getNodeConfigSummary(type: string, config: JsonObject): string {
     const toolName = readString(config.toolName)
     if (alias && toolName) return t('nodeSummary.mcp_tool.set', { alias, tool: toolName })
     return t('nodeSummary.mcp_tool.empty')
+  }
+  if (type === 'webhook_received') {
+    const endpointKey = readString(config.endpointKey)
+    return endpointKey
+      ? t('nodeSummary.webhook_received.set', { endpointKey })
+      : t('nodeSummary.webhook_received.empty')
   }
   if (type === 'email_received') {
     const alias = readString(config.aliasKey)

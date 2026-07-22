@@ -30,6 +30,7 @@ const nodeIcons: Record<string, React.ReactNode> = {
   multi_agent: <Layers3 size={15} />,
   router: <GitBranch size={15} />,
   router_llm: <Sparkles size={15} />,
+  webhook_received: <Activity size={15} />,
   email_received: <Mail size={15} />,
   file_dropped: <FileInput size={15} />,
   mcp_server_event: <Radio size={15} />,

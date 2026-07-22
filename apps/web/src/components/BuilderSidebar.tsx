@@ -102,7 +102,7 @@ const NODE_CATEGORIES: Record<string, string[]> = {
   flow: ['condition', 'router', 'router_llm', 'loop', 'parallel_fork', 'join'],
   human: ['approval', 'human_form'],
   tools: ['tool', 'http', 'webhook', 'mcp_tool', 'subworkflow'],
-  triggers: ['schedule', 'email_received', 'file_dropped', 'mcp_server_event'],
+  triggers: ['schedule', 'webhook_received', 'email_received', 'file_dropped', 'mcp_server_event'],
   misc: ['noop', 'transform', 'wait_until'],
 }
 
@@ -128,6 +128,7 @@ const NODE_ICONS: Record<string, React.ReactNode> = {
   join: <ListTree size={13} />,
   schedule: <CalendarClock size={13} />,
   mcp_tool: <Plug size={13} />,
+  webhook_received: <Webhook size={13} />,
   email_received: <Mail size={13} />,
   file_dropped: <FileInput size={13} />,
   mcp_server_event: <Radio size={13} />,

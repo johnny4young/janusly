@@ -1,9 +1,9 @@
 /**
  * Event-driven trigger node executors + config resolution.
  *
- * Three trigger node types (`email_received`, `file_dropped`,
- * `mcp_server_event`) extend the runtime's trigger surface alongside
- * `schedule`. Like `schedule`, they are PASSTHROUGH triggers: the actual
+ * Four trigger node types (`webhook_received`, `email_received`,
+ * `file_dropped`, `mcp_server_event`) extend the runtime's trigger surface
+ * alongside `schedule`. Like `schedule`, they are PASSTHROUGH triggers: the actual
  * firing happens outside the executor — the API ingestion seam
  * (`apps/api/src/routes/trigger-ingest-routes.ts`) accepts a normalized
  * inbound payload, persists a structured `trigger_events` row (the
@@ -19,7 +19,7 @@
  * `schedule` executor's documented behaviour.
  *
  * Used by:
- * - `node-registry.ts` — registers the three executors.
+ * - `node-registry.ts` — registers the trigger executors.
  * - `workflow-validation.ts` — `resolveTriggerConfig` is the per-type config
  *   gate at `POST /validate` time.
  *
@@ -27,10 +27,11 @@
  * - Config validation goes through the SHARED Zod schemas in
  *   `@janusly/shared/src/trigger-types` so the API, engine, and web agree.
  * - The executor NEVER reaches out to SMTP / the bucket / the MCP server —
- *   it's a pure passthrough. The ingestion seam owns all I/O.
+ *   it is a pure passthrough. The ingestion seam owns all I/O.
  */
 
 import {
+  WebhookReceivedConfigSchema,
   EmailReceivedConfigSchema,
   FileDroppedConfigSchema,
   McpServerEventConfigSchema,
@@ -39,6 +40,7 @@ import {
   type FileDroppedConfig,
   type McpServerEventConfig,
   type TriggerNodeType,
+  type WebhookReceivedConfig,
 } from "@janusly/shared/src/trigger-types";
 import type { NodeExecutor } from "./node-registry";
 
@@ -49,10 +51,13 @@ import type { NodeExecutor } from "./node-registry";
  * offending path) and the validator surfaces it as an issue.
  */
 export function resolveTriggerConfig(type: TriggerNodeType, config: unknown):
+  | WebhookReceivedConfig
   | EmailReceivedConfig
   | FileDroppedConfig
   | McpServerEventConfig {
   switch (type) {
+    case "webhook_received":
+      return WebhookReceivedConfigSchema.parse(config);
     case "email_received":
       return EmailReceivedConfigSchema.parse(config);
     case "file_dropped":
@@ -104,10 +109,12 @@ function makeTriggerExecutor(type: TriggerNodeType): NodeExecutor {
 
 /** `email_received` trigger executor — passthrough; ingestion owns the SMTP relay. */
 export const emailReceivedExecutor: NodeExecutor = makeTriggerExecutor("email_received");
+/** Generic JSON webhook trigger executor; ingestion owns auth and dedupe. */
+export const webhookReceivedExecutor: NodeExecutor = makeTriggerExecutor("webhook_received");
 /** `file_dropped` trigger executor — passthrough; ingestion owns the bucket-event listener. */
 export const fileDroppedExecutor: NodeExecutor = makeTriggerExecutor("file_dropped");
 /** `mcp_server_event` trigger executor — passthrough; ingestion owns the MCP subscription. */
 export const mcpServerEventExecutor: NodeExecutor = makeTriggerExecutor("mcp_server_event");
 
-/** True when the node type is one of the three event-driven trigger types. */
+/** True when the node type is one of the event-driven trigger types. */
 export { isTriggerNodeType };

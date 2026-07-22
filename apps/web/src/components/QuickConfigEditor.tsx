@@ -832,6 +832,21 @@ export function QuickConfigEditor({
     return <ScheduleConfigFields nodeId={nodeId} config={config} onPatch={patch} />
   }
 
+  if (type === 'webhook_received') {
+    return (
+      <section className="quick-config">
+        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
+        <TextConfigField
+          scope={nodeId}
+          label={t('rightPanel.quickConfig.webhookEndpointKey')}
+          value={readConfigString(config, 'endpointKey')}
+          onChange={value => patch({ endpointKey: value })}
+        />
+        <p className="helper-text">{t('rightPanel.quickConfig.webhookReceivedHelper')}</p>
+      </section>
+    )
+  }
+
   if (type === 'email_received') {
     const dkimRequired = config.dkimRequired !== false
     return (

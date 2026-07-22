@@ -120,6 +120,12 @@ const SIMPLE_DAG = {
   edges: [],
 };
 
+const WEBHOOK_DAG = {
+  dslVersion: "1.0" as const,
+  nodes: [{ id: "incoming", type: "webhook_received", config: { endpointKey: "incident-triage" } }],
+  edges: [],
+};
+
 function resolvedFor(orgConfig: Record<string, unknown> = { aliasKey: "ops" }) {
   return {
     workflowId: "wf-1",
@@ -127,6 +133,16 @@ function resolvedFor(orgConfig: Record<string, unknown> = { aliasKey: "ops" }) {
     nodeId: "inbox",
     nodeConfig: orgConfig,
     dagJson: SIMPLE_DAG,
+  };
+}
+
+function resolvedWebhook(endpointKey = "incident-triage") {
+  return {
+    workflowId: "wf-webhook",
+    workflowVersionId: "ver-webhook",
+    nodeId: "incoming",
+    nodeConfig: { endpointKey },
+    dagJson: WEBHOOK_DAG,
   };
 }
 
@@ -185,9 +201,17 @@ async function postEmail(baseUrl: string, body: unknown) {
   });
 }
 
+async function postWebhook(baseUrl: string, body: unknown) {
+  return fetch(`${baseUrl}/triggers/webhook/ingest`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 describe("route declarations", () => {
-  it("the three ingest routes declare editor + triggers.ingest", () => {
-    for (const path of ["/triggers/email/ingest", "/triggers/file/ingest", "/triggers/mcp/ingest"]) {
+  it("the ingest routes declare editor + triggers.ingest", () => {
+    for (const path of ["/triggers/webhook/ingest", "/triggers/email/ingest", "/triggers/file/ingest", "/triggers/mcp/ingest"]) {
       const route = triggerIngestRoutes.find((r) => (typeof r.match === "string" ? r.match === path : r.match(path)) && r.method === "POST");
       expect(route?.role).toBe("editor");
       expect(route?.permission).toBe("triggers.ingest");
@@ -208,6 +232,111 @@ describe("route declarations", () => {
       const res = await fetch(`${baseUrl}/triggers/events?status=buffered`);
       expect(res.status).toBe(200);
       expect(listTriggerEventsMock).toHaveBeenCalledWith("org-a", expect.objectContaining({ status: "buffered" }));
+    } finally {
+      await close(server);
+    }
+  });
+});
+
+describe("webhook_received ingestion", () => {
+  it("rejects an event without an idempotency identity", async () => {
+    const server = createApiServer({ routes: triggerIngestRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const res = await postWebhook(baseUrl, {
+        endpointKey: "incident-triage",
+        payload: { service: "postgres" },
+      });
+
+      expect(res.status).toBe(400);
+      expect(startRunMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("cannot resolve a trigger outside the authenticated organization", async () => {
+    resolveTriggerNodeMock.mockResolvedValue(null);
+    const server = createApiServer({ routes: triggerIngestRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const res = await postWebhook(baseUrl, {
+        endpointKey: "incident-triage",
+        eventId: "alert-1",
+        payload: { service: "postgres" },
+      });
+
+      expect(res.status).toBe(404);
+      expect(resolveTriggerNodeMock).toHaveBeenCalledWith(
+        "org-a",
+        "webhook_received",
+        expect.any(Function),
+      );
+      expect(startRunMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("persists a normalized event before spawning its run", async () => {
+    resolveTriggerNodeMock.mockResolvedValue(resolvedWebhook());
+    resolveTriggerNodeInVersionMock.mockResolvedValue(resolvedWebhook());
+    const server = createApiServer({ routes: triggerIngestRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const res = await postWebhook(baseUrl, {
+        endpointKey: "Incident-Triage",
+        eventId: "alert-1",
+        eventType: "database.connection_exhausted",
+        payload: { service: "postgres", openConnections: 98 },
+      });
+
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toMatchObject({
+        ok: true,
+        runId: "run-1",
+        triggerEventId: "evt-1",
+      });
+      expect(recordTriggerEventMock).toHaveBeenCalledWith(expect.objectContaining({
+        orgId: "org-a",
+        triggerType: "webhook_received",
+        dedupeKey: "webhook:incident-triage:alert-1",
+      }));
+      expect(startRunMock).toHaveBeenCalledWith(expect.objectContaining({
+        orgId: "org-a",
+        versionId: "ver-webhook",
+        triggerEventStart: { id: "evt-1" },
+        input: expect.objectContaining({
+          event: expect.objectContaining({
+            endpointKey: "Incident-Triage",
+            eventId: "alert-1",
+            payload: { service: "postgres", openConnections: 98 },
+          }),
+        }),
+      }));
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("returns the prior run for a repeated event id", async () => {
+    resolveTriggerNodeMock.mockResolvedValue(resolvedWebhook());
+    recordTriggerEventMock.mockResolvedValue({
+      event: { id: "evt-1", orgId: "org-a", status: "started", runId: "run-prior" } as never,
+      wasCreated: false,
+    });
+    const server = createApiServer({ routes: triggerIngestRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const res = await postWebhook(baseUrl, {
+        endpointKey: "incident-triage",
+        eventId: "alert-1",
+        payload: { service: "postgres" },
+      });
+
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toMatchObject({ duplicate: true, runId: "run-prior" });
+      expect(startRunMock).not.toHaveBeenCalled();
     } finally {
       await close(server);
     }

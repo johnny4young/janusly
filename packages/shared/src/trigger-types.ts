@@ -3,7 +3,7 @@
  * types plus their Zod 4 config schemas and the normalized inbound-payload
  * schemas the ingestion seam validates before spawning a run.
  *
- * Three trigger node types extend the runtime's existing trigger surface
+ * Four trigger node types extend the runtime's existing trigger surface
  * (`webhook` / `schedule` / `approval`) with event-driven starts:
  *   - `email_received` — a per-org alias receives mail; the relay POSTs a
  *     normalized payload to the ingestion seam.
@@ -11,8 +11,10 @@
  *     fallback) reports a new object under a watched prefix.
  *   - `mcp_server_event` — an external MCP server's resource-changed
  *     notification (MCP 2025-06-18 subscription primitive).
+ *   - `webhook_received` — an authenticated, idempotent JSON event sent to
+ *     the generic HTTP ingestion seam.
  *
- * The grammar cap on AI generation stays at 11 branches — these three types
+ * The grammar cap on AI generation stays at 11 branches — these four types
  * are NOT emitted by `/ai/generate-workflow`. The LLM emits a `noop`
  * placeholder named after the requested trigger and the operator promotes it
  * in the Inspector (mirror of the `wait_*` / `schedule_*` convention).
@@ -50,6 +52,7 @@ export { utf8ByteLength } from "./utf8";
  * `@janusly/shared/src/workflow:nodeTypeValues`.
  */
 export const triggerNodeTypeValues = [
+  "webhook_received",
   "email_received",
   "file_dropped",
   "mcp_server_event",
@@ -58,7 +61,7 @@ export const triggerNodeTypeValues = [
 /** Zod enum derived from `triggerNodeTypeValues`. */
 export const TriggerNodeTypeSchema = z.enum(triggerNodeTypeValues);
 
-/** One of the three event-driven trigger node types. */
+/** One of the supported event-driven trigger node types. */
 export type TriggerNodeType = (typeof triggerNodeTypeValues)[number];
 
 /** Type guard — narrows an arbitrary string to a known trigger node type. */
@@ -96,6 +99,19 @@ export const TRIGGER_RATE_LIMIT_MAX_PER_MIN = 10_000;
 // Loose-but-typed: validate the fields the executor / ingestion relies on,
 // leave the rest passthrough (mirrors `node-configs.ts` posture).
 // ---------------------------------------------------------------------------
+
+/** Generic inbound webhook config. `endpointKey` selects one authored trigger. */
+export const WebhookReceivedConfigSchema = z
+  .object({
+    endpointKey: z
+      .string()
+      .trim()
+      .min(1, "webhook_received.endpointKey is required")
+      .max(128)
+      .regex(/^[a-zA-Z0-9._-]+$/, "webhook_received.endpointKey must use letters, numbers, dot, dash, or underscore"),
+    rateLimitPerMin: z.number().int().min(1).max(TRIGGER_RATE_LIMIT_MAX_PER_MIN).optional(),
+  })
+  .passthrough();
 
 /**
  * `email_received` node config. `aliasKey` is the local-part of the per-org
@@ -171,6 +187,7 @@ export const McpServerEventConfigSchema = z
 
 /** Per-trigger-type config schema registry (declared `satisfies` for inference). */
 export const TRIGGER_CONFIG_SCHEMAS = {
+  webhook_received: WebhookReceivedConfigSchema,
   email_received: EmailReceivedConfigSchema,
   file_dropped: FileDroppedConfigSchema,
   mcp_server_event: McpServerEventConfigSchema,
@@ -182,6 +199,7 @@ export type TriggerConfigByType = {
 };
 
 export type EmailReceivedConfig = z.infer<typeof EmailReceivedConfigSchema>;
+export type WebhookReceivedConfig = z.infer<typeof WebhookReceivedConfigSchema>;
 export type FileDroppedConfig = z.infer<typeof FileDroppedConfigSchema>;
 export type McpServerEventConfig = z.infer<typeof McpServerEventConfigSchema>;
 
@@ -241,9 +259,20 @@ export const McpServerEventPayloadSchema = z.object({
   receivedAt: z.string().trim().max(64).optional(),
 });
 
+/** Normalized generic JSON event accepted by `POST /triggers/webhook/ingest`. */
+export const WebhookReceivedPayloadSchema = z.object({
+  endpointKey: z.string().trim().min(1).max(128),
+  /** Required upstream identity; retries with the same id converge to one run. */
+  eventId: z.string().trim().min(1).max(256),
+  eventType: z.string().trim().min(1).max(128).optional(),
+  payload: z.record(z.string(), z.unknown()).default({}),
+  receivedAt: z.string().trim().max(64).optional(),
+});
+
 export type EmailReceivedPayload = z.infer<typeof EmailReceivedPayloadSchema>;
 export type FileDroppedPayload = z.infer<typeof FileDroppedPayloadSchema>;
 export type McpServerEventPayload = z.infer<typeof McpServerEventPayloadSchema>;
+export type WebhookReceivedPayload = z.infer<typeof WebhookReceivedPayloadSchema>;
 
 /** Closed enum of structured trigger-event lifecycle statuses persisted in `trigger_events`. */
 /**

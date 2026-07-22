@@ -213,7 +213,7 @@ export type AuditAction =
   | "upstream_health.source.created"
   | "upstream_health.source.updated"
   | "upstream_health.source.deleted"
-  // inbound trigger events (email_received / file_dropped / mcp_server_event)
+  // inbound trigger events (webhook_received / email_received / file_dropped / mcp_server_event)
   | "trigger.event.received"
   | "trigger.event.started"
   | "trigger.event.buffered"

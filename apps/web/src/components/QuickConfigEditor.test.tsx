@@ -559,3 +559,26 @@ describe('<QuickConfigEditor /> schedule validation', () => {
     expect(input).not.toHaveAttribute('aria-invalid')
   })
 })
+
+describe('<QuickConfigEditor /> inbound webhook trigger', () => {
+  it('edits the endpoint selector used by the authenticated ingestion route', () => {
+    const onUpdate = vi.fn()
+    render(
+      <QuickConfigEditor
+        {...emptyWorkflowGraph}
+        nodeId="incoming"
+        type="webhook_received"
+        config={{ endpointKey: 'incident-triage' }}
+        tools={[]}
+        onUpdate={onUpdate}
+      />,
+    )
+
+    const endpointKey = screen.getByLabelText('Endpoint key')
+    expect(endpointKey).toHaveValue('incident-triage')
+    expect(screen.getByText(/stable eventId/)).toBeInTheDocument()
+    fireEvent.change(endpointKey, { target: { value: 'model-rollout' } })
+
+    expect(onUpdate).toHaveBeenLastCalledWith({ endpointKey: 'model-rollout' })
+  })
+})

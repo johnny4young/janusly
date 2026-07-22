@@ -15,6 +15,8 @@ import {
   MAX_ATTACHMENTS,
   McpServerEventConfigSchema,
   McpServerEventPayloadSchema,
+  WebhookReceivedConfigSchema,
+  WebhookReceivedPayloadSchema,
   TRIGGER_DEFAULT_RATE_LIMIT_PER_MIN,
   TRIGGER_RATE_LIMIT_MAX_PER_MIN,
   isTriggerNodeType,
@@ -24,7 +26,8 @@ import {
 } from "./trigger-types";
 
 describe("isTriggerNodeType", () => {
-  it("recognizes the three event-driven trigger types", () => {
+  it("recognizes the event-driven trigger types", () => {
+    expect(isTriggerNodeType("webhook_received")).toBe(true);
     expect(isTriggerNodeType("email_received")).toBe(true);
     expect(isTriggerNodeType("file_dropped")).toBe(true);
     expect(isTriggerNodeType("mcp_server_event")).toBe(true);
@@ -38,8 +41,15 @@ describe("isTriggerNodeType", () => {
     expect(isTriggerNodeType(42)).toBe(false);
   });
 
-  it("the closed enum has exactly the three v1 trigger types", () => {
-    expect([...triggerNodeTypeValues]).toEqual(["email_received", "file_dropped", "mcp_server_event"]);
+  it("the closed enum has exactly the supported trigger types", () => {
+    expect([...triggerNodeTypeValues]).toEqual(["webhook_received", "email_received", "file_dropped", "mcp_server_event"]);
+  });
+});
+
+describe("WebhookReceivedConfigSchema (config validation)", () => {
+  it("accepts a bounded endpoint key and rejects URL-shaped values", () => {
+    expect(WebhookReceivedConfigSchema.safeParse({ endpointKey: "incident-triage" }).success).toBe(true);
+    expect(WebhookReceivedConfigSchema.safeParse({ endpointKey: "https://example.com/hook" }).success).toBe(false);
   });
 });
 
@@ -93,6 +103,16 @@ describe("McpServerEventConfigSchema (config validation)", () => {
 });
 
 describe("inbound payload schemas (size caps + shape)", () => {
+  it("requires an idempotency identity for generic webhooks", () => {
+    expect(WebhookReceivedPayloadSchema.safeParse({
+      endpointKey: "incident-triage",
+      eventId: "evt-1",
+      eventType: "database.connection_exhausted",
+      payload: { service: "postgres" },
+    }).success).toBe(true);
+    expect(WebhookReceivedPayloadSchema.safeParse({ endpointKey: "incident-triage" }).success).toBe(false);
+  });
+
   it("accepts a normalized email payload", () => {
     const parsed = EmailReceivedPayloadSchema.safeParse({
       aliasKey: "ops",
