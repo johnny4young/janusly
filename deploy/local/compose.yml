@@ -8,12 +8,12 @@ x-app-environment: &app-environment
   JANUSLY_RESUME_TOKEN_SECRET: ${JANUSLY_LOCAL_RESUME_TOKEN_SECRET:-local-resume-token-secret-change-before-sharing}
   JANUSLY_LOCAL_STACK: "true"
   JANUSLY_LOCAL_ORG_ID: ${JANUSLY_LOCAL_ORG_ID:-default}
-  JANUSLY_LOCAL_INTEGRATION_SIMULATOR: "true"
+  JANUSLY_LOCAL_INTEGRATION_SIMULATOR: ${JANUSLY_LOCAL_INTEGRATION_SIMULATOR:-true}
   JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL: http://provider-simulator:4010
   JANUSLY_LOCAL_GITHUB_TOKEN: local-github-token
   JANUSLY_LOCAL_SLACK_WEBHOOK_URL: http://provider-simulator:4010/slack/services/local/default
   JANUSLY_LOCAL_WEBHOOK_SECRET: local-webhook-secret
-  JANUSLY_MAILER_PROVIDER: simulator
+  JANUSLY_MAILER_PROVIDER: ${JANUSLY_MAILER_PROVIDER:-simulator}
   JANUSLY_MAILER_FROM: ${JANUSLY_LOCAL_MAILER_FROM:-janusly@example.test}
   ALLOW_PRIVATE_HTTP_TARGETS: "true"
   JANUSLY_LLM_PROVIDER: anthropic
@@ -97,6 +97,8 @@ services:
       target: api
     image: janusly-local-api
     restart: unless-stopped
+    env_file:
+      - ./local.env
     environment:
       <<: *app-environment
       PORT: "3001"
@@ -120,6 +122,8 @@ services:
       target: worker
     image: janusly-local-worker
     restart: unless-stopped
+    env_file:
+      - ./local.env
     environment:
       <<: *app-environment
       OTEL_METRICS_HOST: 0.0.0.0

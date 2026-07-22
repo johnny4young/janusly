@@ -7,6 +7,12 @@ const localEnvExample = await readFile(new URL("../deploy/local/local.env.exampl
 const webDockerfile = await readFile(new URL("../Dockerfile.web", import.meta.url), "utf8");
 const gitignore = await readFile(new URL("../.gitignore", import.meta.url), "utf8");
 
+function serviceBlock(name) {
+  const match = compose.match(new RegExp(`^  ${name}:\\n([\\s\\S]*?)(?=^  [a-z][a-z0-9-]*:|^volumes:)`, "m"));
+  assert.ok(match, `missing ${name} service block`);
+  return match[0];
+}
+
 test("persistent local stack separates runtime services and named data", () => {
   for (const service of ["postgres", "redis", "provider-simulator", "migrate", "seed", "api", "worker", "web"]) {
     assert.match(compose, new RegExp(`^  ${service}:`, "m"));
@@ -36,9 +42,22 @@ test("local web and API use uncommon host ports while retaining internal ports",
 });
 
 test("local provider routing is explicitly gated and private-target access is visible", () => {
-  assert.match(compose, /JANUSLY_LOCAL_INTEGRATION_SIMULATOR: "true"/);
+  assert.match(compose, /JANUSLY_LOCAL_INTEGRATION_SIMULATOR: \$\{JANUSLY_LOCAL_INTEGRATION_SIMULATOR:-true\}/);
   assert.match(compose, /ALLOW_PRIVATE_HTTP_TARGETS: "true"/);
-  assert.match(compose, /JANUSLY_MAILER_PROVIDER: simulator/);
+  assert.match(compose, /JANUSLY_MAILER_PROVIDER: \$\{JANUSLY_MAILER_PROVIDER:-simulator\}/);
+  assert.match(localEnvExample, /^JANUSLY_LOCAL_INTEGRATION_SIMULATOR=true$/m);
+});
+
+test("ignored runtime secrets reach API and worker but never the browser image", () => {
+  assert.match(serviceBlock("api"), /env_file:\n\s+- \.\/local\.env/);
+  assert.match(serviceBlock("worker"), /env_file:\n\s+- \.\/local\.env/);
+  assert.doesNotMatch(serviceBlock("web"), /env_file:/);
+  assert.doesNotMatch(serviceBlock("provider-simulator"), /env_file:/);
+  assert.match(localEnvExample, /^GITHUB_TOKEN=$/m);
+  assert.match(localEnvExample, /^SLACK_WEBHOOK_URL=$/m);
+  assert.match(localEnvExample, /^WEBHOOK_SIGNING_SECRET=$/m);
+  assert.match(localEnvExample, /^RESEND_API_KEY=$/m);
+  assert.match(localEnvExample, /^SENDGRID_API_KEY=$/m);
 });
 
 test("web image is reproducible and has no unpinned global static-server dependency", () => {

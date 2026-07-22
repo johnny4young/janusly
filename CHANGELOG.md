@@ -16,6 +16,11 @@ retroactively.
 
 ### Changed
 
+- The persistent local lab can explicitly switch from its safe provider
+  simulator to environment-backed GitHub, Slack, webhook, and email delivery.
+  Secrets reach only API and worker containers, bootstrap-owned credential
+  references switch idempotently, and simulator smoke commands refuse to run
+  against external providers.
 - Retention, calibration, upstream-health polling, repair reconcilers, and
   consent-revocation purges now run on an isolated low-concurrency BullMQ
   maintenance lane. Rolling upgrades preserve already-materialized jobs,

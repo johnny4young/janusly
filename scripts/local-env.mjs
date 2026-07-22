@@ -50,6 +50,7 @@ export function resolveLocalStackSettings(file, environment = process.env) {
     webUrl: `http://127.0.0.1:${webPort}`,
     apiUrl: `http://127.0.0.1:${apiPort}`,
     simulatorUrl: `http://127.0.0.1:${simulatorPort}`,
+    simulatorEnabled: value("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true") === "true",
     orgId: value("JANUSLY_LOCAL_ORG_ID", "default"),
   };
 }

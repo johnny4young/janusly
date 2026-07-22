@@ -9,6 +9,11 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 const evidenceDir = process.env.JANUSLY_EVIDENCE_DIR
   ?? fileURLToPath(new URL("../artifacts/local-stack-evidence", import.meta.url));
 const settings = await getLocalStackSettings();
+if (!settings.simulatorEnabled) {
+  throw new Error(
+    "local UI smoke is simulator-only and will not execute external provider effects; set JANUSLY_LOCAL_INTEGRATION_SIMULATOR=true",
+  );
+}
 await mkdir(evidenceDir, { recursive: true });
 
 await new Promise((resolve, reject) => {

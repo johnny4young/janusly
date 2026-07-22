@@ -50,7 +50,9 @@ if (command === "up") {
   await compose(["up", "-d", "--build"]);
   try {
     await waitForStack();
-    console.log(`[local] ready: web ${settings.webUrl} · api ${settings.apiUrl} · simulator ${settings.simulatorUrl}`);
+    console.log(
+      `[local] ready: web ${settings.webUrl} · api ${settings.apiUrl} · provider mode ${settings.simulatorEnabled ? "simulator" : "external"}`,
+    );
   } catch (error) {
     await compose(["logs", "--tail", "150"]);
     throw error;

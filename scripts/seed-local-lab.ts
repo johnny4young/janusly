@@ -9,20 +9,22 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { credentials, db } from "@janusly/db";
 import { upsertOrgConfig } from "@janusly/data";
+import { resolveLocalProviderMode } from "./local-provider-mode.mjs";
 
 const orgId = process.env.JANUSLY_LOCAL_ORG_ID?.trim() || "default";
 const marker = process.env.JANUSLY_LOCAL_STACK;
+const providerMode = resolveLocalProviderMode();
 
 if (marker !== "true") {
   throw new Error("seed-local-lab requires JANUSLY_LOCAL_STACK=true");
 }
 
 const desired = [
-  { name: "billing_webhook", kind: "webhook_secret", secretRef: "JANUSLY_LOCAL_WEBHOOK_SECRET" },
-  { name: "billing_slack", kind: "slack_webhook", secretRef: "JANUSLY_LOCAL_SLACK_WEBHOOK_URL" },
-  { name: "ops_github", kind: "github_token", secretRef: "JANUSLY_LOCAL_GITHUB_TOKEN" },
-  { name: "ops_slack", kind: "slack_webhook", secretRef: "JANUSLY_LOCAL_SLACK_WEBHOOK_URL" },
-  { name: "support_slack", kind: "slack_webhook", secretRef: "JANUSLY_LOCAL_SLACK_WEBHOOK_URL" },
+  { name: "billing_webhook", kind: "webhook_secret", secretRef: providerMode.credentialRefs.webhook },
+  { name: "billing_slack", kind: "slack_webhook", secretRef: providerMode.credentialRefs.slack },
+  { name: "ops_github", kind: "github_token", secretRef: providerMode.credentialRefs.github },
+  { name: "ops_slack", kind: "slack_webhook", secretRef: providerMode.credentialRefs.slack },
+  { name: "support_slack", kind: "slack_webhook", secretRef: providerMode.credentialRefs.slack },
 ] as const;
 
 async function seed(): Promise<void> {
@@ -69,11 +71,13 @@ async function seed(): Promise<void> {
   await upsertOrgConfig({
     orgId,
     key: "email.provider",
-    value: "simulator",
+    value: providerMode.emailProvider,
     userId: "local-stack",
   });
 
-  console.log(`[seed-local-lab] ready org=${orgId} credentials=${desired.length}`);
+  console.log(
+    `[seed-local-lab] ready org=${orgId} credentials=${desired.length} providers=${providerMode.simulatorEnabled ? "simulator" : "external"}`,
+  );
 }
 
 seed()

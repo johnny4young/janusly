@@ -36,6 +36,7 @@ test("local stack settings honor host-port and process overrides", () => {
     webUrl: "http://127.0.0.1:3100",
     apiUrl: "http://127.0.0.1:3201",
     simulatorUrl: "http://127.0.0.1:4110",
+    simulatorEnabled: true,
     orgId: "process-org",
   });
 });
@@ -45,8 +46,15 @@ test("local stack defaults avoid common development web ports", () => {
     webUrl: `http://127.0.0.1:${defaultLocalWebPort}`,
     apiUrl: `http://127.0.0.1:${defaultLocalApiPort}`,
     simulatorUrl: "http://127.0.0.1:4010",
+    simulatorEnabled: true,
     orgId: "default",
   });
   assert.notEqual(defaultLocalWebPort, "3000");
   assert.notEqual(defaultLocalApiPort, "3001");
+});
+
+test("local stack settings require an exact opt-in for simulator routing overrides", () => {
+  assert.equal(resolveLocalStackSettings({ JANUSLY_LOCAL_INTEGRATION_SIMULATOR: "false" }, {}).simulatorEnabled, false);
+  assert.equal(resolveLocalStackSettings({ JANUSLY_LOCAL_INTEGRATION_SIMULATOR: "TRUE" }, {}).simulatorEnabled, false);
+  assert.equal(resolveLocalStackSettings({ JANUSLY_LOCAL_INTEGRATION_SIMULATOR: "true" }, {}).simulatorEnabled, true);
 });

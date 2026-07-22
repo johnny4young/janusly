@@ -124,6 +124,48 @@ It does not rewrite arbitrary outbound destinations: only the bundled GitHub
 and Slack credentials, the local mailer, and RFC-reserved `*.example.com`
 webhook placeholders can be redirected.
 
+## Opt-in External Providers
+
+The simulator remains the default because its smoke commands deliberately
+create GitHub, Slack, webhook, and email effects. For private real-use testing,
+edit the ignored `deploy/local/local.env`:
+
+```dotenv
+JANUSLY_LOCAL_INTEGRATION_SIMULATOR=false
+GITHUB_TOKEN=github-token-for-a-dedicated-test-repository
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+WEBHOOK_SIGNING_SECRET=replace-with-a-local-random-secret
+
+# Optional email delivery. Keep noop when email is not under test.
+JANUSLY_MAILER_PROVIDER=noop
+# JANUSLY_MAILER_PROVIDER=resend
+# RESEND_API_KEY=re_...
+```
+
+Then run `pnpm local:up`. The idempotent bootstrap repoints only the five
+credentials it owns (`ops_github`, `ops_slack`, `support_slack`,
+`billing_slack`, and `billing_webhook`) to the external secret names. Switching
+the flag back to `true` and running `pnpm local:up` restores their simulator
+references. A credential with the same name that was not created by the local
+bootstrap is never overwritten.
+
+Every additional `NAME=value` entry in this ignored file is available to the
+API and worker so a credential row can use `NAME` as its `secretRef`. The file
+is not injected into the web or provider-simulator containers, and secret
+values are never compiled into the browser image. Confirm presence without
+revealing values:
+
+```bash
+curl -s http://127.0.0.1:7311/credentials/health \
+  -H 'x-org-id: default' \
+  -H 'x-user-id: dev-user'
+```
+
+Use dedicated test repositories, channels, mail domains, and webhook receivers.
+`pnpm local:smoke`, `local:failure-smoke`, `local:verify`, and `local:ui-smoke`
+refuse to run while external mode is active so qualification cannot
+accidentally create real side effects.
+
 ## Optional AI And Memory
 
 With no `ANTHROPIC_API_KEY`, Janusly exercises deterministic AI fallbacks at
@@ -147,6 +189,8 @@ configuration API. Starting Ollama alone never enables persistent memory.
 - The generated `local.env` is ignored by Git.
 - Images run as non-root users.
 - GitHub, Slack, webhook, and email simulation is opt-in and process-gated.
+- External provider delivery requires an explicit simulator opt-out and local
+  secret values; no smoke command runs against that mode.
 - `ALLOW_PRIVATE_HTTP_TARGETS=true` and development auth are acceptable only
   inside this loopback lab; do not copy them into a public deployment.
 - Real credentials still belong in environment variables or a vault, never in

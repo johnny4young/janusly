@@ -272,6 +272,15 @@ and browser URL settings are documented in the tracked
 credential rows; the local bootstrap creates only references to local-only
 environment values.
 
+The persistent stack loads its ignored `deploy/local/local.env` into the API
+and worker only. With `JANUSLY_LOCAL_INTEGRATION_SIMULATOR=false`, the local
+bootstrap points its GitHub, Slack, and webhook credentials at `GITHUB_TOKEN`,
+`SLACK_WEBHOOK_URL`, and `WEBHOOK_SIGNING_SECRET`; it never copies their values
+into Postgres. Additional environment-backed credential references may be
+appended to that ignored file. The web image never receives it. See
+[`docs/local-deployment.md`](local-deployment.md#opt-in-external-providers) for
+the safe switching procedure and smoke-command boundary.
+
 `.env.example` includes sample credential env names such as
 `SLACK_INCIDENTS_WEBHOOK_URL`, `GITHUB_BOT_TOKEN`, and
 `WEBHOOK_SIGNING_SECRET`. Those are examples referenced by

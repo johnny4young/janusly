@@ -4,6 +4,11 @@ import { spawn } from "node:child_process";
 import { getLocalStackSettings } from "./local-env.mjs";
 
 const settings = await getLocalStackSettings();
+if (!settings.simulatorEnabled) {
+  throw new Error(
+    "local smoke commands are simulator-only and will not execute external provider effects; set JANUSLY_LOCAL_INTEGRATION_SIMULATOR=true",
+  );
+}
 const apiUrl = process.env.JANUSLY_LOCAL_API_URL ?? settings.apiUrl;
 const simulatorUrl = process.env.JANUSLY_LOCAL_SIMULATOR_URL ?? settings.simulatorUrl;
 const orgId = process.env.JANUSLY_LOCAL_ORG_ID ?? settings.orgId;

@@ -179,7 +179,8 @@ Unlike the short-lived `pnpm dev` test topology, this stack uses named volumes,
 keeps API and worker behavior production-shaped, and locally simulates GitHub,
 Slack, signed webhooks, and email without contacting public providers. See
 [`docs/local-deployment.md`](docs/local-deployment.md) for lifecycle commands,
-failure injection, persistence, safety boundaries, and optional Ollama memory.
+failure injection, persistence, safety boundaries, optional Ollama memory, and
+the explicit simulator-to-external-provider switch for private real-use tests.
 
 ### Use Janusly from Claude Desktop / Cursor (MCP)
 
