@@ -172,7 +172,7 @@ provider simulations must survive restarts:
 ```bash
 pnpm local:up
 pnpm local:verify
-# Studio: http://127.0.0.1:3000
+# Studio: http://127.0.0.1:7310
 ```
 
 Unlike the short-lived `pnpm dev` test topology, this stack uses named volumes,

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseEnvFile, resolveLocalStackSettings } from "./local-env.mjs";
+import {
+  defaultLocalApiPort,
+  defaultLocalWebPort,
+  parseEnvFile,
+  resolveLocalStackSettings,
+} from "./local-env.mjs";
 
 test("local env parser ignores comments and preserves values after the first separator", () => {
   assert.deepEqual(parseEnvFile(`
@@ -33,4 +38,15 @@ test("local stack settings honor host-port and process overrides", () => {
     simulatorUrl: "http://127.0.0.1:4110",
     orgId: "process-org",
   });
+});
+
+test("local stack defaults avoid common development web ports", () => {
+  assert.deepEqual(resolveLocalStackSettings({}, {}), {
+    webUrl: `http://127.0.0.1:${defaultLocalWebPort}`,
+    apiUrl: `http://127.0.0.1:${defaultLocalApiPort}`,
+    simulatorUrl: "http://127.0.0.1:4010",
+    orgId: "default",
+  });
+  assert.notEqual(defaultLocalWebPort, "3000");
+  assert.notEqual(defaultLocalApiPort, "3001");
 });

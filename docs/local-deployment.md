@@ -14,7 +14,7 @@ so containers can reach the bundled simulator.
 
 ```mermaid
 flowchart LR
-  Browser["Browser :3000"] --> API["API :3001"]
+  Browser["Browser :7310"] --> API["API :7311"]
   API --> PG[("Postgres 18")]
   API --> Redis[("Redis 8")]
   Worker["Workflow worker"] --> PG
@@ -44,8 +44,15 @@ pnpm local:up
 
 The first command copies `deploy/local/local.env.example` to the ignored
 `deploy/local/local.env`. Edit that file for host-port or local sender changes.
-Then open <http://127.0.0.1:3000>; development auth uses organization `default`
+Then open <http://127.0.0.1:7310>; development auth uses organization `default`
 and user `dev-user`.
+
+The uncommon host ports `7310` (web) and `7311` (API) are deliberate so the
+lab does not compete with projects that commonly use `3000` and `3001`. The
+containers still listen internally on `3000` and `3001`; only the loopback host
+mappings change. Override `JANUSLY_LOCAL_WEB_PORT`, `JANUSLY_LOCAL_API_PORT`,
+`JANUSLY_LOCAL_API_URL`, and `JANUSLY_LOCAL_WEB_ORIGINS` together when another
+host range is preferred.
 
 Run the qualification gates while the stack is healthy:
 

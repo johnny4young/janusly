@@ -4,7 +4,7 @@ x-app-environment: &app-environment
   DATABASE_URL: postgres://postgres:${JANUSLY_LOCAL_POSTGRES_PASSWORD:-janusly-local}@postgres:5432/workflow
   REDIS_URL: redis://redis:6379
   ALLOW_DEV_AUTH_HEADERS: "true"
-  API_ALLOWED_ORIGINS: ${JANUSLY_LOCAL_WEB_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+  API_ALLOWED_ORIGINS: ${JANUSLY_LOCAL_WEB_ORIGINS:-http://localhost:7310,http://127.0.0.1:7310}
   JANUSLY_RESUME_TOKEN_SECRET: ${JANUSLY_LOCAL_RESUME_TOKEN_SECRET:-local-resume-token-secret-change-before-sharing}
   JANUSLY_LOCAL_STACK: "true"
   JANUSLY_LOCAL_ORG_ID: ${JANUSLY_LOCAL_ORG_ID:-default}
@@ -103,7 +103,7 @@ services:
       OTEL_METRICS_HOST: 0.0.0.0
       OTEL_METRICS_PORT: "9464"
     ports:
-      - "127.0.0.1:${JANUSLY_LOCAL_API_PORT:-3001}:3001"
+      - "127.0.0.1:${JANUSLY_LOCAL_API_PORT:-7311}:3001"
       - "127.0.0.1:${JANUSLY_LOCAL_API_METRICS_PORT:-9464}:9464"
     depends_on:
       redis:
@@ -140,12 +140,12 @@ services:
       context: ../..
       dockerfile: Dockerfile.web
       args:
-        VITE_API_URL: ${JANUSLY_LOCAL_API_URL:-http://localhost:3001}
+        VITE_API_URL: ${JANUSLY_LOCAL_API_URL:-http://localhost:7311}
         JANUSLY_BUILD_ID: ${JANUSLY_BUILD_ID:-local-docker}
     image: janusly-local-web
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${JANUSLY_LOCAL_WEB_PORT:-3000}:3000"
+      - "127.0.0.1:${JANUSLY_LOCAL_WEB_PORT:-7310}:3000"
     depends_on:
       api:
         condition: service_healthy

@@ -4,6 +4,8 @@ import { access, copyFile, readFile } from "node:fs/promises";
 
 export const localEnvFile = "deploy/local/local.env";
 export const localEnvExampleFile = "deploy/local/local.env.example";
+export const defaultLocalWebPort = "7310";
+export const defaultLocalApiPort = "7311";
 
 const rootUrl = new URL("../", import.meta.url);
 
@@ -41,8 +43,8 @@ export async function readLocalEnv() {
 
 export function resolveLocalStackSettings(file, environment = process.env) {
   const value = (name, fallback) => environment[name] || file[name] || fallback;
-  const webPort = value("JANUSLY_LOCAL_WEB_PORT", "3000");
-  const apiPort = value("JANUSLY_LOCAL_API_PORT", "3001");
+  const webPort = value("JANUSLY_LOCAL_WEB_PORT", defaultLocalWebPort);
+  const apiPort = value("JANUSLY_LOCAL_API_PORT", defaultLocalApiPort);
   const simulatorPort = value("JANUSLY_LOCAL_SIMULATOR_PORT", "4010");
   return {
     webUrl: `http://127.0.0.1:${webPort}`,
