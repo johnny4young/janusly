@@ -3,7 +3,7 @@
   "name": "Support escalation",
   "description": "When a support ticket comes in, summarize it with AI, let a human agent review and edit the reply, escalate to the support channel, and email the customer back.",
   "category": "support_escalation",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "requiredCredentials": [
     {
       "name": "support_slack",
@@ -19,24 +19,46 @@
   ],
   "workflowJson": {
     "dslVersion": "1.0",
+    "templatePolicy": "strict",
     "id": "support-escalation",
     "name": "Support escalation",
     "inputs": {
       "type": "object",
-      "required": ["customer", "subject", "message"],
+      "required": ["event"],
       "properties": {
-        "customer": { "type": "string", "description": "Customer email" },
-        "subject": { "type": "string", "description": "Ticket subject line" },
-        "message": { "type": "string", "description": "The customer's full message" }
+        "event": {
+          "type": "object",
+          "required": ["eventId", "payload"],
+          "properties": {
+            "eventId": { "type": "string", "description": "Stable delivery id from the support system" },
+            "payload": {
+              "type": "object",
+              "required": ["customer", "subject", "message"],
+              "properties": {
+                "customer": { "type": "string", "description": "Customer email" },
+                "subject": { "type": "string", "description": "Ticket subject line" },
+                "message": { "type": "string", "description": "The customer's full message" }
+              }
+            }
+          }
+        }
       }
     },
     "nodes": [
-      { "id": "trigger", "type": "webhook", "config": {} },
+      { "id": "trigger", "type": "webhook_received", "config": { "endpointKey": "support-escalation" } },
       {
         "id": "summarize",
         "type": "ai",
         "config": {
-          "prompt": "You are a support assistant. Summarize this ticket in 2 sentences and draft a polite reply (under 150 words). Do not invent product features. Subject: {{context.trigger.output.subject}}\n\nMessage: {{context.trigger.output.message}}"
+          "prompt": "Summarize this support ticket in at most two sentences and draft a polite reply under 150 words without inventing product features. Return JSON with exactly two string fields named summary and draftReply. Subject: {{context.trigger.output.event.payload.subject}}\n\nMessage: {{context.trigger.output.event.payload.message}}",
+          "outputSchema": {
+            "type": "object",
+            "required": ["summary", "draftReply"],
+            "properties": {
+              "summary": { "type": "string" },
+              "draftReply": { "type": "string" }
+            }
+          }
         }
       },
       {
@@ -52,6 +74,10 @@
               "finalReply": { "type": "string", "description": "Final reply body. Pre-filled from the AI draft; edit as needed." },
               "priority": { "type": "string", "description": "Optional priority tag", "enum": ["low", "high"] }
             }
+          },
+          "initialValues": {
+            "finalReply": "{{context.summarize.output.data.draftReply}}",
+            "priority": "high"
           }
         }
       },
@@ -60,9 +86,10 @@
         "type": "tool",
         "config": {
           "tool": "slack.post",
+          "resultPolicy": "require_ok",
           "input": {
             "credential": "support_slack",
-            "text": ":ticket: Support ticket from {{context.trigger.output.customer}} — {{context.trigger.output.subject}} (priority {{context.review.output.priority}})"
+            "text": ":ticket: Support ticket from {{context.trigger.output.event.payload.customer}} — {{context.trigger.output.event.payload.subject}} (priority {{context.review.output.priority}})"
           }
         }
       },
@@ -71,9 +98,10 @@
         "type": "tool",
         "config": {
           "tool": "email.send",
+          "resultPolicy": "require_ok",
           "input": {
-            "to": "{{context.trigger.output.customer}}",
-            "subject": "Re: {{context.trigger.output.subject}}",
+            "to": "{{context.trigger.output.event.payload.customer}}",
+            "subject": "Re: {{context.trigger.output.event.payload.subject}}",
             "text": "{{context.review.output.finalReply}}"
           }
         }
@@ -84,16 +112,30 @@
       { "from": "summarize", "to": "review" },
       { "from": "review", "to": "escalate" },
       { "from": "escalate", "to": "reply" }
-    ]
+    ],
+    "outputs": {
+      "customer": "{{context.trigger.output.event.payload.customer}}",
+      "summary": "{{context.summarize.output.data.summary}}",
+      "finalReply": "{{context.review.output.finalReply}}",
+      "escalated": "{{context.escalate.output.result.ok}}",
+      "replied": "{{context.reply.output.result.ok}}"
+    }
   },
   "samplePayloads": [
     {
       "id": "default",
       "label": "Customer can't log in",
       "input": {
-        "customer": "dana@customer.test",
-        "subject": "Locked out after password reset",
-        "message": "I reset my password an hour ago and now the app says my account doesn't exist. Please help — I have a deadline today."
+        "event": {
+          "endpointKey": "support-escalation",
+          "eventId": "sample-ticket-login-lockout",
+          "eventType": "support.ticket_created",
+          "payload": {
+            "customer": "dana@customer.test",
+            "subject": "Locked out after password reset",
+            "message": "I reset my password an hour ago and now the app says my account doesn't exist. Please help — I have a deadline today."
+          }
+        }
       }
     }
   ],

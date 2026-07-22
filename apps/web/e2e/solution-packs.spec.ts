@@ -1,7 +1,8 @@
 import { mkdir } from 'node:fs/promises'
-import { expect, test, type Locator, type Page } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
+const API_URL = process.env.E2E_API_URL ?? 'http://localhost:3001'
 
 function installConsoleErrorGuards(page: Page) {
   const errors: string[] = []
@@ -30,18 +31,36 @@ async function dismissToasts(page: Page): Promise<void> {
   await expect(toasts).toHaveCount(0)
 }
 
-async function prepareSession(page: Page, locale: 'en' | 'es'): Promise<void> {
+async function prepareSession(page: Page, locale: 'en' | 'es'): Promise<string> {
   const orgId = `solution-packs-${locale}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   await page.addInitScript(({ activeOrg, selectedLocale }) => {
     window.localStorage.setItem('janusly:activeOrg', activeOrg)
     window.localStorage.setItem('janusly:locale', selectedLocale)
   }, { activeOrg: orgId, selectedLocale: locale })
+  return orgId
 }
 
-test('Solution Packs install, sample-run, and recovery-drill flows work from the UI', async ({ page }) => {
+async function pollRun(request: APIRequestContext, orgId: string, runId: string) {
+  const deadline = Date.now() + 30_000
+  while (Date.now() < deadline) {
+    const response = await request.get(`${API_URL}/run?runId=${encodeURIComponent(runId)}`, {
+      headers: { 'x-org-id': orgId, 'x-user-id': 'dev-user' },
+    })
+    expect(response.ok(), await response.text()).toBe(true)
+    const snapshot = await response.json() as {
+      run: { status: string }
+      nodes: Array<{ nodeId: string; status: string }>
+    }
+    if (['succeeded', 'failed', 'cancelled', 'skipped'].includes(snapshot.run.status)) return snapshot
+    await new Promise(resolve => setTimeout(resolve, 250))
+  }
+  throw new Error(`Run ${runId} did not reach a terminal status`)
+}
+
+test('Solution Packs install, sample-run, and recovery-drill flows work from the UI', async ({ page, request }) => {
   const browserErrors = installConsoleErrorGuards(page)
 
-  await prepareSession(page, 'en')
+  const orgId = await prepareSession(page, 'en')
   await page.goto('/')
   await expect(page.getByText('dev-user')).toBeVisible()
 
@@ -66,10 +85,20 @@ test('Solution Packs install, sample-run, and recovery-drill flows work from the
   await expect(page.locator('.workflow-node').filter({ hasText: 'Run a tool' })).toHaveCount(2)
 
   await page.getByRole('button', { name: 'Packs', exact: true }).click()
+  const sampleResponsePromise = page.waitForResponse(response => response.url().endsWith('/solution-packs/incident-triage/sample-run'))
   await incidentPack.getByRole('button', { name: 'Preview sample run', exact: true }).click()
+  const sampleResponse = await sampleResponsePromise
+  expect(sampleResponse.status()).toBe(200)
+  const sampleBody = await sampleResponse.json() as { runId: string }
   await expect(page.getByText('Sample run started in the sandbox.')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible()
   await expect(page.getByTestId('run-overview').locator('.status-pill[data-status]')).toBeVisible({ timeout: 30_000 })
+  const sampleRun = await pollRun(request, orgId, sampleBody.runId)
+  expect(sampleRun.run.status).toBe('succeeded')
+  expect(sampleRun.nodes).toEqual(expect.arrayContaining([
+    expect.objectContaining({ nodeId: 'open_issue', status: 'skipped' }),
+    expect.objectContaining({ nodeId: 'page_oncall', status: 'skipped' }),
+  ]))
 
   await page.getByRole('button', { name: 'Packs', exact: true }).click()
   await incidentPack.getByLabel('Failure scenario').selectOption('worker_interrupted_during_page')

@@ -212,7 +212,7 @@ Returns the public catalog. Requires `packs.read`.
     {
       "id": "incident-triage",
       "name": "Incident triage",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "requiredCredentials": [{ "name": "ops_slack", "kind": "slack_webhook", "purpose": "Pages your on-call channel" }],
       "nodeCount": 4,
       "samplePayloadIds": ["default"],
@@ -221,7 +221,7 @@ Returns the public catalog. Requires `packs.read`.
         {
           "id": "classification_output_invalid",
           "label": "AI severity output malformed",
-          "description": "The model returns text outside the expected severity contract and the classification step fails safely.",
+          "description": "The drill records malformed classification as an explicit failed step; the live workflow validity gate blocks external effects.",
           "failureMode": "ai_output_invalid",
           "recoveryPath": "direct_failure"
         }
@@ -444,6 +444,7 @@ Common issue codes:
 | `join_invalid_sources` | `join.config.sources` is malformed |
 | `schedule_invalid_cron` | `schedule.config.cronExpression` is malformed |
 | `trigger_invalid_config` | An event-driven trigger config failed its trigger schema |
+| `trigger_selector_ambiguous` | More than one active workflow matches the inbound selector |
 | `router_missing_candidates` / `router_invalid_candidate` | `router` / `router_llm` candidates are absent or not objects |
 | `router_candidate_missing_node_id` / `router_candidate_unknown_node_id` | A router candidate lacks a target id or points at an unknown node |
 | `edge_invalid_from` / `edge_invalid_to` | Edge references unknown node id |

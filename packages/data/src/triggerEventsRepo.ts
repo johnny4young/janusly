@@ -1,7 +1,7 @@
 /**
  * Repository for `trigger_events` rows — structured inbound-trigger events
- * for the event-driven trigger node types (`email_received`, `file_dropped`,
- * `mcp_server_event`).
+ * for the event-driven trigger node types (`webhook_received`,
+ * `email_received`, `file_dropped`, `mcp_server_event`).
  *
  * The API ingestion seam (`apps/api/src/routes/trigger-ingest-routes.ts`)
  * persists one `received` row for every accepted inbound event BEFORE the run
@@ -36,6 +36,17 @@ import {
 } from "@janusly/shared/src/trigger-types";
 
 export type TriggerEvent = typeof triggerEvents.$inferSelect;
+
+/** Fail-closed signal when an inbound selector matches multiple active workflows. */
+export class AmbiguousTriggerNodeError extends Error {
+  readonly triggerType: TriggerNodeType;
+
+  constructor(triggerType: TriggerNodeType) {
+    super(`Multiple active workflows match the ${triggerType} trigger selector`);
+    this.name = "AmbiguousTriggerNodeError";
+    this.triggerType = triggerType;
+  }
+}
 
 export type RecordTriggerEventInput = {
   orgId: string;
@@ -486,10 +497,11 @@ function extractTriggerNodes(dagJson: unknown): Array<{ id: string; type: Trigge
  * Resolve which trigger node in the org's latest workflow versions matches an
  * inbound event. The `matcher` is a predicate over the node's `(type, config)`
  * supplied by the seam (e.g. "config.aliasKey === inbound.aliasKey"). Returns
- * the FIRST match — an operator should keep trigger keys unique per org, and
- * a duplicate just fires the first-found workflow. Recovery can constrain the
- * lookup to the persisted workflow and node ids. Returns null when no node
- * matches (the seam records the inbound event as `skipped`).
+ * the unique match, throws `AmbiguousTriggerNodeError` when more than one
+ * active workflow matches, and returns null when none matches. Failing closed
+ * prevents an install or duplicated selector from silently routing an event to
+ * an arbitrary workflow. Recovery can constrain the lookup to the persisted
+ * workflow and node ids.
  */
 export async function resolveTriggerNode(
   orgId: string,
@@ -498,13 +510,15 @@ export async function resolveTriggerNode(
   options: { workflowId?: string; nodeId?: string } = {},
 ): Promise<ResolvedTriggerNode | null> {
   const versions = await loadLatestVersionsForOrg(orgId, options.workflowId);
+  let match: ResolvedTriggerNode | null = null;
   for (const version of versions) {
     const triggerNodes = extractTriggerNodes(version.dagJson);
     for (const node of triggerNodes) {
       if (node.type !== triggerType) continue;
       if (options.nodeId && node.id !== options.nodeId) continue;
       if (!matcher(node.config)) continue;
-      return {
+      if (match) throw new AmbiguousTriggerNodeError(triggerType);
+      match = {
         workflowId: version.workflowId,
         workflowVersionId: version.id,
         nodeId: node.id,
@@ -513,7 +527,7 @@ export async function resolveTriggerNode(
       };
     }
   }
-  return null;
+  return match;
 }
 
 // Multi-tenant invariant: every read/write keeps orgId in the predicate; the

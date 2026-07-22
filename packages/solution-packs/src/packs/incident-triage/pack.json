@@ -3,7 +3,7 @@
   "name": "Incident triage",
   "description": "When an alert fires, classify its severity with AI, open a tracking issue on GitHub, and page the on-call channel on Slack.",
   "category": "incident_triage",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "requiredCredentials": [
     {
       "name": "ops_github",
@@ -19,24 +19,46 @@
   "requiredOrgConfigs": [],
   "workflowJson": {
     "dslVersion": "1.0",
+    "templatePolicy": "strict",
     "id": "incident-triage",
     "name": "Incident triage",
     "inputs": {
       "type": "object",
-      "required": ["alertName", "summary"],
+      "required": ["event"],
       "properties": {
-        "alertName": { "type": "string", "description": "Short alert name from your monitoring system" },
-        "summary": { "type": "string", "description": "Alert body / description" },
-        "service": { "type": "string", "description": "Affected service name" }
+        "event": {
+          "type": "object",
+          "required": ["eventId", "payload"],
+          "properties": {
+            "eventId": { "type": "string", "description": "Stable delivery id from the monitoring system" },
+            "payload": {
+              "type": "object",
+              "required": ["alertName", "summary", "service"],
+              "properties": {
+                "alertName": { "type": "string", "description": "Short alert name from your monitoring system" },
+                "summary": { "type": "string", "description": "Alert body or description" },
+                "service": { "type": "string", "description": "Affected service name" }
+              }
+            }
+          }
+        }
       }
     },
     "nodes": [
-      { "id": "trigger", "type": "webhook", "config": {} },
+      { "id": "trigger", "type": "webhook_received", "config": { "endpointKey": "incident-triage" } },
       {
         "id": "classify",
         "type": "ai",
         "config": {
-          "prompt": "You are an SRE triage assistant. Classify the severity of this alert as EXACTLY one lowercase word, no punctuation: `sev1` | `sev2` | `sev3`. Then on a new line write a one-sentence rationale. Alert: {{context.trigger.output.alertName}} on {{context.trigger.output.service}} — {{context.trigger.output.summary}}"
+          "prompt": "Classify this alert and return JSON with exactly two fields: severity must be sev1, sev2, or sev3; rationale must be one concise sentence. Alert: {{context.trigger.output.event.payload.alertName}} on {{context.trigger.output.event.payload.service}} — {{context.trigger.output.event.payload.summary}}",
+          "outputSchema": {
+            "type": "object",
+            "required": ["severity", "rationale"],
+            "properties": {
+              "severity": { "type": "string", "enum": ["sev1", "sev2", "sev3"] },
+              "rationale": { "type": "string" }
+            }
+          }
         }
       },
       {
@@ -44,12 +66,13 @@
         "type": "tool",
         "config": {
           "tool": "github.create_issue",
+          "resultPolicy": "require_ok",
           "input": {
             "credential": "ops_github",
             "owner": "your-org",
             "repo": "incidents",
-            "title": "[incident] {{context.trigger.output.alertName}} on {{context.trigger.output.service}}",
-            "body": "Severity: {{context.classify.output.response}}\n\n{{context.trigger.output.summary}}",
+            "title": "[incident] {{context.trigger.output.event.payload.alertName}} on {{context.trigger.output.event.payload.service}}",
+            "body": "Severity: {{context.classify.output.data.severity}}\n\n{{context.classify.output.data.rationale}}\n\n{{context.trigger.output.event.payload.summary}}",
             "labels": ["incident", "auto-triaged"]
           }
         }
@@ -59,27 +82,41 @@
         "type": "tool",
         "config": {
           "tool": "slack.post",
+          "resultPolicy": "require_ok",
           "input": {
             "credential": "ops_slack",
-            "text": ":rotating_light: {{context.trigger.output.alertName}} on {{context.trigger.output.service}} — severity {{context.classify.output.response}}. Issue: {{context.open_issue.output.result.url}}"
+            "text": ":rotating_light: {{context.trigger.output.event.payload.alertName}} on {{context.trigger.output.event.payload.service}} — severity {{context.classify.output.data.severity}}. Issue: {{context.open_issue.output.result.url}}"
           }
         }
       }
     ],
     "edges": [
       { "from": "trigger", "to": "classify" },
-      { "from": "classify", "to": "open_issue" },
-      { "from": "open_issue", "to": "page_oncall" }
-    ]
+      { "from": "classify", "to": "open_issue", "condition": "context.classify.output.valid === true" },
+      { "from": "open_issue", "to": "page_oncall", "condition": "context.classify.output.valid === true" }
+    ],
+    "outputs": {
+      "severity": "{{context.classify.output.data.severity}}",
+      "rationale": "{{context.classify.output.data.rationale}}",
+      "issueUrl": "{{context.open_issue.output.result.url}}",
+      "pageDelivered": "{{context.page_oncall.output.result.ok}}"
+    }
   },
   "samplePayloads": [
     {
       "id": "default",
       "label": "Database connection pool exhausted",
       "input": {
-        "alertName": "DBConnectionPoolExhausted",
-        "summary": "Primary Postgres pool at 100% for 5m; new connections rejected.",
-        "service": "checkout-api"
+        "event": {
+          "endpointKey": "incident-triage",
+          "eventId": "sample-alert-db-pool",
+          "eventType": "monitoring.alert_fired",
+          "payload": {
+            "alertName": "DBConnectionPoolExhausted",
+            "summary": "Primary Postgres pool at 100% for 5m; new connections rejected.",
+            "service": "checkout-api"
+          }
+        }
       }
     }
   ],
@@ -102,7 +139,7 @@
     {
       "id": "classification_output_invalid",
       "label": "AI severity output malformed",
-      "description": "The model returns text outside the expected severity contract and the classification step fails safely.",
+      "description": "The drill records malformed classification as an explicit failed step; the live workflow validity gate blocks external effects.",
       "failureMode": "ai_output_invalid",
       "recoveryPath": "direct_failure",
       "failedNodeId": "classify",

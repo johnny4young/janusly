@@ -83,6 +83,7 @@ export type ApiErrorCode =
   | "trigger_invalid_payload"
   | "trigger_payload_too_large"
   | "trigger_no_matching_node"
+  | "trigger_selector_ambiguous"
   | "trigger_dkim_required"
   | "trigger_event_not_found"
   // solution packs

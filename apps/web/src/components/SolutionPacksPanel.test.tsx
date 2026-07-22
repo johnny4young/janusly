@@ -125,7 +125,11 @@ describe('<SolutionPacksPanel />', () => {
     fireEvent.change(select, { target: { value: 'classification_output_invalid' } })
     expect(screen.getByText('Invalid AI output')).toBeVisible()
     expect(screen.getByText('Deterministic fixture')).toBeVisible()
-    expect(screen.getByText('The model returns text outside the expected severity contract and the classification step fails safely.')).toBeVisible()
+    expect(
+      screen.getByText(
+        'The drill records malformed classification as a failed step; the live validity gate blocks external effects.',
+      ),
+    ).toBeVisible()
 
     fireEvent.click(screen.getByRole('button', { name: 'Start recovery drill' }))
     expect(handlers.onInjectFailure).toHaveBeenCalledWith('incident-triage', 'classification_output_invalid')

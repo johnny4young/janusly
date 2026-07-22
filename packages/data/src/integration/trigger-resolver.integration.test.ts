@@ -8,7 +8,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { db, workflows, workflowVersions } from "@janusly/db";
-import { resolveTriggerNode } from "../triggerEventsRepo";
+import { AmbiguousTriggerNodeError, resolveTriggerNode } from "../triggerEventsRepo";
 
 const TAG = `${Date.now()}-${process.pid}`;
 const ORG = `it-trigger-resolver-${TAG}`;
@@ -84,6 +84,19 @@ describe("resolveTriggerNode (real Postgres)", () => {
     );
 
     expect(resolved?.workflowId).toBe(targetId);
+  });
+
+  it("fails closed when one selector matches multiple active workflows", async () => {
+    const firstId = `ambiguous-a-${TAG}`;
+    const secondId = `ambiguous-b-${TAG}`;
+    await seedWorkflow({ id: firstId, versions: ["duplicate-selector"] });
+    await seedWorkflow({ id: secondId, versions: ["duplicate-selector"] });
+
+    await expect(resolveTriggerNode(
+      ORG,
+      "email_received",
+      (config) => config.aliasKey === "duplicate-selector",
+    )).rejects.toBeInstanceOf(AmbiguousTriggerNodeError);
   });
 
   it("does not resolve a target from another organization", async () => {

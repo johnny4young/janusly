@@ -70,6 +70,7 @@ import {
   resolveWorkflowRolloutAssignment,
   resolveTriggerNode,
   resolveTriggerNodeInVersion,
+  AmbiguousTriggerNodeError,
   type TriggerEvent,
   type ResolvedTriggerNode,
 } from "@janusly/data";
@@ -94,6 +95,7 @@ const EMAIL_INGEST_MAX_JSON_BYTES = 4 * 1_048_576;
 const TRIGGER_INGEST_MAX_JSON_BYTES = 1_048_576;
 
 type StatusFilter = TriggerEventStatus | undefined;
+const AMBIGUOUS_TRIGGER = Symbol("ambiguous-trigger");
 
 function parseStatusFilter(value: string | null): StatusFilter {
   if (value === "received" || value === "started" || value === "skipped" || value === "failed" || value === "buffered" || value === "backfilling") return value;
@@ -111,6 +113,20 @@ function triggerRateLimitBucket(resolved: ResolvedTriggerNode): string {
 /** True when a thrown error is the limiter's status-bearing 429. */
 function isRateLimit429(err: unknown): boolean {
   return Boolean(err && typeof err === "object" && (err as { statusCode?: unknown }).statusCode === 429);
+}
+
+/** Resolve one inbound selector and fail closed when active workflows conflict. */
+async function resolveUniqueTriggerNode(
+  orgId: string,
+  triggerType: TriggerNodeType,
+  matcher: (config: Record<string, unknown>) => boolean,
+): Promise<ResolvedTriggerNode | null | typeof AMBIGUOUS_TRIGGER> {
+  try {
+    return await resolveTriggerNode(orgId, triggerType, matcher);
+  } catch (error) {
+    if (error instanceof AmbiguousTriggerNodeError) return AMBIGUOUS_TRIGGER;
+    throw error;
+  }
 }
 
 /**
@@ -525,10 +541,13 @@ export const triggerIngestRoutes: Route[] = [
         return sendError(res, "trigger_invalid_payload", parsed.error.issues[0]?.message ?? "Invalid webhook payload", 400);
       }
       const payload = parsed.data;
-      const resolved = await resolveTriggerNode(auth.orgId, "webhook_received", (config) => {
+      const resolved = await resolveUniqueTriggerNode(auth.orgId, "webhook_received", (config) => {
         return typeof config.endpointKey === "string"
           && config.endpointKey.trim().toLowerCase() === payload.endpointKey.toLowerCase();
       });
+      if (resolved === AMBIGUOUS_TRIGGER) {
+        return sendError(res, "trigger_selector_ambiguous", "Multiple active workflows use this webhook endpoint key", 409);
+      }
       if (!resolved) {
         return sendError(res, "trigger_no_matching_node", "No webhook_received trigger matches this endpoint key", 404);
       }
@@ -570,9 +589,12 @@ export const triggerIngestRoutes: Route[] = [
         return sendError(res, "trigger_payload_too_large", "Email body exceeds 1 MiB cap", 413);
       }
 
-      const resolved = await resolveTriggerNode(auth.orgId, "email_received", (config) => {
+      const resolved = await resolveUniqueTriggerNode(auth.orgId, "email_received", (config) => {
         return typeof config.aliasKey === "string" && config.aliasKey.trim().toLowerCase() === payload.aliasKey.trim().toLowerCase();
       });
+      if (resolved === AMBIGUOUS_TRIGGER) {
+        return sendError(res, "trigger_selector_ambiguous", "Multiple active workflows use this email alias", 409);
+      }
       if (!resolved) {
         return sendError(res, "trigger_no_matching_node", "No email_received trigger matches this alias", 404);
       }
@@ -683,7 +705,7 @@ export const triggerIngestRoutes: Route[] = [
         return sendError(res, "trigger_payload_too_large", "File event metadata exceeds the cap", 413);
       }
 
-      const resolved = await resolveTriggerNode(auth.orgId, "file_dropped", (config) => {
+      const resolved = await resolveUniqueTriggerNode(auth.orgId, "file_dropped", (config) => {
         if (typeof config.bucket !== "string" || config.bucket !== payload.bucket) return false;
         const prefix = typeof config.prefix === "string" ? config.prefix : "";
         if (prefix && !payload.key.startsWith(prefix)) return false;
@@ -696,6 +718,9 @@ export const triggerIngestRoutes: Route[] = [
         }
         return true;
       });
+      if (resolved === AMBIGUOUS_TRIGGER) {
+        return sendError(res, "trigger_selector_ambiguous", "Multiple active workflows match this file selector", 409);
+      }
       if (!resolved) {
         return sendError(res, "trigger_no_matching_node", "No file_dropped trigger matches this object", 404);
       }
@@ -739,7 +764,7 @@ export const triggerIngestRoutes: Route[] = [
         return sendError(res, "trigger_payload_too_large", "MCP resource payload exceeds the cap", 413);
       }
 
-      const resolved = await resolveTriggerNode(auth.orgId, "mcp_server_event", (config) => {
+      const resolved = await resolveUniqueTriggerNode(auth.orgId, "mcp_server_event", (config) => {
         if (typeof config.connectionAlias !== "string" || config.connectionAlias !== payload.connectionAlias) return false;
         if (typeof config.resourceUri !== "string" || config.resourceUri !== payload.resourceUri) return false;
         const eventTypes = Array.isArray(config.eventTypes)
@@ -748,6 +773,9 @@ export const triggerIngestRoutes: Route[] = [
         if (eventTypes.length > 0 && !eventTypes.includes(payload.eventType)) return false;
         return true;
       });
+      if (resolved === AMBIGUOUS_TRIGGER) {
+        return sendError(res, "trigger_selector_ambiguous", "Multiple active workflows match this MCP event selector", 409);
+      }
       if (!resolved) {
         return sendError(res, "trigger_no_matching_node", "No mcp_server_event trigger matches this notification", 404);
       }

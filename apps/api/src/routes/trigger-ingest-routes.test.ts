@@ -26,6 +26,7 @@ vi.mock("../audit-helper", () => ({ auditAction: vi.fn(async () => undefined) })
 vi.mock("../rate-limit", () => ({ enforceRateLimit: vi.fn(async () => undefined) }));
 
 vi.mock("@janusly/data", () => ({
+  AmbiguousTriggerNodeError: class AmbiguousTriggerNodeError extends Error {},
   recordSystemAudit: vi.fn(async () => undefined),
   recordTriggerEvent: vi.fn(),
   findTriggerEventByDedupeKey: vi.fn(),
@@ -88,6 +89,7 @@ import {
   resolveTriggerNode,
   resolveTriggerNodeInVersion,
   resolveWorkflowRolloutAssignment,
+  AmbiguousTriggerNodeError,
 } from "@janusly/data";
 import { startRun, TriggerEventStartConflictError } from "@janusly/engine/src/start-run";
 import { createApiServer } from "../server";
@@ -272,6 +274,26 @@ describe("webhook_received ingestion", () => {
         "webhook_received",
         expect.any(Function),
       );
+      expect(startRunMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("fails closed when the endpoint key matches multiple active workflows", async () => {
+    resolveTriggerNodeMock.mockRejectedValue(new AmbiguousTriggerNodeError("webhook_received"));
+    const server = createApiServer({ routes: triggerIngestRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const res = await postWebhook(baseUrl, {
+        endpointKey: "incident-triage",
+        eventId: "alert-1",
+        payload: { service: "postgres" },
+      });
+
+      expect(res.status).toBe(409);
+      await expect(res.json()).resolves.toMatchObject({ code: "trigger_selector_ambiguous" });
+      expect(recordTriggerEventMock).not.toHaveBeenCalled();
       expect(startRunMock).not.toHaveBeenCalled();
     } finally {
       await close(server);

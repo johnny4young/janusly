@@ -527,6 +527,10 @@ stored payload from that structured event row.
 - `POST /triggers/mcp/ingest` matches `mcp_server_event.config.connectionAlias`, `resourceUri`, and optional `eventTypes`.
 - `POST /triggers/events/:id/replay` replays a stored event against the current latest workflow version.
 
+Inbound selectors must be unique among active workflows in an organization. A
+duplicate selector returns HTTP 409 `trigger_selector_ambiguous` before any
+event or run is created; Janusly never chooses an arbitrary first match.
+
 Manual `POST /start` still executes a workflow containing trigger nodes; in
 that path the trigger output carries an empty `event` object.
 

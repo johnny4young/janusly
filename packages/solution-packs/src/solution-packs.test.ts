@@ -58,6 +58,58 @@ describe("solution packs catalog", () => {
     }
   });
 
+  it("every pack is wired for real inbound delivery and explicit terminal outputs", () => {
+    for (const pack of packs) {
+      expect(pack.workflowJson.templatePolicy, pack.id).toBe("strict");
+      expect(Object.keys(pack.workflowJson.outputs ?? {}).length, `${pack.id}: outputs`).toBeGreaterThan(0);
+      const trigger = pack.workflowJson.nodes.find((node) => node.type === "webhook_received");
+      expect(trigger, `${pack.id}: webhook_received`).toBeDefined();
+      expect(trigger?.config.endpointKey, `${pack.id}: endpointKey`).toBe(pack.id);
+      for (const sample of pack.samplePayloads) {
+        expect(sample.input, `${pack.id}:${sample.id}`).toMatchObject({
+          event: {
+            endpointKey: pack.id,
+            eventId: expect.any(String),
+            payload: expect.any(Object),
+          },
+        });
+      }
+    }
+  });
+
+  it("contracts AI data and promotes failed write envelopes into recovery", () => {
+    for (const pack of packs) {
+      for (const node of pack.workflowJson.nodes) {
+        if (node.type === "ai") {
+          expect(node.config.outputSchema, `${pack.id}:${node.id}: outputSchema`).toMatchObject({ type: "object" });
+        }
+        if (node.type === "tool") {
+          expect(node.config.resultPolicy, `${pack.id}:${node.id}: resultPolicy`).toBe("require_ok");
+        }
+      }
+    }
+  });
+
+  it("gates incident side effects on valid structured classification", () => {
+    const incident = getSolutionPack("incident-triage")!;
+    for (const [from, to] of [["classify", "open_issue"], ["open_issue", "page_oncall"]]) {
+      expect(incident.workflowJson.edges).toContainEqual({
+        from,
+        to,
+        condition: "context.classify.output.valid === true",
+      });
+    }
+  });
+
+  it("prefills the support review from the schema-validated AI draft", () => {
+    const support = getSolutionPack("support-escalation")!;
+    const review = support.workflowJson.nodes.find((node) => node.id === "review");
+    expect(review?.config.initialValues).toEqual({
+      finalReply: "{{context.summarize.output.data.draftReply}}",
+      priority: "high",
+    });
+  });
+
   it("every failure fixture references a node that exists in its workflow", () => {
     for (const pack of packs) {
       const nodeIds = new Set(pack.workflowJson.nodes.map((n) => n.id));

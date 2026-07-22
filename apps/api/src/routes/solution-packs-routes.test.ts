@@ -245,7 +245,13 @@ describe("POST /solution-packs/:id/sample-run", () => {
     expect(arg.orgId).toBe("org-1");
     expect(arg.source).toBe("pack:incident-triage");
     // The bundled sample payload becomes the run input.
-    expect(arg.input).toMatchObject({ alertName: expect.any(String) });
+    expect(arg.input).toMatchObject({
+      event: {
+        endpointKey: "incident-triage",
+        eventId: expect.any(String),
+        payload: { alertName: expect.any(String) },
+      },
+    });
 
     expect(auditActionMock.mock.calls[0][1]).toBe("solution_pack.sample_run_started");
   });
