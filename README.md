@@ -164,6 +164,23 @@ The first `pnpm dev` boot may take several minutes while Ollama pulls the `bge-m
 
 When you're done, press `Ctrl+C` in the `pnpm dev` terminal. The orchestrator shuts down API, worker, web, and Compose.
 
+### Persistent local integration lab
+
+Use the dedicated Docker profile when workflows, runs, recovery evidence, and
+provider simulations must survive restarts:
+
+```bash
+pnpm local:up
+pnpm local:verify
+# Studio: http://127.0.0.1:3000
+```
+
+Unlike the short-lived `pnpm dev` test topology, this stack uses named volumes,
+keeps API and worker behavior production-shaped, and locally simulates GitHub,
+Slack, signed webhooks, and email without contacting public providers. See
+[`docs/local-deployment.md`](docs/local-deployment.md) for lifecycle commands,
+failure injection, persistence, safety boundaries, and optional Ollama memory.
+
 ### Use Janusly from Claude Desktop / Cursor (MCP)
 
 `packages/mcp-server` ships an MCP server over stdio. It always advertises read-only inspection, preflight, and AI-authoring tools; when both MCP write-consent flags are enabled it additionally advertises workflow authoring, run operation, exact-DLQ replay, rollback, and outbound-connection management. Contracted tools use runtime-validated `/v1` envelopes; `reports.run_explain` consumes the structured JSON contract while downloadable report artifacts remain on the unversioned route, and `dlq.replay` requires the `deadLetterId` returned by `dlq.list` so terminal recovery evidence stays attributable. With `pnpm dev` running, drop this into `~/Library/Application Support/Claude/claude_desktop_config.json` (or your platform equivalent) and restart Claude Desktop:
@@ -190,6 +207,13 @@ See [`packages/mcp-server/README.md`](packages/mcp-server/README.md) for the arc
 
 ```bash
 pnpm dev             # full local stack: Compose + migrate + api/worker/web; waits for HTTP readiness
+pnpm local:up        # persistent loopback-only Docker integration lab
+pnpm local:smoke     # inbound event + GitHub/Slack/webhook/email simulator path
+pnpm local:failure-smoke # controlled provider outage + fail-closed DLQ evidence
+pnpm local:ui-smoke  # Chromium smoke against the persistent stack
+pnpm local:verify    # provider smoke + full restart persistence proof
+pnpm local:down      # stop the persistent stack without deleting its volumes
+pnpm local:reset     # destructively remove persistent local-stack data
 pnpm dev:doctor      # free api/web ports (:3001, :5173, legacy :5174); add --compose to tear Compose down too
 pnpm stop            # docker compose stop (keeps volumes)
 pnpm clean           # docker compose down -v (removes local volumes)

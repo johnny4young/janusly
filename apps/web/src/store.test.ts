@@ -36,6 +36,18 @@ beforeEach(() => {
 })
 
 describe('useWorkflowStore', () => {
+  it('initializes the translated starter name only while the boot sentinel is empty', () => {
+    useWorkflowStore.setState({ currentWorkflowName: '', workflowDirty: false })
+    useWorkflowStore.getState().initializeWorkflowName('Flujo de ejemplo')
+    expect(useWorkflowStore.getState()).toMatchObject({
+      currentWorkflowName: 'Flujo de ejemplo',
+      workflowDirty: false,
+    })
+
+    useWorkflowStore.getState().initializeWorkflowName('Sample workflow')
+    expect(useWorkflowStore.getState().currentWorkflowName).toBe('Flujo de ejemplo')
+  })
+
   it('addNode appends a node with its preset config and an empty label (leaf component resolves)', () => {
     useWorkflowStore.getState().addNode('http')
     const { nodes } = useWorkflowStore.getState()

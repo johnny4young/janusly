@@ -153,6 +153,8 @@ async function openWorkflow(
 
 async function openRunFromHistory(page: Page, contract: LocaleContract, runId: string): Promise<void> {
   await page.getByRole('button', { name: contract.runs, exact: true }).click()
+  const overview = page.getByTestId('run-workspace-tab-overview')
+  if (await overview.isVisible().catch(() => false)) await overview.click()
   const history = page.getByTestId('runs-history-virtual-list')
   await expect(history).toBeVisible()
   await expect.poll(() => history.getByRole('article').count()).toBeGreaterThan(0)

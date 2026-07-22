@@ -38,7 +38,7 @@ type EmailUsageRecord = {
   workflowId?: string;
   to: string;
   from: string;
-  provider: "resend" | "sendgrid" | "noop";
+  provider: "resend" | "sendgrid" | "simulator" | "noop";
   providerMessageId?: string;
   ok: boolean;
   error?: string;

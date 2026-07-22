@@ -212,6 +212,8 @@ type WorkflowStore = {
   addNode: (type: string, position?: { x: number; y: number }) => void
   duplicateNode: (nodeId: string) => void
   hydrateWorkflow: (workflow: WorkflowDefinition, options?: { saved?: boolean; dirty?: boolean }) => void
+  /** Set the localized starter name once React mounts after i18n bootstrap. */
+  initializeWorkflowName: (name: string) => void
   getWorkflowJson: () => WorkflowDefinition
   newWorkflow: () => void
   /** Mark the current workflow as persisted server-side (after a successful save). */
@@ -365,7 +367,10 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   authReady: false,
 
   currentWorkflowId: 'ui-test',
-  currentWorkflowName: t('workflow.sampleName'),
+  // `main.tsx` starts downloading App in parallel with the locale catalog, so
+  // module evaluation can precede i18next initialization. App fills this
+  // sentinel before paint; never translate during store module evaluation.
+  currentWorkflowName: '',
   currentWorkflowSaved: false,
   workflowDirty: false,
   workflowRevision: 0,
@@ -479,6 +484,10 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       workflowRevision: state.workflowRevision + 1,
     }))
   },
+
+  initializeWorkflowName: (name) => set((state) => (
+    state.currentWorkflowName.length === 0 ? { currentWorkflowName: name } : state
+  )),
 
   markWorkflowSaved: () => set({ currentWorkflowSaved: true, workflowDirty: false }),
   markWorkflowDirty: () => set({ workflowDirty: true }),

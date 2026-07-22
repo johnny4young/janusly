@@ -174,6 +174,27 @@ describe("slack.post", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("accepts the explicitly enabled local Slack simulator", async () => {
+    vi.stubEnv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true");
+    vi.stubEnv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL", "http://provider-simulator:4010");
+    vi.stubEnv("INCIDENTS_SLACK_WEBHOOK_URL", "http://provider-simulator:4010/slack/services/local/ops");
+    credentialMock.mockResolvedValueOnce(credentialRow({ name: "incidents-slack" }));
+    fetchMock.mockResolvedValueOnce({ statusCode: 200, ok: true, body: "ok", headers: {} });
+
+    const result = await executeTool(
+      "slack.post",
+      { credential: "incidents-slack", text: "Local page" },
+      {},
+      { orgId: "org-1" },
+    );
+
+    expect(result).toMatchObject({ ok: true, statusCode: 200 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://provider-simulator:4010/slack/services/local/ops",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("maps a non-2xx response to ok:false with statusCode + error", async () => {
     vi.stubEnv("INCIDENTS_SLACK_WEBHOOK_URL", "https://hooks.slack.com/services/T00/B00/abc");
     credentialMock.mockResolvedValueOnce(credentialRow({ name: "incidents-slack" }));
@@ -240,6 +261,34 @@ describe("slack.post", () => {
 // ──────────────────────────────────────────────────────────────────────────
 
 describe("github.create_issue", () => {
+  it("routes to the explicitly enabled local GitHub simulator", async () => {
+    vi.stubEnv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true");
+    vi.stubEnv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL", "http://provider-simulator:4010");
+    vi.stubEnv("GITHUB_BOT_TOKEN", "local-token");
+    credentialMock.mockResolvedValueOnce(credentialRow({
+      name: "bot-github",
+      kind: "github_token",
+      secretRef: "GITHUB_BOT_TOKEN",
+    }));
+    fetchMock.mockResolvedValueOnce({
+      statusCode: 201,
+      ok: true,
+      body: '{"number":42,"html_url":"http://provider-simulator:4010/ui/issues/42"}',
+      headers: {},
+    });
+
+    const result = await executeTool(
+      "github.create_issue",
+      { credential: "bot-github", owner: "acme", repo: "incidents", title: "Local incident" },
+      {},
+      { orgId: "org-1" },
+    );
+
+    expect(result).toMatchObject({ ok: true, issueNumber: 42 });
+    expect(fetchMock.mock.calls[0]?.[0])
+      .toBe("http://provider-simulator:4010/github/repos/acme/incidents/issues");
+  });
+
   it("creates an issue and surfaces issueNumber + url on 201", async () => {
     vi.stubEnv("GITHUB_BOT_TOKEN", "ghp_redacted");
     credentialMock.mockResolvedValueOnce(credentialRow({
@@ -322,6 +371,29 @@ describe("github.create_issue", () => {
 // ──────────────────────────────────────────────────────────────────────────
 
 describe("webhook.send", () => {
+  it("rewrites reserved example.com placeholders only in explicit local simulator mode", async () => {
+    vi.stubEnv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true");
+    vi.stubEnv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL", "http://provider-simulator:4010");
+    vi.stubEnv("PARTNER_WEBHOOK_SECRET", "local-secret");
+    credentialMock.mockResolvedValueOnce(credentialRow({
+      name: "partner-webhook",
+      kind: "webhook_secret",
+      secretRef: "PARTNER_WEBHOOK_SECRET",
+    }));
+    fetchMock.mockResolvedValueOnce({ statusCode: 202, ok: true, body: "accepted", headers: {} });
+
+    const result = await executeTool(
+      "webhook.send",
+      { credential: "partner-webhook", url: "https://billing.example.com/charges/retry", payload: { invoiceId: "inv-1" } },
+      {},
+      { orgId: "org-1" },
+    );
+
+    expect(result).toMatchObject({ ok: true, statusCode: 202 });
+    expect(fetchMock.mock.calls[0]?.[0])
+      .toBe("http://provider-simulator:4010/webhook?target=https%3A%2F%2Fbilling.example.com%2Fcharges%2Fretry");
+  });
+
   it("signs the body and sends it via fetchHttpTarget with the default header", async () => {
     vi.stubEnv("WEBHOOK_SIGNING_SECRET", "supers3cret");
     credentialMock.mockResolvedValueOnce(credentialRow({

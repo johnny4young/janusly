@@ -36,7 +36,17 @@
     "test:integration": "node scripts/run-integration.mjs",
     "observability:up": "docker compose -f deploy/observability/compose.local.yml up -d",
     "observability:down": "docker compose -f deploy/observability/compose.local.yml down",
-    "observability:check": "node --test scripts/observability-config.test.mjs"
+    "observability:check": "node --test scripts/observability-config.test.mjs",
+    "local:up": "node scripts/local-stack.mjs up",
+    "local:down": "node scripts/local-stack.mjs down",
+    "local:reset": "node scripts/local-stack.mjs reset",
+    "local:restart": "node scripts/local-stack.mjs restart",
+    "local:status": "node scripts/local-stack.mjs status",
+    "local:logs": "node scripts/local-stack.mjs logs",
+    "local:smoke": "node scripts/local-stack-smoke.mjs",
+    "local:failure-smoke": "node scripts/local-stack-smoke.mjs --failure=slack",
+    "local:ui-smoke": "node scripts/local-stack-ui-smoke.mjs",
+    "local:verify": "node scripts/local-stack-smoke.mjs --restart"
   },
   "devDependencies": {
     "oxc-parser": "^0.140.0",

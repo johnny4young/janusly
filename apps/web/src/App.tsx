@@ -19,7 +19,7 @@
  *   radix/cva/clsx/tailwind-merge here.
  */
 
-import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Layout } from './Layout'
 import { BrandMark } from './components/BrandMark'
 import { BuilderSidebar } from './components/BuilderSidebar'
@@ -135,6 +135,7 @@ export default function App() {
     setAuthReady,
     setActiveTab,
     setWorkflowName,
+    initializeWorkflowName,
     hydrateWorkflow,
     getWorkflowJson,
     newWorkflow,
@@ -188,6 +189,7 @@ export default function App() {
     setAuthReady: s.setAuthReady,
     setActiveTab: s.setActiveTab,
     setWorkflowName: s.setWorkflowName,
+    initializeWorkflowName: s.initializeWorkflowName,
     hydrateWorkflow: s.hydrateWorkflow,
     getWorkflowJson: s.getWorkflowJson,
     newWorkflow: s.newWorkflow,
@@ -210,6 +212,10 @@ export default function App() {
   })))
 
   const { t } = useT()
+
+  useLayoutEffect(() => {
+    initializeWorkflowName(t('workflow.sampleName'))
+  }, [initializeWorkflowName, t])
 
   const [validationIssues, setValidationIssues] = useState<ValidationIssue[]>([])
   const [readinessResult, setReadinessResult] = useState<ReadinessResult | null>(null)

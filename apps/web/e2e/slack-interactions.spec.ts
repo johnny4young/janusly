@@ -9,6 +9,7 @@ import { createHmac } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+import { db, orgMembers } from '../../../packages/db/src/index'
 
 import {
   findDeadLetterForRun,
@@ -22,29 +23,37 @@ import {
 
 const API_URL = process.env.E2E_API_URL ?? 'http://localhost:3001'
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
-const AUTH = {
-  'Content-Type': 'application/json',
-  'x-org-id': 'default',
-  'x-user-id': 'dev-user',
+function authHeaders(orgId: string) {
+  return {
+    'Content-Type': 'application/json',
+    'x-org-id': orgId,
+    'x-user-id': 'dev-user',
+  }
 }
 const SIGNING_SECRET = 'janusly-e2e-slack-signing-secret'
 const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']
 
-async function createRecoveryItem(request: APIRequestContext): Promise<string> {
-  const workflow = await loadTemplate(request, 'failed-workflow-recovery')
+async function createRecoveryItem(request: APIRequestContext, orgId: string): Promise<string> {
+  const workflow = await loadTemplate(request, 'failed-workflow-recovery', orgId)
   const payload = { customer: 'slack-operator@example.com', amountUsd: 77 }
-  const { runId } = await startRun(request, workflow, payload)
-  await pollUntilWaitingOrTerminal(request, runId, 'trigger')
-  await resumeWebhook(request, runId, 'trigger', payload)
-  expect((await pollUntilTerminal(request, runId)).status).toBe('failed')
-  const deadLetter = await findDeadLetterForRun(request, runId)
+  const { runId } = await startRun(request, workflow, payload, orgId)
+  await pollUntilWaitingOrTerminal(request, runId, 'trigger', 30_000, orgId)
+  await resumeWebhook(request, runId, 'trigger', payload, orgId)
+  expect((await pollUntilTerminal(request, runId, 30_000, orgId)).status).toBe('failed')
+  const deadLetter = await findDeadLetterForRun(request, runId, orgId)
   expect(deadLetter).not.toBeNull()
-  const response = await request.get(`${API_URL}/recovery/items?limit=200`, { headers: AUTH })
-  expect(response.ok()).toBe(true)
-  const body = await response.json() as { items?: Array<{ id: string; deadLetterId: string }> }
-  const item = body.items?.find((candidate) => candidate.deadLetterId === deadLetter!.id)
-  expect(item, 'failed run must create a linked recovery item').toBeDefined()
-  return item!.id
+  let recoveryItemId = ''
+  await expect.poll(async () => {
+    const response = await request.get(`${API_URL}/recovery/items?limit=200`, { headers: authHeaders(orgId) })
+    if (!response.ok()) return `http-${response.status()}`
+    const body = await response.json() as { items?: Array<{ id: string; deadLetterId: string }> }
+    recoveryItemId = body.items?.find((candidate) => candidate.deadLetterId === deadLetter!.id)?.id ?? ''
+    return recoveryItemId
+  }, {
+    message: 'failed run must create a linked recovery item',
+    timeout: 30_000,
+  }).not.toBe('')
+  return recoveryItemId
 }
 
 async function postSignedAction(
@@ -117,6 +126,7 @@ test.describe.configure({ mode: 'serial' })
 
 test('configures and executes signed recovery actions in English and Spanish', async ({ page, request }) => {
   test.setTimeout(180_000)
+  const orgId = `slack-interactions-${Date.now()}`
   const consoleErrors: string[] = []
   const pageErrors: string[] = []
   page.on('console', (message) => {
@@ -124,19 +134,26 @@ test('configures and executes signed recovery actions in English and Spanish', a
   })
   page.on('pageerror', (error) => pageErrors.push(error.message))
 
+  await db.insert(orgMembers).values({
+    id: `slack-member-${Date.now()}`,
+    orgId,
+    userId: 'dev-user',
+    email: 'dev-user@janusly.local',
+    role: 'admin',
+  }).onConflictDoNothing()
   await seedCredential(request, {
     name: 'e2e-slack-signing',
     kind: 'slack_signing_secret',
     secretRef: 'JANUSLY_E2E_SLACK_SIGNING_SECRET',
-  })
-  const recoveryItemId = await createRecoveryItem(request)
+  }, orgId)
+  const recoveryItemId = await createRecoveryItem(request, orgId)
 
   await page.setViewportSize({ width: 1440, height: 1000 })
-  await page.addInitScript(() => {
-    window.localStorage.setItem('janusly:activeOrg', 'default')
+  await page.addInitScript((activeOrg) => {
+    window.localStorage.setItem('janusly:activeOrg', activeOrg)
     if (!window.localStorage.getItem('janusly:locale')) window.localStorage.setItem('janusly:locale', 'en')
     window.localStorage.setItem('janusly:operations:section', 'integrations')
-  })
+  }, orgId)
   await page.goto('/')
   await page.getByRole('button', { name: 'Operations', exact: true }).click()
   const panel = page.locator('.we-slack-interactions')
@@ -186,7 +203,7 @@ test('configures and executes signed recovery actions in English and Spanish', a
     timestamp,
   )
   expect(assigned.ok()).toBe(true)
-  const itemResponse = await request.get(`${API_URL}/recovery/items/${recoveryItemId}`, { headers: AUTH })
+  const itemResponse = await request.get(`${API_URL}/recovery/items/${recoveryItemId}`, { headers: authHeaders(orgId) })
   expect(itemResponse.ok()).toBe(true)
   expect(await itemResponse.json()).toMatchObject({
     item: { status: 'acknowledged', owner: 'dev-user' },

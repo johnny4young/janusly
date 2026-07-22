@@ -42,6 +42,22 @@ retroactively.
 
 ### Added
 
+- A loopback-only persistent Docker integration lab with named Postgres,
+  Redis, provider-evidence, and optional Ollama volumes; separate API and worker
+  processes; one-shot migration/bootstrap; deterministic GitHub, Slack,
+  signed-webhook, and email simulation; controlled failure modes; restart
+  persistence proof; and Chromium smoke evidence.
+- Durable authenticated JSON webhook ingestion with stable caller event IDs,
+  idempotent run creation, persisted replay anchors, selector ambiguity
+  rejection, strict payload bounds, and authoring/UI coverage.
+- Observable workflow result contracts: tool nodes can promote failed
+  `{ ok: false }` envelopes, AI nodes can require schema-valid structured
+  output, human-form defaults are schema checked, and readiness reports unsafe
+  side-effect paths before execution.
+- Solution Packs now declare real inbound webhook contracts, strict templates,
+  structured AI outputs, fail-closed side effects, and explicit workflow
+  outputs, with runtime and UI qualification evidence.
+
 - An Observability Starter Kit with pinned Grafana Alloy, Prometheus, Tempo,
   and Grafana profiles for local operation, plus a Grafana Cloud forwarding
   profile, provisioned operations dashboard, starter alert rules, safe
@@ -105,6 +121,9 @@ retroactively.
   operationally critical index shapes.
 
 ### Fixed
+
+- The production web bootstrap no longer renders the initial workflow name as
+  `undefined` when the App chunk evaluates before the lazy locale catalog.
 
 - Stalled-node recovery now commits the running-node claim, optional replayable
   DLQ row, causal node event, and parent-run failure in one transaction, so a

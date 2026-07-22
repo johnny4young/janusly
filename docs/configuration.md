@@ -98,7 +98,7 @@ Guardrails:
 | `http.maxResponseBytes` | `JANUSLY_HTTP_MAX_RESPONSE_BYTES` | `1000000` | Engine `http` nodes and `http.request` tool | Default maximum decoded body size. |
 | `http.maxRedirects` | `JANUSLY_HTTP_MAX_REDIRECTS` | `5` | Engine `http` nodes and `http.request` tool | Default maximum redirect hops. |
 | `http.streamPreviewBytes` | `JANUSLY_HTTP_STREAM_PREVIEW_BYTES` | `65536` | Engine `http` nodes and `http.request` tool | Bytes persisted as the JSON-safe preview for streamed HTTP bodies. The full stream still respects `http.maxResponseBytes`. |
-| `email.provider` | `JANUSLY_MAILER_PROVIDER` | `noop` | `email.send` tool | Default mailer backend. Provider API keys stay in env or a vault. |
+| `email.provider` | `JANUSLY_MAILER_PROVIDER` | `noop` | `email.send` tool | Default mailer backend. Public providers are `resend` and `sendgrid`; `simulator` is accepted only behind the explicit local-stack process gate. Provider API keys stay in env or a vault. |
 | `email.from` | `JANUSLY_MAILER_FROM` | `onboarding@resend.dev` | `email.send` tool | Default sender address when workflow input omits `from`. |
 | `email.rateLimitPerMin` | `JANUSLY_EMAIL_RATE_LIMIT_PER_MIN` | `100` | `email.send` tool | Per-org email sends per minute. |
 | `runs.requireSavedWorkflow` | `JANUSLY_REQUIRE_SAVED_WORKFLOW` | `false` | `POST /start` | Require runs to start from saved workflows instead of ad-hoc payloads. |
@@ -236,7 +236,7 @@ transports additionally use the sandbox settings below.
 
 | Variable | Default | Used by | Purpose |
 | --- | --- | --- | --- |
-| `JANUSLY_MAILER_PROVIDER` | `noop` | `packages/engine/src/mailer.ts` | Mailer backend for `email.send`: `noop`, `resend`, or `sendgrid`. |
+| `JANUSLY_MAILER_PROVIDER` | `noop` | `packages/engine/src/mailer.ts` | Mailer backend for `email.send`: `noop`, `resend`, `sendgrid`, or the explicitly gated local `simulator`. |
 | `JANUSLY_MAILER_FROM` | `onboarding@resend.dev` | `packages/engine/src/tool-registry.ts` | Default sender address when the workflow/tool input omits `from`. |
 | `JANUSLY_EMAIL_RATE_LIMIT_PER_MIN` | `100` | `org_configs.email.rateLimitPerMin` | Per-org `email.send` limit fallback. |
 | `RESEND_API_KEY` | unset | `packages/engine/src/mailer.ts` | Resend API key. Required only when provider is `resend`. |
@@ -252,6 +252,25 @@ transports additionally use the sandbox settings below.
 | `JANUSLY_OBJECT_STORE_ENDPOINT` | unset | `packages/engine/src/object-store.ts` | Optional S3-compatible endpoint for MinIO/R2/Backblaze-style stores. |
 | `JANUSLY_OBJECT_STORE_PUBLIC_BASE_URL` | unset | `packages/engine/src/object-store.ts` | Optional public URL prefix; when absent, S3 mode returns presigned URLs. |
 | `JANUSLY_OBJECT_STORE_PRESIGNED_TTL_SEC` | `3600` | `packages/engine/src/object-store.ts` | Presigned URL TTL in seconds for S3 mode. |
+
+### Local integration simulator
+
+These variables are for the loopback-only profile in
+[`docs/local-deployment.md`](local-deployment.md). They are not production
+integration settings.
+
+| Variable | Default | Used by | Purpose |
+| --- | --- | --- | --- |
+| `JANUSLY_LOCAL_INTEGRATION_SIMULATOR` | `false` | integration tools and mailer | Master process gate. Only the exact string `true` enables simulator routing. |
+| `JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL` | unset | `packages/engine/src/local-integration-simulator.ts` | Process-owned simulator base URL. Credentials, query strings, and fragments are rejected. |
+| `JANUSLY_LOCAL_STACK` | `false` | local bootstrap | Required marker before the local credential/config bootstrap can run. |
+| `JANUSLY_LOCAL_ORG_ID` | `default` | local bootstrap and smoke scripts | Organization seeded and exercised by the local lab. |
+
+The Compose-specific `JANUSLY_LOCAL_*_PORT`, local Postgres password, sender,
+and browser URL settings are documented in the tracked
+`deploy/local/local.env.example`. Simulator delivery still requires normal
+credential rows; the local bootstrap creates only references to local-only
+environment values.
 
 `.env.example` includes sample credential env names such as
 `SLACK_INCIDENTS_WEBHOOK_URL`, `GITHUB_BOT_TOKEN`, and

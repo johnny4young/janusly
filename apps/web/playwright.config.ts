@@ -1,6 +1,11 @@
 import { defineConfig, devices } from '@playwright/test'
 
-const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:5173'
+// The root E2E harness owns this private variable. Unlike the documented
+// PLAYWRIGHT_BASE_URL, it is not present in the root .env and therefore cannot
+// be replaced when database-backed specs load @janusly/db in a worker.
+const baseURL = process.env.JANUSLY_E2E_RUNTIME_BASE_URL
+  ?? process.env.PLAYWRIGHT_BASE_URL
+  ?? 'http://127.0.0.1:5173'
 const webPort = new URL(baseURL).port || '5173'
 
 export default defineConfig({

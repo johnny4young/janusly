@@ -433,7 +433,7 @@ export const ORG_CONFIG_DEFINITIONS = [
     valueType: "string",
     defaultValue: "noop",
     envKeys: ["JANUSLY_MAILER_PROVIDER"],
-    allowedValues: ["resend", "sendgrid", "noop"],
+    allowedValues: ["resend", "sendgrid", "simulator", "noop"],
   },
   {
     key: "email.from",

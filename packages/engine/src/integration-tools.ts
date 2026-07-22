@@ -46,6 +46,11 @@ import { getCredentialByName } from "@janusly/data";
 import { RATE_LIMIT_WINDOW_MS } from "./constants";
 import { fetchHttpTarget } from "./http-policy";
 import { getIntegrationUsageRecorder } from "./integration-usage";
+import {
+  isLocalSlackSimulatorUrl,
+  localIntegrationSimulatorEndpoint,
+  resolveLocalWebhookDestination,
+} from "./local-integration-simulator";
 import { getEngineRateLimiter } from "./rate-limit";
 
 /** Lowercase header name the signed webhook tool sets. Surface-stable. */
@@ -82,10 +87,15 @@ function resolveSecretRef(secretRef: string): string | null {
 function isSlackHookUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
-    return parsed.protocol === "https:" && parsed.hostname === "hooks.slack.com";
+    return (parsed.protocol === "https:" && parsed.hostname === "hooks.slack.com")
+      || isLocalSlackSimulatorUrl(url);
   } catch {
     return false;
   }
+}
+
+function githubApiUrl(path: string): string {
+  return localIntegrationSimulatorEndpoint(`/github${path}`) ?? `https://api.github.com${path}`;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -354,7 +364,7 @@ export const slackPostTool = {
 
     if (!isSlackHookUrl(gate.credentialSecret)) {
       const latencyMs = Date.now() - start;
-      const error = "slack webhook URL must point at hooks.slack.com";
+      const error = "slack webhook URL must point at hooks.slack.com or the enabled local simulator";
       await fireIntegrationRecorder({
         orgId: executionContext.orgId!,
         tool: "slack.post",
@@ -475,7 +485,7 @@ export const githubCreateIssueTool = {
       return { ok: false, error: gate.error, latencyMs };
     }
 
-    const url = `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/issues`;
+    const url = githubApiUrl(`/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/issues`);
     const body: Record<string, unknown> = { title: input.title };
     if (input.body) body.body = input.body;
     if (input.labels) body.labels = input.labels;
@@ -604,7 +614,7 @@ export const githubAddIssueCommentTool = {
       return { ok: false, error: gate.error, latencyMs };
     }
 
-    const url = `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/issues/${input.issueNumber}/comments`;
+    const url = githubApiUrl(`/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/issues/${input.issueNumber}/comments`);
 
     const result = await fetchHttpTarget(url, {
       method: "POST",
@@ -742,7 +752,8 @@ export const webhookSendTool = {
     }
     merged[headerName] = signature;
 
-    const result = await fetchHttpTarget(input.url, {
+    const destination = resolveLocalWebhookDestination(input.url);
+    const result = await fetchHttpTarget(destination, {
       method: "POST",
       headers: merged,
       body: serialized,

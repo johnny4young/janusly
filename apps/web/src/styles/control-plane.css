@@ -3046,7 +3046,7 @@
 
 .recovery-center-composer__seed-chip--conf {
   background: var(--we-accent-soft);
-  color: var(--we-accent);
+  color: var(--we-accent-text);
   border-color: color-mix(in srgb, var(--we-accent) 30%, transparent);
 }
 

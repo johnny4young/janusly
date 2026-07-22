@@ -14,6 +14,7 @@ artifacts/
 # .ts is committed; its per-run results are not).
 scripts/model-eval-results.*
 .env
+deploy/local/local.env
 .env.local
 .env.*.local
 deploy/observability/cloud.env

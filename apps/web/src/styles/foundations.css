@@ -16,6 +16,7 @@
   --color-we-primary-text: #245bff;
   --color-we-primary-soft: #eef4ff;
   --color-we-accent: #06b6d4;
+  --color-we-accent-text: #0e7490;
   --color-we-accent-soft: #ecfeff;
   --color-we-success: #10b981;
   --color-we-success-soft: #ecfdf5;
@@ -64,6 +65,7 @@
   --we-primary-shadow: color-mix(in srgb, var(--we-primary) 55%, transparent);
   --we-primary-shadow-strong: color-mix(in srgb, var(--we-primary) 70%, transparent);
   --we-accent: var(--color-we-accent);
+  --we-accent-text: var(--color-we-accent-text);
   --we-accent-soft: var(--color-we-accent-soft);
   --we-brand-glyph: var(--color-we-brand-glyph);
   --we-bg: var(--color-we-bg);
@@ -150,6 +152,7 @@
   --color-we-primary-text: #7aa2ff;
   --color-we-primary-soft: #1a2548;
   --color-we-accent: #06b6d4;
+  --color-we-accent-text: #67e8f9;
   --color-we-accent-soft: #0d2a32;
   --color-we-success: #10b981;
   --color-we-success-soft: #0c2a22;
@@ -195,6 +198,7 @@
   --we-primary-shadow: color-mix(in srgb, var(--color-we-primary) 55%, transparent);
   --we-primary-shadow-strong: color-mix(in srgb, var(--color-we-primary) 70%, transparent);
   --we-accent: var(--color-we-accent);
+  --we-accent-text: var(--color-we-accent-text);
   --we-accent-soft: var(--color-we-accent-soft);
   --we-brand-glyph: var(--color-we-brand-glyph);
   --we-success: var(--color-we-success);

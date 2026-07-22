@@ -495,6 +495,10 @@ try {
     ...webTestArgs,
   ], {
     env: {
+      // @janusly/db intentionally reloads the developer .env with override.
+      // Keep the harness-owned dynamic origin in an unconfigured private key
+      // so Playwright workers cannot fall back to an unrelated process on 5173.
+      JANUSLY_E2E_RUNTIME_BASE_URL: webBaseUrl,
       PLAYWRIGHT_BASE_URL: webBaseUrl,
       E2E_API_URL: apiUrl,
       E2E_API_METRICS_URL: apiMetricsUrl,
