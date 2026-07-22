@@ -33,7 +33,10 @@
     "seed:demos": "pnpm --filter @janusly/api exec tsx ../../scripts/seed-demos.ts",
     "seed:full": "pnpm --filter @janusly/api exec tsx ../../scripts/seed-full.ts",
     "backfill:usage-workflowid": "pnpm --filter @janusly/api exec tsx ../../scripts/backfill-usage-workflowid.ts",
-    "test:integration": "node scripts/run-integration.mjs"
+    "test:integration": "node scripts/run-integration.mjs",
+    "observability:up": "docker compose -f deploy/observability/compose.local.yml up -d",
+    "observability:down": "docker compose -f deploy/observability/compose.local.yml down",
+    "observability:check": "node --test scripts/observability-config.test.mjs"
   },
   "devDependencies": {
     "oxc-parser": "^0.140.0",

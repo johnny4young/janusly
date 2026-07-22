@@ -5,12 +5,24 @@ const meterMock = vi.hoisted(() => {
     callback: (result: { observe: (instrument: unknown, value: number) => void }) => Promise<void>;
     instruments: unknown[];
   }> = [];
+  const histograms: Array<{ name: string; record: ReturnType<typeof vi.fn> }> = [];
+  const counters: Array<{ name: string; add: ReturnType<typeof vi.fn> }> = [];
   return {
     callbacks,
+    counters,
     getMeter: vi.fn(),
+    histograms,
     meter: {
-      createHistogram: vi.fn((name: string) => ({ name, record: vi.fn() })),
-      createCounter: vi.fn((name: string) => ({ name, add: vi.fn() })),
+      createHistogram: vi.fn((name: string) => {
+        const instrument = { name, record: vi.fn() };
+        histograms.push(instrument);
+        return instrument;
+      }),
+      createCounter: vi.fn((name: string) => {
+        const instrument = { name, add: vi.fn() };
+        counters.push(instrument);
+        return instrument;
+      }),
       createObservableGauge: vi.fn((name: string) => ({ name })),
       addBatchObservableCallback: vi.fn((callback, instruments) => {
         callbacks.push({ callback, instruments });
@@ -25,6 +37,9 @@ vi.mock("@opentelemetry/api", () => ({
 }));
 
 import {
+  incNodeFailure,
+  incNodeRetry,
+  recordNodeDuration,
   registerQueueObservables,
   registerRateLimiterObservables,
 } from "./metrics";
@@ -34,6 +49,8 @@ describe("observable metrics", () => {
     meterMock.callbacks.length = 0;
     meterMock.meter.addBatchObservableCallback.mockClear();
     meterMock.meter.removeBatchObservableCallback.mockClear();
+    meterMock.meter.createHistogram.mockClear();
+    meterMock.meter.createCounter.mockClear();
   });
 
   it("observes waiting and active queue counts and unregisters cleanly", async () => {
@@ -84,5 +101,18 @@ describe("observable metrics", () => {
     await meterMock.callbacks[0]?.callback({ observe });
     await meterMock.callbacks[1]?.callback({ observe });
     expect(observe).not.toHaveBeenCalled();
+  });
+
+  it("records node duration, terminal failures, and retries", () => {
+    recordNodeDuration(42, { node_type: "noop" });
+    incNodeFailure({ node_type: "http" });
+    incNodeRetry({ node_type: "http" });
+
+    expect(meterMock.histograms.find(({ name }) => name === "workflow_node_duration_ms")?.record)
+      .toHaveBeenCalledWith(42, { node_type: "noop" });
+    expect(meterMock.counters.find(({ name }) => name === "workflow_node_failures_total")?.add)
+      .toHaveBeenCalledWith(1, { node_type: "http" });
+    expect(meterMock.counters.find(({ name }) => name === "workflow_node_retries_total")?.add)
+      .toHaveBeenCalledWith(1, { node_type: "http" });
   });
 });

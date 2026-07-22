@@ -1,0 +1,50 @@
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+prometheus.scrape "janusly" {
+  targets = [
+    { "__address__" = "host.docker.internal:9464", "job" = "janusly-api", "instance" = "api-local" },
+    { "__address__" = "host.docker.internal:9465", "job" = "janusly-worker", "instance" = "worker-local" },
+  ]
+  forward_to     = [prometheus.remote_write.local.receiver]
+  scrape_interval = "15s"
+  scrape_timeout  = "5s"
+}
+
+prometheus.remote_write "local" {
+  external_labels = {
+    environment = "local",
+  }
+
+  endpoint {
+    url = "http://prometheus:9090/api/v1/write"
+  }
+}
+
+otelcol.receiver.otlp "janusly" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+  output {
+    traces = [otelcol.processor.batch.janusly.input]
+  }
+}
+
+otelcol.processor.batch "janusly" {
+  timeout         = "2s"
+  send_batch_size = 512
+  output {
+    traces = [otelcol.exporter.otlphttp.tempo.input]
+  }
+}
+
+otelcol.exporter.otlphttp "tempo" {
+  client {
+    endpoint = "http://tempo:4318"
+  }
+}

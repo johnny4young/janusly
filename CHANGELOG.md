@@ -42,6 +42,11 @@ retroactively.
 
 ### Added
 
+- An Observability Starter Kit with pinned Grafana Alloy, Prometheus, Tempo,
+  and Grafana profiles for local operation, plus a Grafana Cloud forwarding
+  profile, provisioned operations dashboard, starter alert rules, safe
+  loopback defaults, and an end-to-end configuration guide.
+
 - Progressive baseline/canary workflow deployments with deterministic traffic
   assignment across manual starts, inbound triggers, schedules, and unpinned
   production subworkflows; immutable version capture, strict trigger

@@ -281,16 +281,28 @@ registration failures log and do not block process boot.
 
 ## Auto-Healing And Alerts
 
+Both optional queue Workers live in the API process. Environment changes are
+read at process startup: restart the API after changing these values, but do
+not restart Redis. BullMQ scheduler ids are deterministic, so the next boot
+refreshes their cadence without duplicating them. See
+[`observability.md`](observability.md#queue-topology-and-activation) for the
+complete four-queue topology and operational recommendations.
+
 | Variable | Default | Used by | Purpose |
 | --- | --- | --- | --- |
-| `JANUSLY_AUTO_HEALING_ENABLED` | `false` | API auto-healing scanner/watcher, engine consent | Process master switch for supervised auto-healing. |
+| `JANUSLY_AUTO_HEALING_ENABLED` | `false` | API auto-healing scanner/watcher, engine consent | Process half of supervised auto-healing. The tenant must also set `autoHealing.enabled=true`; start with this enabled and auto-apply disabled. |
 | `JANUSLY_AUTO_HEALING_AUTO_APPLY` | `false` | `packages/engine/src/auto-healing-consent.ts` | Process half of the auto-apply gate; tenant policy must also allow it. |
 | `JANUSLY_AUTO_HEALING_SCAN_CRON` | `0 */6 * * *` | `apps/api/src/auto-healing-scanner.ts` | Recurring scan cadence for DLQ clusters eligible for AI repair proposals. |
 | `JANUSLY_AUTO_HEALING_WATCH_CRON` | `* * * * *` | `apps/api/src/auto-healing-watcher.ts` | Watcher cadence for validation/proposal follow-up work. |
-| `JANUSLY_ALERTS_ENABLED` | `false` | `apps/api/src/alerts-bootstrap.ts`, `apps/api/src/alerts/scanner.ts` | Process switch for alert policy scanning and dispatch. |
+| `JANUSLY_ALERTS_ENABLED` | `false` | `apps/api/src/alerts-bootstrap.ts`, `apps/api/src/alerts/scanner.ts` | Enables the periodic state scanner and its queue Worker. Event-driven dispatch remains registered for matching policies when this is false. |
 | `JANUSLY_ALERTS_SCAN_CRON` | `*/2 * * * *` | `apps/api/src/alerts/scanner.ts` | Alert policy scan cadence. |
 
 ## Observability
+
+The ready-to-run local Grafana/Prometheus/Tempo/Alloy stack and the Grafana
+Cloud forwarding profile are documented in [`observability.md`](observability.md).
+Janusly process env changes require an API/worker restart; they never require a
+Redis restart.
 
 | Variable | Default | Used by | Purpose |
 | --- | --- | --- | --- |

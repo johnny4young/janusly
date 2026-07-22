@@ -45,6 +45,8 @@ The recovery loop is production-shaped end to end:
 
 See [`CHANGELOG.md`](CHANGELOG.md) for release-facing traceability. Architecture
 invariants and operational contracts live under [`docs/architecture/`](docs/architecture/).
+For metrics, traces, queue topology, retention, repair jobs, and the local or
+Grafana Cloud starter stack, see [`docs/observability.md`](docs/observability.md).
 
 ## What Janusly is NOT
 

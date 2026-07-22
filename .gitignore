@@ -16,6 +16,7 @@ scripts/model-eval-results.*
 .env
 .env.local
 .env.*.local
+deploy/observability/cloud.env
 .DS_Store
 
 # Internal working docs — planning, roadmap, analysis, audits, refactor notes,
