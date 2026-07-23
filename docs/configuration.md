@@ -26,7 +26,10 @@ secret values stay env-only.
 | `WORKER_CONCURRENCY` | `10` | `packages/engine/src/worker.ts` | BullMQ worker concurrency. |
 | `MAINTENANCE_WORKER_CONCURRENCY` | `2` | `packages/engine/src/worker.ts` | Isolated BullMQ maintenance-worker concurrency. Closed range 1..4; invalid values use 2 so sweeps cannot consume customer execution capacity. |
 | `JANUSLY_MAX_SUBWORKFLOW_DEPTH` | `5` | `packages/engine/src/subworkflow.ts` | Maximum nested subworkflow depth. |
-| `JANUSLY_RESUME_TOKEN_SECRET` | unset in dev; required in production | `packages/engine/src/secrets.ts` | HMAC signing secret for `human_form` resume tokens and Janusly SSO state/session tokens, separated by signed `purpose`. Dev mode uses a local fallback; production fails closed without this dedicated secret. Do not reuse `JANUSLY_API_SERVICE_TOKEN` for token signing. |
+| `JANUSLY_RESUME_TOKEN_SECRET` | unset in dev; required in production | `packages/engine/src/secrets.ts` | HMAC signing secret for `human_form` resume tokens, one-time SSO state, and opaque browser-session cookie envelopes, separated by signed `purpose`. Dev mode uses a local fallback; production fails closed without this dedicated secret. Do not reuse `API_SERVICE_TOKEN`. |
+| `JANUSLY_SESSION_COOKIE_SECURE` | inferred from `JANUSLY_WEB_BASE_URL` | `apps/api/src/browser-session.ts` | Forces the WorkOS browser-session cookie's `Secure` attribute when `true`, or disables it for deliberate HTTP-only local development when `false`. Omit in production and use an HTTPS web base URL unless a trusted proxy topology requires an explicit override. |
+| `JANUSLY_IDENTITY_RETENTION_CRON` | `0 3 * * *` | maintenance worker | Cron schedule for bounded cleanup of expired/revoked browser sessions and expired one-time SSO nonces. Invalid expressions fall back to the default. |
+| `JANUSLY_IDENTITY_SESSION_RETENTION_DAYS` | `7` | maintenance worker | Days to retain expired sessions and old revoked sessions before deletion. Closed range 1..90. Does not delete users, memberships, audit rows, or run history. |
 | `JANUSLY_PERSIST_MAX_BYTES` | `262144` (256 KiB) | `packages/engine/src/safe-persist.ts` | Default size cap for jsonb writes through the safe-persist chokepoint. Over-cap payloads are replaced with a `{ __truncated: true, ... }` sentinel. |
 | `JANUSLY_HTTP_COMPRESSION` | `true` (on) | `apps/api/src/http.ts` | gzip for JSON responses in the `sendJson` chokepoint. Applied only when the client sent `Accept-Encoding: gzip` and the body clears ~1 KB; SSE streams are never compressed. Set `false` to disable. |
 | `JANUSLY_ORG_CONFIG_CACHE_TTL_MS` | `30000` | `packages/data/src/orgConfigRepo.ts` | Process-local TTL (ms) for the resolved `org_configs` snapshot read on hot paths. Same-process writes invalidate immediately; other replicas converge within one TTL. `0` disables the cache. |
@@ -121,7 +124,7 @@ Guardrails:
 | `objectstore.provider` | `JANUSLY_OBJECT_STORE_PROVIDER` | `noop` | `pdf.generate` tool | Object-store backend for generated PDFs. Bucket/directory credentials remain env-only. |
 | `auth.allowedEmailDomains` | none | `""` | auth policy evaluator | CSV allow-list of email domains accepted for Supabase and post-callback SSO sessions. |
 | `auth.mfaRequired` | none | `false` | auth policy evaluator | Policy marker only; Janusly records/warn-logs, while MFA enforcement stays at the IdP. |
-| `auth.sessionTtlSeconds` | none | `28800` | WorkOS SSO callback | TTL for newly issued Janusly SSO session tokens, range 300..86400 seconds. |
+| `auth.sessionTtlSeconds` | none | `28800` | WorkOS SSO callback | TTL for newly-created revocable WorkOS browser sessions, range 300..86400 seconds. Existing sessions keep their issued expiry. |
 | `retention.runEventsDays` | `JANUSLY_RETENTION_RUN_EVENTS_DAYS` | `90` | retention sweep | Per-org `run_events` retention window, range 7..365 days. |
 | `retention.auditLogsDays` | `JANUSLY_RETENTION_AUDIT_LOGS_DAYS` | `365` | retention sweep | Per-org `audit_logs` retention window, range 30..730 days. Separate global audit-log sweep defaults to 730 days. |
 | `retention.usageEventsDays` | `JANUSLY_RETENTION_USAGE_EVENTS_DAYS` | `90` | retention sweep | Per-org `usage_events` retention window, range 30..365 days. |
@@ -271,6 +274,12 @@ and browser URL settings are documented in the tracked
 `deploy/local/local.env.example`. Simulator delivery still requires normal
 credential rows; the local bootstrap creates only references to local-only
 environment values.
+
+`pnpm local:auth:up` adds the pinned `supabase/config.toml` identity profile.
+Its orchestrator obtains the local API URL plus anonymous/service credentials
+from `supabase status -o env` and injects them into the Compose process without
+persisting secrets. It also forces `ALLOW_DEV_AUTH_HEADERS=false`. Supabase
+uses loopback ports `7431` (Auth/API gateway) and `7432` (private local DB).
 
 The persistent stack loads its ignored `deploy/local/local.env` into the API
 and worker only. With `JANUSLY_LOCAL_INTEGRATION_SIMULATOR=false`, the local

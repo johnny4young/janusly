@@ -42,19 +42,20 @@ import { createClient } from "@supabase/supabase-js";
 
 import {
   findPendingInvitation,
-  acceptInvitation,
+  acceptInvitationForIdentity,
   findMemberByEmail,
   getMembershipForOrgUser,
   listMembershipsForUser,
   migrateMemberUserId,
   upsertMembership,
   getSsoConnectionForOrg,
+  getActiveAuthSession,
   findVerifiedDomain,
 } from "@janusly/data";
-import { verifySignedToken } from "@janusly/engine/src/secrets";
 
 import { audit } from "./audit";
 import { evaluateAuthPolicy } from "./auth-policy";
+import { readBrowserSessionId } from "./browser-session";
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -113,6 +114,26 @@ export type AuthContext = {
   source: AuthSource;
   /** Last 4 chars of the service token, when this request authenticated via service-token mode. Audit forensics only. */
   serviceTokenSuffix?: string;
+  /** Server-side id of a cookie-authenticated WorkOS session. */
+  browserSessionId?: string;
+};
+
+/**
+ * Provider-verified identity before tenant authorization.
+ *
+ * Only bootstrap routes may consume this shape. `orgHint` is an untrusted
+ * selection preference and MUST NOT be used to scope tenant data; ordinary
+ * routes continue receiving `AuthContext` after `org_members` resolution.
+ */
+export type IdentityContext = {
+  userId: string;
+  email: string | null;
+  mode: AuthMode;
+  source: AuthSource;
+  orgHint: string | null;
+  serviceTokenSuffix?: string;
+  /** Server-only revocable session id; never included in API response bodies. */
+  browserSessionId?: string;
 };
 
 /**
@@ -146,6 +167,7 @@ type ProviderPrincipal = {
   declaredSource: AuthSource;
   /** Last-4 of the service token when the request authenticated via service-token mode. */
   serviceTokenSuffix?: string;
+  browserSessionId?: string;
 };
 
 /**
@@ -167,13 +189,6 @@ function constantTimeBearerMatch(authHeader: string | undefined, expected: strin
   return timingSafeEqual(a, b);
 }
 
-/** Session token payload shape (signed via `signSignedToken({ purpose: "sso_session" })`). */
-type JanuslySessionPayload = {
-  orgId: string;
-  userId: string;
-  email: string;
-};
-
 /** SSO state token payload (used by /auth/sso/start ↔ /auth/sso/callback). */
 export type SsoStatePayload = {
   orgId: string;
@@ -181,16 +196,13 @@ export type SsoStatePayload = {
   callbackUrl: string;
 };
 
-/** Purpose discriminator constants (kept in this module so callers don't drift). */
-export const SSO_SESSION_PURPOSE = "sso_session" as const;
+/** Purpose discriminator constant for the one-time callback state token. */
 export const SSO_STATE_PURPOSE = "sso_state" as const;
 
 /**
- * Janusly-session provider — reads `x-janusly-session: <token>` issued
- * by the SSO callback (`apps/api/src/routes/sso-routes.ts`). The token is
- * an HMAC-signed envelope (purpose: `sso_session`) carrying the
- * `{ orgId, userId, email }` triple plus issuedAt/expiresAt; tampering or
- * expiry returns null.
+ * Janusly-session provider — reads the HttpOnly cookie issued by the SSO
+ * callback, verifies its signed opaque session id, then resolves the active
+ * server-side row. Revoked, expired, or missing rows fail closed.
  *
  * Source is hardcoded to `"sso"` — this provider only ever wraps an SSO
  * login.
@@ -199,24 +211,18 @@ export const SSO_STATE_PURPOSE = "sso_state" as const;
  * Supabase cookie that the browser might still be carrying.
  */
 async function extractJanuslySession(req: http.IncomingMessage): Promise<ProviderPrincipal | null> {
-  const header = req.headers["x-janusly-session"];
-  const token = typeof header === "string" && header.length > 0 ? header : null;
-  if (!token) return null;
-  try {
-    const envelope = verifySignedToken<typeof SSO_SESSION_PURPOSE, JanuslySessionPayload>(
-      token,
-      SSO_SESSION_PURPOSE,
-    );
-    return {
-      providerName: "janusly-session",
-      providerUserId: envelope.payload.userId,
-      providerUserEmail: envelope.payload.email ?? null,
-      providerOrgHint: envelope.payload.orgId,
-      declaredSource: "sso",
-    };
-  } catch {
-    return null;
-  }
+  const sessionId = readBrowserSessionId(req);
+  if (!sessionId) return null;
+  const session = await getActiveAuthSession(sessionId);
+  if (!session) return null;
+  return {
+    providerName: "janusly-session",
+    providerUserId: session.userId,
+    providerUserEmail: session.email,
+    providerOrgHint: session.orgId,
+    declaredSource: "sso",
+    browserSessionId: session.id,
+  };
 }
 
 /**
@@ -445,24 +451,17 @@ async function resolveSupabaseMembership(
   // 5a. Pending invitation acceptance.
   const invite = await findPendingInvitation({ orgId: hint, email });
   if (invite) {
-    const accepted = await acceptInvitation({ id: invite.id, orgId: hint });
-    if (accepted === false) {
+    const accepted = await acceptInvitationForIdentity({
+      invitationId: invite.id,
+      expectedOrgId: hint,
+      userId,
+      email,
+    });
+    if (!accepted.ok) {
       const raced = await getMembershipForOrgUser({ orgId: hint, userId });
       if (raced) return { orgId: hint, mode: "supabase" };
       return null;
     }
-    await upsertMembership({
-      orgId: hint,
-      userId,
-      email,
-      role: invite.role,
-      invitedBy: invite.invitedBy ?? null,
-    });
-    await audit(hint, userId, "member.joined", "member", userId, {
-      via: "invitation",
-      invitationId: invite.id,
-      email,
-    });
     return { orgId: hint, mode: "supabase" };
   }
 
@@ -513,6 +512,41 @@ const PROVIDER_CHAIN = [
   extractDevHeaders,
 ] as const;
 
+/** Return the first provider-verified principal without resolving a tenant. */
+async function extractProviderPrincipal(req: http.IncomingMessage): Promise<ProviderPrincipal | null> {
+  for (const extract of PROVIDER_CHAIN) {
+    const principal = await extract(req);
+    if (principal) return principal;
+  }
+  return null;
+}
+
+/**
+ * Resolve who is calling without asserting organization membership.
+ *
+ * This is intentionally narrower than `getAuth`: it exists for the session
+ * bootstrap and first-organization flow where a legitimate user may have zero
+ * memberships. Never use it for tenant-scoped reads or writes.
+ */
+export async function getIdentity(req: http.IncomingMessage): Promise<IdentityContext | null> {
+  const principal = await extractProviderPrincipal(req);
+  if (!principal) return null;
+  const identity: IdentityContext = {
+    userId: principal.providerUserId,
+    email: principal.providerUserEmail,
+    mode: principal.providerName,
+    source: principal.declaredSource,
+    orgHint: principal.providerOrgHint,
+  };
+  if (principal.serviceTokenSuffix !== undefined) {
+    identity.serviceTokenSuffix = principal.serviceTokenSuffix;
+  }
+  if (principal.browserSessionId !== undefined) {
+    identity.browserSessionId = principal.browserSessionId;
+  }
+  return identity;
+}
+
 /**
  * Resolve the request's auth context, or `null` when no provider
  * matched. Routes prefer `requireAuth` (which throws 401 on null).
@@ -521,23 +555,34 @@ const PROVIDER_CHAIN = [
  * keeps provider-native claim shapes out of every downstream caller.
  */
 export async function getAuth(req: http.IncomingMessage): Promise<AuthContext | null> {
-  for (const extract of PROVIDER_CHAIN) {
-    const principal = await extract(req);
-    if (!principal) continue;
-    const membership = await resolveJanuslyMembership(principal);
-    if (!membership) return null;
-    const context: AuthContext = {
-      orgId: membership.orgId,
-      userId: principal.providerUserId,
-      mode: membership.mode,
-      source: principal.declaredSource,
-    };
-    if (principal.serviceTokenSuffix !== undefined) {
-      context.serviceTokenSuffix = principal.serviceTokenSuffix;
-    }
-    return context;
+  const principal = await extractProviderPrincipal(req);
+  if (!principal) return null;
+  const membership = await resolveJanuslyMembership(principal);
+  if (!membership) return null;
+  const context: AuthContext = {
+    orgId: membership.orgId,
+    userId: principal.providerUserId,
+    mode: membership.mode,
+    source: principal.declaredSource,
+  };
+  if (principal.serviceTokenSuffix !== undefined) {
+    context.serviceTokenSuffix = principal.serviceTokenSuffix;
   }
-  return null;
+  if (principal.browserSessionId !== undefined) {
+    context.browserSessionId = principal.browserSessionId;
+  }
+  return context;
+}
+
+/** `getIdentity` + throw a 401 without requiring an organization grant. */
+export async function requireIdentity(req: http.IncomingMessage): Promise<IdentityContext> {
+  const identity = await getIdentity(req);
+  if (!identity) {
+    const err = new Error("Unauthorized: missing or invalid identity provider") as Error & { statusCode?: number };
+    err.statusCode = 401;
+    throw err;
+  }
+  return identity;
 }
 
 /** `getAuth` + throw a 401 on null. Every mutating route calls this first. */

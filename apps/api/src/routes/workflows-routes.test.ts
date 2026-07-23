@@ -140,6 +140,13 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+describe("workflow analysis authorization", () => {
+  it("requires workflows.write for structural validation and production readiness", () => {
+    expect(findRoute("/validate")).toMatchObject({ role: "editor", permission: "workflows.write" });
+    expect(findRoute("/workflows/readiness")).toMatchObject({ role: "editor", permission: "workflows.write" });
+  });
+});
+
 describe("workflow-mutating routes — MCP-source write consent gate", () => {
   it("/workflows/save refuses MCP-source traffic (403 mcp_process_disabled) with the process flag off, never saving", async () => {
     vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "");

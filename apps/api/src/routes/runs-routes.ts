@@ -782,7 +782,7 @@ export const runsRoutes: Route[] = [
         throw err;
       }
     } },
-  { method: "POST", match: "/resume", role: "editor", contract: resumeRunContract,
+  { method: "POST", match: "/resume", role: "editor", permission: "runs.start", contract: resumeRunContract,
     handler: async ({ req, res, auth }) => {
       const resumeMcpGate = await guardMcpWrite(auth, "runs.resume");
       if (!resumeMcpGate.ok) return sendJson(res, resumeMcpGate.body, resumeMcpGate.status);
@@ -851,7 +851,7 @@ export const runsRoutes: Route[] = [
   // automatically; the audit row distinguishes the lab intent from the
   // recovery-dialog intent (`replay_lab.started` vs
   // `recovery.validation_started`).
-  { method: "POST", match: "/runs/replay-lab", role: "editor",
+  { method: "POST", match: "/runs/replay-lab", role: "editor", permission: "runs.start",
     handler: async ({ req, res, auth }) => {
       const { orgConfig } = await orgLlmRuntime(auth.orgId);
       await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: orgConfig.ai.rateLimitPerMin });
@@ -960,7 +960,7 @@ export const runsRoutes: Route[] = [
   // the engine's dryRun gate skips write-side effects uniformly.
   // Audit action `replay_lab.fork_started` distinguishes forks from
   // whole-run replays at compliance read time.
-  { method: "POST", match: "/runs/replay-lab/fork", role: "editor",
+  { method: "POST", match: "/runs/replay-lab/fork", role: "editor", permission: "runs.start",
     handler: async ({ req, res, auth }) => {
       const { orgConfig } = await orgLlmRuntime(auth.orgId);
       await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: orgConfig.ai.rateLimitPerMin });
@@ -1069,7 +1069,7 @@ export const runsRoutes: Route[] = [
   // consumes. Both runs are org-scoped via `getRunComparison`; either
   // run missing or not owned by `auth.orgId` returns the same 404
   // envelope (no enumeration leak).
-  { method: "GET", match: (url) => url.startsWith("/runs/compare"), role: "viewer",
+  { method: "GET", match: (url) => url.startsWith("/runs/compare"), role: "viewer", permission: "runs.read",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const baseRunId = url.searchParams.get("baseRunId");

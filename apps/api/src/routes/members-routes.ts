@@ -34,7 +34,7 @@ export const membersRoutes: Route[] = [
       const rows = await db.select().from(orgMembers).where(eq(orgMembers.orgId, auth.orgId));
       return sendJson(res, rows);
     } },
-  { method: "GET", match: "/members/invitations", role: "admin",
+  { method: "GET", match: "/members/invitations", role: "admin", permission: "members.read",
     handler: async ({ res, auth }) => {
       const rows = await listInvitationsByOrg(auth.orgId);
       return sendJson(res, rows);

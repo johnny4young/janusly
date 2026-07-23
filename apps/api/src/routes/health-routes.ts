@@ -50,12 +50,14 @@ export const healthRoutes: Route[] = [
     method: "GET",
     match: "/system/rate-limiter",
     role: "admin",
+    permission: "org.config.write",
     handler: async ({ res }) => sendJson(res, getRateLimiterAdminHealth()),
   },
   {
     method: "GET",
     match: "/system/queue",
     role: "admin",
+    permission: "org.config.write",
     handler: async ({ res }) => sendJson(res, await getQueueHealthSnapshot()),
   },
 ];

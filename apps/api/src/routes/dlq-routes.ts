@@ -314,7 +314,7 @@ export const dlqRoutes: Route[] = [
         }),
       );
     } },
-  { method: "POST", match: "/dlq/resolve", role: "editor",
+  { method: "POST", match: "/dlq/resolve", role: "editor", permission: "recovery.write",
     handler: async ({ req, res, auth }) => {
       const { id } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       if (typeof id !== "string") return sendError(res, "dlq_field_required", "id is required", 400, { field: "id" });
@@ -339,7 +339,7 @@ export const dlqRoutes: Route[] = [
   // partial-success envelope, but resolves (accepts the loss) instead of
   // replaying. Each entry is the same operation as a single resolve, so it
   // reuses the `dlq.resolved` audit action (metadata.bulk flags the batch).
-  { method: "POST", match: "/dlq/bulk-resolve", role: "editor",
+  { method: "POST", match: "/dlq/bulk-resolve", role: "editor", permission: "recovery.write",
     handler: async ({ req, res, auth }) => {
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const idsRaw = body.deadLetterIds;
@@ -393,7 +393,7 @@ export const dlqRoutes: Route[] = [
   // `runs.replayMode = "validation"` so they're excluded from health,
   // cluster, and recovery metric rollups, and so the engine's HTTP and
   // tool executors can gate write-side actions via `NodeContext.dryRun`.
-  { method: "POST", match: "/dlq/validate-fix", role: "editor",
+  { method: "POST", match: "/dlq/validate-fix", role: "editor", permission: "recovery.write",
     handler: async ({ req, res, auth }) => {
       const { orgConfig } = await orgLlmRuntime(auth.orgId);
       await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: orgConfig.ai.rateLimitPerMin });

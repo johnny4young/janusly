@@ -636,7 +636,7 @@ export const ORG_CONFIG_DEFINITIONS = [
     key: "auth.sessionTtlSeconds",
     category: "auth",
     description:
-      "Per-org override for the SSO session token TTL (in seconds). Range 300..86400 (5 minutes..24 hours). Default 28800 (8 hours). The SSO callback reads this at token issuance time; runtime session-token verification uses each token's own embedded expiry, so changing this only affects newly-minted sessions.",
+      "Per-org override for the WorkOS browser-session TTL (in seconds). Range 300..86400 (5 minutes..24 hours). Default 28800 (8 hours). The SSO callback reads this when it creates the revocable server-side session, so changing it only affects newly-created sessions.",
     valueType: "number",
     defaultValue: 28800,
     min: 300,

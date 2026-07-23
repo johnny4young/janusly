@@ -21,6 +21,7 @@ import { openApiRoutes } from "./openapi-route";
 import { aiRoutes } from "./routes/ai-routes";
 import { alertsRoutes } from "./routes/alerts-routes";
 import { auditRoutes } from "./routes/audit-routes";
+import { authContextRoutes } from "./routes/auth-context-routes";
 import { autoHealingRoutes } from "./routes/auto-healing-routes";
 import { billingRoutes } from "./routes/billing-routes";
 import { credentialsRoutes } from "./routes/credentials-routes";
@@ -59,6 +60,7 @@ import { workflowsRoutes } from "./routes/workflows-routes";
 export const routes: Route[] = [
   ...openApiRoutes,
   ...healthRoutes,
+  ...authContextRoutes,
   ...toolsRoutes,
   ...templatesRoutes,
   ...billingRoutes,

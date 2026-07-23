@@ -6,8 +6,9 @@
  *   1. **Rank-based** — the historical model. `requireRole(min)` reads
  *      the user's role and rejects when their rank is below `min`
  *      (`viewer < editor < admin`). Custom roles map to a built-in
- *      rank via `org_roles.inheritsFrom`. Back-compat for the 37
- *      routes that haven't been migrated to permission gates yet.
+ *      rank via `org_roles.inheritsFrom`. Kept for routes that intentionally
+ *      retain role-only compatibility and as a defense-in-depth floor where
+ *      a route declares both gates.
  *
  *   2. **Permission-based** — the new model.
  *      `requirePermission(perm)` reads the user's role NAME (built-in
@@ -102,8 +103,7 @@ export async function resolveMemberRole(orgId: string, userId: string, mode: Aut
 
 /**
  * Back-compat helper for callers that want just the rank-equivalent
- * built-in name (the shape `requireRole` and the existing 37 routes
- * reason about).
+ * built-in name (the shape `requireRole` consumers reason about).
  */
 export async function getMemberRole(orgId: string, userId: string, mode: AuthMode = 'supabase'): Promise<Role | null> {
   const resolved = await resolveMemberRole(orgId, userId, mode)

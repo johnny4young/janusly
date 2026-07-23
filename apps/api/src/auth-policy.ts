@@ -4,8 +4,8 @@
  * The auth pipeline has one per-org policy boundary: this module. The
  * membership resolver and the SSO callback both call `evaluateAuthPolicy`
  * instead of inlining gate logic, and the SSO callback reads
- * `sessionTtlSeconds` from the returned decision before issuing a Janusly
- * session token. New auth policy behavior belongs here plus in
+ * `sessionTtlSeconds` from the returned decision before persisting a revocable
+ * browser session. New auth policy behavior belongs here plus in
  * `getAuthPolicyConfig`'s narrow reader and the org-config catalog — not in
  * individual route handlers.
  *

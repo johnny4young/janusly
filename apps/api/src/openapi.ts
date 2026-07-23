@@ -47,7 +47,7 @@ export function buildOpenApiDocument(routes: readonly ApiContractRouteDescriptor
     components: {
       securitySchemes: {
         bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" },
-        januslySession: { type: "apiKey", in: "header", name: "x-janusly-session" },
+        januslySession: { type: "apiKey", in: "cookie", name: "janusly_session" },
         devOrg: { type: "apiKey", in: "header", name: "x-org-id" },
         devUser: { type: "apiKey", in: "header", name: "x-user-id" },
       },

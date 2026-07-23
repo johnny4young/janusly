@@ -13,7 +13,8 @@
 import http from "http";
 import { randomUUID } from "node:crypto";
 
-import { requireAuth, type AuthContext } from "./auth";
+import { getIdentity, requireAuth, requireIdentity, type AuthContext, type IdentityContext } from "./auth";
+import { requireBrowserCsrf } from "./browser-session";
 import { MAX_JSON_BODY_BYTES } from "./api-config";
 import { corsHeaders, readJson, sendError, type CorsAwareResponse } from "./http";
 import { requirePermission, requireRole } from "./permissions";
@@ -134,8 +135,26 @@ async function dispatchRequest(
     }
 
     let auth: AuthContext;
+    let identity: IdentityContext | null = null;
     if (matched.skipAuth) {
       auth = { orgId: "", userId: "", mode: "dev-headers", source: "dev" };
+    } else if (matched.identityOnly || matched.optionalIdentity) {
+      if (matched.role || matched.permission || (matched.identityOnly && matched.optionalIdentity)) {
+        throw new Error("identity bootstrap routes cannot combine auth modes, tenant roles, or permissions");
+      }
+      identity = matched.identityOnly ? await requireIdentity(req) : await getIdentity(req);
+      auth = {
+        orgId: "",
+        userId: identity?.userId ?? "",
+        mode: identity?.mode ?? "dev-headers",
+        source: identity?.source ?? "dev",
+        ...(identity?.serviceTokenSuffix !== undefined
+          ? { serviceTokenSuffix: identity.serviceTokenSuffix }
+          : {}),
+        ...(identity?.browserSessionId !== undefined
+          ? { browserSessionId: identity.browserSessionId }
+          : {}),
+      };
     } else {
       auth = await requireAuth(req);
       if (matched.role) {
@@ -144,6 +163,10 @@ async function dispatchRequest(
       if (matched.permission) {
         await requirePermission(auth.orgId, auth.userId, matched.permission, auth.mode);
       }
+    }
+
+    if (req.method !== "GET" && req.method !== "HEAD" && auth.mode === "janusly-session") {
+      requireBrowserCsrf(req);
     }
 
     if (versionedAlias && matched.contract?.request?.path) {
@@ -179,7 +202,7 @@ async function dispatchRequest(
     }
 
     req.url = handlerUrl;
-    await matched.handler({ req, res: response, auth });
+    await matched.handler({ req, res: response, auth, identity });
   } catch (err) {
     const statusCode = resolveErrorStatusCode(err);
     if (statusCode === null) {

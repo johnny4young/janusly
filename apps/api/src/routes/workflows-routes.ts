@@ -359,6 +359,7 @@ export const workflowsRoutes: Route[] = [
       return segments.length === 2 && segments[1] === "slo" && segments[0].length > 0;
     },
     role: "admin",
+    permission: "workflows.write",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = url.pathname.slice("/workflows/".length).split("/")[0];
@@ -489,6 +490,7 @@ export const workflowsRoutes: Route[] = [
       return !reserved.has(rest);
     },
     role: "editor",
+    permission: "workflows.write",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = url.pathname.slice("/workflows/".length);
@@ -526,6 +528,7 @@ export const workflowsRoutes: Route[] = [
       return path.startsWith("/workflows/") && path.endsWith("/restore");
     },
     role: "editor",
+    permission: "workflows.write",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const matched = url.pathname.match(/^\/workflows\/([^/]+)\/restore$/);
@@ -568,7 +571,7 @@ export const workflowsRoutes: Route[] = [
     } },
 
   // Validate
-  { method: "POST", match: "/validate", role: "editor", contract: validateWorkflowContract,
+  { method: "POST", match: "/validate", role: "editor", permission: "workflows.write", contract: validateWorkflowContract,
     handler: async ({ req, res }) => sendJson(res, validateWorkflow(await readJson(req, MAX_JSON_BODY_BYTES))) },
 
   // Production-readiness gate. Sister to `/validate` — this asserts
@@ -578,7 +581,7 @@ export const workflowsRoutes: Route[] = [
   // engine portion is pure; the rollback-availability check is layered
   // here because it needs `workflow_versions` access. Body shape: either
   // a flat workflow JSON or `{ workflow }` envelope (mirrors `/validate`).
-  { method: "POST", match: "/workflows/readiness", role: "editor", contract: checkWorkflowReadinessContract,
+  { method: "POST", match: "/workflows/readiness", role: "editor", permission: "workflows.write", contract: checkWorkflowReadinessContract,
     handler: async ({ req, res, auth }) => {
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const candidate = (body.workflow && typeof body.workflow === "object") ? asRecord(body.workflow) : body;
@@ -618,7 +621,7 @@ export const workflowsRoutes: Route[] = [
   // delta, the run-status counter (always populated), the same-failure
   // check (when the caller supplies the prior signature), and the prior
   // version's id (for the regression-rollback affordance in the dialog).
-  { method: "GET", match: (url) => url === "/workflows/health/delta" || url.startsWith("/workflows/health/delta?"), role: "viewer",
+  { method: "GET", match: (url) => url === "/workflows/health/delta" || url.startsWith("/workflows/health/delta?"), role: "viewer", permission: "workflows.read",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = url.searchParams.get("workflowId");
@@ -809,7 +812,7 @@ export const workflowsRoutes: Route[] = [
       });
     } },
 
-  { method: "GET", match: (url) => url === "/workflows/health" || url.startsWith("/workflows/health?"), role: "viewer", contract: getWorkflowHealthContract,
+  { method: "GET", match: (url) => url === "/workflows/health" || url.startsWith("/workflows/health?"), role: "viewer", permission: "workflows.read", contract: getWorkflowHealthContract,
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = url.searchParams.get("workflowId");

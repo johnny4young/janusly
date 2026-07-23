@@ -144,7 +144,7 @@ export const billingRoutes: Route[] = [
   // / policy). Multi-tenant scope is enforced by validating the workflow
   // belongs to auth.orgId before the upsert. Audits every change as
   // `billing.budget.configured` with `{ scope: "workflow", before, after }`.
-  { method: "POST", match: (url) => /^\/workflows\/[^/]+\/budget$/.test(url), role: "admin",
+  { method: "POST", match: (url) => /^\/workflows\/[^/]+\/budget$/.test(url), role: "admin", permission: "org.config.write",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const match = url.pathname.match(/^\/workflows\/([^/]+)\/budget$/);

@@ -5521,6 +5521,7 @@
           }
         ],
         "x-janusly-minimum-role": "viewer",
+        "x-janusly-permission": "recovery.read",
         "responses": {
           "200": {
             "description": "Successful response",
@@ -5671,6 +5672,7 @@
           }
         ],
         "x-janusly-minimum-role": "viewer",
+        "x-janusly-permission": "recovery.read",
         "parameters": [
           {
             "name": "windowDays",
@@ -6601,6 +6603,7 @@
           }
         ],
         "x-janusly-minimum-role": "viewer",
+        "x-janusly-permission": "recovery.read",
         "parameters": [
           {
             "name": "days",
@@ -7216,6 +7219,7 @@
           }
         ],
         "x-janusly-minimum-role": "editor",
+        "x-janusly-permission": "runs.start",
         "requestBody": {
           "required": true,
           "content": {
@@ -10023,6 +10027,7 @@
           }
         ],
         "x-janusly-minimum-role": "editor",
+        "x-janusly-permission": "workflows.write",
         "requestBody": {
           "required": true,
           "content": {
@@ -10488,6 +10493,7 @@
           }
         ],
         "x-janusly-minimum-role": "viewer",
+        "x-janusly-permission": "workflows.read",
         "parameters": [
           {
             "name": "workflowId",
@@ -11612,6 +11618,7 @@
           }
         ],
         "x-janusly-minimum-role": "editor",
+        "x-janusly-permission": "workflows.write",
         "requestBody": {
           "required": true,
           "content": {
@@ -12972,8 +12979,8 @@
       },
       "januslySession": {
         "type": "apiKey",
-        "in": "header",
-        "name": "x-janusly-session"
+        "in": "cookie",
+        "name": "janusly_session"
       },
       "devOrg": {
         "type": "apiKey",

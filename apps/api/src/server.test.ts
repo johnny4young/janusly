@@ -8,10 +8,19 @@ import type { ApiRouteContract } from "./api-contract-types";
 import type { Route } from "./routes";
 
 vi.mock("./auth", () => ({
+  getIdentity: vi.fn(async () => null),
   requireAuth: vi.fn(async () => ({
     orgId: "org-1",
     userId: "user-1",
     mode: "dev-headers",
+    source: "dev",
+  })),
+  requireIdentity: vi.fn(async () => ({
+    userId: "identity-1",
+    email: "identity@example.com",
+    mode: "supabase",
+    source: "web",
+    orgHint: null,
   })),
 }));
 
@@ -20,11 +29,13 @@ vi.mock("./permissions", () => ({
   requireRole: vi.fn(async () => "editor"),
 }));
 
-import { requireAuth } from "./auth";
+import { getIdentity, requireAuth, requireIdentity } from "./auth";
 import { requirePermission, requireRole } from "./permissions";
 import { configureApiServerTimeouts, createApiServer, matchesContractPath } from "./server";
 
 const requireAuthMock = vi.mocked(requireAuth);
+const requireIdentityMock = vi.mocked(requireIdentity);
+const getIdentityMock = vi.mocked(getIdentity);
 const requirePermissionMock = vi.mocked(requirePermission);
 const requireRoleMock = vi.mocked(requireRole);
 
@@ -93,6 +104,58 @@ describe("createApiServer", () => {
       await expect(response.json()).resolves.toEqual({ orgId: "org-1", userId: "user-1" });
       expect(requireAuthMock).toHaveBeenCalledTimes(1);
       expect(requireRoleMock).toHaveBeenCalledWith("org-1", "user-1", "editor", "dev-headers");
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("dispatches identity-only bootstrap routes without tenant authorization", async () => {
+    const routes: Route[] = [
+      {
+        method: "GET",
+        match: "/identity",
+        identityOnly: true,
+        handler: async ({ identity, res }) => sendJson(res, {
+          userId: identity?.userId,
+          orgId: identity?.orgHint,
+        }),
+      },
+    ];
+    const server = createApiServer({ routes });
+    const baseUrl = await listen(server);
+
+    try {
+      const response = await fetch(`${baseUrl}/identity`);
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ userId: "identity-1", orgId: null });
+      expect(requireIdentityMock).toHaveBeenCalledTimes(1);
+      expect(requireAuthMock).not.toHaveBeenCalled();
+      expect(requireRoleMock).not.toHaveBeenCalled();
+      expect(requirePermissionMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("dispatches an optional-identity probe without turning absence into 401", async () => {
+    const routes: Route[] = [
+      {
+        method: "GET",
+        match: "/identity/optional",
+        optionalIdentity: true,
+        handler: async ({ identity, res }) => sendJson(res, { authenticated: identity !== null }),
+      },
+    ];
+    const server = createApiServer({ routes });
+    const baseUrl = await listen(server);
+
+    try {
+      const response = await fetch(`${baseUrl}/identity/optional`);
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ authenticated: false });
+      expect(getIdentityMock).toHaveBeenCalledTimes(1);
+      expect(requireIdentityMock).not.toHaveBeenCalled();
+      expect(requireAuthMock).not.toHaveBeenCalled();
     } finally {
       await close(server);
     }
@@ -186,6 +249,53 @@ describe("createApiServer", () => {
       expect(requireRoleMock).toHaveBeenCalledWith("org-1", "user-1", "admin", "dev-headers");
       expect(requirePermissionMock).toHaveBeenCalledWith("org-1", "user-1", "org.permissions.write", "dev-headers");
     } finally {
+      await close(server);
+    }
+  });
+
+  it("requires an allowlisted origin and CSRF marker for cookie-authenticated mutations", async () => {
+    const handler = vi.fn(async ({ res }) => sendJson(res, { ok: true }));
+    requireAuthMock.mockResolvedValue({
+      orgId: "org-1",
+      userId: "user-1",
+      mode: "janusly-session",
+      source: "web",
+      browserSessionId: "session-1",
+    });
+    const server = createApiServer({
+      routes: [{ method: "POST", match: "/cookie-write", handler }],
+    });
+    const baseUrl = await listen(server);
+
+    try {
+      const missingMarker = await fetch(`${baseUrl}/cookie-write`, {
+        method: "POST",
+        headers: { Origin: "http://localhost:5173" },
+      });
+      expect(missingMarker.status).toBe(403);
+      expect(handler).not.toHaveBeenCalled();
+
+      const foreignOrigin = await fetch(`${baseUrl}/cookie-write`, {
+        method: "POST",
+        headers: { Origin: "https://attacker.example", "x-janusly-csrf": "1" },
+      });
+      expect(foreignOrigin.status).toBe(403);
+      expect(handler).not.toHaveBeenCalled();
+
+      const accepted = await fetch(`${baseUrl}/cookie-write`, {
+        method: "POST",
+        headers: { Origin: "http://localhost:5173", "x-janusly-csrf": "1" },
+      });
+      expect(accepted.status).toBe(200);
+      await expect(accepted.json()).resolves.toEqual({ ok: true });
+      expect(handler).toHaveBeenCalledTimes(1);
+    } finally {
+      requireAuthMock.mockResolvedValue({
+        orgId: "org-1",
+        userId: "user-1",
+        mode: "dev-headers",
+        source: "dev",
+      });
       await close(server);
     }
   });

@@ -30,6 +30,12 @@ import {
   MEMORY_BULK_PURGE_JOB_NAME,
 } from "./memory-purge-scheduler";
 import {
+  handleIdentityRetentionTrigger,
+  IDENTITY_RETENTION_JOB_ID,
+  IDENTITY_RETENTION_JOB_NAME,
+  registerIdentityRetentionScheduler,
+} from "./identity-retention-scheduler";
+import {
   handleMemoryRetentionTrigger,
   MEMORY_RETENTION_JOB_ID,
   MEMORY_RETENTION_JOB_NAME,
@@ -100,6 +106,7 @@ export { resolveMaintenanceWorkerConcurrency } from "./maintenance-control";
 
 /** Closed list of recurring work owned by the maintenance queue. */
 export const MAINTENANCE_SCHEDULERS: readonly MaintenanceSchedulerSpec[] = [
+  { id: IDENTITY_RETENTION_JOB_ID, label: "identity-retention", register: registerIdentityRetentionScheduler },
   { id: MEMORY_RETENTION_JOB_ID, label: "memory-retention", register: registerMemoryRetentionScheduler },
   { id: AUDIT_LOGS_RETENTION_JOB_ID, label: "audit-logs-retention", register: registerAuditLogsRetentionScheduler },
   { id: SCIM_EVENTS_RETENTION_JOB_ID, label: "scim-events-retention", register: registerScimEventsRetentionScheduler },
@@ -129,6 +136,9 @@ export async function registerAndMigrateMaintenanceSchedulers(
  */
 export async function dispatchMaintenanceJob(name: string, data: unknown): Promise<boolean> {
   switch (name) {
+    case IDENTITY_RETENTION_JOB_NAME:
+      await handleIdentityRetentionTrigger();
+      return true;
     case MEMORY_RETENTION_JOB_NAME:
       await handleMemoryRetentionTrigger();
       return true;

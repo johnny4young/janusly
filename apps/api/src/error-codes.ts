@@ -31,6 +31,20 @@
  * prefix. Mirrors the `apiErrors.*` namespace in the web catalog.
  */
 export type ApiErrorCode =
+  // identity and organizations
+  | "identity_human_required"
+  | "identity_email_required"
+  | "identity_invitation_not_found"
+  | "identity_invitation_accept_failed"
+  | "invitation_id_required"
+  | "organization_name_invalid"
+  | "organization_create_failed"
+  | "profile_name_invalid"
+  | "profile_update_failed"
+  | "browser_session_required"
+  | "browser_session_update_failed"
+  | "organization_id_required"
+  | "organization_access_denied"
   // members
   | "email_required"
   | "email_invalid"

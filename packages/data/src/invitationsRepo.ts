@@ -16,8 +16,8 @@
  * - `apps/api/src/routes/members-routes.ts` (admin invite/list/revoke).
  */
 
-import { and, eq } from "drizzle-orm";
-import { db, invitations } from "@janusly/db";
+import { and, asc, eq } from "drizzle-orm";
+import { db, invitations, organizations } from "@janusly/db";
 
 export type InvitationStatus = "pending" | "accepted" | "revoked";
 
@@ -31,6 +31,13 @@ export type InvitationRow = {
   acceptedAt: Date | string | null;
   createdAt: Date | string | null;
 };
+
+export type IdentityInvitationRow = InvitationRow & {
+  organizationName: string | null;
+};
+
+/** Account bootstrap caps pending invitation discovery per verified email. */
+export const IDENTITY_INVITATION_LIMIT = 50;
 
 function mapRow(row: typeof invitations.$inferSelect): InvitationRow {
   return {
@@ -58,6 +65,40 @@ export async function findPendingInvitation(
   const row = rows[0];
   if (!row || row.status !== "pending") return null;
   return mapRow(row);
+}
+
+/** List pending invitations addressed to one provider-verified email. */
+export async function listPendingInvitationsForEmail(emailInput: string): Promise<IdentityInvitationRow[]> {
+  const email = emailInput.trim().toLowerCase();
+  if (!email) return [];
+  const rows = await db
+    .select({
+      id: invitations.id,
+      orgId: invitations.orgId,
+      email: invitations.email,
+      role: invitations.role,
+      invitedBy: invitations.invitedBy,
+      status: invitations.status,
+      acceptedAt: invitations.acceptedAt,
+      createdAt: invitations.createdAt,
+      organizationName: organizations.name,
+    })
+    .from(invitations)
+    .leftJoin(organizations, eq(organizations.id, invitations.orgId))
+    .where(and(eq(invitations.email, email), eq(invitations.status, "pending")))
+    .orderBy(asc(invitations.createdAt), asc(invitations.id))
+    .limit(IDENTITY_INVITATION_LIMIT + 1);
+  return rows.map((row) => ({
+    id: row.id,
+    orgId: row.orgId,
+    email: row.email,
+    role: row.role,
+    invitedBy: row.invitedBy,
+    status: row.status as InvitationStatus,
+    acceptedAt: row.acceptedAt,
+    createdAt: row.createdAt,
+    organizationName: row.organizationName,
+  }));
 }
 
 /** Insert a new pending invitation, or re-open an accepted / revoked row for the same email. */

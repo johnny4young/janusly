@@ -24,7 +24,7 @@ describe("maintenance job catalog", () => {
 
   it("keeps every recurring id unique and reserved for system work", () => {
     const ids = MAINTENANCE_SCHEDULERS.map((scheduler) => scheduler.id);
-    expect(ids).toHaveLength(12);
+    expect(ids).toHaveLength(13);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids.every((id) => id.startsWith("system:"))).toBe(true);
   });
@@ -33,12 +33,12 @@ describe("maintenance job catalog", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     try {
       await expect(registerAndMigrateMaintenanceSchedulers()).resolves.toEqual({
-        registered: 12,
-        retiredLegacy: 12,
+        registered: 13,
+        retiredLegacy: 13,
       });
-      expect(queueMocks.upsertJobScheduler).toHaveBeenCalledTimes(12);
-      expect(queueMocks.removeJobScheduler).toHaveBeenCalledTimes(12);
-      for (let index = 0; index < 12; index += 1) {
+      expect(queueMocks.upsertJobScheduler).toHaveBeenCalledTimes(13);
+      expect(queueMocks.removeJobScheduler).toHaveBeenCalledTimes(13);
+      for (let index = 0; index < 13; index += 1) {
         expect(queueMocks.upsertJobScheduler.mock.invocationCallOrder[index])
           .toBeLessThan(queueMocks.removeJobScheduler.mock.invocationCallOrder[index] ?? 0);
       }

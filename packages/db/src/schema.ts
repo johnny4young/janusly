@@ -19,7 +19,8 @@
  *   drizzle-kit cannot generate (pgvector extension, GIN opclass, HNSW index).
  *
  * Tables:
- * - `organizations`, `users`, `org_members` — multi-tenant scope.
+ * - `organizations`, `users`, `org_members` — tenant catalogue, global
+ *   identity profiles, and membership grants.
  * - `org_configs` — tenant-level runtime configuration overrides.
  * - `workflows`, `workflow_versions`, `workflow_rollouts`,
  *   `workflow_rollout_outcomes` — versioned DAG storage and bounded rollout
@@ -62,10 +63,10 @@ export const organizations = pgTable("organizations", {
 
 export const users = pgTable("users", {
   id: text("id").primaryKey(),
-  orgId: text("org_id").notNull(),
   email: text("email"),
   name: text("name"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
 export const orgMembers = pgTable(
@@ -1070,6 +1071,32 @@ export const ssoStateNonces = pgTable(
   },
   (table) => [
     uniqueIndex("sso_state_nonces_org_nonce_idx").on(table.orgId, table.nonce),
+  ],
+);
+
+/**
+ * Revocable browser sessions issued after WorkOS SSO. The signed cookie
+ * carries only this row's id; identity, organization, expiry, and revocation
+ * state remain server-side and are checked on every request.
+ *
+ * No foreign keys by the repository's orphan-tolerant policy. Revoking or
+ * deleting an organization never silently rewrites historical session rows;
+ * membership resolution still fails closed when the grant disappears.
+ */
+export const authSessions = pgTable(
+  "auth_sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    email: text("email").notNull(),
+    orgId: text("org_id").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("auth_sessions_user_expiry_idx").on(table.userId, table.expiresAt),
   ],
 );
 

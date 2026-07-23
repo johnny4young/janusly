@@ -2,10 +2,13 @@
 
 Base URL: `http://localhost:3001`. Every request must carry an auth context. In
 dev, send `x-org-id` and `x-user-id` headers. In production, send a provider
-token (`Authorization: Bearer <jwt>` for Supabase or service-token mode, or
-`x-janusly-session` for Janusly SSO) plus `x-org-id` when the user has more
-than one membership. The org header is a scope selector; authorization is
-granted by the server-side `org_members` row, not by a client-side claim.
+token (`Authorization: Bearer <jwt>` for Supabase or service-token mode), or
+use the HttpOnly `janusly_session` cookie issued by WorkOS SSO, plus `x-org-id`
+when the user has more than one membership. Cookie clients must send
+credentials and every mutation must include `x-janusly-csrf: 1` from an
+origin allowed by `API_ALLOWED_ORIGINS`. The org header is a scope selector;
+authorization is granted by the server-side `org_members` row, not by a
+client-side claim.
 
 CORS allowed origins come from `API_ALLOWED_ORIGINS` (default: `http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174`). Root `pnpm dev` binds loopback on strict port `5173`; the `5174` origins remain for legacy/manual development setups. Body limit defaults to 1 MiB (`API_MAX_JSON_BODY_BYTES`).
 
@@ -81,6 +84,7 @@ rest of the registry discoverable without duplicating every handler body.
 
 | Family | Routes | Purpose |
 | --- | --- | --- |
+| Account bootstrap | `/auth/session*`, `/auth/context`, `/auth/invitations/accept`, `/organizations`, `/users/me` | Provider identity, revocable browser sessions, first organization, invitation acceptance, workspace selection, and global profile. |
 | Org config / roles / permissions | `/org/config`, `/org/permissions/catalog`, `/org/roles*` | Tenant runtime config, permission catalog, custom roles. |
 | Enterprise identity | `/org/sso/connections*`, `/auth/sso/start`, `/auth/sso/callback`, `/org/scim/directories*`, `/webhooks/workos/directory` | WorkOS SSO + SCIM admin and webhook surfaces. |
 | MCP client admin | `/mcp/connections*`, `/mcp/connections/:alias/tools*` | Register external MCP servers, rediscover descriptors, enable tools, rate-limit tools, expose selected descriptors to AI. |

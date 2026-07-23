@@ -95,6 +95,7 @@ export const scimRoutes: Route[] = [
     method: "GET",
     match: "/org/scim/directories",
     role: "viewer",
+    permission: "members.read",
     handler: async ({ res, auth }) => {
       const rows = await listScimDirectories(auth.orgId);
       return sendJson(res, rows);
@@ -104,6 +105,7 @@ export const scimRoutes: Route[] = [
     method: "POST",
     match: "/org/scim/directories",
     role: "admin",
+    permission: "org.config.write",
     handler: async ({ req, res, auth }) => {
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const providerDirectoryId = typeof body.providerDirectoryId === "string"
@@ -139,6 +141,7 @@ export const scimRoutes: Route[] = [
     method: "POST",
     match: (url) => /^\/org\/scim\/directories\/[^/]+$/.test(url),
     role: "admin",
+    permission: "org.config.write",
     handler: async ({ req, res, auth }) => {
       const match = (req.url ?? "").match(/^\/org\/scim\/directories\/([^/?]+)/);
       const id = match?.[1];
@@ -168,6 +171,7 @@ export const scimRoutes: Route[] = [
     method: "DELETE",
     match: (url) => /^\/org\/scim\/directories\/[^/]+$/.test(url),
     role: "admin",
+    permission: "org.config.write",
     handler: async ({ req, res, auth }) => {
       const match = (req.url ?? "").match(/^\/org\/scim\/directories\/([^/?]+)/);
       const id = match?.[1];
@@ -188,6 +192,7 @@ export const scimRoutes: Route[] = [
     // the query string, so an exact-string match would 404 on `?limit=…`.
     match: (url) => url === "/org/scim/groups" || url.startsWith("/org/scim/groups?"),
     role: "viewer",
+    permission: "members.read",
     handler: async ({ req, res, auth }) => {
       const directory = await getScimDirectoryByOrgId(auth.orgId);
       if (!directory) return sendJson(res, []);
@@ -201,6 +206,7 @@ export const scimRoutes: Route[] = [
     method: "GET",
     match: "/org/scim/group-role-mappings",
     role: "viewer",
+    permission: "members.read",
     handler: async ({ res, auth }) => {
       const directory = await getScimDirectoryByOrgId(auth.orgId);
       if (!directory) return sendJson(res, []);
@@ -212,6 +218,7 @@ export const scimRoutes: Route[] = [
     method: "POST",
     match: "/org/scim/group-role-mappings",
     role: "admin",
+    permission: "members.role_set",
     handler: async ({ req, res, auth }) => {
       // Read the request body before any await on DB I/O so the stream's
       // data/end events aren't missed (matches the directory POST ordering).
@@ -261,6 +268,7 @@ export const scimRoutes: Route[] = [
     method: "POST",
     match: (url) => /^\/org\/scim\/group-role-mappings\/[^/]+$/.test(url),
     role: "admin",
+    permission: "members.role_set",
     handler: async ({ req, res, auth }) => {
       const match = (req.url ?? "").match(/^\/org\/scim\/group-role-mappings\/([^/?]+)/);
       const id = match?.[1];
@@ -291,6 +299,7 @@ export const scimRoutes: Route[] = [
     method: "DELETE",
     match: (url) => /^\/org\/scim\/group-role-mappings\/[^/]+$/.test(url),
     role: "admin",
+    permission: "members.role_set",
     handler: async ({ req, res, auth }) => {
       const match = (req.url ?? "").match(/^\/org\/scim\/group-role-mappings\/([^/?]+)/);
       const id = match?.[1];
@@ -316,6 +325,7 @@ export const scimRoutes: Route[] = [
     method: "POST",
     match: "/org/scim/resync",
     role: "admin",
+    permission: "members.role_set",
     handler: async ({ res, auth }) => {
       const directory = await getScimDirectoryByOrgId(auth.orgId);
       if (!directory) {
