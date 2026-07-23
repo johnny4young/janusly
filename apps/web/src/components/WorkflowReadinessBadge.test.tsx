@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { initI18n } from '../i18n'
 import { useWorkflowStore } from '../store'
+import type { WorkflowGraphNode } from '../types'
 import { WorkflowReadinessBadge } from './WorkflowReadinessBadge'
 import { consumeResilienceFocus } from './resilience-focus-bus'
 
@@ -10,14 +11,24 @@ vi.mock('../api', () => ({
   api: vi.fn(),
 }))
 
-const initialNodes = useWorkflowStore.getState().nodes
-const initialResilienceNodeId = initialNodes.find(node => node.data.type === 'http')?.id
+const readinessFixtureNodes: WorkflowGraphNode[] = [{
+  id: 'request',
+  position: { x: 0, y: 0 },
+  data: { label: '', type: 'http', config: { url: 'https://example.com' } },
+}]
+const initialResilienceNodeId = readinessFixtureNodes[0].id
 
 describe('<WorkflowReadinessBadge />', () => {
   beforeEach(() => {
     initI18n('en')
     vi.mocked(api).mockReset()
-    useWorkflowStore.setState({ activeTab: 'home', selectedNodeId: null, selectedEdgeId: null, nodes: initialNodes, workflowRevision: 0 })
+    useWorkflowStore.setState({
+      activeTab: 'home',
+      selectedNodeId: null,
+      selectedEdgeId: null,
+      nodes: readinessFixtureNodes,
+      workflowRevision: 0,
+    })
   })
 
   afterEach(() => {
@@ -59,7 +70,6 @@ describe('<WorkflowReadinessBadge />', () => {
   })
 
   it('deep-links a retry blocker to the selected node resilience controls', async () => {
-    expect(initialResilienceNodeId).toBeTruthy()
     vi.mocked(api).mockResolvedValueOnce({
       status: 'fail',
       issues: [{

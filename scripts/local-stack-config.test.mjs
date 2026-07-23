@@ -6,6 +6,7 @@ const compose = await readFile(new URL("../deploy/local/compose.yml", import.met
 const localEnvExample = await readFile(new URL("../deploy/local/local.env.example", import.meta.url), "utf8");
 const webDockerfile = await readFile(new URL("../Dockerfile.web", import.meta.url), "utf8");
 const gitignore = await readFile(new URL("../.gitignore", import.meta.url), "utf8");
+const supabaseConfig = await readFile(new URL("../supabase/config.toml", import.meta.url), "utf8");
 
 function serviceBlock(name) {
   const match = compose.match(new RegExp(`^  ${name}:\\n([\\s\\S]*?)(?=^  [a-z][a-z0-9-]*:|^volumes:)`, "m"));
@@ -13,15 +14,26 @@ function serviceBlock(name) {
   return match[0];
 }
 
-test("persistent local stack separates runtime services and named data", () => {
-  for (const service of ["postgres", "redis", "provider-simulator", "migrate", "seed", "api", "worker", "web"]) {
+test("persistent local stack uses one Supabase database and separate runtime services", () => {
+  for (const service of ["redis", "provider-simulator", "migrate", "api", "worker", "web"]) {
     assert.match(compose, new RegExp(`^  ${service}:`, "m"));
   }
-  assert.match(compose, /postgres_data:\/var\/lib\/postgresql/);
+  assert.doesNotMatch(compose, /^  postgres:/m);
+  assert.doesNotMatch(compose, /^  seed:/m);
+  assert.doesNotMatch(compose, /^  postgres_data:/m);
+  assert.match(compose, /DATABASE_URL: \$\{JANUSLY_LOCAL_DATABASE_URL:\?/);
   assert.match(compose, /redis_data:\/data/);
   assert.match(compose, /provider_data:\/data/);
   assert.match(compose, /condition: service_completed_successfully/);
   assert.match(compose, /restart: unless-stopped/);
+  for (const service of ["migrate", "api", "worker"]) {
+    assert.match(serviceBlock(service), /host\.docker\.internal:host-gateway/);
+  }
+  assert.match(supabaseConfig, /^\[db\]$/m);
+  assert.match(supabaseConfig, /^port = 7432$/m);
+  assert.match(supabaseConfig, /^\[db\.seed\][\s\S]*?^enabled = false$/m);
+  assert.match(supabaseConfig, /^schemas = \["graphql_public"\]$/m);
+  assert.doesNotMatch(supabaseConfig, /^schemas = .*"public"/m);
 });
 
 test("local published ports are loopback-only", () => {
@@ -29,7 +41,7 @@ test("local published ports are loopback-only", () => {
   const published = portBlocks.flatMap(([, block]) => (
     [...block.matchAll(/^\s+- "([^"]+)"$/gm)].map((match) => match[1])
   ));
-  assert.ok(published.length >= 8);
+  assert.ok(published.length >= 6);
   assert.ok(published.every((entry) => entry.startsWith("127.0.0.1:")), published.join("\n"));
 });
 
@@ -72,4 +84,9 @@ test("web image is reproducible and has no unpinned global static-server depende
 
 test("generated local env remains untracked", () => {
   assert.match(gitignore, /^deploy\/local\/local\.env$/m);
+});
+
+test("normal startup cannot insert example credentials or workflow data", () => {
+  assert.doesNotMatch(compose, /setup-local-smoke-fixtures|seed-local-lab|seed:demos|seed:full/);
+  assert.doesNotMatch(localEnvExample, /JANUSLY_LOCAL_POSTGRES_PASSWORD|JANUSLY_POSTGRES_IMAGE/);
 });

@@ -60,6 +60,9 @@ function runLocalStack(command) {
 
 await request(`${apiUrl}/health`);
 await request(`${simulatorUrl}/health`);
+// Normal local startup is intentionally data-empty. Qualification commands
+// opt into only the credential/config fixtures required by this provider path.
+await runLocalStack("fixtures");
 await request(`${simulatorUrl}/requests`, { method: "DELETE" });
 if (failureProvider) await setProviderMode(failureProvider, "failure");
 

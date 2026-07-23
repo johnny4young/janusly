@@ -32,6 +32,7 @@
   --color-we-danger-soft: #fef2f2;
   --color-we-danger-text: #b42318;
   --color-we-info: #3b82f6;
+  --color-we-info-text: #1d4ed8;
   --color-we-info-soft: #eff6ff;
   --color-we-ink: #0f172a;
   --color-we-ink-soft: #334155;
@@ -114,6 +115,7 @@
   --we-danger-border-30: color-mix(in srgb, var(--we-danger) 30%, transparent);
   --we-danger-border-40: color-mix(in srgb, var(--we-danger) 40%, transparent);
   --we-info: var(--color-we-info);
+  --we-info-text: var(--color-we-info-text);
   --we-info-soft: var(--color-we-info-soft);
   --we-info-border-30: color-mix(in srgb, var(--we-info) 30%, transparent);
   --we-shadow-ink-04: color-mix(in srgb, var(--we-ink) 4%, transparent);
@@ -167,6 +169,7 @@
   --color-we-danger-soft: #2c1414;
   --color-we-danger-text: #ef4444;
   --color-we-info: #3b82f6;
+  --color-we-info-text: #60a5fa;
   --color-we-info-soft: #122035;
   --color-we-brand-glyph: #ffffff;
 
@@ -209,6 +212,7 @@
   --we-danger-solid: var(--color-we-danger-solid);
   --we-danger-soft: var(--color-we-danger-soft);
   --we-info: var(--color-we-info);
+  --we-info-text: var(--color-we-info-text);
   --we-info-soft: var(--color-we-info-soft);
   color-scheme: dark;
 }

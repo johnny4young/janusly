@@ -1,7 +1,7 @@
 name: janusly-local
 
 x-app-environment: &app-environment
-  DATABASE_URL: postgres://postgres:${JANUSLY_LOCAL_POSTGRES_PASSWORD:-janusly-local}@postgres:5432/workflow
+  DATABASE_URL: ${JANUSLY_LOCAL_DATABASE_URL:?start the stack through scripts/local-stack.mjs}
   REDIS_URL: redis://redis:6379
   ALLOW_DEV_AUTH_HEADERS: ${JANUSLY_LOCAL_ALLOW_DEV_AUTH_HEADERS:-true}
   API_ALLOWED_ORIGINS: ${JANUSLY_LOCAL_WEB_ORIGINS:-http://localhost:7310,http://127.0.0.1:7310}
@@ -31,23 +31,6 @@ x-app-environment: &app-environment
   OTEL_EXPORTER: ${OTEL_EXPORTER:-console}
 
 services:
-  postgres:
-    image: ${JANUSLY_POSTGRES_IMAGE:-pgvector/pgvector:pg18}
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${JANUSLY_LOCAL_POSTGRES_PASSWORD:-janusly-local}
-      POSTGRES_DB: workflow
-    volumes:
-      - postgres_data:/var/lib/postgresql
-    ports:
-      - "127.0.0.1:${JANUSLY_LOCAL_POSTGRES_PORT:-5432}:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d workflow"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-
   redis:
     image: redis:8-alpine
     restart: unless-stopped
@@ -82,19 +65,8 @@ services:
     restart: "no"
     environment: *app-environment
     command: ["pnpm", "--filter", "@janusly/db", "db:migrate"]
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  seed:
-    image: janusly-local-api
-    pull_policy: never
-    restart: "no"
-    environment: *app-environment
-    command: ["pnpm", "--filter", "@janusly/api", "exec", "tsx", "../../scripts/seed-local-lab.ts"]
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   api:
     build:
@@ -120,7 +92,7 @@ services:
         condition: service_healthy
       provider-simulator:
         condition: service_healthy
-      seed:
+      migrate:
         condition: service_completed_successfully
 
   worker:
@@ -139,12 +111,14 @@ services:
       JANUSLY_WORKER_CONCURRENCY: ${JANUSLY_WORKER_CONCURRENCY:-2}
     ports:
       - "127.0.0.1:${JANUSLY_LOCAL_WORKER_METRICS_PORT:-9465}:9465"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_healthy
       provider-simulator:
         condition: service_healthy
-      seed:
+      migrate:
         condition: service_completed_successfully
 
   web:
@@ -192,7 +166,6 @@ services:
       start_period: 600s
 
 volumes:
-  postgres_data:
   redis_data:
   provider_data:
   ollama_models:

@@ -166,18 +166,23 @@ When you're done, press `Ctrl+C` in the `pnpm dev` terminal. The orchestrator sh
 
 ### Persistent local integration lab
 
-Use the dedicated Docker profile when workflows, runs, recovery evidence, and
-provider simulations must survive restarts:
+Use the dedicated Docker profile when identities, workflows, runs, and recovery
+evidence must survive restarts:
 
 ```bash
-pnpm local:up
-pnpm local:verify
+pnpm local:auth:up
+pnpm local:db:verify
 # Studio: http://127.0.0.1:7310
 ```
 
-Unlike the short-lived `pnpm dev` test topology, this stack uses named volumes,
-keeps API and worker behavior production-shaped, and locally simulates GitHub,
-Slack, signed webhooks, and email without contacting public providers. See
+Supabase supplies one PostgreSQL database: Auth owns the `auth` schema and
+Janusly owns `public`. A clean mount contains no users, organizations,
+workflows, credentials, tenant configuration, or example canvas nodes; create
+the first account and workspace manually. Unlike the short-lived `pnpm dev`
+test topology, this stack keeps API and worker behavior production-shaped.
+Explicit smoke commands can install bounded provider fixtures and locally
+simulate GitHub, Slack, signed webhooks, and email without contacting public
+providers. See
 [`docs/local-deployment.md`](docs/local-deployment.md) for lifecycle commands,
 failure injection, persistence, safety boundaries, optional Ollama memory, and
 the explicit simulator-to-external-provider switch for private real-use tests.
@@ -208,7 +213,8 @@ See [`packages/mcp-server/README.md`](packages/mcp-server/README.md) for the arc
 
 ```bash
 pnpm dev             # full local stack: Compose + migrate + api/worker/web; waits for HTTP readiness
-pnpm local:up        # persistent loopback-only Docker integration lab
+pnpm local:auth:up   # persistent empty-start lab: Supabase Auth + one PostgreSQL DB
+pnpm local:db:verify # prove auth/public share that database
 pnpm local:smoke     # inbound event + GitHub/Slack/webhook/email simulator path
 pnpm local:failure-smoke # controlled provider outage + fail-closed DLQ evidence
 pnpm local:ui-smoke  # Chromium smoke against the persistent stack
@@ -232,9 +238,9 @@ pnpm evals           # scripts/run-evals.mjs against /ai/generate-workflow (assu
 pnpm evals:local     # one-command local regression gate: boots Compose + API, runs golden evals, tears down (spends AI credits only if a provider key is configured)
 pnpm evals:baseline  # snapshot the current ai-mode / shape-pass rates into evals/baseline.json (the regression floors)
 pnpm test:evals      # node:test for the eval-gate logic (scripts/evals-baseline.mjs) — $0, no API
-pnpm seed:demos      # idempotently seed the canonical demo credentials
-pnpm seed:recovery-matrix  # reset + seed DLQ fixtures for Recovery dialog smoke
-pnpm seed:full       # fuller local demo seed
+pnpm seed:demos      # explicit opt-in demo credentials; never runs at startup
+pnpm seed:recovery-matrix  # explicit opt-in DLQ fixtures for recovery testing
+pnpm seed:full       # explicit opt-in full demo dataset; never runs at startup
 pnpm backfill:usage-workflowid  # one-off legacy usage_events workflow attribution backfill
 ```
 

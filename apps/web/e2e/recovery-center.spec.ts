@@ -59,7 +59,8 @@ test('Recovery Center remains usable on mobile and the builder is one tap away',
   await navTrigger.click()
   await drawer.getByRole('button', { name: /^AI Studio\b/ }).click()
   await expect(drawer).toBeHidden()
-  await expect(page.locator('.workspace-main .workflow-node').first()).toBeVisible()
+  await expect(page.getByTestId('canvas-empty')).toBeVisible()
+  await expect(page.locator('.workspace-main .workflow-node')).toHaveCount(0)
 
   const overflow = await page.locator('.workspace-main').evaluate((main) => main.scrollWidth - main.clientWidth)
   expect(overflow).toBeLessThanOrEqual(2)

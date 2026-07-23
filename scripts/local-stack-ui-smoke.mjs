@@ -16,6 +16,20 @@ if (!settings.simulatorEnabled) {
 }
 await mkdir(evidenceDir, { recursive: true });
 
+// The persistent stack itself starts empty. Build the recoverable failure
+// explicitly for this qualification run instead of relying on startup data or
+// on a prior command having mutated the database.
+await new Promise((resolve, reject) => {
+  const child = spawn(process.execPath, ["scripts/local-stack-smoke.mjs", "--failure=slack"], {
+    cwd: root,
+    stdio: "inherit",
+  });
+  child.on("error", reject);
+  child.on("exit", (code) => code === 0
+    ? resolve()
+    : reject(new Error(`local provider fixture smoke exited ${code}`)));
+});
+
 await new Promise((resolve, reject) => {
   const child = spawn("pnpm", [
     "--filter", "@janusly/web", "exec", "playwright", "test",

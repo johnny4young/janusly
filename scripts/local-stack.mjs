@@ -21,7 +21,10 @@ const authExclusions = [
   "mailpit",
   "postgrest",
 ].join(",");
-let composeEnvironment = {};
+const placeholderDatabaseUrl = "postgres://unused:unused@127.0.0.1:1/postgres";
+let composeEnvironment = {
+  JANUSLY_LOCAL_DATABASE_URL: placeholderDatabaseUrl,
+};
 
 function run(commandName, args, options = {}) {
   return new Promise((resolve, reject) => {
@@ -29,7 +32,14 @@ function run(commandName, args, options = {}) {
     const child = spawn(commandName, args, {
       cwd: root,
       stdio: capture ? ["ignore", "pipe", "pipe"] : "inherit",
-      env: { ...process.env, ...composeEnvironment },
+      env: {
+        ...process.env,
+        // The local CLI is the only Supabase component that can emit usage
+        // telemetry. The self-hosted containers themselves do not phone home.
+        SUPABASE_TELEMETRY_DISABLED: "1",
+        DO_NOT_TRACK: "1",
+        ...composeEnvironment,
+      },
     });
     let stdout = "";
     let stderr = "";
@@ -60,16 +70,34 @@ function parseEnvOutput(output) {
   return values;
 }
 
-async function startLocalAuth() {
-  // Supabase prints its local JWTs and secret keys even after a successful
-  // start. Capture the output so routine lifecycle logs never disclose them.
-  await run("pnpm", ["exec", "supabase", "start", "-x", authExclusions], { sensitive: true });
+function containerUrl(raw) {
+  const parsed = new URL(raw);
+  parsed.hostname = "host.docker.internal";
+  return parsed.toString();
+}
+
+async function readLocalSupabaseStatus() {
   const { stdout } = await run(
     "pnpm",
     ["exec", "supabase", "status", "-o", "env"],
     { sensitive: true },
   );
-  const status = parseEnvOutput(stdout);
+  return parseEnvOutput(stdout);
+}
+
+function configureSupabaseEnvironment(status, { authEnabled }) {
+  const databaseUrl = status.DB_URL;
+  if (!databaseUrl) {
+    throw new Error("Supabase local status did not expose DB_URL");
+  }
+
+  composeEnvironment = {
+    JANUSLY_LOCAL_DATABASE_URL: containerUrl(databaseUrl),
+    JANUSLY_LOCAL_ALLOW_DEV_AUTH_HEADERS: authEnabled ? "false" : "true",
+  };
+
+  if (!authEnabled) return;
+
   const apiUrl = status.API_URL;
   const anonKey = status.ANON_KEY ?? status.PUBLISHABLE_KEY;
   const serviceRoleKey = status.SERVICE_ROLE_KEY ?? status.SECRET_KEY;
@@ -77,16 +105,22 @@ async function startLocalAuth() {
     throw new Error("Supabase local status did not expose API_URL, an anonymous/publishable key, and a service-role/secret key");
   }
   const parsed = new URL(apiUrl);
-  composeEnvironment = {
-    JANUSLY_LOCAL_ALLOW_DEV_AUTH_HEADERS: "false",
+  Object.assign(composeEnvironment, {
     JANUSLY_LOCAL_SUPABASE_PUBLIC_URL: apiUrl.replace("127.0.0.1", "localhost"),
     JANUSLY_LOCAL_SUPABASE_INTERNAL_URL: `http://host.docker.internal:${parsed.port}`,
     JANUSLY_LOCAL_SUPABASE_ANON_KEY: anonKey,
     JANUSLY_LOCAL_SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
-  };
+  });
 }
 
-async function stopLocalAuth({ reset = false } = {}) {
+async function startLocalSupabase({ authEnabled }) {
+  // Supabase prints its local JWTs and secret keys even after a successful
+  // start. Capture the output so routine lifecycle logs never disclose them.
+  await run("pnpm", ["exec", "supabase", "start", "-x", authExclusions], { sensitive: true });
+  configureSupabaseEnvironment(await readLocalSupabaseStatus(), { authEnabled });
+}
+
+async function stopLocalSupabase({ reset = false } = {}) {
   await run("pnpm", ["exec", "supabase", "stop", ...(reset ? ["--no-backup"] : [])]);
 }
 
@@ -130,7 +164,7 @@ async function waitForStack() {
 }
 
 if (command === "up") {
-  if (authProfile) await startLocalAuth();
+  await startLocalSupabase({ authEnabled: authProfile });
   await compose(["up", "-d", "--build"]);
   try {
     await waitForStack();
@@ -143,30 +177,41 @@ if (command === "up") {
   }
 } else if (command === "down") {
   await compose(["down"]);
-  if (authProfile) await stopLocalAuth();
+  await stopLocalSupabase();
   console.log("[local] stopped; named volumes were preserved");
 } else if (command === "reset") {
   await compose(["down", "-v", "--remove-orphans"]);
-  if (authProfile) await stopLocalAuth({ reset: true });
+  await stopLocalSupabase({ reset: true });
   console.log("[local] stopped and persistent local data was removed");
 } else if (command === "restart") {
-  if (authProfile) await startLocalAuth();
-  await compose(["restart", "postgres", "redis", "provider-simulator", "api", "worker", "web"]);
+  await startLocalSupabase({ authEnabled: authProfile });
+  await compose(["restart", "redis", "provider-simulator", "api", "worker", "web"]);
   await waitForStack();
   console.log("[local] restarted and healthy");
 } else if (command === "status") {
+  const status = await readLocalSupabaseStatus();
+  configureSupabaseEnvironment(status, { authEnabled: authProfile });
   await compose(["ps"]);
-  if (authProfile) {
-    const { stdout } = await run(
-      "pnpm",
-      ["exec", "supabase", "status", "-o", "env"],
-      { sensitive: true },
-    );
-    const status = parseEnvOutput(stdout);
-    console.log(`[local] Supabase Auth ${status.API_URL ? `ready at ${status.API_URL}` : "running"}`);
-  }
+  console.log(
+    `[local] unified Supabase PostgreSQL ready${authProfile && status.API_URL ? ` · Auth ${status.API_URL}` : ""}`,
+  );
+} else if (command === "fixtures") {
+  configureSupabaseEnvironment(await readLocalSupabaseStatus(), { authEnabled: false });
+  await compose([
+    "run", "--rm", "--no-deps", "api",
+    "pnpm", "--filter", "@janusly/api", "exec", "tsx",
+    "../../scripts/setup-local-smoke-fixtures.ts",
+  ]);
+} else if (command === "verify-db") {
+  configureSupabaseEnvironment(await readLocalSupabaseStatus(), { authEnabled: authProfile });
+  await compose([
+    "run", "--rm", "--no-deps", "api",
+    "pnpm", "--filter", "@janusly/api", "exec", "tsx",
+    "../../scripts/verify-local-unified-db.ts",
+    ...(process.argv.includes("--expect-empty") ? ["--expect-empty"] : []),
+  ]);
 } else if (command === "logs") {
   await compose(["logs", "-f", "--tail", "150"]);
 } else {
-  throw new Error("usage: node scripts/local-stack.mjs up|down|reset|restart|status|logs [--auth]");
+  throw new Error("usage: node scripts/local-stack.mjs up|down|reset|restart|status|fixtures|verify-db|logs [--auth] [--expect-empty]");
 }

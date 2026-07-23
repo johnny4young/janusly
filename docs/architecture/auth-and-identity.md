@@ -26,6 +26,21 @@
 
 Route handlers must not inspect provider-native claims for authorization, and every tenant query must scope by `auth.orgId`. Adding a provider means one extractor plus an entry in `PROVIDER_CHAIN`; adding an account bootstrap route requires `identityOnly` and must not access tenant data without an independently proven membership.
 
+## Unified local database boundary
+
+The persistent local profile has exactly one PostgreSQL instance, owned by the
+Supabase CLI. Supabase Auth owns `auth`; Janusly's Drizzle migrations and all
+domain repositories own `public`. Migration, API, and worker containers receive
+the captured local `DB_URL` only through the process environment and connect
+through `host.docker.internal`; there is no Compose PostgreSQL service or
+second domain database.
+
+Normal startup is intentionally data-empty and never runs fixture scripts.
+The browser begins with a blank untitled workflow. Provider qualification may
+explicitly invoke `scripts/setup-local-smoke-fixtures.ts`, but that path is
+owned by smoke commands and must never become a service dependency. Supabase
+CLI telemetry is disabled by `scripts/local-stack.mjs`.
+
 ## Web auth loading boundary
 
 The browser keeps provider code behind `apps/web/src/supabase-runtime.ts`, a

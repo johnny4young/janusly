@@ -152,14 +152,14 @@ type WorkflowStore = {
   currentWorkflowName: string
   /**
    * Whether the current workflow exists server-side. False for the initial
-   * sample draft and after `newWorkflow()`; true once loaded from the server
+   * blank draft and after `newWorkflow()`; true once loaded from the server
    * or successfully saved. Health/metadata lookups skip unsaved drafts so a
    * never-saved workflow doesn't 404 the health/metadata endpoints on load.
    */
   currentWorkflowSaved: boolean
   /**
    * Whether the canvas holds semantic edits not yet persisted as a workflow
-   * version. False for the untouched sample and right after hydrate/new/save;
+   * version. False for the untouched blank draft and after hydrate/new/save;
    * true after any persisted node/edge/config/name/layout mutation. Drives the unsaved-work guards
    * (confirm-before-replace, beforeunload) and the local draft autosave.
    */
@@ -301,20 +301,7 @@ function persistActiveTab(tab: ActiveTab): void {
   }
 }
 
-// `data.label` is intentionally empty — `WorkflowStepNode` resolves
-// the human label via `getNodeLabel(type)` at render time, which
-// re-evaluates through the i18n runtime on locale toggles. Leaving
-// the field empty lets the OR-fallback (`data.label || ...`) kick in.
-const initialNodes: WorkflowGraphNode[] = [
-  { id: 'fetch', position: { x: 0, y: 0 }, data: { label: '', type: 'http', config: { url: 'https://api.github.com' } } },
-  { id: 'check', position: { x: 280, y: 90 }, data: { label: '', type: 'condition', config: { expression: 'context.fetch.output.statusCode === 200' } } },
-  { id: 'approve', position: { x: 560, y: 180 }, data: { label: '', type: 'approval', config: getNodePreset('approval') } },
-]
-
-const initialEdges: WorkflowGraphEdge[] = [
-  { id: 'e-fetch-check', source: 'fetch', target: 'check', data: {} },
-  { id: 'e-check-approve', source: 'check', target: 'approve', data: { condition: 'context.check.output.result === true' } },
-]
+const initialWorkflowId = `workflow_${crypto.randomUUID().slice(0, 8)}`
 
 function clearedRunProjection(runTransitionGeneration: number) {
   return {
@@ -373,7 +360,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   identityContext: null,
   identityReady: false,
 
-  currentWorkflowId: 'ui-test',
+  currentWorkflowId: initialWorkflowId,
   // `main.tsx` starts downloading App in parallel with the locale catalog, so
   // module evaluation can precede i18next initialization. App fills this
   // sentinel before paint; never translate during store module evaluation.
@@ -384,8 +371,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   currentWorkflowInputs: undefined,
   currentWorkflowOutputs: undefined,
   currentWorkflowTemplatePolicy: undefined,
-  nodes: initialNodes,
-  edges: initialEdges,
+  nodes: [],
+  edges: [],
   selectedNodeId: null,
   selectedEdgeId: null,
   runId: null,

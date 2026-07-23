@@ -43,7 +43,7 @@ import { WorkflowReadinessBadge } from './components/WorkflowReadinessBadge'
 import { WorkflowHealthBadge } from './components/WorkflowHealthBadge'
 const RunInputDialog = lazy(() => import('./components/RunInputDialog').then((m) => ({ default: m.RunInputDialog })))
 import { Activity, ChevronRight, PlayCircle, Search, ShieldAlert, ShieldCheck } from 'lucide-react'
-import { AuthProvider, isSupabaseConfigured, normalizeAuth } from './auth'
+import { AuthProvider, isSupabaseConfigured } from './auth'
 import { useWorkflowStore } from './store'
 import { useShallow } from 'zustand/react/shallow'
 import { api } from './api'
@@ -227,7 +227,7 @@ export default function App() {
   const { t } = useT()
 
   useLayoutEffect(() => {
-    initializeWorkflowName(t('workflow.sampleName'))
+    initializeWorkflowName(t('workflow.defaultName'))
   }, [initializeWorkflowName, t])
 
   const [validationIssues, setValidationIssues] = useState<ValidationIssue[]>([])
@@ -439,9 +439,9 @@ export default function App() {
   useEffect(() => {
     let mounted = true
 
-    void AuthProvider.getSession().then(({ data }) => {
+    void AuthProvider.getAuth().then((auth) => {
       if (!mounted) return
-      setAuth(normalizeAuth(data.session))
+      setAuth(auth)
     }).catch(() => {
       if (mounted) clearAuth()
     }).finally(() => {

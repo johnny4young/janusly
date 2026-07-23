@@ -15,7 +15,7 @@ beforeEach(() => {
       identityContext: null,
       identityReady: false,
       currentWorkflowId: 'ui-test',
-      currentWorkflowName: 'Sample workflow',
+      currentWorkflowName: 'Untitled Workflow',
       workflowRevision: 0,
       nodes: [],
       edges: [],
@@ -38,16 +38,16 @@ beforeEach(() => {
 })
 
 describe('useWorkflowStore', () => {
-  it('initializes the translated starter name only while the boot sentinel is empty', () => {
+  it('initializes the translated blank-draft name only while the boot sentinel is empty', () => {
     useWorkflowStore.setState({ currentWorkflowName: '', workflowDirty: false })
-    useWorkflowStore.getState().initializeWorkflowName('Flujo de ejemplo')
+    useWorkflowStore.getState().initializeWorkflowName('Flujo sin título')
     expect(useWorkflowStore.getState()).toMatchObject({
-      currentWorkflowName: 'Flujo de ejemplo',
+      currentWorkflowName: 'Flujo sin título',
       workflowDirty: false,
     })
 
-    useWorkflowStore.getState().initializeWorkflowName('Sample workflow')
-    expect(useWorkflowStore.getState().currentWorkflowName).toBe('Flujo de ejemplo')
+    useWorkflowStore.getState().initializeWorkflowName('Untitled Workflow')
+    expect(useWorkflowStore.getState().currentWorkflowName).toBe('Flujo sin título')
   })
 
   it('addNode appends a node with its preset config and an empty label (leaf component resolves)', () => {
@@ -62,17 +62,11 @@ describe('useWorkflowStore', () => {
     expect(nodes[0].data.config).toEqual({ url: 'https://api.github.com' })
   })
 
-  it('seeds a representative request, condition, and approval workflow', () => {
-    expect(initialState.nodes.map(node => node.data.type)).toEqual(['http', 'condition', 'approval'])
-    expect(initialState.nodes.find(node => node.id === 'check')?.data.config).toEqual({
-      expression: 'context.fetch.output.statusCode === 200',
-    })
-    expect(initialState.edges.map(edge => [edge.source, edge.target])).toEqual([
-      ['fetch', 'check'],
-      ['check', 'approve'],
-    ])
-    expect(initialState.edges.find(edge => edge.source === 'check')?.data?.condition)
-      .toBe('context.check.output.result === true')
+  it('starts with a clean blank draft rather than example workflow data', () => {
+    expect(initialState.currentWorkflowSaved).toBe(false)
+    expect(initialState.workflowDirty).toBe(false)
+    expect(initialState.nodes).toEqual([])
+    expect(initialState.edges).toEqual([])
   })
 
   it('hydrateWorkflow loads nodes/edges and resets selection and run state', () => {

@@ -12,6 +12,8 @@ const locales = {
     env: 'Environment variable',
     add: 'Add connection',
     runs: 'Runs',
+    authoringNodes: ['Call an API', 'AI prompt', 'Branch rule'],
+    restoreDraft: 'Restore draft',
     added: (name: string) => `Credential ${name} added`,
   },
   es: {
@@ -22,6 +24,8 @@ const locales = {
     env: 'Variable de entorno',
     add: 'Añadir conexión',
     runs: 'Ejecuciones',
+    authoringNodes: ['Llamar a una API', 'Prompt de IA', 'Regla de rama'],
+    restoreDraft: 'Restaurar borrador',
     added: (name: string) => `Credencial ${name} agregada`,
   },
 } as const
@@ -48,9 +52,18 @@ async function capture(surface: Locator, filename: string): Promise<void> {
   })
 }
 
-async function waitForAuthoringCanvas(page: Page): Promise<void> {
+async function waitForAuthoringCanvas(
+  page: Page,
+  labels: readonly [string, string, string],
+): Promise<void> {
   const canvas = page.locator('.workspace-canvas-wrapper')
   const nodes = canvas.locator('.workflow-node')
+  const palette = page.locator('.sb-palette')
+  if (await nodes.count() === 0) {
+    for (const label of labels) {
+      await palette.getByRole('button', { name: label, exact: true }).first().click()
+    }
+  }
   await expect(nodes).toHaveCount(3)
   await expect(nodes.first()).toBeVisible()
   await expect.poll(async () => canvas.evaluate((element) => {
@@ -84,15 +97,20 @@ test('grouped control-plane panels and shared mutations remain bilingual', async
 
   for (const locale of ['en', 'es'] as const) {
     if (locale === 'es') {
-      await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
+      await page.evaluate(() => {
+        window.localStorage.setItem('janusly:locale', 'es')
+        window.localStorage.setItem('janusly:activeTab', 'inspector')
+      })
       await page.reload()
       await expect(page.getByText('dev-user')).toBeVisible()
+      await page.getByRole('button', { name: locales.es.restoreDraft, exact: true }).click()
+      await expect(page.locator('.run-input-backdrop')).toHaveCount(0)
     }
 
     const copy = locales[locale]
     await page.getByRole('button', { name: new RegExp(`^${copy.aiStudio}\\b`) }).click()
     await expect(page.getByText(copy.hero, { exact: true })).toBeVisible()
-    await waitForAuthoringCanvas(page)
+    await waitForAuthoringCanvas(page, copy.authoringNodes)
     await capture(page.locator('.workspace-grid'), `web-${locale}-control-plane-authoring-default`)
 
     await page.getByRole('button', { name: copy.connections, exact: true }).click()

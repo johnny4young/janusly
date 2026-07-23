@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { scanPublicContent } from "./check-public-repo-hygiene.mjs";
+import { checkTrackedFiles, scanPublicContent } from "./check-public-repo-hygiene.mjs";
 
 test("rejects internal work-item identifiers", () => {
   const violations = scanPublicContent("docs/example.md", "Delivered ENG-123 yesterday.");
@@ -45,6 +45,13 @@ test("excludes enforcement fixtures and the ignore file", () => {
   assert.deepEqual(scanPublicContent(".gitignore", "docs/private/"), []);
   assert.deepEqual(
     scanPublicContent("scripts/check-public-repo-hygiene.test.mjs", "ENG-999"),
+    [],
+  );
+});
+
+test("ignores an indexed file deleted from the working tree", () => {
+  assert.deepEqual(
+    checkTrackedFiles(["scripts/__deleted-public-hygiene-fixture__.md"]),
     [],
   );
 });

@@ -49,6 +49,6 @@ test('AI Studio explains the current flow from the panel', async ({ page }) => {
   await page.getByRole('button', { name: /^AI Studio\b/ }).click()
   await page.getByRole('button', { name: 'Explain this flow', exact: true }).click()
 
-  await expect(page.getByText('Explanation for Sample workflow')).toBeVisible()
+  await expect(page.getByText('Explanation for Untitled Workflow')).toBeVisible()
   await expect(page.getByText('This flow starts by calling an API, then coordinates an agent team for the next action.')).toBeVisible()
 })

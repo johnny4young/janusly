@@ -266,27 +266,32 @@ integration settings.
 | --- | --- | --- | --- |
 | `JANUSLY_LOCAL_INTEGRATION_SIMULATOR` | `false` | integration tools and mailer | Master process gate. Only the exact string `true` enables simulator routing. |
 | `JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL` | unset | `packages/engine/src/local-integration-simulator.ts` | Process-owned simulator base URL. Credentials, query strings, and fragments are rejected. |
-| `JANUSLY_LOCAL_STACK` | `false` | local bootstrap | Required marker before the local credential/config bootstrap can run. |
-| `JANUSLY_LOCAL_ORG_ID` | `default` | local bootstrap and smoke scripts | Organization seeded and exercised by the local lab. |
+| `JANUSLY_LOCAL_STACK` | `false` | explicit smoke fixtures | Required marker before qualification-only credential/config fixtures can run. Normal startup never invokes them. |
+| `JANUSLY_LOCAL_ORG_ID` | `default` | smoke scripts | Development organization exercised only by explicit provider qualification. |
 
-The Compose-specific `JANUSLY_LOCAL_*_PORT`, local Postgres password, sender,
-and browser URL settings are documented in the tracked
-`deploy/local/local.env.example`. Simulator delivery still requires normal
-credential rows; the local bootstrap creates only references to local-only
-environment values.
+The Compose-specific `JANUSLY_LOCAL_*_PORT`, sender, and browser URL settings
+are documented in the tracked `deploy/local/local.env.example`. The Supabase
+CLI-generated `DB_URL` is transformed into the container-only
+`JANUSLY_LOCAL_DATABASE_URL` in memory; it is never copied into that file.
+Simulator delivery still requires normal credential rows. Explicit smoke
+commands create only the bounded references required for their own run.
 
-`pnpm local:auth:up` adds the pinned `supabase/config.toml` identity profile.
-Its orchestrator obtains the local API URL plus anonymous/service credentials
-from `supabase status -o env` and injects them into the Compose process without
-persisting secrets. It also forces `ALLOW_DEV_AUTH_HEADERS=false`. Supabase
-uses loopback ports `7431` (Auth/API gateway) and `7432` (private local DB).
+Every persistent local profile starts the pinned `supabase/config.toml`
+PostgreSQL database on host port `7432`; Supabase owns `auth` and Janusly owns
+`public`. `pnpm local:auth:up` additionally injects the local API URL plus
+anonymous/service credentials from `supabase status -o env` and forces
+`ALLOW_DEV_AUTH_HEADERS=false`. Auth uses host port `7431`. Supabase CLI may
+publish both ports on every host interface, so this is trusted-workstation
+development infrastructure rather than a network-safe deployment. Generated
+database/Auth credentials remain in process memory.
 
 The persistent stack loads its ignored `deploy/local/local.env` into the API
-and worker only. With `JANUSLY_LOCAL_INTEGRATION_SIMULATOR=false`, the local
-bootstrap points its GitHub, Slack, and webhook credentials at `GITHUB_TOKEN`,
-`SLACK_WEBHOOK_URL`, and `WEBHOOK_SIGNING_SECRET`; it never copies their values
-into Postgres. Additional environment-backed credential references may be
-appended to that ignored file. The web image never receives it. See
+and worker only. With `JANUSLY_LOCAL_INTEGRATION_SIMULATOR=false`, create
+credential rows manually that reference `GITHUB_TOKEN`, `SLACK_WEBHOOK_URL`,
+or `WEBHOOK_SIGNING_SECRET`; startup never creates or rewrites those rows and
+never copies secret values into PostgreSQL. Additional environment-backed
+credential references may be appended to that ignored file. The web image
+never receives it. See
 [`docs/local-deployment.md`](local-deployment.md#opt-in-external-providers) for
 the safe switching procedure and smoke-command boundary.
 

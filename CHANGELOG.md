@@ -16,6 +16,12 @@ retroactively.
 
 ### Changed
 
+- The persistent local profiles now use one Supabase PostgreSQL database:
+  Supabase owns `auth`, Janusly owns `public`, and the separate Compose
+  PostgreSQL service has been removed.
+- Normal local startup is data-empty. Provider credentials/configuration are
+  installed only by explicit qualification commands; real-use configuration
+  is created manually.
 - Tenant actions now consume the selected organization's effective permission
   set in both API enforcement and browser affordances. Custom roles no longer
   inherit workflow, run, recovery, SCIM, or administration actions merely from
@@ -57,12 +63,12 @@ retroactively.
 - Revocable WorkOS browser sessions backed by server rows and opaque HttpOnly
   cookies, explicit CSRF enforcement, logout and organization rotation, plus
   bounded maintenance cleanup of expired sessions and one-time SSO state.
-- An opt-in persistent local Supabase Auth profile on ports 7431/7432 with a
+- A persistent local Supabase PostgreSQL/Auth profile on ports 7432/7431 with a
   real owner/viewer/editor Playwright journey and persistence proof across a
   complete Janusly stack restart.
-- A loopback-only persistent Docker integration lab with named Postgres,
-  Redis, provider-evidence, and optional Ollama volumes; separate API and worker
-  processes; one-shot migration/bootstrap; deterministic GitHub, Slack,
+- A loopback-only persistent Docker integration lab with Supabase PostgreSQL,
+  named Redis, provider-evidence, and optional Ollama persistence; separate API
+  and worker processes; one-shot migrations; deterministic GitHub, Slack,
   signed-webhook, and email simulation; controlled failure modes; restart
   persistence proof; and Chromium smoke evidence.
 - Durable authenticated JSON webhook ingestion with stable caller event IDs,
@@ -140,6 +146,9 @@ retroactively.
 
 ### Fixed
 
+- Opening Step setup no longer injects a three-node Sample workflow; a new
+  workspace starts with an untitled, empty canvas and explicit add-step
+  guidance.
 - Identity and organization transitions now cancel prior in-flight API, SSE,
   and download work, clear tenant-owned notifications and projections, and
   ignore late bootstrap responses from a previous organization.

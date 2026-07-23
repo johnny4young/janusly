@@ -1,5 +1,5 @@
 /**
- * Idempotent bootstrap for the isolated local Docker stack.
+ * Explicit provider fixtures for local qualification commands.
  *
  * This inserts only credential references and the safe sender address; secret
  * values remain in container environment variables. It refuses to run unless
@@ -16,7 +16,7 @@ const marker = process.env.JANUSLY_LOCAL_STACK;
 const providerMode = resolveLocalProviderMode();
 
 if (marker !== "true") {
-  throw new Error("seed-local-lab requires JANUSLY_LOCAL_STACK=true");
+  throw new Error("setup-local-smoke-fixtures requires JANUSLY_LOCAL_STACK=true");
 }
 
 const desired = [
@@ -27,7 +27,7 @@ const desired = [
   { name: "support_slack", kind: "slack_webhook", secretRef: providerMode.credentialRefs.slack },
 ] as const;
 
-async function seed(): Promise<void> {
+async function setupFixtures(): Promise<void> {
   const existing = await db
     .select({ name: credentials.name, kind: credentials.kind, secretRef: credentials.secretRef, metadata: credentials.metadata })
     .from(credentials)
@@ -45,7 +45,7 @@ async function seed(): Promise<void> {
           ? current.metadata.source
           : null;
         if (source !== "local-stack") {
-          throw new Error(`local credential ${row.name} already exists outside the local bootstrap`);
+          throw new Error(`local credential ${row.name} already exists outside the qualification fixtures`);
         }
         await db.update(credentials)
           .set({ secretRef: row.secretRef })
@@ -76,13 +76,13 @@ async function seed(): Promise<void> {
   });
 
   console.log(
-    `[seed-local-lab] ready org=${orgId} credentials=${desired.length} providers=${providerMode.simulatorEnabled ? "simulator" : "external"}`,
+    `[local-fixtures] ready org=${orgId} credentials=${desired.length} providers=${providerMode.simulatorEnabled ? "simulator" : "external"}`,
   );
 }
 
-seed()
+setupFixtures()
   .then(() => process.exit(0))
   .catch((error) => {
-    console.error("[seed-local-lab] failed:", error);
+    console.error("[local-fixtures] failed:", error);
     process.exit(1);
   });

@@ -68,6 +68,7 @@ test('expert multi-agent view remains directly accessible from the command palet
 test('selecting a node opens quick setup controls', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('button', { name: /^AI Studio\b/ }).click()
+  await page.locator('.sb-palette').getByRole('button', { name: 'Call an API', exact: true }).click()
   await page.locator('.workflow-node').filter({ hasText: 'Call an API' }).click()
 
   await expect(page.getByRole('heading', { name: 'Step setup', exact: true })).toBeVisible()

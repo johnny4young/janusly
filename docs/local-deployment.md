@@ -1,33 +1,38 @@
 # Persistent Local Deployment
 
-Janusly includes a production-shaped, loopback-only Docker stack for private
-evaluation before any public deployment. It keeps real Postgres, Redis,
+Janusly includes a production-shaped Docker stack for private evaluation
+before any public deployment. It keeps real Postgres, Redis,
 API/worker separation, provider failure semantics, and durable recovery
 evidence while replacing public provider calls with an explicit local
 simulator.
 
 This profile is a **local integration lab**, not an internet-facing production
-configuration. It enables development authentication and private HTTP targets
-so containers can reach the bundled simulator.
+configuration. Supabase CLI owns the single PostgreSQL database: Supabase Auth
+uses the `auth` schema and Janusly's Drizzle migrations use `public`.
 
 ## Topology
 
 ```mermaid
 flowchart LR
   Browser["Browser :7310"] --> API["API :7311"]
-  Browser -. real local login .-> Supabase["Optional Supabase Auth :7431"]
-  API -. token verification .-> Supabase
-  API --> PG[("Postgres 18")]
+  Browser -. real local login .-> Auth["Supabase Auth :7431"]
+  API -. token verification .-> Auth
+  Auth --> DB[("Supabase PostgreSQL :7432")]
+  API --> DB
   API --> Redis[("Redis 8")]
-  Worker["Workflow worker"] --> PG
+  Worker["Workflow worker"] --> DB
   Worker --> Redis
   Worker --> Simulator["Provider simulator :4010"]
   API --> Simulator
-  Migrate["One-shot migrations"] --> PG
-  Seed["Idempotent local bootstrap"] --> PG
+  Migrate["Janusly migrations"] --> DB
   Ollama["Optional Ollama profile"] -. embeddings .-> API
   Ollama -. embeddings .-> Worker
 ```
+
+There is no second Janusly PostgreSQL container. The database named by
+`supabase status -o env` is injected in memory into migration, API, and worker
+containers. Supabase-managed objects stay in `auth`; Janusly tables stay in
+`public`.
 
 The API and worker stay separate intentionally. The API owns request handling,
 authorization, ingestion, and live reads; the worker owns queued execution and
@@ -41,13 +46,19 @@ Requirements are Node.js 24, pnpm 11, and Docker with Compose v2.
 ```bash
 corepack enable
 pnpm install
-pnpm local:up
+pnpm local:auth:up
 ```
 
 The first command copies `deploy/local/local.env.example` to the ignored
 `deploy/local/local.env`. Edit that file for host-port or local sender changes.
-Then open <http://127.0.0.1:7310>; development auth uses organization `default`
-and user `dev-user`.
+Then open <http://127.0.0.1:7310>, create the first account, and create the
+first organization manually. A clean start has no users, organizations,
+workflows, credentials, tenant configuration, or example canvas nodes.
+
+`pnpm local:up` uses the same Supabase PostgreSQL database but keeps
+`dev-headers` for automated provider qualification. It also starts without
+database fixtures; the synthetic `default` development workspace is an auth
+compatibility projection, not a stored organization.
 
 The uncommon host ports `7310` (web) and `7311` (API) are deliberate so the
 lab does not compete with projects that commonly use `3000` and `3001`. The
@@ -66,28 +77,33 @@ pnpm local:verify         # success smoke, full service restart, persistence che
 ```
 
 `local:smoke` submits the same inbound event twice and requires both deliveries
-to converge on one run. `local:verify` additionally restarts Postgres, Redis,
+to converge on one run. These commands explicitly install their own bounded
+provider fixtures; normal startup never does. `local:ui-smoke` also creates its
+controlled provider failure before opening Chromium, so it does not rely on
+prior database state. `local:verify` additionally restarts Supabase, Redis,
 the simulator, API, worker, and web, then reads the original workflow and run
 again. No public GitHub, Slack, webhook, or email endpoint is contacted.
 
 ## Real Local Identity Profile
 
-The default lab deliberately keeps fast `dev-headers` authentication. To test
-the actual product login boundary, start the opt-in Supabase profile instead:
+Both profiles use Supabase PostgreSQL. The `local:auth:*` family additionally
+enables the real product login boundary:
 
 ```bash
 pnpm local:auth:up
 pnpm local:auth:ui-smoke
 ```
 
-This starts the pinned Supabase CLI stack from `supabase/config.toml`, with only
-the local Postgres/Auth/API gateway services required by Janusly. Supabase Auth
-is available on loopback port `7431` and its private database on `7432`; the
-Janusly web/API remain on `7310`/`7311`. The orchestrator reads generated
-anonymous and service-role credentials from `supabase status -o env`, passes
-them only to the web build and API container that require them, and disables
-`ALLOW_DEV_AUTH_HEADERS` for this profile. Generated credentials are never
-written to a tracked file.
+The pinned Supabase CLI stack exposes Auth on host port `7431` and the single
+shared PostgreSQL database on `7432`; Janusly web/API remain on loopback ports
+`7310`/`7311`. Unlike the Janusly Compose mappings, Supabase CLI can publish
+its Docker ports on every host interface. Treat `7431`/`7432` as trusted
+workstation ports, protect them with the host firewall, and never expose them
+to an untrusted LAN. The orchestrator captures `supabase status -o env`,
+injects the database URL into migration/API/worker containers, and passes Auth
+keys only to the web build and API. It disables `ALLOW_DEV_AUTH_HEADERS` for
+this profile. Generated credentials are never printed or written to a tracked
+file.
 
 The browser smoke creates two real email/password identities, creates and
 switches organizations, accepts an invitation, verifies viewer/editor action
@@ -98,13 +114,37 @@ local Supabase config so tests do not depend on SMTP.
 ```bash
 pnpm local:auth:status
 pnpm local:auth:restart
-pnpm local:auth:down    # preserves both Janusly and Supabase local data
-pnpm local:auth:reset   # destructive: removes both data sets
+pnpm local:db:verify
+pnpm local:auth:down    # preserves the unified database
+pnpm local:auth:reset   # destructive: removes Auth and Janusly data together
 ```
 
 Use the `local:auth:*` and ordinary `local:*` lifecycle families consistently
 for one run. The ordinary provider smoke commands use dev headers and therefore
 intentionally do not run against the real-identity profile.
+
+## Local Development Versus Internal Deployment
+
+The Supabase CLI profile in this repository is development/test infrastructure.
+It has no production TLS or network hardening and must not be exposed to an
+untrusted network. Supabase CLI may publish `7431`/`7432` on every host
+interface even though the Janusly Compose services bind to loopback. Apart
+from initial container-image/package downloads, all database and Auth
+processing stays on the machine. CLI telemetry is explicitly disabled by the
+orchestrator.
+
+An internal or on-premises production installation is possible, but it must
+use Supabase's supported self-hosted Docker topology rather than `supabase
+start`. That deployment needs TLS/reverse proxying, rotated keys, SMTP,
+backups, upgrades, monitoring, connection pooling, and disaster recovery.
+External SMTP, OAuth, SMS, AI, or workflow providers naturally send only the
+traffic explicitly configured for those integrations.
+
+Supabase's platform repository is Apache-2.0 and the Auth service is MIT
+licensed. Self-hosting does not require a managed Supabase subscription, but
+the operator pays and owns the infrastructure and operational work. Always
+verify the license of every optional component/image kept in a custom
+self-hosted topology.
 
 ## Lifecycle And Persistence
 
@@ -117,11 +157,12 @@ pnpm local:up     # resume with the same workflows, runs, DLQ, and request log
 pnpm local:reset  # destructive: remove all local-stack volumes
 ```
 
-The Compose project owns four named volumes:
+Supabase CLI owns the PostgreSQL persistence containing both schemas. The
+Compose project owns three additional named volumes:
 
 | Volume | Contents |
 | --- | --- |
-| `postgres_data` | Workflows, versions, runs, events, DLQ, audit, tenant config |
+| Supabase DB storage | `auth` identities plus Janusly `public` tables |
 | `redis_data` | BullMQ state, delayed work, and Redis append-only persistence |
 | `provider_data` | Bounded simulator request evidence and provider modes |
 | `ollama_models` | Optional downloaded embedding models |
@@ -129,9 +170,10 @@ The Compose project owns four named volumes:
 `local:down` is the normal stop command. Use `local:reset` only when a clean,
 destructive test environment is intended.
 
-The optional identity profile adds Supabase CLI-managed local Docker volumes.
-`local:auth:down` uses the CLI's normal backup-preserving stop; only
-`local:auth:reset` passes the destructive no-backup boundary.
+Both lifecycle families stop Supabase through its backup-preserving CLI path.
+Only `local:reset`/`local:auth:reset` use the destructive no-backup boundary.
+`pnpm local:db:verify-empty` proves both `auth` and `public` exist in one
+database and that the manual-start tables are empty.
 
 ## Provider Simulator
 
@@ -184,12 +226,10 @@ JANUSLY_MAILER_PROVIDER=noop
 # RESEND_API_KEY=re_...
 ```
 
-Then run `pnpm local:up`. The idempotent bootstrap repoints only the five
-credentials it owns (`ops_github`, `ops_slack`, `support_slack`,
-`billing_slack`, and `billing_webhook`) to the external secret names. Switching
-the flag back to `true` and running `pnpm local:up` restores their simulator
-references. A credential with the same name that was not created by the local
-bootstrap is never overwritten.
+Then run `pnpm local:auth:up` and create the matching credential records
+manually from Connections. Startup never creates or rewrites credentials.
+The simulator-only qualification commands use separate explicit fixtures and
+refuse to run while external mode is active.
 
 Every additional `NAME=value` entry in this ignored file is available to the
 API and worker so a credential row can use `NAME` as its `secretRef`. The file
@@ -227,8 +267,14 @@ configuration API. Starting Ollama alone never enables persistent memory.
 
 ## Safety Boundaries
 
-- Every published port binds to `127.0.0.1`.
+- Janusly Compose services bind published ports to `127.0.0.1`; Supabase CLI
+  may publish Auth `7431` and PostgreSQL `7432` on every host interface, so the
+  local lab requires a trusted workstation and host firewall.
 - The generated `local.env` is ignored by Git.
+- Supabase CLI telemetry is disabled by both `SUPABASE_TELEMETRY_DISABLED=1`
+  and `DO_NOT_TRACK=1`; the self-hosted containers do not send telemetry.
+- Normal startup never inserts example users, organizations, workflows,
+  credentials, or tenant configuration.
 - Images run as non-root users.
 - GitHub, Slack, webhook, and email simulation is opt-in and process-gated.
 - External provider delivery requires an explicit simulator opt-out and local

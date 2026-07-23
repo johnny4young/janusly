@@ -227,6 +227,19 @@ export function normalizeAuth(session: Session | null): NormalizedAuth {
 
 /** Auth methods used by Login / UserMenu / MembersPanel. Stubs to no-ops when Supabase isn't configured. */
 export const AuthProvider = {
+  /**
+   * Resolve the initial normalized identity through the same provider order
+   * used by the live auth listener. Unlike `getSession()`, this preserves the
+   * synthetic dev identity instead of projecting a null Supabase session into
+   * a transient signed-out state.
+   */
+  getAuth: async (): Promise<NormalizedAuth> => {
+    if (await ensureBrowserSession()) return normalizeAuth(null)
+    const client = await getSupabaseClient()
+    if (!client) return { ...devAuth, orgId: getActiveOrg() }
+    const response = await client.auth.getSession()
+    return normalizeAuth(response.data.session)
+  },
   signIn: async (email: string, password: string) => {
     resumeApiRequestLifecycle()
     const client = await getSupabaseClient()

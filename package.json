@@ -42,6 +42,8 @@
     "local:reset": "node scripts/local-stack.mjs reset",
     "local:restart": "node scripts/local-stack.mjs restart",
     "local:status": "node scripts/local-stack.mjs status",
+    "local:db:verify": "node scripts/local-stack.mjs verify-db",
+    "local:db:verify-empty": "node scripts/local-stack.mjs verify-db --auth --expect-empty",
     "local:logs": "node scripts/local-stack.mjs logs",
     "local:smoke": "node scripts/local-stack-smoke.mjs",
     "local:failure-smoke": "node scripts/local-stack-smoke.mjs --failure=slack",

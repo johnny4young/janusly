@@ -133,6 +133,7 @@ test('a real running node pulses, honors reduced motion, and cannot mutate the a
     await page.goto('/')
     await hideUnrelatedOverlays(page)
     await page.getByRole('button', { name: /^AI Studio\b/ }).click()
+    await page.locator('.sb-palette').getByRole('button', { name: 'Call an API', exact: true }).click()
 
     const authorCanvas = page.locator('.workspace-canvas-wrapper .canvas-frame[data-mode="author"]')
     const authorViewport = authorCanvas.locator('.react-flow__viewport')
@@ -142,7 +143,7 @@ test('a real running node pulses, honors reduced motion, and cannot mutate the a
     const selectedAuthorNodeId = await selectedAuthorNode.getAttribute('data-id')
     await selectedAuthorNode.click()
     const beforeZoom = await authorViewport.getAttribute('style')
-    await authorCanvas.locator('.react-flow__controls-zoomin').click()
+    await authorCanvas.locator('.react-flow__controls-zoomout').click()
     await expect.poll(() => authorViewport.getAttribute('style')).not.toBe(beforeZoom)
     const authorViewportAfterZoom = await authorViewport.getAttribute('style')
 

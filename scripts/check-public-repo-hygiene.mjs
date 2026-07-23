@@ -63,7 +63,10 @@ export function checkTrackedFiles(files = listTrackedFiles()) {
     try {
       return scanPublicContent(file, readFileSync(file, "utf8"));
     } catch (error) {
-      if (error?.code === "EISDIR") return [];
+      // `git ls-files` describes the index. During a legitimate unstaged
+      // deletion, the path remains indexed but no longer exists in the working
+      // tree; there is no public content left to inspect.
+      if (error?.code === "EISDIR" || error?.code === "ENOENT") return [];
       throw error;
     }
   });

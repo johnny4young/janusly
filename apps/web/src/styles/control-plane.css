@@ -846,7 +846,7 @@
 .status-pill[data-status="succeeded"] { color: var(--we-success-text); border-color: var(--we-success-border-30); background: var(--we-success-soft); }
 .status-pill[data-status="failed"] { color: var(--we-danger-text); border-color: var(--we-danger-border-30); background: var(--we-danger-soft); }
 .status-pill[data-status="waiting"] { color: var(--we-warning-text); border-color: var(--we-warning-border-30); background: var(--we-warning-soft); }
-.status-pill[data-status="running"] { color: var(--we-info); border-color: var(--we-info-border-30); background: var(--we-info-soft); }
+.status-pill[data-status="running"] { color: var(--we-info-text); border-color: var(--we-info-border-30); background: var(--we-info-soft); }
 
 .mode-pill {
   align-items: center;

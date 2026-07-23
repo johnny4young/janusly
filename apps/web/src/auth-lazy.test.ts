@@ -27,6 +27,23 @@ describe('demand-loaded Supabase auth', () => {
     expect(runtime.createClient).not.toHaveBeenCalled()
   })
 
+  it('resolves the initial dev-header identity without a signed-out race', async () => {
+    vi.stubEnv('VITE_SUPABASE_URL', '')
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', '')
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({ authenticated: false }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )))
+    const auth = await import('./auth')
+
+    await expect(auth.AuthProvider.getAuth()).resolves.toMatchObject({
+      session: null,
+      userId: 'dev-user',
+      orgId: 'default',
+    })
+    expect(runtime.createClient).not.toHaveBeenCalled()
+  })
+
   it('creates one configured client lazily and reuses it for token reads', async () => {
     vi.stubEnv('VITE_SUPABASE_URL', 'https://example.supabase.co')
     vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-public-key')
