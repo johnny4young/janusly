@@ -115,7 +115,7 @@ function successRate(succeeded: number, failed: number): number | null {
   return total === 0 ? null : (succeeded / total) * 100
 }
 
-export function WorkflowRolloutPanel() {
+export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean } = {}) {
   const { t } = useT()
   const confirm = useConfirm()
   const workflowId = useWorkflowStore(state => state.currentWorkflowSaved ? state.currentWorkflowId : undefined)
@@ -255,7 +255,7 @@ export function WorkflowRolloutPanel() {
             <div><span>{t('workflowRollout.canarySuccess')}</span><strong>{canaryRate === null ? '—' : `${canaryRate.toFixed(1)}%`}</strong></div>
             <div><span>{t('workflowRollout.guardrail')}</span><strong>≥ {rollout.minimumSuccessRatePercent}% / {rollout.minimumSampleSize}</strong></div>
           </div>
-          {rollout.status === 'active' && (
+          {!readOnly && rollout.status === 'active' && (
             <div className="we-rollout-panel__actions">
               <button type="button" className="command-button command-button-primary" disabled={mutating} onClick={() => void decide('promote')}>
                 {t('workflowRollout.promote')}
@@ -278,7 +278,7 @@ export function WorkflowRolloutPanel() {
         <p className="we-rollout-panel__empty">{t('workflowRollout.needsVersions')}</p>
       )}
 
-      {!loading && canCreate && latest && (
+      {!readOnly && !loading && canCreate && latest && (
         <form className="we-rollout-panel__form" onSubmit={event => { event.preventDefault(); void createRollout() }}>
           <div className="we-rollout-panel__pair">
             <label className="we-field">

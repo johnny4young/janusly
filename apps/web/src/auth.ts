@@ -32,9 +32,15 @@ import type {
   SupabaseClient,
   User,
 } from '@supabase/supabase-js'
+import {
+  resumeApiRequestLifecycle,
+  rotateApiRequestLifecycle,
+  suspendApiRequestLifecycle,
+} from './api-request-lifecycle'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+const apiUrl = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:3001'
 
 /** True when both Supabase env vars are present in the build. */
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey)
@@ -68,18 +74,15 @@ export async function getSupabaseAccessToken(): Promise<string | null> {
 
 /** localStorage key carrying the user's currently-selected org. */
 const ACTIVE_ORG_STORAGE_KEY = 'janusly:activeOrg'
-/** localStorage key carrying the SSO-issued Janusly session token. */
-const SESSION_TOKEN_STORAGE_KEY = 'janusly:sessionToken'
-/** URL fragment the SSO callback delivers the session token under. */
-const SESSION_TOKEN_FRAGMENT = 'janusly_session'
-/** Purpose discriminator used by API-issued SSO session tokens. */
-const SESSION_TOKEN_PURPOSE = 'sso_session'
 
-type SessionTokenPayload = {
-  orgId: string
+type BrowserSessionIdentity = {
   userId: string
   email: string | null
+  organizationId: string
 }
+
+let browserSessionIdentity: BrowserSessionIdentity | null = null
+let browserSessionProbe: Promise<BrowserSessionIdentity | null> | null = null
 
 function readFromStorage(key: string): string | null {
   if (typeof window === 'undefined' || !window.localStorage) return null
@@ -100,15 +103,6 @@ function writeToStorage(key: string, value: string): void {
   }
 }
 
-function removeFromStorage(key: string): void {
-  if (typeof window === 'undefined' || !window.localStorage) return
-  try {
-    window.localStorage.removeItem(key)
-  } catch {
-    // Non-fatal.
-  }
-}
-
 /**
  * Read the current active-org id from localStorage, falling back to
  * `"default"` so dev / unauthenticated flows still target the dev tenant.
@@ -118,90 +112,53 @@ export function getActiveOrg(): string {
   return readFromStorage(ACTIVE_ORG_STORAGE_KEY) ?? 'default'
 }
 
-/**
- * Read the SSO-issued Janusly session token from localStorage, or null.
- * `api.ts` calls this on every request; when set, the token ships in the
- * `x-janusly-session` header INSTEAD of the Supabase Bearer JWT.
- */
-export function getSessionToken(): string | null {
-  return readFromStorage(SESSION_TOKEN_STORAGE_KEY)
+/** Whether API requests should rely on the HttpOnly WorkOS cookie. */
+export function hasBrowserSession(): boolean {
+  return browserSessionIdentity !== null
 }
 
-/** Persist a new session token (called by the SSO fragment-extract flow). */
-export function setSessionToken(token: string): void {
-  writeToStorage(SESSION_TOKEN_STORAGE_KEY, token)
-}
-
-/** Drop the session token (logout / token rotation). */
-export function clearSessionToken(): void {
-  removeFromStorage(SESSION_TOKEN_STORAGE_KEY)
-}
-
-function decodeBase64Url(value: string): string {
-  const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
-  const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4)
-  return window.atob(padded)
-}
-
-function readSessionTokenPayload(): SessionTokenPayload | null {
-  const token = getSessionToken()
-  if (!token) return null
-  const parts = token.split('.')
-  if (parts.length !== 3 || parts[0] !== 'v1') return null
+async function probeBrowserSession(): Promise<BrowserSessionIdentity | null> {
   try {
-    const envelope = JSON.parse(decodeBase64Url(parts[1])) as {
-      purpose?: unknown
-      payload?: unknown
-      expiresAt?: unknown
-    }
-    if (envelope.purpose !== SESSION_TOKEN_PURPOSE) return null
-    if (typeof envelope.expiresAt !== 'number' || Math.floor(Date.now() / 1000) >= envelope.expiresAt) {
-      clearSessionToken()
+    const response = await fetch(`${apiUrl}/auth/session`, {
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+    if (!response.ok) {
+      browserSessionIdentity = null
       return null
     }
-    const payload = envelope.payload
-    if (!payload || typeof payload !== 'object') return null
-    const { orgId, userId, email } = payload as Record<string, unknown>
-    if (typeof orgId !== 'string' || typeof userId !== 'string') return null
-    return {
-      orgId,
-      userId,
-      email: typeof email === 'string' ? email : null,
+    const payload = await response.json() as Partial<BrowserSessionIdentity>
+    if (
+      typeof payload.userId !== 'string'
+      || typeof payload.organizationId !== 'string'
+      || (payload.email !== null && typeof payload.email !== 'string')
+    ) {
+      browserSessionIdentity = null
+      return null
     }
+    browserSessionIdentity = {
+      userId: payload.userId,
+      email: payload.email ?? null,
+      organizationId: payload.organizationId,
+    }
+    writeToStorage(ACTIVE_ORG_STORAGE_KEY, payload.organizationId)
+    return browserSessionIdentity
   } catch {
+    browserSessionIdentity = null
     return null
   }
 }
 
-/**
- * If the current URL hash carries `janusly_session=<token>` (the SSO
- * callback's delivery vector), persist the token and strip the fragment
- * off the URL bar + history via `history.replaceState`. Returns the
- * extracted token (or null when no fragment was present).
- *
- * Safe to call multiple times — once consumed, the fragment is gone and
- * subsequent calls return null.
- */
-export function consumeSsoSessionFragment(): string | null {
-  if (typeof window === 'undefined' || !window.location) return null
-  const hash = window.location.hash || ''
-  if (!hash.includes(SESSION_TOKEN_FRAGMENT)) return null
-  // Hash format: `#janusly_session=<token>` (possibly with other
-  // entries; parse as URLSearchParams).
-  const trimmed = hash.startsWith('#') ? hash.slice(1) : hash
-  const params = new URLSearchParams(trimmed)
-  const token = params.get(SESSION_TOKEN_FRAGMENT)
-  if (!token) return null
-  setSessionToken(token)
-  try {
-    // Strip the fragment from the URL bar AND from the browser history
-    // entry so a back-forward navigation doesn't expose the token.
-    const cleanPath = window.location.pathname + window.location.search
-    window.history.replaceState(null, '', cleanPath || '/')
-  } catch {
-    // Non-fatal — we still persisted the token to localStorage.
+/** Coalesce startup probes so the session read and auth listener choose one provider. */
+function ensureBrowserSession(): Promise<BrowserSessionIdentity | null> {
+  if (browserSessionIdentity) return Promise.resolve(browserSessionIdentity)
+  if (!browserSessionProbe) {
+    browserSessionProbe = probeBrowserSession().finally(() => {
+      browserSessionProbe = null
+    })
   }
-  return token
+  return browserSessionProbe
 }
 
 type SupabaseAuthClient = SupabaseClient['auth']
@@ -259,35 +216,51 @@ function devAuthSubscription(): AuthSubscriptionResponse {
  */
 export function normalizeAuth(session: Session | null): NormalizedAuth {
   const user = session?.user ?? null
-  const ssoPayload = user ? null : readSessionTokenPayload()
+  const ssoIdentity = user ? null : browserSessionIdentity
   return {
     session,
     user,
-    userId: user?.id ?? ssoPayload?.userId ?? null,
-    orgId: ssoPayload?.orgId ?? getActiveOrg(),
+    userId: user?.id ?? ssoIdentity?.userId ?? null,
+    orgId: ssoIdentity?.organizationId ?? getActiveOrg(),
   }
 }
 
 /** Auth methods used by Login / UserMenu / MembersPanel. Stubs to no-ops when Supabase isn't configured. */
 export const AuthProvider = {
   signIn: async (email: string, password: string) => {
+    resumeApiRequestLifecycle()
     const client = await getSupabaseClient()
     if (!client) return devAuthResponse
     return client.auth.signInWithPassword({ email, password })
   },
   signUp: async (email: string, password: string) => {
+    resumeApiRequestLifecycle()
     const client = await getSupabaseClient()
     if (!client) return devAuthResponse
     return client.auth.signUp({ email, password })
   },
   signOut: async () => {
-    clearSessionToken()
+    // Invalidate requests before either provider revokes its credential. A
+    // panel request that resolves auth concurrently with logout must never be
+    // sent with a missing or departing identity.
+    suspendApiRequestLifecycle()
+    if (browserSessionIdentity) {
+      try {
+        await fetch(`${apiUrl}/auth/session/logout`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'x-janusly-csrf': '1' },
+        })
+      } finally {
+        browserSessionIdentity = null
+      }
+    }
     const client = await getSupabaseClient()
     if (!client) return devSignOutResponse
     return client.auth.signOut()
   },
   getSession: async () => {
-    if (getSessionToken()) return devSessionResponse
+    if (await ensureBrowserSession()) return devSessionResponse
     const client = await getSupabaseClient()
     if (!client) return devSessionResponse
     return client.auth.getSession()
@@ -296,10 +269,21 @@ export const AuthProvider = {
     // Active-org is a client-side preference now. Writing to Supabase
     // `user_metadata.orgId` would mislead readers — the API ignores it
     // and resolves membership through `org_members`.
-    writeToStorage(ACTIVE_ORG_STORAGE_KEY, orgId)
-    if (getSessionToken()) {
+    if (browserSessionIdentity) {
+      const response = await fetch(`${apiUrl}/auth/session/organization`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', 'x-janusly-csrf': '1' },
+        body: JSON.stringify({ organizationId: orgId }),
+      })
+      if (!response.ok) throw new Error('Browser session could not switch organizations')
+      rotateApiRequestLifecycle()
+      browserSessionIdentity = { ...browserSessionIdentity, organizationId: orgId }
+      writeToStorage(ACTIVE_ORG_STORAGE_KEY, orgId)
       return { result: { data: { user: null }, error: null }, auth: normalizeAuth(null) }
     }
+    writeToStorage(ACTIVE_ORG_STORAGE_KEY, orgId)
+    rotateApiRequestLifecycle()
     const client = await getSupabaseClient()
     if (!client) {
       devAuth.orgId = orgId
@@ -312,7 +296,7 @@ export const AuthProvider = {
     }
   },
   onAuthStateChange: async (callback: (auth: NormalizedAuth) => void) => {
-    if (getSessionToken()) {
+    if (await ensureBrowserSession()) {
       callback(normalizeAuth(null))
       return devAuthSubscription()
     }

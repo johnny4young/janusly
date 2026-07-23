@@ -36,8 +36,7 @@ export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
       return
     }
     // Leave the SPA — the API issues a 302 to WorkOS, and the callback
-    // brings us back to /auth/sso/complete with the session token in
-    // the URL fragment.
+    // returns to /auth/sso/complete after setting the HttpOnly session cookie.
     window.location.href = `${API_URL}/auth/sso/start?orgId=${encodeURIComponent(trimmed)}`
   }
 
@@ -92,7 +91,7 @@ export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
           type="password"
           autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
           required
-          minLength={6}
+          minLength={8}
           value={password}
           onChange={(event) => setPassword(event.target.value)}
         />

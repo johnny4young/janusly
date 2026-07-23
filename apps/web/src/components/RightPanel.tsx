@@ -137,6 +137,7 @@ export type RightPanelNavigation = {
 
 export type RightPanelProps = {
   tab: ActiveTab
+  permissions?: readonly string[]
   authoring: RightPanelAuthoring
   catalog: RightPanelCatalog
   execution: RightPanelExecution
@@ -163,6 +164,7 @@ export function RightPanel(props: RightPanelProps) {
 function RightPanelRouter(props: RightPanelProps) {
   const { t } = useT()
   const { authoring, catalog, execution, navigation } = props
+  const can = (permission: string) => props.permissions === undefined || props.permissions.includes(permission)
   const loadRunUsage = useCallback((runId: string, signal: AbortSignal) =>
     api(`/run/usage?runId=${encodeURIComponent(runId)}`, { signal }), [])
   const replayDecision = useCallback((eventId: string, nodeId: string, signal: AbortSignal) => {
@@ -187,10 +189,10 @@ function RightPanelRouter(props: RightPanelProps) {
   )
   if (props.tab === 'workflows') return (
     <PanelChrome title={t('rightPanel.workflows.title')} description={t('rightPanel.workflows.description')} icon={<Database size={18} />}>
-      <WorkflowsDashboard onOpen={catalog.onOpenWorkflow} />
+      <WorkflowsDashboard onOpen={catalog.onOpenWorkflow} canWrite={can('workflows.write')} />
     </PanelChrome>
   )
-  if (props.tab === 'operations') return <OperationsPage />
+  if (props.tab === 'operations') return <OperationsPage permissions={props.permissions} />
   if (props.tab === 'experiments') return (
     <PanelChrome title={t('rightPanel.experiments.title')} description={t('rightPanel.experiments.description')} icon={<FlaskConical size={18} />}>
       <ExperimentsPanel />
@@ -211,6 +213,7 @@ function RightPanelRouter(props: RightPanelProps) {
         onValidate={authoring.onValidateWorkflow}
       />
       <InspectorPanel
+        readOnly={!can('workflows.write')}
         selectedNode={authoring.selectedNode}
         selectedEdge={authoring.selectedEdge}
         runNodes={authoring.runNodes}
@@ -235,14 +238,16 @@ function RightPanelRouter(props: RightPanelProps) {
           spuriously under a ready config. */}
       <Suspense fallback={null}>
         <VersionHistoryPanel />
-        <WorkflowRolloutPanel />
-        <WorkflowSloPanel />
+        <WorkflowRolloutPanel readOnly={!can('workflows.write')} />
+        <WorkflowSloPanel readOnly={!can('workflows.write')} />
         <ScheduleHistoryPanel />
-        <WorkflowMetadataPanel />
+        <WorkflowMetadataPanel readOnly={!can('workflows.write')} />
       </Suspense>
     </PanelChrome>
   )
-  if (props.tab === 'templates') return <TemplatesPanel templates={catalog.templates} onUseTemplate={catalog.onUseTemplate} />
+  if (props.tab === 'templates') return (
+    <TemplatesPanel templates={catalog.templates} onUseTemplate={catalog.onUseTemplate} canUse={can('workflows.write')} />
+  )
   if (props.tab === 'packs') return (
     <SolutionPacksPanel
       packs={catalog.solutionPacks}
@@ -250,10 +255,19 @@ function RightPanelRouter(props: RightPanelProps) {
       onInstall={catalog.onInstallPack}
       onSampleRun={catalog.onSampleRunPack}
       onInjectFailure={catalog.onInjectPackFailure}
+      canInstall={can('packs.install')}
     />
   )
-  if (props.tab === 'marketplace') return <ToolsPanel tools={catalog.tools} onInstallPlugin={catalog.onInstallPlugin} />
-  if (props.tab === 'credentials') return <CredentialsPanel credentials={catalog.credentials} onCreateCredential={catalog.onCreateCredential} />
+  if (props.tab === 'marketplace') return (
+    <ToolsPanel tools={catalog.tools} onInstallPlugin={catalog.onInstallPlugin} canInstall={can('workflows.write')} />
+  )
+  if (props.tab === 'credentials') return (
+    <CredentialsPanel
+      credentials={catalog.credentials}
+      onCreateCredential={catalog.onCreateCredential}
+      canWrite={can('credentials.write')}
+    />
+  )
   if (props.tab === 'runs') return (
     <RunWorkspace
       runs={execution.runs}
@@ -273,6 +287,13 @@ function RightPanelRouter(props: RightPanelProps) {
       onCancelActiveRun={execution.onCancelActiveRun}
       onReplayDeadLetter={execution.onReplayDeadLetter}
       onResolveDeadLetter={execution.onResolveDeadLetter}
+      canStartRuns={can('runs.start')}
+      canCancelRuns={can('runs.cancel')}
+      canReplayDeadLetters={can('dlq.replay')}
+      canResolveDeadLetters={can('recovery.write')}
+      canUseRecovery={can('ai.write') && can('recovery.write') && can('workflows.write') && can('dlq.replay') && can('runs.start')}
+      canReadAutoHealing={can('autohealing.read')}
+      canDecideAutoHealing={can('autohealing.decide')}
       onLoadRunUsage={loadRunUsage}
       onReplayDecision={execution.activeRunId ? replayDecision : undefined}
       onOpenFullView={navigation.onOpenTab}
@@ -292,7 +313,7 @@ function RightPanelRouter(props: RightPanelProps) {
   )
 }
 
-export function TemplatesPanel({ templates, onUseTemplate }: Pick<RightPanelCatalog, 'templates' | 'onUseTemplate'>) {
+export function TemplatesPanel({ templates, onUseTemplate, canUse = true }: Pick<RightPanelCatalog, 'templates' | 'onUseTemplate'> & { canUse?: boolean }) {
   const { t, i18n } = useT()
   const setActiveTab = useWorkflowStore(state => state.setActiveTab)
   const [query, setQuery] = useState('')
@@ -333,7 +354,7 @@ export function TemplatesPanel({ templates, onUseTemplate }: Pick<RightPanelCata
           ) : (
             <div className="we-recipe-grid">
               {filtered.map(template => (
-                <button key={template.id} className="list-card list-card-button" onClick={() => onUseTemplate(template.workflow)}>
+                <button key={template.id} className="list-card list-card-button" disabled={!canUse} onClick={() => onUseTemplate(template.workflow)}>
                   <div className="split-row" style={{ width: '100%' }}>
                     <span className="mode-pill mode-pill-neutral">{tTemplateCategory(template)}</span>
                     <span className="mode-pill mode-pill-neutral">{t('rightPanel.templates.stepCount', { count: template.workflow.nodes.length })}</span>
@@ -351,7 +372,7 @@ export function TemplatesPanel({ templates, onUseTemplate }: Pick<RightPanelCata
   )
 }
 
-function ToolsPanel({ tools, onInstallPlugin }: Pick<RightPanelCatalog, 'tools' | 'onInstallPlugin'>) {
+function ToolsPanel({ tools, onInstallPlugin, canInstall }: Pick<RightPanelCatalog, 'tools' | 'onInstallPlugin'> & { canInstall: boolean }) {
   const { t } = useT()
   return (
     <PanelChrome title={t('rightPanel.tools.title')} description={t('rightPanel.tools.description')} icon={<Boxes size={18} />}>
@@ -370,7 +391,7 @@ function ToolsPanel({ tools, onInstallPlugin }: Pick<RightPanelCatalog, 'tools' 
                 {(tool.optional ?? []).map(field => <span key={`optional-${field}`} className="we-param we-param--optional">{field}</span>)}
               </div>
             ) : null}
-            <button className="small-command" onClick={() => onInstallPlugin(tool.name)}>{t('rightPanel.tools.installTool')}</button>
+            <button className="small-command" disabled={!canInstall} onClick={() => onInstallPlugin(tool.name)}>{t('rightPanel.tools.installTool')}</button>
           </div>
         ))}
       </div>
@@ -399,7 +420,7 @@ const CREDENTIAL_KINDS = [
   'postgres',
 ] as const
 
-function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelCatalog, 'credentials' | 'onCreateCredential'>) {
+function CredentialsPanel({ credentials, onCreateCredential, canWrite }: Pick<RightPanelCatalog, 'credentials' | 'onCreateCredential'> & { canWrite: boolean }) {
   const { t } = useT()
   const platformVersion = useWorkflowStore(state => state.platformVersion)
   const [name, setName] = useState('')
@@ -448,7 +469,7 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelCa
           </div>
           <LockKeyhole size={18} aria-hidden="true" />
         </div>
-        <fieldset className="we-fieldset">
+        <fieldset className="we-fieldset" disabled={!canWrite}>
           <label className="field-label" htmlFor="credential-name">{t('rightPanel.credentials.nameLabel')}</label>
           <input id="credential-name" className="text-field" value={name} onChange={event => setName(event.target.value)} />
           <label className="field-label" htmlFor="credential-kind">{t('rightPanel.credentials.kindLabel')}</label>
@@ -483,7 +504,7 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelCa
         <div className="form-actions connection-form-actions">
           <button
             className="command-button command-button-primary"
-            disabled={!canAdd}
+            disabled={!canWrite || !canAdd}
             onClick={() => {
               onCreateCredential({
                 name: name.trim(),
@@ -552,7 +573,7 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelCa
                 })()}
               </div>
               <div className="form-actions">
-                <button type="button" className="command-button" onClick={() => setRotating(credential.name)}>
+                <button type="button" className="command-button" disabled={!canWrite} onClick={() => setRotating(credential.name)}>
                   {t('credentialRotation.action.rotate')}
                 </button>
               </div>

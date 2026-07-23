@@ -11,7 +11,7 @@
  * - `apps/web/src/App.tsx`
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import type { AiHealth, Credential, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema } from '../types'
 
@@ -60,7 +60,10 @@ export function mergeRunSummaryPage(current: RunSummary[], incoming: RunSummary[
  * failing endpoint never blanks the rest of the dashboard) and is also fired
  * automatically the first time `authReady` flips true.
  */
-export function useBootstrapData(authReady: boolean): BootstrapData {
+export function useBootstrapData(
+  tenantScope: string | null,
+  permissions: readonly string[] = [],
+): BootstrapData {
   const [tools, setTools] = useState<ToolSchema[]>([])
   const [templates, setTemplates] = useState<Template[]>([])
   const [solutionPacks, setSolutionPacks] = useState<SolutionPackPublic[]>([])
@@ -70,23 +73,36 @@ export function useBootstrapData(authReady: boolean): BootstrapData {
   const [deadLetters, setDeadLetters] = useState<DeadLetter[]>([])
   const [usage, setUsage] = useState<Record<string, number>>({})
   const [aiHealth, setAiHealth] = useState<AiHealth | null>(null)
+  const tenantScopeRef = useRef<string | null>(tenantScope)
+  const permissionsRef = useRef<ReadonlySet<string>>(new Set(permissions))
+  const permissionKey = permissions.join('\u0000')
 
   const patchRunSummary = useCallback((runId: string, patch: Partial<RunSummary>) => {
     setRuns(current => patchRunSummaryList(current, runId, patch))
   }, [])
 
   const refreshPlatform = useCallback(async () => {
+    const requestedScope = tenantScopeRef.current
+    if (!requestedScope) return
+    const allowed = permissionsRef.current
+    const read = (permission: string, path: string, fallback: unknown) => allowed.has(permission)
+      ? api(path)
+      : Promise.resolve(fallback)
     const [toolData, templateData, packData, credentialData, runData, deadLetterData, usageData, aiHealthData, workflowsData] = await Promise.allSettled([
-      api('/tools'),
-      api('/templates'),
-      api('/solution-packs'),
-      api('/credentials'),
-      api('/runs'),
-      api('/dlq'),
+      read('workflows.read', '/tools', []),
+      read('workflows.read', '/templates', []),
+      read('packs.read', '/solution-packs', { packs: [] }),
+      read('credentials.read', '/credentials', []),
+      read('runs.read', '/runs', []),
+      read('dlq.read', '/dlq', []),
       api('/billing/usage'),
       api('/ai/health'),
-      api('/workflows'),
+      read('workflows.read', '/workflows', []),
     ])
+
+    // A workspace switch may happen while the fan-out is in flight. Never
+    // project the previous tenant's late response into the newly selected UI.
+    if (tenantScopeRef.current !== requestedScope) return
 
     if (toolData.status === 'fulfilled') setTools(Array.isArray(toolData.value) ? toolData.value : [])
     if (templateData.status === 'fulfilled') setTemplates(Array.isArray(templateData.value) ? templateData.value : [])
@@ -113,8 +129,19 @@ export function useBootstrapData(authReady: boolean): BootstrapData {
   }, [])
 
   useEffect(() => {
-    if (authReady) void refreshPlatform()
-  }, [authReady, refreshPlatform])
+    tenantScopeRef.current = tenantScope
+    permissionsRef.current = new Set(permissionKey ? permissionKey.split('\u0000') : [])
+    setTools([])
+    setTemplates([])
+    setSolutionPacks([])
+    setCredentials([])
+    setRuns([])
+    setSavedWorkflows([])
+    setDeadLetters([])
+    setUsage({})
+    setAiHealth(null)
+    if (tenantScope) void refreshPlatform()
+  }, [tenantScope, permissionKey, refreshPlatform])
 
   return { tools, templates, solutionPacks, credentials, runs, savedWorkflows, deadLetters, usage, aiHealth, refreshPlatform, patchRunSummary }
 }

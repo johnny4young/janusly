@@ -60,7 +60,7 @@ function campaignList(value: unknown): ReplayCampaign[] {
   })
 }
 
-export function ReplayCampaignsCard() {
+export function ReplayCampaignsCard({ canCancel = true }: { canCancel?: boolean }) {
   const { t } = useT()
   const platformVersion = useWorkflowStore((state) => state.platformVersion)
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
@@ -156,7 +156,7 @@ export function ReplayCampaignsCard() {
                 <span>{t('replayCampaign.counts', { replayed: campaign.replayedCount, failed: campaign.failedCount })}</span>
                 <span>{t('replayCampaign.pace', { seconds: campaign.pacingMs / 1_000 })}</span>
               </div>
-              {campaign.status === 'running' && (
+              {canCancel && campaign.status === 'running' && (
                 <div className="we-replay-campaign__actions">
                   {confirmCancelId === campaign.id ? (
                     <>

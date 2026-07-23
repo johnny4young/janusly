@@ -29,9 +29,10 @@ type SolutionPacksPanelProps = {
   onInstall: (packId: string) => void
   onSampleRun: (packId: string) => void
   onInjectFailure: (packId: string, fixtureId: string) => void
+  canInstall?: boolean
 }
 
-export function SolutionPacksPanel({ packs, credentials, onInstall, onSampleRun, onInjectFailure }: SolutionPacksPanelProps) {
+export function SolutionPacksPanel({ packs, credentials, onInstall, onSampleRun, onInjectFailure, canInstall = true }: SolutionPacksPanelProps) {
   const { t, i18n } = useT()
   const setActiveTab = useWorkflowStore((state) => state.setActiveTab)
   const [query, setQuery] = useState('')
@@ -142,10 +143,10 @@ export function SolutionPacksPanel({ packs, credentials, onInstall, onSampleRun,
               )}
 
               <div className="form-actions">
-                <button type="button" className="command-button command-button-primary" onClick={() => onInstall(pack.id)}>
+                <button type="button" className="command-button command-button-primary" disabled={!canInstall} onClick={() => onInstall(pack.id)}>
                   <Download size={13} aria-hidden="true" /> {t('packs.action.install')}
                 </button>
-                <button type="button" className="command-button" onClick={() => onSampleRun(pack.id)}>
+                <button type="button" className="command-button" disabled={!canInstall} onClick={() => onSampleRun(pack.id)}>
                   <Play size={13} aria-hidden="true" /> {t('packs.action.sampleRun')}
                 </button>
               </div>
@@ -168,6 +169,7 @@ export function SolutionPacksPanel({ packs, credentials, onInstall, onSampleRun,
                     id={`pack-drill-${pack.id}`}
                     className="text-field text-field--compact we-pack-drill__select"
                     value={selectedFixture.id}
+                    disabled={!canInstall}
                     aria-describedby={drillDescriptionId}
                     data-testid={`pack-drill-select-${pack.id}`}
                     onChange={(event) => setSelectedDrills((current) => ({
@@ -201,6 +203,7 @@ export function SolutionPacksPanel({ packs, credentials, onInstall, onSampleRun,
                   <button
                     type="button"
                     className="command-button we-pack-drill__action"
+                    disabled={!canInstall}
                     data-testid={`pack-drill-start-${pack.id}`}
                     onClick={() => onInjectFailure(pack.id, selectedFixture.id)}
                   >

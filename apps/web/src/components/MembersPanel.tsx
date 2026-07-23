@@ -19,6 +19,7 @@ import { useWorkflowStore } from '../store'
 import type { OrgMember, OrgRole } from '../types'
 import { tApiError, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
+import { sessionCan } from '../identity-context'
 
 type OrgRoleEntry = {
   name: string
@@ -51,6 +52,7 @@ export function MembersPanel() {
   const addToast = useWorkflowStore(state => state.addToast)
   const bumpPlatformVersion = useWorkflowStore(state => state.bumpPlatformVersion)
   const platformVersion = useWorkflowStore(state => state.platformVersion)
+  const identityContext = useWorkflowStore(state => state.identityContext)
   const [members, setMembers] = useState<OrgMember[]>([])
   const [orgRoles, setOrgRoles] = useState<OrgRoleEntry[]>([
     { name: 'viewer', isBuiltin: true, inheritsFrom: 'viewer', description: null },
@@ -65,7 +67,12 @@ export function MembersPanel() {
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null)
   const trimmedEmail = email.trim()
   const emailInvalid = trimmedEmail.length > 0 && !emailPattern.test(trimmedEmail)
-  const canInvite = emailPattern.test(trimmedEmail) && !pending
+  const canManageMembers = sessionCan(identityContext, 'members.write')
+  const canSetRoles = sessionCan(identityContext, 'members.role_set')
+  const canInvite = canManageMembers && emailPattern.test(trimmedEmail) && !pending
+  const roleLabel = (name: string) => name === 'viewer' || name === 'editor' || name === 'admin'
+    ? t(`userMenu.role.${name}` as never)
+    : name
 
   const load = useCallback(async () => {
     try {
@@ -155,9 +162,11 @@ export function MembersPanel() {
             <div className="section-kicker">{t('members.kicker')}</div>
             <strong>{t('members.heading')}</strong>
           </div>
-          <span className="mode-pill mode-pill-neutral">{role}</span>
+          <span className="mode-pill mode-pill-neutral">
+            {t('members.inviteAs', { role: roleLabel(role) })}
+          </span>
         </div>
-        <fieldset className="we-fieldset">
+        <fieldset className="we-fieldset" disabled={!canManageMembers}>
           <label className="field-label" htmlFor="member-email">{t('members.email')}</label>
           <input
             id="member-email"
@@ -190,7 +199,7 @@ export function MembersPanel() {
                   />
                   <span className="we-role-option__copy">
                     <span className="we-role-option__name">
-                      {option.name}{option.isBuiltin ? '' : (t('members.role.customSuffix'))}
+                      {roleLabel(option.name)}{option.isBuiltin ? '' : (t('members.role.customSuffix'))}
                     </span>
                     <span className="we-role-option__desc">{describeRole(option.name, option)}</span>
                   </span>
@@ -238,14 +247,15 @@ export function MembersPanel() {
                       value={member.role}
                       onChange={(event) => updateRole(member.userId, event.target.value)}
                       aria-label={t('members.row.roleAria', { member: label })}
+                      disabled={!canSetRoles}
                     >
                       {orgRoles.map(option => (
                         <option key={option.name} value={option.name}>
-                          {option.name}{option.isBuiltin ? '' : (t('members.role.customSuffix'))}
+                          {roleLabel(option.name)}{option.isBuiltin ? '' : (t('members.role.customSuffix'))}
                         </option>
                       ))}
                     </select>
-                    {confirmRemoveId === member.userId ? (
+                    {!canManageMembers ? null : confirmRemoveId === member.userId ? (
                       <span className="we-list-row__confirm">
                         <span className="we-list-row__confirm-text">
                           {t('members.row.removeConfirm', { member: label })}

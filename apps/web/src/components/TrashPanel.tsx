@@ -19,6 +19,7 @@ import { daysUntilPurge } from '../trash-expiry'
 type TFunc = ReturnType<typeof useT>['t']
 
 export type TrashPanelProps = {
+  canWrite: boolean
   workflows: SavedWorkflow[]
   loading: boolean
   selectedIds: Set<string>
@@ -32,6 +33,7 @@ export type TrashPanelProps = {
 }
 
 export function TrashPanel({
+  canWrite,
   workflows,
   loading,
   selectedIds,
@@ -51,14 +53,16 @@ export function TrashPanel({
   const renderTrashRow = (workflow: SavedWorkflow) => (
     <li key={workflow.id}>
       <div className="we-list-row" data-severity="cobalt" data-testid={`workflows-trash-row-${workflow.id}`}>
-        <input
-          type="checkbox"
-          className="we-list-row__select"
-          checked={selectedIds.has(workflow.id)}
-          onChange={() => toggleSelected(workflow.id)}
-          aria-label={t('workflowsDashboard.selectRowAria', { name: workflow.name })}
-          data-testid={`workflows-trash-select-${workflow.id}`}
-        />
+        {canWrite && (
+          <input
+            type="checkbox"
+            className="we-list-row__select"
+            checked={selectedIds.has(workflow.id)}
+            onChange={() => toggleSelected(workflow.id)}
+            aria-label={t('workflowsDashboard.selectRowAria', { name: workflow.name })}
+            data-testid={`workflows-trash-select-${workflow.id}`}
+          />
+        )}
         <span className="we-list-row__avatar" aria-hidden="true">
           <Workflow size={14} />
         </span>
@@ -87,14 +91,16 @@ export function TrashPanel({
               </span>
             )
           })()}
-          <button
-            type="button"
-            className="small-command"
-            onClick={() => void restoreWorkflow(workflow.id)}
-            data-testid={`workflows-restore-${workflow.id}`}
-          >
-            <RotateCcw size={14} aria-hidden="true" /> {t('workflowsDashboard.restoreFlow')}
-          </button>
+          {canWrite && (
+            <button
+              type="button"
+              className="small-command"
+              onClick={() => void restoreWorkflow(workflow.id)}
+              data-testid={`workflows-restore-${workflow.id}`}
+            >
+              <RotateCcw size={14} aria-hidden="true" /> {t('workflowsDashboard.restoreFlow')}
+            </button>
+          )}
         </div>
       </div>
     </li>
@@ -116,7 +122,7 @@ export function TrashPanel({
       {/* Bulk-restore action bar — selection is always available in Trash.
           Select-all operates on the raw trash `workflows` (the rendered
           set). Restore-selected is disabled until ≥1 row is ticked. */}
-      <div className="we-list-bulk-bar" data-testid="workflows-trash-actions">
+      {canWrite && <div className="we-list-bulk-bar" data-testid="workflows-trash-actions">
         {selectedIds.size > 0 && (
           <span className="we-list-bulk-bar__count">{t('workflowsDashboard.bulkSelectedCount', { count: selectedIds.size })}</span>
         )}
@@ -140,7 +146,7 @@ export function TrashPanel({
         >
           <RotateCcw size={14} aria-hidden="true" /> {t('workflowsDashboard.trashRestoreSelected', { count: selectedIds.size })}
         </button>
-      </div>
+      </div>}
       <ul className="we-list" data-testid="workflows-trash-list">
         {workflows.map(renderTrashRow)}
       </ul>

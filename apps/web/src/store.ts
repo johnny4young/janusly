@@ -31,6 +31,7 @@ import type { Connection, OnEdgesChange, OnNodesChange } from '@xyflow/react'
 import type { Session, User } from '@supabase/supabase-js'
 import type { ActiveTab, JsonObject, RunEvent, RunNode, RunSummary, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
 import type { OnboardingState } from '@janusly/shared/src/onboarding'
+import type { SessionContext } from './identity-context'
 import { getNodePreset } from './constants'
 import { t } from './i18n/runtime'
 import { workflowToGraph } from './canvas-projections'
@@ -144,6 +145,8 @@ type WorkflowStore = {
   userId: string | null
   orgId: string | null
   authReady: boolean
+  identityContext: SessionContext | null
+  identityReady: boolean
 
   currentWorkflowId: string
   currentWorkflowName: string
@@ -207,6 +210,8 @@ type WorkflowStore = {
   setAuth: (payload: { session: Session | null; user: User | null; userId: string | null; orgId: string | null }) => void
   clearAuth: () => void
   setAuthReady: (ready: boolean) => void
+  setIdentityContext: (context: SessionContext | null) => void
+  setIdentityPending: () => void
   dismissRecoveryIntroThisSession: () => void
 
   addNode: (type: string, position?: { x: number; y: number }) => void
@@ -365,6 +370,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   userId: null,
   orgId: null,
   authReady: false,
+  identityContext: null,
+  identityReady: false,
 
   currentWorkflowId: 'ui-test',
   // `main.tsx` starts downloading App in parallel with the locale catalog, so
@@ -409,6 +416,9 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     authReady: true,
     ...(state.userId !== userId || state.orgId !== orgId
       ? {
+          identityContext: null,
+          identityReady: false,
+          toasts: [],
           ...clearedRunProjection(state.runTransitionGeneration),
           recoveryIntroDismissedThisSession: false,
         }
@@ -420,10 +430,17 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     userId: null,
     orgId: null,
     authReady: true,
+    identityContext: null,
+    identityReady: true,
+    // Notifications belong to the departing identity/workspace. Keeping them
+    // after logout can disclose stale operational details to the next user.
+    toasts: [],
     recoveryIntroDismissedThisSession: false,
     ...clearedRunProjection(state.runTransitionGeneration),
   })),
   setAuthReady: (authReady) => set({ authReady }),
+  setIdentityContext: (identityContext) => set({ identityContext, identityReady: true }),
+  setIdentityPending: () => set({ identityReady: false }),
   dismissRecoveryIntroThisSession: () => set({ recoveryIntroDismissedThisSession: true }),
 
   addNode: (type, position) => {

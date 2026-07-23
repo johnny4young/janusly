@@ -186,8 +186,9 @@ function isForbiddenApiError(error: unknown): boolean {
     && (error as { statusCode?: unknown }).statusCode === 403
 }
 
-export function OperationsPage() {
+export function OperationsPage({ permissions }: { permissions?: readonly string[] }) {
   const { t } = useT()
+  const can = (permission: string) => permissions === undefined || permissions.includes(permission)
   const platformVersion = useWorkflowStore((state) => state.platformVersion)
   const budgetBlocked = useWorkflowStore((state) => state.budgetBlocked)
   const [metrics, setMetrics] = useState<RecoveryMetrics | null>(null)
@@ -202,6 +203,23 @@ export function OperationsPage() {
   const [queueSignal, setQueueSignal] = useState<QueueSignalState | undefined>(undefined)
   const [queueCheckedAt, setQueueCheckedAt] = useState<number | null>(null)
   const [section, setSection] = useState<OpsSection>(() => loadStoredSection())
+
+  const sectionAvailable = (candidate: OpsSection): boolean => {
+    if (candidate === 'overview') return can('recovery.read')
+    if (candidate === 'reliability') {
+      return can('alerts.read') || can('upstream.read') || can('org.config.write')
+    }
+    if (candidate === 'access') {
+      return can('members.read') || can('org.config.write') || can('org.permissions.write')
+    }
+    return can('credentials.read') || can('mcp.connections.read') || can('credentials.write')
+  }
+
+  useEffect(() => {
+    if (sectionAvailable(section)) return
+    const fallback = RAIL_ITEMS.find((item) => sectionAvailable(item.section))?.section
+    if (fallback) setSection(fallback)
+  }, [permissions, section])
 
   // Persist on every section change. Tiny write — no debounce needed.
   useEffect(() => {
@@ -254,7 +272,7 @@ export function OperationsPage() {
       // Live queue numbers intentionally stay off unauthenticated `/health`.
       // Poll the admin projection on the same cadence and preserve the last
       // successful snapshot if a later request fails.
-      if (queueForbidden) return
+      if (queueForbidden || !can('org.config.write')) return
       api('/system/queue')
         .then((payload) => {
           if (cancelled) return
@@ -290,7 +308,7 @@ export function OperationsPage() {
     // degradation is still caught within the interval even while idle.
     const id = window.setInterval(loadHealth, 20_000)
     return () => { cancelled = true; window.clearInterval(id) }
-  }, [])
+  }, [permissions])
 
   // Sandbox zeros render neutral (decision: an empty workspace is "no
   // signal", not a red emergency). No-op once any run is terminal.
@@ -330,15 +348,15 @@ export function OperationsPage() {
         maintenanceQueueUnavailableReason={queueSignal?.maintenanceUnavailableReason}
       />
       <div className="we-operations-page__body">
-        <OperationsRail section={section} onChange={setSection} signals={signals} />
+        <OperationsRail section={section} onChange={setSection} signals={signals} permissions={permissions} />
         <div className="we-operations-page__content" data-section={section}>
           {/* Lazy-mount: only the active sub-tab's cards exist in the DOM.
               Inactive sub-tabs never fire their per-card `useEffect` fetches,
               which is what cuts page-load API traffic from ~9 calls to ~2-3. */}
-          {section === 'overview' && <OverviewSection metrics={displayMetrics} />}
-          {section === 'reliability' && <ReliabilitySection />}
-          {section === 'access' && <AccessSection />}
-          {section === 'integrations' && <IntegrationsSection />}
+          {section === 'overview' && <OverviewSection metrics={displayMetrics} permissions={permissions} />}
+          {section === 'reliability' && <ReliabilitySection permissions={permissions} />}
+          {section === 'access' && <AccessSection permissions={permissions} />}
+          {section === 'integrations' && <IntegrationsSection permissions={permissions} />}
         </div>
       </div>
     </div>
@@ -429,12 +447,21 @@ function OperationsRail({
   section,
   onChange,
   signals,
+  permissions,
 }: {
   section: OpsSection
   onChange: (next: OpsSection) => void
   signals: SignalSummary
+  permissions?: readonly string[]
 }) {
   const { t } = useT()
+  const can = (permission: string) => permissions === undefined || permissions.includes(permission)
+  const visibleItems = RAIL_ITEMS.filter(({ section: candidate }) => {
+    if (candidate === 'overview') return can('recovery.read')
+    if (candidate === 'reliability') return can('alerts.read') || can('upstream.read') || can('org.config.write')
+    if (candidate === 'access') return can('members.read') || can('org.config.write') || can('org.permissions.write')
+    return can('credentials.read') || can('mcp.connections.read') || can('credentials.write')
+  })
 
   // Dot-badge derivation is intentionally limited to page-level signals.
   // Reading child-card health here would force those cards to fetch while
@@ -463,7 +490,7 @@ function OperationsRail({
       data-testid="operations-rail"
     >
       <ul>
-        {RAIL_ITEMS.map((item) => {
+        {visibleItems.map((item) => {
           const isActive = item.section === section
           const dot = dotKind[item.section]
           return (
@@ -498,8 +525,9 @@ function OperationsRail({
   )
 }
 
-function OverviewSection({ metrics }: { metrics: RecoveryMetrics | null }) {
+function OverviewSection({ metrics, permissions }: { metrics: RecoveryMetrics | null; permissions?: readonly string[] }) {
   const { t } = useT()
+  const canReadDlq = permissions === undefined || permissions.includes('dlq.read')
   const locale = getResolvedLocale()
   return (
     <>
@@ -557,41 +585,49 @@ function OverviewSection({ metrics }: { metrics: RecoveryMetrics | null }) {
           </div>
         </section>
       )}
-      <FailureClustersCard />
+      {canReadDlq && <FailureClustersCard />}
     </>
   )
 }
 
-function ReliabilitySection() {
+function ReliabilitySection({ permissions }: { permissions?: readonly string[] }) {
+  const can = (permission: string) => permissions === undefined || permissions.includes(permission)
   return (
     <>
-      <AlertPoliciesPanel />
-      <RecentAlertsCard />
-      <UpstreamHealthPanel />
-      <BudgetSettingsPanel />
-      <AiGuidanceSettingsPanel />
+      {can('alerts.read') && <AlertPoliciesPanel canWrite={can('alerts.write')} />}
+      {can('alerts.read') && <RecentAlertsCard />}
+      {can('upstream.read') && <UpstreamHealthPanel canWrite={can('upstream.write')} />}
+      {can('org.config.write') && <BudgetSettingsPanel />}
+      {can('org.config.write') && <AiGuidanceSettingsPanel />}
     </>
   )
 }
 
-function AccessSection() {
+function AccessSection({ permissions }: { permissions?: readonly string[] }) {
+  const can = (permission: string) => permissions === undefined || permissions.includes(permission)
   return (
     <>
-      <AuthPolicySettingsPanel />
-      <ScimDirectorySettingsPanel />
-      <PermissionGrantsPanel />
-      <MemoryGovernancePanel />
-      <AuditLogPanel />
+      {can('org.config.write') && <AuthPolicySettingsPanel />}
+      {can('members.read') && (
+        <ScimDirectorySettingsPanel
+          canConfigureDirectory={can('org.config.write')}
+          canSetRoles={can('members.role_set')}
+        />
+      )}
+      {can('members.read') && <PermissionGrantsPanel canWrite={can('org.permissions.write')} />}
+      {can('recovery.read') && <MemoryGovernancePanel />}
+      {can('org.config.write') && <AuditLogPanel />}
     </>
   )
 }
 
-function IntegrationsSection() {
+function IntegrationsSection({ permissions }: { permissions?: readonly string[] }) {
+  const can = (permission: string) => permissions === undefined || permissions.includes(permission)
   return (
     <>
-      <SlackInteractionsPanel />
-      <CredentialHealthCard />
-      <McpConnectionsPanel />
+      {can('credentials.write') && <SlackInteractionsPanel />}
+      {can('credentials.read') && <CredentialHealthCard />}
+      {can('mcp.connections.read') && <McpConnectionsPanel canWrite={can('mcp.connections.write')} />}
     </>
   )
 }

@@ -37,12 +37,13 @@ import { RightPanel } from './components/RightPanel'
 import { RecoveryCenterPanel } from './components/RecoveryCenterPanel'
 import { BudgetBlockedBanner } from './components/BudgetBlockedBanner'
 import { Login } from './components/Login'
+import { WorkspaceGate } from './components/WorkspaceGate'
 import { UserMenu } from './components/UserMenu'
 import { WorkflowReadinessBadge } from './components/WorkflowReadinessBadge'
 import { WorkflowHealthBadge } from './components/WorkflowHealthBadge'
 const RunInputDialog = lazy(() => import('./components/RunInputDialog').then((m) => ({ default: m.RunInputDialog })))
 import { Activity, ChevronRight, PlayCircle, Search, ShieldAlert, ShieldCheck } from 'lucide-react'
-import { AuthProvider, consumeSsoSessionFragment, isSupabaseConfigured, normalizeAuth } from './auth'
+import { AuthProvider, isSupabaseConfigured, normalizeAuth } from './auth'
 import { useWorkflowStore } from './store'
 import { useShallow } from 'zustand/react/shallow'
 import { api } from './api'
@@ -63,6 +64,9 @@ import { consumeDeadLetterDeepLink, requestRecoveryQueueFocus } from './componen
 import { requestRecoveryAllClearIfQueueEmpty } from './components/recovery-all-clear-coordinator'
 import { DOCS_URL } from './docs-link'
 import { createRunTransitionGuard, isRunRequestCurrent } from './run-transition'
+import type { SessionContext } from './identity-context'
+import { currentSessionOrganization } from './identity-context'
+import { canOpenTab, firstOpenTab } from './tab-permissions'
 
 type RunResponse = {
   run?: RunSummary
@@ -73,6 +77,7 @@ type RunResponse = {
 }
 
 const CANVAS_PALETTE_TYPES: string[] = ['http', 'ai', 'condition', 'tool', 'agent']
+const EMPTY_PERMISSIONS: readonly string[] = Object.freeze([])
 
 type ValidationResponse = {
   valid: boolean
@@ -117,6 +122,8 @@ export default function App() {
     userId,
     orgId,
     authReady,
+    identityContext,
+    identityReady,
     runId,
     runDetail,
     runNodes,
@@ -133,6 +140,8 @@ export default function App() {
     setAuth,
     clearAuth,
     setAuthReady,
+    setIdentityContext,
+    setIdentityPending,
     setActiveTab,
     setWorkflowName,
     initializeWorkflowName,
@@ -171,6 +180,8 @@ export default function App() {
     userId: s.userId,
     orgId: s.orgId,
     authReady: s.authReady,
+    identityContext: s.identityContext,
+    identityReady: s.identityReady,
     runId: s.runId,
     runDetail: s.runDetail,
     runNodes: s.runNodes,
@@ -187,6 +198,8 @@ export default function App() {
     setAuth: s.setAuth,
     clearAuth: s.clearAuth,
     setAuthReady: s.setAuthReady,
+    setIdentityContext: s.setIdentityContext,
+    setIdentityPending: s.setIdentityPending,
     setActiveTab: s.setActiveTab,
     setWorkflowName: s.setWorkflowName,
     initializeWorkflowName: s.initializeWorkflowName,
@@ -237,6 +250,18 @@ export default function App() {
   // Server-data bootstrap (tools / templates / packs / credentials / runs /
   // saved workflows / dead letters / usage / ai-health) + the `refreshPlatform`
   // fan-out, fired once `authReady` flips.
+  const tenantReady = authReady && identityReady && Boolean(identityContext?.currentOrganizationId)
+  const currentOrganization = useMemo(
+    () => currentSessionOrganization(identityContext),
+    [identityContext],
+  )
+  const tenantPermissions = currentOrganization?.permissions ?? EMPTY_PERMISSIONS
+  const canWriteWorkflows = tenantPermissions.includes('workflows.write')
+  const canStartRuns = tenantPermissions.includes('runs.start')
+  const canReadRuns = tenantPermissions.includes('runs.read')
+  const canReadRecovery = tenantPermissions.includes('recovery.read')
+  const canReadDlq = tenantPermissions.includes('dlq.read')
+  const canInstallPacks = tenantPermissions.includes('packs.install')
   const {
     tools,
     templates,
@@ -249,7 +274,16 @@ export default function App() {
     aiHealth,
     refreshPlatform,
     patchRunSummary,
-  } = useBootstrapData(authReady)
+  } = useBootstrapData(
+    tenantReady ? identityContext?.currentOrganizationId ?? null : null,
+    tenantPermissions,
+  )
+
+  useEffect(() => {
+    if (!tenantReady || canOpenTab(activeTab, tenantPermissions)) return
+    const fallback = firstOpenTab(tenantPermissions)
+    if (fallback) setActiveTab(fallback)
+  }, [activeTab, setActiveTab, tenantPermissions, tenantReady])
   // Run-input dialog state. Open when the active workflow declares typed
   // `inputs` and the user presses Run; closed otherwise. Server errors
   // (JSONPath strings) are stored separately so the dialog can surface
@@ -325,8 +359,12 @@ export default function App() {
     return false
   }, [])
   const fireSignOut = useCallback(() => { void signOut() }, [signOut])
-  const openHomeShortcut = useCallback(() => setActiveTab('home'), [setActiveTab])
-  const openStudioShortcut = useCallback(() => setActiveTab('copilot'), [setActiveTab])
+  const openHomeShortcut = useCallback(() => {
+    if (canOpenTab('home', tenantPermissions)) setActiveTab('home')
+  }, [setActiveTab, tenantPermissions])
+  const openStudioShortcut = useCallback(() => {
+    if (canOpenTab('copilot', tenantPermissions)) setActiveTab('copilot')
+  }, [setActiveTab, tenantPermissions])
   // NOTE: `useKeyboardShortcuts` is mounted further down, after `saveWorkflow`
   // exists (Cmd/Ctrl+S needs it and const hoisting doesn't apply).
 
@@ -392,19 +430,14 @@ export default function App() {
   // from the Flows list.
   const draftRecoveryOffered = useRef(false)
   useEffect(() => {
-    if (!authReady || draftRecoveryOffered.current) return
+    if (!tenantReady || draftRecoveryOffered.current) return
     draftRecoveryOffered.current = true
     const latest = readLatestDraft()
     if (latest) void maybeRestoreDraft(latest.workflowId)
-  }, [authReady, maybeRestoreDraft])
+  }, [tenantReady, maybeRestoreDraft])
 
   useEffect(() => {
     let mounted = true
-
-    // SSO callback delivers `#janusly_session=<token>` in the URL
-    // fragment. Persist it before the auth-state check below runs so the
-    // very first API request after login carries the session token.
-    consumeSsoSessionFragment()
 
     void AuthProvider.getSession().then(({ data }) => {
       if (!mounted) return
@@ -433,6 +466,46 @@ export default function App() {
       unsubscribe?.()
     }
   }, [clearAuth, setAuth, setAuthReady])
+
+  // Provider authentication and tenant authorization are separate. Fetch the
+  // bounded session context only after the provider has identified the user;
+  // this endpoint also works for a legitimate identity with zero memberships.
+  useEffect(() => {
+    if (!authReady) return
+    if (!userId) {
+      setIdentityContext(null)
+      return
+    }
+
+    let cancelled = false
+    setIdentityPending()
+    void (async () => {
+      try {
+        const context = await api('/auth/context') as SessionContext
+        if (cancelled) return
+
+        // A single membership is an unambiguous server-resolved default. Keep
+        // the client preference aligned before any tenant bootstrap request.
+        if (context.currentOrganizationId && context.currentOrganizationId !== orgId) {
+          const { auth } = await AuthProvider.updateOrg(context.currentOrganizationId)
+          if (cancelled) return
+          setAuth(auth)
+        }
+        setIdentityContext(context)
+      } catch (error) {
+        if (cancelled) return
+        setIdentityContext(null)
+        addToast(
+          error instanceof Error ? error.message : t('auth.context.loadFailed'),
+          'error',
+        )
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [addToast, authReady, orgId, setAuth, setIdentityContext, setIdentityPending, t, userId])
 
   // Live-run SSE stream (primary). Owns `streamTransport`; on first byte it
   // sets `streamStatus='connected'` and the poll loop below skips its tick. On
@@ -487,6 +560,7 @@ export default function App() {
   )
 
   const validateWorkflow = useCallback(async () => {
+    if (!canWriteWorkflows) return false
     try {
       const revisionAtRequest = useWorkflowStore.getState().workflowRevision
       const workflow = getWorkflowJson()
@@ -502,9 +576,10 @@ export default function App() {
       addToast(error instanceof Error ? error.message : t('toasts.validationFailed'), 'error')
       return false
     }
-  }, [addToast, getWorkflowJson, t])
+  }, [addToast, canWriteWorkflows, getWorkflowJson, t])
 
   const saveWorkflow = useCallback(async () => {
+    if (!canWriteWorkflows) return
     if (!await validateWorkflow()) return
 
     try {
@@ -518,9 +593,11 @@ export default function App() {
     } catch (error) {
       addToast(error instanceof Error ? error.message : t('toasts.saveFailed'), 'error')
     }
-  }, [addToast, bumpPlatformVersion, getWorkflowJson, markWorkflowSaved, refreshPlatform, t, validateWorkflow])
+  }, [addToast, bumpPlatformVersion, canWriteWorkflows, getWorkflowJson, markWorkflowSaved, refreshPlatform, t, validateWorkflow])
 
-  const fireSave = useCallback(() => { void saveWorkflow() }, [saveWorkflow])
+  const fireSave = useCallback(() => {
+    if (canWriteWorkflows) void saveWorkflow()
+  }, [canWriteWorkflows, saveWorkflow])
   useKeyboardShortcuts({
     onTogglePalette: togglePalette,
     onToggleShortcuts: toggleShortcuts,
@@ -575,7 +652,11 @@ export default function App() {
   }, [addToast, bumpPlatformVersion, getWorkflowJson, refreshPlatform, runTransitionGuard, setActiveTab, setRunDetail, setRunId, t])
 
   const startWorkflow = useCallback(async () => {
-    if (!await validateWorkflow()) return
+    if (!canStartRuns) return
+    // Validation is an authoring capability. A custom operator role may be
+    // allowed to start an existing draft without being allowed to edit it;
+    // `/start` still performs the authoritative server-side DAG validation.
+    if (canWriteWorkflows && !await validateWorkflow()) return
     // Workflows that declared typed `inputs` open the dialog so the
     // operator can provide a payload before we fire `POST /start`.
     if (currentWorkflowInputs) {
@@ -588,7 +669,7 @@ export default function App() {
     } catch (error) {
       addToast(error instanceof Error ? error.message : t('toasts.runFailedToStart'), 'error')
     }
-  }, [addToast, currentWorkflowInputs, startRunWith, t, validateWorkflow])
+  }, [addToast, canStartRuns, canWriteWorkflows, currentWorkflowInputs, startRunWith, t, validateWorkflow])
 
   const submitRunInput = useCallback(async (input: unknown) => {
     setRunInputSubmitting(true)
@@ -626,6 +707,7 @@ export default function App() {
   }, [addToast, confirmReplaceCanvas, hydrateWorkflow, maybeRestoreDraft, setActiveTab, t])
 
   const openRun = useCallback(async (id: string, targetTab?: ActiveTab) => {
+    if (!canReadRuns) return
     // Switch tabs BEFORE the fetch resolves so the panel changes immediately.
     // A caller-pinned `targetTab` is honoured verbatim; otherwise default to the
     // unified Runs workspace. Explicit legacy targets remain honoured for
@@ -645,7 +727,7 @@ export default function App() {
       if (!runTransitionGuard.isCurrent(requestId)) return
       addToast(error instanceof Error ? error.message : t('toasts.runOpenFailed'), 'error')
     }
-  }, [addToast, patchRunSummary, runTransitionGuard, setActiveTab, setEvents, setEventsPagination, setRunDetail, setRunId, setRunNodes, t])
+  }, [addToast, canReadRuns, patchRunSummary, runTransitionGuard, setActiveTab, setEvents, setEventsPagination, setRunDetail, setRunId, setRunNodes, t])
 
   const loadOlderEvents = useCallback(async () => {
     if (!runId || !eventsCursor || !eventsHasMore) return
@@ -719,9 +801,10 @@ export default function App() {
   }, [bumpPlatformVersion, openRun, refreshPlatform, runPlatformMutation, t])
 
   const openRecoveryQueue = useCallback((deadLetterId?: string) => {
+    if (!canReadRuns || !canReadDlq) return
     requestRecoveryQueueFocus(deadLetterId)
     setActiveTab('runs')
-  }, [setActiveTab])
+  }, [canReadDlq, canReadRuns, setActiveTab])
 
   // An alert links to `?deadLetterId=<id>`. Consume it once at bootstrap and
   // hand it to the same path an in-app CTA uses, so the operator lands on the
@@ -730,8 +813,8 @@ export default function App() {
   // the operator back to the alert's row after they moved on.
   useEffect(() => {
     const deepLink = consumeDeadLetterDeepLink()
-    if (deepLink?.deadLetterId) openRecoveryQueue(deepLink.deadLetterId)
-  }, [openRecoveryQueue])
+    if (deepLink?.deadLetterId && canReadDlq) openRecoveryQueue(deepLink.deadLetterId)
+  }, [canReadDlq, openRecoveryQueue])
 
   const injectPackFailure = useCallback(async (packId: string, fixtureId: string) => {
     await runPlatformMutation<{ deadLetterId?: string }>({
@@ -966,7 +1049,7 @@ export default function App() {
     })()
   }, [confirmReplaceCanvas, hydrateWorkflow, setActiveTab])
 
-  if (!authReady) return (
+  if (!authReady || (userId !== null && !identityReady)) return (
     <div className="boot-screen" role="status" aria-live="polite">
       <div className="boot-screen__inner">
         <BrandMark size={64} />
@@ -975,9 +1058,13 @@ export default function App() {
     </div>
   )
   if (!userId && isSupabaseConfigured) return <Login onAuthenticated={() => undefined} />
+  if (identityContext && !identityContext.currentOrganizationId) {
+    return <WorkspaceGate context={identityContext} />
+  }
 
   const env: 'sandbox' | 'production' = (import.meta as { env?: { PROD?: boolean } }).env?.PROD ? 'production' : 'sandbox'
   const envLabel = env === 'production' ? t('topbar.env.production') : t('topbar.env.sandbox')
+  const currentOrganizationLabel = currentOrganization?.name ?? orgId ?? 'default'
   const openDlqCount = deadLetters.filter(dlq => dlq.status === 'open').length
   // Graduated recovery urgency: red is reserved for an ACTIVE blocker (a run
   // paused on a human gate right now), amber for "there's work" (open DLQ
@@ -1001,6 +1088,7 @@ export default function App() {
   const rightPanelElement = (
     <RightPanel
       tab={activeTab}
+      permissions={tenantPermissions}
       authoring={{
         aiHealth,
         runNodes,
@@ -1070,7 +1158,7 @@ export default function App() {
           <div className="top-bar-left">
             <BrandMark size={32} />
             <nav className="top-bar-breadcrumb" aria-label={t('layout.workflowStatus')}>
-              <span>{orgId ?? 'default'}</span>
+              <span>{currentOrganizationLabel}</span>
               <ChevronRight size={12} aria-hidden="true" />
               <b>{currentWorkflowName}</b>
               <span className={`top-bar-env top-bar-env--${env}`}>{envLabel}</span>
@@ -1078,37 +1166,41 @@ export default function App() {
           </div>
           <div className="top-bar-right">
             <div className="top-bar-pill-group">
-              <WorkflowReadinessBadge onResult={handleReadinessResult} />
-              <WorkflowHealthBadge workflowId={currentWorkflowSaved ? (currentWorkflowId ?? undefined) : undefined} />
-            </div>
-            <button
-              type="button"
-              className={`top-bar-cta top-bar-cta--${recoverState}`}
-              onClick={() => (recoverState === 'clear' ? setActiveTab('home') : openRecoveryQueue())}
-              aria-label={
-                recoverState === 'blocked'
-                  ? t('topbar.blockerAria', { count: blockerCount })
-                  : recoverState === 'attention'
-                    ? t('topbar.recoverAria', { count: openDlqCount })
-                    : t('topbar.allClearAria')
-              }
-            >
-              {recoverState === 'clear' ? (
-                <>
-                  <ShieldCheck size={13} aria-hidden="true" />
-                  <span>{t('topbar.allClear')}</span>
-                </>
-              ) : (
-                <>
-                  <ShieldAlert size={13} aria-hidden="true" />
-                  <span>
-                    {recoverState === 'blocked'
-                      ? t('topbar.blocker', { count: blockerCount })
-                      : t('topbar.recover', { count: openDlqCount })}
-                  </span>
-                </>
+              {canWriteWorkflows && <WorkflowReadinessBadge onResult={handleReadinessResult} />}
+              {tenantPermissions.includes('workflows.read') && (
+                <WorkflowHealthBadge workflowId={currentWorkflowSaved ? (currentWorkflowId ?? undefined) : undefined} />
               )}
-            </button>
+            </div>
+            {canReadRecovery && (
+              <button
+                type="button"
+                className={`top-bar-cta top-bar-cta--${recoverState}`}
+                onClick={() => (recoverState === 'clear' ? setActiveTab('home') : openRecoveryQueue())}
+                aria-label={
+                  recoverState === 'blocked'
+                    ? t('topbar.blockerAria', { count: blockerCount })
+                    : recoverState === 'attention'
+                      ? t('topbar.recoverAria', { count: openDlqCount })
+                      : t('topbar.allClearAria')
+                }
+              >
+                {recoverState === 'clear' ? (
+                  <>
+                    <ShieldCheck size={13} aria-hidden="true" />
+                    <span>{t('topbar.allClear')}</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldAlert size={13} aria-hidden="true" />
+                    <span>
+                      {recoverState === 'blocked'
+                        ? t('topbar.blocker', { count: blockerCount })
+                        : t('topbar.recover', { count: openDlqCount })}
+                    </span>
+                  </>
+                )}
+              </button>
+            )}
             <button
               type="button"
               className="top-bar-cmdk"
@@ -1137,6 +1229,7 @@ export default function App() {
           workflowEnv={env}
           workflowVersion={currentWorkflowVersion}
           workflowRunsCount={runs.length}
+          permissions={tenantPermissions}
           onWorkflowNameChange={setWorkflowName}
           onAdd={addNode}
           onValidate={async () => {
@@ -1175,9 +1268,11 @@ export default function App() {
               deadLetters={deadLetters}
               onOpenTab={setActiveTab}
               onOpenRun={openRun}
-              onApproveNode={approveNode}
+              onApproveNode={canStartRuns ? approveNode : () => undefined}
               onOpenRecoveryQueue={() => openRecoveryQueue()}
-              onTryDemoRecovery={() => injectPackFailure('failed-payment-recovery', 'billing_secret_unbound')}
+              onTryDemoRecovery={canInstallPacks
+                ? () => injectPackFailure('failed-payment-recovery', 'billing_secret_unbound')
+                : undefined}
             />
           )
         }
@@ -1260,6 +1355,7 @@ export default function App() {
             onSignOut={fireSignOut}
             docsUrl={DOCS_URL}
             onInsertSnippet={() => setSnippetMenuOpen(true)}
+            permissions={tenantPermissions}
             workflows={savedWorkflows.map(wf => ({ id: wf.id, name: wf.name }))}
             recipes={templates.map(template => ({ id: template.id, name: template.name }))}
             onOpenWorkflow={(id) => { void openWorkflow(id) }}
@@ -1276,7 +1372,9 @@ export default function App() {
             }}
           />
           )}
-          {shortcutsOpen && <ShortcutsModal open={shortcutsOpen} onClose={closeShortcuts} />}
+          {shortcutsOpen && (
+            <ShortcutsModal open={shortcutsOpen} onClose={closeShortcuts} permissions={tenantPermissions} />
+          )}
           {snippetMenuOpen && <SnippetInsertMenu open={snippetMenuOpen} onClose={closeSnippetMenu} />}
         </Suspense>
       }
@@ -1287,18 +1385,24 @@ export default function App() {
               <span className="bottom-status-bar__dot" />
               <span>{isConnected ? t('statusBar.operatorOnline') : t('statusBar.operatorOffline')}</span>
             </span>
-            <span className="bottom-status-bar__sep" aria-hidden="true">|</span>
-            {/* DLQ count only. Queue-depth telemetry is not available in this
-                surface, so the status bar does not render a fabricated value. */}
-            <span className="bottom-status-bar__item">
-              <Activity size={12} aria-hidden="true" />
-              <span>{t('statusBar.dlq', { dlq: openDlqCount })}</span>
-            </span>
-            <span className="bottom-status-bar__sep" aria-hidden="true">|</span>
-            <span className="bottom-status-bar__item">
-              <PlayCircle size={12} aria-hidden="true" />
-              <span>{t('statusBar.activeRuns', { count: activeRunCount })}</span>
-            </span>
+            {canReadDlq && (
+              <>
+                <span className="bottom-status-bar__sep" aria-hidden="true">|</span>
+                <span className="bottom-status-bar__item">
+                  <Activity size={12} aria-hidden="true" />
+                  <span>{t('statusBar.dlq', { dlq: openDlqCount })}</span>
+                </span>
+              </>
+            )}
+            {canReadRuns && (
+              <>
+                <span className="bottom-status-bar__sep" aria-hidden="true">|</span>
+                <span className="bottom-status-bar__item">
+                  <PlayCircle size={12} aria-hidden="true" />
+                  <span>{t('statusBar.activeRuns', { count: activeRunCount })}</span>
+                </span>
+              </>
+            )}
           </div>
           <div className="bottom-status-bar__group bottom-status-bar__group--right">
             {DOCS_URL && (
@@ -1316,7 +1420,7 @@ export default function App() {
               </>
             )}
             <span className="bottom-status-bar__item">
-              {orgId ?? 'default'} · build <span>{__BUILD_ID__}</span>
+              {currentOrganizationLabel} · build <span>{__BUILD_ID__}</span>
             </span>
             <span className="bottom-status-bar__sep" aria-hidden="true">|</span>
             <button

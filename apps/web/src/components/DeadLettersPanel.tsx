@@ -169,6 +169,12 @@ type DeadLettersPanelProps = {
   onRefresh: () => void | Promise<void>
   onReplay: (id: string, createdAtIso?: string) => boolean | Promise<boolean> | undefined
   onResolve: (id: string) => boolean | Promise<boolean> | undefined
+  canReplay?: boolean
+  canResolve?: boolean
+  canStartRuns?: boolean
+  canUseRecovery?: boolean
+  canReadAutoHealing?: boolean
+  canDecideAutoHealing?: boolean
 }
 
 type PendingTriageFocus = {
@@ -184,7 +190,17 @@ function triageQueueSignature(items: DeadLetter[]): string {
 }
 
 /** Render the DLQ list with status filter, replay, and resolve controls. */
-export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLettersPanelProps) {
+export function DeadLettersPanel({
+  onRefresh,
+  onReplay,
+  onResolve,
+  canReplay = true,
+  canResolve = true,
+  canStartRuns = true,
+  canUseRecovery = true,
+  canReadAutoHealing = true,
+  canDecideAutoHealing = true,
+}: DeadLettersPanelProps) {
   const { t } = useT()
   // Filter/sort state + persistence + the cap-correct server fetch + the
   // recovery overlay all live in the hook; this component owns rendering, row
@@ -295,6 +311,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   // 200 partial-success envelope, so inspect it before deciding whether to
   // clear or keep the remaining failed selections.
   const bulkResolve = async () => {
+    if (!canResolve) return
     const ids = [...selectedIds].filter((id) => !replayingIds.has(id))
     if (ids.length === 0) return
     setBulkErrors([])
@@ -330,6 +347,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   // exit selection. Only `open` rows are replayable server-side, so an
   // already-replayed/resolved row in the selection comes back in the failed set.
   const bulkReplay = async () => {
+    if (!canReplay) return
     setConfirmBulkReplay(false)
     const ids = [...selectedIds].filter((id) => !replayingIds.has(id))
     if (ids.length === 0) return
@@ -527,7 +545,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   }
 
   const replaySelected = async () => {
-    if (!selected || selected.status === 'replayed' || replayingIds.has(selected.id)) return
+    if (!canReplay || !selected || selected.status === 'replayed' || replayingIds.has(selected.id)) return
     const replayingId = selected.id
     setReplayingIds((current) => new Set(current).add(replayingId))
     try {
@@ -542,7 +560,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   }
 
   const resolveSelected = async () => {
-    if (!selected || selected.status === 'resolved' || replayingIds.has(selected.id)) return
+    if (!canResolve || !selected || selected.status === 'resolved' || replayingIds.has(selected.id)) return
     await runSelectedTriageAction(onResolve)
   }
 
@@ -598,7 +616,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
 
     if (selectionMode) return
     if (!hasCommandModifier && !event.altKey && !event.shiftKey && key === 'r') {
-      if (selected && selected.status !== 'replayed' && !replayingIds.has(selected.id)) {
+      if (canReplay && selected && selected.status !== 'replayed' && !replayingIds.has(selected.id)) {
         event.preventDefault()
         event.stopPropagation()
         void replaySelected()
@@ -607,7 +625,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     }
 
     if (hasCommandModifier && !event.altKey && !event.shiftKey && event.key === 'Enter') {
-      if (selected && selected.status !== 'resolved' && !replayingIds.has(selected.id)) {
+      if (canResolve && selected && selected.status !== 'resolved' && !replayingIds.has(selected.id)) {
         event.preventDefault()
         event.stopPropagation()
         void resolveSelected()
@@ -688,9 +706,9 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
 
   return (
     <>
-      <FailureClustersCard />
-      <ReplayCampaignsCard />
-      <AutoHealingPendingCard />
+      <FailureClustersCard canRecover={canUseRecovery} />
+      <ReplayCampaignsCard canCancel={canReplay} />
+      {canReadAutoHealing && <AutoHealingPendingCard canDecide={canDecideAutoHealing} />}
       <section
         ref={queueSectionRef}
         className="we-card"
@@ -698,7 +716,12 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
         data-testid="recovery-queue"
         tabIndex={-1}
         aria-labelledby="recovery-queue-heading"
-        aria-keyshortcuts="J K R Meta+Enter Control+Enter"
+        aria-keyshortcuts={[
+          'J',
+          'K',
+          canReplay ? 'R' : null,
+          canResolve ? 'Meta+Enter Control+Enter' : null,
+        ].filter(Boolean).join(' ')}
         onKeyDown={handleQueueKeyDown}
       >
       <div className="split-row">
@@ -707,15 +730,17 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
           <strong id="recovery-queue-heading">{t('dlq.queue')}</strong>
         </div>
         <div className="split-row">
-          <button
-            type="button"
-            className="small-command"
-            aria-pressed={selectionMode}
-            onClick={() => (selectionMode ? exitSelection() : setSelectionMode(true))}
-            data-testid="dlq-select-toggle"
-          >
-            {selectionMode ? t('dlq.selectDone') : t('dlq.selectRows')}
-          </button>
+          {(canReplay || canResolve) && (
+            <button
+              type="button"
+              className="small-command"
+              aria-pressed={selectionMode}
+              onClick={() => (selectionMode ? exitSelection() : setSelectionMode(true))}
+              data-testid="dlq-select-toggle"
+            >
+              {selectionMode ? t('dlq.selectDone') : t('dlq.selectRows')}
+            </button>
+          )}
           <button className="small-command" onClick={handleRefresh}>{t('dlq.refresh')}</button>
         </div>
       </div>
@@ -828,7 +853,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
               {/* Replay (recover) is the primary path; Resolve (accept the loss)
                   is the secondary dismiss. Both act on the same ticked set.
                   Replay re-runs workflows, so it goes through an inline confirm. */}
-              {confirmBulkReplay ? (
+              {canReplay && (confirmBulkReplay ? (
                 <span className="we-list-row__confirm">
                   <span className="we-list-row__confirm-text">
                     {t('dlq.bulkReplayConfirm', { count: selectedIds.size })}
@@ -858,25 +883,29 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
                 >
                   {t('dlq.bulkReplayCta')}
                 </button>
+              ))}
+              {canReplay && (
+                <button
+                  type="button"
+                  className="small-command"
+                  disabled={selectedIds.size < 2}
+                  title={selectedIds.size < 2 ? t('replayCampaign.minimumSelection') : undefined}
+                  onClick={() => setCampaignDeadLetterIds([...selectedIds])}
+                  data-testid="dlq-create-replay-campaign"
+                >
+                  <TimerReset size={12} aria-hidden="true" /> {t('replayCampaign.createCta')}
+                </button>
               )}
-              <button
-                type="button"
-                className="small-command"
-                disabled={selectedIds.size < 2}
-                title={selectedIds.size < 2 ? t('replayCampaign.minimumSelection') : undefined}
-                onClick={() => setCampaignDeadLetterIds([...selectedIds])}
-                data-testid="dlq-create-replay-campaign"
-              >
-                <TimerReset size={12} aria-hidden="true" /> {t('replayCampaign.createCta')}
-              </button>
-              <button
-                type="button"
-                className="small-command"
-                onClick={() => { void bulkResolve() }}
-                data-testid="dlq-bulk-resolve"
-              >
-                {t('dlq.bulkResolveCta')}
-              </button>
+              {canResolve && (
+                <button
+                  type="button"
+                  className="small-command"
+                  onClick={() => { void bulkResolve() }}
+                  data-testid="dlq-bulk-resolve"
+                >
+                  {t('dlq.bulkResolveCta')}
+                </button>
+              )}
             </>
           )}
         </div>
@@ -1088,27 +1117,33 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
           </div>
 
           <div className="split-row">
-            <button
-              className="small-command small-command--primary"
-              disabled={selected.status === 'replayed' || selected.status === 'resolved'}
-              onClick={() => setRecoveryDeadLetter(selectedFull ?? selected)}
-            >
-              <Sparkles size={12} aria-hidden="true" /> {t('dlq.action.suggest')}
-            </button>
-            <button
-              className="small-command we-command-with-kbd"
-              disabled={selected.status === 'replayed' || replayingIds.has(selected.id)}
-              onClick={() => { void replaySelected() }}
-            >
-              <span>{t('dlq.action.retry')}</span><kbd aria-hidden="true">R</kbd>
-            </button>
-            <button
-              className="small-command we-command-with-kbd"
-              disabled={selected.status === 'resolved' || replayingIds.has(selected.id)}
-              onClick={() => { void resolveSelected() }}
-            >
-              <span>{t('dlq.action.resolve')}</span><kbd aria-hidden="true">⌘/Ctrl ↵</kbd>
-            </button>
+            {canUseRecovery && (
+              <button
+                className="small-command small-command--primary"
+                disabled={selected.status === 'replayed' || selected.status === 'resolved'}
+                onClick={() => setRecoveryDeadLetter(selectedFull ?? selected)}
+              >
+                <Sparkles size={12} aria-hidden="true" /> {t('dlq.action.suggest')}
+              </button>
+            )}
+            {canReplay && (
+              <button
+                className="small-command we-command-with-kbd"
+                disabled={selected.status === 'replayed' || replayingIds.has(selected.id)}
+                onClick={() => { void replaySelected() }}
+              >
+                <span>{t('dlq.action.retry')}</span><kbd aria-hidden="true">R</kbd>
+              </button>
+            )}
+            {canResolve && (
+              <button
+                className="small-command we-command-with-kbd"
+                disabled={selected.status === 'resolved' || replayingIds.has(selected.id)}
+                onClick={() => { void resolveSelected() }}
+              >
+                <span>{t('dlq.action.resolve')}</span><kbd aria-hidden="true">⌘/Ctrl ↵</kbd>
+              </button>
+            )}
             <button
               type="button"
               className="small-command"
@@ -1117,13 +1152,15 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
             >
               <Copy size={12} aria-hidden="true" /> {t('dlq.action.copyError')}
             </button>
-            <button
-              className="small-command"
-              onClick={() => setLabSourceRunId(selected.runId)}
-              data-testid="dlq-replay-in-lab"
-            >
-              <FlaskConical size={12} aria-hidden="true" /> {t('dlq.action.replayInLab')}
-            </button>
+            {canStartRuns && (
+              <button
+                className="small-command"
+                onClick={() => setLabSourceRunId(selected.runId)}
+                data-testid="dlq-replay-in-lab"
+              >
+                <FlaskConical size={12} aria-hidden="true" /> {t('dlq.action.replayInLab')}
+              </button>
+            )}
             <button
               className="small-command"
               onClick={async () => {

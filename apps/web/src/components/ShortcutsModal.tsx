@@ -14,10 +14,14 @@ import { useT } from '../i18n'
 
 type Group = {
   title: string
-  items: Array<{ keys: string[]; description: string }>
+  items: Array<{ keys: string[]; description: string; permission?: string }>
 }
 
-export function ShortcutsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function ShortcutsModal({ open, onClose, permissions }: {
+  open: boolean
+  onClose: () => void
+  permissions?: readonly string[]
+}) {
   const { t } = useT()
 
   useEffect(() => {
@@ -41,9 +45,9 @@ export function ShortcutsModal({ open, onClose }: { open: boolean; onClose: () =
       title: t('shortcuts.group.global'),
       items: [
         { keys: ['⌘', 'K'], description: t('shortcuts.cmdk') },
-        { keys: ['⌘', 'S'], description: t('shortcuts.save') },
-        { keys: ['⌘', '1'], description: t('shortcuts.home') },
-        { keys: ['⌘', '2'], description: t('shortcuts.studio') },
+        { keys: ['⌘', 'S'], description: t('shortcuts.save'), permission: 'workflows.write' },
+        { keys: ['⌘', '1'], description: t('shortcuts.home'), permission: 'recovery.read' },
+        { keys: ['⌘', '2'], description: t('shortcuts.studio'), permission: 'ai.write' },
         { keys: ['?'], description: t('shortcuts.helpThis') },
         { keys: ['⌃', '⇧', 'Q'], description: t('shortcuts.signOut') },
       ],
@@ -65,12 +69,17 @@ export function ShortcutsModal({ open, onClose }: { open: boolean; onClose: () =
     {
       title: t('shortcuts.group.recovery'),
       items: [
-        { keys: ['J', 'K'], description: t('shortcuts.recoveryMove') },
-        { keys: ['R'], description: t('shortcuts.recoveryReplay') },
-        { keys: ['⌘/Ctrl', '↵'], description: t('shortcuts.recoveryResolve') },
+        { keys: ['J', 'K'], description: t('shortcuts.recoveryMove'), permission: 'recovery.read' },
+        { keys: ['R'], description: t('shortcuts.recoveryReplay'), permission: 'dlq.replay' },
+        { keys: ['⌘/Ctrl', '↵'], description: t('shortcuts.recoveryResolve'), permission: 'recovery.write' },
       ],
     },
-  ]
+  ].map((group) => ({
+    ...group,
+    items: permissions === undefined
+      ? group.items
+      : group.items.filter((item) => !item.permission || permissions.includes(item.permission)),
+  })).filter((group) => group.items.length > 0)
 
   return (
     <div

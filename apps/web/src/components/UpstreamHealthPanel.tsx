@@ -80,7 +80,7 @@ function statusTint(s: UpstreamHealthSource): 'green' | 'amber' | 'red' | 'gray'
   return 'green'
 }
 
-export function UpstreamHealthPanel(): React.ReactElement {
+export function UpstreamHealthPanel({ canWrite = true }: { canWrite?: boolean } = {}): React.ReactElement {
   const { t } = useT()
   const confirmDialog = useConfirm()
   const platformVersion = useWorkflowStore((s) => s.platformVersion)
@@ -189,6 +189,7 @@ export function UpstreamHealthPanel(): React.ReactElement {
         <button
           type="button"
           className="we-btn we-btn--ghost we-btn--sm"
+          disabled={!canWrite}
           onClick={() => (showForm ? cancelForm() : setShowForm(true))}
         >
           <Plus size={14} aria-hidden /> {t('upstreamHealth.panel.new')}
@@ -268,7 +269,7 @@ export function UpstreamHealthPanel(): React.ReactElement {
               type="button"
               className="we-btn we-btn--primary we-btn--sm"
               onClick={() => void submitSource()}
-              disabled={submitting || form.name.trim().length === 0 || form.url.trim().length === 0}
+              disabled={!canWrite || submitting || form.name.trim().length === 0 || form.url.trim().length === 0}
             >
               {editingId ? t('upstreamHealth.form.saveChanges') : t('common.save')}
             </button>
@@ -326,7 +327,7 @@ export function UpstreamHealthPanel(): React.ReactElement {
                   title={t('upstreamHealth.action.checkNow')}
                   aria-label={t('upstreamHealth.action.checkNow')}
                   onClick={() => void checkNow(s)}
-                  disabled={checkingId === s.id}
+                  disabled={!canWrite || checkingId === s.id}
                 >
                   <RefreshCw size={14} aria-hidden className={checkingId === s.id ? 'we-spin' : undefined} />
                 </button>
@@ -336,6 +337,7 @@ export function UpstreamHealthPanel(): React.ReactElement {
                   title={t('common.edit')}
                   aria-label={t('common.edit')}
                   onClick={() => startEdit(s)}
+                  disabled={!canWrite}
                 >
                   <Pencil size={14} aria-hidden />
                 </button>
@@ -345,6 +347,7 @@ export function UpstreamHealthPanel(): React.ReactElement {
                   title={t('common.delete')}
                   aria-label={t('common.delete')}
                   onClick={() => void deleteSource(s)}
+                  disabled={!canWrite}
                 >
                   <Trash2 size={14} aria-hidden />
                 </button>

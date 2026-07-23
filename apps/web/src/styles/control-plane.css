@@ -1574,7 +1574,25 @@
 }
 
 .auth-card__brand {
+  display: flex;
   align-items: center;
+  gap: 10px;
+}
+
+.auth-card__brand > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.auth-card__brand strong {
+  line-height: 1.1;
+}
+
+.auth-card__brand span {
+  color: var(--we-ink-muted);
+  font-size: 13px;
 }
 
 /* ==========================================================================
@@ -3124,3 +3142,195 @@
 }
 
 .auth-toggle:hover { text-decoration: underline; }
+
+.workspace-gate {
+  height: auto;
+  min-height: 100vh;
+  padding: 36px 18px;
+}
+
+.workspace-gate__card {
+  width: min(720px, 100%);
+  border: 1px solid var(--we-line);
+  border-radius: 18px;
+  background: var(--we-surface);
+  box-shadow: 0 34px 80px -42px var(--we-shadow-ink-25);
+  padding: 24px;
+}
+
+.workspace-gate__header,
+.workspace-gate__section-heading,
+.workspace-gate__option {
+  display: flex;
+  align-items: center;
+}
+
+.workspace-gate__header {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.workspace-gate__signout {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--we-line);
+  border-radius: var(--we-radius-pill);
+  background: transparent;
+  color: var(--we-ink-muted);
+  padding: 7px 11px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.workspace-gate__signout:hover:not(:disabled) {
+  border-color: var(--we-danger);
+  color: var(--we-danger);
+}
+
+.workspace-gate__intro {
+  margin: 30px 0 22px;
+}
+
+.workspace-gate__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--we-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.workspace-gate__intro h1 {
+  margin: 8px 0 6px;
+  font-size: clamp(26px, 4vw, 34px);
+  letter-spacing: -0.035em;
+}
+
+.workspace-gate__intro p,
+.workspace-gate__section-heading p {
+  margin: 0;
+  color: var(--we-ink-muted);
+  line-height: 1.55;
+}
+
+.workspace-gate__section {
+  margin-top: 22px;
+}
+
+.workspace-gate__section h2,
+.workspace-gate__section-heading h2 {
+  margin: 0 0 9px;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+}
+
+.workspace-gate__list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.workspace-gate__option {
+  min-width: 0;
+  gap: 10px;
+  border: 1px solid var(--we-line);
+  border-radius: 12px;
+  background: var(--we-surface-2);
+  color: var(--we-ink);
+  padding: 12px;
+  text-align: left;
+}
+
+.workspace-gate__option:hover:not(:disabled) {
+  border-color: var(--we-primary);
+  box-shadow: 0 8px 22px -18px var(--we-primary);
+}
+
+.workspace-gate__option:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.workspace-gate__option--invite {
+  border-color: color-mix(in srgb, var(--we-accent) 35%, var(--we-line));
+}
+
+.workspace-gate__icon {
+  display: grid;
+  flex: 0 0 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--we-primary-soft);
+  color: var(--we-primary);
+}
+
+.workspace-gate__option-body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.workspace-gate__option-body strong,
+.workspace-gate__option-body small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-gate__option-body small {
+  color: var(--we-ink-muted);
+  font-size: 11px;
+}
+
+.workspace-gate__create {
+  margin-top: 24px;
+  border-top: 1px solid var(--we-line);
+  padding-top: 22px;
+}
+
+.workspace-gate__section-heading {
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 14px;
+}
+
+.workspace-gate__section-heading h2 {
+  margin-bottom: 3px;
+}
+
+.workspace-gate__section-heading svg {
+  color: var(--we-primary);
+}
+
+.workspace-gate__fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.workspace-gate__fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--we-ink-muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.workspace-gate__create-action {
+  margin-top: 14px;
+}
+
+@media (max-width: 620px) {
+  .workspace-gate { padding: 18px 12px; }
+  .workspace-gate__card { padding: 18px; }
+  .workspace-gate__header { align-items: flex-start; }
+  .workspace-gate__signout span { display: none; }
+  .workspace-gate__list,
+  .workspace-gate__fields { grid-template-columns: 1fr; }
+}

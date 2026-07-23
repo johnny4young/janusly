@@ -11,7 +11,7 @@
  * Used by `App.tsx` (top-bar header).
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   BookOpen,
   Building2,
@@ -29,7 +29,7 @@ import {
   UserCog,
   Users,
 } from 'lucide-react'
-import { AuthProvider, isSupabaseConfigured } from '../auth'
+import { AuthProvider } from '../auth'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { tApiError, useT } from '../i18n'
@@ -46,6 +46,7 @@ import {
 import { LocaleSwitcher } from '../i18n/LocaleSwitcher'
 import type { ActiveTab, AiHealth } from '../types'
 import { parseDocsUrl } from '../docs-link'
+import { currentSessionOrganization, sessionCan } from '../identity-context'
 
 type UserMenuProps = {
   aiHealth?: AiHealth | null
@@ -97,7 +98,10 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
   const user = useWorkflowStore(state => state.user)
   const userId = useWorkflowStore(state => state.userId)
   const orgId = useWorkflowStore(state => state.orgId)
+  const identityContext = useWorkflowStore(state => state.identityContext)
   const clearAuth = useWorkflowStore(state => state.clearAuth)
+  const setAuth = useWorkflowStore(state => state.setAuth)
+  const setIdentityContext = useWorkflowStore(state => state.setIdentityContext)
   const addToast = useWorkflowStore(state => state.addToast)
   const onboarding = useWorkflowStore(state => state.onboarding)
   const setOnboarding = useWorkflowStore(state => state.setOnboarding)
@@ -105,6 +109,11 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
   const [open, setOpen] = useState(false)
   const [theme, setThemeState] = useState<ThemePreference>(() => getStoredTheme())
   const [density, setDensityState] = useState<DensityPreference>(() => getStoredDensity())
+  const [workspaceAction, setWorkspaceAction] = useState<string | null>(null)
+  const [showWorkspaceCreate, setShowWorkspaceCreate] = useState(false)
+  const [workspaceName, setWorkspaceName] = useState('')
+  const [showProfileEditor, setShowProfileEditor] = useState(false)
+  const [profileName, setProfileName] = useState(identityContext?.profile.name ?? '')
   const popoverRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -116,13 +125,22 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
-  const name = displayName(user, userId ?? 'dev-user')
-  const email = displayEmail(user, userId ?? 'dev-user@local')
+  const identityEmail = identityContext?.profile.email ?? identityContext?.identity.email ?? userId ?? 'dev-user@local'
+  const name = displayName(user, identityContext?.profile.name ?? identityEmail)
+  const email = displayEmail(user, identityEmail)
   const env = resolveEnv()
   const envLabel = env === 'production'
     ? t('userMenu.workspace.envProduction')
     : t('userMenu.workspace.envSandbox')
-  const role = 'editor'
+  const currentOrganization = currentSessionOrganization(identityContext)
+  const role = currentOrganization?.role ?? 'viewer'
+  const roleLabel = role === 'viewer' || role === 'editor' || role === 'admin'
+    ? t(`userMenu.role.${role}` as never)
+    : role
+  const canOpenOperations = sessionCan(identityContext, 'recovery.read')
+  const canManageCredentials = sessionCan(identityContext, 'credentials.write')
+  const canManageBudget = sessionCan(identityContext, 'org.config.write')
+  const canResumeOnboarding = sessionCan(identityContext, 'onboarding.write')
 
   const aiStatus = aiHealth?.enabled
     ? { pillKey: 'sidebar.aiMode.live', state: 'live' as const }
@@ -132,10 +150,82 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
     ? t('userMenu.ai.costGuard.on')
     : t('userMenu.ai.costGuard.off')
 
-  const recentOrgs = useMemo(() => {
-    if (!orgId) return []
-    return [{ id: orgId, env, active: true }]
-  }, [orgId, env])
+  const recentOrgs = useMemo(() => identityContext?.organizations.map(organization => ({
+    ...organization,
+    env,
+    active: organization.id === identityContext.currentOrganizationId,
+  })) ?? [], [env, identityContext])
+
+  const commitWorkspace = async (nextContext: typeof identityContext, organizationId: string) => {
+    if (!nextContext) return
+    const { auth } = await AuthProvider.updateOrg(organizationId)
+    setAuth(auth)
+    setIdentityContext({
+      ...nextContext,
+      currentOrganizationId: organizationId,
+      selectionRequired: false,
+      needsOrganization: false,
+    })
+    setOpen(false)
+  }
+
+  const switchWorkspace = async (organizationId: string) => {
+    if (!identityContext || organizationId === identityContext.currentOrganizationId) return
+    setWorkspaceAction(`switch:${organizationId}`)
+    try {
+      await commitWorkspace(identityContext, organizationId)
+    } catch (error) {
+      addToast(tApiError(error) || t('auth.workspace.selectFailed'), 'error')
+    } finally {
+      setWorkspaceAction(null)
+    }
+  }
+
+  const createWorkspace = async (event: FormEvent) => {
+    event.preventDefault()
+    if (workspaceName.trim().length < 2) return
+    setWorkspaceAction('create')
+    try {
+      const next = await api('/organizations', {
+        method: 'POST',
+        body: JSON.stringify({ name: workspaceName }),
+      }) as NonNullable<typeof identityContext>
+      if (!next.currentOrganizationId) throw new Error(t('auth.workspace.createFailed'))
+      await commitWorkspace(next, next.currentOrganizationId)
+      setWorkspaceName('')
+      setShowWorkspaceCreate(false)
+    } catch (error) {
+      addToast(tApiError(error) || t('auth.workspace.createFailed'), 'error')
+    } finally {
+      setWorkspaceAction(null)
+    }
+  }
+
+  const saveProfile = async (event: FormEvent) => {
+    event.preventDefault()
+    setWorkspaceAction('profile')
+    try {
+      const profile = await api('/users/me', {
+        method: 'POST',
+        body: JSON.stringify({ name: profileName || null }),
+      }) as { name?: string | null; email?: string | null }
+      if (identityContext) {
+        setIdentityContext({
+          ...identityContext,
+          profile: {
+            name: profile.name ?? null,
+            email: profile.email ?? identityContext.profile.email,
+          },
+        })
+      }
+      setShowProfileEditor(false)
+      addToast(t('userMenu.profile.saved'), 'success')
+    } catch (error) {
+      addToast(tApiError(error) || t('apiErrors.profile_update_failed'), 'error')
+    } finally {
+      setWorkspaceAction(null)
+    }
+  }
 
   const pickTheme = (next: ThemePreference) => {
     setTheme(next)
@@ -190,7 +280,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
         aria-label={triggerLabel}
       >
         <span className="user-menu__trigger-avatar" aria-hidden="true">{initials(email)}</span>
-        <span className="user-menu__trigger-name">{user?.email ?? userId ?? 'dev-user'}</span>
+        <span className="user-menu__trigger-name">{name}</span>
         <ChevronDown size={12} aria-hidden="true" />
       </button>
 
@@ -203,8 +293,8 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
               <strong>{name}</strong>
               <span>{email}</span>
             </div>
-            <span className="user-menu__id-role" aria-label={t(`userMenu.role.${role}` as never)}>
-              {t(`userMenu.role.${role}` as never)}
+            <span className="user-menu__id-role" aria-label={roleLabel}>
+              {roleLabel}
             </span>
           </div>
 
@@ -215,13 +305,13 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
           <div className="user-menu__workspace">
             <span className="user-menu__workspace-ic" aria-hidden="true"><Building2 size={14} /></span>
             <div className="user-menu__workspace-body">
-              <strong>{orgId ?? 'default'}</strong>
+              <strong>{currentOrganization?.name ?? orgId ?? 'default'}</strong>
               <small>
                 <span className={`user-menu__env user-menu__env--${env}`}>{envLabel}</span>
                 <span className="user-menu__build">build {__BUILD_ID__}</span>
               </small>
             </div>
-            <button
+            {canOpenOperations && <button
               type="button"
               className="user-menu__workspace-pick"
               onClick={() => { onOpenTab?.('operations'); setOpen(false) }}
@@ -229,35 +319,68 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
               aria-label={t('userMenu.workspace.openSettings')}
             >
               <Settings2 size={14} aria-hidden="true" />
-            </button>
+            </button>}
           </div>
 
           {/* Recent orgs */}
           {recentOrgs.length > 0 && (
             <div className="user-menu__recent">
               {recentOrgs.map(org => (
-                <div key={org.id} className={`user-menu__recent-row ${org.active ? 'user-menu__recent-row--on' : ''}`}>
+                <button
+                  type="button"
+                  key={org.id}
+                  className={`user-menu__recent-row ${org.active ? 'user-menu__recent-row--on' : ''}`}
+                  onClick={() => switchWorkspace(org.id)}
+                  disabled={org.active || !org.usable || workspaceAction !== null}
+                  aria-current={org.active ? 'true' : undefined}
+                  aria-label={t(
+                    org.active ? 'userMenu.recent.currentLabel' : 'userMenu.recent.switchLabel',
+                    { name: org.name },
+                  )}
+                >
                   <span className={`user-menu__recent-dot user-menu__recent-dot--${org.env}`} aria-hidden="true" />
-                  <span>{org.id}</span>
-                  <span className="user-menu__recent-meta">⌘1</span>
-                </div>
+                  <span>{org.name}</span>
+                  <span className="user-menu__recent-meta">
+                    {workspaceAction === `switch:${org.id}` ? t('common.working') : org.role}
+                  </span>
+                </button>
               ))}
-              <button type="button" className="user-menu__recent-add" onClick={comingSoon}>
-                <Plus size={11} aria-hidden="true" />
-                <span>{t('userMenu.recent.add')}</span>
-              </button>
+              {(identityContext?.identity.mode === 'supabase' || identityContext?.identity.mode === 'dev-headers') && (
+                showWorkspaceCreate ? (
+                  <form className="user-menu__recent-create" onSubmit={createWorkspace}>
+                    <input
+                      className="text-field"
+                      aria-label={t('auth.workspace.organizationName')}
+                      value={workspaceName}
+                      onChange={(event) => setWorkspaceName(event.target.value)}
+                      minLength={2}
+                      maxLength={80}
+                      required
+                      autoFocus
+                    />
+                    <button type="submit" disabled={workspaceAction !== null || workspaceName.trim().length < 2}>
+                      {workspaceAction === 'create' ? t('common.working') : t('auth.workspace.createAction')}
+                    </button>
+                  </form>
+                ) : (
+                  <button type="button" className="user-menu__recent-add" onClick={() => setShowWorkspaceCreate(true)}>
+                    <Plus size={11} aria-hidden="true" />
+                    <span>{t('userMenu.recent.add')}</span>
+                  </button>
+                )
+              )}
             </div>
           )}
 
           {/* AI operator */}
           <div className="user-menu__section user-menu__section--with-link">
             <span className="user-menu__section-label">{t('userMenu.ai.heading')}</span>
-            <a
+            {canOpenOperations && <a
               href="#"
               onClick={(event) => { event.preventDefault(); onOpenTab?.('operations'); setOpen(false) }}
             >
               {t('userMenu.ai.manage')}
-            </a>
+            </a>}
           </div>
           <div className="user-menu__ai">
             <div className="user-menu__ai-top">
@@ -274,12 +397,12 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
               <span aria-hidden="true">·</span>
               <span>{costGuardLabel}</span>
             </div>
-            <div className="user-menu__ai-actions">
-              <button type="button" onClick={() => { onOpenTab?.('credentials'); setOpen(false) }}>
+            {(canManageCredentials || canManageBudget) && <div className="user-menu__ai-actions">
+              {canManageCredentials && <button type="button" onClick={() => { onOpenTab?.('credentials'); setOpen(false) }}>
                 <KeyRound size={11} aria-hidden="true" />
                 <span>{t('userMenu.ai.rotateKey')}</span>
-              </button>
-              <button
+              </button>}
+              {canManageBudget && <button
                 type="button"
                 onClick={() => {
                   requestOperationsSection('reliability')
@@ -289,8 +412,8 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
               >
                 <DollarSign size={11} aria-hidden="true" />
                 <span>{t('userMenu.ai.setBudget')}</span>
-              </button>
-            </div>
+              </button>}
+            </div>}
           </div>
 
           {/* Appearance */}
@@ -358,30 +481,48 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
 
           <LocaleSwitcher variant="popover-row" />
 
+          {showProfileEditor && (
+            <form className="user-menu__profile-editor" onSubmit={saveProfile}>
+              <label htmlFor="user-menu-profile-name">{t('auth.workspace.profileName')}</label>
+              <input
+                id="user-menu-profile-name"
+                className="text-field"
+                value={profileName}
+                onChange={(event) => setProfileName(event.target.value)}
+                minLength={2}
+                maxLength={100}
+                autoComplete="name"
+              />
+              <div>
+                <button type="button" onClick={() => setShowProfileEditor(false)}>{t('common.cancel')}</button>
+                <button type="submit" disabled={workspaceAction !== null}>
+                  {workspaceAction === 'profile' ? t('common.working') : t('userMenu.profile.save')}
+                </button>
+              </div>
+            </form>
+          )}
+
           {/* Items list */}
           <div className="user-menu__items">
-            {onboarding?.status === 'skipped' && (
+            {onboarding?.status === 'skipped' && canResumeOnboarding && (
               <button type="button" className="user-menu__item" onClick={resumeOnboarding}>
                 <span className="user-menu__item-ic" aria-hidden="true"><Sparkles size={12} /></span>
                 <strong>{t('userMenu.item.resumeOnboarding')}</strong>
                 <span></span>
               </button>
             )}
-            <button type="button" className="user-menu__item" onClick={comingSoon}>
+            <button type="button" className="user-menu__item" onClick={() => setShowProfileEditor((visible) => !visible)}>
               <span className="user-menu__item-ic" aria-hidden="true"><UserCog size={12} /></span>
               <strong>{t('userMenu.item.account')}</strong>
               <span></span>
             </button>
-            <button type="button" className="user-menu__item" onClick={() => { onOpenTab?.('members'); setOpen(false) }}>
-              <span className="user-menu__item-ic" aria-hidden="true"><Users size={12} /></span>
-              <strong>{t('userMenu.item.team')}</strong>
-              <span></span>
-            </button>
-            <button type="button" className="user-menu__item" onClick={comingSoon}>
-              <span className="user-menu__item-ic" aria-hidden="true"><KeyRound size={12} /></span>
-              <strong>{t('userMenu.item.tokens')}</strong>
-              <span></span>
-            </button>
+            {sessionCan(identityContext, 'members.read') && (
+              <button type="button" className="user-menu__item" onClick={() => { onOpenTab?.('members'); setOpen(false) }}>
+                <span className="user-menu__item-ic" aria-hidden="true"><Users size={12} /></span>
+                <strong>{t('userMenu.item.team')}</strong>
+                <span></span>
+              </button>
+            )}
             <button
               type="button"
               className="user-menu__item"
@@ -405,7 +546,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
                 <span></span>
               </a>
             )}
-            {isSupabaseConfigured && (user || userId) && (
+            {identityContext && identityContext.identity.mode !== 'dev-headers' && (
               <button type="button" className="user-menu__item user-menu__item--danger" onClick={handleSignOut}>
                 <span className="user-menu__item-ic" aria-hidden="true"><LogOut size={12} /></span>
                 <strong>{t('userMenu.item.signOut')}</strong>

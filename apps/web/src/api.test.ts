@@ -1,15 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, __resetInFlightForTests } from './api'
+import { suspendApiRequestLifecycle } from './api-request-lifecycle'
 import { changeAppLanguage, initI18n } from './i18n'
 import { useWorkflowStore } from './store'
 
-let mockSessionToken: string | null = null
+let mockBrowserSession = false
 let mockActiveOrg = 'default'
 let mockSupabaseAccessToken: string | null = null
 vi.mock('./auth', () => ({
   getSupabaseAccessToken: async () => mockSupabaseAccessToken,
   getActiveOrg: () => mockActiveOrg,
-  getSessionToken: () => mockSessionToken,
+  hasBrowserSession: () => mockBrowserSession,
 }))
 
 function mockJsonResponse(status: number, payload: unknown) {
@@ -32,7 +33,7 @@ describe('api', () => {
     vi.restoreAllMocks()
     vi.useRealTimers()
     useWorkflowStore.getState().clearBudgetBlocked()
-    mockSessionToken = null
+    mockBrowserSession = false
     mockActiveOrg = 'default'
     mockSupabaseAccessToken = null
   })
@@ -75,8 +76,8 @@ describe('api', () => {
     await expect(api('/ping')).rejects.toThrow('La API de Janusly no está disponible')
   })
 
-  it('sends x-janusly-session instead of x-user-id when a session token is set', async () => {
-    mockSessionToken = 'js-session-token-abc'
+  it('uses credentials without exposing a session header for cookie-backed SSO', async () => {
+    mockBrowserSession = true
     const fetchMock = vi.fn<typeof fetch>(async () => new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
     vi.stubGlobal('fetch', fetchMock)
 
@@ -85,7 +86,8 @@ describe('api', () => {
     expect(fetchMock).toHaveBeenCalledOnce()
     const init = fetchMock.mock.calls[0][1] as RequestInit
     const headers = init.headers as Record<string, string>
-    expect(headers['x-janusly-session']).toBe('js-session-token-abc')
+    expect(init.credentials).toBe('include')
+    expect(headers['x-janusly-session']).toBeUndefined()
     expect(headers['x-org-id']).toBe('default')
     expect(headers['x-user-id']).toBeUndefined()
     expect(headers['Authorization']).toBeUndefined()
@@ -269,6 +271,25 @@ describe('api', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(userA).toEqual({ token: 'Bearer jwt-user-a' })
     expect(userB).toEqual({ token: 'Bearer jwt-user-b' })
+  })
+
+  it('cancels departing-identity requests before logout can revoke their token', async () => {
+    mockSupabaseAccessToken = 'jwt-departing-user'
+    const fetchMock = vi.fn<typeof fetch>(async (_input, init) => await new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal
+      if (!signal) return reject(new Error('missing lifecycle signal'))
+      if (signal.aborted) return reject(signal.reason)
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const request = api('/org/roles')
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    suspendApiRequestLifecycle()
+
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' })
+    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined
+    expect(requestInit?.signal?.aborted).toBe(true)
   })
 
   it('does not dedup when the request body differs', async () => {

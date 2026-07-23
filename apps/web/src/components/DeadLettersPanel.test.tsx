@@ -160,6 +160,38 @@ describe('<DeadLettersPanel />', () => {
     })
   })
 
+  it('renders a read-only queue without mutation affordances or shortcuts', async () => {
+    const onReplay = vi.fn()
+    const onResolve = vi.fn()
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('read-only')]))
+    render(
+      <DeadLettersPanel
+        onRefresh={vi.fn()}
+        onReplay={onReplay}
+        onResolve={onResolve}
+        canReplay={false}
+        canResolve={false}
+        canStartRuns={false}
+        canUseRecovery={false}
+        canReadAutoHealing={false}
+        canDecideAutoHealing={false}
+      />,
+    )
+
+    const row = await screen.findByTestId('dlq-row-read-only')
+    expect(screen.queryByTestId('dlq-select-toggle')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('dlq-replay-in-lab')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Retry$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Resolve$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /suggest/i })).not.toBeInTheDocument()
+
+    row.focus()
+    fireEvent.keyDown(row, { key: 'r' })
+    fireEvent.keyDown(row, { key: 'Enter', metaKey: true })
+    expect(onReplay).not.toHaveBeenCalled()
+    expect(onResolve).not.toHaveBeenCalled()
+  })
+
   it('labels a selected recovery drill with its actual recovery path', async () => {
     const row = mockDeadLetter('worker-drill')
     let recovered = false

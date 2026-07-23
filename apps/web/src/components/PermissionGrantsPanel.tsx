@@ -49,7 +49,7 @@ const ROLE_ORDER: Role[] = ["viewer", "editor", "admin"];
  *  the server-side validation so the operator sees the rule before submitting. */
 const ROLE_NAME_RE = /^[a-z0-9_-]{1,32}$/;
 
-export function PermissionGrantsPanel() {
+export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean } = {}) {
   const { t } = useT();
   const confirmDialog = useConfirm();
   const bumpPlatformVersion = useWorkflowStore((s) => s.bumpPlatformVersion);
@@ -267,7 +267,7 @@ export function PermissionGrantsPanel() {
                         <input
                           type="checkbox"
                           checked={checked}
-                          disabled={isMandatory}
+                          disabled={!canWrite || isMandatory}
                           onChange={() => toggleEditing(role.name, entry.key)}
                           aria-label={t("permissions.entryAria", { role: role.name, key: entry.key })}
                         />
@@ -284,7 +284,7 @@ export function PermissionGrantsPanel() {
                 type="button"
                 className="we-button we-button--primary"
                 onClick={() => saveRole(role)}
-                disabled={savingRole === role.name}
+                disabled={!canWrite || savingRole === role.name}
               >
                 <Save size={14} aria-hidden="true" /> {t("permissions.save")}
               </button>
@@ -293,6 +293,7 @@ export function PermissionGrantsPanel() {
                   type="button"
                   className="we-button we-button--ghost"
                   onClick={() => revertBuiltin(role)}
+                  disabled={!canWrite}
                 >
                   <RotateCcw size={14} aria-hidden="true" /> {t("permissions.revert")}
                 </button>
@@ -302,6 +303,7 @@ export function PermissionGrantsPanel() {
                   type="button"
                   className="we-button we-button--ghost"
                   onClick={() => deleteCustom(role)}
+                  disabled={!canWrite}
                   aria-label={t("permissions.deleteAria", { role: role.name })}
                 >
                   <Trash2 size={14} aria-hidden="true" /> {t("permissions.delete")}
@@ -312,7 +314,7 @@ export function PermissionGrantsPanel() {
         );
       })}
 
-      <article className="we-permissions-role-card we-permissions-role-card--new">
+      {canWrite && <article className="we-permissions-role-card we-permissions-role-card--new">
         <header>
           <h4>{t("permissions.add.heading")}</h4>
           <p>{t("permissions.add.intro")}</p>
@@ -380,7 +382,7 @@ export function PermissionGrantsPanel() {
             <Plus size={14} aria-hidden="true" /> {creating ? t("permissions.add.creating") : t("permissions.add.create")}
           </button>
         </form>
-      </article>
+      </article>}
     </section>
   );
 }

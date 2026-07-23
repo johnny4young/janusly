@@ -25,6 +25,10 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof BuilderSidebar>>
     aiHealth: null,
     workflowName: 'Test workflow',
     streamStatus: 'idle',
+    permissions: [
+      'workflows.read', 'workflows.write', 'runs.read', 'runs.start', 'recovery.read',
+      'ai.write', 'evals.read', 'packs.read', 'credentials.read', 'members.read',
+    ],
     onWorkflowNameChange: vi.fn(),
     onAdd: vi.fn(),
     onValidate: vi.fn(),
@@ -42,6 +46,16 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof BuilderSidebar>>
 describe('<BuilderSidebar />', () => {
   beforeEach(() => {
     window.localStorage.clear()
+  })
+
+  it('hides unauthorized destinations and disables write actions', () => {
+    renderSidebar({ permissions: ['workflows.read', 'runs.read'] })
+
+    expect(screen.queryByRole('button', { name: /Members/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Credentials/ })).not.toBeInTheDocument()
+    expect(screen.queryByText('AI operator')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Run' })).toBeDisabled()
   })
 
   it('keeps the header action strip busy until an async action settles', async () => {

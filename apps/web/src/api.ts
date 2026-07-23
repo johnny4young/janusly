@@ -15,7 +15,7 @@
  *   the same `(scope, method, path, body)` tuple while a request is in
  *   flight (and for up to `DEDUP_TTL_MS` after it resolves) share ONE
  *   network round-trip and receive the same payload object. Scope covers
- *   active org + locale + Janusly session token + Supabase access token
+ *   active org + locale + browser-session mode + Supabase access token
  *   because every one of those headers can change the server response.
  *   The Supabase JWT especially carries the user identity — without it
  *   in the key, a fast logout/login within the TTL window could serve
@@ -28,7 +28,11 @@
  *   post-write refreshes cannot reuse pre-write snapshots.
  */
 
-import { getActiveOrg, getSessionToken, getSupabaseAccessToken } from './auth'
+import { getActiveOrg, getSupabaseAccessToken, hasBrowserSession } from './auth'
+import {
+  currentApiRequestLifecycle,
+  resetApiRequestLifecycleForTests,
+} from './api-request-lifecycle'
 import { isV1ReadPath } from '@janusly/shared/src/api-contract'
 import { getResolvedLocale, t } from './i18n/runtime'
 import { useWorkflowStore } from './store'
@@ -48,15 +52,16 @@ type InFlightEntry = { promise: Promise<unknown>; expiresAt: number }
 const inFlight = new Map<string, InFlightEntry>()
 
 type ApiRequestScope = {
+  identityGeneration: number
   activeOrg: string
   resolvedLocale: string
-  sessionToken: string | null
+  browserSession: boolean
   /**
    * Supabase Bearer JWT (when the user is in Supabase mode, i.e. no
-   * SSO session token). Carries the user identity end-to-end — a
+   * active WorkOS browser session). Carries the user identity end-to-end — a
    * different access_token means a different user / refreshed token
    * and must NOT share a cached response with the prior call.
-   * `null` in SSO mode (sessionToken takes over) and in dev mode
+   * `null` in cookie-backed SSO mode and in dev mode
    * (no Supabase configured).
    */
   supabaseAccessToken: string | null
@@ -83,7 +88,7 @@ function dedupKey(scope: ApiRequestScope, method: string, path: string, body: Bo
       // let the fresh fetch run.
       return null
     }
-    return `${scope.activeOrg}:${scope.resolvedLocale}:${scope.sessionToken ?? ''}:${scope.supabaseAccessToken ?? ''}:${method}:${path}:${serialized}`
+    return `${scope.identityGeneration}:${scope.activeOrg}:${scope.resolvedLocale}:${scope.browserSession ? 'cookie' : ''}:${scope.supabaseAccessToken ?? ''}:${method}:${path}:${serialized}`
   } catch {
     return null
   }
@@ -139,17 +144,19 @@ export async function api(path: string, options: RequestInit = {}): Promise<unkn
   const method = (options.method ?? 'GET').toUpperCase()
   const hasSignal = options.signal !== undefined && options.signal !== null
   const isMutation = method !== 'GET' && method !== 'HEAD'
-  const sessionToken = getSessionToken()
+  const lifecycle = currentApiRequestLifecycle(options.signal)
+  const browserSession = hasBrowserSession()
   // Resolve the Supabase JWT BEFORE building the cache key so user
   // identity is part of the dedup tuple. In Supabase v2 the hot path
   // resolves synchronously from the in-memory cache (no network round
   // trip), so the extra `await` costs microseconds. SSO mode + dev
   // mode skip this branch entirely.
-  const supabaseAccessToken = !sessionToken ? await getSupabaseAccessToken() : null
+  const supabaseAccessToken = !browserSession ? await getSupabaseAccessToken() : null
   const requestScope: ApiRequestScope = {
+    identityGeneration: lifecycle.generation,
     activeOrg: getActiveOrg(),
     resolvedLocale: getResolvedLocale(),
-    sessionToken,
+    browserSession,
     supabaseAccessToken,
   }
   const key = hasSignal ? null : dedupKey(requestScope, method, path, options.body)
@@ -161,7 +168,7 @@ export async function api(path: string, options: RequestInit = {}): Promise<unkn
     }
   }
 
-  const promise = doApiFetch(path, options, requestScope).then((payload) => {
+  const promise = doApiFetch(path, { ...options, signal: lifecycle.signal }, requestScope).then((payload) => {
     if (isMutation) inFlight.clear()
     return payload
   })
@@ -198,14 +205,12 @@ export async function api(path: string, options: RequestInit = {}): Promise<unkn
  * the existing behavior.
  */
 async function doApiFetch(path: string, options: RequestInit, requestScope: ApiRequestScope): Promise<unknown> {
-  // SSO-issued Janusly session token wins over Supabase JWT — when the
-  // user logged in via WorkOS, the callback set this localStorage entry
-  // and the API's `extractJanuslySession` provider reads it as the 4th
-  // auth mode. Both tokens were resolved into `requestScope` by the
-  // outer `api()` so the cache key and these headers see the same
-  // snapshot (no second `supabase.auth.getSession()` call here).
-  const sessionToken = requestScope.sessionToken
+  // A probed HttpOnly WorkOS session wins over Supabase JWT auth. The cookie
+  // itself is never visible to JavaScript; `credentials: include` transports
+  // it and this boolean keeps the cache/auth-header decisions consistent.
+  const browserSession = requestScope.browserSession
   const token = requestScope.supabaseAccessToken
+  const method = (options.method ?? 'GET').toUpperCase()
 
   // `x-org-id` ships on every request — it's the scope hint the API
   // resolver uses to pick a membership when the user belongs to multiple
@@ -224,18 +229,18 @@ async function doApiFetch(path: string, options: RequestInit, requestScope: ApiR
     // explanation, message) come back in the user's UI locale. Other
     // routes ignore the header.
     'Accept-Language': requestScope.resolvedLocale,
-    ...(sessionToken ? { 'x-janusly-session': sessionToken } : {}),
-    ...(!sessionToken && token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(!sessionToken && !token ? { 'x-user-id': 'dev-user' } : {}),
+    ...(!browserSession && token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(!browserSession && !token ? { 'x-user-id': 'dev-user' } : {}),
+    ...(method !== 'GET' && method !== 'HEAD' ? { 'x-janusly-csrf': '1' } : {}),
     ...(options.headers ?? {})
   }
 
   let res: Response
-  const method = (options.method ?? 'GET').toUpperCase()
   const wirePath = versionedWirePath(path, method)
   try {
-    res = await fetch(`${API_URL}${wirePath}`, { ...options, headers })
+    res = await fetch(`${API_URL}${wirePath}`, { ...options, credentials: 'include', headers })
   } catch {
+    if (options.signal?.aborted) throw new DOMException('Request cancelled', 'AbortError')
     throw new Error(t('api.error.offline'))
   }
   const rawPayload = await res.json().catch(() => ({}))
@@ -336,16 +341,16 @@ export async function openRunEventStream(
   runId: string,
   options: { lastEventId?: string | null; signal?: AbortSignal } = {},
 ): Promise<Response> {
-  const sessionToken = getSessionToken()
-  const token = !sessionToken ? await getSupabaseAccessToken() : null
+  const lifecycle = currentApiRequestLifecycle(options.signal)
+  const browserSession = hasBrowserSession()
+  const token = !browserSession ? await getSupabaseAccessToken() : null
 
   const headers: Record<string, string> = {
     Accept: 'text/event-stream',
     'x-org-id': getActiveOrg(),
     'Accept-Language': getResolvedLocale(),
-    ...(sessionToken ? { 'x-janusly-session': sessionToken } : {}),
-    ...(!sessionToken && token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(!sessionToken && !token ? { 'x-user-id': 'dev-user' } : {}),
+    ...(!browserSession && token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(!browserSession && !token ? { 'x-user-id': 'dev-user' } : {}),
     ...(options.lastEventId ? { 'Last-Event-ID': options.lastEventId } : {}),
   }
 
@@ -353,9 +358,11 @@ export async function openRunEventStream(
   try {
     res = await fetch(`${API_URL}/runs/${encodeURIComponent(runId)}/stream`, {
       headers,
-      signal: options.signal,
+      signal: lifecycle.signal,
+      credentials: 'include',
     })
   } catch {
+    if (lifecycle.signal.aborted) throw new DOMException('Request cancelled', 'AbortError')
     throw new Error(t('api.error.offline'))
   }
   if (!res.ok || !res.body) {
@@ -384,6 +391,7 @@ function isFieldErrorEnvelope(value: unknown): value is { errors: string[] } {
  */
 export function __resetInFlightForTests(): void {
   inFlight.clear()
+  resetApiRequestLifecycleForTests()
 }
 
 /**
@@ -422,26 +430,28 @@ export async function downloadFromApi(
     typeof optionsOrFilename === 'string' ? { filename: optionsOrFilename } : optionsOrFilename ?? {}
   const method = options.method ?? 'GET'
   const filename = options.filename
+  const lifecycle = currentApiRequestLifecycle()
 
-  const sessionToken = getSessionToken()
-  const token = !sessionToken ? await getSupabaseAccessToken() : null
+  const browserSession = hasBrowserSession()
+  const token = !browserSession ? await getSupabaseAccessToken() : null
 
   const headers: Record<string, string> = {
     'x-org-id': getActiveOrg(),
-    ...(sessionToken ? { 'x-janusly-session': sessionToken } : {}),
-    ...(!sessionToken && token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(!sessionToken && !token ? { 'x-user-id': 'dev-user' } : {}),
+    ...(!browserSession && token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(!browserSession && !token ? { 'x-user-id': 'dev-user' } : {}),
   }
-  const init: RequestInit = { method, headers }
+  const init: RequestInit = { method, headers, signal: lifecycle.signal }
   if (method === 'POST') {
     headers['Content-Type'] = 'application/json'
+    headers['x-janusly-csrf'] = '1'
     init.body = JSON.stringify(options.body ?? {})
   }
 
   let res: Response
   try {
-    res = await fetch(`${API_URL}${path}`, init)
+    res = await fetch(`${API_URL}${path}`, { ...init, credentials: 'include' })
   } catch {
+    if (lifecycle.signal.aborted) throw new DOMException('Request cancelled', 'AbortError')
     throw new Error(t('api.error.offline'))
   }
 

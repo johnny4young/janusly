@@ -100,6 +100,33 @@ describe('<RunsPanel /> failed-node card', () => {
 
     expect(screen.getByTestId('failed-node-slow')).toHaveTextContent('1m 20s')
   })
+
+  it('keeps mutation controls out of the DOM when effective permissions deny them', () => {
+    render(
+      <RunsPanel
+        {...handlers}
+        activeRunId="run-1"
+        workflows={[]}
+        runs={[{ id: 'run-1', status: 'failed' }]}
+        runNodes={[
+          failedNode,
+          { nodeId: 'approval', status: 'waiting', stateJson: { waiting: { kind: 'approval' } } },
+        ]}
+        usage={{}}
+        canStartRuns={false}
+        canCancelRuns={false}
+        canReplayDeadLetters={false}
+        canResolveDeadLetters={false}
+        canUseRecovery={false}
+      />,
+    )
+
+    expect(screen.queryByText('Retry http_call')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('redrive-node-http_call')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('active-run-replay-in-lab')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Cancel run' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Approve and resume' })).not.toBeInTheDocument()
+  })
 })
 
 describe('<RunsPanel /> observability', () => {

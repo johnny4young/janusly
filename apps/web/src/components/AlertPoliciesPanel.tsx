@@ -175,7 +175,7 @@ function buildParameters(form: typeof EMPTY_FORM): Record<string, unknown> {
   }
 }
 
-export function AlertPoliciesPanel(): React.ReactElement {
+export function AlertPoliciesPanel({ canWrite = true }: { canWrite?: boolean } = {}): React.ReactElement {
   const { t } = useT()
   const confirmDialog = useConfirm()
   const platformVersion = useWorkflowStore((s) => s.platformVersion)
@@ -341,6 +341,7 @@ export function AlertPoliciesPanel(): React.ReactElement {
         <button
           type="button"
           className="we-btn we-btn--ghost we-btn--sm"
+          disabled={!canWrite}
           onClick={() => {
             if (showForm) cancelForm()
             else setShowForm(true)
@@ -703,7 +704,7 @@ export function AlertPoliciesPanel(): React.ReactElement {
               type="button"
               className="we-btn we-btn--primary we-btn--sm"
               onClick={submitPolicy}
-              disabled={submitting || form.name.trim().length === 0 || minFrequencyInvalid || stalledMinutesInvalid || warnDaysInvalid || cooldownInvalid}
+              disabled={!canWrite || submitting || form.name.trim().length === 0 || minFrequencyInvalid || stalledMinutesInvalid || warnDaysInvalid || cooldownInvalid}
             >
               {submitting
                 ? t('alerts.form.submitting')
@@ -751,6 +752,7 @@ export function AlertPoliciesPanel(): React.ReactElement {
                   type="button"
                   className="we-btn we-btn--ghost we-btn--sm"
                   onClick={() => startEdit(policy)}
+                  disabled={!canWrite}
                   aria-label={t('alerts.action.edit')}
                   data-testid="alert-policy-edit"
                 >
@@ -760,6 +762,7 @@ export function AlertPoliciesPanel(): React.ReactElement {
                   type="button"
                   className="we-btn we-btn--ghost we-btn--sm"
                   onClick={() => toggleEnabled(policy)}
+                  disabled={!canWrite}
                   aria-label={
                     policy.enabled ? t('alerts.action.disable') : t('alerts.action.enable')
                   }
@@ -770,6 +773,7 @@ export function AlertPoliciesPanel(): React.ReactElement {
                   type="button"
                   className="we-btn we-btn--ghost we-btn--sm"
                   onClick={() => deletePolicy(policy)}
+                  disabled={!canWrite}
                   aria-label={t('alerts.action.delete')}
                 >
                   <Trash2 size={14} />

@@ -62,6 +62,8 @@ type Command = {
   /** Display section grouping: nav (view jump) / action (do thing) / system (theme, sign out). */
   group: 'nav' | 'action' | 'system'
   shortcut?: string
+  /** Effective tenant permission required to expose this command. */
+  permission?: string
   run: (ctx: CommandContext) => void
 }
 
@@ -91,6 +93,8 @@ export type CommandPaletteProps = CommandContext & {
   onOpenWorkflow?: (id: string) => void
   /** Called when the operator picks a recipe from the palette. */
   onOpenRecipe?: (id: string) => void
+  /** Effective permissions from the selected organization. */
+  permissions?: readonly string[]
 }
 
 function readRecent(): CommandId[] {
@@ -114,28 +118,28 @@ function persistRecent(ids: CommandId[]): void {
 
 function buildCommands(docsUrl: string | null | undefined): Command[] {
   const navCommands: Command[] = [
-    { id: 'go.home', labelKey: 'palette.nav.home', icon: <Home size={14} />, group: 'nav', shortcut: '⌘1', run: ({ openTab }) => { openTab('home') } },
-    { id: 'go.copilot', labelKey: 'palette.nav.copilot', icon: <Sparkles size={14} />, group: 'nav', shortcut: '⌘2', run: ({ openTab }) => { openTab('copilot') } },
-    { id: 'go.workflows', labelKey: 'palette.nav.workflows', icon: <Database size={14} />, group: 'nav', run: ({ openTab }) => { openTab('workflows') } },
-    { id: 'go.inspector', labelKey: 'palette.nav.inspector', icon: <GitBranch size={14} />, group: 'nav', run: ({ openTab }) => { openTab('inspector') } },
-    { id: 'go.runs', labelKey: 'palette.nav.runs', icon: <Activity size={14} />, group: 'nav', run: ({ openTab }) => { openTab('runs') } },
-    { id: 'go.multiAgent', labelKey: 'palette.nav.multiAgent', icon: <Layers3 size={14} />, group: 'nav', run: ({ openTab }) => { openTab('multiAgent') } },
-    { id: 'go.operations', labelKey: 'palette.nav.operations', icon: <Gauge size={14} />, group: 'nav', run: ({ openTab }) => { openTab('operations') } },
-    { id: 'go.members', labelKey: 'palette.nav.members', icon: <Users size={14} />, group: 'nav', run: ({ openTab }) => { openTab('members') } },
-    { id: 'go.templates', labelKey: 'palette.nav.templates', icon: <Workflow size={14} />, group: 'nav', run: ({ openTab }) => { openTab('templates') } },
-    { id: 'go.marketplace', labelKey: 'palette.nav.marketplace', icon: <Boxes size={14} />, group: 'nav', run: ({ openTab }) => { openTab('marketplace') } },
-    { id: 'go.credentials', labelKey: 'palette.nav.credentials', icon: <KeyRound size={14} />, group: 'nav', run: ({ openTab }) => { openTab('credentials') } },
+    { id: 'go.home', labelKey: 'palette.nav.home', icon: <Home size={14} />, group: 'nav', shortcut: '⌘1', permission: 'recovery.read', run: ({ openTab }) => { openTab('home') } },
+    { id: 'go.copilot', labelKey: 'palette.nav.copilot', icon: <Sparkles size={14} />, group: 'nav', shortcut: '⌘2', permission: 'ai.write', run: ({ openTab }) => { openTab('copilot') } },
+    { id: 'go.workflows', labelKey: 'palette.nav.workflows', icon: <Database size={14} />, group: 'nav', permission: 'workflows.read', run: ({ openTab }) => { openTab('workflows') } },
+    { id: 'go.inspector', labelKey: 'palette.nav.inspector', icon: <GitBranch size={14} />, group: 'nav', permission: 'workflows.read', run: ({ openTab }) => { openTab('inspector') } },
+    { id: 'go.runs', labelKey: 'palette.nav.runs', icon: <Activity size={14} />, group: 'nav', permission: 'runs.read', run: ({ openTab }) => { openTab('runs') } },
+    { id: 'go.multiAgent', labelKey: 'palette.nav.multiAgent', icon: <Layers3 size={14} />, group: 'nav', permission: 'workflows.read', run: ({ openTab }) => { openTab('multiAgent') } },
+    { id: 'go.operations', labelKey: 'palette.nav.operations', icon: <Gauge size={14} />, group: 'nav', permission: 'recovery.read', run: ({ openTab }) => { openTab('operations') } },
+    { id: 'go.members', labelKey: 'palette.nav.members', icon: <Users size={14} />, group: 'nav', permission: 'members.read', run: ({ openTab }) => { openTab('members') } },
+    { id: 'go.templates', labelKey: 'palette.nav.templates', icon: <Workflow size={14} />, group: 'nav', permission: 'workflows.read', run: ({ openTab }) => { openTab('templates') } },
+    { id: 'go.marketplace', labelKey: 'palette.nav.marketplace', icon: <Boxes size={14} />, group: 'nav', permission: 'workflows.read', run: ({ openTab }) => { openTab('marketplace') } },
+    { id: 'go.credentials', labelKey: 'palette.nav.credentials', icon: <KeyRound size={14} />, group: 'nav', permission: 'credentials.read', run: ({ openTab }) => { openTab('credentials') } },
   ]
 
   const actionCommands: Command[] = [
-    { id: 'action.new', labelKey: 'palette.action.new', icon: <SquarePlus size={14} />, group: 'action', run: ({ onNew }) => { onNew() } },
-    { id: 'action.validate', labelKey: 'palette.action.validate', icon: <CheckCircle2 size={14} />, group: 'action', run: ({ onValidate }) => { onValidate() } },
-    { id: 'action.save', labelKey: 'palette.action.save', icon: <Save size={14} />, group: 'action', run: ({ onSave }) => { onSave() } },
-    { id: 'action.run', labelKey: 'palette.action.run', icon: <Play size={14} />, group: 'action', run: ({ onStart }) => { onStart() } },
-    { id: 'action.insertSnippet', labelKey: 'palette.action.insertSnippet', icon: <Layers size={14} />, group: 'action', run: ({ onInsertSnippet }) => { onInsertSnippet() } },
-    { id: 'action.recover', labelKey: 'palette.action.recover', icon: <ShieldAlert size={14} />, group: 'action', run: ({ openTab }) => { openTab('home') } },
-    { id: 'action.openRuns', labelKey: 'palette.action.openRuns', icon: <PlayCircle size={14} />, group: 'action', run: ({ openTab }) => { openTab('runs') } },
-    { id: 'action.openRecipes', labelKey: 'palette.action.openRecipes', icon: <Compass size={14} />, group: 'action', run: ({ openTab }) => { openTab('templates') } },
+    { id: 'action.new', labelKey: 'palette.action.new', icon: <SquarePlus size={14} />, group: 'action', permission: 'workflows.write', run: ({ onNew }) => { onNew() } },
+    { id: 'action.validate', labelKey: 'palette.action.validate', icon: <CheckCircle2 size={14} />, group: 'action', permission: 'workflows.write', run: ({ onValidate }) => { onValidate() } },
+    { id: 'action.save', labelKey: 'palette.action.save', icon: <Save size={14} />, group: 'action', permission: 'workflows.write', run: ({ onSave }) => { onSave() } },
+    { id: 'action.run', labelKey: 'palette.action.run', icon: <Play size={14} />, group: 'action', permission: 'runs.start', run: ({ onStart }) => { onStart() } },
+    { id: 'action.insertSnippet', labelKey: 'palette.action.insertSnippet', icon: <Layers size={14} />, group: 'action', permission: 'workflows.write', run: ({ onInsertSnippet }) => { onInsertSnippet() } },
+    { id: 'action.recover', labelKey: 'palette.action.recover', icon: <ShieldAlert size={14} />, group: 'action', permission: 'recovery.read', run: ({ openTab }) => { openTab('home') } },
+    { id: 'action.openRuns', labelKey: 'palette.action.openRuns', icon: <PlayCircle size={14} />, group: 'action', permission: 'runs.read', run: ({ openTab }) => { openTab('runs') } },
+    { id: 'action.openRecipes', labelKey: 'palette.action.openRecipes', icon: <Compass size={14} />, group: 'action', permission: 'workflows.read', run: ({ openTab }) => { openTab('templates') } },
   ]
 
   const systemCommands: Command[] = [
@@ -188,6 +192,7 @@ export function CommandPalette({
   recipes = [],
   onOpenWorkflow,
   onOpenRecipe,
+  permissions,
 }: CommandPaletteProps) {
   const { t } = useT()
   const safeDocsUrl = parseDocsUrl(docsUrl)
@@ -208,6 +213,7 @@ export function CommandPalette({
         labelKey: 'palette.dynamic.openWorkflow',
         icon: <Workflow size={14} />,
         group: 'nav',
+        permission: 'workflows.read',
         run: ({ openTab: jump }) => {
           if (onOpenWorkflow) onOpenWorkflow(wf.id); else jump('workflows')
         },
@@ -217,6 +223,7 @@ export function CommandPalette({
         labelKey: 'palette.dynamic.openRecipe',
         icon: <Compass size={14} />,
         group: 'nav',
+        permission: 'workflows.read',
         run: ({ openTab: jump }) => {
           if (onOpenRecipe) onOpenRecipe(rc.id); else jump('templates')
         },
@@ -225,8 +232,11 @@ export function CommandPalette({
     // Replace label resolution: dynamic items show their own name verbatim
     // rather than a translation key. We attach the name via a closure on
     // a separate map below.
-    return [...base, ...dynamicCommands]
-  }, [safeDocsUrl, workflows, recipes, onOpenWorkflow, onOpenRecipe])
+    const all = [...base, ...dynamicCommands]
+    return permissions === undefined
+      ? all
+      : all.filter((command) => !command.permission || permissions.includes(command.permission))
+  }, [safeDocsUrl, workflows, recipes, onOpenWorkflow, onOpenRecipe, permissions])
 
   // Map of dynamic display labels keyed by command id — keeps the
   // translation table untouched while letting the palette show real names.

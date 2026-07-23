@@ -54,8 +54,15 @@ describe('demand-loaded Supabase auth', () => {
     vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-public-key')
     const signOut = vi.fn(async () => ({ error: null }))
     runtime.createClient.mockReturnValue({ auth: { signOut } })
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (input) => {
+      if (String(input).endsWith('/auth/session')) {
+        return new Response(JSON.stringify({
+          userId: 'sso-user', email: 'sso@example.com', organizationId: 'org-sso',
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({ signedOut: true }), { status: 200 })
+    }))
     const auth = await import('./auth')
-    auth.setSessionToken('sso-session-token')
 
     await expect(auth.AuthProvider.getSession()).resolves.toEqual({
       data: { session: null },
@@ -66,6 +73,34 @@ describe('demand-loaded Supabase auth', () => {
     await expect(auth.AuthProvider.signOut()).resolves.toEqual({ error: null })
     expect(runtime.createClient).toHaveBeenCalledOnce()
     expect(signOut).toHaveBeenCalledOnce()
-    expect(auth.getSessionToken()).toBeNull()
+    expect(auth.hasBrowserSession()).toBe(false)
+  })
+
+  it('coalesces the SSO probe before the auth listener can subscribe to Supabase', async () => {
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://example.supabase.co')
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-public-key')
+    const onAuthStateChange = vi.fn()
+    runtime.createClient.mockReturnValue({ auth: { onAuthStateChange } })
+    let releaseProbe: (() => void) | undefined
+    const probeGate = new Promise<void>((resolve) => { releaseProbe = resolve })
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      await probeGate
+      return new Response(JSON.stringify({
+        userId: 'sso-user', email: 'sso@example.com', organizationId: 'org-sso',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const auth = await import('./auth')
+    const listener = vi.fn()
+
+    const sessionPromise = auth.AuthProvider.getSession()
+    const listenerPromise = auth.AuthProvider.onAuthStateChange(listener)
+    releaseProbe?.()
+    await Promise.all([sessionPromise, listenerPromise])
+
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(runtime.createClient).not.toHaveBeenCalled()
+    expect(onAuthStateChange).not.toHaveBeenCalled()
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ userId: 'sso-user', orgId: 'org-sso' }))
   })
 })

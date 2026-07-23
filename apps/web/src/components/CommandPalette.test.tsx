@@ -102,3 +102,18 @@ describe('<CommandPalette /> fuzzy search', () => {
     expect(input).toHaveAttribute('aria-activedescendant', screen.getAllByRole('option')[0]?.id)
   })
 })
+
+describe('<CommandPalette /> effective permissions', () => {
+  it('omits inaccessible navigation and mutation commands', () => {
+    render(<CommandPalette {...props({
+      permissions: ['workflows.read'],
+      workflows: [{ id: 'flow-1', name: 'Readable workflow' }],
+    })} />)
+
+    expect(screen.getByText('Go to Flows')).toBeInTheDocument()
+    expect(screen.getByText('Readable workflow')).toBeInTheDocument()
+    expect(screen.queryByText('Go to Recovery Center')).not.toBeInTheDocument()
+    expect(screen.queryByText('Save workflow')).not.toBeInTheDocument()
+    expect(screen.queryByText('Run workflow')).not.toBeInTheDocument()
+  })
+})
