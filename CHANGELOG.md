@@ -16,6 +16,10 @@ retroactively.
 
 ### Changed
 
+- Tenant actions now consume the selected organization's effective permission
+  set in both API enforcement and browser affordances. Custom roles no longer
+  inherit workflow, run, recovery, SCIM, or administration actions merely from
+  a rank-equivalent built-in role.
 - The persistent local lab can explicitly switch from its safe provider
   simulator to environment-backed GitHub, Slack, webhook, and email delivery.
   Secrets reach only API and worker containers, bootstrap-owned credential
@@ -47,6 +51,15 @@ retroactively.
 
 ### Added
 
+- Provider-neutral account bootstrap for signed-in users: global profiles,
+  first-organization creation, bounded organization selection, invitation
+  acceptance, organization switching, and truthful viewer/editor/admin UI.
+- Revocable WorkOS browser sessions backed by server rows and opaque HttpOnly
+  cookies, explicit CSRF enforcement, logout and organization rotation, plus
+  bounded maintenance cleanup of expired sessions and one-time SSO state.
+- An opt-in persistent local Supabase Auth profile on ports 7431/7432 with a
+  real owner/viewer/editor Playwright journey and persistence proof across a
+  complete Janusly stack restart.
 - A loopback-only persistent Docker integration lab with named Postgres,
   Redis, provider-evidence, and optional Ollama volumes; separate API and worker
   processes; one-shot migration/bootstrap; deterministic GitHub, Slack,
@@ -127,6 +140,11 @@ retroactively.
 
 ### Fixed
 
+- Identity and organization transitions now cancel prior in-flight API, SSE,
+  and download work, clear tenant-owned notifications and projections, and
+  ignore late bootstrap responses from a previous organization.
+- Local Supabase lifecycle commands no longer print credential-bearing start
+  or status output; status reports only service health and the local Auth URL.
 - The production web bootstrap no longer renders the initial workflow name as
   `undefined` when the App chunk evaluates before the lazy locale catalog.
 

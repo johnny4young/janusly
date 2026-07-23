@@ -46,10 +46,17 @@
     "local:smoke": "node scripts/local-stack-smoke.mjs",
     "local:failure-smoke": "node scripts/local-stack-smoke.mjs --failure=slack",
     "local:ui-smoke": "node scripts/local-stack-ui-smoke.mjs",
-    "local:verify": "node scripts/local-stack-smoke.mjs --restart"
+    "local:verify": "node scripts/local-stack-smoke.mjs --restart",
+    "local:auth:up": "node scripts/local-stack.mjs up --auth",
+    "local:auth:down": "node scripts/local-stack.mjs down --auth",
+    "local:auth:reset": "node scripts/local-stack.mjs reset --auth",
+    "local:auth:restart": "node scripts/local-stack.mjs restart --auth",
+    "local:auth:status": "node scripts/local-stack.mjs status --auth",
+    "local:auth:ui-smoke": "node scripts/local-identity-ui-smoke.mjs"
   },
   "devDependencies": {
     "oxc-parser": "^0.140.0",
-    "oxlint": "^1.74.0"
+    "oxlint": "^1.74.0",
+    "supabase": "2.109.1"
   }
 }

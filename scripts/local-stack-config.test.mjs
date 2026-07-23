@@ -25,7 +25,10 @@ test("persistent local stack separates runtime services and named data", () => {
 });
 
 test("local published ports are loopback-only", () => {
-  const published = [...compose.matchAll(/^\s+- "([^"]+:[^"]+)"$/gm)].map((match) => match[1]);
+  const portBlocks = [...compose.matchAll(/^\s{4}ports:\n((?:\s{6}- "[^"]+"\n?)+)/gm)];
+  const published = portBlocks.flatMap(([, block]) => (
+    [...block.matchAll(/^\s+- "([^"]+)"$/gm)].map((match) => match[1])
+  ));
   assert.ok(published.length >= 8);
   assert.ok(published.every((entry) => entry.startsWith("127.0.0.1:")), published.join("\n"));
 });

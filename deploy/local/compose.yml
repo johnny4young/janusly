@@ -3,9 +3,15 @@ name: janusly-local
 x-app-environment: &app-environment
   DATABASE_URL: postgres://postgres:${JANUSLY_LOCAL_POSTGRES_PASSWORD:-janusly-local}@postgres:5432/workflow
   REDIS_URL: redis://redis:6379
-  ALLOW_DEV_AUTH_HEADERS: "true"
+  ALLOW_DEV_AUTH_HEADERS: ${JANUSLY_LOCAL_ALLOW_DEV_AUTH_HEADERS:-true}
   API_ALLOWED_ORIGINS: ${JANUSLY_LOCAL_WEB_ORIGINS:-http://localhost:7310,http://127.0.0.1:7310}
+  JANUSLY_WEB_BASE_URL: ${JANUSLY_LOCAL_WEB_URL:-http://localhost:7310}
+  JANUSLY_SESSION_COOKIE_SECURE: ${JANUSLY_SESSION_COOKIE_SECURE:-false}
   JANUSLY_RESUME_TOKEN_SECRET: ${JANUSLY_LOCAL_RESUME_TOKEN_SECRET:-local-resume-token-secret-change-before-sharing}
+  JANUSLY_IDENTITY_RETENTION_CRON: "${JANUSLY_IDENTITY_RETENTION_CRON:-0 3 * * *}"
+  JANUSLY_IDENTITY_SESSION_RETENTION_DAYS: ${JANUSLY_IDENTITY_SESSION_RETENTION_DAYS:-7}
+  SUPABASE_URL: ${JANUSLY_LOCAL_SUPABASE_INTERNAL_URL:-}
+  SUPABASE_SERVICE_ROLE_KEY: ${JANUSLY_LOCAL_SUPABASE_SERVICE_ROLE_KEY:-}
   JANUSLY_LOCAL_STACK: "true"
   JANUSLY_LOCAL_ORG_ID: ${JANUSLY_LOCAL_ORG_ID:-default}
   JANUSLY_LOCAL_INTEGRATION_SIMULATOR: ${JANUSLY_LOCAL_INTEGRATION_SIMULATOR:-true}
@@ -107,6 +113,8 @@ services:
     ports:
       - "127.0.0.1:${JANUSLY_LOCAL_API_PORT:-7311}:3001"
       - "127.0.0.1:${JANUSLY_LOCAL_API_METRICS_PORT:-9464}:9464"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_healthy
@@ -145,6 +153,8 @@ services:
       dockerfile: Dockerfile.web
       args:
         VITE_API_URL: ${JANUSLY_LOCAL_API_URL:-http://localhost:7311}
+        VITE_SUPABASE_URL: ${JANUSLY_LOCAL_SUPABASE_PUBLIC_URL:-}
+        VITE_SUPABASE_ANON_KEY: ${JANUSLY_LOCAL_SUPABASE_ANON_KEY:-}
         JANUSLY_BUILD_ID: ${JANUSLY_BUILD_ID:-local-docker}
     image: janusly-local-web
     restart: unless-stopped

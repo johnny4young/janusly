@@ -15,6 +15,8 @@ so containers can reach the bundled simulator.
 ```mermaid
 flowchart LR
   Browser["Browser :7310"] --> API["API :7311"]
+  Browser -. real local login .-> Supabase["Optional Supabase Auth :7431"]
+  API -. token verification .-> Supabase
   API --> PG[("Postgres 18")]
   API --> Redis[("Redis 8")]
   Worker["Workflow worker"] --> PG
@@ -68,6 +70,42 @@ to converge on one run. `local:verify` additionally restarts Postgres, Redis,
 the simulator, API, worker, and web, then reads the original workflow and run
 again. No public GitHub, Slack, webhook, or email endpoint is contacted.
 
+## Real Local Identity Profile
+
+The default lab deliberately keeps fast `dev-headers` authentication. To test
+the actual product login boundary, start the opt-in Supabase profile instead:
+
+```bash
+pnpm local:auth:up
+pnpm local:auth:ui-smoke
+```
+
+This starts the pinned Supabase CLI stack from `supabase/config.toml`, with only
+the local Postgres/Auth/API gateway services required by Janusly. Supabase Auth
+is available on loopback port `7431` and its private database on `7432`; the
+Janusly web/API remain on `7310`/`7311`. The orchestrator reads generated
+anonymous and service-role credentials from `supabase status -o env`, passes
+them only to the web build and API container that require them, and disables
+`ALLOW_DEV_AUTH_HEADERS` for this profile. Generated credentials are never
+written to a tracked file.
+
+The browser smoke creates two real email/password identities, creates and
+switches organizations, accepts an invitation, verifies viewer/editor action
+availability, restarts Supabase plus the Janusly services, signs in again, and
+captures persistence screenshots. Email confirmation is disabled only in the
+local Supabase config so tests do not depend on SMTP.
+
+```bash
+pnpm local:auth:status
+pnpm local:auth:restart
+pnpm local:auth:down    # preserves both Janusly and Supabase local data
+pnpm local:auth:reset   # destructive: removes both data sets
+```
+
+Use the `local:auth:*` and ordinary `local:*` lifecycle families consistently
+for one run. The ordinary provider smoke commands use dev headers and therefore
+intentionally do not run against the real-identity profile.
+
 ## Lifecycle And Persistence
 
 ```bash
@@ -90,6 +128,10 @@ The Compose project owns four named volumes:
 
 `local:down` is the normal stop command. Use `local:reset` only when a clean,
 destructive test environment is intended.
+
+The optional identity profile adds Supabase CLI-managed local Docker volumes.
+`local:auth:down` uses the CLI's normal backup-preserving stop; only
+`local:auth:reset` passes the destructive no-backup boundary.
 
 ## Provider Simulator
 
@@ -191,8 +233,9 @@ configuration API. Starting Ollama alone never enables persistent memory.
 - GitHub, Slack, webhook, and email simulation is opt-in and process-gated.
 - External provider delivery requires an explicit simulator opt-out and local
   secret values; no smoke command runs against that mode.
-- `ALLOW_PRIVATE_HTTP_TARGETS=true` and development auth are acceptable only
-  inside this loopback lab; do not copy them into a public deployment.
+- `ALLOW_PRIVATE_HTTP_TARGETS=true` and default-profile development auth are
+  acceptable only inside this loopback lab; the Supabase profile disables dev
+  headers. Do not copy either local posture into a public deployment.
 - Real credentials still belong in environment variables or a vault, never in
   workflow JSON or tenant configuration.
 
