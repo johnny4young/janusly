@@ -14,20 +14,25 @@ import { composeGenerationSystemPrompt, GENERATE_WORKFLOW_SYSTEM_PROMPT } from "
 import { parseGeneratedWorkflow } from "./ai-generate-freejson";
 
 describe("generate-workflow system prompt", () => {
-  it("documents the free-JSON 13-node selection (11 base + direct parallel_fork/join)", () => {
-    // free-JSON can emit the two structural fan-out/fan-in types directly;
-    // remaining runtime-only types either use Pass-2 placeholder promotion
-    // or stay manual Inspector promotions.
-    expect(promptsSource).toContain("'loop', 'parallel_fork', 'join'");
+  it("documents the free-JSON 18-node selection (11 base + fork/join + 5 triggers)", () => {
+    // free-JSON can emit the two structural fan-out/fan-in types AND the five
+    // event-driven trigger types directly; remaining runtime-only types either
+    // use Pass-2 placeholder promotion or stay manual Inspector promotions.
+    expect(promptsSource).toContain("'loop', 'parallel_fork', 'join', 'webhook_received', 'email_received', 'file_dropped', 'mcp_server_event', 'pagerduty_incident'");
     expect(promptsSource).toContain("The platform supports more runtime types outside this direct-emission subset");
     expect(promptsSource).toContain("Pass 2 auto-promotes the wired families");
     expect(promptsSource).toContain("the remaining operator-wired types (multi_agent");
-    expect(promptsSource).toContain("email_received, file_dropped, mcp_server_event");
+    expect(promptsSource).toContain("TRIGGER RULE");
+    expect(promptsSource).toContain("NEVER invent URLs for triggers");
+    expect(promptsSource).toContain("SNOOZE-VS-WAIT");
+    expect(promptsSource).toContain("durationSeconds");
     expect(promptsSource).toContain("FORK/JOIN RULE");
     expect(promptsSource).toContain("Use 'human_form' when the prompt asks a person to provide structured data");
     expect(promptsSource).toContain("use noop placeholders for teams/crews/groups that need multi_agent promotion");
     // parallel_fork/join are no longer in the operator-only noop list.
     expect(promptsSource).not.toContain("agent_reflection, parallel_fork, join, schedule");
+    // The trigger types are no longer in the operator-wired list either.
+    expect(promptsSource).not.toContain("email_received, file_dropped, mcp_server_event) are added by the operator");
   });
 
   it("publishes the complete shared expression grammar", () => {
@@ -89,6 +94,88 @@ describe("generate-workflow system prompt", () => {
     // explicitly call out "schedule a meeting" style on-demand intents
     // so the LLM doesn't tag them as cron.
     expect(promptsSource).toContain("schedule a meeting");
+  });
+});
+
+describe("free-JSON trigger emission + nested tool inputs", () => {
+  it("parses a directly emitted pagerduty_incident trigger with a nested workingHours input", () => {
+    const parsed = parseGeneratedWorkflow(JSON.stringify({
+      dslVersion: "1.0",
+      id: "pagerduty_off_hours_llm",
+      name: "PagerDuty off-hours auto-ack",
+      nodes: [
+        { id: "on_pagerduty", type: "pagerduty_incident", config: { webhookCredential: "pagerduty-webhook" } },
+        {
+          id: "evaluate_policy",
+          type: "tool",
+          config: {
+            tool: "pagerduty.policy.evaluate",
+            input: {
+              eventType: "{{context.on_pagerduty.output.event.eventType}}",
+              occurredAt: "{{context.on_pagerduty.output.event.occurredAt}}",
+              receivedAt: "{{context.on_pagerduty.output.event.receivedAt}}",
+              incident: "{{context.load_incident.output.result.incident}}",
+              pagerDutyUserId: "PUSER123",
+              timeZone: "America/Bogota",
+              // The nested-input payoff: an array of flat objects with scalar-array
+              // leaves is representable in AI-emitted tool input.
+              workingHours: [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" }],
+            },
+          },
+        },
+      ],
+      edges: [{ from: "on_pagerduty", to: "evaluate_policy" }],
+    }));
+
+    expect(parsed).not.toBeNull();
+    expect(parsed!.nodes[0]).toMatchObject({ type: "pagerduty_incident" });
+    expect(parsed!.nodes[1]!.config).toMatchObject({
+      input: { workingHours: [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" }] },
+    });
+    // The parsed draft survives sanitize as a REAL trigger (config passes the
+    // authoritative TRIGGER_CONFIG_SCHEMAS parse) and full engine validation.
+    const sanitized = sanitizeAiWorkflow(parsed!);
+    expect(sanitized.nodes[0]).toMatchObject({ type: "pagerduty_incident" });
+    expect(validateWorkflow(sanitized)).toEqual({ valid: true, issues: [] });
+  });
+
+  it("demotes an under-specified trigger to a noop placeholder, preserving the intent id", () => {
+    // Missing webhookCredential fails the authoritative PagerDuty config
+    // schema → the node demotes to the operator-promotable placeholder
+    // instead of failing the whole draft (same posture as empty transform).
+    const parsed = parseGeneratedWorkflow(JSON.stringify({
+      dslVersion: "1.0",
+      id: "pagerduty_partial",
+      name: "Partial trigger draft",
+      nodes: [
+        { id: "on_pagerduty", type: "pagerduty_incident", config: {} },
+        { id: "notify", type: "noop", config: {} },
+      ],
+      edges: [{ from: "on_pagerduty", to: "notify" }],
+    }));
+
+    expect(parsed).not.toBeNull();
+    const sanitized = sanitizeAiWorkflow(parsed!);
+    expect(sanitized.nodes[0]).toMatchObject({ id: "on_pagerduty", type: "noop", config: {} });
+    expect(validateWorkflow(sanitized)).toEqual({ valid: true, issues: [] });
+  });
+
+  it("keeps a complete webhook_received trigger emitted with a derived endpointKey", () => {
+    const parsed = parseGeneratedWorkflow(JSON.stringify({
+      dslVersion: "1.0",
+      id: "billing_events_flow",
+      name: "Billing events",
+      nodes: [
+        { id: "on_billing_event", type: "webhook_received", config: { endpointKey: "billing_events" } },
+        { id: "record", type: "transform", config: { mapping: { event: "{{context.on_billing_event.output.event.body}}" } } },
+      ],
+      edges: [{ from: "on_billing_event", to: "record" }],
+    }));
+
+    expect(parsed).not.toBeNull();
+    const sanitized = sanitizeAiWorkflow(parsed!);
+    expect(sanitized.nodes[0]).toMatchObject({ type: "webhook_received", config: { endpointKey: "billing_events" } });
+    expect(validateWorkflow(sanitized)).toEqual({ valid: true, issues: [] });
   });
 });
 

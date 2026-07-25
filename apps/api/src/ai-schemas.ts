@@ -266,17 +266,20 @@ export const AiGenerationWorkflowSchema = z.object({
 
 // ---------------------------------------------------------------------------
 // free-JSON extension: two STRUCTURAL fan-out/fan-in node types the model can
-// express directly (it designs the branches itself, so it has all the info —
-// unlike subworkflow / mcp_tool / triggers, which need org-specific ids the
-// model can't know and stay `noop` placeholders).
+// express directly (it designs the branches itself, so it has all the info),
+// plus the five event-driven trigger types (further down — credential /
+// endpoint identifiers are operator-facing names the prompt teaches, and a
+// malformed config demotes to the noop placeholder in `sanitizeAiWorkflow`).
+// `subworkflow` / `mcp_tool` still need org-specific ids the model can't know
+// and stay `noop` placeholders.
 //
 // Why a SEPARATE union instead of widening `AiNodeSchema`: the 11-branch cap
 // is Anthropic's compiled-grammar limit, which only bites `constrained` mode
 // (`generateObject` sends the schema to the provider; 12+ branches → "compiled
 // grammar too large"). free-JSON validates the model's JSON text SERVER-SIDE,
-// so it has no grammar limit and can use this wider 13-branch union. Keeping
-// the two unions separate lets `constrained` stay grammar-safe at 11 while
-// free-JSON (the default) gains direct fork/join.
+// so it has no grammar limit and can use this wider union. Keeping the two
+// unions separate lets `constrained` stay grammar-safe at 11 while free-JSON
+// (the default) gains direct fork/join + triggers.
 // ---------------------------------------------------------------------------
 
 /** `parallel_fork` for free-JSON direct emission. `branches` mirrors the
@@ -354,13 +357,101 @@ const AiHttpNodeFreeJson = AiHttpNode.extend({
   config: AiHttpConfigBase.extend({ retry: AiRetryConfigDraft }),
 });
 
-const AiToolNodeFreeJson = AiToolNode.extend({
-  config: AiToolConfigBase.extend({ retry: AiRetryConfigDraft }),
+// Free-JSON tool inputs allow ONE extra nesting level beyond the constrained
+// scalars: arrays of flat objects and objects of flat objects, so real tool inputs
+// like `workingHours: [{ days: [1,2,3,4,5], start: "09:00", end: "17:00" }]`
+// are representable. Depth stays bounded (no recursion) and per-tool Zod
+// schemas in `tool-registry.ts` remain the authoritative contract at the
+// strict consumption surfaces. Constrained mode keeps the scalar-only base —
+// this union is validated server-side, never sent to a provider grammar.
+const AiToolInputFlatValue = z.union([AiToolInputScalar, z.array(AiToolInputScalar)]);
+const AiToolInputFlatObject = z.record(z.string(), AiToolInputFlatValue);
+const AiToolInputValueFreeJson = z.union([
+  AiToolInputScalar,
+  z.array(z.union([AiToolInputScalar, AiToolInputFlatObject])),
+  z.record(z.string(), z.union([AiToolInputFlatValue, AiToolInputFlatObject])),
+]);
+
+const AiToolConfigBaseFreeJson = AiToolConfigBase.extend({
+  input: z.record(z.string(), AiToolInputValueFreeJson).optional(),
 });
 
-/** 13-branch node union for free-JSON validation: the 11 constrained shapes
- *  (http/tool widened with `retry`) plus `parallel_fork` + `join`. NOT sent
- *  to any provider — used only by `parseGeneratedWorkflow` server-side. */
+const AiToolNodeFreeJson = AiToolNode.extend({
+  config: AiToolConfigBaseFreeJson.extend({ retry: AiRetryConfigDraft }),
+});
+
+// ---------------------------------------------------------------------------
+// Free-JSON-only trigger emission: the five event-driven trigger types
+// are directly emittable so a prompt like "when a pager fires…" yields a real
+// trigger root instead of an operator-promoted noop. Draft posture: every
+// config field is optional AND `.catch(undefined)`-tolerant so a partially
+// filled trigger never fails the whole workflow parse; `sanitizeAiWorkflow`
+// then demotes any config that fails the authoritative
+// `TRIGGER_CONFIG_SCHEMAS` parse to the existing noop placeholder (the
+// operator completes it in the Inspector). Constrained mode keeps the
+// TRIGGER-INTENT NAMING noop path — these branches are server-side only.
+// ---------------------------------------------------------------------------
+const aiDraftString = z.string().optional().catch(undefined);
+const aiDraftBoolean = z.boolean().optional().catch(undefined);
+const aiDraftStringArray = z.array(z.string()).optional().catch(undefined);
+const aiDraftRateLimit = z.number().int().min(1).optional().catch(undefined);
+
+const AiWebhookReceivedNode = z.object({
+  id: z.string().min(1),
+  type: z.literal("webhook_received"),
+  config: z.object({
+    endpointKey: aiDraftString,
+    rateLimitPerMin: aiDraftRateLimit,
+  }),
+});
+
+const AiEmailReceivedNode = z.object({
+  id: z.string().min(1),
+  type: z.literal("email_received"),
+  config: z.object({
+    aliasKey: aiDraftString,
+    dkimRequired: aiDraftBoolean,
+    fromDomains: aiDraftStringArray,
+    rateLimitPerMin: aiDraftRateLimit,
+  }),
+});
+
+const AiFileDroppedNode = z.object({
+  id: z.string().min(1),
+  type: z.literal("file_dropped"),
+  config: z.object({
+    bucket: aiDraftString,
+    prefix: aiDraftString,
+    extensions: aiDraftStringArray,
+    rateLimitPerMin: aiDraftRateLimit,
+  }),
+});
+
+const AiMcpServerEventNode = z.object({
+  id: z.string().min(1),
+  type: z.literal("mcp_server_event"),
+  config: z.object({
+    connectionAlias: aiDraftString,
+    resourceUri: aiDraftString,
+    eventTypes: aiDraftStringArray,
+    rateLimitPerMin: aiDraftRateLimit,
+  }),
+});
+
+const AiPagerDutyIncidentNode = z.object({
+  id: z.string().min(1),
+  type: z.literal("pagerduty_incident"),
+  config: z.object({
+    webhookCredential: aiDraftString,
+    rateLimitPerMin: aiDraftRateLimit,
+  }),
+});
+
+/** 18-branch node union for free-JSON validation: the 11 constrained shapes
+ *  (http/tool widened with `retry`; tool inputs one level deeper), the
+ *  structural `parallel_fork` + `join` pair, and the five event-driven
+ *  trigger types. NOT sent to any provider — used only by
+ *  `parseGeneratedWorkflow` server-side. */
 export const AiNodeSchemaFreeJson = z.discriminatedUnion("type", [
   AiNoopNode,
   AiHttpNodeFreeJson,
@@ -375,6 +466,11 @@ export const AiNodeSchemaFreeJson = z.discriminatedUnion("type", [
   AiLoopNode,
   AiParallelForkNode,
   AiJoinNode,
+  AiWebhookReceivedNode,
+  AiEmailReceivedNode,
+  AiFileDroppedNode,
+  AiMcpServerEventNode,
+  AiPagerDutyIncidentNode,
 ]);
 
 /** Workflow envelope used by the default free-JSON generation path. Same

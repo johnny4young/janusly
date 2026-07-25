@@ -25,6 +25,7 @@ import { composeGenerationSystemPrompt, GENERATE_WORKFLOW_SYSTEM_PROMPT } from "
 import { loadOperatorGuidance } from "../ai-operator-guidance";
 import { fallbackWorkflowForPrompt, orgLlmRuntime, resolveSurfaceModel, sanitizeAiWorkflow } from "../ai-runtime";
 import { AiGenerationWorkflowSchema } from "../ai-schemas";
+import { compilePagerDutyFlow } from "../pagerduty-flow";
 import { generateWorkflowContract } from "../api-contracts";
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
@@ -45,13 +46,55 @@ export const aiGenerateRoutes: Route[] = [
       if (promptText.length > orgConfig.ai.promptMaxChars) {
         return sendError(res, "ai_prompt_too_long", `prompt exceeds {{maxChars}} characters`, 413, { maxChars: orgConfig.ai.promptMaxChars });
       }
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: orgConfig.ai.rateLimitPerMin });
+
+      // PagerDuty off-hours has one canonical deterministic shape
+      // (`compilePagerDutyFlow`). It used to SHORT-CIRCUIT here before the
+      // LLM ever saw the prompt; the LLM path now owns matching prompts
+      // whenever a provider is configured — connector knowledge lives in the
+      // generation catalog/exemplars, and the compiled recipe serves as the
+      // $0 deterministic fallback (no provider, budget-blocked, or a degraded
+      // LLM attempt) and as the eval shape baseline. `mode:"fallback"`
+      // without `aiError` stays the wire contract for local generation that
+      // attempted no LLM call.
+      const pagerDutyFlow = compilePagerDutyFlow(promptText);
+      const respondWithPagerDutyRecipe = async (flow: Workflow, extra: { aiError?: string } = {}) => {
+        const workflow = sanitizeAiWorkflow(flow);
+        // Feed the few-shot memory from the deterministic path too so the
+        // LLM path can learn the canonical shape (consent-gated + fire-and-
+        // forget inside the helper). The old short-circuit skipped this,
+        // which starved generation memory of the one shape we most want it
+        // to reproduce.
+        void recordGenerationExemplar({ orgId: auth.orgId, workflowId: workflow.id, prompt: promptText, workflow });
+        await auditAction(auth, "ai.workflow.generated", {
+          targetType: "ai",
+          targetId: workflow.id,
+          metadata: {
+            mode: "fallback",
+            generationMode: "deterministic_recipe",
+            recipe: "pagerduty_off_hours",
+            ...(extra.aiError ? { error: extra.aiError } : {}),
+          },
+        });
+        return sendJson(res, {
+          mode: "fallback",
+          ...(extra.aiError ? { aiError: extra.aiError } : {}),
+          ...workflow,
+        });
+      };
       // No workflowId yet — /ai/generate-workflow drafts a brand new flow.
       // Only the org-level budget gate applies on this path.
       const budgetGate = await gateBudget({ orgId: auth.orgId, userId: auth.userId, action: "ai.workflow.generated" });
-      if (budgetGate.blocked) return sendJson(res, budgetBlockedResponse(budgetGate.envelope), 402);
-      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: orgConfig.ai.rateLimitPerMin });
+      if (budgetGate.blocked) {
+        // The recipe spends nothing, so a budget-blocked org still gets the
+        // deterministic starter instead of a 402 for this prompt family —
+        // parity with the earlier short-circuit, which never hit the gate.
+        if (pagerDutyFlow) return respondWithPagerDutyRecipe(pagerDutyFlow);
+        return sendJson(res, budgetBlockedResponse(budgetGate.envelope), 402);
+      }
       const fallbackWorkflow = fallbackWorkflowForPrompt(promptText);
       if (!llm) {
+        if (pagerDutyFlow) return respondWithPagerDutyRecipe(pagerDutyFlow);
         // No provider configured. Audit the fallback for observability, but
         // do NOT put `aiError` on the RESPONSE body: `pnpm evals`
         // (`scripts/run-evals.mjs`) skips `requiresMode:"ai"` cases only when
@@ -282,6 +325,10 @@ export const aiGenerateRoutes: Route[] = [
         }, budgetGate));
       } catch (err) {
         const message = err instanceof Error ? err.message : "AI request failed";
+        // Degraded LLM attempt on a recipe-shaped prompt: the compiled
+        // PagerDuty starter beats the generic template fallback. `aiError`
+        // stays on the body (an LLM call WAS attempted) and on the audit row.
+        if (pagerDutyFlow) return respondWithPagerDutyRecipe(pagerDutyFlow, { aiError: message });
         await auditAction(auth, "ai.workflow.generated", { targetType: "ai", targetId: fallbackWorkflow?.id, metadata: { mode: "fallback", error: message, generationMode: orgConfig.ai.generationMode, repairAttempts, candidateCount, validCandidates, bonBackoff, exemplarCount: exemplars.count, exemplarIds: exemplars.ids } });
         return sendJson(res, withBudgetWarning({
           mode: "fallback",

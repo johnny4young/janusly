@@ -27,7 +27,13 @@ import {
 import type { DecisionCandidate } from "@janusly/domain";
 import { validateExpression } from "@janusly/engine/src/expression";
 import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
-import { WorkflowInputSchema, WorkflowSchema, type Workflow } from "@janusly/shared";
+import {
+  TRIGGER_CONFIG_SCHEMAS,
+  WorkflowInputSchema,
+  WorkflowSchema,
+  isTriggerNodeType,
+  type Workflow,
+} from "@janusly/shared";
 
 import { httpError, asNumber, asRecord } from "./http";
 import { workflowTemplates } from "./templates";
@@ -150,6 +156,20 @@ export function sanitizeAiWorkflow(workflow: Workflow): Workflow {
         (parsed.data.type === "object" &&
           (!parsed.data.properties || Object.keys(parsed.data.properties).length === 0));
       if (isEmpty) return { ...node, type: "noop" as const, config: {} };
+      return node;
+    }
+    // Draft-generation tolerance for AI-emitted trigger nodes (free-JSON
+    // emits the five event-driven trigger types directly; see
+    // `AiNodeSchemaFreeJson`). The draft schemas accept every config field as
+    // optional so a partially filled trigger survives the parse; here the
+    // AUTHORITATIVE per-trigger schema decides: a config that passes stays a
+    // real trigger root, one that fails demotes to the same operator-
+    // promotable `noop` placeholder as the other under-specified drafts (the
+    // trigger-intent node id is preserved, so the Inspector promotion path
+    // keeps working). Never fail the whole draft over a trigger config.
+    if (isTriggerNodeType(node.type)) {
+      const parsed = TRIGGER_CONFIG_SCHEMAS[node.type].safeParse(node.config ?? {});
+      if (!parsed.success) return { ...node, type: "noop" as const, config: {} };
       return node;
     }
     if (node.type !== "condition") return node;
