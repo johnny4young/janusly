@@ -2,7 +2,12 @@
 
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { ensureLocalEnv, getLocalStackSettings, localEnvFile } from "./local-env.mjs";
+import {
+  ensureLocalCredentialMasterKey,
+  ensureLocalEnv,
+  getLocalStackSettings,
+  localEnvFile,
+} from "./local-env.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const composeFile = "deploy/local/compose.yml";
@@ -153,6 +158,7 @@ async function waitFor(url, timeoutMs = 240_000) {
 }
 
 await ensureLocalEnv();
+await ensureLocalCredentialMasterKey();
 const settings = await getLocalStackSettings();
 
 async function waitForStack() {

@@ -24,20 +24,18 @@ import type { Workflow } from "@janusly/shared";
 import {
   listCredentialsForOrg,
   listConnections,
+  hasCredentialSecretRef,
   readCredentialNameFromConfig,
   type SecretRefResolver,
 } from "@janusly/data";
 
 /**
- * Production resolver shared by the credential-health route and every
- * readiness call site that wires the credential sidecar. The data layer
- * NEVER reads ``process.env`` directly; this function is the single
- * chokepoint and is the only place that has to know how a missing /
- * blank env var is interpreted.
+ * Production resolver shared by credential health and readiness. Managed
+ * references decrypt through the central store; legacy environment references
+ * remain supported by the same org-aware async contract.
  */
-export function productionSecretRefResolver(envVarName: string): boolean {
-  const value = process.env[envVarName];
-  return typeof value === "string" && value.trim().length > 0;
+export async function productionSecretRefResolver(secretRef: string, orgId: string): Promise<boolean> {
+  return hasCredentialSecretRef(orgId, secretRef);
 }
 
 /**
@@ -158,14 +156,14 @@ export async function getCredentialReadinessIssues(
       }
       continue;
     }
-    if (!resolver(secretRef)) {
+    if (!(await resolver(secretRef, orgId))) {
       for (const nodeId of nodeIds) {
         issues.push({
           code: "credential_missing",
           severity: "warn",
           message: `Credential "${name}" has no resolvable secret in this environment.`,
           nodeId,
-          suggestion: "Verify the operator has set the env var the credential maps to before the run starts.",
+          suggestion: "Verify the credential has an active managed value or a resolvable legacy environment reference before the run starts.",
         });
       }
     }
@@ -187,7 +185,7 @@ export async function getCredentialReadinessIssues(
     }
     const missingKeys: string[] = [];
     for (const [key, ref] of Object.entries(connection.envRefs)) {
-      if (!resolver(ref.name)) missingKeys.push(key);
+      if (!(await resolver(ref.name, orgId))) missingKeys.push(key);
     }
     if (missingKeys.length > 0) {
       for (const nodeId of nodeIds) {
@@ -196,7 +194,7 @@ export async function getCredentialReadinessIssues(
           severity: "warn",
           message: `MCP connection "${alias}" has env references whose secrets don't resolve in this environment (${missingKeys.length} of ${Object.keys(connection.envRefs).length}).`,
           nodeId,
-          suggestion: "Verify the env vars listed in the MCP connection settings are set before this workflow runs in production.",
+          suggestion: "Verify the legacy environment references listed in the MCP connection settings are set before this workflow runs in production.",
         });
       }
     }

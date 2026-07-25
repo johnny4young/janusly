@@ -1,9 +1,11 @@
 /** Reads host-facing settings for the persistent local Docker stack. */
 
-import { access, copyFile, readFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { access, chmod, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 
 export const localEnvFile = "deploy/local/local.env";
 export const localEnvExampleFile = "deploy/local/local.env.example";
+export const localCredentialKeyFile = "deploy/local/.secrets/credential-master.key";
 export const defaultLocalWebPort = "7310";
 export const defaultLocalApiPort = "7311";
 
@@ -33,6 +35,34 @@ export async function ensureLocalEnv() {
   } catch {
     await copyFile(new URL(localEnvExampleFile, rootUrl), target);
     console.log(`[local] created ${localEnvFile} from the tracked example`);
+  }
+}
+
+/** Create the one local SecretStore root key without ever printing it. */
+export async function ensureLocalCredentialMasterKey() {
+  const target = new URL(localCredentialKeyFile, rootUrl);
+  const directory = new URL("deploy/local/.secrets/", rootUrl);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  try {
+    await access(target);
+    await Promise.all([chmod(directory, 0o700), chmod(target, 0o600)]);
+    return;
+  } catch {
+    try {
+      await writeFile(target, `${randomBytes(32).toString("base64")}\n`, {
+        encoding: "utf8",
+        flag: "wx",
+        mode: 0o600,
+      });
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "EEXIST") {
+        await Promise.all([chmod(directory, 0o700), chmod(target, 0o600)]);
+        return;
+      }
+      throw error;
+    }
+    await Promise.all([chmod(directory, 0o700), chmod(target, 0o600)]);
+    console.log(`[local] created ignored credential root key at ${localCredentialKeyFile}`);
   }
 }
 

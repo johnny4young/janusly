@@ -37,6 +37,7 @@
 import { setUsageRecorder } from "@janusly/ai";
 import {
   recordEmailUsage,
+  assertCredentialRootKeyUsable,
   recordIntegrationUsage,
   recordMcpUsage,
   recordMemoryUsage,
@@ -101,6 +102,16 @@ const server = createApiServer({
 });
 
 await assertMigrationsApplied();
+
+// Fail fast on a malformed or unreadable credential root key — the key is
+// otherwise loaded lazily and a misconfigured deployment would boot fine only
+// to 500 on the first managed credential write. An unset key stays legal
+// (legacy environment-reference deployments) but the posture is logged.
+console.log(
+  assertCredentialRootKeyUsable().configured
+    ? "[credential-secret-store] root key loaded"
+    : "[credential-secret-store] no root key configured; managed credential writes will fail until JANUSLY_CREDENTIAL_MASTER_KEY(_FILE) is set",
+);
 
 await startPrometheusMetrics({ defaultPort: API_METRICS_DEFAULT_PORT, processName: "api" });
 const unregisterRateLimiterMetrics = registerRateLimiterObservables(

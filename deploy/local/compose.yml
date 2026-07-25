@@ -8,6 +8,7 @@ x-app-environment: &app-environment
   JANUSLY_WEB_BASE_URL: ${JANUSLY_LOCAL_WEB_URL:-http://localhost:7310}
   JANUSLY_SESSION_COOKIE_SECURE: ${JANUSLY_SESSION_COOKIE_SECURE:-false}
   JANUSLY_RESUME_TOKEN_SECRET: ${JANUSLY_LOCAL_RESUME_TOKEN_SECRET:-local-resume-token-secret-change-before-sharing}
+  JANUSLY_CREDENTIAL_MASTER_KEY_FILE: /run/secrets/janusly_credential_master_key
   JANUSLY_IDENTITY_RETENTION_CRON: "${JANUSLY_IDENTITY_RETENTION_CRON:-0 3 * * *}"
   JANUSLY_IDENTITY_SESSION_RETENTION_DAYS: ${JANUSLY_IDENTITY_SESSION_RETENTION_DAYS:-7}
   SUPABASE_URL: ${JANUSLY_LOCAL_SUPABASE_INTERNAL_URL:-}
@@ -82,6 +83,8 @@ services:
       PORT: "3001"
       OTEL_METRICS_HOST: 0.0.0.0
       OTEL_METRICS_PORT: "9464"
+    secrets:
+      - janusly_credential_master_key
     ports:
       - "127.0.0.1:${JANUSLY_LOCAL_API_PORT:-7311}:3001"
       - "127.0.0.1:${JANUSLY_LOCAL_API_METRICS_PORT:-9464}:9464"
@@ -109,6 +112,8 @@ services:
       OTEL_METRICS_HOST: 0.0.0.0
       OTEL_METRICS_PORT: "9465"
       JANUSLY_WORKER_CONCURRENCY: ${JANUSLY_WORKER_CONCURRENCY:-2}
+    secrets:
+      - janusly_credential_master_key
     ports:
       - "127.0.0.1:${JANUSLY_LOCAL_WORKER_METRICS_PORT:-9465}:9465"
     extra_hosts:
@@ -169,3 +174,7 @@ volumes:
   redis_data:
   provider_data:
   ollama_models:
+
+secrets:
+  janusly_credential_master_key:
+    file: ./.secrets/credential-master.key

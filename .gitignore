@@ -15,6 +15,7 @@ artifacts/
 scripts/model-eval-results.*
 .env
 deploy/local/local.env
+deploy/local/.secrets/
 .env.local
 .env.*.local
 deploy/observability/cloud.env

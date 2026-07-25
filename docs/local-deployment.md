@@ -50,10 +50,15 @@ pnpm local:auth:up
 ```
 
 The first command copies `deploy/local/local.env.example` to the ignored
-`deploy/local/local.env`. Edit that file for host-port or local sender changes.
-Then open <http://127.0.0.1:7310>, create the first account, and create the
-first organization manually. A clean start has no users, organizations,
-workflows, credentials, tenant configuration, or example canvas nodes.
+`deploy/local/local.env` and creates an ignored
+`deploy/local/.secrets/credential-master.key` with directory mode 0700 and file
+mode 0600. Compose exposes it read-only to the non-root API and worker through
+its secret mount; it is never
+printed, copied into the browser image, or stored in PostgreSQL. Edit
+`local.env` for host-port or local sender changes. Then open
+<http://127.0.0.1:7310>, create the first account, and create the first
+organization manually. A clean start has no users, organizations, workflows,
+credentials, tenant configuration, or example canvas nodes.
 
 `pnpm local:up` uses the same Supabase PostgreSQL database but keeps
 `dev-headers` for automated provider qualification. It also starts without
@@ -71,6 +76,7 @@ Run the qualification gates while the stack is healthy:
 
 ```bash
 pnpm local:smoke          # real inbound event and four successful provider effects
+pnpm local:pagerduty-smoke # managed secrets + signed event + acknowledge/snooze
 pnpm local:failure-smoke  # controlled Slack outage, fail-closed run, open DLQ evidence
 pnpm local:ui-smoke       # Chromium smoke plus screenshots
 pnpm local:verify         # success smoke, full service restart, persistence check
@@ -79,10 +85,16 @@ pnpm local:verify         # success smoke, full service restart, persistence che
 `local:smoke` submits the same inbound event twice and requires both deliveries
 to converge on one run. These commands explicitly install their own bounded
 provider fixtures; normal startup never does. `local:ui-smoke` also creates its
-controlled provider failure before opening Chromium, so it does not rely on
-prior database state. `local:verify` additionally restarts Supabase, Redis,
-the simulator, API, worker, and web, then reads the original workflow and run
-again. No public GitHub, Slack, webhook, or email endpoint is contacted.
+controlled provider failure and runs the PagerDuty prompt-generated workflow
+qualification before opening Chromium. It captures the recovery surface and
+the generated PagerDuty graph plus its normal Inspector configuration without
+relying on prior database state. `local:verify` additionally restarts Supabase,
+Redis, the simulator, API, worker, and web, then reads the original workflow
+and run again. `local:pagerduty-smoke` creates managed API/signing credentials,
+asks `/ai/generate-workflow` for the off-hours automation, saves that exact
+graph, sends a signed event, requires one simulator GET→PUT→POST sequence, and
+proves a duplicate delivery creates no second external effect. No public
+GitHub, Slack, PagerDuty, webhook, or email endpoint is contacted.
 
 ## Real Local Identity Profile
 
@@ -180,7 +192,7 @@ database and that the manual-start tables are empty.
 The simulator listens on the loopback port selected by
 `JANUSLY_LOCAL_SIMULATOR_PORT` (4010 by default). It records at most the latest
 200 requests returned by `GET /requests` and supports `github`, `slack`,
-`webhook`, and `email` providers.
+`webhook`, `email`, and `pagerduty` providers.
 
 Each provider has one of three deterministic modes:
 
@@ -206,19 +218,51 @@ Simulator routing is guarded by both
 `JANUSLY_LOCAL_INTEGRATION_SIMULATOR=true` and a process-owned simulator URL.
 It does not rewrite arbitrary outbound destinations: only the bundled GitHub
 and Slack credentials, the local mailer, and RFC-reserved `*.example.com`
-webhook placeholders can be redirected.
+webhook placeholders can be redirected. PagerDuty integration tools switch to
+the simulator's `/pagerduty` API only under the same explicit process gate.
+
+### PagerDuty local qualification
+
+For automated validation, use the dev-header profile:
+
+```bash
+pnpm local:up
+pnpm local:pagerduty-smoke
+```
+
+The command leaves a normal saved workflow, run history, and provider evidence.
+It deliberately does not call an LLM, contact a public provider, or seed data
+during startup.
+
+For manual testing with real local login, run `pnpm local:auth:up`, create two
+managed credentials in Connections:
+
+- API token: kind `pagerduty_api_token`
+- Webhook signing secret: kind `pagerduty_webhook_secret`
+
+Then open AI Studio and use a prompt such as:
+
+```text
+When PagerDuty alerts user PLOCALUSER outside working hours 09:00 to 17:00
+in America/Bogota, acknowledge it and snooze it for 12 hours. Use API
+credential pagerduty-api and webhook credential pagerduty-webhook for
+operator@example.com.
+```
+
+Review the generated graph in Step setup, save it, select the
+`pagerduty_incident` node, and copy its callback URL from the normal Inspector
+into PagerDuty. The bundled simulator uses `PLOCALUSER` and
+`PLOCALSERVICE`. The automated smoke demonstrates the exact signed-payload
+contract without exposing the signing value.
 
 ## Opt-in External Providers
 
 The simulator remains the default because its smoke commands deliberately
-create GitHub, Slack, webhook, and email effects. For private real-use testing,
-edit the ignored `deploy/local/local.env`:
+create GitHub, Slack, PagerDuty, webhook, and email effects. For private
+real-use testing, edit the ignored `deploy/local/local.env`:
 
 ```dotenv
 JANUSLY_LOCAL_INTEGRATION_SIMULATOR=false
-GITHUB_TOKEN=github-token-for-a-dedicated-test-repository
-SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
-WEBHOOK_SIGNING_SECRET=replace-with-a-local-random-secret
 
 # Optional email delivery. Keep noop when email is not under test.
 JANUSLY_MAILER_PROVIDER=noop
@@ -226,15 +270,18 @@ JANUSLY_MAILER_PROVIDER=noop
 # RESEND_API_KEY=re_...
 ```
 
-Then run `pnpm local:auth:up` and create the matching credential records
-manually from Connections. Startup never creates or rewrites credentials.
+Then run `pnpm local:auth:up` and create managed credential values manually
+from Connections. This is the recommended path for GitHub, Slack, PagerDuty,
+outbound webhooks, and external PostgreSQL credentials. Startup never creates
+or rewrites credentials.
 The simulator-only qualification commands use separate explicit fixtures and
 refuse to run while external mode is active.
 
-Every additional `NAME=value` entry in this ignored file is available to the
-API and worker so a credential row can use `NAME` as its `secretRef`. The file
-is not injected into the web or provider-simulator containers, and secret
-values are never compiled into the browser image. Confirm presence without
+Legacy environment-backed credentials remain available when migration or an
+external vault injector requires them: every additional `NAME=value` entry in
+this ignored file is available to API and worker, and the credential form can
+store `NAME` as a legacy reference. The file is not injected into the web or
+provider-simulator containers. Confirm managed or legacy presence without
 revealing values:
 
 ```bash
@@ -271,19 +318,23 @@ configuration API. Starting Ollama alone never enables persistent memory.
   may publish Auth `7431` and PostgreSQL `7432` on every host interface, so the
   local lab requires a trusted workstation and host firewall.
 - The generated `local.env` is ignored by Git.
+- The generated Credential Secret Store root key is ignored by Git and mounted
+  read-only into API and worker. Back it up before relying on managed local
+  credentials; replacing it makes existing ciphertext unreadable.
 - Supabase CLI telemetry is disabled by both `SUPABASE_TELEMETRY_DISABLED=1`
   and `DO_NOT_TRACK=1`; the self-hosted containers do not send telemetry.
 - Normal startup never inserts example users, organizations, workflows,
   credentials, or tenant configuration.
 - Images run as non-root users.
-- GitHub, Slack, webhook, and email simulation is opt-in and process-gated.
+- GitHub, Slack, PagerDuty, webhook, and email simulation is opt-in and process-gated.
 - External provider delivery requires an explicit simulator opt-out and local
   secret values; no smoke command runs against that mode.
 - `ALLOW_PRIVATE_HTTP_TARGETS=true` and default-profile development auth are
   acceptable only inside this loopback lab; the Supabase profile disables dev
   headers. Do not copy either local posture into a public deployment.
-- Real credentials still belong in environment variables or a vault, never in
-  workflow JSON or tenant configuration.
+- Real tenant integration credentials belong in Janusly's encrypted Credential
+  Secret Store (recommended) or a deliberately configured external
+  environment/vault reference, never in workflow JSON or tenant configuration.
 
 For the short-lived development/test orchestrator use `pnpm dev`. For metrics,
 traces, dashboards, and alerts, see [Observability](observability.md).

@@ -4,12 +4,9 @@
  * exactly which workflows reference the credential (the blast radius) without
  * mutating anything; step 2 commits a single `secret_ref` swap, guarded by
  * the `updatedAt` token the preview returned (`ifMatch`) so a concurrent edit
- * can't be silently clobbered — a stale token surfaces as a conflict and the
- * operator re-previews.
- *
- * The secret VALUE never touches this component, and the route never echoes
- * the env-var NAME back — the operator types the new env-var name here (they
- * already know it) and the modal only displays the affected-workflow list.
+ * can't be silently clobbered. Managed values are sent once over the
+ * authenticated API and never returned; legacy env references remain an
+ * explicit option.
  *
  * Reuses the `run-input-*` modal CSS shell shared by the rollback / recovery
  * dialogs. Mounted per-credential by `CredentialsPanel` (in `RightPanel`).
@@ -59,6 +56,8 @@ export function CredentialRotateModal({ credentialName, onClose }: CredentialRot
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const addToast = useWorkflowStore((state) => state.addToast)
   const [step, setStep] = useState<Step>({ kind: 'loading' })
+  const [storage, setStorage] = useState<'managed' | 'environment'>('managed')
+  const [newSecretValue, setNewSecretValue] = useState('')
   const [newSecretRef, setNewSecretRef] = useState('')
   const aliveRef = useRef(true)
   const dialogRef = useRef<HTMLDivElement | null>(null)
@@ -105,15 +104,21 @@ export function CredentialRotateModal({ credentialName, onClose }: CredentialRot
   }, [onClose, step.kind])
 
   const trimmedRef = newSecretRef.trim()
-  const refValid = ENV_VAR_NAME.test(trimmedRef)
+  const secretValid = storage === 'managed'
+    ? newSecretValue.length > 0
+    : ENV_VAR_NAME.test(trimmedRef)
 
   const rotate = async (affected: AffectedWorkflow[], ifMatch: string) => {
-    if (!refValid) return
+    if (!secretValid) return
     setStep({ kind: 'rotating', affected, ifMatch })
     try {
       const res = (await api(`/credentials/${encodeURIComponent(credentialName)}/bulk-update`, {
         method: 'POST',
-        body: JSON.stringify({ dryRun: false, newSecretRef: trimmedRef, ifMatch }),
+        body: JSON.stringify({
+          dryRun: false,
+          ...(storage === 'managed' ? { newSecretValue } : { newSecretRef: trimmedRef }),
+          ifMatch,
+        }),
       })) as { affectedCount?: number }
       if (!aliveRef.current) return
       bumpPlatformVersion()
@@ -186,19 +191,52 @@ export function CredentialRotateModal({ credentialName, onClose }: CredentialRot
                   ))}
                 </ul>
               )}
-              <label className="field-label" htmlFor="credential-rotate-newref">
-                {t('credentialRotation.field.newSecretRef')}
+              <label className="field-label" htmlFor="credential-rotate-storage">
+                {t('rightPanel.credentials.storageLabel')}
               </label>
-              <input
-                id="credential-rotate-newref"
+              <select
+                id="credential-rotate-storage"
                 className="text-field"
-                value={newSecretRef}
-                onChange={(event) => setNewSecretRef(event.target.value)}
-                placeholder={t('credentialRotation.field.newSecretRefPlaceholder')}
+                value={storage}
                 disabled={step.kind === 'rotating'}
-                data-testid="credential-rotate-newref"
-              />
-              <span className="helper-text">{t('credentialRotation.field.newSecretRefHelp')}</span>
+                onChange={(event) => setStorage(event.target.value as 'managed' | 'environment')}
+              >
+                <option value="managed">{t('rightPanel.credentials.storage.managed')}</option>
+                <option value="environment">{t('rightPanel.credentials.storage.environment')}</option>
+              </select>
+              <label className="field-label" htmlFor="credential-rotate-newref">
+                {storage === 'managed'
+                  ? t('credentialRotation.field.newSecretValue')
+                  : t('credentialRotation.field.newSecretRef')}
+              </label>
+              {storage === 'managed' ? (
+                <input
+                  id="credential-rotate-newref"
+                  type="password"
+                  autoComplete="new-password"
+                  className="text-field"
+                  value={newSecretValue}
+                  onChange={(event) => setNewSecretValue(event.target.value)}
+                  placeholder={t('rightPanel.credentials.valuePlaceholder')}
+                  disabled={step.kind === 'rotating'}
+                  data-testid="credential-rotate-newvalue"
+                />
+              ) : (
+                <input
+                  id="credential-rotate-newref"
+                  className="text-field"
+                  value={newSecretRef}
+                  onChange={(event) => setNewSecretRef(event.target.value)}
+                  placeholder={t('credentialRotation.field.newSecretRefPlaceholder')}
+                  disabled={step.kind === 'rotating'}
+                  data-testid="credential-rotate-newref"
+                />
+              )}
+              <span className="helper-text">
+                {storage === 'managed'
+                  ? t('credentialRotation.field.newSecretValueHelp')
+                  : t('credentialRotation.field.newSecretRefHelp')}
+              </span>
             </>
           )}
 
@@ -227,7 +265,7 @@ export function CredentialRotateModal({ credentialName, onClose }: CredentialRot
                 type="button"
                 className="command-button command-button-primary"
                 onClick={() => void rotate(step.affected, step.ifMatch)}
-                disabled={!refValid}
+                disabled={!secretValid}
               >
                 <KeyRound size={14} aria-hidden="true" />
                 <span>{t('credentialRotation.action.rotate')}</span>

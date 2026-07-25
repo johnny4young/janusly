@@ -7,7 +7,9 @@ deployment overrides. Do not put real secrets in `.env.example`.
 Safe runtime choices can also be overridden per tenant in the `org_configs`
 table. Environment variables remain the process-level defaults; tenant rows
 win only for the cataloged keys listed below. Infrastructure settings and
-secret values stay env-only.
+deployment root keys stay process-owned. Tenant integration credentials default
+to the encrypted Credential Secret Store described below; legacy
+environment-backed references remain supported.
 
 ## Core Services
 
@@ -39,6 +41,77 @@ secret values stay env-only.
 (`POSTGRES_USER=postgres`, `POSTGRES_PASSWORD=postgres`,
 `POSTGRES_DB=workflow`). Those are not read from `.env`; they just need to
 match the local `DATABASE_URL` default.
+
+## Credential Secret Store
+
+Managed integration credentials are accepted once by the API, encrypted before
+they enter PostgreSQL, and resolved only inside API/worker processes. The
+`credentials` row holds an opaque `janusly-secret://<id>` reference;
+`credential_secret_versions` holds AES-256-GCM ciphertext and a wrapped random
+data key. One external 32-byte root key unwraps those data keys.
+
+| Variable | Default | Used by | Purpose |
+| --- | --- | --- | --- |
+| `JANUSLY_CREDENTIAL_MASTER_KEY` | unset | API, worker | Inline root key encoded as standard base64 or 64 hexadecimal characters. Takes precedence over the file setting (the file is then silently ignored). Prefer a deployment secret manager rather than a checked-in env file. |
+| `JANUSLY_CREDENTIAL_MASTER_KEY_FILE` | unset | API, worker | Path to a file containing the same 32-byte key encoding. Recommended for Docker/Kubernetes secret mounts. The persistent local stack generates an ignored mode-0600 file automatically. |
+
+Generate a key once per deployment:
+
+```bash
+openssl rand -base64 32
+```
+
+(or `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"`).
+The value must decode to exactly 32 bytes: standard base64 (base64url `-`/`_`
+characters are rejected) or exactly 64 hex characters. Both processes validate
+a *configured* key at boot — a malformed value or unreadable file path fails
+API/worker startup immediately; an unset key boots fine (legacy
+environment-reference deployments) and logs
+`no root key configured`. The key is cached in-process after first use, so
+rotating a mounted key file only takes effect after an API/worker restart.
+
+Operational rules:
+
+- Configure the same root key in every API and worker replica before creating a
+  managed credential. Replicas with different keys are the classic silent
+  failure: creation succeeds on one, resolution fails closed on the other.
+- Back up the root key in your secret manager, separately from PostgreSQL
+  backups (a database dump alone can never decrypt managed credentials, and a
+  root key stored next to the dump defeats the envelope). You need BOTH to
+  restore: same database, same key.
+- Treat the root key as immutable. Current managed rows use key version 1 and
+  there is no rewrap tool yet — replacing the key in place makes every
+  existing managed credential unreadable. Rotating a *credential's value*
+  (`bulk-update`) is routine and unrelated to rotating the *root key*.
+- If the root key is lost, the managed values are gone by design. Recovery is
+  re-entry: list affected rows via `GET /credentials`
+  (`storage: "managed"`) and `GET /credentials/health`
+  (`secretRefPresent: false`), configure a fresh key, then rotate each
+  credential with a new `newSecretValue` obtained from the upstream provider.
+- `POST /credentials` accepts exactly one of `secretValue` (recommended,
+  at most 64 KiB) or `secretRef` (legacy environment variable name). Rotation
+  accepts exactly one of `newSecretValue` or `newSecretRef`.
+- Migrating a legacy credential into the store is one rotation:
+  `POST /credentials/:name/bulk-update` with `newSecretValue`, confirm
+  `storage: "managed"` in `GET /credentials`, then remove the old env var from
+  the deployment. Managed and environment credentials can coexist per row.
+  Deleting a legacy credential never unsets its environment variable.
+- Values and references are never returned. `GET /credentials` reports only
+  `storage: "managed" | "environment"` with safe metadata.
+- Credential health, readiness, Slack, PagerDuty, integration tools, and
+  external PostgreSQL tools all use the same organization-aware resolver.
+  Raw template secrets (`{{secret.X}}` / `{{env.X}}`) and MCP connection
+  `envRefs` stay deployment-owned process environment values outside the
+  store.
+
+Troubleshooting:
+
+| Symptom | Likely cause |
+| --- | --- |
+| API/worker exits at boot with `credential_secret_root_key_invalid` or a file read error | Key not standard base64/64-hex for 32 bytes, or the mounted key file path is wrong. Fix the value/mount — this is deliberate fail-fast. |
+| `POST /credentials` or rotation returns 500 `credentials_secret_store_unavailable` | No root key configured in the API process. Set one of the two variables and restart. |
+| `GET /credentials/health` shows `secretRefPresent: false` for a `managed` credential | The resolving process holds a different root key than the one that encrypted, the version was revoked, or its `keyVersion` is unsupported. Check process logs for `[credential-secret-store] managed secret failed closed` — the `reason` field distinguishes `root_key_unavailable` / `decrypt_failed` / `unsupported_key_version` (a missing/revoked row stays silent by design). |
+| Credential creation works but runs fail with `credential secret missing for <name>` | Same diagnosis as above on the WORKER replica — typically the worker was deployed without the key or with a stale one. The worker logs the same warn line. |
 
 ## Tenant Runtime Config
 
@@ -134,8 +207,9 @@ Guardrails:
 
 The config table deliberately does not store `OPENAI_API_KEY`,
 `ANTHROPIC_API_KEY`, database URLs, Redis URLs, Supabase keys, service tokens,
-or workflow secrets. Store those in `.env` or a vault, then use tenant config
-only to select the safe provider/model/limit behavior.
+or workflow secrets. Deployment-wide provider/infrastructure keys stay in the
+environment or a vault. Tenant integration credentials belong in the encrypted
+Credential Secret Store. Tenant config selects only safe behavior.
 
 ## Auth And Web
 
@@ -255,6 +329,7 @@ transports additionally use the sandbox settings below.
 | `JANUSLY_OBJECT_STORE_ENDPOINT` | unset | `packages/engine/src/object-store.ts` | Optional S3-compatible endpoint for MinIO/R2/Backblaze-style stores. |
 | `JANUSLY_OBJECT_STORE_PUBLIC_BASE_URL` | unset | `packages/engine/src/object-store.ts` | Optional public URL prefix; when absent, S3 mode returns presigned URLs. |
 | `JANUSLY_OBJECT_STORE_PRESIGNED_TTL_SEC` | `3600` | `packages/engine/src/object-store.ts` | Presigned URL TTL in seconds for S3 mode. |
+| `JANUSLY_PUBLIC_API_URL` | unset | Slack interaction connection routes | Optional public API origin used to return absolute signed Slack callback URLs. It contains no credentials. PagerDuty callback URLs are derived in the workflow Inspector from the web app's configured API origin. |
 
 ### Local integration simulator
 
@@ -265,7 +340,7 @@ integration settings.
 | Variable | Default | Used by | Purpose |
 | --- | --- | --- | --- |
 | `JANUSLY_LOCAL_INTEGRATION_SIMULATOR` | `false` | integration tools and mailer | Master process gate. Only the exact string `true` enables simulator routing. |
-| `JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL` | unset | `packages/engine/src/local-integration-simulator.ts` | Process-owned simulator base URL. Credentials, query strings, and fragments are rejected. |
+| `JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL` | unset | integration simulator routing | Process-owned simulator base URL. Credentials, query strings, and fragments are rejected. PagerDuty uses its `/pagerduty` API projection only when this gate is true. |
 | `JANUSLY_LOCAL_STACK` | `false` | explicit smoke fixtures | Required marker before qualification-only credential/config fixtures can run. Normal startup never invokes them. |
 | `JANUSLY_LOCAL_ORG_ID` | `default` | smoke scripts | Development organization exercised only by explicit provider qualification. |
 
@@ -273,8 +348,9 @@ The Compose-specific `JANUSLY_LOCAL_*_PORT`, sender, and browser URL settings
 are documented in the tracked `deploy/local/local.env.example`. The Supabase
 CLI-generated `DB_URL` is transformed into the container-only
 `JANUSLY_LOCAL_DATABASE_URL` in memory; it is never copied into that file.
-Simulator delivery still requires normal credential rows. Explicit smoke
-commands create only the bounded references required for their own run.
+Simulator delivery still requires normal credential rows. They can use managed
+values or legacy environment references. Explicit smoke commands create only
+the bounded references required for their own run.
 
 Every persistent local profile starts the pinned `supabase/config.toml`
 PostgreSQL database on host port `7432`; Supabase owns `auth` and Janusly owns
@@ -286,16 +362,16 @@ development infrastructure rather than a network-safe deployment. Generated
 database/Auth credentials remain in process memory.
 
 The persistent stack loads its ignored `deploy/local/local.env` into the API
-and worker only. With `JANUSLY_LOCAL_INTEGRATION_SIMULATOR=false`, create
-credential rows manually that reference `GITHUB_TOKEN`, `SLACK_WEBHOOK_URL`,
-or `WEBHOOK_SIGNING_SECRET`; startup never creates or rewrites those rows and
-never copies secret values into PostgreSQL. Additional environment-backed
-credential references may be appended to that ignored file. The web image
-never receives it. See
+and worker only and mounts its independently ignored generated credential root
+key read-only. With `JANUSLY_LOCAL_INTEGRATION_SIMULATOR=false`, create managed
+credential rows manually from the UI (recommended), or deliberately choose
+legacy references such as `GITHUB_TOKEN`, `SLACK_WEBHOOK_URL`, or
+`WEBHOOK_SIGNING_SECRET`. Startup never creates or rewrites credential rows.
+The web image receives neither the local env file nor the root key. See
 [`docs/local-deployment.md`](local-deployment.md#opt-in-external-providers) for
 the safe switching procedure and smoke-command boundary.
 
-`.env.example` includes sample credential env names such as
+`.env.example` includes sample legacy credential env names such as
 `SLACK_INCIDENTS_WEBHOOK_URL`, `GITHUB_BOT_TOKEN`, and
 `WEBHOOK_SIGNING_SECRET`. Those are examples referenced by
 `credentials.secret_ref` rows, not fixed platform config keys; deployments can

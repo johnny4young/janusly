@@ -137,6 +137,8 @@ export type ApiErrorCode =
   | "billing_workflow_id_required"
   // credentials
   | "credentials_fields_required"
+  | "credentials_create_failed"
+  | "credentials_conflict"
   | "credentials_invalid_expiry"
   | "credentials_expiry_required"
   | "credentials_expiry_failed"
@@ -146,6 +148,8 @@ export type ApiErrorCode =
   | "credentials_name_required"
   | "credentials_not_found"
   | "credentials_rotation_failed"
+  | "credentials_revoke_failed"
+  | "credentials_secret_store_unavailable"
   // dlq
   | "dlq_failing_node_missing"
   | "dlq_fields_required"
@@ -204,6 +208,10 @@ export type ApiErrorCode =
   | "org_value_required"
   // plugins
   | "plugins_plugin_id_required"
+  // pagerduty
+  | "pagerduty_invalid_request"
+  | "pagerduty_invalid_signature"
+  | "pagerduty_trigger_not_found"
   // prompts
   | "prompts_description_too_long"
   | "prompts_invalid_url"

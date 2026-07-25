@@ -6,10 +6,12 @@ const dataMocks = vi.hoisted(() => ({
   create: vi.fn(),
   delete: vi.fn(),
   getCredential: vi.fn(),
+  hasSecret: vi.fn(),
   getMember: vi.fn(),
   get: vi.fn(),
   getCallback: vi.fn(),
   list: vi.fn(),
+  resolveSecret: vi.fn(),
   resolveUser: vi.fn(),
   update: vi.fn(),
 }));
@@ -25,10 +27,12 @@ vi.mock("@janusly/data", () => ({
   createSlackInteractionConnection: dataMocks.create,
   deleteSlackInteractionConnection: dataMocks.delete,
   getCredentialByName: dataMocks.getCredential,
+  hasCredentialSecretRef: dataMocks.hasSecret,
   getMembershipForOrgUser: dataMocks.getMember,
   getSlackInteractionConnection: dataMocks.get,
   getSlackInteractionConnectionForCallback: dataMocks.getCallback,
   listSlackInteractionConnections: dataMocks.list,
+  resolveCredentialSecretRef: dataMocks.resolveSecret,
   resolveSlackInteractionUser: dataMocks.resolveUser,
   SLACK_INTERACTION_CONNECTION_NAME_MAX: 120,
   SLACK_INTERACTION_CREDENTIAL_NAME_MAX: 200,
@@ -118,6 +122,8 @@ beforeEach(() => {
   vi.stubEnv("SLACK_SIGNING_SECRET", secret);
   dataMocks.getCallback.mockResolvedValue(connection);
   dataMocks.getCredential.mockResolvedValue({ kind: "slack_signing_secret", secretRef: "SLACK_SIGNING_SECRET" });
+  dataMocks.hasSecret.mockResolvedValue(true);
+  dataMocks.resolveSecret.mockResolvedValue(secret);
   dataMocks.resolveUser.mockReturnValue("member-1");
   dataMocks.apply.mockResolvedValue({ kind: "applied", before: recoveryBefore, after: recoveryAfter });
   vi.mocked(requireRole).mockResolvedValue("editor");

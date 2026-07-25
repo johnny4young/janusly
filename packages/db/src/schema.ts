@@ -34,9 +34,10 @@
  * - `routing_stats`, `workflow_improvements` — RL counters and
  *   improvement-engine bookkeeping.
  * - `usage_events` — billing telemetry (LLM calls and write-side tool usage).
- * - `credentials`, `slack_interaction_connections`,
- *   `slack_interaction_receipts`, `installed_plugins` — secret references,
- *   signed operator-action identity, replay claims, and plugin manifests.
+ * - `credentials`, `credential_secret_versions`,
+ *   `slack_interaction_connections`, `slack_interaction_receipts`, and
+ *   `installed_plugins` — encrypted/versioned secret references, signed
+ *   operator actions, and plugin manifests.
  * - `audit_logs` — append-only mutation log (`audit()` redacts sensitive
  *   keys before insertion).
  *
@@ -616,8 +617,8 @@ export const credentials = pgTable(
     metadata: jsonb("metadata"),
     // Optional operator-declared expiry for the underlying secret (token /
     // webhook / DSN). Null = no expiry tracked. Only metadata — the secret
-    // value itself still lives in env via `secret_ref`. Powers the
-    // credential-expiry warning scan + the panel's expiry badge.
+    // value resolves through the managed/legacy provider behind `secret_ref`.
+    // Powers the credential-expiry warning scan + the panel's expiry badge.
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
@@ -626,16 +627,57 @@ export const credentials = pgTable(
     // as an If-Match against the JS Date it round-trips through ISO, and full
     // microsecond precision would never equal a re-serialized ms-precision
     // value — so a first rotation would always look like a conflict.
-    updatedAt: timestamp("updated_at", { withTimezone: true, precision: 3 }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, precision: 3 }).notNull().defaultNow(),
   },
-  (table) => [index("credentials_org_idx").on(table.orgId)],
+  (table) => [
+    uniqueIndex("credentials_org_name_idx").on(table.orgId, table.name),
+    index("credentials_org_idx").on(table.orgId),
+  ],
+);
+
+/**
+ * Versioned encrypted values for credentials managed by Janusly.
+ *
+ * `credentials.secret_ref` points at one row using the opaque
+ * `janusly-secret://<id>` scheme. Each plaintext is encrypted with a random
+ * data-encryption key; that key is wrapped by the process root key. The root
+ * key never enters PostgreSQL. Legacy environment-variable references remain
+ * valid for credentials created before this table existed.
+ *
+ * No foreign key is intentional: revoked versions remain inspectable as
+ * metadata after a credential is deleted, but a revoked row can never resolve.
+ */
+export const credentialSecretVersions = pgTable(
+  "credential_secret_versions",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    credentialId: text("credential_id").notNull(),
+    version: integer("version").notNull(),
+    ciphertext: text("ciphertext").notNull(),
+    dataNonce: text("data_nonce").notNull(),
+    dataTag: text("data_tag").notNull(),
+    wrappedKey: text("wrapped_key").notNull(),
+    wrapNonce: text("wrap_nonce").notNull(),
+    wrapTag: text("wrap_tag").notNull(),
+    keyVersion: integer("key_version").notNull().default(1),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("credential_secret_versions_credential_version_idx")
+      .on(table.credentialId, table.version),
+    index("credential_secret_versions_org_credential_idx")
+      .on(table.orgId, table.credentialId, table.createdAt.desc()),
+  ],
 );
 
 /**
  * One Slack app/team binding for signed recovery-item interactions.
  *
- * The signing secret remains in the credentials/env substrate; this row stores
- * only the credential name plus a bounded Slack-user → Janusly-user mapping.
+ * The signing secret remains in the managed/legacy credential substrate; this
+ * row stores only the credential name plus a bounded Slack-user → Janusly-user mapping.
  * Callback lookup by opaque connection id is the deliberate cross-tenant
  * system exception, but the signed team id must still match before any mapped
  * identity is authorized. No foreign keys keep the integration orphan-tolerant

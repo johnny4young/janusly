@@ -75,6 +75,24 @@ test("ignored runtime secrets reach API and worker but never the browser image",
   assert.match(localEnvExample, /^SENDGRID_API_KEY=$/m);
 });
 
+test("managed credential root key is host-private and mounted only into secret consumers", () => {
+  assert.match(
+    compose,
+    /^  JANUSLY_CREDENTIAL_MASTER_KEY_FILE: \/run\/secrets\/janusly_credential_master_key$/m,
+  );
+  for (const service of ["api", "worker"]) {
+    assert.match(serviceBlock(service), /secrets:\n\s+- janusly_credential_master_key/);
+  }
+  for (const service of ["provider-simulator", "migrate", "web"]) {
+    assert.doesNotMatch(serviceBlock(service), /secrets:/);
+  }
+  assert.match(
+    compose,
+    /^secrets:\n  janusly_credential_master_key:\n    file: \.\/\.secrets\/credential-master\.key$/m,
+  );
+  assert.match(gitignore, /^deploy\/local\/\.secrets\/$/m);
+});
+
 test("web image is reproducible and has no unpinned global static-server dependency", () => {
   assert.match(webDockerfile, /pnpm install --frozen-lockfile/);
   assert.doesNotMatch(webDockerfile, /pnpm add -g serve/);

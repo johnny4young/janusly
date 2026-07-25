@@ -37,7 +37,12 @@ import { isV1ReadPath } from '@janusly/shared/src/api-contract'
 import { getResolvedLocale, t } from './i18n/runtime'
 import { useWorkflowStore } from './store'
 
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001'
+export const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001'
+
+/** Build an absolute public callback URL against the same API origin as `api()`. */
+export function publicApiUrl(path: string): string {
+  return `${API_URL.replace(/\/+$/, '')}${path.startsWith('/') ? path : `/${path}`}`
+}
 
 /**
  * Window during which a resolved (or rejected) in-flight request is

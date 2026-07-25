@@ -13,8 +13,8 @@
  *   SQL to inject tenant predicates; the customer-provided DSN / DB role /
  *   schema / RLS / views own row-level isolation inside the external DB.
  * - Workflow JSON stores only an operator-friendly credential name. The real
- *   Postgres URL lives in env via `credentials.secret_ref`, and neither the
- *   env-var name nor the URL is returned in tool envelopes or usage rows.
+ *   Postgres URL resolves through the central SecretStore (with legacy env
+ *   references supported), and neither the reference nor URL is returned.
  * - Runtime failures return `{ ok: false, error, latencyMs }` envelopes and
  *   never throw. Validation failures are likewise surfaced as envelopes so a
  *   workflow can branch on `ok`.
@@ -24,7 +24,7 @@ import { createHash } from "node:crypto";
 import postgres from "postgres";
 import { z } from "zod";
 
-import { getCredentialByName } from "@janusly/data";
+import { getCredentialByName, resolveCredentialSecretRef } from "@janusly/data";
 import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
 import { RATE_LIMIT_WINDOW_MS } from "./constants";
 import { getIntegrationUsageRecorder } from "./integration-usage";
@@ -222,8 +222,8 @@ async function gateDbCall(args: {
     return { ok: false, error: `credential not found: ${args.credentialName}` };
   }
 
-  const secret = process.env[credential.secretRef];
-  if (!secret || secret.trim().length === 0) {
+  const secret = await resolveCredentialSecretRef(args.orgId, credential.secretRef);
+  if (!secret) {
     return { ok: false, error: `credential secret missing for ${args.credentialName}` };
   }
 

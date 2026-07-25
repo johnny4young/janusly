@@ -75,7 +75,14 @@ export type Template = {
   categoryCode?: string
   workflow: WorkflowDefinition
 }
-export type Credential = { id: string; name: string; kind: string; metadata?: JsonObject; expiresAt?: string | null }
+export type Credential = {
+  id: string
+  name: string
+  kind: string
+  storage?: 'managed' | 'environment'
+  metadata?: JsonObject
+  expiresAt?: string | null
+}
 
 /** One required credential a solution pack declares (name + kind + purpose; never a secret value). */
 type PackRequiredCredential = { name: string; kind: string; purpose: string }

@@ -756,14 +756,21 @@ export default function App() {
     })
   }, [refreshPlatform, runPlatformMutation, t])
 
-  const createCredential = useCallback(async (credential: { name: string; kind: string; secretRef: string; expiresAt?: string }) => {
-    await runPlatformMutation({
+  const createCredential = useCallback(async (credential: {
+    name: string
+    kind: string
+    secretValue?: string
+    secretRef?: string
+    expiresAt?: string
+  }): Promise<boolean> => {
+    const result = await runPlatformMutation({
       request: () => api('/credentials', { method: 'POST', body: JSON.stringify(credential) }),
       failureMessage: t('toasts.credentialFailed'),
       successToast: { message: t('toasts.credentialAdded', { name: credential.name }), tone: 'success' },
       successToastTiming: 'before-effect',
       onSuccess: refreshPlatform,
     })
+    return result.ok
   }, [refreshPlatform, runPlatformMutation, t])
 
   const installPack = useCallback(async (packId: string) => {

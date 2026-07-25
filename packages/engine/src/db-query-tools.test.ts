@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@janusly/data', () => ({
   getCredentialByName: vi.fn(),
+  resolveCredentialSecretRef: vi.fn(async (_orgId: string, secretRef: string) => process.env[secretRef] ?? null),
 }))
 
 import { getCredentialByName } from '@janusly/data'

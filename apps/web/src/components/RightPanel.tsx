@@ -107,7 +107,13 @@ export type RightPanelCatalog = {
   onInstallPack: (packId: string) => void
   onSampleRunPack: (packId: string) => void
   onInjectPackFailure: (packId: string, fixtureId: string) => void
-  onCreateCredential: (credential: { name: string; kind: string; secretRef: string; expiresAt?: string }) => void
+  onCreateCredential: (credential: {
+    name: string
+    kind: string
+    secretValue?: string
+    secretRef?: string
+    expiresAt?: string
+  }) => Promise<boolean>
 }
 
 export type RightPanelExecution = {
@@ -405,8 +411,7 @@ function ToolsPanel({ tools, onInstallPlugin, canInstall }: Pick<RightPanelCatal
  *  read-only. The env-var NAME never reaches this shape (server posture). */
 type CredentialHealthLite = { name: string; secretRefPresent: boolean; lastUsedAt: string | null; expiresAt: string | null }
 
-/** Env-var NAME shape the server accepts for `secretRef` (mirrors the
- *  rotate modal). The secret VALUE never lives here — only the env-var name. */
+/** Legacy env-var NAME shape. New credentials default to managed values. */
 const CREDENTIAL_ENV_VAR_NAME = /^[A-Z][A-Z0-9_]*$/
 
 /** Connection kinds the integration chokepoint recognizes. Free-form on the
@@ -418,16 +423,23 @@ const CREDENTIAL_KINDS = [
   'slack_signing_secret',
   'webhook_secret',
   'postgres',
+  'pagerduty_api_token',
+  'pagerduty_webhook_secret',
 ] as const
 
 function CredentialsPanel({ credentials, onCreateCredential, canWrite }: Pick<RightPanelCatalog, 'credentials' | 'onCreateCredential'> & { canWrite: boolean }) {
   const { t } = useT()
   const platformVersion = useWorkflowStore(state => state.platformVersion)
+  const bumpPlatformVersion = useWorkflowStore(state => state.bumpPlatformVersion)
+  const addToast = useWorkflowStore(state => state.addToast)
   const [name, setName] = useState('')
   const [kind, setKind] = useState('generic')
+  const [storage, setStorage] = useState<'managed' | 'environment'>('managed')
+  const [secretValue, setSecretValue] = useState('')
   const [secretRef, setSecretRef] = useState('')
   const [expiresAt, setExpiresAt] = useState('')
   const [rotating, setRotating] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
   const [healthByName, setHealthByName] = useState<Map<string, CredentialHealthLite>>(new Map())
   const [expiryNowMs, setExpiryNowMs] = useState(() => Date.now())
 
@@ -457,7 +469,9 @@ function CredentialsPanel({ credentials, onCreateCredential, canWrite }: Pick<Ri
 
   const trimmedRef = secretRef.trim()
   const refInvalid = trimmedRef.length > 0 && !CREDENTIAL_ENV_VAR_NAME.test(trimmedRef)
-  const canAdd = name.trim().length > 0 && CREDENTIAL_ENV_VAR_NAME.test(trimmedRef)
+  const canAdd = name.trim().length > 0 && (
+    storage === 'managed' ? secretValue.length > 0 : CREDENTIAL_ENV_VAR_NAME.test(trimmedRef)
+  )
 
   return (
     <PanelChrome title={t('rightPanel.credentials.title')} description={t('rightPanel.credentials.description')} icon={<KeyRound size={18} />}>
@@ -469,24 +483,48 @@ function CredentialsPanel({ credentials, onCreateCredential, canWrite }: Pick<Ri
           </div>
           <LockKeyhole size={18} aria-hidden="true" />
         </div>
-        <fieldset className="we-fieldset" disabled={!canWrite}>
+        <fieldset className="we-fieldset" disabled={!canWrite || submitting}>
           <label className="field-label" htmlFor="credential-name">{t('rightPanel.credentials.nameLabel')}</label>
           <input id="credential-name" className="text-field" value={name} onChange={event => setName(event.target.value)} />
           <label className="field-label" htmlFor="credential-kind">{t('rightPanel.credentials.kindLabel')}</label>
           <select id="credential-kind" className="text-field" value={kind} onChange={event => setKind(event.target.value)}>
             {CREDENTIAL_KINDS.map(option => <option key={option} value={option}>{option}</option>)}
           </select>
-          <label className="field-label" htmlFor="credential-secret">{t('rightPanel.credentials.envLabel')}</label>
-          <input
-            id="credential-secret"
-            className={`text-field${refInvalid ? ' text-field--error' : ''}`}
-            value={secretRef}
-            onChange={event => setSecretRef(event.target.value)}
-            placeholder={t('rightPanel.credentials.envPlaceholder')}
-            aria-invalid={refInvalid}
-            aria-describedby={refInvalid ? 'credential-secret-error' : undefined}
-          />
-          {refInvalid && (
+          <label className="field-label" htmlFor="credential-storage">{t('rightPanel.credentials.storageLabel')}</label>
+          <select
+            id="credential-storage"
+            className="text-field"
+            value={storage}
+            onChange={event => setStorage(event.target.value as 'managed' | 'environment')}
+          >
+            <option value="managed">{t('rightPanel.credentials.storage.managed')}</option>
+            <option value="environment">{t('rightPanel.credentials.storage.environment')}</option>
+          </select>
+          <label className="field-label" htmlFor="credential-secret">
+            {storage === 'managed' ? t('rightPanel.credentials.valueLabel') : t('rightPanel.credentials.envLabel')}
+          </label>
+          {storage === 'managed' ? (
+            <input
+              id="credential-secret"
+              type="password"
+              autoComplete="new-password"
+              className="text-field"
+              value={secretValue}
+              onChange={event => setSecretValue(event.target.value)}
+              placeholder={t('rightPanel.credentials.valuePlaceholder')}
+            />
+          ) : (
+            <input
+              id="credential-secret"
+              className={`text-field${refInvalid ? ' text-field--error' : ''}`}
+              value={secretRef}
+              onChange={event => setSecretRef(event.target.value)}
+              placeholder={t('rightPanel.credentials.envPlaceholder')}
+              aria-invalid={refInvalid}
+              aria-describedby={refInvalid ? 'credential-secret-error' : undefined}
+            />
+          )}
+          {storage === 'environment' && refInvalid && (
             <span id="credential-secret-error" className="helper-text helper-text--error" role="alert">
               <AlertCircle size={13} aria-hidden="true" /> {t('rightPanel.credentials.envInvalid')}
             </span>
@@ -504,18 +542,24 @@ function CredentialsPanel({ credentials, onCreateCredential, canWrite }: Pick<Ri
         <div className="form-actions connection-form-actions">
           <button
             className="command-button command-button-primary"
-            disabled={!canWrite || !canAdd}
+            disabled={!canWrite || !canAdd || submitting}
             onClick={() => {
-              onCreateCredential({
-                name: name.trim(),
-                kind,
-                secretRef: trimmedRef,
-                // Date input gives YYYY-MM-DD; send an ISO instant (UTC midnight).
-                ...(expiresAt ? { expiresAt: new Date(expiresAt).toISOString() } : {}),
-              })
-              setName('')
-              setSecretRef('')
-              setExpiresAt('')
+              setSubmitting(true)
+              void onCreateCredential({
+                  name: name.trim(),
+                  kind,
+                  ...(storage === 'managed' ? { secretValue } : { secretRef: trimmedRef }),
+                  // Date input gives YYYY-MM-DD; send an ISO instant (UTC midnight).
+                  ...(expiresAt ? { expiresAt: new Date(expiresAt).toISOString() } : {}),
+                })
+                .then((created) => {
+                  if (!created) return
+                  setName('')
+                  setSecretValue('')
+                  setSecretRef('')
+                  setExpiresAt('')
+                })
+                .finally(() => setSubmitting(false))
             }}
           >
             {t('rightPanel.credentials.addButton')}
@@ -531,7 +575,11 @@ function CredentialsPanel({ credentials, onCreateCredential, canWrite }: Pick<Ri
             <div key={credential.id} className="list-card">
               <div className="split-row" style={{ width: '100%' }}>
                 <strong>{credential.name}</strong>
-                <span className="mode-pill mode-pill-neutral">{credential.kind}</span>
+                <span className="mode-pill mode-pill-neutral">
+                  {credential.kind} · {credential.storage === 'environment'
+                    ? t('rightPanel.credentials.storage.environmentShort')
+                    : t('rightPanel.credentials.storage.managedShort')}
+                </span>
               </div>
               <div className="split-row" style={{ width: '100%' }}>
                 {/* Always a status pill — never the old plain-text fallback —
@@ -575,6 +623,26 @@ function CredentialsPanel({ credentials, onCreateCredential, canWrite }: Pick<Ri
               <div className="form-actions">
                 <button type="button" className="command-button" disabled={!canWrite} onClick={() => setRotating(credential.name)}>
                   {t('credentialRotation.action.rotate')}
+                </button>
+                <button
+                  type="button"
+                  className="command-button command-button-danger"
+                  disabled={!canWrite || submitting}
+                  onClick={() => {
+                    if (!window.confirm(t('rightPanel.credentials.revokeConfirm', { name: credential.name }))) return
+                    setSubmitting(true)
+                    void api(`/credentials/${encodeURIComponent(credential.name)}`, { method: 'DELETE' })
+                      .then(() => {
+                        bumpPlatformVersion()
+                        addToast(t('rightPanel.credentials.revokeDone', { name: credential.name }), 'success')
+                      })
+                      .catch((error) => {
+                        addToast(error instanceof Error ? error.message : t('rightPanel.credentials.revokeFailed'), 'error')
+                      })
+                      .finally(() => setSubmitting(false))
+                  }}
+                >
+                  {t('rightPanel.credentials.revoke')}
                 </button>
               </div>
             </div>

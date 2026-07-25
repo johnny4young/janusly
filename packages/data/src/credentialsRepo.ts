@@ -2,12 +2,11 @@
  * Repository for the `credentials` table — operator-managed name → secret-ref
  * bindings used by integration tools (Slack, GitHub, signed webhook, etc.).
  *
- * The actual secret values never live in this table. Each row carries a
- * `secret_ref` string that names an environment variable; the calling tool
- * reads `process.env[secret_ref]` at execute time. The table tracks
- * "operator declared a credential named X of kind Y, pointing at env Z" so
- * workflow JSONs can refer to the credential by name without leaking the
- * env-var name into the persisted DAG.
+ * The actual secret values never live in this table. Each row carries an
+ * opaque `secret_ref`: managed references resolve through the encrypted
+ * tenant Secret Store, while legacy references name an environment variable.
+ * Workflow JSONs refer only to the operator-facing credential name and never
+ * persist either form of reference in the DAG.
  *
  * Used by:
  * - `packages/engine/src/integration-tools.ts` — every integration tool's
@@ -65,21 +64,21 @@ export async function listCredentialsForOrg(orgId: string): Promise<Credential[]
     .where(eq(credentials.orgId, orgId));
 }
 
-/** Outcome of a secret-ref rotation. Never carries the secret value or the
- *  env-var name — callers learn only success (with the new concurrency
- *  token) or why it failed. */
+/** Outcome of a secret-ref rotation. Never carries the secret value or its
+ *  managed/legacy reference — callers learn only success (with the new
+ *  concurrency token) or why it failed. */
 export type RotateCredentialResult =
   | { ok: true; updatedAt: Date }
   | { ok: false; reason: "not_found" | "conflict" };
 
 /**
- * Atomically rotate the `secret_ref` (env-var NAME) of the credential named
- * `name` for an org. When `ifMatchUpdatedAt` is supplied the UPDATE is
+ * Atomically rotate the opaque `secret_ref` of the credential named `name`
+ * for an org. When `ifMatchUpdatedAt` is supplied the UPDATE is
  * CAS-guarded on `updated_at` (millisecond precision — see schema): a stale
  * token matches zero rows and returns `conflict`, so a concurrent edit can't
  * be silently clobbered. Multi-tenant scope via `eq(orgId)` — a credential
- * from another org is never touched. The secret VALUE is irrelevant here;
- * only the env-var name (`secretRef`) is stored, exactly as on create.
+ * from another org is never touched. The secret value is irrelevant here;
+ * only its opaque managed reference or legacy env-var name is stored.
  */
 export async function rotateCredentialSecretRef(input: {
   orgId: string;
@@ -119,7 +118,7 @@ export async function rotateCredentialSecretRef(input: {
 
 /** Outcome of a credential-expiry set/clear. Mirrors the rotation result:
  *  the caller learns only success (with the new concurrency token) or why it
- *  failed — never the secret value or env-var name. */
+ *  failed — never the secret value or reference. */
 export type SetCredentialExpiryResult =
   | { ok: true; updatedAt: Date }
   | { ok: false; reason: "not_found" | "conflict" };

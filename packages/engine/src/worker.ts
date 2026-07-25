@@ -39,6 +39,7 @@ import {
   recordMemoryUsage,
   recordPdfUsage,
   recordUsage,
+  assertCredentialRootKeyUsable,
   getRateLimiterAdminHealth,
   setMemoryUsageRecorder,
   productionBudgetChecker,
@@ -95,6 +96,16 @@ import {
 
 await assertMigrationsApplied();
 
+// Fail fast on a malformed or unreadable credential root key — the key is
+// otherwise loaded lazily, and a worker whose key differs from the API's
+// would resolve managed credentials as silently missing at run time. An
+// unset key stays legal (legacy environment-reference deployments).
+console.log(
+  assertCredentialRootKeyUsable().configured
+    ? "[credential-secret-store] root key loaded"
+    : "[credential-secret-store] no root key configured; managed credential resolution will fail closed",
+);
+
 await startPrometheusMetrics({ defaultPort: WORKER_METRICS_DEFAULT_PORT, processName: "worker" });
 const queueMetricsReader = createWorkflowQueueCountReader();
 const unregisterQueueMetrics = registerQueueObservables(queueMetricsReader.getCounts);
@@ -119,7 +130,7 @@ startWorkerCacheInvalidationSubscriber();
 // crash mid-replay doesn't leave the worker happily processing
 // non-schedule jobs while the schedule registrations are partially
 // gone. Failures are logged-and-tolerated — `assertMigrationsApplied`
-// is the only fail-fast at boot.
+// and the credential root-key probe are the only fail-fasts at boot.
 try {
   const count = await replayAllScheduleEntries();
   if (count > 0) console.log(`[schedule] replayed ${count} entries`);

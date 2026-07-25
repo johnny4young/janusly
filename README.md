@@ -38,7 +38,7 @@ The recovery loop is production-shaped end to end:
 - **Reproducible recovery drills.** Solution Packs expose safe, selectable credential, AI-output, rate-limit, contract-drift, upstream-failure, and worker-interruption scenarios. Every drill records its source and enters the same recovery queue used by runtime failures; the worker-interruption scenario crosses the configured age threshold and exercises the real stalled-node reaper rather than inserting a synthetic terminal failure. Recovery Queue measures each drill from failure to verified terminal success or accepted loss and then observes the existing seven-day production recurrence window. Recovery Center turns those bounded facts into a per-organization validation dossier with explicit completion, recovery, operator-intervention, timing, and failure-mode denominators plus Markdown/JSON exports; partner count, setup time, and willingness-to-pay remain external evidence.
 - **Containment.** A transient-error fast path that auto-retries the failures that would have healed anyway (429 / dropped connection / gateway timeout) before they reach the DLQ, and a circuit breaker that pauses a workflow after repeated failures — buffering inbound trigger events for backfill on resume instead of dropping them.
 - **Evidence-gated Recovery Playbooks** that promote a proven fix, with a per-playbook success scorecard.
-- **Operate + govern.** Visual React Flow builder, per-org RBAC with a closed permission catalog and custom roles, append-only audit log per action, SSO (WorkOS) + SCIM directory sync, cost/budget governance, signed Slack recovery buttons for mapped operators, an MCP client (workflow tool nodes) and an MCP server (proxying the API to agent ecosystems), and typed Node + Python SDKs.
+- **Operate + govern.** Visual React Flow builder, per-org RBAC with a closed permission catalog and custom roles, append-only audit log per action, SSO (WorkOS) + SCIM directory sync, cost/budget governance, an encrypted tenant Credential Secret Store, signed Slack recovery buttons, prompt-generated deterministic PagerDuty off-hours workflows with optional post-action AI summaries, an MCP client (workflow tool nodes) and MCP server (proxying the API to agent ecosystems), and typed Node + Python SDKs.
 - **Runs without an LLM.** Every AI surface degrades to a deterministic fallback, so the runtime works with no model key configured.
 
 **In one line:** Run critical AI workflows, explain failures, propose sandbox-validated fixes, redrive on the fix, and evolve workflow versions with full auditability — under human supervision.
@@ -339,11 +339,12 @@ Permissions are enforced per organization through `org_members`. In `dev-headers
 
 ## Credentials & auth
 
-Three independent layers, see [§ Credentials](#credentials):
+Four independent layers, see [§ Credentials](#credentials):
 
 1. **App login** — dev headers (`x-org-id` + `x-user-id`) or Supabase JWT for production.
-2. **Workflow secrets** — `{{secret.NAME}}` resolves at run time from `process.env.NAME`. Register the *name* via the **Secrets** tab; keep the value in `.env` / your vault.
-3. **AI provider** — `ANTHROPIC_API_KEY` + `JANUSLY_LLM_PROVIDER=anthropic` for the AI-native paths.
+2. **Integration credentials** — tenant values default to envelope-encrypted PostgreSQL rows protected by one external deployment root key; legacy environment references remain available.
+3. **Raw template secrets** — `{{secret.NAME}}` still resolves deployment-owned `process.env.NAME` directly when no operator-managed credential is needed.
+4. **AI provider** — `ANTHROPIC_API_KEY` + `JANUSLY_LLM_PROVIDER=anthropic` for the AI-native paths.
 
 ### Credentials
 
@@ -361,21 +362,65 @@ Three independent layers, see [§ Credentials](#credentials):
 
   Once configured, dev headers are rejected by the API. Override for hybrid test/staging with `ALLOW_DEV_AUTH_HEADERS=true`. In `NODE_ENV=production`, the API refuses to start without either Supabase credentials **or** `ALLOW_DEV_AUTH_HEADERS=true`.
 
-#### Workflow secrets
+#### Integration credentials
+
+Configure one 32-byte deployment root key first (`openssl rand -base64 32`).
+For the persistent local stack, `pnpm local:up` generates and mounts an
+ignored mode-0600 key automatically. Other deployments should mount
+`JANUSLY_CREDENTIAL_MASTER_KEY_FILE` from their secret manager (or set the
+base64/hex `JANUSLY_CREDENTIAL_MASTER_KEY` value directly).
 
 ```bash
-# 1. Register the reference (name only)
+# Accept a tenant secret once; API responses and audits never return it.
 curl -X POST http://localhost:3001/credentials \
   -H "Content-Type: application/json" \
   -H "x-org-id: default" -H "x-user-id: dev-user" \
-  -d '{"name":"GitHub bot","kind":"github","secretRef":"GITHUB_TOKEN"}'
-
-# 2. Add the value in .env (or your vault)
-# GITHUB_TOKEN=ghp_xxxxxx
-
-# 3. Use it in a node
-# { "type": "http", "config": { "headers": { "Authorization": "Bearer {{secret.GITHUB_TOKEN}}" } } }
+  -d '{"name":"GitHub bot","kind":"github_token","secretValue":"replace-me"}'
 ```
+
+The credential row stores only an opaque reference. A random data key encrypts
+each version; the deployment root key wraps that data key. Rotate from the UI
+or `POST /credentials/:name/bulk-update`; deleting the credential revokes its
+managed version. Back up the root key in your secret manager, separately from
+database backups — restoring managed credentials needs both, and neither is
+useful alone ([docs/configuration.md](docs/configuration.md) covers loss
+recovery and troubleshooting).
+
+Legacy environment references remain explicit migration compatibility:
+
+```bash
+curl -X POST http://localhost:3001/credentials \
+  -H "Content-Type: application/json" \
+  -H "x-org-id: default" -H "x-user-id: dev-user" \
+  -d '{"name":"Legacy GitHub bot","kind":"github_token","secretRef":"GITHUB_TOKEN"}'
+# Then inject GITHUB_TOKEN through .env or the deployment vault.
+```
+
+Workflow integration nodes store only the operator-facing credential name.
+`org_configs`, workflow JSON, action evidence, and audit metadata are not secret
+stores. See [`docs/configuration.md`](docs/configuration.md#credential-secret-store).
+
+PagerDuty uses two credential kinds (`pagerduty_api_token` and
+`pagerduty_webhook_secret`). Describe the off-hours rule in AI Studio; Janusly
+compiles a visible deterministic trigger/read/evaluate/acknowledge/snooze graph
+without requiring an LLM. Configuration stays versioned in the normal workflow
+Inspector and evidence stays in run history. See
+[`docs/architecture/integrations.md`](docs/architecture/integrations.md#prompt-generated-pagerduty-off-hours-workflow)
+and [`docs/local-deployment.md`](docs/local-deployment.md#pagerduty-local-qualification).
+
+#### Raw template secrets
+
+```json
+{
+  "type": "http",
+  "config": {
+    "headers": { "Authorization": "Bearer {{secret.DEPLOYMENT_OWNED_TOKEN}}" }
+  }
+}
+```
+
+This open-ended template form reads the process environment directly and is
+separate from operator-managed integration credentials.
 
 #### AI provider
 

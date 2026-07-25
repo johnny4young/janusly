@@ -15,11 +15,13 @@ import {
   createSlackInteractionConnection,
   deleteSlackInteractionConnection,
   getCredentialByName,
+  hasCredentialSecretRef,
   getMembershipForOrgUser,
   getSlackInteractionConnection,
   getSlackInteractionConnectionForCallback,
   listSlackInteractionConnections,
   resolveSlackInteractionUser,
+  resolveCredentialSecretRef,
   SLACK_INTERACTION_CONNECTION_NAME_MAX,
   SLACK_INTERACTION_CREDENTIAL_NAME_MAX,
   SLACK_INTERACTION_TEAM_ID_MAX,
@@ -44,8 +46,6 @@ import {
 } from "../slack-interactions";
 
 const SLACK_INTERACTION_BODY_MAX_BYTES = 64_000;
-const ENV_VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
 const UserMappingSchema = z.object({
   slackUserId: z.string().trim().min(1).max(SLACK_INTERACTION_USER_ID_MAX),
   userId: z.string().trim().min(1).max(SLACK_INTERACTION_USER_ID_MAX),
@@ -127,7 +127,9 @@ async function validateConnectionReferences(input: {
     "slack_signing_secret",
     input.signingCredentialName,
   );
-  if (!credential || !ENV_VAR_NAME.test(credential.secretRef)) return "credential_not_found";
+  if (!credential || !(await hasCredentialSecretRef(input.orgId, credential.secretRef))) {
+    return "credential_not_found";
+  }
   for (const mapping of input.userMappings) {
     const member = await getMembershipForOrgUser({ orgId: input.orgId, userId: mapping.userId });
     const localDevSelf = input.authMode === "dev-headers" && mapping.userId === input.currentUserId;
@@ -168,7 +170,9 @@ export const slackInteractionsRoutes: Route[] = [
         "slack_signing_secret",
         connection.signingCredentialName,
       );
-      const secret = credential ? process.env[credential.secretRef] ?? "" : "";
+      const secret = credential
+        ? await resolveCredentialSecretRef(connection.orgId, credential.secretRef) ?? ""
+        : "";
       const rawBody = await readRawBody(req, SLACK_INTERACTION_BODY_MAX_BYTES);
       const timestampHeader = req.headers["x-slack-request-timestamp"];
       const signatureHeader = req.headers["x-slack-signature"];

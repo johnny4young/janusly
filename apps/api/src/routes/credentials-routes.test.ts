@@ -3,14 +3,32 @@
  *
  * Covers the health endpoint + permission gates, plus the bulk-rotation
  * route's behavior contract: dry-run previews without mutating or auditing;
- * commit rotates, audits, and NEVER echoes the env-var name; a stale
+ * commit rotates, audits, and NEVER echoes the secret material or reference; a stale
  * If-Match surfaces as 409; an unknown credential is 404.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const dbHoisted = vi.hoisted(() => ({ credentialRows: [] as Array<Record<string, unknown>> }));
-const txHoisted = vi.hoisted(() => ({ auditCalls: [] as Array<Record<string, unknown>> }));
+const txHoisted = vi.hoisted(() => {
+  const insertValues = vi.fn().mockResolvedValue(undefined);
+  return {
+    auditCalls: [] as Array<Record<string, unknown>>,
+    forUpdate: vi.fn(),
+    insertValues,
+    tx: {
+      insert: vi.fn(() => ({ values: insertValues })),
+    },
+  };
+});
+const secretStoreHoisted = vi.hoisted(() => ({
+  create: vi.fn(async ({ credentialId }: { credentialId: string }) => ({
+    id: "secret-version-1",
+    version: 1,
+    secretRef: `janusly-secret://${credentialId}`,
+  })),
+  revoke: vi.fn().mockResolvedValue(true),
+}));
 
 vi.mock("../http", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../http")>();
@@ -34,13 +52,30 @@ vi.mock("@janusly/data/src/credentialsRepo", () => ({
   setCredentialExpiry: vi.fn(),
 }));
 
+vi.mock("@janusly/data/src/credentialSecretStore", () => ({
+  createCredentialSecretVersion: secretStoreHoisted.create,
+  isManagedCredentialSecretRef: vi.fn((secretRef: string) => secretRef.startsWith("janusly-secret://")),
+  revokeCredentialSecretRef: secretStoreHoisted.revoke,
+}));
+
 // withAuditTx (the atomic entity+audit chokepoint) — run the handler with a
 // fake tx + a capturing audit, mirroring the real {ok,result} envelope.
 vi.mock("@janusly/data/src/audit-tx", () => ({
   withAuditTx: vi.fn(async (handler: (tx: unknown, audit: (i: Record<string, unknown>) => Promise<void>) => Promise<unknown>) => {
     const audit = async (input: Record<string, unknown>) => { txHoisted.auditCalls.push(input); };
     try {
-      const result = await handler({}, audit);
+      const result = await handler({
+        ...txHoisted.tx,
+        select: vi.fn(() => ({
+          from: vi.fn(() => ({
+            where: vi.fn(() => ({
+              limit: vi.fn(() => ({
+                for: txHoisted.forUpdate,
+              })),
+            })),
+          })),
+        })),
+      }, audit);
       return { ok: true, result };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -111,6 +146,14 @@ async function callRoute(method: string, path: string, body?: unknown) {
 beforeEach(() => {
   dbHoisted.credentialRows = [];
   txHoisted.auditCalls = [];
+  txHoisted.forUpdate.mockImplementation(async () => dbHoisted.credentialRows);
+  txHoisted.insertValues.mockResolvedValue(undefined);
+  secretStoreHoisted.create.mockImplementation(async ({ credentialId }: { credentialId: string }) => ({
+    id: "secret-version-1",
+    version: 1,
+    secretRef: `janusly-secret://${credentialId}`,
+  }));
+  secretStoreHoisted.revoke.mockResolvedValue(true);
 });
 
 afterEach(() => {
@@ -130,6 +173,22 @@ describe("POST /credentials gate", () => {
     const route = findRoute("POST", "/credentials");
     expect(route.role).toBe("admin");
     expect(route.permission).toBe("credentials.write");
+  });
+
+  it("maps the database name invariant to a stable conflict response", async () => {
+    txHoisted.insertValues.mockRejectedValueOnce(
+      new Error('duplicate key value violates unique constraint "credentials_org_name_idx"'),
+    );
+
+    const { payload, status } = await callRoute("POST", "/credentials", {
+      name: "pagerduty-api",
+      kind: "pagerduty_api_token",
+      secretValue: "opaque-value",
+    });
+
+    expect(status).toBe(409);
+    expect(payload.code).toBe("credentials_conflict");
+    expect(JSON.stringify(payload)).not.toContain("opaque-value");
   });
 });
 
@@ -156,7 +215,12 @@ describe("POST /credentials/:name/bulk-update", () => {
   });
 
   it("commit rotates, writes the audit row, and NEVER echoes a secretRef", async () => {
-    dbHoisted.credentialRows = [{ kind: "slack_webhook", updatedAt: new Date("2026-05-28T00:00:00.000Z") }];
+    dbHoisted.credentialRows = [{
+      id: "credential-1",
+      kind: "slack_webhook",
+      secretRef: "SLACK_WEBHOOK_V1",
+      updatedAt: new Date("2026-05-28T00:00:00.000Z"),
+    }];
     resolveRefsMock.mockResolvedValue([{ workflowId: "wf-1", workflowName: "Billing", nodeIds: ["n1"] }]);
     rotateMock.mockResolvedValue({ ok: true, updatedAt: new Date("2026-05-29T00:00:00.000Z") });
 
@@ -168,6 +232,7 @@ describe("POST /credentials/:name/bulk-update", () => {
 
     expect(payload.ok).toBe(true);
     expect(payload.affectedCount).toBe(1);
+    expect(txHoisted.forUpdate).toHaveBeenCalledWith("update");
     // Rotation runs inside the withAuditTx transaction, so it's called with
     // the input AND the tx handle.
     expect(rotateMock).toHaveBeenCalledWith({
@@ -176,7 +241,7 @@ describe("POST /credentials/:name/bulk-update", () => {
       newSecretRef: "SLACK_WEBHOOK_V2",
       ifMatchUpdatedAt: "2026-05-28T00:00:00.000Z",
     }, expect.anything());
-    // The env-var name is never on the wire — no secretRef in the response.
+    // Neither reference form is ever on the wire.
     expect("secretRef" in payload).toBe(false);
     expect(JSON.stringify(payload)).not.toContain("SLACK_WEBHOOK_V2");
     // The audit row is written via the tx-bound audit (atomic with the swap),
@@ -242,11 +307,39 @@ describe("POST /credentials — optional expiry", () => {
       name: "gh", kind: "github_token", secretRef: "GH_TOKEN", expiresAt: future,
     });
     expect(status).toBe(200);
-    expect(auditActionMock).toHaveBeenCalledWith(
-      AUTH,
-      "credential.created",
-      expect.objectContaining({ metadata: expect.objectContaining({ hasExpiry: true }) }),
+    expect(txHoisted.auditCalls[0]).toMatchObject({
+      action: "credential.created",
+      metadata: expect.objectContaining({ hasExpiry: true, storage: "legacy" }),
+    });
+  });
+
+  it("accepts a managed secret once and never persists it on the credential row or audit", async () => {
+    const secretValue = "pd-token-value";
+    const { status, payload } = await callRoute("POST", "/credentials", {
+      name: "pagerduty",
+      kind: "pagerduty_api_token",
+      secretValue,
+    });
+
+    expect(status).toBe(200);
+    expect(typeof payload.id).toBe("string");
+    expect(secretStoreHoisted.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orgId: "org-1",
+        credentialId: payload.id,
+        secretValue,
+        createdBy: "user-1",
+      }),
+      expect.objectContaining({ insert: expect.any(Function), select: expect.any(Function) }),
     );
+    expect(txHoisted.insertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: payload.id,
+        secretRef: `janusly-secret://${payload.id}`,
+      }),
+    );
+    expect(JSON.stringify(txHoisted.auditCalls)).not.toContain(secretValue);
+    expect(JSON.stringify(payload)).not.toContain(secretValue);
   });
 
   it("rejects a past expiresAt with credentials_invalid_expiry (400)", async () => {
