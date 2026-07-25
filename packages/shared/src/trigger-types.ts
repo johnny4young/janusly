@@ -3,7 +3,7 @@
  * types plus their Zod 4 config schemas and the normalized inbound-payload
  * schemas the ingestion seam validates before spawning a run.
  *
- * Four trigger node types extend the runtime's existing trigger surface
+ * Five trigger node types extend the runtime's existing trigger surface
  * (`webhook` / `schedule` / `approval`) with event-driven starts:
  *   - `email_received` — a per-org alias receives mail; the relay POSTs a
  *     normalized payload to the ingestion seam.
@@ -13,11 +13,13 @@
  *     notification (MCP 2025-06-18 subscription primitive).
  *   - `webhook_received` — an authenticated, idempotent JSON event sent to
  *     the generic HTTP ingestion seam.
+ *   - `pagerduty_incident` — a PagerDuty V3 webhook verified against a
+ *     tenant credential before a durable workflow run is started.
  *
- * The grammar cap on AI generation stays at 11 branches — these four types
- * are NOT emitted by `/ai/generate-workflow`. The LLM emits a `noop`
- * placeholder named after the requested trigger and the operator promotes it
- * in the Inspector (mirror of the `wait_*` / `schedule_*` convention).
+ * The grammar cap on AI generation stays bounded — the generic trigger types
+ * are not emitted by the LLM. PagerDuty off-hours intent is compiled by a
+ * deterministic server-side recipe into a complete workflow, while the
+ * remaining trigger types use operator-promoted placeholders.
  *
  * This module lives in `@janusly/shared` (zero runtime deps beyond Zod) so
  * the engine (config validation + run spawn), the API (ingestion route +
@@ -56,6 +58,7 @@ export const triggerNodeTypeValues = [
   "email_received",
   "file_dropped",
   "mcp_server_event",
+  "pagerduty_incident",
 ] as const;
 
 /** Zod enum derived from `triggerNodeTypeValues`. */
@@ -185,12 +188,33 @@ export const McpServerEventConfigSchema = z
   })
   .passthrough();
 
+/**
+ * PagerDuty V3 webhook trigger config. The callback URL is derived from the
+ * saved workflow + node ids; the signing value remains in Secret Store.
+ */
+export const PagerDutyIncidentConfigSchema = z
+  .object({
+    webhookCredential: z
+      .string()
+      .trim()
+      .min(1, "pagerduty_incident.webhookCredential is required")
+      .max(200),
+    rateLimitPerMin: z
+      .number()
+      .int()
+      .min(1)
+      .max(TRIGGER_RATE_LIMIT_MAX_PER_MIN)
+      .optional(),
+  })
+  .passthrough();
+
 /** Per-trigger-type config schema registry (declared `satisfies` for inference). */
 export const TRIGGER_CONFIG_SCHEMAS = {
   webhook_received: WebhookReceivedConfigSchema,
   email_received: EmailReceivedConfigSchema,
   file_dropped: FileDroppedConfigSchema,
   mcp_server_event: McpServerEventConfigSchema,
+  pagerduty_incident: PagerDutyIncidentConfigSchema,
 } satisfies Record<TriggerNodeType, z.ZodTypeAny>;
 
 /** Mapped type — `TriggerConfigByType["email_received"]` is the inferred config shape. */
@@ -202,6 +226,7 @@ export type EmailReceivedConfig = z.infer<typeof EmailReceivedConfigSchema>;
 export type WebhookReceivedConfig = z.infer<typeof WebhookReceivedConfigSchema>;
 export type FileDroppedConfig = z.infer<typeof FileDroppedConfigSchema>;
 export type McpServerEventConfig = z.infer<typeof McpServerEventConfigSchema>;
+export type PagerDutyIncidentConfig = z.infer<typeof PagerDutyIncidentConfigSchema>;
 
 // ---------------------------------------------------------------------------
 // Normalized inbound-payload schemas — what the ingestion seam accepts after
@@ -269,10 +294,26 @@ export const WebhookReceivedPayloadSchema = z.object({
   receivedAt: z.string().trim().max(64).optional(),
 });
 
+/**
+ * Bounded PagerDuty event projection persisted in `trigger_events` and made
+ * available to downstream workflow nodes. Raw webhook bodies are never stored.
+ */
+export const PagerDutyIncidentPayloadSchema = z.object({
+  eventId: z.string().trim().min(1).max(300),
+  eventType: z.string().trim().min(1).max(120),
+  incidentId: z.string().trim().min(1).max(300),
+  incidentTitle: z.string().max(2_000).nullable(),
+  serviceId: z.string().trim().min(1).max(300).nullable(),
+  urgency: z.string().trim().min(1).max(100).nullable(),
+  occurredAt: z.iso.datetime({ offset: true }),
+  receivedAt: z.iso.datetime({ offset: true }),
+});
+
 export type EmailReceivedPayload = z.infer<typeof EmailReceivedPayloadSchema>;
 export type FileDroppedPayload = z.infer<typeof FileDroppedPayloadSchema>;
 export type McpServerEventPayload = z.infer<typeof McpServerEventPayloadSchema>;
 export type WebhookReceivedPayload = z.infer<typeof WebhookReceivedPayloadSchema>;
+export type PagerDutyIncidentPayload = z.infer<typeof PagerDutyIncidentPayloadSchema>;
 
 /** Closed enum of structured trigger-event lifecycle statuses persisted in `trigger_events`. */
 /**

@@ -14,6 +14,7 @@ import {
   FileDroppedPayloadSchema,
   MAX_ATTACHMENTS,
   McpServerEventConfigSchema,
+  PagerDutyIncidentConfigSchema,
   McpServerEventPayloadSchema,
   WebhookReceivedConfigSchema,
   WebhookReceivedPayloadSchema,
@@ -42,7 +43,27 @@ describe("isTriggerNodeType", () => {
   });
 
   it("the closed enum has exactly the supported trigger types", () => {
-    expect([...triggerNodeTypeValues]).toEqual(["webhook_received", "email_received", "file_dropped", "mcp_server_event"]);
+    expect([...triggerNodeTypeValues]).toEqual([
+      "webhook_received",
+      "email_received",
+      "file_dropped",
+      "mcp_server_event",
+      "pagerduty_incident",
+    ]);
+  });
+});
+
+describe("PagerDutyIncidentConfigSchema (config validation)", () => {
+  it("requires a stored signing credential and bounds the ingress rate", () => {
+    expect(PagerDutyIncidentConfigSchema.safeParse({
+      webhookCredential: "pagerduty-webhook",
+      rateLimitPerMin: 120,
+    }).success).toBe(true);
+    expect(PagerDutyIncidentConfigSchema.safeParse({}).success).toBe(false);
+    expect(PagerDutyIncidentConfigSchema.safeParse({
+      webhookCredential: "pagerduty-webhook",
+      rateLimitPerMin: 0,
+    }).success).toBe(false);
   });
 });
 

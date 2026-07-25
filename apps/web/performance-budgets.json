@@ -34,7 +34,7 @@
     }
   },
   "baselineGzipKiB": {
-    "api.js": 2.89,
+    "api.js": 3.31,
     "App.js": 49.81,
     "canvas-node-drag.js": 0.2,
     "CelebrationBurst.js": 0.27,
@@ -46,6 +46,7 @@
     "ExperimentsPanel.js": 4.18,
     "helpers.js": 2.87,
     "icons-vendor.js": 16.31,
+    "identity-context.js": 0.14,
     "index.css": 36.52,
     "LoadingSkeleton.js": 0.41,
     "MembersPanel.js": 2.42,
@@ -72,7 +73,7 @@
     "SnippetInsertMenu.js": 4.19,
     "SolutionPacksPanel.js": 1.75,
     "store.js": 3.93,
-    "constants.js": 1.93,
+    "constants.js": 2.17,
     "catalog-en.js": 56.63,
     "catalog-es.js": 62.5,
     "supabase-runtime.js": 50.25,

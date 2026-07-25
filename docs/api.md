@@ -107,7 +107,7 @@ that permission is the authorization gate.
 | Health | `GET /health` | public | Liveness plus additive public rate-limiter degradation snapshot. |
 | Rate limiter admin | `GET /system/rate-limiter` | admin | Process-local Redis limiter degradation details. |
 | Tools/templates/plugins | `GET /tools`, `GET /templates`, `GET /plugins`, `POST /plugins/install` | authenticated / admin install | Tool registry, static workflow templates, installed-plugin catalog. |
-| Org config | `GET /org/config`, `POST /org/config` | viewer / admin + `org.config.write` | Closed-catalog tenant runtime overrides; secret material stays in env/vault-backed credentials. |
+| Org config | `GET /org/config`, `POST /org/config` | viewer / admin + `org.config.write` | Closed-catalog tenant runtime overrides; secret material stays behind credentials (encrypted Secret Store or env reference). |
 | Permissions/roles | `GET /org/permissions/catalog`, `GET /org/roles`, `POST /org/roles`, `POST /org/roles/:name`, `DELETE /org/roles/:name` | viewer / admin + `org.permissions.write` | Built-in role overrides, custom roles, admin-floor coercion, role-in-use delete guard. |
 | Members/invites | `GET /members`, `GET /members/invitations`, `POST /members/invite`, `POST /members/invitations/:id/revoke`, `POST /members/role`, `DELETE /members?userId=` | viewer/admin + member perms | Org membership and invitation lifecycle, including custom role names. |
 | SSO | `GET /org/sso/connections`, `POST /org/sso/connections`, `POST /org/sso/connections/:id`, `DELETE /org/sso/connections/:id`, `GET /auth/sso/start`, `GET /auth/sso/callback` | admin for CRUD; public for flow | WorkOS connection CRUD plus HMAC state/nonce SSO redirect flow. |
@@ -116,7 +116,7 @@ that permission is the authorization gate.
 | Workflow CRUD/readiness | `GET /workflows`, `POST /workflows/save`, `GET /workflows/versions`, `GET /workflows/latest`, `DELETE /workflows/:id`, `POST /validate`, `POST /workflows/readiness` | viewer/editor | Structural validation plus production-readiness checks. |
 | Workflow operations | `POST /workflows/rollback`, `POST /workflows/:id/slo`, `GET /workflows/:id/schedule-history`, `GET /workflows/health`, `GET /workflows/health/delta`, `GET /workflows/:id/metadata`, `POST /workflows/:id/metadata`, `GET /billing/budget`, `POST /workflows/:id/budget` | viewer/editor/admin by route | Rollback, SLO, schedule observability, health scoring, metadata, and cost-budget overrides. |
 | Runs | `POST /start`, `GET /runs`, `GET /run`, `GET /run/usage`, `GET /status`, `GET /runs/:id/stream`, `POST /resume`, `POST /run/cancel`, `POST /runs/replay-lab`, `POST /runs/replay-lab/fork`, `GET /runs/compare`, `GET /causal` | viewer/editor + run perms | Start, poll, inspect bounded resource usage, stream, resume, cancel, sandbox replay, fork, compare, and router explainability. |
-| Credentials | `GET /credentials`, `GET /credentials/health`, `POST /credentials`, `POST /credentials/:name/bulk-update`, `POST /credentials/:name/expiry` | viewer/admin + credential perms | Operator-facing credential rows; health and rotation never echo `secretRef`. Optional operator-declared `expiresAt` powers the expiry-warning alert. |
+| Credentials | `GET /credentials`, `GET /credentials/health`, `POST /credentials`, `POST /credentials/:name/bulk-update`, `DELETE /credentials/:name`, `POST /credentials/:name/expiry` | viewer/admin + credential perms | Operator-facing credential rows; values default to the encrypted Secret Store (`storage: "managed"`), and health/rotation never echo secret material. Optional operator-declared `expiresAt` powers the expiry-warning alert. |
 | AI helpers | `GET /ai/health`, `POST /ai/generate-workflow`, `POST /ai/explain-workflow`, `POST /ai/review-workflow`, `POST /ai/patch-workflow`, `POST /ai/suggest-improvement`, `POST /ai/explain-run` | `ai.write`; editor additionally required for patch/suggest | Provider-neutral LLM surfaces with deterministic fallback/audit contracts. Generation and patch also expose strict `/v1` aliases. |
 | DLQ/recovery loop | `GET /dlq`, `GET /dlq/clusters`, `GET /dlq/cluster-members`, `POST /dlq/resolve`, `POST /dlq/validate-fix`, `POST /dlq/cluster-apply`, `POST /dlq/replay`, `GET /recovery/metrics`, `POST /recovery/feedback` | viewer/editor + DLQ perms | Dead-letter triage, validation sandbox, clustered replay, metrics, and feedback. |
 | Recovery items | `GET /recovery/items`, `GET /recovery/items/:id`, `GET /recovery/items/:id/children`, `POST /recovery/items/:id/acknowledge`, `POST /recovery/items/:id/in-progress`, `POST /recovery/items/:id/waiting-external`, `POST /recovery/items/:id/escalate`, `POST /recovery/items/:id/assign`, `POST /recovery/items/:id/resolve`, `POST /recovery/items/:id/reopen`, `POST /recovery/items/:id/comment`, `POST /recovery/items/:id/evidence`, `POST /recovery/items/:id/handoff` | viewer/editor + recovery perms | Incident workflow, evidence export, and cross-team handoff. |
@@ -722,13 +722,50 @@ Returns `409 Conflict` if the user already belongs to the org.
 
 ### `GET /credentials` / `GET /credentials/health` / `POST /credentials`
 
-Credentials are operator-managed name/kind rows that point at an environment variable name (`secretRef`). `GET /credentials` intentionally omits `secretRef` (but includes `expiresAt`); use `GET /credentials/health` for a safe `secretRefPresent` boolean, `expiresAt`, and referencing workflow ids. Requires `admin` for writes.
+Credentials are operator-managed name/kind bindings. New values use the encrypted tenant Secret Store by default; legacy environment-variable references remain available for migration. `GET /credentials` intentionally omits both reference forms and reports only `storage: "managed" | "environment"` plus safe metadata. Use `GET /credentials/health` for a safe `secretRefPresent` boolean, `expiresAt`, and referencing workflow ids. Requires `admin` plus `credentials.write` for writes.
 
 ```json
-{ "name": "incidents-slack", "kind": "slack_webhook", "secretRef": "INCIDENTS_SLACK_WEBHOOK_URL", "expiresAt": "2026-09-01T00:00:00.000Z" }
+{ "name": "incidents-slack", "kind": "slack_webhook", "secretValue": "https://hooks.slack.com/services/replace-me", "expiresAt": "2026-09-01T00:00:00.000Z" }
 ```
 
 `expiresAt` is optional operator-declared metadata (a future ISO date, or omit for none) — never the secret value. It powers the `credential.expiring` alert trigger + the Credentials panel expiry badge.
+
+Creation accepts exactly one of `secretValue` (managed, recommended) or
+`secretRef` (legacy env-var name); managed values are limited to 64 KiB.
+Errors: 400 `credentials_fields_required` / `credentials_invalid_secret_ref`,
+409 `credentials_conflict` (the name already exists in this organization), 500
+`credentials_secret_store_unavailable` (deployment root key missing or
+malformed — see the Credential Secret Store section of
+[docs/configuration.md](configuration.md)), 500 `credentials_create_failed`
+(other failure). Audited as `credential.created` (kind + storage only). Secret
+values and references are never returned or included in audits.
+
+### `POST /credentials/:name/bulk-update`
+
+Rotates one credential's secret under optimistic concurrency. Preview first
+with `{ "dryRun": true }` — returns
+`{ credentialName, kind, updatedAt, affected, affectedCount }` (the workflows
+referencing the credential) without mutating or auditing. Commit with exactly
+one of `newSecretValue` (managed) or `newSecretRef` (legacy env-var name) plus
+the **mandatory** `ifMatch` (the `updatedAt` token from the preview). The
+commit is one transaction: row lock → `ifMatch` re-check → new encrypted
+version → reference swap → revocation of the previous managed version →
+`credential.bulk_updated` audit (metadata only). The response repeats
+`affected` / `affectedCount` plus the new `updatedAt` token.
+
+Errors: 400 `credentials_if_match_required` / `credentials_if_match_invalid` /
+`credentials_invalid_secret_ref`, 404 `credentials_not_found`, 409
+`credential_rotation_conflict` (changed since the preview — re-preview and
+retry), 500 `credentials_secret_store_unavailable` /
+`credentials_rotation_failed`.
+
+### `DELETE /credentials/:name`
+
+Deletes the credential row and revokes its active managed secret version in
+the same transaction (revoked version metadata is kept as forensic history; a
+legacy environment reference is untouched — deleting the row never unsets an
+env var). `admin` + `credentials.write`; audited as `credential.revoked`.
+Errors: 404 `credentials_not_found`, 500 `credentials_revoke_failed`.
 
 ### `POST /credentials/:name/expiry`
 
@@ -746,7 +783,42 @@ Integration tools reference credentials by operator-facing name, for example:
 }
 ```
 
-Direct `http` nodes do not dereference `credentials` rows. They can use supported env-backed templates such as `{{secret.SLACK_BOT_TOKEN}}` or `{{env.SLACK_BOT_TOKEN}}` in headers.
+Direct `http` nodes do not dereference `credentials` rows. They can still use deployment-owned env templates such as `{{secret.SLACK_BOT_TOKEN}}` or `{{env.SLACK_BOT_TOKEN}}` in headers.
+
+### PagerDuty workflow generation and callback
+
+Create `pagerduty_api_token` and `pagerduty_webhook_secret` credentials, then
+send the desired automation to the normal generation endpoint:
+
+```http
+POST /ai/generate-workflow
+Content-Type: application/json
+```
+
+```json
+{
+  "prompt": "When PagerDuty alerts user PUSER123 outside working hours 09:00 to 18:00 in America/Bogota, acknowledge it and snooze it for 12 hours. Use API credential pagerduty-api and webhook credential pagerduty-webhook for operator@example.com."
+}
+```
+
+Recognized off-hours intent returns `mode: "fallback"` without `aiError`: this
+means Janusly compiled the safety-sensitive graph locally without an LLM. Save
+the returned workflow through `POST /workflows/save`. Its
+`pagerduty_incident` node exposes the callback:
+
+```text
+POST /webhooks/pagerduty/:workflowId/:nodeId
+X-PagerDuty-Signature: v1=<HMAC-SHA256 of the exact raw body>
+```
+
+The path selects one active saved trigger but does not authorize it. The
+tenant-scoped signing credential must verify before the payload enters the
+shared durable trigger pipeline. A successful new delivery returns
+`{ "ok": true, "triggerEventId": "...", "runId": "..." }`; a relay retry with
+the same PagerDuty event id returns the original run with `duplicate: true`.
+The generated flow reads the authoritative incident, makes the assignment,
+filter, and working-hours decision deterministically, then acknowledges and
+snoozes only when that decision matches.
 
 ### `GET /plugins`
 

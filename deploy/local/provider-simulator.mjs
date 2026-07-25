@@ -14,11 +14,13 @@ const port = Number(process.env.PORT ?? 4010);
 const dataDir = process.env.SIMULATOR_DATA_DIR ?? "/data";
 const statePath = `${dataDir}/state.json`;
 const requestPath = `${dataDir}/requests.jsonl`;
+const pagerDutyStatePath = `${dataDir}/pagerduty-incidents.json`;
 const bodyLimit = 1_000_000;
-const providers = ["github", "slack", "webhook", "email"];
+const providers = ["github", "slack", "webhook", "email", "pagerduty"];
 const modes = ["success", "failure", "malformed"];
 const state = Object.fromEntries(providers.map((provider) => [provider, "success"]));
 let recordTail = Promise.resolve();
+const pagerDutyIncidents = new Map();
 
 await mkdir(dataDir, { recursive: true });
 try {
@@ -28,6 +30,18 @@ try {
   }
 } catch {
   // First boot has no state file.
+}
+try {
+  const persistedIncidents = JSON.parse(await readFile(pagerDutyStatePath, "utf8"));
+  if (Array.isArray(persistedIncidents)) {
+    for (const incident of persistedIncidents) {
+      if (incident && typeof incident === "object" && typeof incident.id === "string") {
+        pagerDutyIncidents.set(incident.id, incident);
+      }
+    }
+  }
+} catch {
+  // First boot has no PagerDuty incident state.
 }
 
 function send(res, statusCode, body, contentType = "application/json") {
@@ -62,7 +76,35 @@ function providerFor(pathname) {
   if (pathname.startsWith("/slack/")) return "slack";
   if (pathname === "/webhook") return "webhook";
   if (pathname === "/email/send") return "email";
+  if (pathname.startsWith("/pagerduty/")) return "pagerduty";
   return null;
+}
+
+function pagerDutyIncident(id) {
+  const existing = pagerDutyIncidents.get(id);
+  if (existing) return existing;
+  const incident = {
+    id,
+    type: "incident",
+    status: "triggered",
+    title: `Local PagerDuty incident ${id}`,
+    urgency: "high",
+    service: { id: "PLOCALSERVICE", type: "service_reference", summary: "Local service" },
+    assignments: [{
+      at: new Date().toISOString(),
+      assignee: { id: "PLOCALUSER", type: "user_reference", summary: "Local responder" },
+    }],
+  };
+  pagerDutyIncidents.set(id, incident);
+  return incident;
+}
+
+async function persistPagerDutyIncidents() {
+  await writeFile(
+    pagerDutyStatePath,
+    `${JSON.stringify([...pagerDutyIncidents.values()], null, 2)}\n`,
+    "utf8",
+  );
 }
 
 async function recordRequest(provider, req, url, body) {
@@ -134,7 +176,7 @@ const server = createServer(async (req, res) => {
     }
 
     const provider = providerFor(url.pathname);
-    if (req.method !== "POST" || !provider) {
+    if (!provider) {
       send(res, 404, { error: "not_found" });
       return;
     }
@@ -142,6 +184,50 @@ const server = createServer(async (req, res) => {
     const body = await readBody(req);
     const entry = await recordRequest(provider, req, url, body);
     const mode = state[provider];
+
+    if (provider === "pagerduty") {
+      if (mode === "failure") {
+        send(res, 503, { error: "simulated PagerDuty outage" });
+        return;
+      }
+      const incidentMatch = /^\/pagerduty\/incidents\/([^/]+)$/u.exec(url.pathname);
+      const snoozeMatch = /^\/pagerduty\/incidents\/([^/]+)\/snooze$/u.exec(url.pathname);
+      if (req.method === "GET" && incidentMatch) {
+        if (mode === "malformed") send(res, 200, { incident: { id: incidentMatch[1] } });
+        else send(res, 200, { incident: pagerDutyIncident(incidentMatch[1]) });
+        return;
+      }
+      if (req.method === "PUT" && incidentMatch) {
+        if (
+          body.json?.incident?.id !== incidentMatch[1]
+          || body.json?.incident?.status !== "acknowledged"
+        ) {
+          send(res, 400, { error: "invalid incident update" });
+          return;
+        }
+        const incident = pagerDutyIncident(incidentMatch[1]);
+        incident.status = "acknowledged";
+        incident.last_status_change_at = new Date().toISOString();
+        await persistPagerDutyIncidents();
+        send(res, 200, { incident });
+        return;
+      }
+      if (req.method === "POST" && snoozeMatch) {
+        const incident = pagerDutyIncident(snoozeMatch[1]);
+        const duration = Number(body.json?.duration);
+        if (!Number.isInteger(duration) || duration < 60 || duration > 604_800) {
+          send(res, 400, { error: "invalid snooze duration" });
+          return;
+        }
+        incident.status = "acknowledged";
+        incident.snoozed_until = new Date(Date.now() + duration * 1000).toISOString();
+        await persistPagerDutyIncidents();
+        send(res, 201, { incident });
+        return;
+      }
+      send(res, 404, { error: "not_found" });
+      return;
+    }
 
     if (provider === "github") {
       const [statusCode, payload] = githubResponse(url.pathname, mode, entry);

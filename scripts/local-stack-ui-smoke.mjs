@@ -31,9 +31,21 @@ await new Promise((resolve, reject) => {
 });
 
 await new Promise((resolve, reject) => {
+  const child = spawn(process.execPath, ["scripts/local-pagerduty-smoke.mjs"], {
+    cwd: root,
+    stdio: "inherit",
+  });
+  child.on("error", reject);
+  child.on("exit", (code) => code === 0
+    ? resolve()
+    : reject(new Error(`local PagerDuty smoke exited ${code}`)));
+});
+
+await new Promise((resolve, reject) => {
   const child = spawn("pnpm", [
     "--filter", "@janusly/web", "exec", "playwright", "test",
-    "e2e/local-persistent-stack.spec.ts", "--project=chromium", "--workers=1",
+    "e2e/local-persistent-stack.spec.ts", "e2e/pagerduty-prompt-flow.spec.ts",
+    "--project=chromium", "--workers=1",
   ], {
     cwd: root,
     stdio: "inherit",

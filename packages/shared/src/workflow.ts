@@ -66,13 +66,14 @@ export const nodeTypeValues = [
   "schedule",
   "mcp_tool",
   // Event-driven trigger node types (config + inbound-payload contracts in
-  // `trigger-types.ts`). NOT emitted by AI generation — operators promote a
-  // `noop` placeholder in the Inspector, mirroring the `wait_*` / `schedule_*`
-  // convention. The grammar cap on `/ai/generate-workflow` stays at 11.
+  // `trigger-types.ts`). Generic types use operator-promoted placeholders;
+  // PagerDuty off-hours intent is compiled into a complete deterministic flow
+  // by the prompt-generation route without expanding the LLM grammar.
   "webhook_received",
   "email_received",
   "file_dropped",
   "mcp_server_event",
+  "pagerduty_incident",
 ] as const;
 
 /** Zod enum derived from `nodeTypeValues`; powers `NodeSchema`'s `type` field. */

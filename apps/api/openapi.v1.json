@@ -196,7 +196,8 @@
                                   "webhook_received",
                                   "email_received",
                                   "file_dropped",
-                                  "mcp_server_event"
+                                  "mcp_server_event",
+                                  "pagerduty_incident"
                                 ]
                               },
                               "label": {
@@ -695,7 +696,8 @@
                                           "webhook_received",
                                           "email_received",
                                           "file_dropped",
-                                          "mcp_server_event"
+                                          "mcp_server_event",
+                                          "pagerduty_incident"
                                         ]
                                       },
                                       "label": {
@@ -876,7 +878,8 @@
                                                 "webhook_received",
                                                 "email_received",
                                                 "file_dropped",
-                                                "mcp_server_event"
+                                                "mcp_server_event",
+                                                "pagerduty_incident"
                                               ]
                                             },
                                             "label": {
@@ -2654,7 +2657,8 @@
                                 "webhook_received",
                                 "email_received",
                                 "file_dropped",
-                                "mcp_server_event"
+                                "mcp_server_event",
+                                "pagerduty_incident"
                               ]
                             },
                             "label": {
@@ -8750,7 +8754,8 @@
                                 "webhook_received",
                                 "email_received",
                                 "file_dropped",
-                                "mcp_server_event"
+                                "mcp_server_event",
+                                "pagerduty_incident"
                               ]
                             },
                             "label": {
@@ -9642,7 +9647,8 @@
                                         "webhook_received",
                                         "email_received",
                                         "file_dropped",
-                                        "mcp_server_event"
+                                        "mcp_server_event",
+                                        "pagerduty_incident"
                                       ]
                                     },
                                     "label": {
@@ -11355,7 +11361,8 @@
                                           "webhook_received",
                                           "email_received",
                                           "file_dropped",
-                                          "mcp_server_event"
+                                          "mcp_server_event",
+                                          "pagerduty_incident"
                                         ]
                                       },
                                       "label": {
@@ -12112,7 +12119,8 @@
                             "webhook_received",
                             "email_received",
                             "file_dropped",
-                            "mcp_server_event"
+                            "mcp_server_event",
+                            "pagerduty_incident"
                           ]
                         },
                         "label": {
@@ -12730,7 +12738,8 @@
                                         "webhook_received",
                                         "email_received",
                                         "file_dropped",
-                                        "mcp_server_event"
+                                        "mcp_server_event",
+                                        "pagerduty_incident"
                                       ]
                                     },
                                     "label": {

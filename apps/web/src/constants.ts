@@ -69,6 +69,7 @@ export const nodePresets: Record<string, JsonObject> = {
   email_received: { aliasKey: '', dkimRequired: true },
   file_dropped: { bucket: '', prefix: '' },
   mcp_server_event: { connectionAlias: '', resourceUri: '' },
+  pagerduty_incident: { webhookCredential: 'pagerduty-webhook', rateLimitPerMin: 120 },
 }
 
 /** Ordered list of supported node-type ids — derived from `nodePresets`. */
@@ -234,6 +235,12 @@ export function getNodeConfigSummary(type: string, config: JsonObject): string {
     const resource = readString(config.resourceUri)
     if (alias && resource) return t('nodeSummary.mcp_server_event.set', { alias, resource })
     return t('nodeSummary.mcp_server_event.empty')
+  }
+  if (type === 'pagerduty_incident') {
+    const credential = readString(config.webhookCredential)
+    return credential
+      ? t('nodeSummary.pagerduty_incident.set', { credential })
+      : t('nodeSummary.pagerduty_incident.empty')
   }
   return t('nodeSummary.fallback')
 }

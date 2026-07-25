@@ -1,7 +1,8 @@
 /**
  * Repository for `trigger_events` rows — structured inbound-trigger events
  * for the event-driven trigger node types (`webhook_received`,
- * `email_received`, `file_dropped`, `mcp_server_event`).
+ * `email_received`, `file_dropped`, `mcp_server_event`,
+ * `pagerduty_incident`).
  *
  * The API ingestion seam (`apps/api/src/routes/trigger-ingest-routes.ts`)
  * persists one `received` row for every accepted inbound event BEFORE the run
@@ -14,10 +15,10 @@
  * - `apps/api/src/routes/trigger-ingest-routes.ts` — ingestion + replay.
  *
  * Invariants:
- * - Multi-tenant scope: every function takes `orgId` and filters via
- *   `eq(triggerEvents.orgId, orgId)`. There is NO un-scoped read here — an
- *   inbound event's org is resolved by the seam from the authenticated
- *   caller, never from a claim in the payload.
+ * - Multi-tenant scope: ordinary functions take `orgId` and filter via
+ *   `eq(triggerEvents.orgId, orgId)`. The sole public-callback exception
+ *   resolves a globally unique workflow id first, returns its stored org id,
+ *   and still requires provider signature verification before ingestion.
  * - `recordTriggerEvent` is idempotent on `(orgId, dedupeKey)` via
  *   `ON CONFLICT DO NOTHING` so a relay retry with the same upstream message
  *   id converges to one row (and one run). The `wasCreated` flag tells the
@@ -530,5 +531,39 @@ export async function resolveTriggerNode(
   return match;
 }
 
+export type ResolvedPublicTriggerNode = {
+  orgId: string;
+  resolved: ResolvedTriggerNode;
+};
+
+/**
+ * Resolve an exact trigger selected by a public callback path.
+ *
+ * The workflow id is globally unique and only selects tenant context; it does
+ * not authorize ingestion. The caller must verify the provider signature with
+ * a credential resolved under the returned `orgId` before it starts a run.
+ */
+export async function resolvePublicTriggerNode(
+  workflowId: string,
+  triggerType: TriggerNodeType,
+  nodeId: string,
+): Promise<ResolvedPublicTriggerNode | null> {
+  const parents = await db
+    .select({ orgId: workflows.orgId })
+    .from(workflows)
+    .where(and(eq(workflows.id, workflowId), isNull(workflows.deletedAt)))
+    .limit(1);
+  const orgId = parents[0]?.orgId;
+  if (!orgId) return null;
+  const resolved = await resolveTriggerNode(
+    orgId,
+    triggerType,
+    () => true,
+    { workflowId, nodeId },
+  );
+  return resolved ? { orgId, resolved } : null;
+}
+
 // Multi-tenant invariant: every read/write keeps orgId in the predicate; the
-// resolver only ever loads the caller-authenticated org's versions.
+// public callback resolves orgId from the workflow row and verifies a
+// tenant-scoped provider credential before ingestion.

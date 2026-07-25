@@ -1,16 +1,18 @@
 /**
  * Integration tools — third-party API surfaces exposed as runtime tools.
  *
- * Three tools today:
+ * Provider tools today include:
  *   - `slack.post` — POST to a Slack Incoming Webhook URL.
  *   - `github.create_issue` — POST to GitHub's issues REST endpoint.
  *   - `webhook.send` — signed outbound HTTP POST (Stripe-style HMAC sig).
+ *   - PagerDuty incident read, policy evaluation, acknowledge, and snooze.
  *
- * All three follow the same shape:
+ * Provider-backed tools follow the same shape:
  *   1. Resolve the credential by name from the persisted `credentials` row
  *      (multi-tenant scoped via `getCredentialByName`).
- *   2. Read the actual secret from `process.env[credential.secretRef]`. The
- *      secret-ref env-var name is NEVER echoed in errors / logs / usage
+ *   2. Resolve the actual value through the central SecretStore. Managed
+ *      encrypted values and legacy environment references share this path.
+ *      The secret reference is NEVER echoed in errors / logs / usage
  *      rows — failures return a generic "credential URL/token missing".
  *   3. Per-org rate-limit through the injected `getEngineRateLimiter()`.
  *      Fail-open on Redis blips (existing posture).
@@ -25,15 +27,16 @@
  *      `condition` nodes.
  *
  * Used by:
- * - `packages/engine/src/tool-registry.ts` — registers all three tools.
+ * - `packages/engine/src/tool-registry.ts` — registers the tools.
  *
  * Invariants:
  * - No vendor SDKs (`@slack/web-api`, `@octokit/*`, etc.). The closed
  *   chokepoint is `fetchHttpTarget`; new integrations must reuse it.
  * - Workflow JSON never carries credential URLs / API keys / signing
- *   secrets. Slack webhook URLs, GitHub tokens, and signing secrets come
- *   from the credential `name` → env lookup. `webhook.send` still carries
- *   the destination URL as ordinary tool input, but not the signing secret.
+ *   secrets. Slack webhook URLs, GitHub and PagerDuty tokens, and signing
+ *   secrets come from the credential name through the central Secret Store.
+ *   `webhook.send` still carries the destination URL as ordinary tool input,
+ *   but not the signing secret.
  * - The HMAC signature format on `webhook.send` is Stripe-style:
  *   `t=<unix-seconds>,v1=<hex-hmac-sha256>` with the signed body
  *   `<timestamp>.<json-body>`. Receivers can verify with a 5-line check.
@@ -42,7 +45,7 @@
 import { createHmac } from "node:crypto";
 import { z } from "zod";
 
-import { getCredentialByName } from "@janusly/data";
+import { getCredentialByName, resolveCredentialSecretRef } from "@janusly/data";
 import { RATE_LIMIT_WINDOW_MS } from "./constants";
 import { fetchHttpTarget } from "./http-policy";
 import { getIntegrationUsageRecorder } from "./integration-usage";
@@ -69,18 +72,6 @@ export function signWebhookPayload(secret: string, body: string, unixSeconds: nu
   const signed = `${unixSeconds}.${body}`;
   const hex = createHmac("sha256", secret).update(signed).digest("hex");
   return `t=${unixSeconds},v1=${hex}`;
-}
-
-/**
- * Resolve `credential.secretRef` to its env value. Returns `null` (not the
- * env-var name) when missing, so callers surface a generic error without
- * leaking the env-var name. The env-var name in the credential row is an
- * operator-visible config; in error envelopes it is treated as sensitive.
- */
-function resolveSecretRef(secretRef: string): string | null {
-  const value = process.env[secretRef];
-  if (!value || value.trim().length === 0) return null;
-  return value;
 }
 
 /** Slack Incoming Webhook URL must be Slack's canonical hostname for safety. */
@@ -222,6 +213,92 @@ const webhookSendOutput = z.object({
 });
 
 // ──────────────────────────────────────────────────────────────────────────
+// Tools: PagerDuty incident automation
+// ──────────────────────────────────────────────────────────────────────────
+
+const pagerDutyRegion = z.enum(["us", "eu"]);
+
+const pagerDutyIncident = z.object({
+  id: z.string().min(1),
+  status: z.enum(["triggered", "acknowledged", "resolved"]),
+  title: z.string().nullable(),
+  urgency: z.string().nullable(),
+  serviceId: z.string().nullable(),
+  assignedUserIds: z.array(z.string()),
+});
+
+const pagerDutyConnectionInput = z.object({
+  /** Stored credential name (kind: `pagerduty_api_token`). */
+  credential: z.string().min(1),
+  /** PagerDuty requires a From header containing a valid account email. */
+  requesterEmail: z.email(),
+  /** PagerDuty account data residency. */
+  region: pagerDutyRegion.optional().default("us"),
+  /** Optional per-flow outbound call ceiling. */
+  rateLimitPerMin: z.number().int().min(1).max(10_000).optional(),
+});
+
+const pagerDutyIncidentGetInput = pagerDutyConnectionInput.extend({
+  incidentId: z.string().min(1).max(300),
+});
+
+const pagerDutyIncidentGetOutput = z.object({
+  ok: z.boolean(),
+  incident: pagerDutyIncident.optional(),
+  statusCode: z.number().optional(),
+  error: z.string().optional(),
+  latencyMs: z.number(),
+});
+
+const pagerDutyWorkingWindow = z.object({
+  days: z.array(z.number().int().min(0).max(6)).min(1).max(7),
+  start: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/u),
+  end: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/u),
+}).refine((window) => window.start !== window.end, {
+  message: "working window start and end must differ",
+});
+
+const workflowTemplateReference = z.string().regex(/^\{\{[^{}]+\}\}$/u);
+
+const pagerDutyPolicyEvaluateInput = z.object({
+  eventType: z.string().min(1).max(120),
+  occurredAt: z.union([z.iso.datetime({ offset: true }), workflowTemplateReference]),
+  receivedAt: z.union([z.iso.datetime({ offset: true }), workflowTemplateReference]),
+  incident: z.union([pagerDutyIncident, workflowTemplateReference]),
+  pagerDutyUserId: z.string().min(1).max(300),
+  timeZone: z.string().min(1).max(100),
+  workingHours: z.array(pagerDutyWorkingWindow).min(1).max(14),
+  serviceIds: z.array(z.string().min(1).max(300)).max(100).optional().default([]),
+  urgencies: z.array(z.string().min(1).max(100)).max(20).optional().default([]),
+  actionableEventTypes: z.array(z.string().min(1).max(120)).max(20).optional(),
+});
+
+const pagerDutyPolicyEvaluateOutput = z.object({
+  ok: z.literal(true),
+  shouldAct: z.boolean(),
+  reason: z.string(),
+  eventOutsideWorkingHours: z.boolean(),
+  receivedOutsideWorkingHours: z.boolean(),
+  latencyMs: z.number(),
+});
+
+const pagerDutyMutationOutput = z.object({
+  ok: z.boolean(),
+  statusCode: z.number().optional(),
+  error: z.string().optional(),
+  latencyMs: z.number(),
+});
+
+const pagerDutyAcknowledgeInput = pagerDutyConnectionInput.extend({
+  incidentId: z.string().min(1).max(300),
+});
+
+const pagerDutySnoozeInput = pagerDutyConnectionInput.extend({
+  incidentId: z.string().min(1).max(300),
+  durationSeconds: z.number().int().min(60).max(604_800),
+});
+
+// ──────────────────────────────────────────────────────────────────────────
 // Shared executor scaffolding
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -229,7 +306,10 @@ export type IntegrationToolName =
   | "slack.post"
   | "github.create_issue"
   | "github.add_issue_comment"
-  | "webhook.send";
+  | "webhook.send"
+  | "pagerduty.incident.get"
+  | "pagerduty.incident.acknowledge"
+  | "pagerduty.incident.snooze";
 
 type FireRecorderInput = {
   orgId: string;
@@ -270,7 +350,7 @@ type GateResult =
 /**
  * The pre-call gate every integration tool runs:
  *   1. Look up the credential by name (multi-tenant scoped).
- *   2. Resolve `secret_ref` → env value.
+ *   2. Resolve `secret_ref` through the tenant SecretStore.
  *   3. Rate-limit the call.
  *
  * Returns `{ ok: true, credentialSecret }` when ready to call the upstream,
@@ -291,9 +371,9 @@ async function gateIntegrationCall(args: {
   if (!credential) {
     return { ok: false, error: `credential not found: ${args.credentialName}` };
   }
-  const secret = resolveSecretRef(credential.secretRef);
+  const secret = await resolveCredentialSecretRef(args.orgId, credential.secretRef);
   if (!secret) {
-    // Deliberately generic — never echo the secretRef env-var name.
+    // Deliberately generic — never echo the managed/legacy secret reference.
     return { ok: false, error: `credential secret missing for ${args.credentialName}` };
   }
 
@@ -678,6 +758,402 @@ export const githubAddIssueCommentTool = {
       latencyMs,
     });
     return { ok: false, statusCode: result.statusCode, error: message, latencyMs };
+  },
+};
+
+const PAGERDUTY_RESPONSE_MAX_BYTES = 256 * 1024;
+const PAGERDUTY_DEFAULT_RATE_LIMIT_PER_MIN = 120;
+const PAGERDUTY_ACTIONABLE_EVENTS = new Set([
+  "incident.triggered",
+  "incident.reassigned",
+  "incident.escalated",
+  "incident.reopened",
+]);
+
+type PagerDutyToolContext = {
+  orgId?: string;
+  runId?: string;
+  nodeId?: string;
+  workflowId?: string;
+};
+
+type PagerDutyConnectionFields = z.infer<typeof pagerDutyConnectionInput>;
+
+function pagerDutyApiBase(region: "us" | "eu"): string {
+  return localIntegrationSimulatorEndpoint("/pagerduty")
+    ?? (region === "eu" ? "https://api.eu.pagerduty.com" : "https://api.pagerduty.com");
+}
+
+function pagerDutyHeaders(token: string, requesterEmail: string): Record<string, string> {
+  return {
+    accept: "application/vnd.pagerduty+json;version=2",
+    authorization: `Token token=${token}`,
+    "content-type": "application/json",
+    from: requesterEmail,
+  };
+}
+
+function parsePagerDutyIncident(body: string): z.infer<typeof pagerDutyIncident> | null {
+  const parsed = safeParseJson(body);
+  const raw = parsed?.incident;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  const service = record.service && typeof record.service === "object" && !Array.isArray(record.service)
+    ? record.service as Record<string, unknown>
+    : null;
+  const assignments = Array.isArray(record.assignments) ? record.assignments : [];
+  const candidate = {
+    id: record.id,
+    status: record.status,
+    title: typeof record.title === "string" ? record.title.slice(0, 2_000) : null,
+    urgency: typeof record.urgency === "string" ? record.urgency : null,
+    serviceId: typeof service?.id === "string" ? service.id : null,
+    assignedUserIds: assignments.flatMap((assignment) => {
+      if (!assignment || typeof assignment !== "object" || Array.isArray(assignment)) return [];
+      const assignee = (assignment as Record<string, unknown>).assignee;
+      if (!assignee || typeof assignee !== "object" || Array.isArray(assignee)) return [];
+      const id = (assignee as Record<string, unknown>).id;
+      return typeof id === "string" ? [id] : [];
+    }),
+  };
+  const result = pagerDutyIncident.safeParse(candidate);
+  return result.success ? result.data : null;
+}
+
+async function gatePagerDutyCall(
+  tool: Extract<IntegrationToolName, `pagerduty.${string}`>,
+  input: PagerDutyConnectionFields,
+  executionContext: PagerDutyToolContext,
+): Promise<GateResult> {
+  return gateIntegrationCall({
+    orgId: executionContext.orgId,
+    tool,
+    credentialKind: "pagerduty_api_token",
+    credentialName: input.credential,
+    rateLimitPerMin: input.rateLimitPerMin ?? PAGERDUTY_DEFAULT_RATE_LIMIT_PER_MIN,
+  });
+}
+
+async function recordPagerDutyCall(input: {
+  tool: Extract<IntegrationToolName, `pagerduty.${string}`>;
+  credentialName: string;
+  executionContext: PagerDutyToolContext;
+  ok: boolean;
+  statusCode?: number;
+  error?: string;
+  latencyMs: number;
+}): Promise<void> {
+  if (!input.executionContext.orgId) return;
+  await fireIntegrationRecorder({
+    orgId: input.executionContext.orgId,
+    tool: input.tool,
+    credentialName: input.credentialName,
+    executionContext: input.executionContext,
+    ok: input.ok,
+    statusCode: input.statusCode,
+    error: input.error,
+    latencyMs: input.latencyMs,
+  });
+}
+
+function parseMinute(raw: string): number | null {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/u.exec(raw);
+  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+}
+
+function zonedClock(date: Date, timeZone: string): { day: number; minute: number } | null {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(date);
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    const days: Record<string, number> = {
+      Sun: 0,
+      Mon: 1,
+      Tue: 2,
+      Wed: 3,
+      Thu: 4,
+      Fri: 5,
+      Sat: 6,
+    };
+    const day = days[values.weekday ?? ""];
+    const hour = Number(values.hour);
+    const minute = Number(values.minute);
+    return day === undefined || !Number.isInteger(hour) || !Number.isInteger(minute)
+      ? null
+      : { day, minute: hour * 60 + minute };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Safe-default working-hours evaluator. Invalid policy data is treated as
+ * working time, so malformed configuration cannot authorize mutations.
+ */
+export function isWithinPagerDutyWorkingHours(
+  at: Date,
+  timeZone: string,
+  windows: Array<{ days: number[]; start: string; end: string }>,
+): boolean {
+  if (windows.length === 0) return true;
+  const clock = zonedClock(at, timeZone);
+  if (!clock) return true;
+  for (const window of windows) {
+    const start = parseMinute(window.start);
+    const end = parseMinute(window.end);
+    if (start === null || end === null || start === end || window.days.length === 0) return true;
+    if (start < end) {
+      if (window.days.includes(clock.day) && clock.minute >= start && clock.minute < end) return true;
+      continue;
+    }
+    const previousDay = (clock.day + 6) % 7;
+    if (
+      (window.days.includes(clock.day) && clock.minute >= start)
+      || (window.days.includes(previousDay) && clock.minute < end)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export const pagerDutyIncidentGetTool = {
+  name: "pagerduty.incident.get" as const,
+  description: "Read one authoritative PagerDuty incident using a stored API token.",
+  inputSchema: pagerDutyIncidentGetInput,
+  outputSchema: pagerDutyIncidentGetOutput,
+  inputExample: {
+    credential: "pagerduty-api",
+    requesterEmail: "operator@example.com",
+    region: "us",
+    incidentId: "{{context.on_pagerduty.output.event.incidentId}}",
+  },
+  writeSide: false as const,
+  async execute(
+    input: z.infer<typeof pagerDutyIncidentGetInput>,
+    _context: Record<string, unknown>,
+    executionContext: PagerDutyToolContext,
+  ): Promise<z.infer<typeof pagerDutyIncidentGetOutput>> {
+    const start = Date.now();
+    const gate = await gatePagerDutyCall("pagerduty.incident.get", input, executionContext);
+    if (!gate.ok) {
+      const latencyMs = Date.now() - start;
+      await recordPagerDutyCall({
+        tool: "pagerduty.incident.get",
+        credentialName: input.credential,
+        executionContext,
+        ok: false,
+        error: gate.error,
+        latencyMs,
+      });
+      return { ok: false, error: gate.error, latencyMs };
+    }
+    const result = await fetchHttpTarget(
+      `${pagerDutyApiBase(input.region)}/incidents/${encodeURIComponent(input.incidentId)}`,
+      {
+        method: "GET",
+        headers: pagerDutyHeaders(gate.credentialSecret, input.requesterEmail),
+        maxResponseBytes: PAGERDUTY_RESPONSE_MAX_BYTES,
+      },
+    ).catch(() => null);
+    const latencyMs = Date.now() - start;
+    const incident = result?.ok ? parsePagerDutyIncident(result.body) : null;
+    const ok = Boolean(result?.ok && incident && incident.id === input.incidentId);
+    const error = ok ? undefined : `pagerduty incident read failed${result ? ` (${result.statusCode})` : ""}`;
+    await recordPagerDutyCall({
+      tool: "pagerduty.incident.get",
+      credentialName: input.credential,
+      executionContext,
+      ok,
+      statusCode: result?.statusCode,
+      error,
+      latencyMs,
+    });
+    return ok
+      ? { ok: true, incident: incident!, statusCode: result!.statusCode, latencyMs }
+      : { ok: false, statusCode: result?.statusCode, error: error!, latencyMs };
+  },
+};
+
+export const pagerDutyPolicyEvaluateTool = {
+  name: "pagerduty.policy.evaluate" as const,
+  description: "Evaluate PagerDuty event type, assignment, filters, and working hours without an LLM.",
+  inputSchema: pagerDutyPolicyEvaluateInput,
+  outputSchema: pagerDutyPolicyEvaluateOutput,
+  inputExample: {
+    eventType: "{{context.on_pagerduty.output.event.eventType}}",
+    occurredAt: "{{context.on_pagerduty.output.event.occurredAt}}",
+    receivedAt: "{{context.on_pagerduty.output.event.receivedAt}}",
+    incident: "{{context.load_incident.output.result.incident}}",
+    pagerDutyUserId: "PAGERDUTY_USER_ID",
+    timeZone: "UTC",
+    workingHours: [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" }],
+  },
+  writeSide: false as const,
+  async execute(
+    input: z.infer<typeof pagerDutyPolicyEvaluateInput>,
+  ): Promise<z.infer<typeof pagerDutyPolicyEvaluateOutput>> {
+    const start = Date.now();
+    const actionable = new Set(input.actionableEventTypes ?? PAGERDUTY_ACTIONABLE_EVENTS);
+    const eventAt = new Date(input.occurredAt);
+    const receivedAt = new Date(input.receivedAt);
+    const incident = pagerDutyIncident.safeParse(input.incident);
+    if (!incident.success || Number.isNaN(eventAt.getTime()) || Number.isNaN(receivedAt.getTime())) {
+      return {
+        ok: true,
+        shouldAct: false,
+        reason: "invalid_runtime_input",
+        eventOutsideWorkingHours: false,
+        receivedOutsideWorkingHours: false,
+        latencyMs: Date.now() - start,
+      };
+    }
+    const eventOutsideWorkingHours = !isWithinPagerDutyWorkingHours(eventAt, input.timeZone, input.workingHours);
+    const receivedOutsideWorkingHours = !isWithinPagerDutyWorkingHours(receivedAt, input.timeZone, input.workingHours);
+    let reason = "matched";
+    if (!actionable.has(input.eventType)) reason = "event_not_actionable";
+    else if (incident.data.status === "resolved") reason = "incident_resolved";
+    else if (!incident.data.assignedUserIds.includes(input.pagerDutyUserId)) reason = "user_not_assigned";
+    else if (input.serviceIds.length > 0 && (!incident.data.serviceId || !input.serviceIds.includes(incident.data.serviceId))) reason = "service_filtered";
+    else if (input.urgencies.length > 0 && (!incident.data.urgency || !input.urgencies.includes(incident.data.urgency))) reason = "urgency_filtered";
+    else if (!eventOutsideWorkingHours) reason = "event_in_working_hours";
+    else if (!receivedOutsideWorkingHours) reason = "received_in_working_hours";
+    return {
+      ok: true,
+      shouldAct: reason === "matched",
+      reason,
+      eventOutsideWorkingHours,
+      receivedOutsideWorkingHours,
+      latencyMs: Date.now() - start,
+    };
+  },
+};
+
+export const pagerDutyAcknowledgeTool = {
+  name: "pagerduty.incident.acknowledge" as const,
+  description: "Acknowledge one PagerDuty incident using a stored API token.",
+  inputSchema: pagerDutyAcknowledgeInput,
+  outputSchema: pagerDutyMutationOutput,
+  inputExample: {
+    credential: "pagerduty-api",
+    requesterEmail: "operator@example.com",
+    region: "us",
+    incidentId: "{{context.on_pagerduty.output.event.incidentId}}",
+  },
+  writeSide: true as const,
+  async execute(
+    input: z.infer<typeof pagerDutyAcknowledgeInput>,
+    _context: Record<string, unknown>,
+    executionContext: PagerDutyToolContext,
+  ): Promise<z.infer<typeof pagerDutyMutationOutput>> {
+    const start = Date.now();
+    const gate = await gatePagerDutyCall("pagerduty.incident.acknowledge", input, executionContext);
+    if (!gate.ok) {
+      const latencyMs = Date.now() - start;
+      await recordPagerDutyCall({
+        tool: "pagerduty.incident.acknowledge",
+        credentialName: input.credential,
+        executionContext,
+        ok: false,
+        error: gate.error,
+        latencyMs,
+      });
+      return { ok: false, error: gate.error, latencyMs };
+    }
+    const result = await fetchHttpTarget(
+      `${pagerDutyApiBase(input.region)}/incidents/${encodeURIComponent(input.incidentId)}`,
+      {
+        method: "PUT",
+        headers: pagerDutyHeaders(gate.credentialSecret, input.requesterEmail),
+        body: JSON.stringify({
+          incident: {
+            id: input.incidentId,
+            type: "incident_reference",
+            status: "acknowledged",
+          },
+        }),
+        maxResponseBytes: PAGERDUTY_RESPONSE_MAX_BYTES,
+      },
+    ).catch(() => null);
+    const latencyMs = Date.now() - start;
+    const ok = Boolean(result?.ok);
+    const error = ok ? undefined : `pagerduty acknowledge failed${result ? ` (${result.statusCode})` : ""}`;
+    await recordPagerDutyCall({
+      tool: "pagerduty.incident.acknowledge",
+      credentialName: input.credential,
+      executionContext,
+      ok,
+      statusCode: result?.statusCode,
+      error,
+      latencyMs,
+    });
+    return ok
+      ? { ok: true, statusCode: result!.statusCode, latencyMs }
+      : { ok: false, statusCode: result?.statusCode, error: error!, latencyMs };
+  },
+};
+
+export const pagerDutySnoozeTool = {
+  name: "pagerduty.incident.snooze" as const,
+  description: "Snooze one PagerDuty incident for a bounded duration using a stored API token.",
+  inputSchema: pagerDutySnoozeInput,
+  outputSchema: pagerDutyMutationOutput,
+  inputExample: {
+    credential: "pagerduty-api",
+    requesterEmail: "operator@example.com",
+    region: "us",
+    incidentId: "{{context.on_pagerduty.output.event.incidentId}}",
+    durationSeconds: 43_200,
+  },
+  writeSide: true as const,
+  async execute(
+    input: z.infer<typeof pagerDutySnoozeInput>,
+    _context: Record<string, unknown>,
+    executionContext: PagerDutyToolContext,
+  ): Promise<z.infer<typeof pagerDutyMutationOutput>> {
+    const start = Date.now();
+    const gate = await gatePagerDutyCall("pagerduty.incident.snooze", input, executionContext);
+    if (!gate.ok) {
+      const latencyMs = Date.now() - start;
+      await recordPagerDutyCall({
+        tool: "pagerduty.incident.snooze",
+        credentialName: input.credential,
+        executionContext,
+        ok: false,
+        error: gate.error,
+        latencyMs,
+      });
+      return { ok: false, error: gate.error, latencyMs };
+    }
+    const result = await fetchHttpTarget(
+      `${pagerDutyApiBase(input.region)}/incidents/${encodeURIComponent(input.incidentId)}/snooze`,
+      {
+        method: "POST",
+        headers: pagerDutyHeaders(gate.credentialSecret, input.requesterEmail),
+        body: JSON.stringify({ duration: input.durationSeconds }),
+        maxResponseBytes: PAGERDUTY_RESPONSE_MAX_BYTES,
+      },
+    ).catch(() => null);
+    const latencyMs = Date.now() - start;
+    const ok = Boolean(result?.ok);
+    const error = ok ? undefined : `pagerduty snooze failed${result ? ` (${result.statusCode})` : ""}`;
+    await recordPagerDutyCall({
+      tool: "pagerduty.incident.snooze",
+      credentialName: input.credential,
+      executionContext,
+      ok,
+      statusCode: result?.statusCode,
+      error,
+      latencyMs,
+    });
+    return ok
+      ? { ok: true, statusCode: result!.statusCode, latencyMs }
+      : { ok: false, statusCode: result?.statusCode, error: error!, latencyMs };
   },
 };
 

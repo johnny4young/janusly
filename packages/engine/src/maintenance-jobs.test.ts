@@ -33,12 +33,12 @@ describe("maintenance job catalog", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     try {
       await expect(registerAndMigrateMaintenanceSchedulers()).resolves.toEqual({
-        registered: 13,
-        retiredLegacy: 13,
+        registered: MAINTENANCE_SCHEDULERS.length,
+        retiredLegacy: MAINTENANCE_SCHEDULERS.length,
       });
-      expect(queueMocks.upsertJobScheduler).toHaveBeenCalledTimes(13);
-      expect(queueMocks.removeJobScheduler).toHaveBeenCalledTimes(13);
-      for (let index = 0; index < 13; index += 1) {
+      expect(queueMocks.upsertJobScheduler).toHaveBeenCalledTimes(MAINTENANCE_SCHEDULERS.length);
+      expect(queueMocks.removeJobScheduler).toHaveBeenCalledTimes(MAINTENANCE_SCHEDULERS.length);
+      for (let index = 0; index < MAINTENANCE_SCHEDULERS.length; index += 1) {
         expect(queueMocks.upsertJobScheduler.mock.invocationCallOrder[index])
           .toBeLessThan(queueMocks.removeJobScheduler.mock.invocationCallOrder[index] ?? 0);
       }

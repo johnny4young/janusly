@@ -38,6 +38,7 @@ import {
   EmailReceivedConfigSchema,
   FileDroppedConfigSchema,
   McpServerEventConfigSchema,
+  PagerDutyIncidentConfigSchema,
 } from "@janusly/shared/src/trigger-types";
 import {
   approvalTimeoutPolicyValues,
@@ -328,6 +329,7 @@ export const NODE_CONFIG_SCHEMAS = {
   email_received: EmailReceivedConfigSchema,
   file_dropped: FileDroppedConfigSchema,
   mcp_server_event: McpServerEventConfigSchema,
+  pagerduty_incident: PagerDutyIncidentConfigSchema,
 } satisfies Record<NodeType, z.ZodTypeAny>;
 
 /** Mapped type — `NodeConfigByType["http"]` is the inferred HTTP config shape. */

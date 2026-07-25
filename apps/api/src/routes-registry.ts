@@ -34,6 +34,7 @@ import { membersRoutes } from "./routes/members-routes";
 import { memoryRoutes } from "./routes/memory-routes";
 import { onboardingRoutes } from "./routes/onboarding-routes";
 import { orgRoutes } from "./routes/org-routes";
+import { pagerDutyRoutes } from "./routes/pagerduty-routes";
 import { pluginsRoutes } from "./routes/plugins-routes";
 import { promptsRoutes } from "./routes/prompts-routes";
 import { recoveryHandoffRoutes } from "./routes/recovery-handoff-routes";
@@ -70,6 +71,7 @@ export const routes: Route[] = [
   ...ssoRoutes,
   ...scimRoutes,
   ...slackInteractionsRoutes,
+  ...pagerDutyRoutes,
   ...rolesRoutes,
   ...mcpRoutes,
   // Solution packs register before workflows so `POST /workflows/import-pack`

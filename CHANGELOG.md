@@ -16,6 +16,19 @@ retroactively.
 
 ### Changed
 
+- Integration credential values now default to an organization-scoped encrypted
+  PostgreSQL Secret Store protected by one external deployment root key.
+  Environment-variable references remain an explicit migration mode, while
+  runtime integrations, readiness, health, Slack, and external PostgreSQL tools
+  share one asynchronous resolver.
+  **Operator action:** set `JANUSLY_CREDENTIAL_MASTER_KEY` (or `_FILE`) — the
+  same 32-byte key on every API and worker replica — before creating managed
+  credentials; without it, `POST /credentials` with `secretValue` returns
+  `credentials_secret_store_unavailable`, and a *configured but malformed* key
+  now fails API/worker startup fast. The accompanying migration also enforces
+  unique credential names per organization (pre-existing duplicates are kept
+  but renamed with a `-dup-<id>` suffix; review them after migrating) and adds
+  the `credential_secret_versions` table.
 - The persistent local profiles now use one Supabase PostgreSQL database:
   Supabase owns `auth`, Janusly owns `public`, and the separate Compose
   PostgreSQL service has been removed.
@@ -57,6 +70,13 @@ retroactively.
 
 ### Added
 
+- Prompt-generated PagerDuty V3 workflows: recognized off-hours requests
+  compile locally into a visible signed-trigger, authoritative-read,
+  deterministic-policy, acknowledge, snooze, and evidence graph. Credential
+  names and rules remain versioned in the workflow; secret values remain in
+  the tenant Secret Store. Duplicate webhook deliveries converge on one run,
+  local provider/browser smoke covers the complete graph, and optional AI
+  summaries are appended only when explicitly requested.
 - Provider-neutral account bootstrap for signed-in users: global profiles,
   first-organization creation, bounded organization selection, invitation
   acceptance, organization switching, and truthful viewer/editor/admin UI.

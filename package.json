@@ -46,6 +46,7 @@
     "local:db:verify-empty": "node scripts/local-stack.mjs verify-db --auth --expect-empty",
     "local:logs": "node scripts/local-stack.mjs logs",
     "local:smoke": "node scripts/local-stack-smoke.mjs",
+    "local:pagerduty-smoke": "node scripts/local-pagerduty-smoke.mjs",
     "local:failure-smoke": "node scripts/local-stack-smoke.mjs --failure=slack",
     "local:ui-smoke": "node scripts/local-stack-ui-smoke.mjs",
     "local:verify": "node scripts/local-stack-smoke.mjs --restart",

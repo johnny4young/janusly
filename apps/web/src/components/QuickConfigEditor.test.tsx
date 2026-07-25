@@ -4,7 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { initI18n } from '../i18n'
 
-vi.mock('../api', () => ({ api: vi.fn() }))
+vi.mock('../api', () => ({
+  api: vi.fn(),
+  publicApiUrl: (path: string) => `http://localhost:7311${path}`,
+}))
 vi.mock('./McpToolConfigField', () => ({
   McpToolConfigField: () => <section data-testid="mcp-tool-config" />,
 }))
@@ -580,5 +583,37 @@ describe('<QuickConfigEditor /> inbound webhook trigger', () => {
     fireEvent.change(endpointKey, { target: { value: 'model-rollout' } })
 
     expect(onUpdate).toHaveBeenLastCalledWith({ endpointKey: 'model-rollout' })
+  })
+})
+
+describe('<QuickConfigEditor /> PagerDuty workflow trigger', () => {
+  it('uses the normal Inspector for the signing credential and derived callback', () => {
+    const onUpdate = vi.fn()
+    render(
+      <QuickConfigEditor
+        {...emptyWorkflowGraph}
+        nodeId="on_pagerduty"
+        type="pagerduty_incident"
+        config={{ webhookCredential: 'pagerduty-webhook', rateLimitPerMin: 120 }}
+        tools={[]}
+        currentWorkflowId="pagerduty-off-hours"
+        onUpdate={onUpdate}
+      />,
+    )
+
+    expect(screen.getByLabelText('Webhook signing credential')).toHaveValue('pagerduty-webhook')
+    expect(screen.getByLabelText('PagerDuty callback URL')).toHaveValue(
+      'http://localhost:7311/webhooks/pagerduty/pagerduty-off-hours/on_pagerduty',
+    )
+    expect(screen.getByLabelText('Maximum events per minute')).toHaveValue(120)
+    expect(screen.getByText(/Store the PagerDuty V3 webhook secret/)).toBeVisible()
+
+    fireEvent.change(screen.getByLabelText('Webhook signing credential'), {
+      target: { value: 'pagerduty-signing-prod' },
+    })
+    expect(onUpdate).toHaveBeenLastCalledWith({
+      webhookCredential: 'pagerduty-signing-prod',
+      rateLimitPerMin: 120,
+    })
   })
 })

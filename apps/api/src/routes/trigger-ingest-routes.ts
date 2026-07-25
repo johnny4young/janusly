@@ -135,7 +135,25 @@ async function resolveUniqueTriggerNode(
  * the route should send. `replayOfEventId` is set on the replay path so the
  * audit row distinguishes a replay from a fresh inbound event.
  */
-async function persistEventAndSpawnRun(args: {
+type TriggerAuditAction =
+  | "trigger.event.received"
+  | "trigger.event.skipped"
+  | "trigger.event.buffered"
+  | "trigger.event.started"
+  | "trigger.event.replayed";
+
+type TriggerAuditOptions = {
+  targetType: string;
+  targetId: string;
+  metadata: Record<string, unknown>;
+};
+
+/**
+ * Durable event-to-run tail shared by authenticated normalized ingestion and
+ * provider-signed public callbacks. Public callbacks override `auditEvent`
+ * with a system-actor writer after signature verification.
+ */
+export async function persistEventAndSpawnRun(args: {
   auth: AuthContext;
   triggerType: TriggerNodeType;
   resolved: ResolvedTriggerNode;
@@ -151,8 +169,12 @@ async function persistEventAndSpawnRun(args: {
   eventId?: string;
   /** Existing `received` row recovered before attachment offload. */
   existingEvent?: TriggerEvent;
+  /** Optional system-actor audit adapter for signature-authenticated callbacks. */
+  auditEvent?: (action: TriggerAuditAction, options: TriggerAuditOptions) => Promise<void>;
 }): Promise<{ status: number; body: unknown }> {
   const { auth, triggerType, resolved, payload, dedupeKey, replayOfEventId, eventId, existingEvent } = args;
+  const auditEvent = args.auditEvent
+    ?? ((action: TriggerAuditAction, options: TriggerAuditOptions) => auditAction(auth, action, options));
 
   const durableEventId = existingEvent?.id ?? eventId ?? crypto.randomUUID();
   let selectedResolved = resolved;
@@ -245,7 +267,7 @@ async function persistEventAndSpawnRun(args: {
   }
 
   if (wasCreated) {
-    await auditAction(auth, "trigger.event.received", {
+    await auditEvent("trigger.event.received", {
       targetType: "trigger_event",
       targetId: event.id,
       metadata: { triggerType: effectiveTriggerType, workflowId: effectiveResolved.workflowId, nodeId: effectiveResolved.nodeId, replay: Boolean(replayOfEventId) },
@@ -263,7 +285,7 @@ async function persistEventAndSpawnRun(args: {
   } catch (err) {
     if (isRateLimit429(err)) {
       await markTriggerEventSkipped(auth.orgId, event.id, "rate_limited");
-      await auditAction(auth, "trigger.event.skipped", {
+      await auditEvent("trigger.event.skipped", {
         targetType: "trigger_event",
         targetId: event.id,
         metadata: { triggerType: effectiveTriggerType, reason: "rate_limited", ratePerMin },
@@ -288,7 +310,7 @@ async function persistEventAndSpawnRun(args: {
     const pauseAction = resolveWorkflowPauseAction(wfStatus?.status, "trigger");
     if (pauseAction.kind === "buffer") {
       await markTriggerEventBuffered(auth.orgId, event.id, pauseAction.reason);
-      await auditAction(auth, "trigger.event.buffered", {
+      await auditEvent("trigger.event.buffered", {
         targetType: "trigger_event",
         targetId: event.id,
         metadata: { triggerType: effectiveTriggerType, reason: pauseAction.reason, workflowId: effectiveResolved.workflowId, nodeId: effectiveResolved.nodeId },
@@ -321,7 +343,7 @@ async function persistEventAndSpawnRun(args: {
       ...(effectiveRollout ? { rollout: effectiveRollout } : {}),
       triggerEventStart: { id: event.id },
     });
-    await auditAction(auth, replayOfEventId ? "trigger.event.replayed" : "trigger.event.started", {
+    await auditEvent(replayOfEventId ? "trigger.event.replayed" : "trigger.event.started", {
       targetType: "trigger_event",
       targetId: event.id,
       metadata: { triggerType: effectiveTriggerType, runId, workflowId: effectiveResolved.workflowId, nodeId: effectiveResolved.nodeId, ...(replayOfEventId ? { replayOf: replayOfEventId } : {}) },

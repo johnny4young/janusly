@@ -75,7 +75,13 @@ import { waitUntilExecutor } from "./wait-until";
 import { approvalExecutor } from "./approval-timeout";
 import { joinExecutor, parallelForkExecutor } from "./parallel-fork";
 import { scheduleExecutor } from "./schedule";
-import { emailReceivedExecutor, fileDroppedExecutor, mcpServerEventExecutor, webhookReceivedExecutor } from "./triggers";
+import {
+  emailReceivedExecutor,
+  fileDroppedExecutor,
+  mcpServerEventExecutor,
+  pagerDutyIncidentExecutor,
+  webhookReceivedExecutor,
+} from "./triggers";
 import { signResumeToken } from "./secrets";
 import { executeMcpTool, readMcpClientWritesEnabled, resolveMcpClientRateLimitPerMin, resolveStdioSandboxConfig } from "./mcp-tool-executor";
 import { validateInputs } from "./inputs-validator";
@@ -1101,4 +1107,5 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   email_received: emailReceivedExecutor,
   file_dropped: fileDroppedExecutor,
   mcp_server_event: mcpServerEventExecutor,
+  pagerduty_incident: pagerDutyIncidentExecutor,
 };

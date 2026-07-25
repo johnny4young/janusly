@@ -29,6 +29,10 @@ import { z } from "zod";
 import {
   githubAddIssueCommentTool,
   githubCreateIssueTool,
+  pagerDutyAcknowledgeTool,
+  pagerDutyIncidentGetTool,
+  pagerDutyPolicyEvaluateTool,
+  pagerDutySnoozeTool,
   slackPostTool,
   webhookSendTool,
 } from "./integration-tools";
@@ -102,6 +106,10 @@ const tools = {
   "slack.post": defineTool(slackPostTool),
   "github.create_issue": defineTool(githubCreateIssueTool),
   "github.add_issue_comment": defineTool(githubAddIssueCommentTool),
+  "pagerduty.incident.get": defineTool(pagerDutyIncidentGetTool),
+  "pagerduty.policy.evaluate": defineTool(pagerDutyPolicyEvaluateTool),
+  "pagerduty.incident.acknowledge": defineTool(pagerDutyAcknowledgeTool),
+  "pagerduty.incident.snooze": defineTool(pagerDutySnoozeTool),
   "webhook.send": defineTool(webhookSendTool),
   "db.schema.describe": defineTool(dbSchemaDescribeTool),
   "db.query.read": defineTool(dbQueryReadTool),

@@ -1,7 +1,7 @@
 /**
- * Tests for the three integration tools (`slack.post`,
- * `github.create_issue`, `webhook.send`) plus the `signWebhookPayload`
- * helper. Mocks the credentials repo + `fetchHttpTarget` + the DI seams
+ * Tests for the integration tool chokepoint plus deterministic PagerDuty
+ * policy evaluation and the `signWebhookPayload` helper. Mocks the
+ * credentials repo + `fetchHttpTarget` + the DI seams
  * (rate-limit + integration-usage recorder) so the tools' wrapper logic
  * (credential lookup, env resolution, rate gate, recorder fire, output
  * envelope) can be exercised without a real network call.
@@ -27,7 +27,10 @@ import {
   _resetEngineRateLimiterForTests,
   setEngineRateLimiter,
 } from "./rate-limit";
-import { signWebhookPayload } from "./integration-tools";
+import {
+  isWithinPagerDutyWorkingHours,
+  signWebhookPayload,
+} from "./integration-tools";
 import { executeTool, isToolWriteSide } from "./tool-registry";
 
 const credentialMock = vi.mocked(getCredentialByName);
@@ -70,6 +73,10 @@ describe("integration tools — registry registration", () => {
     expect(isToolWriteSide("slack.post")).toBe(true);
     expect(isToolWriteSide("github.create_issue")).toBe(true);
     expect(isToolWriteSide("webhook.send")).toBe(true);
+    expect(isToolWriteSide("pagerduty.incident.get")).toBe(false);
+    expect(isToolWriteSide("pagerduty.policy.evaluate")).toBe(false);
+    expect(isToolWriteSide("pagerduty.incident.acknowledge")).toBe(true);
+    expect(isToolWriteSide("pagerduty.incident.snooze")).toBe(true);
   });
 });
 
@@ -501,5 +508,197 @@ describe("webhook.send", () => {
     expect((result as { ok: boolean }).ok).toBe(false);
     expect((result as { error: string }).error).toMatch(/private host/);
     expect(captured[0]).toMatchObject({ ok: false, error: expect.stringMatching(/private host/) });
+  });
+});
+
+describe("PagerDuty deterministic workflow tools", () => {
+  const incident = {
+    id: "PINCIDENT1",
+    status: "triggered",
+    title: "Database connection exhaustion",
+    urgency: "high",
+    serviceId: "PSERVICE1",
+    assignedUserIds: ["PLOCALUSER"],
+  };
+
+  it("evaluates event and receipt time outside working hours without an LLM", async () => {
+    const result = await executeTool(
+      "pagerduty.policy.evaluate",
+      {
+        eventType: "incident.triggered",
+        occurredAt: "2026-07-24T03:30:00.000Z",
+        receivedAt: "2026-07-24T03:31:00.000Z",
+        incident,
+        pagerDutyUserId: "PLOCALUSER",
+        timeZone: "America/Bogota",
+        workingHours: [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" }],
+        serviceIds: ["PSERVICE1"],
+        urgencies: ["high"],
+      },
+      {},
+      { orgId: "org-1" },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      shouldAct: true,
+      reason: "matched",
+      eventOutsideWorkingHours: true,
+      receivedOutsideWorkingHours: true,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails safe when receipt is delayed into working hours or templates remain unresolved", async () => {
+    const delayed = await executeTool(
+      "pagerduty.policy.evaluate",
+      {
+        eventType: "incident.triggered",
+        occurredAt: "2026-07-24T03:30:00.000Z",
+        receivedAt: "2026-07-24T15:00:00.000Z",
+        incident,
+        pagerDutyUserId: "PLOCALUSER",
+        timeZone: "America/Bogota",
+        workingHours: [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" }],
+      },
+      {},
+      { orgId: "org-1" },
+    );
+    expect(delayed).toMatchObject({ shouldAct: false, reason: "received_in_working_hours" });
+
+    const unresolved = await executeTool(
+      "pagerduty.policy.evaluate",
+      {
+        eventType: "incident.triggered",
+        occurredAt: "{{context.trigger.output.occurredAt}}",
+        receivedAt: "{{context.trigger.output.receivedAt}}",
+        incident: "{{context.read.output.incident}}",
+        pagerDutyUserId: "PLOCALUSER",
+        timeZone: "America/Bogota",
+        workingHours: [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" }],
+      },
+      {},
+      { orgId: "org-1" },
+    );
+    expect(unresolved).toMatchObject({ shouldAct: false, reason: "invalid_runtime_input" });
+  });
+
+  it("handles overnight working windows in the configured timezone", () => {
+    const overnight = [{ days: [1], start: "22:00", end: "06:00" }];
+    expect(isWithinPagerDutyWorkingHours(
+      new Date("2026-07-21T04:00:00.000Z"),
+      "UTC",
+      overnight,
+    )).toBe(true);
+    expect(isWithinPagerDutyWorkingHours(
+      new Date("2026-07-21T10:00:00.000Z"),
+      "UTC",
+      overnight,
+    )).toBe(false);
+    expect(isWithinPagerDutyWorkingHours(
+      new Date("2026-07-21T04:00:00.000Z"),
+      "Not/A_Timezone",
+      overnight,
+    )).toBe(true);
+  });
+
+  it("reads the authoritative incident with the stored API token", async () => {
+    vi.stubEnv("PAGERDUTY_TEST_TOKEN", "pd-token");
+    credentialMock.mockResolvedValueOnce(credentialRow({
+      name: "pagerduty-api",
+      kind: "pagerduty_api_token",
+      secretRef: "PAGERDUTY_TEST_TOKEN",
+    }));
+    fetchMock.mockResolvedValueOnce({
+      statusCode: 200,
+      ok: true,
+      body: JSON.stringify({
+        incident: {
+          id: "PINCIDENT1",
+          status: "triggered",
+          title: "Database connection exhaustion",
+          urgency: "high",
+          service: { id: "PSERVICE1" },
+          assignments: [{ assignee: { id: "PLOCALUSER" } }],
+        },
+      }),
+      headers: {},
+    });
+
+    const result = await executeTool(
+      "pagerduty.incident.get",
+      {
+        credential: "pagerduty-api",
+        requesterEmail: "operator@example.com",
+        incidentId: "PINCIDENT1",
+      },
+      {},
+      { orgId: "org-1", runId: "run-1", nodeId: "load_incident" },
+    );
+
+    expect(result).toMatchObject({ ok: true, incident });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.pagerduty.com/incidents/PINCIDENT1",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({
+          authorization: "Token token=pd-token",
+          from: "operator@example.com",
+        }),
+      }),
+    );
+  });
+
+  it("acknowledges then snoozes with bounded explicit mutations", async () => {
+    vi.stubEnv("PAGERDUTY_TEST_TOKEN", "pd-token");
+    credentialMock.mockResolvedValue(credentialRow({
+      name: "pagerduty-api",
+      kind: "pagerduty_api_token",
+      secretRef: "PAGERDUTY_TEST_TOKEN",
+    }));
+    fetchMock
+      .mockResolvedValueOnce({ statusCode: 200, ok: true, body: "{}", headers: {} })
+      .mockResolvedValueOnce({ statusCode: 201, ok: true, body: "{}", headers: {} });
+
+    const common = {
+      credential: "pagerduty-api",
+      requesterEmail: "operator@example.com",
+      incidentId: "PINCIDENT1",
+    };
+    const acknowledged = await executeTool(
+      "pagerduty.incident.acknowledge",
+      common,
+      {},
+      { orgId: "org-1" },
+    );
+    const snoozed = await executeTool(
+      "pagerduty.incident.snooze",
+      { ...common, durationSeconds: 43_200 },
+      {},
+      { orgId: "org-1" },
+    );
+
+    expect(acknowledged).toMatchObject({ ok: true, statusCode: 200 });
+    expect(snoozed).toMatchObject({ ok: true, statusCode: 201 });
+    expect(fetchMock.mock.calls[0]).toEqual([
+      "https://api.pagerduty.com/incidents/PINCIDENT1",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({
+          incident: {
+            id: "PINCIDENT1",
+            type: "incident_reference",
+            status: "acknowledged",
+          },
+        }),
+      }),
+    ]);
+    expect(fetchMock.mock.calls[1]).toEqual([
+      "https://api.pagerduty.com/incidents/PINCIDENT1/snooze",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ duration: 43_200 }),
+      }),
+    ]);
   });
 });
