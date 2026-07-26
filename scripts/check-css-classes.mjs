@@ -3,7 +3,7 @@
  *
  * Janusly's hand-written stylesheet is intentionally dependency-free. This
  * ratchet parses selectors conservatively, reads string/template literals from
- * production TypeScript through the compiler AST, and understands dynamic
+ * production TypeScript through the Oxc AST, and understands dynamic
  * class prefixes such as `we-status--${tone}`. Third-party React Flow selectors
  * are the only external class namespace.
  *
@@ -12,11 +12,141 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { parseSync, visitorKeys } from "oxc-parser";
 
-const webRequire = createRequire(new URL("../apps/web/package.json", import.meta.url));
-const ts = webRequire("typescript");
+const OPERATOR_KINDS = {
+  "&&": "&&",
+  "||": "||",
+  "??": "??",
+  "+": "+",
+  "=": "=",
+};
+
+function normalizeAst(node, parent = null) {
+  if (!node || typeof node !== "object") return;
+  node.parent = parent;
+  if (node.type === "Identifier" || node.type === "JSXIdentifier") node.text = node.name;
+  if (node.type === "Literal") node.text = String(node.value ?? "");
+  if (node.type === "VariableDeclarator") {
+    node.name = node.id;
+    node.initializer = node.init;
+  } else if (["FunctionDeclaration", "FunctionExpression"].includes(node.type)) {
+    node.name = node.id;
+    node.parameters = node.params.map((parameter) => ({
+      name: parameter.type === "AssignmentPattern" ? parameter.left : parameter,
+      initializer: parameter.type === "AssignmentPattern" ? parameter.right : null,
+    }));
+  } else if (node.type === "ArrowFunctionExpression") {
+    node.parameters = node.params.map((parameter) => ({
+      name: parameter.type === "AssignmentPattern" ? parameter.left : parameter,
+      initializer: parameter.type === "AssignmentPattern" ? parameter.right : null,
+    }));
+  } else if (node.type === "AssignmentPattern") {
+    node.name = node.left;
+    node.initializer = node.right;
+  } else if (node.type === "CatchClause" && node.param) {
+    node.variableDeclaration = { name: node.param };
+  } else if (node.type === "Property") {
+    node.name = node.key;
+    node.initializer = node.value;
+  } else if (node.type === "SpreadElement") {
+    node.expression = node.argument;
+  } else if (node.type === "ConditionalExpression") {
+    node.whenTrue = node.consequent;
+    node.whenFalse = node.alternate;
+  } else if (node.type === "ReturnStatement") {
+    node.expression = node.argument;
+  } else if (node.type === "MemberExpression") {
+    node.expression = node.object;
+    node.name = node.property;
+    node.argumentExpression = node.computed ? node.property : null;
+  } else if (node.type === "CallExpression") {
+    node.expression = node.callee;
+  } else if (node.type === "JSXAttribute") {
+    node.initializer = node.value;
+  } else if (["BinaryExpression", "LogicalExpression", "AssignmentExpression"].includes(node.type)) {
+    node.operatorToken = { kind: OPERATOR_KINDS[node.operator] ?? node.operator };
+  } else if (node.type === "TemplateLiteral") {
+    node.text = node.quasis[0]?.value.raw ?? "";
+    node.head = { text: node.text };
+    node.templateSpans = node.expressions.map((expression, index) => ({
+      expression,
+      literal: {
+        text: node.quasis[index + 1]?.value.raw ?? "",
+        tail: index === node.expressions.length - 1,
+      },
+    }));
+  }
+  for (const key of visitorKeys[node.type] ?? []) {
+    const child = node[key];
+    if (Array.isArray(child)) child.forEach((item) => normalizeAst(item, node));
+    else normalizeAst(child, node);
+  }
+}
+
+function createSourceFile(fileName, source) {
+  const parsed = parseSync(fileName, source);
+  if (parsed.errors.length > 0) {
+    throw new Error(`Unable to inspect ${fileName}: ${parsed.errors[0].message}`);
+  }
+  normalizeAst(parsed.program);
+  return parsed.program;
+}
+
+const ts = {
+  ScriptTarget: { Latest: null },
+  ScriptKind: { TS: null, TSX: null },
+  SyntaxKind: {
+    AmpersandAmpersandToken: "&&",
+    BarBarToken: "||",
+    QuestionQuestionToken: "??",
+    PlusToken: "+",
+    EqualsToken: "=",
+  },
+  createSourceFile,
+  forEachChild(node, callback) {
+    for (const key of visitorKeys[node.type] ?? []) {
+      const child = node[key];
+      if (Array.isArray(child)) child.forEach((item) => item && callback(item));
+      else if (child) callback(child);
+    }
+  },
+  isArrayLiteralExpression: (node) => node.type === "ArrayExpression",
+  isArrowFunction: (node) => node.type === "ArrowFunctionExpression",
+  isAsExpression: (node) => node.type === "TSAsExpression",
+  isBinaryExpression: (node) => ["AssignmentExpression", "BinaryExpression", "LogicalExpression"].includes(node.type),
+  isBlock: (node) => node.type === "BlockStatement",
+  isCallExpression: (node) => node.type === "CallExpression",
+  isCaseBlock: (node) => node.type === "SwitchCase",
+  isCatchClause: (node) => node.type === "CatchClause",
+  isConditionalExpression: (node) => node.type === "ConditionalExpression",
+  isElementAccessExpression: (node) => node.type === "MemberExpression" && node.computed,
+  isFunctionDeclaration: (node) => node.type === "FunctionDeclaration",
+  isFunctionExpression: (node) => node.type === "FunctionExpression",
+  isFunctionLike: (node) => ["ArrowFunctionExpression", "FunctionDeclaration", "FunctionExpression"].includes(node.type),
+  isIdentifier: (node) => node.type === "Identifier",
+  isJsxAttribute: (node) => node.type === "JSXAttribute",
+  isJsxExpression: (node) => node.type === "JSXExpressionContainer",
+  isNonNullExpression: (node) => node.type === "TSNonNullExpression",
+  isNoSubstitutionTemplateLiteral: (node) => node.type === "TemplateLiteral" && node.expressions.length === 0,
+  isNumericLiteral: (node) => node.type === "Literal" && typeof node.value === "number",
+  isObjectLiteralExpression: (node) => node.type === "ObjectExpression",
+  isOmittedExpression: (node) => !node,
+  isParenthesizedExpression: (node) => node.type === "ParenthesizedExpression",
+  isPropertyAccessExpression: (node) => node.type === "MemberExpression" && !node.computed,
+  isPropertyAssignment: (node) => node.type === "Property" && !node.shorthand,
+  isReturnStatement: (node) => node.type === "ReturnStatement",
+  isShorthandPropertyAssignment: (node) => node.type === "Property" && node.shorthand,
+  isSourceFile: (node) => node.type === "Program",
+  isSpreadAssignment: (node) => node.type === "SpreadElement",
+  isSpreadElement: (node) => node.type === "SpreadElement",
+  isStringLiteral: (node) => node.type === "Literal" && typeof node.value === "string",
+  isTemplateExpression: (node) => node.type === "TemplateLiteral" && node.expressions.length > 0,
+  isTemplateTail: (node) => node.tail,
+  isTypeAssertionExpression: (node) => node.type === "TSTypeAssertion",
+  isVariableDeclaration: (node) => node.type === "VariableDeclarator",
+};
 
 const CSS_CLASS_PATTERN = /\.(-?[_a-zA-Z]+[_a-zA-Z0-9-]*)/g;
 const CLASS_TOKEN_PATTERN = /-?[_a-zA-Z]+[_a-zA-Z0-9-]*/g;
@@ -142,14 +272,31 @@ export function extractTypeScriptClassReferences(source, fileName = "source.tsx"
   }
 
   function addBindingName(scope, name, initializer, declaration) {
-    if (ts.isIdentifier(name)) {
-      addDeclaration(scope, name.text, initializer, declaration);
+    if (name?.type === "ArrayPattern") {
+      for (const element of name.elements) addBindingName(scope, element, null, declaration);
       return;
     }
-    for (const element of name.elements) {
-      if (!ts.isOmittedExpression(element)) {
-        addBindingName(scope, element.name, null, declaration);
+    if (name?.type === "ObjectPattern") {
+      for (const property of name.properties) {
+        addBindingName(
+          scope,
+          property.type === "RestElement" ? property.argument : property.value,
+          null,
+          declaration,
+        );
       }
+      return;
+    }
+    if (name?.type === "RestElement") {
+      addBindingName(scope, name.argument, null, declaration);
+      return;
+    }
+    if (name?.type === "AssignmentPattern") {
+      addBindingName(scope, name.left, name.right, declaration);
+      return;
+    }
+    if (ts.isIdentifier(name)) {
+      addDeclaration(scope, name.text, initializer, declaration);
     }
   }
 

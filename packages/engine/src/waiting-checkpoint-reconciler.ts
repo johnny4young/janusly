@@ -10,7 +10,7 @@
 
 import type { DueWaitingCheckpoint } from "./persistence";
 import { claimDueWaitingCheckpoints } from "./persistence";
-import { enqueueApprovalTimeout, enqueueWaitUntilResume, workflowQueue } from "./queue";
+import { enqueueApprovalTimeout, enqueueWaitUntilResume, maintenanceQueue } from "./queue";
 
 export const WAITING_CHECKPOINT_RECONCILER_JOB_ID = "system:waiting-checkpoint-reconciler";
 export const WAITING_CHECKPOINT_RECONCILER_JOB_NAME = "waiting-checkpoint-reconciler-trigger";
@@ -60,7 +60,7 @@ export async function reconcileWaitingCheckpoints(
 /** Idempotently register the once-per-minute repair sweep. */
 export async function registerWaitingCheckpointReconciler(): Promise<boolean> {
   try {
-    await workflowQueue.upsertJobScheduler(
+    await maintenanceQueue.upsertJobScheduler(
       WAITING_CHECKPOINT_RECONCILER_JOB_ID,
       { pattern: WAITING_CHECKPOINT_RECONCILER_CRON },
       { name: WAITING_CHECKPOINT_RECONCILER_JOB_NAME, data: {} },

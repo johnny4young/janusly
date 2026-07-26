@@ -1,21 +1,15 @@
 /**
  * Route-level tests for the DLQ list endpoint.
  *
- * The `GET /dlq` registry entry MUST declare `role: "viewer"` so the
- * dispatcher invokes `requireRole(...)` before reaching the handler.
- * Omitting `role:` lets the dispatcher fall through to the
- * authenticated-only check, which would expose every open dead letter
- * to any caller carrying a valid token (e.g. a service token without an
- * `org_members` row, or a stale Supabase JWT). The two sibling routes
- * (`/dlq/clusters` and `/dlq/cluster-members`) already declare
- * `role: "viewer"`; this test pins the contract symmetrically.
+ * Every DLQ read MUST declare both `role: "viewer"` and
+ * `permission: "dlq.read"`. The rank gate rejects callers without a member
+ * grant; the permission gate also respects per-org built-in overrides and
+ * custom roles that deliberately omit DLQ access.
  *
  * Two test surfaces:
- * - Declarative pin on the registry entry's `role` field.
- * - Integration cases through `createApiServer` covering the 401 / 403
- *   / 200 paths the dispatcher walks for an unauthenticated request,
- *   an authenticated request below `viewer`, and a successful viewer /
- *   editor caller respectively.
+ * - Declarative pins on every registry entry's rank and permission fields.
+ * - Integration cases through `createApiServer` covering unauthenticated,
+ *   below-rank, missing-permission, and successful callers.
  */
 
 import http from "node:http";
@@ -25,12 +19,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const {
   findMatchingPlaybookMock,
   queryFailureSamplesMock,
+  queryRecoveryDrillOutcomeMock,
   queryRecoveryRecurrenceMock,
   replayDeadLetterMock,
   replayValidationMock,
 } = vi.hoisted(() => ({
   findMatchingPlaybookMock: vi.fn(),
   queryFailureSamplesMock: vi.fn(),
+  queryRecoveryDrillOutcomeMock: vi.fn(),
   queryRecoveryRecurrenceMock: vi.fn(),
   replayDeadLetterMock: vi.fn(),
   replayValidationMock: vi.fn(),
@@ -42,6 +38,7 @@ vi.mock("@janusly/data", async (importOriginal) => {
     ...actual,
     findMatchingActiveRecoveryPlaybook: findMatchingPlaybookMock,
     queryFailureSamples: queryFailureSamplesMock,
+    queryRecoveryDrillOutcome: queryRecoveryDrillOutcomeMock,
     queryRecoveryRecurrence: queryRecoveryRecurrenceMock,
   };
 });
@@ -66,6 +63,7 @@ vi.mock("../dlq", async (importOriginal) => {
     countDeadLettersByStatus: vi.fn(),
     // Bulk-resolve + bulk-replay writers (the loops touch these per entry).
     getDeadLetter: vi.fn(),
+    getRecoveryDrillProvenance: vi.fn(),
     markDeadLetterResolved: vi.fn(),
     markDeadLetterReplayed: vi.fn(),
   };
@@ -116,8 +114,8 @@ vi.mock("@janusly/engine/src/adapters/dlq-replay", () => ({
 import { ReplayNotClaimableError } from "@janusly/engine/src/persistence";
 
 import { requireAuth } from "../auth";
-import { requireRole } from "../permissions";
-import { countDeadLettersByStatus, encodeRecoveryQueueCursor, getDeadLetter, listRecoveryQueue, markDeadLetterReplayed, markDeadLetterResolved, queryRecoveryQueuePage, type RecoveryQueueRow } from "../dlq";
+import { requirePermission, requireRole } from "../permissions";
+import { countDeadLettersByStatus, encodeRecoveryQueueCursor, getDeadLetter, getRecoveryDrillProvenance, listRecoveryQueue, markDeadLetterReplayed, markDeadLetterResolved, queryRecoveryQueuePage, type RecoveryQueueRow } from "../dlq";
 import { auditAction } from "../audit-helper";
 import { resolveSuspectVersion } from "../suspect-version";
 import { resolveRecoveryItemForDismiss } from "@janusly/engine/src/recovery/recovery-item-hook";
@@ -127,10 +125,12 @@ import type { Route } from "../routes";
 
 const requireAuthMock = vi.mocked(requireAuth);
 const requireRoleMock = vi.mocked(requireRole);
+const requirePermissionMock = vi.mocked(requirePermission);
 const listRecoveryQueueMock = vi.mocked(listRecoveryQueue);
 const queryRecoveryQueuePageMock = vi.mocked(queryRecoveryQueuePage);
 const countDeadLettersByStatusMock = vi.mocked(countDeadLettersByStatus);
 const getDeadLetterMock = vi.mocked(getDeadLetter);
+const getRecoveryDrillProvenanceMock = vi.mocked(getRecoveryDrillProvenance);
 const markDeadLetterResolvedMock = vi.mocked(markDeadLetterResolved);
 const markDeadLetterReplayedMock = vi.mocked(markDeadLetterReplayed);
 const auditActionMock = vi.mocked(auditAction);
@@ -184,19 +184,25 @@ afterEach(() => {
 });
 
 describe("GET /dlq route declaration", () => {
-  it("declares role: viewer so the dispatcher gates non-readers", () => {
+  it("declares the rank and permission gates used by every DLQ read", () => {
     const route = findRoute("GET", "/dlq");
-    expect(route.role).toBe("viewer");
+    expect(route).toMatchObject({ role: "viewer", permission: "dlq.read" });
+
+    for (const path of [
+      "/dlq/clusters",
+      "/dlq/cluster-members?signature=x",
+      "/dlq/queue",
+      "/dlq/counts",
+    ]) {
+      expect(findRoute("GET", path)).toMatchObject({ role: "viewer", permission: "dlq.read" });
+    }
   });
 
-  it("does NOT declare a permission gate because this read still uses the role gate", () => {
-    const route = findRoute("GET", "/dlq");
-    expect(route.permission).toBeUndefined();
-  });
-
-  it("matches the role posture of its sibling list routes", () => {
-    expect(findRoute("GET", "/dlq/clusters").role).toBe("viewer");
-    expect(findRoute("GET", "/dlq/cluster-members?signature=x").role).toBe("viewer");
+  it("attaches stable contracts only to the versioned DLQ operations", () => {
+    expect(findRoute("GET", "/dlq").contract?.path).toBe("/dlq");
+    expect(findRoute("GET", "/dlq/clusters").contract?.path).toBe("/dlq/clusters");
+    expect(findRoute("POST", "/dlq/replay").contract?.path).toBe("/dlq/replay");
+    expect(findRoute("GET", "/dlq/queue").contract).toBeUndefined();
   });
 });
 
@@ -242,12 +248,14 @@ describe("GET /dlq/clusters recovery recurrence", () => {
     const server = createApiServer({ routes: dlqRoutes });
     const baseUrl = await listen(server);
     try {
-      const response = await fetch(`${baseUrl}/dlq/clusters?windowDays=14`);
+      const response = await fetch(`${baseUrl}/v1/dlq/clusters?windowDays=14`);
       expect(response.status).toBe(200);
       const payload = await response.json() as {
-        clusters: Array<{ signature: string; recurredAfterRecovery: boolean }>;
+        apiVersion: "v1";
+        data: { clusters: Array<{ signature: string; recurredAfterRecovery: boolean }> };
       };
-      expect(payload.clusters).toEqual(expect.arrayContaining([
+      expect(payload.apiVersion).toBe("v1");
+      expect(payload.data.clusters).toEqual(expect.arrayContaining([
         expect.objectContaining({ signature: firstClusters[0]!.signature, recurredAfterRecovery: true }),
         expect.objectContaining({ signature: firstClusters[1]!.signature, recurredAfterRecovery: false }),
       ]));
@@ -283,6 +291,24 @@ describe("GET /dlq dispatcher gate", () => {
       const response = await fetch(`${baseUrl}/dlq`);
       expect(response.status).toBe(403);
       expect(requireRoleMock).toHaveBeenCalledWith("org-1", "user-1", "viewer", "service-token");
+      expect(requirePermissionMock).not.toHaveBeenCalled();
+      expect(listRecoveryQueueMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("returns 403 when a viewer-rank custom role omits dlq.read", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("viewer");
+    requirePermissionMock.mockRejectedValueOnce(makeStatusError("Forbidden: missing dlq.read permission", 403));
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq`);
+      expect(response.status).toBe(403);
+      expect(requireRoleMock).toHaveBeenCalledWith("org-1", "user-1", "viewer", "supabase");
+      expect(requirePermissionMock).toHaveBeenCalledWith("org-1", "user-1", "dlq.read", "supabase");
       expect(listRecoveryQueueMock).not.toHaveBeenCalled();
     } finally {
       await close(server);
@@ -301,6 +327,7 @@ describe("GET /dlq dispatcher gate", () => {
       const payload = await response.json() as Array<{ id: string }>;
       expect(payload).toHaveLength(1);
       expect(payload[0]?.id).toBe("dl-1");
+      expect(requirePermissionMock).toHaveBeenCalledWith("org-1", "user-1", "dlq.read", "supabase");
       // Bare /dlq: no filters, no sort — the home-preview path.
       expect(listRecoveryQueueMock).toHaveBeenCalledWith("org-1", {
         status: null,
@@ -309,6 +336,57 @@ describe("GET /dlq dispatcher gate", () => {
         sort: undefined,
         limit: undefined,
       });
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("serves the bounded list through the runtime-validated v1 envelope", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("viewer");
+    listRecoveryQueueMock.mockResolvedValueOnce([{
+      id: "dl-1",
+      orgId: "org-1",
+      runId: "run-1",
+      nodeId: "http-1",
+      attempt: 1,
+      errorJson: { message: "Request timed out" },
+      status: "open",
+      replayedAt: null,
+      createdAt: new Date("2026-07-19T12:00:00.000Z"),
+      nodeType: "http",
+      workflowName: "Invoice delivery",
+      recovery: null,
+    }]);
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/v1/dlq?status=open&limit=25`);
+      expect(response.status).toBe(200);
+      const payload = await response.json() as {
+        apiVersion: "v1";
+        requestId: string;
+        data: Array<{ id: string; createdAt: string }>;
+      };
+      expect(payload).toMatchObject({ apiVersion: "v1", data: [{ id: "dl-1" }] });
+      expect(payload.requestId).toBe(response.headers.get("x-request-id"));
+      expect(payload.data[0]?.createdAt).toBe("2026-07-19T12:00:00.000Z");
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("does not expose the legacy detail query through the stable list contract", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("viewer");
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/v1/dlq?id=dl-1`);
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.code).toBe("invalid_input");
+      expect(getDeadLetterMock).not.toHaveBeenCalled();
+      expect(listRecoveryQueueMock).not.toHaveBeenCalled();
     } finally {
       await close(server);
     }
@@ -668,7 +746,7 @@ describe("POST /dlq/replay suggestedWorkflow (apply-a-fix)", () => {
     nodeJson: { id: "n", type: "http", config: { url: "https://x", method: "GET" } },
   };
 
-  it("replays against the supplied fix (not the original snapshot) when suggestedWorkflow is given", async () => {
+  it("replays a stable dead-letter identity through the v1 envelope using the supplied fix", async () => {
     requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
     requireRoleMock.mockResolvedValueOnce("editor");
     getDeadLetterMock.mockResolvedValueOnce(failedItem as never);
@@ -680,12 +758,13 @@ describe("POST /dlq/replay suggestedWorkflow (apply-a-fix)", () => {
     const server = createApiServer({ routes: dlqRoutes });
     const baseUrl = await listen(server);
     try {
-      const response = await fetch(`${baseUrl}/dlq/replay`, {
+      const response = await fetch(`${baseUrl}/v1/dlq/replay`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ deadLetterId: "dl-1", suggestedWorkflow: fix }),
+        body: JSON.stringify({ deadLetterId: "  dl-1  ", suggestedWorkflow: fix }),
       });
       expect(response.status).toBe(200);
+      expect((await response.json()).data).toEqual({ ok: true });
       // The adapter receives the FIX (node `n` is now a noop), not the original http node.
       const call = replayDeadLetterMock.mock.calls[0][0] as {
         deadLetterId: string;
@@ -694,6 +773,27 @@ describe("POST /dlq/replay suggestedWorkflow (apply-a-fix)", () => {
       };
       expect(call.workflow.nodes.find((x) => x.id === "n")?.type).toBe("noop");
       expect(call).toMatchObject({ deadLetterId: "dl-1", recoveryActorId: "user-1" });
+      expect(getDeadLetterMock).toHaveBeenCalledWith("org-1", "dl-1");
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("rejects run/node replay aliases before reading recovery data on v1", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/v1/dlq/replay`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ runId: "run-1", nodeId: "n" }),
+      });
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.code).toBe("invalid_input");
+      expect(getDeadLetterMock).not.toHaveBeenCalled();
+      expect(replayDeadLetterMock).not.toHaveBeenCalled();
     } finally {
       await close(server);
     }
@@ -1083,18 +1183,49 @@ describe("GET /dlq?id= detail read with suspect version", () => {
       previousDagJson: { id: "wf-1", nodes: [] },
     };
     resolveSuspectVersionMock.mockResolvedValueOnce(envelope as never);
+    getRecoveryDrillProvenanceMock.mockResolvedValueOnce({
+      kind: "solution_pack_drill",
+      packId: "incident-triage",
+      fixtureId: "worker_interrupted_during_page",
+      recoveryPath: "stalled_node_reaper",
+    });
+    const drillOutcome = {
+      status: "recovered",
+      startedAt: "2026-07-10T12:00:00.000Z",
+      completedAt: "2026-07-10T12:02:00.000Z",
+      elapsedMs: 120_000,
+      evidence: "terminal_impact",
+      attemptCount: 1,
+      latestDeadLetterId: "dl-1",
+      chainCapped: false,
+      recurrence: {
+        status: "monitoring",
+        windowEndsAt: "2026-07-17T12:02:00.000Z",
+        recurredAt: null,
+      },
+    };
+    queryRecoveryDrillOutcomeMock.mockResolvedValueOnce(drillOutcome);
     const server = createApiServer({ routes: dlqRoutes });
     const baseUrl = await listen(server);
     try {
       const response = await fetch(`${baseUrl}/dlq?id=dl-1`);
       expect(response.status).toBe(200);
-      const payload = await response.json() as Record<string, unknown> & { id: string; suspectVersion: unknown };
+      const payload = await response.json() as Record<string, unknown> & { id: string; suspectVersion: unknown; drill: unknown; drillOutcome: unknown };
       expect(payload.id).toBe("dl-1");
       expect(payload.suspectVersion).toEqual(envelope);
+      expect(payload.drill).toEqual({
+        kind: "solution_pack_drill",
+        packId: "incident-triage",
+        fixtureId: "worker_interrupted_during_page",
+        recoveryPath: "stalled_node_reaper",
+      });
+      expect(payload.drillOutcome).toEqual(drillOutcome);
       expect(payload).not.toHaveProperty("replayClaimToken");
       expect(payload).not.toHaveProperty("replayClaimedAt");
       // The resolver gets the row's own runId + failure timestamp.
       expect(resolveSuspectVersionMock).toHaveBeenCalledWith("org-1", "run-1", DETAIL_ROW.createdAt);
+      expect(getRecoveryDrillProvenanceMock).toHaveBeenCalledWith("org-1", "run-1");
+      expect(queryRecoveryDrillOutcomeMock).toHaveBeenCalledWith("org-1", "dl-1");
     } finally {
       await close(server);
     }
@@ -1104,6 +1235,7 @@ describe("GET /dlq?id= detail read with suspect version", () => {
     requireAuthMock.mockResolvedValue({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
     requireRoleMock.mockResolvedValue("viewer");
     getDeadLetterMock.mockResolvedValue(DETAIL_ROW as never);
+    getRecoveryDrillProvenanceMock.mockResolvedValue(null);
     const server = createApiServer({ routes: dlqRoutes });
     const baseUrl = await listen(server);
     try {
@@ -1111,6 +1243,7 @@ describe("GET /dlq?id= detail read with suspect version", () => {
       const missResponse = await fetch(`${baseUrl}/dlq?id=dl-1`);
       expect(missResponse.status).toBe(200);
       expect(((await missResponse.json()) as { suspectVersion: unknown }).suspectVersion).toBeNull();
+      expect(queryRecoveryDrillOutcomeMock).not.toHaveBeenCalled();
 
       resolveSuspectVersionMock.mockRejectedValueOnce(new Error("db hiccup"));
       const errorResponse = await fetch(`${baseUrl}/dlq?id=dl-1`);

@@ -9,9 +9,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Workflow } from '@janusly/shared'
 
-let existingVersionsByAttempt: { version: number }[][] = []
+type ExistingVersionRow = {
+  version: number
+  sloJson?: unknown
+  upstreamHealthSources?: string[] | null
+}
+
+let existingVersionsByAttempt: ExistingVersionRow[][] = []
 let existingWorkflowRows: { id: string; name: string }[] = []
 let existingWorkflowRowsByAttempt: { id: string; name: string }[][] | null = null
+let activeRolloutRows: { id: string }[] = []
 const insertedWorkflowsRows: Record<string, unknown>[] = []
 const insertedVersionRows: Record<string, unknown>[] = []
 const updatedWorkflowsRows: Record<string, unknown>[] = []
@@ -34,41 +41,32 @@ class SyntheticPgError extends Error {
   }
 }
 
-type SelectChain = {
-  from: () => SelectChain
-  where: (...args: unknown[]) => Promise<unknown> | { orderBy: () => Promise<unknown> }
-}
-
 function makeTx(currentAttempt: number) {
   return {
-    // The save helper issues two `select()` calls per attempt:
-    //   1. workflow_versions list (terminates with .orderBy())
-    //   2. workflows lookup (terminates with .where())
-    select: (() => {
-      let callCount = 0
-      return () => {
-        callCount += 1
-        if (callCount === 1) {
-          // workflow_versions select. Returns the slice for this
-          // attempt — earlier attempts may have seen 0 rows; later
-          // attempts (after a winner committed) see one more row.
-          const chain: SelectChain = {
-            from: () => chain,
-            where: () => ({
-              orderBy: () => Promise.resolve(existingVersionsByAttempt[currentAttempt - 1] ?? []),
+    select: () => {
+      let tableName = ''
+      const chain = {
+        from: (table: unknown) => {
+          tableName = (table as { __tableName?: string })?.__tableName ?? ''
+          return chain
+        },
+        where: () => {
+          if (tableName === 'workflows') {
+            const rows = existingWorkflowRowsByAttempt?.[currentAttempt - 1] ?? existingWorkflowRows
+            return { limit: () => ({ for: () => Promise.resolve(rows) }) }
+          }
+          if (tableName === 'workflow_rollouts') {
+            return { limit: () => Promise.resolve(activeRolloutRows) }
+          }
+          return {
+            orderBy: () => ({
+              limit: () => Promise.resolve(existingVersionsByAttempt[currentAttempt - 1]?.slice(0, 1) ?? []),
             }),
           }
-          return chain
-        }
-        // workflows select.
-        const workflowRows = existingWorkflowRowsByAttempt?.[currentAttempt - 1] ?? existingWorkflowRows
-        const chain: SelectChain = {
-          from: () => chain,
-          where: () => Promise.resolve(workflowRows),
-        }
-        return chain
+        },
       }
-    })(),
+      return chain
+    },
     update: () => ({
       set: (row: Record<string, unknown>) => ({
         where: () => {
@@ -134,6 +132,13 @@ vi.mock('@janusly/db', () => ({
     version: 'workflow_versions.version',
     __tableName: 'workflow_versions',
   },
+  workflowRollouts: {
+    id: 'workflow_rollouts.id',
+    orgId: 'workflow_rollouts.org_id',
+    workflowId: 'workflow_rollouts.workflow_id',
+    status: 'workflow_rollouts.status',
+    __tableName: 'workflow_rollouts',
+  },
   workflows: {
     id: 'workflows.id',
     orgId: 'workflows.org_id',
@@ -167,6 +172,7 @@ afterEach(() => {
   versionInsertBehaviour = []
   attemptCount = 0
   softDeleteGateRow = null
+  activeRolloutRows = []
 })
 
 describe('saveWorkflowVersion — happy path', () => {
@@ -224,6 +230,28 @@ describe('saveWorkflowVersion — happy path', () => {
 
     expect(updatedWorkflowsRows).toHaveLength(1)
     expect(updatedWorkflowsRows[0]!.name).toBe('New name')
+  })
+
+  it('carries reliability declarations from the single latest version', async () => {
+    const sloJson = { targetSuccessRate: 0.99 }
+    existingVersionsByAttempt = [[{
+      version: 7,
+      sloJson,
+      upstreamHealthSources: ['github'],
+    }]]
+    existingWorkflowRows = [{ id: 'wf-test', name: 'Test workflow' }]
+
+    const result = await saveWorkflowVersion({
+      orgId: 'org-1',
+      userId: 'user-a',
+      parsedWorkflow: baseWorkflow,
+    })
+
+    expect(result).toMatchObject({ kind: 'ok', version: 8 })
+    expect(insertedVersionRows[0]).toMatchObject({
+      sloJson,
+      upstreamHealthSources: ['github'],
+    })
   })
 
   it('generates a workflow id when the parsed workflow has none', async () => {
@@ -483,5 +511,21 @@ describe('saveWorkflowVersion — soft-deleted workflow', () => {
     const result = await saveWorkflowVersion({ orgId: 'org-1', userId: 'u1', parsedWorkflow: baseWorkflow })
     expect(result.kind).toBe('ok')
     expect(insertedVersionRows).toHaveLength(1)
+  })
+})
+
+describe('saveWorkflowVersion — active deployment guard', () => {
+  it('does not append a version while traffic is split across versions', async () => {
+    existingWorkflowRows = [{ id: 'wf-test', name: 'Test workflow' }]
+    activeRolloutRows = [{ id: 'rollout-1' }]
+
+    const result = await saveWorkflowVersion({
+      orgId: 'org-a',
+      userId: 'user-a',
+      parsedWorkflow: baseWorkflow,
+    })
+
+    expect(result).toEqual({ kind: 'rollout_active' })
+    expect(insertedVersionRows).toHaveLength(0)
   })
 })

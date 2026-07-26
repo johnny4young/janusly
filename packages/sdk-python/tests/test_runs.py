@@ -7,6 +7,7 @@ from pytest_httpx import HTTPXMock
 
 from janusly import JanuslyClient, ServiceTokenAuth
 from janusly.errors import JanuslyApiError, JanuslyTimeoutError
+from helpers import v1
 
 
 @pytest.fixture
@@ -21,15 +22,19 @@ def client() -> JanuslyClient:
 def test_start_workflow_does_two_step_flow(client: JanuslyClient, httpx_mock: HTTPXMock) -> None:
     """start() loads /workflows/latest then POSTs /start with the DAG."""
     httpx_mock.add_response(
-        url="https://api.test.janus.ly/workflows/latest?workflowId=wf-billing",
-        json={"dagJson": {"nodes": [], "edges": []}},
+        url="https://api.test.janus.ly/v1/workflows/latest?workflowId=wf-billing",
+        json=v1({"dagJson": {"nodes": [], "edges": []}}),
     )
     httpx_mock.add_response(
-        url="https://api.test.janus.ly/start",
-        json={"runId": "run-123"},
+        url="https://api.test.janus.ly/v1/start",
+        json=v1({"runId": "run-123"}),
         method="POST",
     )
-    result = client.runs.start(workflow_id="wf-billing", input={"month": "2026-05"})
+    result = client.runs.start(
+        workflow_id="wf-billing",
+        input={"month": "2026-05"},
+        force_run_during_pause=True,
+    )
     assert result == {"runId": "run-123"}
 
     # Validate that the second request carried the DAG + input.
@@ -39,6 +44,7 @@ def test_start_workflow_does_two_step_flow(client: JanuslyClient, httpx_mock: HT
     body = json.loads(posted.content.decode("utf-8"))
     assert body["workflow"] == {"nodes": [], "edges": []}
     assert body["input"] == {"month": "2026-05"}
+    assert body["forceRunDuringPause"] is True
 
 
 def test_start_workflow_rejects_missing_dag_as_validation_error(
@@ -47,8 +53,8 @@ def test_start_workflow_rejects_missing_dag_as_validation_error(
 ) -> None:
     """A latest-version response without dagJson maps to the TS SDK's 422 shape."""
     httpx_mock.add_response(
-        url="https://api.test.janus.ly/workflows/latest?workflowId=wf-bad",
-        json={},
+        url="https://api.test.janus.ly/v1/workflows/latest?workflowId=wf-bad",
+        json=v1({}),
     )
     with pytest.raises(JanuslyApiError) as err:
         client.runs.start(workflow_id="wf-bad")
@@ -58,8 +64,8 @@ def test_start_workflow_rejects_missing_dag_as_validation_error(
 
 def test_get_run_round_trip(client: JanuslyClient, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        url="https://api.test.janus.ly/run?runId=run-123",
-        json={"run": {"id": "run-123", "status": "running"}, "events": []},
+        url="https://api.test.janus.ly/v1/run?runId=run-123",
+        json=v1({"run": {"id": "run-123", "status": "running"}, "events": []}),
     )
     result = client.runs.get("run-123")
     assert result["run"]["status"] == "running"
@@ -68,8 +74,8 @@ def test_get_run_round_trip(client: JanuslyClient, httpx_mock: HTTPXMock) -> Non
 def test_list_yields_capped_rows(client: JanuslyClient, httpx_mock: HTTPXMock) -> None:
     """list() returns an iterator over the runs list."""
     httpx_mock.add_response(
-        url="https://api.test.janus.ly/runs?limit=200",
-        json={"runs": [{"id": f"r{i}"} for i in range(5)]},
+        url="https://api.test.janus.ly/v1/runs?limit=200",
+        json=v1({"runs": [{"id": f"r{i}"} for i in range(5)]}),
     )
     rows = list(client.runs.list())
     assert len(rows) == 5
@@ -82,14 +88,14 @@ def test_list_follows_future_cursor_pages(
 ) -> None:
     """The iterator mirrors the TS SDK's future-compatible nextCursor loop."""
     httpx_mock.add_response(
-        url="https://api.test.janus.ly/runs?limit=3",
-        json={"runs": [{"id": "r1"}, {"id": "r2"}], "nextCursor": "cursor-2"},
+        url="https://api.test.janus.ly/v1/runs?limit=3&status=failed&runKind=validation",
+        json=v1({"runs": [{"id": "r1"}, {"id": "r2"}], "nextCursor": "cursor-2"}),
     )
     httpx_mock.add_response(
-        url="https://api.test.janus.ly/runs?limit=1&cursor=cursor-2",
-        json={"runs": [{"id": "r3"}], "nextCursor": None},
+        url="https://api.test.janus.ly/v1/runs?limit=1&status=failed&runKind=validation&before=cursor-2",
+        json=v1({"runs": [{"id": "r3"}], "nextCursor": None}),
     )
-    rows = list(client.runs.list(limit=3))
+    rows = list(client.runs.list(limit=3, status="failed", run_kind="validation"))
     assert [row["id"] for row in rows] == ["r1", "r2", "r3"]
 
 
@@ -100,8 +106,8 @@ def test_poll_until_terminal_raises_on_deadline(
     """poll_until_terminal raises JanuslyTimeoutError when the deadline elapses
     without a terminal status."""
     httpx_mock.add_response(
-        url="https://api.test.janus.ly/run?runId=run-456",
-        json={"run": {"id": "run-456", "status": "running"}, "events": []},
+        url="https://api.test.janus.ly/v1/run?runId=run-456",
+        json=v1({"run": {"id": "run-456", "status": "running"}, "events": []}),
         is_reusable=True,
     )
     with pytest.raises(JanuslyTimeoutError):
@@ -114,8 +120,8 @@ def test_poll_until_terminal_returns_on_terminal(
 ) -> None:
     """poll_until_terminal returns the run details once status flips to terminal."""
     httpx_mock.add_response(
-        url="https://api.test.janus.ly/run?runId=run-789",
-        json={"run": {"id": "run-789", "status": "succeeded"}, "events": []},
+        url="https://api.test.janus.ly/v1/run?runId=run-789",
+        json=v1({"run": {"id": "run-789", "status": "succeeded"}, "events": []}),
     )
     result = client.runs.poll_until_terminal("run-789", interval_ms=50, timeout_ms=1000)
     assert result["run"]["status"] == "succeeded"
@@ -123,8 +129,8 @@ def test_poll_until_terminal_returns_on_terminal(
 
 def test_resume_node_posts_payload(client: JanuslyClient, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        url="https://api.test.janus.ly/resume",
-        json={"resumed": True},
+        url="https://api.test.janus.ly/v1/resume",
+        json=v1({"resumed": True}),
         method="POST",
     )
     result = client.runs.resume_node(
@@ -148,8 +154,8 @@ def test_resume_node_posts_payload(client: JanuslyClient, httpx_mock: HTTPXMock)
 
 def test_cancel_posts_payload(client: JanuslyClient, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        url="https://api.test.janus.ly/run/cancel",
-        json={"runId": "run-X", "status": "cancelled"},
+        url="https://api.test.janus.ly/v1/run/cancel",
+        json=v1({"runId": "run-X", "status": "cancelled"}),
         method="POST",
     )
     result = client.runs.cancel(run_id="run-X", reason="stuck on a bad input")
@@ -166,8 +172,8 @@ def test_cancel_omits_reason_when_not_supplied(
     httpx_mock: HTTPXMock,
 ) -> None:
     httpx_mock.add_response(
-        url="https://api.test.janus.ly/run/cancel",
-        json={"runId": "run-X", "status": "cancelled"},
+        url="https://api.test.janus.ly/v1/run/cancel",
+        json=v1({"runId": "run-X", "status": "cancelled"}),
         method="POST",
     )
     client.runs.cancel(run_id="run-X")
@@ -184,8 +190,15 @@ def test_cancel_raises_on_terminal_run(
 ) -> None:
     """Cancelling an already-terminal run maps the route's 409 to a typed error."""
     httpx_mock.add_response(
-        url="https://api.test.janus.ly/run/cancel",
-        json={"error": "Run is already succeeded; cannot cancel"},
+        url="https://api.test.janus.ly/v1/run/cancel",
+        json={
+            "apiVersion": "v1",
+            "requestId": "sdk-test",
+            "error": {
+                "message": "Run is already succeeded; cannot cancel",
+                "code": "runs_already_terminal",
+            },
+        },
         status_code=409,
         method="POST",
     )

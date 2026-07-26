@@ -9,13 +9,15 @@ by prefix alone.
 
 - `apps/api/src/api-contracts.ts` — Zod request/response schemas and the pure
   `V1_CONTRACT_ROUTES` manifest.
-- `packages/shared/src/api-contract.ts` — zero-dependency exact-path catalog
-  shared by the API contracts and browser transport.
+- `packages/shared/src/api-contract.ts` — zero-dependency path catalogs for
+  stable reads, writes, and dynamic MCP connection templates, shared by API
+  contracts and first-party clients.
 - `apps/api/src/routes.ts` — optional `contract` field on a route entry.
 - `apps/api/src/server.ts` — exact-route-first dispatch, `/v1` alias resolution,
-  query validation, request ID assignment, and unchanged auth/RBAC ordering.
+  query/body validation, request ID assignment, and unchanged auth/RBAC ordering.
 - `apps/api/src/http.ts` — versioned success/error envelopes and runtime output
-  validation at the JSON wire boundary.
+  validation at the JSON wire boundary; its memoized `readJson` lets the
+  dispatcher and handler share one single-consumption request stream.
 - `apps/api/src/openapi.ts` — deterministic OpenAPI 3.1 generation through Zod
   4 `toJSONSchema`.
 - `apps/api/openapi.v1.json` — reviewed generated artifact; `pnpm
@@ -61,36 +63,84 @@ the response header and v1 envelope. CORS exposes `X-Request-Id` and
 1. Exact routes resolve before aliasing, so `/v1/openapi.json` is a public raw
    OpenAPI document rather than an enveloped data route.
 2. The dispatcher runs auth, role, and permission gates in the same order for
-   legacy and v1 requests. It validates a v1 query only after authorization.
+   legacy and v1 requests. It validates decoded path parameters, queries, and
+   declared JSON bodies only after authorization. Strict body schemas reject
+   unknown top-level keys; malformed or out-of-contract path values fail before
+   the handler runs.
 3. A v1 handler receives the legacy URL (`/v1/run?...` becomes `/run?...`), so
    tenant-scoped handler logic is shared rather than forked.
-4. `sendJson` validates the serialized JSON payload against the declared
+4. A contracted mutation handler reuses the memoized raw JSON parse after the
+   dispatcher validates it; Zod transformations are not substituted into the
+   legacy handler path, so versioning does not silently change handler semantics.
+   Diagnostic workflow endpoints are the deliberate exception to shape-first
+   request schemas: `/validate` and `/workflows/readiness` accept an object
+   candidate whose fields may be invalid so their successful response can
+   report structured findings. The global JSON byte cap still bounds the body,
+   and their result envelopes are fully typed and runtime-validated.
+5. `sendJson` validates the serialized JSON payload against the declared
    response schema. A mismatch logs operation ID plus safe issue paths/messages
    and returns a generic `server_internal_error`; it never ships an invalid
    contract or raw internal value. OpenAPI uses the same Zod input semantics:
    required/type drift fails closed, while additive keys on ordinary
    `z.object` response schemas remain backward-compatible unless that object is
    explicitly strict.
-5. Route-specific error codes must be declared. Dispatcher-level errors are
-   automatically available to every contract.
-6. Legacy response bodies remain unchanged. The web client opts contracted GET
+6. Route-specific error codes must be declared. Generic server errors are
+   automatically available to every contract, but a contract with a validated
+   path, query, or body must explicitly include `invalid_input`; otherwise the
+   dispatcher rejection itself fails the versioned error contract.
+7. Legacy response bodies remain unchanged. The web client opts contracted GET
    paths into `/v1` and unwraps them inside `apps/web/src/api.ts`, so components
-   keep their existing payload types.
+   keep their existing payload types. The path catalog is query-aware where a
+   legacy endpoint multiplexes incompatible shapes: `/dlq?id=` stays
+   unversioned because it returns full replay-fidelity detail, while bounded
+   `/dlq` list queries use the stable `/v1/dlq` summary contract.
+8. Stable workflow authoring keeps save and rollback on the same
+   `workflows.write` permission and bounded version-allocation retry policy.
+   Rollback additionally requires an active parent, validates the historical
+   DAG before copying it, and reconciles schedules only after the transaction
+   commits.
+9. Stable DLQ reads require both viewer rank and `dlq.read`. `/v1/dlq` exposes
+   only the bounded summary projection (never replay-fidelity workflow/node
+   snapshots), while `/v1/dlq/clusters` exposes scrubbed deterministic cluster
+   evidence. `/v1/dlq/replay` requires `deadLetterId`; run/node replay aliases
+   remain legacy-only because they cannot identify a dead-letter recovery claim
+   for terminal-impact attribution.
+10. Stable run explanation requires viewer rank plus `reports.read` and accepts
+    only `format=json`. `/v1/reports/run-explain` returns the normal validated
+    JSON envelope; downloadable Markdown and JSON attachments deliberately stay
+    on the unversioned route so version negotiation never changes an artifact's
+    bytes or filename.
+11. Stable AI drafting exposes generation and patching without persisting a
+    workflow version. Both require `ai.write`; patching additionally preserves
+    its editor-rank floor. Deterministic AI fallbacks remain successful response
+    data, while cost-policy rejection uses the catalogued `budget_exceeded`
+    error with scalar budget parameters. A fallback patch may carry a malformed
+    historical workflow snapshot for diagnosis, but `mode: "ai"` suggestions
+    must validate against `WorkflowSchema` at the wire boundary.
 
 ## Adding a contracted route
 
 1. Define precise Zod wire schemas and an `ApiRouteContract` in
    `api-contracts.ts`. Dates are ISO strings because validation occurs after
    JSON serialization.
-2. Attach the contract to the real route entry without changing its role,
+2. For a dynamic path, declare a strict `request.path` schema whose keys match
+   every `{parameter}` in the OpenAPI path template. The dispatcher validates
+   decoded values and the generator emits required OpenAPI path parameters.
+3. Attach the contract to the real route entry without changing its role,
    permission, or tenant-scoped handler.
-3. Add the matching method/gates/contract to `V1_CONTRACT_ROUTES`.
-4. If the web should migrate immediately, add the exact GET path to
-   `V1_READ_PATHS` in `packages/shared/src/api-contract.ts`; the browser checks
-   that shared catalog rather than maintaining a second list.
-5. Run `pnpm contract:generate`, review `apps/api/openapi.v1.json`, then run
+4. Add the matching method/gates/contract to `V1_CONTRACT_ROUTES`.
+5. Add a stable read, mutation, or path template to the matching catalog in
+   `packages/shared/src/api-contract.ts`. If the browser should migrate a GET
+   immediately, its transport reads `V1_READ_PATHS` directly.
+6. Run `pnpm contract:generate`, review `apps/api/openapi.v1.json`, then run
    `pnpm contract:check` and the legacy/v1 parity tests.
 
+The MCP proxy consumes `/v1` only for operations present in this manifest and
+unwraps the stable envelope in `packages/mcp-server/src/api-client.ts`. Its
+JSON operation calls are contracted; downloadable artifact routes remain
+unversioned because the v1 envelope would change their bytes. Adding `/v1` to
+an uncontracted path intentionally yields 404.
+
 Do not add a schema with opaque top-level payloads merely to increase route
-count. Do not generate SDKs until the intended surface has complete contracts;
-the checked-in OpenAPI document is the compatibility boundary first.
+count. SDK methods may consume only explicitly contracted `/v1` operations;
+the checked-in OpenAPI document remains the compatibility boundary.

@@ -76,7 +76,7 @@ export const PERMISSION_CATALOG = [
   { key: "recovery.read",        category: "recovery",  description: "View recovery metrics + delta",            defaultRoles: ["viewer", "editor", "admin"] },
   { key: "recovery.write",       category: "recovery",  description: "Submit recovery feedback, manage recovery items (acknowledge / resolve / comment / escalate)", defaultRoles: ["editor", "admin"] },
   // reports
-  { key: "reports.read",         category: "reports",   description: "Download run-explain reports",             defaultRoles: ["viewer", "editor", "admin"] },
+  { key: "reports.read",         category: "reports",   description: "Download run and value reports",           defaultRoles: ["viewer", "editor", "admin"] },
   { key: "reports.deliver",      category: "reports",   description: "Deliver run-explain via Slack / GitHub / webhook", defaultRoles: ["editor", "admin"] },
   // ai
   { key: "ai.write",             category: "ai",        description: "Use AI generate / patch / suggest / explain", defaultRoles: ["editor", "admin"] },
@@ -111,12 +111,12 @@ export const PERMISSION_CATALOG = [
   // eval datasets (built from opted-in accepted recovery feedback)
   { key: "evals.read",           category: "evals",       description: "View + export eval datasets built from recovery decisions", defaultRoles: ["viewer", "editor", "admin"] },
   { key: "evals.write",          category: "evals",       description: "Create / delete eval datasets from opted-in recovery feedback", defaultRoles: ["admin"] },
-  // inbound trigger events (email_received / file_dropped / mcp_server_event)
+  // inbound trigger events (webhook_received / email_received / file_dropped / mcp_server_event)
   { key: "triggers.read",        category: "triggers",    description: "View structured inbound-trigger events + replay history", defaultRoles: ["viewer", "editor", "admin"] },
   { key: "triggers.ingest",      category: "triggers",    description: "Submit a normalized inbound trigger event (relay / forwarder)", defaultRoles: ["editor", "admin"] },
   // solution packs (installable, ICP-shaped workflow starters)
   { key: "packs.read",           category: "packs",       description: "View the solution-pack catalog + per-org dependency hints", defaultRoles: ["viewer", "editor", "admin"] },
-  { key: "packs.install",        category: "packs",       description: "Install a pack as a draft workflow, run a sandbox sample, or inject a demo failure", defaultRoles: ["editor", "admin"] },
+  { key: "packs.install",        category: "packs",       description: "Install a pack as a draft workflow, run a sandbox sample, or start a recovery drill", defaultRoles: ["editor", "admin"] },
   // onboarding ("first recovered run" guided checklist — per-user self-service)
   { key: "onboarding.read",      category: "onboarding",  description: "View own onboarding checklist progress",                    defaultRoles: ["viewer", "editor", "admin"] },
   { key: "onboarding.write",     category: "onboarding",  description: "Skip or resume own onboarding checklist",                   defaultRoles: ["viewer", "editor", "admin"] },

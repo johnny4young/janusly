@@ -31,6 +31,20 @@
  * prefix. Mirrors the `apiErrors.*` namespace in the web catalog.
  */
 export type ApiErrorCode =
+  // identity and organizations
+  | "identity_human_required"
+  | "identity_email_required"
+  | "identity_invitation_not_found"
+  | "identity_invitation_accept_failed"
+  | "invitation_id_required"
+  | "organization_name_invalid"
+  | "organization_create_failed"
+  | "profile_name_invalid"
+  | "profile_update_failed"
+  | "browser_session_required"
+  | "browser_session_update_failed"
+  | "organization_id_required"
+  | "organization_access_denied"
   // members
   | "email_required"
   | "email_invalid"
@@ -55,6 +69,10 @@ export type ApiErrorCode =
   | "upstream_degraded"
   | "workflow_circuit_breaker_paused"
   | "workflow_not_circuit_breaker_paused"
+  | "workflow_rollout_active"
+  | "workflow_rollout_invalid"
+  | "workflow_rollout_not_found"
+  | "workflow_rollout_not_active"
   // upstream health sources
   | "upstream_source_not_found"
   | "upstream_source_duplicate"
@@ -79,6 +97,7 @@ export type ApiErrorCode =
   | "trigger_invalid_payload"
   | "trigger_payload_too_large"
   | "trigger_no_matching_node"
+  | "trigger_selector_ambiguous"
   | "trigger_dkim_required"
   | "trigger_event_not_found"
   // solution packs
@@ -93,6 +112,7 @@ export type ApiErrorCode =
   | "ai_question_too_long"
   | "ai_run_id_required"
   | "ai_run_not_found"
+  | "budget_exceeded"
   // alerts
   | "alerts_policy_id_required"
   | "alerts_policy_invalid"
@@ -117,6 +137,8 @@ export type ApiErrorCode =
   | "billing_workflow_id_required"
   // credentials
   | "credentials_fields_required"
+  | "credentials_create_failed"
+  | "credentials_conflict"
   | "credentials_invalid_expiry"
   | "credentials_expiry_required"
   | "credentials_expiry_failed"
@@ -126,6 +148,8 @@ export type ApiErrorCode =
   | "credentials_name_required"
   | "credentials_not_found"
   | "credentials_rotation_failed"
+  | "credentials_revoke_failed"
+  | "credentials_secret_store_unavailable"
   // dlq
   | "dlq_failing_node_missing"
   | "dlq_fields_required"
@@ -158,10 +182,12 @@ export type ApiErrorCode =
   | "mcp_command_invalid"
   | "mcp_command_not_allowed"
   | "mcp_command_required"
+  | "mcp_process_disabled"
   | "mcp_no_updatable_fields"
   | "mcp_rate_limit_invalid"
   | "mcp_rate_limited"
   | "mcp_transport_invalid"
+  | "mcp_tenant_disabled"
   | "mcp_url_invalid"
   | "mcp_url_required"
   // members
@@ -182,6 +208,10 @@ export type ApiErrorCode =
   | "org_value_required"
   // plugins
   | "plugins_plugin_id_required"
+  // pagerduty
+  | "pagerduty_invalid_request"
+  | "pagerduty_invalid_signature"
+  | "pagerduty_trigger_not_found"
   // prompts
   | "prompts_description_too_long"
   | "prompts_invalid_url"
@@ -215,6 +245,11 @@ export type ApiErrorCode =
   | "recovery_playbook_not_found"
   | "recovery_playbook_outcome_invalid"
   | "recovery_playbook_source_invalid"
+  | "replay_campaign_invalid_body"
+  | "replay_campaign_invalid_cohort"
+  | "replay_campaign_invalid_path"
+  | "replay_campaign_not_found"
+  | "replay_campaign_not_running"
   | "recovery_playbook_source_mismatch"
   | "recovery_playbook_validation_required"
   // reports
@@ -285,6 +320,11 @@ export type ApiErrorCode =
   // server
   | "server_internal_error"
   | "server_not_found"
+  | "slack_interaction_conflict"
+  | "slack_interaction_invalid_request"
+  | "slack_interaction_invalid_signature"
+  | "slack_interaction_not_found"
+  | "slack_interaction_unauthorized"
   | "server_request_failed"
   // snippets
   | "snippet_id_required"
@@ -317,8 +357,12 @@ export type ApiErrorCode =
   // workflows
   | "workflows_after_version_invalid"
   | "workflows_no_versions"
+  | "workflows_rollback_conflict"
   | "workflows_rollback_ids_required"
+  | "workflows_save_conflict"
   | "workflows_source_version_not_found"
+  | "workflows_upstream_health_sources_invalid"
+  | "workflows_validation_failed"
   | "workflows_version_malformed"
   | "workflows_workflow_id_required";
 

@@ -2,7 +2,7 @@
 
 Every workflow is a DAG of `nodes` connected by `edges`. Each node has an `id`, a `type` (one of the supported types below), and a `config` object validated by the engine.
 
-The runtime supports the full closed node set from `packages/shared/src/workflow.ts`: `http`, `condition`, `tool`, `agent`, `multi_agent`, `agent_reflection`, `loop`, `router`, `router_llm`, `transform`, `ai`, `webhook`, `approval`, `human_form`, `noop`, `subworkflow`, `wait_until`, `parallel_fork`, `join`, `schedule`, `mcp_tool`, `email_received`, `file_dropped`, and `mcp_server_event`. `/ai/generate-workflow` emits only the smaller AI-generation subset; Pass 2 auto-promotes wired placeholder families (`wait_until`, `schedule`, and uniquely matched exposed `mcp_tool` noops), while operators promote the remaining advanced runtime nodes in the Inspector or by editing the workflow JSON.
+The runtime supports the full closed node set from `packages/shared/src/workflow.ts`: `http`, `condition`, `tool`, `agent`, `multi_agent`, `agent_reflection`, `loop`, `router`, `router_llm`, `transform`, `ai`, `webhook`, `approval`, `human_form`, `noop`, `subworkflow`, `wait_until`, `parallel_fork`, `join`, `schedule`, `mcp_tool`, `webhook_received`, `email_received`, `file_dropped`, and `mcp_server_event`. `/ai/generate-workflow` emits only the smaller AI-generation subset; Pass 2 auto-promotes wired placeholder families (`wait_until`, `schedule`, and uniquely matched exposed `mcp_tool` noops), while operators promote the remaining advanced runtime nodes in the Inspector or by editing the workflow JSON.
 
 Templating is supported in any string config value via `{{...}}`:
 
@@ -514,20 +514,36 @@ Invokes a tool from an org-registered external MCP connection. The connection an
 
 ## Event-driven triggers
 
-`email_received`, `file_dropped`, and `mcp_server_event` are passthrough
+`webhook_received`, `email_received`, `file_dropped`, and `mcp_server_event` are passthrough
 trigger nodes. The executor never talks to SMTP, a bucket, or an MCP server;
 the API ingestion seam owns all external I/O. Ingestion routes normalize the
 payload, write a `trigger_events` row, apply a per-trigger storm guard, and
 start a run with the normalized event under `input.event`. Replay uses the
 stored payload from that structured event row.
 
+- `POST /triggers/webhook/ingest` matches `webhook_received.config.endpointKey`; callers must supply a stable `eventId`, and retries converge on one run.
 - `POST /triggers/email/ingest` matches `email_received.config.aliasKey`, then enforces DKIM and optional `fromDomains`.
 - `POST /triggers/file/ingest` matches `file_dropped.config.bucket` plus optional `prefix` / `extensions`.
 - `POST /triggers/mcp/ingest` matches `mcp_server_event.config.connectionAlias`, `resourceUri`, and optional `eventTypes`.
 - `POST /triggers/events/:id/replay` replays a stored event against the current latest workflow version.
 
+Inbound selectors must be unique among active workflows in an organization. A
+duplicate selector returns HTTP 409 `trigger_selector_ambiguous` before any
+event or run is created; Janusly never chooses an arbitrary first match.
+
 Manual `POST /start` still executes a workflow containing trigger nodes; in
 that path the trigger output carries an empty `event` object.
+
+```jsonc
+{
+  "id": "incoming",
+  "type": "webhook_received",
+  "config": {
+    "endpointKey": "incident-triage",
+    "rateLimitPerMin": 60
+  }
+}
+```
 
 ```jsonc
 {

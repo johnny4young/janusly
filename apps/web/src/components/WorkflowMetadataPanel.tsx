@@ -111,9 +111,10 @@ function parseChipList(value: string): string[] {
 
 export type WorkflowMetadataPanelProps = {
   workflowId?: string | undefined
+  readOnly?: boolean
 }
 
-export function WorkflowMetadataPanel({ workflowId: explicit }: WorkflowMetadataPanelProps = {}) {
+export function WorkflowMetadataPanel({ workflowId: explicit, readOnly = false }: WorkflowMetadataPanelProps = {}) {
   const { t } = useT()
   const addToast = useWorkflowStore((s) => s.addToast)
   const bumpPlatformVersion = useWorkflowStore((s) => s.bumpPlatformVersion)
@@ -248,7 +249,7 @@ export function WorkflowMetadataPanel({ workflowId: explicit }: WorkflowMetadata
   const aiGuidanceOverCap = aiGuidanceByteLength > WORKFLOW_METADATA_AI_GUIDANCE_MAX_BYTES
   const aiGuidanceHasSecret = containsOperatorGuidanceSecret(form.aiGuidanceMarkdown)
   const loading = loadState === 'loading'
-  const editorDisabled = loadState !== 'ready' || saving
+  const editorDisabled = readOnly || loadState !== 'ready' || saving
 
   function updateForm<K extends keyof WorkflowMetadataForm>(key: K, value: WorkflowMetadataForm[K]) {
     dirtyRef.current = true
@@ -430,7 +431,7 @@ export function WorkflowMetadataPanel({ workflowId: explicit }: WorkflowMetadata
           <button
             type="submit"
             className="command-button command-button-primary"
-            disabled={loadState !== 'ready' || saving || runbookOverCap || aiGuidanceOverCap || aiGuidanceHasSecret}
+            disabled={readOnly || loadState !== 'ready' || saving || runbookOverCap || aiGuidanceOverCap || aiGuidanceHasSecret}
             data-testid="workflow-metadata-save"
           >
             {saving

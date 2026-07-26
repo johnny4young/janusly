@@ -91,7 +91,7 @@ function statusLabel(status: McpConnectionStatus): string {
   }
 }
 
-export function McpConnectionsPanel() {
+export function McpConnectionsPanel({ canWrite = true }: { canWrite?: boolean } = {}) {
   const { t } = useT()
   const confirmDialog = useConfirm()
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
@@ -192,7 +192,7 @@ export function McpConnectionsPanel() {
         addToast(t('mcpConnections.toasts.connectedDiscovered', { count }), 'success')
       } else {
         const reason = discovery?.error ?? (t('mcpConnections.toasts.unknownReason'))
-        addToast(t('mcpConnections.toasts.connectedNoDiscovery', { reason }), 'warning')
+        addToast(t('mcpConnections.toasts.connectedNoDiscovery', { reason }), 'info')
       }
       setForm(EMPTY_FORM)
       bumpPlatformVersion()
@@ -295,7 +295,7 @@ export function McpConnectionsPanel() {
 
       {error && <div className="form-error">{error}</div>}
 
-      <form onSubmit={create} className="form-stack">
+      {canWrite && <form onSubmit={create} className="form-stack">
         <div className="split-row">
           <div style={{ flex: 1 }}>
             <label className="field-label" htmlFor="mcp-alias">{t('mcpConnections.form.alias')}</label>
@@ -373,7 +373,7 @@ export function McpConnectionsPanel() {
           <Plug size={15} aria-hidden="true" />
           <span>{saving ? t('mcpConnections.form.submitting') : t('mcpConnections.form.submit')}</span>
         </button>
-      </form>
+      </form>}
 
       {loading ? (
         <LoadingSkeleton rows={3} label={t('mcpConnections.list.loading')} />
@@ -414,41 +414,45 @@ export function McpConnectionsPanel() {
                 >
                   {openConnectionId === connection.id ? t('mcpConnections.list.hideTools') : t('mcpConnections.list.showTools')}
                 </button>
-                <button
-                  type="button"
-                  className="small-command"
-                  onClick={() => setEnabled(connection, !connection.enabled)}
-                  aria-label={
-                    connection.enabled
-                      ? (t('mcpConnections.actions.disableAria', { alias: connection.alias }))
-                      : (t('mcpConnections.actions.enableAria', { alias: connection.alias }))
-                  }
-                  title={
-                    connection.enabled
-                      ? (t('mcpConnections.actions.disableTitle'))
-                      : (t('mcpConnections.actions.enableTitle'))
-                  }
-                >
-                  <Save size={14} aria-hidden="true" /> {connection.enabled ? t('mcpConnections.actions.disable') : t('mcpConnections.actions.enable')}
-                </button>
-                <button
-                  type="button"
-                  className="small-command"
-                  onClick={() => rediscover(connection)}
-                  aria-label={t('mcpConnections.actions.rediscoverAria', { alias: connection.alias })}
-                  title={t('mcpConnections.actions.rediscoverTitle')}
-                >
-                  <RefreshCw size={14} aria-hidden="true" /> {t('mcpConnections.actions.rediscover')}
-                </button>
-                <button
-                  type="button"
-                  className="small-command danger"
-                  onClick={() => removeConnection(connection)}
-                  aria-label={t('mcpConnections.actions.deleteAria', { alias: connection.alias })}
-                  title={t('mcpConnections.actions.deleteTitle')}
-                >
-                  <Trash2 size={14} aria-hidden="true" />
-                </button>
+                {canWrite && (
+                  <>
+                    <button
+                      type="button"
+                      className="small-command"
+                      onClick={() => setEnabled(connection, !connection.enabled)}
+                      aria-label={
+                        connection.enabled
+                          ? (t('mcpConnections.actions.disableAria', { alias: connection.alias }))
+                          : (t('mcpConnections.actions.enableAria', { alias: connection.alias }))
+                      }
+                      title={
+                        connection.enabled
+                          ? (t('mcpConnections.actions.disableTitle'))
+                          : (t('mcpConnections.actions.enableTitle'))
+                      }
+                    >
+                      <Save size={14} aria-hidden="true" /> {connection.enabled ? t('mcpConnections.actions.disable') : t('mcpConnections.actions.enable')}
+                    </button>
+                    <button
+                      type="button"
+                      className="small-command"
+                      onClick={() => rediscover(connection)}
+                      aria-label={t('mcpConnections.actions.rediscoverAria', { alias: connection.alias })}
+                      title={t('mcpConnections.actions.rediscoverTitle')}
+                    >
+                      <RefreshCw size={14} aria-hidden="true" /> {t('mcpConnections.actions.rediscover')}
+                    </button>
+                    <button
+                      type="button"
+                      className="small-command danger"
+                      onClick={() => removeConnection(connection)}
+                      aria-label={t('mcpConnections.actions.deleteAria', { alias: connection.alias })}
+                      title={t('mcpConnections.actions.deleteTitle')}
+                    >
+                      <Trash2 size={14} aria-hidden="true" />
+                    </button>
+                  </>
+                )}
               </div>
               {Object.keys(connection.envRefs ?? {}).length > 0 && (
                 <div className="helper-text" style={{ marginTop: 8 }}>
@@ -472,6 +476,7 @@ export function McpConnectionsPanel() {
                               <input
                                 type="checkbox"
                                 checked={tool.enabled}
+                                disabled={!canWrite}
                                 onChange={(event) => setToolFlag(connection, tool, { enabled: event.target.checked })}
                                 aria-label={t('mcpConnections.tools.enabledAria', { name: tool.name })}
                               />
@@ -481,6 +486,7 @@ export function McpConnectionsPanel() {
                               <input
                                 type="checkbox"
                                 checked={tool.writeSide}
+                                disabled={!canWrite}
                                 onChange={(event) => setToolFlag(connection, tool, { writeSide: event.target.checked })}
                                 aria-label={t('mcpConnections.tools.writeSideAria', { name: tool.name })}
                               />
@@ -490,6 +496,7 @@ export function McpConnectionsPanel() {
                               <input
                                 type="checkbox"
                                 checked={tool.exposeToAi}
+                                disabled={!canWrite}
                                 onChange={(event) => setToolFlag(connection, tool, { exposeToAi: event.target.checked })}
                                 aria-label={t('mcpConnections.tools.exposeToAiAria', { name: tool.name })}
                               />

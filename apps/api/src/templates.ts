@@ -569,10 +569,9 @@ export const workflowTemplates: WorkflowTemplate[] = [
     name: "Email auto-reply",
     description: "Skeleton for reading inbound email and sending a templated reply via email.send. Operator fills the trigger source and recipient details in the Inspector.",
     category: "Communication",
-    // Placeholder credential — the actual Gmail-read integration is a
-    // future ticket. The template ships as a scaffold so an operator
-    // who asked the AI for an email reply gets a usefully-shaped DAG
-    // when the LLM is unavailable.
+    // The template is intentionally provider-neutral and ships as a scaffold
+    // so an operator who asked the AI for an email reply gets a usefully-shaped
+    // DAG when the LLM is unavailable.
     requiredCredentials: [],
     workflow: {
       dslVersion: "1.0",

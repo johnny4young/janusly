@@ -242,7 +242,7 @@ function buildSuggestedFix(audit: RunExplainRecoveryAudit | null): RunExplainSug
   const patchStyle: "structural" | "config_only" | "unknown" =
     patchStyleRaw === "structural" || patchStyleRaw === "config_only" ? patchStyleRaw : "unknown";
   const suggestionsCount = typeof metadata.suggestionsCount === "number" && Number.isFinite(metadata.suggestionsCount)
-    ? metadata.suggestionsCount
+    ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.trunc(metadata.suggestionsCount)))
     : 0;
   return {
     mode,

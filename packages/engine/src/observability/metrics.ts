@@ -6,7 +6,7 @@
  *
  * Used by:
  * - `core/runtime.ts` after each node terminal status transition.
- * - `worker.ts` for workflow-queue and worker rate-limiter gauges.
+ * - `worker.ts` for workflow/maintenance queue and rate-limiter gauges.
  * - `apps/api/src/index.ts` for the API process's rate-limiter gauge.
  *
  * Invariants:
@@ -31,6 +31,8 @@ type Instruments = {
   nodeRetries: Counter;
   queueWaiting: ObservableGauge;
   queueActive: ObservableGauge;
+  maintenanceQueueWaiting: ObservableGauge;
+  maintenanceQueueActive: ObservableGauge;
   rateLimiterDegradedBuckets: ObservableGauge;
 };
 
@@ -61,6 +63,12 @@ function getInstruments(): Instruments {
     queueActive: meter.createObservableGauge("workflow_queue_active_jobs", {
       description: "Jobs currently being processed",
     }),
+    maintenanceQueueWaiting: meter.createObservableGauge("maintenance_queue_waiting_jobs", {
+      description: "Jobs waiting in the maintenance queue",
+    }),
+    maintenanceQueueActive: meter.createObservableGauge("maintenance_queue_active_jobs", {
+      description: "Jobs currently being processed by maintenance workers",
+    }),
     rateLimiterDegradedBuckets: meter.createObservableGauge(
       "janusly_rate_limit_degraded_buckets",
       { description: "Rate-limiter buckets currently degraded in this process" },
@@ -76,7 +84,7 @@ function isGaugeCount(value: number): boolean {
 }
 
 /**
- * Register asynchronous workflow-queue observations.
+ * Register asynchronous observations for one named delivery lane.
  *
  * Collection is deliberately fail-soft: Redis faults or malformed adapter
  * values omit this scrape's observations instead of rejecting the complete
@@ -84,8 +92,16 @@ function isGaugeCount(value: number): boolean {
  */
 export function registerQueueObservables(
   getCounts: () => QueueCounts | Promise<QueueCounts>,
+  queueKind: "workflow" | "maintenance" = "workflow",
 ): () => void {
-  const { meter, queueWaiting, queueActive } = getInstruments();
+  const instruments = getInstruments();
+  const { meter } = instruments;
+  const queueWaiting = queueKind === "workflow"
+    ? instruments.queueWaiting
+    : instruments.maintenanceQueueWaiting;
+  const queueActive = queueKind === "workflow"
+    ? instruments.queueActive
+    : instruments.maintenanceQueueActive;
   const callback = async (result: BatchObservableResult) => {
     try {
       const counts = await getCounts();

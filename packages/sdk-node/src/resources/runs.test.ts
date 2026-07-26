@@ -15,7 +15,10 @@ function makeConfig(fetchImpl: FakeFetch): JanuslyClientConfig {
 }
 
 function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  return new Response(JSON.stringify({ apiVersion: "v1", requestId: "sdk-test", data: body }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
 }
 
 function runSummary(overrides: Partial<RunSummary> = {}): RunSummary {
@@ -53,13 +56,18 @@ describe("RunsResource.start", () => {
       return jsonResponse({ runId: "run-xyz" });
     }) as unknown as FakeFetch;
     const runs = new RunsResource(makeConfig(fetchImpl));
-    const result = await runs.start({ workflowId: "wf 1", input: { ticketId: "T-1" } });
+    const result = await runs.start({
+      workflowId: "wf 1",
+      input: { ticketId: "T-1" },
+      forceRunDuringPause: true,
+    });
     expect(result).toEqual({ runId: "run-xyz" });
-    expect(captured[0]!.url).toBe("https://api.test.example.com/workflows/latest?workflowId=wf+1");
-    expect(captured[1]!.url).toBe("https://api.test.example.com/start");
+    expect(captured[0]!.url).toBe("https://api.test.example.com/v1/workflows/latest?workflowId=wf+1");
+    expect(captured[1]!.url).toBe("https://api.test.example.com/v1/start");
     expect(JSON.parse(captured[1]!.init.body as string)).toEqual({
       workflow: { id: "wf-1", nodes: [{ id: "n", type: "noop", config: {} }], edges: [] },
       input: { ticketId: "T-1" },
+      forceRunDuringPause: true,
     });
   });
 
@@ -93,7 +101,7 @@ describe("RunsResource.get", () => {
     const runs = new RunsResource(makeConfig(fetchImpl));
     await runs.get("run-1", { eventsLimit: 50, eventsCursor: "2026-05-20T00:00:00.000Z|evt-42" });
     const url = new URL(captured[0]!.url);
-    expect(url.pathname).toBe("/run");
+    expect(url.pathname).toBe("/v1/run");
     expect(url.searchParams.get("runId")).toBe("run-1");
     expect(url.searchParams.get("eventsLimit")).toBe("50");
     expect(url.searchParams.get("eventsCursor")).toBe("2026-05-20T00:00:00.000Z|evt-42");
@@ -136,6 +144,31 @@ describe("RunsResource.list", () => {
     const collected: string[] = [];
     for await (const run of runs.list({ limit: 2 })) collected.push(run.id);
     expect(collected).toEqual(["r-1", "r-2"]);
+  });
+
+  it("uses the stable before cursor and forwards status/run-kind filters", async () => {
+    const captured: string[] = [];
+    const responses = [
+      jsonResponse({ runs: [runSummary({ id: "r-1" })], nextCursor: "cursor-2" }),
+      jsonResponse({ runs: [runSummary({ id: "r-2" })], nextCursor: null }),
+    ];
+    let index = 0;
+    const fetchImpl = vi.fn(async (url: unknown) => {
+      captured.push(String(url));
+      return responses[index++]!;
+    }) as unknown as FakeFetch;
+    const runs = new RunsResource(makeConfig(fetchImpl));
+    const collected: string[] = [];
+
+    for await (const run of runs.list({ status: "failed", runKind: "validation" })) {
+      collected.push(run.id);
+    }
+
+    expect(collected).toEqual(["r-1", "r-2"]);
+    expect(new URL(captured[0]!).pathname).toBe("/v1/runs");
+    expect(new URL(captured[0]!).searchParams.get("status")).toBe("failed");
+    expect(new URL(captured[0]!).searchParams.get("runKind")).toBe("validation");
+    expect(new URL(captured[1]!).searchParams.get("before")).toBe("cursor-2");
   });
 });
 
@@ -301,7 +334,7 @@ describe("RunsResource.resumeNode", () => {
       resumeToken: "tok-abc",
     });
     expect(result).toEqual({ resumed: true });
-    expect(captured[0]!.url).toBe("https://api.test.example.com/resume");
+    expect(captured[0]!.url).toBe("https://api.test.example.com/v1/resume");
     expect(JSON.parse(captured[0]!.init.body as string)).toEqual({
       runId: "run-1",
       nodeId: "node-2",
@@ -323,7 +356,7 @@ describe("RunsResource.cancel", () => {
     const result = await runs.cancel({ runId: "run-1", reason: "stuck on a bad input" });
 
     expect(result).toEqual({ runId: "run-1", status: "cancelled" });
-    expect(captured[0]!.url).toBe("https://api.test.example.com/run/cancel");
+    expect(captured[0]!.url).toBe("https://api.test.example.com/v1/run/cancel");
     expect(captured[0]!.init.method).toBe("POST");
     expect(JSON.parse(captured[0]!.init.body as string)).toEqual({
       runId: "run-1",
@@ -346,7 +379,11 @@ describe("RunsResource.cancel", () => {
 
   it("throws a typed JanuslyApiError (statusCode 409) when the run is already terminal", async () => {
     const fetchImpl = vi.fn(async () =>
-      new Response(JSON.stringify({ error: "Run is already succeeded; cannot cancel" }), {
+      new Response(JSON.stringify({
+        apiVersion: "v1",
+        requestId: "sdk-test",
+        error: { code: "runs_already_terminal", message: "Run is already succeeded; cannot cancel" },
+      }), {
         status: 409,
         headers: { "content-type": "application/json" },
       }),

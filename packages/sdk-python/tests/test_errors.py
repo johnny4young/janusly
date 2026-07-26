@@ -88,6 +88,26 @@ def test_error_envelope_with_params_plumbing() -> None:
     assert err.params == {"field": "workflowId"}
 
 
+def test_nested_v1_error_envelope_plumbing() -> None:
+    err = error_from_response(
+        status_code=422,
+        response_body=None,
+        parsed_envelope={
+            "apiVersion": "v1",
+            "requestId": "sdk-test",
+            "error": {
+                "message": "invalid request body",
+                "code": "invalid_input",
+                "params": {"field": "workflow"},
+            },
+        },
+    )
+    assert isinstance(err, JanuslyValidationError)
+    assert str(err) == "invalid request body"
+    assert err.code == "invalid_input"
+    assert err.params == {"field": "workflow"}
+
+
 def test_error_envelope_from_non_dict_falls_back_to_status() -> None:
     err = error_from_response(
         status_code=500,

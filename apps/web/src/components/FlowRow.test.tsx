@@ -20,6 +20,7 @@ const t = ((key: string) => key) as FlowRowProps['t']
 function props(workflow: SavedWorkflow, selectedIds = new Set<string>()): FlowRowProps {
   return {
     workflow,
+    canWrite: true,
     folderOptions: [],
     tagOptions: [],
     hasFolders: false,

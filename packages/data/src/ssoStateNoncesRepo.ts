@@ -55,9 +55,8 @@ export async function recordSsoNonce(input: {
  * consumers — the underlying DELETE is atomic; one caller wins, the
  * rest see no row and return false.
  *
- * Pruning is implicit: a consumed nonce is gone, and expired nonces
- * stay until a future sweep ticket adds one. The verifier's
- * `expiresAt > now` check keeps stale rows harmless either way.
+ * Pruning is implicit for consumed nonces. Expired rows may remain, but the
+ * verifier's `expiresAt > now` predicate keeps them harmless.
  */
 export async function consumeSsoNonce(
   input: { orgId: string; nonce: string },

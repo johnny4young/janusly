@@ -50,7 +50,7 @@ export function lookupModelPrice(modelId: string): ModelPrice | null {
 /**
  * Estimate the USD cost of one LLM call given a model id + approximate
  * input/output token counts. Returns `null` for unknown models. v1 is a
- * pure linear formula; future tickets may layer in median-from-history
+ * pure linear formula; measured history may later provide median-based
  * adjustments using `usage_events`.
  */
 export function estimatePromptCostUsd(

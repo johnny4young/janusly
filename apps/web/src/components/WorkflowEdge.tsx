@@ -12,7 +12,7 @@
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, useReactFlow, type EdgeProps, type Node } from '@xyflow/react'
 import { getNodeLabel } from '../constants'
 import { useT } from '../i18n'
-import type { EdgeData } from '../canvas-projections'
+import type { WorkflowGraphEdge } from '../types'
 
 /** Human label for an edge endpoint: the node's step label, falling back to its
  *  id. Keeps the directed connection legible to screen readers, which don't
@@ -23,7 +23,7 @@ function endpointLabel(node: Node | undefined, fallbackId: string): string {
 }
 
 /** Render one workflow edge with the cobalt selection state encoded via CSS. */
-export function WorkflowEdge(props: EdgeProps<EdgeData>) {
+export function WorkflowEdge(props: EdgeProps<WorkflowGraphEdge>) {
   const { id, source, target, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, selected, data, markerEnd } = props
   const { t } = useT()
   const { getNode } = useReactFlow()

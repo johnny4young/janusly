@@ -796,17 +796,17 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 .sb-view__meta {
   font-family: var(--font-mono);
   font-size: 10px;
-  color: var(--we-faint);
+  color: var(--we-muted);
 }
 
 .sb-view--on {
   background: var(--we-primary-soft);
-  color: var(--we-primary);
+  color: var(--we-primary-text);
   font-weight: 600;
 }
 
-.sb-view--on .sb-view__ic { color: var(--we-primary); }
-.sb-view--on .sb-view__meta { color: var(--we-primary); }
+.sb-view--on .sb-view__ic { color: var(--we-primary-text); }
+.sb-view--on .sb-view__meta { color: var(--we-primary-text); }
 
 /* Step palette */
 .sb-categories { display: contents; }
@@ -1276,7 +1276,14 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   cursor: pointer;
   font-size: 12px;
   color: var(--we-ink);
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
 }
+
+.user-menu__recent-row:hover:not(:disabled) { background: var(--we-surface-hover); }
+.user-menu__recent-row:disabled { cursor: default; }
 
 .user-menu__recent-row--on {
   background: var(--we-primary-soft);
@@ -1317,6 +1324,67 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 }
 
 .user-menu__recent-add:hover { color: var(--we-primary); border-color: var(--we-primary); }
+
+.user-menu__recent-create {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.user-menu__recent-create .text-field {
+  min-width: 0;
+  height: 30px;
+}
+
+.user-menu__recent-create button {
+  border: 1px solid var(--we-primary);
+  border-radius: 6px;
+  background: var(--we-primary);
+  color: var(--we-brand-glyph);
+  padding: 0 9px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.user-menu__profile-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 8px;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  background: var(--we-surface-2);
+  padding: 9px;
+}
+
+.user-menu__profile-editor label {
+  color: var(--we-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.user-menu__profile-editor > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.user-menu__profile-editor button {
+  border: 1px solid var(--we-line);
+  border-radius: 6px;
+  background: var(--we-surface);
+  color: var(--we-ink);
+  padding: 5px 8px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.user-menu__profile-editor button[type="submit"] {
+  border-color: var(--we-primary);
+  background: var(--we-primary);
+  color: var(--we-brand-glyph);
+}
 
 .user-menu__ai {
   margin: 0 8px 6px;

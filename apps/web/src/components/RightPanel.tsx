@@ -1,9 +1,9 @@
 /**
  * Right-side workspace panel — the tab-aware router that switches between
- * AI Studio, Inspector, Templates, Tools, Credentials, Runs, Multi-agent
- * timeline, Operations, Members, Reasoning, and Workflows tabs.
+ * AI Studio, Inspector, Templates, Tools, Credentials, the unified Runs
+ * workspace, Operations, Members, and the expert full-view tabs.
  *
- * Heavier tabs live in sibling files (`InspectorPanel.tsx`, `RunsPanel.tsx`,
+ * Heavier tabs live in sibling files (`InspectorPanel.tsx`, `RunWorkspace.tsx`,
  * `UsageSummaryCard.tsx`, `QuickConfigEditor.tsx`, `McpToolConfigField.tsx`,
  * `AiUsageFooter.tsx`). The thinner tabs (Templates / Tools / Credentials /
  * Reasoning) stay here because they're small and single-purpose. `PanelChrome`
@@ -42,17 +42,18 @@ const MembersPanel = lazy(() => import('./MembersPanel').then((m) => ({ default:
 const SolutionPacksPanel = lazy(() => import('./SolutionPacksPanel').then((m) => ({ default: m.SolutionPacksPanel })))
 const OperationsPage = lazy(() => import('./OperationsPage').then((m) => ({ default: m.OperationsPage })))
 const ExperimentsPanel = lazy(() => import('./ExperimentsPanel').then((m) => ({ default: m.ExperimentsPanel })))
-const RunsPanel = lazy(() => import('./RunsPanel').then((m) => ({ default: m.RunsPanel })))
+const RunWorkspace = lazy(() => import('./RunWorkspace').then((m) => ({ default: m.RunWorkspace })))
 const ReasoningPanel = lazy(() => import('./ReasoningPanel').then((m) => ({ default: m.ReasoningPanel })))
 const CredentialRotateModal = lazy(() => import('./CredentialRotateModal').then((m) => ({ default: m.CredentialRotateModal })))
 const VersionHistoryPanel = lazy(() => import('./VersionHistoryPanel').then((m) => ({ default: m.VersionHistoryPanel })))
+const WorkflowRolloutPanel = lazy(() => import('./WorkflowRolloutPanel').then((m) => ({ default: m.WorkflowRolloutPanel })))
 const WorkflowSloPanel = lazy(() => import('./WorkflowSloPanel').then((m) => ({ default: m.WorkflowSloPanel })))
 const ScheduleHistoryPanel = lazy(() => import('./ScheduleHistoryPanel').then((m) => ({ default: m.ScheduleHistoryPanel })))
 const WorkflowMetadataPanel = lazy(() => import('./WorkflowMetadataPanel').then((m) => ({ default: m.WorkflowMetadataPanel })))
 import { api } from '../api'
 import { expiryStatus } from '../credential-expiry'
 import { useWorkflowStore } from '../store'
-import { tTemplateCategory, tTemplateDescription, tTemplateName, tToolDescription, useT } from '../i18n'
+import { getResolvedLocale, tTemplateCategory, tTemplateDescription, tTemplateName, tToolDescription, useT } from '../i18n'
 
 export type RightPanelAuthoring = {
   aiHealth: AiHealth | null
@@ -105,8 +106,14 @@ export type RightPanelCatalog = {
   onInstallPlugin: (pluginId: string) => void
   onInstallPack: (packId: string) => void
   onSampleRunPack: (packId: string) => void
-  onInjectPackFailure: (packId: string) => void
-  onCreateCredential: (credential: { name: string; kind: string; secretRef: string; expiresAt?: string }) => void
+  onInjectPackFailure: (packId: string, fixtureId: string) => void
+  onCreateCredential: (credential: {
+    name: string
+    kind: string
+    secretValue?: string
+    secretRef?: string
+    expiresAt?: string
+  }) => Promise<boolean>
 }
 
 export type RightPanelExecution = {
@@ -136,6 +143,7 @@ export type RightPanelNavigation = {
 
 export type RightPanelProps = {
   tab: ActiveTab
+  permissions?: readonly string[]
   authoring: RightPanelAuthoring
   catalog: RightPanelCatalog
   execution: RightPanelExecution
@@ -162,8 +170,13 @@ export function RightPanel(props: RightPanelProps) {
 function RightPanelRouter(props: RightPanelProps) {
   const { t } = useT()
   const { authoring, catalog, execution, navigation } = props
+  const can = (permission: string) => props.permissions === undefined || props.permissions.includes(permission)
   const loadRunUsage = useCallback((runId: string, signal: AbortSignal) =>
     api(`/run/usage?runId=${encodeURIComponent(runId)}`, { signal }), [])
+  const replayDecision = useCallback((eventId: string, nodeId: string, signal: AbortSignal) => {
+    if (!execution.activeRunId) return Promise.resolve(null)
+    return api(`/causal?runId=${encodeURIComponent(execution.activeRunId)}&eventId=${encodeURIComponent(eventId)}&nodeId=${encodeURIComponent(nodeId)}`, { signal })
+  }, [execution.activeRunId])
   if (props.tab === 'copilot') return (
     <AiCopilotPanel
       health={authoring.aiHealth}
@@ -182,10 +195,10 @@ function RightPanelRouter(props: RightPanelProps) {
   )
   if (props.tab === 'workflows') return (
     <PanelChrome title={t('rightPanel.workflows.title')} description={t('rightPanel.workflows.description')} icon={<Database size={18} />}>
-      <WorkflowsDashboard onOpen={catalog.onOpenWorkflow} />
+      <WorkflowsDashboard onOpen={catalog.onOpenWorkflow} canWrite={can('workflows.write')} />
     </PanelChrome>
   )
-  if (props.tab === 'operations') return <OperationsPage />
+  if (props.tab === 'operations') return <OperationsPage permissions={props.permissions} />
   if (props.tab === 'experiments') return (
     <PanelChrome title={t('rightPanel.experiments.title')} description={t('rightPanel.experiments.description')} icon={<FlaskConical size={18} />}>
       <ExperimentsPanel />
@@ -206,6 +219,7 @@ function RightPanelRouter(props: RightPanelProps) {
         onValidate={authoring.onValidateWorkflow}
       />
       <InspectorPanel
+        readOnly={!can('workflows.write')}
         selectedNode={authoring.selectedNode}
         selectedEdge={authoring.selectedEdge}
         runNodes={authoring.runNodes}
@@ -230,13 +244,16 @@ function RightPanelRouter(props: RightPanelProps) {
           spuriously under a ready config. */}
       <Suspense fallback={null}>
         <VersionHistoryPanel />
-        <WorkflowSloPanel />
+        <WorkflowRolloutPanel readOnly={!can('workflows.write')} />
+        <WorkflowSloPanel readOnly={!can('workflows.write')} />
         <ScheduleHistoryPanel />
-        <WorkflowMetadataPanel />
+        <WorkflowMetadataPanel readOnly={!can('workflows.write')} />
       </Suspense>
     </PanelChrome>
   )
-  if (props.tab === 'templates') return <TemplatesPanel templates={catalog.templates} onUseTemplate={catalog.onUseTemplate} />
+  if (props.tab === 'templates') return (
+    <TemplatesPanel templates={catalog.templates} onUseTemplate={catalog.onUseTemplate} canUse={can('workflows.write')} />
+  )
   if (props.tab === 'packs') return (
     <SolutionPacksPanel
       packs={catalog.solutionPacks}
@@ -244,17 +261,28 @@ function RightPanelRouter(props: RightPanelProps) {
       onInstall={catalog.onInstallPack}
       onSampleRun={catalog.onSampleRunPack}
       onInjectFailure={catalog.onInjectPackFailure}
+      canInstall={can('packs.install')}
     />
   )
-  if (props.tab === 'marketplace') return <ToolsPanel tools={catalog.tools} onInstallPlugin={catalog.onInstallPlugin} />
-  if (props.tab === 'credentials') return <CredentialsPanel credentials={catalog.credentials} onCreateCredential={catalog.onCreateCredential} />
+  if (props.tab === 'marketplace') return (
+    <ToolsPanel tools={catalog.tools} onInstallPlugin={catalog.onInstallPlugin} canInstall={can('workflows.write')} />
+  )
+  if (props.tab === 'credentials') return (
+    <CredentialsPanel
+      credentials={catalog.credentials}
+      onCreateCredential={catalog.onCreateCredential}
+      canWrite={can('credentials.write')}
+    />
+  )
   if (props.tab === 'runs') return (
-    <RunsPanel
+    <RunWorkspace
       runs={execution.runs}
       workflows={execution.workflows}
       usage={execution.usage}
       runNodes={execution.runNodes}
       runEvents={execution.events}
+      eventsHasMore={execution.eventsHasMore}
+      onLoadOlderEvents={execution.onLoadOlderEvents}
       activeRunId={execution.activeRunId}
       onOpenRun={execution.onOpenRun}
       onRefreshPlatform={execution.onRefreshPlatform}
@@ -265,6 +293,16 @@ function RightPanelRouter(props: RightPanelProps) {
       onCancelActiveRun={execution.onCancelActiveRun}
       onReplayDeadLetter={execution.onReplayDeadLetter}
       onResolveDeadLetter={execution.onResolveDeadLetter}
+      canStartRuns={can('runs.start')}
+      canCancelRuns={can('runs.cancel')}
+      canReplayDeadLetters={can('dlq.replay')}
+      canResolveDeadLetters={can('recovery.write')}
+      canUseRecovery={can('ai.write') && can('recovery.write') && can('workflows.write') && can('dlq.replay') && can('runs.start')}
+      canReadAutoHealing={can('autohealing.read')}
+      canDecideAutoHealing={can('autohealing.decide')}
+      onLoadRunUsage={loadRunUsage}
+      onReplayDecision={execution.activeRunId ? replayDecision : undefined}
+      onOpenFullView={navigation.onOpenTab}
     />
   )
   return (
@@ -275,15 +313,13 @@ function RightPanelRouter(props: RightPanelProps) {
         onLoadOlderEvents={execution.onLoadOlderEvents}
         activeRunId={execution.activeRunId}
         onLoadRunUsage={loadRunUsage}
-        onReplayDecision={execution.activeRunId
-          ? (eventId, nodeId, signal) => api(`/causal?runId=${encodeURIComponent(execution.activeRunId!)}&eventId=${encodeURIComponent(eventId)}&nodeId=${encodeURIComponent(nodeId)}`, { signal })
-          : undefined}
+        onReplayDecision={execution.activeRunId ? replayDecision : undefined}
       />
     </PanelChrome>
   )
 }
 
-export function TemplatesPanel({ templates, onUseTemplate }: Pick<RightPanelCatalog, 'templates' | 'onUseTemplate'>) {
+export function TemplatesPanel({ templates, onUseTemplate, canUse = true }: Pick<RightPanelCatalog, 'templates' | 'onUseTemplate'> & { canUse?: boolean }) {
   const { t, i18n } = useT()
   const setActiveTab = useWorkflowStore(state => state.setActiveTab)
   const [query, setQuery] = useState('')
@@ -324,7 +360,7 @@ export function TemplatesPanel({ templates, onUseTemplate }: Pick<RightPanelCata
           ) : (
             <div className="we-recipe-grid">
               {filtered.map(template => (
-                <button key={template.id} className="list-card list-card-button" onClick={() => onUseTemplate(template.workflow)}>
+                <button key={template.id} className="list-card list-card-button" disabled={!canUse} onClick={() => onUseTemplate(template.workflow)}>
                   <div className="split-row" style={{ width: '100%' }}>
                     <span className="mode-pill mode-pill-neutral">{tTemplateCategory(template)}</span>
                     <span className="mode-pill mode-pill-neutral">{t('rightPanel.templates.stepCount', { count: template.workflow.nodes.length })}</span>
@@ -342,7 +378,7 @@ export function TemplatesPanel({ templates, onUseTemplate }: Pick<RightPanelCata
   )
 }
 
-function ToolsPanel({ tools, onInstallPlugin }: Pick<RightPanelCatalog, 'tools' | 'onInstallPlugin'>) {
+function ToolsPanel({ tools, onInstallPlugin, canInstall }: Pick<RightPanelCatalog, 'tools' | 'onInstallPlugin'> & { canInstall: boolean }) {
   const { t } = useT()
   return (
     <PanelChrome title={t('rightPanel.tools.title')} description={t('rightPanel.tools.description')} icon={<Boxes size={18} />}>
@@ -361,7 +397,7 @@ function ToolsPanel({ tools, onInstallPlugin }: Pick<RightPanelCatalog, 'tools' 
                 {(tool.optional ?? []).map(field => <span key={`optional-${field}`} className="we-param we-param--optional">{field}</span>)}
               </div>
             ) : null}
-            <button className="small-command" onClick={() => onInstallPlugin(tool.name)}>{t('rightPanel.tools.installTool')}</button>
+            <button className="small-command" disabled={!canInstall} onClick={() => onInstallPlugin(tool.name)}>{t('rightPanel.tools.installTool')}</button>
           </div>
         ))}
       </div>
@@ -375,22 +411,35 @@ function ToolsPanel({ tools, onInstallPlugin }: Pick<RightPanelCatalog, 'tools' 
  *  read-only. The env-var NAME never reaches this shape (server posture). */
 type CredentialHealthLite = { name: string; secretRefPresent: boolean; lastUsedAt: string | null; expiresAt: string | null }
 
-/** Env-var NAME shape the server accepts for `secretRef` (mirrors the
- *  rotate modal). The secret VALUE never lives here — only the env-var name. */
+/** Legacy env-var NAME shape. New credentials default to managed values. */
 const CREDENTIAL_ENV_VAR_NAME = /^[A-Z][A-Z0-9_]*$/
 
 /** Connection kinds the integration chokepoint recognizes. Free-form on the
  *  server, but the select keeps operators on the known set. */
-const CREDENTIAL_KINDS = ['generic', 'github_token', 'slack_webhook', 'webhook_secret', 'postgres'] as const
+const CREDENTIAL_KINDS = [
+  'generic',
+  'github_token',
+  'slack_webhook',
+  'slack_signing_secret',
+  'webhook_secret',
+  'postgres',
+  'pagerduty_api_token',
+  'pagerduty_webhook_secret',
+] as const
 
-function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelCatalog, 'credentials' | 'onCreateCredential'>) {
+function CredentialsPanel({ credentials, onCreateCredential, canWrite }: Pick<RightPanelCatalog, 'credentials' | 'onCreateCredential'> & { canWrite: boolean }) {
   const { t } = useT()
   const platformVersion = useWorkflowStore(state => state.platformVersion)
+  const bumpPlatformVersion = useWorkflowStore(state => state.bumpPlatformVersion)
+  const addToast = useWorkflowStore(state => state.addToast)
   const [name, setName] = useState('')
   const [kind, setKind] = useState('generic')
+  const [storage, setStorage] = useState<'managed' | 'environment'>('managed')
+  const [secretValue, setSecretValue] = useState('')
   const [secretRef, setSecretRef] = useState('')
   const [expiresAt, setExpiresAt] = useState('')
   const [rotating, setRotating] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
   const [healthByName, setHealthByName] = useState<Map<string, CredentialHealthLite>>(new Map())
   const [expiryNowMs, setExpiryNowMs] = useState(() => Date.now())
 
@@ -420,7 +469,9 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelCa
 
   const trimmedRef = secretRef.trim()
   const refInvalid = trimmedRef.length > 0 && !CREDENTIAL_ENV_VAR_NAME.test(trimmedRef)
-  const canAdd = name.trim().length > 0 && CREDENTIAL_ENV_VAR_NAME.test(trimmedRef)
+  const canAdd = name.trim().length > 0 && (
+    storage === 'managed' ? secretValue.length > 0 : CREDENTIAL_ENV_VAR_NAME.test(trimmedRef)
+  )
 
   return (
     <PanelChrome title={t('rightPanel.credentials.title')} description={t('rightPanel.credentials.description')} icon={<KeyRound size={18} />}>
@@ -432,24 +483,48 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelCa
           </div>
           <LockKeyhole size={18} aria-hidden="true" />
         </div>
-        <fieldset className="we-fieldset">
+        <fieldset className="we-fieldset" disabled={!canWrite || submitting}>
           <label className="field-label" htmlFor="credential-name">{t('rightPanel.credentials.nameLabel')}</label>
           <input id="credential-name" className="text-field" value={name} onChange={event => setName(event.target.value)} />
           <label className="field-label" htmlFor="credential-kind">{t('rightPanel.credentials.kindLabel')}</label>
           <select id="credential-kind" className="text-field" value={kind} onChange={event => setKind(event.target.value)}>
             {CREDENTIAL_KINDS.map(option => <option key={option} value={option}>{option}</option>)}
           </select>
-          <label className="field-label" htmlFor="credential-secret">{t('rightPanel.credentials.envLabel')}</label>
-          <input
-            id="credential-secret"
-            className={`text-field${refInvalid ? ' text-field--error' : ''}`}
-            value={secretRef}
-            onChange={event => setSecretRef(event.target.value)}
-            placeholder={t('rightPanel.credentials.envPlaceholder')}
-            aria-invalid={refInvalid}
-            aria-describedby={refInvalid ? 'credential-secret-error' : undefined}
-          />
-          {refInvalid && (
+          <label className="field-label" htmlFor="credential-storage">{t('rightPanel.credentials.storageLabel')}</label>
+          <select
+            id="credential-storage"
+            className="text-field"
+            value={storage}
+            onChange={event => setStorage(event.target.value as 'managed' | 'environment')}
+          >
+            <option value="managed">{t('rightPanel.credentials.storage.managed')}</option>
+            <option value="environment">{t('rightPanel.credentials.storage.environment')}</option>
+          </select>
+          <label className="field-label" htmlFor="credential-secret">
+            {storage === 'managed' ? t('rightPanel.credentials.valueLabel') : t('rightPanel.credentials.envLabel')}
+          </label>
+          {storage === 'managed' ? (
+            <input
+              id="credential-secret"
+              type="password"
+              autoComplete="new-password"
+              className="text-field"
+              value={secretValue}
+              onChange={event => setSecretValue(event.target.value)}
+              placeholder={t('rightPanel.credentials.valuePlaceholder')}
+            />
+          ) : (
+            <input
+              id="credential-secret"
+              className={`text-field${refInvalid ? ' text-field--error' : ''}`}
+              value={secretRef}
+              onChange={event => setSecretRef(event.target.value)}
+              placeholder={t('rightPanel.credentials.envPlaceholder')}
+              aria-invalid={refInvalid}
+              aria-describedby={refInvalid ? 'credential-secret-error' : undefined}
+            />
+          )}
+          {storage === 'environment' && refInvalid && (
             <span id="credential-secret-error" className="helper-text helper-text--error" role="alert">
               <AlertCircle size={13} aria-hidden="true" /> {t('rightPanel.credentials.envInvalid')}
             </span>
@@ -467,18 +542,24 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelCa
         <div className="form-actions connection-form-actions">
           <button
             className="command-button command-button-primary"
-            disabled={!canAdd}
+            disabled={!canWrite || !canAdd || submitting}
             onClick={() => {
-              onCreateCredential({
-                name: name.trim(),
-                kind,
-                secretRef: trimmedRef,
-                // Date input gives YYYY-MM-DD; send an ISO instant (UTC midnight).
-                ...(expiresAt ? { expiresAt: new Date(expiresAt).toISOString() } : {}),
-              })
-              setName('')
-              setSecretRef('')
-              setExpiresAt('')
+              setSubmitting(true)
+              void onCreateCredential({
+                  name: name.trim(),
+                  kind,
+                  ...(storage === 'managed' ? { secretValue } : { secretRef: trimmedRef }),
+                  // Date input gives YYYY-MM-DD; send an ISO instant (UTC midnight).
+                  ...(expiresAt ? { expiresAt: new Date(expiresAt).toISOString() } : {}),
+                })
+                .then((created) => {
+                  if (!created) return
+                  setName('')
+                  setSecretValue('')
+                  setSecretRef('')
+                  setExpiresAt('')
+                })
+                .finally(() => setSubmitting(false))
             }}
           >
             {t('rightPanel.credentials.addButton')}
@@ -494,7 +575,11 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelCa
             <div key={credential.id} className="list-card">
               <div className="split-row" style={{ width: '100%' }}>
                 <strong>{credential.name}</strong>
-                <span className="mode-pill mode-pill-neutral">{credential.kind}</span>
+                <span className="mode-pill mode-pill-neutral">
+                  {credential.kind} · {credential.storage === 'environment'
+                    ? t('rightPanel.credentials.storage.environmentShort')
+                    : t('rightPanel.credentials.storage.managedShort')}
+                </span>
               </div>
               <div className="split-row" style={{ width: '100%' }}>
                 {/* Always a status pill — never the old plain-text fallback —
@@ -536,8 +621,28 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelCa
                 })()}
               </div>
               <div className="form-actions">
-                <button type="button" className="command-button" onClick={() => setRotating(credential.name)}>
+                <button type="button" className="command-button" disabled={!canWrite} onClick={() => setRotating(credential.name)}>
                   {t('credentialRotation.action.rotate')}
+                </button>
+                <button
+                  type="button"
+                  className="command-button command-button-danger"
+                  disabled={!canWrite || submitting}
+                  onClick={() => {
+                    if (!window.confirm(t('rightPanel.credentials.revokeConfirm', { name: credential.name }))) return
+                    setSubmitting(true)
+                    void api(`/credentials/${encodeURIComponent(credential.name)}`, { method: 'DELETE' })
+                      .then(() => {
+                        bumpPlatformVersion()
+                        addToast(t('rightPanel.credentials.revokeDone', { name: credential.name }), 'success')
+                      })
+                      .catch((error) => {
+                        addToast(error instanceof Error ? error.message : t('rightPanel.credentials.revokeFailed'), 'error')
+                      })
+                      .finally(() => setSubmitting(false))
+                  }}
+                >
+                  {t('rightPanel.credentials.revoke')}
                 </button>
               </div>
             </div>

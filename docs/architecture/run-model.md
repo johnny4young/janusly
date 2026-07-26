@@ -45,11 +45,13 @@ Every transition that could race is a conditional UPDATE (compare-and-set):
   `pending` with its durable queue-repair marker.
 - `markWaitingNodeSucceeded` — `waiting → succeeded`, so a replayed resume
   submission cannot overwrite output or enqueue downstream work twice.
-- `failStalledRunningNode` — `running → failed`, used only by the
-  stalled-node reaper (below).
+- `DeadLetterQueueAdapter.persistStalledTerminalFailure` — claims a stale
+  `running` node and commits its optional DLQ row, causal event, and parent-run
+  failure atomically (used only by the stalled-node reaper below).
 
-All in `packages/engine/src/persistence.ts`. Don't replace any of them with a
-read-then-write.
+The core claims live in `packages/engine/src/persistence.ts`; the stalled
+terminal boundary lives in `packages/engine/src/adapters/dead-letter-queue.ts`.
+Don't replace any of them with a read-then-write.
 
 ## Execution lifecycle
 
@@ -96,10 +98,13 @@ read-then-write.
 6. **Worker death** — the one failure the claims can't self-heal: a worker
    killed mid-node leaves the row `running`. The stalled-node reaper
    (`packages/engine/src/stalled-node-reaper.ts`, every 5 min) CAS-fails
-   nodes stuck past the threshold (default 60 min), dead-letters them
-   best-effort, and terminates the run — failed-into-DLQ, never silently
-   re-executed, because the node may have already run a non-idempotent side
-   effect. The operator decides on replay.
+   nodes stuck past the threshold (default 60 min). The node claim, optional
+   replayable DLQ row, `node.failed` event, and first parent `run.failed`
+   transition commit in one transaction. A malformed legacy snapshot still
+   terminates atomically without a DLQ row. The node is never silently
+   re-executed because it may have already run a non-idempotent side effect;
+   the operator decides on replay. Solution Packs can invoke this exact path
+   with one org/run-scoped stale claim for a controlled recovery drill.
 
 ### Subworkflow composition
 

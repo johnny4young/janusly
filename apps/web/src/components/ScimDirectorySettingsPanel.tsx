@@ -67,7 +67,13 @@ const EMPTY_FORM: { providerDirectoryId: string; directoryType: string; defaultR
 
 const ROLES: readonly DefaultRole[] = ["viewer", "editor", "admin"];
 
-export function ScimDirectorySettingsPanel() {
+export function ScimDirectorySettingsPanel({
+  canConfigureDirectory = true,
+  canSetRoles = true,
+}: {
+  canConfigureDirectory?: boolean;
+  canSetRoles?: boolean;
+} = {}) {
   const { t } = useT();
   const confirmDialog = useConfirm();
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion);
@@ -281,7 +287,7 @@ export function ScimDirectorySettingsPanel() {
                     <td>{row.status}</td>
                     <td>{row.lastSyncedAt ? new Date(row.lastSyncedAt).toLocaleString(getResolvedLocale()) : "—"}</td>
                     <td>
-                      {row.status === "active" && (
+                      {canConfigureDirectory && row.status === "active" && (
                         <button
                           type="button"
                           className="we-button we-button--ghost"
@@ -298,7 +304,7 @@ export function ScimDirectorySettingsPanel() {
             </table>
           )}
 
-          {directories.filter((d) => d.status === "active").length === 0 && (
+          {canConfigureDirectory && directories.filter((d) => d.status === "active").length === 0 && (
             <form className="we-budget-settings__form" onSubmit={attach} noValidate>
               <label className="we-field">
                 <span className="we-field__label">{t("scim.field.directoryId")}</span>
@@ -358,7 +364,7 @@ export function ScimDirectorySettingsPanel() {
             <section className="we-scim-mappings" aria-labelledby="scim-mappings-heading">
               <header className="we-budget-settings__header">
                 <h4 id="scim-mappings-heading">{t("scim.mappings.heading")}</h4>
-                {mappings.length > 0 && (
+                {canSetRoles && mappings.length > 0 && (
                   <button
                     type="button"
                     className="we-button we-button--ghost"
@@ -393,6 +399,7 @@ export function ScimDirectorySettingsPanel() {
                           <select
                             className="we-field__input"
                             value={row.role}
+                            disabled={!canSetRoles}
                             aria-label={t("scim.mappings.roleAria", { group: groupName(row.providerGroupId) })}
                             onChange={(e) => updateMappingRole(row, e.target.value as DefaultRole)}
                           >
@@ -402,14 +409,16 @@ export function ScimDirectorySettingsPanel() {
                           </select>
                         </td>
                         <td>
-                          <button
-                            type="button"
-                            className="we-button we-button--ghost"
-                            onClick={() => removeMapping(row)}
-                            aria-label={t("scim.mappings.removeAria", { group: groupName(row.providerGroupId) })}
-                          >
-                            <Trash2 size={14} aria-hidden="true" /> {t("scim.mappings.remove")}
-                          </button>
+                          {canSetRoles && (
+                            <button
+                              type="button"
+                              className="we-button we-button--ghost"
+                              onClick={() => removeMapping(row)}
+                              aria-label={t("scim.mappings.removeAria", { group: groupName(row.providerGroupId) })}
+                            >
+                              <Trash2 size={14} aria-hidden="true" /> {t("scim.mappings.remove")}
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -421,7 +430,7 @@ export function ScimDirectorySettingsPanel() {
                 <p className="we-budget-settings__status">{t("scim.mappings.emptyNoMappings")}</p>
               )}
 
-              {groups.length > 0 && (
+              {canSetRoles && groups.length > 0 && (
                 unmappedGroups.length > 0 ? (
                   <form className="we-budget-settings__form" onSubmit={addMapping} noValidate>
                     <label className="we-field">

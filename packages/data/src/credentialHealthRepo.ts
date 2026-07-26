@@ -2,8 +2,9 @@
  * Credential + MCP-connection health snapshot for the Operations UI
  * and the workflow readiness sidecar.
  *
- * The runtime resolves a credential's ``secret_ref`` to a real env var
- * at execute time. When the env var is missing or empty, the run fails
+ * The runtime resolves a credential's ``secret_ref`` through the central
+ * SecretStore at execute time. When the managed value or legacy env var is
+ * missing, the run fails
  * mid-flight with the generic ``credential secret missing for <name>``
  * envelope — the operator only learns about it AFTER a real workflow
  * has tripped over it. This module produces a per-org snapshot so the
@@ -16,16 +17,15 @@
  *   warn rule's sidecar).
  *
  * Invariants:
- * - **Env-var-name leakage is the load-bearing security property.**
+ * - **Secret-reference leakage is the load-bearing security property.**
  *   The returned shape NEVER carries ``credentials.secret_ref``,
  *   ``McpEnvRef.name``, or any other env-var name. Only operator-
  *   visible identifiers (credential ``name``, MCP ``alias``, the
  *   operator-chosen KEY of an ``envRefs`` map) are returned.
  * - Multi-tenant scope: every query filters by ``orgId``. There is no
  *   helper that bypasses the filter.
- * - The data layer does NOT freely touch ``process.env``. The single
- *   chokepoint is the ``SecretRefResolver`` callback the caller
- *   injects. Tests pass a fake; production wires a thin reader.
+ * - The resolver is async and org-aware so encrypted database references and
+ *   legacy environment references share one health contract.
  * - ``lastErrorMessage`` is scrubbed via ``scrubSecretShapes`` at read
  *   time. Defense-in-depth on top of ``safePersistPayload`` at the
  *   ``usage_events.metadata`` write site.
@@ -52,7 +52,7 @@ import {
  * NEVER reads ``process.env`` directly; the caller is the single chokepoint
  * for that side effect.
  */
-export type SecretRefResolver = (envVarName: string) => boolean;
+export type SecretRefResolver = (secretRef: string, orgId: string) => boolean | Promise<boolean>;
 
 export type CredentialHealthEntry = {
   id: string;
@@ -380,7 +380,7 @@ async function buildMcpHealthEntries(
     const enabledToolCount = descriptors.reduce((n, d) => n + (d.enabled ? 1 : 0), 0);
     const envRefsMissingKeys: string[] = [];
     for (const [key, ref] of Object.entries(conn.envRefs)) {
-      if (!resolver(ref.name)) envRefsMissingKeys.push(key);
+      if (!(await resolver(ref.name, orgId))) envRefsMissingKeys.push(key);
     }
     out.push({
       alias: conn.alias,
@@ -426,13 +426,13 @@ export async function getCredentialHealth(
     collectWorkflowReferences(v.workflowId, v.dagJson, referenceIndex);
   }
 
-  const credentialEntries: CredentialHealthEntry[] = credRows.map((row) => {
+  const credentialEntries: CredentialHealthEntry[] = await Promise.all(credRows.map(async (row) => {
     const aggregate = usage.get(row.name);
     return {
       id: row.id,
       name: row.name,
       kind: row.kind,
-      secretRefPresent: resolver(row.secretRef),
+      secretRefPresent: await resolver(row.secretRef, orgId),
       lastUsedAt: aggregate?.lastUsedAt ?? null,
       lastErrorAt: aggregate?.lastErrorAt ?? null,
       lastErrorMessage: aggregate?.lastErrorMessage ?? null,
@@ -440,7 +440,7 @@ export async function getCredentialHealth(
       referencingWorkflowIds: Array.from(referenceIndex.byCredentialName.get(row.name) ?? []).sort(),
       expiresAt: row.expiresAt?.toISOString() ?? null,
     };
-  });
+  }));
 
   const mcpConnectionEntries = await buildMcpHealthEntries(
     orgId,

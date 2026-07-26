@@ -22,7 +22,7 @@ export const pluginsRoutes: Route[] = [
       const installed = await db.select().from(installedPlugins).where(eq(installedPlugins.orgId, auth.orgId));
       return sendJson(res, { available: listTools(), installed });
     } },
-  { method: "POST", match: "/plugins/install", role: "admin",
+  { method: "POST", match: "/plugins/install", role: "admin", permission: "workflows.write",
     handler: async ({ req, res, auth }) => {
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const pluginId = typeof body.pluginId === "string" ? body.pluginId : "";

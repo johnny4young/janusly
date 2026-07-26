@@ -179,7 +179,7 @@ export type RecoveryValueEstimate = {
 /** One per-day point of the MTTR trend sparkline. `day` is `YYYY-MM-DD`. */
 export type RecoveryMttrTrendPoint = { day: string; seconds: number };
 
-/** Response shape of `GET /recovery/metrics?windowDays=…`. */
+/** Response data from `GET /v1/recovery/metrics?windowDays=…`. */
 export type RecoveryMetrics = {
   successRate: RecoveryMetric;
   mttr: RecoveryMetric;

@@ -10,57 +10,61 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-
-const webRequire = createRequire(new URL("../apps/web/package.json", import.meta.url));
-const ts = webRequire("typescript");
+import { parseSync, visitorKeys } from "oxc-parser";
 
 function isTranslationCall(node) {
-  if (!ts.isCallExpression(node)) return false;
-  const callee = node.expression;
-  return (ts.isIdentifier(callee) && callee.text === "t")
-    || (ts.isPropertyAccessExpression(callee) && callee.name.text === "t");
+  if (node.type !== "CallExpression") return false;
+  const callee = node.callee;
+  return (callee.type === "Identifier" && callee.name === "t")
+    || (
+      callee.type === "MemberExpression"
+      && !callee.computed
+      && callee.property.type === "Identifier"
+      && callee.property.name === "t"
+    );
 }
 
 /** Return whether an expression subtree contains a translation lookup. */
 function containsTranslationCall(node) {
   if (isTranslationCall(node)) return true;
-  let found = false;
-  ts.forEachChild(node, (child) => {
-    if (!found && containsTranslationCall(child)) found = true;
+  return (visitorKeys[node.type] ?? []).some((key) => {
+    const child = node[key];
+    if (Array.isArray(child)) return child.some((item) => item && containsTranslationCall(item));
+    return child && typeof child === "object" && containsTranslationCall(child);
   });
-  return found;
 }
 
 /** Return every translation-derived string assertion in one source string. */
 export function findTranslationStringAssertions(source, fileName = "source.tsx") {
-  const sourceFile = ts.createSourceFile(
-    fileName,
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    fileName.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-  );
+  const parsed = parseSync(fileName, source, { range: true });
+  if (parsed.errors.length > 0) {
+    throw new Error(`Unable to inspect ${fileName}: ${parsed.errors[0].message}`);
+  }
   const findings = [];
 
   function visit(node) {
     if (
-      ts.isAsExpression(node)
-      && node.type.kind === ts.SyntaxKind.StringKeyword
+      node.type === "TSAsExpression"
+      && node.typeAnnotation.type === "TSStringKeyword"
       && containsTranslationCall(node.expression)
     ) {
-      const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+      const lineStart = source.lastIndexOf("\n", node.start - 1) + 1;
+      const line = source.slice(0, lineStart).split("\n").length;
       findings.push({
-        line: position.line + 1,
-        column: position.character + 1,
-        expression: source.slice(node.getStart(sourceFile), node.getEnd()),
+        line,
+        column: node.start - lineStart + 1,
+        expression: source.slice(node.start, node.end),
       });
     }
-    ts.forEachChild(node, visit);
+    for (const key of visitorKeys[node.type] ?? []) {
+      const child = node[key];
+      if (Array.isArray(child)) child.forEach((item) => item && visit(item));
+      else if (child && typeof child === "object") visit(child);
+    }
   }
 
-  visit(sourceFile);
+  visit(parsed.program);
   return findings;
 }
 

@@ -1,8 +1,9 @@
 /**
  * BullMQ queue + ioredis connection for the engine worker.
  *
- * Owns the `workflow-nodes` queue and the singleton Redis connection used by
- * BullMQ. The connection is BullMQ-tuned (`maxRetriesPerRequest: null` —
+ * Owns the customer-facing `workflow-nodes` queue, the isolated
+ * `maintenance-jobs` queue, and the singleton Redis connection used by
+ * their BullMQ producers. The connection is BullMQ-tuned (`maxRetriesPerRequest: null` —
  * BullMQ explicitly requires this to avoid premature giving-up inside the
  * queue's polling loop), which is why `apps/api/src/redis.ts` keeps a
  * separate request-path client with bounded retries.
@@ -14,7 +15,9 @@
  *   wrapping it).
  *
  * Invariants:
- * - One process-wide BullMQ Redis pool per engine process. Do not reuse this
+ * - One process-wide BullMQ Redis pool per engine process. Queue isolation is
+ *   provided by separate BullMQ queue names and Workers, not extra producer
+ *   sockets. Do not reuse this
  *   connection for request-path/ad-hoc commands; those need bounded retry
  *   clients such as `rate-limit-redis.ts`.
  * - `removeOnComplete: 1000` keeps the most recent thousand successful jobs
@@ -33,7 +36,10 @@ import { Queue } from "bullmq";
 import IORedis from "ioredis";
 import { loadRootEnv } from "@janusly/db";
 import type { EnqueueNodeInput } from "./core/types";
-import { buildExecuteNodeJobId } from "./queue-job-id";
+import { buildExecuteNodeJobId, buildReplayCampaignJobId } from "./queue-job-id";
+import { MAINTENANCE_QUEUE_NAME, WORKFLOW_QUEUE_NAME } from "./queue-names";
+
+export { MAINTENANCE_QUEUE_NAME, WORKFLOW_QUEUE_NAME } from "./queue-names";
 
 loadRootEnv();
 
@@ -47,7 +53,12 @@ export const connection = new IORedis(redisUrl, {
   maxRetriesPerRequest: null,
 });
 
-export const workflowQueue = new Queue("workflow-nodes", {
+export const workflowQueue = new Queue(WORKFLOW_QUEUE_NAME, {
+  connection,
+});
+
+/** Producers for retention, reconciliation, calibration, and health jobs. */
+export const maintenanceQueue = new Queue(MAINTENANCE_QUEUE_NAME, {
   connection,
 });
 
@@ -131,6 +142,29 @@ export async function enqueueApprovalTimeout(
       attempts: 20,
       backoff: { type: "exponential", delay: 1_000 },
       delay: Math.max(0, delayMs),
+      removeOnComplete: 1000,
+      removeOnFail: REMOVE_ON_FAIL,
+    },
+  );
+}
+
+/**
+ * Publish one paced replay-campaign step. The due timestamp is part of the
+ * BullMQ id so API publication and the Postgres reconciler converge on the
+ * same delivery; the database dispatch lease still prevents parallel drains.
+ */
+export async function enqueueReplayCampaignStep(
+  campaignId: string,
+  dueAt: Date,
+): Promise<void> {
+  await workflowQueue.add(
+    "replay-campaign-step",
+    { campaignId },
+    {
+      attempts: 20,
+      backoff: { type: "exponential", delay: 1_000 },
+      delay: Math.max(0, dueAt.getTime() - Date.now()),
+      jobId: buildReplayCampaignJobId(campaignId, dueAt),
       removeOnComplete: 1000,
       removeOnFail: REMOVE_ON_FAIL,
     },

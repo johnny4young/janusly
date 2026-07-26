@@ -20,6 +20,16 @@
 
 /** Server error envelope shape. Source: `apps/api/src/error-codes.ts`. */
 export type JanuslyApiErrorEnvelope = {
+  error?: string | {
+    message?: string;
+    code?: string;
+    params?: Record<string, unknown>;
+  };
+  code?: string;
+  params?: Record<string, unknown>;
+};
+
+type ExtractedApiErrorEnvelope = {
   error?: string;
   code?: string;
   params?: Record<string, unknown>;
@@ -107,6 +117,11 @@ export class JanuslyServerError extends JanuslyApiError {
   override readonly name = "JanuslyServerError";
 }
 
+/** Thrown when a successful `/v1` response does not match the stable envelope. */
+export class JanuslyProtocolError extends JanuslyApiError {
+  override readonly name = "JanuslyProtocolError";
+}
+
 /**
  * Thrown by `client.webhooks.verifySignature` when the inbound signature
  * fails. The `reason` field distinguishes tamper from skew from malformed
@@ -133,11 +148,19 @@ export class JanuslyTimeoutError extends JanuslyApiError {
   }
 }
 
-function extractEnvelope(body: unknown): JanuslyApiErrorEnvelope {
+function extractEnvelope(body: unknown): ExtractedApiErrorEnvelope {
   if (!body || typeof body !== "object" || Array.isArray(body)) return {};
   const obj = body as Record<string, unknown>;
-  const out: JanuslyApiErrorEnvelope = {};
+  const out: ExtractedApiErrorEnvelope = {};
   if (typeof obj.error === "string") out.error = obj.error;
+  if (obj.error && typeof obj.error === "object" && !Array.isArray(obj.error)) {
+    const nested = obj.error as Record<string, unknown>;
+    if (typeof nested.message === "string") out.error = nested.message;
+    if (typeof nested.code === "string") out.code = nested.code;
+    if (nested.params && typeof nested.params === "object" && !Array.isArray(nested.params)) {
+      out.params = nested.params as Record<string, unknown>;
+    }
+  }
   if (typeof obj.code === "string") out.code = obj.code;
   if (obj.params && typeof obj.params === "object" && !Array.isArray(obj.params)) {
     out.params = obj.params as Record<string, unknown>;

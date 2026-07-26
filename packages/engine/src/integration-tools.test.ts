@@ -1,7 +1,7 @@
 /**
- * Tests for the three integration tools (`slack.post`,
- * `github.create_issue`, `webhook.send`) plus the `signWebhookPayload`
- * helper. Mocks the credentials repo + `fetchHttpTarget` + the DI seams
+ * Tests for the integration tool chokepoint plus deterministic PagerDuty
+ * policy evaluation and the `signWebhookPayload` helper. Mocks the
+ * credentials repo + `fetchHttpTarget` + the DI seams
  * (rate-limit + integration-usage recorder) so the tools' wrapper logic
  * (credential lookup, env resolution, rate gate, recorder fire, output
  * envelope) can be exercised without a real network call.
@@ -27,7 +27,10 @@ import {
   _resetEngineRateLimiterForTests,
   setEngineRateLimiter,
 } from "./rate-limit";
-import { signWebhookPayload } from "./integration-tools";
+import {
+  isWithinPagerDutyWorkingHours,
+  signWebhookPayload,
+} from "./integration-tools";
 import { executeTool, isToolWriteSide } from "./tool-registry";
 
 const credentialMock = vi.mocked(getCredentialByName);
@@ -70,6 +73,10 @@ describe("integration tools — registry registration", () => {
     expect(isToolWriteSide("slack.post")).toBe(true);
     expect(isToolWriteSide("github.create_issue")).toBe(true);
     expect(isToolWriteSide("webhook.send")).toBe(true);
+    expect(isToolWriteSide("pagerduty.incident.get")).toBe(false);
+    expect(isToolWriteSide("pagerduty.policy.evaluate")).toBe(false);
+    expect(isToolWriteSide("pagerduty.incident.acknowledge")).toBe(true);
+    expect(isToolWriteSide("pagerduty.incident.snooze")).toBe(true);
   });
 });
 
@@ -174,6 +181,27 @@ describe("slack.post", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("accepts the explicitly enabled local Slack simulator", async () => {
+    vi.stubEnv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true");
+    vi.stubEnv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL", "http://provider-simulator:4010");
+    vi.stubEnv("INCIDENTS_SLACK_WEBHOOK_URL", "http://provider-simulator:4010/slack/services/local/ops");
+    credentialMock.mockResolvedValueOnce(credentialRow({ name: "incidents-slack" }));
+    fetchMock.mockResolvedValueOnce({ statusCode: 200, ok: true, body: "ok", headers: {} });
+
+    const result = await executeTool(
+      "slack.post",
+      { credential: "incidents-slack", text: "Local page" },
+      {},
+      { orgId: "org-1" },
+    );
+
+    expect(result).toMatchObject({ ok: true, statusCode: 200 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://provider-simulator:4010/slack/services/local/ops",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("maps a non-2xx response to ok:false with statusCode + error", async () => {
     vi.stubEnv("INCIDENTS_SLACK_WEBHOOK_URL", "https://hooks.slack.com/services/T00/B00/abc");
     credentialMock.mockResolvedValueOnce(credentialRow({ name: "incidents-slack" }));
@@ -240,6 +268,34 @@ describe("slack.post", () => {
 // ──────────────────────────────────────────────────────────────────────────
 
 describe("github.create_issue", () => {
+  it("routes to the explicitly enabled local GitHub simulator", async () => {
+    vi.stubEnv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true");
+    vi.stubEnv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL", "http://provider-simulator:4010");
+    vi.stubEnv("GITHUB_BOT_TOKEN", "local-token");
+    credentialMock.mockResolvedValueOnce(credentialRow({
+      name: "bot-github",
+      kind: "github_token",
+      secretRef: "GITHUB_BOT_TOKEN",
+    }));
+    fetchMock.mockResolvedValueOnce({
+      statusCode: 201,
+      ok: true,
+      body: '{"number":42,"html_url":"http://provider-simulator:4010/ui/issues/42"}',
+      headers: {},
+    });
+
+    const result = await executeTool(
+      "github.create_issue",
+      { credential: "bot-github", owner: "acme", repo: "incidents", title: "Local incident" },
+      {},
+      { orgId: "org-1" },
+    );
+
+    expect(result).toMatchObject({ ok: true, issueNumber: 42 });
+    expect(fetchMock.mock.calls[0]?.[0])
+      .toBe("http://provider-simulator:4010/github/repos/acme/incidents/issues");
+  });
+
   it("creates an issue and surfaces issueNumber + url on 201", async () => {
     vi.stubEnv("GITHUB_BOT_TOKEN", "ghp_redacted");
     credentialMock.mockResolvedValueOnce(credentialRow({
@@ -322,6 +378,29 @@ describe("github.create_issue", () => {
 // ──────────────────────────────────────────────────────────────────────────
 
 describe("webhook.send", () => {
+  it("rewrites reserved example.com placeholders only in explicit local simulator mode", async () => {
+    vi.stubEnv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true");
+    vi.stubEnv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL", "http://provider-simulator:4010");
+    vi.stubEnv("PARTNER_WEBHOOK_SECRET", "local-secret");
+    credentialMock.mockResolvedValueOnce(credentialRow({
+      name: "partner-webhook",
+      kind: "webhook_secret",
+      secretRef: "PARTNER_WEBHOOK_SECRET",
+    }));
+    fetchMock.mockResolvedValueOnce({ statusCode: 202, ok: true, body: "accepted", headers: {} });
+
+    const result = await executeTool(
+      "webhook.send",
+      { credential: "partner-webhook", url: "https://billing.example.com/charges/retry", payload: { invoiceId: "inv-1" } },
+      {},
+      { orgId: "org-1" },
+    );
+
+    expect(result).toMatchObject({ ok: true, statusCode: 202 });
+    expect(fetchMock.mock.calls[0]?.[0])
+      .toBe("http://provider-simulator:4010/webhook?target=https%3A%2F%2Fbilling.example.com%2Fcharges%2Fretry");
+  });
+
   it("signs the body and sends it via fetchHttpTarget with the default header", async () => {
     vi.stubEnv("WEBHOOK_SIGNING_SECRET", "supers3cret");
     credentialMock.mockResolvedValueOnce(credentialRow({
@@ -429,5 +508,197 @@ describe("webhook.send", () => {
     expect((result as { ok: boolean }).ok).toBe(false);
     expect((result as { error: string }).error).toMatch(/private host/);
     expect(captured[0]).toMatchObject({ ok: false, error: expect.stringMatching(/private host/) });
+  });
+});
+
+describe("PagerDuty deterministic workflow tools", () => {
+  const incident = {
+    id: "PINCIDENT1",
+    status: "triggered",
+    title: "Database connection exhaustion",
+    urgency: "high",
+    serviceId: "PSERVICE1",
+    assignedUserIds: ["PLOCALUSER"],
+  };
+
+  it("evaluates event and receipt time outside working hours without an LLM", async () => {
+    const result = await executeTool(
+      "pagerduty.policy.evaluate",
+      {
+        eventType: "incident.triggered",
+        occurredAt: "2026-07-24T03:30:00.000Z",
+        receivedAt: "2026-07-24T03:31:00.000Z",
+        incident,
+        pagerDutyUserId: "PLOCALUSER",
+        timeZone: "America/Bogota",
+        workingHours: [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" }],
+        serviceIds: ["PSERVICE1"],
+        urgencies: ["high"],
+      },
+      {},
+      { orgId: "org-1" },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      shouldAct: true,
+      reason: "matched",
+      eventOutsideWorkingHours: true,
+      receivedOutsideWorkingHours: true,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails safe when receipt is delayed into working hours or templates remain unresolved", async () => {
+    const delayed = await executeTool(
+      "pagerduty.policy.evaluate",
+      {
+        eventType: "incident.triggered",
+        occurredAt: "2026-07-24T03:30:00.000Z",
+        receivedAt: "2026-07-24T15:00:00.000Z",
+        incident,
+        pagerDutyUserId: "PLOCALUSER",
+        timeZone: "America/Bogota",
+        workingHours: [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" }],
+      },
+      {},
+      { orgId: "org-1" },
+    );
+    expect(delayed).toMatchObject({ shouldAct: false, reason: "received_in_working_hours" });
+
+    const unresolved = await executeTool(
+      "pagerduty.policy.evaluate",
+      {
+        eventType: "incident.triggered",
+        occurredAt: "{{context.trigger.output.occurredAt}}",
+        receivedAt: "{{context.trigger.output.receivedAt}}",
+        incident: "{{context.read.output.incident}}",
+        pagerDutyUserId: "PLOCALUSER",
+        timeZone: "America/Bogota",
+        workingHours: [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" }],
+      },
+      {},
+      { orgId: "org-1" },
+    );
+    expect(unresolved).toMatchObject({ shouldAct: false, reason: "invalid_runtime_input" });
+  });
+
+  it("handles overnight working windows in the configured timezone", () => {
+    const overnight = [{ days: [1], start: "22:00", end: "06:00" }];
+    expect(isWithinPagerDutyWorkingHours(
+      new Date("2026-07-21T04:00:00.000Z"),
+      "UTC",
+      overnight,
+    )).toBe(true);
+    expect(isWithinPagerDutyWorkingHours(
+      new Date("2026-07-21T10:00:00.000Z"),
+      "UTC",
+      overnight,
+    )).toBe(false);
+    expect(isWithinPagerDutyWorkingHours(
+      new Date("2026-07-21T04:00:00.000Z"),
+      "Not/A_Timezone",
+      overnight,
+    )).toBe(true);
+  });
+
+  it("reads the authoritative incident with the stored API token", async () => {
+    vi.stubEnv("PAGERDUTY_TEST_TOKEN", "pd-token");
+    credentialMock.mockResolvedValueOnce(credentialRow({
+      name: "pagerduty-api",
+      kind: "pagerduty_api_token",
+      secretRef: "PAGERDUTY_TEST_TOKEN",
+    }));
+    fetchMock.mockResolvedValueOnce({
+      statusCode: 200,
+      ok: true,
+      body: JSON.stringify({
+        incident: {
+          id: "PINCIDENT1",
+          status: "triggered",
+          title: "Database connection exhaustion",
+          urgency: "high",
+          service: { id: "PSERVICE1" },
+          assignments: [{ assignee: { id: "PLOCALUSER" } }],
+        },
+      }),
+      headers: {},
+    });
+
+    const result = await executeTool(
+      "pagerduty.incident.get",
+      {
+        credential: "pagerduty-api",
+        requesterEmail: "operator@example.com",
+        incidentId: "PINCIDENT1",
+      },
+      {},
+      { orgId: "org-1", runId: "run-1", nodeId: "load_incident" },
+    );
+
+    expect(result).toMatchObject({ ok: true, incident });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.pagerduty.com/incidents/PINCIDENT1",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({
+          authorization: "Token token=pd-token",
+          from: "operator@example.com",
+        }),
+      }),
+    );
+  });
+
+  it("acknowledges then snoozes with bounded explicit mutations", async () => {
+    vi.stubEnv("PAGERDUTY_TEST_TOKEN", "pd-token");
+    credentialMock.mockResolvedValue(credentialRow({
+      name: "pagerduty-api",
+      kind: "pagerduty_api_token",
+      secretRef: "PAGERDUTY_TEST_TOKEN",
+    }));
+    fetchMock
+      .mockResolvedValueOnce({ statusCode: 200, ok: true, body: "{}", headers: {} })
+      .mockResolvedValueOnce({ statusCode: 201, ok: true, body: "{}", headers: {} });
+
+    const common = {
+      credential: "pagerduty-api",
+      requesterEmail: "operator@example.com",
+      incidentId: "PINCIDENT1",
+    };
+    const acknowledged = await executeTool(
+      "pagerduty.incident.acknowledge",
+      common,
+      {},
+      { orgId: "org-1" },
+    );
+    const snoozed = await executeTool(
+      "pagerduty.incident.snooze",
+      { ...common, durationSeconds: 43_200 },
+      {},
+      { orgId: "org-1" },
+    );
+
+    expect(acknowledged).toMatchObject({ ok: true, statusCode: 200 });
+    expect(snoozed).toMatchObject({ ok: true, statusCode: 201 });
+    expect(fetchMock.mock.calls[0]).toEqual([
+      "https://api.pagerduty.com/incidents/PINCIDENT1",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({
+          incident: {
+            id: "PINCIDENT1",
+            type: "incident_reference",
+            status: "acknowledged",
+          },
+        }),
+      }),
+    ]);
+    expect(fetchMock.mock.calls[1]).toEqual([
+      "https://api.pagerduty.com/incidents/PINCIDENT1/snooze",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ duration: 43_200 }),
+      }),
+    ]);
   });
 });

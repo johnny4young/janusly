@@ -16,13 +16,14 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { GitCompare, History, RotateCcw, Sparkles, X } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
-import type { OrgMember, OrgRole, WorkflowDefinition } from '../types'
+import type { WorkflowDefinition } from '../types'
 import { RollbackConfirmDialog } from './RollbackConfirmDialog'
 import { WorkflowDiffView } from './WorkflowDiffView'
 import { EmptyState } from './EmptyState'
 import { useConfirm } from './ConfirmDialog'
 import { getResolvedLocale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
+import { sessionCan } from '../identity-context'
 
 type VersionRow = { id: string; version: number; dagJson: WorkflowDefinition; createdAt?: string }
 
@@ -60,22 +61,6 @@ type ImprovementState =
     }
   | { kind: 'fallback'; aiError: string }
 
-/**
- * UI gate: hide the Rollback / Suggest-improvement CTAs from read-only
- * viewers. Custom roles (created via the permission-grants admin UI)
- * carry org-defined names like `compliance`; the server is the
- * authoritative gate (it consults the role's `inheritsFrom` rank and
- * effective permission set), so the web only needs to err on the side
- * of showing the CTA for any non-`viewer` non-null role and let the
- * server reject if the actual permission is missing.
- */
-function canRollbackWithRole(role: string | null | undefined) {
-  return typeof role === 'string' && role !== '' && role !== 'viewer'
-}
-
-/** Same role posture as Rollback — read-only viewers can't trigger AI mutation routes. */
-const canSuggestWithRole = canRollbackWithRole
-
 const APPROACH_KEYS: Record<string, string> = {
   add_retry: 'versionHistory.approach.add_retry',
   raise_timeout: 'versionHistory.approach.raise_timeout',
@@ -97,14 +82,11 @@ export function VersionHistoryPanel() {
   const confirm = useConfirm()
   const currentWorkflowId = useWorkflowStore(state => state.currentWorkflowId)
   const currentWorkflowSaved = useWorkflowStore(state => state.currentWorkflowSaved)
-  const session = useWorkflowStore(state => state.session)
-  const userId = useWorkflowStore(state => state.userId)
-  const orgId = useWorkflowStore(state => state.orgId)
+  const identityContext = useWorkflowStore(state => state.identityContext)
   const hydrateWorkflow = useWorkflowStore(state => state.hydrateWorkflow)
   const addToast = useWorkflowStore(state => state.addToast)
   const platformVersion = useWorkflowStore(state => state.platformVersion)
   const [versions, setVersions] = useState<VersionRow[]>([])
-  const [effectiveRole, setEffectiveRole] = useState<OrgRole | null>(null)
   const [compareMode, setCompareMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   // Snapshot the (current, target) ids at the moment the operator clicks
@@ -165,40 +147,8 @@ export function VersionHistoryPanel() {
     }
   }, [addToast, currentWorkflowId, currentWorkflowSaved, platformVersion, t])
 
-  useEffect(() => {
-    let cancelled = false
-
-    const loadEffectiveRole = async () => {
-      if (!userId) {
-        // Dev-headers mode has no Supabase session AND no userId in
-        // the store (App.tsx clears auth on every onAuthStateChange
-        // when the dev `session` is null, which wipes the dev
-        // identity). Backend role checks intentionally fall back to
-        // admin in dev when no org_members row exists, so mirror that
-        // here — otherwise role-gated UI (Rollback, Suggest
-        // improvement) is silently hidden in dev. Production with a
-        // session but a still-loading userId still resolves to null
-        // here, hiding the button until userId lands.
-        setEffectiveRole(!session ? 'admin' : null)
-        return
-      }
-
-      try {
-        const data = await api('/members')
-        if (cancelled) return
-        const members = Array.isArray(data) ? (data as OrgMember[]) : []
-        const member = members.find((row) => row.userId === userId)
-        setEffectiveRole(member?.role ?? (!session ? 'admin' : null))
-      } catch {
-        if (!cancelled) setEffectiveRole(null)
-      }
-    }
-
-    void loadEffectiveRole()
-    return () => {
-      cancelled = true
-    }
-  }, [orgId, platformVersion, session, userId])
+  const canRollback = sessionCan(identityContext, 'workflows.write')
+  const canSuggest = sessionCan(identityContext, 'ai.write')
 
   // Resolve the two selected rows; sort by version asc so the older one
   // is always on the left regardless of click order.
@@ -315,7 +265,7 @@ export function VersionHistoryPanel() {
   const showSuggestButton =
     compareMode &&
     Boolean(comparePair) &&
-    canSuggestWithRole(effectiveRole) &&
+    canSuggest &&
     improvement.kind !== 'ai' &&
     improvement.kind !== 'fallback'
 
@@ -353,7 +303,7 @@ export function VersionHistoryPanel() {
         // Rolling back to the latest version is a no-op; in compare-mode the
         // row's checkbox owns the click. Hide the Rollback button in both
         // cases. With only one version there's nothing to roll back to.
-        const showRollback = canRollbackWithRole(effectiveRole) && !compareMode && versions.length > 1 && index !== 0
+        const showRollback = canRollback && !compareMode && versions.length > 1 && index !== 0
         return (
           <div
             key={version.id}

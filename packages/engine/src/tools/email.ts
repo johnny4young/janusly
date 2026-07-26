@@ -22,7 +22,7 @@ async function fireEmailRecorder(input: {
   executionContext: ToolExecutionContext;
   to: string;
   from: string;
-  provider: "resend" | "sendgrid" | "noop";
+  provider: "resend" | "sendgrid" | "simulator" | "noop";
   providerMessageId?: string;
   ok: boolean;
   error?: string;
@@ -84,7 +84,7 @@ const emailSendOutput = z.object({
   /** True iff the provider accepted the email for delivery. */
   ok: z.boolean(),
   /** Which mailer handled the call. `"noop"` when no API key was configured. */
-  provider: z.enum(["resend", "sendgrid", "noop"]),
+  provider: z.enum(["resend", "sendgrid", "simulator", "noop"]),
   /** Provider-assigned id; populated on success. */
   providerMessageId: z.string().optional(),
   /** Failure reason; populated when `ok === false`. Mirrors the AGENTS.md AI-fallback contract for write-side tools. */

@@ -156,7 +156,7 @@ afterEach(() => {
 });
 
 describe("getCredentialHealth", () => {
-  it("returns credentials with secretRefPresent driven by the resolver and never echoes the env-var name", async () => {
+  it("returns credentials with secretRefPresent driven by the resolver and never echoes the reference", async () => {
     hoisted.credentialsRows = [
       { id: "c1", name: "slack-prod", kind: "slack_webhook", secretRef: "SLACK_PROD_URL", metadata: null },
       { id: "c2", name: "github-bot", kind: "github_token", secretRef: "GH_BOT_TOKEN", metadata: null },

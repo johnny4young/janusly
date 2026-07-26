@@ -25,8 +25,6 @@ const baseProps = {
   preSaveBeforeSnapshot: null,
 }
 
-const editorMember = { id: 'member-1', orgId: 'default', userId: 'dev-user', role: 'editor' as const }
-
 const baseSignals = (overrides: Partial<{ p95LatencyMs: number | null; totalRuns: number; totalCostUsd: number }> = {}) => ({
   p95LatencyMs: null as number | null,
   totalRuns: 0,
@@ -59,7 +57,26 @@ const baseDelta = (overrides: Partial<{
 describe('<RecoveryDeltaCard />', () => {
   beforeEach(() => {
     vi.mocked(api).mockReset()
-    useWorkflowStore.setState({ platformVersion: 0, session: null, userId: 'dev-user', orgId: 'default' })
+    useWorkflowStore.setState({
+      platformVersion: 0,
+      session: null,
+      userId: 'dev-user',
+      orgId: 'default',
+      identityContext: {
+        identity: { userId: 'dev-user', email: null, mode: 'dev-headers', source: 'dev' },
+        profile: { name: null, email: null },
+        organizations: [{
+          id: 'default', name: 'Default', plan: null, role: 'editor', roleBase: 'editor',
+          permissions: ['workflows.read', 'workflows.write'], usable: true, developmentFallback: false,
+        }],
+        invitations: [],
+        currentOrganizationId: 'default',
+        selectionRequired: false,
+        needsOrganization: false,
+        truncated: false,
+        invitationsTruncated: false,
+      },
+    })
   })
   afterEach(() => {
     vi.useRealTimers()
@@ -184,7 +201,6 @@ describe('<RecoveryDeltaCard />', () => {
       after: { score: 73, status: 'warn', signals: baseSignals({ totalRuns: 5 }) },
       before: { score: 81, status: 'healthy', signals: baseSignals({ totalRuns: 8 }) },
     }))
-    vi.mocked(api).mockResolvedValueOnce([editorMember])
     const versionsResponse = [
       { id: 'v-after', version: 2, dagJson: { dslVersion: '1.0', nodes: [], edges: [] } },
       { id: 'v-before', version: 1, dagJson: { dslVersion: '1.0', nodes: [], edges: [] } },
@@ -207,7 +223,19 @@ describe('<RecoveryDeltaCard />', () => {
       before: { score: 81, status: 'healthy', signals: baseSignals({ totalRuns: 8 }) },
       priorVersion: { version: 1, versionId: 'v0' },
     }))
-    vi.mocked(api).mockResolvedValueOnce([{ ...editorMember, role: 'viewer' }])
+    useWorkflowStore.setState((state) => ({
+      identityContext: state.identityContext
+        ? {
+            ...state.identityContext,
+            organizations: state.identityContext.organizations.map((organization) => ({
+              ...organization,
+              role: 'billing-admin',
+              roleBase: 'admin',
+              permissions: ['workflows.read'],
+            })),
+          }
+        : null,
+    }))
 
     render(<RecoveryDeltaCard {...baseProps} />)
 
@@ -231,11 +259,11 @@ describe('<RecoveryDeltaCard />', () => {
 
     render(<RecoveryDeltaCard {...baseProps} />)
 
-    await waitFor(() => expect(vi.mocked(api).mock.calls.length).toBe(2))
+    await waitFor(() => expect(vi.mocked(api).mock.calls.length).toBe(1))
     await act(async () => {
       useWorkflowStore.getState().bumpPlatformVersion()
     })
-    await waitFor(() => expect(vi.mocked(api).mock.calls.length).toBe(4))
+    await waitFor(() => expect(vi.mocked(api).mock.calls.length).toBe(2))
   })
 
   it('renders the pre-fetched before-snapshot in the loading state', () => {

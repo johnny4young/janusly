@@ -31,7 +31,7 @@
  */
 
 import { db, runNodes, runs, workflows, workflowVersions } from "@janusly/db";
-import { getOrgConfigSnapshot } from "@janusly/data";
+import { getOrgConfigSnapshot, resolveWorkflowRolloutAssignment } from "@janusly/data";
 import { eq, and, asc, desc, isNull } from "drizzle-orm";
 import { WorkflowSchema, workflowVersionMax, type Workflow } from "@janusly/shared";
 import {
@@ -265,8 +265,23 @@ export const subworkflowExecutor: NodeExecutor = async (ctx) => {
     throw new Error(`Subworkflow depth limit reached (${depth} >= ${max})`);
   }
 
-  // 2. Load the child workflow (org-scoped).
-  const childVersion = await loadWorkflowVersion(workflowId, ctx.orgId, requestedVersion);
+  // 2. Load the child workflow (org-scoped). An unpinned production call
+  // participates in the child's deployment; explicit pins and validation
+  // runs remain exact and never consume canary traffic.
+  const rolloutAssignment = requestedVersion === undefined && !ctx.dryRun
+    ? await resolveWorkflowRolloutAssignment({
+        orgId: ctx.orgId,
+        workflowId,
+        assignmentKey: `${ctx.runId}:${ctx.nodeId}`,
+      })
+    : null;
+  const childVersion = rolloutAssignment
+    ? {
+        workflow: rolloutAssignment.workflow,
+        version: rolloutAssignment.version,
+        versionId: rolloutAssignment.versionId,
+      }
+    : await loadWorkflowVersion(workflowId, ctx.orgId, requestedVersion);
   if (!childVersion) {
     const versionSuffix = requestedVersion === undefined ? "" : ` version ${requestedVersion}`;
     throw new Error(`Subworkflow not found: ${workflowId}${versionSuffix} (org: ${ctx.orgId})`);
@@ -295,6 +310,9 @@ export const subworkflowExecutor: NodeExecutor = async (ctx) => {
     parentRunId: ctx.runId,
     parentNodeId: ctx.nodeId,
     replayMode: ctx.dryRun ? "validation" : null,
+    ...(rolloutAssignment
+      ? { rollout: { id: rolloutAssignment.rollout.id, variant: rolloutAssignment.variant } }
+      : {}),
     parentCheckpoint: {
       waitingMetadata: {
         kind: "subworkflow",

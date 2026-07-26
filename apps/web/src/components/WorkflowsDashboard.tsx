@@ -54,7 +54,7 @@ function updateCollapsedFolders(current: string[], key: string, open: boolean): 
 }
 
 /** Render the saved-workflows list with click-to-open + manual refresh. */
-export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void }) {
+export function WorkflowsDashboard({ onOpen, canWrite = true }: { onOpen: (id: string) => void; canWrite?: boolean }) {
   const { t } = useT()
   const addToast = useWorkflowStore(state => state.addToast)
   const platformVersion = useWorkflowStore(state => state.platformVersion)
@@ -644,10 +644,10 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         prev.map((w) => (w.id === workflowId ? { ...w, status: 'active', pausedReason: null } : w)),
       )
       try {
-        const res = await api<{ backfilled?: number; remaining?: number }>(
+        const res = await api(
           `/workflows/${encodeURIComponent(workflowId)}/resume`,
           { method: 'POST' },
-        )
+        ) as { backfilled?: number; remaining?: number }
         // Say what actually happened to the events the pause held. "Resumed"
         // alone leaves the operator guessing whether the webhooks that arrived
         // during the outage were replayed or dropped.
@@ -904,6 +904,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     <FlowRow
       key={workflow.id}
       workflow={workflow}
+      canWrite={canWrite}
       folderOptions={folderOptions}
       tagOptions={tagOptions}
       hasFolders={hasFolders}
@@ -972,6 +973,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
 
       {showToolbar && !showTrashed && (
         <FlowsFilterBar
+          canWrite={canWrite}
           query={query}
           setQuery={setQuery}
           tagOptions={tagOptions}
@@ -1003,7 +1005,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         />
       )}
 
-      {!showTrashed && selectionMode && selectedIds.size > 0 && (
+      {canWrite && !showTrashed && selectionMode && selectedIds.size > 0 && (
         <div className="we-list-bulk-bar" data-testid="workflows-bulk-bar">
           <span className="we-list-bulk-bar__count">{t('workflowsDashboard.bulkSelectedCount', { count: selectedIds.size })}</span>
           <input
@@ -1092,6 +1094,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
           view search term never filters it). Restore-only; no folders/tags/bulk. */}
       {showTrashed && (
         <TrashPanel
+          canWrite={canWrite}
           workflows={workflows}
           loading={loading}
           selectedIds={selectedIds}
@@ -1239,7 +1242,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                           <details> toggle, and that would also cancel a checkbox's
                           own tick. Same preventDefault+stopPropagation as the
                           rename/delete controls. Only in selection mode. */}
-                      {selectionMode && (
+                      {canWrite && selectionMode && (
                         <button
                           type="button"
                           className="small-command we-list-folder__selectall"
@@ -1256,7 +1259,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                       <span className="we-pill" data-tone="ghost">{t('workflowsDashboard.folderCount', { count: group.items.length })}</span>
                       {/* Rename / delete only for NAMED folders — "Ungrouped" is a
                           synthetic bucket, not a real folder to manage. */}
-                      {group.key !== UNGROUPED && (
+                      {canWrite && group.key !== UNGROUPED && (
                         <span className="we-list-folder__actions">
                           <button
                             type="button"

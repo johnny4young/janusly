@@ -42,12 +42,14 @@ export function OnboardingBanner({ onOpenTab }: { onOpenTab: (tab: ActiveTab) =>
   const onboarding = useWorkflowStore((state) => state.onboarding)
   const setOnboarding = useWorkflowStore((state) => state.setOnboarding)
   const authReady = useWorkflowStore((state) => state.authReady)
+  const identityReady = useWorkflowStore((state) => state.identityReady)
+  const currentOrganizationId = useWorkflowStore((state) => state.identityContext?.currentOrganizationId ?? null)
   const platformVersion = useWorkflowStore((state) => state.platformVersion)
 
   // Derive-on-read: refetch the snapshot on boot and on any cross-panel
   // mutation. A transient failure keeps the prior state (no flicker).
   useEffect(() => {
-    if (!authReady) return
+    if (!authReady || !identityReady || !currentOrganizationId) return
     let cancelled = false
     void (async () => {
       try {
@@ -60,7 +62,7 @@ export function OnboardingBanner({ onOpenTab }: { onOpenTab: (tab: ActiveTab) =>
     return () => {
       cancelled = true
     }
-  }, [authReady, platformVersion, setOnboarding])
+  }, [authReady, currentOrganizationId, identityReady, platformVersion, setOnboarding])
 
   if (!onboarding || !onboarding.enabled || onboarding.status !== 'active' || !onboarding.currentStep) return null
 

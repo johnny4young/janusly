@@ -5,9 +5,9 @@
  * the target org has an `active` SSO row, the resolver returns `null`
  * (fails closed). The WorkOS provider's callback handler
  * (`apps/api/src/routes/sso-routes.ts`) runs JIT provisioning BEFORE the
- * resolver — once the callback upserts an `org_members` row and issues a
- * Janusly session token, the next request resolves via step 1 (direct
- * membership match).
+ * resolver — once the callback upserts an `org_members` row and issues the
+ * opaque browser-session cookie, the next request resolves via step 1
+ * (direct membership match).
  *
  * `enforcedSso: true` flips the resolver from "fall closed if no
  * provisioning path" to "reject every non-SSO auth mode for this org".

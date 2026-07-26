@@ -24,6 +24,8 @@ describe('<QuickConfigEditor /> loop for_each browser contract', () => {
           toleratedFailureCount: 1,
         })
       return <QuickConfigEditor
+        workflowNodes={[]}
+        workflowEdges={[]}
         nodeId="batch"
         type="loop"
         config={config}

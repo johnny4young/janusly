@@ -32,6 +32,10 @@ test('mobile node setup can be reached from the canvas', async ({ page }) => {
   // Onboarding is contextual to Recovery Center, so it cannot obscure this
   // canvas or its setup panel after navigation.
   await expect(page.getByTestId('onboarding-banner')).toHaveCount(0)
+  await openMobileNavigation(page)
+  await page.locator('.sb-palette').getByRole('button', { name: 'Call an API', exact: true }).click()
+  await page.keyboard.press('Escape')
+  await expect(page.locator('#workspace-sidebar')).toBeHidden()
   await page.locator('.workflow-node').filter({ hasText: 'Call an API' }).click()
 
   await expect(page.getByRole('heading', { name: 'Step setup', exact: true })).toBeVisible()

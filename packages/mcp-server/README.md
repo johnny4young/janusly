@@ -1,6 +1,6 @@
 # `@janusly/mcp-server`
 
-A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes Janusly to MCP-aware AI clients (Claude Desktop, Cursor, custom agents). It publishes fifteen read-only tools (`workflows.list`, `workflows.get`, `workflows.versions`, `workflows.health`, `recipes.list`, `tools.list`, `runs.get`, `runs.list`, `dlq.list`, `dlq.clusters`, `recovery.metrics`, `reports.run_explain`, `ai.patch_workflow`, `workflows.validate`, `workflows.readiness`) plus a gated write surface (`workflows.save`) advertised only when explicit consent is configured. All tools proxy HTTP to the running Janusly API.
+A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes Janusly to MCP-aware AI clients (Claude Desktop, Cursor, custom agents). It publishes eighteen always-available read tools and ten write tools advertised only when explicit consent is configured. All tools proxy HTTP to the running Janusly API; operations with explicit contracts use `/v1`, while the remaining routes stay on their compatible legacy paths until their schemas are versioned.
 
 ## What is MCP and why ship a server?
 
@@ -30,12 +30,12 @@ The MCP server is intentionally **not** a second consumer of the database. Every
 - **Auth** — dev headers (`x-org-id` / `x-user-id`) when Supabase is unset and `NODE_ENV !== "production"`, or service-token mode (`Authorization: Bearer <API_SERVICE_TOKEN>`).
 - **Multi-tenant scope** — every Drizzle query carries `eq(<table>.orgId, auth.orgId)`.
 - **Rate limiting** — `apps/api/src/rate-limit.ts` gates AI surfaces; MCP tools inherit API-side controls because the server never bypasses the HTTP layer.
-- **Audit logs** — read tools and `workflows.validate` / `workflows.readiness` have no side effects. Accepted write tools (currently `workflows.save`) write an audit row through the API tagged `metadata.source: "mcp"` plus an `actor` block (`userId`, `mode`, and `serviceTokenSuffix` when service-token auth was used).
+- **Audit logs** — read tools and `workflows.validate` / `workflows.readiness` do not persist workflow state. Accepted write tools write through the API audit chokepoint, tagged `metadata.source: "mcp"` plus an `actor` block (`userId`, `mode`, and `serviceTokenSuffix` when service-token auth was used).
 
 The proxy choice is the most important architectural decision. It means:
 
 - We don't duplicate org scope in two places (a known footgun in any system that grows a "second backend").
-- Future write tools must inherit `requireRole`, audit, and rate-limit by going through the same API after the consent policy exists.
+- Future write tools must inherit role, permission, consent, audit, and rate-limit enforcement by going through the same API.
 - The MCP server itself stays small — it's a JSON-RPC dispatcher over named API calls.
 
 ## Transport: stdio
@@ -46,34 +46,45 @@ Boot story: Claude Desktop reads its config file (`~/Library/Application Support
 
 ## Published tools
 
-| MCP tool              | API endpoint                                                | Purpose                                                                 |
-| --------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `workflows.list`      | `GET /workflows[?limit=]`                                   | List workflows in the configured org. Caps at 100 (max 200).            |
-| `workflows.get`       | `GET /workflows/latest?workflowId=…`                        | Fetch the latest version of one workflow. Returns null when unknown.    |
-| `workflows.versions`  | `GET /workflows/versions?workflowId=…`                      | List every saved version newest-first. Useful for rollback suggestions. |
-| `workflows.health`    | `GET /workflows/health?workflowId=…`                        | Compute the 0-100 health score + 6 sub-scores for one workflow.         |
-| `recipes.list`        | `GET /templates`                                            | List the built-in workflow templates (recipes).                         |
-| `tools.list`          | `GET /tools`                                                | List the runtime tool catalog (`http.request`, `text.uppercase`, etc.). |
-| `runs.get`            | `GET /run?runId=…[&eventsLimit=…&eventsCursor=…]`           | Fetch one run with paginated events.                                    |
-| `runs.list`           | `GET /runs[?workflowId=…&limit=…]`                          | List recent runs newest-first; optional `workflowId` filter.            |
-| `dlq.list`            | `GET /dlq[?status=…&limit=…]`                               | List DLQ entries newest-first; optional `status` filter.                |
-| `dlq.clusters`        | `GET /dlq/clusters[?windowDays=…]`                          | Group recent failures by normalized signature (e.g. "Missing secret: GITHUB_TOKEN"). |
-| `recovery.metrics`    | `GET /recovery/metrics[?windowDays=…]`                      | Org-level recovery rollup: success rate, MTTR, p95 latency, approvals pending, replay rate, cost. |
-| `reports.run_explain` | `GET /reports/run-explain?runId=…&format=json`              | Structured explanation envelope for one run (root cause, failed node, recommended next action). |
-| `ai.patch_workflow`   | `POST /ai/patch-workflow`                                   | Ask the AI for up to 3 suggested patches for one DLQ entry. NO save happens; review only. |
-| `workflows.validate`  | `POST /validate`                                            | Validate workflow shape and graph rules without saving.                 |
-| `workflows.readiness` | `POST /workflows/readiness`                                 | Pre-flight readiness check (safety / rollback / approvals / secrets).   |
+| MCP tool | API endpoint | Purpose |
+| --- | --- | --- |
+| `workflows.list` | `GET /v1/workflows` | List active workflows with bounded filters and keyset pagination. |
+| `workflows.get` | `GET /v1/workflows/latest` | Fetch the latest active workflow version. |
+| `workflows.versions` | `GET /v1/workflows/versions` | List immutable versions newest-first. |
+| `workflows.health` | `GET /v1/workflows/health` | Compute workflow health and SLO signals. |
+| `recipes.list` | `GET /v1/templates` | List built-in workflow recipes. |
+| `tools.list` | `GET /v1/tools` | List the runtime tool catalog. |
+| `runs.get` | `GET /v1/run` | Fetch one run with paginated events. |
+| `runs.list` | `GET /v1/runs` | List recent runs with workflow, status, and run-kind filters. |
+| `dlq.list` | `GET /v1/dlq` | List bounded DLQ entries. |
+| `dlq.clusters` | `GET /v1/dlq/clusters` | Group recent failures by normalized signature. |
+| `recovery.metrics` | `GET /v1/recovery/metrics` | Read the tenant recovery rollup. |
+| `reports.run_explain` | `GET /v1/reports/run-explain` | Explain one run with structured evidence. |
+| `ai.patch_workflow` | `POST /v1/ai/patch-workflow` | Suggest patches without saving a workflow version. |
+| `ai.generate_workflow` | `POST /v1/ai/generate-workflow` | Generate a workflow suggestion without saving it. |
+| `workflows.validate` | `POST /v1/validate` | Validate workflow shape and graph rules without saving. |
+| `workflows.readiness` | `POST /v1/workflows/readiness` | Evaluate safety, rollback, approval, and secret readiness. |
+| `mcp.connections.list` | `GET /v1/mcp/connections` | List outbound MCP connections and tool counts. |
+| `mcp.connections.tools` | `GET /v1/mcp/connections/{alias}/tools` | List cached descriptors for one connection. |
 
-`workflows.save` is the first gated write tool. It is advertised only when `JANUSLY_MCP_WRITES_ENABLED=true` is set in the MCP server's environment. The API process must also see the same env flag before it accepts the write, and the route additionally requires `org_configs.mcp.writeConsent = true` for the calling org — both gates must pass or the API returns HTTP 403 with `code: "mcp_process_disabled"` or `code: "mcp_tenant_disabled"`. The tool accepts an optional `dryRun: true` argument that routes the call to `POST /validate` (no persistence) so an MCP client can preview without writing.
+Write tools are advertised only when `JANUSLY_MCP_WRITES_ENABLED=true` is set in the MCP server environment. The API independently requires the same process flag and `org_configs.mcp.writeConsent = true` for the calling organization. Either gate being false returns HTTP 403 with `mcp_process_disabled` or `mcp_tenant_disabled`.
 
-| MCP tool          | API endpoint                    | Notes                                                              |
-| ----------------- | ------------------------------- | ------------------------------------------------------------------ |
-| `workflows.save`  | `POST /workflows/save`          | Gated by env + tenant flag; rate-limited at 60/min/org.            |
-| (with `dryRun`)   | `POST /validate`                | Preview only; never persists.                                      |
+| MCP tool | API endpoint | Notes |
+| --- | --- | --- |
+| `workflows.save` | `POST /v1/workflows/save` | Save a workflow version; `dryRun: true` uses `/v1/validate` instead. |
+| `workflows.rollback` | `POST /v1/workflows/rollback` | Append a prior DAG as the new latest version. |
+| `runs.start` | `POST /v1/start` | Start a production run. |
+| `runs.resume` | `POST /v1/resume` | Resume a waiting approval or human-form node. |
+| `runs.cancel` | `POST /v1/run/cancel` | Cancel an in-flight run. |
+| `dlq.replay` | `POST /v1/dlq/replay` | Replay one dead letter through its generation-bound recovery claim. Requires `deadLetterId` from `dlq.list`. |
+| `mcp.connections.create` | `POST /v1/mcp/connections` | Register and discover an outbound connection. |
+| `mcp.connections.rediscover` | `POST /v1/mcp/connections/{alias}/rediscover` | Refresh cached descriptors while preserving opt-ins. |
+| `mcp.connections.set_tool` | `POST /v1/mcp/connections/{alias}/tools/{toolName}` | Update enabled, write-side, exposure, or rate-limit flags. |
+| `mcp.connections.delete` | `DELETE /v1/mcp/connections/{alias}` | Delete a connection and its cached descriptors. |
 
 The pre-flight POST tools (`workflows.validate` and `workflows.readiness`) take a workflow body and return a verdict; neither writes to the database.
 
-Every tool returns a single MCP `text` content block carrying the API response JSON-stringified. That's the documented MCP convention for "data-shaped" results; the AI client reads it as text and reasons over it. Future tools could surface structured `resource` content blocks if the UX warrants.
+Every tool returns one MCP `text` content block carrying the normalized result as JSON. Stable `/v1` envelopes are validated and unwrapped first, so the model receives the operation data rather than transport metadata. Future tools could surface structured `resource` content blocks if the UX warrants.
 
 ## Auth flow
 
@@ -149,9 +160,10 @@ packages/mcp-server/
 1. Add a descriptor to `tools` in [`src/tools.ts`](src/tools.ts) — `name`, `description`, `inputSchema` (JSON Schema, not Zod — MCP speaks JSON Schema natively).
 2. Add a `case` arm to `runOne` mapping the tool to its API URL. Use `URLSearchParams` for query strings (catches encoding bugs).
 3. Add a unit test to `tools.test.ts` asserting the URL/headers shape with a `vi.fn` `callApi`.
-4. Bump the package version if anything is downstream-visible.
+4. Use `/v1` only when the backing route has an explicit Zod contract in `V1_CONTRACT_ROUTES`; the API intentionally returns 404 for uncontracted aliases.
+5. Bump the package version if anything is downstream-visible.
 
-Write tools must go through the policy in `apps/api/src/mcp-consent.ts`. The route handler runs `isMcpWriteAllowed(auth.orgId)` (env + tenant gate), enforces a `mcp.<actionKey>` rate-limit bucket via `enforceRateLimit`, and merges `mcpAuditMetadata(auth)` into the audit row. Add a new write tool by (1) appending to `WRITE_TOOLS` in `src/tools.ts`, (2) wiring the API route through those three helpers, (3) extending the tests in `tools.test.ts` and `apps/api/src/mcp-consent.test.ts`. Do not add destructive tools without all three steps.
+Write tools must go through `guardMcpWrite(auth, actionKey)` in `apps/api/src/mcp-consent.ts`; that chokepoint applies the process flag, tenant consent, and per-tool rate limit for MCP-source traffic. Route audits use `auditAction`, which derives the MCP source and actor metadata. Add a write tool by extending `WRITE_TOOLS`, adding a `requireWrites`-guarded dispatch branch, guarding the backing API route, and covering both env-off refusal and env-on dispatch. Do not add destructive tools without all of those controls.
 
 ## Configuring MCP writes
 

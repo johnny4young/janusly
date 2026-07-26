@@ -58,7 +58,7 @@ export function RunHistoryList({
   runs: RunSummary[]
   workflows: SavedWorkflow[]
   onOpenRun: (runId: string) => void
-  onOpenLab: (run: RunSummary) => void
+  onOpenLab?: (run: RunSummary) => void
   onSend: (run: RunSummary) => void
 }) {
   const { t, i18n } = useT()
@@ -214,7 +214,7 @@ export function RunHistoryList({
         <div style={{ height: totalHeight, position: 'relative' }}>
           <div style={{ transform: `translateY(${startOffset}px)` }}>
             {visibleItems.map(({ item: run }) => {
-                const showLabAction = !run.replayMode && isTerminalRunStatus(run.status)
+                const showLabAction = Boolean(onOpenLab && !run.replayMode && isTerminalRunStatus(run.status))
                 const workflowLabel = run.workflowId
                   ? workflowLabels.get(run.workflowId) ?? run.workflowName ?? run.workflowId
                   : t('rightPanel.runs.unknownWorkflow')
@@ -252,7 +252,7 @@ export function RunHistoryList({
                         <button
                           type="button"
                           className="small-command"
-                          onClick={() => onOpenLab(run)}
+                          onClick={() => onOpenLab?.(run)}
                           data-testid={`history-replay-in-lab-${run.id}`}
                           aria-label={t('rightPanel.runs.replayInLabAria', { id: run.id })}
                         >

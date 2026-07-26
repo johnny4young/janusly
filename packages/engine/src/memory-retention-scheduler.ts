@@ -41,7 +41,7 @@
 
 import { deleteExpiredMemory } from "@janusly/data";
 
-import { workflowQueue } from "./queue";
+import { maintenanceQueue } from "./queue";
 import { validateCronExpression } from "./schedule";
 
 /** Deterministic global id for the BullMQ scheduler. The `system:`
@@ -89,7 +89,7 @@ export async function registerMemoryRetentionScheduler(
 ): Promise<boolean> {
   const pattern = resolveCronPattern(env);
   try {
-    await workflowQueue.upsertJobScheduler(
+    await maintenanceQueue.upsertJobScheduler(
       MEMORY_RETENTION_JOB_ID,
       { pattern },
       { name: MEMORY_RETENTION_JOB_NAME, data: {} },

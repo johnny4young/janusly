@@ -1,7 +1,7 @@
 /**
  * Inbound-trigger ingestion seam + replay + recent-event feed.
  *
- * The three event-driven trigger node types (`email_received`,
+ * The event-driven trigger node types (`webhook_received`, `email_received`,
  * `file_dropped`, `mcp_server_event`) start runs through this surface. Each
  * `POST /triggers/<kind>/ingest` route accepts a NORMALIZED inbound payload
  * (a real SMTP relay, an SES/Mailgun forwarder, a bucket-event listener, or
@@ -42,6 +42,7 @@ import {
   EmailReceivedPayloadSchema,
   FileDroppedPayloadSchema,
   McpServerEventPayloadSchema,
+  WebhookReceivedPayloadSchema,
   EMAIL_BODY_MAX_BYTES,
   FILE_METADATA_MAX_BYTES,
   MCP_EVENT_PAYLOAD_MAX_BYTES,
@@ -66,7 +67,10 @@ import {
   recordTriggerEvent,
   releaseTriggerEventBackfillClaim,
   retireTriggerEventBackfillClaim,
+  resolveWorkflowRolloutAssignment,
   resolveTriggerNode,
+  resolveTriggerNodeInVersion,
+  AmbiguousTriggerNodeError,
   type TriggerEvent,
   type ResolvedTriggerNode,
 } from "@janusly/data";
@@ -91,6 +95,7 @@ const EMAIL_INGEST_MAX_JSON_BYTES = 4 * 1_048_576;
 const TRIGGER_INGEST_MAX_JSON_BYTES = 1_048_576;
 
 type StatusFilter = TriggerEventStatus | undefined;
+const AMBIGUOUS_TRIGGER = Symbol("ambiguous-trigger");
 
 function parseStatusFilter(value: string | null): StatusFilter {
   if (value === "received" || value === "started" || value === "skipped" || value === "failed" || value === "buffered" || value === "backfilling") return value;
@@ -110,13 +115,45 @@ function isRateLimit429(err: unknown): boolean {
   return Boolean(err && typeof err === "object" && (err as { statusCode?: unknown }).statusCode === 429);
 }
 
+/** Resolve one inbound selector and fail closed when active workflows conflict. */
+async function resolveUniqueTriggerNode(
+  orgId: string,
+  triggerType: TriggerNodeType,
+  matcher: (config: Record<string, unknown>) => boolean,
+): Promise<ResolvedTriggerNode | null | typeof AMBIGUOUS_TRIGGER> {
+  try {
+    return await resolveTriggerNode(orgId, triggerType, matcher);
+  } catch (error) {
+    if (error instanceof AmbiguousTriggerNodeError) return AMBIGUOUS_TRIGGER;
+    throw error;
+  }
+}
+
 /**
  * Shared tail of every ingestion / replay path: persist the structured event,
  * apply the storm guard, spawn the run, and audit. Returns the HTTP response
  * the route should send. `replayOfEventId` is set on the replay path so the
  * audit row distinguishes a replay from a fresh inbound event.
  */
-async function persistEventAndSpawnRun(args: {
+type TriggerAuditAction =
+  | "trigger.event.received"
+  | "trigger.event.skipped"
+  | "trigger.event.buffered"
+  | "trigger.event.started"
+  | "trigger.event.replayed";
+
+type TriggerAuditOptions = {
+  targetType: string;
+  targetId: string;
+  metadata: Record<string, unknown>;
+};
+
+/**
+ * Durable event-to-run tail shared by authenticated normalized ingestion and
+ * provider-signed public callbacks. Public callbacks override `auditEvent`
+ * with a system-actor writer after signature verification.
+ */
+export async function persistEventAndSpawnRun(args: {
   auth: AuthContext;
   triggerType: TriggerNodeType;
   resolved: ResolvedTriggerNode;
@@ -132,8 +169,39 @@ async function persistEventAndSpawnRun(args: {
   eventId?: string;
   /** Existing `received` row recovered before attachment offload. */
   existingEvent?: TriggerEvent;
+  /** Optional system-actor audit adapter for signature-authenticated callbacks. */
+  auditEvent?: (action: TriggerAuditAction, options: TriggerAuditOptions) => Promise<void>;
 }): Promise<{ status: number; body: unknown }> {
   const { auth, triggerType, resolved, payload, dedupeKey, replayOfEventId, eventId, existingEvent } = args;
+  const auditEvent = args.auditEvent
+    ?? ((action: TriggerAuditAction, options: TriggerAuditOptions) => auditAction(auth, action, options));
+
+  const durableEventId = existingEvent?.id ?? eventId ?? crypto.randomUUID();
+  let selectedResolved = resolved;
+  let selectedRollout: { id: string; variant: "baseline" | "canary" } | null = null;
+  if (!existingEvent && !replayOfEventId && resolved.workflowId) {
+    const assignment = await resolveWorkflowRolloutAssignment({
+      orgId: auth.orgId,
+      workflowId: resolved.workflowId,
+      assignmentKey: durableEventId,
+    });
+    if (assignment) {
+      const exactNode = await resolveTriggerNodeInVersion(
+        auth.orgId,
+        assignment.versionId,
+        triggerType,
+        resolved.nodeId,
+      );
+      if (!exactNode) {
+        return {
+          status: 409,
+          body: errorEnvelope("trigger_no_matching_node", "Assigned workflow version no longer contains the trigger node"),
+        };
+      }
+      selectedResolved = exactNode;
+      selectedRollout = { id: assignment.rollout.id, variant: assignment.variant };
+    }
+  }
 
   // 1. Persist the structured event BEFORE the run (DLQ-style replay anchor),
   //    idempotent on (orgId, dedupeKey) so a relay retry converges.
@@ -142,12 +210,14 @@ async function persistEventAndSpawnRun(args: {
     : await recordTriggerEvent({
         orgId: auth.orgId,
         triggerType,
-        workflowId: resolved.workflowId,
-        workflowVersionId: resolved.workflowVersionId,
-        nodeId: resolved.nodeId,
+        workflowId: selectedResolved.workflowId,
+        workflowVersionId: selectedResolved.workflowVersionId,
+        workflowRolloutId: selectedRollout?.id ?? null,
+        workflowRolloutVariant: selectedRollout?.variant ?? null,
+        nodeId: selectedResolved.nodeId,
         dedupeKey,
         payloadJson: safePersistPayload({ event: payload }),
-        id: eventId,
+        id: durableEventId,
       });
   const { event, wasCreated } = recorded;
 
@@ -161,8 +231,9 @@ async function persistEventAndSpawnRun(args: {
   }
 
   let effectiveTriggerType = triggerType;
-  let effectiveResolved = resolved;
+  let effectiveResolved = selectedResolved;
   let effectivePayload = payload;
+  let effectiveRollout = selectedRollout;
   if (!wasCreated) {
     if (!isTriggerNodeType(event.triggerType)) {
       await markTriggerEventFailed(auth.orgId, event.id, "invalid_persisted_trigger_type");
@@ -171,11 +242,11 @@ async function persistEventAndSpawnRun(args: {
         body: errorEnvelope("trigger_invalid_payload", "Persisted trigger event has an invalid type"),
       };
     }
-    const persistedResolved = await resolveTriggerNode(
+    const persistedResolved = await resolveTriggerNodeInVersion(
       auth.orgId,
+      event.workflowVersionId,
       event.triggerType,
-      () => true,
-      event.workflowId ? { workflowId: event.workflowId, nodeId: event.nodeId } : undefined,
+      event.nodeId,
     );
     if (!persistedResolved) {
       await markTriggerEventFailed(auth.orgId, event.id, "persisted_trigger_node_missing");
@@ -186,13 +257,17 @@ async function persistEventAndSpawnRun(args: {
     }
     effectiveTriggerType = event.triggerType;
     effectiveResolved = persistedResolved;
+    effectiveRollout = event.workflowRolloutId
+      && (event.workflowRolloutVariant === "baseline" || event.workflowRolloutVariant === "canary")
+      ? { id: event.workflowRolloutId, variant: event.workflowRolloutVariant }
+      : null;
     effectivePayload = (event.payloadJson && typeof event.payloadJson === "object" && !Array.isArray(event.payloadJson)
       ? (event.payloadJson as { event?: Record<string, unknown> }).event
       : undefined) ?? {};
   }
 
   if (wasCreated) {
-    await auditAction(auth, "trigger.event.received", {
+    await auditEvent("trigger.event.received", {
       targetType: "trigger_event",
       targetId: event.id,
       metadata: { triggerType: effectiveTriggerType, workflowId: effectiveResolved.workflowId, nodeId: effectiveResolved.nodeId, replay: Boolean(replayOfEventId) },
@@ -210,7 +285,7 @@ async function persistEventAndSpawnRun(args: {
   } catch (err) {
     if (isRateLimit429(err)) {
       await markTriggerEventSkipped(auth.orgId, event.id, "rate_limited");
-      await auditAction(auth, "trigger.event.skipped", {
+      await auditEvent("trigger.event.skipped", {
         targetType: "trigger_event",
         targetId: event.id,
         metadata: { triggerType: effectiveTriggerType, reason: "rate_limited", ratePerMin },
@@ -235,7 +310,7 @@ async function persistEventAndSpawnRun(args: {
     const pauseAction = resolveWorkflowPauseAction(wfStatus?.status, "trigger");
     if (pauseAction.kind === "buffer") {
       await markTriggerEventBuffered(auth.orgId, event.id, pauseAction.reason);
-      await auditAction(auth, "trigger.event.buffered", {
+      await auditEvent("trigger.event.buffered", {
         targetType: "trigger_event",
         targetId: event.id,
         metadata: { triggerType: effectiveTriggerType, reason: pauseAction.reason, workflowId: effectiveResolved.workflowId, nodeId: effectiveResolved.nodeId },
@@ -265,9 +340,10 @@ async function persistEventAndSpawnRun(args: {
       versionId: effectiveResolved.workflowVersionId,
       createdBy: auth.userId,
       input: { triggeredBy: effectiveTriggerType, triggerEventId: event.id, event: effectivePayload },
+      ...(effectiveRollout ? { rollout: effectiveRollout } : {}),
       triggerEventStart: { id: event.id },
     });
-    await auditAction(auth, replayOfEventId ? "trigger.event.replayed" : "trigger.event.started", {
+    await auditEvent(replayOfEventId ? "trigger.event.replayed" : "trigger.event.started", {
       targetType: "trigger_event",
       targetId: event.id,
       metadata: { triggerType: effectiveTriggerType, runId, workflowId: effectiveResolved.workflowId, nodeId: effectiveResolved.nodeId, ...(replayOfEventId ? { replayOf: replayOfEventId } : {}) },
@@ -377,9 +453,9 @@ export const TRIGGER_BACKFILL_MAX_PER_RESUME = 100;
  *    still owed.
  *
  * So this leases and transitions the existing row
- * `buffered -> backfilling -> started` against the CURRENT latest version:
- * the operator resumed because they fixed something, and the backfill should
- * run on the fix.
+ * `buffered -> backfilling -> started` against the exact version and optional
+ * rollout variant captured when the event was accepted. Mutable deployment
+ * state cannot silently change the semantics of already-owed input.
  *
  * Never throws: the workflow is already resumed by the time this runs, and a
  * backfill fault must not read as a failed resume. A per-event failure is
@@ -405,13 +481,16 @@ export async function backfillBufferedTriggerEvents(args: {
         }
 
         const triggerType = event.triggerType as TriggerNodeType;
-        const resolved = await resolveTriggerNode(args.auth.orgId, triggerType, () => true, {
-          workflowId: args.workflowId,
-          nodeId: event.nodeId,
-        });
+        const resolved = await resolveTriggerNodeInVersion(
+          args.auth.orgId,
+          event.workflowVersionId,
+          triggerType,
+          event.nodeId,
+        );
         if (!resolved) {
-          // The trigger node is gone from the current version — the event can
-          // never run again. Retire it so it stops counting as owed work.
+          // The exact accepted version or trigger node is no longer available,
+          // so the event can never run again. Retire it so it stops counting as
+          // owed work without silently changing its execution semantics.
           const retired = await retireTriggerEventBackfillClaim(
             args.auth.orgId,
             row.id,
@@ -446,6 +525,10 @@ export async function backfillBufferedTriggerEvents(args: {
           versionId: resolved.workflowVersionId,
           createdBy: args.auth.userId,
           input: { triggeredBy: triggerType, triggerEventId: row.id, backfilled: true, event: storedPayload },
+          ...(event.workflowRolloutId
+            && (event.workflowRolloutVariant === "baseline" || event.workflowRolloutVariant === "canary")
+            ? { rollout: { id: event.workflowRolloutId, variant: event.workflowRolloutVariant } }
+            : {}),
           triggerEventStart: { id: row.id, claimToken: row.claimToken },
         });
         await auditAction(args.auth, "trigger.event.started", {
@@ -467,6 +550,47 @@ export async function backfillBufferedTriggerEvents(args: {
 }
 
 export const triggerIngestRoutes: Route[] = [
+  // ── webhook_received ──────────────────────────────────────────────────
+  {
+    method: "POST",
+    match: "/triggers/webhook/ingest",
+    role: "editor",
+    permission: "triggers.ingest",
+    handler: async ({ req, res, auth }) => {
+      const raw = asRecord(await readJson(req, TRIGGER_INGEST_MAX_JSON_BYTES));
+      const parsed = WebhookReceivedPayloadSchema.safeParse(raw);
+      if (!parsed.success) {
+        return sendError(res, "trigger_invalid_payload", parsed.error.issues[0]?.message ?? "Invalid webhook payload", 400);
+      }
+      const payload = parsed.data;
+      const resolved = await resolveUniqueTriggerNode(auth.orgId, "webhook_received", (config) => {
+        return typeof config.endpointKey === "string"
+          && config.endpointKey.trim().toLowerCase() === payload.endpointKey.toLowerCase();
+      });
+      if (resolved === AMBIGUOUS_TRIGGER) {
+        return sendError(res, "trigger_selector_ambiguous", "Multiple active workflows use this webhook endpoint key", 409);
+      }
+      if (!resolved) {
+        return sendError(res, "trigger_no_matching_node", "No webhook_received trigger matches this endpoint key", 404);
+      }
+
+      const result = await persistEventAndSpawnRun({
+        auth,
+        triggerType: "webhook_received",
+        resolved,
+        payload: {
+          endpointKey: payload.endpointKey,
+          eventId: payload.eventId,
+          eventType: payload.eventType,
+          payload: payload.payload,
+          receivedAt: payload.receivedAt ?? new Date().toISOString(),
+        },
+        dedupeKey: `webhook:${payload.endpointKey.toLowerCase()}:${payload.eventId}`,
+      });
+      return sendJson(res, result.body, result.status);
+    },
+  },
+
   // ── email_received ────────────────────────────────────────────────────
   {
     method: "POST",
@@ -487,9 +611,12 @@ export const triggerIngestRoutes: Route[] = [
         return sendError(res, "trigger_payload_too_large", "Email body exceeds 1 MiB cap", 413);
       }
 
-      const resolved = await resolveTriggerNode(auth.orgId, "email_received", (config) => {
+      const resolved = await resolveUniqueTriggerNode(auth.orgId, "email_received", (config) => {
         return typeof config.aliasKey === "string" && config.aliasKey.trim().toLowerCase() === payload.aliasKey.trim().toLowerCase();
       });
+      if (resolved === AMBIGUOUS_TRIGGER) {
+        return sendError(res, "trigger_selector_ambiguous", "Multiple active workflows use this email alias", 409);
+      }
       if (!resolved) {
         return sendError(res, "trigger_no_matching_node", "No email_received trigger matches this alias", 404);
       }
@@ -600,7 +727,7 @@ export const triggerIngestRoutes: Route[] = [
         return sendError(res, "trigger_payload_too_large", "File event metadata exceeds the cap", 413);
       }
 
-      const resolved = await resolveTriggerNode(auth.orgId, "file_dropped", (config) => {
+      const resolved = await resolveUniqueTriggerNode(auth.orgId, "file_dropped", (config) => {
         if (typeof config.bucket !== "string" || config.bucket !== payload.bucket) return false;
         const prefix = typeof config.prefix === "string" ? config.prefix : "";
         if (prefix && !payload.key.startsWith(prefix)) return false;
@@ -613,6 +740,9 @@ export const triggerIngestRoutes: Route[] = [
         }
         return true;
       });
+      if (resolved === AMBIGUOUS_TRIGGER) {
+        return sendError(res, "trigger_selector_ambiguous", "Multiple active workflows match this file selector", 409);
+      }
       if (!resolved) {
         return sendError(res, "trigger_no_matching_node", "No file_dropped trigger matches this object", 404);
       }
@@ -656,7 +786,7 @@ export const triggerIngestRoutes: Route[] = [
         return sendError(res, "trigger_payload_too_large", "MCP resource payload exceeds the cap", 413);
       }
 
-      const resolved = await resolveTriggerNode(auth.orgId, "mcp_server_event", (config) => {
+      const resolved = await resolveUniqueTriggerNode(auth.orgId, "mcp_server_event", (config) => {
         if (typeof config.connectionAlias !== "string" || config.connectionAlias !== payload.connectionAlias) return false;
         if (typeof config.resourceUri !== "string" || config.resourceUri !== payload.resourceUri) return false;
         const eventTypes = Array.isArray(config.eventTypes)
@@ -665,6 +795,9 @@ export const triggerIngestRoutes: Route[] = [
         if (eventTypes.length > 0 && !eventTypes.includes(payload.eventType)) return false;
         return true;
       });
+      if (resolved === AMBIGUOUS_TRIGGER) {
+        return sendError(res, "trigger_selector_ambiguous", "Multiple active workflows match this MCP event selector", 409);
+      }
       if (!resolved) {
         return sendError(res, "trigger_no_matching_node", "No mcp_server_event trigger matches this notification", 404);
       }

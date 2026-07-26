@@ -17,6 +17,7 @@
 
 import { WorkflowInputSchema, WorkflowSchema, nodeTypeValues, workflowVersionMax } from "@janusly/shared";
 import { validateExpression } from "./expression";
+import { validateInputs } from "./inputs-validator";
 import { resolveJoinSources, resolveParallelForkBranches } from "./parallel-fork";
 import { resolveScheduleConfig } from "./schedule";
 import { resolveTriggerConfig } from "./triggers";
@@ -224,7 +225,12 @@ export function validateWorkflow(workflow: unknown, options: ValidateWorkflowOpt
     // this validator is the strict runtime gate for required fields on
     // `ai` / `agent` / `transform` nodes. Mirrors the per-type checks
     // above for `http` / `tool` / `condition` / `loop`.
-    if (node.type === "ai" && !node.config.prompt) issues.push({ code: "ai_missing_prompt", message: "AI node requires config.prompt", nodeId: node.id });
+    if (node.type === "ai") {
+      if (!node.config.prompt) issues.push({ code: "ai_missing_prompt", message: "AI node requires config.prompt", nodeId: node.id });
+      if (node.config.outputSchema !== undefined && !WorkflowInputSchema.safeParse(node.config.outputSchema).success) {
+        issues.push({ code: "ai_invalid_output_schema", message: "AI node config.outputSchema must use the supported workflow schema subset", nodeId: node.id });
+      }
+    }
     if (node.type === "agent" && !node.config.goal) issues.push({ code: "agent_missing_goal", message: "Agent node requires config.goal", nodeId: node.id });
     if (node.type === "transform") {
       const mapping = node.config.mapping;
@@ -239,6 +245,15 @@ export function validateWorkflow(workflow: unknown, options: ValidateWorkflowOpt
         issues.push({ code: "human_form_invalid_schema", message: "Human form node requires a valid config.schema", nodeId: node.id });
       } else if (schema.data.type === "object" && (!schema.data.properties || Object.keys(schema.data.properties).length === 0)) {
         issues.push({ code: "human_form_empty_schema", message: "Human form node requires at least one field in config.schema.properties", nodeId: node.id });
+      } else if (node.config.initialValues !== undefined) {
+        const initialValues = validateInputs(schema.data, node.config.initialValues);
+        if (!initialValues.valid) {
+          issues.push({
+            code: "human_form_invalid_initial_values",
+            message: `Human form config.initialValues does not satisfy config.schema: ${initialValues.errors.join("; ")}`,
+            nodeId: node.id,
+          });
+        }
       }
     }
     if (node.type === "parallel_fork") {

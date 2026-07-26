@@ -49,6 +49,10 @@ export type AiReviewIssue = ValidationIssue & {
   rationale: string
   suggestion: string
 }
+export type ReviewFindings = {
+  status: 'pass' | 'warn' | 'fail'
+  issues: AiReviewIssue[]
+}
 export type ToolSchema = {
   name: string
   description: string
@@ -71,12 +75,35 @@ export type Template = {
   categoryCode?: string
   workflow: WorkflowDefinition
 }
-export type Credential = { id: string; name: string; kind: string; metadata?: JsonObject; expiresAt?: string | null }
+export type Credential = {
+  id: string
+  name: string
+  kind: string
+  storage?: 'managed' | 'environment'
+  metadata?: JsonObject
+  expiresAt?: string | null
+}
 
 /** One required credential a solution pack declares (name + kind + purpose; never a secret value). */
 type PackRequiredCredential = { name: string; kind: string; purpose: string }
 /** One required org-config key a solution pack declares. */
 type PackRequiredOrgConfig = { key: string; purpose: string }
+export type SolutionPackFailureMode =
+  | 'credential_unavailable'
+  | 'credential_expired'
+  | 'ai_output_invalid'
+  | 'rate_limited'
+  | 'contract_drift'
+  | 'upstream_unavailable'
+  | 'worker_stalled'
+export type SolutionPackRecoveryPath = 'direct_failure' | 'stalled_node_reaper'
+type PackFailureFixture = {
+  id: string
+  label: string
+  description: string
+  failureMode: SolutionPackFailureMode
+  recoveryPath: SolutionPackRecoveryPath
+}
 /** Catalog-safe projection of a solution pack returned by `GET /solution-packs`. */
 export type SolutionPackPublic = {
   id: string
@@ -91,6 +118,7 @@ export type SolutionPackPublic = {
   failureCount: number
   samplePayloadIds: string[]
   failureFixtureIds: string[]
+  failureFixtures: PackFailureFixture[]
 }
 /**
  * `status` / `pausedReason` are the workflow's OPERATIONAL state (`active`,
@@ -258,8 +286,10 @@ export type WorkflowInputSchemaShape = {
 }
 
 export type WorkflowDefinition = {
+  dslVersion?: '1.0'
   id?: string
   name?: string
+  metadata?: JsonObject
   nodes: Array<{ id: string; type: string; label?: string; config: JsonObject }>
   edges: Array<{ from: string; to: string; condition?: string }>
   /** Typed inputs surfaced in the Inspector + validated at run start. */
@@ -272,4 +302,4 @@ export type WorkflowDefinition = {
   ui?: { positions?: Record<string, { x: number; y: number }> }
 }
 export type WorkflowGraphNode = Node<WorkflowNodeData>
-export type WorkflowGraphEdge = Edge<WorkflowEdgeData>
+export type WorkflowGraphEdge = Edge<WorkflowEdgeData & { hasCondition?: boolean }>

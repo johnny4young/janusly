@@ -58,6 +58,30 @@ describe('<RunInputDialog />', () => {
     expect(onSubmit).toHaveBeenCalledWith({ invoiceId: 'INV-1', amount: 42 })
   })
 
+  it('hydrates nested schema values without admitting undeclared fields', () => {
+    const onSubmit = vi.fn()
+    const schema: WorkflowInputSchemaShape = {
+      type: 'object',
+      properties: {
+        customer: {
+          type: 'object',
+          properties: { name: { type: 'string' }, active: { type: 'boolean' } },
+          required: ['name'],
+        },
+      },
+    }
+    render(<RunInputDialog {...makeProps({
+      inputs: schema,
+      initialValue: { customer: { name: 'Ada', active: true, hidden: 'drop me' } },
+      onSubmit,
+    })} />)
+
+    expect(screen.getByLabelText(/name/i)).toHaveValue('Ada')
+    expect(screen.getByLabelText(/active/i)).toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: /Run workflow/i }))
+    expect(onSubmit).toHaveBeenCalledWith({ customer: { name: 'Ada', active: true } })
+  })
+
   it('maps a JSONPath server error to the matching field', () => {
     const props = makeProps({ serverErrors: ['$.invoiceId must be a UUID'] })
     render(<RunInputDialog {...props} />)

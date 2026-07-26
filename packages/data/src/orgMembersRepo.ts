@@ -19,8 +19,8 @@
  * - `apps/api/src/routes/members-routes.ts` (admin CRUD).
  */
 
-import { and, eq } from "drizzle-orm";
-import { db, orgMembers } from "@janusly/db";
+import { and, asc, eq } from "drizzle-orm";
+import { db, organizations, orgMembers } from "@janusly/db";
 
 import type { DbOrTx } from "./audit-tx";
 
@@ -33,6 +33,15 @@ export type OrgMemberRow = {
   invitedBy: string | null;
   createdAt: Date | string | null;
 };
+
+/** Membership projected with the optional organization display metadata. */
+export type OrganizationMembershipRow = OrgMemberRow & {
+  organizationName: string | null;
+  organizationPlan: string | null;
+};
+
+/** Session bootstrap remains bounded even for unusually prolific identities. */
+export const IDENTITY_MEMBERSHIP_LIMIT = 200;
 
 function mapRow(row: typeof orgMembers.$inferSelect): OrgMemberRow {
   return {
@@ -58,13 +67,57 @@ export async function getMembershipForOrgUser(
   return row ? mapRow(row) : null;
 }
 
-/** List every accepted membership for a user across orgs (used when the request has no `x-org-id` hint). */
+/** List accepted memberships for a user across orgs, capped for auth resolution. */
 export async function listMembershipsForUser(userId: string): Promise<OrgMemberRow[]> {
   const rows = await db
     .select()
     .from(orgMembers)
-    .where(eq(orgMembers.userId, userId));
+    .where(eq(orgMembers.userId, userId))
+    .orderBy(asc(orgMembers.createdAt), asc(orgMembers.orgId))
+    .limit(IDENTITY_MEMBERSHIP_LIMIT + 1);
   return rows.map(mapRow);
+}
+
+/**
+ * List the organizations an authenticated identity may select.
+ *
+ * The join is deliberately LEFT: Janusly's orphan-tolerant schema can retain a
+ * membership after an operator-level organization deletion. Such a row still
+ * appears with a null name so the session surface can be honest instead of
+ * silently hiding the grant. Tenant routes remain scoped by `org_members`.
+ */
+export async function listOrganizationMembershipsForUser(
+  userId: string,
+): Promise<OrganizationMembershipRow[]> {
+  const rows = await db
+    .select({
+      id: orgMembers.id,
+      orgId: orgMembers.orgId,
+      userId: orgMembers.userId,
+      email: orgMembers.email,
+      role: orgMembers.role,
+      invitedBy: orgMembers.invitedBy,
+      createdAt: orgMembers.createdAt,
+      organizationName: organizations.name,
+      organizationPlan: organizations.plan,
+    })
+    .from(orgMembers)
+    .leftJoin(organizations, eq(organizations.id, orgMembers.orgId))
+    .where(eq(orgMembers.userId, userId))
+    .orderBy(asc(organizations.name), asc(orgMembers.orgId))
+    .limit(IDENTITY_MEMBERSHIP_LIMIT + 1);
+
+  return rows.map((row) => ({
+    id: row.id,
+    orgId: row.orgId,
+    userId: row.userId,
+    email: row.email,
+    role: row.role,
+    invitedBy: row.invitedBy,
+    createdAt: row.createdAt,
+    organizationName: row.organizationName,
+    organizationPlan: row.organizationPlan,
+  }));
 }
 
 /**

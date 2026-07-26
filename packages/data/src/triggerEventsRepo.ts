@@ -1,7 +1,8 @@
 /**
  * Repository for `trigger_events` rows — structured inbound-trigger events
- * for the event-driven trigger node types (`email_received`, `file_dropped`,
- * `mcp_server_event`).
+ * for the event-driven trigger node types (`webhook_received`,
+ * `email_received`, `file_dropped`, `mcp_server_event`,
+ * `pagerduty_incident`).
  *
  * The API ingestion seam (`apps/api/src/routes/trigger-ingest-routes.ts`)
  * persists one `received` row for every accepted inbound event BEFORE the run
@@ -14,20 +15,20 @@
  * - `apps/api/src/routes/trigger-ingest-routes.ts` — ingestion + replay.
  *
  * Invariants:
- * - Multi-tenant scope: every function takes `orgId` and filters via
- *   `eq(triggerEvents.orgId, orgId)`. There is NO un-scoped read here — an
- *   inbound event's org is resolved by the seam from the authenticated
- *   caller, never from a claim in the payload.
+ * - Multi-tenant scope: ordinary functions take `orgId` and filter via
+ *   `eq(triggerEvents.orgId, orgId)`. The sole public-callback exception
+ *   resolves a globally unique workflow id first, returns its stored org id,
+ *   and still requires provider signature verification before ingestion.
  * - `recordTriggerEvent` is idempotent on `(orgId, dedupeKey)` via
  *   `ON CONFLICT DO NOTHING` so a relay retry with the same upstream message
  *   id converges to one row (and one run). The `wasCreated` flag tells the
  *   caller whether to spawn a run or short-circuit a duplicate.
- * - Resolution of the matching trigger node walks the org's LATEST active
- *   workflow versions (org-scoped) — drafts and soft-deleted workflows do not
- *   fire.
+ * - Initial resolution walks the org's latest active workflow versions. Once
+ *   accepted, the exact version and optional rollout assignment are durable;
+ *   retries and buffered backfill never re-resolve mutable latest state.
  */
 
-import { and, asc, desc, eq, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { db, triggerEvents, workflows, workflowVersions } from "@janusly/db";
 import {
   isTriggerNodeType,
@@ -37,11 +38,24 @@ import {
 
 export type TriggerEvent = typeof triggerEvents.$inferSelect;
 
+/** Fail-closed signal when an inbound selector matches multiple active workflows. */
+export class AmbiguousTriggerNodeError extends Error {
+  readonly triggerType: TriggerNodeType;
+
+  constructor(triggerType: TriggerNodeType) {
+    super(`Multiple active workflows match the ${triggerType} trigger selector`);
+    this.name = "AmbiguousTriggerNodeError";
+    this.triggerType = triggerType;
+  }
+}
+
 export type RecordTriggerEventInput = {
   orgId: string;
   triggerType: TriggerNodeType;
   workflowId: string | null;
   workflowVersionId: string;
+  workflowRolloutId?: string | null;
+  workflowRolloutVariant?: "baseline" | "canary" | null;
   nodeId: string;
   /** Idempotency key — relay retries with the same key converge to one row. */
   dedupeKey: string | null;
@@ -78,6 +92,8 @@ export async function recordTriggerEvent(input: RecordTriggerEventInput): Promis
       triggerType: input.triggerType,
       workflowId: input.workflowId,
       workflowVersionId: input.workflowVersionId,
+      workflowRolloutId: input.workflowRolloutId ?? null,
+      workflowRolloutVariant: input.workflowRolloutVariant ?? null,
       nodeId: input.nodeId,
       status: "received",
       dedupeKey: input.dedupeKey,
@@ -373,6 +389,43 @@ export type ResolvedTriggerNode = {
   dagJson: unknown;
 };
 
+/** Resolve one exact persisted trigger node without consulting latest state. */
+export async function resolveTriggerNodeInVersion(
+  orgId: string,
+  workflowVersionId: string,
+  triggerType: TriggerNodeType,
+  nodeId: string,
+): Promise<ResolvedTriggerNode | null> {
+  const rows = await db
+    .select({
+      workflowId: workflowVersions.workflowId,
+      dagJson: workflowVersions.dagJson,
+    })
+    .from(workflowVersions)
+    .innerJoin(workflows, and(
+      eq(workflows.id, workflowVersions.workflowId),
+      eq(workflows.orgId, workflowVersions.orgId),
+    ))
+    .where(and(
+      eq(workflowVersions.orgId, orgId),
+      eq(workflowVersions.id, workflowVersionId),
+      isNull(workflows.deletedAt),
+    ))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  const node = extractTriggerNodes(row.dagJson)
+    .find((candidate) => candidate.id === nodeId && candidate.type === triggerType);
+  if (!node) return null;
+  return {
+    workflowId: row.workflowId,
+    workflowVersionId,
+    nodeId: node.id,
+    nodeConfig: node.config,
+    dagJson: row.dagJson,
+  };
+}
+
 type LatestVersionRow = {
   id: string;
   workflowId: string;
@@ -445,10 +498,11 @@ function extractTriggerNodes(dagJson: unknown): Array<{ id: string; type: Trigge
  * Resolve which trigger node in the org's latest workflow versions matches an
  * inbound event. The `matcher` is a predicate over the node's `(type, config)`
  * supplied by the seam (e.g. "config.aliasKey === inbound.aliasKey"). Returns
- * the FIRST match — an operator should keep trigger keys unique per org, and
- * a duplicate just fires the first-found workflow. Recovery can constrain the
- * lookup to the persisted workflow and node ids. Returns null when no node
- * matches (the seam records the inbound event as `skipped`).
+ * the unique match, throws `AmbiguousTriggerNodeError` when more than one
+ * active workflow matches, and returns null when none matches. Failing closed
+ * prevents an install or duplicated selector from silently routing an event to
+ * an arbitrary workflow. Recovery can constrain the lookup to the persisted
+ * workflow and node ids.
  */
 export async function resolveTriggerNode(
   orgId: string,
@@ -457,13 +511,15 @@ export async function resolveTriggerNode(
   options: { workflowId?: string; nodeId?: string } = {},
 ): Promise<ResolvedTriggerNode | null> {
   const versions = await loadLatestVersionsForOrg(orgId, options.workflowId);
+  let match: ResolvedTriggerNode | null = null;
   for (const version of versions) {
     const triggerNodes = extractTriggerNodes(version.dagJson);
     for (const node of triggerNodes) {
       if (node.type !== triggerType) continue;
       if (options.nodeId && node.id !== options.nodeId) continue;
       if (!matcher(node.config)) continue;
-      return {
+      if (match) throw new AmbiguousTriggerNodeError(triggerType);
+      match = {
         workflowId: version.workflowId,
         workflowVersionId: version.id,
         nodeId: node.id,
@@ -472,8 +528,42 @@ export async function resolveTriggerNode(
       };
     }
   }
-  return null;
+  return match;
+}
+
+export type ResolvedPublicTriggerNode = {
+  orgId: string;
+  resolved: ResolvedTriggerNode;
+};
+
+/**
+ * Resolve an exact trigger selected by a public callback path.
+ *
+ * The workflow id is globally unique and only selects tenant context; it does
+ * not authorize ingestion. The caller must verify the provider signature with
+ * a credential resolved under the returned `orgId` before it starts a run.
+ */
+export async function resolvePublicTriggerNode(
+  workflowId: string,
+  triggerType: TriggerNodeType,
+  nodeId: string,
+): Promise<ResolvedPublicTriggerNode | null> {
+  const parents = await db
+    .select({ orgId: workflows.orgId })
+    .from(workflows)
+    .where(and(eq(workflows.id, workflowId), isNull(workflows.deletedAt)))
+    .limit(1);
+  const orgId = parents[0]?.orgId;
+  if (!orgId) return null;
+  const resolved = await resolveTriggerNode(
+    orgId,
+    triggerType,
+    () => true,
+    { workflowId, nodeId },
+  );
+  return resolved ? { orgId, resolved } : null;
 }
 
 // Multi-tenant invariant: every read/write keeps orgId in the predicate; the
-// resolver only ever loads the caller-authenticated org's versions.
+// public callback resolves orgId from the workflow row and verifies a
+// tenant-scoped provider credential before ingestion.

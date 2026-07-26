@@ -1,7 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const dataMocks = vi.hoisted(() => ({
+  getSlackInteractionConnection: vi.fn(),
+}));
+
 vi.mock("../tool-registry", () => ({
   executeTool: vi.fn(),
+}));
+
+vi.mock("@janusly/data", () => ({
+  getEnabledPoliciesByTrigger: vi.fn(),
+  getLastDispatchAt: vi.fn(),
+  getSlackInteractionConnection: dataMocks.getSlackInteractionConnection,
+  recordDispatch: vi.fn(),
+  recordSystemAudit: vi.fn(),
 }));
 
 import { executeTool } from "../tool-registry";
@@ -10,6 +22,7 @@ import type { AlertPolicy } from "@janusly/data/src/alertPoliciesRepo";
 
 beforeEach(() => {
   vi.mocked(executeTool).mockReset();
+  dataMocks.getSlackInteractionConnection.mockReset();
 });
 
 function makePolicy(overrides: Partial<AlertPolicy>): AlertPolicy {
@@ -192,5 +205,58 @@ describe("__dispatchOneChannelForTests", () => {
       {},
       { orgId: "org-1" },
     );
+  });
+
+  it("adds recovery actions only when the configured tenant connection is enabled", async () => {
+    dataMocks.getSlackInteractionConnection.mockResolvedValueOnce({ enabled: true });
+    vi.mocked(executeTool).mockResolvedValueOnce({ ok: true, latencyMs: 12 });
+    await __dispatchOneChannelForTests({
+      orgId: "org-1",
+      channel: {
+        destination: "slack",
+        credentialName: "Ops Slack",
+        params: { interactionConnectionId: "f36c0018-ae36-4d96-96c2-c7ed81669e9e" },
+      },
+      subject: "Recovery",
+      markdown: "Recovery body",
+      structured: {
+        trigger: "recovery_item.created",
+        payload: { itemId: "item-1" },
+        deepLinkUrl: "https://janusly.example/operations?recoveryItemId=item-1",
+      },
+    });
+
+    expect(dataMocks.getSlackInteractionConnection).toHaveBeenCalledWith(
+      "org-1",
+      "f36c0018-ae36-4d96-96c2-c7ed81669e9e",
+    );
+    const toolInput = vi.mocked(executeTool).mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(JSON.stringify(toolInput.blocks)).toContain("janusly_recovery_acknowledge");
+    expect(JSON.stringify(toolInput.blocks)).toContain("janusly_recovery_assign_to_me");
+  });
+
+  it("falls back to text-only delivery when the optional connection lookup fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    dataMocks.getSlackInteractionConnection.mockRejectedValueOnce(new Error("db unavailable"));
+    vi.mocked(executeTool).mockResolvedValueOnce({ ok: true, latencyMs: 12 });
+    const result = await __dispatchOneChannelForTests({
+      orgId: "org-1",
+      channel: {
+        destination: "slack",
+        credentialName: "Ops Slack",
+        params: { interactionConnectionId: "f36c0018-ae36-4d96-96c2-c7ed81669e9e" },
+      },
+      subject: "Recovery",
+      markdown: "Recovery body",
+      structured: { trigger: "recovery_item.created", payload: { itemId: "item-1" } },
+    });
+    expect(result.ok).toBe(true);
+    expect(vi.mocked(executeTool)).toHaveBeenCalledWith(
+      "slack.post",
+      { credential: "Ops Slack", text: "Recovery body" },
+      {},
+      { orgId: "org-1" },
+    );
+    warn.mockRestore();
   });
 });

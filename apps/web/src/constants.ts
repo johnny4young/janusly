@@ -65,9 +65,11 @@ export const nodePresets: Record<string, JsonObject> = {
   join: { sources: { a: '', b: '' } },
   schedule: { cronExpression: '0 9 * * *', enabled: true },
   mcp_tool: { connectionAlias: '', toolName: '', input: {} },
+  webhook_received: { endpointKey: '' },
   email_received: { aliasKey: '', dkimRequired: true },
   file_dropped: { bucket: '', prefix: '' },
   mcp_server_event: { connectionAlias: '', resourceUri: '' },
+  pagerduty_incident: { webhookCredential: 'pagerduty-webhook', rateLimitPerMin: 120 },
 }
 
 /** Ordered list of supported node-type ids — derived from `nodePresets`. */
@@ -214,6 +216,12 @@ export function getNodeConfigSummary(type: string, config: JsonObject): string {
     if (alias && toolName) return t('nodeSummary.mcp_tool.set', { alias, tool: toolName })
     return t('nodeSummary.mcp_tool.empty')
   }
+  if (type === 'webhook_received') {
+    const endpointKey = readString(config.endpointKey)
+    return endpointKey
+      ? t('nodeSummary.webhook_received.set', { endpointKey })
+      : t('nodeSummary.webhook_received.empty')
+  }
   if (type === 'email_received') {
     const alias = readString(config.aliasKey)
     return alias ? (t('nodeSummary.email_received.set', { alias })) : (t('nodeSummary.email_received.empty'))
@@ -227,6 +235,12 @@ export function getNodeConfigSummary(type: string, config: JsonObject): string {
     const resource = readString(config.resourceUri)
     if (alias && resource) return t('nodeSummary.mcp_server_event.set', { alias, resource })
     return t('nodeSummary.mcp_server_event.empty')
+  }
+  if (type === 'pagerduty_incident') {
+    const credential = readString(config.webhookCredential)
+    return credential
+      ? t('nodeSummary.pagerduty_incident.set', { credential })
+      : t('nodeSummary.pagerduty_incident.empty')
   }
   return t('nodeSummary.fallback')
 }

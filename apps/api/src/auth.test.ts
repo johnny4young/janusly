@@ -17,11 +17,12 @@ const upsertMembership = vi.fn();
 const migrateMemberUserId = vi.fn();
 
 const findPendingInvitation = vi.fn();
-const acceptInvitation = vi.fn();
+const acceptInvitationForIdentity = vi.fn();
 
 const findVerifiedDomain = vi.fn();
 
 const getSsoConnectionForOrg = vi.fn();
+const getActiveAuthSession = vi.fn();
 
 const auditMock = vi.fn();
 
@@ -35,7 +36,10 @@ vi.mock("@janusly/data/src/orgMembersRepo", () => ({
 
 vi.mock("@janusly/data/src/invitationsRepo", () => ({
   findPendingInvitation: (...args: unknown[]) => findPendingInvitation(...args),
-  acceptInvitation: (...args: unknown[]) => acceptInvitation(...args),
+}));
+
+vi.mock("@janusly/data/src/identityRepo", () => ({
+  acceptInvitationForIdentity: (...args: unknown[]) => acceptInvitationForIdentity(...args),
 }));
 
 vi.mock("@janusly/data/src/verifiedDomainsRepo", () => ({
@@ -44,6 +48,10 @@ vi.mock("@janusly/data/src/verifiedDomainsRepo", () => ({
 
 vi.mock("@janusly/data/src/ssoConnectionsRepo", () => ({
   getSsoConnectionForOrg: (...args: unknown[]) => getSsoConnectionForOrg(...args),
+}));
+
+vi.mock("@janusly/data/src/authSessionsRepo", () => ({
+  getActiveAuthSession: (...args: unknown[]) => getActiveAuthSession(...args),
 }));
 
 // Auth policy narrow-read mock. Returns "no policy set" defaults unless a
@@ -71,9 +79,10 @@ beforeEach(() => {
   upsertMembership.mockReset();
   migrateMemberUserId.mockReset();
   findPendingInvitation.mockReset();
-  acceptInvitation.mockReset();
+  acceptInvitationForIdentity.mockReset();
   findVerifiedDomain.mockReset();
   getSsoConnectionForOrg.mockReset();
+  getActiveAuthSession.mockReset();
   getAuthPolicyConfig.mockReset();
   auditMock.mockReset();
   // Default: repos return "no rows" so each test only overrides what it cares about.
@@ -81,6 +90,7 @@ beforeEach(() => {
   listMembershipsForUser.mockResolvedValue([]);
   findMemberByEmail.mockResolvedValue(null);
   findPendingInvitation.mockResolvedValue(null);
+  acceptInvitationForIdentity.mockResolvedValue({ ok: true, result: { orgId: "org-b", role: "viewer" } });
   findVerifiedDomain.mockResolvedValue(null);
   getAuthPolicyConfig.mockResolvedValue({
     allowedEmailDomains: [],
@@ -88,6 +98,7 @@ beforeEach(() => {
     sessionTtlSeconds: 28800,
   });
   getSsoConnectionForOrg.mockResolvedValue(null);
+  getActiveAuthSession.mockResolvedValue(null);
   auditMock.mockResolvedValue(undefined);
 });
 
@@ -135,6 +146,47 @@ function supabaseUserFixture(overrides: { id?: string; email?: string | null; or
 }
 
 describe("getAuth — source attribution across modes", () => {
+  it("exposes a verified Supabase identity before organization membership exists", async () => {
+    stubSupabaseEnv();
+    supabaseGetUser.mockResolvedValueOnce(supabaseUserFixture({
+      id: "new-user",
+      email: "New.User@Example.com",
+      orgId: null,
+    }));
+
+    const { getIdentity } = await import("./auth");
+    const identity = await getIdentity(makeReq({
+      authorization: "Bearer supabase-jwt",
+    }));
+
+    expect(identity).toEqual({
+      userId: "new-user",
+      email: "new.user@example.com",
+      mode: "supabase",
+      source: "web",
+      orgHint: null,
+    });
+    expect(listMembershipsForUser).not.toHaveBeenCalled();
+  }, 15_000);
+
+  it("keeps the dev organization header as a non-authoritative identity hint", async () => {
+    stubDevHeadersEnv();
+
+    const { getIdentity } = await import("./auth");
+    const identity = await getIdentity(makeReq({
+      "x-org-id": "sandbox-a",
+      "x-user-id": "operator-a",
+    }));
+
+    expect(identity).toMatchObject({
+      userId: "operator-a",
+      email: null,
+      mode: "dev-headers",
+      source: "dev",
+      orgHint: "sandbox-a",
+    });
+  }, 15_000);
+
   it("service-token mode + x-janusly-source: mcp resolves to source=mcp", async () => {
     stubDevHeadersEnv();
     vi.stubEnv("API_SERVICE_TOKEN", "tok-1234");
@@ -347,7 +399,7 @@ describe("getAuth — Supabase membership resolution (org_members + invitations 
     expect(auth).toBeNull();
   });
 
-  it("invite acceptance: pending invitation matches → resolver accepts, upserts, audits", async () => {
+  it("invite acceptance delegates the grant and audit to the atomic identity transaction", async () => {
     stubSupabaseEnv();
     supabaseGetUser.mockResolvedValueOnce(supabaseUserFixture({ id: "user-1", email: "alice@example.com" }));
     findPendingInvitation.mockResolvedValueOnce({
@@ -355,10 +407,7 @@ describe("getAuth — Supabase membership resolution (org_members + invitations 
       role: "editor", invitedBy: "admin-1", status: "pending",
       acceptedAt: null, createdAt: null,
     });
-    upsertMembership.mockResolvedValueOnce({
-      id: "m-2", orgId: "org-b", userId: "user-1", email: "alice@example.com",
-      role: "editor", invitedBy: "admin-1", createdAt: null,
-    });
+    acceptInvitationForIdentity.mockResolvedValueOnce({ ok: true, result: { orgId: "org-b", role: "editor" } });
 
     const { getAuth } = await import("./auth");
     const auth = await getAuth(makeReq({
@@ -368,19 +417,15 @@ describe("getAuth — Supabase membership resolution (org_members + invitations 
 
     expect(auth?.orgId).toBe("org-b");
     expect(auth?.mode).toBe("supabase");
-    expect(acceptInvitation).toHaveBeenCalledWith({ id: "inv-1", orgId: "org-b" });
-    expect(upsertMembership).toHaveBeenCalledWith(expect.objectContaining({
-      orgId: "org-b",
+    expect(acceptInvitationForIdentity).toHaveBeenCalledWith({
+      invitationId: "inv-1",
+      expectedOrgId: "org-b",
       userId: "user-1",
-      role: "editor",
-    }));
-    expect(auditMock).toHaveBeenCalledWith(
-      "org-b",
-      "user-1",
-      "member.joined",
-      "member",
-      "user-1",
-      expect.objectContaining({ via: "invitation", invitationId: "inv-1" }),
+      email: "alice@example.com",
+    });
+    expect(upsertMembership).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalledWith(
+      "org-b", "user-1", "member.joined", expect.anything(), expect.anything(), expect.anything(),
     );
   });
 
@@ -533,14 +578,18 @@ describe("getAuth — Supabase membership resolution (org_members + invitations 
     expect(auth).toBeNull();
   });
 
-  it("Janusly session token (4th auth mode) resolves to mode=janusly-session, source=sso", async () => {
+  it("HttpOnly Janusly session resolves its revocable server row", async () => {
     stubDevHeadersEnv();
     vi.stubEnv("JANUSLY_RESUME_TOKEN_SECRET", "test-resume-secret");
     const { signSignedToken } = await import("@janusly/engine/src/secrets");
     const token = signSignedToken({
       purpose: "sso_session",
-      payload: { orgId: "org-sso", userId: "sso-user-1", email: "alice@acme.com" },
+      payload: { sessionId: "session-1" },
       ttlSeconds: 600,
+    });
+    getActiveAuthSession.mockResolvedValueOnce({
+      id: "session-1", orgId: "org-sso", userId: "sso-user-1", email: "alice@acme.com",
+      expiresAt: new Date(Date.now() + 600_000), revokedAt: null,
     });
     getMembershipForOrgUser.mockResolvedValueOnce({
       id: "m-1", orgId: "org-sso", userId: "sso-user-1", email: "alice@acme.com",
@@ -548,11 +597,12 @@ describe("getAuth — Supabase membership resolution (org_members + invitations 
     });
 
     const { getAuth } = await import("./auth");
-    const auth = await getAuth(makeReq({ "x-janusly-session": token }));
+    const auth = await getAuth(makeReq({ cookie: `janusly_session=${encodeURIComponent(token)}` }));
     expect(auth?.mode).toBe("janusly-session");
     expect(auth?.source).toBe("sso");
     expect(auth?.orgId).toBe("org-sso");
     expect(auth?.userId).toBe("sso-user-1");
+    expect(auth?.browserSessionId).toBe("session-1");
   });
 
   it("Janusly session token with wrong purpose returns null (purpose discriminator gates replay)", async () => {
@@ -563,12 +613,13 @@ describe("getAuth — Supabase membership resolution (org_members + invitations 
     // an SSO session even though the HMAC validates.
     const token = signSignedToken({
       purpose: "sso_state",
-      payload: { orgId: "org-sso", userId: "sso-user-1", email: "alice@acme.com" },
+      payload: { sessionId: "session-1" },
       ttlSeconds: 600,
     });
     const { getAuth } = await import("./auth");
-    const auth = await getAuth(makeReq({ "x-janusly-session": token }));
+    const auth = await getAuth(makeReq({ cookie: `janusly_session=${encodeURIComponent(token)}` }));
     expect(auth).toBeNull();
+    expect(getActiveAuthSession).not.toHaveBeenCalled();
   });
 
   it("Enforced-SSO: Supabase principal hitting an enforced-SSO org returns null (no dev bypass)", async () => {

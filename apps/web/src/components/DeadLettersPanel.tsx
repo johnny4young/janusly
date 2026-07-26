@@ -7,7 +7,7 @@
  */
 
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { CircleCheck, Copy, Download, FlaskConical, GitCompare, Inbox, RefreshCw, Sparkles, X } from 'lucide-react'
+import { CircleCheck, Copy, Download, FlaskConical, GitCompare, Inbox, RefreshCw, Sparkles, TimerReset, X } from 'lucide-react'
 
 import { downtimeSeverity, humanizeAge } from './recovery-center/helpers'
 import { api, downloadFromApi } from '../api'
@@ -24,6 +24,8 @@ const RecoveryDialog = lazy(() => import('./RecoveryDialog').then((m) => ({ defa
 import { ReplayLabDialog } from './ReplayLabDialog'
 import { RecoveryItemBadge } from './RecoveryItemBadge'
 import { RecoveryItemDrawer } from './RecoveryItemDrawer'
+import { ReplayCampaignDialog } from './ReplayCampaignDialog'
+import { ReplayCampaignsCard } from './ReplayCampaignsCard'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { useVirtualList } from '../hooks/useVirtualList'
 import { isKeyboardShortcutTypingTarget } from '../keyboard-shortcut-target'
@@ -47,6 +49,10 @@ import {
   type RecoveryQueueFocusRequest,
 } from './recovery-queue-focus-bus'
 import { requestRecoveryAllClearIfQueueEmpty } from './recovery-all-clear-coordinator'
+import {
+  RecoveryDrillOutcomeCard,
+  type RecoveryDrillOutcome,
+} from './recovery/RecoveryDrillOutcomeCard'
 
 /** Fixed DLQ row height (54px) plus the 6px `.we-list` gap. The matching
  *  `.we-dlq-row` rule prevents metadata wrapping so virtual offsets stay
@@ -86,6 +92,14 @@ export type SuspectVersionInfo = {
   previousDagJson: WorkflowDefinition
 }
 
+/** Bounded recovery-drill provenance from the legacy DLQ detail read. */
+export type RecoveryDrillProvenance = {
+  kind: 'solution_pack_drill'
+  packId: string
+  fixtureId: string
+  recoveryPath: 'direct_failure' | 'stalled_node_reaper'
+}
+
 /** Web-side `dead_letters` row shape (matches the API's response). `recovery`
  *  is the inline overlay (null when the row has no paired recovery item).
  *  LIST rows (`/dlq`, `/dlq/queue`) are summary projections: they carry
@@ -112,6 +126,10 @@ export type DeadLetter = {
   recovery?: DeadLetterRecovery | null
   /** Suspect-version correlation — detail reads only; null when no recent-save correlation. */
   suspectVersion?: SuspectVersionInfo | null
+  /** Code-authored recovery drill context — detail reads only. */
+  drill?: RecoveryDrillProvenance | null
+  /** Server-derived terminal outcome and recurrence — drill detail reads only. */
+  drillOutcome?: RecoveryDrillOutcome | null
 }
 
 type BulkResolveResult = {
@@ -151,6 +169,12 @@ type DeadLettersPanelProps = {
   onRefresh: () => void | Promise<void>
   onReplay: (id: string, createdAtIso?: string) => boolean | Promise<boolean> | undefined
   onResolve: (id: string) => boolean | Promise<boolean> | undefined
+  canReplay?: boolean
+  canResolve?: boolean
+  canStartRuns?: boolean
+  canUseRecovery?: boolean
+  canReadAutoHealing?: boolean
+  canDecideAutoHealing?: boolean
 }
 
 type PendingTriageFocus = {
@@ -166,7 +190,17 @@ function triageQueueSignature(items: DeadLetter[]): string {
 }
 
 /** Render the DLQ list with status filter, replay, and resolve controls. */
-export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLettersPanelProps) {
+export function DeadLettersPanel({
+  onRefresh,
+  onReplay,
+  onResolve,
+  canReplay = true,
+  canResolve = true,
+  canStartRuns = true,
+  canUseRecovery = true,
+  canReadAutoHealing = true,
+  canDecideAutoHealing = true,
+}: DeadLettersPanelProps) {
   const { t } = useT()
   // Filter/sort state + persistence + the cap-correct server fetch + the
   // recovery overlay all live in the hook; this component owns rendering, row
@@ -216,6 +250,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   const [labSourceRunId, setLabSourceRunId] = useState<string | null>(null)
   const addToast = useWorkflowStore((state) => state.addToast)
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
+  const platformVersion = useWorkflowStore((state) => state.platformVersion)
   // Multi-select for bulk resolve. `selectionMode` reveals per-row checkboxes;
   // `selectedIds` holds the ticked rows. Orthogonal to `selectedId` (the
   // single-row detail box), which is hidden while selecting.
@@ -228,6 +263,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   // envelope. The count toast says HOW MANY failed; this surfaces WHY (and which
   // rows), so the operator can tell a transient blip from "already replayed".
   const [bulkErrors, setBulkErrors] = useState<Array<{ deadLetterId: string; error: string }>>([])
+  const [campaignDeadLetterIds, setCampaignDeadLetterIds] = useState<string[] | null>(null)
 
   const handleRefresh = () => {
     refreshQueue()
@@ -275,6 +311,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   // 200 partial-success envelope, so inspect it before deciding whether to
   // clear or keep the remaining failed selections.
   const bulkResolve = async () => {
+    if (!canResolve) return
     const ids = [...selectedIds].filter((id) => !replayingIds.has(id))
     if (ids.length === 0) return
     setBulkErrors([])
@@ -310,6 +347,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   // exit selection. Only `open` rows are replayable server-side, so an
   // already-replayed/resolved row in the selection comes back in the failed set.
   const bulkReplay = async () => {
+    if (!canReplay) return
     setConfirmBulkReplay(false)
     const ids = [...selectedIds].filter((id) => !replayingIds.has(id))
     if (ids.length === 0) return
@@ -337,6 +375,23 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     } catch (error) {
       addToast(tApiError(error) || (t('dlq.bulkReplayFailed')), 'error')
     }
+  }
+
+  const campaignCreated = (result: {
+    campaign: { id: string; name: string; totalCount: number; pacingMs: number }
+    publicationDeferred?: boolean
+  }) => {
+    setCampaignDeadLetterIds(null)
+    addToast(
+      result.publicationDeferred
+        ? t('replayCampaign.createdDeferred', { name: result.campaign.name })
+        : t('replayCampaign.created', { name: result.campaign.name, count: result.campaign.totalCount }),
+      'success',
+    )
+    bumpPlatformVersion()
+    refreshQueue()
+    void onRefresh()
+    exitSelection()
   }
 
   // Org-wide open count drives the warning stripe — there are opens to work
@@ -410,7 +465,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     return () => {
       cancelled = true
     }
-  }, [selectedRowId])
+  }, [selectedRowId, platformVersion])
   // Merge keeps the list row's `recovery` overlay (the detail read is the raw
   // dead_letters row) while the snapshot fields come from the detail.
   const selectedFull = selected && selectedDetail && selectedDetail.id === selected.id
@@ -490,7 +545,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   }
 
   const replaySelected = async () => {
-    if (!selected || selected.status === 'replayed' || replayingIds.has(selected.id)) return
+    if (!canReplay || !selected || selected.status === 'replayed' || replayingIds.has(selected.id)) return
     const replayingId = selected.id
     setReplayingIds((current) => new Set(current).add(replayingId))
     try {
@@ -505,7 +560,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   }
 
   const resolveSelected = async () => {
-    if (!selected || selected.status === 'resolved' || replayingIds.has(selected.id)) return
+    if (!canResolve || !selected || selected.status === 'resolved' || replayingIds.has(selected.id)) return
     await runSelectedTriageAction(onResolve)
   }
 
@@ -561,7 +616,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
 
     if (selectionMode) return
     if (!hasCommandModifier && !event.altKey && !event.shiftKey && key === 'r') {
-      if (selected && selected.status !== 'replayed' && !replayingIds.has(selected.id)) {
+      if (canReplay && selected && selected.status !== 'replayed' && !replayingIds.has(selected.id)) {
         event.preventDefault()
         event.stopPropagation()
         void replaySelected()
@@ -570,7 +625,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     }
 
     if (hasCommandModifier && !event.altKey && !event.shiftKey && event.key === 'Enter') {
-      if (selected && selected.status !== 'resolved' && !replayingIds.has(selected.id)) {
+      if (canResolve && selected && selected.status !== 'resolved' && !replayingIds.has(selected.id)) {
         event.preventDefault()
         event.stopPropagation()
         void resolveSelected()
@@ -651,8 +706,9 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
 
   return (
     <>
-      <FailureClustersCard />
-      <AutoHealingPendingCard />
+      <FailureClustersCard canRecover={canUseRecovery} />
+      <ReplayCampaignsCard canCancel={canReplay} />
+      {canReadAutoHealing && <AutoHealingPendingCard canDecide={canDecideAutoHealing} />}
       <section
         ref={queueSectionRef}
         className="we-card"
@@ -660,7 +716,12 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
         data-testid="recovery-queue"
         tabIndex={-1}
         aria-labelledby="recovery-queue-heading"
-        aria-keyshortcuts="J K R Meta+Enter Control+Enter"
+        aria-keyshortcuts={[
+          'J',
+          'K',
+          canReplay ? 'R' : null,
+          canResolve ? 'Meta+Enter Control+Enter' : null,
+        ].filter(Boolean).join(' ')}
         onKeyDown={handleQueueKeyDown}
       >
       <div className="split-row">
@@ -669,15 +730,17 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
           <strong id="recovery-queue-heading">{t('dlq.queue')}</strong>
         </div>
         <div className="split-row">
-          <button
-            type="button"
-            className="small-command"
-            aria-pressed={selectionMode}
-            onClick={() => (selectionMode ? exitSelection() : setSelectionMode(true))}
-            data-testid="dlq-select-toggle"
-          >
-            {selectionMode ? t('dlq.selectDone') : t('dlq.selectRows')}
-          </button>
+          {(canReplay || canResolve) && (
+            <button
+              type="button"
+              className="small-command"
+              aria-pressed={selectionMode}
+              onClick={() => (selectionMode ? exitSelection() : setSelectionMode(true))}
+              data-testid="dlq-select-toggle"
+            >
+              {selectionMode ? t('dlq.selectDone') : t('dlq.selectRows')}
+            </button>
+          )}
           <button className="small-command" onClick={handleRefresh}>{t('dlq.refresh')}</button>
         </div>
       </div>
@@ -790,7 +853,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
               {/* Replay (recover) is the primary path; Resolve (accept the loss)
                   is the secondary dismiss. Both act on the same ticked set.
                   Replay re-runs workflows, so it goes through an inline confirm. */}
-              {confirmBulkReplay ? (
+              {canReplay && (confirmBulkReplay ? (
                 <span className="we-list-row__confirm">
                   <span className="we-list-row__confirm-text">
                     {t('dlq.bulkReplayConfirm', { count: selectedIds.size })}
@@ -820,15 +883,29 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
                 >
                   {t('dlq.bulkReplayCta')}
                 </button>
+              ))}
+              {canReplay && (
+                <button
+                  type="button"
+                  className="small-command"
+                  disabled={selectedIds.size < 2}
+                  title={selectedIds.size < 2 ? t('replayCampaign.minimumSelection') : undefined}
+                  onClick={() => setCampaignDeadLetterIds([...selectedIds])}
+                  data-testid="dlq-create-replay-campaign"
+                >
+                  <TimerReset size={12} aria-hidden="true" /> {t('replayCampaign.createCta')}
+                </button>
               )}
-              <button
-                type="button"
-                className="small-command"
-                onClick={() => { void bulkResolve() }}
-                data-testid="dlq-bulk-resolve"
-              >
-                {t('dlq.bulkResolveCta')}
-              </button>
+              {canResolve && (
+                <button
+                  type="button"
+                  className="small-command"
+                  onClick={() => { void bulkResolve() }}
+                  data-testid="dlq-bulk-resolve"
+                >
+                  {t('dlq.bulkResolveCta')}
+                </button>
+              )}
             </>
           )}
         </div>
@@ -1040,27 +1117,33 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
           </div>
 
           <div className="split-row">
-            <button
-              className="small-command small-command--primary"
-              disabled={selected.status === 'replayed' || selected.status === 'resolved'}
-              onClick={() => setRecoveryDeadLetter(selectedFull ?? selected)}
-            >
-              <Sparkles size={12} aria-hidden="true" /> {t('dlq.action.suggest')}
-            </button>
-            <button
-              className="small-command we-command-with-kbd"
-              disabled={selected.status === 'replayed' || replayingIds.has(selected.id)}
-              onClick={() => { void replaySelected() }}
-            >
-              <span>{t('dlq.action.retry')}</span><kbd aria-hidden="true">R</kbd>
-            </button>
-            <button
-              className="small-command we-command-with-kbd"
-              disabled={selected.status === 'resolved' || replayingIds.has(selected.id)}
-              onClick={() => { void resolveSelected() }}
-            >
-              <span>{t('dlq.action.resolve')}</span><kbd aria-hidden="true">⌘/Ctrl ↵</kbd>
-            </button>
+            {canUseRecovery && (
+              <button
+                className="small-command small-command--primary"
+                disabled={selected.status === 'replayed' || selected.status === 'resolved'}
+                onClick={() => setRecoveryDeadLetter(selectedFull ?? selected)}
+              >
+                <Sparkles size={12} aria-hidden="true" /> {t('dlq.action.suggest')}
+              </button>
+            )}
+            {canReplay && (
+              <button
+                className="small-command we-command-with-kbd"
+                disabled={selected.status === 'replayed' || replayingIds.has(selected.id)}
+                onClick={() => { void replaySelected() }}
+              >
+                <span>{t('dlq.action.retry')}</span><kbd aria-hidden="true">R</kbd>
+              </button>
+            )}
+            {canResolve && (
+              <button
+                className="small-command we-command-with-kbd"
+                disabled={selected.status === 'resolved' || replayingIds.has(selected.id)}
+                onClick={() => { void resolveSelected() }}
+              >
+                <span>{t('dlq.action.resolve')}</span><kbd aria-hidden="true">⌘/Ctrl ↵</kbd>
+              </button>
+            )}
             <button
               type="button"
               className="small-command"
@@ -1069,13 +1152,15 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
             >
               <Copy size={12} aria-hidden="true" /> {t('dlq.action.copyError')}
             </button>
-            <button
-              className="small-command"
-              onClick={() => setLabSourceRunId(selected.runId)}
-              data-testid="dlq-replay-in-lab"
-            >
-              <FlaskConical size={12} aria-hidden="true" /> {t('dlq.action.replayInLab')}
-            </button>
+            {canStartRuns && (
+              <button
+                className="small-command"
+                onClick={() => setLabSourceRunId(selected.runId)}
+                data-testid="dlq-replay-in-lab"
+              >
+                <FlaskConical size={12} aria-hidden="true" /> {t('dlq.action.replayInLab')}
+              </button>
+            )}
             <button
               className="small-command"
               onClick={async () => {
@@ -1092,6 +1177,22 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
               <Download size={12} aria-hidden="true" /> {t('dlq.action.export')}
             </button>
           </div>
+
+          {selectedFull?.drill && (
+            <>
+              <div className="we-recovery-drill-context" data-testid="dlq-recovery-drill-context">
+                <span className="we-pill" data-tone="info">{t('dlq.drill.label')}</span>
+                <span className="we-pill" data-tone="neutral">
+                  {t(`packs.drill.path.${selectedFull.drill.recoveryPath}`, {
+                    defaultValue: selectedFull.drill.recoveryPath,
+                  })}
+                </span>
+              </div>
+              {selectedFull.drillOutcome && (
+                <RecoveryDrillOutcomeCard outcome={selectedFull.drillOutcome} />
+              )}
+            </>
+          )}
 
           {selectedFull?.suspectVersion && (
             <div className="we-suspect-version" data-testid="dlq-suspect-version">
@@ -1142,6 +1243,13 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
         <ReplayLabDialog
           sourceRun={{ id: labSourceRunId, status: 'failed' }}
           onClose={() => setLabSourceRunId(null)}
+        />
+      )}
+      {campaignDeadLetterIds && (
+        <ReplayCampaignDialog
+          deadLetterIds={campaignDeadLetterIds}
+          onClose={() => setCampaignDeadLetterIds(null)}
+          onCreated={campaignCreated}
         />
       )}
     </>

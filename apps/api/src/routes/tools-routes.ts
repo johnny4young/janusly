@@ -7,10 +7,15 @@
 
 import { listTools } from "@janusly/engine/src/tool-registry";
 
+import { listToolsContract } from "../api-contracts";
 import { sendJson } from "../http";
 import type { Route } from "../routes";
 
 export const toolsRoutes: Route[] = [
-  { method: "GET", match: "/tools",
-    handler: async ({ res }) => sendJson(res, listTools()) },
+  {
+    method: "GET",
+    match: "/tools",
+    contract: listToolsContract,
+    handler: async ({ res }) => sendJson(res, listTools()),
+  },
 ];

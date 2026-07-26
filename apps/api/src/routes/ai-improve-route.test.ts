@@ -100,8 +100,9 @@ beforeEach(() => {
 });
 
 describe("POST /ai/suggest-improvement — auth gate", () => {
-  it("requires the editor role", () => {
+  it("requires both the editor role and ai.write permission", () => {
     expect(findRoute().role).toBe("editor");
+    expect(findRoute().permission).toBe("ai.write");
   });
 });
 

@@ -265,7 +265,7 @@ describe('<Sparkline />', () => {
     render(<Sparkline points={[300, 240, 120]} ariaLabel="t" />)
     const spark = screen.getByTestId('vitals-sparkline')
     expect(spark.getAttribute('data-trend')).toBe('down')
-    expect(spark.className.baseVal ?? spark.getAttribute('class')).toContain('we-sparkline--down')
+    expect(spark.getAttribute('class')).toContain('we-sparkline--down')
   })
 
   it('marks a worsening series (last > mean) as an up/red trend', () => {

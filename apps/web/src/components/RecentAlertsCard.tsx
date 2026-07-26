@@ -61,9 +61,12 @@ export function RecentAlertsCard(): React.ReactElement {
     let cancelled = false
     setLoading(true)
     api('/alerts/recent?limit=50')
-      .then((resp: { items?: AlertDispatch[] }) => {
+      .then((resp) => {
         if (cancelled) return
-        setItems(resp?.items ?? [])
+        const envelope = resp && typeof resp === 'object' && !Array.isArray(resp)
+          ? resp as { items?: unknown }
+          : undefined
+        setItems(Array.isArray(envelope?.items) ? envelope.items as AlertDispatch[] : [])
         setLoading(false)
       })
       .catch(() => {

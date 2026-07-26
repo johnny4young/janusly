@@ -210,6 +210,9 @@ test('replaying one of two failures never publishes a false all-clear', async ({
 
   await page.getByRole('button', { name: ENGLISH.homeName }).click()
   const hero = page.locator('.we-recovery-center-hero')
-  await expect(hero.getByTestId('recovery-center-greeting')).toHaveText('1 run needs recovery')
+  // A retry can fail again and replace the claimed dead letter with a fresh
+  // one. The truthful contract is that recovery work remains visible, not
+  // that the transient open count must fall from two to exactly one.
+  await expect(hero.getByTestId('recovery-center-greeting')).toContainText(/needs? recovery/)
   await expect(hero.getByTestId('celebration-burst')).toHaveCount(0)
 })

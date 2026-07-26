@@ -52,11 +52,9 @@ const baseProps = {
   runs: [],
   runNodes: [],
   deadLetters: [],
-  activeRunId: null,
   onOpenTab: vi.fn(),
   onOpenRun: vi.fn(),
   onApproveNode: vi.fn(),
-  onSubmitHumanForm: vi.fn(),
   onOpenRecoveryQueue: vi.fn(),
 }
 
@@ -74,6 +72,33 @@ const baseMetrics = {
 }
 
 const baseClusters = { clusters: [], totalSamples: 0, windowDays: 30 }
+const baseValidation = {
+  generatedAt: '2026-07-21T12:00:00.000Z',
+  windowDays: 30,
+  sampleLimit: 100,
+  sampleCapped: false,
+  totals: {
+    drills: 1,
+    completed: 1,
+    recovered: 1,
+    acceptedLoss: 0,
+    awaitingAction: 0,
+    replayInProgress: 0,
+    measurementIncomplete: 0,
+    missingEvidence: 0,
+    completionRatePercent: 100,
+    recoveryRatePercent: 100,
+  },
+  resolution: { operator: 0, automated: 1, unknown: 0, operatorInterventionRatePercent: 0 },
+  timing: {
+    medianElapsedMs: 60_000,
+    p90ElapsedMs: 60_000,
+    averageElapsedMs: 60_000,
+    p95ElapsedMs: 60_000,
+    sampleSize: 1,
+  },
+  byFailureMode: [],
+}
 
 beforeEach(() => {
   consumeRecoveryAllClear()
@@ -89,7 +114,6 @@ beforeEach(() => {
   baseProps.onOpenTab = vi.fn()
   baseProps.onOpenRun = vi.fn()
   baseProps.onApproveNode = vi.fn()
-  baseProps.onSubmitHumanForm = vi.fn()
   baseProps.onOpenRecoveryQueue = vi.fn()
 })
 
@@ -285,6 +309,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return readyClusters
       if (path === '/recovery/heatmap?days=90') return pendingHeatmap
+      if (path === '/recovery/validation?windowDays=30') return baseValidation
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
         return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn' }
       }
@@ -299,13 +324,18 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
         '/recovery/metrics',
         '/dlq/clusters',
         '/recovery/heatmap?days=90',
+        '/recovery/validation?windowDays=30',
         '/recovery/ledger',
         '/recovery/my-wins?days=30',
       ]))
       expect(screen.getByTestId('recovery-center-metric-mttr')).toHaveTextContent('12m')
       expect(screen.getByText('Slow heatmap cluster')).toBeInTheDocument()
+      expect(screen.getByTestId('recovery-validation-section')).toHaveTextContent('1/1')
     })
-    releaseHeatmap?.({ days: [] })
+    await act(async () => {
+      releaseHeatmap?.({ days: [] })
+      await pendingHeatmap
+    })
   })
 
   it('waits for terminal-run history before exposing the walkthrough dismissal', async () => {
@@ -932,7 +962,7 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
         sinceIso: '2026-07-13T12:00:00.000Z',
       }
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(10_000)
+        await vi.advanceTimersByTimeAsync(60_000)
       })
 
       expect(screen.getByTestId('recovery-lifetime-ledger')).toHaveTextContent('1 failure recovered')
@@ -940,6 +970,40 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
       expect(screen.getByTestId('recovery-center-all-clear-summary')).toHaveTextContent('2m of downtime ended')
     } finally {
       view.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('pauses fallback reads while hidden and refreshes immediately on return', async () => {
+    vi.useFakeTimers()
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+    recoveryLedger = { totalRecovered: 0, downtimeEndedMs: 0, sinceIso: null }
+    mockAllClearApis()
+    const view = render(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
+
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      const ledgerCalls = () => vi.mocked(api).mock.calls
+        .filter(([path]) => path === '/recovery/ledger')
+        .length
+      expect(ledgerCalls()).toBe(1)
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(120_000)
+      })
+      expect(ledgerCalls()).toBe(1)
+
+      hidden.mockReturnValue(false)
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'))
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(ledgerCalls()).toBe(2)
+    } finally {
+      view.unmount()
+      hidden.mockRestore()
       vi.useRealTimers()
     }
   })

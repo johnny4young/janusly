@@ -22,7 +22,7 @@
  * rejecting workflows that ship extra metadata the executor ignores.
  * Tightening individual schemas is a per-node follow-up; the
  * compounding type-safety payoff arrives when `NodeContext.config`
- * itself becomes generic on the executor signature (separate ticket).
+ * itself becomes generic on the executor signature.
  *
  * Used by:
  * - `packages/engine/src/execute-node.ts` — the dispatcher's parse
@@ -34,9 +34,11 @@
 import { z } from "zod";
 import { nodeTypeValues, type NodeType } from "@janusly/shared/src/workflow";
 import {
+  WebhookReceivedConfigSchema,
   EmailReceivedConfigSchema,
   FileDroppedConfigSchema,
   McpServerEventConfigSchema,
+  PagerDutyIncidentConfigSchema,
 } from "@janusly/shared/src/trigger-types";
 import {
   approvalTimeoutPolicyValues,
@@ -70,6 +72,12 @@ export const ToolNodeConfigSchema = z
   .object({
     tool: z.string().min(1, "tool.tool is required"),
     input: z.unknown().optional(),
+    /**
+     * Legacy/default tools expose their typed result envelope to downstream
+     * conditions. `require_ok` turns a valid `{ ok: false }` envelope into a
+     * node failure so retries/DLQ/recovery can observe the failed effect.
+     */
+    resultPolicy: z.enum(["envelope", "require_ok"]).optional(),
   })
   .passthrough();
 
@@ -180,6 +188,9 @@ export const AiNodeConfigSchema = z
       .optional(),
     variables: z.record(z.string(), z.unknown()).optional(),
     model: z.string().optional(),
+    responseFormat: z.enum(["text", "json"]).optional(),
+    /** Optional JSON contract for model-written output. */
+    outputSchema: z.unknown().optional(),
   })
   .passthrough();
 
@@ -214,6 +225,8 @@ export const HumanFormNodeConfigSchema = z
     // `WorkflowInputSchema`, which throws on undefined / bad shape — so
     // the real gate lives downstream. Kept loose here.
     schema: z.unknown().optional(),
+    /** Template-resolved values shown when the form first opens. */
+    initialValues: z.unknown().optional(),
   })
   .passthrough();
 
@@ -312,9 +325,11 @@ export const NODE_CONFIG_SCHEMAS = {
   // Event-driven trigger node types — the authoring-side config schemas live
   // in `@janusly/shared/src/trigger-types` so the API ingestion seam and the
   // web Inspector share one contract.
+  webhook_received: WebhookReceivedConfigSchema,
   email_received: EmailReceivedConfigSchema,
   file_dropped: FileDroppedConfigSchema,
   mcp_server_event: McpServerEventConfigSchema,
+  pagerduty_incident: PagerDutyIncidentConfigSchema,
 } satisfies Record<NodeType, z.ZodTypeAny>;
 
 /** Mapped type — `NodeConfigByType["http"]` is the inferred HTTP config shape. */

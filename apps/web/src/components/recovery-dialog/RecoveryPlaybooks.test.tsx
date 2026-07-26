@@ -67,10 +67,10 @@ describe('Recovery Playbook reuse', () => {
     const card = await screen.findByTestId('recovery-playbook-match')
     expect(card).toHaveTextContent('Recover billing')
     expect(card).toHaveTextContent('never runs automatically')
-    fireEvent.click(screen.getByRole('button', { name: 'Retire', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: /^Retire$/ }))
     expect(screen.getByTestId('recovery-playbook-retire-confirm')).toHaveTextContent('Retire this playbook?')
     expect(vi.mocked(api).mock.calls.some((call) => call[0] === '/recovery/playbooks/pb-1/retire')).toBe(false)
-    fireEvent.click(screen.getByRole('button', { name: 'Keep active', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: /^Keep active$/ }))
     fireEvent.click(screen.getByRole('button', { name: /Use and revalidate/i }))
 
     const source = await screen.findByTestId('recovery-playbook-revalidation')
@@ -163,14 +163,14 @@ describe('Recovery Playbook manual promotion', () => {
 
 describe('playbook scorecard rendering', () => {
   it('shows the success rate once the sample floor is met, with regressions named', async () => {
-    render(<PlaybookMatchCard playbook={{ ...playbook, successfulUses: 20, regressions: 3 }} onRetire={vi.fn()} />)
+    render(<PlaybookMatchCard playbook={{ ...playbook, successfulUses: 20, regressions: 3 }} busy={null} onUse={vi.fn()} onRetire={vi.fn()} />)
 
     expect(screen.getByTestId('playbook-scorecard-rate')).toHaveTextContent('87')
     expect(screen.getByTestId('playbook-scorecard-regressions')).toHaveTextContent('3')
   })
 
   it('withholds the percentage for a young playbook — raw counts only', () => {
-    render(<PlaybookMatchCard playbook={{ ...playbook, successfulUses: 1, regressions: 0 }} onRetire={vi.fn()} />)
+    render(<PlaybookMatchCard playbook={{ ...playbook, successfulUses: 1, regressions: 0 }} busy={null} onUse={vi.fn()} onRetire={vi.fn()} />)
 
     expect(screen.queryByTestId('playbook-scorecard-rate')).toBeNull()
     expect(screen.queryByTestId('playbook-scorecard-regressions')).toBeNull()

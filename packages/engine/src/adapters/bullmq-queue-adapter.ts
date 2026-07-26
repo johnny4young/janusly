@@ -14,7 +14,6 @@ import { enqueueNode } from "../queue";
 import type {
   QueueAdapter,
   EnqueueNodeInput,
-  DeadLetterInput,
   TerminalFailureInput,
 } from "../core/types";
 import { DeadLetterQueueAdapter } from "./dead-letter-queue";
@@ -31,10 +30,5 @@ export class BullMQQueueAdapter implements QueueAdapter {
   /** Commit the exhausted execution generation and its DLQ row atomically. */
   async persistTerminalFailure(input: TerminalFailureInput): Promise<boolean> {
     return this.deadLetters.persistTerminalFailure(input);
-  }
-
-  /** Insert a row into `dead_letters` for a job that exhausted its retries. */
-  async enqueueDeadLetter(input: DeadLetterInput): Promise<void> {
-    await this.deadLetters.enqueueDeadLetter(input);
   }
 }

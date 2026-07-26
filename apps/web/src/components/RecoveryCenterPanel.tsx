@@ -7,7 +7,8 @@
  * replay / fix durability / SLA),
  * the operator composer + content tiles (recovery queue / failure
  * clusters / pending approvals / recommended actions / budget / today),
- * the value dashboard, and a teaching empty-state hero for new operators.
+ * controlled-drill validation, the value dashboard, and a teaching empty-state
+ * hero for new operators.
  *
  * This file is the thin data-fetching wrapper. The presentational pieces
  * live in sibling files under `./recovery-center/`:
@@ -22,8 +23,10 @@
  *
  * Data sources (all already shipped):
  * - `GET /recovery/metrics` → metric strip, health badge, severities.
+ * - `GET /recovery/validation` → bounded controlled-drill evidence.
  * - `GET /recovery/ledger` + `GET /recovery/my-wins` → verified lifetime and
- *   operator impact; polled cheaply so background-run completions surface.
+ *   operator impact; refreshed from platform signals plus a bounded fallback
+ *   so background-run completions still surface.
  * - `GET /dlq/counts` + oldest-first `GET /dlq/queue` → authoritative hero
  *   count and longest open downtime; the bounded bootstrap page feeds tiles.
  * - `GET /dlq/clusters` → failure-clusters tile.
@@ -32,8 +35,9 @@
  * The Recovery Center is composition over the recovery API + engine metrics.
  * Its heavier metrics, clusters, and heatmap reads start together on the
  * cross-panel `platformVersion` tick. Ledger, personal wins, and queue counts
- * use a separate bounded poll because the completing worker may belong to a
- * run that is not the operator's active SSE target.
+ * use a visibility-aware fallback because the completing worker may belong to
+ * a run that is not the operator's active SSE target. Open recovery work keeps
+ * a short convergence window; a healthy Home uses a slower fallback.
  *
  * Used by `App.tsx` for `activeTab === 'home'`.
  *
@@ -45,7 +49,7 @@
 
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Hourglass, RefreshCw, ShieldCheck, Target, Users, Zap } from 'lucide-react'
-import type { ActiveTab, JsonObject, RunNode, RunSummary } from '../types'
+import type { ActiveTab, RunNode, RunSummary } from '../types'
 import { api } from '../api'
 import { useMemoryConsentStatus } from '../hooks/useMemoryConsentStatus'
 import { getMemoryPurgeCountdown } from '../memory-consent-status'
@@ -54,6 +58,10 @@ import type { DeadLetter } from './DeadLettersPanel'
 import { tRecoveryMetricRationale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { ValueDashboardSection } from './ValueDashboardSection'
+import {
+  RecoveryValidationSection,
+  type RecoveryValidationReport,
+} from './RecoveryValidationSection'
 import { OnboardingReplayButton } from './OnboardingReplayButton'
 import { OnboardingBanner } from './OnboardingBanner'
 import { VitalSignsStrip, withSeverityLabels, type VitalSignsTile } from './VitalSignsStrip'
@@ -100,14 +108,12 @@ type RecoveryCenterPanelProps = {
   runs: RunSummary[]
   runNodes: RunNode[]
   deadLetters: DeadLetter[]
-  activeRunId: string | null
   onOpenTab: (tab: ActiveTab) => void
-  onOpenRun: (runId: string) => void | Promise<void>
+  onOpenRun: (runId: string, targetTab?: ActiveTab) => void | Promise<void>
   onApproveNode: (nodeId: string) => void | Promise<void>
-  onSubmitHumanForm: (nodeId: string, input: JsonObject) => void | Promise<void>
   /** Navigate to Runs and land keyboard focus on the Recovery Queue. */
   onOpenRecoveryQueue: () => void
-  /** Inject a demo failure so a fresh operator can try the recovery loop for real. */
+  /** Start a deterministic drill so a fresh operator can try the recovery loop for real. */
   onTryDemoRecovery?: () => void | Promise<void>
 }
 
@@ -130,7 +136,8 @@ type RecoveryQueueOverview = {
 // Terminal recovery may complete in a worker for a run that is not the
 // operator's active SSE/polling target. Keep this cheap projection live without
 // repeatedly running the heavier metrics, cluster, and heatmap queries.
-const RECOVERY_IMPACT_POLL_MS = 10_000
+const RECOVERY_IMPACT_ACTIVE_POLL_MS = 10_000
+const RECOVERY_IMPACT_IDLE_POLL_MS = 60_000
 
 export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const { t, i18n } = useT()
@@ -150,12 +157,14 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const [metricsSnapshot, setMetricsSnapshot] = useState<OrgSnapshot<RecoveryMetrics> | null>(null)
   const [clustersSnapshot, setClustersSnapshot] = useState<OrgSnapshot<ClustersResponse | null> | null>(null)
   const [heatmapSnapshot, setHeatmapSnapshot] = useState<OrgSnapshot<HeatmapDay[]> | null>(null)
+  const [validationSnapshot, setValidationSnapshot] = useState<OrgSnapshot<RecoveryValidationReport | null> | null>(null)
   const [ledgerSnapshot, setLedgerSnapshot] = useState<OrgSnapshot<RecoveryLedger | null> | null>(null)
   const [winsSnapshot, setWinsSnapshot] = useState<IdentitySnapshot<OperatorWins | null> | null>(null)
   const [impactPollVersion, setImpactPollVersion] = useState(0)
   const metrics = metricsSnapshot?.orgId === resolvedOrgId ? metricsSnapshot.value : null
   const clusters = clustersSnapshot?.orgId === resolvedOrgId ? clustersSnapshot.value : null
   const heatmap = heatmapSnapshot?.orgId === resolvedOrgId ? heatmapSnapshot.value : []
+  const validation = validationSnapshot?.orgId === resolvedOrgId ? validationSnapshot.value : undefined
   const ledger = ledgerSnapshot?.orgId === resolvedOrgId ? ledgerSnapshot.value : null
   const operatorWins = winsSnapshot?.orgId === resolvedOrgId && winsSnapshot.userId === resolvedUserId
     ? winsSnapshot.value
@@ -192,12 +201,13 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     setMetricsLoading(true)
     setMetricsErrorSnapshot(null)
 
-    // Invoke all three heavier reads before attaching handlers so one render commits
+    // Invoke all heavier reads before attaching handlers so one render commits
     // one coordinated request burst without making any result wait for a
     // slower sibling endpoint.
     const metricsRequest = api('/recovery/metrics')
     const clustersRequest = api('/dlq/clusters')
     const heatmapRequest = api('/recovery/heatmap?days=90')
+    const validationRequest = api('/recovery/validation?windowDays=30')
 
     void metricsRequest
       .then((payload) => {
@@ -251,15 +261,25 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
         })
       })
 
+    void validationRequest
+      .then((payload) => {
+        if (cancelled) return
+        startTransition(() => {
+          setValidationSnapshot({
+            orgId: resolvedOrgId,
+            value: payload as RecoveryValidationReport,
+          })
+        })
+      })
+      .catch(() => {
+        if (cancelled) return
+        startTransition(() => {
+          setValidationSnapshot({ orgId: resolvedOrgId, value: null })
+        })
+      })
+
     return () => { cancelled = true }
   }, [platformVersion, resolvedOrgId])
-
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      setImpactPollVersion((version) => version + 1)
-    }, RECOVERY_IMPACT_POLL_MS)
-    return () => window.clearInterval(id)
-  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -347,6 +367,45 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     ? openDeadLetters.filter((deadLetter) => !currentQueueOverview.observedOpenIds.includes(deadLetter.id)).length
     : openDeadLetters.length
   const openFailureCount = Math.max(currentQueueOverview?.openCount ?? 0, unobservedVisibleFailures)
+
+  // Local mutations and active-run terminal events already bump
+  // `platformVersion`, so polling is only a convergence fallback for work
+  // completed by another worker/run. Stay responsive while failures are open,
+  // reduce healthy-home reads sixfold, and stop all background-tab polling.
+  const impactPollMs = openFailureCount > 0
+    ? RECOVERY_IMPACT_ACTIVE_POLL_MS
+    : RECOVERY_IMPACT_IDLE_POLL_MS
+  useEffect(() => {
+    let timeoutId: number | null = null
+
+    const clearScheduledPoll = () => {
+      if (timeoutId === null) return
+      window.clearTimeout(timeoutId)
+      timeoutId = null
+    }
+    const schedulePoll = () => {
+      clearScheduledPoll()
+      if (document.hidden) return
+      timeoutId = window.setTimeout(() => {
+        timeoutId = null
+        setImpactPollVersion((version) => version + 1)
+        schedulePoll()
+      }, impactPollMs)
+    }
+    const handleVisibilityChange = () => {
+      clearScheduledPoll()
+      if (document.hidden) return
+      setImpactPollVersion((version) => version + 1)
+      schedulePoll()
+    }
+
+    schedulePoll()
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      clearScheduledPoll()
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [impactPollMs])
 
   const celebrateAllClear = useCallback((request?: RecoveryAllClearRequest | null) => {
     setAllClearDowntimeOverride(request?.downtimeMs ?? null)
@@ -758,6 +817,8 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
           <BudgetTile onOpenTab={props.onOpenTab} />
         </aside>
       </div>
+
+      <RecoveryValidationSection report={validation} />
 
       <ValueDashboardSection
         mttrMs={metrics?.mttr.value ?? null}

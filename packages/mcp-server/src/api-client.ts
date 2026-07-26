@@ -4,8 +4,8 @@
  * The MCP server is intentionally a proxy: every tool call becomes a single
  * HTTP request against the running `apps/api` server. This module owns
  * (a) resolving the connection config from environment variables and (b) the
- * thin `fetch` wrapper that injects auth headers and surfaces useful errors
- * back to the MCP dispatcher.
+ * thin `fetch` wrapper that injects auth headers, validates `/v1` envelopes,
+ * and surfaces useful errors back to the MCP dispatcher.
  *
  * Used by:
  * - `packages/mcp-server/src/index.ts` — boot path constructs the client.
@@ -46,14 +46,35 @@ export function resolveApiClientConfig(env: NodeJS.ProcessEnv): ApiClientConfig 
   };
 }
 
-/** Bound HTTP closure handed to `dispatchTool`; returns the parsed JSON body or throws. */
+/** Bound HTTP closure handed to `dispatchTool`; returns normalized operation data or throws. */
 export type CallApi = (path: string, init?: RequestInit) => Promise<unknown>;
+
+/** Catalogued HTTP failure returned by the stable API lane. */
+export class JanuslyApiError extends Error {
+  override readonly name = "JanuslyApiError";
+
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string | undefined,
+    readonly requestId: string | undefined,
+    readonly path: string,
+    readonly params: Record<string, string | number | boolean> | undefined,
+  ) {
+    super(message);
+  }
+}
+
+/** Successful HTTP response that violates the advertised v1 envelope. */
+export class JanuslyProtocolError extends Error {
+  override readonly name = "JanuslyProtocolError";
+}
 
 /**
  * Build a `callApi(path)` closure bound to one config. Each call injects
  * `x-org-id` / `x-user-id` and (when configured) an `Authorization: Bearer`
- * service token. Non-2xx responses throw with status + path + truncated body
- * so Claude Desktop's stderr surfaces a useful diagnostic.
+ * service token. Stable successes are unwrapped after protocol validation;
+ * non-2xx responses preserve catalogued v1 codes and request IDs when present.
  */
 export function createApiClient(cfg: ApiClientConfig): CallApi {
   const apiUrl = cfg.apiUrl.replace(/\/+$/, "");
@@ -73,11 +94,80 @@ export function createApiClient(cfg: ApiClientConfig): CallApi {
     if (cfg.serviceToken) headers.authorization = `Bearer ${cfg.serviceToken}`;
 
     const res = await fetch(`${apiUrl}${path}`, { ...init, headers });
+    const text = await res.text().catch(() => "");
+    const payload = parseJson(text);
     if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      const tail = body ? `: ${body.slice(0, 256)}` : "";
-      throw new Error(`Janusly API ${res.status} ${res.statusText} on ${path}${tail}`);
+      const stableError = readStableError(payload);
+      const detail = stableError?.message ?? (text ? text.slice(0, 256) : res.statusText);
+      throw new JanuslyApiError(
+        `Janusly API ${res.status} on ${path}: ${detail}`,
+        res.status,
+        stableError?.code,
+        stableError?.requestId,
+        path,
+        stableError?.params,
+      );
     }
-    return res.json();
+    if (path === "/v1" || path.startsWith("/v1/")) {
+      return unwrapStableSuccess(payload, path);
+    }
+    if (payload === undefined) {
+      throw new JanuslyProtocolError(`Janusly API returned non-JSON success on ${path}`);
+    }
+    return payload;
   };
+}
+
+function parseJson(text: string): unknown | undefined {
+  if (!text) return undefined;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function unwrapStableSuccess(payload: unknown, path: string): unknown {
+  if (
+    !isRecord(payload)
+    || payload.apiVersion !== "v1"
+    || typeof payload.requestId !== "string"
+    || !("data" in payload)
+  ) {
+    throw new JanuslyProtocolError(`Janusly API returned an invalid v1 success envelope on ${path}`);
+  }
+  return payload.data;
+}
+
+function readStableError(payload: unknown): {
+  code: string;
+  message: string;
+  requestId: string | undefined;
+  params: Record<string, string | number | boolean> | undefined;
+} | null {
+  if (!isRecord(payload) || !isRecord(payload.error)) return null;
+  const code = payload.error.code;
+  const message = payload.error.message;
+  if (typeof code !== "string" || typeof message !== "string") return null;
+  return {
+    code,
+    message,
+    requestId: typeof payload.requestId === "string" ? payload.requestId : undefined,
+    params: readErrorParams(payload.error.params),
+  };
+}
+
+function readErrorParams(value: unknown): Record<string, string | number | boolean> | undefined {
+  if (!isRecord(value)) return undefined;
+  const params: Record<string, string | number | boolean> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item === "string" || typeof item === "number" || typeof item === "boolean") {
+      params[key] = item;
+    }
+  }
+  return Object.keys(params).length > 0 ? params : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

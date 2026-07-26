@@ -8,11 +8,16 @@
  * client uses when no translation key is mirrored yet.
  */
 
+import { listTemplatesContract } from "../api-contracts";
 import { sendJson } from "../http";
 import type { Route } from "../routes";
 import { asPublicTemplate, workflowTemplates } from "../templates";
 
 export const templatesRoutes: Route[] = [
-  { method: "GET", match: "/templates",
-    handler: async ({ res }) => sendJson(res, workflowTemplates.map(asPublicTemplate)) },
+  {
+    method: "GET",
+    match: "/templates",
+    contract: listTemplatesContract,
+    handler: async ({ res }) => sendJson(res, workflowTemplates.map(asPublicTemplate)),
+  },
 ];

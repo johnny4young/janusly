@@ -26,10 +26,13 @@ vi.mock("../audit-helper", () => ({ auditAction: vi.fn(async () => undefined) })
 vi.mock("../rate-limit", () => ({ enforceRateLimit: vi.fn(async () => undefined) }));
 
 vi.mock("@janusly/data", () => ({
+  AmbiguousTriggerNodeError: class AmbiguousTriggerNodeError extends Error {},
   recordSystemAudit: vi.fn(async () => undefined),
   recordTriggerEvent: vi.fn(),
   findTriggerEventByDedupeKey: vi.fn(),
   resolveTriggerNode: vi.fn(),
+  resolveTriggerNodeInVersion: vi.fn(),
+  resolveWorkflowRolloutAssignment: vi.fn(async () => null),
   getTriggerEvent: vi.fn(),
   listTriggerEvents: vi.fn(),
   markTriggerEventSkipped: vi.fn(async () => undefined),
@@ -84,6 +87,9 @@ import {
   releaseTriggerEventBackfillClaim,
   retireTriggerEventBackfillClaim,
   resolveTriggerNode,
+  resolveTriggerNodeInVersion,
+  resolveWorkflowRolloutAssignment,
+  AmbiguousTriggerNodeError,
 } from "@janusly/data";
 import { startRun, TriggerEventStartConflictError } from "@janusly/engine/src/start-run";
 import { createApiServer } from "../server";
@@ -96,6 +102,8 @@ const enforceRateLimitMock = vi.mocked(enforceRateLimit);
 const recordTriggerEventMock = vi.mocked(recordTriggerEvent);
 const findByDedupeMock = vi.mocked(findTriggerEventByDedupeKey);
 const resolveTriggerNodeMock = vi.mocked(resolveTriggerNode);
+const resolveTriggerNodeInVersionMock = vi.mocked(resolveTriggerNodeInVersion);
+const resolveWorkflowRolloutAssignmentMock = vi.mocked(resolveWorkflowRolloutAssignment);
 const getTriggerEventMock = vi.mocked(getTriggerEvent);
 const markSkippedMock = vi.mocked(markTriggerEventSkipped);
 const markFailedMock = vi.mocked(markTriggerEventFailed);
@@ -114,6 +122,12 @@ const SIMPLE_DAG = {
   edges: [],
 };
 
+const WEBHOOK_DAG = {
+  dslVersion: "1.0" as const,
+  nodes: [{ id: "incoming", type: "webhook_received", config: { endpointKey: "incident-triage" } }],
+  edges: [],
+};
+
 function resolvedFor(orgConfig: Record<string, unknown> = { aliasKey: "ops" }) {
   return {
     workflowId: "wf-1",
@@ -121,6 +135,16 @@ function resolvedFor(orgConfig: Record<string, unknown> = { aliasKey: "ops" }) {
     nodeId: "inbox",
     nodeConfig: orgConfig,
     dagJson: SIMPLE_DAG,
+  };
+}
+
+function resolvedWebhook(endpointKey = "incident-triage") {
+  return {
+    workflowId: "wf-webhook",
+    workflowVersionId: "ver-webhook",
+    nodeId: "incoming",
+    nodeConfig: { endpointKey },
+    dagJson: WEBHOOK_DAG,
   };
 }
 
@@ -160,6 +184,8 @@ beforeEach(() => {
   findByDedupeMock.mockResolvedValue(null);
   // Default: a fresh event is recorded.
   recordTriggerEventMock.mockResolvedValue({ event: { id: "evt-1", orgId: "org-a", runId: null } as never, wasCreated: true });
+  resolveTriggerNodeInVersionMock.mockResolvedValue(resolvedFor());
+  resolveWorkflowRolloutAssignmentMock.mockResolvedValue(null);
   // `startRun`'s return type pins `runId` to a UUID template literal; the test
   // value is a readable placeholder, so cast through `unknown`.
   startRunMock.mockResolvedValue({ runId: "run-1" } as unknown as Awaited<ReturnType<typeof startRun>>);
@@ -177,9 +203,17 @@ async function postEmail(baseUrl: string, body: unknown) {
   });
 }
 
+async function postWebhook(baseUrl: string, body: unknown) {
+  return fetch(`${baseUrl}/triggers/webhook/ingest`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 describe("route declarations", () => {
-  it("the three ingest routes declare editor + triggers.ingest", () => {
-    for (const path of ["/triggers/email/ingest", "/triggers/file/ingest", "/triggers/mcp/ingest"]) {
+  it("the ingest routes declare editor + triggers.ingest", () => {
+    for (const path of ["/triggers/webhook/ingest", "/triggers/email/ingest", "/triggers/file/ingest", "/triggers/mcp/ingest"]) {
       const route = triggerIngestRoutes.find((r) => (typeof r.match === "string" ? r.match === path : r.match(path)) && r.method === "POST");
       expect(route?.role).toBe("editor");
       expect(route?.permission).toBe("triggers.ingest");
@@ -200,6 +234,131 @@ describe("route declarations", () => {
       const res = await fetch(`${baseUrl}/triggers/events?status=buffered`);
       expect(res.status).toBe(200);
       expect(listTriggerEventsMock).toHaveBeenCalledWith("org-a", expect.objectContaining({ status: "buffered" }));
+    } finally {
+      await close(server);
+    }
+  });
+});
+
+describe("webhook_received ingestion", () => {
+  it("rejects an event without an idempotency identity", async () => {
+    const server = createApiServer({ routes: triggerIngestRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const res = await postWebhook(baseUrl, {
+        endpointKey: "incident-triage",
+        payload: { service: "postgres" },
+      });
+
+      expect(res.status).toBe(400);
+      expect(startRunMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("cannot resolve a trigger outside the authenticated organization", async () => {
+    resolveTriggerNodeMock.mockResolvedValue(null);
+    const server = createApiServer({ routes: triggerIngestRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const res = await postWebhook(baseUrl, {
+        endpointKey: "incident-triage",
+        eventId: "alert-1",
+        payload: { service: "postgres" },
+      });
+
+      expect(res.status).toBe(404);
+      expect(resolveTriggerNodeMock).toHaveBeenCalledWith(
+        "org-a",
+        "webhook_received",
+        expect.any(Function),
+      );
+      expect(startRunMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("fails closed when the endpoint key matches multiple active workflows", async () => {
+    resolveTriggerNodeMock.mockRejectedValue(new AmbiguousTriggerNodeError("webhook_received"));
+    const server = createApiServer({ routes: triggerIngestRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const res = await postWebhook(baseUrl, {
+        endpointKey: "incident-triage",
+        eventId: "alert-1",
+        payload: { service: "postgres" },
+      });
+
+      expect(res.status).toBe(409);
+      await expect(res.json()).resolves.toMatchObject({ code: "trigger_selector_ambiguous" });
+      expect(recordTriggerEventMock).not.toHaveBeenCalled();
+      expect(startRunMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("persists a normalized event before spawning its run", async () => {
+    resolveTriggerNodeMock.mockResolvedValue(resolvedWebhook());
+    resolveTriggerNodeInVersionMock.mockResolvedValue(resolvedWebhook());
+    const server = createApiServer({ routes: triggerIngestRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const res = await postWebhook(baseUrl, {
+        endpointKey: "Incident-Triage",
+        eventId: "alert-1",
+        eventType: "database.connection_exhausted",
+        payload: { service: "postgres", openConnections: 98 },
+      });
+
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toMatchObject({
+        ok: true,
+        runId: "run-1",
+        triggerEventId: "evt-1",
+      });
+      expect(recordTriggerEventMock).toHaveBeenCalledWith(expect.objectContaining({
+        orgId: "org-a",
+        triggerType: "webhook_received",
+        dedupeKey: "webhook:incident-triage:alert-1",
+      }));
+      expect(startRunMock).toHaveBeenCalledWith(expect.objectContaining({
+        orgId: "org-a",
+        versionId: "ver-webhook",
+        triggerEventStart: { id: "evt-1" },
+        input: expect.objectContaining({
+          event: expect.objectContaining({
+            endpointKey: "Incident-Triage",
+            eventId: "alert-1",
+            payload: { service: "postgres", openConnections: 98 },
+          }),
+        }),
+      }));
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("returns the prior run for a repeated event id", async () => {
+    resolveTriggerNodeMock.mockResolvedValue(resolvedWebhook());
+    recordTriggerEventMock.mockResolvedValue({
+      event: { id: "evt-1", orgId: "org-a", status: "started", runId: "run-prior" } as never,
+      wasCreated: false,
+    });
+    const server = createApiServer({ routes: triggerIngestRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const res = await postWebhook(baseUrl, {
+        endpointKey: "incident-triage",
+        eventId: "alert-1",
+        payload: { service: "postgres" },
+      });
+
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toMatchObject({ duplicate: true, runId: "run-prior" });
+      expect(startRunMock).not.toHaveBeenCalled();
     } finally {
       await close(server);
     }
@@ -292,6 +451,50 @@ describe("email_received ingestion", () => {
     }
   });
 
+  it("persists and reuses one canary assignment for the accepted event", async () => {
+    resolveTriggerNodeMock.mockResolvedValue(resolvedFor());
+    resolveWorkflowRolloutAssignmentMock.mockResolvedValueOnce({
+      rollout: { id: "rollout-1" },
+      variant: "baseline",
+      versionId: "ver-baseline",
+      version: 1,
+      workflow: SIMPLE_DAG,
+    } as never);
+    resolveTriggerNodeInVersionMock.mockResolvedValueOnce({
+      ...resolvedFor(),
+      workflowVersionId: "ver-baseline",
+    });
+    const server = createApiServer({ routes: triggerIngestRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const res = await postEmail(baseUrl, {
+        aliasKey: "ops",
+        from: "a@b.com",
+        dkimPass: true,
+        body: "hello",
+        messageId: "msg-canary",
+      });
+
+      expect(res.status).toBe(200);
+      expect(resolveWorkflowRolloutAssignmentMock).toHaveBeenCalledWith({
+        orgId: "org-a",
+        workflowId: "wf-1",
+        assignmentKey: expect.stringMatching(/^email-/),
+      });
+      expect(recordTriggerEventMock).toHaveBeenCalledWith(expect.objectContaining({
+        workflowVersionId: "ver-baseline",
+        workflowRolloutId: "rollout-1",
+        workflowRolloutVariant: "baseline",
+      }));
+      expect(startRunMock).toHaveBeenCalledWith(expect.objectContaining({
+        versionId: "ver-baseline",
+        rollout: { id: "rollout-1", variant: "baseline" },
+      }));
+    } finally {
+      await close(server);
+    }
+  });
+
   it("uses one deterministic attachment namespace for concurrent retries", async () => {
     resolveTriggerNodeMock.mockResolvedValue(resolvedFor());
     const server = createApiServer({ routes: triggerIngestRoutes });
@@ -349,6 +552,8 @@ describe("email_received ingestion", () => {
       orgId: "org-a",
       workflowId: "wf-1",
       workflowVersionId: "ver-1",
+      workflowRolloutId: "rollout-1",
+      workflowRolloutVariant: "canary",
       nodeId: "inbox",
       triggerType: "email_received",
       status: "received",
@@ -369,11 +574,19 @@ describe("email_received ingestion", () => {
       expect(res.status).toBe(200);
       expect(startRunMock).toHaveBeenCalledWith(expect.objectContaining({
         triggerEventStart: { id: "evt-1" },
+        versionId: "ver-1",
+        rollout: { id: "rollout-1", variant: "canary" },
         input: expect.objectContaining({
           event: expect.objectContaining({ from: "original@sender.com" }),
         }),
       }));
       expect(recordTriggerEventMock).not.toHaveBeenCalled();
+      expect(resolveTriggerNodeInVersionMock).toHaveBeenCalledWith(
+        "org-a",
+        "ver-1",
+        "email_received",
+        "inbox",
+      );
       expect(objectStorePut).not.toHaveBeenCalled();
       expect(auditActionMock).not.toHaveBeenCalledWith(
         expect.anything(),
@@ -619,6 +832,7 @@ describe("backfillBufferedTriggerEvents — the pause must not eat the events", 
     getWorkflowStatusMock.mockResolvedValue({ status: "active", pausedReason: null } as never);
     getTriggerEventMock.mockResolvedValue({
       id: "evt-1", orgId: "org-a", workflowId: "wf-1", nodeId: "inbox", triggerType: "email_received",
+      workflowVersionId: "ver-1", workflowRolloutId: null, workflowRolloutVariant: null,
       payloadJson: { event: { aliasKey: "ops", from: "a@b.com", dkimPass: true } }, runId: null,
     } as never);
   });
@@ -635,11 +849,11 @@ describe("backfillBufferedTriggerEvents — the pause must not eat the events", 
       triggerEventStart: { id: "evt-1", claimToken: "claim-evt-1" },
     }));
     expect(recordTriggerEventMock).not.toHaveBeenCalled();
-    expect(resolveTriggerNodeMock).toHaveBeenCalledWith(
+    expect(resolveTriggerNodeInVersionMock).toHaveBeenCalledWith(
       "org-a",
+      "ver-1",
       "email_received",
-      expect.any(Function),
-      { workflowId: "wf-1", nodeId: "inbox" },
+      "inbox",
     );
   });
 
@@ -702,10 +916,10 @@ describe("backfillBufferedTriggerEvents — the pause must not eat the events", 
     expect(releaseBackfillClaimMock).toHaveBeenCalledWith("org-a", "evt-1", "claim-evt-1");
   });
 
-  it("retires an event whose trigger node the fix deleted, instead of owing it forever", async () => {
+  it("retires an event whose exact persisted trigger is unavailable, instead of owing it forever", async () => {
     claimBufferedMock.mockResolvedValue([claimedFor()] as never);
     countBufferedMock.mockResolvedValue(0);
-    resolveTriggerNodeMock.mockResolvedValue(null as never);
+    resolveTriggerNodeInVersionMock.mockResolvedValue(null as never);
 
     const result = await backfillBufferedTriggerEvents({ auth, workflowId: "wf-1" });
 

@@ -163,7 +163,116 @@ beforeEach(() => {
   recordExemplarMock.mockResolvedValue(undefined);
 });
 
+describe("POST /ai/generate-workflow — authorization and contract", () => {
+  it("requires ai.write without imposing a role-rank floor", () => {
+    const route = findRoute("POST", "/ai/generate-workflow");
+    expect(route.role).toBeUndefined();
+    expect(route.permission).toBe("ai.write");
+    expect(route.contract?.operationId).toBe("generateWorkflow");
+  });
+});
+
+const PAGERDUTY_PROMPT =
+  "When PagerDuty alerts PLOCALUSER outside 09:00-17:00 America/Bogota, acknowledge it and snooze it for 12 hours. Use API credential pagerduty-api and webhook credential pagerduty-webhook for operator@example.com.";
+
 describe("POST /ai/generate-workflow — generationMode dispatch", () => {
+  it("routes PagerDuty prompts through the LLM path when a provider is configured", async () => {
+    // The deterministic recipe no longer short-circuits ahead of the LLM —
+    // with a provider configured, generation owns the prompt (budget gate
+    // included) and the recipe is only the local/degraded fallback.
+    const llm = makeLlm({ text: [VALID_JSON] });
+    setRuntime("free_json", llm);
+    readJsonMock.mockResolvedValue({ prompt: PAGERDUTY_PROMPT } as never);
+
+    const res = await callGenerate();
+
+    expect(res.status).toBe(200);
+    expect(res.payload.mode).toBe("ai");
+    expect(llm.generateText).toHaveBeenCalledTimes(1);
+    expect(gateBudgetMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("compiles the PagerDuty recipe locally when no provider is configured", async () => {
+    setRuntime("free_json", null as never);
+    readJsonMock.mockResolvedValue({ prompt: PAGERDUTY_PROMPT } as never);
+
+    const res = await callGenerate();
+
+    expect(res.status).toBe(200);
+    expect(res.payload.mode).toBe("fallback");
+    expect(res.payload.aiError).toBeUndefined();
+    expect(res.payload.nodes.map((node: { type: string }) => node.type)).toEqual([
+      "pagerduty_incident",
+      "tool",
+      "tool",
+      "tool",
+      "tool",
+      "transform",
+      "transform",
+    ]);
+    expect(res.payload.nodes.find((node: { id: string }) => node.id === "snooze_incident"))
+      .toMatchObject({ config: { input: { durationSeconds: 43_200 } } });
+    // The deterministic path now feeds the few-shot generation memory too.
+    expect(recordExemplarMock).toHaveBeenCalledTimes(1);
+    expect(auditMock).toHaveBeenCalledWith(
+      auth,
+      "ai.workflow.generated",
+      expect.objectContaining({
+        targetId: res.payload.id,
+        metadata: {
+          mode: "fallback",
+          generationMode: "deterministic_recipe",
+          recipe: "pagerduty_off_hours",
+        },
+      }),
+    );
+  });
+
+  it("serves the PagerDuty recipe with aiError when the LLM attempt degrades", async () => {
+    // Every candidate + the single-shot retry return unparseable text, so the
+    // free-JSON generator throws into the fallback contract — which prefers
+    // the compiled recipe over the generic template for this prompt family.
+    const llm = makeLlm({ text: ["garbage", "garbage", "garbage", "garbage", "garbage"] });
+    setRuntime("free_json", llm);
+    readJsonMock.mockResolvedValue({ prompt: PAGERDUTY_PROMPT } as never);
+
+    const res = await callGenerate();
+
+    expect(res.status).toBe(200);
+    expect(res.payload.mode).toBe("fallback");
+    expect(typeof res.payload.aiError).toBe("string");
+    expect(res.payload.nodes[0].type).toBe("pagerduty_incident");
+    expect(auditMock).toHaveBeenCalledWith(
+      auth,
+      "ai.workflow.generated",
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          generationMode: "deterministic_recipe",
+          recipe: "pagerduty_off_hours",
+          error: expect.any(String),
+        }),
+      }),
+    );
+  });
+
+  it("serves the PagerDuty recipe instead of a 402 when the org is budget-blocked", async () => {
+    const llm = makeLlm({ text: [VALID_JSON] });
+    setRuntime("free_json", llm);
+    gateBudgetMock.mockResolvedValue({
+      envelope: { allowed: false, warningThresholdCrossed: true },
+      blocked: true,
+    } as never);
+    readJsonMock.mockResolvedValue({ prompt: PAGERDUTY_PROMPT } as never);
+
+    const res = await callGenerate();
+
+    expect(res.status).toBe(200);
+    expect(res.payload.mode).toBe("fallback");
+    expect(res.payload.aiError).toBeUndefined();
+    expect(res.payload.nodes[0].type).toBe("pagerduty_incident");
+    expect(llm.generateText).not.toHaveBeenCalled();
+  });
+
   it("free_json: parses generateText output and audits generationMode=free_json", async () => {
     const llm = makeLlm({ text: [VALID_JSON] });
     setRuntime("free_json", llm);
@@ -175,6 +284,9 @@ describe("POST /ai/generate-workflow — generationMode dispatch", () => {
     expect(res.payload.mode).toBe("ai");
     expect(res.payload.model).toBe("claude-haiku-4-5-20251001");
     expect(res.payload.nodes[0].type).toBe("http");
+    expect(findRoute("POST", "/ai/generate-workflow").contract?.response.safeParse(
+      JSON.parse(JSON.stringify(res.payload)),
+    ).success).toBe(true);
 
     const meta = (auditMock.mock.calls[0]?.[2]?.metadata ?? {}) as Record<string, unknown>;
     expect(meta.mode).toBe("ai");

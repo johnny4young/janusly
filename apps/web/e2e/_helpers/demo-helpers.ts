@@ -24,25 +24,25 @@ export const ALL_DEMO_TEMPLATE_IDS = [...DEMO_TEMPLATE_IDS.flagship, ...DEMO_TEM
 
 type Json = Record<string, unknown>;
 
-function devHeaders(): Record<string, string> {
+function devHeaders(orgId = ORG_ID): Record<string, string> {
   return {
     "Content-Type": "application/json",
-    "x-org-id": ORG_ID,
+    "x-org-id": orgId,
     "x-user-id": USER_ID,
   };
 }
 
-async function apiGet(request: APIRequestContext, path: string): Promise<Json> {
-  const response = await request.get(`${API_URL}${path}`, { headers: devHeaders() });
+async function apiGet(request: APIRequestContext, path: string, orgId = ORG_ID): Promise<Json> {
+  const response = await request.get(`${API_URL}${path}`, { headers: devHeaders(orgId) });
   if (!response.ok()) {
     throw new Error(`GET ${path} failed: ${response.status()} ${await response.text()}`);
   }
   return response.json();
 }
 
-async function apiPost(request: APIRequestContext, path: string, body: Json): Promise<Json> {
+async function apiPost(request: APIRequestContext, path: string, body: Json, orgId = ORG_ID): Promise<Json> {
   const response = await request.post(`${API_URL}${path}`, {
-    headers: devHeaders(),
+    headers: devHeaders(orgId),
     data: body,
   });
   if (!response.ok()) {
@@ -51,14 +51,14 @@ async function apiPost(request: APIRequestContext, path: string, body: Json): Pr
   return response.json();
 }
 
-export async function listTemplates(request: APIRequestContext): Promise<Json[]> {
-  const data = (await apiGet(request, "/templates")) as { templates?: Json[] } | Json[];
+export async function listTemplates(request: APIRequestContext, orgId = ORG_ID): Promise<Json[]> {
+  const data = (await apiGet(request, "/templates", orgId)) as { templates?: Json[] } | Json[];
   if (Array.isArray(data)) return data;
   return data.templates ?? [];
 }
 
-export async function loadTemplate(request: APIRequestContext, templateId: string): Promise<Json> {
-  const templates = await listTemplates(request);
+export async function loadTemplate(request: APIRequestContext, templateId: string, orgId = ORG_ID): Promise<Json> {
+  const templates = await listTemplates(request, orgId);
   const match = templates.find((t) => (t as { id?: string }).id === templateId);
   if (!match) throw new Error(`Template not found: ${templateId}`);
   return (match as { workflow: Json }).workflow;
@@ -67,17 +67,19 @@ export async function loadTemplate(request: APIRequestContext, templateId: strin
 export async function seedCredential(
   request: APIRequestContext,
   args: { name: string; kind: string; secretRef: string },
+  orgId = ORG_ID,
 ): Promise<{ id: string }> {
-  return (await apiPost(request, "/credentials", { name: args.name, kind: args.kind, secretRef: args.secretRef })) as { id: string };
+  return (await apiPost(request, "/credentials", { name: args.name, kind: args.kind, secretRef: args.secretRef }, orgId)) as { id: string };
 }
 
 export async function startRun(
   request: APIRequestContext,
   workflow: Json,
   input?: Json,
+  orgId = ORG_ID,
 ): Promise<{ runId: string }> {
   const body: Json = input === undefined ? workflow : { workflow, input };
-  return (await apiPost(request, "/start", body)) as { runId: string };
+  return (await apiPost(request, "/start", body, orgId)) as { runId: string };
 }
 
 type RunStatus = "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled";
@@ -93,8 +95,8 @@ export type RunSnapshot = {
   events: Json[];
 };
 
-export async function getRun(request: APIRequestContext, runId: string): Promise<RunSnapshot> {
-  const data = (await apiGet(request, `/run?runId=${encodeURIComponent(runId)}`)) as {
+export async function getRun(request: APIRequestContext, runId: string, orgId = ORG_ID): Promise<RunSnapshot> {
+  const data = (await apiGet(request, `/run?runId=${encodeURIComponent(runId)}`, orgId)) as {
     run: { status: RunStatus } & Json;
     nodes: DemoRunNode[];
     events: Json[];
@@ -116,10 +118,11 @@ export async function pollUntilTerminal(
   request: APIRequestContext,
   runId: string,
   maxMs: number = 30_000,
+  orgId = ORG_ID,
 ): Promise<RunSnapshot> {
   const start = Date.now();
   while (Date.now() - start < maxMs) {
-    const snapshot = await getRun(request, runId);
+    const snapshot = await getRun(request, runId, orgId);
     if (TERMINAL_STATUSES.has(snapshot.status)) return snapshot;
     await sleep(500);
   }
@@ -136,10 +139,11 @@ export async function pollUntilWaitingOrTerminal(
   runId: string,
   waitingNodeId: string,
   maxMs: number = 30_000,
+  orgId = ORG_ID,
 ): Promise<RunSnapshot> {
   const start = Date.now();
   while (Date.now() - start < maxMs) {
-    const snapshot = await getRun(request, runId);
+    const snapshot = await getRun(request, runId, orgId);
     if (TERMINAL_STATUSES.has(snapshot.status)) return snapshot;
     const waitingNode = snapshot.nodes.find((n) => n.nodeId === waitingNodeId);
     if (waitingNode && waitingNode.status === "waiting") return snapshot;
@@ -167,15 +171,17 @@ export async function resumeWebhook(
   runId: string,
   nodeId: string,
   payload: Json,
+  orgId = ORG_ID,
 ): Promise<void> {
-  await apiPost(request, "/resume", { runId, nodeId, input: payload });
+  await apiPost(request, "/resume", { runId, nodeId, input: payload }, orgId);
 }
 
 export async function findDeadLetterForRun(
   request: APIRequestContext,
   runId: string,
+  orgId = ORG_ID,
 ): Promise<{ id: string; runId: string; nodeId: string; errorJson?: unknown } | null> {
-  const data = (await apiGet(request, "/dlq?limit=100")) as Array<{
+  const data = (await apiGet(request, "/dlq?limit=100", orgId)) as Array<{
     id: string;
     runId: string;
     nodeId: string;

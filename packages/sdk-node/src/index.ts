@@ -7,26 +7,27 @@
  * consumers reach methods through the client's resource bindings.
  */
 
-export { JanuslyClient } from "./client.ts";
+export { JanuslyClient } from "./client.js";
 export {
   JanuslyApiError,
   JanuslyAuthError,
   JanuslyValidationError,
   JanuslyRateLimitError,
   JanuslyServerError,
+  JanuslyProtocolError,
   JanuslyTimeoutError,
   JanuslyWebhookSignatureError,
   parseRetryAfterSeconds,
   type JanuslyApiErrorEnvelope,
-} from "./errors.ts";
-export { RunsResource } from "./resources/runs.ts";
-export { ReportsResource, type RunExplainFormat, type RunExplainExport } from "./resources/reports.ts";
-export { RecoveryResource } from "./resources/recovery.ts";
+} from "./errors.js";
+export { RunsResource } from "./resources/runs.js";
+export { ReportsResource, type RunExplainFormat, type RunExplainExport } from "./resources/reports.js";
+export { RecoveryResource } from "./resources/recovery.js";
 export {
   WebhooksResource,
   type VerifyWebhookSignatureInput,
   type VerifyWebhookSignatureResult,
-} from "./resources/webhooks.ts";
+} from "./resources/webhooks.js";
 export {
   TERMINAL_RUN_STATUSES,
   type JanuslyAuthMode,
@@ -48,4 +49,4 @@ export {
   type RunNodeStatus,
   type RunStatus,
   type RunSummary,
-} from "./types.ts";
+} from "./types.js";

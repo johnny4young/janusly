@@ -14,7 +14,7 @@
  *   Postgres `23505`. Without retry the loser's request errors out;
  *   with retry, the loser re-reads the now-newer latest version,
  *   bumps `nextVersion`, and INSERTs again. Bounded at
- *   `MAX_SAVE_ATTEMPTS` retries — pathological contention falls
+ *   `MAX_VERSION_WRITE_ATTEMPTS` attempts — pathological contention falls
  *   through to a `kind: "conflict"` result so the route can return
  *   a clean 409 ("please retry") instead of a generic 500.
  *
@@ -34,9 +34,15 @@
  */
 
 import { and, desc, eq } from "drizzle-orm";
-import { db, workflowVersions, workflows } from "@janusly/db";
+import { db, workflowRollouts, workflowVersions, workflows } from "@janusly/db";
 import type { Workflow } from "@janusly/shared";
 import { syncWorkflowSchedules } from "@janusly/engine/src/schedule-scheduler";
+
+import {
+  isRetryableVersionWriteViolation,
+  MAX_VERSION_WRITE_ATTEMPTS,
+  ActiveWorkflowRolloutError,
+} from "./workflow-version-write";
 
 /**
  * Result of an attempted save. `kind: "conflict"` is non-throwing so
@@ -71,91 +77,12 @@ export type SaveWorkflowResult =
        * every other soft-delete gate. The operator restores explicitly first.
        */
       kind: "deleted";
-    };
+    }
+  | { kind: "rollout_active" };
 
-/**
- * Maximum total transaction attempts (including the first). Three is
- * enough headroom: a single 23505 retry resolves microseconds-fast (the
- * winning row has already committed by the time the loser re-reads),
- * and three attempts cover the typical "two concurrent + one extra
- * for rapid contention" pattern. Pathological contention falls through
- * to `kind: "conflict"`.
- */
-export const MAX_SAVE_ATTEMPTS = 3;
-
-/** Postgres SQLSTATE for unique-violation. The retry only fires on this code. */
-const PG_UNIQUE_VIOLATION = "23505";
-
-/**
- * Unique-constraint names whose violation triggers a retry. Two
- * concurrent saves on the same `(orgId, workflowId)` race on either:
- *
- *   - `workflow_versions_org_workflow_version_idx` — both writers
- *     computed the same `nextVersion`. Loser re-reads, bumps version.
- *   - `workflows_pkey` — both writers see no existing workflow row
- *     and both try to INSERT with the caller-provided `workflowId`.
- *     Loser sees the just-committed row on retry and skips the
- *     workflows-INSERT branch (the existing `existingWorkflow[0]`
- *     check inside the transaction is what closes the loop).
- *
- * Both belong to the same race; treating them uniformly as
- * "retryable save violations" keeps the route's contract simple.
- * Other 23505s are genuine bugs and re-throw.
- */
-const RETRYABLE_SAVE_CONSTRAINTS: readonly string[] = [
-  "workflow_versions_org_workflow_version_idx",
-  "workflows_pkey",
-];
-
-/**
- * Probe the underlying Postgres error for one of the retryable
- * unique-constraint shapes. Drizzle wraps the pg driver error in
- * different ways depending on the failure mode, so we walk both
- * `err.code`, `err.cause?.code`, and the `constraint` /
- * `constraint_name` fields defensively.
- *
- * Returns `true` only when the error is BOTH a 23505 AND on one of
- * the retryable indexes (or no constraint name is exposed — defensive
- * default, since the only realistic 23505 sources inside this
- * transaction are the two listed above). Any other shape returns
- * `false` so the caller re-throws.
- */
-export function isRetryableSaveViolation(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-
-  // Walk a small chain in case Drizzle wrapped the pg error.
-  const candidates: unknown[] = [err];
-  const seen = new WeakSet<object>();
-  let cursor: unknown = err;
-  for (let i = 0; i < 5; i += 1) {
-    if (!cursor || typeof cursor !== "object" || seen.has(cursor as object)) break;
-    seen.add(cursor as object);
-    candidates.push(cursor);
-    const next = (cursor as { cause?: unknown }).cause;
-    if (next === cursor || !next) break;
-    cursor = next;
-  }
-
-  for (const candidate of candidates) {
-    if (!candidate || typeof candidate !== "object") continue;
-    const obj = candidate as { code?: unknown; constraint?: unknown; constraint_name?: unknown };
-    if (obj.code !== PG_UNIQUE_VIOLATION) continue;
-    const constraint = typeof obj.constraint === "string"
-      ? obj.constraint
-      : typeof obj.constraint_name === "string"
-        ? obj.constraint_name
-        : null;
-    // Match one of the retryable indexes by name when available; when
-    // the driver doesn't expose the constraint name, accept any 23505
-    // since no other unique index in the save transaction can
-    // plausibly fire (the only other unique surfaces are the
-    // workflow_versions PK on `id` — protected by per-attempt fresh
-    // UUIDs — and audit / usage tables this route never touches).
-    if (constraint === null || RETRYABLE_SAVE_CONSTRAINTS.includes(constraint)) return true;
-    return false;
-  }
-  return false;
-}
+/** Backward-compatible aliases retained for focused save-helper tests. */
+export const MAX_SAVE_ATTEMPTS = MAX_VERSION_WRITE_ATTEMPTS;
+export const isRetryableSaveViolation = isRetryableVersionWriteViolation;
 
 /**
  * Save a workflow as a new version. Generates the workflow id, name,
@@ -192,7 +119,7 @@ export async function saveWorkflowVersion(args: {
     .limit(1);
   if (existingForGate[0]?.deletedAt) return { kind: "deleted" };
 
-  for (let attempt = 1; attempt <= MAX_SAVE_ATTEMPTS; attempt += 1) {
+  for (let attempt = 1; attempt <= MAX_VERSION_WRITE_ATTEMPTS; attempt += 1) {
     // A fresh `versionId` per attempt — the previous attempt's INSERT
     // was rolled back when the transaction aborted, but generating a
     // new UUID makes log lines unambiguous if a row partially landed
@@ -201,23 +128,45 @@ export async function saveWorkflowVersion(args: {
     const versionId = crypto.randomUUID();
     try {
       const { nextVersion } = await db.transaction(async (tx) => {
-        const existingVersions = await tx.select().from(workflowVersions)
+        // Lock the parent before rollout/version reads. Rollout creation takes
+        // the same lock, closing the save-vs-deploy race across replicas.
+        const existingWorkflow = await tx.select().from(workflows)
+          .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, orgId)))
+          .limit(1)
+          .for("update");
+        if (existingWorkflow[0]) {
+          const activeRollout = await tx.select({ id: workflowRollouts.id })
+            .from(workflowRollouts)
+            .where(and(
+              eq(workflowRollouts.orgId, orgId),
+              eq(workflowRollouts.workflowId, workflowId),
+              eq(workflowRollouts.status, "active"),
+            ))
+            .limit(1);
+          if (activeRollout[0]) throw new ActiveWorkflowRolloutError();
+        }
+
+        const latestVersions = await tx.select({
+          version: workflowVersions.version,
+          sloJson: workflowVersions.sloJson,
+          upstreamHealthSources: workflowVersions.upstreamHealthSources,
+        }).from(workflowVersions)
           .where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, orgId)))
-          .orderBy(desc(workflowVersions.version));
-        const computedVersion = (existingVersions[0]?.version ?? 0) + 1;
+          .orderBy(desc(workflowVersions.version))
+          .limit(1);
+        const latestVersion = latestVersions[0];
+        const computedVersion = (latestVersion?.version ?? 0) + 1;
         // Carry forward the prior version's SLO so the operator does not
         // have to re-declare it on every workflow edit. A dedicated
         // setWorkflowSlo route writes to the latest version in place.
-        const inheritedSloJson = existingVersions[0]?.sloJson ?? null;
+        const inheritedSloJson = latestVersion?.sloJson ?? null;
         // Carry forward upstream-health source tags the same way. An explicit
         // value in the save body overrides; `undefined` inherits.
         const resolvedUpstreamHealthSources =
           upstreamHealthSources !== undefined
             ? upstreamHealthSources
-            : ((existingVersions[0]?.upstreamHealthSources as string[] | null) ?? null);
+            : ((latestVersion?.upstreamHealthSources as string[] | null) ?? null);
 
-        const existingWorkflow = await tx.select().from(workflows)
-          .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, orgId)));
         if (existingWorkflow[0]) {
           if (existingWorkflow[0].name !== workflowName) {
             await tx.update(workflows).set({ name: workflowName })
@@ -267,7 +216,8 @@ export async function saveWorkflowVersion(args: {
         attempts: attempt,
       };
     } catch (err) {
-      if (isRetryableSaveViolation(err) && attempt < MAX_SAVE_ATTEMPTS) {
+      if (err instanceof ActiveWorkflowRolloutError) return { kind: "rollout_active" };
+      if (isRetryableVersionWriteViolation(err) && attempt < MAX_VERSION_WRITE_ATTEMPTS) {
         // Lost the version-uniqueness race against a concurrent saver.
         // The other writer's row has committed; the next loop
         // iteration's `select latest version` will see it and bump
@@ -279,8 +229,8 @@ export async function saveWorkflowVersion(args: {
       // The "exhausted with 23505" case becomes the conflict envelope
       // below by construction (we only reach here when retry isn't
       // permitted).
-      if (isRetryableSaveViolation(err)) {
-        return { kind: "conflict", attempts: MAX_SAVE_ATTEMPTS };
+      if (isRetryableVersionWriteViolation(err)) {
+        return { kind: "conflict", attempts: MAX_VERSION_WRITE_ATTEMPTS };
       }
       throw err;
     }
@@ -289,5 +239,5 @@ export async function saveWorkflowVersion(args: {
   // Defensive — all paths above either return or throw. Fall-through
   // here means we ran out of attempts without a successful return,
   // matching the "exhausted with 23505" case.
-  return { kind: "conflict", attempts: MAX_SAVE_ATTEMPTS };
+  return { kind: "conflict", attempts: MAX_VERSION_WRITE_ATTEMPTS };
 }

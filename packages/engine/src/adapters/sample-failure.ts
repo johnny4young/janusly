@@ -2,14 +2,14 @@
  * Synthetic failure injection — seeds a `failed` run + an `open`
  * dead-letter row for a code-authored fixture so an operator can drive
  * the real recovery loop (DeadLettersPanel → "Suggest fix" →
- * `/ai/patch-workflow`) on demand. Used by the solution-pack
- * "break a node" demo affordance.
+ * `/ai/patch-workflow`) on demand. Used by the solution-pack Recovery
+ * Drills affordance.
  *
  * This mirrors the dev seeder `scripts/seed-recovery-matrix.ts`: it writes
  * the prerequisite `runs` / `run_nodes` / `run_events` / `dead_letters`
  * rows DIRECTLY rather than through the queue's `DeadLetterQueueAdapter`.
  * That bypass is intentional and correct here — there is no real queued
- * job to dead-letter; the failure is a deterministic demo fixture, not a
+ * job to dead-letter; the failure is a deterministic drill fixture, not a
  * runtime fault. The fixture payloads are code-resident (no untrusted
  * input), but every jsonb write still goes through `safePersistPayload`
  * to honor the persist chokepoint.
@@ -20,14 +20,28 @@
  * Invariants:
  * - Multi-tenant scope is enforced by the route layer; the run + DLQ rows
  *   carry the caller's `orgId`.
+ * - Every synthetic run carries a bounded `drill` provenance block in
+ *   `runs.inputJson` and its `node.failed` event. Recovery classifiers still
+ *   receive the original error envelope unchanged.
  * - `replayMode` is left null (a "production"-shaped failure) so the row
  *   appears in DeadLettersPanel exactly like a real failure would, same
  *   as the recovery-matrix seeder.
  */
 
+import { recordRecoveryItemCreationEvent } from "@janusly/data";
 import { db, runs, runNodes, runEvents, deadLetters } from "@janusly/db";
 import type { Workflow } from "@janusly/shared";
+import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 import { safePersistPayload } from "../safe-persist";
+
+/** Durable provenance for a code-authored solution-pack failure. */
+export type SampleFailureDrillSource = {
+  kind: "solution_pack_drill";
+  packId: string;
+  fixtureId: string;
+  failureMode: string;
+  recoveryPath: "direct_failure" | "stalled_node_reaper";
+};
 
 /** Input for a synthetic failure injection. */
 export type InjectSampleFailureInput = {
@@ -41,6 +55,8 @@ export type InjectSampleFailureInput = {
   failedNodeId: string;
   /** Persisted error envelope shape the recovery dialog reads. */
   errorJson: Record<string, unknown>;
+  /** Bounded source metadata that distinguishes this run from a runtime fault. */
+  source: SampleFailureDrillSource;
 };
 
 /**
@@ -53,7 +69,7 @@ export type InjectSampleFailureInput = {
 export async function injectSampleFailure(
   input: InjectSampleFailureInput,
 ): Promise<{ runId: string; deadLetterId: string }> {
-  const { orgId, createdBy, workflow, failedNodeId, errorJson } = input;
+  const { orgId, createdBy, workflow, failedNodeId, errorJson, source } = input;
 
   const failingNode = workflow.nodes.find((node) => node.id === failedNodeId);
   if (!failingNode) {
@@ -71,7 +87,7 @@ export async function injectSampleFailure(
       workflowVersionId,
       status: "failed",
       createdBy: createdBy ?? null,
-      inputJson: safePersistPayload({ workflow, input: {} }),
+      inputJson: safePersistPayload({ workflow, input: {}, drill: source }),
     });
 
     await tx.insert(runNodes).values({
@@ -89,7 +105,7 @@ export async function injectSampleFailure(
       runId,
       nodeId: failedNodeId,
       type: "node.failed",
-      payload: safePersistPayload({ error: errorJson }),
+      payload: safePersistPayload({ error: errorJson, drill: source }),
     });
 
     await tx.insert(deadLetters).values({
@@ -103,6 +119,22 @@ export async function injectSampleFailure(
       errorJson: safePersistPayload(errorJson),
       status: "open",
     });
+  });
+
+  // Mirror the production DLQ adapter's post-commit ownership hook. This is
+  // intentionally outside the transaction: configuration, audit, and alert
+  // failures must never roll back the durable drill failure.
+  const errorSignature = normalizeErrorSignature(errorJson, {
+    nodeId: failedNodeId,
+    nodeType: failingNode.type,
+    toolName: typeof failingNode.config?.tool === "string" ? failingNode.config.tool : undefined,
+  }).signature;
+  await recordRecoveryItemCreationEvent({
+    orgId,
+    deadLetterId,
+    workflowId: workflow.id ?? null,
+    errorSignature,
+    createdBy: createdBy ?? "system",
   });
 
   return { runId, deadLetterId };

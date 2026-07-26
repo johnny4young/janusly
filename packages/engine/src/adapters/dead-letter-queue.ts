@@ -34,6 +34,7 @@ import { publishRunEvent } from "../run-event-stream";
 import type {
   DeadLetterInput,
   QueueAdapter,
+  SerializedError,
   TerminalFailureInput,
 } from "../core/types";
 
@@ -50,6 +51,52 @@ const DLQ_ERROR_JSON_MAX_BYTES = 64_000;
 // `node.config.headers` is scrubbed) but skips the size step entirely.
 const DLQ_PAYLOAD_NO_TRUNCATE = Number.POSITIVE_INFINITY;
 
+/** Replay payload available for a stalled node whose run snapshot is valid. */
+export type StalledDeadLetterPayload = {
+  deadLetterId?: string;
+  workflowId?: string | null;
+  workflow: DeadLetterInput["workflow"];
+  node: DeadLetterInput["node"];
+};
+
+/** Atomic stalled-node failure input used by the production reaper and drills. */
+export type StalledTerminalFailureInput = {
+  runId: string;
+  orgId: string;
+  nodeId: string;
+  attempt: number;
+  error: SerializedError;
+  /** Null when a legacy run snapshot cannot reconstruct a replay-safe DLQ row. */
+  deadLetter: StalledDeadLetterPayload | null;
+  /** Bounded causal metadata added to the node.failed event. */
+  eventMetadata?: Record<string, unknown>;
+};
+
+/** Result of one atomic stalled-node claim. */
+export type StalledTerminalFailureResult = {
+  persisted: boolean;
+  deadLettered: boolean;
+  deadLetterId: string | null;
+};
+
+type AtomicTerminalFailureInput = {
+  runId: string;
+  orgId: string;
+  nodeId: string;
+  attempt: number;
+  error: SerializedError;
+  deadLetter: DeadLetterInput | null;
+  acceptedRunStatuses: readonly string[];
+  enforceRecoveryClaim: boolean;
+  recoveryClaimToken?: string;
+  nodeEventMetadata?: Record<string, unknown>;
+};
+
+type AtomicTerminalFailureResult = StalledTerminalFailureResult & {
+  runFlipped: boolean;
+  failedNodes: number;
+};
+
 /** Persists exhausted-retry jobs to `dead_letters` for later replay or resolution. */
 export class DeadLetterQueueAdapter implements Partial<QueueAdapter> {
   /**
@@ -59,8 +106,74 @@ export class DeadLetterQueueAdapter implements Partial<QueueAdapter> {
    * recovery instead of stranding a half-failed run.
    */
   async persistTerminalFailure(input: TerminalFailureInput): Promise<boolean> {
-    const deadLetterId = input.deadLetterId ?? crypto.randomUUID();
-    const workflowId = input.workflowId ?? input.workflow.id ?? null;
+    const result = await this.persistAtomicTerminalFailure({
+      runId: input.runId,
+      orgId: input.orgId,
+      nodeId: input.node.id,
+      attempt: input.attempt,
+      error: input.error,
+      deadLetter: input,
+      acceptedRunStatuses: ["running", "failed"],
+      enforceRecoveryClaim: true,
+      recoveryClaimToken: input.recoveryClaimToken,
+    });
+    return result.persisted;
+  }
+
+  /**
+   * Atomically claim and terminate a stalled running node. A valid persisted
+   * workflow snapshot adds the DLQ row in the same transaction; legacy or
+   * malformed snapshots still commit the node event and parent-run failure.
+   */
+  async persistStalledTerminalFailure(
+    input: StalledTerminalFailureInput,
+  ): Promise<StalledTerminalFailureResult> {
+    if (input.deadLetter && input.deadLetter.node.id !== input.nodeId) {
+      throw new Error("stalled dead-letter node does not match the claimed node");
+    }
+    const deadLetter: DeadLetterInput | null = input.deadLetter
+      ? {
+          deadLetterId: input.deadLetter.deadLetterId,
+          runId: input.runId,
+          orgId: input.orgId,
+          workflowId: input.deadLetter.workflowId,
+          workflow: input.deadLetter.workflow,
+          node: input.deadLetter.node,
+          attempt: input.attempt,
+          error: input.error,
+        }
+      : null;
+    const result = await this.persistAtomicTerminalFailure({
+      runId: input.runId,
+      orgId: input.orgId,
+      nodeId: input.nodeId,
+      attempt: input.attempt,
+      error: input.error,
+      deadLetter,
+      acceptedRunStatuses: ["created", "running", "waiting"],
+      enforceRecoveryClaim: false,
+      nodeEventMetadata: {
+        ...(input.eventMetadata ?? {}),
+        reason: "worker_stalled",
+      },
+    });
+    return {
+      persisted: result.persisted,
+      deadLettered: result.deadLettered,
+      deadLetterId: result.deadLetterId,
+    };
+  }
+
+  /** Shared transaction and post-commit publication for every terminal path. */
+  private async persistAtomicTerminalFailure(
+    input: AtomicTerminalFailureInput,
+  ): Promise<AtomicTerminalFailureResult> {
+    const deadLetterId = input.deadLetter
+      ? input.deadLetter.deadLetterId ?? crypto.randomUUID()
+      : null;
+    const workflowId = input.deadLetter
+      ? input.deadLetter.workflowId ?? input.deadLetter.workflow.id ?? null
+      : null;
     const failedAt = new Date();
     // `node.failed` is the causal failure and `run.failed` is its aggregate
     // consequence. Keep their keyset order explicit even though both commit in
@@ -69,22 +182,36 @@ export class DeadLetterQueueAdapter implements Partial<QueueAdapter> {
     const runFailedAt = new Date(failedAt.getTime() + 1);
     const nodeEventId = crypto.randomUUID();
     const runEventId = crypto.randomUUID();
-    const nodeEventPayload = safePersistPayload({ error: input.error, attempt: input.attempt });
+    const nodeEventPayload = safePersistPayload({
+      ...(input.nodeEventMetadata ?? {}),
+      // Fixed causal fields win over optional metadata so future callers
+      // cannot accidentally rewrite the terminal error or attempt number.
+      error: input.error,
+      attempt: input.attempt,
+    });
 
     const result = await db.transaction(async (tx) => {
       const [run] = await tx
         .select({ status: runs.status })
         .from(runs)
-        .where(eq(runs.id, input.runId))
+        .where(and(eq(runs.id, input.runId), eq(runs.orgId, input.orgId)))
         .limit(1)
         .for("update");
-      if (!run || (run.status !== "running" && run.status !== "failed")) {
-        return { persisted: false, runFlipped: false, failedNodes: 0 };
+      if (!run || !input.acceptedRunStatuses.includes(run.status)) {
+        return {
+          persisted: false,
+          deadLettered: false,
+          deadLetterId: null,
+          runFlipped: false,
+          failedNodes: 0,
+        };
       }
 
-      const claimPredicate = input.recoveryClaimToken
-        ? eq(runNodes.recoveryClaimToken, input.recoveryClaimToken)
-        : isNull(runNodes.recoveryClaimToken);
+      const claimPredicate = input.enforceRecoveryClaim
+        ? input.recoveryClaimToken
+          ? eq(runNodes.recoveryClaimToken, input.recoveryClaimToken)
+          : isNull(runNodes.recoveryClaimToken)
+        : undefined;
       const [failedNode] = await tx
         .update(runNodes)
         .set({
@@ -94,29 +221,39 @@ export class DeadLetterQueueAdapter implements Partial<QueueAdapter> {
         })
         .where(and(
           eq(runNodes.runId, input.runId),
-          eq(runNodes.nodeId, input.node.id),
+          eq(runNodes.nodeId, input.nodeId),
           eq(runNodes.status, "running"),
-          claimPredicate,
+          ...(claimPredicate ? [claimPredicate] : []),
         ))
         .returning({ id: runNodes.id });
-      if (!failedNode) return { persisted: false, runFlipped: false, failedNodes: 0 };
+      if (!failedNode) {
+        return {
+          persisted: false,
+          deadLettered: false,
+          deadLetterId: null,
+          runFlipped: false,
+          failedNodes: 0,
+        };
+      }
 
-      await tx.insert(deadLetters).values({
-        id: deadLetterId,
-        orgId: input.orgId,
-        runId: input.runId,
-        nodeId: input.node.id,
-        attempt: input.attempt,
-        workflowJson: safePersistPayload(input.workflow, { maxBytes: DLQ_PAYLOAD_NO_TRUNCATE }),
-        nodeJson: safePersistPayload(input.node, { maxBytes: DLQ_PAYLOAD_NO_TRUNCATE }),
-        errorJson: safePersistPayload(input.error, { maxBytes: DLQ_ERROR_JSON_MAX_BYTES }),
-        createdAt: failedAt,
-      });
+      if (input.deadLetter && deadLetterId) {
+        await tx.insert(deadLetters).values({
+          id: deadLetterId,
+          orgId: input.orgId,
+          runId: input.runId,
+          nodeId: input.nodeId,
+          attempt: input.attempt,
+          workflowJson: safePersistPayload(input.deadLetter.workflow, { maxBytes: DLQ_PAYLOAD_NO_TRUNCATE }),
+          nodeJson: safePersistPayload(input.deadLetter.node, { maxBytes: DLQ_PAYLOAD_NO_TRUNCATE }),
+          errorJson: safePersistPayload(input.error, { maxBytes: DLQ_ERROR_JSON_MAX_BYTES }),
+          createdAt: failedAt,
+        });
+      }
 
       await tx.insert(runEvents).values({
         id: nodeEventId,
         runId: input.runId,
-        nodeId: input.node.id,
+        nodeId: input.nodeId,
         type: "node.failed",
         payload: nodeEventPayload,
         createdAt: failedAt,
@@ -124,7 +261,7 @@ export class DeadLetterQueueAdapter implements Partial<QueueAdapter> {
 
       let runFlipped = false;
       let failedNodes = 1;
-      if (run.status === "running") {
+      if (run.status !== "failed") {
         const countRows = await tx
           .select({ count: sql<number>`count(*)::int` })
           .from(runNodes)
@@ -136,7 +273,7 @@ export class DeadLetterQueueAdapter implements Partial<QueueAdapter> {
             status: "failed",
             parentNotificationAfter: terminalParentNotificationMarker(),
           })
-          .where(and(eq(runs.id, input.runId), eq(runs.status, "running")))
+          .where(and(eq(runs.id, input.runId), eq(runs.status, run.status)))
           .returning({ id: runs.id });
         runFlipped = Boolean(flipped);
         if (runFlipped) {
@@ -151,15 +288,21 @@ export class DeadLetterQueueAdapter implements Partial<QueueAdapter> {
         }
       }
 
-      return { persisted: true, runFlipped, failedNodes };
+      return {
+        persisted: true,
+        deadLettered: Boolean(input.deadLetter && deadLetterId),
+        deadLetterId,
+        runFlipped,
+        failedNodes,
+      };
     });
 
-    if (!result.persisted) return false;
+    if (!result.persisted) return result;
 
     publishRunEvent(input.runId, {
       kind: "event",
       id: nodeEventId,
-      nodeId: input.node.id,
+      nodeId: input.nodeId,
       type: "node.failed",
       payload: nodeEventPayload,
       createdAt: failedAt.toISOString(),
@@ -177,33 +320,14 @@ export class DeadLetterQueueAdapter implements Partial<QueueAdapter> {
     }
     publishRunEvent(input.runId, { kind: "run.status", status: "failed" });
 
-    await this.afterDeadLetterCommitted({
-      input,
-      deadLetterId,
-      workflowId,
-    });
-    return true;
-  }
-
-  /** Insert one row capturing the full failed job payload. */
-  async enqueueDeadLetter(input: DeadLetterInput): Promise<void> {
-    const deadLetterId = input.deadLetterId ?? crypto.randomUUID();
-    const workflowId = input.workflowId ?? input.workflow.id ?? null;
-    await db.insert(deadLetters).values({
-      id: deadLetterId,
-      orgId: input.orgId,
-      runId: input.runId,
-      nodeId: input.node.id,
-      attempt: input.attempt,
-      // Workflow + node JSONs are key-redacted (defense against literal
-      // `Authorization` fields in the config) but never truncated —
-      // `/dlq/replay` needs the exact failed job to reconstruct.
-      workflowJson: safePersistPayload(input.workflow, { maxBytes: DLQ_PAYLOAD_NO_TRUNCATE }),
-      nodeJson: safePersistPayload(input.node, { maxBytes: DLQ_PAYLOAD_NO_TRUNCATE }),
-      errorJson: safePersistPayload(input.error, { maxBytes: DLQ_ERROR_JSON_MAX_BYTES }),
-    });
-
-    await this.afterDeadLetterCommitted({ input, deadLetterId, workflowId });
+    if (input.deadLetter && deadLetterId) {
+      await this.afterDeadLetterCommitted({
+        input: input.deadLetter,
+        deadLetterId,
+        workflowId,
+      });
+    }
+    return result;
   }
 
   /** Fire non-transactional ownership and alert side effects after commit. */

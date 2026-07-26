@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: Janusly
+    orgId: 1
+    folder: Janusly
+    type: file
+    disableDeletion: true
+    editable: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

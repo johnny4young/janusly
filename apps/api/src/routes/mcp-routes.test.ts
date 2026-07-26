@@ -799,6 +799,7 @@ describe("POST /mcp/connections/:alias/tools/:toolName", () => {
 describe("admin gates on every mutating route", () => {
   it("declares admin role + mcp.connections.write on every mutating route", () => {
     for (const route of mcpRoutes) {
+      expect(route.contract).toBeDefined();
       if (route.method === "POST" || route.method === "DELETE") {
         expect(route.role).toBe("admin");
         expect(route.permission).toBe("mcp.connections.write");
@@ -806,6 +807,28 @@ describe("admin gates on every mutating route", () => {
         expect(route.permission).toBe("mcp.connections.read");
       }
     }
+  });
+});
+
+describe("stable MCP connection contracts", () => {
+  it("accepts the serialized list shape returned by the route", () => {
+    const route = findRoute("GET", "/mcp/connections");
+    expect(route?.contract?.response.safeParse({
+      connections: [{ ...connectionRow, toolCount: 2, enabledToolCount: 1 }],
+    }).success).toBe(true);
+  });
+
+  it("rejects unknown create fields and invalid decoded aliases", () => {
+    const create = findRoute("POST", "/mcp/connections")?.contract;
+    expect(create?.request?.body?.safeParse({
+      alias: "demo",
+      transport: "http",
+      url: "https://mcp.example.test",
+      secret: "must-not-be-accepted",
+    }).success).toBe(false);
+
+    const tools = findRoute("GET", "/mcp/connections/demo/tools")?.contract;
+    expect(tools?.request?.path?.safeParse({ alias: "Bad Alias" }).success).toBe(false);
   });
 });
 
@@ -824,6 +847,7 @@ describe("MCP-source write consent gate", () => {
 
   const cases: Array<{ name: string; method: string; url: string; body?: unknown }> = [
     { name: "create", method: "POST", url: "/mcp/connections", body: { alias: "demo", transport: "stdio", command: "node" } },
+    { name: "update", method: "POST", url: "/mcp/connections/demo", body: { enabled: false } },
     { name: "delete", method: "DELETE", url: "/mcp/connections/demo" },
     { name: "rediscover", method: "POST", url: "/mcp/connections/demo/rediscover" },
     { name: "set_tool", method: "POST", url: "/mcp/connections/demo/tools/pages.update", body: { enabled: true } },

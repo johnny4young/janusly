@@ -41,6 +41,7 @@ type HumanFormWaiting = {
   title?: string
   description?: string
   schema: WorkflowInputSchemaShape
+  initialValues?: unknown
   resumeToken: string
 }
 
@@ -55,6 +56,7 @@ function readHumanFormWaiting(node: RunNode): HumanFormWaiting | null {
     title: typeof data.title === 'string' ? data.title : undefined,
     description: typeof data.description === 'string' ? data.description : undefined,
     schema: data.schema,
+    initialValues: data.initialValues,
     resumeToken: data.resumeToken,
   }
 }
@@ -75,7 +77,7 @@ function isWorkflowInputSchemaShape(value: unknown): value is WorkflowInputSchem
   return true
 }
 
-type RunsPanelProps = {
+export type RunsPanelProps = {
   runs: RunSummary[]
   workflows: SavedWorkflow[]
   usage: Record<string, number>
@@ -91,6 +93,16 @@ type RunsPanelProps = {
   onCancelActiveRun?: () => void | Promise<void>
   onReplayDeadLetter: (id: string, createdAtIso?: string) => boolean | Promise<boolean> | undefined
   onResolveDeadLetter: (id: string) => boolean | Promise<boolean> | undefined
+  canStartRuns?: boolean
+  canCancelRuns?: boolean
+  canReplayDeadLetters?: boolean
+  canResolveDeadLetters?: boolean
+  canUseRecovery?: boolean
+  canReadAutoHealing?: boolean
+  canDecideAutoHealing?: boolean
+  /** Opens the run's timeline. RunWorkspace overrides this to stay in-context;
+   * direct/legacy mounts retain the Reasoning-tab fallback. */
+  onViewTimeline?: () => void
 }
 
 type SubmitHumanFormResult = string[] | undefined
@@ -136,6 +148,14 @@ export function RunsPanel({
   onCancelActiveRun,
   onReplayDeadLetter,
   onResolveDeadLetter,
+  canStartRuns = true,
+  canCancelRuns = true,
+  canReplayDeadLetters = true,
+  canResolveDeadLetters = true,
+  canUseRecovery = true,
+  canReadAutoHealing = true,
+  canDecideAutoHealing = true,
+  onViewTimeline,
 }: RunsPanelProps) {
   const { t } = useT()
   const waitingNodes = runNodes.filter(node => node.status === 'waiting')
@@ -187,7 +207,7 @@ export function RunsPanel({
     ? formatCompactDuration(Math.max(0, (Number.isFinite(finishedAtMs) && activeRun && isTerminalRunStatus(activeRun.status) ? finishedAtMs : clockNow) - startedAtMs))
     : null
   const isActiveRunCancellable = Boolean(
-    activeRunId && onCancelActiveRun && (!activeRun || !isTerminalRunStatus(activeRun.status)),
+    canCancelRuns && activeRunId && onCancelActiveRun && (!activeRun || !isTerminalRunStatus(activeRun.status)),
   )
 
   // Fork-eligible nodes: only terminal node states (succeeded / failed)
@@ -266,11 +286,11 @@ export function RunsPanel({
               <button
                 type="button"
                 className="small-command"
-                onClick={() => setActiveTab('reasoning')}
+                onClick={() => onViewTimeline ? onViewTimeline() : setActiveTab('reasoning')}
               >
                 <Activity size={12} aria-hidden="true" /> {t('rightPanel.runs.viewTimeline')}
               </button>
-              {activeRun && !activeRun.replayMode && isTerminalRunStatus(activeRun.status) && (
+              {canStartRuns && activeRun && !activeRun.replayMode && isTerminalRunStatus(activeRun.status) && (
                 <button
                   type="button"
                   className="small-command"
@@ -280,14 +300,16 @@ export function RunsPanel({
                   <FlaskConical size={12} aria-hidden="true" /> {t('rightPanel.runs.openInLab')}
                 </button>
               )}
-              <button
-                type="button"
-                className="small-command"
-                onClick={() => onCancelActiveRun?.()}
-                disabled={!isActiveRunCancellable}
-              >
-                {t('rightPanel.runs.cancelRun')}
-              </button>
+              {canCancelRuns && (
+                <button
+                  type="button"
+                  className="small-command"
+                  onClick={() => onCancelActiveRun?.()}
+                  disabled={!isActiveRunCancellable}
+                >
+                  {t('rightPanel.runs.cancelRun')}
+                </button>
+              )}
             </div>
           </div>
           <dl className="we-run-overview__facts">
@@ -427,7 +449,7 @@ export function RunsPanel({
                     )}
                   </div>
                 )}
-                {form ? (
+                {form && canStartRuns ? (
                 <button
                   className="small-command small-command--primary"
                   onClick={() => {
@@ -437,7 +459,7 @@ export function RunsPanel({
                 >
                   {t('rightPanel.runs.fillForm', { nodeId: node.nodeId })}
                 </button>
-                ) : canResumeWaitingKind(waiting.kind) ? (
+                ) : canStartRuns && canResumeWaitingKind(waiting.kind) ? (
                   <button className="small-command" onClick={() => onApproveNode(node.nodeId)}>
                     {t(waitActionLabelKey(waiting.kind), { nodeId: node.nodeId })}
                   </button>
@@ -452,9 +474,11 @@ export function RunsPanel({
 
       {activeHumanFormNode && activeHumanForm && (
         <HumanFormDialog
+          key={activeHumanFormNode.nodeId}
           title={activeHumanForm.title}
           description={activeHumanForm.description}
           schema={activeHumanForm.schema}
+          initialValues={activeHumanForm.initialValues}
           serverErrors={humanFormErrors}
           submitting={humanFormSubmitting}
           onCancel={() => {
@@ -503,26 +527,32 @@ export function RunsPanel({
                 {errorMessage && (
                   <p className="we-failed-node__error" title={errorMessage}>{errorMessage}</p>
                 )}
-                <div className="split-row">
-                  <button className="small-command" onClick={() => onReplayNode(node.nodeId)}>
-                    {t('rightPanel.runs.retry', { nodeId: node.nodeId })}
-                  </button>
-                  <button
-                    className="small-command small-command--primary"
-                    onClick={() => onRedriveNode(node.nodeId)}
-                    title={t('rightPanel.runs.redriveTitle')}
-                    data-testid={`redrive-node-${node.nodeId}`}
-                  >
-                    {t('rightPanel.runs.redrive')}
-                  </button>
-                </div>
+                {(canReplayDeadLetters || canStartRuns) && (
+                  <div className="split-row">
+                    {canReplayDeadLetters && (
+                      <button className="small-command" onClick={() => onReplayNode(node.nodeId)}>
+                        {t('rightPanel.runs.retry', { nodeId: node.nodeId })}
+                      </button>
+                    )}
+                    {canStartRuns && (
+                      <button
+                        className="small-command small-command--primary"
+                        onClick={() => onRedriveNode(node.nodeId)}
+                        title={t('rightPanel.runs.redriveTitle')}
+                        data-testid={`redrive-node-${node.nodeId}`}
+                      >
+                        {t('rightPanel.runs.redrive')}
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             )
           })}
         </section>
       )}
 
-      {forkableNodes.length > 0 && (
+      {canStartRuns && forkableNodes.length > 0 && (
         <section className="we-card action-card">
           <div>
             <strong>{t('replayLab.fork.sectionKicker')}</strong>
@@ -550,13 +580,19 @@ export function RunsPanel({
         onRefresh={onRefreshPlatform}
         onReplay={onReplayDeadLetter}
         onResolve={onResolveDeadLetter}
+        canReplay={canReplayDeadLetters}
+        canResolve={canResolveDeadLetters}
+        canStartRuns={canStartRuns}
+        canUseRecovery={canUseRecovery}
+        canReadAutoHealing={canReadAutoHealing}
+        canDecideAutoHealing={canDecideAutoHealing}
       />
 
       <RunHistoryList
         runs={runs}
         workflows={workflows}
         onOpenRun={onOpenRun}
-        onOpenLab={setLabSourceRun}
+        onOpenLab={canStartRuns ? setLabSourceRun : undefined}
         onSend={setDeliveryRun}
       />
 

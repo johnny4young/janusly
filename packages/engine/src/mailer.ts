@@ -1,5 +1,5 @@
 /**
- * Pluggable mailer abstraction for the `email.send` tool. Three
+ * Pluggable mailer abstraction for the `email.send` tool. Four
  * providers, env-driven resolution at call time, plus a test-override
  * seam.
  *
@@ -9,6 +9,8 @@
  *                          configured", provider: "noop" }`. Lights up
  *                          when no `*_API_KEY` is present so the AI-
  *                          fallback contract holds without throwing.
+ *   - `SimulatorMailer` — explicit local-stack delivery to the bundled
+ *                          provider simulator. Never selected implicitly.
  *
  * Both real providers go out via `fetchHttpTarget` (the existing SSRF-
  * guarded HTTP chokepoint). No new SDK deps, no DNS-rebind risk on the
@@ -25,7 +27,8 @@
  *   1. Test override (`setMailerForTests(provider)`) when set.
  *   2. Tenant/provider override or `JANUSLY_MAILER_PROVIDER === "resend"` AND `RESEND_API_KEY` set.
  *   3. Tenant/provider override or `JANUSLY_MAILER_PROVIDER === "sendgrid"` AND `SENDGRID_API_KEY`.
- *   4. Otherwise `NoopMailer`.
+ *   4. Explicit `simulator` selection when the local simulator process gate is enabled.
+ *   5. Otherwise `NoopMailer`.
  *
  * Default `from` is chosen by the tool wrapper from tenant config
  * (`email.from`) with `JANUSLY_MAILER_FROM` as env fallback. Resend's
@@ -35,8 +38,9 @@
  */
 
 import { fetchHttpTarget } from "./http-policy";
+import { localIntegrationSimulatorEndpoint } from "./local-integration-simulator";
 
-export type MailerProviderName = "resend" | "sendgrid" | "noop";
+export type MailerProviderName = "resend" | "sendgrid" | "simulator" | "noop";
 
 export type MailerSendInput = {
   to: string;
@@ -147,6 +151,37 @@ class SendGridMailer implements MailerProvider {
   }
 }
 
+class SimulatorMailer implements MailerProvider {
+  readonly name = "simulator" as const;
+
+  async send(input: MailerSendInput): Promise<MailerSendResult> {
+    try {
+      const endpoint = localIntegrationSimulatorEndpoint("/email/send");
+      if (!endpoint) {
+        return { ok: false, provider: "simulator", error: "Local integration simulator is not enabled" };
+      }
+      const result = await fetchHttpTarget(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      if (!result.ok) {
+        return { ok: false, provider: "simulator", error: `Simulator returned HTTP ${result.statusCode}: ${truncate(result.body)}` };
+      }
+      const parsed = safeJsonParse(result.body);
+      const messageId = parsed && typeof parsed === "object" && "id" in parsed
+        && typeof (parsed as { id: unknown }).id === "string"
+        ? (parsed as { id: string }).id
+        : null;
+      return messageId
+        ? { ok: true, provider: "simulator", providerMessageId: messageId }
+        : { ok: false, provider: "simulator", error: "Simulator response missing message id" };
+    } catch (err) {
+      return { ok: false, provider: "simulator", error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+}
+
 class NoopMailer implements MailerProvider {
   readonly name = "noop" as const;
   async send(_input: MailerSendInput): Promise<MailerSendResult> {
@@ -183,6 +218,9 @@ export function getMailer(providerOverride?: string): MailerProvider {
   }
   if (requested === "sendgrid" && process.env.SENDGRID_API_KEY) {
     return new SendGridMailer(process.env.SENDGRID_API_KEY);
+  }
+  if (requested === "simulator" && process.env.JANUSLY_LOCAL_INTEGRATION_SIMULATOR === "true") {
+    return new SimulatorMailer();
   }
   return new NoopMailer();
 }

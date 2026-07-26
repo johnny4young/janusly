@@ -10,6 +10,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkflowSlo } from "@janusly/shared";
 
+const softDeleteWorkflowMock = vi.hoisted(() => vi.fn(async () => true));
+
 vi.mock("../http", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../http")>();
   const sendJson = vi.fn((_res: unknown, payload: unknown, status = 200) => ({ payload, status }));
@@ -42,6 +44,11 @@ vi.mock("@janusly/data/src/workflowsListRepo", () => ({
   listWorkflowsWithRunSummary: vi.fn(),
   listDeletedWorkflowsWithRunSummary: vi.fn(),
 }));
+
+vi.mock("@janusly/data", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@janusly/data")>();
+  return { ...actual, softDeleteWorkflow: softDeleteWorkflowMock };
+});
 
 // `workflows-routes` reaches the trigger backfill on the resume path, which
 // pulls `startRun` -> the BullMQ queue module. Stubbed here for the same
@@ -333,8 +340,9 @@ describe("DELETE /workflows/:id handler", () => {
   it("soft-deletes a workflow (tombstones via UPDATE; keeps versions + metadata)", async () => {
     await callRoute("DELETE", "/workflows/wf-1", {});
 
-    // Soft delete goes through db.update(workflows) — NOT a hard db.delete.
-    expect(updateMock).toHaveBeenCalledWith(workflows);
+    // The data-layer transaction owns the tombstone + rollout cancellation;
+    // the route must never fall back to the legacy hard delete.
+    expect(softDeleteWorkflowMock).toHaveBeenCalledWith("org-1", "wf-1");
     expect(deleteMock).not.toHaveBeenCalled();
     expect(sendJsonMock.mock.calls.at(-1)?.[1]).toMatchObject({ workflowId: "wf-1", ok: true });
   });

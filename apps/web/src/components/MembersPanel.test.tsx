@@ -33,7 +33,31 @@ describe('<MembersPanel /> dynamic role list', () => {
     // test so the 100ms debounce can't bleed across cases.
     __resetBumpCoalesceForTests()
     vi.mocked(api).mockReset()
-    useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
+    useWorkflowStore.setState({
+      ...initialState,
+      platformVersion: 0,
+      toasts: [],
+      identityContext: {
+        identity: { userId: 'admin-user', email: 'admin@example.com', mode: 'supabase', source: 'web' },
+        profile: { name: 'Admin', email: 'admin@example.com' },
+        organizations: [{
+          id: 'default',
+          name: 'Default',
+          plan: null,
+          role: 'admin',
+          roleBase: 'admin',
+          permissions: ['members.read', 'members.write', 'members.role_set'],
+          usable: true,
+          developmentFallback: false,
+        }],
+        invitations: [],
+        currentOrganizationId: 'default',
+        selectionRequired: false,
+        needsOrganization: false,
+        truncated: false,
+        invitationsTruncated: false,
+      },
+    }, true)
   })
 
   it('populates the invite-form role dropdown with custom roles fetched from /org/roles', async () => {
@@ -52,6 +76,15 @@ describe('<MembersPanel /> dynamic role list', () => {
       // The invite role is a described radio-card group, not a <select>.
       expect(screen.getByRole('radio', { name: /compliance/i })).toBeInTheDocument()
     })
+  })
+
+  it('labels the invite target role instead of implying it is the operator role', async () => {
+    setupApi({})
+    render(<MembersPanel />)
+
+    expect(await screen.findByText('Invite as Viewer')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: /Editor/i }))
+    expect(screen.getByText('Invite as Editor')).toBeInTheDocument()
   })
 
   it('invites a user with a custom role name', async () => {
@@ -141,5 +174,32 @@ describe('<MembersPanel /> dynamic role list', () => {
     await waitFor(() => {
       expect(screen.getByRole('radio', { name: /viewer/i })).toBeChecked()
     })
+  })
+
+  it('keeps member mutations unavailable without their effective permissions', async () => {
+    setupApi({
+      members: [{ id: 'm-1', orgId: 'default', userId: 'user-1', email: 'ada@example.com', role: 'viewer' }],
+    })
+    useWorkflowStore.setState((state) => ({
+      identityContext: state.identityContext
+        ? {
+            ...state.identityContext,
+            organizations: state.identityContext.organizations.map((organization) => ({
+              ...organization,
+              role: 'billing-admin',
+              roleBase: 'admin',
+              permissions: ['members.read'],
+            })),
+          }
+        : null,
+    }))
+
+    render(<MembersPanel />)
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Role for ada@example.com')).toBeDisabled()
+    })
+    expect(screen.queryByLabelText('Remove ada@example.com')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Invite/i })).toBeDisabled()
   })
 })

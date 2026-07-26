@@ -10,15 +10,15 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.82",
-    "@ai-sdk/openai": "^3.0.69",
+    "@ai-sdk/anthropic": "^4.0.16",
+    "@ai-sdk/openai": "^4.0.16",
     "@janusly/shared": "workspace:*",
-    "ai": "^6.0.199",
+    "ai": "^7.0.31",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^24.10.1",
-    "typescript": "^6.0.3",
+    "@types/node": "^24.13.3",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   }
 }

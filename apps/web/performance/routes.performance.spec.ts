@@ -83,6 +83,43 @@ function expectWithinBudget(measurement: RouteMeasurement) {
   expect(measurement.maxLongTaskMs).toBeLessThanOrEqual(budget.maxLongTaskMs)
 }
 
+// Bounded session envelope matching `SessionContext` in
+// `src/identity-context.ts`: one usable membership, already selected, so the
+// app skips both the workspace picker and the needs-organization state.
+// The permission list is the admin catalog because this harness walks every
+// route (`tab-permissions.ts` hides a tab whose permission is absent, which
+// would fail navigation rather than report a budget regression).
+const ADMIN_PERMISSIONS = [
+  'ai.write', 'alerts.read', 'alerts.write', 'autohealing.decide', 'autohealing.read',
+  'credentials.read', 'credentials.write', 'dlq.read', 'dlq.replay', 'evals.read', 'evals.write',
+  'members.read', 'members.role_set', 'members.write', 'onboarding.read', 'onboarding.write',
+  'packs.install', 'packs.read', 'prompts.read', 'prompts.write', 'recovery.read', 'recovery.write',
+  'reports.deliver', 'reports.read', 'runs.cancel', 'runs.read', 'runs.start', 'snippets.read',
+  'snippets.write', 'triggers.ingest', 'triggers.read', 'upstream.read', 'upstream.write',
+  'workflows.read', 'workflows.write',
+]
+
+const sessionContext = {
+  identity: { userId: 'dev-user', email: 'dev-user@janusly.local', mode: 'dev-headers', source: 'dev' },
+  profile: { name: 'Dev User', email: 'dev-user@janusly.local' },
+  organizations: [{
+    id: 'default',
+    name: 'Default',
+    plan: null,
+    role: 'admin',
+    roleBase: 'admin',
+    permissions: ADMIN_PERMISSIONS,
+    usable: true,
+    developmentFallback: false,
+  }],
+  invitations: [],
+  currentOrganizationId: 'default',
+  selectionRequired: false,
+  needsOrganization: false,
+  truncated: false,
+  invitationsTruncated: false,
+}
+
 async function stubApi(page: Page) {
   const createdAt = new Date(Date.now() - 60_000).toISOString()
   const rows = [
@@ -107,7 +144,11 @@ async function stubApi(page: Page) {
     // same fixture envelope as the unversioned compatibility route.
     const pathname = url.pathname.startsWith('/v1/') ? url.pathname.slice(3) : url.pathname
     let body: unknown
-    if (pathname === '/dlq/queue') body = { items: rows, nextCursor: null, hasMore: false }
+    // Tenant bootstrap. The app resolves the active organization from this
+    // envelope before the Recovery Center home renders, so an empty default
+    // would leave every route stuck on the identity-pending shell.
+    if (pathname === '/auth/context') body = sessionContext
+    else if (pathname === '/dlq/queue') body = { items: rows, nextCursor: null, hasMore: false }
     else if (pathname === '/dlq/counts') body = { total: 2, open: 2, replayed: 0, resolved: 0 }
     else if (pathname === '/dlq' && url.searchParams.has('id')) {
       const id = url.searchParams.get('id') ?? 'perf-a'
@@ -127,6 +168,24 @@ async function stubApi(page: Page) {
         costThisWindow: { value: 0, display: '$0.00', severity: 'neutral', rationale: 'No AI usage.', providers: [] },
         windowDays: 30,
         terminalRuns: 0,
+      }
+    } else if (pathname === '/recovery/validation') {
+      // Controlled-drill evidence. `RecoveryValidationSection` dereferences
+      // `totals`/`resolution`/`timing` unconditionally, so an empty default
+      // throws inside the Recovery Center render after first paint.
+      body = {
+        generatedAt: new Date().toISOString(),
+        windowDays: 30,
+        sampleLimit: 100,
+        sampleCapped: false,
+        totals: {
+          drills: 0, completed: 0, recovered: 0, acceptedLoss: 0, awaitingAction: 0,
+          replayInProgress: 0, measurementIncomplete: 0, missingEvidence: 0,
+          completionRatePercent: null, recoveryRatePercent: null,
+        },
+        resolution: { operator: 0, automated: 0, unknown: 0, operatorInterventionRatePercent: null },
+        timing: { medianElapsedMs: null, p90ElapsedMs: null, averageElapsedMs: null, p95ElapsedMs: null, sampleSize: 0 },
+        byFailureMode: [],
       }
     } else if (pathname === '/dlq/clusters') body = { clusters: [], totalSamples: 0, windowDays: 30 }
     else if (pathname === '/billing/budget') {
@@ -195,6 +254,11 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   await page.getByRole('button', { name: 'Open user menu' }).click()
   const localeSwitcher = page.getByRole('combobox', { name: 'Change language' })
   await localeSwitcher.selectOption('es')
+  // Switching locale lazy-loads the Spanish catalog, which remounts the header
+  // subtree and closes the user menu. Reopen it (Spanish label now) before
+  // asserting the switcher itself reflects the new locale.
+  await expect(page.getByRole('button', { name: 'Abrir menú de usuario' })).toBeVisible()
+  await page.getByRole('button', { name: 'Abrir menú de usuario' }).click()
   await expect(page.getByRole('combobox', { name: 'Cambiar idioma' })).toHaveValue('es')
   const localeSwitchResources = await page.evaluate(() => (
     (performance.getEntriesByType('resource') as PerformanceResourceTiming[])

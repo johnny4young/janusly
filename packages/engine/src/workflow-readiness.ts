@@ -2,8 +2,9 @@
  * Deterministic production-readiness gate. Sister to `validateWorkflow` —
  * `validateWorkflow` checks structural invariants (cycles, edge targets,
  * condition grammar); this checks **production posture**: are external
- * calls retried, is HTTP bound, are secrets template-referenced, are
- * outputs declared, is there an approval upstream of write-side actions?
+ * retry-safe calls retried, are failed tool envelopes observable, is HTTP
+ * bound, are secrets template-referenced, are outputs declared, is there an
+ * approval upstream of write-side actions?
  *
  * Pure — no DB, no I/O. Returns a flat list of issues with stable
  * `code` strings + a `severity` (`warn` | `fail`) and a top-level rolled-up
@@ -58,10 +59,6 @@ export type ReadinessResult = {
   issues: ReadinessIssue[];
 };
 
-// External-call node types: each makes a network round-trip that can fail
-// transiently. Production workflows must declare a retry policy on these.
-const EXTERNAL_CALL_TYPES = new Set<WorkflowNode["type"]>(["http", "tool", "ai", "agent", "mcp_tool"]);
-
 // HTTP methods that mutate upstream state. A workflow that POSTs/PUTs/PATCHes
 // /DELETEs without an `approval` ancestor in the DAG triggers a warn — many
 // internal write-side flows legitimately don't need a human gate, but the
@@ -96,6 +93,7 @@ export function checkWorkflowReadiness(workflow: Workflow): ReadinessResult {
   for (const node of workflow.nodes) {
     checkHttpBounds(node, issues);
     checkExternalRetry(node, issues);
+    checkToolResultPolicy(node, issues);
     checkRawSecretsInConfig(node, issues);
     checkSensitiveAction(node, workflow, sensitiveAncestorCache, issues);
     checkParallelForkPair(node, workflow, issues);
@@ -156,7 +154,13 @@ function checkHttpBounds(node: WorkflowNode, issues: ReadinessIssue[]) {
 }
 
 function checkExternalRetry(node: WorkflowNode, issues: ReadinessIssue[]) {
-  if (!EXTERNAL_CALL_TYPES.has(node.type)) return;
+  // Automatic whole-node retries are only a readiness requirement when the
+  // call is statically read-side. Write-side HTTP/tools can have committed
+  // before failing, so the runtime deliberately suppresses blind retries.
+  const retrySafe = node.type === "http"
+    ? !isSensitiveAction(node)
+    : node.type === "tool" && !isToolInvocationWriteSide(node.config.tool, node.config.input);
+  if (!retrySafe) return;
   const retry = (node.config as { retry?: unknown }).retry;
   const maxAttempts = isObject(retry) && typeof (retry as { maxAttempts?: unknown }).maxAttempts === "number"
     ? (retry as { maxAttempts: number }).maxAttempts
@@ -165,9 +169,22 @@ function checkExternalRetry(node: WorkflowNode, issues: ReadinessIssue[]) {
   issues.push({
     code: "external_node_missing_retry",
     severity: "fail",
-    message: `Node "${node.id}" makes an external call but has no retry policy. Transient failures will mark the run failed instead of being retried.`,
+    message: `Read-side node "${node.id}" makes an external call but has no retry policy. Transient failures will mark the run failed instead of being retried.`,
     nodeId: node.id,
     suggestion: "Set `config.retry.maxAttempts` to at least 2; production-grade is typically 3–5 with exponential backoff.",
+  });
+}
+
+function checkToolResultPolicy(node: WorkflowNode, issues: ReadinessIssue[]) {
+  if (node.type !== "tool") return;
+  if (!isToolInvocationWriteSide(node.config.tool, node.config.input)) return;
+  if (node.config.resultPolicy === "require_ok") return;
+  issues.push({
+    code: "tool_result_policy_missing",
+    severity: "fail",
+    message: `Write-side tool node "${node.id}" can return a failed result envelope without failing the run.`,
+    nodeId: node.id,
+    suggestion: "Set `config.resultPolicy` to `require_ok` so failed provider envelopes enter DLQ and recovery without unsafe blind retries.",
   });
 }
 

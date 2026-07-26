@@ -108,6 +108,10 @@ class JanuslyServerError(JanuslyApiError):
     """Raised on 5xx. Server-side failure, generally retryable."""
 
 
+class JanuslyProtocolError(JanuslyApiError):
+    """Raised when a successful ``/v1`` response has an invalid envelope."""
+
+
 class JanuslyTimeoutError(Exception):
     """Raised by client-side polling when the wall-clock deadline elapses.
 
@@ -222,6 +226,16 @@ def _extract_envelope(body: Any) -> dict[str, Any]:
     error = body.get("error")
     if isinstance(error, str):
         out["error"] = error
+    elif isinstance(error, dict):
+        message = error.get("message")
+        nested_code = error.get("code")
+        nested_params = error.get("params")
+        if isinstance(message, str):
+            out["error"] = message
+        if isinstance(nested_code, str):
+            out["code"] = nested_code
+        if isinstance(nested_params, dict):
+            out["params"] = nested_params
     code = body.get("code")
     if isinstance(code, str):
         out["code"] = code
@@ -237,6 +251,7 @@ __all__ = [
     "JanuslyValidationError",
     "JanuslyRateLimitError",
     "JanuslyServerError",
+    "JanuslyProtocolError",
     "JanuslyTimeoutError",
     "JanuslyWebhookSignatureError",
     "WebhookSignatureFailureReason",

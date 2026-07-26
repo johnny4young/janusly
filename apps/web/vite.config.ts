@@ -11,6 +11,8 @@ import tailwindcss from '@tailwindcss/vite'
  * a tarball build) — an honest "dev" beats a confident wrong date.
  */
 function buildId(): string {
+  const explicit = process.env.JANUSLY_BUILD_ID?.trim()
+  if (explicit) return explicit
   try {
     const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim()
     return `${new Date().toISOString().slice(0, 10)}-${sha}`

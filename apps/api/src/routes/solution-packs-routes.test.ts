@@ -6,7 +6,7 @@
  * and the save chokepoint. Covers: gate declarations, catalog projection
  * (no workflow JSON / secret leak), per-org dependency diff, install
  * (creates a version + audits + never auto-creates credentials + lands
- * under auth.orgId), sandbox sample-run, demo failure injection, and 404s.
+ * under auth.orgId), sandbox sample-run, selected recovery drills, and 404s.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -39,6 +39,10 @@ vi.mock("@janusly/engine/src/adapters/sample-failure", () => ({
   injectSampleFailure: vi.fn(),
 }));
 
+vi.mock("@janusly/engine/src/adapters/stalled-node-drill", () => ({
+  runStalledNodeDrill: vi.fn(),
+}));
+
 vi.mock("@janusly/engine/src/workflow-validation", () => ({
   validateWorkflow: vi.fn(() => ({ valid: true, issues: [] })),
 }));
@@ -56,6 +60,7 @@ import { readJson } from "../http";
 import { getCredentialByName, listOrgConfig } from "@janusly/data";
 import { startSandboxRun } from "@janusly/engine/src/adapters/sandbox-run";
 import { injectSampleFailure } from "@janusly/engine/src/adapters/sample-failure";
+import { runStalledNodeDrill } from "@janusly/engine/src/adapters/stalled-node-drill";
 import { saveWorkflowVersion } from "../workflows-save";
 import { auditAction } from "../audit-helper";
 import type { Route } from "../routes";
@@ -65,6 +70,7 @@ const getCredentialByNameMock = vi.mocked(getCredentialByName);
 const listOrgConfigMock = vi.mocked(listOrgConfig);
 const startSandboxRunMock = vi.mocked(startSandboxRun);
 const injectSampleFailureMock = vi.mocked(injectSampleFailure);
+const runStalledNodeDrillMock = vi.mocked(runStalledNodeDrill);
 const saveWorkflowVersionMock = vi.mocked(saveWorkflowVersion);
 const auditActionMock = vi.mocked(auditAction);
 
@@ -81,7 +87,7 @@ function findRoute(method: string, path: string): Route {
 
 async function callRoute(method: string, path: string, body?: unknown) {
   const route = findRoute(method, path);
-  if (body !== undefined) readJsonMock.mockResolvedValueOnce(body);
+  if (body !== undefined) readJsonMock.mockResolvedValue(body);
   return route.handler({ req: { url: path } as never, res: {} as never, auth: AUTH as never }) as Promise<{
     payload: Record<string, unknown>;
     status: number;
@@ -89,6 +95,8 @@ async function callRoute(method: string, path: string, body?: unknown) {
 }
 
 beforeEach(() => {
+  readJsonMock.mockReset();
+  readJsonMock.mockResolvedValue({});
   // Default: org has no credentials configured and no tenant org-config rows.
   getCredentialByNameMock.mockResolvedValue(null);
   listOrgConfigMock.mockResolvedValue([] as never);
@@ -102,6 +110,19 @@ beforeEach(() => {
   } as never);
   startSandboxRunMock.mockResolvedValue({ runId: "run-1" } as never);
   injectSampleFailureMock.mockResolvedValue({ runId: "run-9", deadLetterId: "dlq-9" } as never);
+  runStalledNodeDrillMock.mockResolvedValue({
+    runId: "run-stalled",
+    deadLetterId: "dlq-stalled",
+    evidence: {
+      recoveryPath: "stalled_node_reaper",
+      thresholdMinutes: 60,
+      simulatedStallMs: 3_601_000,
+      reaperRuntimeMs: 12,
+      scanned: 1,
+      reaped: 1,
+      deadLettered: 1,
+    },
+  } as never);
 });
 
 afterEach(() => {
@@ -134,15 +155,25 @@ describe("route gate declarations", () => {
 });
 
 describe("GET /solution-packs (catalog)", () => {
-  it("returns the public projection without workflow JSON", async () => {
+  it("returns safe drill descriptors without workflow JSON or raw error internals", async () => {
     const { payload } = await callRoute("GET", "/solution-packs");
     const packs = payload.packs as Array<Record<string, unknown>>;
     expect(packs.length).toBe(3);
     for (const pack of packs) {
       expect(pack).not.toHaveProperty("workflowJson");
       expect(pack).not.toHaveProperty("samplePayloads");
-      expect(pack).not.toHaveProperty("failureFixtures");
       expect(typeof pack.nodeCount).toBe("number");
+      const fixtures = pack.failureFixtures as Array<Record<string, unknown>>;
+      expect(fixtures.length).toBeGreaterThan(0);
+      expect(fixtures[0]).toMatchObject({
+        id: expect.any(String),
+        label: expect.any(String),
+        description: expect.any(String),
+        failureMode: expect.any(String),
+        recoveryPath: expect.any(String),
+      });
+      expect(fixtures[0]).not.toHaveProperty("failedNodeId");
+      expect(fixtures[0]).not.toHaveProperty("errorJson");
     }
     expect(JSON.stringify(payload)).not.toContain("secretRef");
   });
@@ -214,7 +245,13 @@ describe("POST /solution-packs/:id/sample-run", () => {
     expect(arg.orgId).toBe("org-1");
     expect(arg.source).toBe("pack:incident-triage");
     // The bundled sample payload becomes the run input.
-    expect(arg.input).toMatchObject({ alertName: expect.any(String) });
+    expect(arg.input).toMatchObject({
+      event: {
+        endpointKey: "incident-triage",
+        eventId: expect.any(String),
+        payload: { alertName: expect.any(String) },
+      },
+    });
 
     expect(auditActionMock.mock.calls[0][1]).toBe("solution_pack.sample_run_started");
   });
@@ -227,17 +264,96 @@ describe("POST /solution-packs/:id/sample-run", () => {
 });
 
 describe("POST /solution-packs/:id/inject-failure", () => {
-  it("seeds a demo DLQ failure on the fixture's node and audits", async () => {
-    const { payload, status } = await callRoute("POST", "/solution-packs/incident-triage/inject-failure", {});
+  it("seeds the selected drill with durable provenance and audits its failure mode", async () => {
+    const { payload, status } = await callRoute(
+      "POST",
+      "/solution-packs/incident-triage/inject-failure",
+      { fixtureId: "classification_output_invalid" },
+    );
     expect(status).toBe(200);
     expect(payload.deadLetterId).toBe("dlq-9");
+    expect(payload.fixtureId).toBe("classification_output_invalid");
+    expect(payload.failureMode).toBe("ai_output_invalid");
+    expect(payload.recoveryPath).toBe("direct_failure");
 
     expect(injectSampleFailureMock).toHaveBeenCalledTimes(1);
     const arg = injectSampleFailureMock.mock.calls[0][0];
     expect(arg.orgId).toBe("org-1");
-    expect(arg.failedNodeId).toBe("page_oncall");
-    expect(arg.errorJson).toMatchObject({ code: "http_error" });
+    expect(arg.failedNodeId).toBe("classify");
+    expect(arg.errorJson).toMatchObject({ code: "E_AI_OUTPUT_INVALID" });
+    expect(arg.source).toEqual({
+      kind: "solution_pack_drill",
+      packId: "incident-triage",
+      fixtureId: "classification_output_invalid",
+      failureMode: "ai_output_invalid",
+      recoveryPath: "direct_failure",
+    });
 
     expect(auditActionMock.mock.calls[0][1]).toBe("solution_pack.failure_injected");
+    expect(auditActionMock.mock.calls[0][2]).toMatchObject({
+      metadata: {
+        fixtureId: "classification_output_invalid",
+        failureMode: "ai_output_invalid",
+        recoveryPath: "direct_failure",
+      },
+    });
+  });
+
+  it("runs a worker interruption through the scoped stalled-node reaper path", async () => {
+    const { payload, status } = await callRoute(
+      "POST",
+      "/solution-packs/incident-triage/inject-failure",
+      { fixtureId: "worker_interrupted_during_page" },
+    );
+
+    expect(status).toBe(200);
+    expect(payload).toMatchObject({
+      runId: "run-stalled",
+      deadLetterId: "dlq-stalled",
+      fixtureId: "worker_interrupted_during_page",
+      failureMode: "worker_stalled",
+      recoveryPath: "stalled_node_reaper",
+      evidence: {
+        thresholdMinutes: 60,
+        scanned: 1,
+        reaped: 1,
+        deadLettered: 1,
+      },
+    });
+    expect(injectSampleFailureMock).not.toHaveBeenCalled();
+    expect(runStalledNodeDrillMock).toHaveBeenCalledWith(expect.objectContaining({
+      orgId: "org-1",
+      createdBy: "user-1",
+      failedNodeId: "page_oncall",
+      source: {
+        kind: "solution_pack_drill",
+        packId: "incident-triage",
+        fixtureId: "worker_interrupted_during_page",
+        failureMode: "worker_stalled",
+        recoveryPath: "stalled_node_reaper",
+      },
+    }));
+    expect(auditActionMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "solution_pack.failure_injected",
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          recoveryPath: "stalled_node_reaper",
+          evidence: expect.objectContaining({ reaperRuntimeMs: 12 }),
+        }),
+      }),
+    );
+  });
+
+  it("rejects an unknown fixture id without creating an untraceable default", async () => {
+    const { payload, status } = await callRoute(
+      "POST",
+      "/solution-packs/incident-triage/inject-failure",
+      { fixtureId: "not-a-drill" },
+    );
+
+    expect(status).toBe(400);
+    expect(payload.code).toBe("pack_no_failure_fixture");
+    expect(injectSampleFailureMock).not.toHaveBeenCalled();
   });
 });

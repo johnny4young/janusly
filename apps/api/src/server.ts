@@ -13,8 +13,10 @@
 import http from "http";
 import { randomUUID } from "node:crypto";
 
-import { requireAuth, type AuthContext } from "./auth";
-import { corsHeaders, sendError, type CorsAwareResponse } from "./http";
+import { getIdentity, requireAuth, requireIdentity, type AuthContext, type IdentityContext } from "./auth";
+import { requireBrowserCsrf } from "./browser-session";
+import { MAX_JSON_BODY_BYTES } from "./api-config";
+import { corsHeaders, readJson, sendError, type CorsAwareResponse } from "./http";
 import { requirePermission, requireRole } from "./permissions";
 import { matchesRoute, type Route } from "./routes";
 
@@ -133,8 +135,26 @@ async function dispatchRequest(
     }
 
     let auth: AuthContext;
+    let identity: IdentityContext | null = null;
     if (matched.skipAuth) {
       auth = { orgId: "", userId: "", mode: "dev-headers", source: "dev" };
+    } else if (matched.identityOnly || matched.optionalIdentity) {
+      if (matched.role || matched.permission || (matched.identityOnly && matched.optionalIdentity)) {
+        throw new Error("identity bootstrap routes cannot combine auth modes, tenant roles, or permissions");
+      }
+      identity = matched.identityOnly ? await requireIdentity(req) : await getIdentity(req);
+      auth = {
+        orgId: "",
+        userId: identity?.userId ?? "",
+        mode: identity?.mode ?? "dev-headers",
+        source: identity?.source ?? "dev",
+        ...(identity?.serviceTokenSuffix !== undefined
+          ? { serviceTokenSuffix: identity.serviceTokenSuffix }
+          : {}),
+        ...(identity?.browserSessionId !== undefined
+          ? { browserSessionId: identity.browserSessionId }
+          : {}),
+      };
     } else {
       auth = await requireAuth(req);
       if (matched.role) {
@@ -142,6 +162,22 @@ async function dispatchRequest(
       }
       if (matched.permission) {
         await requirePermission(auth.orgId, auth.userId, matched.permission, auth.mode);
+      }
+    }
+
+    if (req.method !== "GET" && req.method !== "HEAD" && auth.mode === "janusly-session") {
+      requireBrowserCsrf(req);
+    }
+
+    if (versionedAlias && matched.contract?.request?.path) {
+      const path = parseContractPath(matched.contract.path, handlerUrl);
+      const result = path === null
+        ? null
+        : matched.contract.request.path.safeParse(path);
+      if (!result?.success) {
+        const field = result?.error.issues[0]?.path.join(".") || "path";
+        sendError(response, "invalid_input", "Invalid request path", 400, { field });
+        return;
       }
     }
 
@@ -155,8 +191,18 @@ async function dispatchRequest(
       }
     }
 
+    if (versionedAlias && matched.contract?.request?.body) {
+      const body = await readJson(req, MAX_JSON_BODY_BYTES);
+      const result = matched.contract.request.body.safeParse(body);
+      if (!result.success) {
+        const field = result.error.issues[0]?.path.join(".") || "body";
+        sendError(response, "invalid_input", "Invalid request body", 400, { field });
+        return;
+      }
+    }
+
     req.url = handlerUrl;
-    await matched.handler({ req, res: response, auth });
+    await matched.handler({ req, res: response, auth, identity });
   } catch (err) {
     const statusCode = resolveErrorStatusCode(err);
     if (statusCode === null) {
@@ -202,6 +248,31 @@ export function matchesContractPath(contractPath: string, url: string): boolean 
   return contractSegments.every((segment, index) => {
     return /^\{[^{}]+\}$/.test(segment) || segment === actualSegments[index];
   });
+}
+
+/** Decode `{name}` path-template values for runtime contract validation. */
+function parseContractPath(contractPath: string, url: string): Record<string, string> | null {
+  const actualSegments = new URL(url, "http://localhost").pathname.split("/").filter(Boolean);
+  const contractSegments = contractPath.split("/").filter(Boolean);
+  if (actualSegments.length !== contractSegments.length) return null;
+
+  const params: Record<string, string> = {};
+  for (let index = 0; index < contractSegments.length; index += 1) {
+    const contractSegment = contractSegments[index];
+    const actualSegment = actualSegments[index];
+    if (!contractSegment || actualSegment === undefined) return null;
+    const name = contractSegment.match(/^\{([^{}]+)\}$/)?.[1];
+    if (!name) {
+      if (contractSegment !== actualSegment) return null;
+      continue;
+    }
+    try {
+      params[name] = decodeURIComponent(actualSegment);
+    } catch {
+      return null;
+    }
+  }
+  return params;
 }
 
 /** Convert URLSearchParams into the raw object a route's Zod query schema expects. */

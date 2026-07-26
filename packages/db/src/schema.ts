@@ -10,25 +10,34 @@
  *
  * Used by:
  * - Every Drizzle query across `packages/data`, `packages/engine`, `apps/api`.
+ * - `packages/db/src/schema-contract.test.ts`, which compares every table,
+ *   column, default, primary key, and index with the latest migration snapshot
+ *   and protects selected operational index shapes and lifecycle defaults.
  * - `packages/db/migrations/20260610175420_baseline/migration.sql` — the
  *   development baseline (pre-production squash of the first 31 migrations)
  *   was emitted from this exact shape, plus the three documented hand-edits
  *   drizzle-kit cannot generate (pgvector extension, GIN opclass, HNSW index).
  *
  * Tables:
- * - `organizations`, `users`, `org_members` — multi-tenant scope.
+ * - `organizations`, `users`, `org_members` — tenant catalogue, global
+ *   identity profiles, and membership grants.
  * - `org_configs` — tenant-level runtime configuration overrides.
- * - `workflows`, `workflow_versions` — versioned DAG storage.
+ * - `workflows`, `workflow_versions`, `workflow_rollouts`,
+ *   `workflow_rollout_outcomes` — versioned DAG storage and bounded rollout
+ *   assignment/evidence.
  * - `runs`, `run_nodes`, `run_events` — execution history (timeline events
  *   are paginated by `(run_id, created_at)`).
- * - `dead_letters` — DLQ rows; replayed via `POST /dlq/replay`.
+ * - `dead_letters`, `replay_campaigns`, `replay_campaign_items` — durable
+ *   failure anchors and paced bulk-recovery coordination.
  * - `recovery_impact_events`, `recovery_impact_rollups` — terminally verified
  *   recovery value and its constant-time tenant lifetime projection.
  * - `routing_stats`, `workflow_improvements` — RL counters and
  *   improvement-engine bookkeeping.
  * - `usage_events` — billing telemetry (LLM calls and write-side tool usage).
- * - `credentials`, `installed_plugins` — secret references and plugin
- *   manifests.
+ * - `credentials`, `credential_secret_versions`,
+ *   `slack_interaction_connections`, `slack_interaction_receipts`, and
+ *   `installed_plugins` — encrypted/versioned secret references, signed
+ *   operator actions, and plugin manifests.
  * - `audit_logs` — append-only mutation log (`audit()` redacts sensitive
  *   keys before insertion).
  *
@@ -55,10 +64,10 @@ export const organizations = pgTable("organizations", {
 
 export const users = pgTable("users", {
   id: text("id").primaryKey(),
-  orgId: text("org_id").notNull(),
   email: text("email"),
   name: text("name"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
 export const orgMembers = pgTable(
@@ -164,12 +173,58 @@ export const workflowVersions = pgTable(
   ],
 );
 
+/**
+ * Durable deployment decision between one baseline and one newer canary.
+ *
+ * One partial unique index permits at most one active rollout per workflow.
+ * Historical rows remain inspectable after promotion, rollback, or operator
+ * cancellation. No foreign keys: workflow/version history is intentionally
+ * orphan-tolerant and retention owns eventual cleanup.
+ */
+export const workflowRollouts = pgTable(
+  "workflow_rollouts",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    baselineVersionId: text("baseline_version_id").notNull(),
+    canaryVersionId: text("canary_version_id").notNull(),
+    trafficPercent: integer("traffic_percent").notNull(),
+    minimumSampleSize: integer("minimum_sample_size").notNull(),
+    minimumSuccessRatePercent: integer("minimum_success_rate_percent").notNull(),
+    status: text("status")
+      .$type<"active" | "promoted" | "rolled_back" | "cancelled">()
+      .notNull()
+      .default("active"),
+    baselineSucceeded: integer("baseline_succeeded").notNull().default(0),
+    baselineFailed: integer("baseline_failed").notNull().default(0),
+    canarySucceeded: integer("canary_succeeded").notNull().default(0),
+    canaryFailed: integer("canary_failed").notNull().default(0),
+    rolledBackReason: text("rolled_back_reason"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    lastOutcomeAt: timestamp("last_outcome_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("workflow_rollouts_one_active_idx")
+      .on(table.orgId, table.workflowId)
+      .where(sql`status = 'active'`),
+    index("workflow_rollouts_org_workflow_created_idx")
+      .on(table.orgId, table.workflowId, table.createdAt.desc()),
+  ],
+);
+
 export const runs = pgTable(
   "runs",
   {
     id: text("id").primaryKey(),
     orgId: text("org_id").notNull().default("default"),
     workflowVersionId: text("workflow_version_id").notNull(),
+    /** Rollout assignment captured once at start; retries never recalculate it. */
+    workflowRolloutId: text("workflow_rollout_id"),
+    workflowRolloutVariant: text("workflow_rollout_variant").$type<"baseline" | "canary">(),
     status: text("status").notNull(),
     inputJson: jsonb("input_json"),
     /**
@@ -221,9 +276,34 @@ export const runs = pgTable(
       .on(table.parentNotificationAfter, table.id)
       .where(sql`"parent_notification_after" IS NOT NULL`),
     index("runs_org_replay_mode_idx").on(table.orgId, table.replayMode),
+    index("runs_rollout_idx").on(table.workflowRolloutId, table.createdAt.desc()),
     uniqueIndex("runs_redrive_idempotency_idx")
       .on(table.orgId, table.parentRunId, table.parentNodeId, table.workflowVersionId)
       .where(sql`"parent_link_kind" = 'replay' AND "replay_mode" IS NULL AND "input_json" ? 'redrive'`),
+  ],
+);
+
+/**
+ * Idempotency receipt for terminal rollout evidence.
+ *
+ * One run contributes at most one outcome across worker retries and repair
+ * sweeps. Rows are operationally meaningless without their rollout aggregate,
+ * but remain orphan-tolerant to match workflow history's no-FK posture.
+ */
+export const workflowRolloutOutcomes = pgTable(
+  "workflow_rollout_outcomes",
+  {
+    runId: text("run_id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    rolloutId: text("rollout_id").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    variant: text("variant").$type<"baseline" | "canary">().notNull(),
+    status: text("status").$type<"succeeded" | "failed" | "cancelled">().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("workflow_rollout_outcomes_rollout_created_idx")
+      .on(table.rolloutId, table.createdAt),
   ],
 );
 
@@ -338,6 +418,84 @@ export const deadLetters = pgTable(
       table.runId,
       table.nodeId,
       table.createdAt,
+    ),
+  ],
+);
+
+/**
+ * A named, bounded replay campaign over an immutable DLQ cohort snapshot.
+ *
+ * Campaigns deliberately keep counters on the parent row so progress reads
+ * remain O(1); item transitions update the row in the same transaction. The
+ * `nextDispatchAt` clock is a Postgres-owned repair boundary: a BullMQ publish
+ * failure leaves the campaign discoverable by the scheduler instead of
+ * stranding it in Redis. No foreign keys are intentional — campaign evidence
+ * remains inspectable after ordinary DLQ/run retention.
+ */
+export const replayCampaigns = pgTable(
+  "replay_campaigns",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    name: text("name").notNull(),
+    clusterSignature: text("cluster_signature").notNull(),
+    filterJson: jsonb("filter_json").notNull().default({}),
+    pacingMs: integer("pacing_ms").notNull().default(1000),
+    status: text("status").notNull().default("running"),
+    totalCount: integer("total_count").notNull(),
+    replayedCount: integer("replayed_count").notNull().default(0),
+    failedCount: integer("failed_count").notNull().default(0),
+    cancelledCount: integer("cancelled_count").notNull().default(0),
+    createdBy: text("created_by").notNull(),
+    cancelledBy: text("cancelled_by"),
+    nextDispatchAt: timestamp("next_dispatch_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("replay_campaigns_org_created_idx").on(table.orgId, table.createdAt.desc()),
+    index("replay_campaigns_due_idx")
+      .on(table.nextDispatchAt, table.id)
+      .where(sql`"status" = 'running'`),
+  ],
+);
+
+/**
+ * Per-DLQ outcome ledger for one replay campaign.
+ *
+ * The claim token + timestamp form a recoverable lease. A worker crash can
+ * reclaim a stale `processing` item, while the DLQ replay generation claim
+ * prevents duplicate external execution. Campaign cancellation marks every
+ * still-pending row cancelled; an already-processing row may finish and is
+ * reported truthfully in the final counters.
+ */
+export const replayCampaignItems = pgTable(
+  "replay_campaign_items",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    campaignId: text("campaign_id").notNull(),
+    deadLetterId: text("dead_letter_id").notNull(),
+    position: integer("position").notNull(),
+    status: text("status").notNull().default("pending"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    claimToken: text("claim_token"),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    error: text("error"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("replay_campaign_items_campaign_dlq_idx").on(table.campaignId, table.deadLetterId),
+    uniqueIndex("replay_campaign_items_campaign_position_idx").on(table.campaignId, table.position),
+    index("replay_campaign_items_org_campaign_status_idx").on(
+      table.orgId,
+      table.campaignId,
+      table.status,
+      table.position,
     ),
   ],
 );
@@ -459,8 +617,8 @@ export const credentials = pgTable(
     metadata: jsonb("metadata"),
     // Optional operator-declared expiry for the underlying secret (token /
     // webhook / DSN). Null = no expiry tracked. Only metadata — the secret
-    // value itself still lives in env via `secret_ref`. Powers the
-    // credential-expiry warning scan + the panel's expiry badge.
+    // value resolves through the managed/legacy provider behind `secret_ref`.
+    // Powers the credential-expiry warning scan + the panel's expiry badge.
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
@@ -469,9 +627,106 @@ export const credentials = pgTable(
     // as an If-Match against the JS Date it round-trips through ISO, and full
     // microsecond precision would never equal a re-serialized ms-precision
     // value — so a first rotation would always look like a conflict.
-    updatedAt: timestamp("updated_at", { withTimezone: true, precision: 3 }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, precision: 3 }).notNull().defaultNow(),
   },
-  (table) => [index("credentials_org_idx").on(table.orgId)],
+  (table) => [
+    uniqueIndex("credentials_org_name_idx").on(table.orgId, table.name),
+    index("credentials_org_idx").on(table.orgId),
+  ],
+);
+
+/**
+ * Versioned encrypted values for credentials managed by Janusly.
+ *
+ * `credentials.secret_ref` points at one row using the opaque
+ * `janusly-secret://<id>` scheme. Each plaintext is encrypted with a random
+ * data-encryption key; that key is wrapped by the process root key. The root
+ * key never enters PostgreSQL. Legacy environment-variable references remain
+ * valid for credentials created before this table existed.
+ *
+ * No foreign key is intentional: revoked versions remain inspectable as
+ * metadata after a credential is deleted, but a revoked row can never resolve.
+ */
+export const credentialSecretVersions = pgTable(
+  "credential_secret_versions",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    credentialId: text("credential_id").notNull(),
+    version: integer("version").notNull(),
+    ciphertext: text("ciphertext").notNull(),
+    dataNonce: text("data_nonce").notNull(),
+    dataTag: text("data_tag").notNull(),
+    wrappedKey: text("wrapped_key").notNull(),
+    wrapNonce: text("wrap_nonce").notNull(),
+    wrapTag: text("wrap_tag").notNull(),
+    keyVersion: integer("key_version").notNull().default(1),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("credential_secret_versions_credential_version_idx")
+      .on(table.credentialId, table.version),
+    index("credential_secret_versions_org_credential_idx")
+      .on(table.orgId, table.credentialId, table.createdAt.desc()),
+  ],
+);
+
+/**
+ * One Slack app/team binding for signed recovery-item interactions.
+ *
+ * The signing secret remains in the managed/legacy credential substrate; this
+ * row stores only the credential name plus a bounded Slack-user → Janusly-user mapping.
+ * Callback lookup by opaque connection id is the deliberate cross-tenant
+ * system exception, but the signed team id must still match before any mapped
+ * identity is authorized. No foreign keys keep the integration orphan-tolerant
+ * when a credential or member is rotated/deleted.
+ */
+export const slackInteractionConnections = pgTable(
+  "slack_interaction_connections",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    name: text("name").notNull(),
+    teamId: text("team_id").notNull(),
+    signingCredentialName: text("signing_credential_name").notNull(),
+    userMappings: jsonb("user_mappings")
+      .$type<Array<{ slackUserId: string; userId: string }>>()
+      .notNull()
+      .default([]),
+    enabled: boolean("enabled").notNull().default(true),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("slack_interaction_connections_org_name_idx").on(table.orgId, table.name),
+    uniqueIndex("slack_interaction_connections_org_team_idx").on(table.orgId, table.teamId),
+    index("slack_interaction_connections_org_enabled_idx").on(table.orgId, table.enabled),
+  ],
+);
+
+/**
+ * Durable replay claims for signed Slack callbacks.
+ *
+ * The id is a SHA-256 digest of connection id + signed timestamp + exact raw
+ * body. Claim insertion and opportunistic expiry cleanup share a transaction,
+ * so retries across API replicas cannot repeat a recovery mutation and storage
+ * remains bounded to the recent verification window for active connections.
+ */
+export const slackInteractionReceipts = pgTable(
+  "slack_interaction_receipts",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    connectionId: text("connection_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("slack_interaction_receipts_connection_created_idx")
+      .on(table.connectionId, table.createdAt),
+  ],
 );
 
 export const installedPlugins = pgTable(
@@ -858,6 +1113,32 @@ export const ssoStateNonces = pgTable(
   },
   (table) => [
     uniqueIndex("sso_state_nonces_org_nonce_idx").on(table.orgId, table.nonce),
+  ],
+);
+
+/**
+ * Revocable browser sessions issued after WorkOS SSO. The signed cookie
+ * carries only this row's id; identity, organization, expiry, and revocation
+ * state remain server-side and are checked on every request.
+ *
+ * No foreign keys by the repository's orphan-tolerant policy. Revoking or
+ * deleting an organization never silently rewrites historical session rows;
+ * membership resolution still fails closed when the grant disappears.
+ */
+export const authSessions = pgTable(
+  "auth_sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    email: text("email").notNull(),
+    orgId: text("org_id").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("auth_sessions_user_expiry_idx").on(table.userId, table.expiresAt),
   ],
 );
 
@@ -2037,7 +2318,7 @@ export const confidenceCalibrations = pgTable(
 
 /**
  * Structured inbound-trigger events for the event-driven trigger node types
- * (`email_received`, `file_dropped`, `mcp_server_event`).
+ * (`webhook_received`, `email_received`, `file_dropped`, `mcp_server_event`).
  *
  * One row is persisted by the API ingestion seam
  * (`apps/api/src/routes/trigger-ingest-routes.ts`) for EVERY accepted inbound
@@ -2068,11 +2349,15 @@ export const triggerEvents = pgTable(
   {
     id: text("id").primaryKey(),
     orgId: text("org_id").notNull(),
-    /** One of the closed `triggerNodeTypeValues` (`email_received` / `file_dropped` / `mcp_server_event`). */
+    /** One of the closed event-driven `triggerNodeTypeValues`. */
     triggerType: text("trigger_type").notNull(),
     workflowId: text("workflow_id"),
     /** The workflow version whose trigger node matched the inbound event. */
     workflowVersionId: text("workflow_version_id").notNull(),
+    /** Canary deployment captured when the event was first accepted. */
+    workflowRolloutId: text("workflow_rollout_id"),
+    /** Stable deployment variant; retries and buffered backfill never recalculate it. */
+    workflowRolloutVariant: text("workflow_rollout_variant").$type<"baseline" | "canary">(),
     /** The trigger node id inside that version. */
     nodeId: text("node_id").notNull(),
     /** Lifecycle status — one of the closed `triggerEventStatusValues`, including buffered leases. */

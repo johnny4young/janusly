@@ -43,6 +43,7 @@ import { orgLlmRuntime, resolveSurfaceModel, sanitizeAiWorkflow } from "../ai-ru
 import { AiPatchStructuralEnvelope, patchEnvelopeForNodeType, type AiPatchStructuralSuggestion } from "../ai-schemas";
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
+import { patchWorkflowContract } from "../api-contracts";
 import { getDeadLetter } from "../dlq";
 import { asRecord, readJson, sendError, sendJson } from "../http";
 import { applyConfigPatchToWorkflow, applyStructuralPatchToWorkflow } from "../patch-workflow-merge";
@@ -76,7 +77,7 @@ function indexCalibrationCurves(rows: StoredCalibration[]): Map<string, Calibrat
 }
 
 export const aiPatchRoutes: Route[] = [
-  { method: "POST", match: "/ai/patch-workflow", role: "editor",
+  { method: "POST", match: "/ai/patch-workflow", role: "editor", permission: "ai.write", contract: patchWorkflowContract,
     handler: async ({ req, res, auth }) => {
       const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));

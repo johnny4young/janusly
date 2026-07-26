@@ -60,6 +60,8 @@ export type FindStalledRunningNodesInput = {
   olderThan: Date;
   /** Hard cap on rows returned per sweep so one fire never unbounds. */
   limit: number;
+  /** Optional exact tenant/run scope for an operator-triggered drill. */
+  scope?: { orgId: string; runId: string };
 };
 
 /**
@@ -90,6 +92,9 @@ export async function findStalledRunningNodes(
         lt(runNodes.startedAt, input.olderThan),
         inArray(runs.status, [...NON_TERMINAL_RUN_STATUSES]),
         isNull(runs.replayMode),
+        ...(input.scope
+          ? [eq(runs.orgId, input.scope.orgId), eq(runs.id, input.scope.runId)]
+          : []),
       ),
     )
     .orderBy(runNodes.startedAt)

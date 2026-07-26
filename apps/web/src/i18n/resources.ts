@@ -8,6 +8,8 @@
  * `apps/web/src/i18n/locales/<lng>/common.json`, and an explicit demand loader.
  */
 
+import type enCommon from './locales/en/common.json'
+
 /** Closed enum of locales the web ships with. */
 export const SUPPORTED_LANGUAGES = ['en', 'es'] as const
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number]
@@ -28,7 +30,20 @@ export const COMMON_NAMESPACE = 'common'
 export const LOCALE_STORAGE_KEY = 'janusly:locale'
 
 /** Catalog shape is derived from English so loaders and i18next stay typed. */
-export type CommonCatalog = typeof import('./locales/en/common.json').default
+export type CommonCatalog = typeof enCommon
+
+/** Translation keys are validated by catalog parity and runtime fallback tests. */
+export type TranslationKey = string
+
+/** Interpolation/options accepted by the application translation chokepoint. */
+export type TranslationOptions = Record<string, unknown>
+
+/**
+ * Translation signature exposed to application code. Keeping the return value
+ * concrete avoids i18next's recursive generic expansion under TypeScript 7;
+ * catalog completeness remains enforced by the i18n parity/runtime test suite.
+ */
+export type Translate = (key: TranslationKey, options?: TranslationOptions) => string
 
 type CatalogModule = { default: CommonCatalog }
 

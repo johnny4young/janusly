@@ -49,6 +49,7 @@ vi.mock("@janusly/data", () => ({
   getOrgConfigSnapshot: getOrgConfigSnapshotMock,
   getRunComparison: vi.fn(),
   getWorkflowStatus: getWorkflowStatusMock,
+  resolveWorkflowRolloutAssignment: vi.fn(async () => null),
   WORKFLOW_STATUS_ACTIVE: "active",
   WORKFLOW_STATUS_PAUSED_CIRCUIT_BREAKER: "paused_circuit_breaker",
   resolveWorkflowPauseAction: (status: string | null | undefined, entryPoint: string) => {

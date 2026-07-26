@@ -158,7 +158,9 @@ export function BudgetSettingsPanel() {
           warningPercent?: number;
         };
         if (env.resolvedScope === "workflow" && typeof env.monthlyUsdLimit === "number") {
-          const nextWarnPercent = Number.isInteger(env.warningPercent) ? env.warningPercent : 80;
+          const nextWarnPercent = typeof env.warningPercent === "number" && Number.isInteger(env.warningPercent)
+            ? env.warningPercent
+            : 80;
           const nextPolicy = env.policy === "block" ? "block" : "warn";
           setWfExisting({
             id: selectedWorkflowId,

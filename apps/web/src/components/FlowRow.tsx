@@ -20,6 +20,7 @@ type TFunc = ReturnType<typeof useT>['t']
 
 export type FlowRowProps = {
   workflow: SavedWorkflow
+  canWrite: boolean
   folderOptions: string[]
   tagOptions: string[]
   hasFolders: boolean
@@ -45,6 +46,7 @@ const STATUS_PAUSED_CIRCUIT_BREAKER = 'paused_circuit_breaker'
 
 export const FlowRow = memo(function FlowRow({
   workflow,
+  canWrite,
   folderOptions,
   tagOptions,
   hasFolders,
@@ -90,7 +92,7 @@ export const FlowRow = memo(function FlowRow({
       >
         {/* Bulk-select checkbox — only in selection mode. stopPropagation so
             ticking a row never opens it. */}
-        {selectionMode && (
+        {canWrite && selectionMode && (
           <input
             type="checkbox"
             className="we-list-row__select"
@@ -104,7 +106,7 @@ export const FlowRow = memo(function FlowRow({
         {/* Drag handle — only rendered once folders exist (otherwise there's no
             section to drop onto). Native DnD is mouse-only; the per-row select
             below and the Inspector folder field stay keyboard-accessible. */}
-        {hasFolders && (
+        {canWrite && hasFolders && (
           <span
             className="we-list-row__drag"
             draggable
@@ -139,19 +141,21 @@ export const FlowRow = memo(function FlowRow({
               {rowTags.map(tag => (
                 <span key={tag} className="we-pill we-list-row__tag" data-tone="ghost">
                   {tag}
-                  <button
-                    type="button"
-                    className="we-list-row__tag-remove"
-                    aria-label={t('workflowsDashboard.removeTagAria', { tag })}
-                    title={t('workflowsDashboard.removeTagAria', { tag })}
-                    onClick={(event) => { event.stopPropagation(); void setRowTag(workflow.id, tag, 'remove') }}
-                    data-testid={`workflows-row-tag-remove-${workflow.id}-${tag}`}
-                  >
-                    <X size={10} aria-hidden="true" />
-                  </button>
+                  {canWrite && (
+                    <button
+                      type="button"
+                      className="we-list-row__tag-remove"
+                      aria-label={t('workflowsDashboard.removeTagAria', { tag })}
+                      title={t('workflowsDashboard.removeTagAria', { tag })}
+                      onClick={(event) => { event.stopPropagation(); void setRowTag(workflow.id, tag, 'remove') }}
+                      data-testid={`workflows-row-tag-remove-${workflow.id}-${tag}`}
+                    >
+                      <X size={10} aria-hidden="true" />
+                    </button>
+                  )}
                 </span>
               ))}
-              {addableTags.length > 0 && (
+              {canWrite && addableTags.length > 0 && (
                 <select
                   className="we-list-row__tag-add"
                   value=""
@@ -196,7 +200,7 @@ export const FlowRow = memo(function FlowRow({
               <select> is operable without a mouse. Only rendered once folders
               exist (same gate as the drag handle), so the flat no-folder list is
               unchanged. Reuses the same moveToFolder path the drag drop uses. */}
-          {hasFolders && (
+          {canWrite && hasFolders && (
             <select
               className="we-list-row__folder-select"
               value={workflow.folder ?? ''}
@@ -214,7 +218,7 @@ export const FlowRow = memo(function FlowRow({
           {/* Only breaker pauses get a Resume: an upstream-outage pause clears
               itself when the status page recovers. An active workflow can
               continue a capped buffered window without changing pause state. */}
-          {pausedByBreaker && (
+          {canWrite && pausedByBreaker && (
             <button
               onClick={(event) => { event.stopPropagation(); void resumeWorkflow(workflow.id) }}
               className="small-command"
@@ -225,7 +229,7 @@ export const FlowRow = memo(function FlowRow({
               <PlayCircle size={12} aria-hidden="true" /> {t('workflowsDashboard.resumeFlow')}
             </button>
           )}
-          {!isPaused && hasBufferedTriggers && (
+          {canWrite && !isPaused && hasBufferedTriggers && (
             <button
               onClick={(event) => { event.stopPropagation(); void resumeWorkflow(workflow.id) }}
               className="small-command"
@@ -240,7 +244,7 @@ export const FlowRow = memo(function FlowRow({
           {/* Soft-delete affordance: an inline confirm (one row at a time) so a
               click never deletes immediately. The delete is recoverable from the
               Trash view. stopPropagation so the controls never open the row. */}
-          {confirmDeleteId === workflow.id ? (
+          {!canWrite ? null : confirmDeleteId === workflow.id ? (
             <span className="we-list-row__confirm" onClick={(event) => event.stopPropagation()}>
               <span className="we-list-row__confirm-text">{t('workflowsDashboard.deleteConfirm', { name: workflow.name })}</span>
               <button

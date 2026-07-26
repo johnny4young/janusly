@@ -11,11 +11,14 @@
  */
 
 import i18next from 'i18next'
-import { FALLBACK_LOCALE, type RuntimeLocale } from './resources'
+import { FALLBACK_LOCALE, type RuntimeLocale, type Translate } from './resources'
 
-/** The non-React `t` (typed by i18next via `types.d.ts` module augmentation). */
-export const t = (...args: Parameters<typeof i18next.t>): ReturnType<typeof i18next.t> =>
-  i18next.t(...args)
+/** The non-React translation chokepoint with a bounded application signature. */
+export const t: Translate = (key, options) => String(
+  options === undefined
+    ? i18next.t(key as never)
+    : i18next.t(key as never, options as never),
+)
 
 /** Read the currently active runtime locale (never `'system'`). */
 export function getResolvedLocale(): RuntimeLocale {

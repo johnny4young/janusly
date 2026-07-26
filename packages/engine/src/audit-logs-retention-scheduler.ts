@@ -35,7 +35,7 @@
 import {
   recordSystemAudit, deleteExpiredAuditLogs } from "@janusly/data";
 
-import { workflowQueue } from "./queue";
+import { maintenanceQueue } from "./queue";
 import { validateCronExpression } from "./schedule";
 
 /** Deterministic global id for the BullMQ scheduler. */
@@ -116,7 +116,7 @@ export async function registerAuditLogsRetentionScheduler(
 ): Promise<boolean> {
   const pattern = resolveCronPattern(env);
   try {
-    await workflowQueue.upsertJobScheduler(
+    await maintenanceQueue.upsertJobScheduler(
       AUDIT_LOGS_RETENTION_JOB_ID,
       { pattern },
       { name: AUDIT_LOGS_RETENTION_JOB_NAME, data: {} },

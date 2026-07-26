@@ -59,6 +59,15 @@ import { resolveStdioSandboxConfig } from "@janusly/engine/src/mcp-tool-executor
 import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
 import { enforceRateLimit } from "../rate-limit";
 import type { Route } from "../routes";
+import {
+  createMcpConnectionContract,
+  deleteMcpConnectionContract,
+  listMcpConnectionsContract,
+  listMcpConnectionToolsContract,
+  rediscoverMcpConnectionContract,
+  setMcpConnectionToolContract,
+  updateMcpConnectionContract,
+} from "../api-contracts";
 
 const ALIAS_PATTERN = /^[a-z0-9_-]{1,32}$/;
 const TRANSPORTS = new Set<McpTransport>(["stdio", "sse", "http"]);
@@ -221,6 +230,7 @@ export const mcpRoutes: Route[] = [
     match: "/mcp/connections",
     role: "viewer",
     permission: "mcp.connections.read",
+    contract: listMcpConnectionsContract,
     handler: async ({ res, auth }) => {
       const connections = await listConnections(auth.orgId);
       // Include the per-connection descriptor count so the panel can
@@ -245,6 +255,7 @@ export const mcpRoutes: Route[] = [
     match: "/mcp/connections",
     role: "admin",
     permission: "mcp.connections.write",
+    contract: createMcpConnectionContract,
     handler: async ({ req, res, auth }) => {
       const createMcpGate = await guardMcpWrite(auth, "mcp.connections.create");
       if (!createMcpGate.ok) return sendJson(res, createMcpGate.body, createMcpGate.status);
@@ -333,7 +344,10 @@ export const mcpRoutes: Route[] = [
     match: (url) => /^\/mcp\/connections\/[^/]+$/.test(url),
     role: "admin",
     permission: "mcp.connections.write",
+    contract: updateMcpConnectionContract,
     handler: async ({ req, res, auth }) => {
+      const updateMcpGate = await guardMcpWrite(auth, "mcp.connections.update");
+      if (!updateMcpGate.ok) return sendJson(res, updateMcpGate.body, updateMcpGate.status);
       const alias = aliasFromUrl(req.url, "/mcp/connections");
       if (!alias) return sendError(res, "mcp_alias_required", "alias is required", 400);
 
@@ -409,6 +423,7 @@ export const mcpRoutes: Route[] = [
     match: (url) => /^\/mcp\/connections\/[^/]+$/.test(url),
     role: "admin",
     permission: "mcp.connections.write",
+    contract: deleteMcpConnectionContract,
     handler: async ({ req, res, auth }) => {
       const deleteMcpGate = await guardMcpWrite(auth, "mcp.connections.delete");
       if (!deleteMcpGate.ok) return sendJson(res, deleteMcpGate.body, deleteMcpGate.status);
@@ -433,6 +448,7 @@ export const mcpRoutes: Route[] = [
     match: (url) => /^\/mcp\/connections\/[^/]+\/rediscover$/.test(url),
     role: "admin",
     permission: "mcp.connections.write",
+    contract: rediscoverMcpConnectionContract,
     handler: async ({ req, res, auth }) => {
       const rediscoverMcpGate = await guardMcpWrite(auth, "mcp.connections.rediscover");
       if (!rediscoverMcpGate.ok) return sendJson(res, rediscoverMcpGate.body, rediscoverMcpGate.status);
@@ -476,6 +492,7 @@ export const mcpRoutes: Route[] = [
     match: (url) => /^\/mcp\/connections\/[^/]+\/tools$/.test(url),
     role: "viewer",
     permission: "mcp.connections.read",
+    contract: listMcpConnectionToolsContract,
     handler: async ({ req, res, auth }) => {
       const match = (req.url ?? "").match(/^\/mcp\/connections\/([^/]+)\/tools$/);
       const alias = match?.[1] ? decodeURIComponent(match[1]).trim().toLowerCase() : "";
@@ -493,6 +510,7 @@ export const mcpRoutes: Route[] = [
     match: (url) => /^\/mcp\/connections\/[^/]+\/tools\/[^/?]+$/.test(url),
     role: "admin",
     permission: "mcp.connections.write",
+    contract: setMcpConnectionToolContract,
     handler: async ({ req, res, auth }) => {
       const setToolMcpGate = await guardMcpWrite(auth, "mcp.connections.set_tool");
       if (!setToolMcpGate.ok) return sendJson(res, setToolMcpGate.body, setToolMcpGate.status);

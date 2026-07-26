@@ -113,7 +113,7 @@ function severityForCategory(category: ClusterCategory): 'pass' | 'warn' | 'fail
   return 'warn'
 }
 
-export function FailureClustersCard() {
+export function FailureClustersCard({ canRecover = true }: { canRecover?: boolean }) {
   const { t } = useT()
   const platformVersion = useWorkflowStore((state) => state.platformVersion)
   const [data, setData] = useState<ClusterData | null>(null)
@@ -357,7 +357,7 @@ export function FailureClustersCard() {
                       </button>
                     )}
                   </div>
-                  {cluster.frequency >= MIN_FREQUENCY_FOR_BULK_RECOVER
+                  {canRecover && cluster.frequency >= MIN_FREQUENCY_FOR_BULK_RECOVER
                     && cluster.samples.some((s) => s.source === 'dead_letter') ? (
                     <div className="we-cluster-row__section">
                       <button
@@ -379,7 +379,7 @@ export function FailureClustersCard() {
                         </p>
                       )}
                     </div>
-                  ) : (
+                  ) : canRecover ? (
                     // Explain why bulk recovery isn't offered for this cluster instead
                     // of rendering nothing — the gate needs repeat failures AND a
                     // replayable dead-letter sample.
@@ -388,7 +388,7 @@ export function FailureClustersCard() {
                         {t('clusters.recoverUnavailable', { min: MIN_FREQUENCY_FOR_BULK_RECOVER })}
                       </p>
                     </div>
-                  )}
+                  ) : null}
                 </div>
               )}
             </li>

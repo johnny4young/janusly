@@ -7,16 +7,17 @@
 
 import {
   JanuslyApiError,
+  JanuslyProtocolError,
   JanuslyRateLimitError,
   type JanuslyApiErrorEnvelope,
-} from "./errors.ts";
+} from "./errors.js";
 import type {
   JanuslyAuthMode,
   JanuslyClientConfig,
   JanuslyLogger,
   JanuslyRequestOptions,
   JanuslyRetryConfig,
-} from "./types.ts";
+} from "./types.js";
 
 /** Default per-call timeout. */
 export const DEFAULT_TIMEOUT_MS = 30_000;
@@ -124,7 +125,36 @@ async function performSingleRequest(
   }
 
   if (res.status === 204) return undefined;
-  return readBodyAsJson(res, logger);
+  const body = await readBodyAsJson(res, logger);
+  return isVersionedPath(path) ? unwrapVersionedResponse(res, body) : body;
+}
+
+function isVersionedPath(path: string): boolean {
+  return path === "/v1" || path.startsWith("/v1/");
+}
+
+/** Fail closed when a successful stable response drifts from the v1 envelope. */
+function unwrapVersionedResponse(res: Response, body: unknown): unknown {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw protocolError(res);
+  }
+  const envelope = body as Record<string, unknown>;
+  if (
+    envelope.apiVersion !== "v1" ||
+    typeof envelope.requestId !== "string" ||
+    envelope.requestId.length === 0 ||
+    !Object.hasOwn(envelope, "data")
+  ) {
+    throw protocolError(res);
+  }
+  return envelope.data;
+}
+
+function protocolError(res: Response): JanuslyProtocolError {
+  return new JanuslyProtocolError("Invalid Janusly v1 response envelope", {
+    statusCode: res.status,
+    code: "invalid_response_envelope",
+  });
 }
 
 function normalizeBaseUrl(baseUrl: string): string {

@@ -16,9 +16,9 @@
  *      drifted; exchange the WorkOS code for a profile; verify
  *      `profile.connectionId === sso_connection.providerConnectionId`
  *      (defense against an org-A code being used to log in to org B);
- *      upsert the `org_members` row; issue a Janusly session token; 302
- *      back to the web with `#janusly_session=<token>` in the URL
- *      fragment so the token never lands in a server log.
+ *      upsert the `org_members` row; persist a revocable session; issue its
+ *      opaque signed id in an HttpOnly cookie; 302 back to the web without
+ *      placing session material in the URL.
  *
  * Seven audit actions:
  *   `org.sso.connection_added` / `org.sso.connection_updated` /
@@ -40,6 +40,7 @@ import {
   revokeSsoConnection,
   updateSsoConnection,
   consumeSsoNonce,
+  createAuthSession,
   recordSsoNonce,
   upsertMembership,
   withAuditTx,
@@ -51,10 +52,10 @@ import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { asRecord, readJson, sendError, sendJson } from "../http";
 import {
-  SSO_SESSION_PURPOSE,
   SSO_STATE_PURPOSE,
   type SsoStatePayload,
 } from "../auth";
+import { createBrowserSessionToken, sessionCookie } from "../browser-session";
 import { evaluateAuthPolicy } from "../auth-policy";
 import type { Route } from "../routes";
 import { buildAuthorizeUrl, exchangeCode, WorkOsExchangeError } from "../workos";
@@ -87,12 +88,12 @@ function redirect(res: import("http").ServerResponse, target: string) {
 
 export const ssoRoutes: Route[] = [
   // === Admin CRUD on sso_connections ===
-  { method: "GET", match: "/org/sso/connections", role: "admin",
+  { method: "GET", match: "/org/sso/connections", role: "admin", permission: "org.config.write",
     handler: async ({ res, auth }) => {
       const rows = await listSsoConnections(auth.orgId);
       return sendJson(res, rows);
     } },
-  { method: "POST", match: "/org/sso/connections", role: "admin",
+  { method: "POST", match: "/org/sso/connections", role: "admin", permission: "org.config.write",
     handler: async ({ req, res, auth }) => {
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const provider = body.provider;
@@ -126,7 +127,7 @@ export const ssoRoutes: Route[] = [
       } });
       return sendJson(res, row);
     } },
-  { method: "POST", match: (url) => /^\/org\/sso\/connections\/[^/]+$/.test(url), role: "admin",
+  { method: "POST", match: (url) => /^\/org\/sso\/connections\/[^/]+$/.test(url), role: "admin", permission: "org.config.write",
     handler: async ({ req, res, auth }) => {
       const match = (req.url ?? "").match(/^\/org\/sso\/connections\/([^/?]+)/);
       const id = match?.[1];
@@ -153,7 +154,7 @@ export const ssoRoutes: Route[] = [
       await auditAction(auth, "org.sso.connection_updated", { targetType: "sso_connection", targetId: id, metadata: updates });
       return sendJson(res, updated);
     } },
-  { method: "DELETE", match: (url) => /^\/org\/sso\/connections\/[^/]+$/.test(url), role: "admin",
+  { method: "DELETE", match: (url) => /^\/org\/sso\/connections\/[^/]+$/.test(url), role: "admin", permission: "org.config.write",
     handler: async ({ req, res, auth }) => {
       const match = (req.url ?? "").match(/^\/org\/sso\/connections\/([^/?]+)/);
       const id = match?.[1];
@@ -328,6 +329,12 @@ export const ssoRoutes: Route[] = [
             email: profile.email,
           },
         });
+        return createAuthSession({
+          orgId,
+          userId: profile.id,
+          email: profile.email,
+          expiresAt: new Date(Date.now() + policyDecision.sessionTtlSeconds * 1000),
+        }, tx);
       });
       if (!txResult.ok) {
         await audit(orgId, profile.id, "auth.sso.callback_failed", "sso_connection", sso.id, {
@@ -337,13 +344,12 @@ export const ssoRoutes: Route[] = [
         return sendError(res, "sso_membership_persist_failed", "membership_persist_failed", 500);
       }
 
-      const sessionToken = signSignedToken({
-        purpose: SSO_SESSION_PURPOSE,
-        payload: { orgId, userId: profile.id, email: profile.email },
-        ttlSeconds: policyDecision.sessionTtlSeconds,
-      });
-
-      const redirectTarget = `${webBaseUrl.replace(/\/$/, "")}/auth/sso/complete#janusly_session=${encodeURIComponent(sessionToken)}`;
+      const { token: sessionToken } = createBrowserSessionToken(
+        txResult.result.id,
+        policyDecision.sessionTtlSeconds,
+      );
+      res.setHeader("Set-Cookie", sessionCookie(sessionToken, policyDecision.sessionTtlSeconds));
+      const redirectTarget = `${webBaseUrl.replace(/\/$/, "")}/auth/sso/complete`;
       return redirect(res, redirectTarget);
     } },
 ];

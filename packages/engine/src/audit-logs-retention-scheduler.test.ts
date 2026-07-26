@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const insertValuesMock = vi.fn();
 
 vi.mock("./queue", () => ({
-  workflowQueue: {
+  maintenanceQueue: {
     upsertJobScheduler: vi.fn(),
   },
 }));
@@ -37,9 +37,9 @@ import {
   registerAuditLogsRetentionScheduler,
   resolveAuditLogsRetentionDays,
 } from "./audit-logs-retention-scheduler";
-import { workflowQueue } from "./queue";
+import { maintenanceQueue } from "./queue";
 
-const upsertJobSchedulerMock = vi.mocked(workflowQueue.upsertJobScheduler);
+const upsertJobSchedulerMock = vi.mocked(maintenanceQueue.upsertJobScheduler);
 const deleteExpiredAuditLogsMock = vi.mocked(deleteExpiredAuditLogs);
 
 beforeEach(() => {

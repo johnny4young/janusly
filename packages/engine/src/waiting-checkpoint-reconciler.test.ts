@@ -6,10 +6,10 @@ vi.mock("./persistence", () => ({
 vi.mock("./queue", () => ({
   enqueueApprovalTimeout: vi.fn(),
   enqueueWaitUntilResume: vi.fn(),
-  workflowQueue: { upsertJobScheduler: vi.fn() },
+  maintenanceQueue: { upsertJobScheduler: vi.fn() },
 }));
 
-import { workflowQueue } from "./queue";
+import { maintenanceQueue } from "./queue";
 import {
   reconcileWaitingCheckpoints,
   registerWaitingCheckpointReconciler,
@@ -20,7 +20,7 @@ import {
 
 beforeEach(() => {
   vi.restoreAllMocks();
-  vi.mocked(workflowQueue.upsertJobScheduler).mockReset().mockResolvedValue(undefined as never);
+  vi.mocked(maintenanceQueue.upsertJobScheduler).mockReset().mockResolvedValue(undefined as never);
 });
 
 describe("waiting checkpoint reconciler", () => {
@@ -45,13 +45,13 @@ describe("waiting checkpoint reconciler", () => {
 
   it("registers one deterministic once-per-minute scheduler and fails open", async () => {
     await expect(registerWaitingCheckpointReconciler()).resolves.toBe(true);
-    expect(workflowQueue.upsertJobScheduler).toHaveBeenCalledWith(
+    expect(maintenanceQueue.upsertJobScheduler).toHaveBeenCalledWith(
       WAITING_CHECKPOINT_RECONCILER_JOB_ID,
       { pattern: WAITING_CHECKPOINT_RECONCILER_CRON },
       { name: WAITING_CHECKPOINT_RECONCILER_JOB_NAME, data: {} },
     );
 
-    vi.mocked(workflowQueue.upsertJobScheduler).mockRejectedValueOnce(new Error("redis unavailable"));
+    vi.mocked(maintenanceQueue.upsertJobScheduler).mockRejectedValueOnce(new Error("redis unavailable"));
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     await expect(registerWaitingCheckpointReconciler()).resolves.toBe(false);
   });

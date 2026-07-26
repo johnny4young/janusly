@@ -58,6 +58,9 @@ export type AuditAction =
   | "alert.policy.created"
   | "alert.policy.updated"
   | "alert.policy.deleted"
+  | "slack.interaction.created"
+  | "slack.interaction.updated"
+  | "slack.interaction.deleted"
   // auto-healing
   | "auto_healing.scan.triggered"
   | "auto_healing.decline.manual"
@@ -68,11 +71,14 @@ export type AuditAction =
   | "credential.created"
   | "credential.bulk_updated"
   | "credential.expiry_set"
+  | "credential.revoked"
   // dlq / recovery replay
   | "dlq.resolved"
   | "dlq.replayed"
   | "recovery.validation_started"
   | "recovery.cluster_apply"
+  | "recovery.campaign.created"
+  | "recovery.campaign.cancelled"
   | "recovery.playbook.created"
   | "recovery.playbook.activated"
   | "recovery.playbook.retired"
@@ -139,6 +145,7 @@ export type AuditAction =
   | "report.run_explain.exported"
   | "report.run_explain.delivered"
   | "report.value_dashboard.exported"
+  | "report.recovery_validation.exported"
   | "report.evidence.exported"
   | "report.evidence.delivered"
   // retention (per-org daily purge sweep; written by the engine scheduler
@@ -187,6 +194,9 @@ export type AuditAction =
   | "workflow.tag.set"
   | "workflow.saved"
   | "workflow.rolled_back"
+  | "workflow.rollout.started"
+  | "workflow.rollout.promoted"
+  | "workflow.rollout.rolled_back"
   | "workflow.slo.set"
   | "workflow.deleted"
   | "workflow.restored"
@@ -204,7 +214,7 @@ export type AuditAction =
   | "upstream_health.source.created"
   | "upstream_health.source.updated"
   | "upstream_health.source.deleted"
-  // inbound trigger events (email_received / file_dropped / mcp_server_event)
+  // inbound trigger events (webhook_received / email_received / file_dropped / mcp_server_event)
   | "trigger.event.received"
   | "trigger.event.started"
   | "trigger.event.buffered"

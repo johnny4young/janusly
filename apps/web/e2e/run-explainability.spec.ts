@@ -65,6 +65,8 @@ async function seedMemoryRecallEvent(runId: string, nodeId: string, stamp: strin
 
 async function openRunFromHistory(page: Page, runId: string, locale: 'en' | 'es'): Promise<void> {
   await page.getByRole('button', { name: locale === 'en' ? 'Runs' : 'Ejecuciones', exact: true }).click()
+  const overviewTab = page.getByTestId('run-workspace-tab-overview')
+  if (await overviewTab.isVisible().catch(() => false)) await overviewTab.click()
   const history = page.getByTestId('runs-history-virtual-list')
   await expect(history).toBeVisible()
   const prefix = `${runId.slice(0, 8)}…`

@@ -42,6 +42,9 @@ vi.mock('./RecentAlertsCard', () => ({
 vi.mock('./McpConnectionsPanel', () => ({
   McpConnectionsPanel: () => <section data-testid="stub-McpConnectionsPanel">Mcp</section>,
 }))
+vi.mock('./SlackInteractionsPanel', () => ({
+  SlackInteractionsPanel: () => <section data-testid="stub-SlackInteractionsPanel">SlackInteractions</section>,
+}))
 
 const initialState = useWorkflowStore.getState()
 const STORAGE_KEY = 'janusly:operations:section'
@@ -213,6 +216,7 @@ describe('<OperationsPage />', () => {
 
     await screen.findByTestId('stub-CredentialHealthCard')
     expect(screen.getByTestId('stub-McpConnectionsPanel')).toBeInTheDocument()
+    expect(screen.getByTestId('stub-SlackInteractionsPanel')).toBeInTheDocument()
     expect(screen.getByTestId('operations-rail-tab-integrations')).toHaveAttribute('aria-current', 'page')
     // Overview cards are NOT mounted because we hydrated to integrations.
     expect(screen.queryByTestId('stub-FailureClustersCard')).toBeNull()
@@ -289,6 +293,53 @@ describe('<OperationsPage />', () => {
     expect(chip).toHaveTextContent('Queue delayed')
     expect(chip).toHaveTextContent('Jobs are still processing')
     expect(screen.getByTestId('operations-rail-dot-reliability')).toHaveAttribute('data-severity', 'warning')
+  })
+
+  it('shows maintenance pressure independently from a clear workflow queue', async () => {
+    stubApiByPath({
+      '/recovery/metrics': healthyMetrics,
+      '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] }, queue: { degraded: true } },
+      '/system/queue': {
+        waiting: 0,
+        active: 1,
+        oldestWaitingSeconds: null,
+        warnSeconds: 60,
+        maintenance: {
+          waiting: 2,
+          active: 0,
+          oldestWaitingSeconds: 301,
+          warnSeconds: 300,
+        },
+      },
+    })
+
+    render(<OperationsPage />)
+
+    expect(await screen.findByTestId('queue-lag-chip')).toHaveAttribute('data-state', 'clear')
+    const maintenance = screen.getByTestId('maintenance-queue-lag-chip')
+    expect(maintenance).toHaveAttribute('data-state', 'delayed')
+    expect(maintenance).toHaveTextContent('Maintenance delayed')
+    expect(screen.getByTestId('operations-rail-dot-reliability')).toHaveAttribute('data-severity', 'warning')
+  })
+
+  it('attributes an explicit null maintenance snapshot to Redis, not transport', async () => {
+    stubApiByPath({
+      '/recovery/metrics': healthyMetrics,
+      '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] }, queue: null },
+      '/system/queue': {
+        waiting: 0,
+        active: 1,
+        oldestWaitingSeconds: null,
+        warnSeconds: 60,
+        maintenance: null,
+      },
+    })
+
+    render(<OperationsPage />)
+
+    const maintenance = await screen.findByTestId('maintenance-queue-lag-chip')
+    expect(maintenance).toHaveTextContent('Maintenance status unavailable — Redis could not be read')
+    expect(maintenance).not.toHaveTextContent('request failed')
   })
 
   it('treats an unavailable admin queue snapshot as unknown, not empty', async () => {

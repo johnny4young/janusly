@@ -16,7 +16,7 @@
  */
 
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { JanuslyWebhookSignatureError } from "../errors.ts";
+import { JanuslyWebhookSignatureError } from "../errors.js";
 
 /** Default skew tolerance: ±5 minutes (matches Stripe + WorkOS conventions). */
 const DEFAULT_TOLERANCE_SECONDS = 300;

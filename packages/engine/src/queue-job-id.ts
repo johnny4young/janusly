@@ -18,3 +18,9 @@ export function buildExecuteNodeJobId(payload: EnqueueNodeInput): string {
   ]);
   return `workflow-node-${createHash("sha256").update(generation).digest("hex")}`;
 }
+
+/** Stable id for one campaign due-clock generation without BullMQ separators. */
+export function buildReplayCampaignJobId(campaignId: string, dueAt: Date): string {
+  const generation = JSON.stringify([campaignId, dueAt.getTime()]);
+  return `replay-campaign-${createHash("sha256").update(generation).digest("hex")}`;
+}

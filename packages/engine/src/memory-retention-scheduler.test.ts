@@ -12,7 +12,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./queue", () => ({
-  workflowQueue: {
+  maintenanceQueue: {
     upsertJobScheduler: vi.fn(),
   },
 }));
@@ -30,9 +30,9 @@ import {
   MEMORY_RETENTION_JOB_NAME,
   registerMemoryRetentionScheduler,
 } from "./memory-retention-scheduler";
-import { workflowQueue } from "./queue";
+import { maintenanceQueue } from "./queue";
 
-const upsertJobSchedulerMock = vi.mocked(workflowQueue.upsertJobScheduler);
+const upsertJobSchedulerMock = vi.mocked(maintenanceQueue.upsertJobScheduler);
 const deleteExpiredMemoryMock = vi.mocked(deleteExpiredMemory);
 
 beforeEach(() => {

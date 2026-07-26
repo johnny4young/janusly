@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getWorkflowStatusMock = vi.hoisted(() => vi.fn(async () => ({ status: "active", pausedReason: null })));
+const resolveWorkflowRolloutAssignmentMock = vi.hoisted(() => vi.fn(async () => null));
 
 vi.mock("./queue", () => ({
   workflowQueue: {
@@ -40,6 +41,10 @@ vi.mock("@janusly/data/src/upstreamHealthSourcesRepo", () => ({
   getWorkflowStatus: getWorkflowStatusMock,
   WORKFLOW_STATUS_ACTIVE: "active",
   WORKFLOW_STATUS_PAUSED_UPSTREAM: "paused_upstream_degraded",
+}));
+
+vi.mock("@janusly/data/src/workflowRolloutsRepo", () => ({
+  resolveWorkflowRolloutAssignment: resolveWorkflowRolloutAssignmentMock,
 }));
 
 vi.mock("@janusly/db", () => ({
@@ -99,6 +104,8 @@ beforeEach(() => {
   listAllEnabledMock.mockResolvedValue([]);
   getScheduleEntryByIdMock.mockReset();
   recordFireMock.mockReset();
+  resolveWorkflowRolloutAssignmentMock.mockReset();
+  resolveWorkflowRolloutAssignmentMock.mockResolvedValue(null);
 });
 
 describe("buildScheduleJobId", () => {
@@ -376,6 +383,48 @@ describe("handleScheduleTrigger", () => {
     // The property under test is the LOOKUP path, not the run-spawn
     // path: payload.orgId never reaches the DB.
     expect(startRunMock).not.toHaveBeenCalled();
+  });
+
+  it("captures a deterministic canary assignment from the persisted schedule row", async () => {
+    getScheduleEntryByIdMock.mockResolvedValueOnce({
+      id: "entry-1",
+      orgId: "org-1",
+      workflowId: "workflow-1",
+      workflowVersionId: "version-canary",
+      nodeId: "trigger",
+      cronExpression: "0 9 * * *",
+      enabled: true,
+      lastRunAt: null,
+      lastRunId: null,
+      createdBy: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    resolveWorkflowRolloutAssignmentMock.mockResolvedValueOnce({
+      rollout: { id: "rollout-1" },
+      variant: "baseline",
+      versionId: "version-baseline",
+      version: 1,
+      workflow: { id: "workflow-1", name: "Scheduled", nodes: [], edges: [] },
+    } as never);
+
+    await handleScheduleTrigger(
+      { scheduleEntryId: "entry-1", orgId: "spoofed" },
+      undefined,
+      { id: "repeat:stable-delivery", timestamp: Date.parse("2026-07-21T15:00:00.000Z") },
+    );
+
+    expect(resolveWorkflowRolloutAssignmentMock).toHaveBeenCalledWith({
+      orgId: "org-1",
+      workflowId: "workflow-1",
+      assignmentKey: "entry-1:repeat:stable-delivery",
+    });
+    expect(startRunMock).toHaveBeenCalledWith(expect.objectContaining({
+      versionId: "version-baseline",
+      rollout: { id: "rollout-1", variant: "baseline" },
+      input: expect.objectContaining({ triggeredAt: "2026-07-21T15:00:00.000Z" }),
+      orgId: "org-1",
+    }));
   });
 
   describe("pause gate", () => {

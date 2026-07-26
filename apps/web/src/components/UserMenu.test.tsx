@@ -12,11 +12,36 @@ beforeEach(() => {
     userId: 'dev-user',
     orgId: 'default',
     authReady: true,
+    identityReady: true,
+    identityContext: {
+      identity: { userId: 'dev-user', email: 'ada@example.com', mode: 'supabase', source: 'web' },
+      profile: { name: 'Ada Operator', email: 'ada@example.com' },
+      organizations: [{
+        id: 'default', name: 'Acme Operations', plan: 'team', role: 'editor', roleBase: 'editor',
+        permissions: ['workflows.read'], usable: true, developmentFallback: false,
+      }],
+      invitations: [],
+      currentOrganizationId: 'default',
+      selectionRequired: false,
+      needsOrganization: false,
+      truncated: false,
+      invitationsTruncated: false,
+    },
     onboarding: null,
   }, true)
 })
 
 describe('<UserMenu /> docs capability', () => {
+  it('shows the provider-neutral profile, organization, and actual role', () => {
+    render(<UserMenu />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open user menu' }))
+
+    expect(screen.getAllByText('Ada Operator').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Acme Operations').length).toBeGreaterThan(0)
+    expect(screen.getByLabelText('Editor')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Sign out/ })).toBeInTheDocument()
+  })
+
   it('omits the Docs item when no URL is configured', () => {
     render(<UserMenu />)
     fireEvent.click(screen.getByRole('button', { name: 'Open user menu' }))

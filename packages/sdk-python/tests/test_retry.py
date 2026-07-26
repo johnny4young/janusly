@@ -24,8 +24,9 @@ from janusly import (
     ServiceTokenAuth,
 )
 from janusly.errors import JanuslyServerError, JanuslyValidationError
+from helpers import v1
 
-METRICS_URL = "https://api.test.janus.ly/recovery/metrics?windowDays=30"
+METRICS_URL = "https://api.test.janus.ly/v1/recovery/metrics?windowDays=30"
 
 
 def _client(retry: RetryConfig | None = None) -> JanuslyClient:
@@ -78,7 +79,7 @@ def test_sync_retries_503_up_to_max_then_raises(
 
 def test_sync_retries_then_succeeds(httpx_mock: HTTPXMock, no_sleep: list[float]) -> None:
     httpx_mock.add_response(url=METRICS_URL, status_code=503, json={"error": "down"})
-    httpx_mock.add_response(url=METRICS_URL, status_code=200, json={"windowDays": 30})
+    httpx_mock.add_response(url=METRICS_URL, status_code=200, json=v1({"windowDays": 30}))
     result = _client(RetryConfig(max_attempts=3, backoff_ms=5)).recovery.get_metrics()
     assert result["windowDays"] == 30
     assert len(httpx_mock.get_requests()) == 2
@@ -103,7 +104,7 @@ def test_sync_honours_retry_after_on_429(
         headers={"retry-after": "3"},
         json={"error": "slow down"},
     )
-    httpx_mock.add_response(url=METRICS_URL, status_code=200, json={"windowDays": 30})
+    httpx_mock.add_response(url=METRICS_URL, status_code=200, json=v1({"windowDays": 30}))
     result = _client(RetryConfig(max_attempts=1, backoff_ms=999)).recovery.get_metrics()
     assert result["windowDays"] == 30
     assert no_sleep == [3.0]  # Retry-After wins over backoff_ms.
@@ -111,7 +112,7 @@ def test_sync_honours_retry_after_on_429(
 
 def test_sync_retries_network_error(httpx_mock: HTTPXMock, no_sleep: list[float]) -> None:
     httpx_mock.add_exception(httpx.ConnectError("boom"), url=METRICS_URL)
-    httpx_mock.add_response(url=METRICS_URL, status_code=200, json={"windowDays": 30})
+    httpx_mock.add_response(url=METRICS_URL, status_code=200, json=v1({"windowDays": 30}))
     result = _client(RetryConfig(max_attempts=2, backoff_ms=1)).recovery.get_metrics()
     assert result["windowDays"] == 30
     assert len(httpx_mock.get_requests()) == 2
@@ -120,7 +121,7 @@ def test_sync_retries_network_error(httpx_mock: HTTPXMock, no_sleep: list[float]
 def test_sync_negative_backoff_clamps_to_retry_now(httpx_mock: HTTPXMock) -> None:
     """Defensive: a bad caller-provided backoff must not replace the HTTP error."""
     httpx_mock.add_response(url=METRICS_URL, status_code=503, json={"error": "down"})
-    httpx_mock.add_response(url=METRICS_URL, status_code=200, json={"windowDays": 30})
+    httpx_mock.add_response(url=METRICS_URL, status_code=200, json=v1({"windowDays": 30}))
     result = _client(RetryConfig(max_attempts=1, backoff_ms=-1)).recovery.get_metrics()
     assert result["windowDays"] == 30
     assert len(httpx_mock.get_requests()) == 2
@@ -138,7 +139,7 @@ async def test_async_default_does_not_retry(httpx_mock: HTTPXMock) -> None:
 
 async def test_async_retries_then_succeeds(httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(url=METRICS_URL, status_code=503, json={"error": "down"})
-    httpx_mock.add_response(url=METRICS_URL, status_code=200, json={"windowDays": 30})
+    httpx_mock.add_response(url=METRICS_URL, status_code=200, json=v1({"windowDays": 30}))
     result = await _async_client(RetryConfig(max_attempts=3, backoff_ms=1)).recovery.get_metrics()
     assert result["windowDays"] == 30
     assert len(httpx_mock.get_requests()) == 2
@@ -153,7 +154,7 @@ async def test_async_does_not_retry_validation_error(httpx_mock: HTTPXMock) -> N
 
 async def test_async_retries_network_error(httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_exception(httpx.ConnectError("boom"), url=METRICS_URL)
-    httpx_mock.add_response(url=METRICS_URL, status_code=200, json={"windowDays": 30})
+    httpx_mock.add_response(url=METRICS_URL, status_code=200, json=v1({"windowDays": 30}))
     result = await _async_client(RetryConfig(max_attempts=2, backoff_ms=1)).recovery.get_metrics()
     assert result["windowDays"] == 30
     assert len(httpx_mock.get_requests()) == 2

@@ -13,9 +13,10 @@
  *   3. Open a BullMQ Worker on the dedicated `alerts-system` queue with
  *      concurrency 1.
  *
- * Skips entirely when `JANUSLY_ALERTS_ENABLED !== "true"`. A fresh
- * checkout with default env never schedules anything; zero Redis writes,
- * zero Worker process.
+ * The event-driven dispatcher is always registered. When
+ * `JANUSLY_ALERTS_ENABLED !== "true"`, only the periodic scanner scheduler
+ * and its Worker are skipped, so a fresh checkout creates no alert queue
+ * work while matching event-driven policies can still dispatch immediately.
  *
  * Invariants:
  * - Never throws. A Redis blip at boot logs and continues so the rest of

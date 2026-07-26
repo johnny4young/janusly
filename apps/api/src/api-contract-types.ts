@@ -13,11 +13,13 @@ import type { Permission } from "./permission-catalog";
 import type { Role } from "./permissions";
 
 export type ApiContractRequest = {
+  /** Decoded values captured from `{name}` segments in the contract path. */
+  path?: ZodObject<ZodRawShape>;
   /** Raw URL-query schema. Coercion is allowed; handlers keep ownership of the parsed values. */
   query?: ZodObject<ZodRawShape>;
   /** Query keys that must always be represented as arrays before Zod parsing. */
   repeatableQueryParams?: readonly string[];
-  /** JSON body schema for future contracted mutation routes. */
+  /** Raw JSON body schema. The dispatcher validates it and handlers reuse the memoized parse. */
   body?: ZodType;
 };
 

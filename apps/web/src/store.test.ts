@@ -12,8 +12,10 @@ beforeEach(() => {
       userId: null,
       orgId: null,
       authReady: false,
+      identityContext: null,
+      identityReady: false,
       currentWorkflowId: 'ui-test',
-      currentWorkflowName: 'Sample workflow',
+      currentWorkflowName: 'Untitled Workflow',
       workflowRevision: 0,
       nodes: [],
       edges: [],
@@ -36,6 +38,18 @@ beforeEach(() => {
 })
 
 describe('useWorkflowStore', () => {
+  it('initializes the translated blank-draft name only while the boot sentinel is empty', () => {
+    useWorkflowStore.setState({ currentWorkflowName: '', workflowDirty: false })
+    useWorkflowStore.getState().initializeWorkflowName('Flujo sin título')
+    expect(useWorkflowStore.getState()).toMatchObject({
+      currentWorkflowName: 'Flujo sin título',
+      workflowDirty: false,
+    })
+
+    useWorkflowStore.getState().initializeWorkflowName('Untitled Workflow')
+    expect(useWorkflowStore.getState().currentWorkflowName).toBe('Flujo sin título')
+  })
+
   it('addNode appends a node with its preset config and an empty label (leaf component resolves)', () => {
     useWorkflowStore.getState().addNode('http')
     const { nodes } = useWorkflowStore.getState()
@@ -48,17 +62,11 @@ describe('useWorkflowStore', () => {
     expect(nodes[0].data.config).toEqual({ url: 'https://api.github.com' })
   })
 
-  it('seeds a representative request, condition, and approval workflow', () => {
-    expect(initialState.nodes.map(node => node.data.type)).toEqual(['http', 'condition', 'approval'])
-    expect(initialState.nodes.find(node => node.id === 'check')?.data.config).toEqual({
-      expression: 'context.fetch.output.statusCode === 200',
-    })
-    expect(initialState.edges.map(edge => [edge.source, edge.target])).toEqual([
-      ['fetch', 'check'],
-      ['check', 'approve'],
-    ])
-    expect(initialState.edges.find(edge => edge.source === 'check')?.data?.condition)
-      .toBe('context.check.output.result === true')
+  it('starts with a clean blank draft rather than example workflow data', () => {
+    expect(initialState.currentWorkflowSaved).toBe(false)
+    expect(initialState.workflowDirty).toBe(false)
+    expect(initialState.nodes).toEqual([])
+    expect(initialState.edges).toEqual([])
   })
 
   it('hydrateWorkflow loads nodes/edges and resets selection and run state', () => {
@@ -512,6 +520,51 @@ describe('useWorkflowStore', () => {
     expect(state.events).toEqual([])
   })
 
+  it('does not carry notifications across sign-in or workspace ownership changes', () => {
+    useWorkflowStore.setState({
+      userId: null,
+      orgId: null,
+      toasts: [{ id: 'signed-out', message: 'Signed out', tone: 'info' }],
+    })
+
+    useWorkflowStore.getState().setAuth({
+      session: null,
+      user: null,
+      userId: 'user-b',
+      orgId: 'org-b',
+    })
+
+    expect(useWorkflowStore.getState().toasts).toEqual([])
+  })
+
+  it('invalidates identity context when the user or organization changes', () => {
+    useWorkflowStore.setState({
+      userId: 'user-a',
+      orgId: 'org-a',
+      identityReady: true,
+      identityContext: {
+        identity: { userId: 'user-a', email: null, mode: 'dev-headers', source: 'dev' },
+        profile: { name: null, email: null },
+        organizations: [],
+        invitations: [],
+        currentOrganizationId: 'org-a',
+        selectionRequired: false,
+        needsOrganization: false,
+        truncated: false,
+        invitationsTruncated: false,
+      },
+    })
+
+    useWorkflowStore.getState().setAuth({
+      session: null,
+      user: null,
+      userId: 'user-a',
+      orgId: 'org-b',
+    })
+
+    expect(useWorkflowStore.getState()).toMatchObject({ identityContext: null, identityReady: false })
+  })
+
   it('resets the session-only recovery intro dismissal across auth owners', () => {
     useWorkflowStore.setState({
       userId: 'user-a',
@@ -527,6 +580,18 @@ describe('useWorkflowStore', () => {
     })
 
     expect(useWorkflowStore.getState().recoveryIntroDismissedThisSession).toBe(false)
+  })
+
+  it('clears departing-identity notifications on logout', () => {
+    useWorkflowStore.setState({
+      userId: 'user-a',
+      orgId: 'org-a',
+      toasts: [{ id: 'private-toast', message: 'Run failed in Billing', tone: 'error' }],
+    })
+
+    useWorkflowStore.getState().clearAuth()
+
+    expect(useWorkflowStore.getState()).toMatchObject({ userId: null, orgId: null, toasts: [] })
   })
 
   it('preserves the active run when only the auth session refreshes', () => {
@@ -645,7 +710,7 @@ describe('useWorkflowStore semantic workflow signals', () => {
         }),
       applyEdgeChanges: (_changes, edges) => edges,
       addEdge: (_connection, edges) => edges,
-    } as never)
+    })
   })
 
   it('starts clean and turns dirty on semantic mutations', () => {

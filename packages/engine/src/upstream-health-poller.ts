@@ -56,7 +56,7 @@ import {
 import { parseUpstreamFeed, type UpstreamFeedParseResult } from "@janusly/shared";
 
 import { fetchHttpTarget, type HttpBufferedResult } from "./http-policy";
-import { workflowQueue } from "./queue";
+import { maintenanceQueue } from "./queue";
 import { validateCronExpression } from "./schedule";
 
 /** Deterministic global scheduler id. The `system:` prefix is reserved for non-tenant cron jobs. */
@@ -268,7 +268,7 @@ export async function registerUpstreamHealthScheduler(
 ): Promise<boolean> {
   const pattern = resolveCronPattern(env);
   try {
-    await workflowQueue.upsertJobScheduler(
+    await maintenanceQueue.upsertJobScheduler(
       UPSTREAM_HEALTH_JOB_ID,
       { pattern },
       { name: UPSTREAM_HEALTH_JOB_NAME, data: {} },

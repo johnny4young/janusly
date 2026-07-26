@@ -36,6 +36,7 @@
 import { evaluateExpression } from "../expression";
 import { materializeWaitingCheckpointMetadata } from "../waiting-time";
 import { logNodeEvent } from "../observability/logger";
+import { incNodeFailure, incNodeRetry, recordNodeDuration } from "../observability/metrics";
 import { workflowEvent } from "./events";
 import { shouldRetry, computeRetryDelay } from "./retry-policy";
 import { decideTransient, isTransientTierEnabled, transientAttemptFromCounters } from "./transient-tier";
@@ -186,6 +187,8 @@ export class WorkflowRuntime {
             recoveryClaimToken,
           );
           if (!completed) return;
+          const durationMs = Date.now() - start;
+          recordNodeDuration(durationMs, { node_type: node.type });
 
           // ROUTE the decision: mark every non-chosen candidate that is a
           // direct successor of this router as skipped BEFORE the readiness
@@ -231,6 +234,7 @@ export class WorkflowRuntime {
 
       if (result?.status === "waiting") {
         if (result.checkpointPersisted) {
+          recordNodeDuration(durationMs, { node_type: node.type });
           logNodeEvent({ runId, nodeId: node.id, type: "node.waiting", attempt, durationMs });
           return;
         }
@@ -241,6 +245,7 @@ export class WorkflowRuntime {
         };
         const waiting = await this.store.markNodeWaiting(runId, node.id, metadata, recoveryClaimToken);
         if (!waiting) return;
+        recordNodeDuration(durationMs, { node_type: node.type });
         await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.waiting", payload: { ...result, metadata } }));
         logNodeEvent({ runId, nodeId: node.id, type: "node.waiting", attempt, durationMs });
         return;
@@ -262,6 +267,7 @@ export class WorkflowRuntime {
         recoveryClaimToken,
       );
       if (!completed) return;
+      recordNodeDuration(durationMs, { node_type: node.type });
       await updateRoutingStats({ orgId: metadata?.orgId, nodeId: node.id, reward: 1, success: true });
       logNodeEvent({ runId, nodeId: node.id, type: "node.succeeded", attempt, durationMs });
 
@@ -308,6 +314,8 @@ export class WorkflowRuntime {
           delayMs,
         );
         if (!queued) return;
+        recordNodeDuration(durationMs, { node_type: node.type });
+        incNodeRetry({ node_type: node.type });
         await updateRoutingStats({ orgId: metadata?.orgId, nodeId: node.id, reward: -1, success: false });
         await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.retry", payload: { attempt: nextAttempt, delayMs, error } }));
         logNodeEvent({ runId, nodeId: node.id, type: "node.retry", attempt: nextAttempt, durationMs, error });
@@ -358,6 +366,9 @@ export class WorkflowRuntime {
           transientDecision.delayMs,
         );
         if (!queued) return;
+
+        recordNodeDuration(durationMs, { node_type: node.type });
+        incNodeRetry({ node_type: node.type });
 
         await this.store.appendEvent(workflowEvent({
           runId,
@@ -413,6 +424,8 @@ export class WorkflowRuntime {
       });
       if (!failed) return;
 
+      recordNodeDuration(durationMs, { node_type: node.type });
+      incNodeFailure({ node_type: node.type });
       await updateRoutingStats({ orgId: metadata?.orgId, nodeId: node.id, reward: -1, success: false });
       logNodeEvent({ runId, nodeId: node.id, type: "node.failed", attempt, durationMs, error });
       throw err;

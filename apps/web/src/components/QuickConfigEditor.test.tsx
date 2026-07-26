@@ -4,12 +4,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { initI18n } from '../i18n'
 
-vi.mock('../api', () => ({ api: vi.fn() }))
+vi.mock('../api', () => ({
+  api: vi.fn(),
+  publicApiUrl: (path: string) => `http://localhost:7311${path}`,
+}))
 vi.mock('./McpToolConfigField', () => ({
   McpToolConfigField: () => <section data-testid="mcp-tool-config" />,
 }))
 
 import { QuickConfigEditor } from './QuickConfigEditor'
+
+const emptyWorkflowGraph = { workflowNodes: [], workflowEdges: [] }
 
 beforeEach(() => {
   initI18n('en')
@@ -24,6 +29,7 @@ describe('<QuickConfigEditor /> resilience wiring', () => {
   it.each(['http', 'tool', 'agent', 'mcp_tool'] as const)('mounts resilience controls for %s nodes', (type) => {
     render(
       <QuickConfigEditor
+        {...emptyWorkflowGraph}
         nodeId="external-step"
         type={type}
         config={type === 'http' ? { url: 'https://api.example.com' } : {}}
@@ -39,6 +45,7 @@ describe('<QuickConfigEditor /> resilience wiring', () => {
     const onUpdate = vi.fn()
     render(
       <QuickConfigEditor
+        {...emptyWorkflowGraph}
         nodeId="external-step"
         type="http"
         config={{ url: 'https://api.example.com' }}
@@ -60,6 +67,7 @@ describe('<QuickConfigEditor /> resilience wiring', () => {
   it('explains the buffered JSON output contract and localizes tool descriptions', () => {
     const view = render(
       <QuickConfigEditor
+        {...emptyWorkflowGraph}
         nodeId="fetch"
         type="http"
         config={{ url: 'https://api.example.com' }}
@@ -73,6 +81,7 @@ describe('<QuickConfigEditor /> resilience wiring', () => {
     initI18n('es')
     view.rerender(
       <QuickConfigEditor
+        {...emptyWorkflowGraph}
         nodeId="parse"
         type="tool"
         config={{ tool: 'json.parse', input: { value: '{}' } }}
@@ -101,6 +110,7 @@ describe('<QuickConfigEditor /> bounded per-item processing', () => {
   it('keeps the legacy mapping editor as the default loop mode', () => {
     render(
       <QuickConfigEditor
+        {...emptyWorkflowGraph}
         nodeId="batch"
         type="loop"
         config={{ items: 'a,b', mapping: { value: '{{item}}' } }}
@@ -118,6 +128,7 @@ describe('<QuickConfigEditor /> bounded per-item processing', () => {
     const onUpdate = vi.fn()
     render(
       <QuickConfigEditor
+        {...emptyWorkflowGraph}
         nodeId="batch"
         type="loop"
         config={{ items: 'a,b', mapping: { value: '{{item}}' } }}
@@ -142,6 +153,7 @@ describe('<QuickConfigEditor /> bounded per-item processing', () => {
     const onUpdate = vi.fn()
     render(
       <QuickConfigEditor
+        {...emptyWorkflowGraph}
         nodeId="batch"
         type="loop"
         config={{
@@ -178,6 +190,7 @@ describe('<QuickConfigEditor /> bounded per-item processing', () => {
     initI18n('es')
     render(
       <QuickConfigEditor
+        {...emptyWorkflowGraph}
         nodeId="batch"
         type="loop"
         config={{ mode: 'for_each', items: 'a,b', tool: 'text.uppercase', input: { value: '{{item}}' }, concurrency: 4, toleratedFailureCount: 0 }}
@@ -197,6 +210,7 @@ describe('<QuickConfigEditor /> guided workflow choices', () => {
     const onUpdate = vi.fn()
     const { container } = render(
       <QuickConfigEditor
+        {...emptyWorkflowGraph}
         nodeId="child-flow"
         type="subworkflow"
         config={{}}
@@ -223,6 +237,7 @@ describe('<QuickConfigEditor /> guided workflow choices', () => {
     const onUpdate = vi.fn()
     render(
       <QuickConfigEditor
+        {...emptyWorkflowGraph}
         nodeId="child-flow"
         type="subworkflow"
         config={{ workflowId: 'legacy-child' }}
@@ -244,6 +259,7 @@ describe('<QuickConfigEditor /> guided workflow choices', () => {
     const onUpdate = vi.fn()
     const { container } = render(
       <QuickConfigEditor
+        {...emptyWorkflowGraph}
         nodeId="child-flow"
         type="subworkflow"
         config={{ workflowId: 'parent' }}
@@ -271,6 +287,7 @@ describe('<QuickConfigEditor /> guided workflow choices', () => {
     const onUpdate = vi.fn()
     render(
       <QuickConfigEditor
+        {...emptyWorkflowGraph}
         nodeId="child-flow"
         type="subworkflow"
         config={{ workflowId: 'child', version: 2 }}
@@ -297,6 +314,7 @@ describe('<QuickConfigEditor /> guided workflow choices', () => {
     const onUpdate = vi.fn()
     render(
       <QuickConfigEditor
+        {...emptyWorkflowGraph}
         nodeId="child-flow"
         type="subworkflow"
         config={{ workflowId: 'child-a', version: 4 }}
@@ -325,6 +343,7 @@ describe('<QuickConfigEditor /> bounded waiting', () => {
   it('renders approval ownership and deadline policy without duplicating the message field', () => {
     render(
       <QuickConfigEditor
+        {...emptyWorkflowGraph}
         nodeId="approval-step"
         type="approval"
         config={{
@@ -353,6 +372,7 @@ describe('<QuickConfigEditor /> bounded waiting', () => {
     const onUpdate = vi.fn()
     render(
       <QuickConfigEditor
+        {...emptyWorkflowGraph}
         nodeId="approval-step"
         type="approval"
         config={{ message: 'Approve', assignee: 'operator-1', decisionTimeoutMs: 60_000, onTimeout: 'auto_reject' }}
@@ -371,6 +391,7 @@ describe('<QuickConfigEditor /> bounded waiting', () => {
     const onUpdate = vi.fn()
     render(
       <QuickConfigEditor
+        {...emptyWorkflowGraph}
         nodeId="approval-step"
         type="approval"
         config={{ decisionTimeoutMs: 90_001 }}
@@ -393,6 +414,7 @@ describe('<QuickConfigEditor /> bounded waiting', () => {
     const onUpdate = vi.fn()
     const view = render(
       <QuickConfigEditor
+        {...emptyWorkflowGraph}
         nodeId="wait-step"
         type="wait_until"
         config={{ duration: 'PT5M' }}
@@ -408,6 +430,7 @@ describe('<QuickConfigEditor /> bounded waiting', () => {
 
     view.rerender(
       <QuickConfigEditor
+        {...emptyWorkflowGraph}
         nodeId="wait-step"
         type="wait_until"
         config={{ until: '2026-07-14T13:00:00.000Z' }}
@@ -430,6 +453,7 @@ describe('<QuickConfigEditor /> bounded waiting', () => {
     try {
       render(
         <QuickConfigEditor
+        {...emptyWorkflowGraph}
           nodeId="wait-step"
           type="wait_until"
           config={{ until: '2026-03-08T06:30:00.000Z' }}
@@ -459,6 +483,7 @@ describe('<QuickConfigEditor /> bounded waiting', () => {
     try {
       const view = render(
         <QuickConfigEditor
+        {...emptyWorkflowGraph}
           nodeId="wait-step"
           type="wait_until"
           config={{ until: '2026-11-01T06:30:00.000Z' }}
@@ -476,6 +501,7 @@ describe('<QuickConfigEditor /> bounded waiting', () => {
 
       view.rerender(
         <QuickConfigEditor
+        {...emptyWorkflowGraph}
           nodeId="wait-step"
           type="wait_until"
           config={{ until: '2026-11-01T04:30:00.000Z' }}
@@ -506,6 +532,7 @@ describe('<QuickConfigEditor /> schedule validation', () => {
     const onUpdate = vi.fn()
     const view = render(
       <QuickConfigEditor
+        {...emptyWorkflowGraph}
         nodeId="schedule-step"
         type="schedule"
         config={{ cronExpression: 'invalid', enabled: true }}
@@ -521,6 +548,7 @@ describe('<QuickConfigEditor /> schedule validation', () => {
 
     view.rerender(
       <QuickConfigEditor
+        {...emptyWorkflowGraph}
         nodeId="schedule-step"
         type="schedule"
         config={{ cronExpression: '0 9 * * *', enabled: true }}
@@ -532,5 +560,60 @@ describe('<QuickConfigEditor /> schedule validation', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(250) })
     expect(screen.getByText("The next runs couldn't be calculated right now.")).toBeInTheDocument()
     expect(input).not.toHaveAttribute('aria-invalid')
+  })
+})
+
+describe('<QuickConfigEditor /> inbound webhook trigger', () => {
+  it('edits the endpoint selector used by the authenticated ingestion route', () => {
+    const onUpdate = vi.fn()
+    render(
+      <QuickConfigEditor
+        {...emptyWorkflowGraph}
+        nodeId="incoming"
+        type="webhook_received"
+        config={{ endpointKey: 'incident-triage' }}
+        tools={[]}
+        onUpdate={onUpdate}
+      />,
+    )
+
+    const endpointKey = screen.getByLabelText('Endpoint key')
+    expect(endpointKey).toHaveValue('incident-triage')
+    expect(screen.getByText(/stable eventId/)).toBeInTheDocument()
+    fireEvent.change(endpointKey, { target: { value: 'model-rollout' } })
+
+    expect(onUpdate).toHaveBeenLastCalledWith({ endpointKey: 'model-rollout' })
+  })
+})
+
+describe('<QuickConfigEditor /> PagerDuty workflow trigger', () => {
+  it('uses the normal Inspector for the signing credential and derived callback', () => {
+    const onUpdate = vi.fn()
+    render(
+      <QuickConfigEditor
+        {...emptyWorkflowGraph}
+        nodeId="on_pagerduty"
+        type="pagerduty_incident"
+        config={{ webhookCredential: 'pagerduty-webhook', rateLimitPerMin: 120 }}
+        tools={[]}
+        currentWorkflowId="pagerduty-off-hours"
+        onUpdate={onUpdate}
+      />,
+    )
+
+    expect(screen.getByLabelText('Webhook signing credential')).toHaveValue('pagerduty-webhook')
+    expect(screen.getByLabelText('PagerDuty callback URL')).toHaveValue(
+      'http://localhost:7311/webhooks/pagerduty/pagerduty-off-hours/on_pagerduty',
+    )
+    expect(screen.getByLabelText('Maximum events per minute')).toHaveValue(120)
+    expect(screen.getByText(/Store the PagerDuty V3 webhook secret/)).toBeVisible()
+
+    fireEvent.change(screen.getByLabelText('Webhook signing credential'), {
+      target: { value: 'pagerduty-signing-prod' },
+    })
+    expect(onUpdate).toHaveBeenLastCalledWith({
+      webhookCredential: 'pagerduty-signing-prod',
+      rateLimitPerMin: 120,
+    })
   })
 })

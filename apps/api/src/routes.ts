@@ -24,7 +24,7 @@
 
 import type http from "http";
 import type { ApiRouteContract } from "./api-contract-types";
-import type { AuthContext } from "./auth";
+import type { AuthContext, IdentityContext } from "./auth";
 import type { Role } from "./permissions";
 import type { Permission } from "./permission-catalog";
 import type { CorsAwareResponse } from "./http";
@@ -40,6 +40,9 @@ export type RouteContext = {
    * `requireAuth`; for `skipAuth` routes the cast is synthetic and must
    * not be used for authorization. */
   auth: AuthContext;
+  /** Present only for `identityOnly` bootstrap routes. This proves the
+   * provider identity but carries no tenant authority. */
+  identity?: IdentityContext | null;
 };
 
 /** One registered HTTP route. */
@@ -48,6 +51,19 @@ export type Route = {
   match: RouteMatch;
   /** When true, skip `requireAuth`. Public routes must not trust the synthetic auth context. */
   skipAuth?: boolean;
+  /**
+   * Authenticate the provider without requiring organization membership.
+   * Reserved for account/bootstrap routes that must work before the first
+   * organization exists. Must not be combined with `skipAuth`, `role`, or
+   * `permission`.
+   */
+  identityOnly?: boolean;
+  /**
+   * Resolve a provider identity when present but allow the handler to run with
+   * `identity: null`. Reserved for non-error discovery probes such as browser
+   * session bootstrap. Must not be combined with any other auth gate.
+   */
+  optionalIdentity?: boolean;
   /** Required role checked after `requireAuth`. Omit for viewer-or-above. */
   role?: Role;
   /**

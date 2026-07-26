@@ -29,6 +29,10 @@ import { z } from "zod";
 import {
   githubAddIssueCommentTool,
   githubCreateIssueTool,
+  pagerDutyAcknowledgeTool,
+  pagerDutyIncidentGetTool,
+  pagerDutyPolicyEvaluateTool,
+  pagerDutySnoozeTool,
   slackPostTool,
   webhookSendTool,
 } from "./integration-tools";
@@ -102,6 +106,10 @@ const tools = {
   "slack.post": defineTool(slackPostTool),
   "github.create_issue": defineTool(githubCreateIssueTool),
   "github.add_issue_comment": defineTool(githubAddIssueCommentTool),
+  "pagerduty.incident.get": defineTool(pagerDutyIncidentGetTool),
+  "pagerduty.policy.evaluate": defineTool(pagerDutyPolicyEvaluateTool),
+  "pagerduty.incident.acknowledge": defineTool(pagerDutyAcknowledgeTool),
+  "pagerduty.incident.snooze": defineTool(pagerDutySnoozeTool),
   "webhook.send": defineTool(webhookSendTool),
   "db.schema.describe": defineTool(dbSchemaDescribeTool),
   "db.query.read": defineTool(dbQueryReadTool),
@@ -167,9 +175,9 @@ function describeShape(schema: z.ZodObject<z.ZodRawShape>): { required: string[]
 /**
  * Public list of registered tools, shaped for the AI Studio inspector.
  *
- * Called from `apps/api/src/routes/tools-routes.ts` `GET /tools`. The JSON
- * shape is part of the contract `apps/web` consumes via `ToolSchema` in
- * `apps/web/src/types.ts` — the field names must stay stable.
+ * Called from `apps/api/src/routes/tools-routes.ts` and exposed as stable
+ * `GET /v1/tools`. The JSON shape is part of the contract `apps/web` consumes
+ * via `ToolSchema` in `apps/web/src/types.ts` — the field names must stay stable.
  */
 export function listTools(): ToolSchema[] {
   return Object.values(tools).map((tool) => {

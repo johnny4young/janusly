@@ -9,20 +9,21 @@
  *   2. Build a `WorkflowRuntime` with the Postgres execution store + BullMQ
  *      queue adapter (which composes the DLQ adapter — the DLQ contract is
  *      part of the queue layer per AGENTS.md).
- *   3. Open a BullMQ `Worker` on `connection` from `./queue`. Each job is
+ *   3. Open independent workflow and maintenance BullMQ Workers on
+ *      `connection` from `./queue`. Customer node payloads are
  *      validated with `NodeSchema.parse(job.data)` — bad payloads become
  *      `UnrecoverableError` so they go to the DLQ instead of retrying
  *      forever.
- *   4. SIGTERM/SIGINT call `worker.close()` so in-flight jobs drain on
- *      container restart and `running` nodes don't get orphaned.
+ *   4. SIGTERM/SIGINT drain BOTH Workers before shared resources close, so
+ *      container restarts do not orphan nodes or interrupt maintenance.
  *
  * Invariants:
  * - Top-level await is intentional — the migration assertion is mandatory
  *   before any work happens.
  * - Don't bypass `BullMQQueueAdapter`'s DLQ composition. Failed-beyond-retry
  *   jobs must land in `dead_letters`.
- * - The signal handlers must keep calling `worker.close()` so the project's
- *   "no orphan running nodes" invariant survives restarts.
+ * - The signal handlers must keep closing both Workers so the project's
+ *   "no orphan running nodes" and maintenance durability invariants survive.
  */
 
 import { Worker, UnrecoverableError } from "bullmq";
@@ -38,6 +39,7 @@ import {
   recordMemoryUsage,
   recordPdfUsage,
   recordUsage,
+  assertCredentialRootKeyUsable,
   getRateLimiterAdminHealth,
   setMemoryUsageRecorder,
   productionBudgetChecker,
@@ -51,7 +53,13 @@ import { setBudgetChecker } from "./budget";
 import { closeWorkerRateLimitRedis, enforceWorkerRateLimit } from "./rate-limit-redis";
 import { closeWorkerRunEventRedis, registerWorkerRunEventPublisher } from "./run-event-redis";
 import { closeWorkerCacheInvalidationSubscriber, startWorkerCacheInvalidationSubscriber } from "./cache-invalidation-redis";
-import { connection } from "./queue";
+import {
+  connection,
+  maintenanceQueue,
+  MAINTENANCE_QUEUE_NAME,
+  workflowQueue,
+  WORKFLOW_QUEUE_NAME,
+} from "./queue";
 import { WorkflowRuntime } from "./core/runtime";
 import { PostgresExecutionStore } from "./adapters/postgres-execution-store";
 import { BullMQQueueAdapter } from "./adapters/bullmq-queue-adapter";
@@ -60,59 +68,14 @@ import { handleWaitResume } from "./wait-until";
 import { handleApprovalDeadlineArm, handleApprovalTimeout } from "./approval-timeout";
 import { handleScheduleTrigger, replayAllScheduleEntries } from "./schedule-scheduler";
 import {
-  handleMemoryRetentionTrigger,
-  MEMORY_RETENTION_JOB_NAME,
-  registerMemoryRetentionScheduler,
-} from "./memory-retention-scheduler";
+  handleReplayCampaignStep,
+  REPLAY_CAMPAIGN_STEP_JOB_NAME,
+} from "./replay-campaign";
 import {
-  handleMemoryBulkPurgeTrigger,
-  MEMORY_BULK_PURGE_JOB_NAME,
-} from "./memory-purge-scheduler";
-import {
-  AUDIT_LOGS_RETENTION_JOB_NAME,
-  handleAuditLogsRetentionTrigger,
-  registerAuditLogsRetentionScheduler,
-} from "./audit-logs-retention-scheduler";
-import {
-  handleScimEventsRetentionTrigger,
-  registerScimEventsRetentionScheduler,
-  SCIM_EVENTS_RETENTION_JOB_NAME,
-} from "./scim-events-retention-scheduler";
-import {
-  handleRetentionTrigger,
-  registerRetentionScheduler,
-  RETENTION_JOB_NAME,
-} from "./retention-scheduler";
-import {
-  handleUpstreamHealthTrigger,
-  registerUpstreamHealthScheduler,
-  UPSTREAM_HEALTH_JOB_NAME,
-} from "./upstream-health-poller";
-import {
-  CONFIDENCE_CALIBRATION_JOB_NAME,
-  handleConfidenceCalibrationTrigger,
-  registerConfidenceCalibrationScheduler,
-} from "./confidence-calibration-scheduler";
-import {
-  handleStalledNodeReaperTrigger,
-  registerStalledNodeReaperScheduler,
-  STALLED_NODE_REAPER_JOB_NAME,
-} from "./stalled-node-reaper";
-import {
-  handleWaitingCheckpointReconcilerTrigger,
-  registerWaitingCheckpointReconciler,
-  WAITING_CHECKPOINT_RECONCILER_JOB_NAME,
-} from "./waiting-checkpoint-reconciler";
-import {
-  handleQueuePublicationReconcilerTrigger,
-  QUEUE_PUBLICATION_RECONCILER_JOB_NAME,
-  registerQueuePublicationReconciler,
-} from "./queue-publication-reconciler";
-import {
-  handleSubworkflowTerminalReconcilerTrigger,
-  registerSubworkflowTerminalReconciler,
-  SUBWORKFLOW_TERMINAL_RECONCILER_JOB_NAME,
-} from "./subworkflow-terminal-reconciler";
+  dispatchMaintenanceJob,
+  registerAndMigrateMaintenanceSchedulers,
+  resolveMaintenanceWorkerConcurrency,
+} from "./maintenance-jobs";
 import { parseWorkflowCached } from "./workflow-parse-cache";
 import { loadRunWorkflowRaw } from "./persistence";
 import { withSpan } from "./observability/tracer";
@@ -126,13 +89,31 @@ import {
   startPrometheusMetrics,
   WORKER_METRICS_DEFAULT_PORT,
 } from "./observability/prometheus";
-import { createWorkflowQueueCountReader } from "./observability/queue-reader";
+import {
+  createMaintenanceQueueCountReader,
+  createWorkflowQueueCountReader,
+} from "./observability/queue-reader";
 
 await assertMigrationsApplied();
+
+// Fail fast on a malformed or unreadable credential root key — the key is
+// otherwise loaded lazily, and a worker whose key differs from the API's
+// would resolve managed credentials as silently missing at run time. An
+// unset key stays legal (legacy environment-reference deployments).
+console.log(
+  assertCredentialRootKeyUsable().configured
+    ? "[credential-secret-store] root key loaded"
+    : "[credential-secret-store] no root key configured; managed credential resolution will fail closed",
+);
 
 await startPrometheusMetrics({ defaultPort: WORKER_METRICS_DEFAULT_PORT, processName: "worker" });
 const queueMetricsReader = createWorkflowQueueCountReader();
 const unregisterQueueMetrics = registerQueueObservables(queueMetricsReader.getCounts);
+const maintenanceQueueMetricsReader = createMaintenanceQueueCountReader();
+const unregisterMaintenanceQueueMetrics = registerQueueObservables(
+  maintenanceQueueMetricsReader.getCounts,
+  "maintenance",
+);
 const unregisterRateLimiterMetrics = registerRateLimiterObservables(
   () => getRateLimiterAdminHealth().degradedBuckets.length,
 );
@@ -149,7 +130,7 @@ startWorkerCacheInvalidationSubscriber();
 // crash mid-replay doesn't leave the worker happily processing
 // non-schedule jobs while the schedule registrations are partially
 // gone. Failures are logged-and-tolerated — `assertMigrationsApplied`
-// is the only fail-fast at boot.
+// and the credential root-key probe are the only fail-fasts at boot.
 try {
   const count = await replayAllScheduleEntries();
   if (count > 0) console.log(`[schedule] replayed ${count} entries`);
@@ -157,119 +138,15 @@ try {
   console.error("[schedule] replay failed", err);
 }
 
-// Daily sweep that enforces per-row `retain_until` on the memory
-// substrate. Global (non-tenant) recurring job — first one in the
-// codebase, hence the `system:` id prefix. Cadence comes from
-// `JANUSLY_MEMORY_RETENTION_CRON` env with a `0 3 * * *` UTC default;
-// the helper validates + falls back to default on parse failure with
-// a warn log. Failure to register is logged-and-tolerated for the
-// same reason as the schedule replay above — a Redis blip at boot
-// must not block the worker from processing the rest of the queue.
-try {
-  const registered = await registerMemoryRetentionScheduler();
-  if (registered) console.log("[memory-retention] daily sweep scheduler registered");
-} catch (err) {
-  console.error("[memory-retention] scheduler registration failed", err);
-}
-
-// Two sibling retention sweeps for append-only tables that would
-// otherwise grow unbounded (audit_logs ~10k rows/day, scim_processed_events
-// ~10k events/day). Same `system:` id convention + never-throws shape as
-// the memory-retention scheduler above; env knobs documented in
-// AGENTS.md "Retention sweeps".
-try {
-  const registered = await registerAuditLogsRetentionScheduler();
-  if (registered) console.log("[audit-logs-retention] daily sweep scheduler registered");
-} catch (err) {
-  console.error("[audit-logs-retention] scheduler registration failed", err);
-}
-try {
-  const registered = await registerScimEventsRetentionScheduler();
-  if (registered) console.log("[scim-events-retention] daily sweep scheduler registered");
-} catch (err) {
-  console.error("[scim-events-retention] scheduler registration failed", err);
-}
-
-// Per-org configurable retention sweep across the five high-volume tenant
-// tables (run_events / audit_logs / usage_events / recovery_feedback /
-// memory_entries). Reads each org's `retention.*` config bounds and
-// honours the per-row `hold_until` legal-hold bypass. Same `system:` id
-// convention + never-throws boot posture as the standalone sweeps above;
-// runs at 05:00 UTC so it doesn't pile onto the same off-peak window.
-try {
-  const registered = await registerRetentionScheduler();
-  if (registered) console.log("[retention] daily per-org sweep scheduler registered");
-} catch (err) {
-  console.error("[retention] scheduler registration failed", err);
-}
-
-// Upstream health poll sweep. Global (non-tenant) recurring job — `system:`
-// id prefix. Fetches every enabled `upstream_health_sources` row through the
-// `fetchHttpTarget` SSRF chokepoint at the per-source interval, then auto-pauses
-// / resumes tagged workflows. FAIL-OPEN: an unreachable status page never
-// pauses anything. Same never-throws boot posture as the retention sweeps.
-try {
-  const registered = await registerUpstreamHealthScheduler();
-  if (registered) console.log("[upstream-health] poll scheduler registered");
-} catch (err) {
-  console.error("[upstream-health] scheduler registration failed", err);
-}
-
-// Confidence-calibration sweep. Global (non-tenant) recurring job —
-// `system:` id prefix. Walks every opted-in org's recovery feedback and
-// fits a per-approach linear curve that maps an LLM's self-rated patch
-// confidence onto its observed accept rate. Opt-out per org via
-// `org_configs.ai.confidenceCalibrationEnabled`. Same never-throws boot
-// posture as the retention sweeps.
-try {
-  const registered = await registerConfidenceCalibrationScheduler();
-  if (registered) console.log("[confidence-calibration] daily sweep scheduler registered");
-} catch (err) {
-  console.error("[confidence-calibration] scheduler registration failed", err);
-}
-
-// Stalled-node reaper. Global (non-tenant) recurring job — `system:` id
-// prefix. Finds production-run nodes left `running` past the stall threshold
-// (the signature of a worker that crashed mid-node, which the atomic claim
-// cannot self-heal), fails them into the DLQ, and rolls their runs up to a
-// terminal status so a dead worker can't leave a run stuck forever. Same
-// never-throws boot posture as the retention sweeps.
-try {
-  const registered = await registerStalledNodeReaperScheduler();
-  if (registered) console.log("[stalled-node-reaper] sweep scheduler registered");
-} catch (err) {
-  console.error("[stalled-node-reaper] scheduler registration failed", err);
-}
-
-// Once-per-minute repair for persisted approval/timer checkpoints whose
-// delayed Redis job was lost or exhausted infrastructure retries. The final
-// handlers remain generation-CAS guarded, so duplicate repair is harmless.
-try {
-  const registered = await registerWaitingCheckpointReconciler();
-  if (registered) console.log("[waiting-checkpoint-reconciler] sweep scheduler registered");
-} catch (err) {
-  console.error("[waiting-checkpoint-reconciler] scheduler registration failed", err);
-}
-
-// Once-per-minute repair for node generations whose deterministic BullMQ job
-// was not durably acknowledged after the Postgres queue transition. Covers a
-// process crash, Redis publication failure, and failed-parent job consumption.
-try {
-  const registered = await registerQueuePublicationReconciler();
-  if (registered) console.log("[queue-publication-reconciler] sweep scheduler registered");
-} catch (err) {
-  console.error("[queue-publication-reconciler] scheduler registration failed", err);
-}
-
-// Once-per-minute repair for terminal child runs whose exact parent-node
-// handoff was not durably acknowledged after the child status transition.
-// Covers crashes between status commit, parent-node CAS, and DAG readiness.
-try {
-  const registered = await registerSubworkflowTerminalReconciler();
-  if (registered) console.log("[subworkflow-terminal-reconciler] sweep scheduler registered");
-} catch (err) {
-  console.error("[subworkflow-terminal-reconciler] scheduler registration failed", err);
-}
+// Register every system recurrence on the isolated maintenance queue. A
+// successful replacement retires the same scheduler id from the legacy
+// workflow queue; already-materialized legacy jobs remain safe because the
+// workflow processor keeps the shared maintenance dispatcher during rollout.
+const maintenanceRegistration = await registerAndMigrateMaintenanceSchedulers();
+console.log(
+  `[maintenance] ${maintenanceRegistration.registered} schedulers registered; `
+    + `${maintenanceRegistration.retiredLegacy} legacy schedulers retired`,
+);
 
 // Register the usage_events writer once at boot. Every LLM call
 // from the `ai` node and `agent` planner fires it fire-and-forget.
@@ -455,7 +332,7 @@ async function resolveJobData(data: unknown): Promise<ResolvedJob> {
 }
 
 export const worker = new Worker(
-  "workflow-nodes",
+  WORKFLOW_QUEUE_NAME,
   async (job) => {
     // Delayed wake-up jobs for `wait_until` nodes carry a different payload
     // shape than regular execution jobs — dispatch on `job.name` first.
@@ -472,58 +349,20 @@ export const worker = new Worker(
       return;
     }
     if (job.name === "schedule-trigger") {
-      await handleScheduleTrigger(job.data, job.repeatJobKey);
+      await handleScheduleTrigger(job.data, job.repeatJobKey, {
+        id: job.id,
+        timestamp: job.timestamp,
+      });
       return;
     }
-    if (job.name === MEMORY_RETENTION_JOB_NAME) {
-      await handleMemoryRetentionTrigger();
+    if (job.name === REPLAY_CAMPAIGN_STEP_JOB_NAME) {
+      await handleReplayCampaignStep(job.data);
       return;
     }
-    if (job.name === AUDIT_LOGS_RETENTION_JOB_NAME) {
-      await handleAuditLogsRetentionTrigger();
-      return;
-    }
-    if (job.name === SCIM_EVENTS_RETENTION_JOB_NAME) {
-      await handleScimEventsRetentionTrigger();
-      return;
-    }
-    if (job.name === RETENTION_JOB_NAME) {
-      await handleRetentionTrigger();
-      return;
-    }
-    if (job.name === UPSTREAM_HEALTH_JOB_NAME) {
-      await handleUpstreamHealthTrigger();
-      return;
-    }
-    if (job.name === CONFIDENCE_CALIBRATION_JOB_NAME) {
-      await handleConfidenceCalibrationTrigger();
-      return;
-    }
-    if (job.name === STALLED_NODE_REAPER_JOB_NAME) {
-      await handleStalledNodeReaperTrigger();
-      return;
-    }
-    if (job.name === WAITING_CHECKPOINT_RECONCILER_JOB_NAME) {
-      await handleWaitingCheckpointReconcilerTrigger();
-      return;
-    }
-    if (job.name === QUEUE_PUBLICATION_RECONCILER_JOB_NAME) {
-      await handleQueuePublicationReconcilerTrigger();
-      return;
-    }
-    if (job.name === SUBWORKFLOW_TERMINAL_RECONCILER_JOB_NAME) {
-      await handleSubworkflowTerminalReconcilerTrigger();
-      return;
-    }
-    // One-shot delayed job — scheduled on demand from the
-    // `memory.consent.revoked` audit specialization in
-    // `apps/api/src/routes/org-routes.ts`. No boot registration here:
-    // the schedule lives in Redis until it fires, the worker just
-    // dispatches when BullMQ delivers the matured job.
-    if (job.name === MEMORY_BULK_PURGE_JOB_NAME) {
-      await handleMemoryBulkPurgeTrigger(job.data);
-      return;
-    }
+    // Rolling-upgrade compatibility only: future system jobs are published to
+    // `maintenance-jobs`, but an older queue can still hold one materialized
+    // recurrence or delayed purge. Drain it through the canonical dispatcher.
+    if (await dispatchMaintenanceJob(job.name, job.data)) return;
     const resolved = await resolveJobData(job.data);
     if (resolved.skip) return;
     const { runId, node, workflow, attempt, recoveryClaimToken, publicationGeneration } = resolved;
@@ -546,31 +385,71 @@ export const worker = new Worker(
   }
 );
 
+/** Low-concurrency worker isolated from customer workflow execution. */
+export const maintenanceWorker = new Worker(
+  MAINTENANCE_QUEUE_NAME,
+  async (job) => {
+    if (await dispatchMaintenanceJob(job.name, job.data)) return;
+    throw new UnrecoverableError(`Unknown maintenance job: ${job.name}`);
+  },
+  {
+    connection,
+    concurrency: resolveMaintenanceWorkerConcurrency(process.env.MAINTENANCE_WORKER_CONCURRENCY),
+  },
+);
+
 let shuttingDown = false;
 async function shutdown(signal: NodeJS.Signals) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`[worker] received ${signal}, draining in-flight jobs…`);
-  try {
-    await worker.close();
-    await closeWorkerCacheInvalidationSubscriber();
-    await closeWorkerRateLimitRedis();
-    await closeWorkerRunEventRedis();
-    unregisterQueueMetrics();
-    unregisterRateLimiterMetrics();
-    await queueMetricsReader.close();
-    await shutdownPrometheusMetrics().catch((error) => {
-      console.warn("[otel] metrics shutdown failed; worker resources still drained", error);
-    });
-    await shutdownTracing().catch((error) => {
-      console.warn("[otel] trace shutdown failed; worker resources still drained", error);
-    });
-    console.log("[worker] drained, exiting");
-    process.exit(0);
-  } catch (error) {
-    console.error("[worker] shutdown error", error);
-    process.exit(1);
+  const workerClosures = await Promise.allSettled([
+    worker.close(),
+    maintenanceWorker.close(),
+  ]);
+  let shutdownFailed = workerClosures.some((result) => result.status === "rejected");
+  for (const result of workerClosures) {
+    if (result.status === "rejected") console.error("[worker] drain failed", result.reason);
   }
+
+  try {
+    unregisterQueueMetrics();
+    unregisterMaintenanceQueueMetrics();
+    unregisterRateLimiterMetrics();
+  } catch (error) {
+    shutdownFailed = true;
+    console.error("[worker] metric callback retirement failed", error);
+  }
+
+  const resourceClosures = await Promise.allSettled([
+    closeWorkerCacheInvalidationSubscriber(),
+    closeWorkerRateLimitRedis(),
+    closeWorkerRunEventRedis(),
+    queueMetricsReader.close(),
+    maintenanceQueueMetricsReader.close(),
+    workflowQueue.close(),
+    maintenanceQueue.close(),
+    shutdownPrometheusMetrics(),
+    shutdownTracing(),
+  ]);
+  for (const result of resourceClosures) {
+    if (result.status === "rejected") {
+      shutdownFailed = true;
+      console.error("[worker] resource shutdown failed", result.reason);
+    }
+  }
+
+  if (connection.status !== "end") {
+    try {
+      await connection.quit();
+    } catch (error) {
+      shutdownFailed = true;
+      console.error("[worker] BullMQ Redis shutdown failed", error);
+    }
+  }
+
+  console.log(shutdownFailed ? "[worker] shutdown completed with errors" : "[worker] drained, exiting");
+  process.exit(shutdownFailed ? 1 : 0);
 }
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));

@@ -57,6 +57,7 @@ import {
   listAllEnabled,
   listForWorkflow,
   recordFire,
+  resolveWorkflowRolloutAssignment,
   upsertScheduleEntry,
   type ScheduleEntry,
 } from "@janusly/data";
@@ -269,7 +270,11 @@ function isScheduleJobId(value: unknown): value is string {
  * unique constraint on `(scheduleEntryId, triggeredAtMinute)` and is
  * tracked as a future tightening.
  */
-export async function handleScheduleTrigger(data: unknown, repeatJobKey?: string): Promise<void> {
+export async function handleScheduleTrigger(
+  data: unknown,
+  repeatJobKey?: string,
+  delivery?: { id?: string; timestamp?: number },
+): Promise<void> {
   const payload = parseScheduleTriggerPayload(data);
   if (!payload) {
     console.error("[schedule] invalid trigger payload", { data });
@@ -315,17 +320,36 @@ export async function handleScheduleTrigger(data: unknown, repeatJobKey?: string
     return;
   }
 
-  const workflow = await loadWorkflowSnapshot(entry);
+  const deliveryTimestamp = delivery?.timestamp;
+  const triggeredAt = new Date(
+    typeof deliveryTimestamp === "number" && Number.isFinite(deliveryTimestamp)
+      ? deliveryTimestamp
+      : Date.now(),
+  ).toISOString();
+  // BullMQ preserves a scheduler delivery's job id across retries. Prefer it
+  // over wall-clock time so the same tick cannot drift between variants when
+  // its handler is retried before a run is committed.
+  const assignmentKey = delivery?.id
+    ? `${entry.id}:${delivery.id}`
+    : `${entry.id}:${triggeredAt}`;
+  const rolloutAssignment = await resolveWorkflowRolloutAssignment({
+    orgId: entry.orgId,
+    workflowId: entry.workflowId,
+    assignmentKey,
+  });
+  const workflow = rolloutAssignment?.workflow ?? await loadWorkflowSnapshot(entry);
   if (!workflow) {
     console.error("[schedule] workflow snapshot missing", { entryId: entry.id });
     return;
   }
 
-  const triggeredAt = new Date().toISOString();
   const { runId } = await startRun({
     ...workflow,
     orgId: entry.orgId,
-    versionId: entry.workflowVersionId,
+    versionId: rolloutAssignment?.versionId ?? entry.workflowVersionId,
+    ...(rolloutAssignment
+      ? { rollout: { id: rolloutAssignment.rollout.id, variant: rolloutAssignment.variant } }
+      : {}),
     createdBy: null,
     input: {
       triggeredBy: "schedule",

@@ -505,10 +505,9 @@ export function clusterOwnerLabel(owner: ClusterOwner): string {
 export function readHealthScore(metrics: RecoveryMetrics | null): number | null {
   if (!metrics) return null
   // We derive an aggregate health score from the metrics envelope. The
-  // recovery-metrics route exposes success-rate as 0-100; use it as the
-  // primary signal. A future ticket could fold MTTR + cost into a
-  // weighted score; v1 surfaces the most legible number an operator
-  // already understands.
+  // recovery-metrics route exposes success-rate as 0-100, so it remains the
+  // primary signal instead of mixing metrics with incompatible units into an
+  // opaque weighted score.
   const value = metrics.successRate.value
   if (value === null || Number.isNaN(value)) return null
   return Math.round(value)

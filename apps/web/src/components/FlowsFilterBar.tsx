@@ -17,6 +17,7 @@ import type { SortKey } from '../flows-filters'
 type TFunc = ReturnType<typeof useT>['t']
 
 export type FlowsFilterBarProps = {
+  canWrite: boolean
   query: string
   setQuery: Dispatch<SetStateAction<string>>
   tagOptions: string[]
@@ -48,6 +49,7 @@ export type FlowsFilterBarProps = {
 }
 
 export function FlowsFilterBar({
+  canWrite,
   query,
   setQuery,
   tagOptions,
@@ -129,7 +131,7 @@ export function FlowsFilterBar({
       {/* Manage the currently-filtered tag — rename it (re-key across the org)
           or delete it (strip from every workflow). Only shown when EXACTLY one
           tag is filtered; mirrors the folder-section rename/delete. */}
-      {soleTagFilter && (
+      {canWrite && soleTagFilter && (
         renamingTag ? (
           <span className="we-list-tag-manage">
             <input
@@ -228,19 +230,21 @@ export function FlowsFilterBar({
       </div>
       {/* Bulk-select toggle — reveals per-row checkboxes + the bulk bar. Off
           by default so the list is unchanged. */}
-      <button
-        type="button"
-        className="small-command"
-        aria-pressed={selectionMode}
-        onClick={() => { setSelectionMode((on) => !on); setSelectedIds(new Set()) }}
-        data-testid="workflows-select-toggle"
-      >
-        {selectionMode ? t('workflowsDashboard.selectDone') : t('workflowsDashboard.selectFlows')}
-      </button>
+      {canWrite && (
+        <button
+          type="button"
+          className="small-command"
+          aria-pressed={selectionMode}
+          onClick={() => { setSelectionMode((on) => !on); setSelectedIds(new Set()) }}
+          data-testid="workflows-select-toggle"
+        >
+          {selectionMode ? t('workflowsDashboard.selectDone') : t('workflowsDashboard.selectFlows')}
+        </button>
+      )}
       {/* Select-all toggle — lives in the toolbar (not the bulk bar, which
           only appears once ≥1 row is ticked) so it's reachable at 0 selected.
           Operates on `visible`, so it works in flat AND foldered views. */}
-      {selectionMode && (
+      {canWrite && selectionMode && (
         <button
           type="button"
           className="small-command"

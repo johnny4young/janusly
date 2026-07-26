@@ -163,10 +163,16 @@ export const ALERT_DESTINATIONS = ['slack', 'webhook', 'email', 'github'] as con
 export const AlertDestinationSchema = z.enum(ALERT_DESTINATIONS)
 export type AlertDestination = z.infer<typeof AlertDestinationSchema>
 
+/** Stable Block Kit callback ids shared by alert rendering and API verification. */
+export const SLACK_ACTION_ACKNOWLEDGE = 'janusly_recovery_acknowledge'
+export const SLACK_ACTION_ASSIGN_TO_ME = 'janusly_recovery_assign_to_me'
+export const SLACK_ACTION_OPEN = 'janusly_recovery_open'
+
 export const AlertChannelSlackParamsSchema = z
   .object({
     channel: z.string().min(1).max(120).optional(),
     threadTs: z.string().min(1).max(64).optional(),
+    interactionConnectionId: z.string().uuid().optional(),
   })
   .strict()
 

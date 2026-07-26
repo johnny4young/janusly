@@ -2,9 +2,8 @@
  * Admin panel for declaring a workflow's reliability SLO. Two bounded
  * numeric inputs (success-rate % + p95 duration ms) plus a windowDays
  * select. v1 evaluates only those two metrics against the existing
- * `HealthSignals`; the other three SLO fields persist in the schema but
- * are not evaluated yet (a future ticket will wire them when the
- * corresponding signals land).
+ * `HealthSignals`; the other three SLO fields persist for contract
+ * compatibility but remain informational until matching signals exist.
  *
  * Multi-tenant: every fetch carries the org-id header (via `api()`).
  * Role gate: the server route declares `role: admin` — non-admins see
@@ -24,6 +23,7 @@ export type WorkflowSloPanelProps = {
   /** Optional explicit workflowId. When omitted, the panel pulls the current
    *  workflow id from the store — matches the VersionHistoryPanel pattern. */
   workflowId?: string | undefined
+  readOnly?: boolean
 }
 
 type WindowDays = 7 | 14 | 30
@@ -53,7 +53,7 @@ function parseOptionalNumber(raw: string): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-export function WorkflowSloPanel({ workflowId: explicit }: WorkflowSloPanelProps = {}) {
+export function WorkflowSloPanel({ workflowId: explicit, readOnly = false }: WorkflowSloPanelProps = {}) {
   const { t } = useT()
   const addToast = useWorkflowStore((s) => s.addToast)
   const bumpPlatformVersion = useWorkflowStore((s) => s.bumpPlatformVersion)
@@ -128,6 +128,7 @@ export function WorkflowSloPanel({ workflowId: explicit }: WorkflowSloPanelProps
           void onSave(slo)
         }}
       >
+        <fieldset className="we-fieldset" disabled={readOnly}>
         <label className="we-field">
           <span>{t('workflowSlo.field.successRatePercent')}</span>
           <input
@@ -181,6 +182,7 @@ export function WorkflowSloPanel({ workflowId: explicit }: WorkflowSloPanelProps
             {t('workflowSlo.clear')}
           </button>
         </div>
+        </fieldset>
       </form>
     </section>
   )

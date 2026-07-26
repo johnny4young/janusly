@@ -20,19 +20,34 @@ function makeWorkflow(url: string): WorkflowDefinition {
   }
 }
 
-const editorMember = { id: 'member-1', orgId: 'default', userId: 'dev-user', role: 'editor' as const }
-
 function mockVersionHistoryApi(
   versionsByWorkflow: Record<string, Array<{ id: string; version: number; dagJson: WorkflowDefinition }>>,
-  members = [editorMember],
 ) {
   vi.mocked(api).mockImplementation(async (path) => {
-    if (path === '/members') return members
     if (path.startsWith('/workflows/versions')) {
       const url = new URL(path, 'http://localhost')
       return versionsByWorkflow[url.searchParams.get('workflowId') ?? ''] ?? []
     }
     throw new Error(`Unexpected API call: ${path}`)
+  })
+}
+
+function setPermissions(permissions: string[], role = 'editor', roleBase: 'viewer' | 'editor' | 'admin' = 'editor') {
+  useWorkflowStore.setState({
+    identityContext: {
+      identity: { userId: 'dev-user', email: null, mode: 'dev-headers', source: 'dev' },
+      profile: { name: null, email: null },
+      organizations: [{
+        id: 'default', name: 'Default', plan: null, role, roleBase, permissions,
+        usable: true, developmentFallback: false,
+      }],
+      invitations: [],
+      currentOrganizationId: 'default',
+      selectionRequired: false,
+      needsOrganization: false,
+      truncated: false,
+      invitationsTruncated: false,
+    },
   })
 }
 
@@ -53,6 +68,7 @@ describe('<VersionHistoryPanel />', () => {
       },
       true,
     )
+    setPermissions(['workflows.read', 'workflows.write', 'ai.write'])
   })
 
   it('renders a structural diff after selecting two versions in compare mode', async () => {
@@ -121,15 +137,13 @@ describe('<VersionHistoryPanel />', () => {
   })
 
   it('hides Rollback buttons for viewers', async () => {
-    mockVersionHistoryApi(
-      {
-        wf_compare: [
-          { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-          { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
-        ],
-      },
-      [{ ...editorMember, role: 'viewer' }],
-    )
+    mockVersionHistoryApi({
+      wf_compare: [
+        { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+        { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+      ],
+    })
+    setPermissions(['workflows.read'], 'viewer', 'viewer')
 
     render(<VersionHistoryPanel />)
     await screen.findByRole('button', { name: /v2/i })
@@ -139,35 +153,29 @@ describe('<VersionHistoryPanel />', () => {
     })
   })
 
-  it('uses the dev-headers admin fallback when userId is null (no Supabase session yet)', async () => {
-    // Dev-mode auth flow leaves userId=null in the store (App.tsx
-    // clears auth on every onAuthStateChange when session is null),
-    // so loadEffectiveRole's no-userId path must mirror the
-    // backend's "no org_members row → admin" behaviour. Otherwise
-    // role-gated UI is silently hidden in dev.
+  it('does not infer write access from an admin-rank custom role', async () => {
     mockVersionHistoryApi({
       wf_compare: [
         { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
         { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
       ],
     })
-    useWorkflowStore.setState({ userId: null }, false)
+    setPermissions(['workflows.read'], 'billing-admin', 'admin')
 
     render(<VersionHistoryPanel />)
 
-    expect(await screen.findByRole('button', { name: /Roll back to v1/i })).toBeInTheDocument()
+    await screen.findByRole('button', { name: /v2/i })
+    expect(screen.queryByRole('button', { name: /Roll back to v1/i })).not.toBeInTheDocument()
   })
 
-  it('uses the dev-headers admin fallback when no member row exists', async () => {
-    mockVersionHistoryApi(
-      {
-        wf_compare: [
-          { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-          { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
-        ],
-      },
-      [],
-    )
+  it('honors an explicit write grant on a viewer-rank custom role', async () => {
+    mockVersionHistoryApi({
+      wf_compare: [
+        { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+        { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+      ],
+    })
+    setPermissions(['workflows.read', 'workflows.write'], 'workflow-operator', 'viewer')
 
     render(<VersionHistoryPanel />)
 
@@ -234,15 +242,13 @@ describe('<VersionHistoryPanel />', () => {
   })
 
   it('hides the Suggest improvement button for viewers', async () => {
-    mockVersionHistoryApi(
-      {
-        wf_compare: [
-          { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
-          { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
-        ],
-      },
-      [{ ...editorMember, role: 'viewer' }],
-    )
+    mockVersionHistoryApi({
+      wf_compare: [
+        { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
+        { id: 'version_1', version: 1, dagJson: makeWorkflow('https://api.a') },
+      ],
+    })
+    setPermissions(['workflows.read'], 'viewer', 'viewer')
 
     render(<VersionHistoryPanel />)
     await screen.findByRole('button', { name: /v2/i })
@@ -283,7 +289,6 @@ describe('<VersionHistoryPanel />', () => {
       model: 'claude-haiku-4-5-20251001',
     }
     vi.mocked(api).mockImplementation(async (path) => {
-      if (path === '/members') return [editorMember]
       if (path.startsWith('/workflows/versions')) {
         return [
           { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
@@ -316,7 +321,6 @@ describe('<VersionHistoryPanel />', () => {
 
   it('renders a fallback ribbon when AI suggest returns mode: fallback', async () => {
     vi.mocked(api).mockImplementation(async (path) => {
-      if (path === '/members') return [editorMember]
       if (path.startsWith('/workflows/versions')) {
         return [
           { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
@@ -355,7 +359,6 @@ describe('<VersionHistoryPanel />', () => {
 
   it('renders a fallback ribbon when the API request itself throws', async () => {
     vi.mocked(api).mockImplementation(async (path) => {
-      if (path === '/members') return [editorMember]
       if (path.startsWith('/workflows/versions')) {
         return [
           { id: 'version_2', version: 2, dagJson: makeWorkflow('https://api.b') },
@@ -389,7 +392,6 @@ describe('<VersionHistoryPanel />', () => {
       edges: [],
     }
     vi.mocked(api).mockImplementation(async (path) => {
-      if (path === '/members') return [editorMember]
       if (path.startsWith('/workflows/versions')) {
         return [
           { id: 'version_3', version: 3, dagJson: makeWorkflow('https://api.c') },
@@ -435,7 +437,6 @@ describe('<VersionHistoryPanel />', () => {
     // Hold the AI response open until we trigger it.
     let resolveAi: ((value: unknown) => void) | null = null
     vi.mocked(api).mockImplementation(async (path) => {
-      if (path === '/members') return [editorMember]
       if (path.startsWith('/workflows/versions')) {
         return [
           { id: 'version_3', version: 3, dagJson: makeWorkflow('https://api.c') },

@@ -14,6 +14,10 @@
  * `envRefs` is a closed-shape JSONB: `Record<string, { kind: "env",
  * name: string }>`. Secret material never lives on the row — the
  * executor resolves each ref from `process.env[name]` at call time.
+ * Deliberately OUTSIDE the encrypted Credential Secret Store
+ * (`credentialSecretStore.ts`): refs are plain env-var names, so the
+ * store's resolver would always take its legacy branch anyway. Health
+ * checks route through that resolver for uniformity; runtime does not.
  *
  * Multi-tenant scope: every read / write filters by `orgId`. Unique on
  * `(orgId, alias)`. Tool descriptors join through the connection's

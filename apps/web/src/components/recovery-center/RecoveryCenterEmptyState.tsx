@@ -37,8 +37,8 @@ export function RecoveryFlowDemo({
 }: {
   onOpenStudio: () => void
   onOpenRecipes: () => void
-  /** When set, renders a primary "try a demo recovery" CTA that injects a real
-   *  demo failure so the operator can experience the loop, not just read it. */
+  /** When set, renders a primary recovery-drill CTA that creates a deterministic
+   *  failure so the operator can experience the real loop, not just read it. */
   onTryDemo?: () => void | Promise<void>
   /** When set, renders a dismiss control whose persistence policy belongs to the parent. */
   onDismiss?: () => void

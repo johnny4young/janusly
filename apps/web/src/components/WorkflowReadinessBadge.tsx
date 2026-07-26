@@ -31,7 +31,7 @@ import type { ReadinessIssue as ServerReadinessIssue } from '../i18n/server-even
 import { requestResilienceFocus } from './resilience-focus-bus'
 import type { ReadinessIssue, ReadinessResult } from '../types'
 
-const resilienceIssueCodes = new Set(['external_node_missing_retry', 'http_missing_bounds'])
+const resilienceIssueCodes = new Set(['external_node_missing_retry', 'http_missing_bounds', 'tool_result_policy_missing'])
 const resilienceNodeTypes = new Set(['http', 'tool', 'agent', 'mcp_tool'])
 
 export function WorkflowReadinessBadge({ onResult }: { onResult?: (result: ReadinessResult | null) => void }) {

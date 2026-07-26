@@ -8,8 +8,8 @@ const packageDir = fileURLToPath(new URL("..", import.meta.url));
 describe("MCP stdio server", () => {
   it("initializes and lists the published tools over stdio", async () => {
     const transport = new StdioClientTransport({
-      command: "pnpm",
-      args: ["start"],
+      command: process.execPath,
+      args: ["--import", "tsx", "src/index.ts"],
       cwd: packageDir,
       stderr: "pipe",
     });

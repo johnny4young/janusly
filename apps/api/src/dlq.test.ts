@@ -5,10 +5,54 @@ import {
   decodeRecoveryQueueCursor,
   encodeRecoveryQueueCursor,
   isRecoveryQueueSort,
+  parseRecoveryDrillProvenance,
   parseDayRange,
   RECOVERY_QUEUE_SORTS,
   type RecoveryQueueRow,
 } from "./dlq";
+
+describe("parseRecoveryDrillProvenance", () => {
+  it("returns only the closed public projection", () => {
+    expect(parseRecoveryDrillProvenance({
+      workflow: { secret: "not-public" },
+      drill: {
+        kind: "solution_pack_drill",
+        packId: "incident-triage",
+        fixtureId: "worker_interrupted_during_page",
+        failureMode: "worker_stalled",
+        recoveryPath: "stalled_node_reaper",
+        initiatedAt: "2026-07-20T12:00:00.000Z",
+        thresholdMinutes: 60,
+      },
+    })).toEqual({
+      kind: "solution_pack_drill",
+      packId: "incident-triage",
+      fixtureId: "worker_interrupted_during_page",
+      recoveryPath: "stalled_node_reaper",
+    });
+  });
+
+  it("rejects malformed, unknown, and oversized provenance", () => {
+    expect(parseRecoveryDrillProvenance(null)).toBeNull();
+    expect(parseRecoveryDrillProvenance({ drill: { kind: "operator_input" } })).toBeNull();
+    expect(parseRecoveryDrillProvenance({
+      drill: {
+        kind: "solution_pack_drill",
+        packId: "incident-triage",
+        fixtureId: "fixture",
+        recoveryPath: "future_path",
+      },
+    })).toBeNull();
+    expect(parseRecoveryDrillProvenance({
+      drill: {
+        kind: "solution_pack_drill",
+        packId: "x".repeat(129),
+        fixtureId: "fixture",
+        recoveryPath: "direct_failure",
+      },
+    })).toBeNull();
+  });
+});
 
 describe("parseDayRange", () => {
   it("returns the [start, end) UTC bounds for a valid day", () => {

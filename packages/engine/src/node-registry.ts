@@ -75,9 +75,16 @@ import { waitUntilExecutor } from "./wait-until";
 import { approvalExecutor } from "./approval-timeout";
 import { joinExecutor, parallelForkExecutor } from "./parallel-fork";
 import { scheduleExecutor } from "./schedule";
-import { emailReceivedExecutor, fileDroppedExecutor, mcpServerEventExecutor } from "./triggers";
+import {
+  emailReceivedExecutor,
+  fileDroppedExecutor,
+  mcpServerEventExecutor,
+  pagerDutyIncidentExecutor,
+  webhookReceivedExecutor,
+} from "./triggers";
 import { signResumeToken } from "./secrets";
 import { executeMcpTool, readMcpClientWritesEnabled, resolveMcpClientRateLimitPerMin, resolveStdioSandboxConfig } from "./mcp-tool-executor";
+import { validateInputs } from "./inputs-validator";
 
 loadRootEnv();
 
@@ -169,6 +176,56 @@ function fallbackAiResponse(prompt: string, context: Record<string, any>) {
 
 function previewText(value: string, maxLength = 700) {
   return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
+}
+
+/** A typed failed tool envelope promoted into the runtime failure path. */
+export class ToolResultPolicyError extends Error {
+  readonly code = "TOOL_RESULT_NOT_OK";
+  readonly statusCode?: number;
+  readonly details: Record<string, unknown>;
+  readonly writeSide: boolean;
+
+  constructor(tool: string, result: Record<string, unknown>, writeSide: boolean) {
+    const reason = typeof result.error === "string" && result.error.trim()
+      ? result.error.trim()
+      : `${tool} returned ok=false`;
+    super(reason);
+    this.name = "ToolResultPolicyError";
+    this.statusCode = typeof result.statusCode === "number" ? result.statusCode : undefined;
+    this.details = {
+      tool,
+      ok: false,
+      ...(this.statusCode !== undefined ? { statusCode: this.statusCode } : {}),
+      ...(typeof result.provider === "string" ? { provider: result.provider } : {}),
+    };
+    // Without a provider receipt proving rejection-before-effect, a failed
+    // write envelope is ambiguous. Suppress blind whole-node retries; an
+    // operator can use exact-node recovery after inspecting the evidence.
+    this.writeSide = writeSide;
+  }
+}
+
+function parseAiContractOutput(
+  text: string,
+  rawSchema: unknown,
+): { ok: true; data: unknown } | { ok: false; error: string } {
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return { ok: false, error: "AI output was not valid JSON" };
+  }
+
+  const schema = WorkflowInputSchema.safeParse(rawSchema);
+  if (!schema.success) return { ok: false, error: "AI output schema is invalid" };
+  const validation = validateInputs(schema.data, data);
+  if (!validation.valid) {
+    return {
+      ok: false,
+      error: `AI output did not match its contract: ${validation.errors.join("; ")}`,
+    };
+  }
+  return { ok: true, data };
 }
 
 function createTenantLlmClient(orgConfig: OrgConfigSnapshot): LlmClient | null {
@@ -549,7 +606,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   loop: executeLoop,
 
   tool: async (ctx) => {
-    const { tool, input } = ctx.config;
+    const { tool, input, resultPolicy = "envelope" } = ctx.config;
     const mappedInput = mapInput(input, { context: ctx.context, inputs: ctx.config });
     // One cached snapshot feeds every tool node. Keeping a name allowlist
     // here let newly registered tools (for example pdf.generate) silently
@@ -581,6 +638,14 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
       nodeId: ctx.nodeId,
       workflowId: ctx.workflowId ?? undefined,
     });
+    if (resultPolicy === "require_ok" && result.ok === false) {
+      await appendEvent(ctx.runId, ctx.nodeId, "tool.failed", { tool, result });
+      throw new ToolResultPolicyError(
+        tool,
+        result,
+        isToolInvocationWriteSide(tool, toolInput),
+      );
+    }
     await appendEvent(ctx.runId, ctx.nodeId, "tool.completed", { tool, result });
     return { status: "completed", output: { tool, result } };
   },
@@ -771,6 +836,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
           prompt: previewText(prompt),
           response: fallbackAiResponse(String(prompt), ctx.context),
           contextKeys: Object.keys(ctx.context),
+          ...(ctx.config.outputSchema !== undefined ? { valid: false } : {}),
         },
       };
     }
@@ -796,6 +862,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
           prompt: previewText(prompt),
           aiError: "budget_exceeded",
           response: fallbackAiResponse(String(prompt), ctx.context),
+          ...(ctx.config.outputSchema !== undefined ? { valid: false } : {}),
           budget: {
             monthlyUsdSpent: budget.monthlyUsdSpent,
             monthlyUsdLimit: budget.monthlyUsdLimit,
@@ -811,14 +878,46 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
         system:
           "You are Janusly, an AI operator for business workflows. Answer clearly for an operator, and keep the response concise.",
         prompt: JSON.stringify({ prompt, context: ctx.context }),
+        responseFormat: ctx.config.outputSchema !== undefined
+          ? "json"
+          : ctx.config.responseFormat,
         modelHint,
         context: { orgId: ctx.orgId, runId: ctx.runId, nodeId: ctx.nodeId, workflowId: ctx.workflowId ?? undefined },
       });
+
+      const contracted = ctx.config.outputSchema !== undefined
+        ? parseAiContractOutput(result.text, ctx.config.outputSchema)
+        : null;
+      if (contracted && !contracted.ok) {
+        await appendEvent(ctx.runId, ctx.nodeId, "ai.output_invalid", {
+          error: contracted.error,
+          model: result.model,
+          provider: result.provider,
+        });
+        return {
+          status: "completed",
+          output: {
+            mode: "fallback",
+            valid: false,
+            model: result.model,
+            provider: result.provider,
+            modelHint,
+            prompt: previewText(prompt),
+            aiError: "output_invalid",
+            error: contracted.error,
+            response: fallbackAiResponse(String(prompt), ctx.context),
+            usage: result.usage,
+            costUsd: result.costUsd ?? null,
+            latencyMs: result.latencyMs,
+          },
+        };
+      }
 
       return {
         status: "completed",
         output: {
           mode: "ai",
+          ...(contracted ? { valid: true, data: contracted.data } : {}),
           model: result.model,
           provider: result.provider,
           prompt: previewText(prompt),
@@ -841,6 +940,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
           prompt: previewText(prompt),
           aiError: message,
           response: fallbackAiResponse(String(prompt), ctx.context),
+          ...(ctx.config.outputSchema !== undefined ? { valid: false } : {}),
         },
       };
     }
@@ -859,6 +959,13 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   approval: approvalExecutor,
   human_form: async (ctx) => {
     const schema = WorkflowInputSchema.parse(ctx.config.schema);
+    const initialValues = ctx.config.initialValues;
+    if (initialValues !== undefined) {
+      const validation = validateInputs(schema, initialValues);
+      if (!validation.valid) {
+        throw new Error(`human_form.initialValues invalid: ${validation.errors.join("; ")}`);
+      }
+    }
     const orgConfig = await getOrgConfigSnapshot(ctx.orgId);
     const title = typeof ctx.config.title === "string" && ctx.config.title.trim()
       ? ctx.config.title.trim()
@@ -874,6 +981,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
         title,
         description,
         schema,
+        ...(initialValues !== undefined ? { initialValues } : {}),
         resumeToken: signResumeToken(
           { orgId: ctx.orgId, runId: ctx.runId, nodeId: ctx.nodeId, purpose: "human_form" },
           { ttlSeconds: orgConfig.runs.humanFormResumeTtlSeconds },
@@ -995,7 +1103,9 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   // `startRun` with the normalized inbound event as the run input. The
   // executors here just succeed with `{ triggeredBy, event }` so downstream
   // nodes can read the inbound payload.
+  webhook_received: webhookReceivedExecutor,
   email_received: emailReceivedExecutor,
   file_dropped: fileDroppedExecutor,
   mcp_server_event: mcpServerEventExecutor,
+  pagerduty_incident: pagerDutyIncidentExecutor,
 };

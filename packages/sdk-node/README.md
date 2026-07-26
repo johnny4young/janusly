@@ -3,12 +3,13 @@
 > Typed TypeScript client for the Janusly HTTP API. Resource-style methods,
 > async iterators for run listing and event streaming, a typed error class
 > hierarchy, an opt-in retry layer, and a webhook signature verifier.
-> Node 22.12+ in workspace source mode. Zero runtime dependencies.
+> Node 24, ESM, generated declarations, and zero runtime dependencies.
 
 ## Install
 
-This package is workspace-internal today — consume it from any other
-package in the monorepo:
+This package remains private while Janusly's licensing and distribution
+posture is decided. It is nevertheless built and tested as a normal npm
+artifact. Consume it from another workspace package with:
 
 ```jsonc
 // package.json
@@ -17,9 +18,15 @@ package in the monorepo:
 }
 ```
 
-External `npm install @janusly/sdk` is not yet supported. The publish
-posture (build pipeline + `dist/` emit + version pinning) is tracked as
-a separate follow-up.
+External registry installation is not yet supported. Maintainers can verify
+the exact distributable tarball without publishing:
+
+```bash
+pnpm --filter @janusly/sdk test:package
+```
+
+That command builds `dist/`, packs only the public files, installs the tarball
+into an isolated temporary consumer, and imports the public entrypoint.
 
 ## Quick start
 
@@ -193,6 +200,9 @@ reached a terminal status throws `JanuslyApiError` (409).
 
 ### 6. Export a run-explain report
 
+Exports intentionally use the unversioned artifact route so Markdown and JSON
+downloads retain their raw bytes and `Content-Disposition` filename.
+
 ```typescript
 import { writeFile } from "node:fs/promises";
 
@@ -254,6 +264,7 @@ import {
   JanuslyAuthError,
   JanuslyValidationError,
   JanuslyRateLimitError,
+  JanuslyProtocolError,
   JanuslyServerError,
 } from "@janusly/sdk";
 
@@ -270,6 +281,8 @@ try {
     console.error("auth rejected — refresh the token");
   } else if (err instanceof JanuslyServerError) {
     console.error(`server error (${err.statusCode}); the opt-in retry layer would have helped here`);
+  } else if (err instanceof JanuslyProtocolError) {
+    console.error("the API returned an invalid v1 success envelope");
   } else if (err instanceof JanuslyApiError) {
     console.error(`HTTP ${err.statusCode}: ${err.message}`);
   } else {
@@ -287,6 +300,11 @@ Mapping table:
 | 429 | `JanuslyRateLimitError` | `retryAfterSeconds` parsed from `Retry-After` |
 | 500–599 | `JanuslyServerError` | — |
 | any other | `JanuslyApiError` (base) | `statusCode` |
+
+A successful `/v1` response that is missing `apiVersion`, `requestId`, or
+`data` throws `JanuslyProtocolError` with code
+`invalid_response_envelope`. The SDK never silently casts a drifted stable
+response.
 
 A standalone `JanuslyTimeoutError extends JanuslyApiError` (with
 `code: "polling_timeout"` and `statusCode: 0`) is thrown by
@@ -392,18 +410,17 @@ Fastify's `rawBody` plugin, or your framework's equivalent.
 - Target: ES2023, ESM modules, strict mode.
 - Types are inlined — every DTO + class is exported from
   `@janusly/sdk` (no separate `@types/janusly__sdk`).
-- Node 22.12+ required in the current workspace-private source package
-  (matches the monorepo `engines.node` floor). The future publish pipeline
-  can lower the runtime target further once it emits `dist/` JavaScript
-  instead of pointing package entrypoints at `.ts` source.
+- Node 24 is required (matches the monorepo `engines.node` contract).
+- `npm run build` emits ESM JavaScript, declarations, declaration maps, and
+  source maps under `dist/`; package exports never point at TypeScript source.
 - Tested against Vitest 4. Zero runtime deps; `vitest` +
   `@types/node` are dev-only.
 
 ## Versioning
 
-`v0.0.1` — initial private workspace release. Following [SemVer](https://semver.org/)
-for future versions. Breaking changes will be noted in the package
-CHANGELOG (TBD when npm publish posture lands).
+`v0.0.1` — initial private workspace version. Future published versions follow
+[SemVer](https://semver.org/); release notes live in the repository root
+`CHANGELOG.md`.
 
 ## License
 

@@ -23,6 +23,7 @@ export const auditRoutes: Route[] = [
     method: "GET",
     match: (url) => url.startsWith("/audit"),
     role: "admin",
+    permission: "org.config.write",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const limit = parseEventsLimit(url.searchParams.get("limit"), AUDIT_PAGE_SIZE, AUDIT_LOG_PAGE_MAX);

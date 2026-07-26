@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildExecuteNodeJobId } from "./queue-job-id";
+import { buildExecuteNodeJobId, buildReplayCampaignJobId } from "./queue-job-id";
 
 describe("buildExecuteNodeJobId", () => {
   it("is stable for one exact generation and contains no reserved separator", () => {
@@ -26,5 +26,17 @@ describe("buildExecuteNodeJobId", () => {
       buildExecuteNodeJobId({ ...base, attempt: 1, publicationGeneration: 2 }),
     ]);
     expect(ids.size).toBe(6);
+  });
+});
+
+describe("buildReplayCampaignJobId", () => {
+  it("deduplicates one due clock without BullMQ's reserved separator", () => {
+    const dueAt = new Date("2026-07-21T12:00:05.000Z");
+    const id = buildReplayCampaignJobId("campaign-1", dueAt);
+
+    expect(id).toBe(buildReplayCampaignJobId("campaign-1", dueAt));
+    expect(id).toMatch(/^replay-campaign-[0-9a-f]{64}$/);
+    expect(id).not.toContain(":");
+    expect(id).not.toBe(buildReplayCampaignJobId("campaign-1", new Date(dueAt.getTime() + 1)));
   });
 });

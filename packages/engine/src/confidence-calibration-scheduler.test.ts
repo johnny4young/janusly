@@ -15,7 +15,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const insertValuesMock = vi.fn();
 
 vi.mock("./queue", () => ({
-  workflowQueue: {
+  maintenanceQueue: {
     upsertJobScheduler: vi.fn(),
   },
 }));
@@ -50,9 +50,9 @@ import {
   registerConfidenceCalibrationScheduler,
   runOrgCalibration,
 } from "./confidence-calibration-scheduler";
-import { workflowQueue } from "./queue";
+import { maintenanceQueue } from "./queue";
 
-const upsertJobSchedulerMock = vi.mocked(workflowQueue.upsertJobScheduler);
+const upsertJobSchedulerMock = vi.mocked(maintenanceQueue.upsertJobScheduler);
 const listOrgsMock = vi.mocked(listOrgIdsWithCalibrationEnabled);
 const listApproachesMock = vi.mocked(listCalibratableApproaches);
 const listSamplesMock = vi.mocked(listCalibrationSamples);

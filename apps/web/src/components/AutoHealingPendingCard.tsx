@@ -43,7 +43,7 @@ const APPROACH_LABEL_KEY: Record<string, string> = {
   other: 'autoHealing.approach.other',
 }
 
-export function AutoHealingPendingCard() {
+export function AutoHealingPendingCard({ canDecide = true }: { canDecide?: boolean }) {
   const { t } = useT()
   const platformVersion = useWorkflowStore((state) => state.platformVersion)
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
@@ -127,7 +127,7 @@ export function AutoHealingPendingCard() {
                     )}
                   </div>
                 </div>
-                <div className="we-card__list-item-actions">
+                {canDecide && <div className="we-card__list-item-actions">
                   <button
                     type="button"
                     className="small-command small-command--primary"
@@ -144,7 +144,7 @@ export function AutoHealingPendingCard() {
                   >
                     {t('autoHealing.action.decline')}
                   </button>
-                </div>
+                </div>}
               </li>
             )
           })}

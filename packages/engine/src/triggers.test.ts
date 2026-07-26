@@ -14,6 +14,8 @@ import {
   emailReceivedExecutor,
   fileDroppedExecutor,
   mcpServerEventExecutor,
+  pagerDutyIncidentExecutor,
+  webhookReceivedExecutor,
   resolveTriggerConfig,
 } from "./triggers";
 import type { NodeContext } from "./node-registry";
@@ -23,6 +25,11 @@ function ctx(config: Record<string, unknown>, context: Record<string, unknown> =
 }
 
 describe("resolveTriggerConfig", () => {
+  it("validates a webhook_received config", () => {
+    expect(() => resolveTriggerConfig("webhook_received", { endpointKey: "incident-triage" })).not.toThrow();
+    expect(() => resolveTriggerConfig("webhook_received", {})).toThrow();
+  });
+
   it("validates an email_received config", () => {
     expect(() => resolveTriggerConfig("email_received", { aliasKey: "ops" })).not.toThrow();
     expect(() => resolveTriggerConfig("email_received", {})).toThrow();
@@ -36,6 +43,27 @@ describe("resolveTriggerConfig", () => {
   it("validates an mcp_server_event config", () => {
     expect(() => resolveTriggerConfig("mcp_server_event", { connectionAlias: "notion", resourceUri: "notion://x" })).not.toThrow();
     expect(() => resolveTriggerConfig("mcp_server_event", { connectionAlias: "notion" })).toThrow();
+  });
+
+  it("validates a pagerduty_incident config", () => {
+    expect(() => resolveTriggerConfig("pagerduty_incident", {
+      webhookCredential: "pagerduty-webhook",
+      rateLimitPerMin: 120,
+    })).not.toThrow();
+    expect(() => resolveTriggerConfig("pagerduty_incident", {})).toThrow();
+  });
+});
+
+describe("webhookReceivedExecutor", () => {
+  it("passes the normalized idempotent event to downstream nodes", async () => {
+    const event = { eventId: "evt-1", payload: { service: "postgres" } };
+    const result = await webhookReceivedExecutor(
+      ctx({ endpointKey: "incident-triage" }, { input: { event } }),
+    );
+    expect(result).toMatchObject({
+      status: "completed",
+      output: { triggeredBy: "webhook_received", event },
+    });
   });
 });
 
@@ -61,6 +89,27 @@ describe("emailReceivedExecutor", () => {
 
   it("fails fast on a malformed config (no aliasKey)", async () => {
     await expect(emailReceivedExecutor(ctx({}))).rejects.toThrow();
+  });
+});
+
+describe("pagerDutyIncidentExecutor", () => {
+  it("passes the verified normalized event to the deterministic graph", async () => {
+    const event = {
+      eventId: "event-1",
+      eventType: "incident.triggered",
+      incidentId: "PINCIDENT1",
+      occurredAt: "2026-07-24T03:30:00.000Z",
+      receivedAt: "2026-07-24T03:31:00.000Z",
+    };
+    const result = await pagerDutyIncidentExecutor(ctx(
+      { webhookCredential: "pagerduty-webhook" },
+      { input: { event } },
+    ));
+
+    expect(result).toMatchObject({
+      status: "completed",
+      output: { triggeredBy: "pagerduty_incident", event },
+    });
   });
 });
 

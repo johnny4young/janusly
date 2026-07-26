@@ -6,7 +6,12 @@ back.
 
 ## Flow
 
-`webhook` → `ai` (summarize + draft) → `human_form` (agent review) → `slack.post` (escalate) → `email.send` (reply)
+`webhook_received` → `ai` (schema-validated summary + draft) → `human_form` (agent review) → `slack.post` (escalate) → `email.send` (reply)
+
+Send authenticated events to `POST /triggers/webhook/ingest` with
+`endpointKey: "support-escalation"`, a stable support-system `eventId`, and
+the ticket fields under `payload`. Retried deliveries converge on one run, and
+duplicate endpoint keys fail closed with HTTP 409.
 
 ## What you must provide
 
@@ -18,11 +23,18 @@ back.
 Installing the pack never creates these — wire the credential in the Credentials
 panel and set `email.from` in Operations → org config. `email.send` uses your
 configured mailer provider, not a per-tool credential.
+Configure the supported Anthropic provider so the review form can be prefilled
+from the schema-validated `draftReply` field.
 
 ## Try it
 
 - **Preview sample run** runs the workflow in sandbox mode against the bundled
   "can't log in" ticket. The Slack + email steps are skipped in sandbox mode, and
-  the run pauses at the agent-review form so you can see the human checkpoint.
-- **Break a node** injects a "timed out" failure on `escalate` so you can drive the
-  recovery dialog and watch the AI propose a raise-timeout fix.
+  with AI configured the run pauses at the agent-review form with the draft
+  prefilled for editing.
+- **Start recovery drill** reproduces a bounded notification timeout on
+  `escalate`, records the drill source, and opens the recovery queue so you can
+  diagnose and validate a proposed timeout fix.
+
+Slack and email use `resultPolicy: "require_ok"`, so failed delivery envelopes
+cannot be reported as successful workflow steps.

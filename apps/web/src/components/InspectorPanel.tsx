@@ -30,6 +30,7 @@ import {
 const WorkflowIoEditor = React.lazy(() => import('./WorkflowIoEditor').then(module => ({ default: module.WorkflowIoEditor })))
 
 type InspectorPanelProps = {
+  readOnly?: boolean
   selectedNode: WorkflowGraphNode | null
   selectedEdge: WorkflowGraphEdge | null
   runNodes: RunNode[]
@@ -50,6 +51,7 @@ type InspectorPanelProps = {
 }
 
 export function InspectorPanel({
+  readOnly = false,
   selectedNode,
   selectedEdge,
   runNodes,
@@ -211,6 +213,7 @@ export function InspectorPanel({
         <AiUsageFooter stateJson={nodeStatus?.stateJson} />
 
 
+        <fieldset className="we-fieldset" disabled={readOnly}>
         <div className="form-grid">
           <label className="field-label" htmlFor="node-label">{t('rightPanel.inspector.stepNameLabel')}</label>
           <input
@@ -288,6 +291,7 @@ export function InspectorPanel({
             }}
           />
         </details>
+        </fieldset>
 
         {jsonError && <div className="issue issue-error">{jsonError}</div>}
         {nodeIssues.map(issue => <div key={`${issue.code}-${issue.message}`} className="issue issue-error">{issue.message}</div>)}
@@ -300,18 +304,20 @@ export function InspectorPanel({
       <section ref={entityRef} className="we-card" tabIndex={-1} data-testid={`inspector-edge-${selectedEdge.id}`}>
         <div className="section-kicker">{t('rightPanel.inspector.pathKicker')}</div>
         <h3>{t('rightPanel.inspector.pathTitle', { source: selectedEdge.source, target: selectedEdge.target })}</h3>
-        <ExpressionAssistant
-          key={selectedEdge.id}
-          id="edge-condition"
-          label={t('rightPanel.inspector.runOnlyWhen')}
-          value={selectedEdge.data?.condition ?? ''}
-          onChange={(value) => onUpdateEdgeCondition(selectedEdge.id, value)}
-          nodes={workflowNodes}
-          edges={workflowEdges}
-          targetNodeId={selectedEdge.source}
-          mode="edge"
-          workflowInputs={currentWorkflowInputs}
-        />
+        <fieldset className="we-fieldset" disabled={readOnly}>
+          <ExpressionAssistant
+            key={selectedEdge.id}
+            id="edge-condition"
+            label={t('rightPanel.inspector.runOnlyWhen')}
+            value={selectedEdge.data?.condition ?? ''}
+            onChange={(value) => onUpdateEdgeCondition(selectedEdge.id, value)}
+            nodes={workflowNodes}
+            edges={workflowEdges}
+            targetNodeId={selectedEdge.source}
+            mode="edge"
+            workflowInputs={currentWorkflowInputs}
+          />
+        </fieldset>
       </section>
     )
   }
@@ -319,15 +325,17 @@ export function InspectorPanel({
   return (
     <>
       <React.Suspense fallback={<section className="we-card"><p className="helper-text">{t('common.working')}</p></section>}>
-        <WorkflowIoEditor
-          workflowId={currentWorkflowId ?? 'unsaved-workflow'}
-          inputs={currentWorkflowInputs}
-          outputs={currentWorkflowOutputs}
-          templatePolicy={currentWorkflowTemplatePolicy}
-          onChangeInputs={updateWorkflowInputs}
-          onChangeOutputs={updateWorkflowOutputs}
-          onChangeTemplatePolicy={updateWorkflowTemplatePolicy}
-        />
+        <fieldset className="we-fieldset" disabled={readOnly}>
+          <WorkflowIoEditor
+            workflowId={currentWorkflowId ?? 'unsaved-workflow'}
+            inputs={currentWorkflowInputs}
+            outputs={currentWorkflowOutputs}
+            templatePolicy={currentWorkflowTemplatePolicy}
+            onChangeInputs={updateWorkflowInputs}
+            onChangeOutputs={updateWorkflowOutputs}
+            onChangeTemplatePolicy={updateWorkflowTemplatePolicy}
+          />
+        </fieldset>
       </React.Suspense>
       <section className="we-card">
         <div className="empty-panel">

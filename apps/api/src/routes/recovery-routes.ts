@@ -17,6 +17,7 @@ import {
   queryRecoveryFeedbackHealth,
   queryOperatorRecoveryCount,
   queryRecoveryLedger,
+  queryRecoveryValidation,
   recordRecoveryFeedback,
   queryRecoveryMetricsSignals,
   queryRecoveryHeatmap,
@@ -56,6 +57,7 @@ export const recoveryRoutes: Route[] = [
   // a single rollup the Operations dashboard renders.
   { method: "GET", match: (url) => url === "/recovery/metrics" || url.startsWith("/recovery/metrics?"),
     role: "viewer",
+    permission: "recovery.read",
     contract: recoveryMetricsContract,
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
@@ -84,13 +86,27 @@ export const recoveryRoutes: Route[] = [
   // window-dependent assumptions.
   { method: "GET", match: "/recovery/ledger",
     role: "viewer",
+    permission: "recovery.read",
     contract: recoveryLedgerContract,
     handler: async ({ res, auth }) => sendJson(res, await queryRecoveryLedger(auth.orgId)) },
+
+  // Controlled-drill evidence is separate from aggregate production metrics.
+  // It stays bounded to the newest 100 drills and exposes no actor identifiers.
+  { method: "GET", match: (url) => url === "/recovery/validation" || url.startsWith("/recovery/validation?"),
+    role: "viewer",
+    permission: "reports.read",
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const rawWindow = Number.parseInt(url.searchParams.get("windowDays") ?? "", 10);
+      const windowDays = Number.isFinite(rawWindow) ? Math.min(90, Math.max(1, rawWindow)) : 30;
+      return sendJson(res, await queryRecoveryValidation(auth.orgId, windowDays));
+    } },
 
   // Personal momentum for the authenticated operator. The route accepts no
   // user id from the caller; identity comes exclusively from AuthContext.
   { method: "GET", match: (url) => url === "/recovery/my-wins" || url.startsWith("/recovery/my-wins?"),
     role: "viewer",
+    permission: "recovery.read",
     contract: recoveryMyWinsContract,
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
@@ -106,6 +122,7 @@ export const recoveryRoutes: Route[] = [
   // timestamp formatting. No feedback comments or source rows leave here.
   { method: "GET", match: (url) => url === "/recovery/calibration-status" || url.startsWith("/recovery/calibration-status?"),
     role: "viewer",
+    permission: "recovery.read",
     handler: async ({ res, auth }) => {
       const [orgConfig, calibrations] = await Promise.all([
         getOrgConfigSnapshot(auth.orgId),
@@ -124,6 +141,7 @@ export const recoveryRoutes: Route[] = [
   // less often than the metric strip and the grid tolerates one-tick staleness.
   { method: "GET", match: (url) => url === "/recovery/heatmap" || url.startsWith("/recovery/heatmap?"),
     role: "viewer",
+    permission: "recovery.read",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const rawDays = Number.parseInt(url.searchParams.get("days") ?? "", 10);
@@ -137,6 +155,7 @@ export const recoveryRoutes: Route[] = [
   // a caller-supplied workflow id, so this read cannot cross tenant bounds.
   { method: "GET", match: (url) => url === "/recovery/feedback-health" || url.startsWith("/recovery/feedback-health?"),
     role: "viewer",
+    permission: "recovery.read",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const deadLetterId = url.searchParams.get("deadLetterId");
@@ -160,7 +179,7 @@ export const recoveryRoutes: Route[] = [
   // deprioritize approaches the operator has already rejected.
   // Audited as `recovery.feedback`. Editor role — viewers can't
   // capture their own decisions.
-  { method: "POST", match: "/recovery/feedback", role: "editor",
+  { method: "POST", match: "/recovery/feedback", role: "editor", permission: "recovery.write",
     handler: async ({ req, res, auth }) => {
       await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_DEFAULTS_PER_MIN.recovery });
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));

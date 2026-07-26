@@ -35,10 +35,11 @@ import { AlertPoliciesPanel } from './AlertPoliciesPanel'
 import { UpstreamHealthPanel } from './UpstreamHealthPanel'
 import { RecentAlertsCard } from './RecentAlertsCard'
 import { McpConnectionsPanel } from './McpConnectionsPanel'
+import { SlackInteractionsPanel } from './SlackInteractionsPanel'
 import { VitalSignsStrip } from './VitalSignsStrip'
 import { RunStreamChip } from './RunStreamChip'
 import {
-  parseQueueHealth,
+  parseQueueHealthOverview,
   QueueLagChip,
   queueNeedsAttention,
   type QueueHealth,
@@ -154,6 +155,8 @@ type SignalSummary = {
   rateLimiter: RateLimiterHealth | null
   /** Admin queue snapshot; null means unavailable, undefined means not checked yet. */
   queue: QueueHealth | null | undefined
+  /** Independent maintenance queue snapshot; absent against an older API. */
+  maintenanceQueue: QueueHealth | null | undefined
   /** Most recent 402 envelope captured by the API wrapper. Drives Reliability dot. */
   budgetBlocked: unknown
   /** True when at least one `/recovery/metrics` value is in the "unhealthy" band.
@@ -162,8 +165,18 @@ type SignalSummary = {
 }
 
 type QueueSignalState = {
-  health: QueueHealth | null
-  unavailableReason: QueueUnavailableReason
+  workflow: QueueHealth | null
+  maintenance: QueueHealth | null | undefined
+  workflowUnavailableReason: QueueUnavailableReason
+  maintenanceUnavailableReason: QueueUnavailableReason
+}
+
+function hasNullMaintenanceSnapshot(value: unknown): boolean {
+  return typeof value === 'object'
+    && value !== null
+    && !Array.isArray(value)
+    && 'maintenance' in value
+    && (value as { maintenance?: unknown }).maintenance === null
 }
 
 function isForbiddenApiError(error: unknown): boolean {
@@ -173,8 +186,9 @@ function isForbiddenApiError(error: unknown): boolean {
     && (error as { statusCode?: unknown }).statusCode === 403
 }
 
-export function OperationsPage() {
+export function OperationsPage({ permissions }: { permissions?: readonly string[] }) {
   const { t } = useT()
+  const can = (permission: string) => permissions === undefined || permissions.includes(permission)
   const platformVersion = useWorkflowStore((state) => state.platformVersion)
   const budgetBlocked = useWorkflowStore((state) => state.budgetBlocked)
   const [metrics, setMetrics] = useState<RecoveryMetrics | null>(null)
@@ -189,6 +203,23 @@ export function OperationsPage() {
   const [queueSignal, setQueueSignal] = useState<QueueSignalState | undefined>(undefined)
   const [queueCheckedAt, setQueueCheckedAt] = useState<number | null>(null)
   const [section, setSection] = useState<OpsSection>(() => loadStoredSection())
+
+  const sectionAvailable = (candidate: OpsSection): boolean => {
+    if (candidate === 'overview') return can('recovery.read')
+    if (candidate === 'reliability') {
+      return can('alerts.read') || can('upstream.read') || can('org.config.write')
+    }
+    if (candidate === 'access') {
+      return can('members.read') || can('org.config.write') || can('org.permissions.write')
+    }
+    return can('credentials.read') || can('mcp.connections.read') || can('credentials.write')
+  }
+
+  useEffect(() => {
+    if (sectionAvailable(section)) return
+    const fallback = RAIL_ITEMS.find((item) => sectionAvailable(item.section))?.section
+    if (fallback) setSection(fallback)
+  }, [permissions, section])
 
   // Persist on every section change. Tiny write — no debounce needed.
   useEffect(() => {
@@ -241,14 +272,16 @@ export function OperationsPage() {
       // Live queue numbers intentionally stay off unauthenticated `/health`.
       // Poll the admin projection on the same cadence and preserve the last
       // successful snapshot if a later request fails.
-      if (queueForbidden) return
+      if (queueForbidden || !can('org.config.write')) return
       api('/system/queue')
         .then((payload) => {
           if (cancelled) return
-          const health = parseQueueHealth(payload)
+          const health = parseQueueHealthOverview(payload)
           setQueueSignal({
-            health,
-            unavailableReason: payload === null ? 'redis' : 'transport',
+            workflow: health.workflow,
+            maintenance: health.maintenance,
+            workflowUnavailableReason: payload === null ? 'redis' : 'transport',
+            maintenanceUnavailableReason: hasNullMaintenanceSnapshot(payload) ? 'redis' : 'transport',
           })
           setQueueCheckedAt(Date.now())
         })
@@ -261,8 +294,10 @@ export function OperationsPage() {
             return
           }
           setQueueSignal(current => current ?? {
-            health: null,
-            unavailableReason: 'transport',
+            workflow: null,
+            maintenance: null,
+            workflowUnavailableReason: 'transport',
+            maintenanceUnavailableReason: 'transport',
           })
         })
     }
@@ -273,7 +308,7 @@ export function OperationsPage() {
     // degradation is still caught within the interval even while idle.
     const id = window.setInterval(loadHealth, 20_000)
     return () => { cancelled = true; window.clearInterval(id) }
-  }, [])
+  }, [permissions])
 
   // Sandbox zeros render neutral (decision: an empty workspace is "no
   // signal", not a red emergency). No-op once any run is terminal.
@@ -287,11 +322,13 @@ export function OperationsPage() {
     ? [displayMetrics.successRate, displayMetrics.mttr, displayMetrics.p95Latency, displayMetrics.replayRate, displayMetrics.costThisWindow]
         .some((m) => m.severity === 'unhealthy')
     : false
-  const queueHealth = queueSignal === undefined ? undefined : queueSignal.health
+  const queueHealth = queueSignal === undefined ? undefined : queueSignal.workflow
+  const maintenanceQueueHealth = queueSignal === undefined ? undefined : queueSignal.maintenance
 
   const signals: SignalSummary = {
     rateLimiter: rateLimiterHealth,
     queue: queueHealth,
+    maintenanceQueue: maintenanceQueueHealth,
     budgetBlocked,
     overviewUnhealthy,
   }
@@ -305,19 +342,21 @@ export function OperationsPage() {
         rateLimiterHealth={rateLimiterHealth}
         rateLimiterCheckedAt={rateLimiterCheckedAt}
         queueHealth={queueHealth}
+        maintenanceQueueHealth={maintenanceQueueHealth}
         queueCheckedAt={queueCheckedAt}
-        queueUnavailableReason={queueSignal?.unavailableReason}
+        queueUnavailableReason={queueSignal?.workflowUnavailableReason}
+        maintenanceQueueUnavailableReason={queueSignal?.maintenanceUnavailableReason}
       />
       <div className="we-operations-page__body">
-        <OperationsRail section={section} onChange={setSection} signals={signals} />
+        <OperationsRail section={section} onChange={setSection} signals={signals} permissions={permissions} />
         <div className="we-operations-page__content" data-section={section}>
           {/* Lazy-mount: only the active sub-tab's cards exist in the DOM.
               Inactive sub-tabs never fire their per-card `useEffect` fetches,
               which is what cuts page-load API traffic from ~9 calls to ~2-3. */}
-          {section === 'overview' && <OverviewSection metrics={displayMetrics} />}
-          {section === 'reliability' && <ReliabilitySection />}
-          {section === 'access' && <AccessSection />}
-          {section === 'integrations' && <IntegrationsSection />}
+          {section === 'overview' && <OverviewSection metrics={displayMetrics} permissions={permissions} />}
+          {section === 'reliability' && <ReliabilitySection permissions={permissions} />}
+          {section === 'access' && <AccessSection permissions={permissions} />}
+          {section === 'integrations' && <IntegrationsSection permissions={permissions} />}
         </div>
       </div>
     </div>
@@ -330,8 +369,10 @@ function OperationsHeader({
   rateLimiterHealth,
   rateLimiterCheckedAt,
   queueHealth,
+  maintenanceQueueHealth,
   queueCheckedAt,
   queueUnavailableReason,
+  maintenanceQueueUnavailableReason,
 }: {
   metrics: RecoveryMetrics | null
   loading: boolean
@@ -339,8 +380,10 @@ function OperationsHeader({
   rateLimiterHealth: RateLimiterHealth | null
   rateLimiterCheckedAt: number | null
   queueHealth: QueueHealth | null | undefined
+  maintenanceQueueHealth: QueueHealth | null | undefined
   queueCheckedAt: number | null
   queueUnavailableReason?: QueueUnavailableReason
+  maintenanceQueueUnavailableReason?: QueueUnavailableReason
 }) {
   const { t } = useT()
   return (
@@ -362,6 +405,14 @@ function OperationsHeader({
             health={queueHealth}
             checkedAt={queueCheckedAt}
             unavailableReason={queueUnavailableReason}
+          />
+        )}
+        {maintenanceQueueHealth !== undefined && (
+          <QueueLagChip
+            kind="maintenance"
+            health={maintenanceQueueHealth}
+            checkedAt={queueCheckedAt}
+            unavailableReason={maintenanceQueueUnavailableReason}
           />
         )}
       </div>
@@ -396,16 +447,28 @@ function OperationsRail({
   section,
   onChange,
   signals,
+  permissions,
 }: {
   section: OpsSection
   onChange: (next: OpsSection) => void
   signals: SignalSummary
+  permissions?: readonly string[]
 }) {
   const { t } = useT()
+  const can = (permission: string) => permissions === undefined || permissions.includes(permission)
+  const visibleItems = RAIL_ITEMS.filter(({ section: candidate }) => {
+    if (candidate === 'overview') return can('recovery.read')
+    if (candidate === 'reliability') return can('alerts.read') || can('upstream.read') || can('org.config.write')
+    if (candidate === 'access') return can('members.read') || can('org.config.write') || can('org.permissions.write')
+    return can('credentials.read') || can('mcp.connections.read') || can('credentials.write')
+  })
 
   // Dot-badge derivation is intentionally limited to page-level signals.
   // Reading child-card health here would force those cards to fetch while
   // inactive, which would break the lazy-mount traffic reduction.
+  const queueAttention = (signals.queue !== undefined && queueNeedsAttention(signals.queue))
+    || (signals.maintenanceQueue !== undefined
+      && queueNeedsAttention(signals.maintenanceQueue))
   const dotKind: Record<OpsSection, 'danger' | 'warning' | null> = {
     overview: signals.overviewUnhealthy ? 'warning' : null,
     reliability:
@@ -413,7 +476,7 @@ function OperationsRail({
         ? 'danger'
         : signals.rateLimiter && !signals.rateLimiter.healthy
           ? 'warning'
-          : signals.queue !== undefined && queueNeedsAttention(signals.queue)
+          : queueAttention
             ? 'warning'
           : null,
     access: null,
@@ -427,7 +490,7 @@ function OperationsRail({
       data-testid="operations-rail"
     >
       <ul>
-        {RAIL_ITEMS.map((item) => {
+        {visibleItems.map((item) => {
           const isActive = item.section === section
           const dot = dotKind[item.section]
           return (
@@ -462,8 +525,9 @@ function OperationsRail({
   )
 }
 
-function OverviewSection({ metrics }: { metrics: RecoveryMetrics | null }) {
+function OverviewSection({ metrics, permissions }: { metrics: RecoveryMetrics | null; permissions?: readonly string[] }) {
   const { t } = useT()
+  const canReadDlq = permissions === undefined || permissions.includes('dlq.read')
   const locale = getResolvedLocale()
   return (
     <>
@@ -521,40 +585,49 @@ function OverviewSection({ metrics }: { metrics: RecoveryMetrics | null }) {
           </div>
         </section>
       )}
-      <FailureClustersCard />
+      {canReadDlq && <FailureClustersCard />}
     </>
   )
 }
 
-function ReliabilitySection() {
+function ReliabilitySection({ permissions }: { permissions?: readonly string[] }) {
+  const can = (permission: string) => permissions === undefined || permissions.includes(permission)
   return (
     <>
-      <AlertPoliciesPanel />
-      <RecentAlertsCard />
-      <UpstreamHealthPanel />
-      <BudgetSettingsPanel />
-      <AiGuidanceSettingsPanel />
+      {can('alerts.read') && <AlertPoliciesPanel canWrite={can('alerts.write')} />}
+      {can('alerts.read') && <RecentAlertsCard />}
+      {can('upstream.read') && <UpstreamHealthPanel canWrite={can('upstream.write')} />}
+      {can('org.config.write') && <BudgetSettingsPanel />}
+      {can('org.config.write') && <AiGuidanceSettingsPanel />}
     </>
   )
 }
 
-function AccessSection() {
+function AccessSection({ permissions }: { permissions?: readonly string[] }) {
+  const can = (permission: string) => permissions === undefined || permissions.includes(permission)
   return (
     <>
-      <AuthPolicySettingsPanel />
-      <ScimDirectorySettingsPanel />
-      <PermissionGrantsPanel />
-      <MemoryGovernancePanel />
-      <AuditLogPanel />
+      {can('org.config.write') && <AuthPolicySettingsPanel />}
+      {can('members.read') && (
+        <ScimDirectorySettingsPanel
+          canConfigureDirectory={can('org.config.write')}
+          canSetRoles={can('members.role_set')}
+        />
+      )}
+      {can('members.read') && <PermissionGrantsPanel canWrite={can('org.permissions.write')} />}
+      {can('recovery.read') && <MemoryGovernancePanel />}
+      {can('org.config.write') && <AuditLogPanel />}
     </>
   )
 }
 
-function IntegrationsSection() {
+function IntegrationsSection({ permissions }: { permissions?: readonly string[] }) {
+  const can = (permission: string) => permissions === undefined || permissions.includes(permission)
   return (
     <>
-      <CredentialHealthCard />
-      <McpConnectionsPanel />
+      {can('credentials.write') && <SlackInteractionsPanel />}
+      {can('credentials.read') && <CredentialHealthCard />}
+      {can('mcp.connections.read') && <McpConnectionsPanel canWrite={can('mcp.connections.write')} />}
     </>
   )
 }

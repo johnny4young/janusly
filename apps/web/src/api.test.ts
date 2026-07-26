@@ -1,19 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, __resetInFlightForTests } from './api'
+import { suspendApiRequestLifecycle } from './api-request-lifecycle'
 import { changeAppLanguage, initI18n } from './i18n'
 import { useWorkflowStore } from './store'
 
-let mockSessionToken: string | null = null
+let mockBrowserSession = false
 let mockActiveOrg = 'default'
 let mockSupabaseAccessToken: string | null = null
 vi.mock('./auth', () => ({
   getSupabaseAccessToken: async () => mockSupabaseAccessToken,
   getActiveOrg: () => mockActiveOrg,
-  getSessionToken: () => mockSessionToken,
+  hasBrowserSession: () => mockBrowserSession,
 }))
 
 function mockJsonResponse(status: number, payload: unknown) {
-  vi.stubGlobal('fetch', vi.fn(async () => (
+  vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => (
     new Response(JSON.stringify(payload), {
       status,
       headers: { 'Content-Type': 'application/json' },
@@ -32,7 +33,7 @@ describe('api', () => {
     vi.restoreAllMocks()
     vi.useRealTimers()
     useWorkflowStore.getState().clearBudgetBlocked()
-    mockSessionToken = null
+    mockBrowserSession = false
     mockActiveOrg = 'default'
     mockSupabaseAccessToken = null
   })
@@ -68,16 +69,16 @@ describe('api', () => {
 
   it('localizes offline failures through the active locale', async () => {
     changeAppLanguage('es')
-    vi.stubGlobal('fetch', vi.fn(async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => {
       throw new TypeError('network unavailable')
     }))
 
     await expect(api('/ping')).rejects.toThrow('La API de Janusly no está disponible')
   })
 
-  it('sends x-janusly-session instead of x-user-id when a session token is set', async () => {
-    mockSessionToken = 'js-session-token-abc'
-    const fetchMock = vi.fn(async () => new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
+  it('uses credentials without exposing a session header for cookie-backed SSO', async () => {
+    mockBrowserSession = true
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
     vi.stubGlobal('fetch', fetchMock)
 
     await api('/ping')
@@ -85,7 +86,8 @@ describe('api', () => {
     expect(fetchMock).toHaveBeenCalledOnce()
     const init = fetchMock.mock.calls[0][1] as RequestInit
     const headers = init.headers as Record<string, string>
-    expect(headers['x-janusly-session']).toBe('js-session-token-abc')
+    expect(init.credentials).toBe('include')
+    expect(headers['x-janusly-session']).toBeUndefined()
     expect(headers['x-org-id']).toBe('default')
     expect(headers['x-user-id']).toBeUndefined()
     expect(headers['Authorization']).toBeUndefined()
@@ -109,7 +111,7 @@ describe('api', () => {
   })
 
   it('uses and unwraps the v1 envelope for contracted read paths', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       apiVersion: 'v1',
       requestId: 'req-workflows',
       data: [{ id: 'wf-1', name: 'Billing recovery' }],
@@ -140,8 +142,29 @@ describe('api', () => {
     })
   })
 
+  it('routes discovery catalogs and workflow health through stable read contracts', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      apiVersion: 'v1',
+      requestId: 'req-catalog',
+      data: [],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(api('/templates')).resolves.toEqual([])
+    await expect(api('/tools')).resolves.toEqual([])
+    await expect(api('/workflows/health?workflowId=wf-1')).resolves.toEqual([])
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      'http://localhost:3001/v1/templates',
+      'http://localhost:3001/v1/tools',
+      'http://localhost:3001/v1/workflows/health?workflowId=wf-1',
+    ])
+  })
+
   it('leaves uncontracted and mutating paths unversioned', async () => {
-    const fetchMock = vi.fn(async () => new Response('{}', {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('{}', {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }))
@@ -156,8 +179,24 @@ describe('api', () => {
     ])
   })
 
+  it('keeps full DLQ detail on the legacy route while versioning bounded lists', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('{}', {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await api('/dlq?id=dead-letter-1')
+    await api('/dlq?status=open&limit=25')
+
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      'http://localhost:3001/dlq?id=dead-letter-1',
+      'http://localhost:3001/v1/dlq?status=open&limit=25',
+    ])
+  })
+
   it('dedups identical GETs within the in-flight window', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ items: [] }), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ items: [] }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }))
@@ -174,7 +213,7 @@ describe('api', () => {
   })
 
   it('does not dedup across active org changes inside the TTL window', async () => {
-    const fetchMock = vi.fn(async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const fetchMock = vi.fn<typeof fetch>(async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
       const headers = init?.headers as Record<string, string>
       return new Response(JSON.stringify({ orgId: headers['x-org-id'] }), {
         status: 200,
@@ -193,7 +232,7 @@ describe('api', () => {
   })
 
   it('does not dedup across locale changes inside the TTL window', async () => {
-    const fetchMock = vi.fn(async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const fetchMock = vi.fn<typeof fetch>(async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
       const headers = init?.headers as Record<string, string>
       return new Response(JSON.stringify({ locale: headers['Accept-Language'] }), {
         status: 200,
@@ -215,7 +254,7 @@ describe('api', () => {
     // User A authenticates, makes a request; within 500ms User A logs
     // out and User B logs in (or User A's token refreshes). The
     // second call must NOT share User A's cached response.
-    const fetchMock = vi.fn(async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const fetchMock = vi.fn<typeof fetch>(async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
       const headers = init?.headers as Record<string, string>
       return new Response(JSON.stringify({ token: headers['Authorization'] ?? null }), {
         status: 200,
@@ -234,8 +273,27 @@ describe('api', () => {
     expect(userB).toEqual({ token: 'Bearer jwt-user-b' })
   })
 
+  it('cancels departing-identity requests before logout can revoke their token', async () => {
+    mockSupabaseAccessToken = 'jwt-departing-user'
+    const fetchMock = vi.fn<typeof fetch>(async (_input, init) => await new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal
+      if (!signal) return reject(new Error('missing lifecycle signal'))
+      if (signal.aborted) return reject(signal.reason)
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const request = api('/org/roles')
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    suspendApiRequestLifecycle()
+
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' })
+    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined
+    expect(requestInit?.signal?.aborted).toBe(true)
+  })
+
   it('does not dedup when the request body differs', async () => {
-    const fetchMock = vi.fn(async () => new Response('{}', {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('{}', {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }))
@@ -274,7 +332,7 @@ describe('api', () => {
 
   it('does not dedup across the TTL boundary', async () => {
     vi.useFakeTimers()
-    const fetchMock = vi.fn(async () => new Response('{}', {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('{}', {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }))
@@ -289,7 +347,7 @@ describe('api', () => {
   })
 
   it('skips dedup when the caller passes an AbortSignal', async () => {
-    const fetchMock = vi.fn(async () => new Response('{}', {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('{}', {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }))

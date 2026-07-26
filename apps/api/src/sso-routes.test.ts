@@ -13,6 +13,7 @@ const recordSsoNonce = vi.fn();
 const consumeSsoNonce = vi.fn();
 
 const upsertMembership = vi.fn();
+const createAuthSession = vi.fn();
 
 const exchangeCode = vi.fn();
 const buildAuthorizeUrl = vi.fn();
@@ -35,6 +36,10 @@ vi.mock("@janusly/data/src/ssoStateNoncesRepo", () => ({
 
 vi.mock("@janusly/data/src/orgMembersRepo", () => ({
   upsertMembership: (...args: unknown[]) => upsertMembership(...args),
+}));
+
+vi.mock("@janusly/data/src/authSessionsRepo", () => ({
+  createAuthSession: (...args: unknown[]) => createAuthSession(...args),
 }));
 
 // Mock withAuditTx so the SSO callback's atomic membership+audit pair
@@ -109,6 +114,7 @@ beforeEach(() => {
   recordSsoNonce.mockReset();
   consumeSsoNonce.mockReset();
   upsertMembership.mockReset();
+  createAuthSession.mockReset();
   exchangeCode.mockReset();
   buildAuthorizeUrl.mockReset();
   auditMock.mockReset();
@@ -119,6 +125,10 @@ beforeEach(() => {
   upsertMembership.mockResolvedValue({
     id: "m-1", orgId: "org-a", userId: "user-1", email: "u@x.com",
     role: "viewer", invitedBy: null, createdAt: null,
+  });
+  createAuthSession.mockResolvedValue({
+    id: "session-1", orgId: "org-a", userId: "user-sso-1", email: "alice@acme.com",
+    expiresAt: new Date(Date.now() + 28_800_000), revokedAt: null,
   });
   auditMock.mockResolvedValue(undefined);
   getAuthPolicyConfig.mockReset();
@@ -385,7 +395,10 @@ describe("/auth/sso/callback", () => {
     const target = res.getHeader("location");
     const webBaseUrl = (process.env.JANUSLY_WEB_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
     expect(target).toContain(`${webBaseUrl}/auth/sso/complete`);
-    expect(target).toContain("#janusly_session=");
+    expect(target).not.toContain("janusly_session");
+    expect(res.getHeader("set-cookie")).toContain("janusly_session=");
+    expect(res.getHeader("set-cookie")).toContain("HttpOnly");
+    expect(res.getHeader("set-cookie")).toContain("SameSite=Lax");
     expect(upsertMembership).toHaveBeenCalledWith(
       expect.objectContaining({
         orgId: "org-a",
@@ -533,9 +546,10 @@ describe("/auth/sso/callback", () => {
 
     expect(res.statusCode).toBe(302);
     const target = res.getHeader("location") as string;
-    expect(target).toContain("#janusly_session=");
-    // Decode the session token from the redirect target and verify TTL.
-    const tokenMatch = target.match(/#janusly_session=([^&]+)$/);
+    expect(target).not.toContain("janusly_session");
+    // Decode the opaque session cookie and verify its signed TTL.
+    const cookie = res.getHeader("set-cookie") as string;
+    const tokenMatch = cookie.match(/janusly_session=([^;]+)/);
     expect(tokenMatch).not.toBeNull();
     const token = decodeURIComponent(tokenMatch![1]);
     const [, payloadB64] = token.split(".");

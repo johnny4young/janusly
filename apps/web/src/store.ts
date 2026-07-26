@@ -31,6 +31,7 @@ import type { Connection, OnEdgesChange, OnNodesChange } from '@xyflow/react'
 import type { Session, User } from '@supabase/supabase-js'
 import type { ActiveTab, JsonObject, RunEvent, RunNode, RunSummary, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
 import type { OnboardingState } from '@janusly/shared/src/onboarding'
+import type { SessionContext } from './identity-context'
 import { getNodePreset } from './constants'
 import { t } from './i18n/runtime'
 import { workflowToGraph } from './canvas-projections'
@@ -92,7 +93,17 @@ function sanitizeRetryPolicy(value: unknown): JsonObject | null {
  * the `return state` guard is a defensive no-op for the impossible
  * "change before canvas mount" case.
  */
-type FlowOps = Pick<typeof import('@xyflow/react'), 'applyNodeChanges' | 'applyEdgeChanges' | 'addEdge'>
+type FlowOps = {
+  applyNodeChanges: (
+    changes: Parameters<OnNodesChange<WorkflowGraphNode>>[0],
+    nodes: WorkflowGraphNode[],
+  ) => WorkflowGraphNode[]
+  applyEdgeChanges: (
+    changes: Parameters<OnEdgesChange<WorkflowGraphEdge>>[0],
+    edges: WorkflowGraphEdge[],
+  ) => WorkflowGraphEdge[]
+  addEdge: (edge: Connection | WorkflowGraphEdge, edges: WorkflowGraphEdge[]) => WorkflowGraphEdge[]
+}
 let flowOps: FlowOps | null = null
 export function registerFlowOps(ops: FlowOps): void {
   flowOps = ops
@@ -134,19 +145,21 @@ type WorkflowStore = {
   userId: string | null
   orgId: string | null
   authReady: boolean
+  identityContext: SessionContext | null
+  identityReady: boolean
 
   currentWorkflowId: string
   currentWorkflowName: string
   /**
    * Whether the current workflow exists server-side. False for the initial
-   * sample draft and after `newWorkflow()`; true once loaded from the server
+   * blank draft and after `newWorkflow()`; true once loaded from the server
    * or successfully saved. Health/metadata lookups skip unsaved drafts so a
    * never-saved workflow doesn't 404 the health/metadata endpoints on load.
    */
   currentWorkflowSaved: boolean
   /**
    * Whether the canvas holds semantic edits not yet persisted as a workflow
-   * version. False for the untouched sample and right after hydrate/new/save;
+   * version. False for the untouched blank draft and after hydrate/new/save;
    * true after any persisted node/edge/config/name/layout mutation. Drives the unsaved-work guards
    * (confirm-before-replace, beforeunload) and the local draft autosave.
    */
@@ -197,11 +210,15 @@ type WorkflowStore = {
   setAuth: (payload: { session: Session | null; user: User | null; userId: string | null; orgId: string | null }) => void
   clearAuth: () => void
   setAuthReady: (ready: boolean) => void
+  setIdentityContext: (context: SessionContext | null) => void
+  setIdentityPending: () => void
   dismissRecoveryIntroThisSession: () => void
 
   addNode: (type: string, position?: { x: number; y: number }) => void
   duplicateNode: (nodeId: string) => void
   hydrateWorkflow: (workflow: WorkflowDefinition, options?: { saved?: boolean; dirty?: boolean }) => void
+  /** Set the localized starter name once React mounts after i18n bootstrap. */
+  initializeWorkflowName: (name: string) => void
   getWorkflowJson: () => WorkflowDefinition
   newWorkflow: () => void
   /** Mark the current workflow as persisted server-side (after a successful save). */
@@ -211,8 +228,8 @@ type WorkflowStore = {
   setWorkflowName: (name: string) => void
   setNodes: (nodes: WorkflowGraphNode[]) => void
   setEdges: (edges: WorkflowGraphEdge[]) => void
-  onNodesChange: OnNodesChange
-  onEdgesChange: OnEdgesChange
+  onNodesChange: OnNodesChange<WorkflowGraphNode>
+  onEdgesChange: OnEdgesChange<WorkflowGraphEdge>
   connect: (connection: Connection) => void
   selectNode: (id: string | null) => void
   selectEdge: (id: string | null) => void
@@ -284,20 +301,7 @@ function persistActiveTab(tab: ActiveTab): void {
   }
 }
 
-// `data.label` is intentionally empty — `WorkflowStepNode` resolves
-// the human label via `getNodeLabel(type)` at render time, which
-// re-evaluates through the i18n runtime on locale toggles. Leaving
-// the field empty lets the OR-fallback (`data.label || ...`) kick in.
-const initialNodes: WorkflowGraphNode[] = [
-  { id: 'fetch', position: { x: 0, y: 0 }, data: { label: '', type: 'http', config: { url: 'https://api.github.com' } } },
-  { id: 'check', position: { x: 280, y: 90 }, data: { label: '', type: 'condition', config: { expression: 'context.fetch.output.statusCode === 200' } } },
-  { id: 'approve', position: { x: 560, y: 180 }, data: { label: '', type: 'approval', config: getNodePreset('approval') } },
-]
-
-const initialEdges: WorkflowGraphEdge[] = [
-  { id: 'e-fetch-check', source: 'fetch', target: 'check', data: {} },
-  { id: 'e-check-approve', source: 'check', target: 'approve', data: { condition: 'context.check.output.result === true' } },
-]
+const initialWorkflowId = `workflow_${crypto.randomUUID().slice(0, 8)}`
 
 function clearedRunProjection(runTransitionGeneration: number) {
   return {
@@ -353,17 +357,22 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   userId: null,
   orgId: null,
   authReady: false,
+  identityContext: null,
+  identityReady: false,
 
-  currentWorkflowId: 'ui-test',
-  currentWorkflowName: t('workflow.sampleName'),
+  currentWorkflowId: initialWorkflowId,
+  // `main.tsx` starts downloading App in parallel with the locale catalog, so
+  // module evaluation can precede i18next initialization. App fills this
+  // sentinel before paint; never translate during store module evaluation.
+  currentWorkflowName: '',
   currentWorkflowSaved: false,
   workflowDirty: false,
   workflowRevision: 0,
   currentWorkflowInputs: undefined,
   currentWorkflowOutputs: undefined,
   currentWorkflowTemplatePolicy: undefined,
-  nodes: initialNodes,
-  edges: initialEdges,
+  nodes: [],
+  edges: [],
   selectedNodeId: null,
   selectedEdgeId: null,
   runId: null,
@@ -394,6 +403,9 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     authReady: true,
     ...(state.userId !== userId || state.orgId !== orgId
       ? {
+          identityContext: null,
+          identityReady: false,
+          toasts: [],
           ...clearedRunProjection(state.runTransitionGeneration),
           recoveryIntroDismissedThisSession: false,
         }
@@ -405,10 +417,17 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     userId: null,
     orgId: null,
     authReady: true,
+    identityContext: null,
+    identityReady: true,
+    // Notifications belong to the departing identity/workspace. Keeping them
+    // after logout can disclose stale operational details to the next user.
+    toasts: [],
     recoveryIntroDismissedThisSession: false,
     ...clearedRunProjection(state.runTransitionGeneration),
   })),
   setAuthReady: (authReady) => set({ authReady }),
+  setIdentityContext: (identityContext) => set({ identityContext, identityReady: true }),
+  setIdentityPending: () => set({ identityReady: false }),
   dismissRecoveryIntroThisSession: () => set({ recoveryIntroDismissedThisSession: true }),
 
   addNode: (type, position) => {
@@ -469,6 +488,10 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       workflowRevision: state.workflowRevision + 1,
     }))
   },
+
+  initializeWorkflowName: (name) => set((state) => (
+    state.currentWorkflowName.length === 0 ? { currentWorkflowName: name } : state
+  )),
 
   markWorkflowSaved: () => set({ currentWorkflowSaved: true, workflowDirty: false }),
   markWorkflowDirty: () => set({ workflowDirty: true }),

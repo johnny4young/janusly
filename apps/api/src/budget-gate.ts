@@ -159,6 +159,15 @@ export async function gateBudget(input: GateBudgetInput): Promise<GateBudgetOutc
 export function budgetBlockedResponse(envelope: BudgetCheckResult) {
   return {
     error: "budget_exceeded",
+    code: "budget_exceeded" as const,
+    params: {
+      monthlyUsdSpent: envelope.monthlyUsdSpent,
+      ...(envelope.monthlyUsdLimit === null ? {} : { monthlyUsdLimit: envelope.monthlyUsdLimit }),
+      policy: envelope.policy,
+      warningPercent: envelope.warningPercent,
+      ...(envelope.exceededAt === null ? {} : { exceededAt: envelope.exceededAt }),
+      ...(envelope.resolvedScope === null ? {} : { resolvedScope: envelope.resolvedScope }),
+    },
     budget: envelope,
   };
 }

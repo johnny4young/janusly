@@ -30,25 +30,15 @@ import { AlertCircle, ArrowDownRight, ArrowUpRight, Minus, RotateCcw } from 'luc
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { RollbackConfirmDialog } from './RollbackConfirmDialog'
-import type { OrgMember, OrgRole, WorkflowDefinition } from '../types'
+import type { WorkflowDefinition } from '../types'
 import { useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
+import { sessionCan } from '../identity-context'
 
 /** Minimum after-side run count for the full delta to render. Mirrors `MIN_RUNS_FOR_DELTA` in the engine. */
 const MIN_RUNS_FOR_DELTA = 5
 /** Threshold below which the card surfaces the regression-rollback affordance. */
 const REGRESSION_THRESHOLD = -3
-
-/**
- * UI gate: hide the Rollback CTA from read-only viewers. Custom roles
- * carry org-defined names like `compliance`; the server is the
- * authoritative gate (it consults `inheritsFrom` rank + effective
- * permission set), so the web only needs to err on the side of
- * showing the CTA for any non-`viewer` non-null role.
- */
-function canRollbackWithRole(role: string | null | undefined) {
-  return typeof role === 'string' && role !== '' && role !== 'viewer'
-}
 
 /** Pre-save snapshot of the workflow's health state, captured at the moment Apply is clicked. */
 export type PreSaveBeforeSnapshot = {
@@ -101,12 +91,9 @@ export function RecoveryDeltaCard({
 }: RecoveryDeltaCardProps) {
   const { t } = useT()
   const platformVersion = useWorkflowStore((state) => state.platformVersion)
-  const session = useWorkflowStore((state) => state.session)
-  const userId = useWorkflowStore((state) => state.userId)
-  const orgId = useWorkflowStore((state) => state.orgId)
+  const identityContext = useWorkflowStore((state) => state.identityContext)
   const [state, setState] = useState<FetchState>({ kind: 'loading' })
   const [rollback, setRollback] = useState<RollbackState>({ kind: 'idle' })
-  const [effectiveRole, setEffectiveRole] = useState<OrgRole | null>(null)
   const [retryNonce, setRetryNonce] = useState(0)
 
   useEffect(() => {
@@ -133,35 +120,6 @@ export function RecoveryDeltaCard({
       cancelled = true
     }
   }, [workflowId, afterVersion, priorFailureSignature, platformVersion, retryNonce])
-
-  useEffect(() => {
-    let cancelled = false
-
-    const loadEffectiveRole = async () => {
-      if (!userId) {
-        setEffectiveRole(null)
-        return
-      }
-
-      try {
-        const data = await api('/members')
-        if (cancelled) return
-        const members = Array.isArray(data) ? (data as OrgMember[]) : []
-        const member = members.find((row) => row.userId === userId)
-        // Mirrors VersionHistoryPanel and backend dev-header behaviour:
-        // fresh local checkouts without org_members fall back to admin, but
-        // a persisted viewer row must hide rollback affordances.
-        setEffectiveRole(member?.role ?? (!session ? 'admin' : null))
-      } catch {
-        if (!cancelled) setEffectiveRole(null)
-      }
-    }
-
-    void loadEffectiveRole()
-    return () => {
-      cancelled = true
-    }
-  }, [orgId, platformVersion, session, userId])
 
   const onOpenRollback = useCallback(async (priorVersionNumber: number) => {
     setRollback({ kind: 'fetching' })
@@ -220,7 +178,7 @@ export function RecoveryDeltaCard({
     && data.delta != null
     && data.delta.score <= REGRESSION_THRESHOLD
     && data.priorVersion != null
-    && canRollbackWithRole(effectiveRole)
+    && sessionCan(identityContext, 'workflows.write')
 
   return (
     <>

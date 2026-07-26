@@ -18,6 +18,7 @@ import {
   getOrgConfigSnapshot,
   getRunComparison,
   queryRunUsage,
+  resolveWorkflowRolloutAssignment,
   getWorkflowStatus,
   resolveWorkflowPauseAction,
 } from "@janusly/data";
@@ -51,7 +52,15 @@ import {
   productionSecretRefResolver,
 } from "../readiness-helpers";
 import type { Route } from "../routes";
-import { getRunContract, getRunStatusContract, getRunUsageContract, listRunsContract } from "../api-contracts";
+import {
+  cancelRunContract,
+  getRunContract,
+  getRunStatusContract,
+  getRunUsageContract,
+  listRunsContract,
+  resumeRunContract,
+  startRunContract,
+} from "../api-contracts";
 
 // SSE heartbeat cadence. The server destroys idle sockets after 60s
 // (`server.setTimeout`); a comment well under that keeps an idle run's
@@ -635,7 +644,7 @@ export const runsRoutes: Route[] = [
       return sendJson(res, { runId: result.runId });
     } },
   // Run lifecycle (start / resume / cancel)
-  { method: "POST", match: "/start", role: "editor", permission: "runs.start",
+  { method: "POST", match: "/start", role: "editor", permission: "runs.start", contract: startRunContract,
     handler: async ({ req, res, auth }) => {
       const startMcpGate = await guardMcpWrite(auth, "runs.start");
       if (!startMcpGate.ok) return sendJson(res, startMcpGate.body, startMcpGate.status);
@@ -648,15 +657,24 @@ export const runsRoutes: Route[] = [
         ? asRecord(body.workflow)
         : body;
       const inputValue = Object.hasOwn(body, "input") ? body.input : {};
+      const requestedWorkflowId = typeof workflow.id === "string" ? workflow.id : null;
+      const rolloutAssignment = requestedWorkflowId
+        ? await resolveWorkflowRolloutAssignment({
+            orgId: auth.orgId,
+            workflowId: requestedWorkflowId,
+            assignmentKey: crypto.randomUUID(),
+          })
+        : null;
+      const effectiveWorkflow = rolloutAssignment?.workflow ?? workflow;
       // Explicit operator override to start a run even when the workflow is
       // paused by an upstream-health degradation. Surfaced as the "Force run"
       // button on the paused-workflow UI; audited separately so the override
       // is traceable.
       const forceRunDuringPause = body.forceRunDuringPause === true;
 
-      const validation = validateWorkflow(workflow);
+      const validation = validateWorkflow(effectiveWorkflow);
       if (!validation.valid) return sendError(res, "runs_validation_failed", "Validation failed", 400);
-      const parsedWorkflow = WorkflowSchema.parse(workflow);
+      const parsedWorkflow = WorkflowSchema.parse(effectiveWorkflow);
 
       // Production-mode opt-in gate: when `JANUSLY_PRODUCTION_MODE=true`, the
       // deterministic readiness check runs before `startRun` and rejects
@@ -734,10 +752,26 @@ export const runsRoutes: Route[] = [
           input: inputValue,
           orgId: auth.orgId,
           createdBy: auth.userId,
+          ...(rolloutAssignment
+            ? {
+                versionId: rolloutAssignment.versionId,
+                rollout: {
+                  id: rolloutAssignment.rollout.id,
+                  variant: rolloutAssignment.variant,
+                },
+              }
+            : {}),
         });
         await auditAction(auth, isAdhoc ? "run.started.adhoc" : "run.started", { targetType: "run", targetId: result.runId, metadata: {
           workflowId: parsedWorkflow.id,
           adhoc: isAdhoc,
+          ...(rolloutAssignment
+            ? {
+                workflowVersionId: rolloutAssignment.versionId,
+                workflowRolloutId: rolloutAssignment.rollout.id,
+                workflowRolloutVariant: rolloutAssignment.variant,
+              }
+            : {}),
           ...(forcedDuringPause ? { forcedDuringPause: true } : {}),
         } });
         return sendJson(res, result);
@@ -748,7 +782,7 @@ export const runsRoutes: Route[] = [
         throw err;
       }
     } },
-  { method: "POST", match: "/resume", role: "editor",
+  { method: "POST", match: "/resume", role: "editor", permission: "runs.start", contract: resumeRunContract,
     handler: async ({ req, res, auth }) => {
       const resumeMcpGate = await guardMcpWrite(auth, "runs.resume");
       if (!resumeMcpGate.ok) return sendJson(res, resumeMcpGate.body, resumeMcpGate.status);
@@ -783,7 +817,7 @@ export const runsRoutes: Route[] = [
   // (engine helper) flips run + non-running nodes to "cancelled" and emits a
   // `run.cancelled` event. The worker's running job continues to completion;
   // the cancelled-stays-cancelled rollup absorbs the post-cancel writes.
-  { method: "POST", match: "/run/cancel", role: "editor", permission: "runs.cancel",
+  { method: "POST", match: "/run/cancel", role: "editor", permission: "runs.cancel", contract: cancelRunContract,
     handler: async ({ req, res, auth }) => {
       const cancelMcpGate = await guardMcpWrite(auth, "runs.cancel");
       if (!cancelMcpGate.ok) return sendJson(res, cancelMcpGate.body, cancelMcpGate.status);
@@ -817,7 +851,7 @@ export const runsRoutes: Route[] = [
   // automatically; the audit row distinguishes the lab intent from the
   // recovery-dialog intent (`replay_lab.started` vs
   // `recovery.validation_started`).
-  { method: "POST", match: "/runs/replay-lab", role: "editor",
+  { method: "POST", match: "/runs/replay-lab", role: "editor", permission: "runs.start",
     handler: async ({ req, res, auth }) => {
       const { orgConfig } = await orgLlmRuntime(auth.orgId);
       await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: orgConfig.ai.rateLimitPerMin });
@@ -926,7 +960,7 @@ export const runsRoutes: Route[] = [
   // the engine's dryRun gate skips write-side effects uniformly.
   // Audit action `replay_lab.fork_started` distinguishes forks from
   // whole-run replays at compliance read time.
-  { method: "POST", match: "/runs/replay-lab/fork", role: "editor",
+  { method: "POST", match: "/runs/replay-lab/fork", role: "editor", permission: "runs.start",
     handler: async ({ req, res, auth }) => {
       const { orgConfig } = await orgLlmRuntime(auth.orgId);
       await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: orgConfig.ai.rateLimitPerMin });
@@ -1035,7 +1069,7 @@ export const runsRoutes: Route[] = [
   // consumes. Both runs are org-scoped via `getRunComparison`; either
   // run missing or not owned by `auth.orgId` returns the same 404
   // envelope (no enumeration leak).
-  { method: "GET", match: (url) => url.startsWith("/runs/compare"), role: "viewer",
+  { method: "GET", match: (url) => url.startsWith("/runs/compare"), role: "viewer", permission: "runs.read",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const baseRunId = url.searchParams.get("baseRunId");

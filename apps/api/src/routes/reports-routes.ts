@@ -20,9 +20,11 @@ import {
   getOrgConfigSnapshot,
   queryRecoveryLedger,
   queryRecoveryMetricsSignals,
+  queryRecoveryValidation,
   type RecoveryLedgerRepo,
 } from "@janusly/data";
 import { auditAction } from "../audit-helper";
+import { getRunExplainReportContract } from "../api-contracts";
 import { HTTP_CAPS, RATE_LIMIT_WINDOW_MS } from "../constants";
 import { corsHeaders, readJson, sendError, sendJson } from "../http";
 import { enforceRateLimit } from "../rate-limit";
@@ -38,6 +40,10 @@ import {
   contentDispositionAttachment,
   slugify,
 } from "../report-download";
+import {
+  buildRecoveryValidationFilename,
+  buildRecoveryValidationMarkdown,
+} from "../recovery-validation-report";
 import type { Route } from "../routes";
 
 /**
@@ -229,7 +235,7 @@ export const reportsRoutes: Route[] = [
   // explicitly requested for programmatic consumers. Org-scoped on
   // the run lookup; cross-org / missing run id returns a uniform 404
   // (no enumeration leak).
-  { method: "GET", match: (url) => url.startsWith("/reports/run-explain"), role: "viewer",
+  { method: "GET", match: (url) => url.startsWith("/reports/run-explain"), role: "viewer", permission: "reports.read", contract: getRunExplainReportContract,
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const runId = url.searchParams.get("runId");
@@ -342,6 +348,12 @@ export const reportsRoutes: Route[] = [
       });
 
       if (formatRaw === "json") {
+        // Stable callers receive the normal runtime-validated v1 envelope,
+        // not a downloadable file whose contents happen to be JSON. The
+        // unversioned route retains its byte-compatible attachment response
+        // for the web and SDK export helpers.
+        if (res.apiVersion === "v1") return sendJson(res, report.json);
+
         // Use the same disposition pattern for JSON so an operator who
         // saves the response gets a filename instead of "download.bin".
         // sendJson sets Content-Type; we write manually to layer the
@@ -388,7 +400,7 @@ export const reportsRoutes: Route[] = [
   //
   // Audit row `report.run_explain.delivered` is written on BOTH success
   // AND failure (matches the AI-mutation audit posture).
-  { method: "POST", match: "/reports/run-explain/deliver", role: "editor",
+  { method: "POST", match: "/reports/run-explain/deliver", role: "editor", permission: "reports.deliver",
     handler: async ({ req, res, auth }) => {
       const rawBody = await readJson(req, 64_000);
       const parsed = deliverRequestSchema.safeParse(rawBody);
@@ -502,7 +514,7 @@ export const reportsRoutes: Route[] = [
   // stakeholder ("here's what the platform recovered for us this month").
   // Multi-tenant scoped on `auth.orgId` — no enumeration of other orgs.
   // Every export writes a `report.value_dashboard.exported` audit row.
-  { method: "GET", match: (url) => url.startsWith("/reports/value-dashboard"), role: "viewer",
+  { method: "GET", match: (url) => url.startsWith("/reports/value-dashboard"), role: "viewer", permission: "reports.read",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const rawWindow = Number.parseInt(url.searchParams.get("windowDays") ?? "", 10);
@@ -565,6 +577,54 @@ export const reportsRoutes: Route[] = [
         ledger,
         exportedAt: new Date(),
       }));
+    } },
+
+  // GET /reports/recovery-validation?windowDays=N&format=markdown|json
+  // Downloadable, per-org controlled-drill evidence. External private-beta
+  // criteria remain explicit limitations in both representations.
+  { method: "GET", match: (url) => url === "/reports/recovery-validation" || url.startsWith("/reports/recovery-validation?"), role: "viewer", permission: "reports.read",
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const rawWindow = Number.parseInt(url.searchParams.get("windowDays") ?? "", 10);
+      const windowDays = Number.isFinite(rawWindow) ? Math.min(90, Math.max(1, rawWindow)) : 30;
+      const rawFormat = (url.searchParams.get("format") ?? "markdown").toLowerCase();
+      if (rawFormat !== "markdown" && rawFormat !== "json") {
+        return sendError(res, "reports_unknown_format", `Unknown format: {{format}}. Use "markdown" or "json".`, 400, { format: rawFormat });
+      }
+      const format = rawFormat as "markdown" | "json";
+      const report = await queryRecoveryValidation(auth.orgId, windowDays);
+      await auditAction(auth, "report.recovery_validation.exported", {
+        targetType: "org",
+        targetId: auth.orgId,
+        metadata: { format, windowDays, drills: report.totals.drills, sampleCapped: report.sampleCapped },
+      });
+
+      const filenames = buildRecoveryValidationFilename({
+        orgId: auth.orgId,
+        windowDays,
+        exportedAt: new Date(report.generatedAt),
+        format,
+      });
+      const headers = {
+        "Content-Disposition": contentDispositionAttachment(filenames.asciiFilename, filenames.utf8Filename),
+        ...corsHeaders(res),
+        "Access-Control-Expose-Headers": "Content-Disposition, X-Request-Id",
+      };
+      if (format === "json") {
+        res.writeHead(200, { "Content-Type": "application/json", ...headers });
+        res.end(JSON.stringify({
+          scope: {
+            orgId: auth.orgId,
+            evidence: "controlled_recovery_drills",
+            limitations: ["external_partner_count", "setup_time", "willingness_to_pay"],
+          },
+          report,
+        }));
+        return;
+      }
+
+      res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8", ...headers });
+      res.end(buildRecoveryValidationMarkdown({ orgId: auth.orgId, report }));
     } },
 ];
 

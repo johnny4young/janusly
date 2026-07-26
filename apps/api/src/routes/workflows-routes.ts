@@ -37,6 +37,7 @@ import {
   setWorkflowSlo,
   getWorkflowBreakerStatus,
   resumeWorkflowCircuitBreaker,
+  softDeleteWorkflow,
 } from "@janusly/data";
 import { unregisterAllForWorkflow, syncWorkflowSchedules } from "@janusly/engine/src/schedule-scheduler";
 import { validateCronExpression } from "@janusly/engine/src/schedule";
@@ -71,10 +72,15 @@ import { backfillBufferedTriggerEvents } from "./trigger-ingest-routes";
 import { rollbackAuditMetadata, rollbackWorkflowToVersion } from "../workflows-rollback";
 import { saveWorkflowVersion } from "../workflows-save";
 import {
+  checkWorkflowReadinessContract,
   getSchedulePreviewContract,
   getLatestWorkflowVersionContract,
+  getWorkflowHealthContract,
   listWorkflowsContract,
   listWorkflowVersionsContract,
+  rollbackWorkflowContract,
+  saveWorkflowContract,
+  validateWorkflowContract,
 } from "../api-contracts";
 
 /**
@@ -207,7 +213,7 @@ export const workflowsRoutes: Route[] = [
       const rows = await listWorkflowsWithRunSummary(auth.orgId, limitValue, { tags, folder, search, before });
       return sendJson(res, rows);
     } },
-  { method: "POST", match: "/workflows/save", role: "editor", permission: "workflows.write",
+  { method: "POST", match: "/workflows/save", role: "editor", permission: "workflows.write", contract: saveWorkflowContract,
     handler: async ({ req, res, auth }) => {
       // MCP-source mutations gate on the process-wide env AND the tenant's
       // `mcp.writeConsent` flag (+ per-tool rate limit). No-op for non-MCP
@@ -217,7 +223,13 @@ export const workflowsRoutes: Route[] = [
 
       const workflow = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const validation = validateWorkflow(workflow);
-      if (!validation.valid) return sendJson(res, { error: "Validation failed", issues: validation.issues }, 400);
+      if (!validation.valid) {
+        return sendJson(res, {
+          error: "Validation failed",
+          code: "workflows_validation_failed",
+          issues: validation.issues,
+        }, 400);
+      }
       const parsedWorkflow = WorkflowSchema.parse(workflow);
 
       // Optional upstream-health source tags — a sibling field on the save body
@@ -229,7 +241,11 @@ export const workflowsRoutes: Route[] = [
       if (Object.hasOwn(workflow, "upstreamHealthSources")) {
         const parsedTags = UpstreamHealthSourceTagsSchema.safeParse(workflow.upstreamHealthSources);
         if (!parsedTags.success) {
-          return sendJson(res, { error: "invalid upstreamHealthSources", issues: parsedTags.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })) }, 422);
+          return sendJson(res, {
+            error: "Invalid upstream health sources",
+            code: "workflows_upstream_health_sources_invalid",
+            issues: parsedTags.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
+          }, 422);
         }
         upstreamHealthSources = parsedTags.data;
       }
@@ -249,7 +265,9 @@ export const workflowsRoutes: Route[] = [
       if (result.kind === "conflict") {
         return sendJson(res, {
           error: "Concurrent save conflict — please retry",
+          code: "workflows_save_conflict",
           attempts: result.attempts,
+          params: { attempts: result.attempts },
         }, 409);
       }
 
@@ -257,6 +275,14 @@ export const workflowsRoutes: Route[] = [
       // saving never silently resurrects it; restore it first.
       if (result.kind === "deleted") {
         return sendError(res, "workflow_not_found", "Workflow not found", 404);
+      }
+      if (result.kind === "rollout_active") {
+        return sendError(
+          res,
+          "workflow_rollout_active",
+          "Finish the active workflow rollout before saving a new version",
+          409,
+        );
       }
 
       const auditMetadata: Record<string, unknown> = {
@@ -270,7 +296,7 @@ export const workflowsRoutes: Route[] = [
         version: result.version,
       });
     } },
-  { method: "POST", match: "/workflows/rollback", role: "editor",
+  { method: "POST", match: "/workflows/rollback", role: "editor", permission: "workflows.write", contract: rollbackWorkflowContract,
     handler: async ({ req, res, auth }) => {
       const rollbackMcpGate = await guardMcpWrite(auth, "workflows.rollback");
       if (!rollbackMcpGate.ok) return sendJson(res, rollbackMcpGate.body, rollbackMcpGate.status);
@@ -288,8 +314,27 @@ export const workflowsRoutes: Route[] = [
       });
       if (!result.ok) {
         // A soft-deleted workflow behaves as "not found" for writes too.
-        if (result.code === "deleted") {
+        if (result.code === "deleted" || result.code === "parent_not_found") {
           return sendError(res, "workflow_not_found", "Workflow not found", 404);
+        }
+        if (result.code === "malformed") {
+          return sendError(res, "workflows_version_malformed", "Workflow version is malformed", 422);
+        }
+        if (result.code === "conflict") {
+          return sendJson(res, {
+            error: "Concurrent rollback conflict — please retry",
+            code: "workflows_rollback_conflict",
+            attempts: result.attempts,
+            params: { attempts: result.attempts },
+          }, 409);
+        }
+        if (result.code === "rollout_active") {
+          return sendError(
+            res,
+            "workflow_rollout_active",
+            "Finish the active workflow rollout before creating a rollback version",
+            409,
+          );
         }
         return sendError(res, "workflows_source_version_not_found", "Source version not found", 404);
       }
@@ -314,6 +359,7 @@ export const workflowsRoutes: Route[] = [
       return segments.length === 2 && segments[1] === "slo" && segments[0].length > 0;
     },
     role: "admin",
+    permission: "workflows.write",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = url.pathname.slice("/workflows/".length).split("/")[0];
@@ -444,6 +490,7 @@ export const workflowsRoutes: Route[] = [
       return !reserved.has(rest);
     },
     role: "editor",
+    permission: "workflows.write",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = url.pathname.slice("/workflows/".length);
@@ -451,14 +498,12 @@ export const workflowsRoutes: Route[] = [
 
       // Only an active (not already soft-deleted) workflow can be deleted;
       // an absent/already-deleted id returns the same enumeration-safe 404.
-      // The `RETURNING` makes the active→deleted transition a CAS, so two
-      // concurrent DELETEs cannot both audit the same tombstone.
-      const deleted = await db
-        .update(workflows)
-        .set({ deletedAt: new Date() })
-        .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId), isNull(workflows.deletedAt)))
-        .returning({ id: workflows.id });
-      if (deleted.length === 0) return sendError(res, "workflow_not_found", "Workflow not found", 404);
+      // The data-layer transaction locks the parent, makes the active→deleted
+      // transition a CAS, and cancels any active rollout in the same commit.
+      // Concurrent DELETEs cannot both audit the same tombstone, and restore
+      // can never revive an accidentally live deployment.
+      const deleted = await softDeleteWorkflow(auth.orgId, workflowId);
+      if (!deleted) return sendError(res, "workflow_not_found", "Workflow not found", 404);
 
       // Schedule teardown fails open — a Redis blip shouldn't block a
       // workflow delete from completing. A soft-deleted workflow is excluded
@@ -467,7 +512,7 @@ export const workflowsRoutes: Route[] = [
       try {
         await unregisterAllForWorkflow(auth.orgId, workflowId);
       } catch (err) {
-        console.error("[workflows-delete] schedule teardown failed", { workflowId, err });
+        console.error("[workflows-delete] operational teardown failed", { workflowId, err });
       }
 
       await auditAction(auth, "workflow.deleted", { targetType: "workflow", targetId: workflowId, metadata: { soft: true } });
@@ -483,6 +528,7 @@ export const workflowsRoutes: Route[] = [
       return path.startsWith("/workflows/") && path.endsWith("/restore");
     },
     role: "editor",
+    permission: "workflows.write",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const matched = url.pathname.match(/^\/workflows\/([^/]+)\/restore$/);
@@ -525,7 +571,7 @@ export const workflowsRoutes: Route[] = [
     } },
 
   // Validate
-  { method: "POST", match: "/validate", role: "editor",
+  { method: "POST", match: "/validate", role: "editor", permission: "workflows.write", contract: validateWorkflowContract,
     handler: async ({ req, res }) => sendJson(res, validateWorkflow(await readJson(req, MAX_JSON_BODY_BYTES))) },
 
   // Production-readiness gate. Sister to `/validate` — this asserts
@@ -535,7 +581,7 @@ export const workflowsRoutes: Route[] = [
   // engine portion is pure; the rollback-availability check is layered
   // here because it needs `workflow_versions` access. Body shape: either
   // a flat workflow JSON or `{ workflow }` envelope (mirrors `/validate`).
-  { method: "POST", match: "/workflows/readiness", role: "editor",
+  { method: "POST", match: "/workflows/readiness", role: "editor", permission: "workflows.write", contract: checkWorkflowReadinessContract,
     handler: async ({ req, res, auth }) => {
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const candidate = (body.workflow && typeof body.workflow === "object") ? asRecord(body.workflow) : body;
@@ -575,7 +621,7 @@ export const workflowsRoutes: Route[] = [
   // delta, the run-status counter (always populated), the same-failure
   // check (when the caller supplies the prior signature), and the prior
   // version's id (for the regression-rollback affordance in the dialog).
-  { method: "GET", match: (url) => url === "/workflows/health/delta" || url.startsWith("/workflows/health/delta?"), role: "viewer",
+  { method: "GET", match: (url) => url === "/workflows/health/delta" || url.startsWith("/workflows/health/delta?"), role: "viewer", permission: "workflows.read",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = url.searchParams.get("workflowId");
@@ -766,7 +812,7 @@ export const workflowsRoutes: Route[] = [
       });
     } },
 
-  { method: "GET", match: (url) => url === "/workflows/health" || url.startsWith("/workflows/health?"), role: "viewer",
+  { method: "GET", match: (url) => url === "/workflows/health" || url.startsWith("/workflows/health?"), role: "viewer", permission: "workflows.read", contract: getWorkflowHealthContract,
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = url.searchParams.get("workflowId");

@@ -9,6 +9,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
+import { publicApiUrl } from '../api'
 import type { JsonObject, SavedWorkflow, ToolSchema, WorkflowGraphEdge, WorkflowGraphNode, WorkflowInputSchemaShape } from '../types'
 import { Trans, tToolDescription, useT } from '../i18n'
 import { McpToolConfigField } from './McpToolConfigField'
@@ -832,6 +833,21 @@ export function QuickConfigEditor({
     return <ScheduleConfigFields nodeId={nodeId} config={config} onPatch={patch} />
   }
 
+  if (type === 'webhook_received') {
+    return (
+      <section className="quick-config">
+        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
+        <TextConfigField
+          scope={nodeId}
+          label={t('rightPanel.quickConfig.webhookEndpointKey')}
+          value={readConfigString(config, 'endpointKey')}
+          onChange={value => patch({ endpointKey: value })}
+        />
+        <p className="helper-text">{t('rightPanel.quickConfig.webhookReceivedHelper')}</p>
+      </section>
+    )
+  }
+
   if (type === 'email_received') {
     const dkimRequired = config.dkimRequired !== false
     return (
@@ -895,6 +911,42 @@ export function QuickConfigEditor({
           onChange={value => patch({ resourceUri: value })}
         />
         <p className="helper-text">{t('rightPanel.quickConfig.mcpServerEventHelper')}</p>
+      </section>
+    )
+  }
+
+  if (type === 'pagerduty_incident') {
+    const callbackUrl = currentWorkflowId
+      ? publicApiUrl(`/webhooks/pagerduty/${encodeURIComponent(currentWorkflowId)}/${encodeURIComponent(nodeId)}`)
+      : ''
+    return (
+      <section className="quick-config">
+        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
+        <TextConfigField
+          scope={nodeId}
+          label={t('rightPanel.quickConfig.pagerdutyWebhookCredential')}
+          value={readConfigString(config, 'webhookCredential')}
+          onChange={value => patch({ webhookCredential: value })}
+        />
+        <OptionalNumberConfigField
+          scope={nodeId}
+          label={t('rightPanel.quickConfig.pagerdutyRateLimit')}
+          value={readConfigNumber(config, 'rateLimitPerMin')}
+          min={1}
+          max={10_000}
+          onChange={value => patch({ rateLimitPerMin: value })}
+        />
+        <label className="field-label" htmlFor={fieldId(nodeId, 'PagerDuty callback')}>
+          {t('rightPanel.quickConfig.pagerdutyCallback')}
+        </label>
+        <input
+          id={fieldId(nodeId, 'PagerDuty callback')}
+          className="text-field mono"
+          readOnly
+          value={callbackUrl}
+          placeholder={t('rightPanel.quickConfig.pagerdutyCallbackUnavailable')}
+        />
+        <p className="helper-text">{t('rightPanel.quickConfig.pagerdutyIncidentHelper')}</p>
       </section>
     )
   }

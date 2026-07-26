@@ -3,7 +3,7 @@
   "name": "Failed payment recovery",
   "description": "When a charge fails, draft a dunning outreach, gate it behind a human approval, retry the charge through your billing system, and notify the collections channel.",
   "category": "payment_recovery",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "requiredCredentials": [
     {
       "name": "billing_webhook",
@@ -19,32 +19,53 @@
   "requiredOrgConfigs": [],
   "workflowJson": {
     "dslVersion": "1.0",
+    "templatePolicy": "strict",
     "id": "failed-payment-recovery",
     "name": "Failed payment recovery",
     "inputs": {
       "type": "object",
-      "required": ["customer", "invoiceId", "amountUsd"],
+      "required": ["event"],
       "properties": {
-        "customer": { "type": "string", "description": "Customer email or account id" },
-        "invoiceId": { "type": "string", "description": "Invoice id the failed charge applies to" },
-        "amountUsd": { "type": "number", "description": "Amount of the failed charge in USD" },
-        "reason": { "type": "string", "description": "Decline reason reported by the payment processor" }
+        "event": {
+          "type": "object",
+          "required": ["eventId", "payload"],
+          "properties": {
+            "eventId": { "type": "string", "description": "Stable delivery id from the billing system" },
+            "payload": {
+              "type": "object",
+              "required": ["customer", "invoiceId", "amountUsd"],
+              "properties": {
+                "customer": { "type": "string", "description": "Customer email or account id" },
+                "invoiceId": { "type": "string", "description": "Invoice id the failed charge applies to" },
+                "amountUsd": { "type": "number", "description": "Amount of the failed charge in USD" },
+                "reason": { "type": "string", "description": "Decline reason reported by the payment processor" }
+              }
+            }
+          }
+        }
       }
     },
     "nodes": [
-      { "id": "trigger", "type": "webhook", "config": {} },
+      { "id": "trigger", "type": "webhook_received", "config": { "endpointKey": "failed-payment-recovery" } },
       {
         "id": "draft_outreach",
         "type": "ai",
         "config": {
-          "prompt": "You are a billing-recovery assistant. Write a short, friendly dunning message (under 120 words) asking the customer to update their payment method, given a failed charge. Customer: {{context.trigger.output.customer}}, invoice: {{context.trigger.output.invoiceId}}, amount: ${{context.trigger.output.amountUsd}}, decline reason: {{context.trigger.output.reason}}."
+          "prompt": "Write a short, friendly dunning message under 120 words asking the customer to update their payment method. Return JSON with exactly one string field named message. Customer: {{context.trigger.output.event.payload.customer}}, invoice: {{context.trigger.output.event.payload.invoiceId}}, amount: ${{context.trigger.output.event.payload.amountUsd}}, decline reason: {{context.trigger.output.event.payload.reason}}.",
+          "outputSchema": {
+            "type": "object",
+            "required": ["message"],
+            "properties": {
+              "message": { "type": "string" }
+            }
+          }
         }
       },
       {
         "id": "approval",
         "type": "approval",
         "config": {
-          "message": "Approve retrying charge of ${{context.trigger.output.amountUsd}} for {{context.trigger.output.customer}} (invoice {{context.trigger.output.invoiceId}})?\n\nDraft outreach:\n{{context.draft_outreach.output.response}}"
+          "message": "Approve retrying charge of ${{context.trigger.output.event.payload.amountUsd}} for {{context.trigger.output.event.payload.customer}} (invoice {{context.trigger.output.event.payload.invoiceId}})?\n\nDraft outreach:\n{{context.draft_outreach.output.data.message}}"
         }
       },
       {
@@ -52,13 +73,14 @@
         "type": "tool",
         "config": {
           "tool": "webhook.send",
+          "resultPolicy": "require_ok",
           "input": {
             "credential": "billing_webhook",
             "url": "https://billing.example.com/charges/retry",
             "payload": {
-              "customer": "{{context.trigger.output.customer}}",
-              "invoiceId": "{{context.trigger.output.invoiceId}}",
-              "amountUsd": "{{context.trigger.output.amountUsd}}",
+              "customer": "{{context.trigger.output.event.payload.customer}}",
+              "invoiceId": "{{context.trigger.output.event.payload.invoiceId}}",
+              "amountUsd": "{{context.trigger.output.event.payload.amountUsd}}",
               "approvedBy": "janusly-approval"
             }
           }
@@ -69,9 +91,10 @@
         "type": "tool",
         "config": {
           "tool": "slack.post",
+          "resultPolicy": "require_ok",
           "input": {
             "credential": "billing_slack",
-            "text": ":credit_card: Recovery attempted for {{context.trigger.output.customer}} (invoice {{context.trigger.output.invoiceId}}, ${{context.trigger.output.amountUsd}}). Outreach drafted and charge retried."
+            "text": ":credit_card: Recovery attempted for {{context.trigger.output.event.payload.customer}} (invoice {{context.trigger.output.event.payload.invoiceId}}, ${{context.trigger.output.event.payload.amountUsd}}). Outreach drafted and charge retried."
           }
         }
       }
@@ -81,29 +104,76 @@
       { "from": "draft_outreach", "to": "approval" },
       { "from": "approval", "to": "retry_charge" },
       { "from": "retry_charge", "to": "notify_team" }
-    ]
+    ],
+    "outputs": {
+      "customer": "{{context.trigger.output.event.payload.customer}}",
+      "invoiceId": "{{context.trigger.output.event.payload.invoiceId}}",
+      "chargeRetryOk": "{{context.retry_charge.output.result.ok}}",
+      "teamNotified": "{{context.notify_team.output.result.ok}}"
+    }
   },
   "samplePayloads": [
     {
       "id": "default",
       "label": "Card declined — insufficient funds",
       "input": {
-        "customer": "casey@acme.test",
-        "invoiceId": "inv_10428",
-        "amountUsd": 149,
-        "reason": "insufficient_funds"
+        "event": {
+          "endpointKey": "failed-payment-recovery",
+          "eventId": "sample-payment-inv-10428",
+          "eventType": "payment.failed",
+          "payload": {
+            "customer": "casey@acme.test",
+            "invoiceId": "inv_10428",
+            "amountUsd": 149,
+            "reason": "insufficient_funds"
+          }
+        }
       }
     }
   ],
   "failureFixtures": [
     {
       "id": "billing_secret_unbound",
-      "label": "Billing webhook secret unbound",
+      "label": "Billing credential unavailable",
+      "description": "The billing connector cannot resolve its configured credential before the retry starts.",
+      "failureMode": "credential_unavailable",
+      "recoveryPath": "direct_failure",
       "failedNodeId": "retry_charge",
       "errorJson": {
         "name": "CredentialMissingError",
         "code": "credential_missing",
         "message": "credential secret missing for billing_webhook",
+        "node": "retry_charge"
+      }
+    },
+    {
+      "id": "billing_credential_expired",
+      "label": "Billing credential expired",
+      "description": "The billing provider rejects an expired credential and the charge retry moves into recovery.",
+      "failureMode": "credential_expired",
+      "recoveryPath": "direct_failure",
+      "failedNodeId": "retry_charge",
+      "errorJson": {
+        "name": "CredentialExpiredError",
+        "code": "credential_expired",
+        "message": "billing_webhook credential expired before the retry request",
+        "statusCode": 401,
+        "node": "retry_charge"
+      }
+    },
+    {
+      "id": "billing_rate_limited",
+      "label": "Billing provider rate limited",
+      "description": "The billing provider returns HTTP 429 so operators can inspect retry-safe recovery evidence.",
+      "failureMode": "rate_limited",
+      "recoveryPath": "direct_failure",
+      "failedNodeId": "retry_charge",
+      "errorJson": {
+        "name": "ToolError",
+        "code": "rate_limit",
+        "message": "billing retry was rate limited by the upstream provider",
+        "statusCode": 429,
+        "retryAfterSeconds": 60,
         "node": "retry_charge"
       }
     }

@@ -167,8 +167,10 @@ beforeEach(() => {
 });
 
 describe("POST /ai/patch-workflow — auth gate", () => {
-  it("requires the editor role", () => {
+  it("requires both the editor role and ai.write permission", () => {
     expect(findRoute().role).toBe("editor");
+    expect(findRoute().permission).toBe("ai.write");
+    expect(findRoute().contract?.operationId).toBe("patchWorkflow");
   });
 });
 
@@ -180,7 +182,7 @@ describe("POST /ai/patch-workflow — AI mode", () => {
       suggestions: [{
         patchedConfig: { url: "https://new.example.com" },
         rationale: "point at the new endpoint",
-        approachLabel: "config",
+        approachLabel: "fix_url",
         confidence: 72,
         consideredAlternatives: [{
           approach: `Use a credential sk-${"a".repeat(20)}`,
@@ -213,6 +215,7 @@ describe("POST /ai/patch-workflow — AI mode", () => {
       approvalRequired: false,
       approvalPresent: true,
     });
+    expect(findRoute().contract?.response.safeParse(JSON.parse(JSON.stringify(res.payload))).success).toBe(true);
     expect(priorOutcomeMock).toHaveBeenCalledWith("org-1", "HTTP 500 on http node", "dlq-1");
     expect(feedbackHealthMock).toHaveBeenCalledWith("org-1", "wf-patch");
     expect(recoveryMemoryMock).toHaveBeenCalledWith(expect.objectContaining({
@@ -322,6 +325,7 @@ describe("POST /ai/patch-workflow — fallback contract", () => {
     expect(res.payload.suggestedWorkflow.nodes[0].config.url).toBe("https://old.example.com");
     expect(res.payload.recoveryPassport.failureSignature).toBe("HTTP 500 on http node");
     expect(res.payload.suggestions[0].safety.writeSide).toBe(false);
+    expect(findRoute().contract?.response.safeParse(JSON.parse(JSON.stringify(res.payload))).success).toBe(true);
 
     expect(auditMock).toHaveBeenCalledTimes(1);
     const meta = (auditMock.mock.calls[0]?.[2]?.metadata ?? {}) as Record<string, unknown>;

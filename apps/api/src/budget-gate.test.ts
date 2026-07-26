@@ -197,7 +197,17 @@ describe("gateBudget", () => {
 describe("budgetBlockedResponse + attachBudgetEnvelope", () => {
   it("budgetBlockedResponse wraps the envelope with the standard error tag", () => {
     const envelope = { ...NEUTRAL_ENVELOPE, allowed: false, monthlyUsdLimit: 10, monthlyUsdSpent: 12 };
-    expect(budgetBlockedResponse(envelope)).toEqual({ error: "budget_exceeded", budget: envelope });
+    expect(budgetBlockedResponse(envelope)).toEqual({
+      error: "budget_exceeded",
+      code: "budget_exceeded",
+      params: {
+        monthlyUsdSpent: envelope.monthlyUsdSpent,
+        monthlyUsdLimit: envelope.monthlyUsdLimit,
+        policy: envelope.policy,
+        warningPercent: envelope.warningPercent,
+      },
+      budget: envelope,
+    });
   });
 
   it("attachBudgetEnvelope merges into a success response without mutating it", () => {

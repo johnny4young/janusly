@@ -165,6 +165,7 @@ export const rolesRoutes: Route[] = [
     method: "GET",
     match: "/org/permissions/catalog",
     role: "viewer",
+    permission: "members.read",
     handler: async ({ res }) => {
       return sendJson(res, {
         catalog: PERMISSION_CATALOG.map((e) => ({
@@ -183,6 +184,7 @@ export const rolesRoutes: Route[] = [
     method: "GET",
     match: "/org/roles",
     role: "viewer",
+    permission: "members.read",
     handler: async ({ res, auth }) => {
       const roles = await buildRoleList(auth.orgId);
       return sendJson(res, { roles });

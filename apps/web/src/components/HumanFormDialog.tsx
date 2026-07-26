@@ -15,6 +15,7 @@ type HumanFormDialogProps = {
   title?: string
   description?: string
   schema: WorkflowInputSchemaShape
+  initialValues?: unknown
   serverErrors?: string[]
   submitting?: boolean
   onSubmit: (input: unknown) => void | Promise<void>
@@ -26,6 +27,7 @@ export function HumanFormDialog({
   title,
   description,
   schema,
+  initialValues,
   serverErrors,
   submitting,
   onSubmit,
@@ -35,6 +37,7 @@ export function HumanFormDialog({
   return (
     <RunInputDialog
       inputs={schema}
+      initialValue={initialValues}
       kicker={t('humanFormDialog.kicker')}
       title={title?.trim() || t('humanFormDialog.title')}
       description={description?.trim() || t('humanFormDialog.description')}

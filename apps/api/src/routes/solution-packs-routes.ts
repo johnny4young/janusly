@@ -1,13 +1,13 @@
 /**
  * Solution-pack routes — list the code-resident catalog, surface per-org
  * dependency hints, install a pack as a draft workflow, run a one-click
- * sandbox sample, and inject a demo failure to drive the recovery loop.
+ * sandbox sample, and start a deterministic drill in the recovery loop.
  *
  * Five routes:
  *   - `GET  /solution-packs`                      (viewer, packs.read)    — catalog
  *   - `GET  /solution-packs/:id`                  (viewer, packs.read)    — detail + per-org missing deps
  *   - `POST /solution-packs/:id/sample-run`       (editor, packs.install) — sandbox sample run
- *   - `POST /solution-packs/:id/inject-failure`   (editor, packs.install) — seed a demo DLQ failure
+ *   - `POST /solution-packs/:id/inject-failure`   (editor, packs.install) — seed a selected recovery drill
  *   - `POST /workflows/import-pack`               (editor, packs.install) — install as a draft workflow
  *
  * Multi-tenant: every install / sample / inject / dependency-diff is
@@ -39,6 +39,7 @@ import { getCredentialByName, listOrgConfig } from "@janusly/data";
 import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
 import { startSandboxRun } from "@janusly/engine/src/adapters/sandbox-run";
 import { injectSampleFailure } from "@janusly/engine/src/adapters/sample-failure";
+import { runStalledNodeDrill } from "@janusly/engine/src/adapters/stalled-node-drill";
 import { WorkflowSchema } from "@janusly/shared";
 
 import { auditAction } from "../audit-helper";
@@ -180,13 +181,30 @@ export const solutionPacksRoutes: Route[] = [
         return sendError(res, "pack_no_failure_fixture", "No matching failure fixture for this pack", 400);
       }
 
-      const { runId, deadLetterId } = await injectSampleFailure({
-        orgId: auth.orgId,
-        createdBy: auth.userId,
-        workflow: pack.workflowJson,
-        failedNodeId: fixture.failedNodeId,
-        errorJson: fixture.errorJson,
-      });
+      const sourceBase = {
+        kind: "solution_pack_drill" as const,
+        packId: pack.id,
+        fixtureId: fixture.id,
+        failureMode: fixture.failureMode,
+      };
+      const result = fixture.recoveryPath === "stalled_node_reaper"
+        ? await runStalledNodeDrill({
+            orgId: auth.orgId,
+            createdBy: auth.userId,
+            workflow: pack.workflowJson,
+            failedNodeId: fixture.failedNodeId,
+            source: { ...sourceBase, recoveryPath: "stalled_node_reaper" },
+          })
+        : await injectSampleFailure({
+            orgId: auth.orgId,
+            createdBy: auth.userId,
+            workflow: pack.workflowJson,
+            failedNodeId: fixture.failedNodeId,
+            errorJson: fixture.errorJson,
+            source: { ...sourceBase, recoveryPath: "direct_failure" },
+          });
+      const { runId, deadLetterId } = result;
+      const evidence = "evidence" in result ? result.evidence : undefined;
 
       await auditAction(auth, "solution_pack.failure_injected", {
         targetType: "solution_pack",
@@ -194,13 +212,23 @@ export const solutionPacksRoutes: Route[] = [
         metadata: {
           packId: pack.id,
           fixtureId: fixture.id,
+          failureMode: fixture.failureMode,
+          recoveryPath: fixture.recoveryPath,
           failedNodeId: fixture.failedNodeId,
           runId,
           deadLetterId,
+          ...(evidence ? { evidence } : {}),
         },
       });
 
-      return sendJson(res, { runId, deadLetterId, fixtureId: fixture.id });
+      return sendJson(res, {
+        runId,
+        deadLetterId,
+        fixtureId: fixture.id,
+        failureMode: fixture.failureMode,
+        recoveryPath: fixture.recoveryPath,
+        ...(evidence ? { evidence } : {}),
+      });
     },
   },
   {
@@ -271,6 +299,9 @@ export const solutionPacksRoutes: Route[] = [
         // operator restores it explicitly first. (Practically unreachable: pack
         // installs mint a fresh workflow id, but the save contract requires it.)
         return sendError(res, "workflow_not_found", "Workflow not found", 404);
+      }
+      if (result.kind === "rollout_active") {
+        return sendError(res, "workflow_rollout_active", "Finish the active workflow rollout before installing a pack version", 409);
       }
 
       const { missingCredentials, missingOrgConfigs } = await computeMissingDeps(auth.orgId, pack);

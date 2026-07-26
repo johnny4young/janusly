@@ -18,6 +18,7 @@ import { eq } from "drizzle-orm";
 import {
   findMatchingActiveRecoveryPlaybook,
   queryFailureSamples,
+  queryRecoveryDrillOutcome,
   queryRecoveryRecurrence,
   resolveRecoveryPlaybookOutcomeFacts,
 } from "@janusly/data";
@@ -31,10 +32,15 @@ import { computeWorkflowDiff } from "@janusly/shared/src/workflow-diff";
 
 import { orgLlmRuntime, sanitizeAiWorkflow } from "../ai-runtime";
 import { auditAction } from "../audit-helper";
+import {
+  listDeadLettersContract,
+  listFailureClustersContract,
+  replayDeadLetterContract,
+} from "../api-contracts";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { CLUSTER_MEMBERS_DEFAULT_LIMIT, CLUSTER_MEMBERS_MAX_LIMIT, findClusterMembers, pickClusterReplayWorkflow, recheckSignature } from "../cluster-recovery";
-import { countDeadLettersByStatus, decodeRecoveryQueueCursor, getDeadLetter, isDeadLetterStatus, isRecoveryQueueSort, listRecoveryQueue, markDeadLetterReplayed, markDeadLetterResolved, queryRecoveryQueuePage } from "../dlq";
+import { countDeadLettersByStatus, decodeRecoveryQueueCursor, getDeadLetter, getRecoveryDrillProvenance, isDeadLetterStatus, isRecoveryQueueSort, listRecoveryQueue, markDeadLetterReplayed, markDeadLetterResolved, queryRecoveryQueuePage } from "../dlq";
 import { RECOVERY_ITEM_SEVERITIES, type RecoveryItemSeverity } from "@janusly/shared";
 import {
   resolveRecoveryItemForDismiss,
@@ -78,10 +84,10 @@ function readRecoveryPlaybookReplayClaim(
   body: Record<string, unknown>,
 ): { claim: RecoveryPlaybookReplayClaim | null; invalid: boolean } {
   const recoveryPlaybookId = typeof body.recoveryPlaybookId === "string"
-    ? body.recoveryPlaybookId
+    ? body.recoveryPlaybookId.trim() || null
     : null;
   const recoveryValidationRunId = typeof body.recoveryValidationRunId === "string"
-    ? body.recoveryValidationRunId
+    ? body.recoveryValidationRunId.trim() || null
     : null;
   if (!recoveryPlaybookId && !recoveryValidationRunId) return { claim: null, invalid: false };
   if (!recoveryPlaybookId || !recoveryValidationRunId) return { claim: null, invalid: true };
@@ -144,7 +150,7 @@ export const dlqRoutes: Route[] = [
   // DLQ — cluster rollup must register BEFORE the generic /dlq dispatcher
   // because the registry is first-match-wins; otherwise the wildcard
   // handler below would swallow `/dlq/clusters` requests.
-  { method: "GET", match: (url) => url === "/dlq/clusters" || url.startsWith("/dlq/clusters?"), role: "viewer",
+  { method: "GET", match: (url) => url === "/dlq/clusters" || url.startsWith("/dlq/clusters?"), role: "viewer", permission: "dlq.read", contract: listFailureClustersContract,
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const rawWindow = Number.parseInt(url.searchParams.get("windowDays") ?? "", 10);
@@ -165,7 +171,7 @@ export const dlqRoutes: Route[] = [
   // bounded list of DLQ ids whose normalized error signature matches a
   // claimed cluster. Registered BEFORE the generic /dlq dispatcher for
   // the same first-match-wins reason as `/dlq/clusters`.
-  { method: "GET", match: (url) => url.startsWith("/dlq/cluster-members"), role: "viewer",
+  { method: "GET", match: (url) => url.startsWith("/dlq/cluster-members"), role: "viewer", permission: "dlq.read",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const signature = url.searchParams.get("signature");
@@ -181,14 +187,15 @@ export const dlqRoutes: Route[] = [
   // join as the bare `/dlq` array, returning a { items, nextCursor, hasMore }
   // envelope. Registered BEFORE the generic /dlq dispatcher for the same
   // first-match-wins reason as `/dlq/clusters`, and kept a SEPARATE route so
-  // bare `/dlq` stays an array for the home-preview + MCP `dlq.list` consumers.
-  { method: "GET", match: (url) => url === "/dlq/queue" || url.startsWith("/dlq/queue?"), role: "viewer",
+  // bare `/dlq` stays an array for the home preview; the contracted `/v1/dlq`
+  // alias wraps the same bounded rows for stable clients.
+  { method: "GET", match: (url) => url === "/dlq/queue" || url.startsWith("/dlq/queue?"), role: "viewer", permission: "dlq.read",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const status = url.searchParams.get("status");
       const severity = url.searchParams.get("severity");
       const sortParam = url.searchParams.get("sort");
-      const ownerParam = url.searchParams.get("owner");
+      const ownerParam = url.searchParams.get("owner")?.trim() || null;
       const rawLimit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
       const pageSize = Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : undefined;
       // Optional `?search=` substring over node id / run id / error message
@@ -238,22 +245,21 @@ export const dlqRoutes: Route[] = [
   // filter/sort/page. Registered BEFORE the generic /dlq dispatcher for the
   // same first-match-wins reason as `/dlq/queue`. Separate from the filtered
   // `/dlq/queue` page so the summary stays the whole-queue health snapshot.
-  { method: "GET", match: (url) => url === "/dlq/counts" || url.startsWith("/dlq/counts?"), role: "viewer",
+  { method: "GET", match: (url) => url === "/dlq/counts" || url.startsWith("/dlq/counts?"), role: "viewer", permission: "dlq.read",
     handler: async ({ res, auth }) => {
       return sendJson(res, await countDeadLettersByStatus(auth.orgId));
     } },
-  // DLQ — viewer gate is symmetric with `/dlq/clusters` and
-  // `/dlq/cluster-members` above; omitting `role:` lets any
-  // authenticated caller (e.g. service token without an `org_members`
-  // row) reach the handler.
-  { method: "GET", match: (url) => url.startsWith("/dlq"), role: "viewer",
+  // DLQ reads share the viewer-rank + dlq.read permission gates. The rank
+  // rejects callers without a membership grant; the permission additionally
+  // respects custom roles and per-org built-in overrides.
+  { method: "GET", match: (url) => url.startsWith("/dlq"), role: "viewer", permission: "dlq.read", contract: listDeadLettersContract,
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const id = url.searchParams.get("id");
       const status = url.searchParams.get("status");
       const severity = url.searchParams.get("severity");
       const sort = url.searchParams.get("sort");
-      const ownerParam = url.searchParams.get("owner");
+      const ownerParam = url.searchParams.get("owner")?.trim() || null;
       const rawLimit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
       const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : undefined;
       // Optional `?search=` substring over node id / run id / error message,
@@ -269,13 +275,19 @@ export const dlqRoutes: Route[] = [
         // saved shortly before the failure, attach the suspect version + both
         // DAG snapshots so the panel renders "Started after vN was saved" +
         // the diff. Null on any miss — the detail read never fails over it.
-        const suspectVersion = await resolveSuspectVersion(
-          auth.orgId,
-          item.runId,
-          item.createdAt ?? null,
-        ).catch(() => null);
+        const [suspectVersion, drill] = await Promise.all([
+          resolveSuspectVersion(
+            auth.orgId,
+            item.runId,
+            item.createdAt ?? null,
+          ).catch(() => null),
+          getRecoveryDrillProvenance(auth.orgId, item.runId).catch(() => null),
+        ]);
+        const drillOutcome = drill
+          ? await queryRecoveryDrillOutcome(auth.orgId, item.id).catch(() => null)
+          : null;
         const { replayClaimToken: _replayClaimToken, replayClaimedAt: _replayClaimedAt, ...publicItem } = item;
-        return sendJson(res, { ...publicItem, suspectVersion });
+        return sendJson(res, { ...publicItem, suspectVersion, drill, drillOutcome });
       }
       if (status && !isDeadLetterStatus(status)) {
         return sendError(res, "dlq_invalid_status", "Invalid DLQ status", 400);
@@ -302,7 +314,7 @@ export const dlqRoutes: Route[] = [
         }),
       );
     } },
-  { method: "POST", match: "/dlq/resolve", role: "editor",
+  { method: "POST", match: "/dlq/resolve", role: "editor", permission: "recovery.write",
     handler: async ({ req, res, auth }) => {
       const { id } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       if (typeof id !== "string") return sendError(res, "dlq_field_required", "id is required", 400, { field: "id" });
@@ -327,7 +339,7 @@ export const dlqRoutes: Route[] = [
   // partial-success envelope, but resolves (accepts the loss) instead of
   // replaying. Each entry is the same operation as a single resolve, so it
   // reuses the `dlq.resolved` audit action (metadata.bulk flags the batch).
-  { method: "POST", match: "/dlq/bulk-resolve", role: "editor",
+  { method: "POST", match: "/dlq/bulk-resolve", role: "editor", permission: "recovery.write",
     handler: async ({ req, res, auth }) => {
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const idsRaw = body.deadLetterIds;
@@ -381,7 +393,7 @@ export const dlqRoutes: Route[] = [
   // `runs.replayMode = "validation"` so they're excluded from health,
   // cluster, and recovery metric rollups, and so the engine's HTTP and
   // tool executors can gate write-side actions via `NodeContext.dryRun`.
-  { method: "POST", match: "/dlq/validate-fix", role: "editor",
+  { method: "POST", match: "/dlq/validate-fix", role: "editor", permission: "recovery.write",
     handler: async ({ req, res, auth }) => {
       const { orgConfig } = await orgLlmRuntime(auth.orgId);
       await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: orgConfig.ai.rateLimitPerMin });
@@ -687,14 +699,15 @@ export const dlqRoutes: Route[] = [
 
       return sendJson(res, { replayed, failed: errors.length, errors });
     } },
-  { method: "POST", match: "/dlq/replay", role: "editor", permission: "dlq.replay",
+  { method: "POST", match: "/dlq/replay", role: "editor", permission: "dlq.replay", contract: replayDeadLetterContract,
     handler: async ({ req, res, auth }) => {
       const replayMcpGate = await guardMcpWrite(auth, "dlq.replay");
       if (!replayMcpGate.ok) return sendJson(res, replayMcpGate.body, replayMcpGate.status);
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
 
       if (typeof body.deadLetterId === "string") {
-        const item = await getDeadLetter(auth.orgId, body.deadLetterId);
+        const deadLetterId = body.deadLetterId.trim();
+        const item = await getDeadLetter(auth.orgId, deadLetterId);
         if (!item) return sendError(res, "dlq_not_found", "Not found", 404);
 
         // Default: replay the original failed snapshot (a plain retry). When the
@@ -749,7 +762,7 @@ export const dlqRoutes: Route[] = [
           }).signature;
           await createRecoveryItemForDeadLetter({
             orgId: auth.orgId,
-            deadLetterId: body.deadLetterId,
+            deadLetterId,
             createdBy: auth.userId,
             workflowId: workflow.id ?? null,
             errorSignature: signature,
@@ -758,7 +771,7 @@ export const dlqRoutes: Route[] = [
             runId: item.runId,
             workflow,
             node,
-            deadLetterId: body.deadLetterId,
+            deadLetterId,
             recoveryActorId: auth.userId,
             ...(playbookClaim.claim ?? {}),
           });
@@ -767,8 +780,8 @@ export const dlqRoutes: Route[] = [
           throw err;
         }
 
-        await markDeadLetterReplayed(auth.orgId, body.deadLetterId);
-        await auditAction(auth, "dlq.replayed", { targetType: "dlq", targetId: body.deadLetterId });
+        await markDeadLetterReplayed(auth.orgId, deadLetterId);
+        await auditAction(auth, "dlq.replayed", { targetType: "dlq", targetId: deadLetterId });
 
         return sendJson(res, { ok: true });
       }

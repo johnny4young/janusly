@@ -7,7 +7,9 @@ import { AiCopilotPanel } from './AiCopilotPanel'
 
 const initialState = useWorkflowStore.getState()
 
-function renderPanel(onGenerateWorkflow = vi.fn(async () => ({
+type GenerateWorkflow = Parameters<typeof AiCopilotPanel>[0]['onGenerateWorkflow']
+
+function renderPanel(onGenerateWorkflow: GenerateWorkflow = vi.fn(async () => ({
   mode: 'ai' as const,
   workflow: { name: 'ZZGENERATED', nodes: [], edges: [] } as unknown as WorkflowDefinition,
 }))) {

@@ -45,6 +45,8 @@ export type StartableWorkflow = Workflow & {
   createdBy?: string | null;
   input?: unknown;
   versionId?: string;
+  /** Server-owned canary assignment captured once; retries never recalculate it. */
+  rollout?: { id: string; variant: "baseline" | "canary" };
   /**
    * Subworkflow linkage. When present, this run was spawned by a
    * `subworkflow` node in the parent run. Used by `notifyParentOnTerminal`
@@ -113,6 +115,7 @@ export async function startRun(workflow: StartableWorkflow) {
   const {
     parentCheckpoint: _parentCheckpoint,
     replayMode: _replayMode,
+    rollout: _rollout,
     triggerEventStart: _triggerEventStart,
     ...workflowSnapshot
   } = workflow;
@@ -164,6 +167,8 @@ export async function startRun(workflow: StartableWorkflow) {
       id: runId,
       orgId: workflow.orgId ?? "default",
       workflowVersionId,
+      workflowRolloutId: workflow.rollout?.id ?? null,
+      workflowRolloutVariant: workflow.rollout?.variant ?? null,
       status: "running",
       createdBy: workflow.createdBy ?? null,
       inputJson: { workflow: workflowSnapshot, input: workflow.input ?? {} },

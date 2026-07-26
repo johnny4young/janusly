@@ -2,6 +2,7 @@ import { Readable } from "node:stream";
 import { gunzipSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import type http from "node:http";
+import { z } from "zod";
 
 import { readJson, sendJson, type CorsAwareResponse } from "./http";
 
@@ -45,6 +46,16 @@ describe("readJson", () => {
 
   it("resolves {} for an empty body", async () => {
     await expect(readJson(fakeRequest([]), 1024)).resolves.toEqual({});
+  });
+
+  it("memoizes the parsed body for contract validation and handler reuse", async () => {
+    const request = fakeRequest([Buffer.from('{"runId":"run-1"}', "utf8")]);
+
+    const first = readJson(request, 1024);
+    const second = readJson(request, 1024);
+
+    await expect(first).resolves.toEqual({ runId: "run-1" });
+    await expect(second).resolves.toEqual({ runId: "run-1" });
   });
 
   it("tolerates string chunks (encoding-set streams and test doubles)", async () => {
@@ -149,5 +160,39 @@ describe("sendJson gzip", () => {
 
     expect(captured.headers?.["Content-Encoding"]).toBeUndefined();
     expect(typeof captured.body).toBe("string");
+  });
+});
+
+describe("sendJson v1 errors", () => {
+  it("preserves a catalogued budget code and scalar context", () => {
+    const { res, captured } = fakeResponse();
+    res.apiVersion = "v1";
+    res.requestId = "request-budget";
+    res.contract = {
+      operationId: "budgetProbe",
+      path: "/budget-probe",
+      summary: "Probe budget errors",
+      tags: ["Test"],
+      response: z.object({ ok: z.literal(true) }),
+      errorCodes: ["budget_exceeded"],
+    };
+
+    sendJson(res, {
+      error: "budget_exceeded",
+      code: "budget_exceeded",
+      params: { monthlyUsdSpent: 12, monthlyUsdLimit: 10, resolvedScope: "org" },
+      budget: { allowed: false },
+    }, 402);
+
+    expect(captured.status).toBe(402);
+    expect(JSON.parse(captured.body as string)).toEqual({
+      apiVersion: "v1",
+      requestId: "request-budget",
+      error: {
+        code: "budget_exceeded",
+        message: "budget_exceeded",
+        params: { monthlyUsdSpent: 12, monthlyUsdLimit: 10, resolvedScope: "org" },
+      },
+    });
   });
 });

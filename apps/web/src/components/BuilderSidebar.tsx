@@ -66,6 +66,7 @@ import type { ActiveTab, AiHealth } from '../types'
 import { useT } from '../i18n'
 import { MOBILE_WORKSPACE_QUERY, useMediaQuery } from '../hooks/useMediaQuery'
 import { writeNodePaletteDrag } from '../canvas-node-drag'
+import { canOpenTab } from '../tab-permissions'
 
 type BuilderSidebarProps = {
   workflowName: string
@@ -75,6 +76,7 @@ type BuilderSidebarProps = {
   workflowEnv?: 'sandbox' | 'production'
   workflowVersion?: number | null
   workflowRunsCount?: number | null
+  permissions: readonly string[]
   onWorkflowNameChange: (name: string) => void
   onAdd: (type: string) => void
   onValidate: () => void | Promise<void>
@@ -102,7 +104,7 @@ const NODE_CATEGORIES: Record<string, string[]> = {
   flow: ['condition', 'router', 'router_llm', 'loop', 'parallel_fork', 'join'],
   human: ['approval', 'human_form'],
   tools: ['tool', 'http', 'webhook', 'mcp_tool', 'subworkflow'],
-  triggers: ['schedule', 'email_received', 'file_dropped', 'mcp_server_event'],
+  triggers: ['schedule', 'webhook_received', 'email_received', 'file_dropped', 'mcp_server_event'],
   misc: ['noop', 'transform', 'wait_until'],
 }
 
@@ -128,6 +130,7 @@ const NODE_ICONS: Record<string, React.ReactNode> = {
   join: <ListTree size={13} />,
   schedule: <CalendarClock size={13} />,
   mcp_tool: <Plug size={13} />,
+  webhook_received: <Webhook size={13} />,
   email_received: <Mail size={13} />,
   file_dropped: <FileInput size={13} />,
   mcp_server_event: <Radio size={13} />,
@@ -187,7 +190,6 @@ const NAV_GROUPS: NavGroup[] = [
     labelKey: 'sidebar.group.run',
     items: [
       { tab: 'runs', labelKey: 'sidebar.nav.runs.label', helperKey: 'sidebar.nav.runs.helper', icon: <Activity size={13} /> },
-      { tab: 'multiAgent', labelKey: 'sidebar.nav.multiAgent.label', helperKey: 'sidebar.nav.multiAgent.helper', icon: <Layers3 size={13} /> },
       { tab: 'operations', labelKey: 'sidebar.nav.operations.label', helperKey: 'sidebar.nav.operations.helper', icon: <Gauge size={13} /> },
       { tab: 'credentials', labelKey: 'sidebar.nav.credentials.label', helperKey: 'sidebar.nav.credentials.helper', icon: <KeyRound size={13} /> },
       { tab: 'members', labelKey: 'sidebar.nav.members.label', helperKey: 'sidebar.nav.members.helper', icon: <Users size={13} /> },
@@ -255,6 +257,7 @@ export function BuilderSidebar({
   workflowEnv = 'sandbox',
   workflowVersion = null,
   workflowRunsCount = null,
+  permissions,
   onAdd,
   onValidate,
   onSave,
@@ -323,8 +326,12 @@ export function BuilderSidebar({
   const normalisedQuery = searchQuery.trim().toLowerCase()
 
   const filteredGroups = useMemo<NavGroup[]>(() => {
-    if (!normalisedQuery) return NAV_GROUPS
-    return NAV_GROUPS.map(group => ({
+    const allowedGroups = NAV_GROUPS.map(group => ({
+      ...group,
+      items: group.items.filter(item => canOpenTab(item.tab, permissions)),
+    })).filter(group => group.items.length > 0)
+    if (!normalisedQuery) return allowedGroups
+    return allowedGroups.map(group => ({
       ...group,
       items: group.items.filter(item => {
         const label = (t(item.labelKey as never)).toLowerCase()
@@ -332,7 +339,7 @@ export function BuilderSidebar({
         return label.includes(normalisedQuery) || helper.includes(normalisedQuery)
       }),
     })).filter(group => group.items.length > 0)
-  }, [normalisedQuery, t])
+  }, [normalisedQuery, permissions, t])
 
   const filteredCategoryNodes = useMemo<Record<string, string[]>>(() => {
     const known = new Set(nodeTypes)
@@ -366,6 +373,7 @@ export function BuilderSidebar({
   const envLabel = workflowEnv === 'production' ? t('sidebar.workflow.envProduction') : t('sidebar.workflow.envSandbox')
   const isProduction = workflowEnv === 'production'
   const connectionLabel = streamStatus === 'connected' ? t('sidebar.footer.connected') : streamStatus
+  const canWriteWorkflow = permissions.includes('workflows.write')
 
   return (
     <aside className="builder-sidebar" data-collapsed={visuallyCollapsed ? 'true' : 'false'}>
@@ -380,6 +388,7 @@ export function BuilderSidebar({
               onChange={(event) => onWorkflowNameChange(event.target.value)}
               className="sb-workflow__name-input"
               aria-label={t('sidebar.field.name')}
+              disabled={!permissions.includes('workflows.write')}
             />
             <span className="sb-workflow__name-edit" aria-hidden="true"><Pencil size={11} /></span>
           </label>
@@ -410,16 +419,16 @@ export function BuilderSidebar({
           ) : null}
         </div>
         <div className="sb-workflow__acts">
-          <button className="sb-workflow__ghost" type="button" onClick={onNew} disabled={busyAction !== null} title={t('sidebar.action.new')} aria-label={t('sidebar.action.new')}>
+          <button className="sb-workflow__ghost" type="button" onClick={onNew} disabled={busyAction !== null || !permissions.includes('workflows.write')} title={t('sidebar.action.new')} aria-label={t('sidebar.action.new')}>
             <SquarePlus size={13} aria-hidden="true" />
           </button>
-          <button className="sb-workflow__ghost" type="button" onClick={() => runAction('validate', onValidate)} disabled={busyAction !== null} aria-busy={busyAction === 'validate'} title={t('sidebar.action.validate')} aria-label={t('sidebar.action.validate')}>
+          <button className="sb-workflow__ghost" type="button" onClick={() => runAction('validate', onValidate)} disabled={busyAction !== null || !permissions.includes('workflows.write')} aria-busy={busyAction === 'validate'} title={t('sidebar.action.validate')} aria-label={t('sidebar.action.validate')}>
             {busyAction === 'validate' ? <Loader2 size={13} className="we-spin" aria-hidden="true" /> : <CheckCircle2 size={13} aria-hidden="true" />}
           </button>
-          <button className="sb-workflow__ghost" type="button" onClick={() => runAction('save', onSave)} disabled={busyAction !== null} aria-busy={busyAction === 'save'} title={t('sidebar.action.save')} aria-label={t('sidebar.action.save')}>
+          <button className="sb-workflow__ghost" type="button" onClick={() => runAction('save', onSave)} disabled={busyAction !== null || !permissions.includes('workflows.write')} aria-busy={busyAction === 'save'} title={t('sidebar.action.save')} aria-label={t('sidebar.action.save')}>
             {busyAction === 'save' ? <Loader2 size={13} className="we-spin" aria-hidden="true" /> : <Save size={13} aria-hidden="true" />}
           </button>
-          <button className="sb-workflow__run" type="button" onClick={() => runAction('run', onStart)} disabled={busyAction !== null} aria-busy={busyAction === 'run'}>
+          <button className="sb-workflow__run" type="button" onClick={() => runAction('run', onStart)} disabled={busyAction !== null || !permissions.includes('runs.start')} aria-busy={busyAction === 'run'}>
             {busyAction === 'run' ? <Loader2 size={12} className="we-spin" aria-hidden="true" /> : <Play size={12} aria-hidden="true" />}
             <span>{busyAction === 'run' ? t('sidebar.action.running') : t('sidebar.action.run')}</span>
           </button>
@@ -427,7 +436,7 @@ export function BuilderSidebar({
       </div>
 
       {/* AI mode one-line strip */}
-      <button
+      {permissions.includes('ai.write') && <button
         className="sb-ai-strip"
         type="button"
         onClick={() => onOpenTab('copilot')}
@@ -442,7 +451,7 @@ export function BuilderSidebar({
         <span className={`sb-ai-strip__pill sb-ai-strip__pill--${aiHealth?.enabled ? 'live' : 'local'}`}>
           {aiHealth?.enabled ? t('sidebar.aiMode.live') : t('sidebar.aiMode.local')}
         </span>
-      </button>
+      </button>}
 
       {/* Search */}
       <div className="sb-search">
@@ -520,8 +529,11 @@ export function BuilderSidebar({
                   key={`pinned-${type}`}
                   className="sb-chip sb-chip--pinned"
                   type="button"
-                  draggable
-                  onDragStart={(event) => writeNodePaletteDrag(event.dataTransfer, type)}
+                  draggable={canWriteWorkflow}
+                  disabled={!canWriteWorkflow}
+                  onDragStart={(event) => {
+                    if (canWriteWorkflow) writeNodePaletteDrag(event.dataTransfer, type)
+                  }}
                   onClick={() => onAdd(type)}
                   title={`${label} — ${helper}`}
                 >
@@ -561,8 +573,11 @@ export function BuilderSidebar({
                         key={type}
                         className="sb-chip"
                         type="button"
-                        draggable
-                        onDragStart={(event) => writeNodePaletteDrag(event.dataTransfer, type)}
+                        draggable={canWriteWorkflow}
+                        disabled={!canWriteWorkflow}
+                        onDragStart={(event) => {
+                          if (canWriteWorkflow) writeNodePaletteDrag(event.dataTransfer, type)
+                        }}
                         onClick={() => onAdd(type)}
                         title={`${label} — ${helper}`}
                       >

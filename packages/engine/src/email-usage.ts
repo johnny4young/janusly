@@ -41,7 +41,7 @@ export type EmailUsageRecord = {
   to: string;
   /** Sender address (final value after the JANUSLY_MAILER_FROM fallback). */
   from: string;
-  provider: "resend" | "sendgrid" | "noop";
+  provider: "resend" | "sendgrid" | "simulator" | "noop";
   /** Set when `ok === true`. */
   providerMessageId?: string;
   ok: boolean;

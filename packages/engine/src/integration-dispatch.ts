@@ -27,9 +27,18 @@ import { executeTool, type ToolExecutionContext } from "./tool-registry";
 /** `slack.post` — post composed text to a stored Incoming Webhook credential. */
 export async function callSlackPost(
   ctx: ToolExecutionContext,
-  args: { credential: string; text: string },
+  args: { credential: string; text: string; blocks?: Array<Record<string, unknown>> },
 ): Promise<Record<string, unknown>> {
-  return executeTool("slack.post", { credential: args.credential, text: args.text }, {}, ctx);
+  return executeTool(
+    "slack.post",
+    {
+      credential: args.credential,
+      text: args.text,
+      ...(args.blocks && args.blocks.length > 0 ? { blocks: args.blocks } : {}),
+    },
+    {},
+    ctx,
+  );
 }
 
 /** `github.create_issue` — open a new issue; `labels` / `assignees` omitted when empty. */

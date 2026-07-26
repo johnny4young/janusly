@@ -171,10 +171,10 @@ export function verifyResumeToken(
  * Generic signed-payload primitive built on the same HMAC chokepoint as
  * `signResumeToken`. Used for purposes other than human-form resume —
  * notably SSO state tokens (10-min TTL, bound to org + nonce + callback
- * URL) and SSO session tokens (8-hour TTL, bound to org + user + email).
+ * URL) and browser-session cookie envelopes (bound to an opaque session id).
  *
  * The `purpose` discriminator is part of the signed envelope: an SSO
- * session token cannot be replayed as a human-form resume token (and
+ * browser-session envelope cannot be replayed as a human-form resume token (and
  * vice versa) even when both share `JANUSLY_RESUME_TOKEN_SECRET`. The
  * underlying HMAC + base64url encoding is identical to the resume-token
  * format, but the verifier requires the expected `purpose` to match

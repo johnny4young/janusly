@@ -9,11 +9,11 @@
  * cleanly.
  */
 
-import { RecoveryResource } from "./resources/recovery.ts";
-import { ReportsResource } from "./resources/reports.ts";
-import { RunsResource } from "./resources/runs.ts";
-import { WebhooksResource } from "./resources/webhooks.ts";
-import type { JanuslyClientConfig } from "./types.ts";
+import { RecoveryResource } from "./resources/recovery.js";
+import { ReportsResource } from "./resources/reports.js";
+import { RunsResource } from "./resources/runs.js";
+import { WebhooksResource } from "./resources/webhooks.js";
+import type { JanuslyClientConfig } from "./types.js";
 
 export class JanuslyClient {
   /** Run lifecycle: start, list, get, poll, stream events, resume nodes. */

@@ -28,7 +28,7 @@ import { withBudgetWarning } from "../ai-route-helpers";
 import type { Route } from "../routes";
 
 export const aiReviewRoutes: Route[] = [
-  { method: "POST", match: "/ai/review-workflow",
+  { method: "POST", match: "/ai/review-workflow", permission: "ai.write",
     handler: async ({ req, res, auth }) => {
       const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));

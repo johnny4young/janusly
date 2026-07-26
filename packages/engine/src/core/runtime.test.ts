@@ -65,7 +65,6 @@ function makeQueue(): QueueAdapter {
   return {
     enqueueNode: vi.fn().mockResolvedValue(undefined),
     persistTerminalFailure: vi.fn().mockResolvedValue(true),
-    enqueueDeadLetter: vi.fn().mockResolvedValue(undefined),
   }
 }
 

@@ -55,4 +55,26 @@ describe('<QueueLagChip /> (browser smoke)', () => {
     rerender(<QueueLagChip health={null} />)
     expect(chip).toHaveTextContent('Estado de la cola no disponible')
   })
+
+  it('renders the isolated maintenance signal in both locales', () => {
+    const { rerender } = render(
+      <QueueLagChip
+        kind="maintenance"
+        health={{ waiting: 2, active: 0, oldestWaitingSeconds: 301, warnSeconds: 300 }}
+      />,
+    )
+    const chip = screen.getByTestId('maintenance-queue-lag-chip')
+    expect(chip).toHaveAttribute('data-state', 'delayed')
+    expect(chip).toHaveTextContent('Maintenance delayed')
+
+    initI18n('es')
+    rerender(
+      <QueueLagChip
+        kind="maintenance"
+        health={{ waiting: 0, active: 1, oldestWaitingSeconds: null, warnSeconds: 300 }}
+      />,
+    )
+    expect(chip).toHaveAttribute('data-state', 'clear')
+    expect(chip).toHaveTextContent('Cola de mantenimiento sin espera')
+  })
 })

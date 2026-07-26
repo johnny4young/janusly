@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createApiClient, resolveApiClientConfig } from "./api-client";
+import {
+  createApiClient,
+  JanuslyApiError,
+  JanuslyProtocolError,
+  resolveApiClientConfig,
+} from "./api-client";
 
 describe("resolveApiClientConfig", () => {
   it("falls back to localhost defaults when no env vars are set", () => {
@@ -139,5 +144,70 @@ describe("createApiClient", () => {
     // full body nor drops the marker.
     expect(caught!.message.length).toBeLessThan(400);
     expect(caught!.message).toMatch(/x{50,}/);
+  });
+
+  it("unwraps stable v1 success envelopes", async () => {
+    installFetch({
+      body: {
+        apiVersion: "v1",
+        requestId: "req-1",
+        data: { connections: [] },
+      },
+    });
+    const callApi = createApiClient({
+      apiUrl: "http://127.0.0.1:3001",
+      orgId: "default",
+      userId: "mcp-user",
+    });
+
+    await expect(callApi("/v1/mcp/connections")).resolves.toEqual({ connections: [] });
+  });
+
+  it("rejects malformed v1 success envelopes", async () => {
+    installFetch({ body: { connections: [] } });
+    const callApi = createApiClient({
+      apiUrl: "http://127.0.0.1:3001",
+      orgId: "default",
+      userId: "mcp-user",
+    });
+
+    await expect(callApi("/v1/mcp/connections")).rejects.toBeInstanceOf(JanuslyProtocolError);
+  });
+
+  it("surfaces stable v1 error codes without stringifying the whole envelope", async () => {
+    installFetch({
+      ok: false,
+      status: 403,
+      body: {
+        apiVersion: "v1",
+        requestId: "req-denied",
+        error: {
+          code: "mcp_tenant_disabled",
+          message: "Tenant consent is disabled",
+          params: { alias: "demo", ignored: null },
+        },
+      },
+    });
+    const callApi = createApiClient({
+      apiUrl: "http://127.0.0.1:3001",
+      orgId: "default",
+      userId: "mcp-user",
+    });
+
+    try {
+      await callApi("/v1/mcp/connections/demo");
+      throw new Error("Expected callApi to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(JanuslyApiError);
+      expect(error).toMatchObject({
+        name: "JanuslyApiError",
+        message: expect.stringContaining("Tenant consent is disabled"),
+        status: 403,
+        code: "mcp_tenant_disabled",
+        requestId: "req-denied",
+        path: "/v1/mcp/connections/demo",
+        params: { alias: "demo" },
+      } satisfies Partial<JanuslyApiError>);
+    }
   });
 });

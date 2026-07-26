@@ -37,7 +37,7 @@ vi.mock("./agent-memory", () => ({
   recordAgentEpisode: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { nodeRegistry, type NodeContext } from "./node-registry";
+import { nodeRegistry, ToolResultPolicyError, type NodeContext } from "./node-registry";
 
 const orgConfig = {
   email: { provider: "resend", from: "ops@example.com", rateLimitPerMin: 41 },
@@ -93,6 +93,44 @@ describe("tool node tenant config", () => {
         integrations: orgConfig.integrations,
         objectstore: orgConfig.objectstore,
       }),
+    );
+  });
+
+  it("keeps failed result envelopes observable under the compatible default policy", async () => {
+    mocks.executeTool.mockResolvedValueOnce({ ok: false, error: "delivery rejected" });
+
+    await expect(nodeRegistry.tool({
+      ...baseCtx,
+      config: { tool: "pdf.generate", input: { template: "report" } },
+    })).resolves.toEqual({
+      status: "completed",
+      output: { tool: "pdf.generate", result: { ok: false, error: "delivery rejected" } },
+    });
+  });
+
+  it("promotes a failed write envelope into a typed non-retry-safe node failure", async () => {
+    mocks.executeTool.mockResolvedValueOnce({ ok: false, error: "delivery rejected", provider: "s3" });
+
+    const error = await nodeRegistry.tool({
+      ...baseCtx,
+      config: {
+        tool: "pdf.generate",
+        input: { template: "report" },
+        resultPolicy: "require_ok",
+      },
+    }).catch((value) => value);
+
+    expect(error).toBeInstanceOf(ToolResultPolicyError);
+    expect(error).toMatchObject({
+      code: "TOOL_RESULT_NOT_OK",
+      writeSide: true,
+      details: { tool: "pdf.generate", ok: false, provider: "s3" },
+    });
+    expect(mocks.appendEvent).toHaveBeenCalledWith(
+      "run-1",
+      "tool-node",
+      "tool.failed",
+      expect.objectContaining({ tool: "pdf.generate" }),
     );
   });
 });

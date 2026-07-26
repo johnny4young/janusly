@@ -9,7 +9,9 @@
  *
  * Invariants:
  * - `readJson` enforces `API_MAX_JSON_BODY_BYTES` and rejects 413 when
- *   exceeded — callers shouldn't read the stream themselves.
+ *   exceeded, and memoizes the parsed body so contract validation and the
+ *   route handler can share one stream read — callers shouldn't read the
+ *   stream themselves.
  * - `corsHeaders` returns `null` for the Origin when the request came from
  *   a non-allowlisted origin; never `*` with credentials.
  */
@@ -28,6 +30,11 @@ export type HttpError = Error & { statusCode?: number };
  * catalogued error envelopes are well under a KB).
  */
 const GZIP_MIN_BYTES = 1024;
+const PARSED_JSON_BODY = Symbol("janusly.parsedJsonBody");
+
+type JsonReadableRequest = http.IncomingMessage & {
+  [PARSED_JSON_BODY]?: Promise<unknown>;
+};
 
 /** Compression is on by default; `JANUSLY_HTTP_COMPRESSION=false` is the kill-switch. */
 function compressionEnabled(): boolean {
@@ -98,6 +105,12 @@ function getAllowedOrigins() {
   return configured.split(",").map(origin => origin.trim()).filter(Boolean);
 }
 
+/** True when a browser Origin may use cookie-authenticated API requests. */
+export function isAllowedRequestOrigin(origin: string): boolean {
+  const allowedOrigins = getAllowedOrigins();
+  return allowedOrigins.includes("*") || allowedOrigins.includes(origin);
+}
+
 /** Build the CORS header dict against `API_ALLOWED_ORIGINS`. Echoes the origin only when it's allowlisted. */
 export function corsHeaders(res: http.ServerResponse) {
   const response = res as CorsAwareResponse;
@@ -112,8 +125,9 @@ export function corsHeaders(res: http.ServerResponse) {
 
   return {
     "Access-Control-Allow-Origin": allowedOrigin,
+    "Access-Control-Allow-Credentials": "true",
     "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-org-id, x-user-id, x-janusly-session, x-request-id, Accept-Language, Last-Event-ID",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-org-id, x-user-id, x-janusly-csrf, x-request-id, Accept-Language, Last-Event-ID",
     "Access-Control-Expose-Headers": "Content-Disposition, X-Request-Id",
     ...(response.requestId ? { "X-Request-Id": response.requestId } : {}),
     "Vary": "Origin",
@@ -315,7 +329,10 @@ export function sendSseComment(res: http.ServerResponse, text: string) {
  * is SILENT: the body still parses and the mangled text gets persisted.
  */
 export async function readJson(req: http.IncomingMessage, maxBytes: number) {
-  return new Promise<unknown>((resolve, reject) => {
+  const request = req as JsonReadableRequest;
+  if (request[PARSED_JSON_BODY]) return request[PARSED_JSON_BODY];
+
+  const parsed = new Promise<unknown>((resolve, reject) => {
     const chunks: Buffer[] = [];
     let receivedBytes = 0;
     let rejected = false;
@@ -350,6 +367,8 @@ export async function readJson(req: http.IncomingMessage, maxBytes: number) {
       }
     });
   });
+  request[PARSED_JSON_BODY] = parsed;
+  return parsed;
 }
 
 /**

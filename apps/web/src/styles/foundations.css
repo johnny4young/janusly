@@ -13,8 +13,10 @@
 @theme {
   --color-we-primary: #245bff;
   --color-we-primary-strong: #1537cc;
+  --color-we-primary-text: #245bff;
   --color-we-primary-soft: #eef4ff;
   --color-we-accent: #06b6d4;
+  --color-we-accent-text: #0e7490;
   --color-we-accent-soft: #ecfeff;
   --color-we-success: #10b981;
   --color-we-success-soft: #ecfdf5;
@@ -26,9 +28,11 @@
   --color-we-warning-soft: #fffbeb;
   --color-we-warning-text: #9a5108;
   --color-we-danger: #ef4444;
+  --color-we-danger-solid: #b42318;
   --color-we-danger-soft: #fef2f2;
   --color-we-danger-text: #b42318;
   --color-we-info: #3b82f6;
+  --color-we-info-text: #1d4ed8;
   --color-we-info-soft: #eff6ff;
   --color-we-ink: #0f172a;
   --color-we-ink-soft: #334155;
@@ -56,11 +60,13 @@
 :root {
   --we-primary: var(--color-we-primary);
   --we-primary-strong: var(--color-we-primary-strong);
+  --we-primary-text: var(--color-we-primary-text);
   --we-primary-soft: var(--color-we-primary-soft);
   --we-primary-ring: color-mix(in srgb, var(--we-primary) 18%, transparent);
   --we-primary-shadow: color-mix(in srgb, var(--we-primary) 55%, transparent);
   --we-primary-shadow-strong: color-mix(in srgb, var(--we-primary) 70%, transparent);
   --we-accent: var(--color-we-accent);
+  --we-accent-text: var(--color-we-accent-text);
   --we-accent-soft: var(--color-we-accent-soft);
   --we-brand-glyph: var(--color-we-brand-glyph);
   --we-bg: var(--color-we-bg);
@@ -100,6 +106,7 @@
   --we-warning-border-30: color-mix(in srgb, var(--we-warning) 30%, transparent);
   --we-warning-border-35: color-mix(in srgb, var(--we-warning) 35%, transparent);
   --we-danger: var(--color-we-danger);
+  --we-danger-solid: var(--color-we-danger-solid);
   --we-success-text: var(--color-we-success-text);
   --we-warning-text: var(--color-we-warning-text);
   --we-danger-text: var(--color-we-danger-text);
@@ -108,6 +115,7 @@
   --we-danger-border-30: color-mix(in srgb, var(--we-danger) 30%, transparent);
   --we-danger-border-40: color-mix(in srgb, var(--we-danger) 40%, transparent);
   --we-info: var(--color-we-info);
+  --we-info-text: var(--color-we-info-text);
   --we-info-soft: var(--color-we-info-soft);
   --we-info-border-30: color-mix(in srgb, var(--we-info) 30%, transparent);
   --we-shadow-ink-04: color-mix(in srgb, var(--we-ink) 4%, transparent);
@@ -126,8 +134,9 @@
    Re-binds raw color tokens + semantic aliases (Tailwind v4 @theme values
    need an explicit re-resolve at the override scope or descendants keep
    the :root resolution). Brand hues (cobalt + cyan) stay at their
-   canonical hex; only neutrals + soft fills shift. Token source values
-   come from the design-system zip's colors_and_type.css dark theme.
+   canonical hex; only neutrals, soft fills, and the accessible text tint shift.
+   Token source values come from the design-system zip's colors_and_type.css
+   dark theme, with the text tint raised to meet WCAG AA on dark soft fills.
    -------------------------------------------------------------------------- */
 [data-theme="dark"] {
   --color-we-bg: #0a0f1f;
@@ -142,8 +151,10 @@
   --color-we-faint: #5d6886;
   --color-we-primary: #245bff;
   --color-we-primary-strong: #4d7bff;
+  --color-we-primary-text: #7aa2ff;
   --color-we-primary-soft: #1a2548;
   --color-we-accent: #06b6d4;
+  --color-we-accent-text: #67e8f9;
   --color-we-accent-soft: #0d2a32;
   --color-we-success: #10b981;
   --color-we-success-soft: #0c2a22;
@@ -154,9 +165,11 @@
   --color-we-warning-soft: #2c1f08;
   --color-we-warning-text: #f59e0b;
   --color-we-danger: #ef4444;
+  --color-we-danger-solid: #b42318;
   --color-we-danger-soft: #2c1414;
   --color-we-danger-text: #ef4444;
   --color-we-info: #3b82f6;
+  --color-we-info-text: #60a5fa;
   --color-we-info-soft: #122035;
   --color-we-brand-glyph: #ffffff;
 
@@ -182,11 +195,13 @@
   --we-faint: var(--color-we-faint);
   --we-primary: var(--color-we-primary);
   --we-primary-strong: var(--color-we-primary-strong);
+  --we-primary-text: var(--color-we-primary-text);
   --we-primary-soft: var(--color-we-primary-soft);
   --we-primary-ring: color-mix(in srgb, var(--color-we-primary) 28%, transparent);
   --we-primary-shadow: color-mix(in srgb, var(--color-we-primary) 55%, transparent);
   --we-primary-shadow-strong: color-mix(in srgb, var(--color-we-primary) 70%, transparent);
   --we-accent: var(--color-we-accent);
+  --we-accent-text: var(--color-we-accent-text);
   --we-accent-soft: var(--color-we-accent-soft);
   --we-brand-glyph: var(--color-we-brand-glyph);
   --we-success: var(--color-we-success);
@@ -194,8 +209,10 @@
   --we-warning: var(--color-we-warning);
   --we-warning-soft: var(--color-we-warning-soft);
   --we-danger: var(--color-we-danger);
+  --we-danger-solid: var(--color-we-danger-solid);
   --we-danger-soft: var(--color-we-danger-soft);
   --we-info: var(--color-we-info);
+  --we-info-text: var(--color-we-info-text);
   --we-info-soft: var(--color-we-info-soft);
   color-scheme: dark;
 }
@@ -700,7 +717,7 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 
 /* Shared typographic helper for compact section labels. */
 .section-kicker {
-  color: var(--we-primary);
+  color: var(--we-primary-text);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -837,7 +854,7 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 /* Destructive variant — used by the confirm dialog's confirm button. */
 .command-button-danger {
   border-color: transparent;
-  background: var(--we-danger);
+  background: var(--we-danger-solid);
   color: var(--we-surface);
   font-weight: 600;
 }

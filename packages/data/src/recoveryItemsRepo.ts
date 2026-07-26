@@ -30,6 +30,7 @@
 import { and, count, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { db, recoveryItems, recoveryItemChildren } from "@janusly/db";
 import { getRecoverySlaSeconds } from "./orgConfigRepo";
+import type { DbOrTx } from "./audit-tx";
 import {
   defaultSlaTargetAt,
   isSeverityEscalation,
@@ -129,8 +130,9 @@ function hydrateChild(row: typeof recoveryItemChildren.$inferSelect): RecoveryIt
 export async function getRecoveryItemById(
   orgId: string,
   id: string,
+  dbOrTx: DbOrTx = db,
 ): Promise<RecoveryItem | null> {
-  const rows = await db
+  const rows = await dbOrTx
     .select()
     .from(recoveryItems)
     .where(and(eq(recoveryItems.orgId, orgId), eq(recoveryItems.id, id)));
@@ -416,12 +418,13 @@ async function applyCas(
   id: string,
   allowedPre: readonly RecoveryItemStatus[],
   patch: Partial<RecoveryItemRow>,
+  dbOrTx: DbOrTx = db,
 ): Promise<TransitionResult> {
-  const before = await getRecoveryItemById(orgId, id);
+  const before = await getRecoveryItemById(orgId, id, dbOrTx);
   if (!before) return null;
   if (!allowedPre.includes(before.status)) return null;
 
-  const result = await db
+  const result = await dbOrTx
     .update(recoveryItems)
     .set({
       ...patch,
@@ -438,7 +441,7 @@ async function applyCas(
     .returning({ id: recoveryItems.id });
   if (result.length === 0) return null;
 
-  const after = await getRecoveryItemById(orgId, id);
+  const after = await getRecoveryItemById(orgId, id, dbOrTx);
   if (!after) return null;
   return { before, after };
 }
@@ -447,6 +450,7 @@ export async function acknowledgeRecoveryItem(
   orgId: string,
   id: string,
   input: { owner?: string | null; severity?: RecoveryItemSeverity; slaTargetAtOverrideIso?: string },
+  dbOrTx: DbOrTx = db,
 ): Promise<TransitionResult> {
   const patch: Partial<RecoveryItemRow> = { status: "acknowledged" };
   if (input.owner !== undefined) patch.owner = input.owner;
@@ -458,7 +462,7 @@ export async function acknowledgeRecoveryItem(
   } else if (input.slaTargetAtOverrideIso) {
     patch.slaTargetAt = new Date(input.slaTargetAtOverrideIso);
   }
-  return applyCas(orgId, id, ["open", "reopened"], patch);
+  return applyCas(orgId, id, ["open", "reopened"], patch, dbOrTx);
 }
 
 export async function setInProgressRecoveryItem(
@@ -524,13 +528,14 @@ export async function assignOwnerRecoveryItem(
   orgId: string,
   id: string,
   input: { owner: string | null },
+  dbOrTx: DbOrTx = db,
 ): Promise<TransitionResult> {
   // Owner reassignment is allowed in any non-resolved state.
-  const before = await getRecoveryItemById(orgId, id);
+  const before = await getRecoveryItemById(orgId, id, dbOrTx);
   if (!before) return null;
   if (before.status === "resolved") return null;
 
-  const result = await db
+  const result = await dbOrTx
     .update(recoveryItems)
     .set({
       owner: input.owner,
@@ -547,7 +552,7 @@ export async function assignOwnerRecoveryItem(
     .returning({ id: recoveryItems.id });
   if (result.length === 0) return null;
 
-  const after = await getRecoveryItemById(orgId, id);
+  const after = await getRecoveryItemById(orgId, id, dbOrTx);
   if (!after) return null;
   return { before, after };
 }

@@ -160,6 +160,102 @@ describe('<DeadLettersPanel />', () => {
     })
   })
 
+  it('renders a read-only queue without mutation affordances or shortcuts', async () => {
+    const onReplay = vi.fn()
+    const onResolve = vi.fn()
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('read-only')]))
+    render(
+      <DeadLettersPanel
+        onRefresh={vi.fn()}
+        onReplay={onReplay}
+        onResolve={onResolve}
+        canReplay={false}
+        canResolve={false}
+        canStartRuns={false}
+        canUseRecovery={false}
+        canReadAutoHealing={false}
+        canDecideAutoHealing={false}
+      />,
+    )
+
+    const row = await screen.findByTestId('dlq-row-read-only')
+    expect(screen.queryByTestId('dlq-select-toggle')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('dlq-replay-in-lab')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Retry$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Resolve$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /suggest/i })).not.toBeInTheDocument()
+
+    row.focus()
+    fireEvent.keyDown(row, { key: 'r' })
+    fireEvent.keyDown(row, { key: 'Enter', metaKey: true })
+    expect(onReplay).not.toHaveBeenCalled()
+    expect(onResolve).not.toHaveBeenCalled()
+  })
+
+  it('labels a selected recovery drill with its actual recovery path', async () => {
+    const row = mockDeadLetter('worker-drill')
+    let recovered = false
+    let detailCalls = 0
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.startsWith('/dlq/counts')) return countsFromRows([row])
+      if (path.startsWith('/dlq/queue')) return { items: [row], nextCursor: null, hasMore: false }
+      if (path === '/dlq?id=worker-drill') {
+        detailCalls += 1
+        return {
+          ...row,
+          drill: {
+            kind: 'solution_pack_drill',
+            packId: 'incident-triage',
+            fixtureId: 'worker_interrupted_during_page',
+            recoveryPath: 'stalled_node_reaper',
+          },
+          drillOutcome: recovered
+            ? {
+                status: 'recovered',
+                startedAt: '2026-07-01T10:00:00.000Z',
+                completedAt: '2026-07-01T10:02:00.000Z',
+                elapsedMs: 120_000,
+                evidence: 'terminal_impact',
+                attemptCount: 1,
+                latestDeadLetterId: 'worker-drill',
+                chainCapped: false,
+                recurrence: {
+                  status: 'monitoring',
+                  windowEndsAt: '2026-07-08T10:02:00.000Z',
+                  recurredAt: null,
+                },
+              }
+            : {
+                status: 'awaiting_action',
+                startedAt: '2026-07-01T10:00:00.000Z',
+                completedAt: null,
+                elapsedMs: null,
+                evidence: null,
+                attemptCount: 1,
+                latestDeadLetterId: 'worker-drill',
+                chainCapped: false,
+                recurrence: { status: 'not_applicable', windowEndsAt: null, recurredAt: null },
+              },
+        }
+      }
+      return { items: [], clusters: [], runs: [], proposals: [] }
+    })
+
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+
+    const context = await screen.findByTestId('dlq-recovery-drill-context')
+    expect(context).toHaveTextContent('Recovery drill')
+    expect(context).toHaveTextContent('Real reaper path')
+    expect(screen.getByTestId('dlq-recovery-drill-outcome')).toHaveTextContent('Action needed')
+
+    recovered = true
+    act(() => useWorkflowStore.getState().bumpPlatformVersion())
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-recovery-drill-outcome')).toHaveTextContent('Recovered')
+    })
+    expect(detailCalls).toBeGreaterThanOrEqual(2)
+  })
+
   it('refetches /dlq with the chosen status when the status filter changes', async () => {
     const rows = [
       mockDeadLetter('open-1', { status: 'open' }),
@@ -221,7 +317,7 @@ describe('<DeadLettersPanel />', () => {
   })
 
   it('disables Load more while the next page is in flight', async () => {
-    let resolveNext: ((value: unknown) => void) | null = null
+    let resolveNext: (value: unknown) => void = () => { throw new Error('next-page request did not start') }
     vi.mocked(api).mockImplementation((path: string) => {
       if (!path.startsWith('/dlq/queue')) return Promise.resolve({ items: [], clusters: [], runs: [], proposals: [] })
       const params = new URL(path, 'http://x').searchParams
@@ -236,7 +332,7 @@ describe('<DeadLettersPanel />', () => {
     await waitFor(() => expect(screen.getByTestId('dlq-load-more')).toBeInTheDocument())
     fireEvent.click(screen.getByTestId('dlq-load-more'))
     await waitFor(() => expect(screen.getByTestId('dlq-load-more')).toBeDisabled())
-    resolveNext?.({ items: [mockDeadLetter('b')], nextCursor: null, hasMore: false })
+    resolveNext({ items: [mockDeadLetter('b')], nextCursor: null, hasMore: false })
     await waitFor(() => expect(screen.getByTestId('dlq-row-b')).toBeInTheDocument())
   })
 
@@ -442,7 +538,7 @@ describe('<DeadLettersPanel /> — severity filter', () => {
 
   it('does not flash the severity empty state while the /dlq/queue fetch is in flight', async () => {
     const rows = [mockDeadLetter('a', { recovery: overlay('ri-a', 'p3') })]
-    let resolvePending: ((value: unknown) => void) | null = null
+    let resolvePending: (value: unknown) => void = () => { throw new Error('filtered request did not start') }
     vi.mocked(api).mockImplementation((path: string) => {
       if (!path.startsWith('/dlq/queue')) return Promise.resolve({ items: [], clusters: [], runs: [], proposals: [] })
       const params = new URL(path, 'http://x').searchParams
@@ -460,7 +556,7 @@ describe('<DeadLettersPanel /> — severity filter', () => {
     // (stale-while-loading) and must NOT flash the severity empty state.
     expect(screen.queryByTestId('dlq-empty-severity')).toBeNull()
     // Once the empty p1 page lands, the severity empty state renders.
-    resolvePending?.({ items: [], nextCursor: null, hasMore: false })
+    resolvePending({ items: [], nextCursor: null, hasMore: false })
     await waitFor(() => expect(screen.getByTestId('dlq-empty-severity')).toBeInTheDocument())
   })
 })
@@ -690,6 +786,37 @@ describe('<DeadLettersPanel /> — bulk replay', () => {
     await waitFor(() => expect(screen.queryByTestId('dlq-bulk-bar')).not.toBeInTheDocument())
   })
 
+  it('opens a paced campaign preview only after at least two rows are selected', async () => {
+    const rows = [mockDeadLetter('a'), mockDeadLetter('b')]
+    vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/recovery/campaigns/preview') {
+        expect(JSON.parse(String(options?.body))).toEqual({ deadLetterIds: ['a', 'b'] })
+        return {
+          canCreate: true,
+          clusterSignature: 'sig-1',
+          eligible: [
+            { deadLetterId: 'a', runId: 'run-a', nodeId: 'node-a' },
+            { deadLetterId: 'b', runId: 'run-b', nodeId: 'node-b' },
+          ],
+          rejected: [],
+        }
+      }
+      return dlqMock(rows)(path, options)
+    })
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await screen.findByTestId('dlq-row-a')
+
+    fireEvent.click(screen.getByTestId('dlq-select-toggle'))
+    fireEvent.click(screen.getByTestId('dlq-select-row-a'))
+    expect(screen.getByTestId('dlq-create-replay-campaign')).toBeDisabled()
+    fireEvent.click(screen.getByTestId('dlq-select-row-b'))
+    expect(screen.getByTestId('dlq-create-replay-campaign')).toBeEnabled()
+    fireEvent.click(screen.getByTestId('dlq-create-replay-campaign'))
+
+    expect(await screen.findByTestId('replay-campaign-dialog')).toBeInTheDocument()
+    expect(await screen.findByText('2 of 2 eligible')).toBeInTheDocument()
+  })
+
   it('keeps failed rows selected and warns on a partial-success bulk replay', async () => {
     const rows = [mockDeadLetter('a'), mockDeadLetter('b')]
     vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
@@ -902,6 +1029,7 @@ describe('<DeadLettersPanel /> — keyboard triage and copy', () => {
     const onReplay = vi.fn(async (id: string) => {
       rows = rows.filter((row) => row.id !== id)
       useWorkflowStore.setState((state) => ({ platformVersion: state.platformVersion + 1 }))
+      return true
     })
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={onReplay} onResolve={vi.fn()} />)
     const first = await screen.findByTestId('dlq-row-a')

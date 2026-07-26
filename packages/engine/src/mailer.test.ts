@@ -19,7 +19,14 @@ vi.mock("./http-policy", () => ({
 import { fetchHttpTarget } from "./http-policy";
 const fetchHttpTargetMock = vi.mocked(fetchHttpTarget);
 
-const ENV_KEYS = ["JANUSLY_MAILER_PROVIDER", "RESEND_API_KEY", "SENDGRID_API_KEY", "JANUSLY_MAILER_FROM"];
+const ENV_KEYS = [
+  "JANUSLY_MAILER_PROVIDER",
+  "RESEND_API_KEY",
+  "SENDGRID_API_KEY",
+  "JANUSLY_MAILER_FROM",
+  "JANUSLY_LOCAL_INTEGRATION_SIMULATOR",
+  "JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL",
+];
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -61,6 +68,14 @@ describe("getMailer — env-driven resolution", () => {
     expect(getMailer().name).toBe("sendgrid");
   });
 
+  it("returns the simulator only when its explicit local gate is enabled", () => {
+    process.env.JANUSLY_MAILER_PROVIDER = "simulator";
+    expect(getMailer().name).toBe("noop");
+    process.env.JANUSLY_LOCAL_INTEGRATION_SIMULATOR = "true";
+    process.env.JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL = "http://provider-simulator:4010";
+    expect(getMailer().name).toBe("simulator");
+  });
+
   it("falls back to Noop when JANUSLY_MAILER_PROVIDER is unset", () => {
     expect(getMailer().name).toBe("noop");
   });
@@ -80,6 +95,36 @@ describe("getMailer — env-driven resolution", () => {
     process.env.JANUSLY_MAILER_PROVIDER = "resend";
     process.env.RESEND_API_KEY = "re_test_key";
     expect(getMailer("noop").name).toBe("noop");
+  });
+});
+
+describe("SimulatorMailer.send", () => {
+  beforeEach(() => {
+    process.env.JANUSLY_MAILER_PROVIDER = "simulator";
+    process.env.JANUSLY_LOCAL_INTEGRATION_SIMULATOR = "true";
+    process.env.JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL = "http://provider-simulator:4010";
+  });
+
+  it("posts a local delivery and requires a returned message id", async () => {
+    fetchHttpTargetMock.mockResolvedValueOnce({
+      statusCode: 202,
+      ok: true,
+      body: '{"id":"local-email-42"}',
+      headers: {},
+    });
+
+    const result = await getMailer().send({
+      to: "user@example.test",
+      from: "janusly@example.test",
+      subject: "Local smoke",
+      text: "Delivered locally",
+    });
+
+    expect(result).toEqual({ ok: true, provider: "simulator", providerMessageId: "local-email-42" });
+    expect(fetchHttpTargetMock).toHaveBeenCalledWith(
+      "http://provider-simulator:4010/email/send",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 });
 

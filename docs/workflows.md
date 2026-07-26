@@ -242,7 +242,47 @@ Run starts, `publish` enters `waiting`. The UI shows an "Approve publish" button
 }
 ```
 
-`{{secret.EXAMPLE_API_TOKEN}}` resolves at render time from `process.env.EXAMPLE_API_TOKEN`. This is a direct environment-backed placeholder. Operator-managed `credentials` rows are separate: `POST /credentials` stores a credential name/kind plus a `secretRef` env-var name, and integration tools then reference the credential by its operator-facing name.
+`{{secret.EXAMPLE_API_TOKEN}}` resolves at render time from
+`process.env.EXAMPLE_API_TOKEN`. This is a direct deployment-owned placeholder.
+Operator-managed `credentials` rows are separate: `POST /credentials` accepts a
+managed value by default (or a legacy env-var reference), and integration tools
+then reference only the operator-facing credential name.
+
+---
+
+## 8. Prompt-generated PagerDuty off-hours workflow
+
+Create one `pagerduty_api_token` credential and one
+`pagerduty_webhook_secret` credential, then enter this in AI Studio:
+
+```text
+When PagerDuty alerts user PUSER123 outside working hours 09:00 to 18:00
+in America/Bogota, acknowledge it and snooze it for 12 hours. Use API
+credential pagerduty-api and webhook credential pagerduty-webhook for
+operator@example.com.
+```
+
+Janusly recognizes this safety-sensitive intent and compiles it locally; no LLM
+key or token budget is required. The generated workflow has strict template
+resolution and these visible steps:
+
+```text
+PagerDuty incident received
+  → Read authoritative incident
+  → Evaluate off-hours policy
+      ├─ match → Acknowledge incident → Snooze incident → Record action evidence
+      └─ no match → Record no-action evidence
+```
+
+Save the workflow and select its first node in Step setup. The normal Inspector
+shows the derived
+`/webhooks/pagerduty/:workflowId/:nodeId` callback. Add that URL to a PagerDuty
+V3 webhook subscription. The path is only a selector: Janusly verifies
+`X-PagerDuty-Signature` with the node's tenant-scoped signing credential before
+persisting the event. Provider retries with the same event id converge on one
+run. Add “and create an AI summary” to the prompt only when post-action
+enrichment is desired; AI never decides whether acknowledge or snooze is
+allowed.
 
 ---
 
