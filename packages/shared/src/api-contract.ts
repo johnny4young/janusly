@@ -37,8 +37,10 @@ export const V1_WRITE_PATHS = {
   saveWorkflow: "/workflows/save",
   rollbackWorkflow: "/workflows/rollback",
   startRun: "/start",
+  redriveRun: "/runs/redrive",
   resumeRun: "/resume",
   cancelRun: "/run/cancel",
+  resumeWorkflow: "/workflows/{workflowId}/resume",
   replayDeadLetter: "/dlq/replay",
 } as const;
 

@@ -10,7 +10,13 @@ vi.mock("node:dns/promises", () => ({
 }));
 
 import { lookup as mockedLookup } from "node:dns/promises";
-import { __testInternals, consumeStreamToPreview, fetchHttpTarget, validateHttpTarget } from "./http-policy";
+import {
+  __testInternals,
+  consumeStreamToPreview,
+  createPinnedHttpFetch,
+  fetchHttpTarget,
+  validateHttpTarget,
+} from "./http-policy";
 
 const lookupMock = vi.mocked(mockedLookup);
 
@@ -310,6 +316,98 @@ describe("HTTP bound execution", () => {
     const result = await fetchHttpTarget(url, { headers: { Authorization: "Bearer stays" } });
 
     expect(JSON.parse(result.body)).toEqual({ authorization: "Bearer stays" });
+  });
+
+  it("uses fetch-compatible method and body-header semantics across redirects", async () => {
+    const observations: Array<{
+      method: string | undefined;
+      contentType: string | undefined;
+      body: string;
+    }> = [];
+    const url = await spawn((req, res) => {
+      if (req.url === "/") {
+        res.statusCode = 302;
+        res.setHeader("Location", "/final");
+        res.end();
+        return;
+      }
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+      req.on("end", () => {
+        observations.push({
+          method: req.method,
+          contentType: req.headers["content-type"],
+          body: Buffer.concat(chunks).toString("utf8"),
+        });
+        res.statusCode = 200;
+        res.end("done");
+      });
+    });
+
+    await fetchHttpTarget(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "create" }),
+    });
+    await fetchHttpTarget(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "replace" }),
+    });
+
+    expect(observations).toEqual([
+      { method: "GET", contentType: undefined, body: "" },
+      { method: "PUT", contentType: "application/json", body: JSON.stringify({ action: "replace" }) },
+    ]);
+  });
+
+  it("provides a response-preserving pinned fetch for long-lived protocol transports", async () => {
+    const url = await spawn((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ protocol: "mcp" }));
+    });
+    const pinned = createPinnedHttpFetch();
+
+    const response = await pinned.fetch(url);
+    expect(response).toBeInstanceOf(Response);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ protocol: "mcp" });
+
+    await pinned.close();
+    await expect(pinned.fetch(url)).rejects.toThrow(/closed/);
+  });
+
+  it("does not start a request when close races an in-flight DNS lookup", async () => {
+    vi.stubEnv("ALLOW_PRIVATE_HTTP_TARGETS", "false");
+    let finishLookup!: (
+      value: Array<{ address: string; family: number }>,
+    ) => void;
+    lookupMock.mockImplementationOnce(() =>
+      new Promise((resolve) => {
+        finishLookup = resolve;
+      }) as never
+    );
+    const pinned = createPinnedHttpFetch();
+    const request = pinned.fetch("http://slow-dns.example/mcp");
+
+    await pinned.close();
+    finishLookup([{ address: "203.0.113.20", family: 4 }]);
+
+    await expect(request).rejects.toThrow(/closed/);
+  });
+
+  it("revalidates every redirect made by the response-preserving pinned fetch", async () => {
+    const url = await spawn((_req, res) => {
+      vi.stubEnv("ALLOW_PRIVATE_HTTP_TARGETS", "false");
+      res.statusCode = 302;
+      res.setHeader("Location", "http://169.254.169.254/latest/meta-data");
+      res.end();
+    });
+    const pinned = createPinnedHttpFetch();
+
+    await expect(pinned.fetch(url)).rejects.toThrow(/private and blocked/);
+    await pinned.close();
   });
 
   it("returns a normal HttpResult for a sane upstream within all defaults", async () => {

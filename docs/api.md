@@ -997,7 +997,33 @@ For `headers` (HTTP nodes) and `input` (tool nodes), the LLM emits a bounded `Ar
 { "deadLetterId": "<uuid>", "suggestedWorkflow": { "...DAG..." } }
 ```
 
-Replays the proposed patch in a writes-skipped sandbox run. Returns `{ "runId": "<uuid>" }`. Poll `GET /run?runId=<uuid>` until terminal — `succeeded` gates the production save+replay chain; `failed` / `cancelled` surfaces the failed node's `errorJson` so the operator can iterate.
+Replays the proposed patch in a writes-skipped sandbox run. Returns `{ "runId": "<uuid>" }`. Poll `GET /run?runId=<uuid>` until terminal — `succeeded` gates the production save+redrive chain; `failed` / `cancelled` surfaces the failed node's `errorJson` so the operator can iterate.
+
+### `POST /runs/redrive` (stable: `POST /v1/runs/redrive`)
+
+```json
+{
+  "runId": "<failed-source-run>",
+  "nodeId": "<optional-when-unambiguous>",
+  "workflowVersionId": "<optional-saved-target-version>"
+}
+```
+
+Continues a failed saved-workflow run from the failed node, reusing only
+upstream outputs that succeeded and executing the latest saved version unless
+`workflowVersionId` selects another version. This is the production operation
+to use after validating and saving a patch. Reissuing the same source node and
+target version returns the existing continuation run id rather than publishing
+duplicate work. `dlq.replay` is different: it retries the exact failed node on
+the original run snapshot.
+
+### `POST /workflows/:id/resume` (stable: `POST /v1/workflows/{workflowId}/resume`)
+
+Clears only a recovery-circuit-breaker pause and starts an oldest-first bounded
+backfill of trigger events buffered while the workflow was paused. The response
+is `{ "ok": true, "workflowId": "...", "status": "active", "backfilled": N,
+"failed": N, "remaining": N }`. Repeat only while `remaining > 0`; pause states
+owned by other subsystems are rejected rather than being cleared broadly.
 
 ### `GET /dlq/clusters?windowDays=30`
 

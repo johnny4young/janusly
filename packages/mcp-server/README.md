@@ -1,12 +1,24 @@
 # `@janusly/mcp-server`
 
-A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes Janusly to MCP-aware AI clients (Claude Desktop, Cursor, custom agents). It publishes eighteen always-available read tools and ten write tools advertised only when explicit consent is configured. All tools proxy HTTP to the running Janusly API; operations with explicit contracts use `/v1`, while the remaining routes stay on their compatible legacy paths until their schemas are versioned.
+A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes
+Janusly to MCP-aware AI clients (Claude Desktop, Cursor, custom agents). It
+publishes 24 always-available discovery/inspection tools and 13 write tools
+advertised only when explicit consent is configured. Every tool proxies a
+runtime-validated `/v1` contract on the running Janusly API.
 
 ## What is MCP and why ship a server?
 
-MCP is Anthropic's open protocol for letting AI assistants talk to external systems. An **MCP client** (e.g. Claude Desktop) speaks a JSON-RPC dialect over stdio or HTTP+SSE to one or more **MCP servers**. Each server advertises a list of *tools* (function-shaped capabilities); the client surfaces those in its UI and the model decides when to call them.
+MCP is an open standard for letting AI assistants talk to external systems. An
+**MCP client** speaks JSON-RPC over stdio or Streamable HTTP to one or more
+**MCP servers**. Each server advertises tools and their schemas; the host decides
+how and when a model may call them.
 
-By being a first-class MCP server, a developer running Claude Desktop can ask "what workflows do I have, what tools can I call from a flow, how did `run-42` actually fail" without leaving the chat. The same surface can validate a workflow through the API, so authored flows can be checked before an operator saves them in Janusly.
+By being a first-class MCP server, an external agent can discover, author,
+validate, save, run, observe, resume, cancel, and recover Janusly workflows
+without bypassing the API. This is **agent-complete workflow operation**, not
+unrestricted platform administration: secrets, identity/membership, arbitrary
+tenant configuration, deployment rollouts, and workflow trash/delete/restore
+controls stay operator-owned.
 
 ## Architecture: protocol-translation layer over the HTTP API
 
@@ -52,13 +64,19 @@ Boot story: Claude Desktop reads its config file (`~/Library/Application Support
 | `workflows.get` | `GET /v1/workflows/latest` | Fetch the latest active workflow version. |
 | `workflows.versions` | `GET /v1/workflows/versions` | List immutable versions newest-first. |
 | `workflows.health` | `GET /v1/workflows/health` | Compute workflow health and SLO signals. |
+| `workflows.schedule_preview` | `GET /v1/workflows/schedule-preview` | Validate a cron and preview three fires. |
 | `recipes.list` | `GET /v1/templates` | List built-in workflow recipes. |
 | `tools.list` | `GET /v1/tools` | List the runtime tool catalog. |
 | `runs.get` | `GET /v1/run` | Fetch one run with paginated events. |
 | `runs.list` | `GET /v1/runs` | List recent runs with workflow, status, and run-kind filters. |
+| `runs.status` | `GET /v1/status` | Poll the latest durable run state. |
+| `runs.usage` | `GET /v1/run/usage` | Read attributed LLM and memory usage. |
 | `dlq.list` | `GET /v1/dlq` | List bounded DLQ entries. |
 | `dlq.clusters` | `GET /v1/dlq/clusters` | Group recent failures by normalized signature. |
+| `memory.consent_status` | `GET /v1/memory/consent-status` | Inspect effective memory consent and purge state. |
 | `recovery.metrics` | `GET /v1/recovery/metrics` | Read the tenant recovery rollup. |
+| `recovery.ledger` | `GET /v1/recovery/ledger` | Read lifetime impact-bound recovery totals. |
+| `recovery.my_wins` | `GET /v1/recovery/my-wins` | Read operator-attributed recent recoveries. |
 | `reports.run_explain` | `GET /v1/reports/run-explain` | Explain one run with structured evidence. |
 | `ai.patch_workflow` | `POST /v1/ai/patch-workflow` | Suggest patches without saving a workflow version. |
 | `ai.generate_workflow` | `POST /v1/ai/generate-workflow` | Generate a workflow suggestion without saving it. |
@@ -73,18 +91,42 @@ Write tools are advertised only when `JANUSLY_MCP_WRITES_ENABLED=true` is set in
 | --- | --- | --- |
 | `workflows.save` | `POST /v1/workflows/save` | Save a workflow version; `dryRun: true` uses `/v1/validate` instead. |
 | `workflows.rollback` | `POST /v1/workflows/rollback` | Append a prior DAG as the new latest version. |
+| `workflows.resume` | `POST /v1/workflows/{workflowId}/resume` | Clear only a recovery-circuit pause and backfill buffered triggers. |
 | `runs.start` | `POST /v1/start` | Start a production run. |
 | `runs.resume` | `POST /v1/resume` | Resume a waiting approval or human-form node. |
+| `runs.redrive` | `POST /v1/runs/redrive` | Continue a failed saved-workflow run on the latest or an explicit saved version. |
 | `runs.cancel` | `POST /v1/run/cancel` | Cancel an in-flight run. |
-| `dlq.replay` | `POST /v1/dlq/replay` | Replay one dead letter through its generation-bound recovery claim. Requires `deadLetterId` from `dlq.list`. |
+| `dlq.replay` | `POST /v1/dlq/replay` | Retry one dead letter on the original run snapshot. Requires `deadLetterId` from `dlq.list`. |
 | `mcp.connections.create` | `POST /v1/mcp/connections` | Register and discover an outbound connection. |
+| `mcp.connections.update` | `POST /v1/mcp/connections/{alias}` | Update an outbound connection's safe settings. |
 | `mcp.connections.rediscover` | `POST /v1/mcp/connections/{alias}/rediscover` | Refresh cached descriptors while preserving opt-ins. |
 | `mcp.connections.set_tool` | `POST /v1/mcp/connections/{alias}/tools/{toolName}` | Update enabled, write-side, exposure, or rate-limit flags. |
 | `mcp.connections.delete` | `DELETE /v1/mcp/connections/{alias}` | Delete a connection and its cached descriptors. |
 
 The pre-flight POST tools (`workflows.validate` and `workflows.readiness`) take a workflow body and return a verdict; neither writes to the database.
 
-Every tool returns one MCP `text` content block carrying the normalized result as JSON. Stable `/v1` envelopes are validated and unwrapped first, so the model receives the operation data rather than transport metadata. Future tools could surface structured `resource` content blocks if the UX warrants.
+Every tool declares a closed input schema, a generic output schema, and MCP risk
+annotations. Successful calls return both a compatible JSON `text` block and
+`structuredContent: { result }`. Stable `/v1` envelopes are validated and
+unwrapped first, so the model receives operation data rather than transport
+metadata. Expected input/API failures return `isError: true` tool results
+instead of escaping as JSON-RPC internal errors.
+
+The always-visible AI and report tools are not mislabeled as read-only: they
+create audit/usage evidence and AI calls consume budget, so their
+`readOnlyHint` and `idempotentHint` are false even though they never save a
+workflow version.
+
+The initialization instructions teach the durable sequence: discover → author
+→ validate/readiness → save → start → poll → inspect/recover. Janusly run IDs
+remain the asynchronous authority; the server intentionally does not duplicate
+them into the still-experimental MCP Tasks utility.
+
+For recovery, the distinction is deliberate: after an AI or human patch is
+validated and saved, call `runs.redrive` so the continuation uses that saved
+version. Use `dlq.replay` only for a transient or same-version exact-node retry.
+When `workflows.resume` reports `remaining > 0`, repeat it to drain the next
+bounded buffered-trigger page.
 
 ## Auth flow
 
@@ -137,14 +179,15 @@ pnpm --filter @janusly/mcp-server start    # tsx — for Claude Desktop
 pnpm --filter @janusly/mcp-server test     # vitest — unit tests
 ```
 
-The package is a thin wrapper. Use `start` (no watch) when Claude Desktop spawns it; the watch loop adds noise + restart races to the MCP handshake.
+The package is a thin wrapper. Use `start` (no watch) when an MCP host spawns it;
+the watch loop adds noise and restart races to the handshake.
 
 ## File layout
 
 ```
 packages/mcp-server/
 ├── README.md            ← this document
-├── package.json         ← workspace manifest; one runtime dep (@modelcontextprotocol/sdk)
+├── package.json         ← workspace manifest; MCP SDK + shared path/status catalogs
 ├── tsconfig.json        ← extends repo base, noEmit
 ├── vite.config.ts       ← vitest config (node env, src/**/*.test.ts)
 └── src/
@@ -157,13 +200,22 @@ packages/mcp-server/
 
 ## Adding a new tool
 
-1. Add a descriptor to `tools` in [`src/tools.ts`](src/tools.ts) — `name`, `description`, `inputSchema` (JSON Schema, not Zod — MCP speaks JSON Schema natively).
+1. Add a descriptor to the appropriate catalog in
+   [`src/tools.ts`](src/tools.ts)—`name`, `description`, and `inputSchema`
+   (JSON Schema, not Zod). Shared decoration adds the closed top-level schema,
+   output schema, and annotations; update the risk sets when the defaults are
+   not accurate.
 2. Add a `case` arm to `runOne` mapping the tool to its API URL. Use `URLSearchParams` for query strings (catches encoding bugs).
 3. Add a unit test to `tools.test.ts` asserting the URL/headers shape with a `vi.fn` `callApi`.
-4. Use `/v1` only when the backing route has an explicit Zod contract in `V1_CONTRACT_ROUTES`; the API intentionally returns 404 for uncontracted aliases.
+4. Use the path/status constants from `@janusly/shared`; the backing route must
+   have an explicit Zod contract in `V1_CONTRACT_ROUTES`.
 5. Bump the package version if anything is downstream-visible.
 
 Write tools must go through `guardMcpWrite(auth, actionKey)` in `apps/api/src/mcp-consent.ts`; that chokepoint applies the process flag, tenant consent, and per-tool rate limit for MCP-source traffic. Route audits use `auditAction`, which derives the MCP source and actor metadata. Add a write tool by extending `WRITE_TOOLS`, adding a `requireWrites`-guarded dispatch branch, guarding the backing API route, and covering both env-off refusal and env-on dispatch. Do not add destructive tools without all of those controls.
+
+The complete boundary, lifecycle rationale, protocol contract, and deliberate
+non-goals live in
+[`docs/architecture/mcp-server.md`](../../docs/architecture/mcp-server.md).
 
 ## Configuring MCP writes
 

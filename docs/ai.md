@@ -29,7 +29,7 @@ This guide covers local setup. For production secret management, point the same 
 | Feature | Endpoint / surface | Without key | With key |
 | --- | --- | --- | --- |
 | Suggest 1–3 alternative patches for a failing node | `POST /ai/patch-workflow` | `{ mode: "fallback" }` with a single 0-confidence "other" item and the original workflow untouched | Per-failing-node-type envelope returns `suggestions: Array<{ workflow, rationale, approachLabel, confidence }>` (1–3 items, sorted by confidence desc). Recovery dialog renders one tab per item. |
-| Sandbox-validate a proposed patch before saving | `POST /dlq/validate-fix` | Always available — sandbox is provider-agnostic | Same; gates the production save+replay chain |
+| Sandbox-validate a proposed patch before saving | `POST /dlq/validate-fix` | Always available — sandbox is provider-agnostic | Same; gates the production save+redrive chain |
 | Apply a patch across every DLQ entry sharing a failure signature | `POST /dlq/cluster-apply` | Always available | Same; recovery dialog reuses the multi-suggestion tabs in cluster mode |
 | Failure clustering | `GET /dlq/clusters` | Always available — deterministic signature classifier | Same |
 | Roll back a workflow to any prior version | `POST /workflows/rollback` | Always available — pure CRUD | Same |
