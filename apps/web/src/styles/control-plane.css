@@ -256,6 +256,8 @@
 .we-workflow-io__required { flex: 0 0 auto; margin: 0; }
 .we-workflow-io__description,
 .we-workflow-io__template { font-family: inherit; }
+.we-workflow-io__default { display: block; }
+.we-workflow-io__default > .text-field { width: 100%; }
 .we-workflow-io__template { flex: 1 1 auto; min-width: 0; }
 .we-workflow-io__error { color: var(--we-danger); }
 

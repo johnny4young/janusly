@@ -7,7 +7,7 @@
  * Used by: `InspectorPanel.tsx` when no node or edge is selected.
  */
 
-import { useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import type { WorkflowDefinition, WorkflowInputSchemaShape } from '../types'
 import { useT } from '../i18n'
@@ -180,6 +180,13 @@ export function WorkflowIoEditor({
                 onRename={(next) => renameInput(name, next)}
                 onTypeChange={(type) => updateInput(name, shapeForType(type, shape.description))}
                 onDescriptionChange={(description) => updateInput(name, { ...shape, description: description || undefined })}
+                onDefaultChange={(value) => {
+                  // Clearing removes the key entirely — a lingering
+                  // `default: undefined` would serialize differently across
+                  // JSON round-trips and read as "declared" to a future editor.
+                  const { default: _cleared, ...rest } = shape
+                  updateInput(name, value === undefined ? rest : { ...rest, default: value })
+                }}
                 onRequiredChange={(checked) => toggleRequired(name, checked)}
                 onRemove={() => removeInput(name)}
               />
@@ -220,13 +227,15 @@ export function WorkflowIoEditor({
   )
 }
 
-function InputRow({ name, shape, required, onRename, onTypeChange, onDescriptionChange, onRequiredChange, onRemove }: {
+function InputRow({ name, shape, required, onRename, onTypeChange, onDescriptionChange, onDefaultChange, onRequiredChange, onRemove }: {
   name: string
   shape: WorkflowInputSchemaShape
   required: boolean
   onRename: (name: string) => boolean
   onTypeChange: (type: WorkflowInputSchemaShape['type']) => void
   onDescriptionChange: (description: string) => void
+  /** `undefined` clears the declared default rather than storing an empty value. */
+  onDefaultChange: (value: unknown) => void
   onRequiredChange: (required: boolean) => void
   onRemove: () => void
 }) {
@@ -281,8 +290,134 @@ function InputRow({ name, shape, required, onRename, onTypeChange, onDescription
         placeholder={t('rightPanel.inspector.inputDescriptionPlaceholder')}
         aria-label={t('rightPanel.inspector.inputDescriptionAria', { name })}
       />
+      <InputDefaultField name={name} shape={shape} onChange={onDefaultChange} />
       {nameError && <p id={nameErrorId} className="we-workflow-io__error" role="alert">{t('rightPanel.inspector.nameConflict')}</p>}
     </div>
+  )
+}
+
+/**
+ * Declared default for one input — the value a run uses when the caller omits
+ * the field, and what makes a trigger-started workflow runnable at all.
+ *
+ * The control is typed to the field so the stored value keeps its JSON type: a
+ * number field must not persist `"12"`, which would fail
+ * `input_default_type_mismatch` at save. Object/array defaults are deliberately
+ * not editable inline — the same posture the rest of this editor takes toward
+ * nested shapes, which it preserves rather than flattening.
+ */
+function InputDefaultField({ name, shape, onChange }: {
+  name: string
+  shape: WorkflowInputSchemaShape
+  onChange: (value: unknown) => void
+}) {
+  const { t } = useT()
+  if (shape.type === 'object' || shape.type === 'array') return null
+
+  const label = t('rightPanel.inspector.inputDefaultAria', { name })
+  if (shape.type === 'boolean') {
+    // Three states: unset (no default), true, false — a bare checkbox could not
+    // express "no default declared".
+    const value = shape.default === undefined ? '' : shape.default ? 'true' : 'false'
+    return (
+      <label className="we-workflow-io__default">
+        <span className="we-sr-only">{label}</span>
+        <select
+          className="text-field text-field--compact"
+          value={value}
+          aria-label={label}
+          onChange={(event) => onChange(event.target.value === '' ? undefined : event.target.value === 'true')}
+        >
+          <option value="">{t('rightPanel.inspector.inputDefaultNone')}</option>
+          <option value="true">{t('rightPanel.inspector.inputDefaultTrue')}</option>
+          <option value="false">{t('rightPanel.inspector.inputDefaultFalse')}</option>
+        </select>
+      </label>
+    )
+  }
+
+  if (shape.type === 'number') {
+    return (
+      <NumberDefaultField
+        label={label}
+        value={typeof shape.default === 'number' ? shape.default : undefined}
+        placeholder={t('rightPanel.inspector.inputDefaultPlaceholder')}
+        onChange={onChange}
+      />
+    )
+  }
+
+  return (
+    <label className="we-workflow-io__default">
+      <span className="we-sr-only">{label}</span>
+      <input
+        className="text-field text-field--compact"
+        type="text"
+        value={shape.default === undefined ? '' : String(shape.default)}
+        placeholder={t('rightPanel.inspector.inputDefaultPlaceholder')}
+        aria-label={label}
+        onChange={(event) => {
+          const next = event.target.value
+          onChange(next === '' ? undefined : next)
+        }}
+      />
+    </label>
+  )
+}
+
+const FINITE_NUMBER_DRAFT = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/
+
+/**
+ * Keep the operator's in-progress number text separate from the normalized
+ * workflow value. Browser number inputs erase useful intermediate states such
+ * as `-` and `1e`; a decimal keyboard hint plus explicit finite parsing lets
+ * those states remain editable without ever persisting NaN or a string.
+ */
+function NumberDefaultField({ label, value, placeholder, onChange }: {
+  label: string
+  value?: number
+  placeholder: string
+  onChange: (value: unknown) => void
+}) {
+  const externalValue = value === undefined ? '' : String(value)
+  const [draft, setDraft] = useState(externalValue)
+  const focusedRef = useRef(false)
+  const draftIsValid = draft === '' || (FINITE_NUMBER_DRAFT.test(draft) && Number.isFinite(Number(draft)))
+
+  useEffect(() => {
+    if (!focusedRef.current) setDraft(externalValue)
+  }, [externalValue])
+
+  return (
+    <label className="we-workflow-io__default">
+      <span className="we-sr-only">{label}</span>
+      <input
+        className="text-field text-field--compact"
+        type="text"
+        inputMode="decimal"
+        value={draft}
+        placeholder={placeholder}
+        aria-label={label}
+        aria-invalid={draftIsValid ? undefined : true}
+        onFocus={() => { focusedRef.current = true }}
+        onChange={(event) => {
+          const next = event.target.value
+          setDraft(next)
+          if (next === '') {
+            onChange(undefined)
+            return
+          }
+          if (FINITE_NUMBER_DRAFT.test(next)) {
+            const parsed = Number(next)
+            if (Number.isFinite(parsed)) onChange(parsed)
+          }
+        }}
+        onBlur={() => {
+          focusedRef.current = false
+          setDraft(value === undefined ? '' : String(value))
+        }}
+      />
+    </label>
   )
 }
 

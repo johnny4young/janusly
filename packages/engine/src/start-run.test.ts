@@ -182,6 +182,36 @@ describe('startRun persistence chokepoint', () => {
     expect(runWrite.traceId).toBe('trace-parent')
   })
 
+  it('applies and persists an omitted primitive root input default', async () => {
+    await startRun({
+      dslVersion: '1.0',
+      id: 'primitive-input-workflow',
+      inputs: { type: 'string', default: 'production' },
+      nodes: [],
+      edges: [],
+    })
+
+    const runWrite = txInsertMock.mock.calls.find(([table]) => table === runsTable)?.[1] as {
+      inputJson: { input: unknown }
+    }
+    expect(runWrite.inputJson.input).toBe('production')
+  })
+
+  it('preserves the empty-object input contract when no object defaults resolve', async () => {
+    await startRun({
+      dslVersion: '1.0',
+      id: 'object-input-workflow',
+      inputs: { type: 'object', properties: { optional: { type: 'string' } } },
+      nodes: [],
+      edges: [],
+    })
+
+    const runWrite = txInsertMock.mock.calls.find(([table]) => table === runsTable)?.[1] as {
+      inputJson: { input: unknown }
+    }
+    expect(runWrite.inputJson.input).toEqual({})
+  })
+
   it('commits the exact parent waiting checkpoint before publishing child roots', async () => {
     enqueueNodeMock.mockImplementation(async () => {
       expect(transactionState.finished).toBe(true)

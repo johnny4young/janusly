@@ -412,7 +412,8 @@
                             "enum": {
                               "type": "array",
                               "items": {}
-                            }
+                            },
+                            "default": {}
                           },
                           "required": [
                             "type"
@@ -1752,7 +1753,8 @@
                             "enum": {
                               "type": "array",
                               "items": {}
-                            }
+                            },
+                            "default": {}
                           },
                           "required": [
                             "type"
@@ -2770,7 +2772,8 @@
                       "enum": {
                         "type": "array",
                         "items": {}
-                      }
+                      },
+                      "default": {}
                     },
                     "required": [
                       "type"
@@ -8859,7 +8862,8 @@
                       "enum": {
                         "type": "array",
                         "items": {}
-                      }
+                      },
+                      "default": {}
                     },
                     "required": [
                       "type"
@@ -9767,7 +9771,8 @@
                             "enum": {
                               "type": "array",
                               "items": {}
-                            }
+                            },
+                            "default": {}
                           },
                           "required": [
                             "type"
@@ -11517,7 +11522,8 @@
                             "enum": {
                               "type": "array",
                               "items": {}
-                            }
+                            },
+                            "default": {}
                           },
                           "required": [
                             "type"
@@ -12224,7 +12230,8 @@
                       "enum": {
                         "type": "array",
                         "items": {}
-                      }
+                      },
+                      "default": {}
                     },
                     "required": [
                       "type"
@@ -12890,7 +12897,8 @@
                             "enum": {
                               "type": "array",
                               "items": {}
-                            }
+                            },
+                            "default": {}
                           },
                           "required": [
                             "type"

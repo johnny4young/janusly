@@ -141,6 +141,18 @@ export const WorkflowInputTypeSchema = z.enum(workflowInputTypeValues);
  * - `items`: only meaningful for `type: "array"`.
  * - `enum`: closed set of literal values the field must equal one of.
  * - `description`: free-form, surfaces in the AI Studio Inspector.
+ * - `default`: value used when the run-start payload omits the field.
+ *
+ * `default` is what makes a declared input a workflow-level SETTING rather
+ * than only a per-run argument: the operator states the value once on the
+ * workflow, every node reads it through `{{context.input.<name>}}`, and
+ * changing it is one edit in one place instead of hunting literals across
+ * node configs. The `{{inputs.*}}` scope is node-local inside a node config;
+ * it refers to run input only in workflow-level `outputs` templates.
+ * It is also what lets a trigger-driven workflow declare inputs at all — a
+ * webhook/schedule run supplies `{ triggeredBy, event, … }`, never the
+ * declared fields, so without defaults a required input would reject every
+ * such run at `startRun`.
  *
  * No `oneOf` / `anyOf` / patterns / number ranges yet — expand the subset
  * (here AND in the hand-rolled validator) only when a real consumer needs it.
@@ -152,6 +164,7 @@ export const WorkflowInputSchema: z.ZodType<WorkflowInputSchemaShape> = z.lazy((
   required: z.array(z.string()).optional(),
   items: WorkflowInputSchema.optional(),
   enum: z.array(z.unknown()).optional(),
+  default: z.unknown().optional(),
 }));
 
 /**
@@ -166,6 +179,7 @@ export type WorkflowInputSchemaShape = {
   required?: string[];
   items?: WorkflowInputSchemaShape;
   enum?: unknown[];
+  default?: unknown;
 };
 
 /**

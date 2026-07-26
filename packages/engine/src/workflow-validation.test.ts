@@ -13,6 +13,56 @@ describe('validateWorkflow', () => {
     expect(result).toEqual({ valid: true, issues: [] })
   })
 
+  it('accepts declared input defaults that satisfy their recursive schemas', () => {
+    const result = validateWorkflow({
+      nodes: [{ id: 'start', type: 'noop', config: {} }],
+      edges: [],
+      inputs: {
+        type: 'object',
+        properties: {
+          retries: { type: 'number', default: 3 },
+          schedule: {
+            type: 'object',
+            default: { zone: 'UTC' },
+            properties: { zone: { type: 'string', default: 'UTC' } },
+            required: ['zone'],
+          },
+        },
+      },
+    })
+
+    expect(result.issues.filter(issue => issue.code === 'input_default_type_mismatch')).toEqual([])
+  })
+
+  it('rejects mismatched defaults at primitive, nested, and array-item paths', () => {
+    const result = validateWorkflow({
+      nodes: [{ id: 'start', type: 'noop', config: {} }],
+      edges: [],
+      inputs: {
+        type: 'object',
+        properties: {
+          retries: { type: 'number', default: 'three' },
+          schedule: {
+            type: 'object',
+            properties: { enabled: { type: 'boolean', default: 'yes' } },
+          },
+          labels: {
+            type: 'array',
+            items: { type: 'string', default: 42 },
+          },
+        },
+      },
+    })
+
+    const defaultIssues = result.issues.filter(issue => issue.code === 'input_default_type_mismatch')
+    expect(defaultIssues).toHaveLength(3)
+    expect(defaultIssues.map(issue => issue.message)).toEqual(expect.arrayContaining([
+      expect.stringContaining('$.retries'),
+      expect.stringContaining('$.schedule.enabled'),
+      expect.stringContaining('$.labels[]'),
+    ]))
+  })
+
   it('detects cycles and edges pointing to non-existent nodes', () => {
     const result = validateWorkflow({
       nodes: [

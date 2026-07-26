@@ -203,3 +203,97 @@ describe('<WorkflowIoEditor />', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 })
+
+describe('<WorkflowIoEditor /> — declared defaults', () => {
+  const state = () => JSON.parse(screen.getByTestId('io-state').textContent ?? '{}')
+
+  it('edits a string default without touching JSON', () => {
+    render(<Harness initialInputs={{
+      type: 'object',
+      properties: { timeZone: { type: 'string' } },
+      required: ['timeZone'],
+    }} />)
+
+    fireEvent.change(screen.getByLabelText('Default value for timeZone'), {
+      target: { value: 'Europe/Madrid' },
+    })
+
+    expect(state().inputs.properties.timeZone).toEqual({ type: 'string', default: 'Europe/Madrid' })
+  })
+
+  it('stores a number default as a number, not a string', () => {
+    // A string here would fail `input_default_type_mismatch` at save.
+    render(<Harness initialInputs={{ type: 'object', properties: { snoozeHours: { type: 'number' } } }} />)
+
+    fireEvent.change(screen.getByLabelText('Default value for snoozeHours'), { target: { value: '12' } })
+
+    expect(state().inputs.properties.snoozeHours.default).toBe(12)
+  })
+
+  it('keeps partial number text editable without corrupting the stored default', () => {
+    render(<Harness initialInputs={{
+      type: 'object',
+      properties: { threshold: { type: 'number', default: 12 } },
+    }} />)
+    const input = screen.getByLabelText('Default value for threshold')
+
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: '-' } })
+    expect(input).toHaveValue('-')
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(state().inputs.properties.threshold.default).toBe(12)
+
+    fireEvent.change(input, { target: { value: '-12.5' } })
+    expect(input).toHaveValue('-12.5')
+    expect(input).not.toHaveAttribute('aria-invalid')
+    expect(state().inputs.properties.threshold.default).toBe(-12.5)
+
+    fireEvent.blur(input)
+    expect(input).toHaveValue('-12.5')
+  })
+
+  it('clears the default instead of storing an empty value', () => {
+    render(<Harness initialInputs={{
+      type: 'object',
+      properties: { timeZone: { type: 'string', default: 'UTC' } },
+    }} />)
+
+    fireEvent.change(screen.getByLabelText('Default value for timeZone'), { target: { value: '' } })
+
+    expect(state().inputs.properties.timeZone).toEqual({ type: 'string' })
+    expect('default' in state().inputs.properties.timeZone).toBe(false)
+  })
+
+  it('distinguishes an unset boolean default from false', () => {
+    render(<Harness initialInputs={{ type: 'object', properties: { notify: { type: 'boolean' } } }} />)
+    const select = screen.getByLabelText('Default value for notify')
+
+    fireEvent.change(select, { target: { value: 'false' } })
+    expect(state().inputs.properties.notify.default).toBe(false)
+
+    fireEvent.change(select, { target: { value: '' } })
+    expect('default' in state().inputs.properties.notify).toBe(false)
+  })
+
+  it('drops a stale default when the field type changes', () => {
+    // '09:00' is meaningless once the field is a number; keeping it would
+    // fail validation at save with no obvious cause.
+    render(<Harness initialInputs={{
+      type: 'object',
+      properties: { start: { type: 'string', default: '09:00' } },
+    }} />)
+
+    fireEvent.change(screen.getByLabelText('Type for input start'), { target: { value: 'number' } })
+
+    expect(state().inputs.properties.start).toEqual({ type: 'number' })
+  })
+
+  it('offers no inline default for object and array fields', () => {
+    render(<Harness initialInputs={{
+      type: 'object',
+      properties: { window: { type: 'object', properties: {} } },
+    }} />)
+
+    expect(screen.queryByLabelText('Default value for window')).not.toBeInTheDocument()
+  })
+})

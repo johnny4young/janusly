@@ -458,7 +458,8 @@ function PrimitiveOrArrayField({
 function initialFormState(schema: WorkflowInputSchemaShape, initialValue?: unknown): FormState {
   if (schema.type === 'object' && schema.properties) {
     const obj: FormState = {}
-    const supplied = isRecord(initialValue) ? initialValue : {}
+    const effectiveValue = initialValue !== undefined ? initialValue : schema.default
+    const supplied = isRecord(effectiveValue) ? effectiveValue : {}
     for (const [key, child] of Object.entries(schema.properties)) {
       obj[key] = initialLeafValue(child, supplied[key])
     }
@@ -468,16 +469,20 @@ function initialFormState(schema: WorkflowInputSchemaShape, initialValue?: unkno
 }
 
 function initialLeafValue(schema: WorkflowInputSchemaShape, supplied?: unknown): unknown {
-  if (supplied !== undefined) {
-    if (schema.type === 'object' && schema.properties && isRecord(supplied)) {
+  const effectiveValue = supplied !== undefined ? supplied : schema.default
+  if (effectiveValue !== undefined) {
+    if (schema.type === 'object' && schema.properties && isRecord(effectiveValue)) {
       const nested: Record<string, unknown> = {}
       for (const [key, child] of Object.entries(schema.properties)) {
-        nested[key] = initialLeafValue(child, supplied[key])
+        nested[key] = initialLeafValue(child, effectiveValue[key])
       }
       return nested
     }
-    return supplied
+    return effectiveValue
   }
+  // A declared default prefills the field, so the operator sees the value the
+  // run would use and only edits what they mean to override. The engine
+  // applies the same default server-side, so leaving it untouched is a no-op.
   if (schema.type === 'boolean') return false
   if (schema.type === 'object' && schema.properties) {
     const nested: Record<string, unknown> = {}

@@ -49,6 +49,17 @@ describe("generate-workflow system prompt", () => {
     expect(promptsSource).toContain("'email.send'|'pdf.generate'|'slack.post'|'github.create_issue'|'webhook.send'");
     expect(promptsSource).toContain("'db.schema.describe'|'db.query.read'|'db.query.write'|'db.query.transaction'");
     expect(promptsSource).toContain("'vector.search'|'vector.upsert'");
+    // The only zone-aware weekday/time-of-day primitive: without it in the
+    // catalog the model has no way to express a business-hours rule.
+    expect(promptsSource).toContain("'time.window'");
+    expect(promptsSource).toContain("BUSINESS-HOURS RULE");
+    expect(promptsSource).toContain("output.result.inWindow");
+    // Operator-configurable values are declared once and templated, not
+    // repeated as literals across node configs.
+    expect(promptsSource).toContain("CONFIGURABLE-SETTINGS RULE");
+    expect(promptsSource).toContain("{{context.input.<name>}}");
+    // The default is what keeps a trigger-started workflow runnable.
+    expect(promptsSource).toContain("ALWAYS give each field a `default`");
     // The tool rule now asks the LLM to forward fields the operator
     // gave verbatim (closing the bug where every tool-using prompt
     // silently fell back). Pin the new phrasing so a future edit

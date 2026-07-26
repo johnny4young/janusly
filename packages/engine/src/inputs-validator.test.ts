@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { validateInputs, WorkflowInputValidationError } from './inputs-validator'
+import { applyInputDefaults, validateInputs, WorkflowInputValidationError } from './inputs-validator'
 import type { WorkflowInputSchemaShape } from '@janusly/shared'
 
 describe('validateInputs — primitives', () => {
@@ -109,5 +109,118 @@ describe('WorkflowInputValidationError', () => {
     expect(err).toBeInstanceOf(Error)
     expect(err.name).toBe('WorkflowInputValidationError')
     expect(err.errors).toEqual(['$.x is required'])
+  })
+})
+
+describe('applyInputDefaults', () => {
+  // The setting a trigger-driven workflow needs: declared once, same on every
+  // run, read by nodes through `{{context.input.<name>}}`.
+  const settings: WorkflowInputSchemaShape = {
+    type: 'object',
+    properties: {
+      workingHoursStart: { type: 'string', default: '09:00' },
+      workingHoursEnd: { type: 'string', default: '17:00' },
+      timeZone: { type: 'string', default: 'UTC' },
+      snoozeHours: { type: 'number', default: 12 },
+    },
+    required: ['workingHoursStart', 'workingHoursEnd', 'timeZone'],
+  }
+
+  it('fills declared defaults into an empty payload', () => {
+    expect(applyInputDefaults(settings, {})).toEqual({
+      workingHoursStart: '09:00',
+      workingHoursEnd: '17:00',
+      timeZone: 'UTC',
+      snoozeHours: 12,
+    })
+  })
+
+  it('lets a supplied value win over its default', () => {
+    expect(applyInputDefaults(settings, { timeZone: 'America/Bogota' })).toMatchObject({
+      timeZone: 'America/Bogota',
+      workingHoursStart: '09:00',
+    })
+  })
+
+  it('treats explicit null and false as supplied, not absent', () => {
+    const schema: WorkflowInputSchemaShape = {
+      type: 'object',
+      properties: {
+        enabled: { type: 'boolean', default: true },
+        note: { type: 'string', default: 'fallback' },
+      },
+    }
+    expect(applyInputDefaults(schema, { enabled: false, note: null })).toEqual({
+      enabled: false,
+      note: null,
+    })
+  })
+
+  it('never mutates the caller payload', () => {
+    const supplied = { timeZone: 'Asia/Tokyo' }
+    applyInputDefaults(settings, supplied)
+    expect(supplied).toEqual({ timeZone: 'Asia/Tokyo' })
+  })
+
+  it('lets a trigger payload satisfy required settings that have defaults', () => {
+    // The regression this exists for: a webhook/schedule run supplies the
+    // event, never the declared fields, so without defaults every such run
+    // was rejected at startRun.
+    const triggerPayload = { triggeredBy: 'pagerduty_incident', event: { incidentId: 'P1' } }
+    const resolved = applyInputDefaults(settings, triggerPayload)
+
+    expect(validateInputs(settings, resolved)).toEqual({ valid: true })
+    expect(resolved).toMatchObject({ triggeredBy: 'pagerduty_incident', workingHoursStart: '09:00' })
+    // Without defaults the same payload is still rejected.
+    expect(validateInputs(settings, triggerPayload).valid).toBe(false)
+  })
+
+  it('recurses into nested objects', () => {
+    const schema: WorkflowInputSchemaShape = {
+      type: 'object',
+      properties: {
+        window: {
+          type: 'object',
+          properties: { start: { type: 'string', default: '09:00' }, end: { type: 'string', default: '17:00' } },
+        },
+      },
+    }
+    expect(applyInputDefaults(schema, { window: { start: '08:00' } }))
+      .toEqual({ window: { start: '08:00', end: '17:00' } })
+    // Absent nested object still materializes from its children's defaults.
+    expect(applyInputDefaults(schema, {})).toEqual({ window: { start: '09:00', end: '17:00' } })
+  })
+
+  it('leaves an absent optional object absent when nothing defaults it', () => {
+    const schema: WorkflowInputSchemaShape = {
+      type: 'object',
+      properties: { extras: { type: 'object', properties: { note: { type: 'string' } } } },
+    }
+    expect(applyInputDefaults(schema, {})).toEqual({})
+  })
+
+  it('passes a wrong-typed default through for the validator to report', () => {
+    // Terminates instead of recursing, and the type error still surfaces.
+    const schema: WorkflowInputSchemaShape = { type: 'object', default: 'not-an-object' }
+    expect(applyInputDefaults(schema, undefined)).toBe('not-an-object')
+    expect(validateInputs(schema, applyInputDefaults(schema, undefined)).valid).toBe(false)
+  })
+
+  it('treats prototype-shaped field names as own JSON data', () => {
+    const properties = Object.fromEntries([
+      ['__proto__', { type: 'string', default: 'safe' }],
+    ]) as Record<string, WorkflowInputSchemaShape>
+    const schema: WorkflowInputSchemaShape = {
+      type: 'object',
+      properties,
+      required: ['__proto__'],
+    }
+
+    const resolved = applyInputDefaults(schema, {}) as Record<string, unknown>
+
+    expect(Object.getPrototypeOf(resolved)).toBe(Object.prototype)
+    expect(Object.hasOwn(resolved, '__proto__')).toBe(true)
+    expect(resolved.__proto__).toBe('safe')
+    expect(validateInputs(schema, resolved)).toEqual({ valid: true })
   })
 })

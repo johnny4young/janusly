@@ -57,6 +57,52 @@ export function validateInputs(
   return errors.length === 0 ? { valid: true } : { valid: false, errors };
 }
 
+/**
+ * Fill declared defaults into a run-start payload.
+ *
+ * Returns a new value — the caller's payload is never mutated. A supplied
+ * value always wins, including an explicit `null` or `false`, so only a
+ * genuinely absent field takes its default. Object schemas recurse so nested
+ * settings can be defaulted field by field, and a defaulted object fills its
+ * own children before being returned.
+ *
+ * Run this BEFORE `validateInputs`: it is what lets a workflow declare a
+ * required setting and still start from a trigger (whose payload carries the
+ * event, never the declared fields) or from a bare `POST /start`.
+ */
+export function applyInputDefaults(schema: WorkflowInputSchemaShape, value: unknown): unknown {
+  if (schema.type !== "object") {
+    return value === undefined ? schema.default : value;
+  }
+
+  // Pick what to fill into. A wrong-typed supplied value or default is passed
+  // through untouched so `validateInputs` reports the type error rather than
+  // this function silently reshaping it.
+  const base = value !== undefined ? value : schema.default;
+  if (base !== undefined && !isPlainObject(base)) return base;
+
+  const filled: Record<string, unknown> = { ...(base as Record<string, unknown> | undefined) };
+  for (const [key, child] of Object.entries(schema.properties ?? {})) {
+    const supplied = Object.hasOwn(filled, key) ? filled[key] : undefined;
+    const resolved = applyInputDefaults(child, supplied);
+    if (resolved !== undefined) {
+      // JSON object keys are data, including `__proto__`. Define them rather
+      // than invoking Object.prototype's legacy setter, and never treat an
+      // inherited property as a supplied workflow value.
+      Object.defineProperty(filled, key, {
+        value: resolved,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+    }
+  }
+  // An absent optional object stays absent unless a child default gave it
+  // content — otherwise every optional section would materialize as `{}`.
+  if (base === undefined && Object.keys(filled).length === 0) return undefined;
+  return filled;
+}
+
 function walk(schema: WorkflowInputSchemaShape, value: unknown, path: string, errors: string[]): void {
   if (!matchesType(schema.type, value)) {
     errors.push(`${path} must be ${schema.type}, got ${describeActual(value)}`);
@@ -70,12 +116,12 @@ function walk(schema: WorkflowInputSchemaShape, value: unknown, path: string, er
   if (schema.type === "object" && isPlainObject(value)) {
     const obj = value as Record<string, unknown>;
     for (const requiredKey of schema.required ?? []) {
-      if (!(requiredKey in obj)) {
+      if (!Object.hasOwn(obj, requiredKey)) {
         errors.push(`${path}.${requiredKey} is required`);
       }
     }
     for (const [propName, propSchema] of Object.entries(schema.properties ?? {})) {
-      if (propName in obj) {
+      if (Object.hasOwn(obj, propName)) {
         walk(propSchema, obj[propName], `${path}.${propName}`, errors);
       }
     }

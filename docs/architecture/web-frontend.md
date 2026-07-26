@@ -50,6 +50,36 @@ real locale switch must fetch the second catalog. The matching bundle budget
 keeps entry JavaScript at 8 KiB gzip and Home at 300 KiB transferred; do not
 raise either cap without a measured, reviewed reason.
 
+## Render-error blast radius
+
+`ErrorBoundary` (`apps/web/src/components/ErrorBoundary.tsx`) is the single
+render-error boundary: a class component, because `getDerivedStateFromError`
+has no hook equivalent. It wraps three surfaces — the React Flow canvas
+(`WorkflowCanvas.tsx`), every tab panel (the one `RightPanel` mount point, so a
+new tab is covered without extra wiring), and the Recovery Center home surface
+(`App.tsx`, which renders outside the panel router).
+
+Panels render whatever the API returns, so a section dereferencing an
+unexpected envelope must cost its own card and nothing else. Without a
+boundary the throw unmounts the entire tree and the page goes blank — that is
+an observed failure, not a hypothetical: `RecoveryValidationSection` reads
+`report.totals` unconditionally and blanked the whole workspace when
+`/recovery/validation` returned an unexpected shape.
+
+A tripped boundary stays in its fallback until something clears it, so both
+hatches must stay wired:
+
+- `resetKey` — the canvas passes the workflow id, panels pass the active tab.
+  Clearing happens through `getDerivedStateFromProps` rather than a remount, so
+  a healthy subtree keeps its React Flow viewport and scroll position.
+- the render-prop `fallback`, which receives `reset` for an in-place retry.
+  Panels use `PanelErrorFallback` (retry) because they usually trip on a single
+  bad payload; the canvas keeps its reload fallback.
+
+Failure copy goes through the i18n chokepoint (`panel.error.*`) like the rest
+of the UI. `logTag` prefixes the diagnostic console line (`panel:runs`,
+`canvas`) so a caught error is attributable in a bug report.
+
 ## Modal focus contract
 
 Every surface that can expose `aria-modal=true` uses `useDialogFocusTrap`, a
