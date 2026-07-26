@@ -27,6 +27,8 @@ import { AiCopilotPanel } from './AiCopilotPanel'
 import { InspectorPanel } from './InspectorPanel'
 import { AuthoringProblemsPanel } from './AuthoringProblemsPanel'
 import { EmptyView, PanelChrome, PanelSearch } from './panel-primitives'
+import { ErrorBoundary } from './ErrorBoundary'
+import { PanelErrorFallback } from './PanelErrorFallback'
 // Tab-specific panels are code-split out of the eager App chunk: each is only
 // rendered when the operator navigates to its own tab (never on Home or the
 // default authoring tab), so it loads on demand behind the shared <Suspense> in
@@ -153,13 +155,24 @@ export type RightPanelProps = {
 /** Tab-aware right-side panel — wraps the tab→panel router in a single
  *  <Suspense> so the lazy tab panels (multi-agent / workflows / members / packs
  *  / operations / runs) render a brief fallback on first open instead of
- *  shipping in the eager App chunk. */
+ *  shipping in the eager App chunk.
+ *
+ *  The <ErrorBoundary> is the blast-radius limit: panels render whatever the
+ *  API returns, and one of them dereferencing an unexpected envelope used to
+ *  unmount the entire workspace. Keyed on the active tab so navigating away and
+ *  back clears a tripped panel without a page reload. */
 export function RightPanel(props: RightPanelProps) {
   const { t } = useT()
   return (
-    <Suspense fallback={<div className="panel-list"><p className="helper-text">{t('common.working')}</p></div>}>
-      <RightPanelRouter {...props} />
-    </Suspense>
+    <ErrorBoundary
+      resetKey={props.tab}
+      logTag={`panel:${props.tab}`}
+      fallback={({ reset }) => <PanelErrorFallback onRetry={reset} />}
+    >
+      <Suspense fallback={<div className="panel-list"><p className="helper-text">{t('common.working')}</p></div>}>
+        <RightPanelRouter {...props} />
+      </Suspense>
+    </ErrorBoundary>
   )
 }
 

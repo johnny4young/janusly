@@ -14,7 +14,7 @@ import type { AriaLabelConfig, EdgeMouseHandler, NodeMouseHandler, OnBeforeDelet
 import type { WorkflowGraphEdge, WorkflowGraphNode } from '../types'
 import { workflowNodeTypes } from './WorkflowStepNode'
 import { workflowEdgeTypes } from './WorkflowEdge'
-import { CanvasErrorBoundary } from './CanvasErrorBoundary'
+import { ErrorBoundary } from './ErrorBoundary'
 import { useConfirm } from './ConfirmDialog'
 import { formatStatusLabel, getNodeHelper, getNodeLabel, nodeTypes } from '../constants'
 import { readCanvasViewport, writeCanvasViewport } from '../canvas-viewport'
@@ -242,7 +242,7 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
         </div>
       )}
       <div className="canvas-flow-surface" onDragOver={handleDragOver} onDrop={handleDrop}>
-        <CanvasErrorBoundary fallback={canvasErrorFallback} resetKey={viewportWorkflowId}>
+        <ErrorBoundary fallback={canvasErrorFallback} resetKey={viewportWorkflowId} logTag="canvas">
           <ReactFlow
             nodes={a11yNodes}
             edges={a11yEdges}
@@ -289,7 +289,7 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
               />
             )}
           </ReactFlow>
-        </CanvasErrorBoundary>
+        </ErrorBoundary>
       </div>
       {nodes.length === 0 && (
         // Teaching overlay for a blank canvas — pointer-events stay off the

@@ -35,6 +35,8 @@ const CanvasWorkspace = lazy(() => import('./components/CanvasWorkspace').then((
 const RunObservationWorkspace = lazy(() => import('./components/CanvasWorkspace').then((m) => ({ default: m.RunObservationWorkspace })))
 import { RightPanel } from './components/RightPanel'
 import { RecoveryCenterPanel } from './components/RecoveryCenterPanel'
+import { ErrorBoundary } from './components/ErrorBoundary'
+import { PanelErrorFallback } from './components/PanelErrorFallback'
 import { BudgetBlockedBanner } from './components/BudgetBlockedBanner'
 import { Login } from './components/Login'
 import { WorkspaceGate } from './components/WorkspaceGate'
@@ -1268,19 +1270,28 @@ export default function App() {
         //    the existing instance hidden so zoom + pan survive navigation.
         const visibility = getCanvasVisibility(activeTab, canvasActivated)
         if (activeTab === 'home') {
+          // Recovery Center renders several independently-fetched evidence
+          // sections; a throw in any of them used to unmount the whole app
+          // rather than just its own card.
           return (
-            <RecoveryCenterPanel
-              runs={runs}
-              runNodes={runNodes}
-              deadLetters={deadLetters}
-              onOpenTab={setActiveTab}
-              onOpenRun={openRun}
-              onApproveNode={canStartRuns ? approveNode : () => undefined}
-              onOpenRecoveryQueue={() => openRecoveryQueue()}
-              onTryDemoRecovery={canInstallPacks
-                ? () => injectPackFailure('failed-payment-recovery', 'billing_secret_unbound')
-                : undefined}
-            />
+            <ErrorBoundary
+              resetKey={activeTab}
+              logTag="panel:home"
+              fallback={({ reset }) => <PanelErrorFallback onRetry={reset} />}
+            >
+              <RecoveryCenterPanel
+                runs={runs}
+                runNodes={runNodes}
+                deadLetters={deadLetters}
+                onOpenTab={setActiveTab}
+                onOpenRun={openRun}
+                onApproveNode={canStartRuns ? approveNode : () => undefined}
+                onOpenRecoveryQueue={() => openRecoveryQueue()}
+                onTryDemoRecovery={canInstallPacks
+                  ? () => injectPackFailure('failed-payment-recovery', 'billing_secret_unbound')
+                  : undefined}
+              />
+            </ErrorBoundary>
           )
         }
         return (
