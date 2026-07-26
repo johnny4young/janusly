@@ -9,7 +9,7 @@ const locales = {
     hero: 'Describe the outcome. Janusly builds the flow.',
     connections: 'Connections',
     name: 'Connection name',
-    env: 'Environment variable',
+    secretValue: 'Secret value',
     add: 'Add connection',
     runs: 'Runs',
     authoringNodes: ['Call an API', 'AI prompt', 'Branch rule'],
@@ -21,7 +21,7 @@ const locales = {
     hero: 'Describe el resultado. Janusly arma el flujo.',
     connections: 'Conexiones',
     name: 'Nombre de la conexión',
-    env: 'Variable de entorno',
+    secretValue: 'Valor del secreto',
     add: 'Añadir conexión',
     runs: 'Ejecuciones',
     authoringNodes: ['Llamar a una API', 'Prompt de IA', 'Regla de rama'],
@@ -118,7 +118,10 @@ test('grouped control-plane panels and shared mutations remain bilingual', async
 
     const connectionName = `control_plane_${locale}_${stamp}`
     await page.getByLabel(copy.name, { exact: true }).fill(connectionName)
-    await page.getByLabel(copy.env, { exact: true }).fill(`CONTROL_PLANE_${locale.toUpperCase()}_${stamp}`)
+    // Managed storage is the default: the form asks for the secret value
+    // itself, which the API envelope-encrypts. The legacy environment-reference
+    // mode stays reachable through the storage selector above this field.
+    await page.getByLabel(copy.secretValue, { exact: true }).fill(`control-plane-${locale}-${stamp}`)
     await page.getByRole('button', { name: copy.add, exact: true }).click()
 
     const successToast = page.getByText(copy.added(connectionName), { exact: true })

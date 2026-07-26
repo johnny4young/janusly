@@ -35,6 +35,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import net from "node:net";
 import { fileURLToPath } from "node:url";
 import { acquireJanuslyComposeLock, composeUpPullArgs } from "./process-lock.mjs";
@@ -442,12 +443,19 @@ try {
     'return import("./src/index.ts");',
     "});",
   ].join("");
+  // Disposable per-run credential root key. Managed credential values are the
+  // default storage, so without it every `POST /credentials` carrying a
+  // `secretValue` would fail with `credentials_secret_store_unavailable`.
+  // Generated (never a literal) and shared by API + worker so a credential
+  // written by one is resolvable by the other.
+  const credentialMasterKey = randomBytes(32).toString("base64");
   const api = startService("api", "pnpm", [
     "--filter", "@janusly/api", "exec", "tsx", "--eval", e2eApiBootstrap,
   ], {
     env: {
       PORT: String(apiPort),
       OTEL_METRICS_PORT: String(apiMetricsPort),
+      JANUSLY_CREDENTIAL_MASTER_KEY: credentialMasterKey,
     },
   });
   // `@janusly/db` intentionally lets the root `.env` override inherited
@@ -473,6 +481,7 @@ try {
   ], {
     env: {
       OTEL_METRICS_PORT: String(workerMetricsPort),
+      JANUSLY_CREDENTIAL_MASTER_KEY: credentialMasterKey,
     },
   });
 
