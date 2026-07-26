@@ -473,14 +473,40 @@ export const AiNodeSchemaFreeJson = z.discriminatedUnion("type", [
   AiPagerDutyIncidentNode,
 ]);
 
+/**
+ * Declared workflow settings the model may emit, deliberately narrower than
+ * the engine's recursive `WorkflowInputSchema`: a FLAT object of primitive
+ * fields, each allowed a `default`.
+ *
+ * That is the shape an operator means by "make it configurable" — one named
+ * value, stated once, read by nodes through `{{context.input.<name>}}`. The
+ * `default` is what keeps such a workflow startable from a trigger, whose
+ * payload carries the event rather than the declared fields. Keeping nesting
+ * out means a generated draft can't invent a schema tree the operator then has
+ * to untangle; the engine still accepts the full grammar for hand-authored
+ * workflows.
+ */
+const AiWorkflowInputFieldSchema = z.object({
+  type: z.enum(["string", "number", "boolean"]),
+  description: z.string().optional(),
+  default: z.union([z.string(), z.number(), z.boolean()]).optional(),
+});
+
+const AiWorkflowInputsSchema = z.object({
+  type: z.literal("object"),
+  properties: z.record(z.string(), AiWorkflowInputFieldSchema),
+  required: z.array(z.string()).optional(),
+});
+
 /** Workflow envelope used by the default free-JSON generation path. Same
- *  envelope as `AiGenerationWorkflowSchema` but with the wider 13-branch node
- *  union (`constrained` mode keeps the 11-branch `AiGenerationWorkflowSchema`
- *  for the Anthropic grammar cap). */
+ *  envelope as `AiGenerationWorkflowSchema` but with the wider node union
+ *  (`constrained` mode keeps the 11-branch `AiGenerationWorkflowSchema`
+ *  for the Anthropic grammar cap) plus declared settings. */
 export const AiGenerationWorkflowSchemaFreeJson = z.object({
   dslVersion: z.literal("1.0").optional(),
   id: z.string().min(1).optional(),
   name: z.string().min(1).optional(),
+  inputs: AiWorkflowInputsSchema.optional(),
   nodes: z.array(AiNodeSchemaFreeJson),
   edges: z.array(EdgeSchema),
 });

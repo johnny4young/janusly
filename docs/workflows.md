@@ -9,6 +9,43 @@ when the workflow declares typed `inputs`. In production mode
 (`JANUSLY_PRODUCTION_MODE=true`), start also runs the readiness gate and rejects
 fail-level issues before `startRun` writes anything.
 
+## Declared settings (`inputs` + `default`)
+
+A declared input with a `default` is how a workflow becomes configurable in one
+place. State the value once on the workflow and template it wherever it is
+used, instead of repeating a literal across node configs:
+
+```jsonc
+{
+  "inputs": {
+    "type": "object",
+    "properties": {
+      "workingHoursStart": { "type": "string", "default": "09:00" },
+      "workingHoursEnd": { "type": "string", "default": "17:00" },
+      "timeZone": { "type": "string", "description": "IANA zone", "default": "Europe/Madrid" }
+    },
+    "required": ["workingHoursStart", "workingHoursEnd", "timeZone"]
+  }
+}
+```
+
+**Node configs read a declared input as `{{context.input.<name>}}`**, not
+`{{inputs.<name>}}` — inside a node the `inputs.` scope means that node's own
+config. `{{inputs.<name>}}` does resolve to the run input in workflow-level
+`outputs` templates.
+
+`startRun` fills defaults before validating and persists the resolved payload
+to `runs.inputJson.input`, so a run record shows the configuration it actually
+used even after the workflow's defaults later change. A supplied value always
+wins, including an explicit `null` or `false`.
+
+Defaults are also what make declared inputs usable at all on a trigger-driven
+workflow: a webhook or schedule run supplies `{ triggeredBy, event, … }` and
+never the declared fields, so a required input without a default would reject
+every such run. A `default` that does not match its declared type fails
+`validateWorkflow` (`input_default_type_mismatch`) at save time rather than at
+the first run.
+
 Pause/resume nodes share one endpoint with different token posture:
 `webhook` and `approval` use the legacy `<runId>:<nodeId>` checkpoint coordinate
 and rely on authenticated `POST /resume`; `human_form` uses an HMAC-signed,

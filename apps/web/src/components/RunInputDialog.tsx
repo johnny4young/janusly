@@ -478,6 +478,10 @@ function initialLeafValue(schema: WorkflowInputSchemaShape, supplied?: unknown):
     }
     return supplied
   }
+  // A declared default prefills the field, so the operator sees the value the
+  // run would use and only edits what they mean to override. The engine
+  // applies the same default server-side, so leaving it untouched is a no-op.
+  if (schema.default !== undefined && schema.type !== 'object') return schema.default
   if (schema.type === 'boolean') return false
   if (schema.type === 'object' && schema.properties) {
     const nested: Record<string, unknown> = {}

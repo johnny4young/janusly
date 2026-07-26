@@ -15,7 +15,7 @@
  *   breaks the UI without a TypeScript error.
  */
 
-import { WorkflowInputSchema, WorkflowSchema, nodeTypeValues, workflowVersionMax } from "@janusly/shared";
+import { WorkflowInputSchema, WorkflowSchema, nodeTypeValues, workflowVersionMax, type WorkflowInputSchemaShape } from "@janusly/shared";
 import { validateExpression } from "./expression";
 import { validateInputs } from "./inputs-validator";
 import { resolveJoinSources, resolveParallelForkBranches } from "./parallel-fork";
@@ -358,6 +358,15 @@ export function validateWorkflow(workflow: unknown, options: ValidateWorkflowOpt
     }
   }
 
+  // A declared default must satisfy the field it defaults. Checking here means
+  // a mistyped setting fails at save/validate time, where the operator is
+  // looking at the editor, instead of at the first trigger-driven run.
+  if (parsed.data.inputs) {
+    for (const [path, issue] of invalidInputDefaults(parsed.data.inputs, "$")) {
+      issues.push({ code: "input_default_type_mismatch", message: `Declared default for ${path} ${issue}` });
+    }
+  }
+
   if (hasCycle(nodes, edges)) issues.push({ code: "cycle_detected", message: "Workflow graph contains a cycle" });
 
   const incoming = new Set(edges.map((edge) => edge.to));
@@ -365,6 +374,24 @@ export function validateWorkflow(workflow: unknown, options: ValidateWorkflowOpt
   if (nodes.length > 0 && startNodes.length === 0) issues.push({ code: "missing_start_node", message: "Workflow must have at least one start node" });
 
   return { valid: issues.length === 0, issues };
+}
+
+/**
+ * Walk a declared `inputs` shape and yield `[path, problem]` for every
+ * `default` that does not satisfy the field declaring it. Recurses through
+ * object properties so a nested setting is checked at its own path.
+ */
+function* invalidInputDefaults(
+  schema: WorkflowInputSchemaShape,
+  path: string,
+): Generator<[string, string]> {
+  if (schema.default !== undefined) {
+    const result = validateInputs({ ...schema, default: undefined }, schema.default, path);
+    if (!result.valid) yield [path, `is invalid: ${result.errors.join("; ")}`];
+  }
+  for (const [key, child] of Object.entries(schema.properties ?? {})) {
+    yield* invalidInputDefaults(child, `${path}.${key}`);
+  }
 }
 
 function hasCycle(nodes: { id: string }[], edges: { from: string; to: string }[]) {

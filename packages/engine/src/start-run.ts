@@ -27,7 +27,7 @@ import { publishInitialNode } from "./initial-node-publication";
 import { publishRunEvent } from "./run-event-stream";
 import { safePersistPayload } from "./safe-persist";
 import type { Workflow } from "@janusly/shared";
-import { validateInputs, WorkflowInputValidationError } from "./inputs-validator";
+import { applyInputDefaults, validateInputs, WorkflowInputValidationError } from "./inputs-validator";
 
 const INITIAL_NODE_STATE_MAX_BYTES = 1_000_000;
 
@@ -73,11 +73,22 @@ export class TriggerEventStartConflictError extends Error {
 }
 
 export async function startRun(workflow: StartableWorkflow) {
-  // When the workflow declares typed `inputs`, validate the run-start payload
-  // before any DB write so a malformed run never enters the queue. Throws
-  // `WorkflowInputValidationError` — the API route catches and returns 400.
+  // When the workflow declares typed `inputs`, fill declared defaults and then
+  // validate the run-start payload before any DB write, so a malformed run
+  // never enters the queue. Throws `WorkflowInputValidationError` — the API
+  // route catches and returns 400.
+  //
+  // Defaults resolve HERE rather than at template time so `runs.inputJson`
+  // records the values the run actually used: a later reader (run detail,
+  // replay, evidence export) sees the effective configuration even after the
+  // workflow's defaults change. It is also what lets a trigger-driven
+  // workflow declare inputs — its payload carries the event, never the
+  // declared fields.
+  const resolvedInput = workflow.inputs
+    ? applyInputDefaults(workflow.inputs, workflow.input ?? {})
+    : workflow.input ?? {};
   if (workflow.inputs) {
-    const result = validateInputs(workflow.inputs, workflow.input ?? {});
+    const result = validateInputs(workflow.inputs, resolvedInput);
     if (!result.valid) throw new WorkflowInputValidationError(result.errors);
   }
 
@@ -171,7 +182,7 @@ export async function startRun(workflow: StartableWorkflow) {
       workflowRolloutVariant: workflow.rollout?.variant ?? null,
       status: "running",
       createdBy: workflow.createdBy ?? null,
-      inputJson: { workflow: workflowSnapshot, input: workflow.input ?? {} },
+      inputJson: { workflow: workflowSnapshot, input: resolvedInput },
       parentRunId: workflow.parentRunId ?? null,
       parentNodeId: workflow.parentNodeId ?? null,
       parentLinkKind: workflow.parentCheckpoint ? "subworkflow" : null,
