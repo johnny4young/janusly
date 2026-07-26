@@ -536,6 +536,10 @@ Passthrough trigger for cron-started workflows. The executor does not sleep or s
 
 ## `mcp_tool`
 
+This is how a workflow reaches a system Janusly ships no built-in tool for —
+[`docs/mcp.md`](mcp.md) covers registering a server, the per-tool opt-in model,
+and the safety posture; this section is the node contract.
+
 Invokes a tool from an org-registered external MCP connection. The connection and descriptor must both be active/enabled; write-side execution requires both the process write flag and the tenant `mcp.clientWriteConsent` flag. Stdio transports run through the subprocess sandbox; URL transports keep the HTTP SSRF validation perimeter.
 
 ```jsonc

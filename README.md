@@ -55,6 +55,20 @@ Grafana Cloud starter stack, see [`docs/observability.md`](docs/observability.md
 - Not generic RPA. We operate AI workflows; we don't click-record desktop scripts.
 - Not "agents that do everything." Human approval gates are first-class; the operator stays in the loop.
 
+### So how do you reach a system Janusly doesn't ship?
+
+Built-in vendor tools cover Slack, GitHub, and PagerDuty, plus vendor-neutral
+building blocks (`http.request`, `webhook.send`, `db.query.*`, `vector.*`,
+`email.send`, `pdf.generate`, and text/JSON/CSV/time utilities). Everything
+else comes through **MCP**: register a Model Context Protocol server once and
+its tools become workflow nodes with the same retry, dead-letter, replay, and
+audit behavior as a built-in tool.
+
+That is why "not integration breadth" is a scope decision rather than a gap —
+breadth is delegated to an open ecosystem instead of hand-written one logo at a
+time. See [`docs/mcp.md`](docs/mcp.md) for connecting a server, the per-tool
+opt-in model, and the safety posture that applies to servers you did not write.
+
 
 > Design system: **Cobalt** (`#245BFF`) primary with **Cyan** (`#06B6D4`) accent. [`apps/web/src/index.css`](apps/web/src/index.css) imports the ordered hand-written modules; tokens are declared CSS-first via `@theme {}` in [`apps/web/src/styles/foundations.css`](apps/web/src/styles/foundations.css).
 
@@ -331,6 +345,7 @@ Permissions are enforced per organization through `org_members`. In `dev-headers
 | Environment variables and runtime configuration | [`docs/configuration.md`](docs/configuration.md) |
 | Local AI configuration & verification | [`docs/ai.md`](docs/ai.md) |
 | Node types, configs, outputs, templating | [`docs/nodes.md`](docs/nodes.md) |
+| Connecting tools Janusly doesn't ship (MCP) | [`docs/mcp.md`](docs/mcp.md) |
 | HTTP API request/response examples | [`docs/api.md`](docs/api.md) |
 | Full workflow examples (DAG JSON) | [`docs/workflows.md`](docs/workflows.md) |
 | Runnable example payload | [`docs/examples/github-uppercase.json`](docs/examples/github-uppercase.json) |
