@@ -7,7 +7,11 @@
 
 import { z } from "zod";
 import { parseIsoDuration } from "../iso-duration";
+import { parseLocalMinute, windowContains, zonedClock } from "../zoned-window";
 import { defineTool } from "./tool-types";
+
+/** Upper bound on windows per call. Enough for a weekly schedule with splits. */
+const TIME_WINDOW_MAX = 14;
 
 const TIME_DIFF_UNIT_MS: Record<"ms" | "s" | "m" | "h" | "d", number> = {
   ms: 1,
@@ -49,6 +53,27 @@ const timeAddInput = z.object({
   duration: z.string().min(1),
 });
 const timeAddOutput = z.object({ iso: z.string(), epochMs: z.number() });
+
+const timeWindowSchema = z.object({
+  days: z.array(z.number().int().min(0).max(6)).min(1).max(7),
+  start: z.string(),
+  end: z.string(),
+});
+
+const timeWindowInput = z.object({
+  timeZone: z.string().min(1),
+  windows: z.array(timeWindowSchema).min(1).max(TIME_WINDOW_MAX),
+  at: z.union([z.string(), z.number()]).optional(),
+});
+
+const timeWindowOutput = z.object({
+  inWindow: z.boolean(),
+  at: z.string(),
+  timeZone: z.string(),
+  localDay: z.number(),
+  localTime: z.string(),
+  matchedWindow: timeWindowSchema.nullable(),
+});
 
 export const timeTools = {
   "time.now": defineTool({
@@ -126,6 +151,54 @@ export const timeTools = {
       }
       const epochMs = baseMs + offsetMs;
       return { iso: new Date(epochMs).toISOString(), epochMs };
+    },
+  }),
+
+  "time.window": defineTool({
+    name: "time.window",
+    description:
+      "Check whether an instant falls inside recurring local time windows (e.g. business hours) in an IANA time zone. `days` uses 0=Sunday..6=Saturday; `start`/`end` are 24h `HH:MM` local times and a window whose end precedes its start crosses midnight. Omit `at` for now. Returns `inWindow` plus the matched window.",
+    inputSchema: timeWindowInput,
+    outputSchema: timeWindowOutput,
+    inputExample: {
+      timeZone: "America/Bogota",
+      windows: [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" }],
+    },
+    async execute(input) {
+      const at = input.at === undefined ? new Date() : new Date(toEpochMs(input.at));
+      // A decision primitive must never answer from malformed configuration:
+      // an unknown zone or unparseable window throws so the node fails loudly
+      // (and lands in recovery) instead of silently reporting `false`, which a
+      // caller could read as either "act" or "skip". This is the deliberate
+      // opposite of `isWithinPagerDutyWorkingHours`, whose bias absorbs bad
+      // policy data as "working hours" so it can never authorize a mutation.
+      const clock = zonedClock(at, input.timeZone);
+      if (!clock) throw new Error(`Invalid IANA time zone: ${input.timeZone}`);
+
+      let matched: z.infer<typeof timeWindowSchema> | null = null;
+      for (const window of input.windows) {
+        const start = parseLocalMinute(window.start);
+        const end = parseLocalMinute(window.end);
+        if (start === null || end === null) {
+          throw new Error(`Invalid window time (expected 24h HH:MM): ${window.start}-${window.end}`);
+        }
+        if (start === end) {
+          throw new Error(`Ambiguous window ${window.start}-${window.end}: start and end must differ`);
+        }
+        if (matched === null && windowContains(clock, window.days, start, end)) {
+          matched = window;
+        }
+      }
+
+      const hour = Math.floor(clock.minute / 60);
+      return {
+        inWindow: matched !== null,
+        at: at.toISOString(),
+        timeZone: input.timeZone,
+        localDay: clock.day,
+        localTime: `${String(hour).padStart(2, "0")}:${String(clock.minute % 60).padStart(2, "0")}`,
+        matchedWindow: matched,
+      };
     },
   }),
 };

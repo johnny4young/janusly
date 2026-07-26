@@ -237,6 +237,47 @@ Invokes a registered in-tree tool such as `http.request`, `text.uppercase`, `jso
 
 **Output:** `{ tool: "text.uppercase", result: { value: "HELLO WORKFLOW" } }`
 
+### Business hours and other recurring time windows
+
+`time.window` is the only zone-aware weekday + time-of-day primitive. The
+edge-condition grammar has no function calls and the other `time.*` tools are
+zone-unaware, so any "only during business hours" / "after hours" / "weekends"
+rule is expressed as a `time.window` node plus a branch on its result.
+
+```jsonc
+{
+  "id": "check_hours",
+  "type": "tool",
+  "config": {
+    "tool": "time.window",
+    "input": {
+      "timeZone": "Europe/Madrid",
+      "windows": [{ "days": [1, 2, 3, 4, 5], "start": "09:00", "end": "17:00" }]
+    }
+  }
+}
+```
+
+- `days` uses `0`=Sunday..`6`=Saturday; `start` is inclusive and `end` exclusive.
+- A window whose `end` precedes its `start` crosses midnight (night shifts): it
+  opens on a listed day and closes on the next calendar day.
+- `at` defaults to now. Template an upstream timestamp
+  (`"{{context.on_event.output.event.occurredAt}}"`) to decide on event time
+  instead of processing time — they differ whenever work is retried or replayed.
+- Read-side, so it still runs in validation/sandbox replay.
+
+**Output:** `{ inWindow, at, timeZone, localDay, localTime, matchedWindow }` —
+branch with `context.check_hours.output.result.inWindow === false`.
+
+Malformed configuration (unknown IANA zone, a time that is not 24h `HH:MM`, or
+`start === end`) **fails the node** rather than returning `false`: a decision
+primitive must not let broken config look like a legitimate "outside the
+window" answer. The PagerDuty off-hours evaluator
+(`pagerduty.policy.evaluate`) deliberately takes the opposite posture for its
+own provider-specific decision — it absorbs malformed policy data as "inside
+working hours" so it can never authorize a mutation. Both share one zone
+implementation (`packages/engine/src/zoned-window.ts`); only the bias differs.
+
 ## `agent`
 
 Runs a single-agent loop using either the rule-based planner or the provider-backed planner (`config.planner: "rules" | "openai"`). The agent picks tools from the registry and iterates up to `maxSteps` times. With `reflection: true`, each step is followed by a self-check.

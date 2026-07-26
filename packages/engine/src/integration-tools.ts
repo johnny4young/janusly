@@ -55,6 +55,7 @@ import {
   resolveLocalWebhookDestination,
 } from "./local-integration-simulator";
 import { getEngineRateLimiter } from "./rate-limit";
+import { parseLocalMinute, windowContains, zonedClock } from "./zoned-window";
 
 /** Lowercase header name the signed webhook tool sets. Surface-stable. */
 const DEFAULT_WEBHOOK_SIGNATURE_HEADER = "x-janusly-signature";
@@ -856,44 +857,13 @@ async function recordPagerDutyCall(input: {
   });
 }
 
-function parseMinute(raw: string): number | null {
-  const match = /^([01]\d|2[0-3]):([0-5]\d)$/u.exec(raw);
-  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
-}
-
-function zonedClock(date: Date, timeZone: string): { day: number; minute: number } | null {
-  try {
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      weekday: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-    }).formatToParts(date);
-    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-    const days: Record<string, number> = {
-      Sun: 0,
-      Mon: 1,
-      Tue: 2,
-      Wed: 3,
-      Thu: 4,
-      Fri: 5,
-      Sat: 6,
-    };
-    const day = days[values.weekday ?? ""];
-    const hour = Number(values.hour);
-    const minute = Number(values.minute);
-    return day === undefined || !Number.isInteger(hour) || !Number.isInteger(minute)
-      ? null
-      : { day, minute: hour * 60 + minute };
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Safe-default working-hours evaluator. Invalid policy data is treated as
  * working time, so malformed configuration cannot authorize mutations.
+ *
+ * Zone resolution and midnight-crossing matching come from `zoned-window.ts`,
+ * shared with the generic `time.window` tool. The BIAS stays here: that tool
+ * rejects malformed configuration, this one absorbs it as "working hours".
  */
 export function isWithinPagerDutyWorkingHours(
   at: Date,
@@ -904,20 +874,10 @@ export function isWithinPagerDutyWorkingHours(
   const clock = zonedClock(at, timeZone);
   if (!clock) return true;
   for (const window of windows) {
-    const start = parseMinute(window.start);
-    const end = parseMinute(window.end);
+    const start = parseLocalMinute(window.start);
+    const end = parseLocalMinute(window.end);
     if (start === null || end === null || start === end || window.days.length === 0) return true;
-    if (start < end) {
-      if (window.days.includes(clock.day) && clock.minute >= start && clock.minute < end) return true;
-      continue;
-    }
-    const previousDay = (clock.day + 6) % 7;
-    if (
-      (window.days.includes(clock.day) && clock.minute >= start)
-      || (window.days.includes(previousDay) && clock.minute < end)
-    ) {
-      return true;
-    }
+    if (windowContains(clock, window.days, start, end)) return true;
   }
   return false;
 }
