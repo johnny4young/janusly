@@ -180,6 +180,13 @@ export function WorkflowIoEditor({
                 onRename={(next) => renameInput(name, next)}
                 onTypeChange={(type) => updateInput(name, shapeForType(type, shape.description))}
                 onDescriptionChange={(description) => updateInput(name, { ...shape, description: description || undefined })}
+                onDefaultChange={(value) => {
+                  // Clearing removes the key entirely — a lingering
+                  // `default: undefined` would serialize differently across
+                  // JSON round-trips and read as "declared" to a future editor.
+                  const { default: _cleared, ...rest } = shape
+                  updateInput(name, value === undefined ? rest : { ...rest, default: value })
+                }}
                 onRequiredChange={(checked) => toggleRequired(name, checked)}
                 onRemove={() => removeInput(name)}
               />
@@ -220,13 +227,15 @@ export function WorkflowIoEditor({
   )
 }
 
-function InputRow({ name, shape, required, onRename, onTypeChange, onDescriptionChange, onRequiredChange, onRemove }: {
+function InputRow({ name, shape, required, onRename, onTypeChange, onDescriptionChange, onDefaultChange, onRequiredChange, onRemove }: {
   name: string
   shape: WorkflowInputSchemaShape
   required: boolean
   onRename: (name: string) => boolean
   onTypeChange: (type: WorkflowInputSchemaShape['type']) => void
   onDescriptionChange: (description: string) => void
+  /** `undefined` clears the declared default rather than storing an empty value. */
+  onDefaultChange: (value: unknown) => void
   onRequiredChange: (required: boolean) => void
   onRemove: () => void
 }) {
@@ -281,8 +290,73 @@ function InputRow({ name, shape, required, onRename, onTypeChange, onDescription
         placeholder={t('rightPanel.inspector.inputDescriptionPlaceholder')}
         aria-label={t('rightPanel.inspector.inputDescriptionAria', { name })}
       />
+      <InputDefaultField name={name} shape={shape} onChange={onDefaultChange} />
       {nameError && <p id={nameErrorId} className="we-workflow-io__error" role="alert">{t('rightPanel.inspector.nameConflict')}</p>}
     </div>
+  )
+}
+
+/**
+ * Declared default for one input — the value a run uses when the caller omits
+ * the field, and what makes a trigger-started workflow runnable at all.
+ *
+ * The control is typed to the field so the stored value keeps its JSON type: a
+ * number field must not persist `"12"`, which would fail
+ * `input_default_type_mismatch` at save. Object/array defaults are deliberately
+ * not editable inline — the same posture the rest of this editor takes toward
+ * nested shapes, which it preserves rather than flattening.
+ */
+function InputDefaultField({ name, shape, onChange }: {
+  name: string
+  shape: WorkflowInputSchemaShape
+  onChange: (value: unknown) => void
+}) {
+  const { t } = useT()
+  if (shape.type === 'object' || shape.type === 'array') return null
+
+  const label = t('rightPanel.inspector.inputDefaultAria', { name })
+  if (shape.type === 'boolean') {
+    // Three states: unset (no default), true, false — a bare checkbox could not
+    // express "no default declared".
+    const value = shape.default === undefined ? '' : shape.default ? 'true' : 'false'
+    return (
+      <label className="we-workflow-io__default">
+        <span className="we-sr-only">{label}</span>
+        <select
+          className="text-field text-field--compact"
+          value={value}
+          aria-label={label}
+          onChange={(event) => onChange(event.target.value === '' ? undefined : event.target.value === 'true')}
+        >
+          <option value="">{t('rightPanel.inspector.inputDefaultNone')}</option>
+          <option value="true">{t('rightPanel.inspector.inputDefaultTrue')}</option>
+          <option value="false">{t('rightPanel.inspector.inputDefaultFalse')}</option>
+        </select>
+      </label>
+    )
+  }
+
+  const raw = shape.default === undefined ? '' : String(shape.default)
+  return (
+    <label className="we-workflow-io__default">
+      <span className="we-sr-only">{label}</span>
+      <input
+        className="text-field text-field--compact"
+        type={shape.type === 'number' ? 'number' : 'text'}
+        value={raw}
+        placeholder={t('rightPanel.inspector.inputDefaultPlaceholder')}
+        aria-label={label}
+        onChange={(event) => {
+          const next = event.target.value
+          if (next === '') return onChange(undefined)
+          if (shape.type !== 'number') return onChange(next)
+          const parsed = Number(next)
+          // A half-typed number ("-", "1e") must not persist as NaN; hold the
+          // previous default until the entry parses.
+          onChange(Number.isFinite(parsed) ? parsed : shape.default)
+        }}
+      />
+    </label>
   )
 }
 

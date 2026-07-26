@@ -283,6 +283,10 @@ export type WorkflowInputSchemaShape = {
   required?: string[]
   items?: WorkflowInputSchemaShape
   enum?: unknown[]
+  /** Value used when the run-start payload omits this field. See
+   *  `docs/workflows.md` — it is what makes a workflow configurable in one
+   *  place and what keeps a trigger-started run valid. */
+  default?: unknown
 }
 
 export type WorkflowDefinition = {
