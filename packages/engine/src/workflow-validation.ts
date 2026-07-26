@@ -392,6 +392,9 @@ function* invalidInputDefaults(
   for (const [key, child] of Object.entries(schema.properties ?? {})) {
     yield* invalidInputDefaults(child, `${path}.${key}`);
   }
+  if (schema.items) {
+    yield* invalidInputDefaults(schema.items, `${path}[]`);
+  }
 }
 
 function hasCycle(nodes: { id: string }[], edges: { from: string; to: string }[]) {

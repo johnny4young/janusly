@@ -14,6 +14,7 @@ type LocaleContract = {
   required: string
   inputDescription: string
   inputDescriptionValue: string
+  inputDefault: string
   addOutput: string
   outputName: string
   outputTemplate: string
@@ -34,6 +35,7 @@ const LOCALES: LocaleContract[] = [
     required: 'Required input: invoiceId',
     inputDescription: 'Description for input invoiceId',
     inputDescriptionValue: 'Stable invoice identifier',
+    inputDefault: 'Default value for invoiceId',
     addOutput: 'Add output',
     outputName: 'Output name: result',
     outputTemplate: 'Template for output approvedInvoice',
@@ -52,6 +54,7 @@ const LOCALES: LocaleContract[] = [
     required: 'Entrada obligatoria: invoiceId',
     inputDescription: 'Descripción de la entrada invoiceId',
     inputDescriptionValue: 'Identificador estable de factura',
+    inputDefault: 'Valor por defecto de invoiceId',
     addOutput: 'Agregar salida',
     outputName: 'Nombre de la salida: result',
     outputTemplate: 'Plantilla de la salida approvedInvoice',
@@ -160,6 +163,7 @@ for (const contract of LOCALES) {
     await ioCard.getByLabel(contract.inputType).selectOption('number')
     await ioCard.getByRole('checkbox', { name: contract.required, exact: true }).check()
     await ioCard.getByLabel(contract.inputDescription).fill(contract.inputDescriptionValue)
+    await ioCard.getByLabel(contract.inputDefault).fill('12')
 
     await ioCard.getByRole('button', { name: contract.addOutput, exact: true }).click()
     const outputName = ioCard.getByLabel(contract.outputName)
@@ -217,7 +221,7 @@ for (const contract of LOCALES) {
     expect(latest.ok()).toBe(true)
     const body = await latest.json() as {
       dagJson: {
-        inputs?: { type: string; properties?: Record<string, { type: string; description?: string }>; required?: string[] }
+        inputs?: { type: string; properties?: Record<string, { type: string; description?: string; default?: unknown }>; required?: string[] }
         outputs?: Record<string, string>
         nodes: Array<{ id: string; label?: string }>
         ui?: { positions?: Record<string, { x: number; y: number }> }
@@ -225,7 +229,7 @@ for (const contract of LOCALES) {
     }
     expect(body.dagJson.inputs).toEqual({
       type: 'object',
-      properties: { invoiceId: { type: 'number', description: contract.inputDescriptionValue } },
+      properties: { invoiceId: { type: 'number', description: contract.inputDescriptionValue, default: 12 } },
       required: ['invoiceId'],
     })
     expect(body.dagJson.outputs).toEqual({ approvedInvoice: '{{context.finish.output}}' })
@@ -238,6 +242,7 @@ for (const contract of LOCALES) {
     await page.reload()
     await openWorkflow(page, contract, workflowId, workflowName)
     await expect(page.getByTestId('workflow-input-invoiceId')).toBeVisible()
+    await expect(page.getByLabel(contract.inputDefault)).toHaveValue('12')
     await expect(page.getByTestId('workflow-output-approvedInvoice')).toBeVisible()
     await hideUnrelatedOverlays(page)
     await capture(page.getByTestId('workflow-io-card'), `web-${contract.locale}-workflow-io-reloaded`)

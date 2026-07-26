@@ -205,4 +205,22 @@ describe('applyInputDefaults', () => {
     expect(applyInputDefaults(schema, undefined)).toBe('not-an-object')
     expect(validateInputs(schema, applyInputDefaults(schema, undefined)).valid).toBe(false)
   })
+
+  it('treats prototype-shaped field names as own JSON data', () => {
+    const properties = Object.fromEntries([
+      ['__proto__', { type: 'string', default: 'safe' }],
+    ]) as Record<string, WorkflowInputSchemaShape>
+    const schema: WorkflowInputSchemaShape = {
+      type: 'object',
+      properties,
+      required: ['__proto__'],
+    }
+
+    const resolved = applyInputDefaults(schema, {}) as Record<string, unknown>
+
+    expect(Object.getPrototypeOf(resolved)).toBe(Object.prototype)
+    expect(Object.hasOwn(resolved, '__proto__')).toBe(true)
+    expect(resolved.__proto__).toBe('safe')
+    expect(validateInputs(schema, resolved)).toEqual({ valid: true })
+  })
 })

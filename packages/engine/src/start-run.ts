@@ -84,8 +84,13 @@ export async function startRun(workflow: StartableWorkflow) {
   // workflow's defaults change. It is also what lets a trigger-driven
   // workflow declare inputs — its payload carries the event, never the
   // declared fields.
+  const defaultedInput = workflow.inputs
+    ? applyInputDefaults(workflow.inputs, workflow.input)
+    : workflow.input;
   const resolvedInput = workflow.inputs
-    ? applyInputDefaults(workflow.inputs, workflow.input ?? {})
+    ? defaultedInput === undefined && workflow.inputs.type === "object"
+      ? {}
+      : defaultedInput
     : workflow.input ?? {};
   if (workflow.inputs) {
     const result = validateInputs(workflow.inputs, resolvedInput);

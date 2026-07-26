@@ -145,8 +145,10 @@ export const WorkflowInputTypeSchema = z.enum(workflowInputTypeValues);
  *
  * `default` is what makes a declared input a workflow-level SETTING rather
  * than only a per-run argument: the operator states the value once on the
- * workflow, every node reads it through `{{inputs.<name>}}`, and changing it
- * is one edit in one place instead of hunting literals across node configs.
+ * workflow, every node reads it through `{{context.input.<name>}}`, and
+ * changing it is one edit in one place instead of hunting literals across
+ * node configs. The `{{inputs.*}}` scope is node-local inside a node config;
+ * it refers to run input only in workflow-level `outputs` templates.
  * It is also what lets a trigger-driven workflow declare inputs at all — a
  * webhook/schedule run supplies `{ triggeredBy, event, … }`, never the
  * declared fields, so without defaults a required input would reject every

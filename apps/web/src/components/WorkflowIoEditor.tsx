@@ -7,7 +7,7 @@
  * Used by: `InspectorPanel.tsx` when no node or edge is selected.
  */
 
-import { useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import type { WorkflowDefinition, WorkflowInputSchemaShape } from '../types'
 import { useT } from '../i18n'
@@ -336,24 +336,85 @@ function InputDefaultField({ name, shape, onChange }: {
     )
   }
 
-  const raw = shape.default === undefined ? '' : String(shape.default)
+  if (shape.type === 'number') {
+    return (
+      <NumberDefaultField
+        label={label}
+        value={typeof shape.default === 'number' ? shape.default : undefined}
+        placeholder={t('rightPanel.inspector.inputDefaultPlaceholder')}
+        onChange={onChange}
+      />
+    )
+  }
+
   return (
     <label className="we-workflow-io__default">
       <span className="we-sr-only">{label}</span>
       <input
         className="text-field text-field--compact"
-        type={shape.type === 'number' ? 'number' : 'text'}
-        value={raw}
+        type="text"
+        value={shape.default === undefined ? '' : String(shape.default)}
         placeholder={t('rightPanel.inspector.inputDefaultPlaceholder')}
         aria-label={label}
         onChange={(event) => {
           const next = event.target.value
-          if (next === '') return onChange(undefined)
-          if (shape.type !== 'number') return onChange(next)
-          const parsed = Number(next)
-          // A half-typed number ("-", "1e") must not persist as NaN; hold the
-          // previous default until the entry parses.
-          onChange(Number.isFinite(parsed) ? parsed : shape.default)
+          onChange(next === '' ? undefined : next)
+        }}
+      />
+    </label>
+  )
+}
+
+const FINITE_NUMBER_DRAFT = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/
+
+/**
+ * Keep the operator's in-progress number text separate from the normalized
+ * workflow value. Browser number inputs erase useful intermediate states such
+ * as `-` and `1e`; a decimal keyboard hint plus explicit finite parsing lets
+ * those states remain editable without ever persisting NaN or a string.
+ */
+function NumberDefaultField({ label, value, placeholder, onChange }: {
+  label: string
+  value?: number
+  placeholder: string
+  onChange: (value: unknown) => void
+}) {
+  const externalValue = value === undefined ? '' : String(value)
+  const [draft, setDraft] = useState(externalValue)
+  const focusedRef = useRef(false)
+  const draftIsValid = draft === '' || (FINITE_NUMBER_DRAFT.test(draft) && Number.isFinite(Number(draft)))
+
+  useEffect(() => {
+    if (!focusedRef.current) setDraft(externalValue)
+  }, [externalValue])
+
+  return (
+    <label className="we-workflow-io__default">
+      <span className="we-sr-only">{label}</span>
+      <input
+        className="text-field text-field--compact"
+        type="text"
+        inputMode="decimal"
+        value={draft}
+        placeholder={placeholder}
+        aria-label={label}
+        aria-invalid={draftIsValid ? undefined : true}
+        onFocus={() => { focusedRef.current = true }}
+        onChange={(event) => {
+          const next = event.target.value
+          setDraft(next)
+          if (next === '') {
+            onChange(undefined)
+            return
+          }
+          if (FINITE_NUMBER_DRAFT.test(next)) {
+            const parsed = Number(next)
+            if (Number.isFinite(parsed)) onChange(parsed)
+          }
+        }}
+        onBlur={() => {
+          focusedRef.current = false
+          setDraft(value === undefined ? '' : String(value))
         }}
       />
     </label>

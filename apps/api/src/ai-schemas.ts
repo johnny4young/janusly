@@ -486,11 +486,23 @@ export const AiNodeSchemaFreeJson = z.discriminatedUnion("type", [
  * to untangle; the engine still accepts the full grammar for hand-authored
  * workflows.
  */
-const AiWorkflowInputFieldSchema = z.object({
-  type: z.enum(["string", "number", "boolean"]),
-  description: z.string().optional(),
-  default: z.union([z.string(), z.number(), z.boolean()]).optional(),
-});
+const AiWorkflowInputFieldSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("string"),
+    description: z.string().optional(),
+    default: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal("number"),
+    description: z.string().optional(),
+    default: z.number().finite().optional(),
+  }),
+  z.object({
+    type: z.literal("boolean"),
+    description: z.string().optional(),
+    default: z.boolean().optional(),
+  }),
+]);
 
 const AiWorkflowInputsSchema = z.object({
   type: z.literal("object"),

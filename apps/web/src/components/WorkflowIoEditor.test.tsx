@@ -230,6 +230,28 @@ describe('<WorkflowIoEditor /> — declared defaults', () => {
     expect(state().inputs.properties.snoozeHours.default).toBe(12)
   })
 
+  it('keeps partial number text editable without corrupting the stored default', () => {
+    render(<Harness initialInputs={{
+      type: 'object',
+      properties: { threshold: { type: 'number', default: 12 } },
+    }} />)
+    const input = screen.getByLabelText('Default value for threshold')
+
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: '-' } })
+    expect(input).toHaveValue('-')
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(state().inputs.properties.threshold.default).toBe(12)
+
+    fireEvent.change(input, { target: { value: '-12.5' } })
+    expect(input).toHaveValue('-12.5')
+    expect(input).not.toHaveAttribute('aria-invalid')
+    expect(state().inputs.properties.threshold.default).toBe(-12.5)
+
+    fireEvent.blur(input)
+    expect(input).toHaveValue('-12.5')
+  })
+
   it('clears the default instead of storing an empty value', () => {
     render(<Harness initialInputs={{
       type: 'object',

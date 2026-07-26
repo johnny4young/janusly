@@ -18,7 +18,7 @@ work.
 standard for exposing tools to AI systems, with a large and growing ecosystem
 of servers. Janusly is an MCP **client**: register a server once, and its tools
 become callable from workflow nodes with the same retry, dead-letter, replay,
-and audit behavior as a built-in tool. You do not wait for Janusly to add a
+and run-timeline behavior as a built-in tool. You do not wait for Janusly to add a
 connector, and Janusly does not have to pretend to be a connector marketplace.
 
 > Janusly is also an MCP **server** — that is the opposite direction, letting
@@ -84,7 +84,7 @@ An `mcp_tool` node references the connection alias and tool name:
 ```
 
 A failed call becomes a node failure, so it inherits retry, the dead-letter
-queue, replay, and run-timeline events exactly like a built-in tool. That
+queue, replay, and run-timeline behavior exactly like a built-in tool. That
 uniformity is the point: an MCP tool is not a second-class citizen with its own
 error handling.
 
@@ -107,7 +107,7 @@ Registering an MCP server is granting it a foothold, so the safety posture is
 worth understanding before you connect one you did not write:
 
 - **Write consent needs two flags.** `JANUSLY_MCP_CLIENT_WRITES_ENABLED=true`
-  (process) **and** `org_configs.mcp.clientWriteConsent` (tenant). Either false
+  (process) **and** `mcp.clientWriteConsent` (tenant). Either false
   and no write-side call proceeds — the gate sits above the transport, so no
   connection is even opened.
 - **Remote URLs are SSRF-gated.** `http` and `sse` targets are validated before
@@ -121,7 +121,8 @@ worth understanding before you connect one you did not write:
   memory caps.
 - **Per-tool rate limits**, defaulting to 60/min per org and overridable per
   tool.
-- **Every call is audited** and recorded as a usage event, per tenant.
+- **Every call emits start/completion run events and a usage event**, scoped
+  per tenant. Administrative connection/tool changes use the audit log.
 
 Two limits worth knowing rather than discovering later. First, the `http`/`sse`
 transports validate the URL up front but their TCP connect does not reuse the

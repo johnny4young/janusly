@@ -83,8 +83,19 @@ export function applyInputDefaults(schema: WorkflowInputSchemaShape, value: unkn
 
   const filled: Record<string, unknown> = { ...(base as Record<string, unknown> | undefined) };
   for (const [key, child] of Object.entries(schema.properties ?? {})) {
-    const resolved = applyInputDefaults(child, filled[key]);
-    if (resolved !== undefined) filled[key] = resolved;
+    const supplied = Object.hasOwn(filled, key) ? filled[key] : undefined;
+    const resolved = applyInputDefaults(child, supplied);
+    if (resolved !== undefined) {
+      // JSON object keys are data, including `__proto__`. Define them rather
+      // than invoking Object.prototype's legacy setter, and never treat an
+      // inherited property as a supplied workflow value.
+      Object.defineProperty(filled, key, {
+        value: resolved,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+    }
   }
   // An absent optional object stays absent unless a child default gave it
   // content — otherwise every optional section would materialize as `{}`.
@@ -105,12 +116,12 @@ function walk(schema: WorkflowInputSchemaShape, value: unknown, path: string, er
   if (schema.type === "object" && isPlainObject(value)) {
     const obj = value as Record<string, unknown>;
     for (const requiredKey of schema.required ?? []) {
-      if (!(requiredKey in obj)) {
+      if (!Object.hasOwn(obj, requiredKey)) {
         errors.push(`${path}.${requiredKey} is required`);
       }
     }
     for (const [propName, propSchema] of Object.entries(schema.properties ?? {})) {
-      if (propName in obj) {
+      if (Object.hasOwn(obj, propName)) {
         walk(propSchema, obj[propName], `${path}.${propName}`, errors);
       }
     }

@@ -62,7 +62,7 @@ building blocks (`http.request`, `webhook.send`, `db.query.*`, `vector.*`,
 `email.send`, `pdf.generate`, and text/JSON/CSV/time utilities). Everything
 else comes through **MCP**: register a Model Context Protocol server once and
 its tools become workflow nodes with the same retry, dead-letter, replay, and
-audit behavior as a built-in tool.
+run-timeline behavior as a built-in tool.
 
 That is why "not integration breadth" is a scope decision rather than a gap —
 breadth is delegated to an open ecosystem instead of hand-written one logo at a

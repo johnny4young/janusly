@@ -104,6 +104,33 @@ describe("AiGenerationWorkflowSchemaFreeJson — direct parallel_fork / join", (
   });
 });
 
+describe("AiGenerationWorkflowSchemaFreeJson — declared input defaults", () => {
+  const workflowWithInput = (field: Record<string, unknown>) => ({
+    nodes: [{ id: "start", type: "noop", config: {} }],
+    edges: [],
+    inputs: {
+      type: "object",
+      properties: { setting: field },
+    },
+  });
+
+  it.each([
+    { type: "string", default: "production" },
+    { type: "number", default: 12 },
+    { type: "boolean", default: false },
+  ])("accepts a default matching $type", (field) => {
+    expect(AiGenerationWorkflowSchemaFreeJson.safeParse(workflowWithInput(field)).success).toBe(true);
+  });
+
+  it.each([
+    { type: "string", default: 12 },
+    { type: "number", default: "12" },
+    { type: "boolean", default: "false" },
+  ])("rejects a default that does not match $type", (field) => {
+    expect(AiGenerationWorkflowSchemaFreeJson.safeParse(workflowWithInput(field)).success).toBe(false);
+  });
+});
+
 describe("AiGenerationWorkflowSchema — constrained grammar stays at 11 (Anthropic grammar cap)", () => {
   it("rejects parallel_fork (kept out of the provider-sent schema)", () => {
     const wf = {

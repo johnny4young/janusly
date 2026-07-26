@@ -2,9 +2,8 @@
  * Real-Chromium smoke for editing a declared input's default.
  *
  * jsdom already covers the state round-trip; what needs a real browser is the
- * part jsdom fakes: a `type="number"` field rejects non-numeric keystrokes at
- * the browser level, and the typed control must still hand the store a JSON
- * number rather than a string (a string default fails
+ * part jsdom fakes: the decimal keyboard hint and in-progress text must coexist
+ * with a normalized JSON number in application state (a string default fails
  * `input_default_type_mismatch` at save).
  */
 
@@ -51,7 +50,7 @@ describe('<WorkflowIoEditor /> defaults (browser smoke)', () => {
     expect(timeZoneDefault.value).toBe('Europe/Madrid')
 
     const snooze = screen.getByLabelText('Default value for snoozeHours') as HTMLInputElement
-    expect(snooze.type).toBe('number')
+    expect(snooze.inputMode).toBe('decimal')
 
     fireEvent.change(snooze, { target: { value: '12' } })
     const stored = JSON.parse(screen.getByTestId('io-state').textContent ?? '{}')
