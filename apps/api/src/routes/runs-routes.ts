@@ -58,6 +58,7 @@ import {
   getRunStatusContract,
   getRunUsageContract,
   listRunsContract,
+  redriveRunContract,
   resumeRunContract,
   startRunContract,
 } from "../api-contracts";
@@ -507,7 +508,7 @@ export const runsRoutes: Route[] = [
   // latest (or an explicit) saved workflow version, reusing every upstream
   // output that already succeeded. The wedge's last mile: DLQ → patch →
   // save v(n+1) → redrive continues the work instead of re-running it.
-  { method: "POST", match: "/runs/redrive", role: "editor", permission: "runs.start",
+  { method: "POST", match: "/runs/redrive", role: "editor", permission: "runs.start", contract: redriveRunContract,
     handler: async ({ req, res, auth }) => {
       const redriveMcpGate = await guardMcpWrite(auth, "runs.redrive");
       if (!redriveMcpGate.ok) return sendJson(res, redriveMcpGate.body, redriveMcpGate.status);
@@ -613,16 +614,17 @@ export const runsRoutes: Route[] = [
         }
       }
 
-      const sourceInput = asRecord(sourceRun.inputJson).input;
+      const sourceEnvelope = asRecord(sourceRun.inputJson);
+      const sourceInput = Object.hasOwn(sourceEnvelope, "input")
+        ? sourceEnvelope.input
+        : {};
       const result = await redriveRun({
         orgId: auth.orgId,
         sourceRunId: runId,
         failedNodeId,
         workflow: parsedTarget.data,
         targetWorkflowVersionId: targetVersionRow.id,
-        input: sourceInput && typeof sourceInput === "object" && !Array.isArray(sourceInput)
-          ? sourceInput as Record<string, unknown>
-          : {},
+        input: sourceInput,
         createdBy: auth.userId,
         traceId: sourceRun.traceId,
       });

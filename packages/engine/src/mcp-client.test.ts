@@ -10,14 +10,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const stdioConstructorCalls: Array<Record<string, unknown>> = [];
 const sseConstructorCalls: Array<Record<string, unknown>> = [];
 const httpConstructorCalls: Array<Record<string, unknown>> = [];
+const pinnedFetchHandles: Array<{
+  fetch: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+}> = [];
 let stdioStderrStream: (NodeJS.ReadableStream & EventEmitter) | null = null;
 let callToolError: Error | null = null;
 let callToolGate: Promise<void> | null = null;
+let connectError: Error | null = null;
+let clientCloseCalls = 0;
 
 vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
   Client: class FakeClient {
     constructor(public info: unknown, public options: unknown) {}
     async connect() {
+      if (connectError) throw connectError;
       return;
     }
     async listTools() {
@@ -34,6 +41,7 @@ vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
       return { content: [{ type: "text", text: "ok" }], isError: false };
     }
     async close() {
+      clientCloseCalls += 1;
       return;
     }
   },
@@ -68,6 +76,14 @@ vi.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
 }));
 
 vi.mock("./http-policy", () => ({
+  createPinnedHttpFetch: vi.fn(() => {
+    const handle = {
+      fetch: vi.fn(async () => new Response("ok")),
+      close: vi.fn(async () => undefined),
+    };
+    pinnedFetchHandles.push(handle);
+    return handle;
+  }),
   validateHttpTarget: vi.fn(async (url: string) => {
     if (url.includes("169.254.169.254")) {
       throw new Error("private target blocked");
@@ -83,9 +99,12 @@ beforeEach(() => {
   stdioConstructorCalls.length = 0;
   sseConstructorCalls.length = 0;
   httpConstructorCalls.length = 0;
+  pinnedFetchHandles.length = 0;
   stdioStderrStream = null;
   callToolError = null;
   callToolGate = null;
+  connectError = null;
+  clientCloseCalls = 0;
 });
 
 afterEach(() => {
@@ -206,13 +225,24 @@ describe("createSseMcpClient", () => {
   it("rejects private-IP URLs at validation time before the transport opens", async () => {
     await expect(createSseMcpClient({ url: "http://169.254.169.254/sse" })).rejects.toThrow(/private/);
     expect(sseConstructorCalls).toHaveLength(0);
+    expect(pinnedFetchHandles[0]?.close).toHaveBeenCalledOnce();
   });
 
   it("constructs the SSE transport with headers when given", async () => {
     const client = await createSseMcpClient({ url: "https://mcp.example.com/sse", headers: { Authorization: "Bearer xyz" } });
     expect(sseConstructorCalls).toHaveLength(1);
     expect(sseConstructorCalls[0]?.url).toBe("https://mcp.example.com/sse");
+    const handle = pinnedFetchHandles[0]!;
+    const opts = sseConstructorCalls[0] as {
+      requestInit?: { headers?: Record<string, string> };
+      fetch?: unknown;
+      eventSourceInit?: { fetch?: unknown };
+    };
+    expect(opts.requestInit?.headers?.Authorization).toBe("Bearer xyz");
+    expect(opts.fetch).toBe(handle.fetch);
+    expect(opts.eventSourceInit?.fetch).toBe(handle.fetch);
     await client.close();
+    expect(handle.close).toHaveBeenCalledOnce();
   });
 });
 
@@ -226,6 +256,7 @@ describe("createHttpMcpClient (Streamable HTTP)", () => {
     // Streamable HTTP successor and expect identical safety.
     await expect(createHttpMcpClient({ url: "http://169.254.169.254/mcp" })).rejects.toThrow(/private/);
     expect(httpConstructorCalls).toHaveLength(0);
+    expect(pinnedFetchHandles[0]?.close).toHaveBeenCalledOnce();
   });
 
   it("constructs the Streamable HTTP transport with headers when given", async () => {
@@ -239,9 +270,15 @@ describe("createHttpMcpClient (Streamable HTTP)", () => {
     });
     expect(httpConstructorCalls).toHaveLength(1);
     expect(httpConstructorCalls[0]?.url).toBe("https://hosted-mcp.example.com/");
-    const opts = httpConstructorCalls[0] as { requestInit?: { headers?: Record<string, string> } };
+    const handle = pinnedFetchHandles[0]!;
+    const opts = httpConstructorCalls[0] as {
+      requestInit?: { headers?: Record<string, string> };
+      fetch?: unknown;
+    };
     expect(opts.requestInit?.headers?.Authorization).toBe("Bearer xyz");
+    expect(opts.fetch).toBe(handle.fetch);
     await client.close();
+    expect(handle.close).toHaveBeenCalledOnce();
   });
 
   it("omits requestInit when no headers are provided", async () => {
@@ -250,9 +287,21 @@ describe("createHttpMcpClient (Streamable HTTP)", () => {
     // actually have a payload to carry.
     const client = await createHttpMcpClient({ url: "https://hosted-mcp.example.com/" });
     expect(httpConstructorCalls).toHaveLength(1);
-    const opts = httpConstructorCalls[0] as { requestInit?: unknown };
+    const opts = httpConstructorCalls[0] as { requestInit?: unknown; fetch?: unknown };
     expect(opts.requestInit).toBeUndefined();
+    expect(opts.fetch).toBe(pinnedFetchHandles[0]?.fetch);
     await client.close();
+  });
+
+  it("closes a partially initialized SDK client and pinned fetch after connect fails", async () => {
+    connectError = new Error("initialization rejected");
+    const client = await createHttpMcpClient({ url: "https://hosted-mcp.example.com/" });
+
+    await expect(client.listTools()).rejects.toThrow(/initialization rejected/);
+    await client.close();
+
+    expect(clientCloseCalls).toBe(1);
+    expect(pinnedFetchHandles[0]?.close).toHaveBeenCalledOnce();
   });
 });
 

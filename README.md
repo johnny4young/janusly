@@ -203,7 +203,15 @@ the explicit simulator-to-external-provider switch for private real-use tests.
 
 ### Use Janusly from Claude Desktop / Cursor (MCP)
 
-`packages/mcp-server` ships an MCP server over stdio. It always advertises read-only inspection, preflight, and AI-authoring tools; when both MCP write-consent flags are enabled it additionally advertises workflow authoring, run operation, exact-DLQ replay, rollback, and outbound-connection management. Contracted tools use runtime-validated `/v1` envelopes; `reports.run_explain` consumes the structured JSON contract while downloadable report artifacts remain on the unversioned route, and `dlq.replay` requires the `deadLetterId` returned by `dlq.list` so terminal recovery evidence stays attributable. With `pnpm dev` running, drop this into `~/Library/Application Support/Claude/claude_desktop_config.json` (or your platform equivalent) and restart Claude Desktop:
+`packages/mcp-server` ships an agent-complete workflow surface over stdio:
+discover, author, validate, save, start, poll, inspect, resume/cancel, and
+recover. It advertises 24 inspection/AI tools plus 13 writes only when both MCP
+write-consent flags are enabled. Every tool uses a runtime-validated `/v1`
+contract, closed input schema, structured result, and explicit risk hints;
+expected failures return normal `isError` tool results. Secrets and broad
+platform administration remain operator-owned. With `pnpm dev` running, drop
+this into `~/Library/Application Support/Claude/claude_desktop_config.json` (or
+your platform equivalent) and restart Claude Desktop:
 
 ```jsonc
 {
@@ -221,7 +229,9 @@ the explicit simulator-to-external-provider switch for private real-use tests.
 }
 ```
 
-See [`packages/mcp-server/README.md`](packages/mcp-server/README.md) for the architecture, auth flow, and how to add new tools.
+See [`packages/mcp-server/README.md`](packages/mcp-server/README.md) for setup,
+and [`docs/architecture/mcp-server.md`](docs/architecture/mcp-server.md) for the
+architecture and deliberate control-plane boundaries.
 
 ### Root commands
 
@@ -299,7 +309,7 @@ The AI surfaces are listed in detail in [`docs/ai.md`](docs/ai.md). Quick summar
 | Feature | Endpoint / surface | Without provider key | With key |
 | --- | --- | --- | --- |
 | Suggest 1–3 alternative patches for a failed run | `POST /ai/patch-workflow` | `{ mode: "fallback" }` with the original workflow untouched | Array of suggestions with `approachLabel` + self-rated confidence per tab; route fan-out-merges + validates each |
-| Sandbox-validate a patch before saving | `POST /dlq/validate-fix` | Always available — sandbox is provider-agnostic | Same; gates the production save+replay chain |
+| Sandbox-validate a patch before saving | `POST /dlq/validate-fix` | Always available — sandbox is provider-agnostic | Same; gates the production save+redrive chain |
 | Apply a patch across every DLQ entry sharing a failure signature | `POST /dlq/cluster-apply` | Always available | Same; recovery dialog reuses the multi-suggestion tabs in cluster mode |
 | Preview and run a paced, cancellable replay campaign | `POST /recovery/campaigns/preview`, `POST /recovery/campaigns` | Always available — deterministic cohort verification and durable queueing | Same |
 | Failure clustering | `GET /dlq/clusters` | Always available — deterministic signature classifier | Same |

@@ -64,9 +64,20 @@ retroactively.
 - The Python SDK's synchronous and asynchronous run/recovery resources now use
   the same stable `/v1` envelopes, typed protocol-drift errors, filters, and
   keyset cursor semantics as the Node SDK.
-- The stdio MCP server now consumes stable envelopes for contracted workflow,
-  run, recovery, and outbound-connection operations while preserving legacy
-  calls for routes that do not yet have explicit contracts.
+- The stdio MCP server now consumes stable envelopes for every published
+  workflow, run, recovery, report, memory, and outbound-connection operation.
+- The stdio MCP server now exposes an agent-complete workflow lifecycle with
+  structured tool results, risk annotations, recoverable `isError` failures,
+  complete stable list filters, primitive JSON run inputs, durable run polling
+  and usage tools, recovery/memory evidence, and outbound-connection updates.
+  Patched failures can be continued on a saved version through idempotent run
+  redrive, and circuit-breaker pauses can be resumed with bounded trigger
+  backfill. Broad platform administration, workflow trash controls, and secret
+  values remain deliberately outside the agent surface.
+- Outbound MCP Streamable HTTP and legacy SSE connections now use the same
+  connect-time DNS pin and redirect revalidation as Janusly HTTP tools,
+  including cross-origin credential stripping and deterministic cleanup after
+  failed initialization or long-lived streams.
 
 ### Added
 

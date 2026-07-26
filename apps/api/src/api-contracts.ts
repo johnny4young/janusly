@@ -942,7 +942,7 @@ export const getSchedulePreviewContract = {
   tags: ["Workflows"],
   request: {
     query: z.object({
-      cron: z.string().max(100),
+      cron: z.string().trim().min(1).max(100),
     }).strict(),
   },
   response: z.discriminatedUnion("valid", [
@@ -1040,6 +1040,38 @@ export const getRunUsageContract = {
   errorCodes: ["invalid_input", "runs_run_id_required", "runs_forbidden"],
 } satisfies ApiRouteContract;
 
+export const redriveRunContract = {
+  operationId: "redriveRun",
+  path: V1_WRITE_PATHS.redriveRun,
+  summary: "Continue a failed saved-workflow run on a selected workflow version",
+  tags: ["Runs"],
+  request: {
+    body: z.object({
+      runId: z.string().trim().min(1).max(256),
+      nodeId: z.string().trim().min(1).max(256).optional(),
+      workflowVersionId: z.string().trim().min(1).max(256).optional(),
+    }).strict(),
+  },
+  response: z.object({ runId: z.string().min(1) }),
+  errorCodes: [
+    "invalid_input",
+    "runs_run_id_required",
+    "runs_forbidden",
+    "runs_redrive_source_not_failed",
+    "runs_redrive_node_not_failed",
+    "runs_redrive_node_ambiguous",
+    "runs_redrive_requires_saved_workflow",
+    "runs_redrive_workflow_paused",
+    "runs_redrive_version_not_found",
+    "runs_redrive_version_invalid",
+    "runs_redrive_node_missing_in_version",
+    "runs_redrive_predecessor_not_succeeded",
+    "runs_not_production_ready",
+    "workflow_not_found",
+    ...MCP_WRITE_ERROR_CODES,
+  ],
+} satisfies ApiRouteContract;
+
 export const startRunContract = {
   operationId: "startRun",
   path: V1_WRITE_PATHS.startRun,
@@ -1064,6 +1096,33 @@ export const startRunContract = {
     "runs_input_validation_failed",
     "upstream_degraded",
     "workflow_circuit_breaker_paused",
+    ...MCP_WRITE_ERROR_CODES,
+  ],
+} satisfies ApiRouteContract;
+
+export const resumeWorkflowContract = {
+  operationId: "resumeWorkflow",
+  path: V1_WRITE_PATHS.resumeWorkflow,
+  summary: "Resume a workflow paused by its recovery circuit breaker",
+  tags: ["Workflows"],
+  request: {
+    path: z.object({
+      workflowId: z.string().trim().min(1).max(512),
+    }).strict(),
+  },
+  response: z.object({
+    ok: z.literal(true),
+    workflowId: z.string().min(1),
+    status: z.literal("active"),
+    backfilled: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
+    remaining: z.number().int().nonnegative(),
+  }),
+  errorCodes: [
+    "invalid_input",
+    "workflows_workflow_id_required",
+    "workflow_not_found",
+    "workflow_not_circuit_breaker_paused",
     ...MCP_WRITE_ERROR_CODES,
   ],
 } satisfies ApiRouteContract;
@@ -1272,9 +1331,11 @@ export const V1_CONTRACT_ROUTES: readonly ApiContractRouteDescriptor[] = [
   { method: "GET", contract: getRunContract },
   { method: "GET", permission: "runs.read", contract: getRunUsageContract },
   { method: "GET", contract: getRunStatusContract },
+  { method: "POST", role: "editor", permission: "runs.start", contract: redriveRunContract },
   { method: "POST", role: "editor", permission: "runs.start", contract: startRunContract },
   { method: "POST", role: "editor", permission: "runs.start", contract: resumeRunContract },
   { method: "POST", role: "editor", permission: "runs.cancel", contract: cancelRunContract },
+  { method: "POST", permission: "workflows.write", contract: resumeWorkflowContract },
   { method: "GET", role: "viewer", permission: "mcp.connections.read", contract: listMcpConnectionsContract },
   { method: "POST", role: "admin", permission: "mcp.connections.write", contract: createMcpConnectionContract },
   { method: "POST", role: "admin", permission: "mcp.connections.write", contract: updateMcpConnectionContract },
