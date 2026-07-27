@@ -34,6 +34,26 @@ fixture. Detector ids, fixture ids, effect node ids, repair classes, and
 evidence kinds are unique. A malformed expression fails its fixture and can
 never silently pass.
 
+**Pre-deployment outcome qualification:** before a baseline/canary rollout can
+move production traffic when either immutable version carries
+`RecoveryContractV2`, an admin must run the deterministic dataset comparison.
+The first V1→V2 transition bootstraps against the candidate's own fixtures.
+Every later V2 candidate is evaluated against both the exact baseline
+version's fixture snapshot and its own fixtures, so changing expected behavior,
+dropping a detector source, or removing the semantic contract fails closed.
+The evaluator never executes nodes, calls an LLM/provider, or performs an
+external effect.
+
+`workflow_recovery_qualifications` stores a redacted, bounded receipt for the
+exact organization, workflow, baseline version, candidate version, evaluator
+dataset version, and fixture digest. Repeated identical comparisons converge
+on one row. `GET /workflows/:id/rollout/qualification` exposes the current
+receipt to `workflows.read`; `POST` requires admin + `workflows.write`, runs the
+comparison, and audits `workflow.recovery_qualification.recorded`. Canary
+creation independently rechecks a passing receipt for the current evaluator
+version inside the parent-workflow transaction. A stale evaluator receipt or
+a receipt for any other version pair grants no deployment authority.
+
 The workflow validator verifies declared node references, requires every
 actual write-side node to appear in `contract.effects`, and requires each
 quarantine source to dominate every declared or actual write-side effect in

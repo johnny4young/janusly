@@ -23,12 +23,17 @@ import {
   auditLogs,
   db,
   runs,
+  workflowRecoveryQualifications,
   workflowRolloutOutcomes,
   workflowRollouts,
   workflows,
   workflowVersions,
 } from "@janusly/db";
-import { WorkflowSchema, type Workflow } from "@janusly/shared";
+import {
+  RECOVERY_QUALIFICATION_DATASET_VERSION,
+  WorkflowSchema,
+  type Workflow,
+} from "@janusly/shared";
 
 export const WORKFLOW_ROLLOUT_TRAFFIC_MIN = 1;
 export const WORKFLOW_ROLLOUT_TRAFFIC_MAX = 50;
@@ -93,7 +98,15 @@ function isUniqueViolation(error: unknown): boolean {
 
 export type CreateWorkflowRolloutResult =
   | { kind: "created"; rollout: WorkflowRollout }
-  | { kind: "not_found" | "invalid_versions" | "canary_not_latest" | "incompatible_triggers" | "active_exists" };
+  | {
+      kind:
+        | "not_found"
+        | "invalid_versions"
+        | "canary_not_latest"
+        | "incompatible_triggers"
+        | "recovery_qualification_required"
+        | "active_exists";
+    };
 
 /** Start one rollout after validating both immutable version snapshots. */
 export async function createWorkflowRollout(input: {
@@ -157,7 +170,6 @@ export async function createWorkflowRollout(input: {
       if (!haveCompatibleWorkflowRolloutTriggers(baselineWorkflow.data, canaryWorkflow.data)) {
         return { kind: "incompatible_triggers" };
       }
-
       const [active] = await tx.select({ id: workflowRollouts.id })
         .from(workflowRollouts)
         .where(and(
@@ -167,6 +179,41 @@ export async function createWorkflowRollout(input: {
         ))
         .limit(1);
       if (active) return { kind: "active_exists" };
+
+      const recoveryQualificationRequired =
+        baselineWorkflow.data.recovery?.contract?.version === "2"
+        || canaryWorkflow.data.recovery?.contract?.version === "2";
+      if (recoveryQualificationRequired) {
+        const [qualification] = await tx
+          .select({ id: workflowRecoveryQualifications.id })
+          .from(workflowRecoveryQualifications)
+          .where(
+            and(
+              eq(workflowRecoveryQualifications.orgId, input.orgId),
+              eq(
+                workflowRecoveryQualifications.workflowId,
+                input.workflowId,
+              ),
+              eq(
+                workflowRecoveryQualifications.baselineVersionId,
+                baseline.id,
+              ),
+              eq(
+                workflowRecoveryQualifications.candidateVersionId,
+                canary.id,
+              ),
+              eq(
+                workflowRecoveryQualifications.datasetVersion,
+                RECOVERY_QUALIFICATION_DATASET_VERSION,
+              ),
+              eq(workflowRecoveryQualifications.status, "passed"),
+            ),
+          )
+          .limit(1);
+        if (!qualification) {
+          return { kind: "recovery_qualification_required" };
+        }
+      }
 
       const [rollout] = await tx.insert(workflowRollouts).values({
         id: crypto.randomUUID(),

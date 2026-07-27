@@ -198,6 +198,7 @@ export type AuditAction =
   | "workflow.rollout.started"
   | "workflow.rollout.promoted"
   | "workflow.rollout.rolled_back"
+  | "workflow.recovery_qualification.recorded"
   | "workflow.slo.set"
   | "workflow.deleted"
   | "workflow.restored"

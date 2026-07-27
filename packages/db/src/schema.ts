@@ -23,8 +23,9 @@
  *   identity profiles, and membership grants.
  * - `org_configs` — tenant-level runtime configuration overrides.
  * - `workflows`, `workflow_versions`, `workflow_rollouts`,
- *   `workflow_rollout_outcomes` — versioned DAG storage and bounded rollout
- *   assignment/evidence.
+ *   `workflow_rollout_outcomes`, `workflow_recovery_qualifications` —
+ *   versioned DAG storage, bounded rollout assignment/evidence, and
+ *   deterministic pre-deployment outcome qualification.
  * - `runs`, `run_nodes`, `run_events` — execution history (timeline events
  *   are paginated by `(run_id, created_at)`).
  * - `dead_letters`, `replay_campaigns`, `replay_campaign_items` — durable
@@ -213,6 +214,52 @@ export const workflowRollouts = pgTable(
       .where(sql`status = 'active'`),
     index("workflow_rollouts_org_workflow_created_idx")
       .on(table.orgId, table.workflowId, table.createdAt.desc()),
+  ],
+);
+
+/**
+ * Immutable pre-deployment evidence for one baseline/candidate version pair.
+ *
+ * The comparison replays deterministic Recovery Contract fixtures only; it
+ * never executes a workflow node. A receipt is valid only for the exact
+ * version ids, dataset evaluator version, and fixture digest captured here.
+ * Repeating the same deterministic comparison converges on the unique row.
+ *
+ * Orphan-tolerant: workflow/version retention may remove the source snapshots,
+ * while this receipt remains useful audit evidence.
+ */
+export const workflowRecoveryQualifications = pgTable(
+  "workflow_recovery_qualifications",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    baselineVersionId: text("baseline_version_id").notNull(),
+    candidateVersionId: text("candidate_version_id").notNull(),
+    datasetVersion: text("dataset_version").notNull(),
+    datasetDigest: text("dataset_digest").notNull(),
+    mode: text("mode").$type<"bootstrap" | "compare">().notNull(),
+    status: text("status").$type<"passed" | "failed">().notNull(),
+    summaryJson: jsonb("summary_json").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("workflow_recovery_qualifications_exact_idx").on(
+      table.orgId,
+      table.workflowId,
+      table.baselineVersionId,
+      table.candidateVersionId,
+      table.datasetVersion,
+      table.datasetDigest,
+    ),
+    index("workflow_recovery_qualifications_pair_idx").on(
+      table.orgId,
+      table.workflowId,
+      table.baselineVersionId,
+      table.candidateVersionId,
+      table.createdAt.desc(),
+    ),
   ],
 );
 

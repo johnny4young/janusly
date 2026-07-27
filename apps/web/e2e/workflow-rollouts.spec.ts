@@ -1,7 +1,8 @@
 /**
  * Real-stack proof for progressive workflow delivery. Creates two immutable
- * versions, starts split traffic through the English Inspector, then drives an
- * unhealthy canary to automatic baseline return and verifies Spanish mobile.
+ * semantic-contract versions, qualifies their outcome datasets through the
+ * English Inspector, then drives an unhealthy canary to automatic baseline
+ * return and verifies Spanish mobile.
  */
 
 import { mkdir } from 'node:fs/promises'
@@ -20,6 +21,58 @@ type RolloutProjection = {
   baselineFailed: number
   canarySucceeded: number
   canaryFailed: number
+}
+
+function semanticRecoveryContract(): Json {
+  return {
+    version: '2',
+    failure: {
+      technical: {
+        terminalNodeFailure: true,
+        stalledNode: true,
+      },
+      semantic: {
+        mode: 'deterministic',
+        detectors: [{
+          id: 'completed-outcome',
+          sourceNodeId: 'outcome',
+          kind: 'expression',
+          passWhen: 'context.outcome.output.status === "completed"',
+          action: 'quarantine',
+          message: 'The workflow outcome must complete.',
+        }],
+        evaluationFixtures: [
+          {
+            id: 'completed',
+            sourceNodeId: 'outcome',
+            output: { status: 'completed' },
+            expected: 'pass',
+          },
+          {
+            id: 'incomplete',
+            sourceNodeId: 'outcome',
+            output: { status: 'incomplete' },
+            expected: 'violation',
+          },
+        ],
+      },
+    },
+    evidence: {
+      required: ['failure_snapshot', 'audit_trail', 'terminal_outcome'],
+    },
+    effects: [],
+    repairs: { allowed: ['retry'] },
+    validation: { minimumEvidenceLevel: 'static' },
+    approval: {
+      productionMutation: 'required',
+      permission: 'recovery.write',
+    },
+    autonomyLevel: 0,
+    verification: {
+      kind: 'generation_bound_terminal_success',
+    },
+    recurrence: { windowDays: 7 },
+  }
 }
 
 function headers(orgId: string): Record<string, string> {
@@ -141,15 +194,28 @@ test('starts an accessible canary and automatically returns unhealthy traffic to
     dslVersion: '1.0',
     id: workflowId,
     name: workflowName,
-    nodes: [{ id: 'stable', type: 'noop', config: {} }],
+    nodes: [{
+      id: 'outcome',
+      type: 'transform',
+      config: { mapping: { status: 'completed' } },
+    }],
     edges: [],
+    recovery: { contract: semanticRecoveryContract() },
   }
   const canary: Json = {
     dslVersion: '1.0',
     id: workflowId,
     name: workflowName,
-    nodes: [{ id: 'candidate', type: 'http', config: { url: 'http://127.0.0.1:9', method: 'GET' } }],
-    edges: [],
+    nodes: [
+      { id: 'candidate', type: 'http', config: { url: 'http://127.0.0.1:9', method: 'GET' } },
+      {
+        id: 'outcome',
+        type: 'transform',
+        config: { mapping: { status: 'completed' } },
+      },
+    ],
+    edges: [{ from: 'candidate', to: 'outcome' }],
+    recovery: { contract: semanticRecoveryContract() },
   }
   const savedBaseline = await postJson(request, orgId, '/workflows/save', baseline) as { versionId?: unknown }
   const savedCanary = await postJson(request, orgId, '/workflows/save', canary) as { versionId?: unknown }
@@ -173,7 +239,23 @@ test('starts an accessible canary and automatically returns unhealthy traffic to
   await panel.getByLabel('Canary traffic (%)').fill('50')
   await panel.getByLabel('Minimum outcomes').fill('5')
   await panel.getByLabel('Minimum success (%)').fill('80')
-  await panel.getByRole('button', { name: 'Start canary', exact: true }).click()
+  const startCanary = panel.getByRole('button', { name: 'Start canary', exact: true })
+  await expect(panel).toContainText('Outcome dataset comparison')
+  await expect(startCanary).toBeDisabled()
+  await hideUnrelatedOverlays(page)
+  await expectAccessible(page, 'Required workflow outcome qualification')
+  await capture(panel, 'web-en-workflow-outcome-qualification-required')
+
+  await panel.getByRole('button', { name: 'Run comparison', exact: true }).click()
+  await expect(panel).toContainText('Passed')
+  await expect(panel).toContainText('4/4')
+  await expect(panel).toContainText('Regressions')
+  await expect(startCanary).toBeEnabled()
+  await hideUnrelatedOverlays(page)
+  await expectAccessible(page, 'Passed workflow outcome qualification')
+  await capture(panel, 'web-en-workflow-outcome-qualification-passed')
+
+  await startCanary.click()
   await expect(panel).toContainText('Active')
   await expect(panel).toContainText('50% to canary · v2')
   await hideUnrelatedOverlays(page)
@@ -211,6 +293,8 @@ test('starts an accessible canary and automatically returns unhealthy traffic to
   await expect(spanishPanel).toContainText('Despliegue canary')
   await expect(spanishPanel).toContainText('Revertido')
   await expect(spanishPanel).toContainText('Resultados del canary')
+  await expect(spanishPanel).toContainText('Comparación del conjunto de resultados')
+  await expect(spanishPanel).toContainText('Superada')
   await expect(spanishPanel).toContainText('El tráfico productivo nuevo usa la versión base.')
   await hideUnrelatedOverlays(page)
   await expectAccessible(page, 'Retorno automático del canary')

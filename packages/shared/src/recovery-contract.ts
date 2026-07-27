@@ -15,6 +15,8 @@ import { WorkflowInputSchema } from "./value-schema";
 
 export const RECOVERY_CONTRACT_VERSION = "1" as const;
 export const RECOVERY_CONTRACT_V2_VERSION = "2" as const;
+export const RECOVERY_QUALIFICATION_DATASET_VERSION =
+  "semantic-outcomes-v1" as const;
 
 export const RECOVERY_AUTONOMY_LEVELS = [0, 1, 2, 3, 4] as const;
 export const RecoveryAutonomyLevelSchema = z.union([

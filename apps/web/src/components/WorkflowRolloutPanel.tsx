@@ -36,6 +36,40 @@ type WorkflowRollout = {
   lastOutcomeAt: string | null
 }
 
+type RecoveryQualification = {
+  id: string
+  baselineVersionId: string
+  candidateVersionId: string
+  datasetVersion: string
+  datasetDigest: string
+  mode: 'bootstrap' | 'compare'
+  status: 'passed' | 'failed'
+  createdAt: string
+  summary: {
+    candidateAssertionCount: number
+    passedCandidateAssertions: number
+    failedCandidateAssertions: number
+    regressionCount: number
+    coverageFailureCount: number
+    failures: Array<{
+      dataset: 'baseline' | 'candidate'
+      fixtureId: string
+      sourceNodeId: string
+      reason:
+        | 'baseline_dataset_invalid'
+        | 'candidate_contract_missing'
+        | 'detector_uncovered'
+        | 'expected_mismatch'
+    }>
+    failuresTruncated: boolean
+  }
+}
+
+type RecoveryQualificationState = {
+  required: boolean
+  qualification: RecoveryQualification | null
+}
+
 type Draft = {
   baselineVersionId: string
   trafficPercent: number
@@ -110,6 +144,86 @@ function parseRollout(payload: unknown): WorkflowRollout | null {
   }
 }
 
+function parseRecoveryQualification(payload: unknown): RecoveryQualificationState | null {
+  const envelope = asRecord(payload)
+  if (typeof envelope?.required !== 'boolean') return null
+  if (envelope.qualification === null) {
+    return { required: envelope.required, qualification: null }
+  }
+  const row = asRecord(envelope.qualification)
+  const summary = asRecord(row?.summary)
+  if (!row || !summary) return { required: envelope.required, qualification: null }
+  if (row.status !== 'passed' && row.status !== 'failed') return { required: envelope.required, qualification: null }
+  if (row.mode !== 'bootstrap' && row.mode !== 'compare') return { required: envelope.required, qualification: null }
+  const strings = ['id', 'baselineVersionId', 'candidateVersionId', 'datasetVersion', 'datasetDigest', 'createdAt'] as const
+  if (strings.some(key => typeof row[key] !== 'string' || row[key].length === 0)) {
+    return { required: envelope.required, qualification: null }
+  }
+  const summaryKeys = [
+    'candidateAssertionCount',
+    'passedCandidateAssertions',
+    'failedCandidateAssertions',
+    'regressionCount',
+    'coverageFailureCount',
+  ] as const
+  const values = summaryKeys.map(key => boundedInteger(summary[key], 0))
+  if (
+    values.some(value => value === null)
+    || !Array.isArray(summary.failures)
+    || typeof summary.failuresTruncated !== 'boolean'
+  ) {
+    return { required: envelope.required, qualification: null }
+  }
+  const failures: RecoveryQualification['summary']['failures'] = []
+  for (const item of summary.failures) {
+    const failure = asRecord(item)
+    if (!failure) return { required: envelope.required, qualification: null }
+    const dataset = failure.dataset
+    const reason = failure.reason
+    if (
+      (dataset !== 'baseline' && dataset !== 'candidate')
+      || (
+        reason !== 'baseline_dataset_invalid'
+        && reason !== 'candidate_contract_missing'
+        && reason !== 'detector_uncovered'
+        && reason !== 'expected_mismatch'
+      )
+      || typeof failure.fixtureId !== 'string'
+      || typeof failure.sourceNodeId !== 'string'
+    ) {
+      return { required: envelope.required, qualification: null }
+    }
+    failures.push({
+      dataset,
+      fixtureId: failure.fixtureId,
+      sourceNodeId: failure.sourceNodeId,
+      reason,
+    })
+  }
+  return {
+    required: envelope.required,
+    qualification: {
+      id: row.id as string,
+      baselineVersionId: row.baselineVersionId as string,
+      candidateVersionId: row.candidateVersionId as string,
+      datasetVersion: row.datasetVersion as string,
+      datasetDigest: row.datasetDigest as string,
+      mode: row.mode,
+      status: row.status,
+      createdAt: row.createdAt as string,
+      summary: {
+        candidateAssertionCount: values[0]!,
+        passedCandidateAssertions: values[1]!,
+        failedCandidateAssertions: values[2]!,
+        regressionCount: values[3]!,
+        coverageFailureCount: values[4]!,
+        failures,
+        failuresTruncated: summary.failuresTruncated,
+      },
+    },
+  }
+}
+
 function successRate(succeeded: number, failed: number): number | null {
   const total = succeeded + failed
   return total === 0 ? null : (succeeded / total) * 100
@@ -125,13 +239,17 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
   const [versions, setVersions] = useState<VersionRow[]>([])
   const [rollout, setRollout] = useState<WorkflowRollout | null>(null)
   const [draft, setDraft] = useState<Draft>(DEFAULT_DRAFT)
+  const [qualificationState, setQualificationState] = useState<RecoveryQualificationState | null>(null)
   const [loading, setLoading] = useState(false)
+  const [qualificationLoading, setQualificationLoading] = useState(false)
+  const [qualifying, setQualifying] = useState(false)
   const [mutating, setMutating] = useState(false)
 
   useEffect(() => {
     if (!workflowId) {
       setVersions([])
       setRollout(null)
+      setQualificationState(null)
       return
     }
     let cancelled = false
@@ -163,12 +281,81 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
   const canary = versions.find(version => version.id === rollout?.canaryVersionId)
   const rolloutControlsLatest = Boolean(rollout && latest?.id === rollout.canaryVersionId)
   const canCreate = versions.length >= 2 && (!rollout || !rolloutControlsLatest)
+  const qualificationBaselineVersionId = rollout && rolloutControlsLatest
+    ? rollout.baselineVersionId
+    : draft.baselineVersionId
+  const qualificationCandidateVersionId = rollout && rolloutControlsLatest
+    ? rollout.canaryVersionId
+    : latest?.id
   const canaryRate = useMemo(
     () => rollout ? successRate(rollout.canarySucceeded, rollout.canaryFailed) : null,
     [rollout],
   )
 
+  useEffect(() => {
+    if (!workflowId || !qualificationBaselineVersionId || !qualificationCandidateVersionId) {
+      setQualificationState(null)
+      setQualificationLoading(false)
+      return
+    }
+    let cancelled = false
+    setQualificationState(null)
+    setQualificationLoading(true)
+    const query = new URLSearchParams({
+      baselineVersionId: qualificationBaselineVersionId,
+      candidateVersionId: qualificationCandidateVersionId,
+    })
+    api(`/workflows/${encodeURIComponent(workflowId)}/rollout/qualification?${query.toString()}`)
+      .then(payload => {
+        if (cancelled) return
+        const parsed = parseRecoveryQualification(payload)
+        if (!parsed) throw new Error(t('workflowRollout.qualification.invalidResponse'))
+        setQualificationState(parsed)
+      })
+      .catch(error => {
+        if (!cancelled) addToast(tApiError(error) || t('workflowRollout.qualification.loadFailed'), 'error')
+      })
+      .finally(() => {
+        if (!cancelled) setQualificationLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [
+    addToast,
+    platformVersion,
+    qualificationBaselineVersionId,
+    qualificationCandidateVersionId,
+    t,
+    workflowId,
+  ])
+
   if (!workflowId) return null
+
+  const runQualification = async () => {
+    if (!qualificationBaselineVersionId || !qualificationCandidateVersionId) return
+    setQualifying(true)
+    try {
+      const payload = await api(`/workflows/${encodeURIComponent(workflowId)}/rollout/qualification`, {
+        method: 'POST',
+        body: JSON.stringify({
+          baselineVersionId: qualificationBaselineVersionId,
+          candidateVersionId: qualificationCandidateVersionId,
+        }),
+      })
+      const parsed = parseRecoveryQualification(payload)
+      if (!parsed?.qualification) throw new Error(t('workflowRollout.qualification.invalidResponse'))
+      setQualificationState(parsed)
+      addToast(
+        t(parsed.qualification.status === 'passed'
+          ? 'workflowRollout.qualification.passedToast'
+          : 'workflowRollout.qualification.failedToast'),
+        parsed.qualification.status === 'passed' ? 'success' : 'error',
+      )
+    } catch (error) {
+      addToast(tApiError(error) || t('workflowRollout.qualification.runFailed'), 'error')
+    } finally {
+      setQualifying(false)
+    }
+  }
 
   const createRollout = async () => {
     if (!latest || !draft.baselineVersionId) return
@@ -278,6 +465,90 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
         <p className="we-rollout-panel__empty">{t('workflowRollout.needsVersions')}</p>
       )}
 
+      {!loading && versions.length >= 2 && (qualificationLoading || qualificationState?.required) && (
+        <div
+          className="we-rollout-panel__qualification"
+          data-status={qualificationState?.qualification?.status ?? 'pending'}
+          data-testid="workflow-recovery-qualification"
+        >
+          <div className="we-rollout-panel__qualification-header">
+            <div>
+              <span>{t('workflowRollout.qualification.eyebrow')}</span>
+              <strong>{t('workflowRollout.qualification.title')}</strong>
+            </div>
+            <span
+              className="we-pill"
+              data-tone={qualificationState?.qualification?.status === 'passed' ? 'success' : qualificationState?.qualification?.status === 'failed' ? 'danger' : 'warning'}
+            >
+              {qualificationLoading
+                ? t('workflowRollout.qualification.loading')
+                : t(`workflowRollout.qualification.status.${qualificationState?.qualification?.status ?? 'pending'}`)}
+            </span>
+          </div>
+          <p className="helper-text">
+            {qualificationState?.qualification
+              ? t(`workflowRollout.qualification.mode.${qualificationState.qualification.mode}`)
+              : t('workflowRollout.qualification.description')}
+          </p>
+          {qualificationState?.qualification && (
+            <div className="we-rollout-panel__qualification-metrics">
+              <div>
+                <span>{t('workflowRollout.qualification.assertions')}</span>
+                <strong>
+                  {qualificationState.qualification.summary.passedCandidateAssertions}
+                  /{qualificationState.qualification.summary.candidateAssertionCount}
+                </strong>
+              </div>
+              <div>
+                <span>{t('workflowRollout.qualification.regressions')}</span>
+                <strong>{qualificationState.qualification.summary.regressionCount}</strong>
+              </div>
+              <div>
+                <span>{t('workflowRollout.qualification.coverage')}</span>
+                <strong>{qualificationState.qualification.summary.coverageFailureCount}</strong>
+              </div>
+            </div>
+          )}
+          {qualificationState?.qualification?.status === 'failed'
+            && qualificationState.qualification.summary.failures.length > 0 && (
+            <div className="we-rollout-panel__qualification-failures">
+              <strong>{t('workflowRollout.qualification.failuresTitle')}</strong>
+              <ul>
+                {qualificationState.qualification.summary.failures.slice(0, 5).map(failure => (
+                  <li key={`${failure.dataset}:${failure.fixtureId}:${failure.reason}`}>
+                    <span>
+                      {t(`workflowRollout.qualification.dataset.${failure.dataset}`)}
+                      {' · '}
+                      {failure.fixtureId}
+                      {failure.sourceNodeId ? ` · ${failure.sourceNodeId}` : ''}
+                    </span>
+                    <small>{t(`workflowRollout.qualification.failure.${failure.reason}`)}</small>
+                  </li>
+                ))}
+              </ul>
+              {(qualificationState.qualification.summary.failures.length > 5
+                || qualificationState.qualification.summary.failuresTruncated) && (
+                <p>{t('workflowRollout.qualification.failuresBounded')}</p>
+              )}
+            </div>
+          )}
+          {!readOnly && (
+            <button
+              type="button"
+              className="command-button"
+              disabled={qualifying || qualificationLoading}
+              onClick={() => void runQualification()}
+            >
+              {qualifying
+                ? t('workflowRollout.qualification.running')
+                : t(qualificationState?.qualification
+                  ? 'workflowRollout.qualification.runAgain'
+                  : 'workflowRollout.qualification.run')}
+            </button>
+          )}
+        </div>
+      )}
+
       {!readOnly && !loading && canCreate && latest && (
         <form className="we-rollout-panel__form" onSubmit={event => { event.preventDefault(); void createRollout() }}>
           <div className="we-rollout-panel__pair">
@@ -307,7 +578,22 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
             </label>
           </div>
           <p className="helper-text">{t('workflowRollout.guardrailHint')}</p>
-          <button type="submit" className="command-button command-button-primary" disabled={mutating || !draft.baselineVersionId}>
+          {qualificationState?.required && qualificationState.qualification?.status !== 'passed' && (
+            <p className="we-rollout-panel__qualification-blocked">
+              {t('workflowRollout.qualification.blockedHint')}
+            </p>
+          )}
+          <button
+            type="submit"
+            className="command-button command-button-primary"
+            disabled={
+              mutating
+              || !draft.baselineVersionId
+              || qualificationLoading
+              || qualificationState === null
+              || (qualificationState.required && qualificationState.qualification?.status !== 'passed')
+            }
+          >
             {mutating ? t('workflowRollout.starting') : t('workflowRollout.start')}
           </button>
         </form>

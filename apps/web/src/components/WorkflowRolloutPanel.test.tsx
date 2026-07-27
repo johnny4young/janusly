@@ -37,6 +37,37 @@ function activeRollout(overrides: Record<string, unknown> = {}) {
   }
 }
 
+function passedQualification(overrides: Record<string, unknown> = {}) {
+  return {
+    required: true,
+    qualification: {
+      id: 'qualification-1',
+      baselineVersionId: 'version-1',
+      candidateVersionId: 'version-2',
+      datasetVersion: 'semantic-outcomes-v1',
+      datasetDigest: 'digest-1',
+      mode: 'compare',
+      status: 'passed',
+      createdAt: '2026-07-21T11:55:00.000Z',
+      summary: {
+        candidateAssertionCount: 4,
+        passedCandidateAssertions: 4,
+        failedCandidateAssertions: 0,
+        regressionCount: 0,
+        coverageFailureCount: 0,
+        failures: [],
+        failuresTruncated: false,
+      },
+      ...overrides,
+    },
+  }
+}
+
+type QualificationPayload = {
+  required: boolean
+  qualification: ReturnType<typeof passedQualification>['qualification'] | null
+}
+
 describe('<WorkflowRolloutPanel />', () => {
   beforeEach(() => {
     vi.mocked(api).mockReset()
@@ -62,6 +93,7 @@ describe('<WorkflowRolloutPanel />', () => {
     let rollout: ReturnType<typeof activeRollout> | null = null
     vi.mocked(api).mockImplementation(async (path, options) => {
       if (path.startsWith('/workflows/versions')) return versions
+      if (path.includes('/rollout/qualification')) return { required: false, qualification: null }
       if (path === '/workflows/workflow-1/rollout' && options?.method === 'POST') {
         rollout = activeRollout()
         return { rollout }
@@ -93,6 +125,7 @@ describe('<WorkflowRolloutPanel />', () => {
   it('renders measured outcomes and guardrail for an active rollout', async () => {
     vi.mocked(api).mockImplementation(async path => {
       if (path.startsWith('/workflows/versions')) return versions
+      if (path.includes('/rollout/qualification')) return { required: false, qualification: null }
       return { rollout: activeRollout() }
     })
 
@@ -108,6 +141,7 @@ describe('<WorkflowRolloutPanel />', () => {
     let rollout = activeRollout()
     vi.mocked(api).mockImplementation(async (path, options) => {
       if (path.startsWith('/workflows/versions')) return versions
+      if (path.includes('/rollout/qualification')) return { required: false, qualification: null }
       if (path.endsWith('/rollback') && options?.method === 'POST') {
         rollout = activeRollout({ status: 'rolled_back', endedAt: '2026-07-21T12:10:00.000Z' })
       }
@@ -127,6 +161,7 @@ describe('<WorkflowRolloutPanel />', () => {
   it('drops malformed API rows instead of rendering unsafe counters', async () => {
     vi.mocked(api).mockImplementation(async path => {
       if (path.startsWith('/workflows/versions')) return versions
+      if (path.includes('/rollout/qualification')) return { required: false, qualification: null }
       return { rollout: { ...activeRollout(), canaryFailed: -1 } }
     })
 
@@ -134,5 +169,80 @@ describe('<WorkflowRolloutPanel />', () => {
 
     expect(await screen.findByRole('button', { name: 'Start canary' })).toBeInTheDocument()
     expect(screen.queryByTestId('workflow-rollout-status')).not.toBeInTheDocument()
+  })
+
+  it('blocks semantic canary traffic until the outcome dataset comparison passes', async () => {
+    let rollout: ReturnType<typeof activeRollout> | null = null
+    let qualification: QualificationPayload = {
+      required: true,
+      qualification: null,
+    }
+    vi.mocked(api).mockImplementation(async (path, options) => {
+      if (path.startsWith('/workflows/versions')) return versions
+      if (path.includes('/rollout/qualification') && options?.method === 'POST') {
+        qualification = passedQualification()
+        return qualification
+      }
+      if (path.includes('/rollout/qualification')) return qualification
+      if (path === '/workflows/workflow-1/rollout' && options?.method === 'POST') {
+        rollout = activeRollout()
+        return { rollout }
+      }
+      if (path === '/workflows/workflow-1/rollout') return { rollout }
+      throw new Error(`Unexpected API call: ${path}`)
+    })
+
+    render(<WorkflowRolloutPanel />)
+
+    const comparison = await screen.findByTestId('workflow-recovery-qualification')
+    expect(comparison).toHaveTextContent('Outcome dataset comparison')
+    expect(screen.getByRole('button', { name: 'Start canary' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Run comparison' }))
+
+    expect(await screen.findByText('4/4')).toBeInTheDocument()
+    expect(comparison).toHaveTextContent('Passed')
+    expect(screen.getByRole('button', { name: 'Start canary' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Start canary' }))
+
+    await waitFor(() => expect(rollout).not.toBeNull())
+    const qualificationPost = vi.mocked(api).mock.calls.find(
+      ([path, options]) => path.includes('/rollout/qualification') && options?.method === 'POST',
+    )
+    expect(JSON.parse(String(qualificationPost?.[1]?.body))).toEqual({
+      baselineVersionId: 'version-1',
+      candidateVersionId: 'version-2',
+    })
+  })
+
+  it('explains bounded qualification failures without exposing evaluator internals', async () => {
+    const qualification = passedQualification({
+      status: 'failed',
+      summary: {
+        candidateAssertionCount: 4,
+        passedCandidateAssertions: 3,
+        failedCandidateAssertions: 1,
+        regressionCount: 1,
+        coverageFailureCount: 1,
+        failures: [{
+          dataset: 'baseline',
+          fixtureId: 'approved-payment',
+          sourceNodeId: 'outcome',
+          reason: 'detector_uncovered',
+        }],
+        failuresTruncated: false,
+      },
+    })
+    vi.mocked(api).mockImplementation(async path => {
+      if (path.startsWith('/workflows/versions')) return versions
+      if (path.includes('/rollout/qualification')) return qualification
+      return { rollout: null }
+    })
+
+    render(<WorkflowRolloutPanel />)
+
+    const comparison = await screen.findByTestId('workflow-recovery-qualification')
+    expect(comparison).toHaveTextContent('Baseline · approved-payment · outcome')
+    expect(comparison).toHaveTextContent('The candidate no longer evaluates this source node.')
+    expect(screen.getByRole('button', { name: 'Start canary' })).toBeDisabled()
   })
 })

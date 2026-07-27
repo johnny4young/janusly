@@ -73,6 +73,8 @@ export type ApiErrorCode =
   | "workflow_rollout_invalid"
   | "workflow_rollout_not_found"
   | "workflow_rollout_not_active"
+  | "workflow_recovery_qualification_invalid"
+  | "workflow_recovery_qualification_required"
   // upstream health sources
   | "upstream_source_not_found"
   | "upstream_source_duplicate"
