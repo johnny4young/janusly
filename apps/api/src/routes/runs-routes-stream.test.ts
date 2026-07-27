@@ -180,6 +180,10 @@ function arrangeRun(
   status: string,
   catchupRows: CatchupRow[] | Promise<CatchupRow[]> = [],
   latestStatus = status,
+  latestProjection: {
+    outcomeStatus?: string | null;
+    semanticViolationCount?: number;
+  } = {},
 ) {
   let initialWhere: unknown
   selectMock.mockReturnValueOnce({
@@ -199,7 +203,12 @@ function arrangeRun(
     })),
   })
   selectMock.mockReturnValueOnce({
-    from: vi.fn(() => ({ where: vi.fn(async () => [{ status: latestStatus }]) })),
+    from: vi.fn(() => ({
+      where: vi.fn(async () => [{
+        status: latestStatus,
+        ...latestProjection,
+      }]),
+    })),
   })
   return { getInitialWhere: () => initialWhere }
 }
@@ -235,6 +244,28 @@ describe('GET /runs/:runId/stream protocol', () => {
     expect(sendEventFrameMock).toHaveBeenCalledWith(res, {
       event: 'run-status',
       data: { kind: 'run.status', status: 'running' },
+    })
+    close()
+  })
+
+  it('includes the current business-outcome projection in the status snapshot', async () => {
+    arrangeRun('waiting', [], 'waiting', {
+      outcomeStatus: 'semantic_quarantined',
+      semanticViolationCount: 2,
+    })
+    const { req, close } = request()
+    const res = response()
+
+    await streamRoute().handler({ req: req as never, res: res as never, auth })
+
+    expect(sendEventFrameMock).toHaveBeenCalledWith(res, {
+      event: 'run-status',
+      data: {
+        kind: 'run.status',
+        status: 'waiting',
+        outcomeStatus: 'semantic_quarantined',
+        semanticViolationCount: 2,
+      },
     })
     close()
   })
@@ -398,6 +429,30 @@ describe('GET /runs/:runId/stream protocol', () => {
       'run-event',
       'run-status',
     ])
+    expect(sendEventFrameMock).toHaveBeenLastCalledWith(res, {
+      event: 'run-status',
+      data: { kind: 'run.status', status: 'succeeded' },
+    })
+    close()
+  })
+
+  it('does not let a pre-snapshot running signal regress a terminal status', async () => {
+    const catchup = deferred<CatchupRow[]>()
+    arrangeRun('waiting', catchup.promise, 'succeeded')
+    let publish: ((event: { kind: string; status?: string }) => void) | undefined
+    addSubscriberMock.mockImplementation((_runId, _orgId, writer) => {
+      publish = writer
+      return { ok: true, ready: Promise.resolve(), remove: removeSubscriberMock }
+    })
+    const { req, close } = request()
+    const res = response()
+
+    const handling = streamRoute().handler({ req: req as never, res: res as never, auth })
+    await flushMicrotasks()
+    publish?.({ kind: 'run.status', status: 'running' })
+    catchup.resolve([])
+
+    await handling
     expect(sendEventFrameMock).toHaveBeenLastCalledWith(res, {
       event: 'run-status',
       data: { kind: 'run.status', status: 'succeeded' },

@@ -50,7 +50,7 @@ import { useWorkflowStore } from './store'
 import { useShallow } from 'zustand/react/shallow'
 import { api } from './api'
 import { useRunEventStream } from './hooks/useRunEventStream'
-import { useBootstrapData } from './hooks/useBootstrapData'
+import { patchRunSummaryList, useBootstrapData } from './hooks/useBootstrapData'
 import { useRunPolling } from './hooks/useRunPolling'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { usePlatformMutation } from './hooks/usePlatformMutation'
@@ -64,6 +64,7 @@ import { isTerminalRunStatus } from '@janusly/shared/src/status'
 import { getResolvedLocale, useT } from './i18n'
 import { consumeDeadLetterDeepLink, requestRecoveryQueueFocus } from './components/recovery-queue-focus-bus'
 import { requestRecoveryAllClearIfQueueEmpty } from './components/recovery-all-clear-coordinator'
+import { countActiveRecoveryBlockers } from './components/recovery-center/helpers'
 import { DOCS_URL } from './docs-link'
 import { createRunTransitionGuard, isRunRequestCurrent } from './run-transition'
 import type { SessionContext } from './identity-context'
@@ -157,6 +158,7 @@ export default function App() {
     updateSelectedNodeType,
     setRunId,
     setRunDetail,
+    patchRunDetail,
     setRunNodes,
     setEvents,
     addEvents,
@@ -215,6 +217,7 @@ export default function App() {
     updateSelectedNodeType: s.updateSelectedNodeType,
     setRunId: s.setRunId,
     setRunDetail: s.setRunDetail,
+    patchRunDetail: s.patchRunDetail,
     setRunNodes: s.setRunNodes,
     setEvents: s.setEvents,
     addEvents: s.addEvents,
@@ -276,9 +279,34 @@ export default function App() {
     aiHealth,
     refreshPlatform,
     patchRunSummary,
+    beginRunSummaryUpdate,
   } = useBootstrapData(
     tenantReady ? identityContext?.currentOrganizationId ?? null : null,
     tenantPermissions,
+  )
+
+  const projectRunSummary = useCallback((id: string, patch: Partial<RunSummary>) => {
+    patchRunSummary(id, patch)
+    patchRunDetail(id, patch)
+  }, [patchRunDetail, patchRunSummary])
+
+  const beginRunProjectionUpdate = useCallback((id: string) => {
+    const commitSummary = beginRunSummaryUpdate(id)
+    return (patch: Partial<RunSummary>) => {
+      if (!commitSummary(patch)) return false
+      patchRunDetail(id, patch)
+      return true
+    }
+  }, [beginRunSummaryUpdate, patchRunDetail])
+
+  // The selected detail is the freshest complete snapshot for its run. Fold it
+  // into list consumers so a slower collection refresh cannot make the active
+  // card and history row disagree with the observation canvas.
+  const projectedRuns = useMemo(
+    () => runId && runDetail?.id === runId
+      ? patchRunSummaryList(runs, runId, runDetail)
+      : runs,
+    [runDetail, runId, runs],
   )
 
   useEffect(() => {
@@ -294,6 +322,7 @@ export default function App() {
   const [runInputServerErrors, setRunInputServerErrors] = useState<string[]>([])
   const [runInputSubmitting, setRunInputSubmitting] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [semanticBlockerRunIds, setSemanticBlockerRunIds] = useState<string[]>([])
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [snippetMenuOpen, setSnippetMenuOpen] = useState(false)
   // React Flow cannot establish a valid viewport when its first mount happens
@@ -301,6 +330,10 @@ export default function App() {
   // mount until a canvas tab is visible, then retain the instance across other
   // non-home tabs so operator pan/zoom still survives ordinary navigation.
   const [canvasActivated, setCanvasActivated] = useState(() => isCanvasTab(activeTab))
+
+  useEffect(() => {
+    setSemanticBlockerRunIds([])
+  }, [orgId])
   useEffect(() => {
     if (activeTab === 'home') {
       setCanvasActivated(false)
@@ -512,7 +545,7 @@ export default function App() {
   // Live-run SSE stream (primary). Owns `streamTransport`; on first byte it
   // sets `streamStatus='connected'` and the poll loop below skips its tick. On
   // any stream fault it sets `'polling'` and the very next tick resumes.
-  useRunEventStream(runId, patchRunSummary)
+  useRunEventStream(runId, projectRunSummary)
 
   // Terminal-run callback for the poll loop: bump platform version so
   // independent panels re-fetch (cross-panel reactivity), then refetch the
@@ -524,7 +557,7 @@ export default function App() {
 
   // Polling fallback (1.5s `/status`). Loads the initial timeline + stays as the
   // safety net behind SSE. `loadStatus` is reused by the run-action handlers.
-  const { loadStatus } = useRunPolling(runId, onRunTerminal, patchRunSummary)
+  const { loadStatus } = useRunPolling(runId, onRunTerminal, beginRunProjectionUpdate)
   const runPlatformMutation = usePlatformMutation()
 
   const selectedNode = useMemo(() => nodes.find(node => node.id === selectedNodeId) ?? null, [nodes, selectedNodeId])
@@ -721,7 +754,7 @@ export default function App() {
       if (!runTransitionGuard.isCurrent(requestId)) return
       setRunId(id)
       if (data.run) setRunDetail(data.run)
-      if (data.run) patchRunSummary(id, data.run)
+      if (data.run) projectRunSummary(id, data.run)
       setRunNodes(data.nodes ?? [])
       setEvents(data.events ?? [])
       setEventsPagination(data.eventsCursor ?? null, Boolean(data.eventsHasMore))
@@ -729,7 +762,7 @@ export default function App() {
       if (!runTransitionGuard.isCurrent(requestId)) return
       addToast(error instanceof Error ? error.message : t('toasts.runOpenFailed'), 'error')
     }
-  }, [addToast, canReadRuns, patchRunSummary, runTransitionGuard, setActiveTab, setEvents, setEventsPagination, setRunDetail, setRunId, setRunNodes, t])
+  }, [addToast, canReadRuns, projectRunSummary, runTransitionGuard, setActiveTab, setEvents, setEventsPagination, setRunDetail, setRunId, setRunNodes, t])
 
   const loadOlderEvents = useCallback(async () => {
     if (!runId || !eventsCursor || !eventsHasMore) return
@@ -919,7 +952,7 @@ export default function App() {
 
   const cancelActiveRun = useCallback(async () => {
     if (!runId) return
-    const activeRun = runs.find(r => r.id === runId)
+    const activeRun = projectedRuns.find(r => r.id === runId)
     if (activeRun && isTerminalRunStatus(activeRun.status)) {
       addToast(t('toasts.runAlreadyTerminal', { status: formatStatusLabel(activeRun.status) }), 'info')
       return
@@ -937,7 +970,7 @@ export default function App() {
         await refreshPlatform()
       },
     })
-  }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId, runPlatformMutation, runs, t])
+  }, [addToast, bumpPlatformVersion, loadStatus, projectedRuns, refreshPlatform, runId, runPlatformMutation, t])
 
   const replayDeadLetter = useCallback(async (deadLetterId: string, _createdAtIso?: string) => {
     const result = await runPlatformMutation({
@@ -1075,16 +1108,20 @@ export default function App() {
   const envLabel = env === 'production' ? t('topbar.env.production') : t('topbar.env.sandbox')
   const currentOrganizationLabel = currentOrganization?.name ?? orgId ?? 'default'
   const openDlqCount = deadLetters.filter(dlq => dlq.status === 'open').length
-  // Graduated recovery urgency: red is reserved for an ACTIVE blocker (a run
-  // paused on a human gate right now), amber for "there's work" (open DLQ
-  // rows), soft green when there's nothing to recover — so the top-bar CTA
-  // stops shouting in red on every screen.
-  const blockerCount = runNodes.filter(node => node.status === 'waiting').length
+  // Waiting is a run-level posture. Semantic quarantine deliberately leaves
+  // its source node succeeded, so node-only counting would report all-clear
+  // while downstream effects remain contained.
+  const blockerCount = countActiveRecoveryBlockers(
+    projectedRuns,
+    runNodes,
+    runId,
+    semanticBlockerRunIds,
+  )
   const recoverState: 'blocked' | 'attention' | 'clear' =
     blockerCount > 0 ? 'blocked' : openDlqCount > 0 ? 'attention' : 'clear'
-  const activeRunCount = runs.filter(run => run.status === 'running' || run.status === 'paused').length
+  const activeRunCount = projectedRuns.filter(run => run.status === 'running' || run.status === 'paused').length
   const observedRun = runId
-    ? (runDetail?.id === runId ? runDetail : runs.find(run => run.id === runId))
+    ? (runDetail?.id === runId ? runDetail : projectedRuns.find(run => run.id === runId))
     : undefined
   const isConnected = streamStatus === 'connected'
 
@@ -1142,7 +1179,7 @@ export default function App() {
         eventsHasMore,
         onLoadOlderEvents: loadOlderEvents,
         runNodes,
-        runs,
+        runs: projectedRuns,
         workflows: savedWorkflows,
         activeRunId: runId,
         usage,
@@ -1280,13 +1317,15 @@ export default function App() {
               fallback={({ reset }) => <PanelErrorFallback onRetry={reset} />}
             >
               <RecoveryCenterPanel
-                runs={runs}
+                runs={projectedRuns}
                 runNodes={runNodes}
                 deadLetters={deadLetters}
+                onSemanticBlockerRunsChange={setSemanticBlockerRunIds}
                 onOpenTab={setActiveTab}
                 onOpenRun={openRun}
                 onApproveNode={canStartRuns ? approveNode : () => undefined}
                 onOpenRecoveryQueue={() => openRecoveryQueue()}
+                onRefreshPlatform={refreshPlatform}
                 onStartRecoveryDrill={canInstallPacks
                   ? () => injectPackFailure('failed-payment-recovery', 'billing_secret_unbound')
                   : undefined}

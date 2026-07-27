@@ -24,6 +24,8 @@ set is:
 - `GET /v1/recovery/metrics`
 - `GET /v1/recovery/ledger`
 - `GET /v1/recovery/my-wins`
+- `GET /v1/recovery/cases`
+- `POST /v1/recovery/cases/{caseId}/resolve`
 - `GET /v1/templates`
 - `GET /v1/tools`
 - `POST /v1/ai/generate-workflow`
@@ -88,7 +90,7 @@ rest of the registry discoverable without duplicating every handler body.
 | Org config / roles / permissions | `/org/config`, `/org/permissions/catalog`, `/org/roles*` | Tenant runtime config, permission catalog, custom roles. |
 | Enterprise identity | `/org/sso/connections*`, `/auth/sso/start`, `/auth/sso/callback`, `/org/scim/directories*`, `/webhooks/workos/directory` | WorkOS SSO + SCIM admin and webhook surfaces. |
 | MCP client admin | `/mcp/connections*`, `/mcp/connections/:alias/tools*` | Register external MCP servers, rediscover descriptors, enable tools, rate-limit tools, expose selected descriptors to AI. |
-| Recovery operations | `/recovery/items*`, `/recovery/items/:id/handoff`, `/auto-healing*`, `/alerts/*` | Recovery Center item workflow, cross-team handoff, supervised auto-healing queue, alert policies. |
+| Recovery operations | `/recovery/items*`, `/recovery/cases*`, `/recovery/items/:id/handoff`, `/auto-healing*`, `/alerts/*` | Technical incident workflow, deterministic semantic outcome cases, cross-team handoff, supervised auto-healing queue, alert policies. |
 | PromptOps / evals / experiments | `/prompts*`, `/eval/datasets*`, `/experiments*` | Versioned prompt registry, opted-in eval datasets, experiment runs and readouts. |
 | Triggers and snippets | `/triggers/*/ingest`, `/triggers/events*`, `/snippets*`, `/onboarding` | External event ingestion, replay, reusable workflow snippets, onboarding state. |
 | Solution packs and reports | `/solution-packs*`, `/workflows/import-pack`, `/reports/run-explain*`, `/reports/value-dashboard` | Demo/import packs, run explain exports/delivery, value dashboard exports. |
@@ -118,7 +120,7 @@ that permission is the authorization gate.
 | Runs | `POST /start`, `GET /runs`, `GET /run`, `GET /run/usage`, `GET /status`, `GET /runs/:id/stream`, `POST /resume`, `POST /run/cancel`, `POST /runs/replay-lab`, `POST /runs/replay-lab/fork`, `GET /runs/compare`, `GET /causal` | viewer/editor + run perms | Start, poll, inspect bounded resource usage, stream, resume, cancel, sandbox replay, fork, compare, and router explainability. |
 | Credentials | `GET /credentials`, `GET /credentials/health`, `POST /credentials`, `POST /credentials/:name/bulk-update`, `DELETE /credentials/:name`, `POST /credentials/:name/expiry` | viewer/admin + credential perms | Operator-facing credential rows; values default to the encrypted Secret Store (`storage: "managed"`), and health/rotation never echo secret material. Optional operator-declared `expiresAt` powers the expiry-warning alert. |
 | AI helpers | `GET /ai/health`, `POST /ai/generate-workflow`, `POST /ai/explain-workflow`, `POST /ai/review-workflow`, `POST /ai/patch-workflow`, `POST /ai/suggest-improvement`, `POST /ai/explain-run` | `ai.write`; editor additionally required for patch/suggest | Provider-neutral LLM surfaces with deterministic fallback/audit contracts. Generation and patch also expose strict `/v1` aliases. |
-| DLQ/recovery loop | `GET /dlq`, `GET /dlq/clusters`, `GET /dlq/cluster-members`, `POST /dlq/resolve`, `POST /dlq/validate-fix`, `POST /dlq/cluster-apply`, `POST /dlq/replay`, `GET /recovery/metrics`, `POST /recovery/feedback` | viewer/editor + DLQ perms | Dead-letter triage, validation sandbox, clustered replay, metrics, and feedback. |
+| DLQ/recovery loop | `GET /dlq`, `GET /dlq/clusters`, `GET /dlq/cluster-members`, `POST /dlq/resolve`, `POST /dlq/validate-fix`, `POST /dlq/cluster-apply`, `POST /dlq/replay`, `GET /recovery/cases`, `POST /recovery/cases/:caseId/resolve`, `GET /recovery/metrics`, `POST /recovery/feedback` | viewer/editor + DLQ or recovery perms | Dead-letter triage, deterministic semantic containment, validation sandbox, clustered replay, metrics, and feedback. |
 | Recovery items | `GET /recovery/items`, `GET /recovery/items/:id`, `GET /recovery/items/:id/children`, `POST /recovery/items/:id/acknowledge`, `POST /recovery/items/:id/in-progress`, `POST /recovery/items/:id/waiting-external`, `POST /recovery/items/:id/escalate`, `POST /recovery/items/:id/assign`, `POST /recovery/items/:id/resolve`, `POST /recovery/items/:id/reopen`, `POST /recovery/items/:id/comment`, `POST /recovery/items/:id/evidence`, `POST /recovery/items/:id/handoff` | viewer/editor + recovery perms | Incident workflow, evidence export, and cross-team handoff. |
 | Auto-healing/alerts | `GET /auto-healing/pending`, `GET /auto-healing/:id`, `POST /auto-healing/:id/decide`, `POST /auto-healing/scan`, `GET /alerts/policies`, `POST /alerts/policies`, `POST /alerts/policies/:id`, `DELETE /alerts/policies/:id`, `GET /alerts/recent` | viewer/editor/admin + feature perms | Supervised repair decisions, on-demand scan, alert policies, recent dispatch feed. |
 | PromptOps/evals | `GET /prompts`, `POST /prompts`, `GET /prompts/:name`, `GET /prompts/:name/versions/:version`, `POST /prompts/:name/versions`, `POST /prompts/:name/versions/:version/pin`, `GET /eval/datasets`, `POST /eval/datasets`, `GET /eval/datasets/:id`, `GET /eval/datasets/:id/export?format=jsonl|json`, `DELETE /eval/datasets/:id`, `GET /experiments`, `POST /experiments/run`, `GET /experiments/:id` | viewer/editor/admin + prompt/eval perms | Versioned prompt registry, opted-in eval datasets, synchronous model/prompt experiments. |
@@ -1073,6 +1075,86 @@ Recovery before/after rollup. Splits the same time window by version cutoff: run
 ```
 
 `delta` is `null` until `after.signals.totalRuns >= 5` (constant `MIN_RUNS_FOR_DELTA` in `@janusly/engine/src/workflow-health`); the dialog renders the run counter + same-failure pill while waiting. `recentRunsAgainstAfter` is always populated and includes in-flight runs (`running`) so the operator sees activity from run 1. `sameFailureSinceApply` is `null` when `priorFailureSignature` is omitted — when supplied, the route normalizes each new DLQ row's `errorJson` and counts matches against the supplied signature; defense-in-depth, the `priorSignature` echoed in the response is the caller-supplied input verbatim, never a freshly-derived signature. `priorVersion` is `null` when the workflow only has one version. Mounted by `<RecoveryDeltaCard>` inside the recovery dialog's `applied` step.
+
+### `GET /recovery/cases?openOnly=true&runId=<id>&limit=100`
+
+Lists durable deterministic semantic-outcome cases for the current
+organization. Requires `viewer` plus `recovery.read`. `openOnly` defaults to
+`true`; `limit` defaults to 100 and is bounded to 1–200. A malformed or
+fractional limit uses the default rather than changing the query bound.
+
+```json
+{
+  "cases": [
+    {
+      "id": "case-...",
+      "orgId": "default",
+      "runId": "run-...",
+      "workflowId": "workflow-...",
+      "workflowVersionId": "version-...",
+      "source": "semantic_violation",
+      "detectorId": "answer-grounded",
+      "sourceNodeId": "answer",
+      "detectorKind": "expression",
+      "action": "quarantine",
+      "message": "The answer must be grounded before delivery.",
+      "detailsJson": null,
+      "state": "contained",
+      "createdBy": "dev-user",
+      "createdAt": "2026-07-27T17:00:00.000Z",
+      "updatedAt": "2026-07-27T17:00:00.000Z",
+      "resolvedAt": null
+    }
+  ]
+}
+```
+
+An `observe` case records a failed business-outcome check without pausing the
+run. A `quarantine` case means downstream work was not scheduled and the run
+is waiting for an operator decision.
+
+### `POST /recovery/cases/:caseId/resolve`
+
+Requires `editor` plus `recovery.write`. Replacement mode validates the
+supplied JSON against every deterministic detector attached to the same
+source node before any downstream effect can resume:
+
+```json
+{
+  "decision": "replace",
+  "output": { "answer": "Verified response", "grounded": true },
+  "reason": "Validated against the source record."
+}
+```
+
+Observe-only cases, or a quarantined business result the operator intentionally
+accepts, use an explicit loss decision:
+
+```json
+{
+  "decision": "accept_loss",
+  "reason": "The degraded result is acceptable for this execution."
+}
+```
+
+The response is:
+
+```json
+{
+  "ok": true,
+  "runId": "run-...",
+  "sourceNodeId": "answer",
+  "decision": "replace",
+  "resumed": true,
+  "resolvedCaseIds": ["case-..."]
+}
+```
+
+`resumed` is `false` for an observe-only acknowledgment and whenever another
+open quarantine still blocks the run. Same-source cases close together in one
+transaction. Replacement validation failures return
+`recovery_semantic_output_invalid`; concurrent or already-resolved decisions
+return `recovery_case_conflict`.
 
 ### `GET /recovery/metrics?windowDays=30`
 

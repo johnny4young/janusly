@@ -49,7 +49,13 @@
 
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Hourglass, RefreshCw, ShieldCheck, Target, Users, Zap } from 'lucide-react'
-import type { ActiveTab, RunNode, RunSummary } from '../types'
+import type {
+  ActiveTab,
+  RecoveryCase,
+  RunNode,
+  RunSummary,
+  SemanticCaseResolution,
+} from '../types'
 import { api } from '../api'
 import { useMemoryConsentStatus } from '../hooks/useMemoryConsentStatus'
 import { getMemoryPurgeCountdown } from '../memory-consent-status'
@@ -102,6 +108,7 @@ import {
   PendingApprovalsTile,
   RecommendedActionsTile,
   RecoveryQueueTile,
+  SemanticRecoveryCasesTile,
 } from './recovery-center/RecoveryCenterTiles'
 import { RecoveryLabEntry } from './recovery-center/RecoveryCenterEmptyState'
 
@@ -109,6 +116,8 @@ type RecoveryCenterPanelProps = {
   runs: RunSummary[]
   runNodes: RunNode[]
   deadLetters: DeadLetter[]
+  /** Keep the global recovery posture synchronized with durable semantic containment. */
+  onSemanticBlockerRunsChange?: (runIds: string[]) => void
   onOpenTab: (tab: ActiveTab) => void
   onOpenRun: (runId: string, targetTab?: ActiveTab) => void | Promise<void>
   onApproveNode: (nodeId: string) => void | Promise<void>
@@ -116,6 +125,8 @@ type RecoveryCenterPanelProps = {
   onOpenRecoveryQueue: () => void
   /** Start a deterministic drill so a fresh operator can try the recovery loop for real. */
   onStartRecoveryDrill?: () => void | Promise<void>
+  /** Refresh shell-level projections after a Recovery Center mutation. */
+  onRefreshPlatform?: () => void | Promise<void>
 }
 
 type OrgSnapshot<T> = {
@@ -133,6 +144,8 @@ type RecoveryQueueOverview = {
   oldestOpen: DeadLetter | null
   observedOpenIds: string[]
 }
+
+type SemanticCasesStatus = 'loading' | 'available' | 'unavailable'
 
 // Terminal recovery may complete in a worker for a run that is not the
 // operator's active SSE/polling target. Keep this cheap projection live without
@@ -159,6 +172,10 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const [clustersSnapshot, setClustersSnapshot] = useState<OrgSnapshot<ClustersResponse | null> | null>(null)
   const [heatmapSnapshot, setHeatmapSnapshot] = useState<OrgSnapshot<HeatmapDay[]> | null>(null)
   const [validationSnapshot, setValidationSnapshot] = useState<OrgSnapshot<RecoveryValidationReport | null> | null>(null)
+  const [semanticCasesSnapshot, setSemanticCasesSnapshot] = useState<OrgSnapshot<{
+    cases: RecoveryCase[]
+    status: SemanticCasesStatus
+  }> | null>(null)
   const [ledgerSnapshot, setLedgerSnapshot] = useState<OrgSnapshot<RecoveryLedger | null> | null>(null)
   const [winsSnapshot, setWinsSnapshot] = useState<IdentitySnapshot<OperatorWins | null> | null>(null)
   const [impactPollVersion, setImpactPollVersion] = useState(0)
@@ -166,6 +183,27 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const clusters = clustersSnapshot?.orgId === resolvedOrgId ? clustersSnapshot.value : null
   const heatmap = heatmapSnapshot?.orgId === resolvedOrgId ? heatmapSnapshot.value : []
   const validation = validationSnapshot?.orgId === resolvedOrgId ? validationSnapshot.value : undefined
+  const semanticCases = semanticCasesSnapshot?.orgId === resolvedOrgId
+    ? semanticCasesSnapshot.value.cases
+    : []
+  const semanticCasesStatus = semanticCasesSnapshot?.orgId === resolvedOrgId
+    ? semanticCasesSnapshot.value.status
+    : 'loading'
+  const semanticCasesUnavailable = semanticCasesStatus === 'unavailable'
+  const semanticCasesLoading = semanticCasesStatus === 'loading'
+  const semanticOutcomePosture = semanticCases.length > 0
+    ? 'attention'
+    : semanticCasesStatus === 'available'
+      ? 'clear'
+      : semanticCasesStatus
+  const semanticBlockerRunIds = useMemo(
+    () => [...new Set(
+      semanticCases
+        .filter((item) => item.action === 'quarantine' && item.state === 'contained')
+        .map((item) => item.runId),
+    )],
+    [semanticCases],
+  )
   const ledger = ledgerSnapshot?.orgId === resolvedOrgId ? ledgerSnapshot.value : null
   const operatorWins = winsSnapshot?.orgId === resolvedOrgId && winsSnapshot.userId === resolvedUserId
     ? winsSnapshot.value
@@ -182,6 +220,26 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const [allClearDowntimeOverride, setAllClearDowntimeOverride] = useState<number | null>(null)
   const [celebrationTrigger, setCelebrationTrigger] = useState(0)
   const previousRecoveryLedgerRef = useRef<OrgSnapshot<RecoveryLedger> | null>(null)
+  useEffect(() => {
+    props.onSemanticBlockerRunsChange?.(semanticBlockerRunIds)
+  }, [props.onSemanticBlockerRunsChange, semanticBlockerRunIds])
+
+  const handleSemanticCaseResolved = useCallback(async (result: SemanticCaseResolution) => {
+    const resolvedIds = new Set(result.resolvedCaseIds)
+    setSemanticCasesSnapshot(current => {
+      if (current?.orgId !== resolvedOrgId) return current
+      return {
+        ...current,
+        value: {
+          ...current.value,
+          cases: current.value.cases.filter(
+            item => !resolvedIds.has(item.id),
+          ),
+        },
+      }
+    })
+    await props.onRefreshPlatform?.()
+  }, [props.onRefreshPlatform, resolvedOrgId])
   const pendingVerifiedRecoveryRef = useRef<{
     orgId: string
     totalRecovered: number
@@ -209,6 +267,14 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     const clustersRequest = api('/dlq/clusters')
     const heatmapRequest = api('/recovery/heatmap?days=90')
     const validationRequest = api('/recovery/validation?windowDays=30')
+    const semanticCasesRequest = api('/recovery/cases?limit=50')
+    setSemanticCasesSnapshot(current => ({
+      orgId: resolvedOrgId,
+      value: {
+        cases: current?.orgId === resolvedOrgId ? current.value.cases : [],
+        status: 'loading',
+      },
+    }))
 
     void metricsRequest
       .then((payload) => {
@@ -277,6 +343,34 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
         startTransition(() => {
           setValidationSnapshot({ orgId: resolvedOrgId, value: null })
         })
+      })
+
+    void semanticCasesRequest
+      .then((payload) => {
+        if (cancelled) return
+        if (
+          !payload ||
+          typeof payload !== 'object' ||
+          !Array.isArray((payload as { cases?: unknown }).cases)
+        ) {
+          throw new Error('Invalid semantic recovery response')
+        }
+        const cases = (payload as { cases: RecoveryCase[] }).cases
+        setSemanticCasesSnapshot({
+          orgId: resolvedOrgId,
+          value: { cases, status: 'available' },
+        })
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSemanticCasesSnapshot(current => ({
+            orgId: resolvedOrgId,
+            value: {
+              cases: current?.orgId === resolvedOrgId ? current.value.cases : [],
+              status: 'unavailable',
+            },
+          }))
+        }
       })
 
     return () => { cancelled = true }
@@ -368,6 +462,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     ? openDeadLetters.filter((deadLetter) => !currentQueueOverview.observedOpenIds.includes(deadLetter.id)).length
     : openDeadLetters.length
   const openFailureCount = Math.max(currentQueueOverview?.openCount ?? 0, unobservedVisibleFailures)
+  const recoveryClearEligible = openFailureCount === 0 && semanticOutcomePosture === 'clear'
 
   // Local mutations and active-run terminal events already bump
   // `platformVersion`, so polling is only a convergence fallback for work
@@ -436,20 +531,20 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
 
   useEffect(() => {
     const pending = pendingVerifiedRecoveryRef.current
-    if (!pending || pending.orgId !== resolvedOrgId || openFailureCount !== 0) return
+    if (!pending || pending.orgId !== resolvedOrgId || !recoveryClearEligible) return
     pendingVerifiedRecoveryRef.current = null
     celebrateAllClear({ downtimeMs: pending.downtimeMs })
-  }, [celebrateAllClear, ledger, openFailureCount, resolvedOrgId])
+  }, [celebrateAllClear, ledger, recoveryClearEligible, resolvedOrgId])
 
   useEffect(() => {
-    if (openFailureCount > 0) {
+    if (!recoveryClearEligible) {
       setAllClear(false)
       setAllClearDowntimeOverride(null)
     }
-  }, [openFailureCount])
+  }, [recoveryClearEligible])
 
   useEffect(() => {
-    if (openFailureCount !== 0) return
+    if (!recoveryClearEligible) return
 
     const pending = consumeRecoveryAllClear(resolvedOrgId)
     if (pending) {
@@ -466,7 +561,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     }
     window.addEventListener(RECOVERY_ALL_CLEAR_EVENT, onAllClear)
     return () => window.removeEventListener(RECOVERY_ALL_CLEAR_EVENT, onAllClear)
-  }, [celebrateAllClear, openFailureCount, resolvedOrgId])
+  }, [celebrateAllClear, recoveryClearEligible, resolvedOrgId])
 
   useEffect(() => {
     if (!allClear) return
@@ -550,7 +645,19 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     pendingApprovals: waitingNodes.length,
     healthScore,
     totalRuns,
-  }), [currentHour, user, openFailureCount, waitingNodes.length, healthScore, totalRuns, i18n.language])
+    semanticOutcomePosture,
+    semanticCaseCount: semanticCases.length,
+  }), [
+    currentHour,
+    user,
+    openFailureCount,
+    waitingNodes.length,
+    healthScore,
+    totalRuns,
+    semanticOutcomePosture,
+    semanticCases.length,
+    i18n.language,
+  ])
 
   const recommendedActions = useMemo(() => computeRecommendedActions({
     openFailures: openFailureCount,
@@ -742,7 +849,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
         streak={streak}
         longestOpenMs={longestOpen?.durationMs}
         longestOpenSeverity={downtimeSeverity(longestOpen?.createdAt, nowMs)}
-        allClear={allClear && openFailureCount === 0}
+        allClear={allClear && recoveryClearEligible}
         allClearDowntimeMs={allClearDowntimeOverride ?? metrics?.downtimeEndedMs}
         celebrationTrigger={celebrationTrigger}
         personalWins={operatorWins}
@@ -797,6 +904,13 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
           />
         </section>
         <aside className="we-operator-rail" aria-label={t('recoveryCenter.railAria')}>
+          <SemanticRecoveryCasesTile
+            cases={semanticCases}
+            loading={semanticCasesLoading}
+            unavailable={semanticCasesUnavailable}
+            onOpenRun={props.onOpenRun}
+            onResolved={handleSemanticCaseResolved}
+          />
           <PendingApprovalsTile
             waitingNodes={waitingNodes}
             runs={props.runs}

@@ -142,6 +142,14 @@ export type RunSummary = {
   workflowName?: string | null
   workflowVersionId?: string
   status: string
+  /** Business-outcome posture, independent from technical run status. */
+  outcomeStatus?:
+    | 'semantic_violation'
+    | 'semantic_quarantined'
+    | 'semantic_recovered'
+    | 'semantic_accepted_loss'
+    | null
+  semanticViolationCount?: number
   createdBy?: string
   createdAt?: string
   /** Full run-start envelope. Present on `/run` and `/status`; omitted from the bounded `/runs` list. */
@@ -158,6 +166,44 @@ export type RunSummary = {
   replayMode?: string | null
   /** Strength of evidence produced by a validation run. */
   validationEvidenceLevel?: ValidationEvidenceLevel | null
+}
+
+export type RecoveryCase = {
+  id: string
+  orgId: string
+  runId: string
+  workflowId: string | null
+  workflowVersionId: string
+  source: 'semantic_violation'
+  detectorId: string
+  sourceNodeId: string
+  detectorKind: 'expression' | 'schema'
+  action: 'observe' | 'quarantine'
+  message: string
+  detailsJson: unknown
+  state:
+    | 'detected'
+    | 'contained'
+    | 'diagnosed'
+    | 'candidates_ready'
+    | 'validating'
+    | 'awaiting_approval'
+    | 'publishing'
+    | 'monitoring'
+    | 'verified_recovered'
+    | 'recurred'
+    | 'accepted_loss'
+    | 'abandoned'
+  createdBy: string | null
+  createdAt: string
+  updatedAt: string
+  resolvedAt: string | null
+}
+export type SemanticCaseResolution = {
+  runId: string
+  sourceNodeId: string
+  resumed: boolean
+  resolvedCaseIds: string[]
 }
 export type OrgRole = 'viewer' | 'editor' | 'admin'
 export type OrgMember = { id: string; orgId: string; userId: string; email?: string; role: OrgRole; invitedBy?: string; createdAt?: string }

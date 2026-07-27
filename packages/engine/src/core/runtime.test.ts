@@ -5,6 +5,7 @@ import type {
   NodeExecutorRegistry,
   QueueAdapter,
 } from './types'
+import type { Workflow } from '@janusly/shared'
 
 // Mock the data repos the runtime imports so tests don't reach Postgres.
 // Each mock returns a benign no-op default; individual tests can override
@@ -52,6 +53,11 @@ function makeStore(overrides: Partial<ExecutionStore> = {}): ExecutionStore {
     markQueuePublicationSucceeded: vi.fn().mockResolvedValue(true),
     markNodeSucceeded: vi.fn().mockResolvedValue(true),
     markNodeSucceededWithEvent: vi.fn().mockResolvedValue(true),
+    markNodeSucceededWithOutcome: vi.fn().mockResolvedValue({
+      completed: true,
+      quarantined: false,
+      caseIds: [],
+    }),
     markNodeFailed: vi.fn().mockResolvedValue(true),
     markNodeWaiting: vi.fn().mockResolvedValue(true),
     markNodeSkipped: vi.fn().mockResolvedValue(undefined),
@@ -83,6 +89,67 @@ function makeFailingExecutors(error = new Error('temporary outage')): NodeExecut
 const node = { id: 'n1', type: 'noop' as const, config: {} }
 const workflow = { dslVersion: '1.0' as const, nodes: [node], edges: [] }
 const input = { runId: 'r1', node, workflow }
+
+function semanticWorkflow(): Workflow {
+  return {
+    ...workflow,
+    recovery: {
+      contract: {
+        version: '2',
+        failure: {
+          technical: {
+            terminalNodeFailure: true,
+            stalledNode: true,
+          },
+          semantic: {
+            mode: 'deterministic',
+            detectors: [{
+              id: 'ai-mode',
+              sourceNodeId: 'n1',
+              kind: 'expression',
+              passWhen: 'context.n1.output.mode === "ai"',
+              action: 'quarantine',
+              message: 'AI output is required',
+            }],
+            evaluationFixtures: [
+              {
+                id: 'ai-mode-pass',
+                sourceNodeId: 'n1',
+                output: { mode: 'ai' },
+                expected: 'pass',
+              },
+              {
+                id: 'ai-mode-fail',
+                sourceNodeId: 'n1',
+                output: { mode: 'fallback' },
+                expected: 'violation',
+              },
+            ],
+          },
+        },
+        evidence: {
+          required: [
+            'failure_snapshot',
+            'audit_trail',
+            'terminal_outcome',
+          ],
+        },
+        effects: [],
+        repairs: { allowed: ['retry'] },
+        validation: { minimumEvidenceLevel: 'static' },
+        approval: {
+          productionMutation: 'required',
+          permission: 'recovery.write',
+        },
+        autonomyLevel: 3,
+        verification: {
+          kind: 'generation_bound_terminal_success',
+        },
+        recurrence: { windowDays: 7 },
+      },
+    },
+  }
+}
 
 describe('executeQueuedNode — cancellation guards', () => {
   beforeEach(() => vi.clearAllMocks())
@@ -139,6 +206,48 @@ describe('executeQueuedNode — cancellation guards', () => {
     expect(store.markNodeSucceededWithEvent).toHaveBeenCalledWith('r1', 'n1', { x: 1 }, 1, undefined)
     // appendEvent still fires for node.running (and enqueueReadyNodes events).
     expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'node.running' }))
+  })
+
+  it('atomically quarantines an unacceptable semantic outcome before downstream publication', async () => {
+    const store = makeStore({
+      getRunStatus: vi.fn().mockResolvedValue('waiting'),
+      markNodeSucceededWithOutcome: vi.fn().mockResolvedValue({
+        completed: true,
+        quarantined: true,
+        caseIds: ['sem-1'],
+      }),
+    })
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(
+      store,
+      queue,
+      makeExecutors({
+        status: 'completed',
+        output: { mode: 'fallback' },
+      }),
+    )
+    const withContract = semanticWorkflow()
+
+    await runtime.executeQueuedNode({
+      runId: 'r1',
+      node,
+      workflow: withContract,
+    })
+
+    expect(store.markNodeSucceededWithOutcome).toHaveBeenCalledWith(
+      'r1',
+      'n1',
+      { mode: 'fallback' },
+      1,
+      [expect.objectContaining({
+        detectorId: 'ai-mode',
+        action: 'quarantine',
+      })],
+      undefined,
+    )
+    expect(store.markNodeSucceededWithEvent).not.toHaveBeenCalled()
+    expect(store.updateRunStatusFromNodes).not.toHaveBeenCalled()
+    expect(queue.enqueueNode).not.toHaveBeenCalled()
   })
 
   it('stops a stale recovery generation before success events or downstream scheduling', async () => {
@@ -652,6 +761,21 @@ describe('enqueueReadyNodes — cancellation head guard', () => {
 
     expect(await runtime.enqueueReadyNodes({ runId: 'r1', workflow })).toBe(0)
     expect(store.tryClaimNodeForQueue).not.toHaveBeenCalled()
+  })
+
+  it('returns 0 immediately while a semantic quarantine keeps the run waiting', async () => {
+    const store = makeStore({
+      getRunStatus: vi.fn().mockResolvedValue('waiting'),
+    })
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(store, queue, makeExecutors())
+
+    expect(
+      await runtime.enqueueReadyNodes({ runId: 'r1', workflow }),
+    ).toBe(0)
+    expect(store.getRunContext).not.toHaveBeenCalled()
+    expect(store.tryClaimNodeForQueue).not.toHaveBeenCalled()
+    expect(queue.enqueueNode).not.toHaveBeenCalled()
   })
 
   it('requeues a pending root restored by the publication reconciler', async () => {

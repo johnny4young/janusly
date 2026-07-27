@@ -10,6 +10,7 @@ export const V1_READ_PATHS = {
   recoveryMetrics: "/recovery/metrics",
   recoveryLedger: "/recovery/ledger",
   recoveryMyWins: "/recovery/my-wins",
+  recoveryCases: "/recovery/cases",
   templates: "/templates",
   tools: "/tools",
   workflows: "/workflows",
@@ -42,6 +43,7 @@ export const V1_WRITE_PATHS = {
   cancelRun: "/run/cancel",
   resumeWorkflow: "/workflows/{workflowId}/resume",
   replayDeadLetter: "/dlq/replay",
+  recoverSemanticCase: "/recovery/cases/{caseId}/resolve",
 } as const;
 
 export type V1WritePath = typeof V1_WRITE_PATHS[keyof typeof V1_WRITE_PATHS];

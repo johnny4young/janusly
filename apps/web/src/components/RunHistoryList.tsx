@@ -24,6 +24,7 @@ import type { RunSummary, SavedWorkflow } from '../types'
 import { EmptyView } from './panel-primitives'
 import { RunHistoryComparisonDialog } from './RunHistoryComparisonDialog'
 import { ValidationEvidencePill } from './ValidationEvidencePill'
+import { SemanticOutcomePill } from './SemanticOutcomePill'
 
 /** Fixed card pitch for the compact row plus its 8px bottom margin. */
 const RUN_HISTORY_ROW_HEIGHT = 156
@@ -234,6 +235,12 @@ export function RunHistoryList({
                             <ValidationEvidencePill
                               level={run.validationEvidenceLevel}
                               testId={`run-validation-evidence-${run.id}`}
+                            />
+                          )}
+                          {run.outcomeStatus && (
+                            <SemanticOutcomePill
+                              status={run.outcomeStatus}
+                              testId={`run-semantic-outcome-${run.id}`}
                             />
                           )}
                           <span className="status-pill" data-status={run.status}>{formatStatusLabel(run.status)}</span>

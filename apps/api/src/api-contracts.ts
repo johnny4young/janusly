@@ -9,6 +9,7 @@
 
 import {
   EvidenceListSchema,
+  RecoveryCaseStateSchema,
   UpstreamHealthSourceTagsSchema,
   ValidationEvidenceLevelSchema,
   WorkflowSchema,
@@ -430,6 +431,16 @@ const RunSchema = z.object({
   orgId: z.string(),
   workflowVersionId: z.string(),
   status: z.enum(runStatusValues),
+  outcomeStatus: z
+    .enum([
+      "semantic_violation",
+      "semantic_quarantined",
+      "semantic_recovered",
+      "semantic_accepted_loss",
+    ])
+    .nullable()
+    .optional(),
+  semanticViolationCount: z.number().int().nonnegative().optional(),
   inputJson: JsonValueSchema.nullable(),
   outputJson: JsonValueSchema.nullable(),
   parentRunId: z.string().nullable(),
@@ -480,6 +491,26 @@ const RunDetailSchema = z.object({
   events: z.array(RunEventSchema),
   eventsCursor: z.string().nullable(),
   eventsHasMore: z.boolean(),
+});
+
+const RecoveryCaseSchema = z.object({
+  id: z.string(),
+  orgId: z.string(),
+  runId: z.string(),
+  workflowId: z.string().nullable(),
+  workflowVersionId: z.string(),
+  source: z.literal("semantic_violation"),
+  detectorId: z.string(),
+  sourceNodeId: z.string(),
+  detectorKind: z.enum(["expression", "schema"]),
+  action: z.enum(["observe", "quarantine"]),
+  message: z.string(),
+  detailsJson: JsonValueSchema.nullable(),
+  state: RecoveryCaseStateSchema,
+  createdBy: z.string().nullable(),
+  createdAt: IsoDateSchema,
+  updatedAt: IsoDateSchema,
+  resolvedAt: NullableIsoDateSchema,
 });
 
 const NonNegativeSafeIntegerSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
@@ -729,6 +760,69 @@ export const recoveryMyWinsContract = {
     windowDays: z.number().int().min(1).max(90),
   }),
   errorCodes: ["invalid_input"],
+} satisfies ApiRouteContract;
+
+export const listRecoveryCasesContract = {
+  operationId: "listRecoveryCases",
+  path: V1_READ_PATHS.recoveryCases,
+  summary:
+    "List durable semantic recovery cases for the tenant",
+  tags: ["Recovery"],
+  request: {
+    query: z
+      .object({
+        openOnly: z.enum(["true", "false"]).optional(),
+        runId: z.string().trim().min(1).max(256).optional(),
+        limit: PositiveLimitSchema.optional(),
+      })
+      .strict(),
+  },
+  response: z.object({ cases: z.array(RecoveryCaseSchema) }),
+  errorCodes: ["invalid_input"],
+} satisfies ApiRouteContract;
+
+export const recoverSemanticCaseContract = {
+  operationId: "recoverSemanticCase",
+  path: V1_WRITE_PATHS.recoverSemanticCase,
+  summary:
+    "Resolve a semantic quarantine or acknowledge an observe-only outcome",
+  tags: ["Recovery"],
+  request: {
+    path: z
+      .object({
+        caseId: z.string().trim().min(1).max(256),
+      })
+      .strict(),
+    body: z.discriminatedUnion("decision", [
+      z
+        .object({
+          decision: z.literal("replace"),
+          output: JsonValueSchema,
+          reason: z.string().trim().min(1).max(1_000),
+        })
+        .strict(),
+      z
+        .object({
+          decision: z.literal("accept_loss"),
+          reason: z.string().trim().min(1).max(1_000),
+        })
+        .strict(),
+    ]),
+  },
+  response: z.object({
+    ok: z.literal(true),
+    runId: z.string(),
+    sourceNodeId: z.string(),
+    decision: z.enum(["replace", "accept_loss"]),
+    resumed: z.boolean(),
+    resolvedCaseIds: z.array(z.string()),
+  }),
+  errorCodes: [
+    "invalid_input",
+    "recovery_case_not_found",
+    "recovery_case_conflict",
+    "recovery_semantic_output_invalid",
+  ],
 } satisfies ApiRouteContract;
 
 export const listTemplatesContract = {
@@ -1321,6 +1415,8 @@ export const V1_CONTRACT_ROUTES: readonly ApiContractRouteDescriptor[] = [
   { method: "GET", role: "viewer", permission: "recovery.read", contract: recoveryMetricsContract },
   { method: "GET", role: "viewer", permission: "recovery.read", contract: recoveryLedgerContract },
   { method: "GET", role: "viewer", permission: "recovery.read", contract: recoveryMyWinsContract },
+  { method: "GET", role: "viewer", permission: "recovery.read", contract: listRecoveryCasesContract },
+  { method: "POST", role: "editor", permission: "recovery.write", contract: recoverSemanticCaseContract },
   { method: "GET", contract: listTemplatesContract },
   { method: "GET", contract: listToolsContract },
   { method: "POST", permission: "ai.write", contract: generateWorkflowContract },

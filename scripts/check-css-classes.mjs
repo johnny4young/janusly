@@ -272,6 +272,7 @@ export function extractTypeScriptClassReferences(source, fileName = "source.tsx"
   }
 
   function addBindingName(scope, name, initializer, declaration) {
+    if (!name || ts.isOmittedExpression(name)) return;
     if (name?.type === "ArrayPattern") {
       for (const element of name.elements) addBindingName(scope, element, null, declaration);
       return;

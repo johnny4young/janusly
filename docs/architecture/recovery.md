@@ -6,27 +6,51 @@
 
 ## Recovery Contract, Recovery Case, and north-star semantics
 
-**Recovery Contract v1:** `packages/shared/src/recovery-contract.ts` is the
+**Recovery Contract:** `packages/shared/src/recovery-contract.ts` is the
 browser-safe, I/O-free source of truth. A workflow snapshot may persist
 `recovery: { circuitBreaker?, contract? }`; `WorkflowSchema` validates the
-object on save and verifies that every declared external-effect `nodeId`
-exists. Full-workflow AI improvement never receives or overwrites this
-operator-owned policy. The contract records the technical failure boundary,
+object on save. Full-workflow AI improvement never receives or overwrites this
+operator-owned policy. Both versions record the technical failure boundary,
 required evidence, external effects and their idempotency/receipt posture,
 allowed repairs, minimum validation strength, approval permission, autonomy
 level, terminal verification kind, and recurrence window.
 
-Version 1 is intentionally narrower than the eventual product model:
-`failure.semantic.mode` must be `disabled`, so the contract cannot claim
-business-outcome detection that the runtime does not yet implement. Level 4
-policy also fails closed: it requires provider-simulated or live-canary
-evidence, an explicit autonomous-production posture, a repair allowlist that
-is a subset of the contract's allowed repairs, at least one prior verified
-recovery, a bounded affected-execution count, mandatory rollback, idempotent
-effects, retained effect receipts, and no manual receipt dependency. These
-fields declare eligibility; current supervised auto-healing remains governed
-by its existing consent, evidence, and publication gates until a dedicated
-case projection consumes the contract.
+Historical `RecoveryContractV1` snapshots remain valid and require
+`failure.semantic.mode = "disabled"`. `RecoveryContractV2` adds deterministic
+semantic detectors over a completed node's exact output:
+
+- an `expression` detector passes only when its bounded `passWhen` expression
+  evaluates to boolean `true`;
+- a `schema` detector uses the shared recursive JSON-value schema subset;
+- `observe` records a durable business-outcome case without pausing technical
+  execution;
+- `quarantine` atomically marks the source node successful, creates the cases,
+  and places the run in `waiting` before any downstream node can be scheduled.
+
+Every v2 contract carries 2–50 inline evaluation fixtures. Save-time
+validation replays them through the exact runtime evaluator and requires each
+detector source to have a passing fixture plus a detector-specific violation
+fixture. Detector ids, fixture ids, effect node ids, repair classes, and
+evidence kinds are unique. A malformed expression fails its fixture and can
+never silently pass.
+
+The workflow validator verifies declared node references, requires every
+actual write-side node to appear in `contract.effects`, and requires each
+quarantine source to dominate every declared or actual write-side effect in
+the DAG. Deferred-completion sources (`approval`, `human_form`,
+`subworkflow`, `wait_until`, `webhook`) are rejected because their completion
+is persisted outside the inline semantic interception point. Router sources
+are also rejected for quarantine because their branch skips may already be
+persisted before replacement. These are fail-closed save constraints, not
+best-effort runtime warnings.
+
+Level 4 policy remains fail-closed in both versions: it requires
+provider-simulated or live-canary evidence, an explicit autonomous-production
+posture, a repair allowlist contained by the contract, at least one prior
+verified recovery, a bounded affected-execution count, mandatory rollback,
+idempotent effects, retained effect receipts, and no manual receipt
+dependency. Semantic detection does not grant mutation authority: no LLM
+judgment can bypass these deterministic policy gates.
 
 **Recovery Case v1:** `packages/shared/src/recovery-case.ts` defines the legal
 state vocabulary and transition-receipt wire contract:
@@ -45,12 +69,24 @@ detected
 
 Validation or approval may return to `candidates_ready`; every terminal state
 is closed. A transition receipt is versioned, actor-attributed, timestamped,
-and requires at least one bounded evidence reference. This is a stable domain
-contract, not a claim that a new recovery-case table or page already exists:
-`recovery_items`, DLQ rows, validation runs, auto-healing decisions,
-deployments, impact events, and recurrence projections remain the operational
-substrates. A later projection must apply the pure legal-transition check in
-the same CAS transaction that persists its receipt.
+and requires at least one bounded evidence reference.
+
+Semantic incidents are durably projected into `recovery_cases`; every state
+change appends one `recovery_case_transitions` receipt in the same transaction.
+The technical DLQ path continues to use `recovery_items`, so the semantic
+projection does not reinterpret or duplicate technical failure evidence.
+`GET /recovery/cases` lists a bounded tenant-scoped view. An editor can resolve
+`POST /recovery/cases/:caseId/resolve` with replacement JSON that passes every
+detector for the same source, or with an explicit accepted-loss rationale.
+Observe-only cases can be acknowledged without pausing a run. Resolving one of
+multiple quarantined sources does not resume prematurely: the transaction
+locks every run-node row in stable order before the run row, validates a
+replacement against that frozen cross-node context, closes same-source cases
+together, and resumes only after the final open quarantine is resolved. This
+prevents a concurrent node completion from changing detector input between
+validation and publication. Before commit, pending nodes receive a durable
+queue-publication repair marker; immediate BullMQ publication remains
+best-effort behind that repair boundary.
 
 **North-star v1:** the metric key is
 `time_to_verified_recovery`; it is the median elapsed milliseconds from

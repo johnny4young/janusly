@@ -4199,6 +4199,91 @@ button.we-ops-metric-card--button {
   color: var(--we-text-2);
 }
 
+.we-semantic-cases {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.we-semantic-case {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px;
+  border: 1px solid color-mix(in srgb, var(--we-warning) 35%, var(--we-border));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--we-warning) 5%, var(--we-surface-1));
+}
+
+.we-semantic-case__summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.we-semantic-case__summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.we-semantic-case__summary strong {
+  color: var(--we-text-1);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.we-semantic-case__summary span:not(.we-pill) {
+  color: var(--we-text-2);
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 10px;
+}
+
+.we-semantic-case__detail {
+  overflow: hidden;
+  color: var(--we-danger-text);
+  font-size: 10px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.we-semantic-case__actions,
+.we-semantic-case__form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.we-semantic-case__form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--we-border);
+}
+
+.we-semantic-case__form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--we-text-2);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.we-semantic-case__form textarea {
+  resize: vertical;
+  min-height: 88px;
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 11px;
+}
+
 .we-recovery-center-row__age {
   font-size: 11px;
   color: var(--we-text-2);

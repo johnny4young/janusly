@@ -628,6 +628,31 @@ describe('useWorkflowStore', () => {
     expect(state.events).toEqual([])
   })
 
+  it('patches only the currently selected run detail', () => {
+    useWorkflowStore.setState({
+      runId: 'run-a',
+      runDetail: {
+        id: 'run-a',
+        status: 'running',
+        inputJson: { input: { invoiceId: '42' } },
+      },
+    })
+
+    useWorkflowStore.getState().patchRunDetail('run-b', { status: 'failed' })
+    expect(useWorkflowStore.getState().runDetail?.status).toBe('running')
+
+    useWorkflowStore.getState().patchRunDetail('run-a', {
+      status: 'succeeded',
+      outputJson: { result: 'ok' },
+    })
+    expect(useWorkflowStore.getState().runDetail).toEqual({
+      id: 'run-a',
+      status: 'succeeded',
+      inputJson: { input: { invoiceId: '42' } },
+      outputJson: { result: 'ok' },
+    })
+  })
+
   it('invalidates run ownership when authoring replaces the workflow', () => {
     const generation = useWorkflowStore.getState().runTransitionGeneration
     useWorkflowStore.getState().hydrateWorkflow({ id: 'wf-a', nodes: [], edges: [] })

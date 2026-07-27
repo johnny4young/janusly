@@ -192,6 +192,31 @@ describe('useRunEventStream', () => {
     expect(patchRunSummary).toHaveBeenCalledWith('run-1', { status: 'running' })
   })
 
+  it('projects semantic outcome fields from the live status snapshot', async () => {
+    const patchRunSummary = vi.fn()
+    openRunEventStreamMock.mockResolvedValue(
+      streamResponse([
+        ': connected\n\n',
+        `event: run-status\ndata: ${JSON.stringify({
+          kind: 'run.status',
+          status: 'waiting',
+          outcomeStatus: 'semantic_quarantined',
+          semanticViolationCount: 2,
+        })}\n\n`,
+      ]),
+    )
+
+    render(<Harness runId="run-1" patchRunSummary={patchRunSummary} />)
+
+    await waitFor(() => {
+      expect(patchRunSummary).toHaveBeenCalledWith('run-1', {
+        status: 'waiting',
+        outcomeStatus: 'semantic_quarantined',
+        semanticViolationCount: 2,
+      })
+    })
+  })
+
   it('hands back to polling but keeps consuming trailing events after a terminal status', async () => {
     const patchRunSummary = vi.fn()
     openRunEventStreamMock.mockResolvedValue(

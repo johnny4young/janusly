@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   RecoveryContractV1Schema,
+  RecoveryContractV2Schema,
   RecoveryCircuitBreakerSchema,
 } from "./recovery-contract";
 
@@ -245,6 +246,141 @@ describe("RecoveryContractV1Schema", () => {
     expect(RecoveryContractV1Schema.safeParse(invalid).success).toBe(
       false,
     );
+  });
+});
+
+describe("RecoveryContractV2Schema", () => {
+  function contractV2(overrides: Record<string, unknown> = {}) {
+    const base = contract();
+    return {
+      ...base,
+      version: "2",
+      failure: {
+        technical: base.failure.technical,
+        semantic: {
+          mode: "deterministic",
+          detectors: [
+            {
+              id: "acceptable-answer",
+              sourceNodeId: "answer",
+              kind: "expression",
+              passWhen:
+                'context.answer.output.mode === "ai"',
+              action: "quarantine",
+              message: "The model must produce a reviewed answer",
+            },
+          ],
+          evaluationFixtures: [
+            {
+              id: "accepts-ai",
+              sourceNodeId: "answer",
+              output: { mode: "ai" },
+              expected: "pass",
+            },
+            {
+              id: "rejects-fallback",
+              sourceNodeId: "answer",
+              output: { mode: "fallback" },
+              expected: "violation",
+            },
+          ],
+        },
+      },
+      ...overrides,
+    };
+  }
+
+  it("accepts deterministic expression and schema detectors", () => {
+    expect(
+      RecoveryContractV2Schema.safeParse(contractV2()).success,
+    ).toBe(true);
+    expect(
+      RecoveryContractV2Schema.safeParse(
+        contractV2({
+          failure: {
+            technical: {
+              terminalNodeFailure: true,
+              stalledNode: true,
+            },
+            semantic: {
+              mode: "deterministic",
+              detectors: [
+                {
+                  id: "typed-answer",
+                  sourceNodeId: "answer",
+                  kind: "schema",
+                  schema: {
+                    type: "object",
+                    required: ["answer"],
+                    properties: {
+                      answer: { type: "string" },
+                    },
+                  },
+                  action: "observe",
+                  message: "Answer must be a string",
+                },
+              ],
+              evaluationFixtures: [
+                {
+                  id: "typed-answer-pass",
+                  sourceNodeId: "answer",
+                  output: { answer: "ready" },
+                  expected: "pass",
+                },
+                {
+                  id: "typed-answer-fail",
+                  sourceNodeId: "answer",
+                  output: {},
+                  expected: "violation",
+                },
+              ],
+            },
+          },
+        }),
+      ).success,
+    ).toBe(true);
+  });
+
+  it("requires a bounded evaluation dataset with at least two fixtures", () => {
+    const candidate = contractV2();
+    expect(
+      RecoveryContractV2Schema.safeParse({
+        ...candidate,
+        failure: {
+          ...candidate.failure,
+          semantic: {
+            ...candidate.failure.semantic,
+            evaluationFixtures: [
+              candidate.failure.semantic.evaluationFixtures[0],
+            ],
+          },
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects duplicate detector and fixture identities", () => {
+    const candidate = contractV2();
+    const failure = candidate.failure;
+    expect(
+      RecoveryContractV2Schema.safeParse({
+        ...candidate,
+        failure: {
+          ...failure,
+          semantic: {
+            ...failure.semantic,
+            detectors: [
+              failure.semantic.detectors[0],
+              failure.semantic.detectors[0],
+            ],
+            evaluationFixtures: [
+              failure.semantic.evaluationFixtures[0],
+              failure.semantic.evaluationFixtures[0],
+            ],
+          },
+        },
+      }).success,
+    ).toBe(false);
   });
 });
 

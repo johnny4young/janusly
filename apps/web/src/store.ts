@@ -243,6 +243,7 @@ type WorkflowStore = {
 
   setRunId: (id: string | null) => void
   setRunDetail: (run: RunSummary | null) => void
+  patchRunDetail: (runId: string, patch: Partial<RunSummary>) => void
   setRunNodes: (nodes: RunNode[]) => void
   mergeRunNode: (node: RunNode) => void
   addEvents: (events: RunEvent[]) => void
@@ -638,6 +639,11 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     ? { runId: id }
     : { ...clearedRunProjection(state.runTransitionGeneration), runId: id }),
   setRunDetail: (runDetail) => set({ runDetail }),
+  patchRunDetail: (runId, patch) => set((state) => (
+    state.runId === runId && state.runDetail?.id === runId
+      ? { runDetail: { ...state.runDetail, ...patch, id: runId } }
+      : state
+  )),
   setRunNodes: (nodes) => set({ runNodes: nodes }),
   mergeRunNode: (incoming) => set((state) => {
     const index = state.runNodes.findIndex((node) => node.nodeId === incoming.nodeId)

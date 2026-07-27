@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { mergeRunSummaryPage, patchRunSummaryList } from './useBootstrapData'
+import {
+  createRunSummaryUpdateCoordinator,
+  mergeRunSummaryPage,
+  mergeRunSummaryPageWithPatches,
+  patchRunSummaryList,
+} from './useBootstrapData'
 
 describe('run summary live merging', () => {
   it('patches an existing status without discarding detail-only fields', () => {
@@ -27,5 +32,39 @@ describe('run summary live merging', () => {
     expect(mergeRunSummaryPage(current, [{ id: 'run-1', status: 'succeeded', outputJson: { result: 'ok' } }])).toEqual([
       { id: 'run-1', status: 'succeeded', traceId: 'trace-1', inputJson: { input: { invoiceId: '42' } }, outputJson: { result: 'ok' } },
     ])
+  })
+
+  it('keeps a newer live patch authoritative over an older list snapshot', () => {
+    const current = [{
+      id: 'run-1',
+      status: 'succeeded',
+      outcomeStatus: 'semantic_recovered' as const,
+    }]
+    expect(mergeRunSummaryPageWithPatches(
+      current,
+      [{ id: 'run-1', status: 'running', outcomeStatus: 'semantic_recovered' }],
+      [{ runId: 'run-1', patch: { status: 'succeeded' } }],
+    )).toEqual([{
+      id: 'run-1',
+      status: 'succeeded',
+      outcomeStatus: 'semantic_recovered',
+    }])
+  })
+
+  it('invalidates an in-flight snapshot when a newer run update is reserved', () => {
+    const coordinator = createRunSummaryUpdateCoordinator()
+    const pollingRevision = coordinator.reserve('run-1')
+    const liveRevision = coordinator.reserve('run-1')
+
+    expect(coordinator.isCurrent('run-1', pollingRevision)).toBe(false)
+    expect(coordinator.isCurrent('run-1', liveRevision)).toBe(true)
+  })
+
+  it('tracks async summary ownership independently for each run', () => {
+    const coordinator = createRunSummaryUpdateCoordinator()
+    const firstRunRevision = coordinator.reserve('run-1')
+    coordinator.reserve('run-2')
+
+    expect(coordinator.isCurrent('run-1', firstRunRevision)).toBe(true)
   })
 })

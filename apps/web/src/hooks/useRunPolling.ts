@@ -28,6 +28,7 @@ import { useT } from '../i18n'
 import { isRunRequestCurrent } from '../run-transition'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
 import type { RunEvent, RunNode, RunSummary } from '../types'
+import type { RunSummaryUpdateStarter } from './useBootstrapData'
 
 type RunResponse = {
   run?: RunSummary
@@ -59,7 +60,7 @@ export type RunSummaryPatcher = (runId: string, patch: Partial<RunSummary>) => v
 export function useRunPolling(
   runId: string | null,
   onTerminal: () => void | Promise<void>,
-  patchRunSummary?: RunSummaryPatcher,
+  beginRunSummaryUpdate?: RunSummaryUpdateStarter,
 ): RunPolling {
   const { t } = useT()
   const setRunNodes = useWorkflowStore((s) => s.setRunNodes)
@@ -71,6 +72,7 @@ export function useRunPolling(
 
   const loadStatus = useCallback(async (id: string): Promise<RunStatusLoadResult> => {
     const requestId = ++requestSequence.current
+    const commitRunSummary = beginRunSummaryUpdate?.(id)
     const context = {
       runId: id,
       generation: useWorkflowStore.getState().runTransitionGeneration,
@@ -90,7 +92,7 @@ export function useRunPolling(
     // The generation also prevents a same-id response from an older auth or
     // workflow owner from overwriting the current projection.
     if (!isCurrentRequest()) return { discarded: true }
-    if (status.run) patchRunSummary?.(id, status.run)
+    if (status.run) commitRunSummary?.(status.run)
     setRunNodes(status.nodes ?? [])
     const statusEvents = status.events ?? []
     addEvents(statusEvents)
@@ -107,7 +109,7 @@ export function useRunPolling(
       }
     }
     return { discarded: false, status }
-  }, [addEvents, patchRunSummary, setEventsPagination, setRunNodes])
+  }, [addEvents, beginRunSummaryUpdate, setEventsPagination, setRunNodes])
 
   // Polling fallback. The original 1.5s `/status` loop loads the initial
   // timeline and stays as the safety net. Its tick is a no-op while SSE is the

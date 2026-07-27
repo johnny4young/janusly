@@ -36,7 +36,7 @@ import { useEffect } from 'react'
 import { openRunEventStream } from '../api'
 import { useWorkflowStore } from '../store'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
-import type { JsonObject, RunEvent, RunNode } from '../types'
+import type { JsonObject, RunEvent, RunNode, RunSummary } from '../types'
 import type { RunSummaryPatcher } from './useRunPolling'
 
 /** Abort the connect attempt if no byte arrives — catches proxy buffering. */
@@ -45,6 +45,12 @@ const FIRST_BYTE_TIMEOUT_MS = 8_000
 const MAX_BACKOFF_MS = 8_000
 /** Give up on SSE for this run after N consecutive failures (stay on polling). */
 const MAX_CONSECUTIVE_FAILURES = 4
+const semanticOutcomeStatuses = new Set([
+  'semantic_violation',
+  'semantic_quarantined',
+  'semantic_recovered',
+  'semantic_accepted_loss',
+])
 
 /** One field of a parsed SSE frame. */
 type ParsedFrame = { id?: string; event?: string; data: string }
@@ -181,10 +187,41 @@ export function useRunEventStream(runId: string | null, patchRunSummary?: RunSum
         return 'ok'
       }
       if (!parsed || typeof parsed !== 'object') return 'ok'
-      const signal = parsed as { kind?: string; status?: string; id?: string; nodeId?: string | null; type?: string; payload?: unknown; createdAt?: string }
+      const signal = parsed as {
+        kind?: string
+        status?: string
+        outcomeStatus?: unknown
+        semanticViolationCount?: unknown
+        id?: string
+        nodeId?: string | null
+        type?: string
+        payload?: unknown
+        createdAt?: string
+      }
       if (signal.kind === 'catchup-truncated') return 'catchup-truncated'
       if (signal.kind === 'run.status') {
-        if (typeof signal.status === 'string') patchRunSummary?.(runId, { status: signal.status })
+        if (typeof signal.status === 'string') {
+          const patch: Partial<RunSummary> = { status: signal.status }
+          if (
+            signal.outcomeStatus === null ||
+            (
+              typeof signal.outcomeStatus === 'string' &&
+              semanticOutcomeStatuses.has(signal.outcomeStatus)
+            )
+          ) {
+            patch.outcomeStatus =
+              signal.outcomeStatus as RunSummary['outcomeStatus']
+          }
+          if (
+            typeof signal.semanticViolationCount === 'number' &&
+            Number.isInteger(signal.semanticViolationCount) &&
+            signal.semanticViolationCount >= 0
+          ) {
+            patch.semanticViolationCount =
+              signal.semanticViolationCount
+          }
+          patchRunSummary?.(runId, patch)
+        }
         return isTerminalRunStatus(signal.status) ? 'terminal' : 'ok'
       }
       if (signal.kind === 'event' && typeof signal.id === 'string' && typeof signal.type === 'string') {

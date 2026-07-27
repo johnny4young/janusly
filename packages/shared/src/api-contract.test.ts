@@ -6,7 +6,7 @@ describe("v1 API read paths", () => {
   it("keeps the closed path catalog unique", () => {
     const paths = Object.values(V1_READ_PATHS);
     expect(new Set(paths).size).toBe(paths.length);
-    expect(paths).toHaveLength(18);
+    expect(paths).toHaveLength(19);
   });
 
   it("matches exact paths only", () => {
@@ -21,6 +21,7 @@ describe("v1 API read paths", () => {
     expect(isV1ReadPath("/workflows/health")).toBe(true);
     expect(isV1ReadPath("/dlq")).toBe(true);
     expect(isV1ReadPath("/dlq/clusters")).toBe(true);
+    expect(isV1ReadPath("/recovery/cases")).toBe(true);
     expect(isV1ReadPath("/memory/consent-status/extra")).toBe(false);
     expect(isV1ReadPath("/workflows/schedule-preview/extra")).toBe(false);
     expect(isV1ReadPath("/workflows/tags")).toBe(false);
@@ -32,7 +33,7 @@ describe("v1 API mutation paths", () => {
   it("keeps the closed mutation catalog unique and complete", () => {
     const paths = Object.values(V1_WRITE_PATHS);
     expect(new Set(paths).size).toBe(paths.length);
-    expect(paths).toHaveLength(12);
+    expect(paths).toHaveLength(13);
     expect(paths).toContain("/ai/generate-workflow");
     expect(paths).toContain("/runs/redrive");
     expect(paths).toContain("/workflows/{workflowId}/resume");
@@ -40,5 +41,6 @@ describe("v1 API mutation paths", () => {
     expect(paths).toContain("/workflows/save");
     expect(paths).toContain("/workflows/rollback");
     expect(paths).toContain("/dlq/replay");
+    expect(paths).toContain("/recovery/cases/{caseId}/resolve");
   });
 });

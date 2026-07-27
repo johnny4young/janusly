@@ -36,7 +36,13 @@ import {
   Sparkles,
   Users,
 } from 'lucide-react'
-import type { ActiveTab, RunNode, RunSummary } from '../../types'
+import type {
+  ActiveTab,
+  RecoveryCase,
+  RunNode,
+  RunSummary,
+  SemanticCaseResolution,
+} from '../../types'
 import { api } from '../../api'
 import { useWorkflowStore } from '../../store'
 import { getResolvedLocale, useT } from '../../i18n'
@@ -123,6 +129,263 @@ function AllClearState({ message, testId }: { message: string; testId?: string }
         <span>{message}</span>
       </div>
     </div>
+  )
+}
+
+export function SemanticRecoveryCasesTile({
+  cases,
+  loading,
+  unavailable,
+  onOpenRun,
+  onResolved,
+}: {
+  cases: RecoveryCase[]
+  loading: boolean
+  unavailable: boolean
+  onOpenRun: (runId: string, targetTab?: ActiveTab) => void | Promise<void>
+  onResolved?: (result: SemanticCaseResolution) => void | Promise<void>
+}) {
+  const { t } = useT()
+  const addToast = useWorkflowStore(state => state.addToast)
+  const bumpPlatformVersion = useWorkflowStore(state => state.bumpPlatformVersion)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [output, setOutput] = useState('{\n  "mode": "ai"\n}')
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const top = cases.slice(0, 3)
+
+  useEffect(() => {
+    if (selectedId && !cases.some(item => item.id === selectedId)) {
+      setSelectedId(null)
+      setError(null)
+    }
+  }, [cases, selectedId])
+
+  const resolveCase = async (
+    item: RecoveryCase,
+    decision: 'replace' | 'accept_loss',
+  ) => {
+    setError(null)
+    let replacement: unknown
+    if (decision === 'replace') {
+      try {
+        replacement = JSON.parse(output)
+      } catch {
+        setError(t('recoveryCenter.tile.semantic.invalidJson'))
+        return
+      }
+    }
+    if (!reason.trim()) {
+      setError(t('recoveryCenter.tile.semantic.reasonRequired'))
+      return
+    }
+
+    setBusy(true)
+    try {
+      const response = await api(`/recovery/cases/${encodeURIComponent(item.id)}/resolve`, {
+        method: 'POST',
+        body: JSON.stringify({
+          decision,
+          reason: reason.trim(),
+          ...(decision === 'replace' ? { output: replacement } : {}),
+        }),
+      })
+      const result = response as SemanticCaseResolution
+      const resumed = result.resumed === true
+      addToast(
+        t(
+          item.action === 'observe'
+            ? 'recoveryCenter.tile.semantic.observed'
+            : decision === 'replace'
+              ? resumed
+                ? 'recoveryCenter.tile.semantic.replaced'
+                : 'recoveryCenter.tile.semantic.replacedPending'
+              : resumed
+                ? 'recoveryCenter.tile.semantic.accepted'
+                : 'recoveryCenter.tile.semantic.acceptedPending',
+        ),
+        'success',
+      )
+      setSelectedId(null)
+      setReason('')
+      await onResolved?.(result)
+      bumpPlatformVersion()
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : t('recoveryCenter.tile.semantic.resolveFailed'),
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <RecoveryCenterTile
+      title={t('recoveryCenter.tile.semantic.title')}
+      kicker={t('recoveryCenter.tile.semantic.kicker', { count: cases.length })}
+      severity={
+        unavailable
+          ? 'warning'
+          : cases.length === 0
+          ? 'success'
+          : cases.some(item => item.action === 'quarantine')
+            ? 'danger'
+            : 'warning'
+      }
+      icon={<ShieldAlert size={18} aria-hidden="true" />}
+      testId="recovery-center-tile-semantic"
+    >
+      {loading && (
+        <p className="helper-text" role="status">
+          {t('recoveryCenter.tile.semantic.loading')}
+        </p>
+      )}
+      {unavailable && (
+        <div>
+          <p className="helper-text" role="alert">
+            {t('recoveryCenter.tile.semantic.unavailable')}
+          </p>
+          <button
+            type="button"
+            className="small-command"
+            onClick={bumpPlatformVersion}
+          >
+            {t('recoveryCenter.tile.semantic.retry')}
+          </button>
+        </div>
+      )}
+      {!loading && !unavailable && top.length === 0 && (
+        <AllClearState
+          message={t('recoveryCenter.tile.semantic.empty')}
+          testId="recovery-center-semantic-allclear"
+        />
+      )}
+      {top.length > 0 && (
+        <ul className="we-semantic-cases">
+          {top.map(item => {
+            const selected = item.id === selectedId
+            const details = Array.isArray(item.detailsJson)
+              ? item.detailsJson.filter(
+                  (detail): detail is string => typeof detail === 'string',
+                )
+              : []
+            return (
+              <li
+                key={item.id}
+                className="we-semantic-case"
+                data-state={item.state}
+                data-testid={`semantic-recovery-case-${item.id}`}
+              >
+                <div className="we-semantic-case__summary">
+                  <div>
+                    <strong>{item.message}</strong>
+                    <span>
+                      {t('recoveryCenter.tile.semantic.node', {
+                        nodeId: item.sourceNodeId,
+                      })}
+                    </span>
+                  </div>
+                  <span className="we-pill" data-tone={item.action === 'quarantine' ? 'danger' : 'warn'}>
+                    {t(`recoveryCenter.tile.semantic.action.${item.action}`)}
+                  </span>
+                </div>
+                {details[0] && (
+                  <code className="we-semantic-case__detail">{details[0]}</code>
+                )}
+                <div className="we-semantic-case__actions">
+                  <button
+                    type="button"
+                    className="small-command"
+                    onClick={() => void onOpenRun(item.runId, 'runs')}
+                  >
+                    {t('recoveryCenter.tile.semantic.openRun')}
+                  </button>
+                  {(
+                    (item.action === 'quarantine' && item.state === 'contained') ||
+                    (item.action === 'observe' && item.state === 'detected')
+                  ) && (
+                    <button
+                      type="button"
+                      className="small-command small-command--primary"
+                      onClick={() => {
+                        setSelectedId(selected ? null : item.id)
+                        setError(null)
+                      }}
+                      aria-expanded={selected}
+                      data-testid={`semantic-recovery-open-${item.id}`}
+                    >
+                      {t(
+                        item.action === 'quarantine'
+                          ? 'recoveryCenter.tile.semantic.resolve'
+                          : 'recoveryCenter.tile.semantic.review',
+                      )}
+                    </button>
+                  )}
+                </div>
+                {selected && (
+                  <div className="we-semantic-case__form">
+                    {item.action === 'quarantine' && (
+                      <label>
+                        <span>{t('recoveryCenter.tile.semantic.output')}</span>
+                        <textarea
+                          className="text-field"
+                          value={output}
+                          onChange={event => setOutput(event.target.value)}
+                          rows={4}
+                          spellCheck={false}
+                          data-testid={`semantic-recovery-output-${item.id}`}
+                        />
+                      </label>
+                    )}
+                    <label>
+                      <span>{t('recoveryCenter.tile.semantic.reason')}</span>
+                      <input
+                        className="text-field"
+                        value={reason}
+                        onChange={event => setReason(event.target.value)}
+                        maxLength={1000}
+                      />
+                    </label>
+                    {error && <p className="field-error" role="alert">{error}</p>}
+                    <div className="we-semantic-case__form-actions">
+                      {item.action === 'quarantine' && (
+                        <button
+                          type="button"
+                          className="command-button command-button-primary command-button-compact"
+                          disabled={busy}
+                          onClick={() => void resolveCase(item, 'replace')}
+                          data-testid={`semantic-recovery-replace-${item.id}`}
+                        >
+                          {busy
+                            ? t('recoveryCenter.tile.semantic.resolving')
+                            : t('recoveryCenter.tile.semantic.replace')}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className={`command-button command-button-compact${item.action === 'observe' ? ' command-button-primary' : ''}`}
+                        disabled={busy}
+                        onClick={() => void resolveCase(item, 'accept_loss')}
+                        data-testid={`semantic-recovery-accept-${item.id}`}
+                      >
+                        {t(
+                          item.action === 'observe'
+                            ? 'recoveryCenter.tile.semantic.acknowledge'
+                            : 'recoveryCenter.tile.semantic.acceptLoss',
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </RecoveryCenterTile>
   )
 }
 

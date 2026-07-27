@@ -226,6 +226,21 @@ export const runs = pgTable(
     workflowRolloutId: text("workflow_rollout_id"),
     workflowRolloutVariant: text("workflow_rollout_variant").$type<"baseline" | "canary">(),
     status: text("status").notNull(),
+    /**
+     * Business-outcome posture, independent from technical run status.
+     * NULL means no semantic detector has failed. A run may therefore be
+     * technically `succeeded` while this records `semantic_violation`.
+     */
+    outcomeStatus: text("outcome_status").$type<
+      | "semantic_violation"
+      | "semantic_quarantined"
+      | "semantic_recovered"
+      | "semantic_accepted_loss"
+    >(),
+    /** Total distinct semantic detectors that have failed on this run. */
+    semanticViolationCount: integer("semantic_violation_count")
+      .notNull()
+      .default(0),
     inputJson: jsonb("input_json"),
     /**
      * Projected workflow output, computed once at terminal `succeeded`
@@ -390,6 +405,104 @@ export const runEvents = pgTable(
     holdUntil: timestamp("hold_until", { withTimezone: true }),
   },
   (table) => [index("run_events_run_created_idx").on(table.runId, table.createdAt)],
+);
+
+/**
+ * Durable recovery projection independent from the DLQ-backed
+ * `recovery_items` table. Semantic violations have no dead-letter identity,
+ * so they use one case per `(orgId, runId, detectorId)` and retain their own
+ * lifecycle without manufacturing a technical failure.
+ *
+ * Orphan-tolerant by design: run and workflow history may be retained or
+ * purged on different schedules, while the case and its receipts remain
+ * useful forensic evidence.
+ */
+export const recoveryCases = pgTable(
+  "recovery_cases",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    runId: text("run_id").notNull(),
+    workflowId: text("workflow_id"),
+    workflowVersionId: text("workflow_version_id").notNull(),
+    source: text("source")
+      .$type<"semantic_violation">()
+      .notNull(),
+    detectorId: text("detector_id").notNull(),
+    sourceNodeId: text("source_node_id").notNull(),
+    detectorKind: text("detector_kind")
+      .$type<"expression" | "schema">()
+      .notNull(),
+    action: text("action")
+      .$type<"observe" | "quarantine">()
+      .notNull(),
+    message: text("message").notNull(),
+    detailsJson: jsonb("details_json"),
+    state: text("state").notNull(),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("recovery_cases_org_run_detector_idx").on(
+      table.orgId,
+      table.runId,
+      table.detectorId,
+    ),
+    index("recovery_cases_org_state_created_idx").on(
+      table.orgId,
+      table.state,
+      table.createdAt.desc(),
+    ),
+    index("recovery_cases_run_source_idx").on(
+      table.runId,
+      table.sourceNodeId,
+    ),
+  ],
+);
+
+/**
+ * Append-only receipts for every durable Recovery Case transition. The
+ * `(caseId, toState)` uniqueness makes the deterministic semantic-recovery
+ * sequence safe to retry while preserving one receipt per reached state.
+ */
+export const recoveryCaseTransitions = pgTable(
+  "recovery_case_transitions",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    caseId: text("case_id").notNull(),
+    fromState: text("from_state").notNull(),
+    toState: text("to_state").notNull(),
+    actorKind: text("actor_kind")
+      .$type<"system" | "user" | "agent">()
+      .notNull(),
+    actorId: text("actor_id"),
+    evidenceJson: jsonb("evidence_json").notNull(),
+    reason: text("reason"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("recovery_case_transitions_case_to_idx").on(
+      table.caseId,
+      table.toState,
+    ),
+    index("recovery_case_transitions_case_created_idx").on(
+      table.caseId,
+      table.occurredAt,
+    ),
+    index("recovery_case_transitions_org_created_idx").on(
+      table.orgId,
+      table.occurredAt.desc(),
+    ),
+  ],
 );
 
 export const deadLetters = pgTable(

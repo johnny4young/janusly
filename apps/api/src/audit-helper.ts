@@ -133,6 +133,7 @@ export type AuditAction =
   | "recovery.item.commented"
   // recovery feedback
   | "recovery.feedback"
+  | "recovery.semantic_resolved"
   // eval datasets (built from opted-in accepted recovery feedback)
   | "eval.dataset.created"
   | "eval.dataset.deleted"

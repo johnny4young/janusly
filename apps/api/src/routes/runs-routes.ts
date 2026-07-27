@@ -104,6 +104,8 @@ const runListColumns = {
   workflowName: sql<string | null>`${runs.inputJson}->'workflow'->>'name'`,
   workflowVersionId: runs.workflowVersionId,
   status: runs.status,
+  outcomeStatus: runs.outcomeStatus,
+  semanticViolationCount: runs.semanticViolationCount,
   outputJson: runs.outputJson,
   parentRunId: runs.parentRunId,
   parentNodeId: runs.parentNodeId,
@@ -330,23 +332,59 @@ export const runsRoutes: Route[] = [
           return;
         }
 
-        // The pre-subscription run row may be stale after catch-up. Re-read the
-        // tenant-scoped status, then fold statuses buffered during that query
-        // into the snapshot while delivering their event frames first.
+        // Drain everything that arrived before the authoritative status read.
+        // Persisted events still belong after the replay gap, while status
+        // signals are snapshots rather than ordered events and are superseded
+        // by the database read below. This prevents an older buffered
+        // `running` signal from regressing a run that already became terminal.
+        while (bufferedLiveFrames.length > 0 && !torn) {
+          const buffered = bufferedLiveFrames.shift();
+          if (!buffered) break;
+          try {
+            if (buffered.event.kind === "event") {
+              await writeFrame(buffered.event);
+            }
+          } finally {
+            pendingLiveBytes -= buffered.bytes;
+          }
+        }
+
+        // The pre-subscription run row may be stale after catch-up and after
+        // the buffered frames just drained. Re-read the tenant-scoped status,
+        // then fold only publications that race with this query into it.
         const latestRun = await db
-          .select({ status: runs.status })
+          .select({
+            status: runs.status,
+            outcomeStatus: runs.outcomeStatus,
+            semanticViolationCount: runs.semanticViolationCount,
+          })
           .from(runs)
           .where(and(eq(runs.id, runId), eq(runs.orgId, auth.orgId)));
         if (!latestRun[0] || torn) {
           teardown(true);
           return;
         }
-        let effectiveStatus = latestRun[0].status;
+        let effectiveStatus: PublishedRunEvent = {
+          kind: "run.status",
+          status: latestRun[0].status,
+          ...(latestRun[0].outcomeStatus !== undefined
+            ? { outcomeStatus: latestRun[0].outcomeStatus }
+            : {}),
+          ...(latestRun[0].semanticViolationCount !== undefined
+            ? {
+                semanticViolationCount:
+                  latestRun[0].semanticViolationCount,
+              }
+            : {}),
+        };
         while (bufferedLiveFrames.length > 0 && !torn) {
           const buffered = bufferedLiveFrames.shift();
           if (!buffered) break;
           if (buffered.event.kind === "run.status") {
-            effectiveStatus = buffered.event.status;
+            effectiveStatus = {
+              ...effectiveStatus,
+              ...buffered.event,
+            };
             pendingLiveBytes -= buffered.bytes;
           } else {
             try {
@@ -356,7 +394,7 @@ export const runsRoutes: Route[] = [
             }
           }
         }
-        await writeFrame({ kind: "run.status", status: effectiveStatus });
+        await writeFrame(effectiveStatus);
 
         // A slow socket can yield while the snapshot is written. Drain any
         // publications that arrived in that interval before switching the hub

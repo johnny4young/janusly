@@ -13,9 +13,8 @@
  * - `packages/db/drizzle.config.ts` — same, for the migration tooling.
  *
  * Invariants:
- * - `.env.example` is loaded with `override: false` so it only fills in
- *   missing keys; `.env` is loaded with `override: true` so the developer's
- *   secrets win.
+ * - Existing process variables always win. `.env` fills the developer
+ *   configuration next, and `.env.example` supplies only remaining defaults.
  * - The `loaded` guard makes this idempotent — multiple imports across
  *   workspaces don't re-read or shadow values that the application already
  *   set programmatically.
@@ -39,11 +38,11 @@ export function loadRootEnv() {
   const examplePath = fileURLToPath(new URL("../../../.env.example", import.meta.url));
   const envPath = fileURLToPath(new URL("../../../.env", import.meta.url));
 
-  if (existsSync(examplePath)) {
-    config({ path: examplePath, override: false });
+  if (existsSync(envPath)) {
+    config({ path: envPath, override: false });
   }
 
-  if (existsSync(envPath)) {
-    config({ path: envPath, override: true });
+  if (existsSync(examplePath)) {
+    config({ path: examplePath, override: false });
   }
 }

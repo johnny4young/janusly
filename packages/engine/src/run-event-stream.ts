@@ -50,8 +50,11 @@ export type PublishedRunEvent =
     }
   | {
       kind: "run.status";
-      /** Terminal run status that just landed. */
+      /** Current run status. Terminal values also drive the stream close timer. */
       status: string;
+      /** Optional business-outcome projection carried with the same snapshot. */
+      outcomeStatus?: string | null;
+      semanticViolationCount?: number;
     };
 
 /** Transport function: push one signal for `runId`. Must not throw. */

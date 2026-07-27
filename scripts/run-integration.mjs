@@ -5,7 +5,8 @@
  * `*.integration.test.ts` suite against the real backing services, then tears
  * Compose down. Mirrors scripts/run-e2e.mjs's lifecycle but stays far lighter,
  * so local and CI behave identically. It shares the host-global lifecycle lock
- * with dev, local evals, and E2E because they own the same ports and project.
+ * with dev, local evals, and E2E because they own the same Compose project and
+ * volumes. Dedicated host ports let a persistent local stack remain online.
  *
  * Usage:
  *   pnpm test:integration
@@ -17,9 +18,11 @@
 
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { getIntegrationEnvironment } from "./integration-environment.mjs";
 import { acquireJanuslyComposeLock, composeUpPullArgs } from "./process-lock.mjs";
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
+const integrationEnvironment = getIntegrationEnvironment();
 const children = new Set();
 let shutdownPromise = null;
 let composeStarted = false;
@@ -66,7 +69,7 @@ function run(command, args, options = {}) {
     const child = spawn(command, args, {
       cwd: rootDir,
       detached: true,
-      env: { ...process.env, ...options.env },
+      env: { ...process.env, ...integrationEnvironment, ...options.env },
       stdio: options.stdio ?? "inherit",
     });
     trackChild(child);

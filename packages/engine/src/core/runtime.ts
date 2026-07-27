@@ -40,6 +40,7 @@ import { incNodeFailure, incNodeRetry, recordNodeDuration } from "../observabili
 import { workflowEvent } from "./events";
 import { shouldRetry, computeRetryDelay } from "./retry-policy";
 import { decideTransient, isTransientTierEnabled, transientAttemptFromCounters } from "./transient-tier";
+import { evaluateSemanticOutcome } from "../semantic-outcomes";
 import {
   getRoutingStats,
   updateRoutingStats,
@@ -180,12 +181,37 @@ export class WorkflowRuntime {
 
           await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "decision.made", payload: decision }));
           logNodeEvent({ runId, nodeId: node.id, type: "decision.made", attempt });
-          const completed = await this.store.markNodeSucceeded(
-            runId,
-            node.id,
-            { decision },
-            recoveryClaimToken,
-          );
+          const semanticOutcome = evaluateSemanticOutcome({
+            contract: input.workflow.recovery?.contract,
+            sourceNodeId: node.id,
+            output: { decision },
+            context,
+          });
+          const completion = semanticOutcome.evaluated > 0
+            ? await this.store.markNodeSucceededWithOutcome(
+                runId,
+                node.id,
+                { decision },
+                attempt,
+                semanticOutcome.violations,
+                recoveryClaimToken,
+              )
+            : {
+                completed: await this.store.markNodeSucceeded(
+                  runId,
+                  node.id,
+                  { decision },
+                  recoveryClaimToken,
+                ),
+                quarantined: false,
+                caseIds: [],
+              };
+          const completed = completion.completed;
+          /*
+           * The semantic gate is committed with node success. Routing state
+           * can still be made deterministic below, but no successor is
+           * published while the run remains quarantined.
+           */
           if (!completed) return;
           const durationMs = Date.now() - start;
           recordNodeDuration(durationMs, { node_type: node.type });
@@ -222,7 +248,13 @@ export class WorkflowRuntime {
           // cancellation that lands while this node was running shouldn't
           // re-queue work for the operator who just cancelled.
           const postDecisionStatus = await this.store.getRunStatus(runId);
-          if (postDecisionStatus === "cancelled" || postDecisionStatus === "failed") return;
+          if (
+            postDecisionStatus === "cancelled" ||
+            postDecisionStatus === "failed" ||
+            postDecisionStatus === "waiting"
+          ) {
+            return;
+          }
           await this.enqueueReadyNodes(input);
           return;
         }
@@ -259,14 +291,33 @@ export class WorkflowRuntime {
       // together in one transaction (`markNodeSucceededWithEvent`), so the
       // event never repeats the (potentially 1 MB) output the node row
       // already stores.
-      const completed = await this.store.markNodeSucceededWithEvent(
-        runId,
-        node.id,
-        result?.output ?? {},
-        attempt,
-        recoveryClaimToken,
-      );
-      if (!completed) return;
+      const semanticOutcome = evaluateSemanticOutcome({
+        contract: input.workflow.recovery?.contract,
+        sourceNodeId: node.id,
+        output: result?.output ?? {},
+        context,
+      });
+      const completion = semanticOutcome.evaluated > 0
+        ? await this.store.markNodeSucceededWithOutcome(
+            runId,
+            node.id,
+            result?.output ?? {},
+            attempt,
+            semanticOutcome.violations,
+            recoveryClaimToken,
+          )
+        : {
+            completed: await this.store.markNodeSucceededWithEvent(
+              runId,
+              node.id,
+              result?.output ?? {},
+              attempt,
+              recoveryClaimToken,
+            ),
+            quarantined: false,
+            caseIds: [],
+          };
+      if (!completion.completed) return;
       recordNodeDuration(durationMs, { node_type: node.type });
       await updateRoutingStats({ orgId: metadata?.orgId, nodeId: node.id, reward: 1, success: true });
       logNodeEvent({ runId, nodeId: node.id, type: "node.succeeded", attempt, durationMs });
@@ -277,7 +328,13 @@ export class WorkflowRuntime {
       // already running when cancellation landed, so its row stays where it
       // is — but downstream work shouldn't be queued for a cancelled run.
       const postStatus = await this.store.getRunStatus(runId);
-      if (postStatus === "cancelled" || postStatus === "failed") return;
+      if (
+        postStatus === "cancelled" ||
+        postStatus === "failed" ||
+        postStatus === "waiting"
+      ) {
+        return;
+      }
 
       await this.enqueueReadyNodes(input);
     } catch (err: any) {
@@ -498,7 +555,13 @@ export class WorkflowRuntime {
     // notifier, resume-run, the runtime itself) all pre-check, but this
     // guard catches any future caller that forgets to.
     const status = await this.store.getRunStatus(runId);
-    if (status === "cancelled" || status === "failed") return 0;
+    if (
+      status === "cancelled" ||
+      status === "failed" ||
+      status === "waiting"
+    ) {
+      return 0;
+    }
     // Cheap path: the readiness scan only reads node STATUSES unless some
     // edge carries a `condition` (whose expression can reach into outputs).
     // Skipping state_json here matters — this runs after EVERY completion,

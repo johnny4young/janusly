@@ -18,7 +18,7 @@
  */
 
 import { t as runtimeT } from '../../i18n/runtime'
-import type { ActiveTab, RunSummary } from '../../types'
+import type { ActiveTab, RunNode, RunSummary } from '../../types'
 import type { DeadLetter } from '../DeadLettersPanel'
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -144,6 +144,35 @@ export type CalibrationStatusEnvelope = {
     curveIntercept: number
     lastComputedAt: string | null
   }>
+}
+
+/**
+ * Count distinct waiting runs from the bounded platform projection. The
+ * selected-run node fallback covers the short bootstrap interval before that
+ * run appears in the list without counting it twice afterward.
+ */
+export function countActiveRecoveryBlockers(
+  runs: readonly RunSummary[],
+  runNodes: readonly RunNode[],
+  selectedRunId: string | null,
+  semanticBlockerRunIds: readonly string[] = [],
+): number {
+  const waitingRunIds = new Set(
+    runs
+      .filter((run) => run.status === 'waiting')
+      .map((run) => run.id),
+  )
+  for (const runId of semanticBlockerRunIds) {
+    waitingRunIds.add(runId)
+  }
+  if (
+    selectedRunId
+    && !waitingRunIds.has(selectedRunId)
+    && runNodes.some((node) => node.status === 'waiting')
+  ) {
+    waitingRunIds.add(selectedRunId)
+  }
+  return waitingRunIds.size
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -272,6 +301,8 @@ export function buildGreeting(args: {
   pendingApprovals: number
   healthScore: number | null
   totalRuns: number
+  semanticOutcomePosture: 'loading' | 'unavailable' | 'attention' | 'clear'
+  semanticCaseCount: number
 }): { salutation: string; subline: string } {
   // Greeting drops the "there" filler when no name is available — a bare
   // "Good morning." reads cleaner than "Good morning, there." and avoids
@@ -283,7 +314,15 @@ export function buildGreeting(args: {
     ? runtimeT(slotKey, { who: args.displayName })
     : runtimeT(slotKey)
   let subline: string
-  if (args.totalRuns === 0) {
+  if (args.semanticOutcomePosture === 'attention') {
+    subline = runtimeT('recoveryCenter.greeting.subline.semanticCases', {
+      count: args.semanticCaseCount,
+    })
+  } else if (args.semanticOutcomePosture === 'unavailable') {
+    subline = runtimeT('recoveryCenter.greeting.subline.semanticUnavailable')
+  } else if (args.semanticOutcomePosture === 'loading') {
+    subline = runtimeT('recoveryCenter.greeting.subline.semanticLoading')
+  } else if (args.totalRuns === 0) {
     // In an empty workspace the pitch line below the hero carries the
     // copy work — surface the dynamic recovery posture instead of a
     // generic welcome (which would duplicate the pitch).

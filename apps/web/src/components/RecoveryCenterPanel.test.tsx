@@ -9,6 +9,7 @@ import {
 import { consumeRecoveryFocusDay } from './recovery-day-focus-bus'
 import {
   buildGreeting,
+  countActiveRecoveryBlockers,
   computeRecommendedActions,
   humanizeAge,
   readErrorSignature,
@@ -56,6 +57,7 @@ const baseProps = {
   onOpenRun: vi.fn(),
   onApproveNode: vi.fn(),
   onOpenRecoveryQueue: vi.fn(),
+  onRefreshPlatform: vi.fn().mockResolvedValue(undefined),
 }
 
 const baseMetrics = {
@@ -129,6 +131,35 @@ beforeEach(() => {
   baseProps.onOpenRun = vi.fn()
   baseProps.onApproveNode = vi.fn()
   baseProps.onOpenRecoveryQueue = vi.fn()
+  baseProps.onRefreshPlatform = vi.fn().mockResolvedValue(undefined)
+})
+
+describe('countActiveRecoveryBlockers', () => {
+  it('counts semantic quarantine from the run projection even when every node is terminal', () => {
+    expect(countActiveRecoveryBlockers([
+      {
+        id: 'run-semantic',
+        status: 'waiting',
+        outcomeStatus: 'semantic_quarantined',
+      },
+    ], [
+      { nodeId: 'answer', status: 'succeeded' },
+    ], 'run-semantic')).toBe(1)
+  })
+
+  it('uses the selected node fallback without double-counting a projected run', () => {
+    const waitingNode = [{ nodeId: 'approval', status: 'waiting' }]
+    expect(countActiveRecoveryBlockers([], waitingNode, 'run-selected')).toBe(1)
+    expect(countActiveRecoveryBlockers([
+      { id: 'run-selected', status: 'waiting' },
+    ], waitingNode, 'run-selected')).toBe(1)
+  })
+
+  it('merges semantic case ids without double-counting the run projection', () => {
+    expect(countActiveRecoveryBlockers([
+      { id: 'run-semantic', status: 'waiting' },
+    ], [], null, ['run-semantic', 'run-other'])).toBe(2)
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -236,43 +267,75 @@ describe('computeRecommendedActions', () => {
 // ─────────────────────────────────────────────────────────────────────────
 
 describe('buildGreeting', () => {
+  const semanticClear = {
+    semanticOutcomePosture: 'clear' as const,
+    semanticCaseCount: 0,
+  }
+
   it('says "Good morning" before noon', () => {
-    const g = buildGreeting({ hour: 9, displayName: 'Jane', openFailures: 0, pendingApprovals: 0, healthScore: 95, totalRuns: 10 })
+    const g = buildGreeting({ hour: 9, displayName: 'Jane', openFailures: 0, pendingApprovals: 0, healthScore: 95, totalRuns: 10, ...semanticClear })
     expect(g.salutation).toBe('Good morning, Jane.')
   })
   it('says "Good afternoon" 12-17', () => {
-    const g = buildGreeting({ hour: 14, displayName: 'Jane', openFailures: 0, pendingApprovals: 0, healthScore: 95, totalRuns: 10 })
+    const g = buildGreeting({ hour: 14, displayName: 'Jane', openFailures: 0, pendingApprovals: 0, healthScore: 95, totalRuns: 10, ...semanticClear })
     expect(g.salutation).toBe('Good afternoon, Jane.')
   })
   it('says "Good evening" after 18', () => {
-    const g = buildGreeting({ hour: 20, displayName: 'Jane', openFailures: 0, pendingApprovals: 0, healthScore: 95, totalRuns: 10 })
+    const g = buildGreeting({ hour: 20, displayName: 'Jane', openFailures: 0, pendingApprovals: 0, healthScore: 95, totalRuns: 10, ...semanticClear })
     expect(g.salutation).toBe('Good evening, Jane.')
   })
   it('drops the name filler when displayName is null', () => {
     // Operator with no resolvable name reads cleaner as "Good morning."
     // than "Good morning, there." — the former feels intentional, the
     // latter feels like a stale placeholder.
-    const g = buildGreeting({ hour: 9, displayName: null, openFailures: 0, pendingApprovals: 0, healthScore: null, totalRuns: 0 })
+    const g = buildGreeting({ hour: 9, displayName: null, openFailures: 0, pendingApprovals: 0, healthScore: null, totalRuns: 0, ...semanticClear })
     expect(g.salutation).toBe('Good morning.')
   })
   it('subline reflects approvals waiting', () => {
-    const g = buildGreeting({ hour: 9, displayName: 'J', openFailures: 3, pendingApprovals: 2, healthScore: 80, totalRuns: 50 })
+    const g = buildGreeting({ hour: 9, displayName: 'J', openFailures: 3, pendingApprovals: 2, healthScore: 80, totalRuns: 50, ...semanticClear })
     expect(g.subline).toContain('2 approval')
   })
   it('subline reflects open failures when no approvals', () => {
-    const g = buildGreeting({ hour: 9, displayName: 'J', openFailures: 3, pendingApprovals: 0, healthScore: 80, totalRuns: 50 })
+    const g = buildGreeting({ hour: 9, displayName: 'J', openFailures: 3, pendingApprovals: 0, healthScore: 80, totalRuns: 50, ...semanticClear })
     expect(g.subline).toContain('3 run')
   })
   it('subline celebrates when health ≥ 80 and no signals', () => {
-    const g = buildGreeting({ hour: 9, displayName: 'J', openFailures: 0, pendingApprovals: 0, healthScore: 96, totalRuns: 50 })
+    const g = buildGreeting({ hour: 9, displayName: 'J', openFailures: 0, pendingApprovals: 0, healthScore: 96, totalRuns: 50, ...semanticClear })
     expect(g.subline).toContain('All clear')
+  })
+  it('prioritizes known semantic incidents over clean health signals', () => {
+    const g = buildGreeting({
+      hour: 9,
+      displayName: 'J',
+      openFailures: 0,
+      pendingApprovals: 0,
+      healthScore: 96,
+      totalRuns: 50,
+      semanticOutcomePosture: 'attention',
+      semanticCaseCount: 2,
+    })
+    expect(g.subline).toContain('2 business outcome incidents need review')
+  })
+  it('does not claim a clean posture while semantic outcomes are unavailable', () => {
+    const g = buildGreeting({
+      hour: 9,
+      displayName: 'J',
+      openFailures: 0,
+      pendingApprovals: 0,
+      healthScore: 96,
+      totalRuns: 50,
+      semanticOutcomePosture: 'unavailable',
+      semanticCaseCount: 0,
+    })
+    expect(g.subline).toContain('could not be confirmed')
+    expect(g.subline).not.toContain('All clear')
   })
   it('subline falls to the clean-posture line when no runs yet (the pitch carries the welcome)', () => {
     // The hero pitch right below the greeting already explains what
     // Janusly does — duplicating that with a "Welcome to Janusly" subline
     // wastes attention. New-operator subline now matches the steady-state
     // clean posture: "Recovery posture is clean across the last 30 days."
-    const g = buildGreeting({ hour: 9, displayName: 'J', openFailures: 0, pendingApprovals: 0, healthScore: null, totalRuns: 0 })
+    const g = buildGreeting({ hour: 9, displayName: 'J', openFailures: 0, pendingApprovals: 0, healthScore: null, totalRuns: 0, ...semanticClear })
     expect(g.subline).toContain('Recovery posture is clean')
   })
 })
@@ -916,6 +979,209 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
   })
 })
 
+describe('<RecoveryCenterPanel /> — semantic outcome incidents', () => {
+  it('shows a quarantined case and resumes only through an explicit replacement decision', async () => {
+    let semanticListMode: 'initial' | 'unavailable' | 'clear' = 'initial'
+    vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/recovery/metrics') return baseMetrics
+      if (path === '/dlq/clusters') return baseClusters
+      if (path === '/recovery/heatmap?days=90') return { days: [] }
+      if (path === '/recovery/validation?windowDays=30') return baseValidation
+      if (path === '/recovery/cases?limit=50') {
+        if (semanticListMode === 'unavailable') {
+          throw new Error('semantic projection unavailable')
+        }
+        if (semanticListMode === 'clear') return { cases: [] }
+        return {
+          cases: [
+            {
+              id: 'case-1',
+              orgId: 'default',
+              runId: 'run-1',
+              workflowId: 'workflow-1',
+              workflowVersionId: 'version-1',
+              source: 'semantic_violation',
+              detectorId: 'ai-mode',
+              sourceNodeId: 'answer',
+              detectorKind: 'expression',
+              action: 'quarantine',
+              message: 'AI output is required',
+              detailsJson: ['$.mode must equal "ai"'],
+              state: 'contained',
+              createdBy: 'dev-user',
+              createdAt: '2026-07-27T12:00:00.000Z',
+              updatedAt: '2026-07-27T12:00:00.000Z',
+              resolvedAt: null,
+            },
+            {
+              id: 'case-2',
+              orgId: 'default',
+              runId: 'run-2',
+              workflowId: 'workflow-2',
+              workflowVersionId: 'version-2',
+              source: 'semantic_violation',
+              detectorId: 'review-note',
+              sourceNodeId: 'review',
+              detectorKind: 'schema',
+              action: 'observe',
+              message: 'Review note is missing',
+              detailsJson: ['$.note is required'],
+              state: 'detected',
+              createdBy: 'dev-user',
+              createdAt: '2026-07-27T11:00:00.000Z',
+              updatedAt: '2026-07-27T11:00:00.000Z',
+              resolvedAt: null,
+            },
+          ],
+        }
+      }
+      if (path === '/recovery/ledger') return null
+      if (path === '/recovery/my-wins?days=30') return { recovered: 0, windowDays: 30 }
+      if (path.startsWith('/dlq/counts')) return { open: 0 }
+      if (path.startsWith('/dlq/queue')) return { items: [] }
+      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
+        return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn' }
+      }
+      if (path === '/recovery/calibration-status') {
+        return { enabled: true, windowDays: 30, minimumSampleSize: 20, calibrations: [] }
+      }
+      if (path === '/recovery/cases/case-1/resolve' && options?.method === 'POST') {
+        return {
+          ok: true,
+          runId: 'run-1',
+          sourceNodeId: 'answer',
+          decision: 'replace',
+          resumed: true,
+          resolvedCaseIds: ['case-1'],
+        }
+      }
+      if (path === '/recovery/cases/case-2/resolve' && options?.method === 'POST') {
+        return {
+          ok: true,
+          runId: 'run-2',
+          sourceNodeId: 'review',
+          decision: 'accept_loss',
+          resumed: false,
+          resolvedCaseIds: ['case-2'],
+        }
+      }
+      throw new Error(`unexpected fetch: ${path}`)
+    })
+
+    const view = render(<RecoveryCenterPanel {...baseProps} />)
+
+    expect(await screen.findByTestId('semantic-recovery-case-case-1')).toHaveTextContent('AI output is required')
+    expect(screen.getByText('2 business outcome incidents need review.')).toBeVisible()
+    expect(screen.getByTestId('recovery-center-greeting').closest('header'))
+      .not.toHaveAttribute('data-all-clear')
+    fireEvent.click(screen.getByTestId('semantic-recovery-open-case-1'))
+    fireEvent.change(screen.getByLabelText('Operator rationale'), {
+      target: { value: 'Reviewed replacement' },
+    })
+    fireEvent.click(screen.getByTestId('semantic-recovery-replace-case-1'))
+
+    await waitFor(() => {
+      expect(api).toHaveBeenCalledWith(
+        '/recovery/cases/case-1/resolve',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            decision: 'replace',
+            reason: 'Reviewed replacement',
+            output: { mode: 'ai' },
+          }),
+        }),
+      )
+      expect(bumpPlatformVersion).toHaveBeenCalledTimes(1)
+      expect(baseProps.onRefreshPlatform).toHaveBeenCalledTimes(1)
+    })
+    expect(screen.queryByTestId('semantic-recovery-case-case-1')).toBeNull()
+
+    semanticListMode = 'unavailable'
+    platformVersion = 1
+    view.rerender(<RecoveryCenterPanel {...baseProps} />)
+    expect(await screen.findByText(/Outcome incidents could not be loaded/i)).toBeVisible()
+    expect(screen.getByTestId('semantic-recovery-case-case-2')).toBeVisible()
+    expect(screen.getByText('1 business outcome incident needs review.')).toBeVisible()
+
+    fireEvent.click(screen.getByTestId('semantic-recovery-open-case-2'))
+    expect(
+      screen.queryByTestId('semantic-recovery-output-case-2'),
+    ).toBeNull()
+    fireEvent.change(screen.getByLabelText('Operator rationale'), {
+      target: { value: 'Observed and documented' },
+    })
+    fireEvent.click(screen.getByTestId('semantic-recovery-accept-case-2'))
+    await waitFor(() => {
+      expect(api).toHaveBeenCalledWith(
+        '/recovery/cases/case-2/resolve',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            decision: 'accept_loss',
+            reason: 'Observed and documented',
+          }),
+        }),
+      )
+      expect(bumpPlatformVersion).toHaveBeenCalledTimes(2)
+      expect(baseProps.onRefreshPlatform).toHaveBeenCalledTimes(2)
+    })
+    expect(screen.queryByTestId('semantic-recovery-case-case-2')).toBeNull()
+    expect(screen.queryByTestId('recovery-center-semantic-allclear')).toBeNull()
+    expect(screen.getByText(/Outcome incidents could not be loaded/i)).toBeVisible()
+
+    semanticListMode = 'clear'
+    platformVersion = 2
+    view.rerender(<RecoveryCenterPanel {...baseProps} />)
+    expect(await screen.findByTestId('recovery-center-semantic-allclear')).toBeVisible()
+  })
+
+  it.each([
+    ['request failure', new Error('semantic projection unavailable')],
+    ['invalid success payload', {}],
+  ])('does not present an all-clear state after a semantic %s', async (_label, semanticResponse) => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === '/recovery/cases?limit=50') {
+        if (semanticResponse instanceof Error) throw semanticResponse
+        return semanticResponse
+      }
+      if (path === '/recovery/metrics') return baseMetrics
+      if (path === '/dlq/clusters') return baseClusters
+      if (path === '/recovery/heatmap?days=90') return { days: [] }
+      if (path === '/recovery/validation?windowDays=30') return baseValidation
+      if (path === '/recovery/ledger') return null
+      if (path === '/recovery/my-wins?days=30') return { recovered: 0, windowDays: 30 }
+      if (path.startsWith('/dlq/counts')) return { open: 0 }
+      if (path.startsWith('/dlq/queue')) return { items: [] }
+      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
+        return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn' }
+      }
+      if (path === '/recovery/calibration-status') {
+        return { enabled: true, windowDays: 30, minimumSampleSize: 20, calibrations: [] }
+      }
+      return null
+    })
+
+    render(<RecoveryCenterPanel {...baseProps} />)
+
+    const warning = await screen.findByText(
+      /Outcome incidents could not be loaded/i,
+    )
+    expect(warning).toHaveAttribute('role', 'alert')
+    expect(warning).toBeVisible()
+    expect(
+      screen.getByText(/Business outcome posture could not be confirmed/i),
+    ).toBeVisible()
+    expect(screen.getByTestId('recovery-center-greeting').closest('header'))
+      .not.toHaveAttribute('data-all-clear')
+    expect(
+      screen.queryByTestId('recovery-center-semantic-allclear'),
+    ).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(bumpPlatformVersion).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('<RecoveryCenterPanel /> — all-clear moment', () => {
   let recoveryLedger = { totalRecovered: 0, downtimeEndedMs: 0, sinceIso: null as string | null }
 
@@ -924,6 +1190,7 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
       if (path === '/recovery/metrics') return { ...baseMetrics, downtimeEndedMs: 7_200_000 }
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
+      if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/recovery/ledger') return recoveryLedger
       if (path === '/recovery/my-wins?days=30') return { recovered: 0, windowDays: 30 }
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -1049,6 +1316,7 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
       if (path === '/recovery/metrics') return { ...baseMetrics, downtimeEndedMs: 120_000 }
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
+      if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/recovery/ledger') return recoveryLedger
       if (path === '/recovery/my-wins?days=30') return { recovered: recoveryLedger.totalRecovered, windowDays: 30 }
       if (path === '/dlq/counts') return { open: openCount }

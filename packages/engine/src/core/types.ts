@@ -55,6 +55,21 @@ export type SerializedError = {
   writeSide?: boolean;
 };
 
+export type SemanticOutcomeViolationRecord = {
+  detectorId: string;
+  sourceNodeId: string;
+  kind: "expression" | "schema";
+  action: "observe" | "quarantine";
+  message: string;
+  details?: readonly string[];
+};
+
+export type NodeCompletionOutcome = {
+  completed: boolean;
+  quarantined: boolean;
+  caseIds: string[];
+};
+
 /** Backoff curve for `RetryPolicy`. */
 export type RetryBackoffStrategy = "fixed" | "exponential";
 
@@ -234,6 +249,15 @@ export interface ExecutionStore {
   markNodeSucceeded(runId: string, nodeId: string, output: unknown, recoveryClaimToken?: string): Promise<boolean>;
   /** Combine the `succeeded` transition + its `node.succeeded` event in one transaction (the hot completion path). */
   markNodeSucceededWithEvent(runId: string, nodeId: string, output: unknown, attempt: number, recoveryClaimToken?: string): Promise<boolean>;
+  /** Atomically complete a node and persist any deterministic semantic violations before downstream publication. */
+  markNodeSucceededWithOutcome(
+    runId: string,
+    nodeId: string,
+    output: unknown,
+    attempt: number,
+    violations: readonly SemanticOutcomeViolationRecord[],
+    recoveryClaimToken?: string,
+  ): Promise<NodeCompletionOutcome>;
   markNodeFailed(runId: string, nodeId: string, error: SerializedError, recoveryClaimToken?: string): Promise<boolean>;
   markNodeWaiting(runId: string, nodeId: string, metadata?: unknown, recoveryClaimToken?: string): Promise<boolean>;
   markNodeSkipped(runId: string, nodeId: string, metadata?: unknown): Promise<void>;

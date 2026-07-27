@@ -29,6 +29,17 @@
 
 import { z } from "zod";
 import { WorkflowRecoverySchema } from "./recovery-contract";
+import {
+  WorkflowInputSchema,
+  WorkflowInputTypeSchema,
+} from "./value-schema";
+
+export {
+  WorkflowInputSchema,
+  WorkflowInputTypeSchema,
+  workflowInputTypeValues,
+  type WorkflowInputSchemaShape,
+} from "./value-schema";
 
 /**
  * Current DSL version. Persisted workflows store this; older versions need a
@@ -120,68 +131,6 @@ export const WorkflowJsonMetadataSchema = z.object({
   description: z.string().trim().optional(),
   tags: z.array(z.string().trim().min(1)).default([]),
 }).default({ tags: [] });
-
-/**
- * Closed set of JSON-Schema-subset primitive `type` discriminators supported
- * by `WorkflowInputSchema`. Matches the small grammar
- * `packages/engine/src/inputs-validator.ts` understands — adding a new
- * primitive here means adding a matching branch there.
- */
-export const workflowInputTypeValues = ["string", "number", "boolean", "object", "array"] as const;
-/** Zod enum derived from `workflowInputTypeValues`. */
-export const WorkflowInputTypeSchema = z.enum(workflowInputTypeValues);
-
-/**
- * JSON-Schema-subset describing one input field on a workflow's declared
- * `inputs` shape. Recursive via `z.lazy` (object → properties → fields;
- * array → items). Powers `WorkflowSchema.inputs`.
- *
- * The grammar is intentionally limited:
- * - `type`: one of `workflowInputTypeValues`.
- * - `properties` + `required`: only meaningful for `type: "object"`.
- * - `items`: only meaningful for `type: "array"`.
- * - `enum`: closed set of literal values the field must equal one of.
- * - `description`: free-form, surfaces in the AI Studio Inspector.
- * - `default`: value used when the run-start payload omits the field.
- *
- * `default` is what makes a declared input a workflow-level SETTING rather
- * than only a per-run argument: the operator states the value once on the
- * workflow, every node reads it through `{{context.input.<name>}}`, and
- * changing it is one edit in one place instead of hunting literals across
- * node configs. The `{{inputs.*}}` scope is node-local inside a node config;
- * it refers to run input only in workflow-level `outputs` templates.
- * It is also what lets a trigger-driven workflow declare inputs at all — a
- * webhook/schedule run supplies `{ triggeredBy, event, … }`, never the
- * declared fields, so without defaults a required input would reject every
- * such run at `startRun`.
- *
- * No `oneOf` / `anyOf` / patterns / number ranges yet — expand the subset
- * (here AND in the hand-rolled validator) only when a real consumer needs it.
- */
-export const WorkflowInputSchema: z.ZodType<WorkflowInputSchemaShape> = z.lazy(() => z.object({
-  type: WorkflowInputTypeSchema,
-  description: z.string().optional(),
-  properties: z.record(z.string(), WorkflowInputSchema).optional(),
-  required: z.array(z.string()).optional(),
-  items: WorkflowInputSchema.optional(),
-  enum: z.array(z.unknown()).optional(),
-  default: z.unknown().optional(),
-}));
-
-/**
- * The "shape" type for a `WorkflowInputSchema` value. Hand-written rather than
- * `z.infer<>` because Zod can't derive the recursive shape through `z.lazy`
- * without an explicit type seed.
- */
-export type WorkflowInputSchemaShape = {
-  type: typeof workflowInputTypeValues[number];
-  description?: string;
-  properties?: Record<string, WorkflowInputSchemaShape>;
-  required?: string[];
-  items?: WorkflowInputSchemaShape;
-  enum?: unknown[];
-  default?: unknown;
-};
 
 /**
  * `outputs` is a record of output-name → template string. At terminal

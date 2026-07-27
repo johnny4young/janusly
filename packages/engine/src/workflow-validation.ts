@@ -20,7 +20,9 @@ import { validateExpression } from "./expression";
 import { validateInputs } from "./inputs-validator";
 import { resolveJoinSources, resolveParallelForkBranches } from "./parallel-fork";
 import { resolveScheduleConfig } from "./schedule";
+import { evaluateSemanticOutcomeFixtures } from "./semantic-outcomes";
 import { resolveTriggerConfig } from "./triggers";
+import { isSensitiveAction } from "./workflow-readiness";
 import { isTriggerNodeType } from "@janusly/shared/src/trigger-types";
 import { isRegisteredTool, validateToolInput } from "./tool-registry";
 import {
@@ -30,6 +32,13 @@ import {
 } from "./waiting-time";
 
 const supportedNodeTypes = new Set<string>(nodeTypeValues);
+const deferredCompletionNodeTypes = new Set([
+  "approval",
+  "human_form",
+  "subworkflow",
+  "wait_until",
+  "webhook",
+]);
 
 /** One validation finding. `nodeId` / `edgeId` set when the issue is locatable. */
 export type WorkflowValidationIssue = {
@@ -358,6 +367,154 @@ export function validateWorkflow(workflow: unknown, options: ValidateWorkflowOpt
     }
   }
 
+  const recoveryContract = parsed.data.recovery?.contract;
+  if (recoveryContract?.version === "2") {
+    const semantic = recoveryContract.failure.semantic;
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    const detectorSources = new Set(
+      semantic.detectors.map((detector) => detector.sourceNodeId),
+    );
+    const declaredEffectNodeIds = new Set(
+      recoveryContract.effects.map((effect) => effect.nodeId),
+    );
+    const actualEffectNodeIds = nodes
+      .filter(isSensitiveAction)
+      .map((node) => node.id);
+    for (const effectNodeId of actualEffectNodeIds) {
+      if (!declaredEffectNodeIds.has(effectNodeId)) {
+        issues.push({
+          code: "semantic_effect_not_declared",
+          message: `Write-side node "${effectNodeId}" must be declared in recovery.contract.effects before semantic quarantine can make a pre-effect guarantee`,
+          nodeId: effectNodeId,
+        });
+      }
+    }
+    const guardedEffectNodeIds = new Set([
+      ...declaredEffectNodeIds,
+      ...actualEffectNodeIds,
+    ]);
+
+    for (const detector of semantic.detectors) {
+      const sourceNode = nodeById.get(detector.sourceNodeId);
+      if (!sourceNode) {
+        issues.push({
+          code: "semantic_detector_unknown_source",
+          message: `Semantic detector "${detector.id}" references an unknown source node: ${detector.sourceNodeId}`,
+          nodeId: detector.sourceNodeId,
+        });
+      } else if (deferredCompletionNodeTypes.has(sourceNode.type)) {
+        issues.push({
+          code: "semantic_detector_deferred_source",
+          message: `Semantic detector "${detector.id}" cannot target deferred-completion node "${detector.sourceNodeId}"`,
+          nodeId: detector.sourceNodeId,
+        });
+      } else if (
+        detector.action === "quarantine" &&
+        (sourceNode.type === "router" ||
+          sourceNode.type === "router_llm")
+      ) {
+        issues.push({
+          code: "semantic_quarantine_router_source",
+          message: `Quarantine detector "${detector.id}" cannot target a router because routing choices are persisted before operator replacement`,
+          nodeId: detector.sourceNodeId,
+        });
+      }
+      if (detector.kind === "expression") {
+        const result = validateExpression(detector.passWhen);
+        if (!result.valid) {
+          issues.push({
+            code: "semantic_detector_invalid_expression",
+            message:
+              result.message ??
+              `Semantic detector "${detector.id}" has an invalid expression`,
+            nodeId: detector.sourceNodeId,
+          });
+        }
+      }
+      if (detector.action !== "quarantine") continue;
+      for (const effectNodeId of guardedEffectNodeIds) {
+        if (
+          detector.sourceNodeId === effectNodeId ||
+          canReachNodeWithout(
+            nodes,
+            edges,
+            effectNodeId,
+            detector.sourceNodeId,
+          )
+        ) {
+          issues.push({
+            code: "semantic_detector_does_not_guard_effect",
+            message: `Quarantine detector "${detector.id}" must run on every path before recovery effect node "${effectNodeId}"`,
+            nodeId: effectNodeId,
+          });
+        }
+      }
+    }
+
+    for (const fixture of semantic.evaluationFixtures ?? []) {
+      if (!nodeIds.has(fixture.sourceNodeId)) {
+        issues.push({
+          code: "semantic_fixture_unknown_source",
+          message: `Semantic evaluation fixture "${fixture.id}" references an unknown source node: ${fixture.sourceNodeId}`,
+          nodeId: fixture.sourceNodeId,
+        });
+      } else if (!detectorSources.has(fixture.sourceNodeId)) {
+        issues.push({
+          code: "semantic_fixture_without_detector",
+          message: `Semantic evaluation fixture "${fixture.id}" has no detector on source node "${fixture.sourceNodeId}"`,
+          nodeId: fixture.sourceNodeId,
+        });
+      }
+    }
+
+    const fixtureResults =
+      evaluateSemanticOutcomeFixtures(recoveryContract);
+    for (const fixture of fixtureResults) {
+      if (!fixture.passed) {
+        issues.push({
+          code: "semantic_fixture_mismatch",
+          message: `Semantic evaluation fixture "${fixture.id}" expected ${fixture.expected} but evaluated as ${fixture.actual}`,
+          nodeId: fixture.sourceNodeId,
+        });
+      }
+    }
+    for (const detector of semantic.detectors) {
+      const sourceFixtures = fixtureResults.filter(
+        (fixture) =>
+          fixture.sourceNodeId === detector.sourceNodeId,
+      );
+      if (
+        !sourceFixtures.some(
+          (fixture) =>
+            fixture.expected === "pass" &&
+            fixture.actual === "pass",
+        )
+      ) {
+        issues.push({
+          code: "semantic_detector_missing_pass_fixture",
+          message: `Semantic detector "${detector.id}" requires a passing evaluation fixture for source node "${detector.sourceNodeId}"`,
+          nodeId: detector.sourceNodeId,
+        });
+      }
+      if (
+        !sourceFixtures.some(
+          (fixture) =>
+            fixture.expected === "violation" &&
+            fixture.violations.some(
+              (violation) =>
+                violation.detectorId === detector.id,
+            ),
+        )
+      ) {
+        issues.push({
+          code: "semantic_detector_missing_violation_fixture",
+          message: `Semantic detector "${detector.id}" requires a violation fixture that exercises that detector`,
+          nodeId: detector.sourceNodeId,
+        });
+      }
+    }
+  }
+
   // A declared default must satisfy the field it defaults. Checking here means
   // a mistyped setting fails at save/validate time, where the operator is
   // looking at the editor, instead of at the first trigger-driven run.
@@ -416,4 +573,46 @@ function hasCycle(nodes: { id: string }[], edges: { from: string; to: string }[]
   }
 
   return nodes.some(node => visit(node.id));
+}
+
+/**
+ * Return whether `targetId` is still reachable from an original workflow root
+ * after removing `excludedNodeId`. If it is, the excluded node does not
+ * dominate the target and cannot truthfully promise pre-effect quarantine.
+ */
+function canReachNodeWithout(
+  nodes: { id: string }[],
+  edges: { from: string; to: string }[],
+  targetId: string,
+  excludedNodeId: string,
+): boolean {
+  const incoming = new Set(edges.map((edge) => edge.to));
+  const roots = nodes
+    .map((node) => node.id)
+    .filter(
+      (nodeId) =>
+        !incoming.has(nodeId) && nodeId !== excludedNodeId,
+    );
+  const outgoing = new Map<string, string[]>();
+  for (const node of nodes) outgoing.set(node.id, []);
+  for (const edge of edges) {
+    if (
+      edge.from === excludedNodeId ||
+      edge.to === excludedNodeId
+    ) {
+      continue;
+    }
+    outgoing.get(edge.from)?.push(edge.to);
+  }
+
+  const queue = [...roots];
+  const visited = new Set<string>();
+  while (queue.length > 0) {
+    const nodeId = queue.shift();
+    if (!nodeId || visited.has(nodeId)) continue;
+    if (nodeId === targetId) return true;
+    visited.add(nodeId);
+    queue.push(...(outgoing.get(nodeId) ?? []));
+  }
+  return false;
 }

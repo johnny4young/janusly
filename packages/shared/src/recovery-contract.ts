@@ -11,8 +11,10 @@ import {
   supportsAutonomousRecovery,
   ValidationEvidenceLevelSchema,
 } from "./validation-evidence";
+import { WorkflowInputSchema } from "./value-schema";
 
 export const RECOVERY_CONTRACT_VERSION = "1" as const;
+export const RECOVERY_CONTRACT_V2_VERSION = "2" as const;
 
 export const RECOVERY_AUTONOMY_LEVELS = [0, 1, 2, 3, 4] as const;
 export const RecoveryAutonomyLevelSchema = z.union([
@@ -102,29 +104,15 @@ function hasDuplicates(values: readonly string[]): boolean {
   return new Set(values).size !== values.length;
 }
 
-/**
- * Recovery Contract v1 is deliberately honest about semantic recovery:
- * technical failure handling is available now; semantic detectors remain
- * explicitly disabled until a semantic outcome evaluator is implemented.
- */
-export const RecoveryContractV1Schema = z
+const RecoveryTechnicalFailureSchema = z
   .object({
-    version: z.literal(RECOVERY_CONTRACT_VERSION),
-    failure: z
-      .object({
-        technical: z
-          .object({
-            terminalNodeFailure: z.literal(true),
-            stalledNode: z.boolean(),
-          })
-          .strict(),
-        semantic: z
-          .object({
-            mode: z.literal("disabled"),
-          })
-          .strict(),
-      })
-      .strict(),
+    terminalNodeFailure: z.literal(true),
+    stalledNode: z.boolean(),
+  })
+  .strict();
+
+const RecoveryContractCommonSchema = z
+  .object({
     evidence: z
       .object({
         required: z
@@ -180,160 +168,303 @@ export const RecoveryContractV1Schema = z
       })
       .strict(),
   })
-  .strict()
-  .superRefine((contract, context) => {
-    if (hasDuplicates(contract.evidence.required)) {
+  .strict();
+
+type RecoveryContractCommon = z.infer<
+  typeof RecoveryContractCommonSchema
+>;
+
+function validateRecoveryContractCommon(
+  contract: RecoveryContractCommon,
+  context: z.RefinementCtx,
+): void {
+  if (hasDuplicates(contract.evidence.required)) {
+    context.addIssue({
+      code: "custom",
+      path: ["evidence", "required"],
+      message: "Recovery evidence kinds must be unique",
+    });
+  }
+  for (const required of REQUIRED_BASE_EVIDENCE) {
+    if (!contract.evidence.required.includes(required)) {
       context.addIssue({
         code: "custom",
         path: ["evidence", "required"],
-        message: "Recovery evidence kinds must be unique",
+        message: `Recovery contract must retain ${required}`,
       });
     }
-    for (const required of REQUIRED_BASE_EVIDENCE) {
-      if (!contract.evidence.required.includes(required)) {
-        context.addIssue({
-          code: "custom",
-          path: ["evidence", "required"],
-          message: `Recovery contract must retain ${required}`,
-        });
-      }
-    }
-    if (hasDuplicates(contract.effects.map((effect) => effect.nodeId))) {
-      context.addIssue({
-        code: "custom",
-        path: ["effects"],
-        message: "A workflow node may define only one recovery effect",
-      });
-    }
-    if (hasDuplicates(contract.repairs.allowed)) {
-      context.addIssue({
-        code: "custom",
-        path: ["repairs", "allowed"],
-        message: "Recovery repair classes must be unique",
-      });
-    }
+  }
+  if (hasDuplicates(contract.effects.map((effect) => effect.nodeId))) {
+    context.addIssue({
+      code: "custom",
+      path: ["effects"],
+      message: "A workflow node may define only one recovery effect",
+    });
+  }
+  if (hasDuplicates(contract.repairs.allowed)) {
+    context.addIssue({
+      code: "custom",
+      path: ["repairs", "allowed"],
+      message: "Recovery repair classes must be unique",
+    });
+  }
+  if (
+    contract.validation.minimumEvidenceLevel !== "static" &&
+    !contract.evidence.required.includes("validation_receipt")
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["evidence", "required"],
+      message:
+        "Validation evidence above static requires validation_receipt retention",
+    });
+  }
+  if (
+    supportsAutonomousRecovery(contract.validation.minimumEvidenceLevel) &&
+    !contract.evidence.required.includes("effect_receipt")
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["evidence", "required"],
+      message:
+        "Provider-simulated or live-canary validation requires effect_receipt retention",
+    });
+  }
+  if (contract.autonomyLevel === 4) {
     if (
-      contract.validation.minimumEvidenceLevel !== "static" &&
-      !contract.evidence.required.includes("validation_receipt")
+      !supportsAutonomousRecovery(
+        contract.validation.minimumEvidenceLevel,
+      )
     ) {
       context.addIssue({
         code: "custom",
-        path: ["evidence", "required"],
+        path: ["validation", "minimumEvidenceLevel"],
         message:
-          "Validation evidence above static requires validation_receipt retention",
+          "Level 4 autonomy requires provider_simulated or live_canary evidence",
       });
     }
     if (
-      supportsAutonomousRecovery(contract.validation.minimumEvidenceLevel) &&
-      !contract.evidence.required.includes("effect_receipt")
+      contract.approval.productionMutation !==
+      "autonomous_level_4"
     ) {
       context.addIssue({
         code: "custom",
-        path: ["evidence", "required"],
+        path: ["approval", "productionMutation"],
         message:
-          "Provider-simulated or live-canary validation requires effect_receipt retention",
+          "Level 4 autonomy requires an explicit autonomous_level_4 mutation policy",
       });
     }
-    if (contract.autonomyLevel === 4) {
-      if (
-        !supportsAutonomousRecovery(
-          contract.validation.minimumEvidenceLevel,
-        )
-      ) {
-        context.addIssue({
-          code: "custom",
-          path: ["validation", "minimumEvidenceLevel"],
-          message:
-            "Level 4 autonomy requires provider_simulated or live_canary evidence",
-        });
-      }
-      if (
-        contract.approval.productionMutation !==
-        "autonomous_level_4"
-      ) {
-        context.addIssue({
-          code: "custom",
-          path: ["approval", "productionMutation"],
-          message:
-            "Level 4 autonomy requires an explicit autonomous_level_4 mutation policy",
-        });
-      }
-      if (!contract.narrowAutonomy) {
-        context.addIssue({
-          code: "custom",
-          path: ["narrowAutonomy"],
-          message:
-            "Level 4 autonomy requires prior-evidence, blast-radius, and rollback bounds",
-        });
-      } else {
-        if (hasDuplicates(contract.narrowAutonomy.allowedRepairClasses)) {
-          context.addIssue({
-            code: "custom",
-            path: ["narrowAutonomy", "allowedRepairClasses"],
-            message:
-              "Narrow-autonomy repair classes must be unique",
-          });
-        }
-        for (
-          const [index, repair] of contract.narrowAutonomy
-            .allowedRepairClasses.entries()
-        ) {
-          if (!contract.repairs.allowed.includes(repair)) {
-            context.addIssue({
-              code: "custom",
-              path: [
-                "narrowAutonomy",
-                "allowedRepairClasses",
-                index,
-              ],
-              message:
-                "Narrow-autonomy repair classes must be allowed by the recovery contract",
-            });
-          }
-        }
-      }
-      for (const [index, effect] of contract.effects.entries()) {
-        if (effect.idempotency === "unavailable") {
-          context.addIssue({
-            code: "custom",
-            path: ["effects", index, "idempotency"],
-            message:
-              "Level 4 autonomy cannot include an effect without idempotency",
-          });
-        }
-        if (effect.receipt === "manual") {
-          context.addIssue({
-            code: "custom",
-            path: ["effects", index, "receipt"],
-            message:
-              "Level 4 autonomy cannot depend on a manual effect receipt",
-          });
-        }
-      }
+    if (!contract.narrowAutonomy) {
+      context.addIssue({
+        code: "custom",
+        path: ["narrowAutonomy"],
+        message:
+          "Level 4 autonomy requires prior-evidence, blast-radius, and rollback bounds",
+      });
     } else {
-      if (
-        contract.approval.productionMutation !== "required"
-      ) {
+      if (hasDuplicates(contract.narrowAutonomy.allowedRepairClasses)) {
         context.addIssue({
           code: "custom",
-          path: ["approval", "productionMutation"],
+          path: ["narrowAutonomy", "allowedRepairClasses"],
           message:
-            "Autonomous production mutation is valid only at autonomy level 4",
+            "Narrow-autonomy repair classes must be unique",
         });
       }
-      if (contract.narrowAutonomy) {
+      for (
+        const [index, repair] of contract.narrowAutonomy
+          .allowedRepairClasses.entries()
+      ) {
+        if (!contract.repairs.allowed.includes(repair)) {
+          context.addIssue({
+            code: "custom",
+            path: [
+              "narrowAutonomy",
+              "allowedRepairClasses",
+              index,
+            ],
+            message:
+              "Narrow-autonomy repair classes must be allowed by the recovery contract",
+          });
+        }
+      }
+    }
+    for (const [index, effect] of contract.effects.entries()) {
+      if (effect.idempotency === "unavailable") {
         context.addIssue({
           code: "custom",
-          path: ["narrowAutonomy"],
+          path: ["effects", index, "idempotency"],
           message:
-            "Narrow-autonomy bounds are valid only at autonomy level 4",
+            "Level 4 autonomy cannot include an effect without idempotency",
+        });
+      }
+      if (effect.receipt === "manual") {
+        context.addIssue({
+          code: "custom",
+          path: ["effects", index, "receipt"],
+          message:
+            "Level 4 autonomy cannot depend on a manual effect receipt",
         });
       }
     }
-  });
+  } else {
+    if (
+      contract.approval.productionMutation !== "required"
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["approval", "productionMutation"],
+        message:
+          "Autonomous production mutation is valid only at autonomy level 4",
+      });
+    }
+    if (contract.narrowAutonomy) {
+      context.addIssue({
+        code: "custom",
+        path: ["narrowAutonomy"],
+        message:
+          "Narrow-autonomy bounds are valid only at autonomy level 4",
+      });
+    }
+  }
+}
+
+/**
+ * Recovery Contract v1 is deliberately honest about semantic recovery:
+ * technical failure handling is available, while semantic detection remains
+ * disabled on historical snapshots.
+ */
+export const RecoveryContractV1Schema = z
+  .object({
+    version: z.literal(RECOVERY_CONTRACT_VERSION),
+    failure: z
+      .object({
+        technical: RecoveryTechnicalFailureSchema,
+        semantic: z
+          .object({
+            mode: z.literal("disabled"),
+          })
+          .strict(),
+      })
+      .strict(),
+    ...RecoveryContractCommonSchema.shape,
+  })
+  .strict()
+  .superRefine(validateRecoveryContractCommon);
 
 export type RecoveryContractV1 = z.infer<
   typeof RecoveryContractV1Schema
+>;
+
+export const RecoverySemanticExpressionDetectorV2Schema = z
+  .object({
+    id: z.string().trim().min(1).max(200),
+    sourceNodeId: z.string().trim().min(1).max(200),
+    kind: z.literal("expression"),
+    passWhen: z.string().trim().min(1).max(2_000),
+    action: z.enum(["observe", "quarantine"]),
+    message: z.string().trim().min(1).max(500),
+  })
+  .strict();
+
+export const RecoverySemanticSchemaDetectorV2Schema = z
+  .object({
+    id: z.string().trim().min(1).max(200),
+    sourceNodeId: z.string().trim().min(1).max(200),
+    kind: z.literal("schema"),
+    schema: WorkflowInputSchema,
+    action: z.enum(["observe", "quarantine"]),
+    message: z.string().trim().min(1).max(500),
+  })
+  .strict();
+
+export const RecoverySemanticDetectorV2Schema = z.discriminatedUnion(
+  "kind",
+  [
+    RecoverySemanticExpressionDetectorV2Schema,
+    RecoverySemanticSchemaDetectorV2Schema,
+  ],
+);
+export type RecoverySemanticDetectorV2 = z.infer<
+  typeof RecoverySemanticDetectorV2Schema
+>;
+
+export const RecoverySemanticEvaluationFixtureV2Schema = z
+  .object({
+    id: z.string().trim().min(1).max(200),
+    sourceNodeId: z.string().trim().min(1).max(200),
+    output: z.unknown(),
+    context: z.record(z.string(), z.unknown()).optional(),
+    expected: z.enum(["pass", "violation"]),
+  })
+  .strict();
+export type RecoverySemanticEvaluationFixtureV2 = z.infer<
+  typeof RecoverySemanticEvaluationFixtureV2Schema
+>;
+
+export const RecoveryContractV2Schema = z
+  .object({
+    version: z.literal(RECOVERY_CONTRACT_V2_VERSION),
+    failure: z
+      .object({
+        technical: RecoveryTechnicalFailureSchema,
+        semantic: z
+          .object({
+            mode: z.literal("deterministic"),
+            detectors: z
+              .array(RecoverySemanticDetectorV2Schema)
+              .min(1)
+              .max(50),
+            evaluationFixtures: z
+              .array(RecoverySemanticEvaluationFixtureV2Schema)
+              .min(2)
+              .max(50)
+          })
+          .strict(),
+      })
+      .strict(),
+    ...RecoveryContractCommonSchema.shape,
+  })
+  .strict()
+  .superRefine((contract, context) => {
+    validateRecoveryContractCommon(contract, context);
+    if (
+      hasDuplicates(
+        contract.failure.semantic.detectors.map(
+          (detector) => detector.id,
+        ),
+      )
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["failure", "semantic", "detectors"],
+        message: "Semantic detector ids must be unique",
+      });
+    }
+    if (
+      hasDuplicates(
+        (contract.failure.semantic.evaluationFixtures ?? []).map(
+          (fixture) => fixture.id,
+        ),
+      )
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["failure", "semantic", "evaluationFixtures"],
+        message: "Semantic evaluation fixture ids must be unique",
+      });
+    }
+  });
+
+export type RecoveryContractV2 = z.infer<
+  typeof RecoveryContractV2Schema
+>;
+
+export const RecoveryContractSchema = z.discriminatedUnion("version", [
+  RecoveryContractV1Schema,
+  RecoveryContractV2Schema,
+]);
+export type RecoveryContract = z.infer<
+  typeof RecoveryContractSchema
 >;
 
 export const RECOVERY_CIRCUIT_BREAKER_MIN = 2;
@@ -362,7 +493,7 @@ export const RecoveryCircuitBreakerSchema = z.union([
 export const WorkflowRecoverySchema = z
   .object({
     circuitBreaker: RecoveryCircuitBreakerSchema.optional(),
-    contract: RecoveryContractV1Schema.optional(),
+    contract: RecoveryContractSchema.optional(),
   })
   .strict();
 

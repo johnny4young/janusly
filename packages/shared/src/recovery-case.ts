@@ -1,9 +1,10 @@
 /**
  * Pure Recovery Case lifecycle and measurement contracts.
  *
- * `recovery_items` remains the current operational incident substrate. These
- * contracts define the stable state/receipt vocabulary a later case projection
- * can persist without changing the meaning of today's rows.
+ * `recovery_items` remains the technical DLQ incident substrate. Durable
+ * semantic incidents use `recovery_cases`; both surfaces share this stable
+ * state and receipt vocabulary without coupling the browser-safe contract to
+ * persistence.
  */
 
 import { z } from "zod";
@@ -31,6 +32,12 @@ export const RECOVERY_CASE_TERMINAL_STATES = [
   "accepted_loss",
   "abandoned",
 ] as const satisfies readonly RecoveryCaseState[];
+const recoveryCaseTerminalStateSet = new Set<RecoveryCaseState>(
+  RECOVERY_CASE_TERMINAL_STATES,
+);
+export const RECOVERY_CASE_OPEN_STATES = RECOVERY_CASE_STATES.filter(
+  (state) => !recoveryCaseTerminalStateSet.has(state),
+);
 
 const LEGAL_RECOVERY_CASE_TRANSITIONS: Readonly<
   Record<RecoveryCaseState, readonly RecoveryCaseState[]>
@@ -79,7 +86,9 @@ export function isLegalRecoveryCaseTransition(
 
 export const RECOVERY_CASE_EVIDENCE_REFERENCE_KINDS = [
   "run",
+  "run_node",
   "run_event",
+  "semantic_detector",
   "dead_letter",
   "validation",
   "publication",

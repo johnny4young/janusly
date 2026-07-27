@@ -14,7 +14,7 @@
  *   The grammar is small enough that a 100kB validator dependency would be
  *   the wrong trade.
  * - The grammar must stay in lockstep with `WorkflowInputSchema` in
- *   `packages/shared/src/workflow.ts`. Adding a new primitive type means
+ *   `packages/shared/src/value-schema.ts`. Adding a new primitive type means
  *   adding a branch to both files.
  */
 

@@ -21,9 +21,11 @@ import {
   recordRecoveryFeedback,
   queryRecoveryMetricsSignals,
   queryRecoveryHeatmap,
+  listRecoveryCases,
 } from "@janusly/data";
 import { MIN_CALIBRATION_SAMPLES } from "@janusly/engine/src/confidence-calibration";
 import { composeRecoveryMetrics } from "@janusly/engine/src/recovery-metrics";
+import { recoverSemanticOutcome } from "@janusly/engine/src/semantic-recovery";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 
 import {
@@ -41,8 +43,10 @@ import { enforceRateLimit } from "../rate-limit";
 import type { Route } from "../routes";
 import {
   recoveryLedgerContract,
+  listRecoveryCasesContract,
   recoveryMetricsContract,
   recoveryMyWinsContract,
+  recoverSemanticCaseContract,
 } from "../api-contracts";
 
 /** Extract the saved workflow identifier from a DLQ snapshot without trusting client input. */
@@ -52,6 +56,141 @@ function workflowIdFromSnapshot(workflowJson: unknown): string | null {
 }
 
 export const recoveryRoutes: Route[] = [
+  {
+    method: "GET",
+    match: (url) =>
+      url === "/recovery/cases" ||
+      url.startsWith("/recovery/cases?"),
+    role: "viewer",
+    permission: "recovery.read",
+    contract: listRecoveryCasesContract,
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const rawLimit = Number(url.searchParams.get("limit"));
+      const limit = Number.isInteger(rawLimit)
+        ? Math.min(Math.max(rawLimit, 1), 200)
+        : 100;
+      return sendJson(res, {
+        cases: await listRecoveryCases(auth.orgId, {
+          openOnly:
+            url.searchParams.get("openOnly") !== "false",
+          runId: url.searchParams.get("runId") ?? undefined,
+          limit,
+        }),
+      });
+    },
+  },
+
+  {
+    method: "POST",
+    match: (url) =>
+      /^\/recovery\/cases\/[^/?]+\/resolve(\?|$)/.test(url),
+    role: "editor",
+    permission: "recovery.write",
+    contract: recoverSemanticCaseContract,
+    handler: async ({ req, res, auth }) => {
+      const pathname = new URL(
+        req.url ?? "",
+        "http://localhost",
+      ).pathname;
+      const match = pathname.match(
+        /^\/recovery\/cases\/([^/]+)\/resolve$/,
+      );
+      if (!match) {
+        return sendError(
+          res,
+          "recovery_case_not_found",
+          "Recovery case not found",
+          404,
+        );
+      }
+      let caseId: string;
+      try {
+        caseId = decodeURIComponent(match[1]!);
+      } catch {
+        return sendError(
+          res,
+          "invalid_input",
+          "Invalid recovery case id",
+          400,
+        );
+      }
+      const parsed =
+        recoverSemanticCaseContract.request.body.safeParse(
+          await readJson(req, MAX_JSON_BODY_BYTES),
+        );
+      if (!parsed.success) {
+        return sendError(
+          res,
+          "invalid_input",
+          "Invalid semantic recovery decision",
+          400,
+          {
+            issueCount: parsed.error.issues.length,
+            firstIssue:
+              parsed.error.issues[0]?.message ?? "Invalid input",
+          },
+        );
+      }
+      const result = await recoverSemanticOutcome({
+        orgId: auth.orgId,
+        caseId,
+        actorId: auth.userId,
+        ...parsed.data,
+      });
+      if (result.status === "not_found") {
+        return sendError(
+          res,
+          "recovery_case_not_found",
+          "Recovery case not found",
+          404,
+        );
+      }
+      if (result.status === "conflict") {
+        return sendError(
+          res,
+          "recovery_case_conflict",
+          result.reason,
+          409,
+        );
+      }
+      if (result.status === "invalid_output") {
+        return sendError(
+          res,
+          "recovery_semantic_output_invalid",
+          "Replacement output does not satisfy the recovery contract",
+          422,
+          {
+            violationCount: result.violations.length,
+            firstViolation:
+              result.violations[0]?.message ??
+              "Semantic detector failed",
+          },
+        );
+      }
+
+      await auditAction(auth, "recovery.semantic_resolved", {
+        targetType: "recovery_case",
+        targetId: caseId,
+        metadata: {
+          runId: result.runId,
+          sourceNodeId: result.sourceNodeId,
+          decision: result.decision,
+          resumed: result.resumed,
+          resolvedCaseIds: result.resolvedCaseIds,
+        },
+      });
+      return sendJson(res, {
+        ok: true,
+        runId: result.runId,
+        sourceNodeId: result.sourceNodeId,
+        decision: result.decision,
+        resumed: result.resumed,
+        resolvedCaseIds: result.resolvedCaseIds,
+      });
+    },
+  },
+
   // Org-level recovery metrics — composes run status counts, MTTR, p95
   // latency, approvals pending, replay rate, and cost-by-provider into
   // a single rollup the Operations dashboard renders.
