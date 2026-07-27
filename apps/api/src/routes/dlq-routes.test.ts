@@ -173,9 +173,11 @@ async function listen(server: http.Server): Promise<string> {
 
 async function close(server: http.Server): Promise<void> {
   if (!server.listening) return;
-  await new Promise<void>((resolve, reject) => {
+  const closing = new Promise<void>((resolve, reject) => {
     server.close((err) => (err ? reject(err) : resolve()));
   });
+  server.closeAllConnections();
+  await closing;
 }
 
 afterEach(() => {

@@ -8,7 +8,7 @@
  * `drizzle-orm`'s predicate helpers are stubbed to capture their args so
  * we can assert tenant scope.
  *
- * Coverage targets (the ticket AC):
+ * Coverage guarantees:
  * - Tenant scope: the recovery-item read carries `eq(recoveryItems.orgId,
  *   orgId)`; a null first row short-circuits with `null` (no downstream
  *   reads, no enumeration leak).

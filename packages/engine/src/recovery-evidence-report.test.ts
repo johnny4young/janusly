@@ -2,7 +2,7 @@
  * Tests for the pure recovery-evidence report builder. The builder is
  * pure — no DB, no LLM call — so tests build the snapshot bundle inline.
  *
- * Coverage targets (the ticket AC):
+ * Coverage guarantees:
  * - Secret-shape values in ANY rendered free-form string are scrubbed
  *   (redaction at render time, on top of the write-time chokepoint).
  * - The run timeline respects the run-explain pagination cap.

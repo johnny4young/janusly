@@ -17,11 +17,29 @@ const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 type LocaleContract = {
   locale: 'en' | 'es'
   homeName: RegExp
+  runsName: string
+  applyName: string
+  skippedSignature: string
+  legacySignature: string
 }
 
 const LOCALES: LocaleContract[] = [
-  { locale: 'en', homeName: /^Home\b/ },
-  { locale: 'es', homeName: /^Inicio\b/ },
+  {
+    locale: 'en',
+    homeName: /^Home\b/,
+    runsName: 'Runs',
+    applyName: 'Apply',
+    skippedSignature: 'HTTP write validation',
+    legacySignature: 'Legacy validation',
+  },
+  {
+    locale: 'es',
+    homeName: /^Inicio\b/,
+    runsName: 'Ejecuciones',
+    applyName: 'Aplicar',
+    skippedSignature: 'Validación de escritura HTTP',
+    legacySignature: 'Validación heredada',
+  },
 ]
 
 function sqlLiteral(value: string): string {
@@ -84,6 +102,47 @@ async function seedRecoveryHistory(orgId: string): Promise<{ days: string[]; ids
   return { days: days.map((day) => day.toISOString().slice(0, 10)), ids }
 }
 
+async function seedAutoHealingEvidence(
+  orgId: string,
+  contract: LocaleContract,
+): Promise<void> {
+  const suffix = orgId.replaceAll(/[^a-zA-Z0-9]/g, '').slice(-24)
+  const now = new Date().toISOString()
+  await execFileAsync('docker', [
+    'compose', '-f', COMPOSE_FILE,
+    'exec', '-T', 'postgres',
+    'psql', '-U', 'postgres', '-d', 'workflow', '-v', 'ON_ERROR_STOP=1',
+    '-c', `INSERT INTO auto_healing_runs (
+      id, org_id, dead_letter_id, signature, status, approach_label,
+      confidence, validation_evidence_level, loop_attempt_count, created_at, updated_at
+    ) VALUES (
+      ${sqlLiteral(`healing-skipped-${suffix}`)},
+      ${sqlLiteral(orgId)},
+      ${sqlLiteral(`dlq-skipped-${suffix}`)},
+      ${sqlLiteral(contract.skippedSignature)},
+      'validated',
+      'add_retry',
+      84,
+      'writes_skipped',
+      1,
+      ${sqlLiteral(now)}::timestamptz,
+      ${sqlLiteral(now)}::timestamptz
+    ), (
+      ${sqlLiteral(`healing-legacy-${suffix}`)},
+      ${sqlLiteral(orgId)},
+      ${sqlLiteral(`dlq-legacy-${suffix}`)},
+      ${sqlLiteral(contract.legacySignature)},
+      'validated',
+      'raise_timeout',
+      72,
+      NULL,
+      1,
+      ${sqlLiteral(now)}::timestamptz,
+      ${sqlLiteral(now)}::timestamptz
+    );`,
+  ])
+}
+
 async function prepareSession(page: Page, locale: 'en' | 'es'): Promise<string> {
   const orgId = `recovery-exploration-${locale}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   await page.addInitScript(({ activeOrg, selectedLocale }) => {
@@ -118,7 +177,7 @@ async function capture(locator: Locator, name: string): Promise<void> {
 test.describe.configure({ mode: 'serial' })
 
 for (const contract of LOCALES) {
-  test(`${contract.locale} restores the fresh demo and drills through real recovery history by keyboard`, async ({ page }) => {
+  test(`${contract.locale} restores the Recovery Lab entry and drills through real recovery history by keyboard`, async ({ page }) => {
     test.setTimeout(90_000)
     const consoleErrors: string[] = []
     const pageErrors: string[] = []
@@ -127,19 +186,33 @@ for (const contract of LOCALES) {
     })
     page.on('pageerror', (error) => pageErrors.push(error.message))
 
-    await prepareSession(page, contract.locale)
+    const sessionOrgId = await prepareSession(page, contract.locale)
     await page.goto('/')
 
-    const demo = page.getByTestId('recovery-flow-demo')
-    await expect(demo).toBeVisible()
-    await demo.getByTestId('recovery-flow-demo-dismiss').click()
-    await expect(demo).toBeHidden()
+    const labEntry = page.getByTestId('recovery-lab-entry')
+    await expect(labEntry).toBeVisible()
+    await labEntry.getByTestId('recovery-lab-entry-dismiss').click()
+    await expect(labEntry).toBeHidden()
     expect(await page.evaluate(() => localStorage.getItem('janusly:recovery:hideIntro'))).toBeNull()
 
     await page.reload()
-    await expect(demo).toBeVisible()
+    await expect(labEntry).toBeVisible()
     await hideUnrelatedOverlays(page)
-    await capture(demo, `web-${contract.locale}-recovery-demo-restored`)
+    await capture(labEntry, `web-${contract.locale}-recovery-lab-restored`)
+
+    await seedAutoHealingEvidence(sessionOrgId, contract)
+    await page.getByRole('button', { name: contract.runsName, exact: true }).click()
+    const evidenceCard = page.getByTestId('auto-healing-pending-card')
+    const skippedCandidate = evidenceCard.locator('li').filter({ hasText: contract.skippedSignature })
+    const legacyCandidate = evidenceCard.locator('li').filter({ hasText: contract.legacySignature })
+    await expect(skippedCandidate.getByRole('button', { name: contract.applyName })).toBeDisabled()
+    await expect(legacyCandidate.getByRole('button', { name: contract.applyName })).toBeDisabled()
+    await skippedCandidate.getByRole('checkbox').click()
+    await expect(skippedCandidate.getByRole('button', { name: contract.applyName })).toBeEnabled()
+    await expect(legacyCandidate.getByRole('button', { name: contract.applyName })).toBeDisabled()
+    await hideUnrelatedOverlays(page)
+    await capture(evidenceCard, `web-${contract.locale}-auto-healing-evidence-gates`)
+    await page.getByRole('button', { name: contract.homeName }).click()
 
     const historyOrgId = `recovery-history-${contract.locale}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const { days, ids } = await seedRecoveryHistory(historyOrgId)
@@ -148,8 +221,8 @@ for (const contract of LOCALES) {
       localStorage.removeItem('janusly:recovery:hideIntro')
     }, historyOrgId)
     await page.reload()
-    await expect(demo).toBeVisible()
-    await demo.getByTestId('recovery-flow-demo-dismiss').click()
+    await expect(labEntry).toBeVisible()
+    await labEntry.getByTestId('recovery-lab-entry-dismiss').click()
     expect(await page.evaluate(() => localStorage.getItem('janusly:recovery:hideIntro'))).toBeNull()
 
     const metricAction = page.getByTestId('recovery-center-metric-mttr')

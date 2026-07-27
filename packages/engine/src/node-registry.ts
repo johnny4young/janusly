@@ -50,6 +50,7 @@ import { withTimeout } from "./core/timeout";
 import { planAgentTool, planAgentToolWithLLM, type AgentPlanResult } from "./agent-planner";
 import type { AgentNodeConfig } from "./node-configs";
 import { appendEvent } from "./persistence";
+import { recordValidationWriteSkip } from "./validation-evidence";
 import { resolvePromptRef } from "./prompt-resolver";
 import { getRunMemory, summarizeMemory } from "./memory";
 import { recallAgentEpisodes, recordAgentEpisode } from "./agent-memory";
@@ -377,7 +378,7 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: AgentNodeConfig, even
     const dryRunSkip = ctx.dryRun ? dryRunToolSkipPayload(plan.tool, toolInput) : null;
     if (dryRunSkip) {
       const result = { tool: plan.tool, dryRun: true, skipped: true };
-      await appendEvent(ctx.runId, ctx.nodeId, "tool.dry_run.skipped", {
+      await recordValidationWriteSkip(ctx.runId, ctx.nodeId, "tool.dry_run.skipped", {
         ...dryRunSkip,
         agent: agentConfig.name,
         iteration: i,
@@ -518,7 +519,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
     // Read-side methods (GET / HEAD / OPTIONS) still execute — they give
     // the validation real signal without mutating external state.
     if (ctx.dryRun && !SAFE_HTTP_METHODS.has(resolvedMethod)) {
-      await appendEvent(ctx.runId, ctx.nodeId, "node.dry_run.skipped", {
+      await recordValidationWriteSkip(ctx.runId, ctx.nodeId, "node.dry_run.skipped", {
         reason: "write-side HTTP method skipped in validation mode",
         method: resolvedMethod,
         url,
@@ -623,7 +624,12 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
     // skipped to avoid double-charging external APIs.
     const dryRunSkip = ctx.dryRun ? dryRunToolSkipPayload(tool, toolInput) : null;
     if (dryRunSkip) {
-      await appendEvent(ctx.runId, ctx.nodeId, "tool.dry_run.skipped", dryRunSkip);
+      await recordValidationWriteSkip(
+        ctx.runId,
+        ctx.nodeId,
+        "tool.dry_run.skipped",
+        dryRunSkip,
+      );
       return { status: "completed", output: { tool, dryRun: true, skipped: true } };
     }
 

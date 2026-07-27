@@ -22,6 +22,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useT } from '../i18n'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
+import type { ValidationEvidenceLevel } from '../types'
 
 type PendingRow = {
   id: string
@@ -29,6 +30,7 @@ type PendingRow = {
   approachLabel: string | null
   confidence: number | null
   deadLetterId: string
+  validationEvidenceLevel: ValidationEvidenceLevel | null
   createdAt: string
 }
 
@@ -43,6 +45,13 @@ const APPROACH_LABEL_KEY: Record<string, string> = {
   other: 'autoHealing.approach.other',
 }
 
+const EVIDENCE_LABEL_KEY: Record<NonNullable<PendingRow['validationEvidenceLevel']>, string> = {
+  static: 'autoHealing.evidence.static',
+  writes_skipped: 'autoHealing.evidence.writes_skipped',
+  provider_simulated: 'autoHealing.evidence.provider_simulated',
+  live_canary: 'autoHealing.evidence.live_canary',
+}
+
 export function AutoHealingPendingCard({ canDecide = true }: { canDecide?: boolean }) {
   const { t } = useT()
   const platformVersion = useWorkflowStore((state) => state.platformVersion)
@@ -50,7 +59,9 @@ export function AutoHealingPendingCard({ canDecide = true }: { canDecide?: boole
   const [rows, setRows] = useState<PendingRow[] | null>(null)
   const [hidden, setHidden] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
+  const [riskAcknowledged, setRiskAcknowledged] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -76,12 +87,19 @@ export function AutoHealingPendingCard({ canDecide = true }: { canDecide?: boole
   const decide = async (id: string, accepted: boolean) => {
     if (busy) return
     setBusy(id)
+    setNotice(null)
     try {
-      await api(`/auto-healing/${encodeURIComponent(id)}/decide`, {
+      const result = await api(`/auto-healing/${encodeURIComponent(id)}/decide`, {
         method: 'POST',
-        body: JSON.stringify({ accepted }),
+        body: JSON.stringify({
+          accepted,
+          acknowledgeValidationRisk: accepted && riskAcknowledged[id] === true,
+        }),
         headers: { 'content-type': 'application/json' },
-      })
+      }) as { status?: 'applied' | 'pending' }
+      if (accepted && result.status === 'pending') {
+        setNotice(t('autoHealing.publicationPending'))
+      }
       bumpPlatformVersion()
     } catch (err) {
       setError(err instanceof Error ? err.message : t('autoHealing.error.decide'))
@@ -93,12 +111,17 @@ export function AutoHealingPendingCard({ canDecide = true }: { canDecide?: boole
   if (hidden) return null
 
   return (
-    <section className="we-card">
+    <section className="we-card" data-testid="auto-healing-pending-card">
       <div className="section-kicker">{t('autoHealing.card.kicker')}</div>
       <h3 className="we-card__title">{t('autoHealing.card.title')}</h3>
       <p className="we-card__subtitle">{t('autoHealing.card.subtitle')}</p>
 
       {error && <div className="we-card__error">{error}</div>}
+      {notice && (
+        <div className="we-recovery-warning" role="status" aria-live="polite">
+          {notice}
+        </div>
+      )}
 
       {rows === null && !error && (
         <div className="we-card__empty">{t('autoHealing.card.loading')}</div>
@@ -109,29 +132,61 @@ export function AutoHealingPendingCard({ canDecide = true }: { canDecide?: boole
       )}
 
       {rows && rows.length > 0 && (
-        <ul className="we-card__list">
+        <ul className="we-auto-healing__list">
           {rows.map((row) => {
             const approachKey = row.approachLabel
               ? APPROACH_LABEL_KEY[row.approachLabel] ?? 'autoHealing.approach.other'
               : 'autoHealing.approach.other'
+            const evidenceLevel = row.validationEvidenceLevel
+            const requiresRiskAcknowledgement = (
+              evidenceLevel == null || evidenceLevel === 'writes_skipped'
+            )
+            const evidenceLabelKey = evidenceLevel == null
+              ? 'autoHealing.evidence.unknown'
+              : EVIDENCE_LABEL_KEY[evidenceLevel]
+            const riskAcknowledgementKey = evidenceLevel == null
+              ? 'autoHealing.evidence.unknownAck'
+              : 'autoHealing.evidence.writesSkippedAck'
             return (
-              <li key={row.id} className="we-card__list-item">
-                <div className="we-card__list-item-main">
-                  <strong>{row.signature}</strong>
-                  <div className="we-card__list-item-meta">
-                    <span className="chip">{t(approachKey)}</span>
+              <li key={row.id} className="we-auto-healing__item">
+                <div className="we-auto-healing__main">
+                  <strong className="we-auto-healing__signature">{row.signature}</strong>
+                  <div className="we-auto-healing__meta">
+                    <span className="we-pill" data-tone="neutral">{t(approachKey)}</span>
                     {row.confidence != null && (
-                      <span className="chip chip--muted">
+                      <span className="we-pill" data-tone="neutral">
                         {t('autoHealing.confidence', { value: row.confidence })}
                       </span>
                     )}
+                    <span
+                      className="we-pill"
+                      data-tone={requiresRiskAcknowledgement ? 'warning' : 'neutral'}
+                    >
+                      {t(evidenceLabelKey)}
+                    </span>
                   </div>
+                  {requiresRiskAcknowledgement && canDecide && (
+                    <label className="we-auto-healing__risk">
+                      <input
+                        type="checkbox"
+                        checked={riskAcknowledged[row.id] === true}
+                        onChange={(event) => setRiskAcknowledged((current) => ({
+                          ...current,
+                          [row.id]: event.target.checked,
+                        }))}
+                      />
+                      <span>{t(riskAcknowledgementKey)}</span>
+                    </label>
+                  )}
                 </div>
-                {canDecide && <div className="we-card__list-item-actions">
+                {canDecide && <div className="we-auto-healing__actions">
                   <button
                     type="button"
                     className="small-command small-command--primary"
-                    disabled={busy === row.id}
+                    disabled={
+                      busy === row.id
+                      || (requiresRiskAcknowledgement && riskAcknowledged[row.id] !== true)
+                    }
                     onClick={() => void decide(row.id, true)}
                   >
                     {t('autoHealing.action.apply')}

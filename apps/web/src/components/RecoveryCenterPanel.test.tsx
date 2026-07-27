@@ -188,7 +188,7 @@ describe('computeRecommendedActions', () => {
     expect(actions[0]!.severity).toBe('warning')
   })
 
-  it('surfaces the getting-started demo for new operators with no signals', () => {
+  it('surfaces the getting-started action for new operators with no signals', () => {
     const actions = computeRecommendedActions({
       openFailures: 0,
       pendingApprovals: 0,
@@ -198,9 +198,7 @@ describe('computeRecommendedActions', () => {
     })
     expect(actions[0]!.id).toBe('run_getting_started')
     expect(actions[0]!.severity).toBe('cyan')
-    // CTA routes to AI Studio so the operator can draft a real first flow
-    // (the previous "Browse recipes" placeholder pointed at a demo recipe
-    // that doesn't exist).
+    // CTA routes to AI Studio so the operator can draft a real first flow.
     expect(actions[0]!.ctaTab).toBe('copilot')
   })
 
@@ -352,10 +350,10 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
 
     render(<RecoveryCenterPanel {...baseProps} />)
-    expect(screen.queryByTestId('recovery-flow-demo')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('recovery-lab-entry')).not.toBeInTheDocument()
 
     releaseMetrics?.({ ...baseMetrics, terminalRuns: 0 })
-    expect(await screen.findByTestId('recovery-flow-demo')).toBeInTheDocument()
+    expect(await screen.findByTestId('recovery-lab-entry')).toBeInTheDocument()
   })
 
   it('does not render a previous organization snapshot during an org switch', async () => {
@@ -431,7 +429,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
 
     render(<RecoveryCenterPanel {...baseProps} />)
-    fireEvent.click(await screen.findByTestId('recovery-flow-demo-dismiss'))
+    fireEvent.click(await screen.findByTestId('recovery-lab-entry-dismiss'))
 
     expect(dismissRecoveryIntroThisSession).toHaveBeenCalledOnce()
     expect(localStorage.getItem('janusly:recovery:hideIntro')).toBeNull()
@@ -449,7 +447,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
 
     render(<RecoveryCenterPanel {...baseProps} />)
-    fireEvent.click(await screen.findByTestId('recovery-flow-demo-dismiss'))
+    fireEvent.click(await screen.findByTestId('recovery-lab-entry-dismiss'))
 
     expect(localStorage.getItem('janusly:recovery:hideIntro')).toBe('true')
   })
@@ -467,9 +465,11 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     render(<RecoveryCenterPanel {...baseProps} />)
 
     await waitFor(() => {
-      expect(screen.getByTestId('recovery-flow-demo')).toBeInTheDocument()
+      expect(screen.getByTestId('recovery-lab-entry')).toBeInTheDocument()
     })
-    expect(screen.getByText('From failure to fix in one screen.')).toBeInTheDocument()
+    expect(screen.getByText('Create your first recovery evidence.')).toBeInTheDocument()
+    expect(screen.getByText(/no incidents or sample activity/i)).toBeInTheDocument()
+    expect(screen.queryByText(/0x9af2|stripe\.charge|412ms|92 AI/)).toBeNull()
     expect(screen.getByTestId('recovery-center-empty-cta-studio')).toBeInTheDocument()
     expect(screen.getByTestId('recovery-center-empty-cta-recipes')).toBeInTheDocument()
   })
@@ -485,7 +485,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
 
     render(<RecoveryCenterPanel {...baseProps} />)
-    await waitFor(() => expect(screen.getByTestId('recovery-flow-demo')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('recovery-lab-entry')).toBeInTheDocument())
 
     fireEvent.click(screen.getByTestId('recovery-center-empty-cta-studio'))
     expect(baseProps.onOpenTab).toHaveBeenCalledWith('copilot')
@@ -502,7 +502,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
 
     render(<RecoveryCenterPanel {...baseProps} />)
-    await waitFor(() => expect(screen.getByTestId('recovery-flow-demo')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('recovery-lab-entry')).toBeInTheDocument())
 
     fireEvent.click(screen.getByTestId('recovery-center-empty-cta-recipes'))
     expect(baseProps.onOpenTab).toHaveBeenCalledWith('templates')
@@ -883,7 +883,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
 
     render(<RecoveryCenterPanel {...baseProps} />)
 
-    await screen.findByTestId('recovery-flow-demo')
+    await screen.findByTestId('recovery-lab-entry')
     expect(screen.queryByTestId('recovery-center-clean-streak')).toBeNull()
   })
 })
@@ -928,7 +928,7 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
     recoveryLedger = { totalRecovered: 0, downtimeEndedMs: 0, sinceIso: null }
     mockAllClearApis()
     const { rerender } = render(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
-    await screen.findByTestId('recovery-flow-demo')
+    await screen.findByTestId('recovery-lab-entry')
     await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/ledger'))
 
     recoveryLedger = {
@@ -1087,7 +1087,7 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
 
     render(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
 
-    await screen.findByTestId('recovery-flow-demo')
+    await screen.findByTestId('recovery-lab-entry')
     expect(screen.getByTestId('recovery-center-greeting')).not.toHaveTextContent(/^All clear$/)
     expect(screen.queryByTestId('celebration-burst')).toBeNull()
   })
@@ -1104,7 +1104,7 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
     unmount()
 
     render(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
-    await screen.findByTestId('recovery-flow-demo')
+    await screen.findByTestId('recovery-lab-entry')
     expect(screen.getByTestId('recovery-center-greeting')).not.toHaveTextContent(/^All clear$/)
   })
 })

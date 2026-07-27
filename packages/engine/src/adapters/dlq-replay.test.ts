@@ -160,6 +160,24 @@ describe('DLQReplayAdapter.replayDeadLetter (production replay)', () => {
     }, baseWorkflow)
   })
 
+  it('preserves an upstream idempotency receipt as the replay generation', async () => {
+    await adapter.replayDeadLetter({
+      runId: 'orig-run',
+      workflow: baseWorkflow,
+      node: failingNode,
+      recoveryClaimToken: 'upstream-receipt-1',
+      deadLetterId: 'dlq-1',
+    })
+
+    expect(claimReplayTransitionMock).toHaveBeenCalledWith('orig-run', failingNode.id, {
+      recoveryClaimToken: 'upstream-receipt-1',
+      deadLetterId: 'dlq-1',
+      recoveryActorId: null,
+      recoveryPlaybookId: null,
+      recoveryValidationRunId: null,
+    }, baseWorkflow)
+  })
+
   it('binds a verified playbook and validation run to the replay generation', async () => {
     await adapter.replayDeadLetter({
       runId: 'orig-run',

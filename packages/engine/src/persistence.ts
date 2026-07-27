@@ -667,6 +667,7 @@ export async function claimReplayTransition(
   runId: string,
   nodeId: string,
   recovery: {
+    recoveryClaimToken?: string;
     deadLetterId?: string | null;
     recoveryActorId?: string | null;
     recoveryPlaybookId?: string | null;
@@ -674,7 +675,7 @@ export async function claimReplayTransition(
   } = {},
   workflow?: Workflow,
 ): Promise<ReplayTransitionClaim> {
-  const recoveryClaimToken = crypto.randomUUID();
+  const recoveryClaimToken = recovery.recoveryClaimToken ?? crypto.randomUUID();
   const replayClaimedAt = new Date();
   const publicationGeneration = await db.transaction(async (tx) => {
     await tx.update(runs)

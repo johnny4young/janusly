@@ -15,10 +15,9 @@
  *
  * Three terminal cases on the validation sandbox run:
  *   - `succeeded` → patch worked (signature gone). Row moves to
- *     `validated`. If auto-apply is allowed, replay against the
- *     patched workflow and move to `applied` with
- *     `decisionActor: "auto"`. Otherwise leave for manual operator
- *     decision via the Recovery Center card.
+ *     `validated`. If auto-apply is allowed, claim publication, persist the
+ *     exact production replay receipt, and only then move to `applied`.
+ *     Otherwise leave the row for manual operator decision.
  *   - `failed` + signature UNCHANGED → patch didn't fix it. Row moves
  *     to `validation_failed` with reason `validation_failed`.
  *   - `failed` + signature CHANGED → patch caused a different failure
@@ -39,28 +38,31 @@
  *   into `runs` filtered by the same orgId.
  * - The auto-apply branch does NOT re-check budget (the scanner
  *   already paid the LLM + validation budget for this candidate).
- *   It DOES re-check the master gate AND the auto-apply gate AND the
- *   loop count AND the existing CAS-style `recordDecision` so a
- *   concurrent operator click cannot collide.
+ *   It DOES re-check the master gate, auto-apply gate, and loop count.
+ *   The shared apply service owns the CAS claim against a concurrent click.
  */
 
 import { and, eq, inArray } from "drizzle-orm";
-import { db, deadLetters, runs, runNodes } from "@janusly/db";
+import { db, runs, runNodes } from "@janusly/db";
 import {
   countRecentAttemptsBySignature,
   listValidatingRows,
-  recordDecision,
   recordValidationOutcome,
   sweepStaleValidating,
   type AutoHealingRun,
   getOrgConfigSnapshot,
 } from "@janusly/data";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
-import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
-import { WorkflowSchema, type WorkflowNode } from "@janusly/shared";
+import {
+  parseValidationEvidenceLevel,
+  supportsAutonomousRecovery,
+  type ValidationEvidenceLevel,
+} from "@janusly/shared";
 
-import { audit } from "./audit";
-import { markDeadLetterReplayed } from "./dlq";
+import {
+  applyValidatedAutoHealing,
+  repairAutoHealingPublications,
+} from "./auto-healing-apply";
 import {
   isAutoApplyAllowed,
   isAutoHealingAllowed,
@@ -81,8 +83,6 @@ export const DEFAULT_AUTO_HEALING_WATCH_CRON = "* * * * *";
  *  validation latency; the existing run-timeout machinery should kick in
  *  first in practice, but this is the belt-and-braces fallback. */
 const STALE_VALIDATING_HOURS = 2;
-
-const dlqReplay = new DLQReplayAdapter();
 
 // ─── Cron registration ──────────────────────────────────────────────────────
 
@@ -123,6 +123,15 @@ function resolveWatchCronPattern(env: NodeJS.ProcessEnv): string {
 // ─── Watcher entry point ────────────────────────────────────────────────────
 
 export async function handleAutoHealingWatchTrigger(): Promise<void> {
+  try {
+    const repaired = await repairAutoHealingPublications();
+    if (repaired.scanned > 0) {
+      console.log("[auto-healing] publication repair sweep", repaired);
+    }
+  } catch (err) {
+    console.error("[auto-healing] publication repair sweep failed", { err });
+  }
+
   // Stale sweep FIRST so a long-stuck validation doesn't block subsequent
   // auto-healing attempts on the same signature (the row would otherwise
   // count toward the loop breaker until the next sweep window).
@@ -156,6 +165,7 @@ export async function handleAutoHealingWatchTrigger(): Promise<void> {
             orgId: runs.orgId,
             status: runs.status,
             inputJson: runs.inputJson,
+            validationEvidenceLevel: runs.validationEvidenceLevel,
           })
           .from(runs)
           .where(inArray(runs.id, validationRunIds))
@@ -176,7 +186,13 @@ export async function handleAutoHealingWatchTrigger(): Promise<void> {
 
 async function processValidatingRow(
   row: AutoHealingRun,
-  runById: Map<string, { id: string; orgId: string; status: string; inputJson: unknown }>,
+  runById: Map<string, {
+    id: string;
+    orgId: string;
+    status: string;
+    inputJson: unknown;
+    validationEvidenceLevel: string | null;
+  }>,
 ): Promise<void> {
   if (!row.validationRunId) return;
   const runRow = runById.get(row.validationRunId);
@@ -193,6 +209,9 @@ async function processValidatingRow(
   if (runRow.status !== "succeeded" && runRow.status !== "failed" && runRow.status !== "cancelled") {
     return;
   }
+  const validationEvidenceLevel = parseValidationEvidenceLevel(
+    runRow.validationEvidenceLevel,
+  );
 
   // Master gate re-check — a kill switch flipped while the validation
   // was in flight halts before the outcome path runs. We mark the row
@@ -204,6 +223,7 @@ async function processValidatingRow(
     await recordValidationOutcome(row.id, {
       outcome: "validation_failed",
       validationSignature: null,
+      validationEvidenceLevel,
       reason: "feature_disabled",
     });
     return;
@@ -221,8 +241,9 @@ async function processValidatingRow(
     await recordValidationOutcome(row.id, {
       outcome: "validated",
       validationSignature: null,
+      validationEvidenceLevel,
     });
-    await maybeAutoApply(row);
+    await maybeAutoApply(row, validationEvidenceLevel);
     return;
   }
 
@@ -231,6 +252,7 @@ async function processValidatingRow(
     await recordValidationOutcome(row.id, {
       outcome: "validation_failed",
       validationSignature,
+      validationEvidenceLevel,
       reason: "signature_changed",
     });
     return;
@@ -238,18 +260,22 @@ async function processValidatingRow(
   await recordValidationOutcome(row.id, {
     outcome: "validation_failed",
     validationSignature,
+    validationEvidenceLevel,
     reason: "validation_failed",
   });
 }
 
 /**
- * Auto-apply branch. Gated by `isAutoApplyAllowed` + loop count
- * re-check + CAS-style `recordDecision`. The production replay
- * targets the original DLQ row's run id with the PATCHED workflow,
- * so the failing node re-runs against the suggested fix.
+ * Auto-apply branch. The shared service claims the accepted decision and
+ * publishes the patched workflow through the same durable boundary used by
+ * manual decisions.
  */
-async function maybeAutoApply(row: AutoHealingRun): Promise<void> {
+async function maybeAutoApply(
+  row: AutoHealingRun,
+  validationEvidenceLevel: ValidationEvidenceLevel,
+): Promise<void> {
   if (!row.proposedPatchJson) return;
+  if (!supportsAutonomousRecovery(validationEvidenceLevel)) return;
   const autoApply = await isAutoApplyAllowed(row.orgId);
   if (!autoApply.allowed) return;
 
@@ -270,60 +296,16 @@ async function maybeAutoApply(row: AutoHealingRun): Promise<void> {
     return;
   }
 
-  // Parse the stored patch; defense-in-depth WorkflowSchema check.
-  const workflowParse = WorkflowSchema.safeParse(row.proposedPatchJson);
-  if (!workflowParse.success) {
-    return;
-  }
-  const patchedWorkflow = workflowParse.data;
-  const dlqRow = await loadDlqContext(row.orgId, row.deadLetterId);
-  if (!dlqRow) return;
-  const failingNode = (patchedWorkflow.nodes as WorkflowNode[]).find(
-    (n) => n.id === dlqRow.nodeId,
-  );
-  if (!failingNode) return;
-
-  // CAS-style apply — only one writer wins (operator click vs this
-  // auto-apply). The loser audits silently as "no-op" because the
-  // CAS update returns no rows.
-  const decision = await recordDecision(row.id, { actor: "auto", accepted: true });
-  if (!decision.applied) return;
-
-  // Replay the failing run against the patched workflow.
-  try {
-    await dlqReplay.replayDeadLetter({
-      runId: dlqRow.runId,
-      workflow: patchedWorkflow,
-      node: failingNode,
-      deadLetterId: row.deadLetterId,
-      recoveryActorId: "system:auto-healing",
+  const result = await applyValidatedAutoHealing({
+    orgId: row.orgId,
+    id: row.id,
+    actor: "system:auto-healing",
+  });
+  if (result.outcome === "pending") {
+    console.warn("[auto-healing] auto-apply publication pending repair", {
+      id: row.id,
     });
-    await markDeadLetterReplayed(row.orgId, row.deadLetterId);
-    // Distinct action so we don't double-write `auto_healing.applied`
-    // (the row-state transition audit lives inside `recordDecision`
-    // and fires once per `validated → applied`). The replay-triggered
-    // signal carries the "the DLQ row was actually re-enqueued"
-    // outcome for operators reading the audit timeline.
-    await audit(row.orgId, "system:auto-healing", "auto_healing.replay.triggered", "auto_healing_run", row.id, {
-      decisionActor: "auto",
-      signature: row.signature,
-      deadLetterId: row.deadLetterId,
-    });
-  } catch (err) {
-    console.error("[auto-healing] auto-apply replay failed", { id: row.id, err });
   }
-}
-
-async function loadDlqContext(
-  orgId: string,
-  deadLetterId: string,
-): Promise<{ runId: string; nodeId: string } | null> {
-  const rows = await db
-    .select({ runId: deadLetters.runId, nodeId: deadLetters.nodeId })
-    .from(deadLetters)
-    .where(and(eq(deadLetters.orgId, orgId), eq(deadLetters.id, deadLetterId)))
-    .limit(1);
-  return rows[0] ?? null;
 }
 
 async function computeValidationFailureSignature(validationRunId: string): Promise<string | null> {

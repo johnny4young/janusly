@@ -1287,7 +1287,7 @@ export default function App() {
                 onOpenRun={openRun}
                 onApproveNode={canStartRuns ? approveNode : () => undefined}
                 onOpenRecoveryQueue={() => openRecoveryQueue()}
-                onTryDemoRecovery={canInstallPacks
+                onStartRecoveryDrill={canInstallPacks
                   ? () => injectPackFailure('failed-payment-recovery', 'billing_secret_unbound')
                   : undefined}
               />

@@ -23,9 +23,9 @@
  * - Every synthetic run carries a bounded `drill` provenance block in
  *   `runs.inputJson` and its `node.failed` event. Recovery classifiers still
  *   receive the original error envelope unchanged.
- * - `replayMode` is left null (a "production"-shaped failure) so the row
- *   appears in DeadLettersPanel exactly like a real failure would, same
- *   as the recovery-matrix seeder.
+ * - The run is marked as validation data so health, cluster, rollout, and
+ *   recovery metrics never treat an operator-created drill as production.
+ *   The linked dead-letter remains inspectable through the Recovery Center.
  */
 
 import { recordRecoveryItemCreationEvent } from "@janusly/data";
@@ -88,6 +88,8 @@ export async function injectSampleFailure(
       status: "failed",
       createdBy: createdBy ?? null,
       inputJson: safePersistPayload({ workflow, input: {}, drill: source }),
+      replayMode: "validation",
+      validationEvidenceLevel: "static",
     });
 
     await tx.insert(runNodes).values({

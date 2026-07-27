@@ -99,6 +99,8 @@ describe("injectSampleFailure", () => {
       status: "failed",
       createdBy: "user-1",
       inputJson: { workflow, input: {}, drill: source },
+      replayMode: "validation",
+      validationEvidenceLevel: "static",
     });
 
     const eventInsert = txInsertMock.mock.calls.find(([table]) => table === runEventsTable)?.[1];

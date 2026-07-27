@@ -127,6 +127,12 @@ export type SolutionPackPublic = {
  * workflow refuses new runs, so the list must say so.
  */
 export type SavedWorkflow = { id: string; orgId: string; name: string; createdBy?: string; createdAt?: string; updatedAt?: string; lastRunStatus?: string | null; runCount?: number; bufferedTriggerCount?: number; status?: string; pausedReason?: string | null; tags?: string[]; folder?: string | null; deletedAt?: string | null }
+export type ValidationEvidenceLevel =
+  | 'static'
+  | 'writes_skipped'
+  | 'provider_simulated'
+  | 'live_canary'
+
 export type RunSummary = {
   id: string
   orgId?: string
@@ -150,6 +156,8 @@ export type RunSummary = {
    * Drives whether the "Open in Lab" button surfaces (no nested labs).
    */
   replayMode?: string | null
+  /** Strength of evidence produced by a validation run. */
+  validationEvidenceLevel?: ValidationEvidenceLevel | null
 }
 export type OrgRole = 'viewer' | 'editor' | 'admin'
 export type OrgMember = { id: string; orgId: string; userId: string; email?: string; role: OrgRole; invitedBy?: string; createdAt?: string }

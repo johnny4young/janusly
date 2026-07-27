@@ -138,6 +138,8 @@ async function verifyRecoveryPlaybookReplayClaim(input: {
     && facts.playbook.signature === signature
     && run
     && run.replayMode === "validation"
+    && run.validationEvidenceLevel != null
+    && run.validationEvidenceLevel !== "writes_skipped"
     && run.parentRunId === input.deadLetter.runId
     && run.status === "succeeded"
     && validationPlaybookId(run) === input.claim.recoveryPlaybookId

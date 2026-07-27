@@ -6869,6 +6869,22 @@
                                 }
                               ]
                             },
+                            "validationEvidenceLevel": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "static",
+                                    "writes_skipped",
+                                    "provider_simulated",
+                                    "live_canary"
+                                  ]
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
                             "createdAt": {
                               "anyOf": [
                                 {
@@ -6891,6 +6907,7 @@
                             "workflowVersionId",
                             "parentRunId",
                             "replayMode",
+                            "validationEvidenceLevel",
                             "createdAt",
                             "isFailure"
                           ]
@@ -7530,6 +7547,22 @@
                               "anyOf": [
                                 {
                                   "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "validationEvidenceLevel": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "static",
+                                    "writes_skipped",
+                                    "provider_simulated",
+                                    "live_canary"
+                                  ]
                                 },
                                 {
                                   "type": "null"
@@ -8481,6 +8514,22 @@
                               }
                             ]
                           },
+                          "validationEvidenceLevel": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "static",
+                                  "writes_skipped",
+                                  "provider_simulated",
+                                  "live_canary"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "createdBy": {
                             "anyOf": [
                               {
@@ -9313,6 +9362,22 @@
                               "anyOf": [
                                 {
                                   "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "validationEvidenceLevel": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "static",
+                                    "writes_skipped",
+                                    "provider_simulated",
+                                    "live_canary"
+                                  ]
                                 },
                                 {
                                   "type": "null"

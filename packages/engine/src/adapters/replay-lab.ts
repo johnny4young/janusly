@@ -98,6 +98,7 @@ export async function replayRunAsValidation(
       workflowVersionId,
       status: "running",
       replayMode: "validation",
+      validationEvidenceLevel: "static",
       createdBy: createdBy ?? null,
       // Mirror the `startRun` shape: `inputJson` carries the workflow
       // snapshot AND the trigger input so `{{input.*}}` references
@@ -324,6 +325,7 @@ export async function replayRunAsValidationFork(
       workflowVersionId,
       status: "running",
       replayMode: "validation",
+      validationEvidenceLevel: "static",
       createdBy: createdBy ?? null,
       // Workflow stored RAW (like `startRun`) so the slim queue worker can
       // reload an executable DAG via `loadRunWorkflowRaw`.

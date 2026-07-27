@@ -2706,10 +2706,8 @@
 }
 
 /* ==========================================================================
-   Home recovery-loop: hero pitch + RecoveryFlowDemo + composer seed
-   transcript. Lands the differentiator at first glance: a 4-step
-   horizontal flow (failure → AI suggestions → sandbox → apply) plus a
-   sample AI/User conversation when the operator is fresh.
+   Home recovery entry. A fresh workspace remains truthful and empty until
+   the operator explicitly starts a controlled drill.
    ========================================================================== */
 
 .we-recovery-center-hero__pitch {
@@ -2720,12 +2718,12 @@
   max-width: 56ch;
 }
 
-/* RecoveryFlowDemo */
-.we-flow-demo {
+/* Recovery Lab entry */
+.we-recovery-lab-entry {
   position: relative;
   display: grid;
-  container-type: inline-size;
-  gap: 16px;
+  grid-template-columns: minmax(0, 1.3fr) minmax(260px, 0.7fr);
+  gap: 20px;
   padding: 18px 20px 20px;
   border-radius: 14px;
   border: 1px solid var(--we-line);
@@ -2734,7 +2732,7 @@
   box-shadow: 0 1px 2px var(--we-shadow-ink-04);
 }
 
-.we-flow-demo__dismiss {
+.we-recovery-lab-entry__dismiss {
   position: absolute;
   top: 10px;
   right: 10px;
@@ -2752,19 +2750,12 @@
   transition: background 120ms ease, color 120ms ease;
 }
 
-.we-flow-demo__dismiss:hover {
+.we-recovery-lab-entry__dismiss:hover {
   background: var(--we-surface-3);
   color: var(--we-text-1);
 }
 
-.we-flow-demo__head {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 16px;
-  align-items: flex-end;
-}
-
-.we-flow-demo__head h2 {
+.we-recovery-lab-entry__copy h2 {
   margin: 4px 0 4px;
   font-size: 18px;
   font-weight: 700;
@@ -2772,7 +2763,7 @@
   color: var(--we-ink);
 }
 
-.we-flow-demo__head p {
+.we-recovery-lab-entry__copy > p {
   margin: 0;
   font-size: 12px;
   color: var(--we-ink-soft);
@@ -2780,320 +2771,81 @@
   max-width: 60ch;
 }
 
-.we-flow-demo__ctas {
+.we-recovery-lab-entry__actions {
   display: inline-flex;
   gap: 8px;
   flex-wrap: wrap;
+  margin-top: 14px;
 }
 
-.we-flow-demo__steps {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  align-items: stretch;
-  gap: 0;
+.we-recovery-lab-entry__notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 9px 10px;
+  border: 1px solid var(--we-success-border-30);
+  border-radius: 8px;
+  background: var(--we-success-soft);
+  color: var(--we-success-text);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.we-recovery-lab-entry__notice svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.we-recovery-lab-entry__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   padding: 0;
   margin: 0;
   list-style: none;
 }
 
-.we-flow-demo__step {
-  min-width: 0;
+.we-recovery-lab-entry__steps li {
   display: grid;
-  grid-template-rows: auto auto auto auto auto;
-  gap: 6px;
-  padding: 12px 12px 14px;
-  border: 1px solid var(--we-line);
-  border-radius: 10px;
-  background: var(--we-surface);
-  position: relative;
-  box-shadow: 0 1px 2px var(--we-shadow-ink-04);
-}
-
-.we-flow-demo__step[data-step="failure"]  { border-left: 3px solid var(--we-danger); }
-.we-flow-demo__step[data-step="suggest"]  { border-left: 3px solid var(--we-accent); }
-.we-flow-demo__step[data-step="sandbox"]  { border-left: 3px solid var(--we-success); }
-.we-flow-demo__step[data-step="apply"]    { border-left: 3px solid var(--we-primary); }
-
-.we-flow-demo__step strong {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--we-ink);
-  letter-spacing: -0.01em;
-}
-
-.we-flow-demo__step-num {
-  position: absolute;
-  top: 8px;
-  right: 10px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 800;
-  color: var(--we-faint);
-  letter-spacing: 0.04em;
-}
-
-.we-flow-demo__step-ic {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  background: var(--we-surface-muted);
-  border: 1px solid var(--we-line);
-  color: var(--we-ink-soft);
-  display: grid;
-  place-items: center;
-}
-
-.we-flow-demo__step[data-step="failure"] .we-flow-demo__step-ic { color: var(--we-danger-text); background: var(--we-danger-soft); border-color: var(--we-danger-border-30); }
-.we-flow-demo__step[data-step="suggest"] .we-flow-demo__step-ic { color: var(--we-accent); background: var(--we-accent-soft); border-color: color-mix(in srgb, var(--we-accent) 30%, transparent); }
-.we-flow-demo__step[data-step="sandbox"] .we-flow-demo__step-ic { color: var(--we-success-text); background: var(--we-success-soft); border-color: var(--we-success-border-30); }
-.we-flow-demo__step[data-step="apply"]   .we-flow-demo__step-ic { color: var(--we-primary); background: var(--we-primary-soft); border-color: color-mix(in srgb, var(--we-primary) 28%, transparent); }
-
-.we-flow-demo__sig {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  background: var(--we-surface-muted);
-  border: 1px solid var(--we-line);
-  border-radius: 5px;
-  padding: 2px 7px;
-  color: var(--we-ink);
-  width: max-content;
-  letter-spacing: 0.02em;
-}
-
-.we-flow-demo__step-meta {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 10px;
-  color: var(--we-muted);
-  font-family: var(--font-mono);
-  letter-spacing: 0.02em;
-}
-
-.we-flow-demo__confidence-strip {
-  display: inline-flex;
-  gap: 4px;
-}
-
-.we-flow-demo__conf {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  padding: 2px 6px;
-  border-radius: var(--we-radius-pill);
-  background: var(--we-surface-muted);
-  color: var(--we-muted);
-  border: 1px solid var(--we-line);
-  letter-spacing: 0.02em;
-}
-
-.we-flow-demo__conf--top {
-  background: var(--we-accent-soft);
-  color: var(--we-accent);
-  border-color: color-mix(in srgb, var(--we-accent) 34%, transparent);
-}
-
-.we-flow-demo__conf--low {
-  background: var(--we-warning-soft);
-  color: var(--we-warning-text);
-  border-color: var(--we-warning-border-30);
-}
-
-.we-flow-demo__pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: var(--we-radius-pill);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  width: max-content;
-}
-
-.we-flow-demo__pill--success {
-  background: var(--we-success-soft);
-  color: var(--we-success-text);
-  border: 1px solid var(--we-success-border-30);
-}
-
-.we-flow-demo__pill--cobalt {
-  background: var(--we-primary-soft);
-  color: var(--we-primary);
-  border: 1px solid color-mix(in srgb, var(--we-primary) 28%, transparent);
-}
-
-.we-flow-demo__arrow {
-  display: none;
-  grid-column: 1 / -1;
-  place-items: center;
-  padding: 0 6px;
-  color: var(--we-faint);
-}
-
-/* The demo often lives in the operator grid's narrow main column even when
-   the viewport itself is desktop-wide. Collapse its header from the actual
-   component width rather than relying only on viewport breakpoints. */
-@container (max-width: 700px) {
-  .we-flow-demo__head {
-    grid-template-columns: 1fr;
-    align-items: start;
-  }
-
-  .we-flow-demo__ctas {
-    flex-wrap: wrap;
-  }
-
-  .we-flow-demo__steps {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@container (max-width: 430px) {
-  .we-flow-demo__steps {
-    grid-template-columns: 1fr;
-  }
-
-  .we-flow-demo__arrow {
-    display: grid;
-    grid-column: 1 / -1;
-    transform: rotate(90deg);
-    padding: 4px 0;
-  }
-}
-
-/* The demo renders inside the ~790px left column of .we-operator-grid, so
-   collapse on the project's canonical breakpoints (the grid itself drops to
-   one column at 1100px), not an orphan viewport value. */
-@media (max-width: 1100px) {
-  .we-flow-demo__steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .we-flow-demo__head { grid-template-columns: 1fr; }
-}
-
-@media (max-width: 760px) {
-  .we-flow-demo__steps { grid-template-columns: 1fr; }
-  .we-flow-demo__arrow { display: grid; grid-column: 1 / -1; transform: rotate(90deg); padding: 4px 0; }
-}
-
-/* Composer seed transcript — sample AI/User conversation shown when
-   isEmpty so the operator sees the chat-surface UX before having data. */
-.recovery-center-composer__seed {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px 12px 0;
-  border-top: 1px dashed var(--we-line);
-  margin-top: 2px;
-}
-
-.recovery-center-composer__msg {
-  display: grid;
-  grid-template-columns: 24px 1fr;
+  grid-template-columns: 30px 1fr;
   gap: 10px;
   align-items: flex-start;
-}
-
-.recovery-center-composer__msg-ic {
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  background: var(--we-surface-muted);
+  padding: 10px;
   border: 1px solid var(--we-line);
-  color: var(--we-ink-soft);
-  display: grid;
-  place-items: center;
-  margin-top: 2px;
+  border-radius: 9px;
+  background: var(--we-surface);
 }
 
-.recovery-center-composer__msg--ai .recovery-center-composer__msg-ic {
-  background: var(--we-accent-soft);
-  color: var(--we-accent);
-  border-color: color-mix(in srgb, var(--we-accent) 30%, transparent);
-}
-
-.recovery-center-composer__msg--user .recovery-center-composer__msg-ic {
+.we-recovery-lab-entry__steps li > svg {
+  padding: 6px;
+  box-sizing: content-box;
+  border-radius: 7px;
   background: var(--we-primary-soft);
   color: var(--we-primary);
-  border-color: color-mix(in srgb, var(--we-primary) 28%, transparent);
 }
 
-.recovery-center-composer__msg-body { min-width: 0; }
-.recovery-center-composer__msg-body header {
-  display: inline-flex;
-  gap: 8px;
-  align-items: baseline;
-  margin-bottom: 2px;
+.we-recovery-lab-entry__steps div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
-.recovery-center-composer__msg-body header strong {
-  font-size: 12px;
-  font-weight: 700;
+
+.we-recovery-lab-entry__steps strong {
   color: var(--we-ink);
-}
-.recovery-center-composer__msg--ai .recovery-center-composer__msg-body header strong { color: var(--we-accent); }
-.recovery-center-composer__msg-body header small {
-  font-size: 10px;
-  color: var(--we-muted);
-  font-family: var(--font-mono);
-  letter-spacing: 0.02em;
-}
-.recovery-center-composer__msg-body p {
-  margin: 0;
   font-size: 12px;
-  color: var(--we-ink-soft);
-  line-height: 1.5;
 }
 
-.recovery-center-composer__seed-chips {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 6px;
-}
-
-.recovery-center-composer__seed-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 1px 7px;
-  border-radius: var(--we-radius-pill);
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--we-ink-soft);
-  background: var(--we-surface-muted);
-  border: 1px solid var(--we-line);
-  font-family: var(--font-mono);
-}
-
-.recovery-center-composer__seed-chip--conf {
-  background: var(--we-accent-soft);
-  color: var(--we-accent-text);
-  border-color: color-mix(in srgb, var(--we-accent) 30%, transparent);
-}
-
-.recovery-center-composer__seed-hint {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
+.we-recovery-lab-entry__steps span {
   color: var(--we-muted);
-  font-style: italic;
-  padding: 6px 4px 4px;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
-.recovery-center-composer__seed-hint svg { color: var(--we-accent); }
-
-/* Seed AI message recovery affordance — disabled CTA row showing what
-   "Apply / Open diff / Reject" look like, even in demo mode. */
-.recovery-center-composer__seed-actions {
-  display: inline-flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-top: 8px;
-}
-
-.recovery-center-composer__seed-actions .command-button[disabled] {
-  cursor: default;
-  opacity: 0.85;
+@media (max-width: 1100px) {
+  .we-recovery-lab-entry {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Recovery-first chip variant — used for the lead composer chip

@@ -20,8 +20,8 @@
  *  - Every mutation uses a CAS-style `UPDATE … WHERE status IN
  *    (allowed_pre_states)`. The route layer converts a `null` result
  *    (CAS lost) into a 409 with `{ code: "recovery_item_transition_invalid",
- *    currentStatus }`. This mirrors `recordDecision` in
- *    `autoHealingRepo.ts:264-297`.
+ *    currentStatus }`. This mirrors the conditional-write posture of
+ *    auto-healing decisions.
  *  - Closed-enum validation lives in `@janusly/shared/src/recovery-item`
  *    (Zod). The repo doesn't re-validate — caller is responsible for
  *    passing schema-parsed input.

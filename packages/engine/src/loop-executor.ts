@@ -9,6 +9,7 @@
 
 import { getOrgConfigSnapshot } from "@janusly/data";
 import { appendEvent } from "./persistence";
+import { recordValidationWriteSkip } from "./validation-evidence";
 import { safePersistPayload } from "./safe-persist";
 import {
   enforceLateBoundTemplatePolicy,
@@ -348,6 +349,14 @@ async function executeForEachLoop(ctx: LoopContext, items: unknown[]) {
   const failures = allFailures.slice(0, LOOP_FAILURE_SAMPLE_LIMIT);
   const succeededCount = rawResults.filter((item) => item.status === "succeeded").length;
   const skippedCount = rawResults.filter((item) => item.status === "skipped").length;
+  if (skippedCount > 0) {
+    await recordValidationWriteSkip(
+      ctx.runId,
+      ctx.nodeId,
+      "loop.dry_run.skipped",
+      { tool, skippedCount, count: items.length },
+    );
+  }
   const failedCount = allFailures.length;
   const failedPercentage = items.length === 0 ? 0 : (failedCount / items.length) * 100;
   const resultTruncatedCount = results.filter(

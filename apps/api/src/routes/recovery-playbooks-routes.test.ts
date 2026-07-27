@@ -157,7 +157,7 @@ describe("POST /recovery/playbooks", () => {
     readJsonMock.mockResolvedValueOnce(body);
     dataMocks.resolvePromotion.mockResolvedValue({
       deadLetter,
-      validationRun: { id: "validation-a", status: "succeeded", replayMode: "validation", parentRunId: "run-a", inputJson: { workflow: failedWorkflow }, createdAt: new Date("2026-07-11T10:01:00Z") },
+      validationRun: { id: "validation-a", status: "succeeded", replayMode: "validation", validationEvidenceLevel: "static", parentRunId: "run-a", inputJson: { workflow: failedWorkflow }, createdAt: new Date("2026-07-11T10:01:00Z") },
       sourceVersion: { id: "wv-a", workflowId: "wf-a", dagJson: failedWorkflow, createdAt: new Date("2026-07-11T10:02:00Z") },
       acceptedFeedback: { id: "feedback-a", workflowId: "wf-a", approachLabel: "raise_timeout", suggestionMode: "ai", createdAt: new Date("2026-07-11T10:06:00Z") },
     });
@@ -171,7 +171,7 @@ describe("POST /recovery/playbooks", () => {
     readJsonMock.mockResolvedValueOnce(body);
     dataMocks.resolvePromotion.mockResolvedValue({
       deadLetter,
-      validationRun: { id: "validation-a", status: "succeeded", replayMode: "validation", parentRunId: "run-a", inputJson: { workflow }, createdAt: new Date("2026-07-11T10:01:00Z") },
+      validationRun: { id: "validation-a", status: "succeeded", replayMode: "validation", validationEvidenceLevel: "static", parentRunId: "run-a", inputJson: { workflow }, createdAt: new Date("2026-07-11T10:01:00Z") },
       sourceVersion: { id: "wv-a", workflowId: "wf-a", dagJson: workflow, createdAt: new Date("2026-07-11T10:02:00Z") },
       acceptedFeedback: { id: "feedback-a", workflowId: "wf-a", approachLabel: "raise_timeout", suggestionMode: "ai", createdAt: new Date("2026-07-11T10:06:00Z") },
     });
@@ -192,11 +192,85 @@ describe("POST /recovery/playbooks", () => {
     expect(auditActionMock).toHaveBeenCalledWith(auth, "recovery.playbook.created", expect.objectContaining({ targetId: "pb-a" }));
   });
 
+  it("does not promote a sandbox that skipped external writes", async () => {
+    readJsonMock.mockResolvedValueOnce(body);
+    dataMocks.resolvePromotion.mockResolvedValue({
+      deadLetter,
+      validationRun: {
+        id: "validation-a",
+        status: "succeeded",
+        replayMode: "validation",
+        validationEvidenceLevel: "writes_skipped",
+        parentRunId: "run-a",
+        inputJson: { workflow },
+        createdAt: new Date("2026-07-11T10:01:00Z"),
+      },
+      sourceVersion: {
+        id: "wv-a",
+        workflowId: "wf-a",
+        dagJson: workflow,
+        createdAt: new Date("2026-07-11T10:02:00Z"),
+      },
+      acceptedFeedback: {
+        id: "feedback-a",
+        workflowId: "wf-a",
+        approachLabel: "raise_timeout",
+        suggestionMode: "ai",
+        createdAt: new Date("2026-07-11T10:06:00Z"),
+      },
+    } as never);
+
+    const result = await call("POST", "/recovery/playbooks");
+
+    expect(result).toMatchObject({
+      status: 422,
+      payload: { code: "recovery_playbook_validation_required" },
+    });
+    expect(dataMocks.createDraft).not.toHaveBeenCalled();
+  });
+
+  it("does not promote a legacy sandbox with unclassified evidence", async () => {
+    readJsonMock.mockResolvedValueOnce(body);
+    dataMocks.resolvePromotion.mockResolvedValue({
+      deadLetter,
+      validationRun: {
+        id: "validation-a",
+        status: "succeeded",
+        replayMode: "validation",
+        validationEvidenceLevel: null,
+        parentRunId: "run-a",
+        inputJson: { workflow },
+        createdAt: new Date("2026-07-11T10:01:00Z"),
+      },
+      sourceVersion: {
+        id: "wv-a",
+        workflowId: "wf-a",
+        dagJson: workflow,
+        createdAt: new Date("2026-07-11T10:02:00Z"),
+      },
+      acceptedFeedback: {
+        id: "feedback-a",
+        workflowId: "wf-a",
+        approachLabel: "raise_timeout",
+        suggestionMode: "ai",
+        createdAt: new Date("2026-07-11T10:06:00Z"),
+      },
+    } as never);
+
+    const result = await call("POST", "/recovery/playbooks");
+
+    expect(result).toMatchObject({
+      status: 422,
+      payload: { code: "recovery_playbook_validation_required" },
+    });
+    expect(dataMocks.createDraft).not.toHaveBeenCalled();
+  });
+
   it("rejects a replay that predates the validated and saved recovery", async () => {
     readJsonMock.mockResolvedValueOnce(body);
     dataMocks.resolvePromotion.mockResolvedValue({
       deadLetter: { ...deadLetter, replayedAt: new Date("2026-07-11T10:00:30Z") },
-      validationRun: { id: "validation-a", status: "succeeded", replayMode: "validation", parentRunId: "run-a", inputJson: { workflow }, createdAt: new Date("2026-07-11T10:01:00Z") },
+      validationRun: { id: "validation-a", status: "succeeded", replayMode: "validation", validationEvidenceLevel: "static", parentRunId: "run-a", inputJson: { workflow }, createdAt: new Date("2026-07-11T10:01:00Z") },
       sourceVersion: { id: "wv-a", workflowId: "wf-a", dagJson: workflow, createdAt: new Date("2026-07-11T10:02:00Z") },
       acceptedFeedback: { id: "feedback-a", workflowId: "wf-a", approachLabel: "raise_timeout", suggestionMode: "ai", createdAt: new Date("2026-07-11T10:06:00Z") },
     });
@@ -234,6 +308,7 @@ describe("explicit use and outcome", () => {
         id: "validation-failed",
         status: "failed",
         replayMode: "validation",
+        validationEvidenceLevel: "writes_skipped",
         parentRunId: "run-a",
         inputJson: { workflow, recoveryPlaybookId: "pb-a" },
       },
@@ -256,6 +331,7 @@ describe("explicit use and outcome", () => {
         id: "validation-ok",
         status: "succeeded",
         replayMode: "validation",
+        validationEvidenceLevel: "static",
         parentRunId: "run-a",
         inputJson: { workflow, recoveryPlaybookId: "pb-a" },
       },
@@ -276,6 +352,7 @@ describe("explicit use and outcome", () => {
         id: "validation-ok",
         status: "succeeded",
         replayMode: "validation",
+        validationEvidenceLevel: "static",
         parentRunId: "run-a",
         inputJson: { workflow, recoveryPlaybookId: "pb-a" },
       },

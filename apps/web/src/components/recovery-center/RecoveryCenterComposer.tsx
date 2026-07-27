@@ -13,13 +13,10 @@ import React, { useState } from 'react'
 import {
   ArrowUp,
   BarChart3,
-  Check,
   DollarSign,
   FileDiff,
-  Layers,
   ShieldAlert,
   Sparkles,
-  User,
   Wand2,
 } from 'lucide-react'
 import type { ActiveTab } from '../../types'
@@ -31,11 +28,9 @@ import { t as runtimeT } from '../../i18n/runtime'
 export function RecoveryCenterComposer({
   onOpenTab,
   recentDlqRunId,
-  showSeedTranscript,
 }: {
   onOpenTab: (tab: ActiveTab) => void
   recentDlqRunId?: string
-  showSeedTranscript?: boolean
 }) {
   const { t } = useT()
   const addToast = useWorkflowStore((state) => state.addToast)
@@ -169,67 +164,6 @@ export function RecoveryCenterComposer({
           <div className="section-kicker">{t('recoveryCenter.composer.kicker')}</div>
         </div>
       </header>
-
-      {showSeedTranscript && !answer && (
-        <div className="recovery-center-composer__seed" data-testid="recovery-center-composer-seed">
-          <article className="recovery-center-composer__msg recovery-center-composer__msg--ai">
-            <span className="recovery-center-composer__msg-ic" aria-hidden="true"><Sparkles size={12} /></span>
-            <div className="recovery-center-composer__msg-body">
-              <header>
-                <strong>{t('recoveryCenter.composer.seed.ai1.who')}</strong>
-                <small>{t('recoveryCenter.composer.seed.ai1.when')}</small>
-              </header>
-              <p>{t('recoveryCenter.composer.seed.ai1.body')}</p>
-              <div className="recovery-center-composer__seed-chips">
-                <span className="recovery-center-composer__seed-chip"><Sparkles size={10} aria-hidden="true" /> secret_missing</span>
-                <span className="recovery-center-composer__seed-chip"><Layers size={10} aria-hidden="true" /> 9 cluster entries</span>
-                <span className="recovery-center-composer__seed-chip"><Check size={10} aria-hidden="true" /> sandbox 412ms</span>
-                <span className="recovery-center-composer__seed-chip recovery-center-composer__seed-chip--conf">92 AI</span>
-              </div>
-              <div className="recovery-center-composer__seed-actions" aria-label={t('recoveryCenter.composer.seed.ai1.actionsAria')}>
-                <button type="button" className="command-button command-button-primary command-button-compact" disabled>
-                  <Check size={13} aria-hidden="true" />
-                  <span>{t('recoveryCenter.composer.seed.ai1.action.apply')}</span>
-                </button>
-                <button type="button" className="command-button command-button-compact" disabled>
-                  <FileDiff size={13} aria-hidden="true" />
-                  <span>{t('recoveryCenter.composer.seed.ai1.action.diff')}</span>
-                </button>
-                <button type="button" className="command-button command-button-compact" disabled>
-                  <span>{t('recoveryCenter.composer.seed.ai1.action.reject')}</span>
-                </button>
-              </div>
-            </div>
-          </article>
-
-          <article className="recovery-center-composer__msg recovery-center-composer__msg--user">
-            <span className="recovery-center-composer__msg-ic" aria-hidden="true"><User size={12} /></span>
-            <div className="recovery-center-composer__msg-body">
-              <header>
-                <strong>{t('recoveryCenter.composer.seed.user.who')}</strong>
-                <small>{t('recoveryCenter.composer.seed.user.when')}</small>
-              </header>
-              <p>{t('recoveryCenter.composer.seed.user.body')}</p>
-            </div>
-          </article>
-
-          <article className="recovery-center-composer__msg recovery-center-composer__msg--ai">
-            <span className="recovery-center-composer__msg-ic" aria-hidden="true"><Sparkles size={12} /></span>
-            <div className="recovery-center-composer__msg-body">
-              <header>
-                <strong>{t('recoveryCenter.composer.seed.ai2.who')}</strong>
-                <small>{t('recoveryCenter.composer.seed.ai2.when')}</small>
-              </header>
-              <p>{t('recoveryCenter.composer.seed.ai2.body')}</p>
-            </div>
-          </article>
-
-          <div className="recovery-center-composer__seed-hint">
-            <Sparkles size={11} aria-hidden="true" />
-            <span>{t('recoveryCenter.composer.seed.hint')}</span>
-          </div>
-        </div>
-      )}
 
       <form className="recovery-center-composer__input" onSubmit={submit}>
         <Sparkles size={16} aria-hidden="true" />

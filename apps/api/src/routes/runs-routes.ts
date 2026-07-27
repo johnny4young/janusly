@@ -109,6 +109,7 @@ const runListColumns = {
   parentNodeId: runs.parentNodeId,
   traceId: runs.traceId,
   replayMode: runs.replayMode,
+  validationEvidenceLevel: runs.validationEvidenceLevel,
   createdBy: runs.createdBy,
   createdAt: runs.createdAt,
 };

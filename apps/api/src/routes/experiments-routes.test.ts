@@ -4,7 +4,7 @@
  *   GET  /experiments/:id
  *   POST /experiments/run
  *
- * Coverage targets (the ticket AC):
+ * Coverage guarantees:
  * - Route gating: run requires admin + evals.write; reads require evals.read.
  * - POST /experiments/run writes `experiment.run.started` +
  *   `experiment.run.completed`, and `experiment.run.promotion_suggested`

@@ -10,6 +10,7 @@
 import {
   EvidenceListSchema,
   UpstreamHealthSourceTagsSchema,
+  ValidationEvidenceLevelSchema,
   WorkflowSchema,
   WorkflowSloBreachesSchema,
   WorkflowSloSchema,
@@ -142,6 +143,7 @@ const RunExplainReportSchema = z.object({
     workflowVersionId: z.string().max(256).nullable(),
     parentRunId: z.string().max(256).nullable(),
     replayMode: z.string().max(64).nullable(),
+    validationEvidenceLevel: ValidationEvidenceLevelSchema.nullable(),
     createdAt: NullableIsoDateSchema,
     isFailure: z.boolean(),
   }),
@@ -434,6 +436,7 @@ const RunSchema = z.object({
   parentNodeId: z.string().nullable(),
   traceId: z.string().nullable(),
   replayMode: z.string().nullable(),
+  validationEvidenceLevel: ValidationEvidenceLevelSchema.nullable().optional(),
   recoveryPlaybookValidationRecordedAt: NullableIsoDateSchema,
   recoveryPlaybookAppliedRecordedAt: NullableIsoDateSchema,
   createdBy: z.string().nullable(),

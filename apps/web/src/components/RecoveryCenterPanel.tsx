@@ -102,7 +102,7 @@ import {
   RecommendedActionsTile,
   RecoveryQueueTile,
 } from './recovery-center/RecoveryCenterTiles'
-import { RecoveryFlowDemo } from './recovery-center/RecoveryCenterEmptyState'
+import { RecoveryLabEntry } from './recovery-center/RecoveryCenterEmptyState'
 
 type RecoveryCenterPanelProps = {
   runs: RunSummary[]
@@ -114,7 +114,7 @@ type RecoveryCenterPanelProps = {
   /** Navigate to Runs and land keyboard focus on the Recovery Queue. */
   onOpenRecoveryQueue: () => void
   /** Start a deterministic drill so a fresh operator can try the recovery loop for real. */
-  onTryDemoRecovery?: () => void | Promise<void>
+  onStartRecoveryDrill?: () => void | Promise<void>
 }
 
 type OrgSnapshot<T> = {
@@ -559,12 +559,9 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     totalRuns,
   }), [openFailureCount, waitingNodes.length, topClusterFrequency, healthScore, totalRuns, i18n.language])
 
-  const isEmpty = openFailureCount === 0
-    && waitingNodes.length === 0
-    && (clusters?.clusters.length ?? 0) === 0
   // Before the first terminal run, dismissal lasts only for this authenticated
-  // store session so a reload restores the demo. Real history upgrades the
-  // same choice to the durable preference operators already had.
+  // store session so a reload restores the Recovery Lab entry. Real history
+  // upgrades the same choice to the durable preference operators already had.
   const introDismissed = (metrics?.terminalRuns ?? 0) > 0
     ? persistedIntroDismissed
     : introDismissedThisSession
@@ -775,13 +772,12 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
           <RecoveryCenterComposer
             onOpenTab={props.onOpenTab}
             recentDlqRunId={openDeadLetters[0]?.runId}
-            showSeedTranscript={isEmpty}
           />
           {showOnboarding && (
-            <RecoveryFlowDemo
+            <RecoveryLabEntry
               onOpenStudio={() => props.onOpenTab('copilot')}
               onOpenRecipes={() => props.onOpenTab('templates')}
-              onTryDemo={props.onTryDemoRecovery}
+              onStartDrill={props.onStartRecoveryDrill}
               onDismiss={dismissIntro}
             />
           )}

@@ -262,6 +262,12 @@ export const runs = pgTable(
      * `writeSide`) when set.
      */
     replayMode: text("replay_mode"),
+    /**
+     * What a validation run actually proved. `writes_skipped` means at least
+     * one external mutation was deliberately omitted and must not be treated
+     * as provider-verified evidence.
+     */
+    validationEvidenceLevel: text("validation_evidence_level"),
     /** Atomic per-run idempotency claim for Recovery Playbook validation accounting. */
     recoveryPlaybookValidationRecordedAt: timestamp("recovery_playbook_validation_recorded_at", { withTimezone: true }),
     /** Atomic per-run idempotency claim for Recovery Playbook production-use accounting. */
@@ -1634,9 +1640,9 @@ export const memoryEntries = pgTable(
  * outcome time so the watcher's signature-changed defense can
  * compare like-for-like.
  *
- * `status` is the source of truth for the apply race — both the
- * operator decision route AND the auto-apply watcher run a CAS-style
- * `UPDATE … WHERE status = 'validated'`, so only one writer wins.
+ * `status` is the source of truth for the apply race. Accepted decisions
+ * first claim `validated → publishing`; `applied` is written only after the
+ * production replay has an exact durable claim.
  *
  * `loopAttemptCount` is captured ONCE at diagnose time and never
  * recomputed, so the audit log can trace why a candidate was
@@ -1654,7 +1660,8 @@ export const autoHealingRuns = pgTable(
     signature: text("signature").notNull(),
     // Closed enum validated at the repo layer:
     // 'diagnosed' | 'proposed' | 'validating' | 'validated' |
-    // 'validation_failed' | 'applied' | 'declined' | 'failed'.
+    // 'validation_failed' | 'publishing' | 'publish_failed' |
+    // 'applied' | 'declined' | 'failed'.
     status: text("status").notNull(),
     // The merged workflow snapshot from the apply-config or
     // apply-structural patch helper. `safePersistPayload`-wrapped at
@@ -1672,9 +1679,17 @@ export const autoHealingRuns = pgTable(
     // defense can compare like-for-like. Nullable when validation
     // succeeded (no error to normalize).
     validationSignature: text("validation_signature"),
+    // Snapshot of the validation run's actual evidence strength.
+    validationEvidenceLevel: text("validation_evidence_level"),
     // 'auto' / '<userId>' / 'system_decline_<reason>'; nullable until
     // decision. The audit row's userId mirrors this column.
     decisionActor: text("decision_actor"),
+    // Stable idempotency receipt shared with the DLQ replay claim. A matching
+    // dead_letters.replay_claim_token proves the production replay is durable.
+    publicationReceipt: text("publication_receipt"),
+    // Due clock for crash repair and bounded retry after publication failure.
+    publicationRepairAfter: timestamp("publication_repair_after", { withTimezone: true }),
+    publicationAttempts: integer("publication_attempts").notNull().default(0),
     // Closed enum: loop_breaker_tripped / budget_exceeded /
     // validation_failed / signature_changed / auto_apply_disabled /
     // manual_review / signature_already_resolved / validation_timeout.
@@ -1714,6 +1729,9 @@ export const autoHealingRuns = pgTable(
     index("auto_healing_runs_org_validated_idx")
       .on(table.orgId)
       .where(sql`${table.status} = 'validated'`),
+    index("auto_healing_runs_publication_repair_idx")
+      .on(table.publicationRepairAfter, table.id)
+      .where(sql`${table.publicationRepairAfter} IS NOT NULL AND ${table.status} IN ('publishing', 'publish_failed')`),
   ],
 );
 
@@ -1807,8 +1825,8 @@ export const alertDispatches = pgTable(
  *
  * Lifecycle state machine enforced at the data layer via CAS-style
  * `UPDATE … WHERE status IN (allowed_pre_states)` — concurrent
- * operator-click vs auto-apply can't double-apply (mirror of
- * `recordDecision` in `autoHealingRepo.ts`).
+ * operator-click vs auto-apply can't double-apply (the same conditional-write
+ * posture used by auto-healing publication claims).
  *
  * Multi-tenant scope: every read carries `eq(recoveryItems.orgId, orgId)`.
  * One item per `(orgId, deadLetterId)` — the unique index makes

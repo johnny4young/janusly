@@ -7,7 +7,7 @@
  * who owns the incident, what severity / SLA it carries, the lifecycle
  * status, and append-only comments. The state machine is enforced at the
  * data layer via CAS-style `UPDATE … WHERE status IN (allowed_pre_states)`
- * (mirrors `recordDecision` in `autoHealingRepo.ts`).
+ * (mirrors the conditional-write posture of auto-healing decisions).
  *
  * Pure, zero-I/O — safe to import from web bundle + engine + api + data.
  */

@@ -6,7 +6,7 @@
  *   GET    /eval/datasets/:id/export?format=jsonl|json
  *   DELETE /eval/datasets/:id
  *
- * Coverage targets (the ticket AC):
+ * Coverage guarantees:
  * - Create delegates to the repo with `auth.orgId` (the opt-in gate lives
  *   in `createEvalDataset` → `queryEligibleFeedbackForEval`, unit-tested
  *   in the data layer) and writes the `eval.dataset.created` audit.

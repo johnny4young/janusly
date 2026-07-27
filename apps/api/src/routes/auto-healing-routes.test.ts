@@ -14,22 +14,18 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const replayHoisted = vi.hoisted(() => ({ replayDeadLetterMock: vi.fn() }));
-
 vi.mock("@janusly/data/src/autoHealingRepo", () => ({
   getByIdForOrg: vi.fn(),
   listPendingForOrg: vi.fn(),
-  recordDecision: vi.fn(),
+  recordDeclineDecision: vi.fn(),
 }));
 
 vi.mock("@janusly/data/src/recoveryFeedbackRepo", () => ({
   recordRecoveryFeedback: vi.fn(),
 }));
 
-vi.mock("@janusly/engine/src/adapters/dlq-replay", () => ({
-  DLQReplayAdapter: class {
-    replayDeadLetter = replayHoisted.replayDeadLetterMock;
-  },
+vi.mock("../auto-healing-apply", () => ({
+  applyValidatedAutoHealing: vi.fn(),
 }));
 
 vi.mock("../audit", () => ({
@@ -41,7 +37,7 @@ vi.mock("../rate-limit", () => ({
 }));
 
 vi.mock("../dlq", () => ({
-  markDeadLetterReplayed: vi.fn(),
+  getDeadLetter: vi.fn(),
 }));
 
 vi.mock("../auto-healing-scanner", () => ({
@@ -50,15 +46,6 @@ vi.mock("../auto-healing-scanner", () => ({
 
 vi.mock("../auto-healing-queue", () => ({
   autoHealingQueue: {},
-}));
-
-const hoisted = vi.hoisted(() => ({
-  selectFromMock: vi.fn(),
-}));
-
-vi.mock("@janusly/db", () => ({
-  db: { select: vi.fn(() => ({ from: hoisted.selectFromMock })) },
-  deadLetters: { orgId: "org_id", id: "id", runId: "run_id", workflowJson: "workflow_json", nodeId: "node_id" },
 }));
 
 vi.mock("../http", async (importOriginal) => {
@@ -76,26 +63,26 @@ import { autoHealingRoutes } from "./auto-healing-routes";
 import {
   getByIdForOrg,
   listPendingForOrg,
-  recordDecision,
+  recordDeclineDecision,
 } from "@janusly/data/src/autoHealingRepo";
 import { recordRecoveryFeedback } from "@janusly/data/src/recoveryFeedbackRepo";
+import { applyValidatedAutoHealing } from "../auto-healing-apply";
 import { runOrgScan } from "../auto-healing-scanner";
 import { audit } from "../audit";
-import { markDeadLetterReplayed } from "../dlq";
+import { getDeadLetter } from "../dlq";
 import { readJson, sendJson } from "../http";
 import type { Route } from "../routes";
 
 const listPendingMock = vi.mocked(listPendingForOrg);
 const getByIdMock = vi.mocked(getByIdForOrg);
-const decisionMock = vi.mocked(recordDecision);
+const declineMock = vi.mocked(recordDeclineDecision);
+const applyMock = vi.mocked(applyValidatedAutoHealing);
 const feedbackMock = vi.mocked(recordRecoveryFeedback);
 const runOrgScanMock = vi.mocked(runOrgScan);
 const auditMock = vi.mocked(audit);
-const markDeadLetterReplayedMock = vi.mocked(markDeadLetterReplayed);
-const replayDeadLetterMock = replayHoisted.replayDeadLetterMock;
+const getDeadLetterMock = vi.mocked(getDeadLetter);
 const readJsonMock = vi.mocked(readJson);
 const sendJsonMock = vi.mocked(sendJson);
-const selectFromMock = hoisted.selectFromMock;
 
 const auth = {
   orgId: "org-1",
@@ -126,15 +113,14 @@ async function callRoute(method: string, path: string, body?: Record<string, unk
 beforeEach(() => {
   listPendingMock.mockReset().mockResolvedValue([]);
   getByIdMock.mockReset();
-  decisionMock.mockReset();
+  declineMock.mockReset().mockResolvedValue(true);
+  applyMock.mockReset();
   feedbackMock.mockReset().mockResolvedValue(undefined);
   runOrgScanMock.mockReset().mockResolvedValue(undefined);
   auditMock.mockReset().mockResolvedValue(undefined);
-  markDeadLetterReplayedMock.mockReset().mockResolvedValue(undefined);
-  replayDeadLetterMock.mockReset().mockResolvedValue(undefined);
+  getDeadLetterMock.mockReset();
   readJsonMock.mockReset();
   sendJsonMock.mockClear();
-  selectFromMock.mockReset();
 });
 
 describe("GET /auto-healing/pending", () => {
@@ -155,15 +141,9 @@ describe("GET /auto-healing/:id", () => {
 
 describe("POST /auto-healing/:id/decide", () => {
   function setupDlqLookup(workflowId: string | undefined) {
-    const limit = vi.fn().mockResolvedValue([
-      {
-        runId: "run-1",
-        workflowJson: workflowId ? { id: workflowId } : {},
-        nodeId: "n-1",
-      },
-    ]);
-    const where = vi.fn(() => ({ limit }));
-    selectFromMock.mockReturnValue({ where });
+    getDeadLetterMock.mockResolvedValue({
+      workflowJson: workflowId ? { id: workflowId } : {},
+    } as never);
   }
 
   it("returns 409 signature_already_resolved when the CAS write loses the race", async () => {
@@ -172,6 +152,7 @@ describe("POST /auto-healing/:id/decide", () => {
       orgId: "org-1",
       deadLetterId: "dlq-1",
       status: "validated",
+      validationEvidenceLevel: "static",
       approachLabel: "fix_url",
       proposedPatchJson: {
         id: "wf-1",
@@ -179,7 +160,11 @@ describe("POST /auto-healing/:id/decide", () => {
         edges: [],
       },
     } as never);
-    decisionMock.mockResolvedValueOnce({ applied: false });
+    applyMock.mockResolvedValueOnce({
+      outcome: "rejected",
+      code: "not_pending",
+      row: null,
+    });
     setupDlqLookup("wf-1");
 
     const result = (await callRoute("POST", "/auto-healing/row-1/decide", { accepted: true })) as {
@@ -196,6 +181,7 @@ describe("POST /auto-healing/:id/decide", () => {
       orgId: "org-1",
       deadLetterId: "dlq-1",
       status: "validated",
+      validationEvidenceLevel: "static",
       approachLabel: "fix_url",
       proposedPatchJson: {
         id: "wf-1",
@@ -203,7 +189,11 @@ describe("POST /auto-healing/:id/decide", () => {
         edges: [],
       },
     } as never);
-    decisionMock.mockResolvedValueOnce({ applied: true });
+    applyMock.mockResolvedValueOnce({
+      outcome: "applied",
+      row: {} as never,
+      receipt: "receipt-1",
+    });
     setupDlqLookup("wf-1");
 
     const result = (await callRoute("POST", "/auto-healing/row-1/decide", {
@@ -212,12 +202,11 @@ describe("POST /auto-healing/:id/decide", () => {
     })) as { status: number };
 
     expect(result.status).toBe(200);
-    expect(replayDeadLetterMock).toHaveBeenCalledWith(expect.objectContaining({
-      runId: "run-1",
-      deadLetterId: "dlq-1",
-      recoveryActorId: "user-1",
-    }));
-    expect(markDeadLetterReplayedMock).toHaveBeenCalledWith("org-1", "dlq-1");
+    expect(applyMock).toHaveBeenCalledWith({
+      orgId: "org-1",
+      id: "row-1",
+      actor: "user-1",
+    });
     expect(feedbackMock).toHaveBeenCalledWith(expect.objectContaining({
       orgId: "org-1",
       workflowId: "wf-1",
@@ -232,18 +221,65 @@ describe("POST /auto-healing/:id/decide", () => {
       orgId: "org-1",
       deadLetterId: "dlq-1",
       status: "validated",
+      validationEvidenceLevel: "static",
       approachLabel: "fix_url",
       proposedPatchJson: { id: "wf-1", nodes: "not-an-array", edges: [] },
     } as never);
-    setupDlqLookup("wf-1");
+    applyMock.mockResolvedValueOnce({
+      outcome: "rejected",
+      code: "invalid_patch",
+      row: null,
+    });
 
     const result = (await callRoute("POST", "/auto-healing/row-1/decide", {
       accepted: true,
     })) as { status: number };
 
     expect(result.status).toBe(500);
-    expect(decisionMock).not.toHaveBeenCalled();
+    expect(declineMock).not.toHaveBeenCalled();
     expect(feedbackMock).not.toHaveBeenCalled();
+  });
+
+  it("requires explicit acknowledgement when validation skipped external writes", async () => {
+    getByIdMock.mockResolvedValueOnce({
+      id: "row-1",
+      orgId: "org-1",
+      deadLetterId: "dlq-1",
+      status: "validated",
+      validationEvidenceLevel: "writes_skipped",
+      approachLabel: "fix_url",
+    } as never);
+
+    const result = (await callRoute("POST", "/auto-healing/row-1/decide", {
+      accepted: true,
+    })) as { status: number; payload: { code: string } };
+
+    expect(result).toMatchObject({
+      status: 409,
+      payload: { code: "autoheal_validation_risk_ack_required" },
+    });
+    expect(applyMock).not.toHaveBeenCalled();
+  });
+
+  it("requires explicit acknowledgement when legacy validation evidence is unavailable", async () => {
+    getByIdMock.mockResolvedValueOnce({
+      id: "row-1",
+      orgId: "org-1",
+      deadLetterId: "dlq-1",
+      status: "validated",
+      validationEvidenceLevel: null,
+      approachLabel: "fix_url",
+    } as never);
+
+    const result = (await callRoute("POST", "/auto-healing/row-1/decide", {
+      accepted: true,
+    })) as { status: number; payload: { code: string } };
+
+    expect(result).toMatchObject({
+      status: 409,
+      payload: { code: "autoheal_validation_risk_ack_required" },
+    });
+    expect(applyMock).not.toHaveBeenCalled();
   });
 
   it("on decline: writes the manual-decline audit row + skips replay", async () => {
@@ -254,7 +290,6 @@ describe("POST /auto-healing/:id/decide", () => {
       status: "validated",
       approachLabel: "fix_url",
     } as never);
-    decisionMock.mockResolvedValueOnce({ applied: true });
     setupDlqLookup("wf-1");
 
     const result = (await callRoute("POST", "/auto-healing/row-1/decide", {
@@ -264,6 +299,12 @@ describe("POST /auto-healing/:id/decide", () => {
 
     expect(result.status).toBe(200);
     expect(result.payload.accepted).toBe(false);
+    expect(declineMock).toHaveBeenCalledWith(
+      "org-1",
+      "row-1",
+      "user-1",
+      "manual_review",
+    );
     expect(auditMock).toHaveBeenCalledWith(
       "org-1",
       "user-1",

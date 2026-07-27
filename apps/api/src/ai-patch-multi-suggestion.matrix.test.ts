@@ -66,7 +66,7 @@ function suggestionsForFixture(fixture: typeof RECOVERY_MATRIX_FIXTURES[number])
   // valid — enough to produce a non-zero diff against the original
   // workflow so the actionable-suggestion check passes. http carries
   // 7 nullable-required fields (`headers` is the array-of-pairs patch
-  // form added in this ticket); tool carries 4 (`input` is the
+  // form added to this envelope); tool carries 4 (`input` is the
   // equivalent array-of-pairs form).
   const baseHttp: Record<string, unknown> = {
     url: null,

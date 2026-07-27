@@ -2847,6 +2847,74 @@ button.we-ops-metric-card--button {
   color: var(--we-surface);
 }
 
+.we-auto-healing__list {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.we-auto-healing__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid var(--we-line);
+  border-radius: 10px;
+  background: var(--we-surface-muted);
+}
+
+.we-auto-healing__main {
+  min-width: 0;
+}
+
+.we-auto-healing__signature {
+  display: block;
+  color: var(--we-text-1);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.we-auto-healing__meta,
+.we-auto-healing__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.we-auto-healing__meta {
+  margin-top: 7px;
+}
+
+.we-auto-healing__risk {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--we-warning-border-30);
+  border-radius: 8px;
+  background: var(--we-warning-soft);
+  color: var(--we-warning-text);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.we-auto-healing__risk input {
+  margin-top: 2px;
+}
+
+@media (max-width: 700px) {
+  .we-auto-healing__item {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ----------------- Recovery delta card ---------------------------------- */
 /* Mounted inside the Recovery dialog's `applied` step alongside the
  * existing success ribbon. Surfaces five signals: run counter,

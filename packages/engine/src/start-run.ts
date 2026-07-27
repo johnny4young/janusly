@@ -192,6 +192,8 @@ export async function startRun(workflow: StartableWorkflow) {
       parentNodeId: workflow.parentNodeId ?? null,
       parentLinkKind: workflow.parentCheckpoint ? "subworkflow" : null,
       replayMode: workflow.replayMode ?? null,
+      validationEvidenceLevel:
+        workflow.replayMode === "validation" ? "static" : null,
       // Every root run gets a correlation id up front; subworkflows pass the
       // inherited value so the whole chain remains copyable as one trace.
       traceId: workflow.traceId ?? crypto.randomUUID(),

@@ -117,6 +117,9 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
       runId,
       node.id,
       {
+        ...(input.recoveryClaimToken
+          ? { recoveryClaimToken: input.recoveryClaimToken }
+          : {}),
         deadLetterId: input.deadLetterId ?? null,
         recoveryActorId: input.recoveryActorId ?? null,
         recoveryPlaybookId: input.recoveryPlaybookId ?? null,
@@ -164,6 +167,7 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
         workflowVersionId,
         status: "running",
         replayMode: "validation",
+        validationEvidenceLevel: "static",
         createdBy: createdBy ?? null,
         // Persist the full suggested workflow + failing node id so the
         // queue worker can reload the DAG (`loadRunWorkflowRaw`) without

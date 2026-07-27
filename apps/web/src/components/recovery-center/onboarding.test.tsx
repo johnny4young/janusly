@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { RecoveryFlowDemo } from './RecoveryCenterEmptyState'
+import { RecoveryLabEntry } from './RecoveryCenterEmptyState'
 import { shouldShowOnboarding } from './helpers'
 
 describe('shouldShowOnboarding', () => {
@@ -22,30 +22,31 @@ describe('shouldShowOnboarding', () => {
   })
 })
 
-describe('<RecoveryFlowDemo /> dismiss', () => {
+describe('<RecoveryLabEntry /> dismiss', () => {
   it('renders no dismiss control when onDismiss is absent', () => {
-    render(<RecoveryFlowDemo onOpenStudio={() => {}} onOpenRecipes={() => {}} />)
-    expect(screen.queryByTestId('recovery-flow-demo-dismiss')).toBeNull()
+    render(<RecoveryLabEntry onOpenStudio={() => {}} onOpenRecipes={() => {}} />)
+    expect(screen.queryByTestId('recovery-lab-entry-dismiss')).toBeNull()
   })
 
   it('fires onDismiss when the control is clicked', () => {
     const onDismiss = vi.fn()
-    render(<RecoveryFlowDemo onOpenStudio={() => {}} onOpenRecipes={() => {}} onDismiss={onDismiss} />)
-    fireEvent.click(screen.getByTestId('recovery-flow-demo-dismiss'))
+    render(<RecoveryLabEntry onOpenStudio={() => {}} onOpenRecipes={() => {}} onDismiss={onDismiss} />)
+    fireEvent.click(screen.getByTestId('recovery-lab-entry-dismiss'))
     expect(onDismiss).toHaveBeenCalledOnce()
   })
 })
 
-describe('<RecoveryFlowDemo /> try-demo CTA', () => {
-  it('renders no demo CTA without onTryDemo', () => {
-    render(<RecoveryFlowDemo onOpenStudio={() => {}} onOpenRecipes={() => {}} />)
-    expect(screen.queryByTestId('recovery-center-empty-cta-demo')).toBeNull()
+describe('<RecoveryLabEntry /> controlled drill CTA', () => {
+  it('renders no drill CTA without onStartDrill', () => {
+    render(<RecoveryLabEntry onOpenStudio={() => {}} onOpenRecipes={() => {}} />)
+    expect(screen.queryByTestId('recovery-center-empty-cta-drill')).toBeNull()
   })
 
-  it('fires onTryDemo when the demo CTA is clicked', () => {
-    const onTryDemo = vi.fn()
-    render(<RecoveryFlowDemo onOpenStudio={() => {}} onOpenRecipes={() => {}} onTryDemo={onTryDemo} />)
-    fireEvent.click(screen.getByTestId('recovery-center-empty-cta-demo'))
-    expect(onTryDemo).toHaveBeenCalledOnce()
+  it('fires onStartDrill and renders no fabricated evidence', () => {
+    const onStartDrill = vi.fn()
+    render(<RecoveryLabEntry onOpenStudio={() => {}} onOpenRecipes={() => {}} onStartDrill={onStartDrill} />)
+    fireEvent.click(screen.getByTestId('recovery-center-empty-cta-drill'))
+    expect(onStartDrill).toHaveBeenCalledOnce()
+    expect(screen.queryByText(/0x9af2|stripe\.charge|412ms|92 AI/)).toBeNull()
   })
 })

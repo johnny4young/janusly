@@ -27,27 +27,22 @@ import { runOrgScan } from "../auto-healing-scanner";
 import {
   getByIdForOrg,
   listPendingForOrg,
-  recordDecision,
+  recordDeclineDecision,
   recordRecoveryFeedback,
 } from "@janusly/data";
-import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
-import { WorkflowSchema, type Workflow, type WorkflowNode } from "@janusly/shared";
 
 import { auditAction } from "../audit-helper";
+import { applyValidatedAutoHealing } from "../auto-healing-apply";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { RATE_LIMIT_DEFAULTS_PER_MIN, RATE_LIMIT_WINDOW_MS } from "../constants";
 import { enforceRateLimit } from "../rate-limit";
 import { asRecord, readJson, sendError, sendJson } from "../http";
-import { db } from "@janusly/db";
-import { deadLetters } from "@janusly/db";
-import { and, eq } from "drizzle-orm";
-import { markDeadLetterReplayed } from "../dlq";
+import { getDeadLetter } from "../dlq";
 import type { Route } from "../routes";
-
-const dlqReplay = new DLQReplayAdapter();
 
 const DecideBodySchema = z.object({
   accepted: z.boolean(),
+  acknowledgeValidationRisk: z.boolean().optional(),
   comment: z.string().max(2000).optional(),
 });
 
@@ -94,7 +89,7 @@ export const autoHealingRoutes: Route[] = [
       if (!parse.success) {
         return sendError(res, "autoheal_invalid_body", "invalid body", 400);
       }
-      const { accepted, comment } = parse.data;
+      const { accepted, acknowledgeValidationRisk, comment } = parse.data;
 
       const row = await getByIdForOrg(auth.orgId, id);
       if (!row) return sendError(res, "autoheal_not_found", "Not found", 404);
@@ -106,58 +101,72 @@ export const autoHealingRoutes: Route[] = [
           409,
         );
       }
-
-      // Mirror the dialog's recovery_feedback write so the LLM's
-      // pastFeedbackSummary learns from auto-healing decisions too.
-      // Look up the DLQ row for the workflowId — needed by the
-      // recoveryFeedbackRepo's input shape.
-      const dlqRow = await db
-        .select({
-          runId: deadLetters.runId,
-          workflowJson: deadLetters.workflowJson,
-          nodeId: deadLetters.nodeId,
-        })
-        .from(deadLetters)
-        .where(and(eq(deadLetters.orgId, auth.orgId), eq(deadLetters.id, row.deadLetterId)))
-        .limit(1);
-
-      let patchedWorkflow: Workflow | null = null;
-      let failingNode: WorkflowNode | null = null;
-      if (accepted) {
-        // Preflight the apply inputs BEFORE the CAS decision claim.
-        // Otherwise a corrupt stored patch or deleted DLQ row would
-        // move the row to `applied` and write `auto_healing.applied`
-        // even though production replay never happened.
-        const workflowParse = WorkflowSchema.safeParse(row.proposedPatchJson);
-        if (!workflowParse.success) {
-          return sendError(res, "autoheal_patch_revalidation_failed", "Stored patch failed re-validation", 500);
-        }
-        patchedWorkflow = workflowParse.data;
-        failingNode = (patchedWorkflow.nodes as WorkflowNode[]).find(
-          (n) => n.id === dlqRow[0]?.nodeId,
-        ) ?? null;
-        if (!dlqRow[0] || !failingNode) {
-          return sendError(res, "autoheal_dlq_or_node_missing", "DLQ row or failing node missing", 404);
-        }
-      }
-
-      // CAS-style — second writer (race with the watcher's auto-apply)
-      // gets `applied: false` and the route returns 409.
-      const decision = await recordDecision(id, {
-        actor: auth.userId,
-        accepted,
-        declineReason: accepted ? undefined : "manual_review",
-      });
-      if (!decision.applied) {
+      if (
+        accepted
+        && (
+          row.validationEvidenceLevel == null
+          || row.validationEvidenceLevel === "writes_skipped"
+        )
+        && acknowledgeValidationRisk !== true
+      ) {
         return sendError(
           res,
-          "autoheal_already_resolved",
-          "Auto-healing row was already resolved",
+          "autoheal_validation_risk_ack_required",
+          "Validation did not prove external writes; explicit acknowledgement is required",
           409,
         );
       }
 
-      const workflowSnapshot = dlqRow[0]?.workflowJson as { id?: string } | undefined;
+      const applyResult = accepted
+        ? await applyValidatedAutoHealing({
+            orgId: auth.orgId,
+            id,
+            actor: auth.userId,
+          })
+        : null;
+      if (applyResult?.outcome === "rejected") {
+        const status = applyResult.code === "not_found" || applyResult.code === "missing_context"
+          ? 404
+          : applyResult.code === "invalid_patch"
+            ? 500
+            : 409;
+        return sendError(
+          res,
+          applyResult.code === "invalid_patch"
+            ? "autoheal_patch_revalidation_failed"
+            : applyResult.code === "missing_context"
+              ? "autoheal_dlq_or_node_missing"
+              : applyResult.code === "not_found"
+                ? "autoheal_not_found"
+                : "autoheal_already_resolved",
+          applyResult.code === "invalid_patch"
+            ? "Stored patch failed re-validation"
+            : applyResult.code === "missing_context"
+              ? "DLQ row or failing node missing"
+              : "Auto-healing row was already resolved",
+          status,
+        );
+      }
+
+      if (!accepted) {
+        const declined = await recordDeclineDecision(
+          auth.orgId,
+          id,
+          auth.userId,
+          "manual_review",
+        );
+        if (!declined) {
+          return sendError(
+            res,
+            "autoheal_already_resolved",
+            "Auto-healing row was already resolved",
+            409,
+          );
+        }
+      }
+
+      const deadLetter = await getDeadLetter(auth.orgId, row.deadLetterId);
+      const workflowSnapshot = deadLetter?.workflowJson as { id?: string } | undefined;
       const workflowId = typeof workflowSnapshot?.id === "string" ? workflowSnapshot.id : null;
       if (workflowId && row.approachLabel) {
         try {
@@ -183,25 +192,15 @@ export const autoHealingRoutes: Route[] = [
         return sendJson(res, { ok: true, accepted: false });
       }
 
-      // Apply path — replay the failing node against the patched
-      // workflow snapshot stored on the row.
-      try {
-        await dlqReplay.replayDeadLetter({
-          runId: dlqRow[0]!.runId,
-          workflow: patchedWorkflow!,
-          node: failingNode!,
-          deadLetterId: row.deadLetterId,
-          recoveryActorId: auth.userId,
-        });
-        await markDeadLetterReplayed(auth.orgId, row.deadLetterId);
-      } catch (err) {
-        console.error("[auto-healing] manual apply replay failed", { id, err });
-        return sendError(res, "autoheal_apply_replay_failed", "Apply replay failed", 500);
-      }
-
-      // Note: the audit row for `auto_healing.applied` is already
-      // written by `recordDecision`. The route doesn't double-audit.
-      return sendJson(res, { ok: true, accepted: true });
+      return sendJson(
+        res,
+        {
+          ok: applyResult?.outcome === "applied",
+          accepted: true,
+          status: applyResult?.outcome,
+        },
+        applyResult?.outcome === "applied" ? 200 : 202,
+      );
     },
   },
   {

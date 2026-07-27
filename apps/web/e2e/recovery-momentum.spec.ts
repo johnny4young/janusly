@@ -110,9 +110,9 @@ async function runRecoveryCycle(
   await prepareIsolatedSession(page, contract.locale, options.reducedMotion)
   await page.goto('/')
 
-  const demoButton = page.getByTestId('recovery-center-empty-cta-demo')
-  await expect(demoButton).toBeVisible()
-  await demoButton.click()
+  const drillButton = page.getByTestId('recovery-center-empty-cta-drill')
+  await expect(drillButton).toBeVisible()
+  await drillButton.click()
 
   const queue = page.getByTestId('recovery-queue')
   await expect(queue).toBeVisible()
@@ -196,7 +196,7 @@ test('replaying one of two failures never publishes a false all-clear', async ({
   const orgId = await prepareIsolatedSession(page, 'en', false)
   await page.goto('/')
 
-  await page.getByTestId('recovery-center-empty-cta-demo').click()
+  await page.getByTestId('recovery-center-empty-cta-drill').click()
   await expect(page.getByTestId('recovery-queue')).toBeVisible()
   await injectDemoFailure(request, orgId)
   await page.reload()

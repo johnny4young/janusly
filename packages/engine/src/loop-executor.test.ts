@@ -8,13 +8,17 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { appendEventMock, executeToolForRunMock, getOrgConfigSnapshotMock } = vi.hoisted(() => ({
+const { appendEventMock, executeToolForRunMock, getOrgConfigSnapshotMock, recordValidationWriteSkipMock } = vi.hoisted(() => ({
   appendEventMock: vi.fn(),
   executeToolForRunMock: vi.fn(),
   getOrgConfigSnapshotMock: vi.fn(),
+  recordValidationWriteSkipMock: vi.fn(),
 }));
 
 vi.mock("./persistence", () => ({ appendEvent: appendEventMock }));
+vi.mock("./validation-evidence", () => ({
+  recordValidationWriteSkip: recordValidationWriteSkipMock,
+}));
 vi.mock("@janusly/data", () => ({ getOrgConfigSnapshot: getOrgConfigSnapshotMock }));
 vi.mock("./tool-execution", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./tool-execution")>();
@@ -62,6 +66,7 @@ function context(config: Record<string, unknown>, overrides: Record<string, unkn
 beforeEach(() => {
   vi.clearAllMocks();
   appendEventMock.mockResolvedValue(undefined);
+  recordValidationWriteSkipMock.mockResolvedValue(undefined);
   getOrgConfigSnapshotMock.mockResolvedValue(orgConfig);
   executeToolForRunMock.mockImplementation(async ({ toolInput }) => ({ value: toolInput }));
 });
@@ -363,6 +368,12 @@ describe("executeLoop", () => {
         { index: 1, status: "skipped", dryRun: true },
       ],
     });
+    expect(recordValidationWriteSkipMock).toHaveBeenCalledWith(
+      "run-1",
+      "batch",
+      "loop.dry_run.skipped",
+      { tool: "slack.post", skippedCount: 2, count: 2 },
+    );
   });
 
   it("rejects an item set above the one-node persistence bound", async () => {

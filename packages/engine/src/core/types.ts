@@ -179,6 +179,8 @@ export type DeadLetterReplayInput = {
   workflow: Workflow;
   node: WorkflowNode;
   attempt?: number;
+  /** Optional idempotency receipt supplied by an upstream durable publisher. */
+  recoveryClaimToken?: string;
   /** DLQ identity whose terminal success may become verified recovery impact. */
   deadLetterId?: string | null;
   /** Authenticated operator or system actor that initiated the replay. */

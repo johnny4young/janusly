@@ -1,9 +1,10 @@
 # Janusly
 
 > **The operational backbone for AI workflows.**
-> Janusly is being built to make AI workflows feel less like fragile demos and more like production infrastructure: observable, recoverable, reviewable, auditable.
+>
+> Janusly is an agent-native workflow orchestration and recovery platform. Build, run, observe, and recover durable AI automations—with human approvals, audit trails, and deterministic safeguards.
 
-**Purpose:** make AI workflows dependable enough for the boring, critical work companies actually run every day.
+**Purpose:** turn fragile AI automations into dependable operations for the boring, critical work companies actually run every day.
 
 ## Why Janusly exists
 
@@ -11,7 +12,9 @@ Every company is racing to put AI into production. Most discover the same hard t
 
 Workflow tools were built for the **integration era** — drag-and-drop connectors between APIs that already worked. They were not built for the **AI era**, where the hardest question is not "how do I wire these systems together?" but "what happens when the model returns nonsense, the secret expires, or a step that worked yesterday fails today?"
 
-**Janusly is being built to answer that question.** The vision is a control plane for AI workflows where every step leaves evidence, every failure creates a recovery path, every fix can be reviewed before rollout, and every workflow can evolve without losing human control. Running an AI workflow should become as operationally boring as running a database: instrumented, backed up, recoverable, auditable, and trusted enough for work that matters.
+**Janusly answers that question by treating recovery as a first-class runtime concern.**
+
+It provides a control plane where humans and AI agents can operate workflows without surrendering deterministic safeguards: every step leaves evidence, every failure creates a recovery path, every fix can be reviewed before rollout, and every workflow can evolve without losing human control. Running an AI workflow should become as operationally boring as running a database: instrumented, backed up, recoverable, auditable, and trusted enough for work that matters.
 
 The number we hold ourselves to is **Mean Time To Recovery for failed automations**: from hours to minutes, from minutes to seconds.
 
@@ -41,7 +44,7 @@ The recovery loop is production-shaped end to end:
 - **Operate + govern.** Visual React Flow builder, per-org RBAC with a closed permission catalog and custom roles, append-only audit log per action, SSO (WorkOS) + SCIM directory sync, cost/budget governance, an encrypted tenant Credential Secret Store, signed Slack recovery buttons, prompt-generated deterministic PagerDuty off-hours workflows with optional post-action AI summaries, an MCP client (workflow tool nodes) and MCP server (proxying the API to agent ecosystems), and typed Node + Python SDKs.
 - **Runs without an LLM.** Every AI surface degrades to a deterministic fallback, so the runtime works with no model key configured.
 
-**In one line:** Run critical AI workflows, explain failures, propose sandbox-validated fixes, redrive on the fix, and evolve workflow versions with full auditability — under human supervision.
+**In one line:** Let humans and AI agents build, run, inspect, and safely recover critical workflows on a durable, auditable runtime.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for release-facing traceability. Architecture
 invariants and operational contracts live under [`docs/architecture/`](docs/architecture/).
@@ -491,7 +494,7 @@ Acronyms used throughout this README and the wider Janusly codebase ([`AGENTS.md
 | --- | --- | --- |
 | **AI** | Artificial Intelligence | Anything routed through an LLM provider (Anthropic by default). Every AI surface has a deterministic non-AI fallback. |
 | **API** | Application Programming Interface | The HTTP control plane in `apps/api` (plain Node `http`, no framework). |
-| **CAS** | Compare-And-Swap | The "atomic claim" pattern used in concurrency-sensitive transitions — `UPDATE … WHERE status='pending'` in `tryClaimNodeForQueue`, and `UPDATE … WHERE status='validated'` in auto-healing `recordDecision` so concurrent operator-click vs auto-apply can't double-apply (loser returns 409). |
+| **CAS** | Compare-And-Swap | The "atomic claim" pattern used in concurrency-sensitive transitions — `UPDATE … WHERE status='pending'` in `tryClaimNodeForQueue`, and `UPDATE … WHERE status='validated'` in the auto-healing publication claim so concurrent operator-click vs auto-apply cannot double-publish (the loser returns 409 while the winner completes through the durable replay receipt). |
 | **CRUD** | Create / Read / Update / Delete | Basic record-level operations against a resource (e.g. workflows, members, credentials). |
 | **CSS** | Cascading Style Sheets | The design system is hand-written CSS behind the ordered `apps/web/src/index.css` entrypoint; Tailwind 4 CSS-first tokens live in `apps/web/src/styles/foundations.css`. |
 | **DAG** | Directed Acyclic Graph | The workflow shape: nodes + edges, no cycles. The engine executes nodes in topological order. |

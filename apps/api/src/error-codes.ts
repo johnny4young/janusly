@@ -120,7 +120,6 @@ export type ApiErrorCode =
   | "alerts_policy_refinement_failed"
   | "alerts_policy_system_trigger_only"
   // auto-healing
-  | "autoheal_apply_replay_failed"
   | "autoheal_dlq_or_node_missing"
   | "autoheal_invalid_body"
   | "autoheal_missing_id"
@@ -129,6 +128,7 @@ export type ApiErrorCode =
   | "autoheal_rate_limited"
   | "autoheal_not_pending"
   | "autoheal_already_resolved"
+  | "autoheal_validation_risk_ack_required"
   // billing
   | "billing_monthly_usd_invalid"
   | "billing_policy_invalid"
