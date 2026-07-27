@@ -369,6 +369,8 @@ export type RunMetadata = {
    *  omit it stay valid. `executeNode` reads it to set `NodeContext.dryRun`
    *  without a second per-node `runs` lookup. */
   replayMode?: string | null;
+  /** Validation-only effect policy persisted in `runs.inputJson`. */
+  validationEffectMode?: "skip" | "provider_simulation";
   /** The run's start/trigger input (`runs.inputJson.input` — the block
    *  `startRun` persists and the trigger-ingest routes fill with the inbound
    *  event). `executeNode` merges it into the per-node context as
@@ -421,7 +423,11 @@ export async function getRunMetadata(runId: string): Promise<RunMetadata | null>
   // `inputJson` is `{ workflow, input }` for production runs (`startRun`) and
   // `{ workflow, failingNodeId }` for sandbox validation runs — read `input`
   // defensively and normalise anything non-object to `{}`.
-  const inputJson = row.inputJson as { input?: unknown; workflow?: unknown } | null;
+  const inputJson = row.inputJson as {
+    input?: unknown;
+    workflow?: unknown;
+    validationEffectMode?: unknown;
+  } | null;
   const rawInput = inputJson?.input;
   const input =
     rawInput && typeof rawInput === "object" && !Array.isArray(rawInput)
@@ -434,12 +440,16 @@ export async function getRunMetadata(runId: string): Promise<RunMetadata | null>
   const templatePolicy = rawTemplatePolicy === "strict" || rawTemplatePolicy === "lenient"
     ? rawTemplatePolicy
     : undefined;
+  const validationEffectMode = inputJson?.validationEffectMode === "provider_simulation"
+    ? "provider_simulation"
+    : "skip";
   return {
     orgId: row.orgId,
     workflowVersionId: row.workflowVersionId,
     workflowId: row.workflowId ?? null,
     createdBy: row.createdBy ?? null,
     replayMode: row.replayMode ?? null,
+    validationEffectMode,
     input,
     templatePolicy,
   };

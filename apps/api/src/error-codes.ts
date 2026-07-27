@@ -252,6 +252,9 @@ export type ApiErrorCode =
   | "replay_campaign_not_running"
   | "recovery_playbook_source_mismatch"
   | "recovery_playbook_validation_required"
+  | "recovery_provider_simulation_unavailable"
+  | "recovery_provider_simulation_unsupported"
+  | "recovery_validation_effect_mode_invalid"
   // reports
   | "reports_invalid_request"
   | "reports_rate_limit_exceeded"

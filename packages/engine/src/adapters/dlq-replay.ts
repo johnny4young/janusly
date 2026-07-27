@@ -36,6 +36,7 @@ import {
 } from "../persistence";
 import { publishInitialNode } from "../initial-node-publication";
 import { safePersistPayload } from "../safe-persist";
+import type { ValidationEffectMode } from "../validation-evidence";
 
 const INITIAL_NODE_STATE_MAX_BYTES = 1_000_000;
 const COPYABLE_ANCESTOR_STATUSES = new Set(["succeeded", "skipped"]);
@@ -54,6 +55,8 @@ export type DeadLetterValidationInput = {
   createdBy?: string | null;
   /** Explicit Recovery Playbook invocation, persisted for outcome attestation. */
   recoveryPlaybookId?: string | null;
+  /** Validation write posture. Defaults to effect-free sandbox execution. */
+  validationEffectMode?: ValidationEffectMode;
 };
 
 function collectAncestorNodeIds(workflow: Workflow, nodeId: string): Set<string> {
@@ -145,7 +148,15 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
    * caller can poll until terminal status.
    */
   async replayDeadLetterAsValidation(input: DeadLetterValidationInput): Promise<{ runId: string }> {
-    const { orgId, originalRunId, suggestedWorkflow, failingNode, createdBy, recoveryPlaybookId } = input;
+    const {
+      orgId,
+      originalRunId,
+      suggestedWorkflow,
+      failingNode,
+      createdBy,
+      recoveryPlaybookId,
+      validationEffectMode = "skip",
+    } = input;
 
     const runId = crypto.randomUUID();
     const ancestorNodeIds = collectAncestorNodeIds(suggestedWorkflow, failingNode.id);
@@ -178,6 +189,7 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
         inputJson: {
           workflow: suggestedWorkflow,
           failingNodeId: failingNode.id,
+          validationEffectMode,
           ...(recoveryPlaybookId ? { recoveryPlaybookId } : {}),
         },
         parentRunId: originalRunId,
@@ -246,6 +258,7 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
           workflowVersionId,
           originalRunId,
           failingNodeId: failingNode.id,
+          validationEffectMode,
           ...(recoveryPlaybookId ? { recoveryPlaybookId } : {}),
         }),
       });

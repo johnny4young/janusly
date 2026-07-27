@@ -10,7 +10,20 @@
  */
 
 import type { OrgConfigSnapshot } from "@janusly/data";
+import { parseProviderSimulationReceipt } from "./local-integration-simulator";
+import {
+  isProviderSimulationToolInvocation,
+} from "./provider-simulation-policy";
 import { executeTool, isToolWriteSide } from "./tool-registry";
+import {
+  recordValidationProviderReceipt,
+  type ValidationEffectMode,
+} from "./validation-evidence";
+
+export {
+  isProviderSimulationRuntimeAvailable,
+  isProviderSimulationToolInvocation,
+} from "./provider-simulation-policy";
 
 /** HTTP methods that read state without mutating it; safe in validation runs. */
 export const SAFE_HTTP_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -38,12 +51,22 @@ export function withHttpToolDefaults(
  * Return the audit-safe reason an invocation must be skipped in validation
  * mode, or `null` when it is read-side and may execute.
  */
-export function dryRunToolSkipPayload(tool: string, input: unknown): Record<string, unknown> | null {
+export function dryRunToolSkipPayload(
+  tool: string,
+  input: unknown,
+  validationEffectMode: ValidationEffectMode = "skip",
+): Record<string, unknown> | null {
   if (!isToolWriteSide(tool)) return null;
   const inputObj = (input ?? {}) as Record<string, unknown>;
   const method = typeof inputObj.method === "string" ? inputObj.method.toUpperCase() : "GET";
   const isHttpRead = tool === "http.request" && SAFE_HTTP_METHODS.has(method);
   if (isHttpRead) return null;
+  if (
+    validationEffectMode === "provider_simulation"
+    && isProviderSimulationToolInvocation(tool, input)
+  ) {
+    return null;
+  }
   return {
     reason: "write-side tool skipped in validation mode",
     tool,
@@ -77,14 +100,31 @@ export async function executeToolForRun(input: {
   runId: string;
   nodeId: string;
   workflowId?: string;
+  validationEffectMode?: ValidationEffectMode;
 }): Promise<Record<string, unknown>> {
-  return executeTool(input.tool, input.toolInput, input.context, {
+  const providerSimulation = input.validationEffectMode === "provider_simulation"
+    && isProviderSimulationToolInvocation(input.tool, input.toolInput);
+  const result = await executeTool(input.tool, input.toolInput, input.context, {
     orgId: input.orgId,
     runId: input.runId,
     nodeId: input.nodeId,
     workflowId: input.workflowId,
+    ...(providerSimulation ? { providerSimulation: { scope: "validation" as const } } : {}),
     email: input.orgConfig.email,
     integrations: input.orgConfig.integrations,
     objectstore: input.orgConfig.objectstore,
   });
+  if (providerSimulation && result.ok === true) {
+    const receipt = parseProviderSimulationReceipt(result.providerReceipt, "validation");
+    if (!receipt) {
+      throw new Error("Local provider simulation did not return a valid validation receipt");
+    }
+    await recordValidationProviderReceipt(
+      input.runId,
+      input.nodeId,
+      input.tool,
+      receipt,
+    );
+  }
+  return result;
 }

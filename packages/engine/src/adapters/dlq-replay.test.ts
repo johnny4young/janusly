@@ -301,6 +301,30 @@ describe('DLQReplayAdapter.replayDeadLetterAsValidation (sandbox replay)', () =>
     expect((runsInsertCall![1] as { inputJson: { workflow: unknown; failingNodeId: string } }).inputJson).toEqual({
       workflow: baseWorkflow,
       failingNodeId: 'fetch',
+      validationEffectMode: 'skip',
+    })
+  })
+
+  it('persists an explicitly qualified provider simulation mode in the run and start event', async () => {
+    await adapter.replayDeadLetterAsValidation({
+      orgId: 'org-1',
+      originalRunId: 'orig-run',
+      suggestedWorkflow: baseWorkflow,
+      failingNode,
+      validationEffectMode: 'provider_simulation',
+    })
+
+    const runsInsertCall = txInsertMock.mock.calls.find((args) => args[0] === runsTable)
+    expect(runsInsertCall?.[1]).toMatchObject({
+      inputJson: expect.objectContaining({
+        validationEffectMode: 'provider_simulation',
+      }),
+    })
+    const eventInsertCall = txInsertMock.mock.calls.find((args) => args[0] === runEventsTable)
+    expect(eventInsertCall?.[1]).toMatchObject({
+      payload: expect.objectContaining({
+        validationEffectMode: 'provider_simulation',
+      }),
     })
   })
 
@@ -315,7 +339,12 @@ describe('DLQReplayAdapter.replayDeadLetterAsValidation (sandbox replay)', () =>
 
     const runsInsertCall = txInsertMock.mock.calls.find((args) => args[0] === runsTable)
     expect(runsInsertCall?.[1]).toMatchObject({
-      inputJson: { workflow: baseWorkflow, failingNodeId: 'fetch', recoveryPlaybookId: 'playbook-1' },
+      inputJson: {
+        workflow: baseWorkflow,
+        failingNodeId: 'fetch',
+        validationEffectMode: 'skip',
+        recoveryPlaybookId: 'playbook-1',
+      },
     })
     const eventInsertCall = txInsertMock.mock.calls.find((args) => args[0] === runEventsTable)
     expect(eventInsertCall?.[1]).toMatchObject({

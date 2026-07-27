@@ -78,6 +78,7 @@ Run the qualification gates while the stack is healthy:
 pnpm local:smoke          # real inbound event and four successful provider effects
 pnpm local:pagerduty-smoke # managed secrets + signed event + acknowledge/snooze
 pnpm local:failure-smoke  # controlled Slack outage, fail-closed run, open DLQ evidence
+pnpm local:recovery-lab   # provider outage → validated repair → idempotent redrive
 pnpm local:ui-smoke       # Chromium smoke plus screenshots
 pnpm local:verify         # success smoke, full service restart, persistence check
 ```
@@ -210,8 +211,9 @@ curl -X POST http://127.0.0.1:4010/control \
 - `failure` returns a provider-shaped HTTP 503.
 - `malformed` returns a successful HTTP status with an invalid response shape.
 
-Provider state and request evidence survive container restarts. Delete only the
-request log with `DELETE /requests`, or use `pnpm local:reset` to remove all
+Provider state, request evidence, and the webhook effect ledger survive
+container restarts. Delete request evidence with `DELETE /requests`, webhook
+effects with `DELETE /effects`, or use `pnpm local:reset` to remove all
 simulator state.
 
 Simulator routing is guarded by both
@@ -220,6 +222,45 @@ It does not rewrite arbitrary outbound destinations: only the bundled GitHub
 and Slack credentials, the local mailer, and RFC-reserved `*.example.com`
 webhook placeholders can be redirected. PagerDuty integration tools switch to
 the simulator's `/pagerduty` API only under the same explicit process gate.
+
+### Real Recovery Lab
+
+The Recovery Lab is an explicit, removable proof of the complete recovery
+path. It uses a dedicated `local-recovery-lab` organization, creates one
+payment-retry workflow through the normal API, and then:
+
+1. injects a webhook-provider outage;
+2. runs the workflow through a human approval and into the real DLQ;
+3. validates a bounded timeout repair against the provider simulator;
+4. persists a validation-scoped provider receipt;
+5. saves the repaired workflow and redrives the original failed run;
+6. verifies the generation-bound recovery ledger;
+7. repeats the same invoice delivery and proves the provider effect was not
+   applied twice.
+
+```bash
+pnpm local:up
+pnpm local:recovery-lab
+
+JANUSLY_EVIDENCE_DIR="$PWD/output/review/real-recovery-lab" \
+  pnpm local:recovery-lab:ui-smoke
+
+pnpm local:recovery-lab:destroy
+```
+
+The UI smoke writes a machine-readable `recovery-lab.json` bundle plus English
+and Spanish application screenshots. The create command cleans only the
+dedicated Lab organization before recreating it; the destroy command removes
+that organization and its simulator request/effect evidence. Both commands
+refuse an organization id that does not begin with `local-recovery-lab`.
+
+Provider simulation is deliberately narrower than an ordinary sandbox. The
+exact failing-node/descendant path must include a direct idempotent
+`webhook.send` to an RFC-reserved `*.example.com` target and use
+`resultPolicy="require_ok"`. Dynamic agent/MCP/subworkflow paths and write-side
+HTTP nodes remain effect-free validation. The API and worker independently
+re-check the local-stack gates, and a validation run is not promoted to
+`provider_simulated` without a valid validation-scoped receipt.
 
 ### PagerDuty local qualification
 

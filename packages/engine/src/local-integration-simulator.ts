@@ -16,6 +16,19 @@
 const ENABLED_ENV = "JANUSLY_LOCAL_INTEGRATION_SIMULATOR";
 const URL_ENV = "JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL";
 
+export type ProviderSimulationReceipt = {
+  kind: "provider_simulation_receipt";
+  version: 1;
+  provider: "webhook";
+  operation: "deliver";
+  scope: "validation" | "production";
+  effectId: string;
+  idempotencyKey: string | null;
+  applied: boolean;
+  duplicate: boolean;
+  requestId: string;
+};
+
 export function getLocalIntegrationSimulatorUrl(): URL | null {
   if (process.env[ENABLED_ENV] !== "true") return null;
 
@@ -52,12 +65,78 @@ export function isLocalSlackSimulatorUrl(value: string): boolean {
   }
 }
 
+export function isLocalIntegrationSimulatorEndpoint(value: string, path: string): boolean {
+  const endpoint = localIntegrationSimulatorEndpoint(path);
+  if (!endpoint) return false;
+  try {
+    const candidate = new URL(value);
+    const expected = new URL(endpoint);
+    return candidate.origin === expected.origin && candidate.pathname === expected.pathname;
+  } catch {
+    return false;
+  }
+}
+
+export function parseProviderSimulationReceipt(
+  value: unknown,
+  expectedScope?: ProviderSimulationReceipt["scope"],
+): ProviderSimulationReceipt | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const receipt = value as Record<string, unknown>;
+  const scope = receipt.scope;
+  const idempotencyKey = receipt.idempotencyKey;
+  if (
+    receipt.kind !== "provider_simulation_receipt"
+    || receipt.version !== 1
+    || receipt.provider !== "webhook"
+    || receipt.operation !== "deliver"
+    || (scope !== "validation" && scope !== "production")
+    || (expectedScope !== undefined && scope !== expectedScope)
+    || typeof receipt.effectId !== "string"
+    || receipt.effectId.length === 0
+    || (idempotencyKey !== null && (typeof idempotencyKey !== "string" || idempotencyKey.length === 0))
+    || typeof receipt.applied !== "boolean"
+    || typeof receipt.duplicate !== "boolean"
+    || receipt.applied === receipt.duplicate
+    || typeof receipt.requestId !== "string"
+    || receipt.requestId.length === 0
+  ) {
+    return null;
+  }
+  return {
+    kind: "provider_simulation_receipt",
+    version: 1,
+    provider: "webhook",
+    operation: "deliver",
+    scope,
+    effectId: receipt.effectId,
+    idempotencyKey,
+    applied: receipt.applied,
+    duplicate: receipt.duplicate,
+    requestId: receipt.requestId,
+  };
+}
+
+export function isLocalWebhookPlaceholder(value: string): boolean {
+  try {
+    const target = new URL(value);
+    return (
+      (target.protocol === "http:" || target.protocol === "https:")
+      && !target.username
+      && !target.password
+      && target.hostname.endsWith(".example.com")
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function resolveLocalWebhookDestination(value: string): string {
   const endpoint = localIntegrationSimulatorEndpoint("/webhook");
   if (!endpoint) return value;
 
+  if (!isLocalWebhookPlaceholder(value)) return value;
   const target = new URL(value);
-  if (!target.hostname.endsWith(".example.com")) return value;
   const simulator = new URL(endpoint);
   simulator.searchParams.set("target", target.href);
   return simulator.href;

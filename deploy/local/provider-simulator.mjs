@@ -15,12 +15,16 @@ const dataDir = process.env.SIMULATOR_DATA_DIR ?? "/data";
 const statePath = `${dataDir}/state.json`;
 const requestPath = `${dataDir}/requests.jsonl`;
 const pagerDutyStatePath = `${dataDir}/pagerduty-incidents.json`;
+const webhookEffectsPath = `${dataDir}/webhook-effects.json`;
 const bodyLimit = 1_000_000;
+const webhookEffectLimit = 2_000;
 const providers = ["github", "slack", "webhook", "email", "pagerduty"];
 const modes = ["success", "failure", "malformed"];
 const state = Object.fromEntries(providers.map((provider) => [provider, "success"]));
 let recordTail = Promise.resolve();
+let webhookEffectTail = Promise.resolve();
 const pagerDutyIncidents = new Map();
+const webhookEffects = new Map();
 
 await mkdir(dataDir, { recursive: true });
 try {
@@ -42,6 +46,18 @@ try {
   }
 } catch {
   // First boot has no PagerDuty incident state.
+}
+try {
+  const persistedEffects = JSON.parse(await readFile(webhookEffectsPath, "utf8"));
+  if (Array.isArray(persistedEffects)) {
+    for (const effect of persistedEffects.slice(-webhookEffectLimit)) {
+      if (effect && typeof effect === "object" && typeof effect.key === "string") {
+        webhookEffects.set(effect.key, effect);
+      }
+    }
+  }
+} catch {
+  // First boot has no webhook effect state.
 }
 
 function send(res, statusCode, body, contentType = "application/json") {
@@ -115,6 +131,9 @@ async function recordRequest(provider, req, url, body) {
     method: req.method,
     path: url.pathname,
     target: url.searchParams.get("target"),
+    idempotencyKey: typeof req.headers["x-idempotency-key"] === "string"
+      ? req.headers["x-idempotency-key"]
+      : null,
     body: body.json ?? body.raw.slice(0, 4_000),
   };
   const write = recordTail.then(async () => {
@@ -134,6 +153,85 @@ async function listRequests() {
   } catch {
     return [];
   }
+}
+
+function webhookSimulationScope(req) {
+  return req.headers["x-janusly-simulation-scope"] === "validation"
+    ? "validation"
+    : "production";
+}
+
+async function persistWebhookEffects() {
+  await writeFile(
+    webhookEffectsPath,
+    `${JSON.stringify([...webhookEffects.values()], null, 2)}\n`,
+    "utf8",
+  );
+}
+
+async function recordWebhookEffect(req, url, entry) {
+  const idempotencyKey = typeof req.headers["x-idempotency-key"] === "string"
+    ? req.headers["x-idempotency-key"].trim() || null
+    : null;
+  const target = url.searchParams.get("target") ?? "unknown";
+  const scope = webhookSimulationScope(req);
+  const key = JSON.stringify([scope, target, idempotencyKey ?? entry.id]);
+
+  const operation = webhookEffectTail.then(async () => {
+    const existing = idempotencyKey ? webhookEffects.get(key) : null;
+    if (existing) {
+      existing.deliveryCount = Number(existing.deliveryCount ?? 1) + 1;
+      existing.lastRequestId = entry.id;
+      existing.lastReceivedAt = entry.receivedAt;
+      await persistWebhookEffects();
+      return {
+        kind: "provider_simulation_receipt",
+        version: 1,
+        provider: "webhook",
+        operation: "deliver",
+        scope,
+        effectId: existing.effectId,
+        idempotencyKey,
+        applied: false,
+        duplicate: true,
+        requestId: entry.id,
+      };
+    }
+
+    const effect = {
+      key,
+      effectId: crypto.randomUUID(),
+      scope,
+      target,
+      idempotencyKey,
+      firstRequestId: entry.id,
+      lastRequestId: entry.id,
+      createdAt: entry.receivedAt,
+      lastReceivedAt: entry.receivedAt,
+      deliveryCount: 1,
+    };
+    webhookEffects.set(key, effect);
+    while (webhookEffects.size > webhookEffectLimit) {
+      const oldest = webhookEffects.keys().next().value;
+      if (typeof oldest !== "string") break;
+      webhookEffects.delete(oldest);
+    }
+    await persistWebhookEffects();
+    return {
+      kind: "provider_simulation_receipt",
+      version: 1,
+      provider: "webhook",
+      operation: "deliver",
+      scope,
+      effectId: effect.effectId,
+      idempotencyKey,
+      applied: true,
+      duplicate: false,
+      requestId: entry.id,
+    };
+  });
+  webhookEffectTail = operation.catch(() => {});
+  return operation;
 }
 
 function githubResponse(pathname, mode, entry) {
@@ -158,6 +256,18 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "DELETE" && url.pathname === "/requests") {
       await rm(requestPath, { force: true });
+      send(res, 200, { ok: true });
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/effects") {
+      await webhookEffectTail;
+      send(res, 200, { effects: [...webhookEffects.values()] });
+      return;
+    }
+    if (req.method === "DELETE" && url.pathname === "/effects") {
+      await webhookEffectTail;
+      webhookEffects.clear();
+      await rm(webhookEffectsPath, { force: true });
       send(res, 200, { ok: true });
       return;
     }
@@ -242,8 +352,11 @@ const server = createServer(async (req, res) => {
     }
     if (provider === "webhook") {
       if (mode === "failure") send(res, 503, { error: "simulated webhook outage" });
-      else if (mode === "malformed") send(res, 200, "unexpected", "text/plain");
-      else send(res, 202, { accepted: true, requestId: entry.id });
+      else {
+        const receipt = await recordWebhookEffect(req, url, entry);
+        if (mode === "malformed") send(res, 200, "unexpected", "text/plain");
+        else send(res, 202, { accepted: true, requestId: entry.id, receipt });
+      }
       return;
     }
     if (mode === "failure") send(res, 503, { error: "simulated email outage" });
@@ -256,7 +369,9 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`[provider-simulator] listening on http://${host}:${port}`);
+  const address = server.address();
+  const listeningPort = typeof address === "object" && address ? address.port : port;
+  console.log(`[provider-simulator] listening on http://${host}:${listeningPort}`);
 });
 
 for (const signal of ["SIGINT", "SIGTERM"]) {

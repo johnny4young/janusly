@@ -343,6 +343,7 @@ integration settings.
 | `JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL` | unset | integration simulator routing | Process-owned simulator base URL. Credentials, query strings, and fragments are rejected. PagerDuty uses its `/pagerduty` API projection only when this gate is true. |
 | `JANUSLY_LOCAL_STACK` | `false` | explicit smoke fixtures | Required marker before qualification-only credential/config fixtures can run. Normal startup never invokes them. |
 | `JANUSLY_LOCAL_ORG_ID` | `default` | smoke scripts | Development organization exercised only by explicit provider qualification. |
+| `JANUSLY_RECOVERY_LAB_ORG_ID` | `local-recovery-lab` | Real Recovery Lab scripts | Isolated organization used by `local:recovery-lab`; must begin with `local-recovery-lab` so cleanup cannot target an ordinary tenant. |
 
 The Compose-specific `JANUSLY_LOCAL_*_PORT`, sender, and browser URL settings
 are documented in the tracked `deploy/local/local.env.example`. The Supabase

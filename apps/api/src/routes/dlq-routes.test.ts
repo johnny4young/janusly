@@ -21,6 +21,7 @@ const {
   queryFailureSamplesMock,
   queryRecoveryDrillOutcomeMock,
   queryRecoveryRecurrenceMock,
+  qualifyProviderSimulationMock,
   replayDeadLetterMock,
   replayValidationMock,
 } = vi.hoisted(() => ({
@@ -28,6 +29,7 @@ const {
   queryFailureSamplesMock: vi.fn(),
   queryRecoveryDrillOutcomeMock: vi.fn(),
   queryRecoveryRecurrenceMock: vi.fn(),
+  qualifyProviderSimulationMock: vi.fn(),
   replayDeadLetterMock: vi.fn(),
   replayValidationMock: vi.fn(),
 }));
@@ -94,6 +96,9 @@ vi.mock("../cluster-recovery", async (importOriginal) => {
 vi.mock("@janusly/engine/src/recovery/recovery-item-hook", () => ({
   resolveRecoveryItemForDismiss: vi.fn(),
   createRecoveryItemForDeadLetter: vi.fn(),
+}));
+vi.mock("@janusly/engine/src/provider-simulation-validation", () => ({
+  qualifyProviderSimulationWorkflow: qualifyProviderSimulationMock,
 }));
 
 // Bulk-replay drives the shared DLQReplayAdapter instance created at module
@@ -943,6 +948,179 @@ describe("POST /dlq/validate-fix with a Recovery Playbook", () => {
       expect(response.status).toBe(409);
       expect(((await response.json()) as { code: string }).code).toBe("recovery_playbook_match_changed");
       expect(replayValidationMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+});
+
+describe("POST /dlq/validate-fix provider simulation", () => {
+  const workflow = {
+    id: "wf-provider",
+    name: "Provider validation",
+    dslVersion: "1.0",
+    nodes: [{
+      id: "retry-charge",
+      type: "tool",
+      config: {
+        tool: "webhook.send",
+        resultPolicy: "require_ok",
+        input: {
+          credential: "billing_webhook",
+          url: "https://billing.example.com/charges/retry",
+          payload: { invoiceId: "invoice-1" },
+          headers: { "X-Idempotency-Key": "invoice-1" },
+        },
+      },
+    }],
+    edges: [],
+  };
+  const item = {
+    id: "dl-provider",
+    orgId: "org-1",
+    runId: "run-provider",
+    nodeId: "retry-charge",
+    status: "open",
+    workflowJson: workflow,
+    nodeJson: workflow.nodes[0],
+    errorJson: { message: "simulated provider outage" },
+  };
+
+  it("rejects unknown validation effect modes before starting a run", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "dev-headers", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    getDeadLetterMock.mockResolvedValueOnce(item as never);
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/validate-fix`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          deadLetterId: item.id,
+          suggestedWorkflow: workflow,
+          validationEffectMode: "live_provider",
+        }),
+      });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        code: "recovery_validation_effect_mode_invalid",
+      });
+      expect(replayValidationMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("fails closed when the local runtime gate is unavailable", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "dev-headers", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    getDeadLetterMock.mockResolvedValueOnce(item as never);
+    vi.stubEnv("JANUSLY_LOCAL_STACK", "false");
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/validate-fix`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          deadLetterId: item.id,
+          suggestedWorkflow: workflow,
+          validationEffectMode: "provider_simulation",
+        }),
+      });
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        code: "recovery_provider_simulation_unavailable",
+      });
+      expect(replayValidationMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("rejects a validation path whose write effects cannot be attested", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "dev-headers", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    getDeadLetterMock.mockResolvedValueOnce(item as never);
+    vi.stubEnv("JANUSLY_LOCAL_STACK", "true");
+    vi.stubEnv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true");
+    vi.stubEnv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL", "http://provider-simulator:4010");
+    qualifyProviderSimulationMock.mockReturnValueOnce({
+      ok: false,
+      nodeId: "retry-charge",
+      reason: "missing idempotency key",
+    });
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/validate-fix`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          deadLetterId: item.id,
+          suggestedWorkflow: workflow,
+          validationEffectMode: "provider_simulation",
+        }),
+      });
+      expect(response.status).toBe(422);
+      expect(await response.json()).toMatchObject({
+        code: "recovery_provider_simulation_unsupported",
+      });
+      expect(replayValidationMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("persists and audits an explicitly qualified provider-simulation run", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "dev-headers", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    getDeadLetterMock.mockResolvedValueOnce(item as never);
+    vi.stubEnv("JANUSLY_LOCAL_STACK", "true");
+    vi.stubEnv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true");
+    vi.stubEnv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL", "http://provider-simulator:4010");
+    qualifyProviderSimulationMock.mockReturnValueOnce({
+      ok: true,
+      effectNodeIds: ["retry-charge"],
+    });
+    replayValidationMock.mockResolvedValueOnce({ runId: "validation-provider-1" });
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/validate-fix`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          deadLetterId: item.id,
+          suggestedWorkflow: workflow,
+          validationEffectMode: "provider_simulation",
+        }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        runId: "validation-provider-1",
+        validationEffectMode: "provider_simulation",
+        providerEffectNodeIds: ["retry-charge"],
+      });
+      expect(replayValidationMock).toHaveBeenCalledWith(expect.objectContaining({
+        validationEffectMode: "provider_simulation",
+      }));
+      expect(auditActionMock).toHaveBeenCalledWith(
+        expect.anything(),
+        "recovery.validation_started",
+        expect.objectContaining({
+          metadata: {
+            validationRunId: "validation-provider-1",
+            validationEffectMode: "provider_simulation",
+            providerEffectNodeIds: ["retry-charge"],
+          },
+        }),
+      );
     } finally {
       await close(server);
     }

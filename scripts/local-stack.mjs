@@ -208,6 +208,13 @@ if (command === "up") {
     "pnpm", "--filter", "@janusly/api", "exec", "tsx",
     "../../scripts/setup-local-smoke-fixtures.ts",
   ]);
+} else if (command === "recovery-lab-cleanup") {
+  configureSupabaseEnvironment(await readLocalSupabaseStatus(), { authEnabled: false });
+  await compose([
+    "run", "--rm", "--no-deps", "api",
+    "pnpm", "--filter", "@janusly/api", "exec", "tsx",
+    "../../scripts/cleanup-local-recovery-lab.ts",
+  ]);
 } else if (command === "verify-db") {
   configureSupabaseEnvironment(await readLocalSupabaseStatus(), { authEnabled: authProfile });
   await compose([
@@ -219,5 +226,5 @@ if (command === "up") {
 } else if (command === "logs") {
   await compose(["logs", "-f", "--tail", "150"]);
 } else {
-  throw new Error("usage: node scripts/local-stack.mjs up|down|reset|restart|status|fixtures|verify-db|logs [--auth] [--expect-empty]");
+  throw new Error("usage: node scripts/local-stack.mjs up|down|reset|restart|status|fixtures|recovery-lab-cleanup|verify-db|logs [--auth] [--expect-empty]");
 }

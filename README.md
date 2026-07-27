@@ -38,7 +38,7 @@ The recovery loop is production-shaped end to end:
 - **Observable runtime.** Postgres-backed DAG execution with per-node `run_events`, live SSE run streaming, a unified Runs workspace for overview / chronology / agent activity, a Recovery Center home surfacing failed runs / failure clusters / pending approvals / production-only verified-recovery metrics, and OpenTelemetry traces + Prometheus metrics.
 - **Versioned recovery policy.** A workflow can persist an operator-owned `RecoveryContractV1` that declares its technical failure boundary, required evidence, external effects, allowed repair classes, validation strength, approval/autonomy posture, terminal verification, and recurrence window. Semantic-outcome detection is explicitly disabled in v1 rather than presented as shipped, and AI workflow improvement cannot rewrite the policy.
 - **Diagnosis + patch.** AI failure explanation and 1–3 patch suggestions with self-rated confidence, calibrated per approach against the team's own accept/reject history, with a Recovery Confidence Passport that scores whether a patch is safe to apply.
-- **Safe recovery.** Sandbox validation (write-side effects skipped) before any patch saves, immediate cluster-level apply for small cohorts, paced and cancellable replay campaigns with durable per-item progress for larger cohorts, one-click rollback through version history, production redrive that continues a failed run on the patched version, and progressive baseline/canary delivery with minimum-sample automatic return when the canary success guardrail is breached.
+- **Safe recovery.** Effect-free sandbox validation by default, plus explicitly gated provider-simulated validation for idempotent local effects with durable receipts, before any patch saves; immediate cluster-level apply for small cohorts, paced and cancellable replay campaigns with durable per-item progress for larger cohorts, one-click rollback through version history, production redrive that continues a failed run on the patched version, and progressive baseline/canary delivery with minimum-sample automatic return when the canary success guardrail is breached.
 - **Reproducible recovery drills.** Solution Packs expose safe, selectable credential, AI-output, rate-limit, contract-drift, upstream-failure, and worker-interruption scenarios. Every drill records its source and enters the same recovery queue used by runtime failures; the worker-interruption scenario crosses the configured age threshold and exercises the real stalled-node reaper rather than inserting a synthetic terminal failure. Recovery Queue measures each drill from failure to verified terminal success or accepted loss and then observes the existing seven-day production recurrence window. Recovery Center turns those bounded facts into a per-organization validation dossier with explicit completion, recovery, operator-intervention, timing, and failure-mode denominators plus Markdown/JSON exports; partner count, setup time, and willingness-to-pay remain external evidence.
 - **Containment.** A transient-error fast path that auto-retries the failures that would have healed anyway (429 / dropped connection / gateway timeout) before they reach the DLQ, and a circuit breaker that pauses a workflow after repeated failures — buffering inbound trigger events for backfill on resume instead of dropping them.
 - **Evidence-gated Recovery Playbooks** that promote a proven fix, with a per-playbook success scorecard.
@@ -200,7 +200,10 @@ the first account and workspace manually. Unlike the short-lived `pnpm dev`
 test topology, this stack keeps API and worker behavior production-shaped.
 Explicit smoke commands can install bounded provider fixtures and locally
 simulate GitHub, Slack, signed webhooks, and email without contacting public
-providers. See
+providers. `pnpm local:recovery-lab` additionally proves a real
+provider-boundary failure, DLQ validation with a durable provider receipt,
+operator-approved publication/redrive, verified recovery, and idempotent
+duplicate delivery. See
 [`docs/local-deployment.md`](docs/local-deployment.md) for lifecycle commands,
 failure injection, persistence, safety boundaries, optional Ollama memory, and
 the explicit simulator-to-external-provider switch for private real-use tests.
@@ -245,6 +248,8 @@ pnpm local:auth:up   # persistent empty-start lab: Supabase Auth + one PostgreSQ
 pnpm local:db:verify # prove auth/public share that database
 pnpm local:smoke     # inbound event + GitHub/Slack/webhook/email simulator path
 pnpm local:failure-smoke # controlled provider outage + fail-closed DLQ evidence
+pnpm local:recovery-lab # complete provider-simulated recovery proof
+pnpm local:recovery-lab:destroy # remove the isolated Lab tenant and simulator evidence
 pnpm local:ui-smoke  # Chromium smoke against the persistent stack
 pnpm local:verify    # provider smoke + full restart persistence proof
 pnpm local:down      # stop the persistent stack without deleting its volumes

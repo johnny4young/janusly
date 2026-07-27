@@ -401,6 +401,59 @@ describe("webhook.send", () => {
       .toBe("http://provider-simulator:4010/webhook?target=https%3A%2F%2Fbilling.example.com%2Fcharges%2Fretry");
   });
 
+  it("returns a validated local receipt and isolates validation effects with a reserved header", async () => {
+    vi.stubEnv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true");
+    vi.stubEnv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL", "http://provider-simulator:4010");
+    vi.stubEnv("PARTNER_WEBHOOK_SECRET", "local-secret");
+    credentialMock.mockResolvedValueOnce(credentialRow({
+      name: "partner-webhook",
+      kind: "webhook_secret",
+      secretRef: "PARTNER_WEBHOOK_SECRET",
+    }));
+    const receipt = {
+      kind: "provider_simulation_receipt",
+      version: 1,
+      provider: "webhook",
+      operation: "deliver",
+      scope: "validation",
+      effectId: "effect-1",
+      idempotencyKey: "invoice-1",
+      applied: true,
+      duplicate: false,
+      requestId: "request-1",
+    };
+    fetchMock.mockResolvedValueOnce({
+      statusCode: 202,
+      ok: true,
+      body: JSON.stringify({ accepted: true, receipt }),
+      headers: {},
+    });
+
+    const result = await executeTool(
+      "webhook.send",
+      {
+        credential: "partner-webhook",
+        url: "https://billing.example.com/charges/retry",
+        payload: { invoiceId: "invoice-1" },
+        headers: {
+          "X-Idempotency-Key": "invoice-1",
+          "X-Janusly-Simulation-Scope": "production",
+        },
+      },
+      {},
+      { orgId: "org-1", providerSimulation: { scope: "validation" } },
+    );
+
+    expect(result).toMatchObject({ ok: true, providerReceipt: receipt });
+    const requestOptions = fetchMock.mock.calls[0]?.[1] as {
+      headers: Record<string, string>;
+    } | undefined;
+    if (!requestOptions) throw new Error("webhook request was not dispatched");
+    const requestHeaders = requestOptions.headers;
+    expect(requestHeaders["x-idempotency-key"]).toBe("invoice-1");
+    expect(requestHeaders["x-janusly-simulation-scope"]).toBe("validation");
+  });
+
   it("signs the body and sends it via fetchHttpTarget with the default header", async () => {
     vi.stubEnv("WEBHOOK_SIGNING_SECRET", "supers3cret");
     credentialMock.mockResolvedValueOnce(credentialRow({

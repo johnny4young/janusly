@@ -24,6 +24,14 @@ export type ToolExecutionContext = {
   runId?: string;
   nodeId?: string;
   workflowId?: string;
+  /**
+   * Present only for explicitly qualified local validation effects. Provider
+   * adapters use it to isolate simulator state from production-scoped local
+   * effects; it never enables arbitrary outbound calls.
+   */
+  providerSimulation?: {
+    scope: "validation";
+  };
   email?: {
     provider?: string;
     from?: string;

@@ -28,6 +28,7 @@ import {
 } from "./template";
 import type { ExecuteNodeInput, NodeExecutionResult } from "./core/types";
 import type { NodeType } from "@janusly/shared/src/workflow";
+import { isProviderSimulationToolInvocation } from "./tool-execution";
 
 type RenderedConfig = ReturnType<typeof renderTemplateWithRedactions>;
 
@@ -175,6 +176,7 @@ export async function executeNode(
   // without committing external state. Reuses the single `getRunMetadata`
   // row above — no second per-node `runs` lookup.
   const dryRun = meta.replayMode === "validation";
+  const validationEffectMode = meta.validationEffectMode ?? "skip";
 
   const context = await getRunContext(runId);
 
@@ -228,7 +230,14 @@ export async function executeNode(
     // dispatcher errored above if no executor matched).
     const configSchema = NODE_CONFIG_SCHEMAS[node.type as NodeType];
     const parsedConfig = configSchema ? configSchema.parse(resolvedConfig) : resolvedConfig;
-    renderedWriteSide = !dryRun && isWriteSideNode({
+    const executesQualifiedProviderEffect = dryRun
+      && validationEffectMode === "provider_simulation"
+      && node.type === "tool"
+      && isProviderSimulationToolInvocation(
+        String((parsedConfig as Record<string, unknown>).tool ?? ""),
+        (parsedConfig as Record<string, unknown>).input,
+      );
+    renderedWriteSide = (!dryRun || executesQualifiedProviderEffect) && isWriteSideNode({
       type: node.type,
       config: parsedConfig as Record<string, unknown>,
     });
@@ -254,6 +263,7 @@ export async function executeNode(
         recoveryClaimToken,
         signal: timeoutController?.signal,
         dryRun,
+        validationEffectMode,
         templatePolicy: meta.templatePolicy ?? "lenient",
       }),
       timeoutMs,

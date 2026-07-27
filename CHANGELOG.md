@@ -86,6 +86,13 @@ retroactively.
 
 ### Added
 
+- An explicit Real Recovery Lab that creates and destroys one isolated local
+  payment-retry tenant, injects a provider-boundary failure, reaches the real
+  DLQ, validates an idempotent webhook repair through the normal engine path,
+  persists a provider-scoped effect receipt, publishes and redrives the repair,
+  verifies the recovery ledger, and proves duplicate delivery does not repeat
+  the provider effect. English/Spanish browser evidence and a machine-readable
+  result bundle are produced by one local command.
 - Versioned `RecoveryContractV1` and `RecoveryCaseState` domain contracts. A
   workflow can retain operator-owned technical-failure, evidence, effect,
   repair, validation, approval/autonomy, verification, and recurrence policy;

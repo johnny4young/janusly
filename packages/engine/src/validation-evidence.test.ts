@@ -11,6 +11,7 @@ vi.mock("@janusly/db", () => ({
     id: "runs.id",
     replayMode: "runs.replay_mode",
     validationEvidenceLevel: "runs.validation_evidence_level",
+    inputJson: "runs.input_json",
   },
   runEvents: { id: "run_events.id" },
 }));
@@ -19,7 +20,10 @@ vi.mock("./run-event-stream", () => ({
   publishRunEvent: publishRunEventMock,
 }));
 
-import { recordValidationWriteSkip } from "./validation-evidence";
+import {
+  recordValidationProviderReceipt,
+  recordValidationWriteSkip,
+} from "./validation-evidence";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -62,5 +66,74 @@ describe("recordValidationWriteSkip", () => {
     expect(transactionMock.mock.invocationCallOrder[0]).toBeLessThan(
       publishRunEventMock.mock.invocationCallOrder[0]!,
     );
+  });
+});
+
+describe("recordValidationProviderReceipt", () => {
+  it("atomically promotes qualified evidence and persists the receipt", async () => {
+    const returningMock = vi.fn().mockResolvedValue([{ id: "run-1" }]);
+    updateSetMock.mockReturnValueOnce({
+      where: vi.fn(() => ({ returning: returningMock })),
+    });
+    const receipt = {
+      kind: "provider_simulation_receipt",
+      version: 1,
+      provider: "webhook",
+      operation: "deliver",
+      scope: "validation",
+      effectId: "effect-1",
+      idempotencyKey: "invoice-1",
+      applied: true,
+      duplicate: false,
+      requestId: "request-1",
+    } as const;
+
+    const id = await recordValidationProviderReceipt(
+      "run-1",
+      "node-1",
+      "webhook.send",
+      receipt,
+    );
+
+    expect(updateSetMock).toHaveBeenCalledWith({
+      validationEvidenceLevel: "provider_simulated",
+    });
+    expect(insertValuesMock).toHaveBeenCalledWith(expect.objectContaining({
+      id,
+      runId: "run-1",
+      nodeId: "node-1",
+      type: "validation.provider.receipt",
+      payload: { tool: "webhook.send", receipt },
+    }));
+    expect(publishRunEventMock).toHaveBeenCalledWith(
+      "run-1",
+      expect.objectContaining({ id, type: "validation.provider.receipt" }),
+    );
+  });
+
+  it("refuses to record a receipt when the run cannot be promoted", async () => {
+    updateSetMock.mockReturnValueOnce({
+      where: vi.fn(() => ({ returning: vi.fn().mockResolvedValue([]) })),
+    });
+
+    await expect(recordValidationProviderReceipt(
+      "run-1",
+      "node-1",
+      "webhook.send",
+      {
+        kind: "provider_simulation_receipt",
+        version: 1,
+        provider: "webhook",
+        operation: "deliver",
+        scope: "validation",
+        effectId: "effect-1",
+        idempotencyKey: "invoice-1",
+        applied: true,
+        duplicate: false,
+        requestId: "request-1",
+      },
+    )).rejects.toThrow("receipt rejected");
+    expect(insertValuesMock).not.toHaveBeenCalled();
+    expect(publishRunEventMock).not.toHaveBeenCalled();
   });
 });

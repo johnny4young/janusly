@@ -3325,6 +3325,13 @@ button.we-ops-metric-card--button {
   border-radius: 6px;
 }
 
+.we-run-history-card__badges {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
 .we-run-history {
   gap: 12px;
 }

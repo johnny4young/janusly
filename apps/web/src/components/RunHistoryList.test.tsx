@@ -75,6 +75,22 @@ describe('<RunHistoryList />', () => {
     expect(props.onOpenRun).toHaveBeenCalledWith('failed-run')
   })
 
+  it('surfaces the durable evidence level on validation history rows', () => {
+    render(<RunHistoryList
+      {...props}
+      runs={[{
+        ...runs[1]!,
+        id: 'validation-run',
+        replayMode: 'validation',
+        validationEvidenceLevel: 'provider_simulated',
+      }]}
+    />)
+
+    expect(screen.getByTestId('run-validation-evidence-validation-run'))
+      .toHaveTextContent('Provider simulated')
+    expect(screen.queryByTestId('history-replay-in-lab-validation-run')).not.toBeInTheDocument()
+  })
+
   it('composes workflow and status as server-side filters', async () => {
     vi.mocked(api).mockResolvedValue([runs[0]])
     render(<RunHistoryList {...props} />)

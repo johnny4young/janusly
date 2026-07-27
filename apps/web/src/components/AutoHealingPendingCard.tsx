@@ -23,6 +23,7 @@ import { useT } from '../i18n'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { ValidationEvidenceLevel } from '../types'
+import { ValidationEvidencePill } from './ValidationEvidencePill'
 
 type PendingRow = {
   id: string
@@ -43,13 +44,6 @@ const APPROACH_LABEL_KEY: Record<string, string> = {
   add_approval: 'autoHealing.approach.add_approval',
   fix_url: 'autoHealing.approach.fix_url',
   other: 'autoHealing.approach.other',
-}
-
-const EVIDENCE_LABEL_KEY: Record<NonNullable<PendingRow['validationEvidenceLevel']>, string> = {
-  static: 'autoHealing.evidence.static',
-  writes_skipped: 'autoHealing.evidence.writes_skipped',
-  provider_simulated: 'autoHealing.evidence.provider_simulated',
-  live_canary: 'autoHealing.evidence.live_canary',
 }
 
 export function AutoHealingPendingCard({ canDecide = true }: { canDecide?: boolean }) {
@@ -141,9 +135,6 @@ export function AutoHealingPendingCard({ canDecide = true }: { canDecide?: boole
             const requiresRiskAcknowledgement = (
               evidenceLevel == null || evidenceLevel === 'writes_skipped'
             )
-            const evidenceLabelKey = evidenceLevel == null
-              ? 'autoHealing.evidence.unknown'
-              : EVIDENCE_LABEL_KEY[evidenceLevel]
             const riskAcknowledgementKey = evidenceLevel == null
               ? 'autoHealing.evidence.unknownAck'
               : 'autoHealing.evidence.writesSkippedAck'
@@ -158,12 +149,16 @@ export function AutoHealingPendingCard({ canDecide = true }: { canDecide?: boole
                         {t('autoHealing.confidence', { value: row.confidence })}
                       </span>
                     )}
-                    <span
-                      className="we-pill"
-                      data-tone={requiresRiskAcknowledgement ? 'warning' : 'neutral'}
-                    >
-                      {t(evidenceLabelKey)}
-                    </span>
+                    {evidenceLevel == null ? (
+                      <span className="we-pill" data-tone="warning">
+                        {t('autoHealing.evidence.unknown')}
+                      </span>
+                    ) : (
+                      <ValidationEvidencePill
+                        level={evidenceLevel}
+                        tone={requiresRiskAcknowledgement ? 'warning' : undefined}
+                      />
+                    )}
                   </div>
                   {requiresRiskAcknowledgement && canDecide && (
                     <label className="we-auto-healing__risk">

@@ -23,6 +23,7 @@ import { useWorkflowStore } from '../store'
 import type { RunSummary, SavedWorkflow } from '../types'
 import { EmptyView } from './panel-primitives'
 import { RunHistoryComparisonDialog } from './RunHistoryComparisonDialog'
+import { ValidationEvidencePill } from './ValidationEvidencePill'
 
 /** Fixed card pitch for the compact row plus its 8px bottom margin. */
 const RUN_HISTORY_ROW_HEIGHT = 156
@@ -228,7 +229,15 @@ export function RunHistoryList({
                     >
                       <div className="split-row" style={{ width: '100%' }}>
                         <strong title={workflowLabel}>{workflowLabel}</strong>
-                        <span className="status-pill" data-status={run.status}>{formatStatusLabel(run.status)}</span>
+                        <span className="we-run-history-card__badges">
+                          {run.replayMode === 'validation' && run.validationEvidenceLevel && (
+                            <ValidationEvidencePill
+                              level={run.validationEvidenceLevel}
+                              testId={`run-validation-evidence-${run.id}`}
+                            />
+                          )}
+                          <span className="status-pill" data-status={run.status}>{formatStatusLabel(run.status)}</span>
+                        </span>
                       </div>
                       <span className="we-run-history-card__identity">
                         <code>{run.id.slice(0, 8)}…</code>

@@ -50,8 +50,10 @@ import { RATE_LIMIT_WINDOW_MS } from "./constants";
 import { fetchHttpTarget } from "./http-policy";
 import { getIntegrationUsageRecorder } from "./integration-usage";
 import {
+  isLocalIntegrationSimulatorEndpoint,
   isLocalSlackSimulatorUrl,
   localIntegrationSimulatorEndpoint,
+  parseProviderSimulationReceipt,
   resolveLocalWebhookDestination,
 } from "./local-integration-simulator";
 import { getEngineRateLimiter } from "./rate-limit";
@@ -211,6 +213,18 @@ const webhookSendOutput = z.object({
   statusCode: z.number().optional(),
   error: z.string().optional(),
   latencyMs: z.number(),
+  providerReceipt: z.object({
+    kind: z.literal("provider_simulation_receipt"),
+    version: z.literal(1),
+    provider: z.literal("webhook"),
+    operation: z.literal("deliver"),
+    scope: z.enum(["validation", "production"]),
+    effectId: z.string().min(1),
+    idempotencyKey: z.string().min(1).nullable(),
+    applied: z.boolean(),
+    duplicate: z.boolean(),
+    requestId: z.string().min(1),
+  }).optional(),
 });
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -1137,6 +1151,7 @@ export const webhookSendTool = {
       nodeId?: string;
       workflowId?: string;
       integrations?: { webhook?: { rateLimitPerMin?: number } };
+      providerSimulation?: { scope: "validation" };
     },
   ): Promise<z.infer<typeof webhookSendOutput>> {
     const start = Date.now();
@@ -1170,6 +1185,8 @@ export const webhookSendTool = {
     const unixSeconds = Math.floor(Date.now() / 1000);
     const signature = signWebhookPayload(gate.credentialSecret, serialized, unixSeconds);
     const headerName = (input.signatureHeader ?? DEFAULT_WEBHOOK_SIGNATURE_HEADER).toLowerCase();
+    const destination = resolveLocalWebhookDestination(input.url);
+    const localSimulator = isLocalIntegrationSimulatorEndpoint(destination, "/webhook");
 
     // Merge operator-supplied extra headers (e.g., X-Idempotency-Key for
     // Linear / generic receivers) on TOP of the always-sent
@@ -1182,13 +1199,20 @@ export const webhookSendTool = {
     if (input.headers) {
       for (const [key, value] of Object.entries(input.headers)) {
         const lower = key.toLowerCase();
-        if (lower === "content-type" || lower === "authorization" || lower === headerName) continue;
+        if (
+          lower === "content-type"
+          || lower === "authorization"
+          || lower === headerName
+          || lower === "x-janusly-simulation-scope"
+        ) continue;
         merged[lower] = value;
       }
     }
     merged[headerName] = signature;
+    if (localSimulator && executionContext.providerSimulation?.scope === "validation") {
+      merged["x-janusly-simulation-scope"] = "validation";
+    }
 
-    const destination = resolveLocalWebhookDestination(input.url);
     const result = await fetchHttpTarget(destination, {
       method: "POST",
       headers: merged,
@@ -1222,6 +1246,11 @@ export const webhookSendTool = {
 
     const ok = result.ok && result.statusCode >= 200 && result.statusCode < 300;
     const error = ok ? undefined : `webhook responded ${result.statusCode}: ${truncate(result.body)}`;
+    const parsedBody = ok && localSimulator ? safeParseJson(result.body) : null;
+    const providerReceipt = parseProviderSimulationReceipt(
+      parsedBody?.receipt,
+      executionContext.providerSimulation?.scope === "validation" ? "validation" : "production",
+    );
     await fireIntegrationRecorder({
       orgId: executionContext.orgId!,
       tool: "webhook.send",
@@ -1233,7 +1262,12 @@ export const webhookSendTool = {
       latencyMs,
     });
     return ok
-      ? { ok: true, statusCode: result.statusCode, latencyMs }
+      ? {
+          ok: true,
+          statusCode: result.statusCode,
+          latencyMs,
+          ...(providerReceipt ? { providerReceipt } : {}),
+        }
       : { ok: false, statusCode: result.statusCode, error: error!, latencyMs };
   },
 };

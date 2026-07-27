@@ -50,7 +50,10 @@ import { withTimeout } from "./core/timeout";
 import { planAgentTool, planAgentToolWithLLM, type AgentPlanResult } from "./agent-planner";
 import type { AgentNodeConfig } from "./node-configs";
 import { appendEvent } from "./persistence";
-import { recordValidationWriteSkip } from "./validation-evidence";
+import {
+  recordValidationWriteSkip,
+  type ValidationEffectMode,
+} from "./validation-evidence";
 import { resolvePromptRef } from "./prompt-resolver";
 import { getRunMemory, summarizeMemory } from "./memory";
 import { recallAgentEpisodes, recordAgentEpisode } from "./agent-memory";
@@ -127,6 +130,8 @@ export type NodeContext = {
    * validation run produces a real terminal status.
    */
   dryRun?: boolean;
+  /** Narrow local effect policy for validation runs. Ordinary sandboxes use `skip`. */
+  validationEffectMode?: ValidationEffectMode;
 };
 
 /**
@@ -622,7 +627,9 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
     // safe methods (GET / HEAD / OPTIONS) still execute so the validation
     // run can read state without mutating it; non-safe methods are
     // skipped to avoid double-charging external APIs.
-    const dryRunSkip = ctx.dryRun ? dryRunToolSkipPayload(tool, toolInput) : null;
+    const dryRunSkip = ctx.dryRun
+      ? dryRunToolSkipPayload(tool, toolInput, ctx.validationEffectMode)
+      : null;
     if (dryRunSkip) {
       await recordValidationWriteSkip(
         ctx.runId,
@@ -643,6 +650,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
       runId: ctx.runId,
       nodeId: ctx.nodeId,
       workflowId: ctx.workflowId ?? undefined,
+      validationEffectMode: ctx.validationEffectMode,
     });
     if (resultPolicy === "require_ok" && result.ok === false) {
       await appendEvent(ctx.runId, ctx.nodeId, "tool.failed", { tool, result });
