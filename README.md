@@ -199,11 +199,16 @@ workflows, credentials, tenant configuration, or example canvas nodes; create
 the first account and workspace manually. Unlike the short-lived `pnpm dev`
 test topology, this stack keeps API and worker behavior production-shaped.
 Explicit smoke commands can install bounded provider fixtures and locally
-simulate GitHub, Slack, signed webhooks, and email without contacting public
-providers. `pnpm local:recovery-lab` additionally proves a real
-provider-boundary failure, DLQ validation with a durable provider receipt,
-operator-approved publication/redrive, verified recovery, and idempotent
-duplicate delivery. See
+simulate GitHub, Slack, signed webhooks, email, and the supported Anthropic
+messages transport without contacting public providers.
+`pnpm local:recovery-lab` additionally proves one combined journey: a
+schema-valid but business-invalid AI result is deterministically quarantined
+and replaced by an operator before any effect runs; the resumed workflow then
+crosses a real provider boundary, fails into the DLQ, validates a repair with a
+durable provider receipt, publishes/redrives, verifies recovery, and rejects a
+duplicate effect. The LLM and downstream provider evidence is explicitly
+`provider_simulated`; it is not presented as live Anthropic or production
+proof. See
 [`docs/local-deployment.md`](docs/local-deployment.md) for lifecycle commands,
 failure injection, persistence, safety boundaries, optional Ollama memory, and
 the explicit simulator-to-external-provider switch for private real-use tests.
@@ -248,7 +253,7 @@ pnpm local:auth:up   # persistent empty-start lab: Supabase Auth + one PostgreSQ
 pnpm local:db:verify # prove auth/public share that database
 pnpm local:smoke     # inbound event + GitHub/Slack/webhook/email simulator path
 pnpm local:failure-smoke # controlled provider outage + fail-closed DLQ evidence
-pnpm local:recovery-lab # complete provider-simulated recovery proof
+pnpm local:recovery-lab # combined semantic + provider-simulated recovery proof
 pnpm local:recovery-lab:destroy # remove the isolated Lab tenant and simulator evidence
 pnpm local:ui-smoke  # Chromium smoke against the persistent stack
 pnpm local:verify    # provider smoke + full restart persistence proof

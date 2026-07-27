@@ -88,6 +88,22 @@ validation and publication. Before commit, pending nodes receive a durable
 queue-publication repair marker; immediate BullMQ publication remains
 best-effort behind that repair boundary.
 
+**Combined local qualification:** `pnpm local:recovery-lab` exercises one
+payment-retry workflow through both semantic and technical recovery. Its
+Anthropic-compatible simulator returns JSON that satisfies the AI node's
+output schema but violates the operator-authored expression detector. The
+runtime atomically succeeds the source node, creates and contains the semantic
+case, parks the run, and proves the downstream write did not execute. Only an
+operator replacement that passes the same deterministic detector resumes the
+run. A separate provider-simulator outage then drives the resumed workflow
+through the real DLQ, provider-simulated validation receipt, publication,
+generation-bound redrive, verified outcome, and duplicate-delivery
+idempotency path. Machine evidence records the provider request, original and
+replacement outputs, semantic case state, technical receipt, effect ledger,
+and recovery ledger. Both simulated provider boundaries are clearly labeled;
+this qualifies local integration and control flow, not live vendor behavior.
+The LLM never resolves the case or authorizes the downstream mutation.
+
 **North-star v1:** the metric key is
 `time_to_verified_recovery`; it is the median elapsed milliseconds from
 `detected_at` to `verified_recovered_at`, with p90 as the primary guardrail.

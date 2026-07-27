@@ -61,6 +61,15 @@ test("local provider routing is explicitly gated and private-target access is vi
   assert.match(compose, /ALLOW_PRIVATE_HTTP_TARGETS: "true"/);
   assert.match(compose, /JANUSLY_MAILER_PROVIDER: \$\{JANUSLY_MAILER_PROVIDER:-simulator\}/);
   assert.match(localEnvExample, /^JANUSLY_LOCAL_INTEGRATION_SIMULATOR=true$/m);
+  assert.match(
+    compose,
+    /ANTHROPIC_BASE_URL: \$\{ANTHROPIC_BASE_URL:-https:\/\/api\.anthropic\.com\/v1\}/,
+  );
+  assert.match(localEnvExample, /^ANTHROPIC_BASE_URL=$/m);
+  assert.match(
+    compose,
+    /JANUSLY_LLM_SIMULATED_PROVIDERS: \$\{JANUSLY_LLM_SIMULATED_PROVIDERS:-\}/,
+  );
 });
 
 test("ignored runtime secrets reach API and worker but never the browser image", () => {

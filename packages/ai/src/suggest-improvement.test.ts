@@ -98,6 +98,7 @@ describe("suggestWorkflowImprovement — AI mode happy path", () => {
       },
       model: "claude-haiku-4-5-20251001",
       provider: "anthropic",
+      providerSimulated: false,
       usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
       latencyMs: 200,
     });
@@ -130,6 +131,7 @@ describe("suggestWorkflowImprovement — AI mode happy path", () => {
       }] },
       model: "m",
       provider: "anthropic",
+      providerSimulated: false,
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
       latencyMs: 1,
     });
@@ -158,6 +160,7 @@ describe("suggestWorkflowImprovement — AI mode happy path", () => {
       }] },
       model: "m",
       provider: "anthropic",
+      providerSimulated: false,
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
       latencyMs: 1,
     });
@@ -223,6 +226,7 @@ describe("suggestWorkflowImprovement — AI mode failure paths", () => {
       }] },
       model: "m",
       provider: "anthropic",
+      providerSimulated: false,
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
       latencyMs: 1,
     });
@@ -251,6 +255,7 @@ describe("suggestWorkflowImprovement — system prompt pinning", () => {
       }] },
       model: "m",
       provider: "anthropic",
+      providerSimulated: false,
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
       latencyMs: 1,
     });

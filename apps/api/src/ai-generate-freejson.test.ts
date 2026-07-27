@@ -17,7 +17,14 @@ const VALID_WORKFLOW = {
 const VALID_JSON = JSON.stringify(VALID_WORKFLOW);
 
 function textResult(text: string): LlmGenerateTextResult {
-  return { text, provider: "anthropic", model: "claude-haiku-4-5-20251001", latencyMs: 5, usage: {} };
+  return {
+    text,
+    provider: "anthropic",
+    model: "claude-haiku-4-5-20251001",
+    providerSimulated: false,
+    latencyMs: 5,
+    usage: {},
+  };
 }
 
 // Mock LlmClient whose generateText returns queued replies in order.

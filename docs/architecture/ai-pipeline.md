@@ -8,6 +8,22 @@
 
 **HTTP authorization:** all six LLM-backed `POST /ai/*` surfaces require the closed `ai.write` permission. `/ai/patch-workflow` and `/ai/suggest-improvement` additionally retain their `editor` rank floor, so both gates must pass. `GET /ai/health` is an authenticated non-LLM status read and deliberately does not require `ai.write`. Generation and patching also expose strict `/v1` aliases; neither alias persists a workflow version.
 
+**Anthropic-compatible endpoint qualification:** provider endpoint resolution
+belongs to the `PROVIDERS` registry, not call sites. `ANTHROPIC_BASE_URL`
+normalizes the canonical host to `/v1` and preserves an intentional compatible
+proxy/simulator URL without a trailing slash before passing it to
+`createAnthropic`; an unset value uses the SDK default. The persistent Recovery
+Lab routes the real Anthropic SDK messages transport to the loopback provider
+simulator, then verifies a schema-valid response through the ordinary `ai`
+node. This is explicit `provider_simulated` evidence, not a live Anthropic
+claim. `JANUSLY_LLM_SIMULATED_PROVIDERS` is ignored unless both
+`JANUSLY_LOCAL_STACK=true` and
+`JANUSLY_LOCAL_INTEGRATION_SIMULATOR=true`. Admitted calls expose
+`providerSimulated: true`, persist that provenance in `usage_events`, and
+record `costUsd=0`; live and unmarked calls retain normal catalog pricing.
+Never infer simulation from a custom URL alone, and never let this label bypass
+budget, fallback, output-schema, or deterministic recovery-policy gates.
+
 ## Agent episodic memory
 
 The `agent` / `multi_agent` loop (`runAgentLoop` in `packages/engine/src/node-registry.ts`) gets durable cross-run memory through `packages/engine/src/agent-memory.ts`, whose `recallAgentEpisodes` / `recordAgentEpisode` wrappers are the only engine path to the `agent_episode` kind in `recallMemory` / `commitMemory`. The LLM planner receives every registered runtime tool from `listPlannerTools()` rather than maintaining a second catalog; each entry carries its Zod-derived JSON input schema, and `{ dryRun: true }` removes registration-time `writeSide` tools before the model sees them (the executor's independent skip stays in place). The planner rejects a model-selected tool that was not in that offered catalog and degrades through the deterministic fallback. On completion the loop records one bounded goal + outcome episode. Only a configured LLM planner (`planner: "openai"`) recalls semantically similar prior episodes and injects the scrubbed results into a DATA-framed prompt block; the deterministic rules planner and an unconfigured LLM client skip recall entirely, so they incur no embedding call. The path honors the same two-flag memory consent (`JANUSLY_MEMORY_ENABLED` + tenant `memory.enabled`, with `agent_episode` in `memory.allowedKinds`), skips write-back in `ctx.dryRun`, and never throws from recall or commit. Do not bypass the shared memory substrate or weaken its prompt-injection framing and secret scrubbing.

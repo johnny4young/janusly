@@ -254,6 +254,8 @@ Credential Secret Store. Tenant config selects only safe behavior.
 | `JANUSLY_LLM_PROVIDER` | `anthropic` (matches the supported posture; explicit set still recommended) | `packages/ai`, `apps/api` | Default provider registry key. Registered values: `openai`, `anthropic`. The supported runtime target is `anthropic` — see AGENTS.md "AI integration" for the operating posture. |
 | `ANTHROPIC_API_KEY` | unset | `packages/ai` | Enables Anthropic-backed AI calls and explicit `anthropic/model` overrides. |
 | `ANTHROPIC_MODEL` | `claude-haiku-4-5-20251001` | `packages/ai`, `apps/api` | Default Anthropic model. |
+| `ANTHROPIC_BASE_URL` | Anthropic SDK default | `packages/ai` | Optional Anthropic-compatible proxy endpoint. The canonical host is normalized to `/v1`; custom URLs are preserved without a trailing slash. The local Recovery Lab points this at its loopback simulator. |
+| `JANUSLY_LLM_SIMULATED_PROVIDERS` | unset | local Recovery Lab only | Comma-separated provider names whose local-compatible calls must be labeled simulated and costed at zero. Ignored unless both `JANUSLY_LOCAL_STACK=true` and `JANUSLY_LOCAL_INTEGRATION_SIMULATOR=true`; never use it to describe live provider traffic. |
 | `JANUSLY_LLM_PRICE_<MODEL>` | built-in pricing table | `packages/ai/src/pricing.ts` | Optional cost override as `<inputUsdPer1M>,<outputUsdPer1M>`, for example `JANUSLY_LLM_PRICE_GPT_4O_MINI=0.15,0.60` or `JANUSLY_LLM_PRICE_CLAUDE_HAIKU_4_5=1.00,5.00`. |
 
 ## Memory And Embeddings

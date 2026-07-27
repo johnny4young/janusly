@@ -1,11 +1,14 @@
 import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getLocalStackSettings } from "./local-env.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const evidenceDir = process.env.JANUSLY_EVIDENCE_DIR
-  ?? fileURLToPath(new URL("../artifacts/recovery-lab-evidence", import.meta.url));
+  ? resolve(root, process.env.JANUSLY_EVIDENCE_DIR)
+  : fileURLToPath(new URL("../output/review/recovery-lab", import.meta.url));
+const recoveryLabEvidence = `${evidenceDir}/recovery-lab.json`;
 const settings = await getLocalStackSettings();
 
 await mkdir(evidenceDir, { recursive: true });
@@ -26,7 +29,7 @@ function run(command, args, env = {}) {
 
 await run(process.execPath, [
   "scripts/recovery-lab.mjs",
-  `--output=${evidenceDir}/recovery-lab.json`,
+  `--output=${recoveryLabEvidence}`,
 ]);
 await run("pnpm", [
   "--filter", "@janusly/web", "exec", "playwright", "test",
@@ -36,6 +39,7 @@ await run("pnpm", [
 ], {
   JANUSLY_REAL_RECOVERY_LAB_E2E: "1",
   JANUSLY_EVIDENCE_DIR: evidenceDir,
+  JANUSLY_RECOVERY_LAB_EVIDENCE: recoveryLabEvidence,
   PLAYWRIGHT_BASE_URL: settings.webUrl,
   PLAYWRIGHT_SKIP_WEB_SERVER: "1",
   E2E_API_URL: settings.apiUrl,

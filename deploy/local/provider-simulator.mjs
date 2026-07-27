@@ -18,8 +18,15 @@ const pagerDutyStatePath = `${dataDir}/pagerduty-incidents.json`;
 const webhookEffectsPath = `${dataDir}/webhook-effects.json`;
 const bodyLimit = 1_000_000;
 const webhookEffectLimit = 2_000;
-const providers = ["github", "slack", "webhook", "email", "pagerduty"];
-const modes = ["success", "failure", "malformed"];
+const providerModes = {
+  github: ["success", "failure", "malformed"],
+  slack: ["success", "failure", "malformed"],
+  webhook: ["success", "failure", "malformed"],
+  email: ["success", "failure", "malformed"],
+  pagerduty: ["success", "failure", "malformed"],
+  anthropic: ["success", "failure", "malformed", "semantic_violation"],
+};
+const providers = Object.keys(providerModes);
 const state = Object.fromEntries(providers.map((provider) => [provider, "success"]));
 let recordTail = Promise.resolve();
 let webhookEffectTail = Promise.resolve();
@@ -30,7 +37,9 @@ await mkdir(dataDir, { recursive: true });
 try {
   const persisted = JSON.parse(await readFile(statePath, "utf8"));
   for (const provider of providers) {
-    if (modes.includes(persisted[provider])) state[provider] = persisted[provider];
+    if (providerModes[provider].includes(persisted[provider])) {
+      state[provider] = persisted[provider];
+    }
   }
 } catch {
   // First boot has no state file.
@@ -88,6 +97,7 @@ async function readBody(req) {
 }
 
 function providerFor(pathname) {
+  if (pathname === "/v1/messages") return "anthropic";
   if (pathname.startsWith("/github/")) return "github";
   if (pathname.startsWith("/slack/")) return "slack";
   if (pathname === "/webhook") return "webhook";
@@ -243,6 +253,56 @@ function githubResponse(pathname, mode, entry) {
     : [201, { number: 42, html_url: `http://localhost:${port}/ui/issues/42`, requestId: entry.id }];
 }
 
+function anthropicResponse(mode, entry, body) {
+  if (mode === "failure") {
+    return [
+      503,
+      {
+        type: "error",
+        error: {
+          type: "api_error",
+          message: "simulated Anthropic outage",
+        },
+      },
+    ];
+  }
+  if (mode === "malformed") {
+    return [200, { id: `msg_${entry.id}`, type: "message" }];
+  }
+
+  const assessment = mode === "semantic_violation"
+    ? {
+        decision: "hold",
+        riskScore: 0.92,
+        reason: "The model could not verify the retry against the business policy.",
+      }
+    : {
+        decision: "retry",
+        riskScore: 0.12,
+        reason: "The retry is within the configured business policy.",
+      };
+  const text = JSON.stringify(assessment);
+  return [
+    200,
+    {
+      id: `msg_${entry.id.replaceAll("-", "")}`,
+      type: "message",
+      role: "assistant",
+      model:
+        typeof body.json?.model === "string"
+          ? body.json.model
+          : "claude-haiku-4-5-20251001",
+      content: [{ type: "text", text }],
+      stop_reason: "end_turn",
+      stop_sequence: null,
+      usage: {
+        input_tokens: 40,
+        output_tokens: Math.max(1, Math.ceil(text.length / 4)),
+      },
+    },
+  ];
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? `localhost:${port}`}`);
   try {
@@ -275,7 +335,10 @@ const server = createServer(async (req, res) => {
       const body = await readBody(req);
       const provider = body.json?.provider;
       const mode = body.json?.mode;
-      if (!providers.includes(provider) || !modes.includes(mode)) {
+      if (
+        !providers.includes(provider)
+        || !providerModes[provider].includes(mode)
+      ) {
         send(res, 400, { error: "provider and mode must be valid closed values" });
         return;
       }
@@ -294,6 +357,16 @@ const server = createServer(async (req, res) => {
     const body = await readBody(req);
     const entry = await recordRequest(provider, req, url, body);
     const mode = state[provider];
+
+    if (provider === "anthropic") {
+      if (req.method !== "POST") {
+        send(res, 405, { error: "method_not_allowed" });
+        return;
+      }
+      const [statusCode, payload] = anthropicResponse(mode, entry, body);
+      send(res, statusCode, payload);
+      return;
+    }
 
     if (provider === "pagerduty") {
       if (mode === "failure") {

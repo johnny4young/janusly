@@ -62,6 +62,7 @@ export async function recordUsage(record: UsageRecord): Promise<void> {
       cacheCreationInputTokens: record.cacheCreationInputTokens ?? null,
       latencyMs: record.latencyMs,
       costUsd: record.costUsd ?? null,
+      providerSimulated: record.providerSimulated,
       nodeId: record.nodeId ?? null,
       // Workflow attribution — populated by /ai/* routes that have
       // the workflow in scope and by the engine's node executors via

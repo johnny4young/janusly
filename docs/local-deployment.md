@@ -229,12 +229,18 @@ The Recovery Lab is an explicit, removable proof of the complete recovery
 path. It uses a dedicated `local-recovery-lab` organization, creates one
 payment-retry workflow through the normal API, and then:
 
-1. injects a webhook-provider outage;
-2. runs the workflow through a human approval and into the real DLQ;
-3. validates a bounded timeout repair against the provider simulator;
-4. persists a validation-scoped provider receipt;
-5. saves the repaired workflow and redrives the original failed run;
-6. verifies the generation-bound recovery ledger;
+1. sends a schema-valid AI result through the Anthropic messages SDK transport
+   to the loopback provider simulator;
+2. fails the operator-authored business expression, creates a durable semantic
+   case, quarantines the run, and proves the downstream effect did not execute;
+3. validates an operator replacement with the same deterministic detector and
+   resumes the original run;
+4. injects a webhook-provider outage after the human approval and reaches the
+   real DLQ through the normal worker path;
+5. validates a bounded timeout repair against the provider simulator and
+   persists a validation-scoped provider receipt;
+6. saves the repaired workflow, redrives the original failed run, and verifies
+   both the semantic outcome and generation-bound recovery ledger;
 7. repeats the same invoice delivery and proves the provider effect was not
    applied twice.
 
@@ -249,13 +255,24 @@ pnpm local:recovery-lab:destroy
 ```
 
 The UI smoke writes a machine-readable `recovery-lab.json` bundle plus English
-and Spanish application screenshots. The create command cleans only the
+and Spanish application screenshots under `output/review/` by default. The
+bundle distinguishes the simulated Anthropic request, deterministic semantic
+case/replacement, provider validation receipt, production effect ledger, and
+duplicate-delivery result. The create command cleans only the
 dedicated Lab organization before recreating it; the destroy command removes
 that organization and its simulator request/effect evidence. Both commands
 refuse an organization id that does not begin with `local-recovery-lab`.
+After qualification (including a failed attempt), the script recreates the
+ordinary local API/worker profile so later manual runs cannot inherit the
+temporary Anthropic simulator endpoint.
 
 Provider simulation is deliberately narrower than an ordinary sandbox. The
-exact failing-node/descendant path must include a direct idempotent
+Anthropic-compatible path is enabled only by the Lab process, requires both
+local-stack simulator gates, sets `providerSimulated=true`, and records
+`costUsd=0`; this qualifies Janusly's SDK/wire integration without claiming a
+live vendor call. No LLM output resolves a semantic incident or authorizes a
+mutation. For downstream effect simulation, the exact failing-node/descendant
+path must include a direct idempotent
 `webhook.send` to an RFC-reserved `*.example.com` target and use
 `resultPolicy="require_ok"`. Dynamic agent/MCP/subworkflow paths and write-side
 HTTP nodes remain effect-free validation. The API and worker independently

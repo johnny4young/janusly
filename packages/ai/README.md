@@ -6,7 +6,7 @@ Provider-neutral LLM abstraction + the run explainer. Every AI surface in Janusl
 
 | Export | What it is |
 | --- | --- |
-| `LlmClient` | One-method interface (`generateText`) every caller depends on. |
+| `LlmClient` | Provider-neutral `generateText` and schema-aware `generateObject` interface every caller depends on. |
 | `getLlmClient()` | Memoised singleton resolved from `process.env`. Returns `null` only when no registered provider key is configured. |
 | `createLlmClient(cfg)` | Build a client from a hand-crafted `ResolvedLlmConfig` (mostly used by tests). |
 | `resolveLlmConfig(env)` | Read the env vars listed below into a fully-defaulted config. Pure over `env`. |
@@ -17,11 +17,13 @@ Provider-neutral LLM abstraction + the run explainer. Every AI surface in Janusl
 
 | Variable | Provider | Purpose | Default |
 | --- | --- | --- | --- |
-| `JANUSLY_LLM_PROVIDER` | _switch_ | Selects the deploy-time default backend. | `openai` |
+| `JANUSLY_LLM_PROVIDER` | _switch_ | Selects the deploy-time default backend. Anthropic is the supported completion posture. | `anthropic` |
 | `OPENAI_API_KEY` | openai | API key. Absent ⇒ AI surfaces degrade to fallback. | _(unset)_ |
 | `OPENAI_MODEL` | openai | Override default model id. | `gpt-4o-mini` |
 | `ANTHROPIC_API_KEY` | anthropic | API key. | _(unset)_ |
 | `ANTHROPIC_MODEL` | anthropic | Override default model id. | `claude-haiku-4-5-20251001` |
+| `ANTHROPIC_BASE_URL` | anthropic | Optional compatible proxy endpoint; the canonical host is normalized to `/v1`. | SDK default |
+| `JANUSLY_LLM_SIMULATED_PROVIDERS` | local qualification | Comma-separated simulated providers. Ignored unless both explicit local-stack simulator gates are true; admitted calls expose provenance and cost zero. | _(unset)_ |
 | `OPENAI_TIMEOUT_MS` | _shared_ | Per-call timeout (passed to `AbortSignal.timeout`). | `30000` |
 | `OPENAI_MAX_RETRIES` | _shared_ | AI SDK retries on rate-limit + 5xx. | `2` |
 
@@ -46,7 +48,7 @@ A workflow author writing this on a single `ai` node:
 
 …runs THAT node alone against Anthropic, regardless of the deploy's `JANUSLY_LLM_PROVIDER`. Per-step provider override comes for free.
 
-## Adding a provider in 4 fields
+## Adding a provider in 4 required fields
 
 `packages/ai/src/llm-client.ts` owns the `PROVIDERS` registry. Adding a new vendor is a single record entry:
 
@@ -59,7 +61,7 @@ const PROVIDERS = {
     envApiKey: "OLLAMA_BASE_URL",
     envModel: "OLLAMA_MODEL",
     defaultModel: "llama3.1",
-    create: (apiKey) => {
+    create: (apiKey, _baseURL) => {
       const ollama = createOllama({ baseURL: apiKey });
       return (modelId) => ollama(modelId);
     },
@@ -71,7 +73,12 @@ const PROVIDERS = {
 };
 ```
 
-Add `@ai-sdk/ollama` to `package.json`, append the entry, ship. The factory, the env loader, the per-call override path all read from `PROVIDERS` directly — no other code changes. The contract is locked down by the registry-extensibility test in `llm-client.test.ts`.
+Add `@ai-sdk/ollama` to `package.json`, append the entry, and validate it.
+Providers that support compatible proxies may also declare optional
+`envBaseURL` and `normalizeBaseURL` fields. The factory, env loader, and
+per-call override path all read from `PROVIDERS` directly — no other routing
+changes. The contract is locked down by the registry-extensibility test in
+`llm-client.test.ts`.
 
 ## Fallback contract — the highest-risk invariant
 

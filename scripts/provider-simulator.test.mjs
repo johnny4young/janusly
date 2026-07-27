@@ -55,6 +55,31 @@ async function deliver(url, scope) {
   return (await response.json()).receipt;
 }
 
+async function setProviderMode(url, provider, mode) {
+  const response = await fetch(`${url}/control`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ provider, mode }),
+  });
+  assert.equal(response.status, 200);
+}
+
+async function completeAnthropic(url) {
+  return fetch(`${url}/v1/messages`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": "local-test-key",
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 200,
+      messages: [{ role: "user", content: "Assess the retry." }],
+    }),
+  });
+}
+
 test("provider simulator persists idempotent effects and isolates validation scope", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "janusly-provider-simulator-"));
   let simulator = await startSimulator(dataDir);
@@ -84,6 +109,48 @@ test("provider simulator persists idempotent effects and isolates validation sco
     const persistedDuplicate = await deliver(simulator.url, "validation");
     assert.equal(persistedDuplicate.duplicate, true);
     assert.equal(persistedDuplicate.effectId, firstValidation.effectId);
+  } finally {
+    await simulator.stop();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("provider simulator exposes deterministic Anthropic-compatible semantic outcomes", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "janusly-anthropic-simulator-"));
+  const simulator = await startSimulator(dataDir);
+  try {
+    await setProviderMode(
+      simulator.url,
+      "anthropic",
+      "semantic_violation",
+    );
+    const violationResponse = await completeAnthropic(simulator.url);
+    assert.equal(violationResponse.status, 200);
+    const violation = await violationResponse.json();
+    assert.equal(violation.type, "message");
+    assert.equal(violation.role, "assistant");
+    assert.equal(violation.stop_reason, "end_turn");
+    assert.deepEqual(JSON.parse(violation.content[0].text), {
+      decision: "hold",
+      riskScore: 0.92,
+      reason: "The model could not verify the retry against the business policy.",
+    });
+
+    await setProviderMode(simulator.url, "anthropic", "success");
+    const successResponse = await completeAnthropic(simulator.url);
+    assert.equal(successResponse.status, 200);
+    const success = await successResponse.json();
+    assert.deepEqual(JSON.parse(success.content[0].text), {
+      decision: "retry",
+      riskScore: 0.12,
+      reason: "The retry is within the configured business policy.",
+    });
+
+    const requests = await (await fetch(`${simulator.url}/requests`)).json();
+    assert.equal(
+      requests.requests.filter((entry) => entry.provider === "anthropic").length,
+      2,
+    );
   } finally {
     await simulator.stop();
     await rm(dataDir, { recursive: true, force: true });

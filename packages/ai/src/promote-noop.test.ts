@@ -19,6 +19,7 @@ function durationResult(duration: string): LlmGenerateObjectResult<{ duration: s
   return {
     object: { duration },
     provider: "anthropic",
+    providerSimulated: false,
     model: "claude-haiku-4-5-20251001",
     latencyMs: 12,
   };
@@ -302,6 +303,7 @@ function cronResult(cronExpression: string): LlmGenerateObjectResult<{ cronExpre
   return {
     object: { cronExpression },
     provider: "anthropic",
+    providerSimulated: false,
     model: "claude-haiku-4-5-20251001",
     latencyMs: 14,
   };

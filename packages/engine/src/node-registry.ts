@@ -915,6 +915,9 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
             valid: false,
             model: result.model,
             provider: result.provider,
+            ...(result.providerSimulated
+              ? { providerSimulated: true }
+              : {}),
             modelHint,
             prompt: previewText(prompt),
             aiError: "output_invalid",
@@ -934,6 +937,9 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
           ...(contracted ? { valid: true, data: contracted.data } : {}),
           model: result.model,
           provider: result.provider,
+          ...(result.providerSimulated
+            ? { providerSimulated: true }
+            : {}),
           prompt: previewText(prompt),
           response: result.text,
           // Surface tokens + cost + latency on the node's stateJson
