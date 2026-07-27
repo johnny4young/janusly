@@ -1,6 +1,6 @@
 /**
  * Value Dashboard — the commercial-pitch surface that sits inside the
- * Recovery Center. Renders MTTR before/after, clusters resolved,
+ * Recovery Center. Renders recovery time before/after, clusters resolved,
  * estimated hours saved, and estimated dollar savings.
  *
  * Every dollar/hour surface carries an "estimate" badge + tooltip
@@ -44,8 +44,8 @@ export type ValueEstimate = {
 }
 
 export type ValueDashboardSectionProps = {
-  mttrMs: number | null
-  mttrDisplay: string
+  recoveryTimeMs: number | null
+  recoveryTimeDisplay: string
   clustersResolved?: ClustersResolvedMetric
   valueEstimate?: ValueEstimate
   windowDays: number
@@ -93,7 +93,9 @@ export function ValueDashboardSection(props: ValueDashboardSectionProps) {
 
   const baselineMttrSeconds = valueEstimate?.assumptions.baselineMttrSeconds ?? 0
   const baselineUnset = baselineMttrSeconds === 0
-  const mttrSeconds = props.mttrMs != null ? Math.round(props.mttrMs / 1000) : null
+  const recoveryTimeSeconds = props.recoveryTimeMs != null
+    ? Math.round(props.recoveryTimeMs / 1000)
+    : null
   const ledgerLine = props.ledger && props.ledger.totalRecovered > 0 ? (
     <p className="we-recovery-center-value__lifetime" data-testid="recovery-lifetime-ledger">
       <History size={14} aria-hidden="true" />
@@ -163,7 +165,7 @@ export function ValueDashboardSection(props: ValueDashboardSectionProps) {
       </header>
 
       <div className="we-recovery-center-value__grid">
-        {/* MTTR Before */}
+        {/* Recovery-time baseline */}
         <div className="we-recovery-center-value__card">
           <div className="we-recovery-center-value__label">{t('recoveryCenter.value.mttrBefore.label')}</div>
           <div className="we-recovery-center-value__value">
@@ -171,14 +173,14 @@ export function ValueDashboardSection(props: ValueDashboardSectionProps) {
           </div>
         </div>
 
-        {/* MTTR After */}
+        {/* Current verified-recovery time */}
         <div className="we-recovery-center-value__card">
           <div className="we-recovery-center-value__label">{t('recoveryCenter.value.mttrAfter.label')}</div>
-          <div className="we-recovery-center-value__value">{props.mttrDisplay}</div>
+          <div className="we-recovery-center-value__value">{props.recoveryTimeDisplay}</div>
         </div>
 
-        {/* MTTR Delta */}
-        {valueEstimate?.mttrDeltaSeconds != null && mttrSeconds != null && (
+        {/* Recovery-time delta */}
+        {valueEstimate?.mttrDeltaSeconds != null && recoveryTimeSeconds != null && (
           <div className="we-recovery-center-value__card">
             <div className="we-recovery-center-value__label">
               {t('recoveryCenter.value.mttrDelta.label')}

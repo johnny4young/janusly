@@ -52,11 +52,19 @@ export type ValueEstimate = {
   }
 }
 
-/** One per-day point of the MTTR trend sparkline; `day` is `YYYY-MM-DD`. */
+/** One per-day median verified-recovery point; `day` is `YYYY-MM-DD`. */
 export type MttrTrendPoint = { day: string; seconds: number }
 
 export type RecoveryMetrics = {
   successRate: RecoveryMetric
+  verifiedRecovery?: RecoveryMetric & {
+    definitionVersion: '1'
+    metric: 'time_to_verified_recovery'
+    unit: 'milliseconds'
+    sampleSize: number
+    p50Ms: number | null
+    p90Ms: number | null
+  }
   mttr: RecoveryMetric
   p95Latency: RecoveryMetric
   approvalsPending: RecoveryMetric
@@ -68,7 +76,7 @@ export type RecoveryMetrics = {
   valueEstimate?: ValueEstimate
   windowDays: number
   terminalRuns: number
-  /** Per-day avg recovery time (last ≤14 days, oldest-first) for the MTTR sparkline. Optional — older API responses omit it. */
+  /** Per-day median verified-recovery time (last ≤14 days, oldest-first). Optional — older API responses omit it. */
   mttrTrend?: MttrTrendPoint[]
   /** Total automation downtime closed in the window (ms). Optional — older API responses omit it. */
   downtimeEndedMs?: number

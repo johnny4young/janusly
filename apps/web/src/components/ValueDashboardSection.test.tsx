@@ -3,7 +3,7 @@
  * visible contracts:
  *   - empty state when no terminal runs in the window (no metric cards
  *     render).
- *   - populated state renders MTTR before/after + clusters + hours + dollar.
+ *   - populated state renders recovery time before/after + clusters + hours + dollar.
  *   - baseline-unset variant shows the "private-beta data pending" copy in
  *     the "Before" slot.
  *   - export buttons trigger `downloadFromApi` with the right URL.
@@ -30,8 +30,8 @@ describe('<ValueDashboardSection />', () => {
   it('renders the private-beta-pending copy when terminalRuns is zero', () => {
     render(
       <ValueDashboardSection
-        mttrMs={null}
-        mttrDisplay="—"
+        recoveryTimeMs={null}
+        recoveryTimeDisplay="—"
         terminalRunsZero
         windowDays={30}
       />,
@@ -44,8 +44,8 @@ describe('<ValueDashboardSection />', () => {
   it('renders all 4 metric cards + estimate badges when populated', () => {
     render(
       <ValueDashboardSection
-        mttrMs={60_000}
-        mttrDisplay="1m 0s"
+        recoveryTimeMs={60_000}
+        recoveryTimeDisplay="1m 0s"
         terminalRunsZero={false}
         windowDays={30}
         clustersResolved={{
@@ -83,8 +83,8 @@ describe('<ValueDashboardSection />', () => {
   it('uses the canonical recovery duration for measured downtime', () => {
     render(
       <ValueDashboardSection
-        mttrMs={60_000}
-        mttrDisplay="1m"
+        recoveryTimeMs={60_000}
+        recoveryTimeDisplay="1m"
         terminalRunsZero={false}
         windowDays={30}
         downtimeEndedMs={(3 * 60 + 14) * 60_000}
@@ -97,8 +97,8 @@ describe('<ValueDashboardSection />', () => {
   it('renders a quiet lifetime ledger only after the first recovered failure', () => {
     const { rerender } = render(
       <ValueDashboardSection
-        mttrMs={60_000}
-        mttrDisplay="1m"
+        recoveryTimeMs={60_000}
+        recoveryTimeDisplay="1m"
         terminalRunsZero={false}
         windowDays={30}
         ledger={{ totalRecovered: 1, downtimeEndedMs: 11_700_000, sinceIso: '2026-01-01T00:00:00.000Z' }}
@@ -111,8 +111,8 @@ describe('<ValueDashboardSection />', () => {
 
     rerender(
       <ValueDashboardSection
-        mttrMs={null}
-        mttrDisplay="—"
+        recoveryTimeMs={null}
+        recoveryTimeDisplay="—"
         terminalRunsZero
         windowDays={30}
         ledger={{ totalRecovered: 0, downtimeEndedMs: 0, sinceIso: null }}
@@ -124,8 +124,8 @@ describe('<ValueDashboardSection />', () => {
   it('renders "Awaiting private-beta data" when baseline is unset (sentinel 0)', () => {
     render(
       <ValueDashboardSection
-        mttrMs={60_000}
-        mttrDisplay="1m 0s"
+        recoveryTimeMs={60_000}
+        recoveryTimeDisplay="1m 0s"
         terminalRunsZero={false}
         windowDays={30}
         clustersResolved={{
@@ -150,15 +150,15 @@ describe('<ValueDashboardSection />', () => {
     )
 
     expect(screen.getByText(/Awaiting private-beta data/i)).toBeInTheDocument()
-    // MTTR delta card should NOT render when baseline is unset.
-    expect(screen.queryByText('MTTR delta')).not.toBeInTheDocument()
+    // Recovery-time delta stays hidden while its baseline is unset.
+    expect(screen.queryByText('Recovery-time delta')).not.toBeInTheDocument()
   })
 
   it('triggers downloadFromApi with the markdown URL on the markdown export button', () => {
     render(
       <ValueDashboardSection
-        mttrMs={60_000}
-        mttrDisplay="1m 0s"
+        recoveryTimeMs={60_000}
+        recoveryTimeDisplay="1m 0s"
         terminalRunsZero={false}
         windowDays={30}
         clustersResolved={{
@@ -192,8 +192,8 @@ describe('<ValueDashboardSection />', () => {
   it('triggers downloadFromApi with the json URL on the json export button', () => {
     render(
       <ValueDashboardSection
-        mttrMs={60_000}
-        mttrDisplay="1m 0s"
+        recoveryTimeMs={60_000}
+        recoveryTimeDisplay="1m 0s"
         terminalRunsZero={false}
         windowDays={7}
         clustersResolved={{

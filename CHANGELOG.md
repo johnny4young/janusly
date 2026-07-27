@@ -16,6 +16,11 @@ retroactively.
 
 ### Changed
 
+- Recovery Center, Operations, and value exports now use a versioned
+  production-only median time to verified recovery, with p90 as a guardrail.
+  Validation runs and invalid recovery clocks are excluded from impact writes
+  and windowed operational metrics; the legacy average `mttr` response field
+  remains for compatible clients.
 - Integration credential values now default to an organization-scoped encrypted
   PostgreSQL Secret Store protected by one external deployment root key.
   Environment-variable references remain an explicit migration mode, while
@@ -81,6 +86,12 @@ retroactively.
 
 ### Added
 
+- Versioned `RecoveryContractV1` and `RecoveryCaseState` domain contracts. A
+  workflow can retain operator-owned technical-failure, evidence, effect,
+  repair, validation, approval/autonomy, verification, and recurrence policy;
+  legal case transitions require actor-attributed evidence receipts. Semantic
+  outcome detection and a durable case projection remain explicitly future
+  work.
 - Prompt-generated PagerDuty V3 workflows: recognized off-hours requests
   compile locally into a visible signed-trigger, authoritative-read,
   deterministic-policy, acknowledge, snooze, and evidence graph. Credential
@@ -177,6 +188,9 @@ retroactively.
 
 ### Fixed
 
+- Workflow save no longer strips documented `recovery` settings, and
+  full-workflow AI improvement cannot invent or overwrite the operator-owned
+  recovery policy.
 - Opening Step setup no longer injects a three-node Sample workflow; a new
   workspace starts with an untitled, empty canvas and explicit add-step
   guidance.

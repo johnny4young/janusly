@@ -16,7 +16,7 @@ Workflow tools were built for the **integration era** — drag-and-drop connecto
 
 It provides a control plane where humans and AI agents can operate workflows without surrendering deterministic safeguards: every step leaves evidence, every failure creates a recovery path, every fix can be reviewed before rollout, and every workflow can evolve without losing human control. Running an AI workflow should become as operationally boring as running a database: instrumented, backed up, recoverable, auditable, and trusted enough for work that matters.
 
-The number we hold ourselves to is **Mean Time To Recovery for failed automations**: from hours to minutes, from minutes to seconds.
+The number we hold ourselves to is the **median time from a detected production failure to a generation-bound, verified recovery**: from hours to minutes, from minutes to seconds. Replay accepted or patch saved does not stop that clock.
 
 ## Where Janusly is going
 
@@ -35,7 +35,8 @@ This is the destination, not a claim that every edge is finished today. The dire
 
 The recovery loop is production-shaped end to end:
 
-- **Observable runtime.** Postgres-backed DAG execution with per-node `run_events`, live SSE run streaming, a unified Runs workspace for overview / chronology / agent activity, a Recovery Center home surfacing failed runs / failure clusters / pending approvals / MTTR-style recovery metrics, and OpenTelemetry traces + Prometheus metrics.
+- **Observable runtime.** Postgres-backed DAG execution with per-node `run_events`, live SSE run streaming, a unified Runs workspace for overview / chronology / agent activity, a Recovery Center home surfacing failed runs / failure clusters / pending approvals / production-only verified-recovery metrics, and OpenTelemetry traces + Prometheus metrics.
+- **Versioned recovery policy.** A workflow can persist an operator-owned `RecoveryContractV1` that declares its technical failure boundary, required evidence, external effects, allowed repair classes, validation strength, approval/autonomy posture, terminal verification, and recurrence window. Semantic-outcome detection is explicitly disabled in v1 rather than presented as shipped, and AI workflow improvement cannot rewrite the policy.
 - **Diagnosis + patch.** AI failure explanation and 1–3 patch suggestions with self-rated confidence, calibrated per approach against the team's own accept/reject history, with a Recovery Confidence Passport that scores whether a patch is safe to apply.
 - **Safe recovery.** Sandbox validation (write-side effects skipped) before any patch saves, immediate cluster-level apply for small cohorts, paced and cancellable replay campaigns with durable per-item progress for larger cohorts, one-click rollback through version history, production redrive that continues a failed run on the patched version, and progressive baseline/canary delivery with minimum-sample automatic return when the canary success guardrail is breached.
 - **Reproducible recovery drills.** Solution Packs expose safe, selectable credential, AI-output, rate-limit, contract-drift, upstream-failure, and worker-interruption scenarios. Every drill records its source and enters the same recovery queue used by runtime failures; the worker-interruption scenario crosses the configured age threshold and exercises the real stalled-node reaper rather than inserting a synthetic terminal failure. Recovery Queue measures each drill from failure to verified terminal success or accepted loss and then observes the existing seven-day production recurrence window. Recovery Center turns those bounded facts into a per-organization validation dossier with explicit completion, recovery, operator-intervention, timing, and failure-mode denominators plus Markdown/JSON exports; partner count, setup time, and willingness-to-pay remain external evidence.
@@ -510,7 +511,7 @@ Acronyms used throughout this README and the wider Janusly codebase ([`AGENTS.md
 | **LTS** | Long-Term Support | Node.js 24 LTS (codename Krypton) is the only supported JavaScript runtime. |
 | **MCP** | Model Context Protocol | The Anthropic-defined protocol for exposing tools to LLM clients. Janusly ships an MCP server (`packages/mcp-server`) and consumes external MCP servers as `mcp_tool` workflow nodes. |
 | **MFA** | Multi-Factor Authentication | A marker flag on `org_configs.auth.mfaRequired`. **Informational only** — Janusly warn-logs server-side when set, but actual enforcement happens at the IdP (Okta / Azure AD carry the claim, Supabase does not). |
-| **MTTR** | Mean Time To Recovery | The north-star metric: how long from a failed automation to that automation working again. Surfaced on `GET /recovery/metrics` and as an SLO threshold field (`mttrSeconds`). |
+| **MTTR** | Mean Time To Recovery | A legacy arithmetic-average compatibility field on `GET /recovery/metrics` and the existing SLO threshold name (`mttrSeconds`). Janusly's versioned product north-star is the median production time to a generation-bound verified recovery (`verifiedRecovery`). |
 | **MVP** | Minimum Viable Product | The current shipping scope — Anthropic-only LLM support, single recovery loop, no cross-provider verification yet. |
 | **OTEL** | OpenTelemetry | The tracing / metrics stack. Tracer + Meter carry `service.name="janusly"`; Prometheus exporter is wired in. |
 | **p95** | 95th percentile | Latency notation: 95% of runs / nodes finish at or below this duration. Surfaced on the workflow health rollup, the recovery metrics dashboard, and as an SLO threshold (`p95DurationMs`). |

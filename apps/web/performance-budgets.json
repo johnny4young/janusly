@@ -57,6 +57,7 @@
     "panel-primitives.js": 0.67,
     "recovery-all-clear-coordinator.js": 1.63,
     "recovery-item.js": 0.61,
+    "recovery-metrics.js": 0.84,
     "recovery-queue-focus-bus.js": 0.71,
     "ReasoningPanel.js": 6.03,
     "RecoveryDialog.js": 13.42,

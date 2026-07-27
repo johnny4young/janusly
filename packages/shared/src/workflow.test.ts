@@ -92,4 +92,91 @@ describe('WorkflowSchema', () => {
       ui: { positions: { missing: { x: 0, y: 0 } } },
     }).success).toBe(false)
   })
+
+  it('preserves validated workflow recovery settings', () => {
+    const workflow = WorkflowSchema.parse({
+      nodes: [{ id: 'charge', type: 'http', config: {} }],
+      edges: [],
+      recovery: {
+        circuitBreaker: { consecutiveFailures: 5 },
+        contract: {
+          version: '1',
+          failure: {
+            technical: { terminalNodeFailure: true, stalledNode: true },
+            semantic: { mode: 'disabled' },
+          },
+          evidence: {
+            required: [
+              'failure_snapshot',
+              'audit_trail',
+              'validation_receipt',
+              'terminal_outcome',
+            ],
+          },
+          effects: [{
+            nodeId: 'charge',
+            kind: 'external_write',
+            idempotency: 'required',
+            receipt: 'runtime',
+          }],
+          repairs: { allowed: ['retry', 'config_patch'] },
+          validation: { minimumEvidenceLevel: 'writes_skipped' },
+          approval: {
+            productionMutation: 'required',
+            permission: 'recovery.write',
+          },
+          autonomyLevel: 3,
+          verification: {
+            kind: 'generation_bound_terminal_success',
+          },
+          recurrence: { windowDays: 7 },
+        },
+      },
+    })
+    expect(workflow.recovery?.circuitBreaker).toEqual({
+      consecutiveFailures: 5,
+    })
+    expect(workflow.recovery?.contract?.version).toBe('1')
+  })
+
+  it('rejects recovery effects that reference missing workflow nodes', () => {
+    const parsed = WorkflowSchema.safeParse({
+      nodes: [{ id: 'charge', type: 'http', config: {} }],
+      edges: [],
+      recovery: {
+        contract: {
+          version: '1',
+          failure: {
+            technical: { terminalNodeFailure: true, stalledNode: true },
+            semantic: { mode: 'disabled' },
+          },
+          evidence: {
+            required: [
+              'failure_snapshot',
+              'audit_trail',
+              'terminal_outcome',
+            ],
+          },
+          effects: [{
+            nodeId: 'missing',
+            kind: 'external_write',
+            idempotency: 'required',
+            receipt: 'runtime',
+          }],
+          repairs: { allowed: ['retry'] },
+          validation: { minimumEvidenceLevel: 'static' },
+          approval: {
+            productionMutation: 'required',
+            permission: 'recovery.write',
+          },
+          autonomyLevel: 1,
+          verification: {
+            kind: 'generation_bound_terminal_success',
+          },
+          recurrence: { windowDays: 7 },
+        },
+      },
+    })
+    expect(parsed.success).toBe(false)
+  })
 })

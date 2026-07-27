@@ -162,6 +162,22 @@ describe('tRecoveryMetricRationale', () => {
       rationaleMeta: { held: 9, resolved: 10, recurred: 1 },
     })).toBe('9 de 10 recuperaciones terminales no han vuelto a fallar con la misma firma durante los siete días siguientes.')
   })
+
+  it('pluralizes verified-recovery samples', () => {
+    initI18n('es')
+
+    expect(tRecoveryMetricRationale({
+      rationale: 'fallback',
+      rationaleCode: 'verified_recovery.summary',
+      rationaleMeta: { p50: '1m', p90: '1m', count: 1 },
+    })).toBe('Mediana 1m en 1 recuperación verificada · p90 1m.')
+
+    expect(tRecoveryMetricRationale({
+      rationale: 'fallback',
+      rationaleCode: 'verified_recovery.summary',
+      rationaleMeta: { p50: '2m', p90: '5m', count: 3 },
+    })).toBe('Mediana 2m en 3 recuperaciones verificadas · p90 5m.')
+  })
 })
 
 describe('tServerFallback', () => {

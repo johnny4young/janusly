@@ -1076,7 +1076,39 @@ Recovery before/after rollup. Splits the same time window by version cutoff: run
 
 ### `GET /recovery/metrics?windowDays=30`
 
-Org-level Operations dashboard payload — recovery metric cards (success rate, MTTR, p95 latency, approvals pending, replay rate, SLA attainment, cost) each with `value` / `display` / `severity` / `rationale`. `slaAttainment` additionally carries `resolvedInWindow` and `metSla`; when no items resolved in-window its `value` is `null`/neutral, not `0%`. The cost/cache projection aggregates every `llm.completion` in the requested rolling window in PostgreSQL, returns the highest-value 100 provider/model groups, and folds any remaining groups into one row with `aggregated: true`; totals and cache share still include that remainder. Severity bands are tunable constants in the engine module.
+Org-level Operations dashboard payload. `verifiedRecovery` is the versioned
+production-only north-star:
+
+```json
+{
+  "definitionVersion": "1",
+  "metric": "time_to_verified_recovery",
+  "unit": "milliseconds",
+  "sampleSize": 8,
+  "p50Ms": 92000,
+  "p90Ms": 310000,
+  "value": 92000,
+  "display": "1m 32s",
+  "severity": "healthy",
+  "rationale": "Median 1m 32s across 8 verified recoveries · p90 5m 10s.",
+  "rationaleCode": "verified_recovery.summary"
+}
+```
+
+The clock starts at durable failure detection and stops only at a
+generation-bound terminal success. Validation runs, accepted loss, abandoned
+work, and invalid clocks are excluded. PostgreSQL computes sample size,
+continuous p50/p90, and downtime over the complete eligible window; the
+1,000-row raw-duration cap applies only to legacy arithmetic-average `mttr`.
+Current Janusly UI and exports prefer `verifiedRecovery`. Other cards include success rate, p95 latency, approvals
+pending, replay rate, SLA attainment, first-action time, recurrence, and cost,
+each with `value` / `display` / `severity` / `rationale`.
+`slaAttainment` additionally carries `resolvedInWindow` and `metSla`; when no
+production items resolved in-window its `value` is `null`/neutral, not `0%`.
+The cost/cache projection aggregates every `llm.completion` in the requested
+rolling window in PostgreSQL, returns the highest-value 100 provider/model
+groups, and folds any remaining groups into one row with `aggregated: true`;
+totals and cache share still include that remainder.
 
 ### `POST /recovery/feedback`
 
@@ -1148,7 +1180,7 @@ Surface highlights:
 
 - **`client.runs.*`** — start saved workflows, list the current capped runs page as an async iterator, get details, poll until terminal, stream events (async iterator), resume `human_form` / `approval` nodes with engine-signed resume tokens.
 - **`client.reports.exportRunExplain(runId, { format })`** — download the run-explain artefact (markdown or JSON) with the suggested filename from `Content-Disposition`.
-- **`client.recovery.getMetrics({ windowDays })`** — operations rollup (success rate, MTTR, p95 latency, approvals pending, replay rate, cost).
+- **`client.recovery.getMetrics({ windowDays })`** — operations rollup (success rate, versioned median time to verified recovery, legacy MTTR compatibility, p95 latency, approvals pending, replay rate, and cost).
 - **`client.webhooks.verifySignature({ body, signatureHeader, secret })`** — Stripe-style HMAC-SHA256 verifier for inbound Janusly webhooks (`x-janusly-signature: t=<unix-seconds>,v1=<hex>` over `${t}.${body}`). Uses `crypto.timingSafeEqual` + ±5-min clock-skew tolerance.
 
 Two auth modes: **service-token** (sends `Authorization: Bearer <token>` + `x-user-id` defaulting to `"sdk-user"`) and **caller-supplied bearer** (Authorization only, identity carried in the token). `x-org-id` is always sent.

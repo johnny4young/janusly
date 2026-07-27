@@ -3,7 +3,7 @@
  *
  * Composes recovery signals from existing endpoints into a one-screen
  * summary: a hero strip with the org-wide health ring + greeting, a
- * seven-cell metric strip (open failures / MTTR / first action / approvals /
+ * seven-cell metric strip (open failures / verified recovery / first action / approvals /
  * replay / fix durability / SLA),
  * the operator composer + content tiles (recovery queue / failure
  * clusters / pending approvals / recommended actions / budget / today),
@@ -84,6 +84,7 @@ import {
 } from './recovery-center/helpers'
 import { RecoveryHeatmap } from './recovery-center/RecoveryHeatmap'
 import { requestRecoveryDayFocus } from './recovery-day-focus-bus'
+import { selectRecoveryTimeMetric } from './recovery-metrics'
 import {
   consumeRecoveryAllClear,
   parseRecoveryAllClearEvent,
@@ -595,12 +596,13 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   // Append the computed tiles. Each pushes a fully-formed VitalSignsTile;
   // the inline composition keeps the rich aria-label (label + display + rationale)
   // the legacy RecoveryCenterMetric provided to screen readers.
-  const mttrLabel = t('recoveryCenter.metric.mttr.label')
-  const mttrDisplay = metrics?.mttr.display ?? '—'
-  const mttrRationale = metrics?.mttr
-    ? tRecoveryMetricRationale(metrics.mttr)
+  const recoveryTime = metrics ? selectRecoveryTimeMetric(metrics) : null
+  const recoveryTimeLabel = t('recoveryCenter.metric.mttr.label')
+  const recoveryTimeDisplay = recoveryTime?.display ?? '—'
+  const recoveryTimeRationale = recoveryTime
+    ? tRecoveryMetricRationale(recoveryTime)
     : t('recoveryCenter.metric.mttr.rationaleFallback')
-  // MTTR trend sparkline: needs ≥2 daily points to tell a story. The hover
+  // The recovery trend needs at least two daily points to tell a story. The hover
   // title lists the exact per-day values the sparkline plots.
   const mttrTrend = metrics?.mttrTrend ?? []
   const mttrTrendSeconds = mttrTrend.map((point) => point.seconds)
@@ -610,12 +612,16 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const mttrTrendTitle = mttrTrendPointLabels.join('\n')
   homeTiles.push({
     icon: <RefreshCw size={14} aria-hidden="true" />,
-    label: mttrLabel,
-    display: mttrDisplay,
-    numericValue: metrics?.mttr.value ?? null,
-    severity: metrics?.mttr.severity ?? 'neutral',
-    rationale: mttrRationale,
-    ariaLabel: t('recoveryCenter.metric.aria', { label: mttrLabel, display: mttrDisplay, rationale: mttrRationale }),
+    label: recoveryTimeLabel,
+    display: recoveryTimeDisplay,
+    numericValue: recoveryTime?.value ?? null,
+    severity: recoveryTime?.severity ?? 'neutral',
+    rationale: recoveryTimeRationale,
+    ariaLabel: t('recoveryCenter.metric.aria', {
+      label: recoveryTimeLabel,
+      display: recoveryTimeDisplay,
+      rationale: recoveryTimeRationale,
+    }),
     sparkline: mttrTrendSeconds.length >= 2 ? mttrTrendSeconds : undefined,
     sparklineLabel: t('recoveryCenter.metric.mttr.trendAria', { count: mttrTrendSeconds.length }),
     sparklineTitle: mttrTrendSeconds.length >= 2 ? mttrTrendTitle : undefined,
@@ -629,7 +635,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
         }
       : undefined,
     onClick: () => props.onOpenTab('operations'),
-    testId: 'recovery-center-metric-mttr',
+    testId: 'recovery-center-metric-verified-recovery',
   })
   const firstActionLabel = t('recoveryCenter.metric.firstAction.label')
   const firstActionDisplay = metrics?.timeToFirstAction?.display ?? '—'
@@ -817,8 +823,8 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
       <RecoveryValidationSection report={validation} />
 
       <ValueDashboardSection
-        mttrMs={metrics?.mttr.value ?? null}
-        mttrDisplay={metrics?.mttr.display ?? '—'}
+        recoveryTimeMs={recoveryTime?.value ?? null}
+        recoveryTimeDisplay={recoveryTime?.display ?? '—'}
         clustersResolved={metrics?.clustersResolved}
         valueEstimate={metrics?.valueEstimate}
         windowDays={metrics?.windowDays ?? 30}

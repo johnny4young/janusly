@@ -19,6 +19,7 @@ import {
   recoveryImpactEvents,
   recoveryImpactRollups,
   recoveryItems,
+  runs,
 } from "@janusly/db";
 import { queryAuditLogs } from "../auditLogsRepo";
 import { rotateCredentialSecretRef } from "../credentialsRepo";
@@ -45,6 +46,8 @@ afterAll(async () => {
   await db.delete(auditLogs).where(eq(auditLogs.orgId, ORG_OTHER));
   await db.delete(deadLetters).where(eq(deadLetters.orgId, ORG));
   await db.delete(deadLetters).where(eq(deadLetters.orgId, ORG_OTHER));
+  await db.delete(runs).where(eq(runs.orgId, ORG));
+  await db.delete(runs).where(eq(runs.orgId, ORG_OTHER));
   await db.delete(credentials).where(eq(credentials.orgId, ORG));
 });
 
@@ -127,11 +130,20 @@ describe("recovery impact aggregates — real Postgres", () => {
       recoveredAt: Date;
       downtimeMs: number;
       withRecoveryItem?: boolean;
+      replayMode?: "validation" | null;
     }): Promise<boolean> {
       const orgId = input.orgId ?? ORG;
       const deadLetterId = `${RUN_TAG}-${input.suffix}`;
       const runId = `${deadLetterId}-run`;
       const nodeId = `${deadLetterId}-node`;
+      await db.insert(runs).values({
+        id: runId,
+        orgId,
+        workflowVersionId: `${runId}-version`,
+        status: "failed",
+        replayMode: input.replayMode ?? null,
+        createdAt: new Date(input.recoveredAt.getTime() - input.downtimeMs),
+      });
       await db.insert(deadLetters).values({
         id: deadLetterId,
         orgId,
@@ -164,12 +176,26 @@ describe("recovery impact aggregates — real Postgres", () => {
     }
 
     await expect(record({ suffix: "recent-a", recoveredAt: recent, downtimeMs: 5 * 60_000, withRecoveryItem: true })).resolves.toBe(true);
-    await expect(record({ suffix: "recent-b", recoveredAt: now, downtimeMs: -60_000 })).resolves.toBe(true);
+    await expect(record({ suffix: "recent-b", recoveredAt: now, downtimeMs: -60_000 })).resolves.toBe(false);
     await expect(record({ suffix: "other-user", userId: "operator-b", recoveredAt: recent, downtimeMs: 10 * 60_000 })).resolves.toBe(true);
+    await expect(record({ suffix: "same-clock", userId: "operator-c", recoveredAt: now, downtimeMs: 0 })).resolves.toBe(true);
     await expect(record({ suffix: "old", recoveredAt: old, downtimeMs: 20 * 60_000 })).resolves.toBe(true);
     await expect(record({ suffix: "other-org", orgId: ORG_OTHER, recoveredAt: recent, downtimeMs: 30 * 60_000 })).resolves.toBe(true);
+    await expect(record({
+      suffix: "validation",
+      recoveredAt: now,
+      downtimeMs: 2 * 60_000,
+      replayMode: "validation",
+    })).resolves.toBe(false);
 
     // A replay that never reaches terminal success has a DLQ row but no impact event.
+    await db.insert(runs).values({
+      id: `${RUN_TAG}-failed-run`,
+      orgId: ORG,
+      workflowVersionId: `${RUN_TAG}-failed-version`,
+      status: "failed",
+      createdAt: new Date(now.getTime() - 60 * 60_000),
+    });
     await db.insert(deadLetters).values({
       id: `${RUN_TAG}-failed-attempt`,
       orgId: ORG,
@@ -209,7 +235,7 @@ describe("recovery impact aggregates — real Postgres", () => {
     });
 
     const since = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    await expect(queryOperatorRecoveryCount(ORG, "operator-a", since)).resolves.toBe(2);
+    await expect(queryOperatorRecoveryCount(ORG, "operator-a", since)).resolves.toBe(1);
     await expect(queryOperatorRecoveryCount(ORG, "operator-b", since)).resolves.toBe(1);
     await expect(queryOperatorRecoveryCount(ORG_OTHER, "operator-a", since)).resolves.toBe(1);
 
@@ -241,7 +267,18 @@ describe("recovery impact aggregates — real Postgres", () => {
     ]));
 
     const signals = await queryRecoveryMetricsSignals(ORG, 30);
-    expect([...signals.mttrDurations].sort((a, b) => a - b)).toEqual([5 * 60_000, 10 * 60_000]);
+    expect(signals.runStatusCounts.total).toBe(5);
+    expect([...signals.mttrDurations].sort((a, b) => a - b)).toEqual([
+      0,
+      5 * 60_000,
+      10 * 60_000,
+    ]);
+    expect(signals.verifiedRecovery).toEqual({
+      sampleSize: 3,
+      p50Ms: 5 * 60_000,
+      p90Ms: 9 * 60_000,
+      downtimeEndedMs: 15 * 60_000,
+    });
     expect(signals.replayOutcomes).toEqual({
       totalEntries: 4,
       replayedSuccess: 3,
@@ -249,6 +286,7 @@ describe("recovery impact aggregates — real Postgres", () => {
     });
     expect(signals.resolvedClusters.totalEntries).toBe(3);
     const heatmap = await queryRecoveryHeatmap(ORG, 30);
+    expect(heatmap.reduce((sum, day) => sum + day.failures, 0)).toBe(6);
     expect(heatmap.reduce((sum, day) => sum + day.recovered, 0)).toBe(3);
 
     // Worker retries cannot inflate the event or rollup because deadLetterId is unique.

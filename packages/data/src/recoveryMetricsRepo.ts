@@ -37,7 +37,8 @@ import {
   runNodes,
   runs,
 } from "@janusly/db";
-import { and, eq, gte, or, sql } from "drizzle-orm";
+import { and, eq, gte, isNull, or, sql } from "drizzle-orm";
+import { buildRecoveryNorthStarSample } from "@janusly/shared";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 import { safePersistPayload } from "@janusly/shared/src/safe-persist";
 import { recordRecoveryPlaybookAppliedTx } from "./recoveryPlaybooksRepo";
@@ -128,11 +129,19 @@ export type RecoveryRecurrenceRepo = {
  * names + shape match `RecoveryMetricsSignals` there — both modules
  * declare the type so neither layer has to depend on the other.
  */
-/** One per-day point for the MTTR trend sparkline: `day` = `YYYY-MM-DD`, `seconds` = avg recovery time that day. */
+/** One per-day point for the recovery trend: `day` = `YYYY-MM-DD`, `seconds` = median verified-recovery time. */
 export type MttrTrendPointRepo = { day: string; seconds: number };
+
+export type VerifiedRecoveryStatsRepo = {
+  sampleSize: number;
+  p50Ms: number | null;
+  p90Ms: number | null;
+  downtimeEndedMs: number;
+};
 
 export type RecoveryMetricsSignals = {
   runStatusCounts: RunStatusCountsRepo;
+  verifiedRecovery: VerifiedRecoveryStatsRepo;
   mttrDurations: number[];
   mttrTrend: MttrTrendPointRepo[];
   approvalsPending: number;
@@ -186,8 +195,16 @@ export async function recordRecoveryImpactTx(
       createdAt: deadLetters.createdAt,
       replayClaimedAt: deadLetters.replayClaimedAt,
       replayedAt: deadLetters.replayedAt,
+      replayMode: runs.replayMode,
     })
     .from(deadLetters)
+    .innerJoin(
+      runs,
+      and(
+        eq(runs.id, deadLetters.runId),
+        eq(runs.orgId, deadLetters.orgId),
+      ),
+    )
     .where(and(
       eq(deadLetters.id, input.deadLetterId),
       eq(deadLetters.runId, input.runId),
@@ -195,6 +212,18 @@ export async function recordRecoveryImpactTx(
     ))
     .limit(1);
   if (!dlq) return false;
+  if (!dlq.createdAt) return false;
+
+  const northStar = buildRecoveryNorthStarSample({
+    caseId: input.deadLetterId,
+    source: "technical_failure",
+    verificationKind: "generation_bound_terminal_success",
+    runKind: dlq.replayMode === null ? "production" : "validation",
+    outcome: "verified_recovered",
+    detectedAt: dlq.createdAt,
+    verifiedRecoveredAt: input.recoveredAt,
+  });
+  if (!northStar.included) return false;
 
   // The API normally stamps queue acceptance immediately after BullMQ
   // enqueue, but a process crash can land between those two operations. A
@@ -213,9 +242,7 @@ export async function recordRecoveryImpactTx(
       eq(deadLetters.status, "open"),
     ));
 
-  const downtimeEndedMs = dlq.createdAt
-    ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, input.recoveredAt.getTime() - dlq.createdAt.getTime()))
-    : 0;
+  const downtimeEndedMs = northStar.sample.durationMs;
   const inserted = await tx
     .insert(recoveryImpactEvents)
     .values({
@@ -391,10 +418,18 @@ export async function queryOperatorRecoveryCount(
   const rows = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(recoveryImpactEvents)
+    .innerJoin(
+      runs,
+      and(
+        eq(runs.id, recoveryImpactEvents.runId),
+        eq(runs.orgId, recoveryImpactEvents.orgId),
+      ),
+    )
     .where(and(
       eq(recoveryImpactEvents.orgId, orgId),
       eq(recoveryImpactEvents.userId, userId),
       gte(recoveryImpactEvents.recoveredAt, since),
+      isNull(runs.replayMode),
     ));
   const count = Number(rows[0]?.count ?? 0);
   return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
@@ -409,6 +444,7 @@ export async function queryRecoveryMetricsSignals(
 
   const [
     runStatusCounts,
+    verifiedRecovery,
     mttrDurations,
     mttrTrend,
     approvalsPending,
@@ -421,6 +457,7 @@ export async function queryRecoveryMetricsSignals(
     recurrence,
   ] = await Promise.all([
     queryRunStatusCounts(orgId, since),
+    queryVerifiedRecoveryStats(orgId, since),
     queryMttrDurations(orgId, since),
     queryMttrTrend(orgId, since),
     queryApprovalsPending(orgId),
@@ -435,6 +472,7 @@ export async function queryRecoveryMetricsSignals(
 
   return {
     runStatusCounts,
+    verifiedRecovery,
     mttrDurations,
     mttrTrend,
     approvalsPending,
@@ -465,11 +503,20 @@ export async function queryTimeToFirstAction(
     p95_seconds: number | null;
   }>(sql`
     WITH samples AS (
-      SELECT extract(epoch FROM ("first_action_at" - "created_at"))::float8 AS seconds
-      FROM "recovery_items"
-      WHERE "org_id" = ${orgId}
-        AND "created_at" >= ${since.toISOString()}::timestamptz
-        AND "first_action_at" IS NOT NULL
+      SELECT extract(epoch FROM (
+        item."first_action_at" - item."created_at"
+      ))::float8 AS seconds
+      FROM "recovery_items" item
+      INNER JOIN "dead_letters" item_dlq
+        ON item_dlq."org_id" = item."org_id"
+       AND item_dlq."id" = item."dead_letter_id"
+      INNER JOIN "runs" item_run
+        ON item_run."org_id" = item."org_id"
+       AND item_run."id" = item_dlq."run_id"
+      WHERE item."org_id" = ${orgId}
+        AND item."created_at" >= ${since.toISOString()}::timestamptz
+        AND item."first_action_at" IS NOT NULL
+        AND item_run."replay_mode" IS NULL
 
       UNION ALL
 
@@ -477,9 +524,13 @@ export async function queryTimeToFirstAction(
         coalesce(dlq."replay_claimed_at", dlq."replayed_at") - dlq."created_at"
       ))::float8 AS seconds
       FROM "dead_letters" dlq
+      INNER JOIN "runs" fallback_run
+        ON fallback_run."org_id" = dlq."org_id"
+       AND fallback_run."id" = dlq."run_id"
       WHERE dlq."org_id" = ${orgId}
         AND dlq."created_at" >= ${since.toISOString()}::timestamptz
         AND coalesce(dlq."replay_claimed_at", dlq."replayed_at") IS NOT NULL
+        AND fallback_run."replay_mode" IS NULL
         AND NOT EXISTS (
           SELECT 1
           FROM "recovery_items" item
@@ -531,11 +582,15 @@ export async function queryRecoveryRecurrence(
         item."error_signature" AS error_signature,
         impact."recovered_at" AS recovered_at
       FROM "recovery_impact_events" impact
+      INNER JOIN "runs" impact_run
+        ON impact_run."id" = impact."run_id"
+       AND impact_run."org_id" = impact."org_id"
       INNER JOIN "recovery_items" item
         ON item."org_id" = impact."org_id"
        AND item."dead_letter_id" = impact."dead_letter_id"
       WHERE impact."org_id" = ${orgId}
         AND impact."recovered_at" >= ${since.toISOString()}::timestamptz
+        AND impact_run."replay_mode" IS NULL
 
       UNION ALL
 
@@ -544,6 +599,9 @@ export async function queryRecoveryRecurrence(
         item."error_signature" AS error_signature,
         impact."recovered_at" AS recovered_at
       FROM "recovery_impact_events" impact
+      INNER JOIN "runs" impact_run
+        ON impact_run."id" = impact."run_id"
+       AND impact_run."org_id" = impact."org_id"
       INNER JOIN "recovery_item_children" child
         ON child."org_id" = impact."org_id"
        AND child."dead_letter_id" = impact."dead_letter_id"
@@ -552,6 +610,7 @@ export async function queryRecoveryRecurrence(
        AND item."id" = child."recovery_item_id"
       WHERE impact."org_id" = ${orgId}
         AND impact."recovered_at" >= ${since.toISOString()}::timestamptz
+        AND impact_run."replay_mode" IS NULL
     ), recovered_items AS (
       SELECT
         item_id,
@@ -618,10 +677,10 @@ export async function queryRecoveryRecurrence(
 }
 
 /**
- * Per-day average terminal recovery impact, bucketed by the day success
+ * Per-day median terminal recovery impact, bucketed by the day success
  * committed. Aggregated entirely
  * in Postgres (one GROUP BY, no row materialization) and bounded to the most
- * recent 14 days with data, returned oldest-first for the MTTR trend sparkline.
+ * recent 14 days with data, returned oldest-first for the recovery trend.
  * Multi-tenant scope: `eq(recoveryImpactEvents.orgId, orgId)`.
  */
 async function queryMttrTrend(orgId: string, since: Date): Promise<MttrTrendPointRepo[]> {
@@ -629,22 +688,31 @@ async function queryMttrTrend(orgId: string, since: Date): Promise<MttrTrendPoin
   const rows = await db
     .select({
       day: sql<string>`to_char(${dayBucket}, 'YYYY-MM-DD')`,
-      seconds: sql<number>`avg(${recoveryImpactEvents.downtimeEndedMs})::float8 / 1000`,
+      seconds: sql<number>`percentile_cont(0.5) within group (order by ${recoveryImpactEvents.downtimeEndedMs})::float8 / 1000`,
     })
     .from(recoveryImpactEvents)
+    .innerJoin(
+      runs,
+      and(
+        eq(runs.id, recoveryImpactEvents.runId),
+        eq(runs.orgId, recoveryImpactEvents.orgId),
+      ),
+    )
     .where(and(
       eq(recoveryImpactEvents.orgId, orgId),
       gte(recoveryImpactEvents.recoveredAt, since),
+      isNull(runs.replayMode),
     ))
     .groupBy(dayBucket)
     .orderBy(sql`${dayBucket} desc`)
     .limit(14);
 
   // Newest-first from SQL → reverse to ascending for the left-to-right
-  // sparkline; drop any non-positive average (clock skew).
+  // sparkline; negative clocks are rejected before impact insertion, while a
+  // zero-duration recovery remains a valid sample at timestamp precision.
   return rows
     .map((row) => ({ day: row.day, seconds: Number(row.seconds) }))
-    .filter((point) => Number.isFinite(point.seconds) && point.seconds > 0)
+    .filter((point) => Number.isFinite(point.seconds) && point.seconds >= 0)
     .reverse();
 }
 
@@ -662,7 +730,7 @@ const HEATMAP_MAX_DAYS = 90;
  * Per-day failure/recovery counts over the last `days` (clamped 1..90),
  * bucketed by the day the failure landed: `failures` = dead letters created
  * that day, `recovered` = the subset with terminal impact evidence,
- * `mttrSeconds` = avg terminal recovery time. One Postgres GROUP BY,
+ * `mttrSeconds` = median terminal recovery time. One Postgres GROUP BY,
  * oldest-first. Multi-tenant scope: `eq(deadLetters.orgId, orgId)`. The existing
  * `dead_letters_org_created_idx` covers the window scan.
  */
@@ -675,11 +743,28 @@ export async function queryRecoveryHeatmap(orgId: string, days: number): Promise
       day: sql<string>`to_char(${dayBucket}, 'YYYY-MM-DD')`,
       failures: sql<number>`count(*)::int`,
       recovered: sql<number>`count(${recoveryImpactEvents.deadLetterId})::int`,
-      mttrSeconds: sql<number>`coalesce(avg(${recoveryImpactEvents.downtimeEndedMs}) / 1000, 0)::float8`,
+      mttrSeconds: sql<number>`coalesce(percentile_cont(0.5) within group (order by ${recoveryImpactEvents.downtimeEndedMs}), 0)::float8 / 1000`,
     })
     .from(deadLetters)
-    .leftJoin(recoveryImpactEvents, eq(recoveryImpactEvents.deadLetterId, deadLetters.id))
-    .where(and(eq(deadLetters.orgId, orgId), gte(deadLetters.createdAt, since)))
+    .innerJoin(
+      runs,
+      and(
+        eq(runs.id, deadLetters.runId),
+        eq(runs.orgId, deadLetters.orgId),
+      ),
+    )
+    .leftJoin(
+      recoveryImpactEvents,
+      and(
+        eq(recoveryImpactEvents.deadLetterId, deadLetters.id),
+        eq(recoveryImpactEvents.orgId, deadLetters.orgId),
+      ),
+    )
+    .where(and(
+      eq(deadLetters.orgId, orgId),
+      gte(deadLetters.createdAt, since),
+      isNull(runs.replayMode),
+    ))
     .groupBy(dayBucket)
     .orderBy(sql`${dayBucket} asc`)
     .limit(HEATMAP_MAX_DAYS);
@@ -708,10 +793,25 @@ export async function queryRecoverySlaAttainment(
       metSla: sql<number>`count(*) filter (where ${recoveryItems.resolvedAt} <= ${recoveryItems.slaTargetAt})::int`,
     })
     .from(recoveryItems)
+    .innerJoin(
+      deadLetters,
+      and(
+        eq(deadLetters.orgId, recoveryItems.orgId),
+        eq(deadLetters.id, recoveryItems.deadLetterId),
+      ),
+    )
+    .innerJoin(
+      runs,
+      and(
+        eq(runs.orgId, recoveryItems.orgId),
+        eq(runs.id, deadLetters.runId),
+      ),
+    )
     .where(and(
       eq(recoveryItems.orgId, orgId),
       eq(recoveryItems.status, "resolved"),
       gte(recoveryItems.resolvedAt, since),
+      isNull(runs.replayMode),
     ));
   return {
     resolvedInWindow: rows[0]?.resolvedInWindow ?? 0,
@@ -733,6 +833,7 @@ async function queryRunStatusCounts(orgId: string, since: Date): Promise<RunStat
     .where(and(
       eq(runs.orgId, orgId),
       gte(runs.createdAt, since),
+      isNull(runs.replayMode),
     ))
     .limit(RUN_STATUS_ROW_CAP);
 
@@ -754,6 +855,56 @@ async function queryRunStatusCounts(orgId: string, since: Date): Promise<RunStat
   return counts;
 }
 
+/**
+ * Exact rolling-window north-star aggregate. PostgreSQL computes the complete
+ * production sample and returns one bounded row; the separate raw duration
+ * query remains capped only for the legacy arithmetic-average `mttr` field.
+ */
+async function queryVerifiedRecoveryStats(
+  orgId: string,
+  since: Date,
+): Promise<VerifiedRecoveryStatsRepo> {
+  const rows = await db
+    .select({
+      sampleSize: sql<number>`count(*)::int`,
+      p50Ms: sql<number | null>`percentile_cont(0.5) within group (order by ${recoveryImpactEvents.downtimeEndedMs})`,
+      p90Ms: sql<number | null>`percentile_cont(0.9) within group (order by ${recoveryImpactEvents.downtimeEndedMs})`,
+      downtimeEndedMs: sql<number>`coalesce(sum(${recoveryImpactEvents.downtimeEndedMs}), 0)`,
+    })
+    .from(recoveryImpactEvents)
+    .innerJoin(
+      runs,
+      and(
+        eq(runs.id, recoveryImpactEvents.runId),
+        eq(runs.orgId, recoveryImpactEvents.orgId),
+      ),
+    )
+    .where(and(
+      eq(recoveryImpactEvents.orgId, orgId),
+      gte(recoveryImpactEvents.recoveredAt, since),
+      isNull(runs.replayMode),
+    ));
+  const row = rows[0];
+  const sampleSize = Number(row?.sampleSize ?? 0);
+  const p50Ms = row?.p50Ms == null ? null : Number(row.p50Ms);
+  const p90Ms = row?.p90Ms == null ? null : Number(row.p90Ms);
+  const downtimeEndedMs = Number(row?.downtimeEndedMs ?? 0);
+  return {
+    sampleSize: Number.isFinite(sampleSize)
+      ? Math.max(0, Math.floor(sampleSize))
+      : 0,
+    p50Ms: p50Ms != null && Number.isFinite(p50Ms)
+      ? Math.max(0, Math.round(p50Ms))
+      : null,
+    p90Ms: p90Ms != null && Number.isFinite(p90Ms)
+      ? Math.max(0, Math.round(p90Ms))
+      : null,
+    downtimeEndedMs: Number.isFinite(downtimeEndedMs)
+      ? Math.max(0, Math.round(downtimeEndedMs))
+      : 0,
+  };
+}
+
 async function queryMttrDurations(orgId: string, since: Date): Promise<number[]> {
   // Terminal recovery duration is materialized atomically with node success.
   // Enqueue acceptance (`dead_letters.status='replayed'`) is not evidence.
@@ -762,15 +913,23 @@ async function queryMttrDurations(orgId: string, since: Date): Promise<number[]>
       downtimeEndedMs: recoveryImpactEvents.downtimeEndedMs,
     })
     .from(recoveryImpactEvents)
+    .innerJoin(
+      runs,
+      and(
+        eq(runs.id, recoveryImpactEvents.runId),
+        eq(runs.orgId, recoveryImpactEvents.orgId),
+      ),
+    )
     .where(and(
       eq(recoveryImpactEvents.orgId, orgId),
       gte(recoveryImpactEvents.recoveredAt, since),
+      isNull(runs.replayMode),
     ))
     .limit(MTTR_SAMPLE_CAP);
 
   return rows
     .map((row) => Number(row.downtimeEndedMs))
-    .filter((ms) => Number.isFinite(ms) && ms > 0);
+    .filter((ms) => Number.isFinite(ms) && ms >= 0);
 }
 
 async function queryApprovalsPending(orgId: string): Promise<number> {
@@ -785,6 +944,7 @@ async function queryApprovalsPending(orgId: string): Promise<number> {
     .where(and(
       eq(runs.orgId, orgId),
       eq(runNodes.status, "waiting"),
+      isNull(runs.replayMode),
       sql`${runNodes.stateJson} #>> '{waiting,reason}' = 'Waiting for human approval'`,
     ));
   return rows[0]?.count ?? 0;
@@ -915,6 +1075,7 @@ async function queryP95Latency(orgId: string, since: Date): Promise<number | nul
     .where(and(
       eq(runs.orgId, orgId),
       gte(runs.createdAt, since),
+      isNull(runs.replayMode),
     ))
     .groupBy(runEvents.runId)
     .limit(EVENT_ROW_CAP);
@@ -943,19 +1104,23 @@ async function queryReplayOutcomes(orgId: string, since: Date): Promise<ReplayOu
   }>(sql`
     WITH attempts AS (
       SELECT
-        "id",
-        "org_id",
-        "run_id",
-        "node_id",
-        coalesce("replay_claimed_at", "replayed_at") AS "replay_boundary"
-      FROM "dead_letters"
-      WHERE "org_id" = ${orgId}
-        AND coalesce("replay_claimed_at", "replayed_at") >= ${sinceIso}::timestamptz
+        dlq."id",
+        dlq."org_id",
+        dlq."run_id",
+        dlq."node_id",
+        coalesce(dlq."replay_claimed_at", dlq."replayed_at") AS "replay_boundary"
+      FROM "dead_letters" dlq
+      INNER JOIN "runs" attempt_run
+        ON attempt_run."id" = dlq."run_id"
+       AND attempt_run."org_id" = dlq."org_id"
+      WHERE dlq."org_id" = ${orgId}
+        AND coalesce(dlq."replay_claimed_at", dlq."replayed_at") >= ${sinceIso}::timestamptz
+        AND attempt_run."replay_mode" IS NULL
     ), outcomes AS (
       SELECT
         attempts."id",
         bool_or(impact."dead_letter_id" IS NOT NULL) AS "succeeded",
-        bool_or(later."id" IS NOT NULL) AS "reopened"
+        bool_or(later_run."id" IS NOT NULL) AS "reopened"
       FROM attempts
       LEFT JOIN "recovery_impact_events" impact
         ON impact."dead_letter_id" = attempts."id"
@@ -965,6 +1130,10 @@ async function queryReplayOutcomes(orgId: string, since: Date): Promise<ReplayOu
        AND later."node_id" = attempts."node_id"
        AND later."id" <> attempts."id"
        AND later."created_at" > attempts."replay_boundary"
+      LEFT JOIN "runs" later_run
+        ON later_run."id" = later."run_id"
+       AND later_run."org_id" = later."org_id"
+       AND later_run."replay_mode" IS NULL
       GROUP BY attempts."id"
     )
     SELECT
@@ -1010,9 +1179,17 @@ export async function queryFailureClustersResolved(
     })
     .from(recoveryImpactEvents)
     .innerJoin(deadLetters, eq(deadLetters.id, recoveryImpactEvents.deadLetterId))
+    .innerJoin(
+      runs,
+      and(
+        eq(runs.id, recoveryImpactEvents.runId),
+        eq(runs.orgId, recoveryImpactEvents.orgId),
+      ),
+    )
     .where(and(
       eq(recoveryImpactEvents.orgId, orgId),
       gte(recoveryImpactEvents.recoveredAt, since),
+      isNull(runs.replayMode),
     ))
     .limit(RESOLVED_CLUSTERS_ROW_CAP + 1);
 

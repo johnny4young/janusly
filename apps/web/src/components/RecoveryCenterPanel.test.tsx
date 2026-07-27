@@ -60,7 +60,21 @@ const baseProps = {
 
 const baseMetrics = {
   successRate: { value: 87, display: '87%', severity: 'healthy', rationale: 'Workflow success rate' },
-  mttr: { value: 12, display: '12m', severity: 'warn', rationale: 'Mean time to recovery' },
+  verifiedRecovery: {
+    value: 7 * 60_000,
+    display: '7m',
+    severity: 'warn',
+    rationale: 'Verified recovery median',
+    rationaleCode: 'verified_recovery.summary',
+    rationaleMeta: { count: 3, p50: '7m', p90: '12m' },
+    definitionVersion: '1',
+    metric: 'time_to_verified_recovery',
+    unit: 'milliseconds',
+    sampleSize: 3,
+    p50Ms: 7 * 60_000,
+    p90Ms: 12 * 60_000,
+  },
+  mttr: { value: 12, display: '12m', severity: 'warn', rationale: 'Legacy mean time to recovery' },
   p95Latency: { value: 240, display: '240ms', severity: 'healthy', rationale: 'p95 latency' },
   approvalsPending: { value: 0, display: '0', severity: 'healthy', rationale: 'No human action waiting' },
   replayRate: { value: 78, display: '78%', severity: 'healthy', rationale: 'Replay success rate' },
@@ -326,7 +340,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
         '/recovery/ledger',
         '/recovery/my-wins?days=30',
       ]))
-      expect(screen.getByTestId('recovery-center-metric-mttr')).toHaveTextContent('12m')
+      expect(screen.getByTestId('recovery-center-metric-verified-recovery')).toHaveTextContent('7m')
       expect(screen.getByText('Slow heatmap cluster')).toBeInTheDocument()
       expect(screen.getByTestId('recovery-validation-section')).toHaveTextContent('1/1')
     })
@@ -364,7 +378,14 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
       if (path === '/recovery/metrics') {
         metricsCalls += 1
         if (metricsCalls === 1) return firstMetrics
-        return { ...baseMetrics, mttr: { ...baseMetrics.mttr, value: 22, display: '22m' } }
+        return {
+          ...baseMetrics,
+          verifiedRecovery: {
+            ...baseMetrics.verifiedRecovery,
+            value: 22 * 60_000,
+            display: '22m',
+          },
+        }
       }
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -380,12 +401,19 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     rerender(<RecoveryCenterPanel {...baseProps} />)
     await waitFor(() => {
       expect(metricsCalls).toBe(2)
-      expect(screen.getByTestId('recovery-center-metric-mttr')).toHaveTextContent('22m')
+      expect(screen.getByTestId('recovery-center-metric-verified-recovery')).toHaveTextContent('22m')
     })
 
-    releaseFirstMetrics?.({ ...baseMetrics, mttr: { ...baseMetrics.mttr, value: 99, display: '99m' } })
+    releaseFirstMetrics?.({
+      ...baseMetrics,
+      verifiedRecovery: {
+        ...baseMetrics.verifiedRecovery,
+        value: 99 * 60_000,
+        display: '99m',
+      },
+    })
     await Promise.resolve()
-    expect(screen.getByTestId('recovery-center-metric-mttr')).not.toHaveTextContent('99m')
+    expect(screen.getByTestId('recovery-center-metric-verified-recovery')).not.toHaveTextContent('99m')
   })
 
   it('does not render a previous organization metrics error during an org switch', async () => {
@@ -735,7 +763,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     await waitFor(() => expect(screen.getByTestId('recovery-center-metric-failures')).toBeInTheDocument())
     fireEvent.click(screen.getByTestId('recovery-center-metric-failures'))
     expect(baseProps.onOpenRecoveryQueue).toHaveBeenCalledOnce()
-    fireEvent.click(screen.getByTestId('recovery-center-metric-mttr'))
+    fireEvent.click(screen.getByTestId('recovery-center-metric-verified-recovery'))
     expect(baseProps.onOpenTab).toHaveBeenLastCalledWith('operations')
     fireEvent.click(screen.getByTestId('recovery-center-metric-approvals'))
     expect(baseProps.onOpenTab).toHaveBeenLastCalledWith('runs')
@@ -743,7 +771,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     expect(baseProps.onOpenTab).toHaveBeenLastCalledWith('operations')
   })
 
-  it('drills an MTTR sparkline point into the matching recovery day', async () => {
+  it('drills a verified-recovery trend point into the matching recovery day', async () => {
     const trend = [
       { day: '2026-07-01', seconds: 300 },
       { day: '2026-07-02', seconds: 240 },

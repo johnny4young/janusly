@@ -11,6 +11,7 @@
 import { CheckCircle2, Clock, DollarSign, RefreshCw, Users, Zap } from 'lucide-react'
 import { withSeverityLabels, type VitalSignsTile, type VitalSignsTileSeverity } from './VitalSignsStrip'
 import { tRecoveryMetricRationale, type useT } from '../i18n'
+import { selectRecoveryTimeMetric } from './recovery-metrics'
 
 /** Closed enum of metric severity values that the API echoes back. Mirrored
  *  byte-for-byte from the engine's `MetricSeverity` so the tile builder
@@ -28,6 +29,7 @@ export type OperationsMetric = {
 
 export type OperationsMetrics = {
   successRate: OperationsMetric
+  verifiedRecovery?: OperationsMetric
   mttr: OperationsMetric
   p95Latency: OperationsMetric
   approvalsPending: OperationsMetric
@@ -44,6 +46,7 @@ export function buildOperationsTiles(
   metrics: OperationsMetrics,
   t: ReturnType<typeof useT>['t'],
 ): VitalSignsTile[] {
+  const recoveryTime = selectRecoveryTimeMetric(metrics)
   return withSeverityLabels([
     {
       icon: <CheckCircle2 size={14} aria-hidden="true" />,
@@ -56,9 +59,9 @@ export function buildOperationsTiles(
     {
       icon: <RefreshCw size={14} aria-hidden="true" />,
       label: t('operations.metric.mttr'),
-      display: metrics.mttr.display,
-      severity: metrics.mttr.severity,
-      rationale: tRecoveryMetricRationale(metrics.mttr),
+      display: recoveryTime.display,
+      severity: recoveryTime.severity,
+      rationale: tRecoveryMetricRationale(recoveryTime),
     },
     {
       icon: <Zap size={14} aria-hidden="true" />,

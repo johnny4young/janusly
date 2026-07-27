@@ -200,13 +200,22 @@ describe("Recovery Playbooks (real Postgres)", () => {
     });
     expect((await activateRecoveryPlaybook(ORG, draft.playbook.id, "operator")).kind).toBe("ok");
 
-    await db.insert(runs).values({
-      id: validationRunId,
-      orgId: ORG,
-      workflowVersionId: versionId,
-      status: "succeeded",
-      replayMode: "validation",
-    });
+    await db.insert(runs).values([
+      {
+        id: validationRunId,
+        orgId: ORG,
+        workflowVersionId: versionId,
+        status: "succeeded",
+        replayMode: "validation",
+      },
+      {
+        id: productionRunId,
+        orgId: ORG,
+        workflowVersionId: versionId,
+        status: "succeeded",
+        createdAt: new Date(recoveredAt.getTime() - 60_000),
+      },
+    ]);
     await db.insert(deadLetters).values({
       id: deadLetterId,
       orgId: ORG,

@@ -46,6 +46,7 @@ import {
   type QueueUnavailableReason,
 } from './QueueLagChip'
 import { buildOperationsTiles } from './operations-tiles'
+import { selectRecoveryTimeMetric } from './recovery-metrics'
 import {
   OPERATIONS_SECTION_REQUEST_EVENT as SECTION_REQUEST_EVENT,
   isOpsSection as isSection,
@@ -106,6 +107,7 @@ type CacheEfficiency = {
 
 type RecoveryMetrics = {
   successRate: RecoveryMetric
+  verifiedRecovery?: RecoveryMetric
   mttr: RecoveryMetric
   p95Latency: RecoveryMetric
   approvalsPending: RecoveryMetric
@@ -118,7 +120,7 @@ type RecoveryMetrics = {
 
 /**
  * Sandbox zeros read as "no signal", not red. When no run has reached a
- * terminal state yet, the signal metrics (success / mttr / p95 / replay /
+ * terminal state yet, the signal metrics (success / recovery time / p95 / replay /
  * cost) carry no real data — present them neutral regardless of the
  * server's band so an empty workspace doesn't look like a broken product.
  * `approvalsPending` is left alone (0 pending == healthy, never alarming).
@@ -132,6 +134,9 @@ function neutralizeSandboxZeros(metrics: RecoveryMetrics | null): RecoveryMetric
   return {
     ...metrics,
     successRate: neutral(metrics.successRate),
+    ...(metrics.verifiedRecovery
+      ? { verifiedRecovery: neutral(metrics.verifiedRecovery) }
+      : {}),
     mttr: neutral(metrics.mttr),
     p95Latency: neutral(metrics.p95Latency),
     replayRate: neutral(metrics.replayRate),
@@ -319,7 +324,13 @@ export function OperationsPage({ permissions }: { permissions?: readonly string[
   // Inline (no useMemo) — 5 comparisons against a fixed-size set is cheap
   // and keeps the asymmetry with the inline rate-limiter checks small.
   const overviewUnhealthy = displayMetrics
-    ? [displayMetrics.successRate, displayMetrics.mttr, displayMetrics.p95Latency, displayMetrics.replayRate, displayMetrics.costThisWindow]
+    ? [
+        displayMetrics.successRate,
+        selectRecoveryTimeMetric(displayMetrics),
+        displayMetrics.p95Latency,
+        displayMetrics.replayRate,
+        displayMetrics.costThisWindow,
+      ]
         .some((m) => m.severity === 'unhealthy')
     : false
   const queueHealth = queueSignal === undefined ? undefined : queueSignal.workflow

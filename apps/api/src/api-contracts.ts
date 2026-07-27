@@ -619,6 +619,14 @@ const CostProviderRowSchema = z.object({
 
 const RecoveryMetricsSchema = z.object({
   successRate: RecoveryMetricSchema,
+  verifiedRecovery: RecoveryMetricSchema.extend({
+    definitionVersion: z.literal("1"),
+    metric: z.literal("time_to_verified_recovery"),
+    unit: z.literal("milliseconds"),
+    sampleSize: z.number().int().nonnegative(),
+    p50Ms: z.number().int().nonnegative().nullable(),
+    p90Ms: z.number().int().nonnegative().nullable(),
+  }),
   mttr: RecoveryMetricSchema,
   p95Latency: RecoveryMetricSchema,
   approvalsPending: RecoveryMetricSchema,

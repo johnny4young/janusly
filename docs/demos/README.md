@@ -4,9 +4,12 @@ Canonical demos for sales calls, landing-page copy, and technical-buyer conversa
 
 The product positioning anchors on a single sentence:
 
-> **Janusly is a self-healing AI workflow operator. Every run is observable, every failure is explainable, every proposed fix is reviewable, and every production change is replayable before rollout.**
+> **Janusly is an agent-native workflow orchestration and recovery platform. Every run is observable, every failure is explainable, every proposed fix is reviewable, and every production change is auditable.**
 
-The primary business metric is **Mean Time To Recovery for failed automations**. Every demo loops back to that number and to the product purpose described in the root [`README.md`](../../README.md).
+The primary business metric is **median time from a detected production failure
+to a generation-bound verified recovery**. Every demo must show the real
+measured clock when it completes; illustrative customer baselines are labeled
+as assumptions, not product evidence.
 
 ## Flagship demos (3 — 3-5 minute sales-call material)
 
@@ -34,7 +37,7 @@ Every narrative follows the same skeleton:
 3. **Observability story** — what the operator can see in the run timeline, audit log, usage events, budget dashboard.
 4. **Human-in-the-loop story** — where the human appears, what data they see, what they decide.
 5. **Recovery story** — what happens when something breaks; how the operator gets back to green.
-6. **Closing metric** — the one number the demo proves out (MTTR, dollars saved, approvals processed, etc.).
+6. **Closing metric** — the one number the demo actually measured (verified-recovery time, approvals processed, etc.) or an explicitly labeled estimate.
 7. **3-5 minute talk track** — a tight script for live demos and screen recordings.
 
 ## Templates vs solution packs
@@ -58,7 +61,7 @@ latter and reports measured reaper evidence.
 - **Landing-page copy** (`docs/marketing/landing-page.md`) — hero subcopy, problem statement, use-case cards, and security/control proof points are derived from the per-demo "story" sections.
 - **Sales calls** — the talk tracks here are the literal scripts.
 - **Recording scripts** ([`docs/marketing/recording-scripts/`](../marketing/recording-scripts/)) — second-by-second timed beat sheets for the three flagship demos, with exact button labels, copy-pasteable setup commands, sample payloads, and failure-injection / recovery-moment sequences. Use these when filming a sales recording or onboarding a private-beta design partner.
-- **Private-beta MTTR experiment** — design partners walk through the three flagship demos before measuring their baseline; the post-flow surveys ask which demo moved them most.
+- **Private-beta recovery-time experiment** — design partners walk through the three flagship demos before measuring their baseline; the post-flow surveys ask which demo moved them most.
 
 ## Adding a new demo
 

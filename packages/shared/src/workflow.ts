@@ -28,6 +28,7 @@
  */
 
 import { z } from "zod";
+import { WorkflowRecoverySchema } from "./recovery-contract";
 
 /**
  * Current DSL version. Persisted workflows store this; older versions need a
@@ -230,19 +231,32 @@ export const WorkflowSchema = z.object({
   inputs: WorkflowInputSchema.optional(),
   outputs: WorkflowOutputsSchema.optional(),
   templatePolicy: TemplatePolicySchema.optional(),
+  recovery: WorkflowRecoverySchema.optional(),
   ui: WorkflowUiSchema.optional(),
   nodes: z.array(NodeSchema),
   edges: z.array(EdgeSchema),
 }).superRefine((workflow, context) => {
   const positions = workflow.ui?.positions
-  if (!positions) return
   const nodeIds = new Set(workflow.nodes.map(node => node.id))
-  for (const nodeId of Object.keys(positions)) {
-    if (!nodeIds.has(nodeId)) {
+  if (positions) {
+    for (const nodeId of Object.keys(positions)) {
+      if (!nodeIds.has(nodeId)) {
+        context.addIssue({
+          code: "custom",
+          path: ["ui", "positions", nodeId],
+          message: "Workflow position must reference an existing node",
+        });
+      }
+    }
+  }
+  for (const [index, effect] of (
+    workflow.recovery?.contract?.effects ?? []
+  ).entries()) {
+    if (!nodeIds.has(effect.nodeId)) {
       context.addIssue({
         code: "custom",
-        path: ["ui", "positions", nodeId],
-        message: "Workflow position must reference an existing node",
+        path: ["recovery", "contract", "effects", index, "nodeId"],
+        message: "Recovery effect must reference an existing workflow node",
       });
     }
   }

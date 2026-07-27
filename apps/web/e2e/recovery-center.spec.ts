@@ -6,7 +6,7 @@ test('Recovery Center is the authenticated desktop home', async ({ page }) => {
 
   await expect(page.locator('.we-recovery-center-hero .section-kicker', { hasText: 'Recovery Center' })).toBeVisible()
   await expect(page.getByTestId('recovery-center-metric-failures')).toBeVisible()
-  await expect(page.getByTestId('recovery-center-metric-mttr')).toBeVisible()
+  await expect(page.getByTestId('recovery-center-metric-verified-recovery')).toBeVisible()
   await expect(page.getByRole('button', { name: /^AI Studio\b/ })).toBeVisible()
 
   await page.getByTestId('recovery-center-queue-open-all').click()

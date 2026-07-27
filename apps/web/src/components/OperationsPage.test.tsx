@@ -54,6 +54,13 @@ const healthyMetrics = {
   windowDays: 30,
   terminalRuns: 12,
   successRate: { value: 95, display: '95.0%', severity: 'healthy', rationale: 'All good.' },
+  verifiedRecovery: {
+    value: 45_000,
+    display: '45.0s',
+    severity: 'healthy',
+    rationale: 'Production median.',
+    rationaleCode: 'verified_recovery.summary',
+  },
   mttr: { value: 90_000, display: '1m 30s', severity: 'healthy', rationale: '' },
   p95Latency: { value: 4_000, display: '4.0s', severity: 'healthy', rationale: '' },
   approvalsPending: { value: 0, display: '0', severity: 'neutral', rationale: '' },
@@ -107,6 +114,8 @@ describe('<OperationsPage />', () => {
 
     await screen.findByTestId('stub-FailureClustersCard')
     expect(screen.getByTestId('operations-rail-tab-overview')).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByText('45.0s')).toBeInTheDocument()
+    expect(screen.queryByText('1m 30s')).not.toBeInTheDocument()
     // Reliability cards are NOT mounted — proves lazy-mount.
     expect(screen.queryByTestId('stub-BudgetSettingsPanel')).toBeNull()
     expect(screen.queryByTestId('stub-AlertPoliciesPanel')).toBeNull()

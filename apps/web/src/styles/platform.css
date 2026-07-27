@@ -1782,7 +1782,7 @@
   margin: 0;
 }
 
-/* Inline MTTR trend sparkline under a metric value. Color encodes direction:
+/* Inline recovery-time trend sparkline under a metric value. Color encodes direction:
    improving (last <= mean) is green, worsening is red. */
 .we-sparkline {
   display: block;

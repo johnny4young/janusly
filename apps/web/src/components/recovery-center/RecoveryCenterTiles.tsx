@@ -41,6 +41,7 @@ import { api } from '../../api'
 import { useWorkflowStore } from '../../store'
 import { getResolvedLocale, useT } from '../../i18n'
 import { requestOperationsSection } from '../operations-section-bus'
+import { selectRecoveryTimeMetric } from '../recovery-metrics'
 import { approachLabelDisplay } from '../recovery-dialog/helpers'
 import type { PatchApproachLabel } from '../recovery-dialog/types'
 import type { DeadLetter } from '../DeadLettersPanel'
@@ -142,6 +143,7 @@ export function OperatorTodayTile({
   onOpenTab: (tab: ActiveTab) => void
 }) {
   const { t } = useT()
+  const recoveryTime = metrics ? selectRecoveryTimeMetric(metrics) : null
   return (
     <RecoveryCenterTile
       title={t('recoveryCenter.tile.today.title')}
@@ -177,7 +179,7 @@ export function OperatorTodayTile({
         </div>
         <div className="we-operator-mini__cell">
           <div className="we-operator-mini__lbl">{t('recoveryCenter.tile.today.mttr')}</div>
-          <div className="we-operator-mini__val">{metrics?.mttr.display ?? '—'}</div>
+          <div className="we-operator-mini__val">{recoveryTime?.display ?? '—'}</div>
           <div className="we-operator-mini__delta">{t('recoveryCenter.tile.today.pending')} {waitingNodes}</div>
         </div>
       </div>

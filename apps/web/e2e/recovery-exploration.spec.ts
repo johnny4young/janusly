@@ -60,6 +60,16 @@ async function seedRecoveryHistory(orgId: string): Promise<{ days: string[]; ids
   const suffix = orgId.replaceAll(/[^a-zA-Z0-9]/g, '').slice(-24)
   const days = [2, 1, 0].map(historicalMidday)
   const ids = days.map((_, index) => `history-${suffix}-${index}`)
+  const runValues = days.map((recoveredAt, index) => {
+    const createdAt = new Date(recoveredAt.getTime() - (index + 1) * 5 * 60_000)
+    return `(
+      ${sqlLiteral(`history-run-${suffix}-${index}`)},
+      ${sqlLiteral(orgId)},
+      ${sqlLiteral(`history-version-${suffix}`)},
+      'succeeded',
+      ${sqlLiteral(createdAt.toISOString())}::timestamptz
+    )`
+  }).join(',')
   const values = days.map((replayedAt, index) => {
     const createdAt = new Date(replayedAt.getTime() - (index + 1) * 5 * 60_000)
     return `(
@@ -90,7 +100,10 @@ async function seedRecoveryHistory(orgId: string): Promise<{ days: string[]; ids
     'compose', '-f', COMPOSE_FILE,
     'exec', '-T', 'postgres',
     'psql', '-U', 'postgres', '-d', 'workflow', '-v', 'ON_ERROR_STOP=1',
-    '-c', `INSERT INTO dead_letters (
+    '-c', `INSERT INTO runs (
+      id, org_id, workflow_version_id, status, created_at
+    ) VALUES ${runValues};
+    INSERT INTO dead_letters (
       id, org_id, run_id, node_id, attempt, workflow_json, node_json,
       error_json, status, replayed_at, created_at
     ) VALUES ${values};
@@ -171,7 +184,11 @@ async function capture(locator: Locator, name: string): Promise<void> {
   await expect(locator).toBeVisible()
   if (!EVIDENCE_DIR) return
   await mkdir(EVIDENCE_DIR, { recursive: true })
-  await locator.screenshot({ path: `${EVIDENCE_DIR}/${name}.png` })
+  await locator.screenshot({
+    path: `${EVIDENCE_DIR}/${name}.png`,
+    animations: 'disabled',
+    caret: 'hide',
+  })
 }
 
 test.describe.configure({ mode: 'serial' })
@@ -221,11 +238,10 @@ for (const contract of LOCALES) {
       localStorage.removeItem('janusly:recovery:hideIntro')
     }, historyOrgId)
     await page.reload()
-    await expect(labEntry).toBeVisible()
-    await labEntry.getByTestId('recovery-lab-entry-dismiss').click()
+    await expect(labEntry).toBeHidden()
     expect(await page.evaluate(() => localStorage.getItem('janusly:recovery:hideIntro'))).toBeNull()
 
-    const metricAction = page.getByTestId('recovery-center-metric-mttr')
+    const metricAction = page.getByTestId('recovery-center-metric-verified-recovery')
     const metricCard = metricAction.locator('..')
     const lastPoint = page.getByTestId('vitals-sparkline-point-2')
     await expect(lastPoint).toHaveAccessibleName(`${days[2]}: 15m`)
@@ -233,6 +249,7 @@ for (const contract of LOCALES) {
     await page.keyboard.press('Home')
     const oldestPoint = page.getByTestId('vitals-sparkline-point-0')
     await expect(oldestPoint).toBeFocused()
+    await expect(metricCard.locator('.we-ops-metric-card__value')).toHaveText('10m')
     await hideUnrelatedOverlays(page)
     await capture(metricCard, `web-${contract.locale}-recovery-sparkline-keyboard`)
     await oldestPoint.press('Enter')
