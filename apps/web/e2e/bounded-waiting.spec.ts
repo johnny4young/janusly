@@ -19,9 +19,10 @@ type RunSnapshot = {
 
 const locales = {
   en: {
-    flows: 'Flows',
+    flows: 'Workflows',
     stepSetup: 'Step setup',
     runs: 'Runs',
+    recover: 'Recover',
     approvalDeadline: 'Decision deadline',
     timeoutPolicy: 'When the deadline passes',
     timeoutSeconds: 'Timeout (seconds)',
@@ -33,6 +34,7 @@ const locales = {
     flows: 'Flujos',
     stepSetup: 'Configuración de paso',
     runs: 'Ejecuciones',
+    recover: 'Recuperar',
     approvalDeadline: 'Fecha límite para decidir',
     timeoutPolicy: 'Cuando venza el plazo',
     timeoutSeconds: 'Tiempo límite (segundos)',
@@ -134,6 +136,8 @@ async function openRunFromHistory(page: Page, locale: keyof typeof locales, runI
   await expect.poll(async () => history.getByRole('article').filter({ hasText: prefix }).count()).toBeGreaterThan(0)
   await history.getByRole('article').filter({ hasText: prefix }).first().locator('button.list-card-row').click()
   await expect(page.getByTestId('run-overview')).toContainText(runId.slice(0, 12))
+  await expect(page.locator('.we-run-stream-chip--live')).toBeVisible()
+  await page.getByRole('button', { name: locales[locale].recover, exact: true }).click()
 }
 
 test('approval deadlines and absolute waits are safe, observable, and authorable in both locales', async ({ page, request }) => {
@@ -276,7 +280,6 @@ test('approval deadlines and absolute waits are safe, observable, and authorable
   await openRunFromHistory(page, 'es', escalationRunId)
   const liveEscalationCard = page.getByTestId('waiting-step-gate')
   await expect(liveEscalationCard).toContainText('Responsable: tier-1')
-  await expect(page.locator('.we-run-stream-chip--live')).toBeVisible()
   await expect(liveEscalationCard).toContainText('Responsabilidad escalada de tier-1 a tier-2', { timeout: 15_000 })
   await capture(liveEscalationCard, 'web-es-approval-live-escalated')
   const escalated = await pollRun(request, orgId, escalationRunId, snapshot => {

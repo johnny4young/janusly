@@ -17,7 +17,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { Activity, CheckCircle2, CircleX, Copy, FlaskConical, GitBranch, ListChecks } from 'lucide-react'
+import { Activity, CheckCircle2, CircleX, Copy, FlaskConical, GitBranch, ListChecks, ShieldAlert } from 'lucide-react'
 import type { RunEvent, RunNode, RunSummary, SavedWorkflow, WorkflowInputSchemaShape } from '../types'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
 import { formatCompactDuration, formatStatusLabel, formatNodeDuration } from '../constants'
@@ -79,6 +79,7 @@ function isWorkflowInputSchemaShape(value: unknown): value is WorkflowInputSchem
 }
 
 export type RunsPanelProps = {
+  mode?: 'runs' | 'recovery'
   runs: RunSummary[]
   workflows: SavedWorkflow[]
   usage: Record<string, number>
@@ -134,6 +135,7 @@ function canResumeWaitingKind(kind: RunWaitKind): boolean {
 }
 
 export function RunsPanel({
+  mode = 'runs',
   runs,
   workflows,
   usage,
@@ -194,7 +196,9 @@ export function RunsPanel({
   const activeRunInput = activeRun ? getRunTriggerInput(activeRun) : undefined
   const activeRunFinishedAt = getRunTerminalAt(runEvents) ?? getRunFinishedAt(runNodes)
   const [clockNow, setClockNow] = useState(() => Date.now())
-  const shouldTickClock = Boolean(activeRun && !isTerminalRunStatus(activeRun.status)) || waitingNodes.length > 0
+  const shouldTickClock =
+    (mode === 'runs' && Boolean(activeRun && !isTerminalRunStatus(activeRun.status)))
+    || (mode === 'recovery' && waitingNodes.length > 0)
   useEffect(() => {
     if (!shouldTickClock) return
     setClockNow(Date.now())
@@ -261,21 +265,26 @@ export function RunsPanel({
       rationale: failedRuns > 0
         ? (t('rightPanel.runs.metric.failedOpen'))
         : (t('rightPanel.runs.metric.failedClear')),
-      onClick: failedRuns > 0 ? () => setActiveTab('home') : undefined,
+      onClick: failedRuns > 0 ? () => setActiveTab('recover') : undefined,
       ariaLabel: failedRuns > 0 ? (t('rightPanel.runs.metric.failedAria')) : undefined,
       testId: 'runs-metric-failed',
     },
   ]
+  const recoveryMode = mode === 'recovery'
 
   return (
-    <PanelChrome title={t('rightPanel.runs.title')} description={t('rightPanel.runs.description')} icon={<Activity size={18} />}>
-      <VitalSignsStrip
+    <PanelChrome
+      title={t(recoveryMode ? 'rightPanel.recover.title' : 'rightPanel.runs.title')}
+      description={t(recoveryMode ? 'rightPanel.recover.description' : 'rightPanel.runs.description')}
+      icon={recoveryMode ? <ShieldAlert size={18} /> : <Activity size={18} />}
+    >
+      {!recoveryMode && <VitalSignsStrip
         tiles={withSeverityLabels(runMetricTiles, t)}
         ariaLabel={t('rightPanel.runs.summaryAria')}
         testId="runs-metric-strip"
-      />
+      />}
 
-      {activeRunId && (
+      {!recoveryMode && activeRunId && (
         <section className="we-card we-run-overview" data-testid="run-overview">
           <div className="split-row we-run-overview__header">
             <span className="we-run-overview__title">
@@ -387,11 +396,11 @@ export function RunsPanel({
         </section>
       )}
 
-      <RunExplainChat runId={activeRunId} />
+      {!recoveryMode && <RunExplainChat runId={activeRunId} />}
 
-      <UsageSummaryCard usage={usage} onRefreshPlatform={onRefreshPlatform} />
+      {!recoveryMode && <UsageSummaryCard usage={usage} onRefreshPlatform={onRefreshPlatform} />}
 
-      {waitingNodes.length > 0 && (
+      {recoveryMode && waitingNodes.length > 0 && (
         <section className="we-card action-card" data-testid="waiting-steps">
           <div>
             <strong>{t('rightPanel.runs.pausedTitle')}</strong>
@@ -479,7 +488,7 @@ export function RunsPanel({
         </section>
       )}
 
-      {activeHumanFormNode && activeHumanForm && (
+      {recoveryMode && activeHumanFormNode && activeHumanForm && (
         <HumanFormDialog
           key={activeHumanFormNode.nodeId}
           title={activeHumanForm.title}
@@ -509,7 +518,7 @@ export function RunsPanel({
         />
       )}
 
-      {failedNodes.length > 0 && (
+      {recoveryMode && failedNodes.length > 0 && (
         <section className="we-card action-card">
           <div>
             <strong>{t('rightPanel.runs.attentionTitle')}</strong>
@@ -559,7 +568,7 @@ export function RunsPanel({
         </section>
       )}
 
-      {canStartRuns && forkableNodes.length > 0 && (
+      {!recoveryMode && canStartRuns && forkableNodes.length > 0 && (
         <section className="we-card action-card">
           <div>
             <strong>{t('replayLab.fork.sectionKicker')}</strong>
@@ -583,7 +592,7 @@ export function RunsPanel({
         </section>
       )}
 
-      <DeadLettersPanel
+      {recoveryMode && <DeadLettersPanel
         onRefresh={onRefreshPlatform}
         onReplay={onReplayDeadLetter}
         onResolve={onResolveDeadLetter}
@@ -593,17 +602,17 @@ export function RunsPanel({
         canUseRecovery={canUseRecovery}
         canReadAutoHealing={canReadAutoHealing}
         canDecideAutoHealing={canDecideAutoHealing}
-      />
+      />}
 
-      <RunHistoryList
+      {!recoveryMode && <RunHistoryList
         runs={runs}
         workflows={workflows}
         onOpenRun={onOpenRun}
         onOpenLab={canStartRuns ? setLabSourceRun : undefined}
         onSend={setDeliveryRun}
-      />
+      />}
 
-      {labSourceRun && (
+      {!recoveryMode && labSourceRun && (
         <ReplayLabDialog
           sourceRun={{
             id: labSourceRun.id,
@@ -615,7 +624,7 @@ export function RunsPanel({
         />
       )}
 
-      {forkTargetNodeId && activeRun && (
+      {!recoveryMode && forkTargetNodeId && activeRun && (
         <ReplayLabForkDialog
           sourceRun={{
             id: activeRun.id,
@@ -627,7 +636,7 @@ export function RunsPanel({
         />
       )}
 
-      {deliveryRun && (
+      {!recoveryMode && deliveryRun && (
         <ReportDeliveryDialog
           sourceRun={{
             id: deliveryRun.id,

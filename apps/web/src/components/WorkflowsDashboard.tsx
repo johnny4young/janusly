@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { LoadingSkeleton } from './LoadingSkeleton'
-import { CircleCheck, FolderPlus, ListChecks, Pencil, RefreshCw, Trash, Trash2, Workflow } from 'lucide-react'
+import { CircleCheck, FolderPlus, ListChecks, Pencil, Plus, RefreshCw, Trash, Trash2, Workflow } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { SavedWorkflow } from '../types'
@@ -54,7 +54,15 @@ function updateCollapsedFolders(current: string[], key: string, open: boolean): 
 }
 
 /** Render the saved-workflows list with click-to-open + manual refresh. */
-export function WorkflowsDashboard({ onOpen, canWrite = true }: { onOpen: (id: string) => void; canWrite?: boolean }) {
+export function WorkflowsDashboard({
+  onOpen,
+  onCreate,
+  canWrite = true,
+}: {
+  onOpen: (id: string) => void
+  onCreate?: () => void
+  canWrite?: boolean
+}) {
   const { t } = useT()
   const addToast = useWorkflowStore(state => state.addToast)
   const platformVersion = useWorkflowStore(state => state.platformVersion)
@@ -938,6 +946,16 @@ export function WorkflowsDashboard({ onOpen, canWrite = true }: { onOpen: (id: s
           <p className="helper-text">{showTrashed ? t('workflowsDashboard.trashHelper') : t('workflowsDashboard.helper')}</p>
         </div>
         <div className="panel-toolbar__actions">
+          {!showTrashed && onCreate && (
+            <button
+              type="button"
+              className="small-command small-command--primary"
+              onClick={onCreate}
+              disabled={!canWrite}
+            >
+              <Plus size={14} aria-hidden="true" /> {t('workflowsDashboard.newWorkflow')}
+            </button>
+          )}
           {/* Trash toggle — always reachable (it lives in the always-rendered
               header, not the filterable toolbar). Entering Trash clears any
               active-view selection + delete-confirm so the views don't bleed. */}

@@ -12,7 +12,7 @@ function installConsoleErrorGuards(page: Page) {
 const views = [
   { button: /^Home\b/, selector: '.we-recovery-center-hero .section-kicker', text: 'Recovery Center' },
   { button: /^AI Studio\b/, text: 'Describe the outcome. Janusly builds the flow.' },
-  { button: 'Flows', heading: 'Flows' },
+  { button: 'Workflows', heading: 'Flows' },
   { button: 'Step setup', heading: 'Step setup' },
   { button: 'Runs', heading: 'Runs' },
   { button: 'Team', heading: 'Team' },

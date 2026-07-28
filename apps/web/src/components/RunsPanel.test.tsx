@@ -46,6 +46,7 @@ beforeEach(() => {
 function renderPanel(runNodes: RunNode[]) {
   const props: Parameters<typeof RunsPanel>[0] = {
     ...handlers,
+    mode: 'recovery',
     runs: [],
     workflows: [],
     usage: {},
@@ -105,6 +106,7 @@ describe('<RunsPanel /> failed-node card', () => {
     render(
       <RunsPanel
         {...handlers}
+        mode="recovery"
         activeRunId="run-1"
         workflows={[]}
         runs={[{ id: 'run-1', status: 'failed' }]}
@@ -185,6 +187,7 @@ describe('<RunsPanel /> observability', () => {
     render(
       <RunsPanel
         {...handlers}
+        mode="recovery"
         activeRunId="run-1"
         workflows={[]}
         runs={[{ id: 'run-1', status: 'running', createdAt: new Date(Date.now() - 10_000).toISOString() }]}

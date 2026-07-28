@@ -121,7 +121,7 @@ that permission is the authorization gate.
 | Runs | `POST /start`, `GET /runs`, `GET /run`, `GET /run/usage`, `GET /status`, `GET /runs/:id/stream`, `POST /resume`, `POST /run/cancel`, `POST /runs/replay-lab`, `POST /runs/replay-lab/fork`, `GET /runs/compare`, `GET /causal` | viewer/editor + run perms | Start, poll, inspect bounded resource usage, stream, resume, cancel, sandbox replay, fork, compare, and router explainability. |
 | Credentials | `GET /credentials`, `GET /credentials/health`, `POST /credentials`, `POST /credentials/:name/bulk-update`, `DELETE /credentials/:name`, `POST /credentials/:name/expiry` | viewer/admin + credential perms | Operator-facing credential rows; values default to the encrypted Secret Store (`storage: "managed"`), and health/rotation never echo secret material. Optional operator-declared `expiresAt` powers the expiry-warning alert. |
 | AI helpers | `GET /ai/health`, `POST /ai/generate-workflow`, `POST /ai/explain-workflow`, `POST /ai/review-workflow`, `POST /ai/patch-workflow`, `POST /ai/suggest-improvement`, `POST /ai/explain-run` | `ai.write`; editor additionally required for patch/suggest | Provider-neutral LLM surfaces with deterministic fallback/audit contracts. Generation and patch also expose strict `/v1` aliases. |
-| DLQ/recovery loop | `GET /dlq`, `GET /dlq/clusters`, `GET /dlq/cluster-members`, `POST /dlq/resolve`, `POST /dlq/validate-fix`, `POST /dlq/cluster-apply`, `POST /dlq/replay`, `GET /recovery/cases`, `POST /recovery/cases/:caseId/resolve`, `GET /recovery/metrics`, `POST /recovery/feedback` | viewer/editor + DLQ or recovery perms | Dead-letter triage, deterministic semantic containment, validation sandbox, clustered replay, metrics, and feedback. |
+| DLQ/recovery loop | `GET /dlq`, `GET /dlq/clusters`, `GET /dlq/cluster-members`, `POST /dlq/resolve`, `POST /dlq/validate-fix`, `POST /dlq/cluster-apply`, `POST /dlq/replay`, `GET /recovery/home`, `GET /recovery/cases`, `POST /recovery/cases/:caseId/resolve`, `GET /recovery/metrics`, `POST /recovery/feedback` | viewer/editor + DLQ or recovery perms | Dead-letter triage, coalesced Home read model, deterministic semantic containment, validation sandbox, clustered replay, metrics, and feedback. |
 | Recovery items | `GET /recovery/items`, `GET /recovery/items/:id`, `GET /recovery/items/:id/children`, `POST /recovery/items/:id/acknowledge`, `POST /recovery/items/:id/in-progress`, `POST /recovery/items/:id/waiting-external`, `POST /recovery/items/:id/escalate`, `POST /recovery/items/:id/assign`, `POST /recovery/items/:id/resolve`, `POST /recovery/items/:id/reopen`, `POST /recovery/items/:id/comment`, `POST /recovery/items/:id/evidence`, `POST /recovery/items/:id/handoff` | viewer/editor + recovery perms | Incident workflow, evidence export, and cross-team handoff. |
 | Auto-healing/alerts | `GET /auto-healing/pending`, `GET /auto-healing/:id`, `POST /auto-healing/:id/decide`, `POST /auto-healing/scan`, `GET /alerts/policies`, `POST /alerts/policies`, `POST /alerts/policies/:id`, `DELETE /alerts/policies/:id`, `GET /alerts/recent` | viewer/editor/admin + feature perms | Supervised repair decisions, on-demand scan, alert policies, recent dispatch feed. |
 | PromptOps/evals | `GET /prompts`, `POST /prompts`, `GET /prompts/:name`, `GET /prompts/:name/versions/:version`, `POST /prompts/:name/versions`, `POST /prompts/:name/versions/:version/pin`, `GET /eval/datasets`, `POST /eval/datasets`, `GET /eval/datasets/:id`, `GET /eval/datasets/:id/export?format=jsonl|json`, `DELETE /eval/datasets/:id`, `GET /experiments`, `POST /experiments/run`, `GET /experiments/:id` | viewer/editor/admin + prompt/eval perms | Versioned prompt registry, opted-in eval datasets, synchronous model/prompt experiments. |
@@ -1200,6 +1200,45 @@ open quarantine still blocks the run. Same-source cases close together in one
 transaction. Replacement validation failures return
 `recovery_semantic_output_invalid`; concurrent or already-resolved decisions
 return `recovery_case_conflict`.
+
+### `GET /recovery/home?scope=full|impact`
+
+Internal web read model for the Recovery Center. It has no `/v1` alias: stable
+automation clients should continue to use the focused recovery, DLQ, and report
+contracts. The default `full` scope coalesces metrics, failure clusters, the
+90-day heatmap, the 30-day validation dossier, open semantic cases, the
+lifetime recovery ledger, the current operator's 30-day wins, and the
+authoritative open-queue count/oldest row.
+
+```json
+{
+  "scope": "full",
+  "generatedAt": "2026-07-28T00:00:00.000Z",
+  "sections": {
+    "metrics": { "status": "ok", "value": { "terminalRuns": 87 } },
+    "clusters": { "status": "ok", "value": { "clusters": [] } },
+    "heatmap": { "status": "ok", "value": { "days": [], "windowDays": 90 } },
+    "validation": { "status": "unavailable" },
+    "cases": { "status": "ok", "value": { "cases": [] } },
+    "ledger": { "status": "ok", "value": { "totalRecovered": 12 } },
+    "wins": { "status": "ok", "value": { "recovered": 3, "windowDays": 30 } },
+    "queue": {
+      "status": "ok",
+      "value": { "counts": { "open": 1 }, "oldestOpen": { "id": "dlq-..." } }
+    }
+  }
+}
+```
+
+Every section settles independently. A repository/query failure or missing
+section-specific permission produces `{ "status": "unavailable" }` for only
+that section; it never changes another section's status. The route itself
+requires `recovery.read`; clusters and queue additionally require `dlq.read`,
+while validation additionally requires `reports.read`.
+
+`scope=impact` returns only `ledger`, `wins`, and `queue`. The web uses that
+bounded shape for background convergence polling so it does not repeatedly
+execute the heavier Home projections.
 
 ### `GET /recovery/metrics?windowDays=30`
 

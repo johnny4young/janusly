@@ -15,7 +15,8 @@ test('run history opens report delivery dialog and surfaces a credential error',
   await expect(page.getByText('dev-user')).toBeVisible()
   await expect(page.locator('.we-recovery-center-hero .section-kicker', { hasText: 'Recovery Center' })).toBeVisible()
 
-  await page.getByRole('button', { name: 'New', exact: true }).click()
+  await page.getByRole('button', { name: 'Workflows', exact: true }).click()
+  await page.getByRole('button', { name: 'New workflow', exact: true }).click()
   await expect(page.getByText('Describe the outcome. Janusly builds the flow.')).toBeVisible()
   await page.getByRole('textbox', { name: 'Name' }).fill(workflowName)
   await expandStepPaletteGroup(page, /^Misc\b/)

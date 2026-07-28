@@ -59,7 +59,7 @@ test('authors and executes one durable idempotent inbound JSON event', async ({ 
     window.localStorage.setItem('janusly:locale', 'en')
   }, { activeOrg: orgId })
   await page.goto('/')
-  await page.getByRole('button', { name: 'Flows', exact: true }).click()
+  await page.getByRole('button', { name: 'Workflows', exact: true }).click()
   await page.getByTestId(`workflows-row-${workflowId}`).click()
   await page.getByRole('button', { name: 'Step setup', exact: true }).click()
   await page.locator('.react-flow__node[data-id="incoming"] .workflow-node').click()

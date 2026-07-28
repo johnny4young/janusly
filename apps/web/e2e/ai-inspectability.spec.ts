@@ -122,7 +122,7 @@ async function openWorkflowMetadata(
   workflowName: string,
 ): Promise<Locator> {
   await page.getByRole('button', {
-    name: locale === 'en' ? 'Flows' : 'Flujos',
+    name: locale === 'en' ? 'Workflows' : 'Flujos',
     exact: true,
   }).click()
   const row = page.getByTestId(`workflows-row-${workflowId}`)
@@ -247,7 +247,7 @@ async function openRecoverySuggestion(
   nodeId: string,
 ): Promise<Locator> {
   await page.getByRole('button', {
-    name: locale === 'en' ? 'Runs' : 'Ejecuciones',
+    name: locale === 'en' ? 'Recover' : 'Recuperar',
     exact: true,
   }).click()
   const queue = page.getByTestId('recovery-queue')

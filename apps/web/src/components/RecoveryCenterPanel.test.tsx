@@ -117,6 +117,65 @@ const baseValidation = {
   byFailureMode: [],
 }
 
+type ApiMockHandler = (
+  path: string,
+  options?: unknown,
+) => Promise<unknown>
+
+function mockRecoveryApi(handler: ApiMockHandler) {
+  const settleValue = async (
+    loader: () => Promise<unknown>,
+  ): Promise<{ status: 'ok'; value: unknown } | { status: 'unavailable' }> => {
+    try {
+      return { status: 'ok', value: await loader() }
+    } catch {
+      return { status: 'unavailable' }
+    }
+  }
+  const settle = (path: string, options?: unknown) =>
+    settleValue(() => handler(path, options))
+  const queue = async (options?: unknown) => {
+    const counts = await handler('/dlq/counts', options) as { open?: unknown }
+    const open = counts?.open
+    if (typeof open !== 'number' || !Number.isInteger(open) || open < 0) {
+      throw new Error('invalid queue counts')
+    }
+    const page = open > 0
+      ? await handler('/dlq/queue?status=open&sort=oldest&limit=1', options) as { items?: unknown }
+      : { items: [] }
+    return {
+      counts,
+      oldestOpen: Array.isArray(page?.items) ? page.items[0] ?? null : null,
+    }
+  }
+
+  vi.mocked(api).mockImplementation(async (path: string, options?: unknown) => {
+    if (path !== '/recovery/home' && path !== '/recovery/home?scope=impact') {
+      return handler(path, options)
+    }
+    const impact = {
+      ledger: await settle('/recovery/ledger', options),
+      wins: await settle('/recovery/my-wins?days=30', options),
+      queue: await settleValue(() => queue(options)),
+    }
+    const sections = path.endsWith('scope=impact')
+      ? impact
+      : {
+          metrics: await settle('/recovery/metrics', options),
+          clusters: await settle('/dlq/clusters', options),
+          heatmap: await settle('/recovery/heatmap?days=90', options),
+          validation: await settle('/recovery/validation?windowDays=30', options),
+          cases: await settle('/recovery/cases?limit=50', options),
+          ...impact,
+        }
+    return {
+      scope: path.endsWith('scope=impact') ? 'impact' : 'full',
+      generatedAt: '2026-07-28T00:00:00.000Z',
+      sections,
+    }
+  })
+}
+
 beforeEach(() => {
   consumeRecoveryAllClear()
   consumeRecoveryFocusDay()
@@ -179,7 +238,7 @@ describe('computeRecommendedActions', () => {
     const actions = computeRecommendedActions(signals)
     expect(actions[0]!.id).toBe('resolve_approvals')
     expect(actions[0]!.severity).toBe('warning')
-    expect(actions[0]!.ctaTab).toBe('runs')
+    expect(actions[0]!.ctaTab).toBe('recover')
     expect(actions[0]!.title).toContain('Resolve 2 approval')
   })
 
@@ -367,7 +426,7 @@ describe('helpers', () => {
 // ─────────────────────────────────────────────────────────────────────────
 
 describe('<RecoveryCenterPanel /> — empty state', () => {
-  it('renders urgent metrics without waiting for the contextual heatmap', async () => {
+  it('loads the coordinated Home snapshot through one recovery request', async () => {
     let releaseHeatmap: ((value: unknown) => void) | undefined
     const pendingHeatmap = new Promise((resolve) => { releaseHeatmap = resolve })
     const readyClusters = {
@@ -381,7 +440,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
       totalSamples: 2,
       windowDays: 30,
     }
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return readyClusters
       if (path === '/recovery/heatmap?days=90') return pendingHeatmap
@@ -394,30 +453,79 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
 
     render(<RecoveryCenterPanel {...baseProps} />)
 
-    await waitFor(() => {
-      const calls = vi.mocked(api).mock.calls.map(([path]) => path)
-      expect(calls).toEqual(expect.arrayContaining([
-        '/recovery/metrics',
-        '/dlq/clusters',
-        '/recovery/heatmap?days=90',
-        '/recovery/validation?windowDays=30',
-        '/recovery/ledger',
-        '/recovery/my-wins?days=30',
-      ]))
-      expect(screen.getByTestId('recovery-center-metric-verified-recovery')).toHaveTextContent('7m')
-      expect(screen.getByText('Slow heatmap cluster')).toBeInTheDocument()
-      expect(screen.getByTestId('recovery-validation-section')).toHaveTextContent('1/1')
-    })
+    expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/home')
+    expect(vi.mocked(api)).not.toHaveBeenCalledWith('/recovery/metrics')
+    expect(screen.getByTestId('recovery-center-metric-verified-recovery'))
+      .not.toHaveTextContent('7m')
     await act(async () => {
       releaseHeatmap?.({ days: [] })
       await pendingHeatmap
     })
+    await waitFor(() => {
+      expect(screen.getByTestId('recovery-center-metric-verified-recovery')).toHaveTextContent('7m')
+      expect(screen.getByText('Slow heatmap cluster')).toBeInTheDocument()
+      expect(screen.getByTestId('recovery-validation-section')).toHaveTextContent('1/1')
+    })
+  })
+
+  it('keeps healthy Home sections visible when one wire section is malformed', async () => {
+    const healthyClusters = {
+      clusters: [{
+        signature: 'http:rate-limit',
+        category: 'http_error' as const,
+        frequency: 2,
+        suggestedOwner: 'ops' as const,
+        lastSeen: '2026-07-27T12:00:00.000Z',
+      }],
+      totalSamples: 2,
+      windowDays: 30,
+    }
+    mockRecoveryApi(async (path: string) => {
+      if (path === '/recovery/metrics') {
+        return {
+          ...baseMetrics,
+          replayRate: { ...baseMetrics.replayRate, display: 42 },
+        }
+      }
+      if (path === '/dlq/clusters') return healthyClusters
+      if (path === '/recovery/heatmap?days=90') return { days: [] }
+      if (path === '/recovery/validation?windowDays=30') return baseValidation
+      if (path === '/recovery/cases?limit=50') return { cases: [] }
+      if (path === '/recovery/ledger') {
+        return {
+          totalRecovered: 0,
+          downtimeEndedMs: 0,
+          sinceIso: null,
+        }
+      }
+      if (path === '/recovery/my-wins?days=30') {
+        return { recovered: 0, windowDays: 30 }
+      }
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
+        return {
+          allowed: true,
+          monthlyUsdSpent: 0,
+          monthlyUsdLimit: null,
+          policy: 'warn',
+        }
+      }
+      throw new Error(`unexpected fetch: ${path}`)
+    })
+
+    render(<RecoveryCenterPanel {...baseProps} />)
+
+    expect(await screen.findByText('http:rate-limit')).toBeInTheDocument()
+    expect(screen.getByTestId('recovery-validation-section'))
+      .toHaveTextContent('1/1')
+    expect(screen.getByTestId('recovery-center-metric-verified-recovery'))
+      .not.toHaveTextContent('7m')
   })
 
   it('waits for terminal-run history before exposing the walkthrough dismissal', async () => {
     let releaseMetrics: ((value: unknown) => void) | undefined
     const pendingMetrics = new Promise((resolve) => { releaseMetrics = resolve })
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return pendingMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -438,7 +546,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     let releaseFirstMetrics: ((value: unknown) => void) | undefined
     const firstMetrics = new Promise((resolve) => { releaseFirstMetrics = resolve })
     let metricsCalls = 0
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') {
         metricsCalls += 1
         if (metricsCalls === 1) return firstMetrics
@@ -484,7 +592,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     let releaseSecondMetrics: ((value: unknown) => void) | undefined
     const secondMetrics = new Promise((resolve) => { releaseSecondMetrics = resolve })
     let metricsCalls = 0
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') {
         metricsCalls += 1
         if (metricsCalls === 1) throw new Error('Org A metrics failed')
@@ -499,18 +607,18 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
 
     const { rerender } = render(<RecoveryCenterPanel {...baseProps} />)
-    expect(await screen.findByText(/Org A metrics failed/)).toBeInTheDocument()
+    expect(await screen.findByText(/Metrics unavailable/i)).toBeInTheDocument()
 
     activeOrgId = 'org-b'
     rerender(<RecoveryCenterPanel {...baseProps} />)
-    expect(screen.queryByText(/Org A metrics failed/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Metrics unavailable/i)).not.toBeInTheDocument()
 
     releaseSecondMetrics?.(baseMetrics)
     await waitFor(() => expect(metricsCalls).toBe(2))
   })
 
   it('keeps a fresh-workspace dismissal session-only', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return { ...baseMetrics, terminalRuns: 0 }
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -528,7 +636,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
   })
 
   it('keeps the durable dismissal after real terminal history', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -545,7 +653,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
   })
 
   it('renders the welcome hero when no runs / no DLQ / no waiting nodes', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -567,7 +675,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
   })
 
   it('opens AI Studio when the empty-state Studio CTA is clicked', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -584,7 +692,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
   })
 
   it('opens Recipes when the empty-state Recipes CTA is clicked', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -603,7 +711,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
 
 describe('<RecoveryCenterPanel /> — recovery impact', () => {
   function mockImpactReads(options: { ledgerFails?: boolean; winsFails?: boolean } = {}) {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -660,7 +768,7 @@ describe('<RecoveryCenterPanel /> — recovery impact', () => {
     let releaseFirstWins: ((value: unknown) => void) | undefined
     const firstWins = new Promise((resolve) => { releaseFirstWins = resolve })
     let winsCalls = 0
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -710,7 +818,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
   }
 
   it('renders the populated recovery metrics and operator tiles', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -748,7 +856,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
   })
 
   it('hands Open queue to the focused recovery navigation callback', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -768,7 +876,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
   })
 
   it('routes Open clusters → operations tab', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -788,7 +896,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
   })
 
   it('clicking a recovery-queue row opens the underlying run + Runs tab', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -810,7 +918,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
   })
 
   it('clicking a metric strip cell routes to the expected detail tab', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -830,7 +938,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     fireEvent.click(screen.getByTestId('recovery-center-metric-verified-recovery'))
     expect(baseProps.onOpenTab).toHaveBeenLastCalledWith('operations')
     fireEvent.click(screen.getByTestId('recovery-center-metric-approvals'))
-    expect(baseProps.onOpenTab).toHaveBeenLastCalledWith('runs')
+    expect(baseProps.onOpenTab).toHaveBeenLastCalledWith('recover')
     fireEvent.click(screen.getByTestId('recovery-center-metric-replay'))
     expect(baseProps.onOpenTab).toHaveBeenLastCalledWith('operations')
   })
@@ -841,7 +949,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       { day: '2026-07-02', seconds: 240 },
       { day: '2026-07-03', seconds: 180 },
     ]
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return { ...baseMetrics, mttrTrend: trend }
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -854,12 +962,12 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     render(<RecoveryCenterPanel {...baseProps} runs={populatedRuns as never} />)
     fireEvent.click(await screen.findByTestId('vitals-sparkline-point-1'))
 
-    expect(baseProps.onOpenTab).toHaveBeenCalledWith('runs')
+    expect(baseProps.onOpenTab).toHaveBeenCalledWith('recover')
     expect(consumeRecoveryFocusDay()).toBe('2026-07-02')
   })
 
   it('recommended-actions tile leads with the approvals action when approvals are pending', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -874,13 +982,13 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       deadLetters={populatedDlq as never}
     />)
     await waitFor(() => expect(screen.getByTestId('recovery-center-action-resolve_approvals')).toBeInTheDocument())
-    // The first action's CTA is the "Open runs" routing for approvals.
+    // Approval work stays in the focused recovery task space.
     fireEvent.click(screen.getByTestId('recovery-center-action-cta-resolve_approvals'))
-    expect(baseProps.onOpenTab).toHaveBeenCalledWith('runs')
+    expect(baseProps.onOpenTab).toHaveBeenCalledWith('recover')
   })
 
   it('renders the Recovery Center-greeting header with the user display name', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -910,8 +1018,9 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       day: new Date(todayMs - daysAgo * dayMs).toISOString().slice(0, 10),
       failures: 1,
       recovered: 1,
+      mttrSeconds: 0,
     }))
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') {
@@ -940,7 +1049,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       ...populatedDlq[0],
       createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
     }
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -956,14 +1065,17 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
 
     render(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
 
-    expect(await screen.findByTestId('recovery-center-greeting')).toHaveTextContent('1 run needs recovery')
+    await waitFor(() => {
+      expect(screen.getByTestId('recovery-center-greeting'))
+        .toHaveTextContent('1 run needs recovery')
+    })
     const downtime = await screen.findByTestId('recovery-center-longest-downtime')
     expect(downtime).toHaveTextContent(/5h/)
     expect(downtime).toHaveAttribute('data-severity', 'danger')
   })
 
   it('does not invent a clean streak for a workspace without heatmap activity', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -982,7 +1094,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
 
 describe('<RecoveryCenterPanel /> — semantic outcome incidents', () => {
   it('keeps the home tile scannable and opens a case in its dedicated workspace', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -1062,7 +1174,7 @@ describe('<RecoveryCenterPanel /> — semantic outcome incidents', () => {
     ['request failure', new Error('semantic projection unavailable')],
     ['invalid success payload', {}],
   ])('does not present an all-clear state after a semantic %s', async (_label, semanticResponse) => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/cases?limit=50') {
         if (semanticResponse instanceof Error) throw semanticResponse
         return semanticResponse
@@ -1108,7 +1220,7 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
   let recoveryLedger = { totalRecovered: 0, downtimeEndedMs: 0, sinceIso: null as string | null }
 
   function mockAllClearApis() {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return { ...baseMetrics, downtimeEndedMs: 7_200_000 }
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -1146,7 +1258,7 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
     mockAllClearApis()
     const { rerender } = render(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
     await screen.findByTestId('recovery-lab-entry')
-    await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/ledger'))
+    await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/home'))
 
     recoveryLedger = {
       totalRecovered: 1,
@@ -1171,7 +1283,7 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0)
       })
-      expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/ledger')
+      expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/home')
 
       recoveryLedger = {
         totalRecovered: 1,
@@ -1202,22 +1314,22 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0)
       })
-      const ledgerCalls = () => vi.mocked(api).mock.calls
-        .filter(([path]) => path === '/recovery/ledger')
+      const impactCalls = () => vi.mocked(api).mock.calls
+        .filter(([path]) => path === '/recovery/home' || path === '/recovery/home?scope=impact')
         .length
-      expect(ledgerCalls()).toBe(1)
+      expect(impactCalls()).toBe(1)
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(120_000)
       })
-      expect(ledgerCalls()).toBe(1)
+      expect(impactCalls()).toBe(1)
 
       hidden.mockReturnValue(false)
       await act(async () => {
         document.dispatchEvent(new Event('visibilitychange'))
         await vi.advanceTimersByTimeAsync(0)
       })
-      expect(ledgerCalls()).toBe(2)
+      expect(impactCalls()).toBe(2)
     } finally {
       view.unmount()
       hidden.mockRestore()
@@ -1234,7 +1346,7 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
       workflowJson: {}, nodeJson: {}, errorJson: {}, createdAt: new Date().toISOString(),
     }
     const deadLetters = [failure] as never
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return { ...baseMetrics, downtimeEndedMs: 120_000 }
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -1254,7 +1366,7 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0)
       })
-      expect(vi.mocked(api)).toHaveBeenCalledWith('/dlq/queue?status=open&sort=oldest&limit=1')
+      expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/home')
 
       recoveryLedger = {
         totalRecovered: 1,
@@ -1329,7 +1441,7 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
 
 describe('<RecoveryCenterPanel /> — degraded metrics endpoint', () => {
   it('surfaces a soft warning when /recovery/metrics fails but still renders tiles', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') throw new Error('Recovery metrics unavailable')
       if (path === '/dlq/clusters') return baseClusters
       // The Budget tile (5th tile) reads /billing/budget on the same

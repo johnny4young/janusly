@@ -13,7 +13,7 @@ type RunSnapshot = {
 
 const locales = {
   en: {
-    flows: 'Flows',
+    flows: 'Workflows',
     stepSetup: 'Step setup',
     runs: 'Runs',
     viewTimeline: 'View timeline',

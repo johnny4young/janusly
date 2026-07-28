@@ -228,7 +228,7 @@ test('starts an accessible canary and automatically returns unhealthy traffic to
     if (!window.localStorage.getItem('janusly:locale')) window.localStorage.setItem('janusly:locale', 'en')
   }, { activeOrg: orgId })
   await page.goto('/')
-  await page.getByRole('button', { name: 'Flows', exact: true }).click()
+  await page.getByRole('button', { name: 'Workflows', exact: true }).click()
   const row = page.getByTestId(`workflows-row-${workflowId}`)
   await expect(row).toContainText(workflowName)
   await row.click()

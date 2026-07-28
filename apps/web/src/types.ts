@@ -280,7 +280,7 @@ export function parseAiCandidateBackoff(value: unknown): AiCandidateBackoff | un
   return { from, to }
 }
 export type AiHealth = { enabled: boolean; provider?: string; model: string; timeoutMs: number; maxRetries: number }
-export type ActiveTab = 'home' | 'workflows' | 'members' | 'copilot' | 'experiments' | 'marketplace' | 'templates' | 'packs' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'multiAgent' | 'operations' | 'recoveryCase'
+export type ActiveTab = 'home' | 'recover' | 'workflows' | 'members' | 'copilot' | 'experiments' | 'marketplace' | 'templates' | 'packs' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'multiAgent' | 'operations' | 'recoveryCase'
 
 /**
  * Tabs that NEED the React Flow canvas mounted as their main slot. Today

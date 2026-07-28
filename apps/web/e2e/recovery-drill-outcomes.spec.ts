@@ -122,7 +122,7 @@ test('a successful drill replay exposes terminal recovery time and recurrence mo
   // Remount the queue after the API-driven replay so its detail read observes
   // the immutable terminal-impact row written by the worker.
   await page.getByRole('button', { name: 'Packs', exact: true }).click()
-  await page.getByRole('button', { name: 'Runs', exact: true }).click()
+  await page.getByRole('button', { name: 'Recover', exact: true }).click()
   await page.locator('#dlq-filter').selectOption('all')
   await expect(focusedFailure).toBeVisible({ timeout: 30_000 })
   await focusedFailure.click()

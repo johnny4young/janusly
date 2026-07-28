@@ -12,7 +12,7 @@ type RunSnapshot = {
 
 const contracts = {
   en: {
-    flows: 'Flows',
+    flows: 'Workflows',
     stepSetup: 'Step setup',
     useContext: 'Use context',
     expression: 'Branch expression',

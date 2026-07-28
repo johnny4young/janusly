@@ -93,6 +93,32 @@ describe('<WorkflowsDashboard />', () => {
     window.localStorage.clear()
   })
 
+  it('offers an explicit workflow creation action from the catalog', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/tags') return { tags: [] }
+      if (url === '/workflows/folders') return { folders: [] }
+      return []
+    })
+    const onCreate = vi.fn()
+
+    render(<WorkflowsDashboard onOpen={() => {}} onCreate={onCreate} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New workflow' }))
+    expect(onCreate).toHaveBeenCalledOnce()
+  })
+
+  it('keeps workflow creation visible but disabled without write access', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/tags') return { tags: [] }
+      if (url === '/workflows/folders') return { folders: [] }
+      return []
+    })
+
+    render(<WorkflowsDashboard onOpen={() => {}} onCreate={() => {}} canWrite={false} />)
+
+    expect(await screen.findByRole('button', { name: 'New workflow' })).toBeDisabled()
+  })
+
   it('renders each workflow with its tag pills', async () => {
     mockApi((url) => {
       if (url === '/workflows/tags') return { tags: ['billing', 'onboarding', 'urgent'] }

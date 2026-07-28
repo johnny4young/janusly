@@ -102,7 +102,7 @@ test('operator triages genuine failures by keyboard, copies context, and fuzzy-s
 
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   await page.goto('/')
-  await page.getByRole('button', { name: 'Runs', exact: true }).click()
+  await page.getByRole('button', { name: 'Recover', exact: true }).click()
 
   const queue = page.getByTestId('recovery-queue')
   await expect(queue).toBeVisible()
@@ -168,7 +168,7 @@ test('operator triages genuine failures by keyboard, copies context, and fuzzy-s
 
   await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
   await page.reload()
-  await page.getByRole('button', { name: 'Ejecuciones', exact: true }).click()
+  await page.getByRole('button', { name: 'Recuperar', exact: true }).click()
   const spanishQueue = page.getByTestId('recovery-queue')
   const spanishRow = spanishQueue.locator('[data-dead-letter-id]').first()
   await expect(spanishRow).toBeVisible()

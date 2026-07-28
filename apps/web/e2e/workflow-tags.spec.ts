@@ -41,7 +41,7 @@ test('Flows list filters by tag, shows the no-match state, and clears the filter
 
   await page.goto('/')
   await expect(page.getByText('dev-user')).toBeVisible()
-  await page.getByRole('button', { name: 'Flows' }).click()
+  await page.getByRole('button', { name: 'Workflows' }).click()
   await page.getByRole('button', { name: 'Refresh' }).click()
 
   const alphaRow = page.locator(`[data-testid="workflows-row-${alphaId}"]`)

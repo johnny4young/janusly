@@ -7,6 +7,11 @@ import { RightPanel, type RightPanelProps } from './RightPanel'
 vi.mock('../api', () => ({
   api: vi.fn(),
 }))
+vi.mock('./RunsPanel', () => ({
+  RunsPanel: ({ mode }: { mode?: string }) => (
+    <div data-testid="runs-panel-mode">{mode ?? 'runs'}</div>
+  ),
+}))
 
 function props(overrides: Partial<RightPanelProps> = {}): RightPanelProps {
   return {
@@ -41,6 +46,7 @@ function props(overrides: Partial<RightPanelProps> = {}): RightPanelProps {
       credentials: [],
       workflows: [],
       onOpenWorkflow: vi.fn(),
+      onCreateWorkflow: vi.fn(),
       onUseTemplate: vi.fn(),
       onInstallPlugin: vi.fn(),
       onInstallPack: vi.fn(),
@@ -79,5 +85,14 @@ describe('<RightPanel /> credentials', () => {
 
     const kind = screen.getByLabelText('Connection kind')
     expect(within(kind).getByRole('option', { name: 'postgres' })).toBeInTheDocument()
+  })
+})
+
+describe('<RightPanel /> recovery task space', () => {
+  it('mounts the action-focused recovery projection', async () => {
+    render(<RightPanel {...props({ tab: 'recover' })} />)
+
+    expect(await screen.findByTestId('runs-panel-mode'))
+      .toHaveTextContent('recovery')
   })
 })

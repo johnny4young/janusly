@@ -22,6 +22,23 @@ export default defineConfig({
     baseURL,
     screenshot: 'only-on-failure',
     trace: 'on-first-retry',
+    // Feature-focused specs enter specialized task spaces directly. Keep their
+    // setup concise while the dedicated navigation spec clears this seed and
+    // proves that real first-run UX keeps Advanced collapsed.
+    storageState: {
+      cookies: [],
+      origins: [{
+        origin: baseURL,
+        localStorage: [{
+          name: 'janusly:sidebar:state',
+          value: JSON.stringify({
+            openGroups: ['workspace', 'advanced'],
+            openCategories: ['ai', 'flow'],
+            collapsed: false,
+          }),
+        }],
+      }],
+    },
   },
   projects: [
     {

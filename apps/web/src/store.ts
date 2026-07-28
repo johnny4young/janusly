@@ -286,7 +286,7 @@ const TOAST_TTL_ERROR_MS = 6000
 // the new tab — it never throws).
 const ACTIVE_TAB_KEY = 'janusly:activeTab'
 const PERSISTED_TABS: readonly ActiveTab[] = [
-  'home', 'workflows', 'members', 'copilot', 'marketplace', 'templates',
+  'home', 'recover', 'workflows', 'members', 'copilot', 'marketplace', 'templates',
   'packs', 'credentials', 'inspector', 'runs', 'reasoning', 'multiAgent', 'operations', 'experiments',
 ]
 function readStoredActiveTab(): ActiveTab {

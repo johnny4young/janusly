@@ -16,7 +16,8 @@ test('dev session can create, save, run, and reopen a workflow', async ({ page }
   await page.goto('/')
   await expect(page.getByText('dev-user')).toBeVisible()
 
-  await page.getByRole('button', { name: 'New', exact: true }).click()
+  await page.getByRole('button', { name: 'Workflows', exact: true }).click()
+  await page.getByRole('button', { name: 'New workflow', exact: true }).click()
   await page.getByRole('textbox', { name: 'Name' }).fill(workflowName)
   await expandStepPaletteGroup(page, /^Misc\b/)
   await page.getByRole('button', { name: /Do nothing/i }).click()
@@ -32,7 +33,7 @@ test('dev session can create, save, run, and reopen a workflow', async ({ page }
   await page.getByRole('button', { name: /^AI Studio\b/ }).click()
   await expect(page.locator('.workflow-node').filter({ hasText: 'Do nothing' }).filter({ hasText: 'Done' })).toBeVisible({ timeout: 30_000 })
 
-  await page.getByRole('button', { name: 'Flows' }).click()
+  await page.getByRole('button', { name: 'Workflows' }).click()
   await page.getByRole('button', { name: 'Refresh' }).click()
   await expect(page.locator('[data-testid^="workflows-row-"]').filter({ hasText: workflowName })).toBeVisible()
 })
@@ -41,7 +42,8 @@ test('human form pauses a run, validates input, and resumes with submitted outpu
   await page.goto('/')
   await expect(page.getByText('dev-user')).toBeVisible()
 
-  await page.getByRole('button', { name: 'New', exact: true }).click()
+  await page.getByRole('button', { name: 'Workflows', exact: true }).click()
+  await page.getByRole('button', { name: 'New workflow', exact: true }).click()
   await page.getByRole('textbox', { name: 'Name' }).fill(`E2E Human Form ${Date.now()}`)
   await expandStepPaletteGroup(page, /^Human-in-the-loop\b/)
   await page.getByRole('button', { name: /Collect form/i }).click()
@@ -51,7 +53,7 @@ test('human form pauses a run, validates input, and resumes with submitted outpu
 
   await page.getByRole('button', { name: 'Run', exact: true }).click()
   await expect(page.getByText(/Run started:/)).toBeVisible()
-  await page.getByRole('button', { name: 'Runs', exact: true }).click()
+  await page.getByRole('button', { name: 'Recover', exact: true }).click()
   await expect(page.getByRole('button', { name: /Fill form/i })).toBeVisible({ timeout: 30_000 })
 
   await page.getByRole('button', { name: /Fill form/i }).click()
@@ -115,10 +117,11 @@ test('human form presents schema-valid initial values for operator review', asyn
     window.localStorage.setItem('janusly:locale', 'en')
   }, { activeOrg: orgId })
   await page.goto('/')
-  await page.getByRole('button', { name: 'Flows', exact: true }).click()
+  await page.getByRole('button', { name: 'Workflows', exact: true }).click()
   await page.getByTestId(`workflows-row-${workflow.id}`).click()
   await page.getByRole('button', { name: 'Runs', exact: true }).click()
   await page.getByRole('button', { name: `Open timeline for run ${startedBody.runId}` }).click()
+  await page.getByRole('button', { name: 'Recover', exact: true }).click()
   await expect(page.getByRole('button', { name: /Fill form/i })).toBeVisible({ timeout: 30_000 })
   await page.getByRole('button', { name: /Fill form/i }).click()
 

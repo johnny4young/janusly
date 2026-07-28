@@ -21,23 +21,21 @@
  * The metric strip + value section reuse the already-extracted siblings
  * `VitalSignsStrip` + `ValueDashboardSection`.
  *
- * Data sources (all already shipped):
- * - `GET /recovery/metrics` → metric strip, health badge, severities.
- * - `GET /recovery/validation` → bounded controlled-drill evidence.
- * - `GET /recovery/ledger` + `GET /recovery/my-wins` → verified lifetime and
- *   operator impact; refreshed from platform signals plus a bounded fallback
- *   so background-run completions still surface.
- * - `GET /dlq/counts` + oldest-first `GET /dlq/queue` → authoritative hero
- *   count and longest open downtime; the bounded bootstrap page feeds tiles.
- * - `GET /dlq/clusters` → failure-clusters tile.
+ * Data sources:
+ * - `GET /recovery/home` → one coalesced snapshot for recovery metrics,
+ *   validation, clusters, semantic cases, lifetime/operator impact, heatmap,
+ *   and the authoritative queue overview.
+ * - `GET /recovery/home?scope=impact` → a lightweight convergence snapshot for
+ *   the ledger, personal wins, and queue while background work completes.
  * - Run nodes from the store (`status === "waiting"`) → pending approvals.
  *
  * The Recovery Center is composition over the recovery API + engine metrics.
- * Its heavier metrics, clusters, and heatmap reads start together on the
- * cross-panel `platformVersion` tick. Ledger, personal wins, and queue counts
- * use a visibility-aware fallback because the completing worker may belong to
- * a run that is not the operator's active SSE target. Open recovery work keeps
- * a short convergence window; a healthy Home uses a slower fallback.
+ * Each server section settles independently, so one unavailable projection
+ * never hides healthy data. The full snapshot refreshes on the cross-panel
+ * `platformVersion` tick. The impact scope uses a visibility-aware fallback
+ * because the completing worker may belong to a run that is not the operator's
+ * active SSE target. Open recovery work keeps a short convergence window; a
+ * healthy Home uses a slower fallback.
  *
  * Used by `App.tsx` for `activeTab === 'home'`.
  *
@@ -58,6 +56,21 @@ import type {
 import { api } from '../api'
 import { useMemoryConsentStatus } from '../hooks/useMemoryConsentStatus'
 import { getMemoryPurgeCountdown } from '../memory-consent-status'
+import {
+  parseRecoveryHomeSnapshot,
+  readRecoveryHomeSection,
+  type RecoveryHomeSnapshot,
+} from '../recovery-home-snapshot'
+import {
+  decodeClustersResponse,
+  decodeHeatmap,
+  decodeOperatorWins,
+  decodeRecoveryCases,
+  decodeRecoveryLedger,
+  decodeRecoveryMetrics,
+  decodeRecoveryQueue,
+  decodeRecoveryValidationReport,
+} from '../recovery-home-sections'
 import { useWorkflowStore } from '../store'
 import type { DeadLetter } from './DeadLettersPanel'
 import { tRecoveryMetricRationale, useT } from '../i18n'
@@ -121,7 +134,7 @@ type RecoveryCenterPanelProps = {
   onOpenRecoveryCase: (caseId: string) => void
   onOpenRun: (runId: string, targetTab?: ActiveTab) => void | Promise<void>
   onApproveNode: (nodeId: string) => void | Promise<void>
-  /** Navigate to Runs and land keyboard focus on the Recovery Queue. */
+  /** Navigate to Recover and land keyboard focus on the Recovery Queue. */
   onOpenRecoveryQueue: () => void
   /** Start a deterministic drill so a fresh operator can try the recovery loop for real. */
   onStartRecoveryDrill?: () => void | Promise<void>
@@ -141,7 +154,7 @@ type IdentitySnapshot<T> = OrgSnapshot<T> & {
 type RecoveryQueueOverview = {
   orgId: string
   openCount: number
-  oldestOpen: DeadLetter | null
+  oldestOpen: { createdAt?: string } | null
   observedOpenIds: string[]
 }
 
@@ -220,6 +233,12 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const [allClearDowntimeOverride, setAllClearDowntimeOverride] = useState<number | null>(null)
   const [celebrationTrigger, setCelebrationTrigger] = useState(0)
   const previousRecoveryLedgerRef = useRef<OrgSnapshot<RecoveryLedger> | null>(null)
+  const identityRef = useRef({ orgId: resolvedOrgId, userId: resolvedUserId })
+  identityRef.current = { orgId: resolvedOrgId, userId: resolvedUserId }
+  const observedOpenIdsRef = useRef<string[]>([])
+  observedOpenIdsRef.current = props.deadLetters
+    .filter((deadLetter) => deadLetter.status === 'open')
+    .map((deadLetter) => deadLetter.id)
   useEffect(() => {
     props.onSemanticBlockerRunsChange?.(semanticBlockerRunIds)
   }, [props.onSemanticBlockerRunsChange, semanticBlockerRunIds])
@@ -239,19 +258,52 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     try { localStorage.setItem('janusly:recovery:hideIntro', 'true') } catch { /* storage unavailable — session-only dismiss */ }
   }
 
+  const applyImpactSnapshot = useCallback((
+    snapshot: RecoveryHomeSnapshot,
+    orgId: string,
+    userId: string,
+  ) => {
+    const ledgerValue = readRecoveryHomeSection(
+      snapshot,
+      'ledger',
+      decodeRecoveryLedger,
+    )
+    const winsValue = readRecoveryHomeSection(
+      snapshot,
+      'wins',
+      decodeOperatorWins,
+    )
+    const queueValue = readRecoveryHomeSection(
+      snapshot,
+      'queue',
+      decodeRecoveryQueue,
+    )
+    startTransition(() => {
+      setLedgerSnapshot({
+        orgId,
+        value: ledgerValue,
+      })
+      setWinsSnapshot({
+        orgId,
+        userId,
+        value: winsValue,
+      })
+      if (queueValue) {
+        const open = queueValue.counts.open
+        setQueueOverview({
+          orgId,
+          openCount: open,
+          oldestOpen: queueValue.oldestOpen,
+          observedOpenIds: [...observedOpenIdsRef.current],
+        })
+      }
+    })
+  }, [])
+
   useEffect(() => {
     let cancelled = false
     setMetricsLoading(true)
     setMetricsErrorSnapshot(null)
-
-    // Invoke all heavier reads before attaching handlers so one render commits
-    // one coordinated request burst without making any result wait for a
-    // slower sibling endpoint.
-    const metricsRequest = api('/recovery/metrics')
-    const clustersRequest = api('/dlq/clusters')
-    const heatmapRequest = api('/recovery/heatmap?days=90')
-    const validationRequest = api('/recovery/validation?windowDays=30')
-    const semanticCasesRequest = api('/recovery/cases?limit=50')
     setSemanticCasesSnapshot(current => ({
       orgId: resolvedOrgId,
       value: {
@@ -260,10 +312,79 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
       },
     }))
 
-    void metricsRequest
+    void api('/recovery/home')
       .then((payload) => {
         if (cancelled) return
-        setMetricsSnapshot({ orgId: resolvedOrgId, value: payload as RecoveryMetrics })
+        const snapshot = parseRecoveryHomeSnapshot(payload)
+        if (!snapshot || snapshot.scope !== 'full') {
+          throw new Error('Invalid recovery Home response')
+        }
+
+        const metricsValue = readRecoveryHomeSection(
+          snapshot,
+          'metrics',
+          decodeRecoveryMetrics,
+        )
+        const clustersValue = readRecoveryHomeSection(
+          snapshot,
+          'clusters',
+          decodeClustersResponse,
+        )
+        const heatmapValue = readRecoveryHomeSection(
+          snapshot,
+          'heatmap',
+          decodeHeatmap,
+        )
+        const validationValue = readRecoveryHomeSection(
+          snapshot,
+          'validation',
+          decodeRecoveryValidationReport,
+        )
+        const casesValue = readRecoveryHomeSection(
+          snapshot,
+          'cases',
+          decodeRecoveryCases,
+        )
+
+        if (metricsValue) {
+          setMetricsSnapshot({ orgId: resolvedOrgId, value: metricsValue })
+        } else {
+          setMetricsErrorSnapshot({
+            orgId: resolvedOrgId,
+            value: runtimeT('recoveryCenter.empty.metricsUnavailableFallback'),
+          })
+        }
+
+        startTransition(() => {
+          setClustersSnapshot({
+            orgId: resolvedOrgId,
+            value: clustersValue,
+          })
+          setHeatmapSnapshot({
+            orgId: resolvedOrgId,
+            value: heatmapValue?.days ?? [],
+          })
+          setValidationSnapshot({
+            orgId: resolvedOrgId,
+            value: validationValue,
+          })
+        })
+
+        if (casesValue) {
+          setSemanticCasesSnapshot({
+            orgId: resolvedOrgId,
+            value: { cases: casesValue.cases, status: 'available' },
+          })
+        } else {
+          setSemanticCasesSnapshot(current => ({
+            orgId: resolvedOrgId,
+            value: {
+              cases: current?.orgId === resolvedOrgId ? current.value.cases : [],
+              status: 'unavailable',
+            },
+          }))
+        }
+        applyImpactSnapshot(snapshot, resolvedOrgId, resolvedUserId)
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -273,164 +394,44 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
             ? error.message
             : runtimeT('recoveryCenter.empty.metricsUnavailableFallback'),
         })
+        startTransition(() => {
+          setClustersSnapshot({ orgId: resolvedOrgId, value: null })
+          setHeatmapSnapshot({ orgId: resolvedOrgId, value: [] })
+          setValidationSnapshot({ orgId: resolvedOrgId, value: null })
+          setLedgerSnapshot({ orgId: resolvedOrgId, value: null })
+          setWinsSnapshot({ orgId: resolvedOrgId, userId: resolvedUserId, value: null })
+        })
+        setSemanticCasesSnapshot(current => ({
+          orgId: resolvedOrgId,
+          value: {
+            cases: current?.orgId === resolvedOrgId ? current.value.cases : [],
+            status: 'unavailable',
+          },
+        }))
       })
       .finally(() => {
         if (!cancelled) setMetricsLoading(false)
       })
 
-    void clustersRequest
-      .then((payload) => {
-        if (cancelled) return
-        startTransition(() => {
-          setClustersSnapshot({
-            orgId: resolvedOrgId,
-            value: payload as ClustersResponse,
-          })
-        })
-      })
-      .catch(() => {
-        if (cancelled) return
-        startTransition(() => {
-          setClustersSnapshot({ orgId: resolvedOrgId, value: null })
-        })
-      })
-
-    void heatmapRequest
-      .then((payload) => {
-        if (cancelled) return
-        startTransition(() => {
-          setHeatmapSnapshot({
-            orgId: resolvedOrgId,
-            value: ((payload as { days?: HeatmapDay[] })?.days ?? []),
-          })
-        })
-      })
-      .catch(() => {
-        if (cancelled) return
-        startTransition(() => {
-          setHeatmapSnapshot({ orgId: resolvedOrgId, value: [] })
-        })
-      })
-
-    void validationRequest
-      .then((payload) => {
-        if (cancelled) return
-        startTransition(() => {
-          setValidationSnapshot({
-            orgId: resolvedOrgId,
-            value: payload as RecoveryValidationReport,
-          })
-        })
-      })
-      .catch(() => {
-        if (cancelled) return
-        startTransition(() => {
-          setValidationSnapshot({ orgId: resolvedOrgId, value: null })
-        })
-      })
-
-    void semanticCasesRequest
-      .then((payload) => {
-        if (cancelled) return
-        if (
-          !payload ||
-          typeof payload !== 'object' ||
-          !Array.isArray((payload as { cases?: unknown }).cases)
-        ) {
-          throw new Error('Invalid semantic recovery response')
-        }
-        const cases = (payload as { cases: RecoveryCase[] }).cases
-        setSemanticCasesSnapshot({
-          orgId: resolvedOrgId,
-          value: { cases, status: 'available' },
-        })
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSemanticCasesSnapshot(current => ({
-            orgId: resolvedOrgId,
-            value: {
-              cases: current?.orgId === resolvedOrgId ? current.value.cases : [],
-              status: 'unavailable',
-            },
-          }))
-        }
-      })
-
     return () => { cancelled = true }
-  }, [platformVersion, resolvedOrgId])
+  }, [applyImpactSnapshot, platformVersion, resolvedOrgId, resolvedUserId])
 
   useEffect(() => {
+    if (impactPollVersion === 0) return
     let cancelled = false
-    const ledgerRequest = api('/recovery/ledger')
-    const winsRequest = api('/recovery/my-wins?days=30')
-
-    void ledgerRequest
+    const { orgId, userId } = identityRef.current
+    void api('/recovery/home?scope=impact')
       .then((payload) => {
         if (cancelled) return
-        startTransition(() => {
-          setLedgerSnapshot({ orgId: resolvedOrgId, value: payload as RecoveryLedger })
-        })
+        const snapshot = parseRecoveryHomeSnapshot(payload)
+        if (!snapshot || snapshot.scope !== 'impact') return
+        applyImpactSnapshot(snapshot, orgId, userId)
       })
       .catch(() => {
-        if (cancelled) return
-        startTransition(() => {
-          setLedgerSnapshot({ orgId: resolvedOrgId, value: null })
-        })
-      })
-
-    void winsRequest
-      .then((payload) => {
-        if (cancelled) return
-        startTransition(() => {
-          setWinsSnapshot({
-            orgId: resolvedOrgId,
-            userId: resolvedUserId,
-            value: payload as OperatorWins,
-          })
-        })
-      })
-      .catch(() => {
-        if (cancelled) return
-        startTransition(() => {
-          setWinsSnapshot({ orgId: resolvedOrgId, userId: resolvedUserId, value: null })
-        })
-      })
-
-    return () => { cancelled = true }
-  }, [impactPollVersion, platformVersion, resolvedOrgId, resolvedUserId])
-
-  useEffect(() => {
-    let cancelled = false
-    const observedOpenIds = props.deadLetters
-      .filter((deadLetter) => deadLetter.status === 'open')
-      .map((deadLetter) => deadLetter.id)
-    void api('/dlq/counts')
-      .then(async (payload) => {
-        if (cancelled) return
-        const open = (payload as { open?: unknown } | null)?.open
-        if (typeof open !== 'number' || !Number.isInteger(open) || open < 0) return
-
-        if (open === 0) {
-          setQueueOverview({ orgId: resolvedOrgId, openCount: 0, oldestOpen: null, observedOpenIds })
-          return
-        }
-
-        const queuePayload = await api('/dlq/queue?status=open&sort=oldest&limit=1').catch(() => null)
-        if (cancelled) return
-        const items = (queuePayload as { items?: unknown } | null)?.items
-        setQueueOverview({
-          orgId: resolvedOrgId,
-          openCount: open,
-          oldestOpen: Array.isArray(items) && items.length > 0 ? items[0] as DeadLetter : null,
-          observedOpenIds,
-        })
-      })
-      .catch(() => {
-        // Keep the bounded bootstrap-page fallback when the summary is unavailable.
+        // Keep the last healthy impact projection when a convergence poll fails.
       })
     return () => { cancelled = true }
-  }, [impactPollVersion, platformVersion, props.deadLetters, resolvedOrgId])
+  }, [applyImpactSnapshot, impactPollVersion])
 
   const openDeadLetters = useMemo(
     () => props.deadLetters.filter((dlq) => dlq.status === 'open'),
@@ -722,7 +723,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
           const day = mttrTrend[index]?.day
           if (!day) return
           requestRecoveryDayFocus(day)
-          props.onOpenTab('runs')
+          props.onOpenTab('recover')
         }
       : undefined,
     onClick: () => props.onOpenTab('operations'),
@@ -757,7 +758,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     severity: waitingNodes.length === 0 ? 'healthy' : 'warn',
     rationale: approvalsRationale,
     ariaLabel: t('recoveryCenter.metric.aria', { label: approvalsLabel, display: approvalsDisplay, rationale: approvalsRationale }),
-    onClick: () => props.onOpenTab('runs'),
+    onClick: () => props.onOpenTab('recover'),
     testId: 'recovery-center-metric-approvals',
   })
   const replayLabel = t('recoveryCenter.metric.replay.label')
@@ -860,7 +861,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
         nowMs={nowMs}
         onSelectDay={(day) => {
           requestRecoveryDayFocus(day)
-          props.onOpenTab('runs')
+          props.onOpenTab('recover')
         }}
       />
 

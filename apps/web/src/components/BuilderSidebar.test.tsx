@@ -51,7 +51,6 @@ describe('<BuilderSidebar />', () => {
   it('hides unauthorized destinations and disables write actions', () => {
     renderSidebar({ permissions: ['workflows.read', 'runs.read'] })
 
-    expect(screen.queryByRole('button', { name: /Members/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Credentials/ })).not.toBeInTheDocument()
     expect(screen.queryByText('AI operator')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
@@ -110,5 +109,40 @@ describe('<BuilderSidebar />', () => {
 
     expect(screen.getByRole('button', { name: /^Runs$/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Multi-agent timeline$/ })).not.toBeInTheDocument()
+  })
+
+  it('keeps operational task spaces primary and authoring chrome contextual', () => {
+    renderSidebar({ activeTab: 'home' })
+
+    expect(screen.getByRole('button', { name: /^Home/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Recover$/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Workflows$/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Runs$/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Connections$/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Operations$/ })).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Name' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Call an API' })).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Search sections…' })).toBeInTheDocument()
+
+    const advanced = screen.getByRole('button', { name: /^Advanced/ })
+    expect(advanced).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(advanced)
+    expect(screen.getByRole('button', { name: /^AI Studio/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Step setup$/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Team$/ })).toBeInTheDocument()
+  })
+
+  it('migrates stale navigation groups without hiding the primary workspace', () => {
+    window.localStorage.setItem('janusly:sidebar:state', JSON.stringify({
+      openGroups: ['pinned', 'build', 'run'],
+      openCategories: ['ai'],
+      collapsed: false,
+    }))
+
+    renderSidebar({ activeTab: 'home' })
+
+    expect(screen.getByRole('button', { name: /Workspace/ }))
+      .toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: /^Recover$/ })).toBeInTheDocument()
   })
 })

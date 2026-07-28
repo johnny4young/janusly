@@ -11,14 +11,14 @@ const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 const LOCALES = [
   {
     locale: 'en',
-    runs: 'Runs',
+    recover: 'Recover',
     eligible: 'Technically eligible',
     blocked: 'Operator required',
     blockedReason: 'The operator policy does not allow this repair class.',
   },
   {
     locale: 'es',
-    runs: 'Ejecuciones',
+    recover: 'Recuperar',
     eligible: 'Técnicamente elegible',
     blocked: 'Requiere operador',
     blockedReason: 'La política del operador no permite esta clase de reparación.',
@@ -242,7 +242,7 @@ for (const contract of LOCALES) {
     const orgId = await prepareSession(page, contract.locale)
     await seedAutonomyEvidence(orgId)
     await page.goto('/')
-    await page.getByRole('button', { name: contract.runs, exact: true }).click()
+    await page.getByRole('button', { name: contract.recover, exact: true }).click()
 
     const card = page.getByTestId('auto-healing-pending-card')
     await expect(card.getByText(contract.eligible, { exact: true })).toBeVisible()

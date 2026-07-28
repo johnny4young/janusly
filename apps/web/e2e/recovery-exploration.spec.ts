@@ -17,7 +17,7 @@ const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 type LocaleContract = {
   locale: 'en' | 'es'
   homeName: RegExp
-  runsName: string
+  recoverName: string
   applyName: string
   skippedSignature: string
   legacySignature: string
@@ -27,7 +27,7 @@ const LOCALES: LocaleContract[] = [
   {
     locale: 'en',
     homeName: /^Home\b/,
-    runsName: 'Runs',
+    recoverName: 'Recover',
     applyName: 'Apply',
     skippedSignature: 'HTTP write validation',
     legacySignature: 'Legacy validation',
@@ -35,7 +35,7 @@ const LOCALES: LocaleContract[] = [
   {
     locale: 'es',
     homeName: /^Inicio\b/,
-    runsName: 'Ejecuciones',
+    recoverName: 'Recuperar',
     applyName: 'Aplicar',
     skippedSignature: 'Validación de escritura HTTP',
     legacySignature: 'Validación heredada',
@@ -218,7 +218,7 @@ for (const contract of LOCALES) {
     await capture(labEntry, `web-${contract.locale}-recovery-lab-restored`)
 
     await seedAutoHealingEvidence(sessionOrgId, contract)
-    await page.getByRole('button', { name: contract.runsName, exact: true }).click()
+    await page.getByRole('button', { name: contract.recoverName, exact: true }).click()
     const evidenceCard = page.getByTestId('auto-healing-pending-card')
     const skippedCandidate = evidenceCard.locator('li').filter({ hasText: contract.skippedSignature })
     const legacyCandidate = evidenceCard.locator('li').filter({ hasText: contract.legacySignature })

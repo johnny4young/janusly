@@ -17,9 +17,7 @@ import { eq } from "drizzle-orm";
 
 import {
   findMatchingActiveRecoveryPlaybook,
-  queryFailureSamples,
   queryRecoveryDrillOutcome,
-  queryRecoveryRecurrence,
   resolveRecoveryPlaybookOutcomeFacts,
 } from "@janusly/data";
 import { db, runs, workflowVersions } from "@janusly/db";
@@ -28,7 +26,6 @@ import { ReplayNotClaimableError } from "@janusly/engine/src/persistence";
 import { isProviderSimulationRuntimeAvailable } from "@janusly/engine/src/provider-simulation-policy";
 import { qualifyProviderSimulationWorkflow } from "@janusly/engine/src/provider-simulation-validation";
 import type { ValidationEffectMode } from "@janusly/engine/src/validation-evidence";
-import { clusterFailureSamples } from "@janusly/engine/src/cluster-failures";
 import { NodeSchema, WorkflowSchema, type Workflow } from "@janusly/shared";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 import { computeWorkflowDiff } from "@janusly/shared/src/workflow-diff";
@@ -53,6 +50,7 @@ import { asRecord, readJson, sendError, sendJson } from "../http";
 import { guardMcpWrite } from "../mcp-consent";
 import { enforceRateLimit } from "../rate-limit";
 import { resolveSuspectVersion } from "../suspect-version";
+import { queryFailureClustersReadModel } from "../recovery-read-models";
 import type { Route } from "../routes";
 
 // Shared DLQ replay adapter used by validate-fix, cluster-apply, and
@@ -160,17 +158,13 @@ export const dlqRoutes: Route[] = [
       const url = new URL(req.url ?? "", "http://localhost");
       const rawWindow = Number.parseInt(url.searchParams.get("windowDays") ?? "", 10);
       const windowDays = Number.isFinite(rawWindow) ? Math.min(90, Math.max(1, rawWindow)) : 30;
-      const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
-      const [samples, recurrence] = await Promise.all([
-        queryFailureSamples(auth.orgId, windowDays),
-        queryRecoveryRecurrence(auth.orgId, since),
-      ]);
-      const recurredSignatures = new Set(recurrence.recurredSignatures);
-      const clusters = clusterFailureSamples(samples).map((cluster) => ({
-        ...cluster,
-        recurredAfterRecovery: recurredSignatures.has(cluster.signature),
-      }));
-      return sendJson(res, { clusters, totalSamples: samples.length, windowDays });
+      return sendJson(
+        res,
+        await queryFailureClustersReadModel(
+          auth.orgId,
+          windowDays,
+        ),
+      );
     } },
   // Cluster member listing — feeds the bulk recovery dialog with the
   // bounded list of DLQ ids whose normalized error signature matches a

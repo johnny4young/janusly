@@ -45,6 +45,7 @@ const SolutionPacksPanel = lazy(() => import('./SolutionPacksPanel').then((m) =>
 const OperationsPage = lazy(() => import('./OperationsPage').then((m) => ({ default: m.OperationsPage })))
 const ExperimentsPanel = lazy(() => import('./ExperimentsPanel').then((m) => ({ default: m.ExperimentsPanel })))
 const RunWorkspace = lazy(() => import('./RunWorkspace').then((m) => ({ default: m.RunWorkspace })))
+const RunsPanel = lazy(() => import('./RunsPanel').then((m) => ({ default: m.RunsPanel })))
 const RecoveryCasePanel = lazy(() => import('./RecoveryCasePanel').then((m) => ({ default: m.RecoveryCasePanel })))
 const ReasoningPanel = lazy(() => import('./ReasoningPanel').then((m) => ({ default: m.ReasoningPanel })))
 const CredentialRotateModal = lazy(() => import('./CredentialRotateModal').then((m) => ({ default: m.CredentialRotateModal })))
@@ -105,6 +106,7 @@ export type RightPanelCatalog = {
   credentials: Credential[]
   workflows: SavedWorkflow[]
   onOpenWorkflow: (id: string) => void
+  onCreateWorkflow: () => void
   onUseTemplate: (workflow: WorkflowDefinition) => void
   onInstallPlugin: (pluginId: string) => void
   onInstallPack: (packId: string) => void
@@ -192,6 +194,30 @@ function RightPanelRouter(props: RightPanelProps) {
     if (!execution.activeRunId) return Promise.resolve(null)
     return api(`/causal?runId=${encodeURIComponent(execution.activeRunId)}&eventId=${encodeURIComponent(eventId)}&nodeId=${encodeURIComponent(nodeId)}`, { signal })
   }, [execution.activeRunId])
+  const runsPanelProps = {
+    runs: execution.runs,
+    workflows: execution.workflows,
+    usage: execution.usage,
+    runNodes: execution.runNodes,
+    runEvents: execution.events,
+    activeRunId: execution.activeRunId,
+    onOpenRun: execution.onOpenRun,
+    onRefreshPlatform: execution.onRefreshPlatform,
+    onApproveNode: execution.onApproveNode,
+    onSubmitHumanForm: execution.onSubmitHumanForm,
+    onReplayNode: execution.onReplayNode,
+    onRedriveNode: execution.onRedriveNode,
+    onCancelActiveRun: execution.onCancelActiveRun,
+    onReplayDeadLetter: execution.onReplayDeadLetter,
+    onResolveDeadLetter: execution.onResolveDeadLetter,
+    canStartRuns: can('runs.start'),
+    canCancelRuns: can('runs.cancel'),
+    canReplayDeadLetters: can('dlq.replay'),
+    canResolveDeadLetters: can('recovery.write'),
+    canUseRecovery: can('ai.write') && can('recovery.write') && can('workflows.write') && can('dlq.replay') && can('runs.start'),
+    canReadAutoHealing: can('autohealing.read'),
+    canDecideAutoHealing: can('autohealing.decide'),
+  }
   if (props.tab === 'copilot') return (
     <AiCopilotPanel
       health={authoring.aiHealth}
@@ -210,7 +236,11 @@ function RightPanelRouter(props: RightPanelProps) {
   )
   if (props.tab === 'workflows') return (
     <PanelChrome title={t('rightPanel.workflows.title')} description={t('rightPanel.workflows.description')} icon={<Database size={18} />}>
-      <WorkflowsDashboard onOpen={catalog.onOpenWorkflow} canWrite={can('workflows.write')} />
+      <WorkflowsDashboard
+        onOpen={catalog.onOpenWorkflow}
+        onCreate={catalog.onCreateWorkflow}
+        canWrite={can('workflows.write')}
+      />
     </PanelChrome>
   )
   if (props.tab === 'operations') return <OperationsPage permissions={props.permissions} />
@@ -298,32 +328,17 @@ function RightPanelRouter(props: RightPanelProps) {
       canWrite={can('credentials.write')}
     />
   )
+  if (props.tab === 'recover') return (
+    <RunsPanel
+      {...runsPanelProps}
+      mode="recovery"
+    />
+  )
   if (props.tab === 'runs') return (
     <RunWorkspace
-      runs={execution.runs}
-      workflows={execution.workflows}
-      usage={execution.usage}
-      runNodes={execution.runNodes}
-      runEvents={execution.events}
+      {...runsPanelProps}
       eventsHasMore={execution.eventsHasMore}
       onLoadOlderEvents={execution.onLoadOlderEvents}
-      activeRunId={execution.activeRunId}
-      onOpenRun={execution.onOpenRun}
-      onRefreshPlatform={execution.onRefreshPlatform}
-      onApproveNode={execution.onApproveNode}
-      onSubmitHumanForm={execution.onSubmitHumanForm}
-      onReplayNode={execution.onReplayNode}
-      onRedriveNode={execution.onRedriveNode}
-      onCancelActiveRun={execution.onCancelActiveRun}
-      onReplayDeadLetter={execution.onReplayDeadLetter}
-      onResolveDeadLetter={execution.onResolveDeadLetter}
-      canStartRuns={can('runs.start')}
-      canCancelRuns={can('runs.cancel')}
-      canReplayDeadLetters={can('dlq.replay')}
-      canResolveDeadLetters={can('recovery.write')}
-      canUseRecovery={can('ai.write') && can('recovery.write') && can('workflows.write') && can('dlq.replay') && can('runs.start')}
-      canReadAutoHealing={can('autohealing.read')}
-      canDecideAutoHealing={can('autohealing.decide')}
       onLoadRunUsage={loadRunUsage}
       onReplayDecision={execution.activeRunId ? replayDecision : undefined}
       onOpenFullView={navigation.onOpenTab}

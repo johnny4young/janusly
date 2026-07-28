@@ -200,7 +200,7 @@ test('replaying one of two failures never publishes a false all-clear', async ({
   await expect(page.getByTestId('recovery-queue')).toBeVisible()
   await injectDemoFailure(request, orgId)
   await page.reload()
-  await page.getByRole('button', { name: 'Runs', exact: true }).click()
+  await page.getByRole('button', { name: 'Recover', exact: true }).click()
 
   const queue = page.getByTestId('recovery-queue')
   await expect(queue.locator('[data-dead-letter-id]')).toHaveCount(2)

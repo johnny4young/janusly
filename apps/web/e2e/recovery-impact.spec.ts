@@ -245,7 +245,8 @@ test('Recovery impact is tenant-safe, personal, localized, and visible in focuse
   })
   page.on('pageerror', (error) => pageErrors.push(error.message))
   page.on('response', (response) => {
-    if (response.url().includes('/recovery/ledger') || response.url().includes('/recovery/my-wins')) {
+    const url = new URL(response.url())
+    if (url.pathname === '/recovery/home' && url.searchParams.get('scope') === 'impact') {
       recoveryReadResponses.push(response.url())
     }
   })
@@ -296,7 +297,7 @@ test('Recovery impact is tenant-safe, personal, localized, and visible in focuse
   const backgroundImpact = await seedPendingBackgroundRecovery(orgId)
   await page.reload()
   await expect(page.getByTestId('recovery-center-metric-failures')).toContainText('1')
-  const readsBeforeCompletion = recoveryReadResponses.filter((url) => url.includes('/recovery/my-wins')).length
+  const readsBeforeCompletion = recoveryReadResponses.length
   await completeBackgroundRecovery(orgId, backgroundImpact)
   expect(await getV1(request, orgId, '/recovery/ledger')).toMatchObject({
     data: { totalRecovered: 5, downtimeEndedMs: 12_600_000 },
@@ -305,7 +306,7 @@ test('Recovery impact is tenant-safe, personal, localized, and visible in focuse
     data: { recovered: 3, windowDays: 30 },
   })
   await expect.poll(
-    () => recoveryReadResponses.filter((url) => url.includes('/recovery/my-wins')).length,
+    () => recoveryReadResponses.length,
     { timeout: 15_000 },
   ).toBeGreaterThan(readsBeforeCompletion)
   await expect(hero.getByTestId('recovery-center-greeting')).toHaveText(

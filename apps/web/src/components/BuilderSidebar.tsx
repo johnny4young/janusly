@@ -1,19 +1,17 @@
 /**
- * Left-rail sidebar — Janusly Studio's persistent workspace navigator.
+ * Persistent task-space navigator.
  *
- * Replicates `ui_kits/studio/sidebar.html` from the design system zip:
- * (1) workflow header card (name + env chip + status row + 4-col action
- * strip), (2) AI-mode one-line strip, (3) search input, (4) grouped views
- * with collapse/expand state (Pinned / Build / Run),
- * (5) pinned step palette + categorized step palette (AI / Flow control /
- * Human-in-the-loop / Tools & integrations / Misc), (6) bottom utility
- * strip with connection live indicator.
+ * The primary group exposes the six operator destinations used most often.
+ * Advanced authoring and administration remain one disclosure away. Workflow
+ * controls and the node palette render only in authoring contexts, keeping
+ * Home and operational workspaces focused on their current task.
  *
  * Used by `App.tsx`.
  *
  * Persists open-group / open-category state to localStorage under
  * `janusly:sidebar:state` so the operator's collapse choices survive a
- * page reload. Search filters BOTH views and step types in one keystroke.
+ * page reload. Search filters navigation everywhere and step types while
+ * authoring.
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
@@ -28,7 +26,6 @@ import {
   Database,
   FileInput,
   FlaskConical,
-  Gauge,
   GitBranch,
   GitFork,
   Globe,
@@ -52,6 +49,8 @@ import {
   Route,
   Save,
   Search,
+  Settings2,
+  ShieldAlert,
   Sparkles,
   Split,
   SquarePlus,
@@ -95,7 +94,7 @@ type StoredState = {
   collapsed: boolean
 }
 
-const DEFAULT_OPEN_GROUPS = ['pinned', 'build', 'run']
+const DEFAULT_OPEN_GROUPS = ['workspace']
 const DEFAULT_OPEN_CATEGORIES = ['ai', 'flow']
 const PINNED_PALETTE: string[] = ['http', 'ai', 'condition', 'tool']
 
@@ -145,53 +144,36 @@ type NavItem = {
 }
 
 type NavGroup = {
-  key: 'pinned' | 'build' | 'run'
+  key: 'workspace' | 'advanced'
   labelKey: string
   items: NavItem[]
 }
 
-/** Three nav groups: Pinned (home shortcut), Build (authoring + discovery —
- *  Templates/Marketplace live here because they're the surfaces an operator
- *  uses to FIND the building blocks of a workflow), Run (operate-the-org —
- *  Credentials/Members live here because they're runtime config, not authoring).
- *
- *  Adding a new tab means deciding which group it conceptually belongs to:
- *  - "authoring or discovery" → Build
- *  - "production-runtime config or admin" → Run
- *  - "always-accessible shortcut" → Pinned
- *
- *  Adding a fourth group is a bigger UX call — three groups is the comfortable
- *  ceiling for a vertical sidebar (PagerDuty / Vercel / Linear all converge
- *  here). Re-evaluate only when an 11-item group emerges with no clean
- *  sub-categorization. */
+/** Primary destinations stay stable and short. Specialized builders and
+ * administrative views remain reachable in Advanced and the command palette. */
 const NAV_GROUPS: NavGroup[] = [
   {
-    key: 'pinned',
-    labelKey: 'sidebar.group.pinned',
+    key: 'workspace',
+    labelKey: 'sidebar.group.workspace',
     items: [
       { tab: 'home', labelKey: 'sidebar.nav.home.label', helperKey: 'sidebar.nav.home.helper', icon: <Home size={13} />, meta: '⌘1' },
+      { tab: 'recover', labelKey: 'sidebar.nav.recover.label', helperKey: 'sidebar.nav.recover.helper', icon: <ShieldAlert size={13} /> },
+      { tab: 'workflows', labelKey: 'sidebar.nav.workflows.label', helperKey: 'sidebar.nav.workflows.helper', icon: <Database size={13} /> },
+      { tab: 'runs', labelKey: 'sidebar.nav.runs.label', helperKey: 'sidebar.nav.runs.helper', icon: <Activity size={13} /> },
+      { tab: 'credentials', labelKey: 'sidebar.nav.credentials.label', helperKey: 'sidebar.nav.credentials.helper', icon: <KeyRound size={13} /> },
+      { tab: 'operations', labelKey: 'sidebar.nav.operations.label', helperKey: 'sidebar.nav.operations.helper', icon: <Settings2 size={13} /> },
     ],
   },
   {
-    key: 'build',
-    labelKey: 'sidebar.group.build',
+    key: 'advanced',
+    labelKey: 'sidebar.group.advanced',
     items: [
       { tab: 'copilot', labelKey: 'sidebar.nav.copilot.label', helperKey: 'sidebar.nav.copilot.helper', icon: <Sparkles size={13} />, meta: '⌘2' },
       { tab: 'experiments', labelKey: 'sidebar.nav.experiments.label', helperKey: 'sidebar.nav.experiments.helper', icon: <FlaskConical size={13} /> },
-      { tab: 'workflows', labelKey: 'sidebar.nav.workflows.label', helperKey: 'sidebar.nav.workflows.helper', icon: <Database size={13} /> },
       { tab: 'inspector', labelKey: 'sidebar.nav.inspector.label', helperKey: 'sidebar.nav.inspector.helper', icon: <GitBranch size={13} /> },
       { tab: 'templates', labelKey: 'sidebar.nav.templates.label', helperKey: 'sidebar.nav.templates.helper', icon: <Workflow size={13} /> },
       { tab: 'packs', labelKey: 'sidebar.nav.packs.label', helperKey: 'sidebar.nav.packs.helper', icon: <Package size={13} /> },
       { tab: 'marketplace', labelKey: 'sidebar.nav.marketplace.label', helperKey: 'sidebar.nav.marketplace.helper', icon: <Boxes size={13} /> },
-    ],
-  },
-  {
-    key: 'run',
-    labelKey: 'sidebar.group.run',
-    items: [
-      { tab: 'runs', labelKey: 'sidebar.nav.runs.label', helperKey: 'sidebar.nav.runs.helper', icon: <Activity size={13} /> },
-      { tab: 'operations', labelKey: 'sidebar.nav.operations.label', helperKey: 'sidebar.nav.operations.helper', icon: <Gauge size={13} /> },
-      { tab: 'credentials', labelKey: 'sidebar.nav.credentials.label', helperKey: 'sidebar.nav.credentials.helper', icon: <KeyRound size={13} /> },
       { tab: 'members', labelKey: 'sidebar.nav.members.label', helperKey: 'sidebar.nav.members.helper', icon: <Users size={13} /> },
     ],
   },
@@ -227,10 +209,16 @@ function loadStoredState(): StoredState {
     const raw = window.localStorage.getItem(STORAGE_KEY)
     if (!raw) return fallback
     const parsed = JSON.parse(raw) as Partial<StoredState>
+    const validOpenGroups = Array.isArray(parsed.openGroups)
+      ? parsed.openGroups.filter((k): k is string => typeof k === 'string' && VALID_GROUP_KEYS.has(k))
+      : DEFAULT_OPEN_GROUPS
     return {
-      openGroups: Array.isArray(parsed.openGroups)
-        ? parsed.openGroups.filter((k): k is string => typeof k === 'string' && VALID_GROUP_KEYS.has(k))
-        : DEFAULT_OPEN_GROUPS,
+      openGroups:
+        Array.isArray(parsed.openGroups)
+        && parsed.openGroups.length > 0
+        && validOpenGroups.length === 0
+          ? DEFAULT_OPEN_GROUPS
+          : validOpenGroups,
       openCategories: Array.isArray(parsed.openCategories)
         ? parsed.openCategories.filter((k): k is string => typeof k === 'string' && VALID_CATEGORY_KEYS.has(k))
         : DEFAULT_OPEN_CATEGORIES,
@@ -324,6 +312,7 @@ export function BuilderSidebar({
   }
 
   const normalisedQuery = searchQuery.trim().toLowerCase()
+  const authoringMode = activeTab === 'copilot' || activeTab === 'inspector'
 
   const filteredGroups = useMemo<NavGroup[]>(() => {
     const allowedGroups = NAV_GROUPS.map(group => ({
@@ -377,8 +366,7 @@ export function BuilderSidebar({
 
   return (
     <aside className="builder-sidebar" data-collapsed={visuallyCollapsed ? 'true' : 'false'}>
-      {/* Workflow header card */}
-      <div className={`sb-workflow ${isProduction ? 'sb-workflow--prod' : 'sb-workflow--sandbox'}`}>
+      {authoringMode && <div className={`sb-workflow ${isProduction ? 'sb-workflow--prod' : 'sb-workflow--sandbox'}`}>
         <div className="sb-workflow__top">
           <label className="sb-workflow__name" aria-label={t('sidebar.workflow.rename')}>
             <span className="sb-workflow__name-ic" aria-hidden="true"><Workflow size={13} /></span>
@@ -433,10 +421,9 @@ export function BuilderSidebar({
             <span>{busyAction === 'run' ? t('sidebar.action.running') : t('sidebar.action.run')}</span>
           </button>
         </div>
-      </div>
+      </div>}
 
-      {/* AI mode one-line strip */}
-      {permissions.includes('ai.write') && <button
+      {authoringMode && permissions.includes('ai.write') && <button
         className="sb-ai-strip"
         type="button"
         onClick={() => onOpenTab('copilot')}
@@ -460,8 +447,8 @@ export function BuilderSidebar({
           type="text"
           value={searchQuery}
           onChange={(event) => setSearchQuery(event.target.value)}
-          placeholder={t('sidebar.search.placeholder')}
-          aria-label={t('sidebar.search.placeholder')}
+          placeholder={t(authoringMode ? 'sidebar.search.placeholder' : 'sidebar.search.navigationPlaceholder')}
+          aria-label={t(authoringMode ? 'sidebar.search.placeholder' : 'sidebar.search.navigationPlaceholder')}
           data-shortcut="sidebar-search"
         />
         <kbd>/</kbd>
@@ -510,8 +497,7 @@ export function BuilderSidebar({
         })}
       </nav>
 
-      {/* Pinned step palette */}
-      {filteredPinned.length > 0 && (
+      {authoringMode && filteredPinned.length > 0 && (
         <div className="sb-group sb-group--open sb-pinned">
           <div className="sb-group__head sb-group__head--static">
             <span className="sb-group__head-label">
@@ -546,8 +532,7 @@ export function BuilderSidebar({
         </div>
       )}
 
-      {/* Categorized step palette */}
-      <div className="sb-categories">
+      {authoringMode && <div className="sb-categories">
         {Object.entries(filteredCategoryNodes).map(([key, types]) => {
           if (types.length === 0) return null
           const isOpen = openCategories.has(key)
@@ -591,7 +576,7 @@ export function BuilderSidebar({
             </div>
           )
         })}
-      </div>
+      </div>}
 
       {/* Bottom utility strip */}
       <div className="sb-footer">

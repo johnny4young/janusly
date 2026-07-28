@@ -118,7 +118,7 @@ test('Solution Packs install, sample-run, and recovery-drill flows work from the
   expect(drillBody.evidence.thresholdMinutes).toBeLessThanOrEqual(1440)
   expect(drillBody.evidence.simulatedStallMs).toBe(drillBody.evidence.thresholdMinutes * 60_000 + 1_000)
   await expect(page.getByText('Recovery drill created')).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Recover', exact: true })).toBeVisible()
   const focusedFailure = page.locator('[data-testid^="dlq-row-"][data-selected="true"]').filter({ hasText: 'page_oncall' }).first()
   await expect(focusedFailure).toBeVisible({ timeout: 30_000 })
   await expect(focusedFailure).toBeFocused()

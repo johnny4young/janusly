@@ -126,7 +126,7 @@ test('creates, observes, and stops a paced campaign in English and Spanish', asy
     }
   })
   await page.goto('/')
-  await page.getByRole('button', { name: 'Runs', exact: true }).click()
+  await page.getByRole('button', { name: 'Recover', exact: true }).click()
 
   const queue = page.getByTestId('recovery-queue')
   await expect(queue).toBeVisible()

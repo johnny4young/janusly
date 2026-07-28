@@ -37,7 +37,7 @@ export type RunWorkspaceView = 'overview' | 'timeline' | 'agents'
 type LoadRunUsage = (runId: string, signal: AbortSignal) => Promise<unknown>
 type ReplayDecision = (eventId: string, nodeId: string, signal: AbortSignal) => Promise<unknown>
 
-export type RunWorkspaceProps = Omit<RunsPanelProps, 'onViewTimeline'> & {
+export type RunWorkspaceProps = Omit<RunsPanelProps, 'mode' | 'onViewTimeline'> & {
   eventsHasMore?: boolean
   onLoadOlderEvents?: () => void | Promise<void>
   onOpenFullView: (tab: 'reasoning' | 'multiAgent') => void

@@ -6,7 +6,7 @@ const DEV_HEADERS = { 'Content-Type': 'application/json', 'x-org-id': 'default',
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 
 const copy = {
-  en: { flows: 'Flows', connections: 'Connections' },
+  en: { flows: 'Workflows', connections: 'Connections' },
   es: { flows: 'Flujos', connections: 'Conexiones' },
 } as const
 

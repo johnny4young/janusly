@@ -12,7 +12,7 @@ type RunSnapshot = {
 
 const locales = {
   en: {
-    flows: 'Flows',
+    flows: 'Workflows',
     stepSetup: 'Step setup',
     version: 'Version pin',
     pinned: /Pinned to exact version v\d+\. Clear the field to follow latest\./,

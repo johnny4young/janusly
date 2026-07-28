@@ -493,7 +493,7 @@ export function PendingApprovalsTile({
         <button
           type="button"
           className="we-recovery-center-tile__link"
-          onClick={() => onOpenTab('runs')}
+          onClick={() => onOpenTab('recover')}
           data-testid="recovery-center-approvals-open-all"
         >
           {t('recoveryCenter.tile.approvals.openAll')} <ChevronRight size={14} aria-hidden="true" />
@@ -549,10 +549,8 @@ export function PendingApprovalsTile({
                       type="button"
                       className="command-button command-button-compact"
                       onClick={() => {
-                        // With a runId, openRun switches to the runs tab itself;
-                        // without one, fall back to just opening the runs list.
-                        if (runId) void onOpenRun(runId, 'runs')
-                        else onOpenTab('runs')
+                        if (runId) void onOpenRun(runId, 'recover')
+                        else onOpenTab('recover')
                       }}
                     >
                       {t('recoveryCenter.tile.approvals.hold')}

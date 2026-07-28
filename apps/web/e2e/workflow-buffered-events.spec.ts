@@ -15,7 +15,7 @@ const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 const LOCALES = [
   {
     locale: 'en' as const,
-    flows: 'Flows',
+    flows: 'Workflows',
     action: 'Continue events',
     cleared: 'Buffered events cleared — 2 replayed',
   },

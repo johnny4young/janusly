@@ -119,6 +119,7 @@ function persistRecent(ids: CommandId[]): void {
 function buildCommands(docsUrl: string | null | undefined): Command[] {
   const navCommands: Command[] = [
     { id: 'go.home', labelKey: 'palette.nav.home', icon: <Home size={14} />, group: 'nav', shortcut: '⌘1', permission: 'recovery.read', run: ({ openTab }) => { openTab('home') } },
+    { id: 'go.recover', labelKey: 'palette.nav.recover', icon: <ShieldAlert size={14} />, group: 'nav', permission: 'recovery.read', run: ({ openTab }) => { openTab('recover') } },
     { id: 'go.copilot', labelKey: 'palette.nav.copilot', icon: <Sparkles size={14} />, group: 'nav', shortcut: '⌘2', permission: 'ai.write', run: ({ openTab }) => { openTab('copilot') } },
     { id: 'go.workflows', labelKey: 'palette.nav.workflows', icon: <Database size={14} />, group: 'nav', permission: 'workflows.read', run: ({ openTab }) => { openTab('workflows') } },
     { id: 'go.inspector', labelKey: 'palette.nav.inspector', icon: <GitBranch size={14} />, group: 'nav', permission: 'workflows.read', run: ({ openTab }) => { openTab('inspector') } },
@@ -137,7 +138,7 @@ function buildCommands(docsUrl: string | null | undefined): Command[] {
     { id: 'action.save', labelKey: 'palette.action.save', icon: <Save size={14} />, group: 'action', permission: 'workflows.write', run: ({ onSave }) => { onSave() } },
     { id: 'action.run', labelKey: 'palette.action.run', icon: <Play size={14} />, group: 'action', permission: 'runs.start', run: ({ onStart }) => { onStart() } },
     { id: 'action.insertSnippet', labelKey: 'palette.action.insertSnippet', icon: <Layers size={14} />, group: 'action', permission: 'workflows.write', run: ({ onInsertSnippet }) => { onInsertSnippet() } },
-    { id: 'action.recover', labelKey: 'palette.action.recover', icon: <ShieldAlert size={14} />, group: 'action', permission: 'recovery.read', run: ({ openTab }) => { openTab('home') } },
+    { id: 'action.recover', labelKey: 'palette.action.recover', icon: <ShieldAlert size={14} />, group: 'action', permission: 'recovery.read', run: ({ openTab }) => { openTab('recover') } },
     { id: 'action.openRuns', labelKey: 'palette.action.openRuns', icon: <PlayCircle size={14} />, group: 'action', permission: 'runs.read', run: ({ openTab }) => { openTab('runs') } },
     { id: 'action.openRecipes', labelKey: 'palette.action.openRecipes', icon: <Compass size={14} />, group: 'action', permission: 'workflows.read', run: ({ openTab }) => { openTab('templates') } },
   ]

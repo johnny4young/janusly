@@ -14,12 +14,11 @@ import {
   isMemoryAllowed,
   getOrgConfigSnapshot,
   listCalibrations,
-  queryRecoveryFeedbackHealth,
   queryOperatorRecoveryCount,
+  queryRecoveryFeedbackHealth,
   queryRecoveryLedger,
   queryRecoveryValidation,
   recordRecoveryFeedback,
-  queryRecoveryMetricsSignals,
   queryRecoveryHeatmap,
   getRecoveryCase,
   listRecoveryCases,
@@ -27,7 +26,6 @@ import {
   resolveRecoveryCaseAutonomyProfile,
 } from "@janusly/data";
 import { MIN_CALIBRATION_SAMPLES } from "@janusly/engine/src/confidence-calibration";
-import { composeRecoveryMetrics } from "@janusly/engine/src/recovery-metrics";
 import { recoverSemanticOutcome } from "@janusly/engine/src/semantic-recovery";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 
@@ -37,13 +35,13 @@ import {
   RecoveryFeedbackBodySchema,
 } from "../ai-patch-feedback";
 import { auditAction } from "../audit-helper";
-import { getCachedRecoveryMetrics, setCachedRecoveryMetrics } from "../metrics-cache";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { RATE_LIMIT_DEFAULTS_PER_MIN, RATE_LIMIT_WINDOW_MS } from "../constants";
 import { getDeadLetter } from "../dlq";
 import { asRecord, readJson, sendError, sendJson } from "../http";
 import { guardMcpWrite } from "../mcp-consent";
 import { enforceRateLimit } from "../rate-limit";
+import { queryRecoveryMetricsReadModel } from "../recovery-read-models";
 import type { Route } from "../routes";
 import {
   recoveryLedgerContract,
@@ -292,22 +290,13 @@ export const recoveryRoutes: Route[] = [
       const url = new URL(req.url ?? "", "http://localhost");
       const rawWindow = Number.parseInt(url.searchParams.get("windowDays") ?? "", 10);
       const windowDays = Number.isFinite(rawWindow) ? Math.min(90, Math.max(1, rawWindow)) : 30;
-      // Short-TTL micro-cache: repeated polls (multiple operators, the web's
-      // platformVersion refetch) reuse the composed envelope instead of
-      // re-running the ~8-query signal fan-out. Invalidated on DLQ mutations.
-      const cached = getCachedRecoveryMetrics(auth.orgId, windowDays);
-      if (cached) return sendJson(res, cached);
-      // Read the value-dashboard assumptions in parallel with the
-      // metrics signals. The rollup is fully additive — clients that
-      // don't read `valueEstimate` / `clustersResolved` get the same
-      // shape as before plus the new fields, byte-for-byte back-compat.
-      const [signals, snapshot] = await Promise.all([
-        queryRecoveryMetricsSignals(auth.orgId, windowDays),
-        getOrgConfigSnapshot(auth.orgId),
-      ]);
-      const metrics = composeRecoveryMetrics(signals, windowDays, snapshot.value);
-      setCachedRecoveryMetrics(auth.orgId, windowDays, metrics);
-      return sendJson(res, metrics);
+      return sendJson(
+        res,
+        await queryRecoveryMetricsReadModel(
+          auth.orgId,
+          windowDays,
+        ),
+      );
     } },
 
   // Lifetime measured recovery value. This remains separate from the rolling

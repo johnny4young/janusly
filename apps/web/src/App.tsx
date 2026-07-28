@@ -426,6 +426,14 @@ export default function App() {
     })
   }, [confirm, t])
 
+  const createNewWorkflow = useCallback(async (targetTab?: ActiveTab): Promise<void> => {
+    if (!await confirmReplaceCanvas()) return
+    newWorkflow()
+    setValidationIssues([])
+    setCurrentWorkflowVersion(null)
+    if (targetTab) setActiveTab(targetTab)
+  }, [confirmReplaceCanvas, newWorkflow, setActiveTab])
+
   // Warn on tab close / reload while the canvas holds unsaved edits. The
   // browser shows its own generic dialog; we only flag the condition.
   useEffect(() => {
@@ -849,7 +857,7 @@ export default function App() {
   const openRecoveryQueue = useCallback((deadLetterId?: string) => {
     if (!canReadRuns || !canReadDlq) return
     requestRecoveryQueueFocus(deadLetterId)
-    setActiveTab('runs')
+    setActiveTab('recover')
   }, [canReadDlq, canReadRuns, setActiveTab])
 
   // An alert links to `?deadLetterId=<id>`. Consume it once at bootstrap and
@@ -1171,6 +1179,7 @@ export default function App() {
         credentials,
         workflows: savedWorkflows,
         onOpenWorkflow: openWorkflow,
+        onCreateWorkflow: () => { void createNewWorkflow('copilot') },
         onUseTemplate: useTemplate,
         onInstallPlugin: installPlugin,
         onInstallPack: installPack,
@@ -1291,14 +1300,7 @@ export default function App() {
           onSave={saveWorkflow}
           onOpenTab={setActiveTab}
           onOpenHelp={openShortcuts}
-          onNew={() => {
-            void (async () => {
-              if (!await confirmReplaceCanvas()) return
-              newWorkflow()
-              setValidationIssues([])
-              setCurrentWorkflowVersion(null)
-            })()
-          }}
+          onNew={() => { void createNewWorkflow() }}
           onStart={startWorkflow}
         />
       }
@@ -1314,9 +1316,8 @@ export default function App() {
         //    the existing instance hidden so zoom + pan survive navigation.
         const visibility = getCanvasVisibility(activeTab, canvasActivated)
         if (activeTab === 'home') {
-          // Recovery Center renders several independently-fetched evidence
-          // sections; a throw in any of them used to unmount the whole app
-          // rather than just its own card.
+          // Recovery Center renders independently-settled evidence sections;
+          // a render fault in one projection must not unmount the whole app.
           return (
             <ErrorBoundary
               resetKey={activeTab}
@@ -1409,14 +1410,7 @@ export default function App() {
             onValidate={validateWorkflow}
             onSave={saveWorkflow}
             onStart={startWorkflow}
-            onNew={() => {
-              void (async () => {
-                if (!await confirmReplaceCanvas()) return
-                newWorkflow()
-                setValidationIssues([])
-                setCurrentWorkflowVersion(null)
-              })()
-            }}
+            onNew={() => { void createNewWorkflow() }}
             onSignOut={fireSignOut}
             docsUrl={DOCS_URL}
             onInsertSnippet={() => setSnippetMenuOpen(true)}

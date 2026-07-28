@@ -27,7 +27,7 @@ type LocaleContract = {
 const LOCALES: LocaleContract[] = [
   {
     locale: 'en',
-    flows: 'Flows',
+    flows: 'Workflows',
     stepSetup: 'Step setup',
     addInput: 'Add input',
     inputName: 'Input name: input',

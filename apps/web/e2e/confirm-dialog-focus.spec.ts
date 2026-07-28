@@ -68,6 +68,9 @@ for (const contract of LOCALES) {
 
     await page.goto('/')
     await expect(page.getByText('dev-user')).toBeVisible()
+    await page.getByRole('button', {
+      name: /^AI Studio\b/,
+    }).click()
 
     const newFlowTrigger = page.getByRole('button', { name: contract.newFlow, exact: true })
     await newFlowTrigger.click()

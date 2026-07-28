@@ -8,9 +8,8 @@
  * composer (`../RecoveryCenterPanel.tsx`), the tile family
  * (`./RecoveryCenterTiles.tsx`), and `./HealthRing.tsx`.
  *
- * The data-shape types mirror the API envelopes the existing panels read
- * (`GET /recovery/metrics`, `GET /recovery/ledger`,
- * `GET /recovery/my-wins`, `GET /dlq/clusters`, `GET /billing/budget`).
+ * The data-shape types mirror the API envelopes the existing panels read,
+ * including the coalesced Recovery Home snapshot and the budget endpoint.
  *
  * Used by `../RecoveryCenterPanel.test.tsx` — `computeRecommendedActions`
  * and `buildGreeting` are unit-tested here directly (no React render
@@ -232,7 +231,7 @@ export function computeRecommendedActions(signals: RecommendedActionSignals): Re
       title: runtimeT('recoveryCenter.action.resolve_approvals.title', { count: signals.pendingApprovals }),
       body: runtimeT('recoveryCenter.action.resolve_approvals.body'),
       ctaLabel: runtimeT('recoveryCenter.action.resolve_approvals.cta'),
-      ctaTab: 'runs',
+      ctaTab: 'recover',
       severity: 'warning',
     })
   }
@@ -252,7 +251,7 @@ export function computeRecommendedActions(signals: RecommendedActionSignals): Re
       title: runtimeT('recoveryCenter.action.triage_failures.title', { count: signals.openFailures }),
       body: runtimeT('recoveryCenter.action.triage_failures.body'),
       ctaLabel: runtimeT('recoveryCenter.action.triage_failures.cta'),
-      ctaTab: 'runs',
+      ctaTab: 'recover',
       severity: 'warning',
     })
   }
