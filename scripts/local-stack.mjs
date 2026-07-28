@@ -8,6 +8,10 @@ import {
   getLocalStackSettings,
   localEnvFile,
 } from "./local-env.mjs";
+import {
+  formatLocalStackStatus,
+  inspectLocalSupabase,
+} from "./local-stack-status.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const composeFile = "deploy/local/compose.yml";
@@ -195,12 +199,12 @@ if (command === "up") {
   await waitForStack();
   console.log("[local] restarted and healthy");
 } else if (command === "status") {
-  const status = await readLocalSupabaseStatus();
-  configureSupabaseEnvironment(status, { authEnabled: authProfile });
+  const inspection = await inspectLocalSupabase(readLocalSupabaseStatus);
+  if (inspection.status) {
+    configureSupabaseEnvironment(inspection.status, { authEnabled: authProfile });
+  }
   await compose(["ps"]);
-  console.log(
-    `[local] unified Supabase PostgreSQL ready${authProfile && status.API_URL ? ` · Auth ${status.API_URL}` : ""}`,
-  );
+  console.log(formatLocalStackStatus(inspection, { authEnabled: authProfile }));
 } else if (command === "fixtures") {
   configureSupabaseEnvironment(await readLocalSupabaseStatus(), { authEnabled: false });
   await compose([

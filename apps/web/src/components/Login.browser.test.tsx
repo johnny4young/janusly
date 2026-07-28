@@ -7,10 +7,6 @@
  *  3. The choice is persisted to localStorage under 'janusly:locale'.
  *  4. Re-mounting the form (simulating a refresh) re-reads localStorage
  *     and stays in Spanish.
- *
- * Aligns with the operational rule "UI smoke + data-consistency
- * validation mandatory" (project memory) — the i18n persistence loop is
- * exercised end-to-end in a real Chromium browser, not just a hook test.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -21,10 +17,22 @@ import { initI18n } from '../i18n'
 describe('<Login /> + LocaleSwitcher (browser smoke)', () => {
   it('renders English labels by default', async () => {
     render(<Login onAuthenticated={() => undefined} />)
-    expect(await screen.findByText('Welcome back')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Welcome back' })).toBeInTheDocument()
+    expect(screen.getByRole('main')).toBeInTheDocument()
     expect(screen.getByText('Email')).toBeInTheDocument()
     expect(screen.getByText('Password')).toBeInTheDocument()
     expect(screen.getByText('Continue with SSO')).toBeInTheDocument()
+  })
+
+  it('uses the accessible primary text token in dark mode', async () => {
+    document.documentElement.dataset.theme = 'dark'
+    try {
+      render(<Login onAuthenticated={() => undefined} />)
+      const toggle = await screen.findByRole('button', { name: 'Need an account? Sign up' })
+      expect(getComputedStyle(toggle).color).toBe('rgb(122, 162, 255)')
+    } finally {
+      delete document.documentElement.dataset.theme
+    }
   })
 
   it('switches to Spanish in real time when the corner switcher fires', async () => {

@@ -170,6 +170,11 @@ pnpm local:up     # resume with the same workflows, runs, DLQ, and request log
 pnpm local:reset  # destructive: remove all local-stack volumes
 ```
 
+`local:status` and `local:auth:status` remain safe to run while the stack is
+stopped. They show the Compose service table plus a bounded
+`Supabase unavailable` summary rather than failing or printing captured CLI
+credentials.
+
 Supabase CLI owns the PostgreSQL persistence containing both schemas. The
 Compose project owns three additional named volumes:
 

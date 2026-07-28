@@ -3100,7 +3100,7 @@
   gap: 8px;
 }
 
-.auth-card h2 {
+.auth-card h1 {
   margin: 12px 0 4px;
   font-size: 22px;
   font-weight: 700;
@@ -3112,7 +3112,7 @@
 .auth-toggle {
   background: transparent;
   border: 0;
-  color: var(--we-primary);
+  color: var(--we-primary-text);
   font-size: 12px;
   font-weight: 600;
   margin-top: 4px;

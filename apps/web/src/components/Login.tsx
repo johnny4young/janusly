@@ -60,7 +60,7 @@ export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
   }
 
   return (
-    <div className="auth-screen">
+    <main className="auth-screen">
       <LocaleSwitcher variant="auth-corner" />
       <form className="auth-card" onSubmit={submit}>
         <div className="brand-lockup auth-card__brand">
@@ -71,7 +71,7 @@ export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
           </div>
         </div>
 
-        <h2>{mode === 'login' ? t('auth.login.welcomeBack') : t('auth.login.createAccount')}</h2>
+        <h1>{mode === 'login' ? t('auth.login.welcomeBack') : t('auth.login.createAccount')}</h1>
 
         <label className="field-label" htmlFor="auth-email">{t('auth.login.email')}</label>
         <input
@@ -138,6 +138,6 @@ export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
           <span>{t('auth.login.continueSso')}</span>
         </button>
       </form>
-    </div>
+    </main>
   )
 }
