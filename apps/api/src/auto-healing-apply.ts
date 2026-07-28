@@ -2,16 +2,24 @@ import {
   claimApplyPublication,
   claimApplyPublicationRetry,
   completeApplyPublication,
+  countRecentAttemptsBySignature,
   getByIdForOrg,
+  getOrgConfigSnapshot,
   listDueApplyPublications,
   recordApplyPublicationFailure,
   recordApplyTerminalFailure,
+  type AutoHealingAutonomyContext,
   type AutoHealingRun,
 } from "@janusly/data";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
 import { WorkflowSchema, type Workflow, type WorkflowNode } from "@janusly/shared";
 import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
 
+import { assessAutoHealingAutonomyRow } from "./auto-healing-autonomy";
+import {
+  isAutoApplyAllowed,
+  isAutoHealingAllowed,
+} from "./auto-healing-consent";
 import { getDeadLetter, markDeadLetterReplayed } from "./dlq";
 
 const replayAdapter = new DLQReplayAdapter();
@@ -21,7 +29,12 @@ type PreparedApply = {
   workflow: Workflow;
   node: WorkflowNode;
   runId: string;
+  autonomyContext: AutoHealingAutonomyContext;
 };
+
+export type AutoHealingApplyAuthority =
+  | { kind: "operator"; actor: string }
+  | { kind: "autonomous"; actor: "system:auto-healing" };
 
 export type AutoHealingApplyResult =
   | { outcome: "applied"; row: AutoHealingRun; receipt: string }
@@ -33,7 +46,8 @@ export type AutoHealingApplyResult =
         | "not_pending"
         | "invalid_patch"
         | "missing_context"
-        | "publication_conflict";
+        | "publication_conflict"
+        | "autonomy_policy_blocked";
       row: AutoHealingRun | null;
     };
 
@@ -53,7 +67,7 @@ type PrepareResult =
 export async function applyValidatedAutoHealing(input: {
   orgId: string;
   id: string;
-  actor: string;
+  authority: AutoHealingApplyAuthority;
 }): Promise<AutoHealingApplyResult> {
   const row = await getByIdForOrg(input.orgId, input.id);
   if (!row) return { outcome: "rejected", code: "not_found", row: null };
@@ -66,11 +80,33 @@ export async function applyValidatedAutoHealing(input: {
     return { outcome: "rejected", code: prepared.code, row };
   }
 
-  const claim = await claimApplyPublication(input.orgId, input.id, input.actor);
+  if (input.authority.kind === "autonomous") {
+    const authorized = await authorizeAutonomousApply(
+      row,
+      prepared.value.autonomyContext,
+    );
+    if (!authorized) {
+      return {
+        outcome: "rejected",
+        code: "autonomy_policy_blocked",
+        row,
+      };
+    }
+  }
+
+  const claim = await claimApplyPublication(
+    input.orgId,
+    input.id,
+    input.authority.actor,
+  );
   if (!claim.claimed) {
     return { outcome: "rejected", code: "not_pending", row };
   }
-  return publishClaim(prepared.value, claim.receipt, input.actor);
+  return publishClaim(
+    prepared.value,
+    claim.receipt,
+    input.authority.actor,
+  );
 }
 
 /**
@@ -185,8 +221,46 @@ async function prepareApply(
       workflow: workflow.data,
       node,
       runId: deadLetter.runId,
+      autonomyContext: {
+        deadLetterId: deadLetter.id,
+        workflowJson: deadLetter.workflowJson,
+        nodeId: deadLetter.nodeId,
+        errorJson: deadLetter.errorJson,
+      },
     },
   };
+}
+
+async function authorizeAutonomousApply(
+  row: AutoHealingRun,
+  context: AutoHealingAutonomyContext,
+): Promise<boolean> {
+  try {
+    const [masterConsent, autoApplyConsent, snapshot] = await Promise.all([
+      isAutoHealingAllowed(row.orgId),
+      isAutoApplyAllowed(row.orgId),
+      getOrgConfigSnapshot(row.orgId),
+    ]);
+    if (!masterConsent.allowed || !autoApplyConsent.allowed) return false;
+
+    const attempts = await countRecentAttemptsBySignature(
+      row.orgId,
+      row.signature,
+      snapshot.autoHealing.loopWindowDays,
+    );
+    if (attempts > snapshot.autoHealing.maxAttemptsPerSignature) {
+      return false;
+    }
+
+    const assessment = await assessAutoHealingAutonomyRow(row, context);
+    return assessment.eligible;
+  } catch (error) {
+    console.warn("[auto-healing] autonomous authorization failed closed", {
+      id: row.id,
+      error: safeErrorMessage(error),
+    });
+    return false;
+  }
 }
 
 async function publishClaim(

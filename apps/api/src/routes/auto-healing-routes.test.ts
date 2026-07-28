@@ -28,6 +28,10 @@ vi.mock("../auto-healing-apply", () => ({
   applyValidatedAutoHealing: vi.fn(),
 }));
 
+vi.mock("../auto-healing-autonomy", () => ({
+  assessAutoHealingAutonomyRows: vi.fn(),
+}));
+
 vi.mock("../audit", () => ({
   audit: vi.fn(),
 }));
@@ -67,6 +71,7 @@ import {
 } from "@janusly/data/src/autoHealingRepo";
 import { recordRecoveryFeedback } from "@janusly/data/src/recoveryFeedbackRepo";
 import { applyValidatedAutoHealing } from "../auto-healing-apply";
+import { assessAutoHealingAutonomyRows } from "../auto-healing-autonomy";
 import { runOrgScan } from "../auto-healing-scanner";
 import { audit } from "../audit";
 import { getDeadLetter } from "../dlq";
@@ -77,6 +82,7 @@ const listPendingMock = vi.mocked(listPendingForOrg);
 const getByIdMock = vi.mocked(getByIdForOrg);
 const declineMock = vi.mocked(recordDeclineDecision);
 const applyMock = vi.mocked(applyValidatedAutoHealing);
+const assessAutonomyMock = vi.mocked(assessAutoHealingAutonomyRows);
 const feedbackMock = vi.mocked(recordRecoveryFeedback);
 const runOrgScanMock = vi.mocked(runOrgScan);
 const auditMock = vi.mocked(audit);
@@ -115,6 +121,12 @@ beforeEach(() => {
   getByIdMock.mockReset();
   declineMock.mockReset().mockResolvedValue(true);
   applyMock.mockReset();
+  assessAutonomyMock.mockReset().mockImplementation(
+    async (_orgId, rows) => rows.map((row) => ({
+      ...row,
+      autonomyAssessment: { eligible: false, factors: [] },
+    })) as never,
+  );
   feedbackMock.mockReset().mockResolvedValue(undefined);
   runOrgScanMock.mockReset().mockResolvedValue(undefined);
   auditMock.mockReset().mockResolvedValue(undefined);
@@ -128,6 +140,10 @@ describe("GET /auto-healing/pending", () => {
     listPendingMock.mockResolvedValueOnce([{ id: "row-1", orgId: "org-1" } as never]);
     await callRoute("GET", "/auto-healing/pending");
     expect(listPendingMock).toHaveBeenCalledWith("org-1", 100);
+    expect(assessAutonomyMock).toHaveBeenCalledWith(
+      "org-1",
+      [expect.objectContaining({ id: "row-1" })],
+    );
   });
 });
 
@@ -136,6 +152,35 @@ describe("GET /auto-healing/:id", () => {
     getByIdMock.mockResolvedValueOnce(null);
     const result = (await callRoute("GET", "/auto-healing/row-other-org")) as { status: number };
     expect(result.status).toBe(404);
+  });
+
+  it("returns the server-projected technical autonomy assessment", async () => {
+    getByIdMock.mockResolvedValueOnce({
+      id: "row-1",
+      orgId: "org-1",
+    } as never);
+    assessAutonomyMock.mockResolvedValueOnce([{
+      id: "row-1",
+      orgId: "org-1",
+      autonomyAssessment: {
+        eligible: true,
+        factors: [],
+      },
+    }] as never);
+
+    const result = await callRoute("GET", "/auto-healing/row-1") as {
+      payload: {
+        row: {
+          autonomyAssessment: { eligible: boolean };
+        };
+      };
+    };
+
+    expect(result.payload.row.autonomyAssessment.eligible).toBe(true);
+    expect(assessAutonomyMock).toHaveBeenCalledWith(
+      "org-1",
+      [expect.objectContaining({ id: "row-1" })],
+    );
   });
 });
 
@@ -205,7 +250,10 @@ describe("POST /auto-healing/:id/decide", () => {
     expect(applyMock).toHaveBeenCalledWith({
       orgId: "org-1",
       id: "row-1",
-      actor: "user-1",
+      authority: {
+        kind: "operator",
+        actor: "user-1",
+      },
     });
     expect(feedbackMock).toHaveBeenCalledWith(expect.objectContaining({
       orgId: "org-1",

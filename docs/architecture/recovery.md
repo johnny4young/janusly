@@ -87,6 +87,23 @@ evaluates or persists the candidate; accepted loss remains available at lower
 levels so an operator can explicitly close containment without silently
 raising authority.
 
+`packages/shared/src/technical-recovery-autonomy.ts` is the corresponding pure
+authorization model for technical failures. It classifies the exact original
+DLQ workflow versus the stored candidate instead of trusting the model's
+`approachLabel`: only a retry-only change on the failing node, another
+failing-node config patch, or the exact supported approval insertion can
+enter the narrow repair grammar. Workflow identity and operator-owned Recovery
+policy changes are part of the diff, and unrelated topology changes fail
+closed. Seven factors must pass together: effective Level 4 mutation policy,
+repair allowlist, provider-strength validation evidence, prior same-signature
+terminal recovery facts, one-execution blast radius within the declared
+maximum, an immutable original snapshot for rollback, and safe declared
+idempotency/receipt posture. The authoritative facts are projected in bulk by
+`packages/data/src/autoHealingAutonomyRepo.ts`; prior outcomes count only
+distinct `deadLetterId` values where an `auto_healing_runs.status = 'applied'`
+decision joins an immutable `recovery_impact_events` row in the same tenant.
+The browser renders this assessment but never derives authority.
+
 **Recovery Case v1:** `packages/shared/src/recovery-case.ts` defines the legal
 state vocabulary and transition-receipt wire contract:
 

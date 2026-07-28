@@ -299,7 +299,10 @@ async function maybeAutoApply(
   const result = await applyValidatedAutoHealing({
     orgId: row.orgId,
     id: row.id,
-    actor: "system:auto-healing",
+    authority: {
+      kind: "autonomous",
+      actor: "system:auto-healing",
+    },
   });
   if (result.outcome === "pending") {
     console.warn("[auto-healing] auto-apply publication pending repair", {

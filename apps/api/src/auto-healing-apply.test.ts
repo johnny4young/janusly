@@ -6,7 +6,9 @@ vi.mock("@janusly/data", () => ({
   claimApplyPublication: vi.fn(),
   claimApplyPublicationRetry: vi.fn(),
   completeApplyPublication: vi.fn(),
+  countRecentAttemptsBySignature: vi.fn(),
   getByIdForOrg: vi.fn(),
+  getOrgConfigSnapshot: vi.fn(),
   listDueApplyPublications: vi.fn(),
   recordApplyPublicationFailure: vi.fn(),
   recordApplyTerminalFailure: vi.fn(),
@@ -18,6 +20,15 @@ vi.mock("@janusly/engine/src/adapters/dlq-replay", () => ({
   },
 }));
 
+vi.mock("./auto-healing-autonomy", () => ({
+  assessAutoHealingAutonomyRow: vi.fn(),
+}));
+
+vi.mock("./auto-healing-consent", () => ({
+  isAutoApplyAllowed: vi.fn(),
+  isAutoHealingAllowed: vi.fn(),
+}));
+
 vi.mock("./dlq", () => ({
   getDeadLetter: vi.fn(),
   markDeadLetterReplayed: vi.fn(),
@@ -27,11 +38,18 @@ import {
   claimApplyPublication,
   claimApplyPublicationRetry,
   completeApplyPublication,
+  countRecentAttemptsBySignature,
   getByIdForOrg,
+  getOrgConfigSnapshot,
   listDueApplyPublications,
   recordApplyPublicationFailure,
   recordApplyTerminalFailure,
 } from "@janusly/data";
+import { assessAutoHealingAutonomyRow } from "./auto-healing-autonomy";
+import {
+  isAutoApplyAllowed,
+  isAutoHealingAllowed,
+} from "./auto-healing-consent";
 import { getDeadLetter, markDeadLetterReplayed } from "./dlq";
 import {
   applyValidatedAutoHealing,
@@ -41,10 +59,15 @@ import {
 const claimMock = vi.mocked(claimApplyPublication);
 const retryClaimMock = vi.mocked(claimApplyPublicationRetry);
 const completeMock = vi.mocked(completeApplyPublication);
+const countAttemptsMock = vi.mocked(countRecentAttemptsBySignature);
 const getRowMock = vi.mocked(getByIdForOrg);
+const getSnapshotMock = vi.mocked(getOrgConfigSnapshot);
 const listDueMock = vi.mocked(listDueApplyPublications);
 const publicationFailureMock = vi.mocked(recordApplyPublicationFailure);
 const terminalFailureMock = vi.mocked(recordApplyTerminalFailure);
+const assessAutonomyMock = vi.mocked(assessAutoHealingAutonomyRow);
+const autoApplyAllowedMock = vi.mocked(isAutoApplyAllowed);
+const autoHealingAllowedMock = vi.mocked(isAutoHealingAllowed);
 const getDeadLetterMock = vi.mocked(getDeadLetter);
 const markReplayedMock = vi.mocked(markDeadLetterReplayed);
 
@@ -67,6 +90,7 @@ function row(status: "validated" | "publishing" | "publish_failed" = "validated"
     confidence: 80,
     validationRunId: "validation-1",
     validationSignature: null,
+    validationEvidenceLevel: "provider_simulated",
     decisionActor: status === "validated" ? null : "user-1",
     publicationReceipt: status === "validated" ? null : "receipt-1",
     publicationRepairAfter: status === "validated" ? null : new Date(0),
@@ -91,6 +115,7 @@ function deadLetter(
     nodeId: "n-1",
     status,
     workflowJson: workflow,
+    errorJson: { code: "provider_timeout" },
     replayClaimToken,
     replayClaimedAt,
   } as never;
@@ -100,10 +125,22 @@ beforeEach(() => {
   claimMock.mockReset().mockResolvedValue({ claimed: true, receipt: "receipt-1" });
   retryClaimMock.mockReset().mockResolvedValue("receipt-1");
   completeMock.mockReset().mockResolvedValue(true);
+  countAttemptsMock.mockReset().mockResolvedValue(1);
   getRowMock.mockReset().mockResolvedValue(row() as never);
+  getSnapshotMock.mockReset().mockResolvedValue({
+    autoHealing: {
+      loopWindowDays: 14,
+      maxAttemptsPerSignature: 3,
+    },
+  } as never);
   listDueMock.mockReset().mockResolvedValue([]);
   publicationFailureMock.mockReset().mockResolvedValue(undefined);
   terminalFailureMock.mockReset().mockResolvedValue(undefined);
+  assessAutonomyMock.mockReset().mockResolvedValue({
+    eligible: true,
+  } as never);
+  autoApplyAllowedMock.mockReset().mockResolvedValue({ allowed: true });
+  autoHealingAllowedMock.mockReset().mockResolvedValue({ allowed: true });
   getDeadLetterMock.mockReset();
   markReplayedMock.mockReset().mockResolvedValue(true);
   replayDeadLetterMock.mockReset().mockResolvedValue(undefined);
@@ -119,7 +156,7 @@ describe("applyValidatedAutoHealing", () => {
     const result = await applyValidatedAutoHealing({
       orgId: "org-1",
       id: "heal-1",
-      actor: "user-1",
+      authority: { kind: "operator", actor: "user-1" },
     });
 
     expect(result.outcome).toBe("applied");
@@ -148,7 +185,7 @@ describe("applyValidatedAutoHealing", () => {
     const result = await applyValidatedAutoHealing({
       orgId: "org-1",
       id: "heal-1",
-      actor: "user-1",
+      authority: { kind: "operator", actor: "user-1" },
     });
 
     expect(result.outcome).toBe("applied");
@@ -166,7 +203,7 @@ describe("applyValidatedAutoHealing", () => {
     const result = await applyValidatedAutoHealing({
       orgId: "org-1",
       id: "heal-1",
-      actor: "user-1",
+      authority: { kind: "operator", actor: "user-1" },
     });
 
     expect(result.outcome).toBe("pending");
@@ -187,7 +224,7 @@ describe("applyValidatedAutoHealing", () => {
     const result = await applyValidatedAutoHealing({
       orgId: "org-1",
       id: "heal-1",
-      actor: "user-1",
+      authority: { kind: "operator", actor: "user-1" },
     });
 
     expect(result).toMatchObject({
@@ -208,7 +245,7 @@ describe("applyValidatedAutoHealing", () => {
     const result = await applyValidatedAutoHealing({
       orgId: "org-1",
       id: "heal-1",
-      actor: "user-1",
+      authority: { kind: "operator", actor: "user-1" },
     });
 
     expect(result).toMatchObject({
@@ -235,7 +272,7 @@ describe("applyValidatedAutoHealing", () => {
     const result = await applyValidatedAutoHealing({
       orgId: "org-1",
       id: "heal-1",
-      actor: "user-1",
+      authority: { kind: "operator", actor: "user-1" },
     });
 
     expect(result.outcome).toBe("pending");
@@ -245,6 +282,99 @@ describe("applyValidatedAutoHealing", () => {
       "receipt-1",
       "postgres unavailable",
     );
+  });
+
+  it("authorizes an autonomous decision from runtime consent and durable facts", async () => {
+    getDeadLetterMock
+      .mockResolvedValueOnce(deadLetter())
+      .mockResolvedValueOnce(deadLetter())
+      .mockResolvedValueOnce(deadLetter("receipt-1", new Date()));
+
+    const result = await applyValidatedAutoHealing({
+      orgId: "org-1",
+      id: "heal-1",
+      authority: {
+        kind: "autonomous",
+        actor: "system:auto-healing",
+      },
+    });
+
+    expect(result.outcome).toBe("applied");
+    expect(assessAutonomyMock).toHaveBeenCalledOnce();
+    expect(claimMock).toHaveBeenCalledWith(
+      "org-1",
+      "heal-1",
+      "system:auto-healing",
+    );
+  });
+
+  it("fails closed before claiming when technical autonomy is blocked", async () => {
+    getDeadLetterMock.mockResolvedValueOnce(deadLetter());
+    assessAutonomyMock.mockResolvedValueOnce({
+      eligible: false,
+    } as never);
+
+    const result = await applyValidatedAutoHealing({
+      orgId: "org-1",
+      id: "heal-1",
+      authority: {
+        kind: "autonomous",
+        actor: "system:auto-healing",
+      },
+    });
+
+    expect(result).toMatchObject({
+      outcome: "rejected",
+      code: "autonomy_policy_blocked",
+    });
+    expect(claimMock).not.toHaveBeenCalled();
+    expect(replayDeadLetterMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before assessment when auto-apply consent was revoked", async () => {
+    getDeadLetterMock.mockResolvedValueOnce(deadLetter());
+    autoApplyAllowedMock.mockResolvedValueOnce({
+      allowed: false,
+      reason: "tenant_disabled",
+      message: "disabled",
+    });
+
+    const result = await applyValidatedAutoHealing({
+      orgId: "org-1",
+      id: "heal-1",
+      authority: {
+        kind: "autonomous",
+        actor: "system:auto-healing",
+      },
+    });
+
+    expect(result).toMatchObject({
+      outcome: "rejected",
+      code: "autonomy_policy_blocked",
+    });
+    expect(assessAutonomyMock).not.toHaveBeenCalled();
+    expect(claimMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when authoritative autonomy facts are unavailable", async () => {
+    getDeadLetterMock.mockResolvedValueOnce(deadLetter());
+    assessAutonomyMock.mockRejectedValueOnce(new Error("postgres unavailable"));
+
+    const result = await applyValidatedAutoHealing({
+      orgId: "org-1",
+      id: "heal-1",
+      authority: {
+        kind: "autonomous",
+        actor: "system:auto-healing",
+      },
+    });
+
+    expect(result).toMatchObject({
+      outcome: "rejected",
+      code: "autonomy_policy_blocked",
+    });
+    expect(claimMock).not.toHaveBeenCalled();
+    expect(replayDeadLetterMock).not.toHaveBeenCalled();
   });
 });
 

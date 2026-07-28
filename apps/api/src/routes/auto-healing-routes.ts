@@ -33,6 +33,7 @@ import {
 
 import { auditAction } from "../audit-helper";
 import { applyValidatedAutoHealing } from "../auto-healing-apply";
+import { assessAutoHealingAutonomyRows } from "../auto-healing-autonomy";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { RATE_LIMIT_DEFAULTS_PER_MIN, RATE_LIMIT_WINDOW_MS } from "../constants";
 import { enforceRateLimit } from "../rate-limit";
@@ -61,7 +62,9 @@ export const autoHealingRoutes: Route[] = [
       const limitRaw = new URL(req.url ?? "/", "http://x").searchParams.get("limit");
       const limit = limitRaw ? Math.max(1, Math.min(200, Number(limitRaw) || 100)) : 100;
       const rows = await listPendingForOrg(auth.orgId, limit);
-      return sendJson(res, { rows });
+      return sendJson(res, {
+        rows: await assessAutoHealingAutonomyRows(auth.orgId, rows),
+      });
     },
   },
   {
@@ -73,7 +76,11 @@ export const autoHealingRoutes: Route[] = [
       if (!id) return sendError(res, "autoheal_missing_id", "missing id", 400);
       const row = await getByIdForOrg(auth.orgId, id);
       if (!row) return sendError(res, "autoheal_not_found", "Not found", 404);
-      return sendJson(res, { row });
+      const [projected] = await assessAutoHealingAutonomyRows(
+        auth.orgId,
+        [row],
+      );
+      return sendJson(res, { row: projected });
     },
   },
   {
@@ -121,7 +128,10 @@ export const autoHealingRoutes: Route[] = [
         ? await applyValidatedAutoHealing({
             orgId: auth.orgId,
             id,
-            actor: auth.userId,
+            authority: {
+              kind: "operator",
+              actor: auth.userId,
+            },
           })
         : null;
       if (applyResult?.outcome === "rejected") {

@@ -184,7 +184,10 @@ describe("handleAutoHealingWatchTrigger", () => {
     expect(applyMock).toHaveBeenCalledWith({
       orgId: "org-1",
       id: "row-1",
-      actor: "system:auto-healing",
+      authority: {
+        kind: "autonomous",
+        actor: "system:auto-healing",
+      },
     });
   });
 
