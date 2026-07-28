@@ -37,8 +37,11 @@
  * - `usage_events` — billing telemetry (LLM calls and write-side tool usage).
  * - `credentials`, `credential_secret_versions`,
  *   `slack_interaction_connections`, `slack_interaction_receipts`, and
- *   `installed_plugins` — encrypted/versioned secret references, signed
- *   operator actions, and plugin manifests.
+ *   `external_runtime_connections`, `external_runtime_events`,
+ *   `external_workflows`, `external_runs`, `external_run_steps`,
+ *   `external_recovery_cases`, and `installed_plugins` —
+ *   encrypted/versioned secret references, signed operator actions,
+ *   read-only external lifecycle projections, and plugin manifests.
  * - `audit_logs` — append-only mutation log (`audit()` redacts sensitive
  *   keys before insertion).
  *
@@ -892,6 +895,187 @@ export const slackInteractionReceipts = pgTable(
   (table) => [
     index("slack_interaction_receipts_connection_created_idx")
       .on(table.connectionId, table.createdAt),
+  ],
+);
+
+/**
+ * One signed, observation-only connection to an external workflow runtime.
+ *
+ * The HMAC secret remains behind the credential store. The opaque connection
+ * id is the only cross-tenant callback lookup and grants no control authority.
+ * No foreign keys keep historical observations inspectable after a credential
+ * rotation or connection removal.
+ */
+export const externalRuntimeConnections = pgTable(
+  "external_runtime_connections",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    name: text("name").notNull(),
+    runtimeKey: text("runtime_key").notNull(),
+    signingCredentialName: text("signing_credential_name").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("external_runtime_connections_org_name_idx").on(table.orgId, table.name),
+    uniqueIndex("external_runtime_connections_org_runtime_idx").on(table.orgId, table.runtimeKey),
+    index("external_runtime_connections_org_enabled_idx").on(table.orgId, table.enabled),
+  ],
+);
+
+/**
+ * Immutable signed event receipts. The composite identity provides replay
+ * protection across API replicas while retaining stale events as forensic
+ * evidence. `payload_json` is scrubbed and size-bounded before insertion.
+ */
+export const externalRuntimeEvents = pgTable(
+  "external_runtime_events",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    connectionId: text("connection_id").notNull(),
+    eventId: text("event_id").notNull(),
+    source: text("source").notNull(),
+    eventType: text("event_type").notNull(),
+    subject: text("subject"),
+    eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
+    sequence: bigint("sequence", { mode: "number" }).notNull(),
+    payloadJson: jsonb("payload_json").notNull(),
+    projectionState: text("projection_state").notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("external_runtime_events_connection_source_event_idx")
+      .on(table.connectionId, table.source, table.eventId),
+    index("external_runtime_events_org_received_idx")
+      .on(table.orgId, table.receivedAt.desc()),
+  ],
+);
+
+/** Latest monotonic projection of an externally owned workflow. */
+export const externalWorkflows = pgTable(
+  "external_workflows",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    connectionId: text("connection_id").notNull(),
+    externalWorkflowId: text("external_workflow_id").notNull(),
+    name: text("name").notNull(),
+    version: text("version"),
+    snapshotJson: jsonb("snapshot_json"),
+    evidenceJson: jsonb("evidence_json").notNull().default([]),
+    lastSequence: bigint("last_sequence", { mode: "number" }).notNull().default(-1),
+    lastEventId: text("last_event_id"),
+    lastObservedAt: timestamp("last_observed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("external_workflows_connection_external_idx")
+      .on(table.connectionId, table.externalWorkflowId),
+    index("external_workflows_org_observed_idx")
+      .on(table.orgId, table.lastObservedAt.desc()),
+  ],
+);
+
+/** Latest monotonic projection of an externally owned workflow run. */
+export const externalRuns = pgTable(
+  "external_runs",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    connectionId: text("connection_id").notNull(),
+    externalWorkflowId: text("external_workflow_id").notNull(),
+    externalRunId: text("external_run_id").notNull(),
+    status: text("status").notNull().default("unknown"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    snapshotJson: jsonb("snapshot_json"),
+    evidenceJson: jsonb("evidence_json").notNull().default([]),
+    lastSequence: bigint("last_sequence", { mode: "number" }).notNull().default(-1),
+    lastEventId: text("last_event_id"),
+    lastObservedAt: timestamp("last_observed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("external_runs_connection_external_idx")
+      .on(table.connectionId, table.externalRunId),
+    index("external_runs_org_observed_idx")
+      .on(table.orgId, table.lastObservedAt.desc()),
+    index("external_runs_connection_workflow_idx")
+      .on(table.connectionId, table.externalWorkflowId, table.lastObservedAt.desc()),
+  ],
+);
+
+/** Latest monotonic projection of one externally owned run step. */
+export const externalRunSteps = pgTable(
+  "external_run_steps",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    connectionId: text("connection_id").notNull(),
+    externalWorkflowId: text("external_workflow_id").notNull(),
+    externalRunId: text("external_run_id").notNull(),
+    externalStepId: text("external_step_id").notNull(),
+    name: text("name").notNull(),
+    status: text("status").notNull().default("unknown"),
+    attempt: integer("attempt").notNull().default(1),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    snapshotJson: jsonb("snapshot_json"),
+    evidenceJson: jsonb("evidence_json").notNull().default([]),
+    lastSequence: bigint("last_sequence", { mode: "number" }).notNull().default(-1),
+    lastEventId: text("last_event_id"),
+    lastObservedAt: timestamp("last_observed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("external_run_steps_connection_run_step_idx")
+      .on(table.connectionId, table.externalRunId, table.externalStepId),
+    index("external_run_steps_org_observed_idx")
+      .on(table.orgId, table.lastObservedAt.desc()),
+  ],
+);
+
+/**
+ * Read-only failure projection derived from signed external run/step events.
+ *
+ * A later success may mark the same subject as observed recovered, but this
+ * table never grants Janusly verified-recovery credit because Janusly did not
+ * control the source runtime's effect.
+ */
+export const externalRecoveryCases = pgTable(
+  "external_recovery_cases",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    connectionId: text("connection_id").notNull(),
+    subjectKey: text("subject_key").notNull(),
+    subjectKind: text("subject_kind").notNull(),
+    externalWorkflowId: text("external_workflow_id").notNull(),
+    externalRunId: text("external_run_id").notNull(),
+    externalStepId: text("external_step_id"),
+    state: text("state").notNull(),
+    failureSnapshotJson: jsonb("failure_snapshot_json"),
+    evidenceJson: jsonb("evidence_json").notNull().default([]),
+    firstDetectedAt: timestamp("first_detected_at", { withTimezone: true }).notNull(),
+    lastObservedAt: timestamp("last_observed_at", { withTimezone: true }).notNull(),
+    observedRecoveredAt: timestamp("observed_recovered_at", { withTimezone: true }),
+    lastSequence: bigint("last_sequence", { mode: "number" }).notNull(),
+    lastEventId: text("last_event_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("external_recovery_cases_connection_subject_idx")
+      .on(table.connectionId, table.subjectKey),
+    index("external_recovery_cases_org_state_observed_idx")
+      .on(table.orgId, table.state, table.lastObservedAt.desc()),
   ],
 );
 

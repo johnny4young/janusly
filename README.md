@@ -42,7 +42,7 @@ The recovery loop is production-shaped end to end:
 - **Reproducible recovery drills.** Solution Packs expose safe, selectable credential, AI-output, rate-limit, contract-drift, upstream-failure, and worker-interruption scenarios. Every drill records its source and enters the same recovery queue used by runtime failures; the worker-interruption scenario crosses the configured age threshold and exercises the real stalled-node reaper rather than inserting a synthetic terminal failure. Recovery Queue measures each drill from failure to verified terminal success or accepted loss and then observes the existing seven-day production recurrence window. Recovery Center turns those bounded facts into a per-organization validation dossier with explicit completion, recovery, operator-intervention, timing, and failure-mode denominators plus Markdown/JSON exports; partner count, setup time, and willingness-to-pay remain external evidence.
 - **Containment.** A transient-error fast path that auto-retries the failures that would have healed anyway (429 / dropped connection / gateway timeout) before they reach the DLQ, and a circuit breaker that pauses a workflow after repeated failures — buffering inbound trigger events for backfill on resume instead of dropping them.
 - **Evidence-gated Recovery Playbooks** that promote a proven fix, with a per-playbook success scorecard.
-- **Operate + govern.** Visual React Flow builder, per-org RBAC with a closed permission catalog and custom roles, append-only audit log per action, SSO (WorkOS) + SCIM directory sync, cost/budget governance, an encrypted tenant Credential Secret Store, signed Slack recovery buttons, prompt-generated deterministic PagerDuty off-hours workflows with optional post-action AI summaries, an MCP client (workflow tool nodes) and MCP server (proxying the API to agent ecosystems), and typed Node + Python SDKs.
+- **Operate + govern.** Visual React Flow builder, per-org RBAC with a closed permission catalog and custom roles, append-only audit log per action, SSO (WorkOS) + SCIM directory sync, cost/budget governance, an encrypted tenant Credential Secret Store, signed read-only shadow ingestion for externally executed workflows, signed Slack recovery buttons, prompt-generated deterministic PagerDuty off-hours workflows with optional post-action AI summaries, an MCP client (workflow tool nodes) and MCP server (proxying the API to agent ecosystems), and typed Node + Python SDKs.
 - **Runs without an LLM.** Every AI surface degrades to a deterministic fallback, so the runtime works with no model key configured.
 
 **In one line:** Let humans and AI agents build, run, inspect, and safely recover critical workflows on a durable, auditable runtime.
@@ -446,6 +446,13 @@ without requiring an LLM. Configuration stays versioned in the normal workflow
 Inspector and evidence stays in run history. See
 [`docs/architecture/integrations.md`](docs/architecture/integrations.md#prompt-generated-pagerduty-off-hours-workflow)
 and [`docs/local-deployment.md`](docs/local-deployment.md#pagerduty-local-qualification).
+
+External workflow engines use an `external_runtime_signing_secret` credential.
+Create the observer in Operations → Integrations, then emit workflow/run/step
+lifecycle events with `ExternalRuntimeObserver` from the Node SDK. Janusly
+keeps a read-only, monotonic shadow and never treats observed recovery as a
+Janusly-verified effect. See
+[`docs/architecture/integrations.md`](docs/architecture/integrations.md#external-runtime-shadow-mode).
 
 #### Raw template secrets
 

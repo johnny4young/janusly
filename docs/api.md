@@ -88,6 +88,7 @@ rest of the registry discoverable without duplicating every handler body.
 | --- | --- | --- |
 | Account bootstrap | `/auth/session*`, `/auth/context`, `/auth/invitations/accept`, `/organizations`, `/users/me` | Provider identity, revocable browser sessions, first organization, invitation acceptance, workspace selection, and global profile. |
 | Org config / roles / permissions | `/org/config`, `/org/permissions/catalog`, `/org/roles*` | Tenant runtime config, permission catalog, custom roles. |
+| External runtime observers | `/integrations/external-runtimes`, `/webhooks/external-runtimes/:connectionId` | Signed, idempotent, read-only workflow/run/step lifecycle projections. |
 | Enterprise identity | `/org/sso/connections*`, `/auth/sso/start`, `/auth/sso/callback`, `/org/scim/directories*`, `/webhooks/workos/directory` | WorkOS SSO + SCIM admin and webhook surfaces. |
 | MCP client admin | `/mcp/connections*`, `/mcp/connections/:alias/tools*` | Register external MCP servers, rediscover descriptors, enable tools, rate-limit tools, expose selected descriptors to AI. |
 | Recovery operations | `/recovery/items*`, `/recovery/cases*`, `/recovery/items/:id/handoff`, `/auto-healing*`, `/alerts/*` | Technical incident workflow, deterministic semantic outcome cases, cross-team handoff, supervised auto-healing queue, alert policies. |
@@ -786,6 +787,50 @@ Integration tools reference credentials by operator-facing name, for example:
 ```
 
 Direct `http` nodes do not dereference `credentials` rows. They can still use deployment-owned env templates such as `{{secret.SLACK_BOT_TOKEN}}` or `{{env.SLACK_BOT_TOKEN}}` in headers.
+
+### External runtime shadow mode
+
+Create a managed credential with kind
+`external_runtime_signing_secret`, then register an observer:
+
+```http
+POST /integrations/external-runtimes
+```
+
+```json
+{
+  "name": "Temporal production",
+  "runtimeKey": "temporal-prod",
+  "signingCredentialName": "temporal-observer",
+  "enabled": true
+}
+```
+
+The response includes an opaque `callbackUrl`. Send one CloudEvents 1.0 JSON
+event to that URL with
+`X-Janusly-Signature: t=<unix>,v1=<HMAC-SHA256(timestamp.rawBody)>`.
+Supported event types are
+`io.janusly.external.workflow.observed`,
+`io.janusly.external.run.observed`, and
+`io.janusly.external.step.observed`; every `data` object requires a monotonic
+integer `sequence`. The callback returns 202:
+
+```json
+{
+  "accepted": true,
+  "duplicate": false,
+  "projectionState": "applied",
+  "eventId": "temporal-event-42",
+  "receivedAt": "2026-07-27T12:30:01.000Z"
+}
+```
+
+Exact event retries return `duplicate: true`. A lower/equal sequence is
+retained as forensic evidence with `projectionState: "stale"` but cannot
+regress the latest workflow/run/step state. `GET
+/integrations/external-runtimes` returns the bounded observer-only connection,
+workflow, run, step, and recovery-case projections. The API exposes no external
+retry/resume/cancel/replay endpoint.
 
 ### PagerDuty workflow generation and callback
 

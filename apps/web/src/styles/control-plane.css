@@ -1817,10 +1817,222 @@
 
 .we-alert-policies,
 .we-recent-alerts,
-.we-slack-interactions {
+.we-slack-interactions,
+.we-external-runtime {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.we-external-runtime__boundary {
+  align-items: flex-start;
+  background: color-mix(in srgb, var(--we-info) 7%, var(--we-surface) 93%);
+  border: 1px solid color-mix(in srgb, var(--we-info) 22%, var(--we-line) 78%);
+  border-radius: 8px;
+  color: var(--we-muted);
+  display: flex;
+  font-size: 12px;
+  gap: 9px;
+  line-height: 1.45;
+  padding: 10px 12px;
+}
+
+.we-external-runtime__boundary > svg {
+  color: var(--we-info);
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.we-external-runtime__boundary div {
+  display: grid;
+  gap: 2px;
+}
+
+.we-external-runtime__boundary strong {
+  color: var(--we-ink);
+}
+
+.we-external-runtime__form {
+  align-items: end;
+  background: color-mix(in srgb, var(--we-primary) 3%, var(--we-surface) 97%);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(150px, 1fr) minmax(140px, 0.8fr) minmax(180px, 1fr);
+  padding: 12px;
+}
+
+.we-external-runtime__form > label:not(.we-external-runtime__enabled) {
+  color: var(--we-muted);
+  display: grid;
+  font-size: 12px;
+  gap: 5px;
+}
+
+.we-external-runtime__form input:not([type="checkbox"]),
+.we-external-runtime__form select {
+  background: var(--we-surface);
+  border: 1px solid var(--we-line-strong);
+  border-radius: 8px;
+  color: var(--we-ink);
+  font-size: 13px;
+  min-height: 34px;
+  min-width: 0;
+  padding: 0 10px;
+}
+
+.we-external-runtime__enabled {
+  align-items: center;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 8px;
+}
+
+.we-external-runtime__form > .we-btn {
+  justify-self: start;
+}
+
+.we-external-runtime__stats {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.we-external-runtime__stats > div {
+  background: var(--we-surface-muted);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.we-external-runtime__stats > div[data-tone="danger"] {
+  background: var(--we-danger-soft);
+  border-color: var(--we-danger-border-30);
+}
+
+.we-external-runtime__stats > div[data-tone="success"] {
+  background: var(--we-success-soft);
+  border-color: var(--we-success-border-30);
+}
+
+.we-external-runtime__stats span {
+  color: var(--we-muted);
+  font-size: 11px;
+}
+
+.we-external-runtime__stats strong {
+  color: var(--we-ink);
+  font-size: 19px;
+}
+
+.we-external-runtime__connections,
+.we-external-runtime__cases ul {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.we-external-runtime__connections .we-list-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.we-external-runtime__callback {
+  color: var(--we-muted);
+  display: block;
+  font-size: 11px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.we-external-runtime__cases {
+  border-top: 1px solid var(--we-line);
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.we-external-runtime__subhead {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.we-external-runtime__subhead h4,
+.we-external-runtime__subhead p {
+  margin: 0;
+}
+
+.we-external-runtime__subhead h4 {
+  color: var(--we-ink);
+  font-size: 13px;
+}
+
+.we-external-runtime__subhead p {
+  color: var(--we-muted);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.we-external-runtime__cases li {
+  align-items: center;
+  background: var(--we-surface-muted);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: 10px 12px;
+}
+
+.we-external-runtime__case-icon {
+  align-items: center;
+  background: var(--we-danger-soft);
+  border-radius: 7px;
+  color: var(--we-danger);
+  display: inline-flex;
+  height: 30px;
+  justify-content: center;
+  width: 30px;
+}
+
+.we-external-runtime__case-icon[data-tone="success"] {
+  background: var(--we-success-soft);
+  color: var(--we-success);
+}
+
+.we-external-runtime__cases li > div:not(.we-external-runtime__case-meta) {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.we-external-runtime__cases li > div > strong {
+  color: var(--we-ink);
+  font-size: 12px;
+}
+
+.we-external-runtime__cases li > div > span {
+  color: var(--we-muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.we-external-runtime__case-meta {
+  align-items: flex-end;
+  color: var(--we-muted);
+  display: grid;
+  font-size: 10px;
+  gap: 4px;
+  justify-items: end;
 }
 
 .we-slack-interactions__intro {
@@ -2016,8 +2228,20 @@
   }
 
   .we-slack-interactions__mapping,
-  .we-slack-interactions__list .we-list-row {
+  .we-slack-interactions__list .we-list-row,
+  .we-external-runtime__form,
+  .we-external-runtime__connections .we-list-row,
+  .we-external-runtime__cases li {
     grid-template-columns: 1fr;
+  }
+
+  .we-external-runtime__stats {
+    grid-template-columns: 1fr;
+  }
+
+  .we-external-runtime__case-meta {
+    align-items: flex-start;
+    justify-items: start;
   }
 }
 

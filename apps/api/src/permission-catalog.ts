@@ -45,6 +45,7 @@ export type PermissionCategory =
   | "upstream"
   | "snippets"
   | "evals"
+  | "external-runtimes"
   | "triggers"
   | "packs"
   | "onboarding";
@@ -57,7 +58,7 @@ export type PermissionEntry = {
 };
 
 /**
- * Closed catalog of permission keys. Currently 39 keys across 19
+ * Closed catalog of permission keys. Currently 41 keys across 20
  * categories. Mirrors the action categories exposed by the API surface
  * today.
  */
@@ -111,6 +112,9 @@ export const PERMISSION_CATALOG = [
   // eval datasets (built from opted-in accepted recovery feedback)
   { key: "evals.read",           category: "evals",       description: "View + export eval datasets built from recovery decisions", defaultRoles: ["viewer", "editor", "admin"] },
   { key: "evals.write",          category: "evals",       description: "Create / delete eval datasets from opted-in recovery feedback", defaultRoles: ["admin"] },
+  // read-only external runtime observer connections and projections
+  { key: "external-runtimes.read",  category: "external-runtimes", description: "View external runtime connections and read-only lifecycle projections", defaultRoles: ["viewer", "editor", "admin"] },
+  { key: "external-runtimes.write", category: "external-runtimes", description: "Register / edit / delete signed external runtime observers", defaultRoles: ["admin"] },
   // inbound trigger events (webhook_received / email_received / file_dropped / mcp_server_event)
   { key: "triggers.read",        category: "triggers",    description: "View structured inbound-trigger events + replay history", defaultRoles: ["viewer", "editor", "admin"] },
   { key: "triggers.ingest",      category: "triggers",    description: "Submit a normalized inbound trigger event (relay / forwarder)", defaultRoles: ["editor", "admin"] },

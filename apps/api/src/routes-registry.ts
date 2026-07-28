@@ -27,6 +27,7 @@ import { billingRoutes } from "./routes/billing-routes";
 import { credentialsRoutes } from "./routes/credentials-routes";
 import { dlqRoutes } from "./routes/dlq-routes";
 import { evalDatasetsRoutes } from "./routes/eval-datasets-routes";
+import { externalRuntimeRoutes } from "./routes/external-runtime-routes";
 import { experimentsRoutes } from "./routes/experiments-routes";
 import { healthRoutes } from "./routes/health-routes";
 import { mcpRoutes } from "./routes/mcp-routes";
@@ -71,6 +72,7 @@ export const routes: Route[] = [
   ...ssoRoutes,
   ...scimRoutes,
   ...slackInteractionsRoutes,
+  ...externalRuntimeRoutes,
   ...pagerDutyRoutes,
   ...rolesRoutes,
   ...mcpRoutes,

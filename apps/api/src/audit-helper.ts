@@ -138,6 +138,10 @@ export type AuditAction =
   | "eval.dataset.created"
   | "eval.dataset.deleted"
   | "eval.dataset.exported"
+  // external runtime observer connections
+  | "external_runtime.connection.created"
+  | "external_runtime.connection.updated"
+  | "external_runtime.connection.deleted"
   // prompt/model experiments (A/B control-vs-candidate against an eval dataset)
   | "experiment.run.started"
   | "experiment.run.completed"

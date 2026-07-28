@@ -1,4 +1,4 @@
-# Integrations (Secret Store, PagerDuty, integration tools, mailer, upstream health, trigger nodes)
+# Integrations (Secret Store, external runtime shadow, PagerDuty, tools, mailer, upstream health, trigger nodes)
 
 > Operational deep-dive extracted from `AGENTS.md` (kept verbatim). `AGENTS.md` carries the one-line summary + a link here. Edit the invariants here; keep the `AGENTS.md` summary in sync.
 
@@ -76,6 +76,49 @@ the legacy branch). Don't cite "all consumers" when touching those paths.
 ## Integration tools
 
 Registered-tool dispatch in `packages/engine/src/tool-execution.ts` is shared by ordinary `tool` nodes, agent planning, and `loop.mode='for_each'`; keep organization defaults, usage context, and dry-run write-side classification there instead of adding executor-specific forks. An ordinary tool node preserves the registry's never-throw envelope as output, while `for_each` deliberately interprets `{ ok: false }` as an item failure for its explicit batch budget. A timed-out or over-budget write-side batch is marked possibly committed, cooperatively stops dequeuing new items, and never whole-node retries automatically; operator-gated replay prevents duplicate external effects.
+
+### External runtime shadow mode
+
+External runtime shadow mode is the first adapter boundary for workflows that
+execute outside Janusly. It is observation-only: an administrator registers an
+`external_runtime_signing_secret` credential and an observer under
+`/integrations/external-runtimes`; the opaque callback is
+`POST /webhooks/external-runtimes/:connectionId`. The callback verifies
+`X-Janusly-Signature: t=<unix>,v1=<hex>` against the exact raw body with the
+same HMAC-SHA256 scheme used by `webhook.send`, rejects timestamps outside five
+minutes, and validates the bounded CloudEvents 1.0-compatible union in
+`packages/shared/src/external-runtime.ts` before any write. The event
+transaction rechecks that the same tenant connection is still enabled before
+claiming its receipt, so a concurrent disable/delete closes the callback at the
+durable authority boundary rather than only at the initial lookup.
+
+Three event types are accepted: workflow, run, and step observations. Every
+event has a stable source event id and a required non-negative source
+`sequence`. `external_runtime_events` is the immutable replay-protection
+receipt; `(connectionId, source, eventId)` converges exact retries. The
+`external_workflows`, `external_runs`, and `external_run_steps` projections
+advance only when `incoming.sequence > lastSequence`, so a late success cannot
+rewrite a newer failure. Run/step events may arrive before their parents and
+create bounded `unknown` placeholders; the later authoritative parent event
+fills them without losing child history. Every free-form string is scrubbed
+for known secret shapes and every JSON snapshot/evidence block passes through
+`safePersistPayload` before PostgreSQL. Event/source/workflow/run/step identity
+fields fail closed instead of being redacted, because redacting an identity
+would collapse distinct upstream entities onto the same uniqueness key.
+
+`external_recovery_cases` opens or reopens only from an observed `failed`
+run/step and may move to `observed_recovered` after a newer `succeeded` event
+for the exact subject. This is not `verifiedRecovery`: Janusly did not execute
+the effect and receives no production recovery-impact credit. Operations →
+Integrations renders this boundary explicitly and exposes no retry, resume,
+cancel, replay, or patch action. Connection deletion disables future callback
+resolution but deliberately preserves orphan-tolerant receipts and
+projections for forensic history.
+
+New adapters should first emit this shared contract. Mutation capabilities are
+a separate future boundary and must be explicit per adapter (for example,
+`retry` or `cancel`), independently credentialed and audited; never infer
+control authority merely because an observer can report lifecycle events.
 
 ### Signed Slack recovery actions
 

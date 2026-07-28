@@ -2,6 +2,18 @@
 
 > Operational deep-dive extracted from `AGENTS.md` (kept verbatim). `AGENTS.md` carries the one-line summary + a link here. Edit the invariants here; keep the `AGENTS.md` summary in sync.
 
+**External runtime shadow administration:** Operations → Integrations mounts
+`ExternalRuntimePanel` before action-capable integrations. It accepts only the
+server's explicit `observerOnly: true` projection, validates every connection,
+run, and case row before rendering, and filters its credential picker to
+`external_runtime_signing_secret`. The card keeps the no-control boundary
+visible, shows signed callback metadata plus detected/observed-recovered case
+counts, and exposes only create/delete/copy for observer configuration—never
+retry, resume, cancel, replay, or recovery-credit controls. Reader permission
+hides configuration mutations; administrator mutations invalidate the shared
+platform snapshot through `bumpPlatformVersion()`. Keep the responsive EN/ES
+layout and malformed-wire fail-closed behavior covered.
+
 **Slack interaction administration:** Operations → Integrations mounts `SlackInteractionsPanel` before credential health and MCP connections. It lists only the server's safe projection (name, team id, signing credential name, bounded user mappings, enabled state, and callback URL), filters the credential selector to `slack_signing_secret`, and maps Slack user ids to members returned by `/members`. It supports create/edit/delete/copy with responsive EN/ES controls and invalidates other panels through `bumpPlatformVersion()`. Recovery alert policies show the optional interaction-connection selector only for Slack channels on recovery-item triggers; all other Slack alerts remain text-only.
 
 **Progressive workflow deployment:** the Inspector lazily mounts `WorkflowRolloutPanel` for saved workflows. It reads immutable version history plus the latest deployment projection, permits an older baseline against only the newest canary, and bounds canary traffic/minimum sample/minimum success rate to the server contract. Active state shows traffic, baseline/canary terminal counts, canary success rate, and the automatic-return guardrail. Promotion and return-to-baseline use the shared accessible confirmation dialog; successful mutations call `bumpPlatformVersion()`. API payloads are parsed defensively instead of trusted through casts. Eligibility, authorization, trigger compatibility, assignment, and automatic rollback remain server-owned; the panel is not a second deployment state machine.

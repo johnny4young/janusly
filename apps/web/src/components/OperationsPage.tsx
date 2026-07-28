@@ -36,6 +36,7 @@ import { UpstreamHealthPanel } from './UpstreamHealthPanel'
 import { RecentAlertsCard } from './RecentAlertsCard'
 import { McpConnectionsPanel } from './McpConnectionsPanel'
 import { SlackInteractionsPanel } from './SlackInteractionsPanel'
+import { ExternalRuntimePanel } from './ExternalRuntimePanel'
 import { VitalSignsStrip } from './VitalSignsStrip'
 import { RunStreamChip } from './RunStreamChip'
 import {
@@ -636,6 +637,9 @@ function IntegrationsSection({ permissions }: { permissions?: readonly string[] 
   const can = (permission: string) => permissions === undefined || permissions.includes(permission)
   return (
     <>
+      {can('external-runtimes.read') && (
+        <ExternalRuntimePanel canWrite={can('external-runtimes.write')} />
+      )}
       {can('credentials.write') && <SlackInteractionsPanel />}
       {can('credentials.read') && <CredentialHealthCard />}
       {can('mcp.connections.read') && <McpConnectionsPanel canWrite={can('mcp.connections.write')} />}

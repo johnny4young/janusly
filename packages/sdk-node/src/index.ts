@@ -24,6 +24,14 @@ export { RunsResource } from "./resources/runs.js";
 export { ReportsResource, type RunExplainFormat, type RunExplainExport } from "./resources/reports.js";
 export { RecoveryResource } from "./resources/recovery.js";
 export {
+  ExternalRuntimeObserver,
+  signExternalRuntimeEvent,
+  type ExternalRuntimeEvent,
+  type ExternalRuntimeObserverConfig,
+  type ExternalRuntimeReceipt,
+  type ExternalRuntimeStatus,
+} from "./resources/external-runtime.js";
+export {
   WebhooksResource,
   type VerifyWebhookSignatureInput,
   type VerifyWebhookSignatureResult,
