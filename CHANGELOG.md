@@ -16,6 +16,18 @@ retroactively.
 
 ### Changed
 
+- The primary product navigation is now organized around six operator tasks:
+  Home, Recover, Workflows, Runs, Connections, and Settings. Advanced authoring
+  and administration remain available through contextual surfaces and the
+  command palette, while saved deep links and permission checks remain intact.
+- Recovery Center Home now reads one coalesced, permission-aware snapshot.
+  Individual sections still fail independently, so a malformed or unavailable
+  source cannot blank healthy recovery evidence.
+- Supervised auto-healing now authorizes narrow autonomous publication only at
+  the durable claim boundary. The server re-evaluates the immutable recovery
+  policy, exact repair diff, validation strength, prior verified impact,
+  one-execution blast radius, rollback availability, and effect-receipt posture;
+  a failed factor keeps the candidate operator-gated.
 - Recovery Center, Operations, and value exports now use a versioned
   production-only median time to verified recovery, with p90 as a guardrail.
   Validation runs and invalid recovery clocks are excluded from impact writes
@@ -86,6 +98,26 @@ retroactively.
 
 ### Added
 
+- Deterministic semantic outcome recovery through `RecoveryContractV2`.
+  Expression/schema detectors can observe or quarantine an unacceptable output,
+  durable Recovery Cases retain append-only transition evidence, and only a
+  detector-valid replacement or explicit accepted loss can continue a
+  quarantined workflow.
+- A dedicated Recovery Case workspace and stable API/MCP operations for listing,
+  inspecting, and resolving semantic cases without reconstructing the lifecycle
+  across unrelated panels.
+- Exact baseline/candidate semantic dataset qualification before canary traffic.
+  Qualification runs no nodes or provider effects, rejects stale evaluator
+  receipts, and never grants mutation authority to an LLM judge.
+- Signed, idempotent shadow ingestion for externally executed workflows. The
+  API, Operations UI, and Node SDK retain monotonic workflow/run/step
+  projections and bounded scrubbed evidence while deliberately exposing no
+  external control authority or Janusly verified-recovery credit.
+- A committed 25-case, provider-free Recovery evaluation corpus covering nine
+  deterministic production capabilities. Its fail-closed baseline pins the
+  dataset hash and requires 100% overall, per-capability, and safety-critical
+  pass rates with zero unsafe acceptances and zero secret leaks; CI runs the
+  suite at no provider cost.
 - An explicit Real Recovery Lab that creates and destroys one isolated local
   payment-retry tenant, injects a provider-boundary failure, reaches the real
   DLQ, validates an idempotent webhook repair through the normal engine path,
@@ -96,9 +128,9 @@ retroactively.
 - Versioned `RecoveryContractV1` and `RecoveryCaseState` domain contracts. A
   workflow can retain operator-owned technical-failure, evidence, effect,
   repair, validation, approval/autonomy, verification, and recurrence policy;
-  legal case transitions require actor-attributed evidence receipts. Semantic
-  outcome detection and a durable case projection remain explicitly future
-  work.
+  legal case transitions require actor-attributed evidence receipts. Historical
+  V1 snapshots remain compatible and keep semantic detection disabled unless an
+  operator explicitly adopts V2.
 - Prompt-generated PagerDuty V3 workflows: recognized off-hours requests
   compile locally into a visible signed-trigger, authoritative-read,
   deterministic-policy, acknowledge, snooze, and evidence graph. Credential

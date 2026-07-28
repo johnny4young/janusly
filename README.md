@@ -47,6 +47,16 @@ The recovery loop is production-shaped end to end:
 
 **In one line:** Let humans and AI agents build, run, inspect, and safely recover critical workflows on a durable, auditable runtime.
 
+### Current qualification boundary
+
+Janusly is an engineering preview, not a tagged public release. The committed
+Recovery corpus proves deterministic classifiers, safety gates, patch
+application, qualification, and outcome-accounting behavior; it does not prove
+live-model diagnosis quality or business value. External runtime support is
+read-only shadow observation today, not remote cancel/retry/redrive control.
+Provider-simulated local journeys are labeled as simulation and do not stand in
+for design-partner or production evidence.
+
 See [`CHANGELOG.md`](CHANGELOG.md) for release-facing traceability. Architecture
 invariants and operational contracts live under [`docs/architecture/`](docs/architecture/).
 For metrics, traces, queue topology, retention, repair jobs, and the local or
