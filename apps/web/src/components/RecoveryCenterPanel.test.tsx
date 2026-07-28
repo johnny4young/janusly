@@ -14,7 +14,7 @@ import {
   humanizeAge,
   readErrorSignature,
   type RecommendedActionSignals,
-} from './recovery-center/helpers'
+} from './recovery-center/recovery-center-model'
 
 vi.mock('../api', () => ({ api: vi.fn() }))
 

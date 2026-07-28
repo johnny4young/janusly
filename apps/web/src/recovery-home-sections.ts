@@ -8,7 +8,7 @@ import type {
   RecoveryLedger,
   RecoveryMetric,
   RecoveryMetrics,
-} from './components/recovery-center/helpers'
+} from './components/recovery-center/recovery-center-model'
 
 export type RecoveryHomeQueueSection = {
   counts: { open: number }

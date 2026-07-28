@@ -187,7 +187,7 @@ describe('<OperationsPage />', () => {
     await screen.findByTestId('stub-FailureClustersCard')
     fireEvent.click(screen.getByTestId('operations-rail-tab-reliability'))
 
-    expect(screen.getByTestId('stub-AlertPoliciesPanel')).toBeInTheDocument()
+    expect(await screen.findByTestId('stub-AlertPoliciesPanel')).toBeInTheDocument()
     expect(screen.getByTestId('stub-RecentAlertsCard')).toBeInTheDocument()
     expect(screen.getByTestId('stub-BudgetSettingsPanel')).toBeInTheDocument()
     expect(screen.getByTestId('stub-AiGuidanceSettingsPanel')).toBeInTheDocument()

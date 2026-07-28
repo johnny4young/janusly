@@ -20,7 +20,7 @@ import { EvidencePanel } from './EvidencePanel'
 import { AlternativeHypothesesPanel } from './AlternativeHypothesesPanel'
 import { LearningHealthBadge } from './LearningHealthBadge'
 import { RecoveryPassportCard } from './RecoveryPassportCard'
-import { approachLabelDisplay, resolveConfidenceDisplay, suggestionTabKey } from './helpers'
+import { approachLabelDisplay, resolveConfidenceDisplay, suggestionTabKey } from './recovery-dialog-model'
 import type { PatchSuggestion, SuggestionTab } from './types'
 
 export function ReviewBody({

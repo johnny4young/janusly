@@ -8,7 +8,7 @@ import {
   downtimeSeverity,
   formatDuration,
   formatDowntime,
-} from './helpers'
+} from './recovery-center-model'
 
 const MIN = 60_000
 const NOW = 1_700_000_000_000

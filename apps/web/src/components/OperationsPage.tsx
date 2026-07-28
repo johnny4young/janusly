@@ -18,25 +18,10 @@
  * the mounted operations experience.
  */
 
-import React, { useEffect, useState } from 'react'
+import React, { lazy, Suspense, useEffect, useState } from 'react'
 import { Gauge, Plug, RefreshCw, ShieldCheck } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
-import { FailureClustersCard } from './FailureClustersCard'
-import { BudgetSettingsPanel } from './BudgetSettingsPanel'
-import { AiGuidanceSettingsPanel } from './AiGuidanceSettingsPanel'
-import { AuthPolicySettingsPanel } from './AuthPolicySettingsPanel'
-import { ScimDirectorySettingsPanel } from './ScimDirectorySettingsPanel'
-import { AuditLogPanel } from './AuditLogPanel'
-import { PermissionGrantsPanel } from './PermissionGrantsPanel'
-import { MemoryGovernancePanel } from './MemoryGovernancePanel'
-import { CredentialHealthCard } from './CredentialHealthCard'
-import { AlertPoliciesPanel } from './AlertPoliciesPanel'
-import { UpstreamHealthPanel } from './UpstreamHealthPanel'
-import { RecentAlertsCard } from './RecentAlertsCard'
-import { McpConnectionsPanel } from './McpConnectionsPanel'
-import { SlackInteractionsPanel } from './SlackInteractionsPanel'
-import { ExternalRuntimePanel } from './ExternalRuntimePanel'
 import { VitalSignsStrip } from './VitalSignsStrip'
 import { RunStreamChip } from './RunStreamChip'
 import {
@@ -56,6 +41,22 @@ import {
   type OpsSection,
 } from './operations-section-bus'
 import { getResolvedLocale, useT } from '../i18n'
+
+const FailureClustersCard = lazy(() => import('./FailureClustersCard').then(module => ({ default: module.FailureClustersCard })))
+const BudgetSettingsPanel = lazy(() => import('./BudgetSettingsPanel').then(module => ({ default: module.BudgetSettingsPanel })))
+const AiGuidanceSettingsPanel = lazy(() => import('./AiGuidanceSettingsPanel').then(module => ({ default: module.AiGuidanceSettingsPanel })))
+const AuthPolicySettingsPanel = lazy(() => import('./AuthPolicySettingsPanel').then(module => ({ default: module.AuthPolicySettingsPanel })))
+const ScimDirectorySettingsPanel = lazy(() => import('./ScimDirectorySettingsPanel').then(module => ({ default: module.ScimDirectorySettingsPanel })))
+const AuditLogPanel = lazy(() => import('./AuditLogPanel').then(module => ({ default: module.AuditLogPanel })))
+const PermissionGrantsPanel = lazy(() => import('./PermissionGrantsPanel').then(module => ({ default: module.PermissionGrantsPanel })))
+const MemoryGovernancePanel = lazy(() => import('./MemoryGovernancePanel').then(module => ({ default: module.MemoryGovernancePanel })))
+const CredentialHealthCard = lazy(() => import('./CredentialHealthCard').then(module => ({ default: module.CredentialHealthCard })))
+const AlertPoliciesPanel = lazy(() => import('./AlertPoliciesPanel').then(module => ({ default: module.AlertPoliciesPanel })))
+const UpstreamHealthPanel = lazy(() => import('./UpstreamHealthPanel').then(module => ({ default: module.UpstreamHealthPanel })))
+const RecentAlertsCard = lazy(() => import('./RecentAlertsCard').then(module => ({ default: module.RecentAlertsCard })))
+const McpConnectionsPanel = lazy(() => import('./McpConnectionsPanel').then(module => ({ default: module.McpConnectionsPanel })))
+const SlackInteractionsPanel = lazy(() => import('./SlackInteractionsPanel').then(module => ({ default: module.SlackInteractionsPanel })))
+const ExternalRuntimePanel = lazy(() => import('./ExternalRuntimePanel').then(module => ({ default: module.ExternalRuntimePanel })))
 
 /** Public ``/health`` rate-limiter payload — matches
  *  ``RateLimiterPublicHealth`` from ``@janusly/data/src/rate-limit-degradation``
@@ -362,13 +363,12 @@ export function OperationsPage({ permissions }: { permissions?: readonly string[
       <div className="we-operations-page__body">
         <OperationsRail section={section} onChange={setSection} signals={signals} permissions={permissions} />
         <div className="we-operations-page__content" data-section={section}>
-          {/* Lazy-mount: only the active sub-tab's cards exist in the DOM.
-              Inactive sub-tabs never fire their per-card `useEffect` fetches,
-              which is what cuts page-load API traffic from ~9 calls to ~2-3. */}
-          {section === 'overview' && <OverviewSection metrics={displayMetrics} permissions={permissions} />}
-          {section === 'reliability' && <ReliabilitySection permissions={permissions} />}
-          {section === 'access' && <AccessSection permissions={permissions} />}
-          {section === 'integrations' && <IntegrationsSection permissions={permissions} />}
+          <Suspense fallback={<p className="helper-text" role="status">{t('common.working')}</p>}>
+            {section === 'overview' && <OverviewSection metrics={displayMetrics} permissions={permissions} />}
+            {section === 'reliability' && <ReliabilitySection permissions={permissions} />}
+            {section === 'access' && <AccessSection permissions={permissions} />}
+            {section === 'integrations' && <IntegrationsSection permissions={permissions} />}
+          </Suspense>
         </div>
       </div>
     </div>

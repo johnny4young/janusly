@@ -24,7 +24,7 @@
       "maxTransferredKiB": 300,
       "maxLongTaskMs": 500
     },
-    "aiStudio": {
+    "workflowBuilder": {
       "maxTransferredKiB": 100,
       "maxLongTaskMs": 300
     },

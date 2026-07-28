@@ -11,7 +11,7 @@ import { ClipboardCheck, Download, FileText } from 'lucide-react'
 
 import { downloadFromApi } from '../api'
 import { getResolvedLocale, useT } from '../i18n'
-import { formatDuration } from './recovery-center/helpers'
+import { formatDuration } from './recovery-center/recovery-center-model'
 
 export type RecoveryValidationReport = {
   generatedAt: string

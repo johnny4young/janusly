@@ -38,7 +38,8 @@ const expectedLocalCssImports = [
   "./styles/accessibility.css",
 ];
 const localCssImports = [...indexCss.matchAll(/@import\s+"([^"]+\.css)"/g)]
-  .map((match) => match[1]);
+  .map((match) => match[1])
+  .filter((importPath) => importPath.startsWith("./"));
 const cssBundleSource = [
   indexCss,
   ...localCssImports.map((importPath) =>

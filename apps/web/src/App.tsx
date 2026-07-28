@@ -33,8 +33,8 @@ const ShortcutsModal = lazy(() => import('./components/ShortcutsModal').then((m)
 // tab, not at boot. `CanvasWorkspace` owns the `<ReactFlowProvider>`.
 const CanvasWorkspace = lazy(() => import('./components/CanvasWorkspace').then((m) => ({ default: m.CanvasWorkspace })))
 const RunObservationWorkspace = lazy(() => import('./components/CanvasWorkspace').then((m) => ({ default: m.RunObservationWorkspace })))
+const RecoveryCenterPanel = lazy(() => import('./components/RecoveryCenterPanel').then((m) => ({ default: m.RecoveryCenterPanel })))
 import { RightPanel } from './components/RightPanel'
-import { RecoveryCenterPanel } from './components/RecoveryCenterPanel'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { PanelErrorFallback } from './components/PanelErrorFallback'
 import { BudgetBlockedBanner } from './components/BudgetBlockedBanner'
@@ -64,7 +64,7 @@ import { isTerminalRunStatus } from '@janusly/shared/src/status'
 import { getResolvedLocale, useT } from './i18n'
 import { consumeDeadLetterDeepLink, requestRecoveryQueueFocus } from './components/recovery-queue-focus-bus'
 import { requestRecoveryAllClearIfQueueEmpty } from './components/recovery-all-clear-coordinator'
-import { countActiveRecoveryBlockers } from './components/recovery-center/helpers'
+import { countActiveRecoveryBlockers } from './components/recovery-center/recovery-center-model'
 import { DOCS_URL } from './docs-link'
 import { createRunTransitionGuard, isRunRequestCurrent } from './run-transition'
 import type { SessionContext } from './identity-context'
@@ -1324,21 +1324,23 @@ export default function App() {
               logTag="panel:home"
               fallback={({ reset }) => <PanelErrorFallback onRetry={reset} />}
             >
-              <RecoveryCenterPanel
-                runs={projectedRuns}
-                runNodes={runNodes}
-                deadLetters={deadLetters}
-                onSemanticBlockerRunsChange={setSemanticBlockerRunIds}
-                onOpenTab={setActiveTab}
-                onOpenRecoveryCase={openRecoveryCase}
-                onOpenRun={openRun}
-                onApproveNode={canStartRuns ? approveNode : () => undefined}
-                onOpenRecoveryQueue={() => openRecoveryQueue()}
-                onRefreshPlatform={refreshPlatform}
-                onStartRecoveryDrill={canInstallPacks
-                  ? () => injectPackFailure('failed-payment-recovery', 'billing_secret_unbound')
-                  : undefined}
-              />
+              <Suspense fallback={<div className="panel-list"><p className="helper-text">{t('common.working')}</p></div>}>
+                <RecoveryCenterPanel
+                  runs={projectedRuns}
+                  runNodes={runNodes}
+                  deadLetters={deadLetters}
+                  onSemanticBlockerRunsChange={setSemanticBlockerRunIds}
+                  onOpenTab={setActiveTab}
+                  onOpenRecoveryCase={openRecoveryCase}
+                  onOpenRun={openRun}
+                  onApproveNode={canStartRuns ? approveNode : () => undefined}
+                  onOpenRecoveryQueue={() => openRecoveryQueue()}
+                  onRefreshPlatform={refreshPlatform}
+                  onStartRecoveryDrill={canInstallPacks
+                    ? () => injectPackFailure('failed-payment-recovery', 'billing_secret_unbound')
+                    : undefined}
+                />
+              </Suspense>
             </ErrorBoundary>
           )
         }

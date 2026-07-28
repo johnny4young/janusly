@@ -11,7 +11,7 @@
 import { useState } from 'react'
 import { useT } from '../../i18n'
 import type { DeadLetter } from '../DeadLettersPanel'
-import { approachLabelDisplay } from './helpers'
+import { approachLabelDisplay } from './recovery-dialog-model'
 import type { PatchSuggestion } from './types'
 
 /**

@@ -16,7 +16,7 @@ import { Award, Clock3, Flame, ListTree } from 'lucide-react'
 import { useT } from '../../i18n'
 import { HealthRing } from './HealthRing'
 import { CelebrationBurst } from './CelebrationBurst'
-import { formatDowntime, type DowntimeSeverity, type OperatorWins, type StreakSummary } from './helpers'
+import { formatDowntime, type DowntimeSeverity, type OperatorWins, type StreakSummary } from './recovery-center-model'
 
 export function RecoveryCenterHero({
   salutation,

@@ -1,4 +1,5 @@
-@import "tailwindcss";
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
 @import "./styles/foundations.css";
 @import "./styles/control-plane.css";
 @import "./styles/workflow.css";

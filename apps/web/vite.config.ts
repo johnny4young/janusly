@@ -1,8 +1,10 @@
 /// <reference types="vitest" />
 import { execFileSync } from 'node:child_process'
+import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { compactI18nCatalogs } from '../../scripts/compact-i18n-plugin.mjs'
 
 /**
  * Real build stamp, computed once at config load: `<date>-<short-sha>`.
@@ -22,7 +24,13 @@ function buildId(): string {
 }
 
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    compactI18nCatalogs({
+      canonicalPath: resolve(import.meta.dirname, 'src/i18n/locales/en/common.json'),
+    }),
+    react(),
+    tailwindcss(),
+  ],
   define: {
     __BUILD_ID__: JSON.stringify(buildId()),
   },
@@ -35,9 +43,11 @@ export default defineConfig(({ mode }) => ({
     // shipped to the browser on the first cold load. Future error-tracking
     // sidecar can flip this to 'hidden' to emit .map files without inlining.
     sourcemap: mode !== 'production',
+    cssMinify: 'lightningcss',
     rollupOptions: {
       output: {
         manualChunks: (id) => {
+          if (id.includes('janusly-catalog=keys')) return 'catalog-keys'
           if (!id.includes('node_modules')) return undefined
           // `@xyflow/*` is reached ONLY through the dynamic `CanvasWorkspace`
           // import (nothing on the boot path imports an `@xyflow` value — the

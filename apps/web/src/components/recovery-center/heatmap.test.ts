@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildHeatmapCells, computeStreaks, heatmapOutcome, type HeatmapCell, type HeatmapDay } from './helpers'
+import { buildHeatmapCells, computeStreaks, heatmapOutcome, type HeatmapCell, type HeatmapDay } from './recovery-center-model'
 
 describe('heatmapOutcome', () => {
   it('classifies each band', () => {

@@ -21,7 +21,7 @@ import { Award, Download, FileText, History } from 'lucide-react'
 
 import { downloadFromApi } from '../api'
 import { getResolvedLocale, useT } from '../i18n'
-import { formatDuration, type RecoveryLedger } from './recovery-center/helpers'
+import { formatDuration, type RecoveryLedger } from './recovery-center/recovery-center-model'
 
 export type ClustersResolvedMetric = {
   value: number | null

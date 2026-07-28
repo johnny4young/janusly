@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { RecoveryLabEntry } from './RecoveryCenterEmptyState'
-import { shouldShowOnboarding } from './helpers'
+import { shouldShowOnboarding } from './recovery-center-model'
 
 describe('shouldShowOnboarding', () => {
   const fresh = { runs: 0, openFailures: 0, waitingApprovals: 0, dismissed: false }

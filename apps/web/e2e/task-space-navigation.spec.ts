@@ -22,6 +22,7 @@ const LOCALES = [
     home: 'Home',
     recover: 'Recover',
     workflows: 'Workflows',
+    newWorkflow: 'New workflow',
     runs: 'Runs',
     connections: 'Connections',
     settings: 'Operations',
@@ -35,6 +36,7 @@ const LOCALES = [
     home: 'Inicio',
     recover: 'Recuperar',
     workflows: 'Flujos',
+    newWorkflow: 'Nuevo flujo',
     runs: 'Ejecuciones',
     connections: 'Conexiones',
     settings: 'Operaciones',
@@ -71,6 +73,55 @@ async function expectAccessible(page: Page, context: string): Promise<void> {
 }
 
 test.describe.configure({ mode: 'serial' })
+
+test('workflow creation is reachable from the workflow inventory', async ({ page }) => {
+  const orgId = `task-workflow-create-${Date.now()}`
+  const consoleErrors: string[] = []
+  const pageErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text())
+  })
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+
+  await page.setViewportSize({ width: 1440, height: 1100 })
+  await page.addInitScript((activeOrg) => {
+    window.localStorage.setItem('janusly:activeOrg', activeOrg)
+    window.localStorage.setItem('janusly:locale', 'en')
+    window.localStorage.setItem('janusly:activeTab', 'home')
+    window.localStorage.removeItem('janusly:sidebar:state')
+  }, orgId)
+  await page.goto('/')
+
+  const sidebar = page.locator('.builder-sidebar')
+  const workflowsDestination = sidebar.getByRole('button', {
+    name: 'Workflows',
+    exact: true,
+  })
+  await expect(workflowsDestination).toBeVisible()
+  await workflowsDestination.click()
+
+  const createWorkflowAction = page.getByRole('button', {
+    name: 'New workflow',
+    exact: true,
+  })
+  await expect(createWorkflowAction).toBeVisible()
+  await expect(createWorkflowAction).toBeEnabled()
+  await createWorkflowAction.click()
+
+  const canvas = page.locator('.workspace-main .react-flow').first()
+  await expect(canvas).toBeVisible()
+  await expect(page.getByTestId('workspace-canvas-wrapper')).toHaveAttribute(
+    'data-canvas-visible',
+    'true',
+  )
+  await expectAccessible(page, 'workflow creation task')
+  await capture(
+    page.locator('.app-shell'),
+    'web-en-workflow-creation-task',
+  )
+  expect(consoleErrors).toEqual([])
+  expect(pageErrors).toEqual([])
+})
 
 for (const locale of LOCALES) {
   test(`${locale.locale} separates Home, Recover, and advanced authoring`, async ({

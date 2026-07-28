@@ -20,7 +20,7 @@
 import { useEffect, useState } from 'react'
 import { useT } from '../i18n'
 import { useWorkflowStore } from '../store'
-import { humanizeAge } from './recovery-center/helpers'
+import { humanizeAge } from './recovery-center/recovery-center-model'
 
 /** How often the relative "as of" age re-computes while a run is active. */
 const AS_OF_TICK_MS = 15_000

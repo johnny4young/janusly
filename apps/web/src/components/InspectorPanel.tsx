@@ -17,7 +17,7 @@ import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
 import { AiUsageFooter } from './AiUsageFooter'
 import { useConfirm } from './ConfirmDialog'
-import { pickErrorMessage } from './recovery-dialog/helpers'
+import { pickErrorMessage } from './recovery-dialog/recovery-dialog-model'
 import { QuickConfigEditor } from './QuickConfigEditor'
 import { ExpressionAssistant } from './ExpressionAssistant'
 import {

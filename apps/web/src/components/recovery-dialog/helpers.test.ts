@@ -8,7 +8,7 @@ import {
   pickFailedNodeErrorJson,
   resolveConfidenceDisplay,
   toWorkflow,
-} from './helpers'
+} from './recovery-dialog-model'
 import type { PatchSuggestion, SuggestionTab } from './types'
 
 const baseWorkflow = {

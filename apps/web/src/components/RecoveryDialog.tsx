@@ -55,7 +55,7 @@ import {
   isActionableSuggestion,
   normalisePatchSuggestion,
   pickFailedNodeErrorJson,
-} from './recovery-dialog/helpers'
+} from './recovery-dialog/recovery-dialog-model'
 import type {
   ClusterApplyResult,
   PatchSuggestion,

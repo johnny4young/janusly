@@ -3,7 +3,7 @@
 import { useMemo } from 'react'
 
 import { useT } from '../../i18n'
-import { normalizeConsideredAlternatives } from './helpers'
+import { normalizeConsideredAlternatives } from './recovery-dialog-model'
 
 export function AlternativeHypothesesPanel({ alternatives }: { alternatives: unknown }) {
   const { t } = useT()

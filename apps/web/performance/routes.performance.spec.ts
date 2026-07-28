@@ -227,14 +227,21 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   expectWithinBudget(homeMeasurement)
   await captureElement(home, 'web-en-performance-home')
 
+  const workflowsDestination = page.getByRole('button', { name: /^Workflows\b/ })
+  await expect(workflowsDestination).toBeVisible()
+  await workflowsDestination.click()
+  const createWorkflowAction = page.getByRole('button', { name: 'New workflow', exact: true })
+  await expect(createWorkflowAction).toBeVisible()
+  await expect(createWorkflowAction).toBeEnabled()
+
   await resetRouteMeasurement(page)
-  await page.getByRole('button', { name: /^AI Studio\b/ }).click()
+  await createWorkflowAction.click()
   const canvas = page.locator('.workspace-main .react-flow').first()
   await expect(canvas).toBeVisible()
-  const aiStudioMeasurement = await measureRoute(page, 'aiStudio')
-  expect(aiStudioMeasurement.resources.some((path) => /CanvasWorkspace-.*\.js$/.test(path))).toBe(true)
-  expectWithinBudget(aiStudioMeasurement)
-  await captureElement(canvas, 'web-en-performance-ai-studio')
+  const workflowBuilderMeasurement = await measureRoute(page, 'workflowBuilder')
+  expect(workflowBuilderMeasurement.resources.some((path) => /CanvasWorkspace-.*\.js$/.test(path))).toBe(true)
+  expectWithinBudget(workflowBuilderMeasurement)
+  await captureElement(canvas, 'web-en-performance-workflow-builder')
 
   await page.getByRole('button', { name: /^Home\b/ }).click()
   await page.getByTestId('recovery-center-queue-open-all').click()
@@ -281,7 +288,7 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   await esPage.goto('/')
   const esHome = esPage.locator('.we-recovery-center-hero')
   await expect(esHome).toBeVisible()
-  await expect(esPage.getByTestId('recovery-center-greeting')).toContainText('ejecuciones necesitan recuperación')
+  await expect(esHome.locator('.section-kicker')).toHaveText('Centro de recuperación')
   const esResources = await esPage.evaluate(() => (
     (performance.getEntriesByType('resource') as PerformanceResourceTiming[])
       .map((entry) => new URL(entry.name).pathname)
@@ -293,7 +300,7 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   expect(esBrowserErrors).toEqual([])
   await esPage.close()
 
-  const measurements = [homeMeasurement, aiStudioMeasurement, recoveryMeasurement]
+  const measurements = [homeMeasurement, workflowBuilderMeasurement, recoveryMeasurement]
   if (PERF_REPORT) {
     const path = resolve(PERF_REPORT)
     await mkdir(dirname(path), { recursive: true })

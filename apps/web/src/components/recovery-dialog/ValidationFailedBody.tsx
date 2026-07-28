@@ -12,7 +12,7 @@ import { Trans, useT } from '../../i18n'
 import type { WorkflowDefinition } from '../../types'
 import { WorkflowDiffView } from '../WorkflowDiffView'
 import type { DeadLetter } from '../DeadLettersPanel'
-import { classifyRecoveryError, pickErrorMessage } from './helpers'
+import { classifyRecoveryError, pickErrorMessage } from './recovery-dialog-model'
 import { RecoveryPassportCard } from './RecoveryPassportCard'
 import type { PatchSuggestion } from './types'
 

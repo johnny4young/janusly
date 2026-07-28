@@ -9,7 +9,7 @@
 
 import { BrainCircuit } from 'lucide-react'
 import { useT } from '../../i18n'
-import { approachLabelDisplay } from './helpers'
+import { approachLabelDisplay } from './recovery-dialog-model'
 import type { PatchApproachLabel, RecoveryFeedbackHealthSnapshot } from './types'
 
 export function LearningHealthBadge({

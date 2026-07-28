@@ -9,7 +9,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { CircleCheck, Copy, Download, FlaskConical, GitCompare, Inbox, RefreshCw, Sparkles, TimerReset, X } from 'lucide-react'
 
-import { downtimeSeverity, humanizeAge } from './recovery-center/helpers'
+import { downtimeSeverity, humanizeAge } from './recovery-center/recovery-center-model'
 import { api, downloadFromApi } from '../api'
 import { formatStatusLabel } from '../constants'
 import { useWorkflowStore } from '../store'

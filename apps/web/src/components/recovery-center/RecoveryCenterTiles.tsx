@@ -47,7 +47,7 @@ import { useWorkflowStore } from '../../store'
 import { getResolvedLocale, useT } from '../../i18n'
 import { requestOperationsSection } from '../operations-section-bus'
 import { selectRecoveryTimeMetric } from '../recovery-metrics'
-import { approachLabelDisplay } from '../recovery-dialog/helpers'
+import { approachLabelDisplay } from '../recovery-dialog/recovery-dialog-model'
 import type { PatchApproachLabel } from '../recovery-dialog/types'
 import type { DeadLetter } from '../DeadLettersPanel'
 import {
@@ -65,7 +65,7 @@ import {
   type RecommendedActionId,
   type RecommendedActionSeverity,
   type RecoveryMetrics,
-} from './helpers'
+} from './recovery-center-model'
 
 // ─────────────────────────────────────────────────────────────────────────
 // RecoveryCenterTile — the shared shell every tile renders into.

@@ -99,7 +99,7 @@ import {
   type OperatorWins,
   type RecoveryLedger,
   type RecoveryMetrics,
-} from './recovery-center/helpers'
+} from './recovery-center/recovery-center-model'
 import { RecoveryHeatmap } from './recovery-center/RecoveryHeatmap'
 import { requestRecoveryDayFocus } from './recovery-day-focus-bus'
 import { selectRecoveryTimeMetric } from './recovery-metrics'
