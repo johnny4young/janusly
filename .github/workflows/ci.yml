@@ -49,8 +49,8 @@ jobs:
       - name: Test (jsdom)
         run: pnpm test
 
-      - name: Test script utilities
-        run: pnpm test:scripts
+      - name: Test script utilities and deterministic recovery evals
+        run: pnpm test:evals
 
   test_browser:
     name: Browser tests

@@ -275,7 +275,9 @@ pnpm test:integration # data integration lane: Compose Postgres + migrate + real
 pnpm evals           # scripts/run-evals.mjs against /ai/generate-workflow (assumes pnpm dev is up)
 pnpm evals:local     # one-command local regression gate: boots Compose + API, runs golden evals, tears down (spends AI credits only if a provider key is configured)
 pnpm evals:baseline  # snapshot the current ai-mode / shape-pass rates into evals/baseline.json (the regression floors)
-pnpm test:evals      # node:test for the eval-gate logic (scripts/evals-baseline.mjs) — $0, no API
+pnpm evals:recovery  # deterministic Recovery corpus against production classifiers, safety gates, qualification, and outcome semantics — $0
+pnpm evals:recovery:baseline # refresh the Recovery dataset hash only after every deterministic safety case passes
+pnpm test:evals      # unit-test both eval gates, then run the deterministic Recovery suite — $0, no API
 pnpm seed:demos      # explicit opt-in demo credentials; never runs at startup
 pnpm seed:recovery-matrix  # explicit opt-in DLQ fixtures for recovery testing
 pnpm seed:full       # explicit opt-in full demo dataset; never runs at startup

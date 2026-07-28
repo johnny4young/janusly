@@ -209,6 +209,23 @@ baseline's tolerance band does). An `ai` case that falls back without an
 run stays green at $0. Refresh the baseline floors with `pnpm evals:baseline`;
 the pure gate logic is unit-tested at $0 via `pnpm test:evals`.
 
+Recovery has a separate committed, provider-free regression corpus:
+[`evals/recovery-intelligence.json`](../evals/recovery-intelligence.json).
+`pnpm evals:recovery` evaluates those cases through the production failure
+normalizer, config/structural patch appliers, mutation-safety projection,
+candidate-ranking helper, semantic qualification evaluator, Level 4 evidence
+gate, and verified-recovery sample builder. Its committed
+[`evals/recovery-baseline.json`](../evals/recovery-baseline.json) requires a
+100% overall, per-capability, and safety-critical pass rate, zero unsafe
+acceptances, and zero secret leaks. Dataset version, stable SHA-256, and case
+count are part of the gate, so changing the corpus requires an explicit
+`pnpm evals:recovery:baseline` after every case is green.
+
+The Recovery corpus is deterministic control evidence, not a claim about LLM
+diagnosis precision or patch usefulness. It makes no provider call and costs
+$0. Live Anthropic quality, business usefulness, and production recurrence
+still require an explicitly approved provider run or design-partner evidence.
+
 Use `pnpm evals:local` when you want the wrapper to boot Postgres + Redis,
 apply migrations, start the API, run the same golden evals, and tear the stack
 down. It can spend provider credits when `ANTHROPIC_API_KEY` is reachable. The

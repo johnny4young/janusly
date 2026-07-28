@@ -174,6 +174,21 @@ and recovery ledger. Both simulated provider boundaries are clearly labeled;
 this qualifies local integration and control flow, not live vendor behavior.
 The LLM never resolves the case or authorizes the downstream mutation.
 
+**Committed deterministic Recovery evals:** `pnpm evals:recovery` runs the
+versioned `evals/recovery-intelligence.json` corpus through real production
+pure seams: failure classification and secret scrubbing, config and structural
+patch application, repair-scope classification, write-side approval
+projection, stable confidence ranking, semantic baseline/candidate
+qualification, Level 4 evidence sufficiency, and production-only
+verified-recovery eligibility. `evals/recovery-baseline.json` pins the stable
+dataset SHA-256 and case count and requires 100% overall, per-capability, and
+safety-critical pass rates with zero unsafe acceptances and zero secret leaks.
+The runner refuses to update that baseline from a failing or unsafe run.
+`pnpm test:evals` unit-tests both gate implementations and executes this
+provider-free suite at $0. This is deterministic control evidence only: it does
+not prove LLM diagnosis precision, repair usefulness, live-provider behavior,
+or business outcomes.
+
 **North-star v1:** the metric key is
 `time_to_verified_recovery`; it is the median elapsed milliseconds from
 `detected_at` to `verified_recovered_at`, with p90 as the primary guardrail.
@@ -292,7 +307,7 @@ Every accepted patch suggestion carries `consideredAlternatives: Array<{ approac
 
 ## Eval datasets from recoveries
 
-**Eval datasets from recoveries:** accepted recovery decisions become a reusable regression bed ONLY with explicit opt-in. `recovery_feedback.eval_consent` (boolean, default `false`, threaded through `RecoveryFeedbackBodySchema` → `recordRecoveryFeedback` → `recovery.feedback` audit metadata) is the gate; an admin builds a dataset via `POST /eval/datasets` (`evals.write`, admin) and the build query `queryEligibleFeedbackForEval` (`packages/data/src/evalDatasetsRepo.ts`) filters `accepted = true AND eval_consent = true AND eq(orgId)` — no consent → never eligible. Two new `orgId`-scoped tables: `eval_datasets` (unique `(orgId, name)`) + `eval_examples` (self-describing SCRUBBED snapshot of failure signature + input context + expected `approachLabel` + retention metadata — durable so a `recovery_feedback` retention purge can't shrink a published dataset). `deleteEvalDataset` hard-deletes examples then the dataset (children first, cascade per the `workflow_versions` precedent). `scrubSecretShapes` runs at WRITE time (the repo, when an example is built) AND at READ time (`serializeEvalExamplesToJsonl` / `composeEvalExamplePrompt` in `@janusly/shared/src/eval-dataset.ts`) — defense in depth. Export is JSONL (one scrubbed object/line, `GET /eval/datasets/:id/export?format=jsonl|json`, dual-form Content-Disposition via the shared `report-download` helpers). When examples are surfaced to an LLM they are framed as DATA via `composeEvalExamplePrompt` (data-framed header + per-example `- ` list lines + the same suspicion-framing escape clause `composeGenerationSystemPrompt` uses for MCP tool exposure), NEVER as instructions. New permission category `evals` (`evals.read` viewer / `evals.write` admin); audit actions `eval.dataset.created` / `_deleted` / `_exported`; error codes `eval_dataset_not_found` / `_name_exists` / `_name_required`. v1 ships no LLM eval-runner (the dataset IS the regression bed; running it against the patch route is a follow-up) and no rejection-capture (only accepted+consented rows eligible).
+**Eval datasets from recoveries:** accepted recovery decisions become a reusable regression bed ONLY with explicit opt-in. `recovery_feedback.eval_consent` (boolean, default `false`, threaded through `RecoveryFeedbackBodySchema` → `recordRecoveryFeedback` → `recovery.feedback` audit metadata) is the gate; an admin builds a dataset via `POST /eval/datasets` (`evals.write`, admin) and the build query `queryEligibleFeedbackForEval` (`packages/data/src/evalDatasetsRepo.ts`) filters `accepted = true AND eval_consent = true AND eq(orgId)` — no consent → never eligible. Two new `orgId`-scoped tables: `eval_datasets` (unique `(orgId, name)`) + `eval_examples` (self-describing SCRUBBED snapshot of failure signature + input context + expected `approachLabel` + retention metadata — durable so a `recovery_feedback` retention purge can't shrink a published dataset). `deleteEvalDataset` hard-deletes examples then the dataset (children first, cascade per the `workflow_versions` precedent). `scrubSecretShapes` runs at WRITE time (the repo, when an example is built) AND at READ time (`serializeEvalExamplesToJsonl` / `composeEvalExamplePrompt` in `@janusly/shared/src/eval-dataset.ts`) — defense in depth. Export is JSONL (one scrubbed object/line, `GET /eval/datasets/:id/export?format=jsonl|json`, dual-form Content-Disposition via the shared `report-download` helpers). When examples are surfaced to an LLM they are framed as DATA via `composeEvalExamplePrompt` (data-framed header + per-example `- ` list lines + the same suspicion-framing escape clause `composeGenerationSystemPrompt` uses for MCP tool exposure), NEVER as instructions. New permission category `evals` (`evals.read` viewer / `evals.write` admin); audit actions `eval.dataset.created` / `_deleted` / `_exported`; error codes `eval_dataset_not_found` / `_name_exists` / `_name_required`. v1 ships no LLM runner over tenant-exported examples (running those consented examples against the patch route remains follow-up); the committed provider-free control corpus is separate and contains no tenant data. Rejection capture is also absent (only accepted+consented rows are eligible).
 
 ## Cluster recovery apply
 
