@@ -44,12 +44,16 @@ and concurrency failures that an all-in-one process would hide.
 Requirements are Node.js 24, pnpm 11, and Docker with Compose v2.
 
 ```bash
-corepack enable
+npm install --global pnpm@11.17.0
 pnpm install
 pnpm local:auth:up
 ```
 
-The first command copies `deploy/local/local.env.example` to the ignored
+Janusly does not depend on Node's bundled Corepack. The exact pnpm release
+stays pinned in the root `packageManager` field, while local machines install
+pnpm directly and CI uses `pnpm/action-setup`.
+
+The `pnpm local:auth:up` command copies `deploy/local/local.env.example` to the ignored
 `deploy/local/local.env` and creates an ignored
 `deploy/local/.secrets/credential-master.key` with directory mode 0700 and file
 mode 0600. Compose exposes it read-only to the non-root API and worker through

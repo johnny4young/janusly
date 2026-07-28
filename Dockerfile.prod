@@ -21,7 +21,7 @@ FROM node:24-alpine AS base
 
 WORKDIR /app
 
-RUN corepack enable
+RUN npm install --global pnpm@11.17.0
 RUN addgroup -S janusly && adduser -S janusly -G janusly \
   && chown janusly:janusly /app
 

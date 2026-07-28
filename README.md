@@ -150,7 +150,8 @@ The worker lives at `packages/engine/src/worker.ts` and runs with `pnpm --filter
 ## Requirements
 
 - Node.js **24** (`engines.node` rejects earlier and future major versions)
-- PNPM **11** (`corepack enable`; the exact version is pinned in `packageManager`)
+- pnpm **11.17.0** (install it directly; the exact version is pinned in
+  `packageManager` and consumed by pnpm plus `pnpm/action-setup`)
 - Docker (for Postgres + Redis 8 + Ollama services in local dev)
 - (Optional) Anthropic API key — see [`docs/ai.md`](docs/ai.md). MVP support posture is Anthropic-only; OpenAI is registered in the provider abstraction but not currently a verified runtime target.
 
@@ -174,7 +175,7 @@ Three steps to a working local stack with the dev-mode UI (no auth setup needed)
 
 ```bash
 # 1. Install dependencies
-corepack enable
+npm install --global pnpm@11.17.0
 pnpm install
 
 # 2. Start Postgres, Redis, Ollama, API, worker, and web

@@ -219,8 +219,8 @@ The package test suite must prove:
 Run:
 
 ```bash
-corepack pnpm --filter @janusly/mcp-server test
-corepack pnpm --filter @janusly/mcp-server build
+pnpm --filter @janusly/mcp-server test
+pnpm --filter @janusly/mcp-server build
 ```
 
 The protocol smoke opens a loopback listener and may need to run outside a

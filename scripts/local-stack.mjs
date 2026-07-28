@@ -14,6 +14,7 @@ import {
 } from "./local-stack-status.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+const supabaseCli = fileURLToPath(new URL("../node_modules/supabase/dist/supabase.js", import.meta.url));
 const composeFile = "deploy/local/compose.yml";
 const command = process.argv[2] ?? "up";
 const authProfile = process.argv.includes("--auth");
@@ -65,6 +66,10 @@ function run(commandName, args, options = {}) {
   });
 }
 
+function runSupabase(args, options = {}) {
+  return run(process.execPath, [supabaseCli, ...args], options);
+}
+
 function parseEnvOutput(output) {
   const values = {};
   for (const line of output.split(/\r?\n/)) {
@@ -86,11 +91,7 @@ function containerUrl(raw) {
 }
 
 async function readLocalSupabaseStatus() {
-  const { stdout } = await run(
-    "pnpm",
-    ["exec", "supabase", "status", "-o", "env"],
-    { sensitive: true },
-  );
+  const { stdout } = await runSupabase(["status", "-o", "env"], { sensitive: true });
   return parseEnvOutput(stdout);
 }
 
@@ -125,12 +126,12 @@ function configureSupabaseEnvironment(status, { authEnabled }) {
 async function startLocalSupabase({ authEnabled }) {
   // Supabase prints its local JWTs and secret keys even after a successful
   // start. Capture the output so routine lifecycle logs never disclose them.
-  await run("pnpm", ["exec", "supabase", "start", "-x", authExclusions], { sensitive: true });
+  await runSupabase(["start", "-x", authExclusions], { sensitive: true });
   configureSupabaseEnvironment(await readLocalSupabaseStatus(), { authEnabled });
 }
 
 async function stopLocalSupabase({ reset = false } = {}) {
-  await run("pnpm", ["exec", "supabase", "stop", ...(reset ? ["--no-backup"] : [])]);
+  await runSupabase(["stop", ...(reset ? ["--no-backup"] : [])]);
 }
 
 function compose(args, options = {}) {
