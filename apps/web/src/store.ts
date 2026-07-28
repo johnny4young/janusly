@@ -191,6 +191,8 @@ type WorkflowStore = {
   eventsCursor: string | null
   eventsHasMore: boolean
   activeTab: ActiveTab
+  /** Contextual Recovery Case selection. Cleared on identity changes and not persisted across reloads. */
+  activeRecoveryCaseId: string | null
   streamStatus: StreamStatus
   streamTransport: StreamTransport
   toasts: Toast[]
@@ -250,6 +252,7 @@ type WorkflowStore = {
   setEvents: (events: RunEvent[]) => void
   setEventsPagination: (cursor: string | null, hasMore: boolean) => void
   setActiveTab: (tab: ActiveTab) => void
+  openRecoveryCase: (caseId: string) => void
   setStreamStatus: (status: StreamStatus) => void
   setStreamTransport: (transport: StreamTransport) => void
   resetRun: () => void
@@ -388,6 +391,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   // recovery). When the operator has navigated elsewhere, the last tab is
   // restored from localStorage so a refresh doesn't drop them back to Home.
   activeTab: readStoredActiveTab(),
+  activeRecoveryCaseId: null,
   streamStatus: 'idle',
   streamTransport: 'idle',
   toasts: [],
@@ -407,6 +411,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           identityContext: null,
           identityReady: false,
           toasts: [],
+          activeRecoveryCaseId: null,
+          activeTab: state.activeTab === 'recoveryCase' ? 'home' : state.activeTab,
           ...clearedRunProjection(state.runTransitionGeneration),
           recoveryIntroDismissedThisSession: false,
         }
@@ -423,6 +429,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     // Notifications belong to the departing identity/workspace. Keeping them
     // after logout can disclose stale operational details to the next user.
     toasts: [],
+    activeRecoveryCaseId: null,
+    activeTab: state.activeTab === 'recoveryCase' ? 'home' : state.activeTab,
     recoveryIntroDismissedThisSession: false,
     ...clearedRunProjection(state.runTransitionGeneration),
   })),
@@ -675,6 +683,9 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   setActiveTab: (tab) => {
     persistActiveTab(tab)
     set({ activeTab: tab })
+  },
+  openRecoveryCase: (caseId) => {
+    set({ activeRecoveryCaseId: caseId, activeTab: 'recoveryCase' })
   },
   setStreamStatus: (streamStatus) => set({ streamStatus }),
   setStreamTransport: (streamTransport) => set({ streamTransport }),

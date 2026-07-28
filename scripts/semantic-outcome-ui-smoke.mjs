@@ -2,17 +2,19 @@
 
 import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getLocalStackSettings } from "./local-env.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const evidenceDir = process.env.JANUSLY_EVIDENCE_DIR
-  ?? fileURLToPath(
-    new URL(
-      "../output/review/2026-07-27-semantic-outcomes",
-      import.meta.url,
-    ),
-  );
+  ? resolve(root, process.env.JANUSLY_EVIDENCE_DIR)
+  : fileURLToPath(
+      new URL(
+        "../output/review/2026-07-27-semantic-outcomes",
+        import.meta.url,
+      ),
+    );
 const settings = await getLocalStackSettings();
 const orgIds = [
   "local-recovery-lab-semantic-en",

@@ -6,7 +6,7 @@ describe("v1 API read paths", () => {
   it("keeps the closed path catalog unique", () => {
     const paths = Object.values(V1_READ_PATHS);
     expect(new Set(paths).size).toBe(paths.length);
-    expect(paths).toHaveLength(19);
+    expect(paths).toHaveLength(20);
   });
 
   it("matches exact paths only", () => {
@@ -22,6 +22,8 @@ describe("v1 API read paths", () => {
     expect(isV1ReadPath("/dlq")).toBe(true);
     expect(isV1ReadPath("/dlq/clusters")).toBe(true);
     expect(isV1ReadPath("/recovery/cases")).toBe(true);
+    expect(V1_READ_PATHS.recoveryCase).toBe("/recovery/cases/{caseId}");
+    expect(isV1ReadPath("/recovery/cases/case-1")).toBe(false);
     expect(isV1ReadPath("/memory/consent-status/extra")).toBe(false);
     expect(isV1ReadPath("/workflows/schedule-preview/extra")).toBe(false);
     expect(isV1ReadPath("/workflows/tags")).toBe(false);

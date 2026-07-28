@@ -54,7 +54,6 @@ import type {
   RecoveryCase,
   RunNode,
   RunSummary,
-  SemanticCaseResolution,
 } from '../types'
 import { api } from '../api'
 import { useMemoryConsentStatus } from '../hooks/useMemoryConsentStatus'
@@ -119,6 +118,7 @@ type RecoveryCenterPanelProps = {
   /** Keep the global recovery posture synchronized with durable semantic containment. */
   onSemanticBlockerRunsChange?: (runIds: string[]) => void
   onOpenTab: (tab: ActiveTab) => void
+  onOpenRecoveryCase: (caseId: string) => void
   onOpenRun: (runId: string, targetTab?: ActiveTab) => void | Promise<void>
   onApproveNode: (nodeId: string) => void | Promise<void>
   /** Navigate to Runs and land keyboard focus on the Recovery Queue. */
@@ -224,22 +224,6 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     props.onSemanticBlockerRunsChange?.(semanticBlockerRunIds)
   }, [props.onSemanticBlockerRunsChange, semanticBlockerRunIds])
 
-  const handleSemanticCaseResolved = useCallback(async (result: SemanticCaseResolution) => {
-    const resolvedIds = new Set(result.resolvedCaseIds)
-    setSemanticCasesSnapshot(current => {
-      if (current?.orgId !== resolvedOrgId) return current
-      return {
-        ...current,
-        value: {
-          ...current.value,
-          cases: current.value.cases.filter(
-            item => !resolvedIds.has(item.id),
-          ),
-        },
-      }
-    })
-    await props.onRefreshPlatform?.()
-  }, [props.onRefreshPlatform, resolvedOrgId])
   const pendingVerifiedRecoveryRef = useRef<{
     orgId: string
     totalRecovered: number
@@ -909,7 +893,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
             loading={semanticCasesLoading}
             unavailable={semanticCasesUnavailable}
             onOpenRun={props.onOpenRun}
-            onResolved={handleSemanticCaseResolved}
+            onOpenCase={props.onOpenRecoveryCase}
           />
           <PendingApprovalsTile
             waitingNodes={waitingNodes}

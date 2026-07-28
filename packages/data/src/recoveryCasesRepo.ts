@@ -79,7 +79,10 @@ export async function listRecoveryCaseTransitions(
         eq(recoveryCaseTransitions.caseId, caseId),
       ),
     )
-    .orderBy(recoveryCaseTransitions.occurredAt)
+    .orderBy(
+      recoveryCaseTransitions.occurredAt,
+      recoveryCaseTransitions.id,
+    )
     .limit(100);
 }
 

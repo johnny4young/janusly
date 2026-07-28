@@ -45,6 +45,7 @@ const SolutionPacksPanel = lazy(() => import('./SolutionPacksPanel').then((m) =>
 const OperationsPage = lazy(() => import('./OperationsPage').then((m) => ({ default: m.OperationsPage })))
 const ExperimentsPanel = lazy(() => import('./ExperimentsPanel').then((m) => ({ default: m.ExperimentsPanel })))
 const RunWorkspace = lazy(() => import('./RunWorkspace').then((m) => ({ default: m.RunWorkspace })))
+const RecoveryCasePanel = lazy(() => import('./RecoveryCasePanel').then((m) => ({ default: m.RecoveryCasePanel })))
 const ReasoningPanel = lazy(() => import('./ReasoningPanel').then((m) => ({ default: m.ReasoningPanel })))
 const CredentialRotateModal = lazy(() => import('./CredentialRotateModal').then((m) => ({ default: m.CredentialRotateModal })))
 const VersionHistoryPanel = lazy(() => import('./VersionHistoryPanel').then((m) => ({ default: m.VersionHistoryPanel })))
@@ -141,6 +142,7 @@ export type RightPanelExecution = {
 
 export type RightPanelNavigation = {
   onOpenTab: (tab: ActiveTab) => void
+  activeRecoveryCaseId: string | null
 }
 
 export type RightPanelProps = {
@@ -212,6 +214,15 @@ function RightPanelRouter(props: RightPanelProps) {
     </PanelChrome>
   )
   if (props.tab === 'operations') return <OperationsPage permissions={props.permissions} />
+  if (props.tab === 'recoveryCase') return (
+    <RecoveryCasePanel
+      caseId={navigation.activeRecoveryCaseId}
+      canResolve={can('recovery.write')}
+      onBack={() => navigation.onOpenTab('home')}
+      onOpenRun={execution.onOpenRun}
+      onResolved={execution.onRefreshPlatform}
+    />
+  )
   if (props.tab === 'experiments') return (
     <PanelChrome title={t('rightPanel.experiments.title')} description={t('rightPanel.experiments.description')} icon={<FlaskConical size={18} />}>
       <ExperimentsPanel />

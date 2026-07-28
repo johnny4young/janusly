@@ -42,6 +42,8 @@ describe("MCP stdio server", () => {
         "mcp.connections.tools",
         "memory.consent_status",
         "recipes.list",
+        "recovery.cases.get",
+        "recovery.cases.list",
         "recovery.ledger",
         "recovery.metrics",
         "recovery.my_wins",

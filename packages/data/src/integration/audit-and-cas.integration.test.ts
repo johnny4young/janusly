@@ -118,7 +118,7 @@ describe("queryAuditLogs — real Postgres", () => {
 });
 
 describe("recovery impact aggregates — real Postgres", () => {
-  it("materializes only terminal success and isolates ledger and wins by tenant, actor, and window", async () => {
+  it("materializes terminal evidence while isolating production credit by tenant, actor, and window", async () => {
     const now = new Date();
     const recent = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const old = new Date(now.getTime() - 45 * 24 * 60 * 60 * 1000);
@@ -186,7 +186,7 @@ describe("recovery impact aggregates — real Postgres", () => {
       recoveredAt: now,
       downtimeMs: 2 * 60_000,
       replayMode: "validation",
-    })).resolves.toBe(false);
+    })).resolves.toBe(true);
 
     // A replay that never reaches terminal success has a DLQ row but no impact event.
     await db.insert(runs).values({

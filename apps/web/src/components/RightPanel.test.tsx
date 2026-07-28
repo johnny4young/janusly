@@ -63,7 +63,7 @@ function props(overrides: Partial<RightPanelProps> = {}): RightPanelProps {
       onReplayDeadLetter: vi.fn(),
       onResolveDeadLetter: vi.fn(),
     },
-    navigation: { onOpenTab: vi.fn() },
+    navigation: { onOpenTab: vi.fn(), activeRecoveryCaseId: null },
     ...overrides,
   }
 }

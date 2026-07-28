@@ -122,6 +122,7 @@ export default function App() {
     connect,
     addNode,
     activeTab,
+    activeRecoveryCaseId,
     userId,
     orgId,
     authReady,
@@ -146,6 +147,7 @@ export default function App() {
     setIdentityContext,
     setIdentityPending,
     setActiveTab,
+    openRecoveryCase,
     setWorkflowName,
     initializeWorkflowName,
     hydrateWorkflow,
@@ -180,6 +182,7 @@ export default function App() {
     connect: s.connect,
     addNode: s.addNode,
     activeTab: s.activeTab,
+    activeRecoveryCaseId: s.activeRecoveryCaseId,
     session: s.session,
     userId: s.userId,
     orgId: s.orgId,
@@ -205,6 +208,7 @@ export default function App() {
     setIdentityContext: s.setIdentityContext,
     setIdentityPending: s.setIdentityPending,
     setActiveTab: s.setActiveTab,
+    openRecoveryCase: s.openRecoveryCase,
     setWorkflowName: s.setWorkflowName,
     initializeWorkflowName: s.initializeWorkflowName,
     hydrateWorkflow: s.hydrateWorkflow,
@@ -1193,7 +1197,10 @@ export default function App() {
         onReplayDeadLetter: replayDeadLetter,
         onResolveDeadLetter: resolveDeadLetter,
       }}
-      navigation={{ onOpenTab: setActiveTab }}
+      navigation={{
+        onOpenTab: setActiveTab,
+        activeRecoveryCaseId,
+      }}
     />
   )
 
@@ -1322,6 +1329,7 @@ export default function App() {
                 deadLetters={deadLetters}
                 onSemanticBlockerRunsChange={setSemanticBlockerRunIds}
                 onOpenTab={setActiveTab}
+                onOpenRecoveryCase={openRecoveryCase}
                 onOpenRun={openRun}
                 onApproveNode={canStartRuns ? approveNode : () => undefined}
                 onOpenRecoveryQueue={() => openRecoveryQueue()}

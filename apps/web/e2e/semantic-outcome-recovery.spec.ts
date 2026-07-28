@@ -24,9 +24,11 @@ function labels(locale: Locale) {
         reason: 'Reviewed against the business policy.',
         runs: 'Runs',
         recovered: 'Outcome recovered',
+        blocker: '1 blocker',
         blockedRun: '1 blocked run',
         blockedRunAria: 'Open recovery — 1 run is blocked on a human gate',
         allClearAria: 'Open Recovery Center — no pending work',
+        backToRecovery: 'Back to Recovery Center',
       }
     : {
         workflowName: 'Recuperación de resultado semántico',
@@ -34,9 +36,11 @@ function labels(locale: Locale) {
         reason: 'Revisado según la política de negocio.',
         runs: 'Ejecuciones',
         recovered: 'Resultado recuperado',
+        blocker: '1 bloqueador',
         blockedRun: '1 ejecución bloqueada',
         blockedRunAria: 'Abrir recuperación — 1 ejecución está bloqueada en un gate humano',
         allClearAria: 'Abrir Centro de Recuperación — sin trabajo pendiente',
+        backToRecovery: 'Volver al Centro de recuperación',
       }
 }
 
@@ -226,6 +230,25 @@ async function capture(page: Page, name: string) {
   await page.screenshot({ path: `${evidenceDir}/${name}.png`, fullPage: true })
 }
 
+async function expectNoHorizontalOverflow(page: Page) {
+  const { overflow, scrollX } = await page.evaluate(() => ({
+    overflow: document.documentElement.scrollWidth - window.innerWidth,
+    scrollX: window.scrollX,
+  }))
+  expect(overflow).toBeLessThanOrEqual(2)
+  expect(scrollX).toBe(0)
+}
+
+async function hideTransientOverlays(page: Page) {
+  await page.evaluate(() => {
+    for (const selector of ['.toast', '.toast-stack']) {
+      for (const element of document.querySelectorAll<HTMLElement>(selector)) {
+        element.style.display = 'none'
+      }
+    }
+  })
+}
+
 async function persistEvidence() {
   if (!evidenceDir) return
   await mkdir(evidenceDir, { recursive: true })
@@ -262,12 +285,21 @@ for (const locale of ['en', 'es'] as const) {
     await expect(page.getByRole('button', { name: copy.blockedRunAria })).toContainText(
       copy.blockedRun,
     )
+    await expect(
+      page.getByText(copy.blocker, { exact: true }),
+    ).toBeVisible()
     const recoveryCase = page.getByTestId(`semantic-recovery-case-${fixture.caseId}`)
     await expect(recoveryCase).toBeVisible()
     await recoveryCase.scrollIntoViewIfNeeded()
+    await expectNoHorizontalOverflow(page)
     await capture(page, `semantic-outcome-quarantine-${locale}`)
 
     await page.getByTestId(`semantic-recovery-open-${fixture.caseId}`).click()
+    await expect(
+      page.getByTestId(`recovery-case-workspace-${fixture.caseId}`),
+    ).toBeVisible()
+    await expectNoHorizontalOverflow(page)
+    await capture(page, `semantic-outcome-case-workspace-${locale}`)
     await page.getByTestId(`semantic-recovery-output-${fixture.caseId}`).fill(
       JSON.stringify({
         mode: 'ai',
@@ -278,7 +310,16 @@ for (const locale of ['en', 'es'] as const) {
     await page.getByLabel(
       locale === 'en' ? 'Operator rationale' : 'Justificación del operador',
     ).fill(copy.reason)
-    await page.getByTestId(`semantic-recovery-replace-${fixture.caseId}`).click()
+    const replaceButton = page.getByTestId(
+      `semantic-recovery-replace-${fixture.caseId}`,
+    )
+    await replaceButton.scrollIntoViewIfNeeded()
+    await capture(page, `semantic-outcome-case-decision-${locale}`)
+    await replaceButton.click()
+    await expect(
+      page.getByTestId(`recovery-case-workspace-${fixture.caseId}`),
+    ).toContainText(locale === 'en' ? 'Recovered' : 'Recuperado')
+    await page.getByRole('button', { name: copy.backToRecovery }).click()
     await expect(page.getByTestId('recovery-center-semantic-allclear')).toBeVisible()
     await expect(page.getByRole('button', { name: copy.allClearAria })).toBeVisible()
 
@@ -288,6 +329,7 @@ for (const locale of ['en', 'es'] as const) {
     await runRow.getByRole('button').first().click()
     await expect(runRow.locator('.status-pill[data-status="succeeded"]')).toBeVisible()
     await runRow.scrollIntoViewIfNeeded()
+    await hideTransientOverlays(page)
     await capture(page, `semantic-outcome-recovered-${locale}`)
     await expect(runRow.locator('.status-pill[data-status="succeeded"]')).toBeVisible()
 

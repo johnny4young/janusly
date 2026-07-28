@@ -106,9 +106,11 @@ describe('<WorkflowRolloutPanel />', () => {
 
     expect(await screen.findByText('Canary version')).toBeInTheDocument()
     expect(screen.getByText('v2')).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('Canary traffic (%)'), { target: { value: '20' } })
-    fireEvent.change(screen.getByLabelText('Minimum outcomes'), { target: { value: '5' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Start canary' }))
+    fireEvent.change(screen.getByLabelText('Traffic share'), { target: { value: '20' } })
+    fireEvent.change(screen.getByLabelText('Min. outcomes'), { target: { value: '5' } })
+    const startButton = screen.getByRole('button', { name: 'Start canary' })
+    await waitFor(() => expect(startButton).toBeEnabled())
+    fireEvent.click(startButton)
 
     await waitFor(() => expect(vi.mocked(api).mock.calls.some(([, options]) => options?.method === 'POST')).toBe(true))
     const createOptions = vi.mocked(api).mock.calls.find(([, options]) => options?.method === 'POST')?.[1]

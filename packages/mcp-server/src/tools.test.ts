@@ -32,6 +32,8 @@ describe("MCP tool catalog", () => {
       "mcp.connections.tools",
       "memory.consent_status",
       "recipes.list",
+      "recovery.cases.get",
+      "recovery.cases.list",
       "recovery.ledger",
       "recovery.metrics",
       "recovery.my_wins",
@@ -56,6 +58,7 @@ describe("MCP tool catalog", () => {
       "runs.start",
       "runs.redrive",
       "dlq.replay",
+      "recovery.cases.resolve",
       "mcp.connections.create",
     ]) {
       expect(names).not.toContain(write);
@@ -75,6 +78,7 @@ describe("MCP tool catalog", () => {
       "runs.redrive",
       "runs.cancel",
       "dlq.replay",
+      "recovery.cases.resolve",
       "mcp.connections.create",
       "mcp.connections.update",
       "mcp.connections.rediscover",
@@ -159,6 +163,12 @@ describe("MCP tool catalog", () => {
       idempotentHint: false,
       openWorldHint: true,
     });
+    expect(byName.get("recovery.cases.resolve")?.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    });
     expect(byName.get("mcp.connections.update")?.annotations).toMatchObject({
       readOnlyHint: false,
       destructiveHint: false,
@@ -186,6 +196,7 @@ describe("MCP tool catalog", () => {
       ["dlq.clusters", "windowDays"],
       ["recovery.metrics", "windowDays"],
       ["recovery.my_wins", "days"],
+      ["recovery.cases.list", "limit"],
     ];
     for (const [toolName, field] of integerFields) {
       const properties = byName.get(toolName)?.inputSchema.properties as
@@ -293,9 +304,71 @@ describe("dispatchTool", () => {
     await dispatchTool(mock, "memory.consent_status", {});
     await dispatchTool(mock, "recovery.ledger", {});
     await dispatchTool(mock, "recovery.my_wins", { days: 14 });
+    await dispatchTool(mock, "recovery.cases.list", {
+      openOnly: false,
+      runId: "run with space",
+      limit: 25,
+    });
+    await dispatchTool(mock, "recovery.cases.get", {
+      caseId: "case with space",
+    });
     expect(mock).toHaveBeenNthCalledWith(1, "/v1/memory/consent-status");
     expect(mock).toHaveBeenNthCalledWith(2, "/v1/recovery/ledger");
     expect(mock).toHaveBeenNthCalledWith(3, "/v1/recovery/my-wins?days=14");
+    expect(mock).toHaveBeenNthCalledWith(
+      4,
+      "/v1/recovery/cases?openOnly=false&runId=run+with+space&limit=25",
+    );
+    expect(mock).toHaveBeenNthCalledWith(
+      5,
+      "/v1/recovery/cases/case%20with%20space",
+    );
+  });
+
+  it("resolves a recovery case only with write consent and a complete decision", async () => {
+    const { mock } = makeMockCallApi();
+    await expect(
+      dispatchTool(mock, "recovery.cases.resolve", {
+        caseId: "case-1",
+        decision: "replace",
+        output: { status: "approved" },
+        reason: "Validated against the source record",
+      }),
+    ).rejects.toThrow(/JANUSLY_MCP_WRITES_ENABLED/);
+    expect(mock).not.toHaveBeenCalled();
+
+    vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "true");
+    await dispatchTool(mock, "recovery.cases.resolve", {
+      caseId: "case with space",
+      decision: "replace",
+      output: { status: "approved" },
+      reason: "Validated against the source record",
+    });
+    expect(mock).toHaveBeenCalledWith(
+      "/v1/recovery/cases/case%20with%20space/resolve",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          decision: "replace",
+          reason: "Validated against the source record",
+          output: { status: "approved" },
+        }),
+      },
+    );
+  });
+
+  it("rejects a replacement recovery decision without output", async () => {
+    vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "true");
+    const { mock } = makeMockCallApi();
+
+    await expect(
+      dispatchTool(mock, "recovery.cases.resolve", {
+        caseId: "case-1",
+        decision: "replace",
+        reason: "Reviewed",
+      }),
+    ).rejects.toThrow(/output.*required/);
+    expect(mock).not.toHaveBeenCalled();
   });
 
   it("runs.get builds a URLSearchParams query with eventsLimit + cursor", async () => {

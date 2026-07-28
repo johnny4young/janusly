@@ -21,7 +21,9 @@ import {
   recordRecoveryFeedback,
   queryRecoveryMetricsSignals,
   queryRecoveryHeatmap,
+  getRecoveryCase,
   listRecoveryCases,
+  listRecoveryCaseTransitions,
 } from "@janusly/data";
 import { MIN_CALIBRATION_SAMPLES } from "@janusly/engine/src/confidence-calibration";
 import { composeRecoveryMetrics } from "@janusly/engine/src/recovery-metrics";
@@ -39,10 +41,12 @@ import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { RATE_LIMIT_DEFAULTS_PER_MIN, RATE_LIMIT_WINDOW_MS } from "../constants";
 import { getDeadLetter } from "../dlq";
 import { asRecord, readJson, sendError, sendJson } from "../http";
+import { guardMcpWrite } from "../mcp-consent";
 import { enforceRateLimit } from "../rate-limit";
 import type { Route } from "../routes";
 import {
   recoveryLedgerContract,
+  getRecoveryCaseContract,
   listRecoveryCasesContract,
   recoveryMetricsContract,
   recoveryMyWinsContract,
@@ -53,6 +57,27 @@ import {
 function workflowIdFromSnapshot(workflowJson: unknown): string | null {
   const id = (workflowJson as { id?: unknown } | null)?.id;
   return typeof id === "string" && id.length > 0 ? id : null;
+}
+
+type ParsedRecoveryCaseId =
+  | { ok: true; caseId: string }
+  | { ok: false; code: "not_found" | "invalid" };
+
+function parseRecoveryCaseId(
+  rawUrl: string | undefined,
+  pattern: RegExp,
+): ParsedRecoveryCaseId {
+  const pathname = new URL(rawUrl ?? "", "http://localhost").pathname;
+  const match = pathname.match(pattern);
+  if (!match?.[1]) return { ok: false, code: "not_found" };
+  try {
+    const caseId = decodeURIComponent(match[1]);
+    return caseId.length > 0
+      ? { ok: true, caseId }
+      : { ok: false, code: "not_found" };
+  } catch {
+    return { ok: false, code: "invalid" };
+  }
 }
 
 export const recoveryRoutes: Route[] = [
@@ -82,21 +107,35 @@ export const recoveryRoutes: Route[] = [
   },
 
   {
-    method: "POST",
+    method: "GET",
     match: (url) =>
-      /^\/recovery\/cases\/[^/?]+\/resolve(\?|$)/.test(url),
-    role: "editor",
-    permission: "recovery.write",
-    contract: recoverSemanticCaseContract,
+      /^\/recovery\/cases\/[^/?]+(\?|$)/.test(url) &&
+      !/^\/recovery\/cases\/[^/?]+\/resolve(\?|$)/.test(url),
+    role: "viewer",
+    permission: "recovery.read",
+    contract: getRecoveryCaseContract,
     handler: async ({ req, res, auth }) => {
-      const pathname = new URL(
-        req.url ?? "",
-        "http://localhost",
-      ).pathname;
-      const match = pathname.match(
-        /^\/recovery\/cases\/([^/]+)\/resolve$/,
+      const parsedCaseId = parseRecoveryCaseId(
+        req.url,
+        /^\/recovery\/cases\/([^/]+)$/,
       );
-      if (!match) {
+      if (!parsedCaseId.ok) {
+        return sendError(
+          res,
+          parsedCaseId.code === "invalid"
+            ? "invalid_input"
+            : "recovery_case_not_found",
+          parsedCaseId.code === "invalid"
+            ? "Invalid recovery case id"
+            : "Recovery case not found",
+          parsedCaseId.code === "invalid" ? 400 : 404,
+        );
+      }
+      const recoveryCase = await getRecoveryCase(
+        auth.orgId,
+        parsedCaseId.caseId,
+      );
+      if (!recoveryCase) {
         return sendError(
           res,
           "recovery_case_not_found",
@@ -104,15 +143,45 @@ export const recoveryRoutes: Route[] = [
           404,
         );
       }
-      let caseId: string;
-      try {
-        caseId = decodeURIComponent(match[1]!);
-      } catch {
+      return sendJson(res, {
+        case: recoveryCase,
+        transitions: await listRecoveryCaseTransitions(
+          auth.orgId,
+          parsedCaseId.caseId,
+        ),
+      });
+    },
+  },
+
+  {
+    method: "POST",
+    match: (url) =>
+      /^\/recovery\/cases\/[^/?]+\/resolve(\?|$)/.test(url),
+    role: "editor",
+    permission: "recovery.write",
+    contract: recoverSemanticCaseContract,
+    handler: async ({ req, res, auth }) => {
+      const mcpGate = await guardMcpWrite(
+        auth,
+        "recovery.cases.resolve",
+      );
+      if (!mcpGate.ok) {
+        return sendJson(res, mcpGate.body, mcpGate.status);
+      }
+      const parsedCaseId = parseRecoveryCaseId(
+        req.url,
+        /^\/recovery\/cases\/([^/]+)\/resolve$/,
+      );
+      if (!parsedCaseId.ok) {
         return sendError(
           res,
-          "invalid_input",
-          "Invalid recovery case id",
-          400,
+          parsedCaseId.code === "invalid"
+            ? "invalid_input"
+            : "recovery_case_not_found",
+          parsedCaseId.code === "invalid"
+            ? "Invalid recovery case id"
+            : "Recovery case not found",
+          parsedCaseId.code === "invalid" ? 400 : 404,
         );
       }
       const parsed =
@@ -134,7 +203,7 @@ export const recoveryRoutes: Route[] = [
       }
       const result = await recoverSemanticOutcome({
         orgId: auth.orgId,
-        caseId,
+        caseId: parsedCaseId.caseId,
         actorId: auth.userId,
         ...parsed.data,
       });
@@ -171,7 +240,7 @@ export const recoveryRoutes: Route[] = [
 
       await auditAction(auth, "recovery.semantic_resolved", {
         targetType: "recovery_case",
-        targetId: caseId,
+        targetId: parsedCaseId.caseId,
         metadata: {
           runId: result.runId,
           sourceNodeId: result.sourceNodeId,

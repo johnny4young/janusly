@@ -214,7 +214,7 @@ export async function recordRecoveryImpactTx(
   if (!dlq) return false;
   if (!dlq.createdAt) return false;
 
-  const northStar = buildRecoveryNorthStarSample({
+  const productionNorthStar = buildRecoveryNorthStarSample({
     caseId: input.deadLetterId,
     source: "technical_failure",
     verificationKind: "generation_bound_terminal_success",
@@ -223,7 +223,15 @@ export async function recordRecoveryImpactTx(
     detectedAt: dlq.createdAt,
     verifiedRecoveredAt: input.recoveredAt,
   });
-  if (!northStar.included) return false;
+  const detectedAtMs = dlq.createdAt.getTime();
+  const recoveredAtMs = input.recoveredAt.getTime();
+  if (
+    !Number.isFinite(detectedAtMs)
+    || !Number.isFinite(recoveredAtMs)
+    || recoveredAtMs < detectedAtMs
+  ) {
+    return false;
+  }
 
   // The API normally stamps queue acceptance immediately after BullMQ
   // enqueue, but a process crash can land between those two operations. A
@@ -242,7 +250,16 @@ export async function recordRecoveryImpactTx(
       eq(deadLetters.status, "open"),
     ));
 
-  const downtimeEndedMs = northStar.sample.durationMs;
+  // Controlled drills retain the same immutable terminal fact for their
+  // measured validation dossier, but never enter the production north-star
+  // rollup. Ordinary sandbox runs do not carry a recoveryDeadLetterId, so
+  // they cannot reach this branch.
+  const downtimeEndedMs = productionNorthStar.included
+    ? productionNorthStar.sample.durationMs
+    : Math.min(
+        Number.MAX_SAFE_INTEGER,
+        Math.round(recoveredAtMs - detectedAtMs),
+      );
   const inserted = await tx
     .insert(recoveryImpactEvents)
     .values({
@@ -258,30 +275,32 @@ export async function recordRecoveryImpactTx(
     .returning({ deadLetterId: recoveryImpactEvents.deadLetterId });
   if (inserted.length === 0) return false;
 
-  await tx
-    .insert(recoveryImpactRollups)
-    .values({
-      orgId: dlq.orgId,
-      totalRecovered: 1,
-      downtimeEndedMs,
-      firstRecoveredAt: input.recoveredAt,
-      updatedAt: input.recoveredAt,
-    })
-    .onConflictDoUpdate({
-      target: recoveryImpactRollups.orgId,
-      set: {
-        totalRecovered: sql`${recoveryImpactRollups.totalRecovered} + 1`,
-        downtimeEndedMs: sql`${recoveryImpactRollups.downtimeEndedMs} + ${downtimeEndedMs}`,
-        firstRecoveredAt: sql`least(
-          coalesce(${recoveryImpactRollups.firstRecoveredAt}, excluded."first_recovered_at"),
-          excluded."first_recovered_at"
-        )`,
-        updatedAt: sql`greatest(
-          ${recoveryImpactRollups.updatedAt},
-          excluded."updated_at"
-        )`,
-      },
-    });
+  if (productionNorthStar.included) {
+    await tx
+      .insert(recoveryImpactRollups)
+      .values({
+        orgId: dlq.orgId,
+        totalRecovered: 1,
+        downtimeEndedMs,
+        firstRecoveredAt: input.recoveredAt,
+        updatedAt: input.recoveredAt,
+      })
+      .onConflictDoUpdate({
+        target: recoveryImpactRollups.orgId,
+        set: {
+          totalRecovered: sql`${recoveryImpactRollups.totalRecovered} + 1`,
+          downtimeEndedMs: sql`${recoveryImpactRollups.downtimeEndedMs} + ${downtimeEndedMs}`,
+          firstRecoveredAt: sql`least(
+            coalesce(${recoveryImpactRollups.firstRecoveredAt}, excluded."first_recovered_at"),
+            excluded."first_recovered_at"
+          )`,
+          updatedAt: sql`greatest(
+            ${recoveryImpactRollups.updatedAt},
+            excluded."updated_at"
+          )`,
+        },
+      });
+  }
 
   // The incident closes only alongside terminal node success. Keeping this
   // CAS transition and its audit row in the same transaction as the impact

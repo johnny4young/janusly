@@ -109,13 +109,23 @@ async function pollUntilTerminal(
   throw new Error(`Run ${runId} did not reach a terminal status`)
 }
 
-function installBrowserErrorGuards(page: Page): string[] {
-  const errors: string[] = []
+function installBrowserErrorGuards(page: Page): {
+  consoleErrors: string[]
+  responseErrors: string[]
+} {
+  const consoleErrors: string[] = []
+  const responseErrors: string[] = []
   page.on('console', message => {
-    if (message.type() === 'error') errors.push(message.text())
+    if (message.type() !== 'error') return
+    const location = message.location().url
+    consoleErrors.push(location ? `${message.text()} @ ${location}` : message.text())
   })
-  page.on('pageerror', error => errors.push(error.message))
-  return errors
+  page.on('pageerror', error => consoleErrors.push(error.message))
+  page.on('response', response => {
+    if (response.status() < 400) return
+    responseErrors.push(`${response.status()} ${new URL(response.url()).pathname}`)
+  })
+  return { consoleErrors, responseErrors }
 }
 
 async function hideUnrelatedOverlays(page: Page): Promise<void> {
@@ -420,7 +430,7 @@ test('HTTP JSON and unresolved templates stay explicit from runtime through the 
     await captureUnresolvedEvent(page, spanish, lenientRunId, spanish.unresolvedLenient, 'web-es-template-unresolved-lenient-warning')
     await captureUnresolvedEvent(page, spanish, strictRunId, spanish.unresolvedStrict, 'web-es-template-unresolved-strict-warning')
 
-    expect(browserErrors).toEqual([])
+    expect(browserErrors).toEqual({ consoleErrors: [], responseErrors: [] })
   } finally {
     await httpFixture.close()
   }

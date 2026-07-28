@@ -15,6 +15,7 @@ export const TAB_PERMISSION: Partial<Record<ActiveTab, string>> = {
   reasoning: 'runs.read',
   multiAgent: 'workflows.read',
   operations: 'recovery.read',
+  recoveryCase: 'recovery.read',
   credentials: 'credentials.read',
   members: 'members.read',
 }

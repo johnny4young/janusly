@@ -54,6 +54,7 @@ const baseProps = {
   runNodes: [],
   deadLetters: [],
   onOpenTab: vi.fn(),
+  onOpenRecoveryCase: vi.fn(),
   onOpenRun: vi.fn(),
   onApproveNode: vi.fn(),
   onOpenRecoveryQueue: vi.fn(),
@@ -980,18 +981,13 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
 })
 
 describe('<RecoveryCenterPanel /> — semantic outcome incidents', () => {
-  it('shows a quarantined case and resumes only through an explicit replacement decision', async () => {
-    let semanticListMode: 'initial' | 'unavailable' | 'clear' = 'initial'
-    vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
+  it('keeps the home tile scannable and opens a case in its dedicated workspace', async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
       if (path === '/recovery/validation?windowDays=30') return baseValidation
       if (path === '/recovery/cases?limit=50') {
-        if (semanticListMode === 'unavailable') {
-          throw new Error('semantic projection unavailable')
-        }
-        if (semanticListMode === 'clear') return { cases: [] }
         return {
           cases: [
             {
@@ -1045,95 +1041,21 @@ describe('<RecoveryCenterPanel /> — semantic outcome incidents', () => {
       if (path === '/recovery/calibration-status') {
         return { enabled: true, windowDays: 30, minimumSampleSize: 20, calibrations: [] }
       }
-      if (path === '/recovery/cases/case-1/resolve' && options?.method === 'POST') {
-        return {
-          ok: true,
-          runId: 'run-1',
-          sourceNodeId: 'answer',
-          decision: 'replace',
-          resumed: true,
-          resolvedCaseIds: ['case-1'],
-        }
-      }
-      if (path === '/recovery/cases/case-2/resolve' && options?.method === 'POST') {
-        return {
-          ok: true,
-          runId: 'run-2',
-          sourceNodeId: 'review',
-          decision: 'accept_loss',
-          resumed: false,
-          resolvedCaseIds: ['case-2'],
-        }
-      }
       throw new Error(`unexpected fetch: ${path}`)
     })
 
-    const view = render(<RecoveryCenterPanel {...baseProps} />)
+    render(<RecoveryCenterPanel {...baseProps} />)
 
     expect(await screen.findByTestId('semantic-recovery-case-case-1')).toHaveTextContent('AI output is required')
     expect(screen.getByText('2 business outcome incidents need review.')).toBeVisible()
     expect(screen.getByTestId('recovery-center-greeting').closest('header'))
       .not.toHaveAttribute('data-all-clear')
     fireEvent.click(screen.getByTestId('semantic-recovery-open-case-1'))
-    fireEvent.change(screen.getByLabelText('Operator rationale'), {
-      target: { value: 'Reviewed replacement' },
-    })
-    fireEvent.click(screen.getByTestId('semantic-recovery-replace-case-1'))
-
-    await waitFor(() => {
-      expect(api).toHaveBeenCalledWith(
-        '/recovery/cases/case-1/resolve',
-        expect.objectContaining({
-          method: 'POST',
-          body: JSON.stringify({
-            decision: 'replace',
-            reason: 'Reviewed replacement',
-            output: { mode: 'ai' },
-          }),
-        }),
-      )
-      expect(bumpPlatformVersion).toHaveBeenCalledTimes(1)
-      expect(baseProps.onRefreshPlatform).toHaveBeenCalledTimes(1)
-    })
-    expect(screen.queryByTestId('semantic-recovery-case-case-1')).toBeNull()
-
-    semanticListMode = 'unavailable'
-    platformVersion = 1
-    view.rerender(<RecoveryCenterPanel {...baseProps} />)
-    expect(await screen.findByText(/Outcome incidents could not be loaded/i)).toBeVisible()
-    expect(screen.getByTestId('semantic-recovery-case-case-2')).toBeVisible()
-    expect(screen.getByText('1 business outcome incident needs review.')).toBeVisible()
-
-    fireEvent.click(screen.getByTestId('semantic-recovery-open-case-2'))
-    expect(
-      screen.queryByTestId('semantic-recovery-output-case-2'),
-    ).toBeNull()
-    fireEvent.change(screen.getByLabelText('Operator rationale'), {
-      target: { value: 'Observed and documented' },
-    })
-    fireEvent.click(screen.getByTestId('semantic-recovery-accept-case-2'))
-    await waitFor(() => {
-      expect(api).toHaveBeenCalledWith(
-        '/recovery/cases/case-2/resolve',
-        expect.objectContaining({
-          method: 'POST',
-          body: JSON.stringify({
-            decision: 'accept_loss',
-            reason: 'Observed and documented',
-          }),
-        }),
-      )
-      expect(bumpPlatformVersion).toHaveBeenCalledTimes(2)
-      expect(baseProps.onRefreshPlatform).toHaveBeenCalledTimes(2)
-    })
-    expect(screen.queryByTestId('semantic-recovery-case-case-2')).toBeNull()
-    expect(screen.queryByTestId('recovery-center-semantic-allclear')).toBeNull()
-    expect(screen.getByText(/Outcome incidents could not be loaded/i)).toBeVisible()
-
-    semanticListMode = 'clear'
-    platformVersion = 2
-    view.rerender(<RecoveryCenterPanel {...baseProps} />)
-    expect(await screen.findByTestId('recovery-center-semantic-allclear')).toBeVisible()
+    expect(baseProps.onOpenRecoveryCase).toHaveBeenCalledWith('case-1')
+    expect(api).not.toHaveBeenCalledWith(
+      expect.stringContaining('/resolve'),
+      expect.anything(),
+    )
   })
 
   it.each([

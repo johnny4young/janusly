@@ -2,7 +2,7 @@
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes
 Janusly to MCP-aware AI clients (Claude Desktop, Cursor, custom agents). It
-publishes 24 always-available discovery/inspection tools and 13 write tools
+publishes 26 always-available discovery/inspection tools and 14 write tools
 advertised only when explicit consent is configured. Every tool proxies a
 runtime-validated `/v1` contract on the running Janusly API.
 
@@ -77,6 +77,8 @@ Boot story: Claude Desktop reads its config file (`~/Library/Application Support
 | `recovery.metrics` | `GET /v1/recovery/metrics` | Read the tenant recovery rollup. |
 | `recovery.ledger` | `GET /v1/recovery/ledger` | Read lifetime impact-bound recovery totals. |
 | `recovery.my_wins` | `GET /v1/recovery/my-wins` | Read operator-attributed recent recoveries. |
+| `recovery.cases.list` | `GET /v1/recovery/cases` | List bounded tenant-scoped semantic recovery cases. |
+| `recovery.cases.get` | `GET /v1/recovery/cases/{caseId}` | Inspect one case and its append-only transition history. |
 | `reports.run_explain` | `GET /v1/reports/run-explain` | Explain one run with structured evidence. |
 | `ai.patch_workflow` | `POST /v1/ai/patch-workflow` | Suggest patches without saving a workflow version. |
 | `ai.generate_workflow` | `POST /v1/ai/generate-workflow` | Generate a workflow suggestion without saving it. |
@@ -97,6 +99,7 @@ Write tools are advertised only when `JANUSLY_MCP_WRITES_ENABLED=true` is set in
 | `runs.redrive` | `POST /v1/runs/redrive` | Continue a failed saved-workflow run on the latest or an explicit saved version. |
 | `runs.cancel` | `POST /v1/run/cancel` | Cancel an in-flight run. |
 | `dlq.replay` | `POST /v1/dlq/replay` | Retry one dead letter on the original run snapshot. Requires `deadLetterId` from `dlq.list`. |
+| `recovery.cases.resolve` | `POST /v1/recovery/cases/{caseId}/resolve` | Apply an audited replacement or explicit accepted-loss decision after deterministic validation. |
 | `mcp.connections.create` | `POST /v1/mcp/connections` | Register and discover an outbound connection. |
 | `mcp.connections.update` | `POST /v1/mcp/connections/{alias}` | Update an outbound connection's safe settings. |
 | `mcp.connections.rediscover` | `POST /v1/mcp/connections/{alias}/rediscover` | Refresh cached descriptors while preserving opt-ins. |
@@ -125,6 +128,9 @@ them into the still-experimental MCP Tasks utility.
 For recovery, the distinction is deliberate: after an AI or human patch is
 validated and saved, call `runs.redrive` so the continuation uses that saved
 version. Use `dlq.replay` only for a transient or same-version exact-node retry.
+For semantic outcomes, inspect with `recovery.cases.list` then
+`recovery.cases.get`; `recovery.cases.resolve` re-validates replacement JSON
+against the operator-owned contract before any downstream work can resume.
 When `workflows.resume` reports `remaining > 0`, repeat it to drain the next
 bounded buffered-trigger page.
 

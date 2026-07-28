@@ -27,6 +27,7 @@ beforeEach(() => {
       eventsCursor: null,
       eventsHasMore: false,
       activeTab: 'multiAgent',
+      activeRecoveryCaseId: null,
       streamStatus: 'idle',
       toasts: [],
       platformVersion: 0,
@@ -456,6 +457,17 @@ describe('useWorkflowStore', () => {
     }
   })
 
+  it('opens a recovery case as contextual non-persistent workspace state', () => {
+    window.localStorage.setItem('janusly:activeTab', 'home')
+    useWorkflowStore.getState().openRecoveryCase('case-42')
+
+    expect(useWorkflowStore.getState()).toMatchObject({
+      activeTab: 'recoveryCase',
+      activeRecoveryCaseId: 'case-42',
+    })
+    expect(window.localStorage.getItem('janusly:activeTab')).toBe('home')
+  })
+
   // bumpPlatformVersion coalesce behavior is covered in the dedicated
   // `useWorkflowStore.bumpPlatformVersion (coalesce)` describe block
   // below — it uses fake timers to assert the 100ms trailing-edge
@@ -666,7 +678,7 @@ describe('useWorkflowStore', () => {
   // the workspace contents in the main slot for these (instead of the
   // React Flow canvas), so we pin a handful of representative tabs to
   // guard against accidental enum drift.
-  it.each(['operations', 'experiments', 'members', 'credentials'] as const)(
+  it.each(['operations', 'experiments', 'members', 'credentials', 'recoveryCase'] as const)(
     'setActiveTab accepts the non-canvas tab "%s"',
     (tab) => {
       useWorkflowStore.getState().setActiveTab(tab)

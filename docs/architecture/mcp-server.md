@@ -20,9 +20,10 @@ An MCP-aware agent can:
 4. save and roll back versions when MCP writes are enabled;
 5. start, poll, inspect, resume, cancel, and redrive runs onto a saved patch;
 6. inspect run usage, workflow health, recovery metrics, the recovery ledger,
-   and attributable wins;
-7. explain failures, request a candidate patch, replay an exact dead letter on
-   its original snapshot, and manually clear a recovery-circuit pause;
+   attributable wins, and durable semantic recovery cases;
+7. explain failures, request a candidate patch, resolve a deterministic
+   semantic case, replay an exact dead letter on its original snapshot, and
+   manually clear a recovery-circuit pause;
 8. create, update, rediscover, configure, and delete outbound MCP connections.
 
 That is enough for an agent to use the workflow product end to end while the
@@ -62,9 +63,9 @@ paths or run-status enums in the dispatcher.
 The current server uses the stable local `stdio` transport and advertises the
 MCP `tools` capability. It publishes:
 
-- **24 always-visible tools** for discovery, validation, AI suggestions,
+- **26 always-visible tools** for discovery, validation, AI suggestions,
   observation, and recovery evidence;
-- **13 write tools** only when `JANUSLY_MCP_WRITES_ENABLED=true`.
+- **14 write tools** only when `JANUSLY_MCP_WRITES_ENABLED=true`.
 
 Every descriptor has:
 
@@ -104,6 +105,15 @@ discover → author → validate/readiness → save → start → poll → inspe
 After saving a candidate patch, `runs.redrive` continues the failed run on that
 saved version. `dlq.replay` is reserved for transient or same-version retries
 because it keeps the original run snapshot.
+
+Semantic recovery follows a separate evidence-first sequence:
+`recovery.cases.list` → `recovery.cases.get` →
+`recovery.cases.resolve`. Resolution never trusts an agent assertion: a
+replacement output is re-evaluated against the immutable workflow contract,
+and the API only resumes downstream work after every open quarantine for the
+run is closed. The resolve route passes `guardMcpWrite` before reading the body
+and remains destructive/open-world in MCP risk annotations because a valid
+decision can release downstream effects.
 
 ## Asynchronous runs instead of MCP Tasks
 

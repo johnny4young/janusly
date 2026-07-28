@@ -236,9 +236,9 @@ test('starts an accessible canary and automatically returns unhealthy traffic to
 
   const panel = page.getByTestId('workflow-rollout-panel')
   await expect(panel).toContainText('Canary deployment')
-  await panel.getByLabel('Canary traffic (%)').fill('50')
-  await panel.getByLabel('Minimum outcomes').fill('5')
-  await panel.getByLabel('Minimum success (%)').fill('80')
+  await panel.getByLabel('Traffic share').fill('50')
+  await panel.getByLabel('Min. outcomes').fill('5')
+  await panel.getByLabel('Success floor').fill('80')
   const startCanary = panel.getByRole('button', { name: 'Start canary', exact: true })
   await expect(panel).toContainText('Outcome dataset comparison')
   await expect(startCanary).toBeDisabled()

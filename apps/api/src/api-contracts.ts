@@ -513,6 +513,19 @@ const RecoveryCaseSchema = z.object({
   resolvedAt: NullableIsoDateSchema,
 });
 
+const RecoveryCaseTransitionSchema = z.object({
+  id: z.string(),
+  orgId: z.string(),
+  caseId: z.string(),
+  fromState: RecoveryCaseStateSchema,
+  toState: RecoveryCaseStateSchema,
+  actorKind: z.enum(["system", "user", "agent"]),
+  actorId: z.string().nullable(),
+  evidenceJson: JsonValueSchema,
+  reason: z.string().nullable(),
+  occurredAt: IsoDateSchema,
+});
+
 const NonNegativeSafeIntegerSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const PositiveSafeIntegerSchema = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
 
@@ -781,6 +794,26 @@ export const listRecoveryCasesContract = {
   errorCodes: ["invalid_input"],
 } satisfies ApiRouteContract;
 
+export const getRecoveryCaseContract = {
+  operationId: "getRecoveryCase",
+  path: V1_READ_PATHS.recoveryCase,
+  summary:
+    "Get one durable semantic recovery case with its append-only transition history",
+  tags: ["Recovery"],
+  request: {
+    path: z
+      .object({
+        caseId: z.string().trim().min(1).max(256),
+      })
+      .strict(),
+  },
+  response: z.object({
+    case: RecoveryCaseSchema,
+    transitions: z.array(RecoveryCaseTransitionSchema),
+  }),
+  errorCodes: ["invalid_input", "recovery_case_not_found"],
+} satisfies ApiRouteContract;
+
 export const recoverSemanticCaseContract = {
   operationId: "recoverSemanticCase",
   path: V1_WRITE_PATHS.recoverSemanticCase,
@@ -822,6 +855,7 @@ export const recoverSemanticCaseContract = {
     "recovery_case_not_found",
     "recovery_case_conflict",
     "recovery_semantic_output_invalid",
+    ...MCP_WRITE_ERROR_CODES,
   ],
 } satisfies ApiRouteContract;
 
@@ -1416,6 +1450,7 @@ export const V1_CONTRACT_ROUTES: readonly ApiContractRouteDescriptor[] = [
   { method: "GET", role: "viewer", permission: "recovery.read", contract: recoveryLedgerContract },
   { method: "GET", role: "viewer", permission: "recovery.read", contract: recoveryMyWinsContract },
   { method: "GET", role: "viewer", permission: "recovery.read", contract: listRecoveryCasesContract },
+  { method: "GET", role: "viewer", permission: "recovery.read", contract: getRecoveryCaseContract },
   { method: "POST", role: "editor", permission: "recovery.write", contract: recoverSemanticCaseContract },
   { method: "GET", contract: listTemplatesContract },
   { method: "GET", contract: listToolsContract },

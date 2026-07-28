@@ -564,18 +564,24 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
             </div>
           </div>
           <div className="we-rollout-panel__fields">
-            <label className="we-field">
-              <span>{t('workflowRollout.traffic')}</span>
-              <input type="number" min={1} max={50} value={draft.trafficPercent} disabled={mutating} onChange={event => setDraft({ ...draft, trafficPercent: Number(event.target.value) })} />
-            </label>
-            <label className="we-field">
-              <span>{t('workflowRollout.sample')}</span>
-              <input type="number" min={5} max={100} value={draft.minimumSampleSize} disabled={mutating} onChange={event => setDraft({ ...draft, minimumSampleSize: Number(event.target.value) })} />
-            </label>
-            <label className="we-field">
-              <span>{t('workflowRollout.successRate')}</span>
-              <input type="number" min={1} max={100} value={draft.minimumSuccessRatePercent} disabled={mutating} onChange={event => setDraft({ ...draft, minimumSuccessRatePercent: Number(event.target.value) })} />
-            </label>
+            <div className="we-field">
+              <label htmlFor="workflow-rollout-traffic">{t('workflowRollout.traffic')}</label>
+              <span className="we-rollout-panel__input-unit">
+                <input id="workflow-rollout-traffic" type="number" min={1} max={50} value={draft.trafficPercent} disabled={mutating} onChange={event => setDraft({ ...draft, trafficPercent: Number(event.target.value) })} />
+                <span aria-hidden="true">{t('workflowRollout.percentUnit')}</span>
+              </span>
+            </div>
+            <div className="we-field">
+              <label htmlFor="workflow-rollout-minimum-outcomes">{t('workflowRollout.sample')}</label>
+              <input id="workflow-rollout-minimum-outcomes" type="number" min={5} max={100} value={draft.minimumSampleSize} disabled={mutating} onChange={event => setDraft({ ...draft, minimumSampleSize: Number(event.target.value) })} />
+            </div>
+            <div className="we-field">
+              <label htmlFor="workflow-rollout-success-floor">{t('workflowRollout.successRate')}</label>
+              <span className="we-rollout-panel__input-unit">
+                <input id="workflow-rollout-success-floor" type="number" min={1} max={100} value={draft.minimumSuccessRatePercent} disabled={mutating} onChange={event => setDraft({ ...draft, minimumSuccessRatePercent: Number(event.target.value) })} />
+                <span aria-hidden="true">{t('workflowRollout.percentUnit')}</span>
+              </span>
+            </div>
           </div>
           <p className="helper-text">{t('workflowRollout.guardrailHint')}</p>
           {qualificationState?.required && qualificationState.qualification?.status !== 'passed' && (

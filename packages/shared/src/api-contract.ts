@@ -11,6 +11,7 @@ export const V1_READ_PATHS = {
   recoveryLedger: "/recovery/ledger",
   recoveryMyWins: "/recovery/my-wins",
   recoveryCases: "/recovery/cases",
+  recoveryCase: "/recovery/cases/{caseId}",
   templates: "/templates",
   tools: "/tools",
   workflows: "/workflows",

@@ -93,6 +93,7 @@ const IDEMPOTENT_WRITE_TOOLS = new Set([
   "mcp.connections.delete",
 ]);
 const DESTRUCTIVE_TOOLS = new Set([
+  "recovery.cases.resolve",
   "runs.cancel",
   "mcp.connections.delete",
 ]);
@@ -103,6 +104,7 @@ const OPEN_WORLD_TOOLS = new Set([
   "runs.resume",
   "runs.redrive",
   "dlq.replay",
+  "recovery.cases.resolve",
   "workflows.resume",
   "mcp.connections.create",
   "mcp.connections.update",
@@ -272,6 +274,39 @@ const WRITE_TOOLS: Tool[] = [
           minLength: 1,
           maxLength: 256,
           description: "Stable dead-letter id (from `dlq.list`).",
+        },
+      },
+    },
+  },
+  {
+    name: "recovery.cases.resolve",
+    description:
+      "Resolve one deterministic semantic recovery case after inspecting it with `recovery.cases.get`. A replacement is re-validated against the workflow's operator-owned outcome contract before the run can resume; accepting loss is explicit and audited. This can release downstream effects, so two-flag write consent + per-tool rate limit apply.",
+    inputSchema: {
+      type: "object",
+      required: ["caseId", "decision", "reason"],
+      properties: {
+        caseId: {
+          type: "string",
+          minLength: 1,
+          maxLength: 256,
+          description: "Stable case id returned by `recovery.cases.list`.",
+        },
+        decision: {
+          type: "string",
+          enum: ["replace", "accept_loss"],
+          description:
+            "Use `replace` to validate a corrected JSON output, or `accept_loss` to acknowledge the observed outcome explicitly.",
+        },
+        output: {
+          description:
+            "Required for `replace`: the complete JSON value that should become the quarantined node's output.",
+        },
+        reason: {
+          type: "string",
+          minLength: 1,
+          maxLength: 1000,
+          description: "Operator rationale written to the durable case history.",
         },
       },
     },
@@ -531,6 +566,49 @@ const ALWAYS_VISIBLE_TOOLS: Tool[] = [
           minimum: 1,
           maximum: 90,
           description: "Rolling window in days; defaults to 30.",
+        },
+      },
+    },
+  },
+  {
+    name: "recovery.cases.list",
+    description:
+      "List bounded tenant-scoped semantic recovery cases. Open cases are returned by default; filter by run when investigating a specific execution.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        openOnly: {
+          type: "boolean",
+          description: "Defaults to true. Set false to include terminal cases.",
+        },
+        runId: {
+          type: "string",
+          minLength: 1,
+          maxLength: 256,
+          description: "Optional exact run id.",
+        },
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: 200,
+          description: "Optional cap; defaults to 100.",
+        },
+      },
+    },
+  },
+  {
+    name: "recovery.cases.get",
+    description:
+      "Inspect one semantic recovery case with its append-only transition history before proposing or applying a resolution.",
+    inputSchema: {
+      type: "object",
+      required: ["caseId"],
+      properties: {
+        caseId: {
+          type: "string",
+          minLength: 1,
+          maxLength: 256,
+          description: "Stable case id returned by `recovery.cases.list`.",
         },
       },
     },
@@ -1190,6 +1268,41 @@ async function runOne(
       const path = v1(V1_READ_PATHS.recoveryMyWins);
       return callApi(days === undefined ? path : `${path}?days=${days}`);
     }
+    case "recovery.cases.list": {
+      const params = new URLSearchParams();
+      const openOnly = optionalBoolean(
+        args.openOnly,
+        "recovery.cases.list `openOnly`",
+      );
+      if (openOnly !== undefined) params.set("openOnly", String(openOnly));
+      const runId = optionalString(
+        args.runId,
+        "recovery.cases.list `runId`",
+        256,
+      );
+      if (runId !== undefined) params.set("runId", runId);
+      const limit = optionalInteger(
+        args.limit,
+        "recovery.cases.list `limit`",
+        1,
+        200,
+      );
+      if (limit !== undefined) params.set("limit", String(limit));
+      const query = params.toString();
+      const path = v1(V1_READ_PATHS.recoveryCases);
+      return callApi(query ? `${path}?${query}` : path);
+    }
+    case "recovery.cases.get": {
+      const caseId = requireString(
+        args.caseId,
+        "recovery.cases.get `caseId`",
+        256,
+      );
+      return callApi(
+        v1(V1_READ_PATHS.recoveryCase)
+          .replace("{caseId}", encodeURIComponent(caseId)),
+      );
+    }
     case "runs.get": {
       const runId = requireString(args.runId, "runs.get `runId`", 256);
       const params = new URLSearchParams({ runId });
@@ -1390,6 +1503,46 @@ async function runOne(
         method: "POST",
         body: JSON.stringify({ deadLetterId }),
       });
+    }
+    case "recovery.cases.resolve": {
+      requireWrites(name);
+      const caseId = requireString(
+        args.caseId,
+        "recovery.cases.resolve `caseId`",
+        256,
+      );
+      const decision = optionalEnum(
+        args.decision,
+        "recovery.cases.resolve `decision`",
+        ["replace", "accept_loss"] as const,
+      );
+      if (decision === undefined) {
+        throw new Error(
+          "recovery.cases.resolve `decision` is required",
+        );
+      }
+      const reason = requireString(
+        args.reason,
+        "recovery.cases.resolve `reason`",
+        1000,
+      );
+      const payload: Record<string, unknown> = { decision, reason };
+      if (decision === "replace") {
+        if (args.output === undefined) {
+          throw new Error(
+            "recovery.cases.resolve `output` is required for `replace`",
+          );
+        }
+        payload.output = args.output;
+      }
+      return callApi(
+        v1(V1_WRITE_PATHS.recoverSemanticCase)
+          .replace("{caseId}", encodeURIComponent(caseId)),
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+      );
     }
     case "workflows.rollback": {
       requireWrites(name);
