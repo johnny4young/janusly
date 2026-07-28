@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 /**
  * Automated accessibility floor for the highest-value operator journeys.
  *
@@ -97,7 +98,7 @@ test('AI Studio and command palette meet the accessibility floor', async ({ page
   const errors = installBrowserErrorGuards(page)
   await page.goto('/')
 
-  await page.getByRole('button', { name: /^AI Studio\b/ }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Build with AI')
   const studio = page.locator('.workspace-main')
   await expect(studio.locator('.react-flow')).toBeVisible()
   await expectNoBlockingAccessibilityViolations(page, 'AI Studio')
@@ -116,7 +117,7 @@ test('Solution Packs recovery-drill selection meets the accessibility floor', as
   const errors = installBrowserErrorGuards(page)
   await page.goto('/')
 
-  await page.getByRole('button', { name: 'Packs', exact: true }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Packs')
   const pack = page.locator('.list-card').filter({ hasText: 'Incident triage' }).first()
   await expect(pack).toBeVisible()
   await pack.getByLabel('Failure scenario').selectOption('worker_interrupted_during_page')

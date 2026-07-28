@@ -35,6 +35,7 @@ import type { SessionContext } from './identity-context'
 import { getNodePreset } from './constants'
 import { t } from './i18n/runtime'
 import { workflowToGraph } from './canvas-projections'
+import { PERSISTED_WORKSPACE_TABS } from './workspace-locations'
 
 /**
  * Build the config for an explicit step-kind change.
@@ -279,20 +280,16 @@ let pendingBumpTimer: ReturnType<typeof setTimeout> | null = null
 const TOAST_TTL_DEFAULT_MS = 3500
 const TOAST_TTL_ERROR_MS = 6000
 
-// Persist the operator's last top-level tab so a refresh restores context
-// instead of dropping back to Home. The stored value is validated against the
-// known set; anything unknown/removed falls back to Home. Keep PERSISTED_TABS
-// in sync with the ActiveTab union in ./types (drift just disables restore for
-// the new tab — it never throws).
+// Persist the operator's last internal location so a refresh restores both its
+// global destination and contextual section. Values from the former top-level
+// navigation remain valid and are projected into the new four-destination shell.
 const ACTIVE_TAB_KEY = 'janusly:activeTab'
-const PERSISTED_TABS: readonly ActiveTab[] = [
-  'home', 'recover', 'workflows', 'members', 'copilot', 'marketplace', 'templates',
-  'packs', 'credentials', 'inspector', 'runs', 'reasoning', 'multiAgent', 'operations', 'experiments',
-]
 function readStoredActiveTab(): ActiveTab {
   try {
     const raw = window.localStorage.getItem(ACTIVE_TAB_KEY)
-    return raw && (PERSISTED_TABS as readonly string[]).includes(raw) ? (raw as ActiveTab) : 'home'
+    return raw && (PERSISTED_WORKSPACE_TABS as readonly string[]).includes(raw)
+      ? (raw as ActiveTab)
+      : 'home'
   } catch {
     return 'home'
   }

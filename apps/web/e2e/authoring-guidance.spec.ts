@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 import { expect, test, type Page } from '@playwright/test'
 
 function captureBrowserErrors(page: Page) {
@@ -70,7 +71,7 @@ test('Problems and graph context guide an author to a valid branch expression', 
   })
 
   await page.goto('/')
-  await page.getByRole('button', { name: /^AI Studio\b/ }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Build with AI')
   await page.getByRole('button', { name: 'Draft flow', exact: true }).click()
   await page.getByRole('button', { name: 'Review this flow', exact: true }).click()
   await page.locator('.workflow-node').filter({ hasText: 'Branch rule' }).click()
@@ -112,7 +113,7 @@ test('Problems and graph context guide an author to a valid branch expression', 
 
   // The same revision guard applies to AI review findings that complete after
   // the operator has already changed the graph.
-  await page.getByRole('button', { name: /^AI Studio\b/ }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Build with AI')
   const staleReviewResponse = page.waitForResponse((response) => response.url().endsWith('/ai/review-workflow'))
   await page.getByRole('button', { name: 'Review this flow', exact: true }).click()
   await page.locator('.workflow-node').filter({ hasText: 'Branch rule' }).click()

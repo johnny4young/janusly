@@ -12,6 +12,7 @@ import { promisify } from 'node:util'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 
 import { pollUntilTerminal, startRun } from './_helpers/demo-helpers'
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 
 const execFileAsync = promisify(execFile)
 const COMPOSE_FILE = fileURLToPath(new URL('../../../docker-compose.yml', import.meta.url))
@@ -64,7 +65,11 @@ async function seedMemoryRecallEvent(runId: string, nodeId: string, stamp: strin
 }
 
 async function openRunFromHistory(page: Page, runId: string, locale: 'en' | 'es'): Promise<void> {
-  await page.getByRole('button', { name: locale === 'en' ? 'Runs' : 'Ejecuciones', exact: true }).click()
+  await openWorkspaceSection(
+    page,
+    locale === 'en' ? 'Activity' : 'Actividad',
+    locale === 'en' ? 'Runs' : 'Ejecuciones',
+  )
   const overviewTab = page.getByTestId('run-workspace-tab-overview')
   if (await overviewTab.isVisible().catch(() => false)) await overviewTab.click()
   const history = page.getByTestId('runs-history-virtual-list')

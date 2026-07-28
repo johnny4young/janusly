@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 
 test('Recovery Center is the authenticated desktop home', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -55,8 +56,7 @@ test('Recovery Center remains usable on mobile and the builder is one tap away',
   await expect(drawer).toBeHidden()
   await expect(navTrigger).toBeFocused()
 
-  await navTrigger.click()
-  await drawer.getByRole('button', { name: /^AI Studio\b/ }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Build with AI')
   await expect(drawer).toBeHidden()
   await expect(page.getByTestId('canvas-empty')).toBeVisible()
   await expect(page.locator('.workspace-main .workflow-node')).toHaveCount(0)

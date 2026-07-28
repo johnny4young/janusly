@@ -13,6 +13,7 @@ import {
   type APIRequestContext,
   type Page,
 } from '@playwright/test'
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 
 const API_URL = process.env.E2E_API_URL ?? 'http://localhost:3001'
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
@@ -104,17 +105,11 @@ async function hideUnrelatedOverlays(page: Page): Promise<void> {
 }
 
 async function openRun(page: Page, runId: string, locale: Locale): Promise<void> {
-  if ((page.viewportSize()?.width ?? 0) <= 760) {
-    await page.getByRole('button', {
-      name: locale === 'en' ? 'Navigation' : 'Navegación',
-      exact: true,
-    }).click()
-    await expect(page.locator('#workspace-sidebar')).toBeVisible()
-  }
-  await page.getByRole('button', {
-    name: locale === 'en' ? 'Runs' : 'Ejecuciones',
-    exact: true,
-  }).click()
+  await openWorkspaceSection(
+    page,
+    locale === 'en' ? 'Activity' : 'Actividad',
+    locale === 'en' ? 'Runs' : 'Ejecuciones',
+  )
   await page.getByTestId('run-workspace-tab-overview').click()
   const history = page.getByTestId('runs-history-virtual-list')
   await expect(history).toBeVisible()

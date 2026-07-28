@@ -1,10 +1,13 @@
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 
 type LocaleContract = {
   locale: 'en' | 'es'
+  workflows: string
+  buildWithAi: string
   newFlow: string
   workflowName: string
   dialogTitle: string
@@ -15,6 +18,8 @@ type LocaleContract = {
 const LOCALES: LocaleContract[] = [
   {
     locale: 'en',
+    workflows: 'Workflows',
+    buildWithAi: 'Build with AI',
     newFlow: 'New',
     workflowName: 'Name',
     dialogTitle: 'Unsaved changes',
@@ -23,6 +28,8 @@ const LOCALES: LocaleContract[] = [
   },
   {
     locale: 'es',
+    workflows: 'Flujos',
+    buildWithAi: 'Crear con IA',
     newFlow: 'Nuevo',
     workflowName: 'Nombre',
     dialogTitle: 'Cambios sin guardar',
@@ -68,9 +75,7 @@ for (const contract of LOCALES) {
 
     await page.goto('/')
     await expect(page.getByText('dev-user')).toBeVisible()
-    await page.getByRole('button', {
-      name: /^AI Studio\b/,
-    }).click()
+    await openWorkspaceSection(page, contract.workflows, contract.buildWithAi)
 
     const newFlowTrigger = page.getByRole('button', { name: contract.newFlow, exact: true })
     await newFlowTrigger.click()

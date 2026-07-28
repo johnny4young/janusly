@@ -3,6 +3,7 @@ import { createServer } from 'node:http'
 import { once } from 'node:events'
 import type { AddressInfo } from 'node:net'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 
 const API_URL = process.env.E2E_API_URL ?? 'http://localhost:3001'
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
@@ -158,11 +159,19 @@ async function openWorkflow(
   const row = page.getByTestId(`workflows-row-${workflowId}`)
   await expect(row).toContainText(workflowName)
   await row.click()
-  await page.getByRole('button', { name: contract.stepSetup, exact: true }).click()
+  await openWorkspaceSection(
+    page,
+    contract.flows,
+    contract.locale === 'en' ? 'Configure' : 'Configurar',
+  )
 }
 
 async function openRunFromHistory(page: Page, contract: LocaleContract, runId: string): Promise<void> {
-  await page.getByRole('button', { name: contract.runs, exact: true }).click()
+  await openWorkspaceSection(
+    page,
+    contract.locale === 'en' ? 'Activity' : 'Actividad',
+    contract.runs,
+  )
   const overview = page.getByTestId('run-workspace-tab-overview')
   if (await overview.isVisible().catch(() => false)) await overview.click()
   const history = page.getByTestId('runs-history-virtual-list')

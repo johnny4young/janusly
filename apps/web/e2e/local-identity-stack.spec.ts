@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
 
@@ -82,7 +83,7 @@ test('real local identity covers onboarding, organizations, roles, and truthful 
   await expect(page.getByRole('button', { name: 'Open user menu' })).toBeVisible()
   await expect(page.locator('.bottom-status-bar')).toContainText(organizationName)
   await capture(page, 'identity-owner-workspace')
-  await page.getByRole('button', { name: 'Step setup', exact: true }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Configure')
   await expect(page.getByTestId('canvas-empty')).toBeVisible()
   await expect(page.locator('.react-flow__node')).toHaveCount(0)
   await expect(page.locator('.top-bar-breadcrumb')).toContainText('Untitled Workflow')

@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 
@@ -64,7 +65,7 @@ test('Solution Packs install, sample-run, and recovery-drill flows work from the
   await page.goto('/')
   await expect(page.getByText('dev-user')).toBeVisible()
 
-  await page.getByRole('button', { name: 'Packs', exact: true }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Packs')
   await expect(page.getByRole('heading', { name: 'Solution Packs', exact: true })).toBeVisible()
 
   const incidentPack = page.locator('.list-card').filter({ hasText: 'Incident triage' }).first()
@@ -84,7 +85,7 @@ test('Solution Packs install, sample-run, and recovery-drill flows work from the
   await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Incident triage')
   await expect(page.locator('.workflow-node').filter({ hasText: 'Run a tool' })).toHaveCount(2)
 
-  await page.getByRole('button', { name: 'Packs', exact: true }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Packs')
   const sampleResponsePromise = page.waitForResponse(response => response.url().endsWith('/solution-packs/incident-triage/sample-run'))
   await incidentPack.getByRole('button', { name: 'Preview sample run', exact: true }).click()
   const sampleResponse = await sampleResponsePromise
@@ -100,7 +101,7 @@ test('Solution Packs install, sample-run, and recovery-drill flows work from the
     expect.objectContaining({ nodeId: 'page_oncall', status: 'skipped' }),
   ]))
 
-  await page.getByRole('button', { name: 'Packs', exact: true }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Packs')
   await incidentPack.getByLabel('Failure scenario').selectOption('worker_interrupted_during_page')
   const requestPromise = page.waitForRequest((request) => request.url().endsWith('/solution-packs/incident-triage/inject-failure'))
   const responsePromise = page.waitForResponse((response) => response.url().endsWith('/solution-packs/incident-triage/inject-failure'))
@@ -146,7 +147,7 @@ test('Spanish recovery drills remain usable on mobile without horizontal overflo
   await prepareSession(page, 'es')
   await page.goto('/')
   await page.getByRole('button', { name: 'Navegación' }).click()
-  await page.locator('#workspace-sidebar').getByRole('button', { name: 'Packs', exact: true }).click()
+  await openWorkspaceSection(page, 'Flujos', 'Paquetes')
 
   await expect(page.getByRole('heading', { name: 'Solution Packs', exact: true })).toBeVisible()
   const incidentPack = page.locator('.list-card').filter({ hasText: 'Triage de incidentes' }).first()

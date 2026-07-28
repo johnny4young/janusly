@@ -29,6 +29,7 @@ import { AuthoringProblemsPanel } from './AuthoringProblemsPanel'
 import { EmptyView, PanelChrome, PanelSearch } from './panel-primitives'
 import { ErrorBoundary } from './ErrorBoundary'
 import { PanelErrorFallback } from './PanelErrorFallback'
+import { WorkspaceSectionNav } from './WorkspaceSectionNav'
 // Tab-specific panels are code-split out of the eager App chunk: each is only
 // rendered when the operator navigates to its own tab (never on Home or the
 // default authoring tab), so it loads on demand behind the shared <Suspense> in
@@ -57,6 +58,7 @@ const WorkflowMetadataPanel = lazy(() => import('./WorkflowMetadataPanel').then(
 import { api } from '../api'
 import { expiryStatus } from '../credential-expiry'
 import { useWorkflowStore } from '../store'
+import { workspaceDestinationForTab } from '../workspace-locations'
 import { getResolvedLocale, tTemplateCategory, tTemplateDescription, tTemplateName, tToolDescription, useT } from '../i18n'
 
 export type RightPanelAuthoring = {
@@ -168,15 +170,25 @@ export type RightPanelProps = {
 export function RightPanel(props: RightPanelProps) {
   const { t } = useT()
   return (
-    <ErrorBoundary
-      resetKey={props.tab}
-      logTag={`panel:${props.tab}`}
-      fallback={({ reset }) => <PanelErrorFallback onRetry={reset} />}
+    <div
+      className="workspace-panel-stack"
+      data-destination={workspaceDestinationForTab(props.tab)}
     >
-      <Suspense fallback={<div className="panel-list"><p className="helper-text">{t('common.working')}</p></div>}>
-        <RightPanelRouter {...props} />
-      </Suspense>
-    </ErrorBoundary>
+      <WorkspaceSectionNav
+        activeTab={props.tab}
+        permissions={props.permissions}
+        onOpenTab={props.navigation.onOpenTab}
+      />
+      <ErrorBoundary
+        resetKey={props.tab}
+        logTag={`panel:${props.tab}`}
+        fallback={({ reset }) => <PanelErrorFallback onRetry={reset} />}
+      >
+        <Suspense fallback={<div className="panel-list"><p className="helper-text">{t('common.working')}</p></div>}>
+          <RightPanelRouter {...props} />
+        </Suspense>
+      </ErrorBoundary>
+    </div>
   )
 }
 

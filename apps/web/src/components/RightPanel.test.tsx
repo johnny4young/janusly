@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api'
@@ -90,9 +90,33 @@ describe('<RightPanel /> credentials', () => {
 
 describe('<RightPanel /> recovery task space', () => {
   it('mounts the action-focused recovery projection', async () => {
-    render(<RightPanel {...props({ tab: 'recover' })} />)
+    const onOpenTab = vi.fn()
+    render(<RightPanel {...props({
+      tab: 'recover',
+      permissions: ['runs.read', 'recovery.read'],
+      navigation: { onOpenTab, activeRecoveryCaseId: null },
+    })} />)
 
     expect(await screen.findByTestId('runs-panel-mode'))
       .toHaveTextContent('recovery')
+    const sectionNav = screen.getByTestId('workspace-section-nav')
+    expect(sectionNav).toHaveAttribute('data-destination', 'activity')
+    expect(within(sectionNav).getByRole('button', { name: /^Recover$/ }))
+      .toHaveAttribute('aria-current', 'page')
+
+    fireEvent.click(within(sectionNav).getByRole('button', { name: /^Runs$/ }))
+    expect(onOpenTab).toHaveBeenCalledWith('runs')
+  })
+
+  it('filters contextual sections with the same effective permissions as global navigation', () => {
+    render(<RightPanel {...props({
+      tab: 'credentials',
+      permissions: ['credentials.read'],
+    })} />)
+
+    const sectionNav = screen.getByTestId('workspace-section-nav')
+    expect(within(sectionNav).getAllByRole('button')).toHaveLength(1)
+    expect(within(sectionNav).getByRole('button', { name: /^Connections$/ }))
+      .toHaveAttribute('aria-current', 'page')
   })
 })

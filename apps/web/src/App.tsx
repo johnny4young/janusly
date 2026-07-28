@@ -70,6 +70,10 @@ import { createRunTransitionGuard, isRunRequestCurrent } from './run-transition'
 import type { SessionContext } from './identity-context'
 import { currentSessionOrganization } from './identity-context'
 import { canOpenTab, firstOpenTab } from './tab-permissions'
+import {
+  resolveWorkspaceDestinationTarget,
+  type WorkspaceDestination,
+} from './workspace-locations'
 
 type RunResponse = {
   run?: RunSummary
@@ -398,11 +402,9 @@ export default function App() {
     return false
   }, [])
   const fireSignOut = useCallback(() => { void signOut() }, [signOut])
-  const openHomeShortcut = useCallback(() => {
-    if (canOpenTab('home', tenantPermissions)) setActiveTab('home')
-  }, [setActiveTab, tenantPermissions])
-  const openStudioShortcut = useCallback(() => {
-    if (canOpenTab('copilot', tenantPermissions)) setActiveTab('copilot')
+  const openWorkspaceDestination = useCallback((destination: WorkspaceDestination) => {
+    const target = resolveWorkspaceDestinationTarget(destination, tenantPermissions)
+    if (target) setActiveTab(target)
   }, [setActiveTab, tenantPermissions])
   // NOTE: `useKeyboardShortcuts` is mounted further down, after `saveWorkflow`
   // exists (Cmd/Ctrl+S needs it and const hoisting doesn't apply).
@@ -650,8 +652,7 @@ export default function App() {
     onToggleShortcuts: toggleShortcuts,
     onFocusSidebarSearch: focusSidebarSearch,
     onSave: fireSave,
-    onOpenHome: openHomeShortcut,
-    onOpenStudio: openStudioShortcut,
+    onOpenDestination: openWorkspaceDestination,
     onSignOut: fireSignOut,
   })
 

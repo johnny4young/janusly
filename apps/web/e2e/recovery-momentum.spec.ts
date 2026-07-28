@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 /**
  * Real-browser proof for recovery momentum and truthful replay feedback.
  * Each case uses a private dev-header org and the product's own demo-failure
@@ -200,7 +201,7 @@ test('replaying one of two failures never publishes a false all-clear', async ({
   await expect(page.getByTestId('recovery-queue')).toBeVisible()
   await injectDemoFailure(request, orgId)
   await page.reload()
-  await page.getByRole('button', { name: 'Recover', exact: true }).click()
+  await openWorkspaceSection(page, 'Activity', 'Recover')
 
   const queue = page.getByTestId('recovery-queue')
   await expect(queue.locator('[data-dead-letter-id]')).toHaveCount(2)

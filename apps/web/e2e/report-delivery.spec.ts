@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 import { expect, test, type Page } from '@playwright/test'
 
 test.use({ viewport: { width: 1440, height: 900 } })
@@ -25,10 +26,10 @@ test('run history opens report delivery dialog and surfaces a credential error',
 
   await page.getByRole('button', { name: 'Run', exact: true }).click()
   await expect(page.getByText(/Run started:/)).toBeVisible()
-  await page.getByRole('button', { name: /^AI Studio\b/ }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Build with AI')
   await expect(page.locator('.workflow-node').filter({ hasText: 'Do nothing' }).filter({ hasText: 'Done' })).toBeVisible({ timeout: 30_000 })
 
-  await page.getByRole('button', { name: 'Runs', exact: true }).click()
+  await openWorkspaceSection(page, 'Activity', 'Runs')
   const sendButton = page.getByRole('button', { name: /Send run explain report for/ }).first()
   await expect(sendButton).toBeVisible({ timeout: 30_000 })
   await sendButton.click()

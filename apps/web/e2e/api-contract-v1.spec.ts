@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 
@@ -168,7 +169,7 @@ test('v1 contracts stay legacy-compatible and power the real web reads', async (
   await expect(workflowRow).toBeVisible()
   await captureElement(workflowRow, 'web-en-v1-workflow-row')
 
-  await page.getByRole('button', { name: 'Runs', exact: true }).click()
+  await openWorkspaceSection(page, 'Activity', 'Runs')
   const runHistory = page.getByTestId('runs-history-virtual-list')
   await expect(runHistory).toContainText(`${runId.slice(0, 8)}…`)
   await captureElement(runHistory, 'web-en-v1-run-history')

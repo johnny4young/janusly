@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 
 const enabled = process.env.JANUSLY_SEMANTIC_OUTCOME_E2E === '1'
 const evidenceDir = process.env.JANUSLY_EVIDENCE_DIR
@@ -351,7 +352,11 @@ for (const locale of ['en', 'es'] as const) {
     await expect(page.getByTestId('recovery-center-semantic-allclear')).toBeVisible()
     await expect(page.getByRole('button', { name: copy.allClearAria })).toBeVisible()
 
-    await page.getByRole('button', { name: copy.runs, exact: true }).click()
+    await openWorkspaceSection(
+      page,
+      locale === 'en' ? 'Activity' : 'Actividad',
+      copy.runs,
+    )
     const runRow = page.getByRole('article').filter({ hasText: fixture.workflowName }).first()
     await expect(runRow.locator('[data-outcome-status="semantic_recovered"]')).toHaveText(copy.recovered)
     await runRow.getByRole('button').first().click()

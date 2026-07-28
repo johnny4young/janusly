@@ -18,7 +18,6 @@ import {
   Boxes,
   CheckCircle2,
   Compass,
-  Database,
   Gauge,
   GitBranch,
   Home,
@@ -43,6 +42,11 @@ import { useT } from '../i18n'
 import { applyTheme, type ThemePreference } from '../theme'
 import { openDocsUrl, parseDocsUrl } from '../docs-link'
 import { rankPaletteMatches } from '../command-palette-search'
+import {
+  WORKSPACE_DESTINATION_DEFINITIONS,
+  resolveWorkspaceDestinationTarget,
+  type WorkspaceDestination,
+} from '../workspace-locations'
 
 const STORAGE_KEY = 'janusly:palette:recent'
 const RECENT_LIMIT = 4
@@ -116,12 +120,33 @@ function persistRecent(ids: CommandId[]): void {
   }
 }
 
-function buildCommands(docsUrl: string | null | undefined): Command[] {
+const DESTINATION_COMMAND_ICONS: Record<WorkspaceDestination, React.ReactNode> = {
+  home: <Home size={14} />,
+  workflows: <Workflow size={14} />,
+  activity: <Activity size={14} />,
+  settings: <Gauge size={14} />,
+}
+
+function buildCommands(
+  docsUrl: string | null | undefined,
+  permissions?: readonly string[],
+): Command[] {
+  const destinationCommands = WORKSPACE_DESTINATION_DEFINITIONS.flatMap<Command>((destination) => {
+    const target = resolveWorkspaceDestinationTarget(destination.id, permissions)
+    if (!target) return []
+    return [{
+      id: `go.destination.${destination.id}`,
+      labelKey: `palette.destination.${destination.id}`,
+      icon: DESTINATION_COMMAND_ICONS[destination.id],
+      group: 'nav',
+      shortcut: destination.shortcut,
+      run: ({ openTab }) => { openTab(target) },
+    }]
+  })
+
   const navCommands: Command[] = [
-    { id: 'go.home', labelKey: 'palette.nav.home', icon: <Home size={14} />, group: 'nav', shortcut: '⌘1', permission: 'recovery.read', run: ({ openTab }) => { openTab('home') } },
     { id: 'go.recover', labelKey: 'palette.nav.recover', icon: <ShieldAlert size={14} />, group: 'nav', permission: 'recovery.read', run: ({ openTab }) => { openTab('recover') } },
-    { id: 'go.copilot', labelKey: 'palette.nav.copilot', icon: <Sparkles size={14} />, group: 'nav', shortcut: '⌘2', permission: 'ai.write', run: ({ openTab }) => { openTab('copilot') } },
-    { id: 'go.workflows', labelKey: 'palette.nav.workflows', icon: <Database size={14} />, group: 'nav', permission: 'workflows.read', run: ({ openTab }) => { openTab('workflows') } },
+    { id: 'go.copilot', labelKey: 'palette.nav.copilot', icon: <Sparkles size={14} />, group: 'nav', permission: 'ai.write', run: ({ openTab }) => { openTab('copilot') } },
     { id: 'go.inspector', labelKey: 'palette.nav.inspector', icon: <GitBranch size={14} />, group: 'nav', permission: 'workflows.read', run: ({ openTab }) => { openTab('inspector') } },
     { id: 'go.runs', labelKey: 'palette.nav.runs', icon: <Activity size={14} />, group: 'nav', permission: 'runs.read', run: ({ openTab }) => { openTab('runs') } },
     { id: 'go.multiAgent', labelKey: 'palette.nav.multiAgent', icon: <Layers3 size={14} />, group: 'nav', permission: 'workflows.read', run: ({ openTab }) => { openTab('multiAgent') } },
@@ -168,7 +193,7 @@ function buildCommands(docsUrl: string | null | undefined): Command[] {
     { id: 'system.signOut', labelKey: 'palette.system.signOut', icon: <LogOut size={14} />, group: 'system', run: ({ onSignOut }) => { onSignOut() } },
   ]
 
-  return [...navCommands, ...actionCommands, ...systemCommands]
+  return [...destinationCommands, ...navCommands, ...actionCommands, ...systemCommands]
 }
 
 const GROUP_KEY_LABELS: Record<Command['group'] | 'dynamic', string> = {
@@ -207,7 +232,7 @@ export function CommandPalette({
   useDialogFocusTrap(dialogRef, { active: open })
 
   const commands = useMemo<Command[]>(() => {
-    const base = buildCommands(safeDocsUrl)
+    const base = buildCommands(safeDocsUrl, permissions)
     const dynamicCommands: Command[] = [
       ...workflows.slice(0, 20).map<Command>((wf) => ({
         id: `workflow.${wf.id}`,

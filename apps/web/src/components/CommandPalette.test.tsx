@@ -110,10 +110,28 @@ describe('<CommandPalette /> effective permissions', () => {
       workflows: [{ id: 'flow-1', name: 'Readable workflow' }],
     })} />)
 
-    expect(screen.getByText('Go to Flows')).toBeInTheDocument()
+    expect(screen.getByText('Go to Workflows')).toBeInTheDocument()
     expect(screen.getByText('Readable workflow')).toBeInTheDocument()
-    expect(screen.queryByText('Go to Recovery Center')).not.toBeInTheDocument()
+    expect(screen.queryByText('Go to Home')).not.toBeInTheDocument()
     expect(screen.queryByText('Save workflow')).not.toBeInTheDocument()
     expect(screen.queryByText('Run workflow')).not.toBeInTheDocument()
+  })
+
+  it('keeps four destinations first-class while retaining permitted deep jumps', () => {
+    render(<CommandPalette {...props({
+      permissions: [
+        'recovery.read',
+        'workflows.read',
+        'runs.read',
+        'credentials.read',
+      ],
+    })} />)
+
+    expect(screen.getByText('Go to Home')).toBeInTheDocument()
+    expect(screen.getByText('Go to Workflows')).toBeInTheDocument()
+    expect(screen.getByText('Go to Activity')).toBeInTheDocument()
+    expect(screen.getByText('Go to Settings')).toBeInTheDocument()
+    expect(screen.getByText('Go to Recover')).toBeInTheDocument()
+    expect(screen.getByText('Go to Connections')).toBeInTheDocument()
   })
 })

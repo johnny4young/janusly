@@ -7,7 +7,7 @@
  */
 
 import { GitBranch } from 'lucide-react'
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 
 import { api } from '../api'
 import { tApiError, useT } from '../i18n'
@@ -174,17 +174,15 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
   const baseline = versions.find(version => version.id === rollout?.baselineVersionId)
   const canary = versions.find(version => version.id === rollout?.canaryVersionId)
   const rolloutControlsLatest = Boolean(rollout && latest?.id === rollout.canaryVersionId)
-  const canCreate = versions.length >= 2 && (!rollout || !rolloutControlsLatest)
   const qualificationBaselineVersionId = rollout && rolloutControlsLatest
     ? rollout.baselineVersionId
     : draft.baselineVersionId
   const qualificationCandidateVersionId = rollout && rolloutControlsLatest
     ? rollout.canaryVersionId
     : latest?.id
-  const canaryRate = useMemo(
-    () => rollout ? successRate(rollout.canarySucceeded, rollout.canaryFailed) : null,
-    [rollout],
-  )
+  const canaryRate = rollout
+    ? successRate(rollout.canarySucceeded, rollout.canaryFailed)
+    : null
 
   useEffect(() => {
     setQualificationGate(null)
@@ -291,14 +289,17 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
             workflowId={workflowId}
             baselineVersionId={qualificationBaselineVersionId}
             candidateVersionId={qualificationCandidateVersionId}
-            platformVersion={platformVersion}
             readOnly={readOnly}
             onGateChange={setQualificationGate}
           />
         </Suspense>
       )}
 
-      {!readOnly && !loading && canCreate && latest && (
+      {!readOnly
+        && !loading
+        && versions.length >= 2
+        && (!rollout || !rolloutControlsLatest)
+        && latest && (
         <form className="we-rollout-panel__form" onSubmit={event => { event.preventDefault(); void createRollout() }}>
           <div className="we-rollout-panel__pair">
             <label className="we-field">

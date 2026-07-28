@@ -1,5 +1,6 @@
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 
 const API_URL = process.env.E2E_API_URL ?? 'http://localhost:3001'
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
@@ -119,7 +120,11 @@ async function openWorkflow(page: Page, locale: keyof typeof locales, workflowId
   const row = page.getByTestId(`workflows-row-${workflowId}`)
   await expect(row).toContainText(workflowName)
   await row.click()
-  await page.getByRole('button', { name: copy.stepSetup, exact: true }).click()
+  await openWorkspaceSection(
+    page,
+    copy.flows,
+    locale === 'en' ? 'Configure' : 'Configurar',
+  )
 }
 
 async function openRunFromHistory(page: Page, locale: keyof typeof locales, runId: string): Promise<void> {
@@ -128,8 +133,11 @@ async function openRunFromHistory(page: Page, locale: keyof typeof locales, runI
   // observe the new run even when the in-memory history cache is already warm.
   await page.reload()
   await hideUnrelatedOverlays(page)
-  await page.getByRole('button', { name: locales[locale].flows, exact: true }).click()
-  await page.getByRole('button', { name: locales[locale].runs, exact: true }).click()
+  await openWorkspaceSection(
+    page,
+    locale === 'en' ? 'Activity' : 'Actividad',
+    locales[locale].runs,
+  )
   const history = page.getByTestId('runs-history-virtual-list')
   await expect(history).toBeVisible()
   const prefix = `${runId.slice(0, 8)}…`
@@ -137,7 +145,11 @@ async function openRunFromHistory(page: Page, locale: keyof typeof locales, runI
   await history.getByRole('article').filter({ hasText: prefix }).first().locator('button.list-card-row').click()
   await expect(page.getByTestId('run-overview')).toContainText(runId.slice(0, 12))
   await expect(page.locator('.we-run-stream-chip--live')).toBeVisible()
-  await page.getByRole('button', { name: locales[locale].recover, exact: true }).click()
+  await openWorkspaceSection(
+    page,
+    locale === 'en' ? 'Activity' : 'Actividad',
+    locales[locale].recover,
+  )
 }
 
 test('approval deadlines and absolute waits are safe, observable, and authorable in both locales', async ({ page, request }) => {

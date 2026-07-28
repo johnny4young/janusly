@@ -1,5 +1,6 @@
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 
 const API_URL = process.env.E2E_API_URL ?? 'http://localhost:3001'
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
@@ -96,7 +97,7 @@ async function openExpressionAssistant(
   const row = page.getByTestId(`workflows-row-${workflowId}`)
   await expect(row).toContainText(workflowName)
   await row.click()
-  await page.getByRole('button', { name: contract.stepSetup, exact: true }).click()
+  await openWorkspaceSection(page, contract.flows, locale === 'en' ? 'Configure' : 'Configurar')
   await page.locator('.react-flow__node[data-id="rules"] .workflow-node').click()
 
   const inspector = page.getByTestId('inspector-node-rules')

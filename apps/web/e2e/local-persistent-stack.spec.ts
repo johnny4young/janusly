@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
 
@@ -34,10 +35,10 @@ test('persistent local stack exposes configured packs and recoverable provider f
   await expect(page.getByText('dev-user')).toBeVisible()
   await expect(page.locator('.top-bar-breadcrumb')).toContainText('Untitled Workflow')
   await expect(page.locator('.top-bar-breadcrumb')).not.toContainText('undefined')
-  await page.getByRole('button', { name: 'Step setup', exact: true }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Configure')
   await expect(page.getByTestId('canvas-empty')).toBeVisible()
   await expect(page.locator('.react-flow__node')).toHaveCount(0)
-  await page.getByRole('button', { name: 'Packs', exact: true }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Packs')
   await expect(page.getByRole('heading', { name: 'Solution Packs', exact: true })).toBeVisible()
 
   const incidentPack = page.locator('.list-card').filter({ hasText: 'Incident triage' }).first()

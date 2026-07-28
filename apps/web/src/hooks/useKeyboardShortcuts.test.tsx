@@ -15,8 +15,7 @@ function mountShortcuts(overrides: Partial<KeyboardShortcutHandlers> = {}) {
     onToggleShortcuts: vi.fn(),
     onFocusSidebarSearch: vi.fn(() => false),
     onSave: vi.fn(),
-    onOpenHome: vi.fn(),
-    onOpenStudio: vi.fn(),
+    onOpenDestination: vi.fn(),
     onSignOut: vi.fn(),
     ...overrides,
   }
@@ -66,20 +65,25 @@ describe('useKeyboardShortcuts — Cmd/Ctrl+S', () => {
     input.remove()
   })
 
-  it('navigates with the advertised Cmd/Ctrl+1 and Cmd/Ctrl+2 shortcuts', () => {
+  it('navigates with the advertised Cmd/Ctrl+1 through Cmd/Ctrl+4 shortcuts', () => {
     const handlers = mountShortcuts()
     const home = pressKey('1', { metaKey: true })
-    const studio = pressKey('2', { ctrlKey: true })
+    const workflows = pressKey('2', { ctrlKey: true })
+    const activity = pressKey('3', { metaKey: true })
+    const settings = pressKey('4', { ctrlKey: true })
 
-    expect(handlers.onOpenHome).toHaveBeenCalledTimes(1)
-    expect(handlers.onOpenStudio).toHaveBeenCalledTimes(1)
+    expect(handlers.onOpenDestination).toHaveBeenNthCalledWith(1, 'home')
+    expect(handlers.onOpenDestination).toHaveBeenNthCalledWith(2, 'workflows')
+    expect(handlers.onOpenDestination).toHaveBeenNthCalledWith(3, 'activity')
+    expect(handlers.onOpenDestination).toHaveBeenNthCalledWith(4, 'settings')
     expect(home.defaultPrevented).toBe(true)
-    expect(studio.defaultPrevented).toBe(true)
+    expect(workflows.defaultPrevented).toBe(true)
+    expect(activity.defaultPrevented).toBe(true)
+    expect(settings.defaultPrevented).toBe(true)
 
     pressKey('1', { metaKey: true, shiftKey: true })
-    pressKey('2')
-    expect(handlers.onOpenHome).toHaveBeenCalledTimes(1)
-    expect(handlers.onOpenStudio).toHaveBeenCalledTimes(1)
+    pressKey('4')
+    expect(handlers.onOpenDestination).toHaveBeenCalledTimes(4)
   })
 })
 

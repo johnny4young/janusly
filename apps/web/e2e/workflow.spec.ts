@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
 
@@ -30,10 +31,10 @@ test('dev session can create, save, run, and reopen a workflow', async ({ page }
 
   await page.getByRole('button', { name: 'Run', exact: true }).click()
   await expect(page.getByText(/Run started:/)).toBeVisible()
-  await page.getByRole('button', { name: /^AI Studio\b/ }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Build with AI')
   await expect(page.locator('.workflow-node').filter({ hasText: 'Do nothing' }).filter({ hasText: 'Done' })).toBeVisible({ timeout: 30_000 })
 
-  await page.getByRole('button', { name: 'Workflows' }).click()
+  await page.getByRole('button', { name: 'Workflows', exact: true }).click()
   await page.getByRole('button', { name: 'Refresh' }).click()
   await expect(page.locator('[data-testid^="workflows-row-"]').filter({ hasText: workflowName })).toBeVisible()
 })
@@ -53,7 +54,7 @@ test('human form pauses a run, validates input, and resumes with submitted outpu
 
   await page.getByRole('button', { name: 'Run', exact: true }).click()
   await expect(page.getByText(/Run started:/)).toBeVisible()
-  await page.getByRole('button', { name: 'Recover', exact: true }).click()
+  await openWorkspaceSection(page, 'Activity', 'Recover')
   await expect(page.getByRole('button', { name: /Fill form/i })).toBeVisible({ timeout: 30_000 })
 
   await page.getByRole('button', { name: /Fill form/i }).click()
@@ -63,7 +64,7 @@ test('human form pauses a run, validates input, and resumes with submitted outpu
   await page.getByRole('button', { name: /Submit form/i }).click()
 
   await expect(page.getByText(/Form .* submitted/)).toBeVisible()
-  await page.getByRole('button', { name: /^AI Studio\b/ }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Build with AI')
   await expect(page.locator('.workflow-node').filter({ hasText: 'Done' })).toBeVisible({ timeout: 30_000 })
 })
 
@@ -119,9 +120,9 @@ test('human form presents schema-valid initial values for operator review', asyn
   await page.goto('/')
   await page.getByRole('button', { name: 'Workflows', exact: true }).click()
   await page.getByTestId(`workflows-row-${workflow.id}`).click()
-  await page.getByRole('button', { name: 'Runs', exact: true }).click()
+  await openWorkspaceSection(page, 'Activity', 'Runs')
   await page.getByRole('button', { name: `Open timeline for run ${startedBody.runId}` }).click()
-  await page.getByRole('button', { name: 'Recover', exact: true }).click()
+  await openWorkspaceSection(page, 'Activity', 'Recover')
   await expect(page.getByRole('button', { name: /Fill form/i })).toBeVisible({ timeout: 30_000 })
   await page.getByRole('button', { name: /Fill form/i }).click()
 

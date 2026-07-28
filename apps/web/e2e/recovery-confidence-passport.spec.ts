@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 import { expect, test, type Page, type Response } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 
@@ -91,7 +92,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   await expect(onboarding).toBeVisible()
   expect(await onboarding.evaluate((node) => getComputedStyle(node).position)).not.toBe('fixed')
   await captureEvidence(page, '01-contextual-onboarding-en')
-  await page.getByRole('button', { name: 'Packs', exact: true }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Packs')
   const pack = page.locator('.list-card').filter({ hasText: 'Incident triage' }).first()
   await pack.getByRole('button', { name: 'Install', exact: true }).click()
   await expect(page.getByText(/Pack installed/)).toBeVisible()
@@ -99,7 +100,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   // for that final destination before navigating back, otherwise the handoff
   // can replace the Packs DOM while Playwright is clicking its action button.
   await expect(page.getByRole('heading', { name: 'Step setup', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Packs', exact: true }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Packs')
   const selectedBeforeInitialFailure = await selectedDeadLetterTestId(page)
   await pack.getByRole('button', { name: 'Start recovery drill', exact: true }).click()
 
@@ -184,7 +185,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   // Explicit use returns the immutable source, then the normal sandbox and
   // production Apply gates run again against the fresh failure.
   await page.getByRole('button', { name: 'Close', exact: true }).click()
-  await page.getByRole('button', { name: 'Packs', exact: true }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Packs')
   const repeatPack = page.locator('.list-card').filter({ hasText: 'Incident triage' }).first()
   const selectedBeforeRepeatedFailure = await selectedDeadLetterTestId(page)
   await repeatPack.getByRole('button', { name: 'Start recovery drill', exact: true }).click()
@@ -259,7 +260,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   // Locale parity on the playbook's own live surface (not only a unit render).
   await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
   await page.reload()
-  await page.getByRole('button', { name: 'Packs', exact: true }).click()
+  await openWorkspaceSection(page, 'Flujos', 'Paquetes')
   const spanishPlaybookPack = page.locator('.list-card').filter({ hasText: 'Triage de incidentes' }).first()
   const selectedBeforeSpanishFailure = await selectedDeadLetterTestId(page)
   await spanishPlaybookPack.getByRole('button', { name: 'Iniciar ejercicio de recuperación', exact: true }).click()
@@ -315,7 +316,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   // A separate occurrence drives the regression state so the successful-use
   // smoke above and the failed-validation smoke below remain causally honest.
   await page.getByRole('button', { name: 'Cerrar', exact: true }).click()
-  await page.getByRole('button', { name: 'Packs', exact: true }).click()
+  await openWorkspaceSection(page, 'Flujos', 'Paquetes')
   const selectedBeforeSpanishRegression = await selectedDeadLetterTestId(page)
   await spanishPlaybookPack.getByRole('button', { name: 'Iniciar ejercicio de recuperación', exact: true }).click()
   const spanishRegressionFailure = await waitForNewSelectedFailure(
@@ -370,12 +371,12 @@ test('recovery passport requires sandbox success and a separate apply decision',
   // same dialog stays useful without an AI provider and never enables the
   // sandbox/apply actions for a no-op suggestion.
   await page.reload()
-  await page.getByRole('button', { name: 'Packs', exact: true }).click()
+  await openWorkspaceSection(page, 'Flujos', 'Paquetes')
   const spanishPack = page.locator('.list-card').filter({ hasText: 'Escalamiento de soporte' }).first()
   await spanishPack.getByRole('button', { name: 'Instalar', exact: true }).click()
   await expect(page.getByText(/Pack instalado/)).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Configuración del paso', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Packs', exact: true }).click()
+  await openWorkspaceSection(page, 'Flujos', 'Paquetes')
   const selectedBeforeFallbackFailure = await selectedDeadLetterTestId(page)
   await spanishPack.getByRole('button', { name: 'Iniciar ejercicio de recuperación', exact: true }).click()
   const spanishFailure = await waitForNewSelectedFailure(page, selectedBeforeFallbackFailure)

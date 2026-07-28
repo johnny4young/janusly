@@ -20,28 +20,32 @@ const LOCALES = [
   {
     locale: 'en',
     home: 'Home',
-    recover: 'Recover',
     workflows: 'Workflows',
-    newWorkflow: 'New workflow',
+    activity: 'Activity',
+    settings: 'Settings',
+    recover: 'Recover',
+    allWorkflows: 'All workflows',
+    emptyWorkflows: 'No flows saved yet',
     runs: 'Runs',
-    connections: 'Connections',
-    settings: 'Operations',
+    workspace: 'Workspace',
+    operationsHeading: 'Operations',
     primaryGroup: 'Workspace',
-    advancedGroup: 'Advanced',
     homeKicker: 'Recovery Center',
     search: 'Search sections…',
   },
   {
     locale: 'es',
     home: 'Inicio',
-    recover: 'Recuperar',
     workflows: 'Flujos',
-    newWorkflow: 'Nuevo flujo',
+    activity: 'Actividad',
+    settings: 'Configuración',
+    recover: 'Recuperar',
+    allWorkflows: 'Todos los flujos',
+    emptyWorkflows: 'Aún no hay flujos guardados',
     runs: 'Ejecuciones',
-    connections: 'Conexiones',
-    settings: 'Operaciones',
+    workspace: 'Espacio de trabajo',
+    operationsHeading: 'Operaciones',
     primaryGroup: 'Principal',
-    advancedGroup: 'Avanzado',
     homeKicker: 'Centro de recuperación',
     search: 'Buscar secciones…',
   },
@@ -124,7 +128,7 @@ test('workflow creation is reachable from the workflow inventory', async ({ page
 })
 
 for (const locale of LOCALES) {
-  test(`${locale.locale} separates Home, Recover, and advanced authoring`, async ({
+  test(`${locale.locale} exposes four destinations with contextual activity sections`, async ({
     page,
   }) => {
     const orgId = `task-spaces-${locale.locale}-${Date.now()}`
@@ -142,7 +146,7 @@ for (const locale of LOCALES) {
       }
     })
 
-    await page.setViewportSize({ width: 1440, height: 1100 })
+    await page.setViewportSize({ width: 1280, height: 720 })
     await page.addInitScript(({ activeOrg, selectedLocale }) => {
       window.localStorage.setItem('janusly:activeOrg', activeOrg)
       window.localStorage.setItem('janusly:locale', selectedLocale)
@@ -156,22 +160,12 @@ for (const locale of LOCALES) {
     await expect(
       page.locator('.we-recovery-center-hero .section-kicker'),
     ).toHaveText(locale.homeKicker)
-    await expect(
-      sidebar.getByRole('button', {
-        name: new RegExp(`^${locale.primaryGroup}\\b`),
-      }),
-    ).toHaveAttribute('aria-expanded', 'true')
-    await expect(
-      sidebar.getByRole('button', {
-        name: new RegExp(`^${locale.advancedGroup}\\b`),
-      }),
-    ).toHaveAttribute('aria-expanded', 'false')
+    await expect(sidebar.getByText(locale.primaryGroup, { exact: true }))
+      .toBeVisible()
     for (const destination of [
       locale.home,
-      locale.recover,
       locale.workflows,
-      locale.runs,
-      locale.connections,
+      locale.activity,
       locale.settings,
     ]) {
       await expect(
@@ -191,6 +185,20 @@ for (const locale of LOCALES) {
     )
 
     await sidebar.getByRole('button', {
+      name: locale.activity,
+      exact: true,
+    }).click()
+    const sectionNav = page.getByTestId('workspace-section-nav')
+    await expect(sectionNav).toHaveAttribute('data-destination', 'activity')
+    await expect(sectionNav.getByRole('button', {
+      name: locale.runs,
+      exact: true,
+    })).toHaveAttribute('aria-current', 'page')
+    await expect(sectionNav.getByRole('button', {
+      name: locale.recover,
+      exact: true,
+    })).toBeVisible()
+    await sectionNav.getByRole('button', {
       name: locale.recover,
       exact: true,
     }).click()
@@ -202,17 +210,48 @@ for (const locale of LOCALES) {
     await expect(page.getByTestId('runs-metric-strip')).toHaveCount(0)
     await expect(page.getByTestId('usage-summary-card')).toHaveCount(0)
     await expect(
-      sidebar.getByRole('button', { name: locale.recover, exact: true }),
+      sidebar.getByRole('button', { name: locale.activity, exact: true }),
     ).toHaveAttribute('aria-current', 'page')
-    await expect(
-      sidebar.getByRole('button', {
-        name: new RegExp(`^${locale.advancedGroup}\\b`),
-      }),
-    ).toHaveAttribute('aria-expanded', 'false')
     await expectAccessible(page, `${locale.locale} Recover task space`)
     await capture(
       shell,
       `web-${locale.locale}-recover-task-space`,
+    )
+
+    await sidebar.getByRole('button', {
+      name: locale.workflows,
+      exact: true,
+    }).click()
+    await expect(sectionNav).toHaveAttribute('data-destination', 'workflows')
+    await expect(sectionNav.getByRole('button', {
+      name: locale.allWorkflows,
+      exact: true,
+    })).toHaveAttribute('aria-current', 'page')
+    await expect(page.getByText(locale.emptyWorkflows, { exact: true }))
+      .toBeVisible()
+    await expectAccessible(page, `${locale.locale} Workflows task space`)
+    await capture(
+      shell,
+      `web-${locale.locale}-workflows-task-space`,
+    )
+
+    await sidebar.getByRole('button', {
+      name: locale.settings,
+      exact: true,
+    }).click()
+    await expect(sectionNav).toHaveAttribute('data-destination', 'settings')
+    await expect(sectionNav.getByRole('button', {
+      name: locale.workspace,
+      exact: true,
+    })).toHaveAttribute('aria-current', 'page')
+    await expect(page.getByRole('heading', {
+      name: locale.operationsHeading,
+      exact: true,
+    })).toBeVisible()
+    await expectAccessible(page, `${locale.locale} Settings task space`)
+    await capture(
+      shell,
+      `web-${locale.locale}-settings-task-space`,
     )
 
     expect(homeRequests.filter((search) => search === '')).toHaveLength(1)

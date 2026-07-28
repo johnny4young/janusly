@@ -1,11 +1,14 @@
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 
 const locales = {
   en: {
-    aiStudio: 'AI Studio',
+    workflows: 'Workflows',
+    buildWithAi: 'Build with AI',
+    settings: 'Settings',
     hero: 'Describe the outcome. Janusly builds the flow.',
     connections: 'Connections',
     name: 'Connection name',
@@ -17,7 +20,9 @@ const locales = {
     added: (name: string) => `Credential ${name} added`,
   },
   es: {
-    aiStudio: 'AI Studio',
+    workflows: 'Flujos',
+    buildWithAi: 'Crear con IA',
+    settings: 'Configuración',
     hero: 'Describe el resultado. Janusly arma el flujo.',
     connections: 'Conexiones',
     name: 'Nombre de la conexión',
@@ -108,12 +113,12 @@ test('grouped control-plane panels and shared mutations remain bilingual', async
     }
 
     const copy = locales[locale]
-    await page.getByRole('button', { name: new RegExp(`^${copy.aiStudio}\\b`) }).click()
+    await openWorkspaceSection(page, copy.workflows, copy.buildWithAi)
     await expect(page.getByText(copy.hero, { exact: true })).toBeVisible()
     await waitForAuthoringCanvas(page, copy.authoringNodes)
     await capture(page.locator('.workspace-grid'), `web-${locale}-control-plane-authoring-default`)
 
-    await page.getByRole('button', { name: copy.connections, exact: true }).click()
+    await openWorkspaceSection(page, copy.settings, copy.connections)
     await expect(page.getByRole('heading', { name: copy.connections, exact: true })).toBeVisible()
 
     const connectionName = `control_plane_${locale}_${stamp}`
@@ -134,7 +139,11 @@ test('grouped control-plane panels and shared mutations remain bilingual', async
     expect(overflow).toBeLessThanOrEqual(2)
     await capture(main, `web-${locale}-control-plane-connection-result`)
 
-    await page.getByRole('button', { name: copy.runs, exact: true }).click()
+    await openWorkspaceSection(
+      page,
+      locale === 'en' ? 'Activity' : 'Actividad',
+      copy.runs,
+    )
     await expect(page.getByRole('heading', { name: copy.runs, exact: true })).toBeVisible()
   }
 

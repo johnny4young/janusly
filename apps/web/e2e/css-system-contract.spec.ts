@@ -1,5 +1,6 @@
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 
 const API_URL = process.env.E2E_API_URL ?? 'http://localhost:3001'
 const DEV_HEADERS = { 'Content-Type': 'application/json', 'x-org-id': 'default', 'x-user-id': 'dev-user' }
@@ -89,7 +90,11 @@ test('canonical card and pill CSS contracts render in both locales', async ({ pa
     await expect(page.locator('.panel-card')).toHaveCount(0)
     await capture(row, `web-${locale}-css-system-flow-pill`)
 
-    await page.getByRole('button', { name: copy[locale].connections, exact: true }).click()
+    await openWorkspaceSection(
+      page,
+      locale === 'en' ? 'Settings' : 'Configuración',
+      copy[locale].connections,
+    )
     const card = page.locator('section.we-card.connection-form')
     await expect(card).toBeVisible()
     await expect.poll(() => card.evaluate((element) => {

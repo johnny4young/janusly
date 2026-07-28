@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 /**
  * Real-stack acceptance for inspectable AI policy and decisions.
  *
@@ -106,10 +107,11 @@ async function switchLocale(page: Page, locale: Locale): Promise<void> {
 }
 
 async function openOperationsReliability(page: Page, locale: Locale): Promise<void> {
-  await page.getByRole('button', {
-    name: locale === 'en' ? 'Operations' : 'Operaciones',
-    exact: true,
-  }).click()
+  await openWorkspaceSection(
+    page,
+    locale === 'en' ? 'Settings' : 'Configuración',
+    locale === 'en' ? 'Workspace' : 'Espacio de trabajo',
+  )
   const reliability = page.getByTestId('operations-rail-tab-reliability')
   await expect(reliability).toBeVisible()
   await reliability.click()
@@ -134,10 +136,11 @@ async function openWorkflowMetadata(
   })
   await row.click()
   expect((await workflowResponse).ok()).toBe(true)
-  await page.getByRole('button', {
-    name: locale === 'en' ? 'Step setup' : 'Configuración de paso',
+  const configure = page.getByTestId('workspace-section-nav').getByRole('button', {
+    name: locale === 'en' ? 'Configure' : 'Configurar',
     exact: true,
-  }).click()
+  })
+  if (await configure.getAttribute('aria-current') !== 'page') await configure.click()
   const panel = page.locator('.we-workflow-metadata-panel')
   await expect(panel).toBeVisible()
   return panel
@@ -207,10 +210,11 @@ async function findDeadLetter(
 }
 
 async function openRunTimeline(page: Page, locale: Locale, runId: string): Promise<void> {
-  await page.getByRole('button', {
-    name: locale === 'en' ? 'Runs' : 'Ejecuciones',
-    exact: true,
-  }).click()
+  await openWorkspaceSection(
+    page,
+    locale === 'en' ? 'Activity' : 'Actividad',
+    locale === 'en' ? 'Runs' : 'Ejecuciones',
+  )
   const overviewTab = page.getByTestId('run-workspace-tab-overview')
   if (await overviewTab.isVisible().catch(() => false)) await overviewTab.click()
   const history = page.getByTestId('runs-history-virtual-list')
@@ -246,10 +250,11 @@ async function openRecoverySuggestion(
   deadLetterId: string,
   nodeId: string,
 ): Promise<Locator> {
-  await page.getByRole('button', {
-    name: locale === 'en' ? 'Recover' : 'Recuperar',
-    exact: true,
-  }).click()
+  await openWorkspaceSection(
+    page,
+    locale === 'en' ? 'Activity' : 'Actividad',
+    locale === 'en' ? 'Recover' : 'Recuperar',
+  )
   const queue = page.getByTestId('recovery-queue')
   await expect(queue).toBeVisible()
   await queue.getByTestId('dlq-search').fill(nodeId)
@@ -300,7 +305,7 @@ test('organization and workflow guidance survive real saves, retry, and both loc
   await page.goto('/')
   await hideUnrelatedOverlays(page)
 
-  await page.getByRole('button', { name: 'Operations', exact: true }).click()
+  await openWorkspaceSection(page, 'Settings', 'Workspace')
   let failOrgLoads = true
   let delayNextOrgSave = true
   await page.route('**/org/config', async route => {

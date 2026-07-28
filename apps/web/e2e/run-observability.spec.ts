@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { createServer, type ServerResponse } from 'node:http'
 import { once } from 'node:events'
@@ -62,7 +63,11 @@ function matchesRunsFilter(rawUrl: string, workflowId: string, status: string): 
 }
 
 async function openRuns(page: Page, locale: 'en' | 'es'): Promise<void> {
-  await page.getByRole('button', { name: locale === 'en' ? 'Runs' : 'Ejecuciones', exact: true }).click()
+  await openWorkspaceSection(
+    page,
+    locale === 'en' ? 'Activity' : 'Actividad',
+    locale === 'en' ? 'Runs' : 'Ejecuciones',
+  )
   const overview = page.getByTestId('run-workspace-tab-overview')
   if (await overview.isVisible().catch(() => false)) await overview.click()
   await expect(page.getByTestId('runs-history-virtual-list')).toBeVisible()
@@ -132,7 +137,7 @@ test('a real running node pulses, honors reduced motion, and cannot mutate the a
   try {
     await page.goto('/')
     await hideUnrelatedOverlays(page)
-    await page.getByRole('button', { name: /^AI Studio\b/ }).click()
+    await openWorkspaceSection(page, 'Workflows', 'Build with AI')
     await page.locator('.sb-palette').getByRole('button', { name: 'Call an API', exact: true }).click()
 
     const authorCanvas = page.locator('.workspace-canvas-wrapper .canvas-frame[data-mode="author"]')
@@ -147,7 +152,7 @@ test('a real running node pulses, honors reduced motion, and cannot mutate the a
     await expect.poll(() => authorViewport.getAttribute('style')).not.toBe(beforeZoom)
     const authorViewportAfterZoom = await authorViewport.getAttribute('style')
 
-    await page.getByRole('button', { name: 'Runs', exact: true }).click()
+    await openWorkspaceSection(page, 'Activity', 'Runs')
     await expect(page.getByTestId('run-history-status-filter')).toBeVisible()
     const running = await startRun(request, {
       id: `e2e-observation-running-${Date.now()}`,
@@ -183,7 +188,7 @@ test('a real running node pulses, honors reduced motion, and cannot mutate the a
     expect(await runningNode.evaluate(element => getComputedStyle(element).boxShadow)).not.toBe('none')
     await captureElement(englishMap, 'web-en-run-map-running-reduced-motion')
 
-    await page.getByRole('button', { name: /^AI Studio\b/ }).click()
+    await openWorkspaceSection(page, 'Workflows', 'Build with AI')
     await expect(authorCanvas).toBeVisible()
     expect(await authorCanvas.locator('.react-flow__node').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-id')))).toEqual(authorNodeIds)
     expect(await authorViewport.getAttribute('style')).toBe(authorViewportAfterZoom)
@@ -326,7 +331,7 @@ test('active runs explain identity, trigger, chronology, and waits in both local
   await openRunFromHistory(page, waiting.runId)
   const englishWaitingMap = await assertRunObservationMap(page, 'approve_refund', 'waiting', 'en')
   await captureElement(englishWaitingMap, 'web-en-run-map-waiting-readonly')
-  await page.getByRole('button', { name: 'Recover', exact: true }).click()
+  await openWorkspaceSection(page, 'Activity', 'Recover')
   const englishWaiting = page.getByTestId('waiting-steps')
   await expect(englishWaiting).toContainText('Approval')
   await expect(englishWaiting).toContainText('Approve refund evidence')

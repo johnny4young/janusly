@@ -9,6 +9,7 @@ import { mkdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 
 const execFileAsync = promisify(execFile)
 const COMPOSE_FILE = fileURLToPath(new URL('../../../docker-compose.yml', import.meta.url))
@@ -218,7 +219,11 @@ for (const contract of LOCALES) {
     await capture(labEntry, `web-${contract.locale}-recovery-lab-restored`)
 
     await seedAutoHealingEvidence(sessionOrgId, contract)
-    await page.getByRole('button', { name: contract.recoverName, exact: true }).click()
+    await openWorkspaceSection(
+      page,
+      contract.locale === 'en' ? 'Activity' : 'Actividad',
+      contract.recoverName,
+    )
     const evidenceCard = page.getByTestId('auto-healing-pending-card')
     const skippedCandidate = evidenceCard.locator('li').filter({ hasText: contract.skippedSignature })
     const legacyCandidate = evidenceCard.locator('li').filter({ hasText: contract.legacySignature })

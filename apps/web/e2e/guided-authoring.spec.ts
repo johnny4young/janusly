@@ -1,5 +1,6 @@
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 
 const API_URL = process.env.E2E_API_URL ?? 'http://localhost:3001'
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
@@ -7,9 +8,9 @@ const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 type LocaleContract = {
   locale: 'en' | 'es'
   flows: string
-  inspector: string
+  configure: string
   home: string
-  studio: string
+  buildWithAi: string
   help: string
   aiPrompt: string
   minimap: string
@@ -28,9 +29,9 @@ const LOCALES: LocaleContract[] = [
   {
     locale: 'en',
     flows: 'Workflows',
-    inspector: 'Step setup',
+    configure: 'Configure',
     home: 'Home',
-    studio: 'AI Studio',
+    buildWithAi: 'Build with AI',
     help: 'Help',
     aiPrompt: 'AI prompt',
     minimap: 'Workflow overview map',
@@ -40,16 +41,16 @@ const LOCALES: LocaleContract[] = [
     cronInvalid: 'Use a valid 5-field cron expression.',
     cronReady: 'Next 3 runs',
     shortcuts: 'Keyboard shortcuts',
-    shortcutHome: 'Open Recovery Center',
-    shortcutStudio: 'Open AI Studio',
+    shortcutHome: 'Open Home',
+    shortcutStudio: 'Open Workflows',
     save: 'Save',
   },
   {
     locale: 'es',
     flows: 'Flujos',
-    inspector: 'Configuración de paso',
+    configure: 'Configurar',
     home: 'Inicio',
-    studio: 'AI Studio',
+    buildWithAi: 'Crear con IA',
     help: 'Ayuda',
     aiPrompt: 'Prompt de IA',
     minimap: 'Mapa general del workflow',
@@ -59,8 +60,8 @@ const LOCALES: LocaleContract[] = [
     cronInvalid: 'Usa una expresión cron válida de 5 campos.',
     cronReady: 'Próximas 3 ejecuciones',
     shortcuts: 'Atajos de teclado',
-    shortcutHome: 'Abrir el Centro de Recuperación',
-    shortcutStudio: 'Abrir AI Studio',
+    shortcutHome: 'Abrir Inicio',
+    shortcutStudio: 'Abrir Flujos',
     save: 'Guardar',
   },
 ]
@@ -161,7 +162,6 @@ async function openWorkflow(page: Page, contract: LocaleContract, workflowId: st
   const row = page.getByTestId(`workflows-row-${workflowId}`)
   await expect(row).toContainText(workflowName)
   await row.click()
-  await page.getByRole('button', { name: contract.inspector, exact: true }).click()
 }
 
 function navigationButton(page: Page, label: string): Locator {
@@ -194,9 +194,9 @@ for (const contract of LOCALES) {
     const canvas = page.locator('.canvas-frame[data-mode="author"]')
     await expect(canvas.locator('.canvas-palette')).toBeVisible()
     await expect(canvas.getByRole('img', { name: contract.minimap })).toBeVisible()
-    await navigationButton(page, contract.studio).click()
+    await openWorkspaceSection(page, contract.flows, contract.buildWithAi)
     await expect(canvas.locator('.canvas-palette')).toBeVisible()
-    await page.getByRole('button', { name: contract.inspector, exact: true }).click()
+    await openWorkspaceSection(page, contract.flows, contract.configure)
 
     const paletteSource = page.locator('.builder-sidebar .sb-palette').getByRole('button', { name: contract.aiPrompt, exact: true }).first()
     // Drop into the exposed canvas area; the contextual inspector occupies the
@@ -283,7 +283,9 @@ for (const contract of LOCALES) {
     await expect(navigationButton(page, contract.home)).toHaveAttribute('aria-current', 'page')
     await expect(page.getByTestId('workspace-canvas-wrapper')).toHaveCount(0)
     await page.keyboard.press('Meta+2')
-    await expect(navigationButton(page, contract.studio)).toHaveAttribute('aria-current', 'page')
+    await expect(navigationButton(page, contract.flows)).toHaveAttribute('aria-current', 'page')
+    await expect(page.getByTestId('workspace-canvas-wrapper')).toHaveCount(0)
+    await openWorkspaceSection(page, contract.flows, contract.buildWithAi)
     await expect(page.getByTestId('workspace-canvas-wrapper')).toHaveAttribute('data-canvas-visible', 'true')
     await expect(canvas.locator('.canvas-palette')).toBeVisible()
 

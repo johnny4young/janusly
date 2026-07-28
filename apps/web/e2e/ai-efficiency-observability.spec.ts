@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 /** Real-stack proof for AI/run efficiency in Operations, Reasoning, and Copilot. */
 
 import { execFile } from 'node:child_process'
@@ -145,7 +146,11 @@ async function capture(locator: Locator, name: string): Promise<void> {
 }
 
 async function openRunFromHistory(page: Page, runId: string, locale: Locale): Promise<void> {
-  await page.getByRole('button', { name: copy[locale].runs, exact: true }).click()
+  await openWorkspaceSection(
+    page,
+    locale === 'en' ? 'Activity' : 'Actividad',
+    copy[locale].runs,
+  )
   const overviewTab = page.getByTestId('run-workspace-tab-overview')
   if (await overviewTab.isVisible().catch(() => false)) await overviewTab.click()
   const history = page.getByTestId('runs-history-virtual-list')
@@ -285,7 +290,11 @@ test('AI and run efficiency are observable in English and Spanish', async ({ pag
     }
     await hideUnrelatedOverlays(page)
 
-    await page.getByRole('button', { name: copy[locale].operations, exact: true }).click()
+    await openWorkspaceSection(
+      page,
+      locale === 'en' ? 'Settings' : 'Configuración',
+      locale === 'en' ? 'Workspace' : 'Espacio de trabajo',
+    )
     const costCard = page.locator('.we-card').filter({ hasText: copy[locale].costHeading }).first()
     const cacheSummary = costCard.getByLabel(copy[locale].cacheLabel)
     await expect(cacheSummary).toContainText('50%')
@@ -296,7 +305,11 @@ test('AI and run efficiency are observable in English and Spanish', async ({ pag
 
     await captureRunUsageStates(page, runId, locale)
 
-    await page.getByRole('button', { name: /^AI Studio\b/ }).click()
+    await openWorkspaceSection(
+      page,
+      locale === 'en' ? 'Workflows' : 'Flujos',
+      locale === 'en' ? 'Build with AI' : 'Crear con IA',
+    )
     await page.locator('.copilot-prompt').fill(locale === 'en'
       ? 'Draft a budget-aware approval flow.'
       : 'Arma un flujo de aprobación ajustado al presupuesto.')

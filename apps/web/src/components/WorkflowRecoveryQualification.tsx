@@ -140,14 +140,12 @@ export function WorkflowRecoveryQualification({
   workflowId,
   baselineVersionId,
   candidateVersionId,
-  platformVersion,
   readOnly,
   onGateChange,
 }: {
   workflowId: string
   baselineVersionId: string
   candidateVersionId: string
-  platformVersion: number
   readOnly: boolean
   onGateChange: (gate: RecoveryQualificationGate | null) => void
 }) {
@@ -160,6 +158,7 @@ export function WorkflowRecoveryQualification({
 
   useEffect(() => {
     let cancelled = false
+    const abortController = new AbortController()
     setState(null)
     setLoading(true)
     onGateChange({ loading: true, required: true, status: null })
@@ -167,7 +166,10 @@ export function WorkflowRecoveryQualification({
       baselineVersionId,
       candidateVersionId,
     })
-    api(`/workflows/${encodeURIComponent(workflowId)}/rollout/qualification?${query.toString()}`)
+    api(
+      `/workflows/${encodeURIComponent(workflowId)}/rollout/qualification?${query.toString()}`,
+      { signal: abortController.signal },
+    )
       .then(payload => {
         if (cancelled) return
         const parsed = parseRecoveryQualification(payload)
@@ -187,13 +189,15 @@ export function WorkflowRecoveryQualification({
       .finally(() => {
         if (!cancelled) setLoading(false)
       })
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      abortController.abort()
+    }
   }, [
     addToast,
     baselineVersionId,
     candidateVersionId,
     onGateChange,
-    platformVersion,
     t,
     workflowId,
   ])

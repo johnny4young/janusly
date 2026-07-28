@@ -10,6 +10,83 @@
    Common right-panel heading, list card, empty state, metrics, and detail
    primitives reused across Runs, Connections, Team, Tools, and Recipes.
    ========================================================================== */
+.workspace-panel-stack {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.workspace-section-nav {
+  background:
+    linear-gradient(135deg, var(--we-primary-soft), transparent 72%),
+    var(--we-surface);
+  border: 1px solid var(--we-line);
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  margin: 16px 16px 0;
+  padding: 11px;
+}
+
+.workspace-main > [data-layout="contextual"] .workspace-section-nav,
+.workspace-main > [data-layout="run-observation"] .workspace-section-nav {
+  margin: 0 0 18px;
+}
+
+.workspace-section-nav__intro {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.workspace-section-nav__intro strong {
+  color: var(--we-ink);
+  font-size: 12px;
+}
+
+.workspace-section-nav__intro span {
+  color: var(--we-muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-section-nav__rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.workspace-section-nav__item {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--we-ink-soft);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 600;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 8px;
+}
+
+.workspace-section-nav__item:hover {
+  background: var(--we-surface-muted);
+  color: var(--we-ink);
+}
+
+.workspace-section-nav__item[data-active="true"] {
+  background: var(--we-primary);
+  border-color: var(--we-primary);
+  box-shadow: 0 4px 12px var(--we-primary-ring);
+  color: var(--we-brand-glyph);
+}
+
 .panel-heading h2 {
   font-size: 18px;
   font-weight: 700;

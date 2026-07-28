@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 /**
  * Real-browser proof for keyboard-first recovery triage, copy-ready failure
  * context, and fuzzy command-palette search. The test seeds two genuine DLQ
@@ -102,7 +103,7 @@ test('operator triages genuine failures by keyboard, copies context, and fuzzy-s
 
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   await page.goto('/')
-  await page.getByRole('button', { name: 'Recover', exact: true }).click()
+  await openWorkspaceSection(page, 'Activity', 'Recover')
 
   const queue = page.getByTestId('recovery-queue')
   await expect(queue).toBeVisible()
@@ -152,9 +153,9 @@ test('operator triages genuine failures by keyboard, copies context, and fuzzy-s
   await page.getByRole('button', { name: /command palette/i }).click()
   const palette = page.getByTestId('command-palette')
   await expect(palette).toBeVisible()
-  await palette.getByRole('combobox').fill('gtrct')
+  await palette.getByRole('combobox').fill('gtrcv')
   const options = palette.getByRole('option')
-  await expect(options.first()).toContainText('Go to Recovery Center')
+  await expect(options.first()).toContainText('Go to Recover')
   expect(await options.count()).toBeLessThanOrEqual(5)
   await hideUnrelatedOverlays(page)
   await captureElement(palette.locator('.we-cmdk-dialog'), 'web-en-command-palette-fuzzy-result')
@@ -185,8 +186,8 @@ test('operator triages genuine failures by keyboard, copies context, and fuzzy-s
 
   await page.getByRole('button', { name: /paleta de comandos/i }).click()
   const spanishPalette = page.getByTestId('command-palette')
-  await spanishPalette.getByRole('combobox').fill('recuperacion')
-  await expect(spanishPalette.getByRole('option').first()).toContainText('Ir al Centro de Recuperación')
+  await spanishPalette.getByRole('combobox').fill('irrecuperar')
+  await expect(spanishPalette.getByRole('option').first()).toContainText('Ir a Recuperar')
   await hideUnrelatedOverlays(page)
   await captureElement(spanishPalette.locator('.we-cmdk-dialog'), 'web-es-command-palette-fuzzy-result')
 

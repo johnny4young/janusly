@@ -1,14 +1,14 @@
 /**
  * Persistent task-space navigator.
  *
- * The primary group exposes the six operator destinations used most often.
- * Advanced authoring and administration remain one disclosure away. Workflow
- * controls and the node palette render only in authoring contexts, keeping
- * Home and operational workspaces focused on their current task.
+ * Four stable destinations expose the product's user-facing information
+ * architecture. Workflow controls and the node palette render only in
+ * authoring contexts, keeping Home and operational workspaces focused on
+ * their current task.
  *
  * Used by `App.tsx`.
  *
- * Persists open-group / open-category state to localStorage under
+ * Persists open-category state to localStorage under
  * `janusly:sidebar:state` so the operator's collapse choices survive a
  * page reload. Search filters navigation everywhere and step types while
  * authoring.
@@ -23,20 +23,16 @@ import {
   CheckCircle2,
   ChevronRight,
   ClipboardList,
-  Database,
   FileInput,
-  FlaskConical,
   GitBranch,
   GitFork,
   Globe,
   HelpCircle,
   Home,
-  KeyRound,
   Layers3,
   Mail,
   ListTree,
   Network,
-  Package,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
@@ -50,7 +46,6 @@ import {
   Save,
   Search,
   Settings2,
-  ShieldAlert,
   Sparkles,
   Split,
   SquarePlus,
@@ -65,7 +60,13 @@ import type { ActiveTab, AiHealth } from '../types'
 import { useT } from '../i18n'
 import { MOBILE_WORKSPACE_QUERY, useMediaQuery } from '../hooks/useMediaQuery'
 import { writeNodePaletteDrag } from '../canvas-node-drag'
-import { canOpenTab } from '../tab-permissions'
+import {
+  WORKSPACE_DESTINATION_DEFINITIONS,
+  canOpenWorkspaceDestination,
+  resolveWorkspaceDestinationTarget,
+  workspaceDestinationForTab,
+  type WorkspaceDestination,
+} from '../workspace-locations'
 
 type BuilderSidebarProps = {
   workflowName: string
@@ -89,12 +90,10 @@ type BuilderSidebarProps = {
 const STORAGE_KEY = 'janusly:sidebar:state'
 
 type StoredState = {
-  openGroups: string[]
   openCategories: string[]
   collapsed: boolean
 }
 
-const DEFAULT_OPEN_GROUPS = ['workspace']
 const DEFAULT_OPEN_CATEGORIES = ['ai', 'flow']
 const PINNED_PALETTE: string[] = ['http', 'ai', 'condition', 'tool']
 
@@ -135,49 +134,12 @@ const NODE_ICONS: Record<string, React.ReactNode> = {
   mcp_server_event: <Radio size={13} />,
 }
 
-type NavItem = {
-  tab: ActiveTab
-  labelKey: string
-  helperKey: string
-  icon: React.ReactNode
-  meta?: string
+const DESTINATION_ICONS: Record<WorkspaceDestination, React.ReactNode> = {
+  home: <Home size={14} />,
+  workflows: <Workflow size={14} />,
+  activity: <Activity size={14} />,
+  settings: <Settings2 size={14} />,
 }
-
-type NavGroup = {
-  key: 'workspace' | 'advanced'
-  labelKey: string
-  items: NavItem[]
-}
-
-/** Primary destinations stay stable and short. Specialized builders and
- * administrative views remain reachable in Advanced and the command palette. */
-const NAV_GROUPS: NavGroup[] = [
-  {
-    key: 'workspace',
-    labelKey: 'sidebar.group.workspace',
-    items: [
-      { tab: 'home', labelKey: 'sidebar.nav.home.label', helperKey: 'sidebar.nav.home.helper', icon: <Home size={13} />, meta: '⌘1' },
-      { tab: 'recover', labelKey: 'sidebar.nav.recover.label', helperKey: 'sidebar.nav.recover.helper', icon: <ShieldAlert size={13} /> },
-      { tab: 'workflows', labelKey: 'sidebar.nav.workflows.label', helperKey: 'sidebar.nav.workflows.helper', icon: <Database size={13} /> },
-      { tab: 'runs', labelKey: 'sidebar.nav.runs.label', helperKey: 'sidebar.nav.runs.helper', icon: <Activity size={13} /> },
-      { tab: 'credentials', labelKey: 'sidebar.nav.credentials.label', helperKey: 'sidebar.nav.credentials.helper', icon: <KeyRound size={13} /> },
-      { tab: 'operations', labelKey: 'sidebar.nav.operations.label', helperKey: 'sidebar.nav.operations.helper', icon: <Settings2 size={13} /> },
-    ],
-  },
-  {
-    key: 'advanced',
-    labelKey: 'sidebar.group.advanced',
-    items: [
-      { tab: 'copilot', labelKey: 'sidebar.nav.copilot.label', helperKey: 'sidebar.nav.copilot.helper', icon: <Sparkles size={13} />, meta: '⌘2' },
-      { tab: 'experiments', labelKey: 'sidebar.nav.experiments.label', helperKey: 'sidebar.nav.experiments.helper', icon: <FlaskConical size={13} /> },
-      { tab: 'inspector', labelKey: 'sidebar.nav.inspector.label', helperKey: 'sidebar.nav.inspector.helper', icon: <GitBranch size={13} /> },
-      { tab: 'templates', labelKey: 'sidebar.nav.templates.label', helperKey: 'sidebar.nav.templates.helper', icon: <Workflow size={13} /> },
-      { tab: 'packs', labelKey: 'sidebar.nav.packs.label', helperKey: 'sidebar.nav.packs.helper', icon: <Package size={13} /> },
-      { tab: 'marketplace', labelKey: 'sidebar.nav.marketplace.label', helperKey: 'sidebar.nav.marketplace.helper', icon: <Boxes size={13} /> },
-      { tab: 'members', labelKey: 'sidebar.nav.members.label', helperKey: 'sidebar.nav.members.helper', icon: <Users size={13} /> },
-    ],
-  },
-]
 
 const CATEGORY_LABEL_KEYS: Record<string, string> = {
   ai: 'sidebar.category.ai',
@@ -196,29 +158,16 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   misc: <Network size={11} />,
 }
 
-/** Closed sets of keys we accept from persisted state. Any value outside
- *  the set (stale group from a previous version, hand-edited gibberish) is
- *  silently dropped on read so the UI never tries to render or toggle a key
- *  that doesn't exist in the current `NAV_GROUPS` / `NODE_CATEGORIES`. */
-const VALID_GROUP_KEYS = new Set<string>(NAV_GROUPS.map((g) => g.key))
+/** Closed set of keys accepted from persisted state. */
 const VALID_CATEGORY_KEYS = new Set<string>(Object.keys(NODE_CATEGORIES))
 
 function loadStoredState(): StoredState {
-  const fallback: StoredState = { openGroups: DEFAULT_OPEN_GROUPS, openCategories: DEFAULT_OPEN_CATEGORIES, collapsed: false }
+  const fallback: StoredState = { openCategories: DEFAULT_OPEN_CATEGORIES, collapsed: false }
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
     if (!raw) return fallback
     const parsed = JSON.parse(raw) as Partial<StoredState>
-    const validOpenGroups = Array.isArray(parsed.openGroups)
-      ? parsed.openGroups.filter((k): k is string => typeof k === 'string' && VALID_GROUP_KEYS.has(k))
-      : DEFAULT_OPEN_GROUPS
     return {
-      openGroups:
-        Array.isArray(parsed.openGroups)
-        && parsed.openGroups.length > 0
-        && validOpenGroups.length === 0
-          ? DEFAULT_OPEN_GROUPS
-          : validOpenGroups,
       openCategories: Array.isArray(parsed.openCategories)
         ? parsed.openCategories.filter((k): k is string => typeof k === 'string' && VALID_CATEGORY_KEYS.has(k))
         : DEFAULT_OPEN_CATEGORIES,
@@ -277,14 +226,13 @@ export function BuilderSidebar({
     }
   }
   const [stored] = useState<StoredState>(() => loadStoredState())
-  const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(stored.openGroups))
   const [openCategories, setOpenCategories] = useState<Set<string>>(() => new Set(stored.openCategories))
   const [collapsed, setCollapsed] = useState<boolean>(stored.collapsed)
   const [searchQuery, setSearchQuery] = useState('')
 
   useEffect(() => {
-    persistState({ openGroups: Array.from(openGroups), openCategories: Array.from(openCategories), collapsed })
-  }, [openGroups, openCategories, collapsed])
+    persistState({ openCategories: Array.from(openCategories), collapsed })
+  }, [openCategories, collapsed])
 
   // Reflect collapsed state on the workspace shell so the grid column
   // shrinks from 300px to 56px. The data attribute is read by CSS.
@@ -294,14 +242,6 @@ export function BuilderSidebar({
     document.documentElement.dataset.sidebarCollapsed = visuallyCollapsed ? 'true' : 'false'
     return () => { document.documentElement.dataset.sidebarCollapsed = 'false' }
   }, [visuallyCollapsed])
-
-  const toggleGroup = (key: string) => {
-    setOpenGroups(prev => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key); else next.add(key)
-      return next
-    })
-  }
 
   const toggleCategory = (key: string) => {
     setOpenCategories(prev => {
@@ -314,20 +254,15 @@ export function BuilderSidebar({
   const normalisedQuery = searchQuery.trim().toLowerCase()
   const authoringMode = activeTab === 'copilot' || activeTab === 'inspector'
 
-  const filteredGroups = useMemo<NavGroup[]>(() => {
-    const allowedGroups = NAV_GROUPS.map(group => ({
-      ...group,
-      items: group.items.filter(item => canOpenTab(item.tab, permissions)),
-    })).filter(group => group.items.length > 0)
-    if (!normalisedQuery) return allowedGroups
-    return allowedGroups.map(group => ({
-      ...group,
-      items: group.items.filter(item => {
-        const label = (t(item.labelKey as never)).toLowerCase()
-        const helper = (t(item.helperKey as never)).toLowerCase()
-        return label.includes(normalisedQuery) || helper.includes(normalisedQuery)
-      }),
-    })).filter(group => group.items.length > 0)
+  const filteredDestinations = useMemo(() => {
+    const allowed = WORKSPACE_DESTINATION_DEFINITIONS.filter((destination) =>
+      canOpenWorkspaceDestination(destination.id, permissions))
+    if (!normalisedQuery) return allowed
+    return allowed.filter((destination) => {
+      const label = t(destination.labelKey).toLowerCase()
+      const helper = t(destination.helperKey).toLowerCase()
+      return label.includes(normalisedQuery) || helper.includes(normalisedQuery)
+    })
   }, [normalisedQuery, permissions, t])
 
   const filteredCategoryNodes = useMemo<Record<string, string[]>>(() => {
@@ -454,47 +389,43 @@ export function BuilderSidebar({
         <kbd>/</kbd>
       </div>
 
-      {/* Grouped views */}
+      {/* Global destinations */}
       <nav className="sb-groups" aria-label={t('sidebar.workspaceViews')}>
-        {filteredGroups.map(group => {
-          const isOpen = openGroups.has(group.key)
-          return (
-            <div key={group.key} className={`sb-group ${isOpen ? 'sb-group--open' : ''}`}>
-              <button className="sb-group__head" type="button" onClick={() => toggleGroup(group.key)} aria-expanded={isOpen}>
-                <span className="sb-group__head-label">
-                  <ChevronRight size={11} className="sb-group__chev" aria-hidden="true" />
-                  <span>{t(group.labelKey as never)}</span>
-                </span>
-                <span className="sb-group__count">{group.items.length}</span>
-              </button>
-              {isOpen && (
-                <ul className="sb-group__list">
-                  {group.items.map(item => {
-                    const label = t(item.labelKey as never)
-                    const helper = t(item.helperKey as never)
-                    const active = activeTab === item.tab
-                    return (
-                      <li key={item.tab}>
-                        <button
-                          className={`sb-view ${active ? 'sb-view--on' : ''}`}
-                          type="button"
-                          aria-current={active ? 'page' : undefined}
-                          onClick={() => onOpenTab(item.tab)}
-                          data-mobile-nav-close="true"
-                          title={`${label} — ${helper}`}
-                        >
-                          <span className="sb-view__ic" aria-hidden="true">{item.icon}</span>
-                          <span className="sb-view__label">{label}</span>
-                          {item.meta ? <span className="sb-view__meta">{item.meta}</span> : null}
-                        </button>
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
-            </div>
-          )
-        })}
+        <div className="sb-group sb-group--open">
+          <div className="sb-group__head sb-group__head--static">
+            <span className="sb-group__head-label">{t('sidebar.group.workspace')}</span>
+            <span className="sb-group__count">{filteredDestinations.length}</span>
+          </div>
+          <ul className="sb-group__list">
+            {filteredDestinations.map((destination) => {
+              const label = t(destination.labelKey)
+              const helper = t(destination.helperKey)
+              const active = workspaceDestinationForTab(activeTab) === destination.id
+              const target = resolveWorkspaceDestinationTarget(destination.id, permissions)
+              return (
+                <li key={destination.id}>
+                  <button
+                    className={`sb-view ${active ? 'sb-view--on' : ''}`}
+                    type="button"
+                    aria-current={active ? 'page' : undefined}
+                    aria-label={label}
+                    onClick={() => {
+                      if (target) onOpenTab(target)
+                    }}
+                    data-mobile-nav-close="true"
+                    title={`${label} — ${helper}`}
+                  >
+                    <span className="sb-view__ic" aria-hidden="true">
+                      {DESTINATION_ICONS[destination.id]}
+                    </span>
+                    <span className="sb-view__label">{label}</span>
+                    <span className="sb-view__meta">{destination.shortcut}</span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
       </nav>
 
       {authoringMode && filteredPinned.length > 0 && (

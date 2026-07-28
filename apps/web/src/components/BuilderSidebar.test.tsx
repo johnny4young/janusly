@@ -104,35 +104,28 @@ describe('<BuilderSidebar />', () => {
     expect(screen.queryByRole('button', { name: "What's new" })).not.toBeInTheDocument()
   })
 
-  it('keeps run evidence in one primary destination', () => {
+  it('keeps run evidence in one global destination', () => {
     renderSidebar()
 
-    expect(screen.getByRole('button', { name: /^Runs$/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Activity$/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Runs$/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Multi-agent timeline$/ })).not.toBeInTheDocument()
   })
 
-  it('keeps operational task spaces primary and authoring chrome contextual', () => {
+  it('exposes four global destinations and keeps authoring chrome contextual', () => {
     renderSidebar({ activeTab: 'home' })
 
     expect(screen.getByRole('button', { name: /^Home/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^Recover$/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Workflows$/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^Runs$/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^Connections$/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^Operations$/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Activity$/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Settings$/ })).toBeInTheDocument()
     expect(screen.queryByRole('textbox', { name: 'Name' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Call an API' })).not.toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Search sections…' })).toBeInTheDocument()
-
-    const advanced = screen.getByRole('button', { name: /^Advanced/ })
-    expect(advanced).toHaveAttribute('aria-expanded', 'false')
-    fireEvent.click(advanced)
-    expect(screen.getByRole('button', { name: /^AI Studio/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^Step setup$/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^Team$/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Advanced/ })).not.toBeInTheDocument()
   })
 
-  it('migrates stale navigation groups without hiding the primary workspace', () => {
+  it('ignores former group state without hiding the global destinations', () => {
     window.localStorage.setItem('janusly:sidebar:state', JSON.stringify({
       openGroups: ['pinned', 'build', 'run'],
       openCategories: ['ai'],
@@ -141,8 +134,16 @@ describe('<BuilderSidebar />', () => {
 
     renderSidebar({ activeTab: 'home' })
 
-    expect(screen.getByRole('button', { name: /Workspace/ }))
-      .toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByRole('button', { name: /^Recover$/ })).toBeInTheDocument()
+    expect(screen.getByText('Workspace')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Activity$/ })).toBeInTheDocument()
+  })
+
+  it('marks an internal section through its parent destination', () => {
+    const props = renderSidebar({ activeTab: 'recover' })
+
+    const activity = screen.getByRole('button', { name: /^Activity$/ })
+    expect(activity).toHaveAttribute('aria-current', 'page')
+    fireEvent.click(activity)
+    expect(props.onOpenTab).toHaveBeenCalledWith('runs')
   })
 })

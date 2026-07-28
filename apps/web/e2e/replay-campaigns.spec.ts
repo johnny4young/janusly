@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 /**
  * Real-stack proof for paced replay campaigns: genuine failed runs form one
  * server-verified cohort, the operator creates a durable campaign in English,
@@ -126,7 +127,7 @@ test('creates, observes, and stops a paced campaign in English and Spanish', asy
     }
   })
   await page.goto('/')
-  await page.getByRole('button', { name: 'Recover', exact: true }).click()
+  await openWorkspaceSection(page, 'Activity', 'Recover')
 
   const queue = page.getByTestId('recovery-queue')
   await expect(queue).toBeVisible()

@@ -2,6 +2,7 @@
 
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 
 const API_URL = process.env.E2E_API_URL ?? 'http://127.0.0.1:3001'
 const API_METRICS_URL = process.env.E2E_API_METRICS_URL
@@ -204,7 +205,11 @@ test('queue pressure stays private, observable, and clear in English and Spanish
     queueState = states[0].value
     await page.goto('/')
     await hideUnrelatedOverlays(page)
-    await page.getByRole('button', { name: copy[locale].operations, exact: true }).click()
+    await openWorkspaceSection(
+      page,
+      locale === 'en' ? 'Settings' : 'Configuración',
+      locale === 'en' ? 'Workspace' : 'Espacio de trabajo',
+    )
     const chip = page.getByTestId('queue-lag-chip')
     for (const state of states) {
       const requestsBeforeTransition = queueRequestCount

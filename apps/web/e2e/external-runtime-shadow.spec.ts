@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 /**
  * Real-stack proof for signed, idempotent, monotonic external-runtime shadow
  * ingestion and its observer-only Operations surface.
@@ -123,7 +124,7 @@ test('observes external failures and recovery without remote control authority',
     window.localStorage.setItem('janusly:operations:section', 'integrations')
   }, orgId)
   await page.goto('/')
-  await page.getByRole('button', { name: 'Operations', exact: true }).click()
+  await openWorkspaceSection(page, 'Settings', 'Workspace')
   const panel = page.locator('.we-external-runtime')
   await expect(panel).toBeVisible()
   await panel.getByRole('button', { name: 'New observer' }).click()

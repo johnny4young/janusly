@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 
@@ -92,7 +93,7 @@ test('a successful drill replay exposes terminal recovery time and recurrence mo
   const orgId = await prepareSession(page, 'en')
 
   await page.goto('/')
-  await page.getByRole('button', { name: 'Packs', exact: true }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Packs')
   const drill = await startContractDrill(page, 'Incident triage', 'Start recovery drill')
 
   const focusedFailure = page.locator(`[data-testid="dlq-row-${drill.deadLetterId}"]`)
@@ -121,8 +122,8 @@ test('a successful drill replay exposes terminal recovery time and recurrence mo
 
   // Remount the queue after the API-driven replay so its detail read observes
   // the immutable terminal-impact row written by the worker.
-  await page.getByRole('button', { name: 'Packs', exact: true }).click()
-  await page.getByRole('button', { name: 'Recover', exact: true }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Packs')
+  await openWorkspaceSection(page, 'Activity', 'Recover')
   await page.locator('#dlq-filter').selectOption('all')
   await expect(focusedFailure).toBeVisible({ timeout: 30_000 })
   await focusedFailure.click()
@@ -160,7 +161,7 @@ test('Spanish mobile resolve records accepted loss and refreshes the selected dr
 
   await page.goto('/')
   await page.getByRole('button', { name: 'Navegación' }).click()
-  await page.locator('#workspace-sidebar').getByRole('button', { name: 'Packs', exact: true }).click()
+  await openWorkspaceSection(page, 'Flujos', 'Paquetes')
   const drill = await startContractDrill(page, 'Triage de incidentes', 'Iniciar ejercicio de recuperación')
 
   await expect(page.locator(`[data-testid="dlq-row-${drill.deadLetterId}"]`)).toBeVisible({ timeout: 30_000 })

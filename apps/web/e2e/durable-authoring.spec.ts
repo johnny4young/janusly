@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 
@@ -133,7 +134,11 @@ async function openWorkflow(page: Page, contract: LocaleContract, workflowId: st
   const row = page.getByTestId(`workflows-row-${workflowId}`)
   await expect(row).toContainText(workflowName)
   await row.click()
-  await page.getByRole('button', { name: contract.stepSetup, exact: true }).click()
+  await openWorkspaceSection(
+    page,
+    contract.flows,
+    contract.locale === 'en' ? 'Configure' : 'Configurar',
+  )
 }
 
 test.describe.configure({ mode: 'serial' })
@@ -193,7 +198,11 @@ for (const contract of LOCALES) {
     expect(afterDrag.y).toBeGreaterThan(beforeDrag.y + 50)
 
     const canvasFrame = page.locator('.canvas-frame[data-mode="author"]')
-    await page.getByRole('button', { name: /^AI Studio\b/ }).click()
+    await openWorkspaceSection(
+      page,
+      contract.locale === 'en' ? 'Workflows' : 'Flujos',
+      contract.locale === 'en' ? 'Build with AI' : 'Crear con IA',
+    )
     await canvasFrame.locator('.canvas-palette').getByRole('button', { name: contract.newNodeLabel, exact: true }).click()
     const allNodes = canvasFrame.locator('.react-flow__node')
     await expect(allNodes).toHaveCount(3)
