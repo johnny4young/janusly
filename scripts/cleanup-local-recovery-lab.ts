@@ -1,9 +1,15 @@
 import { client } from "@janusly/db";
 
 const orgId = process.env.JANUSLY_LOCAL_ORG_ID?.trim() || "local-recovery-lab";
+const cleanupPrefixes = [
+  "local-recovery-lab",
+  "local-recovery-passport",
+];
 
-if (!orgId.startsWith("local-recovery-lab")) {
-  throw new Error("cleanup-local-recovery-lab refuses to delete a non-lab organization");
+if (!cleanupPrefixes.some((prefix) => orgId.startsWith(prefix))) {
+  throw new Error(
+    "cleanup-local-recovery-lab refuses to delete a non-recovery-test organization",
+  );
 }
 
 function quoteIdentifier(value: string): string {

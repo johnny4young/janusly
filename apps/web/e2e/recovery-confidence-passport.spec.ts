@@ -75,7 +75,8 @@ async function waitForPlaybookMatch(
 test('recovery passport requires sandbox success and a separate apply decision', async ({ page, request }) => {
   const browserErrors = installConsoleErrorGuards(page)
   const playbookMatches = recordPlaybookMatches(page)
-  const orgId = `recovery-passport-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const orgId = process.env.JANUSLY_RECOVERY_PASSPORT_ORG_ID
+    ?? `recovery-passport-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const headers = authHeaders(orgId)
   let saveRequests = 0
   page.on('request', (outgoing) => {
@@ -148,10 +149,13 @@ test('recovery passport requires sandbox success and a separate apply decision',
   const passport = page.getByTestId('recovery-confidence-passport')
   await expect(passport).toHaveAttribute('data-verdict', 'needs_review')
   await expect(passport).toContainText('Sandbox validation required')
+  await expect(passport.locator('.we-recovery-passport__factors > li')).toHaveCount(5)
+  await expect(passport.locator('[data-status="review"]')).toHaveCount(1)
   await captureElement(passport, '02-passport-needs-review-en')
 
   await page.getByRole('button', { name: /Validate in sandbox/i }).click()
   await expect(passport).toHaveAttribute('data-verdict', 'safe_to_apply', { timeout: 30_000 })
+  await expect(passport.locator('[data-status="pass"]')).toHaveCount(5)
   await expect(page.getByRole('button', { name: /Apply validated fix/i })).toBeVisible()
   expect(saveRequests, 'sandbox success must not auto-save').toBe(0)
 
@@ -263,6 +267,14 @@ test('recovery passport requires sandbox success and a separate apply decision',
   const spanishFailureTestId = await spanishPlaybookFailure.getAttribute('data-testid')
   const spanishFailureId = spanishFailureTestId?.replace('dlq-row-', '')
   expect(spanishFailureId).toBeTruthy()
+  const spanishFailureDetailResponse = await request.get(
+    `${API_URL}/dlq?id=${encodeURIComponent(spanishFailureId!)}`,
+    { headers },
+  )
+  expect(spanishFailureDetailResponse.ok()).toBe(true)
+  const spanishFailureDetail = await spanishFailureDetailResponse.json() as {
+    runId: string
+  }
   const spanishMatchResponsePromise = waitForPlaybookMatch(playbookMatches, spanishFailureId!)
   await page.getByRole('button', { name: /Sugerir corrección/i }).click()
   const spanishMatchResponse = await spanishMatchResponsePromise
@@ -290,6 +302,15 @@ test('recovery passport requires sandbox success and a separate apply decision',
   await expect(spanishUsePending).toContainText('Uso del playbook pendiente de verificación', { timeout: 30_000 })
   await expect(spanishUsePending).toContainText('solo cuando este reintento termine correctamente')
   await captureElement(spanishUsePending, 'web-es-recovery-playbook-use-pending')
+  await expect.poll(async () => {
+    const response = await request.get(
+      `${API_URL}/run?runId=${encodeURIComponent(spanishFailureDetail.runId)}`,
+      { headers },
+    )
+    if (!response.ok()) return 'missing'
+    return ((await response.json()) as { run?: { status?: string } })
+      .run?.status ?? 'missing'
+  }, { timeout: 30_000 }).toBe('succeeded')
 
   // A separate occurrence drives the regression state so the successful-use
   // smoke above and the failed-validation smoke below remain causally honest.
@@ -398,6 +419,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   await expect(blockedPassport).toHaveAttribute('data-verdict', 'unsafe')
   await expect(blockedPassport).toContainText('No es seguro aplicar')
   await expect(blockedPassport).toContainText('No hay un parche aplicable')
+  await expect(blockedPassport.locator('[data-status="block"]')).toHaveCount(1)
   await expect(page.getByRole('button', { name: /Validar en sandbox/i })).toBeDisabled()
   await captureElement(blockedPassport, '04-passport-unsafe-es')
   expect(browserErrors).toEqual([])

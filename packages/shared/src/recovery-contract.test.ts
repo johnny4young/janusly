@@ -233,6 +233,25 @@ describe("RecoveryContractV1Schema", () => {
     expect(parsed.success).toBe(false);
   });
 
+  it("rejects a technical failure override above the workflow ceiling", () => {
+    expect(
+      RecoveryContractV1Schema.safeParse(
+        contract({
+          failure: {
+            technical: {
+              terminalNodeFailure: true,
+              stalledNode: true,
+              autonomy: {
+                terminalNodeFailure: 4,
+              },
+            },
+            semantic: { mode: "disabled" },
+          },
+        }),
+      ).success,
+    ).toBe(false);
+  });
+
   it("keeps semantic recovery disabled until its evaluator ships", () => {
     const invalid = contract({
       failure: {
@@ -289,6 +308,40 @@ describe("RecoveryContractV2Schema", () => {
       ...overrides,
     };
   }
+
+  it("accepts a semantic detector override below the workflow ceiling", () => {
+    const base = contractV2();
+    const value = {
+      ...base,
+      failure: {
+        ...base.failure,
+        semantic: {
+          ...base.failure.semantic,
+          detectors: base.failure.semantic.detectors.map(
+            (detector) => ({ ...detector, autonomyLevel: 1 }),
+          ),
+        },
+      },
+    };
+    expect(RecoveryContractV2Schema.safeParse(value).success).toBe(true);
+  });
+
+  it("rejects a semantic detector override above the workflow ceiling", () => {
+    const base = contractV2();
+    const value = {
+      ...base,
+      failure: {
+        ...base.failure,
+        semantic: {
+          ...base.failure.semantic,
+          detectors: base.failure.semantic.detectors.map(
+            (detector) => ({ ...detector, autonomyLevel: 4 }),
+          ),
+        },
+      },
+    };
+    expect(RecoveryContractV2Schema.safeParse(value).success).toBe(false);
+  });
 
   it("accepts deterministic expression and schema detectors", () => {
     expect(

@@ -13,7 +13,11 @@ object on save. Full-workflow AI improvement never receives or overwrites this
 operator-owned policy. Both versions record the technical failure boundary,
 required evidence, external effects and their idempotency/receipt posture,
 allowed repairs, minimum validation strength, approval permission, autonomy
-level, terminal verification kind, and recurrence window.
+level, terminal verification kind, and recurrence window. The workflow
+`autonomyLevel` is the maximum capability ceiling. Technical failure classes
+and individual semantic detectors may declare an optional lower
+`autonomyLevel`; save-time validation rejects an override that would raise the
+workflow ceiling.
 
 Historical `RecoveryContractV1` snapshots remain valid and require
 `failure.semantic.mode = "disabled"`. `RecoveryContractV2` adds deterministic
@@ -72,6 +76,17 @@ idempotent effects, retained effect receipts, and no manual receipt
 dependency. Semantic detection does not grant mutation authority: no LLM
 judgment can bypass these deterministic policy gates.
 
+The zero-dependency `packages/shared/src/recovery-autonomy.ts` projects every
+effective policy into one capability ladder: Level 0 observe, Level 1
+recommend, Level 2 validate, Level 3 apply with explicit approval, and Level 4
+narrow autonomous apply. A replacement resolves all open same-run/source
+detectors atomically, so the strictest effective detector level governs the
+cohort. Missing contracts or detector declarations fail closed. The engine
+enforces that Level 3 is the minimum for operator replacement before it
+evaluates or persists the candidate; accepted loss remains available at lower
+levels so an operator can explicitly close containment without silently
+raising authority.
+
 **Recovery Case v1:** `packages/shared/src/recovery-case.ts` defines the legal
 state vocabulary and transition-receipt wire contract:
 
@@ -96,14 +111,18 @@ change appends one `recovery_case_transitions` receipt in the same transaction.
 The technical DLQ path continues to use `recovery_items`, so the semantic
 projection does not reinterpret or duplicate technical failure evidence.
 `GET /recovery/cases` lists a bounded tenant-scoped view.
-`GET /recovery/cases/:caseId` returns one tenant-scoped case plus at most 100
-append-only transition receipts in chronological order; the stable `/v1`
-contract is also the detail boundary used by the web workspace and MCP. An
-editor can resolve `POST /recovery/cases/:caseId/resolve` with replacement JSON
-that passes every detector for the same source, or with an explicit
-accepted-loss rationale. MCP-source decisions additionally pass the shared
-process flag, tenant consent, and per-tool rate-limit gate before the request
-body is read.
+`GET /recovery/cases/:caseId` returns one tenant-scoped case, at most 100
+append-only transition receipts in chronological order, and the effective
+autonomy profile resolved from the immutable saved workflow version or ad-hoc
+run snapshot. The read model retains every same-source detector after terminal
+resolution so historical views show the policy that governed the atomic
+decision. The stable `/v1` contract is also the detail boundary used by the
+web workspace and MCP. An editor can resolve
+`POST /recovery/cases/:caseId/resolve` with replacement JSON that passes every
+detector for the same source when the effective policy permits manual apply,
+or with an explicit accepted-loss rationale. MCP-source decisions additionally
+pass the shared process flag, tenant consent, and per-tool rate-limit gate
+before the request body is read.
 Observe-only cases can be acknowledged without pausing a run. Resolving one of
 multiple quarantined sources does not resume prematurely: the transaction
 locks every run-node row in stable order before the run row, validates a

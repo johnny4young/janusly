@@ -240,6 +240,7 @@ export type ApiErrorCode =
   | "recovery_item_comment_cap_reached"
   | "recovery_case_not_found"
   | "recovery_case_conflict"
+  | "recovery_autonomy_policy_blocked"
   | "recovery_semantic_output_invalid"
   | "recovery_playbook_acceptance_required"
   | "recovery_playbook_apply_required"

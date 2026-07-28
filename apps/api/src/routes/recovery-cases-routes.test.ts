@@ -4,6 +4,7 @@ const {
   getRecoveryCaseMock,
   listRecoveryCasesMock,
   listRecoveryCaseTransitionsMock,
+  resolveRecoveryCaseAutonomyProfileMock,
   recoverSemanticOutcomeMock,
   auditActionMock,
   guardMcpWriteMock,
@@ -11,6 +12,7 @@ const {
   getRecoveryCaseMock: vi.fn(),
   listRecoveryCasesMock: vi.fn(),
   listRecoveryCaseTransitionsMock: vi.fn(),
+  resolveRecoveryCaseAutonomyProfileMock: vi.fn(),
   recoverSemanticOutcomeMock: vi.fn(),
   auditActionMock: vi.fn(),
   guardMcpWriteMock: vi.fn(),
@@ -23,6 +25,8 @@ vi.mock("@janusly/data", async (importOriginal) => {
     getRecoveryCase: getRecoveryCaseMock,
     listRecoveryCases: listRecoveryCasesMock,
     listRecoveryCaseTransitions: listRecoveryCaseTransitionsMock,
+    resolveRecoveryCaseAutonomyProfile:
+      resolveRecoveryCaseAutonomyProfileMock,
   };
 });
 
@@ -77,6 +81,34 @@ const auth = {
 beforeEach(() => {
   vi.clearAllMocks();
   guardMcpWriteMock.mockResolvedValue({ ok: true });
+  resolveRecoveryCaseAutonomyProfileMock.mockResolvedValue({
+    level: 3,
+    source: "workflow_default",
+    detectorIds: ["operator-approved"],
+    unavailableReason: null,
+    capabilities: {
+      observe: true,
+      recommend: true,
+      validate: true,
+      applyWithApproval: true,
+      autonomousApply: false,
+    },
+    factors: [
+      { capability: "observe", requiredLevel: 0, enabled: true },
+      { capability: "recommend", requiredLevel: 1, enabled: true },
+      { capability: "validate", requiredLevel: 2, enabled: true },
+      {
+        capability: "apply_with_approval",
+        requiredLevel: 3,
+        enabled: true,
+      },
+      {
+        capability: "autonomous_apply",
+        requiredLevel: 4,
+        enabled: false,
+      },
+    ],
+  });
 });
 
 describe("semantic recovery case routes", () => {
@@ -182,8 +214,19 @@ describe("semantic recovery case routes", () => {
         transitions: [
           expect.objectContaining({ id: "transition-1" }),
         ],
+        autonomy: expect.objectContaining({
+          level: 3,
+          capabilities: expect.objectContaining({
+            applyWithApproval: true,
+          }),
+        }),
       },
     });
+    expect(resolveRecoveryCaseAutonomyProfileMock)
+      .toHaveBeenCalledWith(
+        "org-1",
+        expect.objectContaining({ id: "case-1" }),
+      );
   });
 
   it("does not expose another tenant's recovery case history", async () => {
@@ -308,5 +351,52 @@ describe("semantic recovery case routes", () => {
     });
     expect(readJsonMock).not.toHaveBeenCalled();
     expect(recoverSemanticOutcomeMock).not.toHaveBeenCalled();
+  });
+
+  it("returns a stable conflict when the frozen autonomy policy blocks replacement", async () => {
+    readJsonMock.mockResolvedValueOnce({
+      decision: "replace",
+      output: { mode: "ai" },
+      reason: "Reviewed replacement",
+    });
+    recoverSemanticOutcomeMock.mockResolvedValueOnce({
+      status: "policy_blocked",
+      profile: {
+        level: 1,
+        source: "failure_override",
+        detectorIds: ["operator-approved"],
+        unavailableReason: null,
+        capabilities: {
+          observe: true,
+          recommend: true,
+          validate: false,
+          applyWithApproval: false,
+          autonomousApply: false,
+        },
+        factors: [],
+      },
+    });
+    const route = recoveryRoutes.find(
+      (candidate) =>
+        candidate.method === "POST" &&
+        typeof candidate.match === "function" &&
+        candidate.match("/recovery/cases/case-1/resolve"),
+    );
+
+    const result = await route!.handler({
+      req: {
+        url: "/recovery/cases/case-1/resolve",
+      } as never,
+      res: {} as never,
+      auth: auth as never,
+    });
+
+    expect(result).toMatchObject({
+      status: 409,
+      payload: {
+        code: "recovery_autonomy_policy_blocked",
+      },
+    });
+    expect(auditActionMock).not.toHaveBeenCalled();
   });
 });

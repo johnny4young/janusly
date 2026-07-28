@@ -28,6 +28,7 @@ const STAMP = `${Date.now()}-${process.pid}`;
 const ORG_ID = `semantic-recovery-${STAMP}`;
 const RUN_ID = `semantic-run-${STAMP}`;
 const ACCEPT_RUN_ID = `semantic-accept-${STAMP}`;
+const POLICY_RUN_ID = `semantic-policy-${STAMP}`;
 const RACE_RUN_ID = `semantic-race-${STAMP}`;
 const IMPACT_RUN_ID = `semantic-impact-${STAMP}`;
 const CONTEXT_RUN_ID = `semantic-context-${STAMP}`;
@@ -35,6 +36,7 @@ const IMPACT_DLQ_ID = `semantic-impact-dlq-${STAMP}`;
 const TEST_RUN_IDS = [
   RUN_ID,
   ACCEPT_RUN_ID,
+  POLICY_RUN_ID,
   RACE_RUN_ID,
   IMPACT_RUN_ID,
   CONTEXT_RUN_ID,
@@ -190,6 +192,29 @@ const crossContextWorkflow = {
               expected: "violation" as const,
             },
           ],
+        },
+      },
+    },
+  },
+};
+
+const recommendationOnlyWorkflow = {
+  ...workflow,
+  id: "semantic-recommendation-only-workflow",
+  recovery: {
+    contract: {
+      ...workflow.recovery.contract,
+      failure: {
+        ...workflow.recovery.contract.failure,
+        semantic: {
+          ...workflow.recovery.contract.failure.semantic,
+          detectors:
+            workflow.recovery.contract.failure.semantic.detectors.map(
+              (detector) =>
+                detector.id === "ai-mode"
+                  ? { ...detector, autonomyLevel: 1 as const }
+                  : detector,
+            ),
         },
       },
     },
@@ -572,6 +597,125 @@ describe("semantic outcome recovery transaction (real Postgres)", () => {
         }),
       ]),
     );
+  });
+
+  it("blocks replacement below the manual-apply level while preserving accepted loss", async () => {
+    await db.insert(runs).values({
+      id: POLICY_RUN_ID,
+      orgId: ORG_ID,
+      workflowVersionId: `${POLICY_RUN_ID}-version`,
+      status: "running",
+      createdBy: "operator-1",
+      inputJson: {
+        workflow: recommendationOnlyWorkflow,
+        input: {},
+      },
+    });
+    await db.insert(runNodes).values({
+      id: `${POLICY_RUN_ID}-answer`,
+      runId: POLICY_RUN_ID,
+      nodeId: "answer",
+      status: "running",
+      attempts: 1,
+    });
+
+    const completion = await markNodeSucceededWithOutcome(
+      POLICY_RUN_ID,
+      "answer",
+      { mode: "fallback" },
+      1,
+      [
+        {
+          detectorId: "ai-mode",
+          sourceNodeId: "answer",
+          kind: "expression",
+          action: "quarantine",
+          message: "AI output is required",
+        },
+        {
+          detectorId: "answer-shape",
+          sourceNodeId: "answer",
+          kind: "schema",
+          action: "observe",
+          message: "Answer text is required",
+        },
+      ],
+    );
+    expect(completion).toMatchObject({
+      completed: true,
+      quarantined: true,
+    });
+
+    const cases = await db
+      .select()
+      .from(recoveryCases)
+      .where(eq(recoveryCases.runId, POLICY_RUN_ID));
+    const quarantineCase = cases.find(
+      (item) => item.detectorId === "ai-mode",
+    )!;
+
+    const blocked = await resolveSemanticOutcomeCase({
+      orgId: ORG_ID,
+      caseId: quarantineCase.id,
+      actorId: "operator-1",
+      decision: "replace",
+      output: { mode: "ai", text: "Valid but unauthorized" },
+      reason: "Attempt a replacement",
+    });
+    expect(blocked).toMatchObject({
+      status: "policy_blocked",
+      profile: {
+        level: 1,
+        source: "strictest_failure",
+        detectorIds: expect.arrayContaining([
+          "ai-mode",
+          "answer-shape",
+        ]),
+        capabilities: {
+          applyWithApproval: false,
+        },
+      },
+    });
+
+    const [blockedRun] = await db
+      .select()
+      .from(runs)
+      .where(eq(runs.id, POLICY_RUN_ID));
+    expect(blockedRun).toMatchObject({
+      status: "waiting",
+      outcomeStatus: "semantic_quarantined",
+    });
+    const openCases = await db
+      .select()
+      .from(recoveryCases)
+      .where(eq(recoveryCases.runId, POLICY_RUN_ID));
+    expect(openCases).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          detectorId: "ai-mode",
+          state: "contained",
+        }),
+        expect.objectContaining({
+          detectorId: "answer-shape",
+          state: "detected",
+        }),
+      ]),
+    );
+
+    const accepted = await resolveSemanticOutcomeCase({
+      orgId: ORG_ID,
+      caseId: quarantineCase.id,
+      actorId: "operator-1",
+      decision: "accept_loss",
+      reason: "Accept the bounded degraded outcome",
+    });
+    expect(accepted).toMatchObject({
+      status: "resolved",
+      resumed: true,
+      resolvedCaseIds: expect.arrayContaining(
+        cases.map((item) => item.id),
+      ),
+    });
   });
 
   it("credits a replay only after a quarantined output is replaced and verified", async () => {

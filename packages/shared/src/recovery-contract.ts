@@ -110,6 +110,13 @@ const RecoveryTechnicalFailureSchema = z
   .object({
     terminalNodeFailure: z.literal(true),
     stalledNode: z.boolean(),
+    autonomy: z
+      .object({
+        terminalNodeFailure: RecoveryAutonomyLevelSchema.optional(),
+        stalledNode: RecoveryAutonomyLevelSchema.optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -175,11 +182,38 @@ const RecoveryContractCommonSchema = z
 type RecoveryContractCommon = z.infer<
   typeof RecoveryContractCommonSchema
 >;
+type RecoveryContractWithTechnicalFailure =
+  RecoveryContractCommon & {
+    failure: {
+      technical: z.infer<typeof RecoveryTechnicalFailureSchema>;
+    };
+  };
 
 function validateRecoveryContractCommon(
-  contract: RecoveryContractCommon,
+  contract: RecoveryContractWithTechnicalFailure,
   context: z.RefinementCtx,
 ): void {
+  const technicalAutonomy = contract.failure.technical.autonomy;
+  for (const [failureClass, level] of Object.entries(
+    technicalAutonomy ?? {},
+  )) {
+    if (
+      level !== undefined &&
+      level > contract.autonomyLevel
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: [
+          "failure",
+          "technical",
+          "autonomy",
+          failureClass,
+        ],
+        message:
+          "A failure-specific autonomy level cannot exceed the workflow recovery level",
+      });
+    }
+  }
   if (hasDuplicates(contract.evidence.required)) {
     context.addIssue({
       code: "custom",
@@ -365,6 +399,7 @@ export const RecoverySemanticExpressionDetectorV2Schema = z
     passWhen: z.string().trim().min(1).max(2_000),
     action: z.enum(["observe", "quarantine"]),
     message: z.string().trim().min(1).max(500),
+    autonomyLevel: RecoveryAutonomyLevelSchema.optional(),
   })
   .strict();
 
@@ -376,6 +411,7 @@ export const RecoverySemanticSchemaDetectorV2Schema = z
     schema: WorkflowInputSchema,
     action: z.enum(["observe", "quarantine"]),
     message: z.string().trim().min(1).max(500),
+    autonomyLevel: RecoveryAutonomyLevelSchema.optional(),
   })
   .strict();
 
@@ -441,6 +477,25 @@ export const RecoveryContractV2Schema = z
         path: ["failure", "semantic", "detectors"],
         message: "Semantic detector ids must be unique",
       });
+    }
+    for (const [index, detector] of contract.failure.semantic.detectors.entries()) {
+      if (
+        detector.autonomyLevel !== undefined &&
+        detector.autonomyLevel > contract.autonomyLevel
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: [
+            "failure",
+            "semantic",
+            "detectors",
+            index,
+            "autonomyLevel",
+          ],
+          message:
+            "A failure-specific autonomy level cannot exceed the workflow recovery level",
+        });
+      }
     }
     if (
       hasDuplicates(

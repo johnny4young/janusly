@@ -14,7 +14,7 @@ type Fixture = {
   workflowName: string
 }
 
-const fixtures = new Map<Locale, Fixture>()
+const fixtures = new Map<string, Fixture>()
 
 function labels(locale: Locale) {
   return locale === 'en'
@@ -70,9 +70,19 @@ async function requestJson<T>(
   return JSON.parse(text) as T
 }
 
-async function createFixture(locale: Locale): Promise<Fixture> {
+async function createFixture(
+  locale: Locale,
+  options: {
+    autonomyLevel?: 0 | 1 | 2 | 3 | 4
+    orgSuffix?: string
+  } = {},
+): Promise<Fixture> {
   const copy = labels(locale)
-  const orgId = `local-recovery-lab-semantic-${locale}`
+  const orgId = [
+    'local-recovery-lab-semantic',
+    locale,
+    options.orgSuffix,
+  ].filter(Boolean).join('-')
   const userId = `semantic-operator-${locale}`
   const target = `semantic-${locale}-${Date.now()}`
   const workflow = {
@@ -121,6 +131,7 @@ async function createFixture(locale: Locale): Promise<Fixture> {
                 passWhen: 'context.draft_response.output.approved === true',
                 action: 'quarantine',
                 message: copy.message,
+                autonomyLevel: options.autonomyLevel ?? 3,
               },
             ],
             evaluationFixtures: [
@@ -267,7 +278,7 @@ for (const locale of ['en', 'es'] as const) {
   test(`semantic quarantine is visible and recoverable in ${locale}`, async ({ page }) => {
     test.skip(!enabled, 'requires the persistent local Docker stack')
     const fixture = await createFixture(locale)
-    fixtures.set(locale, fixture)
+    fixtures.set(`${locale}-level3`, fixture)
     await persistEvidence()
 
     const copy = labels(locale)
@@ -298,6 +309,23 @@ for (const locale of ['en', 'es'] as const) {
     await expect(
       page.getByTestId(`recovery-case-workspace-${fixture.caseId}`),
     ).toBeVisible()
+    const autonomy = page.getByTestId(
+      `recovery-autonomy-profile-${fixture.caseId}`,
+    )
+    await expect(autonomy).toContainText(
+      locale === 'en' ? 'Level 3' : 'Nivel 3',
+    )
+    await expect(autonomy).toContainText(
+      locale === 'en'
+        ? 'Failure-specific override'
+        : 'Excepción específica del fallo',
+    )
+    await expect(autonomy).toContainText(
+      locale === 'en' ? 'Apply with approval' : 'Aplicar con aprobación',
+    )
+    await expect(autonomy).toContainText(
+      locale === 'en' ? 'Autonomous apply' : 'Aplicación autónoma',
+    )
     await expectNoHorizontalOverflow(page)
     await capture(page, `semantic-outcome-case-workspace-${locale}`)
     await page.getByTestId(`semantic-recovery-output-${fixture.caseId}`).fill(
@@ -336,3 +364,54 @@ for (const locale of ['en', 'es'] as const) {
     expect(browserErrors).toEqual([])
   })
 }
+
+test('recommendation-only policy keeps replacement locked and accepted loss explicit', async ({ page }) => {
+  test.skip(!enabled, 'requires the persistent local Docker stack')
+  const fixture = await createFixture('en', {
+    autonomyLevel: 1,
+    orgSuffix: 'policy',
+  })
+  fixtures.set('en-level1', fixture)
+  await persistEvidence()
+  const browserErrors = guardBrowserErrors(page)
+
+  await page.addInitScript(({ activeOrg }) => {
+    window.localStorage.setItem('janusly:activeOrg', activeOrg)
+    window.localStorage.setItem('janusly:locale', 'en')
+    window.localStorage.setItem('janusly:recovery:hideIntro', 'true')
+  }, { activeOrg: fixture.orgId })
+
+  await page.goto('/')
+  await page.getByTestId(`semantic-recovery-open-${fixture.caseId}`).click()
+  const workspace = page.getByTestId(
+    `recovery-case-workspace-${fixture.caseId}`,
+  )
+  await expect(workspace).toBeVisible()
+  const autonomy = page.getByTestId(
+    `recovery-autonomy-profile-${fixture.caseId}`,
+  )
+  await expect(autonomy).toContainText('Level 1')
+  await expect(autonomy).toContainText('Failure-specific override')
+  await expect(workspace).toContainText(
+    'This failure policy does not permit replacement',
+  )
+  await expect(
+    page.getByTestId(`semantic-recovery-output-${fixture.caseId}`),
+  ).toHaveCount(0)
+  await expect(
+    page.getByTestId(`semantic-recovery-replace-${fixture.caseId}`),
+  ).toHaveCount(0)
+  const acceptLoss = page.getByTestId(
+    `semantic-recovery-accept-${fixture.caseId}`,
+  )
+  await expect(acceptLoss).toBeVisible()
+  await page.getByLabel('Operator rationale').fill(
+    'The bounded degraded output is explicitly accepted.',
+  )
+  await acceptLoss.scrollIntoViewIfNeeded()
+  await expectNoHorizontalOverflow(page)
+  await capture(page, 'semantic-outcome-policy-blocked-en')
+  await acceptLoss.click()
+  await expect(workspace).toContainText('Accepted loss')
+  expect(browserErrors).toEqual([])
+})

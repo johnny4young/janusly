@@ -24,6 +24,7 @@ import {
   getRecoveryCase,
   listRecoveryCases,
   listRecoveryCaseTransitions,
+  resolveRecoveryCaseAutonomyProfile,
 } from "@janusly/data";
 import { MIN_CALIBRATION_SAMPLES } from "@janusly/engine/src/confidence-calibration";
 import { composeRecoveryMetrics } from "@janusly/engine/src/recovery-metrics";
@@ -143,12 +144,20 @@ export const recoveryRoutes: Route[] = [
           404,
         );
       }
-      return sendJson(res, {
-        case: recoveryCase,
-        transitions: await listRecoveryCaseTransitions(
+      const [transitions, autonomy] = await Promise.all([
+        listRecoveryCaseTransitions(
           auth.orgId,
           parsedCaseId.caseId,
         ),
+        resolveRecoveryCaseAutonomyProfile(
+          auth.orgId,
+          recoveryCase,
+        ),
+      ]);
+      return sendJson(res, {
+        case: recoveryCase,
+        transitions,
+        autonomy,
       });
     },
   },
@@ -234,6 +243,18 @@ export const recoveryRoutes: Route[] = [
             firstViolation:
               result.violations[0]?.message ??
               "Semantic detector failed",
+          },
+        );
+      }
+      if (result.status === "policy_blocked") {
+        return sendError(
+          res,
+          "recovery_autonomy_policy_blocked",
+          "The effective recovery autonomy policy does not permit applying a replacement",
+          409,
+          {
+            level: result.profile.level ?? "unavailable",
+            detectorCount: result.profile.detectorIds.length,
           },
         );
       }

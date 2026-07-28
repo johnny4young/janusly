@@ -526,6 +526,46 @@ const RecoveryCaseTransitionSchema = z.object({
   occurredAt: IsoDateSchema,
 });
 
+const RecoveryAutonomyLevelSchema = z.union([
+  z.literal(0),
+  z.literal(1),
+  z.literal(2),
+  z.literal(3),
+  z.literal(4),
+]);
+const RecoveryAutonomyProfileSchema = z.object({
+  level: RecoveryAutonomyLevelSchema.nullable(),
+  source: z.enum([
+    "failure_override",
+    "workflow_default",
+    "strictest_failure",
+    "unavailable",
+  ]),
+  detectorIds: z.array(z.string()),
+  unavailableReason: z.enum([
+    "contract_missing",
+    "failure_policy_missing",
+  ]).nullable(),
+  capabilities: z.object({
+    observe: z.boolean(),
+    recommend: z.boolean(),
+    validate: z.boolean(),
+    applyWithApproval: z.boolean(),
+    autonomousApply: z.boolean(),
+  }),
+  factors: z.array(z.object({
+    capability: z.enum([
+      "observe",
+      "recommend",
+      "validate",
+      "apply_with_approval",
+      "autonomous_apply",
+    ]),
+    requiredLevel: RecoveryAutonomyLevelSchema,
+    enabled: z.boolean(),
+  })),
+});
+
 const NonNegativeSafeIntegerSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const PositiveSafeIntegerSchema = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
 
@@ -810,6 +850,7 @@ export const getRecoveryCaseContract = {
   response: z.object({
     case: RecoveryCaseSchema,
     transitions: z.array(RecoveryCaseTransitionSchema),
+    autonomy: RecoveryAutonomyProfileSchema,
   }),
   errorCodes: ["invalid_input", "recovery_case_not_found"],
 } satisfies ApiRouteContract;
@@ -854,6 +895,7 @@ export const recoverSemanticCaseContract = {
     "invalid_input",
     "recovery_case_not_found",
     "recovery_case_conflict",
+    "recovery_autonomy_policy_blocked",
     "recovery_semantic_output_invalid",
     ...MCP_WRITE_ERROR_CODES,
   ],

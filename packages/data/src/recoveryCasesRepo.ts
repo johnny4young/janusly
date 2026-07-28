@@ -11,11 +11,17 @@ import {
   db,
   recoveryCases,
   recoveryCaseTransitions,
+  runs,
+  workflowVersions,
 } from "@janusly/db";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import {
+  combineRecoveryAutonomyProfiles,
   RECOVERY_CASE_OPEN_STATES,
   RECOVERY_CASE_TERMINAL_STATES,
+  resolveRecoveryAutonomyProfile,
+  WorkflowSchema,
+  type RecoveryAutonomyProfile,
 } from "@janusly/shared";
 
 export type RecoveryCase = typeof recoveryCases.$inferSelect;
@@ -84,6 +90,91 @@ export async function listRecoveryCaseTransitions(
       recoveryCaseTransitions.id,
     )
     .limit(100);
+}
+
+function workflowFromRunInput(input: unknown): unknown {
+  if (
+    typeof input !== "object" ||
+    input === null ||
+    Array.isArray(input)
+  ) {
+    return null;
+  }
+  return (input as { workflow?: unknown }).workflow ?? null;
+}
+
+/**
+ * Resolve the effective policy for every detector that shares the case's
+ * source node. A single replacement closes that cohort atomically, so the
+ * strictest detector must govern the decision even after the cohort becomes
+ * terminal.
+ *
+ * Saved workflows resolve through their immutable version. Ad-hoc runs fall
+ * back to the run-start workflow snapshot; both reads remain tenant-scoped.
+ */
+export async function resolveRecoveryCaseAutonomyProfile(
+  orgId: string,
+  recoveryCase: RecoveryCase,
+): Promise<RecoveryAutonomyProfile> {
+  const [versionRows, runRows, peerCases] = await Promise.all([
+    db
+      .select({ dagJson: workflowVersions.dagJson })
+      .from(workflowVersions)
+      .where(
+        and(
+          eq(workflowVersions.orgId, orgId),
+          eq(workflowVersions.id, recoveryCase.workflowVersionId),
+        ),
+      )
+      .limit(1),
+    db
+      .select({ inputJson: runs.inputJson })
+      .from(runs)
+      .where(
+        and(
+          eq(runs.orgId, orgId),
+          eq(runs.id, recoveryCase.runId),
+        ),
+      )
+      .limit(1),
+    db
+      .select({ detectorId: recoveryCases.detectorId })
+      .from(recoveryCases)
+      .where(
+        and(
+          eq(recoveryCases.orgId, orgId),
+          eq(recoveryCases.runId, recoveryCase.runId),
+          eq(
+            recoveryCases.sourceNodeId,
+            recoveryCase.sourceNodeId,
+          ),
+        ),
+      )
+      .orderBy(recoveryCases.detectorId)
+      .limit(50),
+  ]);
+  const parsed = WorkflowSchema.safeParse(
+    versionRows[0]?.dagJson ??
+      workflowFromRunInput(runRows[0]?.inputJson),
+  );
+  const contract = parsed.success
+    ? parsed.data.recovery?.contract
+    : null;
+  const detectorIds = [
+    ...new Set(
+      peerCases.length > 0
+        ? peerCases.map((item) => item.detectorId)
+        : [recoveryCase.detectorId],
+    ),
+  ];
+  return combineRecoveryAutonomyProfiles(
+    detectorIds.map((detectorId) =>
+      resolveRecoveryAutonomyProfile(contract, {
+        kind: "semantic",
+        detectorId,
+      }),
+    ),
+  );
 }
 
 export function isRecoveryCaseTerminal(state: string): boolean {

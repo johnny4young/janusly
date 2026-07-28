@@ -19,6 +19,7 @@ const settings = await getLocalStackSettings();
 const orgIds = [
   "local-recovery-lab-semantic-en",
   "local-recovery-lab-semantic-es",
+  "local-recovery-lab-semantic-en-policy",
 ];
 
 await mkdir(evidenceDir, { recursive: true });

@@ -5,10 +5,19 @@ import {
   CircleAlert,
   Clock3,
   ExternalLink,
+  Gauge,
   History,
+  LockKeyhole,
   ShieldAlert,
+  ShieldCheck,
 } from 'lucide-react'
 import { V1_READ_PATHS } from '@janusly/shared/src/api-contract'
+import {
+  RECOVERY_AUTONOMY_CAPABILITIES,
+  type RecoveryAutonomyCapability,
+  type RecoveryAutonomyLevel,
+  type RecoveryAutonomyProfile,
+} from '@janusly/shared/src/recovery-autonomy'
 
 import { api } from '../api'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
@@ -23,6 +32,7 @@ import { EmptyView, PanelChrome } from './panel-primitives'
 type RecoveryCaseDetail = {
   case: RecoveryCase
   transitions: RecoveryCaseTransition[]
+  autonomy: RecoveryAutonomyProfile
 }
 
 const RECOVERY_CASE_STATES = new Set<RecoveryCase['state']>([
@@ -38,6 +48,14 @@ const RECOVERY_CASE_STATES = new Set<RecoveryCase['state']>([
   'recurred',
   'accepted_loss',
   'abandoned',
+])
+const RECOVERY_AUTONOMY_CAPABILITY_SET =
+  new Set<RecoveryAutonomyCapability>(RECOVERY_AUTONOMY_CAPABILITIES)
+const RECOVERY_AUTONOMY_SOURCES = new Set<RecoveryAutonomyProfile['source']>([
+  'failure_override',
+  'workflow_default',
+  'strictest_failure',
+  'unavailable',
 ])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -97,15 +115,91 @@ function parseRecoveryCaseTransition(
   return value as RecoveryCaseTransition
 }
 
+function isRecoveryAutonomyLevel(
+  value: unknown,
+): value is RecoveryAutonomyLevel {
+  return Number.isInteger(value)
+    && typeof value === 'number'
+    && value >= 0
+    && value <= 4
+}
+
+function parseRecoveryAutonomyProfile(
+  value: unknown,
+): RecoveryAutonomyProfile | null {
+  if (!isRecord(value) || !isRecord(value.capabilities)) return null
+  if (
+    !(value.level === null || isRecoveryAutonomyLevel(value.level))
+    || typeof value.source !== 'string'
+    || !RECOVERY_AUTONOMY_SOURCES.has(
+      value.source as RecoveryAutonomyProfile['source'],
+    )
+    || !Array.isArray(value.detectorIds)
+    || !value.detectorIds.every(id => typeof id === 'string')
+    || !(
+      value.unavailableReason === null
+      || value.unavailableReason === 'contract_missing'
+      || value.unavailableReason === 'failure_policy_missing'
+    )
+    || typeof value.capabilities.observe !== 'boolean'
+    || typeof value.capabilities.recommend !== 'boolean'
+    || typeof value.capabilities.validate !== 'boolean'
+    || typeof value.capabilities.applyWithApproval !== 'boolean'
+    || typeof value.capabilities.autonomousApply !== 'boolean'
+    || !Array.isArray(value.factors)
+  ) return null
+  const factors = value.factors.map((factor) => {
+    if (
+      !isRecord(factor)
+      || typeof factor.capability !== 'string'
+      || !RECOVERY_AUTONOMY_CAPABILITY_SET.has(
+        factor.capability as RecoveryAutonomyCapability,
+      )
+      || !isRecoveryAutonomyLevel(factor.requiredLevel)
+      || typeof factor.enabled !== 'boolean'
+    ) return null
+    return {
+      capability: factor.capability as RecoveryAutonomyCapability,
+      requiredLevel: factor.requiredLevel,
+      enabled: factor.enabled,
+    }
+  })
+  if (
+    factors.some(factor => factor === null)
+    || factors.length !== RECOVERY_AUTONOMY_CAPABILITY_SET.size
+    || new Set(factors.map(factor => factor?.capability)).size
+      !== RECOVERY_AUTONOMY_CAPABILITY_SET.size
+  ) return null
+  return {
+    level: value.level,
+    source: value.source as RecoveryAutonomyProfile['source'],
+    detectorIds: value.detectorIds,
+    unavailableReason: value.unavailableReason,
+    capabilities: {
+      observe: value.capabilities.observe,
+      recommend: value.capabilities.recommend,
+      validate: value.capabilities.validate,
+      applyWithApproval: value.capabilities.applyWithApproval,
+      autonomousApply: value.capabilities.autonomousApply,
+    },
+    factors: factors as RecoveryAutonomyProfile['factors'],
+  }
+}
+
 function parseRecoveryCaseDetail(value: unknown): RecoveryCaseDetail | null {
   if (!isRecord(value)) return null
   const recoveryCase = parseRecoveryCase(value.case)
-  if (!recoveryCase || !Array.isArray(value.transitions)) return null
+  const autonomy = parseRecoveryAutonomyProfile(value.autonomy)
+  if (
+    !recoveryCase
+    || !autonomy
+    || !Array.isArray(value.transitions)
+  ) return null
   const transitions = value.transitions
     .map(parseRecoveryCaseTransition)
     .filter((item): item is RecoveryCaseTransition => item !== null)
   if (transitions.length !== value.transitions.length) return null
-  return { case: recoveryCase, transitions }
+  return { case: recoveryCase, transitions, autonomy }
 }
 
 function parseResolution(value: unknown): SemanticCaseResolution | null {
@@ -263,13 +357,19 @@ export function RecoveryCasePanel({
 
   const recoveryCase = detail?.case ?? null
   const transitions = detail?.transitions ?? []
-  const canDecide = Boolean(
+  const autonomy = detail?.autonomy ?? null
+  const canAcknowledge = Boolean(
     canResolve
     && recoveryCase
     && (
       (recoveryCase.action === 'quarantine' && recoveryCase.state === 'contained')
       || (recoveryCase.action === 'observe' && recoveryCase.state === 'detected')
     ),
+  )
+  const canReplace = Boolean(
+    canAcknowledge
+    && recoveryCase?.action === 'quarantine'
+    && autonomy?.capabilities.applyWithApproval,
   )
   const details = Array.isArray(recoveryCase?.detailsJson)
     ? recoveryCase.detailsJson
@@ -372,6 +472,93 @@ export function RecoveryCasePanel({
             </button>
           </section>
 
+          {autonomy && (
+            <section
+              className="we-card we-recovery-case__autonomy"
+              data-level={autonomy.level ?? 'unavailable'}
+              data-testid={`recovery-autonomy-profile-${recoveryCase.id}`}
+              aria-labelledby="recovery-case-autonomy-title"
+            >
+              <div className="we-recovery-case__autonomy-head">
+                <div className="we-recovery-case__section-head">
+                  <Gauge size={17} aria-hidden="true" />
+                  <div>
+                    <div className="section-kicker">
+                      {t('recoveryCase.autonomy.kicker')}
+                    </div>
+                    <h3 id="recovery-case-autonomy-title">
+                      {t('recoveryCase.autonomy.title')}
+                    </h3>
+                  </div>
+                </div>
+                <span
+                  className="we-pill"
+                  data-tone={
+                    autonomy.level === null
+                      ? 'danger'
+                      : autonomy.level >= 3
+                        ? 'success'
+                        : 'warning'
+                  }
+                >
+                  {autonomy.level === null
+                    ? t('recoveryCase.autonomy.unavailable')
+                    : t('recoveryCase.autonomy.level', {
+                        level: autonomy.level,
+                      })}
+                </span>
+              </div>
+              <p className="helper-text">
+                {autonomy.level === null
+                  ? t(
+                      `recoveryCase.autonomy.reason.${autonomy.unavailableReason ?? 'failure_policy_missing'}`,
+                    )
+                  : t(`recoveryCase.autonomy.description.${autonomy.level}`)}
+              </p>
+              <div className="we-recovery-case__autonomy-meta">
+                <span>
+                  {t('recoveryCase.autonomy.source')}
+                  <strong>
+                    {t(`recoveryCase.autonomy.source.${autonomy.source}`)}
+                  </strong>
+                </span>
+                <span>
+                  {t('recoveryCase.autonomy.detectors')}
+                  <strong>{autonomy.detectorIds.length}</strong>
+                </span>
+              </div>
+              <ol className="we-recovery-case__autonomy-ladder">
+                {autonomy.factors.map(factor => (
+                  <li
+                    key={factor.capability}
+                    data-enabled={factor.enabled}
+                  >
+                    <span className="we-recovery-case__autonomy-level">
+                      {factor.requiredLevel}
+                    </span>
+                    <span>
+                      <strong>
+                        {t(
+                          `recoveryCase.autonomy.capability.${factor.capability}`,
+                        )}
+                      </strong>
+                      <small>
+                        {t(
+                          factor.enabled
+                            ? 'recoveryCase.autonomy.enabled'
+                            : 'recoveryCase.autonomy.disabled',
+                        )}
+                      </small>
+                    </span>
+                    {factor.enabled
+                      ? <ShieldCheck size={15} aria-hidden="true" />
+                      : <LockKeyhole size={15} aria-hidden="true" />}
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+
           <div className="we-recovery-case__columns">
             <section className="we-card we-recovery-case__history" aria-labelledby="recovery-case-history-title">
               <div className="we-recovery-case__section-head">
@@ -412,10 +599,12 @@ export function RecoveryCasePanel({
               <div className="section-kicker">{t('recoveryCase.decisionKicker')}</div>
               <h3 id="recovery-case-decision-title">{t('recoveryCase.decisionTitle')}</h3>
               <p className="helper-text">
-                {canDecide
+                {canAcknowledge
                   ? t(
                       recoveryCase.action === 'quarantine'
-                        ? 'recoveryCase.decisionQuarantine'
+                        ? canReplace
+                          ? 'recoveryCase.decisionQuarantine'
+                          : 'recoveryCase.decisionPolicyBlocked'
                         : 'recoveryCase.decisionObserve',
                     )
                   : t(
@@ -424,9 +613,9 @@ export function RecoveryCasePanel({
                         : 'recoveryCase.decisionReadOnly',
                     )}
               </p>
-              {canDecide && (
+              {canAcknowledge && (
                 <div className="we-recovery-case__form">
-                  {recoveryCase.action === 'quarantine' && (
+                  {canReplace && (
                     <label className="we-field">
                       <span>{t('recoveryCenter.tile.semantic.output')}</span>
                       <textarea
@@ -452,7 +641,7 @@ export function RecoveryCasePanel({
                   </label>
                   {resolveError && <p className="field-error" role="alert">{resolveError}</p>}
                   <div className="we-recovery-case__decision-actions">
-                    {recoveryCase.action === 'quarantine' && (
+                    {canReplace && (
                       <button
                         type="button"
                         className="command-button command-button-primary"

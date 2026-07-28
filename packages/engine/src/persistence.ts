@@ -29,8 +29,11 @@ import {
 import { recordRecoveryImpactTx, recordWorkflowRolloutOutcome } from "@janusly/data";
 import { eq, ne, and, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import {
+  combineRecoveryAutonomyProfiles,
   RECOVERY_CASE_OPEN_STATES,
+  resolveRecoveryAutonomyProfile,
   WorkflowSchema,
+  type RecoveryAutonomyProfile,
   type Workflow,
 } from "@janusly/shared";
 import { isOpenNodeStatus, nodeCancellableStatusValues } from "@janusly/shared/src/status";
@@ -1458,6 +1461,10 @@ export type ResolveSemanticOutcomeCaseResult =
   | { status: "not_found" }
   | { status: "conflict"; reason: string }
   | {
+      status: "policy_blocked";
+      profile: RecoveryAutonomyProfile;
+    }
+  | {
       status: "invalid_output";
       violations: SemanticOutcomeViolation[];
     };
@@ -1594,6 +1601,20 @@ export async function resolveSemanticOutcomeCase(input: {
     }
 
     if (input.decision === "replace") {
+      const autonomy = combineRecoveryAutonomyProfiles(
+        openCases.map((item) =>
+          resolveRecoveryAutonomyProfile(contract, {
+            kind: "semantic",
+            detectorId: item.detectorId,
+          }),
+        ),
+      );
+      if (!autonomy.capabilities.applyWithApproval) {
+        return {
+          kind: "policy_blocked" as const,
+          profile: autonomy,
+        };
+      }
       const evaluation = evaluateSemanticOutcome({
         contract,
         sourceNodeId: snapshot.case.sourceNodeId,
@@ -1831,6 +1852,12 @@ export async function resolveSemanticOutcomeCase(input: {
     return {
       status: "invalid_output",
       violations: resolved.violations,
+    };
+  }
+  if (resolved?.kind === "policy_blocked") {
+    return {
+      status: "policy_blocked",
+      profile: resolved.profile,
     };
   }
   if (!resolved) {

@@ -471,6 +471,11 @@ export function DeadLettersPanel({
   const selectedFull = selected && selectedDetail && selectedDetail.id === selected.id
     ? { ...selected, ...selectedDetail, recovery: selected.recovery }
     : selected
+  const selectedDetailReady = Boolean(
+    selected
+    && selectedDetail
+    && selectedDetail.id === selected.id,
+  )
 
   // Virtualize the filtered list. With 100-200 rows in the Recovery
   // Center, mounting every row as a real `<li>` costs hundreds of ms
@@ -1120,8 +1125,16 @@ export function DeadLettersPanel({
             {canUseRecovery && (
               <button
                 className="small-command small-command--primary"
-                disabled={selected.status === 'replayed' || selected.status === 'resolved'}
-                onClick={() => setRecoveryDeadLetter(selectedFull ?? selected)}
+                disabled={
+                  selected.status === 'replayed'
+                  || selected.status === 'resolved'
+                  || !selectedDetailReady
+                }
+                onClick={() => {
+                  if (selectedDetailReady) {
+                    setRecoveryDeadLetter(selectedFull)
+                  }
+                }}
               >
                 <Sparkles size={12} aria-hidden="true" /> {t('dlq.action.suggest')}
               </button>

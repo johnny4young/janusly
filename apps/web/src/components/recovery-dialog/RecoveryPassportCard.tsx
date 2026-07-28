@@ -5,10 +5,13 @@
  */
 
 import { AlertTriangle, ShieldAlert, ShieldCheck } from 'lucide-react'
+import {
+  evaluateRecoveryPassport,
+  type RecoverySandboxStatus,
+} from '@janusly/shared/src/recovery-passport'
 import { getResolvedLocale, useT } from '../../i18n'
 import { resolvePlaybookScorecard } from './playbook-scorecard'
 import type { DeadLetter } from '../DeadLettersPanel'
-import { evaluateRecoveryPassport, type RecoverySandboxStatus } from './recovery-passport'
 import type { PatchSuggestion, SuggestionTab } from './types'
 
 export function RecoveryPassportCard({
@@ -123,9 +126,28 @@ export function RecoveryPassportCard({
         </div>
       </dl>
 
-      <ul className="we-recovery-passport__reasons" aria-label={t('recoveryDialog.passport.reasonsAria')}>
-        {evaluation.reasons.map((reason) => (
-          <li key={reason}>{t(`recoveryDialog.passport.reason.${reason}` as never)}</li>
+      <ul className="we-recovery-passport__factors" aria-label={t('recoveryDialog.passport.factorsAria')}>
+        {evaluation.factors.map((factor) => (
+          <li key={factor.id} data-status={factor.status}>
+            <span className="we-recovery-passport__factor-indicator" aria-hidden="true" />
+            <span className="we-recovery-passport__factor-copy">
+              <strong>{t(`recoveryDialog.passport.factor.${factor.id}` as never)}</strong>
+              <small>
+                {factor.reason
+                  ? t(`recoveryDialog.passport.reason.${factor.reason}` as never)
+                  : t('recoveryDialog.passport.factorReady')}
+              </small>
+            </span>
+            <span className="we-pill" data-tone={
+              factor.status === 'pass'
+                ? 'success'
+                : factor.status === 'block'
+                  ? 'danger'
+                  : 'warning'
+            }>
+              {t(`recoveryDialog.passport.factorStatus.${factor.status}` as never)}
+            </span>
+          </li>
         ))}
       </ul>
     </section>

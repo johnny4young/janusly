@@ -192,6 +192,45 @@ describe('<DeadLettersPanel />', () => {
     expect(onResolve).not.toHaveBeenCalled()
   })
 
+  it('waits for the full selected failure snapshot before enabling recovery', async () => {
+    const row = mockDeadLetter('detail-gated', {
+      workflowJson: undefined,
+      nodeJson: undefined,
+    })
+    let releaseDetail!: (value: DeadLetter) => void
+    const detail = new Promise<DeadLetter>((resolve) => {
+      releaseDetail = resolve
+    })
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.startsWith('/dlq/counts')) return countsFromRows([row])
+      if (path.startsWith('/dlq/queue')) {
+        return { items: [row], nextCursor: null, hasMore: false }
+      }
+      if (path === '/dlq?id=detail-gated') return detail
+      return { items: [], clusters: [], runs: [], proposals: [] }
+    })
+
+    render(
+      <DeadLettersPanel
+        onRefresh={vi.fn()}
+        onReplay={vi.fn()}
+        onResolve={vi.fn()}
+      />,
+    )
+
+    const suggest = await screen.findByRole('button', {
+      name: /suggest fix/i,
+    })
+    expect(suggest).toBeDisabled()
+
+    releaseDetail({
+      ...row,
+      workflowJson: { dslVersion: '1.0', nodes: [], edges: [] },
+      nodeJson: { id: row.nodeId, type: 'noop', config: {} },
+    })
+    await waitFor(() => expect(suggest).toBeEnabled())
+  })
+
   it('labels a selected recovery drill with its actual recovery path', async () => {
     const row = mockDeadLetter('worker-drill')
     let recovered = false
