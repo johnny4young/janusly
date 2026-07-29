@@ -142,6 +142,8 @@ export type RunSummary = {
   workflowName?: string | null
   workflowVersionId?: string
   status: string
+  /** True when the bounded run projection found at least one waiting node. */
+  hasWaitingNodes?: boolean
   /** Business-outcome posture, independent from technical run status. */
   outcomeStatus?:
     | 'semantic_violation'

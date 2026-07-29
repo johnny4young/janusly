@@ -104,6 +104,14 @@ const runListColumns = {
   workflowName: sql<string | null>`${runs.inputJson}->'workflow'->>'name'`,
   workflowVersionId: runs.workflowVersionId,
   status: runs.status,
+  // A run can remain `running` while one of its nodes is waiting for a human.
+  // Project the actionable condition without changing the durable run state.
+  hasWaitingNodes: sql<boolean>`exists (
+    select 1
+    from ${runNodes}
+    where ${runNodes.runId} = ${runs.id}
+      and ${runNodes.status} = 'waiting'
+  )`,
   outcomeStatus: runs.outcomeStatus,
   semanticViolationCount: runs.semanticViolationCount,
   outputJson: runs.outputJson,

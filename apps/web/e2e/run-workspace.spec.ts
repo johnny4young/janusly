@@ -110,7 +110,6 @@ async function openRun(page: Page, runId: string, locale: Locale): Promise<void>
     locale === 'en' ? 'Activity' : 'Actividad',
     locale === 'en' ? 'Runs' : 'Ejecuciones',
   )
-  await page.getByTestId('run-workspace-tab-overview').click()
   const history = page.getByTestId('runs-history-virtual-list')
   await expect(history).toBeVisible()
   const prefix = `${runId.slice(0, 8)}…`

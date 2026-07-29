@@ -59,9 +59,6 @@ describe('workspace locations', () => {
       'workflows.read',
     ]).map((section) => section.tab)).toEqual([
       'runs',
-      'recover',
-      'reasoning',
-      'multiAgent',
     ])
   })
 })

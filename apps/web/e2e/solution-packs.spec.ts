@@ -92,6 +92,7 @@ test('Solution Packs install, sample-run, and recovery-drill flows work from the
   expect(sampleResponse.status()).toBe(200)
   const sampleBody = await sampleResponse.json() as { runId: string }
   await expect(page.getByText('Sample run started in the sandbox.')).toBeVisible()
+  await openWorkspaceSection(page, 'Activity', 'Runs')
   await expect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible()
   await expect(page.getByTestId('run-overview').locator('.status-pill[data-status]')).toBeVisible({ timeout: 30_000 })
   const sampleRun = await pollRun(request, orgId, sampleBody.runId)
@@ -119,18 +120,14 @@ test('Solution Packs install, sample-run, and recovery-drill flows work from the
   expect(drillBody.evidence.thresholdMinutes).toBeLessThanOrEqual(1440)
   expect(drillBody.evidence.simulatedStallMs).toBe(drillBody.evidence.thresholdMinutes * 60_000 + 1_000)
   await expect(page.getByText('Recovery drill created')).toBeVisible()
+  const activityRecovery = page.getByTestId('activity-recovery-detail')
+  await expect(activityRecovery).toBeVisible()
+  await expect(activityRecovery).toContainText('Run a tool')
+  await expect(activityRecovery).toContainText('worker_stalled')
+  await openWorkspaceSection(page, 'Activity', 'Recover')
   await expect(page.getByRole('heading', { name: 'Recover', exact: true })).toBeVisible()
-  const focusedFailure = page.locator('[data-testid^="dlq-row-"][data-selected="true"]').filter({ hasText: 'page_oncall' }).first()
-  await expect(focusedFailure).toBeVisible({ timeout: 30_000 })
-  await expect(focusedFailure).toBeFocused()
-  const targetInMainViewport = await focusedFailure.evaluate((node) => {
-    const main = node.closest('.workspace-main')
-    if (!main) return false
-    const target = node.getBoundingClientRect()
-    const viewport = main.getBoundingClientRect()
-    return target.top >= viewport.top - 2 && target.bottom <= viewport.bottom + 2
-  })
-  expect(targetInMainViewport).toBe(true)
+  const selectedFailure = page.locator('[data-testid^="dlq-row-"][data-selected="true"]').filter({ hasText: 'page_oncall' }).first()
+  await expect(selectedFailure).toBeVisible({ timeout: 30_000 })
   const drillContext = page.getByTestId('dlq-recovery-drill-context')
   await expect(drillContext).toContainText('Recovery drill')
   await expect(drillContext).toContainText('Real reaper path')
@@ -163,6 +160,7 @@ test('Spanish recovery drills remain usable on mobile without horizontal overflo
 
   await incidentPack.getByRole('button', { name: 'Iniciar ejercicio de recuperación', exact: true }).click()
   await expect(page.getByText('Ejercicio de recuperación creado')).toBeVisible()
+  await openWorkspaceSection(page, 'Actividad', 'Recuperar')
   const focusedFailure = page.locator('[data-testid^="dlq-row-"][data-selected="true"]').filter({ hasText: 'open_issue' }).first()
   await expect(focusedFailure).toBeVisible({ timeout: 30_000 })
   const drillContext = page.getByTestId('dlq-recovery-drill-context')

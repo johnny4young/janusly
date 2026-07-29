@@ -142,6 +142,7 @@ test('grouped control-plane panels and shared mutations remain bilingual', async
       copy.runs,
     )
     await expect(page.getByRole('heading', { name: copy.runs, exact: true })).toBeVisible()
+    await expect(page.getByTestId('activity-run-history')).toBeVisible()
   }
 
   expect(browserErrors).toEqual([])

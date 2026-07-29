@@ -20,6 +20,7 @@ test('mobile workspace remains usable without horizontal overflow', async ({ pag
 
   await openWorkspaceSection(page, 'Activity', 'Runs')
   await expect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible()
+  await expect(page.getByTestId('activity-run-history')).toBeVisible()
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
   expect(overflow).toBeLessThanOrEqual(2)

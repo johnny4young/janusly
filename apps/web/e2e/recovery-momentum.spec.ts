@@ -114,6 +114,11 @@ async function runRecoveryCycle(
   const drillButton = page.getByTestId('recovery-center-empty-cta-drill')
   await expect(drillButton).toBeVisible()
   await drillButton.click()
+  await openWorkspaceSection(
+    page,
+    contract.locale === 'en' ? 'Activity' : 'Actividad',
+    contract.locale === 'en' ? 'Recover' : 'Recuperar',
+  )
 
   const queue = page.getByTestId('recovery-queue')
   await expect(queue).toBeVisible()
@@ -128,6 +133,11 @@ async function runRecoveryCycle(
   await captureElement(hero, `web-${contract.locale}-recovery-hero-action`)
 
   await hero.getByTestId('recovery-center-open-queue').click()
+  await openWorkspaceSection(
+    page,
+    contract.locale === 'en' ? 'Activity' : 'Actividad',
+    contract.locale === 'en' ? 'Recover' : 'Recuperar',
+  )
   await expect(queue).toBeVisible()
   const activeRow = queue.locator('[data-dead-letter-id]').first()
   await activeRow.click()
@@ -198,6 +208,7 @@ test('replaying one of two failures never publishes a false all-clear', async ({
   await page.goto('/')
 
   await page.getByTestId('recovery-center-empty-cta-drill').click()
+  await openWorkspaceSection(page, 'Activity', 'Recover')
   await expect(page.getByTestId('recovery-queue')).toBeVisible()
   await injectDemoFailure(request, orgId)
   await page.reload()

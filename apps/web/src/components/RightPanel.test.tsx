@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api'
@@ -61,6 +61,7 @@ function props(overrides: Partial<RightPanelProps> = {}): RightPanelProps {
       events: [],
       runNodes: [],
       runs: [],
+      deadLetters: [],
       workflows: [],
       usage: {},
       onOpenRun: vi.fn(),
@@ -69,6 +70,8 @@ function props(overrides: Partial<RightPanelProps> = {}): RightPanelProps {
       onSubmitHumanForm: vi.fn(),
       onReplayNode: vi.fn(),
       onRedriveNode: vi.fn(),
+      onSelectRecovery: vi.fn(),
+      onClearActiveRun: vi.fn(),
       onReplayDeadLetter: vi.fn(),
       onResolveDeadLetter: vi.fn(),
     },
@@ -104,11 +107,8 @@ describe('<RightPanel /> recovery task space', () => {
       .toHaveTextContent('recovery')
     const sectionNav = screen.getByTestId('workspace-section-nav')
     expect(sectionNav).toHaveAttribute('data-destination', 'activity')
-    expect(within(sectionNav).getByRole('button', { name: /^Recover$/ }))
-      .toHaveAttribute('aria-current', 'page')
-
-    fireEvent.click(within(sectionNav).getByRole('button', { name: /^Runs$/ }))
-    expect(onOpenTab).toHaveBeenCalledWith('runs')
+    expect(within(sectionNav).queryByRole('button')).not.toBeInTheDocument()
+    expect(within(sectionNav).getByText('Activity')).toBeVisible()
   })
 
   it('filters contextual sections with the same effective permissions as global navigation', () => {

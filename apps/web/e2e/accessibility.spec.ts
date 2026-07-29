@@ -86,8 +86,9 @@ test('Recovery Center and its primary queue path meet the accessibility floor', 
   await capture(page.locator('.workspace-main'), 'accessibility-en-recovery-center')
 
   await page.getByTestId('recovery-center-queue-open-all').click()
+  await openWorkspaceSection(page, 'Activity', 'Recover')
   const queue = page.getByTestId('recovery-queue')
-  await expect(queue).toBeFocused()
+  await expect(queue).toBeVisible()
   await expectNoBlockingAccessibilityViolations(page, 'Recovery queue')
   await capture(queue, 'accessibility-en-recovery-queue')
   expect(errors).toEqual([])

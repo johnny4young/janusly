@@ -10,8 +10,9 @@ test('Recovery Center is the authenticated desktop home', async ({ page }) => {
   await expect(page.getByTestId('recovery-center-metric-verified-recovery')).toBeVisible()
 
   await page.getByTestId('recovery-center-queue-open-all').click()
+  await openWorkspaceSection(page, 'Activity', 'Recover')
   const queue = page.getByTestId('recovery-queue')
-  await expect(queue).toBeFocused()
+  await expect(queue).toBeVisible()
   const queueLandedInMain = await queue.evaluate((node) => {
     const main = node.closest('.workspace-main')
     if (!main) return false

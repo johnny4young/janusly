@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalGzipKiB": 602,
+  "totalGzipKiB": 612,
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
     "reactVendor": {
@@ -25,7 +25,7 @@
       "maxLongTaskMs": 500
     },
     "workflowBuilder": {
-      "maxTransferredKiB": 100,
+      "maxTransferredKiB": 102,
       "maxLongTaskMs": 300
     },
     "selectedRecovery": {
@@ -34,6 +34,8 @@
     }
   },
   "baselineGzipKiB": {
+    "ActivityRecoveryDetail.js": 2.35,
+    "ActivityWorkspace.js": 3.75,
     "api.js": 3.31,
     "App.js": 49.81,
     "canvas-node-drag.js": 0.2,
@@ -48,7 +50,7 @@
     "helpers.js": 2.87,
     "icons-vendor.js": 16.31,
     "identity-context.js": 0.14,
-    "index.css": 36.52,
+    "index.css": 40.86,
     "LoadingSkeleton.js": 0.41,
     "MembersPanel.js": 2.42,
     "MultiAgentTimeline.js": 2.06,
@@ -67,6 +69,7 @@
     "RollbackConfirmDialog.js": 1.58,
     "rolldown-runtime.js": 0.41,
     "RunInputDialog.js": 3.29,
+    "RunExplainChat.js": 4.36,
     "RunWorkspace.js": 27.64,
     "RunStreamChip.js": 3.58,
     "ScheduleHistoryPanel.js": 2.37,

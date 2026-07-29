@@ -23,6 +23,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { Activity, AlertCircle, Boxes, Database, FlaskConical, KeyRound, Layers3, LockKeyhole, Plug, ShieldCheck, Users, Workflow } from 'lucide-react'
 import type { ActiveTab, AiAuthoringActionRequest, AiCandidateBackoff, AiHealth, AiMode, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, WorkflowDefinition, WorkflowImprovementResult, WorkflowImprovementSuggestion } from '../types'
+import type { DeadLetter } from './DeadLettersPanel'
 import { AiCopilotPanel } from './AiCopilotPanel'
 import { AuthoringPanel, type AuthoringPanelModel } from './AuthoringPanel'
 import { EmptyView, PanelChrome, PanelSearch } from './panel-primitives'
@@ -44,7 +45,7 @@ const MembersPanel = lazy(() => import('./MembersPanel').then((m) => ({ default:
 const SolutionPacksPanel = lazy(() => import('./SolutionPacksPanel').then((m) => ({ default: m.SolutionPacksPanel })))
 const OperationsPage = lazy(() => import('./OperationsPage').then((m) => ({ default: m.OperationsPage })))
 const ExperimentsPanel = lazy(() => import('./ExperimentsPanel').then((m) => ({ default: m.ExperimentsPanel })))
-const RunWorkspace = lazy(() => import('./RunWorkspace').then((m) => ({ default: m.RunWorkspace })))
+const ActivityWorkspace = lazy(() => import('./ActivityWorkspace').then((m) => ({ default: m.ActivityWorkspace })))
 const RunsPanel = lazy(() => import('./RunsPanel').then((m) => ({ default: m.RunsPanel })))
 const RecoveryCasePanel = lazy(() => import('./RecoveryCasePanel').then((m) => ({ default: m.RecoveryCasePanel })))
 const ReasoningPanel = lazy(() => import('./ReasoningPanel').then((m) => ({ default: m.ReasoningPanel })))
@@ -105,10 +106,12 @@ export type RightPanelExecution = {
   onLoadOlderEvents?: () => void | Promise<void>
   runNodes: RunNode[]
   runs: RunSummary[]
+  deadLetters: DeadLetter[]
   workflows: SavedWorkflow[]
   activeRunId?: string | null
+  activeRecoveryId?: string | null
   usage: Record<string, number>
-  onOpenRun: (id: string) => void
+  onOpenRun: (id: string) => void | Promise<void>
   onRefreshPlatform: () => void
   onApproveNode: (nodeId: string) => void
   onSubmitHumanForm: (nodeId: string, input: unknown, resumeToken: string) =>
@@ -116,6 +119,8 @@ export type RightPanelExecution = {
   onReplayNode: (nodeId: string) => void
   onRedriveNode: (nodeId: string) => void
   onCancelActiveRun?: () => void | Promise<void>
+  onSelectRecovery: (id: string | null) => void
+  onClearActiveRun: () => void
   onReplayDeadLetter: (id: string, createdAtIso?: string) => boolean | Promise<boolean> | undefined
   onResolveDeadLetter: (id: string) => boolean | Promise<boolean> | undefined
 }
@@ -303,13 +308,19 @@ function RightPanelRouter(props: RightPanelProps) {
     />
   )
   if (props.tab === 'runs') return (
-    <RunWorkspace
+    <ActivityWorkspace
       {...runsPanelProps}
+      deadLetters={execution.deadLetters}
+      activeRecoveryId={execution.activeRecoveryId}
       eventsHasMore={execution.eventsHasMore}
       onLoadOlderEvents={execution.onLoadOlderEvents}
       onLoadRunUsage={loadRunUsage}
       onReplayDecision={execution.activeRunId ? replayDecision : undefined}
       onOpenFullView={navigation.onOpenTab}
+      onSelectRecovery={execution.onSelectRecovery}
+      onClearActiveRun={execution.onClearActiveRun}
+      onOpenRecoveryTools={() => navigation.onOpenTab('recover')}
+      canReadDeadLetters={can('dlq.read')}
     />
   )
   return (

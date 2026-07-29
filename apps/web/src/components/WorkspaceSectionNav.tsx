@@ -65,26 +65,28 @@ export function WorkspaceSectionNav({
         <strong>{destinationLabel}</strong>
         <span>{t(destination.helperKey)}</span>
       </div>
-      <div className="workspace-section-nav__rail">
-        {sections.map((section) => {
-          const label = t(section.labelKey)
-          const active = activeTab === section.tab || section.activeAliases?.includes(activeTab) === true
-          return (
-            <button
-              key={section.tab}
-              type="button"
-              className="workspace-section-nav__item"
-              data-active={active ? 'true' : 'false'}
-              aria-current={active ? 'page' : undefined}
-              onClick={() => onOpenTab(section.tab)}
-              title={`${label} — ${t(section.helperKey)}`}
-            >
-              <span aria-hidden="true">{SECTION_ICONS[section.tab]}</span>
-              <span>{label}</span>
-            </button>
-          )
-        })}
-      </div>
+      {(destinationId !== 'activity' || sections.length > 1) && (
+        <div className="workspace-section-nav__rail">
+          {sections.map((section) => {
+            const label = t(section.labelKey)
+            const active = activeTab === section.tab || section.activeAliases?.includes(activeTab) === true
+            return (
+              <button
+                key={section.tab}
+                type="button"
+                className="workspace-section-nav__item"
+                data-active={active ? 'true' : 'false'}
+                aria-current={active ? 'page' : undefined}
+                onClick={() => onOpenTab(section.tab)}
+                title={`${label} — ${t(section.helperKey)}`}
+              >
+                <span aria-hidden="true">{SECTION_ICONS[section.tab]}</span>
+                <span>{label}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
     </nav>
   )
 }

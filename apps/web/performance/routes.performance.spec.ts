@@ -158,6 +158,8 @@ async function stubApi(page: Page) {
         workflowJson: { id: 'workflow-perf', name: row.workflowName, nodes: [{ id: row.nodeId, type: 'noop', config: {} }], edges: [] },
         nodeJson: { id: row.nodeId, type: 'noop', config: {} },
       }
+    } else if (pathname === '/dlq') {
+      body = rows
     } else if (pathname === '/recovery/metrics') {
       body = {
         successRate: { value: 0, display: '—', severity: 'neutral', rationale: 'No terminal runs.' },
@@ -236,6 +238,7 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
 
   await resetRouteMeasurement(page)
   await createWorkflowAction.click()
+  await page.getByRole('button', { name: /^Start blank\b/ }).click()
   const canvas = page.locator('.workspace-main .react-flow').first()
   await expect(canvas).toBeVisible()
   const workflowBuilderMeasurement = await measureRoute(page, 'workflowBuilder')
@@ -245,14 +248,17 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
 
   await page.getByRole('button', { name: /^Home\b/ }).click()
   await page.getByTestId('recovery-center-queue-open-all').click()
-  const secondRow = page.getByTestId('dlq-row-perf-b')
+  const secondRow = page.getByTestId('activity-row-recovery:perf-b')
   await expect(secondRow).toBeVisible()
   await resetRouteMeasurement(page)
   await secondRow.click()
-  const detail = page.locator('.detail-box').filter({ hasText: 'notify_owner' })
+  const detail = page.getByTestId('activity-recovery-detail')
   await expect(detail).toContainText('Delivery failed')
   const recoveryMeasurement = await measureRoute(page, 'selectedRecovery')
   expect(recoveryMeasurement.resources.some((path) => path === '/dlq')).toBe(true)
+  expect(recoveryMeasurement.resources.some(
+    (path) => /ActivityRecoveryDetail-.*\.js$/.test(path),
+  )).toBe(true)
   expect(recoveryMeasurement.transferredBytes).toBeGreaterThan(0)
   expectWithinBudget(recoveryMeasurement)
   await captureElement(detail, 'web-en-performance-selected-recovery')

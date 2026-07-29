@@ -95,6 +95,7 @@ test('a successful drill replay exposes terminal recovery time and recurrence mo
   await page.goto('/')
   await openWorkspaceSection(page, 'Workflows', 'Templates')
   const drill = await startContractDrill(page, 'Start recovery drill')
+  await openWorkspaceSection(page, 'Activity', 'Recover')
 
   const focusedFailure = page.locator(`[data-testid="dlq-row-${drill.deadLetterId}"]`)
   await expect(focusedFailure).toBeVisible({ timeout: 30_000 })
@@ -163,6 +164,7 @@ test('Spanish mobile resolve records accepted loss and refreshes the selected dr
   await page.getByRole('button', { name: 'Navegación' }).click()
   await openWorkspaceSection(page, 'Flujos', 'Plantillas')
   const drill = await startContractDrill(page, 'Iniciar ejercicio de recuperación')
+  await openWorkspaceSection(page, 'Actividad', 'Recuperar')
 
   await expect(page.locator(`[data-testid="dlq-row-${drill.deadLetterId}"]`)).toBeVisible({ timeout: 30_000 })
   const outcome = page.getByTestId('dlq-recovery-drill-outcome')
@@ -176,15 +178,20 @@ test('Spanish mobile resolve records accepted loss and refreshes the selected dr
   await page.getByRole('button', { name: 'Resolver', exact: true }).click()
   expect((await resolveResponse).status()).toBe(200)
 
-  await expect(outcome.getByRole('status')).toHaveText('Pérdida aceptada', { timeout: 30_000 })
-  await expect(outcome).toContainText('Registrado a partir de la decisión del operador de aceptar la pérdida.')
-  await expect(outcome).toContainText('Tiempo de recuperación')
-  await expect(outcome).toContainText('La reincidencia se evalúa después de una recuperación verificada.')
+  await page.locator('#dlq-filter').selectOption('all')
+  const resolvedRow = page.locator(`[data-testid="dlq-row-${drill.deadLetterId}"]`)
+  await expect(resolvedRow).toBeVisible({ timeout: 30_000 })
+  await resolvedRow.click()
+  const resolvedOutcome = page.getByTestId('dlq-recovery-drill-outcome')
+  await expect(resolvedOutcome.getByRole('status')).toHaveText('Pérdida aceptada', { timeout: 30_000 })
+  await expect(resolvedOutcome).toContainText('Registrado a partir de la decisión del operador de aceptar la pérdida.')
+  await expect(resolvedOutcome).toContainText('Tiempo de recuperación')
+  await expect(resolvedOutcome).toContainText('La reincidencia se evalúa después de una recuperación verificada.')
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   expect(overflow).toBeLessThanOrEqual(2)
   await dismissToasts(page)
-  await captureEvidence(outcome, 'recovery-drill-outcome-es-accepted-loss-mobile')
+  await captureEvidence(resolvedOutcome, 'recovery-drill-outcome-es-accepted-loss-mobile')
 
   await page.getByRole('button', { name: 'Navegación' }).click()
   await page.locator('#workspace-sidebar').getByRole('button', { name: /^Inicio\b/ }).click()

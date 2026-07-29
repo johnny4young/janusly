@@ -15,7 +15,7 @@ const views = [
   { destination: 'Workflows', section: 'Build', text: 'Describe the outcome. Janusly builds the flow.', ai: true },
   { destination: 'Workflows', section: 'All workflows', heading: 'Flows' },
   { destination: 'Workflows', section: 'Build', heading: 'Build' },
-  { destination: 'Activity', section: 'Runs', heading: 'Runs' },
+  { destination: 'Activity', heading: 'Activity' },
   { destination: 'Settings', section: 'Team', heading: 'Team' },
   { destination: 'Workflows', section: 'Templates', heading: 'Templates' },
   { destination: 'Settings', section: 'Tools', heading: 'Tools' },

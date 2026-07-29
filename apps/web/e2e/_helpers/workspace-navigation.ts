@@ -3,6 +3,7 @@ import type { Page } from '@playwright/test'
 export async function openWorkspaceDestination(
   page: Page,
   destination: string,
+  force = false,
 ): Promise<void> {
   await page.locator('.app-shell').waitFor({ state: 'visible' })
 
@@ -12,6 +13,7 @@ export async function openWorkspaceDestination(
     exact: true,
   })
   if (
+    !force &&
     await destinationButton.isVisible().catch(() => false)
     && await destinationButton.getAttribute('aria-current') === 'page'
   ) return
@@ -46,6 +48,27 @@ export async function openWorkspaceSection(
       name: section,
       exact: true,
     })
+    if (
+      await sectionButton.count() === 0
+      && (destination === 'Activity' || destination === 'Actividad')
+    ) {
+      if (section === 'Recover' || section === 'Recuperar') {
+        if (await page.getByTestId('recovery-queue').isVisible().catch(() => false)) return
+        await openWorkspaceDestination(page, destination, true)
+        const recoveryTools = page.getByTestId('activity-open-recovery-tools')
+        await recoveryTools.waitFor({ state: 'visible' })
+        await recoveryTools.click()
+        await page.getByTestId('recovery-queue').waitFor({ state: 'visible' })
+      } else if (section === 'Runs' || section === 'Ejecuciones') {
+        if (await page.getByTestId('activity-run-history').isVisible().catch(() => false)) return
+        await openWorkspaceDestination(page, destination, true)
+        const runHistory = page.getByTestId('activity-open-run-history')
+        await runHistory.waitFor({ state: 'visible' })
+        await runHistory.click()
+        await page.getByTestId('activity-run-history').waitFor({ state: 'visible' })
+      }
+      return
+    }
   }
   if (await sectionButton.getAttribute('aria-current') !== 'page') {
     await sectionButton.click()

@@ -23,6 +23,11 @@ test('run history opens report delivery dialog and surfaces a credential error',
   await expect(page.locator('.workflow-node').filter({ hasText: 'Do nothing' }).filter({ hasText: 'Done' })).toBeVisible({ timeout: 30_000 })
 
   await openWorkspaceSection(page, 'Activity', 'Runs')
+  const history = page.getByTestId('runs-history-virtual-list')
+  const runRow = history.getByRole('article').filter({ hasText: workflowName }).first()
+  await expect(runRow).toBeVisible({ timeout: 30_000 })
+  await runRow.locator('button.list-card-row').click()
+  await expect(page.getByTestId('run-overview')).toBeVisible()
   const sendButton = page.getByRole('button', { name: /Send run explain report for/ }).first()
   await expect(sendButton).toBeVisible({ timeout: 30_000 })
   await sendButton.click()

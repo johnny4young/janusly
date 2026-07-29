@@ -61,7 +61,7 @@ import type { WorkflowCreationMode } from './components/WorkflowsDashboard'
 import { projectVisibleEdges, projectVisibleNodes } from './canvas-projections'
 import type { ActiveTab, AiAuthoringAction, AiAuthoringActionRequest, AiMode, AiReviewIssue, ReadinessResult, RunEvent, RunNode, RunSummary, ValidationIssue, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode, WorkflowImprovementResult, WorkflowImprovementSuggestion } from './types'
 import { getCanvasVisibility, isCanvasTab, parseAiCandidateBackoff } from './types'
-import { isTerminalRunStatus } from '@janusly/shared/src/status'
+import { isOpenRunStatus, isTerminalRunStatus } from '@janusly/shared/src/status'
 import { getResolvedLocale, useT } from './i18n'
 import { consumeDeadLetterDeepLink, requestRecoveryQueueFocus } from './components/recovery-queue-focus-bus'
 import { requestRecoveryAllClearIfQueueEmpty } from './components/recovery-all-clear-coordinator'
@@ -333,6 +333,7 @@ export default function App() {
   const [runInputSubmitting, setRunInputSubmitting] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [semanticBlockerRunIds, setSemanticBlockerRunIds] = useState<string[]>([])
+  const [activityRecoveryId, setActivityRecoveryId] = useState<string | null>(null)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [snippetMenuOpen, setSnippetMenuOpen] = useState(false)
   const [aiActionRequest, setAiActionRequest] = useState<AiAuthoringActionRequest | null>(null)
@@ -344,6 +345,7 @@ export default function App() {
 
   useEffect(() => {
     setSemanticBlockerRunIds([])
+    setActivityRecoveryId(null)
   }, [orgId])
   useEffect(() => {
     if (activeTab === 'home') {
@@ -783,6 +785,7 @@ export default function App() {
     // unified Runs workspace. Explicit legacy targets remain honoured for
     // command-palette and expert deep access.
     const requestId = runTransitionGuard.begin()
+    setActivityRecoveryId(null)
     setActiveTab(targetTab ?? 'runs')
     try {
       const data = await api(`/run?runId=${encodeURIComponent(id)}`) as RunResponse
@@ -798,6 +801,22 @@ export default function App() {
       addToast(error instanceof Error ? error.message : t('toasts.runOpenFailed'), 'error')
     }
   }, [addToast, canReadRuns, projectRunSummary, runTransitionGuard, setActiveTab, setEvents, setEventsPagination, setRunDetail, setRunId, setRunNodes, t])
+
+  const clearActiveRun = useCallback(() => {
+    runTransitionGuard.begin()
+    setRunId(null)
+    setRunDetail(null)
+    setRunNodes([])
+    setEvents([])
+    setEventsPagination(null, false)
+  }, [
+    runTransitionGuard,
+    setEvents,
+    setEventsPagination,
+    setRunDetail,
+    setRunId,
+    setRunNodes,
+  ])
 
   const loadOlderEvents = useCallback(async () => {
     if (!runId || !eventsCursor || !eventsHasMore) return
@@ -879,9 +898,17 @@ export default function App() {
 
   const openRecoveryQueue = useCallback((deadLetterId?: string) => {
     if (!canReadRuns || !canReadDlq) return
+    setActivityRecoveryId(deadLetterId ?? null)
     requestRecoveryQueueFocus(deadLetterId)
-    setActiveTab('recover')
+    setActiveTab('runs')
   }, [canReadDlq, canReadRuns, setActiveTab])
+  const openHomeTab = useCallback((tab: ActiveTab) => {
+    if (tab === 'recover') {
+      openRecoveryQueue()
+      return
+    }
+    setActiveTab(tab)
+  }, [openRecoveryQueue, setActiveTab])
 
   // An alert links to `?deadLetterId=<id>`. Consume it once at bootstrap and
   // hand it to the same path an in-app CTA uses, so the operator lands on the
@@ -1187,7 +1214,7 @@ export default function App() {
   )
   const recoverState: 'blocked' | 'attention' | 'clear' =
     blockerCount > 0 ? 'blocked' : openDlqCount > 0 ? 'attention' : 'clear'
-  const activeRunCount = projectedRuns.filter(run => run.status === 'running' || run.status === 'paused').length
+  const activeRunCount = projectedRuns.filter(run => isOpenRunStatus(run.status)).length
   const observedRun = runId
     ? (runDetail?.id === runId ? runDetail : projectedRuns.find(run => run.id === runId))
     : undefined
@@ -1254,8 +1281,10 @@ export default function App() {
         onLoadOlderEvents: loadOlderEvents,
         runNodes,
         runs: projectedRuns,
+        deadLetters,
         workflows: savedWorkflows,
         activeRunId: runId,
+        activeRecoveryId: activityRecoveryId,
         usage,
         onOpenRun: openRun,
         onRefreshPlatform: refreshPlatform,
@@ -1264,6 +1293,8 @@ export default function App() {
         onReplayNode: replayNode,
         onRedriveNode: redriveNode,
         onCancelActiveRun: cancelActiveRun,
+        onSelectRecovery: setActivityRecoveryId,
+        onClearActiveRun: clearActiveRun,
         onReplayDeadLetter: replayDeadLetter,
         onResolveDeadLetter: resolveDeadLetter,
       }}
@@ -1391,7 +1422,7 @@ export default function App() {
                   runNodes={runNodes}
                   deadLetters={deadLetters}
                   onSemanticBlockerRunsChange={setSemanticBlockerRunIds}
-                  onOpenTab={setActiveTab}
+                  onOpenTab={openHomeTab}
                   onOpenRecoveryCase={openRecoveryCase}
                   onOpenRun={openRun}
                   onApproveNode={canStartRuns ? approveNode : () => undefined}

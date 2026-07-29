@@ -1,4 +1,8 @@
-import { addCanvasStep, openWorkspaceSection } from './_helpers/workspace-navigation'
+import {
+  addCanvasStep,
+  openWorkspaceDestination,
+  openWorkspaceSection,
+} from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { createServer, type ServerResponse } from 'node:http'
 import { once } from 'node:events'
@@ -73,8 +77,12 @@ async function openRuns(page: Page, locale: 'en' | 'es'): Promise<void> {
   await expect(page.getByTestId('runs-history-virtual-list')).toBeVisible()
 }
 
-async function openRunFromHistory(page: Page, runId: string): Promise<void> {
-  const history = page.getByTestId('runs-history-virtual-list')
+async function openRunFromHistory(
+  page: Page,
+  runId: string,
+  listTestId = 'runs-history-virtual-list',
+): Promise<void> {
+  const history = page.getByTestId(listTestId)
   const prefix = `${runId.slice(0, 8)}…`
   // Filter changes fetch asynchronously. Wait for the virtual list to receive
   // at least one row before deciding that its current scroll range is empty.
@@ -152,8 +160,8 @@ test('a real running node pulses, honors reduced motion, and cannot mutate the a
     await expect.poll(() => authorViewport.getAttribute('style')).not.toBe(beforeZoom)
     const authorViewportAfterZoom = await authorViewport.getAttribute('style')
 
-    await openWorkspaceSection(page, 'Activity', 'Runs')
-    await expect(page.getByTestId('run-history-status-filter')).toBeVisible()
+    await openWorkspaceDestination(page, 'Activity')
+    await expect(page.getByTestId('activity-filter-running')).toBeVisible()
     const running = await startRun(request, {
       id: `e2e-observation-running-${Date.now()}`,
       name: 'E2E held running node',
@@ -167,8 +175,14 @@ test('a real running node pulses, honors reduced motion, and cannot mutate the a
     runId = running.runId
     await target.connected
 
-    await page.getByTestId('run-history-status-filter').selectOption('running')
-    await openRunFromHistory(page, runId)
+    const refreshResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return url.pathname.endsWith('/runs') && response.ok()
+    })
+    await page.getByTestId('activity-refresh').click()
+    await refreshResponse
+    await page.getByTestId('activity-filter-running').click()
+    await openRunFromHistory(page, runId, 'activity-feed-list')
     const englishMap = await assertRunObservationMap(page, 'held_request', 'running', 'en')
     const runningNode = englishMap.locator('.react-flow__node[data-id="held_request"] .workflow-node')
     await expect.poll(() => runningNode.evaluate(element => getComputedStyle(element).animationName)).toContain('we-running-node-pulse')
@@ -198,9 +212,9 @@ test('a real running node pulses, honors reduced motion, and cannot mutate the a
     await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
     await page.reload()
     await hideUnrelatedOverlays(page)
-    await openRuns(page, 'es')
-    await page.getByTestId('run-history-status-filter').selectOption('running')
-    await openRunFromHistory(page, runId)
+    await openWorkspaceDestination(page, 'Actividad')
+    await page.getByTestId('activity-filter-running').click()
+    await openRunFromHistory(page, runId, 'activity-feed-list')
     const spanishMap = await assertRunObservationMap(page, 'held_request', 'running', 'es')
     await expect.poll(() => spanishMap.locator('.workflow-node[data-status="running"]').evaluate(element => getComputedStyle(element).animationName)).toContain('we-running-node-pulse')
     await captureElement(spanishMap, 'web-es-run-map-running-pulse')
@@ -397,7 +411,7 @@ test('active runs explain identity, trigger, chronology, and waits in both local
   expect(stackedPanelBox!.y).toBeGreaterThanOrEqual(stackedMapBox!.y + stackedMapBox!.height)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await captureElement(spanishWaitingMap, 'web-es-run-map-waiting-stacked')
-  await page.getByRole('button', { name: 'Recuperar', exact: true }).click()
+  await openWorkspaceSection(page, 'Actividad', 'Recuperar')
   const spanishWaiting = page.getByTestId('waiting-steps')
   await expect(spanishWaiting).toContainText('Aprobación')
   await expect(spanishWaiting).toContainText('En espera durante')

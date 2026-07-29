@@ -258,6 +258,11 @@ for (const contract of LOCALES) {
     await hideUnrelatedOverlays(page)
     await capture(metricCard, `web-${contract.locale}-recovery-sparkline-keyboard`)
     await oldestPoint.press('Enter')
+    await openWorkspaceSection(
+      page,
+      contract.locale === 'en' ? 'Activity' : 'Actividad',
+      contract.recoverName,
+    )
 
     const queue = page.getByTestId('recovery-queue')
     const dayChip = page.getByTestId('dlq-day-filter-chip')
@@ -282,6 +287,11 @@ for (const contract of LOCALES) {
     await hideUnrelatedOverlays(page)
     await capture(heatmap, `web-${contract.locale}-recovery-heatmap-keyboard`)
     await previousDayCell.press('Enter')
+    await openWorkspaceSection(
+      page,
+      contract.locale === 'en' ? 'Activity' : 'Actividad',
+      contract.recoverName,
+    )
     await expect(queue).toBeVisible()
     await expect(dayChip).toContainText(days[1] ?? '')
     await expect(page.getByTestId(`dlq-row-${ids[1]}`)).toBeVisible()

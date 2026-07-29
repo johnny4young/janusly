@@ -103,6 +103,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   await openWorkspaceSection(page, 'Workflows', 'Templates')
   const selectedBeforeInitialFailure = await selectedDeadLetterTestId(page)
   await pack.getByRole('button', { name: 'Start recovery drill', exact: true }).click()
+  await openWorkspaceSection(page, 'Activity', 'Recover')
 
   const failedRow = await waitForNewSelectedFailure(page, selectedBeforeInitialFailure, 'page_oncall')
   const rowTestId = await failedRow.getAttribute('data-testid')
@@ -189,6 +190,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   const repeatPack = page.getByTestId('solution-pack-incident-triage')
   const selectedBeforeRepeatedFailure = await selectedDeadLetterTestId(page)
   await repeatPack.getByRole('button', { name: 'Start recovery drill', exact: true }).click()
+  await openWorkspaceSection(page, 'Activity', 'Recover')
   const repeatedFailure = await waitForNewSelectedFailure(page, selectedBeforeRepeatedFailure, 'page_oncall')
   const repeatedTestId = await repeatedFailure.getAttribute('data-testid')
   const repeatedDeadLetterId = repeatedTestId?.replace('dlq-row-', '')
@@ -264,6 +266,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   const spanishPlaybookPack = page.getByTestId('solution-pack-incident-triage')
   const selectedBeforeSpanishFailure = await selectedDeadLetterTestId(page)
   await spanishPlaybookPack.getByRole('button', { name: 'Iniciar ejercicio de recuperación', exact: true }).click()
+  await openWorkspaceSection(page, 'Actividad', 'Recuperar')
   const spanishPlaybookFailure = await waitForNewSelectedFailure(page, selectedBeforeSpanishFailure, 'page_oncall')
   const spanishFailureTestId = await spanishPlaybookFailure.getAttribute('data-testid')
   const spanishFailureId = spanishFailureTestId?.replace('dlq-row-', '')
@@ -319,6 +322,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   await openWorkspaceSection(page, 'Flujos', 'Plantillas')
   const selectedBeforeSpanishRegression = await selectedDeadLetterTestId(page)
   await spanishPlaybookPack.getByRole('button', { name: 'Iniciar ejercicio de recuperación', exact: true }).click()
+  await openWorkspaceSection(page, 'Actividad', 'Recuperar')
   const spanishRegressionFailure = await waitForNewSelectedFailure(
     page,
     selectedBeforeSpanishRegression,
@@ -379,6 +383,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   await openWorkspaceSection(page, 'Flujos', 'Plantillas')
   const selectedBeforeFallbackFailure = await selectedDeadLetterTestId(page)
   await spanishPack.getByRole('button', { name: 'Iniciar ejercicio de recuperación', exact: true }).click()
+  await openWorkspaceSection(page, 'Actividad', 'Recuperar')
   const spanishFailure = await waitForNewSelectedFailure(page, selectedBeforeFallbackFailure)
   const spanishRowTestId = await spanishFailure.getAttribute('data-testid')
   const spanishDeadLetterId = spanishRowTestId?.replace('dlq-row-', '')

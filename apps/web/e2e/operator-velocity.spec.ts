@@ -169,7 +169,7 @@ test('operator triages genuine failures by keyboard, copies context, and fuzzy-s
 
   await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
   await page.reload()
-  await page.getByRole('button', { name: 'Recuperar', exact: true }).click()
+  await openWorkspaceSection(page, 'Actividad', 'Recuperar')
   const spanishQueue = page.getByTestId('recovery-queue')
   const spanishRow = spanishQueue.locator('[data-dead-letter-id]').first()
   await expect(spanishRow).toBeVisible()

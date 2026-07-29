@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   NODE_OPEN_STATUSES,
+  RUN_OPEN_STATUSES,
   TERMINAL_NODE_STATUSES,
   TERMINAL_RUN_STATUSES,
   isOpenNodeStatus,
+  isOpenRunStatus,
   isTerminalNodeStatus,
   isTerminalRunStatus,
   nodeCancellableStatusValues,
@@ -82,6 +84,11 @@ describe('status Set helpers', () => {
     for (const s of nodeOpenStatusValues) expect(NODE_OPEN_STATUSES.has(s)).toBe(true)
     expect(NODE_OPEN_STATUSES.size).toBe(nodeOpenStatusValues.length)
   })
+
+  it('RUN_OPEN_STATUSES has every run open value', () => {
+    for (const s of runOpenStatusValues) expect(RUN_OPEN_STATUSES.has(s)).toBe(true)
+    expect(RUN_OPEN_STATUSES.size).toBe(runOpenStatusValues.length)
+  })
 })
 
 describe('status type guards', () => {
@@ -91,6 +98,15 @@ describe('status type guards', () => {
     expect(isTerminalNodeStatus('timed_out')).toBe(false)
     expect(isTerminalNodeStatus('canceled')).toBe(false)
     expect(isTerminalNodeStatus(null)).toBe(false)
+  })
+
+  it('recognizes open run statuses without accepting node-only or legacy values', () => {
+    expect(isOpenRunStatus('created')).toBe(true)
+    expect(isOpenRunStatus('running')).toBe(true)
+    expect(isOpenRunStatus('waiting')).toBe(true)
+    expect(isOpenRunStatus('queued')).toBe(false)
+    expect(isOpenRunStatus('paused')).toBe(false)
+    expect(isOpenRunStatus(null)).toBe(false)
   })
 
   it('recognizes terminal run statuses without accepting node-only or legacy values', () => {

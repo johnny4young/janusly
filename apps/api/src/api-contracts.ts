@@ -461,6 +461,7 @@ const RunSummarySchema = RunSchema.omit({
 }).extend({
   workflowId: z.string(),
   workflowName: z.string().nullable(),
+  hasWaitingNodes: z.boolean().optional(),
 });
 
 const RunNodeSchema = z.object({

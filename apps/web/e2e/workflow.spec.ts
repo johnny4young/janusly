@@ -115,6 +115,10 @@ test('human form presents schema-valid initial values for operator review', asyn
   await page.getByRole('button', { name: 'Workflows', exact: true }).click()
   await page.getByTestId(`workflows-row-${workflow.id}`).click()
   await openWorkspaceSection(page, 'Activity', 'Runs')
+  const history = page.getByTestId('runs-history-virtual-list')
+  const runPrefix = `${String(startedBody.runId).slice(0, 8)}…`
+  await expect.poll(() => history.getByRole('article').filter({ hasText: runPrefix }).count())
+    .toBeGreaterThan(0)
   await page.getByRole('button', { name: `Open timeline for run ${startedBody.runId}` }).click()
   await openWorkspaceSection(page, 'Activity', 'Recover')
   await expect(page.getByRole('button', { name: /Fill form/i })).toBeVisible({ timeout: 30_000 })

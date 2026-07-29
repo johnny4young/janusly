@@ -32,6 +32,7 @@ const LOCALES = [
     primaryGroup: 'Workspace',
     homeKicker: 'Recovery Center',
     search: 'Search sections…',
+    emptyActivity: 'No activity yet',
   },
   {
     locale: 'es',
@@ -48,6 +49,7 @@ const LOCALES = [
     primaryGroup: 'Principal',
     homeKicker: 'Centro de recuperación',
     search: 'Buscar secciones…',
+    emptyActivity: 'Aún no hay actividad',
   },
 ] as const
 
@@ -129,7 +131,7 @@ test('workflow creation is reachable from the workflow inventory', async ({ page
 })
 
 for (const locale of LOCALES) {
-  test(`${locale.locale} exposes four destinations with contextual activity sections`, async ({
+  test(`${locale.locale} exposes four destinations with one approachable activity feed`, async ({
     page,
   }) => {
     const orgId = `task-spaces-${locale.locale}-${Date.now()}`
@@ -191,18 +193,16 @@ for (const locale of LOCALES) {
     }).click()
     const sectionNav = page.getByTestId('workspace-section-nav')
     await expect(sectionNav).toHaveAttribute('data-destination', 'activity')
-    await expect(sectionNav.getByRole('button', {
-      name: locale.runs,
-      exact: true,
-    })).toHaveAttribute('aria-current', 'page')
-    await expect(sectionNav.getByRole('button', {
-      name: locale.recover,
+    await expect(sectionNav.getByRole('button')).toHaveCount(0)
+    await expect(page.getByRole('heading', {
+      name: locale.activity,
       exact: true,
     })).toBeVisible()
-    await sectionNav.getByRole('button', {
-      name: locale.recover,
-      exact: true,
-    }).click()
+    await expect(page.getByTestId('activity-workspace')).toBeVisible()
+    await expect(page.getByText(locale.emptyActivity, { exact: true })).toBeVisible()
+    await expect(page.getByTestId('activity-open-run-history')).toBeVisible()
+    await expect(page.getByTestId('activity-open-recovery-tools')).toBeVisible()
+    await page.getByTestId('activity-open-recovery-tools').click()
     await expect(page.getByRole('heading', {
       name: locale.recover,
       exact: true,
