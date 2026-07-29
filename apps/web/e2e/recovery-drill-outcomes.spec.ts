@@ -59,8 +59,8 @@ async function prepareSession(page: Page, locale: 'en' | 'es'): Promise<string> 
   return orgId
 }
 
-async function startContractDrill(page: Page, packName: string, actionName: string): Promise<DrillResponse> {
-  const pack = page.locator('.list-card').filter({ hasText: packName }).first()
+async function startContractDrill(page: Page, actionName: string): Promise<DrillResponse> {
+  const pack = page.getByTestId('solution-pack-incident-triage')
   await expect(pack).toBeVisible()
   await pack.locator('select').last().selectOption('github_contract_drift')
   const responsePromise = page.waitForResponse((response) => (
@@ -93,8 +93,8 @@ test('a successful drill replay exposes terminal recovery time and recurrence mo
   const orgId = await prepareSession(page, 'en')
 
   await page.goto('/')
-  await openWorkspaceSection(page, 'Workflows', 'Packs')
-  const drill = await startContractDrill(page, 'Incident triage', 'Start recovery drill')
+  await openWorkspaceSection(page, 'Workflows', 'Templates')
+  const drill = await startContractDrill(page, 'Start recovery drill')
 
   const focusedFailure = page.locator(`[data-testid="dlq-row-${drill.deadLetterId}"]`)
   await expect(focusedFailure).toBeVisible({ timeout: 30_000 })
@@ -122,7 +122,7 @@ test('a successful drill replay exposes terminal recovery time and recurrence mo
 
   // Remount the queue after the API-driven replay so its detail read observes
   // the immutable terminal-impact row written by the worker.
-  await openWorkspaceSection(page, 'Workflows', 'Packs')
+  await openWorkspaceSection(page, 'Workflows', 'Templates')
   await openWorkspaceSection(page, 'Activity', 'Recover')
   await page.locator('#dlq-filter').selectOption('all')
   await expect(focusedFailure).toBeVisible({ timeout: 30_000 })
@@ -161,8 +161,8 @@ test('Spanish mobile resolve records accepted loss and refreshes the selected dr
 
   await page.goto('/')
   await page.getByRole('button', { name: 'Navegación' }).click()
-  await openWorkspaceSection(page, 'Flujos', 'Paquetes')
-  const drill = await startContractDrill(page, 'Triage de incidentes', 'Iniciar ejercicio de recuperación')
+  await openWorkspaceSection(page, 'Flujos', 'Plantillas')
+  const drill = await startContractDrill(page, 'Iniciar ejercicio de recuperación')
 
   await expect(page.locator(`[data-testid="dlq-row-${drill.deadLetterId}"]`)).toBeVisible({ timeout: 30_000 })
   const outcome = page.getByTestId('dlq-recovery-drill-outcome')

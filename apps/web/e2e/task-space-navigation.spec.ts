@@ -111,6 +111,7 @@ test('workflow creation is reachable from the workflow inventory', async ({ page
   await expect(createWorkflowAction).toBeVisible()
   await expect(createWorkflowAction).toBeEnabled()
   await createWorkflowAction.click()
+  await page.getByRole('button', { name: /^Start blank\b/ }).click()
 
   const canvas = page.locator('.workspace-main .react-flow').first()
   await expect(canvas).toBeVisible()

@@ -92,15 +92,15 @@ test('recovery passport requires sandbox success and a separate apply decision',
   await expect(onboarding).toBeVisible()
   expect(await onboarding.evaluate((node) => getComputedStyle(node).position)).not.toBe('fixed')
   await captureEvidence(page, '01-contextual-onboarding-en')
-  await openWorkspaceSection(page, 'Workflows', 'Packs')
-  const pack = page.locator('.list-card').filter({ hasText: 'Incident triage' }).first()
+  await openWorkspaceSection(page, 'Workflows', 'Templates')
+  const pack = page.getByTestId('solution-pack-incident-triage')
   await pack.getByRole('button', { name: 'Install', exact: true }).click()
   await expect(page.getByText(/Pack installed/)).toBeVisible()
   // The success toast precedes the async refresh + workflow-open handoff. Wait
   // for that final destination before navigating back, otherwise the handoff
-  // can replace the Packs DOM while Playwright is clicking its action button.
-  await expect(page.getByRole('heading', { name: 'Step setup', exact: true })).toBeVisible()
-  await openWorkspaceSection(page, 'Workflows', 'Packs')
+  // can replace the catalog DOM while Playwright is clicking its action button.
+  await expect(page.getByRole('heading', { name: 'Build', exact: true })).toBeVisible()
+  await openWorkspaceSection(page, 'Workflows', 'Templates')
   const selectedBeforeInitialFailure = await selectedDeadLetterTestId(page)
   await pack.getByRole('button', { name: 'Start recovery drill', exact: true }).click()
 
@@ -185,8 +185,8 @@ test('recovery passport requires sandbox success and a separate apply decision',
   // Explicit use returns the immutable source, then the normal sandbox and
   // production Apply gates run again against the fresh failure.
   await page.getByRole('button', { name: 'Close', exact: true }).click()
-  await openWorkspaceSection(page, 'Workflows', 'Packs')
-  const repeatPack = page.locator('.list-card').filter({ hasText: 'Incident triage' }).first()
+  await openWorkspaceSection(page, 'Workflows', 'Templates')
+  const repeatPack = page.getByTestId('solution-pack-incident-triage')
   const selectedBeforeRepeatedFailure = await selectedDeadLetterTestId(page)
   await repeatPack.getByRole('button', { name: 'Start recovery drill', exact: true }).click()
   const repeatedFailure = await waitForNewSelectedFailure(page, selectedBeforeRepeatedFailure, 'page_oncall')
@@ -260,8 +260,8 @@ test('recovery passport requires sandbox success and a separate apply decision',
   // Locale parity on the playbook's own live surface (not only a unit render).
   await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
   await page.reload()
-  await openWorkspaceSection(page, 'Flujos', 'Paquetes')
-  const spanishPlaybookPack = page.locator('.list-card').filter({ hasText: 'Triage de incidentes' }).first()
+  await openWorkspaceSection(page, 'Flujos', 'Plantillas')
+  const spanishPlaybookPack = page.getByTestId('solution-pack-incident-triage')
   const selectedBeforeSpanishFailure = await selectedDeadLetterTestId(page)
   await spanishPlaybookPack.getByRole('button', { name: 'Iniciar ejercicio de recuperación', exact: true }).click()
   const spanishPlaybookFailure = await waitForNewSelectedFailure(page, selectedBeforeSpanishFailure, 'page_oncall')
@@ -316,7 +316,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   // A separate occurrence drives the regression state so the successful-use
   // smoke above and the failed-validation smoke below remain causally honest.
   await page.getByRole('button', { name: 'Cerrar', exact: true }).click()
-  await openWorkspaceSection(page, 'Flujos', 'Paquetes')
+  await openWorkspaceSection(page, 'Flujos', 'Plantillas')
   const selectedBeforeSpanishRegression = await selectedDeadLetterTestId(page)
   await spanishPlaybookPack.getByRole('button', { name: 'Iniciar ejercicio de recuperación', exact: true }).click()
   const spanishRegressionFailure = await waitForNewSelectedFailure(
@@ -371,12 +371,12 @@ test('recovery passport requires sandbox success and a separate apply decision',
   // same dialog stays useful without an AI provider and never enables the
   // sandbox/apply actions for a no-op suggestion.
   await page.reload()
-  await openWorkspaceSection(page, 'Flujos', 'Paquetes')
-  const spanishPack = page.locator('.list-card').filter({ hasText: 'Escalamiento de soporte' }).first()
+  await openWorkspaceSection(page, 'Flujos', 'Plantillas')
+  const spanishPack = page.getByTestId('solution-pack-support-escalation')
   await spanishPack.getByRole('button', { name: 'Instalar', exact: true }).click()
   await expect(page.getByText(/Pack instalado/)).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Configuración del paso', exact: true })).toBeVisible()
-  await openWorkspaceSection(page, 'Flujos', 'Paquetes')
+  await expect(page.getByRole('heading', { name: 'Crear', exact: true })).toBeVisible()
+  await openWorkspaceSection(page, 'Flujos', 'Plantillas')
   const selectedBeforeFallbackFailure = await selectedDeadLetterTestId(page)
   await spanishPack.getByRole('button', { name: 'Iniciar ejercicio de recuperación', exact: true }).click()
   const spanishFailure = await waitForNewSelectedFailure(page, selectedBeforeFallbackFailure)

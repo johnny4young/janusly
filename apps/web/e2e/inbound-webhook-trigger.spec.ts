@@ -62,7 +62,7 @@ test('authors and executes one durable idempotent inbound JSON event', async ({ 
   await page.goto('/')
   await page.getByRole('button', { name: 'Workflows', exact: true }).click()
   await page.getByTestId(`workflows-row-${workflowId}`).click()
-  await openWorkspaceSection(page, 'Workflows', 'Configure')
+  await openWorkspaceSection(page, 'Workflows', 'Build')
   await page.locator('.react-flow__node[data-id="incoming"] .workflow-node').click()
 
   await expect(page.getByLabel('Endpoint key')).toHaveValue(endpointKey)

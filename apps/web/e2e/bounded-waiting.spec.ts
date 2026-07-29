@@ -21,7 +21,6 @@ type RunSnapshot = {
 const locales = {
   en: {
     flows: 'Workflows',
-    stepSetup: 'Step setup',
     runs: 'Runs',
     recover: 'Recover',
     approvalDeadline: 'Decision deadline',
@@ -33,7 +32,6 @@ const locales = {
   },
   es: {
     flows: 'Flujos',
-    stepSetup: 'Configuración de paso',
     runs: 'Ejecuciones',
     recover: 'Recuperar',
     approvalDeadline: 'Fecha límite para decidir',
@@ -123,7 +121,7 @@ async function openWorkflow(page: Page, locale: keyof typeof locales, workflowId
   await openWorkspaceSection(
     page,
     copy.flows,
-    locale === 'en' ? 'Configure' : 'Configurar',
+    locale === 'en' ? 'Build' : 'Crear',
   )
 }
 

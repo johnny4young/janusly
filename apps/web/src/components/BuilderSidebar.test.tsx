@@ -30,10 +30,8 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof BuilderSidebar>>
       'ai.write', 'evals.read', 'packs.read', 'credentials.read', 'members.read',
     ],
     onWorkflowNameChange: vi.fn(),
-    onAdd: vi.fn(),
     onValidate: vi.fn(),
     onSave: vi.fn(),
-    onNew: vi.fn(),
     onStart: vi.fn(),
     onOpenTab: vi.fn(),
     onOpenHelp: vi.fn(),
@@ -82,19 +80,11 @@ describe('<BuilderSidebar />', () => {
     expect(runButton).not.toBeDisabled()
   })
 
-  it('keeps palette steps clickable while exposing a copy drag payload', () => {
-    const props = renderSidebar()
-    const setData = vi.fn()
-    const dataTransfer = { setData, effectAllowed: 'all' } as unknown as DataTransfer
-    const step = screen.getAllByRole('button', { name: 'Call an API' })[0]
+  it('keeps step discovery out of global navigation', () => {
+    renderSidebar()
 
-    expect(step).toHaveAttribute('draggable', 'true')
-    fireEvent.dragStart(step, { dataTransfer })
-    expect(setData).toHaveBeenCalledWith('application/x-janusly-node-type', 'http')
-    expect(dataTransfer.effectAllowed).toBe('copy')
-
-    fireEvent.click(step)
-    expect(props.onAdd).toHaveBeenCalledWith('http')
+    expect(screen.queryByRole('button', { name: 'Call an API' })).not.toBeInTheDocument()
+    expect(screen.getByRole('searchbox', { name: 'Search sections…' })).toBeInTheDocument()
   })
 
   it('opens real keyboard help and does not render the dead whats-new affordance', () => {
@@ -121,7 +111,7 @@ describe('<BuilderSidebar />', () => {
     expect(screen.getByRole('button', { name: /^Settings$/ })).toBeInTheDocument()
     expect(screen.queryByRole('textbox', { name: 'Name' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Call an API' })).not.toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: 'Search sections…' })).toBeInTheDocument()
+    expect(screen.getByRole('searchbox', { name: 'Search sections…' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Advanced/ })).not.toBeInTheDocument()
   })
 

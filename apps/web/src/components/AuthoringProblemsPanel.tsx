@@ -32,12 +32,14 @@ export function AuthoringProblemsPanel({
   aiReviewIssues,
   workflowEdges,
   onValidate,
+  onOpenProblem,
 }: {
   validationIssues: ValidationIssue[]
   readiness: ReadinessResult | null
   aiReviewIssues: AiReviewIssue[]
   workflowEdges: WorkflowGraphEdge[]
   onValidate(): Promise<boolean>
+  onOpenProblem?(): void
 }) {
   const { t } = useT()
   const selectNode = useWorkflowStore((state) => state.selectNode)
@@ -55,12 +57,14 @@ export function AuthoringProblemsPanel({
       else requestAuthoringFocus({ kind: 'node', id: problem.nodeId })
       selectNode(problem.nodeId)
       setActiveTab('inspector')
+      onOpenProblem?.()
       return
     }
     if (problem.edgeId) {
       requestAuthoringFocus({ kind: 'edge', id: problem.edgeId })
       selectEdge(problem.edgeId)
       setActiveTab('inspector')
+      onOpenProblem?.()
     }
   }
 

@@ -1,4 +1,4 @@
-import { openWorkspaceSection } from './_helpers/workspace-navigation'
+import { addCanvasStep, openWorkspaceSection } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { createServer, type ServerResponse } from 'node:http'
 import { once } from 'node:events'
@@ -137,8 +137,8 @@ test('a real running node pulses, honors reduced motion, and cannot mutate the a
   try {
     await page.goto('/')
     await hideUnrelatedOverlays(page)
-    await openWorkspaceSection(page, 'Workflows', 'Build with AI')
-    await page.locator('.sb-palette').getByRole('button', { name: 'Call an API', exact: true }).click()
+    await openWorkspaceSection(page, 'Workflows', 'Build')
+    await addCanvasStep(page, 'Call an API')
 
     const authorCanvas = page.locator('.workspace-canvas-wrapper .canvas-frame[data-mode="author"]')
     const authorViewport = authorCanvas.locator('.react-flow__viewport')
@@ -188,7 +188,7 @@ test('a real running node pulses, honors reduced motion, and cannot mutate the a
     expect(await runningNode.evaluate(element => getComputedStyle(element).boxShadow)).not.toBe('none')
     await captureElement(englishMap, 'web-en-run-map-running-reduced-motion')
 
-    await openWorkspaceSection(page, 'Workflows', 'Build with AI')
+    await openWorkspaceSection(page, 'Workflows', 'Build')
     await expect(authorCanvas).toBeVisible()
     expect(await authorCanvas.locator('.react-flow__node').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-id')))).toEqual(authorNodeIds)
     expect(await authorViewport.getAttribute('style')).toBe(authorViewportAfterZoom)

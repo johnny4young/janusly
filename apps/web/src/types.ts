@@ -260,6 +260,11 @@ export type McpToolDescriptor = {
 }
 
 export type AiMode = 'ai' | 'fallback' | 'error'
+export type AiAuthoringAction = 'generate' | 'explain' | 'review' | 'fix'
+export type AiAuthoringActionRequest = {
+  id: number
+  action: AiAuthoringAction
+}
 
 /** Budget-driven reduction of Best-of-N candidates for one AI generation. */
 export type AiCandidateBackoff = { from: number; to: number }
@@ -370,6 +375,18 @@ export type WorkflowDefinition = {
   templatePolicy?: 'lenient' | 'strict'
   /** Editor-only layout metadata; runtime consumers ignore it. */
   ui?: { positions?: Record<string, { x: number; y: number }> }
+}
+export type WorkflowImprovementSuggestion = {
+  workflow: WorkflowDefinition
+  rationale: string
+  approachLabel: string
+  confidence: number
+}
+export type WorkflowImprovementResult = {
+  mode: AiMode
+  suggestions: WorkflowImprovementSuggestion[]
+  model?: string
+  aiError?: string
 }
 export type WorkflowGraphNode = Node<WorkflowNodeData>
 export type WorkflowGraphEdge = Edge<WorkflowEdgeData & { hasCondition?: boolean }>

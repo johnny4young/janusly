@@ -53,7 +53,7 @@ describe('useWorkflowStore', () => {
 
   it('addNode appends a node with its preset config and an empty label (leaf component resolves)', () => {
     useWorkflowStore.getState().addNode('http')
-    const { nodes } = useWorkflowStore.getState()
+    const { nodes, selectedNodeId, selectedEdgeId } = useWorkflowStore.getState()
     expect(nodes).toHaveLength(1)
     expect(nodes[0].data.type).toBe('http')
     // `data.label` stays empty so `WorkflowStepNode` resolves it via
@@ -61,6 +61,8 @@ describe('useWorkflowStore', () => {
     // out of the upstream `visibleNodes` memo dep array.
     expect(nodes[0].data.label).toBe('')
     expect(nodes[0].data.config).toEqual({ url: 'https://api.github.com' })
+    expect(selectedNodeId).toBe(nodes[0].id)
+    expect(selectedEdgeId).toBeNull()
   })
 
   it('starts with a clean blank draft rather than example workflow data', () => {

@@ -30,6 +30,7 @@ function props(overrides: Partial<RightPanelProps> = {}): RightPanelProps {
       workflows: [],
       currentWorkflowId: 'untitled',
       currentWorkflowName: 'Untitled',
+      aiActionRequest: null,
       onUpdateNodeConfig: vi.fn(),
       onUpdateNodeType: vi.fn(),
       onUpdateEdgeCondition: vi.fn(),
@@ -38,6 +39,8 @@ function props(overrides: Partial<RightPanelProps> = {}): RightPanelProps {
       onGenerateWorkflow: vi.fn(async () => ({ mode: 'fallback' as const, workflow: { dslVersion: '1.0' as const, id: 'wf', name: 'Workflow', nodes: [], edges: [] } })),
       onExplainWorkflow: vi.fn(async () => ({ mode: 'fallback' as const, explanation: '' })),
       onReviewWorkflow: vi.fn(async () => ({ mode: 'fallback' as const, review: { status: 'pass' as const, issues: [] } })),
+      onSuggestWorkflowImprovement: vi.fn(async () => ({ mode: 'fallback' as const, suggestions: [] })),
+      onApplyWorkflowImprovement: vi.fn(async () => true),
     },
     catalog: {
       tools: [],
@@ -69,7 +72,7 @@ function props(overrides: Partial<RightPanelProps> = {}): RightPanelProps {
       onReplayDeadLetter: vi.fn(),
       onResolveDeadLetter: vi.fn(),
     },
-    navigation: { onOpenTab: vi.fn(), activeRecoveryCaseId: null },
+    navigation: { onOpenTab: vi.fn(), onOpenAiAction: vi.fn(), activeRecoveryCaseId: null },
     ...overrides,
   }
 }
@@ -94,7 +97,7 @@ describe('<RightPanel /> recovery task space', () => {
     render(<RightPanel {...props({
       tab: 'recover',
       permissions: ['runs.read', 'recovery.read'],
-      navigation: { onOpenTab, activeRecoveryCaseId: null },
+      navigation: { onOpenTab, onOpenAiAction: vi.fn(), activeRecoveryCaseId: null },
     })} />)
 
     expect(await screen.findByTestId('runs-panel-mode'))

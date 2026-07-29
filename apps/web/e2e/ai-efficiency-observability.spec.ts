@@ -1,4 +1,4 @@
-import { openWorkspaceSection } from './_helpers/workspace-navigation'
+import { openWorkflowAiAction, openWorkspaceSection } from './_helpers/workspace-navigation'
 /** Real-stack proof for AI/run efficiency in Operations, Reasoning, and Copilot. */
 
 import { execFile } from 'node:child_process'
@@ -305,11 +305,7 @@ test('AI and run efficiency are observable in English and Spanish', async ({ pag
 
     await captureRunUsageStates(page, runId, locale)
 
-    await openWorkspaceSection(
-      page,
-      locale === 'en' ? 'Workflows' : 'Flujos',
-      locale === 'en' ? 'Build with AI' : 'Crear con IA',
-    )
+    await openWorkflowAiAction(page, locale === 'en' ? 'Workflows' : 'Flujos')
     await page.locator('.copilot-prompt').fill(locale === 'en'
       ? 'Draft a budget-aware approval flow.'
       : 'Arma un flujo de aprobación ajustado al presupuesto.')

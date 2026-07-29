@@ -56,7 +56,7 @@ test('Recovery Center remains usable on mobile and the builder is one tap away',
   await expect(drawer).toBeHidden()
   await expect(navTrigger).toBeFocused()
 
-  await openWorkspaceSection(page, 'Workflows', 'Build with AI')
+  await openWorkspaceSection(page, 'Workflows', 'Build')
   await expect(drawer).toBeHidden()
   await expect(page.getByTestId('canvas-empty')).toBeVisible()
   await expect(page.locator('.workspace-main .workflow-node')).toHaveCount(0)

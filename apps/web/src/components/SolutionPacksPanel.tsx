@@ -8,7 +8,8 @@
  * computed client-side against the already-fetched `credentials` list, so
  * there's no per-pack detail fetch.
  *
- * Used by `RightPanel.tsx` (tab === 'packs').
+ * Used by `RightPanel.tsx` as a standalone compatibility route and embedded
+ * in the unified Templates catalog.
  *
  * Invariants:
  * - The secret VALUE / env-var name never reaches this surface — packs
@@ -30,13 +31,30 @@ type SolutionPacksPanelProps = {
   onSampleRun: (packId: string) => void
   onInjectFailure: (packId: string, fixtureId: string) => void
   canInstall?: boolean
+  embedded?: boolean
+  query?: string
+  onQueryChange?: (value: string) => void
+  showSearch?: boolean
 }
 
-export function SolutionPacksPanel({ packs, credentials, onInstall, onSampleRun, onInjectFailure, canInstall = true }: SolutionPacksPanelProps) {
+export function SolutionPacksPanel({
+  packs,
+  credentials,
+  onInstall,
+  onSampleRun,
+  onInjectFailure,
+  canInstall = true,
+  embedded = false,
+  query: controlledQuery,
+  onQueryChange,
+  showSearch = true,
+}: SolutionPacksPanelProps) {
   const { t, i18n } = useT()
   const setActiveTab = useWorkflowStore((state) => state.setActiveTab)
-  const [query, setQuery] = useState('')
+  const [internalQuery, setInternalQuery] = useState('')
   const [selectedDrills, setSelectedDrills] = useState<Record<string, string>>({})
+  const query = controlledQuery ?? internalQuery
+  const setQuery = onQueryChange ?? setInternalQuery
   const credentialKeys = new Set(credentials.map((c) => `${c.kind}:${c.name}`))
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -55,23 +73,24 @@ export function SolutionPacksPanel({ packs, credentials, onInstall, onSampleRun,
   }, [packs, query, t, i18n.language])
 
   if (packs.length === 0) {
-    return (
-      <PanelChrome title={t('packs.title')} description={t('packs.description')} icon={<Package size={18} />}>
-        <div className="panel-list">
-          <EmptyView
-            icon={<Package size={22} />}
-            title={t('packs.empty.title')}
-            body={t('packs.empty.body')}
-            cta={{ label: t('packs.empty.cta'), onClick: () => setActiveTab('templates') }}
-          />
-        </div>
-      </PanelChrome>
+    const empty = (
+      <div className="panel-list">
+        <EmptyView
+          icon={<Package size={22} />}
+          title={t('packs.empty.title')}
+          body={t('packs.empty.body')}
+          cta={embedded ? undefined : { label: t('packs.empty.cta'), onClick: () => setActiveTab('templates') }}
+        />
+      </div>
     )
+    return embedded
+      ? empty
+      : <PanelChrome title={t('packs.title')} description={t('packs.description')} icon={<Package size={18} />}>{empty}</PanelChrome>
   }
 
-  return (
-    <PanelChrome title={t('packs.title')} description={t('packs.description')} icon={<Package size={18} />}>
-      <PanelSearch value={query} onChange={setQuery} placeholder={t('packs.searchPlaceholder')} />
+  const content = (
+    <>
+      {showSearch && <PanelSearch value={query} onChange={setQuery} placeholder={t('packs.searchPlaceholder')} />}
       {filtered.length === 0 && (
         <div className="panel-list">
           <EmptyView
@@ -92,7 +111,7 @@ export function SolutionPacksPanel({ packs, credentials, onInstall, onSampleRun,
             ?? pack.failureFixtures[0]
           const drillDescriptionId = `pack-drill-description-${pack.id}`
           return (
-            <div key={pack.id} className="list-card">
+            <div key={pack.id} className="list-card" data-testid={`solution-pack-${pack.id}`}>
               <div className="split-row" style={{ width: '100%' }}>
                 <span className="mode-pill mode-pill-neutral">{categoryLabel}</span>
                 <span className="mode-pill mode-pill-neutral">{t('packs.stepCount', { count: pack.nodeCount })}</span>
@@ -215,6 +234,10 @@ export function SolutionPacksPanel({ packs, credentials, onInstall, onSampleRun,
           )
         })}
       </div>
-    </PanelChrome>
+    </>
   )
+
+  return embedded
+    ? content
+    : <PanelChrome title={t('packs.title')} description={t('packs.description')} icon={<Package size={18} />}>{content}</PanelChrome>
 }

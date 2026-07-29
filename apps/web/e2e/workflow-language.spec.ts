@@ -14,14 +14,12 @@ type RunSnapshot = {
 const contracts = {
   en: {
     flows: 'Workflows',
-    stepSetup: 'Step setup',
     useContext: 'Use context',
     expression: 'Branch expression',
     valid: 'Expression matches the runtime grammar.',
   },
   es: {
     flows: 'Flujos',
-    stepSetup: 'Configuración de paso',
     useContext: 'Usar contexto',
     expression: 'Expresión de rama',
     valid: 'La expresión cumple la gramática del entorno de ejecución.',
@@ -97,7 +95,7 @@ async function openExpressionAssistant(
   const row = page.getByTestId(`workflows-row-${workflowId}`)
   await expect(row).toContainText(workflowName)
   await row.click()
-  await openWorkspaceSection(page, contract.flows, locale === 'en' ? 'Configure' : 'Configurar')
+  await openWorkspaceSection(page, contract.flows, locale === 'en' ? 'Build' : 'Crear')
   await page.locator('.react-flow__node[data-id="rules"] .workflow-node').click()
 
   const inspector = page.getByTestId('inspector-node-rules')

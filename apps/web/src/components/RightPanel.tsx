@@ -21,11 +21,10 @@
  */
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
-import { Activity, AlertCircle, Boxes, Database, FlaskConical, GitBranch, KeyRound, Layers3, LockKeyhole, Plug, Search, ShieldCheck, Users, Workflow } from 'lucide-react'
-import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiCandidateBackoff, AiHealth, AiMode, AiReviewIssue, Credential, ReadinessResult, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
+import { Activity, AlertCircle, Boxes, Database, FlaskConical, KeyRound, Layers3, LockKeyhole, Plug, ShieldCheck, Users, Workflow } from 'lucide-react'
+import type { ActiveTab, AiAuthoringActionRequest, AiCandidateBackoff, AiHealth, AiMode, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, WorkflowDefinition, WorkflowImprovementResult, WorkflowImprovementSuggestion } from '../types'
 import { AiCopilotPanel } from './AiCopilotPanel'
-import { InspectorPanel } from './InspectorPanel'
-import { AuthoringProblemsPanel } from './AuthoringProblemsPanel'
+import { AuthoringPanel, type AuthoringPanelModel } from './AuthoringPanel'
 import { EmptyView, PanelChrome, PanelSearch } from './panel-primitives'
 import { ErrorBoundary } from './ErrorBoundary'
 import { PanelErrorFallback } from './PanelErrorFallback'
@@ -50,41 +49,16 @@ const RunsPanel = lazy(() => import('./RunsPanel').then((m) => ({ default: m.Run
 const RecoveryCasePanel = lazy(() => import('./RecoveryCasePanel').then((m) => ({ default: m.RecoveryCasePanel })))
 const ReasoningPanel = lazy(() => import('./ReasoningPanel').then((m) => ({ default: m.ReasoningPanel })))
 const CredentialRotateModal = lazy(() => import('./CredentialRotateModal').then((m) => ({ default: m.CredentialRotateModal })))
-const VersionHistoryPanel = lazy(() => import('./VersionHistoryPanel').then((m) => ({ default: m.VersionHistoryPanel })))
-const WorkflowRolloutPanel = lazy(() => import('./WorkflowRolloutPanel').then((m) => ({ default: m.WorkflowRolloutPanel })))
-const WorkflowSloPanel = lazy(() => import('./WorkflowSloPanel').then((m) => ({ default: m.WorkflowSloPanel })))
-const ScheduleHistoryPanel = lazy(() => import('./ScheduleHistoryPanel').then((m) => ({ default: m.ScheduleHistoryPanel })))
-const WorkflowMetadataPanel = lazy(() => import('./WorkflowMetadataPanel').then((m) => ({ default: m.WorkflowMetadataPanel })))
 import { api } from '../api'
 import { expiryStatus } from '../credential-expiry'
 import { useWorkflowStore } from '../store'
 import { workspaceDestinationForTab } from '../workspace-locations'
 import { getResolvedLocale, tTemplateCategory, tTemplateDescription, tTemplateName, tToolDescription, useT } from '../i18n'
+import type { WorkflowCreationMode } from './WorkflowsDashboard'
 
-export type RightPanelAuthoring = {
+export type RightPanelAuthoring = AuthoringPanelModel & {
   aiHealth: AiHealth | null
-  runNodes: RunNode[]
-  selectedNode: WorkflowGraphNode | null
-  selectedEdge: WorkflowGraphEdge | null
-  workflowNodes: WorkflowGraphNode[]
-  workflowEdges: WorkflowGraphEdge[]
-  validationIssues: ValidationIssue[]
-  readinessResult: ReadinessResult | null
-  aiReviewIssues: AiReviewIssue[]
-  tools: ToolSchema[]
-  workflows: SavedWorkflow[]
-  currentWorkflowId: string
-  currentWorkflowName: string
-  /** Declared workflow input shape; rendered in the no-selection inspector card. */
-  currentWorkflowInputs?: WorkflowDefinition['inputs']
-  /** Declared workflow output projection; rendered alongside `currentWorkflowInputs`. */
-  currentWorkflowOutputs?: WorkflowDefinition['outputs']
-  onUpdateNodeConfig: (config: Record<string, unknown>) => void
-  onUpdateNodeType: (type: string) => void
-  onUpdateEdgeCondition: (edgeId: string, condition: string) => void
-  onValidateWorkflow(): Promise<boolean>
-  /** Opens the "Insert snippet…" dialog (also bound to a Cmd+K palette entry). */
-  onInsertSnippet: () => void
+  aiActionRequest: AiAuthoringActionRequest | null
   /** Resolves `null` when the author declined the unsaved-canvas guard. */
   onGenerateWorkflow: (prompt: string) => Promise<{
     mode: AiMode
@@ -99,6 +73,8 @@ export type RightPanelAuthoring = {
     model?: string
     aiError?: string
   }>
+  onSuggestWorkflowImprovement: () => Promise<WorkflowImprovementResult>
+  onApplyWorkflowImprovement: (suggestion: WorkflowImprovementSuggestion) => Promise<boolean>
 }
 
 export type RightPanelCatalog = {
@@ -108,7 +84,7 @@ export type RightPanelCatalog = {
   credentials: Credential[]
   workflows: SavedWorkflow[]
   onOpenWorkflow: (id: string) => void
-  onCreateWorkflow: () => void
+  onCreateWorkflow: (mode: WorkflowCreationMode) => void
   onUseTemplate: (workflow: WorkflowDefinition) => void
   onInstallPlugin: (pluginId: string) => void
   onInstallPack: (packId: string) => void
@@ -146,6 +122,7 @@ export type RightPanelExecution = {
 
 export type RightPanelNavigation = {
   onOpenTab: (tab: ActiveTab) => void
+  onOpenAiAction: (action: AiAuthoringActionRequest['action']) => void
   activeRecoveryCaseId: string | null
 }
 
@@ -237,6 +214,9 @@ function RightPanelRouter(props: RightPanelProps) {
       onGenerateWorkflow={authoring.onGenerateWorkflow}
       onExplainWorkflow={authoring.onExplainWorkflow}
       onReviewWorkflow={authoring.onReviewWorkflow}
+      actionRequest={authoring.aiActionRequest}
+      onSuggestWorkflowImprovement={authoring.onSuggestWorkflowImprovement}
+      onApplyWorkflowImprovement={authoring.onApplyWorkflowImprovement}
       onOpenRuns={() => navigation.onOpenTab('runs')}
       onOpenTemplates={() => navigation.onOpenTab('templates')}
     />
@@ -276,49 +256,25 @@ function RightPanelRouter(props: RightPanelProps) {
     </PanelChrome>
   )
   if (props.tab === 'inspector') return (
-    <PanelChrome title={t('rightPanel.inspector.title')} description={t('rightPanel.inspector.description')} icon={<GitBranch size={18} />}>
-      <AuthoringProblemsPanel
-        validationIssues={authoring.validationIssues}
-        readiness={authoring.readinessResult}
-        aiReviewIssues={authoring.aiReviewIssues}
-        workflowEdges={authoring.workflowEdges}
-        onValidate={authoring.onValidateWorkflow}
-      />
-      <InspectorPanel
-        readOnly={!can('workflows.write')}
-        selectedNode={authoring.selectedNode}
-        selectedEdge={authoring.selectedEdge}
-        runNodes={authoring.runNodes}
-        validationIssues={authoring.validationIssues}
-        tools={authoring.tools}
-        workflows={authoring.workflows}
-        workflowNodes={authoring.workflowNodes}
-        workflowEdges={authoring.workflowEdges}
-        currentWorkflowId={authoring.currentWorkflowId}
-        currentWorkflowName={authoring.currentWorkflowName}
-        currentWorkflowInputs={authoring.currentWorkflowInputs}
-        currentWorkflowOutputs={authoring.currentWorkflowOutputs}
-        onUpdateNodeConfig={authoring.onUpdateNodeConfig}
-        onUpdateNodeType={authoring.onUpdateNodeType}
-        onUpdateEdgeCondition={authoring.onUpdateEdgeCondition}
-        onInsertSnippet={authoring.onInsertSnippet}
-      />
-      {/* Auxiliary inspector panels are lazy — an inner <Suspense> (below the
-          eager InspectorPanel) keeps the node config instant while these load on
-          first inspector visit. `null` fallback: they're secondary and three
-          self-gate to null on unsaved drafts, so a "Working…" line would flash
-          spuriously under a ready config. */}
-      <Suspense fallback={null}>
-        <VersionHistoryPanel />
-        <WorkflowRolloutPanel readOnly={!can('workflows.write')} />
-        <WorkflowSloPanel readOnly={!can('workflows.write')} />
-        <ScheduleHistoryPanel />
-        <WorkflowMetadataPanel readOnly={!can('workflows.write')} />
-      </Suspense>
-    </PanelChrome>
+    <AuthoringPanel
+      model={authoring}
+      canWrite={can('workflows.write')}
+      canUseAi={can('ai.write')}
+      onOpenAiAction={navigation.onOpenAiAction}
+    />
   )
   if (props.tab === 'templates') return (
-    <TemplatesPanel templates={catalog.templates} onUseTemplate={catalog.onUseTemplate} canUse={can('workflows.write')} />
+    <TemplatesPanel
+      templates={catalog.templates}
+      solutionPacks={catalog.solutionPacks}
+      credentials={catalog.credentials}
+      onUseTemplate={catalog.onUseTemplate}
+      onInstallPack={catalog.onInstallPack}
+      onSampleRunPack={catalog.onSampleRunPack}
+      onInjectPackFailure={catalog.onInjectPackFailure}
+      canUse={can('workflows.write')}
+      canInstallPacks={can('packs.install')}
+    />
   )
   if (props.tab === 'packs') return (
     <SolutionPacksPanel
@@ -370,7 +326,29 @@ function RightPanelRouter(props: RightPanelProps) {
   )
 }
 
-export function TemplatesPanel({ templates, onUseTemplate, canUse = true }: Pick<RightPanelCatalog, 'templates' | 'onUseTemplate'> & { canUse?: boolean }) {
+export function TemplatesPanel({
+  templates,
+  solutionPacks,
+  credentials,
+  onUseTemplate,
+  onInstallPack,
+  onSampleRunPack,
+  onInjectPackFailure,
+  canUse = true,
+  canInstallPacks = true,
+}: Pick<
+  RightPanelCatalog,
+  | 'templates'
+  | 'solutionPacks'
+  | 'credentials'
+  | 'onUseTemplate'
+  | 'onInstallPack'
+  | 'onSampleRunPack'
+  | 'onInjectPackFailure'
+> & {
+  canUse?: boolean
+  canInstallPacks?: boolean
+}) {
   const { t, i18n } = useT()
   const setActiveTab = useWorkflowStore(state => state.setActiveTab)
   const [query, setQuery] = useState('')
@@ -387,7 +365,7 @@ export function TemplatesPanel({ templates, onUseTemplate, canUse = true }: Pick
 
   return (
     <PanelChrome title={t('rightPanel.templates.title')} description={t('rightPanel.templates.description')} icon={<Workflow size={18} />}>
-      {templates.length === 0 ? (
+      {templates.length === 0 && solutionPacks.length === 0 ? (
         <div className="panel-list">
           <EmptyView
             icon={<Workflow size={22} />}
@@ -399,30 +377,41 @@ export function TemplatesPanel({ templates, onUseTemplate, canUse = true }: Pick
       ) : (
         <>
           <PanelSearch value={query} onChange={setQuery} placeholder={t('rightPanel.templates.searchPlaceholder')} />
-          {filtered.length === 0 ? (
-            <div className="panel-list">
-              <EmptyView
-                icon={<Search size={22} />}
-                title={t('rightPanel.templates.noMatches.title')}
-                body={t('rightPanel.templates.noMatches.body')}
-                cta={{ label: t('common.clearFilter'), onClick: () => setQuery('') }}
-              />
-            </div>
-          ) : (
-            <div className="we-recipe-grid">
-              {filtered.map(template => (
-                <button key={template.id} className="list-card list-card-button" disabled={!canUse} onClick={() => onUseTemplate(template.workflow)}>
-                  <div className="split-row" style={{ width: '100%' }}>
-                    <span className="mode-pill mode-pill-neutral">{tTemplateCategory(template)}</span>
-                    <span className="mode-pill mode-pill-neutral">{t('rightPanel.templates.stepCount', { count: template.workflow.nodes.length })}</span>
-                  </div>
-                  <strong>{tTemplateName(template)}</strong>
-                  <span>{tTemplateDescription(template)}</span>
-                  <span className="list-card-action">{t('rightPanel.templates.useRecipe')}</span>
-                </button>
-              ))}
-            </div>
-          )}
+          <section className="template-catalog-section">
+            <div className="section-kicker">{t('rightPanel.templates.recipes')}</div>
+            {filtered.length === 0 ? (
+              <p className="helper-text">{t('rightPanel.templates.noRecipeMatches')}</p>
+            ) : (
+              <div className="we-recipe-grid">
+                {filtered.map(template => (
+                  <button key={template.id} className="list-card list-card-button" disabled={!canUse} onClick={() => onUseTemplate(template.workflow)}>
+                    <div className="split-row" style={{ width: '100%' }}>
+                      <span className="mode-pill mode-pill-neutral">{tTemplateCategory(template)}</span>
+                      <span className="mode-pill mode-pill-neutral">{t('rightPanel.templates.stepCount', { count: template.workflow.nodes.length })}</span>
+                    </div>
+                    <strong>{tTemplateName(template)}</strong>
+                    <span>{tTemplateDescription(template)}</span>
+                    <span className="list-card-action">{t('rightPanel.templates.useRecipe')}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+          <section className="template-catalog-section">
+            <div className="section-kicker">{t('rightPanel.templates.solutionPacks')}</div>
+            <SolutionPacksPanel
+              embedded
+              showSearch={false}
+              query={query}
+              onQueryChange={setQuery}
+              packs={solutionPacks}
+              credentials={credentials}
+              onInstall={onInstallPack}
+              onSampleRun={onSampleRunPack}
+              onInjectFailure={onInjectPackFailure}
+              canInstall={canInstallPacks}
+            />
+          </section>
         </>
       )}
     </PanelChrome>

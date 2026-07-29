@@ -1,4 +1,4 @@
-import { openWorkspaceSection } from './_helpers/workspace-navigation'
+import { openWorkflowAiAction } from './_helpers/workspace-navigation'
 import { expect, test, type Page } from '@playwright/test'
 
 async function forceLocalAiMode(page: Page) {
@@ -20,7 +20,7 @@ test('AI Studio local mode points operators to the supported Anthropic key in bo
 
   await forceLocalAiMode(page)
   await page.goto('/')
-  await openWorkspaceSection(page, 'Workflows', 'Build with AI')
+  await openWorkflowAiAction(page, 'Workflows')
 
   const englishHero = page.locator('.copilot-hero')
   await expect(englishHero).toContainText('Add ANTHROPIC_API_KEY to the root .env')
@@ -29,7 +29,7 @@ test('AI Studio local mode points operators to the supported Anthropic key in bo
 
   await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
   await page.reload()
-  await openWorkspaceSection(page, 'Flujos', 'Crear con IA')
+  await openWorkflowAiAction(page, 'Flujos')
 
   const spanishHero = page.locator('.copilot-hero')
   await expect(spanishHero).toContainText('Agrega ANTHROPIC_API_KEY al archivo .env de la raíz')

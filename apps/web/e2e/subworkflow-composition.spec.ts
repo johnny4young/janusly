@@ -14,7 +14,6 @@ type RunSnapshot = {
 const locales = {
   en: {
     flows: 'Workflows',
-    stepSetup: 'Step setup',
     version: 'Version pin',
     pinned: /Pinned to exact version v\d+\. Clear the field to follow latest\./,
     latest: 'Leave blank to use the latest saved version at run time.',
@@ -22,7 +21,6 @@ const locales = {
   },
   es: {
     flows: 'Flujos',
-    stepSetup: 'Configuración de paso',
     version: 'Versión fija',
     pinned: /Fijado en la versión exacta v\d+\. Borra el campo para seguir la última\./,
     latest: 'Déjalo vacío para usar la última versión guardada al ejecutar.',
@@ -108,7 +106,7 @@ async function openVersionField(
   await openWorkspaceSection(
     page,
     contract.flows,
-    locale === 'en' ? 'Configure' : 'Configurar',
+    locale === 'en' ? 'Build' : 'Crear',
   )
   await page.locator('.react-flow__node[data-id="call-child"] .workflow-node').click()
   const surface = page.getByTestId('inspector-node-call-child').getByTestId('subworkflow-version-field')

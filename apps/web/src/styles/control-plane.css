@@ -1686,9 +1686,7 @@
 [data-density="compact"] .sb-workflow__ghost { height: 26px; }
 [data-density="compact"] .sb-ai-strip { padding: 6px 8px; margin: 0 12px 8px; }
 [data-density="compact"] .sb-view { padding: 5px 8px; }
-[data-density="compact"] .sb-chip { padding: 4px 6px; }
 [data-density="compact"] .sb-group { margin-bottom: 4px; }
-[data-density="compact"] .sb-cat { margin-bottom: 2px; }
 [data-density="compact"] .user-menu__item { padding: 5px 8px; }
 [data-density="compact"] .user-menu__workspace { padding: 8px; }
 [data-density="compact"] .user-menu__id { padding: 10px 12px; }

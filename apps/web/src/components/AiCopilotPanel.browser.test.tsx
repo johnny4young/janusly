@@ -25,6 +25,9 @@ function renderLocalModePanel() {
         mode: 'fallback' as const,
         review: { status: 'pass', issues: [] } as unknown as ReviewFindings,
       }))}
+      actionRequest={null}
+      onSuggestWorkflowImprovement={vi.fn(async () => ({ mode: 'fallback' as const, suggestions: [] }))}
+      onApplyWorkflowImprovement={vi.fn(async () => true)}
       onOpenRuns={vi.fn()}
       onOpenTemplates={vi.fn()}
     />,
@@ -78,6 +81,9 @@ describe('<AiCopilotPanel /> provider guidance (browser)', () => {
           mode: 'ai' as const,
           review: { status: 'pass', issues: [] } as unknown as ReviewFindings,
         }))}
+        actionRequest={null}
+        onSuggestWorkflowImprovement={vi.fn(async () => ({ mode: 'fallback' as const, suggestions: [] }))}
+        onApplyWorkflowImprovement={vi.fn(async () => true)}
         onOpenRuns={vi.fn()}
         onOpenTemplates={vi.fn()}
       />,

@@ -1,4 +1,4 @@
-import { openWorkspaceSection } from './_helpers/workspace-navigation'
+import { openWorkflowAiAction } from './_helpers/workspace-navigation'
 import { expect, test } from '@playwright/test'
 
 test('AI Studio drafts a flow from a business prompt', async ({ page }) => {
@@ -25,7 +25,7 @@ test('AI Studio drafts a flow from a business prompt', async ({ page }) => {
   })
 
   await page.goto('/')
-  await openWorkspaceSection(page, 'Workflows', 'Build with AI')
+  await openWorkflowAiAction(page, 'Workflows')
   await page.getByPlaceholder('Example: when a customer asks for a refund, check policy, summarize risk, and ask for approval.').fill('When a refund is risky, pause for approval before notifying the customer.')
   await page.getByRole('button', { name: 'Draft flow', exact: true }).click()
 
@@ -47,8 +47,7 @@ test('AI Studio explains the current flow from the panel', async ({ page }) => {
   })
 
   await page.goto('/')
-  await openWorkspaceSection(page, 'Workflows', 'Build with AI')
-  await page.getByRole('button', { name: 'Explain this flow', exact: true }).click()
+  await openWorkflowAiAction(page, 'Workflows', 'explain')
 
   await expect(page.getByText('Explanation for Untitled Workflow')).toBeVisible()
   await expect(page.getByText('This flow starts by calling an API, then coordinates an agent team for the next action.')).toBeVisible()

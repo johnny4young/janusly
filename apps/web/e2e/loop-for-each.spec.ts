@@ -15,7 +15,6 @@ type RunSnapshot = {
 const locales = {
   en: {
     flows: 'Workflows',
-    stepSetup: 'Step setup',
     runs: 'Runs',
     viewTimeline: 'View timeline',
     processingMode: 'Processing mode',
@@ -28,7 +27,6 @@ const locales = {
   },
   es: {
     flows: 'Flujos',
-    stepSetup: 'Configuración de paso',
     runs: 'Ejecuciones',
     viewTimeline: 'Ver cronología',
     processingMode: 'Modo de procesamiento',
@@ -119,7 +117,7 @@ async function openLoopConfig(
   const row = page.getByTestId(`workflows-row-${workflowId}`)
   await expect(row).toContainText(workflowName)
   await row.click()
-  await openWorkspaceSection(page, contract.flows, locale === 'en' ? 'Configure' : 'Configurar')
+  await openWorkspaceSection(page, contract.flows, locale === 'en' ? 'Build' : 'Crear')
   await page.locator('.react-flow__node[data-id="batch"] .workflow-node').click()
   return page.getByTestId('inspector-node-batch').getByTestId('loop-config')
 }

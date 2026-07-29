@@ -13,20 +13,29 @@ function makeTemplate(id: string, name: string): Template {
   }
 }
 
+const catalogProps = {
+  solutionPacks: [],
+  credentials: [],
+  onInstallPack: vi.fn(),
+  onSampleRunPack: vi.fn(),
+  onInjectPackFailure: vi.fn(),
+}
+
 describe('<TemplatesPanel />', () => {
   it('offers a Copilot CTA when no templates are loaded', () => {
-    render(<TemplatesPanel templates={[]} onUseTemplate={vi.fn()} />)
+    render(<TemplatesPanel templates={[]} onUseTemplate={vi.fn()} {...catalogProps} />)
     expect(screen.getByTestId('empty-state-cta')).toHaveTextContent('Generate one with Copilot')
   })
 
-  it('filters by search and offers clear-filter when nothing matches', () => {
+  it('filters recipes with the shared catalog search', async () => {
     render(
       <TemplatesPanel
         templates={[makeTemplate('t1', 'Invoice sync'), makeTemplate('t2', 'Lead router')]}
         onUseTemplate={vi.fn()}
+        {...catalogProps}
       />,
     )
-    expect(screen.getByText('Invoice sync')).toBeInTheDocument()
+    expect(await screen.findByText('Invoice sync')).toBeInTheDocument()
     expect(screen.getByText('Lead router')).toBeInTheDocument()
 
     const input = screen.getByPlaceholderText('Search templates…')
@@ -35,10 +44,10 @@ describe('<TemplatesPanel />', () => {
     expect(screen.queryByText('Lead router')).not.toBeInTheDocument()
 
     fireEvent.change(input, { target: { value: 'zzz-nope' } })
-    expect(screen.getByText('No templates match')).toBeInTheDocument()
+    expect(screen.getByText('No recipes match this search.')).toBeInTheDocument()
 
-    // Clearing the filter restores the full list.
-    fireEvent.click(screen.getByTestId('empty-state-cta'))
+    // Clearing the shared catalog search restores the full recipe list.
+    fireEvent.change(input, { target: { value: '' } })
     expect(screen.getByText('Invoice sync')).toBeInTheDocument()
     expect(screen.getByText('Lead router')).toBeInTheDocument()
   })

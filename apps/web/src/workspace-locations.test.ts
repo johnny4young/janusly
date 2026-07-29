@@ -34,13 +34,14 @@ describe('workspace locations', () => {
   })
 
   it('resolves a destination to its first permitted section', () => {
-    expect(resolveWorkspaceDestinationTarget('workflows', ['ai.write'])).toBe('copilot')
+    expect(resolveWorkspaceDestinationTarget('workflows', ['ai.write'])).toBeNull()
+    expect(resolveWorkspaceDestinationTarget('workflows', ['workflows.read'])).toBe('workflows')
     expect(resolveWorkspaceDestinationTarget('activity', ['recovery.read'])).toBe('recover')
     expect(resolveWorkspaceDestinationTarget('settings', ['credentials.read'])).toBe('credentials')
     expect(resolveWorkspaceDestinationTarget('settings', [])).toBeNull()
   })
 
-  it('keeps every permitted deep feature reachable in its contextual section list', () => {
+  it('lists only the visible task-oriented sections', () => {
     expect(listWorkspaceSections('workflows', [
       'workflows.read',
       'ai.write',
@@ -48,10 +49,8 @@ describe('workspace locations', () => {
       'packs.read',
     ]).map((section) => section.tab)).toEqual([
       'workflows',
-      'copilot',
       'inspector',
       'templates',
-      'packs',
       'experiments',
     ])
     expect(listWorkspaceSections('activity', [

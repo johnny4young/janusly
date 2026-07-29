@@ -1,15 +1,9 @@
-import { openWorkspaceSection } from './_helpers/workspace-navigation'
+import { addCanvasStep, openWorkspaceSection } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
 const API_URL = process.env.E2E_API_URL ?? 'http://localhost:3001'
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
-
-async function expandStepPaletteGroup(page: Page, name: RegExp) {
-  const group = page.getByRole('button', { name }).first()
-  if ((await group.count()) === 0) return
-  if ((await group.getAttribute('aria-expanded')) !== 'true') await group.click()
-}
 
 test('dev session can create, save, run, and reopen a workflow', async ({ page }) => {
   const workflowName = `E2E Noop ${Date.now()}`
@@ -19,9 +13,9 @@ test('dev session can create, save, run, and reopen a workflow', async ({ page }
 
   await page.getByRole('button', { name: 'Workflows', exact: true }).click()
   await page.getByRole('button', { name: 'New workflow', exact: true }).click()
+  await page.getByRole('button', { name: /^Start blank\b/ }).click()
   await page.getByRole('textbox', { name: 'Name' }).fill(workflowName)
-  await expandStepPaletteGroup(page, /^Misc\b/)
-  await page.getByRole('button', { name: /Do nothing/i }).click()
+  await addCanvasStep(page, 'Do nothing')
 
   await page.getByRole('button', { name: 'Validate', exact: true }).click()
   await expect(page.getByText('Flow is ready to run')).toBeVisible()
@@ -31,7 +25,7 @@ test('dev session can create, save, run, and reopen a workflow', async ({ page }
 
   await page.getByRole('button', { name: 'Run', exact: true }).click()
   await expect(page.getByText(/Run started:/)).toBeVisible()
-  await openWorkspaceSection(page, 'Workflows', 'Build with AI')
+  await openWorkspaceSection(page, 'Workflows', 'Build')
   await expect(page.locator('.workflow-node').filter({ hasText: 'Do nothing' }).filter({ hasText: 'Done' })).toBeVisible({ timeout: 30_000 })
 
   await page.getByRole('button', { name: 'Workflows', exact: true }).click()
@@ -45,9 +39,9 @@ test('human form pauses a run, validates input, and resumes with submitted outpu
 
   await page.getByRole('button', { name: 'Workflows', exact: true }).click()
   await page.getByRole('button', { name: 'New workflow', exact: true }).click()
+  await page.getByRole('button', { name: /^Start blank\b/ }).click()
   await page.getByRole('textbox', { name: 'Name' }).fill(`E2E Human Form ${Date.now()}`)
-  await expandStepPaletteGroup(page, /^Human-in-the-loop\b/)
-  await page.getByRole('button', { name: /Collect form/i }).click()
+  await addCanvasStep(page, 'Collect form')
 
   await page.getByRole('button', { name: 'Validate', exact: true }).click()
   await expect(page.getByText('Flow is ready to run')).toBeVisible()
@@ -64,7 +58,7 @@ test('human form pauses a run, validates input, and resumes with submitted outpu
   await page.getByRole('button', { name: /Submit form/i }).click()
 
   await expect(page.getByText(/Form .* submitted/)).toBeVisible()
-  await openWorkspaceSection(page, 'Workflows', 'Build with AI')
+  await openWorkspaceSection(page, 'Workflows', 'Build')
   await expect(page.locator('.workflow-node').filter({ hasText: 'Done' })).toBeVisible({ timeout: 30_000 })
 })
 

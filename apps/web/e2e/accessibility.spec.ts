@@ -93,15 +93,15 @@ test('Recovery Center and its primary queue path meet the accessibility floor', 
   expect(errors).toEqual([])
 })
 
-test('AI Studio and command palette meet the accessibility floor', async ({ page }) => {
+test('workflow builder and command palette meet the accessibility floor', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   const errors = installBrowserErrorGuards(page)
   await page.goto('/')
 
-  await openWorkspaceSection(page, 'Workflows', 'Build with AI')
+  await openWorkspaceSection(page, 'Workflows', 'Build')
   const studio = page.locator('.workspace-main')
   await expect(studio.locator('.react-flow')).toBeVisible()
-  await expectNoBlockingAccessibilityViolations(page, 'AI Studio')
+  await expectNoBlockingAccessibilityViolations(page, 'Workflow builder')
   await capture(studio, 'accessibility-en-ai-studio')
 
   await page.keyboard.press('ControlOrMeta+K')
@@ -117,8 +117,8 @@ test('Solution Packs recovery-drill selection meets the accessibility floor', as
   const errors = installBrowserErrorGuards(page)
   await page.goto('/')
 
-  await openWorkspaceSection(page, 'Workflows', 'Packs')
-  const pack = page.locator('.list-card').filter({ hasText: 'Incident triage' }).first()
+  await openWorkspaceSection(page, 'Workflows', 'Templates')
+  const pack = page.getByTestId('solution-pack-incident-triage')
   await expect(pack).toBeVisible()
   await pack.getByLabel('Failure scenario').selectOption('worker_interrupted_during_page')
   await expect(pack.getByText('Real reaper path')).toBeVisible()

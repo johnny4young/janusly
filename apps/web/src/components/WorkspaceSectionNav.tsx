@@ -8,7 +8,6 @@ import {
   Layers3,
   Settings2,
   ShieldAlert,
-  Sparkles,
   Users,
   Workflow,
 } from 'lucide-react'
@@ -24,7 +23,6 @@ import {
 
 const SECTION_ICONS: Partial<Record<ActiveTab, ReactNode>> = {
   workflows: <Database size={14} />,
-  copilot: <Sparkles size={14} />,
   inspector: <GitBranch size={14} />,
   templates: <Workflow size={14} />,
   packs: <Boxes size={14} />,
@@ -70,7 +68,7 @@ export function WorkspaceSectionNav({
       <div className="workspace-section-nav__rail">
         {sections.map((section) => {
           const label = t(section.labelKey)
-          const active = activeTab === section.tab
+          const active = activeTab === section.tab || section.activeAliases?.includes(activeTab) === true
           return (
             <button
               key={section.tab}

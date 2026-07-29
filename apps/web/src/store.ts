@@ -441,6 +441,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     set((state) => ({
       workflowDirty: true,
       workflowRevision: state.workflowRevision + 1,
+      selectedNodeId: id,
+      selectedEdgeId: null,
       nodes: state.nodes.concat({
         id,
         position: position ?? nodePlacementResolver?.() ?? { x: 120 + state.nodes.length * 80, y: 120 + state.nodes.length * 40 },
@@ -530,7 +532,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       selectedNodeId: null,
       selectedEdgeId: null,
       ...clearedRunProjection(state.runTransitionGeneration),
-      activeTab: 'copilot',
+      activeTab: 'inspector',
       workflowRevision: state.workflowRevision + 1,
     }))
   },

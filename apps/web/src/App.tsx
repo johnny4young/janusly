@@ -57,8 +57,9 @@ import { usePlatformMutation } from './hooks/usePlatformMutation'
 import { useDraftAutosave, readDraft, readLatestDraft, clearDraft } from './hooks/useDraftPersistence'
 import { useConfirm } from './components/ConfirmDialog'
 import { formatStatusLabel } from './constants'
+import type { WorkflowCreationMode } from './components/WorkflowsDashboard'
 import { projectVisibleEdges, projectVisibleNodes } from './canvas-projections'
-import type { ActiveTab, AiMode, AiReviewIssue, ReadinessResult, RunEvent, RunNode, RunSummary, ValidationIssue, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
+import type { ActiveTab, AiAuthoringAction, AiAuthoringActionRequest, AiMode, AiReviewIssue, ReadinessResult, RunEvent, RunNode, RunSummary, ValidationIssue, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode, WorkflowImprovementResult, WorkflowImprovementSuggestion } from './types'
 import { getCanvasVisibility, isCanvasTab, parseAiCandidateBackoff } from './types'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
 import { getResolvedLocale, useT } from './i18n'
@@ -71,7 +72,9 @@ import type { SessionContext } from './identity-context'
 import { currentSessionOrganization } from './identity-context'
 import { canOpenTab, firstOpenTab } from './tab-permissions'
 import {
+  getWorkspaceDestination,
   resolveWorkspaceDestinationTarget,
+  workspaceDestinationForTab,
   type WorkspaceDestination,
 } from './workspace-locations'
 
@@ -83,7 +86,6 @@ type RunResponse = {
   eventsHasMore?: boolean
 }
 
-const CANVAS_PALETTE_TYPES: string[] = ['http', 'ai', 'condition', 'tool', 'agent']
 const EMPTY_PERMISSIONS: readonly string[] = Object.freeze([])
 
 type ValidationResponse = {
@@ -333,6 +335,7 @@ export default function App() {
   const [semanticBlockerRunIds, setSemanticBlockerRunIds] = useState<string[]>([])
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [snippetMenuOpen, setSnippetMenuOpen] = useState(false)
+  const [aiActionRequest, setAiActionRequest] = useState<AiAuthoringActionRequest | null>(null)
   // React Flow cannot establish a valid viewport when its first mount happens
   // under display:none (for example, after reloading on Runs). Defer that first
   // mount until a canvas tab is visible, then retain the instance across other
@@ -369,7 +372,10 @@ export default function App() {
     selectEdge(edge.id)
     setActiveTab('inspector')
   }, [selectEdge, setActiveTab])
-  const canvasPaletteTypes = isCanvasTab(activeTab) ? CANVAS_PALETTE_TYPES : undefined
+  const addWorkflowNode = useCallback((type: string, position?: { x: number; y: number }) => {
+    addNode(type, position)
+    setActiveTab('inspector')
+  }, [addNode, setActiveTab])
 
   // One sign-out driver for keyboard and Command Palette entry points:
   // AuthProvider.signOut → clearAuth → toast.
@@ -435,6 +441,22 @@ export default function App() {
     setCurrentWorkflowVersion(null)
     if (targetTab) setActiveTab(targetTab)
   }, [confirmReplaceCanvas, newWorkflow, setActiveTab])
+
+  const beginWorkflowCreation = useCallback((mode: WorkflowCreationMode): void => {
+    if (mode === 'template') {
+      setActiveTab('templates')
+      return
+    }
+    void createNewWorkflow(mode === 'describe' ? 'copilot' : 'inspector')
+  }, [createNewWorkflow, setActiveTab])
+
+  const openAiAuthoringAction = useCallback((action: AiAuthoringAction): void => {
+    setAiActionRequest((current) => ({
+      id: (current?.id ?? 0) + 1,
+      action,
+    }))
+    setActiveTab('copilot')
+  }, [setActiveTab])
 
   // Warn on tab close / reload while the canvas holds unsaved edits. The
   // browser shows its own generic dialog; we only flag the condition.
@@ -1072,6 +1094,39 @@ export default function App() {
     }
   }, [getWorkflowJson])
 
+  const suggestWorkflowImprovement = useCallback(async (): Promise<WorkflowImprovementResult> => {
+    const workflow = getWorkflowJson()
+    const result = await api('/ai/suggest-improvement', {
+      method: 'POST',
+      body: JSON.stringify({ workflow }),
+    }) as {
+      mode?: AiMode
+      suggestions?: WorkflowImprovementSuggestion[]
+      model?: string
+      aiError?: string
+      error?: string
+    }
+    if (result.error) throw new Error(result.error)
+    return {
+      mode: result.mode ?? 'fallback',
+      suggestions: Array.isArray(result.suggestions) ? result.suggestions : [],
+      model: result.model,
+      aiError: result.aiError,
+    }
+  }, [getWorkflowJson])
+
+  const applyWorkflowImprovement = useCallback(async (
+    suggestion: WorkflowImprovementSuggestion,
+  ): Promise<boolean> => {
+    if (!await confirmReplaceCanvas()) return false
+    hydrateWorkflow(suggestion.workflow, { saved: false, dirty: true })
+    setValidationIssues([])
+    setAiReviewIssues([])
+    setActiveTab('inspector')
+    addToast(t('toasts.aiImprovementApplied'), 'success')
+    return true
+  }, [addToast, confirmReplaceCanvas, hydrateWorkflow, setActiveTab, t])
+
   const resolveDeadLetter = useCallback(async (deadLetterId: string) => {
     const result = await runPlatformMutation({
       request: () => api('/dlq/resolve', {
@@ -1137,6 +1192,8 @@ export default function App() {
     ? (runDetail?.id === runId ? runDetail : projectedRuns.find(run => run.id === runId))
     : undefined
   const isConnected = streamStatus === 'connected'
+  const authoringMode = isCanvasTab(activeTab)
+  const activeDestination = getWorkspaceDestination(workspaceDestinationForTab(activeTab))
 
   // Extracted once so the same element instance can render in either the
   // canvas-tab right rail OR — for non-canvas tabs — directly in the
@@ -1172,6 +1229,9 @@ export default function App() {
         onGenerateWorkflow: generateWorkflow,
         onExplainWorkflow: explainWorkflow,
         onReviewWorkflow: reviewWorkflow,
+        aiActionRequest,
+        onSuggestWorkflowImprovement: suggestWorkflowImprovement,
+        onApplyWorkflowImprovement: applyWorkflowImprovement,
       }}
       catalog={{
         tools,
@@ -1180,7 +1240,7 @@ export default function App() {
         credentials,
         workflows: savedWorkflows,
         onOpenWorkflow: openWorkflow,
-        onCreateWorkflow: () => { void createNewWorkflow('copilot') },
+        onCreateWorkflow: beginWorkflowCreation,
         onUseTemplate: useTemplate,
         onInstallPlugin: installPlugin,
         onInstallPack: installPack,
@@ -1209,6 +1269,7 @@ export default function App() {
       }}
       navigation={{
         onOpenTab: setActiveTab,
+        onOpenAiAction: openAiAuthoringAction,
         activeRecoveryCaseId,
       }}
     />
@@ -1216,6 +1277,7 @@ export default function App() {
 
   return (
     <Layout
+      authoring={authoringMode}
       header={
         <>
           <div className="top-bar-left">
@@ -1223,14 +1285,14 @@ export default function App() {
             <nav className="top-bar-breadcrumb" aria-label={t('layout.workflowStatus')}>
               <span>{currentOrganizationLabel}</span>
               <ChevronRight size={12} aria-hidden="true" />
-              <b>{currentWorkflowName}</b>
-              <span className={`top-bar-env top-bar-env--${env}`}>{envLabel}</span>
+              <b>{authoringMode ? currentWorkflowName : t(activeDestination.labelKey)}</b>
+              {authoringMode && <span className={`top-bar-env top-bar-env--${env}`}>{envLabel}</span>}
             </nav>
           </div>
           <div className="top-bar-right">
             <div className="top-bar-pill-group">
-              {canWriteWorkflows && <WorkflowReadinessBadge onResult={handleReadinessResult} />}
-              {tenantPermissions.includes('workflows.read') && (
+              {authoringMode && canWriteWorkflows && <WorkflowReadinessBadge onResult={handleReadinessResult} />}
+              {authoringMode && tenantPermissions.includes('workflows.read') && (
                 <WorkflowHealthBadge workflowId={currentWorkflowSaved ? (currentWorkflowId ?? undefined) : undefined} />
               )}
             </div>
@@ -1294,14 +1356,12 @@ export default function App() {
           workflowRunsCount={runs.length}
           permissions={tenantPermissions}
           onWorkflowNameChange={setWorkflowName}
-          onAdd={addNode}
           onValidate={async () => {
             await validateWorkflow()
           }}
           onSave={saveWorkflow}
           onOpenTab={setActiveTab}
           onOpenHelp={openShortcuts}
-          onNew={() => { void createNewWorkflow() }}
           onStart={startWorkflow}
         />
       }
@@ -1366,8 +1426,8 @@ export default function App() {
                     onConnect={connect}
                     onNodeClick={handleNodeClick}
                     onEdgeClick={handleEdgeClick}
-                    paletteNodeTypes={canvasPaletteTypes}
-                    onAddNode={addNode}
+                    onAddNode={addWorkflowNode}
+                    readOnly={!canWriteWorkflows}
                     viewportWorkflowId={currentWorkflowSaved ? (currentWorkflowId ?? undefined) : undefined}
                     active={visibility.visible}
                   />

@@ -233,7 +233,7 @@ test('starts an accessible canary and automatically returns unhealthy traffic to
   const row = page.getByTestId(`workflows-row-${workflowId}`)
   await expect(row).toContainText(workflowName)
   await row.click()
-  await openWorkspaceSection(page, 'Workflows', 'Configure')
+  await openWorkspaceSection(page, 'Workflows', 'Build')
 
   const panel = page.getByTestId('workflow-rollout-panel')
   await expect(panel).toContainText('Canary deployment')
@@ -288,7 +288,7 @@ test('starts an accessible canary and automatically returns unhealthy traffic to
   const spanishRow = page.getByTestId(`workflows-row-${workflowId}`)
   await expect(spanishRow).toContainText(workflowName)
   await spanishRow.click()
-  await openWorkspaceSection(page, 'Flujos', 'Configurar')
+  await openWorkspaceSection(page, 'Flujos', 'Crear')
   const spanishPanel = page.getByTestId('workflow-rollout-panel')
   await expect(spanishPanel).toContainText('Despliegue canary')
   await expect(spanishPanel).toContainText('Revertido')

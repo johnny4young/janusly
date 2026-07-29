@@ -1,4 +1,4 @@
-import { openWorkspaceSection } from './_helpers/workspace-navigation'
+import { openWorkflowAiAction, openWorkspaceSection } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
 
@@ -26,7 +26,7 @@ test('a prompt creates the deterministic PagerDuty flow in the normal editor', a
   })
 
   await page.goto('/')
-  await openWorkspaceSection(page, 'Workflows', 'Build with AI')
+  await openWorkflowAiAction(page, 'Workflows')
   await page.getByPlaceholder(
     'Example: when a customer asks for a refund, check policy, summarize risk, and ask for approval.',
   ).fill(
@@ -37,7 +37,7 @@ test('a prompt creates the deterministic PagerDuty flow in the normal editor', a
   await expect(page.getByText('Starter flow loaded locally').first()).toBeVisible()
   await expect(page.getByText(/PagerDuty off-hours incident handling is now on the canvas/)).toBeVisible()
 
-  await openWorkspaceSection(page, 'Workflows', 'Configure')
+  await openWorkspaceSection(page, 'Workflows', 'Build')
   const canvas = page.locator('.canvas-frame')
   await expect(canvas.locator('.react-flow__node')).toHaveCount(7)
   await expect(canvas.locator('.react-flow__node[data-id="on_pagerduty"]')).toBeVisible()

@@ -137,7 +137,7 @@ async function openWorkflowMetadata(
   await row.click()
   expect((await workflowResponse).ok()).toBe(true)
   const configure = page.getByTestId('workspace-section-nav').getByRole('button', {
-    name: locale === 'en' ? 'Configure' : 'Configurar',
+    name: locale === 'en' ? 'Build' : 'Crear',
     exact: true,
   })
   if (await configure.getAttribute('aria-current') !== 'page') await configure.click()

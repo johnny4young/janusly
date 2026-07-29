@@ -93,7 +93,7 @@ describe('<WorkflowsDashboard />', () => {
     window.localStorage.clear()
   })
 
-  it('offers an explicit workflow creation action from the catalog', async () => {
+  it('offers three explicit workflow creation paths from the catalog', async () => {
     mockApi((url) => {
       if (url === '/workflows/tags') return { tags: [] }
       if (url === '/workflows/folders') return { folders: [] }
@@ -104,7 +104,12 @@ describe('<WorkflowsDashboard />', () => {
     render(<WorkflowsDashboard onOpen={() => {}} onCreate={onCreate} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'New workflow' }))
-    expect(onCreate).toHaveBeenCalledOnce()
+    expect(screen.getByRole('button', { name: /Describe it/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Start blank/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Use a template/ })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Start blank/ }))
+    expect(onCreate).toHaveBeenCalledWith('blank')
   })
 
   it('keeps workflow creation visible but disabled without write access', async () => {

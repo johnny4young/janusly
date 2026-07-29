@@ -118,6 +118,7 @@ describe('<SolutionPacksPanel />', () => {
   it('explains the selected drill and sends its explicit fixture id', () => {
     renderPanel([])
 
+    expect(screen.getByTestId('solution-pack-incident-triage')).toBeVisible()
     const select = screen.getByLabelText('Failure scenario')
     expect(select).toHaveValue('slack_5xx_transient')
     expect(screen.getByText('The on-call notification provider is temporarily unavailable after the incident issue is created.')).toBeVisible()

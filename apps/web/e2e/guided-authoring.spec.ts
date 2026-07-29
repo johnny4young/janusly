@@ -1,6 +1,6 @@
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
-import { openWorkspaceSection } from './_helpers/workspace-navigation'
+import { openCanvasStepPicker, openWorkspaceSection } from './_helpers/workspace-navigation'
 
 const API_URL = process.env.E2E_API_URL ?? 'http://localhost:3001'
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
@@ -8,9 +8,7 @@ const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 type LocaleContract = {
   locale: 'en' | 'es'
   flows: string
-  configure: string
   home: string
-  buildWithAi: string
   help: string
   aiPrompt: string
   minimap: string
@@ -29,9 +27,7 @@ const LOCALES: LocaleContract[] = [
   {
     locale: 'en',
     flows: 'Workflows',
-    configure: 'Configure',
     home: 'Home',
-    buildWithAi: 'Build with AI',
     help: 'Help',
     aiPrompt: 'AI prompt',
     minimap: 'Workflow overview map',
@@ -48,9 +44,7 @@ const LOCALES: LocaleContract[] = [
   {
     locale: 'es',
     flows: 'Flujos',
-    configure: 'Configurar',
     home: 'Inicio',
-    buildWithAi: 'Crear con IA',
     help: 'Ayuda',
     aiPrompt: 'Prompt de IA',
     minimap: 'Mapa general del workflow',
@@ -192,16 +186,26 @@ for (const contract of LOCALES) {
     await openWorkflow(page, contract, workflowId, workflowName)
 
     const canvas = page.locator('.canvas-frame[data-mode="author"]')
-    await expect(canvas.locator('.canvas-palette')).toBeVisible()
+    await expect(canvas.locator('.canvas-step-picker')).toBeVisible()
     await expect(canvas.getByRole('img', { name: contract.minimap })).toBeVisible()
-    await openWorkspaceSection(page, contract.flows, contract.buildWithAi)
-    await expect(canvas.locator('.canvas-palette')).toBeVisible()
-    await openWorkspaceSection(page, contract.flows, contract.configure)
-
-    const paletteSource = page.locator('.builder-sidebar .sb-palette').getByRole('button', { name: contract.aiPrompt, exact: true }).first()
-    // Drop into the exposed canvas area; the contextual inspector occupies the
-    // right side of the workspace and correctly intercepts pointer events.
-    await paletteSource.dragTo(canvas, { targetPosition: { x: 320, y: 500 } })
+    await openCanvasStepPicker(page)
+    const paletteSource = page
+      .locator('.canvas-step-picker__menu')
+      .getByRole('button', { name: new RegExp(`^${contract.aiPrompt}(?:\\s|$)`) })
+    const flowSurface = canvas.locator('.canvas-flow-surface')
+    const flowSurfaceBounds = await flowSurface.boundingBox()
+    if (!flowSurfaceBounds) throw new Error('authoring canvas has no interaction surface')
+    const dataTransfer = await page.evaluateHandle(() => new DataTransfer())
+    const dropPoint = {
+      clientX: Math.round(flowSurfaceBounds.x + flowSurfaceBounds.width * 0.75),
+      clientY: Math.round(flowSurfaceBounds.y + flowSurfaceBounds.height * 0.6),
+      dataTransfer,
+    }
+    await paletteSource.dispatchEvent('dragstart', { dataTransfer })
+    await flowSurface.dispatchEvent('dragover', dropPoint)
+    await flowSurface.dispatchEvent('drop', dropPoint)
+    await paletteSource.dispatchEvent('dragend', { dataTransfer })
+    await dataTransfer.dispose()
     await expect(canvas.locator('.react-flow__node')).toHaveCount(7)
 
     await canvas.locator('.react-flow__node[data-id="source"] .workflow-node').click()
@@ -285,9 +289,9 @@ for (const contract of LOCALES) {
     await page.keyboard.press('Meta+2')
     await expect(navigationButton(page, contract.flows)).toHaveAttribute('aria-current', 'page')
     await expect(page.getByTestId('workspace-canvas-wrapper')).toHaveCount(0)
-    await openWorkspaceSection(page, contract.flows, contract.buildWithAi)
+    await openWorkspaceSection(page, contract.flows, contract.locale === 'en' ? 'Build' : 'Crear')
     await expect(page.getByTestId('workspace-canvas-wrapper')).toHaveAttribute('data-canvas-visible', 'true')
-    await expect(canvas.locator('.canvas-palette')).toBeVisible()
+    await expect(canvas.locator('.canvas-step-picker')).toBeVisible()
 
     expect(browserErrors).toEqual([])
   })

@@ -1,13 +1,12 @@
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { openWorkspaceSection } from './_helpers/workspace-navigation'
+import { addCanvasStep, openWorkflowAiAction, openWorkspaceSection } from './_helpers/workspace-navigation'
 
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 
 const locales = {
   en: {
     workflows: 'Workflows',
-    buildWithAi: 'Build with AI',
     settings: 'Settings',
     hero: 'Describe the outcome. Janusly builds the flow.',
     connections: 'Connections',
@@ -21,7 +20,6 @@ const locales = {
   },
   es: {
     workflows: 'Flujos',
-    buildWithAi: 'Crear con IA',
     settings: 'Configuración',
     hero: 'Describe el resultado. Janusly arma el flujo.',
     connections: 'Conexiones',
@@ -63,10 +61,9 @@ async function waitForAuthoringCanvas(
 ): Promise<void> {
   const canvas = page.locator('.workspace-canvas-wrapper')
   const nodes = canvas.locator('.workflow-node')
-  const palette = page.locator('.sb-palette')
   if (await nodes.count() === 0) {
     for (const label of labels) {
-      await palette.getByRole('button', { name: label, exact: true }).first().click()
+      await addCanvasStep(page, label)
     }
   }
   await expect(nodes).toHaveCount(3)
@@ -113,7 +110,7 @@ test('grouped control-plane panels and shared mutations remain bilingual', async
     }
 
     const copy = locales[locale]
-    await openWorkspaceSection(page, copy.workflows, copy.buildWithAi)
+    await openWorkflowAiAction(page, copy.workflows)
     await expect(page.getByText(copy.hero, { exact: true })).toBeVisible()
     await waitForAuthoringCanvas(page, copy.authoringNodes)
     await capture(page.locator('.workspace-grid'), `web-${locale}-control-plane-authoring-default`)

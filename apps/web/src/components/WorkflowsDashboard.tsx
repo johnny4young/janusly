@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { LoadingSkeleton } from './LoadingSkeleton'
-import { CircleCheck, FolderPlus, ListChecks, Pencil, Plus, RefreshCw, Trash, Trash2, Workflow } from 'lucide-react'
+import { CircleCheck, FilePlus2, FolderPlus, LayoutTemplate, ListChecks, Pencil, Plus, RefreshCw, Sparkles, Trash, Trash2, Workflow, X } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { SavedWorkflow } from '../types'
@@ -44,6 +44,8 @@ const DEFAULT_RETENTION_DAYS = 30
  *  its workflows, in the same order the global filter+sort produced. */
 type FolderGroup = { key: string; items: SavedWorkflow[] }
 
+export type WorkflowCreationMode = 'describe' | 'blank' | 'template'
+
 /** Return the persisted collapsed-folder set after a details section reaches
  *  `open`. Reuses the current array for no-op native toggle notifications. */
 function updateCollapsedFolders(current: string[], key: string, open: boolean): string[] {
@@ -60,7 +62,7 @@ export function WorkflowsDashboard({
   canWrite = true,
 }: {
   onOpen: (id: string) => void
-  onCreate?: () => void
+  onCreate?: (mode: WorkflowCreationMode) => void
   canWrite?: boolean
 }) {
   const { t } = useT()
@@ -69,6 +71,7 @@ export function WorkflowsDashboard({
   const bumpPlatformVersion = useWorkflowStore(state => state.bumpPlatformVersion)
   const [workflows, setWorkflows] = useState<SavedWorkflow[]>([])
   const [loading, setLoading] = useState(false)
+  const [creationOpen, setCreationOpen] = useState(false)
   const recoveryBusyRef = useRef(new Set<string>())
   const [recoveryBusyIds, setRecoveryBusyIds] = useState<Set<string>>(() => new Set())
   // "Load more" keyset pagination. `hasMore` is true when the last page came back
@@ -950,7 +953,9 @@ export function WorkflowsDashboard({
             <button
               type="button"
               className="small-command small-command--primary"
-              onClick={onCreate}
+              onClick={() => setCreationOpen((open) => !open)}
+              aria-expanded={creationOpen}
+              aria-controls="workflow-creation-choices"
               disabled={!canWrite}
             >
               <Plus size={14} aria-hidden="true" /> {t('workflowsDashboard.newWorkflow')}
@@ -988,6 +993,66 @@ export function WorkflowsDashboard({
           </button>
         </div>
       </div>
+
+      {!showTrashed && creationOpen && onCreate && (
+        <section
+          id="workflow-creation-choices"
+          className="workflow-creation"
+          aria-labelledby="workflow-creation-title"
+          data-testid="workflow-creation-choices"
+        >
+          <div className="workflow-creation__intro">
+            <div>
+              <span className="section-kicker">{t('workflowCreation.kicker')}</span>
+              <h3 id="workflow-creation-title">{t('workflowCreation.title')}</h3>
+              <p>{t('workflowCreation.body')}</p>
+            </div>
+            <button
+              type="button"
+              className="small-command"
+              onClick={() => setCreationOpen(false)}
+              aria-label={t('workflowCreation.close')}
+            >
+              <X size={15} aria-hidden="true" />
+            </button>
+          </div>
+          <div className="workflow-creation__choices">
+            <button
+              type="button"
+              className="workflow-creation__choice workflow-creation__choice--primary"
+              onClick={() => onCreate('describe')}
+            >
+              <span className="workflow-creation__icon" aria-hidden="true"><Sparkles size={19} /></span>
+              <span>
+                <strong>{t('workflowCreation.describe.title')}</strong>
+                <small>{t('workflowCreation.describe.body')}</small>
+              </span>
+            </button>
+            <button
+              type="button"
+              className="workflow-creation__choice"
+              onClick={() => onCreate('blank')}
+            >
+              <span className="workflow-creation__icon" aria-hidden="true"><FilePlus2 size={18} /></span>
+              <span>
+                <strong>{t('workflowCreation.blank.title')}</strong>
+                <small>{t('workflowCreation.blank.body')}</small>
+              </span>
+            </button>
+            <button
+              type="button"
+              className="workflow-creation__choice"
+              onClick={() => onCreate('template')}
+            >
+              <span className="workflow-creation__icon" aria-hidden="true"><LayoutTemplate size={18} /></span>
+              <span>
+                <strong>{t('workflowCreation.template.title')}</strong>
+                <small>{t('workflowCreation.template.body')}</small>
+              </span>
+            </button>
+          </div>
+        </section>
+      )}
 
       {showToolbar && !showTrashed && (
         <FlowsFilterBar

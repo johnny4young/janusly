@@ -240,6 +240,20 @@
     top: 10px;
   }
 
+  .canvas-step-picker {
+    left: 10px;
+    top: 62px;
+  }
+
+  .canvas-step-picker__menu {
+    max-height: min(540px, calc(100vh - 210px));
+    width: min(380px, calc(100vw - 20px));
+  }
+
+  .canvas-step-picker__group > div {
+    grid-template-columns: 1fr;
+  }
+
   .workflow-node {
     min-width: 218px;
   }
@@ -285,10 +299,7 @@
 
   .bottom-status-bar__group--right { display: none; }
 
-  /* New sidebar — palette grid collapses to single column and footer
-     hides the secondary action buttons (collapse / megaphone) to keep
-     the connection live indicator visible. */
-  .sb-palette { grid-template-columns: 1fr; }
+  /* The off-canvas sidebar keeps only the help action visible on phones. */
   .sb-footer__actions .sb-footer__collapse {
     display: none;
   }
@@ -6653,6 +6664,110 @@ button.we-recovery-heatmap__cell:focus-visible {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 4px;
+}
+
+.workflow-creation {
+  background: var(--we-surface-muted);
+  border: 1px solid var(--we-line-strong);
+  border-radius: 14px;
+  display: grid;
+  gap: 16px;
+  overflow: hidden;
+  padding: 18px;
+}
+
+.workflow-creation__intro {
+  align-items: flex-start;
+  display: flex;
+  justify-content: space-between;
+}
+
+.workflow-creation__intro h3 {
+  font-size: 18px;
+  letter-spacing: -0.025em;
+  margin: 3px 0 4px;
+}
+
+.workflow-creation__intro p {
+  color: var(--we-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.workflow-creation__choices {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.workflow-creation__choice {
+  align-items: center;
+  background: var(--we-surface);
+  border: 1px solid var(--we-line);
+  border-radius: 10px;
+  color: var(--we-ink);
+  display: grid;
+  gap: 11px;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-height: 72px;
+  padding: 12px;
+  text-align: left;
+}
+
+.workflow-creation__choice--primary {
+  background: var(--we-primary-soft);
+  border-color: var(--we-primary-ring);
+  grid-row: span 2;
+  min-height: 152px;
+}
+
+.workflow-creation__choice:hover {
+  border-color: var(--we-primary);
+}
+
+.workflow-creation__choice strong,
+.workflow-creation__choice small {
+  display: block;
+}
+
+.workflow-creation__choice strong {
+  font-size: 13px;
+}
+
+.workflow-creation__choice small {
+  color: var(--we-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  margin-top: 3px;
+}
+
+.workflow-creation__icon {
+  align-items: center;
+  background: var(--we-primary-soft);
+  border: 1px solid var(--we-primary-ring);
+  border-radius: 9px;
+  color: var(--we-primary);
+  display: inline-flex;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
+}
+
+.workflow-creation__choice--primary .workflow-creation__icon {
+  height: 40px;
+  width: 40px;
+}
+
+@media (max-width: 720px) {
+  .workflow-creation__choices {
+    grid-template-columns: 1fr;
+  }
+
+  .workflow-creation__choice--primary {
+    grid-row: auto;
+    min-height: 84px;
+  }
 }
 
 /* Per-row editable tag pills: each pill carries a ✕; a "+ tag" picker adds one. */

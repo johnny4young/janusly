@@ -8,12 +8,13 @@ import { AiCopilotPanel } from './AiCopilotPanel'
 const initialState = useWorkflowStore.getState()
 
 type GenerateWorkflow = Parameters<typeof AiCopilotPanel>[0]['onGenerateWorkflow']
+type AiCopilotProps = Parameters<typeof AiCopilotPanel>[0]
 
 function renderPanel(onGenerateWorkflow: GenerateWorkflow = vi.fn(async () => ({
   mode: 'ai' as const,
   workflow: { name: 'ZZGENERATED', nodes: [], edges: [] } as unknown as WorkflowDefinition,
-}))) {
-  const props = {
+})), overrides: Partial<AiCopilotProps> = {}) {
+  const props: AiCopilotProps = {
     health: null,
     workflowName: 'My flow',
     onGenerateWorkflow,
@@ -22,8 +23,12 @@ function renderPanel(onGenerateWorkflow: GenerateWorkflow = vi.fn(async () => ({
       mode: 'ai' as const,
       review: { status: 'pass', issues: [] } as unknown as ReviewFindings,
     })),
+    actionRequest: null,
+    onSuggestWorkflowImprovement: vi.fn(async () => ({ mode: 'fallback' as const, suggestions: [] })),
+    onApplyWorkflowImprovement: vi.fn(async () => true),
     onOpenRuns: vi.fn(),
     onOpenTemplates: vi.fn(),
+    ...overrides,
   }
   return render(<AiCopilotPanel {...props} />)
 }
@@ -94,6 +99,31 @@ describe('<AiCopilotPanel />', () => {
     fireEvent.click(screen.getByRole('button', { name: /Explain this flow/i }))
     await waitFor(() => expect(screen.getByText('EXPLAIN_BODY_XYZ')).toBeInTheDocument())
     expect(live).toContainElement(screen.getByText('EXPLAIN_BODY_XYZ'))
+  })
+
+  it('runs a contextual fix request and applies the chosen draft safely', async () => {
+    const suggestion = {
+      workflow: { id: 'fixed', name: 'Fixed flow', nodes: [], edges: [] } as WorkflowDefinition,
+      rationale: 'Add a bounded recovery path.',
+      approachLabel: 'add_retry',
+      confidence: 0.91,
+    }
+    const onSuggestWorkflowImprovement = vi.fn(async () => ({
+      mode: 'ai' as const,
+      suggestions: [suggestion],
+    }))
+    const onApplyWorkflowImprovement = vi.fn(async () => true)
+
+    renderPanel(undefined, {
+      actionRequest: { id: 1, action: 'fix' },
+      onSuggestWorkflowImprovement,
+      onApplyWorkflowImprovement,
+    })
+
+    expect(await screen.findByText('Add a bounded recovery path.')).toBeInTheDocument()
+    expect(onSuggestWorkflowImprovement).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByRole('button', { name: 'Apply to draft' }))
+    expect(onApplyWorkflowImprovement).toHaveBeenCalledWith(suggestion)
   })
 
   it('renders the supported Anthropic setup guidance in English local mode', () => {

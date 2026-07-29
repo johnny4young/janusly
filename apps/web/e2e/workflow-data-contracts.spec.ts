@@ -25,7 +25,6 @@ type RunSnapshot = {
 type LocaleContract = {
   locale: 'en' | 'es'
   flows: string
-  stepSetup: string
   runs: string
   viewTimeline: string
   strictLabel: string
@@ -40,7 +39,6 @@ const LOCALES: LocaleContract[] = [
   {
     locale: 'en',
     flows: 'Workflows',
-    stepSetup: 'Step setup',
     runs: 'Runs',
     viewTimeline: 'View timeline',
     strictLabel: 'Fail on a missing value',
@@ -53,7 +51,6 @@ const LOCALES: LocaleContract[] = [
   {
     locale: 'es',
     flows: 'Flujos',
-    stepSetup: 'Configuración de paso',
     runs: 'Ejecuciones',
     viewTimeline: 'Ver cronología',
     strictLabel: 'Fallar ante un valor ausente',
@@ -162,7 +159,7 @@ async function openWorkflow(
   await openWorkspaceSection(
     page,
     contract.flows,
-    contract.locale === 'en' ? 'Configure' : 'Configurar',
+    contract.locale === 'en' ? 'Build' : 'Crear',
   )
 }
 

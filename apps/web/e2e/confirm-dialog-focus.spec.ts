@@ -7,8 +7,10 @@ const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 type LocaleContract = {
   locale: 'en' | 'es'
   workflows: string
-  buildWithAi: string
-  newFlow: string
+  allWorkflows: string
+  build: string
+  newWorkflow: string
+  startBlank: string
   workflowName: string
   dialogTitle: string
   confirm: string
@@ -19,8 +21,10 @@ const LOCALES: LocaleContract[] = [
   {
     locale: 'en',
     workflows: 'Workflows',
-    buildWithAi: 'Build with AI',
-    newFlow: 'New',
+    allWorkflows: 'All workflows',
+    build: 'Build',
+    newWorkflow: 'New workflow',
+    startBlank: 'Start blank',
     workflowName: 'Name',
     dialogTitle: 'Unsaved changes',
     confirm: 'Discard changes',
@@ -29,8 +33,10 @@ const LOCALES: LocaleContract[] = [
   {
     locale: 'es',
     workflows: 'Flujos',
-    buildWithAi: 'Crear con IA',
-    newFlow: 'Nuevo',
+    allWorkflows: 'Todos los flujos',
+    build: 'Crear',
+    newWorkflow: 'Nuevo flujo',
+    startBlank: 'Empezar vacío',
     workflowName: 'Nombre',
     dialogTitle: 'Cambios sin guardar',
     confirm: 'Descartar cambios',
@@ -75,14 +81,17 @@ for (const contract of LOCALES) {
 
     await page.goto('/')
     await expect(page.getByText('dev-user')).toBeVisible()
-    await openWorkspaceSection(page, contract.workflows, contract.buildWithAi)
+    await openWorkspaceSection(page, contract.workflows, contract.allWorkflows)
 
-    const newFlowTrigger = page.getByRole('button', { name: contract.newFlow, exact: true })
-    await newFlowTrigger.click()
+    await page.getByRole('button', { name: contract.newWorkflow, exact: true }).click()
+    await page.getByRole('button', { name: new RegExp(`^${contract.startBlank}`) }).click()
     const workflowName = page.getByRole('textbox', { name: contract.workflowName, exact: true })
     const dirtyName = `Focus contract ${contract.locale} ${Date.now()}`
     await workflowName.fill(dirtyName)
-    await newFlowTrigger.click()
+    await openWorkspaceSection(page, contract.workflows, contract.allWorkflows)
+    await page.getByRole('button', { name: contract.newWorkflow, exact: true }).click()
+    const startBlankTrigger = page.getByRole('button', { name: new RegExp(`^${contract.startBlank}`) })
+    await startBlankTrigger.click()
 
     const dialog = page.getByRole('alertdialog')
     const confirmButton = dialog.getByRole('button', { name: contract.confirm, exact: true })
@@ -100,8 +109,9 @@ for (const contract of LOCALES) {
 
     await page.keyboard.press('Escape')
     await expect(dialog).toHaveCount(0)
-    await expect(newFlowTrigger).toBeFocused()
-    await expect(workflowName).toHaveValue(dirtyName)
+    await expect(startBlankTrigger).toBeFocused()
+    await openWorkspaceSection(page, contract.workflows, contract.build)
+    await expect(page.getByRole('textbox', { name: contract.workflowName, exact: true })).toHaveValue(dirtyName)
     expect(browserErrors).toEqual([])
   })
 }
