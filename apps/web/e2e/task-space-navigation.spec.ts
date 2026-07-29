@@ -29,6 +29,7 @@ const LOCALES = [
     runs: 'Runs',
     workspace: 'Workspace',
     operationsHeading: 'Workspace settings',
+    automation: 'Automation and patterns',
     primaryGroup: 'Workspace',
     homeKicker: 'Home',
     search: 'Search sections…',
@@ -46,6 +47,7 @@ const LOCALES = [
     runs: 'Ejecuciones',
     workspace: 'Espacio de trabajo',
     operationsHeading: 'Configuración del espacio',
+    automation: 'Automatización y patrones',
     primaryGroup: 'Principal',
     homeKicker: 'Inicio',
     search: 'Buscar secciones…',
@@ -152,14 +154,23 @@ for (const locale of LOCALES) {
     const consoleErrors: string[] = []
     const pageErrors: string[] = []
     const homeRequests: string[] = []
+    const recoveryAutomationRequests: string[] = []
     page.on('console', (message) => {
       if (message.type() === 'error') consoleErrors.push(message.text())
     })
     page.on('pageerror', (error) => pageErrors.push(error.message))
     page.on('request', (request) => {
       const url = new URL(request.url())
+      const routePath = url.pathname.replace(/^\/v1(?=\/)/, '')
       if (url.pathname === '/recovery/home') {
         homeRequests.push(url.search)
+      }
+      if (
+        routePath === '/dlq/clusters'
+        || routePath === '/recovery/campaigns'
+        || routePath === '/auto-healing/pending'
+      ) {
+        recoveryAutomationRequests.push(routePath)
       }
     })
 
@@ -234,6 +245,17 @@ for (const locale of LOCALES) {
       exact: true,
     })).toBeVisible()
     await expect(page.getByTestId('recovery-queue')).toBeVisible()
+    const recoveryQueueBox = await page.getByTestId('recovery-queue').boundingBox()
+    const recoveryAutomation = page.getByTestId('recovery-automation')
+    const recoveryAutomationBox = await recoveryAutomation.boundingBox()
+    expect(recoveryQueueBox).not.toBeNull()
+    expect(recoveryAutomationBox).not.toBeNull()
+    expect(recoveryQueueBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(720)
+    expect(recoveryAutomationBox?.y ?? 0).toBeGreaterThan(recoveryQueueBox?.y ?? 0)
+    await expect(recoveryAutomation.getByRole('button', {
+      name: new RegExp(locale.automation),
+    })).toHaveAttribute('aria-expanded', 'false')
+    expect(recoveryAutomationRequests).toEqual([])
     await expect(page.getByTestId('runs-metric-strip')).toHaveCount(0)
     await expect(page.getByTestId('usage-summary-card')).toHaveCount(0)
     await expect(
@@ -244,6 +266,31 @@ for (const locale of LOCALES) {
       shell,
       `web-${locale.locale}-recover-task-space`,
     )
+
+    await recoveryAutomation.getByTestId('recovery-automation-toggle').click()
+    await expect(recoveryAutomation.getByTestId('recovery-automation-toggle'))
+      .toHaveAttribute('aria-expanded', 'true')
+    await expect.poll(() => recoveryAutomationRequests.sort()).toEqual([
+      '/auto-healing/pending',
+      '/dlq/clusters',
+      '/recovery/campaigns',
+    ])
+    await expectAccessible(page, `${locale.locale} recovery automation disclosure`)
+    await capture(
+      recoveryAutomation,
+      `web-${locale.locale}-recover-automation-open`,
+    )
+
+    await recoveryAutomation.getByTestId('recovery-automation-toggle').click()
+    await page.setViewportSize({ width: 1024, height: 720 })
+    await page.getByTestId('recovery-queue').scrollIntoViewIfNeeded()
+    await expect(page.getByTestId('recovery-queue')).toBeVisible()
+    await expectAccessible(page, `${locale.locale} narrow recovery tools`)
+    await capture(
+      shell,
+      `web-${locale.locale}-recover-task-space-narrow`,
+    )
+    await page.setViewportSize({ width: 1280, height: 720 })
 
     await sidebar.getByRole('button', {
       name: locale.workflows,

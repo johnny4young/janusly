@@ -11,7 +11,7 @@ import {
 } from '@janusly/shared/src/recovery-passport'
 import { getResolvedLocale, useT } from '../../i18n'
 import { resolvePlaybookScorecard } from './playbook-scorecard'
-import type { DeadLetter } from '../DeadLettersPanel'
+import type { DeadLetter } from '../dead-letter-types'
 import type { PatchSuggestion, SuggestionTab } from './types'
 
 export function RecoveryPassportCard({

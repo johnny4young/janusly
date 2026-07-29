@@ -1,5 +1,5 @@
 import type { RunSummary, SavedWorkflow } from './types'
-import type { DeadLetter } from './components/DeadLettersPanel'
+import type { DeadLetter } from './components/dead-letter-types'
 import { isOpenRunStatus } from '@janusly/shared/src/status'
 
 export const ACTIVITY_FILTERS = [

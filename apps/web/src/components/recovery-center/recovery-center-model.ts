@@ -18,7 +18,7 @@
 
 import { t as runtimeT } from '../../i18n/runtime'
 import type { ActiveTab, RunNode, RunSummary } from '../../types'
-import type { DeadLetter } from '../DeadLettersPanel'
+import type { DeadLetter } from '../dead-letter-types'
 import { isOpenRunStatus } from '@janusly/shared/src/status'
 
 // ─────────────────────────────────────────────────────────────────────────

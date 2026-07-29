@@ -1460,6 +1460,9 @@
 
   "dlq.kicker": "Recovery",
   "dlq.queue": "Recovery queue",
+  "dlq.automation.title": "Automation and patterns",
+  "dlq.automation.description": "Explore recurring failures, paced campaigns, and supervised recovery decisions.",
+  "dlq.automation.loading": "Loading recovery automation…",
   "dlq.refresh": "Refresh",
   "dlq.loadMore": "Load more",
   "dlq.loadingMore": "Loading…",

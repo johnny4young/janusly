@@ -1460,6 +1460,9 @@
 
   "dlq.kicker": "Recuperación",
   "dlq.queue": "Cola de recuperación",
+  "dlq.automation.title": "Automatización y patrones",
+  "dlq.automation.description": "Explora fallas recurrentes, campañas graduales y decisiones de recuperación supervisada.",
+  "dlq.automation.loading": "Cargando automatización de recuperación…",
   "dlq.refresh": "Actualizar",
   "dlq.loadMore": "Cargar más",
   "dlq.loadingMore": "Cargando…",

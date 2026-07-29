@@ -31,7 +31,7 @@ import { api } from '../api'
 import { formatStatusLabel, getNodeLabel } from '../constants'
 import { useVirtualList } from '../hooks/useVirtualList'
 import { getResolvedLocale, useT } from '../i18n'
-import type { DeadLetter } from './DeadLettersPanel'
+import type { DeadLetter } from './dead-letter-types'
 import { EmptyView } from './panel-primitives'
 import {
   consumeRecoveryQueueFocus,

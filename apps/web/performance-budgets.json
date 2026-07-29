@@ -38,6 +38,10 @@
     "selectedRecovery": {
       "maxTransferredKiB": 90,
       "maxLongTaskMs": 200
+    },
+    "recoveryTools": {
+      "maxTransferredKiB": 90,
+      "maxLongTaskMs": 200
     }
   },
   "baselineGzipKiB": {
@@ -46,6 +50,7 @@
     "AiGuidanceSettingsPanel.js": 1.31,
     "AlertPoliciesPanel.js": 4.24,
     "app-workspace.js": 71.07,
+    "AutoHealingPendingCard.js": 2.34,
     "AuditLogPanel.js": 1.46,
     "AuthPolicySettingsPanel.js": 1.73,
     "BudgetSettingsPanel.js": 2.29,
@@ -77,11 +82,12 @@
     "recovery-item.js": 0.6,
     "RecoveryCasePanel.js": 3.5,
     "RecoveryDialog.js": 9.8,
+    "ReplayCampaignsCard.js": 1.6,
     "RollbackConfirmDialog.js": 1.27,
     "rolldown-runtime.js": 0.41,
     "RunExplainChat.js": 4.32,
     "RunInputDialog.js": 2.96,
-    "RunsPanel.js": 26.91,
+    "RunsPanel.js": 25.7,
     "RunStreamChip.js": 0.58,
     "RunWorkspace.js": 1.76,
     "ScheduleHistoryPanel.js": 1.96,
@@ -95,6 +101,7 @@
     "UpstreamHealthPanel.js": 2.39,
     "url.js": 0.12,
     "useVirtualList.js": 0.9,
+    "ValidationEvidencePill.js": 0.3,
     "VersionHistoryPanel.js": 2.54,
     "VitalSignsStrip.js": 2.11,
     "workflow-workspace.js": 35.36,

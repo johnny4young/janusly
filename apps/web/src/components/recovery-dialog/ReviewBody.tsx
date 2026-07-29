@@ -15,7 +15,7 @@ import type { RecoverySandboxStatus } from '@janusly/shared/src/recovery-passpor
 import { useT } from '../../i18n'
 import type { WorkflowDefinition } from '../../types'
 import { WorkflowDiffView } from '../WorkflowDiffView'
-import type { DeadLetter } from '../DeadLettersPanel'
+import type { DeadLetter } from '../dead-letter-types'
 import { EvidencePanel } from './EvidencePanel'
 import { AlternativeHypothesesPanel } from './AlternativeHypothesesPanel'
 import { LearningHealthBadge } from './LearningHealthBadge'

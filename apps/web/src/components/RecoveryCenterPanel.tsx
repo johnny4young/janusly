@@ -33,7 +33,7 @@ import {
   decodeRecoveryValidationReport,
 } from '../recovery-home-sections'
 import { useWorkflowStore } from '../store'
-import type { DeadLetter } from './DeadLettersPanel'
+import type { DeadLetter } from './dead-letter-types'
 import { useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { RecoveryCenterView } from './RecoveryCenterView'

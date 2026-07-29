@@ -23,7 +23,7 @@
 import { lazy, Suspense, useCallback, useMemo, useState } from 'react'
 import { Activity, Boxes, Database, FlaskConical, Layers3, Plug, Users, Workflow } from 'lucide-react'
 import type { ActiveTab, AiAuthoringActionRequest, AiCandidateBackoff, AiHealth, AiMode, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, WorkflowDefinition, WorkflowImprovementResult, WorkflowImprovementSuggestion } from '../types'
-import type { DeadLetter } from './DeadLettersPanel'
+import type { DeadLetter } from './dead-letter-types'
 import { AiCopilotPanel } from './AiCopilotPanel'
 import { AuthoringPanel, type AuthoringPanelModel } from './AuthoringPanel'
 import { EmptyView, PanelChrome, PanelSearch } from './panel-primitives'

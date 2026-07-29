@@ -14,7 +14,7 @@ import { formatStatusLabel, getNodeLabel } from '../constants'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { buildRecoveryErrorSummary } from '../recovery-error-summary'
 import { useWorkflowStore } from '../store'
-import type { DeadLetter } from './DeadLettersPanel'
+import type { DeadLetter } from './dead-letter-types'
 import { ReplayLabDialog } from './ReplayLabDialog'
 import { RunExplainChat } from './RunExplainChat'
 

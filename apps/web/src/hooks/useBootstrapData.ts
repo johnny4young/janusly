@@ -39,7 +39,7 @@ export type RunSummaryUpdateStarter = (runId: string) => RunSummaryUpdateCommitt
 // `DeadLetter` is declared next to the panel that owns its row shape; re-import
 // it here so the hook's return type matches what `App` passed down before the
 // extraction.
-import type { DeadLetter } from '../components/DeadLettersPanel'
+import type { DeadLetter } from '../components/dead-letter-types'
 
 export function patchRunSummaryList(
   current: RunSummary[],

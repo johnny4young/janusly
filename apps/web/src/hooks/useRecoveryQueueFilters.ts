@@ -20,7 +20,7 @@ import {
 } from '../components/recovery-day-focus-bus'
 import type { RecoveryItemBadgeData } from '../components/RecoveryItemBadge'
 import type { RecoveryItemDrawerData } from '../components/RecoveryItemDrawer'
-import type { DeadLetter } from '../components/DeadLettersPanel'
+import type { DeadLetter } from '../components/dead-letter-types'
 
 /** DLQ-status filter values; `'all'` shows every status. */
 export const statuses = ['all', 'open', 'replayed', 'resolved'] as const

@@ -190,6 +190,8 @@ async function stubApi(page: Page) {
         byFailureMode: [],
       }
     } else if (pathname === '/dlq/clusters') body = { clusters: [], totalSamples: 0, windowDays: 30 }
+    else if (pathname === '/recovery/campaigns') body = { campaigns: [] }
+    else if (pathname === '/auto-healing/pending') body = { rows: [] }
     else if (pathname === '/billing/budget') {
       body = { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn', warningPercent: 80, warningThresholdCrossed: false, exceededAt: null, resolvedScope: 'org' }
     } else if (['/tools', '/templates', '/solution-packs', '/credentials', '/runs', '/dlq', '/workflows'].includes(pathname)) {
@@ -265,6 +267,28 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   expect(recoveryMeasurement.transferredBytes).toBeGreaterThan(0)
   await captureElement(detail, 'web-en-performance-selected-recovery')
 
+  await page.getByRole('button', { name: /^Activity\b/ }).click()
+  const recoveryTools = page.getByTestId('activity-open-recovery-tools')
+  await expect(recoveryTools).toBeVisible()
+  await resetRouteMeasurement(page)
+  await recoveryTools.click()
+  const recoveryQueue = page.getByTestId('recovery-queue')
+  await expect(recoveryQueue).toBeVisible()
+  const recoveryToolsMeasurement = await measureRoute(page, 'recoveryTools')
+  expect(recoveryToolsMeasurement.resources.some((path) => /RunsPanel-.*\.js$/.test(path))).toBe(true)
+  expect(recoveryToolsMeasurement.resources.some((path) => /FailureClustersCard-.*\.js$/.test(path))).toBe(false)
+  expect(recoveryToolsMeasurement.resources.some((path) => /ReplayCampaignsCard-.*\.js$/.test(path))).toBe(false)
+  expect(recoveryToolsMeasurement.resources.some((path) => /AutoHealingPendingCard-.*\.js$/.test(path))).toBe(false)
+  await captureElement(recoveryQueue, 'web-en-performance-recovery-tools')
+
+  await resetRouteMeasurement(page)
+  await page.getByTestId('recovery-automation-toggle').click()
+  await expect(page.getByTestId('recovery-automation-toggle')).toHaveAttribute('aria-expanded', 'true')
+  const automationResources = await measureRoute(page, 'recoveryAutomation')
+  expect(automationResources.resources.some((path) => /FailureClustersCard-.*\.js$/.test(path))).toBe(true)
+  expect(automationResources.resources.some((path) => /ReplayCampaignsCard-.*\.js$/.test(path))).toBe(true)
+  expect(automationResources.resources.some((path) => /AutoHealingPendingCard-.*\.js$/.test(path))).toBe(true)
+
   await resetRouteMeasurement(page)
   await page.getByRole('button', { name: 'Open user menu' }).click()
   const localeSwitcher = page.getByRole('combobox', { name: 'Change language' })
@@ -305,7 +329,12 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   expect(esBrowserErrors).toEqual([])
   await esPage.close()
 
-  const measurements = [homeMeasurement, workflowBuilderMeasurement, recoveryMeasurement]
+  const measurements = [
+    homeMeasurement,
+    workflowBuilderMeasurement,
+    recoveryMeasurement,
+    recoveryToolsMeasurement,
+  ]
   if (PERF_REPORT) {
     const path = resolve(PERF_REPORT)
     await mkdir(dirname(path), { recursive: true })

@@ -14,7 +14,7 @@
  * the last successful card and any nested recovery dialog while its next
  * payload is in flight; applying a fix must not discard its success state.
  *
- * Used in `DeadLettersPanel.tsx` (Runs tab → Operations card).
+ * Loaded by `RecoveryAutomationDisclosure.tsx` after explicit expansion.
  */
 
 import { lazy, Suspense, useEffect, useState } from 'react'
@@ -24,7 +24,7 @@ import { EmptyState } from './EmptyState'
 import { useWorkflowStore } from '../store'
 // Modal-only + heavy (~1.2k lines) — load on first open, not in the main chunk.
 const RecoveryDialog = lazy(() => import('./RecoveryDialog').then((m) => ({ default: m.RecoveryDialog })))
-import type { DeadLetter } from './DeadLettersPanel'
+import type { DeadLetter } from './dead-letter-types'
 import { getResolvedLocale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 
