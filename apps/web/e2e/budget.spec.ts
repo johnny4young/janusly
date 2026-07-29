@@ -84,6 +84,7 @@ test('Recovery Center budget tile opens budget settings', async ({ page }) => {
   })
 
   await page.goto('/')
+  await page.getByTestId('home-insights-toggle').click()
 
   await expect(page.getByTestId('recovery-center-tile-budget')).toContainText('AI budget')
   await expect(page.getByTestId('recovery-center-budget-bar')).toContainText('$12.00 / $10.00')

@@ -15,7 +15,9 @@ test('mobile workspace remains usable without horizontal overflow', async ({ pag
   await openMobileNavigation(page)
   await expect(page.getByRole('button', { name: 'Home', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Workflows', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Activity', exact: true })).toBeVisible()
+  await expect(
+    page.locator('#workspace-sidebar').getByRole('button', { name: 'Activity', exact: true }),
+  ).toBeVisible()
   await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible()
 
   await openWorkspaceSection(page, 'Activity', 'Runs')

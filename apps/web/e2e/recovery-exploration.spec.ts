@@ -206,6 +206,7 @@ for (const contract of LOCALES) {
 
     const sessionOrgId = await prepareSession(page, contract.locale)
     await page.goto('/')
+    await page.getByTestId('home-insights-toggle').click()
 
     const labEntry = page.getByTestId('recovery-lab-entry')
     await expect(labEntry).toBeVisible()
@@ -214,6 +215,7 @@ for (const contract of LOCALES) {
     expect(await page.evaluate(() => localStorage.getItem('janusly:recovery:hideIntro'))).toBeNull()
 
     await page.reload()
+    await page.getByTestId('home-insights-toggle').click()
     await expect(labEntry).toBeVisible()
     await hideUnrelatedOverlays(page)
     await capture(labEntry, `web-${contract.locale}-recovery-lab-restored`)
@@ -243,6 +245,7 @@ for (const contract of LOCALES) {
       localStorage.removeItem('janusly:recovery:hideIntro')
     }, historyOrgId)
     await page.reload()
+    await page.getByTestId('home-insights-toggle').click()
     await expect(labEntry).toBeHidden()
     expect(await page.evaluate(() => localStorage.getItem('janusly:recovery:hideIntro'))).toBeNull()
 
@@ -273,6 +276,7 @@ for (const contract of LOCALES) {
     await capture(queue, `web-${contract.locale}-recovery-sparkline-drill-in`)
 
     await page.getByRole('button', { name: contract.homeName }).click()
+    await page.getByTestId('home-insights-toggle').click()
     const heatmap = page.getByTestId('recovery-heatmap')
     const latestCell = page.getByTestId(`recovery-heatmap-cell-${days[2]}`)
     const previousDayCell = page.getByTestId(`recovery-heatmap-cell-${days[1]}`)

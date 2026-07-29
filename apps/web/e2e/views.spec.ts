@@ -11,7 +11,7 @@ function installConsoleErrorGuards(page: Page) {
 }
 
 const views = [
-  { destination: 'Home', selector: '.we-recovery-center-hero .section-kicker', text: 'Recovery Center' },
+  { destination: 'Home', selector: '.we-home-header .section-kicker', text: 'Home' },
   { destination: 'Workflows', section: 'Build', text: 'Describe the outcome. Janusly builds the flow.', ai: true },
   { destination: 'Workflows', section: 'All workflows', heading: 'Flows' },
   { destination: 'Workflows', section: 'Build', heading: 'Build' },

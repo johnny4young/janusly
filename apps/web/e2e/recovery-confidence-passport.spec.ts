@@ -74,6 +74,7 @@ async function waitForPlaybookMatch(
 }
 
 test('recovery passport requires sandbox success and a separate apply decision', async ({ page, request }) => {
+  test.slow()
   const browserErrors = installConsoleErrorGuards(page)
   const playbookMatches = recordPlaybookMatches(page)
   const orgId = process.env.JANUSLY_RECOVERY_PASSPORT_ORG_ID

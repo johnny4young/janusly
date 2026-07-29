@@ -21,7 +21,11 @@ import { Award, Download, FileText, History } from 'lucide-react'
 
 import { downloadFromApi } from '../api'
 import { getResolvedLocale, useT } from '../i18n'
-import { formatDuration, type RecoveryLedger } from './recovery-center/recovery-center-model'
+import {
+  formatDuration,
+  type OperatorWins,
+  type RecoveryLedger,
+} from './recovery-center/recovery-center-model'
 
 export type ClustersResolvedMetric = {
   value: number | null
@@ -53,6 +57,8 @@ export type ValueDashboardSectionProps = {
   downtimeEndedMs?: number
   /** Lifetime measured recovery value; hidden until at least one replay succeeds. */
   ledger?: RecoveryLedger | null
+  /** Personal recovery momentum for the authenticated operator. */
+  personalWins?: OperatorWins | null
   /** When true, the section renders the private-beta-pending empty state. */
   terminalRunsZero: boolean
 }
@@ -105,6 +111,15 @@ export function ValueDashboardSection(props: ValueDashboardSectionProps) {
       })}
     </p>
   ) : null
+  const personalWinsLine = props.personalWins && props.personalWins.recovered > 0 ? (
+    <p className="we-recovery-center-value__lifetime" data-testid="recovery-insights-personal-wins">
+      <Award size={14} aria-hidden="true" />
+      {t('recoveryCenter.hero.personalWins', {
+        count: props.personalWins.recovered,
+        days: props.personalWins.windowDays,
+      })}
+    </p>
+  ) : null
 
   // Empty state when the org has no terminal runs in the window —
   // dashboard sits dormant until the operator runs at least one workflow.
@@ -116,6 +131,7 @@ export function ValueDashboardSection(props: ValueDashboardSectionProps) {
           {t('recoveryCenter.value.title')}
         </h2>
         <p className="we-recovery-center-value__empty">{t('recoveryCenter.value.privateBetaPending')}</p>
+        {personalWinsLine}
         {ledgerLine}
       </section>
     )
@@ -140,6 +156,7 @@ export function ValueDashboardSection(props: ValueDashboardSectionProps) {
             {t('recoveryCenter.value.title')}
           </h2>
           <p className="we-recovery-center-value__subtitle">{t('recoveryCenter.value.subtitle')}</p>
+          {personalWinsLine}
           {ledgerLine}
         </div>
         <div className="we-recovery-center-value__actions">

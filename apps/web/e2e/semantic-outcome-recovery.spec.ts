@@ -292,21 +292,18 @@ for (const locale of ['en', 'es'] as const) {
     }, { activeOrg: fixture.orgId, language: locale })
 
     await page.goto('/')
-    const tile = page.getByTestId('recovery-center-tile-semantic')
-    await expect(tile).toContainText(copy.message)
+    const action = page.getByTestId('recovery-center-action-review_semantic_cases')
+    await expect(action).toContainText(copy.message)
     await expect(page.getByRole('button', { name: copy.blockedRunAria })).toContainText(
       copy.blockedRun,
     )
     await expect(
       page.getByText(copy.blocker, { exact: true }),
     ).toBeVisible()
-    const recoveryCase = page.getByTestId(`semantic-recovery-case-${fixture.caseId}`)
-    await expect(recoveryCase).toBeVisible()
-    await recoveryCase.scrollIntoViewIfNeeded()
     await expectNoHorizontalOverflow(page)
     await capture(page, `semantic-outcome-quarantine-${locale}`)
 
-    await page.getByTestId(`semantic-recovery-open-${fixture.caseId}`).click()
+    await page.getByTestId('recovery-center-action-cta-review_semantic_cases').click()
     await expect(
       page.getByTestId(`recovery-case-workspace-${fixture.caseId}`),
     ).toBeVisible()
@@ -349,7 +346,7 @@ for (const locale of ['en', 'es'] as const) {
       page.getByTestId(`recovery-case-workspace-${fixture.caseId}`),
     ).toContainText(locale === 'en' ? 'Recovered' : 'Recuperado')
     await page.getByRole('button', { name: copy.backToRecovery }).click()
-    await expect(page.getByTestId('recovery-center-semantic-allclear')).toBeVisible()
+    await expect(page.getByTestId('home-priority-clear')).toBeVisible()
     await expect(page.getByRole('button', { name: copy.allClearAria })).toBeVisible()
 
     await openWorkspaceSection(

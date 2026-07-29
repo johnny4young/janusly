@@ -1425,9 +1425,7 @@ export default function App() {
                   onOpenTab={openHomeTab}
                   onOpenRecoveryCase={openRecoveryCase}
                   onOpenRun={openRun}
-                  onApproveNode={canStartRuns ? approveNode : () => undefined}
-                  onOpenRecoveryQueue={() => openRecoveryQueue()}
-                  onRefreshPlatform={refreshPlatform}
+                  onOpenRecoveryQueue={openRecoveryQueue}
                   onStartRecoveryDrill={canInstallPacks
                     ? () => injectPackFailure('failed-payment-recovery', 'billing_secret_unbound')
                     : undefined}

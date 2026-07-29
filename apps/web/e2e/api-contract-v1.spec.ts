@@ -160,6 +160,7 @@ test('v1 contracts stay legacy-compatible and power the real web reads', async (
   })
 
   await page.goto('/')
+  await page.getByTestId('home-insights-toggle').click()
   const metricStrip = page.getByTestId('recovery-center-metric-strip')
   await expect(metricStrip).toBeVisible()
   await captureElement(metricStrip, 'web-en-v1-recovery-metrics')

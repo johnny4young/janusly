@@ -121,6 +121,22 @@ describe('<ValueDashboardSection />', () => {
     expect(screen.queryByTestId('recovery-lifetime-ledger')).not.toBeInTheDocument()
   })
 
+  it('keeps personal recovery momentum available in secondary insights', () => {
+    render(
+      <ValueDashboardSection
+        recoveryTimeMs={60_000}
+        recoveryTimeDisplay="1m"
+        terminalRunsZero={false}
+        windowDays={30}
+        personalWins={{ recovered: 3, windowDays: 30 }}
+      />,
+    )
+
+    expect(screen.getByTestId('recovery-insights-personal-wins')).toHaveTextContent(
+      'You recovered 3 failures in the last 30 days',
+    )
+  })
+
   it('renders "Awaiting private-beta data" when baseline is unset (sentinel 0)', () => {
     render(
       <ValueDashboardSection

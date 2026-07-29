@@ -207,6 +207,7 @@ test('Recovery effectiveness is measured and shown in English and Spanish', asyn
   await prepareSession(page, orgId)
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto('/')
+  await page.getByTestId('home-insights-toggle').click()
   const metricStrip = page.getByTestId('recovery-center-metric-strip')
   const clusterTile = page.getByTestId('recovery-center-tile-clusters')
   await expect(page.getByTestId('recovery-center-metric-first-action')).toContainText('Time to first action')
@@ -221,6 +222,7 @@ test('Recovery effectiveness is measured and shown in English and Spanish', asyn
 
   await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
   await page.reload()
+  await page.getByTestId('home-insights-toggle').click()
   await expect(page.getByTestId('recovery-center-metric-first-action')).toContainText('Tiempo hasta la primera acción')
   await expect(page.getByTestId('recovery-center-metric-durability')).toContainText('Correcciones que se mantienen')
   await expect(clusterTile).toContainText('Falló tras corregirse')

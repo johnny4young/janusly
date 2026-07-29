@@ -75,22 +75,30 @@ async function capture(surface: Locator, filename: string): Promise<void> {
   })
 }
 
-test('Recovery Center and its primary queue path meet the accessibility floor', async ({ page }) => {
+async function prepareIsolatedSession(page: Page, locale: 'en' | 'es'): Promise<void> {
+  const orgId = `accessibility-${locale}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  await page.addInitScript(({ activeOrg, selectedLocale }) => {
+    window.localStorage.setItem('janusly:activeOrg', activeOrg)
+    window.localStorage.setItem('janusly:locale', selectedLocale)
+  }, { activeOrg: orgId, selectedLocale: locale })
+}
+
+test('Home and its primary Activity path meet the accessibility floor', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   const errors = installBrowserErrorGuards(page)
+  await prepareIsolatedSession(page, 'en')
   await page.goto('/')
 
   const hero = page.locator('.we-recovery-center-hero')
   await expect(hero).toBeVisible()
-  await expectNoBlockingAccessibilityViolations(page, 'Recovery Center home')
-  await capture(page.locator('.workspace-main'), 'accessibility-en-recovery-center')
+  await expectNoBlockingAccessibilityViolations(page, 'Home')
+  await capture(page.locator('.workspace-main'), 'accessibility-en-home')
 
-  await page.getByTestId('recovery-center-queue-open-all').click()
-  await openWorkspaceSection(page, 'Activity', 'Recover')
-  const queue = page.getByTestId('recovery-queue')
-  await expect(queue).toBeVisible()
-  await expectNoBlockingAccessibilityViolations(page, 'Recovery queue')
-  await capture(queue, 'accessibility-en-recovery-queue')
+  await page.getByTestId('home-active-work').getByRole('button', { name: 'Activity' }).click()
+  await expect(page.getByRole('heading', { name: 'Activity', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Recent activity' })).toBeVisible()
+  await expectNoBlockingAccessibilityViolations(page, 'Activity')
+  await capture(page.locator('.workspace-main'), 'accessibility-en-activity')
   expect(errors).toEqual([])
 })
 
@@ -146,8 +154,8 @@ test('mobile navigation meets the accessibility floor while open', async ({ page
 test('Spanish dark-mode Recovery Center and command palette meet the accessibility floor', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   const errors = installBrowserErrorGuards(page)
+  await prepareIsolatedSession(page, 'es')
   await page.addInitScript(() => {
-    window.localStorage.setItem('janusly:locale', 'es')
     window.localStorage.setItem('janusly:theme', 'dark')
   })
   await page.goto('/')

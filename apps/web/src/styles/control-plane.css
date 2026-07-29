@@ -254,11 +254,6 @@
 }
 .inspector-id-copy:hover { color: var(--we-ink); }
 
-/* Recovery Center hero CTA row (action-first mode when failures exist). */
-.we-recovery-center-hero__actions {
-  margin-top: 14px;
-}
-
 .inspector-meta {
   border-top: 1px solid var(--we-line);
   color: var(--we-muted);
@@ -1986,7 +1981,6 @@
 [data-density="compact"] .user-menu__workspace { padding: 8px; }
 [data-density="compact"] .user-menu__id { padding: 10px 12px; }
 [data-density="compact"] .we-recovery-center-tile { padding: 12px; }
-[data-density="compact"] .we-recovery-signoff-row { padding: 8px; }
 [data-density="compact"] .we-recovery-watch-row { padding: 6px 8px; }
 [data-density="compact"] .recovery-center-composer { padding: 10px 12px; gap: 8px; }
 [data-density="compact"] .top-bar { padding: 0 12px; }
@@ -3142,26 +3136,7 @@
 
 .bottom-status-bar__item--button:hover { color: var(--we-primary); }
 
-/* ==========================================================================
-   Operator grid — Home chat-surface (left, 1.7fr) + live status rail
-   (right, 1fr). Mirrors `ui_kits/studio/home-operator.html`.
-   ========================================================================== */
 .we-recovery-center-panel--operator { gap: 16px; }
-
-.we-operator-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr);
-  gap: 16px;
-  min-height: 0;
-}
-
-.we-operator-chat,
-.we-operator-rail {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 0;
-}
 
 .we-operator-mini {
   display: grid;
@@ -3205,10 +3180,6 @@
 .we-operator-mini__delta[data-severity="warn"] { color: var(--we-warning-text); }
 .we-operator-mini__delta[data-severity="unhealthy"],
 .we-operator-mini__delta[data-severity="danger"] { color: var(--we-danger-text); }
-
-@media (max-width: 1100px) {
-  .we-operator-grid { grid-template-columns: 1fr; }
-}
 
 /* ==========================================================================
    Final polish pass — Inspector, AiCopilot result body, MultiAgentTimeline,
@@ -3303,14 +3274,6 @@
    Home recovery entry. A fresh workspace remains truthful and empty until
    the operator explicitly starts a controlled drill.
    ========================================================================== */
-
-.we-recovery-center-hero__pitch {
-  margin: 8px 0 0;
-  font-size: 13px;
-  color: var(--we-ink-soft);
-  line-height: 1.55;
-  max-width: 56ch;
-}
 
 /* Recovery Lab entry */
 .we-recovery-lab-entry {

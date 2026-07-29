@@ -19,6 +19,7 @@
 import { t as runtimeT } from '../../i18n/runtime'
 import type { ActiveTab, RunNode, RunSummary } from '../../types'
 import type { DeadLetter } from '../DeadLettersPanel'
+import { isOpenRunStatus } from '@janusly/shared/src/status'
 
 // ─────────────────────────────────────────────────────────────────────────
 // Types / data shapes — mirror the API envelopes the existing panels read.
@@ -192,11 +193,10 @@ export function healthBand(score: number | null): 'high' | 'mid' | 'low' | 'unkn
 
 export type RecommendedActionId =
   | 'resolve_approvals'
+  | 'review_semantic_cases'
   | 'recover_cluster'
   | 'triage_failures'
   | 'review_workflow_risk'
-  | 'run_getting_started'
-  | 'healthy_try_studio'
 
 export type RecommendedActionSeverity = 'cobalt' | 'cyan' | 'success' | 'warning' | 'danger'
 
@@ -212,16 +212,16 @@ export type RecommendedAction = {
 export type RecommendedActionSignals = {
   openFailures: number
   pendingApprovals: number
+  semanticCases: number
   topClusterFrequency: number
   healthScore: number | null
-  totalRuns: number
 }
 
 /**
  * Deterministic priority of recommended next actions. Operator-blocking
- * work first (approvals waiting on input), then bulk recovery, then
- * triage, then long-term risk, then onboarding. Pure function — easy
- * to unit-test each fixture in isolation.
+ * work first (approvals waiting on input), then semantic containment,
+ * bulk recovery, individual triage, and long-term risk. Pure function
+ * so each ordering rule can be tested in isolation.
  */
 export function computeRecommendedActions(signals: RecommendedActionSignals): RecommendedAction[] {
   const actions: RecommendedAction[] = []
@@ -235,6 +235,18 @@ export function computeRecommendedActions(signals: RecommendedActionSignals): Re
       severity: 'warning',
     })
   }
+  if (signals.semanticCases > 0) {
+    actions.push({
+      id: 'review_semantic_cases',
+      title: runtimeT('recoveryCenter.action.review_semantic_cases.title', {
+        count: signals.semanticCases,
+      }),
+      body: runtimeT('recoveryCenter.action.review_semantic_cases.body'),
+      ctaLabel: runtimeT('recoveryCenter.action.review_semantic_cases.cta'),
+      ctaTab: 'recover',
+      severity: 'danger',
+    })
+  }
   if (signals.topClusterFrequency >= 2) {
     actions.push({
       id: 'recover_cluster',
@@ -244,8 +256,7 @@ export function computeRecommendedActions(signals: RecommendedActionSignals): Re
       ctaTab: 'operations',
       severity: 'cobalt',
     })
-  }
-  if (signals.openFailures > 0) {
+  } else if (signals.openFailures > 0) {
     actions.push({
       id: 'triage_failures',
       title: runtimeT('recoveryCenter.action.triage_failures.title', { count: signals.openFailures }),
@@ -266,27 +277,20 @@ export function computeRecommendedActions(signals: RecommendedActionSignals): Re
       severity,
     })
   }
-  if (signals.totalRuns < 5 && signals.openFailures === 0 && signals.pendingApprovals === 0) {
-    actions.push({
-      id: 'run_getting_started',
-      title: runtimeT('recoveryCenter.action.run_getting_started.title'),
-      body: runtimeT('recoveryCenter.action.run_getting_started.body'),
-      ctaLabel: runtimeT('recoveryCenter.action.run_getting_started.cta'),
-      ctaTab: 'copilot',
-      severity: 'cyan',
+  return actions.slice(0, 3)
+}
+
+export function listActiveRuns(runs: readonly RunSummary[], limit = 3): RunSummary[] {
+  const boundedLimit = Math.max(0, Math.floor(limit))
+  return runs
+    .filter((run) => isOpenRunStatus(run.status))
+    .slice()
+    .sort((a, b) => {
+      const aTime = a.createdAt ? Date.parse(a.createdAt) : 0
+      const bTime = b.createdAt ? Date.parse(b.createdAt) : 0
+      return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0)
     })
-  }
-  if (actions.length === 0) {
-    actions.push({
-      id: 'healthy_try_studio',
-      title: runtimeT('recoveryCenter.action.healthy_try_studio.title'),
-      body: runtimeT('recoveryCenter.action.healthy_try_studio.body'),
-      ctaLabel: runtimeT('recoveryCenter.action.healthy_try_studio.cta'),
-      ctaTab: 'copilot',
-      severity: 'success',
-    })
-  }
-  return actions
+    .slice(0, boundedLimit)
 }
 
 // ─────────────────────────────────────────────────────────────────────────

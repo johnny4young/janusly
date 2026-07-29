@@ -8,8 +8,9 @@ const baseProps = {
   subline: 'One run needs recovery.',
   healthScore: 87,
   openFailures: 0,
+  priorityCount: 0,
+  metricsStatus: 'available' as const,
   streak: { current: 0, longest: 0 },
-  onOpenQueue: vi.fn(),
 }
 
 describe('<RecoveryCenterHero /> (browser smoke)', () => {
@@ -43,6 +44,29 @@ describe('<RecoveryCenterHero /> (browser smoke)', () => {
     expect(streak.getBoundingClientRect().height).toBeGreaterThan(0)
   })
 
+  it('keeps one concise health summary beside the greeting', () => {
+    render(<RecoveryCenterHero
+      {...baseProps}
+      priorityCount={2}
+    />)
+
+    expect(screen.getByTestId('home-health-summary')).toHaveTextContent('Needs attention')
+    expect(screen.getByLabelText('Health score 87 of 100')).toBeVisible()
+  })
+
+  it('offers an inline retry when the combined Home status is incomplete', () => {
+    const onRefreshStatus = vi.fn()
+    render(<RecoveryCenterHero
+      {...baseProps}
+      metricsStatus="unavailable"
+      onRefreshStatus={onRefreshStatus}
+    />)
+
+    expect(screen.getByTestId('home-health-summary')).toHaveTextContent('Status is incomplete')
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(onRefreshStatus).toHaveBeenCalledOnce()
+  })
+
   it('renders the all-clear summary and animated burst as a focused hero state', () => {
     render(<RecoveryCenterHero
       {...baseProps}
@@ -73,7 +97,9 @@ describe('<RecoveryCenterHero /> (browser smoke)', () => {
 
     const hero = screen.getByRole('banner')
     expect(hero).not.toHaveAttribute('data-all-clear')
-    expect(screen.getByTestId('recovery-center-greeting')).toHaveTextContent('1 run needs recovery')
+    expect(screen.getByTestId('recovery-center-greeting')).toHaveTextContent(
+      'Good afternoon, Jane.',
+    )
     expect(screen.queryByTestId('celebration-burst')).toBeNull()
   })
 
@@ -99,7 +125,7 @@ describe('<RecoveryCenterHero /> (browser smoke)', () => {
     expect(wins).toHaveTextContent('You recovered 3 failures in the last 30 days')
     expect(wins.getBoundingClientRect().height).toBeGreaterThan(0)
 
-    rerender(<RecoveryCenterHero {...baseProps} personalWins={personalWins} openFailures={1} />)
+    rerender(<RecoveryCenterHero {...baseProps} personalWins={personalWins} openFailures={1} priorityCount={1} />)
     expect(screen.queryByTestId('recovery-center-personal-wins')).toBeNull()
 
     rerender(<RecoveryCenterHero {...baseProps} personalWins={personalWins} allClear />)
