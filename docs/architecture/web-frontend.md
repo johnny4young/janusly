@@ -2,7 +2,7 @@
 
 > Operational deep-dive extracted from `AGENTS.md` (kept verbatim). `AGENTS.md` carries the one-line summary + a link here. Edit the invariants here; keep the `AGENTS.md` summary in sync.
 
-**External runtime shadow administration:** Operations → Integrations mounts
+**External runtime shadow administration:** Settings → Workspace → Integrations mounts
 `ExternalRuntimePanel` before action-capable integrations. It accepts only the
 server's explicit `observerOnly: true` projection, validates every connection,
 run, and case row before rendering, and filters its credential picker to
@@ -14,7 +14,7 @@ hides configuration mutations; administrator mutations invalidate the shared
 platform snapshot through `bumpPlatformVersion()`. Keep the responsive EN/ES
 layout and malformed-wire fail-closed behavior covered.
 
-**Slack interaction administration:** Operations → Integrations mounts `SlackInteractionsPanel` before credential health and MCP connections. It lists only the server's safe projection (name, team id, signing credential name, bounded user mappings, enabled state, and callback URL), filters the credential selector to `slack_signing_secret`, and maps Slack user ids to members returned by `/members`. It supports create/edit/delete/copy with responsive EN/ES controls and invalidates other panels through `bumpPlatformVersion()`. Recovery alert policies show the optional interaction-connection selector only for Slack channels on recovery-item triggers; all other Slack alerts remain text-only.
+**Slack interaction administration:** Settings → Workspace → Integrations mounts `SlackInteractionsPanel` alongside external-runtime observers and MCP connections. It lists only the server's safe projection (name, team id, signing credential name, bounded user mappings, enabled state, and callback URL), filters the credential selector to `slack_signing_secret`, and maps Slack user ids to members returned by `/members`. It supports create/edit/delete/copy with responsive EN/ES controls and invalidates other panels through `bumpPlatformVersion()`. Recovery alert policies show the optional interaction-connection selector only for Slack channels on recovery-item triggers; all other Slack alerts remain text-only.
 
 **Progressive workflow deployment:** the Inspector lazily mounts `WorkflowRolloutPanel` for saved workflows. The panel keeps only version/rollout orchestration on its initial boundary: `WorkflowRecoveryQualification` owns the qualification parser, read, mutation, and gate state and loads only when a baseline/candidate pair exists; `WorkflowRolloutStatus` owns the active/latest status projection and actions and loads only when that projection is visible. It reads immutable version history plus the latest deployment projection, permits an older baseline against only the newest canary, and bounds canary traffic/minimum sample/minimum success rate to the server contract. Active state shows traffic, baseline/canary terminal counts, canary success rate, and the automatic-return guardrail. Promotion and return-to-baseline use the shared accessible confirmation dialog; successful mutations call `bumpPlatformVersion()`. API payloads are parsed defensively instead of trusted through casts. Eligibility, authorization, trigger compatibility, assignment, and automatic rollback remain server-owned; the panel is not a second deployment state machine.
 
@@ -41,7 +41,20 @@ workflows, Build, Templates, and Experiments; Templates unifies recipes and
 solution packs behind one search. Activity has one visible chronological
 workspace for runs and recoveries; its historical Recover, Reasoning, and Agent
 routes are hidden expert aliases. Settings contains Workspace, Connections,
-Team, and Tools.
+Team, and Tools. Workspace opens on a searchable inventory of six focused
+areas—Reliability, Integrations, Access, AI, Usage, and Infrastructure—and
+shows current status before configuration forms. The index and contextual rail
+share `settings-sections.ts` as the one OR-capability visibility policy for
+areas containing multiple independently authorized panels, while every child
+still owns its exact read/write gates. Persisted or requested sections are
+permission-resolved before any child mounts. Page-level reads follow the same
+boundary: recovery metrics are not requested without `recovery.read`, and the
+admin queue projection is not requested without `org.config.write`.
+Connections opens on a bounded searchable inventory with type, safe owner
+metadata, declared expiry, last-use posture, and health. Creation and rotation
+live in focused dialogs; secret values remain write-only and mutation controls
+remain absent for readers. Long connection inventories use `useVirtualList`
+rather than mounting every row.
 Permission filtering is delegated to the existing `canOpenTab` policy and
 opening a destination selects its first permitted section. Home has no
 redundant section rail. The command palette keeps direct expert routes while
@@ -69,12 +82,14 @@ run-authority path.
 
 The Reasoning tab and the Runs workspace's Timeline projection share the lazy `ReasoningPanel` chunk rather than placing it on the eager `App` path. Its `constants` and `useVirtualList` dependencies are shared chunks because Runs history also consumes them; keep the three reviewed names in `apps/web/performance-budgets.json`. Do not move the long-run timeline back into `RightPanel.tsx` or `RunWorkspace.tsx`: the feature-specific filtering, focus navigation, payload rendering, and fixed-row virtualization belong in the sibling component, while the wrappers remain lazy dispatchers.
 
-`OperationsPage` is a lazy route shell and each heavy child card is also a
-lazy import. Only the active Overview, Reliability, Access, or Integrations
-section mounts its cards, so inactive section code and fetch effects remain
-off the navigation path. Keep the shell's health summary and section router
-eager within that route, and place feature-specific state and effects in the
-corresponding child panel.
+`OperationsPage` is the lazy internal route shell for Settings → Workspace and
+each heavy child card is also a lazy import. Only the active overview or one of
+Reliability, Integrations, Access, AI, Usage, and Infrastructure mounts its
+content, so inactive code and fetch effects remain off the navigation path.
+Keep the shell's health summary and section router eager within that route, and
+place feature-specific state and effects in the corresponding child panel.
+`ConnectionsPanel` is a separate lazy route chunk so its inventory and dialogs
+do not grow the initial Settings workspace payload.
 
 The zero-dependency `@janusly/shared/src/api-contract` subpath is also allowed:
 it is the canonical exact-path catalog for reads transported over `/v1` and
@@ -170,7 +185,7 @@ each component.
 
 **Home:** the authenticated landing page is `activeTab: "home"` (set in `apps/web/src/store.ts`), rendering the lazy `RecoveryCenterPanel` from `apps/web/src/components/RecoveryCenterPanel.tsx` inside its own `ErrorBoundary` and `Suspense` fallback. Home is an action workspace, not a second operational dashboard: its first viewport contains one concise combined-health summary, at most three deterministic priority actions, and at most three recent active runs. `HomeActionWorkspace` owns that bounded presentation while the pure projections in `apps/web/src/components/recovery-center/recovery-center-model.ts` own ordering, deduplication, and canonical open-run classification. Healthy organizations return no synthetic recommendation; they receive a calm caught-up state with Activity as the optional next destination. Server-driven `OnboardingBanner` remains the only setup guide and exposes only the next incomplete outcome. Operational rows remain authoritative in Activity or the exact case/run workspace rather than being duplicated as Home queue, approval, or semantic-case tiles.
 
-Priority order is pending approvals → open semantic cases → clustered recover-all or individual triage → elevated recovery risk, capped at three after the mutually exclusive cluster/triage choice. Each action deep-links to the narrowest available context: the exact waiting run, semantic case, or dead-letter record; only aggregate cluster/risk guidance opens Operations. Active work uses the canonical run-status guard and opens the selected run in Activity. Heatmaps, clusters, qualification, cost, calibration, validation, historical trends, and Recovery Lab live in the lazy `HomeInsights` disclosure below the action workspace. `VitalSignsStrip` remains the shared metric primitive inside that secondary disclosure; Home must not restore a bespoke above-fold metric grid. The store's `newWorkflow()` reset intentionally routes to `"inspector"` so a fresh draft opens Build, while the explicit describe-with-AI path routes to `"copilot"`; do not make the generic reset AI-first again.
+Priority order is pending approvals → open semantic cases → clustered recover-all or individual triage → elevated recovery risk, capped at three after the mutually exclusive cluster/triage choice. Each action deep-links to the narrowest available context: the exact waiting run, semantic case, or dead-letter record; only aggregate cluster/risk guidance opens Settings. Active work uses the canonical run-status guard and opens the selected run in Activity. Heatmaps, clusters, qualification, cost, calibration, validation, historical trends, and Recovery Lab live in the lazy `HomeInsights` disclosure below the action workspace. `VitalSignsStrip` remains the shared metric primitive inside that secondary disclosure; Home must not restore a bespoke above-fold metric grid. The store's `newWorkflow()` reset intentionally routes to `"inspector"` so a fresh draft opens Build, while the explicit describe-with-AI path routes to `"copilot"`; do not make the generic reset AI-first again.
 
 Home's primary server read remains the coalesced `GET /recovery/home`, whose independently degradable section envelopes contain metrics, semantic cases, clusters, heatmap, validation, lifetime ledger, personal wins, and the authoritative queue overview; run nodes still come from the App-owned store. The server reuses the same focused read models, so Home cannot drift into a second metrics or clustering implementation. A failed section returns `status: "unavailable"` without erasing successful siblings. The browser parses the outer envelope defensively, preserves known semantic cases through refresh failure, and marks combined health unavailable whenever metrics or semantic posture cannot be confirmed; the inline Retry refreshes the platform snapshot. The global recovery posture unions open-quarantine run ids with waiting runs from the bounded bootstrap projection plus the selected-run node fallback, so independent projection timing can never claim everything is caught up while containment is visible.
 
@@ -189,13 +204,13 @@ authority or context. The panel parser rejects malformed case or receipt
 envelopes in full, date formatting follows live locale changes, and read-only
 users retain the evidence view without mutation controls.
 
-Recovery time copy delegates to `formatDuration` in `recovery-center/recovery-center-model.ts`; the legacy `formatDowntime` export is only a compatibility wrapper, and relative ages use the same core with runtime locale keys. Home Insights and Operations route recovery-time selection through `selectRecoveryTimeMetric`: prefer the versioned production-only `verifiedRecovery` median and use legacy average `mttr` only when an older API omits the new field. The selectable trend is a per-day median over the same eligible production impact events. Sparkline points and selectable heatmap cells are composite keyboard controls with one roving tab stop: arrows plus Home/End move focus, and Enter/Space/click publishes the existing recovery-day handoff before opening Activity. Keep the sparkline point targets as siblings of the metric's main button (never nest interactive SVG controls in a button), keep empty heatmap days non-actionable, and keep unlabeled sparklines decorative. The truly-fresh Recovery Lab entry waits for a successful metrics section before exposing dismissal; its dismissal lives in the Zustand session state and resets when the auth owner or organization changes. It presents no fabricated incident, transcript, score, timing, or cluster evidence. The operator must explicitly start a controlled solution-pack drill, whose run is tagged as validation data and excluded from production rollups, before Janusly creates any recovery activity. Do not persist dismissal to `janusly:recovery:hideIntro` until the Home metrics section reports real terminal history, so a fresh-workspace reload restores the truthful lab entry.
+Recovery time copy delegates to `formatDuration` in `recovery-center/recovery-center-model.ts`; the legacy `formatDowntime` export is only a compatibility wrapper, and relative ages use the same core with runtime locale keys. Home Insights routes recovery-time selection through `selectRecoveryTimeMetric`: prefer the versioned production-only `verifiedRecovery` median and use legacy average `mttr` only when an older API omits the new field. The selectable trend is a per-day median over the same eligible production impact events. Sparkline points and selectable heatmap cells are composite keyboard controls with one roving tab stop: arrows plus Home/End move focus, and Enter/Space/click publishes the existing recovery-day handoff before opening Activity. Keep the sparkline point targets as siblings of the metric's main button (never nest interactive SVG controls in a button), keep empty heatmap days non-actionable, and keep unlabeled sparklines decorative. The truly-fresh Recovery Lab entry waits for a successful metrics section before exposing dismissal; its dismissal lives in the Zustand session state and resets when the auth owner or organization changes. It presents no fabricated incident, transcript, score, timing, or cluster evidence. The operator must explicitly start a controlled solution-pack drill, whose run is tagged as validation data and excluded from production rollups, before Janusly creates any recovery activity. Do not persist dismissal to `janusly:recovery:hideIntro` until the Home metrics section reports real terminal history, so a fresh-workspace reload restores the truthful lab entry.
 
 **Replay-campaign UI:** `DeadLettersPanel` exposes paced campaign creation only from multi-select, with the server preview shown before the operator can submit. `ReplayCampaignDialog` uses the shared modal focus contract and never derives cohort eligibility in the browser. `ReplayCampaignsCard` renders the eight newest durable campaigns, polls every three seconds only while at least one is running, refreshes on `platformVersion`, and requires inline confirmation before cancellation. Progress is the server's settled counter (`replayed + failed + cancelled`) over the immutable total; it must not infer success from queue acceptance. The surface stays bilingual and usable at 390px without hiding the stop control. An empty campaign list renders no placeholder card so ordinary recovery triage does not gain permanent visual weight.
 
 ## Inspectable AI guidance and decisions
 
-Operator AI policy has two bounded bilingual editors. `AiGuidanceSettingsPanel` lives in Operations → Reliability and reads/writes the closed `ai.operatorGuidance` organization setting through the existing `/org/config` routes. `WorkflowMetadataPanel` owns the optional per-workflow `aiGuidanceMarkdown` field through the existing whole-row metadata route. Both show a UTF-8 byte counter, explain that the field is preferences rather than a secret store or policy override, prevent an over-cap save, and call `bumpPlatformVersion()` after success. Do not introduce a second settings endpoint or persist the text in browser storage; the tenant-scoped server writers and their audit-safe descriptors are authoritative.
+Operator AI policy has two bounded bilingual editors. `AiGuidanceSettingsPanel` lives in Settings → Workspace → AI and reads/writes the closed `ai.operatorGuidance` organization setting through the existing `/org/config` routes. `WorkflowMetadataPanel` owns the optional per-workflow `aiGuidanceMarkdown` field through the existing whole-row metadata route. Both show a UTF-8 byte counter, explain that the field is preferences rather than a secret store or policy override, prevent an over-cap save, and call `bumpPlatformVersion()` after success. Do not introduce a second settings endpoint or persist the text in browser storage; the tenant-scoped server writers and their audit-safe descriptors are authoritative.
 
 Recovery keeps model-authored trade-offs and deterministic support visibly separate. `AlternativeHypothesesPanel` is a collapsed-by-default disclosure after the workflow diff and before `EvidencePanel`; it consumes only the unknown-safe normalized zero-to-two `consideredAlternatives` rows and hides when none survive. `ReasoningPanel` renders a valid `agent.reasoning` payload as a compact operator summary (why, mode, agent, decision/tool, iteration), with only that closed, scrubbed projection behind the raw-JSON disclosure. Malformed canonical events fail closed to localized unavailable copy and never render their raw payload. `dedupeAgentReasoningEvents` hides only the nearest matching legacy `*.step.planned` row inside `ReasoningPanel`; `MultiAgentTimeline` continues to consume the legacy event unchanged, so the additive event cannot create phantom agent steps. Labels and controls are localized EN/ES; model-authored/free-form reasons remain bounded data rather than hidden chain-of-thought.
 
@@ -210,7 +225,7 @@ factors; a safe verdict requires every factor to pass.
 
 `useMemoryConsentStatus` is the tenant-identity-safe read chokepoint for
 `GET /memory/consent-status`; malformed or failed reads render an explicit
-unavailable state and never infer consent. Operations → Access mounts the
+unavailable state and never infer consent. Settings → Workspace → Access mounts the
 read-only `MemoryGovernancePanel`, showing the process gate, tenant gate, and
 the safe purge projection (`none` / `scheduled` / `running` / `unknown`). When
 tenant consent is off and deletion is scheduled, Recovery Center shows a

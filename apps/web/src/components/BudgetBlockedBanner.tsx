@@ -5,7 +5,7 @@
  * The store records the most recent 402 envelope under `budgetBlocked`
  * (set by the API wrapper in `api.ts`). When set, this banner renders
  * above the canvas with the MTD spend, the limit, and a CTA that
- * switches the active tab to Operations > Reliability (where
+ * switches the active tab to Settings > AI (where
  * `BudgetSettingsPanel` lives). Dismissible via the X button, which
  * clears the store slot.
  *
@@ -61,7 +61,7 @@ export function BudgetBlockedBanner({ onOpenTab }: { onOpenTab: (tab: ActiveTab)
           type="button"
           className="command-button command-button-primary"
           onClick={() => {
-            requestOperationsSection('reliability')
+            requestOperationsSection('ai')
             onOpenTab('operations')
             clear()
           }}

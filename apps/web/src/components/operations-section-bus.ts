@@ -1,6 +1,6 @@
 /**
  * Cross-component bus for the Operations sub-section
- * (overview / reliability / access / integrations).
+ * (overview plus six focused settings areas).
  *
  * Lives in its own tiny module so deep-linkers (BudgetBlockedBanner,
  * UserMenu) can request a section WITHOUT statically importing the heavy
@@ -13,10 +13,17 @@
  * new callers should import from here.
  */
 
-/** Closed-enum sub-section value. Adding a fifth tab means an entry here +
- *  a new `<XxxSection />` wrapper + a matching branch in `OperationsPage` +
- *  a row in `RAIL_ITEMS` + i18n keys. */
-export const OPERATIONS_SUB_SECTIONS = ['overview', 'reliability', 'access', 'integrations'] as const
+/** Closed-enum sub-section value shared by the Settings index, deep links,
+ *  persisted navigation, and the active-only panel dispatcher. */
+export const OPERATIONS_SUB_SECTIONS = [
+  'overview',
+  'reliability',
+  'integrations',
+  'access',
+  'ai',
+  'usage',
+  'infrastructure',
+] as const
 export type OpsSection = typeof OPERATIONS_SUB_SECTIONS[number]
 
 const STORAGE_KEY = 'janusly:operations:section'

@@ -82,6 +82,8 @@ export type Credential = {
   storage?: 'managed' | 'environment'
   metadata?: JsonObject
   expiresAt?: string | null
+  createdBy?: string | null
+  createdAt?: string | null
 }
 
 /** One required credential a solution pack declares (name + kind + purpose; never a secret value). */

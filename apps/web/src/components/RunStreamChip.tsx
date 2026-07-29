@@ -11,10 +11,9 @@
  * transport pill says the channel is open, the age says when something last
  * happened on it.
  *
- * Mirrors `RateLimiterStatusChip` in `OperationsPage` (same dot + chip
- * structure). Self-contained — reads the store directly so it can mount in any
- * header without prop drilling. Mounted in `RunsPanel` and the Operations
- * header.
+ * Self-contained — reads the store directly so it can mount without prop
+ * drilling. Runs hides the chip while idle; Settings requests an explicit
+ * neutral state so its infrastructure row never renders an unlabeled gap.
  */
 
 import { useEffect, useState } from 'react'
@@ -25,7 +24,7 @@ import { humanizeAge } from './recovery-center/recovery-center-model'
 /** How often the relative "as of" age re-computes while a run is active. */
 const AS_OF_TICK_MS = 15_000
 
-export function RunStreamChip() {
+export function RunStreamChip({ showIdle = false }: { showIdle?: boolean } = {}) {
   const { t } = useT()
   const runId = useWorkflowStore((state) => state.runId)
   const streamTransport = useWorkflowStore((state) => state.streamTransport)
@@ -41,7 +40,11 @@ export function RunStreamChip() {
     return () => window.clearInterval(id)
   }, [runId, streamTransport])
 
-  if (!runId || streamTransport === 'idle') return null
+  if (!runId || streamTransport === 'idle') {
+    return showIdle
+      ? <span className="we-pill" data-tone="neutral">{t('common.none')}</span>
+      : null
+  }
 
   const isLive = streamTransport === 'sse'
   const stateLabel = isLive ? t('runStream.live') : t('runStream.polling')

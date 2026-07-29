@@ -20,7 +20,6 @@ type QueueRouteState = (NonNullable<QueueState> & { maintenance?: QueueState }) 
 
 const copy = {
   en: {
-    operations: 'Operations',
     clear: 'Workflow queue clear',
     processing: '2 jobs waiting · oldest 40 seconds',
     delayed: 'Queue delayed',
@@ -31,7 +30,6 @@ const copy = {
     maintenanceDelayed: 'Maintenance delayed',
   },
   es: {
-    operations: 'Operaciones',
     clear: 'Cola de flujos sin espera',
     processing: '2 trabajos en espera · el más antiguo lleva 40 segundos',
     delayed: 'Cola con demora',
@@ -210,6 +208,7 @@ test('queue pressure stays private, observable, and clear in English and Spanish
       locale === 'en' ? 'Settings' : 'Configuración',
       locale === 'en' ? 'Workspace' : 'Espacio de trabajo',
     )
+    await page.getByTestId('operations-rail-tab-infrastructure').click()
     const chip = page.getByTestId('queue-lag-chip')
     for (const state of states) {
       const requestsBeforeTransition = queueRequestCount
@@ -252,13 +251,13 @@ test('queue pressure stays private, observable, and clear in English and Spanish
       : copy.es.maintenanceClear)
     await hideUnrelatedOverlays(page)
     await capture(
-      page.locator('.we-operations-header'),
+      page.locator('.we-infrastructure-card'),
       `web-${locale}-workflow-maintenance-queues`,
     )
   }
 
   await page.setViewportSize({ width: 390, height: 844 })
-  const mobileHeader = page.locator('.we-operations-header')
+  const mobileHeader = page.locator('.we-infrastructure-card')
   await expect(page.getByTestId('maintenance-queue-lag-chip')).toBeVisible()
   expect(await mobileHeader.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
   await capture(mobileHeader, 'web-es-workflow-maintenance-queues-mobile')

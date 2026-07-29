@@ -405,7 +405,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
               {canManageBudget && <button
                 type="button"
                 onClick={() => {
-                  requestOperationsSection('reliability')
+                  requestOperationsSection('ai')
                   onOpenTab?.('operations')
                   setOpen(false)
                 }}

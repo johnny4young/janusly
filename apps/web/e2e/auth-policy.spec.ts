@@ -1,7 +1,7 @@
 import { openWorkspaceSection } from './_helpers/workspace-navigation'
 import { expect, test } from '@playwright/test'
 
-test('Operations auth policy panel validates and saves org settings', async ({ page }) => {
+test('Settings auth policy panel validates and saves org settings', async ({ page }) => {
   await page.goto('/')
   await openWorkspaceSection(page, 'Settings', 'Workspace')
   await page.getByTestId('operations-rail-tab-access').click()

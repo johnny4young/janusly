@@ -1,5 +1,5 @@
 import { openWorkflowAiAction, openWorkspaceSection } from './_helpers/workspace-navigation'
-/** Real-stack proof for AI/run efficiency in Operations, Reasoning, and Copilot. */
+/** Real-stack proof for AI/run efficiency in Settings, Reasoning, and Copilot. */
 
 import { execFile } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
@@ -16,7 +16,6 @@ type Locale = 'en' | 'es'
 
 const copy = {
   en: {
-    operations: 'Operations',
     costHeading: 'Cost breakdown',
     cacheLabel: 'Prompt cache efficiency',
     runs: 'Runs',
@@ -33,7 +32,6 @@ const copy = {
     knownCost: '0.0425',
   },
   es: {
-    operations: 'Operaciones',
     costHeading: 'Desglose de costo',
     cacheLabel: 'Eficiencia de la caché de instrucciones',
     runs: 'Ejecuciones',
@@ -295,6 +293,7 @@ test('AI and run efficiency are observable in English and Spanish', async ({ pag
       locale === 'en' ? 'Settings' : 'Configuración',
       locale === 'en' ? 'Workspace' : 'Espacio de trabajo',
     )
+    await page.getByTestId('operations-rail-tab-usage').click()
     const costCard = page.locator('.we-card').filter({ hasText: copy[locale].costHeading }).first()
     const cacheSummary = costCard.getByLabel(copy[locale].cacheLabel)
     await expect(cacheSummary).toContainText('50%')

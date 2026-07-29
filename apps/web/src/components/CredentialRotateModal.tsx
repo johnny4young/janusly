@@ -9,7 +9,7 @@
  * explicit option.
  *
  * Reuses the `run-input-*` modal CSS shell shared by the rollback / recovery
- * dialogs. Mounted per-credential by `CredentialsPanel` (in `RightPanel`).
+ * dialogs. Mounted per credential by `ConnectionsPanel`.
  */
 
 import React, { useEffect, useRef, useState } from 'react'

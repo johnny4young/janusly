@@ -75,7 +75,7 @@ test('canonical card and pill CSS contracts render in both locales', async ({ pa
       await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
       await page.reload()
     }
-    await expect(page.getByText('dev-user')).toBeVisible()
+    await expect(page.locator('.user-menu__trigger-name')).toHaveText('dev-user')
 
     await page.getByRole('button', { name: copy[locale].flows, exact: true }).click()
     const row = page.getByTestId(`workflows-row-${workflowId}`)
@@ -95,7 +95,7 @@ test('canonical card and pill CSS contracts render in both locales', async ({ pa
       locale === 'en' ? 'Settings' : 'Configuración',
       copy[locale].connections,
     )
-    const card = page.locator('section.we-card.connection-form')
+    const card = page.locator('section.we-card.we-connections-inventory')
     await expect(card).toBeVisible()
     await expect.poll(() => card.evaluate((element) => {
       const style = getComputedStyle(element)

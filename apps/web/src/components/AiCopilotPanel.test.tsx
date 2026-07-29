@@ -129,7 +129,7 @@ describe('<AiCopilotPanel />', () => {
   it('renders the supported Anthropic setup guidance in English local mode', () => {
     renderPanel()
 
-    expect(screen.getByText(/Add ANTHROPIC_API_KEY to the root \.env/i)).toBeInTheDocument()
+    expect(screen.getByText(/Configure ANTHROPIC_API_KEY for the API and worker/i)).toBeInTheDocument()
     expect(screen.getByText('Root .env has ANTHROPIC_API_KEY')).toBeInTheDocument()
     expect(screen.queryByText(/OPENAI_API_KEY/i)).not.toBeInTheDocument()
   })
@@ -138,7 +138,7 @@ describe('<AiCopilotPanel />', () => {
     changeAppLanguage('es')
     renderPanel()
 
-    expect(await screen.findByText(/Agrega ANTHROPIC_API_KEY al archivo \.env de la raíz/i)).toBeInTheDocument()
+    expect(await screen.findByText(/Configura ANTHROPIC_API_KEY para la API y el worker/i)).toBeInTheDocument()
     expect(screen.getByText('El archivo .env de la raíz contiene ANTHROPIC_API_KEY')).toBeInTheDocument()
     expect(screen.queryByText(/OPENAI_API_KEY/i)).not.toBeInTheDocument()
   })

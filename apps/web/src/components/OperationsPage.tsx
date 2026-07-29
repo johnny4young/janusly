@@ -1,13 +1,10 @@
 /**
- * Operations dashboard shell. Replaces the legacy vertical stack with a
- * sticky sub-tab rail + active-only content column.
+ * Settings workspace shell with a searchable index, focused sections, and an
+ * active-only content column.
  *
- * The four closed sub-tabs (Overview / Reliability / Access / Integrations)
- * mount their own cards on demand — inactive sub-tabs literally don't
- * render, so their `useEffect` fetches never fire. This drops the
- * per-refresh API call count from ~9 (every card self-fetched on mount)
- * to ~3-4 (header metrics + public/admin infra health, plus whichever cards
- * the active sub-tab carries).
+ * Inactive sections do not render, so their self-fetching cards stay dormant.
+ * The index exposes current posture first and routes operators to one focused
+ * configuration area instead of presenting a wall of forms.
  *
  * Active sub-tab is persisted to localStorage under
  * `janusly:operations:section` so the operator lands where they left
@@ -18,21 +15,35 @@
  * the mounted operations experience.
  */
 
-import React, { lazy, Suspense, useEffect, useState } from 'react'
-import { Gauge, Plug, RefreshCw, ShieldCheck } from 'lucide-react'
+import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
+import {
+  BrainCircuit,
+  ChartNoAxesCombined,
+  Gauge,
+  LayoutGrid,
+  Plug,
+  RefreshCw,
+  ServerCog,
+  ShieldCheck,
+} from 'lucide-react'
 import { api } from '../api'
+import { canOpenSettingsSection } from '../settings-sections'
 import { useWorkflowStore } from '../store'
-import { VitalSignsStrip } from './VitalSignsStrip'
-import { RunStreamChip } from './RunStreamChip'
+import type { ActiveTab, AiHealth } from '../types'
 import {
   parseQueueHealthOverview,
-  QueueLagChip,
   queueNeedsAttention,
   type QueueHealth,
   type QueueUnavailableReason,
 } from './QueueLagChip'
-import { buildOperationsTiles } from './operations-tiles'
-import { selectRecoveryTimeMetric } from './recovery-metrics'
+import { AiRuntimeStatusCard } from './AiRuntimeStatusCard'
+import { SettingsInfrastructureSection } from './SettingsInfrastructureSection'
+import { SettingsOverview } from './SettingsOverview'
+import {
+  SettingsUsageSection,
+  type CacheEfficiency,
+  type CostProviderRow,
+} from './SettingsUsageSection'
 import {
   OPERATIONS_SECTION_REQUEST_EVENT as SECTION_REQUEST_EVENT,
   isOpsSection as isSection,
@@ -40,7 +51,7 @@ import {
   persistOpsSection as persistSection,
   type OpsSection,
 } from './operations-section-bus'
-import { getResolvedLocale, useT } from '../i18n'
+import { useT } from '../i18n'
 
 const FailureClustersCard = lazy(() => import('./FailureClustersCard').then(module => ({ default: module.FailureClustersCard })))
 const BudgetSettingsPanel = lazy(() => import('./BudgetSettingsPanel').then(module => ({ default: module.BudgetSettingsPanel })))
@@ -50,7 +61,6 @@ const ScimDirectorySettingsPanel = lazy(() => import('./ScimDirectorySettingsPan
 const AuditLogPanel = lazy(() => import('./AuditLogPanel').then(module => ({ default: module.AuditLogPanel })))
 const PermissionGrantsPanel = lazy(() => import('./PermissionGrantsPanel').then(module => ({ default: module.PermissionGrantsPanel })))
 const MemoryGovernancePanel = lazy(() => import('./MemoryGovernancePanel').then(module => ({ default: module.MemoryGovernancePanel })))
-const CredentialHealthCard = lazy(() => import('./CredentialHealthCard').then(module => ({ default: module.CredentialHealthCard })))
 const AlertPoliciesPanel = lazy(() => import('./AlertPoliciesPanel').then(module => ({ default: module.AlertPoliciesPanel })))
 const UpstreamHealthPanel = lazy(() => import('./UpstreamHealthPanel').then(module => ({ default: module.UpstreamHealthPanel })))
 const RecentAlertsCard = lazy(() => import('./RecentAlertsCard').then(module => ({ default: module.RecentAlertsCard })))
@@ -88,25 +98,6 @@ type RecoveryMetric = {
   rationaleMeta?: Record<string, string | number | boolean>
 }
 
-type CostProviderRow = {
-  provider: string
-  model: string
-  usd: number
-  tokens: number
-  inputTokens: number
-  cachedInputTokens: number
-  cacheCreationInputTokens: number
-  calls: number
-  aggregated?: boolean
-}
-
-type CacheEfficiency = {
-  inputTokens: number
-  readTokens: number
-  creationTokens: number
-  readSharePercent: number | null
-}
-
 type RecoveryMetrics = {
   successRate: RecoveryMetric
   verifiedRecovery?: RecoveryMetric
@@ -120,36 +111,6 @@ type RecoveryMetrics = {
   terminalRuns: number
 }
 
-/**
- * Sandbox zeros read as "no signal", not red. When no run has reached a
- * terminal state yet, the signal metrics (success / recovery time / p95 / replay /
- * cost) carry no real data — present them neutral regardless of the
- * server's band so an empty workspace doesn't look like a broken product.
- * `approvalsPending` is left alone (0 pending == healthy, never alarming).
- * No-op the moment any run is terminal, so a seeded/real workspace shows
- * its true bands.
- */
-function neutralizeSandboxZeros(metrics: RecoveryMetrics | null): RecoveryMetrics | null {
-  if (!metrics || metrics.terminalRuns > 0) return metrics
-  const neutral = <T extends RecoveryMetric>(metric: T): T =>
-    metric.severity === 'neutral' ? metric : { ...metric, severity: 'neutral' as MetricSeverity }
-  return {
-    ...metrics,
-    successRate: neutral(metrics.successRate),
-    ...(metrics.verifiedRecovery
-      ? { verifiedRecovery: neutral(metrics.verifiedRecovery) }
-      : {}),
-    mttr: neutral(metrics.mttr),
-    p95Latency: neutral(metrics.p95Latency),
-    replayRate: neutral(metrics.replayRate),
-    costThisWindow: {
-      ...neutral(metrics.costThisWindow),
-      providers: metrics.costThisWindow.providers,
-      cache: metrics.costThisWindow.cache,
-    },
-  }
-}
-
 // The section bus (sub-section enum + deep-link helper) lives in its own
 // module so OperationsPage stays code-splittable — see operations-section-bus.
 // Re-exported here for back-compat with existing `from './OperationsPage'`
@@ -158,17 +119,20 @@ export { requestOperationsSection } from './operations-section-bus'
 export type { OpsSection } from './operations-section-bus'
 
 type SignalSummary = {
-  /** `/health` rate-limiter snapshot. Drives the chip and Reliability dot. */
+  /** `/health` rate-limiter snapshot. Drives the chip and Infrastructure dot. */
   rateLimiter: RateLimiterHealth | null
   /** Admin queue snapshot; null means unavailable, undefined means not checked yet. */
   queue: QueueHealth | null | undefined
   /** Independent maintenance queue snapshot; absent against an older API. */
   maintenanceQueue: QueueHealth | null | undefined
-  /** Most recent 402 envelope captured by the API wrapper. Drives Reliability dot. */
+  /** Most recent 402 envelope captured by the API wrapper. Drives the AI dot. */
   budgetBlocked: unknown
-  /** True when at least one `/recovery/metrics` value is in the "unhealthy" band.
-   *  Drives Overview dot — a proxy for "operator should look at this tab". */
+  /** True when any high-level metric is unhealthy. Drives the overview dot. */
   overviewUnhealthy: boolean
+  /** True when a reliability metric is unhealthy. */
+  reliabilityUnhealthy: boolean
+  /** True when cost posture is unhealthy. */
+  usageUnhealthy: boolean
 }
 
 type QueueSignalState = {
@@ -193,72 +157,78 @@ function isForbiddenApiError(error: unknown): boolean {
     && (error as { statusCode?: unknown }).statusCode === 403
 }
 
-export function OperationsPage({ permissions }: { permissions?: readonly string[] }) {
+function hasPermission(permissions: readonly string[] | undefined, permission: string): boolean {
+  return permissions === undefined || permissions.includes(permission)
+}
+
+export function OperationsPage({
+  permissions,
+  connectionCount = 0,
+  aiHealth = null,
+  onOpenTab = () => undefined,
+}: {
+  permissions?: readonly string[]
+  connectionCount?: number
+  aiHealth?: AiHealth | null
+  onOpenTab?: (tab: ActiveTab) => void
+}) {
   const { t } = useT()
-  const can = (permission: string) => permissions === undefined || permissions.includes(permission)
   const platformVersion = useWorkflowStore((state) => state.platformVersion)
   const budgetBlocked = useWorkflowStore((state) => state.budgetBlocked)
   const [metrics, setMetrics] = useState<RecoveryMetrics | null>(null)
-  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Rate-limiter health is independent of metrics and degrades silently on
   // /health failure — operators still see the rest of the page.
   const [rateLimiterHealth, setRateLimiterHealth] = useState<RateLimiterHealth | null>(null)
-  // When the last /health snapshot landed — shown as an "as of" on the chip so a
-  // stalled poll (the snapshot frozen) reads as stale rather than current.
-  const [rateLimiterCheckedAt, setRateLimiterCheckedAt] = useState<number | null>(null)
   const [queueSignal, setQueueSignal] = useState<QueueSignalState | undefined>(undefined)
   const [queueCheckedAt, setQueueCheckedAt] = useState<number | null>(null)
   const [section, setSection] = useState<OpsSection>(() => loadStoredSection())
-
-  const sectionAvailable = (candidate: OpsSection): boolean => {
-    if (candidate === 'overview') return can('recovery.read')
-    if (candidate === 'reliability') {
-      return can('alerts.read') || can('upstream.read') || can('org.config.write')
-    }
-    if (candidate === 'access') {
-      return can('members.read') || can('org.config.write') || can('org.permissions.write')
-    }
-    return can('credentials.read') || can('mcp.connections.read') || can('credentials.write')
-  }
+  const effectiveSection = canOpenSettingsSection(section, permissions)
+    ? section
+    : RAIL_ITEMS.find((item) => canOpenSettingsSection(item.section, permissions))?.section
+      ?? 'overview'
 
   useEffect(() => {
-    if (sectionAvailable(section)) return
-    const fallback = RAIL_ITEMS.find((item) => sectionAvailable(item.section))?.section
-    if (fallback) setSection(fallback)
-  }, [permissions, section])
+    if (section !== effectiveSection) setSection(effectiveSection)
+  }, [effectiveSection, section])
 
   // Persist on every section change. Tiny write — no debounce needed.
   useEffect(() => {
-    persistSection(section)
-  }, [section])
+    persistSection(effectiveSection)
+  }, [effectiveSection])
 
   useEffect(() => {
     const handleSectionRequest = (event: Event) => {
       const next = event instanceof CustomEvent ? event.detail : null
-      if (isSection(next)) setSection(next)
+      if (!isSection(next)) return
+      if (canOpenSettingsSection(next, permissions)) {
+        setSection(next)
+        return
+      }
+      persistSection(effectiveSection)
     }
     window.addEventListener(SECTION_REQUEST_EVENT, handleSectionRequest)
     return () => window.removeEventListener(SECTION_REQUEST_EVENT, handleSectionRequest)
-  }, [])
+  }, [effectiveSection, permissions])
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
     setError(null)
+    if (!hasPermission(permissions, 'recovery.read')) {
+      setMetrics(null)
+      return () => { cancelled = true }
+    }
     api('/recovery/metrics')
       .then((payload) => {
         if (cancelled) return
         setMetrics(payload as RecoveryMetrics)
-        setLoading(false)
       })
       .catch((err) => {
         if (cancelled) return
         setError(err instanceof Error ? err.message : (t('operations.metricsUnavailable', { detail: '' })))
-        setLoading(false)
       })
     return () => { cancelled = true }
-  }, [platformVersion, t])
+  }, [permissions, platformVersion, t])
 
   useEffect(() => {
     let cancelled = false
@@ -269,7 +239,6 @@ export function OperationsPage({ permissions }: { permissions?: readonly string[
           if (cancelled) return
           const health = (payload as HealthPayload).rateLimiter
           setRateLimiterHealth(health ?? null)
-          setRateLimiterCheckedAt(Date.now())
         })
         .catch(() => {
           if (cancelled) return
@@ -279,7 +248,7 @@ export function OperationsPage({ permissions }: { permissions?: readonly string[
       // Live queue numbers intentionally stay off unauthenticated `/health`.
       // Poll the admin projection on the same cadence and preserve the last
       // successful snapshot if a later request fails.
-      if (queueForbidden || !can('org.config.write')) return
+      if (queueForbidden || !hasPermission(permissions, 'org.config.write')) return
       api('/system/queue')
         .then((payload) => {
           if (cancelled) return
@@ -317,24 +286,19 @@ export function OperationsPage({ permissions }: { permissions?: readonly string[
     return () => { cancelled = true; window.clearInterval(id) }
   }, [permissions])
 
-  // Sandbox zeros render neutral (decision: an empty workspace is "no
-  // signal", not a red emergency). No-op once any run is terminal.
-  const displayMetrics = neutralizeSandboxZeros(metrics)
-
-  // Derive Overview dot signal: any metric in the "unhealthy" band. We
-  // skip approvalsPending because its severity reflects load, not breakage.
-  // Inline (no useMemo) — 5 comparisons against a fixed-size set is cheap
-  // and keeps the asymmetry with the inline rate-limiter checks small.
-  const overviewUnhealthy = displayMetrics
+  // Empty workspaces have no operational signal, so server-side zero bands do
+  // not raise attention dots until a run reaches a terminal state.
+  const hasOperationalSignal = (metrics?.terminalRuns ?? 0) > 0
+  const reliabilityUnhealthy = metrics && hasOperationalSignal
     ? [
-        displayMetrics.successRate,
-        selectRecoveryTimeMetric(displayMetrics),
-        displayMetrics.p95Latency,
-        displayMetrics.replayRate,
-        displayMetrics.costThisWindow,
-      ]
-        .some((m) => m.severity === 'unhealthy')
+        metrics.successRate,
+        metrics.verifiedRecovery ?? metrics.mttr,
+        metrics.p95Latency,
+        metrics.replayRate,
+      ].some((metric) => metric.severity === 'unhealthy')
     : false
+  const usageUnhealthy = hasOperationalSignal && metrics?.costThisWindow.severity === 'unhealthy'
+  const overviewUnhealthy = reliabilityUnhealthy || usageUnhealthy
   const queueHealth = queueSignal === undefined ? undefined : queueSignal.workflow
   const maintenanceQueueHealth = queueSignal === undefined ? undefined : queueSignal.maintenance
 
@@ -344,30 +308,55 @@ export function OperationsPage({ permissions }: { permissions?: readonly string[
     maintenanceQueue: maintenanceQueueHealth,
     budgetBlocked,
     overviewUnhealthy,
+    reliabilityUnhealthy,
+    usageUnhealthy,
   }
-
   return (
     <div className="we-operations-page">
       <OperationsHeader
-        metrics={displayMetrics}
-        loading={loading}
+        windowDays={metrics?.windowDays ?? 30}
         error={error}
-        rateLimiterHealth={rateLimiterHealth}
-        rateLimiterCheckedAt={rateLimiterCheckedAt}
-        queueHealth={queueHealth}
-        maintenanceQueueHealth={maintenanceQueueHealth}
-        queueCheckedAt={queueCheckedAt}
-        queueUnavailableReason={queueSignal?.workflowUnavailableReason}
-        maintenanceQueueUnavailableReason={queueSignal?.maintenanceUnavailableReason}
       />
       <div className="we-operations-page__body">
-        <OperationsRail section={section} onChange={setSection} signals={signals} permissions={permissions} />
-        <div className="we-operations-page__content" data-section={section}>
+        <OperationsRail section={effectiveSection} onChange={setSection} signals={signals} permissions={permissions} />
+        <div className="we-operations-page__content" data-section={effectiveSection}>
           <Suspense fallback={<p className="helper-text" role="status">{t('common.working')}</p>}>
-            {section === 'overview' && <OverviewSection metrics={displayMetrics} permissions={permissions} />}
-            {section === 'reliability' && <ReliabilitySection permissions={permissions} />}
-            {section === 'access' && <AccessSection permissions={permissions} />}
-            {section === 'integrations' && <IntegrationsSection permissions={permissions} />}
+            {effectiveSection === 'overview' && (
+              <SettingsOverview
+                permissions={permissions}
+                connectionCount={connectionCount}
+                aiHealth={aiHealth}
+                onOpenSection={setSection}
+                onOpenTab={onOpenTab}
+              />
+            )}
+            {effectiveSection === 'reliability' && <ReliabilitySection permissions={permissions} />}
+            {effectiveSection === 'integrations' && (
+              <IntegrationsSection permissions={permissions} onOpenTab={onOpenTab} />
+            )}
+            {effectiveSection === 'access' && <AccessSection permissions={permissions} />}
+            {effectiveSection === 'ai' && <AiSection permissions={permissions} aiHealth={aiHealth} />}
+            {effectiveSection === 'usage' && (
+              <SettingsUsageSection
+                providers={metrics?.costThisWindow.providers ?? []}
+                cache={metrics?.costThisWindow.cache ?? {
+                  inputTokens: 0,
+                  readTokens: 0,
+                  creationTokens: 0,
+                  readSharePercent: null,
+                }}
+              />
+            )}
+            {effectiveSection === 'infrastructure' && (
+              <SettingsInfrastructureSection
+                rateLimiterHealth={rateLimiterHealth}
+                queueHealth={queueHealth}
+                maintenanceQueueHealth={maintenanceQueueHealth}
+                queueCheckedAt={queueCheckedAt}
+                queueUnavailableReason={queueSignal?.workflowUnavailableReason}
+                maintenanceQueueUnavailableReason={queueSignal?.maintenanceUnavailableReason}
+              />
+            )}
           </Suspense>
         </div>
       </div>
@@ -375,27 +364,11 @@ export function OperationsPage({ permissions }: { permissions?: readonly string[
   )
 }
 function OperationsHeader({
-  metrics,
-  loading,
+  windowDays,
   error,
-  rateLimiterHealth,
-  rateLimiterCheckedAt,
-  queueHealth,
-  maintenanceQueueHealth,
-  queueCheckedAt,
-  queueUnavailableReason,
-  maintenanceQueueUnavailableReason,
 }: {
-  metrics: RecoveryMetrics | null
-  loading: boolean
+  windowDays: number
   error: string | null
-  rateLimiterHealth: RateLimiterHealth | null
-  rateLimiterCheckedAt: number | null
-  queueHealth: QueueHealth | null | undefined
-  maintenanceQueueHealth: QueueHealth | null | undefined
-  queueCheckedAt: number | null
-  queueUnavailableReason?: QueueUnavailableReason
-  maintenanceQueueUnavailableReason?: QueueUnavailableReason
 }) {
   const { t } = useT()
   return (
@@ -404,29 +377,9 @@ function OperationsHeader({
         <div className="panel-heading-copy">
           <div className="section-kicker">{t('operations.kicker')}</div>
           <h2>{t('operations.title')}</h2>
-          <p>{t('operations.intro', { days: metrics?.windowDays ?? 30 })}</p>
+          <p>{t('operations.intro', { days: windowDays })}</p>
         </div>
         <span className="panel-heading-icon"><Gauge size={18} aria-hidden="true" /></span>
-      </div>
-
-      <div className="we-operations-header__signals">
-        <RunStreamChip />
-        {rateLimiterHealth && <RateLimiterStatusChip health={rateLimiterHealth} checkedAt={rateLimiterCheckedAt} />}
-        {queueHealth !== undefined && (
-          <QueueLagChip
-            health={queueHealth}
-            checkedAt={queueCheckedAt}
-            unavailableReason={queueUnavailableReason}
-          />
-        )}
-        {maintenanceQueueHealth !== undefined && (
-          <QueueLagChip
-            kind="maintenance"
-            health={maintenanceQueueHealth}
-            checkedAt={queueCheckedAt}
-            unavailableReason={maintenanceQueueUnavailableReason}
-          />
-        )}
       </div>
 
       {error && (
@@ -435,24 +388,18 @@ function OperationsHeader({
         </section>
       )}
 
-      {!error && (loading || !metrics) && (
-        <section className="we-card">
-          <p className="helper-text" aria-live="polite">{t('operations.computing')}</p>
-        </section>
-      )}
-
-      {!error && metrics && (
-        <VitalSignsStrip tiles={buildOperationsTiles(metrics, t)} />
-      )}
     </header>
   )
 }
 
-const RAIL_ITEMS: Array<{ section: OpsSection; icon: React.ReactNode }> = [
-  { section: 'overview', icon: <Gauge size={14} aria-hidden="true" /> },
+const RAIL_ITEMS: Array<{ section: OpsSection; icon: ReactNode }> = [
+  { section: 'overview', icon: <LayoutGrid size={14} aria-hidden="true" /> },
   { section: 'reliability', icon: <RefreshCw size={14} aria-hidden="true" /> },
-  { section: 'access', icon: <ShieldCheck size={14} aria-hidden="true" /> },
   { section: 'integrations', icon: <Plug size={14} aria-hidden="true" /> },
+  { section: 'access', icon: <ShieldCheck size={14} aria-hidden="true" /> },
+  { section: 'ai', icon: <BrainCircuit size={14} aria-hidden="true" /> },
+  { section: 'usage', icon: <ChartNoAxesCombined size={14} aria-hidden="true" /> },
+  { section: 'infrastructure', icon: <ServerCog size={14} aria-hidden="true" /> },
 ]
 
 function OperationsRail({
@@ -467,13 +414,8 @@ function OperationsRail({
   permissions?: readonly string[]
 }) {
   const { t } = useT()
-  const can = (permission: string) => permissions === undefined || permissions.includes(permission)
-  const visibleItems = RAIL_ITEMS.filter(({ section: candidate }) => {
-    if (candidate === 'overview') return can('recovery.read')
-    if (candidate === 'reliability') return can('alerts.read') || can('upstream.read') || can('org.config.write')
-    if (candidate === 'access') return can('members.read') || can('org.config.write') || can('org.permissions.write')
-    return can('credentials.read') || can('mcp.connections.read') || can('credentials.write')
-  })
+  const visibleItems = RAIL_ITEMS.filter(({ section: candidate }) =>
+    canOpenSettingsSection(candidate, permissions))
 
   // Dot-badge derivation is intentionally limited to page-level signals.
   // Reading child-card health here would force those cards to fetch while
@@ -483,16 +425,17 @@ function OperationsRail({
       && queueNeedsAttention(signals.maintenanceQueue))
   const dotKind: Record<OpsSection, 'danger' | 'warning' | null> = {
     overview: signals.overviewUnhealthy ? 'warning' : null,
-    reliability:
-      signals.budgetBlocked != null
-        ? 'danger'
-        : signals.rateLimiter && !signals.rateLimiter.healthy
-          ? 'warning'
-          : queueAttention
-            ? 'warning'
-          : null,
-    access: null,
+    reliability: signals.reliabilityUnhealthy ? 'warning' : null,
     integrations: null,
+    access: null,
+    ai: signals.budgetBlocked != null ? 'danger' : null,
+    usage: signals.usageUnhealthy ? 'warning' : null,
+    infrastructure:
+      signals.rateLimiter && !signals.rateLimiter.healthy
+        ? 'warning'
+        : queueAttention
+          ? 'warning'
+          : null,
   }
 
   return (
@@ -537,71 +480,6 @@ function OperationsRail({
   )
 }
 
-function OverviewSection({ metrics, permissions }: { metrics: RecoveryMetrics | null; permissions?: readonly string[] }) {
-  const { t } = useT()
-  const canReadDlq = permissions === undefined || permissions.includes('dlq.read')
-  const locale = getResolvedLocale()
-  return (
-    <>
-      {metrics && metrics.costThisWindow.providers.length > 0 && (
-        <section className="we-card">
-          <div className="section-kicker">{t('operations.cost.heading')}</div>
-          <dl className="we-ops-cache-summary" aria-label={t('operations.cost.cache.summaryLabel')}>
-            <div>
-              <dt>{t('operations.cost.cache.readShare')}</dt>
-              <dd>{metrics.costThisWindow.cache.readSharePercent == null
-                ? '—'
-                : `${metrics.costThisWindow.cache.readSharePercent.toLocaleString(locale, { maximumFractionDigits: 1 })}%`}</dd>
-            </div>
-            <div>
-              <dt>{t('operations.cost.cache.readTokens')}</dt>
-              <dd>{metrics.costThisWindow.cache.readTokens.toLocaleString(locale)}</dd>
-            </div>
-            <div>
-              <dt>{t('operations.cost.cache.creationTokens')}</dt>
-              <dd>{metrics.costThisWindow.cache.creationTokens.toLocaleString(locale)}</dd>
-            </div>
-          </dl>
-          <div
-            className="we-ops-cost-table-wrap"
-            role="region"
-            aria-label={t('operations.cost.tableAria')}
-            tabIndex={0}
-          >
-            <table className="we-ops-cost-table">
-              <thead>
-                <tr>
-                  <th>{t('operations.cost.col.provider')}</th>
-                  <th>{t('operations.cost.col.model')}</th>
-                  <th>{t('operations.cost.col.usd')}</th>
-                  <th>{t('operations.cost.col.tokens')}</th>
-                  <th>{t('operations.cost.col.cacheRead')}</th>
-                  <th>{t('operations.cost.col.cacheCreated')}</th>
-                  <th>{t('operations.cost.col.calls')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {metrics.costThisWindow.providers.map((row) => (
-                  <tr key={`${row.aggregated ? 'aggregate' : 'detail'}::${row.provider}::${row.model}`}>
-                    <td>{row.aggregated ? t('operations.cost.otherProviderModel') : row.provider}</td>
-                    <td>{row.aggregated ? '—' : <code>{row.model}</code>}</td>
-                    <td>${row.usd.toFixed(4)}</td>
-                    <td>{row.tokens.toLocaleString(locale)}</td>
-                    <td>{row.cachedInputTokens.toLocaleString(locale)}</td>
-                    <td>{row.cacheCreationInputTokens.toLocaleString(locale)}</td>
-                    <td>{row.calls.toLocaleString(locale)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-      {canReadDlq && <FailureClustersCard />}
-    </>
-  )
-}
-
 function ReliabilitySection({ permissions }: { permissions?: readonly string[] }) {
   const can = (permission: string) => permissions === undefined || permissions.includes(permission)
   return (
@@ -609,8 +487,7 @@ function ReliabilitySection({ permissions }: { permissions?: readonly string[] }
       {can('alerts.read') && <AlertPoliciesPanel canWrite={can('alerts.write')} />}
       {can('alerts.read') && <RecentAlertsCard />}
       {can('upstream.read') && <UpstreamHealthPanel canWrite={can('upstream.write')} />}
-      {can('org.config.write') && <BudgetSettingsPanel />}
-      {can('org.config.write') && <AiGuidanceSettingsPanel />}
+      {can('dlq.read') && <FailureClustersCard />}
     </>
   )
 }
@@ -633,59 +510,52 @@ function AccessSection({ permissions }: { permissions?: readonly string[] }) {
   )
 }
 
-function IntegrationsSection({ permissions }: { permissions?: readonly string[] }) {
+function IntegrationsSection({
+  permissions,
+  onOpenTab,
+}: {
+  permissions?: readonly string[]
+  onOpenTab: (tab: ActiveTab) => void
+}) {
+  const { t } = useT()
   const can = (permission: string) => permissions === undefined || permissions.includes(permission)
   return (
     <>
+      {can('credentials.read') && (
+        <section className="we-card">
+          <div className="we-card__header">
+            <div>
+              <strong>{t('workspace.section.credentials.label')}</strong>
+              <p className="helper-text">{t('workspace.section.credentials.helper')}</p>
+            </div>
+            <button type="button" className="small-command" onClick={() => onOpenTab('credentials')}>
+              {t('workspace.section.credentials.label')}
+            </button>
+          </div>
+        </section>
+      )}
       {can('external-runtimes.read') && (
         <ExternalRuntimePanel canWrite={can('external-runtimes.write')} />
       )}
       {can('credentials.write') && <SlackInteractionsPanel />}
-      {can('credentials.read') && <CredentialHealthCard />}
       {can('mcp.connections.read') && <McpConnectionsPanel canWrite={can('mcp.connections.write')} />}
     </>
   )
 }
 
-/**
- * Status chip surfacing Redis-backed rate-limiter degradation. Kept in this
- * file so the Operations page stays self-contained.
- */
-function RateLimiterStatusChip({ health, checkedAt }: { health: RateLimiterHealth; checkedAt?: number | null }) {
-  const { t } = useT()
-  // Absolute "Checked HH:MM:SS" of the last successful /health poll. No tick is
-  // needed — the 20s poll re-renders with a fresh timestamp; a failed poll
-  // leaves the last one frozen, which is the staleness signal.
-  const checkedLabel = typeof checkedAt === 'number'
-    ? (t('operations.rateLimiter.checkedAt', { time: new Date(checkedAt).toLocaleTimeString(getResolvedLocale()) }))
-    : null
-  const age = checkedLabel ? <span className="we-ops-rate-limiter-chip__age">· {checkedLabel}</span> : null
-  if (health.healthy) {
-    return (
-      <span
-        className="we-ops-rate-limiter-chip we-ops-rate-limiter-chip--healthy"
-        role="status"
-        aria-label={checkedLabel ? `${t('operations.rateLimiter.label')} · ${checkedLabel}` : (t('operations.rateLimiter.label'))}
-      >
-        <span className="we-ops-rate-limiter-chip__dot" aria-hidden="true" />
-        <span>{t('operations.rateLimiter.healthy')}</span>
-        {age}
-      </span>
-    )
-  }
-  const bucketCount = health.degradedBuckets.length
-  const bucketNames = health.degradedBuckets.map((b) => b.bucket).join(', ')
-  const tooltip = t('operations.rateLimiter.degradedBucketsTooltip', { buckets: bucketNames })
+function AiSection({
+  permissions,
+  aiHealth,
+}: {
+  permissions?: readonly string[]
+  aiHealth: AiHealth | null
+}) {
+  const can = (permission: string) => permissions === undefined || permissions.includes(permission)
   return (
-    <span
-      className="we-ops-rate-limiter-chip we-ops-rate-limiter-chip--degraded"
-      role="status"
-      aria-label={checkedLabel ? `${t('operations.rateLimiter.label')} · ${checkedLabel}` : (t('operations.rateLimiter.label'))}
-      title={tooltip}
-    >
-      <span className="we-ops-rate-limiter-chip__dot" aria-hidden="true" />
-      <span>{t('operations.rateLimiter.degraded', { count: bucketCount })}</span>
-      {age}
-    </span>
+    <>
+      <AiRuntimeStatusCard health={aiHealth} />
+      {can('org.config.write') && <BudgetSettingsPanel />}
+      {can('org.config.write') && <AiGuidanceSettingsPanel />}
+    </>
   )
 }

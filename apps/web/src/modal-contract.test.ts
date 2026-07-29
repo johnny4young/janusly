@@ -21,6 +21,7 @@ describe('modal accessibility contract', () => {
     expect(modalSources.map(([path]) => path)).toEqual([
       './components/CommandPalette.tsx',
       './components/ConfirmDialog.tsx',
+      './components/ConnectionsPanel.tsx',
       './components/CredentialRotateModal.tsx',
       './components/RecoveryDialog.tsx',
       './components/ReplayCampaignDialog.tsx',

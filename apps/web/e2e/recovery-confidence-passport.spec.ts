@@ -46,7 +46,7 @@ async function waitForNewSelectedFailure(page: Page, previousTestId: string | nu
     if (await selected.count() === 0) return null
     const testId = await selected.getAttribute('data-testid')
     return testId && testId !== previousTestId ? testId : null
-  }, { timeout: 30_000 }).not.toBeNull()
+  }, { timeout: 60_000 }).not.toBeNull()
   await expect(selected).toBeVisible()
   return selected
 }

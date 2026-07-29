@@ -2149,11 +2149,7 @@ button.we-ops-metric-card--button {
   color: var(--we-text-1);
 }
 
-/* Rate-limiter degradation status chip — surfaces a Redis blip without
- * raising it to a top-level banner. Operator copy explicitly says
- * "Traffic still allowed" so it never gets confused with the budget
- * blocked banner ("AI workflow budget exceeded — blocked"). */
-.we-ops-rate-limiter-chip,
+/* Queue pressure stays compact while retaining state and freshness. */
 .we-ops-queue-lag-chip {
   display: inline-flex;
   align-items: center;
@@ -2169,18 +2165,6 @@ button.we-ops-metric-card--button {
   max-width: 100%;
 }
 
-.we-ops-rate-limiter-chip--healthy {
-  border-color: var(--we-success);
-  color: var(--we-success-text);
-}
-
-.we-ops-rate-limiter-chip--degraded {
-  border-color: var(--we-warning);
-  background: color-mix(in srgb, var(--we-warning) 12%, transparent);
-  color: var(--we-text-1);
-}
-
-.we-ops-rate-limiter-chip__dot,
 .we-ops-queue-lag-chip__dot {
   width: 8px;
   height: 8px;
@@ -2195,18 +2179,9 @@ button.we-ops-metric-card--button {
 }
 
 /* "Checked HH:MM" freshness, muted so it sits behind the health state. */
-.we-ops-rate-limiter-chip__age,
 .we-ops-queue-lag-chip__age {
   color: var(--we-muted);
   font-variant-numeric: tabular-nums;
-}
-
-.we-ops-rate-limiter-chip--healthy .we-ops-rate-limiter-chip__dot {
-  background: var(--we-success);
-}
-
-.we-ops-rate-limiter-chip--degraded .we-ops-rate-limiter-chip__dot {
-  background: var(--we-warning);
 }
 
 /* Queue pressure has four truthful states: clear, processing below the
@@ -2326,13 +2301,6 @@ button.we-ops-metric-card--button {
   gap: 12px;
 }
 
-.we-operations-header__signals {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .we-operations-page__body {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
@@ -2410,9 +2378,9 @@ button.we-ops-metric-card--button {
   letter-spacing: 0;
 }
 
-/* Attention dot — fires on the sub-tabs whose signal sources are at the
-   header level (Overview: any unhealthy metric; Reliability: limiter
-   degraded or budget blocked). The `data-severity` attribute mirrors the
+/* Attention dots use only page-level signal sources: recovery and usage
+   metrics, AI budget blocks, and infrastructure health. The `data-severity`
+   attribute mirrors the
    `.we-card[data-severity]` vocabulary so the colour story stays
    consistent across the design system. */
 .we-operations-rail__dot {
@@ -2449,6 +2417,335 @@ button.we-ops-metric-card--button {
 
   .we-operations-rail__tab {
     min-height: 42px;
+  }
+}
+
+/* Settings opens on a searchable outcome index. Focused areas retain the
+   active-only mounting model so configuration forms fetch only when opened. */
+.we-settings-index {
+  display: grid;
+  gap: 16px;
+}
+
+.we-settings-index__heading {
+  align-items: end;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.72fr);
+}
+
+.we-settings-index__heading h3,
+.we-settings-index__heading p {
+  margin: 0;
+}
+
+.we-settings-index__heading h3 {
+  color: var(--we-ink);
+  font-size: 20px;
+}
+
+.we-settings-index__heading p {
+  color: var(--we-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  margin-top: 6px;
+}
+
+.we-settings-index__search {
+  margin: 0;
+}
+
+.we-settings-index__grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.we-settings-index__card {
+  align-items: center;
+  color: var(--we-ink);
+  cursor: pointer;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 116px;
+  padding: 14px;
+  text-align: left;
+}
+
+.we-settings-index__card:focus-visible {
+  outline: 2px solid var(--we-primary);
+  outline-offset: 2px;
+}
+
+.we-settings-index__card-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.we-settings-index__card-copy strong {
+  font-size: 14px;
+}
+
+.we-settings-index__card-copy > span {
+  color: var(--we-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.we-settings-index__card-copy small {
+  color: var(--we-primary-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.we-settings-index__quick-paths {
+  align-items: center;
+  border-top: 1px solid var(--we-line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.we-connection-row__facts dt {
+  color: var(--we-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.we-connection-row__facts dd {
+  color: var(--we-ink);
+  font-size: 12px;
+  font-weight: 650;
+  margin: 0;
+}
+
+.we-infrastructure-card {
+  display: grid;
+}
+
+.we-infrastructure-card__queue {
+  align-items: center;
+  border-top: 1px solid var(--we-line);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 10px 0;
+}
+
+.we-infrastructure-card__queue:first-child {
+  border-top: 0;
+}
+
+.we-infrastructure-card__queue > div {
+  display: grid;
+  gap: 3px;
+}
+
+.we-infrastructure-card__queue strong {
+  font-size: 12px;
+}
+
+.we-infrastructure-card__queue span {
+  color: var(--we-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* Connections is inventory-first. Secret creation and rotation are modal
+   actions; the list never renders secret values or environment names. */
+.we-connections-inventory {
+  display: grid;
+  gap: 14px;
+}
+
+.we-connections-inventory .we-card__header p {
+  margin: 0;
+}
+
+.we-connections-inventory .we-list-search {
+  margin: 0;
+}
+
+.we-connections-inventory__type-filter {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.we-connections-inventory__type-filter select {
+  max-width: 220px;
+}
+
+.we-connections-inventory__notice {
+  align-items: center;
+  background: var(--we-warning-soft);
+  border: 1px solid var(--we-warning-border-30);
+  border-radius: 8px;
+  color: var(--we-warning-text);
+  display: flex;
+  font-size: 12px;
+  gap: 7px;
+  margin: 0;
+  padding: 9px 10px;
+}
+
+.we-connections-inventory__list {
+  max-height: min(580px, 62vh);
+}
+
+.we-connections-inventory__row-slot {
+  box-sizing: border-box;
+  height: 166px;
+  padding-bottom: 8px;
+}
+
+.we-connection-row {
+  align-items: center;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(170px, 0.78fr) minmax(360px, 1.65fr) auto;
+  height: 100%;
+  padding: 14px;
+}
+
+.we-connection-row__identity {
+  align-items: flex-start;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.we-connection-row__identity strong {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.we-connection-row__facts {
+  display: grid;
+  gap: 10px 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  min-width: 0;
+}
+
+.we-connection-row__facts div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.we-connection-row__facts dd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.we-connection-row__facts dd[data-expiry="expired"] {
+  color: var(--we-danger-text);
+}
+
+.we-connection-row__facts dd[data-expiry="soon"] {
+  color: var(--we-warning-text);
+}
+
+.we-connection-row__actions {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.we-connection-row__actions .small-command {
+  width: 100%;
+}
+
+.we-connection-dialog {
+  max-width: 620px;
+}
+
+.we-connection-dialog .field-label {
+  margin-top: 0;
+}
+
+.we-connection-dialog .helper-text {
+  align-items: flex-start;
+  display: flex;
+  gap: 5px;
+}
+
+@media (max-width: 900px) {
+  .we-settings-index__heading {
+    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .we-connection-row {
+    gap: 10px;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .we-connection-row__facts {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .we-connection-row__actions {
+    flex-direction: row;
+    grid-column: 2;
+    grid-row: 1;
+  }
+}
+
+@media (max-width: 620px) {
+  .we-settings-index__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .we-settings-index__card {
+    min-height: 104px;
+  }
+
+  .we-connections-inventory .we-card__header .command-button,
+  .we-connections-inventory__type-filter,
+  .we-connections-inventory__type-filter select {
+    max-width: none;
+    width: 100%;
+  }
+
+  .we-connection-row {
+    align-content: center;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .we-connection-row__identity {
+    align-items: center;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .we-connection-row__facts {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .we-connection-row__actions {
+    flex-direction: row;
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .we-connections-inventory__row-slot {
+    height: 166px;
+  }
+
+  .we-connection-row__facts div:nth-child(4) {
+    display: none;
   }
 }
 
@@ -8000,87 +8297,8 @@ button.we-authoring-problems__row:focus-visible {
   cursor: default;
 }
 
-/* Credential health card — surfaces broken / stale credentials and
- * MCP connections inside OperationsPage. The card is observability-
- * only: no admin actions live here; rediscover stays in the existing
- * McpConnectionsPanel. Severity tinted left border mirrors the
- * existing .we-ops-metric-card pattern. */
-.we-ops-credential-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 14px;
-}
-
-.we-ops-credential-card__section + .we-ops-credential-card__section {
-  margin-top: 4px;
-}
-
-.we-ops-credential-card__section-heading {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0;
-  text-transform: uppercase;
-  color: var(--we-text-2);
-  margin: 0 0 6px;
-}
-
-.we-ops-credential-card__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.we-ops-credential-card__row {
-  display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr);
-  gap: 8px;
-  align-items: center;
-  padding: 8px 10px;
-  border: 1px solid var(--we-line);
-  border-left-width: 3px;
-  border-radius: 6px;
-  background: var(--we-surface-muted);
-  font-size: 12px;
-  color: var(--we-text-1);
-}
-
-.we-ops-credential-card__row--healthy { border-left-color: var(--we-success); }
-.we-ops-credential-card__row--warn { border-left-color: var(--we-warning); }
-.we-ops-credential-card__row--unhealthy { border-left-color: var(--we-danger); }
-
-.we-ops-credential-card__row-name {
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.we-ops-credential-card__row-meta {
-  color: var(--we-text-2);
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Stacked variant: meta line + the read-only "Set secret" deep-link below
-   it, on a missing-secret row. Overrides the single-line clamp. */
-.we-ops-credential-card__row-meta--stack {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  overflow: visible;
-  white-space: normal;
-}
-
-/* Secret/credential status pill — shared by the read-only Operations
-   credential-health card and the Connections vault list so "linked vs
-   missing" reads as a tinted pill with a dot, never raw red text. */
+/* Secret status stays a tinted pill so linked versus missing is never raw
+   color-only text. */
 .we-secret-pill {
   display: inline-flex;
   align-items: center;
@@ -8198,9 +8416,3 @@ button.we-authoring-problems__row:focus-visible {
 .we-role-option__desc { font-size: 11.5px; color: var(--we-muted); line-height: 1.4; }
 .we-role-option__radio { width: 16px; height: 16px; border-radius: var(--we-radius-pill); border: 1.5px solid var(--we-line-strong); flex-shrink: 0; }
 .we-role-option[data-selected="true"] .we-role-option__radio { border-color: var(--we-primary); background: radial-gradient(circle, var(--we-primary) 0 38%, transparent 42%); }
-
-@media (max-width: 760px) {
-  .we-ops-credential-card__row {
-    grid-template-columns: 1fr;
-  }
-}

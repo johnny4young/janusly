@@ -30,8 +30,8 @@ vi.mock('./ScimDirectorySettingsPanel', () => ({
 vi.mock('./PermissionGrantsPanel', () => ({
   PermissionGrantsPanel: () => <section data-testid="stub-PermissionGrantsPanel">Permissions</section>,
 }))
-vi.mock('./CredentialHealthCard', () => ({
-  CredentialHealthCard: () => <section data-testid="stub-CredentialHealthCard">CredHealth</section>,
+vi.mock('./MemoryGovernancePanel', () => ({
+  MemoryGovernancePanel: () => <section data-testid="stub-MemoryGovernancePanel">Memory</section>,
 }))
 vi.mock('./AlertPoliciesPanel', () => ({
   AlertPoliciesPanel: () => <section data-testid="stub-AlertPoliciesPanel">AlertPolicies</section>,
@@ -89,6 +89,11 @@ function stubApiByPath(handlers: Record<string, unknown>) {
   })
 }
 
+async function openInfrastructureSettings(): Promise<void> {
+  await screen.findByTestId('settings-index-infrastructure')
+  fireEvent.click(screen.getByTestId('operations-rail-tab-infrastructure'))
+}
+
 describe('<OperationsPage />', () => {
   beforeEach(() => {
     vi.mocked(api).mockReset()
@@ -112,11 +117,14 @@ describe('<OperationsPage />', () => {
 
     render(<OperationsPage />)
 
-    await screen.findByTestId('stub-FailureClustersCard')
+    await screen.findByTestId('settings-index-reliability')
     expect(screen.getByTestId('operations-rail-tab-overview')).toHaveAttribute('aria-current', 'page')
-    expect(screen.getByText('45.0s')).toBeInTheDocument()
-    expect(screen.queryByText('1m 30s')).not.toBeInTheDocument()
-    // Reliability cards are NOT mounted — proves lazy-mount.
+    expect(screen.getByRole('heading', { name: 'Workspace settings' })).toBeInTheDocument()
+    expect(screen.getByTestId('settings-index-integrations')).toBeInTheDocument()
+    expect(screen.getByTestId('settings-index-ai')).toBeInTheDocument()
+    expect(screen.getByTestId('settings-index-ai')).toHaveTextContent('Health unavailable')
+    // Focused settings panels stay dormant until their area is opened.
+    expect(screen.queryByTestId('stub-FailureClustersCard')).toBeNull()
     expect(screen.queryByTestId('stub-BudgetSettingsPanel')).toBeNull()
     expect(screen.queryByTestId('stub-AlertPoliciesPanel')).toBeNull()
   })
@@ -162,6 +170,8 @@ describe('<OperationsPage />', () => {
     })
 
     render(<OperationsPage />)
+    await screen.findByTestId('settings-index-usage')
+    fireEvent.click(screen.getByTestId('operations-rail-tab-usage'))
 
     const summary = await screen.findByLabelText('Prompt cache efficiency')
     expect(summary).toHaveTextContent('Input served from cache50%')
@@ -184,18 +194,16 @@ describe('<OperationsPage />', () => {
 
     render(<OperationsPage />)
 
-    await screen.findByTestId('stub-FailureClustersCard')
+    await screen.findByTestId('settings-index-reliability')
     fireEvent.click(screen.getByTestId('operations-rail-tab-reliability'))
 
     expect(await screen.findByTestId('stub-AlertPoliciesPanel')).toBeInTheDocument()
     expect(screen.getByTestId('stub-RecentAlertsCard')).toBeInTheDocument()
-    expect(screen.getByTestId('stub-BudgetSettingsPanel')).toBeInTheDocument()
-    expect(screen.getByTestId('stub-AiGuidanceSettingsPanel')).toBeInTheDocument()
-    // Overview cards are gone.
-    expect(screen.queryByTestId('stub-FailureClustersCard')).toBeNull()
+    expect(screen.getByTestId('stub-FailureClustersCard')).toBeInTheDocument()
+    expect(screen.queryByTestId('stub-BudgetSettingsPanel')).toBeNull()
+    expect(screen.queryByTestId('stub-AiGuidanceSettingsPanel')).toBeNull()
     // Access / Integrations cards are not mounted either.
     expect(screen.queryByTestId('stub-AuthPolicySettingsPanel')).toBeNull()
-    expect(screen.queryByTestId('stub-CredentialHealthCard')).toBeNull()
   })
 
   it('persists the selected section to localStorage on change', async () => {
@@ -206,7 +214,7 @@ describe('<OperationsPage />', () => {
 
     render(<OperationsPage />)
 
-    await screen.findByTestId('stub-FailureClustersCard')
+    await screen.findByTestId('settings-index-reliability')
     fireEvent.click(screen.getByTestId('operations-rail-tab-access'))
 
     await waitFor(() => {
@@ -223,11 +231,10 @@ describe('<OperationsPage />', () => {
 
     render(<OperationsPage />)
 
-    await screen.findByTestId('stub-CredentialHealthCard')
-    expect(screen.getByTestId('stub-McpConnectionsPanel')).toBeInTheDocument()
-    expect(screen.getByTestId('stub-SlackInteractionsPanel')).toBeInTheDocument()
+    expect(await screen.findByTestId('stub-McpConnectionsPanel')).toBeInTheDocument()
+    expect(await screen.findByTestId('stub-SlackInteractionsPanel')).toBeInTheDocument()
     expect(screen.getByTestId('operations-rail-tab-integrations')).toHaveAttribute('aria-current', 'page')
-    // Overview cards are NOT mounted because we hydrated to integrations.
+    // Reliability panels are NOT mounted because we hydrated to integrations.
     expect(screen.queryByTestId('stub-FailureClustersCard')).toBeNull()
   })
 
@@ -239,11 +246,12 @@ describe('<OperationsPage />', () => {
 
     render(<OperationsPage />)
 
-    await screen.findByTestId('stub-FailureClustersCard')
-    act(() => requestOperationsSection('reliability'))
+    await screen.findByTestId('settings-index-reliability')
+    act(() => requestOperationsSection('ai'))
 
     await screen.findByTestId('stub-BudgetSettingsPanel')
-    expect(screen.getByTestId('operations-rail-tab-reliability')).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByTestId('stub-AiGuidanceSettingsPanel')).toBeInTheDocument()
+    expect(screen.getByTestId('operations-rail-tab-ai')).toHaveAttribute('aria-current', 'page')
     expect(screen.queryByTestId('stub-FailureClustersCard')).toBeNull()
   })
 
@@ -256,11 +264,11 @@ describe('<OperationsPage />', () => {
 
     render(<OperationsPage />)
 
-    await screen.findByTestId('stub-FailureClustersCard')
+    await screen.findByTestId('settings-index-reliability')
     expect(screen.getByTestId('operations-rail-tab-overview')).toHaveAttribute('aria-current', 'page')
   })
 
-  it('lights the Reliability dot when the rate-limiter is degraded', async () => {
+  it('lights the Infrastructure dot when the rate-limiter is degraded', async () => {
     stubApiByPath({
       '/recovery/metrics': healthyMetrics,
       '/health': {
@@ -276,11 +284,11 @@ describe('<OperationsPage />', () => {
 
     render(<OperationsPage />)
 
-    await screen.findByTestId('stub-FailureClustersCard')
+    await screen.findByTestId('settings-index-reliability')
     await waitFor(() => {
-      expect(screen.getByTestId('operations-rail-dot-reliability')).toBeInTheDocument()
+      expect(screen.getByTestId('operations-rail-dot-infrastructure')).toBeInTheDocument()
     })
-    expect(screen.getByTestId('operations-rail-dot-reliability')).toHaveAttribute('data-severity', 'warning')
+    expect(screen.getByTestId('operations-rail-dot-infrastructure')).toHaveAttribute('data-severity', 'warning')
     // No dot on overview (metrics are healthy), no dot on access/integrations
     // (those sub-tabs have no page-level signal source — see the rail's dotKind map).
     expect(screen.queryByTestId('operations-rail-dot-overview')).toBeNull()
@@ -288,7 +296,7 @@ describe('<OperationsPage />', () => {
     expect(screen.queryByTestId('operations-rail-dot-integrations')).toBeNull()
   })
 
-  it('shows admin queue pressure and lights Reliability only above the threshold', async () => {
+  it('shows admin queue pressure and lights Infrastructure only above the threshold', async () => {
     stubApiByPath({
       '/recovery/metrics': healthyMetrics,
       '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] }, queue: { degraded: true } },
@@ -297,11 +305,15 @@ describe('<OperationsPage />', () => {
 
     render(<OperationsPage />)
 
+    await openInfrastructureSettings()
+    const stream = screen.getByText('Live run connection').closest('.we-infrastructure-card__queue')
+    expect(stream).not.toBeNull()
+    expect(within(stream as HTMLElement).getByText('None')).toBeInTheDocument()
     const chip = await screen.findByTestId('queue-lag-chip')
     expect(chip).toHaveAttribute('data-state', 'delayed')
     expect(chip).toHaveTextContent('Queue delayed')
     expect(chip).toHaveTextContent('Jobs are still processing')
-    expect(screen.getByTestId('operations-rail-dot-reliability')).toHaveAttribute('data-severity', 'warning')
+    expect(screen.getByTestId('operations-rail-dot-infrastructure')).toHaveAttribute('data-severity', 'warning')
   })
 
   it('shows maintenance pressure independently from a clear workflow queue', async () => {
@@ -324,11 +336,12 @@ describe('<OperationsPage />', () => {
 
     render(<OperationsPage />)
 
+    await openInfrastructureSettings()
     expect(await screen.findByTestId('queue-lag-chip')).toHaveAttribute('data-state', 'clear')
     const maintenance = screen.getByTestId('maintenance-queue-lag-chip')
     expect(maintenance).toHaveAttribute('data-state', 'delayed')
     expect(maintenance).toHaveTextContent('Maintenance delayed')
-    expect(screen.getByTestId('operations-rail-dot-reliability')).toHaveAttribute('data-severity', 'warning')
+    expect(screen.getByTestId('operations-rail-dot-infrastructure')).toHaveAttribute('data-severity', 'warning')
   })
 
   it('attributes an explicit null maintenance snapshot to Redis, not transport', async () => {
@@ -346,6 +359,7 @@ describe('<OperationsPage />', () => {
 
     render(<OperationsPage />)
 
+    await openInfrastructureSettings()
     const maintenance = await screen.findByTestId('maintenance-queue-lag-chip')
     expect(maintenance).toHaveTextContent('Maintenance status unavailable — Redis could not be read')
     expect(maintenance).not.toHaveTextContent('request failed')
@@ -360,10 +374,11 @@ describe('<OperationsPage />', () => {
 
     render(<OperationsPage />)
 
+    await openInfrastructureSettings()
     const chip = await screen.findByTestId('queue-lag-chip')
     expect(chip).toHaveAttribute('data-state', 'unavailable')
     expect(chip).toHaveTextContent('Queue status unavailable — Redis could not be read')
-    expect(screen.getByTestId('operations-rail-dot-reliability')).toHaveAttribute('data-severity', 'warning')
+    expect(screen.getByTestId('operations-rail-dot-infrastructure')).toHaveAttribute('data-severity', 'warning')
   })
 
   it('does not diagnose an initial queue request failure as a Redis failure', async () => {
@@ -376,6 +391,7 @@ describe('<OperationsPage />', () => {
 
     render(<OperationsPage />)
 
+    await openInfrastructureSettings()
     const chip = await screen.findByTestId('queue-lag-chip')
     expect(chip).toHaveTextContent('Queue status unavailable — request failed')
     expect(chip).not.toHaveTextContent('Redis could not be read')
@@ -396,10 +412,10 @@ describe('<OperationsPage />', () => {
 
     render(<OperationsPage />)
 
-    await screen.findByTestId('stub-FailureClustersCard')
+    await openInfrastructureSettings()
     await waitFor(() => expect(queueCalls).toBe(1))
     expect(screen.queryByTestId('queue-lag-chip')).toBeNull()
-    expect(screen.queryByTestId('operations-rail-dot-reliability')).toBeNull()
+    expect(screen.queryByTestId('operations-rail-dot-infrastructure')).toBeNull()
 
     await act(async () => {
       vi.advanceTimersByTime(40_000)
@@ -426,21 +442,20 @@ describe('<OperationsPage />', () => {
 
     render(<OperationsPage />)
 
-    await screen.findByTestId('stub-FailureClustersCard')
-    const rateChip = (await screen.findByText(/Rate limiter healthy/i)).closest('[role="status"]')
-    expect(rateChip).not.toBeNull()
-    expect(within(rateChip as HTMLElement).getByText(/Checked/i)).toBeInTheDocument()
+    await openInfrastructureSettings()
+    const rateCard = screen.getByText('Rate limiter').closest('.we-infrastructure-card__queue')
+    expect(rateCard).not.toBeNull()
+    expect(within(rateCard as HTMLElement).getByText('Healthy')).toBeInTheDocument()
 
     await act(async () => {
       vi.advanceTimersByTime(20_000)
       await Promise.resolve()
     })
 
-    expect(within(rateChip as HTMLElement).getByText(/Rate limiter healthy/i)).toBeInTheDocument()
-    expect(within(rateChip as HTMLElement).getByText(/Checked/i)).toBeInTheDocument()
+    expect(within(rateCard as HTMLElement).getByText('Healthy')).toBeInTheDocument()
   })
 
-  it('escalates the Reliability dot to danger when a budget block is in store', async () => {
+  it('escalates the AI dot to danger when a budget block is in store', async () => {
     useWorkflowStore.setState({
       ...initialState,
       platformVersion: 0,
@@ -453,9 +468,124 @@ describe('<OperationsPage />', () => {
 
     render(<OperationsPage />)
 
-    await screen.findByTestId('stub-FailureClustersCard')
+    await screen.findByTestId('settings-index-reliability')
     await waitFor(() => {
-      expect(screen.getByTestId('operations-rail-dot-reliability')).toHaveAttribute('data-severity', 'danger')
+      expect(screen.getByTestId('operations-rail-dot-ai')).toHaveAttribute('data-severity', 'danger')
     })
+  })
+
+  it('searches configuration areas and routes direct settings pages', async () => {
+    const onOpenTab = vi.fn()
+    stubApiByPath({
+      '/recovery/metrics': healthyMetrics,
+      '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } },
+    })
+
+    render(<OperationsPage connectionCount={3} onOpenTab={onOpenTab} />)
+
+    const search = await screen.findByLabelText('Find provider, credential, member, alert, queue…')
+    fireEvent.change(search, { target: { value: 'queue' } })
+    expect(screen.getByTestId('settings-index-infrastructure')).toBeInTheDocument()
+    expect(screen.queryByTestId('settings-index-reliability')).toBeNull()
+
+    fireEvent.change(search, { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Connections' }))
+    expect(onOpenTab).toHaveBeenCalledWith('credentials')
+  })
+
+  it('keeps an area visible when any contained capability is granted', async () => {
+    stubApiByPath({
+      '/recovery/metrics': healthyMetrics,
+      '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } },
+    })
+
+    render(<OperationsPage permissions={['recovery.read', 'mcp.connections.read']} />)
+
+    expect(await screen.findByTestId('settings-index-integrations')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('settings-index-integrations'))
+    expect(await screen.findByTestId('stub-McpConnectionsPanel')).toBeInTheDocument()
+  })
+
+  it('does not request recovery metrics for a settings-only permission scope', async () => {
+    stubApiByPath({
+      '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } },
+    })
+
+    render(<OperationsPage permissions={['credentials.read']} />)
+
+    expect(await screen.findByTestId('operations-rail-tab-integrations'))
+      .toHaveAttribute('aria-current', 'page')
+    expect(api).not.toHaveBeenCalledWith('/recovery/metrics')
+    expect(screen.queryByText(/Recovery metrics are temporarily unavailable/)).toBeNull()
+  })
+
+  it('routes credential readers from Integrations to the canonical Connections inventory', async () => {
+    const onOpenTab = vi.fn()
+    stubApiByPath({
+      '/recovery/metrics': healthyMetrics,
+      '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } },
+    })
+
+    render(
+      <OperationsPage
+        permissions={['recovery.read', 'credentials.read']}
+        onOpenTab={onOpenTab}
+      />,
+    )
+
+    fireEvent.click(await screen.findByTestId('settings-index-integrations'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Connections' }))
+    expect(onOpenTab).toHaveBeenCalledWith('credentials')
+  })
+
+  it('keeps write-only integration and recovery-governance sections reachable', async () => {
+    stubApiByPath({
+      '/recovery/metrics': healthyMetrics,
+      '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } },
+    })
+
+    const { rerender } = render(
+      <OperationsPage permissions={['recovery.read', 'credentials.write']} />,
+    )
+
+    fireEvent.click(await screen.findByTestId('settings-index-integrations'))
+    expect(await screen.findByTestId('stub-SlackInteractionsPanel')).toBeInTheDocument()
+
+    rerender(<OperationsPage permissions={['recovery.read']} />)
+    fireEvent.click(await screen.findByTestId('operations-rail-tab-access'))
+    expect(await screen.findByTestId('stub-MemoryGovernancePanel')).toBeInTheDocument()
+  })
+
+  it('does not mount a persisted section after its permissions are removed', async () => {
+    window.localStorage.setItem(STORAGE_KEY, 'integrations')
+    stubApiByPath({
+      '/recovery/metrics': healthyMetrics,
+      '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } },
+    })
+
+    render(<OperationsPage permissions={['recovery.read']} />)
+
+    expect(await screen.findByTestId('operations-rail-tab-overview'))
+      .toHaveAttribute('aria-current', 'page')
+    expect(screen.queryByTestId('stub-McpConnectionsPanel')).toBeNull()
+    expect(screen.queryByTestId('stub-SlackInteractionsPanel')).toBeNull()
+    await waitFor(() => expect(window.localStorage.getItem(STORAGE_KEY)).toBe('overview'))
+  })
+
+  it('rejects inaccessible section requests without persisting them', async () => {
+    stubApiByPath({
+      '/recovery/metrics': healthyMetrics,
+      '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } },
+    })
+
+    render(<OperationsPage permissions={['recovery.read']} />)
+    await screen.findByTestId('settings-index-access')
+
+    act(() => requestOperationsSection('integrations'))
+
+    expect(screen.getByTestId('operations-rail-tab-overview'))
+      .toHaveAttribute('aria-current', 'page')
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe('overview')
+    expect(screen.queryByTestId('stub-McpConnectionsPanel')).toBeNull()
   })
 })

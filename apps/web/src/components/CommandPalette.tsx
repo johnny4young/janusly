@@ -150,7 +150,6 @@ function buildCommands(
     { id: 'go.inspector', labelKey: 'palette.nav.inspector', icon: <GitBranch size={14} />, group: 'nav', permission: 'workflows.read', run: ({ openTab }) => { openTab('inspector') } },
     { id: 'go.runs', labelKey: 'palette.nav.runs', icon: <Activity size={14} />, group: 'nav', permission: 'runs.read', run: ({ openTab }) => { openTab('runs') } },
     { id: 'go.multiAgent', labelKey: 'palette.nav.multiAgent', icon: <Layers3 size={14} />, group: 'nav', permission: 'workflows.read', run: ({ openTab }) => { openTab('multiAgent') } },
-    { id: 'go.operations', labelKey: 'palette.nav.operations', icon: <Gauge size={14} />, group: 'nav', permission: 'recovery.read', run: ({ openTab }) => { openTab('operations') } },
     { id: 'go.members', labelKey: 'palette.nav.members', icon: <Users size={14} />, group: 'nav', permission: 'members.read', run: ({ openTab }) => { openTab('members') } },
     { id: 'go.templates', labelKey: 'palette.nav.templates', icon: <Workflow size={14} />, group: 'nav', permission: 'workflows.read', run: ({ openTab }) => { openTab('templates') } },
     { id: 'go.marketplace', labelKey: 'palette.nav.marketplace', icon: <Boxes size={14} />, group: 'nav', permission: 'workflows.read', run: ({ openTab }) => { openTab('marketplace') } },

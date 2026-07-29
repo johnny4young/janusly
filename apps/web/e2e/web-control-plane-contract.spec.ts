@@ -116,15 +116,27 @@ test('grouped control-plane panels and shared mutations remain bilingual', async
     await capture(page.locator('.workspace-grid'), `web-${locale}-control-plane-authoring-default`)
 
     await openWorkspaceSection(page, copy.settings, copy.connections)
-    await expect(page.getByRole('heading', { name: copy.connections, exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', {
+      name: copy.connections,
+      exact: true,
+      level: 2,
+    })).toBeVisible()
 
     const connectionName = `control_plane_${locale}_${stamp}`
-    await page.getByLabel(copy.name, { exact: true }).fill(connectionName)
+    await page
+      .locator('.we-connections-inventory .we-card__header')
+      .getByRole('button', { name: copy.add, exact: true })
+      .click()
+    const connectionDialog = page.getByRole('dialog')
+    await expect(connectionDialog).toBeVisible()
+    await connectionDialog.getByLabel(copy.name, { exact: true }).fill(connectionName)
     // Managed storage is the default: the form asks for the secret value
     // itself, which the API envelope-encrypts. The legacy environment-reference
     // mode stays reachable through the storage selector above this field.
-    await page.getByLabel(copy.secretValue, { exact: true }).fill(`control-plane-${locale}-${stamp}`)
-    await page.getByRole('button', { name: copy.add, exact: true }).click()
+    await connectionDialog
+      .getByLabel(copy.secretValue, { exact: true })
+      .fill(`control-plane-${locale}-${stamp}`)
+    await connectionDialog.getByRole('button', { name: copy.add, exact: true }).click()
 
     const successToast = page.getByText(copy.added(connectionName), { exact: true })
     await expect(successToast).toBeVisible()

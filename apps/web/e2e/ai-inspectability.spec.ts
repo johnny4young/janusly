@@ -106,15 +106,15 @@ async function switchLocale(page: Page, locale: Locale): Promise<void> {
   await hideUnrelatedOverlays(page)
 }
 
-async function openOperationsReliability(page: Page, locale: Locale): Promise<void> {
+async function openAiSettings(page: Page, locale: Locale): Promise<void> {
   await openWorkspaceSection(
     page,
     locale === 'en' ? 'Settings' : 'Configuración',
     locale === 'en' ? 'Workspace' : 'Espacio de trabajo',
   )
-  const reliability = page.getByTestId('operations-rail-tab-reliability')
-  await expect(reliability).toBeVisible()
-  await reliability.click()
+  const ai = page.getByTestId('operations-rail-tab-ai')
+  await expect(ai).toBeVisible()
+  await ai.click()
 }
 
 async function openWorkflowMetadata(
@@ -324,7 +324,7 @@ test('organization and workflow guidance survive real saves, retry, and both loc
     }
     await route.continue()
   })
-  await page.getByTestId('operations-rail-tab-reliability').click()
+  await page.getByTestId('operations-rail-tab-ai').click()
 
   const orgCard = page.getByTestId('ai-guidance-settings')
   const orgInput = orgCard.getByTestId('ai-guidance-org-input')
@@ -411,7 +411,7 @@ test('organization and workflow guidance survive real saves, retry, and both loc
   await capture(englishWorkflowField, 'web-en-workflow-guidance-saved')
 
   await switchLocale(page, 'es')
-  await openOperationsReliability(page, 'es')
+  await openAiSettings(page, 'es')
   const spanishOrgCard = page.getByTestId('ai-guidance-settings')
   const spanishOrgInput = spanishOrgCard.getByTestId('ai-guidance-org-input')
   await expect(spanishOrgInput).toHaveValue(englishOrgGuidance)

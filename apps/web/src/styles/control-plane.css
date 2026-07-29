@@ -348,12 +348,6 @@
   margin-top: 14px;
 }
 
-.connection-form-actions {
-  border-top: 1px solid var(--we-line);
-  margin-top: 24px;
-  padding-top: 16px;
-}
-
 .quick-config {
   border-top: 1px solid var(--we-line);
   padding-top: 12px;

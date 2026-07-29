@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api'
@@ -86,10 +86,12 @@ beforeEach(() => {
 })
 
 describe('<RightPanel /> credentials', () => {
-  it('offers postgres as a connection kind for external DB tools', () => {
+  it('keeps creation focused and offers postgres for external DB tools', async () => {
     render(<RightPanel {...props()} />)
 
-    const kind = screen.getByLabelText('Connection kind')
+    const createActions = await screen.findAllByRole('button', { name: 'Add connection' })
+    fireEvent.click(createActions[0]!)
+    const kind = await screen.findByLabelText('Connection kind')
     expect(within(kind).getByRole('option', { name: 'postgres' })).toBeInTheDocument()
   })
 })

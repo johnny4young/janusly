@@ -19,7 +19,7 @@ const views = [
   { destination: 'Settings', section: 'Team', heading: 'Team' },
   { destination: 'Workflows', section: 'Templates', heading: 'Templates' },
   { destination: 'Settings', section: 'Tools', heading: 'Tools' },
-  { destination: 'Settings', section: 'Connections', heading: 'Connections' },
+  { destination: 'Settings', section: 'Connections', heading: 'Connections', headingLevel: 2 },
 ]
 
 test('workspace views can be opened independently', async ({ page }) => {
@@ -40,7 +40,11 @@ test('workspace views can be opened independently', async ({ page }) => {
     }
 
     if (view.heading) {
-      await expect(page.getByRole('heading', { name: view.heading, exact: true })).toBeVisible()
+      await expect(page.getByRole('heading', {
+        name: view.heading,
+        exact: true,
+        level: 'headingLevel' in view ? view.headingLevel : undefined,
+      })).toBeVisible()
     } else {
       const target = view.selector
         ? page.locator(view.selector, { hasText: view.text })

@@ -92,7 +92,7 @@ test('Recovery Center budget tile opens budget settings', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Budget settings', exact: true })).toBeVisible()
 })
 
-test('AI Studio budget block shows a dismissible Operations CTA', async ({ page }) => {
+test('AI Studio budget block shows a dismissible Settings CTA', async ({ page }) => {
   await page.route('**/ai/explain-workflow', async route => {
     await route.fulfill({
       status: 402,

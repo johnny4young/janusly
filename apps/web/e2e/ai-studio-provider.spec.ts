@@ -23,7 +23,9 @@ test('AI Studio local mode points operators to the supported Anthropic key in bo
   await openWorkflowAiAction(page, 'Workflows')
 
   const englishHero = page.locator('.copilot-hero')
-  await expect(englishHero).toContainText('Add ANTHROPIC_API_KEY to the root .env')
+  await expect(englishHero).toContainText(
+    'Configure ANTHROPIC_API_KEY for the API and worker, then restart both.',
+  )
   await expect(page.getByText('Root .env has ANTHROPIC_API_KEY')).toBeVisible()
   await expect(page.getByText(/OPENAI_API_KEY/)).toHaveCount(0)
 
@@ -32,7 +34,9 @@ test('AI Studio local mode points operators to the supported Anthropic key in bo
   await openWorkflowAiAction(page, 'Flujos')
 
   const spanishHero = page.locator('.copilot-hero')
-  await expect(spanishHero).toContainText('Agrega ANTHROPIC_API_KEY al archivo .env de la raíz')
+  await expect(spanishHero).toContainText(
+    'Configura ANTHROPIC_API_KEY para la API y el worker y reinicia ambos.',
+  )
   await expect(page.getByText('El archivo .env de la raíz contiene ANTHROPIC_API_KEY')).toBeVisible()
   await expect(page.getByText(/OPENAI_API_KEY/)).toHaveCount(0)
   expect(browserErrors).toEqual([])

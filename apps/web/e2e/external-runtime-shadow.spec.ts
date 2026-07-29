@@ -1,7 +1,7 @@
 import { openWorkspaceSection } from './_helpers/workspace-navigation'
 /**
  * Real-stack proof for signed, idempotent, monotonic external-runtime shadow
- * ingestion and its observer-only Operations surface.
+ * ingestion and its observer-only Settings surface.
  */
 
 import { createHmac } from 'node:crypto'

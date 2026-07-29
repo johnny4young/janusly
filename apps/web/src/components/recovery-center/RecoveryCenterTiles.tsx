@@ -386,7 +386,7 @@ export function BudgetTile({ onOpenTab }: { onOpenTab: (tab: ActiveTab) => void 
           type="button"
           className="we-recovery-center-tile__link"
           onClick={() => {
-            requestOperationsSection('reliability')
+            requestOperationsSection('ai')
             onOpenTab('operations')
           }}
           data-testid="recovery-center-budget-open-settings"

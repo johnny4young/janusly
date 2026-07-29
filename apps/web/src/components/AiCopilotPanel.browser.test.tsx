@@ -42,7 +42,7 @@ describe('<AiCopilotPanel /> provider guidance (browser)', () => {
   it('renders visible Anthropic guidance in English local mode', async () => {
     renderLocalModePanel()
 
-    const detail = await screen.findByText(/Add ANTHROPIC_API_KEY to the root \.env/i)
+    const detail = await screen.findByText(/Configure ANTHROPIC_API_KEY for the API and worker/i)
     expect(detail.getBoundingClientRect().height).toBeGreaterThan(0)
     expect(getComputedStyle(detail).display).not.toBe('none')
     expect(screen.getByText('Root .env has ANTHROPIC_API_KEY')).toBeInTheDocument()
@@ -53,7 +53,7 @@ describe('<AiCopilotPanel /> provider guidance (browser)', () => {
     initI18n('es')
     renderLocalModePanel()
 
-    const detail = await screen.findByText(/Agrega ANTHROPIC_API_KEY al archivo \.env de la raíz/i)
+    const detail = await screen.findByText(/Configura ANTHROPIC_API_KEY para la API y el worker/i)
     expect(detail.getBoundingClientRect().height).toBeGreaterThan(0)
     expect(getComputedStyle(detail).display).not.toBe('none')
     expect(screen.getByText('El archivo .env de la raíz contiene ANTHROPIC_API_KEY')).toBeInTheDocument()
