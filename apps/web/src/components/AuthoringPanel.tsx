@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { CheckCircle2, GitBranch, MessageSquareText, Settings2, ShieldCheck, Sparkles, Wrench } from 'lucide-react'
 
 import { useT } from '../i18n'
@@ -17,12 +17,7 @@ import type {
 import { AuthoringProblemsPanel } from './AuthoringProblemsPanel'
 import { InspectorPanel } from './InspectorPanel'
 import { PanelChrome } from './panel-primitives'
-
-const VersionHistoryPanel = lazy(() => import('./VersionHistoryPanel').then((module) => ({ default: module.VersionHistoryPanel })))
-const WorkflowRolloutPanel = lazy(() => import('./WorkflowRolloutPanel').then((module) => ({ default: module.WorkflowRolloutPanel })))
-const WorkflowSloPanel = lazy(() => import('./WorkflowSloPanel').then((module) => ({ default: module.WorkflowSloPanel })))
-const ScheduleHistoryPanel = lazy(() => import('./ScheduleHistoryPanel').then((module) => ({ default: module.ScheduleHistoryPanel })))
-const WorkflowMetadataPanel = lazy(() => import('./WorkflowMetadataPanel').then((module) => ({ default: module.WorkflowMetadataPanel })))
+import { WorkflowOperationsPanel } from './WorkflowOperationsPanel'
 
 export type AuthoringPanelModel = {
   runNodes: RunNode[]
@@ -102,7 +97,7 @@ export function AuthoringPanel({
                 onClick={() => onOpenAiAction(item.action)}
               >
                 {item.icon}
-                <span>{t(item.labelKey as never)}</span>
+                <span>{t(item.labelKey)}</span>
               </button>
             ))}
           </div>
@@ -195,13 +190,7 @@ export function AuthoringPanel({
             onUpdateEdgeCondition={model.onUpdateEdgeCondition}
             onInsertSnippet={model.onInsertSnippet}
           />
-          <Suspense fallback={null}>
-            <VersionHistoryPanel />
-            <WorkflowRolloutPanel readOnly={!canWrite} />
-            <WorkflowSloPanel readOnly={!canWrite} />
-            <ScheduleHistoryPanel />
-            <WorkflowMetadataPanel readOnly={!canWrite} />
-          </Suspense>
+          <WorkflowOperationsPanel readOnly={!canWrite} />
         </>
       )}
     </PanelChrome>

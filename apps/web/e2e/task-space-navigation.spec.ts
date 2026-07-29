@@ -78,6 +78,21 @@ async function expectAccessible(page: Page, context: string): Promise<void> {
   expect(blocking).toEqual([])
 }
 
+async function expectReadablePrimaryText(locator: Locator): Promise<void> {
+  const sizes = await locator.evaluateAll((elements) => elements
+    .filter((element) => {
+      const style = getComputedStyle(element)
+      return style.display !== 'none' && style.visibility !== 'hidden'
+    })
+    .map((element) => ({
+      text: element.textContent?.trim() ?? '',
+      pixels: Number.parseFloat(getComputedStyle(element).fontSize),
+    }))
+    .filter(({ text }) => text.length > 0))
+  expect(sizes.length).toBeGreaterThan(0)
+  expect(sizes.filter(({ pixels }) => pixels < 12)).toEqual([])
+}
+
 test.describe.configure({ mode: 'serial' })
 
 test('workflow creation is reachable from the workflow inventory', async ({ page }) => {
@@ -106,10 +121,9 @@ test('workflow creation is reachable from the workflow inventory', async ({ page
   await expect(workflowsDestination).toBeVisible()
   await workflowsDestination.click()
 
-  const createWorkflowAction = page.getByRole('button', {
-    name: 'New workflow',
-    exact: true,
-  })
+  const createWorkflowAction = page.locator(
+    'button[aria-controls="workflow-creation-choices"]',
+  )
   await expect(createWorkflowAction).toBeVisible()
   await expect(createWorkflowAction).toBeEnabled()
   await createWorkflowAction.click()
@@ -181,6 +195,18 @@ for (const locale of LOCALES) {
     await expect(sidebar.locator('.sb-workflow')).toHaveCount(0)
     await expect(sidebar.locator('.sb-ai-strip')).toHaveCount(0)
     await expect(sidebar.locator('.sb-pinned')).toHaveCount(0)
+    await expectReadablePrimaryText(sidebar.locator('.sb-view, .sb-view__meta'))
+    await expectReadablePrimaryText(page.locator(
+      '.we-recovery-center-hero__copy, .we-home-workspace button, .we-home-workspace p',
+    ))
+    await expect(page.getByTestId('home-priority-inbox').getByRole('button', {
+      name: locale.activity,
+      exact: true,
+    })).toBeVisible()
+    await expect(page.getByTestId('home-active-work').getByRole('button', {
+      name: locale.activity,
+      exact: true,
+    })).toBeVisible()
     await expectAccessible(page, `${locale.locale} Home task space`)
     await capture(
       shell,

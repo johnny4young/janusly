@@ -787,7 +787,7 @@ export function DeadLettersPanel({
 
       <label className="field-label" htmlFor="dlq-filter">{t('dlq.show')}</label>
       <select id="dlq-filter" className="text-field" value={status} onChange={event => setStatus(toStatusFilter(event.target.value))}>
-        {statuses.map(item => <option key={item} value={item}>{t(STATUS_FILTER_KEYS[item] as never)}</option>)}
+        {statuses.map(item => <option key={item} value={item}>{t(STATUS_FILTER_KEYS[item])}</option>)}
       </select>
 
       <div className="field-label">{t('dlq.owner.label')}</div>
@@ -820,7 +820,7 @@ export function DeadLettersPanel({
       >
         <option value="all">{t('dlq.severity.all')}</option>
         {SEVERITIES.map(sev => (
-          <option key={sev} value={sev}>{t(`recoveryItems.severity.${sev}` as never)}</option>
+          <option key={sev} value={sev}>{t(`recoveryItems.severity.${sev}`)}</option>
         ))}
       </select>
 
@@ -833,7 +833,7 @@ export function DeadLettersPanel({
         data-testid="dlq-sort"
       >
         {SORT_KEYS.map(key => (
-          <option key={key} value={key}>{t(SORT_KEY_LABELS[key] as never)}</option>
+          <option key={key} value={key}>{t(SORT_KEY_LABELS[key])}</option>
         ))}
       </select>
 

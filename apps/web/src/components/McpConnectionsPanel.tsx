@@ -54,14 +54,14 @@ function parseEnvRefs(text: string): { ok: true; envRefs: Record<string, { kind:
   const lines = text.split('\n').map((line) => line.trim()).filter(Boolean)
   for (const line of lines) {
     const eq = line.indexOf('=')
-    if (eq <= 0) return { ok: false, error: runtimeT('mcpConnections.errors.badEnvRefLine', { line }) as string }
+    if (eq <= 0) return { ok: false, error: runtimeT('mcpConnections.errors.badEnvRefLine', { line }) }
     const key = line.slice(0, eq).trim()
     const value = line.slice(eq + 1).trim()
-    if (!key || !value) return { ok: false, error: runtimeT('mcpConnections.errors.badEnvRefLine', { line }) as string }
+    if (!key || !value) return { ok: false, error: runtimeT('mcpConnections.errors.badEnvRefLine', { line }) }
     // Reject duplicate keys at parse time — a silent overwrite loses one
     // of the operator's intended refs (e.g. `KEY=A\nKEY=B` resolves to
     // just `B` with no warning). Surface it so the admin can fix it.
-    if (key in out) return { ok: false, error: runtimeT('mcpConnections.errors.duplicateEnvRefKey', { key }) as string }
+    if (key in out) return { ok: false, error: runtimeT('mcpConnections.errors.duplicateEnvRefKey', { key }) }
     out[key] = { kind: 'env', name: value }
   }
   return { ok: true, envRefs: out }
@@ -84,10 +84,10 @@ function statusBadgeClass(status: McpConnectionStatus): string {
 
 function statusLabel(status: McpConnectionStatus): string {
   switch (status) {
-    case 'active': return runtimeT('mcpConnections.status.active') as string
-    case 'failed': return runtimeT('mcpConnections.status.failed') as string
-    case 'disabled': return runtimeT('mcpConnections.status.disabled') as string
-    case 'pending': return runtimeT('mcpConnections.status.pending') as string
+    case 'active': return runtimeT('mcpConnections.status.active')
+    case 'failed': return runtimeT('mcpConnections.status.failed')
+    case 'disabled': return runtimeT('mcpConnections.status.disabled')
+    case 'pending': return runtimeT('mcpConnections.status.pending')
   }
 }
 

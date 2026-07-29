@@ -28,8 +28,8 @@ export function SettingsOverview({
     if (!canOpenSettingsSection(area, permissions)) return false
     if (!normalizedQuery) return true
     return [
-      t(`operations.section.${area}.label` as never),
-      t(`operations.section.${area}.helper` as never),
+      t(`operations.section.${area}.label`),
+      t(`operations.section.${area}.helper`),
     ]
       .join(' ')
       .toLocaleLowerCase()
@@ -91,8 +91,8 @@ export function SettingsOverview({
                 data-testid={`settings-index-${area}`}
               >
                 <span className="we-settings-index__card-copy">
-                  <strong>{t(`operations.section.${area}.label` as never)}</strong>
-                  <span>{t(`operations.section.${area}.helper` as never)}</span>
+                  <strong>{t(`operations.section.${area}.label`)}</strong>
+                  <span>{t(`operations.section.${area}.helper`)}</span>
                   {status && <small>{status}</small>}
                 </span>
               </button>

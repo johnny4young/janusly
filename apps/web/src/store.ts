@@ -28,7 +28,7 @@
 
 import { create } from 'zustand'
 import type { Connection, OnEdgesChange, OnNodesChange } from '@xyflow/react'
-import type { Session, User } from '@supabase/supabase-js'
+import type { Session, User } from '@supabase/auth-js'
 import type { ActiveTab, JsonObject, RunEvent, RunNode, RunSummary, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
 import type { OnboardingState } from '@janusly/shared/src/onboarding'
 import type { SessionContext } from './identity-context'
@@ -363,7 +363,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
   currentWorkflowId: initialWorkflowId,
   // `main.tsx` starts downloading App in parallel with the locale catalog, so
-  // module evaluation can precede i18next initialization. App fills this
+  // module evaluation can precede catalog initialization. App fills this
   // sentinel before paint; never translate during store module evaluation.
   currentWorkflowName: '',
   currentWorkflowSaved: false,

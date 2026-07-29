@@ -114,7 +114,7 @@ export function CanvasStepPicker({
           <div className="canvas-step-picker__groups">
             {groups.map((group) => (
               <section className="canvas-step-picker__group" key={group.id}>
-                <span>{t(group.labelKey as never)}</span>
+                <span>{t(group.labelKey)}</span>
                 <div>
                   {group.types.map((type) => (
                     <button

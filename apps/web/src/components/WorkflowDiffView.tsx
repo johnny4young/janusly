@@ -271,7 +271,7 @@ function TagPill({ tag }: { tag: ChangeTag }) {
   return (
     <span className={`we-diff-tag we-diff-tag--${tag}`}>
       {tag === 'secret_ref' && <ShieldAlert size={11} aria-hidden="true" />}
-      {t(TAG_KEYS[tag] as never)}
+      {t(TAG_KEYS[tag])}
     </span>
   )
 }
@@ -281,14 +281,14 @@ function TagPill({ tag }: { tag: ChangeTag }) {
 function summarize(diff: WorkflowDiff): string {
   const parts: string[] = []
   const { summary } = diff
-  if (summary.nodesAdded) parts.push(runtimeT('diff.summary.nodesAdded', { count: summary.nodesAdded }) as string)
-  if (summary.nodesRemoved) parts.push(runtimeT('diff.summary.nodesRemoved', { count: summary.nodesRemoved }) as string)
-  if (summary.nodesChanged) parts.push(runtimeT('diff.summary.nodesChanged', { count: summary.nodesChanged }) as string)
-  if (summary.edgesAdded) parts.push(runtimeT('diff.summary.edgesAdded', { count: summary.edgesAdded }) as string)
-  if (summary.edgesRemoved) parts.push(runtimeT('diff.summary.edgesRemoved', { count: summary.edgesRemoved }) as string)
-  if (summary.edgesChanged) parts.push(runtimeT('diff.summary.edgesChanged', { count: summary.edgesChanged }) as string)
-  if (diff.workflow.length > 0) parts.push(runtimeT('diff.summary.workflowFields', { count: diff.workflow.length }) as string)
-  return parts.length === 0 ? (runtimeT('diff.summary.empty') as string) : parts.join(' · ')
+  if (summary.nodesAdded) parts.push(runtimeT('diff.summary.nodesAdded', { count: summary.nodesAdded }))
+  if (summary.nodesRemoved) parts.push(runtimeT('diff.summary.nodesRemoved', { count: summary.nodesRemoved }))
+  if (summary.nodesChanged) parts.push(runtimeT('diff.summary.nodesChanged', { count: summary.nodesChanged }))
+  if (summary.edgesAdded) parts.push(runtimeT('diff.summary.edgesAdded', { count: summary.edgesAdded }))
+  if (summary.edgesRemoved) parts.push(runtimeT('diff.summary.edgesRemoved', { count: summary.edgesRemoved }))
+  if (summary.edgesChanged) parts.push(runtimeT('diff.summary.edgesChanged', { count: summary.edgesChanged }))
+  if (diff.workflow.length > 0) parts.push(runtimeT('diff.summary.workflowFields', { count: diff.workflow.length }))
+  return parts.length === 0 ? (runtimeT('diff.summary.empty')) : parts.join(' · ')
 }
 
 function nodeChangeKey(change: WorkflowDiff['nodes'][number]): string {

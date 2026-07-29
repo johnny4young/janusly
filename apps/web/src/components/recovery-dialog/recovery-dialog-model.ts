@@ -60,25 +60,25 @@ export const CALIBRATION_SUBTITLE_DELTA = 10
 
 export function approachLabelDisplay(label: PatchApproachLabel): string {
   switch (label) {
-    case 'add_retry': return runtimeT('recoveryDialog.approachLabel.add_retry') as string
-    case 'raise_timeout': return runtimeT('recoveryDialog.approachLabel.raise_timeout') as string
-    case 'swap_secret_ref': return runtimeT('recoveryDialog.approachLabel.swap_secret_ref') as string
-    case 'add_approval': return runtimeT('recoveryDialog.approachLabel.add_approval') as string
-    case 'fix_url': return runtimeT('recoveryDialog.approachLabel.fix_url') as string
-    case 'other': return runtimeT('recoveryDialog.approachLabel.other') as string
+    case 'add_retry': return runtimeT('recoveryDialog.approachLabel.add_retry')
+    case 'raise_timeout': return runtimeT('recoveryDialog.approachLabel.raise_timeout')
+    case 'swap_secret_ref': return runtimeT('recoveryDialog.approachLabel.swap_secret_ref')
+    case 'add_approval': return runtimeT('recoveryDialog.approachLabel.add_approval')
+    case 'fix_url': return runtimeT('recoveryDialog.approachLabel.fix_url')
+    case 'other': return runtimeT('recoveryDialog.approachLabel.other')
   }
 }
 
 /** Human label for an evidence kind, localized. */
 export function evidenceKindLabel(kind: EvidenceKind): string {
   switch (kind) {
-    case 'recovery_feedback': return runtimeT('recoveryDialog.evidence.kind.recovery_feedback') as string
-    case 'memory_entry': return runtimeT('recoveryDialog.evidence.kind.memory_entry') as string
-    case 'runbook_excerpt': return runtimeT('recoveryDialog.evidence.kind.runbook_excerpt') as string
-    case 'recent_error': return runtimeT('recoveryDialog.evidence.kind.recent_error') as string
-    case 'signature_rule': return runtimeT('recoveryDialog.evidence.kind.signature_rule') as string
-    case 'tool_contract': return runtimeT('recoveryDialog.evidence.kind.tool_contract') as string
-    case 'recovery_playbook': return runtimeT('recoveryDialog.evidence.kind.recovery_playbook') as string
+    case 'recovery_feedback': return runtimeT('recoveryDialog.evidence.kind.recovery_feedback')
+    case 'memory_entry': return runtimeT('recoveryDialog.evidence.kind.memory_entry')
+    case 'runbook_excerpt': return runtimeT('recoveryDialog.evidence.kind.runbook_excerpt')
+    case 'recent_error': return runtimeT('recoveryDialog.evidence.kind.recent_error')
+    case 'signature_rule': return runtimeT('recoveryDialog.evidence.kind.signature_rule')
+    case 'tool_contract': return runtimeT('recoveryDialog.evidence.kind.tool_contract')
+    case 'recovery_playbook': return runtimeT('recoveryDialog.evidence.kind.recovery_playbook')
   }
 }
 

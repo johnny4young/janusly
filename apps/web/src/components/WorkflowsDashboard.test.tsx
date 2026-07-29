@@ -122,6 +122,33 @@ describe('<WorkflowsDashboard />', () => {
     render(<WorkflowsDashboard onOpen={() => {}} onCreate={() => {}} canWrite={false} />)
 
     expect(await screen.findByRole('button', { name: 'New workflow' })).toBeDisabled()
+    expect(await screen.findByTestId('workflows-empty')).toHaveTextContent(
+      'An editor can create the first one.',
+    )
+    expect(screen.queryByTestId('empty-state-cta')).not.toBeInTheDocument()
+  })
+
+  it('shows a retryable error state when the workflow inventory cannot load', async () => {
+    let inventoryFails = true
+    vi.mocked(api).mockImplementation(async (url: string) => {
+      if (url === '/workflows/tags') return { tags: [] }
+      if (url === '/workflows/folders') return { folders: [] }
+      if (inventoryFails) throw new Error('Inventory request failed')
+      return FLOWS
+    })
+
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+
+    const errorState = await screen.findByTestId('workflows-load-error')
+    expect(errorState).toHaveTextContent('Workflows are unavailable')
+    expect(errorState).toHaveTextContent('Inventory request failed')
+    expect(screen.queryByTestId('workflows-empty')).not.toBeInTheDocument()
+
+    inventoryFails = false
+    fireEvent.click(within(errorState).getByRole('button', { name: 'Try again' }))
+
+    expect(await screen.findByTestId('workflows-row-wf1')).toBeInTheDocument()
+    expect(screen.queryByTestId('workflows-load-error')).not.toBeInTheDocument()
   })
 
   it('renders each workflow with its tag pills', async () => {

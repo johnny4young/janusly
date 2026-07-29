@@ -302,7 +302,7 @@ export function RecoveryDialog({
         if (cancelled) return
         setStep({
           kind: 'error',
-          message: error instanceof Error ? error.message : (runtimeT('recoveryDialog.errors.validationPolling') as string),
+          message: error instanceof Error ? error.message : (runtimeT('recoveryDialog.errors.validationPolling')),
         })
       }
     }

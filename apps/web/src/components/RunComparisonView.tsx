@@ -280,7 +280,7 @@ function EqualityChip({ equality }: { equality: Equality }) {
   const { t } = useT()
   return (
     <span className={`we-comparison-chip we-comparison-chip--${equality}`}>
-      {t(EQUALITY_KEY[equality] as never)}
+      {t(EQUALITY_KEY[equality])}
     </span>
   )
 }

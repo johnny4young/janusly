@@ -61,7 +61,7 @@ export function RecoveryPassportCard({
         <div>
           <div className="section-kicker">{t('recoveryDialog.passport.kicker')}</div>
           <strong id="recovery-passport-title">
-            {t(`recoveryDialog.passport.verdict.${evaluation.verdict}` as never)}
+            {t(`recoveryDialog.passport.verdict.${evaluation.verdict}`)}
           </strong>
         </div>
       </header>
@@ -91,7 +91,7 @@ export function RecoveryPassportCard({
         </div>
         <div>
           <dt>{t('recoveryDialog.passport.sandbox')}</dt>
-          <dd>{t(`recoveryDialog.passport.sandbox.${sandboxStatus}` as never)}</dd>
+          <dd>{t(`recoveryDialog.passport.sandbox.${sandboxStatus}`)}</dd>
         </div>
         <div>
           <dt>{t('recoveryDialog.passport.evidence')}</dt>
@@ -131,10 +131,10 @@ export function RecoveryPassportCard({
           <li key={factor.id} data-status={factor.status}>
             <span className="we-recovery-passport__factor-indicator" aria-hidden="true" />
             <span className="we-recovery-passport__factor-copy">
-              <strong>{t(`recoveryDialog.passport.factor.${factor.id}` as never)}</strong>
+              <strong>{t(`recoveryDialog.passport.factor.${factor.id}`)}</strong>
               <small>
                 {factor.reason
-                  ? t(`recoveryDialog.passport.reason.${factor.reason}` as never)
+                  ? t(`recoveryDialog.passport.reason.${factor.reason}`)
                   : t('recoveryDialog.passport.factorReady')}
               </small>
             </span>
@@ -145,7 +145,7 @@ export function RecoveryPassportCard({
                   ? 'danger'
                   : 'warning'
             }>
-              {t(`recoveryDialog.passport.factorStatus.${factor.status}` as never)}
+              {t(`recoveryDialog.passport.factorStatus.${factor.status}`)}
             </span>
           </li>
         ))}

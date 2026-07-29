@@ -55,8 +55,8 @@ type TimelineItem = {
 
 function getAgentName(event: RunEvent): string {
   const payload = event.payload ?? {}
-  const fallbackTeam = runtimeT('multiAgent.defaultAgent') as string
-  const fallbackWorkflow = runtimeT('multiAgent.defaultWorkflow') as string
+  const fallbackTeam = runtimeT('multiAgent.defaultAgent')
+  const fallbackWorkflow = runtimeT('multiAgent.defaultWorkflow')
 
   if (event.type === 'multi_agent.agent.started') return typeof payload.name === 'string' ? payload.name : fallbackTeam
   if (event.type === 'multi_agent.agent.completed') return typeof payload.name === 'string' ? payload.name : fallbackTeam
@@ -74,31 +74,31 @@ function getAgentName(event: RunEvent): string {
 
 function getLabel(event: RunEvent): string {
   const payload = event.payload ?? {}
-  const defaultAgent = runtimeT('multiAgent.defaultAgentName') as string
-  const defaultTool = runtimeT('multiAgent.defaultTool') as string
-  const defaultDecision = runtimeT('multiAgent.defaultDecision') as string
+  const defaultAgent = runtimeT('multiAgent.defaultAgentName')
+  const defaultTool = runtimeT('multiAgent.defaultTool')
+  const defaultDecision = runtimeT('multiAgent.defaultDecision')
 
-  if (event.type === 'multi_agent.started') return runtimeT('multiAgent.teamStarted', { count: payload.count ?? 0 }) as string
+  if (event.type === 'multi_agent.started') return runtimeT('multiAgent.teamStarted', { count: payload.count ?? 0 })
   if (event.type === 'multi_agent.agent.started') {
-    return runtimeT('multiAgent.agentStarted', { name: typeof payload.name === 'string' ? payload.name : defaultAgent }) as string
+    return runtimeT('multiAgent.agentStarted', { name: typeof payload.name === 'string' ? payload.name : defaultAgent })
   }
   if (event.type.match(/^multi_agent\.agent\.\d+\.started$/)) {
-    return runtimeT('multiAgent.agentStarted', { name: typeof payload.name === 'string' ? payload.name : defaultAgent }) as string
+    return runtimeT('multiAgent.agentStarted', { name: typeof payload.name === 'string' ? payload.name : defaultAgent })
   }
   if (event.type.match(/^multi_agent\.agent\.\d+\.completed$/)) {
-    return runtimeT('multiAgent.agentCompleted', { name: typeof payload.name === 'string' ? payload.name : defaultAgent }) as string
+    return runtimeT('multiAgent.agentCompleted', { name: typeof payload.name === 'string' ? payload.name : defaultAgent })
   }
-  if (event.type.endsWith('.step.started')) return runtimeT('multiAgent.stepStarted', { step: readNumber(payload.iteration) + 1 }) as string
-  if (event.type.endsWith('.step.planned')) return runtimeT('multiAgent.stepPlanned', { tool: readNestedString(payload, ['plan', 'tool']) ?? defaultTool }) as string
-  if (event.type.endsWith('.tool.started')) return runtimeT('multiAgent.toolStarted', { tool: typeof payload.tool === 'string' ? payload.tool : defaultTool }) as string
-  if (event.type.endsWith('.tool.completed')) return runtimeT('multiAgent.toolCompleted') as string
+  if (event.type.endsWith('.step.started')) return runtimeT('multiAgent.stepStarted', { step: readNumber(payload.iteration) + 1 })
+  if (event.type.endsWith('.step.planned')) return runtimeT('multiAgent.stepPlanned', { tool: readNestedString(payload, ['plan', 'tool']) ?? defaultTool })
+  if (event.type.endsWith('.tool.started')) return runtimeT('multiAgent.toolStarted', { tool: typeof payload.tool === 'string' ? payload.tool : defaultTool })
+  if (event.type.endsWith('.tool.completed')) return runtimeT('multiAgent.toolCompleted')
   if (event.type.includes('reflection')) {
-    return runtimeT('multiAgent.reflection', { decision: typeof payload.decision === 'string' ? payload.decision : defaultDecision }) as string
+    return runtimeT('multiAgent.reflection', { decision: typeof payload.decision === 'string' ? payload.decision : defaultDecision })
   }
   if (event.type === 'multi_agent.agent.completed') {
-    return runtimeT('multiAgent.agentCompleted', { name: typeof payload.name === 'string' ? payload.name : defaultAgent }) as string
+    return runtimeT('multiAgent.agentCompleted', { name: typeof payload.name === 'string' ? payload.name : defaultAgent })
   }
-  if (event.type === 'multi_agent.completed') return runtimeT('multiAgent.teamCompleted') as string
+  if (event.type === 'multi_agent.completed') return runtimeT('multiAgent.teamCompleted')
 
   return event.type
 }

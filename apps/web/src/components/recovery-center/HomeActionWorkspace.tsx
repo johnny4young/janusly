@@ -55,7 +55,7 @@ export function HomeActionWorkspace({
               <p>{t('home.priority.clearBody')}</p>
             </div>
             <button type="button" className="we-btn we-btn--secondary" onClick={onOpenActivity}>
-              {t('activity.title')}
+              {t('workspace.destination.activity.label')}
               <ArrowRight size={14} aria-hidden="true" />
             </button>
           </div>
@@ -112,7 +112,7 @@ export function HomeActionWorkspace({
         ) : (
           <ul className="we-home-active__list" aria-label={t('home.active.title')}>
             {activeRuns.map((run) => {
-              const workflowName = run.workflowName ?? run.workflowId ?? t('activity.unknownWorkflow')
+              const workflowName = run.workflowName ?? run.workflowId ?? t('home.active.unknownWorkflow')
               return (
                 <li key={run.id}>
                   <button
@@ -138,7 +138,7 @@ export function HomeActionWorkspace({
         )}
 
         <button type="button" className="we-home-active__footer" onClick={onOpenActivity}>
-          {t('activity.title')}
+          {t('workspace.destination.activity.label')}
           <ArrowRight size={14} aria-hidden="true" />
         </button>
       </section>

@@ -7,14 +7,21 @@ const source = await readFile(new URL("./local-stack.mjs", import.meta.url), "ut
 test("Supabase lifecycle commands capture credential-bearing output", () => {
   assert.match(
     source,
-    /run\(\s*"pnpm",\s*\["exec", "supabase", "start", "-x", authExclusions\],\s*\{ sensitive: true \}\s*\)/,
+    /const supabaseCli = fileURLToPath\(new URL\("\.\.\/node_modules\/supabase\/dist\/supabase\.js", import\.meta\.url\)\)/,
   );
-
-  const safeStatusCalls = source.match(
-    /run\(\s*"pnpm",\s*\["exec", "supabase", "status", "-o", "env"\],\s*\{ sensitive: true \},?\s*\)/g,
+  assert.match(
+    source,
+    /function runSupabase\(args, options = \{\}\) \{\s*return run\(process\.execPath, \[supabaseCli, \.\.\.args\], options\);\s*\}/,
   );
-  assert.equal(safeStatusCalls?.length, 1);
-  assert.doesNotMatch(source, /run\(\s*"pnpm",\s*\["exec", "supabase", "status"\]\s*\)/);
+  assert.match(
+    source,
+    /runSupabase\(\["start", "-x", authExclusions\], \{ sensitive: true \}\)/,
+  );
+  assert.match(
+    source,
+    /runSupabase\(\["status", "-o", "env"\], \{ sensitive: true \}\)/,
+  );
+  assert.doesNotMatch(source, /runSupabase\(\["status"(?:, "-o", "env")?\]\s*\)/);
 });
 
 test("sensitive command failures omit captured stderr", () => {

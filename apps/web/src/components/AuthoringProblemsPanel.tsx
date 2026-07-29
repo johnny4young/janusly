@@ -110,11 +110,11 @@ export function AuthoringProblemsPanel({
               <>
                 <span className="we-authoring-problems__severity" data-severity={problem.severity}>
                   <AlertTriangle size={13} aria-hidden="true" />
-                  {t(`problems.severity.${problem.severity}` as never)}
+                  {t(`problems.severity.${problem.severity}`)}
                 </span>
                 <span className="we-authoring-problems__message">{localizeProblem(problem)}</span>
                 <span className="we-authoring-problems__meta">
-                  {problem.sources.map((source) => t(`problems.source.${source}` as never)).join(' · ')}
+                  {problem.sources.map((source) => t(`problems.source.${source}`)).join(' · ')}
                   {location ? ` · ${location}` : ''}
                 </span>
                 {locatable && <ExternalLink className="we-authoring-problems__open" size={13} aria-hidden="true" />}

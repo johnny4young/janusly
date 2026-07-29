@@ -3,20 +3,78 @@
  *
  * Locale JSON files remain the authoring source of truth. At build time the
  * canonical key list is emitted once, while each locale chunk carries only its
- * translated values. The runtime then reconstructs the flat i18next resource.
+ * translated values. The runtime then reconstructs the flat message catalog.
  */
 
 import { readFileSync } from 'node:fs'
 
 const PROJECTION_PARAM = 'janusly-catalog'
 const PROJECTIONS = new Set(['keys', 'values'])
+const NAMESPACE_PARAM = 'janusly-namespace'
+const NAMESPACES = new Set(['core', 'workspace'])
+const PACK_SEPARATOR = '\0'
 
-function parseProjection(id) {
+const WORKSPACE_PREFIXES = [
+  'activity.',
+  'aiCopilot.',
+  'aiGuidance.',
+  'aiReview.',
+  'authoring.',
+  'authPolicy.',
+  'budget.',
+  'canvas.',
+  'comparison.',
+  'credentialRotation.',
+  'diff.',
+  'dlq.',
+  'experiments.',
+  'expressionAssistant.',
+  'externalRuntime.',
+  'mcpConnections.',
+  'members.',
+  'multiAgent.',
+  'nodeDefaults.',
+  'nodes.',
+  'operations.',
+  'permissions.',
+  'problems.',
+  'readiness.',
+  'recoveryCase.',
+  'recoveryDialog.',
+  'replayCampaign.',
+  'replayLab.',
+  'reportDelivery.',
+  'rightPanel.',
+  'rollback.',
+  'runEvents.',
+  'runExplain.',
+  'runHistoryComparison.',
+  'runInput.',
+  'runStream.',
+  'runWorkspace.',
+  'scheduleHistory.',
+  'scim.',
+  'slackInteractions.',
+  'snippets.',
+  'templates.',
+  'tools.',
+  'versionHistory.',
+  'workflowCreation.',
+  'workflowMetadata.',
+  'workflowRollout.',
+  'workflowsDashboard.',
+  'workflowSlo.',
+]
+
+function parseCatalogRequest(id) {
   const queryIndex = id.indexOf('?')
   if (queryIndex === -1) return null
   const query = new URLSearchParams(id.slice(queryIndex + 1))
   const projection = query.get(PROJECTION_PARAM)
-  return projection && PROJECTIONS.has(projection) ? projection : null
+  const namespace = query.get(NAMESPACE_PARAM)
+  if (!projection || !PROJECTIONS.has(projection)) return null
+  if (!namespace || !NAMESPACES.has(namespace)) return null
+  return { projection, namespace }
 }
 
 function sourcePath(id) {
@@ -35,7 +93,14 @@ function assertFlatCatalog(catalog, label) {
   }
 }
 
-export function projectCompactCatalog(canonical, locale, projection, label = 'catalog') {
+export function selectCatalogNamespace(catalog, namespace) {
+  const inWorkspace = (key) => WORKSPACE_PREFIXES.some((prefix) => key.startsWith(prefix))
+  return Object.fromEntries(Object.entries(catalog).filter(([key]) => (
+    namespace === 'workspace' ? inWorkspace(key) : !inWorkspace(key)
+  )))
+}
+
+export function projectCompactCatalog(canonical, locale, projection, label = 'catalog', namespace) {
   assertFlatCatalog(canonical, 'canonical catalog')
   assertFlatCatalog(locale, label)
 
@@ -52,13 +117,48 @@ export function projectCompactCatalog(canonical, locale, projection, label = 'ca
     throw new Error(`${label} does not match the canonical catalog (${details})`)
   }
 
+  const projectedKeys = namespace
+    ? Object.keys(selectCatalogNamespace(canonical, namespace))
+    : keys
   return projection === 'keys'
-    ? keys
-    : keys.map((key) => locale[key])
+    ? projectedKeys
+    : projectedKeys.map((key) => locale[key])
 }
 
 function readCatalog(path) {
   return JSON.parse(readFileSync(path, 'utf8'))
+}
+
+/**
+ * Front-code the ordered key list: each token stores the length of the prefix
+ * shared with the previous key in its first code unit, followed by the suffix.
+ * Translation values keep the same canonical order, so no per-locale key
+ * duplication is introduced.
+ */
+export function frontCodeCatalogKeys(keys) {
+  let previous = ''
+  return keys.map((key) => {
+    if (key.includes(PACK_SEPARATOR)) {
+      throw new Error('Catalog keys cannot contain null characters')
+    }
+    let prefixLength = 0
+    while (
+      prefixLength < previous.length
+      && prefixLength < key.length
+      && previous[prefixLength] === key[prefixLength]
+    ) {
+      prefixLength += 1
+    }
+    previous = key
+    return `${String.fromCharCode(64 + prefixLength)}${key.slice(prefixLength)}`
+  }).join(PACK_SEPARATOR)
+}
+
+export function packCatalogValues(values) {
+  if (values.some((value) => value.includes(PACK_SEPARATOR))) {
+    throw new Error('Catalog values cannot contain null characters')
+  }
+  return values.join(PACK_SEPARATOR)
 }
 
 export function compactI18nCatalogs({ canonicalPath }) {
@@ -67,16 +167,16 @@ export function compactI18nCatalogs({ canonicalPath }) {
     enforce: 'pre',
 
     async resolveId(source, importer) {
-      const projection = parseProjection(source)
-      if (!projection) return null
+      const request = parseCatalogRequest(source)
+      if (!request) return null
       const resolved = await this.resolve(sourcePath(source), importer, { skipSelf: true })
       if (!resolved) return null
-      return `${sourcePath(resolved.id)}?${PROJECTION_PARAM}=${projection}`
+      return `${sourcePath(resolved.id)}?${PROJECTION_PARAM}=${request.projection}&${NAMESPACE_PARAM}=${request.namespace}`
     },
 
     load(id) {
-      const projection = parseProjection(id)
-      if (!projection) return null
+      const request = parseCatalogRequest(id)
+      if (!request) return null
 
       const localePath = sourcePath(id)
       this.addWatchFile(canonicalPath)
@@ -84,10 +184,14 @@ export function compactI18nCatalogs({ canonicalPath }) {
       const payload = projectCompactCatalog(
         readCatalog(canonicalPath),
         readCatalog(localePath),
-        projection,
+        request.projection,
         localePath,
+        request.namespace,
       )
-      return `export default ${JSON.stringify(payload)};`
+      const output = request.projection === 'keys'
+        ? frontCodeCatalogKeys(payload)
+        : packCatalogValues(payload)
+      return `export default ${JSON.stringify(output)};`
     },
   }
 }

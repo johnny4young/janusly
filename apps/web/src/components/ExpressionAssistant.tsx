@@ -121,7 +121,7 @@ export function ExpressionAssistant({
             if (group.length === 0) return null
             return (
               <section key={kind} className="we-expression-assistant__group">
-                <strong>{t(`expressionAssistant.group.${kind}` as never)}</strong>
+                <strong>{t(`expressionAssistant.group.${kind}`)}</strong>
                 <div className="we-expression-assistant__tokens">
                   {group.map((suggestion) => (
                     <button

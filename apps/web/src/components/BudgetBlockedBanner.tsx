@@ -46,9 +46,8 @@ export function BudgetBlockedBanner({ onOpenTab }: { onOpenTab: (tab: ActiveTab)
       <div className="we-budget-banner__copy">
         <strong>{t('budgetBanner.exceeded', { scope: scopeLabel })}</strong>
         <span>
-          {/* `<Trans>` lets the translation file control sentence order
-              while keeping <strong> wrappers safe — react-i18next maps
-              numbered placeholders (<0> … </0>) to the children below. */}
+          {/* Rich text lets the catalog control sentence order while mapping
+              numbered placeholders to explicit safe React elements. */}
           <Trans
             i18nKey="budgetBanner.detail"
             values={{ spent: spent.toFixed(2), limit: limit.toFixed(2) }}

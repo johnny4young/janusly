@@ -4,7 +4,7 @@
  * toggles invalidate only the visible edge components, never the
  * upstream `visibleEdges` memo. Visual selection state rides on the
  * `data-selected` DOM attribute — the `.we-edge` rule in
- * `apps/web/src/styles/workflow.css` switches stroke + width when it's `"true"`.
+ * `apps/web/src/styles/canvas.css` switches stroke + width when it's `"true"`.
  *
  * Plugged into the canvas via `workflowEdgeTypes` in `WorkflowCanvas.tsx`.
  */

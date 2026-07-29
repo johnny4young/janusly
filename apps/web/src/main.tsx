@@ -23,12 +23,9 @@ const initialLocale = resolveAppLanguage(stored)
 // catalog request cannot reintroduce a light→dark first-paint flicker.
 bootTheme()
 
-// Kick off the two heaviest boot downloads TOGETHER. The locale catalog
-// (~51 KiB gzip) and the App chunk (~50 KiB gzip) are the whole JS boot
-// beyond the entry; awaiting the catalog BEFORE starting the App import
-// serialized them — one full network round-trip of pure waiting on every
-// cold start. App is only USED after both resolve, so starting its fetch
-// early changes nothing semantically.
+// Start the selected-locale and app-workspace downloads together. Awaiting the
+// catalog before importing App would serialize two independent boot resources
+// and add a network round-trip without changing mount semantics.
 const appModulePromise = import('./App')
 // Mark the early-started promise as handled: if i18n bootstrap throws on the
 // fallback path below, mountApp exits before awaiting App, and an ALSO-failed

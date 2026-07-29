@@ -170,7 +170,7 @@ export function ExperimentsPanel(): React.ReactElement {
             <option value="model">{t('experiments.kind.model')}</option>
             <option value="prompt_and_model">{t('experiments.kind.promptAndModel')}</option>
           </select>
-          <p className="helper-text we-experiments__ref-hint">{t(`experiments.refHint.${runForm.kind}` as never)}</p>
+          <p className="helper-text we-experiments__ref-hint">{t(`experiments.refHint.${runForm.kind}`)}</p>
           <label className="field-label" htmlFor="experiment-control">{t('experiments.field.control')}</label>
           <input id="experiment-control" className="text-field" value={runForm.controlRef} onChange={(event) => setRunForm((current) => ({ ...current, controlRef: event.target.value }))} />
           <label className="field-label" htmlFor="experiment-candidate">{t('experiments.field.candidate')}</label>
@@ -245,7 +245,7 @@ export function ExperimentsPanel(): React.ReactElement {
                       <strong>{experiment.name}</strong>
                       <small>{date ?? t('common.unknown')}</small>
                     </span>
-                    <span className="we-pill" data-tone="info">{t(`experiments.status.${experiment.status}` as never)}</span>
+                    <span className="we-pill" data-tone="info">{t(`experiments.status.${experiment.status}`)}</span>
                   </button>
                 </li>
               )

@@ -124,7 +124,7 @@ describe('<WorkflowEdge />', () => {
   it('re-resolves the condition label when the locale changes', async () => {
     renderEdge({ hasCondition: true })
     expect(screen.getByText('condition')).toBeInTheDocument()
-    // i18next's language change fires subscribers asynchronously; wrap
+    // Locale changes notify React subscribers; wrap
     // in `act` so the re-render is observable in the next microtask.
     await act(async () => {
       changeAppLanguage('es')

@@ -14,11 +14,9 @@ vi.mock('./AuthoringProblemsPanel', () => ({
     <button type="button" data-testid="problems-scope" onClick={onOpenProblem}>Problems</button>
   ),
 }))
-vi.mock('./VersionHistoryPanel', () => ({ VersionHistoryPanel: () => null }))
-vi.mock('./WorkflowRolloutPanel', () => ({ WorkflowRolloutPanel: () => null }))
-vi.mock('./WorkflowSloPanel', () => ({ WorkflowSloPanel: () => null }))
-vi.mock('./ScheduleHistoryPanel', () => ({ ScheduleHistoryPanel: () => null }))
-vi.mock('./WorkflowMetadataPanel', () => ({ WorkflowMetadataPanel: () => null }))
+vi.mock('./WorkflowOperationsPanel', () => ({
+  WorkflowOperationsPanel: () => <div data-testid="workflow-operations" />,
+}))
 
 function model(overrides: Partial<AuthoringPanelModel> = {}): AuthoringPanelModel {
   return {
@@ -51,6 +49,7 @@ describe('<AuthoringPanel />', () => {
 
     expect(screen.getByRole('button', { name: 'Step' })).toBeDisabled()
     expect(screen.getByTestId('inspector-scope')).toHaveTextContent('workflow')
+    expect(screen.getByTestId('workflow-operations')).toBeInTheDocument()
 
     const selectedNode = {
       id: 'fetch',

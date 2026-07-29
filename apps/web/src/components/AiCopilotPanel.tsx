@@ -192,7 +192,7 @@ export function AiCopilotPanel({
       setResult({
         kind: 'workflow',
         mode: response.mode,
-        title: t(titleKey as never),
+        title: t(titleKey),
         body: t('aiCopilot.draftedBody', {
           name: response.workflow.name ?? response.workflow.id ?? (t('aiCopilot.untitledWorkflow')),
         }),
@@ -392,7 +392,7 @@ export function AiCopilotPanel({
               <span>{t('aiCopilot.fallbackBannerBody')}</span>
             </div>
           )}
-          <p className="helper-text">{t(MODE_COPY_KEYS[result.mode] as never)}</p>
+          <p className="helper-text">{t(MODE_COPY_KEYS[result.mode])}</p>
           <div className="result-body">{result.body}</div>
           {result.kind === 'workflow' && result.bonBackoff && (
             <div className="issue" role="status" data-testid="ai-candidate-backoff">

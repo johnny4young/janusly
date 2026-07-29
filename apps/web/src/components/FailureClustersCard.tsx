@@ -295,7 +295,7 @@ export function FailureClustersCard({ canRecover = true }: { canRecover?: boolea
                 onClick={() => setExpanded((prev) => ({ ...prev, [cluster.signature]: !isOpen }))}
                 aria-expanded={isOpen}
                 aria-label={t('clusters.rowAria', {
-                  category: t(CATEGORY_KEYS[cluster.category] as never),
+                  category: t(CATEGORY_KEYS[cluster.category]),
                   signature: cluster.signature,
                   occurrences: t('clusters.occurrences', { count: cluster.frequency }),
                   workflows: t('clusters.workflows', { count: cluster.affectedWorkflows.length }),
@@ -310,14 +310,14 @@ export function FailureClustersCard({ canRecover = true }: { canRecover?: boolea
                     <strong>{cluster.signature}</strong>
                   </span>
                   <span className="we-cluster-row__meta">
-                    <span className={`mode-pill we-cluster-pill--${cluster.category}`}>{t(CATEGORY_KEYS[cluster.category] as never)}</span>
+                    <span className={`mode-pill we-cluster-pill--${cluster.category}`}>{t(CATEGORY_KEYS[cluster.category])}</span>
                     <span className="we-cluster-meta-sep">{t('clusters.occurrences', { count: cluster.frequency })}</span>
                     <span className="we-cluster-meta-sep">{t('clusters.workflows', { count: cluster.affectedWorkflows.length })}</span>
                     <span className="we-cluster-meta-sep">{t('clusters.lastSeen', { rel: lastSeenLabel })}</span>
                   </span>
                 </span>
                 <span className="we-cluster-row__owner" title={t('clusters.suggestedOwner')}>
-                  <Users size={12} aria-hidden="true" /> {t(OWNER_KEYS[cluster.suggestedOwner] as never)}
+                  <Users size={12} aria-hidden="true" /> {t(OWNER_KEYS[cluster.suggestedOwner])}
                 </span>
               </button>
 
@@ -410,9 +410,9 @@ function formatRelative(iso: string, nowMs: number): string {
   const time = new Date(iso).getTime()
   if (!Number.isFinite(time)) return iso
   const diffSec = Math.max(0, Math.floor((nowMs - time) / 1000))
-  if (diffSec < 60) return runtimeT('clusters.relative.justNow') as string
-  if (diffSec < 3600) return runtimeT('clusters.relative.minutes', { count: Math.floor(diffSec / 60) }) as string
-  if (diffSec < 86400) return runtimeT('clusters.relative.hours', { count: Math.floor(diffSec / 3600) }) as string
-  if (diffSec < 7 * 86400) return runtimeT('clusters.relative.days', { count: Math.floor(diffSec / 86400) }) as string
+  if (diffSec < 60) return runtimeT('clusters.relative.justNow')
+  if (diffSec < 3600) return runtimeT('clusters.relative.minutes', { count: Math.floor(diffSec / 60) })
+  if (diffSec < 86400) return runtimeT('clusters.relative.hours', { count: Math.floor(diffSec / 3600) })
+  if (diffSec < 7 * 86400) return runtimeT('clusters.relative.days', { count: Math.floor(diffSec / 86400) })
   return new Date(iso).toLocaleDateString(getResolvedLocale())
 }

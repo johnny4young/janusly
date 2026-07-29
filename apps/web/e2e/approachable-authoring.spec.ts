@@ -1,5 +1,5 @@
 import { mkdir } from 'node:fs/promises'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 
 import {
   openCanvasStepPicker,
@@ -60,6 +60,21 @@ async function captureViewport(page: Page, filename: string): Promise<void> {
   })
 }
 
+async function expectReadablePrimaryText(locator: Locator): Promise<void> {
+  const sizes = await locator.evaluateAll((elements) => elements
+    .filter((element) => {
+      const style = getComputedStyle(element)
+      return style.display !== 'none' && style.visibility !== 'hidden'
+    })
+    .map((element) => ({
+      text: element.textContent?.trim() ?? '',
+      pixels: Number.parseFloat(getComputedStyle(element).fontSize),
+    }))
+    .filter(({ text }) => text.length > 0))
+  expect(sizes.length).toBeGreaterThan(0)
+  expect(sizes.filter(({ pixels }) => pixels < 12)).toEqual([])
+}
+
 test.describe.configure({ mode: 'serial' })
 
 for (const locale of ['en', 'es'] as const) {
@@ -77,7 +92,7 @@ for (const locale of ['en', 'es'] as const) {
 
     await page.goto('/')
     await openWorkspaceSection(page, copy.workflows, copy.allWorkflows)
-    await page.getByRole('button', { name: copy.newWorkflow, exact: true }).click()
+    await page.locator('button[aria-controls="workflow-creation-choices"]').click()
 
     const creation = page.getByTestId('workflow-creation-choices')
     await expect(creation.getByRole('heading', { name: copy.creationTitle, exact: true })).toBeVisible()
@@ -85,6 +100,7 @@ for (const locale of ['en', 'es'] as const) {
     for (const choice of copy.creationChoices) {
       await expect(creation.getByRole('button', { name: new RegExp(`^${choice}`) })).toBeVisible()
     }
+    await expectReadablePrimaryText(creation.locator('.workflow-creation__choice strong, .workflow-creation__choice small'))
     await captureViewport(page, `web-${locale}-workflow-creation-paths`)
 
     const startBlank = creation.getByRole('button', {
@@ -96,6 +112,7 @@ for (const locale of ['en', 'es'] as const) {
     await expect(page.getByRole('heading', { name: copy.build, exact: true })).toBeVisible()
     await expect(page.getByTestId('canvas-empty')).toBeVisible()
     await expect(page.locator('.canvas-step-picker')).toHaveCount(1)
+    await expectReadablePrimaryText(page.locator('.authoring-scope-nav button'))
 
     await page.getByRole('button', { name: copy.addStep, exact: true }).click()
     const search = page.getByRole('searchbox', { name: copy.searchSteps, exact: true })

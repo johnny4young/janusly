@@ -195,7 +195,7 @@ export function ReplayCampaignDialog({
                 {preview.rejected.map((item) => (
                   <li key={item.deadLetterId}>
                     <code>{item.deadLetterId.slice(0, 8)}</code>
-                    <span>{t(`replayCampaign.reason.${item.reason}` as never, { defaultValue: item.reason })}</span>
+                    <span>{t(`replayCampaign.reason.${item.reason}`, { defaultValue: item.reason })}</span>
                   </li>
                 ))}
               </ul>

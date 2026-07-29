@@ -58,7 +58,7 @@ export function ValidationFailedBody({
       ) : null}
       {category ? (
         <p className="helper-text we-recovery-error-summary">
-          {t(`recoveryDialog.errorSummary.${category}` as never)}
+          {t(`recoveryDialog.errorSummary.${category}`)}
         </p>
       ) : null}
       {message ? (

@@ -47,7 +47,41 @@ export default defineConfig(({ mode }) => ({
     rollupOptions: {
       output: {
         manualChunks: (id) => {
-          if (id.includes('janusly-catalog=keys')) return 'catalog-keys'
+          if (
+            id.endsWith('/src/i18n/catalog-keys.ts')
+            || id.includes('janusly-catalog=keys')
+          ) {
+            return 'catalog-keys'
+          }
+          if (id.includes('/i18n/catalog-core-en') || id.includes('/i18n/catalog-workspace-en')) {
+            return 'catalog-en'
+          }
+          if (id.includes('/i18n/catalog-core-es') || id.includes('/i18n/catalog-workspace-es')) {
+            return 'catalog-es'
+          }
+          if (
+            id.endsWith('/src/App.tsx')
+            || id.endsWith('/src/AppWorkspace.tsx')
+            || id.includes('/src/hooks/app-command')
+            || id.includes('/src/hooks/useApp')
+            || id.endsWith('/src/hooks/useIdentityBootstrap.ts')
+            || id.endsWith('/src/hooks/useIntegrationCommands.ts')
+            || id.endsWith('/src/hooks/useRunCommands.ts')
+            || id.endsWith('/src/hooks/useWorkflowCommands.ts')
+            || id.endsWith('/src/components/RecoveryCenterPanel.tsx')
+            || id.endsWith('/src/components/RecoveryCenterView.tsx')
+          ) {
+            return 'app-workspace'
+          }
+          if (
+            id.endsWith('/src/components/RightPanel.tsx')
+            || id.endsWith('/src/components/WorkflowsDashboard.tsx')
+            || id.endsWith('/src/components/WorkflowsDashboardView.tsx')
+            || id.endsWith('/src/components/workflows-dashboard-model.ts')
+            || id.endsWith('/src/components/WorkflowOperationsPanel.tsx')
+          ) {
+            return 'workflow-workspace'
+          }
           if (!id.includes('node_modules')) return undefined
           // `@xyflow/*` is reached ONLY through the dynamic `CanvasWorkspace`
           // import (nothing on the boot path imports an `@xyflow` value — the

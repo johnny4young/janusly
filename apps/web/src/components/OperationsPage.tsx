@@ -461,7 +461,7 @@ function OperationsRail({
               >
                 <span className="we-operations-rail__icon" aria-hidden="true">{item.icon}</span>
                 <span className="we-operations-rail__label">
-                  {t(`operations.section.${item.section}.label` as never)}
+                  {t(`operations.section.${item.section}.label`)}
                 </span>
                 {dot && (
                   <span

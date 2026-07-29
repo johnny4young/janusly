@@ -1,51 +1,13 @@
-/**
- * Home — the authenticated operational landing page.
- *
- * The primary surface answers two questions: what needs attention now, and
- * what is still running. Onboarding supplies only the next incomplete setup
- * outcome. Recovery trends, validation, calibration, cost, and the assistant
- * remain available behind one lazy-loaded insights disclosure.
- *
- * This file owns the coalesced data orchestration. Presentational pieces live
- * under `./recovery-center/`: the compact header, action workspace, and
- * secondary insights. Keeping the action model pure makes priority ordering
- * deterministic and independently testable.
- *
- * Data sources:
- * - `GET /recovery/home` → one coalesced snapshot for recovery metrics,
- *   validation, clusters, semantic cases, lifetime/operator impact, heatmap,
- *   and the authoritative queue overview.
- * - `GET /recovery/home?scope=impact` → a lightweight convergence snapshot for
- *   the ledger, personal wins, and queue while background work completes.
- * - Run nodes and the bounded run projection → pending human work.
- *
- * The Recovery Center is composition over the recovery API + engine metrics.
- * Each server section settles independently, so one unavailable projection
- * never hides healthy data. The full snapshot refreshes on the cross-panel
- * `platformVersion` tick. The impact scope uses a visibility-aware fallback
- * because the completing worker may belong to a run that is not the operator's
- * active SSE target. Open recovery work keeps a short convergence window; a
- * healthy Home uses a slower fallback.
- *
- * Used by `App.tsx` for `activeTab === 'home'`.
- *
- * Design language: see the Home and Recovery Center blocks in
- * `apps/web/src/styles/platform.css`. Tokens-only, no inline hex. Animations
- * honour `prefers-reduced-motion`. Tab order: header → priority inbox →
- * active work → onboarding → insights.
- */
+/** Home recovery controller for independently settled tenant and identity snapshots. */
 
 import {
-  lazy,
   startTransition,
-  Suspense,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from 'react'
-import { ChevronDown } from 'lucide-react'
 import type {
   ActiveTab,
   RecoveryCase,
@@ -74,16 +36,15 @@ import { useWorkflowStore } from '../store'
 import type { DeadLetter } from './DeadLettersPanel'
 import { useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
+import { RecoveryCenterView } from './RecoveryCenterView'
 import type { RecoveryValidationReport } from './RecoveryValidationSection'
-import { OnboardingReplayButton } from './OnboardingReplayButton'
-import { OnboardingBanner } from './OnboardingBanner'
+import { requestOperationsSection } from './operations-section-bus'
 import {
   buildGreeting,
   buildHeatmapCells,
   computeLongestOpenDowntime,
   computeRecommendedActions,
   computeStreaks,
-  downtimeSeverity,
   listActiveRuns,
   readDisplayName,
   readHealthScore,
@@ -102,25 +63,16 @@ import {
   RECOVERY_ALL_CLEAR_WINDOW_MS,
   type RecoveryAllClearRequest,
 } from './recovery-all-clear-bus'
-import { RecoveryCenterHero } from './recovery-center/RecoveryCenterHero'
-import { HomeActionWorkspace } from './recovery-center/HomeActionWorkspace'
 
-const HomeInsights = lazy(() => import('./recovery-center/HomeInsights').then((module) => ({
-  default: module.HomeInsights,
-})))
-
-type RecoveryCenterPanelProps = {
+export type RecoveryCenterPanelProps = {
   runs: RunSummary[]
   runNodes: RunNode[]
   deadLetters: DeadLetter[]
-  /** Keep the global recovery posture synchronized with durable semantic containment. */
   onSemanticBlockerRunsChange?: (runIds: string[]) => void
   onOpenTab: (tab: ActiveTab) => void
   onOpenRecoveryCase: (caseId: string) => void
   onOpenRun: (runId: string, targetTab?: ActiveTab) => void | Promise<void>
-  /** Open Activity and optionally select one exact recovery row. */
   onOpenRecoveryQueue: (deadLetterId?: string) => void
-  /** Start a deterministic drill so a fresh operator can try the recovery loop for real. */
   onStartRecoveryDrill?: () => void | Promise<void>
 }
 
@@ -142,13 +94,10 @@ type RecoveryQueueOverview = {
 
 type SemanticCasesStatus = 'loading' | 'available' | 'unavailable'
 
-// Terminal recovery may complete in a worker for a run that is not the
-// operator's active SSE/polling target. Keep this cheap projection live without
-// repeatedly running the heavier metrics, cluster, and heatmap queries.
 const RECOVERY_IMPACT_ACTIVE_POLL_MS = 10_000
 const RECOVERY_IMPACT_IDLE_POLL_MS = 60_000
 
-export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
+function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
   const { t, i18n } = useT()
   const platformVersion = useWorkflowStore((state) => state.platformVersion)
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
@@ -413,7 +362,6 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
         applyImpactSnapshot(snapshot, orgId, userId)
       })
       .catch(() => {
-        // Keep the last healthy impact projection when a convergence poll fails.
       })
     return () => { cancelled = true }
   }, [applyImpactSnapshot, impactPollVersion])
@@ -423,21 +371,12 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     [props.deadLetters],
   )
   const currentQueueOverview = queueOverview?.orgId === resolvedOrgId ? queueOverview : null
-  // A fresh bootstrap page can learn about a newly-opened failure after the
-  // count request starts, so rows absent from that request's input snapshot
-  // remain a fail-safe lower bound. Rows the request already observed can be
-  // retired by a later authoritative zero; otherwise a worker-owned terminal
-  // recovery would leave a stale bootstrap row blocking all-clear forever.
   const unobservedVisibleFailures = currentQueueOverview
     ? openDeadLetters.filter((deadLetter) => !currentQueueOverview.observedOpenIds.includes(deadLetter.id)).length
     : openDeadLetters.length
   const openFailureCount = Math.max(currentQueueOverview?.openCount ?? 0, unobservedVisibleFailures)
   const recoveryClearEligible = openFailureCount === 0 && semanticOutcomePosture === 'clear'
 
-  // Local mutations and active-run terminal events already bump
-  // `platformVersion`, so polling is only a convergence fallback for work
-  // completed by another worker/run. Stay responsive while failures are open,
-  // reduce healthy-home reads sixfold, and stop all background-tab polling.
   const impactPollMs = openFailureCount > 0
     ? RECOVERY_IMPACT_ACTIVE_POLL_MS
     : RECOVERY_IMPACT_IDLE_POLL_MS
@@ -546,9 +485,6 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     setCurrentHour(new Date().getHours())
   }, [])
 
-  // Live "downtime clock": re-anchor the reference time on mount and whenever
-  // the data changes, then tick once a minute so open-failure ages advance in
-  // place — ONE interval for the whole panel, never a timer per row.
   useEffect(() => {
     setNowMs(Date.now())
     const id = window.setInterval(() => setNowMs(Date.now()), 60_000)
@@ -604,10 +540,6 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
 
   const totalRuns = props.runs.length
   const healthScore = readHealthScore(metrics)
-  // `buildGreeting` and `computeRecommendedActions` call `runtimeT(...)`
-  // internally, so the memo MUST re-compute when the active locale changes;
-  // adding `i18n.language` to the dep array is the cheapest fix that keeps
-  // the helper functions pure (vs. plumbing `t` through every call site).
   const greeting = useMemo(() => buildGreeting({
     hour: currentHour,
     displayName: readDisplayName(user),
@@ -681,9 +613,6 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     semanticCases,
   ])
 
-  // Before the first terminal run, dismissal lasts only for this authenticated
-  // store session so a reload restores the Recovery Lab entry. Real history
-  // upgrades the same choice to the durable preference operators already had.
   const introDismissed = (metrics?.terminalRuns ?? 0) > 0
     ? persistedIntroDismissed
     : introDismissedThisSession
@@ -696,7 +625,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     })
     && totalRuns === 0
 
-  const metricsStatus = metricsLoading || semanticCasesStatus === 'loading'
+  const metricsStatus: 'loading' | 'unavailable' | 'available' = metricsLoading || semanticCasesStatus === 'loading'
     ? 'loading'
     : metricsError || semanticCasesStatus === 'unavailable'
       ? 'unavailable'
@@ -704,101 +633,27 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
         ? 'available'
         : 'loading'
 
-  return (
-    <div className="we-recovery-center-panel we-recovery-center-panel--operator">
-      <RecoveryCenterHero
-        salutation={greeting.salutation}
-        subline={greeting.subline}
-        healthScore={healthScore}
-        openFailures={openFailureCount}
-        priorityCount={recommendedActions.length}
-        metricsStatus={metricsStatus}
-        streak={streak}
-        longestOpenMs={longestOpen?.durationMs}
-        longestOpenSeverity={downtimeSeverity(longestOpen?.createdAt, nowMs)}
-        allClear={allClear && recoveryClearEligible}
-        allClearDowntimeMs={allClearDowntimeOverride ?? metrics?.downtimeEndedMs}
-        celebrationTrigger={celebrationTrigger}
-        personalWins={operatorWins}
-        memoryPurgeCountdown={memoryPurgeCountdownLabel}
-        onRefreshStatus={bumpPlatformVersion}
-        onOpenMemoryGovernance={() => {
-          void import('./operations-section-bus')
-            .then(({ requestOperationsSection }) => {
-              requestOperationsSection('access')
-              props.onOpenTab('operations')
-            })
-            .catch(() => props.onOpenTab('operations'))
-        }}
-      />
+  const openMemoryGovernance = useCallback(() => {
+    requestOperationsSection('access')
+    props.onOpenTab('operations')
+  }, [props.onOpenTab])
 
-      <HomeActionWorkspace
-        actions={recommendedActions}
-        activeRuns={activeRuns}
-        activeRunCount={allActiveRuns.length}
-        onSelectAction={handleRecommendedAction}
-        onOpenRun={(runId) => props.onOpenRun(runId, 'runs')}
-        onOpenActivity={() => props.onOpenTab('runs')}
-      />
+  return {
+    activeRuns, allActiveRuns, allClear, allClearDowntimeOverride, bumpPlatformVersion,
+    celebrationTrigger, clusters, dismissIntro, greeting, handleRecommendedAction,
+    healthScore, heatmap, heatmapCells, insightsOpen, ledger, longestOpen, memoryPurgeCountdownLabel,
+    metrics, metricsError, metricsLoading, metricsStatus, nowMs,
+    onOpenActivity: () => props.onOpenTab('runs'), onOpenMemoryGovernance: openMemoryGovernance,
+    onOpenRecoveryQueue: props.onOpenRecoveryQueue,
+    onOpenRun: (runId: string) => props.onOpenRun(runId, 'runs'), onOpenTab: props.onOpenTab,
+    onStartRecoveryDrill: props.onStartRecoveryDrill, openDeadLetters, openFailureCount,
+    operatorWins, recommendedActions, recoveryClearEligible, setInsightsOpen, showOnboarding,
+    streak, validation, waitingNodes,
+  }
+}
 
-      <OnboardingBanner onOpenTab={props.onOpenTab} />
+export type RecoveryCenterController = ReturnType<typeof useRecoveryCenterController>
 
-      <section className="we-home-insights" data-expanded={insightsOpen}>
-        <button
-          type="button"
-          className="we-home-insights__toggle"
-          aria-expanded={insightsOpen}
-          aria-controls="we-home-insights-content"
-          onClick={() => setInsightsOpen((open) => !open)}
-          data-testid="home-insights-toggle"
-        >
-          <span className="we-home-insights__toggle-copy">
-            <strong>{t('home.insights.title')}</strong>
-          </span>
-          <span className="we-home-insights__toggle-action" aria-hidden="true">
-            <ChevronDown size={16} aria-hidden="true" />
-          </span>
-        </button>
-
-        {insightsOpen && (
-          <div id="we-home-insights-content">
-            <Suspense
-              fallback={(
-                <p className="helper-text" role="status">
-                  {t('common.loading')}
-                </p>
-              )}
-            >
-              <HomeInsights
-                metrics={metrics}
-                openFailureCount={openFailureCount}
-                waitingApprovals={waitingNodes.length}
-                clusters={clusters}
-                heatmap={heatmap}
-                heatmapCells={heatmapCells}
-                nowMs={nowMs}
-                validation={validation}
-                ledger={ledger}
-                personalWins={operatorWins}
-                showRecoveryLab={showOnboarding}
-                recentDlqRunId={openDeadLetters[0]?.runId}
-                onOpenTab={props.onOpenTab}
-                onOpenRecoveryQueue={props.onOpenRecoveryQueue}
-                onStartRecoveryDrill={props.onStartRecoveryDrill}
-                onDismissRecoveryLab={dismissIntro}
-              />
-            </Suspense>
-
-            {metricsError && !metricsLoading && (
-              <p className="we-recovery-center-error" role="status">
-                {t('recoveryCenter.metricsUnavailable', { detail: metricsError })}
-              </p>
-            )}
-          </div>
-        )}
-      </section>
-
-      <OnboardingReplayButton />
-    </div>
-  )
+export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
+  return <RecoveryCenterView model={useRecoveryCenterController(props)} />
 }

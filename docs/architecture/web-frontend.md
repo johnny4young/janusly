@@ -20,7 +20,7 @@ layout and malformed-wire fail-closed behavior covered.
 
 ## Layout & canvas visibility
 
-**Layout & canvas visibility:** the React Flow canvas (`apps/web/src/components/WorkflowCanvas.tsx`) is the most expensive component in the web bundle and only meaningful in authoring contexts. The closed-enum allowlist `CANVAS_TABS = ['copilot', 'inspector'] as const` in `apps/web/src/types.ts` is the SINGLE source of truth for which tabs SHOW the canvas in their main slot. `App.tsx`'s slot dispatcher consults `getCanvasVisibility(activeTab, canvasActivated)` (same file as `CANVAS_TABS`) and follows three closed states: (a) `home` → `mounted: false`, the lazy `<RecoveryCenterPanel>` owns the full slot (no canvas in the DOM at all, so users who never navigate away from home pay zero React Flow runtime cost AND zero React Flow download — both surfaces are code-split, see below); (b) canvas tab (`copilot` / `inspector`) → `mounted: true, visible: true`, the canvas wrapper is visible and `<RightPanel>` mounts in the side panel; (c) any other non-home tab renders a `<div data-layout="contextual">…</div>` with `<RightPanel>` in the full-width main slot and `panel={null}`. Before an authoring canvas has been opened in the current non-home session, `mounted: false` keeps React Flow completely out of the DOM. After activation, `mounted: true, visible: false` retains the existing wrapper hidden via `.workspace-canvas-wrapper[data-canvas-visible="false"] { display: none }`. The hidden-but-mounted posture is load-bearing: `<ReactFlowProvider>` lives inside the lazy-loaded `apps/web/src/components/CanvasWorkspace.tsx` (relocated from `main.tsx`) so `@xyflow/react` — the bundle's single heaviest dependency (~182 KB JS + 15 KB CSS) — is code-split into an on-demand chunk that stays OFF the boot/home-landing path; `App.tsx` renders `<CanvasWorkspace>` via `lazy()` + `<Suspense>` (reusing the `common.working` fallback) INSIDE the `workspace-canvas-wrapper`. Once a canvas tab sets `canvasActivated`, `getCanvasVisibility` keeps the wrapper mounted for later non-home tabs, so the `<ReactFlow>` instance — and thus the viewport (zoom + pan) — survives `inspector → operations → inspector` cycles in-memory (the instance is never destroyed). A round-trip THROUGH home (`mounted: false`) unmounts the canvas, but for a SAVED workflow the viewport is RESTORED on the next mount from `localStorage` (`apps/web/src/canvas-viewport.ts`, key `janusly:canvasViewport:<workflowId>`): `WorkflowCanvas` reads it as `defaultViewport` so `fitView` is skipped (`fitView={!restored}` — React Flow ignores `defaultViewport` while `fitView` is on) and persists user pan/zoom via `onMoveEnd` plus explicit React Flow `Controls` callbacks (`onZoomIn` / `onZoomOut` / `onFitView`). Only deliberate gestures are stored — the automatic fit/restore fires `onMoveEnd` with a null `event`, which is skipped; the toolbar callbacks persist Control Panel zoom/fit because React Flow reports those viewport changes with a null source event too. An UNSAVED draft has no reload-surviving identity, so it always `fitView`s (no persistence). The chunk loads only on the operator's first canvas-tab navigation; ordinary contextual destinations do not activate or download React Flow. To keep it deferred, NOTHING on the boot path may import an `@xyflow/*` VALUE: the store's React Flow change-appliers (`applyNodeChanges` / `applyEdgeChanges` / `addEdge`) are registered lazily from `CanvasWorkspace` via `registerFlowOps` (store.ts keeps only the type-only `@xyflow/react` import), `canvas-projections.ts` uses the marker string literal `'arrowclosed'` (type-only `EdgeMarker` import), and `vite.config.ts`'s `manualChunks` early-returns `undefined` for `@xyflow/` so the loose `/react/` matcher can't sweep it into the eager `react-vendor` chunk. The CSS rule `.workspace-main > [data-layout="contextual"]` (in `apps/web/src/styles/foundations.css`) centers + pads the contextual wrapper to `--we-content-max-width: 1280px`, mirroring the Recovery Center hero. Non-canvas non-home tabs gain full main-slot width without the authoring DAG sitting behind their admin/read-only content, except for the explicit run-observation companion described below. The `onNodeClick → setActiveTab('inspector')` cross-reference in `App.tsx` is safe because `'inspector'` is in `CANVAS_TABS`. Adding a new tab that needs the canvas means appending to `CANVAS_TABS` (one line); any other tab gets the contextual full-width layout and retains an already-activated canvas hidden for viewport preservation. A page reload (F5) likewise restores a saved workflow's viewport from `localStorage` (an unsaved draft is discarded by F5 anyway and re-fits). Persistence is per-browser and gated on `currentWorkflowSaved` (App passes `viewportWorkflowId={currentWorkflowSaved ? currentWorkflowId : undefined}` to `<CanvasWorkspace>`, which threads it to `WorkflowCanvas`, and keys the canvas by `currentWorkflowId` so React Flow remounts when the operator opens a different saved workflow and can re-read `defaultViewport`); cross-device sync and pruning orphan entries for deleted workflows are out of scope.
+**Layout & canvas visibility:** the React Flow canvas (`apps/web/src/components/WorkflowCanvas.tsx`) is the most expensive component in the web bundle and only meaningful in authoring contexts. The closed-enum allowlist `CANVAS_TABS = ['copilot', 'inspector'] as const` in `apps/web/src/types.ts` is the SINGLE source of truth for which tabs SHOW the canvas in their main slot. `AppWorkspace.tsx`'s slot dispatcher consults `getCanvasVisibility(activeTab, canvasActivated)` (same file as `CANVAS_TABS`) and follows three closed states: (a) `home` → `mounted: false`, the lazy `<RecoveryCenterPanel>` owns the full slot (no canvas in the DOM at all, so users who never navigate away from home pay zero React Flow runtime cost AND zero React Flow download — both surfaces are code-split, see below); (b) canvas tab (`copilot` / `inspector`) → `mounted: true, visible: true`, the canvas wrapper is visible and `<RightPanel>` mounts in the side panel; (c) any other non-home tab renders a `<div data-layout="contextual">…</div>` with `<RightPanel>` in the full-width main slot and `panel={null}`. Before an authoring canvas has been opened in the current non-home session, `mounted: false` keeps React Flow completely out of the DOM. After activation, `mounted: true, visible: false` retains the existing wrapper hidden via `.workspace-canvas-wrapper[data-canvas-visible="false"] { display: none }`. The hidden-but-mounted posture is load-bearing: `<ReactFlowProvider>` lives inside the lazy-loaded `apps/web/src/components/CanvasWorkspace.tsx` (relocated from `main.tsx`) so `@xyflow/react` — the bundle's single heaviest dependency (~182 KB JS + 15 KB CSS) — is code-split into an on-demand chunk that stays OFF the boot/home-landing path; `AppWorkspace.tsx` renders `<CanvasWorkspace>` via `lazy()` + `<Suspense>` (reusing the `common.working` fallback) INSIDE the `workspace-canvas-wrapper`. Once a canvas tab sets `canvasActivated`, `getCanvasVisibility` keeps the wrapper mounted for later non-home tabs, so the `<ReactFlow>` instance — and thus the viewport (zoom + pan) — survives `inspector → operations → inspector` cycles in-memory (the instance is never destroyed). A round-trip THROUGH home (`mounted: false`) unmounts the canvas, but for a SAVED workflow the viewport is RESTORED on the next mount from `localStorage` (`apps/web/src/canvas-viewport.ts`, key `janusly:canvasViewport:<workflowId>`): `WorkflowCanvas` reads it as `defaultViewport` so `fitView` is skipped (`fitView={!restored}` — React Flow ignores `defaultViewport` while `fitView` is on) and persists user pan/zoom via `onMoveEnd` plus explicit React Flow `Controls` callbacks (`onZoomIn` / `onZoomOut` / `onFitView`). Only deliberate gestures are stored — the automatic fit/restore fires `onMoveEnd` with a null `event`, which is skipped; the toolbar callbacks persist Control Panel zoom/fit because React Flow reports those viewport changes with a null source event too. An UNSAVED draft has no reload-surviving identity, so it always `fitView`s (no persistence). The chunk loads only on the operator's first canvas-tab navigation; ordinary contextual destinations do not activate or download React Flow. To keep it deferred, NOTHING on the boot path may import an `@xyflow/*` VALUE: the store's React Flow change-appliers (`applyNodeChanges` / `applyEdgeChanges` / `addEdge`) are registered lazily from `CanvasWorkspace` via `registerFlowOps` (store.ts keeps only the type-only `@xyflow/react` import), `canvas-projections.ts` uses the marker string literal `'arrowclosed'` (type-only `EdgeMarker` import), and `vite.config.ts`'s `manualChunks` early-returns `undefined` for `@xyflow/` so the loose `/react/` matcher can't sweep it into the eager `react-vendor` chunk. The CSS rule `.workspace-main > [data-layout="contextual"]` (in `apps/web/src/styles/foundations.css`) centers + pads the contextual wrapper to `--we-content-max-width: 1280px`, mirroring the Recovery Center hero. Non-canvas non-home tabs gain full main-slot width without the authoring DAG sitting behind their admin/read-only content, except for the explicit run-observation companion described below. The `onNodeClick → setActiveTab('inspector')` cross-reference in `App.tsx` is safe because `'inspector'` is in `CANVAS_TABS`. Adding a new tab that needs the canvas means appending to `CANVAS_TABS` (one line); any other tab gets the contextual full-width layout and retains an already-activated canvas hidden for viewport preservation. A page reload (F5) likewise restores a saved workflow's viewport from `localStorage` (an unsaved draft is discarded by F5 anyway and re-fits). Persistence is per-browser and gated on `currentWorkflowSaved` (App passes `viewportWorkflowId={currentWorkflowSaved ? currentWorkflowId : undefined}` to `<CanvasWorkspace>`, which threads it to `WorkflowCanvas`, and keys the canvas by `currentWorkflowId` so React Flow remounts when the operator opens a different saved workflow and can re-read `defaultViewport`); cross-device sync and pruning orphan entries for deleted workflows are out of scope.
 
 
 **Authoring persistence:** the shared workflow contract may carry an optional node `label` (operator-authored display identity, max 80 characters) and `ui.positions` keyed by node id. Runtime dispatch remains exclusively `node.type`; engine consumers ignore `ui`. Positions retain React Flow's established top-left origin so historical fallback coordinates keep their visual meaning. `graphToWorkflow` persists every finite React Flow position, while `workflowToGraph` restores positions per node and uses the deterministic diagonal fallback only when a historical node has no persisted coordinate. A completed drag marks `workflowDirty` so versioned save and local draft autosave capture layout, but it deliberately does NOT increment the semantic `workflowRevision` used to invalidate readiness and AI findings. Palette placement stays inside the lazy canvas: `WorkflowCanvas` registers a viewport-centre resolver through `registerNodePlacementResolver` and estimates the rendered node footprint from an existing sibling before resolving the top-left coordinate; the boot-reachable store must never import a React Flow value. The empty-selection Inspector owns direct top-level object input/output authoring; its `WorkflowIoEditor` is locally lazy-loaded so this secondary form does not grow the boot entry, and a non-object root schema is preserved read-only rather than flattened destructively.
@@ -78,7 +78,62 @@ run-authority path.
 
 ## Web deps
 
-**Web deps:** `apps/web` only imports `react`, `react-dom`, `@xyflow/react`, `@supabase/supabase-js`, `zustand`, `lucide-react`, `i18next`, `react-i18next`, and focused zero-dependency `@janusly/shared/src/*` subpaths. `status`, `workflow-diff`, `expression`, `recovery-autonomy`, `technical-recovery-autonomy`, and `recovery-passport` are canonical runtime grammars or pure projections shared with the server; never fork web-only evaluators for them. Do not import the broad `@janusly/shared` barrel from web; it pulls workflow Zod schemas into the browser bundle. No `@radix-ui`, `class-variance-authority`, `clsx`, or `tailwind-merge` — the design system is hand-written CSS behind the ordered `index.css` entrypoint. Don't reintroduce shadcn-style scaffolding. **CSS architecture:** `index.css` imports Tailwind's theme and preflight layers, then `foundations.css`, `control-plane.css`, `workflow.css`, `platform.css`, and `accessibility.css` in that exact order; later modules intentionally refine earlier primitives. Do not import Tailwind's utilities layer unless production JSX adopts utility classes deliberately: the current UI is classed by the hand-written modules, so auto-generated utilities are unused payload. `foundations.css` owns `@theme`, runtime aliases, and `--we-radius-pill`. Runtime cards use the single `.we-card` base; pills use `.we-pill` plus the closed `data-tone="info|warning|neutral|ghost|primary|danger|success"` vocabulary instead of modifier-class aliases. `scripts/check-css-classes.mjs` scans every CSS module plus production TypeScript literals and fails `pnpm lint` on any selector without a production owner; React Flow's external class namespace is the only prefix exemption. **`i18next` + `react-i18next` are allowed exclusively for i18n integration through the `apps/web/src/i18n/` module; component code never imports from `i18next` / `react-i18next` directly — every consumer goes through `useT()` / `t()` / `tValidationIssue()` / `tReadinessIssue()` / `tAiReviewIssue()` / `tRunEvent()` / `tFailureCluster()` / `tApiError()` / `getResolvedLocale()` exported from `apps/web/src/i18n`. Pinned at `i18next@^26` + `react-i18next@^17` so the stack stays in sync with the sibling `lingua` project.** **App/dialog decomposition (structure of record):** `App.tsx`'s bootstrap + effects live in named hooks under `apps/web/src/hooks/` — `useBootstrapData` (the platform `Promise.allSettled` fetch + `refreshPlatform`, fired on `authReady`), `useRunPolling` (the 1500ms `/status` poll + `loadStatus` + terminal cascade; keeps the SSE-skip-while-`streamTransport==='sse'` + `addEvents`-merge invariants), `useKeyboardShortcuts` (the global keydown listener). Every callback passed into those hooks is `useCallback`-stable so the poll interval / keydown listener don't rebind per render. `RecoveryDialog.tsx` is split into prop-driven bodies + a pure `recovery-dialog-model.ts` under `apps/web/src/components/recovery-dialog/` (`types.ts` / `recovery-dialog-model.ts` / `RecoveryPassportCard` / `EvidencePanel` / `ReviewBody` / `CancellingBody` / `ValidationFailedBody` / `AppliedBody`); the parent keeps the `Step` state machine, the focus/ESC/validation-poll effects (including the double-transition `cancelled`-before-yield guard), and the explicit validate-then-apply callbacks. The onboarding checklist is mounted contextually inside `RecoveryCenterPanel`, never in `App.tsx`'s overlay slot; it may not use fixed positioning or obscure incident controls. Mirror the `recovery-center/` precedent (subdir of focused pieces, hooks in `hooks/`, no barrel files); don't re-inline these back into the parent.
+**Web deps:** runtime dependencies are intentionally narrow: `react`,
+`react-dom`, `@xyflow/react`, `@supabase/auth-js`, `zustand`, `lucide-react`,
+and focused zero-dependency `@janusly/shared/src/*` subpaths. The browser uses
+Supabase only for GoTrue authentication, so the broader `@supabase/supabase-js`
+client is not allowed. `status`, `workflow-diff`, `expression`,
+`recovery-autonomy`, `technical-recovery-autonomy`, and `recovery-passport` are
+canonical runtime grammars or pure projections shared with the server; never
+fork web-only evaluators for them. Do not import the broad `@janusly/shared`
+barrel from web because it pulls workflow Zod schemas into the browser bundle.
+No `@radix-ui`, `class-variance-authority`, `clsx`, or `tailwind-merge`; the
+design system is hand-written CSS. Do not reintroduce shadcn-style scaffolding.
+
+**CSS architecture:** `index.css` imports Tailwind's theme and preflight layers,
+then `foundations.css`, `control-plane.css`, `navigation.css`, `workflow.css`,
+`platform.css`, and `accessibility.css` in that exact order. Navigation,
+account, feedback, and Home styles remain eager because those surfaces render
+before any canvas; `canvas.css` is the only route CSS module and is imported by
+`CanvasWorkspace.tsx` so non-authoring sessions do not transfer React Flow
+chrome. Do not import Tailwind's utilities layer unless production JSX adopts
+utility classes deliberately. `foundations.css` owns `@theme`, runtime aliases,
+and `--we-radius-pill`. Runtime cards use `.we-card`; pills use `.we-pill` plus the
+closed `data-tone="info|warning|neutral|ghost|primary|danger|success"`
+vocabulary. `scripts/check-css-classes.mjs` scans every CSS module plus
+production TypeScript literals and fails `pnpm lint` on any unowned selector;
+React Flow's external class namespace is the only prefix exemption. Primary
+navigation, actionable copy, explanatory copy, and workflow content have a
+12px minimum; compact status badges may remain smaller when they are not the
+only carrier of meaning. Playwright verifies the primary-text floor on Home and
+the authoring journey.
+
+**i18n dependency posture:** application code imports only Janusly's
+`apps/web/src/i18n/` chokepoint. The focused runtime uses React's
+`useSyncExternalStore` and local compact catalogs; neither `i18next` nor
+`react-i18next` is a dependency. Consumers use `useT()` / `t()` and the typed
+server-event helpers described below.
+
+**Workspace decomposition (structure of record):** `App.tsx` coordinates
+application data and hands a render model to `AppWorkspace.tsx`; the render
+shell owns lazy workspace boundaries, ErrorBoundaries, layout slots, and
+overlays. `useAppStore` centralizes the scoped Zustand projection,
+`useIdentityBootstrap` owns provider and tenant synchronization, and the
+`useAppCommands` facade composes focused workflow, run/recovery, and integration
+command hooks. Existing
+`useBootstrapData`, `useRunPolling`, `useRunEventStream`,
+`useKeyboardShortcuts`, and `useDraftPersistence` retain their focused effects.
+The workflow inventory is a controller (`WorkflowsDashboard.tsx`), a render-only
+view (`WorkflowsDashboardView.tsx`), and pure folder-state transitions
+(`workflows-dashboard-model.ts`). Home recovery follows the same
+`RecoveryCenterPanel.tsx` controller plus `RecoveryCenterView.tsx` boundary.
+Keep workspace containers below 700 lines and test controller/data behavior
+without depending on the full shell. `RecoveryDialog.tsx` remains split into
+prop-driven bodies plus the pure `recovery-dialog-model.ts` under
+`components/recovery-dialog/`; the parent keeps the state machine, focus/ESC
+and validation-poll effects, and explicit validate-then-apply callbacks. Mirror
+these focused controller/view/model boundaries; do not re-inline them into a
+single route component.
 
 The Reasoning tab and the Runs workspace's Timeline projection share the lazy `ReasoningPanel` chunk rather than placing it on the eager `App` path. Its `constants` and `useVirtualList` dependencies are shared chunks because Runs history also consumes them; keep the three reviewed names in `apps/web/performance-budgets.json`. Do not move the long-run timeline back into `RightPanel.tsx` or `RunWorkspace.tsx`: the feature-specific filtering, focus navigation, payload rendering, and fixed-row virtualization belong in the sibling component, while the wrappers remain lazy dispatchers.
 
@@ -98,26 +153,42 @@ replace it with a broad `@janusly/shared` barrel import.
 
 ## Startup loading boundaries
 
-The production entry may contain boot infrastructure, but not either full
-translation catalog or the Supabase implementation. `bootstrapI18n()` awaits
-only the resolved local catalog before React mounts. The
-`compactI18nCatalogPlugin` projects the canonical English key order once into
-the stable `catalog-keys` chunk and projects each locale into a values-only
-chunk; `materializeCatalog()` verifies equal lengths before reconstructing the
-runtime object. Explicit `catalog-en.ts`/`catalog-es.ts` wrappers keep locale
-chunks separately named, and `changeAppLanguage()` demand-loads the other
-values chunk before persisting the new preference. Catalog parity allows
-`fallbackLng: false`, so a Spanish first render does not quietly download
-English values. The same plugin must be registered in production Vite and
-Vitest Browser because both graphs import the wrappers. This remains
-local-file loading—not an i18next backend—and React Suspense stays disabled.
-Supabase is reached only through the dynamic `supabase-runtime.ts` boundary described in
-`auth-and-identity.md`; dev headers and SSO remain on the lightweight path.
-`routes.performance.spec.ts` is the runtime conservation gate: Home must load
-exactly the selected catalog, must not load Supabase when unconfigured, and a
-real locale switch must fetch the second catalog. The matching bundle budget
-keeps entry JavaScript at 8 KiB gzip and Home at 300 KiB transferred; do not
-raise either cap without a measured, reviewed reason.
+The production entry may contain boot infrastructure, but not eager locale
+values or the Supabase implementation. `main.tsx` starts the selected locale
+and `App` imports concurrently, then mounts React only after the core namespace
+is registered. The compact-catalog plugin front-codes the canonical English
+key order into the locale-neutral `catalog-keys` projection and emits only
+translated values in each locale module. The registry owns
+`materializeCatalog()` and keeps the shared key projection on the eager
+application path; this prevents the bundler from assigning shared keys to one
+language chunk and making another language download it. Runtime namespaces
+remain separate: core boots the shell, and `I18nNamespaceGate` registers
+workspace strings only when a workspace surface needs them. Production
+`manualChunks` deliberately coalesces each language's two value modules into
+one physical `catalog-en` or `catalog-es` chunk so gzip gets one language-wide
+dictionary and navigation does not pay extra wrapper requests; loading bytes
+is not the same as registering the workspace namespace. `materializeCatalog()`
+expands and validates the NUL-delimited front-coded keys and rejects length
+mismatches before reconstructing a fragment. The selected locale is the only
+locale fetched at boot, and `changeAppLanguage()` fetches the other language
+before persisting the preference.
+
+The dependency-free runtime supports Janusly's bounded catalog features:
+cardinal plurals, interpolation, safe rich-text component slots, missing-key
+defaults, and synchronous React subscriptions. The compact plugin is registered
+in Vite and Vitest Browser because both graphs import the projected modules.
+Supabase authentication is reached only through lazy `supabase-runtime.ts` and
+`@supabase/auth-js`; dev headers and SSO stay on the lightweight path.
+
+Production chunks follow operator workspaces rather than source-file accidents:
+`app-workspace` combines App, identity/command hooks, and Home recovery;
+`workflow-workspace` combines workflow inventory and authoring panels; React
+Flow plus `canvas.css` stays behind `CanvasWorkspace`. The reviewed budgets
+are <=560 KiB gzip for all production JS/CSS, <=250 KiB transferred for a cold
+Home, and <=90 KiB for opening the workflow builder or a selected recovery.
+Entry JavaScript remains <=2 KiB gzip. `routes.performance.spec.ts` proves the selected-locale-only,
+Supabase-deferred, React-Flow-deferred, route-transfer, and long-task contracts.
+Do not raise a cap without measured evidence and a reviewed exception.
 
 ## Render-error blast radius
 
@@ -126,7 +197,7 @@ render-error boundary: a class component, because `getDerivedStateFromError`
 has no hook equivalent. It wraps three surfaces — the React Flow canvas
 (`WorkflowCanvas.tsx`), every tab panel (the one `RightPanel` mount point, so a
 new tab is covered without extra wiring), and the Recovery Center home surface
-(`App.tsx`, which renders outside the panel router).
+(`AppWorkspace.tsx`, which renders outside the panel router).
 
 Panels render whatever the API returns, so a section dereferencing an
 unexpected envelope must cost its own card and nothing else. Without a
@@ -179,11 +250,36 @@ each component.
 
 ## i18n
 
-**i18n:** the `apps/web/src/i18n/` module is the single chokepoint for translations. Two locales today (`en`, `es`) plus a `'system'` setting that resolves once at boot via `navigator.languages`. Persistence: `localStorage["janusly:locale"]` (defensive try/catch mirroring `auth.ts`). Bootstrap: `apps/web/src/main.tsx` awaits `bootstrapI18n()` for exactly the resolved local catalog before `createRoot`; initialization then stays synchronous, with no Suspense and no remote i18next backend. JSON catalogs live at `apps/web/src/i18n/locales/<lng>/common.json` (single namespace `common`, dot-notation flat keys, plurals via i18next `_one`/`_other`, interpolation `{{var}}`) and remain the source of truth; the build-only compact projection must not become a second editable catalog. Application code receives the bounded `Translate` signature `(key: string, options?) => string` rather than i18next's recursive generic `TFunction`; this keeps TypeScript 7 from exhausting its instantiation depth and correctly permits plural base keys plus dynamic catalog families. Catalog completeness is enforced by parity and runtime fallback tests, not an exact-key union that cannot model those i18next behaviors. React components use `useT()` (subscribes to language changes), while non-React helpers (`constants.ts` formatters, server-event mappers) use `t` from `apps/web/src/i18n/runtime.ts` (shares the same `i18next` instance). Server-emitted strings are translated client-side via the dedicated helpers `tValidationIssue` / `tReadinessIssue` / `tAiReviewIssue` / `tRunEvent` / `tFailureCluster` / `tApiError` — they look up `<surface>.<code>` in the catalog and fall back to `serverEvents.fallback` (`{{message}}`) for unknown codes. **API error envelopes** ship `{ error: "<EN fallback>", code: "<snake_code>", params? }` built via `errorEnvelope(code, message, params?)` from `apps/api/src/error-codes.ts` (closed `ApiErrorCode` union); `tApiError(err)` on the web reads the `code` first and resolves `apiErrors.<code>` in the catalog, falling back to the literal `error` (then `message`) when the key is missing. Adding a new API error code is three edits: the closed-union entry in `error-codes.ts`, an `apiErrors.<code>` line in `en/common.json`, and the matching line in `es/common.json` (parity test catches mismatches). **Date and number formatting** in components passes `getResolvedLocale()` to `.toLocaleString()` / `.toLocaleDateString()` so timestamps and counts respect the operator's UI language; never call those formatters without an explicit locale argument. The server stays locale-blind; the client owns 100% of translations. Adding a new code from the engine is one entry in `en/common.json` + `es/common.json`; adding a new locale requires its `locales/<lng>/common.json`, one explicit `catalog-<lng>.ts` loader, and the closed loader-map entry. Parity between locales is gated by `apps/web/src/i18n/parity.test.ts` (runs as part of `pnpm test`). Free-form server messages (Supabase errors, generic `Error.message`) pass through `serverEvents.fallback` unchanged.
+**i18n:** `apps/web/src/i18n/` is the single translation chokepoint. The web
+ships `en`, `es`, and a `system` preference resolved once at boot through
+`navigator.languages`; persistence uses `localStorage["janusly:locale"]` behind
+defensive access. `main.tsx` awaits `bootstrapI18n()` for the resolved core
+fragment before `createRoot`, with no Suspense and no remote backend. Canonical
+flat JSON lives at `i18n/locales/<lng>/common.json`; `_one` / `_other` suffixes,
+`{{value}}` interpolation, and explicit rich component slots are interpreted by
+the local runtime. Build-time core/workspace projections are generated
+artifacts, never a second editable catalog.
+
+Application code receives the bounded `Translate` signature `(key: string,
+options?) => string`. React consumers call `useT()`, which subscribes through
+`useSyncExternalStore`; non-React helpers use the stable `t` from `runtime.ts`.
+`Trans` parses only trusted catalog tags and clones explicitly supplied React
+components; malformed or unknown tags degrade to text and no HTML is injected.
+Catalog parity and compact-catalog tests enforce completeness, separator safety,
+and materialization integrity. Server strings go through
+`tValidationIssue`, `tReadinessIssue`, `tAiReviewIssue`, `tRunEvent`,
+`tFailureCluster`, `tApiError`, and related helpers, falling back to the server's
+English message for unknown codes. API error envelopes remain `{ error, code,
+params? }`; adding a code requires the closed server union plus matching EN/ES
+`apiErrors.<code>` keys. Date and number formatting always receives
+`getResolvedLocale()` explicitly. Adding a locale requires its canonical JSON,
+core/workspace projected modules, loader-map entries, and a reviewed production
+chunk mapping. Free-form provider errors remain visible through the bounded
+fallback rather than being silently discarded.
 
 ## Home
 
-**Home:** the authenticated landing page is `activeTab: "home"` (set in `apps/web/src/store.ts`), rendering the lazy `RecoveryCenterPanel` from `apps/web/src/components/RecoveryCenterPanel.tsx` inside its own `ErrorBoundary` and `Suspense` fallback. Home is an action workspace, not a second operational dashboard: its first viewport contains one concise combined-health summary, at most three deterministic priority actions, and at most three recent active runs. `HomeActionWorkspace` owns that bounded presentation while the pure projections in `apps/web/src/components/recovery-center/recovery-center-model.ts` own ordering, deduplication, and canonical open-run classification. Healthy organizations return no synthetic recommendation; they receive a calm caught-up state with Activity as the optional next destination. Server-driven `OnboardingBanner` remains the only setup guide and exposes only the next incomplete outcome. Operational rows remain authoritative in Activity or the exact case/run workspace rather than being duplicated as Home queue, approval, or semantic-case tiles.
+**Home:** the authenticated landing page is `activeTab: "home"` (set in `apps/web/src/store.ts`), rendering the lazy `RecoveryCenterPanel` controller and `RecoveryCenterView` render boundary inside its own `ErrorBoundary` and `Suspense` fallback. Home is an action workspace, not a second operational dashboard: its first viewport contains one concise combined-health summary, at most three deterministic priority actions, and at most three recent active runs. `HomeActionWorkspace` owns that bounded presentation while the pure projections in `apps/web/src/components/recovery-center/recovery-center-model.ts` own ordering, deduplication, and canonical open-run classification. Healthy organizations return no synthetic recommendation; they receive a calm caught-up state with Activity as the optional next destination. Server-driven `OnboardingBanner` remains the only setup guide and exposes only the next incomplete outcome. Operational rows remain authoritative in Activity or the exact case/run workspace rather than being duplicated as Home queue, approval, or semantic-case tiles.
 
 Priority order is pending approvals → open semantic cases → clustered recover-all or individual triage → elevated recovery risk, capped at three after the mutually exclusive cluster/triage choice. Each action deep-links to the narrowest available context: the exact waiting run, semantic case, or dead-letter record; only aggregate cluster/risk guidance opens Settings. Active work uses the canonical run-status guard and opens the selected run in Activity. Heatmaps, clusters, qualification, cost, calibration, validation, historical trends, and Recovery Lab live in the lazy `HomeInsights` disclosure below the action workspace. `VitalSignsStrip` remains the shared metric primitive inside that secondary disclosure; Home must not restore a bespoke above-fold metric grid. The store's `newWorkflow()` reset intentionally routes to `"inspector"` so a fresh draft opens Build, while the explicit describe-with-AI path routes to `"copilot"`; do not make the generic reset AI-first again.
 

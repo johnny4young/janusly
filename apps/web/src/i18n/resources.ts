@@ -9,6 +9,8 @@
  */
 
 import type enCommon from './locales/en/common.json'
+import { catalogKeys } from './catalog-keys'
+import { materializeCatalog } from './compact-catalog'
 
 /** Closed enum of locales the web ships with. */
 export const SUPPORTED_LANGUAGES = ['en', 'es'] as const
@@ -17,20 +19,22 @@ export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number]
 /** App-level setting (what the user picked, including auto-detect sentinel). */
 export type AppLanguage = 'system' | SupportedLanguage
 
-/** Resolved runtime locale (what i18next actually loads — never `'system'`). */
+/** Resolved runtime locale (what the catalog runtime loads — never `'system'`). */
 export type RuntimeLocale = SupportedLanguage
 
 /** Default when nothing else matches. */
 export const FALLBACK_LOCALE: RuntimeLocale = 'en'
 
-/** Single-namespace setup mirrors lingua. */
+/** Stable namespace name retained for catalog tooling and compatibility. */
 export const COMMON_NAMESPACE = 'common'
 
 /** localStorage key for the user's chosen locale. Convention: `janusly:*` prefix. */
 export const LOCALE_STORAGE_KEY = 'janusly:locale'
 
-/** Catalog shape is derived from English so loaders and i18next stay typed. */
+/** Catalog shape is derived from English so every demand loader stays typed. */
 export type CommonCatalog = typeof enCommon
+export type CatalogFragment = Record<string, string>
+export type CatalogNamespace = 'core' | 'workspace'
 
 /** Translation keys are validated by catalog parity and runtime fallback tests. */
 export type TranslationKey = string
@@ -40,50 +44,77 @@ export type TranslationOptions = Record<string, unknown>
 
 /**
  * Translation signature exposed to application code. Keeping the return value
- * concrete avoids i18next's recursive generic expansion under TypeScript 7;
- * catalog completeness remains enforced by the i18n parity/runtime test suite.
+ * concrete keeps call sites lightweight under TypeScript 7; catalog
+ * completeness remains enforced by the parity/runtime test suite.
  */
 export type Translate = (key: TranslationKey, options?: TranslationOptions) => string
 
-type CatalogModule = { default: CommonCatalog }
+type CatalogModule = { default: string }
 
 /**
- * Explicit per-locale modules give production chunks stable, reviewable names.
- * Do not replace these with eager JSON imports or a broad glob.
+ * Explicit per-locale modules keep runtime namespaces independently
+ * registerable. Production may coalesce both namespaces for one language into
+ * a single compression boundary; do not replace these with eager JSON imports
+ * or a broad glob.
  */
-const CATALOG_LOADERS: Record<SupportedLanguage, () => Promise<CatalogModule>> = {
-  en: () => import('./catalog-en'),
-  es: () => import('./catalog-es'),
+const CATALOG_LOADERS: Record<SupportedLanguage, Record<CatalogNamespace, () => Promise<CatalogModule>>> = {
+  en: {
+    core: () => import('./catalog-core-en'),
+    workspace: () => import('./catalog-workspace-en'),
+  },
+  es: {
+    core: () => import('./catalog-core-es'),
+    workspace: () => import('./catalog-workspace-es'),
+  },
 }
 
-const loadedCatalogs: Partial<Record<SupportedLanguage, CommonCatalog>> = {}
-const catalogPromises: Partial<Record<SupportedLanguage, Promise<CommonCatalog>>> = {}
+const loadedCatalogs: Partial<Record<SupportedLanguage, Partial<Record<CatalogNamespace, CatalogFragment>>>> = {}
+const catalogPromises: Partial<Record<SupportedLanguage, Partial<Record<CatalogNamespace, Promise<CatalogFragment>>>>> = {}
 
 /** Return an already-loaded catalog without triggering a network request. */
-export function getLoadedLocaleCatalog(language: RuntimeLocale): CommonCatalog | undefined {
-  return loadedCatalogs[language]
+export function getLoadedLocaleCatalog(
+  language: RuntimeLocale,
+  namespace: CatalogNamespace = 'core',
+): CatalogFragment | undefined {
+  return loadedCatalogs[language]?.[namespace]
 }
 
 /**
  * Load one local catalog at most once. The selected locale is awaited before
  * React mounts; other locales reach this path only when the operator switches.
  */
-export function loadLocaleCatalog(language: RuntimeLocale): Promise<CommonCatalog> {
-  const loaded = loadedCatalogs[language]
+export function loadLocaleCatalog(
+  language: RuntimeLocale,
+  namespace: CatalogNamespace = 'core',
+): Promise<CatalogFragment> {
+  const loaded = loadedCatalogs[language]?.[namespace]
   if (loaded) return Promise.resolve(loaded)
 
-  const pending = catalogPromises[language]
+  const pending = catalogPromises[language]?.[namespace]
   if (pending) return pending
 
-  const promise = CATALOG_LOADERS[language]().then((module) => {
-    loadedCatalogs[language] = module.default
-    return module.default
+  const promise = CATALOG_LOADERS[language][namespace]().then((module) => {
+    const catalog = materializeCatalog(catalogKeys[namespace], module.default)
+    const catalogs = loadedCatalogs[language] ?? {}
+    catalogs[namespace] = catalog
+    loadedCatalogs[language] = catalogs
+    return catalog
   }).catch((error: unknown) => {
-    delete catalogPromises[language]
+    if (catalogPromises[language]) delete catalogPromises[language]![namespace]
     throw error
   })
-  catalogPromises[language] = promise
+  const promises = catalogPromises[language] ?? {}
+  promises[namespace] = promise
+  catalogPromises[language] = promises
   return promise
+}
+
+export async function loadCompleteLocaleCatalog(language: RuntimeLocale): Promise<CommonCatalog> {
+  const [core, workspace] = await Promise.all([
+    loadLocaleCatalog(language, 'core'),
+    loadLocaleCatalog(language, 'workspace'),
+  ])
+  return { ...core, ...workspace } as CommonCatalog
 }
 
 /** Type-guard — does the raw string name a supported locale? */

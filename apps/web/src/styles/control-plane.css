@@ -2075,7 +2075,7 @@
 }
 .we-list-row__body small {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--we-muted);
   font-family: var(--font-mono);
   margin-top: 2px;
@@ -2169,7 +2169,7 @@
 
 .we-list-row__hint {
   color: var(--we-muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.35;
 }
 

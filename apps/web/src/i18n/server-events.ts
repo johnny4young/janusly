@@ -14,19 +14,18 @@
 import { getResolvedLocale, t } from './runtime'
 import type { RunEvent, ValidationIssue } from '../types'
 
-/** Sentinel returned by i18next when `defaultValue: '__MISSING__'` and no key matched. */
+/** Sentinel returned by the catalog runtime when no server code matched. */
 const MISSING = '__MISSING__'
 
 /**
  * Resolve a SERVER-COMPUTED catalog key (`<surface>.<code>`). The key union
  * cannot be statically typed — the code half originates on the server — so
- * this helper is the single deliberate escape hatch from i18next's key
- * typing for this module. It always applies the `MISSING` sentinel default
+ * this helper is the single dynamic-key boundary for server-owned codes. It always applies the `MISSING` sentinel default
  * so callers can fall back to the server's literal message. Don't scatter
  * `t(key as any)` casts; add the key to the catalog or route through here.
  */
 function tServerCode(key: string, options: Record<string, unknown> = {}): string {
-  return t(key as never, { defaultValue: MISSING, ...options })
+  return t(key, { defaultValue: MISSING, ...options })
 }
 
 /** Generic free-form wrapper. Returns the message verbatim today; one place to prefix later. */

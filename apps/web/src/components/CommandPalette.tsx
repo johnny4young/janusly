@@ -296,7 +296,7 @@ export function CommandPalette({
   }, [open, onClose])
 
   const labelFor = useCallback(
-    (cmd: Command): string => dynamicLabels.get(cmd.id) ?? (t(cmd.labelKey as never)),
+    (cmd: Command): string => dynamicLabels.get(cmd.id) ?? (t(cmd.labelKey)),
     [dynamicLabels, t],
   )
 
@@ -392,7 +392,7 @@ export function CommandPalette({
                 id={commandOptionId(idx)}
                 role="option"
                 aria-selected={idx === activeIndex}
-                title={cmd.hintKey ? (t(cmd.hintKey as never)) : labelFor(cmd)}
+                title={cmd.hintKey ? (t(cmd.hintKey)) : labelFor(cmd)}
                 className={idx === activeIndex ? 'we-cmdk-row we-cmdk-row--active' : 'we-cmdk-row'}
                 onMouseEnter={() => setActiveIndex(idx)}
                 onMouseDown={(event) => { event.preventDefault(); runCommand(cmd) }}
@@ -402,7 +402,7 @@ export function CommandPalette({
                 {isRecent ? (
                   <span className="we-cmdk-row__pill">{t('palette.recentTag')}</span>
                 ) : (
-                  <span className="we-cmdk-row__group">{t(GROUP_KEY_LABELS[dynamicLabels.has(cmd.id) ? 'dynamic' : cmd.group] as never)}</span>
+                  <span className="we-cmdk-row__group">{t(GROUP_KEY_LABELS[dynamicLabels.has(cmd.id) ? 'dynamic' : cmd.group])}</span>
                 )}
                 {cmd.shortcut ? <kbd className="we-cmdk-row__kbd">{cmd.shortcut}</kbd> : null}
               </li>

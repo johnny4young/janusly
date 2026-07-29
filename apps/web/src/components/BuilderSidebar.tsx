@@ -172,7 +172,7 @@ export function BuilderSidebar({
             <span>
               {t(streamStatus === 'connected'
                 ? 'sidebar.workflow.status.idle'
-                : `sidebar.streamStatus.${streamStatus}` as never)}
+                : `sidebar.streamStatus.${streamStatus}`)}
             </span>
             {workflowVersion !== null && (
               <>

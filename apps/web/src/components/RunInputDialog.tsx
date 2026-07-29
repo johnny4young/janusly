@@ -28,7 +28,7 @@ import type { WorkflowInputSchemaShape } from '../types'
 import { useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 
-type RunInputDialogProps = {
+export type RunInputDialogProps = {
   /** Declared `inputs` schema for the current workflow. Required because the dialog is only mounted when inputs exist. */
   inputs: WorkflowInputSchemaShape
   /** Optional schema-valid value used to prefill the form on mount. */
@@ -320,7 +320,7 @@ function PrimitiveOrArrayField({
   const inputId = `run-input-${path || 'root'}`
   const errorId = `${inputId}-error`
   const error = errors[path]
-  const displayLabel = label ?? (path || (runtimeT('runInput.fallbackLabel') as string))
+  const displayLabel = label ?? (path || (runtimeT('runInput.fallbackLabel')))
   const value = getAtPath(state, path)
   const setValue = (next: unknown) => {
     setState((prev) => setAtPath(prev, path, next))
@@ -351,7 +351,7 @@ function PrimitiveOrArrayField({
         aria-describedby={error ? errorId : undefined}
         ref={firstFieldRef as React.MutableRefObject<HTMLSelectElement | null> | undefined}
       >
-        <option value="">{runtimeT('runInput.select') as string}</option>
+        <option value="">{runtimeT('runInput.select')}</option>
         {schema.enum.map((option) => {
           const text = typeof option === 'string' ? option : JSON.stringify(option)
           return (
@@ -403,7 +403,7 @@ function PrimitiveOrArrayField({
           aria-describedby={error ? errorId : undefined}
           ref={firstFieldRef as React.MutableRefObject<HTMLInputElement | null> | undefined}
         />
-        <span>{runtimeT('runInput.enabled') as string}</span>
+        <span>{runtimeT('runInput.enabled')}</span>
       </label>
     )
   } else if (schema.type === 'array') {
@@ -565,7 +565,7 @@ function parseObject(
       // the operator typed at least one value. Guard the empty-object
       // case explicitly so `required: ['user']` actually means it.
       if (isRequired && Object.keys(nested).filter((k) => nested[k] !== undefined).length === 0) {
-        errors[childPath] = runtimeT('runInput.error.required', { label: prettyLabel(childPath) }) as string
+        errors[childPath] = runtimeT('runInput.error.required', { label: prettyLabel(childPath) })
       }
       out[key] = nested
       continue
@@ -587,7 +587,7 @@ function parseLeaf(
   errors: ErrorMap,
   required: boolean,
 ): unknown {
-  const requiredError = (p: string) => runtimeT('runInput.error.required', { label: prettyLabel(p) }) as string
+  const requiredError = (p: string) => runtimeT('runInput.error.required', { label: prettyLabel(p) })
   if (schema.type === 'string') {
     const text = typeof raw === 'string' ? raw : ''
     if (!text) {
@@ -603,7 +603,7 @@ function parseLeaf(
     }
     const num = typeof raw === 'number' ? raw : Number(raw)
     if (!Number.isFinite(num)) {
-      errors[path] = runtimeT('runInput.error.notNumber', { label: prettyLabel(path) }) as string
+      errors[path] = runtimeT('runInput.error.notNumber', { label: prettyLabel(path) })
       return undefined
     }
     return num
@@ -621,12 +621,12 @@ function parseLeaf(
       try {
         const parsed = JSON.parse(trimmed)
         if (!Array.isArray(parsed)) {
-          errors[path] = runtimeT('runInput.error.notArray', { label: prettyLabel(path) }) as string
+          errors[path] = runtimeT('runInput.error.notArray', { label: prettyLabel(path) })
           return undefined
         }
         return parsed
       } catch {
-        errors[path] = runtimeT('runInput.error.notJson', { label: prettyLabel(path) }) as string
+        errors[path] = runtimeT('runInput.error.notJson', { label: prettyLabel(path) })
         return undefined
       }
     }
@@ -644,7 +644,7 @@ function parseLeaf(
     try {
       return JSON.parse(trimmed)
     } catch {
-      errors[path] = runtimeT('runInput.error.notJson', { label: prettyLabel(path) }) as string
+      errors[path] = runtimeT('runInput.error.notJson', { label: prettyLabel(path) })
       return undefined
     }
   }
@@ -683,7 +683,7 @@ function splitServerErrors(
       continue
     }
     const display = reason
-      ? (runtimeT('runInput.error.serverPrefix', { label: prettyLabel(fieldPath), reason }) as string)
+      ? (runtimeT('runInput.error.serverPrefix', { label: prettyLabel(fieldPath), reason }))
       : stripped
     mapped[fieldPath] = display
   }
@@ -718,6 +718,6 @@ function matchKnownPath(segment: string, knownPaths: string[]): string | undefin
 }
 
 function prettyLabel(path: string): string {
-  if (!path) return runtimeT('runInput.fallbackLabel') as string
+  if (!path) return runtimeT('runInput.fallbackLabel')
   return path
 }

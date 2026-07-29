@@ -73,7 +73,7 @@ const APPROACH_KEYS: Record<string, string> = {
 
 function approachLabelText(label: string): string {
   const key = APPROACH_KEYS[label]
-  return key ? (runtimeT(key as never) as string) : label
+  return key ? (runtimeT(key)) : label
 }
 
 /** Render the version-history list for the active workflow with click-to-hydrate. */

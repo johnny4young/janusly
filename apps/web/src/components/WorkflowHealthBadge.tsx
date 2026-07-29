@@ -152,7 +152,7 @@ export function WorkflowHealthBadge({ workflowId, showLabel = true }: WorkflowHe
   }
   const severity = statusToSeverity[result.status]
   const summaryLabel = showLabel ? t('badges.health.label', { score: result.score }) : `${result.score}`
-  const localisedStatus = t(STATUS_LABEL_KEYS[result.status] as never)
+  const localisedStatus = t(STATUS_LABEL_KEYS[result.status])
 
   const sloBreaching = result.slo?.breaches.anyBreach === true
   const sloLabel = t('badges.slo.breachPill')
@@ -185,7 +185,7 @@ export function WorkflowHealthBadge({ workflowId, showLabel = true }: WorkflowHe
             // Same severity bands as the rollup but per category — green
             // (pass) for ≥80, amber (warn) for ≥60, red (fail) below.
             const cellSeverity: 'pass' | 'warn' | 'fail' = entry.score >= 80 ? 'pass' : entry.score >= 60 ? 'warn' : 'fail'
-            const categoryLabel = t(CATEGORY_LABEL_KEYS[category] as never)
+            const categoryLabel = t(CATEGORY_LABEL_KEYS[category])
             return (
               <li key={category} className={`we-readiness-issue we-readiness-issue--${cellSeverity}`}>
                 <strong className="we-readiness-issue__code">{t('badges.health.cellLabel', { category: categoryLabel, score: entry.score })}</strong>
@@ -205,7 +205,7 @@ export function WorkflowHealthBadge({ workflowId, showLabel = true }: WorkflowHe
                     const target = sloBlock.slo[metric]
                     if (target === null) return null
                     const breaching = sloBlock.breaches[metric]
-                    const metricLabel = t(SLO_METRIC_LABEL_KEYS[metric] as never)
+                    const metricLabel = t(SLO_METRIC_LABEL_KEYS[metric])
                     return (
                       <li
                         key={metric}

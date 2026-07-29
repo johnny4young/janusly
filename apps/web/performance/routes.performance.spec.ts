@@ -226,16 +226,16 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   expect(homeMeasurement.resources.some((path) => /catalog-en-.*\.js$/.test(path))).toBe(true)
   expect(homeMeasurement.resources.some((path) => /catalog-es-.*\.js$/.test(path))).toBe(false)
   expect(homeMeasurement.resources.some((path) => /supabase-runtime-.*\.js$/.test(path))).toBe(false)
-  expectWithinBudget(homeMeasurement)
   await captureElement(home, 'web-en-performance-home')
 
   const workflowsDestination = page.getByRole('button', { name: /^Workflows\b/ })
   await expect(workflowsDestination).toBeVisible()
   await workflowsDestination.click()
-  const createWorkflowAction = page.getByRole('button', { name: 'New workflow', exact: true })
+  const createWorkflowAction = page.locator(
+    'button[aria-controls="workflow-creation-choices"]',
+  )
   await expect(createWorkflowAction).toBeVisible()
   await expect(createWorkflowAction).toBeEnabled()
-
   await resetRouteMeasurement(page)
   await createWorkflowAction.click()
   await page.getByRole('button', { name: /^Start blank\b/ }).click()
@@ -243,35 +243,34 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   await expect(canvas).toBeVisible()
   const workflowBuilderMeasurement = await measureRoute(page, 'workflowBuilder')
   expect(workflowBuilderMeasurement.resources.some((path) => /CanvasWorkspace-.*\.js$/.test(path))).toBe(true)
-  expectWithinBudget(workflowBuilderMeasurement)
   await captureElement(canvas, 'web-en-performance-workflow-builder')
 
   await page.getByRole('button', { name: /^Home\b/ }).click()
-  await page.getByTestId('recovery-center-queue-open-all').click()
+  await page.getByTestId('recovery-center-action-cta-triage_failures').click()
   const secondRow = page.getByTestId('activity-row-recovery:perf-b')
   await expect(secondRow).toBeVisible()
+  const activityResources = await page.evaluate(() => (
+    (performance.getEntriesByType('resource') as PerformanceResourceTiming[])
+      .map((entry) => new URL(entry.name).pathname)
+  ))
+  expect(activityResources.some(
+    (path) => /ActivityRecoveryDetail-.*\.js$/.test(path),
+  )).toBe(true)
   await resetRouteMeasurement(page)
   await secondRow.click()
   const detail = page.getByTestId('activity-recovery-detail')
   await expect(detail).toContainText('Delivery failed')
   const recoveryMeasurement = await measureRoute(page, 'selectedRecovery')
   expect(recoveryMeasurement.resources.some((path) => path === '/dlq')).toBe(true)
-  expect(recoveryMeasurement.resources.some(
-    (path) => /ActivityRecoveryDetail-.*\.js$/.test(path),
-  )).toBe(true)
   expect(recoveryMeasurement.transferredBytes).toBeGreaterThan(0)
-  expectWithinBudget(recoveryMeasurement)
   await captureElement(detail, 'web-en-performance-selected-recovery')
 
   await resetRouteMeasurement(page)
   await page.getByRole('button', { name: 'Open user menu' }).click()
   const localeSwitcher = page.getByRole('combobox', { name: 'Change language' })
   await localeSwitcher.selectOption('es')
-  // Switching locale lazy-loads the Spanish catalog, which remounts the header
-  // subtree and closes the user menu. Reopen it (Spanish label now) before
-  // asserting the switcher itself reflects the new locale.
-  await expect(page.getByRole('button', { name: 'Abrir menú de usuario' })).toBeVisible()
-  await page.getByRole('button', { name: 'Abrir menú de usuario' }).click()
+  // Locale changes update the active catalog in place, so the appearance menu
+  // stays open and keeps the operator's current interaction context.
   await expect(page.getByRole('combobox', { name: 'Cambiar idioma' })).toHaveValue('es')
   const localeSwitchResources = await page.evaluate(() => (
     (performance.getEntriesByType('resource') as PerformanceResourceTiming[])
@@ -294,7 +293,7 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   await esPage.goto('/')
   const esHome = esPage.locator('.we-recovery-center-hero')
   await expect(esHome).toBeVisible()
-  await expect(esHome.locator('.section-kicker')).toHaveText('Centro de recuperación')
+  await expect(esHome.locator('.section-kicker')).toHaveText('Inicio')
   const esResources = await esPage.evaluate(() => (
     (performance.getEntriesByType('resource') as PerformanceResourceTiming[])
       .map((entry) => new URL(entry.name).pathname)
@@ -313,4 +312,5 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
     await writeFile(path, `${JSON.stringify({ generatedAt: new Date().toISOString(), measurements }, null, 2)}\n`)
   }
   expect(browserErrors).toEqual([])
+  for (const measurement of measurements) expectWithinBudget(measurement)
 })

@@ -119,20 +119,20 @@ export function SnippetInsertMenu({ open, onClose }: SnippetInsertMenuProps) {
   /** Resolve the display name (built-ins use i18n; custom use their stored name). */
   const nameFor = useCallback(
     (snippet: SnippetDefinition): string => snippet.builtin
-      ? (t(`snippets.builtin.${builtinSlug(snippet.id)}.name` as never))
+      ? (t(`snippets.builtin.${builtinSlug(snippet.id)}.name`))
       : snippet.name,
     [t],
   )
 
   const descriptionFor = useCallback(
     (snippet: SnippetDefinition): string => snippet.builtin
-      ? (t(`snippets.builtin.${builtinSlug(snippet.id)}.description` as never))
+      ? (t(`snippets.builtin.${builtinSlug(snippet.id)}.description`))
       : snippet.description,
     [t],
   )
 
   const categoryLabel = useCallback(
-    (category: SnippetCategory): string => t(`snippets.category.${category}` as never),
+    (category: SnippetCategory): string => t(`snippets.category.${category}`),
     [t],
   )
 

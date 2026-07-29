@@ -46,7 +46,7 @@ export function ExperimentSummaryDetail({
           <div className="section-kicker">{t('experiments.detail.kicker')}</div>
           <h3 id="experiment-detail-title">{experiment.name}</h3>
         </div>
-        <span className="we-pill" data-tone="info">{t(`experiments.status.${experiment.status}` as never)}</span>
+        <span className="we-pill" data-tone="info">{t(`experiments.status.${experiment.status}`)}</span>
       </div>
       {loading ? <p className="helper-text">{t('common.loading')}</p> : summary ? (
         <>
@@ -68,7 +68,7 @@ export function ExperimentSummaryDetail({
                   const sideSummary = summary[side]
                   return (
                     <tr key={side}>
-                      <th scope="row">{t(`experiments.arm.${side}` as never)}</th>
+                      <th scope="row">{t(`experiments.arm.${side}`)}</th>
                       <td>{formatPercent(sideSummary.meanScore * 100)}</td>
                       <td>{sideSummary.costKnownCount > 0 ? formatCurrency(sideSummary.totalCostUsd) : t('experiments.metric.unknown')}</td>
                       <td>{t('experiments.metric.latency', { value: Math.round(sideSummary.meanLatencyMs) })}</td>
@@ -85,7 +85,7 @@ export function ExperimentSummaryDetail({
             <div><dt>{t('experiments.metric.costDelta')}</dt><dd>{formatDelta(summary.costDelta, formatCurrency)}</dd></div>
           </dl>
           <aside className="we-experiments__recommendation" data-recommendation={summary.recommendation} aria-live="polite">
-            <strong>{t(`experiments.recommendation.${summary.recommendation}.title` as never)}</strong>
+            <strong>{t(`experiments.recommendation.${summary.recommendation}.title`)}</strong>
             <p>{getRecommendationReason(summary, t)}</p>
             {summary.recommendation === 'promote_candidate' && (
               <>

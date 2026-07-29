@@ -37,11 +37,11 @@ const BUILTIN_ROLE_COPY_KEYS: Record<OrgRole, string> = {
 function describeRole(role: string, entry?: OrgRoleEntry): string {
   if (entry && !entry.isBuiltin && entry.description) return entry.description
   if (role === 'viewer' || role === 'editor' || role === 'admin') {
-    return runtimeT(BUILTIN_ROLE_COPY_KEYS[role as OrgRole] as never) as string
+    return runtimeT(BUILTIN_ROLE_COPY_KEYS[role as OrgRole])
   }
   return entry
-    ? (runtimeT('members.role.customInherits', { base: entry.inheritsFrom }) as string)
-    : (runtimeT('members.role.customDefault') as string)
+    ? (runtimeT('members.role.customInherits', { base: entry.inheritsFrom }))
+    : (runtimeT('members.role.customDefault'))
 }
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -71,7 +71,7 @@ export function MembersPanel() {
   const canSetRoles = sessionCan(identityContext, 'members.role_set')
   const canInvite = canManageMembers && emailPattern.test(trimmedEmail) && !pending
   const roleLabel = (name: string) => name === 'viewer' || name === 'editor' || name === 'admin'
-    ? t(`userMenu.role.${name}` as never)
+    ? t(`userMenu.role.${name}`)
     : name
 
   const load = useCallback(async () => {

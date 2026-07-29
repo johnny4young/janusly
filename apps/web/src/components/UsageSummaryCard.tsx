@@ -91,12 +91,12 @@ function bucketLabel(b: UsageBreakdownBucket, dims: UsageBreakdownDimension[]): 
   return dims
     .map((dim) => {
       const value = dim === 'mode' ? b.mode : b[dim]
-      if (value === undefined || value === null) return runtimeT('rightPanel.usage.unknown') as string
+      if (value === undefined || value === null) return runtimeT('rightPanel.usage.unknown')
       // Legacy-data sentinel from the backfill script — render as
       // "Legacy" so operators can distinguish backfilled-pre-attribution
       // rows from genuinely-unattributed `/ai/generate-workflow` rows
       // (which keep value === undefined → "unknown").
-      if (dim === 'workflow' && value === LEGACY_WORKFLOW_SENTINEL) return runtimeT('rightPanel.usage.legacy') as string
+      if (dim === 'workflow' && value === LEGACY_WORKFLOW_SENTINEL) return runtimeT('rightPanel.usage.legacy')
       return value
     })
     .join(' / ')

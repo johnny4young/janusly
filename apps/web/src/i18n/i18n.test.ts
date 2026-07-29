@@ -29,9 +29,20 @@ describe('i18n.t', () => {
     expect(t('toasts.savedVersion', { version: 7 })).toBe('Saved version 7')
   })
 
+  it('selects the active locale cardinal plural before interpolation', () => {
+    changeAppLanguage('en')
+    expect(t('snippets.menu.nodeCount', { count: 1 })).toBe('1 node')
+    expect(t('snippets.menu.nodeCount', { count: 3 })).toBe('3 nodes')
+  })
+
+  it('uses an explicit default for dynamic catalog keys', () => {
+    expect(t('dynamic.key', { defaultValue: 'Provider fallback' }))
+      .toBe('Provider fallback')
+  })
+
   it('falls back to the missing-key sentinel behavior', () => {
-    // i18next's default behavior is to return the key when nothing matches.
-    expect(t('this.key.does.not.exist' as never)).toBe('this.key.does.not.exist')
+    // Missing keys remain visible so untranslated server codes are debuggable.
+    expect(t('this.key.does.not.exist')).toBe('this.key.does.not.exist')
   })
 })
 
