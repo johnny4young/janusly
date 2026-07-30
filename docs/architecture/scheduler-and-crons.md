@@ -6,6 +6,13 @@
 
 Customer execution and platform maintenance use separate BullMQ delivery lanes. `workflow-nodes` owns node execution, workflow schedules, delayed approval/timer checkpoints, and paced replay steps. `maintenance-jobs` owns retention, confidence calibration, upstream-health polling, stalled-node repair, durable reconcilers, and consent-revocation purge jobs. Both producers share the process-wide BullMQ Redis pool, but independent Workers prevent a long sweep from consuming customer concurrency. `MAINTENANCE_WORKER_CONCURRENCY` is closed to 1..4 (default 2); invalid values fall back to 2.
 
+The local load/soak qualifier exercises admission plus a six-node
+fan-out/fan-in DAG, observes pressure through the bounded admin queue surface,
+and requires both lanes to drain with exact PostgreSQL run/node counts, no dead
+letters, and no pending publication-repair markers. Latency percentiles are
+recorded as machine-local evidence only; the correctness and drain invariants
+are the portable gate.
+
 `packages/engine/src/maintenance-jobs.ts` is the closed maintenance catalog and dispatcher. At boot, each recurring scheduler is first registered on `maintenance-jobs`; only a successful replacement allows removal of the same queue-local scheduler id from `workflow-nodes`. The workflow worker retains the same dispatcher solely to drain jobs already materialized by an older deployment. Consent-revocation purge status/cancel/reschedule operations inspect both queues during this compatibility window, while all new purge jobs publish only to maintenance. Unknown maintenance jobs fail unrecoverably instead of falling through to node payload parsing. Graceful shutdown drains both Workers before closing Redis, metrics, and tracing resources.
 
 Queue pressure is independently observable: Prometheus exports `workflow_queue_waiting_jobs` / `_active_jobs` and `maintenance_queue_waiting_jobs` / `_active_jobs`; admin `GET /system/queue` preserves the workflow snapshot at the top level and adds `maintenance`, which may independently be `null`. Public `GET /health` still reveals only `{ queue: { degraded } | null }`, with `degraded` true when either available lane exceeds its own threshold. Operations renders both admin signals. Bounded observability clients import queue names from the side-effect-free `queue-names.ts` and never import the delivery connection owner.
