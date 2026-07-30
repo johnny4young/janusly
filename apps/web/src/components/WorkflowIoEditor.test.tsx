@@ -110,7 +110,9 @@ describe('<WorkflowIoEditor />', () => {
   it('preserves a non-object root schema instead of offering a destructive editor', () => {
     render(<Harness initialInputs={{ type: 'array', items: { type: 'string' } }} />)
 
-    expect(screen.getByText(/array root contract is preserved as-is/)).toBeInTheDocument()
+    expect(screen.getByText(
+      'This array contract is preserved because the guided editor cannot represent every field.',
+    )).toBeInTheDocument()
     expect(screen.queryByTestId('workflow-input-add')).toBeNull()
     expect(JSON.parse(screen.getByTestId('io-state').textContent ?? '{}').inputs).toEqual({
       type: 'array',

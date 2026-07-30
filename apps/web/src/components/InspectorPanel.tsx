@@ -26,8 +26,9 @@ import {
   parseAuthoringFocusEvent,
   type AuthoringFocusRequest,
 } from './authoring-focus-bus'
+import { loadWorkflowIoEditor } from './workflow-io-loader'
 
-const WorkflowIoEditor = React.lazy(() => import('./WorkflowIoEditor').then(module => ({ default: module.WorkflowIoEditor })))
+const WorkflowIoEditor = React.lazy(() => loadWorkflowIoEditor().then(module => ({ default: module.WorkflowIoEditor })))
 
 type InspectorPanelProps = {
   readOnly?: boolean

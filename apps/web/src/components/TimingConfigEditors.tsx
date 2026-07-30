@@ -1,11 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { lazy, useCallback, useEffect, useState } from 'react'
 
 import { Trans, useT } from '../i18n'
 import type { JsonObject } from '../types'
 import {
-  asJsonObject,
   fieldId,
-  JsonConfigField,
   readConfigNumber,
   readConfigString,
   TextareaConfigField,
@@ -13,6 +11,9 @@ import {
 } from './quick-config-fields'
 import { ScheduleCronPreview } from './ScheduleCronPreview'
 import type { ScheduleCronPreviewSnapshot } from './ScheduleCronPreview'
+import { loadWorkflowIoEditor } from './workflow-io-loader'
+
+const SchemaFieldsEditor = lazy(loadWorkflowIoEditor)
 
 type ConfigEditorProps = {
   nodeId: string
@@ -227,8 +228,12 @@ export function HumanFormConfigEditor({ nodeId, config, onUpdate }: ConfigEditor
       <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
       <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.formTitle')} value={readConfigString(config, 'title')} onChange={value => patch({ title: value })} />
       <TextareaConfigField scope={nodeId} label={t('rightPanel.quickConfig.formInstructions')} value={readConfigString(config, 'description')} onChange={value => patch({ description: value })} />
-      <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.fieldsSchema')} value={asJsonObject(config.schema)} onChange={value => patch({ schema: value })} />
-      <p className="helper-text">{t('rightPanel.quickConfig.humanFormHelper')}</p>
+      <SchemaFieldsEditor
+        scope={nodeId}
+        schema={config.schema}
+        form
+        onChange={schema => patch({ schema })}
+      />
     </section>
   )
 }
