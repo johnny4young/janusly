@@ -900,17 +900,18 @@ func (q *Queries) ListWorkflows(ctx context.Context, arg ListWorkflowsParams) ([
 }
 
 const markRunTerminalFromRunning = `-- name: MarkRunTerminalFromRunning :execrows
-UPDATE runs SET status = $1
-WHERE id = $2 AND status = 'running'
+UPDATE runs SET status = $1, output_json = $2
+WHERE id = $3 AND status = 'running'
 `
 
 type MarkRunTerminalFromRunningParams struct {
-	Status string
-	ID     string
+	Status     string
+	OutputJson json.RawMessage
+	ID         string
 }
 
 func (q *Queries) MarkRunTerminalFromRunning(ctx context.Context, arg MarkRunTerminalFromRunningParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markRunTerminalFromRunning, arg.Status, arg.ID)
+	result, err := q.db.Exec(ctx, markRunTerminalFromRunning, arg.Status, arg.OutputJson, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -938,6 +939,34 @@ type QueueRunNodeParams struct {
 
 func (q *Queries) QueueRunNode(ctx context.Context, arg QueueRunNodeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, queueRunNode, arg.RunID, arg.NodeID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const skipRunNode = `-- name: SkipRunNode :execrows
+UPDATE run_nodes
+SET status = 'skipped', state_json = $1,
+    finished_at = $2
+WHERE run_id = $3 AND node_id = $4
+  AND status = 'pending'
+`
+
+type SkipRunNodeParams struct {
+	StateJson  json.RawMessage
+	FinishedAt *time.Time
+	RunID      string
+	NodeID     string
+}
+
+func (q *Queries) SkipRunNode(ctx context.Context, arg SkipRunNodeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, skipRunNode,
+		arg.StateJson,
+		arg.FinishedAt,
+		arg.RunID,
+		arg.NodeID,
+	)
 	if err != nil {
 		return 0, err
 	}

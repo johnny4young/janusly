@@ -112,6 +112,10 @@ func Parse(raw []byte) (*Workflow, []Issue) {
 	if doc.Nodes == nil {
 		contract("nodes", "Invalid input: expected array, received undefined")
 	} else {
+		// Non-nil even when empty: the workflow snapshot persisted at run
+		// start must round-trip as "nodes": [] — a nil slice would marshal
+		// as null and fail this same contract on re-parse.
+		wf.Nodes = []Node{}
 		for i, n := range *doc.Nodes {
 			path := fmt.Sprintf("nodes.%d", i)
 			node := Node{Config: n.Config}
@@ -138,6 +142,9 @@ func Parse(raw []byte) (*Workflow, []Issue) {
 		}
 	}
 
+	if doc.Edges != nil {
+		wf.Edges = []Edge{}
+	}
 	if doc.Edges == nil {
 		contract("edges", "Invalid input: expected array, received undefined")
 	} else {

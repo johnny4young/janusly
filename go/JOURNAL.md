@@ -169,3 +169,27 @@ consolidan en el informe de la puerta D15.
 - El seam del domain quedó cableado: `grammar.DomainValidator` produce
   `condition_invalid_expression` con el mensaje verbatim de referencia
   (sin prefijo — workflow-validation.ts:151 usa `??`, leído dos veces).
+
+## 2026-07-30 — executors base + semántica de aristas (T-007)
+
+- La gramática y la cola se encontraron: nace `internal/executors`
+  (noop/transform/condition puros — jamás tocan la DB) y el `Dispatcher`
+  del engine (contexto → render con tracking de secretos → evento de
+  evidencia → executor → scrub). El pipeline entero de un nodo en ~90
+  líneas auditables.
+- La corrección del día ES a mi propia card: escribí "skip propaga" y
+  Node no hace eso — un `skipped` satisface sus aristas y el sucesor
+  incondicional EJECUTA. Leer la fuente antes de portar volvió a pagar:
+  el fixture ahora fija la semántica real, no la que yo recordaba.
+- Segundo hallazgo de referencia: el scan de Node es UNA pasada en orden
+  de declaración; un dependiente-de-skippeado declarado antes que su
+  predecesor queda atascado para siempre (nada re-dispara el scan). El
+  piloto itera a punto fijo — superior, documentado, idéntico en
+  workflows bien ordenados.
+- Bug propio encontrado por los tests: slices nil en Parse rompían el
+  round-trip del snapshot (`"edges":null`); los timeouts silenciosos que
+  causaba inflaban la suite de 3s a 41s. Arreglado en la raíz.
+- Bonus que cerró deuda: `template.unresolved_path` + política estricta
+  + proyección de outputs declarados (con máscara de secret/env) — tres
+  cosas que el plan tenía anotadas como divergencias/diferidos, todas
+  dentro del alcance natural de esta tarea.

@@ -75,7 +75,7 @@ func TestEightWorkersExecuteFanOutExactlyOnce(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = eng.RunWorkers(workerCtx, 8, 100*time.Millisecond, func(_ context.Context, claim ClaimedNode, _ domain.Node, _ *domain.Workflow) (any, error) {
+		_ = eng.RunWorkers(workerCtx, 8, 100*time.Millisecond, func(_ context.Context, claim ClaimedNode, _ domain.Node, _ *domain.Workflow, _ map[string]any) (any, error) {
 			// Claims are global by design; scope the probe to this run so
 			// leftovers from other tests in the shared database don't count.
 			if claim.RunID == runID {
@@ -143,7 +143,7 @@ func TestDiamondJoinRunsOnceAfterBothBranches(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = eng.RunWorkers(workerCtx, 4, 100*time.Millisecond, func(_ context.Context, claim ClaimedNode, _ domain.Node, _ *domain.Workflow) (any, error) {
+		_ = eng.RunWorkers(workerCtx, 4, 100*time.Millisecond, func(_ context.Context, claim ClaimedNode, _ domain.Node, _ *domain.Workflow, _ map[string]any) (any, error) {
 			if claim.RunID != runID {
 				return nil, nil
 			}
@@ -210,7 +210,7 @@ func TestShutdownDrainsClaimedWorkAndResumes(t *testing.T) {
 	}
 
 	counter := newExecCounter()
-	slowExec := func(_ context.Context, claim ClaimedNode, _ domain.Node, _ *domain.Workflow) (any, error) {
+	slowExec := func(_ context.Context, claim ClaimedNode, _ domain.Node, _ *domain.Workflow, _ map[string]any) (any, error) {
 		if claim.RunID != runID {
 			return nil, nil
 		}
@@ -298,7 +298,7 @@ func TestExecutorFailureFailsNodeAndRun(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = eng.RunWorkers(workerCtx, 2, 50*time.Millisecond, func(_ context.Context, claim ClaimedNode, _ domain.Node, _ *domain.Workflow) (any, error) {
+		_ = eng.RunWorkers(workerCtx, 2, 50*time.Millisecond, func(_ context.Context, claim ClaimedNode, _ domain.Node, _ *domain.Workflow, _ map[string]any) (any, error) {
 			if claim.RunID != runID {
 				return nil, nil
 			}

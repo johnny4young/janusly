@@ -11,30 +11,31 @@ var openNodeStatuses = map[string]bool{
 	"pending": true, "queued": true, "running": true, "waiting": true,
 }
 
-// readySuccessors returns, in declaration order, every pending node whose
-// incoming edges all come from satisfied predecessors. A skipped predecessor
-// satisfies its edge exactly like a succeeded one — that is what lets a join
-// fed by a losing conditional branch still unblock.
-func readySuccessors(wf *domain.Workflow, statuses map[string]string) []string {
-	satisfied := func(status string) bool {
-		return status == "succeeded" || status == "skipped"
+// depsSatisfied reports whether every incoming edge of the node comes from a
+// satisfied predecessor. A skipped predecessor satisfies its edge exactly
+// like a succeeded one — that is what lets a join fed by a losing
+// conditional branch still unblock.
+func depsSatisfied(wf *domain.Workflow, nodeID string, statuses map[string]string) bool {
+	for _, edge := range wf.Edges {
+		if edge.To != nodeID {
+			continue
+		}
+		if from := statuses[edge.From]; from != "succeeded" && from != "skipped" {
+			return false
+		}
 	}
+	return true
+}
+
+// readySuccessors returns, in declaration order, every pending node whose
+// dependencies are satisfied.
+func readySuccessors(wf *domain.Workflow, statuses map[string]string) []string {
 	var ready []string
 	for _, node := range wf.Nodes {
 		if statuses[node.ID] != "pending" {
 			continue
 		}
-		ok := true
-		for _, edge := range wf.Edges {
-			if edge.To != node.ID {
-				continue
-			}
-			if !satisfied(statuses[edge.From]) {
-				ok = false
-				break
-			}
-		}
-		if ok {
+		if depsSatisfied(wf, node.ID, statuses) {
 			ready = append(ready, node.ID)
 		}
 	}

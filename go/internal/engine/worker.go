@@ -25,7 +25,7 @@ import (
 // ExecuteFunc runs one claimed node and returns its output. The pool owns
 // every status transition: an error return becomes the node's terminal
 // failure, anything else commits as success.
-type ExecuteFunc func(ctx context.Context, claim ClaimedNode, node domain.Node, wf *domain.Workflow) (any, error)
+type ExecuteFunc func(ctx context.Context, claim ClaimedNode, node domain.Node, wf *domain.Workflow, runInput map[string]any) (any, error)
 
 // wakeChannel is the LISTEN/NOTIFY channel shared with run start and node
 // completion; the payload (a run id) is a hint only — claims are global.
@@ -101,7 +101,7 @@ func (e *Engine) executeClaim(ctx context.Context, claim ClaimedNode, execute Ex
 		logger.Error("load run for claim failed", "runId", claim.RunID, "nodeId", claim.NodeID, "error", err)
 		return
 	}
-	wf, err := workflowFromRunInput(run.InputJson)
+	wf, runInput, err := workflowFromRunInput(run.InputJson)
 	if err != nil {
 		e.failClaim(ctx, claim, err, logger)
 		return
@@ -118,7 +118,7 @@ func (e *Engine) executeClaim(ctx context.Context, claim ClaimedNode, execute Ex
 		return
 	}
 
-	output, execErr := runExecutor(ctx, claim, *node, wf, execute)
+	output, execErr := runExecutor(ctx, claim, *node, wf, runInput, execute)
 	if execErr != nil {
 		e.failClaim(ctx, claim, execErr, logger)
 		return
@@ -130,13 +130,13 @@ func (e *Engine) executeClaim(ctx context.Context, claim ClaimedNode, execute Ex
 
 // runExecutor isolates executor panics so one broken node can't take the
 // worker goroutine (and its claim slot) down with it.
-func runExecutor(ctx context.Context, claim ClaimedNode, node domain.Node, wf *domain.Workflow, execute ExecuteFunc) (output any, err error) {
+func runExecutor(ctx context.Context, claim ClaimedNode, node domain.Node, wf *domain.Workflow, runInput map[string]any, execute ExecuteFunc) (output any, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("executor panic: %v", r)
 		}
 	}()
-	return execute(ctx, claim, node, wf)
+	return execute(ctx, claim, node, wf, runInput)
 }
 
 func (e *Engine) failClaim(ctx context.Context, claim ClaimedNode, cause error, logger *slog.Logger) {

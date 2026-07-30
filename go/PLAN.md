@@ -170,7 +170,7 @@ crítica) · P1 (importante) · P2 (stretch).
 | T-004 | startRun transaccional + defaults de inputs | P0 | partial |
 | T-005 | Cola propia: claim loop, worker pool, LISTEN/NOTIFY | P0 | done |
 | T-006 | Gramáticas subconjunto: templates + expresiones | P0 | done |
-| T-007 | Executors: noop, transform, condition + semántica de aristas | P0 | todo |
+| T-007 | Executors: noop, transform, condition + semántica de aristas | P0 | done |
 | T-008 | Modelo de fallo: retry ladder + dead_letters | P0 | todo |
 | T-009 | wait_until + approval/waiting + POST /resume | P0 | todo |
 | T-010 | Redrive desde dead_letters | P0 | todo |
@@ -605,6 +605,13 @@ el chat publicado.
 | 2026-07-30 | divergencia | Igualdad de referencias JS (`===` entre arrays/objetos) no reproducible tras round-trip JSON → operandos no escalares comparan false; `==` laxo con operando array/objeto → false (JS haría ToPrimitive); objetos interpolados en strings serializan con claves alfabéticas (Go) vs orden de inserción (JS); `String()` de magnitudes extremas puede diferir del shortest-round-trip de V8 |
 | 2026-07-30 | divergencia | `unresolvedPaths` conserva dedupe pero no el orden de inserción exacto al iterar mapas Go (el test verifica pertenencia); `redactError` de Node (mutación de Error JS) no se porta — la redacción de errores se aplica como strings en T-008 |
 | 2026-07-30 | nota | `parseSimpleComparisonExpression`/`formatSimpleComparisonExpression` (authoring guiado del web) se difieren a F1; lint: exclusión ST1005 por paquete — los mensajes capitalizados de referencia son contrato |
+| 2026-07-30 | corrección a la card | T-007: la card decía que el skip "propaga" — FALSO en Node (runtime.ts:592-606): un predecesor `skipped` SATISFACE sus aristas salientes; el sucesor con arista sin condición EJECUTA (contra output vacío `{}`). El skip solo ocurre cuando todas las aristas entrantes satisfechas llevan condición falsa. Fixture lo fija |
+| 2026-07-30 | paridad exacta | Scope de templates en nodo: `{context: <run context + input>, inputs: <config del PROPIO nodo>}` (execute-node.ts:196-199); aristas evalúan con `inputs: {}` VACÍO (runtime.ts:604) — una condición de arista no puede ver el run input (por eso existe el guard `edge_condition_inputs_scope`); entrada de contexto por nodo `{status, attempts, state, output, error}` con `output = state.output ?? {}` |
+| 2026-07-30 | mejora sobre card | `template.unresolved_path` + `templatePolicy: "strict"` SÍ se implementaron (la card los anotaba como divergencia aceptada) — payload `{count, paths≤20, truncated, policy}` idéntico; y la proyección de `outputs` declarados (outputs-projector.ts: refs secret/env enmascaradas ANTES de renderizar) aterrizó aquí, cerrando la nota diferida de T-005 |
+| 2026-07-30 | divergencia (superior) | El scan de readiness itera a punto fijo; Node hace UNA pasada en orden de declaración — un workflow donde el dependiente de un nodo skippeado aparece ANTES en `nodes[]` queda ATASCADO en Node (nada re-dispara el scan). Divergencia estrictamente superior; idéntico en workflows bien ordenados |
+| 2026-07-30 | divergencia | Error al evaluar condición de arista → se trata como falsa (skip determinista); Node deja propagar el throw al job (retry BullMQ). Validación al guardar rechaza gramática inválida, así que solo drift de datos llega aquí |
+| 2026-07-30 | bug corregido (port) | `Parse` dejaba `Nodes`/`Edges` nil con array vacío → el snapshot re-marshalado emitía `null` y fallaba su propio re-parse en el claim; ahora slices no-nil siempre — el snapshot round-tripea `[]` |
+| 2026-07-30 | divergencia temporal | Sin validación Zod post-template por tipo de nodo (NODE_CONFIG_SCHEMAS) ni timeout por nodo (`config.timeoutMs` / withTimeout) — llegan con T-008/T-012 |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)

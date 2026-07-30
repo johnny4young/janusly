@@ -121,8 +121,15 @@ SELECT status, input_json FROM runs WHERE id = $1;
 SELECT node_id, status FROM run_nodes WHERE run_id = $1;
 
 -- name: MarkRunTerminalFromRunning :execrows
-UPDATE runs SET status = sqlc.arg(status)
+UPDATE runs SET status = sqlc.arg(status), output_json = sqlc.arg(output_json)
 WHERE id = sqlc.arg(id) AND status = 'running';
+
+-- name: SkipRunNode :execrows
+UPDATE run_nodes
+SET status = 'skipped', state_json = sqlc.arg(state_json),
+    finished_at = sqlc.arg(finished_at)
+WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
+  AND status = 'pending';
 
 -- name: InsertRunEvent :exec
 INSERT INTO run_events (id, run_id, node_id, type, payload)
