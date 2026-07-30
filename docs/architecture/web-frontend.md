@@ -118,6 +118,13 @@ opening a destination selects its first permitted section. Home has no
 redundant section rail. The command palette keeps direct expert routes while
 putting the four destinations first.
 
+The Build header keeps three status domains explicit instead of presenting
+apparently contradictory generic pills: Production is deterministic draft
+readiness, Workflow is the saved runtime-health rollup, and Recovery is the
+organization recovery queue. The Production summary opens the canonical
+Problems scope; it must not grow a second issue popover, expose raw readiness
+codes, or duplicate the Problems panel's localization and deep-link logic.
+
 Internal `ActiveTab` values remain the persistence and panel-routing contract,
 so historical `janusly:activeTab` values restore into the correct destination
 without migration or deep-link breakage. Sidebar persistence now owns only

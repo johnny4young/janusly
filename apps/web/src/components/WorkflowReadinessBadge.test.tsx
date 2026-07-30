@@ -3,20 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { initI18n } from '../i18n'
 import { useWorkflowStore } from '../store'
-import type { WorkflowGraphNode } from '../types'
 import { WorkflowReadinessBadge } from './WorkflowReadinessBadge'
-import { consumeResilienceFocus } from './resilience-focus-bus'
 
 vi.mock('../api', () => ({
   api: vi.fn(),
 }))
 
-const readinessFixtureNodes: WorkflowGraphNode[] = [{
-  id: 'request',
-  position: { x: 0, y: 0 },
-  data: { label: '', type: 'http', config: { url: 'https://example.com' } },
-}]
-const initialResilienceNodeId = readinessFixtureNodes[0].id
+const noop = () => undefined
 
 describe('<WorkflowReadinessBadge />', () => {
   beforeEach(() => {
@@ -26,7 +19,7 @@ describe('<WorkflowReadinessBadge />', () => {
       activeTab: 'home',
       selectedNodeId: null,
       selectedEdgeId: null,
-      nodes: readinessFixtureNodes,
+      nodes: [],
       workflowRevision: 0,
     })
   })
@@ -39,7 +32,7 @@ describe('<WorkflowReadinessBadge />', () => {
   it('shows an unavailable state when the readiness endpoint fails', async () => {
     vi.mocked(api).mockRejectedValueOnce(new Error('service down'))
 
-    render(<WorkflowReadinessBadge />)
+    render(<WorkflowReadinessBadge onOpenProblems={noop} />)
 
     await waitFor(() => {
       expect(screen.getByText('Readiness unavailable')).toBeInTheDocument()
@@ -49,17 +42,17 @@ describe('<WorkflowReadinessBadge />', () => {
   it('shows the green ready state when the endpoint returns pass', async () => {
     vi.mocked(api).mockResolvedValueOnce({ status: 'pass', issues: [] })
 
-    render(<WorkflowReadinessBadge />)
+    render(<WorkflowReadinessBadge onOpenProblems={noop} />)
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Production readiness: Production Ready' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Open authoring problems — Production · Ready' })).toBeInTheDocument()
     })
   })
 
   it('publishes results and coalesces rapid semantic revisions into one refetch', async () => {
     const onResult = vi.fn()
     vi.mocked(api).mockResolvedValue({ status: 'pass', issues: [] })
-    render(<WorkflowReadinessBadge onResult={onResult} />)
+    render(<WorkflowReadinessBadge onOpenProblems={noop} onResult={onResult} />)
     await waitFor(() => expect(onResult).toHaveBeenCalledWith({ status: 'pass', issues: [] }))
 
     vi.mocked(api).mockClear()
@@ -69,51 +62,47 @@ describe('<WorkflowReadinessBadge />', () => {
     expect(onResult).toHaveBeenCalledWith(null)
   })
 
-  it('deep-links a retry blocker to the selected node resilience controls', async () => {
+  it('opens the canonical Problems surface without rendering a duplicate technical list', async () => {
+    const onOpenProblems = vi.fn()
     vi.mocked(api).mockResolvedValueOnce({
       status: 'fail',
       issues: [{
         code: 'external_node_missing_retry',
         severity: 'fail',
         message: 'Missing retry policy',
-        nodeId: initialResilienceNodeId,
+        nodeId: 'request',
         suggestion: 'Set retry.maxAttempts.',
       }],
     })
 
-    render(<WorkflowReadinessBadge />)
+    render(<WorkflowReadinessBadge onOpenProblems={onOpenProblems} />)
 
-    const summary = await screen.findByRole('button', { name: 'Production readiness: 1 blocker' })
+    const summary = await screen.findByRole('button', {
+      name: 'Open authoring problems — Production · 1 blocker',
+    })
     fireEvent.click(summary)
-    fireEvent.click(await screen.findByRole('button', { name: 'Open resilience controls' }))
 
-    expect(useWorkflowStore.getState().selectedNodeId).toBe(initialResilienceNodeId)
-    expect(useWorkflowStore.getState().activeTab).toBe('inspector')
-    expect(consumeResilienceFocus(initialResilienceNodeId!)).toBe(true)
+    expect(onOpenProblems).toHaveBeenCalledOnce()
+    expect(screen.queryByText('external_node_missing_retry')).toBeNull()
+    expect(screen.queryByText('Set retry.maxAttempts.')).toBeNull()
   })
 
-  it('does not offer a dead link for readiness blockers on unsupported AI nodes', async () => {
-    useWorkflowStore.setState({
-      nodes: [{
-        id: 'summarise',
-        type: 'workflowStep',
-        position: { x: 0, y: 0 },
-        data: { label: 'Summarise', type: 'ai', config: {} },
-      }],
-    })
+  it('renders the scoped summary in Spanish', async () => {
+    initI18n('es')
     vi.mocked(api).mockResolvedValueOnce({
       status: 'fail',
       issues: [{
         code: 'external_node_missing_retry',
         severity: 'fail',
         message: 'Missing retry policy',
-        nodeId: 'summarise',
+        nodeId: 'request',
       }],
     })
 
-    render(<WorkflowReadinessBadge />)
+    render(<WorkflowReadinessBadge onOpenProblems={noop} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Production readiness: 1 blocker' }))
-    expect(screen.queryByRole('button', { name: 'Open resilience controls' })).toBeNull()
+    expect(await screen.findByRole('button', {
+      name: 'Abrir problemas de autoría — Producción · 1 bloqueo',
+    })).toBeInTheDocument()
   })
 })

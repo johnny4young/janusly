@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { WorkflowGraphNode } from '../types'
@@ -87,5 +87,18 @@ describe('<AuthoringPanel />', () => {
     }
     fireEvent.click(screen.getByRole('button', { name: 'Fix' }))
     expect(onOpenAiAction).toHaveBeenCalledWith('fix')
+  })
+
+  it('opens the canonical Problems scope from the header handoff', () => {
+    render(
+      <AuthoringPanel model={model()} canWrite canUseAi onOpenAiAction={vi.fn()} />,
+    )
+
+    act(() => document.querySelector<HTMLButtonElement>('.authoring-scope-nav button:last-of-type')?.click())
+
+    expect(screen.getAllByRole('button', { name: 'Problems' })
+      .find((button) => button.getAttribute('aria-current') === 'page'))
+      .toBeInTheDocument()
+    expect(screen.getByTestId('problems-scope')).toBeInTheDocument()
   })
 })

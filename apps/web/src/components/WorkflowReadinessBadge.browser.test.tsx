@@ -7,7 +7,7 @@ import { WorkflowReadinessBadge } from './WorkflowReadinessBadge'
 
 vi.mock('../api', () => ({ api: vi.fn() }))
 
-describe('<WorkflowReadinessBadge /> header popover (browser smoke)', () => {
+describe('<WorkflowReadinessBadge /> header summary (browser smoke)', () => {
   beforeEach(() => {
     vi.mocked(api).mockReset()
     useWorkflowStore.setState({
@@ -27,7 +27,8 @@ describe('<WorkflowReadinessBadge /> header popover (browser smoke)', () => {
     window.sessionStorage.clear()
   })
 
-  it('keeps an expanded resilience action reachable when it receives focus', async () => {
+  it('keeps one compact, keyboard-operable route to Problems', async () => {
+    const onOpenProblems = vi.fn()
     vi.mocked(api).mockResolvedValueOnce({
       status: 'fail',
       issues: [{
@@ -43,24 +44,27 @@ describe('<WorkflowReadinessBadge /> header popover (browser smoke)', () => {
       <header className="top-bar">
         <div className="top-bar-right">
           <div className="top-bar-pill-group">
-            <WorkflowReadinessBadge />
+            <WorkflowReadinessBadge onOpenProblems={onOpenProblems} />
           </div>
         </div>
       </header>,
     )
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Production readiness: 1 blocker' }))
-    const action = await screen.findByRole('button', { name: 'Open resilience controls' })
+    const summary = await screen.findByRole('button', {
+      name: 'Open authoring problems — Production · 1 blocker',
+    })
     const group = container.querySelector<HTMLElement>('.top-bar-pill-group')
     expect(group).not.toBeNull()
     if (!group) throw new Error('Missing top-bar pill group')
 
-    action.focus()
+    summary.focus()
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
 
-    expect(action).toHaveFocus()
-    expect(getComputedStyle(group).overflow).toBe('visible')
+    expect(summary).toHaveFocus()
+    expect(group.scrollWidth - group.clientWidth).toBeLessThanOrEqual(1)
     expect(group.scrollTop).toBe(0)
-    expect(action.getBoundingClientRect().top).toBeGreaterThan(group.getBoundingClientRect().bottom)
+    fireEvent.click(summary)
+    expect(onOpenProblems).toHaveBeenCalledOnce()
+    expect(screen.queryByText('http_missing_bounds')).toBeNull()
   })
 })

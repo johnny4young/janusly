@@ -48,6 +48,16 @@ describe('tReadinessIssue', () => {
     })
     expect(result).toBe('La expresión de la condición no es válida')
   })
+
+  it('localizes API-side readiness checks instead of falling back to English', () => {
+    initI18n('es')
+    const result = tReadinessIssue({
+      code: 'workflow_missing_rollback_version',
+      severity: 'warn',
+      message: 'Only one workflow version exists.',
+    })
+    expect(result).toBe('Rollback no disponible — solo hay una versión guardada')
+  })
 })
 
 describe('tAiReviewIssue', () => {

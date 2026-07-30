@@ -252,8 +252,13 @@ function WorkspaceContent(props: AppWorkspaceProps) {
           </div>
           <div className="top-bar-right">
             <div className="top-bar-pill-group">
-              {authoringMode && canWriteWorkflows && (
-                <WorkflowReadinessBadge onResult={props.onReadinessResult} />
+              {activeTab === 'inspector' && canWriteWorkflows && (
+                <WorkflowReadinessBadge
+                  onOpenProblems={() => document
+                    .querySelector<HTMLButtonElement>('.authoring-scope-nav button:last-of-type')
+                    ?.click()}
+                  onResult={props.onReadinessResult}
+                />
               )}
               {authoringMode && permissions.includes('workflows.read') && (
                 <WorkflowHealthBadge workflowId={header.workflowSaved ? header.workflowId : undefined} />

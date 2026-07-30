@@ -26,6 +26,10 @@ const LOCALES = {
     condition: 'Condition',
     value: 'Compare with',
     branchExpression: 'Branch expression',
+    step: 'Step',
+    productionStatus: /^Open authoring problems — Production · (?:Ready|\d+ (?:warning|warnings|blocker|blockers))$/u,
+    workflowStatus: /^Workflow · \d+ \/ 100$/u,
+    recoveryStatus: 'Recovery · Clear',
   },
   es: {
     workflows: 'Flujos',
@@ -39,6 +43,10 @@ const LOCALES = {
     condition: 'Condición',
     value: 'Comparar con',
     branchExpression: 'Expresión de rama',
+    step: 'Paso',
+    productionStatus: /^Abrir problemas de autoría — Producción · (?:Lista|\d+ (?:aviso|avisos|bloqueo|bloqueos))$/u,
+    workflowStatus: /^Flujo · \d+ \/ 100$/u,
+    recoveryStatus: 'Recuperación · Sin pendientes',
   },
 } as const
 
@@ -197,6 +205,22 @@ for (const locale of ['en', 'es'] as const) {
     await expect(nodeEditor.getByLabel(copy.condition)).toHaveValue('===')
     await expect(nodeEditor.getByLabel(copy.value)).toHaveValue('high')
 
+    const productionStatus = page.getByRole('button', { name: copy.productionStatus })
+    await expect(productionStatus).toBeVisible()
+    await expect(page.getByText(copy.workflowStatus, { exact: true })).toBeVisible()
+    await expect(page.getByText(copy.recoveryStatus, { exact: true })).toBeVisible()
+    const topBarOverflow = await page.locator('.top-bar')
+      .evaluate(element => element.scrollWidth - element.clientWidth)
+    expect(topBarOverflow).toBeLessThanOrEqual(2)
+    await capture(page.locator('.app-shell'), `web-${locale}-authoring-status`)
+
+    await productionStatus.click()
+    await expect(page.getByTestId('authoring-problems')).toBeVisible()
+    await expect(page.locator('.top-bar .we-readiness-badge__issues')).toHaveCount(0)
+    await expectNoBlockingAccessibilityViolations(page, `${locale} consolidated authoring Problems`)
+    await capture(page.locator('.app-shell'), `web-${locale}-authoring-status-problems`)
+    await page.getByRole('button', { name: copy.step, exact: true }).click()
+
     await nodeEditor.getByLabel(copy.condition).selectOption('!==')
     await nodeEditor.getByLabel(copy.value).fill('low')
 
@@ -230,6 +254,9 @@ for (const locale of ['en', 'es'] as const) {
     await expect(edgeEditor).toBeVisible()
     const editorOverflow = await edgeEditor.evaluate(element => element.scrollWidth - element.clientWidth)
     expect(editorOverflow).toBeLessThanOrEqual(2)
+    const shellOverflow = await page.locator('.app-shell')
+      .evaluate(element => element.scrollWidth - element.clientWidth)
+    expect(shellOverflow).toBeLessThanOrEqual(2)
     await capture(page.locator('.app-shell'), `web-${locale}-branch-rule-narrow`)
     await page.setViewportSize({ width: 1440, height: 1000 })
 
