@@ -182,14 +182,19 @@ pnpm local:auth:ui-smoke
 
 The pinned Supabase CLI stack exposes Auth on host port `7431` and the single
 shared PostgreSQL database on `7432`; Janusly web/API remain on loopback ports
-`7310`/`7311`. Unlike the Janusly Compose mappings, Supabase CLI can publish
-its Docker ports on every host interface. Treat `7431`/`7432` as trusted
-workstation ports, protect them with the host firewall, and never expose them
-to an untrusted LAN. The orchestrator captures `supabase status -o env`,
-injects the database URL into migration/API/worker containers, and passes Auth
-keys only to the web build and API. It disables `ALLOW_DEV_AUTH_HEADERS` for
-this profile. Generated credentials are never printed or written to a tracked
-file.
+`7310`/`7311`. The orchestrator creates a dedicated Docker bridge whose default
+host binding is `127.0.0.1`, inspects the effective container bindings, and
+recreates only the published gateway/database containers with an explicit
+loopback `HostIp` if the Docker runtime ignored that bridge option. The
+recreation uses the local Unix Docker API, keeps the database volume and
+container configuration, writes no secret-bearing image or temporary file,
+and rolls the original container back if replacement fails. Startup fails
+closed if any published Supabase port remains non-loopback.
+
+The orchestrator captures `supabase status -o env`, injects the database URL
+into migration/API/worker containers, and passes Auth keys only to the web
+build and API. It disables `ALLOW_DEV_AUTH_HEADERS` for this profile. Generated
+credentials are never printed or written to a tracked file.
 
 The browser smoke creates two real email/password identities, creates and
 switches organizations, accepts an invitation, verifies viewer/editor action
@@ -212,12 +217,12 @@ intentionally do not run against the real-identity profile.
 ## Local Development Versus Internal Deployment
 
 The Supabase CLI profile in this repository is development/test infrastructure.
-It has no production TLS or network hardening and must not be exposed to an
-untrusted network. Supabase CLI may publish `7431`/`7432` on every host
-interface even though the Janusly Compose services bind to loopback. Apart
-from initial container-image/package downloads, all database and Auth
-processing stays on the machine. CLI telemetry is explicitly disabled by the
-orchestrator.
+It has no production TLS, rate limiting, or production key lifecycle and must
+not be exposed publicly. The local orchestrator restricts every published
+service to loopback and verifies the effective bindings rather than trusting
+Docker network defaults. Apart from initial container-image/package downloads,
+all database and Auth processing stays on the machine. CLI telemetry is
+explicitly disabled by the orchestrator.
 
 An internal or on-premises production installation is possible, but it must
 use Supabase's supported self-hosted Docker topology rather than `supabase
@@ -502,9 +507,9 @@ configuration API. Starting Ollama alone never enables persistent memory.
 
 ## Safety Boundaries
 
-- Janusly Compose services bind published ports to `127.0.0.1`; Supabase CLI
-  may publish Auth `7431` and PostgreSQL `7432` on every host interface, so the
-  local lab requires a trusted workstation and host firewall.
+- Janusly Compose services and the Supabase Auth/PostgreSQL containers bind
+  every published port to `127.0.0.1`; startup verifies the effective Docker
+  mappings and fails closed on a wildcard or non-loopback binding.
 - The generated `local.env` is ignored by Git.
 - The generated Credential Secret Store root key is ignored by Git and mounted
   read-only into API and worker. Back it up before relying on managed local
@@ -523,6 +528,22 @@ configuration API. Starting Ollama alone never enables persistent memory.
 - Real tenant integration credentials belong in Janusly's encrypted Credential
   Secret Store (recommended) or a deliberately configured external
   environment/vault reference, never in workflow JSON or tenant configuration.
+
+Run the destructive local security qualification against an expendable local
+database:
+
+```bash
+pnpm local:security:smoke --confirm-reset
+```
+
+It resets tenant/Auth data, rebuilds the current checkout, verifies real Auth
+rejections, CORS, loopback-only publishing, bounded public health, encrypted
+credential storage, server-only secret mounts, bilingual accessibility, and
+browser/runtime errors. It then removes the generated tenant/Auth data and
+stops the stack; cleanup remains mandatory when a qualification step fails.
+Evidence is written under
+`output/review/2026-07-30-security-qualification/` and contains no plaintext
+credential.
 
 For the short-lived development/test orchestrator use `pnpm dev`. For metrics,
 traces, dashboards, and alerts, see [Observability](observability.md).

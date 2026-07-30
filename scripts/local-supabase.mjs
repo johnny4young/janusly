@@ -2,6 +2,7 @@
 
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { rebindPublishedContainerToLoopback } from "./docker-loopback.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const supabaseCli = fileURLToPath(
@@ -20,6 +21,12 @@ const authExclusions = [
   "mailpit",
   "postgrest",
 ].join(",");
+export const localSupabaseNetwork = "janusly-local-loopback";
+const loopbackBindingOption = "com.docker.network.bridge.host_binding_ipv4";
+const publishedContainerNames = [
+  "supabase_kong_janusly-local",
+  "supabase_db_janusly-local",
+];
 
 export const localPlaceholderDatabaseUrl =
   "postgres://unused:unused@127.0.0.1:1/postgres";
@@ -47,6 +54,137 @@ function runSupabase(argumentsList, options = {}) {
         `${process.execPath} ${supabaseCli} ${argumentsList.join(" ")} exited ${code}${!options.sensitive && stderr ? `: ${stderr.trim()}` : ""}`,
       )));
   });
+}
+
+function runDocker(argumentsList, options = {}) {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn("docker", argumentsList, {
+      cwd: root,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0 || options.allowFailure) {
+        resolvePromise({ code, stdout, stderr });
+        return;
+      }
+      reject(new Error(
+        `docker ${argumentsList.join(" ")} exited ${code}${stderr ? `: ${stderr.trim()}` : ""}`,
+      ));
+    });
+  });
+}
+
+export function assertLoopbackNetworkBinding(value) {
+  if (value.trim() !== "127.0.0.1") {
+    throw new Error(
+      `${localSupabaseNetwork} must set ${loopbackBindingOption}=127.0.0.1`,
+    );
+  }
+}
+
+export function isMissingDockerNetworkError(value) {
+  return /(?:No such network|network .+ not found)/u.test(value);
+}
+
+export function findUnsafePublishedBindings(inspections) {
+  const unsafe = [];
+  for (const inspection of inspections) {
+    for (const [containerPort, bindings] of Object.entries(
+      inspection.ports ?? {},
+    )) {
+      for (const binding of bindings ?? []) {
+        if (binding.HostIp !== "127.0.0.1") {
+          unsafe.push({
+            container: inspection.container,
+            containerPort,
+            hostIp: binding.HostIp,
+            hostPort: binding.HostPort,
+          });
+        }
+      }
+    }
+  }
+  return unsafe;
+}
+
+async function ensureLocalSupabaseNetwork() {
+  const inspected = await runDocker([
+    "network",
+    "inspect",
+    "--format",
+    `{{ index .Options "${loopbackBindingOption}" }}`,
+    localSupabaseNetwork,
+  ], { allowFailure: true });
+
+  if (inspected.code === 0) {
+    assertLoopbackNetworkBinding(inspected.stdout);
+    return;
+  }
+  if (!isMissingDockerNetworkError(inspected.stderr)) {
+    throw new Error(
+      `Unable to inspect the local Supabase Docker network: ${inspected.stderr.trim()}`,
+    );
+  }
+
+  await runDocker([
+    "network",
+    "create",
+    "--driver",
+    "bridge",
+    "--opt",
+    `${loopbackBindingOption}=127.0.0.1`,
+    localSupabaseNetwork,
+  ]);
+  const created = await runDocker([
+    "network",
+    "inspect",
+    "--format",
+    `{{ index .Options "${loopbackBindingOption}" }}`,
+    localSupabaseNetwork,
+  ]);
+  assertLoopbackNetworkBinding(created.stdout);
+}
+
+async function inspectPublishedBindings() {
+  return Promise.all(publishedContainerNames.map(async (container) => {
+    const result = await runDocker([
+      "inspect",
+      "--format",
+      "{{json .NetworkSettings.Ports}}",
+      container,
+    ]);
+    return {
+      container,
+      ports: JSON.parse(result.stdout.trim()),
+    };
+  }));
+}
+
+async function assertLocalSupabasePortBindings() {
+  const inspections = await inspectPublishedBindings();
+  for (const inspection of inspections) {
+    const bindings = Object.values(inspection.ports ?? {}).flatMap(
+      (portBindings) => portBindings ?? [],
+    );
+    if (bindings.length === 0) {
+      throw new Error(
+        `Local Supabase container ${inspection.container} has no published port`,
+      );
+    }
+  }
+  const unsafe = findUnsafePublishedBindings(inspections);
+  if (unsafe.length > 0) {
+    throw new Error(
+      `Local Supabase published a non-loopback port: ${unsafe
+        .map(({ container, hostIp, hostPort }) => `${container} ${hostIp}:${hostPort}`)
+        .join(", ")}`,
+    );
+  }
 }
 
 export function parseSupabaseEnvironmentOutput(output) {
@@ -107,7 +245,23 @@ export async function readLocalSupabaseStatus() {
 }
 
 export async function startLocalSupabase({ authEnabled }) {
-  await runSupabase(["start", "-x", authExclusions], { sensitive: true });
+  await ensureLocalSupabaseNetwork();
+  const startArguments = [
+    "start",
+    "--network-id",
+    localSupabaseNetwork,
+    "-x",
+    authExclusions,
+  ];
+  await runSupabase(startArguments, { sensitive: true });
+  try {
+    await assertLocalSupabasePortBindings();
+  } catch {
+    for (const containerName of publishedContainerNames) {
+      await rebindPublishedContainerToLoopback(containerName);
+    }
+    await assertLocalSupabasePortBindings();
+  }
   return buildLocalComposeEnvironment(
     await readLocalSupabaseStatus(),
     { authEnabled },

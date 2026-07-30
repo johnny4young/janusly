@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  assertLoopbackNetworkBinding,
   buildLocalComposeEnvironment,
+  findUnsafePublishedBindings,
+  isMissingDockerNetworkError,
+  localSupabaseNetwork,
   parseSupabaseEnvironmentOutput,
 } from "./local-supabase.mjs";
 
@@ -62,4 +66,77 @@ test("Auth profile fails closed when identity material is incomplete", () => {
     ),
     /anonymous\/publishable key/,
   );
+});
+
+test("local Supabase network accepts only an explicit IPv4 loopback binding", () => {
+  assert.doesNotThrow(() => assertLoopbackNetworkBinding("127.0.0.1\n"));
+  for (const value of ["", "0.0.0.0", "::1", "127.0.0.2"]) {
+    assert.throws(
+      () => assertLoopbackNetworkBinding(value),
+      new RegExp(`${localSupabaseNetwork}.*127\\.0\\.0\\.1`, "u"),
+    );
+  }
+});
+
+test("Docker network lookup recognizes daemon error variants", () => {
+  assert.equal(
+    isMissingDockerNetworkError(
+      "Error response from daemon: No such network: janusly-local-loopback",
+    ),
+    true,
+  );
+  assert.equal(
+    isMissingDockerNetworkError(
+      "Error response from daemon: network janusly-local-loopback not found",
+    ),
+    true,
+  );
+  assert.equal(
+    isMissingDockerNetworkError("permission denied connecting to daemon"),
+    false,
+  );
+});
+
+test("published Supabase ports reject wildcard and IPv6 host bindings", () => {
+  const inspections = [
+    {
+      container: "gateway",
+      ports: {
+        "8000/tcp": [
+          { HostIp: "127.0.0.1", HostPort: "7431" },
+          { HostIp: "0.0.0.0", HostPort: "7431" },
+          { HostIp: "::", HostPort: "7431" },
+        ],
+      },
+    },
+    {
+      container: "database",
+      ports: {
+        "5432/tcp": [{ HostIp: "127.0.0.1", HostPort: "7432" }],
+      },
+    },
+  ];
+
+  assert.deepEqual(findUnsafePublishedBindings(inspections), [
+    {
+      container: "gateway",
+      containerPort: "8000/tcp",
+      hostIp: "0.0.0.0",
+      hostPort: "7431",
+    },
+    {
+      container: "gateway",
+      containerPort: "8000/tcp",
+      hostIp: "::",
+      hostPort: "7431",
+    },
+  ]);
+  assert.deepEqual(findUnsafePublishedBindings([
+    {
+      container: "gateway",
+      ports: {
+        "8000/tcp": [{ HostIp: "127.0.0.1", HostPort: "7431" }],
+      },
+    },
+  ]), []);
 });

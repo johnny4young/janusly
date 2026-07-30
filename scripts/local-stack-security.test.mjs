@@ -15,7 +15,11 @@ test("Supabase lifecycle commands capture credential-bearing output", () => {
   );
   assert.match(
     source,
-    /runSupabase\(\["start", "-x", authExclusions\], \{ sensitive: true \}\)/,
+    /const startArguments = \[\s*"start",\s*"--network-id",\s*localSupabaseNetwork,\s*"-x",\s*authExclusions,\s*\]/,
+  );
+  assert.match(
+    source,
+    /runSupabase\(startArguments, \{ sensitive: true \}\)/,
   );
   assert.match(
     source,

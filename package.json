@@ -43,6 +43,7 @@
     "local:clean-install": "node scripts/local-stack.mjs clean-install --auth",
     "local:clean-install:smoke": "node scripts/local-clean-install-smoke.mjs",
     "local:upgrade-rollback:smoke": "node scripts/local-upgrade-rollback-smoke.mjs",
+    "local:security:smoke": "node scripts/local-security-smoke.mjs",
     "local:down": "node scripts/local-stack.mjs down",
     "local:reset": "node scripts/local-stack.mjs reset",
     "local:restart": "node scripts/local-stack.mjs restart",
