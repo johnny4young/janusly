@@ -167,7 +167,7 @@ crítica) · P1 (importante) · P2 (stretch).
 | T-001 | Config, boot, observabilidad (4600/4601, slog, healthz, probe) | P0 | done |
 | T-002 | sqlc + inventario real del esquema + persistencia núcleo | P0 | done |
 | T-003 | Dominio: parsing + validación subconjunto (códigos de issue) | P0 | partial |
-| T-004 | startRun transaccional + defaults de inputs | P0 | todo |
+| T-004 | startRun transaccional + defaults de inputs | P0 | partial |
 | T-005 | Cola propia: claim loop, worker pool, LISTEN/NOTIFY | P0 | todo |
 | T-006 | Gramáticas subconjunto: templates + expresiones | P0 | todo |
 | T-007 | Executors: noop, transform, condition + semántica de aristas | P0 | todo |
@@ -588,6 +588,11 @@ el chat publicado.
 | 2026-07-30 | divergencia aceptada (F2 revisa) | Mensajes de `invalid_contract`: paridad de código+path sí, redacción exacta de Zod no reproducible mecánicamente |
 | 2026-07-30 | divergencia menor | Orden de issues dentro de properties: Go itera ordenado alfabético (mapas sin orden); Node usa orden de inserción — el arnés de paridad compara conjuntos |
 | 2026-07-30 | decisión | Gramática de expresiones como seam inyectable (`ExpressionValidator`); permisiva hasta que la gramática real la reemplace |
+| 2026-07-30 | paridad exacta | startRun: raíces `queued`+`attempts=1`+`state_json {}`, resto `pending`+0; evento `run.started` payload `{workflowVersionId}`; versionId = versionId ?? workflowId ?? runId (leído de start-run.ts:85,225-249) |
+| 2026-07-30 | decisión | NOTIFY dentro de la transacción (pg entrega al commit) — el wake solo dispara si el commit ocurre; probado con LISTEN real |
+| 2026-07-30 | decisión | Semántica undefined/null del JS portada como (value, present); nil en el tope = ausente; el engine normaliza input nil→{} como Node |
+| 2026-07-30 | nota | Dep nueva: google/uuid (paridad de formato de ids con crypto.randomUUID) |
+| 2026-07-30 | nota | El endurecimiento __proto__ que develop añadió a applyInputDefaults es gratis en Go (mapas sin prototipo) — test lo fija igual |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)

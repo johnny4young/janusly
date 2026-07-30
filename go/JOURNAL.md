@@ -97,3 +97,23 @@ consolidan en el informe de la puerta D15.
   validan limpias.
 - Fricción menor: mapas Go sin orden → iteración ordenada para issues
   deterministas (Node usa orden de inserción; comparación por conjuntos).
+
+## 2026-07-30 — startRun transaccional + defaults (T-004)
+
+- El invariante fundacional portado con su forma exacta: raíces `queued` con
+  `attempts=1` y `state_json {}`, resto `pending`; evento `run.started` con
+  payload `{workflowVersionId}`; cadena de fallback del versionId igual a la
+  referencia.
+- NOTIFY viaja DENTRO de la transacción — Postgres lo entrega solo al
+  commit, así que el despertar de workers no puede adelantarse a un rollback.
+  Probado con un LISTEN real que recibe el run id.
+- Atomicidad probada con inyección: un wrapper de DBTX falla en el tercer
+  statement y las tres tablas quedan en cero — el seam `wrapTx` es el patrón
+  de arnés en acción.
+- `applyInputDefaults` portado del pin (que ya traía un endurecimiento de
+  `__proto__` posterior a mi versión TS — en Go es gratis, test igual);
+  la distinción undefined/null del JS se volvió (value, present).
+- El caso estrella verificado de punta a punta: payload estilo trigger
+  satisface requeridos vía defaults y lo persistido lleva defaults + claves
+  del trigger juntos.
+- 9 tests portados/nuevos citando el `it(...)` TS de origen.

@@ -58,8 +58,8 @@ UPDATE runs SET status = $4, output_json = COALESCE($5, output_json)
 WHERE id = $1 AND org_id = $2 AND status = $3;
 
 -- name: InsertRunNode :exec
-INSERT INTO run_nodes (id, run_id, node_id, status)
-VALUES ($1, $2, $3, $4);
+INSERT INTO run_nodes (id, run_id, node_id, status, attempts, state_json)
+VALUES ($1, $2, $3, $4, $5, $6);
 
 -- name: GetRunNode :one
 SELECT id, run_id, node_id, status, state_json, attempts, started_at,
@@ -136,3 +136,6 @@ LIMIT $1;
 
 -- name: DeleteWakeup :exec
 DELETE FROM go_pilot_wakeups WHERE run_node_id = $1;
+
+-- name: NotifyWake :exec
+SELECT pg_notify('janusly_go_wake', sqlc.arg(run_id)::text);

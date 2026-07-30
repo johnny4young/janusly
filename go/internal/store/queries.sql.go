@@ -365,15 +365,17 @@ func (q *Queries) InsertRunEvent(ctx context.Context, arg InsertRunEventParams) 
 }
 
 const insertRunNode = `-- name: InsertRunNode :exec
-INSERT INTO run_nodes (id, run_id, node_id, status)
-VALUES ($1, $2, $3, $4)
+INSERT INTO run_nodes (id, run_id, node_id, status, attempts, state_json)
+VALUES ($1, $2, $3, $4, $5, $6)
 `
 
 type InsertRunNodeParams struct {
-	ID     string
-	RunID  string
-	NodeID string
-	Status string
+	ID        string
+	RunID     string
+	NodeID    string
+	Status    string
+	Attempts  pgtype.Int4
+	StateJson json.RawMessage
 }
 
 func (q *Queries) InsertRunNode(ctx context.Context, arg InsertRunNodeParams) error {
@@ -382,6 +384,8 @@ func (q *Queries) InsertRunNode(ctx context.Context, arg InsertRunNodeParams) er
 		arg.RunID,
 		arg.NodeID,
 		arg.Status,
+		arg.Attempts,
+		arg.StateJson,
 	)
 	return err
 }
@@ -751,6 +755,15 @@ func (q *Queries) ListWorkflows(ctx context.Context, arg ListWorkflowsParams) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const notifyWake = `-- name: NotifyWake :exec
+SELECT pg_notify('janusly_go_wake', $1::text)
+`
+
+func (q *Queries) NotifyWake(ctx context.Context, runID string) error {
+	_, err := q.db.Exec(ctx, notifyWake, runID)
+	return err
 }
 
 const queueRunNode = `-- name: QueueRunNode :execrows
