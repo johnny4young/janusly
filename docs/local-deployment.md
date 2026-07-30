@@ -56,7 +56,9 @@ pnpm directly and CI uses `pnpm/action-setup`.
 The `pnpm local:auth:up` command copies `deploy/local/local.env.example` to the ignored
 `deploy/local/local.env` and creates an ignored
 `deploy/local/.secrets/credential-master.key` with directory mode 0700 and file
-mode 0600. Compose exposes it read-only to the non-root API and worker through
+mode 0600. The generated environment file is also repaired to mode 0600 on
+every lifecycle command because it may contain real provider credentials.
+Compose exposes the root key read-only to the non-root API and worker through
 its secret mount; it is never
 printed, copied into the browser image, or stored in PostgreSQL. Edit
 `local.env` for host-port or local sender changes. Then open
@@ -100,6 +102,36 @@ asks `/ai/generate-workflow` for the off-hours automation, saves that exact
 graph, sends a signed event, requires one simulator GET→PUT→POST sequence, and
 proves a duplicate delivery creates no second external effect. No public
 GitHub, Slack, PagerDuty, webhook, or email endpoint is contacted.
+
+## Clean Installation Qualification
+
+A clean installation deliberately removes the unified Auth/application
+database, Redis and simulator volumes, generated local environment file, and
+Credential Secret Store root key. It then recreates private configuration,
+builds the current checkout, starts real Supabase identity, applies every
+Janusly migration, and proves the database has no users or tenant data:
+
+```bash
+pnpm local:clean-install -- --confirm-reset
+```
+
+The explicit confirmation is mandatory and the command is available only for
+the real local identity profile. Back up anything important first.
+
+Run the complete browser qualification with:
+
+```bash
+JANUSLY_EVIDENCE_DIR="$PWD/output/review/local-clean-install" \
+  pnpm local:clean-install:smoke -- --confirm-reset
+```
+
+The smoke requires the empty database, captures the English and Spanish login
+and first-workspace onboarding surfaces, checks serious/critical accessibility
+findings, horizontal overflow, and browser/network errors, and proves that
+sign-up creates only one identity—not an organization, workflow, credential,
+or tenant configuration. It resets and starts the stack once more afterward,
+leaving a clean login screen ready for manual configuration. Its JSON report
+and screenshots stay under the ignored evidence directory.
 
 ## Real Local Identity Profile
 

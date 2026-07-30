@@ -40,6 +40,8 @@
     "observability:down": "docker compose -f deploy/observability/compose.local.yml down",
     "observability:check": "node --test scripts/observability-config.test.mjs",
     "local:up": "node scripts/local-stack.mjs up",
+    "local:clean-install": "node scripts/local-stack.mjs clean-install --auth",
+    "local:clean-install:smoke": "node scripts/local-clean-install-smoke.mjs",
     "local:down": "node scripts/local-stack.mjs down",
     "local:reset": "node scripts/local-stack.mjs reset",
     "local:restart": "node scripts/local-stack.mjs restart",

@@ -7,7 +7,9 @@ import {
   ensureLocalEnv,
   getLocalStackSettings,
   localEnvFile,
+  removeLocalGeneratedConfiguration,
 } from "./local-env.mjs";
+import { assertCleanInstallRequest } from "./local-clean-install-policy.mjs";
 import {
   formatLocalStackStatus,
   inspectLocalSupabase,
@@ -164,7 +166,7 @@ async function waitFor(url, timeoutMs = 240_000) {
 
 await ensureLocalEnv();
 await ensureLocalCredentialMasterKey();
-const settings = await getLocalStackSettings();
+let settings = await getLocalStackSettings();
 
 async function waitForStack() {
   await Promise.all([
@@ -174,18 +176,46 @@ async function waitForStack() {
   ]);
 }
 
-if (command === "up") {
-  await startLocalSupabase({ authEnabled: authProfile });
+async function startStack({ authEnabled }) {
+  await startLocalSupabase({ authEnabled });
   await compose(["up", "-d", "--build"]);
   try {
     await waitForStack();
-    console.log(
-      `[local] ready: web ${settings.webUrl} · api ${settings.apiUrl} · provider mode ${settings.simulatorEnabled ? "simulator" : "external"} · identity ${authProfile ? "supabase" : "dev-headers"}`,
-    );
   } catch (error) {
     await compose(["logs", "--tail", "150"]);
     throw error;
   }
+}
+
+async function verifyUnifiedDatabase(expectation) {
+  configureSupabaseEnvironment(await readLocalSupabaseStatus(), { authEnabled: authProfile });
+  await compose([
+    "run", "--rm", "--no-deps", "api",
+    "pnpm", "--filter", "@janusly/api", "exec", "tsx",
+    "../../scripts/verify-local-unified-db.ts",
+    ...(expectation === "empty" ? ["--expect-empty"] : []),
+    ...(expectation === "onboarding" ? ["--expect-onboarding"] : []),
+  ]);
+}
+
+if (command === "up") {
+  await startStack({ authEnabled: authProfile });
+  console.log(
+    `[local] ready: web ${settings.webUrl} · api ${settings.apiUrl} · provider mode ${settings.simulatorEnabled ? "simulator" : "external"} · identity ${authProfile ? "supabase" : "dev-headers"}`,
+  );
+} else if (command === "clean-install") {
+  assertCleanInstallRequest(process.argv.slice(3));
+  await compose(["down", "-v", "--remove-orphans"]);
+  await stopLocalSupabase({ reset: true });
+  await removeLocalGeneratedConfiguration();
+  await ensureLocalEnv();
+  await ensureLocalCredentialMasterKey();
+  settings = await getLocalStackSettings();
+  await startStack({ authEnabled: true });
+  await verifyUnifiedDatabase("empty");
+  console.log(
+    `[local] clean installation ready: web ${settings.webUrl} · api ${settings.apiUrl} · identity supabase · database empty`,
+  );
 } else if (command === "down") {
   await compose(["down"]);
   await stopLocalSupabase();
@@ -221,15 +251,15 @@ if (command === "up") {
     "../../scripts/cleanup-local-recovery-lab.ts",
   ]);
 } else if (command === "verify-db") {
-  configureSupabaseEnvironment(await readLocalSupabaseStatus(), { authEnabled: authProfile });
-  await compose([
-    "run", "--rm", "--no-deps", "api",
-    "pnpm", "--filter", "@janusly/api", "exec", "tsx",
-    "../../scripts/verify-local-unified-db.ts",
-    ...(process.argv.includes("--expect-empty") ? ["--expect-empty"] : []),
-  ]);
+  await verifyUnifiedDatabase(
+    process.argv.includes("--expect-empty")
+      ? "empty"
+      : process.argv.includes("--expect-onboarding")
+        ? "onboarding"
+        : "topology",
+  );
 } else if (command === "logs") {
   await compose(["logs", "-f", "--tail", "150"]);
 } else {
-  throw new Error("usage: node scripts/local-stack.mjs up|down|reset|restart|status|fixtures|recovery-lab-cleanup|verify-db|logs [--auth] [--expect-empty]");
+  throw new Error("usage: node scripts/local-stack.mjs up|clean-install|down|reset|restart|status|fixtures|recovery-lab-cleanup|verify-db|logs [--auth] [--confirm-reset] [--expect-empty|--expect-onboarding]");
 }
