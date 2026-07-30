@@ -1221,17 +1221,27 @@
   padding: 0 4px;
 }
 
-.run-input-required {
-  color: var(--we-primary);
-  margin-left: 4px;
-}
-
-.run-input-checkbox {
+.run-input-field-label {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  font-size: 13px;
-  color: var(--we-text-1);
+}
+
+.run-input-field-label > small {
+  border: 1px solid var(--we-line);
+  border-radius: 999px;
+  color: var(--we-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 7px;
+}
+
+.run-input-field-label > small[data-required="true"] {
+  background: var(--we-primary-soft);
+  border-color: color-mix(in srgb, var(--we-primary) 24%, var(--we-line));
+  color: var(--we-primary);
 }
 
 .run-input-field-error {
