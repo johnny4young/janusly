@@ -166,7 +166,7 @@ crítica) · P1 (importante) · P2 (stretch).
 | T-000 | Bootstrap: worktree, rama, scaffold, Compose 4632, migraciones | P0 | done |
 | T-001 | Config, boot, observabilidad (4600/4601, slog, healthz, probe) | P0 | done |
 | T-002 | sqlc + inventario real del esquema + persistencia núcleo | P0 | done |
-| T-003 | Dominio: parsing + validación subconjunto (códigos de issue) | P0 | todo |
+| T-003 | Dominio: parsing + validación subconjunto (códigos de issue) | P0 | partial |
 | T-004 | startRun transaccional + defaults de inputs | P0 | todo |
 | T-005 | Cola propia: claim loop, worker pool, LISTEN/NOTIFY | P0 | todo |
 | T-006 | Gramáticas subconjunto: templates + expresiones | P0 | todo |
@@ -584,6 +584,10 @@ el chat publicado.
 | 2026-07-30 | decisión | sqlc como tool de go.mod (`go tool sqlc`) — pinneada 1.31.1, sin brew, agnóstica de máquina; esquema vía `make schema-dump` (pg_dump del contenedor) |
 | 2026-07-30 | hallazgo | Postgres jsonb NORMALIZA al escribir (claves alfabéticas, espaciado canónico) — idéntico para Node; el passthrough RawMessage garantiza cero re-encodeo de Go encima, no des-normalización. La afirmación de §1.3/§3 queda precisada así |
 | 2026-07-30 | gotcha sqlc | Overrides de timestamptz requieren AMBAS formas (`timestamptz` para parámetros y `pg_catalog.timestamptz` para columnas) |
+| 2026-07-30 | hallazgo | Node YA tiene `unsupported_node_type` (tipo inválido en toda la plataforma); el código piloto cubre el caso distinto "válido en Node, no ejecutable en F0" — ambos coexisten |
+| 2026-07-30 | divergencia aceptada (F2 revisa) | Mensajes de `invalid_contract`: paridad de código+path sí, redacción exacta de Zod no reproducible mecánicamente |
+| 2026-07-30 | divergencia menor | Orden de issues dentro de properties: Go itera ordenado alfabético (mapas sin orden); Node usa orden de inserción — el arnés de paridad compara conjuntos |
+| 2026-07-30 | decisión | Gramática de expresiones como seam inyectable (`ExpressionValidator`); permisiva hasta que la gramática real la reemplace |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)

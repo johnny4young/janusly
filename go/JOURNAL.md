@@ -79,3 +79,21 @@ consolidan en el informe de la puerta D15.
   simple; mezclar sqlc.arg() con $N posicionales rompe la numeración.
 - Fricción de tests contra DB persistente: ids fijos chocan entre
   re-ejecuciones → helper `uid()` por invocación.
+
+## 2026-07-30 — Dominio + validación del subconjunto (T-003)
+
+- Porte check por check y EN EL ORDEN de la referencia: 16 códigos con sus
+  mensajes exactos (leídos de la fuente en el pin, con cita archivo:línea en
+  cada test).
+- Hallazgo: Node ya tiene `unsupported_node_type` — el código piloto quedó
+  para el caso distinto "válido en la plataforma, no ejecutable aquí aún".
+- Semántica JS portada con intención: truthiness (`!config.url` = ausente,
+  "", null, false y 0), coerción String(), y el guard de inputs.* en aristas
+  con el mismo regex que ignora literales entre comillas.
+- Paridad de mensaje verificada contra la corrida real de Node de hace unos
+  días: `Declared default for $.start is invalid: $.start must be string,
+  got number` — byte a byte.
+- Las dos fixtures de docs/workflows.md (§2 condicional, §6 approval)
+  validan limpias.
+- Fricción menor: mapas Go sin orden → iteración ordenada para issues
+  deterministas (Node usa orden de inserción; comparación por conjuntos).
