@@ -253,10 +253,36 @@ selected set.
 ## 5. Use it from the UI
 
 1. **Open** <http://localhost:5173>.
-2. Start in **AI Copilot** and describe the outcome you want. With no key, Janusly loads a deterministic starter workflow; with a key, it drafts a workflow from the prompt.
-3. Click **Explain current flow** to get a plain-language explanation of the canvas.
-4. Click **Run** on the workflow.
-5. Switch to **Run history** and ask Janusly what happened. Each reply tags `mode: "ai"` (LLM) or `mode: "fallback"` (deterministic) so you always know which path served the answer.
+2. Open **Workflows**. For a new workflow, choose **Describe it** to ask
+   Janusly for a draft, or **Start blank** to author it directly.
+3. In **Build**, select an **AI prompt** step on the canvas. **Quick setup**
+   offers two prompt sources:
+   - **Write it here** stores an inline `config.prompt`.
+   - **Use a saved prompt** stores `config.promptRef`. Choose a prompt from the
+     organization registry; Advanced options can pin an exact version and
+     supply its declared variables. When version is blank, the runtime uses the
+     prompt's pinned version or otherwise its latest version.
+4. Choose the output contract:
+   - **Text** returns the answer under `output.response`.
+   - **JSON text** asks the provider for JSON but still returns the text under
+     `output.response`.
+   - **Validated structured data** validates the response against the shown
+     JSON Schema subset and exposes accepted fields under `output.data`.
+5. Leave **Model override** blank to use the organization default. If it is
+   necessary to override it, use an approved Anthropic model.
+6. Save, then click **Run**. Without a configured provider, on budget/provider
+   failure, on missing prompt data, or on an invalid structured result, the AI
+   step completes through the deterministic `mode: "fallback"` path instead
+   of crashing the workflow. Structured-output fallbacks include
+   `valid: false`.
+7. Open **Activity → Runs** and ask Janusly what happened. Each AI response
+   identifies `mode: "ai"` or `mode: "fallback"` so the serving path remains
+   explicit.
+
+Saved prompts are currently created and versioned through the REST API or MCP;
+the Build Inspector intentionally consumes that registry rather than creating a
+second browser-only prompt store. See the PromptOps routes in
+[`docs/api.md`](api.md).
 
 ---
 

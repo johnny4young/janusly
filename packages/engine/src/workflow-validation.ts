@@ -235,7 +235,16 @@ export function validateWorkflow(workflow: unknown, options: ValidateWorkflowOpt
     // `ai` / `agent` / `transform` nodes. Mirrors the per-type checks
     // above for `http` / `tool` / `condition` / `loop`.
     if (node.type === "ai") {
-      if (!node.config.prompt) issues.push({ code: "ai_missing_prompt", message: "AI node requires config.prompt", nodeId: node.id });
+      const promptRef = node.config.promptRef;
+      const hasInlinePrompt = typeof node.config.prompt === "string" && node.config.prompt.trim().length > 0;
+      const hasPromptRef =
+        promptRef !== null
+        && typeof promptRef === "object"
+        && typeof (promptRef as { name?: unknown }).name === "string"
+        && (promptRef as { name: string }).name.trim().length > 0;
+      if (!hasInlinePrompt && !hasPromptRef) {
+        issues.push({ code: "ai_missing_prompt", message: "AI node requires config.prompt or config.promptRef", nodeId: node.id });
+      }
       if (node.config.outputSchema !== undefined && !WorkflowInputSchema.safeParse(node.config.outputSchema).success) {
         issues.push({ code: "ai_invalid_output_schema", message: "AI node config.outputSchema must use the supported workflow schema subset", nodeId: node.id });
       }

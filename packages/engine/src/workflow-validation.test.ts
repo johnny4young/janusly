@@ -410,6 +410,39 @@ describe('validateWorkflow', () => {
     expect(codes.filter(c => c === 'transform_missing_mapping').length).toBe(2)
   })
 
+  it('accepts a prompt reference as the AI node prompt source', () => {
+    const result = validateWorkflow({
+      nodes: [{
+        id: 'classify',
+        type: 'ai',
+        config: {
+          promptRef: { name: 'invoice_classifier', version: 2 },
+          variables: { customer: 'Ada' },
+          outputSchema: {
+            type: 'object',
+            properties: { risk: { type: 'string' } },
+            required: ['risk'],
+          },
+        },
+      }],
+      edges: [],
+    })
+
+    expect(result).toEqual({ valid: true, issues: [] })
+  })
+
+  it('rejects blank inline and referenced AI prompt sources', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'inline', type: 'ai', config: { prompt: '   ' } },
+        { id: 'saved', type: 'ai', config: { promptRef: { name: '   ' } } },
+      ],
+      edges: [],
+    })
+
+    expect(result.issues.filter(issue => issue.code === 'ai_missing_prompt')).toHaveLength(2)
+  })
+
   it('validates human_form schema before runtime execution', () => {
     const invalid = validateWorkflow({
       nodes: [

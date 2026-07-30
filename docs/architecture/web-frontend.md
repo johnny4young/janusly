@@ -29,6 +29,21 @@ layout and malformed-wire fail-closed behavior covered.
 
 The HTTP Inspector is basics-first and mirrors the existing engine contract rather than inventing a web-only request model. Method and URL are always visible; methods that can carry a payload expose an optional arbitrary-JSON body. Headers plus buffered/stream response handling live behind one request-options disclosure, while retry, timeout, and response bounds live behind a separate Resilience disclosure. Existing configured options are summarized while collapsed, malformed optional JSON remains local until it parses, switching back to buffered mode removes stream-only keys, and readiness deep links open and focus the collapsed Resilience controls through the existing focus bus. `HttpConfigEditor` owns the request surface, `ResilienceFieldset` owns operational policy, and `QuickConfigEditor` remains only the node-type dispatcher; Advanced JSON stays the escape hatch for forward-compatible passthrough keys.
 
+The AI Inspector follows the same basics-first boundary through `AiConfigEditor`.
+Prompt source is an explicit, mutually exclusive choice between inline text and
+an organization-scoped saved prompt; each transition removes the inactive
+source so the editor cannot create the runtime's ambiguous
+`prompt` + `promptRef` state. The saved-prompt list is parsed as untrusted
+server data, loaded only when that source is selected, trimmed, deduplicated,
+and capped at 200 entries. Output is one of
+plain text, JSON text, or validated structured data; changing modes removes
+stale `responseFormat` / `outputSchema` keys, and structured mode starts from a
+valid minimal contract. Prompt version, variables, and the Anthropic model
+override stay behind one Advanced disclosure. Canvas and Inspector summaries
+use the same `promptRef`-first precedence as the executor, while workflow
+validation accepts either a nonblank inline prompt or a valid saved-prompt
+reference. Advanced JSON remains the forward-compatible escape hatch.
+
 **Declared run input UX:** workflows with a typed `inputs` schema open the lazy `RunInputDialog` before `POST /start`; workflows without inputs keep the one-click run path. Durable schema keys remain unchanged in the submitted payload, while `run-input-model.ts` derives readable labels, maps JSONPath server errors, and owns state parsing independently from the dialog view. Required fields render before optional fields and each group uses a stable readable-label order because PostgreSQL JSONB does not preserve authoring order. Every field shows an explicit Required/Optional badge; a boolean has an unset/Yes/No state so untouched required values cannot silently become `false`, while explicit `false` remains valid. The first rendered field receives focus through the shared dialog-focus primitive, keyboard trapping/restoration stays centralized, and the engine remains the authoritative default/type validator.
 
 **Loop authoring:** the Inspector preserves omitted/default `map` behavior and exposes `for_each` as an explicit mode with the existing registered-tool picker, per-item JSON input, concurrency 1..20, and one count-or-percentage failure budget. Switching budget units removes the inactive key, fractional percentages remain exact, and legacy mapping stays in config when the operator temporarily selects tool execution. EN/ES labels and browser coverage live in the same lazy authoring boundary; do not duplicate the tool catalog or create a web-only validation model.

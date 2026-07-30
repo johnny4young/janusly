@@ -152,7 +152,19 @@ export function getNodeHelper(type: string): string {
 /** One-line config summary for the Inspector header (e.g. "GET https://api.example.com"). */
 export function getNodeConfigSummary(type: string, config: JsonObject): string {
   if (type === 'http') return readString(config.url) ?? (t('nodeSummary.http.empty'))
-  if (type === 'ai') return compact(readString(config.prompt) ?? (t('nodeSummary.ai.empty')))
+  if (type === 'ai') {
+    const promptRef = config.promptRef
+    if (promptRef && typeof promptRef === 'object' && !Array.isArray(promptRef)) {
+      const name = readString((promptRef as JsonObject).name)
+      if (name) {
+        const version = (promptRef as JsonObject).version
+        return typeof version === 'number' && Number.isSafeInteger(version) && version > 0
+          ? t('nodeSummary.ai.savedVersion', { name, version })
+          : t('nodeSummary.ai.saved', { name })
+      }
+    }
+    return compact(readString(config.prompt) ?? (t('nodeSummary.ai.empty')))
+  }
   if (type === 'tool') return readString(config.tool) ?? (t('nodeSummary.tool.empty'))
   if (type === 'agent') return compact(readString(config.goal) ?? (t('nodeSummary.agent.empty')))
   if (type === 'multi_agent') {

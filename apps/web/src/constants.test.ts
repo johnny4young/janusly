@@ -33,6 +33,19 @@ describe('node-type catalogue', () => {
   })
 
   describe('getNodeConfigSummary', () => {
+    it('summarises the saved prompt that the AI executor will use', () => {
+      expect(getNodeConfigSummary('ai', {
+        prompt: 'Ignored inline draft',
+        promptRef: { name: 'invoice_classifier', version: 2 },
+      })).toBe('Saved prompt: invoice_classifier · v2')
+      expect(getNodeConfigSummary('ai', {
+        promptRef: { name: 'daily_summary' },
+      })).toBe('Saved prompt: daily_summary')
+      expect(getNodeConfigSummary('ai', {
+        promptRef: { name: 'daily_summary', version: -1 },
+      })).toBe('Saved prompt: daily_summary')
+    })
+
     it('surfaces an exact subworkflow version pin', () => {
       expect(getNodeConfigSummary('subworkflow', { workflowId: 'child-flow', version: 3 }))
         .toBe('child-flow · v3')

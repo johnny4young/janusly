@@ -16,6 +16,7 @@ import { McpToolConfigField } from './McpToolConfigField'
 import { ResilienceFieldset } from './ResilienceFieldset'
 import { ExpressionAssistant } from './ExpressionAssistant'
 import { HttpConfigEditor } from './HttpConfigEditor'
+import { AiConfigEditor } from './AiConfigEditor'
 import {
   ApprovalConfigEditor,
   HumanFormConfigEditor,
@@ -215,12 +216,7 @@ export function QuickConfigEditor({
   }
 
   if (type === 'ai') {
-    return (
-      <section className="quick-config">
-        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
-        <TextareaConfigField scope={nodeId} label={t('rightPanel.quickConfig.prompt')} value={readConfigString(config, 'prompt')} onChange={value => patch({ prompt: value })} />
-      </section>
-    )
+    return <AiConfigEditor nodeId={nodeId} config={config} onUpdate={onUpdate} />
   }
 
   if (type === 'tool') {
