@@ -7,7 +7,7 @@
  * literals, `null`, and dotted paths starting with `context.` or `inputs.`.
  *
  * Used by the engine (`condition` executor + edge guard), API workflow
- * sanitization, and the web Inspector's Expression Assistant. Keeping this
+ * sanitization, and the web Inspector's branch-rule editor. Keeping this
  * parser zero-dependency lets authoring validate the exact runtime grammar
  * without shipping a duplicate implementation.
  *
@@ -47,10 +47,20 @@ const comparisonOperators = [
   "in",
 ] as const;
 type ComparisonOperator = (typeof comparisonOperators)[number];
+export const SIMPLE_COMPARISON_OPERATORS = ["===", "!==", ">", ">=", "<", "<="] as const;
+export type SimpleComparisonOperator = (typeof SIMPLE_COMPARISON_OPERATORS)[number];
+export type SimpleExpressionPrimitive = string | number | boolean;
+export type SimpleComparisonExpression = {
+  left: string;
+  operator: SimpleComparisonOperator;
+  right: SimpleExpressionPrimitive;
+};
 
 const wordComparisonOperators = new Set<ComparisonOperator>(["contains", "startsWith", "matches", "in"]);
 const MAX_GLOB_PATTERN_CHARS = 256;
 const MAX_GLOB_VALUE_CHARS = 16_384;
+const safePathPattern = /^(context|inputs)(\.[A-Za-z0-9_$-]+|\[\d+\])*$/;
+const simpleComparisonPattern = /^((?:context|inputs)(?:\.[A-Za-z0-9_$-]+|\[\d+\])*)\s*(===|!==|>=|<=|>|<)\s*(true|false|-?\d+(?:\.\d+)?|'[^']*'|"[^"]*")$/;
 
 /**
  * Static-evaluate the expression with empty scopes to surface syntactic /
@@ -79,6 +89,52 @@ export function validateExpression(expression: string): ExpressionValidationResu
     }
     return { valid: false, message, code: "invalid_expression" };
   }
+}
+
+/**
+ * Project the common one-path-versus-one-literal subset used by guided
+ * authoring. Complex boolean expressions remain valid runtime expressions,
+ * but deliberately return `null` so callers preserve them in their advanced
+ * editor instead of attempting a lossy round trip.
+ */
+export function parseSimpleComparisonExpression(expression: string): SimpleComparisonExpression | null {
+  const trimmed = stripOuterParens(expression.trim());
+  const match = simpleComparisonPattern.exec(trimmed);
+  if (!match) return null;
+  const raw = match[3]!;
+  const right = raw === "true"
+    ? true
+    : raw === "false"
+      ? false
+      : raw.startsWith("'") || raw.startsWith('"')
+        ? raw.slice(1, -1)
+        : Number(raw);
+  return {
+    left: match[1]!,
+    operator: match[2] as SimpleComparisonOperator,
+    right,
+  };
+}
+
+/**
+ * Serialize the guided-authoring subset back into the exact runtime grammar.
+ * Returns `null` when a string cannot be represented without escaping because
+ * the runtime grammar intentionally treats quoted values as raw text.
+ */
+export function formatSimpleComparisonExpression(expression: SimpleComparisonExpression): string | null {
+  if (!safePathPattern.test(expression.left.trim())) return null;
+  const value = expression.right;
+  const right = typeof value === "boolean"
+    ? String(value)
+    : typeof value === "number"
+      ? Number.isFinite(value) ? String(value) : null
+    : !value.includes("'")
+      ? `'${value}'`
+      : !value.includes('"')
+        ? `"${value}"`
+        : null;
+  if (right === null) return null;
+  return `${expression.left.trim()} ${expression.operator} ${right}`;
 }
 
 /**
@@ -189,7 +245,7 @@ function readValue(token: string, scope: ExpressionScope): unknown {
     return trimmed.slice(1, -1);
   }
 
-  if (/^(context|inputs)(\.[A-Za-z0-9_$-]+|\[\d+\])*$/.test(trimmed)) {
+  if (safePathPattern.test(trimmed)) {
     return getBySafePath(scope, trimmed);
   }
 

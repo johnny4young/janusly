@@ -66,6 +66,23 @@ remains available even before a tool is selected. `ToolPicker` and the
 `loop.mode="for_each"`; do not fork another tool catalog, field parser, or
 search model.
 
+**Branch-rule authoring:** condition nodes and conditional edges share
+`BranchRuleEditor`. The primary path projects one safe path-versus-literal
+comparison into aligned source/operator/value controls, inferring scalar type
+from the declared input, upstream output, or existing expression. It uses only
+scalar graph inputs and upstream outputs reachable at that execution point.
+The selector shows the exact durable context path so the saved rule remains
+inspectable without a hidden display-name mapping.
+An unconditional edge stays an absent condition; an always-true condition node
+stays the literal `true`. Compound boolean expressions, list membership, loose
+equality, and any expression outside the lossless guided subset open in the
+advanced exact-text editor and are never rewritten merely by rendering.
+The subset parser/formatter lives beside the runtime evaluator in
+`@janusly/shared/src/expression`; contextual reachability and validation status
+remain shared through `expression-context.ts`, with errors rendered by the
+editor beside the affected control. Do not fork separate node/edge editors or
+a browser-only expression grammar.
+
 **Declared run input UX:** workflows with a typed `inputs` schema open the lazy `RunInputDialog` before `POST /start`; workflows without inputs keep the one-click run path. Durable schema keys remain unchanged in the submitted payload, while `run-input-model.ts` derives readable labels, maps JSONPath server errors, and owns state parsing independently from the dialog view. Required fields render before optional fields and each group uses a stable readable-label order because PostgreSQL JSONB does not preserve authoring order. Every field shows an explicit Required/Optional badge; a boolean has an unset/Yes/No state so untouched required values cannot silently become `false`, while explicit `false` remains valid. The first rendered field receives focus through the shared dialog-focus primitive, keyboard trapping/restoration stays centralized, and the engine remains the authoritative default/type validator.
 
 **Loop authoring:** the Inspector preserves omitted/default `map` behavior and exposes `for_each` as an explicit mode with the existing registered-tool picker, the shared schema-guided per-item input form plus Advanced JSON, concurrency 1..20, and one count-or-percentage failure budget. Switching budget units removes the inactive key, fractional percentages remain exact, and legacy mapping stays in config when the operator temporarily selects tool execution. EN/ES labels and browser coverage live in the same lazy authoring boundary; do not duplicate the tool catalog or create a web-only validation model.

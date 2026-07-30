@@ -42,6 +42,30 @@ describe('<QuickConfigEditor /> resilience wiring', () => {
     expect(screen.getByTestId('resilience-fieldset')).toBeInTheDocument()
   })
 
+  it('routes condition nodes through the guided branch-rule editor', () => {
+    const onUpdate = vi.fn()
+    render(
+      <QuickConfigEditor
+        nodeId="gate"
+        type="condition"
+        config={{ expression: 'context.fetch.output.ok === true' }}
+        tools={[]}
+        workflowNodes={[
+          { id: 'fetch', position: { x: 0, y: 0 }, data: { label: 'Fetch order', type: 'http', config: {} } },
+          { id: 'gate', position: { x: 100, y: 0 }, data: { label: 'Check order', type: 'condition', config: {} } },
+        ]}
+        workflowEdges={[{ id: 'fetch-gate', source: 'fetch', target: 'gate', data: {} }]}
+        onUpdate={onUpdate}
+      />,
+    )
+
+    expect(screen.getByLabelText('Run rule')).toBeVisible()
+    fireEvent.change(screen.getByLabelText('Condition'), { target: { value: '!==' } })
+    expect(onUpdate).toHaveBeenLastCalledWith({
+      expression: 'context.fetch.output.ok !== true',
+    })
+  })
+
   it('merges a resilience edit into the current node config', () => {
     const onUpdate = vi.fn()
     render(

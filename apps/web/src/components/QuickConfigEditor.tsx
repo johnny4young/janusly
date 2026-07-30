@@ -14,7 +14,7 @@ import type { JsonObject, SavedWorkflow, ToolSchema, WorkflowGraphEdge, Workflow
 import { Trans, useT } from '../i18n'
 import { McpToolConfigField } from './McpToolConfigField'
 import { ResilienceFieldset } from './ResilienceFieldset'
-import { ExpressionAssistant } from './ExpressionAssistant'
+import { BranchRuleEditor } from './BranchRuleEditor'
 import { HttpConfigEditor } from './HttpConfigEditor'
 import { AiConfigEditor } from './AiConfigEditor'
 import { ToolConfigEditor } from './ToolConfigEditor'
@@ -230,20 +230,17 @@ export function QuickConfigEditor({
 
   if (type === 'condition') {
     return (
-      <section className="quick-config">
-        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
-        <ExpressionAssistant
-          id={`${nodeId}-branch-expression`}
-          label={t('rightPanel.quickConfig.branchExpression')}
-          value={readConfigString(config, 'expression')}
-          onChange={value => patch({ expression: value })}
-          nodes={workflowNodes}
-          edges={workflowEdges}
-          targetNodeId={nodeId}
-          mode="node"
-          workflowInputs={workflowInputs}
-        />
-      </section>
+      <BranchRuleEditor
+        id={`${nodeId}-branch-rule`}
+        label={t('rightPanel.quickConfig.branchExpression')}
+        value={readConfigString(config, 'expression')}
+        onChange={value => patch({ expression: value })}
+        nodes={workflowNodes}
+        edges={workflowEdges}
+        targetNodeId={nodeId}
+        mode="node"
+        workflowInputs={workflowInputs}
+      />
     )
   }
 

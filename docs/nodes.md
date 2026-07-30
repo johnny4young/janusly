@@ -138,6 +138,14 @@ Supported operators: `===`, `!==`, `==`, `!=`, `>`, `<`, `>=`, `<=`, `contains`,
 - `in` checks whether the left value is a member of an array path or literal, for example `'billing' in context.input.tags`.
 - Ordered comparisons are numeric for two numbers and lexicographic for two strings, so equal-width ISO 8601 timestamps compare naturally. A number paired with a numeric string preserves the legacy numeric coercion; incompatible runtime values remain non-fatal and evaluate `false`, while statically invalid literal/operator combinations are rejected during validation.
 
+In the workflow Inspector, **Match one rule** configures the common
+path-versus-literal case without requiring expression syntax. It offers only
+declared workflow inputs and outputs from steps that can reach the rule.
+Condition nodes and conditional edges use the same editor. Choose
+**Use an advanced expression** for `&&`, `||`, list membership, parentheses, or
+other composed rules; Janusly preserves an existing advanced expression
+exactly instead of simplifying it.
+
 ```jsonc
 {
   "id": "is_example_domain",

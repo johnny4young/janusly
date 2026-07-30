@@ -353,6 +353,20 @@
   padding-top: 12px;
 }
 
+.we-branch-rule__simple {
+  background: var(--we-surface-muted);
+  border: 1px solid var(--we-line);
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.we-branch-rule__simple .helper-text--error {
+  border-top: 1px solid var(--we-line);
+  padding-top: 8px;
+}
+
 .we-http-request-row {
   align-items: end;
   display: grid;

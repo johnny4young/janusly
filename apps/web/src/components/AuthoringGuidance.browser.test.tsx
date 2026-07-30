@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkflowGraphEdge, WorkflowGraphNode } from '../types'
 import { useWorkflowStore } from '../store'
 import { AuthoringProblemsPanel } from './AuthoringProblemsPanel'
-import { ExpressionAssistant } from './ExpressionAssistant'
+import { BranchRuleEditor } from './BranchRuleEditor'
 
 const nodes = [
   { id: 'fetch', position: { x: 0, y: 0 }, data: { label: '', type: 'http', config: {} } },
@@ -23,7 +23,7 @@ function GuidanceFixture() {
         workflowEdges={edges}
         onValidate={vi.fn(async () => false)}
       />
-      <ExpressionAssistant
+      <BranchRuleEditor
         id="browser-expression"
         label="Branch expression"
         value={expression}
@@ -33,6 +33,7 @@ function GuidanceFixture() {
         targetNodeId="gate"
         mode="node"
       />
+      <output>{expression}</output>
     </div>
   )
 }
@@ -42,20 +43,18 @@ describe('guided authoring surfaces (browser)', () => {
     useWorkflowStore.setState({ selectedNodeId: null, selectedEdgeId: null, activeTab: 'inspector' })
   })
 
-  it('renders actionable Problems and inserts reachable context in Chromium', () => {
+  it('renders actionable Problems and offers reachable context in Chromium', () => {
     render(<GuidanceFixture />)
     const problems = screen.getByTestId('authoring-problems')
     expect(problems.getBoundingClientRect().height).toBeGreaterThan(0)
     fireEvent.click(screen.getByRole('button', { name: 'Open problem on step gate' }))
     expect(useWorkflowStore.getState().selectedNodeId).toBe('gate')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use context' }))
-    const token = screen.getByRole('button', { name: 'Insert context.fetch.output.statusCode at the cursor' })
-    expect(token.getBoundingClientRect().height).toBeGreaterThan(0)
-    const expression = screen.getByLabelText('Branch expression') as HTMLTextAreaElement
-    expression.focus()
-    expression.setSelectionRange(expression.value.length, expression.value.length)
-    fireEvent.click(token)
-    expect(expression).toHaveValue('context.fetch.output.ok === truecontext.fetch.output.statusCode')
+    const source = screen.getByLabelText('Value from')
+    expect(source.getBoundingClientRect().height).toBeGreaterThan(0)
+    expect(screen.getByRole('option', { name: 'context.fetch.output.statusCode' })).toBeVisible()
+    fireEvent.change(source, { target: { value: 'context.fetch.output.statusCode' } })
+    expect(screen.getByLabelText('Compare with')).toHaveValue(200)
+    expect(screen.getByText('context.fetch.output.statusCode === 200')).toBeVisible()
   })
 })

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { evaluateExpression, validateExpression } from './expression'
+import {
+  evaluateExpression,
+  formatSimpleComparisonExpression,
+  parseSimpleComparisonExpression,
+  validateExpression,
+} from './expression'
 
 describe('evaluateExpression', () => {
   const scope = {
@@ -91,5 +96,46 @@ describe('evaluateExpression', () => {
     const scope = { context: { http: { output: { body: stream } } }, inputs: {} }
     expect(() => evaluateExpression("context.http.output.body === 'ok'", scope))
       .toThrow(/ReadableStream/)
+  })
+
+  it('round-trips one path-versus-literal comparison for guided authoring', () => {
+    expect(parseSimpleComparisonExpression("context.http.output.statusCode >= 200")).toEqual({
+      left: 'context.http.output.statusCode',
+      operator: '>=',
+      right: 200,
+    })
+    expect(parseSimpleComparisonExpression(
+      "context.approval.output.decision in ['approved', 'review']",
+    )).toBeNull()
+    expect(formatSimpleComparisonExpression({
+      left: 'context.approval.output.decision',
+      operator: '===',
+      right: "owner's review",
+    })).toBe('context.approval.output.decision === "owner\'s review"')
+    const windowsPath = String.raw`C:\temp`
+    const formattedPath = formatSimpleComparisonExpression({
+      left: 'context.input.path',
+      operator: '===',
+      right: windowsPath,
+    })
+    expect(formattedPath).toBe(String.raw`context.input.path === 'C:\temp'`)
+    expect(parseSimpleComparisonExpression(formattedPath!)).toMatchObject({ right: windowsPath })
+  })
+
+  it('keeps complex or loss-prone expressions out of guided round trips', () => {
+    expect(parseSimpleComparisonExpression(
+      'context.http.output.ok === true && context.http.output.statusCode === 200',
+    )).toBeNull()
+    expect(parseSimpleComparisonExpression("'approved' in context.approval.output.decision")).toBeNull()
+    expect(formatSimpleComparisonExpression({
+      left: 'context.approval.output.decision',
+      operator: '===',
+      right: `can't "escape" both`,
+    })).toBeNull()
+    expect(formatSimpleComparisonExpression({
+      left: 'process.env.SECRET',
+      operator: '===',
+      right: 'nope',
+    })).toBeNull()
   })
 })

@@ -14,15 +14,13 @@ type RunSnapshot = {
 const contracts = {
   en: {
     flows: 'Workflows',
-    useContext: 'Use context',
+    mode: 'Run rule',
     expression: 'Branch expression',
-    valid: 'Expression matches the runtime grammar.',
   },
   es: {
     flows: 'Flujos',
-    useContext: 'Usar contexto',
+    mode: 'Regla de ejecución',
     expression: 'Expresión de rama',
-    valid: 'La expresión cumple la gramática del entorno de ejecución.',
   },
 } as const
 
@@ -74,7 +72,7 @@ async function capture(page: Page, surface: Locator, filename: string): Promise<
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()))
   }))
   const box = await surface.boundingBox()
-  if (!box) throw new Error(`Cannot capture ${filename}: expression assistant has no bounding box`)
+  if (!box) throw new Error(`Cannot capture ${filename}: branch rule editor has no bounding box`)
   await mkdir(EVIDENCE_DIR, { recursive: true })
   await page.screenshot({
     path: `${EVIDENCE_DIR}/${filename}.png`,
@@ -84,12 +82,12 @@ async function capture(page: Page, surface: Locator, filename: string): Promise<
   })
 }
 
-async function openExpressionAssistant(
+async function openBranchRuleEditor(
   page: Page,
   locale: keyof typeof contracts,
   workflowId: string,
   workflowName: string,
-): Promise<{ assistant: Locator; expression: Locator }> {
+): Promise<{ editor: Locator; expression: Locator }> {
   const contract = contracts[locale]
   await page.getByRole('button', { name: contract.flows, exact: true }).click()
   const row = page.getByTestId(`workflows-row-${workflowId}`)
@@ -99,10 +97,9 @@ async function openExpressionAssistant(
   await page.locator('.react-flow__node[data-id="rules"] .workflow-node').click()
 
   const inspector = page.getByTestId('inspector-node-rules')
-  const assistant = inspector.getByTestId('expression-assistant')
-  const expression = assistant.getByLabel(contract.expression)
-  await assistant.getByRole('button', { name: contract.useContext, exact: true }).click()
-  return { assistant, expression }
+  const editor = inspector.locator('section.quick-config')
+  await expect(editor.getByLabel(contract.mode)).toHaveValue('advanced')
+  return { editor, expression: editor.getByLabel(contract.expression) }
 }
 
 test('the richer workflow language executes and remains authorable in English and Spanish', async ({ page, request }) => {
@@ -166,37 +163,20 @@ test('the richer workflow language executes and remains authorable in English an
   await page.goto('/')
   await hideUnrelatedOverlays(page)
 
-  const english = await openExpressionAssistant(page, 'en', workflowId, workflowName)
-  for (const token of ['contains ""', 'startsWith ""', 'matches ""', 'in []']) {
-    await expect(english.assistant.locator('.we-expression-assistant__token code', { hasText: token })).toBeVisible()
-  }
-  await capture(page, english.assistant, 'web-en-expression-assistant-operators-expanded')
-
-  await english.expression.fill('context.input.message')
-  await english.expression.evaluate((element: HTMLTextAreaElement) => {
-    element.focus()
-    element.setSelectionRange(element.value.length, element.value.length)
-  })
-  await english.assistant.locator('.we-expression-assistant__token', {
-    has: page.locator('code', { hasText: 'contains ""' }),
-  }).click()
-  await expect(english.expression).toHaveValue('context.input.message contains ""')
-  expect(await english.expression.evaluate((element: HTMLTextAreaElement) => element.selectionStart))
-    .toBe('context.input.message contains ""'.length - 1)
+  const english = await openBranchRuleEditor(page, 'en', workflowId, workflowName)
+  await expect(english.expression).toHaveValue(expression)
   await english.expression.fill("context.input.message contains 'card declined'")
-  await expect(english.assistant.getByRole('status')).toHaveText(contracts.en.valid)
+  await expect(english.editor.getByRole('alert')).toHaveCount(0)
+  await capture(page, english.editor, 'web-en-advanced-branch-expression')
 
   await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
   await page.reload()
   await hideUnrelatedOverlays(page)
 
-  const spanish = await openExpressionAssistant(page, 'es', workflowId, workflowName)
-  for (const token of ['contains ""', 'startsWith ""', 'matches ""', 'in []']) {
-    await expect(spanish.assistant.locator('.we-expression-assistant__token code', { hasText: token })).toBeVisible()
-  }
-  await capture(page, spanish.assistant, 'web-es-expression-assistant-operators-expanded')
+  const spanish = await openBranchRuleEditor(page, 'es', workflowId, workflowName)
   await spanish.expression.fill("'billing' in context.input.tags && context.input.email matches '*@example.com'")
-  await expect(spanish.assistant.getByRole('status')).toHaveText(contracts.es.valid)
+  await expect(spanish.editor.getByRole('alert')).toHaveCount(0)
+  await capture(page, spanish.editor, 'web-es-advanced-branch-expression')
 
   expect(browserErrors).toEqual([])
 })

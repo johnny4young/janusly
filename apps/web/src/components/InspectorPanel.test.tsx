@@ -80,7 +80,7 @@ describe('<InspectorPanel /> selection-change hygiene', () => {
       onUpdateEdgeCondition,
     })
 
-    const first = screen.getByLabelText(/run only when/i) as HTMLTextAreaElement
+    const first = screen.getByLabelText('Run only when') as HTMLTextAreaElement
     expect(first.value).toBe('context.a.output.ok === true')
 
     rerender(
@@ -90,9 +90,10 @@ describe('<InspectorPanel /> selection-change hygiene', () => {
       />,
     )
 
-    const second = screen.getByLabelText(/run only when/i) as HTMLTextAreaElement
-    // Without key={selectedEdge.id} React reuses the uncontrolled textarea and
-    // this still reads edge A's text — which blur would then WRITE onto edge B.
+    const second = screen.getByLabelText('Run only when') as HTMLTextAreaElement
+    // Without key={selectedEdge.id} React reuses the editor's local projection
+    // and this still reads edge A's source — which the next edit would then
+    // WRITE onto edge B.
     expect(second.value).toBe('context.b.output.count > 0')
 
     fireEvent.change(second, { target: { value: 'context.b.output.count >= 1' } })
