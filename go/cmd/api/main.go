@@ -1,5 +1,5 @@
-// Command api is the go-pilot API binary. T-001 wires config, boot probe and
-// observability; for T-000 it only proves the module builds and runs.
+// Command api is the go-pilot API binary. For now it only proves the module
+// builds and runs; config, boot probe and observability arrive next.
 package main
 
 import "fmt"

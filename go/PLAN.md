@@ -1,16 +1,30 @@
-# `go-pilot` v3 — plan ejecutable (timebox 3 semanas)
+# `go-pilot` v4 — plan ejecutable
 
-**v3 (2026-07-30).** Versión operativa: tareas secuenciales con especificación
-completa, criterios de aceptación, tests y commit por tarea; estados
-rastreables; protocolo de ejecución autónoma. Sustituye a v2.1 (misma visión,
-ahora sin ambigüedad ejecutable). Historial: v1 strangler (descartada), v2
-migración total + motor propio, v2.1 alineación README (recovery core, MCP
-complemento) + tests por tanda.
+**v4 (2026-07-30, directivas de Johnny):**
 
-**Fuente de verdad durante la ejecución:** la tarea T-000 copia este archivo
-a `go/PLAN.md` dentro de la rama `go-pilot`; desde ahí los ESTADOS se
-actualizan y viajan en cada commit. Este archivo de proposals queda como
-espécimen v3 congelado + puntero.
+1. **Base de análisis y estrategia: la rama `develop`** (más avanzada que
+   main). La rama del piloto fue re-basada sobre `develop @ c1aa11e2`
+   (71 tablas / 29 migraciones aplicadas a `janusly_go`). Johnny la
+   modificará hoy; el protocolo de seguimiento desde ahora: la revisión
+   intensiva quedó hecha sobre esta base y, en adelante, **solo se revisan
+   los diffs de commits posteriores** (`git log <pin>..develop` antes de
+   cada tanda de paridad, actualizando el pin en §9).
+2. **Alcance final del piloto: Backend + UI.** Al terminar, la web React debe
+   funcionar contra el backend Go **exactamente como funciona hoy contra
+   Node, sin excepciones**. El detalle está en §10–§11; el timebox de 3
+   semanas cubre la Fase 0 (motor) y su puerta D15 decide la continuación
+   de las fases F1–F3.
+3. **Los comentarios del código jamás referencian nombres internos del plan**
+   (IDs `T-xxx`, secciones de PLAN.md): el código se explica por sí mismo
+   (regla 10 del protocolo). Aplica también a mensajes de commit futuros.
+
+Historial: v1 strangler (descartada) · v2 migración total + motor propio ·
+v2.1 recovery core / MCP complemento / tests por tanda · v3 ejecutable ·
+**v4 base develop + alcance Backend+UI**.
+
+**Fuente de verdad durante la ejecución:** este archivo (`go/PLAN.md` en la
+rama); los estados viajan en cada commit. La copia en docs/proposals del
+checkout principal es el espécimen histórico.
 
 ---
 
@@ -35,6 +49,9 @@ espécimen v3 congelado + puntero.
    tarea no bloqueada. Un `blocked` sin salida al final del día se reporta en
    el resumen.
 9. Push de la rama: opcional y agrupado (repo privado); nunca a `main`.
+10. **Comentarios de código sin naming interno del plan** (ni `T-xxx` ni
+    referencias a PLAN.md): un comentario explica el código para su próximo
+    lector, no el proceso que lo produjo.
 
 ## 1. Decisiones cerradas
 
@@ -160,7 +177,22 @@ crítica) · P1 (importante) · P2 (stretch).
 | T-101 | (stretch) Tick de schedules con líder por advisory lock | P2 | todo |
 | T-102 | (post-piloto) LlmClient Go sobre SDKs oficiales | P2 | todo |
 | T-103 | (post-piloto) pdf.generate: evaluación maroto v2 | P2 | todo |
-| T-104 | (post-piloto) embed.FS con el dist del web | P2 | todo |
+| T-104 | (F3) embed.FS con el dist del web | P2 | todo |
+| T-200 | (F1) auth/context + sesión + permisos por pestaña | P0 | todo |
+| T-201 | (F1) catálogos: tools/templates/solution-packs/snippets/prompts | P0 | todo |
+| T-202 | (F1) workflows: CRUD/versions/metadata/tags/folders/health | P0 | todo |
+| T-203 | (F1) runs: list/detail/status/usage + SSE stream | P0 | todo |
+| T-204 | (F1) Recovery Center lecturas: home/metrics/items/dlq/heatmap/calibración | P0 | todo |
+| T-205 | (F1) credentials(+health)/members/roles/org-config/billing/onboarding/audit/system | P0 | todo |
+| T-206 | (F1) hito: la web arranca contra Go y navega sus pestañas de lectura | P0 | todo |
+| T-300 | (F2) escrituras DLQ/campañas/playbooks/feedback/auto-healing/alerts | P0 | todo |
+| T-301 | (F2) AI surfaces completas con contrato AI-fallback | P0 | todo |
+| T-302 | (F2) triggers/webhooks firmados + scheduler + crons system | P0 | todo |
+| T-303 | (F2) los 26 tipos de nodo + gramáticas completas (paridad total) | P0 | todo |
+| T-304 | (F2) Secret Store/HMAC/memoria/MCP/SCIM/rate limits/i18n server-events/permisos completos | P0 | todo |
+| T-305 | (F2) rollouts canary + import packs + upstream + experiments | P1 | todo |
+| T-400 | (F3) Playwright completo + browser + perf budgets verdes contra Go | P0 | todo |
+| T-401 | (F3) saldo de diferidos §9 + plan de corte y reversa | P0 | todo |
 
 ## 3. Convenciones transversales (aplican a TODAS las tareas)
 
@@ -519,15 +551,186 @@ el chat publicado.
 | 2026-07-30 | decisión | Cola propia (§1.3); Asynq plan C; River descartada |
 | 2026-07-30 | decisión | IA post-piloto: LlmClient propio sobre SDKs oficiales (§1.4); posible extracción OSS futura |
 | 2026-07-30 | decisión | PDF post-piloto: maroto v2 → gopdf → gpdf (§1.6) |
-| 2026-07-30 | divergencia aceptada | `template.unresolved_path` no se emite en el piloto |
-| 2026-07-30 | divergencia aceptada | tokens HMAC de human_form fuera de alcance; resume solo autenticado |
-| 2026-07-30 | divergencia aceptada | código `node_type_unsupported_pilot` para tipos fuera del subconjunto |
-| 2026-07-30 | decisión | Referencia de paridad CONGELADA: Node @ `da51e5df` (main sigue moviéndose — PR #22 ya entró); el piloto no persigue main |
-| 2026-07-30 | decisión | Piloto sin UI: la validación es API + fixtures + MCP; React sigue contra Node |
+| 2026-07-30 | diferido a F2 | `template.unresolved_path` no se emite en F0 (obligatorio antes del switchover) |
+| 2026-07-30 | diferido a F2 | tokens HMAC de human_form fuera de F0; resume autenticado (paridad total exigida en F2) |
+| 2026-07-30 | diferido a F2 | `node_type_unsupported_pilot` solo existe en F0; F2 implementa los 26 tipos de nodo |
+| 2026-07-30 | reemplazada | (v3) pin en main @ da51e5df — sustituido por la directiva v4: base `develop` |
+| 2026-07-30 | reemplazada | (v3) "piloto sin UI" — sustituida por la directiva v4: Backend + UI sin excepciones (§10) |
 | 2026-07-30 | decisión | Push de respaldo de la rama 1×/semana, sin PR (CI no corre en ramas laterales) |
 | 2026-07-30 | decisión | Proyecto Compose `janusly-go-pilot` (sin colisión con el lock del Compose fijo); org del piloto `default` |
 | 2026-07-30 | decisión | "D1–D15" = orden de tareas, no calendario; el timebox de 3 semanas es el límite exterior |
 | 2026-07-30 | nota | Toolchain local ya trae Go 1.26.5 + golangci-lint 2.12.2 exactos; k6 se instala en T-016 (`brew install k6`) |
 | 2026-07-30 | corrección | La base congelada da51e5df tiene 62 tablas (el conteo 71 venía de develop); aceptación de T-000 ajustada |
 | 2026-07-30 | corrección | PG 18: el volumen Docker monta en /var/lib/postgresql (no .../data) — compose ajustado |
+| 2026-07-30 | decisión (v4) | Rama re-basada sobre `develop @ c1aa11e2`; DB regenerada: 71 tablas / 29 migraciones; PIN de paridad = ese sha; seguimiento por diffs (`git log <pin>..develop`) |
+| 2026-07-30 | decisión (v4) | Alcance final Backend+UI (§10); D15 sigue siendo la puerta de F0 |
+| 2026-07-30 | decisión (v4) | Inventario UI: 108 rutas + SSE (§11), extraído del código web |
+| 2026-07-30 | regla (v4) | Comentarios de código sin IDs de tareas ni referencias a PLAN.md; scrub aplicado al código existente |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
+
+## 10. Alcance final: Backend + UI, sin excepciones (v4)
+
+La definición de "terminado" del piloto completo: **la web React actual,
+sin modificar (salvo la URL del API), funciona contra el binario Go
+exactamente igual que contra Node** — misma apariencia, mismos flujos,
+mismos errores, mismo streaming. La aceptación final es la suite Playwright
+completa + browser-mode + presupuestos de rendimiento, verdes contra Go.
+
+### Fases
+
+| Fase | Contenido | Horizonte |
+| --- | --- | --- |
+| **F0 — Motor (T-000…T-018)** | La vertical durable de recovery + puerta D15 | Timebox 3 semanas (vigente) |
+| **F1 — La UI arranca y opera lecturas** | `auth/context` + sesión/organización; catálogos (`tools`, `templates`, `solution-packs`, `snippets`, `prompts`); workflows CRUD/versions/metadata/tags/folders/health; runs list/detail/status/usage + **SSE `/runs/:id/stream`** (fetch+ReadableStream, hub sobre LISTEN/NOTIFY); Recovery Center (`recovery/home`, `metrics`, `items`, `dlq/*` lecturas, heatmap, calibración); `credentials(+health)`, `members/roles`, `org/config`, `billing`, `onboarding`, `audit`, `health`/`system/*` | ~3–4 semanas post-gate |
+| **F2 — Paridad operativa total** | Todas las escrituras y flujos: DLQ replay/bulk/clusters/validate-fix, campañas, playbooks, feedback, auto-healing, alerts, experiments/evals, AI surfaces completas (generate/explain/review/patch/suggest/explain-run **con el contrato AI-fallback**), triggers/webhooks (PagerDuty/Slack/external-runtime firmados), scheduler + 19 crons `system:`, rollouts canary, Secret Store (compatible bit a bit), resume tokens HMAC, memoria/vector, MCP cliente+servidor, SCIM/SSO, rate limiting, i18n de server-events, permisos (catálogo completo + roles custom), import de packs, upstream sources | ~2–4 meses |
+| **F3 — Switchover** | Playwright e2e completo (93 specs) + `test:browser` + presupuestos de rendimiento contra Go; goldens; saldar TODOS los "diferido a F2/F3" de §9; plan de corte y reversa | ~2–4 semanas |
+
+La puerta D15 (fin de F0) decide con evidencia si F1–F3 proceden; los
+estimados asumen el ritmo solo-dev + agentes de esta base de código.
+
+### Comportamientos que la UI observa indirectamente (también "sin excepciones")
+
+- Ejecución durable real (worker): estados de nodos en vivo vía SSE, retries,
+  DLQ que aparece en Recovery Center, replay/redrive que revive runs.
+- Schedules que disparan runs; triggers entrantes (webhooks firmados) que
+  crean runs y aparecen en la UI; buffering durante pausas del circuito.
+- El contrato AI-fallback: cada superficie AI degrada a determinista sin
+  romper la UI (funciona sin clave de proveedor).
+- Presencia de `X-Request-Id`, envelopes de error exactos (la web matchea
+  códigos para i18n), cursores intercambiables, semántica de permisos por
+  pestaña (`tab-permissions` depende de `auth/context`).
+
+## 11. Inventario: superficie exacta que consume la web (develop @ c1aa11e2)
+
+Extraído del código del web (`api()`/`apiRaw()` + streams). **108 rutas
+únicas** (los sufijos `/` indican segmento dinámico `:id`/`:name`), más el
+stream SSE. Este inventario es la lista de control de F1/F2; se re-verifica
+contra los diffs de develop antes de cada tanda.
+
+```
+/ai/explain-run
+/ai/explain-workflow
+/ai/generate-workflow
+/ai/health
+/ai/patch-workflow
+/ai/review-workflow
+/ai/suggest-improvement
+/alerts/policies
+/alerts/policies/
+/alerts/recent
+/auth/context
+/auth/invitations/accept
+/auto-healing/
+/auto-healing/pending
+/billing/budget
+/billing/usage
+/causal
+/check
+/children
+/comment
+/credentials
+/credentials/
+/credentials/health
+/dlq
+/dlq/bulk-replay
+/dlq/bulk-resolve
+/dlq/cluster-apply
+/dlq/cluster-members
+/dlq/clusters
+/dlq/counts
+/dlq/replay
+/dlq/resolve
+/dlq/validate-fix
+/eval/datasets
+/experiments
+/experiments/
+/experiments/run
+/handoff
+/health
+/integrations/external-runtimes
+/integrations/external-runtimes/
+/integrations/slack/interactions
+/integrations/slack/interactions/
+/mcp/connections
+/mcp/connections/
+/members
+/members/invite
+/members/role
+/memory/consent-status
+/onboarding
+/org/config
+/org/roles
+/org/roles/
+/org/scim/directories/
+/org/scim/group-role-mappings/
+/organizations
+/ping
+/plugins/install
+/prompts
+/recovery/calibration-status
+/recovery/campaigns
+/recovery/campaigns/
+/recovery/campaigns/preview
+/recovery/feedback
+/recovery/home
+/recovery/items/
+/recovery/metrics
+/recovery/playbooks
+/recovery/playbooks/
+/recovery/playbooks/match
+/resume
+/run
+/run/cancel
+/run/usage
+/runs
+/runs/redrive
+/runs/replay-lab
+/runs/replay-lab/fork
+/snippets
+/snippets/
+/solution-packs/incident-triage/inject-failure
+/start
+/status
+/system/queue
+/templates
+/tools
+/upstream/sources
+/upstream/sources/
+/users/me
+/validate
+/workflows
+/workflows/
+/workflows/folders
+/workflows/folders/assign
+/workflows/folders/delete
+/workflows/folders/rename
+/workflows/health
+/workflows/health/delta
+/workflows/import-pack
+/workflows/readiness
+/workflows/rollback
+/workflows/save
+/workflows/schedule-preview
+/workflows/tags
+/workflows/tags/assign
+/workflows/tags/delete
+/workflows/tags/rename
+/workflows/versions
+/runs/:id/stream        (SSE vía fetch + ReadableStream)
+```
+
+Familias: workflows (18) · recovery (11) · dlq (10) · ai (7) · org (5) ·
+runs+run (7) · integrations (4) · members (3) · experiments (3) ·
+credentials (3) · alerts (3) · resto (auth, billing, upstream, snippets,
+mcp, auto-healing, system, tools, templates, solution-packs, onboarding,
+memory, users, prompts, plugins, causal, validate, resume, start, status,
+health, ping, check, children, comment, handoff — estos cuatro últimos son
+sub-rutas de `recovery/items/:id`).
+
+Notas de precisión para F1/F2 (verificadas en el código web):
+- `check` = `GET /check` (health del API en el arranque del web).
+- `children`/`comment`/`handoff` cuelgan de `recovery/items/:id/...`.
+- `eval/datasets` y `experiments/*` = harness de experimentos.
+- `plugins/install` + `solution-packs/*/inject-failure` = demos/packs.
+- La web nunca llama triggers de ingest directamente, pero F2 los cubre
+  porque sus efectos (runs entrantes) son visibles en la UI.

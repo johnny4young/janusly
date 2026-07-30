@@ -9,9 +9,9 @@ db-up:
 db-down:
 	docker compose -f docker-compose.yml down
 
-# The shared drizzle migrations are the single schema author (PLAN.md §1.5).
-# Running them through the repo's own tooling keeps the
-# drizzle.__drizzle_migrations journal that the T-001 boot probe requires.
+# The shared drizzle migrations are the single schema author. Running them
+# through the repo's own tooling keeps the drizzle.__drizzle_migrations
+# journal that the boot probe asserts.
 migrate:
 	cd .. && DATABASE_URL=$(DB_URL) pnpm migrate
 
