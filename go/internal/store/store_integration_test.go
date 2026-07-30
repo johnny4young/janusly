@@ -127,6 +127,7 @@ func TestListRunsKeysetStableUnderTies(t *testing.T) {
 
 func TestRunNodeTransitionsAreCompareAndSet(t *testing.T) {
 	ctx, pool, q, org := newHarness(t)
+	casNow := time.Now().UTC()
 	casRun := uid(org, "run-cas")
 	seedRun(t, ctx, q, org, casRun)
 	if err := q.InsertRunNode(ctx, InsertRunNodeParams{ID: uid(org, "rn"), RunID: casRun, NodeID: "step", Status: "pending"}); err != nil {
@@ -141,13 +142,13 @@ func TestRunNodeTransitionsAreCompareAndSet(t *testing.T) {
 	}
 
 	// Completion requires the running state; a queued node must not complete.
-	if rows, _ := q.CompleteRunNode(ctx, CompleteRunNodeParams{RunID: casRun, NodeID: "step", StateJson: json.RawMessage(`{}`)}); rows != 0 {
+	if rows, _ := q.CompleteRunNode(ctx, CompleteRunNodeParams{RunID: casRun, NodeID: "step", StateJson: json.RawMessage(`{}`), FinishedAt: &casNow}); rows != 0 {
 		t.Fatalf("complete from queued must lose, rows=%d", rows)
 	}
 	if _, err := pool.Exec(ctx, "update run_nodes set status='running' where run_id=$1", casRun); err != nil {
 		t.Fatalf("promote to running: %v", err)
 	}
-	if rows, _ := q.CompleteRunNode(ctx, CompleteRunNodeParams{RunID: casRun, NodeID: "step", StateJson: json.RawMessage(`{"output":{"ok":true}}`)}); rows != 1 {
+	if rows, _ := q.CompleteRunNode(ctx, CompleteRunNodeParams{RunID: casRun, NodeID: "step", StateJson: json.RawMessage(`{"output":{"ok":true}}`), FinishedAt: &casNow}); rows != 1 {
 		t.Fatalf("complete from running must win, rows=%d", rows)
 	}
 

@@ -75,22 +75,62 @@ WHERE run_id = $1
 ORDER BY id;
 
 -- name: QueueRunNode :execrows
-UPDATE run_nodes SET status = 'queued'
+UPDATE run_nodes SET status = 'queued', attempts = 1
 WHERE run_id = $1 AND node_id = $2 AND status = 'pending';
+
+-- The claim is the queue's consume operation: SKIP LOCKED lets N workers
+-- pull disjoint rows without blocking each other, and the runs join keeps
+-- nodes of cancelled/failed runs from ever being picked up.
+-- name: ClaimQueuedRunNodes :many
+UPDATE run_nodes SET status = 'running', started_at = now()
+WHERE id IN (
+  SELECT rn.id
+  FROM run_nodes rn
+  JOIN runs r ON r.id = rn.run_id
+  WHERE rn.status = 'queued' AND r.status = 'running'
+  ORDER BY rn.id
+  LIMIT sqlc.arg(batch_size)
+  FOR UPDATE OF rn SKIP LOCKED
+)
+RETURNING id, run_id, node_id, COALESCE(attempts, 1)::int AS attempt;
+
+-- Serializes node-completion transactions per run: the xact lock releases
+-- on commit, so a concurrent sibling's readiness scan always observes this
+-- completion — the fan-in gate for joins.
+-- name: AcquireRunCompletionLock :exec
+SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(run_id)::text, 0));
 
 -- name: CompleteRunNode :execrows
 UPDATE run_nodes
-SET status = 'succeeded', state_json = $3, finished_at = now()
-WHERE run_id = $1 AND node_id = $2 AND status = 'running';
+SET status = 'succeeded', state_json = sqlc.arg(state_json),
+    finished_at = sqlc.arg(finished_at)
+WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
+  AND status = 'running';
 
 -- name: FailRunNode :execrows
 UPDATE run_nodes
-SET status = $4, error_json = $3, finished_at = now()
-WHERE run_id = $1 AND node_id = $2 AND status = 'running';
+SET status = 'failed', error_json = sqlc.arg(error_json),
+    finished_at = sqlc.arg(finished_at)
+WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
+  AND status = 'running';
+
+-- name: GetRunExecution :one
+SELECT status, input_json FROM runs WHERE id = $1;
+
+-- name: ListRunNodeStatuses :many
+SELECT node_id, status FROM run_nodes WHERE run_id = $1;
+
+-- name: MarkRunTerminalFromRunning :execrows
+UPDATE runs SET status = sqlc.arg(status)
+WHERE id = sqlc.arg(id) AND status = 'running';
 
 -- name: InsertRunEvent :exec
 INSERT INTO run_events (id, run_id, node_id, type, payload)
 VALUES ($1, $2, $3, $4, $5);
+
+-- name: InsertRunEventAt :exec
+INSERT INTO run_events (id, run_id, node_id, type, payload, created_at)
+VALUES ($1, $2, $3, $4, $5, $6);
 
 -- name: ListRunEvents :many
 SELECT id, run_id, node_id, type, payload, created_at

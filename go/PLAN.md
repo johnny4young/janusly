@@ -168,7 +168,7 @@ crítica) · P1 (importante) · P2 (stretch).
 | T-002 | sqlc + inventario real del esquema + persistencia núcleo | P0 | done |
 | T-003 | Dominio: parsing + validación subconjunto (códigos de issue) | P0 | partial |
 | T-004 | startRun transaccional + defaults de inputs | P0 | partial |
-| T-005 | Cola propia: claim loop, worker pool, LISTEN/NOTIFY | P0 | todo |
+| T-005 | Cola propia: claim loop, worker pool, LISTEN/NOTIFY | P0 | done |
 | T-006 | Gramáticas subconjunto: templates + expresiones | P0 | todo |
 | T-007 | Executors: noop, transform, condition + semántica de aristas | P0 | todo |
 | T-008 | Modelo de fallo: retry ladder + dead_letters | P0 | todo |
@@ -593,6 +593,12 @@ el chat publicado.
 | 2026-07-30 | decisión | Semántica undefined/null del JS portada como (value, present); nil en el tope = ausente; el engine normaliza input nil→{} como Node |
 | 2026-07-30 | nota | Dep nueva: google/uuid (paridad de formato de ids con crypto.randomUUID) |
 | 2026-07-30 | nota | El endurecimiento __proto__ que develop añadió a applyInputDefaults es gratis en Go (mapas sin prototipo) — test lo fija igual |
+| 2026-07-30 | decisión | Completación de nodo bajo `pg_advisory_xact_lock(hash(run_id))`: las transacciones de completación del MISMO run se serializan (la ejecución sigue paralela), así el scan de readiness de un sibling siempre ve la completación anterior — el fan-in del join no necesita reconciler ni ventana de crash: completación + evento + queue de sucesores + rollup del run son UNA transacción |
+| 2026-07-30 | divergencia | `queuePublicationGeneration`/`repairAfter` de Node no se portan: existen porque BullMQ es un segundo store que reconciliar; aquí la transición de fila ES la publicación |
+| 2026-07-30 | paridad exacta | evento `node.succeeded`: output inline solo ≤ 8.000 bytes, si no `{outputBytes, outputTruncated, attempt}`; `state_json {output}` cap 1 MB con centinela `{__truncated, originalBytes, maxBytes, preview}` (preview = cap/2 bytes); `node.queued` payload `{}`; `run.failed`/`run.succeeded` con created_at +1 ms tras el evento causal (orden de keyset, detalle de dead-letter-queue.ts:182) |
+| 2026-07-30 | divergencia temporal | `FailNode` mínimo pre-T-008: error_json `{message}`, sin fila `dead_letters` ni escalera de retries; flip de run solo desde `running` (waiting llega en T-009) |
+| 2026-07-30 | nota | Proyección de `outputs` declarados al terminar el run se difiere a T-007 (necesita resolución de templates); output_json queda NULL igual que Node sin outputs declarados |
+| 2026-07-30 | nota | Claim ordena por `rn.id` (run_nodes no tiene created_at); el orden del DAG domina de todos modos. Fallback de polling por worker (250 ms default) cubre NOTIFY perdidos y arranques en frío |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)

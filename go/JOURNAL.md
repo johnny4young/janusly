@@ -117,3 +117,25 @@ consolidan en el informe de la puerta D15.
   satisface requeridos vía defaults y lo persistido lleva defaults + claves
   del trigger juntos.
 - 9 tests portados/nuevos citando el `it(...)` TS de origen.
+
+## 2026-07-30 — cola propia: claim loop + worker pool (T-005)
+
+- El corazón del piloto late: `SKIP LOCKED` como operación de consumo,
+  N goroutines reclamando de a un nodo, LISTEN/NOTIFY con fallback de
+  polling, drain limpio (el trabajo reclamado termina en un context
+  desacoplado de la cancelación — cero filas `running` huérfanas).
+- La decisión de arquitectura del día: un `pg_advisory_xact_lock` por run
+  serializa las transacciones de completación. Con eso, completación +
+  evento + readiness + queue de sucesores + rollup del run son UNA
+  transacción — Node necesita generaciones de publicación y reconcilers
+  porque BullMQ es un segundo store; aquí ese triángulo desaparece.
+- Fricción valiosa: el primer run del test de fan-out contó 55 nodos en
+  vez de 50 — el claim es GLOBAL (correcto: un pool consume todos los
+  runs) y estaba ejecutando sobrantes encolados de tests anteriores en la
+  DB persistente. Los probes ahora se scopean por runID; el
+  comportamiento de la cola quedó como debe ser.
+- Paridad leída de la fuente: regla de 8 KB para el output inline del
+  evento, centinela de truncado con preview = cap/2, y el detalle fino
+  del +1 ms en `run.failed` para que el keyset nunca ordene la
+  consecuencia agregada antes de su causa.
+- 3 corridas extra de la suite de carreras con `-race`: estable.

@@ -13,6 +13,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const acquireRunCompletionLock = `-- name: AcquireRunCompletionLock :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
+`
+
+// Serializes node-completion transactions per run: the xact lock releases
+// on commit, so a concurrent sibling's readiness scan always observes this
+// completion — the fan-in gate for joins.
+func (q *Queries) AcquireRunCompletionLock(ctx context.Context, runID string) error {
+	_, err := q.db.Exec(ctx, acquireRunCompletionLock, runID)
+	return err
+}
+
 const claimDeadLetterReplay = `-- name: ClaimDeadLetterReplay :execrows
 UPDATE dead_letters SET replay_claimed_at = now()
 WHERE id = $1 AND org_id = $2 AND replay_claimed_at IS NULL
@@ -31,20 +43,77 @@ func (q *Queries) ClaimDeadLetterReplay(ctx context.Context, arg ClaimDeadLetter
 	return result.RowsAffected(), nil
 }
 
+const claimQueuedRunNodes = `-- name: ClaimQueuedRunNodes :many
+UPDATE run_nodes SET status = 'running', started_at = now()
+WHERE id IN (
+  SELECT rn.id
+  FROM run_nodes rn
+  JOIN runs r ON r.id = rn.run_id
+  WHERE rn.status = 'queued' AND r.status = 'running'
+  ORDER BY rn.id
+  LIMIT $1
+  FOR UPDATE OF rn SKIP LOCKED
+)
+RETURNING id, run_id, node_id, COALESCE(attempts, 1)::int AS attempt
+`
+
+type ClaimQueuedRunNodesRow struct {
+	ID      string
+	RunID   string
+	NodeID  string
+	Attempt int32
+}
+
+// The claim is the queue's consume operation: SKIP LOCKED lets N workers
+// pull disjoint rows without blocking each other, and the runs join keeps
+// nodes of cancelled/failed runs from ever being picked up.
+func (q *Queries) ClaimQueuedRunNodes(ctx context.Context, batchSize int32) ([]ClaimQueuedRunNodesRow, error) {
+	rows, err := q.db.Query(ctx, claimQueuedRunNodes, batchSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ClaimQueuedRunNodesRow
+	for rows.Next() {
+		var i ClaimQueuedRunNodesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.NodeID,
+			&i.Attempt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const completeRunNode = `-- name: CompleteRunNode :execrows
 UPDATE run_nodes
-SET status = 'succeeded', state_json = $3, finished_at = now()
-WHERE run_id = $1 AND node_id = $2 AND status = 'running'
+SET status = 'succeeded', state_json = $1,
+    finished_at = $2
+WHERE run_id = $3 AND node_id = $4
+  AND status = 'running'
 `
 
 type CompleteRunNodeParams struct {
-	RunID     string
-	NodeID    string
-	StateJson json.RawMessage
+	StateJson  json.RawMessage
+	FinishedAt *time.Time
+	RunID      string
+	NodeID     string
 }
 
 func (q *Queries) CompleteRunNode(ctx context.Context, arg CompleteRunNodeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, completeRunNode, arg.RunID, arg.NodeID, arg.StateJson)
+	result, err := q.db.Exec(ctx, completeRunNode,
+		arg.StateJson,
+		arg.FinishedAt,
+		arg.RunID,
+		arg.NodeID,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -62,23 +131,25 @@ func (q *Queries) DeleteWakeup(ctx context.Context, runNodeID string) error {
 
 const failRunNode = `-- name: FailRunNode :execrows
 UPDATE run_nodes
-SET status = $4, error_json = $3, finished_at = now()
-WHERE run_id = $1 AND node_id = $2 AND status = 'running'
+SET status = 'failed', error_json = $1,
+    finished_at = $2
+WHERE run_id = $3 AND node_id = $4
+  AND status = 'running'
 `
 
 type FailRunNodeParams struct {
-	RunID     string
-	NodeID    string
-	ErrorJson json.RawMessage
-	Status    string
+	ErrorJson  json.RawMessage
+	FinishedAt *time.Time
+	RunID      string
+	NodeID     string
 }
 
 func (q *Queries) FailRunNode(ctx context.Context, arg FailRunNodeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, failRunNode,
+		arg.ErrorJson,
+		arg.FinishedAt,
 		arg.RunID,
 		arg.NodeID,
-		arg.ErrorJson,
-		arg.Status,
 	)
 	if err != nil {
 		return 0, err
@@ -213,6 +284,22 @@ func (q *Queries) GetRun(ctx context.Context, arg GetRunParams) (GetRunRow, erro
 		&i.CreatedBy,
 		&i.CreatedAt,
 	)
+	return i, err
+}
+
+const getRunExecution = `-- name: GetRunExecution :one
+SELECT status, input_json FROM runs WHERE id = $1
+`
+
+type GetRunExecutionRow struct {
+	Status    string
+	InputJson json.RawMessage
+}
+
+func (q *Queries) GetRunExecution(ctx context.Context, id string) (GetRunExecutionRow, error) {
+	row := q.db.QueryRow(ctx, getRunExecution, id)
+	var i GetRunExecutionRow
+	err := row.Scan(&i.Status, &i.InputJson)
 	return i, err
 }
 
@@ -360,6 +447,32 @@ func (q *Queries) InsertRunEvent(ctx context.Context, arg InsertRunEventParams) 
 		arg.NodeID,
 		arg.Type,
 		arg.Payload,
+	)
+	return err
+}
+
+const insertRunEventAt = `-- name: InsertRunEventAt :exec
+INSERT INTO run_events (id, run_id, node_id, type, payload, created_at)
+VALUES ($1, $2, $3, $4, $5, $6)
+`
+
+type InsertRunEventAtParams struct {
+	ID        string
+	RunID     string
+	NodeID    pgtype.Text
+	Type      string
+	Payload   json.RawMessage
+	CreatedAt *time.Time
+}
+
+func (q *Queries) InsertRunEventAt(ctx context.Context, arg InsertRunEventAtParams) error {
+	_, err := q.db.Exec(ctx, insertRunEventAt,
+		arg.ID,
+		arg.RunID,
+		arg.NodeID,
+		arg.Type,
+		arg.Payload,
+		arg.CreatedAt,
 	)
 	return err
 }
@@ -592,6 +705,35 @@ func (q *Queries) ListRunEvents(ctx context.Context, arg ListRunEventsParams) ([
 	return items, nil
 }
 
+const listRunNodeStatuses = `-- name: ListRunNodeStatuses :many
+SELECT node_id, status FROM run_nodes WHERE run_id = $1
+`
+
+type ListRunNodeStatusesRow struct {
+	NodeID string
+	Status string
+}
+
+func (q *Queries) ListRunNodeStatuses(ctx context.Context, runID string) ([]ListRunNodeStatusesRow, error) {
+	rows, err := q.db.Query(ctx, listRunNodeStatuses, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRunNodeStatusesRow
+	for rows.Next() {
+		var i ListRunNodeStatusesRow
+		if err := rows.Scan(&i.NodeID, &i.Status); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRunNodesByRun = `-- name: ListRunNodesByRun :many
 SELECT id, run_id, node_id, status, state_json, attempts, started_at,
        finished_at, error_json
@@ -757,6 +899,24 @@ func (q *Queries) ListWorkflows(ctx context.Context, arg ListWorkflowsParams) ([
 	return items, nil
 }
 
+const markRunTerminalFromRunning = `-- name: MarkRunTerminalFromRunning :execrows
+UPDATE runs SET status = $1
+WHERE id = $2 AND status = 'running'
+`
+
+type MarkRunTerminalFromRunningParams struct {
+	Status string
+	ID     string
+}
+
+func (q *Queries) MarkRunTerminalFromRunning(ctx context.Context, arg MarkRunTerminalFromRunningParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markRunTerminalFromRunning, arg.Status, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const notifyWake = `-- name: NotifyWake :exec
 SELECT pg_notify('janusly_go_wake', $1::text)
 `
@@ -767,7 +927,7 @@ func (q *Queries) NotifyWake(ctx context.Context, runID string) error {
 }
 
 const queueRunNode = `-- name: QueueRunNode :execrows
-UPDATE run_nodes SET status = 'queued'
+UPDATE run_nodes SET status = 'queued', attempts = 1
 WHERE run_id = $1 AND node_id = $2 AND status = 'pending'
 `
 
