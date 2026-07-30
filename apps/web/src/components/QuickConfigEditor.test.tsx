@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api'
 import { initI18n } from '../i18n'
+import type { ToolSchema } from '../types'
 
 vi.mock('../api', () => ({
   api: vi.fn(),
@@ -91,6 +92,7 @@ describe('<QuickConfigEditor /> resilience wiring', () => {
           description: 'Parse a JSON string into its native object, array, or primitive value.',
           descriptionCode: 'json-parse',
           required: ['value'],
+          inputFields: [{ name: 'value', kind: 'string', required: true }],
           writeSide: false,
         }]}
         onUpdate={vi.fn()}
@@ -210,12 +212,13 @@ describe('<QuickConfigEditor /> resilience wiring', () => {
 })
 
 describe('<QuickConfigEditor /> bounded per-item processing', () => {
-  const tools = [{
+  const tools: ToolSchema[] = [{
     name: 'text.uppercase',
     description: 'Convert text to uppercase.',
     descriptionCode: 'text-uppercase',
     required: ['value'],
     inputExample: { value: 'hello' },
+    inputFields: [{ name: 'value', kind: 'string', required: true }],
     writeSide: false,
   }]
 

@@ -63,12 +63,13 @@ export type ToolExecutionContext = {
 /**
  * Internal definition shape for one registered tool.
  *
- * `TIn`/`TOut` are inferred at the call site — registering a tool with literal
- * `z.object({...})` schemas gives the executor a fully-typed `input` and a
- * type-checked `Promise<output>`.
+ * `TIn`/`TOut` are inferred at the call site — every tool input is an object so
+ * the public catalog and planner can derive named fields from the same schema.
+ * Registering a literal `z.object({...})` gives the executor a fully-typed
+ * `input` and a type-checked `Promise<output>`.
  */
 export type ToolDefinition<
-  TIn extends z.ZodTypeAny = z.ZodTypeAny,
+  TIn extends z.ZodObject<z.ZodRawShape> = z.ZodObject<z.ZodRawShape>,
   TOut extends z.ZodTypeAny = z.ZodTypeAny,
 > = {
   name: string;
@@ -99,7 +100,7 @@ export type ToolDefinition<
  * the literal schema values when registering a tool. Without it the registry
  * would widen `execute`'s `input` to `unknown` under the `satisfies` clause.
  */
-export function defineTool<TIn extends z.ZodTypeAny, TOut extends z.ZodTypeAny>(
+export function defineTool<TIn extends z.ZodObject<z.ZodRawShape>, TOut extends z.ZodTypeAny>(
   def: ToolDefinition<TIn, TOut>,
 ): ToolDefinition<TIn, TOut> {
   return def;

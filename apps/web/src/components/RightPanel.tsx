@@ -451,18 +451,9 @@ function ToolsPanel({ tools, onInstallPlugin, canInstall }: Pick<RightPanelCatal
                     ? 'rightPanel.quickConfig.toolWriteCapable'
                     : 'rightPanel.quickConfig.toolReadOnly')}
                 </span>
-                <span className="we-pill" data-tone="neutral">
-                  {t('rightPanel.tools.requiredCount', { count: tool.required?.length ?? 0 })}
-                </span>
               </div>
             </div>
             <span>{tToolDescription(tool)}</span>
-            {(tool.required?.length || tool.optional?.length) ? (
-              <div className="we-tool-params">
-                {(tool.required ?? []).map(field => <span key={`required-${field}`} className="we-param we-param--required">{field}</span>)}
-                {(tool.optional ?? []).map(field => <span key={`optional-${field}`} className="we-param we-param--optional">{field}</span>)}
-              </div>
-            ) : null}
             <button className="small-command" disabled={!canInstall} onClick={() => onInstallPlugin(tool.name)}>{t('rightPanel.tools.installTool')}</button>
           </div>
         ))}

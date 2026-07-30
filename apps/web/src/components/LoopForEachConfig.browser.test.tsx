@@ -35,6 +35,7 @@ describe('<QuickConfigEditor /> loop for_each browser contract', () => {
           descriptionCode: 'text-uppercase',
           required: ['value'],
           inputExample: { value: 'hello' },
+          inputFields: [{ name: 'value', kind: 'string', required: true }],
           writeSide: false,
         }]}
         onUpdate={(next) => {

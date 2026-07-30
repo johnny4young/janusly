@@ -1,7 +1,8 @@
 import { useT } from '../i18n'
 import type { JsonObject, ToolSchema } from '../types'
-import { JsonConfigField, readConfigString } from './quick-config-fields'
+import { readConfigString } from './quick-config-fields'
 import { ResilienceFieldset } from './ResilienceFieldset'
+import { ToolInputEditor } from './ToolInputEditor'
 import { ToolPicker } from './ToolPicker'
 
 export function ToolConfigEditor({
@@ -31,10 +32,11 @@ export function ToolConfigEditor({
       />
       {selectedTool && (
         <>
-          <JsonConfigField
+          <ToolInputEditor
             scope={nodeId}
-            label={t('rightPanel.quickConfig.toolInput')}
-            value={config.input}
+            tool={matchedTool}
+            input={config.input}
+            rawLabel={t('rightPanel.quickConfig.toolInput')}
             onChange={input => patch({ input })}
           />
           {matchedTool?.inputExample && (

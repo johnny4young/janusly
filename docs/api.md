@@ -165,6 +165,12 @@ Lists tools registered in the engine. Used by the workflow builder and by agents
     "required": ["url"],
     "optional": ["method", "headers", "body"],
     "inputExample": { "url": "https://example.com", "method": "GET" },
+    "inputFields": [
+      { "name": "url", "kind": "string", "required": true },
+      { "name": "method", "kind": "string", "required": false },
+      { "name": "headers", "kind": "json", "required": false },
+      { "name": "body", "kind": "json", "required": false }
+    ],
     "writeSide": true
   },
   {
@@ -172,6 +178,9 @@ Lists tools registered in the engine. Used by the workflow builder and by agents
     "description": "Convert text to uppercase.",
     "required": ["value"],
     "inputExample": { "value": "hello" },
+    "inputFields": [
+      { "name": "value", "kind": "string", "required": true }
+    ],
     "writeSide": false
   },
   {
@@ -179,7 +188,12 @@ Lists tools registered in the engine. Used by the workflow builder and by agents
     "description": "Pick a value from workflow context using a dot path.",
     "required": ["path"],
     "optional": ["source"],
-    "inputExample": { "path": "1.output.statusCode" }
+    "inputExample": { "path": "1.output.statusCode" },
+    "inputFields": [
+      { "name": "path", "kind": "string", "required": true },
+      { "name": "source", "kind": "json", "required": false }
+    ],
+    "writeSide": false
   }
 ]
 ```
@@ -188,6 +202,9 @@ Lists tools registered in the engine. Used by the workflow builder and by agents
 input-sensitive tools such as `http.request` still determine the exact effect
 from the configured input at runtime. The builder uses this bit for safety
 guidance; runtime dry-run and recovery gates remain authoritative.
+`inputFields` is the compact browser-form projection derived from the execution
+schema. It deliberately omits the planner-only JSON Schema; Advanced JSON
+remains available for exact input objects and future fields.
 
 ### `GET /templates`
 

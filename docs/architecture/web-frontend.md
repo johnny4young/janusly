@@ -52,14 +52,23 @@ tool as read-only or potentially effectful before execution; runtime
 input-sensitive classification remains authoritative. Selecting a different
 tool replaces the previous `input` with the selected contract's bounded
 `inputExample` or `{}`, so stale fields cannot silently cross tool schemas.
-Required and optional keys remain catalog-derived, the editable JSON stays the
-canonical workflow config, and the existing resilience disclosure remains
-available even before a tool is selected. `ToolPicker` is reused by
-`loop.mode="for_each"`; do not fork another tool catalog or search model.
+The same Zod object schema produces a bounded `inputFields` projection
+(`string` / `number` / `integer` / `boolean` / `json`, required, string enum)
+without exposing the planner-only JSON Schema. `ToolInputFields` renders those
+descriptors as the primary form, preserves complete runtime template
+expressions across every kind, keeps unknown keys untouched, and leaves the
+exact input object behind Advanced JSON. Invalid drafts stay local until
+corrected; runtime validation remains authoritative. The field editor is lazy
+loaded only after a registered tool is selected so its schema-form machinery
+does not expand the initial workflow workspace. The resilience disclosure
+remains available even before a tool is selected. `ToolPicker` and the
+`ToolInputEditor` dispatch boundary are both reused by
+`loop.mode="for_each"`; do not fork another tool catalog, field parser, or
+search model.
 
 **Declared run input UX:** workflows with a typed `inputs` schema open the lazy `RunInputDialog` before `POST /start`; workflows without inputs keep the one-click run path. Durable schema keys remain unchanged in the submitted payload, while `run-input-model.ts` derives readable labels, maps JSONPath server errors, and owns state parsing independently from the dialog view. Required fields render before optional fields and each group uses a stable readable-label order because PostgreSQL JSONB does not preserve authoring order. Every field shows an explicit Required/Optional badge; a boolean has an unset/Yes/No state so untouched required values cannot silently become `false`, while explicit `false` remains valid. The first rendered field receives focus through the shared dialog-focus primitive, keyboard trapping/restoration stays centralized, and the engine remains the authoritative default/type validator.
 
-**Loop authoring:** the Inspector preserves omitted/default `map` behavior and exposes `for_each` as an explicit mode with the existing registered-tool picker, per-item JSON input, concurrency 1..20, and one count-or-percentage failure budget. Switching budget units removes the inactive key, fractional percentages remain exact, and legacy mapping stays in config when the operator temporarily selects tool execution. EN/ES labels and browser coverage live in the same lazy authoring boundary; do not duplicate the tool catalog or create a web-only validation model.
+**Loop authoring:** the Inspector preserves omitted/default `map` behavior and exposes `for_each` as an explicit mode with the existing registered-tool picker, the shared schema-guided per-item input form plus Advanced JSON, concurrency 1..20, and one count-or-percentage failure budget. Switching budget units removes the inactive key, fractional percentages remain exact, and legacy mapping stays in config when the operator temporarily selects tool execution. EN/ES labels and browser coverage live in the same lazy authoring boundary; do not duplicate the tool catalog or create a web-only validation model.
 
 **Run observation exception:** Activity and Reasoning remain NON-authoring tabs and MUST NOT be added to `CANVAS_TABS`. When Activity has a selected run with a valid `runs.input_json.workflow` snapshot, its contextual slot switches to `data-layout="run-observation"`: a separate `RunObservationWorkspace` React Flow provider renders that exact snapshot beside the Activity panel. Selecting a recovery clears the stale active-run projection before rendering the recovery detail, so a prior run map can never appear beside an unrelated case. `getRunWorkflowSnapshot` and `workflowToGraph` in `canvas-projections.ts` validate historical JSON fail-closed, restore persisted positions when present, and use the established deterministic layout as the per-node fallback; `projectVisibleNodes` overlays only the active run's `run_nodes` statuses. The selected detail snapshot is retained independently from the bounded `/runs` page, so refreshes and newly started runs cannot make the map disappear. Async run ownership binds both the active run id and a monotonic `runTransitionGeneration`; identity, workflow, active-run, and recovery-selection transitions increment that generation atomically with projection cleanup. Open/start guards and status/history requests capture it before awaiting, then fail closed if either owner changes; discarded polling responses also skip connection and terminal lifecycle effects. `WorkflowCanvas mode="observe"` disables drag/connect/reconnect/delete, hides handles, keeps pan/zoom/focus, labels nodes with localized status for assistive technology, pulses `running` nodes, and replaces that motion with a static ring under `prefers-reduced-motion`. This is deliberately a SECOND provider/instance: the hidden authoring canvas stays mounted and untouched, so observing a run can never mutate the draft, select an editor node, or replace the saved authoring viewport. Activity/Reasoning without a valid selected snapshot keep the normal full-width contextual layout. At ≤1200px the observation map stacks above the panel; wider desktop windows keep both side-by-side.
 

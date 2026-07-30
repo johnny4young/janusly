@@ -62,6 +62,12 @@ const PublicToolSchema = z.object({
   required: z.array(z.string()).optional(),
   optional: z.array(z.string()).optional(),
   inputExample: z.record(z.string(), z.unknown()).optional(),
+  inputFields: z.array(z.object({
+    name: z.string().min(1),
+    kind: z.enum(["string", "number", "integer", "boolean", "json"]),
+    required: z.boolean(),
+    options: z.array(z.string()).optional(),
+  })),
   writeSide: z.boolean(),
 });
 

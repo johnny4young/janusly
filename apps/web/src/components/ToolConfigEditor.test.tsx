@@ -20,6 +20,15 @@ const tools: ToolSchema[] = [
       title: 'Incident triage',
       body: 'Details…',
     },
+    inputFields: [
+      { name: 'credential', kind: 'string', required: true },
+      { name: 'owner', kind: 'string', required: true },
+      { name: 'repo', kind: 'string', required: true },
+      { name: 'title', kind: 'string', required: true },
+      { name: 'body', kind: 'string', required: false },
+      { name: 'labels', kind: 'json', required: false },
+      { name: 'assignees', kind: 'json', required: false },
+    ],
     writeSide: true,
   },
   {
@@ -28,6 +37,7 @@ const tools: ToolSchema[] = [
     descriptionCode: 'text-uppercase',
     required: ['value'],
     inputExample: { value: 'hello' },
+    inputFields: [{ name: 'value', kind: 'string', required: true }],
     writeSide: false,
   },
 ]
@@ -145,7 +155,7 @@ describe('<ToolConfigEditor />', () => {
     expect((screen.getByLabelText('Tool input') as HTMLTextAreaElement).value).toContain('preserved')
   })
 
-  it('keeps the input and resilience controls progressive until a tool is chosen', () => {
+  it('keeps the input and resilience controls progressive until a tool is chosen', async () => {
     function Harness() {
       const [config, setConfig] = useState<JsonObject>({})
       return (
@@ -162,6 +172,6 @@ describe('<ToolConfigEditor />', () => {
     expect(screen.queryByLabelText('Tool input')).not.toBeInTheDocument()
     expect(screen.getByTestId('resilience-fieldset')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Tool'), { target: { value: 'text.uppercase' } })
-    expect((screen.getByLabelText('Tool input') as HTMLTextAreaElement).value).toContain('hello')
+    expect(await screen.findByLabelText(/^Value/)).toHaveValue('hello')
   })
 })

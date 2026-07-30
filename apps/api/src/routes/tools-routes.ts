@@ -1,8 +1,8 @@
 /**
  * Tool registry catalog. Returns the AI-Studio-facing
  * `listTools()` JSON shape (`name` / `description` / `required` /
- * `optional` / `inputExample` / `writeSide`). Field names are part of the public
- * contract `apps/web` reads via `ToolSchema`; do not drift.
+ * `optional` / `inputExample` / `inputFields` / `writeSide`). Field names are
+ * part of the public contract `apps/web` reads via `ToolSchema`; do not drift.
  */
 
 import { listTools } from "@janusly/engine/src/tool-registry";

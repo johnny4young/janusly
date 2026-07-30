@@ -18,6 +18,7 @@ import { ExpressionAssistant } from './ExpressionAssistant'
 import { HttpConfigEditor } from './HttpConfigEditor'
 import { AiConfigEditor } from './AiConfigEditor'
 import { ToolConfigEditor } from './ToolConfigEditor'
+import { ToolInputEditor } from './ToolInputEditor'
 import { ToolPicker } from './ToolPicker'
 import {
   ApprovalConfigEditor,
@@ -309,6 +310,8 @@ export function QuickConfigEditor({
     const modeId = fieldId(nodeId, 'loop mode')
     const failureBudgetMode = typeof config.toleratedFailurePercentage === 'number' ? 'percentage' : 'count'
     const failureBudgetModeId = fieldId(nodeId, 'loop failure budget mode')
+    const selectedTool = readConfigString(config, 'tool')
+    const selectedToolSchema = tools.find(tool => tool.name === selectedTool)
     return (
       <section className="quick-config" data-testid="loop-config">
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
@@ -349,11 +352,17 @@ export function QuickConfigEditor({
           <div data-testid="loop-for-each-config">
             <ToolPicker
               nodeId={`${nodeId}-loop`}
-              selectedTool={readConfigString(config, 'tool')}
+              selectedTool={selectedTool}
               tools={tools}
               onChange={(tool, input) => patch({ tool, input })}
             />
-            <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.loopToolInput')} value={asJsonObject(config.input)} onChange={value => patch({ input: value })} />
+            <ToolInputEditor
+              scope={`${nodeId}-loop`}
+              tool={selectedToolSchema}
+              input={config.input}
+              rawLabel={t('rightPanel.quickConfig.loopToolInput')}
+              onChange={input => patch({ input })}
+            />
             <OptionalNumberConfigField
               scope={nodeId}
               label={t('rightPanel.quickConfig.loopConcurrency')}

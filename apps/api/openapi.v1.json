@@ -16929,6 +16929,42 @@
                             },
                             "additionalProperties": {}
                           },
+                          "inputFields": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "name": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "string",
+                                    "number",
+                                    "integer",
+                                    "boolean",
+                                    "json"
+                                  ]
+                                },
+                                "required": {
+                                  "type": "boolean"
+                                },
+                                "options": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "name",
+                                "kind",
+                                "required"
+                              ]
+                            }
+                          },
                           "writeSide": {
                             "type": "boolean"
                           }
@@ -16937,6 +16973,7 @@
                           "name",
                           "description",
                           "descriptionCode",
+                          "inputFields",
                           "writeSide"
                         ]
                       }

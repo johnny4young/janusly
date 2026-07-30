@@ -53,6 +53,13 @@ export type ReviewFindings = {
   status: 'pass' | 'warn' | 'fail'
   issues: AiReviewIssue[]
 }
+export type ToolInputFieldSchema = {
+  name: string
+  kind: 'string' | 'number' | 'integer' | 'boolean' | 'json'
+  required: boolean
+  options?: string[]
+}
+
 export type ToolSchema = {
   name: string
   description: string
@@ -61,6 +68,7 @@ export type ToolSchema = {
   required?: string[]
   optional?: string[]
   inputExample?: Record<string, unknown>
+  inputFields: ToolInputFieldSchema[]
   /** True when some valid invocations can mutate external state. */
   writeSide: boolean
 }

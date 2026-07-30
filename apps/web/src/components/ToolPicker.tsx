@@ -97,12 +97,6 @@ export function ToolPicker({
                 ? 'rightPanel.quickConfig.toolWriteCapable'
                 : 'rightPanel.quickConfig.toolReadOnly')}
             </span>
-            {(matchedTool.required ?? []).map(field => (
-              <span key={`required-${field}`} className="we-param we-param--required">{field}</span>
-            ))}
-            {(matchedTool.optional ?? []).map(field => (
-              <span key={`optional-${field}`} className="we-param we-param--optional">{field}</span>
-            ))}
           </div>
           {matchedTool.description && <p className="helper-text">{tToolDescription(matchedTool)}</p>}
           <p className="helper-text">

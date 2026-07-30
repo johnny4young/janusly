@@ -22,6 +22,13 @@ const LOCALES = {
     toolSearch: 'Find a tool',
     tool: 'Tool',
     toolInput: 'Tool input',
+    credential: 'Credential',
+    owner: 'Owner',
+    repo: 'Repository',
+    title: 'Title',
+    body: 'Body',
+    value: 'Value',
+    advancedInput: 'Advanced JSON',
     writeCapable: 'May change external systems',
     readOnly: 'Read-only',
   },
@@ -33,6 +40,13 @@ const LOCALES = {
     toolSearch: 'Buscar una herramienta',
     tool: 'Herramienta',
     toolInput: 'Entrada de la herramienta',
+    credential: 'Credencial',
+    owner: 'Propietario',
+    repo: 'Repositorio',
+    title: 'Título',
+    body: 'Contenido',
+    value: 'Valor',
+    advancedInput: 'JSON avanzado',
     writeCapable: 'Puede modificar sistemas externos',
     readOnly: 'Solo lectura',
   },
@@ -173,30 +187,39 @@ for (const locale of ['en', 'es'] as const) {
     await search.fill('github.create_issue')
     await picker.selectOption('github.create_issue')
     await expect(editor.getByTestId('tool-capability')).toContainText(copy.writeCapable)
-    const writeInput = editor.getByLabel(copy.toolInput, { exact: true })
-    await expect(writeInput).toHaveValue(/Incident triage/)
-    expect(await writeInput.inputValue()).not.toContain('STALE INPUT')
-    await editor.getByTestId('tool-capability').scrollIntoViewIfNeeded()
-    await capture(page.locator('.app-shell'), `web-${locale}-tool-write-capability`)
+    await expect(editor.getByLabel(new RegExp(`^${copy.credential}`))).toHaveValue('bot-github')
+    await expect(editor.getByLabel(new RegExp(`^${copy.owner}`))).toHaveValue('janusly')
+    await expect(editor.getByLabel(new RegExp(`^${copy.repo}`))).toHaveValue('demo')
+    await expect(editor.getByLabel(new RegExp(`^${copy.title}`))).toHaveValue('Incident triage')
+    await expect(editor.getByLabel(new RegExp(`^${copy.body}`))).toHaveValue('Details…')
+    await expect(editor.getByText('STALE INPUT')).toHaveCount(0)
+    await editor.getByLabel(new RegExp(`^${copy.credential}`)).scrollIntoViewIfNeeded()
+    await capture(page.locator('.app-shell'), `web-${locale}-tool-fields-write-capability`)
 
     await search.fill('text.uppercase')
     await picker.selectOption('text.uppercase')
     await expect(editor.getByTestId('tool-capability')).toContainText(copy.readOnly)
-    const toolInput = editor.getByLabel(copy.toolInput, { exact: true })
-    await expect(toolInput).toHaveValue(/"value": "hello"/)
-    await toolInput.fill(JSON.stringify({ value: 'hola Janusly' }, null, 2))
-    await toolInput.blur()
+    const valueInput = editor.getByLabel(new RegExp(`^${copy.value}`))
+    await expect(valueInput).toHaveValue('hello')
+    await valueInput.fill('hola Janusly')
+    await valueInput.blur()
+
+    await editor.getByText(copy.advancedInput, { exact: true }).click()
+    const advancedInput = editor.getByLabel(copy.toolInput, { exact: true })
+    await expect(advancedInput).toHaveValue(/"value": "hola Janusly"/)
+    await capture(page.locator('.app-shell'), `web-${locale}-tool-fields-advanced-json`)
+    await editor.getByText(copy.advancedInput, { exact: true }).click()
 
     await expectNoBlockingAccessibilityViolations(page, `${locale} approachable tool step`)
     await search.scrollIntoViewIfNeeded()
-    await capture(page.locator('.app-shell'), `web-${locale}-tool-step-editor`)
+    await capture(page.locator('.app-shell'), `web-${locale}-tool-fields-editor`)
 
     await page.setViewportSize({ width: 1024, height: 900 })
     await expect(editor).toBeVisible()
-    await search.scrollIntoViewIfNeeded()
+    await valueInput.scrollIntoViewIfNeeded()
     const editorOverflow = await editor.evaluate(element => element.scrollWidth - element.clientWidth)
     expect(editorOverflow).toBeLessThanOrEqual(2)
-    await capture(page.locator('.app-shell'), `web-${locale}-tool-step-editor-narrow`)
+    await capture(page.locator('.app-shell'), `web-${locale}-tool-fields-editor-narrow`)
     await page.setViewportSize({ width: 1440, height: 1000 })
 
     const saveResponse = page.waitForResponse((response) => (

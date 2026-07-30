@@ -8464,7 +8464,6 @@ button.we-authoring-problems__row:focus-visible {
   font-weight: 600;
   border: 1px solid transparent;
 }
-.we-param--required { color: var(--we-primary); background: var(--we-primary-soft); border-color: color-mix(in srgb, var(--we-primary) 25%, transparent); }
 .we-param--missing { color: var(--we-warning-text); background: var(--we-warning-soft); border-color: var(--we-warning-border-30); }
 .we-param--optional { color: var(--we-muted); background: var(--we-surface-muted); border-color: var(--we-line); }
 

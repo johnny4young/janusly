@@ -18,8 +18,8 @@
  *   downstream in the runtime.
  * - The JSON shape `listTools()` produces is part of the public API surface
  *   that `apps/web` reads via `ToolSchema`. Don't change `name`,
- *   `description`, `required`, `optional`, `inputExample`, or `writeSide`
- *   field names.
+ *   `description`, `required`, `optional`, `inputExample`, `inputFields`, or
+ *   `writeSide` field names.
  * - `http.request` goes through `fetchHttpTarget` so the SSRF + DNS-rebinding
  *   pin is preserved on every call.
  * - Adding a new tool without `inputSchema` and `outputSchema` is a TypeScript
@@ -78,8 +78,16 @@ export type ToolSchema = {
   required?: string[];
   optional?: string[];
   inputExample?: Record<string, unknown>;
+  inputFields: ToolInputFieldSchema[];
   /** True when some valid invocations can mutate external state. */
   writeSide: boolean;
+};
+
+export type ToolInputFieldSchema = {
+  name: string;
+  kind: "string" | "number" | "integer" | "boolean" | "json";
+  required: boolean;
+  options?: string[];
 };
 
 /**
@@ -175,6 +183,45 @@ function describeShape(schema: z.ZodObject<z.ZodRawShape>): { required: string[]
   return { required, optional };
 }
 
+function describeInputKind(type: unknown): ToolInputFieldSchema["kind"] {
+  switch (type) {
+    case "string":
+    case "number":
+    case "integer":
+    case "boolean":
+      return type;
+    default:
+      return "json";
+  }
+}
+
+function describeInputFields(
+  schema: z.ZodObject<z.ZodRawShape>,
+  required: readonly string[],
+): ToolInputFieldSchema[] {
+  const { properties } = z.toJSONSchema(schema) as {
+    properties?: Record<string, {
+      type?: unknown;
+      enum?: unknown;
+    }>;
+  };
+
+  return Object.entries(properties ?? {}).map(([name, property]) => {
+    const kind = describeInputKind(property.type);
+    const options = kind === "string"
+      && Array.isArray(property.enum)
+      && property.enum.every((value): value is string => typeof value === "string")
+      ? property.enum
+      : undefined;
+    return {
+      name,
+      kind,
+      required: required.includes(name),
+      ...(options ? { options } : {}),
+    };
+  }).sort((left, right) => Number(right.required) - Number(left.required));
+}
+
 /**
  * Public list of registered tools, shaped for the AI Studio inspector.
  *
@@ -184,7 +231,8 @@ function describeShape(schema: z.ZodObject<z.ZodRawShape>): { required: string[]
  */
 export function listTools(): ToolSchema[] {
   return Object.values(tools).map((tool) => {
-    const { required, optional } = describeShape(tool.inputSchema as z.ZodObject<z.ZodRawShape>);
+    const inputSchema = tool.inputSchema;
+    const { required, optional } = describeShape(inputSchema);
     return {
       name: tool.name,
       description: tool.description,
@@ -192,6 +240,7 @@ export function listTools(): ToolSchema[] {
       required,
       optional: optional.length > 0 ? optional : undefined,
       inputExample: tool.inputExample,
+      inputFields: describeInputFields(inputSchema, required),
       writeSide: tool.writeSide === true,
     };
   });

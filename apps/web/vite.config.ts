@@ -79,6 +79,7 @@ export default defineConfig(({ mode }) => ({
             || id.endsWith('/src/components/WorkflowsDashboardView.tsx')
             || id.endsWith('/src/components/workflows-dashboard-model.ts')
             || id.endsWith('/src/components/WorkflowOperationsPanel.tsx')
+            || id.endsWith('/src/components/input-display-label.ts')
           ) {
             return 'workflow-workspace'
           }

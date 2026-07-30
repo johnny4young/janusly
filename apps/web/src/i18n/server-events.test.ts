@@ -10,6 +10,7 @@ import en from './locales/en/common.json'
 import es from './locales/es/common.json'
 import { initI18n } from './init'
 import { tValidationIssue, tReadinessIssue, tAiReviewIssue, tRunEvent, tFailureCluster, tHealthRationale, tRecoveryMetricRationale, tApiError, tServerFallback } from './server-events'
+import { tToolInputLabel } from './tool-input-label'
 
 beforeAll(() => {
   initI18n('en')
@@ -189,6 +190,19 @@ describe('tServerFallback', () => {
     expect(tServerFallback(null)).toBe('')
     expect(tServerFallback(undefined)).toBe('')
     expect(tServerFallback('')).toBe('')
+  })
+})
+
+describe('tToolInputLabel', () => {
+  it('translates a known field label in each locale', () => {
+    expect(tToolInputLabel('credential', 'Credential')).toBe('Credential')
+
+    initI18n('es')
+    expect(tToolInputLabel('credential', 'Credential')).toBe('Credencial')
+  })
+
+  it('retains the readable fallback for an unknown field key', () => {
+    expect(tToolInputLabel('futureField', 'Future field')).toBe('Future field')
   })
 })
 
