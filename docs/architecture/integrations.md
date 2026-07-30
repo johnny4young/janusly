@@ -77,6 +77,17 @@ the legacy branch). Don't cite "all consumers" when touching those paths.
 
 Registered-tool dispatch in `packages/engine/src/tool-execution.ts` is shared by ordinary `tool` nodes, agent planning, and `loop.mode='for_each'`; keep organization defaults, usage context, and dry-run write-side classification there instead of adding executor-specific forks. An ordinary tool node preserves the registry's never-throw envelope as output, while `for_each` deliberately interprets `{ ok: false }` as an item failure for its explicit batch budget. A timed-out or over-budget write-side batch is marked possibly committed, cooperatively stops dequeuing new items, and never whole-node retries automatically; operator-gated replay prevents duplicate external effects.
 
+The public `listTools()` projection includes a required `writeSide` capability
+bit derived from the same registered `ToolDefinition` as execution. It tells
+the browser that some valid invocations can mutate external state; it does not
+replace input-sensitive runtime classification. The workflow Inspector keeps
+the current selection visible while searching, labels read-only versus
+write-capable tools before execution, and replaces a previous tool's input with
+the new tool's bounded example (or `{}`) when the contract changes. This avoids
+silently carrying stale fields across schemas. `ToolPicker` is shared by
+ordinary tool nodes and bounded `for_each` loops; `ToolConfigEditor` owns only
+the ordinary-node composition and resilience disclosure.
+
 ### External runtime shadow mode
 
 External runtime shadow mode is the first adapter boundary for workflows that

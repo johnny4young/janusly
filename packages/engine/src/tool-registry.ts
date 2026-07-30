@@ -18,7 +18,8 @@
  *   downstream in the runtime.
  * - The JSON shape `listTools()` produces is part of the public API surface
  *   that `apps/web` reads via `ToolSchema`. Don't change `name`,
- *   `description`, `required`, `optional`, or `inputExample` field names.
+ *   `description`, `required`, `optional`, `inputExample`, or `writeSide`
+ *   field names.
  * - `http.request` goes through `fetchHttpTarget` so the SSRF + DNS-rebinding
  *   pin is preserved on every call.
  * - Adding a new tool without `inputSchema` and `outputSchema` is a TypeScript
@@ -77,6 +78,8 @@ export type ToolSchema = {
   required?: string[];
   optional?: string[];
   inputExample?: Record<string, unknown>;
+  /** True when some valid invocations can mutate external state. */
+  writeSide: boolean;
 };
 
 /**
@@ -189,6 +192,7 @@ export function listTools(): ToolSchema[] {
       required,
       optional: optional.length > 0 ? optional : undefined,
       inputExample: tool.inputExample,
+      writeSide: tool.writeSide === true,
     };
   });
 }

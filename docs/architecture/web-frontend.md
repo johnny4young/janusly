@@ -44,6 +44,19 @@ use the same `promptRef`-first precedence as the executor, while workflow
 validation accepts either a nonblank inline prompt or a valid saved-prompt
 reference. Advanced JSON remains the forward-compatible escape hatch.
 
+The registered-tool Inspector follows the same boundary through
+`ToolConfigEditor` and the shared `ToolPicker`. Search filters the bounded
+server catalog by stable name or localized purpose without hiding the current
+selection. The public catalog's required `writeSide` capability bit labels a
+tool as read-only or potentially effectful before execution; runtime
+input-sensitive classification remains authoritative. Selecting a different
+tool replaces the previous `input` with the selected contract's bounded
+`inputExample` or `{}`, so stale fields cannot silently cross tool schemas.
+Required and optional keys remain catalog-derived, the editable JSON stays the
+canonical workflow config, and the existing resilience disclosure remains
+available even before a tool is selected. `ToolPicker` is reused by
+`loop.mode="for_each"`; do not fork another tool catalog or search model.
+
 **Declared run input UX:** workflows with a typed `inputs` schema open the lazy `RunInputDialog` before `POST /start`; workflows without inputs keep the one-click run path. Durable schema keys remain unchanged in the submitted payload, while `run-input-model.ts` derives readable labels, maps JSONPath server errors, and owns state parsing independently from the dialog view. Required fields render before optional fields and each group uses a stable readable-label order because PostgreSQL JSONB does not preserve authoring order. Every field shows an explicit Required/Optional badge; a boolean has an unset/Yes/No state so untouched required values cannot silently become `false`, while explicit `false` remains valid. The first rendered field receives focus through the shared dialog-focus primitive, keyboard trapping/restoration stays centralized, and the engine remains the authoritative default/type validator.
 
 **Loop authoring:** the Inspector preserves omitted/default `map` behavior and exposes `for_each` as an explicit mode with the existing registered-tool picker, per-item JSON input, concurrency 1..20, and one count-or-percentage failure budget. Switching budget units removes the inactive key, fractional percentages remain exact, and legacy mapping stays in config when the operator temporarily selects tool execution. EN/ES labels and browser coverage live in the same lazy authoring boundary; do not duplicate the tool catalog or create a web-only validation model.

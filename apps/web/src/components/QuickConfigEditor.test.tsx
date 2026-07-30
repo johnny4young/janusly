@@ -91,6 +91,7 @@ describe('<QuickConfigEditor /> resilience wiring', () => {
           description: 'Parse a JSON string into its native object, array, or primitive value.',
           descriptionCode: 'json-parse',
           required: ['value'],
+          writeSide: false,
         }]}
         onUpdate={vi.fn()}
       />,
@@ -215,6 +216,7 @@ describe('<QuickConfigEditor /> bounded per-item processing', () => {
     descriptionCode: 'text-uppercase',
     required: ['value'],
     inputExample: { value: 'hello' },
+    writeSide: false,
   }]
 
   it('keeps the legacy mapping editor as the default loop mode', () => {

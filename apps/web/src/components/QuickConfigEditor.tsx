@@ -11,12 +11,14 @@
 import { useEffect, useState } from 'react'
 import { publicApiUrl } from '../api'
 import type { JsonObject, SavedWorkflow, ToolSchema, WorkflowGraphEdge, WorkflowGraphNode, WorkflowInputSchemaShape } from '../types'
-import { Trans, tToolDescription, useT } from '../i18n'
+import { Trans, useT } from '../i18n'
 import { McpToolConfigField } from './McpToolConfigField'
 import { ResilienceFieldset } from './ResilienceFieldset'
 import { ExpressionAssistant } from './ExpressionAssistant'
 import { HttpConfigEditor } from './HttpConfigEditor'
 import { AiConfigEditor } from './AiConfigEditor'
+import { ToolConfigEditor } from './ToolConfigEditor'
+import { ToolPicker } from './ToolPicker'
 import {
   ApprovalConfigEditor,
   HumanFormConfigEditor,
@@ -45,48 +47,6 @@ function isPositiveVersion(value: string): boolean {
   if (!/^\d+$/.test(value)) return false
   const parsed = Number(value)
   return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= SUBWORKFLOW_VERSION_MAX
-}
-
-function ToolPicker({ nodeId, selectedTool, input, tools, onChange }: {
-  nodeId: string
-  selectedTool: string
-  input: unknown
-  tools: ToolSchema[]
-  onChange: (tool: string, input: unknown) => void
-}) {
-  const { t } = useT()
-  const matchedTool = tools.find(tool => tool.name === selectedTool) ?? null
-  const showCurrentToolOption = Boolean(selectedTool) && !matchedTool
-  const isUnknown = showCurrentToolOption && tools.length > 0
-  const toolNameId = fieldId(nodeId, 'tool name')
-  const onSelectTool = (next: string) => {
-    const inputIsEmpty = !input || (typeof input === 'object' && input !== null && !Array.isArray(input) && Object.keys(input).length === 0)
-    const newTool = tools.find(tool => tool.name === next)
-    const seedInput = inputIsEmpty && newTool?.inputExample ? newTool.inputExample : input
-    onChange(next, seedInput)
-  }
-  return (
-    <div className="form-grid" data-testid="tool-picker">
-      <label className="field-label" htmlFor={toolNameId}>{t('rightPanel.quickConfig.tool')}</label>
-      <select
-        id={toolNameId}
-        className="text-field"
-        value={selectedTool}
-        onChange={event => onSelectTool(event.target.value)}
-      >
-        {!selectedTool && <option value="">{t('rightPanel.quickConfig.pickTool')}</option>}
-        {showCurrentToolOption && <option value={selectedTool}>{tools.length > 0 ? t('rightPanel.quickConfig.toolNotRegistered', { name: selectedTool }) : t('rightPanel.quickConfig.toolLoading', { name: selectedTool })}</option>}
-        {tools.map(tool => (
-          <option key={tool.name} value={tool.name}>{tool.name}</option>
-        ))}
-      </select>
-      {matchedTool?.description && <p className="helper-text">{tToolDescription(matchedTool)}</p>}
-      {matchedTool?.required && matchedTool.required.length > 0 && (
-        <p className="helper-text">{t('rightPanel.quickConfig.requiredInput', { required: matchedTool.required.join(', ') })}{matchedTool.optional?.length ? t('rightPanel.quickConfig.optionalSuffix', { optional: matchedTool.optional.join(', ') }) : ''}</p>
-      )}
-      {isUnknown && <p className="helper-text" data-testid="unknown-tool-warning">{t('rightPanel.quickConfig.unknownToolWarning')}</p>}
-    </div>
-  )
 }
 
 function SubworkflowVersionField({ nodeId, value, onChange }: {
@@ -220,21 +180,7 @@ export function QuickConfigEditor({
   }
 
   if (type === 'tool') {
-    const selectedTool = readConfigString(config, 'tool')
-    return (
-      <section className="quick-config">
-        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
-        <ToolPicker
-          nodeId={nodeId}
-          selectedTool={selectedTool}
-          input={config.input}
-          tools={tools}
-          onChange={(tool, input) => patch({ tool, input })}
-        />
-        <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.toolInput')} value={asJsonObject(config.input)} onChange={value => patch({ input: value })} />
-        <ResilienceFieldset nodeId={nodeId} nodeType="tool" config={config} onPatch={patch} />
-      </section>
-    )
+    return <ToolConfigEditor nodeId={nodeId} config={config} tools={tools} onUpdate={onUpdate} />
   }
 
   if (type === 'agent' || type === 'multi_agent') {
@@ -404,7 +350,6 @@ export function QuickConfigEditor({
             <ToolPicker
               nodeId={`${nodeId}-loop`}
               selectedTool={readConfigString(config, 'tool')}
-              input={config.input}
               tools={tools}
               onChange={(tool, input) => patch({ tool, input })}
             />

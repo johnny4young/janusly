@@ -1,0 +1,62 @@
+import { useT } from '../i18n'
+import type { JsonObject, ToolSchema } from '../types'
+import { JsonConfigField, readConfigString } from './quick-config-fields'
+import { ResilienceFieldset } from './ResilienceFieldset'
+import { ToolPicker } from './ToolPicker'
+
+export function ToolConfigEditor({
+  nodeId,
+  config,
+  tools,
+  onUpdate,
+}: {
+  nodeId: string
+  config: JsonObject
+  tools: ToolSchema[]
+  onUpdate: (config: Record<string, unknown>) => void
+}) {
+  const { t } = useT()
+  const selectedTool = readConfigString(config, 'tool')
+  const matchedTool = tools.find(tool => tool.name === selectedTool)
+  const patch = (next: Record<string, unknown>) => onUpdate({ ...config, ...next })
+
+  return (
+    <section className="quick-config" data-testid="tool-config">
+      <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
+      <ToolPicker
+        nodeId={nodeId}
+        selectedTool={selectedTool}
+        tools={tools}
+        onChange={(tool, input) => patch({ tool, input })}
+      />
+      {selectedTool && (
+        <>
+          <JsonConfigField
+            scope={nodeId}
+            label={t('rightPanel.quickConfig.toolInput')}
+            value={config.input}
+            onChange={input => patch({ input })}
+          />
+          {matchedTool?.inputExample && (
+            <div className="form-actions">
+              <button
+                type="button"
+                className="we-btn we-btn--ghost we-btn--sm"
+                onClick={() => patch({ input: matchedTool.inputExample })}
+              >
+                {t('rightPanel.quickConfig.toolRestoreExample')}
+              </button>
+            </div>
+          )}
+          <p className="helper-text">{t('rightPanel.quickConfig.toolChangeHelper')}</p>
+        </>
+      )}
+      <ResilienceFieldset
+        nodeId={nodeId}
+        nodeType="tool"
+        config={config}
+        onPatch={patch}
+      />
+    </section>
+  )
+}

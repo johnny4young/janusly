@@ -196,6 +196,8 @@ describe('tool-registry', () => {
     const textUpper = tools.find(tool => tool.name === 'text.uppercase')
     expect(textUpper?.required).toEqual(['value'])
     expect(textUpper?.optional).toBeUndefined()
+    expect(textUpper?.writeSide).toBe(false)
+    expect(http?.writeSide).toBe(true)
     const dbRead = tools.find(tool => tool.name === 'db.query.read')
     expect(dbRead?.required).toEqual(['credential', 'sql'])
     expect(dbRead?.optional?.slice().sort()).toEqual(['maxRows', 'params', 'timeoutMs'])
@@ -238,10 +240,10 @@ describe('tool-registry', () => {
       'vector.upsert',
     ]))
 
-    // The web-facing contract remains compact; planner-only schemas do not
-    // increase the GET /tools payload.
+    // The web-facing contract stays compact: it exposes only the safety bit,
+    // never the planner-only JSON Schema.
     expect(publicTools[0]).not.toHaveProperty('inputSchema')
-    expect(publicTools[0]).not.toHaveProperty('writeSide')
+    expect(typeof publicTools[0]?.writeSide).toBe('boolean')
   })
 
   /* -------- text.* -------- */

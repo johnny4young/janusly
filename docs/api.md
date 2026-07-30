@@ -164,13 +164,15 @@ Lists tools registered in the engine. Used by the workflow builder and by agents
     "description": "Make an HTTP request to an external API.",
     "required": ["url"],
     "optional": ["method", "headers", "body"],
-    "inputExample": { "url": "https://example.com", "method": "GET" }
+    "inputExample": { "url": "https://example.com", "method": "GET" },
+    "writeSide": true
   },
   {
     "name": "text.uppercase",
     "description": "Convert text to uppercase.",
     "required": ["value"],
-    "inputExample": { "value": "hello" }
+    "inputExample": { "value": "hello" },
+    "writeSide": false
   },
   {
     "name": "json.pick",
@@ -181,6 +183,11 @@ Lists tools registered in the engine. Used by the workflow builder and by agents
   }
 ]
 ```
+
+`writeSide` means that at least one valid invocation can mutate external state;
+input-sensitive tools such as `http.request` still determine the exact effect
+from the configured input at runtime. The builder uses this bit for safety
+guidance; runtime dry-run and recovery gates remain authoritative.
 
 ### `GET /templates`
 

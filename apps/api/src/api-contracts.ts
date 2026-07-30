@@ -62,6 +62,7 @@ const PublicToolSchema = z.object({
   required: z.array(z.string()).optional(),
   optional: z.array(z.string()).optional(),
   inputExample: z.record(z.string(), z.unknown()).optional(),
+  writeSide: z.boolean(),
 });
 
 const WorkflowValidationIssueSchema = z.object({

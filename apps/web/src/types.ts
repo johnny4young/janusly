@@ -61,6 +61,8 @@ export type ToolSchema = {
   required?: string[]
   optional?: string[]
   inputExample?: Record<string, unknown>
+  /** True when some valid invocations can mutate external state. */
+  writeSide: boolean
 }
 export type Template = {
   id: string

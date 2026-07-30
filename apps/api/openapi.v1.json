@@ -16928,12 +16928,16 @@
                               "type": "string"
                             },
                             "additionalProperties": {}
+                          },
+                          "writeSide": {
+                            "type": "boolean"
                           }
                         },
                         "required": [
                           "name",
                           "description",
-                          "descriptionCode"
+                          "descriptionCode",
+                          "writeSide"
                         ]
                       }
                     }

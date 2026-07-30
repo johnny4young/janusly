@@ -445,7 +445,16 @@ function ToolsPanel({ tools, onInstallPlugin, canInstall }: Pick<RightPanelCatal
           <div key={tool.name} className="list-card">
             <div className="split-row" style={{ width: '100%' }}>
               <strong>{tool.name}</strong>
-              <span className="we-pill" data-tone="warning">{t('rightPanel.tools.requiredCount', { count: tool.required?.length ?? 0 })}</span>
+              <div className="we-tool-params">
+                <span className="we-pill" data-tone={tool.writeSide ? 'warning' : 'success'}>
+                  {t(tool.writeSide
+                    ? 'rightPanel.quickConfig.toolWriteCapable'
+                    : 'rightPanel.quickConfig.toolReadOnly')}
+                </span>
+                <span className="we-pill" data-tone="neutral">
+                  {t('rightPanel.tools.requiredCount', { count: tool.required?.length ?? 0 })}
+                </span>
+              </div>
             </div>
             <span>{tToolDescription(tool)}</span>
             {(tool.required?.length || tool.optional?.length) ? (
