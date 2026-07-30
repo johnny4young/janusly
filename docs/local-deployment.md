@@ -197,6 +197,58 @@ Only `local:reset`/`local:auth:reset` use the destructive no-backup boundary.
 `pnpm local:db:verify-empty` proves both `auth` and `public` exist in one
 database and that the manual-start tables are empty.
 
+### Portable backup and restore
+
+A Compose restart or normal stop proves persistence on one workstation, but it
+is not a portable backup. Create a logical snapshot of both application and
+identity data with:
+
+```bash
+pnpm local:backup
+# or choose a private destination explicitly
+pnpm local:backup -- /path/to/private/janusly-backup
+```
+
+The command briefly quiesces the web, API, worker, and Supabase Auth gateway so
+the snapshot is consistent. It writes an ignored `output/backups/...`
+directory by default containing:
+
+- `database.sql`: a data-only dump of the `auth` and `public` schemas;
+- `credential-master.key`: the matching root key required to decrypt managed
+  credentials;
+- `manifest.json`: format, migration fingerprint, checksums, source commit, and
+  bounded row counts used for restore verification. It also records any legacy
+  `public` tables no longer declared by Janusly; those tables are excluded from
+  the restorable dump instead of making a clean current schema impossible to
+  restore. Supabase Auth's own `auth.schema_migrations` ledger is also excluded:
+  the freshly started, pinned Auth image owns that schema history, while the
+  backup restores its user, identity, factor, and session data.
+
+The directory and files are owner-only, but the backup is **not encrypted**.
+It contains password hashes, sessions, workflow data, and the credential root
+key. Store it in an encrypted disk or secret-aware backup system and never
+commit or share it.
+
+Restore only into the same migration set:
+
+```bash
+pnpm local:restore -- /path/to/private/janusly-backup --confirm-reset
+```
+
+Restore validates the manifest, both SHA-256 checksums, and the current
+migration fingerprint before crossing the destructive boundary. It then resets
+the unified local database, restores the exact credential key, recreates the
+current schema, loads the snapshot, and requires the bounded row counts to
+match before restarting the application and Auth services. The explicit
+`--confirm-reset` flag is mandatory because all current local Auth and Janusly
+data are replaced.
+
+Redis and provider-simulator volumes are intentionally not part of this
+portable snapshot. PostgreSQL is the durable source of workflow, run,
+outbox/reconciliation, and schedule state; a restore starts with a fresh queue
+and the worker rebuilds durable publications and schedulers. Provider simulator
+request history is qualification evidence rather than product data.
+
 ## Provider Simulator
 
 The simulator listens on the loopback port selected by

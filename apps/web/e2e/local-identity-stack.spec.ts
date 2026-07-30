@@ -110,7 +110,7 @@ test('real local identity covers onboarding, organizations, roles, and truthful 
   await expect(page.getByRole('button', { name: 'Open user menu' })).toBeVisible()
   await expect(page.locator('.bottom-status-bar')).toContainText(organizationName)
   await page.getByRole('button', { name: 'Workflows', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'New workflow', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'New workflow', exact: true }).first()).toBeDisabled()
   await openTeam(page)
   await expect(page.getByRole('button', { name: 'Invite', exact: true })).toBeDisabled()
   await expect(page.getByLabel(`Role for ${memberEmail}`)).toBeDisabled()
@@ -126,8 +126,8 @@ test('real local identity covers onboarding, organizations, roles, and truthful 
 
   await signIn(page, memberEmail)
   await page.getByRole('button', { name: 'Workflows', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'New workflow', exact: true })).toBeEnabled()
-  await page.getByRole('button', { name: 'New workflow', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'New workflow', exact: true }).first()).toBeEnabled()
+  await page.getByRole('button', { name: 'New workflow', exact: true }).first().click()
   await page.getByRole('button', { name: /^Start blank\b/ }).click()
   await expect(page.getByRole('button', { name: 'New', exact: true })).toBeEnabled()
   await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
@@ -149,7 +149,7 @@ test('local identity and organization membership survive a complete stack restar
   await expect(page.getByRole('button', { name: 'Open user menu' })).toBeVisible()
   await expect(page.locator('.bottom-status-bar')).toContainText(organizationName)
   await page.getByRole('button', { name: 'Workflows', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'New workflow', exact: true })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'New workflow', exact: true }).first()).toBeEnabled()
   await capture(page, 'identity-persisted-after-restart')
 
   expect(browserErrors).toEqual([])
