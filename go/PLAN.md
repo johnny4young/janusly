@@ -165,7 +165,7 @@ crítica) · P1 (importante) · P2 (stretch).
 | --- | --- | --- | --- |
 | T-000 | Bootstrap: worktree, rama, scaffold, Compose 4632, migraciones | P0 | done |
 | T-001 | Config, boot, observabilidad (4600/4601, slog, healthz, probe) | P0 | done |
-| T-002 | sqlc + inventario real del esquema + persistencia núcleo | P0 | todo |
+| T-002 | sqlc + inventario real del esquema + persistencia núcleo | P0 | done |
 | T-003 | Dominio: parsing + validación subconjunto (códigos de issue) | P0 | todo |
 | T-004 | startRun transaccional + defaults de inputs | P0 | todo |
 | T-005 | Cola propia: claim loop, worker pool, LISTEN/NOTIFY | P0 | todo |
@@ -579,6 +579,11 @@ el chat publicado.
 | 2026-07-30 | mejora F3 | Los smokes de calificación nuevos (clean-install, upgrade-rollback, security, tenant-isolation, backup/restore) se suman a la aceptación del switchover: deben pasar con el backend Go |
 | 2026-07-30 | decisión | Journal movido a `go/JOURNAL.md` (en la rama, visible para cualquier agente); el gitignored del checkout principal queda obsoleto |
 | 2026-07-30 | decisión | Rama publicada en `origin/go-pilot` para acceso multi-agente (CI no corre en ramas laterales) |
+| 2026-07-30 | inventario | Esquema real confirmado: `run_nodes.attempts` (plural), `dead_letters.status/attempt/replay_claimed_at`, `run_events.hold_until`; toda NOT NULL sin valor tiene default — inserts mínimos válidos |
+| 2026-07-30 | decisión | `go_pilot_wakeups` confirmada necesaria (run_nodes no tiene columna de despertar); migración piloto 0001 aplicada solo a janusly_go |
+| 2026-07-30 | decisión | sqlc como tool de go.mod (`go tool sqlc`) — pinneada 1.31.1, sin brew, agnóstica de máquina; esquema vía `make schema-dump` (pg_dump del contenedor) |
+| 2026-07-30 | hallazgo | Postgres jsonb NORMALIZA al escribir (claves alfabéticas, espaciado canónico) — idéntico para Node; el passthrough RawMessage garantiza cero re-encodeo de Go encima, no des-normalización. La afirmación de §1.3/§3 queda precisada así |
+| 2026-07-30 | gotcha sqlc | Overrides de timestamptz requieren AMBAS formas (`timestamptz` para parámetros y `pg_catalog.timestamptz` para columnas) |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)

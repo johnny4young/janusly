@@ -59,3 +59,23 @@ consolidan en el informe de la puerta D15.
   el runtime de Go, y contra una DB sin migrar el binario muere en el boot
   con SQLSTATE y remedio — no sirve tráfico a medias.
 - Dependencias añadidas: pgx v5.10.0 (pin del plan), client_golang v1.24.1.
+
+## 2026-07-30 — Persistencia tipada (T-002)
+
+- Inventario del esquema real ANTES de escribir consultas: sorpresas
+  documentadas (`attempts` plural, `dead_letters.status`, `hold_until`);
+  todos los NOT NULL sin valor traen default → inserts mínimos.
+- `go_pilot_wakeups` nace (run_nodes no tiene columna de despertar); primera
+  migración piloto aplicada solo a `janusly_go`.
+- sqlc pinneada como tool de go.mod (sin brew — cualquier agente la obtiene
+  con el módulo); esquema para sqlc por `pg_dump` regenerable.
+- 15 consultas: round-trips, keyset con desempate por id (probado con
+  timestamps forzados a empatar), transiciones CAS (probado que el segundo
+  escritor pierde), claim único de dead letters, ciclo de wakeups.
+- **Hallazgo que precisa el plan**: jsonb de Postgres normaliza al escribir
+  (claves alfabéticas) — igual para Node; nuestro passthrough evita el
+  re-encodeo de Go, no la normalización de PG. El test lo fija.
+- Gotchas sqlc: overrides de timestamptz necesitan la forma calificada Y la
+  simple; mezclar sqlc.arg() con $N posicionales rompe la numeración.
+- Fricción de tests contra DB persistente: ids fijos chocan entre
+  re-ejecuciones → helper `uid()` por invocación.
