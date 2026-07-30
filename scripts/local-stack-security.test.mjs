@@ -2,16 +2,16 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const source = await readFile(new URL("./local-stack.mjs", import.meta.url), "utf8");
+const source = await readFile(new URL("./local-supabase.mjs", import.meta.url), "utf8");
 
 test("Supabase lifecycle commands capture credential-bearing output", () => {
   assert.match(
     source,
-    /const supabaseCli = fileURLToPath\(new URL\("\.\.\/node_modules\/supabase\/dist\/supabase\.js", import\.meta\.url\)\)/,
+    /const supabaseCli = fileURLToPath\(\s*new URL\("\.\.\/node_modules\/supabase\/dist\/supabase\.js", import\.meta\.url\),\s*\)/,
   );
   assert.match(
     source,
-    /function runSupabase\(args, options = \{\}\) \{\s*return run\(process\.execPath, \[supabaseCli, \.\.\.args\], options\);\s*\}/,
+    /function runSupabase\(argumentsList, options = \{\}\)/,
   );
   assert.match(
     source,
@@ -19,7 +19,7 @@ test("Supabase lifecycle commands capture credential-bearing output", () => {
   );
   assert.match(
     source,
-    /runSupabase\(\["status", "-o", "env"\], \{ sensitive: true \}\)/,
+    /runSupabase\(\["status", "-o", "env"\], \{\s*sensitive: true,\s*\}\)/,
   );
   assert.doesNotMatch(source, /runSupabase\(\["status"(?:, "-o", "env")?\]\s*\)/);
 });

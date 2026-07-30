@@ -133,6 +133,43 @@ or tenant configuration. It resets and starts the stack once more afterward,
 leaving a clean login screen ready for manual configuration. Its JSON report
 and screenshots stay under the ignored evidence directory.
 
+## Upgrade and Rollback Qualification
+
+Janusly database migrations are forward-only. A safe rollback therefore means
+running the previous application generation against the already-upgraded
+schema, not deleting schema changes in place. The destructive qualification
+automatically selects the application immediately before the newest migration,
+proves historical migration files are byte-for-byte unchanged, builds that
+source, creates a real identity/workspace/workflow/run, and takes an owner-only
+pre-upgrade database snapshot. It then:
+
+1. starts the current checkout and applies only the added migrations;
+2. proves the identity and application records remain usable in English and
+   Spanish;
+3. restarts the retained previous-generation images without rebuilding them;
+4. proves that application rollback can still read the upgraded database;
+5. rolls forward to the current application and proves the same records are
+   usable there again; and
+6. resets the qualification data, leaving the current stack empty.
+
+Run it only after backing up local data:
+
+```bash
+JANUSLY_EVIDENCE_DIR="$PWD/output/review/local-upgrade-rollback" \
+  pnpm local:upgrade-rollback:smoke -- --confirm-reset
+```
+
+`JANUSLY_UPGRADE_BASE_REF=<commit>` may override the automatically selected
+ancestor. The override must still be an ancestor with a strict, unchanged
+prefix of current migrations. Qualification evidence includes the migration
+inventories, database states, backup checksum, build-compatibility disclosure,
+and bilingual browser screenshots. The report identifies the checked-out HEAD
+and records whether qualification used uncommitted source so evidence never
+overstates its provenance. Because container tags are mutable unless the source
+pins its base, every current Janusly Node container stage uses one exact Node
+24.18.0 multi-architecture manifest digest. Temporary historical image tags are
+removed after the current stack is restored.
+
 ## Real Local Identity Profile
 
 Both profiles use Supabase PostgreSQL. The `local:auth:*` family additionally

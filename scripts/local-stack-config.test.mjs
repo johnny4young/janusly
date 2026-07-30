@@ -4,9 +4,18 @@ import test from "node:test";
 
 const compose = await readFile(new URL("../deploy/local/compose.yml", import.meta.url), "utf8");
 const localEnvExample = await readFile(new URL("../deploy/local/local.env.example", import.meta.url), "utf8");
+const apiDockerfile = await readFile(new URL("../Dockerfile.api", import.meta.url), "utf8");
+const productionDockerfile = await readFile(new URL("../Dockerfile.prod", import.meta.url), "utf8");
 const webDockerfile = await readFile(new URL("../Dockerfile.web", import.meta.url), "utf8");
+const simulatorDockerfile = await readFile(
+  new URL("../deploy/local/Dockerfile.simulator", import.meta.url),
+  "utf8",
+);
 const gitignore = await readFile(new URL("../.gitignore", import.meta.url), "utf8");
 const supabaseConfig = await readFile(new URL("../supabase/config.toml", import.meta.url), "utf8");
+
+const pinnedNodeImage =
+  "node:24.18.0-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd";
 
 function serviceBlock(name) {
   const match = compose.match(new RegExp(`^  ${name}:\\n([\\s\\S]*?)(?=^  [a-z][a-z0-9-]*:|^volumes:)`, "m"));
@@ -107,6 +116,23 @@ test("web image is reproducible and has no unpinned global static-server depende
   assert.doesNotMatch(webDockerfile, /pnpm add -g serve/);
   assert.match(webDockerfile, /USER node/);
   assert.match(webDockerfile, /serve-web\.mjs/);
+});
+
+test("application images pin one multi-architecture Node 24 runtime by digest", () => {
+  for (const source of [
+    apiDockerfile,
+    productionDockerfile,
+    webDockerfile,
+    simulatorDockerfile,
+  ]) {
+    const nodeImages = [...source.matchAll(/^FROM (node:[^\s]+)(?:\s|$)/gmu)]
+      .map((match) => match[1]);
+    assert.ok(nodeImages.length > 0);
+    assert.ok(
+      nodeImages.every((image) => image === pinnedNodeImage),
+      nodeImages.join("\n"),
+    );
+  }
 });
 
 test("generated local env remains untracked", () => {
