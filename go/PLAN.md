@@ -566,6 +566,11 @@ el chat publicado.
 | 2026-07-30 | decisión (v4) | Alcance final Backend+UI (§10); D15 sigue siendo la puerta de F0 |
 | 2026-07-30 | decisión (v4) | Inventario UI: 108 rutas + SSE (§11), extraído del código web |
 | 2026-07-30 | regla (v4) | Comentarios de código sin IDs de tareas ni referencias a PLAN.md; scrub aplicado al código existente |
+| 2026-07-30 | pin actualizado | Diff-review nº1: develop c1aa11e2 → **0f294ad2** (5 commits: calificación local + human form web; sin migraciones; inventario UI intacto). Rebase limpio |
+| 2026-07-30 | hallazgo paridad | `http.ts` endureció CORS (sin `*`/`"null"`; headers credenciados solo con Origin allowlisted) — F1 debe replicar esta semántica de headers |
+| 2026-07-30 | mejora F3 | Los smokes de calificación nuevos (clean-install, upgrade-rollback, security, tenant-isolation, backup/restore) se suman a la aceptación del switchover: deben pasar con el backend Go |
+| 2026-07-30 | decisión | Journal movido a `go/JOURNAL.md` (en la rama, visible para cualquier agente); el gitignored del checkout principal queda obsoleto |
+| 2026-07-30 | decisión | Rama publicada en `origin/go-pilot` para acceso multi-agente (CI no corre en ramas laterales) |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -734,3 +739,29 @@ Notas de precisión para F1/F2 (verificadas en el código web):
 - `plugins/install` + `solution-packs/*/inject-failure` = demos/packs.
 - La web nunca llama triggers de ingest directamente, pero F2 los cubre
   porque sus efectos (runs entrantes) son visibles en la UI.
+
+## 12. Independencia de rutas y de agente (directiva 2026-07-30)
+
+**Nada del piloto depende de rutas de una máquina ni de un agente
+concreto.** Garantías verificadas:
+
+- Todo lo necesario vive EN LA RAMA: `go/PLAN.md` (plan vivo),
+  `go/JOURNAL.md` (bitácora), `go/AGENTS.md` (onboarding cross-agente — el
+  archivo que Codex/Cursor leen nativamente), código, Makefile, compose.
+- El Makefile y los scripts usan solo rutas relativas (`cd ..` hacia la raíz
+  del repo); el proyecto Compose tiene nombre fijo (`janusly-go-pilot`) y
+  puertos fijos (4600/4601/4632) — independientes del directorio.
+- **El worktree es una conveniencia, no un requisito.** Modos equivalentes:
+  (a) worktree local en cualquier ruta:
+  `git worktree add <cualquier-ruta> go-pilot`;
+  (b) clon normal + `git checkout go-pilot`;
+  (c) workspace cloud de otro agente sobre `origin/go-pilot`.
+- Para usar OTRO agente: dale la rama y una sola instrucción — "lee
+  `go/AGENTS.md` y sigue el protocolo". El estado de tareas está en el plan
+  versionado, no en la memoria de ningún agente.
+- La copia del plan en `docs/proposals/` del checkout de Johnny es una
+  conveniencia de lectura, NO fuente de verdad; puede desactualizarse sin
+  consecuencia.
+- Única dependencia externa a la rama: el repositorio mismo (migraciones
+  compartidas, contrato OpenAPI, y la rama `develop` como referencia de
+  paridad) — que es exactamente lo que cualquier agente ya tiene al clonar.
