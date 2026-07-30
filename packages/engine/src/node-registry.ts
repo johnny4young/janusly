@@ -536,6 +536,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
     const resolvedTimeoutMs = typeof timeoutMs === "number" ? timeoutMs : orgConfig.http.timeoutMs;
     const resolvedMaxBytes = typeof maxResponseBytes === "number" ? maxResponseBytes : orgConfig.http.maxResponseBytes;
     const resolvedMaxRedirects = typeof maxRedirects === "number" ? maxRedirects : orgConfig.http.maxRedirects;
+    const serializedBody = body === undefined ? undefined : JSON.stringify(body);
 
     // Streaming opt-in: the body comes back as a ReadableStream the executor
     // immediately consumes into a bounded preview before returning. The
@@ -549,7 +550,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
       const streaming = await fetchHttpTarget(url, {
         method: resolvedMethod,
         headers,
-        body: body ? JSON.stringify(body) : undefined,
+        body: serializedBody,
         timeoutMs: resolvedTimeoutMs,
         maxResponseBytes: resolvedMaxBytes,
         maxRedirects: resolvedMaxRedirects,
@@ -578,7 +579,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
     const result = await fetchHttpTarget(url, {
       method: resolvedMethod,
       headers,
-      body: body ? JSON.stringify(body) : undefined,
+      body: serializedBody,
       // Optional bounds — nodes that fetch large payloads or call slow APIs
       // pass these through; otherwise tenant/runtime defaults apply.
       timeoutMs: resolvedTimeoutMs,

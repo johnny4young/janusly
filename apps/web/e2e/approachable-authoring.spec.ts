@@ -19,9 +19,17 @@ const locales = {
     addStep: 'Add step',
     searchSteps: 'Search steps…',
     httpStep: 'Call an API',
+    httpMethod: 'HTTP method',
     httpUrl: 'Request URL',
+    httpBody: 'JSON body',
+    requestOptions: 'Request & response options',
+    headers: 'Headers (JSON)',
+    responseMode: 'Response handling',
+    streamResponse: 'Stream a bounded preview',
+    previewBytes: 'Preview bytes',
     branchStep: 'Branch rule',
     branchExpression: 'Branch expression',
+    httpNodeAria: 'Step: Call an API',
     stepScope: 'Step',
   },
   es: {
@@ -34,9 +42,17 @@ const locales = {
     addStep: 'Agregar paso',
     searchSteps: 'Buscar pasos…',
     httpStep: 'Llamar a una API',
+    httpMethod: 'Método HTTP',
     httpUrl: 'URL de la petición',
+    httpBody: 'Cuerpo JSON',
+    requestOptions: 'Opciones de petición y respuesta',
+    headers: 'Cabeceras (JSON)',
+    responseMode: 'Manejo de la respuesta',
+    streamResponse: 'Transmitir una vista previa limitada',
+    previewBytes: 'Bytes de vista previa',
     branchStep: 'Regla de rama',
     branchExpression: 'Expresión de rama',
+    httpNodeAria: 'Paso: Llamar a una API',
     stepScope: 'Paso',
   },
 } as const
@@ -125,6 +141,24 @@ for (const locale of ['en', 'es'] as const) {
     const requestUrl = page.getByLabel(copy.httpUrl, { exact: true })
     await expect(requestUrl).toBeVisible()
     await requestUrl.fill('https://api.example.com/orders')
+    await page.getByLabel(copy.httpMethod, { exact: true }).selectOption('POST')
+    const requestBody = page.getByLabel(copy.httpBody, { exact: true })
+    await expect(requestBody).toBeVisible()
+    await requestBody.fill('{"customerId":"cus_42","amount":1250}')
+    await requestBody.blur()
+
+    await page.getByText(copy.requestOptions, { exact: true }).click()
+    const headers = page.getByLabel(copy.headers, { exact: true })
+    await headers.fill('{"Content-Type":"application/json"}')
+    await headers.blur()
+    await page.getByLabel(copy.responseMode, { exact: true }).selectOption('stream')
+    const previewBytes = page.getByLabel(copy.previewBytes, { exact: true })
+    await previewBytes.fill('32768')
+    await previewBytes.blur()
+    const responseMode = page.getByLabel(copy.responseMode, { exact: true })
+    await expect(responseMode).toHaveValue('stream')
+    await expect(responseMode.locator('option:checked')).toHaveText(copy.streamResponse)
+    await captureViewport(page, `web-${locale}-http-step-basics`)
 
     await openCanvasStepPicker(page)
     await search.fill(copy.branchStep)
@@ -136,6 +170,15 @@ for (const locale of ['en', 'es'] as const) {
     const branchExpression = page.getByLabel(copy.branchExpression, { exact: true })
     await expect(branchExpression).toBeVisible()
     await branchExpression.fill('context.input.approved === true')
+
+    const httpNode = canvas.getByRole('group', { name: copy.httpNodeAria, exact: true })
+    await expect(httpNode).toBeVisible()
+    await httpNode.dispatchEvent('click')
+    await expect(page.getByLabel(copy.httpMethod, { exact: true })).toHaveValue('POST')
+    await expect(page.getByLabel(copy.httpBody, { exact: true }))
+      .toHaveValue(/"customerId": "cus_42"/)
+    await expect(page.getByTestId('http-options')).toHaveAttribute('open')
+    await expect(page.getByLabel(copy.responseMode, { exact: true })).toHaveValue('stream')
 
     const canvasBounds = await page.getByTestId('workspace-canvas-wrapper').boundingBox()
     const panelBounds = await page.locator('.workspace-panel').boundingBox()

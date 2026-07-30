@@ -23,6 +23,8 @@ describe('<ResilienceFieldset /> (browser smoke)', () => {
       />,
     )
 
+    expect(screen.getByTestId('resilience-fieldset')).not.toBeVisible()
+    fireEvent.click(screen.getByTestId('resilience-disclosure').querySelector('summary')!)
     expect(screen.getByTestId('resilience-fieldset')).toBeVisible()
     const retryAttempts = screen.getByLabelText('Retry attempts')
     fireEvent.change(retryAttempts, { target: { value: '3' } })
@@ -43,6 +45,7 @@ describe('<ResilienceFieldset /> (browser smoke)', () => {
       />,
     )
 
+    fireEvent.click(screen.getByTestId('resilience-disclosure').querySelector('summary')!)
     const block = screen.getByTestId('resilience-retry-on')
     expect(block).toBeVisible()
     expect(block.textContent).toContain('Reintentar solo en')

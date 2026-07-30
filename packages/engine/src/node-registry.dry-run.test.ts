@@ -181,6 +181,28 @@ describe('http node — dryRun gating', () => {
     expect(result.output).toMatchObject({ statusCode: 201, ok: true })
   })
 
+  it.each([
+    ['false', false, 'false'],
+    ['null', null, 'null'],
+  ])('preserves an explicit %s JSON request body', async (_label, body, expectedBody) => {
+    fetchHttpTargetMock.mockResolvedValueOnce({
+      statusCode: 204,
+      ok: true,
+      body: '',
+      headers: {},
+    } as never)
+
+    await nodeRegistry.http({
+      ...baseCtx,
+      config: { url: 'https://x.example', method: 'POST', body },
+    })
+
+    expect(fetchHttpTargetMock).toHaveBeenCalledWith(
+      'https://x.example',
+      expect.objectContaining({ body: expectedBody }),
+    )
+  })
+
   it('projects valid declared JSON while preserving the original HTTP body', async () => {
     fetchHttpTargetMock.mockResolvedValueOnce({
       statusCode: 200,

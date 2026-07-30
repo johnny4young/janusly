@@ -1,4 +1,4 @@
-import { openWorkspaceSection } from './_helpers/workspace-navigation'
+import { addCanvasStep, openWorkspaceSection } from './_helpers/workspace-navigation'
 /**
  * Automated accessibility floor for the highest-value operator journeys.
  *
@@ -110,8 +110,13 @@ test('workflow builder and command palette meet the accessibility floor', async 
   await openWorkspaceSection(page, 'Workflows', 'Build')
   const studio = page.locator('.workspace-main')
   await expect(studio.locator('.react-flow')).toBeVisible()
-  await expectNoBlockingAccessibilityViolations(page, 'Workflow builder')
-  await capture(studio, 'accessibility-en-ai-studio')
+  await addCanvasStep(page, 'Call an API')
+  await page.getByLabel('HTTP method', { exact: true }).selectOption('POST')
+  await page.getByText('Request & response options', { exact: true }).click()
+  await expect(page.getByLabel('JSON body', { exact: true })).toBeVisible()
+  await expect(page.getByLabel('Headers (JSON)', { exact: true })).toBeVisible()
+  await expectNoBlockingAccessibilityViolations(page, 'Workflow HTTP setup')
+  await capture(studio, 'accessibility-en-http-step-setup')
 
   await page.keyboard.press('ControlOrMeta+K')
   const palette = page.getByTestId('command-palette')

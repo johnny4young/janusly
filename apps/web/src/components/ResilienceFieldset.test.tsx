@@ -29,26 +29,27 @@ afterEach(() => {
 })
 
 describe('<ResilienceFieldset />', () => {
-  it('writes the engine-consumed retry, HTTP, and bounds settings', () => {
+  it('starts collapsed and writes the engine-consumed retry and bounds settings', () => {
     const onPatch = renderFieldset()
+    const disclosure = screen.getByTestId('resilience-disclosure')
+    expect(disclosure).not.toHaveAttribute('open')
+    expect(screen.getByText('Using runtime defaults')).toBeInTheDocument()
+    fireEvent.click(disclosure.querySelector('summary')!)
 
     const retryAttempts = screen.getByLabelText('Retry attempts')
     fireEvent.change(retryAttempts, { target: { value: '3' } })
     fireEvent.blur(retryAttempts)
     expect(onPatch).toHaveBeenLastCalledWith({ retry: { maxAttempts: 3 } })
 
-    fireEvent.change(screen.getByLabelText('HTTP method'), { target: { value: 'POST' } })
-    expect(onPatch).toHaveBeenLastCalledWith({ method: 'POST' })
-
     const timeout = screen.getByLabelText('Timeout (ms)')
     fireEvent.change(timeout, { target: { value: '5000' } })
     fireEvent.blur(timeout)
     expect(onPatch).toHaveBeenLastCalledWith({ timeoutMs: 5000 })
 
-    const headers = screen.getByLabelText('Headers (JSON)')
-    fireEvent.change(headers, { target: { value: '{\n  "x-request-id": "trace-1"\n}' } })
-    fireEvent.blur(headers)
-    expect(onPatch).toHaveBeenLastCalledWith({ headers: { 'x-request-id': 'trace-1' } })
+    const responseBytes = screen.getByLabelText('Maximum response bytes')
+    fireEvent.change(responseBytes, { target: { value: '5000000' } })
+    fireEvent.blur(responseBytes)
+    expect(onPatch).toHaveBeenLastCalledWith({ maxResponseBytes: 5000000 })
   })
 
   it('caps an MCP timeout at the executor contract maximum on blur', () => {
@@ -88,29 +89,33 @@ describe('<ResilienceFieldset />', () => {
     expect(onPatch).toHaveBeenLastCalledWith({ retry: { maxAttempts: 10 } })
   })
 
-  it('keeps HTTP-only request controls out of non-HTTP nodes', () => {
+  it('keeps HTTP-only response bounds out of non-HTTP nodes', () => {
     renderFieldset({ nodeType: 'tool', config: { tool: 'http.request' } })
 
-    expect(screen.queryByLabelText('HTTP method')).toBeNull()
-    expect(screen.queryByLabelText('Headers (JSON)')).toBeNull()
+    expect(screen.queryByLabelText('Maximum response bytes')).toBeNull()
+    expect(screen.queryByLabelText('Maximum redirects')).toBeNull()
   })
 
-  it('localises the invalid HTTP headers error', () => {
-    initI18n('es')
-    renderFieldset()
+  it('summarises configured policy without expanding the dense controls', () => {
+    renderFieldset({
+      config: {
+        url: 'https://api.example.com',
+        retry: { maxAttempts: 3 },
+        timeoutMs: 5000,
+        maxResponseBytes: 1000000,
+      },
+    })
 
-    const headers = screen.getByLabelText('Cabeceras (JSON)')
-    fireEvent.change(headers, { target: { value: '{' } })
-    fireEvent.blur(headers)
-
-    expect(screen.getByText('El valor debe ser JSON válido')).toBeInTheDocument()
+    expect(screen.getByText('3 custom settings')).toBeInTheDocument()
+    expect(screen.getByTestId('resilience-disclosure')).not.toHaveAttribute('open')
   })
 
-  it('focuses the requested fieldset after the Inspector mounts', async () => {
+  it('opens and focuses the requested fieldset after the Inspector mounts', async () => {
     requestResilienceFocus('fetch-customer')
     renderFieldset()
 
     await waitFor(() => {
+      expect(screen.getByTestId('resilience-disclosure')).toHaveAttribute('open')
       expect(screen.getByTestId('resilience-fieldset')).toHaveFocus()
     })
   })

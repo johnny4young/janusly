@@ -54,6 +54,7 @@ describe('<QuickConfigEditor /> resilience wiring', () => {
       />,
     )
 
+    fireEvent.click(screen.getByTestId('resilience-disclosure').querySelector('summary')!)
     const retryAttempts = screen.getByLabelText('Retry attempts')
     fireEvent.change(retryAttempts, { target: { value: '3' } })
     fireEvent.blur(retryAttempts)
@@ -95,6 +96,115 @@ describe('<QuickConfigEditor /> resilience wiring', () => {
       />,
     )
     expect(screen.getByText('Interpreta una cadena JSON como su objeto, arreglo o valor primitivo nativo.')).toBeInTheDocument()
+  })
+
+  it('authors a complete HTTP request without advanced JSON', () => {
+    const onUpdate = vi.fn()
+    render(
+      <QuickConfigEditor
+        {...emptyWorkflowGraph}
+        nodeId="create-order"
+        type="http"
+        config={{
+          method: 'POST',
+          url: 'https://api.example.com/orders',
+        }}
+        tools={[]}
+        onUpdate={onUpdate}
+      />,
+    )
+
+    expect(screen.getByLabelText('HTTP method')).toHaveValue('POST')
+    expect(screen.getByLabelText('Request URL')).toHaveValue('https://api.example.com/orders')
+    expect(screen.getByLabelText('JSON body')).toHaveValue('')
+
+    fireEvent.change(screen.getByLabelText('JSON body'), {
+      target: { value: '{\n  "orderId": "ord_42"\n}' },
+    })
+    fireEvent.blur(screen.getByLabelText('JSON body'))
+    expect(onUpdate).toHaveBeenLastCalledWith({
+      method: 'POST',
+      url: 'https://api.example.com/orders',
+      body: { orderId: 'ord_42' },
+    })
+
+    fireEvent.click(screen.getByText('Request & response options'))
+    const headers = screen.getByLabelText('Headers (JSON)')
+    fireEvent.change(headers, {
+      target: { value: '{\n  "Content-Type": "application/json"\n}' },
+    })
+    fireEvent.blur(headers)
+    expect(onUpdate).toHaveBeenLastCalledWith({
+      method: 'POST',
+      url: 'https://api.example.com/orders',
+      headers: { 'Content-Type': 'application/json' },
+    })
+  })
+
+  it('configures bounded streaming and removes stream-only keys when buffering', () => {
+    const onUpdate = vi.fn()
+    const view = render(
+      <QuickConfigEditor
+        {...emptyWorkflowGraph}
+        nodeId="download-report"
+        type="http"
+        config={{
+          method: 'GET',
+          url: 'https://api.example.com/report.csv',
+          bodyMode: 'stream',
+          streamPreviewBytes: 32768,
+        }}
+        tools={[]}
+        onUpdate={onUpdate}
+      />,
+    )
+
+    expect(screen.getByTestId('http-options')).toHaveAttribute('open')
+    expect(screen.getByLabelText('Response handling')).toHaveValue('stream')
+    expect(screen.getByLabelText('Preview bytes')).toHaveValue(32768)
+
+    fireEvent.change(screen.getByLabelText('Response handling'), {
+      target: { value: 'buffer' },
+    })
+    expect(onUpdate).toHaveBeenLastCalledWith({
+      method: 'GET',
+      url: 'https://api.example.com/report.csv',
+    })
+
+    view.rerender(
+      <QuickConfigEditor
+        {...emptyWorkflowGraph}
+        nodeId="download-report"
+        type="http"
+        config={{ method: 'GET', url: 'https://api.example.com/report.csv' }}
+        tools={[]}
+        onUpdate={onUpdate}
+      />,
+    )
+    expect(screen.queryByLabelText('JSON body')).toBeNull()
+  })
+
+  it('keeps malformed Spanish headers local until valid JSON is committed', () => {
+    initI18n('es')
+    const onUpdate = vi.fn()
+    render(
+      <QuickConfigEditor
+        {...emptyWorkflowGraph}
+        nodeId="fetch"
+        type="http"
+        config={{ url: 'https://api.example.com' }}
+        tools={[]}
+        onUpdate={onUpdate}
+      />,
+    )
+
+    fireEvent.click(screen.getByText('Opciones de petición y respuesta'))
+    const headers = screen.getByLabelText('Cabeceras (JSON)')
+    fireEvent.change(headers, { target: { value: '{' } })
+    fireEvent.blur(headers)
+
+    expect(screen.getByText('El valor debe ser JSON válido')).toBeInTheDocument()
+    expect(onUpdate).not.toHaveBeenCalled()
   })
 })
 
