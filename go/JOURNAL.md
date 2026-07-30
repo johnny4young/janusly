@@ -139,3 +139,33 @@ consolidan en el informe de la puerta D15.
   del +1 ms en `run.failed` para que el keyset nunca ordene la
   consecuencia agregada antes de su causa.
 - 3 corridas extra de la suite de carreras con `-race`: estable.
+
+## 2026-07-30 — gramática: templates + expresiones (T-006)
+
+- Nace `internal/grammar` con las dos gramáticas del runtime portadas de la
+  fuente canónica (`@janusly/shared/src/expression.ts` +
+  `packages/engine/src/template.ts`), con sus tests TS como especificación:
+  ~55 aserciones portadas citando cada `it(...)` de origen (la card pedía
+  ≥25).
+- Decisión: portar la gramática COMPLETA (==/!= laxos, contains,
+  startsWith, matches con glob acotado, in, arrays, null), no el
+  subconjunto de la card — el costo marginal era bajo y evita una
+  divergencia gratuita.
+- El hallazgo del día: probando un caso inventado descubrí que
+  `(A || B) && C` TAMPOCO funciona en Node — los grupos booleanos entre
+  paréntesis compuestos con otro operador están fuera de la gramática de
+  referencia (verificado en vivo con node --experimental-strip-types).
+  El port reproduce el rechazo byte a byte y un test lo fija para que
+  nadie "arregle" la paridad por accidente.
+- La parte honesta del port fue `jsvalue.go`: undefined vs null,
+  truthiness, Number() con hex/octal/Infinity/""→0, y orden de strings
+  por unidades UTF-16 (no code points) — cada coerción auditable en un
+  archivo.
+- Templates: single-ref conserva tipos nativos (arrays sobreviven),
+  multi-ref interpola (objetos como JSON), env/secret con piso de 4
+  caracteres para la lista de redacción, secret faltante = fallo duro,
+  deferredRoots verbatim para loop/item. RedactValues cierra el ciclo
+  render→scrub end-to-end.
+- El seam del domain quedó cableado: `grammar.DomainValidator` produce
+  `condition_invalid_expression` con el mensaje verbatim de referencia
+  (sin prefijo — workflow-validation.ts:151 usa `??`, leído dos veces).

@@ -169,7 +169,7 @@ crítica) · P1 (importante) · P2 (stretch).
 | T-003 | Dominio: parsing + validación subconjunto (códigos de issue) | P0 | partial |
 | T-004 | startRun transaccional + defaults de inputs | P0 | partial |
 | T-005 | Cola propia: claim loop, worker pool, LISTEN/NOTIFY | P0 | done |
-| T-006 | Gramáticas subconjunto: templates + expresiones | P0 | todo |
+| T-006 | Gramáticas subconjunto: templates + expresiones | P0 | done |
 | T-007 | Executors: noop, transform, condition + semántica de aristas | P0 | todo |
 | T-008 | Modelo de fallo: retry ladder + dead_letters | P0 | todo |
 | T-009 | wait_until + approval/waiting + POST /resume | P0 | todo |
@@ -599,6 +599,12 @@ el chat publicado.
 | 2026-07-30 | divergencia temporal | `FailNode` mínimo pre-T-008: error_json `{message}`, sin fila `dead_letters` ni escalera de retries; flip de run solo desde `running` (waiting llega en T-009) |
 | 2026-07-30 | nota | Proyección de `outputs` declarados al terminar el run se difiere a T-007 (necesita resolución de templates); output_json queda NULL igual que Node sin outputs declarados |
 | 2026-07-30 | nota | Claim ordena por `rn.id` (run_nodes no tiene created_at); el orden del DAG domina de todos modos. Fallback de polling por worker (250 ms default) cubre NOTIFY perdidos y arranques en frío |
+| 2026-07-30 | mejora sobre card | T-006 portó la gramática COMPLETA de expresiones (incluye `==`/`!=` laxos, `contains`/`startsWith`/`matches`/`in`, arrays, `null`), no solo el subconjunto listado — la card subestimaba; el evaluador canónico vive en `@janusly/shared/src/expression.ts` y sus tests son la spec |
+| 2026-07-30 | hallazgo (referencia) | Verificado en vivo contra Node: `(A || B) && C` — un grupo booleano entre paréntesis compuesto con otro operador — está FUERA de la gramática de referencia (lanza `Unsupported expression token`); los paréntesis solo agrupan en el nivel externo o tras `!`. El port reproduce el rechazo idéntico, con test que lo fija |
+| 2026-07-30 | decisión | Semántica JS explícita en `jsvalue.go`: undefined≠null, truthiness, `Number()` (hex/octal/binario/Infinity/cadena vacía→0), orden relacional de strings por unidades UTF-16 |
+| 2026-07-30 | divergencia | Igualdad de referencias JS (`===` entre arrays/objetos) no reproducible tras round-trip JSON → operandos no escalares comparan false; `==` laxo con operando array/objeto → false (JS haría ToPrimitive); objetos interpolados en strings serializan con claves alfabéticas (Go) vs orden de inserción (JS); `String()` de magnitudes extremas puede diferir del shortest-round-trip de V8 |
+| 2026-07-30 | divergencia | `unresolvedPaths` conserva dedupe pero no el orden de inserción exacto al iterar mapas Go (el test verifica pertenencia); `redactError` de Node (mutación de Error JS) no se porta — la redacción de errores se aplica como strings en T-008 |
+| 2026-07-30 | nota | `parseSimpleComparisonExpression`/`formatSimpleComparisonExpression` (authoring guiado del web) se difieren a F1; lint: exclusión ST1005 por paquete — los mensajes capitalizados de referencia son contrato |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
