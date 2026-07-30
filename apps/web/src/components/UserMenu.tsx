@@ -275,7 +275,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
         type="button"
         className="user-menu__trigger"
         onClick={() => setOpen(prev => !prev)}
-        aria-haspopup="menu"
+        aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={triggerLabel}
       >
@@ -285,7 +285,12 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
       </button>
 
       {open && (
-        <div className="user-menu__popover" role="menu">
+        <div
+          className="user-menu__popover"
+          role="dialog"
+          aria-modal="false"
+          aria-label={t('userMenu.dialogLabel')}
+        >
           {/* Identity strip */}
           <div className="user-menu__id">
             <span className="user-menu__id-avatar" aria-hidden="true">{initials(email)}</span>

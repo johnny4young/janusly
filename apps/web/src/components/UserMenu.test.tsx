@@ -34,8 +34,13 @@ beforeEach(() => {
 describe('<UserMenu /> docs capability', () => {
   it('shows the provider-neutral profile, organization, and actual role', () => {
     render(<UserMenu />)
-    fireEvent.click(screen.getByRole('button', { name: 'Open user menu' }))
+    const trigger = screen.getByRole('button', { name: 'Open user menu' })
+    expect(trigger).toHaveAttribute('aria-haspopup', 'dialog')
+    fireEvent.click(trigger)
 
+    expect(
+      screen.getByRole('dialog', { name: 'Account and workspace controls' }),
+    ).toBeInTheDocument()
     expect(screen.getAllByText('Ada Operator').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Acme Operations').length).toBeGreaterThan(0)
     expect(screen.getByLabelText('Editor')).toBeInTheDocument()

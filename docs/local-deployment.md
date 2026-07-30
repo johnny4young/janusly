@@ -545,5 +545,20 @@ Evidence is written under
 `output/review/2026-07-30-security-qualification/` and contains no plaintext
 credential.
 
+Run the destructive real-identity tenant-isolation qualification:
+
+```bash
+pnpm local:tenant-isolation:smoke --confirm-reset
+```
+
+It creates two temporary Supabase identities and two organizations, then
+qualifies list reads, direct identifiers, mutations, membership authority,
+organization switching, permission-aware UI, and independent PostgreSQL row
+bindings. The viewer receives one organization grant while the owner switches
+between both. Evidence is written under
+`output/review/2026-07-30-tenant-isolation-qualification/`. The qualifier
+always removes generated Auth/tenant data and stops the stack before it
+returns.
+
 For the short-lived development/test orchestrator use `pnpm dev`. For metrics,
 traces, dashboards, and alerts, see [Observability](observability.md).

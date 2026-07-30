@@ -332,6 +332,7 @@
   "auth.workspace.acceptFailed": "The invitation could not be accepted",
 
   "auth.userMenu.language": "Language",
+  "userMenu.dialogLabel": "Account and workspace controls",
   "userMenu.role.editor": "Editor",
   "userMenu.role.viewer": "Viewer",
   "userMenu.role.admin": "Admin",
