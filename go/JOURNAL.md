@@ -41,3 +41,21 @@ consolidan en el informe de la puerta D15.
   agente), este journal se muda a la rama (antes vivía gitignored en el
   checkout de Johnny — invisible para otros agentes), y el plan declara la
   independencia de rutas (§12).
+
+## 2026-07-30 — Config + boot + observabilidad (T-001)
+
+- `internal/config`: carga validada con defectos y rangos; agrega TODAS las
+  violaciones en un solo error (una instalación rota conoce todos sus
+  problemas de una vez, no de a uno).
+- `internal/boot`: pool pgx acotado con ping al arrancar; probe de
+  migraciones que aborta ante journal ausente/vacío con el remedio en el
+  mensaje (`make migrate`).
+- `internal/httpapi`: mux público (`/healthz`) y mux interno separado
+  (métricas Prometheus + pprof, ligado a 127.0.0.1) — perfiles jamás a un
+  proxy de distancia del público.
+- `cmd/api`: arranque completo con apagado limpio (SIGTERM drena con gracia
+  de 10s; verificado exit=0).
+- Verificación en vivo además de los tests: healthz responde, métricas traen
+  el runtime de Go, y contra una DB sin migrar el binario muere en el boot
+  con SQLSTATE y remedio — no sirve tráfico a medias.
+- Dependencias añadidas: pgx v5.10.0 (pin del plan), client_golang v1.24.1.

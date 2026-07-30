@@ -164,7 +164,7 @@ crítica) · P1 (importante) · P2 (stretch).
 | ID | Tarea | Prio | Estado |
 | --- | --- | --- | --- |
 | T-000 | Bootstrap: worktree, rama, scaffold, Compose 4632, migraciones | P0 | done |
-| T-001 | Config, boot, observabilidad (4600/4601, slog, healthz, probe) | P0 | todo |
+| T-001 | Config, boot, observabilidad (4600/4601, slog, healthz, probe) | P0 | done |
 | T-002 | sqlc + inventario real del esquema + persistencia núcleo | P0 | todo |
 | T-003 | Dominio: parsing + validación subconjunto (códigos de issue) | P0 | todo |
 | T-004 | startRun transaccional + defaults de inputs | P0 | todo |
