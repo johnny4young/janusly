@@ -52,6 +52,14 @@ checkout principal es el espécimen histórico.
 10. **Comentarios de código sin naming interno del plan** (ni `T-xxx` ni
     referencias a PLAN.md): un comentario explica el código para su próximo
     lector, no el proceso que lo produjo.
+11. **"Sync develop" a demanda**: cuando Johnny lo pida (o antes de cada
+    tanda de paridad), se ejecuta el procedimiento de sincronización:
+    diff-review (`git log <pin>..develop`), rebase de la rama (sin
+    conflictos por construcción: todo vive bajo `go/`), re-migrar si hay
+    migraciones nuevas, actualizar el pin en §9 y re-verificar el
+    inventario §11. No hace falta esperar a que develop "se calme"; la
+    única cortesía útil es avisar antes de cambiar semántica del engine que
+    una tarea esté portando en ese momento.
 
 ## 1. Decisiones cerradas
 
