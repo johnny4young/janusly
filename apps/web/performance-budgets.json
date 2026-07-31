@@ -1,6 +1,13 @@
 {
-  "version": 2,
-  "totalGzipKiB": 560,
+  "version": 3,
+  "artifactGzipKiB": 580,
+  "singleLocale": {
+    "assets": [
+      "catalog-en.js",
+      "catalog-es.js"
+    ],
+    "maxGzipKiB": 530
+  },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
     "reactVendor": {
@@ -31,6 +38,10 @@
       "maxTransferredKiB": 250,
       "maxLongTaskMs": 500
     },
+    "homeEs": {
+      "maxTransferredKiB": 250,
+      "maxLongTaskMs": 500
+    },
     "workflowBuilder": {
       "maxTransferredKiB": 90,
       "maxLongTaskMs": 300
@@ -41,6 +52,14 @@
     },
     "recoveryTools": {
       "maxTransferredKiB": 90,
+      "maxLongTaskMs": 200
+    },
+    "recoveryAutomation": {
+      "maxTransferredKiB": 20,
+      "maxLongTaskMs": 200
+    },
+    "localeSwitch": {
+      "maxTransferredKiB": 55,
       "maxLongTaskMs": 200
     }
   },

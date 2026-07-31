@@ -268,12 +268,20 @@ Supabase authentication is reached only through lazy `supabase-runtime.ts` and
 Production chunks follow operator workspaces rather than source-file accidents:
 `app-workspace` combines App, identity/command hooks, and Home recovery;
 `workflow-workspace` combines workflow inventory and authoring panels; React
-Flow plus `canvas.css` stays behind `CanvasWorkspace`. The reviewed budgets
-are <=560 KiB gzip for all production JS/CSS, <=250 KiB transferred for a cold
-Home, and <=90 KiB for opening the workflow builder or a selected recovery.
-Entry JavaScript remains <=2 KiB gzip. `routes.performance.spec.ts` proves the selected-locale-only,
-Supabase-deferred, React-Flow-deferred, route-transfer, and long-task contracts.
-Do not raise a cap without measured evidence and a reviewed exception.
+Flow plus `canvas.css` stays behind `CanvasWorkspace`. Bundle governance keeps
+two different envelopes instead of presenting the sum of mutually exclusive
+locale catalogs as a normal-session transfer: the complete production JS/CSS
+artifact is <=580 KiB gzip, while the worst single-locale JS/CSS set is <=530
+KiB gzip (all non-locale assets plus the larger locale catalog). The cold Home
+remains <=250 KiB transferred; opening the workflow builder, selected recovery,
+or Recovery Tools remains <=90 KiB; the secondary Recovery automation
+disclosure is <=20 KiB; and an explicit locale switch is <=55 KiB. Entry
+JavaScript remains <=2 KiB gzip. `routes.performance.spec.ts` proves English
+and Spanish cold starts, selected-locale-only loading, explicit locale
+switching, Supabase-deferred, React-Flow-deferred, disclosure-level route
+transfer, and long-task contracts. `bundle-report.mjs` fails closed when either
+locale asset is absent. Do not raise a cap without measured evidence and a
+reviewed exception.
 
 ## Render-error blast radius
 

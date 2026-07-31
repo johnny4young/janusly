@@ -16,6 +16,11 @@ retroactively.
 
 ### Changed
 
+- Web performance governance now distinguishes the complete JS/CSS deploy
+  artifact from the worst single-locale JS/CSS set instead of treating mutually
+  exclusive English and Spanish catalogs as one normal-session transfer.
+  Browser gates now also enforce budgets for Spanish cold Home, explicit
+  locale switching, and the secondary Recovery automation disclosure.
 - The primary product navigation is now organized around six operator tasks:
   Home, Recover, Workflows, Runs, Connections, and Settings. Advanced authoring
   and administration remain available through contextual surfaces and the
