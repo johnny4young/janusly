@@ -673,3 +673,18 @@ local. Sin umbral pasa/no-pasa: números para aprender.
   edge id sintético, operadores de palabra legales, y violaciones de
   contrato de operadores cazadas estáticamente en save en vez de
   degradar a falsedad silenciosa en runtime.
+
+## 2026-07-30 — ingest de webhooks (T-040)
+
+- `POST /v1/webhooks/{workflowId}` con el contrato de la referencia
+  adaptado al alcance del pilot: payload normalizado validado, ancla de
+  replay en `trigger_events` ANTES del run, idempotencia sobre
+  `(org, dedupe_key)` para que el retry del relay converja a un solo
+  run, buffer-on-pause con 202, y el claim CAS dentro de la transacción
+  de start — la parte que más valía la pena portar exacta, porque es la
+  que hace imposible el doble run bajo entrega concurrente.
+- El executor `webhook_received` es passthrough puro (config re-validada
+  como última línea de defensa, `{triggeredBy, triggeredAt, event}`);
+  el start manual sigue corriendo con evento vacío, igual que Node.
+- Hallazgo de encoder: `writeVersioned` fijaba 200 en todo éxito; el
+  202 de buffered lo destapó. Éxitos no-200 ahora conservan su status.

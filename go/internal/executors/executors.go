@@ -41,16 +41,17 @@ type Func func(ctx context.Context, in Input) (any, error)
 func Registry() map[string]Func {
 	toolRegistry := tools.NewRegistry()
 	return map[string]Func{
-		"tool":          NewToolExecutor(toolRegistry),
-		"noop":          executeNoop,
-		"condition":     executeCondition,
-		"transform":     executeTransform,
-		"wait_until":    executeWaitUntil,
-		"approval":      executeApproval,
-		"http":          NewHTTPExecutor(HTTPOptions{}),
-		"parallel_fork": executeParallelFork,
-		"loop":          executeLoop,
-		"join":          executeJoin,
+		"tool":             NewToolExecutor(toolRegistry),
+		"noop":             executeNoop,
+		"condition":        executeCondition,
+		"transform":        executeTransform,
+		"wait_until":       executeWaitUntil,
+		"approval":         executeApproval,
+		"http":             NewHTTPExecutor(HTTPOptions{}),
+		"parallel_fork":    executeParallelFork,
+		"loop":             executeLoop,
+		"join":             executeJoin,
+		"webhook_received": executeWebhookReceived,
 	}
 }
 

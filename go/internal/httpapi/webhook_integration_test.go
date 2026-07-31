@@ -1,0 +1,221 @@
+//go:build integration
+
+package httpapi
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+func webhookWorkflow(id, endpointKey string) map[string]any {
+	return map[string]any{
+		"id":   id,
+		"name": "webhook flow",
+		"nodes": []any{
+			map[string]any{"id": "inbox", "type": "webhook_received",
+				"config": map[string]any{"endpointKey": endpointKey}},
+			map[string]any{"id": "shape", "type": "transform",
+				"config": map[string]any{"mapping": map[string]any{
+					"total": "{{context.inbox.output.event.payload.total}}",
+					"via":   "{{context.inbox.output.triggeredBy}}",
+				}}},
+		},
+		"edges": []any{map[string]any{"from": "inbox", "to": "shape"}},
+	}
+}
+
+func testPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	pool, err := pgxpool.New(context.Background(), os.Getenv("JANUSLY_GO_DATABASE_URL"))
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
+}
+
+func TestWebhookIngestSpawnsOneConvergentRun(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	wfID := "wf-hook-" + h.org
+	if res := h.call("POST", "/v1/workflows/save", webhookWorkflow(wfID, "Orders.v1"), ""); res.status != 200 {
+		t.Fatalf("save: %+v", res.body)
+	}
+
+	event := map[string]any{
+		"endpointKey": "orders.V1", // case-insensitive match is part of the contract
+		"eventId":     "evt-1",
+		"eventType":   "order.created",
+		"payload":     map[string]any{"total": 99.5},
+	}
+	res := h.call("POST", "/v1/webhooks/"+wfID, event, "")
+	if res.status != 200 {
+		t.Fatalf("ingest: %d %+v", res.status, res.body)
+	}
+	requireEnvelope(t, res)
+	data := res.body["data"].(map[string]any)
+	if data["ok"] != true || data["runId"] == nil || data["triggerEventId"] == nil {
+		t.Fatalf("ingest body: %+v", data)
+	}
+	runID := data["runId"].(string)
+	h.waitRun(runID, "succeeded")
+
+	// The trigger executor passes the normalized event through to templates.
+	status := h.call("GET", "/v1/run?runId="+runID, nil, "")
+	nodes := status.body["data"].(map[string]any)["nodes"].([]any)
+	var shaped map[string]any
+	for _, raw := range nodes {
+		node := raw.(map[string]any)
+		if node["nodeId"] == "shape" {
+			state := node["stateJson"].(map[string]any)
+			shaped = state["output"].(map[string]any)
+		}
+	}
+	if shaped["total"] != 99.5 || shaped["via"] != "webhook_received" {
+		t.Fatalf("downstream template must read the event: %+v", shaped)
+	}
+
+	// The replay anchor row landed and the start claim bound it to the run.
+	var evStatus, evRunID string
+	err := pool.QueryRow(context.Background(),
+		`SELECT status, run_id FROM trigger_events WHERE org_id = $1 AND id = $2`,
+		h.org, data["triggerEventId"]).Scan(&evStatus, &evRunID)
+	if err != nil || evStatus != "started" || evRunID != runID {
+		t.Fatalf("trigger event row: %v %s %s", err, evStatus, evRunID)
+	}
+
+	// A relay retry with the same eventId converges: duplicate, same run.
+	retry := h.call("POST", "/v1/webhooks/"+wfID, event, "")
+	retryData := retry.body["data"].(map[string]any)
+	if retryData["duplicate"] != true || retryData["runId"] != runID {
+		t.Fatalf("retry must converge: %+v", retryData)
+	}
+	var runCount int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM runs WHERE org_id = $1`, h.org).Scan(&runCount); err != nil || runCount != 1 {
+		t.Fatalf("one run total, got %d (%v)", runCount, err)
+	}
+}
+
+func TestWebhookIngestContractErrors(t *testing.T) {
+	h := newAPIHarness(t)
+	wfID := "wf-hookerr-" + h.org
+	if res := h.call("POST", "/v1/workflows/save", webhookWorkflow(wfID, "billing"), ""); res.status != 200 {
+		t.Fatalf("save: %+v", res.body)
+	}
+
+	cases := []struct {
+		name   string
+		path   string
+		body   map[string]any
+		org    string
+		status int
+		code   string
+	}{
+		{"missing eventId", "/v1/webhooks/" + wfID,
+			map[string]any{"endpointKey": "billing"}, "", 400, "trigger_invalid_payload"},
+		{"wrong endpoint key", "/v1/webhooks/" + wfID,
+			map[string]any{"endpointKey": "other", "eventId": "e1"}, "", 404, "trigger_no_matching_node"},
+		{"unknown workflow", "/v1/webhooks/wf-nope",
+			map[string]any{"endpointKey": "billing", "eventId": "e1"}, "", 404, "trigger_no_matching_node"},
+		{"cross-org workflow", "/v1/webhooks/" + wfID,
+			map[string]any{"endpointKey": "billing", "eventId": "e1"}, "other-org-" + h.org, 404, "trigger_no_matching_node"},
+	}
+	for _, tc := range cases {
+		res := h.call("POST", tc.path, tc.body, tc.org)
+		errBody, _ := res.body["error"].(map[string]any)
+		if res.status != tc.status || errBody == nil || errBody["code"] != tc.code {
+			t.Fatalf("%s: got %d %+v", tc.name, res.status, res.body)
+		}
+	}
+
+	// Two nodes matching one endpoint key is ambiguous — 409, no event row.
+	ambiguous := webhookWorkflow("wf-hookamb-"+h.org, "dup")
+	ambiguous["nodes"] = append(ambiguous["nodes"].([]any),
+		map[string]any{"id": "inbox2", "type": "webhook_received",
+			"config": map[string]any{"endpointKey": "DUP"}})
+	if res := h.call("POST", "/v1/workflows/save", ambiguous, ""); res.status != 200 {
+		t.Fatalf("save ambiguous: %+v", res.body)
+	}
+	res := h.call("POST", "/v1/webhooks/wf-hookamb-"+h.org,
+		map[string]any{"endpointKey": "dup", "eventId": "e1"}, "")
+	errBody, _ := res.body["error"].(map[string]any)
+	if res.status != 409 || errBody["code"] != "trigger_selector_ambiguous" {
+		t.Fatalf("ambiguous: %d %+v", res.status, res.body)
+	}
+
+	// A soft-deleted workflow is indistinguishable from no matching trigger.
+	if res := h.call("DELETE", "/workflows/"+wfID, nil, ""); res.status != 200 {
+		t.Fatalf("delete: %+v", res.body)
+	}
+	res = h.call("POST", "/v1/webhooks/"+wfID,
+		map[string]any{"endpointKey": "billing", "eventId": "e2"}, "")
+	if res.status != 404 {
+		t.Fatalf("tombstoned ingest: %d %+v", res.status, res.body)
+	}
+}
+
+func TestWebhookIngestBuffersOnPausedWorkflow(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	wfID := "wf-hookpause-" + h.org
+	if res := h.call("POST", "/v1/workflows/save", webhookWorkflow(wfID, "pagers"), ""); res.status != 200 {
+		t.Fatalf("save: %+v", res.body)
+	}
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE workflows SET status = 'paused_circuit_breaker' WHERE id = $1`, wfID); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+
+	res := h.call("POST", "/v1/webhooks/"+wfID,
+		map[string]any{"endpointKey": "pagers", "eventId": "e1"}, "")
+	if res.status != 202 {
+		t.Fatalf("buffered ingest status: %d %+v", res.status, res.body)
+	}
+	data := res.body["data"].(map[string]any)
+	if data["buffered"] != true || data["reason"] != "paused_circuit_breaker" {
+		t.Fatalf("buffered body: %+v", data)
+	}
+	var evStatus, reason string
+	err := pool.QueryRow(context.Background(),
+		`SELECT status, skipped_reason FROM trigger_events WHERE org_id = $1 AND id = $2`,
+		h.org, data["triggerEventId"]).Scan(&evStatus, &reason)
+	if err != nil || evStatus != "buffered" || reason != "paused_circuit_breaker" {
+		t.Fatalf("buffered row: %v %s %s", err, evStatus, reason)
+	}
+	var runCount int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM runs WHERE org_id = $1`, h.org).Scan(&runCount); err != nil || runCount != 0 {
+		t.Fatalf("paused workflow must not spawn runs, got %d (%v)", runCount, err)
+	}
+}
+
+func TestManualStartOfTriggerWorkflowRunsWithEmptyEvent(t *testing.T) {
+	h := newAPIHarness(t)
+	res := h.call("POST", "/v1/start", map[string]any{
+		"workflow": webhookWorkflow(fmt.Sprintf("wf-hookman-%s-%d", h.org, time.Now().UnixNano()), "manual"),
+	}, "")
+	if res.status != 200 {
+		t.Fatalf("manual start: %d %+v", res.status, res.body)
+	}
+	runID := res.body["data"].(map[string]any)["runId"].(string)
+	h.waitRun(runID, "succeeded")
+
+	status := h.call("GET", "/v1/run?runId="+runID, nil, "")
+	for _, raw := range status.body["data"].(map[string]any)["nodes"].([]any) {
+		node := raw.(map[string]any)
+		if node["nodeId"] == "inbox" {
+			state := node["stateJson"].(map[string]any)
+			output := state["output"].(map[string]any)
+			event, ok := output["event"].(map[string]any)
+			if !ok || len(event) != 0 || output["triggeredBy"] != "webhook_received" {
+				t.Fatalf("manual trigger output: %+v", output)
+			}
+		}
+	}
+}

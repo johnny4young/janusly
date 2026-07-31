@@ -47,7 +47,8 @@ func writeLegacy(w http.ResponseWriter, result opResult) {
 
 func writeVersioned(w http.ResponseWriter, requestID string, result opResult) {
 	if result.data != nil {
-		writeV1Data(w, requestID, result.data)
+		// Non-200 successes keep their status (202 = accepted, run deferred).
+		writeV1(w, requestID, result.status, map[string]any{"data": result.data})
 		return
 	}
 	writeV1Error(w, requestID, result.status, result.code, result.message, result.params)

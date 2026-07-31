@@ -76,6 +76,30 @@ func (q *Queries) ClaimDeadLetterReplay(ctx context.Context, arg ClaimDeadLetter
 	return result.RowsAffected(), nil
 }
 
+const claimTriggerEventStart = `-- name: ClaimTriggerEventStart :execrows
+UPDATE trigger_events
+SET status = 'started', run_id = $3, skipped_reason = NULL,
+    backfill_claim_token = NULL, backfill_claimed_at = NULL
+WHERE org_id = $1 AND id = $2 AND status = 'received' AND run_id IS NULL
+`
+
+type ClaimTriggerEventStartParams struct {
+	OrgID string
+	ID    string
+	RunID pgtype.Text
+}
+
+// The start-claim CAS: runs inside the run-start transaction so "event
+// claimed" and "run exists" commit or roll back together (the reference
+// claims inside startRun's transaction the same way).
+func (q *Queries) ClaimTriggerEventStart(ctx context.Context, arg ClaimTriggerEventStartParams) (int64, error) {
+	result, err := q.db.Exec(ctx, claimTriggerEventStart, arg.OrgID, arg.ID, arg.RunID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const completeRunNode = `-- name: CompleteRunNode :execrows
 UPDATE run_nodes
 SET status = 'succeeded', state_json = $1,
@@ -236,6 +260,53 @@ func (q *Queries) FindStalledRunningNodes(ctx context.Context, arg FindStalledRu
 		return nil, err
 	}
 	return items, nil
+}
+
+const findTriggerEventByDedupe = `-- name: FindTriggerEventByDedupe :one
+SELECT id, org_id, trigger_type, workflow_id, workflow_version_id, node_id,
+       status, run_id, dedupe_key, payload_json, skipped_reason, created_at
+FROM trigger_events
+WHERE org_id = $1 AND dedupe_key = $2
+`
+
+type FindTriggerEventByDedupeParams struct {
+	OrgID     string
+	DedupeKey pgtype.Text
+}
+
+type FindTriggerEventByDedupeRow struct {
+	ID                string
+	OrgID             string
+	TriggerType       string
+	WorkflowID        pgtype.Text
+	WorkflowVersionID string
+	NodeID            string
+	Status            string
+	RunID             pgtype.Text
+	DedupeKey         pgtype.Text
+	PayloadJson       json.RawMessage
+	SkippedReason     pgtype.Text
+	CreatedAt         *time.Time
+}
+
+func (q *Queries) FindTriggerEventByDedupe(ctx context.Context, arg FindTriggerEventByDedupeParams) (FindTriggerEventByDedupeRow, error) {
+	row := q.db.QueryRow(ctx, findTriggerEventByDedupe, arg.OrgID, arg.DedupeKey)
+	var i FindTriggerEventByDedupeRow
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.TriggerType,
+		&i.WorkflowID,
+		&i.WorkflowVersionID,
+		&i.NodeID,
+		&i.Status,
+		&i.RunID,
+		&i.DedupeKey,
+		&i.PayloadJson,
+		&i.SkippedReason,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const getDeadLetter = `-- name: GetDeadLetter :one
@@ -442,6 +513,53 @@ func (q *Queries) GetRunOwner(ctx context.Context, id string) (GetRunOwnerRow, e
 	return i, err
 }
 
+const getTriggerEvent = `-- name: GetTriggerEvent :one
+SELECT id, org_id, trigger_type, workflow_id, workflow_version_id, node_id,
+       status, run_id, dedupe_key, payload_json, skipped_reason, created_at
+FROM trigger_events
+WHERE org_id = $1 AND id = $2
+`
+
+type GetTriggerEventParams struct {
+	OrgID string
+	ID    string
+}
+
+type GetTriggerEventRow struct {
+	ID                string
+	OrgID             string
+	TriggerType       string
+	WorkflowID        pgtype.Text
+	WorkflowVersionID string
+	NodeID            string
+	Status            string
+	RunID             pgtype.Text
+	DedupeKey         pgtype.Text
+	PayloadJson       json.RawMessage
+	SkippedReason     pgtype.Text
+	CreatedAt         *time.Time
+}
+
+func (q *Queries) GetTriggerEvent(ctx context.Context, arg GetTriggerEventParams) (GetTriggerEventRow, error) {
+	row := q.db.QueryRow(ctx, getTriggerEvent, arg.OrgID, arg.ID)
+	var i GetTriggerEventRow
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.TriggerType,
+		&i.WorkflowID,
+		&i.WorkflowVersionID,
+		&i.NodeID,
+		&i.Status,
+		&i.RunID,
+		&i.DedupeKey,
+		&i.PayloadJson,
+		&i.SkippedReason,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getWorkflow = `-- name: GetWorkflow :one
 SELECT id, org_id, name, status, paused_reason, created_by, created_at, deleted_at
 FROM workflows
@@ -466,6 +584,28 @@ func (q *Queries) GetWorkflow(ctx context.Context, arg GetWorkflowParams) (Workf
 		&i.CreatedAt,
 		&i.DeletedAt,
 	)
+	return i, err
+}
+
+const getWorkflowIngestState = `-- name: GetWorkflowIngestState :one
+
+SELECT org_id, status, deleted_at FROM workflows WHERE id = $1
+`
+
+type GetWorkflowIngestStateRow struct {
+	OrgID     string
+	Status    string
+	DeletedAt *time.Time
+}
+
+// ── Trigger events (webhook ingest) ───────────────────────────────────
+// The shared trigger_events table is the DLQ-style replay anchor: the row
+// persists BEFORE the run spawns, idempotent on (org_id, dedupe_key) so a
+// relay retry converges instead of double-running.
+func (q *Queries) GetWorkflowIngestState(ctx context.Context, id string) (GetWorkflowIngestStateRow, error) {
+	row := q.db.QueryRow(ctx, getWorkflowIngestState, id)
+	var i GetWorkflowIngestStateRow
+	err := row.Scan(&i.OrgID, &i.Status, &i.DeletedAt)
 	return i, err
 }
 
@@ -652,6 +792,41 @@ func (q *Queries) InsertRunNode(ctx context.Context, arg InsertRunNodeParams) er
 		arg.StateJson,
 	)
 	return err
+}
+
+const insertTriggerEvent = `-- name: InsertTriggerEvent :execrows
+INSERT INTO trigger_events (id, org_id, trigger_type, workflow_id,
+                            workflow_version_id, node_id, status, dedupe_key, payload_json)
+VALUES ($1, $2, $3, $4, $5, $6, 'received', $7, $8)
+ON CONFLICT (org_id, dedupe_key) DO NOTHING
+`
+
+type InsertTriggerEventParams struct {
+	ID                string
+	OrgID             string
+	TriggerType       string
+	WorkflowID        pgtype.Text
+	WorkflowVersionID string
+	NodeID            string
+	DedupeKey         pgtype.Text
+	PayloadJson       json.RawMessage
+}
+
+func (q *Queries) InsertTriggerEvent(ctx context.Context, arg InsertTriggerEventParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertTriggerEvent,
+		arg.ID,
+		arg.OrgID,
+		arg.TriggerType,
+		arg.WorkflowID,
+		arg.WorkflowVersionID,
+		arg.NodeID,
+		arg.DedupeKey,
+		arg.PayloadJson,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const insertWorkflow = `-- name: InsertWorkflow :exec
@@ -1641,6 +1816,32 @@ type MarkRunTerminalFromRunningParams struct {
 
 func (q *Queries) MarkRunTerminalFromRunning(ctx context.Context, arg MarkRunTerminalFromRunningParams) (int64, error) {
 	result, err := q.db.Exec(ctx, markRunTerminalFromRunning, arg.Status, arg.OutputJson, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const markTriggerEventOutcome = `-- name: MarkTriggerEventOutcome :execrows
+UPDATE trigger_events
+SET status = $3, skipped_reason = $4
+WHERE org_id = $1 AND id = $2 AND status = 'received'
+`
+
+type MarkTriggerEventOutcomeParams struct {
+	OrgID         string
+	ID            string
+	Status        string
+	SkippedReason pgtype.Text
+}
+
+func (q *Queries) MarkTriggerEventOutcome(ctx context.Context, arg MarkTriggerEventOutcomeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markTriggerEventOutcome,
+		arg.OrgID,
+		arg.ID,
+		arg.Status,
+		arg.SkippedReason,
+	)
 	if err != nil {
 		return 0, err
 	}

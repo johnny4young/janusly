@@ -416,3 +416,43 @@ SELECT pg_notify('janusly_go_wake', sqlc.arg(run_id)::text);
 -- events, so SSE subscribers re-query exactly when something committed.
 -- name: NotifyRunEvents :exec
 SELECT pg_notify('janusly_go_run_events', sqlc.arg(run_id)::text);
+
+-- ── Trigger events (webhook ingest) ───────────────────────────────────
+-- The shared trigger_events table is the DLQ-style replay anchor: the row
+-- persists BEFORE the run spawns, idempotent on (org_id, dedupe_key) so a
+-- relay retry converges instead of double-running.
+
+-- name: GetWorkflowIngestState :one
+SELECT org_id, status, deleted_at FROM workflows WHERE id = $1;
+
+-- name: InsertTriggerEvent :execrows
+INSERT INTO trigger_events (id, org_id, trigger_type, workflow_id,
+                            workflow_version_id, node_id, status, dedupe_key, payload_json)
+VALUES ($1, $2, $3, $4, $5, $6, 'received', $7, $8)
+ON CONFLICT (org_id, dedupe_key) DO NOTHING;
+
+-- name: FindTriggerEventByDedupe :one
+SELECT id, org_id, trigger_type, workflow_id, workflow_version_id, node_id,
+       status, run_id, dedupe_key, payload_json, skipped_reason, created_at
+FROM trigger_events
+WHERE org_id = $1 AND dedupe_key = $2;
+
+-- name: GetTriggerEvent :one
+SELECT id, org_id, trigger_type, workflow_id, workflow_version_id, node_id,
+       status, run_id, dedupe_key, payload_json, skipped_reason, created_at
+FROM trigger_events
+WHERE org_id = $1 AND id = $2;
+
+-- The start-claim CAS: runs inside the run-start transaction so "event
+-- claimed" and "run exists" commit or roll back together (the reference
+-- claims inside startRun's transaction the same way).
+-- name: ClaimTriggerEventStart :execrows
+UPDATE trigger_events
+SET status = 'started', run_id = $3, skipped_reason = NULL,
+    backfill_claim_token = NULL, backfill_claimed_at = NULL
+WHERE org_id = $1 AND id = $2 AND status = 'received' AND run_id IS NULL;
+
+-- name: MarkTriggerEventOutcome :execrows
+UPDATE trigger_events
+SET status = $3, skipped_reason = $4
+WHERE org_id = $1 AND id = $2 AND status = 'received';

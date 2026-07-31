@@ -65,6 +65,20 @@ type StartInput struct {
 	// Input is the caller's payload; nil means none was supplied.
 	Input     any
 	CreatedBy string
+	// TriggerEventID, when set, CAS-claims that trigger_events row inside
+	// the start transaction: "event claimed" and "run exists" commit or
+	// roll back together, so a concurrent relay retry can never spawn a
+	// second run for the same inbound event.
+	TriggerEventID string
+}
+
+// TriggerEventStartConflictError reports a trigger-event start claim that
+// lost the CAS: another start already consumed the event. Callers treat it
+// as a duplicate delivery, not a failure.
+type TriggerEventStartConflictError struct{}
+
+func (e *TriggerEventStartConflictError) Error() string {
+	return "trigger event was already claimed by another run start"
 }
 
 // StartRun resolves declared defaults, validates the payload, and commits
@@ -125,6 +139,19 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		CreatedBy: pgtype.Text{String: in.CreatedBy, Valid: in.CreatedBy != ""},
 	}); err != nil {
 		return "", fmt.Errorf("insert run: %w", err)
+	}
+
+	if in.TriggerEventID != "" {
+		claimed, err := q.ClaimTriggerEventStart(ctx, store.ClaimTriggerEventStartParams{
+			OrgID: in.OrgID, ID: in.TriggerEventID,
+			RunID: pgtype.Text{String: runID, Valid: true},
+		})
+		if err != nil {
+			return "", fmt.Errorf("claim trigger event: %w", err)
+		}
+		if claimed == 0 {
+			return "", &TriggerEventStartConflictError{}
+		}
 	}
 
 	for _, node := range in.Workflow.Nodes {

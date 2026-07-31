@@ -74,6 +74,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	mux.HandleFunc("GET /v1/workflows/latest", server.auth(server.latestWorkflowVersion))
 	mux.HandleFunc("GET /v1/workflows/versions", server.auth(server.listWorkflowVersions))
 	mux.HandleFunc("POST /v1/start", server.auth(server.startRun))
+	mux.HandleFunc("POST /v1/webhooks/{workflowId}", server.auth(server.ingestWebhook))
 	mux.HandleFunc("GET /v1/run", server.auth(server.getRun))
 	mux.HandleFunc("GET /v1/status", server.auth(server.getRun))
 	mux.HandleFunc("GET /v1/runs", server.auth(server.listRuns))
