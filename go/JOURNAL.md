@@ -715,3 +715,18 @@ local. Sin umbral pasa/no-pasa: números para aprender.
   ambos corren en la suite), así que el cierre fue puro estado — sin
   código nuevo. La regla que queda: al terminar un ticket, el estado
   del plan se voltea en el MISMO commit que el código.
+
+## 2026-07-30 — gate de production-mode + badge de readiness (T-042)
+
+- Las 8 reglas por nodo del gate determinista portadas en el orden de la
+  referencia con mensajes y sugerencias verbatim (una aserción pin-ea el
+  texto completo de `external_node_missing_retry` para cazar drift). La
+  distinción que más importaba portar bien: el retry solo es requisito en
+  llamadas READ-side — un write pudo comprometer antes de fallar, y el
+  runtime suprime deliberadamente los reintentos ciegos ahí.
+- El regex de claves secretas se reutilizó de `grammar.IsSensitiveKey`
+  en vez de duplicarse (la misma regla anti-bifurcación que la
+  referencia se impone entre safe-persist y workflow-diff).
+- El rechazo del start en producción es 422 sin lista de issues — igual
+  que Node: el detalle vive en el badge (`/workflows/readiness`, ambos
+  wires), no en el error del start.

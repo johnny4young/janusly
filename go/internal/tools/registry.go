@@ -260,3 +260,10 @@ func deepMerge(left, right map[string]any) map[string]any {
 	}
 	return out
 }
+
+// IsWriteSide reports the static write-capability bit for a registered tool;
+// unknown names are read-side (the reference's registry lookup does the same).
+func (r *Registry) IsWriteSide(name string) bool {
+	definition, ok := r.byName[name]
+	return ok && definition.WriteSide
+}

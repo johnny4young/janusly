@@ -70,6 +70,12 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	}))
 	mux.HandleFunc("POST /v1/workflows/save", server.auth(server.saveWorkflow))
 	mux.HandleFunc("POST /v1/workflows/rollback", server.auth(server.rollbackWorkflow))
+	mux.HandleFunc("POST /v1/workflows/readiness", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeVersioned(w, rc.id, server.readinessCore(r, rc))
+	}))
+	mux.HandleFunc("POST /workflows/readiness", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeLegacy(w, server.readinessCore(r, rc))
+	}))
 	mux.HandleFunc("GET /v1/workflows", server.auth(server.listWorkflows))
 	mux.HandleFunc("GET /v1/workflows/latest", server.auth(server.latestWorkflowVersion))
 	mux.HandleFunc("GET /v1/workflows/versions", server.auth(server.listWorkflowVersions))
@@ -266,6 +272,9 @@ func (s *V1Server) startCore(r *http.Request, rc v1Request) opResult {
 	if result := domain.Validate(wf, grammar.DomainValidator); !result.Valid {
 		return opError(http.StatusBadRequest, "workflows_validation_failed",
 			"Workflow validation failed", map[string]any{"issues": result.Issues})
+	}
+	if rejection := s.productionGate(r.Context(), rc.orgID, wf); rejection != nil {
+		return *rejection
 	}
 	runID, err := s.engine.StartRun(r.Context(), engine.StartInput{
 		OrgID: rc.orgID, Workflow: wf, Input: body.Input, CreatedBy: rc.userID,
