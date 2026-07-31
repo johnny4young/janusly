@@ -1547,3 +1547,7 @@ producción necesita saber — de lo ya resuelto o informativo.
 - BUG de paridad real cazado por el smoke: `/start` de Go exigía el sobre `{workflow}` mientras el web (igual que contra Node) envía el workflow PLANO al correr sin input — `startCore` ahora acepta ambas formas.
 - El runner pre-limpia los 5 ids fijos de los templates de fallback (los ids son fijos también en Node; un save previo de otro org bloquea el siguiente — limitación real del producto, documentada).
 - Flakes diagnosticados: un binario de pruebas huérfano compartía la DB y reclamaba jobs con `ALLOW_PRIVATE_HTTP_TARGETS` sin setear (los nodos http del smoke morían con "private and blocked"); la tarjeta de waiting vive en el panel del run — la navegación estable es click a `activity-row-run:<id>`.
+
+## T-128 · REPORT-W4 (2026-07-31)
+- Informe de cierre de la ola 4 en go/REPORT-W4.md: paridad de evals en tabla (3/3 deterministas con ids clavados, 27 ai-mode con skip limpio, gate sin fork, exit 0), costo real de la ola $0 en créditos (todo simulador doble-gate o fallback; 2.046 filas llm.completion / 195.704 tokens contados por el ledger real), cinco divergencias AI vivas con su porqué, y la recomendación para la ola 5 (contrato de recovery primero; extender replay_mode y failcat en vez de duplicar; mapear tickets contra lo ya existente en el baseline; presupuestar la corrida dorada).
+- Cierre: 30/30 tickets de la ola done; 130/130 acumulados; suite completa verde con -race; lint 0; smoke web 4/4.
