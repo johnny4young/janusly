@@ -2289,6 +2289,41 @@ func (q *Queries) ListDueWakeups(ctx context.Context, limit int32) ([]GoPilotWak
 	return items, nil
 }
 
+const listExposedMcpToolsForAi = `-- name: ListExposedMcpToolsForAi :many
+SELECT c.alias, d.name, d.description
+FROM mcp_connections c
+JOIN mcp_tool_descriptors d ON d.connection_id = c.id
+WHERE c.org_id = $1 AND c.enabled = true AND c.expose_to_ai = true
+  AND d.enabled = true AND d.expose_to_ai = true
+ORDER BY c.alias, d.name
+`
+
+type ListExposedMcpToolsForAiRow struct {
+	Alias       string
+	Name        string
+	Description pgtype.Text
+}
+
+func (q *Queries) ListExposedMcpToolsForAi(ctx context.Context, orgID string) ([]ListExposedMcpToolsForAiRow, error) {
+	rows, err := q.db.Query(ctx, listExposedMcpToolsForAi, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListExposedMcpToolsForAiRow
+	for rows.Next() {
+		var i ListExposedMcpToolsForAiRow
+		if err := rows.Scan(&i.Alias, &i.Name, &i.Description); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFailedRunNodeSamples = `-- name: ListFailedRunNodeSamples :many
 SELECT rn.run_id, rn.node_id, rn.error_json, rn.finished_at,
        r.input_json
@@ -4130,6 +4165,31 @@ func (q *Queries) RevokePendingInvitation(ctx context.Context, arg RevokePending
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const setMcpConnectionStatus = `-- name: SetMcpConnectionStatus :exec
+UPDATE mcp_connections
+SET status = $3, status_reason = $4, last_discovery_at = $5, updated_at = now()
+WHERE org_id = $1 AND id = $2
+`
+
+type SetMcpConnectionStatusParams struct {
+	OrgID           string
+	ID              string
+	Status          string
+	StatusReason    pgtype.Text
+	LastDiscoveryAt *time.Time
+}
+
+func (q *Queries) SetMcpConnectionStatus(ctx context.Context, arg SetMcpConnectionStatusParams) error {
+	_, err := q.db.Exec(ctx, setMcpConnectionStatus,
+		arg.OrgID,
+		arg.ID,
+		arg.Status,
+		arg.StatusReason,
+		arg.LastDiscoveryAt,
+	)
+	return err
 }
 
 const settleReplayCampaignItem = `-- name: SettleReplayCampaignItem :execrows

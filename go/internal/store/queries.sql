@@ -1019,3 +1019,16 @@ ON CONFLICT (connection_id, name) DO UPDATE SET
 
 -- name: ListMcpToolDescriptorsByConnection :many
 SELECT * FROM mcp_tool_descriptors WHERE connection_id = $1 ORDER BY name LIMIT 200;
+
+-- name: SetMcpConnectionStatus :exec
+UPDATE mcp_connections
+SET status = $3, status_reason = $4, last_discovery_at = $5, updated_at = now()
+WHERE org_id = $1 AND id = $2;
+
+-- name: ListExposedMcpToolsForAi :many
+SELECT c.alias, d.name, d.description
+FROM mcp_connections c
+JOIN mcp_tool_descriptors d ON d.connection_id = c.id
+WHERE c.org_id = $1 AND c.enabled = true AND c.expose_to_ai = true
+  AND d.enabled = true AND d.expose_to_ai = true
+ORDER BY c.alias, d.name;

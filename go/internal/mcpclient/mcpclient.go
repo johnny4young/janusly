@@ -196,12 +196,9 @@ func (c *Client) Execute(ctx context.Context, call Call) (envelope executors.Mcp
 		if ref.Kind != "env" {
 			continue
 		}
-		value := os.Getenv(ref.Name)
-		if value == "" {
-			return fail(fmt.Sprintf("credential secret missing for %s", key))
-		}
-		if strings.ContainsAny(value, "\r\n") {
-			return fail(fmt.Sprintf("credential value invalid for %s", key))
+		value, refErr := lookupEnvRef(ref.Name)
+		if refErr != "" {
+			return fail(fmt.Sprintf("%s for %s", refErr, key))
 		}
 		resolvedEnv[key] = value
 	}
@@ -265,13 +262,12 @@ func (c *Client) Execute(ctx context.Context, call Call) (envelope executors.Mcp
 	return envelope
 }
 
-// callTransport builds the transport-specific session and invokes the
-// tool. Adding a transport = a new branch here; everything above stays
-// transport-agnostic.
-func (c *Client) callTransport(
+// dialSession builds the transport-specific session. Adding a transport
+// = a new branch here; everything above stays transport-agnostic. The
+// caller owns session.Close and (for stdio) sandbox.stopWatchdog.
+func (c *Client) dialSession(
 	ctx context.Context, connection store.McpConnection, resolvedEnv map[string]string,
-	toolName string, input map[string]any,
-) (*mcp.CallToolResult, *stdioSandbox, error) {
+) (*mcp.ClientSession, *stdioSandbox, error) {
 	var transport mcp.Transport
 	var sandbox *stdioSandbox
 	switch connection.Transport {
@@ -310,12 +306,37 @@ func (c *Client) callTransport(
 	if err != nil {
 		return nil, sandbox, err
 	}
+	return session, sandbox, nil
+}
+
+// callTransport dials and invokes the tool.
+func (c *Client) callTransport(
+	ctx context.Context, connection store.McpConnection, resolvedEnv map[string]string,
+	toolName string, input map[string]any,
+) (*mcp.CallToolResult, *stdioSandbox, error) {
+	session, sandbox, err := c.dialSession(ctx, connection, resolvedEnv)
+	if err != nil {
+		return nil, sandbox, err
+	}
 	defer func() { _ = session.Close() }()
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: toolName, Arguments: input})
 	if err != nil {
 		return nil, sandbox, err
 	}
 	return result, sandbox, nil
+}
+
+// lookupEnvRef resolves one env-ref value with the generic error posture:
+// the env-var NAME never reaches an error message.
+func lookupEnvRef(name string) (string, string) {
+	value := os.Getenv(name)
+	if value == "" {
+		return "", "credential secret missing"
+	}
+	if strings.ContainsAny(value, "\r\n") {
+		return "", "credential value invalid"
+	}
+	return value, ""
 }
 
 // headerInjector adds the resolved env-ref values as request headers on
