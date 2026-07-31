@@ -162,3 +162,22 @@ func EvaluateSemanticOutcomeFixtures(contract *domain.RecoveryContract) []Semant
 	}
 	return results
 }
+
+// FixtureOutcomesForValidation adapts the runtime fixture replay to the
+// domain validator's neutral outcome seam.
+func FixtureOutcomesForValidation(contract *domain.RecoveryContract) []domain.SemanticFixtureOutcome {
+	results := EvaluateSemanticOutcomeFixtures(contract)
+	outcomes := make([]domain.SemanticFixtureOutcome, 0, len(results))
+	for _, result := range results {
+		ids := make([]string, 0, len(result.Violations))
+		for _, violation := range result.Violations {
+			ids = append(ids, violation.DetectorID)
+		}
+		outcomes = append(outcomes, domain.SemanticFixtureOutcome{
+			ID: result.ID, SourceNodeID: result.SourceNodeID,
+			Expected: result.Expected, Actual: result.Actual,
+			Passed: result.Passed, ViolationDetectorIDs: ids,
+		})
+	}
+	return outcomes
+}

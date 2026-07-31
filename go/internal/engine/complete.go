@@ -18,6 +18,7 @@ import (
 
 	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/grammar"
+	"github.com/johnny4young/janusly/go/internal/recovery"
 	"github.com/johnny4young/janusly/go/internal/store"
 )
 
@@ -47,6 +48,14 @@ func (e *Engine) CompleteNode(ctx context.Context, claim ClaimedNode, output any
 		return fmt.Errorf("marshal output: %w", err)
 	}
 	stateJSON := safePersist(map[string]any{"output": output}, stateJSONMaxBytes)
+
+	// Deterministic semantic interception (T-132): evaluate the contract's
+	// detectors for this source node BEFORE the completion transaction, on
+	// the pre-completion context snapshot with the exact output overlaid.
+	violations, evalErr := e.evaluateSemanticOutcome(ctx, claim, output)
+	if evalErr != nil {
+		return evalErr
+	}
 
 	var eventPayload map[string]any
 	if len(outputJSON) <= nodeSucceededOutputMaxBytes {
@@ -84,8 +93,153 @@ func (e *Engine) CompleteNode(ctx context.Context, claim ClaimedNode, output any
 			return fmt.Errorf("insert node.succeeded: %w", err)
 		}
 		metricNodeCompletions.WithLabelValues("succeeded").Inc()
+		if len(violations) > 0 {
+			quarantined, err := e.persistSemanticViolations(ctx, q, claim, violations, finishedAt)
+			if err != nil {
+				return err
+			}
+			if quarantined {
+				// The business-outcome gate: the run parks in waiting BEFORE
+				// any downstream node can be scheduled.
+				return nil
+			}
+		}
 		return e.scheduleDownstream(ctx, q, claim.RunID, finishedAt)
 	})
+}
+
+// evaluateSemanticOutcome runs the contract's deterministic detectors for
+// the completing node. Sandbox replays (replayMode=validation) are
+// excluded: a dry-run must not create durable business-outcome cases.
+func (e *Engine) evaluateSemanticOutcome(ctx context.Context, claim ClaimedNode, output any) ([]recovery.SemanticOutcomeViolation, error) {
+	run, err := store.New(e.pool).GetRunExecution(ctx, claim.RunID)
+	if err != nil {
+		return nil, fmt.Errorf("read run for semantic evaluation: %w", err)
+	}
+	if run.ReplayMode.Valid && run.ReplayMode.String != "" {
+		return nil, nil
+	}
+	wf, _, err := workflowFromRunInput(run.InputJson)
+	if err != nil || wf.Recovery == nil || wf.Recovery.Contract == nil || wf.Recovery.Contract.Version != "2" {
+		return nil, nil
+	}
+	relevant := false
+	for _, detector := range wf.Recovery.Contract.Failure.Semantic.Detectors {
+		if detector.SourceNodeID == claim.NodeID {
+			relevant = true
+			break
+		}
+	}
+	if !relevant {
+		return nil, nil
+	}
+	rows, err := store.New(e.pool).ListRunNodesByRun(ctx, claim.RunID)
+	if err != nil {
+		return nil, fmt.Errorf("read context for semantic evaluation: %w", err)
+	}
+	runContext := runContextFromRows(rows)
+	evaluation := recovery.EvaluateSemanticOutcome(struct {
+		Contract     *domain.RecoveryContract
+		SourceNodeID string
+		Output       any
+		Context      map[string]any
+	}{
+		Contract: wf.Recovery.Contract, SourceNodeID: claim.NodeID,
+		Output: output, Context: runContext,
+	})
+	return evaluation.Violations, nil
+}
+
+// persistSemanticViolations writes the durable cases, containment
+// receipts, timeline events, and the run's outcome projection INSIDE the
+// completion transaction — quarantine parks the run in waiting atomically
+// with node success, so no downstream node can be scheduled past an
+// unresolved business outcome.
+func (e *Engine) persistSemanticViolations(
+	ctx context.Context, q *store.Queries, claim ClaimedNode,
+	violations []recovery.SemanticOutcomeViolation, finishedAt time.Time,
+) (bool, error) {
+	run, err := q.GetRunExecution(ctx, claim.RunID)
+	if err != nil {
+		return false, fmt.Errorf("read run for semantic persistence: %w", err)
+	}
+	wf, _, err := workflowFromRunInput(run.InputJson)
+	if err != nil {
+		return false, err
+	}
+	for _, violation := range violations {
+		caseID := StableSemanticID("sem", run.OrgID, claim.RunID, violation.DetectorID)
+		state := "detected"
+		if violation.Action == "quarantine" {
+			state = "contained"
+		}
+		details := violation.Details
+		if len(details) > 50 {
+			details = details[:50]
+		}
+		detailsJSON, _ := json.Marshal(details)
+		if err := q.InsertRecoveryCase(ctx, store.InsertRecoveryCaseParams{
+			ID: caseID, OrgID: run.OrgID, RunID: claim.RunID,
+			WorkflowID:        pgtype.Text{String: wf.ID, Valid: wf.ID != ""},
+			WorkflowVersionID: wf.ID,
+			Source:            "semantic_violation", DetectorID: violation.DetectorID,
+			SourceNodeID: violation.SourceNodeID, DetectorKind: violation.Kind,
+			Action: violation.Action, Message: violation.Message,
+			DetailsJson: detailsJSON, State: state,
+			CreatedBy: pgtype.Text{},
+		}); err != nil {
+			return false, fmt.Errorf("insert semantic case: %w", err)
+		}
+		if violation.Action == "quarantine" {
+			evidenceJSON, _ := json.Marshal([]domain.RecoveryCaseEvidenceRef{
+				{Kind: "run_node", ID: claim.RunID + ":" + claim.NodeID},
+				{Kind: "semantic_detector", ID: violation.DetectorID},
+			})
+			if _, err := q.InsertRecoveryCaseTransition(ctx, store.InsertRecoveryCaseTransitionParams{
+				ID:    StableSemanticID("sct", caseID, "contained"),
+				OrgID: run.OrgID, CaseID: caseID,
+				FromState: "detected", ToState: "contained",
+				ActorKind: "system", ActorID: pgtype.Text{},
+				EvidenceJson: evidenceJSON, Reason: pgtype.Text{},
+				OccurredAt: finishedAt,
+			}); err != nil {
+				return false, fmt.Errorf("insert containment receipt: %w", err)
+			}
+		}
+		payload := safePersist(map[string]any{
+			"caseId": caseID, "detectorId": violation.DetectorID,
+			"sourceNodeId": violation.SourceNodeID, "kind": violation.Kind,
+			"action": violation.Action, "message": violation.Message,
+			"details": details,
+		}, defaultPersistMaxBytes())
+		if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
+			ID: e.newID(), RunID: claim.RunID,
+			NodeID: pgtype.Text{String: claim.NodeID, Valid: true},
+			Type:   "recovery.semantic_violation", Payload: payload, CreatedAt: &finishedAt,
+		}); err != nil {
+			return false, fmt.Errorf("insert semantic_violation event: %w", err)
+		}
+	}
+
+	counts, err := q.CountRunSemanticCases(ctx, store.CountRunSemanticCasesParams{
+		OrgID: run.OrgID, RunID: claim.RunID,
+	})
+	if err != nil {
+		return false, fmt.Errorf("count semantic cases: %w", err)
+	}
+	quarantined := counts.OpenQuarantines > 0
+	outcomeStatus := "semantic_violation"
+	if quarantined {
+		outcomeStatus = "semantic_quarantined"
+	}
+	if err := q.SetRunSemanticOutcome(ctx, store.SetRunSemanticOutcomeParams{
+		ID: claim.RunID, Quarantine: quarantined,
+		OutcomeStatus:  pgtype.Text{String: outcomeStatus, Valid: true},
+		ViolationCount: int32(counts.Total),
+	}); err != nil {
+		return false, fmt.Errorf("set run semantic outcome: %w", err)
+	}
+	return quarantined, nil
 }
 
 // RetryOrFail is the worker's failure decision, mirroring the reference's

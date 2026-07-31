@@ -14,6 +14,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/executors"
 	"github.com/johnny4young/janusly/go/internal/grammar"
+	"github.com/johnny4young/janusly/go/internal/recovery"
 	"github.com/johnny4young/janusly/go/internal/store"
 )
 
@@ -106,7 +107,7 @@ func (s *V1Server) validateCore(r *http.Request, rc v1Request) opResult {
 		}
 		return opOK(map[string]any{"valid": false, "issues": issues})
 	}
-	result := domain.Validate(wf, grammar.DomainValidator)
+	result := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation)
 	issues := result.Issues
 	if issues == nil {
 		issues = []domain.Issue{}
@@ -134,7 +135,7 @@ func (s *V1Server) readinessCore(r *http.Request, rc v1Request) opResult {
 	wf, _ := domain.Parse(candidate)
 	var validation domain.ValidationResult
 	if wf != nil {
-		validation = domain.Validate(wf, grammar.DomainValidator)
+		validation = domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation)
 	}
 	if wf == nil || !validation.Valid {
 		issues := make([]domain.ReadinessIssue, 0, len(validation.Issues))

@@ -26,6 +26,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/grammar"
 	"github.com/johnny4young/janusly/go/internal/orgconfig"
 	"github.com/johnny4young/janusly/go/internal/ratelimit"
+	"github.com/johnny4young/janusly/go/internal/recovery"
 	"github.com/johnny4young/janusly/go/internal/store"
 )
 
@@ -176,7 +177,7 @@ func (d Deps) saveWorkflow(ctx context.Context, raw json.RawMessage) (*mcp.CallT
 	if wf == nil {
 		return expected(fmt.Sprintf("workflow contract invalid: %s", issueSummary(issues)))
 	}
-	result := domain.Validate(wf, grammar.DomainValidator)
+	result := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation)
 	var blocking []domain.Issue
 	for _, issue := range result.Issues {
 		if issue.Code != domain.CodeNodeTypeUnsupportedPilot {
@@ -236,7 +237,7 @@ func (d Deps) startRun(ctx context.Context, raw json.RawMessage, input map[strin
 	if wf == nil {
 		return expected(fmt.Sprintf("workflow contract invalid: %s", issueSummary(issues)))
 	}
-	if result := domain.Validate(wf, grammar.DomainValidator); !result.Valid {
+	if result := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation); !result.Valid {
 		return expected(fmt.Sprintf("workflow validation failed: %s", issueSummary(result.Issues)))
 	}
 	var startInput any

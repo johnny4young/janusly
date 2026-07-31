@@ -1072,3 +1072,16 @@ SELECT * FROM recovery_case_transitions
 WHERE org_id = $1 AND case_id = $2
 ORDER BY occurred_at, id
 LIMIT 100;
+
+-- name: CountRunSemanticCases :one
+SELECT count(*) AS total,
+  count(*) FILTER (WHERE action = 'quarantine'
+    AND state NOT IN ('verified_recovered','recurred','accepted_loss','abandoned')) AS open_quarantines
+FROM recovery_cases WHERE org_id = $1 AND run_id = $2;
+
+-- name: SetRunSemanticOutcome :exec
+UPDATE runs SET
+  status = CASE WHEN sqlc.arg(quarantine)::boolean THEN 'waiting' ELSE status END,
+  outcome_status = sqlc.arg(outcome_status),
+  semantic_violation_count = sqlc.arg(violation_count)
+WHERE id = $1;

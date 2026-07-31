@@ -26,6 +26,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/executors"
 	"github.com/johnny4young/janusly/go/internal/grammar"
 	"github.com/johnny4young/janusly/go/internal/ratelimit"
+	"github.com/johnny4young/janusly/go/internal/recovery"
 	"github.com/johnny4young/janusly/go/internal/store"
 )
 
@@ -226,7 +227,7 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 		}}
 	}
 
-	if valid := domain.Validate(wf, grammar.DomainValidator); !valid.Valid {
+	if valid := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation); !valid.Valid {
 		_, _ = q.MarkTriggerEventOutcome(ctx, store.MarkTriggerEventOutcomeParams{
 			OrgID: rc.orgID, ID: triggerEventID, Status: "failed",
 			SkippedReason: pgtype.Text{String: "workflow_parse_failed", Valid: true},

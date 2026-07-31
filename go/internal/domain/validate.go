@@ -88,11 +88,20 @@ var (
 // workflow. Parse-level problems never reach here: Parse returns its
 // invalid_contract issues instead of a workflow.
 func Validate(wf *Workflow, validExpression ExpressionValidator) ValidationResult {
+	return ValidateWithSemanticFixtures(wf, validExpression, nil)
+}
+
+// ValidateWithSemanticFixtures is Validate plus the bounded-fixture
+// qualification that needs the runtime evaluator (injected so domain
+// stays grammar-free; every product surface passes the real evaluator
+// from internal/recovery, mirroring the reference's single validator).
+func ValidateWithSemanticFixtures(wf *Workflow, validExpression ExpressionValidator, replayFixtures SemanticFixtureEvaluator) ValidationResult {
 	if validExpression == nil {
 		validExpression = PermissiveExpressions
 	}
 	var issues []Issue
 	push := func(issue Issue) { issues = append(issues, issue) }
+	validateSemanticContractDAG(wf, validExpression, replayFixtures, push)
 
 	if len(wf.Nodes) == 0 {
 		push(Issue{Code: CodeEmptyWorkflow, Message: "Workflow must include at least one node"})

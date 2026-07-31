@@ -32,6 +32,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/mcpclient"
 	"github.com/johnny4young/janusly/go/internal/orgconfig"
 	"github.com/johnny4young/janusly/go/internal/ratelimit"
+	"github.com/johnny4young/janusly/go/internal/recovery"
 	"github.com/johnny4young/janusly/go/internal/store"
 )
 
@@ -261,7 +262,7 @@ func (s *V1Server) saveCore(r *http.Request, rc v1Request) opResult {
 	}
 	// Save accepts the full platform vocabulary — a node type this backend
 	// cannot execute yet is a START-time concern, not a save-time one.
-	result := domain.Validate(wf, grammar.DomainValidator)
+	result := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation)
 	var blocking []domain.Issue
 	for _, issue := range result.Issues {
 		if issue.Code != domain.CodeNodeTypeUnsupportedPilot {
@@ -359,7 +360,7 @@ func (s *V1Server) startCore(r *http.Request, rc v1Request) opResult {
 	}
 	// Execution needs the executable subset — here the pilot-only code IS
 	// blocking, unlike save.
-	if result := domain.Validate(wf, grammar.DomainValidator); !result.Valid {
+	if result := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation); !result.Valid {
 		return opError(http.StatusBadRequest, "workflows_validation_failed",
 			"Workflow validation failed", map[string]any{"issues": result.Issues})
 	}

@@ -33,6 +33,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/grammar"
 	"github.com/johnny4young/janusly/go/internal/orgconfig"
 	"github.com/johnny4young/janusly/go/internal/ratelimit"
+	"github.com/johnny4young/janusly/go/internal/recovery"
 )
 
 //go:embed ai_generate_prompt.txt
@@ -331,7 +332,7 @@ func validateGeneratedWorkflow(raw []byte) []domain.Issue {
 	if wf == nil {
 		return parseIssues
 	}
-	result := domain.Validate(wf, grammar.DomainValidator)
+	result := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation)
 	var blocking []domain.Issue
 	for _, issue := range result.Issues {
 		if issue.Code != domain.CodeNodeTypeUnsupportedPilot {

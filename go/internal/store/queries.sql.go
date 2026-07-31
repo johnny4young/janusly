@@ -440,6 +440,30 @@ func (q *Queries) CountMembersInRole(ctx context.Context, arg CountMembersInRole
 	return column_1, err
 }
 
+const countRunSemanticCases = `-- name: CountRunSemanticCases :one
+SELECT count(*) AS total,
+  count(*) FILTER (WHERE action = 'quarantine'
+    AND state NOT IN ('verified_recovered','recurred','accepted_loss','abandoned')) AS open_quarantines
+FROM recovery_cases WHERE org_id = $1 AND run_id = $2
+`
+
+type CountRunSemanticCasesParams struct {
+	OrgID string
+	RunID string
+}
+
+type CountRunSemanticCasesRow struct {
+	Total           int64
+	OpenQuarantines int64
+}
+
+func (q *Queries) CountRunSemanticCases(ctx context.Context, arg CountRunSemanticCasesParams) (CountRunSemanticCasesRow, error) {
+	row := q.db.QueryRow(ctx, countRunSemanticCases, arg.OrgID, arg.RunID)
+	var i CountRunSemanticCasesRow
+	err := row.Scan(&i.Total, &i.OpenQuarantines)
+	return i, err
+}
+
 const countWorkflowVersions = `-- name: CountWorkflowVersions :one
 SELECT COALESCE(MAX(version), 0)::int FROM workflow_versions
 WHERE workflow_id = $1 AND org_id = $2
@@ -4406,6 +4430,31 @@ func (q *Queries) SetMcpConnectionStatus(ctx context.Context, arg SetMcpConnecti
 		arg.Status,
 		arg.StatusReason,
 		arg.LastDiscoveryAt,
+	)
+	return err
+}
+
+const setRunSemanticOutcome = `-- name: SetRunSemanticOutcome :exec
+UPDATE runs SET
+  status = CASE WHEN $2::boolean THEN 'waiting' ELSE status END,
+  outcome_status = $3,
+  semantic_violation_count = $4
+WHERE id = $1
+`
+
+type SetRunSemanticOutcomeParams struct {
+	ID             string
+	Quarantine     bool
+	OutcomeStatus  pgtype.Text
+	ViolationCount int32
+}
+
+func (q *Queries) SetRunSemanticOutcome(ctx context.Context, arg SetRunSemanticOutcomeParams) error {
+	_, err := q.db.Exec(ctx, setRunSemanticOutcome,
+		arg.ID,
+		arg.Quarantine,
+		arg.OutcomeStatus,
+		arg.ViolationCount,
 	)
 	return err
 }
