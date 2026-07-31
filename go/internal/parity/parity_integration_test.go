@@ -42,10 +42,10 @@ var acceptedDivergences = map[string]map[string]any{
 }
 
 type projection struct {
-	RunStatus   string                `json:"runStatus"`
-	Nodes       map[string]nodeShape  `json:"nodes"`
-	OutputJSON  any                   `json:"outputJson"`
-	DeadLetters int                   `json:"deadLetters"`
+	RunStatus   string               `json:"runStatus"`
+	Nodes       map[string]nodeShape `json:"nodes"`
+	OutputJSON  any                  `json:"outputJson"`
+	DeadLetters int                  `json:"deadLetters"`
 }
 
 type nodeShape struct {

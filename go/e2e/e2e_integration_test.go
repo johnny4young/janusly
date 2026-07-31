@@ -66,9 +66,10 @@ func freePort(t *testing.T) int {
 }
 
 type binaryAPI struct {
-	base string
-	org  string
-	cmd  *exec.Cmd
+	base     string
+	internal string
+	org      string
+	cmd      *exec.Cmd
 }
 
 func bootBinary(t *testing.T) *binaryAPI {
@@ -92,9 +93,10 @@ func bootBinary(t *testing.T) *binaryAPI {
 		t.Fatalf("start binary: %v", err)
 	}
 	api := &binaryAPI{
-		base: fmt.Sprintf("http://127.0.0.1:%d", port),
-		org:  fmt.Sprintf("e2e-%d", time.Now().UnixNano()),
-		cmd:  cmd,
+		base:     fmt.Sprintf("http://127.0.0.1:%d", port),
+		internal: fmt.Sprintf("http://127.0.0.1:%d", internal),
+		org:      fmt.Sprintf("e2e-%d", time.Now().UnixNano()),
+		cmd:      cmd,
 	}
 	t.Cleanup(func() {
 		// SIGTERM must drain cleanly — the lifecycle contract.
@@ -302,5 +304,39 @@ func TestApprovalGateLifecycleOverTheRealBinary(t *testing.T) {
 	}
 	if !strings.Contains(string(outputRaw), `"release":true`) {
 		t.Fatalf("declared outputs must read downstream state: %s", outputRaw)
+	}
+}
+
+func TestEngineMetricsExposeOnTheInternalPort(t *testing.T) {
+	api := bootBinary(t)
+	workflow := map[string]any{
+		"nodes": []any{
+			map[string]any{"id": "a", "type": "noop", "config": map[string]any{}},
+			map[string]any{"id": "b", "type": "transform", "config": map[string]any{
+				"mapping": map[string]any{"ok": true},
+			}},
+		},
+		"edges": []any{map[string]any{"from": "a", "to": "b"}},
+	}
+	runID := api.data(t, "POST", "/v1/start", map[string]any{"workflow": workflow})["runId"].(string)
+	api.waitRun(t, runID, "succeeded")
+
+	res, err := http.Get(api.internal + "/metrics")
+	if err != nil {
+		t.Fatalf("scrape: %v", err)
+	}
+	defer res.Body.Close()
+	raw, _ := io.ReadAll(res.Body)
+	body := string(raw)
+	for _, series := range []string{
+		"janusly_go_claims_total",
+		`janusly_go_node_completions_total{outcome="succeeded"}`,
+		"janusly_go_node_execution_seconds_bucket",
+		`janusly_go_runs_terminal_total{status="succeeded"}`,
+		`janusly_go_queue_depth{state="queued"}`,
+	} {
+		if !strings.Contains(body, series) {
+			t.Fatalf("metric series %s missing from scrape", series)
+		}
 	}
 }

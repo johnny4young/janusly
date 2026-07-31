@@ -12,22 +12,22 @@ import (
 // Issue codes emitted by Parse and Validate. Closed set; additions must
 // exist in the reference first (except the explicit pilot-only code).
 const (
-	CodeInvalidContract           = "invalid_contract"
-	CodeEmptyWorkflow             = "empty_workflow"
-	CodeDuplicateNodeID           = "duplicate_node_id"
-	CodeNodeIDReserved            = "node_id_reserved"
-	CodeUnsupportedNodeType       = "unsupported_node_type"
-	CodeHTTPMissingURL            = "http_missing_url"
-	CodeConditionMissingExpr      = "condition_missing_expression"
-	CodeConditionInvalidExpr      = "condition_invalid_expression"
-	CodeTransformMissingMapping   = "transform_missing_mapping"
-	CodeEdgeInvalidFrom           = "edge_invalid_from"
-	CodeEdgeInvalidTo             = "edge_invalid_to"
-	CodeEdgeInvalidCondition      = "edge_invalid_condition"
-	CodeEdgeConditionInputsScope  = "edge_condition_inputs_scope"
-	CodeInputDefaultTypeMismatch  = "input_default_type_mismatch"
-	CodeCycleDetected             = "cycle_detected"
-	CodeMissingStartNode          = "missing_start_node"
+	CodeInvalidContract          = "invalid_contract"
+	CodeEmptyWorkflow            = "empty_workflow"
+	CodeDuplicateNodeID          = "duplicate_node_id"
+	CodeNodeIDReserved           = "node_id_reserved"
+	CodeUnsupportedNodeType      = "unsupported_node_type"
+	CodeHTTPMissingURL           = "http_missing_url"
+	CodeConditionMissingExpr     = "condition_missing_expression"
+	CodeConditionInvalidExpr     = "condition_invalid_expression"
+	CodeTransformMissingMapping  = "transform_missing_mapping"
+	CodeEdgeInvalidFrom          = "edge_invalid_from"
+	CodeEdgeInvalidTo            = "edge_invalid_to"
+	CodeEdgeInvalidCondition     = "edge_invalid_condition"
+	CodeEdgeConditionInputsScope = "edge_condition_inputs_scope"
+	CodeInputDefaultTypeMismatch = "input_default_type_mismatch"
+	CodeCycleDetected            = "cycle_detected"
+	CodeMissingStartNode         = "missing_start_node"
 	// Pilot-only: the type is valid in the full platform but this backend
 	// does not execute it yet. Deliberately distinct from
 	// unsupported_node_type, which means the type is invalid everywhere.

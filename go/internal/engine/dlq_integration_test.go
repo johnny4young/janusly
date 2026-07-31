@@ -109,7 +109,10 @@ func TestExhaustedRetriesCaptureExactlyOneDeadLetter(t *testing.T) {
 	workerCtx, stop := context.WithCancel(ctx)
 	defer stop()
 	done := make(chan struct{})
-	go func() { defer close(done); _ = eng.RunWorkers(workerCtx, 2, 30*time.Millisecond, doomed, quietLogger()) }()
+	go func() {
+		defer close(done)
+		_ = eng.RunWorkers(workerCtx, 2, 30*time.Millisecond, doomed, quietLogger())
+	}()
 	waitRun(t, pool, runID, "failed", 20*time.Second)
 	stop()
 	<-done

@@ -462,3 +462,14 @@ local. Sin umbral pasa/no-pasa: números para aprender.
   todos los guards re-checkeados bajo snapshot fresco sobre filas que
   YA poseemos (sin re-evaluación EPQ posible). Treinta corridas
   seguidas en verde donde antes caía una de diez.
+
+## 2026-07-30 — métricas Prometheus del engine (T-024)
+
+- Serie propia janusly_go_* — deliberadamente NO reutilizo los nombres
+  del exporter de Node: series nuevas de un backend nuevo, no impostores
+  que confundirían dashboards durante la coexistencia F1-F3.
+- La profundidad de cola es un Collector custom con caché de 5s: un solo
+  GROUP BY acotado por scrape real, scrapes concurrentes coalescen — la
+  misma postura anti-estampida del /health de Node.
+- El e2e escrapea el puerto interno del binario real tras un run
+  completo y exige las cinco series con valores.

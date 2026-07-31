@@ -51,6 +51,7 @@ func (e *Engine) ReapStalledNodes(ctx context.Context, threshold time.Duration, 
 			continue
 		}
 		reaped++
+		metricReapedNodes.Inc()
 		logger.Warn("stalled node reaped into the DLQ",
 			"runId", row.RunID, "nodeId", row.NodeID, "attempt", row.Attempt)
 	}

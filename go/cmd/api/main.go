@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/johnny4young/janusly/go/internal/boot"
 	"github.com/johnny4young/janusly/go/internal/config"
 	"github.com/johnny4young/janusly/go/internal/engine"
@@ -60,6 +62,7 @@ func run() error {
 	// pool. The processes split when scale demands it — the engine already
 	// supports N independent consumers.
 	eng := engine.New(workerPool)
+	prometheus.MustRegister(engine.NewQueueDepthCollector(pool))
 	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
 	workerCtx, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()

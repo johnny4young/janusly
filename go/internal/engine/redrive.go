@@ -94,5 +94,6 @@ func (e *Engine) RedriveDeadLetter(ctx context.Context, orgID, deadLetterID stri
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}
+	metricRedrives.Inc()
 	return nil
 }

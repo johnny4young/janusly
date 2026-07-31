@@ -120,6 +120,7 @@ func (e *Engine) claimBatch(ctx context.Context, batch int32) ([]ClaimedNode, er
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	metricClaims.Add(float64(len(rows)))
 	claims := make([]ClaimedNode, 0, len(rows))
 	for _, row := range rows {
 		claims = append(claims, ClaimedNode{
@@ -156,7 +157,9 @@ func (e *Engine) executeClaim(ctx context.Context, claim ClaimedNode, execute Ex
 		return
 	}
 
+	executionStart := time.Now()
 	output, execErr := runExecutor(ctx, claim, *node, wf, runInput, execute)
+	metricNodeExecution.Observe(time.Since(executionStart).Seconds())
 	if execErr != nil {
 		if err := e.RetryOrFail(ctx, claim, *node, execErr); err != nil {
 			logger.Error("retry-or-fail failed", "runId", claim.RunID, "nodeId", claim.NodeID, "error", err)

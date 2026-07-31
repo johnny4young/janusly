@@ -80,6 +80,7 @@ func (e *Engine) CompleteNode(ctx context.Context, claim ClaimedNode, output any
 		}); err != nil {
 			return fmt.Errorf("insert node.succeeded: %w", err)
 		}
+		metricNodeCompletions.WithLabelValues("succeeded").Inc()
 		return e.scheduleDownstream(ctx, q, claim.RunID, finishedAt)
 	})
 }
@@ -120,6 +121,7 @@ func (e *Engine) RetryOrFail(ctx context.Context, claim ClaimedNode, node domain
 		if requeued == 0 {
 			return errSkipCommit
 		}
+		metricNodeRetries.Inc()
 		// The wake-up rides the same transaction: the anti-join on the claim
 		// keeps the row unclaimable until the backoff clock passes.
 		if err := q.UpsertWakeup(ctx, store.UpsertWakeupParams{
@@ -170,6 +172,7 @@ func (e *Engine) FailNode(ctx context.Context, claim ClaimedNode, execErr error)
 		if failed == 0 {
 			return errSkipCommit
 		}
+		metricNodeCompletions.WithLabelValues("failed").Inc()
 		if err := q.DeleteWakeup(ctx, claim.RowID); err != nil {
 			return fmt.Errorf("clear wakeup: %w", err)
 		}
@@ -342,6 +345,7 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, runID
 						return fmt.Errorf("insert node.skipped: %w", err)
 					}
 				}
+				metricNodeCompletions.WithLabelValues("skipped").Inc()
 				statuses[node.ID] = "skipped"
 				if runContext != nil {
 					runContext[node.ID] = map[string]any{
@@ -450,6 +454,7 @@ func (e *Engine) flipRunTerminal(ctx context.Context, q *store.Queries, runID, s
 	if flipped == 0 {
 		return nil
 	}
+	metricRunsTerminal.WithLabelValues(status).Inc()
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal run event payload: %w", err)
