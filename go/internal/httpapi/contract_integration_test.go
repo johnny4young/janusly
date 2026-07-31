@@ -583,10 +583,12 @@ func TestLegacySupportReads(t *testing.T) {
 		t.Fatalf("health sub-shapes: %v", health)
 	}
 
-	// /org/config: raw legacy body, honestly empty for a fresh org.
+	// /org/config: raw legacy body — the FULL closed catalog with layered
+	// provenance, exactly what the reference answers a fresh org (the
+	// earlier empty-list stub was a divergence, closed by T-086).
 	cfg := h.call("GET", "/org/config", nil, "")
-	if list, ok := cfg.body["config"].([]any); !ok || len(list) != 0 {
-		t.Fatalf("org config must be an empty list: %v", cfg.body)
+	if list, ok := cfg.body["config"].([]any); !ok || len(list) != 69 {
+		t.Fatalf("org config must list the whole catalog: %v", cfg.body)
 	}
 }
 

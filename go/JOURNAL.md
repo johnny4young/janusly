@@ -1277,3 +1277,10 @@ producción necesita saber — de lo ya resuelto o informativo.
   buffer) y el 429 con cuerpo verbatim; MCP writes con bucket por tool a
   60/min. Hallazgo: la card pedía limitar start/save/resume "como Node" —
   y Node no los limita; portar la realidad, no la especulación.
+
+## 2026-07-31 — el catálogo cerrado gobierna (T-086)
+
+- 69 definiciones extraídas mecánicamente (no ~50 como estimaba la card),
+  guards verbatim, resolutor por capas puro. El GET que respondía `[]` a
+  una org fresca era divergencia: la referencia responde el catálogo
+  completo con procedencia por clave.

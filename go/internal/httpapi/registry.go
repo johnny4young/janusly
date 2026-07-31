@@ -61,6 +61,10 @@ var routeAuthz = map[string]routeGate{
 	// Audit trail: admin-only compliance surface (reference pair verbatim).
 	"GET /audit": {auth.RoleAdmin, "org.config.write"},
 
+	// Org config: the read is auth-only (every member sees effective
+	// settings); the write is the admin pair from the reference.
+	"POST /org/config": {auth.RoleAdmin, "org.config.write"},
+
 	// Members + invitations (reference pairs verbatim).
 	"GET /members":                          {auth.RoleViewer, "members.read"},
 	"GET /members/invitations":              {auth.RoleAdmin, "members.read"},

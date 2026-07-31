@@ -774,3 +774,15 @@ RETURNING count;
 
 -- name: CleanupExpiredRateWindows :execrows
 DELETE FROM go_pilot_rate_windows WHERE expires_at < now();
+
+-- Org-config rows for the layered catalog read. The closed catalog is
+-- ~69 keys; the 200 cap guards a pathological row count, like the
+-- reference's defensive limit.
+-- name: ListOrgConfigRows :many
+SELECT key, value_json, updated_at FROM org_configs WHERE org_id = $1 LIMIT 200;
+
+-- name: UpsertOrgConfigValue :exec
+INSERT INTO org_configs (id, org_id, key, value_json, category, description, value_type, updated_by, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+ON CONFLICT (org_id, key)
+DO UPDATE SET value_json = EXCLUDED.value_json, updated_by = EXCLUDED.updated_by, updated_at = now();

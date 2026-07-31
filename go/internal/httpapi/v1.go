@@ -72,11 +72,10 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 		})
 		_, _ = w.Write(payload)
 	})
-	// Legacy org-config read: the closed catalog with no tenant rows is an
-	// honestly EMPTY list — the same answer the reference gives a fresh org.
+	// Org-config read: the full closed catalog with layered effective
+	// values (tenant row → env → default) and provenance per key.
 	mux.HandleFunc("GET /org/config", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"config":[]}`))
+		writeLegacy(w, server.listOrgConfigCore(r, rc))
 	}))
 	mux.HandleFunc("POST /v1/workflows/save", server.auth(server.saveWorkflow))
 	mux.HandleFunc("POST /v1/workflows/rollback", server.auth(server.rollbackWorkflow))
@@ -132,6 +131,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	server.mountMemberRoutes(mux)
 	server.mountRoleRoutes(mux)
 	server.mountAuditRoutes(mux)
+	server.mountOrgConfigRoutes(mux)
 	return WithBrowserHeaders(mux)
 }
 

@@ -1927,6 +1927,39 @@ func (q *Queries) ListFailedRunNodeSamples(ctx context.Context, arg ListFailedRu
 	return items, nil
 }
 
+const listOrgConfigRows = `-- name: ListOrgConfigRows :many
+SELECT key, value_json, updated_at FROM org_configs WHERE org_id = $1 LIMIT 200
+`
+
+type ListOrgConfigRowsRow struct {
+	Key       string
+	ValueJson json.RawMessage
+	UpdatedAt *time.Time
+}
+
+// Org-config rows for the layered catalog read. The closed catalog is
+// ~69 keys; the 200 cap guards a pathological row count, like the
+// reference's defensive limit.
+func (q *Queries) ListOrgConfigRows(ctx context.Context, orgID string) ([]ListOrgConfigRowsRow, error) {
+	rows, err := q.db.Query(ctx, listOrgConfigRows, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOrgConfigRowsRow
+	for rows.Next() {
+		var i ListOrgConfigRowsRow
+		if err := rows.Scan(&i.Key, &i.ValueJson, &i.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrgHTTPConfig = `-- name: ListOrgHTTPConfig :many
 SELECT key, value_json FROM org_configs
 WHERE org_id = $1 AND category = 'http'
@@ -3451,6 +3484,38 @@ func (q *Queries) UpdateRunStatusCAS(ctx context.Context, arg UpdateRunStatusCAS
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const upsertOrgConfigValue = `-- name: UpsertOrgConfigValue :exec
+INSERT INTO org_configs (id, org_id, key, value_json, category, description, value_type, updated_by, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+ON CONFLICT (org_id, key)
+DO UPDATE SET value_json = EXCLUDED.value_json, updated_by = EXCLUDED.updated_by, updated_at = now()
+`
+
+type UpsertOrgConfigValueParams struct {
+	ID          string
+	OrgID       string
+	Key         string
+	ValueJson   json.RawMessage
+	Category    string
+	Description string
+	ValueType   string
+	UpdatedBy   pgtype.Text
+}
+
+func (q *Queries) UpsertOrgConfigValue(ctx context.Context, arg UpsertOrgConfigValueParams) error {
+	_, err := q.db.Exec(ctx, upsertOrgConfigValue,
+		arg.ID,
+		arg.OrgID,
+		arg.Key,
+		arg.ValueJson,
+		arg.Category,
+		arg.Description,
+		arg.ValueType,
+		arg.UpdatedBy,
+	)
+	return err
 }
 
 const upsertWakeup = `-- name: UpsertWakeup :exec
