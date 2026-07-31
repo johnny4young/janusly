@@ -160,3 +160,93 @@ func TestRecoveryPlaybookLoop(t *testing.T) {
 		t.Fatalf("failed sandbox must auto-retire: %s/%d", status, regressions)
 	}
 }
+
+// The drill surfaces over a REAL recovered chain (reusing the impact
+// cycle): the outcome reads recovered + terminal impact + monitoring
+// recurrence, and the dossier aggregates it.
+func TestRecoveryDrillOutcomeRoutes(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	ctx := t.Context()
+	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "true")
+	wfID := fmt.Sprintf("wf-drill-%d", time.Now().UnixNano())
+
+	var healed atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !healed.Load() {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+
+	workflow := map[string]any{
+		"id": wfID, "name": "Drill", "dslVersion": "1.0",
+		"nodes": []any{map[string]any{"id": "call", "type": "http", "config": map[string]any{
+			"url": upstream.URL, "timeoutMs": 500,
+		}}},
+		"edges": []any{},
+	}
+	res := h.call("POST", "/v1/start", map[string]any{"workflow": workflow}, "")
+	runID := extractRunID(t, res)
+	h.waitRun(runID, "failed")
+	var rootDL string
+	_ = pool.QueryRow(ctx, `SELECT id FROM dead_letters WHERE run_id = $1`, runID).Scan(&rootDL)
+
+	// Mid-flight: claimed replay against a broken upstream → in progress /
+	// awaiting on the follow-up dead letter.
+	res = h.call("POST", "/dlq/replay", map[string]any{"deadLetterId": rootDL}, "")
+	if res.status != 200 {
+		t.Fatalf("replay 1: %d", res.status)
+	}
+	h.waitRun(runID, "failed")
+
+	// Heal + replay the fresh dead letter: the chain recovers.
+	var openDL string
+	_ = pool.QueryRow(ctx, `SELECT id FROM dead_letters WHERE run_id = $1 AND status = 'open'
+		ORDER BY created_at DESC LIMIT 1`, runID).Scan(&openDL)
+	healed.Store(true)
+	res = h.call("POST", "/dlq/replay", map[string]any{"deadLetterId": openDL}, "")
+	if res.status != 200 {
+		t.Fatalf("replay 2: %d", res.status)
+	}
+	h.waitRun(runID, "succeeded")
+
+	// The outcome from the ROOT reads the whole chain: recovered with
+	// terminal impact, 2 attempts, recurrence monitoring.
+	res = h.call("GET", "/recovery/drills/outcome?deadLetterId="+rootDL, nil, "")
+	if res.status != 200 {
+		t.Fatalf("outcome: %d %+v", res.status, res.body)
+	}
+	outcome := res.body["outcome"].(map[string]any)
+	if outcome["status"] != "recovered" || outcome["evidence"] != "terminal_impact" ||
+		outcome["attemptCount"] != float64(2) || outcome["chainCapped"] != false {
+		t.Fatalf("outcome shape: %+v", outcome)
+	}
+	if outcome["recurrence"].(map[string]any)["status"] != "monitoring" {
+		t.Fatalf("recurrence: %+v", outcome["recurrence"])
+	}
+	if outcome["elapsedMs"] == nil || outcome["elapsedMs"].(float64) < 0 {
+		t.Fatalf("elapsed: %+v", outcome["elapsedMs"])
+	}
+
+	// The dossier aggregates the org's measured drills.
+	res = h.call("GET", "/recovery/drills/dossier", nil, "")
+	if res.status != 200 {
+		t.Fatalf("dossier: %d", res.status)
+	}
+	drills := res.body["drills"].([]any)
+	if len(drills) < 1 {
+		t.Fatalf("dossier must list the drill: %+v", res.body)
+	}
+	summary := res.body["summary"].(map[string]any)
+	if summary["recovered"] == nil {
+		t.Fatalf("dossier summary: %+v", summary)
+	}
+
+	// Unknown dead letter → 404.
+	if res = h.call("GET", "/recovery/drills/outcome?deadLetterId=dl-fantasma", nil, ""); res.status != 404 {
+		t.Fatalf("unknown outcome: %d", res.status)
+	}
+}

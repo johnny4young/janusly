@@ -158,6 +158,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	server.mountMcpRoutes(mux)
 	server.mountValidateFixRoutes(mux)
 	server.mountPlaybookRoutes(mux)
+	server.mountDrillRoutes(mux)
 	server.mountAiPatchRoutes(mux)
 	return WithBrowserHeaders(mux)
 }

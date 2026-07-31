@@ -1245,3 +1245,8 @@ WHERE org_id = $1 AND id = $2
 -- name: GetWorkflowVersionAnyWorkflow :one
 SELECT id, org_id, workflow_id, version, dag_json FROM workflow_versions
 WHERE id = $1 AND org_id = $2;
+
+-- name: ListDrillRootDeadLetters :many
+SELECT id FROM dead_letters
+WHERE org_id = $1 AND replay_claimed_at IS NOT NULL
+ORDER BY created_at DESC LIMIT 50;
