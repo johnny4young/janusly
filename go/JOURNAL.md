@@ -1255,3 +1255,10 @@ producción necesita saber — de lo ya resuelto o informativo.
 - `GET /audit` con el wire crudo de la referencia y keyset exacto; el
   precedente de T-058 (estampar en ms) se extendió al insert de audit,
   cerrando un salto de frontera de página que la referencia aún tiene.
+
+## 2026-07-31 — el chokepoint formal de persistencia (T-083)
+
+- Las 3 capas de safe-persist en `grammar`, con el engine de shim (el
+  mismo split de la referencia) y el metadata de audit ganando la cota
+  que no tenía. El property test siembra secretos reales y barre las 6
+  columnas jsonb: cero supervivencias, snapshot DLQ reproducible.

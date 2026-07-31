@@ -2,6 +2,7 @@ package engine
 
 import (
 	"encoding/json"
+	"github.com/johnny4young/janusly/go/internal/grammar"
 	"reflect"
 	"strings"
 	"testing"
@@ -69,14 +70,14 @@ func TestReadySuccessorsTable(t *testing.T) {
 
 func TestBoundPayloadPassesSmallThrough(t *testing.T) {
 	raw := json.RawMessage(`{"ok":true}`)
-	if got := boundPayload(raw, 1000); string(got) != string(raw) {
+	if got := grammar.BoundPersistPayload(raw, 1000); string(got) != string(raw) {
 		t.Fatalf("small payload must pass untouched: %s", got)
 	}
 }
 
 func TestBoundPayloadReplacesOversizeWithSentinel(t *testing.T) {
 	big, _ := json.Marshal(map[string]string{"blob": strings.Repeat("x", 5000)})
-	bounded := boundPayload(big, 1000)
+	bounded := grammar.BoundPersistPayload(big, 1000)
 
 	var sentinel struct {
 		Truncated     bool   `json:"__truncated"`
@@ -100,7 +101,7 @@ func TestBoundPayloadReplacesOversizeWithSentinel(t *testing.T) {
 func TestBoundPayloadPreviewNeverSplitsARune(t *testing.T) {
 	// Multibyte content aligned so a naive byte slice would cut mid-rune.
 	big, _ := json.Marshal(strings.Repeat("é", 4000))
-	bounded := boundPayload(big, 1001)
+	bounded := grammar.BoundPersistPayload(big, 1001)
 	var sentinel struct {
 		Preview string `json:"preview"`
 	}

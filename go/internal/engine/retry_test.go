@@ -142,7 +142,7 @@ func TestSafePersistRedactsSensitiveKeysAndBounds(t *testing.T) {
 	value := map[string]any{
 		"apiKey": "sk-live-12345", "nested": map[string]any{"client_secret": "shh", "ok": "visible"},
 	}
-	persisted := string(safePersist(value, defaultPersistMaxBytes))
+	persisted := string(safePersist(value, defaultPersistMaxBytes()))
 	if !strings.Contains(persisted, `"apiKey":"[redacted]"`) || !strings.Contains(persisted, `"client_secret":"[redacted]"`) ||
 		!strings.Contains(persisted, `"ok":"visible"`) {
 		t.Fatalf("key redaction broken: %s", persisted)

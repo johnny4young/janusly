@@ -740,6 +740,9 @@ el chat publicado.
 | 2026-07-31 | T-081 identidades | El MCP server (escritura directa a store) audita con `Mode=service-token, Source=mcp`; un start por trigger NO es `run.started.adhoc` (0 filas verificadas); el retry convergente del relay no re-audita |
 | 2026-07-31 | T-082 GET /audit | Lector del rastro: wire crudo `{rows, nextCursor, hasMore}` de la referencia, filtro PREFIX de acción, keyset `(createdAt,id)` DESC con cursor `<iso>|<id>`, tope 200/default 100, gate admin + `org.config.write` en el registro central. Test: 5 filas en loop apretado (colisiones mismo-ms reales) reensambladas en páginas de 2 sin saltos ni repes |
 | 2026-07-31 | T-082 precisión ms | Postura T-058 extendida a audit: `created_at` se estampa app-side truncado a ms para que el cursor ms haga round-trip exacto (la referencia mantiene µs en DB y cursor ms — puede saltar pares del mismo ms en fronteras de página; el pilot es estrictamente más correcto, wire idéntico) |
+| 2026-07-31 | T-083 chokepoint formal | `grammar.SafePersistPayload` con las 3 capas de la referencia: redacción por VALOR (lista opcional), por CLAVE (siempre; el mismo `IsSensitiveKey`, sin bifurcar), y cota de bytes (default 256 KB, env `JANUSLY_PERSIST_MAX_BYTES`, `PersistUnbounded` para los snapshots DLQ) con el centinela `{__truncated, originalBytes, maxBytes, preview}`. `engine/bound.go` queda de shim (mismo split que la referencia); el metadata de audit migró y GANÓ la cota que no tenía |
+| 2026-07-31 | T-083 property test | Corrida sembrada con secretos (claves sensibles en output de transform + Authorization/password en config del http que muere a DLQ): barrido de las 6 columnas jsonb del chokepoint — cero supervivencias; el snapshot DLQ conserva estructura reproducible con `[redacted]` en su sitio |
+| 2026-07-31 | T-083 hallazgo test-only | Un literal `domain.Workflow{}` sin `DSLVersion` produce un snapshot que el propio `workflowFromRunInput` no puede re-interpretar (Parse exige "1.0"); la ruta API siempre lo estampa — mal uso exclusivo de tests engine-direct, documentado aquí |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -1026,7 +1029,7 @@ día que exista el chokepoint (T-079)**.
 | T-080 | `withAuditTx` (entidad + fila de audit comprometen juntas) | audit | P0 | done |
 | T-081 | Retrofit de audit a TODAS las mutaciones existentes (save/cancel/redrive/campañas/trash/MCP) | audit | P0 | done |
 | T-082 | `GET /audit` (admin, filtro por prefijo de acción, keyset, cap 200) | audit | P1 | done |
-| T-083 | `safePersistPayload` formal (redacción por valor + claves + cota de bytes + centinela) | audit | P1 | todo |
+| T-083 | `safePersistPayload` formal (redacción por valor + claves + cota de bytes + centinela) | audit | P1 | done |
 | T-084 | Rate limiter en Postgres (fail-open) + observabilidad de degradación | limiter | P0 | todo |
 | T-085 | Limiter cableado: API global, storm-guard de triggers, MCP writes 60/min | limiter | P1 | todo |
 | T-086 | Catálogo completo de org config (tipado, guards anti-secreto, GET/PUT + audit) | config | P0 | todo |

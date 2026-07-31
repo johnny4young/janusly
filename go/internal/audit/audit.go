@@ -20,7 +20,6 @@ package audit
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -58,12 +57,15 @@ func enrich(authCtx *auth.Context, metadata map[string]any) map[string]any {
 	return enriched
 }
 
+// marshalMetadata routes through the formal persistence chokepoint: key
+// redaction plus the default byte cap (env JANUSLY_PERSIST_MAX_BYTES) so a
+// runaway metadata blob truncates to the sentinel instead of bloating the
+// audit row.
 func marshalMetadata(metadata map[string]any) ([]byte, error) {
-	redacted, _ := grammar.RedactSensitiveKeys(metadata).(map[string]any)
-	if redacted == nil {
-		redacted = map[string]any{}
+	if metadata == nil {
+		metadata = map[string]any{}
 	}
-	return json.Marshal(redacted)
+	return grammar.SafePersistPayload(metadata, grammar.PersistOptions{}), nil
 }
 
 // created_at is stamped app-side truncated to milliseconds (the T-058

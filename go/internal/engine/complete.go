@@ -56,7 +56,7 @@ func (e *Engine) CompleteNode(ctx context.Context, claim ClaimedNode, output any
 			"outputBytes": len(outputJSON), "outputTruncated": true, "attempt": claim.Attempt,
 		}
 	}
-	eventJSON := safePersist(eventPayload, defaultPersistMaxBytes)
+	eventJSON := safePersist(eventPayload, defaultPersistMaxBytes())
 
 	finishedAt := eventNow()
 	return e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries) error {

@@ -40,7 +40,7 @@ func (e *Engine) MarkNodeWaiting(ctx context.Context, claim ClaimedNode, waiting
 	stateJSON := safePersist(map[string]any{"waiting": metadata}, stateJSONMaxBytes)
 	eventJSON := safePersist(map[string]any{
 		"status": "waiting", "reason": waiting.Reason, "metadata": metadata,
-	}, defaultPersistMaxBytes)
+	}, defaultPersistMaxBytes())
 
 	return e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries) error {
 		marked, err := q.MarkRunNodeWaiting(ctx, store.MarkRunNodeWaitingParams{
