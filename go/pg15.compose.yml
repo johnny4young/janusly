@@ -1,0 +1,19 @@
+# Ephemeral Postgres 15 floor lane. Own project + port so it never touches
+# the dev database (whose volume was initdb'd by PG 18 and cannot run under
+# 15). No volume: `down -v` leaves nothing.
+name: janusly-go-pg15
+
+services:
+  postgres:
+    image: ${JANUSLY_GO_PG15_IMAGE:-pgvector/pgvector:pg15}
+    ports:
+      - "127.0.0.1:4634:5432"
+    environment:
+      POSTGRES_DB: janusly_go
+      POSTGRES_USER: janusly
+      POSTGRES_PASSWORD: janusly-go-local
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U janusly -d janusly_go"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

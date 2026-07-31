@@ -137,10 +137,26 @@ func TestReplayCampaignCancellation(t *testing.T) {
 	if campaign["status"] != "cancelled" || campaign["cancelledBy"] != "api-tester" {
 		t.Fatalf("cancelled shape: %+v", campaign)
 	}
-	replayed := campaign["replayedCount"].(float64)
-	cancelledCount := campaign["cancelledCount"].(float64)
-	if replayed+cancelledCount != 3 || cancelledCount < 2 {
-		t.Fatalf("truthful counters: replayed=%v cancelled=%v", replayed, cancelledCount)
+
+	// An item claimed before the cancel legitimately finishes AFTER it —
+	// poll until every item settles, then the counters must be truthful.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		detail := h.call("GET", "/recovery/campaigns/"+campaignID, nil, "")
+		final := detail.body["campaign"].(map[string]any)
+		replayed := final["replayedCount"].(float64)
+		failed := final["failedCount"].(float64)
+		cancelledCount := final["cancelledCount"].(float64)
+		if replayed+failed+cancelledCount == 3 {
+			if cancelledCount < 2 {
+				t.Fatalf("cancel must park the unclaimed majority: %+v", final)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("items never settled: %+v", final)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	// Cancelling again: 409 not-running; unknown id: 404.

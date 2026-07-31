@@ -2,7 +2,7 @@ SHELL := /bin/bash
 DB_URL ?= postgres://janusly:janusly-go-local@127.0.0.1:4632/janusly_go
 PG_CONTAINER := janusly-go-pilot-postgres-1
 
-.PHONY: db-up db-down migrate schema-dump generate lint test run build parity ci
+.PHONY: db-up db-down migrate schema-dump generate lint test run build parity ci test-pg15
 
 db-up:
 	docker compose -f docker-compose.yml up -d --wait
@@ -16,6 +16,7 @@ db-down:
 # follow from ./migrations, applied idempotently to the pilot database only.
 migrate:
 	cd .. && DATABASE_URL=$(DB_URL) pnpm migrate
+	docker exec -i janusly-go-pilot-postgres-1 psql -U janusly -d janusly_go -v ON_ERROR_STOP=1 < migrations/0001_go_pilot.sql
 	for f in migrations/*.sql; do \
 		docker exec -i $(PG_CONTAINER) psql -v ON_ERROR_STOP=1 -U janusly -d janusly_go < $$f; \
 	done
@@ -61,3 +62,13 @@ ci:
 	@echo "== semantic parity F01-F10 =="
 	$(MAKE) parity
 	@echo "== ci green =="
+
+# Postgres 15 floor: the full integration suite against an ephemeral pg15
+# container (port 4634), mirroring the reference CI's test_compat_pg15 lane.
+test-pg15:
+	docker compose -f pg15.compose.yml up -d --wait
+	cd .. && DATABASE_URL=postgres://janusly:janusly-go-local@127.0.0.1:4634/janusly_go pnpm migrate
+	docker exec -i janusly-go-pg15-postgres-1 psql -U janusly -d janusly_go -v ON_ERROR_STOP=1 < migrations/0001_go_pilot.sql
+	JANUSLY_GO_DATABASE_URL=postgres://janusly:janusly-go-local@127.0.0.1:4634/janusly_go \
+		go test -race -tags integration -p 1 -count=1 ./... ; \
+		status=$$?; docker compose -f pg15.compose.yml down -v; exit $$status

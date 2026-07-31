@@ -797,3 +797,21 @@ local. Sin umbral pasa/no-pasa: números para aprender.
   coinciden sin una sola divergencia nueva.
 - 18 fixtures totales; keyset se traslada a T-058 donde el round-trip
   de cursores Node↔Go es el objeto del test.
+
+## 2026-07-31 — floor Postgres 15 + strip de credenciales en redirects (T-047, T-049)
+
+- El lane pg15 pagó su costo el primer día: destapó que `make migrate`
+  nunca aplicaba la migración propia del pilot (la DB dev la tenía a
+  mano) — en una instalación fresca los timers y retries no agendaban.
+  El síntoma fue elocuente: F17 colgado 30s y la paridad tardando 541s
+  en vez de 4. Con el fix, las 13 suites corren verdes bajo PG 15 sin
+  tocar una línea de SQL: el floor es real, no aspiracional.
+- También cazó una race de test legítima: los contadores del cancel de
+  campañas se leían antes de que el item en vuelo asentara — pg15 solo
+  cambió el timing suficiente para exponerla.
+- T-049: Go stdlib hace strip de credenciales por DOMINIO y omite
+  Proxy-Authorization; la referencia (spec fetch) lo hace por ORIGEN.
+  El delta era explotable: mismo host en otro puerto, downgrade de
+  scheme o salto de subdominio conservaban el header. El strip por
+  origen vive ahora en el mismo CheckRedirect que ya revalidaba SSRF
+  por salto, con el caso "mismo host, otro puerto" pin-eado en test.
