@@ -68,6 +68,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 		_, _ = w.Write([]byte(`{"config":[]}`))
 	}))
 	mux.HandleFunc("POST /v1/workflows/save", server.auth(server.saveWorkflow))
+	mux.HandleFunc("POST /v1/workflows/rollback", server.auth(server.rollbackWorkflow))
 	mux.HandleFunc("GET /v1/workflows", server.auth(server.listWorkflows))
 	mux.HandleFunc("GET /v1/workflows/latest", server.auth(server.latestWorkflowVersion))
 	mux.HandleFunc("GET /v1/workflows/versions", server.auth(server.listWorkflowVersions))
@@ -667,6 +668,70 @@ func (s *V1Server) redrive(w http.ResponseWriter, r *http.Request, rc v1Request)
 		return
 	}
 	writeV1Data(w, rc.id, map[string]any{"redriven": true})
+}
+
+// rollbackCore appends a prior snapshot as the new latest version with the
+// reference's pre-checks: an active parent (a tombstone behaves as
+// not-found for writes too), an org-and-workflow-scoped source version, a
+// well-formed source DAG, and a version-increment conflict surfaced as a
+// retryable 409.
+func (s *V1Server) rollbackCore(r *http.Request, rc v1Request) opResult {
+	var body struct {
+		WorkflowID      string `json:"workflowId"`
+		SourceVersionID string `json:"sourceVersionId"`
+	}
+	if err := decodeBody(r, &body); err != nil || body.WorkflowID == "" || body.SourceVersionID == "" {
+		return opError(http.StatusBadRequest, "workflows_rollback_ids_required",
+			"workflowId and sourceVersionId are required", nil)
+	}
+	ctx := r.Context()
+	q := store.New(s.pool)
+	owner, err := q.GetWorkflowOwnerState(ctx, body.WorkflowID)
+	if err != nil || owner.OrgID != rc.orgID || owner.DeletedAt != nil {
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+		}
+		return opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil)
+	}
+	source, err := q.GetWorkflowVersionByID(ctx, store.GetWorkflowVersionByIDParams{
+		ID: body.SourceVersionID, OrgID: rc.orgID, WorkflowID: body.WorkflowID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return opError(http.StatusNotFound, "workflows_source_version_not_found", "Source version not found", nil)
+		}
+		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+	}
+	if wf, _ := domain.Parse(source.DagJson); wf == nil {
+		return opError(http.StatusUnprocessableEntity, "workflows_version_malformed",
+			"Workflow version is malformed", nil)
+	}
+	version, err := q.CountWorkflowVersions(ctx, store.CountWorkflowVersionsParams{
+		WorkflowID: body.WorkflowID, OrgID: rc.orgID,
+	})
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+	}
+	versionID := s.newID()
+	if err := q.InsertWorkflowVersion(ctx, store.InsertWorkflowVersionParams{
+		ID: versionID, OrgID: rc.orgID, WorkflowID: body.WorkflowID,
+		Version: version + 1, DagJson: source.DagJson,
+		CreatedBy: pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
+	}); err != nil {
+		if strings.Contains(err.Error(), "duplicate key") {
+			return opError(http.StatusConflict, "workflows_rollback_conflict",
+				"Concurrent rollback conflict — please retry", map[string]any{"attempts": 1})
+		}
+		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+	}
+	return opOK(map[string]any{
+		"workflowId": body.WorkflowID, "versionId": versionID,
+		"version": version + 1, "sourceVersion": source.Version,
+	})
+}
+
+func (s *V1Server) rollbackWorkflow(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	writeVersioned(w, rc.id, s.rollbackCore(r, rc))
 }
 
 // replayCore is the shared engine redrive with the reference's replay wire

@@ -485,6 +485,43 @@ func (q *Queries) GetWorkflowOwnerState(ctx context.Context, id string) (GetWork
 	return i, err
 }
 
+const getWorkflowVersionByID = `-- name: GetWorkflowVersionByID :one
+SELECT id, org_id, workflow_id, version, dag_json, created_by, created_at
+FROM workflow_versions
+WHERE id = $1 AND org_id = $2 AND workflow_id = $3
+`
+
+type GetWorkflowVersionByIDParams struct {
+	ID         string
+	OrgID      string
+	WorkflowID string
+}
+
+type GetWorkflowVersionByIDRow struct {
+	ID         string
+	OrgID      string
+	WorkflowID string
+	Version    int32
+	DagJson    json.RawMessage
+	CreatedBy  pgtype.Text
+	CreatedAt  *time.Time
+}
+
+func (q *Queries) GetWorkflowVersionByID(ctx context.Context, arg GetWorkflowVersionByIDParams) (GetWorkflowVersionByIDRow, error) {
+	row := q.db.QueryRow(ctx, getWorkflowVersionByID, arg.ID, arg.OrgID, arg.WorkflowID)
+	var i GetWorkflowVersionByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.WorkflowID,
+		&i.Version,
+		&i.DagJson,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const insertDeadLetter = `-- name: InsertDeadLetter :exec
 INSERT INTO dead_letters (id, org_id, run_id, node_id, attempt, workflow_json, node_json, error_json)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)

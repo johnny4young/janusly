@@ -99,6 +99,11 @@ LIMIT sqlc.arg(page_limit);
 INSERT INTO workflow_versions (id, org_id, workflow_id, version, dag_json, created_by)
 VALUES ($1, $2, $3, $4, $5, $6);
 
+-- name: GetWorkflowVersionByID :one
+SELECT id, org_id, workflow_id, version, dag_json, created_by, created_at
+FROM workflow_versions
+WHERE id = $1 AND org_id = $2 AND workflow_id = $3;
+
 -- name: GetLatestWorkflowVersion :one
 SELECT id, org_id, workflow_id, version, dag_json, created_by, created_at
 FROM workflow_versions

@@ -133,6 +133,7 @@ func (s *V1Server) legacyMutations(mux *http.ServeMux) {
 	alias("POST /resume", s.resumeCore)
 	alias("POST /run/cancel", s.cancelCore)
 	alias("POST /workflows/save", s.saveCore)
+	alias("POST /workflows/rollback", s.rollbackCore)
 	alias("POST /dlq/replay", s.replayCore)
 
 	// Legacy DLQ reads the web keeps on the raw wire by design.

@@ -593,3 +593,14 @@ local. Sin umbral pasa/no-pasa: números para aprender.
   Un binario de probe huérfano estuvo reclamando nodos con executors
   reales y fabricó dos fallos fantasma que perseguí en serio. pkill por
   ruta tras cada probe, siempre.
+
+## 2026-07-30 — rollback (T-034)
+
+- La semántica que importa: el rollback APPENDEA — v3 nace como copia
+  del snapshot de v1, la historia nunca se reescribe. El test verifica
+  que latest tras el rollback lleva el DAG de la versión 1 (dos nodos),
+  no el de la 2.
+- Los cuatro guards de la fuente en orden: ids requeridos, padre activo
+  (el tombstone es not-found para escrituras también — mismo comentario
+  del código Node), fuente org+workflow-scoped, y DAG malformado en 422.
+  El patrón core+dos-wires de T-032 hizo esta ruta casi gratis.

@@ -734,3 +734,61 @@ func TestSoftDeleteTrashRestoreLifecycle(t *testing.T) {
 		t.Fatalf("cross-org delete legacy wire: %v", crossDelete.body)
 	}
 }
+
+func TestRollbackAppendsPriorSnapshotAsNewLatest(t *testing.T) {
+	h := newAPIHarness(t)
+	workflowID := "wf-rb-" + h.org
+	v1doc := makeLinearWorkflow(workflowID)
+	v2doc := map[string]any{
+		"id": workflowID, "name": "API linear v2",
+		"nodes": []any{map[string]any{"id": "only", "type": "noop", "config": map[string]any{}}},
+		"edges": []any{},
+	}
+	h.call("POST", "/workflows/save", v1doc, "")
+	h.call("POST", "/workflows/save", v2doc, "")
+
+	versions := h.call("GET", "/v1/workflows/versions?workflowId="+workflowID, nil, "")
+	items := versions.body["data"].([]any)
+	sourceVersionID := items[1].(map[string]any)["id"].(string) // version 1
+
+	rolled := h.call("POST", "/workflows/rollback", map[string]any{
+		"workflowId": workflowID, "sourceVersionId": sourceVersionID,
+	}, "")
+	if rolled.status != 200 || rolled.body["version"] != float64(3) || rolled.body["sourceVersion"] != float64(1) {
+		t.Fatalf("rollback shape: %v", rolled.body)
+	}
+
+	// The new latest carries version 1's DAG (two nodes), not version 2's.
+	latest := h.call("GET", "/v1/workflows/latest?workflowId="+workflowID, nil, "")
+	dag := latest.body["data"].(map[string]any)["dagJson"].(map[string]any)
+	if len(dag["nodes"].([]any)) != 2 {
+		t.Fatalf("latest must be the rolled-back snapshot: %v", dag)
+	}
+
+	// Guard ladder, legacy wire.
+	missing := h.call("POST", "/workflows/rollback", map[string]any{}, "")
+	if missing.status != 400 || missing.body["code"] != "workflows_rollback_ids_required" {
+		t.Fatalf("ids-required guard: %v", missing.body)
+	}
+	ghost := h.call("POST", "/workflows/rollback", map[string]any{
+		"workflowId": "ghost", "sourceVersionId": sourceVersionID,
+	}, "")
+	if ghost.status != 404 || ghost.body["code"] != "workflow_not_found" {
+		t.Fatalf("unknown parent guard: %v", ghost.body)
+	}
+	wrongSource := h.call("POST", "/workflows/rollback", map[string]any{
+		"workflowId": workflowID, "sourceVersionId": "ghost-version",
+	}, "")
+	if wrongSource.status != 404 || wrongSource.body["code"] != "workflows_source_version_not_found" {
+		t.Fatalf("source guard: %v", wrongSource.body)
+	}
+
+	// A tombstoned parent behaves as not-found for writes too.
+	h.call("DELETE", "/workflows/"+workflowID, nil, "")
+	tombstoned := h.call("POST", "/workflows/rollback", map[string]any{
+		"workflowId": workflowID, "sourceVersionId": sourceVersionID,
+	}, "")
+	if tombstoned.status != 404 || tombstoned.body["code"] != "workflow_not_found" {
+		t.Fatalf("tombstone guard: %v", tombstoned.body)
+	}
+}
