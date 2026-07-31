@@ -16,6 +16,11 @@ retroactively.
 
 ### Changed
 
+- Stable `/v1` API contracts are now organized into side-effect-free domain
+  modules behind one ordered pure manifest and the existing compatibility
+  barrel. OpenAPI generation, runtime aliasing, authorization descriptors, and
+  first-party imports retain the same contract surface while future changes no
+  longer expand one monolithic contract file.
 - Concrete workflow executors now receive node-type-specific configuration
   inferred from the same Zod schemas used at runtime dispatch. The registry is
   compile-time exhaustive for executor-owned node types, while runtime-owned

@@ -1,7 +1,7 @@
 /**
  * Zero-dependency path catalogs for the stable `/v1` API lane.
  *
- * Used by `apps/api/src/api-contracts.ts` and `apps/web/src/api.ts`. Keeping the
+ * Used by `apps/api/src/contracts/*` and `apps/web/src/api.ts`. Keeping the
  * values here prevents the browser transport map from drifting from OpenAPI.
  */
 
