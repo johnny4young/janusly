@@ -832,3 +832,52 @@ local. Sin umbral pasa/no-pasa: números para aprender.
   todos los runs del org. Con el índice alineado: 17× por consulta,
   24× en el escenario (8.2k req/s @ 8ms sobre org poblado). Chip
   upstream con el patrón two-file para el fix en drizzle.
+
+## 2026-07-31 — corte de mitad de ola: estado y divergencias vivas (T-050)
+
+Doce tickets ejecutados de los treinta del goal (T-041, cierres T-003/
+T-004, T-042..T-049 con T-046 adelantado). El registro §9 acumula 146
+filas; esta revisión separa lo VIVO — lo que una decisión de F2 o de
+producción necesita saber — de lo ya resuelto o informativo.
+
+### Divergencias vivas (estado de comportamiento, no hallazgos puntuales)
+
+**Superficie de ingest/trigger**
+- Selector webhook acotado al workflow de la URL (`/v1/webhooks/{id}`)
+  en vez del resolver org-wide por endpointKey de Node.
+- Eventos `buffered` por pausa no tienen backfill-on-resume en el pilot;
+  quedan drenables por el backend Node sobre la misma tabla.
+- Sin rate-limit por trigger (storm guard) ni rollouts baseline/canary.
+
+**Runtime**
+- Redrive avanza `attempts` (rastro de evidencia) donde Node re-arma en
+  1; el evento `node.redriven` es pilot-propio (F05 divergencia aceptada).
+- Semántica de método en redirects es la de Go stdlib (301/302 reescriben
+  todo no-GET/HEAD a GET; fetch solo POST). El strip de credenciales sí
+  es por origen, igual que Node.
+- Tipos de nodo ejecutables: el subconjunto pilot (sin `ai`, `agent`,
+  `mcp_tool`, `subworkflow`, `schedule`, `email_received`, etc.).
+
+**Plataforma**
+- Sin audit rows en ninguna mutación (transversal); sin guardMcpWrite en
+  campañas (llega con T-057).
+- Org-config: solo el subset http; resolución por ejecución de nodo http
+  sin caché de snapshot (revisar si el bench lo señala).
+- Clusters: `recurredAfterRecovery` siempre false (sin substrato de
+  impacto); muestras cap 2000 por superficie.
+- SSE sin cap `streamMaxSubscriptions`.
+- `go_pilot_runs_org_created_id_idx` es mejora local pilot-owned; el fix
+  upstream viaja por chip con el patrón two-file.
+
+### Hallazgos regalados al backend Node (chips abiertos)
+1. Límite de grupos con paréntesis en la gramática de expresiones.
+2. Riesgo de run atascado por orden de declaración en el readiness scan.
+3. `json.parse` mal clusterizado como parse_error por prioridad de reglas.
+4. Índice keyset de runs sin tiebreaker `id` (O(runs-del-org) por página).
+
+### Deuda de proceso saldada en esta ola
+- El estado del plan se voltea en el mismo commit que el código.
+- Capturas de goldens solo vía el stack aislado (nunca pnpm dev/e2e).
+- Integración multi-paquete siempre con `-p 1`.
+- `make migrate` aplica TAMBIÉN la migración del pilot (gap de
+  instalación fresca cerrado).
