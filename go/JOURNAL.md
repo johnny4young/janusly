@@ -938,3 +938,12 @@ producción necesita saber — de lo ya resuelto o informativo.
   detección (fila DLQ) a la verificación (evento run.succeeded), con
   percentile_cont en SQL — la misma semántica de percentil que usa la
   referencia. Sin muestra, la respuesta dice null, nunca cero fingido.
+
+## 2026-07-31 — MCP: tools de lista con paginación keyset (T-056)
+
+- runs.list y workflows.list completan el lado de inspección del
+  servidor MCP reutilizando las mismas queries keyset del API — mismos
+  aggregates, mismo contrato de cursor, cursor malformado degradando a
+  página uno en vez de romper la sesión del agente. El test recorre la
+  paginación real: página de 2 con hasMore y cursor, página siguiente
+  sin solapamiento, filtro por workflow devolviendo exactamente su run.

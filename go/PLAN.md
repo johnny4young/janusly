@@ -707,6 +707,7 @@ el chat publicado.
 | 2026-07-31 | T-053 retention | Sweep de retención mínimo: cascada dura diferida para workflows tombstone con la MISMA CTE atómica de Node (versions + metadata + workflows juntos o nada), ventana default 30d (`JANUSLY_GO_RETENTION_DELETED_WORKFLOWS_DAYS`), corrida horaria en el binario. Divergencia: barrido GLOBAL con una sola ventana (Node barre por org con `retention.deletedWorkflowsDays` del catálogo por tenant); runs/audit huérfanos se toleran igual que Node |
 | 2026-07-31 | T-054 timers masivos | Backlog masivo de timers (ventana de downtime): el sweep drena por LOTES hasta vaciar o gastar el presupuesto por tick (50×40=2000), con FAIRNESS round-robin por run en SQL (`ROW_NUMBER() OVER (PARTITION BY run_id ORDER BY wake_at)` — el primer timer de cada run ordena antes que el segundo de cualquiera) para que un run acaparador no expulse al resto del lote. Conflictos de resume cuentan como progreso (el backlog encogió); cero progreso corta el tick en vez de girar sobre el mismo head-of-line. Probado: 120+3 timers vencidos en dos runs — el primer lote de 50 contiene AMBOS runs y un solo sweep drena los 123 |
 | 2026-07-31 | T-055 north star | `GET /recovery/metrics` (ambos wires): `verifiedRecovery` p50/p90 en ms sobre redrives REALES — dead letter con replay reclamado cuyo run llegó a `succeeded`; duración = fila DLQ (detección) → evento `run.succeeded` (verificación), `percentile_cont` en SQL (misma semántica de percentil que la referencia) + `mttrMs` promedio legacy de compatibilidad. Sin muestra → nulls, nunca ceros fingidos. Probado con el ciclo completo real: fallo → DLQ → upstream sana → redrive → éxito verificado; con muestra 1, p50 == p90 == mttr |
+| 2026-07-31 | T-056 MCP listas | `runs.list` (filtros workflowId/status) + `workflows.list` en el servidor MCP, reutilizando las MISMAS queries keyset del API (`ListRunSummaries`/`ListWorkflowRows` — mismos aggregates: runCount, lastRunStatus, workflowName) con el contrato de página compartido: default 20/max 100, cursor `<iso>|<id>`, cursor malformado = página uno (nunca error), `hasMore` por sobre-lectura de límite+1. Ocho tools totales |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -949,7 +950,7 @@ compactas aquí; el detalle de paridad se lee de la fuente al ejecutar.
 | T-053 | Retention sweep mínimo (`system:retention`: purga workflows tombstone >30d) | F2 | P2 | todo |
 | T-054 | `wait_until` archivo de timers vencidos masivos (lote + fairness) | F2 | P3 | todo |
 | T-055 | Métricas de valor: verifiedRecovery p50/p90 sobre redrives reales | F2 | P2 | done |
-| T-056 | MCP: tools de inspección extra (runs.list, workflows.list) + paginación | F2 | P2 | todo |
+| T-056 | MCP: tools de inspección extra (runs.list, workflows.list) + paginación | F2 | P2 | done |
 | T-057 | MCP: consent gate de escrituras (env + org flag, paridad guardMcpWrite) | F2 | P1 | todo |
 | T-058 | API keyset en eventos: paridad exacta cursores Node↔Go round-trip test | F2 | P1 | todo |
 | T-059 | Idempotencia de `POST /start` (header `Idempotency-Key` opcional) | F2 | P3 | todo |

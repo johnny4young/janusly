@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -32,7 +33,7 @@ type Deps struct {
 	NewID  func() string
 }
 
-// NewServer builds the MCP server with the pilot's six tools registered.
+// NewServer builds the MCP server with the pilot's eight tools registered.
 func NewServer(deps Deps) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "janusly-go",
@@ -83,6 +84,29 @@ func NewServer(deps Deps) *mcp.Server {
 		Description: "Read a run in depth: row, nodes with state and errors, and the recent timeline.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args runArgs) (*mcp.CallToolResult, any, error) {
 		return deps.runInspect(ctx, args.RunID)
+	})
+
+	type pageArgs struct {
+		Limit  int    `json:"limit,omitempty" jsonschema:"maximum rows to return (default 20, max 100)"`
+		Cursor string `json:"cursor,omitempty" jsonschema:"keyset cursor from a previous page's nextCursor"`
+	}
+	type runsListArgs struct {
+		Limit      int    `json:"limit,omitempty" jsonschema:"maximum rows to return (default 20, max 100)"`
+		Cursor     string `json:"cursor,omitempty" jsonschema:"keyset cursor from a previous page's nextCursor"`
+		WorkflowID string `json:"workflowId,omitempty" jsonschema:"only runs of this workflow"`
+		Status     string `json:"status,omitempty" jsonschema:"only runs with this status (running, succeeded, failed, cancelled)"`
+	}
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "runs.list",
+		Description: "List the org's runs newest first, keyset-paginated; optional workflowId and status filters.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args runsListArgs) (*mcp.CallToolResult, any, error) {
+		return deps.runsList(ctx, args.Limit, args.Cursor, args.WorkflowID, args.Status)
+	})
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "workflows.list",
+		Description: "List the org's active workflows newest first, keyset-paginated.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args pageArgs) (*mcp.CallToolResult, any, error) {
+		return deps.workflowsList(ctx, args.Limit, args.Cursor)
 	})
 
 	type dlqListArgs struct {
@@ -344,4 +368,92 @@ func orEmptyObject(raw json.RawMessage) json.RawMessage {
 		return json.RawMessage(`{}`)
 	}
 	return raw
+}
+
+// pageBounds normalizes the shared limit contract (default 20, max 100)
+// and decodes the `<iso>|<id>` keyset cursor; a malformed cursor means
+// page one, never an error — same posture as the HTTP list surfaces.
+func pageBounds(limit int, cursor string) (int32, time.Time, string) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	before := farFuture()
+	beforeID := "￿"
+	if at, id, found := strings.Cut(cursor, "|"); found {
+		if parsed, err := time.Parse(time.RFC3339Nano, at); err == nil {
+			before, beforeID = parsed, id
+		}
+	}
+	return int32(limit), before, beforeID
+}
+
+func (d Deps) runsList(ctx context.Context, limit int, cursor, workflowID, status string) (*mcp.CallToolResult, any, error) {
+	pageLimit, before, beforeID := pageBounds(limit, cursor)
+	rows, err := store.New(d.Pool).ListRunSummaries(ctx, store.ListRunSummariesParams{
+		OrgID: d.OrgID, BeforeCreatedAt: before, BeforeID: beforeID,
+		FilterWorkflowID: pgtype.Text{String: workflowID, Valid: workflowID != ""},
+		FilterStatus:     pgtype.Text{String: status, Valid: status != ""},
+		PageLimit:        pageLimit + 1,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	hasMore := len(rows) > int(pageLimit)
+	if hasMore {
+		rows = rows[:pageLimit]
+	}
+	items := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		item := map[string]any{
+			"runId": row.ID, "status": row.Status,
+			"workflowId": row.WorkflowID.String, "workflowName": row.WorkflowName.String,
+			"createdAt": createdAtISO(row.CreatedAt),
+		}
+		items = append(items, item)
+	}
+	payload := map[string]any{"runs": items, "hasMore": hasMore}
+	if hasMore && len(rows) > 0 {
+		last := rows[len(rows)-1]
+		payload["nextCursor"] = createdAtISO(last.CreatedAt) + "|" + last.ID
+	}
+	return ok(payload)
+}
+
+func (d Deps) workflowsList(ctx context.Context, limit int, cursor string) (*mcp.CallToolResult, any, error) {
+	pageLimit, before, beforeID := pageBounds(limit, cursor)
+	rows, err := store.New(d.Pool).ListWorkflowRows(ctx, store.ListWorkflowRowsParams{
+		OrgID: d.OrgID, BeforeCreatedAt: before, BeforeID: beforeID,
+		PageLimit: pageLimit + 1,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	hasMore := len(rows) > int(pageLimit)
+	if hasMore {
+		rows = rows[:pageLimit]
+	}
+	items := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, map[string]any{
+			"workflowId": row.ID, "name": row.Name,
+			"createdAt": createdAtISO(row.CreatedAt),
+			"runCount":  row.RunCount, "lastRunStatus": row.LastRunStatus,
+		})
+	}
+	payload := map[string]any{"workflows": items, "hasMore": hasMore}
+	if hasMore && len(rows) > 0 {
+		last := rows[len(rows)-1]
+		payload["nextCursor"] = createdAtISO(last.CreatedAt) + "|" + last.ID
+	}
+	return ok(payload)
+}
+
+func createdAtISO(at *time.Time) string {
+	if at == nil {
+		return ""
+	}
+	return at.UTC().Format(time.RFC3339Nano)
 }

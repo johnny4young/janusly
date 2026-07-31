@@ -98,7 +98,7 @@ func TestAgentDrivesFailureRedriveCycleOverMCP(t *testing.T) {
 	for _, tool := range tools.Tools {
 		names[tool.Name] = true
 	}
-	for _, want := range []string{"workflows.save", "runs.start", "runs.status", "runs.inspect", "dlq.list", "dlq.redrive"} {
+	for _, want := range []string{"workflows.save", "runs.start", "runs.status", "runs.inspect", "runs.list", "workflows.list", "dlq.list", "dlq.redrive"} {
 		if !names[want] {
 			t.Fatalf("tool %s missing; got %v", want, names)
 		}
@@ -212,5 +212,52 @@ func TestAgentDrivesFailureRedriveCycleOverMCP(t *testing.T) {
 	ghost, _ := callTool(t, session, "runs.status", map[string]any{"runId": "ghost"})
 	if !ghost.IsError {
 		t.Fatal("unknown run must be an isError result")
+	}
+}
+
+// The inspect list tools paginate by keyset: page one carries nextCursor,
+// page two picks up exactly where it left off, filters narrow runs.
+func TestMcpListToolsPaginate(t *testing.T) {
+	session, _ := newMCPSession(t)
+
+	for i := range 3 {
+		doc := map[string]any{
+			"id":    fmt.Sprintf("mcp-page-%d-%d", i, time.Now().UnixNano()),
+			"name":  fmt.Sprintf("paged %d", i),
+			"nodes": []any{map[string]any{"id": "a", "type": "noop", "config": map[string]any{}}},
+			"edges": []any{},
+		}
+		if res, _ := callTool(t, session, "workflows.save", map[string]any{"workflow": doc}); res.IsError {
+			t.Fatalf("save %d failed", i)
+		}
+		if res, _ := callTool(t, session, "runs.start", map[string]any{"workflow": doc}); res.IsError {
+			t.Fatalf("start %d failed", i)
+		}
+	}
+
+	_, page1 := callTool(t, session, "workflows.list", map[string]any{"limit": 2})
+	rows1 := page1["workflows"].([]any)
+	if len(rows1) != 2 || page1["hasMore"] != true || page1["nextCursor"] == nil {
+		t.Fatalf("page1: %+v", page1)
+	}
+	_, page2 := callTool(t, session, "workflows.list", map[string]any{
+		"limit": 2, "cursor": page1["nextCursor"].(string),
+	})
+	rows2 := page2["workflows"].([]any)
+	if len(rows2) != 1 || page2["hasMore"] != false {
+		t.Fatalf("page2: %+v", page2)
+	}
+	if rows1[0].(map[string]any)["workflowId"] == rows2[0].(map[string]any)["workflowId"] {
+		t.Fatal("pages must not overlap")
+	}
+
+	_, runsPage := callTool(t, session, "runs.list", map[string]any{"limit": 2})
+	if len(runsPage["runs"].([]any)) != 2 || runsPage["hasMore"] != true {
+		t.Fatalf("runs page: %+v", runsPage)
+	}
+	wfID := rows2[0].(map[string]any)["workflowId"].(string)
+	_, filtered := callTool(t, session, "runs.list", map[string]any{"workflowId": wfID})
+	if len(filtered["runs"].([]any)) != 1 || filtered["hasMore"] != false {
+		t.Fatalf("filtered runs: %+v", filtered)
 	}
 }
