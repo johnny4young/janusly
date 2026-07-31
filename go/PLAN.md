@@ -846,3 +846,65 @@ concreto.** Garantías verificadas:
 - Única dependencia externa a la rama: el repositorio mismo (migraciones
   compartidas, contrato OpenAPI, y la rama `develop` como referencia de
   paridad) — que es exactamente lo que cualquier agente ya tiene al clonar.
+
+## 13. Ola 2 — 50 tickets (F0.5 → F1 → F2 temprana)
+
+Protocolo idéntico (§0): secuencial, criterios de aceptación, tests, commit
+por ticket, resumen post-commit, estado en esta tabla. Las cards viven
+compactas aquí; el detalle de paridad se lee de la fuente al ejecutar.
+
+### Tabla de seguimiento — ola 2
+
+| # | Ticket | Fase | Pri | Estado |
+| --- | --- | --- | --- | --- |
+| T-019 | Pool DB configurable + pools separados API/workers + retest 50VU | F0.5 | P0 | todo |
+| T-020 | Reaper de nodos atascados (`running` huérfanos → requeue/fail acotado) | F0.5 | P0 | todo |
+| T-021 | Cancelación de run (`POST /v1/run/cancel`, semántica Node: cancellable statuses) | F0.5 | P0 | todo |
+| T-022 | Recaptura goldens faltantes (save-éxito, dlq-replay) + golden de cancel | F0.5 | P1 | todo |
+| T-023 | Diagnóstico flake delayed-retry + captura de detalle en arnés | F0.5 | P1 | todo |
+| T-024 | Métricas Prometheus del engine (claims, completions, profundidad, latencia) | F0.5 | P1 | todo |
+| T-025 | Lane `make ci` local (build+lint+test+parity, una orden, exit code honesto) | F0.5 | P1 | todo |
+| T-026 | Keyset real en `/v1/runs` + `/v1/workflows` (cursor `<iso>|<id>` Node-compatible) | F0.5 | P0 | todo |
+| T-027 | Rutas workflows read: GET /v1/workflows, /latest, /versions (formas golden) | F1 | P0 | todo |
+| T-028 | Config CORS + headers paridad http.ts (el web browser habla con Go) | F1 | P0 | todo |
+| T-029 | Arranque del web real contra Go: inventario de gaps de la Home/Activity (doc) | F1 | P0 | todo |
+| T-030 | GET /health con forma Node (rateLimiter/queue públicos-seguros) | F1 | P1 | todo |
+| T-031 | SSE `/runs/:id/stream` (pub del engine → hub API; web usa fetch+ReadableStream) | F1 | P0 | todo |
+| T-032 | Rutas /run/usage + /workflows/trash + /workflows/:id/restore (stubs honestos donde aplique) | F1 | P1 | todo |
+| T-033 | Soft-delete de workflows (DELETE /v1/workflows/:id + tombstone + exclusiones) | F1 | P0 | todo |
+| T-034 | Rollback (`POST /v1/workflows/rollback`, pre-checks Node) | F1 | P1 | todo |
+| T-035 | Smoke Playwright del web contra Go (Flows list + Activity + run detail) | F1 | P0 | todo |
+| T-036 | Executor `json.parse` + tool registry mínimo (`listTools()` para AI Studio read) | F2 | P1 | todo |
+| T-037 | `parallel_fork` + `join` (shells declarativos sobre readiness, validación 3 reglas) | F2 | P1 | todo |
+| T-038 | Executor `loop` modo map puro (legacy contract) | F2 | P1 | todo |
+| T-039 | Edge conditions con evaluación completa en validación (`validateExpression` en save) | F2 | P2 | todo |
+| T-040 | Trigger ingest: `POST /v1/webhooks/:workflowId` → startRun con evento normalizado | F2 | P1 | todo |
+| T-041 | `webhook_received` executor passthrough + fixture trigger e2e | F2 | P1 | todo |
+| T-042 | Validación production-mode (readiness gate subset: retries, bounds, secretos) | F2 | P2 | todo |
+| T-043 | Org config subset (`org_configs` read + http bounds por tenant en executor) | F2 | P2 | todo |
+| T-044 | Réplica de `/dlq/counts` + clusters básicos (firma de error agrupada) | F2 | P2 | todo |
+| T-045 | Replay campaigns mínimo (2..N mismos-firma, paced, cancelable) | F2 | P3 | todo |
+| T-046 | Paridad lane A ampliada: F11-F20 (cancel, fork/join, loop, webhook, keyset) | F2 | P0 | todo |
+| T-047 | Postgres 15 floor: lane integración con `JANUSLY_POSTgres_IMAGE` pg15 | F2 | P2 | todo |
+| T-048 | Bench regresión: `make bench` guarda serie temporal en conformance/perf | F2 | P2 | todo |
+| T-049 | Hardening SSRF extra: redirect cross-origin strip de headers credenciales | F2 | P1 | todo |
+| T-050 | Journal ola 2 parcial + revisión de divergencias acumuladas | F2 | P1 | todo |
+| T-051 | Streaming HTTP opt-in (`bodyMode:"stream"` → preview acotado) | F2 | P2 | todo |
+| T-052 | `csv.fetch`/`csv.parse` port (RFC 4180 compartido, bounded sample) | F2 | P2 | todo |
+| T-053 | Retention sweep mínimo (`system:retention`: purga workflows tombstone >30d) | F2 | P2 | todo |
+| T-054 | `wait_until` archivo de timers vencidos masivos (lote + fairness) | F2 | P3 | todo |
+| T-055 | Métricas de valor: verifiedRecovery p50/p90 sobre redrives reales | F2 | P2 | todo |
+| T-056 | MCP: tools de inspección extra (runs.list, workflows.list) + paginación | F2 | P2 | todo |
+| T-057 | MCP: consent gate de escrituras (env + org flag, paridad guardMcpWrite) | F2 | P1 | todo |
+| T-058 | API keyset en eventos: paridad exacta cursores Node↔Go round-trip test | F2 | P1 | todo |
+| T-059 | Idempotencia de `POST /start` (header `Idempotency-Key` opcional) | F2 | P3 | todo |
+| T-060 | Runbook de operación del binario (systemd/launchd, backup, upgrade) | F2 | P2 | todo |
+| T-061 | Fuzzing de gramáticas (go-fuzz corto: expresiones + templates) | F2 | P2 | todo |
+| T-062 | Property tests del queue (invariantes: exactly-once, no-orphan, terminal) | F2 | P2 | todo |
+| T-063 | Paridad de `/v1/dlq` filtros server-side (status, nodeId, workflowId) | F2 | P2 | todo |
+| T-064 | Web: panel DLQ + redrive contra Go (smoke Playwright) | F1+ | P1 | todo |
+| T-065 | Web: aprobar/resume desde la UI contra Go (smoke Playwright) | F1+ | P1 | todo |
+| T-066 | Consolidación: goldens re-run completo + parity F01-F20 verde | F2 | P0 | todo |
+| T-067 | Números ola 2: retest carga con pools nuevos + tabla evolución | F2 | P1 | todo |
+| T-068 | Informe de ola 2 (REPORT-W2.md): estado F1/F2, gaps restantes, riesgo | F2 | P0 | todo |
+
