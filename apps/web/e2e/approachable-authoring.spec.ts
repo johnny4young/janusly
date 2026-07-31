@@ -28,6 +28,7 @@ const locales = {
     streamResponse: 'Stream a bounded preview',
     previewBytes: 'Preview bytes',
     branchStep: 'Branch rule',
+    branchMode: 'Run rule',
     branchExpression: 'Branch expression',
     httpNodeAria: 'Step: Call an API',
     stepScope: 'Step',
@@ -51,6 +52,7 @@ const locales = {
     streamResponse: 'Transmitir una vista previa limitada',
     previewBytes: 'Bytes de vista previa',
     branchStep: 'Regla de rama',
+    branchMode: 'Regla de ejecución',
     branchExpression: 'Expresión de rama',
     httpNodeAria: 'Paso: Llamar a una API',
     stepScope: 'Paso',
@@ -167,6 +169,7 @@ for (const locale of ['en', 'es'] as const) {
 
     await expect(canvas.locator('.react-flow__node')).toHaveCount(2)
     await expect(page.getByRole('button', { name: copy.stepScope, exact: true })).toHaveAttribute('aria-current', 'page')
+    await page.getByLabel(copy.branchMode, { exact: true }).selectOption('advanced')
     const branchExpression = page.getByLabel(copy.branchExpression, { exact: true })
     await expect(branchExpression).toBeVisible()
     await branchExpression.fill('context.input.approved === true')

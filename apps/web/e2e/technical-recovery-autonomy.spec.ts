@@ -3,7 +3,10 @@ import { mkdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { openWorkspaceSection } from './_helpers/workspace-navigation'
+import {
+  openRecoveryAutomation,
+  openWorkspaceSection,
+} from './_helpers/workspace-navigation'
 
 const execFileAsync = promisify(execFile)
 const COMPOSE_FILE = fileURLToPath(new URL('../../../docker-compose.yml', import.meta.url))
@@ -248,6 +251,7 @@ for (const contract of LOCALES) {
       contract.locale === 'en' ? 'Activity' : 'Actividad',
       contract.recover,
     )
+    await openRecoveryAutomation(page)
 
     const card = page.getByTestId('auto-healing-pending-card')
     await expect(card.getByText(contract.eligible, { exact: true })).toBeVisible()

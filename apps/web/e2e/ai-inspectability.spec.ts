@@ -1,4 +1,7 @@
-import { openWorkspaceSection } from './_helpers/workspace-navigation'
+import {
+  openWorkflowOperation,
+  openWorkspaceSection,
+} from './_helpers/workspace-navigation'
 /**
  * Real-stack acceptance for inspectable AI policy and decisions.
  *
@@ -141,6 +144,7 @@ async function openWorkflowMetadata(
     exact: true,
   })
   if (await configure.getAttribute('aria-current') !== 'page') await configure.click()
+  await openWorkflowOperation(page, locale === 'en' ? 'About' : 'Acerca de')
   const panel = page.locator('.we-workflow-metadata-panel')
   await expect(panel).toBeVisible()
   return panel

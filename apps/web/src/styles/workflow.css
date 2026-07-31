@@ -731,7 +731,7 @@
   gap: 6px;
 }
 
-.user-menu__ai-top strong svg { color: var(--we-accent); }
+.user-menu__ai-top strong svg { color: var(--we-accent-text); }
 
 .user-menu__ai-pill {
   display: inline-flex;
@@ -747,7 +747,7 @@
 
 .user-menu__ai-pill--live {
   background: var(--we-accent-soft);
-  color: var(--we-accent);
+  color: var(--we-accent-text);
   border: 1px solid color-mix(in srgb, var(--we-accent) 30%, transparent);
 }
 
@@ -1084,7 +1084,7 @@
 
 .recovery-center-composer__answer-pill--ai {
   background: var(--we-accent-soft);
-  color: var(--we-accent);
+  color: var(--we-accent-text);
   border: 1px solid color-mix(in srgb, var(--we-accent) 30%, transparent);
 }
 
@@ -1190,7 +1190,7 @@
 
 .we-recovery-watch-row__state--ready {
   background: var(--we-accent-soft);
-  color: var(--we-accent);
+  color: var(--we-accent-text);
   border: 1px solid color-mix(in srgb, var(--we-accent) 34%, transparent);
 }
 

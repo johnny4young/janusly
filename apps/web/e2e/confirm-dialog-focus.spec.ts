@@ -9,7 +9,6 @@ type LocaleContract = {
   workflows: string
   allWorkflows: string
   build: string
-  newWorkflow: string
   startBlank: string
   workflowName: string
   dialogTitle: string
@@ -23,7 +22,6 @@ const LOCALES: LocaleContract[] = [
     workflows: 'Workflows',
     allWorkflows: 'All workflows',
     build: 'Build',
-    newWorkflow: 'New workflow',
     startBlank: 'Start blank',
     workflowName: 'Name',
     dialogTitle: 'Unsaved changes',
@@ -35,7 +33,6 @@ const LOCALES: LocaleContract[] = [
     workflows: 'Flujos',
     allWorkflows: 'Todos los flujos',
     build: 'Crear',
-    newWorkflow: 'Nuevo flujo',
     startBlank: 'Empezar vacío',
     workflowName: 'Nombre',
     dialogTitle: 'Cambios sin guardar',
@@ -83,13 +80,13 @@ for (const contract of LOCALES) {
     await expect(page.getByText('dev-user')).toBeVisible()
     await openWorkspaceSection(page, contract.workflows, contract.allWorkflows)
 
-    await page.getByRole('button', { name: contract.newWorkflow, exact: true }).click()
+    await page.locator('button[aria-controls="workflow-creation-choices"]').click()
     await page.getByRole('button', { name: new RegExp(`^${contract.startBlank}`) }).click()
     const workflowName = page.getByRole('textbox', { name: contract.workflowName, exact: true })
     const dirtyName = `Focus contract ${contract.locale} ${Date.now()}`
     await workflowName.fill(dirtyName)
     await openWorkspaceSection(page, contract.workflows, contract.allWorkflows)
-    await page.getByRole('button', { name: contract.newWorkflow, exact: true }).click()
+    await page.locator('button[aria-controls="workflow-creation-choices"]').click()
     const startBlankTrigger = page.getByRole('button', { name: new RegExp(`^${contract.startBlank}`) })
     await startBlankTrigger.click()
 

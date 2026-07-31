@@ -1414,7 +1414,7 @@
 
 .we-cluster-pill--ai_provider {
   background: var(--we-accent-soft);
-  color: var(--we-accent);
+  color: var(--we-accent-text);
 }
 
 .we-cluster-pill--parse_error,
@@ -3149,7 +3149,7 @@ button.we-ops-metric-card--button {
 .we-recovery-evidence__row[data-evidence-kind="memory_entry"] .we-recovery-evidence__kind,
 .we-recovery-evidence__row[data-evidence-kind="runbook_excerpt"] .we-recovery-evidence__kind {
   background: var(--we-accent-soft);
-  color: var(--we-accent);
+  color: var(--we-accent-text);
 }
 
 .we-recovery-evidence__snippet {
@@ -3325,7 +3325,7 @@ button.we-ops-metric-card--button {
 .we-recovery-learning-health[data-state="no_accepted_fix"] .we-recovery-learning-health__icon,
 .we-recovery-learning-health[data-state="not_started"] .we-recovery-learning-health__icon {
   background: var(--we-accent-soft);
-  color: var(--we-accent);
+  color: var(--we-accent-text);
 }
 
 .small-command--primary {
@@ -4991,7 +4991,7 @@ button.we-ops-metric-card--button {
 }
 .we-recovery-center-tile[data-severity="cyan"] .we-recovery-center-tile__icon {
   background: var(--we-accent-soft);
-  color: var(--we-accent);
+  color: var(--we-accent-text);
 }
 
 .we-recovery-center-tile__heading {
@@ -5797,7 +5797,7 @@ button.we-recovery-heatmap__cell:focus-visible {
   border-radius: var(--we-radius-pill);
   border: 1px solid color-mix(in srgb, var(--we-accent) 35%, transparent);
   background: var(--we-accent-soft);
-  color: var(--we-accent);
+  color: var(--we-accent-text);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
