@@ -998,3 +998,13 @@ producción necesita saber — de lo ya resuelto o informativo.
   template renderiza o degrada, nunca revienta. El corpus semilla
   cubre cada operador, los word-operators, unicode y los rotos
   clásicos (paréntesis sin cerrar, strings sin terminar, NULs).
+
+## 2026-07-31 — property tests del queue (T-062)
+
+- Veinticinco DAGs aleatorios con fan-in natural bajo seis workers, y
+  los cuatro invariantes fundacionales verificados directamente contra
+  la base: exactamente-una-vez, orden causal por aristas, cero
+  huérfanos, contabilidad terminal exacta. Los shapes aleatorios
+  complementan los race tests dirigidos del F0 — estos encuentran las
+  formas que nadie pensó dibujar. Seeds fijos: un fallo se reproduce
+  con su número.
