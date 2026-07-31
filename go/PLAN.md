@@ -760,6 +760,7 @@ el chat publicado.
 | 2026-07-31 | T-092 Prometheus paridad | Series con los NOMBRES de la referencia junto a las janusly_go_* propias: `workflow_queue_waiting_jobs`/`_active_jobs` (collector cacheado 5s sobre la MISMA query de elegibilidad de T-091), `janusly_rate_limit_degraded_buckets` (gauge process-global alimentado por transiciones simétricas del tracker), y el Resource OTel renderizado a la manera Prometheus: `target_info{service_name="janusly", service_namespace="janusly", service_instance_id}` (env → HOSTNAME → os.Hostname). Bind 127.0.0.1 y arranque post-migraciones ya existían; conflicto de bind PROBADO con proceso real: exit no-cero, jamás media superficie servida |
 | 2026-07-31 | T-093 lane HA | `make test-ha` (tag `integration && ha`): DOS engines con pools separados sobre la misma base. (1) 75 DAGs de propiedad (25×3 rondas, starts repartidos entre instancias) con los invariantes exactly-once/orden/sin-huérfanos del arnés mono-instancia intactos; (2) una campaña drenada por AMBAS bombas: cada item asentado una vez, cada dead letter de la cohorte con exactamente un claim, UNA sola auditoría de completion (el CAS status='running' elige un ganador); (3) 40 timers de retry masivos (80 wake-ups) sin duplicados ni fugas. Verde ×3 corridas |
 | 2026-07-31 | T-093 hallazgos del arnés | Dos trampas del PROPIO test, no del motor: un literal sin `Edges: []` marshala `null` y el snapshot no re-interpreta (falla instantánea no-reintentable — mismo hallazgo que T-083 desde otro ángulo); y el revive-in-place de un replay contra un target aún muerto acuña dead letters NUEVAS abiertas — el assert de claims debe mirar la cohorte original |
+| 2026-07-31 | T-094 matriz de bombas | Los 5 loops de fondo revisados y probados con gemelo simultáneo: workers (escalera de claim — T-093), bomba de campañas (claim atómico de despacho — T-093), timers (wake-up en la fila — T-093), reaper (el CAS de FailNode elige un ganador — 2 reapers sobre 5 varados = 5 DLQs exactas), retención (DELETEs idempotentes — 2 barridos suman 300/300 sin doble conteo). NINGUNO necesita lease a escala pilot; el RUNBOOK gana la sección HA con la matriz completa y el punto de corte exacto (advisory lock por loop) si el negocio lo pide |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -1057,7 +1058,7 @@ día que exista el chokepoint (T-079)**.
 | T-091 | Health de dos niveles: `/health` público-seguro + `/system/queue` admin (profundidad desde Postgres) | obs | P1 | done |
 | T-092 | Paridad de nombres Prometheus + Resource OTel (`service.name=janusly`, instance id) | obs | P2 | done |
 | T-093 | Lane HA: DOS instancias del engine sobre una base — property + race suites verdes | HA | P0 | done |
-| T-094 | Singletons con lease o prueba de seguridad concurrente por bomba (campañas/retención/timers) | HA | P1 | todo |
+| T-094 | Singletons con lease o prueba de seguridad concurrente por bomba (campañas/retención/timers) | HA | P1 | done |
 | T-095 | Soak: `make soak` (k6 sostenido ≥1h, vigilancia de RSS/goroutines, reporte) | HA | P1 | todo |
 | T-096 | Manifiesto de contrato v1 + OpenAPI generado + guard de deriva en `make ci` | contrato | P1 | todo |
 | T-097 | Lane CI de GitHub Actions para `go/` (build+lint+test+parity con Postgres de servicio) | contrato | P2 | todo |

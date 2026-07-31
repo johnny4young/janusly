@@ -1331,3 +1331,10 @@ producción necesita saber — de lo ya resuelto o informativo.
   wake-ups de retry — exactly-once aguantó todo, tres corridas. Los dos
   fallos del camino eran del arnés (Edges null; el revive-in-place acuña
   DLQs nuevas), y ambos terminaron documentando comportamiento real.
+
+## 2026-07-31 — ningún singleton implícito sin probar (T-094)
+
+- Los cinco loops de fondo, cada uno con su gemelo simultáneo en el lane
+  HA: claims, campañas, timers, reaper y retención. Ninguno necesita
+  lease — y el RUNBOOK ahora dice exactamente dónde cortar si algún día
+  lo necesitan.

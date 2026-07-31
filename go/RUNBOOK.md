@@ -125,3 +125,23 @@ backward-tolerant dentro de la ola (los objetos del pilot solo se añaden).
 | 403 en tools MCP de escritura | El escalón de consent: env primero, luego la fila `mcp.writeConsent` del org |
 | Latencia de lista alta | `ANALYZE runs;` y confirma el índice `go_pilot_runs_org_created_id_idx` |
 | Todo 500 | El DSN: el binario no arranca a medias — si responde, la base era alcanzable al boot |
+
+## HA — múltiples réplicas sobre una base
+
+El binario no tiene singletons con lease: cada loop de fondo es seguro
+con N réplicas por diseño, y el lane `make test-ha` (dos engines, pools
+separados, misma base) lo prueba en cada corrida. La matriz:
+
+| Loop | Estrategia | Prueba |
+| --- | --- | --- |
+| Workers (claims de nodos) | Escalera de claim: `FOR UPDATE SKIP LOCKED` + re-chequeo con snapshot fresco + CAS por transición | 75 DAGs de propiedad con starts repartidos entre instancias (`TestHAPropertyDAGs...`) |
+| Bomba de campañas | Claim de despacho atómico (el UPDATE due empuja `next_dispatch_at`; el segundo corredor re-evalúa y no encuentra fila) + token de claim por item + CAS de asentamiento + CAS de completion | Una campaña drenada por dos bombas: items una vez, una sola auditoría de completion (`TestHACampaignNoDoubleDispatch`) |
+| Timers de retry (wake-ups) | El wake-up vive en la fila; el claim ladder lo consume y la transacción de completion lo borra | 40 nodos × 2 retries entre dos instancias: 80 eventos exactos, cero wake-ups filtrados (`TestHAMassTimers...`) |
+| Reaper de nodos varados | La escritura terminal ES el CAS de `FailNode` — un ganador por nodo | Dos reapers sobre la misma cohorte: 5 dead letters exactas (`TestHAConcurrentReapers...`) |
+| Retención (tombstones + datos + ventanas del limiter) | DELETEs idempotentes por lotes acotados; una réplica gemela solo duplica trabajo, jamás filas | Dos barridos simultáneos: los conteos SUMAN el total sembrado, sin doble conteo (`TestHAConcurrentRetentionSweeps`) |
+
+Trabajo duplicado tolerado: los SELECT de sondeo de cada réplica (acotados
+por el intervalo de poll) y algún lote de retención vacío. A la escala del
+pilot no amerita lease; si el negocio lo pide, el punto de corte es un
+advisory lock `pg_try_advisory_lock` con renovación alrededor de cada
+`Run*`-loop — la matriz de arriba dice exactamente dónde.
