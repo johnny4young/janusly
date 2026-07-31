@@ -1053,7 +1053,7 @@ día que exista el chokepoint (T-079)**.
 | T-083 | `safePersistPayload` formal (redacción por valor + claves + cota de bytes + centinela) | audit | P1 | done |
 | T-084 | Rate limiter en Postgres (fail-open) + observabilidad de degradación | limiter | P0 | done |
 | T-085 | Limiter cableado: API global, storm-guard de triggers, MCP writes 60/min | limiter | P1 | done |
-| T-086 | Catálogo completo de org config (tipado, guards anti-secreto, GET/PUT + audit) | config | P0 | todo |
+| T-086 | Catálogo completo de org config (tipado, guards anti-secreto, GET/PUT + audit) | config | P0 | done |
 | T-087 | Consumidores del snapshot: requireSavedWorkflow, TTLs, ventanas de retención por org | config | P1 | done |
 | T-088 | Retención completa por org: run_events / audit_logs / usage_events (CTE por tabla, acotada) | config | P1 | done |
 | T-089 | Sustrato usage_events + seam de recorder (forma `llm.completion` lista para ola 4) | usage | P1 | done |
@@ -1063,7 +1063,7 @@ día que exista el chokepoint (T-079)**.
 | T-093 | Lane HA: DOS instancias del engine sobre una base — property + race suites verdes | HA | P0 | done |
 | T-094 | Singletons con lease o prueba de seguridad concurrente por bomba (campañas/retención/timers) | HA | P1 | done |
 | T-095 | Soak: `make soak` (k6 sostenido ≥1h, vigilancia de RSS/goroutines, reporte) | HA | P1 | partial |
-| T-096 | Manifiesto de contrato v1 + OpenAPI generado + guard de deriva en `make ci` | contrato | P1 | todo |
+| T-096 | Manifiesto de contrato v1 + OpenAPI generado + guard de deriva en `make ci` | contrato | P1 | done |
 | T-097 | Lane CI de GitHub Actions para `go/` (build+lint+test+parity con Postgres de servicio) | contrato | P2 | done |
 | T-098 | Informe de ola 3 (REPORT-W3.md) + corte de divergencias | cierre | P0 | todo |
 
