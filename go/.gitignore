@@ -1,5 +1,5 @@
 /bin/
 *.prof
-loadgen
-api
-mcp
+/loadgen
+/api
+/mcp
