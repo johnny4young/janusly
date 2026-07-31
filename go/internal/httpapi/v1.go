@@ -28,6 +28,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/engine"
 	"github.com/johnny4young/janusly/go/internal/executors"
 	"github.com/johnny4young/janusly/go/internal/grammar"
+	"github.com/johnny4young/janusly/go/internal/mcpclient"
 	"github.com/johnny4young/janusly/go/internal/orgconfig"
 	"github.com/johnny4young/janusly/go/internal/ratelimit"
 	"github.com/johnny4young/janusly/go/internal/store"
@@ -43,6 +44,7 @@ type V1Server struct {
 	limiter        *ratelimit.Limiter
 	limiterTracker *ratelimit.Tracker
 	queueCache     *queueHealthCache
+	mcp            *mcpclient.Client
 }
 
 // NewV1Handler mounts the v1 routes plus /healthz.
@@ -53,6 +55,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 		OnError: server.limiterTracker.RecordError, OnSuccess: server.limiterTracker.RecordRecovery,
 	})
 	server.queueCache = &queueHealthCache{read: server.readQueueSnapshot}
+	server.mcp = mcpclient.New(pool, server.limiter)
 	go server.hub.listen(context.Background(), pool)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -138,6 +141,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	server.mountSystemHealthRoutes(mux)
 	server.mountAiGenerateRoutes(mux)
 	server.mountPromptRoutes(mux)
+	server.mountMcpRoutes(mux)
 	server.mountAiPatchRoutes(mux)
 	return WithBrowserHeaders(mux)
 }

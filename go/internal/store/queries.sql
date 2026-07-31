@@ -1032,3 +1032,9 @@ JOIN mcp_tool_descriptors d ON d.connection_id = c.id
 WHERE c.org_id = $1 AND c.enabled = true AND c.expose_to_ai = true
   AND d.enabled = true AND d.expose_to_ai = true
 ORDER BY c.alias, d.name;
+
+-- name: UpdateMcpToolFlags :one
+UPDATE mcp_tool_descriptors
+SET enabled = $3, write_side = $4, rate_limit_per_min = $5, expose_to_ai = $6, updated_at = now()
+WHERE connection_id = $1 AND name = $2
+RETURNING *;

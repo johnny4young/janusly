@@ -4285,6 +4285,48 @@ func (q *Queries) SweepDueWakeups(ctx context.Context) (int64, error) {
 	return result.RowsAffected(), nil
 }
 
+const updateMcpToolFlags = `-- name: UpdateMcpToolFlags :one
+UPDATE mcp_tool_descriptors
+SET enabled = $3, write_side = $4, rate_limit_per_min = $5, expose_to_ai = $6, updated_at = now()
+WHERE connection_id = $1 AND name = $2
+RETURNING id, connection_id, name, description, input_schema, write_side, enabled, rate_limit_per_min, expose_to_ai, created_at, updated_at
+`
+
+type UpdateMcpToolFlagsParams struct {
+	ConnectionID    string
+	Name            string
+	Enabled         bool
+	WriteSide       bool
+	RateLimitPerMin pgtype.Int4
+	ExposeToAi      bool
+}
+
+func (q *Queries) UpdateMcpToolFlags(ctx context.Context, arg UpdateMcpToolFlagsParams) (McpToolDescriptor, error) {
+	row := q.db.QueryRow(ctx, updateMcpToolFlags,
+		arg.ConnectionID,
+		arg.Name,
+		arg.Enabled,
+		arg.WriteSide,
+		arg.RateLimitPerMin,
+		arg.ExposeToAi,
+	)
+	var i McpToolDescriptor
+	err := row.Scan(
+		&i.ID,
+		&i.ConnectionID,
+		&i.Name,
+		&i.Description,
+		&i.InputSchema,
+		&i.WriteSide,
+		&i.Enabled,
+		&i.RateLimitPerMin,
+		&i.ExposeToAi,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateOrgMemberRole = `-- name: UpdateOrgMemberRole :execrows
 UPDATE org_members SET role = $3
 WHERE org_id = $1 AND user_id = $2

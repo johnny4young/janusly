@@ -69,6 +69,10 @@ var routeAuthz = map[string]routeGate{
 	"POST /ai/generate-workflow": {auth.RoleViewer, "ai.write"},
 	"POST /ai/patch-workflow":    {auth.RoleEditor, "ai.write"},
 
+	// MCP connections admin surface (reference pairs verbatim).
+	"POST /mcp/connections":                          {auth.RoleAdmin, "mcp.connections.write"},
+	"POST /mcp/connections/{alias}/tools/{toolName}": {auth.RoleAdmin, "mcp.connections.write"},
+
 	// PromptOps registry (reference pairs: read for all, write editor+).
 	"GET /prompts":                                {auth.RoleViewer, "prompts.read"},
 	"POST /prompts":                               {auth.RoleViewer, "prompts.write"},

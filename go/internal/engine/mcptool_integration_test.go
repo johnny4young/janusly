@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,6 +98,60 @@ func TestMcpToolNodeThroughRun(t *testing.T) {
 		AND type IN ('mcp_tool.started','mcp_tool.completed')`, runID).Scan(&events)
 	if events != 2 {
 		t.Fatalf("event family: %d", events)
+	}
+
+	// Validation replay: the READ-ONLY tool still executes for real
+	// (dry-run skips write-side only) — the admin's read-only marking is
+	// what lets validation produce real signal.
+	dryWf := &domain.Workflow{
+		ID: "wf-mcp-dry", Name: "MCP", DSLVersion: "1.0",
+		Nodes: []domain.Node{{ID: "m", Type: "mcp_tool", Config: map[string]any{
+			"connectionAlias": "fixture", "toolName": "saluda",
+			"input": map[string]any{"name": "sombra"},
+		}}},
+		Edges: []domain.Edge{},
+	}
+	runID, err = eng.StartRun(ctx, StartInput{OrgID: org, Workflow: dryWf, ReplayMode: "validation"})
+	if err != nil {
+		t.Fatalf("start dry: %v", err)
+	}
+	waitRunStatus(t, pool, runID, "succeeded", 0)
+	raw = nil
+	_ = pool.QueryRow(ctx, `SELECT state_json FROM run_nodes WHERE run_id = $1 AND node_id = 'm'`, runID).Scan(&raw)
+	state = struct {
+		Output struct {
+			Status string         `json:"status"`
+			Output map[string]any `json:"output"`
+		} `json:"output"`
+	}{}
+	_ = json.Unmarshal(raw, &state)
+	if state.Output.Output["text"] != "hola sombra" || state.Output.Output["skipped"] == true {
+		t.Fatalf("read-only tool must EXECUTE in validation: %s", raw)
+	}
+
+	// And a write-side descriptor SKIPS in the same validation mode.
+	if _, err := pool.Exec(ctx, `UPDATE mcp_tool_descriptors SET write_side = true WHERE connection_id = $1`, connID); err != nil {
+		t.Fatal(err)
+	}
+	runID, err = eng.StartRun(ctx, StartInput{OrgID: org, Workflow: &domain.Workflow{
+		ID: "wf-mcp-dry-write", Name: "MCP", DSLVersion: "1.0",
+		Nodes: []domain.Node{{ID: "m", Type: "mcp_tool", Config: map[string]any{
+			"connectionAlias": "fixture", "toolName": "saluda",
+			"input": map[string]any{"name": "x"},
+		}}},
+		Edges: []domain.Edge{},
+	}, ReplayMode: "validation"})
+	if err != nil {
+		t.Fatalf("start dry write: %v", err)
+	}
+	waitRunStatus(t, pool, runID, "succeeded", 0)
+	raw = nil
+	_ = pool.QueryRow(ctx, `SELECT state_json FROM run_nodes WHERE run_id = $1 AND node_id = 'm'`, runID).Scan(&raw)
+	if !strings.Contains(string(raw), `"skipped":true`) && !strings.Contains(string(raw), `"skipped": true`) {
+		t.Fatalf("write-side tool must SKIP in validation: %s", raw)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE mcp_tool_descriptors SET write_side = false WHERE connection_id = $1`, connID); err != nil {
+		t.Fatal(err)
 	}
 
 	// A missing tool fails through the ordinary node-failure path.

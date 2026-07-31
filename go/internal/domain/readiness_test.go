@@ -82,3 +82,43 @@ func TestWellPairedForkJoinIsClean(t *testing.T) {
 		t.Fatalf("well-paired fork/join must be clean: %+v", issues)
 	}
 }
+
+// mcp_tool is write-side BY DEFAULT (the workflow JSON only carries
+// alias+tool; the real writeSide flag lives on the API-side descriptor
+// table): without an approval ancestor the gate flags it, with one it
+// stays quiet. False positives cost an ignorable suggestion; false
+// negatives would miss a real external write.
+func TestReadinessMcpToolApprovalGate(t *testing.T) {
+	bare := &Workflow{
+		ID: "wf", Name: "w", DSLVersion: "1.0",
+		Nodes: []Node{{ID: "m", Type: "mcp_tool", Config: map[string]any{
+			"connectionAlias": "crm", "toolName": "contacts.update",
+		}}},
+		Edges: []Edge{},
+	}
+	found := false
+	for _, issue := range CheckWorkflowReadiness(bare, ReadinessOptions{}).Issues {
+		if issue.Code == "sensitive_action_missing_approval" && issue.NodeID == "m" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("mcp_tool without approval must flag as write-side by default")
+	}
+
+	gated := &Workflow{
+		ID: "wf", Name: "w", DSLVersion: "1.0",
+		Nodes: []Node{
+			{ID: "a", Type: "approval", Config: map[string]any{}},
+			{ID: "m", Type: "mcp_tool", Config: map[string]any{
+				"connectionAlias": "crm", "toolName": "contacts.update",
+			}},
+		},
+		Edges: []Edge{{From: "a", To: "m"}},
+	}
+	for _, issue := range CheckWorkflowReadiness(gated, ReadinessOptions{}).Issues {
+		if issue.Code == "sensitive_action_missing_approval" && issue.NodeID == "m" {
+			t.Fatal("approval ancestor must satisfy the gate")
+		}
+	}
+}
