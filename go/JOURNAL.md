@@ -1128,3 +1128,17 @@ producción necesita saber — de lo ya resuelto o informativo.
   exactamente lo que el SDK de Node hace por dentro, sin arrastrar un
   SDK. De paso el 401 del pilot adoptó la forma real del dispatcher
   Node; la nuestra era inventada.
+
+## 2026-07-31 — modo Supabase de punta a punta (T-070)
+
+- El caso de seguridad central quedó probado con datos reales: un
+  usuario que EXISTE en dos orgs no entra a un tercero por mucho hint
+  que mande — el hint selecciona, la fila org_members autoriza. Y el
+  hint-less ambiguo (dos membresías) obliga al cliente a declarar org,
+  exactamente como la referencia.
+- El backfill perezoso de huérfanos legacy funciona como cuenta la
+  fuente: la fila sembrada con el email como placeholder se reescribe
+  al UUID real en el primer sign-in y el rol viaja intacto.
+- El end-to-end por el middleware usa un Supabase falso vía env — el
+  mismo binario, la misma cadena, un JWT válido lee el API y uno
+  forjado recibe el 401 con la forma exacta del dispatcher Node.

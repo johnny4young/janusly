@@ -457,6 +457,38 @@ func (q *Queries) FindOpenDeadLetterForNode(ctx context.Context, arg FindOpenDea
 	return id, err
 }
 
+const findOrgMemberByEmail = `-- name: FindOrgMemberByEmail :one
+SELECT id, org_id, user_id, role FROM org_members
+WHERE org_id = $1 AND lower(email) = lower($2)
+`
+
+type FindOrgMemberByEmailParams struct {
+	OrgID string
+	Lower string
+}
+
+type FindOrgMemberByEmailRow struct {
+	ID     string
+	OrgID  string
+	UserID string
+	Role   string
+}
+
+// Legacy-orphan lazy backfill: rows seeded with userId = email before
+// invite-acceptance shipped migrate to the real provider UUID on first
+// authenticated sign-in.
+func (q *Queries) FindOrgMemberByEmail(ctx context.Context, arg FindOrgMemberByEmailParams) (FindOrgMemberByEmailRow, error) {
+	row := q.db.QueryRow(ctx, findOrgMemberByEmail, arg.OrgID, arg.Lower)
+	var i FindOrgMemberByEmailRow
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.UserID,
+		&i.Role,
+	)
+	return i, err
+}
+
 const findStalledRunningNodes = `-- name: FindStalledRunningNodes :many
 SELECT rn.id, rn.run_id, rn.node_id, COALESCE(rn.attempts, 1)::int AS attempt
 FROM run_nodes rn
@@ -2616,6 +2648,25 @@ func (q *Queries) MarkWaitingNodeSucceeded(ctx context.Context, arg MarkWaitingN
 	var id string
 	err := row.Scan(&id)
 	return id, err
+}
+
+const migrateOrgMemberUserID = `-- name: MigrateOrgMemberUserID :execrows
+UPDATE org_members SET user_id = $3
+WHERE id = $1 AND org_id = $2
+`
+
+type MigrateOrgMemberUserIDParams struct {
+	ID     string
+	OrgID  string
+	UserID string
+}
+
+func (q *Queries) MigrateOrgMemberUserID(ctx context.Context, arg MigrateOrgMemberUserIDParams) (int64, error) {
+	result, err := q.db.Exec(ctx, migrateOrgMemberUserID, arg.ID, arg.OrgID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const notifyRunEvents = `-- name: NotifyRunEvents :exec

@@ -355,3 +355,40 @@ func (h *apiHarness) callWithHeaders(method, path string, body any, org string, 
 	_ = json.NewDecoder(res.Body).Decode(&parsed)
 	return apiResponse{status: res.StatusCode, headers: res.Header, body: parsed}
 }
+
+// Supabase mode end to end through the real middleware: a valid JWT with a
+// membership grant reads the API; a forged one gets the reference's 401.
+func TestSupabaseModeThroughTheMiddleware(t *testing.T) {
+	fakeSb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/auth/v1/user" && r.Header.Get("Authorization") == "Bearer live-token" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"uuid-mw","email":"mw@example.com"}`))
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer fakeSb.Close()
+	t.Setenv("SUPABASE_URL", fakeSb.URL)
+	t.Setenv("SUPABASE_SERVICE_ROLE_KEY", "anon")
+
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO org_members (id, org_id, user_id, email, role)
+		 VALUES ($1, $2, 'uuid-mw', 'mw@example.com', 'editor')`,
+		h.org+"-mw-member", h.org); err != nil {
+		t.Fatalf("seed member: %v", err)
+	}
+
+	res := h.callWithHeaders("GET", "/v1/runs", nil, "", map[string]string{
+		"Authorization": "Bearer live-token",
+	})
+	if res.status != 200 {
+		t.Fatalf("granted JWT must read: %d %+v", res.status, res.body)
+	}
+
+	forged := h.callWithHeaders("GET", "/v1/runs", nil, "", map[string]string{
+		"Authorization": "Bearer forged",
+	})
+	requireError(t, forged, 401, "server_request_failed", "Unauthorized: missing Supabase JWT or dev headers")
+}

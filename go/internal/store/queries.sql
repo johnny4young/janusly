@@ -674,3 +674,14 @@ WHERE org_id = $1 AND user_id = $2;
 SELECT id, org_id, user_id, role FROM org_members
 WHERE user_id = $1
 ORDER BY created_at, id;
+
+-- Legacy-orphan lazy backfill: rows seeded with userId = email before
+-- invite-acceptance shipped migrate to the real provider UUID on first
+-- authenticated sign-in.
+-- name: FindOrgMemberByEmail :one
+SELECT id, org_id, user_id, role FROM org_members
+WHERE org_id = $1 AND lower(email) = lower($2);
+
+-- name: MigrateOrgMemberUserID :execrows
+UPDATE org_members SET user_id = $3
+WHERE id = $1 AND org_id = $2;

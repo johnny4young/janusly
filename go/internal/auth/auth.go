@@ -72,6 +72,7 @@ type Context struct {
 type principal struct {
 	providerName       Mode
 	providerUserID     string
+	providerUserEmail  string
 	providerOrgHint    string
 	declaredSource     Source
 	serviceTokenSuffix string
@@ -164,11 +165,12 @@ func (rv *Resolver) extract(ctx context.Context, r *http.Request) *principal {
 		if header := r.Header.Get("Authorization"); strings.HasPrefix(header, "Bearer ") &&
 			!constantTimeBearerMatch(header, rv.serviceToken) {
 			token := strings.TrimPrefix(header, "Bearer ")
-			if userID, _, ok := rv.verifySupabase(ctx, token); ok {
+			if userID, email, ok := rv.verifySupabase(ctx, token); ok {
 				return &principal{
-					providerName:    ModeSupabase,
-					providerUserID:  userID,
-					providerOrgHint: strings.TrimSpace(r.Header.Get("x-org-id")),
+					providerName:      ModeSupabase,
+					providerUserID:    userID,
+					providerUserEmail: email,
+					providerOrgHint:   strings.TrimSpace(r.Header.Get("x-org-id")),
 					// Hardcoded: a browser cannot self-declare MCP.
 					declaredSource: SourceWeb,
 				}
@@ -269,6 +271,30 @@ func (rv *Resolver) resolveSupabaseMembership(ctx context.Context, q *store.Quer
 		}
 		if !errorsIsNoRows(err) {
 			return nil, err
+		}
+		// Step 2 — legacy-orphan lazy backfill: a pre-invite-acceptance row
+		// seeded userId with the EMAIL as placeholder; on first real
+		// sign-in, rewrite it to the provider UUID and accept the grant.
+		// (The member.userid.migrated audit row lands with the audit
+		// retrofit ticket.)
+		if p.providerUserEmail != "" {
+			byEmail, err := q.FindOrgMemberByEmail(ctx, store.FindOrgMemberByEmailParams{
+				OrgID: p.providerOrgHint, Lower: p.providerUserEmail,
+			})
+			if err == nil && byEmail.UserID != p.providerUserID && strings.Contains(byEmail.UserID, "@") {
+				if _, err := q.MigrateOrgMemberUserID(ctx, store.MigrateOrgMemberUserIDParams{
+					ID: byEmail.ID, OrgID: p.providerOrgHint, UserID: p.providerUserID,
+				}); err != nil {
+					return nil, err
+				}
+				return &Context{
+					OrgID: p.providerOrgHint, UserID: p.providerUserID,
+					Mode: ModeSupabase, Source: SourceWeb, MembershipRole: byEmail.Role,
+				}, nil
+			}
+			if err != nil && !errorsIsNoRows(err) {
+				return nil, err
+			}
 		}
 		return nil, nil // hint without a grant fails closed
 	}
