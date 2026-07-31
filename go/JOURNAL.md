@@ -1298,3 +1298,9 @@ producción necesita saber — de lo ya resuelto o informativo.
   hold, shape con `cappedByMaxBatches`), y una lección de rendimiento:
   enumerar orgs por los pisos del catálogo convirtió 40 s de barrido en
   milisegundos — una org sin datos viejos ni entra al loop.
+
+## 2026-07-31 — la tubería de telemetría antes del primer token (T-089)
+
+- El seam de usage con el contrato exacto de la referencia y un Fire que
+  absorbe todo (error, pánico, org ausente) — cuando llegue el LlmClient
+  en ola 4, la telemetría ya lo espera.

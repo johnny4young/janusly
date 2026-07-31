@@ -1546,6 +1546,35 @@ func (q *Queries) InsertTriggerEvent(ctx context.Context, arg InsertTriggerEvent
 	return result.RowsAffected(), nil
 }
 
+const insertUsageEvent = `-- name: InsertUsageEvent :exec
+INSERT INTO usage_events (id, org_id, user_id, run_id, metric, quantity, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+`
+
+type InsertUsageEventParams struct {
+	ID       string
+	OrgID    string
+	UserID   pgtype.Text
+	RunID    pgtype.Text
+	Metric   string
+	Quantity int32
+	Metadata json.RawMessage
+}
+
+// One LLM usage row per attempt (the telemetry chokepoint's writer).
+func (q *Queries) InsertUsageEvent(ctx context.Context, arg InsertUsageEventParams) error {
+	_, err := q.db.Exec(ctx, insertUsageEvent,
+		arg.ID,
+		arg.OrgID,
+		arg.UserID,
+		arg.RunID,
+		arg.Metric,
+		arg.Quantity,
+		arg.Metadata,
+	)
+	return err
+}
+
 const insertWorkflow = `-- name: InsertWorkflow :exec
 
 INSERT INTO workflows (id, org_id, name, created_by)

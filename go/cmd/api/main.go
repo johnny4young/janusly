@@ -22,6 +22,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/grammar"
 	"github.com/johnny4young/janusly/go/internal/httpapi"
 	"github.com/johnny4young/janusly/go/internal/migrate"
+	"github.com/johnny4young/janusly/go/internal/usage"
 )
 
 const shutdownGrace = 10 * time.Second
@@ -77,6 +78,10 @@ func run() error {
 	if err := boot.ProbeMigrations(ctx, pool); err != nil {
 		return err
 	}
+	// Process-global LLM telemetry recorder (the reference's
+	// setUsageRecorder(recordUsage) boot step) — registered before any
+	// surface that could fire an LLM call.
+	usage.SetRecorder(usage.NewDBRecorder(pool))
 	logger.Info("boot", "port", cfg.Port, "internal_port", cfg.InternalPort)
 
 	// The pilot ships as one binary: the API process also runs the worker

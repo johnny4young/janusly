@@ -858,3 +858,8 @@ SELECT DISTINCT org_id FROM (
 -- layer chain in memory instead of one config query per org/table.
 -- name: ListRetentionConfigRows :many
 SELECT org_id, key, value_json FROM org_configs WHERE key LIKE 'retention.%';
+
+-- One LLM usage row per attempt (the telemetry chokepoint's writer).
+-- name: InsertUsageEvent :exec
+INSERT INTO usage_events (id, org_id, user_id, run_id, metric, quantity, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7);
