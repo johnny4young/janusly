@@ -2065,12 +2065,19 @@ button.we-ops-metric-card--button {
 
 .we-ops-cost-table {
   width: 100%;
+  min-width: max-content;
   border-collapse: collapse;
   font-size: 12px;
   margin-top: 8px;
 }
 
+.we-settings-usage {
+  min-width: 0;
+}
+
 .we-ops-cost-table-wrap {
+  max-width: 100%;
+  min-width: 0;
   overflow-x: auto;
 }
 
@@ -2299,6 +2306,7 @@ button.we-ops-metric-card--button {
 .we-operations-page__content {
   display: grid;
   gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
 }
 

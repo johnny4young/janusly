@@ -31,7 +31,11 @@ import { type LlmClient } from "@janusly/ai";
 import { validateWorkflow, type WorkflowValidationIssue } from "@janusly/engine/src/workflow-validation";
 import { WorkflowSchema, type NodeType, type Workflow } from "@janusly/shared";
 
-import { extractJsonObject, parseGeneratedWorkflow } from "./ai-generate-freejson";
+import {
+  extractJsonObject,
+  missingPromptTemplateReferences,
+  parseGeneratedWorkflow,
+} from "./ai-generate-freejson";
 import { sanitizeAiWorkflow } from "./ai-runtime";
 
 /** Max directed repair attempts before degrading to the deterministic fallback. */
@@ -136,6 +140,7 @@ export function composeRepairPrompt(
   originalPrompt: string,
   brokenWorkflow: Workflow,
   issues: WorkflowValidationIssue[],
+  missingReferences: readonly string[] = [],
 ): string {
   const issueLines = issues
     .map((issue) => {
@@ -159,6 +164,13 @@ export function composeRepairPrompt(
     "",
     "Validator issues to fix (each is a hard error):",
     issueLines,
+    ...(missingReferences.length > 0
+      ? [
+          "",
+          "Machine references that must survive byte-for-byte:",
+          ...missingReferences.map((reference) => `- ${reference}`),
+        ]
+      : []),
     "",
     "Broken workflow (JSON):",
     JSON.stringify(brokenWorkflow),
@@ -188,7 +200,13 @@ export async function repairGeneratedWorkflow(input: RepairInput): Promise<Repai
     // The sanitizer's throw only carries a joined message; re-derive the
     // structured issues (same options the sanitizer uses) for the prompt.
     const issues = validateWorkflow(current, { strictToolInputs: false }).issues;
-    const prompt = composeRepairPrompt(originalPrompt, current, issues);
+    const missingReferences = missingPromptTemplateReferences(originalPrompt, current);
+    const prompt = composeRepairPrompt(
+      originalPrompt,
+      current,
+      issues,
+      missingReferences,
+    );
 
     const result = await llm.generateText({
       system,
@@ -209,6 +227,17 @@ export async function repairGeneratedWorkflow(input: RepairInput): Promise<Repai
 
     try {
       const workflow = sanitizeAiWorkflow(parsed);
+      const omittedReferences = missingPromptTemplateReferences(
+        originalPrompt,
+        workflow,
+      );
+      if (omittedReferences.length > 0) {
+        lastError = new Error(
+          "workflow repair omitted operator-supplied machine references",
+        );
+        current = parsed;
+        continue;
+      }
       return { workflow, model: result.model, provider: result.provider, repairAttempts: attempt };
     } catch (err) {
       // Still invalid — feed THIS reply's issues into the next round.

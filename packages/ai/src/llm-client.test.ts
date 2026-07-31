@@ -111,6 +111,29 @@ describe("resolveLlmConfig", () => {
     expect(cfg!.defaultModels.anthropic).toBe("claude-sonnet-4-5");
   });
 
+  it("defaults and overrides the hard output-token ceiling", () => {
+    const defaults = resolveLlmConfig({
+      ANTHROPIC_API_KEY: "sk-ant-x",
+    } as NodeJS.ProcessEnv);
+    const configured = resolveLlmConfig({
+      ANTHROPIC_API_KEY: "sk-ant-x",
+      JANUSLY_LLM_MAX_OUTPUT_UNITS: "2048",
+    } as NodeJS.ProcessEnv);
+
+    expect(defaults!.maxOutputTokens).toBe(4096);
+    expect(configured!.maxOutputTokens).toBe(2048);
+  });
+
+  it("rejects malformed direct env output limits back to the safe default", () => {
+    for (const value of ["NaN", "255", "16385", "2048.5"]) {
+      const cfg = resolveLlmConfig({
+        ANTHROPIC_API_KEY: "sk-ant-x",
+        JANUSLY_LLM_MAX_OUTPUT_UNITS: value,
+      } as NodeJS.ProcessEnv);
+      expect(cfg!.maxOutputTokens).toBe(4096);
+    }
+  });
+
   it("preserves an explicit Anthropic-compatible proxy base URL", () => {
     const cfg = resolveLlmConfig({
       ANTHROPIC_API_KEY: "local-key",
@@ -191,6 +214,7 @@ describe("createLlmClient — happy paths", () => {
     expect(opts.model).toBeDefined();
     expect(opts.prompt).toBe("hi");
     expect(opts.maxRetries).toBe(2);
+    expect(opts.maxOutputTokens).toBe(4096);
     expect(opts.abortSignal).toBeInstanceOf(AbortSignal);
     expect(result).toMatchObject({
       text: "hello world",

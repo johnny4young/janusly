@@ -131,6 +131,18 @@ const PROVIDERS: Record<string, ProviderSpec> = {
   // Add a new provider here. e.g. ollama / mistral / google. Four fields.
 };
 
+function boundedInteger(
+  raw: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed >= minimum && parsed <= maximum
+    ? parsed
+    : fallback;
+}
+
 // ─── (b) Public types ────────────────────────────────────────────────────
 
 /** Input accepted by `LlmClient.generateText`. */
@@ -305,6 +317,8 @@ export type ResolvedLlmConfig = {
   timeoutMs: number;
   /** AI SDK-built-in retry on rate-limit + 5xx. */
   maxRetries: number;
+  /** Hard output ceiling forwarded to every provider call. */
+  maxOutputTokens: number;
 };
 
 // ─── (c) Factory ─────────────────────────────────────────────────────────
@@ -372,6 +386,12 @@ export function resolveLlmConfig(env: NodeJS.ProcessEnv): ResolvedLlmConfig | nu
     simulatedProviders,
     timeoutMs: Number(env.OPENAI_TIMEOUT_MS ?? 30_000),
     maxRetries: Number(env.OPENAI_MAX_RETRIES ?? 2),
+    maxOutputTokens: boundedInteger(
+      env.JANUSLY_LLM_MAX_OUTPUT_UNITS,
+      4_096,
+      256,
+      16_384,
+    ),
   };
 }
 
@@ -459,6 +479,7 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
           system: buildSystemPrompt(providerName, input.system, input.cacheSystemPrompt),
           prompt: input.prompt,
           maxRetries: cfg.maxRetries,
+          maxOutputTokens: cfg.maxOutputTokens,
           abortSignal: AbortSignal.timeout(cfg.timeoutMs),
         });
       } catch (error) {
@@ -536,6 +557,7 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
           system: buildSystemPrompt(providerName, input.system, input.cacheSystemPrompt),
           prompt: input.prompt,
           maxRetries: cfg.maxRetries,
+          maxOutputTokens: cfg.maxOutputTokens,
           abortSignal: AbortSignal.timeout(cfg.timeoutMs),
           // `Output.object({ schema })` plumbs the JSON Schema through the
           // provider's structured-output capability and validates the

@@ -335,6 +335,17 @@ export const ORG_CONFIG_DEFINITIONS = [
     min: 0,
   },
   {
+    key: "ai.maxOutputUnits",
+    category: "ai",
+    description:
+      "Maximum output tokens allowed for one LLM provider call. Bounds spend and oversized replies without changing the provider-specific prompt contract.",
+    valueType: "number",
+    defaultValue: 4_096,
+    envKeys: ["JANUSLY_LLM_MAX_OUTPUT_UNITS"],
+    min: 256,
+    max: 16_384,
+  },
+  {
     key: "ai.promptMaxChars",
     category: "ai",
     description: "Maximum prompt length accepted by AI endpoints.",

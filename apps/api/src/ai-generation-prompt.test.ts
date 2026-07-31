@@ -67,6 +67,9 @@ describe("generate-workflow system prompt", () => {
     expect(promptsSource).toContain("emit the tool name AND any required-field values the operator gave VERBATIM");
     expect(promptsSource).toContain("Tool input examples must match the runtime tool registry");
     expect(promptsSource).toContain("credential: slack_ops text: deploy started");
+    expect(promptsSource).toContain("MACHINE-REFERENCE RULE");
+    expect(promptsSource).toContain("{{secret.BILLING_API_TOKEN}}");
+    expect(promptsSource).toContain("headers?: { [name:string]: string }, body?: JSON");
     expect(promptsSource).not.toContain("channel: #ops");
     expect(promptsSource).toContain("NEVER invent realistic-looking values");
     expect(promptsSource).toContain("the operator finishes in the Inspector");

@@ -353,10 +353,6 @@ const AiJoinNode = z.object({
 // a missing retry instead of a dead generation.
 const AiRetryConfigDraft = AiRetryConfig.optional().catch(undefined);
 
-const AiHttpNodeFreeJson = AiHttpNode.extend({
-  config: AiHttpConfigBase.extend({ retry: AiRetryConfigDraft }),
-});
-
 // Free-JSON tool inputs allow ONE extra nesting level beyond the constrained
 // scalars: arrays of flat objects and objects of flat objects, so real tool inputs
 // like `workingHours: [{ days: [1,2,3,4,5], start: "09:00", end: "17:00" }]`
@@ -371,6 +367,18 @@ const AiToolInputValueFreeJson = z.union([
   z.array(z.union([AiToolInputScalar, AiToolInputFlatObject])),
   z.record(z.string(), z.union([AiToolInputFlatValue, AiToolInputFlatObject])),
 ]);
+
+// Free-JSON HTTP drafts can preserve the request material the operator
+// supplied. These fields stay out of the constrained provider grammar, but
+// they are safe to validate server-side with the same bounded JSON depth used
+// for tool inputs.
+const AiHttpNodeFreeJson = AiHttpNode.extend({
+  config: AiHttpConfigBase.extend({
+    headers: z.record(z.string(), z.string()).optional(),
+    body: AiToolInputValueFreeJson.optional(),
+    retry: AiRetryConfigDraft,
+  }),
+});
 
 const AiToolConfigBaseFreeJson = AiToolConfigBase.extend({
   input: z.record(z.string(), AiToolInputValueFreeJson).optional(),

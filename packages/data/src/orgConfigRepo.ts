@@ -73,6 +73,7 @@ export type OrgConfigSnapshot = {
     anthropicModel: string;
     timeoutMs: number;
     maxRetries: number;
+    maxOutputTokens: number;
     promptMaxChars: number;
     rateLimitPerMin: number;
     confidenceCalibrationEnabled: boolean;
@@ -298,6 +299,7 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
       anthropicModel: readString(values, "ai.anthropic.model"),
       timeoutMs: readNumber(values, "ai.timeoutMs"),
       maxRetries: readNumber(values, "ai.maxRetries"),
+      maxOutputTokens: readNumber(values, "ai.maxOutputUnits"),
       promptMaxChars: readNumber(values, "ai.promptMaxChars"),
       rateLimitPerMin: readNumber(values, "ai.rateLimitPerMin"),
       confidenceCalibrationEnabled: readBoolean(values, "ai.confidenceCalibrationEnabled"),
@@ -628,6 +630,7 @@ export function applyOrgConfigToEnv(
     ANTHROPIC_MODEL: config.ai.anthropicModel,
     OPENAI_TIMEOUT_MS: String(config.ai.timeoutMs),
     OPENAI_MAX_RETRIES: String(config.ai.maxRetries),
+    JANUSLY_LLM_MAX_OUTPUT_UNITS: String(config.ai.maxOutputTokens),
     AI_PROMPT_MAX_CHARS: String(config.ai.promptMaxChars),
     AI_RATE_LIMIT_PER_MIN: String(config.ai.rateLimitPerMin),
     JANUSLY_HTTP_TIMEOUT_MS: String(config.http.timeoutMs),

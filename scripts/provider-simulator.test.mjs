@@ -115,6 +115,43 @@ test("provider simulator persists idempotent effects and isolates validation sco
   }
 });
 
+test("provider simulator applies webhook modes to named endpoint paths", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "janusly-named-webhook-simulator-"));
+  const simulator = await startSimulator(dataDir);
+  try {
+    const endpoint = `${simulator.url}/webhook/provider-qualification-read`;
+
+    const successResponse = await fetch(endpoint, { method: "GET" });
+    assert.equal(successResponse.status, 202);
+    const success = await successResponse.json();
+    assert.equal(success.accepted, true);
+    assert.equal(success.receipt.provider, "webhook");
+
+    await setProviderMode(simulator.url, "webhook", "failure");
+    const failureResponse = await fetch(endpoint, { method: "GET" });
+    assert.equal(failureResponse.status, 503);
+    assert.deepEqual(await failureResponse.json(), {
+      error: "simulated webhook outage",
+    });
+
+    const requests = await (await fetch(`${simulator.url}/requests`)).json();
+    assert.equal(
+      requests.requests.filter(
+        (entry) =>
+          entry.provider === "webhook"
+          && entry.path === "/webhook/provider-qualification-read",
+      ).length,
+      2,
+    );
+
+    const unrelatedResponse = await fetch(`${simulator.url}/webhooks/not-a-provider`);
+    assert.equal(unrelatedResponse.status, 404);
+  } finally {
+    await simulator.stop();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
 test("provider simulator exposes deterministic Anthropic-compatible semantic outcomes", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "janusly-anthropic-simulator-"));
   const simulator = await startSimulator(dataDir);

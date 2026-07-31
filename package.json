@@ -46,6 +46,7 @@
     "local:security:smoke": "node scripts/local-security-smoke.mjs",
     "local:tenant-isolation:smoke": "node scripts/local-tenant-isolation-smoke.mjs",
     "local:load-soak:smoke": "node scripts/local-load-soak-smoke.mjs",
+    "local:real-provider:smoke": "node scripts/local-real-provider-smoke.mjs",
     "local:down": "node scripts/local-stack.mjs down",
     "local:reset": "node scripts/local-stack.mjs reset",
     "local:restart": "node scripts/local-stack.mjs restart",

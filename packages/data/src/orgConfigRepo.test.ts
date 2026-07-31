@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 
 import type { OrgConfigDefinition } from "./orgConfigRepo";
 import { ORG_CONFIG_DEFINITIONS, normalizeOrgConfigValue } from "./orgConfigRepo";
+import { defaultValueFor } from "./orgConfigCatalog";
 
 const findDef = (key: string): OrgConfigDefinition => {
   const def = ORG_CONFIG_DEFINITIONS.find((d) => d.key === key);
@@ -495,6 +496,21 @@ describe("validate hook is opt-in (unchanged-behaviour smoke)", () => {
     const def = findDef("ai.timeoutMs");
     expect(normalizeOrgConfigValue(def, 30_000)).toBe(30_000);
     expect(() => normalizeOrgConfigValue(def, 0)).toThrow(/>= 1/);
+  });
+
+  it("ai.maxOutputUnits keeps provider replies inside a bounded range", () => {
+    const def = findDef("ai.maxOutputUnits");
+    expect(def.defaultValue).toBe(4_096);
+    expect(defaultValueFor(def, {
+      JANUSLY_LLM_MAX_OUTPUT_UNITS: "2048",
+    })).toEqual({ value: 2_048, source: "env" });
+    expect(defaultValueFor(def, {
+      JANUSLY_LLM_MAX_OUTPUT_UNITS: "not-a-number",
+    })).toEqual({ value: 4_096, source: "default" });
+    expect(normalizeOrgConfigValue(def, 256)).toBe(256);
+    expect(normalizeOrgConfigValue(def, 16_384)).toBe(16_384);
+    expect(() => normalizeOrgConfigValue(def, 255)).toThrow(/>= 256/);
+    expect(() => normalizeOrgConfigValue(def, 16_385)).toThrow(/<= 16384/);
   });
 
   it("ai.provider (string with allowedValues, no validate hook) keeps existing enum check", () => {

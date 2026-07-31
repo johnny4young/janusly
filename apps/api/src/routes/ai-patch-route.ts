@@ -425,7 +425,7 @@ export const aiPatchRoutes: Route[] = [
               // empty-list branch below degrades to fallback.
             }
           }
-          validated = rankRecoverySuggestions(validated);
+          validated = rankRecoverySuggestions(validated, dlq.errorJson);
         }
 
         if (validated.length > 0) {

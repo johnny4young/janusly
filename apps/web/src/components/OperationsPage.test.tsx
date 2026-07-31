@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
+import { changeAppLanguage } from '../i18n'
 import { useWorkflowStore } from '../store'
 import { OperationsPage, requestOperationsSection } from './OperationsPage'
 
@@ -179,11 +180,16 @@ describe('<OperationsPage />', () => {
     expect(summary).toHaveTextContent('Cache-created tokens2,000')
     expect(screen.getByRole('columnheader', { name: 'Cache read' })).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: 'Cache created' })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'Cost breakdown table' })).toHaveAttribute('tabindex', '0')
+    const costTable = screen.getByTestId('settings-usage-cost-table')
+    expect(costTable).toHaveAccessibleName('Cost breakdown table')
+    expect(costTable).toHaveAttribute('tabindex', '0')
     expect(screen.getAllByText('8,000')).toHaveLength(2)
     const aggregateRow = screen.getByText('Other providers and models').closest('tr')
     expect(aggregateRow).not.toBeNull()
     expect(within(aggregateRow as HTMLElement).getByText('—')).toBeInTheDocument()
+
+    await changeAppLanguage('es')
+    expect(costTable).toHaveAccessibleName('Tabla de desglose de costo')
   })
 
   it('mounts only the active sub-tab cards when the operator clicks Reliability', async () => {

@@ -79,6 +79,37 @@ export type FreeJsonGenerationResult = {
 const RETRY_NUDGE =
   "\n\nYour previous reply was not a valid workflow. Return ONLY the JSON workflow object — no prose, no markdown fences.";
 
+const TEMPLATE_REFERENCE_PATTERN =
+  /\{\{(?:secret|env|context|input|inputs)\.[A-Za-z0-9_.-]{1,220}\}\}/gu;
+const MAX_PROMPT_TEMPLATE_REFERENCES = 32;
+
+/** Machine-contract references written by the operator must survive generation. */
+export function promptTemplateReferences(prompt: string): string[] {
+  return [...new Set(prompt.match(TEMPLATE_REFERENCE_PATTERN) ?? [])]
+    .slice(0, MAX_PROMPT_TEMPLATE_REFERENCES);
+}
+
+/** Return operator-supplied references that the parsed workflow dropped. */
+export function missingPromptTemplateReferences(
+  prompt: string,
+  workflow: Workflow,
+): string[] {
+  const serialized = JSON.stringify(workflow);
+  return promptTemplateReferences(prompt)
+    .filter((reference) => !serialized.includes(reference));
+}
+
+function referenceRetryNudge(references: readonly string[]): string {
+  if (references.length === 0) return "";
+  return [
+    "",
+    "",
+    "Your previous workflow omitted operator-supplied machine references.",
+    `Preserve these exact references byte-for-byte in the relevant config values: ${references.join(", ")}.`,
+    "They are safe Janusly references, not literal secret values. Return ONLY the corrected JSON workflow object.",
+  ].join("\n");
+}
+
 /**
  * Generate a workflow via the free-JSON path with retry-on-parse-fail.
  * Returns the first parseable+valid result; throws after
@@ -94,10 +125,11 @@ export async function generateWorkflowFreeJson(
 ): Promise<FreeJsonGenerationResult> {
   let lastModel = "";
   let lastProvider = "";
+  let retryNudge = "";
   for (let attempt = 1; attempt <= FREE_JSON_MAX_ATTEMPTS; attempt++) {
     const result = await llm.generateText({
       system,
-      prompt: attempt === 1 ? prompt : prompt + RETRY_NUDGE,
+      prompt: attempt === 1 ? prompt : prompt + RETRY_NUDGE + retryNudge,
       responseFormat: "json",
       modelHint,
       cacheSystemPrompt,
@@ -107,7 +139,11 @@ export async function generateWorkflowFreeJson(
     lastProvider = result.provider;
     const workflow = parseGeneratedWorkflow(result.text ?? "");
     if (workflow) {
-      return { workflow, model: result.model, provider: result.provider, attempts: attempt };
+      const missingReferences = missingPromptTemplateReferences(prompt, workflow);
+      if (missingReferences.length === 0) {
+        return { workflow, model: result.model, provider: result.provider, attempts: attempt };
+      }
+      retryNudge = referenceRetryNudge(missingReferences);
     }
   }
   throw new Error(

@@ -255,6 +255,7 @@ Rules per suggestion:
   - \`timeoutMs: <milliseconds>\` — when the failure is a timeout. Default is 30000 ms; raise modestly (60000-120000) rather than removing the bound.
   - \`maxResponseBytes: <bytes>\` — when the failure is a body-cap rejection. Default is 1048576 (1 MB); raise to 5242880 (5 MB) or 10485760 (10 MB) when the response is legitimately larger.
   - \`maxRedirects: <integer>\` — when the failure is a redirect-loop or insufficient redirects. Default is 5.
+- A received 5xx or 429 response proves the configured URL reached an upstream. Do NOT change the URL for those failures; prefer a bounded retry. Raise \`timeoutMs\` only when the error or run events contain timeout evidence.
 - Headers (HTTP) and tool inputs use an \`Array<{ name, value }>\` patch form because flat record shapes are rejected by some provider strict modes. Emit ONLY the keys you're changing; the system folds them against the existing record (other keys preserved). Use a literal value, a supported template like \`{{secret.NAME}}\` / \`{{env.NAME}}\`, or a credential name for a tool's \`input.credential\` field; emit \`value: null\` to remove the key from the merged config. Examples:
   - HTTP 401 with a literal token → \`headers: [{ name: "Authorization", value: "Bearer {{secret.GITHUB_TOKEN}}" }]\`
   - Missing-secret template ({{secret.NAME}}) where the secret isn't bound → swap the same Authorization header to a different known-good secret reference.

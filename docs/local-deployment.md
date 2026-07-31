@@ -71,12 +71,14 @@ credentials, tenant configuration, or example canvas nodes.
 database fixtures; the synthetic `default` development workspace is an auth
 compatibility projection, not a stored organization.
 
-The uncommon host ports `7310` (web) and `7311` (API) are deliberate so the
-lab does not compete with projects that commonly use `3000` and `3001`. The
-containers still listen internally on `3000` and `3001`; only the loopback host
-mappings change. Override `JANUSLY_LOCAL_WEB_PORT`, `JANUSLY_LOCAL_API_PORT`,
-`JANUSLY_LOCAL_API_URL`, and `JANUSLY_LOCAL_WEB_ORIGINS` together when another
-host range is preferred.
+The uncommon host ports `7310` (web), `7311` (API), and `16379` (Redis) are
+deliberate so the lab does not compete with projects that commonly use `3000`,
+`3001`, or `6379`. The containers still listen internally on `3000`, `3001`,
+and `6379`; only the loopback host mappings change. Override
+`JANUSLY_LOCAL_WEB_PORT`, `JANUSLY_LOCAL_API_PORT`,
+`JANUSLY_LOCAL_REDIS_PORT`, `JANUSLY_LOCAL_API_URL`, and
+`JANUSLY_LOCAL_WEB_ORIGINS` when another host range is preferred. Keep the API
+URL and web origins aligned with their corresponding port overrides.
 
 Run the qualification gates while the stack is healthy:
 
@@ -330,6 +332,11 @@ The simulator listens on the loopback port selected by
 200 requests returned by `GET /requests` and supports `github`, `slack`,
 `webhook`, `email`, and `pagerduty` providers.
 
+Webhook simulation accepts both `/webhook` and named descendants such as
+`/webhook/billing-retry`. Named paths let independent local workflows exercise
+distinct destinations while sharing the same controlled provider mode; they
+never widen production routing because the simulator binds to loopback.
+
 Each provider has one of three deterministic modes:
 
 ```bash
@@ -491,8 +498,11 @@ accidentally create real side effects.
 ## Optional AI And Memory
 
 With no `ANTHROPIC_API_KEY`, Janusly exercises deterministic AI fallbacks at
-zero provider cost. Add a key only to `deploy/local/local.env` when real
-Anthropic completion behavior is deliberately under test.
+zero provider cost. For ordinary manual use, add a key only to the ignored
+`deploy/local/local.env` when real Anthropic completion behavior is
+deliberately under test. Prefer the tenant-safe `ai.maxOutputUnits` setting
+for per-organization limits; `JANUSLY_LLM_MAX_OUTPUT_UNITS` is the
+deployment-level fallback.
 
 Ollama is optional and disabled by default:
 
@@ -577,6 +587,47 @@ capacity claim. Tune bounded local experiments with
 `JANUSLY_SOAK_SECONDS`, and `JANUSLY_SOAK_RPS`. Evidence is written under
 `output/review/2026-07-30-load-soak-qualification/`; generated workload data
 is removed and the stack is stopped on success or failure.
+
+Run the destructive, cost-bearing real Anthropic qualification only after the
+zero-cost repository gates pass:
+
+```bash
+export ANTHROPIC_API_KEY='your temporary test key'
+export JANUSLY_REAL_PROVIDER_BUDGET_USD='0.25'
+pnpm local:real-provider:smoke --confirm-reset --confirm-provider-cost
+unset ANTHROPIC_API_KEY JANUSLY_REAL_PROVIDER_BUDGET_USD
+```
+
+The qualifier refuses to start without both consent flags, a process-only key,
+an Anthropic key beginning with `sk-ant-`, and an observed-spend authorization
+between USD 0.25 and USD 5.00. It rejects custom Anthropic endpoints and
+provider simulation, pins
+`claude-haiku-4-5-20251001`, sets one generation candidate, disables retries,
+caps each reply at 2,048 output tokens, and requires USD 0.10 of observed
+headroom before admitting another top-level case. Only local-stack startup
+inherits the provider key; Git, SQL inspection, Playwright, and cleanup child
+processes do not. Before any reset, an authenticated read-only model-catalog
+probe proves both the key and access to the pinned model without inference or
+corpus transfer. The corpus exercises API and real
+Chromium workflow generation, English/Spanish intent parity, approval ordering,
+time-window routing, human review, recovery suggestions, persisted usage,
+accessibility, compact layout, and browser/runtime errors.
+
+Evidence is written under
+`output/review/2026-07-30-real-provider-qualification/` without model payloads
+or credentials. The temporary organization and local persistent data are
+removed and the stack is stopped after success or failure. The Janusly budget
+and runner stop additional top-level cases after observed spend; they cannot
+cancel an in-flight vendor request or replace an Anthropic account spending
+limit, which remains the only hard invoice ceiling. This command is a deliberate
+local qualification and must not run in CI. Immediately before its first
+provider call, it atomically creates `provider-cost-attempt.json` in that
+evidence directory. A later invocation refuses to spend again while this record
+exists; remove it only after inspecting the prior attempt and obtaining a new
+explicit cost authorization. The runner fails after the first case that falls
+back or violates deterministic safety, records observed usage before cleanup
+when accounting remains available, and reports incomplete accounting explicitly
+rather than assuming a failed request cost nothing.
 
 For the short-lived development/test orchestrator use `pnpm dev`. For metrics,
 traces, dashboards, and alerts, see [Observability](observability.md).

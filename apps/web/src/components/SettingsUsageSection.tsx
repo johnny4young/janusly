@@ -34,7 +34,7 @@ export function SettingsUsageSection({
 
   if (providers.length === 0) {
     return (
-      <section className="we-card">
+      <section className="we-card we-settings-usage">
         <EmptyView
           icon={<ChartNoAxesCombined size={22} />}
           title={t('rightPanel.usage.emptyKicker')}
@@ -45,7 +45,7 @@ export function SettingsUsageSection({
   }
 
   return (
-    <section className="we-card">
+    <section className="we-card we-settings-usage">
       <div className="section-kicker">{t('operations.cost.heading')}</div>
       <dl className="we-ops-cache-summary" aria-label={t('operations.cost.cache.summaryLabel')}>
         <div>
@@ -65,6 +65,7 @@ export function SettingsUsageSection({
       </dl>
       <div
         className="we-ops-cost-table-wrap"
+        data-testid="settings-usage-cost-table"
         role="region"
         aria-label={t('operations.cost.tableAria')}
         tabIndex={0}

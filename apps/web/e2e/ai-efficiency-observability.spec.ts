@@ -17,6 +17,7 @@ type Locale = 'en' | 'es'
 const copy = {
   en: {
     costHeading: 'Cost breakdown',
+    costTable: 'Cost breakdown table',
     cacheLabel: 'Prompt cache efficiency',
     runs: 'Runs',
     timeline: 'View timeline',
@@ -33,6 +34,7 @@ const copy = {
   },
   es: {
     costHeading: 'Desglose de costo',
+    costTable: 'Tabla de desglose de costo',
     cacheLabel: 'Eficiencia de la caché de instrucciones',
     runs: 'Ejecuciones',
     timeline: 'Ver cronología',
@@ -295,12 +297,33 @@ test('AI and run efficiency are observable in English and Spanish', async ({ pag
     )
     await page.getByTestId('operations-rail-tab-usage').click()
     const costCard = page.locator('.we-card').filter({ hasText: copy[locale].costHeading }).first()
+    const costTable = page.getByTestId('settings-usage-cost-table')
     const cacheSummary = costCard.getByLabel(copy[locale].cacheLabel)
     await expect(cacheSummary).toContainText('50%')
     await expect(cacheSummary).toContainText(copy[locale].cacheTokens)
     await expect(costCard).toContainText(copy[locale].createdTokens)
+    await expect(costTable).toHaveAccessibleName(copy[locale].costTable)
+    await expect(costTable).toHaveAttribute('tabindex', '0')
     await hideUnrelatedOverlays(page)
     await capture(costCard, `web-${locale}-operations-cache-efficiency-ready`)
+    if (locale === 'es') {
+      await page.setViewportSize({ width: 390, height: 844 })
+      const mobileSidebar = page.locator('#workspace-sidebar')
+      await expect(mobileSidebar).toHaveAttribute('aria-hidden', 'true')
+      await expect(mobileSidebar).toHaveCSS('visibility', 'hidden')
+      await expect(costTable).toBeVisible()
+      const compactTable = await costTable.evaluate(element => ({
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+      }))
+      expect(compactTable.clientWidth).toBeGreaterThan(0)
+      expect(compactTable.scrollWidth).toBeGreaterThan(compactTable.clientWidth)
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth),
+      ).toBeLessThanOrEqual(2)
+      await capture(costCard, 'web-es-operations-cache-efficiency-mobile')
+      await page.setViewportSize({ width: 1280, height: 720 })
+    }
 
     await captureRunUsageStates(page, runId, locale)
 
