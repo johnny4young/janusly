@@ -120,7 +120,11 @@ func SystemWrite(ctx context.Context, pool *pgxpool.Pool, orgID, actor string, a
 	if opts.Metadata == nil {
 		opts.Metadata = map[string]any{}
 	}
-	opts.Metadata["actor"] = actor
+	// An empty actor stays absent — some reference system writers (the
+	// rate-limiter degradation rows) carry no actor field at all.
+	if actor != "" {
+		opts.Metadata["actor"] = actor
+	}
 	err := insert(ctx, func(ctx context.Context, sql string, args ...any) error {
 		_, execErr := pool.Exec(ctx, sql, args...)
 		return execErr

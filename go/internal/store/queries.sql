@@ -762,3 +762,15 @@ WHERE org_id = $1
        OR (created_at = @before_created_at AND id < @before_id))
 ORDER BY created_at DESC, id DESC
 LIMIT @page_limit;
+
+-- Rate limiter: one O(1) UPSERT per request — the fixed window lives in
+-- the PK, so a fresh window is an insert and a repeat hit an increment.
+-- name: BumpRateWindow :one
+INSERT INTO go_pilot_rate_windows (name, key, window_start, count, expires_at)
+VALUES ($1, $2, $3, 1, $4)
+ON CONFLICT (name, key, window_start)
+DO UPDATE SET count = go_pilot_rate_windows.count + 1
+RETURNING count;
+
+-- name: CleanupExpiredRateWindows :execrows
+DELETE FROM go_pilot_rate_windows WHERE expires_at < now();

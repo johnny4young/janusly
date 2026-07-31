@@ -3094,3 +3094,12 @@ CREATE INDEX workflows_org_created_idx ON public.workflows USING btree (org_id, 
 
 \unrestrict chOjQvbOSGd2C41nDJ22az0XgYm86gdCluIvipc3YfSDSc087hpVvnDJ8PVEaBO
 
+
+CREATE TABLE go_pilot_rate_windows (
+    name text NOT NULL,
+    key text NOT NULL,
+    window_start timestamptz NOT NULL,
+    count integer NOT NULL DEFAULT 1,
+    expires_at timestamptz NOT NULL,
+    PRIMARY KEY (name, key, window_start)
+);

@@ -293,6 +293,14 @@ type ExternalWorkflow struct {
 	UpdatedAt          time.Time
 }
 
+type GoPilotRateWindow struct {
+	Name        string
+	Key         string
+	WindowStart time.Time
+	Count       int32
+	ExpiresAt   time.Time
+}
+
 type GoPilotStartIdempotency struct {
 	OrgID          string
 	IdempotencyKey string

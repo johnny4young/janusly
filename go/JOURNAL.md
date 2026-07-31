@@ -1262,3 +1262,11 @@ producción necesita saber — de lo ya resuelto o informativo.
   mismo split de la referencia) y el metadata de audit ganando la cota
   que no tenía. El property test siembra secretos reales y barre las 6
   columnas jsonb: cero supervivencias, snapshot DLQ reproducible.
+
+## 2026-07-31 — el limiter sin Redis (T-084)
+
+- La decisión de arquitectura del operador, ejecutada: ventana fija en
+  Postgres con la ventana DENTRO de la PK (un UPSERT O(1) por request),
+  fail-open con warn, y el 429 con el mensaje exacto de Node. La
+  degradación audita una vez por (bucket, día) — dedupe probado con dos
+  réplicas de memoria fresca contra la misma base.

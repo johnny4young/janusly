@@ -25,6 +25,35 @@ func (q *Queries) AcquireRunCompletionLock(ctx context.Context, runID string) er
 	return err
 }
 
+const bumpRateWindow = `-- name: BumpRateWindow :one
+INSERT INTO go_pilot_rate_windows (name, key, window_start, count, expires_at)
+VALUES ($1, $2, $3, 1, $4)
+ON CONFLICT (name, key, window_start)
+DO UPDATE SET count = go_pilot_rate_windows.count + 1
+RETURNING count
+`
+
+type BumpRateWindowParams struct {
+	Name        string
+	Key         string
+	WindowStart time.Time
+	ExpiresAt   time.Time
+}
+
+// Rate limiter: one O(1) UPSERT per request — the fixed window lives in
+// the PK, so a fresh window is an insert and a repeat hit an increment.
+func (q *Queries) BumpRateWindow(ctx context.Context, arg BumpRateWindowParams) (int32, error) {
+	row := q.db.QueryRow(ctx, bumpRateWindow,
+		arg.Name,
+		arg.Key,
+		arg.WindowStart,
+		arg.ExpiresAt,
+	)
+	var count int32
+	err := row.Scan(&count)
+	return count, err
+}
+
 const bumpReplayCampaignCounter = `-- name: BumpReplayCampaignCounter :exec
 UPDATE replay_campaigns
 SET replayed_count = replayed_count + $2::int,
@@ -282,6 +311,18 @@ type ClaimTriggerEventStartParams struct {
 // claims inside startRun's transaction the same way).
 func (q *Queries) ClaimTriggerEventStart(ctx context.Context, arg ClaimTriggerEventStartParams) (int64, error) {
 	result, err := q.db.Exec(ctx, claimTriggerEventStart, arg.OrgID, arg.ID, arg.RunID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const cleanupExpiredRateWindows = `-- name: CleanupExpiredRateWindows :execrows
+DELETE FROM go_pilot_rate_windows WHERE expires_at < now()
+`
+
+func (q *Queries) CleanupExpiredRateWindows(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, cleanupExpiredRateWindows)
 	if err != nil {
 		return 0, err
 	}
