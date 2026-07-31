@@ -49,3 +49,30 @@ func TestPermissionCatalogPinned(t *testing.T) {
 		t.Fatal("unknown keys must not validate")
 	}
 }
+
+// The self-lockout floor: overriding the built-in admin force-includes the
+// two mandatory keys; a custom admin-ranked role is NOT coerced.
+func TestCoerceAdminFloor(t *testing.T) {
+	merged, coerced := CoerceAdminFloor("admin", []string{"workflows.read"})
+	want := map[string]bool{"workflows.read": true, "org.permissions.write": true, "members.write": true}
+	if len(merged) != 3 || len(coerced) != 2 {
+		t.Fatalf("floor: merged=%v coerced=%v", merged, coerced)
+	}
+	for _, key := range merged {
+		if !want[key] {
+			t.Fatalf("unexpected key %q", key)
+		}
+	}
+
+	// Already present: nothing coerced (idempotent).
+	merged, coerced = CoerceAdminFloor("admin", []string{"org.permissions.write", "members.write"})
+	if len(coerced) != 0 || len(merged) != 2 {
+		t.Fatalf("idempotent floor: %v %v", merged, coerced)
+	}
+
+	// billing-admin (custom, admin-ranked) is deliberately untouched.
+	merged, coerced = CoerceAdminFloor("billing-admin", []string{"org.config.write"})
+	if len(coerced) != 0 || len(merged) != 1 {
+		t.Fatalf("custom admin must not be coerced: %v %v", merged, coerced)
+	}
+}

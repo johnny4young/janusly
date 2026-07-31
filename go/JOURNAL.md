@@ -1186,3 +1186,12 @@ producción necesita saber — de lo ya resuelto o informativo.
   fail-closed cubre las tres grietas: fila borrada, herencia fuera del
   enum, y el custom con permisos null que solo puede ser un bug de
   integridad.
+
+## 2026-07-31 — el piso anti-lockout (T-075)
+
+- Corto y con filo: un admin no puede quitarse a sí mismo la capacidad
+  de administrar permisos y miembros — el override del admin built-in
+  fuerza las dos claves y reporta cuáles coercionó para el audit. La
+  excepción es deliberada: un rol custom que HEREDA rango admin no se
+  toca, porque un billing-admin estrecho es un caso de uso, no un
+  accidente.

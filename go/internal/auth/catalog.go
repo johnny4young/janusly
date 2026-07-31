@@ -78,3 +78,33 @@ func DefaultRoleHasPermission(role Role, key string) bool {
 	entry, ok := permissionsByKey[key]
 	return ok && entry.DefaultRoles[role]
 }
+
+// MandatoryAdminPermissions is the self-lockout floor: any override of the
+// BUILT-IN admin role force-includes these, so an admin cannot strip the
+// org's ability to manage permissions and members.
+func MandatoryAdminPermissions() []string {
+	return []string{"org.permissions.write", "members.write"}
+}
+
+// CoerceAdminFloor applies the floor to an override of `roleName`,
+// returning the merged set plus the keys that were coerced in (the audit
+// records them under metadata.coerced). Custom roles that merely INHERIT
+// admin rank are deliberately not coerced — the reference's billing-admin
+// case, a deliberate narrow admin.
+func CoerceAdminFloor(roleName string, permissions []string) (merged, coerced []string) {
+	if roleName != string(RoleAdmin) {
+		return permissions, nil
+	}
+	merged = append([]string{}, permissions...)
+	present := map[string]bool{}
+	for _, key := range merged {
+		present[key] = true
+	}
+	for _, required := range MandatoryAdminPermissions() {
+		if !present[required] {
+			merged = append(merged, required)
+			coerced = append(coerced, required)
+		}
+	}
+	return merged, coerced
+}
