@@ -14,9 +14,11 @@ db-down:
 # through the repo's own tooling keeps the drizzle.__drizzle_migrations
 # journal that the boot probe asserts. Pilot-only objects (go_pilot_* tables)
 # follow from ./migrations, applied idempotently to the pilot database only.
+# goose owns the pilot's schema (2026-07-31 decision): migrations embed in
+# the binary; no Node repo needed. Pre-goose databases get stamped at the
+# baseline automatically on first run.
 migrate:
-	cd .. && DATABASE_URL=$(DB_URL) pnpm migrate
-	docker exec -i janusly-go-pilot-postgres-1 psql -U janusly -d janusly_go -v ON_ERROR_STOP=1 < migrations/0001_go_pilot.sql
+	JANUSLY_GO_DATABASE_URL=$(DB_URL) go run ./cmd/api migrate
 	for f in migrations/*.sql; do \
 		docker exec -i $(PG_CONTAINER) psql -v ON_ERROR_STOP=1 -U janusly -d janusly_go < $$f; \
 	done
@@ -67,8 +69,7 @@ ci:
 # container (port 4634), mirroring the reference CI's test_compat_pg15 lane.
 test-pg15:
 	docker compose -f pg15.compose.yml up -d --wait
-	cd .. && DATABASE_URL=postgres://janusly:janusly-go-local@127.0.0.1:4634/janusly_go pnpm migrate
-	docker exec -i janusly-go-pg15-postgres-1 psql -U janusly -d janusly_go -v ON_ERROR_STOP=1 < migrations/0001_go_pilot.sql
+	JANUSLY_GO_DATABASE_URL=postgres://janusly:janusly-go-local@127.0.0.1:4634/janusly_go go run ./cmd/api migrate
 	JANUSLY_GO_DATABASE_URL=postgres://janusly:janusly-go-local@127.0.0.1:4634/janusly_go \
 		go test -race -tags integration -p 1 -count=1 ./... ; \
 		status=$$?; docker compose -f pg15.compose.yml down -v; exit $$status

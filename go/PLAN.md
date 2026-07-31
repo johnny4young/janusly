@@ -721,6 +721,9 @@ el chat publicado.
 | 2026-07-31 | T-066 consolidación | Recaptura COMPLETA de los 18 goldens de paridad desde el stack aislado en una sola corrida: byte-idénticos a los committeados (git diff vacío — la captura es reproducible y el pin no ha derivado) y la paridad Go verde ×3 contra ellos. Hallazgo del booter: el stack aislado no exportaba `ALLOW_PRIVATE_HTTP_TARGETS=true` y el guard SSRF de Node bloqueaba el stub loopback (F03/F04/F05 capturaban un fallo DISTINTO al original) — las capturas parciales previas (F11-F17, sin fixtures http) nunca lo pisaron. Corregido en el booter |
 | 2026-07-31 | T-067 números | `conformance/perf/EVOLUTION.md`: tres momentos (Node loadgen / Go F0 loadgen / Go ola-2 k6) con columna de dirección por métrica y notas de honestidad metodológica (herramienta distinta, org poblado vs vacío, la comparación diamond conservadora a favor de Node por sus runs atascados). Titulares ola 2: start 209 runs/s (4.6× Node) con p99 69ms (7.6× menor), list 6.7k req/s @ p95 10ms sobre org de decenas de miles (el peor caso honesto — gracias al índice keyset), diamond 112 DAGs/s, 0 errores, RSS ~22-43MB en un proceso. Los features de la ola no costaron rendimiento: throughput ↑ en los tres escenarios vs F0 |
 | 2026-07-31 | T-068 informe | `REPORT-W2.md`: estado F1/F2 por área, la evidencia que más pesa (paridad reproducible byte-idéntica, rendimiento sin regresión por features, loop del operador desde la UI real), 4 chips upstream + 2 hallazgos de compatibilidad cruzada, divergencias vivas que condicionan adopción, riesgos honestos (HA multi-nodo no probado, propiedad del esquema, mensajes pilot-shaped) y recomendación: ola 3 = «plataforma mínima creíble» (audit + limiter en Postgres + catálogo) + primer despliegue supervisado. GOAL DE 30 TICKETS COMPLETO |
+| 2026-07-31 | sync ola-3 | Pin actualizado a develop@1ad09028 (2 commits: qualification de proveedor AI + superficies de estado AI del web). CERO migraciones db nuevas; los cambios de `ai-generate-*`/`ai-prompts` de Node se anotan como INSUMO de la ola 4 (T-105: releer la fuente al implementar — el prompt y Best-of-N cambiaron). Merge limpio, suite 13 paquetes verde post-merge |
+| 2026-07-31 | decisiones usuario | (1) Limiter: Postgres fail-open confirmado, Redis solo cuando el negocio lo pida. (2) Esquema/migraciones: propiedad pasa YA a herramienta Go pura (goose) — T-188 se ejecuta primero en la ola 3; la decisión previa «drizzle dueño durante las olas» queda reemplazada: drizzle sigue siendo dueño en el repo Node para develop, el PILOT se auto-migra con goose y espeja las migraciones drizzle nuevas en cada sync. (3) Linaje de replay se decide en T-135 leyendo el uso real — ratificado |
+| 2026-07-31 | T-188 goose | Propiedad de esquema ejecutada: goose v3 (Go puro) con migraciones EMBEBIDAS en el binario (`janusly-go migrate`), contabilidad en `go_pilot_goose_version` (sin chocar con drizzle), baseline = dump completo al pin con TRES saneos aprendidos a golpes: (1) meta-comandos psql `\restrict` del dump PG18 no son SQL, (2) el `set_config('search_path','')` del dump rompe el INSERT de versión de goose, (3) `SET transaction_timeout` es PG17+ y el floor es 15. Base pre-goose se estampa (versiones 0+1) sin re-ejecutar; base fresca 74/74 tablas y suite verde SIN el repo Node; pg15 lane 13 paquetes por el camino nuevo; boot rehúsa des-migrado. El probe legacy de drizzle (F0) quedaba FALSO-NEGATIVO en bases goose (tabla drizzle existe vacía) — reemplazado. Regla §0 ampliada: cada sync espeja migraciones drizzle nuevas como goose numeradas; `pnpm migrate` PROHIBIDO sobre bases goose |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -992,6 +995,7 @@ día que exista el chokepoint (T-079)**.
 
 | # | Ticket | Área | Pri | Estado |
 | --- | --- | --- | --- | --- |
+| T-188 | Migraciones en Go puro (goose embebido): baseline + conversión + boot check — SE EJECUTA PRIMERO | schema | P0 | done |
 | T-069 | AuthContext + PROVIDER_CHAIN (seams de 4 modos, grant = org_members) | auth | P0 | todo |
 | T-070 | Modo Supabase: verificación JWT + resolución de membresía | auth | P0 | todo |
 | T-071 | Modo service-token (sin auto-admin) + modo dev-headers endurecido | auth | P0 | todo |
@@ -1024,6 +1028,28 @@ día que exista el chokepoint (T-079)**.
 | T-098 | Informe de ola 3 (REPORT-W3.md) + corte de divergencias | cierre | P0 | todo |
 
 ### Cards — ola 3
+
+### T-188 · Migraciones en Go puro — P0 (primero de la ola)
+**Objetivo:** decisión del usuario (2026-07-31): la propiedad de esquema y
+migraciones del pilot pasa YA a una herramienta del ecosistema Go —
+liviana, Go puro, sin dependencias tipo Java. Elegida: **goose**
+(pressly/goose, Go puro, migraciones SQL embebibles con `embed.FS` en el
+binario — encaja con la tesis un-binario).
+**Espec:** (1) baseline: el esquema compartido completo al pin como
+migración 00001 (dump limpio; en bases EXISTENTES se marca aplicada sin
+ejecutar — goose sobre tabla de versiones propia `go_pilot_goose_version`
+para no chocar con drizzle). (2) Convertir `migrations/0001_go_pilot.sql`
+a migraciones goose numeradas. (3) `make migrate` deja de delegar en
+`pnpm migrate`: `go run ./cmd/migrate` (o subcomando del binario) aplica
+todo; el lane pg15 y el RUNBOOK se actualizan (camino sin repo Node ya
+real). (4) Boot check: el binario verifica la versión goose al arrancar y
+rehúsa si falta (paridad con `assertMigrationsApplied`). (5) Protocolo de
+sync: cada sync con develop revisa `packages/db/migrations` nuevas y las
+ESPEJA como migraciones goose (regla §0 ampliada).
+**Acepta:** [ ] base fresca: `migrate` desde cero SIN pnpm deja la suite
+verde · [ ] base existente: baseline marcada sin re-ejecutar, migraciones
+nuevas aplican · [ ] binario rehúsa arrancar des-migrado · [ ] pg15 lane
+verde por el camino nuevo · [ ] RUNBOOK + §9 actualizados.
 
 ### T-069 · AuthContext + PROVIDER_CHAIN — P0
 **Objetivo:** el resolver real de identidad, con la arquitectura de la

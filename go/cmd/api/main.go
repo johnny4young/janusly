@@ -20,6 +20,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/engine"
 	"github.com/johnny4young/janusly/go/internal/grammar"
 	"github.com/johnny4young/janusly/go/internal/httpapi"
+	"github.com/johnny4young/janusly/go/internal/migrate"
 )
 
 const shutdownGrace = 10 * time.Second
@@ -40,6 +41,19 @@ func run() error {
 		return err
 	}
 	logger := boot.NewLogger()
+
+	// Single-binary ops: `janusly-go migrate` applies the embedded goose
+	// migrations and exits; the serving path refuses a stale schema.
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		if err := migrate.Up(ctx, cfg.DatabaseURL); err != nil {
+			return err
+		}
+		logger.Info("migrations applied")
+		return nil
+	}
+	if err := migrate.AssertMigrated(ctx, cfg.DatabaseURL); err != nil {
+		return err
+	}
 
 	// Two pools, one truth from the load tests: API pollers and worker
 	// transactions must not compete for the same connection budget.

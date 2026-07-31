@@ -1095,3 +1095,21 @@ producción necesita saber — de lo ya resuelto o informativo.
 - De paso: quince filas de la ola 2 seguían en `todo` por patrones de
   reemplazo con la prioridad equivocada — corregidas a `done` (todas
   estaban ejecutadas y committeadas); el REPORT-W2 ahora dice 69/69.
+
+## 2026-07-31 — goose: el esquema es del binario (T-188)
+
+- La decisión del usuario ejecutada el mismo día: goose (Go puro, cero
+  dependencias pesadas) con las migraciones embebidas — `janusly-go
+  migrate` y no hay más ceremonia. El baseline es el dump completo al
+  pin, y costó tres saneos que ahora están documentados en el propio
+  archivo: los meta-comandos psql del dump de PG18, el reset de
+  search_path que rompía la contabilidad de goose, y un SET de PG17+
+  que el floor 15 rechaza.
+- La prueba de fuego fue doble: una base FRESCA provisionada solo por
+  goose corre la suite completa (74 tablas idénticas a la dev), y el
+  lane pg15 entero pasa por el camino nuevo. De regalo cayó un bug
+  latente: el probe de arranque del F0 preguntaba por FILAS de drizzle
+  y habría rechazado toda base goose-provisionada.
+- Frontera clara con Node: drizzle sigue mandando en develop; el pilot
+  espeja sus migraciones nuevas en cada sync, y una base goose jamás
+  corre pnpm migrate.

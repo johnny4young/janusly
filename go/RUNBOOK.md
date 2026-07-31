@@ -66,13 +66,23 @@ apuntando al binario, `EnvironmentVariables` con el DSN, `KeepAlive` true.
 
 ## Migraciones
 
-`make migrate` hace DOS cosas y ambas importan: las migraciones drizzle del
-esquema compartido (vía `pnpm migrate` del repo) y después
-`migrations/0001_go_pilot.sql` (objetos propios del pilot: wakeups de
-timers, idempotencia de start, índice keyset de runs). En un despliegue sin
-el repo Node a mano, aplica el SQL de drizzle desde
-`packages/db/migrations/` en orden y luego el archivo del pilot con
-`psql -v ON_ERROR_STOP=1`. Todo es idempotente (`IF NOT EXISTS`).
+goose (Go puro) es el dueño del esquema del pilot desde 2026-07-31. Las
+migraciones viven EMBEBIDAS en el binario:
+
+```bash
+janusly-go migrate
+```
+
+Eso es todo — sin Node, sin pnpm, sin psql. Una base fresca recibe el
+baseline completo (esquema compartido + objetos del pilot); una base
+provisionada antes de goose se estampa en el baseline automáticamente sin
+re-ejecutarlo. El binario rehúsa servir contra una base des-migrada. La
+contabilidad vive en `go_pilot_goose_version` (jamás choca con la de
+drizzle). Regla de sincronización: cada sync con develop espeja las
+migraciones drizzle nuevas como migraciones goose numeradas.
+
+Nota: una base provisionada por goose NO debe correr `pnpm migrate` del
+repo Node (la tabla drizzle existe vacía y drizzle re-ejecutaría todo).
 
 ## Copia de seguridad y restauración
 
@@ -107,7 +117,7 @@ backward-tolerant dentro de la ola (los objetos del pilot solo se añaden).
 | Síntoma | Primer paso |
 |---|---|
 | Runs en `running` sin avanzar | `SELECT count(*) FROM run_nodes WHERE status='queued'` — si crece, revisa workers en el log; el reaper repone claims muertos |
-| Timers que no disparan | ¿existe `go_pilot_wakeups`? (migración del pilot ausente = el gap clásico) |
+| Timers que no disparan | ¿existe `go_pilot_wakeups`? (`janusly-go migrate` pendiente = el gap clásico) |
 | 403 en tools MCP de escritura | El escalón de consent: env primero, luego la fila `mcp.writeConsent` del org |
 | Latencia de lista alta | `ANALYZE runs;` y confirma el índice `go_pilot_runs_org_created_id_idx` |
 | Todo 500 | El DSN: el binario no arranca a medias — si responde, la base era alcanzable al boot |

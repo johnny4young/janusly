@@ -45,20 +45,24 @@ func Connect(ctx context.Context, databaseURL string, maxConns int) (*pgxpool.Po
 	return pool, nil
 }
 
-// ErrNotMigrated reports a database without the shared migration journal.
+// ErrNotMigrated reports a database behind the embedded goose migrations.
+// goose owns the pilot's schema since 2026-07-31; a goose-provisioned
+// database carries the drizzle bookkeeping TABLE (schema baseline) but not
+// its rows, so probing drizzle would reject a perfectly migrated database.
 var ErrNotMigrated = errors.New(
-	"database is not migrated: drizzle.__drizzle_migrations is missing or empty; run `make migrate`",
+	"database is not migrated: run the binary's `migrate` subcommand first",
 )
 
-// ProbeMigrations fails fast when the shared drizzle migrations have not been
-// applied, before any server starts accepting traffic.
+// ProbeMigrations fails fast when the goose journal is missing or behind,
+// before any server starts accepting traffic.
 func ProbeMigrations(ctx context.Context, pool *pgxpool.Pool) error {
-	var count int
-	err := pool.QueryRow(ctx, "select count(*) from drizzle.__drizzle_migrations").Scan(&count)
+	var current int64
+	err := pool.QueryRow(ctx,
+		"SELECT COALESCE(MAX(version_id), 0) FROM go_pilot_goose_version WHERE is_applied").Scan(&current)
 	if err != nil {
 		return fmt.Errorf("%w (probe query failed: %v)", ErrNotMigrated, err)
 	}
-	if count == 0 {
+	if current == 0 {
 		return ErrNotMigrated
 	}
 	return nil

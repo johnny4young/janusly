@@ -1,3 +1,7 @@
+-- SUPERSEDED: this file is folded into the goose baseline
+-- (internal/migrate/sql/00001_baseline.sql). Kept for history only; no
+-- runner applies it anymore.
+
 -- Pilot-only auxiliary objects. The shared tables stay untouched: drizzle-kit
 -- owns their schema, and this file is applied only to the pilot database.
 

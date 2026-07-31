@@ -1,8 +1,16 @@
+-- +goose Up
+-- Baseline: the complete shared schema (drizzle-owned tables) plus the
+-- pilot's own objects, captured at develop@1ad09028. Fresh databases get
+-- everything from this one migration; databases provisioned before goose
+-- adoption are stamped as already at this version without executing it.
+-- psql meta-commands from pg_dump are stripped (they are not SQL).
+-- Future changes land as numbered migrations after this file, and every
+-- develop sync mirrors any new drizzle migration here.
+-- +goose StatementBegin
 --
 -- PostgreSQL database dump
 --
 
-\restrict chOjQvbOSGd2C41nDJ22az0XgYm86gdCluIvipc3YfSDSc087hpVvnDJ8PVEaBO
 
 -- Dumped from database version 18.4 (Debian 18.4-1.pgdg12+1)
 -- Dumped by pg_dump version 18.4 (Debian 18.4-1.pgdg12+1)
@@ -10,10 +18,11 @@
 SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
-SET transaction_timeout = 0;
+-- (SET transaction_timeout removed: PG 17+ parameter; the floor is 15)
 SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
-SELECT pg_catalog.set_config('search_path', '', false);
+-- (search_path reset removed: every object below is schema-qualified,
+-- and goose's own version insert needs the default search_path)
 SET check_function_bodies = false;
 SET xmloption = content;
 SET client_min_messages = warning;
@@ -3092,5 +3101,6 @@ CREATE INDEX workflows_org_created_idx ON public.workflows USING btree (org_id, 
 -- PostgreSQL database dump complete
 --
 
-\unrestrict chOjQvbOSGd2C41nDJ22az0XgYm86gdCluIvipc3YfSDSc087hpVvnDJ8PVEaBO
 
+
+-- +goose StatementEnd
