@@ -1,0 +1,33 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/start",
+    "body": {
+      "workflow": {
+        "id": "golden2-doomed",
+        "nodes": [
+          {
+            "id": "blocked",
+            "type": "http",
+            "config": {
+              "url": "http://169.254.169.254/x"
+            }
+          }
+        ],
+        "edges": []
+      }
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "x-request-id": "<present>"
+  },
+  "body": {
+    "apiVersion": "v1",
+    "requestId": "07b5dd22-87df-4185-b605-e51740014243",
+    "data": {
+      "runId": "0863a04f-9082-4e78-8706-b157978cef0e"
+    }
+  }
+}

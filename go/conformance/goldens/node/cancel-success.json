@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/run/cancel",
+    "body": {
+      "runId": "be74b0bc-2054-4068-a145-3205362b07ca",
+      "reason": {
+        "why": "golden"
+      }
+    }
+  },
+  "status": 400,
+  "headers": {
+    "content-type": "application/json",
+    "x-request-id": "<present>"
+  },
+  "body": {
+    "apiVersion": "v1",
+    "requestId": "ce399111-f748-49d1-a457-875d50711377",
+    "error": {
+      "code": "invalid_input",
+      "message": "Invalid request body",
+      "params": {
+        "field": "reason"
+      }
+    }
+  }
+}

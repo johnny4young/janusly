@@ -429,3 +429,17 @@ local. Sin umbral pasa/no-pasa: números para aprender.
   403 (otro tenant), mientras las LECTURAS de run mantienen ambos como
   403 indistinguible. Leer no revela existencia; actuar sí la requiere.
   Fijado con test para que nadie lo "arregle".
+
+## 2026-07-30 — segunda pasada de goldens (T-022)
+
+- Doce goldens nuevos, y el más valioso enseñó una lección de capas: el
+  contrato v1 NO es la ruta legacy con envelope. En cancel, Zod valida
+  la forma ANTES de los guards manuales — runId faltante es
+  invalid_input {field:"runId"}, y reason es STRING opcional (mandar un
+  objeto da 400 nombrando el campo). Mi puerto venía de leer la ruta
+  legacy; el golden lo corrigió. Regla aprendida: para rutas /v1, el
+  contrato Zod es la verdad, la ruta legacy es solo el handler.
+- El replay de Node quedó clavado: éxito {ok:true}, conflicto con su
+  mensaje largo y humano. Mi /v1/dlq/redrive propio convive con el
+  alias /v1/dlq/replay de paridad — misma operación del engine, dos
+  formas de wire.

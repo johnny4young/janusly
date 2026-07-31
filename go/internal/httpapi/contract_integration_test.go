@@ -383,10 +383,20 @@ func TestCancelGuardsDistinguishMissingFromCrossOrg(t *testing.T) {
 		404, "runs_run_not_found", "Run not found")
 	requireError(t, h.call("POST", "/v1/run/cancel", map[string]any{"runId": runID}, h.org+"-x"),
 		403, "runs_forbidden", "Forbidden")
-	requireError(t, h.call("POST", "/v1/run/cancel", nil, ""),
-		400, "runs_run_id_required", "runId is required")
+	// Golden-verified v1 contract: shape errors are invalid_input naming the
+	// field — and an OBJECT reason is rejected (reason is an optional string).
+	missing := h.call("POST", "/v1/run/cancel", map[string]any{}, "")
+	requireError(t, missing, 400, "invalid_input", "Invalid request body")
+	if missing.body["error"].(map[string]any)["params"].(map[string]any)["field"] != "runId" {
+		t.Fatalf("missing runId field param: %v", missing.body)
+	}
+	badReason := h.call("POST", "/v1/run/cancel", map[string]any{"runId": runID, "reason": map[string]any{"why": "x"}}, "")
+	requireError(t, badReason, 400, "invalid_input", "Invalid request body")
+	if badReason.body["error"].(map[string]any)["params"].(map[string]any)["field"] != "reason" {
+		t.Fatalf("object reason must name the field: %v", badReason.body)
+	}
 
-	cancelled := h.call("POST", "/v1/run/cancel", map[string]any{"runId": runID, "reason": map[string]any{"why": "test"}}, "")
+	cancelled := h.call("POST", "/v1/run/cancel", map[string]any{"runId": runID, "reason": "operator says stop"}, "")
 	requireEnvelope(t, cancelled)
 	data := cancelled.body["data"].(map[string]any)
 	if data["status"] != "cancelled" || data["runId"] != runID {
@@ -399,4 +409,34 @@ func TestCancelGuardsDistinguishMissingFromCrossOrg(t *testing.T) {
 	if params["status"] != "cancelled" {
 		t.Fatalf("terminal params must carry the status: %v", params)
 	}
+}
+
+func TestReplayAliasMatchesReferenceShape(t *testing.T) {
+	h := newAPIHarness(t)
+	doomed := map[string]any{
+		"id": "wf-replay-" + h.org,
+		"nodes": []any{map[string]any{"id": "blocked", "type": "http", "config": map[string]any{
+			"url": "http://169.254.169.254/x",
+		}}},
+		"edges": []any{},
+	}
+	started := h.call("POST", "/v1/start", map[string]any{"workflow": doomed}, "")
+	runID := started.body["data"].(map[string]any)["runId"].(string)
+	h.waitRun(runID, "failed")
+	list := h.call("GET", "/v1/dlq?limit=20", nil, "")
+	var deadLetterID string
+	for _, item := range list.body["data"].([]any) {
+		if row := item.(map[string]any); row["runId"] == runID {
+			deadLetterID = row["id"].(string)
+		}
+	}
+	// Golden: success is {ok:true}; the conflict carries the reference's
+	// full message.
+	replayed := h.call("POST", "/v1/dlq/replay", map[string]any{"deadLetterId": deadLetterID}, "")
+	requireEnvelope(t, replayed)
+	if replayed.body["data"].(map[string]any)["ok"] != true {
+		t.Fatalf("replay data shape: %v", replayed.body)
+	}
+	requireError(t, h.call("POST", "/v1/dlq/replay", map[string]any{"deadLetterId": deadLetterID}, ""),
+		409, "dlq_replay_conflict", "This run can no longer be replayed — it was cancelled or already recovered")
 }

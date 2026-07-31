@@ -51,6 +51,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	mux.HandleFunc("POST /v1/run/cancel", server.auth(server.cancelRun))
 	mux.HandleFunc("GET /v1/dlq", server.auth(server.listDeadLetters))
 	mux.HandleFunc("POST /v1/dlq/redrive", server.auth(server.redrive))
+	mux.HandleFunc("POST /v1/dlq/replay", server.auth(server.replayAlias))
 	return mux
 }
 
@@ -407,13 +408,27 @@ func (s *V1Server) resumeRun(w http.ResponseWriter, r *http.Request, rc v1Reques
 // with run READS: cancel distinguishes a missing run (404) from a cross-org
 // one (403), while reads keep both indistinguishable.
 func (s *V1Server) cancelRun(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	// The v1 contract (golden-verified) validates the body shape FIRST:
+	// runId is a required string, reason an OPTIONAL STRING — an object
+	// reason is a 400 invalid_input naming the field, not an accepted value.
 	var body struct {
 		RunID  string `json:"runId"`
 		Reason any    `json:"reason"`
 	}
-	if err := decodeBody(r, &body); err != nil || body.RunID == "" {
-		writeV1Error(w, rc.id, http.StatusBadRequest, "runs_run_id_required", "runId is required", nil)
+	if err := decodeBody(r, &body); err != nil || strings.TrimSpace(body.RunID) == "" {
+		writeV1Error(w, rc.id, http.StatusBadRequest, "invalid_input", "Invalid request body",
+			map[string]any{"field": "runId"})
 		return
+	}
+	var reason any
+	if body.Reason != nil {
+		text, ok := body.Reason.(string)
+		if !ok || strings.TrimSpace(text) == "" {
+			writeV1Error(w, rc.id, http.StatusBadRequest, "invalid_input", "Invalid request body",
+				map[string]any{"field": "reason"})
+			return
+		}
+		reason = text
 	}
 	owner, err := store.New(s.pool).GetRunOwner(r.Context(), body.RunID)
 	if err != nil {
@@ -435,7 +450,7 @@ func (s *V1Server) cancelRun(w http.ResponseWriter, r *http.Request, rc v1Reques
 			map[string]any{"status": owner.Status})
 		return
 	}
-	if err := s.engine.CancelRun(r.Context(), body.RunID, body.Reason); err != nil {
+	if err := s.engine.CancelRun(r.Context(), body.RunID, reason); err != nil {
 		s.internal(w, rc, err)
 		return
 	}
@@ -489,6 +504,33 @@ func (s *V1Server) redrive(w http.ResponseWriter, r *http.Request, rc v1Request)
 		return
 	}
 	writeV1Data(w, rc.id, map[string]any{"redriven": true})
+}
+
+// replayAlias exposes the reference's /v1/dlq/replay wire shape over the
+// same engine redrive: success {ok:true}, conflict with the reference's
+// message. The pilot-own /v1/dlq/redrive stays for its richer body.
+func (s *V1Server) replayAlias(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	var body struct {
+		DeadLetterID string `json:"deadLetterId"`
+	}
+	if err := decodeBody(r, &body); err != nil || body.DeadLetterID == "" {
+		writeV1Error(w, rc.id, http.StatusBadRequest, "invalid_input", "Invalid request body",
+			map[string]any{"field": "deadLetterId"})
+		return
+	}
+	if err := s.engine.RedriveDeadLetter(r.Context(), rc.orgID, body.DeadLetterID); err != nil {
+		switch {
+		case errors.Is(err, engine.ErrDeadLetterNotFound):
+			writeV1Error(w, rc.id, http.StatusNotFound, "dlq_not_found", "Dead letter not found", nil)
+		case errors.Is(err, engine.ErrRedriveConflict):
+			writeV1Error(w, rc.id, http.StatusConflict, "dlq_replay_conflict",
+				"This run can no longer be replayed — it was cancelled or already recovered", nil)
+		default:
+			s.internal(w, rc, err)
+		}
+		return
+	}
+	writeV1Data(w, rc.id, map[string]any{"ok": true})
 }
 
 func (s *V1Server) internal(w http.ResponseWriter, rc v1Request, err error) {

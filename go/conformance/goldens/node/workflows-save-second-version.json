@@ -1,0 +1,32 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/workflows/save",
+    "body": {
+      "id": "golden2-save",
+      "name": "Golden save success",
+      "nodes": [
+        {
+          "id": "only",
+          "type": "noop",
+          "config": {}
+        }
+      ],
+      "edges": []
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "x-request-id": "<present>"
+  },
+  "body": {
+    "apiVersion": "v1",
+    "requestId": "ffc87c46-bba7-4a0b-8527-e1e014578c20",
+    "data": {
+      "workflowId": "golden2-save",
+      "versionId": "95ee9f90-5254-49a2-b070-2055094b7d31",
+      "version": 2
+    }
+  }
+}
