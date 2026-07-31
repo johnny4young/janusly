@@ -310,6 +310,10 @@ WHERE org_id = $1
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(page_limit);
 
+-- name: CountDeadLettersByStatus :many
+SELECT status, count(*) AS count FROM dead_letters
+WHERE org_id = $1 GROUP BY status;
+
 -- name: ClaimDeadLetterReplay :execrows
 UPDATE dead_letters SET replay_claimed_at = now()
 WHERE id = $1 AND org_id = $2 AND replay_claimed_at IS NULL;

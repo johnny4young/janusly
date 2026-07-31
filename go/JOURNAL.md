@@ -563,3 +563,18 @@ local. Sin umbral pasa/no-pasa: números para aprender.
 - Bug de arnés instructivo: dos readFrames sobre el mismo bufio.Reader
   lanzaban dos goroutines lectoras robándose líneas — un pump por
   conexión y la verdad emergió.
+
+## 2026-07-30 — el wire dual: aliases legacy (T-032)
+
+- La pieza estructural de F1: un core por mutación que devuelve un
+  resultado wire-agnóstico, y dos encoders — el crudo legacy que el web
+  POSTea y el envelope v1. El drift entre las dos formas es
+  estructuralmente imposible porque comparten el core: exactamente la
+  arquitectura de alias de Node, en ~60 líneas de encoders.
+- El wire de error legacy es {error: message, code, params?} — el campo
+  se llama "error" y lleva el MENSAJE (no un objeto). Fácil de suponer
+  mal; el docstring de sendError lo dice y el test lo fija.
+- /dlq/counts salió real (GROUP BY de verdad) y el detalle /dlq?id=
+  lleva el snapshot exacto con los overlays de recovery como null
+  honesto. /dlq/queue quedó para T-044: está atado a severidad/SLA/
+  owners de la maquinaria de recovery que el pilot no tiene aún.

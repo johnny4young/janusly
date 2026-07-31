@@ -588,3 +588,82 @@ func TestLegacySupportReads(t *testing.T) {
 		t.Fatalf("org config must be an empty list: %v", cfg.body)
 	}
 }
+
+func TestLegacyMutationAliasesSpeakTheRawWire(t *testing.T) {
+	h := newAPIHarness(t)
+	workflowID := "wf-legacy-" + h.org
+	doc := makeLinearWorkflow(workflowID)
+
+	// Legacy save: the RAW body, no envelope.
+	saved := h.call("POST", "/workflows/save", doc, "")
+	if saved.status != 200 || saved.body["apiVersion"] != nil {
+		t.Fatalf("legacy save must be raw: %d %v", saved.status, saved.body)
+	}
+	if saved.body["workflowId"] != workflowID || saved.body["version"] != float64(1) {
+		t.Fatalf("legacy save shape: %v", saved.body)
+	}
+
+	// Legacy start + cancel: raw {runId} and raw {runId, status}.
+	started := h.call("POST", "/start", map[string]any{"workflow": doc}, "")
+	runID, _ := started.body["runId"].(string)
+	if runID == "" || started.body["data"] != nil {
+		t.Fatalf("legacy start must be raw {runId}: %v", started.body)
+	}
+	h.waitRun(runID, "succeeded")
+	already := h.call("POST", "/run/cancel", map[string]any{"runId": runID}, "")
+	if already.status != 409 || already.body["error"] != "Run is already {{status}}; cannot cancel" ||
+		already.body["code"] != "runs_already_terminal" {
+		t.Fatalf("legacy error wire must be {error, code, params}: %v", already.body)
+	}
+
+	// Legacy resume conflict on a terminal run.
+	conflict := h.call("POST", "/resume", map[string]any{"runId": runID, "nodeId": "shape"}, "")
+	if conflict.status != 409 || conflict.body["error"] != "Node is not waiting" {
+		t.Fatalf("legacy resume conflict: %v", conflict.body)
+	}
+}
+
+func TestLegacyDlqDetailAndCounts(t *testing.T) {
+	h := newAPIHarness(t)
+	doomed := map[string]any{
+		"id": "wf-dlqleg-" + h.org,
+		"nodes": []any{map[string]any{"id": "blocked", "type": "http", "config": map[string]any{
+			"url": "http://169.254.169.254/x",
+		}}},
+		"edges": []any{},
+	}
+	started := h.call("POST", "/start", map[string]any{"workflow": doomed}, "")
+	runID := started.body["runId"].(string)
+	h.waitRun(runID, "failed")
+
+	counts := h.call("GET", "/dlq/counts", nil, "")
+	if counts.body["open"].(float64) < 1 || counts.body["total"].(float64) < 1 {
+		t.Fatalf("counts must reflect the open dead letter: %v", counts.body)
+	}
+
+	list := h.call("GET", "/v1/dlq?limit=20", nil, "")
+	var deadLetterID string
+	for _, item := range list.body["data"].([]any) {
+		if row := item.(map[string]any); row["runId"] == runID {
+			deadLetterID = row["id"].(string)
+		}
+	}
+	detail := h.call("GET", "/dlq?id="+deadLetterID, nil, "")
+	requireKeys(t, detail.body,
+		"id", "orgId", "runId", "nodeId", "attempt", "workflowJson", "nodeJson",
+		"errorJson", "status", "replayedAt", "createdAt", "replayClaimedAt",
+		"suspectVersion", "drill", "drillOutcome")
+	if detail.body["workflowJson"] == nil {
+		t.Fatal("detail must carry the exact replay snapshot")
+	}
+
+	// Legacy replay: raw {ok:true} then the raw conflict wire.
+	replayed := h.call("POST", "/dlq/replay", map[string]any{"deadLetterId": deadLetterID}, "")
+	if replayed.body["ok"] != true {
+		t.Fatalf("legacy replay shape: %v", replayed.body)
+	}
+	again := h.call("POST", "/dlq/replay", map[string]any{"deadLetterId": deadLetterID}, "")
+	if again.status != 409 || again.body["code"] != "dlq_replay_conflict" {
+		t.Fatalf("legacy replay conflict: %v", again.body)
+	}
+}

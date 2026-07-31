@@ -104,6 +104,36 @@ func (q *Queries) CompleteRunNode(ctx context.Context, arg CompleteRunNodeParams
 	return result.RowsAffected(), nil
 }
 
+const countDeadLettersByStatus = `-- name: CountDeadLettersByStatus :many
+SELECT status, count(*) AS count FROM dead_letters
+WHERE org_id = $1 GROUP BY status
+`
+
+type CountDeadLettersByStatusRow struct {
+	Status string
+	Count  int64
+}
+
+func (q *Queries) CountDeadLettersByStatus(ctx context.Context, orgID string) ([]CountDeadLettersByStatusRow, error) {
+	rows, err := q.db.Query(ctx, countDeadLettersByStatus, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountDeadLettersByStatusRow
+	for rows.Next() {
+		var i CountDeadLettersByStatusRow
+		if err := rows.Scan(&i.Status, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countWorkflowVersions = `-- name: CountWorkflowVersions :one
 SELECT COALESCE(MAX(version), 0)::int FROM workflow_versions
 WHERE workflow_id = $1 AND org_id = $2

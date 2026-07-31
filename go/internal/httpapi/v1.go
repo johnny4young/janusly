@@ -81,6 +81,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	mux.HandleFunc("POST /v1/dlq/redrive", server.auth(server.redrive))
 	mux.HandleFunc("POST /v1/dlq/replay", server.auth(server.replayAlias))
 	mux.HandleFunc("GET /runs/{runId}/stream", server.auth(server.streamRun))
+	server.legacyMutations(mux)
 	return WithBrowserHeaders(mux)
 }
 
@@ -152,16 +153,18 @@ func contractField(issues []domain.Issue) string {
 }
 
 func (s *V1Server) saveWorkflow(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	writeVersioned(w, rc.id, s.saveCore(r, rc))
+}
+
+func (s *V1Server) saveCore(r *http.Request, rc v1Request) opResult {
 	var raw json.RawMessage
 	if err := decodeBody(r, &raw); err != nil {
-		writeV1Error(w, rc.id, http.StatusBadRequest, "invalid_input", "Invalid request body", nil)
-		return
+		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body", nil)
 	}
 	wf, issues := domain.Parse(raw)
 	if wf == nil {
-		writeV1Error(w, rc.id, http.StatusBadRequest, "invalid_input", "Invalid request body",
+		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
 			map[string]any{"field": contractField(issues)})
-		return
 	}
 	// Save accepts the full platform vocabulary — a node type this backend
 	// cannot execute yet is a START-time concern, not a save-time one.
@@ -173,9 +176,8 @@ func (s *V1Server) saveWorkflow(w http.ResponseWriter, r *http.Request, rc v1Req
 		}
 	}
 	if len(blocking) > 0 {
-		writeV1Error(w, rc.id, http.StatusBadRequest, "workflows_validation_failed",
+		return opError(http.StatusBadRequest, "workflows_validation_failed",
 			"Workflow validation failed", map[string]any{"issues": blocking})
-		return
 	}
 
 	ctx := r.Context()
@@ -186,8 +188,7 @@ func (s *V1Server) saveWorkflow(w http.ResponseWriter, r *http.Request, rc v1Req
 	}
 	if _, err := q.GetWorkflow(ctx, store.GetWorkflowParams{ID: workflowID, OrgID: rc.orgID}); err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
-			s.internal(w, rc, err)
-			return
+			return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 		}
 		name := wf.Name
 		if name == "" {
@@ -200,20 +201,17 @@ func (s *V1Server) saveWorkflow(w http.ResponseWriter, r *http.Request, rc v1Req
 			// The id exists under another org: same-name collision across
 			// tenants surfaces as the reference's save-conflict code.
 			if strings.Contains(err.Error(), "workflows_pkey") {
-				writeV1Error(w, rc.id, http.StatusConflict, "workflows_save_conflict",
+				return opError(http.StatusConflict, "workflows_save_conflict",
 					"Workflow id is already taken", nil)
-				return
 			}
-			s.internal(w, rc, err)
-			return
+			return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 		}
 	}
 	version, err := q.CountWorkflowVersions(ctx, store.CountWorkflowVersionsParams{
 		WorkflowID: workflowID, OrgID: rc.orgID,
 	})
 	if err != nil {
-		s.internal(w, rc, err)
-		return
+		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}
 	versionID := s.newID()
 	if err := q.InsertWorkflowVersion(ctx, store.InsertWorkflowVersionParams{
@@ -221,36 +219,36 @@ func (s *V1Server) saveWorkflow(w http.ResponseWriter, r *http.Request, rc v1Req
 		Version: version + 1, DagJson: raw,
 		CreatedBy: pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
 	}); err != nil {
-		s.internal(w, rc, err)
-		return
+		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}
-	writeV1Data(w, rc.id, map[string]any{
+	return opOK(map[string]any{
 		"workflowId": workflowID, "versionId": versionID, "version": version + 1,
 	})
 }
 
 func (s *V1Server) startRun(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	writeVersioned(w, rc.id, s.startCore(r, rc))
+}
+
+func (s *V1Server) startCore(r *http.Request, rc v1Request) opResult {
 	var body struct {
 		Workflow json.RawMessage `json:"workflow"`
 		Input    any             `json:"input"`
 	}
 	if err := decodeBody(r, &body); err != nil || len(body.Workflow) == 0 {
-		writeV1Error(w, rc.id, http.StatusBadRequest, "invalid_input", "Invalid request body",
+		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
 			map[string]any{"field": "workflow"})
-		return
 	}
 	wf, issues := domain.Parse(body.Workflow)
 	if wf == nil {
-		writeV1Error(w, rc.id, http.StatusBadRequest, "invalid_input", "Invalid request body",
+		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
 			map[string]any{"field": "workflow." + contractField(issues)})
-		return
 	}
 	// Execution needs the executable subset — here the pilot-only code IS
 	// blocking, unlike save.
 	if result := domain.Validate(wf, grammar.DomainValidator); !result.Valid {
-		writeV1Error(w, rc.id, http.StatusBadRequest, "workflows_validation_failed",
+		return opError(http.StatusBadRequest, "workflows_validation_failed",
 			"Workflow validation failed", map[string]any{"issues": result.Issues})
-		return
 	}
 	runID, err := s.engine.StartRun(r.Context(), engine.StartInput{
 		OrgID: rc.orgID, Workflow: wf, Input: body.Input, CreatedBy: rc.userID,
@@ -258,14 +256,12 @@ func (s *V1Server) startRun(w http.ResponseWriter, r *http.Request, rc v1Request
 	if err != nil {
 		var invalid *engine.InputValidationError
 		if errors.As(err, &invalid) {
-			writeV1Error(w, rc.id, http.StatusBadRequest, "runs_input_invalid",
+			return opError(http.StatusBadRequest, "runs_input_invalid",
 				err.Error(), map[string]any{"errors": invalid.Errors})
-			return
 		}
-		s.internal(w, rc, err)
-		return
+		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}
-	writeV1Data(w, rc.id, map[string]any{"runId": runID})
+	return opOK(map[string]any{"runId": runID})
 }
 
 const eventsPageDefault = 200
@@ -417,13 +413,16 @@ func (s *V1Server) listRuns(w http.ResponseWriter, r *http.Request, rc v1Request
 }
 
 func (s *V1Server) resumeRun(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	writeVersioned(w, rc.id, s.resumeCore(r, rc))
+}
+
+func (s *V1Server) resumeCore(r *http.Request, rc v1Request) opResult {
 	var body struct {
 		RunID  string `json:"runId"`
 		NodeID string `json:"nodeId"`
 	}
 	if err := decodeBody(r, &body); err != nil || body.RunID == "" || body.NodeID == "" {
-		writeV1Error(w, rc.id, http.StatusBadRequest, "invalid_input", "Invalid request body", nil)
-		return
+		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body", nil)
 	}
 	// Tenancy first: a run outside this org is the same Forbidden as a run
 	// that never existed.
@@ -431,24 +430,21 @@ func (s *V1Server) resumeRun(w http.ResponseWriter, r *http.Request, rc v1Reques
 		ID: body.RunID, OrgID: rc.orgID,
 	}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			writeV1Error(w, rc.id, http.StatusForbidden, "runs_forbidden", "Forbidden", nil)
-			return
+			return opError(http.StatusForbidden, "runs_forbidden", "Forbidden", nil)
 		}
-		s.internal(w, rc, err)
-		return
+		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}
 	if err := s.engine.ResumeRun(r.Context(), body.RunID, body.NodeID); err != nil {
 		switch {
 		case errors.Is(err, engine.ErrResumeConflict):
-			writeV1Error(w, rc.id, http.StatusConflict, "runs_resume_conflict", "Node is not waiting", nil)
+			return opError(http.StatusConflict, "runs_resume_conflict", "Node is not waiting", nil)
 		case errors.Is(err, engine.ErrResumeNodeNotFound):
-			writeV1Error(w, rc.id, http.StatusNotFound, "runs_resume_not_found", "Node not found", nil)
+			return opError(http.StatusNotFound, "runs_resume_not_found", "Node not found", nil)
 		default:
-			s.internal(w, rc, err)
+			return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 		}
-		return
 	}
-	writeV1Data(w, rc.id, map[string]any{"resumed": true})
+	return opOK(map[string]any{"resumed": true})
 }
 
 func (s *V1Server) listWorkflows(w http.ResponseWriter, r *http.Request, rc v1Request) {
@@ -571,53 +567,52 @@ func (s *V1Server) listWorkflowVersions(w http.ResponseWriter, r *http.Request, 
 // with run READS: cancel distinguishes a missing run (404) from a cross-org
 // one (403), while reads keep both indistinguishable.
 func (s *V1Server) cancelRun(w http.ResponseWriter, r *http.Request, rc v1Request) {
-	// The v1 contract (golden-verified) validates the body shape FIRST:
-	// runId is a required string, reason an OPTIONAL STRING — an object
-	// reason is a 400 invalid_input naming the field, not an accepted value.
+	writeVersioned(w, rc.id, s.cancelCore(r, rc))
+}
+
+// cancelCore ports the reference guards exactly — and note the asymmetry
+// with run READS: cancel distinguishes a missing run (404) from a cross-org
+// one (403), while reads keep both indistinguishable. The v1 contract
+// (golden-verified) validates the body shape FIRST: runId is a required
+// string, reason an OPTIONAL STRING.
+func (s *V1Server) cancelCore(r *http.Request, rc v1Request) opResult {
 	var body struct {
 		RunID  string `json:"runId"`
 		Reason any    `json:"reason"`
 	}
 	if err := decodeBody(r, &body); err != nil || strings.TrimSpace(body.RunID) == "" {
-		writeV1Error(w, rc.id, http.StatusBadRequest, "invalid_input", "Invalid request body",
+		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
 			map[string]any{"field": "runId"})
-		return
 	}
 	var reason any
 	if body.Reason != nil {
 		text, ok := body.Reason.(string)
 		if !ok || strings.TrimSpace(text) == "" {
-			writeV1Error(w, rc.id, http.StatusBadRequest, "invalid_input", "Invalid request body",
+			return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
 				map[string]any{"field": "reason"})
-			return
 		}
 		reason = text
 	}
 	owner, err := store.New(s.pool).GetRunOwner(r.Context(), body.RunID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			writeV1Error(w, rc.id, http.StatusNotFound, "runs_run_not_found", "Run not found", nil)
-			return
+			return opError(http.StatusNotFound, "runs_run_not_found", "Run not found", nil)
 		}
-		s.internal(w, rc, err)
-		return
+		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}
 	if owner.OrgID != rc.orgID {
-		writeV1Error(w, rc.id, http.StatusForbidden, "runs_forbidden", "Forbidden", nil)
-		return
+		return opError(http.StatusForbidden, "runs_forbidden", "Forbidden", nil)
 	}
 	switch owner.Status {
 	case "succeeded", "failed", "cancelled", "timed_out":
-		writeV1Error(w, rc.id, http.StatusConflict, "runs_already_terminal",
+		return opError(http.StatusConflict, "runs_already_terminal",
 			"Run is already {{status}}; cannot cancel",
 			map[string]any{"status": owner.Status})
-		return
 	}
 	if err := s.engine.CancelRun(r.Context(), body.RunID, reason); err != nil {
-		s.internal(w, rc, err)
-		return
+		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}
-	writeV1Data(w, rc.id, map[string]any{"runId": body.RunID, "status": "cancelled"})
+	return opOK(map[string]any{"runId": body.RunID, "status": "cancelled"})
 }
 
 func (s *V1Server) listDeadLetters(w http.ResponseWriter, r *http.Request, rc v1Request) {
@@ -669,31 +664,33 @@ func (s *V1Server) redrive(w http.ResponseWriter, r *http.Request, rc v1Request)
 	writeV1Data(w, rc.id, map[string]any{"redriven": true})
 }
 
-// replayAlias exposes the reference's /v1/dlq/replay wire shape over the
-// same engine redrive: success {ok:true}, conflict with the reference's
-// message. The pilot-own /v1/dlq/redrive stays for its richer body.
-func (s *V1Server) replayAlias(w http.ResponseWriter, r *http.Request, rc v1Request) {
+// replayCore is the shared engine redrive with the reference's replay wire
+// (success {ok:true}); the pilot-own redrive route reuses it with a richer
+// body.
+func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 	var body struct {
 		DeadLetterID string `json:"deadLetterId"`
 	}
 	if err := decodeBody(r, &body); err != nil || body.DeadLetterID == "" {
-		writeV1Error(w, rc.id, http.StatusBadRequest, "invalid_input", "Invalid request body",
+		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
 			map[string]any{"field": "deadLetterId"})
-		return
 	}
 	if err := s.engine.RedriveDeadLetter(r.Context(), rc.orgID, body.DeadLetterID); err != nil {
 		switch {
 		case errors.Is(err, engine.ErrDeadLetterNotFound):
-			writeV1Error(w, rc.id, http.StatusNotFound, "dlq_not_found", "Dead letter not found", nil)
+			return opError(http.StatusNotFound, "dlq_not_found", "Dead letter not found", nil)
 		case errors.Is(err, engine.ErrRedriveConflict):
-			writeV1Error(w, rc.id, http.StatusConflict, "dlq_replay_conflict",
+			return opError(http.StatusConflict, "dlq_replay_conflict",
 				"This run can no longer be replayed — it was cancelled or already recovered", nil)
 		default:
-			s.internal(w, rc, err)
+			return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 		}
-		return
 	}
-	writeV1Data(w, rc.id, map[string]any{"ok": true})
+	return opOK(map[string]any{"ok": true})
+}
+
+func (s *V1Server) replayAlias(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	writeVersioned(w, rc.id, s.replayCore(r, rc))
 }
 
 func (s *V1Server) internal(w http.ResponseWriter, rc v1Request, err error) {
