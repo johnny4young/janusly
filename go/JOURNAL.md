@@ -1525,3 +1525,8 @@ producción necesita saber — de lo ya resuelto o informativo.
 - Consumido por 4 suites: el cliente ai (matriz de clasificación — refactor del inline anterior), la escalera free-json (repair-or-fail por réplica), `/ai/generate-workflow` (cada fallo wire degrada con HTTP 200, `mode:"fallback"`, clase aiError al frente y template de fallback con nodos) y el nodo ai por run real (el run TRIUNFA; salida `{mode:fallback, aiError}` — el contrato sagrado).
 - Hallazgo: un 200 con cuerpo no-JSON clasifica `network`, no `unknown` — el SDK lo reporta como fallo de decode del transporte (proxy roto delante del proveedor), y esa es la lectura honesta. El caso quedó documentado en el catálogo.
 - Agente/embeddings ya tenían sus matrices propias (TestAgentLLMPlannerMatrix, memoria con Ollama muerto); el catálogo cubre las superficies de parseo/proveedor.
+
+## T-124 · Evals contra Go (2026-07-31)
+- Corrida formal del harness existente (sin fork): binario Go servido en :4699, `JANUSLY_EVALS_API_URL=http://127.0.0.1:4699 node scripts/run-evals.mjs` → 3 passed / 0 not-passing / 27 skipped / exit 0. El gate `summarizeAi` + `compareToBaseline` corre intacto.
+- Deterministas al 100%: los tres casos con template exigido pasan con los ids clavados del T-106. Los 27 casos ai-mode saltan porque el fallback sin key del Go no adjunta `aiError` — exactamente el contrato de skip que las evals esperan (excluidos de denominadores, verde a $0).
+- Divergencia explicada y aceptada: la tasa ai-mode contra baseline no se puede medir a $0; la corrida dorada con key real gasta créditos y queda como ítem diferido invocado por el usuario (decisión vigente desde la ola 3).
