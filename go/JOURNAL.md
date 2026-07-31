@@ -618,3 +618,17 @@ local. Sin umbral pasa/no-pasa: números para aprender.
   cadena useBootstrapData → permissionsRef → App → identityContext.
   La rama dev-headers de Node (org sintética admin con las 41 claves
   del catálogo) era la respuesta exacta.
+
+## 2026-07-30 — tool registry + nodo tool (T-036)
+
+- La familia json portada con una decisión que me gustó razonar: los
+  guards de prototype-pollution NO son necesarios en Go (no hay
+  prototipo que envenenar) pero se portan igual — un payload producido
+  por el pilot puede terminar consumido por el backend Node, así que
+  refutar `__proto__` en los paths de set y saltarlo en merge mantiene
+  la seguridad de la cadena completa, no solo de este proceso.
+- El envelope {tool, result} importa más de lo que parece: los
+  templates downstream leen A TRAVÉS de él
+  ({{context.parse.output.result.value.customer.id}}), y el test lo
+  recorre entero. resultPolicy decide si un fallo de tool mata el nodo
+  o fluye como dato para que el workflow ramifique.

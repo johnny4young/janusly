@@ -14,6 +14,7 @@ import (
 	"fmt"
 
 	"github.com/johnny4young/janusly/go/internal/grammar"
+	"github.com/johnny4young/janusly/go/internal/tools"
 )
 
 // Input carries one execution's rendered config and run context, plus the
@@ -31,7 +32,9 @@ type Func func(ctx context.Context, in Input) (any, error)
 // Registry returns the executable subset: node types outside this map fail
 // dispatch with the reference's "No executor" error.
 func Registry() map[string]Func {
+	toolRegistry := tools.NewRegistry()
 	return map[string]Func{
+		"tool":       NewToolExecutor(toolRegistry),
 		"noop":       executeNoop,
 		"condition":  executeCondition,
 		"transform":  executeTransform,

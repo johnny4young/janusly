@@ -672,6 +672,7 @@ el chat publicado.
 | 2026-07-30 | T-034 rollback | Pre-checks de workflows-rollback.ts portados: padre activo (tombstone = not-found para escrituras — el mismo comentario de la fuente), versión fuente org+workflow-scoped (source de otro workflow/org = `workflows_source_version_not_found` 404), DAG fuente bien formado (`workflows_version_malformed` 422), conflicto de incremento → 409 `workflows_rollback_conflict` con params.attempts. Éxito `{workflowId, versionId, version, sourceVersion}` — el rollback APPENDEA (v3 = snapshot de v1), nunca borra historia. Ambos wires vía rollbackCore. `rollout_active` fuera de alcance (sin rollouts en pilot); sin retry bounded de unique-violation (single-attempt → conflicto directo, anotado) |
 | 2026-07-30 | T-035 HITO F1 | EL WEB REAL CORRE CONTRA GO: smoke Playwright verde — la app monta, el feed de Activity renderiza runs sembrados leyendo /v1/runs de Go, el approval en espera cuenta en needs-action (proyección de nodos), y CERO page errors (paneles fuera de alcance degradan como prometía el wrapper). Reproducible: `node go/conformance/run-web-smoke.mjs` (bootea binario Go + vite vía webServer de Playwright con VITE_API_URL) |
 | 2026-07-30 | hallazgo (T-035) | El gap invisible del inventario: `GET /auth/context` — el bootstrap de identidad que el web hace ANTES de todo. Sin él, `permissionsRef` queda vacío y CADA lectura cae a su fallback (síntoma engañoso: app montada, feed vacío, cero errores). Servida la rama dev-headers de Node: org sintética admin developmentFallback con las 41 claves del catálogo (extraídas de permission-catalog.ts en el pin) |
+| 2026-07-30 | T-036 tool registry | `internal/tools` con la familia json (parse/pick/set/merge) portada incluidos sus guards de prototype-pollution (`__proto__`/`prototype`/`constructor` rechazados en paths de set y saltados en merge — en Go no hay prototipo que envenenar, pero un payload del pilot puede volver al backend Node: se refutan igual). Nodo `tool` con el envelope de referencia `{tool, result}` + `resultPolicy` ("envelope" default fluye el fallo; "require_ok" falla el nodo). Catálogo `listTools()` (name/description/required/optional/inputExample/inputFields/writeSide) servido en /v1/tools y /tools. `tool` entra en PilotNodeTypes (el test de tipo-no-ejecutable migró a `ai`) |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -894,7 +895,7 @@ compactas aquí; el detalle de paridad se lee de la fuente al ejecutar.
 | T-033 | Soft-delete de workflows (DELETE /v1/workflows/:id + tombstone + exclusiones) | F1 | P0 | done |
 | T-034 | Rollback (`POST /v1/workflows/rollback`, pre-checks Node) | F1 | P1 | done |
 | T-035 | Smoke Playwright del web contra Go (Flows list + Activity + run detail) | F1 | P0 | done |
-| T-036 | Executor `json.parse` + tool registry mínimo (`listTools()` para AI Studio read) | F2 | P1 | todo |
+| T-036 | Executor `json.parse` + tool registry mínimo (`listTools()` para AI Studio read) | F2 | P1 | done |
 | T-037 | `parallel_fork` + `join` (shells declarativos sobre readiness, validación 3 reglas) | F2 | P1 | todo |
 | T-038 | Executor `loop` modo map puro (legacy contract) | F2 | P1 | todo |
 | T-039 | Edge conditions con evaluación completa en validación (`validateExpression` en save) | F2 | P2 | todo |

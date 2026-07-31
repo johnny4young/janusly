@@ -201,3 +201,63 @@ func TestStrictTemplatePolicyFailsBeforeConsumingMissingValue(t *testing.T) {
 		t.Fatalf("strict policy must fail with the envelope message: %s", errorJSON)
 	}
 }
+
+func TestToolNodeRunsThroughTheRegistry(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	doc := `{"nodes":[
+		{"id":"parse","type":"tool","config":{
+			"tool":"json.parse",
+			"input":{"value":"{\"customer\":{\"id\":42}}"}
+		}},
+		{"id":"read","type":"transform","config":{"mapping":{
+			"id":"{{context.parse.output.result.value.customer.id}}"
+		}}}
+	],"edges":[{"from":"parse","to":"read"}]}`
+	runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: mustParse(t, doc)})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	runDispatcherToTerminal(t, eng, pool, runID, "succeeded")
+
+	var state []byte
+	_ = pool.QueryRow(ctx, "select state_json->'output' from run_nodes where run_id=$1 and node_id='parse'", runID).Scan(&state)
+	var output map[string]any
+	_ = json.Unmarshal(state, &output)
+	// Envelope parity: {tool, result} with the tool's own fields under result.
+	if output["tool"] != "json.parse" {
+		t.Fatalf("tool envelope: %s", state)
+	}
+	result := output["result"].(map[string]any)
+	if result["ok"] != true {
+		t.Fatalf("result envelope: %s", state)
+	}
+
+	// Downstream templating reads THROUGH the envelope.
+	var downstream []byte
+	_ = pool.QueryRow(ctx, "select state_json->'output' from run_nodes where run_id=$1 and node_id='read'", runID).Scan(&downstream)
+	if !strings.Contains(string(downstream), `"id": 42`) && !strings.Contains(string(downstream), `"id":42`) {
+		t.Fatalf("templated tool output: %s", downstream)
+	}
+}
+
+func TestToolFailureFollowsResultPolicy(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	// Default policy: the failed envelope flows downstream, node succeeds.
+	lenient := `{"nodes":[{"id":"t","type":"tool","config":{
+		"tool":"json.parse","input":{"value":"{broken"}
+	}}],"edges":[]}`
+	runID, _ := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: mustParse(t, lenient)})
+	runDispatcherToTerminal(t, eng, pool, runID, "succeeded")
+	var state []byte
+	_ = pool.QueryRow(ctx, "select state_json->'output'->'result' from run_nodes where run_id=$1", runID).Scan(&state)
+	if !strings.Contains(string(state), `"ok": false`) || !strings.Contains(string(state), "invalid JSON") {
+		t.Fatalf("lenient policy must carry the failure envelope: %s", state)
+	}
+
+	// require_ok: the node fails.
+	strict := `{"nodes":[{"id":"t","type":"tool","config":{
+		"tool":"json.parse","input":{"value":"{broken"},"resultPolicy":"require_ok"
+	}}],"edges":[]}`
+	strictRun, _ := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: mustParse(t, strict)})
+	runDispatcherToTerminal(t, eng, pool, strictRun, "failed")
+}

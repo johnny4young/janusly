@@ -26,6 +26,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/engine"
 	"github.com/johnny4young/janusly/go/internal/grammar"
 	"github.com/johnny4young/janusly/go/internal/store"
+	"github.com/johnny4young/janusly/go/internal/tools"
 )
 
 // V1Server owns the /v1 route surface over one engine and pool.
@@ -83,6 +84,14 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	mux.HandleFunc("POST /v1/dlq/replay", server.auth(server.replayAlias))
 	mux.HandleFunc("GET /runs/{runId}/stream", server.auth(server.streamRun))
 	mux.HandleFunc("GET /auth/context", server.auth(server.authContext))
+	// The AI Studio's tool catalog; the web calls it through /v1.
+	mux.HandleFunc("GET /v1/tools", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeV1Data(w, rc.id, tools.NewRegistry().Catalog())
+	}))
+	mux.HandleFunc("GET /tools", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(tools.NewRegistry().Catalog())
+	}))
 	server.legacyMutations(mux)
 	return WithBrowserHeaders(mux)
 }

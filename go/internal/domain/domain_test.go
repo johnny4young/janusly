@@ -91,13 +91,13 @@ func TestUnsupportedVersusPilotUnsupported(t *testing.T) {
 	// executable subset gets the pilot-only code instead, never Node's.
 	result := Validate(parseOK(t, `{"nodes":[
 		{"id":"a","type":"banana","config":{}},
-		{"id":"b","type":"tool","config":{"tool":"http.request"}}
+		{"id":"b","type":"ai","config":{}}
 	],"edges":[]}`), nil)
 	unsupported := requireIssue(t, result, CodeUnsupportedNodeType, "Unsupported node type: banana")
 	if unsupported.NodeID != "a" {
 		t.Fatalf("wrong node attribution: %+v", unsupported)
 	}
-	pilot := requireIssue(t, result, CodeNodeTypeUnsupportedPilot, `"tool"`)
+	pilot := requireIssue(t, result, CodeNodeTypeUnsupportedPilot, `"ai"`)
 	if pilot.NodeID != "b" {
 		t.Fatalf("wrong node attribution: %+v", pilot)
 	}

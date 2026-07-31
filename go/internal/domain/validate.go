@@ -72,7 +72,7 @@ var platformNodeTypes = map[string]bool{
 // PilotNodeTypes is the executable subset of this backend today.
 var PilotNodeTypes = map[string]bool{
 	"noop": true, "transform": true, "condition": true, "http": true,
-	"wait_until": true, "approval": true,
+	"wait_until": true, "approval": true, "tool": true,
 }
 
 // inputsScopePattern flags inputs.* references on edge conditions after
