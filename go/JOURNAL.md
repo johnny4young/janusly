@@ -1195,3 +1195,19 @@ producción necesita saber — de lo ya resuelto o informativo.
   excepción es deliberada: un rol custom que HEREDA rango admin no se
   toca, porque un billing-admin estrecho es un caso de uso, no un
   accidente.
+
+## 2026-07-31 — el chokepoint de audit, con su hallazgo (T-079, T-080)
+
+- La extracción mecánica volvió a pagar: mi primer corte del union type
+  dio 88 acciones y el catálogo real tiene 147 — un punto y coma
+  intermedio truncó el tipo. Los tests con nombres reales lo
+  destaparon de inmediato; una transcripción a mano habría derivado en
+  silencio.
+- Las dos posturas de escritura quedaron nítidas y probadas: la
+  best-effort traga fallos (la telemetría jamás rompe la operación que
+  describe) mientras la transaccional EXISTE para fallar — un typo en
+  el audit ligado al tx revienta la transacción entera, y la firma del
+  handler en Go impone lo que la referencia solo podía pedir por
+  convención de nombres. La forense no es falsificable: el bloque
+  actor/source derivado del auth gana toda colisión con metadata del
+  caller, y las claves sensibles se redactan antes del jsonb.
