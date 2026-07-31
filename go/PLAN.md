@@ -177,7 +177,7 @@ crítica) · P1 (importante) · P2 (stretch).
 | T-011 | Executor http + SSRF/DNS pinning | P0 | done |
 | T-012 | API /v1 mínima + envelopes + goldens de referencia Node | P0 | done |
 | T-013 | Arnés de paridad semántica (lane A, fixtures F01–F10) | P0 | done |
-| T-014 | E2E de API Go (lane B) | P0 | todo |
+| T-014 | E2E de API Go (lane B) | P0 | done |
 | T-015 | Servidor MCP stdio + e2e vía MCP (lane C) | P1 | todo |
 | T-016 | Rendimiento: k6 + RSS + pprof vs Node | P1 | todo |
 | T-017 | Journal consolidado + análisis de fricción | P1 | todo |
@@ -642,6 +642,7 @@ el chat publicado.
 | 2026-07-30 | HITO | Paridad semántica F01–F10 EN VERDE A LA PRIMERA: 11 proyecciones (F02 partida a/b) idénticas a los goldens del stack Node real — status final, estado+attempts por nodo, outputs proyectados, conteo de dead letters. `make parity` reproducible; fixtures compartidas en conformance/fixtures.json con pasos declarativos y `{{UPSTREAM}}` por runner |
 | 2026-07-30 | divergencia aceptada (única) | F05: el replay de Node RE-ARMA el nodo fresco (attempts vuelve a 1 bajo su maquinaria de recovery claims); el redrive del piloto preserva la evidencia y avanza el contador (2 fallos + éxito redriveado = 3). Tabla `acceptedDivergences` en el runner con el porqué |
 | 2026-07-30 | nota | Los goldens de paridad se generaron con el stack Node del worktree (pin) + stub upstream determinista idéntico en ambos runners (ok/fail/flaky+heal); ALLOW_PRIVATE_HTTP_TARGETS=true en ambos lados para F03-F05 (upstream local) |
+| 2026-07-30 | e2e binario real | T-014: los dos ciclos del README conducidos por HTTP contra el binario COMPILADO en puertos efímeros — cuña de recuperación (save→start→500→DLQ→heal→redrive→succeeded con downstream completado) y puerta de operador (approval→resume→outputs proyectados leyendo default de input + estado downstream). El teardown verifica el drain limpio en SIGTERM — el contrato de lifecycle probado en cada corrida |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)

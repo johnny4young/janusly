@@ -321,3 +321,17 @@ consolidan en el informe de la puerta D15.
 - El arnés quedó reproducible: fixtures compartidas declarativas, stub
   upstream determinista clonado en ambos runners, `make parity` como
   comando único. Regenerar goldens = un script contra el stack del pin.
+
+## 2026-07-30 — e2e del binario real (T-014)
+
+- Los dos ciclos del README, por HTTP, contra el binario compilado de
+  verdad: la cuña de recuperación completa (500 persistente → DLQ →
+  upstream sana → redrive → succeeded con el transform downstream
+  leyendo el statusCode) y la puerta de operador (approval → resume →
+  outputs proyectados combinando el default declarado del input con el
+  estado del downstream).
+- El teardown no es cortesía: cada corrida manda SIGTERM y FALLA si el
+  binario no drena en 15s — el contrato de lifecycle del worker se
+  prueba en cada ejecución del suite.
+- Un bug de arnés instructivo: t.TempDir() del primer test se llevaba el
+  binario compartido al terminar; temp estable propio y listo.
