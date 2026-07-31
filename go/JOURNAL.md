@@ -1386,3 +1386,9 @@ producción necesita saber — de lo ya resuelto o informativo.
   calculado, fallback con el error clasificado — y las tres posturas de
   costo (desconocido→null, simulado→cero, override de env) probadas
   contra filas reales.
+
+## 2026-07-31 — el breakpoint de cache, anclado al wire (T-102)
+
+- Un servidor de captura probó el request mismo: el bloque system lleva
+  el cache_control exacto cuando se opta, ni un byte cuando no, y el
+  max_tokens per-call aterriza tal cual.
