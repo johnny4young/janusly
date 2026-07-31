@@ -88,13 +88,41 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 		Config: renderedConfig, Context: runContext,
 	})
 	if execErr != nil {
-		return nil, errors.New(grammar.RedactString(execErr.Error(), rendered.RedactedValues))
+		return nil, redactExecError(execErr, rendered.RedactedValues)
 	}
 	if waiting, ok := output.(executors.Waiting); ok {
 		waiting.Metadata, _ = grammar.RedactValues(waiting.Metadata, rendered.RedactedValues).(map[string]any)
 		return waiting, nil
 	}
 	return grammar.RedactValues(output, rendered.RedactedValues), nil
+}
+
+// richError is the identity contract structured executor errors satisfy so
+// classification survives redaction.
+type richError interface {
+	error
+	ErrorName() string
+	ErrorCode() string
+	ErrorStatusCode() int
+}
+
+// redactExecError scrubs resolved secret/env values from the message while
+// preserving the error's classification identity (name/code/status) — the
+// retry ladder reads those fields to match retryOn patterns like "5xx".
+func redactExecError(execErr error, redactedValues []string) error {
+	message := grammar.RedactString(execErr.Error(), redactedValues)
+	var rich richError
+	if errors.As(execErr, &rich) {
+		return &ExecError{
+			Message: message, Name: rich.ErrorName(),
+			Code: rich.ErrorCode(), StatusCode: rich.ErrorStatusCode(),
+		}
+	}
+	var config *executors.ConfigError
+	if errors.As(execErr, &config) {
+		return &ExecError{Message: message, Name: "WaitingConfigError", Code: config.Code}
+	}
+	return errors.New(message)
 }
 
 // recordUnresolvedPaths appends the bounded, deduplicated evidence event and

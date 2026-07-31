@@ -37,6 +37,7 @@ func Registry() map[string]Func {
 		"transform":  executeTransform,
 		"wait_until": executeWaitUntil,
 		"approval":   executeApproval,
+		"http":       NewHTTPExecutor(HTTPOptions{}),
 	}
 }
 

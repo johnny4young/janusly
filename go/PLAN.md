@@ -174,7 +174,7 @@ crítica) · P1 (importante) · P2 (stretch).
 | T-008 | Modelo de fallo: retry ladder + dead_letters | P0 | done |
 | T-009 | wait_until + approval/waiting + POST /resume | P0 | done |
 | T-010 | Redrive desde dead_letters | P0 | done |
-| T-011 | Executor http + SSRF/DNS pinning | P0 | todo |
+| T-011 | Executor http + SSRF/DNS pinning | P0 | done |
 | T-012 | API /v1 mínima + envelopes + goldens de referencia Node | P0 | todo |
 | T-013 | Arnés de paridad semántica (lane A, fixtures F01–F10) | P0 | todo |
 | T-014 | E2E de API Go (lane B) | P0 | todo |
@@ -628,6 +628,12 @@ el chat publicado.
 | 2026-07-30 | paridad + divergencia anotada | La columna de claim es la misma de Node (`replay_claimed_at`); el evento `node.redriven` es nombre propio del piloto (anotado en card). `dead_letters.status` queda `open` — el flip a `replayed`/`replayedAt` es maquinaria de impacto de recuperación de Node (se marca al RECUPERAR, no al iniciar el replay: "replay initiation is never a recovered win") — diferido a F2 |
 | 2026-07-30 | paridad (heredada) | Ni Node ni el piloto limpian `error_json` al completar un nodo redriveado — la evidencia del fallo anterior queda en la fila junto al output nuevo. Verificado en markNodeSucceeded (no toca errorJson) |
 | 2026-07-30 | nota | Si el nodo ya no está `failed` (redrive previo, cancel), el claim NO se quema: la tx entera revierte y devuelve conflicto — el operador puede reintentar cuando el estado se aclare. La ruta HTTP `POST /dlq/redrive` monta en la tarea de API |
+| 2026-07-30 | verificado en fuente | T-011: status no-2xx SÍ falla el nodo — `HttpResponseError {name:"HttpResponseError", code:"E_HTTP_STATUS", statusCode, message:"HTTP failed: N"}` (core/http-error.ts; existe precisamente para que `retryOn:["5xx"]` clasifique). El pipeline de dispatch preserva name/code/statusCode a través de la redacción — sin eso, la escalera de retries quedaría ciega para el tipo de nodo más común |
+| 2026-07-30 | corrección a la card | El tope de respuesta LANZA error con los mensajes exactos de Node ("HTTP response exceeds maxResponseBytes…"), no centinela truncado — el centinela es del safe-persist, no del executor |
+| 2026-07-30 | paridad exacta | Tabla de clases portada de http-policy.ts:194-238: IPv4 0/8, 10/8, 127/8, CGNAT 100.64/10, 169.254/16 (metadata incluida), 172.16/12, 192.168/16, ≥224; IPv6 ::1, ::, fc/fd, fe80, ff, mapeadas ::ffff:x; hostnames `localhost`/`localhost.localdomain`/`*.localhost`; mensajes de rechazo verbatim; bypass `ALLOW_PRIVATE_HTTP_TARGETS=true` SIN pinning (igual que Node: el bypass devuelve la URL sin agent); proyección JSON solo con media type declarado (`application/json` o `application/*+json`), ≤64 KiB, `jsonParseError`/`jsonParseSkipped:"body_too_large"`; defaults 30s/1MB/5 redirects |
+| 2026-07-30 | decisión | Pinning por construcción: el resolver se consulta EXACTAMENTE una vez (validación) y `DialContext` marca la IP validada del mapa por host — el dial de un host no validado se rehúsa, y un pin privado se rehúsa en el socket (defensa en profundidad). Cada salto de redirect revalida y re-pinnea vía CheckRedirect |
+| 2026-07-30 | divergencia temporal | Sin org_config (bounds por tenant), sin modo streaming (`bodyMode:"stream"`), sin dry-run/validation skip de métodos write-side, sin strip de headers con credenciales en redirect cross-origin — F2. El guard write-side de retries (no reintentar writes) llega cuando exista noción de validation runs |
+| 2026-07-30 | watch-item | Flake 1/~10: TestDelayedRetryIsNotClaimableUntilDue falló una vez en suite completa (0.37s, detalle no capturado); pasa 6/6 después. Diagnosticar si recurre |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)

@@ -259,3 +259,27 @@ consolidan en el informe de la puerta D15.
 - Paridad heredada curiosa: nadie limpia error_json al completar un nodo
   redriveado — la evidencia del fallo viejo convive con el output nuevo.
   Node hace lo mismo; queda fijado como comportamiento, no como bug.
+
+## 2026-07-30 — http executor + SSRF con dial pinneado (T-011)
+
+- La pieza de seguridad del piloto. La clase de bug que este diseño hace
+  imposible: rebinding DNS (IP pública al validar, privada al conectar).
+  El resolver se consulta UNA vez; el DialContext marca la IP exacta
+  validada; un host no validado ni siquiera obtiene socket. El test lo
+  prueba por construcción: resolver que cambia de respuesta + contador
+  de llamadas == 1.
+- La duda que la card pedía verificar quedó resuelta en fuente: no-2xx
+  SÍ falla el nodo, con un error tipado cuyo statusCode alimenta la
+  clasificación 5xx de retries. Y encontré un bug propio en el camino:
+  mi dispatch envolvía errores en errors.New tras redactar, PERDIENDO
+  name/code/statusCode — la escalera habría quedado ciega para el nodo
+  más común del producto. Ahora la identidad sobrevive la redacción.
+- Bypass fiel: ALLOW_PRIVATE_HTTP_TARGETS=true desactiva TODO (ni
+  pinning) — igual que Node, que devuelve la URL sin agent. Mi primera
+  versión pineaba también en bypass y el guard del socket bloqueaba los
+  httptest servers: el fallo del test me enseñó la semántica real.
+- Matriz SSRF: 19 casos de clase + resolución-a-privada (incluida la
+  respuesta DNS mixta: UNA privada envenena el set) + refusals del dial.
+  Todos los mensajes verbatim de Node.
+- Watch-item: un flake 1/~10 en TestDelayedRetryIsNotClaimableUntilDue
+  bajo suite completa; pasa 6/6 después. Si recurre, capturar detalle.
