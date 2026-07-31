@@ -15,6 +15,7 @@ import (
 
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/johnny4young/janusly/go/internal/aiconfig"
 	"github.com/johnny4young/janusly/go/internal/audit"
 	"github.com/johnny4young/janusly/go/internal/domain"
@@ -22,6 +23,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/grammar"
 	"github.com/johnny4young/janusly/go/internal/ratelimit"
 	"github.com/johnny4young/janusly/go/internal/recovery"
+	"github.com/johnny4young/janusly/go/internal/store"
 )
 
 func (s *V1Server) validateFixCore(r *http.Request, rc v1Request) opResult {
@@ -56,12 +58,10 @@ func (s *V1Server) validateFixCore(r *http.Request, rc v1Request) opResult {
 		return opError(http.StatusConflict, "recovery_provider_simulation_unavailable",
 			"Provider simulation is available only in the explicitly enabled local stack", nil)
 	}
-	if body.RecoveryPlaybookID != "" {
-		// No active playbook can match until the playbook substrate lands
-		// (T-139) — the reference's stale-claim answer is the honest one.
-		return opError(http.StatusConflict, "recovery_playbook_match_changed",
-			"This playbook no longer matches the failure", nil)
-	}
+	// A playbook claim re-verifies its EXACT match before every sandbox
+	// use: active status, same workflow + failure signature, and a source
+	// snapshot identical to the suggestion. Anything else is a stale claim.
+	playbookID := body.RecoveryPlaybookID
 
 	// The same grammar gate as /ai/patch-workflow output: strict parse +
 	// full validation so the sandbox can't be seeded with a malformed DAG.
@@ -89,7 +89,32 @@ func (s *V1Server) validateFixCore(r *http.Request, rc v1Request) opResult {
 			"suggestedWorkflow failed schema validation: "+reason, map[string]any{"reason": reason})
 	}
 
-	runID, err := s.engine.ReplayDeadLetterAsValidation(r.Context(), rc.orgID, body.DeadLetterID, wf, rc.userID)
+	if playbookID != "" {
+		item, err := store.New(s.pool).GetDeadLetter(r.Context(), store.GetDeadLetterParams{
+			ID: body.DeadLetterID, OrgID: rc.orgID,
+		})
+		if err != nil {
+			return opError(http.StatusNotFound, "dlq_not_found", "DLQ entry not found", nil)
+		}
+		sig := engine.DeadLetterSignature(item)
+		playbook, err := store.New(s.pool).FindMatchingActivePlaybook(r.Context(), store.FindMatchingActivePlaybookParams{
+			OrgID: rc.orgID, WorkflowID: pgtype.Text{String: wf.ID, Valid: wf.ID != ""}, Signature: sig,
+		})
+		if err != nil || playbook.ID != playbookID {
+			return opError(http.StatusConflict, "recovery_playbook_match_changed",
+				"This playbook no longer matches the failure", nil)
+		}
+		source, err := store.New(s.pool).GetWorkflowVersionAnyWorkflow(r.Context(), store.GetWorkflowVersionAnyWorkflowParams{
+			ID: playbook.SourceWorkflowVersionID, OrgID: rc.orgID,
+		})
+		sourceWf, _ := domain.Parse(source.DagJson)
+		if err != nil || sourceWf == nil || !engine.WorkflowsEqual(sourceWf, wf) {
+			return opError(http.StatusConflict, "recovery_playbook_match_changed",
+				"This playbook no longer matches the failure", nil)
+		}
+	}
+
+	runID, err := s.engine.ReplayDeadLetterAsValidationWithPlaybook(r.Context(), rc.orgID, body.DeadLetterID, wf, rc.userID, playbookID)
 	if err != nil {
 		switch {
 		case errors.Is(err, engine.ErrDeadLetterNotFound):

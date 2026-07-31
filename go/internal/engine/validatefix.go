@@ -30,6 +30,15 @@ var ErrValidateFixFailingNodeMissing = errors.New("suggested workflow does not c
 func (e *Engine) ReplayDeadLetterAsValidation(
 	ctx context.Context, orgID, deadLetterID string, suggested *domain.Workflow, createdBy string,
 ) (string, error) {
+	return e.ReplayDeadLetterAsValidationWithPlaybook(ctx, orgID, deadLetterID, suggested, createdBy, "")
+}
+
+// ReplayDeadLetterAsValidationWithPlaybook additionally records the
+// playbook claim in the run input so the terminal flip can attribute the
+// sandbox outcome (fresh evidence or auto-retire).
+func (e *Engine) ReplayDeadLetterAsValidationWithPlaybook(
+	ctx context.Context, orgID, deadLetterID string, suggested *domain.Workflow, createdBy, playbookID string,
+) (string, error) {
 	q := store.New(e.pool)
 	item, err := q.GetDeadLetter(ctx, store.GetDeadLetterParams{ID: deadLetterID, OrgID: orgID})
 	if err != nil {
@@ -78,10 +87,14 @@ func (e *Engine) ReplayDeadLetterAsValidation(
 	}
 
 	runID := e.newID()
-	inputJSON, err := json.Marshal(map[string]any{
+	inputEnvelope := map[string]any{
 		"workflow": suggested, "input": originalInput,
 		"failingNodeId": item.NodeID, "validationEffectMode": "skip",
-	})
+	}
+	if playbookID != "" {
+		inputEnvelope["recoveryPlaybookId"] = playbookID
+	}
+	inputJSON, err := json.Marshal(inputEnvelope)
 	if err != nil {
 		return "", fmt.Errorf("marshal validation input: %w", err)
 	}

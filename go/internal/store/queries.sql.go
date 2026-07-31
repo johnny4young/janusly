@@ -25,6 +25,26 @@ func (q *Queries) AcquireRunCompletionLock(ctx context.Context, runID string) er
 	return err
 }
 
+const activateDraftPlaybook = `-- name: ActivateDraftPlaybook :execrows
+UPDATE recovery_playbooks
+SET status = 'active', activated_at = now(), retired_at = NULL, updated_at = now(), updated_by = $3
+WHERE org_id = $1 AND id = $2 AND status = 'draft'
+`
+
+type ActivateDraftPlaybookParams struct {
+	OrgID string
+	ID    string
+	Actor pgtype.Text
+}
+
+func (q *Queries) ActivateDraftPlaybook(ctx context.Context, arg ActivateDraftPlaybookParams) (int64, error) {
+	result, err := q.db.Exec(ctx, activateDraftPlaybook, arg.OrgID, arg.ID, arg.Actor)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const bumpRateWindow = `-- name: BumpRateWindow :one
 INSERT INTO go_pilot_rate_windows (name, key, window_start, count, expires_at)
 VALUES ($1, $2, $3, 1, $4)
@@ -756,6 +776,47 @@ func (q *Queries) FailRunNode(ctx context.Context, arg FailRunNodeParams) (int64
 	return result.RowsAffected(), nil
 }
 
+const findMatchingActivePlaybook = `-- name: FindMatchingActivePlaybook :one
+SELECT id, org_id, workflow_id, signature, version, status, title, instructions_markdown, evidence_requirements_json, source_workflow_version_id, approach_label, successful_uses, regressions, last_validated_at, last_validation_run_id, last_applied_validation_run_id, activated_at, retired_at, created_by, updated_by, created_at, updated_at FROM recovery_playbooks
+WHERE org_id = $1 AND workflow_id = $2 AND signature = $3 AND status = 'active'
+`
+
+type FindMatchingActivePlaybookParams struct {
+	OrgID      string
+	WorkflowID pgtype.Text
+	Signature  string
+}
+
+func (q *Queries) FindMatchingActivePlaybook(ctx context.Context, arg FindMatchingActivePlaybookParams) (RecoveryPlaybook, error) {
+	row := q.db.QueryRow(ctx, findMatchingActivePlaybook, arg.OrgID, arg.WorkflowID, arg.Signature)
+	var i RecoveryPlaybook
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.WorkflowID,
+		&i.Signature,
+		&i.Version,
+		&i.Status,
+		&i.Title,
+		&i.InstructionsMarkdown,
+		&i.EvidenceRequirementsJson,
+		&i.SourceWorkflowVersionID,
+		&i.ApproachLabel,
+		&i.SuccessfulUses,
+		&i.Regressions,
+		&i.LastValidatedAt,
+		&i.LastValidationRunID,
+		&i.LastAppliedValidationRunID,
+		&i.ActivatedAt,
+		&i.RetiredAt,
+		&i.CreatedBy,
+		&i.UpdatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const findOpenDeadLetterForNode = `-- name: FindOpenDeadLetterForNode :one
 SELECT id FROM dead_letters
 WHERE org_id = $1 AND run_id = $2 AND node_id = $3 AND status = 'open'
@@ -839,6 +900,46 @@ func (q *Queries) FindPendingInvitation(ctx context.Context, arg FindPendingInvi
 	var id string
 	err := row.Scan(&id)
 	return id, err
+}
+
+const findPlaybookBySourceVersion = `-- name: FindPlaybookBySourceVersion :one
+SELECT id, org_id, workflow_id, signature, version, status, title, instructions_markdown, evidence_requirements_json, source_workflow_version_id, approach_label, successful_uses, regressions, last_validated_at, last_validation_run_id, last_applied_validation_run_id, activated_at, retired_at, created_by, updated_by, created_at, updated_at FROM recovery_playbooks
+WHERE org_id = $1 AND source_workflow_version_id = $2
+`
+
+type FindPlaybookBySourceVersionParams struct {
+	OrgID                   string
+	SourceWorkflowVersionID string
+}
+
+func (q *Queries) FindPlaybookBySourceVersion(ctx context.Context, arg FindPlaybookBySourceVersionParams) (RecoveryPlaybook, error) {
+	row := q.db.QueryRow(ctx, findPlaybookBySourceVersion, arg.OrgID, arg.SourceWorkflowVersionID)
+	var i RecoveryPlaybook
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.WorkflowID,
+		&i.Signature,
+		&i.Version,
+		&i.Status,
+		&i.Title,
+		&i.InstructionsMarkdown,
+		&i.EvidenceRequirementsJson,
+		&i.SourceWorkflowVersionID,
+		&i.ApproachLabel,
+		&i.SuccessfulUses,
+		&i.Regressions,
+		&i.LastValidatedAt,
+		&i.LastValidationRunID,
+		&i.LastAppliedValidationRunID,
+		&i.ActivatedAt,
+		&i.RetiredAt,
+		&i.CreatedBy,
+		&i.UpdatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const findRecoveryItemForDeadLetter = `-- name: FindRecoveryItemForDeadLetter :one
@@ -1410,6 +1511,45 @@ func (q *Queries) GetRecoveryImpactRollup(ctx context.Context, orgID string) (Re
 	return i, err
 }
 
+const getRecoveryPlaybook = `-- name: GetRecoveryPlaybook :one
+SELECT id, org_id, workflow_id, signature, version, status, title, instructions_markdown, evidence_requirements_json, source_workflow_version_id, approach_label, successful_uses, regressions, last_validated_at, last_validation_run_id, last_applied_validation_run_id, activated_at, retired_at, created_by, updated_by, created_at, updated_at FROM recovery_playbooks WHERE org_id = $1 AND id = $2
+`
+
+type GetRecoveryPlaybookParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) GetRecoveryPlaybook(ctx context.Context, arg GetRecoveryPlaybookParams) (RecoveryPlaybook, error) {
+	row := q.db.QueryRow(ctx, getRecoveryPlaybook, arg.OrgID, arg.ID)
+	var i RecoveryPlaybook
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.WorkflowID,
+		&i.Signature,
+		&i.Version,
+		&i.Status,
+		&i.Title,
+		&i.InstructionsMarkdown,
+		&i.EvidenceRequirementsJson,
+		&i.SourceWorkflowVersionID,
+		&i.ApproachLabel,
+		&i.SuccessfulUses,
+		&i.Regressions,
+		&i.LastValidatedAt,
+		&i.LastValidationRunID,
+		&i.LastAppliedValidationRunID,
+		&i.ActivatedAt,
+		&i.RetiredAt,
+		&i.CreatedBy,
+		&i.UpdatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getReplayCampaign = `-- name: GetReplayCampaign :one
 SELECT id, org_id, name, cluster_signature, filter_json, pacing_ms, status, total_count, replayed_count, failed_count, cancelled_count, created_by, cancelled_by, next_dispatch_at, started_at, completed_at, cancelled_at, created_at, updated_at FROM replay_campaigns WHERE org_id = $1 AND id = $2
 `
@@ -1771,6 +1911,37 @@ func (q *Queries) GetWorkflowOwnerState(ctx context.Context, id string) (GetWork
 	row := q.db.QueryRow(ctx, getWorkflowOwnerState, id)
 	var i GetWorkflowOwnerStateRow
 	err := row.Scan(&i.OrgID, &i.DeletedAt)
+	return i, err
+}
+
+const getWorkflowVersionAnyWorkflow = `-- name: GetWorkflowVersionAnyWorkflow :one
+SELECT id, org_id, workflow_id, version, dag_json FROM workflow_versions
+WHERE id = $1 AND org_id = $2
+`
+
+type GetWorkflowVersionAnyWorkflowParams struct {
+	ID    string
+	OrgID string
+}
+
+type GetWorkflowVersionAnyWorkflowRow struct {
+	ID         string
+	OrgID      string
+	WorkflowID string
+	Version    int32
+	DagJson    json.RawMessage
+}
+
+func (q *Queries) GetWorkflowVersionAnyWorkflow(ctx context.Context, arg GetWorkflowVersionAnyWorkflowParams) (GetWorkflowVersionAnyWorkflowRow, error) {
+	row := q.db.QueryRow(ctx, getWorkflowVersionAnyWorkflow, arg.ID, arg.OrgID)
+	var i GetWorkflowVersionAnyWorkflowRow
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.WorkflowID,
+		&i.Version,
+		&i.DagJson,
+	)
 	return i, err
 }
 
@@ -2155,6 +2326,46 @@ func (q *Queries) InsertRecoveryItem(ctx context.Context, arg InsertRecoveryItem
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const insertRecoveryPlaybookDraft = `-- name: InsertRecoveryPlaybookDraft :exec
+INSERT INTO recovery_playbooks (id, org_id, workflow_id, signature, version, status, title,
+  instructions_markdown, evidence_requirements_json, source_workflow_version_id, approach_label,
+  last_validated_at, last_validation_run_id, created_by, updated_by)
+VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9, $10, now(), $11, $12, $12)
+`
+
+type InsertRecoveryPlaybookDraftParams struct {
+	ID                       string
+	OrgID                    string
+	WorkflowID               pgtype.Text
+	Signature                string
+	Version                  int32
+	Title                    string
+	InstructionsMarkdown     string
+	EvidenceRequirementsJson json.RawMessage
+	SourceWorkflowVersionID  string
+	ApproachLabel            string
+	LastValidationRunID      pgtype.Text
+	CreatedBy                pgtype.Text
+}
+
+func (q *Queries) InsertRecoveryPlaybookDraft(ctx context.Context, arg InsertRecoveryPlaybookDraftParams) error {
+	_, err := q.db.Exec(ctx, insertRecoveryPlaybookDraft,
+		arg.ID,
+		arg.OrgID,
+		arg.WorkflowID,
+		arg.Signature,
+		arg.Version,
+		arg.Title,
+		arg.InstructionsMarkdown,
+		arg.EvidenceRequirementsJson,
+		arg.SourceWorkflowVersionID,
+		arg.ApproachLabel,
+		arg.LastValidationRunID,
+		arg.CreatedBy,
+	)
+	return err
 }
 
 const insertReplayCampaign = `-- name: InsertReplayCampaign :exec
@@ -4273,6 +4484,23 @@ func (q *Queries) MarkWaitingNodeSucceeded(ctx context.Context, arg MarkWaitingN
 	return id, err
 }
 
+const maxPlaybookVersion = `-- name: MaxPlaybookVersion :one
+SELECT COALESCE(max(version), 0)::int FROM recovery_playbooks
+WHERE org_id = $1 AND signature = $2
+`
+
+type MaxPlaybookVersionParams struct {
+	OrgID     string
+	Signature string
+}
+
+func (q *Queries) MaxPlaybookVersion(ctx context.Context, arg MaxPlaybookVersionParams) (int32, error) {
+	row := q.db.QueryRow(ctx, maxPlaybookVersion, arg.OrgID, arg.Signature)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const migrateOrgMemberUserID = `-- name: MigrateOrgMemberUserID :execrows
 UPDATE org_members SET user_id = $3
 WHERE id = $1 AND org_id = $2
@@ -4683,6 +4911,67 @@ func (q *Queries) QueueRunNode(ctx context.Context, arg QueueRunNodeParams) (int
 	return result.RowsAffected(), nil
 }
 
+const recordPlaybookApplied = `-- name: RecordPlaybookApplied :execrows
+UPDATE recovery_playbooks
+SET successful_uses = successful_uses + 1,
+    last_applied_validation_run_id = $3, updated_at = now()
+WHERE org_id = $1 AND id = $2
+  AND (last_applied_validation_run_id IS NULL OR last_applied_validation_run_id <> $3)
+`
+
+type RecordPlaybookAppliedParams struct {
+	OrgID           string
+	ID              string
+	ValidationRunID pgtype.Text
+}
+
+func (q *Queries) RecordPlaybookApplied(ctx context.Context, arg RecordPlaybookAppliedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, recordPlaybookApplied, arg.OrgID, arg.ID, arg.ValidationRunID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const recordPlaybookValidationRegression = `-- name: RecordPlaybookValidationRegression :execrows
+UPDATE recovery_playbooks
+SET status = 'retired', retired_at = now(), regressions = regressions + 1, updated_at = now()
+WHERE org_id = $1 AND id = $2 AND status <> 'retired'
+`
+
+type RecordPlaybookValidationRegressionParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) RecordPlaybookValidationRegression(ctx context.Context, arg RecordPlaybookValidationRegressionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, recordPlaybookValidationRegression, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const recordPlaybookValidationSuccess = `-- name: RecordPlaybookValidationSuccess :execrows
+UPDATE recovery_playbooks
+SET last_validated_at = now(), last_validation_run_id = $3, updated_at = now()
+WHERE org_id = $1 AND id = $2 AND status <> 'retired'
+`
+
+type RecordPlaybookValidationSuccessParams struct {
+	OrgID           string
+	ID              string
+	ValidationRunID pgtype.Text
+}
+
+func (q *Queries) RecordPlaybookValidationSuccess(ctx context.Context, arg RecordPlaybookValidationSuccessParams) (int64, error) {
+	result, err := q.db.Exec(ctx, recordPlaybookValidationSuccess, arg.OrgID, arg.ID, arg.ValidationRunID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const redriveFailedRunNode = `-- name: RedriveFailedRunNode :one
 UPDATE run_nodes
 SET status = 'queued', attempts = 1
@@ -4786,6 +5075,54 @@ type ResumeWorkflowCircuitBreakerParams struct {
 
 func (q *Queries) ResumeWorkflowCircuitBreaker(ctx context.Context, arg ResumeWorkflowCircuitBreakerParams) (int64, error) {
 	result, err := q.db.Exec(ctx, resumeWorkflowCircuitBreaker, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const retirePreviousActivePlaybookMatch = `-- name: RetirePreviousActivePlaybookMatch :execrows
+UPDATE recovery_playbooks
+SET status = 'retired', retired_at = now(), updated_at = now(), updated_by = $4
+WHERE org_id = $1 AND workflow_id = $2 AND signature = $3 AND status = 'active' AND id <> $5
+`
+
+type RetirePreviousActivePlaybookMatchParams struct {
+	OrgID      string
+	WorkflowID pgtype.Text
+	Signature  string
+	Actor      pgtype.Text
+	ExcludeID  string
+}
+
+func (q *Queries) RetirePreviousActivePlaybookMatch(ctx context.Context, arg RetirePreviousActivePlaybookMatchParams) (int64, error) {
+	result, err := q.db.Exec(ctx, retirePreviousActivePlaybookMatch,
+		arg.OrgID,
+		arg.WorkflowID,
+		arg.Signature,
+		arg.Actor,
+		arg.ExcludeID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const retireRecoveryPlaybook = `-- name: RetireRecoveryPlaybook :execrows
+UPDATE recovery_playbooks
+SET status = 'retired', retired_at = now(), updated_at = now(), updated_by = $3
+WHERE org_id = $1 AND id = $2 AND status <> 'retired'
+`
+
+type RetireRecoveryPlaybookParams struct {
+	OrgID string
+	ID    string
+	Actor pgtype.Text
+}
+
+func (q *Queries) RetireRecoveryPlaybook(ctx context.Context, arg RetireRecoveryPlaybookParams) (int64, error) {
+	result, err := q.db.Exec(ctx, retireRecoveryPlaybook, arg.OrgID, arg.ID, arg.Actor)
 	if err != nil {
 		return 0, err
 	}
@@ -4947,16 +5284,19 @@ func (q *Queries) SoftDeleteWorkflow(ctx context.Context, arg SoftDeleteWorkflow
 
 const stampRedriveRecoveryClaim = `-- name: StampRedriveRecoveryClaim :exec
 UPDATE run_nodes
-SET recovery_dead_letter_id = $3, recovery_requested_by = $4, recovery_claim_token = $5
+SET recovery_dead_letter_id = $3, recovery_requested_by = $4, recovery_claim_token = $5,
+    recovery_playbook_id = $6, recovery_validation_run_id = $7
 WHERE run_id = $1 AND node_id = $2
 `
 
 type StampRedriveRecoveryClaimParams struct {
-	RunID                string
-	NodeID               string
-	RecoveryDeadLetterID pgtype.Text
-	RecoveryRequestedBy  pgtype.Text
-	RecoveryClaimToken   pgtype.Text
+	RunID                   string
+	NodeID                  string
+	RecoveryDeadLetterID    pgtype.Text
+	RecoveryRequestedBy     pgtype.Text
+	RecoveryClaimToken      pgtype.Text
+	RecoveryPlaybookID      pgtype.Text
+	RecoveryValidationRunID pgtype.Text
 }
 
 func (q *Queries) StampRedriveRecoveryClaim(ctx context.Context, arg StampRedriveRecoveryClaimParams) error {
@@ -4966,6 +5306,8 @@ func (q *Queries) StampRedriveRecoveryClaim(ctx context.Context, arg StampRedriv
 		arg.RecoveryDeadLetterID,
 		arg.RecoveryRequestedBy,
 		arg.RecoveryClaimToken,
+		arg.RecoveryPlaybookID,
+		arg.RecoveryValidationRunID,
 	)
 	return err
 }

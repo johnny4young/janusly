@@ -157,6 +157,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	server.mountPromptRoutes(mux)
 	server.mountMcpRoutes(mux)
 	server.mountValidateFixRoutes(mux)
+	server.mountPlaybookRoutes(mux)
 	server.mountAiPatchRoutes(mux)
 	return WithBrowserHeaders(mux)
 }
@@ -958,9 +959,11 @@ func (s *V1Server) rollbackWorkflow(w http.ResponseWriter, r *http.Request, rc v
 // body.
 func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 	var body struct {
-		DeadLetterID string `json:"deadLetterId"`
-		RunID        string `json:"runId"`
-		NodeID       string `json:"nodeId"`
+		DeadLetterID            string `json:"deadLetterId"`
+		RunID                   string `json:"runId"`
+		NodeID                  string `json:"nodeId"`
+		RecoveryPlaybookID      string `json:"recoveryPlaybookId"`
+		RecoveryValidationRunID string `json:"recoveryValidationRunId"`
 	}
 	if err := decodeBody(r, &body); err != nil {
 		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
@@ -989,7 +992,26 @@ func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 		})
 		return opOK(map[string]any{"ok": true})
 	}
-	if err := s.engine.RedriveDeadLetter(r.Context(), rc.orgID, body.DeadLetterID); err != nil {
+	if (body.RecoveryPlaybookID == "") != (body.RecoveryValidationRunID == "") {
+		return opError(http.StatusBadRequest, "recovery_playbook_invalid_body",
+			"recoveryPlaybookId and recoveryValidationRunId must be provided together", nil)
+	}
+	if body.RecoveryPlaybookID != "" {
+		item, err := store.New(s.pool).GetDeadLetter(r.Context(), store.GetDeadLetterParams{
+			ID: body.DeadLetterID, OrgID: rc.orgID,
+		})
+		if err != nil {
+			return opError(http.StatusNotFound, "dlq_not_found", "Dead letter not found", nil)
+		}
+		wf, _ := domain.Parse(item.WorkflowJson)
+		if wf == nil || !s.engine.VerifyPlaybookReplayClaim(r.Context(), rc.orgID, item, wf,
+			body.RecoveryPlaybookID, body.RecoveryValidationRunID) {
+			return opError(http.StatusUnprocessableEntity, "recovery_playbook_outcome_invalid",
+				"Recovery Playbook replay evidence cannot be verified", nil)
+		}
+	}
+	if err := s.engine.RedriveDeadLetterWithPlaybook(r.Context(), rc.orgID, body.DeadLetterID,
+		body.RecoveryPlaybookID, body.RecoveryValidationRunID); err != nil {
 		switch {
 		case errors.Is(err, engine.ErrDeadLetterNotFound):
 			return opError(http.StatusNotFound, "dlq_not_found", "Dead letter not found", nil)

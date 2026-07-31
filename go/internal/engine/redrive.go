@@ -31,6 +31,13 @@ var ErrRedriveConflict = errors.New("dead letter replay already claimed")
 // wake the workers — one transaction, so a crash can never leave a claimed
 // dead letter without its revived node.
 func (e *Engine) RedriveDeadLetter(ctx context.Context, orgID, deadLetterID string) error {
+	return e.RedriveDeadLetterWithPlaybook(ctx, orgID, deadLetterID, "", "")
+}
+
+// RedriveDeadLetterWithPlaybook additionally stamps a VERIFIED playbook
+// claim on the revived node, so the terminal impact tail can credit the
+// playbook's applied win atomically (T-137).
+func (e *Engine) RedriveDeadLetterWithPlaybook(ctx context.Context, orgID, deadLetterID, playbookID, validationRunID string) error {
 	tx, err := e.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
@@ -75,9 +82,11 @@ func (e *Engine) RedriveDeadLetter(ctx context.Context, orgID, deadLetterID stri
 	// credit a different execution, and initiation alone credits nothing.
 	if err := q.StampRedriveRecoveryClaim(ctx, store.StampRedriveRecoveryClaimParams{
 		RunID: deadLetter.RunID, NodeID: deadLetter.NodeID,
-		RecoveryDeadLetterID: pgtype.Text{String: deadLetterID, Valid: true},
-		RecoveryRequestedBy:  pgtype.Text{},
-		RecoveryClaimToken:   pgtype.Text{String: e.newID(), Valid: true},
+		RecoveryDeadLetterID:    pgtype.Text{String: deadLetterID, Valid: true},
+		RecoveryRequestedBy:     pgtype.Text{},
+		RecoveryClaimToken:      pgtype.Text{String: e.newID(), Valid: true},
+		RecoveryPlaybookID:      pgtype.Text{String: playbookID, Valid: playbookID != ""},
+		RecoveryValidationRunID: pgtype.Text{String: validationRunID, Valid: validationRunID != ""},
 	}); err != nil {
 		return fmt.Errorf("stamp recovery claim: %w", err)
 	}

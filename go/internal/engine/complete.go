@@ -646,6 +646,10 @@ func (e *Engine) flipRunTerminal(ctx context.Context, q *store.Queries, runID, s
 		return nil
 	}
 	metricRunsTerminal.WithLabelValues(status).Inc()
+	// A validation run carrying a playbook claim reports its outcome here:
+	// success refreshes evidence, failure auto-retires (in the same tx as
+	// the terminal flip, so evidence and outcome can't drift).
+	e.recordPlaybookValidationOutcome(ctx, q, runID, status)
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal run event payload: %w", err)
@@ -808,11 +812,22 @@ func (e *Engine) recordRecoveryImpact(ctx context.Context, q *store.Queries, cla
 	}
 
 	// Playbook attribution: a claim that carried a playbook + its
-	// validation run credits the playbook's applied win atomically. The
-	// durable playbook receipt row arrives with the playbook substrate
-	// (T-139); the audit fact lands now so the trail never has a gap.
+	// validation run credits the playbook's applied win atomically — the
+	// DURABLE receipt (successful_uses++, set-once on the validation run)
+	// and its audit ride the same transaction as the impact fact.
 	if nodeClaim.RecoveryPlaybookID.Valid && nodeClaim.RecoveryPlaybookID.String != "" &&
 		nodeClaim.RecoveryValidationRunID.Valid && nodeClaim.RecoveryValidationRunID.String != "" {
+		applied, err := q.RecordPlaybookApplied(ctx, store.RecordPlaybookAppliedParams{
+			OrgID: dlq.OrgID, ID: nodeClaim.RecoveryPlaybookID.String,
+			ValidationRunID: nodeClaim.RecoveryValidationRunID,
+		})
+		if err != nil {
+			return fmt.Errorf("record playbook applied: %w", err)
+		}
+		if applied == 0 {
+			// The same validation run already credited — idempotent.
+			return nil
+		}
 		metadata, _ := json.Marshal(map[string]any{
 			"deadLetterId":    deadLetterID,
 			"validationRunId": nodeClaim.RecoveryValidationRunID.String,

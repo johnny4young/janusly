@@ -1091,7 +1091,8 @@ WHERE id = $1;
 
 -- name: StampRedriveRecoveryClaim :exec
 UPDATE run_nodes
-SET recovery_dead_letter_id = $3, recovery_requested_by = $4, recovery_claim_token = $5
+SET recovery_dead_letter_id = $3, recovery_requested_by = $4, recovery_claim_token = $5,
+    recovery_playbook_id = $6, recovery_validation_run_id = $7
 WHERE run_id = $1 AND node_id = $2;
 
 -- name: GetRunNodeRecoveryClaim :one
@@ -1186,3 +1187,61 @@ RETURNING trigger_events.id, trigger_events.node_id, trigger_events.payload_json
 SELECT count(*) FROM trigger_events te
 WHERE te.org_id = sqlc.arg(org_id) AND te.workflow_id = sqlc.arg(workflow_id) AND te.status = 'buffered'
   AND te.backfill_claim_token IS NULL;
+
+-- name: GetRecoveryPlaybook :one
+SELECT * FROM recovery_playbooks WHERE org_id = $1 AND id = $2;
+
+-- name: FindMatchingActivePlaybook :one
+SELECT * FROM recovery_playbooks
+WHERE org_id = $1 AND workflow_id = $2 AND signature = $3 AND status = 'active';
+
+-- name: FindPlaybookBySourceVersion :one
+SELECT * FROM recovery_playbooks
+WHERE org_id = $1 AND source_workflow_version_id = $2;
+
+-- name: MaxPlaybookVersion :one
+SELECT COALESCE(max(version), 0)::int FROM recovery_playbooks
+WHERE org_id = $1 AND signature = $2;
+
+-- name: InsertRecoveryPlaybookDraft :exec
+INSERT INTO recovery_playbooks (id, org_id, workflow_id, signature, version, status, title,
+  instructions_markdown, evidence_requirements_json, source_workflow_version_id, approach_label,
+  last_validated_at, last_validation_run_id, created_by, updated_by)
+VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9, $10, now(), $11, $12, $12);
+
+-- name: RetirePreviousActivePlaybookMatch :execrows
+UPDATE recovery_playbooks
+SET status = 'retired', retired_at = now(), updated_at = now(), updated_by = sqlc.arg(actor)
+WHERE org_id = $1 AND workflow_id = $2 AND signature = $3 AND status = 'active' AND id <> sqlc.arg(exclude_id);
+
+-- name: ActivateDraftPlaybook :execrows
+UPDATE recovery_playbooks
+SET status = 'active', activated_at = now(), retired_at = NULL, updated_at = now(), updated_by = sqlc.arg(actor)
+WHERE org_id = $1 AND id = $2 AND status = 'draft';
+
+-- name: RetireRecoveryPlaybook :execrows
+UPDATE recovery_playbooks
+SET status = 'retired', retired_at = now(), updated_at = now(), updated_by = sqlc.arg(actor)
+WHERE org_id = $1 AND id = $2 AND status <> 'retired';
+
+-- name: RecordPlaybookValidationSuccess :execrows
+UPDATE recovery_playbooks
+SET last_validated_at = now(), last_validation_run_id = sqlc.arg(validation_run_id), updated_at = now()
+WHERE org_id = $1 AND id = $2 AND status <> 'retired';
+
+-- name: RecordPlaybookValidationRegression :execrows
+UPDATE recovery_playbooks
+SET status = 'retired', retired_at = now(), regressions = regressions + 1, updated_at = now()
+WHERE org_id = $1 AND id = $2 AND status <> 'retired';
+
+-- name: RecordPlaybookApplied :execrows
+UPDATE recovery_playbooks
+SET successful_uses = successful_uses + 1,
+    last_applied_validation_run_id = sqlc.arg(validation_run_id), updated_at = now()
+WHERE org_id = $1 AND id = $2
+  AND (last_applied_validation_run_id IS NULL OR last_applied_validation_run_id <> sqlc.arg(validation_run_id));
+
+
+-- name: GetWorkflowVersionAnyWorkflow :one
+SELECT id, org_id, workflow_id, version, dag_json FROM workflow_versions
+WHERE id = $1 AND org_id = $2;
