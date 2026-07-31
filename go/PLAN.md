@@ -764,6 +764,8 @@ el chat publicado.
 | 2026-07-31 | T-096 contrato v1 | Manifiesto puro `internal/contract` (20 rutas /v1 con shapes de request/response; el generador JAMÁS importa el server — paridad con la regla V1_CONTRACT_ROUTES) → `cmd/contract` renderiza determinista a `contract/openapi.json` (OpenAPI 3.1) con los envelopes de éxito y error documentados UNA vez en components y referenciados por cada operación. Guard de deriva en `make ci` probado de verdad: manifiesto tocado sin regenerar → diff → falla |
 | 2026-07-31 | T-097 lane CI | Job `test_go` en `.github/workflows/ci.yml` sobre los MISMOS triggers (cero pushes extra): service container `pgvector/pgvector:pg18` directo (sin Compose en el YAML — regla del repo), setup-go con cache por go.sum, golangci-lint 2.12.2 anclado, migrate goose y `make ci` (drift sqlc + drift contrato + build + lint + suite -race + paridad). Validado localmente con el MISMO comando; el verde en push real queda para el próximo batch de push del usuario (repo privada — cada push cuesta) |
 | 2026-07-31 | T-097 hallazgo operativo | `make ci` NO puede correr concurrente con `make soak` sobre el mismo DB dev: el binario del soak (poll 50ms) roba claims de los tests de engine — 7 fallos ambientales, cero regresiones. En CI no aplica (DB efímero por job); localmente, un lane a la vez |
+| 2026-07-31 | T-095 soak 1h | `make soak` (k6 sostenido parametrizable + muestreo de /metrics interno) corrió la HORA completa: 121 muestras, veredicto ESTABLE en las tres señales — RSS 32.5→33.2 MB (+2.2%), goroutines 42→40 (−4.6%), heap 9.7→9.9 MB (+1.8%). El arnés falla el make target con crecimiento >10% primer-cuarto vs último-cuarto; reporte direccional en `conformance/perf/SOAK.md` + serie `soak-ms93ees6.jsonl`. Hallazgo del arnés: k6 debe correr ASYNC (execFileSync mataba de hambre al muestreador) |
+| 2026-07-31 | T-095 residuo del drain | Un SIGTERM al binario del soak deja nodos `pending` de runs en vuelo (el drain termina lo RECLAMADO, por diseño) — ese residuo interfirió un test de shutdown de la suite hasta limpiarlo. Nota operativa: tras un soak local, cancelar los runs `soak-%` restantes antes de correr la suite |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -1062,7 +1064,7 @@ día que exista el chokepoint (T-079)**.
 | T-092 | Paridad de nombres Prometheus + Resource OTel (`service.name=janusly`, instance id) | obs | P2 | done |
 | T-093 | Lane HA: DOS instancias del engine sobre una base — property + race suites verdes | HA | P0 | done |
 | T-094 | Singletons con lease o prueba de seguridad concurrente por bomba (campañas/retención/timers) | HA | P1 | done |
-| T-095 | Soak: `make soak` (k6 sostenido ≥1h, vigilancia de RSS/goroutines, reporte) | HA | P1 | partial |
+| T-095 | Soak: `make soak` (k6 sostenido ≥1h, vigilancia de RSS/goroutines, reporte) | HA | P1 | done |
 | T-096 | Manifiesto de contrato v1 + OpenAPI generado + guard de deriva en `make ci` | contrato | P1 | done |
 | T-097 | Lane CI de GitHub Actions para `go/` (build+lint+test+parity con Postgres de servicio) | contrato | P2 | done |
 | T-098 | Informe de ola 3 (REPORT-W3.md) + corte de divergencias | cierre | P0 | todo |

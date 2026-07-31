@@ -1351,3 +1351,11 @@ producción necesita saber — de lo ya resuelto o informativo.
   y make ci completo. Y una lección local: el soak y la suite no
   comparten DB — el binario del soak roba claims de los tests. En CI el
   DB es efímero por job; en local, un lane a la vez.
+
+## 2026-07-31 — una hora bajo carga, plano (T-095)
+
+- 121 muestras, tres señales estables: RSS +2.2%, goroutines −4.6%,
+  heap +1.8%. El binario entero vive en ~33 MB tras una hora. Dos
+  lecciones del arnés: k6 async o el muestreador muere de hambre, y el
+  residuo pending de un SIGTERM al soak contamina la suite si no se
+  limpia.
