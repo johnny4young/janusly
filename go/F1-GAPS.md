@@ -43,6 +43,13 @@ Diseño: refactor de handlers a `(status, payload, errShape)` + dos
 encoders (legacy crudo / envelope v1). Un handler, dos wires — igual que
 Node. → **T-032**.
 
+### ✅ Descubierto y servido en T-035: `GET /auth/context`
+
+El bootstrap de identidad que el web hace ANTES de todo: sin él, el gate de
+permisos del cliente vacía cada lectura a su fallback (el síntoma: app
+montada, feed vacío). El pilot sirve la rama dev-headers de Node: org
+sintética admin (developmentFallback) con las 41 claves del catálogo.
+
 ### 🔴 Bloqueante F1 — lecturas fuera del set v1 (legacy directo)
 
 | Ruta | Uso en el web | Nota |

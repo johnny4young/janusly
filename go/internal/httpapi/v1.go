@@ -82,6 +82,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	mux.HandleFunc("POST /v1/dlq/redrive", server.auth(server.redrive))
 	mux.HandleFunc("POST /v1/dlq/replay", server.auth(server.replayAlias))
 	mux.HandleFunc("GET /runs/{runId}/stream", server.auth(server.streamRun))
+	mux.HandleFunc("GET /auth/context", server.auth(server.authContext))
 	server.legacyMutations(mux)
 	return WithBrowserHeaders(mux)
 }

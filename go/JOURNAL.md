@@ -604,3 +604,17 @@ local. Sin umbral pasa/no-pasa: números para aprender.
   (el tombstone es not-found para escrituras también — mismo comentario
   del código Node), fuente org+workflow-scoped, y DAG malformado en 422.
   El patrón core+dos-wires de T-032 hizo esta ruta casi gratis.
+
+## 2026-07-30 — HITO F1: el web real contra Go (T-035)
+
+- El momento que F1 existía para producir: el React de producción,
+  sin tocar una línea suya, apuntado a Go por UNA variable de entorno —
+  monta, lee, renderiza runs reales, cuenta el approval en espera, y
+  ningún panel revienta. Smoke Playwright reproducible en una orden.
+- El gap que el inventario estático NO podía ver: /auth/context. El web
+  lo llama antes que nada y deriva de ahí los PERMISOS que gatean cada
+  lectura — sin la ruta, el síntoma es engañosamente benigno (app
+  montada, feed vacío, consola limpia). Perseguirlo requirió leer la
+  cadena useBootstrapData → permissionsRef → App → identityContext.
+  La rama dev-headers de Node (org sintética admin con las 41 claves
+  del catálogo) era la respuesta exacta.
