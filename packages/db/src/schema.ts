@@ -142,7 +142,25 @@ export const workflows = pgTable(
      */
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
-  (table) => [index("workflows_org_created_idx").on(table.orgId, table.createdAt.desc())],
+  (table) => [
+    // Backs the Flows list keyset (`ORDER BY created_at DESC, id DESC`) —
+    // without the `id` tiebreaker Postgres re-sorts the org's workflows on
+    // every page. Supersedes the old (org_id, created_at) index (strict prefix).
+    // `.nullsFirst()` is load-bearing: `created_at` is nullable and a plain
+    // `ORDER BY created_at DESC` means NULLS FIRST, so drizzle's default
+    // DESC NULLS LAST index cannot satisfy the sort and the planner re-sorts.
+    index("workflows_org_created_id_idx").on(
+      table.orgId,
+      table.createdAt.desc().nullsFirst(),
+      table.id.desc().nullsFirst(),
+    ),
+    // Backs the Trash list keyset (`ORDER BY deleted_at DESC, id DESC`) and
+    // the `system:retention` tombstone sweep; partial, so it only holds
+    // soft-deleted rows. NULLS FIRST for the same sort-matching reason above.
+    index("workflows_org_deleted_idx")
+      .on(table.orgId, table.deletedAt.desc().nullsFirst(), table.id.desc().nullsFirst())
+      .where(sql`"deleted_at" IS NOT NULL`),
+  ],
 );
 
 export const workflowVersions = pgTable(
@@ -341,7 +359,18 @@ export const runs = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
   (table) => [
-    index("runs_org_created_idx").on(table.orgId, table.createdAt.desc()),
+    // Backs the `GET /runs` keyset (`ORDER BY created_at DESC, id DESC`) —
+    // without the `id` tiebreaker Postgres cannot satisfy the sort from the
+    // index and top-N re-sorts the org's ENTIRE runs on every page (O(org-runs)
+    // per page). Supersedes the old (org_id, created_at) index (strict prefix).
+    // `.nullsFirst()` is load-bearing: `created_at` is nullable and a plain
+    // `ORDER BY created_at DESC` means NULLS FIRST, so drizzle's default
+    // DESC NULLS LAST index cannot satisfy the sort and the planner re-sorts.
+    index("runs_org_created_id_idx").on(
+      table.orgId,
+      table.createdAt.desc().nullsFirst(),
+      table.id.desc().nullsFirst(),
+    ),
     index("runs_parent_idx").on(table.parentRunId),
     index("runs_parent_notification_idx")
       .on(table.parentNotificationAfter, table.id)

@@ -353,4 +353,17 @@ describe("hot-path indexes present after migration", () => {
   it("trigger_events carries the buffered-window index the resume backfill scans", async () => {
     expect(await indexNames("trigger_events")).toContain("trigger_events_org_workflow_status_idx");
   });
+
+  it("runs carries the keyset-aligned list index and dropped its strict prefix", async () => {
+    const names = await indexNames("runs");
+    expect(names).toContain("runs_org_created_id_idx");
+    expect(names).not.toContain("runs_org_created_idx");
+  });
+
+  it("workflows carries the keyset-aligned list + trash indexes and dropped the strict prefix", async () => {
+    const names = await indexNames("workflows");
+    expect(names).toContain("workflows_org_created_id_idx");
+    expect(names).toContain("workflows_org_deleted_idx");
+    expect(names).not.toContain("workflows_org_created_idx");
+  });
 });

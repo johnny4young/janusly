@@ -275,6 +275,12 @@ retroactively.
   relying on Vite's transpilation to hide static drift.
 - Operator metadata, AI cost chips, active navigation, section kickers, and
   command-palette text now retain WCAG AA contrast in light and dark themes.
+- The runs list, Flows list, and Trash list keysets are now backed by
+  sort-aligned indexes (org, timestamp DESC, id DESC — NULLS FIRST to match
+  the queries' ORDER BY), replacing strict-prefix indexes that forced Postgres
+  to re-sort the organization's entire run history on every page. Operators
+  deploying to production apply the migration's sibling `production-rollout.sql`
+  (concurrent index creates/drops) before `pnpm migrate`.
 
 ## Development milestone: recovery platform hardening
 
