@@ -405,12 +405,20 @@ WHERE w.wake_at <= now()
   );
 
 -- Due timers attached to still-waiting nodes: the sweeper resumes these —
--- the auto-completion path for wait_until.
+-- the auto-completion path for wait_until. Fairness under a mass-expiry
+-- backlog (a downtime window leaving thousands due): round-robin by run —
+-- every run's FIRST due timer sorts before any run's second — so one run
+-- with a huge pile cannot starve the rest of the fleet out of a batch.
 -- name: ListDueWaitingWakeups :many
-SELECT w.run_node_id, rn.run_id, rn.node_id
-FROM go_pilot_wakeups w
-JOIN run_nodes rn ON rn.id = w.run_node_id
-WHERE w.wake_at <= now() AND rn.status = 'waiting'
+SELECT run_node_id, run_id, node_id
+FROM (
+  SELECT w.run_node_id, rn.run_id, rn.node_id,
+         ROW_NUMBER() OVER (PARTITION BY rn.run_id ORDER BY w.wake_at, w.run_node_id) AS run_rank
+  FROM go_pilot_wakeups w
+  JOIN run_nodes rn ON rn.id = w.run_node_id
+  WHERE w.wake_at <= now() AND rn.status = 'waiting'
+) ranked
+ORDER BY run_rank, run_node_id
 LIMIT sqlc.arg(batch_size);
 
 -- name: NotifyWake :exec

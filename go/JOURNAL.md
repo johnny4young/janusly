@@ -917,3 +917,15 @@ producción necesita saber — de lo ya resuelto o informativo.
   ventana de catálogo queda para cuando el pilot tenga el catálogo
   completo. El test siembra tres estados (expirado, fresco, activo) y
   verifica que solo el expirado cae con sus dos versiones.
+
+## 2026-07-31 — drenaje justo de timers masivos (T-054)
+
+- El caso que motiva el ticket: una ventana de caída deja miles de
+  timers vencidos y el sweep de 50-por-tick tardaría una eternidad,
+  con el agravante de que un run acaparador podía llenar cada lote. La
+  equidad vive en SQL — round-robin por run vía window function, así el
+  primer timer de cada run entra al lote antes que el segundo de
+  cualquiera — y el drenaje continúa por lotes hasta vaciar o gastar
+  el presupuesto del tick. Los conflictos de resume cuentan como
+  progreso (otro actor encogió el backlog); cero progreso corta el
+  tick en vez de girar sobre fallos persistentes.

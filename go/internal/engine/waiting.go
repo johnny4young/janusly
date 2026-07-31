@@ -125,25 +125,50 @@ func (e *Engine) ResumeRun(ctx context.Context, runID, nodeID string) error {
 	})
 }
 
+// Timer-sweep bounds: one poll tick keeps draining fair batches until the
+// backlog empties or the per-sweep budget is spent, so a mass expiry
+// (downtime window) recovers in few ticks without an unbounded tick.
+const (
+	timerSweepBatchSize = 50
+	timerSweepMaxPerRun = 2_000
+)
+
 // resumeDueTimers auto-completes every waiting node whose wake-up clock has
-// passed — the wait_until firing path. A conflict means another actor
-// (manual resume, cancellation) advanced the node first; that is the
-// idempotency contract, not an error.
+// passed — the wait_until firing path. Batches are run-fair (round-robin by
+// run) and the drain loop continues past one batch under backlog. A
+// conflict means another actor (manual resume, cancellation) advanced the
+// node first; that is the idempotency contract, not an error.
 func (e *Engine) resumeDueTimers(ctx context.Context, q *store.Queries) int {
-	due, err := q.ListDueWaitingWakeups(ctx, 50)
-	if err != nil {
-		return 0
-	}
 	resumed := 0
-	for _, timer := range due {
-		err := e.ResumeRun(ctx, timer.RunID, timer.NodeID)
-		if err == nil {
-			resumed++
-			continue
+	for resumed < timerSweepMaxPerRun {
+		due, err := q.ListDueWaitingWakeups(ctx, timerSweepBatchSize)
+		if err != nil || len(due) == 0 {
+			return resumed
 		}
-		if !errors.Is(err, ErrResumeConflict) && ctx.Err() == nil {
-			// Leave the wake-up in place; the next sweep retries.
-			continue
+		progressed := 0
+		for _, timer := range due {
+			if ctx.Err() != nil {
+				return resumed
+			}
+			err := e.ResumeRun(ctx, timer.RunID, timer.NodeID)
+			if err == nil {
+				resumed++
+				progressed++
+				continue
+			}
+			if errors.Is(err, ErrResumeConflict) {
+				// Another actor advanced it — the backlog still shrank.
+				progressed++
+			}
+			// Other errors leave the wake-up in place for the next sweep.
+		}
+		if progressed == 0 {
+			// Nothing moved (persistent failures): stop instead of spinning
+			// on the same head-of-line batch within this tick.
+			return resumed
+		}
+		if len(due) < timerSweepBatchSize {
+			return resumed
 		}
 	}
 	return resumed

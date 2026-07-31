@@ -4,6 +4,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/grammar"
+	"github.com/johnny4young/janusly/go/internal/store"
 )
 
 // A tenant org_configs row must bound the http executor without any node
@@ -148,5 +150,90 @@ func TestRetentionSweepPurgesExpiredTombstones(t *testing.T) {
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM workflow_versions WHERE org_id = $1`, org).Scan(&versions)
 	if workflows != 2 || versions != 4 {
 		t.Fatalf("survivors: workflows=%d versions=%d", workflows, versions)
+	}
+}
+
+// Mass-expired timers: the sweep drains past one batch in a single tick,
+// and batches interleave runs (round-robin fairness) so one run's pile
+// cannot monopolize a batch.
+func TestMassTimerBacklogDrainsFairly(t *testing.T) {
+	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	defer pool.Close()
+	eng := New(pool)
+	q := store.New(pool)
+
+	org := fmt.Sprintf("org-timers-%d", time.Now().UnixNano())
+	// Two runs: a hog with 120 due timers and a small one with 3. Every
+	// waiting node carries an expired wakeup.
+	seedRun := func(runID string, timers int) {
+		nodes := make([]map[string]any, 0, timers)
+		for i := range timers {
+			nodes = append(nodes, map[string]any{
+				"id": fmt.Sprintf("wait-%03d", i), "type": "wait_until",
+				"config": map[string]any{"duration": "PT1S"},
+			})
+		}
+		inputJSON, _ := json.Marshal(map[string]any{
+			"workflow": map[string]any{"nodes": nodes, "edges": []any{}},
+		})
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO runs (id, org_id, workflow_version_id, status, input_json)
+			 VALUES ($1, $2, 'v', 'running', $3::jsonb)`,
+			runID, org, string(inputJSON)); err != nil {
+			t.Fatalf("seed run: %v", err)
+		}
+		for i := range timers {
+			rowID := fmt.Sprintf("%s-n%03d", runID, i)
+			if _, err := pool.Exec(ctx,
+				`INSERT INTO run_nodes (id, run_id, node_id, status, state_json)
+				 VALUES ($1, $2, $3, 'waiting', '{}'::jsonb)`,
+				rowID, runID, fmt.Sprintf("wait-%03d", i)); err != nil {
+				t.Fatalf("seed node: %v", err)
+			}
+			if _, err := pool.Exec(ctx,
+				`INSERT INTO go_pilot_wakeups (run_node_id, wake_at, reason)
+				 VALUES ($1, now() - interval '1 hour', 'wait_until')`, rowID); err != nil {
+				t.Fatalf("seed wakeup: %v", err)
+			}
+		}
+	}
+	hog := org + "-hog"
+	small := org + "-small"
+	seedRun(hog, 120)
+	seedRun(small, 3)
+
+	// Fairness: the first fair batch must contain BOTH runs even though the
+	// hog alone could fill it.
+	batch, err := q.ListDueWaitingWakeups(ctx, 50)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	runsSeen := map[string]bool{}
+	for _, item := range batch {
+		runsSeen[item.RunID] = true
+	}
+	if !runsSeen[small] || !runsSeen[hog] {
+		t.Fatalf("fair batch must interleave runs: %v", runsSeen)
+	}
+
+	// Drain: one sweep clears the whole backlog (123 > one 50-batch).
+	resumed := eng.resumeDueTimers(ctx, q)
+	if resumed != 123 {
+		t.Fatalf("drained %d of 123", resumed)
+	}
+	var remaining int
+	_ = pool.QueryRow(ctx,
+		`SELECT count(*) FROM go_pilot_wakeups w JOIN run_nodes rn ON rn.id = w.run_node_id
+		 WHERE rn.run_id IN ($1, $2)`, hog, small).Scan(&remaining)
+	if remaining != 0 {
+		t.Fatalf("wakeups left: %d", remaining)
 	}
 }
