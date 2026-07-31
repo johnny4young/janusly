@@ -1167,19 +1167,25 @@ func (q *Queries) GetRun(ctx context.Context, arg GetRunParams) (GetRunRow, erro
 }
 
 const getRunExecution = `-- name: GetRunExecution :one
-SELECT status, org_id, input_json FROM runs WHERE id = $1
+SELECT status, org_id, input_json, replay_mode FROM runs WHERE id = $1
 `
 
 type GetRunExecutionRow struct {
-	Status    string
-	OrgID     string
-	InputJson json.RawMessage
+	Status     string
+	OrgID      string
+	InputJson  json.RawMessage
+	ReplayMode pgtype.Text
 }
 
 func (q *Queries) GetRunExecution(ctx context.Context, id string) (GetRunExecutionRow, error) {
 	row := q.db.QueryRow(ctx, getRunExecution, id)
 	var i GetRunExecutionRow
-	err := row.Scan(&i.Status, &i.OrgID, &i.InputJson)
+	err := row.Scan(
+		&i.Status,
+		&i.OrgID,
+		&i.InputJson,
+		&i.ReplayMode,
+	)
 	return i, err
 }
 
@@ -1614,8 +1620,8 @@ func (q *Queries) InsertReplayCampaignItem(ctx context.Context, arg InsertReplay
 }
 
 const insertRun = `-- name: InsertRun :exec
-INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, created_by)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, created_by, replay_mode)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 `
 
 type InsertRunParams struct {
@@ -1625,6 +1631,7 @@ type InsertRunParams struct {
 	Status            string
 	InputJson         json.RawMessage
 	CreatedBy         pgtype.Text
+	ReplayMode        pgtype.Text
 }
 
 func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) error {
@@ -1635,6 +1642,7 @@ func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) error {
 		arg.Status,
 		arg.InputJson,
 		arg.CreatedBy,
+		arg.ReplayMode,
 	)
 	return err
 }

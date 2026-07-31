@@ -34,6 +34,9 @@ type Input struct {
 	// resolved from org config; nil keeps the platform constants. Node
 	// config always wins over these.
 	HTTPBounds *HTTPBounds
+	// AI carries the tenant-resolved seams for `ai`/`agent` nodes; nil
+	// behaves as "no provider configured" (the $0 fallback).
+	AI *AIDeps
 }
 
 // HTTPBounds are the tenant-effective outbound HTTP defaults.
@@ -54,6 +57,7 @@ func Registry() map[string]Func {
 	return map[string]Func{
 		"tool":             NewToolExecutor(toolRegistry),
 		"noop":             executeNoop,
+		"ai":               executeAiNode,
 		"condition":        executeCondition,
 		"transform":        executeTransform,
 		"wait_until":       executeWaitUntil,

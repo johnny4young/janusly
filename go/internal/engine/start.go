@@ -65,6 +65,9 @@ type StartInput struct {
 	// Input is the caller's payload; nil means none was supplied.
 	Input     any
 	CreatedBy string
+	// ReplayMode marks a validation replay ("validation"): write-side
+	// skips apply and the ai node never dials the SDK. Empty = production.
+	ReplayMode string
 	// TriggerEventID, when set, CAS-claims that trigger_events row inside
 	// the start transaction: "event claimed" and "run exists" commit or
 	// roll back together, so a concurrent relay retry can never spawn a
@@ -148,7 +151,8 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 	if err := q.InsertRun(ctx, store.InsertRunParams{
 		ID: runID, OrgID: in.OrgID, WorkflowVersionID: versionID,
 		Status: "running", InputJson: inputJSON,
-		CreatedBy: pgtype.Text{String: in.CreatedBy, Valid: in.CreatedBy != ""},
+		CreatedBy:  pgtype.Text{String: in.CreatedBy, Valid: in.CreatedBy != ""},
+		ReplayMode: pgtype.Text{String: in.ReplayMode, Valid: in.ReplayMode != ""},
 	}); err != nil {
 		return "", fmt.Errorf("insert run: %w", err)
 	}

@@ -112,8 +112,8 @@ ORDER BY version DESC
 LIMIT 1;
 
 -- name: InsertRun :exec
-INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, created_by)
-VALUES ($1, $2, $3, $4, $5, $6);
+INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, created_by, replay_mode)
+VALUES ($1, $2, $3, $4, $5, $6, $7);
 
 -- name: GetRun :one
 SELECT id, org_id, workflow_version_id, status, input_json, output_json,
@@ -207,7 +207,7 @@ WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
   AND status = 'running';
 
 -- name: GetRunExecution :one
-SELECT status, org_id, input_json FROM runs WHERE id = $1;
+SELECT status, org_id, input_json, replay_mode FROM runs WHERE id = $1;
 
 -- name: RequeueRunNodeForRetry :execrows
 UPDATE run_nodes SET status = 'queued', attempts = sqlc.arg(attempt)

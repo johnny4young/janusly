@@ -14,9 +14,12 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/johnny4young/janusly/go/internal/aibudget"
+	"github.com/johnny4young/janusly/go/internal/aiconfig"
 	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/executors"
 	"github.com/johnny4young/janusly/go/internal/grammar"
+	"github.com/johnny4young/janusly/go/internal/prompts"
 	"github.com/johnny4young/janusly/go/internal/store"
 )
 
@@ -94,9 +97,13 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 		bounds := LoadOrgHTTPBounds(ctx, q, claim.OrgID, d.renderOpts.LookupEnv)
 		httpBounds = &bounds
 	}
+	var aiDeps *executors.AIDeps
+	if node.Type == "ai" {
+		aiDeps = d.buildAIDeps(ctx, claim)
+	}
 	output, execErr := execute(ctx, executors.Input{
 		RunID: claim.RunID, NodeID: claim.NodeID,
-		Config: renderedConfig, Context: runContext, HTTPBounds: httpBounds,
+		Config: renderedConfig, Context: runContext, HTTPBounds: httpBounds, AI: aiDeps,
 		Emit: func(eventType string, payload map[string]any) {
 			eventAt := eventNow()
 			raw, err := json.Marshal(payload)
@@ -218,4 +225,31 @@ func runContextFromRows(rows []store.ListRunNodesByRunRow) map[string]any {
 		}
 	}
 	return runContext
+}
+
+// buildAIDeps resolves the tenant seams for an ai node: the catalog-built
+// chokepoint client, the fail-soft budget check, the PromptOps resolver,
+// and the dry-run flag from the run's replay mode (a validation replay
+// must never touch the SDK).
+func (d *Dispatcher) buildAIDeps(ctx context.Context, claim ClaimedNode) *executors.AIDeps {
+	pool := d.engine.pool
+	client, _ := aiconfig.Resolve(ctx, pool, claim.OrgID)
+	dryRun := false
+	if run, err := store.New(pool).GetRunExecution(ctx, claim.RunID); err == nil && run.ReplayMode.Valid {
+		dryRun = run.ReplayMode.String == "validation"
+	}
+	return &executors.AIDeps{
+		Client: client, OrgID: claim.OrgID, DryRun: dryRun,
+		BudgetAllowed: func() (bool, map[string]any) {
+			result := aibudget.Check(ctx, pool, claim.OrgID)
+			budget := map[string]any{
+				"monthlyUsdSpent": result.MonthlyUsdSpent, "monthlyUsdLimit": result.MonthlyUsdLimit,
+				"policy": result.Policy, "exceededAt": result.ExceededAt,
+			}
+			return result.Allowed, budget
+		},
+		ResolvePrompt: func(name string, version int, variables map[string]string) (string, error) {
+			return prompts.ResolveTemplate(ctx, pool, claim.OrgID, name, version, variables)
+		},
+	}
 }

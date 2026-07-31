@@ -1448,3 +1448,9 @@ producción necesita saber — de lo ya resuelto o informativo.
   persistencia): proyección determinista con 6 kinds cerrados, caps en
   runas — la semántica de length de JS, no bytes — y el audit llevando
   solo el conteo.
+
+## 2026-07-31 — el nodo que nunca tumba el run (T-111)
+
+- El executor ai con los cuatro escalones probados: $0 sucede, vivo
+  responde, la validación no marca el SDK, y el proveedor muerto deja
+  el fallback en el estado — jamás un run fallido por culpa del modelo.
