@@ -766,6 +766,7 @@ el chat publicado.
 | 2026-07-31 | T-097 hallazgo operativo | `make ci` NO puede correr concurrente con `make soak` sobre el mismo DB dev: el binario del soak (poll 50ms) roba claims de los tests de engine — 7 fallos ambientales, cero regresiones. En CI no aplica (DB efímero por job); localmente, un lane a la vez |
 | 2026-07-31 | T-095 soak 1h | `make soak` (k6 sostenido parametrizable + muestreo de /metrics interno) corrió la HORA completa: 121 muestras, veredicto ESTABLE en las tres señales — RSS 32.5→33.2 MB (+2.2%), goroutines 42→40 (−4.6%), heap 9.7→9.9 MB (+1.8%). El arnés falla el make target con crecimiento >10% primer-cuarto vs último-cuarto; reporte direccional en `conformance/perf/SOAK.md` + serie `soak-ms93ees6.jsonl`. Hallazgo del arnés: k6 debe correr ASYNC (execFileSync mataba de hambre al muestreador) |
 | 2026-07-31 | T-095 residuo del drain | Un SIGTERM al binario del soak deja nodos `pending` de runs en vuelo (el drain termina lo RECLAMADO, por diseño) — ese residuo interfirió un test de shutdown de la suite hasta limpiarlo. Nota operativa: tras un soak local, cancelar los runs `soak-%` restantes antes de correr la suite |
+| 2026-07-31 | T-098 REPORT-W3 | Cierre de ola con la misma vara: qué es ahora la plataforma (multi-tenant operable con esquema propiedad de Go), matriz de authz, evidencia que más pesa (lane HA ×3, property de secretos, el piso que se probó solo, base fresca sin Node), soak 1h estable (~33 MB RSS), 7 divergencias deliberadas cortadas, deuda consciente y recomendación de ola 4 (arrancar por T-101 LlmClient). 31/31 de la ola; 100/100 acumulados en el plan |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -1067,7 +1068,7 @@ día que exista el chokepoint (T-079)**.
 | T-095 | Soak: `make soak` (k6 sostenido ≥1h, vigilancia de RSS/goroutines, reporte) | HA | P1 | done |
 | T-096 | Manifiesto de contrato v1 + OpenAPI generado + guard de deriva en `make ci` | contrato | P1 | done |
 | T-097 | Lane CI de GitHub Actions para `go/` (build+lint+test+parity con Postgres de servicio) | contrato | P2 | done |
-| T-098 | Informe de ola 3 (REPORT-W3.md) + corte de divergencias | cierre | P0 | todo |
+| T-098 | Informe de ola 3 (REPORT-W3.md) + corte de divergencias | cierre | P0 | done |
 
 ### Cards — ola 3
 

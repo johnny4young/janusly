@@ -1,6 +1,6 @@
 # Informe de ola 3 — pilot Go
 
-**Corte:** 2026-07-31 · rama `go-pilot` (108+ commits sobre `develop@1ad09028`)
+**Corte:** 2026-07-31 · rama `go-pilot` (111 commits sobre `develop@1ad09028`)
 · 31/31 tickets de la ola `done` (T-188 + T-069..T-098); 100/100 acumulados
 en el plan (olas 1, 2 y 3 completas).
 

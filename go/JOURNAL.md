@@ -1359,3 +1359,11 @@ producción necesita saber — de lo ya resuelto o informativo.
   lecciones del arnés: k6 async o el muestreador muere de hambre, y el
   residuo pending de un SIGTERM al soak contamina la suite si no se
   limpia.
+
+## 2026-07-31 — ola 3 cerrada (T-098)
+
+- 31/31. El pilot dejó de ser un runtime con paridad y se volvió una
+  plataforma multi-tenant operable con su esquema en propiedad. La
+  evidencia que más pesa: dos instancias sin perder exactly-once, cero
+  secretos sobreviviendo en jsonb, un candado que casi se cierra sobre
+  su propio autor, y una hora de carga en 33 MB planos.
