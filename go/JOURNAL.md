@@ -1008,3 +1008,11 @@ producción necesita saber — de lo ya resuelto o informativo.
   complementan los race tests dirigidos del F0 — estos encuentran las
   formas que nadie pensó dibujar. Seeds fijos: un fallo se reproduce
   con su número.
+
+## 2026-07-31 — runbook de operación (T-060)
+
+- El argumento operacional del pilot puesto por escrito: un binario,
+  una base, y por tanto una copia de seguridad que ES la copia del
+  sistema. La tabla de diagnóstico no es genérica — cada síntoma viene
+  de algo que esta ola realmente rompió y arregló (la migración del
+  pilot ausente, el escalón de consent, el índice keyset).

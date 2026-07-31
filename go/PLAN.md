@@ -715,6 +715,7 @@ el chat publicado.
 | 2026-07-31 | T-059 idempotencia | Mejora pilot-propia (Node no la tiene): header opcional `Idempotency-Key` (≤256) en `/start` — la clave `(org, key)` se reclama DENTRO de la tx de start (mismo posicionamiento que el trigger-claim: clave y run comprometen juntos); duplicado → 200 con el runId ORIGINAL, cuerpo indistinguible de la primera llamada. Claves scoped por org; sin header, cada llamada es un run fresco. Tabla pilot-owned `go_pilot_start_idempotency` (sin TTL — candidata al sweep de retención si crece) |
 | 2026-07-31 | T-061 fuzzing | Fuzzers nativos de Go sobre las dos gramáticas con propiedades de robustez (no oráculos de corrección): (1) jamás panic/colgarse, (2) acuerdo validar↔evaluar — lo que valida limpio no puede fallar el parse al evaluar, (3) rendering total bajo política lenient (paths sin resolver degradan, no error; secretos faltantes excluidos — su fallo duro es contrato documentado). 4.9M ejecuciones de expresiones + 6.3M de templates, 45s cada uno, cero hallazgos — 534 entradas "interesantes" de cobertura acumuladas. `make fuzz` (FUZZTIME configurable) para corridas más largas |
 | 2026-07-31 | T-062 propiedades | 25 DAGs aleatorios forward-only (acíclicos por construcción, 3..12 nodos, 1-2 predecesores por nodo — fan-in natural) bajo pool real de 6 workers, invariantes verificados desde la BASE, no la proyección: exactly-once (succeeded + attempts==1 + un solo evento node.succeeded), ordering (sucesor jamás estampado antes que un predecesor), no-orphan (cero filas no-terminales tras el terminal), terminal (exactamente un run.started + un run.succeeded). Seeds fijos reproducibles; el fallo nombra su seed. Hallazgo menor: `domain.Workflow` construido a mano requiere `DSLVersion` explícito (el path del API lo asume vía Parse) |
+| 2026-07-31 | T-060 runbook | `go/RUNBOOK.md`: tabla completa de env vars, systemd/launchd, migraciones (las DOS capas — drizzle + pilot — con el camino sin repo Node), backup = pg_dump (todo el estado vive en Postgres; post-restore los timers los drena el sweep justo y los claims muertos el reaper), upgrade con drenaje SIGTERM y verificación, y tabla de diagnóstico rápido con los síntomas reales de la ola (wakeups ausentes, consent MCP, índice keyset) |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -961,7 +962,7 @@ compactas aquí; el detalle de paridad se lee de la fuente al ejecutar.
 | T-057 | MCP: consent gate de escrituras (env + org flag, paridad guardMcpWrite) | F2 | P1 | todo |
 | T-058 | API keyset en eventos: paridad exacta cursores Node↔Go round-trip test | F2 | P1 | todo |
 | T-059 | Idempotencia de `POST /start` (header `Idempotency-Key` opcional) | F2 | P3 | done |
-| T-060 | Runbook de operación del binario (systemd/launchd, backup, upgrade) | F2 | P2 | todo |
+| T-060 | Runbook de operación del binario (systemd/launchd, backup, upgrade) | F2 | P2 | done |
 | T-061 | Fuzzing de gramáticas (go-fuzz corto: expresiones + templates) | F2 | P2 | done |
 | T-062 | Property tests del queue (invariantes: exactly-once, no-orphan, terminal) | F2 | P2 | done |
 | T-063 | Paridad de `/v1/dlq` filtros server-side (status, nodeId, workflowId) | F2 | P2 | done |
