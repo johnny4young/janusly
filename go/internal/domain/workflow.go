@@ -37,6 +37,7 @@ type Workflow struct {
 	Inputs         *InputSchema      `json:"inputs,omitempty"`
 	Outputs        map[string]string `json:"outputs,omitempty"`
 	TemplatePolicy string            `json:"templatePolicy,omitempty"`
+	Recovery       *WorkflowRecovery `json:"recovery,omitempty"`
 	Nodes          []Node            `json:"nodes"`
 	Edges          []Edge            `json:"edges"`
 }
@@ -52,6 +53,7 @@ type rawWorkflow struct {
 	Inputs         *InputSchema      `json:"inputs"`
 	Outputs        map[string]string `json:"outputs"`
 	TemplatePolicy *string           `json:"templatePolicy"`
+	Recovery       *WorkflowRecovery `json:"recovery"`
 	Nodes          *[]rawNode        `json:"nodes"`
 	Edges          *[]rawEdge        `json:"edges"`
 }
@@ -106,6 +108,18 @@ func Parse(raw []byte) (*Workflow, []Issue) {
 		wf.TemplatePolicy = *doc.TemplatePolicy
 		if wf.TemplatePolicy != "lenient" && wf.TemplatePolicy != "strict" {
 			contract("templatePolicy", `expected "lenient" or "strict"`)
+		}
+	}
+	if doc.Recovery != nil {
+		wf.Recovery = doc.Recovery
+		// The versioned contract validates at parse time — the reference
+		// rejects an invalid contract in WorkflowSchema.parse, so the same
+		// document fails here with path-prefixed invalid_contract issues.
+		for _, problem := range ValidateRecoveryContract(doc.Recovery.Contract) {
+			contract("recovery.contract", problem)
+		}
+		if _, _, problem := ParseCircuitBreakerThreshold(doc.Recovery.CircuitBreaker); problem != "" {
+			contract("recovery", problem)
 		}
 	}
 
