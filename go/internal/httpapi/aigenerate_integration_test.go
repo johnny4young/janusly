@@ -122,3 +122,49 @@ func TestGenerateWorkflowLadder(t *testing.T) {
 		t.Fatal("an attempted-and-failed LLM call must surface aiError")
 	}
 }
+
+// Best-of-N: three concurrent samples where only one is a valid graph —
+// the invalid majority never discards the generation, the readiness
+// scorer picks the valid draft, and the audit carries the counts.
+func TestGenerateWorkflowBestOfN(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+
+	valid := `{"dslVersion":"1.0","id":"bon-win","name":"Winner","nodes":[{"id":"a","type":"noop","config":{}}],"edges":[]}`
+	broken := `{"dslVersion":"1.0","id":"bon-bad","name":"Bad","nodes":[{"id":"a","type":"noop","config":{}}],"edges":[{"from":"a","to":"ghost"}]}`
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if n == 2 { // exactly one of the three samples is valid
+			_, _ = fmt.Fprint(w, anthropicReply(valid))
+			return
+		}
+		_, _ = fmt.Fprint(w, anthropicReply(broken))
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("JANUSLY_LOCAL_STACK", "true")
+	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+	t.Setenv("JANUSLY_LLM_SIMULATED_PROVIDERS", "anthropic")
+	t.Setenv("JANUSLY_LLM_SIMULATOR_BASE_URL", server.URL)
+	if _, err := pool.Exec(t.Context(), `INSERT INTO org_configs (id, org_id, key, value_json, category, description, value_type)
+		VALUES ($1, $2, 'ai.generationCandidates', '3', 'ai', 'test', 'number')`, h.org+"-bon", h.org); err != nil {
+		t.Fatalf("seed candidates: %v", err)
+	}
+
+	res := h.call("POST", "/ai/generate-workflow", map[string]any{"prompt": "one noop"}, "")
+	if res.status != 200 || res.body["mode"] != "ai" || res.body["id"] != "bon-win" {
+		t.Fatalf("BoN must keep the valid candidate: %d %+v", res.status, res.body)
+	}
+	if calls.Load() != 3 {
+		t.Fatalf("three samples must fire: %d", calls.Load())
+	}
+	var audited int
+	_ = pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_logs
+		WHERE org_id = $1 AND action = 'ai.workflow.generated'
+		  AND metadata @> '{"candidateCount":3,"validCandidates":1}'`, h.org).Scan(&audited)
+	if audited != 1 {
+		t.Fatalf("BoN telemetry must audit: %d", audited)
+	}
+}

@@ -1412,3 +1412,9 @@ producción necesita saber — de lo ya resuelto o informativo.
   dirigida con los issues reales del dominio, y las 5 plantillas $0. La
   aceptación de verdad: los evals de Node corriendo contra Go — 3/3
   deterministas, 27 saltados, exit 0.
+
+## 2026-07-31 — N candidatos, un ganador determinista (T-106)
+
+- Best-of-N con el scorer de la referencia y la regla que importa: un
+  candidato inválido no descarta la generación si otro valida, y N=1
+  ni siquiera entra a la rama.
