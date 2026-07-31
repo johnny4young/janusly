@@ -119,6 +119,22 @@ func TestReplayCampaignLifecycle(t *testing.T) {
 	if rows := list.body["campaigns"].([]any); len(rows) != 1 {
 		t.Fatalf("list: %+v", list.body)
 	}
+
+	// Audit trail: the operator's create, one system-actor completion, and
+	// one item row per replayed entry (the pump replays via the engine, so
+	// no dlq.replayed rows — item_replayed is that path's identity).
+	pool := testPool(t)
+	for action, want := range map[string]int{
+		"recovery.campaign.created":       1,
+		"recovery.campaign.completed":     1,
+		"recovery.campaign.item_replayed": 2,
+		"recovery.campaign.item_failed":   0,
+		"dlq.replayed":                    0,
+	} {
+		if got := countAudit(t, pool, h.org, action); got != want {
+			t.Fatalf("%s: want %d rows, got %d", action, want, got)
+		}
+	}
 }
 
 func TestReplayCampaignCancellation(t *testing.T) {
@@ -174,6 +190,14 @@ func TestReplayCampaignCancellation(t *testing.T) {
 	missing := h.call("POST", "/recovery/campaigns/nope/cancel", nil, "")
 	if missing.status != 404 || missing.body["code"] != "replay_campaign_not_found" {
 		t.Fatalf("missing cancel: %d %+v", missing.status, missing.body)
+	}
+	// A cancelled campaign audits the operator action (cancellation is an
+	// operator verb, so no system completion row lands).
+	if got := countAudit(t, testPool(t), h.org, "recovery.campaign.cancelled"); got != 1 {
+		t.Fatalf("recovery.campaign.cancelled: want 1 row, got %d", got)
+	}
+	if got := countAudit(t, testPool(t), h.org, "recovery.campaign.completed"); got != 0 {
+		t.Fatalf("cancelled campaign must not audit completion, got %d", got)
 	}
 }
 

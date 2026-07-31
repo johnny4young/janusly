@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/johnny4young/janusly/go/internal/audit"
 	"github.com/johnny4young/janusly/go/internal/store"
 )
 
@@ -70,6 +71,10 @@ func (s *V1Server) legacyMutations(mux *http.ServeMux) {
 			writeLegacy(w, opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil))
 			return
 		}
+		audit.Write(r.Context(), s.pool, rc.authContext, "workflow.deleted", audit.Options{
+			TargetType: "workflow", TargetID: workflowID,
+			Metadata: map[string]any{"soft": true},
+		})
 		writeLegacy(w, opOK(map[string]any{"workflowId": workflowID, "ok": true}))
 	}))
 	mux.HandleFunc("POST /workflows/{workflowId}/restore", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
@@ -85,6 +90,9 @@ func (s *V1Server) legacyMutations(mux *http.ServeMux) {
 			writeLegacy(w, opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil))
 			return
 		}
+		audit.Write(r.Context(), s.pool, rc.authContext, "workflow.restored", audit.Options{
+			TargetType: "workflow", TargetID: workflowID,
+		})
 		writeLegacy(w, opOK(map[string]any{"workflowId": workflowID, "ok": true}))
 	}))
 	mux.HandleFunc("GET /workflows/trash", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {

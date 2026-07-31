@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/johnny4young/janusly/go/internal/audit"
 	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/engine"
 	"github.com/johnny4young/janusly/go/internal/executors"
@@ -159,6 +160,16 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 		}
 	}
 
+	if created != 0 {
+		audit.Write(ctx, s.pool, rc.authContext, "trigger.event.received", audit.Options{
+			TargetType: "trigger_event", TargetID: triggerEventID,
+			Metadata: map[string]any{
+				"triggerType": "webhook_received", "workflowId": workflowID,
+				"nodeId": nodeID, "replay": false,
+			},
+		})
+	}
+
 	// Buffer-on-pause: an inbound event is data the upstream system already
 	// committed and will not re-send — a paused workflow parks it as
 	// `buffered` (202: accepted, run deferred) instead of dropping it.
@@ -169,6 +180,13 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 		}); err != nil {
 			return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 		}
+		audit.Write(ctx, s.pool, rc.authContext, "trigger.event.buffered", audit.Options{
+			TargetType: "trigger_event", TargetID: triggerEventID,
+			Metadata: map[string]any{
+				"triggerType": "webhook_received", "reason": ownerState.Status,
+				"workflowId": workflowID, "nodeId": nodeID,
+			},
+		})
 		return opResult{status: http.StatusAccepted, data: map[string]any{
 			"ok": true, "buffered": true, "reason": ownerState.Status, "triggerEventId": triggerEventID,
 		}}
@@ -206,6 +224,13 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 		// The event row stays `received` so the relay's retry converges.
 		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}
+	audit.Write(ctx, s.pool, rc.authContext, "trigger.event.started", audit.Options{
+		TargetType: "trigger_event", TargetID: triggerEventID,
+		Metadata: map[string]any{
+			"triggerType": "webhook_received", "runId": runID,
+			"workflowId": workflowID, "nodeId": nodeID,
+		},
+	})
 	return opOK(map[string]any{"ok": true, "triggerEventId": triggerEventID, "runId": runID})
 }
 
@@ -269,5 +294,9 @@ func (s *V1Server) runsRedriveCore(r *http.Request, rc v1Request) opResult {
 			return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
 		}
 	}
+	audit.Write(r.Context(), s.pool, rc.authContext, "run.redrive", audit.Options{
+		TargetType: "run", TargetID: body.RunID,
+		Metadata: map[string]any{"sourceRunId": body.RunID, "nodeId": body.NodeID},
+	})
 	return opOK(map[string]any{"ok": true, "runId": body.RunID})
 }

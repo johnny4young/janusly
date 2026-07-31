@@ -101,6 +101,18 @@ func TestWebhookIngestSpawnsOneConvergentRun(t *testing.T) {
 		`SELECT count(*) FROM runs WHERE org_id = $1`, h.org).Scan(&runCount); err != nil || runCount != 1 {
 		t.Fatalf("one run total, got %d (%v)", runCount, err)
 	}
+
+	// One received + one started audit row; the converged relay retry never
+	// re-audits, and a trigger start is NOT an adhoc run start.
+	for action, want := range map[string]int{
+		"trigger.event.received": 1,
+		"trigger.event.started":  1,
+		"run.started.adhoc":      0,
+	} {
+		if got := countAudit(t, pool, h.org, action); got != want {
+			t.Fatalf("%s: want %d rows, got %d", action, want, got)
+		}
+	}
 }
 
 func TestWebhookIngestContractErrors(t *testing.T) {
@@ -193,6 +205,9 @@ func TestWebhookIngestBuffersOnPausedWorkflow(t *testing.T) {
 	if err := pool.QueryRow(context.Background(),
 		`SELECT count(*) FROM runs WHERE org_id = $1`, h.org).Scan(&runCount); err != nil || runCount != 0 {
 		t.Fatalf("paused workflow must not spawn runs, got %d (%v)", runCount, err)
+	}
+	if got := countAudit(t, pool, h.org, "trigger.event.buffered"); got != 1 {
+		t.Fatalf("trigger.event.buffered: want 1 row, got %d", got)
 	}
 }
 

@@ -1240,3 +1240,12 @@ producción necesita saber — de lo ya resuelto o informativo.
 - Probado con el proceso real, no con un unit: producción sin Supabase
   muere en el arranque con el mensaje exacto de la referencia, y el
   override explícito lo revive. Jamás un fallback anónimo silencioso.
+
+## 2026-07-31 — toda mutación deja huella (T-081)
+
+- Retrofit completo: 18 mutaciones de olas 1-2 auditan con nombres de la
+  referencia; el pump de campañas escribe las filas de sistema
+  (`system:replay-campaign`) y el MCP server firma `source=mcp`.
+- Hallazgo: tres acciones del pump viven FUERA del catálogo tipado de la
+  referencia (su system-writer no tipa) — registradas como pilot-action
+  sin contaminar el pin de 147.

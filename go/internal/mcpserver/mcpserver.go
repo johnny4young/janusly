@@ -19,6 +19,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/johnny4young/janusly/go/internal/audit"
+	"github.com/johnny4young/janusly/go/internal/auth"
 	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/engine"
 	"github.com/johnny4young/janusly/go/internal/grammar"
@@ -32,6 +34,14 @@ type Deps struct {
 	OrgID  string
 	UserID string
 	NewID  func() string
+}
+
+// auditContext derives the audit identity for MCP-originated writes: the
+// reference's MCP proxy reaches the API with the service token and the mcp
+// source tag, which is exactly what the audit trail must show.
+func (d Deps) auditContext() *auth.Context {
+	return &auth.Context{OrgID: d.OrgID, UserID: d.UserID,
+		Mode: auth.ModeServiceToken, Source: auth.SourceMcp}
 }
 
 // NewServer builds the MCP server with the pilot's eight tools registered.
@@ -206,6 +216,10 @@ func (d Deps) saveWorkflow(ctx context.Context, raw json.RawMessage) (*mcp.CallT
 	}); err != nil {
 		return nil, nil, err
 	}
+	audit.Write(ctx, d.Pool, d.auditContext(), "workflow.saved", audit.Options{
+		TargetType: "workflow", TargetID: workflowID,
+		Metadata: map[string]any{"version": version + 1},
+	})
 	return ok(map[string]any{"workflowId": workflowID, "versionId": versionID, "version": version + 1})
 }
 
@@ -234,6 +248,10 @@ func (d Deps) startRun(ctx context.Context, raw json.RawMessage, input map[strin
 		}
 		return nil, nil, err
 	}
+	audit.Write(ctx, d.Pool, d.auditContext(), "run.started.adhoc", audit.Options{
+		TargetType: "run", TargetID: runID,
+		Metadata: map[string]any{"workflowId": wf.ID, "adhoc": true},
+	})
 	return ok(map[string]any{"runId": runID})
 }
 
@@ -348,6 +366,9 @@ func (d Deps) redrive(ctx context.Context, deadLetterID string) (*mcp.CallToolRe
 	err := d.Engine.RedriveDeadLetter(ctx, d.OrgID, deadLetterID)
 	switch {
 	case err == nil:
+		audit.Write(ctx, d.Pool, d.auditContext(), "dlq.replayed", audit.Options{
+			TargetType: "dlq", TargetID: deadLetterID,
+		})
 		return ok(map[string]any{"redriven": true, "deadLetterId": deadLetterID})
 	case errors.Is(err, engine.ErrDeadLetterNotFound):
 		return expected("dead letter not found")

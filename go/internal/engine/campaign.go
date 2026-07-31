@@ -18,8 +18,33 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/johnny4young/janusly/go/internal/audit"
 	"github.com/johnny4young/janusly/go/internal/store"
 )
+
+// The campaign pump's audit actions exist in the reference too, but are
+// written by its UNTYPED system writer (deps.audit in replay-campaign.ts),
+// so they sit outside the typed AuditAction catalog the pilot extracted —
+// they register here rather than counting against the reference pin.
+func init() {
+	audit.RegisterPilotAction("recovery.campaign.completed")
+	audit.RegisterPilotAction("recovery.campaign.item_replayed")
+	audit.RegisterPilotAction("recovery.campaign.item_failed")
+}
+
+// campaignSystemActor mirrors the reference's completion-audit actor.
+const campaignSystemActor = "system:replay-campaign"
+
+func (e *Engine) auditCampaignCompleted(ctx context.Context, campaign store.ReplayCampaign) {
+	audit.SystemWrite(ctx, e.pool, campaign.OrgID, campaignSystemActor,
+		"recovery.campaign.completed", audit.Options{
+			TargetType: "replay_campaign", TargetID: campaign.ID,
+			Metadata: map[string]any{
+				"replayed": campaign.ReplayedCount, "failed": campaign.FailedCount,
+				"cancelled": campaign.CancelledCount,
+			},
+		})
+}
 
 // ProcessDueReplayCampaignStep claims ONE due running campaign and drains
 // at most one item. Returns false when nothing was due.
@@ -41,10 +66,14 @@ func (e *Engine) ProcessDueReplayCampaignStep(ctx context.Context) (bool, error)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// No pending work: complete the campaign if nothing is in flight.
-			_, err := q.CompleteReplayCampaignIfExhausted(ctx, campaign.ID)
-			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return true, err
+			completed, err := q.CompleteReplayCampaignIfExhausted(ctx, campaign.ID)
+			if err != nil {
+				if !errors.Is(err, pgx.ErrNoRows) {
+					return true, err
+				}
+				return true, nil
 			}
+			e.auditCampaignCompleted(ctx, completed)
 			return true, nil
 		}
 		return true, err
@@ -64,6 +93,15 @@ func (e *Engine) ProcessDueReplayCampaignStep(ctx context.Context) (bool, error)
 	}); err != nil {
 		return true, err
 	}
+	itemAction := audit.Action("recovery.campaign.item_replayed")
+	itemMetadata := map[string]any{"campaignId": campaign.ID, "position": item.Position}
+	if status == "failed" {
+		itemAction = "recovery.campaign.item_failed"
+		itemMetadata["error"] = itemError.String
+	}
+	audit.SystemWrite(ctx, e.pool, campaign.OrgID, campaign.CreatedBy, itemAction, audit.Options{
+		TargetType: "dlq", TargetID: item.DeadLetterID, Metadata: itemMetadata,
+	})
 	replayed, failed := int32(0), int32(0)
 	if status == "replayed" {
 		replayed = 1
@@ -76,9 +114,14 @@ func (e *Engine) ProcessDueReplayCampaignStep(ctx context.Context) (bool, error)
 		return true, err
 	}
 	// A drained cohort completes without waiting one extra pacing period.
-	if _, err := q.CompleteReplayCampaignIfExhausted(ctx, campaign.ID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return true, err
+	completed, err := q.CompleteReplayCampaignIfExhausted(ctx, campaign.ID)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return true, err
+		}
+		return true, nil
 	}
+	e.auditCampaignCompleted(ctx, completed)
 	return true, nil
 }
 

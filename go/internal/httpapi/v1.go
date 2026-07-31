@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/johnny4young/janusly/go/internal/audit"
 	"github.com/johnny4young/janusly/go/internal/auth"
 	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/engine"
@@ -292,6 +293,10 @@ func (s *V1Server) saveCore(r *http.Request, rc v1Request) opResult {
 	}); err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}
+	audit.Write(ctx, s.pool, rc.authContext, "workflow.saved", audit.Options{
+		TargetType: "workflow", TargetID: workflowID,
+		Metadata: map[string]any{"version": version + 1},
+	})
 	return opOK(map[string]any{
 		"workflowId": workflowID, "versionId": versionID, "version": version + 1,
 	})
@@ -347,6 +352,10 @@ func (s *V1Server) startCore(r *http.Request, rc v1Request) opResult {
 		}
 		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}
+	audit.Write(r.Context(), s.pool, rc.authContext, "run.started.adhoc", audit.Options{
+		TargetType: "run", TargetID: runID,
+		Metadata: map[string]any{"workflowId": wf.ID, "adhoc": true},
+	})
 	return opOK(map[string]any{"runId": runID})
 }
 
@@ -538,6 +547,10 @@ func (s *V1Server) resumeCore(r *http.Request, rc v1Request) opResult {
 			return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 		}
 	}
+	audit.Write(r.Context(), s.pool, rc.authContext, "run.resumed", audit.Options{
+		TargetType: "run", TargetID: body.RunID,
+		Metadata: map[string]any{"nodeId": body.NodeID},
+	})
 	return opOK(map[string]any{"resumed": true})
 }
 
@@ -706,6 +719,10 @@ func (s *V1Server) cancelCore(r *http.Request, rc v1Request) opResult {
 	if err := s.engine.CancelRun(r.Context(), body.RunID, reason); err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}
+	audit.Write(r.Context(), s.pool, rc.authContext, "run.cancelled", audit.Options{
+		TargetType: "run", TargetID: body.RunID,
+		Metadata: map[string]any{"reason": reason},
+	})
 	return opOK(map[string]any{"runId": body.RunID, "status": "cancelled"})
 }
 
@@ -769,6 +786,9 @@ func (s *V1Server) redrive(w http.ResponseWriter, r *http.Request, rc v1Request)
 		}
 		return
 	}
+	audit.Write(r.Context(), s.pool, rc.authContext, "dlq.replayed", audit.Options{
+		TargetType: "dlq", TargetID: body.DeadLetterID,
+	})
 	writeV1Data(w, rc.id, map[string]any{"redriven": true})
 }
 
@@ -826,6 +846,13 @@ func (s *V1Server) rollbackCore(r *http.Request, rc v1Request) opResult {
 		}
 		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}
+	audit.Write(ctx, s.pool, rc.authContext, "workflow.rolled_back", audit.Options{
+		TargetType: "workflow", TargetID: body.WorkflowID,
+		Metadata: map[string]any{
+			"sourceVersionId": body.SourceVersionID, "sourceVersion": source.Version,
+			"newVersion": version + 1,
+		},
+	})
 	return opOK(map[string]any{
 		"workflowId": body.WorkflowID, "versionId": versionID,
 		"version": version + 1, "sourceVersion": source.Version,
@@ -858,6 +885,9 @@ func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 			return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 		}
 	}
+	audit.Write(r.Context(), s.pool, rc.authContext, "dlq.replayed", audit.Options{
+		TargetType: "dlq", TargetID: body.DeadLetterID,
+	})
 	return opOK(map[string]any{"ok": true})
 }
 

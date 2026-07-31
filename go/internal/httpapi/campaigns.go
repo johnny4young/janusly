@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/johnny4young/janusly/go/internal/audit"
 	"github.com/johnny4young/janusly/go/internal/signature"
 	"github.com/johnny4young/janusly/go/internal/store"
 )
@@ -209,6 +210,13 @@ func (s *V1Server) campaignCreateCore(r *http.Request, rc v1Request) opResult {
 	// The due clock is the pilot's only dispatch substrate — there is no
 	// queue publication to lose, so this is always false.
 	detail["publicationDeferred"] = false
+	audit.Write(ctx, s.pool, rc.authContext, "recovery.campaign.created", audit.Options{
+		TargetType: "replay_campaign", TargetID: campaignID,
+		Metadata: map[string]any{
+			"total": len(preview.Eligible), "pacingMs": int32(*body.PacingMs),
+			"clusterSignature": *preview.ClusterSignature, "publicationDeferred": false,
+		},
+	})
 	return opResult{status: http.StatusAccepted, data: detail}
 }
 
@@ -286,6 +294,14 @@ func (s *V1Server) campaignCancelCore(r *http.Request, rc v1Request, id string) 
 	if detail == nil {
 		return result
 	}
+	cancelled, _ := detail["campaign"].(map[string]any)
+	audit.Write(ctx, s.pool, rc.authContext, "recovery.campaign.cancelled", audit.Options{
+		TargetType: "replay_campaign", TargetID: id,
+		Metadata: map[string]any{
+			"replayed": cancelled["replayedCount"], "failed": cancelled["failedCount"],
+			"cancelled": cancelled["cancelledCount"],
+		},
+	})
 	return opOK(detail)
 }
 
