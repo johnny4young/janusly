@@ -673,7 +673,7 @@ el chat publicado.
 | 2026-07-30 | T-035 HITO F1 | EL WEB REAL CORRE CONTRA GO: smoke Playwright verde — la app monta, el feed de Activity renderiza runs sembrados leyendo /v1/runs de Go, el approval en espera cuenta en needs-action (proyección de nodos), y CERO page errors (paneles fuera de alcance degradan como prometía el wrapper). Reproducible: `node go/conformance/run-web-smoke.mjs` (bootea binario Go + vite vía webServer de Playwright con VITE_API_URL) |
 | 2026-07-30 | hallazgo (T-035) | El gap invisible del inventario: `GET /auth/context` — el bootstrap de identidad que el web hace ANTES de todo. Sin él, `permissionsRef` queda vacío y CADA lectura cae a su fallback (síntoma engañoso: app montada, feed vacío, cero errores). Servida la rama dev-headers de Node: org sintética admin developmentFallback con las 41 claves del catálogo (extraídas de permission-catalog.ts en el pin) |
 | 2026-07-30 | T-036 tool registry | `internal/tools` con la familia json (parse/pick/set/merge) portada incluidos sus guards de prototype-pollution (`__proto__`/`prototype`/`constructor` rechazados en paths de set y saltados en merge — en Go no hay prototipo que envenenar, pero un payload del pilot puede volver al backend Node: se refutan igual). Nodo `tool` con el envelope de referencia `{tool, result}` + `resultPolicy` ("envelope" default fluye el fallo; "require_ok" falla el nodo). Catálogo `listTools()` (name/description/required/optional/inputExample/inputFields/writeSide) servido en /v1/tools y /tools. `tool` entra en PilotNodeTypes (el test de tipo-no-ejecutable migró a `ai`) |
-| 2026-07-30 | T-037 fork/join | Los shells declarativos portados de parallel-fork.ts: fork = passthrough que valida 2..10 branches únicas (≤64 chars, desc ≤280) y ecoa `{branches}`; join = ensambla `output.branches` por ETIQUETA leyendo `context[predId].output` (dup de predecessor rechazado — el copy-paste surfaceado fuerte). El fan-out/fan-in real ya lo daba el engine (ALL-AND + claim atómico) — cero primitivas nuevas de runtime, como manda la regla de la casa. Las 3 reglas del gate en domain.CheckForkJoinReadiness con severidades (warn/fail); enforcement al gate production-mode cuando exista (T-042). Un branch fallando → join jamás encola (queda pending), run failed — probado |
+| 2026-07-30 | T-037 fork/join | Los shells declarativos portados de parallel-fork.ts: fork = passthrough que valida 2..10 branches únicas (≤64 chars, desc ≤280) y devuelve `{branches}` como eco; join = ensambla `output.branches` por ETIQUETA leyendo `context[predId].output` (dup de predecessor rechazado — el copy-paste surfaceado fuerte). El fan-out/fan-in real ya lo daba el engine (ALL-AND + claim atómico) — cero primitivas nuevas de runtime, como manda la regla de la casa. Las 3 reglas del gate en domain.CheckForkJoinReadiness con severidades (warn/fail); enforcement al gate production-mode cuando exista (T-042). Un branch fallando → join jamás encola (queda pending), run failed — probado |
 | 2026-07-30 | divergencia menor | Los mensajes de fork_join_missing_branch_sources/readiness son resumidos (Node compone closest-join + labels faltantes en el mensaje); los códigos y severidades son exactos — el web matchea por código |
 | 2026-07-30 | T-038 loop map | El contrato legacy puro portado: items via mapInput + normalizeItems (array tal cual; string split-por-comas trim+drop-vacíos; otro → []), cap 1.000 con LoopItemLimitError exacto, mapping default `{item:"{{item}}", index:"{{index}}"}`, render por ítem con `item`/`index` ligados por iteración (diferidos en el render de config del dispatcher — el diseño deferredRoots de T-006 pagando), evento `loop.completed {count, items}` y output idéntico. Ejecutors ganan los seams Emit (appendEvent) + ReportUnresolved (política late-bound del dispatcher). `for_each` falla honesto ("not executable by this backend yet") — su maquinaria (tool por ítem, presupuestos de fallo, write-side) es ticket propio futuro |
 | 2026-07-30 | T-039 verificación | La estructura YA existía (seam de T-003 + gramática de T-006 + saveCore) — el ticket se convirtió honesto en verificación end-to-end: `edge_invalid_condition` con mensaje verbatim + edge_0 sintético, operadores de palabra legales en aristas, violaciones de contrato de operadores (in sobre no-array) rechazadas ESTÁTICAMENTE en save (la pasada empty-scope), y el API surfaceando el issue en params.issues del 400. Ticket de una hora que confirmó cero deuda oculta |
@@ -688,7 +688,7 @@ el chat publicado.
 | 2026-07-30 | T-042 gate | `CheckWorkflowReadiness` portado completo (8 reglas por nodo + outputs + evals opt-in, mensajes/sugerencias verbatim, mismo orden), con dos seams: `IsWriteSideTool` (registry de tools; el refinamiento input-sensible de `http.request` de Node no aplica — el registry del pilot no tiene tools write-side aún) y `RequireEvalCoverage` (misma env `JANUSLY_REQUIRE_EVAL_COVERAGE`). Regex sensible REUTILIZADO de `grammar.IsSensitiveKey` (regla: no bifurcar). Gate en `/start` con la misma env `JANUSLY_PRODUCTION_MODE` → 422 `runs_not_production_ready` SIN params (Node tampoco expone issues en el rechazo del start; el badge sí). `workflow_missing_rollback_version` (warn, DB-layered) portado; `credential_missing` NO (el pilot no tiene Secret Store) |
 | 2026-07-30 | T-042 badge | `POST /workflows/readiness` en ambos wires (raw + envelope v1), cuerpo plano o `{workflow}` como Node; inválido estructural → 200 `{status:"fail"}` con códigos `invalid_workflow_<code>` envueltos, igual que la referencia |
 | 2026-07-30 | T-043 org config | Subconjunto http del catálogo (`http.timeoutMs`/`maxResponseBytes`/`maxRedirects`) con el contrato exacto del catálogo Node: precedencia config-de-nodo → fila tenant → env (`JANUSLY_HTTP_*`, mismos nombres) → default (30000/1MB/5), mínimos 1/1/0, valores inválidos caen a la siguiente capa sin aplicarse a medias, lectura fallida degrada a env/defaults (nunca falla un nodo por config ilegible). `ClaimedNode` gana `OrgID` (poblado del run row en executeClaim — cero reads extra); el dispatcher resuelve bounds SOLO para nodos http (una query indexada por ejecución, sin caché — divergencia consciente vs el hot-path de Node, revisar si el bench lo señala). `maxRedirects: 0` de tenant es válido y se honra (min 0) |
-| 2026-07-30 | T-044 firma | `normalizeErrorSignature` portado completo a `internal/signature` (7 reglas en orden, scrub de formas de token, sanitización de identificadores, truncado a 80). Conversión JS→RE2 razonada: los lookaheads de frontera `(?=$|[^A-Za-z0-9])` son REDUNDANTES en cuerpos abiertos (`{20,}` greedy consume todo) y solo AKIA/AIza (longitud fija) necesitan emulación real (grupo de cola restaurado en el replacement) — test pin-ea el caso "17 chars tras AKIA no es key". `recurredAfterRecovery` siempre false (sin substrato de impacto en el pilot) |
+| 2026-07-30 | T-044 firma | `normalizeErrorSignature` portado completo a `internal/signature` (7 reglas en orden, scrub de formas de token, sanitización de identificadores, truncado a 80). Conversión JS→RE2 razonada: los lookaheads de frontera `(?=$|[^A-Za-z0-9])` son REDUNDANTES en cuerpos abiertos (`{20,}` greedy consume todo) y solo AKIA/AIza (longitud fija) necesitan emulación real (grupo de cola restaurado en el replacement) — un test fija el caso "17 chars tras AKIA no es key". `recurredAfterRecovery` siempre false (sin substrato de impacto en el pilot) |
 | 2026-07-30 | T-044 quirk Node | Hallazgo de la referencia reproducido fielmente + chip upstream: `PARSE_ERROR_PATTERN` (regla 5) matchea el NOMBRE del tool `json.parse` case-insensitive dentro de "Invalid tool input for json.parse: …", así que esos errores clusterizan como `parse_error` genérico y nunca llegan a la regla `tool_input` (regla 6). El pilot reproduce el mismo resultado (paridad > corrección local); el fix va al backend Node |
 | 2026-07-30 | T-044 clusters | `GET /dlq/clusters` en ambos wires: muestras de dead_letters + run_nodes fallidos en la ventana (1..90 días, default 30, LIMIT 2000 por superficie — cap propio del pilot), dedupe `(runId,nodeId)` prefiriendo DLQ, workflows afectados ordenados por count, 5 sample refs, orden frecuencia desc + firma asc, `totalSamples` cuenta muestras CRUDAS pre-dedupe como Node. Identidad workflow/nodeType/toolName enriquecida del snapshot `input_json.workflow` del run |
 | 2026-07-30 | T-045 pump | Campañas de replay sobre el MISMO esquema compartido (`replay_campaigns` + `replay_campaign_items`), pero sin espejo BullMQ: el due-clock de Postgres (que Node declara autoritativo) se bombea directo — `ClaimDueReplayCampaign` avanza `next_dispatch_at` por su propio pacing EN el mismo statement (FOR UPDATE SKIP LOCKED), así que pumps concurrentes no pueden doble-despachar y no existe publicación que reconciliar. Un paso = a lo sumo un replay (pacing nunca es sleep de loop); items con lease por claim-token; cancelación corta claims nuevos y reporta contadores veraces (el item en vuelo termina). Reutiliza `RedriveDeadLetter` por item (misma tx de revival). Rutas legacy `/recovery/campaigns[/preview|/{id}|/{id}/cancel]` con códigos/bounds verbatim (100 items, nombre 120, pacing 1000..60000, cohorte ≥2 misma-firma resuelta server-side); sin guardMcpWrite ni audits (pendientes del pilot) |
@@ -949,31 +949,974 @@ compactas aquí; el detalle de paridad se lee de la fuente al ejecutar.
 | T-039 | Edge conditions con evaluación completa en validación (`validateExpression` en save) | F2 | P2 | done |
 | T-040 | Trigger ingest: `POST /v1/webhooks/:workflowId` → startRun con evento normalizado | F2 | P1 | done |
 | T-041 | `webhook_received` executor passthrough + fixture trigger e2e | F2 | P1 | done |
-| T-042 | Validación production-mode (readiness gate subset: retries, bounds, secretos) | F2 | P2 | todo |
-| T-043 | Org config subset (`org_configs` read + http bounds por tenant en executor) | F2 | P2 | todo |
-| T-044 | Réplica de `/dlq/counts` + clusters básicos (firma de error agrupada) | F2 | P2 | todo |
-| T-045 | Replay campaigns mínimo (2..N mismos-firma, paced, cancelable) | F2 | P3 | todo |
-| T-046 | Paridad lane A ampliada: F11-F20 (cancel, fork/join, loop, webhook, keyset) | F2 | P0 | todo |
+| T-042 | Validación production-mode (readiness gate subset: retries, bounds, secretos) | F2 | P2 | done |
+| T-043 | Org config subset (`org_configs` read + http bounds por tenant en executor) | F2 | P2 | done |
+| T-044 | Réplica de `/dlq/counts` + clusters básicos (firma de error agrupada) | F2 | P2 | done |
+| T-045 | Replay campaigns mínimo (2..N mismos-firma, paced, cancelable) | F2 | P3 | done |
+| T-046 | Paridad lane A ampliada: F11-F20 (cancel, fork/join, loop, webhook, keyset) | F2 | P0 | done |
 | T-047 | Postgres 15 floor: lane integración con `JANUSLY_POSTgres_IMAGE` pg15 | F2 | P2 | done |
 | T-048 | Bench regresión: `make bench` guarda serie temporal en conformance/perf | F2 | P2 | done |
-| T-049 | Hardening SSRF extra: redirect cross-origin strip de headers credenciales | F2 | P1 | todo |
-| T-050 | Journal ola 2 parcial + revisión de divergencias acumuladas | F2 | P1 | todo |
+| T-049 | Hardening SSRF extra: redirect cross-origin strip de headers credenciales | F2 | P1 | done |
+| T-050 | Journal ola 2 parcial + revisión de divergencias acumuladas | F2 | P1 | done |
 | T-051 | Streaming HTTP opt-in (`bodyMode:"stream"` → preview acotado) | F2 | P2 | done |
 | T-052 | `csv.fetch`/`csv.parse` port (RFC 4180 compartido, bounded sample) | F2 | P2 | done |
-| T-053 | Retention sweep mínimo (`system:retention`: purga workflows tombstone >30d) | F2 | P2 | todo |
-| T-054 | `wait_until` archivo de timers vencidos masivos (lote + fairness) | F2 | P3 | todo |
+| T-053 | Retention sweep mínimo (`system:retention`: purga workflows tombstone >30d) | F2 | P2 | done |
+| T-054 | `wait_until` archivo de timers vencidos masivos (lote + fairness) | F2 | P3 | done |
 | T-055 | Métricas de valor: verifiedRecovery p50/p90 sobre redrives reales | F2 | P2 | done |
 | T-056 | MCP: tools de inspección extra (runs.list, workflows.list) + paginación | F2 | P2 | done |
-| T-057 | MCP: consent gate de escrituras (env + org flag, paridad guardMcpWrite) | F2 | P1 | todo |
-| T-058 | API keyset en eventos: paridad exacta cursores Node↔Go round-trip test | F2 | P1 | todo |
+| T-057 | MCP: consent gate de escrituras (env + org flag, paridad guardMcpWrite) | F2 | P1 | done |
+| T-058 | API keyset en eventos: paridad exacta cursores Node↔Go round-trip test | F2 | P1 | done |
 | T-059 | Idempotencia de `POST /start` (header `Idempotency-Key` opcional) | F2 | P3 | done |
 | T-060 | Runbook de operación del binario (systemd/launchd, backup, upgrade) | F2 | P2 | done |
 | T-061 | Fuzzing de gramáticas (go-fuzz corto: expresiones + templates) | F2 | P2 | done |
 | T-062 | Property tests del queue (invariantes: exactly-once, no-orphan, terminal) | F2 | P2 | done |
 | T-063 | Paridad de `/v1/dlq` filtros server-side (status, nodeId, workflowId) | F2 | P2 | done |
-| T-064 | Web: panel DLQ + redrive contra Go (smoke Playwright) | F1+ | P1 | todo |
-| T-065 | Web: aprobar/resume desde la UI contra Go (smoke Playwright) | F1+ | P1 | todo |
-| T-066 | Consolidación: goldens re-run completo + parity F01-F20 verde | F2 | P0 | todo |
+| T-064 | Web: panel DLQ + redrive contra Go (smoke Playwright) | F1+ | P1 | done |
+| T-065 | Web: aprobar/resume desde la UI contra Go (smoke Playwright) | F1+ | P1 | done |
+| T-066 | Consolidación: goldens re-run completo + parity F01-F20 verde | F2 | P0 | done |
 | T-067 | Números ola 2: retest carga con pools nuevos + tabla evolución | F2 | P1 | done |
-| T-068 | Informe de ola 2 (REPORT-W2.md): estado F1/F2, gaps restantes, riesgo | F2 | P0 | todo |
+| T-068 | Informe de ola 2 (REPORT-W2.md): estado F1/F2, gaps restantes, riesgo | F2 | P0 | done |
 
+
+## 14. Ola 3 — Plataforma mínima creíble (T-069..T-098)
+
+**Tesis:** lo que separa el pilot de un despliegue serio no es runtime sino
+plataforma. Esta ola cierra las cuatro transversales (auth real, audit,
+limiter, catálogo de org config), valida HA multi-instancia y deja el
+contrato v1 generado y vigilado. Protocolo §0 idéntico: secuencial,
+fuente Node al pin antes de portar, tests, commit por ticket, fila(s) §9,
+resumen. Regla de esta ola: **ninguna mutación nueva sin audit desde el
+día que exista el chokepoint (T-079)**.
+
+### Tabla de seguimiento — ola 3
+
+| # | Ticket | Área | Pri | Estado |
+| --- | --- | --- | --- | --- |
+| T-069 | AuthContext + PROVIDER_CHAIN (seams de 4 modos, grant = org_members) | auth | P0 | todo |
+| T-070 | Modo Supabase: verificación JWT + resolución de membresía | auth | P0 | todo |
+| T-071 | Modo service-token (sin auto-admin) + modo dev-headers endurecido | auth | P0 | todo |
+| T-072 | Catálogo de permisos (41 claves) + `requireRole` por rango | auth | P0 | todo |
+| T-073 | `requirePermission` + anotación role/permission en el registry de rutas | auth | P0 | todo |
+| T-074 | Roles custom por org (`org_roles`, inheritsFrom cerrado, fail-closed) | auth | P1 | todo |
+| T-075 | Guard anti-lockout de admin (coerción auditada, excepción custom-admin) | auth | P1 | todo |
+| T-076 | Rutas members: invite / role / delete (sin cascada, fallback getOrgRole) | auth | P1 | todo |
+| T-077 | Overrides de permisos + CRUD de roles custom (409 role_in_use, revert built-in) | auth | P1 | todo |
+| T-078 | Gate de arranque en producción (sin Supabase → rehusar salvo ALLOW_DEV_AUTH_HEADERS) | auth | P0 | todo |
+| T-079 | Chokepoint de audit: catálogo tipado de acciones + helper `auditAction` | audit | P0 | todo |
+| T-080 | `withAuditTx` (entidad + fila de audit comprometen juntas) | audit | P0 | todo |
+| T-081 | Retrofit de audit a TODAS las mutaciones existentes (save/cancel/redrive/campañas/trash/MCP) | audit | P0 | todo |
+| T-082 | `GET /audit` (admin, filtro por prefijo de acción, keyset, cap 200) | audit | P1 | todo |
+| T-083 | `safePersistPayload` formal (redacción por valor + claves + cota de bytes + centinela) | audit | P1 | todo |
+| T-084 | Rate limiter en Postgres (fail-open) + observabilidad de degradación | limiter | P0 | todo |
+| T-085 | Limiter cableado: API global, storm-guard de triggers, MCP writes 60/min | limiter | P1 | todo |
+| T-086 | Catálogo completo de org config (tipado, guards anti-secreto, GET/PUT + audit) | config | P0 | todo |
+| T-087 | Consumidores del snapshot: requireSavedWorkflow, TTLs, ventanas de retención por org | config | P1 | todo |
+| T-088 | Retención completa por org: run_events / audit_logs / usage_events (CTE por tabla, acotada) | config | P1 | todo |
+| T-089 | Sustrato usage_events + seam de recorder (forma `llm.completion` lista para ola 4) | usage | P1 | todo |
+| T-090 | `GET /run/usage` real + agregado de costos acotado (100 grupos + resto) | usage | P2 | todo |
+| T-091 | Health de dos niveles: `/health` público-seguro + `/system/queue` admin (profundidad desde Postgres) | obs | P1 | todo |
+| T-092 | Paridad de nombres Prometheus + Resource OTel (`service.name=janusly`, instance id) | obs | P2 | todo |
+| T-093 | Lane HA: DOS instancias del engine sobre una base — property + race suites verdes | HA | P0 | todo |
+| T-094 | Singletons con lease o prueba de seguridad concurrente por bomba (campañas/retención/timers) | HA | P1 | todo |
+| T-095 | Soak: `make soak` (k6 sostenido ≥1h, vigilancia de RSS/goroutines, reporte) | HA | P1 | todo |
+| T-096 | Manifiesto de contrato v1 + OpenAPI generado + guard de deriva en `make ci` | contrato | P1 | todo |
+| T-097 | Lane CI de GitHub Actions para `go/` (build+lint+test+parity con Postgres de servicio) | contrato | P2 | todo |
+| T-098 | Informe de ola 3 (REPORT-W3.md) + corte de divergencias | cierre | P0 | todo |
+
+### Cards — ola 3
+
+### T-069 · AuthContext + PROVIDER_CHAIN — P0
+**Objetivo:** el resolver real de identidad, con la arquitectura de la
+referencia: una cadena de proveedores donde el PRIMERO que resuelve gana y
+**el grant es la fila `org_members`** (nunca el token solo).
+**Espec:** leer `docs/architecture/auth-and-identity.md` + el resolver Node
+antes de portar. `internal/auth`: `Context{OrgID, UserID, Role, Mode,
+ServiceTokenSuffix}` + `Provider` seam (`Resolve(r) (*Context, error)`);
+`providerOrgHint` es selector de alcance, no autoridad. El middleware
+`auth()` actual de httpapi pasa a delegar en la cadena.
+**Acepta:** [ ] cadena configurable con orden estable · [ ] sin proveedor
+que resuelva → 401 con la forma Node · [ ] dev-headers sigue byte-igual
+para el harness · [ ] tests de precedencia entre modos.
+
+### T-070 · Modo Supabase (JWT + membresía) — P0
+**Objetivo:** producción real: token de Supabase → usuario → fila
+`org_members` del org pedido.
+**Espec:** verificación de firma según lo que use la referencia (leer su
+verificador: secreto HS/JWKS), extracción de `sub`, resolución de
+membresía por `(orgId, userId)`; expiración → 401; membresía ausente →
+403 (la expulsión expira la sesión en el siguiente request, semántica del
+member-delete). Config por env igual que Node (`SUPABASE_*`).
+**Acepta:** [ ] token válido + miembro → contexto con rol real · [ ] token
+válido sin membresía → 403 · [ ] firma inválida/expirada → 401 · [ ]
+matriz de 5+ tokens malformados (alg none, aud equivocada, exp pasada).
+
+### T-071 · Service-token + dev-headers endurecidos — P0
+**Objetivo:** los otros dos modos productivos de la cadena.
+**Espec:** service-token compara contra `JANUSLY_API_SERVICE_TOKEN`
+(comparación constante), **no auto-otorga admin** (resuelve membresía como
+cualquier usuario; sufijo de token al contexto para audit). Dev-headers:
+auto-permitido SOLO cuando Supabase no está configurado **y**
+`NODE_ENV`-equivalente ≠ producción; fallback a rol `admin` únicamente
+cuando NO existe fila `org_members` (paridad exacta con la nota del
+CLAUDE.md).
+**Acepta:** [ ] service-token sin membresía no es admin · [ ] sufijo en el
+contexto · [ ] dev-headers respeta la fila real cuando existe.
+
+### T-072 · Catálogo de permisos + requireRole — P0
+**Objetivo:** la primera capa de autorización: rango `viewer < editor <
+admin`.
+**Espec:** portar el catálogo cerrado de `apps/api/src/permission-catalog.ts`
+(41 claves, 20 categorías activas, `defaultRoles` por clave) a un paquete
+`internal/authz` con test que ANCLA el conteo exacto (si Node añade una
+clave, el test de paridad del catálogo lo delata). `requireRole(min)` como
+middleware componible.
+**Acepta:** [ ] 41 claves byte-iguales a la fuente · [ ] rango correcto
+por rol · [ ] viewer bloqueado de mutaciones (matriz por ruta existente).
+
+### T-073 · requirePermission + registry anotado — P0
+**Objetivo:** la segunda capa; cuando una ruta declara ambas, AMBAS pasan.
+**Espec:** anotar cada ruta del pilot con `{role?, permission?}` en un
+registro central (hoy los mounts son directos — introducir la tabla de
+rutas del pilot con dispatcher first-match, paridad con el patrón
+Open/Closed de Node). El orden de verificación es `requireRole` → 
+`requirePermission`, como el dispatcher de la referencia.
+**Acepta:** [ ] toda ruta existente anotada (tabla en el código, no
+dispersa) · [ ] denegaciones con código/forma Node · [ ] test recorriendo
+el registro y verificando que ninguna mutación quedó sin permiso.
+
+### T-074 · Roles custom por org — P1
+**Objetivo:** `org_roles` con la semántica exacta: built-ins virtuales
+hasta ser sobreescritos.
+**Espec:** `(orgId, name)` único, `inheritsFrom` enum cerrado,
+`grantedPermissions` JSONB anulable; `getMemberRole` consciente de
+custom (rol no built-in → consultar `org_roles`; default `viewer`,
+**fail-closed** si la fila no existe).
+**Acepta:** [ ] custom hereda rango del inheritsFrom · [ ] rol desconocido
+sin fila → viewer efectivo (fail-closed probado) · [ ] permisos otorgados
+se suman a los heredados.
+
+### T-075 · Guard anti-lockout — P1
+**Objetivo:** un admin no puede quitarse a sí mismo la capacidad de
+administrar permisos.
+**Espec:** `mandatoryAdminPermissions()` fuerza `org.permissions.write` +
+`members.write` en todo override del rol admin built-in, registrando la
+coerción en `metadata.coerced` del audit; los custom con
+`inheritsFrom: "admin"` NO se coercen (el caso `billing-admin`).
+**Acepta:** [ ] override de admin sin las claves → se fuerzan + audit ·
+[ ] custom admin-heredado queda intacto.
+
+### T-076 · Rutas members — P1
+**Objetivo:** invite / cambio de rol / expulsión con las semánticas de
+cascada de la referencia.
+**Espec:** `POST /members/invite`, `POST /members/role`, `DELETE /members`
+aceptando nombres custom vía fallback `getOrgRole` cuando `isRole` falla;
+member-delete borra SOLO la fila (workflows/runs/audit quedan — audit es
+append-only); toda mutación con `withAuditTx` (depende de T-080).
+**Acepta:** [ ] invite con rol custom válido · [ ] delete no cascada
+(filas hijas intactas, probado) · [ ] la sesión del expulsado muere en el
+siguiente request.
+
+### T-077 · Overrides + CRUD de roles — P1
+**Objetivo:** la superficie admin de permisos completa.
+**Espec:** set/clear de overrides por rol; crear/actualizar/eliminar rol
+custom; DELETE de un custom con miembros → 409 `{membersAffected,
+code:"role_in_use"}`; DELETE sobre nombre built-in → revierte el override.
+Acciones de audit: `org.permissions.override_set/_cleared`,
+`org.role.created/_updated/_deleted` (catálogo T-079).
+**Acepta:** [ ] escalera 409 exacta · [ ] revert de built-in probado ·
+[ ] audit por cada acción con metadata correcta.
+
+### T-078 · Gate de arranque en producción — P0
+**Objetivo:** el binario rehúsa arrancar mal configurado.
+**Espec:** modo producción (env explícita del pilot, p. ej.
+`JANUSLY_GO_ENV=production`) sin Supabase configurado → exit no-cero con
+mensaje claro, salvo `ALLOW_DEV_AUTH_HEADERS=true` explícito (paridad con
+la regla Node). Documentar en RUNBOOK.
+**Acepta:** [ ] arranque rehusado probado (proceso hijo en test) · [ ]
+override explícito funciona · [ ] RUNBOOK actualizado.
+
+### T-079 · Chokepoint de audit — P0
+**Objetivo:** el catálogo tipado: una acción con typo es error de compilación.
+**Espec:** `internal/audit`: tipo `Action` cerrado (constantes generadas
+del catálogo Node — extraer la lista de `AuditAction` y fijarla con un test),
+`auditAction(auth, action, opts{targetType, targetId, metadata})` que
+deriva `source` + bloque `actor{userId, mode, serviceTokenSuffix}`;
+metadata SIEMPRE pasa por `safePersistPayload` (T-083; hasta entonces por
+el redactor actual).
+**Acepta:** [ ] catálogo anclado con test contra la fuente · [ ] forma de fila
+byte-comparable con una de Node (fixture) · [ ] fallo del insert de audit
+en camino no-tx NUNCA rompe la operación (best-effort documentado).
+
+### T-080 · withAuditTx — P0
+**Objetivo:** el invariante: entidad + audit comprometen o revierten juntas.
+**Espec:** `WithAuditTx(ctx, pool, func(tx, audit) error)` — el handler
+recibe el tx y un `audit` ligado al tx (convención de sombreado de nombre
+de la referencia, aquí impuesta por firma). Consumidores iniciales: todas
+las rutas de T-076/T-077.
+**Acepta:** [ ] fallo inyectado tras el insert de entidad revierte TAMBIÉN
+el audit (y viceversa) · [ ] test de atomicidad con wrapTx.
+
+### T-081 · Retrofit de audit — P0
+**Objetivo:** saldar la divergencia transversal «sin audit rows» de las
+olas 1-2.
+**Espec:** añadir audit a: workflows.save/rollback/delete/restore,
+run cancel, dlq redrive + replay, campañas (created/cancelled/completed —
+la completed desde la bomba con actor sistema), trigger ingest
+(trigger.event.received/started/buffered), org config PUT, MCP writes
+(source "mcp"). Acciones con los NOMBRES del catálogo Node donde existan;
+las pilot-propias (p. ej. `runs.redrive_in_place`) documentadas en §9.
+**Acepta:** [ ] cada mutación listada emite exactamente una fila · [ ]
+matriz de test por acción · [ ] metadata redactada (secreto plantado no
+sobrevive).
+
+### T-082 · GET /audit — P1
+**Objetivo:** la lectura admin.
+**Espec:** `?action=&cursor=&limit=` — filtro por PREFIJO de acción,
+keyset `(createdAt,id)` DESC (cursor `<iso>|<id>` reutilizando el parser),
+cap 200; rol admin. Web: panel de Access debe listar contra Go.
+**Acepta:** [ ] prefijo filtra en SQL · [ ] round-trip de cursor sin
+saltos (mismo patrón del test T-058) · [ ] smoke del panel si el tab
+carga con dev-headers.
+
+### T-083 · safePersistPayload formal — P1
+**Objetivo:** el chokepoint de persistencia jsonb con TODAS sus capas.
+**Espec:** portar `packages/shared/src/safe-persist.ts`: redacción por
+VALOR (lista de valores resueltos), redacción por CLAVE (reutilizar
+`grammar.IsSensitiveKey` — no bifurcar), cota de bytes (default 256KB,
+env `JANUSLY_PERSIST_MAX_BYTES`, por-llamada) con centinela
+`{__truncated, originalBytes, maxBytes, preview}`. Migrar los escritores
+existentes (state_json, error_json, event payload, audit metadata, DLQ —
+workflow/node JSON con bytes infinitos pero clave-redactados).
+**Acepta:** [ ] paridad de centinela byte-igual · [ ] DLQ conserva el job
+exacto redactado · [ ] property test: ninguna clave sensible sobrevive en
+ninguna columna jsonb tras una corrida sembrada con secretos.
+
+### T-084 · Rate limiter en Postgres — P0
+**Objetivo:** la decisión de arquitectura ejecutada: limiter sin Redis,
+coherente con un-binario-una-base.
+**Espec:** ventana fija por `(name, orgId)` sobre una tabla `go_pilot_rate_windows`
+(UPSERT contador con expiración por ventana; O(1) por request, sin
+vacuum-storm — ventana en la PK). **Fail-open** con warn si la base
+falla la operación de limiter (nunca fail-closed). Hooks
+`onError/onRecovery` → tracker en memoria + audit one-shot
+`rate_limit.degraded`/`rate_limit.recovered` por (bucket, día-UTC) con
+dedupe en base (paridad con la semántica Node, sustrato distinto — §9).
+**Acepta:** [ ] 429 con la forma Node (`Rate limit exceeded for <bucket>.
+Retry in Ns.`) · [ ] fail-open probado matando la conexión del limiter ·
+[ ] degradación audita UNA vez por bucket/día bajo réplicas (test con dos
+procesos).
+
+### T-085 · Limiter cableado — P1
+**Objetivo:** los tres consumidores de la referencia.
+**Espec:** (1) buckets API por ruta sensible (start, save, resume — los
+que Node limita; leer sus nombres de bucket exactos), (2) storm-guard por
+trigger (`rateLimitPerMin` del config del nodo, default 60, máx 10000) →
+evento `skipped` + 429 `{ok:false, skipped:true, reason:"rate_limited"}`
+(cierra la divergencia de T-040), (3) MCP writes 60/min por org.
+**Acepta:** [ ] trigger sobre el límite marca la fila skipped · [ ]
+MCP write denegado a 61 · [ ] nombres de bucket byte-iguales.
+
+### T-086 · Catálogo completo de org config — P0
+**Objetivo:** el catálogo cerrado con sus guards.
+**Espec:** portar `ORG_CONFIG_DEFINITIONS` completo (claves, tipos,
+defaults, envKeys, min/max, allowedValues, categorías) + los guards de
+nombre/valor prohibidos (nada con forma de credencial entra). Rutas
+GET (lista con defaults resueltos por capa) + PUT (validación por tipo y
+rango, audit). El snapshot tipado reemplaza el lector ad-hoc de T-043.
+**Acepta:** [ ] catálogo anclado con test contra la fuente (conteo + claves) ·
+[ ] PUT de un valor con forma de secreto → rechazado · [ ] precedencia
+fila→env→default probada por capa (reusar el patrón de T-043).
+
+### T-087 · Consumidores del snapshot — P1
+**Objetivo:** que el catálogo gobierne de verdad.
+**Espec:** `runs.requireSavedWorkflow` en `/start` (403
+`runs_adhoc_disabled` con mensaje Node), TTL de human-form (se consume en
+ola 4 — dejar el lector), ventanas de retención por org
+(`retention.*Days`) alimentando T-088, `mcp.writeConsent` migrado del
+lector puntual de T-057 al snapshot.
+**Acepta:** [ ] adhoc-disabled byte-igual · [ ] retención por org
+respetada · [ ] T-057 sigue verde sobre el nuevo lector.
+
+### T-088 · Retención completa — P1
+**Objetivo:** las purgas que faltan, por org y acotadas.
+**Espec:** run_events / audit_logs / usage_events con el patrón CTE
+atómico del sweep existente, por org con su ventana del catálogo,
+lotes con cota (`cappedByMaxBatches` — paridad del shape del resultado),
+enumeración de orgs con datos elegibles. Extiende el runner horario.
+**Acepta:** [ ] cada tabla purga solo su ventana y su org · [ ] lote
+acotado no bloquea (prueba con volumen sembrado) · [ ] métricas/log por
+barrido.
+
+### T-089 · Sustrato usage_events — P1
+**Objetivo:** la tubería de telemetría lista antes del primer token AI.
+**Espec:** tabla compartida `usage_events`; `internal/usage` con
+`Recorder` seam process-global (equivalente de `setUsageRecorder`);
+forma exacta `metric:"llm.completion"`, quantity=totalTokens, metadata
+{provider, model, providerSimulated, input/output/cached tokens,
+latencyMs, costUsd, nodeId, mode, aiError}. Fallos del recorder se
+capturan y descartan — la telemetría jamás rompe una llamada.
+**Acepta:** [ ] fila con la forma exacta desde un recorder de prueba ·
+[ ] recorder que lanza no propaga · [ ] listo para consumo en T-101.
+
+### T-090 · /run/usage + costos — P2
+**Objetivo:** reemplazar el stub honesto de T-032.
+**Espec:** atribución por runId (toda recall/LLM del run reenvía el
+runId — regla para ola 4), agregado de Operations: ventana rodante
+completa en Postgres, máx 100 grupos proveedor/modelo + fila resto
+explícita (nunca sample crudo arbitrario).
+**Acepta:** [ ] shape del agregado paridad Node · [ ] resto agregado
+correcto con >100 grupos sembrados.
+
+### T-091 · Health de dos niveles — P1
+**Objetivo:** separar lo público-seguro de lo admin.
+**Espec:** `/health` público: bloque `rateLimiter` sin bucket/clave cruda
++ `queue:{degraded}|null`; `/system/queue` admin (permiso real vía T-073):
+waiting/active/oldest-age calculados de `run_nodes` (la cola ES Postgres;
+edad desde elegibilidad — el análogo del matiz BullMQ documentado),
+snapshot coalescido 5s con timeout duro. Umbral
+`JANUSLY_QUEUE_LAG_WARN_SECONDS` (1..86400, default 60).
+**Acepta:** [ ] público jamás expone números vivos de cola · [ ] admin
+con la forma Node · [ ] chip del web (`RateLimiterStatusChip`) renderiza
+contra Go.
+
+### T-092 · Prometheus + OTel Resource — P2
+**Objetivo:** que los dashboards existentes no necesiten renombrar.
+**Espec:** Resource `service.name="janusly"`, `service.namespace="janusly"`,
+`service.instance.id` (env → hostname); gauges de cola con los nombres
+Node (`workflow_queue_waiting_jobs`/`_active_jobs` — aunque el sustrato
+sea Postgres) + `janusly_rate_limit_degraded_buckets`; bind 127.0.0.1
+por defecto, puerto 9464-equivalente por env, arranque tras migraciones y
+fallo duro en conflicto de bind.
+**Acepta:** [ ] scrape con nombres exactos · [ ] conflicto de bind
+aborta el arranque (probado).
+
+### T-093 · Lane HA de dos instancias — P0
+**Objetivo:** la afirmación no probada del REPORT-W2, probada.
+**Espec:** arnés que levanta DOS engines (procesos o instancias in-test
+con pools separados) sobre la misma base y corre: property tests (25 DAGs),
+races dirigidos, campañas concurrentes, timers masivos. Invariantes
+idénticos (exactly-once cross-instancia — el claim ladder es la garantía).
+`make test-ha`.
+**Acepta:** [ ] exactly-once con dos instancias (×3 corridas) · [ ]
+campañas sin doble despacho · [ ] hallazgos documentados en §9 (si algo
+falla, ESE es el resultado valioso).
+
+### T-094 · Seguridad concurrente de bombas — P1
+**Objetivo:** cada singleton implícito, o probado seguro concurrente o con
+lease.
+**Espec:** revisar campaña-pump (SKIP LOCKED — seguro), retención
+(idempotente — seguro), timers (conflicto de resume — seguro pero
+duplicando trabajo: medir), reaper. Donde el trabajo duplicado importe,
+lease con advisory lock try + renovación. Documentar la matriz en el
+RUNBOOK.
+**Acepta:** [ ] matriz completa singleton→estrategia · [ ] test de dos
+bombas simultáneas por cada una · [ ] RUNBOOK con la sección HA.
+
+### T-095 · Soak — P1
+**Objetivo:** memoria y goroutines bajo horas, no segundos.
+**Espec:** `make soak` (k6 modo sostenido parametrizable, default 1h),
+muestreo periódico de RSS/goroutines/conexiones del binario (endpoint
+pprof interno ya existe), reporte con veredicto (creció/estable) en
+`conformance/perf/`.
+**Acepta:** [ ] 1h sin crecimiento monótono de RSS ni fugas de goroutines
+· [ ] reporte generado con la tabla direccional.
+
+### T-096 · Contrato v1 generado — P1
+**Objetivo:** el OpenAPI 3.1 del pilot desde un manifiesto sin efectos.
+**Espec:** manifiesto Go de rutas v1 (método, path, shapes de
+request/response — puede derivar de structs con tags), generador →
+`go/contract/openapi.json` checked-in, guard de deriva en `make ci`
+(regenerar y `git diff --quiet`). No importar el server desde el
+generador (paridad con la regla V1_CONTRACT_ROUTES).
+**Acepta:** [ ] documento generado y committeado · [ ] deriva rompe ci ·
+[ ] envelope v1 documentado una vez y referenciado.
+
+### T-097 · CI GitHub Actions — P2
+**Objetivo:** el lane Go en el CI real (consciente de que cada push a la
+privada cuesta — el lane monta en los MISMOS triggers existentes, cero
+pushes extra).
+**Espec:** job `test_go` en `.github/workflows/ci.yml`: Go 1.2x, servicio
+Postgres (pgvector), `make migrate`-equivalente (drizzle + SQL del pilot
+vía psql), `make ci`. Cache de módulos. NO añadir orquestación Compose al
+YAML (regla del repo): el job usa el service container directo.
+**Acepta:** [ ] verde en un push de prueba (coordinado con el batch de
+push del usuario) · [ ] duración < 10 min con cache caliente.
+
+### T-098 · REPORT-W3 — P0
+**Objetivo:** cierre con la misma vara: qué es ahora la plataforma, matriz
+de authz, deuda restante, números del soak/HA, recomendación de ola 4.
+**Acepta:** [ ] informe + JOURNAL + §9 al día · [ ] tabla de estado por
+área actualizada.
+
+## 15. Ola 4 — Pipeline AI + agentes + formularios humanos (T-099..T-128)
+
+**Tesis:** todo camino AI degrada a `{mode:"fallback", aiError}` — ese
+contrato es sagrado y cada ticket lo prueba. Anthropic-only
+(`claude-haiku-4-5`) vía `anthropic-sdk-go`; los evals existentes validan
+la paridad por HTTP sin cambios.
+
+### Tabla de seguimiento — ola 4
+
+| # | Ticket | Área | Pri | Estado |
+| --- | --- | --- | --- | --- |
+| T-099 | LlmClient chokepoint (anthropic-sdk-go) + contrato de fallback sagrado | ai-core | P0 | todo |
+| T-100 | Config AI del catálogo (provider/model/timeouts/reintentos/promptMaxChars) | ai-core | P0 | todo |
+| T-101 | Usage desde el chokepoint (tokens+cache+costo, pricing + override env, simulated) | ai-core | P0 | todo |
+| T-102 | Prompt caching + `ai.maxOutputUnits` por llamada | ai-core | P1 | todo |
+| T-103 | Gobernanza de costo: checkBudget/gateBudget + audit del bloqueo | ai-core | P1 | todo |
+| T-104 | Modo free_json: extracción/reparación robusta de JSON del texto libre | ai-core | P0 | todo |
+| T-105 | `/ai/generate-workflow` (prompt DATA-framed + fallback determinista + evals verdes) | genera | P0 | todo |
+| T-106 | Best-of-N: candidatos + selección | genera | P1 | todo |
+| T-107 | Guía de operador `janusly.md` (org/workflow, scrubbed, DATA-framed, acotada) | genera | P2 | todo |
+| T-108 | Registro PromptOps (prompts versionados) | genera | P2 | todo |
+| T-109 | `/ai/patch-workflow` (envelopes estructurales + alternativas separadas de evidencia) | genera | P1 | todo |
+| T-110 | Canal lateral de evidencia AI | genera | P2 | todo |
+| T-111 | Executor de nodo `ai` (fallback a nivel de nodo, salida estable) | nodos | P0 | todo |
+| T-112 | Sustrato de memoria: pgvector + embeddings (Ollama) + consent de dos flags | memoria | P0 | todo |
+| T-113 | Tools `vector.search` / `vector.upsert` (kind workflow_vector, consent, write-side) | memoria | P1 | todo |
+| T-114 | Agent loop con planner determinista de reglas + presupuesto de pasos | agente | P0 | todo |
+| T-115 | Planner LLM (plan interpretado con reintento, fallback al de reglas) | agente | P0 | todo |
+| T-116 | Memoria episódica del agente (recall DATA-framed + write-back skip en dryRun) | agente | P1 | todo |
+| T-117 | `multi_agent` secuencial (previousAgents por agente completado) + paralelo | agente | P1 | todo |
+| T-118 | Resúmenes operacionales `agent.reasoning` (acotados, estables) | agente | P2 | todo |
+| T-119 | Scopes diferidos en validación: previousAgents/item con la política estricta | agente | P2 | todo |
+| T-120 | Nodo `mcp_tool` (cliente): stdio + transportes URL SSRF-validados/pinned | mcp-cli | P1 | todo |
+| T-121 | Descubrimiento MCP + descriptores + sanitización NFKC para awareness AI | mcp-cli | P1 | todo |
+| T-122 | writeSide de descriptores + interacción con readiness/approval | mcp-cli | P2 | todo |
+| T-123 | Matriz de fallos AI (5-10 casos por superficie: timeout/auth/JSON roto/budget) | calidad | P0 | todo |
+| T-124 | Evals contra Go (`JANUSLY_EVALS_API_URL`) con gate vs baseline; deltas documentados | calidad | P0 | todo |
+| T-125 | `/validate` + listPlannerTools paridad (proyección planner privada) | calidad | P2 | todo |
+| T-126 | Nodo `human_form`: tokens HMAC (org/run/node/purpose + TTL) + /resume con schema | humano | P0 | todo |
+| T-127 | Smokes web: AI Studio generar→guardar→correr (camino fallback $0) + human form | humano | P1 | todo |
+| T-128 | Informe de ola 4 (REPORT-W4.md) | cierre | P0 | todo |
+
+### Cards — ola 4
+
+### T-099 · LlmClient chokepoint — P0
+**Objetivo:** UNA puerta para todo token: `internal/ai.Client.GenerateText`.
+**Espec:** `anthropic-sdk-go` envuelto en try/catch-equivalente TOTAL: 
+cualquier error del SDK → `{mode:"fallback", aiError:<clasificado>}`,
+jamás un panic ni un error crudo al caller. Neutral de proveedor en la
+interfaz (aunque la postura sea Anthropic-only). Nada fuera de
+`internal/ai` llama al SDK (regla de import verificable con un test de
+paquete).
+**Acepta:** [ ] matriz de errores del SDK → fallback (red, 401, 429,
+overloaded, timeout) · [ ] test de que ningún otro paquete importa el SDK.
+
+### T-100 · Config AI — P0
+**Espec:** consumir del catálogo (T-086): `ai.provider`,
+`ai.anthropic.model` (default `claude-haiku-4-5-20251001`), `ai.timeoutMs`,
+`ai.maxRetries`, `ai.promptMaxChars`, `ai.rateLimitPerMin` (bucket del
+limiter). Prompt sobre el máximo → truncado documentado, no error.
+**Acepta:** [ ] overrides por org efectivos · [ ] sin clave API → todo
+camino cae a fallback limpio y los evals `requiresMode:"ai"` se saltan
+(paridad con la regla de $0).
+
+### T-101 · Usage desde el chokepoint — P0
+**Espec:** una fila `usage_events` por llamada vía el Recorder de T-089:
+tokens (input/output/cached/cacheCreation con fallback defensivo a la
+metadata de Anthropic), `costUsd` de la tabla de precios portada
+(`pricing.ts` + `JANUSLY_LLM_PRICE_<MODEL>`; modelo desconocido → null),
+`providerSimulated` solo tras el doble gate del simulador local y siempre
+costo cero.
+**Acepta:** [ ] fila exacta comparada con una de Node (fixture) · [ ]
+modelo desconocido no inventa costo.
+
+### T-102 · Caching + maxOutputUnits — P1
+**Espec:** bloques cacheables marcados (system/prompt estable primero),
+`ai.maxOutputUnits` per-call → max_tokens; conteos de cache a usage.
+**Acepta:** [ ] segunda llamada idéntica reporta cachedInputTokens>0
+(test vivo opcional con clave; unit con SDK falso siempre).
+
+### T-103 · Presupuesto — P1
+**Espec:** `checkBudget`/`gateBudget` sobre el agregado de usage del mes
+por org (límite del catálogo); bloqueo → fallback con
+`aiError:"budget_blocked"` + audit del gate (actor sistema); superficie
+`/health`-adjacente para el banner del web.
+**Acepta:** [ ] gate bloquea exactamente al cruzar · [ ] la llamada
+bloqueada NO toca el SDK · [ ] audit una vez por transición.
+
+### T-104 · free_json — P0
+**Espec:** portar la extracción del modo por defecto: fences, prosa
+alrededor, JSON truncado reparable, arrays top-level, BOM/unicode. Es LA
+pieza de fiabilidad medida (memoria del proyecto: free-JSON ganó a
+constrained) — suite de fixtures portada de los tests Node + los casos
+del harness de experimentos.
+**Acepta:** [ ] suite de extracción ≥ paridad de casos Node · [ ]
+falla de extracción → fallback, nunca excepción.
+
+### T-105 · /ai/generate-workflow — P0
+**Espec:** ensamblaje del prompt (DATA-framing de todo lo user-supplied,
+few-shot exemplars portados, guía janusly.md cuando exista T-107),
+generación free_json → validación con el validador REAL del dominio →
+reparación de un paso si aplica (leer el flujo exacto de Node) →
+respuesta con la forma del wire (incluye `mode`). El generador
+determinista de fallback (sin clave) portado con paridad de shapes —
+los evals deterministas son fallos duros si divergen.
+**Acepta:** [ ] `pnpm evals` con `JANUSLY_EVALS_API_URL` apuntando a Go:
+deterministas 100%, ai-mode ≥ baseline cuando hay clave · [ ] flat-object
+inputs con defaults (subset AI del grammar de inputs) respetado.
+
+### T-106 · Best-of-N — P1
+**Espec:** `ai.generationCandidates` del catálogo; N candidatos
+concurrentes acotados, selección por el criterio de Node (leer su
+scorer), empates estables.
+**Acepta:** [ ] N=1 es byte-igual al camino simple · [ ] candidato
+inválido no descarta la generación si otro valida.
+
+### T-107 · janusly.md — P2
+**Espec:** guía por org y por workflow, acotada en bytes, scrubbed
+(`ScrubSecretShapes`) y SIEMPRE DATA-framed (jamás override de política ni
+almacén de secretos); inyección solo donde Node la inyecta.
+**Acepta:** [ ] intento de instrucción maliciosa queda enmarcado como
+datos (fixture del test Node) · [ ] cota de bytes.
+
+### T-108 · PromptOps — P2
+**Espec:** registro versionado de prompts con la mecánica de Node
+(id+versión activa, lectura en caliente); las superficies leen del
+registro, no de literales.
+**Acepta:** [ ] cambiar la versión activa cambia el prompt sin redeploy ·
+[ ] fallback al literal embebido si el registro falta.
+
+### T-109 · /ai/patch-workflow — P1
+**Espec:** el AI-patch del Recovery dialog: config por tipo + envelopes
+estructurales del patch (grammar exacta de parche), 0-2 alternativas
+consideradas scrubbed SEPARADAS de la evidencia determinista; validación
+del resultado con el validador real antes de responder.
+**Acepta:** [ ] patch inválido jamás llega al wire · [ ] alternativas
+nunca contaminan el bloque de evidencia · [ ] fallback determinista con
+forma completa.
+
+### T-110 · Evidencia AI — P2
+**Espec:** el canal lateral de evidencia (qué vio el modelo) persistido
+acotado y scrubbed, consultable por run/decisión.
+**Acepta:** [ ] cotas + scrub probados · [ ] shape paridad.
+
+### T-111 · Nodo `ai` — P0
+**Espec:** executor: prompt del config renderizado (plantillas ya
+resueltas por el dispatcher), llamada vía chokepoint, salida
+`{text|json, mode, aiError?}` estable; fallo del proveedor NO falla el
+nodo si el fallback contract dice degradar (leer la semántica exacta del
+executor Node — el nodo completa con mode:"fallback").
+**Acepta:** [ ] fixture de paridad F-AI (con simulador o fallback
+determinista) · [ ] dryRun no llama al SDK.
+
+### T-112 · Memoria pgvector — P0
+**Espec:** `memory_entries` compartida; cliente de embeddings (Ollama
+`bge-m3`, 1024-dim, base URL del env); `recallMemory`/`commitMemory` con
+el consent de dos flags (`JANUSLY_MEMORY_ENABLED` + `org.memory.enabled` +
+kind permitido); usage rows `memory.commit`/`memory.recall` con runId
+reenviado; recall/commit JAMÁS lanzan (degradan en silencio).
+**Acepta:** [ ] consent apagado = byte-igual a hoy · [ ] Ollama caído no
+rompe ningún camino · [ ] atribución de runId en /run/usage.
+
+### T-113 · Tools vector — P1
+**Espec:** wrappers finos sobre el sustrato (NUNCA re-implementar acceso),
+kind `workflow_vector`, upsert write-side (skip en validación), consent
+off → `{ok:false, error:"memory_disabled"}` / search vacío sin lanzar.
+**Acepta:** [ ] matriz de consent · [ ] write-side respetado en dry-run.
+
+### T-114 · Agent loop (reglas) — P0
+**Espec:** el bucle: plan → tool → observación → siguiente, con
+presupuesto de pasos, `availableTools` SIEMPRE de `listPlannerTools()`
+(catálogo + tipos derivados), dryRun retira los write-side ANTES del
+prompt (y el skip del executor queda como defensa en profundidad).
+Planner determinista de reglas portado como default sin clave.
+**Acepta:** [ ] paridad del planner de reglas sobre los fixtures Node ·
+[ ] presupuesto corta limpio · [ ] dry-run jamás ejecuta un write.
+
+### T-115 · Planner LLM — P0
+**Espec:** plan generado free_json, validado contra el catálogo de tools
+(nombre+input), malformado → reintento acotado → fallback al planner de
+reglas; solo un plan AI interpretado con recall no-vacío emite
+`agent.memory.recalled` (T-116).
+**Acepta:** [ ] matriz: sin cliente / budget-blocked / malformado /
+lanzado → fallback de reglas sin evento · [ ] plan válido ejecuta.
+
+### T-116 · Memoria episódica — P1
+**Espec:** kind `agent_episode`; al completar, UN episodio (goal +
+outcome); el planner LLM recalla semánticamente (query=goal) e inyecta
+DATA-framed con cláusula de escape + scrub; write-back skip con
+`ctx.dryRun`; evento con conteo + fingerprints SHA-256 de 12 chars, sin
+contenido.
+**Acepta:** [ ] consent off → cero embeddings llamados · [ ] evento solo
+en el camino exacto · [ ] fingerprints estables.
+
+### T-117 · multi_agent — P1
+**Espec:** secuencial: `previousAgents` liga POR agente completado (scope
+diferido del dispatcher — extender DeferredRoots); paralelo: NUNCA
+diferir previousAgents (regla explícita del CLAUDE.md). Salida agregada
+con la forma Node.
+**Acepta:** [ ] fixture de paridad secuencial y paralela · [ ] binding
+tardío probado con política estricta (T-119).
+
+### T-118 · agent.reasoning — P2
+**Espec:** resúmenes operacionales acotados y estables (no
+chain-of-thought oculto) como eventos del run.
+**Acepta:** [ ] cota de bytes · [ ] presentes en el timeline del web.
+
+### T-119 · Scopes diferidos + estricta — P2
+**Espec:** unificar la maquinaria: `item`/`index` (existe) +
+`previousAgents` con el MISMO contrato de evidencia
+`template.unresolved_path` + fallo bajo strict en el punto real de
+binding.
+**Acepta:** [ ] estricta falla en el binding del scope diferido, no antes
+· [ ] evidencia deduplicada acotada.
+
+### T-120 · Nodo mcp_tool (cliente) — P1
+**Espec:** conexiones `mcp_tool` stdio (comando/env/cwd/lifetime/stderr
+acotados — leer las defensas exactas) y transportes `sse`/`http` con
+validación SSRF ANTES de construir y el adaptador DNS-pinned que preserva
+respuesta en cada fetch/redirect del SDK (puente al `http-policy` del
+pilot). El triplete create+discovery+audit NO va en una tx (red bajo tx,
+prohibido).
+**Acepta:** [ ] matriz SSRF del transporte URL (privado, rebinding) ·
+[ ] stdio con límites de vida/stderr probados · [ ] llamada real a un
+server MCP de prueba (el propio server del pilot sirve de fixture).
+
+### T-121 · Descubrimiento + descriptores — P1
+**Espec:** tabla de descriptores por conexión; sanitización para prompts:
+NFKC + strip del bloque de inyección unicode + control chars + scrub +
+cap 300 (portar `sanitizeMcpToolDescription`/`sanitizeMcpPromptLabel` —
+ya hay mitad del trabajo en el paquete signature); cap total de prosa
+20KB por org.
+**Acepta:** [ ] fixtures de inyección del test Node pasan · [ ] caps.
+
+### T-122 · writeSide de descriptores — P2
+**Espec:** default `writeSide:true` (fail-safe), admins marcan read-only;
+readiness ya trata mcp_tool como sensible — conectar el descriptor real
+donde el runtime lo conoce; consent MCP-server (T-057) intacto.
+**Acepta:** [ ] tool marcada read-only entra al prompt en dry-run · [ ]
+default write-side detrás del gate de approval en readiness.
+
+### T-123 · Matriz de fallos AI — P0
+**Espec:** por superficie (generate, patch, nodo ai, agent, embeddings):
+5-10 casos de la matriz estándar (timeout, 401, 429, JSON roto, truncado,
+budget, tool-input inválido, prompt sobre cota, unicode hostil) con
+fixtures compartidos en un catálogo único (regla de la memoria del
+proyecto: el catálogo alimenta tests y seeder).
+**Acepta:** [ ] catálogo único consumido por ≥3 suites · [ ] cada
+superficie degrada al fallback documentado en cada caso.
+
+### T-124 · Evals contra Go — P0
+**Espec:** correr `pnpm evals` (harness existente) contra el binario;
+gate `summarizeAi`/`compareToBaseline` intacto; deltas → §9 con causa
+raíz. Local/dev-invocado, NUNCA CI (regla de créditos).
+**Acepta:** [ ] deterministas 100% · [ ] ai-rate dentro del gate o
+divergencia explicada y aceptada explícitamente.
+
+### T-125 · /validate + planner tools — P2
+**Espec:** `POST /validate` con la forma Node (issues de trigger config
+vía los schemas compartidos ya portados); `listPlannerTools()` con la
+proyección privada (JSON Schema planner-only NO sale por `/tools`).
+**Acepta:** [ ] /validate paridad de códigos · [ ] /tools no filtra el
+schema planner.
+
+### T-126 · human_form — P0
+**Espec:** portar `packages/engine/src/secrets.ts` (HMAC): token ligado a
+org/run/node/purpose con `issuedAt`+`expiresAt` firmados;
+`JANUSLY_RESUME_TOKEN_SECRET` dedicado (fallback dev local, prohibido
+reusar el service token); TTL del catálogo
+(`runs.humanFormResumeTtlSeconds` 300..604800, default 7d) solo para
+tokens NUEVOS; legado v1 sin expiresAt → frontera fija de 7 días del
+verificador. `/resume` del formulario: valida token + input contra el
+subset JSON-schema del nodo y completa SOLO un nodo aún `waiting`
+(replays no doble-escriben ni doble-encolan — misma garantía CAS del
+resume actual).
+**Acepta:** [ ] matriz de tokens (expirado, purpose cruzado, run ajeno,
+v1 legado) · [ ] input inválido → 400 con las formas Node · [ ] replay
+del token no duplica downstream (test de carrera).
+
+### T-127 · Smokes web ola 4 — P1
+**Espec:** AI Studio: generar (camino fallback determinista, $0) →
+guardar → correr → verde, contra Go; human form: link de resume → formulario
+→ enviar → run continúa. Extiende el spec guardado del pilot.
+**Acepta:** [ ] ambos smokes verdes en `run-web-smoke` · [ ] cero
+pageerrors.
+
+### T-128 · REPORT-W4 — P0
+**Acepta:** [ ] informe con: paridad de evals (tabla), costo real de la
+ola en tokens, divergencias vivas de AI, recomendación ola 5.
+
+## 16. Ola 5 — Recovery avanzado + rollouts (T-129..T-158)
+
+**Tesis:** la maquinaria más densa de la referencia. Orden interno: primero
+el sustrato durable (cases, receipts, impacto), luego las políticas
+(contratos, autonomía, breaker), luego las superficies (playbooks, drills,
+read-models del web experto), y rollouts al final porque consume receipts.
+Regla: **ningún juez LLM otorga autoridad de mutación** — se hereda tal
+cual.
+
+### Tabla de seguimiento — ola 5
+
+| # | Ticket | Área | Pri | Estado |
+| --- | --- | --- | --- | --- |
+| T-129 | `recovery_cases` durable + receipts de transición append-only (atómicos) | sustrato | P0 | todo |
+| T-130 | Contratos versionados V1/V2 (detectores expresión/schema V2, fixtures acotadas) | política | P0 | todo |
+| T-131 | Autonomía: techo por workflow + overrides por fallo → perfil Level 0-4 (puro) | política | P0 | todo |
+| T-132 | Acciones observe/quarantine + validación de dominancia de efectos | política | P1 | todo |
+| T-133 | Sandbox replay: `replayMode="validation"` + skip write-side + evidencia estática | sandbox | P0 | todo |
+| T-134 | `/dlq/validate-fix` (la puerta de sandbox del Recovery dialog) | sandbox | P1 | todo |
+| T-135 | Linaje de replay Node-parity: run de continuación + `parentLinkKind` (reconciliar revive-in-place) | sustrato | P0 | todo |
+| T-136 | Impacto terminal ligado a generación: claim token → CAS → impact_events + rollups O(1) | impacto | P0 | todo |
+| T-137 | Atribución atómica incidente/playbook; iniciación jamás cuenta como win (reconciliar T-055) | impacto | P1 | todo |
+| T-138 | Circuit breaker: decisión pura + pausa CAS + resume manual + backfill oldest-first de buffered | breaker | P0 | todo |
+| T-139 | Playbooks: draft/activate/retire, match exacto workflow+firma, sandbox fresco, auto-retire | playbook | P1 | todo |
+| T-140 | Drills medidos + dossier de validación por org + exports | drills | P2 | todo |
+| T-141 | Feedback loop + calibración de confianza (ajuste diario, toggle por org) | feedback | P2 | todo |
+| T-142 | Ownership + handoff de incidentes + estados de escalamiento (drawer) | owner | P1 | todo |
+| T-143 | `/dlq/queue` read-model (severidad, sort, owner, search, day, keyset propio) | read-model | P0 | todo |
+| T-144 | `/dlq/cluster-members` + `cluster-apply` + `bulk-replay` + `resolve`/`bulk-resolve` | read-model | P1 | todo |
+| T-145 | Read-models de recovery-home (clusters con recurrencia REAL post-recovery) | read-model | P1 | todo |
+| T-146 | Alerting: `alert_policies` + evaluación + notificación por el chokepoint de tools | alertas | P2 | todo |
+| T-147 | Run-explain + exports de evidencia (reports subset) | reports | P2 | todo |
+| T-148 | Latencia de primera acción set-once + recurrencia a 7 días ligada a impacto | métricas | P2 | todo |
+| T-149 | Rollouts: esquema + asignación determinista capturada en runs/eventos | rollout | P0 | todo |
+| T-150 | Compatibilidad estricta de triggers externos + version-write locking | rollout | P1 | todo |
+| T-151 | Receipts de calificación por par exacto de versiones | rollout | P1 | todo |
+| T-152 | Auto-rollback con muestra mínima + receipts terminales idempotentes + repair acotado | rollout | P0 | todo |
+| T-153 | Validación/replay + pins de subworkflow jamás consumen canary | rollout | P1 | todo |
+| T-154 | Ingest con asignación de rollout (nodo exacto en la versión asignada) | rollout | P1 | todo |
+| T-155 | Smokes web expertos: recovery queue + drawer + cluster-apply contra Go | web | P1 | todo |
+| T-156 | Matriz de fallos de recovery (catálogo compartido, 5-10 por superficie) | calidad | P0 | todo |
+| T-157 | Fixtures F18-F25 (validation, breaker pause/buffer/resume, playbook, rollout) + goldens | paridad | P0 | todo |
+| T-158 | Informe de ola 5 (REPORT-W5.md) | cierre | P0 | todo |
+
+### Cards — ola 5 (las decisiones no obvias)
+
+### T-129 · recovery_cases + receipts — P0
+**Espec:** caso durable por (workflow, firma) con transición append-only
+(receipt por cambio de estado, atómico con el cambio vía withAuditTx-style
+tx). Resolución de operador: replacement (exige Level 3) / accepted-loss
+(auditable siempre).
+**Acepta:** [ ] transición sin receipt imposible (tx probada) · [ ]
+escalera de estados cerrada.
+
+### T-130 · Contratos V1/V2 — P0
+**Espec:** V1: detección semántica DESHABILITADA para snapshots
+históricos (regla dura). V2: detectores deterministas de outcome por
+expresión (la gramática existente) y por schema, fixtures acotadas,
+decisiones semánticas same-source usan el detector MÁS estricto.
+**Acepta:** [ ] snapshot V1 jamás activa semántica · [ ] mismo-source →
+estricto probado con detectores en conflicto.
+
+### T-131 · Autonomía Level 0-4 — P0
+**Espec:** módulo puro (domain): techo del workflow + overrides
+específicos por fallo → perfil resuelto; Level 4 (auto-apply técnico)
+autoriza SOLO en la frontera del claim durable con la gramática exacta de
+patch + factores (contrato/evidencia/impacto-previo/blast-radius/rollback/
+effect-receipt); el navegador solo RENDERIZA el veredicto del server.
+**Acepta:** [ ] tabla de resolución anclada con tests a los casos Node · [ ]
+ningún camino LLM muta sin el perfil.
+
+### T-133 · Sandbox replay — P0
+**Espec:** `replayMode="validation"` propaga a todo hijo; write-side
+nodes/tools se saltan con el clasificador de tool-execution;
+`validationEvidenceLevel: "static"`; los replays sandbox NUNCA cuentan
+para breaker ni para métricas verified.
+**Acepta:** [ ] un write-side sembrado NO ejecuta efecto en validación ·
+[ ] exclusiones de breaker/métricas probadas.
+
+### T-135 · Linaje de replay — P0
+**Espec:** cerrar la divergencia F05: `/dlq/replay` crea run de
+continuación con `parentLinkKind:"replay"` (trace-only: profundidad y
+terminal delivery solo por aristas ejecutables), attempts re-armados como
+Node; el adapter `/runs/redrive` mantiene revive-in-place como camino
+pilot documentado O migra — decidir en el ticket leyendo el uso web, y
+actualizar la divergencia aceptada de F05 si se cierra.
+**Acepta:** [ ] golden F05 SIN la divergencia de attempts (si se cierra)
+· [ ] linaje visible en la proyección del run.
+
+### T-136 · Impacto terminal — P0
+**Espec:** el pipeline exacto: claim token en `run_nodes` → CAS al
+completar → `recovery_impact_events` idempotente → rollups O(1);
+generation-bound (un claim viejo no acredita un run nuevo).
+**Acepta:** [ ] doble terminal no duplica impacto (carrera probada) ·
+[ ] rollup O(1) verificado por plan.
+
+### T-138 · Circuit breaker — P0
+**Espec:** capa de decisión PURA (racha de fallos consecutivos, replays
+sandbox excluidos) + pausa CAS sobre `workflows.status` + trip auditado;
+la pausa cierra TODOS los puntos de entrada: `/start` (403 con el código
+por causa — la fila `reject` de la tabla de pausa), ingest (buffered+202 —
+ya existe), scheduler (drop — llega en ola 6, dejar el seam); resume
+DELIBERADAMENTE manual `POST /workflows/:id/resume` con backfill
+oldest-first de buffered (cierra la divergencia de T-040) y ticks de cron
+descartados.
+**Acepta:** [ ] racha dispara una sola pausa (CAS) · [ ] backfill drena
+en orden con claims (`backfill_claim_token` — las columnas ya existen) ·
+[ ] sandbox no cuenta para la racha.
+
+### T-143 · /dlq/queue — P0
+**Espec:** el read-model del web experto: envelope {items, nextCursor,
+hasMore}, filtros status/severity/sort/owner(`me`)/search(≤100,
+ILIKE server-side)/day(UTC), cursor decodificado contra el sort EFECTIVO
+(sort distinto → página 1, jamás mal ordenar); severidad del modelo
+Node (downtime). Cierra el gap documentado de T-064.
+**Acepta:** [ ] panel DLQ del web renderiza y pagina contra Go (smoke
+T-155) · [ ] cursor bajo sort cambiado degrada a página 1.
+
+### T-149..T-154 · Rollouts (bloque)
+**Espec común:** asignación determinista (hash de la clave de asignación)
+CAPTURADA en el run y sus eventos (nunca re-derivada); receipts de
+calificación por par exacto (baseline,candidate); rollback automático con
+muestra mínima; validación/replay/pins jamás consumen canary; ingest
+asigna y resuelve el NODO exacto en la versión asignada (el 409
+`trigger_no_matching_node` de "Assigned workflow version no longer
+contains the trigger node").
+**Acepta (bloque):** [ ] mismo assignment key → misma variante siempre ·
+[ ] rollback dispara con la muestra mínima y NUNCA antes · [ ] fixtures
+F-rollout con goldens.
+
+### T-157 · Fixtures F18-F25 — P0
+**Espec:** validación sandbox (write skip observable), breaker
+(racha→pausa→buffer→resume→backfill), playbook (sandbox fresco + apply),
+rollout (asignación + rollback), impacto (redrive→terminal→rollup).
+Capturas SOLO por el stack aislado.
+**Acepta:** [ ] goldens capturados + paridad ×3 · [ ] recaptura completa
+byte-idéntica.
+
+## 17. Ola 6 — Integraciones + scheduler + subworkflows + listo-para-cutover (T-159..T-187)
+
+**Tesis:** el resto del catálogo de nodos/tools, el cron sustrato completo,
+y la evidencia final para el go/no-go: HA validado, soak largo, seguridad
+revisada, y el mapa de cutover por ruta. Regla: secretos SOLO por
+`credentials.secret_ref` — jamás una URL/clave cruda en config u
+org_configs (los guards de T-086 lo imponen).
+
+### Tabla de seguimiento — ola 6
+
+| # | Ticket | Área | Pri | Estado |
+| --- | --- | --- | --- | --- |
+| T-159 | Secret Store: cifrado envelope + root key externa + tabla credentials | secretos | P0 | todo |
+| T-160 | Rutas de credenciales + rotación (withAuditTx) + resolver async org-aware | secretos | P0 | todo |
+| T-161 | Readiness con credenciales (`credential_missing`, cap 50 refs) — cierra gap T-042 | secretos | P1 | todo |
+| T-162 | Chokepoint integration-tools (fetchHttpTarget-only, límite org+credencial, envelope never-throw) | integr | P0 | todo |
+| T-163 | `email.send` + postura segura de entrega (catálogo email.*, providers noop/simulador) | integr | P1 | todo |
+| T-164 | `pdf.generate` + object store (driver FS local + seam S3-compatible) | integr | P2 | todo |
+| T-165 | Acciones Slack firmadas de recovery | integr | P2 | todo |
+| T-166 | PagerDuty V3: trigger firmado → lectura autoritativa → política (`zoned-window`) → ack → snooze | integr | P1 | todo |
+| T-167 | `time.window` tool (el ÚNICO primitivo zone-aware; sesgos documentados sin unificar) | integr | P1 | todo |
+| T-168 | Ingest de email: DKIM + selector de alias + attachments al object store + caps 1MiB | triggers | P1 | todo |
+| T-169 | Triggers `file_dropped` + `mcp_server_event` (ingest + executors passthrough) | triggers | P2 | todo |
+| T-170 | Shadow ingestion de runtime externo (firmado/idempotente, secuencia monotónica, sin crédito) | triggers | P2 | todo |
+| T-171 | Upstream-health (fail-open) + auto-pausa `upstream_degraded` + fila reject de /start | triggers | P1 | todo |
+| T-172 | Tools `db.schema.describe` + `db.query.read` (credencial postgres, validación SQL completa) | db | P1 | todo |
+| T-173 | `db.query.write` + `db.query.transaction` (write-side, límite por org+credencial) | db | P1 | todo |
+| T-174 | `loop` modo for_each (tool por item, ≤1000, conc 1..20, presupuesto único, stop cooperativo) | nodos | P0 | todo |
+| T-175 | Nodo `subworkflow`: checkpoint del padre en tx + publicación del root del hijo + profundidad | nodos | P0 | todo |
+| T-176 | Handoff terminal hijo→padre + `parentNotificationAfter` + reconciler con lease + settle de hermanos | nodos | P0 | todo |
+| T-177 | Nodo `schedule`: `schedule_entries` + sync en save + due-clock + guard de padre activo + drop en pausa | cron | P0 | todo |
+| T-178 | Crons de sistema restantes: auto-healing supervisado + heatmap de observabilidad + purga de consent | cron | P2 | todo |
+| T-179 | Reconciler de checkpoints vencidos (paridad del overdue de approvals/timers) — verificación | cron | P2 | todo |
+| T-180 | Snippets + solution packs + onboarding (rutas + smoke) | producto | P2 | todo |
+| T-181 | Health rollup de workflows + SLO + `/workflows/health/delta` (same-failure por firma) | producto | P2 | todo |
+| T-182 | Tags/folders/metadata + distincts excluyendo tombstones + paridad Flows completa | producto | P1 | todo |
+| T-183 | Barrido final F1-GAPS → cero-o-documentado (byte-paridad de lo que el web toca) | paridad | P0 | todo |
+| T-184 | Proxy strangler: mapa de cutover por ruta + comparador dual-run (shadow) | cutover | P0 | todo |
+| T-185 | HA final: suite completa a dos instancias + kill-failover + soak 24h | cutover | P0 | todo |
+| T-186 | Revisión de seguridad: matriz SSRF re-corrida, scrub e2e, matriz authz por permiso | cutover | P0 | todo |
+| T-187 | SDK Python contra Go (pytest lane) + runbook de cutover por tenant + REPORT-W6 + plantilla go/no-go | cutover | P0 | todo |
+
+### Cards — ola 6 (las decisiones no obvias)
+
+### T-159/T-160 · Secret Store — P0
+**Espec:** cifrado envelope (DEK por fila, KEK de env/root key externa),
+migración de referencias legacy de env como *referencia deliberada* (no
+copia del valor); resolver async org-aware ÚNICO; rotación con
+withAuditTx; NUNCA se devuelve valor, nombre de env ni error upstream con
+forma de secreto.
+**Acepta:** [ ] dump de la base no revela plaintext · [ ] rotación no
+rompe referencias en vuelo · [ ] matriz de no-eco.
+
+### T-162 · Chokepoint integration-tools — P0
+**Espec:** TODO tool de integración sale por `fetchHttpTarget` (el
+executor http del pilot como primitivo — cero SDKs de vendor), límite por
+org+credencial, usage events, bit writeSide, envelope never-throw
+`{ok:false, error}` (los tools de integración jamás lanzan).
+**Acepta:** [ ] test de que ningún tool de integración importa un cliente
+HTTP propio · [ ] envelope en cada modo de fallo de la matriz.
+
+### T-166/T-167 · PagerDuty + time.window — P1
+**Espec:** compartir `zoned-window` (resolución de zona + cruce de
+medianoche) con los DOS sesgos intactos y sin unificar: `time.window`
+LANZA ante config malformada (primitivo de decisión), el evaluador de
+política PD la absorbe como "working hours" (política rota jamás autoriza
+mutación). Flujo V3 firmado → lectura autoritativa → evaluación → ack →
+snooze; AI post-acción solo si se pidió.
+**Acepta:** [ ] los dos sesgos probados por separado · [ ] firma V3
+verificada con fixtures reales.
+
+### T-174 · loop for_each — P0
+**Espec:** un tool registrado por item DENTRO del mismo nodo (jamás un
+primitivo de cola), ≤1000 items, concurrencia 1..20 (default 4), TODOS
+los inputs renderizados antes del primer efecto, UN presupuesto de fallos
+(conteo o porcentaje), throws y `{ok:false}` cuentan igual; timeout
+write-side o presupuesto excedido → `writeSide=true`, deja de desencolar
+cooperativamente y PROHIBIDO el retry de nodo completo (replay bajo control del
+operador es más seguro que duplicar efectos externos). Diagnósticos
+acotados por item y agregados.
+**Acepta:** [ ] render-antes-del-primer-efecto probado · [ ] presupuesto
+corta cooperativo · [ ] sin whole-node retry en write-side (test).
+
+### T-175/T-176 · subworkflow — P0
+**Espec:** el arranque del hijo comete el checkpoint exacto
+`running→waiting` del padre + ambos eventos EN la misma tx ANTES de
+publicar el root del hijo; `parentLinkKind` separa `subworkflow`
+(ejecutable: profundidad + terminal delivery) de `replay` (trace-only);
+todo hijo terminal marca `parentNotificationAfter` (ms) y solo se limpia
+tras el handoff exacto + readiness downstream; padre fallido asienta a
+TODOS los hermanos en espera antes de que un replay lo reabra (y reabrir
+limpia el marcador terminal atómicamente); reconciler con lease para
+ventanas de crash. Profundidad del catálogo (`subworkflow.maxDepth`).
+**Acepta:** [ ] crash inyectado entre checkpoint y publicación → el
+reconciler repara sin duplicar · [ ] validación propaga al hijo · [ ]
+fixture de paridad con golden.
+
+### T-177 · schedule — P0
+**Espec:** sustrato propio sobre el patrón due-clock YA probado (campañas):
+`schedule_entries` sincronizadas en save (`syncWorkflowSchedules` —
+upsert/retire por diff), guard de padre activo (un entry huérfano de un
+workflow tombstoned JAMÁS dispara — paridad de la regla del scheduler
+worker), tick vencido → startRun con input de schedule, pausa → DROP
+ruidoso (la fila `drop` de la tabla de pausa — "el run de las 3am no
+significa nada a las 6am").
+**Acepta:** [ ] save re-sincroniza (añade/retira) · [ ] tombstone no
+dispara · [ ] pausa descarta con log/evento, sin backfill.
+
+### T-183 · Barrido F1-GAPS final — P0
+**Espec:** recorrer el inventario §11 completo contra el pilot: cada ruta
+que el web consume, o byte-paridad verificada, o divergencia §9 con
+decisión. Actualizar F1-GAPS.md a estado terminal.
+**Acepta:** [ ] cero gaps sin clasificar · [ ] smoke de TODOS los tabs
+del web sin pageerrors.
+
+### T-184 · Strangler + shadow — P0
+**Espec:** mapa de cutover por ruta (ejemplo Caddy/nginx con el split),
+comparador dual-run: mismo request a ambos backends, diff de respuestas
+normalizado (ids/timestamps fuera), reporte de divergencia; correr sobre
+el tráfico de los smokes y del harness de paridad.
+**Acepta:** [ ] comparador reporta cero diffs inesperados sobre la suite
+completa · [ ] mapa versionado en el repo.
+
+### T-187 · Cierre y go/no-go — P0
+**Espec:** SDK Python (pytest apuntando a Go — mismo wire); runbook de
+cutover por tenant (switch, monitoreo, rollback = apuntar el proxy de
+vuelta); REPORT-W6 con la plantilla de decisión: evidencia por área,
+riesgos residuales, criterio explícito de go/no-go.
+**Acepta:** [ ] pytest verde contra Go · [ ] plantilla lista para la
+decisión del timebox.
+
+### Dependencias entre olas (para reordenar con criterio si hace falta)
+
+- T-081 (retrofit audit) depende de T-079/T-080; **todo ticket posterior a
+  T-079 que cree una mutación incluye su audit en el mismo commit**.
+- T-085 y T-100 dependen del limiter (T-084); T-101/103 de usage (T-089).
+- T-105 depende de T-099/T-104; T-115/116 de T-112; T-126 del catálogo
+  (T-086, TTL).
+- T-134/139/140 dependen de T-133; T-137/148 de T-136; T-152 de T-151;
+  T-154 de T-149 y del ingest existente.
+- T-161 cierra el gap de readiness de T-042 y depende de T-159/160;
+  T-166 depende de T-162; T-176 depende de T-175; T-177 usa el patrón de
+  T-045.
+- T-183..T-187 son terminales: exigen TODO lo anterior verde.

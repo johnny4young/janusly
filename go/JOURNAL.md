@@ -1063,3 +1063,35 @@ producción necesita saber — de lo ya resuelto o informativo.
   que habla con Go), qué evidencia pesa (paridad reproducible,
   rendimiento sin regresión, el loop del operador entero), qué le
   falta para producción (plataforma, no runtime) y qué ola seguiría.
+
+## 2026-07-31 — plan de las olas 3-6: 119 tickets (T-069..T-187)
+
+- El faltante completo de la migración, analizado y convertido en plan
+  ejecutable con el mismo protocolo: ola 3 «plataforma mínima creíble»
+  (auth real de 4 modos, audit transaccional con retrofit total,
+  limiter en Postgres fail-open, catálogo completo de org config, HA a
+  dos instancias, contrato v1 generado); ola 4 «AI + agentes» (el
+  chokepoint con su contrato de fallback sagrado, free_json, las dos
+  superficies de generación, memoria pgvector con consent, agent loop
+  con ambos planners, cliente MCP, human_form con HMAC); ola 5
+  «recovery avanzado + rollouts» (cases + receipts, autonomía 0-4,
+  sandbox replay, breaker con backfill de buffered, impacto ligado a
+  generación, los read-models del web experto, rollouts con rollback
+  automático); ola 6 «integraciones + scheduler + subworkflows +
+  listo-para-cutover» (Secret Store envelope, chokepoint de
+  integration-tools, PagerDuty/Slack/email, db tools, for_each,
+  subworkflow con su coreografía transaccional, schedule sobre el
+  due-clock probado, y el bloque terminal de cutover: strangler +
+  shadow, HA final, seguridad, SDK Python, go/no-go).
+- Tres decisiones de arquitectura quedaron RESUELTAS en el plan en vez
+  de abiertas: limiter en Postgres (coherente con la tesis), drizzle
+  sigue siendo dueño del esquema durante las olas (objetos go_pilot_*
+  idempotentes), y el linaje de replay Node-parity se decide leyendo el
+  uso real en T-135 (cerrando o re-aceptando la divergencia F05).
+- Deuda de la ola 2 saldada dentro del plan: cada gap documentado en §9
+  tiene ticket dueño (readiness de credenciales → T-161, /dlq/queue →
+  T-143, storm-guard → T-085, backfill de buffered → T-138, audit
+  transversal → T-081).
+- De paso: quince filas de la ola 2 seguían en `todo` por patrones de
+  reemplazo con la prioridad equivocada — corregidas a `done` (todas
+  estaban ejecutadas y committeadas); el REPORT-W2 ahora dice 69/69.

@@ -1,8 +1,8 @@
 # Informe de ola 2 — pilot Go
 
 **Corte:** 2026-07-31 · rama `go-pilot` (75 commits sobre `develop@7febb99c`,
-pin sin deriva verificada) · 54/69 tickets `done` en el plan; los 30 del
-goal de esta ola, completos.
+pin sin deriva verificada) · 69/69 tickets `done` en el plan (olas 1 y 2 completas); los 30 del
+goal de esta ola incluidos.
 
 ## Qué es el pilot hoy
 
