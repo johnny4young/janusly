@@ -676,6 +676,7 @@ el chat publicado.
 | 2026-07-30 | T-037 fork/join | Los shells declarativos portados de parallel-fork.ts: fork = passthrough que valida 2..10 branches únicas (≤64 chars, desc ≤280) y ecoa `{branches}`; join = ensambla `output.branches` por ETIQUETA leyendo `context[predId].output` (dup de predecessor rechazado — el copy-paste surfaceado fuerte). El fan-out/fan-in real ya lo daba el engine (ALL-AND + claim atómico) — cero primitivas nuevas de runtime, como manda la regla de la casa. Las 3 reglas del gate en domain.CheckForkJoinReadiness con severidades (warn/fail); enforcement al gate production-mode cuando exista (T-042). Un branch fallando → join jamás encola (queda pending), run failed — probado |
 | 2026-07-30 | divergencia menor | Los mensajes de fork_join_missing_branch_sources/readiness son resumidos (Node compone closest-join + labels faltantes en el mensaje); los códigos y severidades son exactos — el web matchea por código |
 | 2026-07-30 | T-038 loop map | El contrato legacy puro portado: items via mapInput + normalizeItems (array tal cual; string split-por-comas trim+drop-vacíos; otro → []), cap 1.000 con LoopItemLimitError exacto, mapping default `{item:"{{item}}", index:"{{index}}"}`, render por ítem con `item`/`index` ligados por iteración (diferidos en el render de config del dispatcher — el diseño deferredRoots de T-006 pagando), evento `loop.completed {count, items}` y output idéntico. Ejecutors ganan los seams Emit (appendEvent) + ReportUnresolved (política late-bound del dispatcher). `for_each` falla honesto ("not executable by this backend yet") — su maquinaria (tool por ítem, presupuestos de fallo, write-side) es ticket propio futuro |
+| 2026-07-30 | T-039 verificación | La estructura YA existía (seam de T-003 + gramática de T-006 + saveCore) — el ticket se convirtió honesto en verificación end-to-end: `edge_invalid_condition` con mensaje verbatim + edge_0 sintético, operadores de palabra legales en aristas, violaciones de contrato de operadores (in sobre no-array) rechazadas ESTÁTICAMENTE en save (la pasada empty-scope), y el API surfaceando el issue en params.issues del 400. Ticket de una hora que confirmó cero deuda oculta |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -901,7 +902,7 @@ compactas aquí; el detalle de paridad se lee de la fuente al ejecutar.
 | T-036 | Executor `json.parse` + tool registry mínimo (`listTools()` para AI Studio read) | F2 | P1 | done |
 | T-037 | `parallel_fork` + `join` (shells declarativos sobre readiness, validación 3 reglas) | F2 | P1 | done |
 | T-038 | Executor `loop` modo map puro (legacy contract) | F2 | P1 | done |
-| T-039 | Edge conditions con evaluación completa en validación (`validateExpression` en save) | F2 | P2 | todo |
+| T-039 | Edge conditions con evaluación completa en validación (`validateExpression` en save) | F2 | P2 | done |
 | T-040 | Trigger ingest: `POST /v1/webhooks/:workflowId` → startRun con evento normalizado | F2 | P1 | todo |
 | T-041 | `webhook_received` executor passthrough + fixture trigger e2e | F2 | P1 | todo |
 | T-042 | Validación production-mode (readiness gate subset: retries, bounds, secretos) | F2 | P2 | todo |

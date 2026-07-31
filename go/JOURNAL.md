@@ -663,3 +663,13 @@ local. Sin umbral pasa/no-pasa: números para aprender.
 - for_each queda honesto: falla con "not executable yet" en vez de
   ejecutar a medias — su maquinaria (tool por ítem, presupuestos de
   fallo, semántica write-side) merece su propio ticket.
+
+## 2026-07-30 — validación de condiciones de arista en save (T-039)
+
+- El ticket más corto de la ola y el más tranquilizador: la estructura
+  ya existía completa (el seam inyectable de T-003, la gramática de
+  T-006, el saveCore de T-032) — solo faltaba PROBARLO de punta a
+  punta. Tres tests nuevos confirman: rechazo con mensaje verbatim y
+  edge id sintético, operadores de palabra legales, y violaciones de
+  contrato de operadores cazadas estáticamente en save en vez de
+  degradar a falsedad silenciosa en runtime.

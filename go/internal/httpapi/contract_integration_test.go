@@ -792,3 +792,28 @@ func TestRollbackAppendsPriorSnapshotAsNewLatest(t *testing.T) {
 		t.Fatalf("tombstone guard: %v", tombstoned.body)
 	}
 }
+
+func TestSaveRejectsInvalidEdgeConditions(t *testing.T) {
+	h := newAPIHarness(t)
+	doc := map[string]any{
+		"id": "wf-edgeval-" + h.org,
+		"nodes": []any{
+			map[string]any{"id": "a", "type": "noop", "config": map[string]any{}},
+			map[string]any{"id": "b", "type": "noop", "config": map[string]any{}},
+		},
+		"edges": []any{map[string]any{"from": "a", "to": "b", "condition": "require('fs')"}},
+	}
+	res := h.call("POST", "/v1/workflows/save", doc, "")
+	requireError(t, res, 400, "workflows_validation_failed", "Workflow validation failed")
+	issues := res.body["error"].(map[string]any)["params"].(map[string]any)["issues"].([]any)
+	sawEdge := false
+	for _, raw := range issues {
+		issue := raw.(map[string]any)
+		if issue["code"] == "edge_invalid_condition" && issue["edgeId"] == "edge_0" {
+			sawEdge = true
+		}
+	}
+	if !sawEdge {
+		t.Fatalf("save must surface the edge rejection: %v", issues)
+	}
+}
