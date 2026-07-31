@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/johnny4young/janusly/go/internal/ai"
+	"github.com/johnny4young/janusly/go/internal/aiguidance"
 	"github.com/johnny4young/janusly/go/internal/tools"
 )
 
@@ -106,10 +107,11 @@ func runAgentLoop(ctx context.Context, in Input, agentConfig map[string]any, eve
 	}
 	reflectionEnabled, _ := agentConfig["reflection"].(bool)
 	dryRun := in.AI != nil && in.AI.DryRun
-	emit := func(eventType string, payload map[string]any) {
+	emit := func(eventType string, payload map[string]any) string {
 		if in.Emit != nil {
-			in.Emit(eventType, payload)
+			return in.Emit(eventType, payload)
 		}
+		return ""
 	}
 	name, _ := agentConfig["name"].(string)
 	emit(eventPrefix+".started", map[string]any{
@@ -155,20 +157,24 @@ func runAgentLoop(ctx context.Context, in Input, agentConfig map[string]any, eve
 			})
 			memoryInfluenceEmitted = true
 		}
-		emit(eventPrefix+".step.planned", map[string]any{"agent": name, "iteration": i, "plan": plan})
+		plannedEventID := emit(eventPrefix+".step.planned", map[string]any{"agent": name, "iteration": i, "plan": plan})
 		decision := "use_tool"
-		reasonText := plan.Reason
+		var toolField any = fallbackReasoningText(
+			sanitizeReasoningText(plan.Tool, agentReasoningToolMaxChars), "unknown")
 		if plan.Done {
-			decision = "finish"
-		}
-		if reasonText == "" {
-			reasonText = "Planner did not provide an operational rationale."
+			decision, toolField = "finish", nil
 		}
 		emit("agent.reasoning", map[string]any{
-			"agent": boundedText(name, 80), "iteration": i, "planner": planner,
-			"mode": plan.Mode, "scope": boundedText(eventPrefix, 40),
-			"decision": decision, "tool": boundedText(plan.Tool, 120),
-			"reason": boundedText(reasonText, 280),
+			"agent": fallbackReasoningText(
+				sanitizeReasoningText(name, agentReasoningAgentMaxChars), "agent"),
+			"iteration": i, "planner": planner, "mode": plan.Mode,
+			"scope": fallbackReasoningText(
+				sanitizeReasoningText(eventPrefix, agentReasoningScopeMaxChars), "agent"),
+			"replacesEventId": plannedEventID,
+			"decision":        decision, "tool": toolField,
+			"reason": fallbackReasoningText(
+				sanitizeReasoningText(plan.Reason, agentReasoningReasonMaxChars),
+				"Planner did not provide an operational rationale."),
 		})
 
 		if plan.Done {
@@ -284,12 +290,44 @@ func hasFailureSignal(result map[string]any) bool {
 	return hasError
 }
 
-func boundedText(value string, max int) string {
-	runes := []rune(value)
-	if len(runes) <= max {
-		return value
+// Per-field caps for the stable operator-facing rationale contract —
+// pinned to the reference's run-events.ts values.
+const (
+	agentReasoningAgentMaxChars  = 120
+	agentReasoningScopeMaxChars  = 160
+	agentReasoningToolMaxChars   = 160
+	agentReasoningReasonMaxChars = 500
+)
+
+// sanitizeReasoningText produces one bounded `agent.reasoning` field: an
+// operational summary, never hidden chain-of-thought — secrets scrubbed,
+// control/invisible characters flattened, whitespace collapsed, rune-capped.
+func sanitizeReasoningText(value string, maxChars int) string {
+	scrubbed := aiguidance.ScrubGuidanceSecrets(value)
+	flattened := strings.Map(func(r rune) rune {
+		switch {
+		case r <= 0x1f, r == 0x7f,
+			r >= 0x200b && r <= 0x200f,
+			r >= 0x202a && r <= 0x202e,
+			r >= 0x2060 && r <= 0x206f,
+			r == 0xfeff:
+			return ' '
+		}
+		return r
+	}, scrubbed)
+	collapsed := strings.Join(strings.Fields(flattened), " ")
+	runes := []rune(collapsed)
+	if len(runes) > maxChars {
+		runes = runes[:maxChars]
 	}
-	return string(runes[:max])
+	return string(runes)
+}
+
+func fallbackReasoningText(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 // planAgentToolWithLLM ports the reference's LLM planner: free-json plan

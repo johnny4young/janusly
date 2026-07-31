@@ -1492,3 +1492,8 @@ producción necesita saber — de lo ya resuelto o informativo.
 - Agregación textual de la referencia: `last` (finalAnswer/finalResult del último), `all`, `first`, `best-effort` (primer no-fallido). `continueOnError` acumula `{status:"failed", error:{message}}`; sin él, secuencial propaga el error y paralelo falla con `Multi-agent <name> failed: <msg>`.
 - Eventos: `multi_agent.started/agent.started/agent.completed/agent.failed/completed`. `PilotNodeTypes` += `multi_agent`; dispatch construye AIDeps+MemoryDeps para el nodo.
 - Hallazgo: la referencia SOLO liga tarde el goal — el assert correcto del binding es el goal renderizado del evento `agent.started`, no el config del agente (eso se renderiza en dispatch y conserva el literal).
+
+## T-118 · agent.reasoning (2026-07-31)
+- Contrato estable del evento alineado a `packages/shared/src/run-events.ts`: caps por campo 120 (agent) / 160 (scope) / 160 (tool) / 500 (reason) en RUNAS; `sanitizeReasoningText` = ScrubGuidanceSecrets + aplanado de control/bidi/ZWSP/FEFF a espacio + colapso de whitespace + cap; fallbacks "agent"/"unknown"/mensaje por defecto.
+- `tool` es null JSON cuando decision=finish; `replacesEventId` apunta al id exacto del `agent.step.planned` que este resumen seguro reemplaza — `executors.Input.Emit` ahora devuelve el id del evento insertado (un solo sitio de asignación en dispatch).
+- Tests unitarios en `internal/executors/agent_reasoning_test.go`; suites de agente/multi-agente del engine verdes con `-race`; `boundedText` eliminado (quedó sin usos).

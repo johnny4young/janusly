@@ -25,7 +25,7 @@ type Input struct {
 	Context map[string]any
 	// Emit appends one run event through the engine (the reference's
 	// appendEvent seam); nil in unit tests that don't observe events.
-	Emit func(eventType string, payload map[string]any)
+	Emit func(eventType string, payload map[string]any) string
 	// ReportUnresolved feeds late-bound unresolved template paths back to
 	// the dispatcher's evidence/policy machinery; a strict template policy
 	// surfaces here as the returned error.

@@ -115,17 +115,19 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 	output, execErr := execute(ctx, executors.Input{
 		RunID: claim.RunID, NodeID: claim.NodeID,
 		Config: renderedConfig, Context: runContext, HTTPBounds: httpBounds, AI: aiDeps, Memory: memoryDeps,
-		Emit: func(eventType string, payload map[string]any) {
+		Emit: func(eventType string, payload map[string]any) string {
 			eventAt := eventNow()
 			raw, err := json.Marshal(payload)
 			if err != nil {
-				return
+				return ""
 			}
+			eventID := d.engine.newID()
 			_ = q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-				ID: d.engine.newID(), RunID: claim.RunID,
+				ID: eventID, RunID: claim.RunID,
 				NodeID: pgtype.Text{String: claim.NodeID, Valid: true},
 				Type:   eventType, Payload: raw, CreatedAt: &eventAt,
 			})
+			return eventID
 		},
 		ReportUnresolved: func(paths []string) error {
 			return d.recordUnresolvedPaths(ctx, q, claim, wf, paths)
