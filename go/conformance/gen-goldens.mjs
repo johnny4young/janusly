@@ -96,10 +96,10 @@ await mkdir(OUT, { recursive: true });
 
 // GOLDENS_ONLY=F11 recaptures a single fixture without touching the rest —
 // the stack serving :3001 may have drifted from the pin the others used.
-const only = process.env.GOLDENS_ONLY;
+const only = process.env.GOLDENS_ONLY ? new Set(process.env.GOLDENS_ONLY.split(",")) : null;
 
 for (const fixture of spec.fixtures) {
-  if (only && fixture.id !== only) continue;
+  if (only && !only.has(fixture.id)) continue;
   const doc = JSON.parse(
     JSON.stringify(fixture.workflow).replaceAll("{{UPSTREAM}}", upstream).replaceAll("{{RUN}}", Date.now().toString(36)),
   );
@@ -121,6 +121,9 @@ for (const fixture of spec.fixtures) {
       const res = await api("POST", "/start", { workflow: doc, input: fixture.input });
       runId = res.body?.data?.runId ?? res.body?.runId;
       if (!runId) throw new Error(`${fixture.id}: start failed ${JSON.stringify(res)}`);
+    } else if (verb === "cancel") {
+      const res = await api("POST", "/run/cancel", { runId });
+      if (res.status !== 200) throw new Error(`${fixture.id}: cancel ${JSON.stringify(res)}`);
     } else if (verb === "waitTerminal") {
       await waitFor(runId, (v) => TERMINAL.has(v.run.status));
     } else if (verb === "waitNodeWaiting") {

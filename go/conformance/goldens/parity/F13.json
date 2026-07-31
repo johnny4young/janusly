@@ -1,0 +1,26 @@
+{
+  "runStatus": "succeeded",
+  "nodes": {
+    "split": {
+      "status": "succeeded",
+      "attempts": 1
+    },
+    "ta": {
+      "status": "succeeded",
+      "attempts": 1
+    },
+    "tb": {
+      "status": "succeeded",
+      "attempts": 1
+    },
+    "merge": {
+      "status": "succeeded",
+      "attempts": 1
+    }
+  },
+  "outputJson": {
+    "left": "alpha",
+    "right": "beta"
+  },
+  "deadLetters": 0
+}

@@ -1,0 +1,21 @@
+{
+  "runStatus": "succeeded",
+  "nodes": {
+    "seed": {
+      "status": "succeeded",
+      "attempts": 1
+    },
+    "hit": {
+      "status": "succeeded",
+      "attempts": 1
+    },
+    "miss": {
+      "status": "skipped",
+      "attempts": 0
+    }
+  },
+  "outputJson": {
+    "taken": "matched"
+  },
+  "deadLetters": 0
+}

@@ -784,3 +784,16 @@ local. Sin umbral pasa/no-pasa: números para aprender.
   y completa con contadores exactos; con 60s de pacing la cancelación
   aterriza antes del segundo item y reporta verazmente lo que alcanzó
   a pasar (replayed + cancelled == total).
+
+## 2026-07-30 — paridad ampliada F12-F17 (T-046)
+
+- Seis fixtures nuevos cubren las áreas que faltaban del runtime:
+  cancelación en waiting, fork/join etiquetado, loop en sus dos formas
+  de items, ruteo por operadores de palabra en aristas, y strict
+  template policy hasta el DLQ. Capturados del stack aislado y verdes
+  en Go byte-igual al primer intento — la señal más clara hasta ahora
+  de que la fidelidad acumulada del port es real: proyección de loop,
+  shape del join, cancelación de pendientes y el DLQ de strict policy
+  coinciden sin una sola divergencia nueva.
+- 18 fixtures totales; keyset se traslada a T-058 donde el round-trip
+  de cursores Node↔Go es el objeto del test.

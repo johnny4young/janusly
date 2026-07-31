@@ -1,0 +1,15 @@
+{
+  "runStatus": "cancelled",
+  "nodes": {
+    "pause": {
+      "status": "cancelled",
+      "attempts": 1
+    },
+    "after": {
+      "status": "cancelled",
+      "attempts": 0
+    }
+  },
+  "outputJson": null,
+  "deadLetters": 0
+}

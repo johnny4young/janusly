@@ -193,6 +193,11 @@ func runFixture(t *testing.T, driver *apiDriver, upstream *stubUpstream, fx fixt
 			if runID == "" {
 				t.Fatalf("start failed: %v", res)
 			}
+		case "cancel":
+			res := driver.call(t, "POST", "/v1/run/cancel", map[string]any{"runId": runID})
+			if _, ok := res["data"]; !ok {
+				t.Fatalf("cancel failed: %v", res)
+			}
 		case "waitTerminal":
 			driver.waitRun(t, runID, func(view map[string]any) bool {
 				status := runStatusOf(view)

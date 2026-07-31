@@ -1,0 +1,13 @@
+{
+  "runStatus": "succeeded",
+  "nodes": {
+    "crunch": {
+      "status": "succeeded",
+      "attempts": 1
+    }
+  },
+  "outputJson": {
+    "count": 3
+  },
+  "deadLetters": 0
+}

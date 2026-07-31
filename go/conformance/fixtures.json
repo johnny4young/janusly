@@ -495,6 +495,258 @@
           }
         ]
       }
+    },
+    {
+      "id": "F12",
+      "name": "cancel while waiting on a timer",
+      "steps": [
+        "start",
+        "waitNodeWaiting:pause",
+        "cancel",
+        "waitTerminal"
+      ],
+      "workflow": {
+        "id": "parity-f12",
+        "nodes": [
+          {
+            "id": "pause",
+            "type": "wait_until",
+            "config": {
+              "duration": "PT1H"
+            }
+          },
+          {
+            "id": "after",
+            "type": "noop",
+            "config": {}
+          }
+        ],
+        "edges": [
+          {
+            "from": "pause",
+            "to": "after"
+          }
+        ]
+      }
+    },
+    {
+      "id": "F13",
+      "name": "fork join labelled merge",
+      "steps": [
+        "start",
+        "waitTerminal"
+      ],
+      "workflow": {
+        "id": "parity-f13",
+        "outputs": {
+          "left": "{{context.merge.output.branches.a.value}}",
+          "right": "{{context.merge.output.branches.b.value}}"
+        },
+        "nodes": [
+          {
+            "id": "split",
+            "type": "parallel_fork",
+            "config": {
+              "branches": [
+                {
+                  "label": "a"
+                },
+                {
+                  "label": "b"
+                }
+              ]
+            }
+          },
+          {
+            "id": "ta",
+            "type": "transform",
+            "config": {
+              "mapping": {
+                "value": "alpha"
+              }
+            }
+          },
+          {
+            "id": "tb",
+            "type": "transform",
+            "config": {
+              "mapping": {
+                "value": "beta"
+              }
+            }
+          },
+          {
+            "id": "merge",
+            "type": "join",
+            "config": {
+              "sources": {
+                "a": "ta",
+                "b": "tb"
+              }
+            }
+          }
+        ],
+        "edges": [
+          {
+            "from": "split",
+            "to": "ta"
+          },
+          {
+            "from": "split",
+            "to": "tb"
+          },
+          {
+            "from": "ta",
+            "to": "merge"
+          },
+          {
+            "from": "tb",
+            "to": "merge"
+          }
+        ]
+      }
+    },
+    {
+      "id": "F14",
+      "name": "loop maps declared items",
+      "steps": [
+        "start",
+        "waitTerminal"
+      ],
+      "input": {
+        "items": [
+          2,
+          3,
+          5
+        ]
+      },
+      "workflow": {
+        "id": "parity-f14",
+        "outputs": {
+          "count": "{{context.crunch.output.count}}"
+        },
+        "nodes": [
+          {
+            "id": "crunch",
+            "type": "loop",
+            "config": {
+              "items": "{{context.input.items}}",
+              "mapping": {
+                "value": "{{item}}",
+                "position": "{{index}}"
+              }
+            }
+          }
+        ],
+        "edges": []
+      }
+    },
+    {
+      "id": "F15",
+      "name": "loop normalizes comma separated strings",
+      "steps": [
+        "start",
+        "waitTerminal"
+      ],
+      "workflow": {
+        "id": "parity-f15",
+        "outputs": {
+          "count": "{{context.split.output.count}}"
+        },
+        "nodes": [
+          {
+            "id": "split",
+            "type": "loop",
+            "config": {
+              "items": "alpha, beta, , gamma"
+            }
+          }
+        ],
+        "edges": []
+      }
+    },
+    {
+      "id": "F16",
+      "name": "word operator edge conditions route",
+      "steps": [
+        "start",
+        "waitTerminal"
+      ],
+      "workflow": {
+        "id": "parity-f16",
+        "outputs": {
+          "taken": "{{context.hit.output.path}}"
+        },
+        "nodes": [
+          {
+            "id": "seed",
+            "type": "transform",
+            "config": {
+              "mapping": {
+                "tags": [
+                  "billing",
+                  "urgent"
+                ],
+                "state": "open"
+              }
+            }
+          },
+          {
+            "id": "hit",
+            "type": "transform",
+            "config": {
+              "mapping": {
+                "path": "matched"
+              }
+            }
+          },
+          {
+            "id": "miss",
+            "type": "transform",
+            "config": {
+              "mapping": {
+                "path": "unmatched"
+              }
+            }
+          }
+        ],
+        "edges": [
+          {
+            "from": "seed",
+            "to": "hit",
+            "condition": "context.seed.output.tags contains 'billing' && context.seed.output.state in ['open','held']"
+          },
+          {
+            "from": "seed",
+            "to": "miss",
+            "condition": "context.seed.output.tags contains 'refunds'"
+          }
+        ]
+      }
+    },
+    {
+      "id": "F17",
+      "name": "strict template policy fails missing paths",
+      "steps": [
+        "start",
+        "waitTerminal"
+      ],
+      "workflow": {
+        "id": "parity-f17",
+        "templatePolicy": "strict",
+        "nodes": [
+          {
+            "id": "shape",
+            "type": "transform",
+            "config": {
+              "mapping": {
+                "value": "{{context.ghost.output.total}}"
+              }
+            }
+          }
+        ],
+        "edges": []
+      }
     }
   ]
 }
