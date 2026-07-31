@@ -4,6 +4,9 @@ package httpapi
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -167,5 +170,68 @@ func TestReplayCampaignCancellation(t *testing.T) {
 	missing := h.call("POST", "/recovery/campaigns/nope/cancel", nil, "")
 	if missing.status != 404 || missing.body["code"] != "replay_campaign_not_found" {
 		t.Fatalf("missing cancel: %d %+v", missing.status, missing.body)
+	}
+}
+
+// A real recovery cycle feeds the north star: fail → DLQ → heal upstream →
+// redrive → verified success, measured detection → terminal success.
+func TestVerifiedRecoveryMetrics(t *testing.T) {
+	h := newAPIHarness(t)
+
+	// Empty org: sample 0, null percentiles.
+	empty := h.call("GET", "/v1/recovery/metrics", nil, "")
+	requireEnvelope(t, empty)
+	data := empty.body["data"].(map[string]any)
+	vr := data["verifiedRecovery"].(map[string]any)
+	if vr["sampleSize"] != float64(0) || vr["p50Ms"] != nil || data["mttrMs"] != nil {
+		t.Fatalf("empty metrics: %+v", data)
+	}
+
+	// Healable upstream: fails until told otherwise.
+	var healed atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if healed.Load() {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true}`))
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer upstream.Close()
+	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "true")
+
+	doc := map[string]any{
+		"id": "wf-vr-" + h.org,
+		"nodes": []any{map[string]any{"id": "call", "type": "http",
+			"config": map[string]any{"url": upstream.URL, "timeoutMs": float64(500)}}},
+		"edges": []any{},
+	}
+	res := h.call("POST", "/v1/start", map[string]any{"workflow": doc}, "")
+	runID := res.body["data"].(map[string]any)["runId"].(string)
+	h.waitRun(runID, "failed")
+
+	healed.Store(true)
+	ids := deadLetterIDs(t, h)
+	if len(ids) != 1 {
+		t.Fatalf("dead letters: %v", ids)
+	}
+	redrive := h.call("POST", "/v1/dlq/redrive", map[string]any{"deadLetterId": ids[0]}, "")
+	if _, ok := redrive.body["data"]; !ok {
+		t.Fatalf("redrive: %+v", redrive.body)
+	}
+	h.waitRun(runID, "succeeded")
+
+	after := h.call("GET", "/recovery/metrics?windowDays=7", nil, "")
+	if after.body["apiVersion"] != nil {
+		t.Fatalf("legacy wire must be raw: %+v", after.body)
+	}
+	vr = after.body["verifiedRecovery"].(map[string]any)
+	p50, _ := vr["p50Ms"].(float64)
+	p90, _ := vr["p90Ms"].(float64)
+	if vr["sampleSize"] != float64(1) || p50 <= 0 || p50 != p90 {
+		t.Fatalf("north star: %+v", vr)
+	}
+	if mttr, _ := after.body["mttrMs"].(float64); mttr != p50 {
+		t.Fatalf("legacy average with one sample must equal the median: %+v", after.body)
 	}
 }

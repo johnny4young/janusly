@@ -615,3 +615,28 @@ deleted_workflows AS (
   RETURNING id
 )
 SELECT count(*)::int AS rows_deleted FROM deleted_workflows;
+
+-- Verified-recovery north star over REAL redrives: a dead letter whose
+-- replay was claimed and whose run then reached succeeded. Duration is
+-- detection (dead letter row) → the run's terminal success event, the
+-- pilot's equivalent of the reference's detectedAt → verifiedRecoveredAt.
+-- percentile_cont matches the reference's percentile semantics exactly.
+-- name: QueryVerifiedRecoveryStats :one
+WITH recovered AS (
+  SELECT EXTRACT(EPOCH FROM (ev.created_at - dl.created_at)) * 1000 AS duration_ms
+  FROM dead_letters dl
+  JOIN runs r ON r.id = dl.run_id
+  JOIN LATERAL (
+    SELECT re.created_at FROM run_events re
+    WHERE re.run_id = dl.run_id AND re.type = 'run.succeeded'
+      AND re.created_at >= dl.created_at
+    ORDER BY re.created_at DESC LIMIT 1
+  ) ev ON true
+  WHERE dl.org_id = $1 AND dl.status = 'replayed' AND r.status = 'succeeded'
+    AND dl.created_at >= now() - make_interval(days => sqlc.arg(window_days)::int)
+)
+SELECT count(*)::int AS sample_size,
+       COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms), -1)::float8 AS p50_ms,
+       COALESCE(percentile_cont(0.9) WITHIN GROUP (ORDER BY duration_ms), -1)::float8 AS p90_ms,
+       COALESCE(avg(duration_ms), -1)::float8 AS mttr_avg_ms
+FROM recovered;

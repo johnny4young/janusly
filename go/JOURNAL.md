@@ -929,3 +929,12 @@ producción necesita saber — de lo ya resuelto o informativo.
   el presupuesto del tick. Los conflictos de resume cuentan como
   progreso (otro actor encogió el backlog); cero progreso corta el
   tick en vez de girar sobre fallos persistentes.
+
+## 2026-07-31 — north star: verifiedRecovery p50/p90 (T-055)
+
+- La métrica de valor del producto medida sobre recuperaciones reales,
+  no sobre iniciaciones: solo cuenta un dead letter cuyo replay fue
+  reclamado Y cuyo run llegó a succeeded después. La duración va de la
+  detección (fila DLQ) a la verificación (evento run.succeeded), con
+  percentile_cont en SQL — la misma semántica de percentil que usa la
+  referencia. Sin muestra, la respuesta dice null, nunca cero fingido.
