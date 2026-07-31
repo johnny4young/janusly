@@ -93,6 +93,9 @@ func (e *Engine) CompleteNode(ctx context.Context, claim ClaimedNode, output any
 			return fmt.Errorf("insert node.succeeded: %w", err)
 		}
 		metricNodeCompletions.WithLabelValues("succeeded").Inc()
+		if err := e.recordRecoveryImpact(ctx, q, claim, finishedAt); err != nil {
+			return err
+		}
 		if len(violations) > 0 {
 			quarantined, err := e.persistSemanticViolations(ctx, q, claim, violations, finishedAt)
 			if err != nil {
@@ -668,4 +671,67 @@ func workflowFromRunInput(inputJSON []byte) (*domain.Workflow, map[string]any, e
 // write time makes every cursor comparison exact in both directions.
 func eventNow() time.Time {
 	return time.Now().UTC().Truncate(time.Millisecond)
+}
+
+// recordRecoveryImpact credits one generation-bound terminal success INSIDE
+// the completion transaction, ported from the reference's
+// recordRecoveryImpactTx: the completing node must carry the recovery
+// claim its redrive stamped; the dead letter must still match by exact
+// identity (id + run + node); the impact event is idempotent on the
+// unique dead_letter_id (a racing double terminal can never double-count);
+// and only PRODUCTION recoveries (replay_mode null) enter the O(1)
+// north-star rollup. Replay initiation is never a recovered win — only
+// this terminal path credits.
+func (e *Engine) recordRecoveryImpact(ctx context.Context, q *store.Queries, claim ClaimedNode, recoveredAt time.Time) error {
+	nodeClaim, err := q.GetRunNodeRecoveryClaim(ctx, store.GetRunNodeRecoveryClaimParams{
+		RunID: claim.RunID, NodeID: claim.NodeID,
+	})
+	if err != nil || !nodeClaim.RecoveryDeadLetterID.Valid || nodeClaim.RecoveryDeadLetterID.String == "" {
+		return nil
+	}
+	deadLetterID := nodeClaim.RecoveryDeadLetterID.String
+	dlq, err := q.GetDeadLetterForImpact(ctx, store.GetDeadLetterForImpactParams{
+		ID: deadLetterID, RunID: claim.RunID, NodeID: claim.NodeID,
+	})
+	if err != nil {
+		// Exact identity no longer matches — a stale claim credits nothing.
+		return nil
+	}
+	if dlq.CreatedAt == nil {
+		return nil
+	}
+	detectedAt := dlq.CreatedAt.UTC()
+	if recoveredAt.Before(detectedAt) {
+		return nil
+	}
+	downtimeMs := recoveredAt.Sub(detectedAt).Milliseconds()
+
+	if err := q.ConvergeDeadLetterReplayed(ctx, store.ConvergeDeadLetterReplayedParams{
+		ID: deadLetterID, OrgID: dlq.OrgID, RecoveredAt: &recoveredAt,
+	}); err != nil {
+		return fmt.Errorf("converge dead letter: %w", err)
+	}
+	inserted, err := q.InsertRecoveryImpactEvent(ctx, store.InsertRecoveryImpactEventParams{
+		DeadLetterID: deadLetterID, OrgID: dlq.OrgID,
+		RunID: claim.RunID, NodeID: claim.NodeID,
+		UserID:      nodeClaim.RecoveryRequestedBy,
+		RecoveredAt: recoveredAt, DowntimeEndedMs: downtimeMs,
+	})
+	if err != nil {
+		return fmt.Errorf("insert impact event: %w", err)
+	}
+	if inserted == 0 {
+		// The unique dead_letter_id already holds a win — idempotent.
+		return nil
+	}
+	// Only production recoveries enter the north-star rollup; validation
+	// drills keep their immutable fact above but never inflate value.
+	if !dlq.ReplayMode.Valid || dlq.ReplayMode.String == "" {
+		if err := q.UpsertRecoveryImpactRollup(ctx, store.UpsertRecoveryImpactRollupParams{
+			OrgID: dlq.OrgID, DowntimeEndedMs: downtimeMs, RecoveredAt: &recoveredAt,
+		}); err != nil {
+			return fmt.Errorf("upsert impact rollup: %w", err)
+		}
+	}
+	return nil
 }

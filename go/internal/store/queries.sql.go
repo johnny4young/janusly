@@ -394,6 +394,22 @@ func (q *Queries) CompleteRunNode(ctx context.Context, arg CompleteRunNodeParams
 	return result.RowsAffected(), nil
 }
 
+const convergeDeadLetterReplayed = `-- name: ConvergeDeadLetterReplayed :exec
+UPDATE dead_letters SET status = 'replayed', replayed_at = $3
+WHERE id = $1 AND org_id = $2 AND status = 'open'
+`
+
+type ConvergeDeadLetterReplayedParams struct {
+	ID          string
+	OrgID       string
+	RecoveredAt *time.Time
+}
+
+func (q *Queries) ConvergeDeadLetterReplayed(ctx context.Context, arg ConvergeDeadLetterReplayedParams) error {
+	_, err := q.db.Exec(ctx, convergeDeadLetterReplayed, arg.ID, arg.OrgID, arg.RecoveredAt)
+	return err
+}
+
 const countDeadLettersByStatus = `-- name: CountDeadLettersByStatus :many
 SELECT status, count(*) AS count FROM dead_letters
 WHERE org_id = $1 GROUP BY status
@@ -854,6 +870,40 @@ func (q *Queries) GetDeadLetter(ctx context.Context, arg GetDeadLetterParams) (G
 	return i, err
 }
 
+const getDeadLetterForImpact = `-- name: GetDeadLetterForImpact :one
+SELECT d.org_id, d.created_at, d.replay_claimed_at, d.replayed_at, r.replay_mode
+FROM dead_letters d
+JOIN runs r ON r.id = d.run_id AND r.org_id = d.org_id
+WHERE d.id = $1 AND d.run_id = $2 AND d.node_id = $3
+`
+
+type GetDeadLetterForImpactParams struct {
+	ID     string
+	RunID  string
+	NodeID string
+}
+
+type GetDeadLetterForImpactRow struct {
+	OrgID           string
+	CreatedAt       *time.Time
+	ReplayClaimedAt *time.Time
+	ReplayedAt      *time.Time
+	ReplayMode      pgtype.Text
+}
+
+func (q *Queries) GetDeadLetterForImpact(ctx context.Context, arg GetDeadLetterForImpactParams) (GetDeadLetterForImpactRow, error) {
+	row := q.db.QueryRow(ctx, getDeadLetterForImpact, arg.ID, arg.RunID, arg.NodeID)
+	var i GetDeadLetterForImpactRow
+	err := row.Scan(
+		&i.OrgID,
+		&i.CreatedAt,
+		&i.ReplayClaimedAt,
+		&i.ReplayedAt,
+		&i.ReplayMode,
+	)
+	return i, err
+}
+
 const getLatestPublishedPromptVersion = `-- name: GetLatestPublishedPromptVersion :one
 SELECT id, org_id, prompt_id, version, template_text, variables, status, created_by, created_at FROM prompt_versions
 WHERE org_id = $1 AND prompt_id = $2 AND status = 'published'
@@ -1204,6 +1254,23 @@ func (q *Queries) GetRecoveryCase(ctx context.Context, arg GetRecoveryCaseParams
 	return i, err
 }
 
+const getRecoveryImpactRollup = `-- name: GetRecoveryImpactRollup :one
+SELECT org_id, total_recovered, downtime_ended_ms, first_recovered_at, updated_at FROM recovery_impact_rollups WHERE org_id = $1
+`
+
+func (q *Queries) GetRecoveryImpactRollup(ctx context.Context, orgID string) (RecoveryImpactRollup, error) {
+	row := q.db.QueryRow(ctx, getRecoveryImpactRollup, orgID)
+	var i RecoveryImpactRollup
+	err := row.Scan(
+		&i.OrgID,
+		&i.TotalRecovered,
+		&i.DowntimeEndedMs,
+		&i.FirstRecoveredAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getReplayCampaign = `-- name: GetReplayCampaign :one
 SELECT id, org_id, name, cluster_signature, filter_json, pacing_ms, status, total_count, replayed_count, failed_count, cancelled_count, created_by, cancelled_by, next_dispatch_at, started_at, completed_at, cancelled_at, created_at, updated_at FROM replay_campaigns WHERE org_id = $1 AND id = $2
 `
@@ -1352,6 +1419,38 @@ func (q *Queries) GetRunNode(ctx context.Context, arg GetRunNodeParams) (GetRunN
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.ErrorJson,
+	)
+	return i, err
+}
+
+const getRunNodeRecoveryClaim = `-- name: GetRunNodeRecoveryClaim :one
+SELECT recovery_dead_letter_id, recovery_requested_by, recovery_claim_token,
+       recovery_playbook_id, recovery_validation_run_id
+FROM run_nodes WHERE run_id = $1 AND node_id = $2
+`
+
+type GetRunNodeRecoveryClaimParams struct {
+	RunID  string
+	NodeID string
+}
+
+type GetRunNodeRecoveryClaimRow struct {
+	RecoveryDeadLetterID    pgtype.Text
+	RecoveryRequestedBy     pgtype.Text
+	RecoveryClaimToken      pgtype.Text
+	RecoveryPlaybookID      pgtype.Text
+	RecoveryValidationRunID pgtype.Text
+}
+
+func (q *Queries) GetRunNodeRecoveryClaim(ctx context.Context, arg GetRunNodeRecoveryClaimParams) (GetRunNodeRecoveryClaimRow, error) {
+	row := q.db.QueryRow(ctx, getRunNodeRecoveryClaim, arg.RunID, arg.NodeID)
+	var i GetRunNodeRecoveryClaimRow
+	err := row.Scan(
+		&i.RecoveryDeadLetterID,
+		&i.RecoveryRequestedBy,
+		&i.RecoveryClaimToken,
+		&i.RecoveryPlaybookID,
+		&i.RecoveryValidationRunID,
 	)
 	return i, err
 }
@@ -1801,6 +1900,38 @@ func (q *Queries) InsertRecoveryCaseTransition(ctx context.Context, arg InsertRe
 		arg.EvidenceJson,
 		arg.Reason,
 		arg.OccurredAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const insertRecoveryImpactEvent = `-- name: InsertRecoveryImpactEvent :execrows
+INSERT INTO recovery_impact_events (dead_letter_id, org_id, run_id, node_id, user_id, recovered_at, downtime_ended_ms)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (dead_letter_id) DO NOTHING
+`
+
+type InsertRecoveryImpactEventParams struct {
+	DeadLetterID    string
+	OrgID           string
+	RunID           string
+	NodeID          string
+	UserID          pgtype.Text
+	RecoveredAt     time.Time
+	DowntimeEndedMs int64
+}
+
+func (q *Queries) InsertRecoveryImpactEvent(ctx context.Context, arg InsertRecoveryImpactEventParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertRecoveryImpactEvent,
+		arg.DeadLetterID,
+		arg.OrgID,
+		arg.RunID,
+		arg.NodeID,
+		arg.UserID,
+		arg.RecoveredAt,
+		arg.DowntimeEndedMs,
 	)
 	if err != nil {
 		return 0, err
@@ -4547,6 +4678,31 @@ func (q *Queries) SoftDeleteWorkflow(ctx context.Context, arg SoftDeleteWorkflow
 	return result.RowsAffected(), nil
 }
 
+const stampRedriveRecoveryClaim = `-- name: StampRedriveRecoveryClaim :exec
+UPDATE run_nodes
+SET recovery_dead_letter_id = $3, recovery_requested_by = $4, recovery_claim_token = $5
+WHERE run_id = $1 AND node_id = $2
+`
+
+type StampRedriveRecoveryClaimParams struct {
+	RunID                string
+	NodeID               string
+	RecoveryDeadLetterID pgtype.Text
+	RecoveryRequestedBy  pgtype.Text
+	RecoveryClaimToken   pgtype.Text
+}
+
+func (q *Queries) StampRedriveRecoveryClaim(ctx context.Context, arg StampRedriveRecoveryClaimParams) error {
+	_, err := q.db.Exec(ctx, stampRedriveRecoveryClaim,
+		arg.RunID,
+		arg.NodeID,
+		arg.RecoveryDeadLetterID,
+		arg.RecoveryRequestedBy,
+		arg.RecoveryClaimToken,
+	)
+	return err
+}
+
 const sweepDueWakeups = `-- name: SweepDueWakeups :execrows
 DELETE FROM go_pilot_wakeups w
 WHERE w.wake_at <= now()
@@ -4796,6 +4952,27 @@ func (q *Queries) UpsertOrgConfigValue(ctx context.Context, arg UpsertOrgConfigV
 		arg.ValueType,
 		arg.UpdatedBy,
 	)
+	return err
+}
+
+const upsertRecoveryImpactRollup = `-- name: UpsertRecoveryImpactRollup :exec
+INSERT INTO recovery_impact_rollups (org_id, total_recovered, downtime_ended_ms, first_recovered_at, updated_at)
+VALUES ($1, 1, $2, $3, $3)
+ON CONFLICT (org_id) DO UPDATE SET
+  total_recovered = recovery_impact_rollups.total_recovered + 1,
+  downtime_ended_ms = recovery_impact_rollups.downtime_ended_ms + EXCLUDED.downtime_ended_ms,
+  first_recovered_at = LEAST(COALESCE(recovery_impact_rollups.first_recovered_at, EXCLUDED.first_recovered_at), EXCLUDED.first_recovered_at),
+  updated_at = GREATEST(recovery_impact_rollups.updated_at, EXCLUDED.updated_at)
+`
+
+type UpsertRecoveryImpactRollupParams struct {
+	OrgID           string
+	DowntimeEndedMs int64
+	RecoveredAt     *time.Time
+}
+
+func (q *Queries) UpsertRecoveryImpactRollup(ctx context.Context, arg UpsertRecoveryImpactRollupParams) error {
+	_, err := q.db.Exec(ctx, upsertRecoveryImpactRollup, arg.OrgID, arg.DowntimeEndedMs, arg.RecoveredAt)
 	return err
 }
 

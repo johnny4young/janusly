@@ -1087,3 +1087,40 @@ UPDATE runs SET
   outcome_status = sqlc.arg(outcome_status),
   semantic_violation_count = sqlc.arg(violation_count)
 WHERE id = $1;
+
+-- name: StampRedriveRecoveryClaim :exec
+UPDATE run_nodes
+SET recovery_dead_letter_id = $3, recovery_requested_by = $4, recovery_claim_token = $5
+WHERE run_id = $1 AND node_id = $2;
+
+-- name: GetRunNodeRecoveryClaim :one
+SELECT recovery_dead_letter_id, recovery_requested_by, recovery_claim_token,
+       recovery_playbook_id, recovery_validation_run_id
+FROM run_nodes WHERE run_id = $1 AND node_id = $2;
+
+-- name: GetDeadLetterForImpact :one
+SELECT d.org_id, d.created_at, d.replay_claimed_at, d.replayed_at, r.replay_mode
+FROM dead_letters d
+JOIN runs r ON r.id = d.run_id AND r.org_id = d.org_id
+WHERE d.id = $1 AND d.run_id = $2 AND d.node_id = $3;
+
+-- name: ConvergeDeadLetterReplayed :exec
+UPDATE dead_letters SET status = 'replayed', replayed_at = sqlc.arg(recovered_at)
+WHERE id = $1 AND org_id = $2 AND status = 'open';
+
+-- name: InsertRecoveryImpactEvent :execrows
+INSERT INTO recovery_impact_events (dead_letter_id, org_id, run_id, node_id, user_id, recovered_at, downtime_ended_ms)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (dead_letter_id) DO NOTHING;
+
+-- name: UpsertRecoveryImpactRollup :exec
+INSERT INTO recovery_impact_rollups (org_id, total_recovered, downtime_ended_ms, first_recovered_at, updated_at)
+VALUES ($1, 1, $2, sqlc.arg(recovered_at), sqlc.arg(recovered_at))
+ON CONFLICT (org_id) DO UPDATE SET
+  total_recovered = recovery_impact_rollups.total_recovered + 1,
+  downtime_ended_ms = recovery_impact_rollups.downtime_ended_ms + EXCLUDED.downtime_ended_ms,
+  first_recovered_at = LEAST(COALESCE(recovery_impact_rollups.first_recovered_at, EXCLUDED.first_recovered_at), EXCLUDED.first_recovered_at),
+  updated_at = GREATEST(recovery_impact_rollups.updated_at, EXCLUDED.updated_at);
+
+-- name: GetRecoveryImpactRollup :one
+SELECT * FROM recovery_impact_rollups WHERE org_id = $1;

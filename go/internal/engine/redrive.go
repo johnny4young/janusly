@@ -69,6 +69,17 @@ func (e *Engine) RedriveDeadLetter(ctx context.Context, orgID, deadLetterID stri
 		}
 		return fmt.Errorf("requeue failed node: %w", err)
 	}
+	// The GENERATION-BOUND claim: a fresh token per replay binds this exact
+	// revival to its future terminal success — an old claim can never
+	// credit a different execution, and initiation alone credits nothing.
+	if err := q.StampRedriveRecoveryClaim(ctx, store.StampRedriveRecoveryClaimParams{
+		RunID: deadLetter.RunID, NodeID: deadLetter.NodeID,
+		RecoveryDeadLetterID: pgtype.Text{String: deadLetterID, Valid: true},
+		RecoveryRequestedBy:  pgtype.Text{},
+		RecoveryClaimToken:   pgtype.Text{String: e.newID(), Valid: true},
+	}); err != nil {
+		return fmt.Errorf("stamp recovery claim: %w", err)
+	}
 	if _, err := q.ReviveFailedRun(ctx, deadLetter.RunID); err != nil {
 		return fmt.Errorf("revive run: %w", err)
 	}
