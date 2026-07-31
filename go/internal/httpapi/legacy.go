@@ -166,7 +166,15 @@ func (s *V1Server) legacyMutations(mux *http.ServeMux) {
 	mux.HandleFunc("GET /dlq", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		id := r.URL.Query().Get("id")
 		if id == "" {
-			writeLegacy(w, opError(http.StatusBadRequest, "dlq_id_required", "id is required", nil))
+			// Bare /dlq stays an ARRAY (home preview) — the queue page with
+			// its envelope lives at /dlq/queue.
+			items, bad := s.dlqListItems(r, rc)
+			if bad != nil {
+				writeLegacy(w, *bad)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(items)
 			return
 		}
 		row, err := store.New(s.pool).GetDeadLetter(r.Context(), store.GetDeadLetterParams{ID: id, OrgID: rc.orgID})

@@ -52,6 +52,7 @@ var routeAuthz = map[string]routeGate{
 	"GET /v1/dlq":                            {auth.RoleViewer, "dlq.read"},
 	"GET /dlq":                               {auth.RoleViewer, "dlq.read"},
 	"GET /dlq/counts":                        {auth.RoleViewer, "dlq.read"},
+	"GET /dlq/queue":                         {auth.RoleViewer, "dlq.read"},
 	"GET /v1/dlq/clusters":                   {auth.RoleViewer, "dlq.read"},
 	"GET /dlq/clusters":                      {auth.RoleViewer, "dlq.read"},
 	"POST /v1/dlq/redrive":                   {auth.RoleEditor, "dlq.replay"},
