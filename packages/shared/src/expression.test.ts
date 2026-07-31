@@ -28,6 +28,21 @@ describe('evaluateExpression', () => {
     expect(evaluateExpression("context.approval.output.decision === 'rejected' || inputs.threshold >= 10", scope)).toBe(true)
   })
 
+  it('evaluates parenthesized boolean groups composed with further operators', () => {
+    expect(evaluateExpression("(context.http.output.statusCode === 200 || false) && !false", scope)).toBe(true)
+    expect(evaluateExpression('(true || false) && true', scope)).toBe(true)
+    // Grouping must actually override the ||-splits-first precedence.
+    expect(evaluateExpression('(true || false) && false', scope)).toBe(false)
+    expect(evaluateExpression('true || false && false', scope)).toBe(true)
+    expect(evaluateExpression('!(context.http.output.ok === false || context.http.output.statusCode === 500)', scope)).toBe(true)
+    expect(evaluateExpression('((context.http.output.ok === true && inputs.threshold >= 10) || (false && true))', scope)).toBe(true)
+    // Parens inside quoted strings are literal text, never grouping.
+    expect(evaluateExpression("'(a || b)' === '(a || b)'", scope)).toBe(true)
+    expect(validateExpression("(context.http.output.statusCode === 200 || false) && !false").valid).toBe(true)
+    // Static validation still visits every branch inside a paren group.
+    expect(validateExpression("(true || context.value startsWith 123) && true").valid).toBe(false)
+  })
+
   it('rejects expressions that try to execute arbitrary code', () => {
     expect(validateExpression('process.exit()')).toEqual({
       valid: false,
