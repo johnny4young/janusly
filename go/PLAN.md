@@ -178,7 +178,7 @@ crítica) · P1 (importante) · P2 (stretch).
 | T-012 | API /v1 mínima + envelopes + goldens de referencia Node | P0 | done |
 | T-013 | Arnés de paridad semántica (lane A, fixtures F01–F10) | P0 | done |
 | T-014 | E2E de API Go (lane B) | P0 | done |
-| T-015 | Servidor MCP stdio + e2e vía MCP (lane C) | P1 | todo |
+| T-015 | Servidor MCP stdio + e2e vía MCP (lane C) | P1 | done |
 | T-016 | Rendimiento: k6 + RSS + pprof vs Node | P1 | todo |
 | T-017 | Journal consolidado + análisis de fricción | P1 | todo |
 | T-018 | Puerta D15: informe + recomendación | P0 | todo |
@@ -643,6 +643,9 @@ el chat publicado.
 | 2026-07-30 | divergencia aceptada (única) | F05: el replay de Node RE-ARMA el nodo fresco (attempts vuelve a 1 bajo su maquinaria de recovery claims); el redrive del piloto preserva la evidencia y avanza el contador (2 fallos + éxito redriveado = 3). Tabla `acceptedDivergences` en el runner con el porqué |
 | 2026-07-30 | nota | Los goldens de paridad se generaron con el stack Node del worktree (pin) + stub upstream determinista idéntico en ambos runners (ok/fail/flaky+heal); ALLOW_PRIVATE_HTTP_TARGETS=true en ambos lados para F03-F05 (upstream local) |
 | 2026-07-30 | e2e binario real | T-014: los dos ciclos del README conducidos por HTTP contra el binario COMPILADO en puertos efímeros — cuña de recuperación (save→start→500→DLQ→heal→redrive→succeeded con downstream completado) y puerta de operador (approval→resume→outputs proyectados leyendo default de input + estado downstream). El teardown verifica el drain limpio en SIGTERM — el contrato de lifecycle probado en cada corrida |
+| 2026-07-30 | MCP en proceso | T-015: `cmd/mcp` con el SDK Go oficial (v1.7.0) — 6 tools sobre el engine SIN salto HTTP; fallos esperados como `isError` (postura del mcp-server Node); resultados JSON + structuredContent; el proceso corre el worker pool (los runs progresan sin otro servicio). Org por `JANUSLY_GO_ORG` (análogo dev-auth para stdio). E2E: cliente SDK in-memory ejecuta el ciclo fallo→DLQ→redrive→succeeded + conflicto legible + timeline con node.redriven |
+| 2026-07-30 | gotcha (SDK) | `json.RawMessage` en args de tool deriva schema "array de números" (es []byte) — los documentos workflow van como `map[string]any` y se re-serializan; el jsonschema del SDK valida ANTES del handler |
+| 2026-07-30 | pendiente manual | Demo con Claude real (registrar cmd/mcp vía claude mcp add y conducir el ciclo) — snippet en go/README.md; anotar en journal al hacerla |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)

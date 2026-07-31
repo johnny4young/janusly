@@ -1,0 +1,347 @@
+// The pilot's MCP surface: a thin in-process layer over the engine — no
+// HTTP hop — exposing the operator loop to agents. Results return as JSON
+// text plus structuredContent; EXPECTED failures (conflicts, not-found,
+// validation) come back as isError tool results, matching the reference
+// MCP server's posture, while transport/programming errors propagate.
+package mcpserver
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/johnny4young/janusly/go/internal/domain"
+	"github.com/johnny4young/janusly/go/internal/engine"
+	"github.com/johnny4young/janusly/go/internal/grammar"
+	"github.com/johnny4young/janusly/go/internal/store"
+)
+
+// Deps carries the in-process dependencies every tool shares.
+type Deps struct {
+	Engine *engine.Engine
+	Pool   *pgxpool.Pool
+	OrgID  string
+	UserID string
+	NewID  func() string
+}
+
+// NewServer builds the MCP server with the pilot's six tools registered.
+func NewServer(deps Deps) *mcp.Server {
+	server := mcp.NewServer(&mcp.Implementation{
+		Name:    "janusly-go",
+		Title:   "Janusly (Go pilot)",
+		Version: "0.1.0",
+	}, nil)
+
+	type saveArgs struct {
+		Workflow map[string]any `json:"workflow" jsonschema:"the full workflow document to save as a new immutable version"`
+	}
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "workflows.save",
+		Description: "Validate a workflow document and save it as a new immutable version.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args saveArgs) (*mcp.CallToolResult, any, error) {
+		raw, err := json.Marshal(args.Workflow)
+		if err != nil {
+			return nil, nil, err
+		}
+		return deps.saveWorkflow(ctx, raw)
+	})
+
+	type startArgs struct {
+		Workflow map[string]any `json:"workflow" jsonschema:"the workflow document to execute"`
+		Input    map[string]any `json:"input,omitempty" jsonschema:"optional run input payload"`
+	}
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "runs.start",
+		Description: "Start a run for the given workflow document; returns the run id.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args startArgs) (*mcp.CallToolResult, any, error) {
+		raw, err := json.Marshal(args.Workflow)
+		if err != nil {
+			return nil, nil, err
+		}
+		return deps.startRun(ctx, raw, args.Input)
+	})
+
+	type runArgs struct {
+		RunID string `json:"runId" jsonschema:"the run to read"`
+	}
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "runs.status",
+		Description: "Read a run's status projection: final status plus per-node state and attempts.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args runArgs) (*mcp.CallToolResult, any, error) {
+		return deps.runStatus(ctx, args.RunID)
+	})
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "runs.inspect",
+		Description: "Read a run in depth: row, nodes with state and errors, and the recent timeline.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args runArgs) (*mcp.CallToolResult, any, error) {
+		return deps.runInspect(ctx, args.RunID)
+	})
+
+	type dlqListArgs struct {
+		Limit int `json:"limit,omitempty" jsonschema:"maximum rows to return (default 20, max 100)"`
+	}
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "dlq.list",
+		Description: "List dead letters for the org, newest first.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args dlqListArgs) (*mcp.CallToolResult, any, error) {
+		return deps.dlqList(ctx, args.Limit)
+	})
+
+	type redriveArgs struct {
+		DeadLetterID string `json:"deadLetterId" jsonschema:"the dead letter whose run should be revived"`
+	}
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "dlq.redrive",
+		Description: "Claim one dead letter and revive its run: the failed node requeues and workers take over.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args redriveArgs) (*mcp.CallToolResult, any, error) {
+		return deps.redrive(ctx, args.DeadLetterID)
+	})
+
+	return server
+}
+
+// ok wraps a successful payload as JSON text + structuredContent.
+func ok(payload any) (*mcp.CallToolResult, any, error) {
+	raw, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return nil, nil, err
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: string(raw)}},
+	}, payload, nil
+}
+
+// expected reports an EXPECTED failure as isError, keeping the session
+// alive — agents read these and decide, they are not crashes.
+func expected(message string) (*mcp.CallToolResult, any, error) {
+	return &mcp.CallToolResult{
+		IsError: true,
+		Content: []mcp.Content{&mcp.TextContent{Text: message}},
+	}, nil, nil
+}
+
+func (d Deps) saveWorkflow(ctx context.Context, raw json.RawMessage) (*mcp.CallToolResult, any, error) {
+	wf, issues := domain.Parse(raw)
+	if wf == nil {
+		return expected(fmt.Sprintf("workflow contract invalid: %s", issueSummary(issues)))
+	}
+	result := domain.Validate(wf, grammar.DomainValidator)
+	var blocking []domain.Issue
+	for _, issue := range result.Issues {
+		if issue.Code != domain.CodeNodeTypeUnsupportedPilot {
+			blocking = append(blocking, issue)
+		}
+	}
+	if len(blocking) > 0 {
+		return expected(fmt.Sprintf("workflow validation failed: %s", issueSummary(blocking)))
+	}
+
+	q := store.New(d.Pool)
+	workflowID := wf.ID
+	if workflowID == "" {
+		workflowID = d.NewID()
+	}
+	if _, err := q.GetWorkflow(ctx, store.GetWorkflowParams{ID: workflowID, OrgID: d.OrgID}); err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil, err
+		}
+		name := wf.Name
+		if name == "" {
+			name = workflowID
+		}
+		if err := q.InsertWorkflow(ctx, store.InsertWorkflowParams{
+			ID: workflowID, OrgID: d.OrgID, Name: name,
+			CreatedBy: pgtype.Text{String: d.UserID, Valid: d.UserID != ""},
+		}); err != nil {
+			return expected(fmt.Sprintf("workflow id is already taken: %s", workflowID))
+		}
+	}
+	version, err := q.CountWorkflowVersions(ctx, store.CountWorkflowVersionsParams{
+		WorkflowID: workflowID, OrgID: d.OrgID,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	versionID := d.NewID()
+	if err := q.InsertWorkflowVersion(ctx, store.InsertWorkflowVersionParams{
+		ID: versionID, OrgID: d.OrgID, WorkflowID: workflowID,
+		Version: version + 1, DagJson: raw,
+		CreatedBy: pgtype.Text{String: d.UserID, Valid: d.UserID != ""},
+	}); err != nil {
+		return nil, nil, err
+	}
+	return ok(map[string]any{"workflowId": workflowID, "versionId": versionID, "version": version + 1})
+}
+
+func (d Deps) startRun(ctx context.Context, raw json.RawMessage, input map[string]any) (*mcp.CallToolResult, any, error) {
+	wf, issues := domain.Parse(raw)
+	if wf == nil {
+		return expected(fmt.Sprintf("workflow contract invalid: %s", issueSummary(issues)))
+	}
+	if result := domain.Validate(wf, grammar.DomainValidator); !result.Valid {
+		return expected(fmt.Sprintf("workflow validation failed: %s", issueSummary(result.Issues)))
+	}
+	var startInput any
+	if input != nil {
+		startInput = input
+	}
+	runID, err := d.Engine.StartRun(ctx, engine.StartInput{
+		OrgID: d.OrgID, Workflow: wf, Input: startInput, CreatedBy: d.UserID,
+	})
+	if err != nil {
+		var invalid *engine.InputValidationError
+		if errors.As(err, &invalid) {
+			return expected(err.Error())
+		}
+		return nil, nil, err
+	}
+	return ok(map[string]any{"runId": runID})
+}
+
+func (d Deps) runStatus(ctx context.Context, runID string) (*mcp.CallToolResult, any, error) {
+	q := store.New(d.Pool)
+	run, err := q.GetRun(ctx, store.GetRunParams{ID: runID, OrgID: d.OrgID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return expected("run not found")
+		}
+		return nil, nil, err
+	}
+	nodes, err := q.ListRunNodesByRun(ctx, runID)
+	if err != nil {
+		return nil, nil, err
+	}
+	nodeViews := map[string]any{}
+	for _, node := range nodes {
+		attempts := int32(0)
+		if node.Attempts.Valid {
+			attempts = node.Attempts.Int32
+		}
+		nodeViews[node.NodeID] = map[string]any{"status": node.Status, "attempts": attempts}
+	}
+	return ok(map[string]any{
+		"runId": run.ID, "status": run.Status, "nodes": nodeViews,
+		"outputJson": json.RawMessage(orEmptyObject(run.OutputJson)),
+	})
+}
+
+func (d Deps) runInspect(ctx context.Context, runID string) (*mcp.CallToolResult, any, error) {
+	q := store.New(d.Pool)
+	run, err := q.GetRun(ctx, store.GetRunParams{ID: runID, OrgID: d.OrgID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return expected("run not found")
+		}
+		return nil, nil, err
+	}
+	nodes, err := q.ListRunNodesByRun(ctx, runID)
+	if err != nil {
+		return nil, nil, err
+	}
+	events, err := q.ListRunEvents(ctx, store.ListRunEventsParams{
+		RunID: runID, BeforeCreatedAt: farFuture(), BeforeID: "￿", PageLimit: 50,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	nodeViews := make([]map[string]any, 0, len(nodes))
+	for _, node := range nodes {
+		attempts := int32(0)
+		if node.Attempts.Valid {
+			attempts = node.Attempts.Int32
+		}
+		nodeViews = append(nodeViews, map[string]any{
+			"nodeId": node.NodeID, "status": node.Status, "attempts": attempts,
+			"stateJson": json.RawMessage(orEmptyObject(node.StateJson)),
+			"errorJson": json.RawMessage(orEmptyObject(node.ErrorJson)),
+		})
+	}
+	eventViews := make([]map[string]any, 0, len(events))
+	for _, event := range events {
+		nodeID := ""
+		if event.NodeID.Valid {
+			nodeID = event.NodeID.String
+		}
+		eventViews = append(eventViews, map[string]any{
+			"type": event.Type, "nodeId": nodeID,
+			"payload": json.RawMessage(orEmptyObject(event.Payload)),
+		})
+	}
+	return ok(map[string]any{
+		"runId": run.ID, "status": run.Status,
+		"inputJson":  json.RawMessage(orEmptyObject(run.InputJson)),
+		"outputJson": json.RawMessage(orEmptyObject(run.OutputJson)),
+		"nodes":      nodeViews, "recentEvents": eventViews,
+	})
+}
+
+func (d Deps) dlqList(ctx context.Context, limit int) (*mcp.CallToolResult, any, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	rows, err := store.New(d.Pool).ListDeadLetterSummaries(ctx, store.ListDeadLetterSummariesParams{
+		OrgID: d.OrgID, PageLimit: int32(limit),
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	items := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, map[string]any{
+			"id": row.ID, "runId": row.RunID, "nodeId": row.NodeID,
+			"attempt": row.Attempt, "status": row.Status,
+			"errorJson": json.RawMessage(orEmptyObject(row.ErrorJson)),
+		})
+	}
+	return ok(map[string]any{"deadLetters": items})
+}
+
+func (d Deps) redrive(ctx context.Context, deadLetterID string) (*mcp.CallToolResult, any, error) {
+	if deadLetterID == "" {
+		return expected("deadLetterId is required")
+	}
+	err := d.Engine.RedriveDeadLetter(ctx, d.OrgID, deadLetterID)
+	switch {
+	case err == nil:
+		return ok(map[string]any{"redriven": true, "deadLetterId": deadLetterID})
+	case errors.Is(err, engine.ErrDeadLetterNotFound):
+		return expected("dead letter not found")
+	case errors.Is(err, engine.ErrRedriveConflict):
+		return expected("dead letter replay already claimed")
+	default:
+		return nil, nil, err
+	}
+}
+
+func issueSummary(issues []domain.Issue) string {
+	if len(issues) == 0 {
+		return "unknown issue"
+	}
+	summary := issues[0].Message
+	if len(issues) > 1 {
+		summary = fmt.Sprintf("%s (+%d more)", summary, len(issues)-1)
+	}
+	return summary
+}
+
+func farFuture() time.Time {
+	return time.Now().Add(24 * time.Hour)
+}
+
+func orEmptyObject(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return json.RawMessage(`{}`)
+	}
+	return raw
+}

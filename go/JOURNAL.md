@@ -335,3 +335,19 @@ consolidan en el informe de la puerta D15.
   prueba en cada ejecución del suite.
 - Un bug de arnés instructivo: t.TempDir() del primer test se llevaba el
   binario compartido al terminar; temp estable propio y listo.
+
+## 2026-07-30 — MCP en proceso sobre el engine (T-015)
+
+- El objetivo a corto plazo de la visión toma forma: un agente puede
+  operar el motor por MCP sin que exista NINGÚN otro servicio — el
+  binario stdio carga el engine en proceso, corre el worker pool, y
+  expone las seis herramientas del loop del operador.
+- El e2e ES la conversación con Claude, scriptada: guardar el workflow,
+  arrancarlo, verlo morir en el DLQ, sanar el upstream, redrivear,
+  verlo triunfar, e inspeccionar el timeline con node.redriven — con el
+  doble redrive respondiendo un isError legible, no un crash.
+- Gotcha del SDK que costó un test rojo: json.RawMessage en los args
+  deriva schema de array (es []byte) y el SDK valida ANTES del handler.
+  Documentos como map[string]any.
+- Falta la demo manual con Claude real (snippet listo en README) — la
+  anoto cuando Johnny la corra o la corramos juntos en una sesión.
