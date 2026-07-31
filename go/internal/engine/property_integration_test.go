@@ -20,13 +20,13 @@ import (
 // a real worker pool, then every queue invariant is checked from the
 // database — not from the API projection:
 //
-//   exactly-once  every node succeeded with attempts == 1 and exactly one
-//                 node.succeeded event; no duplicate deliveries survive the
-//                 claim ladder.
-//   ordering      a node's success is never stamped before any of its
-//                 predecessors' (event timestamps, ms precision, >=).
-//   no-orphan     nothing remains pending/queued/running after terminal.
-//   terminal      exactly one run.started and one run.succeeded event.
+//	exactly-once  every node succeeded with attempts == 1 and exactly one
+//	              node.succeeded event; no duplicate deliveries survive the
+//	              claim ladder.
+//	ordering      a node's success is never stamped before any of its
+//	              predecessors' (event timestamps, ms precision, >=).
+//	no-orphan     nothing remains pending/queued/running after terminal.
+//	terminal      exactly one run.started and one run.succeeded event.
 //
 // Seeds are fixed for reproducibility; a failure names its seed.
 func TestQueuePropertiesOverRandomDAGs(t *testing.T) {

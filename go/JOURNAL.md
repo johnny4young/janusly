@@ -1016,3 +1016,18 @@ producción necesita saber — de lo ya resuelto o informativo.
   sistema. La tabla de diagnóstico no es genérica — cada síntoma viene
   de algo que esta ola realmente rompió y arregló (la migración del
   pilot ausente, el escalón de consent, el índice keyset).
+
+## 2026-07-31 — el loop del operador desde la UI real (T-064, T-065)
+
+- El smoke que más dice del F1: la app React de producción, sin tocar,
+  ejecuta el ciclo completo de recuperación contra Go — el run falla,
+  el operador abre el panel, sana el upstream, pulsa redrive, y ve al
+  nodo fallido desaparecer; luego aprueba un gate y ve al workflow
+  fluir. Cero errores de página en todo el recorrido.
+- Para que el botón funcionara hubo que darle al pilot el adapter
+  `/runs/redrive` (el web no llama `/dlq/replay` desde el panel):
+  revive-in-place devolviendo el mismo runId, donde la referencia
+  crea una continuación de replay — el web reabre lo que llegue.
+- Cartografía útil del feed: un run fallido emite dos filas (run y
+  recovery — la recovery abre el drawer de evidencia, no el panel), y
+  los workflows ad-hoc salen como "Unnamed workflow".

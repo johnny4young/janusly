@@ -437,6 +437,26 @@ func (q *Queries) FailRunNode(ctx context.Context, arg FailRunNodeParams) (int64
 	return result.RowsAffected(), nil
 }
 
+const findOpenDeadLetterForNode = `-- name: FindOpenDeadLetterForNode :one
+SELECT id FROM dead_letters
+WHERE org_id = $1 AND run_id = $2 AND node_id = $3 AND status = 'open'
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type FindOpenDeadLetterForNodeParams struct {
+	OrgID  string
+	RunID  string
+	NodeID string
+}
+
+func (q *Queries) FindOpenDeadLetterForNode(ctx context.Context, arg FindOpenDeadLetterForNodeParams) (string, error) {
+	row := q.db.QueryRow(ctx, findOpenDeadLetterForNode, arg.OrgID, arg.RunID, arg.NodeID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
 const findStalledRunningNodes = `-- name: FindStalledRunningNodes :many
 SELECT rn.id, rn.run_id, rn.node_id, COALESCE(rn.attempts, 1)::int AS attempt
 FROM run_nodes rn

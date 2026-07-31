@@ -37,6 +37,8 @@ const api = spawn("/tmp/janusly-go-smoke-api", [], {
     JANUSLY_GO_PORT: "4600",
     JANUSLY_GO_INTERNAL_PORT: "4601",
     JANUSLY_GO_POLL_MS: "50",
+    // The operator-loop spec hosts its healable upstream on loopback.
+    ALLOW_PRIVATE_HTTP_TARGETS: "true",
   },
   stdio: ["ignore", "inherit", "inherit"],
 });

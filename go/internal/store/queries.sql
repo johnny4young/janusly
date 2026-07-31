@@ -657,3 +657,9 @@ ON CONFLICT (org_id, idempotency_key) DO NOTHING;
 -- name: GetStartIdempotencyRun :one
 SELECT run_id FROM go_pilot_start_idempotency
 WHERE org_id = $1 AND idempotency_key = $2;
+
+-- name: FindOpenDeadLetterForNode :one
+SELECT id FROM dead_letters
+WHERE org_id = $1 AND run_id = $2 AND node_id = $3 AND status = 'open'
+ORDER BY created_at DESC
+LIMIT 1;

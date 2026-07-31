@@ -236,3 +236,38 @@ func matchWebhookNode(wf *domain.Workflow, endpointKey string, noMatch opResult)
 			"Multiple active workflows use this webhook endpoint key", nil)
 	}
 }
+
+// runsRedriveCore adapts the web's POST /runs/redrive {runId, nodeId} to
+// the pilot's revive-in-place redrive: resolve the node's open dead letter
+// and claim it. The reference spawns a replay continuation run; the pilot
+// revives the SAME run, so the returned runId equals the input and the web
+// simply reopens it.
+func (s *V1Server) runsRedriveCore(r *http.Request, rc v1Request) opResult {
+	var body struct {
+		RunID  string `json:"runId"`
+		NodeID string `json:"nodeId"`
+	}
+	if err := decodeBody(r, &body); err != nil || body.RunID == "" || body.NodeID == "" {
+		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
+			map[string]any{"field": "runId"})
+	}
+	deadLetterID, err := store.New(s.pool).FindOpenDeadLetterForNode(r.Context(),
+		store.FindOpenDeadLetterForNodeParams{OrgID: rc.orgID, RunID: body.RunID, NodeID: body.NodeID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return opError(http.StatusNotFound, "dlq_not_found", "Not found", nil)
+		}
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+	}
+	if err := s.engine.RedriveDeadLetter(r.Context(), rc.orgID, deadLetterID); err != nil {
+		switch {
+		case errors.Is(err, engine.ErrDeadLetterNotFound):
+			return opError(http.StatusNotFound, "dlq_not_found", "Not found", nil)
+		case errors.Is(err, engine.ErrRedriveConflict):
+			return opError(http.StatusConflict, "dlq_replay_conflict", "Dead letter replay already claimed", nil)
+		default:
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		}
+	}
+	return opOK(map[string]any{"ok": true, "runId": body.RunID})
+}
