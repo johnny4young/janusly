@@ -21,3 +21,15 @@ CREATE INDEX IF NOT EXISTS go_pilot_wakeups_due_idx
 -- objects on the shared schema.
 CREATE INDEX IF NOT EXISTS go_pilot_runs_org_created_id_idx
   ON runs (org_id, created_at DESC, id DESC);
+
+-- Optional POST /start idempotency: one key per org maps to the run it
+-- created. The row inserts inside the start transaction, so "key claimed"
+-- and "run exists" commit together; a duplicate key returns the original
+-- run instead of spawning a second one.
+CREATE TABLE IF NOT EXISTS go_pilot_start_idempotency (
+  org_id text NOT NULL,
+  idempotency_key text NOT NULL,
+  run_id text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (org_id, idempotency_key)
+);

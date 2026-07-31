@@ -3,9 +3,13 @@
 package httpapi
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -276,4 +280,78 @@ func TestDlqServerSideFilters(t *testing.T) {
 	}
 	bad := h.call("GET", "/v1/dlq?status=bogus", nil, "")
 	requireError(t, bad, 400, "dlq_invalid_status", "Invalid DLQ status")
+}
+
+// Optional Idempotency-Key on /start: a duplicate returns the ORIGINAL
+// run with an indistinguishable body; keys scope per org.
+func TestStartIdempotencyKey(t *testing.T) {
+	h := newAPIHarness(t)
+	doc := map[string]any{
+		"nodes": []any{map[string]any{"id": "a", "type": "noop", "config": map[string]any{}}},
+		"edges": []any{},
+	}
+	key := fmt.Sprintf("deploy-%d", time.Now().UnixNano())
+	call := func(org string) apiResponse {
+		res := h.callWithHeaders("POST", "/v1/start", map[string]any{"workflow": doc}, org,
+			map[string]string{"Idempotency-Key": key})
+		return res
+	}
+	first := call("")
+	second := call("")
+	runA := first.body["data"].(map[string]any)["runId"].(string)
+	runB := second.body["data"].(map[string]any)["runId"].(string)
+	if runA != runB {
+		t.Fatalf("duplicate key must replay the original run: %s vs %s", runA, runB)
+	}
+	pool := testPool(t)
+	var count int
+	_ = pool.QueryRow(context.Background(), `SELECT count(*) FROM runs WHERE org_id = $1`, h.org).Scan(&count)
+	if count != 1 {
+		t.Fatalf("one run expected, got %d", count)
+	}
+
+	// The same key under ANOTHER org is independent.
+	other := call("other-" + h.org)
+	if other.body["data"].(map[string]any)["runId"].(string) == runA {
+		t.Fatal("keys must scope per org")
+	}
+
+	// Without the header every call is a fresh run.
+	plain := h.call("POST", "/v1/start", map[string]any{"workflow": doc}, "")
+	if plain.body["data"].(map[string]any)["runId"].(string) == runA {
+		t.Fatal("headerless starts must not join the idempotent family")
+	}
+
+	// Oversized key: 400.
+	big := h.callWithHeaders("POST", "/v1/start", map[string]any{"workflow": doc}, "",
+		map[string]string{"Idempotency-Key": strings.Repeat("k", 257)})
+	if big.status != 400 {
+		t.Fatalf("oversized key: %d", big.status)
+	}
+}
+
+func (h *apiHarness) callWithHeaders(method, path string, body any, org string, headers map[string]string) apiResponse {
+	h.t.Helper()
+	if org == "" {
+		org = h.org
+	}
+	raw, _ := json.Marshal(body)
+	req, err := http.NewRequest(method, h.server.URL+path, bytes.NewReader(raw))
+	if err != nil {
+		h.t.Fatalf("request: %v", err)
+	}
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("x-org-id", org)
+	req.Header.Set("x-user-id", "api-tester")
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		h.t.Fatalf("call: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	var parsed map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&parsed)
+	return apiResponse{status: res.StatusCode, headers: res.Header, body: parsed}
 }

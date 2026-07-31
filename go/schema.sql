@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict 1b5ajwYZ8QpMyx3kdxh31qgFn9QLF1jJXVp7oYcM8NteQ3iavvmDrZSiISlihGf
+\restrict EwDufLHIEOxtJKMBJoJZWVisNSwApyVjP0nsSnna8gcYhP6khaWXI5fyTcAnLnh
 
 -- Dumped from database version 18.4 (Debian 18.4-1.pgdg12+1)
 -- Dumped by pg_dump version 18.4 (Debian 18.4-1.pgdg12+1)
@@ -438,6 +438,18 @@ CREATE TABLE public.external_workflows (
     last_observed_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: go_pilot_start_idempotency; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.go_pilot_start_idempotency (
+    org_id text NOT NULL,
+    idempotency_key text NOT NULL,
+    run_id text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -1601,6 +1613,14 @@ ALTER TABLE ONLY public.external_workflows
 
 
 --
+-- Name: go_pilot_start_idempotency go_pilot_start_idempotency_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.go_pilot_start_idempotency
+    ADD CONSTRAINT go_pilot_start_idempotency_pkey PRIMARY KEY (org_id, idempotency_key);
+
+
+--
 -- Name: go_pilot_wakeups go_pilot_wakeups_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2317,6 +2337,13 @@ CREATE UNIQUE INDEX external_workflows_connection_external_idx ON public.externa
 --
 
 CREATE INDEX external_workflows_org_observed_idx ON public.external_workflows USING btree (org_id, last_observed_at DESC NULLS LAST);
+
+
+--
+-- Name: go_pilot_runs_org_created_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX go_pilot_runs_org_created_id_idx ON public.runs USING btree (org_id, created_at DESC, id DESC);
 
 
 --
@@ -3065,5 +3092,5 @@ CREATE INDEX workflows_org_created_idx ON public.workflows USING btree (org_id, 
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 1b5ajwYZ8QpMyx3kdxh31qgFn9QLF1jJXVp7oYcM8NteQ3iavvmDrZSiISlihGf
+\unrestrict EwDufLHIEOxtJKMBJoJZWVisNSwApyVjP0nsSnna8gcYhP6khaWXI5fyTcAnLnh
 

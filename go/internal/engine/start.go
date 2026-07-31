@@ -70,6 +70,18 @@ type StartInput struct {
 	// roll back together, so a concurrent relay retry can never spawn a
 	// second run for the same inbound event.
 	TriggerEventID string
+	// IdempotencyKey, when set, claims (org, key) inside the start
+	// transaction; a duplicate aborts the new run and the caller returns
+	// the original via ErrStartIdempotencyReplay.
+	IdempotencyKey string
+}
+
+// ErrStartIdempotencyReplay reports a duplicate Idempotency-Key: the
+// original run id rides the error for the caller to return verbatim.
+type ErrStartIdempotencyReplay struct{ RunID string }
+
+func (e *ErrStartIdempotencyReplay) Error() string {
+	return "idempotency key already used by run " + e.RunID
 }
 
 // TriggerEventStartConflictError reports a trigger-event start claim that
@@ -139,6 +151,24 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		CreatedBy: pgtype.Text{String: in.CreatedBy, Valid: in.CreatedBy != ""},
 	}); err != nil {
 		return "", fmt.Errorf("insert run: %w", err)
+	}
+
+	if in.IdempotencyKey != "" {
+		claimed, err := q.ClaimStartIdempotencyKey(ctx, store.ClaimStartIdempotencyKeyParams{
+			OrgID: in.OrgID, IdempotencyKey: in.IdempotencyKey, RunID: runID,
+		})
+		if err != nil {
+			return "", fmt.Errorf("claim idempotency key: %w", err)
+		}
+		if claimed == 0 {
+			original, err := store.New(e.pool).GetStartIdempotencyRun(ctx, store.GetStartIdempotencyRunParams{
+				OrgID: in.OrgID, IdempotencyKey: in.IdempotencyKey,
+			})
+			if err != nil {
+				return "", fmt.Errorf("read idempotent run: %w", err)
+			}
+			return "", &ErrStartIdempotencyReplay{RunID: original}
+		}
 	}
 
 	if in.TriggerEventID != "" {

@@ -244,6 +244,26 @@ func (q *Queries) ClaimNextReplayCampaignItem(ctx context.Context, arg ClaimNext
 	return i, err
 }
 
+const claimStartIdempotencyKey = `-- name: ClaimStartIdempotencyKey :execrows
+INSERT INTO go_pilot_start_idempotency (org_id, idempotency_key, run_id)
+VALUES ($1, $2, $3)
+ON CONFLICT (org_id, idempotency_key) DO NOTHING
+`
+
+type ClaimStartIdempotencyKeyParams struct {
+	OrgID          string
+	IdempotencyKey string
+	RunID          string
+}
+
+func (q *Queries) ClaimStartIdempotencyKey(ctx context.Context, arg ClaimStartIdempotencyKeyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, claimStartIdempotencyKey, arg.OrgID, arg.IdempotencyKey, arg.RunID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const claimTriggerEventStart = `-- name: ClaimTriggerEventStart :execrows
 UPDATE trigger_events
 SET status = 'started', run_id = $3, skipped_reason = NULL,
@@ -768,6 +788,23 @@ func (q *Queries) GetRunOwner(ctx context.Context, id string) (GetRunOwnerRow, e
 	var i GetRunOwnerRow
 	err := row.Scan(&i.OrgID, &i.Status)
 	return i, err
+}
+
+const getStartIdempotencyRun = `-- name: GetStartIdempotencyRun :one
+SELECT run_id FROM go_pilot_start_idempotency
+WHERE org_id = $1 AND idempotency_key = $2
+`
+
+type GetStartIdempotencyRunParams struct {
+	OrgID          string
+	IdempotencyKey string
+}
+
+func (q *Queries) GetStartIdempotencyRun(ctx context.Context, arg GetStartIdempotencyRunParams) (string, error) {
+	row := q.db.QueryRow(ctx, getStartIdempotencyRun, arg.OrgID, arg.IdempotencyKey)
+	var run_id string
+	err := row.Scan(&run_id)
+	return run_id, err
 }
 
 const getTriggerEvent = `-- name: GetTriggerEvent :one

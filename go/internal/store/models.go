@@ -293,6 +293,13 @@ type ExternalWorkflow struct {
 	UpdatedAt          time.Time
 }
 
+type GoPilotStartIdempotency struct {
+	OrgID          string
+	IdempotencyKey string
+	RunID          string
+	CreatedAt      time.Time
+}
+
 type GoPilotWakeup struct {
 	RunNodeID string
 	WakeAt    time.Time

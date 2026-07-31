@@ -289,10 +289,22 @@ func (s *V1Server) startCore(r *http.Request, rc v1Request) opResult {
 	if rejection := s.productionGate(r.Context(), rc.orgID, wf); rejection != nil {
 		return *rejection
 	}
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if len(idempotencyKey) > 256 {
+		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
+			map[string]any{"field": "Idempotency-Key"})
+	}
 	runID, err := s.engine.StartRun(r.Context(), engine.StartInput{
 		OrgID: rc.orgID, Workflow: wf, Input: body.Input, CreatedBy: rc.userID,
+		IdempotencyKey: idempotencyKey,
 	})
 	if err != nil {
+		// A duplicate key is SUCCESS by definition: the original run id
+		// returns with a body indistinguishable from the first call.
+		var replay *engine.ErrStartIdempotencyReplay
+		if errors.As(err, &replay) {
+			return opOK(map[string]any{"runId": replay.RunID})
+		}
 		var invalid *engine.InputValidationError
 		if errors.As(err, &invalid) {
 			return opError(http.StatusBadRequest, "runs_input_invalid",

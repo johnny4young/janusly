@@ -648,3 +648,12 @@ FROM recovered;
 
 -- name: GetOrgConfigValue :one
 SELECT value_json FROM org_configs WHERE org_id = $1 AND key = $2;
+
+-- name: ClaimStartIdempotencyKey :execrows
+INSERT INTO go_pilot_start_idempotency (org_id, idempotency_key, run_id)
+VALUES ($1, $2, $3)
+ON CONFLICT (org_id, idempotency_key) DO NOTHING;
+
+-- name: GetStartIdempotencyRun :one
+SELECT run_id FROM go_pilot_start_idempotency
+WHERE org_id = $1 AND idempotency_key = $2;

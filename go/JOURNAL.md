@@ -978,3 +978,12 @@ producción necesita saber — de lo ya resuelto o informativo.
   workflows sin guardar también filtran. severity/sort/owner/search
   (que en Node viven sobre el read-model de la recovery queue) quedan
   fuera del alcance del pilot, anotados.
+
+## 2026-07-31 — Idempotency-Key opcional en /start (T-059)
+
+- Mejora pilot-propia sobre la referencia: un cliente que reintenta un
+  deploy o un POST tras timeout de red no duplica el run. La clave se
+  reclama dentro de la misma transacción del start — el patrón del
+  trigger-claim, invertido — y el duplicado responde con el run
+  original en un cuerpo indistinguible: idempotencia de verdad, no un
+  409 que obliga al cliente a reconciliar.
