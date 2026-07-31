@@ -1379,3 +1379,10 @@ producción necesita saber — de lo ya resuelto o informativo.
 - aiconfig resuelve todo del catálogo por capas; sin clave todo cae
   limpio a no_client, y un tenant configurado a otro proveedor recibe
   fallback en vez de un re-ruteo silencioso a Anthropic.
+
+## 2026-07-31 — cada token deja factura (T-101)
+
+- El chokepoint dispara el recorder en cada intento — éxito con costo
+  calculado, fallback con el error clasificado — y las tres posturas de
+  costo (desconocido→null, simulado→cero, override de env) probadas
+  contra filas reales.

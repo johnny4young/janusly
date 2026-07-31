@@ -204,7 +204,12 @@ func (c *anthropicClient) GenerateText(ctx context.Context, input GenerateTextIn
 	message, err := c.client.Messages.New(ctx, params)
 	latency := time.Since(startedAt).Milliseconds()
 	if err != nil {
-		return nil, classify(err)
+		classified := classify(err)
+		fireUsage(ctx, input.Context, usageRecord{
+			provider: "anthropic", model: model, latencyMs: latency,
+			simulated: c.cfg.ProviderSimulated, mode: "fallback", aiError: classified.Error(),
+		})
+		return nil, classified
 	}
 	if message == nil {
 		return nil, &AIError{Class: "unknown", Message: "provider returned an empty response"}
@@ -231,6 +236,19 @@ func (c *anthropicClient) GenerateText(ctx context.Context, input GenerateTextIn
 			CacheCreationInputTokens: int(message.Usage.CacheCreationInputTokens),
 		},
 	}
+	// Cost: the price table (env override wins); an explicitly simulated
+	// provider always records ZERO cost, an unknown model records null.
+	if c.cfg.ProviderSimulated {
+		zero := 0.0
+		out.CostUsd = &zero
+	} else {
+		out.CostUsd = ComputeCostUsd(GetModelPrice(model), out.Usage)
+	}
+	fireUsage(ctx, input.Context, usageRecord{
+		provider: "anthropic", model: model, latencyMs: latency,
+		simulated: c.cfg.ProviderSimulated, mode: "ai",
+		usage: &out.Usage, costUsd: out.CostUsd,
+	})
 	return out, nil
 }
 
