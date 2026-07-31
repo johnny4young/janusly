@@ -12,15 +12,15 @@ import (
 	"os"
 
 	"github.com/johnny4young/janusly/go/internal/domain"
+	"github.com/johnny4young/janusly/go/internal/executors"
 	"github.com/johnny4young/janusly/go/internal/grammar"
 	"github.com/johnny4young/janusly/go/internal/store"
-	"github.com/johnny4young/janusly/go/internal/tools"
 )
 
 // readinessOptions wires the pure checks' seams: the tool registry's static
 // write-side bit and the opt-in eval-coverage warn.
 func (s *V1Server) readinessOptions() domain.ReadinessOptions {
-	registry := tools.NewRegistry()
+	registry := executors.NewToolRegistry()
 	return domain.ReadinessOptions{
 		IsWriteSideTool: func(tool string, _ map[string]any) bool {
 			return registry.IsWriteSide(tool)

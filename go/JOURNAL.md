@@ -891,3 +891,20 @@ producción necesita saber — de lo ya resuelto o informativo.
   ironía agradable: en Go no existe "modo stream" mecánico — el body
   siempre es un Reader — así que el opt-in solo cambia qué se bufferiza
   y qué se proyecta, sin rama de transporte aparte.
+
+## 2026-07-31 — familia CSV con fetch streaming (T-052)
+
+- El parser es el mismo autómata de la referencia, con sus dos estados
+  de frontera (pendingQuote, pendingCr) que hacen posible que una
+  comilla escapada o un CRLF caigan partidos entre chunks. El test más
+  valioso barre TODOS los cortes posibles de un documento con escapes
+  y CRLF y exige idéntico resultado — si el estado cruzado de chunks
+  tuviera un agujero, algún corte lo encontraría.
+- Observación de diseño: en Go no hizo falta decodificador incremental
+  de UTF-8 — los delimitadores son ASCII y los bytes de continuación
+  UTF-8 son ≥ 0x80, así que tokenizar por bytes reensambla runas
+  partidas gratis.
+- `csv.fetch` vive en executors (donde está el SSRF/pinning) y se
+  registra sobre el registry base vía el seam nuevo; el catálogo del
+  API y el dispatcher consumen el MISMO constructor para que las
+  superficies no puedan divergir.

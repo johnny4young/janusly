@@ -132,6 +132,12 @@ type httpExecutor struct {
 
 // NewHTTPExecutor builds the http node executor with injectable seams.
 func NewHTTPExecutor(opts HTTPOptions) Func {
+	executor := &httpExecutor{opts: normalizeHTTPOptions(opts)}
+	return executor.execute
+}
+
+// normalizeHTTPOptions fills the production defaults for the SSRF seams.
+func normalizeHTTPOptions(opts HTTPOptions) HTTPOptions {
 	if opts.Resolve == nil {
 		opts.Resolve = func(ctx context.Context, host string) ([]net.IP, error) {
 			addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
@@ -148,8 +154,7 @@ func NewHTTPExecutor(opts HTTPOptions) Func {
 	if opts.AllowPrivate == nil {
 		opts.AllowPrivate = func() bool { return os.Getenv("ALLOW_PRIVATE_HTTP_TARGETS") == "true" }
 	}
-	executor := &httpExecutor{opts: opts}
-	return executor.execute
+	return opts
 }
 
 // validate checks scheme and hostname classes and, for public targets,
@@ -257,13 +262,7 @@ func (e *httpExecutor) execute(ctx context.Context, in Input) (any, error) {
 		return nil, err
 	}
 
-	transport := &http.Transport{
-		TLSClientConfig:   &tls.Config{MinVersion: tls.VersionTLS12},
-		DisableKeepAlives: true,
-	}
-	if !e.opts.AllowPrivate() {
-		transport.DialContext = pins.dial
-	}
+	transport := e.newTransport(pins)
 	client := &http.Client{
 		Transport: transport,
 		Timeout:   time.Duration(timeoutMs) * time.Millisecond,
@@ -463,4 +462,17 @@ func consumeStreamToPreview(body io.Reader, previewCap, maxBytes int) (string, i
 			return "", 0, truncated, err
 		}
 	}
+}
+
+// newTransport builds the per-request transport with the pinned dialer
+// (skipped when private targets are allowed — dev/test loopback).
+func (e *httpExecutor) newTransport(pins *pinnedDialer) *http.Transport {
+	transport := &http.Transport{
+		TLSClientConfig:   &tls.Config{MinVersion: tls.VersionTLS12},
+		DisableKeepAlives: true,
+	}
+	if !e.opts.AllowPrivate() {
+		transport.DialContext = pins.dial
+	}
+	return transport
 }

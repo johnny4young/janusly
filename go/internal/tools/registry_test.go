@@ -89,8 +89,10 @@ func TestRegistryValidationAndCatalog(t *testing.T) {
 		err.Error() != "Unknown tool: ghost.tool" {
 		t.Fatalf("unknown tool: %v", err)
 	}
+	// 4 json tools + 3 buffered csv tools; csv.fetch registers from the
+	// executors package on top of this base set.
 	catalog := NewRegistry().Catalog()
-	if len(catalog) != 4 {
+	if len(catalog) != 7 {
 		t.Fatalf("catalog size: %d", len(catalog))
 	}
 	first := catalog[0]

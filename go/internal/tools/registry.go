@@ -45,6 +45,9 @@ func NewRegistry() *Registry {
 	for _, definition := range jsonTools() {
 		registry.byName[definition.Name] = definition
 	}
+	for _, definition := range csvTools() {
+		registry.byName[definition.Name] = definition
+	}
 	return registry
 }
 
@@ -259,6 +262,13 @@ func deepMerge(left, right map[string]any) map[string]any {
 		out[key] = value
 	}
 	return out
+}
+
+// Register adds one tool definition; later registrations override earlier
+// ones by name. The executors package uses this to contribute tools that
+// need machinery living there (the SSRF-gated streaming fetch).
+func (r *Registry) Register(definition Definition) {
+	r.byName[definition.Name] = definition
 }
 
 // IsWriteSide reports the static write-capability bit for a registered tool;
