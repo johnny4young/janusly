@@ -16,6 +16,10 @@ retroactively.
 
 ### Changed
 
+- The web jsdom suite now retains file-level parallelism while bounding worker
+  concurrency to the smaller of four or the host's available parallelism. This
+  prevents high-core machines from turning lazy-module scheduling pressure into
+  unrelated UI-test timeouts without hiding slow tests behind larger deadlines.
 - Web performance governance now distinguishes the complete JS/CSS deploy
   artifact from the worst single-locale JS/CSS set instead of treating mutually
   exclusive English and Spanish catalogs as one normal-session transfer.

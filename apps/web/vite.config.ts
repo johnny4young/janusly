@@ -1,10 +1,12 @@
 /// <reference types="vitest" />
 import { execFileSync } from 'node:child_process'
+import { availableParallelism } from 'node:os'
 import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { compactI18nCatalogs } from '../../scripts/compact-i18n-plugin.mjs'
+import { resolveWebTestWorkerLimit } from './vitest-worker-policy'
 
 /**
  * Real build stamp, computed once at config load: `<date>-<short-sha>`.
@@ -106,6 +108,11 @@ export default defineConfig(({ mode }) => ({
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
     exclude: ['src/**/*.browser.test.{ts,tsx}', 'node_modules/**'],
+    // Each file owns a jsdom realm and may activate several lazy Vite imports.
+    // Keep file concurrency, but cap aggregate realm/import pressure so test
+    // deadlines measure component behavior rather than host scheduler delay.
+    fileParallelism: true,
+    maxWorkers: resolveWebTestWorkerLimit(availableParallelism()),
     css: true,
   },
 }))

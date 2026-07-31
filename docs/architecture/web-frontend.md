@@ -283,6 +283,14 @@ transfer, and long-task contracts. `bundle-report.mjs` fails closed when either
 locale asset is absent. Do not raise a cap without measured evidence and a
 reviewed exception.
 
+The jsdom suite keeps file-level parallelism but caps Vitest workers at the
+smaller of four or the host's available parallelism. Each test file owns a
+jsdom realm and can activate multiple lazy Vite imports; allowing high-core
+hosts to schedule every realm concurrently can starve Testing Library waits
+without exposing a product defect. Do not replace this bound with broad test
+timeout increases or fully serial execution. Browser-mode and Playwright suites
+retain their independent concurrency policies.
+
 ## Render-error blast radius
 
 `ErrorBoundary` (`apps/web/src/components/ErrorBoundary.tsx`) is the single
