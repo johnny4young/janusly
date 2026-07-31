@@ -242,3 +242,20 @@ consolidan en el informe de la puerta D15.
 - Detalle que me gustó portar: `until` en el pasado → delayMs 0, resume
   inmediato — un workflow guardado válido ayer no puede volverse
   inválido hoy en runtime.
+
+## 2026-07-30 — redrive: el DLQ revive runs (T-010)
+
+- La cuña de recuperación en miniatura: fallo permanente → dead letter →
+  upstream sana → redrive → run `succeeded`. El test lo cuenta como
+  historia (upstream down/healed con un atomic.Bool) y verifica las dos
+  ejecuciones exactas del nodo frágil.
+- Todo es una transacción bajo el advisory lock del run: claim del DL
+  (CAS sobre replay_claimed_at, la misma columna de Node), failed→queued
+  con attempts+1, run revivido, evento, NOTIFY. La propiedad que más
+  importa: si el nodo ya no está `failed`, el claim NO se quema — la tx
+  revierte entera y el 409 es reintentable.
+- Cross-org es un not-found indistinguible (la fila no existe para otro
+  tenant) — el mismo principio de invisibilidad del API de Node.
+- Paridad heredada curiosa: nadie limpia error_json al completar un nodo
+  redriveado — la evidencia del fallo viejo convive con el output nuevo.
+  Node hace lo mismo; queda fijado como comportamiento, no como bug.

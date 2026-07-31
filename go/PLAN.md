@@ -173,7 +173,7 @@ crítica) · P1 (importante) · P2 (stretch).
 | T-007 | Executors: noop, transform, condition + semántica de aristas | P0 | done |
 | T-008 | Modelo de fallo: retry ladder + dead_letters | P0 | done |
 | T-009 | wait_until + approval/waiting + POST /resume | P0 | done |
-| T-010 | Redrive desde dead_letters | P0 | todo |
+| T-010 | Redrive desde dead_letters | P0 | done |
 | T-011 | Executor http + SSRF/DNS pinning | P0 | todo |
 | T-012 | API /v1 mínima + envelopes + goldens de referencia Node | P0 | todo |
 | T-013 | Arnés de paridad semántica (lane A, fixtures F01–F10) | P0 | todo |
@@ -624,6 +624,10 @@ el chat publicado.
 | 2026-07-30 | decisión | El timer reutiliza `go_pilot_wakeups`: el sweeper resuelve wakeups vencidos de nodos waiting vía `ResumeRun` (mismo camino que el resume manual — idéntico a Node donde handleWaitResume llama resumeRun); el CAS waiting→succeeded hace idempotente el disparo duplicado. SweepDueWakeups ya no borra wakeups de nodos waiting (solo GC de consumidos) |
 | 2026-07-30 | decisión (postura pilot) | Approval con campos de deadline (`decisionTimeoutMs`/`until`/`onTimeout`/`escalateTo`) FALLA determinista con código `approval_deadline_unsupported_pilot` — ejecutarlo ignorando la supervisión declarada sería peor que fallar. Las políticas de deadline (arm/timeout/escalate de Node) quedan fuera del subset |
 | 2026-07-30 | nota | ResumeRun es UNA transacción (CAS + borrar wakeup + evento + scheduleDownstream) — Node lo hace en 4 pasos separados; tokens HMAC de human_form fuera de alcance (anotado en card) |
+| 2026-07-30 | decisión | Redrive = UNA transacción bajo el advisory lock del run: leer DL (org-scoped, cross-org = not-found indistinguible) → CAS `replay_claimed_at IS NULL` → failed→queued con attempts+1 → run failed→running → `node.redriven {deadLetterId, attempt}` → NOTIFY. Un crash no puede dejar un claim quemado sin nodo revivido |
+| 2026-07-30 | paridad + divergencia anotada | La columna de claim es la misma de Node (`replay_claimed_at`); el evento `node.redriven` es nombre propio del piloto (anotado en card). `dead_letters.status` queda `open` — el flip a `replayed`/`replayedAt` es maquinaria de impacto de recuperación de Node (se marca al RECUPERAR, no al iniciar el replay: "replay initiation is never a recovered win") — diferido a F2 |
+| 2026-07-30 | paridad (heredada) | Ni Node ni el piloto limpian `error_json` al completar un nodo redriveado — la evidencia del fallo anterior queda en la fila junto al output nuevo. Verificado en markNodeSucceeded (no toca errorJson) |
+| 2026-07-30 | nota | Si el nodo ya no está `failed` (redrive previo, cancel), el claim NO se quema: la tx entera revierte y devuelve conflicto — el operador puede reintentar cuando el estado se aclare. La ruta HTTP `POST /dlq/redrive` monta en la tarea de API |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)

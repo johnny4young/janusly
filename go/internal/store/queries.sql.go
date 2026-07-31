@@ -1034,6 +1034,26 @@ func (q *Queries) QueueRunNode(ctx context.Context, arg QueueRunNodeParams) (int
 	return result.RowsAffected(), nil
 }
 
+const redriveFailedRunNode = `-- name: RedriveFailedRunNode :one
+UPDATE run_nodes
+SET status = 'queued', attempts = COALESCE(attempts, 0) + 1
+WHERE run_id = $1 AND node_id = $2
+  AND status = 'failed'
+RETURNING COALESCE(attempts, 1)::int AS attempt
+`
+
+type RedriveFailedRunNodeParams struct {
+	RunID  string
+	NodeID string
+}
+
+func (q *Queries) RedriveFailedRunNode(ctx context.Context, arg RedriveFailedRunNodeParams) (int32, error) {
+	row := q.db.QueryRow(ctx, redriveFailedRunNode, arg.RunID, arg.NodeID)
+	var attempt int32
+	err := row.Scan(&attempt)
+	return attempt, err
+}
+
 const requeueRunNodeForRetry = `-- name: RequeueRunNodeForRetry :execrows
 UPDATE run_nodes SET status = 'queued', attempts = $1
 WHERE run_id = $2 AND node_id = $3
@@ -1048,6 +1068,19 @@ type RequeueRunNodeForRetryParams struct {
 
 func (q *Queries) RequeueRunNodeForRetry(ctx context.Context, arg RequeueRunNodeForRetryParams) (int64, error) {
 	result, err := q.db.Exec(ctx, requeueRunNodeForRetry, arg.Attempt, arg.RunID, arg.NodeID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reviveFailedRun = `-- name: ReviveFailedRun :execrows
+UPDATE runs SET status = 'running'
+WHERE id = $1 AND status = 'failed'
+`
+
+func (q *Queries) ReviveFailedRun(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.Exec(ctx, reviveFailedRun, id)
 	if err != nil {
 		return 0, err
 	}

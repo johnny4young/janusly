@@ -191,6 +191,17 @@ LIMIT sqlc.arg(page_limit);
 UPDATE dead_letters SET replay_claimed_at = now()
 WHERE id = $1 AND org_id = $2 AND replay_claimed_at IS NULL;
 
+-- name: RedriveFailedRunNode :one
+UPDATE run_nodes
+SET status = 'queued', attempts = COALESCE(attempts, 0) + 1
+WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
+  AND status = 'failed'
+RETURNING COALESCE(attempts, 1)::int AS attempt;
+
+-- name: ReviveFailedRun :execrows
+UPDATE runs SET status = 'running'
+WHERE id = sqlc.arg(id) AND status = 'failed';
+
 -- name: UpsertWakeup :exec
 INSERT INTO go_pilot_wakeups (run_node_id, wake_at, reason)
 VALUES ($1, $2, $3)
