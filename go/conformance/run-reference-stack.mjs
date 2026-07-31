@@ -39,7 +39,9 @@ function startService(name, cwd, entry, extraEnv) {
     cwd,
     detached: true, // own process group so teardown reaps tsx's children too
     stdio: ["ignore", "inherit", "inherit"],
-    env: { ...process.env, DATABASE_URL, REDIS_URL, ...extraEnv },
+    // Golden fixtures hit a loopback stub; the reference's SSRF guard
+    // must allow private targets inside this disposable stack.
+    env: { ...process.env, DATABASE_URL, REDIS_URL, ALLOW_PRIVATE_HTTP_TARGETS: "true", ...extraEnv },
   });
   child.on("error", (error) => console.error(`[goldens stack] ${name}:`, error.message));
   children.push({ name, child });

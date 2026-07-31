@@ -1031,3 +1031,16 @@ producción necesita saber — de lo ya resuelto o informativo.
 - Cartografía útil del feed: un run fallido emite dos filas (run y
   recovery — la recovery abre el drawer de evidencia, no el panel), y
   los workflows ad-hoc salen como "Unnamed workflow".
+
+## 2026-07-31 — consolidación: recaptura total + paridad ×3 (T-066)
+
+- La afirmación más fuerte que puede hacer el lane: los 18 goldens
+  recapturados del stack aislado en una sola corrida salieron
+  byte-idénticos a los committeados — la captura es reproducible y el
+  pin no derivó — y la paridad Go corre verde tres veces contra ellos.
+- El booter escondía una trampa que solo la recaptura total pisó: sin
+  ALLOW_PRIVATE_HTTP_TARGETS el guard SSRF de Node bloqueaba el stub
+  loopback y los fixtures http capturaban un fallo distinto al
+  original. Las capturas parciales previas no tenían fixtures http y
+  nunca lo notaron. La lección de siempre: los caminos que no se
+  ejercitan completos guardan sorpresas.
