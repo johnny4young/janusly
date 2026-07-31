@@ -1,6 +1,6 @@
 # Piloto Go — journal consolidado (F0)
 
-Fecha: 2026-07-30 · Rama: `go-pilot` · Pin de referencia: `develop @ 0f294ad2`
+Fecha: 2026-07-30 · Rama: `go-pilot` · Pin de referencia: `develop @ 7febb99c`
 Fuente viva: [`go/JOURNAL.md`](JOURNAL.md) (cronológico) y
 [`go/PLAN.md`](PLAN.md) §9 (registro de decisiones). Este documento
 consolida; no reemplaza.

@@ -1,6 +1,6 @@
 # Puerta D15 — informe de decisión del piloto Go
 
-Fecha: 2026-07-30 · Rama: `go-pilot` (24 commits) · Pin: `develop @ 0f294ad2`
+Fecha: 2026-07-30 · Rama: `go-pilot` (24 commits) · Pin: `develop @ 7febb99c` (histórico F0: 0f294ad2)
 La decisión es de Johnny; este informe la deja lista.
 
 ## Las cuatro condiciones (§8 del plan)
