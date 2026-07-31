@@ -392,3 +392,31 @@ func TestSupabaseModeThroughTheMiddleware(t *testing.T) {
 	})
 	requireError(t, forged, 401, "server_request_failed", "Unauthorized: missing Supabase JWT or dev headers")
 }
+
+// requireRole: a seeded viewer cannot save even through dev headers (the
+// auto-grant is for missing rows only); the 403 carries the reference's
+// exact message.
+func TestRequireRoleGateOnSave(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO org_members (id, org_id, user_id, role)
+		 VALUES ($1, $2, 'api-tester', 'viewer')`, h.org+"-viewer-row", h.org); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	doc := map[string]any{
+		"id":    "wf-rolegate-" + h.org,
+		"nodes": []any{map[string]any{"id": "a", "type": "noop", "config": map[string]any{}}},
+		"edges": []any{},
+	}
+	res := h.call("POST", "/v1/workflows/save", doc, "")
+	requireError(t, res, 403, "server_request_failed", "Forbidden: requires editor role")
+
+	// A ghost user in the SAME org still auto-grants admin via dev mode.
+	ghost := h.callWithHeaders("POST", "/v1/workflows/save", doc, "", map[string]string{
+		"x-user-id": "ghost-admin",
+	})
+	if ghost.status != 200 {
+		t.Fatalf("dev auto-grant must pass: %d %+v", ghost.status, ghost.body)
+	}
+}

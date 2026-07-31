@@ -1151,3 +1151,13 @@ producción necesita saber — de lo ya resuelto o informativo.
   distinción es la que evita que el modo de desarrollo esconda bugs de
   autorización. Service-token jamás auto-eleva, y un rol custom cuya
   definición fue borrada falla cerrado en todos los modos.
+
+## 2026-07-31 — el catálogo cerrado y su primer gate (T-072)
+
+- Las 41 claves no se transcribieron: se EXTRAJERON con regex de la
+  fuente y el test ancla el conteo, las categorías y nueve filas de la
+  matriz — si Node añade una clave, la paridad truena aquí en vez de
+  derivar en silencio. El primer gate real (save exige editor) probó la
+  sutileza de T-071 por el camino HTTP completo: el viewer sembrado
+  recibe el 403 verbatim y el fantasma del mismo org pasa por el
+  auto-grant de dev.
