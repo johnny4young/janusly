@@ -236,6 +236,14 @@ func (e *httpExecutor) execute(ctx context.Context, in Input) (any, error) {
 	if m, ok := in.Config["method"].(string); ok && m != "" {
 		method = strings.ToUpper(m)
 	}
+	// The sandbox gate: a validation replay skips write-side methods —
+	// read-side GET/HEAD still execute so validation produces real signal.
+	if in.DryRun && method != "GET" && method != "HEAD" && method != "OPTIONS" {
+		return map[string]any{
+			"dryRun": true, "skipped": true, "reason": "validation_dry_run",
+			"method": method,
+		}, nil
+	}
 	// Bound precedence: node config → tenant defaults (org config/env,
 	// resolved by the dispatcher) → platform constants.
 	timeoutMs := float64(httpDefaultTimeoutMs)

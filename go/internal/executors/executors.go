@@ -42,6 +42,9 @@ type Input struct {
 	Memory *MemoryDeps
 	// Mcp carries the dispatcher-built MCP client seam (mcp_tool nodes).
 	Mcp *McpDeps
+	// DryRun marks a validation (sandbox) execution: write-side tools and
+	// sensitive http methods SKIP instead of producing external effects.
+	DryRun bool
 }
 
 // MemoryDeps are thin closures over the memory substrate — the vector

@@ -511,13 +511,14 @@ func runView(run store.GetRunRow) map[string]any {
 		"id": run.ID, "orgId": run.OrgID,
 		"workflowVersionId": run.WorkflowVersionID,
 		"workflowRolloutId": nil, "workflowRolloutVariant": nil,
-		"status": run.Status, "outcomeStatus": nil, "semanticViolationCount": 0,
-		"inputJson": rawOrNull(run.InputJson), "outputJson": rawOrNull(run.OutputJson),
+		"status": run.Status, "outcomeStatus": textOrNull(run.OutcomeStatus),
+		"semanticViolationCount": run.SemanticViolationCount,
+		"inputJson":              rawOrNull(run.InputJson), "outputJson": rawOrNull(run.OutputJson),
 		"parentRunId": textOrNull(run.ParentRunID), "parentNodeId": textOrNull(run.ParentNodeID),
 		"parentLinkKind": nil, "parentNotificationAfter": nil,
 		"recoveryPlaybookAppliedRecordedAt": nil, "recoveryPlaybookValidationRecordedAt": nil,
 		"replayMode": textOrNull(run.ReplayMode), "traceId": nil,
-		"validationEvidenceLevel": nil,
+		"validationEvidenceLevel": textOrNull(run.ValidationEvidenceLevel),
 		"createdBy":               textOrNull(run.CreatedBy), "createdAt": timeOrNull(run.CreatedAt),
 	}
 }

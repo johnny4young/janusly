@@ -153,6 +153,10 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		Status: "running", InputJson: inputJSON,
 		CreatedBy:  pgtype.Text{String: in.CreatedBy, Valid: in.CreatedBy != ""},
 		ReplayMode: pgtype.Text{String: in.ReplayMode, Valid: in.ReplayMode != ""},
+		// A validation replay carries its evidence level from birth: the
+		// sandbox produced STATIC evidence (write sides skipped), and the
+		// contract ladder reads this to decide what the run may prove.
+		ValidationEvidenceLevel: pgtype.Text{String: "static", Valid: in.ReplayMode == "validation"},
 	}); err != nil {
 		return "", fmt.Errorf("insert run: %w", err)
 	}

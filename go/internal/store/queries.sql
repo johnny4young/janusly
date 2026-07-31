@@ -112,12 +112,13 @@ ORDER BY version DESC
 LIMIT 1;
 
 -- name: InsertRun :exec
-INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, created_by, replay_mode)
-VALUES ($1, $2, $3, $4, $5, $6, $7);
+INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, created_by, replay_mode, validation_evidence_level)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
 
 -- name: GetRun :one
 SELECT id, org_id, workflow_version_id, status, input_json, output_json,
-       parent_run_id, parent_node_id, replay_mode, created_by, created_at
+       parent_run_id, parent_node_id, replay_mode, created_by, created_at,
+       outcome_status, semantic_violation_count, validation_evidence_level
 FROM runs
 WHERE id = $1 AND org_id = $2;
 

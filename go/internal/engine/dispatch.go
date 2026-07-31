@@ -110,6 +110,10 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 		bounds := LoadOrgHTTPBounds(ctx, q, claim.OrgID, d.renderOpts.LookupEnv)
 		httpBounds = &bounds
 	}
+	dryRun := false
+	if run, err := q.GetRunExecution(ctx, claim.RunID); err == nil && run.ReplayMode.Valid {
+		dryRun = run.ReplayMode.String == "validation"
+	}
 	var aiDeps *executors.AIDeps
 	if node.Type == "ai" || node.Type == "agent" || node.Type == "multi_agent" {
 		aiDeps = d.buildAIDeps(ctx, claim)
@@ -120,10 +124,6 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 	}
 	var mcpDeps *executors.McpDeps
 	if node.Type == "mcp_tool" {
-		dryRun := false
-		if run, err := q.GetRunExecution(ctx, claim.RunID); err == nil && run.ReplayMode.Valid {
-			dryRun = run.ReplayMode.String == "validation"
-		}
 		mcpDeps = &executors.McpDeps{
 			Execute: func(execCtx context.Context, mcpCall executors.McpCall) executors.McpEnvelope {
 				return d.mcp.Execute(execCtx, mcpclient.Call{
@@ -137,7 +137,7 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 	}
 	output, execErr := execute(ctx, executors.Input{
 		RunID: claim.RunID, NodeID: claim.NodeID,
-		Config: renderedConfig, Context: runContext, HTTPBounds: httpBounds, AI: aiDeps, Memory: memoryDeps, Mcp: mcpDeps,
+		Config: renderedConfig, Context: runContext, HTTPBounds: httpBounds, AI: aiDeps, Memory: memoryDeps, Mcp: mcpDeps, DryRun: dryRun,
 		Emit: func(eventType string, payload map[string]any) string {
 			eventAt := eventNow()
 			raw, err := json.Marshal(payload)

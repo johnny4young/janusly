@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/johnny4young/janusly/go/internal/tools"
 )
 
 // The executors mirror the reference registry entries (node-registry.ts:
@@ -92,5 +94,53 @@ func TestTransformNilMappingYieldsEmptyObject(t *testing.T) {
 	out, err := Registry()["transform"](context.Background(), Input{Config: map[string]any{}})
 	if err != nil || !reflect.DeepEqual(out, map[string]any{}) {
 		t.Fatalf("got %v err %v", out, err)
+	}
+}
+
+// The generic sandbox gate at the tool node: ANY registered write-side
+// tool skips cooperatively under DryRun; read-side tools still execute.
+func TestToolNodeDryRunWriteSkip(t *testing.T) {
+	registry := tools.NewRegistry()
+	fired := false
+	registry.Register(tools.Definition{
+		Name: "test.mutate", Description: "test write",
+		Required: []string{}, Fields: []tools.Field{},
+		WriteSide: true,
+		Execute: func(ctx context.Context, input map[string]any) (map[string]any, error) {
+			fired = true
+			return map[string]any{"ok": true}, nil
+		},
+	})
+	exec := NewToolExecutor(registry)
+
+	output, err := exec(context.Background(), Input{
+		Config: map[string]any{"tool": "test.mutate"}, DryRun: true,
+	})
+	if err != nil {
+		t.Fatalf("dry-run write tool: %v", err)
+	}
+	result := output.(map[string]any)["result"].(map[string]any)
+	if result["skipped"] != true || result["reason"] != "validation_dry_run" || fired {
+		t.Fatalf("write-side tool must skip in dry-run: %+v fired=%v", result, fired)
+	}
+
+	// Without DryRun the same tool fires.
+	if _, err := exec(context.Background(), Input{
+		Config: map[string]any{"tool": "test.mutate"},
+	}); err != nil || !fired {
+		t.Fatalf("production must fire: %v fired=%v", err, fired)
+	}
+
+	// A read-side tool executes even in dry-run (real validation signal).
+	readOutput, err := exec(context.Background(), Input{
+		Config: map[string]any{"tool": "text.uppercase", "input": map[string]any{"value": "hola"}},
+		DryRun: true,
+	})
+	if err != nil {
+		t.Fatalf("read-side dry-run: %v", err)
+	}
+	readResult := readOutput.(map[string]any)["result"].(map[string]any)
+	if readResult["skipped"] == true {
+		t.Fatalf("read-side must execute in dry-run: %+v", readResult)
 	}
 }

@@ -30,6 +30,14 @@ func NewToolExecutor(registry *tools.Registry) Func {
 			return map[string]any{"tool": name, "result": executeVectorTool(name, input, in.Memory)}, nil
 		}
 
+		// The sandbox gate: a validation replay must not produce external
+		// effects — every registered write-side tool skips cooperatively.
+		if in.DryRun && registry.IsWriteSide(name) {
+			return map[string]any{"tool": name, "result": map[string]any{
+				"ok": true, "skipped": true, "reason": "validation_dry_run",
+			}}, nil
+		}
+
 		output, err := registry.Execute(ctx, name, input)
 		result := map[string]any{"ok": true}
 		if err != nil {

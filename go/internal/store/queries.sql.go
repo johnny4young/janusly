@@ -1242,7 +1242,8 @@ func (q *Queries) GetReplayCampaign(ctx context.Context, arg GetReplayCampaignPa
 
 const getRun = `-- name: GetRun :one
 SELECT id, org_id, workflow_version_id, status, input_json, output_json,
-       parent_run_id, parent_node_id, replay_mode, created_by, created_at
+       parent_run_id, parent_node_id, replay_mode, created_by, created_at,
+       outcome_status, semantic_violation_count, validation_evidence_level
 FROM runs
 WHERE id = $1 AND org_id = $2
 `
@@ -1253,17 +1254,20 @@ type GetRunParams struct {
 }
 
 type GetRunRow struct {
-	ID                string
-	OrgID             string
-	WorkflowVersionID string
-	Status            string
-	InputJson         json.RawMessage
-	OutputJson        json.RawMessage
-	ParentRunID       pgtype.Text
-	ParentNodeID      pgtype.Text
-	ReplayMode        pgtype.Text
-	CreatedBy         pgtype.Text
-	CreatedAt         *time.Time
+	ID                      string
+	OrgID                   string
+	WorkflowVersionID       string
+	Status                  string
+	InputJson               json.RawMessage
+	OutputJson              json.RawMessage
+	ParentRunID             pgtype.Text
+	ParentNodeID            pgtype.Text
+	ReplayMode              pgtype.Text
+	CreatedBy               pgtype.Text
+	CreatedAt               *time.Time
+	OutcomeStatus           pgtype.Text
+	SemanticViolationCount  int32
+	ValidationEvidenceLevel pgtype.Text
 }
 
 func (q *Queries) GetRun(ctx context.Context, arg GetRunParams) (GetRunRow, error) {
@@ -1281,6 +1285,9 @@ func (q *Queries) GetRun(ctx context.Context, arg GetRunParams) (GetRunRow, erro
 		&i.ReplayMode,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.OutcomeStatus,
+		&i.SemanticViolationCount,
+		&i.ValidationEvidenceLevel,
 	)
 	return i, err
 }
@@ -1857,18 +1864,19 @@ func (q *Queries) InsertReplayCampaignItem(ctx context.Context, arg InsertReplay
 }
 
 const insertRun = `-- name: InsertRun :exec
-INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, created_by, replay_mode)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, created_by, replay_mode, validation_evidence_level)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type InsertRunParams struct {
-	ID                string
-	OrgID             string
-	WorkflowVersionID string
-	Status            string
-	InputJson         json.RawMessage
-	CreatedBy         pgtype.Text
-	ReplayMode        pgtype.Text
+	ID                      string
+	OrgID                   string
+	WorkflowVersionID       string
+	Status                  string
+	InputJson               json.RawMessage
+	CreatedBy               pgtype.Text
+	ReplayMode              pgtype.Text
+	ValidationEvidenceLevel pgtype.Text
 }
 
 func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) error {
@@ -1880,6 +1888,7 @@ func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) error {
 		arg.InputJson,
 		arg.CreatedBy,
 		arg.ReplayMode,
+		arg.ValidationEvidenceLevel,
 	)
 	return err
 }
