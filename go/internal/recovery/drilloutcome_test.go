@@ -87,3 +87,52 @@ func TestBuildRecoveryDrillOutcome(t *testing.T) {
 		t.Fatalf("in progress: %+v", inProgress)
 	}
 }
+
+// The calibration fit: monotonic-only curves, sample floor abstention,
+// and the clamped monotonic application.
+func TestFitAndApplyCalibration(t *testing.T) {
+	// Below the floor → nil.
+	if FitCalibrationCurve(make([]CalibrationSample, MinCalibrationSamples-1)) != nil {
+		t.Fatal("below the floor must abstain")
+	}
+	// A clean positive relationship fits: low confidence mostly rejected,
+	// high mostly accepted.
+	var samples []CalibrationSample
+	for i := 0; i < 15; i++ {
+		samples = append(samples, CalibrationSample{RawConfidence: 20, Accepted: i < 3})
+	}
+	for i := 0; i < 15; i++ {
+		samples = append(samples, CalibrationSample{RawConfidence: 85, Accepted: i < 12})
+	}
+	curve := FitCalibrationCurve(samples)
+	if curve == nil || curve.Slope <= 0 || curve.SampleSize != 30 {
+		t.Fatalf("positive fit expected: %+v", curve)
+	}
+	// Monotonic + clamped application; identity without a curve.
+	low, high := ApplyCalibration(20, curve), ApplyCalibration(85, curve)
+	if low > high || low < 0 || high > 100 {
+		t.Fatalf("monotonic clamp: %d/%d", low, high)
+	}
+	if ApplyCalibration(63.4, nil) != 63 {
+		t.Fatal("nil curve must be identity (rounded)")
+	}
+	// An INVERTED relationship refuses the curve (negative slope).
+	var inverted []CalibrationSample
+	for i := 0; i < 15; i++ {
+		inverted = append(inverted, CalibrationSample{RawConfidence: 20, Accepted: i < 13})
+	}
+	for i := 0; i < 15; i++ {
+		inverted = append(inverted, CalibrationSample{RawConfidence: 85, Accepted: i < 2})
+	}
+	if FitCalibrationCurve(inverted) != nil {
+		t.Fatal("non-monotonic fit must refuse")
+	}
+	// One bucket only → degenerate geometry → nil.
+	var flat []CalibrationSample
+	for i := 0; i < 30; i++ {
+		flat = append(flat, CalibrationSample{RawConfidence: 50, Accepted: i%2 == 0})
+	}
+	if FitCalibrationCurve(flat) != nil {
+		t.Fatal("single-bucket fit must refuse")
+	}
+}

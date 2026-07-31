@@ -2262,6 +2262,43 @@ func (q *Queries) InsertRecoveryCaseTransition(ctx context.Context, arg InsertRe
 	return result.RowsAffected(), nil
 }
 
+const insertRecoveryFeedback = `-- name: InsertRecoveryFeedback :exec
+INSERT INTO recovery_feedback (id, org_id, user_id, dead_letter_id, workflow_id,
+  suggestion_mode, approach_label, accepted, raw_confidence, comment, eval_consent)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+`
+
+type InsertRecoveryFeedbackParams struct {
+	ID             string
+	OrgID          string
+	UserID         pgtype.Text
+	DeadLetterID   string
+	WorkflowID     string
+	SuggestionMode string
+	ApproachLabel  string
+	Accepted       bool
+	RawConfidence  pgtype.Int4
+	Comment        pgtype.Text
+	EvalConsent    bool
+}
+
+func (q *Queries) InsertRecoveryFeedback(ctx context.Context, arg InsertRecoveryFeedbackParams) error {
+	_, err := q.db.Exec(ctx, insertRecoveryFeedback,
+		arg.ID,
+		arg.OrgID,
+		arg.UserID,
+		arg.DeadLetterID,
+		arg.WorkflowID,
+		arg.SuggestionMode,
+		arg.ApproachLabel,
+		arg.Accepted,
+		arg.RawConfidence,
+		arg.Comment,
+		arg.EvalConsent,
+	)
+	return err
+}
+
 const insertRecoveryImpactEvent = `-- name: InsertRecoveryImpactEvent :execrows
 INSERT INTO recovery_impact_events (dead_letter_id, org_id, run_id, node_id, user_id, recovered_at, downtime_ended_ms)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -2654,6 +2691,109 @@ func (q *Queries) InsertWorkflowVersion(ctx context.Context, arg InsertWorkflowV
 		arg.CreatedBy,
 	)
 	return err
+}
+
+const listCalibratableApproaches = `-- name: ListCalibratableApproaches :many
+SELECT DISTINCT approach_label FROM recovery_feedback
+WHERE org_id = $1 AND raw_confidence IS NOT NULL
+  AND created_at >= now() - make_interval(days => $2::int)
+`
+
+type ListCalibratableApproachesParams struct {
+	OrgID      string
+	WindowDays int32
+}
+
+func (q *Queries) ListCalibratableApproaches(ctx context.Context, arg ListCalibratableApproachesParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listCalibratableApproaches, arg.OrgID, arg.WindowDays)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var approach_label string
+		if err := rows.Scan(&approach_label); err != nil {
+			return nil, err
+		}
+		items = append(items, approach_label)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCalibrationSamples = `-- name: ListCalibrationSamples :many
+SELECT raw_confidence, accepted FROM recovery_feedback
+WHERE org_id = $1 AND approach_label = $2 AND raw_confidence IS NOT NULL
+  AND created_at >= now() - make_interval(days => $3::int)
+ORDER BY created_at ASC
+LIMIT 5000
+`
+
+type ListCalibrationSamplesParams struct {
+	OrgID         string
+	ApproachLabel string
+	WindowDays    int32
+}
+
+type ListCalibrationSamplesRow struct {
+	RawConfidence pgtype.Int4
+	Accepted      bool
+}
+
+func (q *Queries) ListCalibrationSamples(ctx context.Context, arg ListCalibrationSamplesParams) ([]ListCalibrationSamplesRow, error) {
+	rows, err := q.db.Query(ctx, listCalibrationSamples, arg.OrgID, arg.ApproachLabel, arg.WindowDays)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCalibrationSamplesRow
+	for rows.Next() {
+		var i ListCalibrationSamplesRow
+		if err := rows.Scan(&i.RawConfidence, &i.Accepted); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listConfidenceCalibrations = `-- name: ListConfidenceCalibrations :many
+SELECT id, org_id, approach_label, accept_rate, sample_size, curve_slope, curve_intercept, last_computed_at FROM confidence_calibrations WHERE org_id = $1 ORDER BY approach_label
+`
+
+func (q *Queries) ListConfidenceCalibrations(ctx context.Context, orgID string) ([]ConfidenceCalibration, error) {
+	rows, err := q.db.Query(ctx, listConfidenceCalibrations, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ConfidenceCalibration
+	for rows.Next() {
+		var i ConfidenceCalibration
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.ApproachLabel,
+			&i.AcceptRate,
+			&i.SampleSize,
+			&i.CurveSlope,
+			&i.CurveIntercept,
+			&i.LastComputedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listDeadLetterFailureSamples = `-- name: ListDeadLetterFailureSamples :many
@@ -3362,6 +3502,32 @@ func (q *Queries) ListOrgRoles(ctx context.Context, orgID string) ([]ListOrgRole
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrgsWithFeedback = `-- name: ListOrgsWithFeedback :many
+SELECT DISTINCT org_id FROM recovery_feedback
+WHERE created_at >= now() - make_interval(days => $1::int)
+LIMIT 500
+`
+
+func (q *Queries) ListOrgsWithFeedback(ctx context.Context, windowDays int32) ([]string, error) {
+	rows, err := q.db.Query(ctx, listOrgsWithFeedback, windowDays)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var org_id string
+		if err := rows.Scan(&org_id); err != nil {
+			return nil, err
+		}
+		items = append(items, org_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -5541,6 +5707,38 @@ func (q *Queries) UpdateRunStatusCAS(ctx context.Context, arg UpdateRunStatusCAS
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const upsertConfidenceCalibration = `-- name: UpsertConfidenceCalibration :exec
+INSERT INTO confidence_calibrations (id, org_id, approach_label, accept_rate, sample_size, curve_slope, curve_intercept, last_computed_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+ON CONFLICT (org_id, approach_label) DO UPDATE SET
+  accept_rate = EXCLUDED.accept_rate, sample_size = EXCLUDED.sample_size,
+  curve_slope = EXCLUDED.curve_slope, curve_intercept = EXCLUDED.curve_intercept,
+  last_computed_at = now()
+`
+
+type UpsertConfidenceCalibrationParams struct {
+	ID             string
+	OrgID          string
+	ApproachLabel  string
+	AcceptRate     float32
+	SampleSize     int32
+	CurveSlope     float32
+	CurveIntercept float32
+}
+
+func (q *Queries) UpsertConfidenceCalibration(ctx context.Context, arg UpsertConfidenceCalibrationParams) error {
+	_, err := q.db.Exec(ctx, upsertConfidenceCalibration,
+		arg.ID,
+		arg.OrgID,
+		arg.ApproachLabel,
+		arg.AcceptRate,
+		arg.SampleSize,
+		arg.CurveSlope,
+		arg.CurveIntercept,
+	)
+	return err
 }
 
 const upsertMcpToolDescriptor = `-- name: UpsertMcpToolDescriptor :exec

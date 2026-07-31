@@ -1250,3 +1250,36 @@ WHERE id = $1 AND org_id = $2;
 SELECT id FROM dead_letters
 WHERE org_id = $1 AND replay_claimed_at IS NOT NULL
 ORDER BY created_at DESC LIMIT 50;
+
+-- name: InsertRecoveryFeedback :exec
+INSERT INTO recovery_feedback (id, org_id, user_id, dead_letter_id, workflow_id,
+  suggestion_mode, approach_label, accepted, raw_confidence, comment, eval_consent)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
+
+-- name: ListCalibrationSamples :many
+SELECT raw_confidence, accepted FROM recovery_feedback
+WHERE org_id = $1 AND approach_label = $2 AND raw_confidence IS NOT NULL
+  AND created_at >= now() - make_interval(days => sqlc.arg(window_days)::int)
+ORDER BY created_at ASC
+LIMIT 5000;
+
+-- name: ListCalibratableApproaches :many
+SELECT DISTINCT approach_label FROM recovery_feedback
+WHERE org_id = $1 AND raw_confidence IS NOT NULL
+  AND created_at >= now() - make_interval(days => sqlc.arg(window_days)::int);
+
+-- name: UpsertConfidenceCalibration :exec
+INSERT INTO confidence_calibrations (id, org_id, approach_label, accept_rate, sample_size, curve_slope, curve_intercept, last_computed_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+ON CONFLICT (org_id, approach_label) DO UPDATE SET
+  accept_rate = EXCLUDED.accept_rate, sample_size = EXCLUDED.sample_size,
+  curve_slope = EXCLUDED.curve_slope, curve_intercept = EXCLUDED.curve_intercept,
+  last_computed_at = now();
+
+-- name: ListConfidenceCalibrations :many
+SELECT * FROM confidence_calibrations WHERE org_id = $1 ORDER BY approach_label;
+
+-- name: ListOrgsWithFeedback :many
+SELECT DISTINCT org_id FROM recovery_feedback
+WHERE created_at >= now() - make_interval(days => sqlc.arg(window_days)::int)
+LIMIT 500;

@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/johnny4young/janusly/go/internal/engine"
 )
 
 // The evidence-gated playbook loop: draft from a fresh sandbox, manual
@@ -248,5 +250,71 @@ func TestRecoveryDrillOutcomeRoutes(t *testing.T) {
 	// Unknown dead letter → 404.
 	if res = h.call("GET", "/recovery/drills/outcome?deadLetterId=dl-fantasma", nil, ""); res.status != 404 {
 		t.Fatalf("unknown outcome: %d", res.status)
+	}
+}
+
+// The feedback → sweep → curve loop, with the org toggle honored.
+func TestCalibrationLoop(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	ctx := t.Context()
+
+	// 24 labeled decisions: confident suggestions mostly accepted.
+	for i := 0; i < 24; i++ {
+		confidence := int32(25)
+		accepted := i%4 == 0
+		if i >= 12 {
+			confidence, accepted = 90, i%6 != 0
+		}
+		res := h.call("POST", "/recovery/feedback", map[string]any{
+			"deadLetterId": fmt.Sprintf("dl-fb-%d", i), "workflowId": "wf-fb",
+			"approachLabel": "add_retry", "accepted": accepted,
+			"rawConfidence": confidence,
+		}, "")
+		if res.status != 200 {
+			t.Fatalf("feedback %d: %d %+v", i, res.status, res.body)
+		}
+	}
+	// Invalid label refuses.
+	if res := h.call("POST", "/recovery/feedback", map[string]any{
+		"deadLetterId": "dl-x", "workflowId": "wf-fb",
+		"approachLabel": "magia", "accepted": true,
+	}, ""); res.status != 400 {
+		t.Fatalf("bad label: %d", res.status)
+	}
+
+	// The sweep fits and stores one curve for the approach.
+	sweeper := engine.New(pool)
+	if written := sweeper.RunCalibrationSweep(ctx); written < 1 {
+		t.Fatalf("sweep must write a curve: %d", written)
+	}
+	res := h.call("GET", "/recovery/calibrations", nil, "")
+	if res.status != 200 {
+		t.Fatalf("list: %d", res.status)
+	}
+	curves := res.body["calibrations"].([]any)
+	if len(curves) != 1 {
+		t.Fatalf("one curve: %+v", curves)
+	}
+	curve := curves[0].(map[string]any)
+	if curve["approachLabel"] != "add_retry" || curve["curveSlope"].(float64) <= 0 ||
+		curve["sampleSize"].(float64) != 24 {
+		t.Fatalf("curve shape: %+v", curve)
+	}
+
+	// The org toggle off → the sweep abstains for this org.
+	if _, err := pool.Exec(ctx, `INSERT INTO org_configs (id, org_id, key, value_json, category, description, value_type)
+		VALUES ($1, $2, 'ai.confidenceCalibrationEnabled', 'false', 'ai', 'test', 'boolean')`,
+		h.org+"-caltoggle", h.org); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM confidence_calibrations WHERE org_id = $1`, h.org); err != nil {
+		t.Fatal(err)
+	}
+	_ = sweeper.RunCalibrationSweep(ctx)
+	var remaining int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM confidence_calibrations WHERE org_id = $1`, h.org).Scan(&remaining)
+	if remaining != 0 {
+		t.Fatalf("toggle off must abstain: %d", remaining)
 	}
 }
