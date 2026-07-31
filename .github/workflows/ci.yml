@@ -171,6 +171,45 @@ jobs:
       - name: Integration lanes (real Postgres 15)
         run: pnpm test:integration
 
+  # Go pilot lane — rides the SAME triggers as every other job (a private
+  # repo bills per push, so the lane adds zero new pushes). No Compose in
+  # the workflow YAML per the repo rule: the job talks to a plain service
+  # container and runs the pilot's own make ci (sqlc + contract drift
+  # guards, build, lint, unit + integration -race, semantic parity).
+  test_go:
+    name: Go pilot (make ci)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: janusly
+          POSTGRES_PASSWORD: janusly-go-local
+          POSTGRES_DB: janusly_go
+        ports:
+          - 4632:5432
+        options: >-
+          --health-cmd "pg_isready -U janusly -d janusly_go"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+      - name: Install golangci-lint
+        run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$(go env GOPATH)/bin" v2.12.2
+      - name: Migrate (goose)
+        working-directory: go
+        run: go run ./cmd/api migrate
+        env:
+          JANUSLY_GO_DATABASE_URL: postgres://janusly:janusly-go-local@127.0.0.1:4632/janusly_go
+      - name: make ci
+        working-directory: go
+        run: make ci
+        env:
+          JANUSLY_GO_DATABASE_URL: postgres://janusly:janusly-go-local@127.0.0.1:4632/janusly_go
+
   dep_audit:
     name: Dependency audit
     runs-on: ubuntu-latest

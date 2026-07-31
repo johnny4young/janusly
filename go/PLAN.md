@@ -762,6 +762,8 @@ el chat publicado.
 | 2026-07-31 | T-093 hallazgos del arnés | Dos trampas del PROPIO test, no del motor: un literal sin `Edges: []` marshala `null` y el snapshot no re-interpreta (falla instantánea no-reintentable — mismo hallazgo que T-083 desde otro ángulo); y el revive-in-place de un replay contra un target aún muerto acuña dead letters NUEVAS abiertas — el assert de claims debe mirar la cohorte original |
 | 2026-07-31 | T-094 matriz de bombas | Los 5 loops de fondo revisados y probados con gemelo simultáneo: workers (escalera de claim — T-093), bomba de campañas (claim atómico de despacho — T-093), timers (wake-up en la fila — T-093), reaper (el CAS de FailNode elige un ganador — 2 reapers sobre 5 varados = 5 DLQs exactas), retención (DELETEs idempotentes — 2 barridos suman 300/300 sin doble conteo). NINGUNO necesita lease a escala pilot; el RUNBOOK gana la sección HA con la matriz completa y el punto de corte exacto (advisory lock por loop) si el negocio lo pide |
 | 2026-07-31 | T-096 contrato v1 | Manifiesto puro `internal/contract` (20 rutas /v1 con shapes de request/response; el generador JAMÁS importa el server — paridad con la regla V1_CONTRACT_ROUTES) → `cmd/contract` renderiza determinista a `contract/openapi.json` (OpenAPI 3.1) con los envelopes de éxito y error documentados UNA vez en components y referenciados por cada operación. Guard de deriva en `make ci` probado de verdad: manifiesto tocado sin regenerar → diff → falla |
+| 2026-07-31 | T-097 lane CI | Job `test_go` en `.github/workflows/ci.yml` sobre los MISMOS triggers (cero pushes extra): service container `pgvector/pgvector:pg18` directo (sin Compose en el YAML — regla del repo), setup-go con cache por go.sum, golangci-lint 2.12.2 anclado, migrate goose y `make ci` (drift sqlc + drift contrato + build + lint + suite -race + paridad). Validado localmente con el MISMO comando; el verde en push real queda para el próximo batch de push del usuario (repo privada — cada push cuesta) |
+| 2026-07-31 | T-097 hallazgo operativo | `make ci` NO puede correr concurrente con `make soak` sobre el mismo DB dev: el binario del soak (poll 50ms) roba claims de los tests de engine — 7 fallos ambientales, cero regresiones. En CI no aplica (DB efímero por job); localmente, un lane a la vez |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -1062,7 +1064,7 @@ día que exista el chokepoint (T-079)**.
 | T-094 | Singletons con lease o prueba de seguridad concurrente por bomba (campañas/retención/timers) | HA | P1 | done |
 | T-095 | Soak: `make soak` (k6 sostenido ≥1h, vigilancia de RSS/goroutines, reporte) | HA | P1 | partial |
 | T-096 | Manifiesto de contrato v1 + OpenAPI generado + guard de deriva en `make ci` | contrato | P1 | todo |
-| T-097 | Lane CI de GitHub Actions para `go/` (build+lint+test+parity con Postgres de servicio) | contrato | P2 | todo |
+| T-097 | Lane CI de GitHub Actions para `go/` (build+lint+test+parity con Postgres de servicio) | contrato | P2 | done |
 | T-098 | Informe de ola 3 (REPORT-W3.md) + corte de divergencias | cierre | P0 | todo |
 
 ### Cards — ola 3

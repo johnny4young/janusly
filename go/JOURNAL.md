@@ -1344,3 +1344,10 @@ producción necesita saber — de lo ya resuelto o informativo.
 - 20 rutas v1 en un manifiesto sin efectos, renderizadas deterministas a
   OpenAPI 3.1 con el envelope documentado una vez; el guard de deriva se
   probó tocando el manifiesto sin regenerar — y falló como debía.
+
+## 2026-07-31 — el lane Go en el CI real (T-097)
+
+- test_go monta en los triggers existentes con service container directo
+  y make ci completo. Y una lección local: el soak y la suite no
+  comparten DB — el binario del soak roba claims de los tests. En CI el
+  DB es efímero por job; en local, un lane a la vez.
