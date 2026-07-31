@@ -2,7 +2,7 @@ SHELL := /bin/bash
 DB_URL ?= postgres://janusly:janusly-go-local@127.0.0.1:4632/janusly_go
 PG_CONTAINER := janusly-go-pilot-postgres-1
 
-.PHONY: db-up db-down migrate schema-dump generate lint test run build parity ci test-pg15 bench fuzz
+.PHONY: db-up db-down migrate schema-dump generate lint test run build parity ci test-pg15 bench fuzz contract
 
 db-up:
 	docker compose -f docker-compose.yml up -d --wait
@@ -51,10 +51,16 @@ parity:
 # The one-command truth lane: everything a reviewer needs to trust the
 # branch, failing fast with an honest exit code. Assumes the pilot DB is up
 # (make db-up + make migrate once per checkout).
+contract:
+	go run ./cmd/contract
+
 ci:
 	@echo "== generate (sqlc drift check) =="
 	$(MAKE) generate
 	@git diff --quiet -- internal/store || (echo "sqlc output drifted: run make generate and commit" && exit 1)
+	@echo "== contract (drift check) =="
+	$(MAKE) contract
+	@git diff --quiet -- contract/ || (echo "openapi contract drifted: run make contract and commit" && exit 1)
 	@echo "== build =="
 	$(MAKE) build
 	@echo "== lint =="
