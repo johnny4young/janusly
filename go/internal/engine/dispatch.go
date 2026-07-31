@@ -19,8 +19,10 @@ import (
 	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/executors"
 	"github.com/johnny4young/janusly/go/internal/grammar"
+	"github.com/johnny4young/janusly/go/internal/mcpclient"
 	"github.com/johnny4young/janusly/go/internal/memory"
 	"github.com/johnny4young/janusly/go/internal/prompts"
+	"github.com/johnny4young/janusly/go/internal/ratelimit"
 	"github.com/johnny4young/janusly/go/internal/store"
 )
 
@@ -29,6 +31,7 @@ type Dispatcher struct {
 	engine     *Engine
 	registry   map[string]executors.Func
 	renderOpts grammar.RenderOptions
+	mcp        *mcpclient.Client
 }
 
 // NewDispatcher wires the executor registry over this engine. Env access
@@ -38,7 +41,10 @@ func (e *Engine) NewDispatcher(opts grammar.RenderOptions) *Dispatcher {
 	if opts.LookupEnv == nil {
 		opts.LookupEnv = os.LookupEnv
 	}
-	return &Dispatcher{engine: e, registry: executors.Registry(), renderOpts: opts}
+	return &Dispatcher{
+		engine: e, registry: executors.Registry(), renderOpts: opts,
+		mcp: mcpclient.New(e.pool, ratelimit.New(e.pool, ratelimit.Hooks{})),
+	}
 }
 
 // Execute implements ExecuteFunc: the output it returns is what the engine
@@ -112,9 +118,26 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 	if node.Type == "tool" || node.Type == "agent" || node.Type == "multi_agent" {
 		memoryDeps = d.buildMemoryDeps(ctx, claim, wf.ID)
 	}
+	var mcpDeps *executors.McpDeps
+	if node.Type == "mcp_tool" {
+		dryRun := false
+		if run, err := q.GetRunExecution(ctx, claim.RunID); err == nil && run.ReplayMode.Valid {
+			dryRun = run.ReplayMode.String == "validation"
+		}
+		mcpDeps = &executors.McpDeps{
+			Execute: func(execCtx context.Context, mcpCall executors.McpCall) executors.McpEnvelope {
+				return d.mcp.Execute(execCtx, mcpclient.Call{
+					OrgID: claim.OrgID, ConnectionAlias: mcpCall.ConnectionAlias,
+					ToolName: mcpCall.ToolName, Input: mcpCall.Input,
+					TimeoutMs: mcpCall.TimeoutMs, DryRun: dryRun,
+					RunID: claim.RunID, NodeID: claim.NodeID, WorkflowID: wf.ID,
+				})
+			},
+		}
+	}
 	output, execErr := execute(ctx, executors.Input{
 		RunID: claim.RunID, NodeID: claim.NodeID,
-		Config: renderedConfig, Context: runContext, HTTPBounds: httpBounds, AI: aiDeps, Memory: memoryDeps,
+		Config: renderedConfig, Context: runContext, HTTPBounds: httpBounds, AI: aiDeps, Memory: memoryDeps, Mcp: mcpDeps,
 		Emit: func(eventType string, payload map[string]any) string {
 			eventAt := eventNow()
 			raw, err := json.Marshal(payload)

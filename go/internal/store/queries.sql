@@ -998,3 +998,24 @@ WHERE org_id = $1 AND id = $2;
 
 -- name: GetPromptRowByID :one
 SELECT * FROM prompts WHERE org_id = $1 AND id = $2;
+
+-- name: GetMcpConnectionByAlias :one
+SELECT * FROM mcp_connections WHERE org_id = $1 AND alias = $2;
+
+-- name: InsertMcpConnection :exec
+INSERT INTO mcp_connections (id, org_id, alias, transport, command, args, url, env_refs, enabled, status, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
+
+-- name: GetMcpToolDescriptor :one
+SELECT * FROM mcp_tool_descriptors WHERE connection_id = $1 AND name = $2;
+
+-- name: UpsertMcpToolDescriptor :exec
+INSERT INTO mcp_tool_descriptors (id, connection_id, name, description, input_schema, write_side, enabled, rate_limit_per_min)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+ON CONFLICT (connection_id, name) DO UPDATE SET
+  description = EXCLUDED.description,
+  input_schema = EXCLUDED.input_schema,
+  updated_at = now();
+
+-- name: ListMcpToolDescriptorsByConnection :many
+SELECT * FROM mcp_tool_descriptors WHERE connection_id = $1 ORDER BY name LIMIT 200;

@@ -464,6 +464,21 @@ func consumeStreamToPreview(body io.Reader, previewCap, maxBytes int) (string, i
 	}
 }
 
+// NewPinnedHTTPClient validates rawURL under the same SSRF policy as the
+// http node and returns an *http.Client whose transport dials ONLY the
+// pinned, validated address (DNS-rebinding defense). Callers hand this
+// client to SDKs (the MCP URL transports) so every fetch/redirect the SDK
+// makes keeps the validated pin. AllowPrivate mode returns a plain client
+// (the operator opted out of the posture).
+func NewPinnedHTTPClient(ctx context.Context, rawURL string, opts HTTPOptions) (*http.Client, error) {
+	executor := &httpExecutor{opts: normalizeHTTPOptions(opts)}
+	pins := &pinnedDialer{byHost: map[string]net.IP{}}
+	if _, err := executor.validate(ctx, rawURL, pins); err != nil {
+		return nil, err
+	}
+	return &http.Client{Transport: executor.newTransport(pins)}, nil
+}
+
 // newTransport builds the per-request transport with the pinned dialer
 // (skipped when private targets are allowed — dev/test loopback).
 func (e *httpExecutor) newTransport(pins *pinnedDialer) *http.Transport {

@@ -40,6 +40,8 @@ type Input struct {
 	// Memory carries the org-scoped memory seams for the vector tools;
 	// nil behaves as consent-off (search empty, upsert memory_disabled).
 	Memory *MemoryDeps
+	// Mcp carries the dispatcher-built MCP client seam (mcp_tool nodes).
+	Mcp *McpDeps
 }
 
 // MemoryDeps are thin closures over the memory substrate — the vector
@@ -85,6 +87,7 @@ func Registry() map[string]Func {
 		"loop":             executeLoop,
 		"join":             executeJoin,
 		"webhook_received": executeWebhookReceived,
+		"mcp_tool":         NewMcpToolExecutor(),
 	}
 }
 

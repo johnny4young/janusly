@@ -896,6 +896,67 @@ func (q *Queries) GetLatestWorkflowVersion(ctx context.Context, arg GetLatestWor
 	return i, err
 }
 
+const getMcpConnectionByAlias = `-- name: GetMcpConnectionByAlias :one
+SELECT id, org_id, alias, transport, command, args, url, env_refs, enabled, status, status_reason, expose_to_ai, last_discovery_at, created_by, created_at, updated_at FROM mcp_connections WHERE org_id = $1 AND alias = $2
+`
+
+type GetMcpConnectionByAliasParams struct {
+	OrgID string
+	Alias string
+}
+
+func (q *Queries) GetMcpConnectionByAlias(ctx context.Context, arg GetMcpConnectionByAliasParams) (McpConnection, error) {
+	row := q.db.QueryRow(ctx, getMcpConnectionByAlias, arg.OrgID, arg.Alias)
+	var i McpConnection
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Alias,
+		&i.Transport,
+		&i.Command,
+		&i.Args,
+		&i.Url,
+		&i.EnvRefs,
+		&i.Enabled,
+		&i.Status,
+		&i.StatusReason,
+		&i.ExposeToAi,
+		&i.LastDiscoveryAt,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getMcpToolDescriptor = `-- name: GetMcpToolDescriptor :one
+SELECT id, connection_id, name, description, input_schema, write_side, enabled, rate_limit_per_min, expose_to_ai, created_at, updated_at FROM mcp_tool_descriptors WHERE connection_id = $1 AND name = $2
+`
+
+type GetMcpToolDescriptorParams struct {
+	ConnectionID string
+	Name         string
+}
+
+func (q *Queries) GetMcpToolDescriptor(ctx context.Context, arg GetMcpToolDescriptorParams) (McpToolDescriptor, error) {
+	row := q.db.QueryRow(ctx, getMcpToolDescriptor, arg.ConnectionID, arg.Name)
+	var i McpToolDescriptor
+	err := row.Scan(
+		&i.ID,
+		&i.ConnectionID,
+		&i.Name,
+		&i.Description,
+		&i.InputSchema,
+		&i.WriteSide,
+		&i.Enabled,
+		&i.RateLimitPerMin,
+		&i.ExposeToAi,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getOrgConfigValue = `-- name: GetOrgConfigValue :one
 SELECT value_json FROM org_configs WHERE org_id = $1 AND key = $2
 `
@@ -1480,6 +1541,42 @@ func (q *Queries) InsertInvitation(ctx context.Context, arg InsertInvitationPara
 		arg.Email,
 		arg.Role,
 		arg.InvitedBy,
+	)
+	return err
+}
+
+const insertMcpConnection = `-- name: InsertMcpConnection :exec
+INSERT INTO mcp_connections (id, org_id, alias, transport, command, args, url, env_refs, enabled, status, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+`
+
+type InsertMcpConnectionParams struct {
+	ID        string
+	OrgID     string
+	Alias     string
+	Transport string
+	Command   pgtype.Text
+	Args      json.RawMessage
+	Url       pgtype.Text
+	EnvRefs   json.RawMessage
+	Enabled   bool
+	Status    string
+	CreatedBy pgtype.Text
+}
+
+func (q *Queries) InsertMcpConnection(ctx context.Context, arg InsertMcpConnectionParams) error {
+	_, err := q.db.Exec(ctx, insertMcpConnection,
+		arg.ID,
+		arg.OrgID,
+		arg.Alias,
+		arg.Transport,
+		arg.Command,
+		arg.Args,
+		arg.Url,
+		arg.EnvRefs,
+		arg.Enabled,
+		arg.Status,
+		arg.CreatedBy,
 	)
 	return err
 }
@@ -2230,6 +2327,42 @@ func (q *Queries) ListFailedRunNodeSamples(ctx context.Context, arg ListFailedRu
 			&i.ErrorJson,
 			&i.FinishedAt,
 			&i.InputJson,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMcpToolDescriptorsByConnection = `-- name: ListMcpToolDescriptorsByConnection :many
+SELECT id, connection_id, name, description, input_schema, write_side, enabled, rate_limit_per_min, expose_to_ai, created_at, updated_at FROM mcp_tool_descriptors WHERE connection_id = $1 ORDER BY name LIMIT 200
+`
+
+func (q *Queries) ListMcpToolDescriptorsByConnection(ctx context.Context, connectionID string) ([]McpToolDescriptor, error) {
+	rows, err := q.db.Query(ctx, listMcpToolDescriptorsByConnection, connectionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []McpToolDescriptor
+	for rows.Next() {
+		var i McpToolDescriptor
+		if err := rows.Scan(
+			&i.ID,
+			&i.ConnectionID,
+			&i.Name,
+			&i.Description,
+			&i.InputSchema,
+			&i.WriteSide,
+			&i.Enabled,
+			&i.RateLimitPerMin,
+			&i.ExposeToAi,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -4184,6 +4317,40 @@ func (q *Queries) UpdateRunStatusCAS(ctx context.Context, arg UpdateRunStatusCAS
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const upsertMcpToolDescriptor = `-- name: UpsertMcpToolDescriptor :exec
+INSERT INTO mcp_tool_descriptors (id, connection_id, name, description, input_schema, write_side, enabled, rate_limit_per_min)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+ON CONFLICT (connection_id, name) DO UPDATE SET
+  description = EXCLUDED.description,
+  input_schema = EXCLUDED.input_schema,
+  updated_at = now()
+`
+
+type UpsertMcpToolDescriptorParams struct {
+	ID              string
+	ConnectionID    string
+	Name            string
+	Description     pgtype.Text
+	InputSchema     json.RawMessage
+	WriteSide       bool
+	Enabled         bool
+	RateLimitPerMin pgtype.Int4
+}
+
+func (q *Queries) UpsertMcpToolDescriptor(ctx context.Context, arg UpsertMcpToolDescriptorParams) error {
+	_, err := q.db.Exec(ctx, upsertMcpToolDescriptor,
+		arg.ID,
+		arg.ConnectionID,
+		arg.Name,
+		arg.Description,
+		arg.InputSchema,
+		arg.WriteSide,
+		arg.Enabled,
+		arg.RateLimitPerMin,
+	)
+	return err
 }
 
 const upsertOrgConfigValue = `-- name: UpsertOrgConfigValue :exec
