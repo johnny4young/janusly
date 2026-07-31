@@ -43,10 +43,7 @@ func (e *Engine) CompleteNode(ctx context.Context, claim ClaimedNode, output any
 	if err != nil {
 		return fmt.Errorf("marshal output: %w", err)
 	}
-	stateJSON, err := json.Marshal(map[string]any{"output": output})
-	if err != nil {
-		return fmt.Errorf("marshal state: %w", err)
-	}
+	stateJSON := safePersist(map[string]any{"output": output}, stateJSONMaxBytes)
 
 	var eventPayload map[string]any
 	if len(outputJSON) <= nodeSucceededOutputMaxBytes {
@@ -56,16 +53,13 @@ func (e *Engine) CompleteNode(ctx context.Context, claim ClaimedNode, output any
 			"outputBytes": len(outputJSON), "outputTruncated": true, "attempt": claim.Attempt,
 		}
 	}
-	eventJSON, err := json.Marshal(eventPayload)
-	if err != nil {
-		return fmt.Errorf("marshal event payload: %w", err)
-	}
+	eventJSON := safePersist(eventPayload, defaultPersistMaxBytes)
 
 	finishedAt := time.Now().UTC()
 	return e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries) error {
 		completed, err := q.CompleteRunNode(ctx, store.CompleteRunNodeParams{
 			RunID: claim.RunID, NodeID: claim.NodeID,
-			StateJson:  boundPayload(stateJSON, stateJSONMaxBytes),
+			StateJson:  stateJSON,
 			FinishedAt: &finishedAt,
 		})
 		if err != nil {
@@ -85,27 +79,84 @@ func (e *Engine) CompleteNode(ctx context.Context, claim ClaimedNode, output any
 	})
 }
 
-// FailNode commits a terminal execution failure: node failed with its error,
-// the node.failed event, and the run flipped to failed. Deliberately minimal
-// ahead of the retry ladder and dead-letter capture, which extend this same
-// transaction later.
-func (e *Engine) FailNode(ctx context.Context, claim ClaimedNode, execErr error) error {
-	errorJSON, err := json.Marshal(map[string]any{"message": execErr.Error()})
-	if err != nil {
-		return fmt.Errorf("marshal error: %w", err)
+// RetryOrFail is the worker's failure decision, mirroring the reference's
+// catch block: under the node's declared retry policy an eligible failure
+// requeues the node with attempt+1 and a wake-up at the computed backoff;
+// anything else commits the terminal failure with its dead-letter capture.
+func (e *Engine) RetryOrFail(ctx context.Context, claim ClaimedNode, node domain.Node, execErr error) error {
+	serr := serializeError(execErr)
+	policy := parseRetryPolicy(node.Config)
+	maxAttempts := 1
+	if policy != nil && policy.MaxAttempts > 0 {
+		maxAttempts = policy.MaxAttempts
 	}
+	if int(claim.Attempt) >= maxAttempts || !shouldRetry(serr, policy) {
+		return e.FailNode(ctx, claim, execErr)
+	}
+
+	nextAttempt := claim.Attempt + 1
+	delayMs := computeRetryDelay(int(nextAttempt), policy, e.randFloat)
+	wakeAt := e.now().UTC().Add(time.Duration(delayMs) * time.Millisecond)
 	eventJSON, err := json.Marshal(map[string]any{
-		"error": map[string]any{"message": execErr.Error()}, "attempt": claim.Attempt,
+		"attempt": nextAttempt, "delayMs": delayMs, "error": serr,
 	})
+	if err != nil {
+		return fmt.Errorf("marshal retry payload: %w", err)
+	}
+	retriedAt := time.Now().UTC()
+	return e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries) error {
+		requeued, err := q.RequeueRunNodeForRetry(ctx, store.RequeueRunNodeForRetryParams{
+			RunID: claim.RunID, NodeID: claim.NodeID,
+			Attempt: pgtype.Int4{Int32: nextAttempt, Valid: true},
+		})
+		if err != nil {
+			return fmt.Errorf("requeue for retry: %w", err)
+		}
+		if requeued == 0 {
+			return errSkipCommit
+		}
+		// The wake-up rides the same transaction: the anti-join on the claim
+		// keeps the row unclaimable until the backoff clock passes.
+		if err := q.UpsertWakeup(ctx, store.UpsertWakeupParams{
+			RunNodeID: claim.RowID, WakeAt: wakeAt, Reason: "retry",
+		}); err != nil {
+			return fmt.Errorf("schedule retry wakeup: %w", err)
+		}
+		if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
+			ID: e.newID(), RunID: claim.RunID,
+			NodeID: pgtype.Text{String: claim.NodeID, Valid: true},
+			Type:   "node.retry", Payload: eventJSON, CreatedAt: &retriedAt,
+		}); err != nil {
+			return fmt.Errorf("insert node.retry: %w", err)
+		}
+		return nil
+	})
+}
+
+// FailNode commits the terminal execution failure atomically: the node CAS
+// to failed, the dead-letter row carrying the exact workflow/node/error
+// snapshots for replay, the node.failed event, and the run flipped to
+// failed — one transaction, so a half-failed run can never strand.
+func (e *Engine) FailNode(ctx context.Context, claim ClaimedNode, execErr error) error {
+	serr := serializeError(execErr)
+	eventJSON, err := json.Marshal(map[string]any{"error": serr, "attempt": claim.Attempt})
 	if err != nil {
 		return fmt.Errorf("marshal event payload: %w", err)
 	}
 
 	failedAt := time.Now().UTC()
 	return e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries) error {
+		run, err := q.GetRunExecution(ctx, claim.RunID)
+		if err != nil {
+			return fmt.Errorf("read run: %w", err)
+		}
+		if run.Status != "running" && run.Status != "failed" {
+			// Cancellation landed first; the node keeps its state elsewhere.
+			return errSkipCommit
+		}
 		failed, err := q.FailRunNode(ctx, store.FailRunNodeParams{
 			RunID: claim.RunID, NodeID: claim.NodeID,
-			ErrorJson:  boundPayload(errorJSON, stateJSONMaxBytes),
+			ErrorJson:  safePersist(serr, deadLetterErrorMaxBytes),
 			FinishedAt: &failedAt,
 		})
 		if err != nil {
@@ -114,6 +165,11 @@ func (e *Engine) FailNode(ctx context.Context, claim ClaimedNode, execErr error)
 		if failed == 0 {
 			return errSkipCommit
 		}
+
+		if err := e.insertDeadLetter(ctx, q, claim, run, serr, failedAt); err != nil {
+			return err
+		}
+
 		if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
 			ID: e.newID(), RunID: claim.RunID,
 			NodeID: pgtype.Text{String: claim.NodeID, Valid: true},
@@ -122,6 +178,9 @@ func (e *Engine) FailNode(ctx context.Context, claim ClaimedNode, execErr error)
 			return fmt.Errorf("insert node.failed: %w", err)
 		}
 
+		if run.Status == "failed" {
+			return nil
+		}
 		statuses, err := e.nodeStatuses(ctx, q, claim.RunID)
 		if err != nil {
 			return err
@@ -135,6 +194,38 @@ func (e *Engine) FailNode(ctx context.Context, claim ClaimedNode, execErr error)
 		return e.flipRunTerminal(ctx, q, claim.RunID, "failed",
 			map[string]any{"failedNodes": failedNodes}, failedAt, nil)
 	})
+}
+
+// insertDeadLetter captures the exact failed job for operator replay: the
+// full workflow and node snapshots (key-redacted, never size-truncated —
+// replay needs the exact JSON) plus the bounded error.
+func (e *Engine) insertDeadLetter(ctx context.Context, q *store.Queries, claim ClaimedNode, run store.GetRunExecutionRow, serr map[string]any, failedAt time.Time) error {
+	var envelope struct {
+		Workflow any `json:"workflow"`
+	}
+	_ = json.Unmarshal(run.InputJson, &envelope)
+	workflowJSON := safePersist(envelope.Workflow, 0)
+
+	var nodeSnapshot any
+	if wf, _, err := workflowFromRunInput(run.InputJson); err == nil {
+		for i := range wf.Nodes {
+			if wf.Nodes[i].ID == claim.NodeID {
+				raw, _ := json.Marshal(wf.Nodes[i])
+				_ = json.Unmarshal(raw, &nodeSnapshot)
+				break
+			}
+		}
+	}
+	if err := q.InsertDeadLetter(ctx, store.InsertDeadLetterParams{
+		ID: e.newID(), OrgID: run.OrgID, RunID: claim.RunID, NodeID: claim.NodeID,
+		Attempt:      claim.Attempt,
+		WorkflowJson: workflowJSON,
+		NodeJson:     safePersist(nodeSnapshot, 0),
+		ErrorJson:    safePersist(serr, deadLetterErrorMaxBytes),
+	}); err != nil {
+		return fmt.Errorf("insert dead letter: %w", err)
+	}
+	return nil
 }
 
 // errSkipCommit aborts the transaction without reporting an error to the

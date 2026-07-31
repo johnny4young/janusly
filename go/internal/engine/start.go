@@ -8,7 +8,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -25,14 +27,19 @@ type Engine struct {
 	// wrapTx lets tests interpose on the transaction's statements to prove
 	// atomicity; production keeps the identity wrapper.
 	wrapTx func(store.DBTX) store.DBTX
+	// now and randFloat are seams for deterministic retry-scheduling tests.
+	now       func() time.Time
+	randFloat func() float64
 }
 
 // New builds an Engine over the given pool.
 func New(pool *pgxpool.Pool) *Engine {
 	return &Engine{
-		pool:   pool,
-		newID:  uuid.NewString,
-		wrapTx: func(tx store.DBTX) store.DBTX { return tx },
+		pool:      pool,
+		newID:     uuid.NewString,
+		wrapTx:    func(tx store.DBTX) store.DBTX { return tx },
+		now:       time.Now,
+		randFloat: rand.Float64,
 	}
 }
 

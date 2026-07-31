@@ -4,7 +4,10 @@
 // RenderTemplateWithRedactions.
 package grammar
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // RedactedPlaceholder is the literal that replaces matched values.
 const RedactedPlaceholder = "[redacted]"
@@ -45,4 +48,44 @@ func RedactString(s string, redactedValues []string) string {
 		s = strings.ReplaceAll(s, secret, RedactedPlaceholder)
 	}
 	return s
+}
+
+// sensitiveKeyPattern is the reference's closed list of secret-shaped object
+// keys (packages/shared/src/sensitive-keys.ts) — secret*/password*/token*
+// with separator or camel-case continuation, api key, authorization, cookie,
+// x-api-key, client secret, private key.
+var sensitiveKeyPattern = regexp.MustCompile(
+	`^(?i:secret|password|token)((?-i:$|[_-].*|[A-Z].*))$|^(?i)(api[_-]?key|authorization|cookie|x-api-key|client[_-]?secret|private[_-]?key)$`,
+)
+
+// IsSensitiveKey reports whether an object key looks like credential
+// material under the reference pattern.
+func IsSensitiveKey(key string) bool {
+	return sensitiveKeyPattern.MatchString(key)
+}
+
+// RedactSensitiveKeys deep-copies value, replacing the value of every
+// sensitive-shaped key with the redaction placeholder. Arrays recurse;
+// non-container leaves pass through.
+func RedactSensitiveKeys(value any) any {
+	switch v := value.(type) {
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			out[i] = RedactSensitiveKeys(item)
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for key, item := range v {
+			if IsSensitiveKey(key) {
+				out[key] = RedactedPlaceholder
+				continue
+			}
+			out[key] = RedactSensitiveKeys(item)
+		}
+		return out
+	default:
+		return value
+	}
 }

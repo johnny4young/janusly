@@ -50,6 +50,10 @@ WHERE id IN (
   FROM run_nodes rn
   JOIN runs r ON r.id = rn.run_id
   WHERE rn.status = 'queued' AND r.status = 'running'
+    AND NOT EXISTS (
+      SELECT 1 FROM go_pilot_wakeups w
+      WHERE w.run_node_id = rn.id AND w.wake_at > now()
+    )
   ORDER BY rn.id
   LIMIT $1
   FOR UPDATE OF rn SKIP LOCKED
@@ -288,18 +292,19 @@ func (q *Queries) GetRun(ctx context.Context, arg GetRunParams) (GetRunRow, erro
 }
 
 const getRunExecution = `-- name: GetRunExecution :one
-SELECT status, input_json FROM runs WHERE id = $1
+SELECT status, org_id, input_json FROM runs WHERE id = $1
 `
 
 type GetRunExecutionRow struct {
 	Status    string
+	OrgID     string
 	InputJson json.RawMessage
 }
 
 func (q *Queries) GetRunExecution(ctx context.Context, id string) (GetRunExecutionRow, error) {
 	row := q.db.QueryRow(ctx, getRunExecution, id)
 	var i GetRunExecutionRow
-	err := row.Scan(&i.Status, &i.InputJson)
+	err := row.Scan(&i.Status, &i.OrgID, &i.InputJson)
 	return i, err
 }
 
@@ -945,6 +950,26 @@ func (q *Queries) QueueRunNode(ctx context.Context, arg QueueRunNodeParams) (int
 	return result.RowsAffected(), nil
 }
 
+const requeueRunNodeForRetry = `-- name: RequeueRunNodeForRetry :execrows
+UPDATE run_nodes SET status = 'queued', attempts = $1
+WHERE run_id = $2 AND node_id = $3
+  AND status = 'running'
+`
+
+type RequeueRunNodeForRetryParams struct {
+	Attempt pgtype.Int4
+	RunID   string
+	NodeID  string
+}
+
+func (q *Queries) RequeueRunNodeForRetry(ctx context.Context, arg RequeueRunNodeForRetryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, requeueRunNodeForRetry, arg.Attempt, arg.RunID, arg.NodeID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const skipRunNode = `-- name: SkipRunNode :execrows
 UPDATE run_nodes
 SET status = 'skipped', state_json = $1,
@@ -967,6 +992,22 @@ func (q *Queries) SkipRunNode(ctx context.Context, arg SkipRunNodeParams) (int64
 		arg.RunID,
 		arg.NodeID,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const sweepDueWakeups = `-- name: SweepDueWakeups :execrows
+DELETE FROM go_pilot_wakeups WHERE wake_at <= now()
+`
+
+// Garbage-collects consumed wake-ups. Correctness never depends on this:
+// the claim's anti-join reads wake_at against now(), so a due retry is
+// claimable the moment its clock passes — this just trims rows and nudges
+// idle workers awake.
+func (q *Queries) SweepDueWakeups(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, sweepDueWakeups)
 	if err != nil {
 		return 0, err
 	}

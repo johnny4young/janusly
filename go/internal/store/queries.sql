@@ -88,6 +88,10 @@ WHERE id IN (
   FROM run_nodes rn
   JOIN runs r ON r.id = rn.run_id
   WHERE rn.status = 'queued' AND r.status = 'running'
+    AND NOT EXISTS (
+      SELECT 1 FROM go_pilot_wakeups w
+      WHERE w.run_node_id = rn.id AND w.wake_at > now()
+    )
   ORDER BY rn.id
   LIMIT sqlc.arg(batch_size)
   FOR UPDATE OF rn SKIP LOCKED
@@ -115,7 +119,12 @@ WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
   AND status = 'running';
 
 -- name: GetRunExecution :one
-SELECT status, input_json FROM runs WHERE id = $1;
+SELECT status, org_id, input_json FROM runs WHERE id = $1;
+
+-- name: RequeueRunNodeForRetry :execrows
+UPDATE run_nodes SET status = 'queued', attempts = sqlc.arg(attempt)
+WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
+  AND status = 'running';
 
 -- name: ListRunNodeStatuses :many
 SELECT node_id, status FROM run_nodes WHERE run_id = $1;
@@ -183,6 +192,13 @@ LIMIT $1;
 
 -- name: DeleteWakeup :exec
 DELETE FROM go_pilot_wakeups WHERE run_node_id = $1;
+
+-- Garbage-collects consumed wake-ups. Correctness never depends on this:
+-- the claim's anti-join reads wake_at against now(), so a due retry is
+-- claimable the moment its clock passes — this just trims rows and nudges
+-- idle workers awake.
+-- name: SweepDueWakeups :execrows
+DELETE FROM go_pilot_wakeups WHERE wake_at <= now();
 
 -- name: NotifyWake :exec
 SELECT pg_notify('janusly_go_wake', sqlc.arg(run_id)::text);

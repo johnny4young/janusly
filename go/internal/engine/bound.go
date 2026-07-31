@@ -8,16 +8,53 @@ package engine
 import (
 	"encoding/json"
 	"unicode/utf8"
+
+	"github.com/johnny4young/janusly/go/internal/grammar"
 )
 
-// Caps mirror the reference: node output state at 1 MB, and the succeeded
-// event inlines the output only up to 8 KB (larger outputs keep the event
-// small — the node row already stores them).
+// Caps mirror the reference: node output state at 1 MB, the succeeded
+// event inlines the output only up to 8 KB, dead-letter errors at 64 KB,
+// and everything else defaults to 256 KB.
 const (
-	stateJSONMaxBytes             = 1_000_000
-	nodeSucceededOutputMaxBytes   = 8_000
-	truncationPreviewDivisor      = 2
+	stateJSONMaxBytes           = 1_000_000
+	nodeSucceededOutputMaxBytes = 8_000
+	deadLetterErrorMaxBytes     = 64_000
+	defaultPersistMaxBytes      = 256_000
+	truncationPreviewDivisor    = 2
 )
+
+// safePersist is the jsonb write chokepoint: sensitive-shaped keys redact,
+// then the result is size-bounded (maxBytes 0 = never truncate — dead
+// letters need the exact JSON for replay, but still get key-redacted).
+func safePersist(value any, maxBytes int) json.RawMessage {
+	raw, err := json.Marshal(grammar.RedactSensitiveKeys(normalizeJSON(value)))
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	if maxBytes <= 0 {
+		return raw
+	}
+	return boundPayload(raw, maxBytes)
+}
+
+// normalizeJSON round-trips non-basic values through JSON so the key
+// redactor sees plain maps/slices regardless of the caller's types.
+func normalizeJSON(value any) any {
+	switch value.(type) {
+	case nil, bool, float64, string, map[string]any, []any:
+		return value
+	default:
+		raw, err := json.Marshal(value)
+		if err != nil {
+			return value
+		}
+		var out any
+		if json.Unmarshal(raw, &out) != nil {
+			return value
+		}
+		return out
+	}
+}
 
 // boundPayload returns raw unchanged when it fits, or the reference's
 // truncation sentinel: {__truncated, originalBytes, maxBytes, preview} with

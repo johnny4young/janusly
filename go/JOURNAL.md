@@ -193,3 +193,29 @@ consolidan en el informe de la puerta D15.
   + proyección de outputs declarados (con máscara de secret/env) — tres
   cosas que el plan tenía anotadas como divergencias/diferidos, todas
   dentro del alcance natural de esta tarea.
+
+## 2026-07-30 — modelo de fallo: escalera de retries + DLQ (T-008)
+
+- Otra vez la fuente corrigió a la card: mis números de backoff eran
+  inventados; el evaluador real usa full jitter `[delay/2, delay]` y
+  patrones `retryOn`/`ignoreOn` sobre labels clasificados (familia
+  `5xx`, `timeout` por wording, `network` por códigos). Portado con
+  rand inyectado — cero sleeps en los tests unitarios.
+- La decisión que más me gusta del día: el retry diferido no necesita
+  scheduler. El claim lleva un anti-join contra `go_pilot_wakeups`
+  (`wake_at > now()`), así que la fila se vuelve reclamable en el
+  instante exacto en que su reloj pasa — el sweeper es solo garbage
+  collection y un empujón a workers ociosos. La corrección no depende
+  de ningún proceso intermedio.
+- El fallo terminal ahora es la transacción completa de Node: CAS del
+  nodo + fila `dead_letters` (snapshots workflow/node exactos para
+  replay — sin truncar pero key-redactados) + `node.failed` + flip del
+  run. Un fallo del insert del DLQ revierte todo — nada de runs a
+  medio fallar.
+- De paso cayó el safe-persist completo: el regex cerrado de claves
+  sensibles portado de sensitive-keys.ts, compuesto con el acotado de
+  T-005. `authorization: "Bearer …"` en un config aparece como
+  `[redacted]` en los tres JSON del DLQ — probado contra la fila real.
+- El test de retry diferido es el que más confianza da: agenda un retry
+  a 60s, prueba que NADIE lo reclama en 300ms, mueve el reloj en SQL y
+  ve al poll cadence reclamarlo — sin esperas reales.

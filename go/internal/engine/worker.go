@@ -44,6 +44,13 @@ func (e *Engine) RunWorkers(ctx context.Context, concurrency int, poll time.Dura
 		e.listenForWakeups(ctx, wake, logger)
 	}()
 
+	var sweepers sync.WaitGroup
+	sweepers.Add(1)
+	go func() {
+		defer sweepers.Done()
+		e.sweepWakeups(ctx, wake, poll, logger)
+	}()
+
 	var workers sync.WaitGroup
 	for i := 0; i < concurrency; i++ {
 		workers.Add(1)
@@ -54,6 +61,7 @@ func (e *Engine) RunWorkers(ctx context.Context, concurrency int, poll time.Dura
 	}
 	workers.Wait()
 	listeners.Wait()
+	sweepers.Wait()
 	return nil
 }
 
@@ -120,7 +128,9 @@ func (e *Engine) executeClaim(ctx context.Context, claim ClaimedNode, execute Ex
 
 	output, execErr := runExecutor(ctx, claim, *node, wf, runInput, execute)
 	if execErr != nil {
-		e.failClaim(ctx, claim, execErr, logger)
+		if err := e.RetryOrFail(ctx, claim, *node, execErr); err != nil {
+			logger.Error("retry-or-fail failed", "runId", claim.RunID, "nodeId", claim.NodeID, "error", err)
+		}
 		return
 	}
 	if err := e.CompleteNode(ctx, claim, output); err != nil {
@@ -142,6 +152,33 @@ func runExecutor(ctx context.Context, claim ClaimedNode, node domain.Node, wf *d
 func (e *Engine) failClaim(ctx context.Context, claim ClaimedNode, cause error, logger *slog.Logger) {
 	if err := e.FailNode(ctx, claim, cause); err != nil {
 		logger.Error("fail node failed", "runId", claim.RunID, "nodeId", claim.NodeID, "error", err)
+	}
+}
+
+// sweepWakeups garbage-collects due wake-up rows on the poll cadence and
+// nudges idle workers when any were due. Claim correctness never depends on
+// it — the claim's anti-join compares wake_at to now() directly.
+func (e *Engine) sweepWakeups(ctx context.Context, wake chan<- struct{}, poll time.Duration, logger *slog.Logger) {
+	q := store.New(e.pool)
+	for {
+		select {
+		case <-time.After(poll):
+		case <-ctx.Done():
+			return
+		}
+		swept, err := q.SweepDueWakeups(ctx)
+		if err != nil {
+			if ctx.Err() == nil {
+				logger.Error("wakeup sweep failed", "error", err)
+			}
+			continue
+		}
+		if swept > 0 {
+			select {
+			case wake <- struct{}{}:
+			default:
+			}
+		}
 	}
 }
 

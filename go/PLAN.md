@@ -171,7 +171,7 @@ crítica) · P1 (importante) · P2 (stretch).
 | T-005 | Cola propia: claim loop, worker pool, LISTEN/NOTIFY | P0 | done |
 | T-006 | Gramáticas subconjunto: templates + expresiones | P0 | done |
 | T-007 | Executors: noop, transform, condition + semántica de aristas | P0 | done |
-| T-008 | Modelo de fallo: retry ladder + dead_letters | P0 | todo |
+| T-008 | Modelo de fallo: retry ladder + dead_letters | P0 | done |
 | T-009 | wait_until + approval/waiting + POST /resume | P0 | todo |
 | T-010 | Redrive desde dead_letters | P0 | todo |
 | T-011 | Executor http + SSRF/DNS pinning | P0 | todo |
@@ -612,6 +612,12 @@ el chat publicado.
 | 2026-07-30 | divergencia | Error al evaluar condición de arista → se trata como falsa (skip determinista); Node deja propagar el throw al job (retry BullMQ). Validación al guardar rechaza gramática inválida, así que solo drift de datos llega aquí |
 | 2026-07-30 | bug corregido (port) | `Parse` dejaba `Nodes`/`Edges` nil con array vacío → el snapshot re-marshalado emitía `null` y fallaba su propio re-parse en el claim; ahora slices no-nil siempre — el snapshot round-tripea `[]` |
 | 2026-07-30 | divergencia temporal | Sin validación Zod post-template por tipo de nodo (NODE_CONFIG_SCHEMAS) ni timeout por nodo (`config.timeoutMs` / withTimeout) — llegan con T-008/T-012 |
+| 2026-07-30 | corrección a la card | T-008: los números de backoff de la card (base 2s, ±20%) eran inventados — la fuente (core/retry-policy.ts) usa base `delayMs ?? 1000`, exponencial `base*2^(attempt-1)` solo con `backoff:"exponential"`, tope `maxDelayMs`, y jitter FULL uniforme en `[delay/2, delay]`. Se portó la fuente |
+| 2026-07-30 | paridad exacta | `shouldRetry` con clasificación de labels (name, code, status exacto, familia `Nxx`, `timeout` por wording/ETIMEDOUT/NODE_TIMEOUT, `network` por wording/ECONNRESET/ENOTFOUND); `ignoreOn` gana, `retryOn` vacío = retry a todo; sin política = sin retry. Evento `node.retry {attempt, delayMs, error}`; DLQ: workflow/node snapshots SIN truncar (replay exige el JSON exacto) pero SÍ key-redactados; error_json cap 64 KB; `node.failed {error, attempt}` con campos causales fijos |
+| 2026-07-30 | decisión (elegante) | El retry diferido NO necesita un scheduler: el claim lleva un anti-join `NOT EXISTS (wakeup con wake_at > now())` — la fila es reclamable en el instante en que su reloj pasa, sin proceso intermedio. El sweeper de `go_pilot_wakeups` es solo GC + nudge de workers ociosos; la corrección jamás depende de él |
+| 2026-07-30 | mejora sobre card | safe-persist completo: `safePersist` = redacción de claves sensibles (regex cerrado portado de sensitive-keys.ts) + acotado con centinela; aplicado a state_json, payloads de eventos, error_json y los tres JSON del DLQ (cap 0 = sin truncar). Cierra la divergencia de redacción por claves que venía anotada |
+| 2026-07-30 | divergencia | Errores Go planos serializan `{message}` sin `name` (JS siempre lleva `name:"Error"`); `ExecError {message,name,code,statusCode}` lo aporta cuando el executor lo conoce (http en T-012). Tier transitorio (`decideTransient`) y guard write-side no portados aún — write-side llega con T-012 |
+| 2026-07-30 | nota | Seams `now()`/`randFloat` en el Engine para tests deterministas del backoff; éxito tras retry conserva `attempts=N` como evidencia (igual que Node) |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
