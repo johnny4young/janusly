@@ -730,3 +730,19 @@ local. Sin umbral pasa/no-pasa: números para aprender.
 - El rechazo del start en producción es 422 sin lista de issues — igual
   que Node: el detalle vive en el badge (`/workflows/readiness`, ambos
   wires), no en el error del start.
+
+## 2026-07-30 — bounds HTTP por tenant vía org_configs (T-043)
+
+- La cadena de precedencia del catálogo portada exacta y probada capa
+  por capa: config del nodo → fila del tenant → env → default, con los
+  mínimos del catálogo y fall-through en valores inválidos (nunca
+  medio-aplicar). El caso sutil: `maxRedirects: 0` es un valor VÁLIDO
+  de tenant (min 0 — apagar redirects es legítimo) y un `>= min` mal
+  escrito lo habría tragado.
+- Integración real: un org con `http.timeoutMs = 50` en org_configs
+  corta una upstream de 300ms ("timed out after 50ms" en error_json)
+  mientras el org vecino sin fila usa el default y termina bien —
+  aislamiento por tenant demostrado en la misma corrida.
+- `ClaimedNode` ahora lleva el org del run (se puebla del row ya
+  cargado en executeClaim), así que la resolución por tenant no añade
+  lecturas del run.

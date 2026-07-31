@@ -27,6 +27,9 @@ type ClaimedNode struct {
 	RunID   string
 	NodeID  string
 	Attempt int32
+	// OrgID is populated from the run row at execution time so downstream
+	// per-tenant resolution (org config bounds) never re-reads the run.
+	OrgID string
 }
 
 // CompleteNode commits a successful execution: node succeeded with its

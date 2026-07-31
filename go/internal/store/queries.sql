@@ -456,3 +456,6 @@ WHERE org_id = $1 AND id = $2 AND status = 'received' AND run_id IS NULL;
 UPDATE trigger_events
 SET status = $3, skipped_reason = $4
 WHERE org_id = $1 AND id = $2 AND status = 'received';
+-- name: ListOrgHTTPConfig :many
+SELECT key, value_json FROM org_configs
+WHERE org_id = $1 AND category = 'http';

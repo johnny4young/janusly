@@ -230,15 +230,22 @@ func (e *httpExecutor) execute(ctx context.Context, in Input) (any, error) {
 	if m, ok := in.Config["method"].(string); ok && m != "" {
 		method = strings.ToUpper(m)
 	}
+	// Bound precedence: node config → tenant defaults (org config/env,
+	// resolved by the dispatcher) → platform constants.
 	timeoutMs := float64(httpDefaultTimeoutMs)
+	maxBytes := httpDefaultMaxBytes
+	maxRedirects := httpDefaultMaxRedirect
+	if in.HTTPBounds != nil {
+		timeoutMs = in.HTTPBounds.TimeoutMs
+		maxBytes = in.HTTPBounds.MaxResponseBytes
+		maxRedirects = in.HTTPBounds.MaxRedirects
+	}
 	if v, ok := in.Config["timeoutMs"].(float64); ok {
 		timeoutMs = v
 	}
-	maxBytes := httpDefaultMaxBytes
 	if v, ok := in.Config["maxResponseBytes"].(float64); ok {
 		maxBytes = int(v)
 	}
-	maxRedirects := httpDefaultMaxRedirect
 	if v, ok := in.Config["maxRedirects"].(float64); ok {
 		maxRedirects = int(v)
 	}

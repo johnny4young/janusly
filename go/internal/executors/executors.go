@@ -31,6 +31,17 @@ type Input struct {
 	// the dispatcher's evidence/policy machinery; a strict template policy
 	// surfaces here as the returned error.
 	ReportUnresolved func(paths []string) error
+	// HTTPBounds carries the per-tenant outbound defaults the dispatcher
+	// resolved from org config; nil keeps the platform constants. Node
+	// config always wins over these.
+	HTTPBounds *HTTPBounds
+}
+
+// HTTPBounds are the tenant-effective outbound HTTP defaults.
+type HTTPBounds struct {
+	TimeoutMs        float64
+	MaxResponseBytes int
+	MaxRedirects     int
 }
 
 // Func executes one node and returns its output value.

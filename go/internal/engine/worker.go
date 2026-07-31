@@ -140,6 +140,7 @@ func (e *Engine) executeClaim(ctx context.Context, claim ClaimedNode, execute Ex
 		logger.Error("load run for claim failed", "runId", claim.RunID, "nodeId", claim.NodeID, "error", err)
 		return
 	}
+	claim.OrgID = run.OrgID
 	wf, runInput, err := workflowFromRunInput(run.InputJson)
 	if err != nil {
 		e.failClaim(ctx, claim, err, logger)

@@ -1157,6 +1157,36 @@ func (q *Queries) ListDueWakeups(ctx context.Context, limit int32) ([]GoPilotWak
 	return items, nil
 }
 
+const listOrgHTTPConfig = `-- name: ListOrgHTTPConfig :many
+SELECT key, value_json FROM org_configs
+WHERE org_id = $1 AND category = 'http'
+`
+
+type ListOrgHTTPConfigRow struct {
+	Key       string
+	ValueJson json.RawMessage
+}
+
+func (q *Queries) ListOrgHTTPConfig(ctx context.Context, orgID string) ([]ListOrgHTTPConfigRow, error) {
+	rows, err := q.db.Query(ctx, listOrgHTTPConfig, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOrgHTTPConfigRow
+	for rows.Next() {
+		var i ListOrgHTTPConfigRow
+		if err := rows.Scan(&i.Key, &i.ValueJson); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRunEvents = `-- name: ListRunEvents :many
 SELECT id, run_id, node_id, type, payload, created_at
 FROM run_events

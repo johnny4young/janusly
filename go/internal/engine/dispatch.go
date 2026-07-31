@@ -90,9 +90,14 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 	if renderedConfig == nil {
 		renderedConfig = map[string]any{}
 	}
+	var httpBounds *executors.HTTPBounds
+	if node.Type == "http" {
+		bounds := LoadOrgHTTPBounds(ctx, q, claim.OrgID, d.renderOpts.LookupEnv)
+		httpBounds = &bounds
+	}
 	output, execErr := execute(ctx, executors.Input{
 		RunID: claim.RunID, NodeID: claim.NodeID,
-		Config: renderedConfig, Context: runContext,
+		Config: renderedConfig, Context: runContext, HTTPBounds: httpBounds,
 		Emit: func(eventType string, payload map[string]any) {
 			eventAt := time.Now().UTC()
 			raw, err := json.Marshal(payload)
