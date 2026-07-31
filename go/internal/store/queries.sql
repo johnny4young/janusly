@@ -78,24 +78,36 @@ ORDER BY id;
 UPDATE run_nodes SET status = 'queued', attempts = 1
 WHERE run_id = $1 AND node_id = $2 AND status = 'pending';
 
--- The claim is the queue's consume operation: SKIP LOCKED lets N workers
--- pull disjoint rows without blocking each other, and the runs join keeps
--- nodes of cancelled/failed runs from ever being picked up.
--- name: ClaimQueuedRunNodes :many
+-- The claim is the queue's consume operation, split in TWO statements
+-- inside one transaction on purpose. A single UPDATE-with-subquery is
+-- vulnerable to an EvalPlanQual race under READ COMMITTED: when the locked
+-- row changed since the statement snapshot, the NOT EXISTS wake-up guard
+-- re-evaluates against the OLD snapshot — which predates a retry's
+-- freshly-committed future wake-up — and a delayed retry gets claimed
+-- instantly. Statement one locks candidates (SKIP LOCKED keeps workers
+-- disjoint); statement two re-checks every guard under a FRESH snapshot on
+-- rows we already hold, where no EPQ re-evaluation can occur.
+-- name: LockClaimableRunNodes :many
+SELECT rn.id
+FROM run_nodes rn
+JOIN runs r ON r.id = rn.run_id
+WHERE rn.status = 'queued' AND r.status = 'running'
+  AND NOT EXISTS (
+    SELECT 1 FROM go_pilot_wakeups w
+    WHERE w.run_node_id = rn.id AND w.wake_at > now()
+  )
+ORDER BY rn.id
+LIMIT sqlc.arg(batch_size)
+FOR UPDATE OF rn SKIP LOCKED;
+
+-- name: MarkLockedNodesRunning :many
 UPDATE run_nodes SET status = 'running', started_at = now()
-WHERE id IN (
-  SELECT rn.id
-  FROM run_nodes rn
-  JOIN runs r ON r.id = rn.run_id
-  WHERE rn.status = 'queued' AND r.status = 'running'
-    AND NOT EXISTS (
-      SELECT 1 FROM go_pilot_wakeups w
-      WHERE w.run_node_id = rn.id AND w.wake_at > now()
-    )
-  ORDER BY rn.id
-  LIMIT sqlc.arg(batch_size)
-  FOR UPDATE OF rn SKIP LOCKED
-)
+WHERE id = ANY(sqlc.arg(ids)::text[])
+  AND status = 'queued'
+  AND NOT EXISTS (
+    SELECT 1 FROM go_pilot_wakeups w
+    WHERE w.run_node_id = run_nodes.id AND w.wake_at > now()
+  )
 RETURNING id, run_id, node_id, COALESCE(attempts, 1)::int AS attempt;
 
 -- Serializes node-completion transactions per run: the xact lock releases

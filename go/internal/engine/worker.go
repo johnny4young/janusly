@@ -70,12 +70,11 @@ func (e *Engine) RunWorkers(ctx context.Context, concurrency int, poll time.Dura
 // on a context detached from cancellation so shutdown finishes what this
 // worker already owns.
 func (e *Engine) workerLoop(ctx context.Context, wake <-chan struct{}, poll time.Duration, execute ExecuteFunc, logger *slog.Logger) {
-	q := store.New(e.pool)
 	for {
 		if ctx.Err() != nil {
 			return
 		}
-		claims, err := q.ClaimQueuedRunNodes(ctx, 1)
+		claims, err := e.claimBatch(ctx, 1)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -92,12 +91,42 @@ func (e *Engine) workerLoop(ctx context.Context, wake <-chan struct{}, poll time
 			}
 			continue
 		}
-		claim := ClaimedNode{
-			RowID: claims[0].ID, RunID: claims[0].RunID,
-			NodeID: claims[0].NodeID, Attempt: claims[0].Attempt,
-		}
-		e.executeClaim(context.WithoutCancel(ctx), claim, execute, logger)
+		e.executeClaim(context.WithoutCancel(ctx), claims[0], execute, logger)
 	}
+}
+
+// claimBatch runs the two-statement claim in one transaction: lock
+// candidates under SKIP LOCKED, then flip them to running with every guard
+// re-checked on a FRESH statement snapshot — the EvalPlanQual-safe shape
+// (see the query comments in queries.sql).
+func (e *Engine) claimBatch(ctx context.Context, batch int32) ([]ClaimedNode, error) {
+	tx, err := e.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := store.New(e.wrapTx(tx))
+	ids, err := q.LockClaimableRunNodes(ctx, batch)
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, tx.Commit(ctx)
+	}
+	rows, err := q.MarkLockedNodesRunning(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	claims := make([]ClaimedNode, 0, len(rows))
+	for _, row := range rows {
+		claims = append(claims, ClaimedNode{
+			RowID: row.ID, RunID: row.RunID, NodeID: row.NodeID, Attempt: row.Attempt,
+		})
+	}
+	return claims, nil
 }
 
 // executeClaim loads the run snapshot, dispatches the executor and commits

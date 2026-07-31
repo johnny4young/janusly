@@ -197,7 +197,17 @@ func TestDelayedRetryIsNotClaimableUntilDue(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("retry never scheduled")
+			// Diagnostic capture for the flake: the exact row state, how many
+			// executions the stub saw, wake-up rows, and the claimable queue
+			// ahead of this node.
+			var wakeups int
+			_ = pool.QueryRow(ctx, `select count(*) from go_pilot_wakeups w
+				join run_nodes rn on rn.id = w.run_node_id where rn.run_id=$1`, runID).Scan(&wakeups)
+			var queuedAhead int
+			_ = pool.QueryRow(ctx, `select count(*) from run_nodes rn join runs r on r.id=rn.run_id
+				where rn.status='queued' and r.status='running'`).Scan(&queuedAhead)
+			t.Fatalf("retry never scheduled: node=%s/%d execs=%d wakeups=%d claimableGlobal=%d",
+				status, attempts, executions.Load(), wakeups, queuedAhead)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

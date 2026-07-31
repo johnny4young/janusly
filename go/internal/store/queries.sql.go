@@ -76,59 +76,6 @@ func (q *Queries) ClaimDeadLetterReplay(ctx context.Context, arg ClaimDeadLetter
 	return result.RowsAffected(), nil
 }
 
-const claimQueuedRunNodes = `-- name: ClaimQueuedRunNodes :many
-UPDATE run_nodes SET status = 'running', started_at = now()
-WHERE id IN (
-  SELECT rn.id
-  FROM run_nodes rn
-  JOIN runs r ON r.id = rn.run_id
-  WHERE rn.status = 'queued' AND r.status = 'running'
-    AND NOT EXISTS (
-      SELECT 1 FROM go_pilot_wakeups w
-      WHERE w.run_node_id = rn.id AND w.wake_at > now()
-    )
-  ORDER BY rn.id
-  LIMIT $1
-  FOR UPDATE OF rn SKIP LOCKED
-)
-RETURNING id, run_id, node_id, COALESCE(attempts, 1)::int AS attempt
-`
-
-type ClaimQueuedRunNodesRow struct {
-	ID      string
-	RunID   string
-	NodeID  string
-	Attempt int32
-}
-
-// The claim is the queue's consume operation: SKIP LOCKED lets N workers
-// pull disjoint rows without blocking each other, and the runs join keeps
-// nodes of cancelled/failed runs from ever being picked up.
-func (q *Queries) ClaimQueuedRunNodes(ctx context.Context, batchSize int32) ([]ClaimQueuedRunNodesRow, error) {
-	rows, err := q.db.Query(ctx, claimQueuedRunNodes, batchSize)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ClaimQueuedRunNodesRow
-	for rows.Next() {
-		var i ClaimQueuedRunNodesRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.RunID,
-			&i.NodeID,
-			&i.Attempt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const completeRunNode = `-- name: CompleteRunNode :execrows
 UPDATE run_nodes
 SET status = 'succeeded', state_json = $1,
@@ -1184,6 +1131,92 @@ func (q *Queries) ListWorkflows(ctx context.Context, arg ListWorkflowsParams) ([
 			&i.Status,
 			&i.CreatedBy,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockClaimableRunNodes = `-- name: LockClaimableRunNodes :many
+SELECT rn.id
+FROM run_nodes rn
+JOIN runs r ON r.id = rn.run_id
+WHERE rn.status = 'queued' AND r.status = 'running'
+  AND NOT EXISTS (
+    SELECT 1 FROM go_pilot_wakeups w
+    WHERE w.run_node_id = rn.id AND w.wake_at > now()
+  )
+ORDER BY rn.id
+LIMIT $1
+FOR UPDATE OF rn SKIP LOCKED
+`
+
+// The claim is the queue's consume operation, split in TWO statements
+// inside one transaction on purpose. A single UPDATE-with-subquery is
+// vulnerable to an EvalPlanQual race under READ COMMITTED: when the locked
+// row changed since the statement snapshot, the NOT EXISTS wake-up guard
+// re-evaluates against the OLD snapshot — which predates a retry's
+// freshly-committed future wake-up — and a delayed retry gets claimed
+// instantly. Statement one locks candidates (SKIP LOCKED keeps workers
+// disjoint); statement two re-checks every guard under a FRESH snapshot on
+// rows we already hold, where no EPQ re-evaluation can occur.
+func (q *Queries) LockClaimableRunNodes(ctx context.Context, batchSize int32) ([]string, error) {
+	rows, err := q.db.Query(ctx, lockClaimableRunNodes, batchSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markLockedNodesRunning = `-- name: MarkLockedNodesRunning :many
+UPDATE run_nodes SET status = 'running', started_at = now()
+WHERE id = ANY($1::text[])
+  AND status = 'queued'
+  AND NOT EXISTS (
+    SELECT 1 FROM go_pilot_wakeups w
+    WHERE w.run_node_id = run_nodes.id AND w.wake_at > now()
+  )
+RETURNING id, run_id, node_id, COALESCE(attempts, 1)::int AS attempt
+`
+
+type MarkLockedNodesRunningRow struct {
+	ID      string
+	RunID   string
+	NodeID  string
+	Attempt int32
+}
+
+func (q *Queries) MarkLockedNodesRunning(ctx context.Context, ids []string) ([]MarkLockedNodesRunningRow, error) {
+	rows, err := q.db.Query(ctx, markLockedNodesRunning, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MarkLockedNodesRunningRow
+	for rows.Next() {
+		var i MarkLockedNodesRunningRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.NodeID,
+			&i.Attempt,
 		); err != nil {
 			return nil, err
 		}

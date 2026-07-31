@@ -443,3 +443,22 @@ local. Sin umbral pasa/no-pasa: números para aprender.
   mensaje largo y humano. Mi /v1/dlq/redrive propio convive con el
   alias /v1/dlq/replay de paridad — misma operación del engine, dos
   formas de wire.
+
+## 2026-07-30 — el flake era un bug: EvalPlanQual en el claim (T-023)
+
+- El watch-item de T-011 resultó ser el mejor bug de la ola: bajo READ
+  COMMITTED, el claim de UN solo UPDATE-con-subquery sufre EvalPlanQual
+  — cuando la fila cambió desde el snapshot del statement, Postgres
+  re-chequea los quals sobre la versión nueva PERO el NOT EXISTS del
+  wakeup se re-evalúa con el snapshot VIEJO, anterior al wakeup del
+  retry. Resultado: un retry diferido de 60 segundos reclamado al
+  instante, una de cada diez corridas.
+- El camino del diagnóstico también cuenta: instrumentar el Fatal del
+  test (node=succeeded/2, execs=2, wakeups=0), descartar procesos
+  huérfanos, descartar drift del reloj del VM de Docker (69ms), y solo
+  entonces releer el SQL con la lupa de EPQ.
+- El fix es el patrón canónico: claim en dos statements dentro de una
+  transacción — bloquear candidatos con SKIP LOCKED, luego UPDATE con
+  todos los guards re-checkeados bajo snapshot fresco sobre filas que
+  YA poseemos (sin re-evaluación EPQ posible). Treinta corridas
+  seguidas en verde donde antes caía una de diez.
