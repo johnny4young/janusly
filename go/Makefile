@@ -90,3 +90,7 @@ fuzz:
 # modelo in-test de dos réplicas. Corre SOLO los tests etiquetados ha.
 test-ha:
 	go test -race -tags "integration ha" -p 1 -count=1 -run 'TestHA' ./internal/engine/ -timeout 10m
+
+# Soak sostenido (default 1h; SOAK_DURATION=3m para validar el arnés).
+soak:
+	node conformance/run-soak.mjs

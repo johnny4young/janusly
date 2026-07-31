@@ -1059,7 +1059,7 @@ día que exista el chokepoint (T-079)**.
 | T-092 | Paridad de nombres Prometheus + Resource OTel (`service.name=janusly`, instance id) | obs | P2 | done |
 | T-093 | Lane HA: DOS instancias del engine sobre una base — property + race suites verdes | HA | P0 | done |
 | T-094 | Singletons con lease o prueba de seguridad concurrente por bomba (campañas/retención/timers) | HA | P1 | done |
-| T-095 | Soak: `make soak` (k6 sostenido ≥1h, vigilancia de RSS/goroutines, reporte) | HA | P1 | todo |
+| T-095 | Soak: `make soak` (k6 sostenido ≥1h, vigilancia de RSS/goroutines, reporte) | HA | P1 | partial |
 | T-096 | Manifiesto de contrato v1 + OpenAPI generado + guard de deriva en `make ci` | contrato | P1 | todo |
 | T-097 | Lane CI de GitHub Actions para `go/` (build+lint+test+parity con Postgres de servicio) | contrato | P2 | todo |
 | T-098 | Informe de ola 3 (REPORT-W3.md) + corte de divergencias | cierre | P0 | todo |
