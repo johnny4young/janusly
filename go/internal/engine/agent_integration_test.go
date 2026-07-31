@@ -447,3 +447,135 @@ func TestMultiAgentCrew(t *testing.T) {
 		t.Fatalf("parallel crew: %+v", output)
 	}
 }
+
+// The deferred-scope contract at the REAL binding point: a strict policy
+// over a missing previousAgents path fails when the second agent's goal
+// binds — AFTER the first agent completed — and lenient emits ONE
+// deduplicated template.unresolved_path evidence event for that phase.
+func TestDeferredScopeStrictPolicy(t *testing.T) {
+	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	defer pool.Close()
+	eng := New(pool)
+	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
+	workerCtx, stop := context.WithCancel(context.Background())
+	defer stop()
+	go func() { _ = eng.RunWorkers(workerCtx, 2, 20*time.Millisecond, dispatcher.Execute, quietLogger()) }()
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	org := fmt.Sprintf("org-deferred-%d", time.Now().UnixNano())
+
+	crew := func(id, policy string) *domain.Workflow {
+		return &domain.Workflow{
+			ID: id, Name: "Crew", DSLVersion: "1.0", TemplatePolicy: policy,
+			Nodes: []domain.Node{{ID: "crew", Type: "multi_agent", Config: map[string]any{
+				"mode": "sequential", "maxSteps": float64(1),
+				"agents": []any{
+					map[string]any{"name": "primero", "goal": "uppercase the word", "value": "sonda"},
+					// The same missing deferred path twice — evidence must dedupe.
+					map[string]any{"name": "segundo", "goal": "uppercase {{previousAgents.5.result.ghost}} and {{previousAgents.5.result.ghost}}"},
+				},
+			}}},
+			Edges: []domain.Edge{},
+		}
+	}
+
+	// Strict: the run fails AT the second agent's binding — the first agent
+	// completed before the failure.
+	runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: crew("wf-deferred-strict", "strict")})
+	if err != nil {
+		t.Fatalf("start strict: %v", err)
+	}
+	waitRunStatus(t, pool, runID, "failed", 0)
+	var firstCompleted int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM run_events WHERE run_id = $1
+		AND type = 'multi_agent.agent.completed' AND payload->>'name' = 'primero'`, runID).Scan(&firstCompleted)
+	if firstCompleted == 0 {
+		t.Fatal("strict must fail at the deferred binding, not before the first agent ran")
+	}
+	var payload []byte
+	if err := pool.QueryRow(ctx, `SELECT payload FROM run_events WHERE run_id = $1
+		AND type = 'template.unresolved_path' LIMIT 1`, runID).Scan(&payload); err != nil {
+		t.Fatalf("strict evidence event expected: %v", err)
+	}
+	var parsed struct {
+		Count  int      `json:"count"`
+		Paths  []string `json:"paths"`
+		Policy string   `json:"policy"`
+	}
+	_ = json.Unmarshal(payload, &parsed)
+	if parsed.Policy != "strict" || parsed.Count != 1 || len(parsed.Paths) != 1 ||
+		!strings.HasPrefix(parsed.Paths[0], "previousAgents.5") {
+		t.Fatalf("strict evidence payload: %s", payload)
+	}
+
+	// Lenient (default): same crew succeeds, ONE deduplicated evidence event
+	// for the binding phase.
+	runID, err = eng.StartRun(ctx, StartInput{OrgID: org, Workflow: crew("wf-deferred-lenient", "")})
+	if err != nil {
+		t.Fatalf("start lenient: %v", err)
+	}
+	waitRunStatus(t, pool, runID, "succeeded", 0)
+	if err := pool.QueryRow(ctx, `SELECT payload FROM run_events WHERE run_id = $1
+		AND type = 'template.unresolved_path'`, runID).Scan(&payload); err != nil {
+		t.Fatalf("lenient evidence event expected: %v", err)
+	}
+	_ = json.Unmarshal(payload, &parsed)
+	if parsed.Policy != "lenient" || parsed.Count != 1 || len(parsed.Paths) != 1 {
+		t.Fatalf("lenient evidence must dedupe to one path: %s", payload)
+	}
+}
+
+// The loop's item scope under strict: a mapping over a missing item field
+// fails per iteration through the SAME recordUnresolvedPaths chokepoint.
+func TestLoopItemScopeStrictPolicy(t *testing.T) {
+	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	defer pool.Close()
+	eng := New(pool)
+	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
+	workerCtx, stop := context.WithCancel(context.Background())
+	defer stop()
+	go func() { _ = eng.RunWorkers(workerCtx, 2, 20*time.Millisecond, dispatcher.Execute, quietLogger()) }()
+	org := fmt.Sprintf("org-loopstrict-%d", time.Now().UnixNano())
+
+	wf := &domain.Workflow{
+		ID: "wf-loop-strict", Name: "Loop", DSLVersion: "1.0", TemplatePolicy: "strict",
+		Nodes: []domain.Node{{ID: "l", Type: "loop", Config: map[string]any{
+			"items":   "a,b",
+			"mapping": map[string]any{"v": "{{item.ghost}}"},
+		}}},
+		Edges: []domain.Edge{},
+	}
+	runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: wf})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	waitRunStatus(t, pool, runID, "failed", 0)
+	var payload []byte
+	if err := pool.QueryRow(ctx, `SELECT payload FROM run_events WHERE run_id = $1
+		AND type = 'template.unresolved_path' LIMIT 1`, runID).Scan(&payload); err != nil {
+		t.Fatalf("loop strict evidence expected: %v", err)
+	}
+	var parsed struct {
+		Policy string   `json:"policy"`
+		Paths  []string `json:"paths"`
+	}
+	_ = json.Unmarshal(payload, &parsed)
+	if parsed.Policy != "strict" || len(parsed.Paths) == 0 || !strings.HasPrefix(parsed.Paths[0], "item.") {
+		t.Fatalf("loop strict evidence: %s", payload)
+	}
+}

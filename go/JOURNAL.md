@@ -1497,3 +1497,8 @@ producción necesita saber — de lo ya resuelto o informativo.
 - Contrato estable del evento alineado a `packages/shared/src/run-events.ts`: caps por campo 120 (agent) / 160 (scope) / 160 (tool) / 500 (reason) en RUNAS; `sanitizeReasoningText` = ScrubGuidanceSecrets + aplanado de control/bidi/ZWSP/FEFF a espacio + colapso de whitespace + cap; fallbacks "agent"/"unknown"/mensaje por defecto.
 - `tool` es null JSON cuando decision=finish; `replacesEventId` apunta al id exacto del `agent.step.planned` que este resumen seguro reemplaza — `executors.Input.Emit` ahora devuelve el id del evento insertado (un solo sitio de asignación en dispatch).
 - Tests unitarios en `internal/executors/agent_reasoning_test.go`; suites de agente/multi-agente del engine verdes con `-race`; `boundedText` eliminado (quedó sin usos).
+
+## T-119 · Scopes diferidos + política estricta (2026-07-31)
+- Sin producción nueva: `recordUnresolvedPaths` ya era el chokepoint único (render ordinario en dispatch + costura `ReportUnresolved` que usan loop y multi_agent). El ticket agrega la evidencia en el punto real de binding.
+- `TestDeferredScopeStrictPolicy`: crew secuencial con `{{previousAgents.5.result.ghost}}` duplicado en el goal del agente 2 — bajo `strict` el run falla DESPUÉS de que el agente 1 completó (evento `agent.completed` presente) con evidencia `policy:strict, count:1`; bajo leniente el run triunfa con UN evento deduplicado.
+- `TestLoopItemScopeStrictPolicy`: `{{item.ghost}}` bajo estricta falla por iteración con evidencia `item.*`. La cota (20 paths + truncated) ya estaba probada a nivel grammar.
