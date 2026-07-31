@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/johnny4young/janusly/go/internal/ai/failcat"
 )
 
 func fakeProvider(t *testing.T, status int, body string, delay time.Duration) *httptest.Server {
@@ -34,31 +36,28 @@ const successBody = `{"id":"msg_1","type":"message","role":"assistant",
 // The SDK error matrix: every failure mode classifies into the stable
 // AIError vocabulary — never a raw SDK error, never a panic.
 func TestGenerateTextClassifiesEveryFailure(t *testing.T) {
-	cases := []struct {
-		name      string
-		status    int
-		body      string
-		delay     time.Duration
-		wantClass string
-	}{
-		{"auth 401", 401, `{"type":"error","error":{"type":"authentication_error","message":"bad key"}}`, 0, "auth"},
-		{"forbidden 403", 403, `{"type":"error","error":{"type":"permission_error","message":"no"}}`, 0, "auth"},
-		{"rate limit 429", 429, `{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`, 0, "rate_limit"},
-		{"overloaded 529", 529, `{"type":"error","error":{"type":"overloaded_error","message":"busy"}}`, 0, "overloaded"},
-		{"server 500", 500, `{"type":"error","error":{"type":"api_error","message":"boom"}}`, 0, "overloaded"},
-		{"invalid request 400", 400, `{"type":"error","error":{"type":"invalid_request_error","message":"bad"}}`, 0, "invalid_request"},
-		{"timeout", 200, successBody, 2 * time.Second, "timeout"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			server := fakeProvider(t, tc.status, tc.body, tc.delay)
-			client := New(Config{APIKey: "test-key", BaseURL: server.URL, TimeoutMs: 300})
+	// The shared failure catalog drives this suite — adding a case there
+	// exercises the chokepoint here automatically.
+	for _, tc := range failcat.Wire() {
+		t.Run(tc.Name, func(t *testing.T) {
+			var baseURL string
+			if tc.Status == 0 {
+				baseURL = "http://127.0.0.1:1"
+			} else {
+				server := httptest.NewServer(failcat.Handler(tc))
+				t.Cleanup(server.Close)
+				baseURL = server.URL
+			}
+			client := New(Config{APIKey: "test-key", BaseURL: baseURL, TimeoutMs: 300})
 			result, aiErr := client.GenerateText(context.Background(), GenerateTextInput{Prompt: "hi"})
 			if result != nil || aiErr == nil {
 				t.Fatalf("must fail classified: %+v %v", result, aiErr)
 			}
-			if aiErr.Class != tc.wantClass {
-				t.Fatalf("class: want %s got %s (%s)", tc.wantClass, aiErr.Class, aiErr.Message)
+			// network_dead may race the client timeout — both classes are
+			// honest for a dead endpoint.
+			deadRace := tc.Name == "network_dead" && aiErr.Class == "timeout"
+			if aiErr.Class != tc.WantClass && !deadRace {
+				t.Fatalf("class: want %s got %s (%s)", tc.WantClass, aiErr.Class, aiErr.Message)
 			}
 		})
 	}

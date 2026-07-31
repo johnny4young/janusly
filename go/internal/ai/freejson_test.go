@@ -5,6 +5,8 @@ import (
 	"math/rand/v2"
 	"strings"
 	"testing"
+
+	"github.com/johnny4young/janusly/go/internal/ai/failcat"
 )
 
 const validJSON = `{"dslVersion":"1.0","id":"wf-test","name":"Test flow","nodes":[{"id":"n1","type":"http","config":{"url":"https://example.com"}}],"edges":[]}`
@@ -92,5 +94,21 @@ func TestFreeJSONFuzzNeverPanics(t *testing.T) {
 				t.Fatalf("parsed value must re-marshal: %v", err)
 			}
 		}
+	}
+}
+
+// The shared reply catalog: every hostile model text either recovers a
+// JSON object through the extract+parse ladder (Parseable) or fails
+// cleanly — never a panic.
+func TestFreeJSONLadderAgainstReplyCatalog(t *testing.T) {
+	for _, tc := range failcat.Replies() {
+		t.Run(tc.Name, func(t *testing.T) {
+			extracted := ExtractJSONObject(tc.ReplyText)
+			value, ok := ParseJSONValue(extracted)
+			recovered := ok && value != nil
+			if recovered != tc.Parseable {
+				t.Fatalf("parseable=%v want %v (extracted %q)", recovered, tc.Parseable, extracted)
+			}
+		})
 	}
 }

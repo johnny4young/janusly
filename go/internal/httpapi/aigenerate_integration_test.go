@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/johnny4young/janusly/go/internal/usage"
+
+	"github.com/johnny4young/janusly/go/internal/ai/failcat"
 )
 
 func anthropicReply(text string) string {
@@ -166,5 +169,46 @@ func TestGenerateWorkflowBestOfN(t *testing.T) {
 		  AND metadata @> '{"candidateCount":3,"validCandidates":1}'`, h.org).Scan(&audited)
 	if audited != 1 {
 		t.Fatalf("BoN telemetry must audit: %d", audited)
+	}
+}
+
+// The shared wire catalog against the FULL generate surface: every
+// provider failure degrades to mode "fallback" with the catalog's
+// classified aiError — 200 on the wire, never a 5xx, template intact.
+func TestGenerateWorkflowFailureMatrix(t *testing.T) {
+	h := newAPIHarness(t)
+	for _, tc := range failcat.Wire() {
+		if tc.Name == "timeout" || tc.Name == "network_dead" {
+			// timeout needs a sub-second client budget the org catalog
+			// floor does not allow here; network_dead is covered by the
+			// no-key path — the client suite owns both.
+			continue
+		}
+		t.Run(tc.Name, func(t *testing.T) {
+			server := httptest.NewServer(failcat.Handler(tc))
+			t.Cleanup(server.Close)
+			t.Setenv("ANTHROPIC_API_KEY", "test-key")
+			t.Setenv("JANUSLY_LOCAL_STACK", "true")
+			t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+			t.Setenv("JANUSLY_LLM_SIMULATED_PROVIDERS", "anthropic")
+			t.Setenv("JANUSLY_LLM_SIMULATOR_BASE_URL", server.URL)
+
+			res := h.call("POST", "/ai/generate-workflow", map[string]any{
+				"prompt": "haz un flujo que apruebe y notifique",
+			}, "")
+			if res.status != 200 {
+				t.Fatalf("surface must degrade with 200: %d %+v", res.status, res.body)
+			}
+			if res.body["mode"] != "fallback" {
+				t.Fatalf("mode fallback expected: %+v", res.body["mode"])
+			}
+			aiError, _ := res.body["aiError"].(string)
+			if !strings.HasPrefix(aiError, tc.WantClass) {
+				t.Fatalf("aiError class %q must lead: %q", tc.WantClass, aiError)
+			}
+			if res.body["nodes"] == nil {
+				t.Fatal("fallback template must carry nodes")
+			}
+		})
 	}
 }
