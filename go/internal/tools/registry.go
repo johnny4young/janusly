@@ -48,6 +48,9 @@ func NewRegistry() *Registry {
 	for _, definition := range csvTools() {
 		registry.byName[definition.Name] = definition
 	}
+	for _, definition := range vectorTools() {
+		registry.byName[definition.Name] = definition
+	}
 	return registry
 }
 
@@ -276,4 +279,38 @@ func (r *Registry) Register(definition Definition) {
 func (r *Registry) IsWriteSide(name string) bool {
 	definition, ok := r.byName[name]
 	return ok && definition.WriteSide
+}
+
+// vectorTools are catalog entries for the org-scoped memory tools. Their
+// execution REQUIRES engine context (org, run, consent), so the tool-node
+// executor intercepts them before generic dispatch; calling them through
+// the bare registry (no engine) answers with the engine-context error.
+func vectorTools() []Definition {
+	engineOnly := func(context.Context, map[string]any) (map[string]any, error) {
+		return nil, fmt.Errorf("vector tools require engine context")
+	}
+	return []Definition{
+		{
+			Name:        "vector.search",
+			Description: "Search the org's vector memory (workflow_vector kind) by semantic similarity.",
+			Required:    []string{"query"},
+			Fields: []Field{
+				{Name: "query", Type: "string"},
+			},
+			InputExample: map[string]any{"query": "prior fixes for the billing webhook"},
+			Execute:      engineOnly,
+		},
+		{
+			Name:        "vector.upsert",
+			Description: "Store one entry in the org's vector memory (workflow_vector kind). Consent-gated.",
+			Required:    []string{"content"},
+			Fields: []Field{
+				{Name: "content", Type: "string"},
+				{Name: "metadata", Type: "object"},
+			},
+			InputExample: map[string]any{"content": "retries with backoff fixed the timeout"},
+			WriteSide:    true,
+			Execute:      engineOnly,
+		},
+	}
 }

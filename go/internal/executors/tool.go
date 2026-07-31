@@ -24,6 +24,12 @@ func NewToolExecutor(registry *tools.Registry) Func {
 		}
 		policy, _ := in.Config["resultPolicy"].(string)
 
+		// Vector tools are org-scoped: the executor intercepts them with
+		// the engine-built memory seams before generic dispatch.
+		if name == "vector.search" || name == "vector.upsert" {
+			return map[string]any{"tool": name, "result": executeVectorTool(name, input, in.Memory)}, nil
+		}
+
 		output, err := registry.Execute(ctx, name, input)
 		result := map[string]any{"ok": true}
 		if err != nil {
@@ -38,4 +44,35 @@ func NewToolExecutor(registry *tools.Registry) Func {
 		}
 		return map[string]any{"tool": name, "result": result}, nil
 	}
+}
+
+// executeVectorTool: thin wrappers over the memory substrate. Consent off
+// (or no deps) answers {ok:false, error:"memory_disabled"} for upsert and
+// an empty result for search — never a throw. A validation (dry-run)
+// execution skips the WRITE side entirely.
+func executeVectorTool(name string, input map[string]any, deps *MemoryDeps) map[string]any {
+	if name == "vector.search" {
+		query, _ := input["query"].(string)
+		if deps == nil || deps.Recall == nil || query == "" {
+			return map[string]any{"ok": true, "entries": []any{}}
+		}
+		entries := deps.Recall(query)
+		anyEntries := make([]any, 0, len(entries))
+		for _, entry := range entries {
+			anyEntries = append(anyEntries, entry)
+		}
+		return map[string]any{"ok": true, "entries": anyEntries}
+	}
+	content, _ := input["content"].(string)
+	if content == "" {
+		return map[string]any{"ok": false, "error": "content is required"}
+	}
+	if deps == nil || deps.Commit == nil {
+		return map[string]any{"ok": false, "error": "memory_disabled"}
+	}
+	if deps.DryRun {
+		return map[string]any{"ok": true, "skipped": true, "reason": "validation_dry_run"}
+	}
+	metadata, _ := input["metadata"].(map[string]any)
+	return deps.Commit(content, metadata)
 }

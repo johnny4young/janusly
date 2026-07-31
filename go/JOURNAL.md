@@ -1461,3 +1461,10 @@ producción necesita saber — de lo ya resuelto o informativo.
   embeddings de Ollama, y la garantía probada de que nada lanza: consent
   apagado escribe cero, Ollama muerto degrada en silencio, y cada
   recall firma su runId para la factura.
+
+## 2026-07-31 — la memoria llega a los workflows (T-113)
+
+- Las vector tools como wrappers finos interceptados en el executor —
+  el registro queda puro y la identidad org/run viaja por closures. El
+  consent apagado responde envelopes cerrados sin lanzar, y la
+  validación salta la escritura con cero filas.

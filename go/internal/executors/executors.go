@@ -37,6 +37,17 @@ type Input struct {
 	// AI carries the tenant-resolved seams for `ai`/`agent` nodes; nil
 	// behaves as "no provider configured" (the $0 fallback).
 	AI *AIDeps
+	// Memory carries the org-scoped memory seams for the vector tools;
+	// nil behaves as consent-off (search empty, upsert memory_disabled).
+	Memory *MemoryDeps
+}
+
+// MemoryDeps are thin closures over the memory substrate — the vector
+// tools NEVER re-implement embedding or DB access.
+type MemoryDeps struct {
+	DryRun bool
+	Commit func(content string, metadata map[string]any) map[string]any
+	Recall func(query string) []map[string]any
 }
 
 // HTTPBounds are the tenant-effective outbound HTTP defaults.

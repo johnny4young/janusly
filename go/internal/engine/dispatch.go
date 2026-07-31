@@ -19,6 +19,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/executors"
 	"github.com/johnny4young/janusly/go/internal/grammar"
+	"github.com/johnny4young/janusly/go/internal/memory"
 	"github.com/johnny4young/janusly/go/internal/prompts"
 	"github.com/johnny4young/janusly/go/internal/store"
 )
@@ -101,9 +102,13 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 	if node.Type == "ai" {
 		aiDeps = d.buildAIDeps(ctx, claim)
 	}
+	var memoryDeps *executors.MemoryDeps
+	if node.Type == "tool" {
+		memoryDeps = d.buildMemoryDeps(ctx, claim)
+	}
 	output, execErr := execute(ctx, executors.Input{
 		RunID: claim.RunID, NodeID: claim.NodeID,
-		Config: renderedConfig, Context: runContext, HTTPBounds: httpBounds, AI: aiDeps,
+		Config: renderedConfig, Context: runContext, HTTPBounds: httpBounds, AI: aiDeps, Memory: memoryDeps,
 		Emit: func(eventType string, payload map[string]any) {
 			eventAt := eventNow()
 			raw, err := json.Marshal(payload)
@@ -250,6 +255,46 @@ func (d *Dispatcher) buildAIDeps(ctx context.Context, claim ClaimedNode) *execut
 		},
 		ResolvePrompt: func(name string, version int, variables map[string]string) (string, error) {
 			return prompts.ResolveTemplate(ctx, pool, claim.OrgID, name, version, variables)
+		},
+	}
+}
+
+// buildMemoryDeps wires the vector tools to the memory substrate with
+// the run's org/run identity and the validation dry-run flag.
+func (d *Dispatcher) buildMemoryDeps(ctx context.Context, claim ClaimedNode) *executors.MemoryDeps {
+	pool := d.engine.pool
+	dryRun := false
+	if run, err := store.New(pool).GetRunExecution(ctx, claim.RunID); err == nil && run.ReplayMode.Valid {
+		dryRun = run.ReplayMode.String == "validation"
+	}
+	return &executors.MemoryDeps{
+		DryRun: dryRun,
+		Commit: func(content string, metadata map[string]any) map[string]any {
+			result := memory.Commit(ctx, pool, memory.CommitInput{
+				OrgID: claim.OrgID, RunID: claim.RunID, Kind: "workflow_vector",
+				Content: content, Metadata: metadata,
+			})
+			out := map[string]any{"ok": result.OK}
+			if result.Error != "" {
+				out["error"] = result.Error
+			}
+			if result.ID != "" {
+				out["id"] = result.ID
+			}
+			return out
+		},
+		Recall: func(query string) []map[string]any {
+			entries := memory.Recall(ctx, pool, memory.RecallInput{
+				OrgID: claim.OrgID, RunID: claim.RunID, Kind: "workflow_vector", Query: query,
+			})
+			out := make([]map[string]any, 0, len(entries))
+			for _, entry := range entries {
+				out = append(out, map[string]any{
+					"id": entry.ID, "kind": entry.Kind, "content": entry.Content,
+					"metadata": entry.Metadata,
+				})
+			}
+			return out
 		},
 	}
 }
