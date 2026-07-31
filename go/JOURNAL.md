@@ -764,3 +764,23 @@ local. Sin umbral pasa/no-pasa: números para aprender.
   emite muestra por AMBAS superficies (run_nodes + dead_letters) y el
   cluster reporta frecuencia 1 con la ref DLQ ganando, mientras
   `totalSamples: 2` conserva la contabilidad cruda como Node.
+
+## 2026-07-30 — campañas de replay paced sobre el due-clock (T-045)
+
+- La arquitectura del pilot resultó MÁS simple que la de la referencia
+  sin perder ningún invariante: Node espeja despachos en BullMQ y
+  necesita un reconciliador para publicaciones perdidas; el pilot
+  bombea directamente el due-clock de Postgres que Node ya declaraba
+  autoritativo. El claim de despacho avanza el reloj por su propio
+  pacing en el mismo statement con SKIP LOCKED — doble despacho
+  imposible por construcción, cero maquinaria de reparación.
+- El test de re-elegibilidad destapó un gap real del F0: el redrive
+  reclamaba la fila sin voltear su status, dejando dead letters
+  reproducidos como "open" eternos — una segunda campaña los habría
+  aceptado como cohorte (el claim habría fallado los items, pero la UX
+  del preview mentía). El claim ahora es también el flip open →
+  replayed, un solo statement.
+- Ciclo completo probado en vivo: cohorte de 2 con 1s de pacing drena
+  y completa con contadores exactos; con 60s de pacing la cancelación
+  aterriza antes del segundo item y reporta verazmente lo que alcanzó
+  a pasar (replayed + cancelled == total).

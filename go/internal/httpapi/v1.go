@@ -106,6 +106,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 		_ = json.NewEncoder(w).Encode(tools.NewRegistry().Catalog())
 	}))
 	server.legacyMutations(mux)
+	server.mountCampaignRoutes(mux)
 	return WithBrowserHeaders(mux)
 }
 

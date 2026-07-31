@@ -71,6 +71,9 @@ func run() error {
 		defer close(workersDone)
 		_ = eng.RunWorkers(workerCtx, cfg.WorkerConcurrency, cfg.PollInterval, dispatcher.Execute, logger)
 	}()
+	go func() {
+		eng.RunReplayCampaignPump(workerCtx, cfg.PollInterval, logger)
+	}()
 	go eng.StartReaper(workerCtx, time.Minute, time.Hour, logger)
 	defer func() { stopWorkers(); <-workersDone }()
 

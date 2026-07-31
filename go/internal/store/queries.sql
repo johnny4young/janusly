@@ -358,8 +358,12 @@ LIMIT sqlc.arg(page_limit);
 SELECT status, count(*) AS count FROM dead_letters
 WHERE org_id = $1 GROUP BY status;
 
+-- The claim is also the lifecycle flip: one statement takes the causal
+-- replay claim AND moves the row open → replayed, so a claimed dead letter
+-- can never linger as an eligible "open" member of a second cohort.
 -- name: ClaimDeadLetterReplay :execrows
-UPDATE dead_letters SET replay_claimed_at = now()
+UPDATE dead_letters
+SET replay_claimed_at = now(), status = 'replayed', replayed_at = now()
 WHERE id = $1 AND org_id = $2 AND replay_claimed_at IS NULL;
 
 -- name: RedriveFailedRunNode :one
@@ -481,3 +485,100 @@ JOIN runs r ON r.id = rn.run_id
 WHERE r.org_id = $1 AND rn.status = 'failed' AND rn.finished_at >= $2
 ORDER BY rn.finished_at DESC
 LIMIT 2000;
+
+-- ── Replay campaigns ──────────────────────────────────────────────────
+-- The Postgres due clock (next_dispatch_at + the partial running index) is
+-- the authoritative pacing substrate; the pilot pumps it directly instead
+-- of mirroring dispatches into a queue.
+
+-- name: ListReplayCampaignDeadLetters :many
+SELECT id, run_id, node_id, status, error_json, node_json
+FROM dead_letters
+WHERE org_id = $1 AND id = ANY(sqlc.arg(ids)::text[]);
+
+-- name: InsertReplayCampaign :exec
+INSERT INTO replay_campaigns (id, org_id, name, cluster_signature, filter_json,
+                              pacing_ms, total_count, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+
+-- name: InsertReplayCampaignItem :exec
+INSERT INTO replay_campaign_items (id, org_id, campaign_id, dead_letter_id, position)
+VALUES ($1, $2, $3, $4, $5);
+
+-- name: GetReplayCampaign :one
+SELECT * FROM replay_campaigns WHERE org_id = $1 AND id = $2;
+
+-- name: ListReplayCampaignItems :many
+SELECT * FROM replay_campaign_items
+WHERE org_id = $1 AND campaign_id = $2
+ORDER BY position;
+
+-- name: ListReplayCampaigns :many
+SELECT * FROM replay_campaigns
+WHERE org_id = $1
+ORDER BY created_at DESC
+LIMIT $2;
+
+-- Cancellation: pending items flip to cancelled and the campaign records
+-- the truthful counter in one statement pair (same tx).
+-- name: CancelRunningReplayCampaign :one
+UPDATE replay_campaigns
+SET status = 'cancelled', cancelled_by = $3, cancelled_at = now(), updated_at = now(),
+    cancelled_count = cancelled_count + (
+      SELECT count(*) FROM replay_campaign_items i
+      WHERE i.campaign_id = replay_campaigns.id AND i.status = 'pending')
+WHERE replay_campaigns.org_id = $1 AND replay_campaigns.id = $2
+  AND replay_campaigns.status = 'running'
+RETURNING *;
+
+-- name: CancelPendingReplayCampaignItems :execrows
+UPDATE replay_campaign_items SET status = 'cancelled', completed_at = now()
+WHERE org_id = $1 AND campaign_id = $2 AND status = 'pending';
+
+-- The pump's dispatch claim: lease one due running campaign and push its
+-- clock forward by its own pacing in the same statement, so concurrent
+-- pumps can't double-dispatch a step.
+-- name: ClaimDueReplayCampaign :one
+UPDATE replay_campaigns
+SET next_dispatch_at = now() + make_interval(secs => pacing_ms / 1000.0),
+    updated_at = now()
+WHERE id = (
+  SELECT id FROM replay_campaigns
+  WHERE status = 'running' AND next_dispatch_at <= now()
+  ORDER BY next_dispatch_at
+  LIMIT 1
+  FOR UPDATE SKIP LOCKED)
+RETURNING *;
+
+-- name: ClaimNextReplayCampaignItem :one
+UPDATE replay_campaign_items
+SET status = 'processing', claim_token = sqlc.arg(claim_token),
+    claimed_at = now(), attempt_count = attempt_count + 1
+WHERE replay_campaign_items.id = (
+  SELECT i.id FROM replay_campaign_items i
+  WHERE i.campaign_id = sqlc.arg(campaign_id) AND i.status = 'pending'
+  ORDER BY i.position
+  LIMIT 1
+  FOR UPDATE SKIP LOCKED)
+RETURNING *;
+
+-- name: SettleReplayCampaignItem :execrows
+UPDATE replay_campaign_items
+SET status = sqlc.arg(status), error = sqlc.arg(error), completed_at = now()
+WHERE id = sqlc.arg(id) AND claim_token = sqlc.arg(claim_token) AND status = 'processing';
+
+-- name: BumpReplayCampaignCounter :exec
+UPDATE replay_campaigns
+SET replayed_count = replayed_count + sqlc.arg(replayed)::int,
+    failed_count = failed_count + sqlc.arg(failed)::int,
+    updated_at = now()
+WHERE id = $1;
+
+-- name: CompleteReplayCampaignIfExhausted :one
+UPDATE replay_campaigns
+SET status = 'completed', completed_at = now(), updated_at = now()
+WHERE replay_campaigns.id = $1 AND replay_campaigns.status = 'running'
+  AND NOT EXISTS (
+    SELECT 1 FROM replay_campaign_items i
+    WHERE i.campaign_id = $1 AND i.status IN ('pending', 'processing'))
+RETURNING *;

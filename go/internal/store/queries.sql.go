@@ -25,6 +25,43 @@ func (q *Queries) AcquireRunCompletionLock(ctx context.Context, runID string) er
 	return err
 }
 
+const bumpReplayCampaignCounter = `-- name: BumpReplayCampaignCounter :exec
+UPDATE replay_campaigns
+SET replayed_count = replayed_count + $2::int,
+    failed_count = failed_count + $3::int,
+    updated_at = now()
+WHERE id = $1
+`
+
+type BumpReplayCampaignCounterParams struct {
+	ID       string
+	Replayed int32
+	Failed   int32
+}
+
+func (q *Queries) BumpReplayCampaignCounter(ctx context.Context, arg BumpReplayCampaignCounterParams) error {
+	_, err := q.db.Exec(ctx, bumpReplayCampaignCounter, arg.ID, arg.Replayed, arg.Failed)
+	return err
+}
+
+const cancelPendingReplayCampaignItems = `-- name: CancelPendingReplayCampaignItems :execrows
+UPDATE replay_campaign_items SET status = 'cancelled', completed_at = now()
+WHERE org_id = $1 AND campaign_id = $2 AND status = 'pending'
+`
+
+type CancelPendingReplayCampaignItemsParams struct {
+	OrgID      string
+	CampaignID string
+}
+
+func (q *Queries) CancelPendingReplayCampaignItems(ctx context.Context, arg CancelPendingReplayCampaignItemsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, cancelPendingReplayCampaignItems, arg.OrgID, arg.CampaignID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const cancelRun = `-- name: CancelRun :exec
 UPDATE runs SET status = 'cancelled' WHERE id = $1
 `
@@ -58,8 +95,55 @@ func (q *Queries) CancelRunNodes(ctx context.Context, arg CancelRunNodesParams) 
 	return result.RowsAffected(), nil
 }
 
+const cancelRunningReplayCampaign = `-- name: CancelRunningReplayCampaign :one
+UPDATE replay_campaigns
+SET status = 'cancelled', cancelled_by = $3, cancelled_at = now(), updated_at = now(),
+    cancelled_count = cancelled_count + (
+      SELECT count(*) FROM replay_campaign_items i
+      WHERE i.campaign_id = replay_campaigns.id AND i.status = 'pending')
+WHERE replay_campaigns.org_id = $1 AND replay_campaigns.id = $2
+  AND replay_campaigns.status = 'running'
+RETURNING id, org_id, name, cluster_signature, filter_json, pacing_ms, status, total_count, replayed_count, failed_count, cancelled_count, created_by, cancelled_by, next_dispatch_at, started_at, completed_at, cancelled_at, created_at, updated_at
+`
+
+type CancelRunningReplayCampaignParams struct {
+	OrgID       string
+	ID          string
+	CancelledBy pgtype.Text
+}
+
+// Cancellation: pending items flip to cancelled and the campaign records
+// the truthful counter in one statement pair (same tx).
+func (q *Queries) CancelRunningReplayCampaign(ctx context.Context, arg CancelRunningReplayCampaignParams) (ReplayCampaign, error) {
+	row := q.db.QueryRow(ctx, cancelRunningReplayCampaign, arg.OrgID, arg.ID, arg.CancelledBy)
+	var i ReplayCampaign
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.ClusterSignature,
+		&i.FilterJson,
+		&i.PacingMs,
+		&i.Status,
+		&i.TotalCount,
+		&i.ReplayedCount,
+		&i.FailedCount,
+		&i.CancelledCount,
+		&i.CreatedBy,
+		&i.CancelledBy,
+		&i.NextDispatchAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.CancelledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const claimDeadLetterReplay = `-- name: ClaimDeadLetterReplay :execrows
-UPDATE dead_letters SET replay_claimed_at = now()
+UPDATE dead_letters
+SET replay_claimed_at = now(), status = 'replayed', replayed_at = now()
 WHERE id = $1 AND org_id = $2 AND replay_claimed_at IS NULL
 `
 
@@ -68,12 +152,96 @@ type ClaimDeadLetterReplayParams struct {
 	OrgID string
 }
 
+// The claim is also the lifecycle flip: one statement takes the causal
+// replay claim AND moves the row open → replayed, so a claimed dead letter
+// can never linger as an eligible "open" member of a second cohort.
 func (q *Queries) ClaimDeadLetterReplay(ctx context.Context, arg ClaimDeadLetterReplayParams) (int64, error) {
 	result, err := q.db.Exec(ctx, claimDeadLetterReplay, arg.ID, arg.OrgID)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const claimDueReplayCampaign = `-- name: ClaimDueReplayCampaign :one
+UPDATE replay_campaigns
+SET next_dispatch_at = now() + make_interval(secs => pacing_ms / 1000.0),
+    updated_at = now()
+WHERE id = (
+  SELECT id FROM replay_campaigns
+  WHERE status = 'running' AND next_dispatch_at <= now()
+  ORDER BY next_dispatch_at
+  LIMIT 1
+  FOR UPDATE SKIP LOCKED)
+RETURNING id, org_id, name, cluster_signature, filter_json, pacing_ms, status, total_count, replayed_count, failed_count, cancelled_count, created_by, cancelled_by, next_dispatch_at, started_at, completed_at, cancelled_at, created_at, updated_at
+`
+
+// The pump's dispatch claim: lease one due running campaign and push its
+// clock forward by its own pacing in the same statement, so concurrent
+// pumps can't double-dispatch a step.
+func (q *Queries) ClaimDueReplayCampaign(ctx context.Context) (ReplayCampaign, error) {
+	row := q.db.QueryRow(ctx, claimDueReplayCampaign)
+	var i ReplayCampaign
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.ClusterSignature,
+		&i.FilterJson,
+		&i.PacingMs,
+		&i.Status,
+		&i.TotalCount,
+		&i.ReplayedCount,
+		&i.FailedCount,
+		&i.CancelledCount,
+		&i.CreatedBy,
+		&i.CancelledBy,
+		&i.NextDispatchAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.CancelledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const claimNextReplayCampaignItem = `-- name: ClaimNextReplayCampaignItem :one
+UPDATE replay_campaign_items
+SET status = 'processing', claim_token = $1,
+    claimed_at = now(), attempt_count = attempt_count + 1
+WHERE replay_campaign_items.id = (
+  SELECT i.id FROM replay_campaign_items i
+  WHERE i.campaign_id = $2 AND i.status = 'pending'
+  ORDER BY i.position
+  LIMIT 1
+  FOR UPDATE SKIP LOCKED)
+RETURNING id, org_id, campaign_id, dead_letter_id, position, status, attempt_count, claim_token, claimed_at, error, completed_at, created_at
+`
+
+type ClaimNextReplayCampaignItemParams struct {
+	ClaimToken pgtype.Text
+	CampaignID string
+}
+
+func (q *Queries) ClaimNextReplayCampaignItem(ctx context.Context, arg ClaimNextReplayCampaignItemParams) (ReplayCampaignItem, error) {
+	row := q.db.QueryRow(ctx, claimNextReplayCampaignItem, arg.ClaimToken, arg.CampaignID)
+	var i ReplayCampaignItem
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.CampaignID,
+		&i.DeadLetterID,
+		&i.Position,
+		&i.Status,
+		&i.AttemptCount,
+		&i.ClaimToken,
+		&i.ClaimedAt,
+		&i.Error,
+		&i.CompletedAt,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const claimTriggerEventStart = `-- name: ClaimTriggerEventStart :execrows
@@ -98,6 +266,43 @@ func (q *Queries) ClaimTriggerEventStart(ctx context.Context, arg ClaimTriggerEv
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const completeReplayCampaignIfExhausted = `-- name: CompleteReplayCampaignIfExhausted :one
+UPDATE replay_campaigns
+SET status = 'completed', completed_at = now(), updated_at = now()
+WHERE replay_campaigns.id = $1 AND replay_campaigns.status = 'running'
+  AND NOT EXISTS (
+    SELECT 1 FROM replay_campaign_items i
+    WHERE i.campaign_id = $1 AND i.status IN ('pending', 'processing'))
+RETURNING id, org_id, name, cluster_signature, filter_json, pacing_ms, status, total_count, replayed_count, failed_count, cancelled_count, created_by, cancelled_by, next_dispatch_at, started_at, completed_at, cancelled_at, created_at, updated_at
+`
+
+func (q *Queries) CompleteReplayCampaignIfExhausted(ctx context.Context, id string) (ReplayCampaign, error) {
+	row := q.db.QueryRow(ctx, completeReplayCampaignIfExhausted, id)
+	var i ReplayCampaign
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.ClusterSignature,
+		&i.FilterJson,
+		&i.PacingMs,
+		&i.Status,
+		&i.TotalCount,
+		&i.ReplayedCount,
+		&i.FailedCount,
+		&i.CancelledCount,
+		&i.CreatedBy,
+		&i.CancelledBy,
+		&i.NextDispatchAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.CancelledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const completeRunNode = `-- name: CompleteRunNode :execrows
@@ -390,6 +595,42 @@ func (q *Queries) GetLatestWorkflowVersion(ctx context.Context, arg GetLatestWor
 		&i.DagJson,
 		&i.CreatedBy,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getReplayCampaign = `-- name: GetReplayCampaign :one
+SELECT id, org_id, name, cluster_signature, filter_json, pacing_ms, status, total_count, replayed_count, failed_count, cancelled_count, created_by, cancelled_by, next_dispatch_at, started_at, completed_at, cancelled_at, created_at, updated_at FROM replay_campaigns WHERE org_id = $1 AND id = $2
+`
+
+type GetReplayCampaignParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) GetReplayCampaign(ctx context.Context, arg GetReplayCampaignParams) (ReplayCampaign, error) {
+	row := q.db.QueryRow(ctx, getReplayCampaign, arg.OrgID, arg.ID)
+	var i ReplayCampaign
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.ClusterSignature,
+		&i.FilterJson,
+		&i.PacingMs,
+		&i.Status,
+		&i.TotalCount,
+		&i.ReplayedCount,
+		&i.FailedCount,
+		&i.CancelledCount,
+		&i.CreatedBy,
+		&i.CancelledBy,
+		&i.NextDispatchAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.CancelledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -688,6 +929,61 @@ func (q *Queries) InsertDeadLetter(ctx context.Context, arg InsertDeadLetterPara
 		arg.WorkflowJson,
 		arg.NodeJson,
 		arg.ErrorJson,
+	)
+	return err
+}
+
+const insertReplayCampaign = `-- name: InsertReplayCampaign :exec
+INSERT INTO replay_campaigns (id, org_id, name, cluster_signature, filter_json,
+                              pacing_ms, total_count, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+`
+
+type InsertReplayCampaignParams struct {
+	ID               string
+	OrgID            string
+	Name             string
+	ClusterSignature string
+	FilterJson       json.RawMessage
+	PacingMs         int32
+	TotalCount       int32
+	CreatedBy        string
+}
+
+func (q *Queries) InsertReplayCampaign(ctx context.Context, arg InsertReplayCampaignParams) error {
+	_, err := q.db.Exec(ctx, insertReplayCampaign,
+		arg.ID,
+		arg.OrgID,
+		arg.Name,
+		arg.ClusterSignature,
+		arg.FilterJson,
+		arg.PacingMs,
+		arg.TotalCount,
+		arg.CreatedBy,
+	)
+	return err
+}
+
+const insertReplayCampaignItem = `-- name: InsertReplayCampaignItem :exec
+INSERT INTO replay_campaign_items (id, org_id, campaign_id, dead_letter_id, position)
+VALUES ($1, $2, $3, $4, $5)
+`
+
+type InsertReplayCampaignItemParams struct {
+	ID           string
+	OrgID        string
+	CampaignID   string
+	DeadLetterID string
+	Position     int32
+}
+
+func (q *Queries) InsertReplayCampaignItem(ctx context.Context, arg InsertReplayCampaignItemParams) error {
+	_, err := q.db.Exec(ctx, insertReplayCampaignItem,
+		arg.ID,
+		arg.OrgID,
+		arg.CampaignID,
+		arg.DeadLetterID,
+		arg.Position,
 	)
 	return err
 }
@@ -1281,6 +1577,154 @@ func (q *Queries) ListOrgHTTPConfig(ctx context.Context, orgID string) ([]ListOr
 	for rows.Next() {
 		var i ListOrgHTTPConfigRow
 		if err := rows.Scan(&i.Key, &i.ValueJson); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReplayCampaignDeadLetters = `-- name: ListReplayCampaignDeadLetters :many
+
+SELECT id, run_id, node_id, status, error_json, node_json
+FROM dead_letters
+WHERE org_id = $1 AND id = ANY($2::text[])
+`
+
+type ListReplayCampaignDeadLettersParams struct {
+	OrgID string
+	Ids   []string
+}
+
+type ListReplayCampaignDeadLettersRow struct {
+	ID        string
+	RunID     string
+	NodeID    string
+	Status    string
+	ErrorJson json.RawMessage
+	NodeJson  json.RawMessage
+}
+
+// ── Replay campaigns ──────────────────────────────────────────────────
+// The Postgres due clock (next_dispatch_at + the partial running index) is
+// the authoritative pacing substrate; the pilot pumps it directly instead
+// of mirroring dispatches into a queue.
+func (q *Queries) ListReplayCampaignDeadLetters(ctx context.Context, arg ListReplayCampaignDeadLettersParams) ([]ListReplayCampaignDeadLettersRow, error) {
+	rows, err := q.db.Query(ctx, listReplayCampaignDeadLetters, arg.OrgID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListReplayCampaignDeadLettersRow
+	for rows.Next() {
+		var i ListReplayCampaignDeadLettersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.NodeID,
+			&i.Status,
+			&i.ErrorJson,
+			&i.NodeJson,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReplayCampaignItems = `-- name: ListReplayCampaignItems :many
+SELECT id, org_id, campaign_id, dead_letter_id, position, status, attempt_count, claim_token, claimed_at, error, completed_at, created_at FROM replay_campaign_items
+WHERE org_id = $1 AND campaign_id = $2
+ORDER BY position
+`
+
+type ListReplayCampaignItemsParams struct {
+	OrgID      string
+	CampaignID string
+}
+
+func (q *Queries) ListReplayCampaignItems(ctx context.Context, arg ListReplayCampaignItemsParams) ([]ReplayCampaignItem, error) {
+	rows, err := q.db.Query(ctx, listReplayCampaignItems, arg.OrgID, arg.CampaignID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ReplayCampaignItem
+	for rows.Next() {
+		var i ReplayCampaignItem
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.CampaignID,
+			&i.DeadLetterID,
+			&i.Position,
+			&i.Status,
+			&i.AttemptCount,
+			&i.ClaimToken,
+			&i.ClaimedAt,
+			&i.Error,
+			&i.CompletedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReplayCampaigns = `-- name: ListReplayCampaigns :many
+SELECT id, org_id, name, cluster_signature, filter_json, pacing_ms, status, total_count, replayed_count, failed_count, cancelled_count, created_by, cancelled_by, next_dispatch_at, started_at, completed_at, cancelled_at, created_at, updated_at FROM replay_campaigns
+WHERE org_id = $1
+ORDER BY created_at DESC
+LIMIT $2
+`
+
+type ListReplayCampaignsParams struct {
+	OrgID string
+	Limit int32
+}
+
+func (q *Queries) ListReplayCampaigns(ctx context.Context, arg ListReplayCampaignsParams) ([]ReplayCampaign, error) {
+	rows, err := q.db.Query(ctx, listReplayCampaigns, arg.OrgID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ReplayCampaign
+	for rows.Next() {
+		var i ReplayCampaign
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Name,
+			&i.ClusterSignature,
+			&i.FilterJson,
+			&i.PacingMs,
+			&i.Status,
+			&i.TotalCount,
+			&i.ReplayedCount,
+			&i.FailedCount,
+			&i.CancelledCount,
+			&i.CreatedBy,
+			&i.CancelledBy,
+			&i.NextDispatchAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.CancelledAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -2113,6 +2557,32 @@ WHERE id = $1 AND status = 'failed'
 
 func (q *Queries) ReviveFailedRun(ctx context.Context, id string) (int64, error) {
 	result, err := q.db.Exec(ctx, reviveFailedRun, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const settleReplayCampaignItem = `-- name: SettleReplayCampaignItem :execrows
+UPDATE replay_campaign_items
+SET status = $1, error = $2, completed_at = now()
+WHERE id = $3 AND claim_token = $4 AND status = 'processing'
+`
+
+type SettleReplayCampaignItemParams struct {
+	Status     string
+	Error      pgtype.Text
+	ID         string
+	ClaimToken pgtype.Text
+}
+
+func (q *Queries) SettleReplayCampaignItem(ctx context.Context, arg SettleReplayCampaignItemParams) (int64, error) {
+	result, err := q.db.Exec(ctx, settleReplayCampaignItem,
+		arg.Status,
+		arg.Error,
+		arg.ID,
+		arg.ClaimToken,
+	)
 	if err != nil {
 		return 0, err
 	}

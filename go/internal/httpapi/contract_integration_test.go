@@ -53,6 +53,7 @@ func newAPIHarness(t *testing.T) *apiHarness {
 		defer close(done)
 		_ = eng.RunWorkers(workerCtx, 2, 30*time.Millisecond, dispatcher.Execute, quietTestLogger())
 	}()
+	go eng.RunReplayCampaignPump(workerCtx, 30*time.Millisecond, quietTestLogger())
 	t.Cleanup(func() { stopWorkers(); <-done })
 
 	server := httptest.NewServer(NewV1Handler(eng, pool))
