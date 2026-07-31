@@ -947,3 +947,11 @@ producción necesita saber — de lo ya resuelto o informativo.
   página uno en vez de romper la sesión del agente. El test recorre la
   paginación real: página de 2 con hasMore y cursor, página siguiente
   sin solapamiento, filtro por workflow devolviendo exactamente su run.
+
+## 2026-07-31 — consent de escrituras MCP (T-057)
+
+- El principio de la referencia intacto: un agente externo NO escribe
+  sin doble opt-in explícito — proceso y tenant — y la negación le dice
+  exactamente cuál capa falta, con los mensajes verbatim. El escalón
+  completo probado en vivo: flag de proceso apagado, flag encendido con
+  consent revocado, y los reads fluyendo sin gate en ambos estados.

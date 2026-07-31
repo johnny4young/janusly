@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -153,6 +154,9 @@ func expected(message string) (*mcp.CallToolResult, any, error) {
 }
 
 func (d Deps) saveWorkflow(ctx context.Context, raw json.RawMessage) (*mcp.CallToolResult, any, error) {
+	if allowed, message := d.guardWrite(ctx); !allowed {
+		return expected(message)
+	}
 	wf, issues := domain.Parse(raw)
 	if wf == nil {
 		return expected(fmt.Sprintf("workflow contract invalid: %s", issueSummary(issues)))
@@ -206,6 +210,9 @@ func (d Deps) saveWorkflow(ctx context.Context, raw json.RawMessage) (*mcp.CallT
 }
 
 func (d Deps) startRun(ctx context.Context, raw json.RawMessage, input map[string]any) (*mcp.CallToolResult, any, error) {
+	if allowed, message := d.guardWrite(ctx); !allowed {
+		return expected(message)
+	}
 	wf, issues := domain.Parse(raw)
 	if wf == nil {
 		return expected(fmt.Sprintf("workflow contract invalid: %s", issueSummary(issues)))
@@ -332,6 +339,9 @@ func (d Deps) dlqList(ctx context.Context, limit int) (*mcp.CallToolResult, any,
 }
 
 func (d Deps) redrive(ctx context.Context, deadLetterID string) (*mcp.CallToolResult, any, error) {
+	if allowed, message := d.guardWrite(ctx); !allowed {
+		return expected(message)
+	}
 	if deadLetterID == "" {
 		return expected("deadLetterId is required")
 	}
@@ -456,4 +466,28 @@ func createdAtISO(at *time.Time) string {
 		return ""
 	}
 	return at.UTC().Format(time.RFC3339Nano)
+}
+
+// guardWrite is the two-flag write consent, ported from the reference's
+// guardMcpWrite: process-wide env opt-in AND the tenant's org-config
+// consent row must BOTH be true before any MCP write tool acts. Denials
+// return the reference's verbatim messages as expected (isError) results
+// — the pilot's MCP is in-process, so the reference's HTTP 403 surfaces
+// as a tool error instead. The per-action rate limit is not ported (the
+// pilot has no limiter substrate).
+func (d Deps) guardWrite(ctx context.Context) (bool, string) {
+	if os.Getenv("JANUSLY_MCP_WRITES_ENABLED") != "true" {
+		return false, "MCP writes are disabled at the process level (JANUSLY_MCP_WRITES_ENABLED is not 'true')."
+	}
+	raw, err := store.New(d.Pool).GetOrgConfigValue(ctx, store.GetOrgConfigValueParams{
+		OrgID: d.OrgID, Key: "mcp.writeConsent",
+	})
+	consent := false
+	if err == nil {
+		_ = json.Unmarshal(raw, &consent)
+	}
+	if !consent {
+		return false, "MCP writes are not consented for this organization (mcp.writeConsent is false)."
+	}
+	return true, ""
 }

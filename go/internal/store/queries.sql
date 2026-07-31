@@ -640,3 +640,6 @@ SELECT count(*)::int AS sample_size,
        COALESCE(percentile_cont(0.9) WITHIN GROUP (ORDER BY duration_ms), -1)::float8 AS p90_ms,
        COALESCE(avg(duration_ms), -1)::float8 AS mttr_avg_ms
 FROM recovered;
+
+-- name: GetOrgConfigValue :one
+SELECT value_json FROM org_configs WHERE org_id = $1 AND key = $2;

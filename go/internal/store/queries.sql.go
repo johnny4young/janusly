@@ -599,6 +599,22 @@ func (q *Queries) GetLatestWorkflowVersion(ctx context.Context, arg GetLatestWor
 	return i, err
 }
 
+const getOrgConfigValue = `-- name: GetOrgConfigValue :one
+SELECT value_json FROM org_configs WHERE org_id = $1 AND key = $2
+`
+
+type GetOrgConfigValueParams struct {
+	OrgID string
+	Key   string
+}
+
+func (q *Queries) GetOrgConfigValue(ctx context.Context, arg GetOrgConfigValueParams) (json.RawMessage, error) {
+	row := q.db.QueryRow(ctx, getOrgConfigValue, arg.OrgID, arg.Key)
+	var value_json json.RawMessage
+	err := row.Scan(&value_json)
+	return value_json, err
+}
+
 const getReplayCampaign = `-- name: GetReplayCampaign :one
 SELECT id, org_id, name, cluster_signature, filter_json, pacing_ms, status, total_count, replayed_count, failed_count, cancelled_count, created_by, cancelled_by, next_dispatch_at, started_at, completed_at, cancelled_at, created_at, updated_at FROM replay_campaigns WHERE org_id = $1 AND id = $2
 `

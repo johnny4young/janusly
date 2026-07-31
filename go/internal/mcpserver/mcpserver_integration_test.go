@@ -54,6 +54,15 @@ func newMCPSession(t *testing.T) (*mcp.ClientSession, string) {
 	t.Cleanup(func() { stopWorkers(); <-done })
 
 	org := fmt.Sprintf("mcp-org-%d", time.Now().UnixNano())
+	// Write tools run under the two-flag consent; the harness models a
+	// fully consented environment. The denial ladder has its own test.
+	t.Setenv("JANUSLY_MCP_WRITES_ENABLED", "true")
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO org_configs (id, org_id, key, value_json, category, description, value_type)
+		 VALUES ($1, $2, 'mcp.writeConsent', 'true', 'mcp', 'test consent', 'boolean')`,
+		org+"-consent", org); err != nil {
+		t.Fatalf("seed consent: %v", err)
+	}
 	server := NewServer(Deps{Engine: eng, Pool: pool, OrgID: org, UserID: "mcp-test", NewID: uuid.NewString})
 
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
@@ -260,4 +269,58 @@ func TestMcpListToolsPaginate(t *testing.T) {
 	if len(filtered["runs"].([]any)) != 1 || filtered["hasMore"] != false {
 		t.Fatalf("filtered runs: %+v", filtered)
 	}
+}
+
+// The write-consent denial ladder: process flag off → verbatim process
+// message; flag on without tenant consent → verbatim tenant message.
+// Read tools stay available throughout.
+func TestMcpWriteConsentLadder(t *testing.T) {
+	session, orgID := newMCPSession(t)
+	doc := map[string]any{
+		"id":    fmt.Sprintf("mcp-consent-%d", time.Now().UnixNano()),
+		"nodes": []any{map[string]any{"id": "a", "type": "noop", "config": map[string]any{}}},
+		"edges": []any{},
+	}
+
+	t.Setenv("JANUSLY_MCP_WRITES_ENABLED", "")
+	res, _ := callTool(t, session, "workflows.save", map[string]any{"workflow": doc})
+	if !res.IsError {
+		t.Fatal("process-level denial expected")
+	}
+	text := res.Content[0].(*mcp.TextContent).Text
+	if text != "MCP writes are disabled at the process level (JANUSLY_MCP_WRITES_ENABLED is not 'true')." {
+		t.Fatalf("process message drifted: %q", text)
+	}
+
+	// Read tools are never gated.
+	if res, _ := callTool(t, session, "workflows.list", map[string]any{}); res.IsError {
+		t.Fatal("reads must not be gated")
+	}
+
+	// Flag on, tenant consent revoked → the tenant message.
+	t.Setenv("JANUSLY_MCP_WRITES_ENABLED", "true")
+	pool := poolForTest(t)
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE org_configs SET value_json = 'false' WHERE org_id = $1 AND key = 'mcp.writeConsent'`,
+		orgID); err != nil {
+		t.Fatalf("revoke consent: %v", err)
+	}
+	res, _ = callTool(t, session, "runs.start", map[string]any{"workflow": doc})
+	if !res.IsError {
+		t.Fatal("tenant-level denial expected")
+	}
+	text = res.Content[0].(*mcp.TextContent).Text
+	if text != "MCP writes are not consented for this organization (mcp.writeConsent is false)." {
+		t.Fatalf("tenant message drifted: %q", text)
+	}
+}
+
+func poolForTest(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	pool, err := pgxpool.New(context.Background(), os.Getenv("JANUSLY_GO_DATABASE_URL"))
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
 }
