@@ -99,3 +99,63 @@ func (e *Engine) RedriveDeadLetter(ctx context.Context, orgID, deadLetterID stri
 	metricRedrives.Inc()
 	return nil
 }
+
+// RedriveRunNode is the exact-identity replay branch: the web's run
+// panel posts {runId, nodeId} without a dead-letter id. Same in-place
+// revival (attempt re-armed to 1) minus the dead-letter claim — the
+// reference's second /dlq/replay branch.
+func (e *Engine) RedriveRunNode(ctx context.Context, orgID, runID, nodeID string) error {
+	tx, err := e.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := store.New(e.wrapTx(tx))
+
+	run, err := q.GetRun(ctx, store.GetRunParams{ID: runID, OrgID: orgID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrDeadLetterNotFound
+		}
+		return fmt.Errorf("read run: %w", err)
+	}
+	_ = run
+	if err := q.AcquireRunCompletionLock(ctx, runID); err != nil {
+		return fmt.Errorf("acquire completion lock: %w", err)
+	}
+	attempt, err := q.RedriveFailedRunNode(ctx, store.RedriveFailedRunNodeParams{
+		RunID: runID, NodeID: nodeID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrRedriveConflict
+		}
+		return fmt.Errorf("requeue failed node: %w", err)
+	}
+	if _, err := q.ReviveFailedRun(ctx, runID); err != nil {
+		return fmt.Errorf("revive run: %w", err)
+	}
+	redrivenAt := eventNow()
+	payload, err := json.Marshal(map[string]any{"attempt": attempt})
+	if err != nil {
+		return fmt.Errorf("marshal redrive payload: %w", err)
+	}
+	if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
+		ID: e.newID(), RunID: runID,
+		NodeID: pgtype.Text{String: nodeID, Valid: true},
+		Type:   "node.redriven", Payload: payload, CreatedAt: &redrivenAt,
+	}); err != nil {
+		return fmt.Errorf("insert node.redriven: %w", err)
+	}
+	if err := q.NotifyWake(ctx, runID); err != nil {
+		return fmt.Errorf("notify wake: %w", err)
+	}
+	if err := q.NotifyRunEvents(ctx, runID); err != nil {
+		return fmt.Errorf("notify run events: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	metricRedrives.Inc()
+	return nil
+}

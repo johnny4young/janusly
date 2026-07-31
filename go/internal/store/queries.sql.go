@@ -4338,7 +4338,7 @@ func (q *Queries) QueueRunNode(ctx context.Context, arg QueueRunNodeParams) (int
 
 const redriveFailedRunNode = `-- name: RedriveFailedRunNode :one
 UPDATE run_nodes
-SET status = 'queued', attempts = COALESCE(attempts, 0) + 1
+SET status = 'queued', attempts = 1
 WHERE run_id = $1 AND node_id = $2
   AND status = 'failed'
 RETURNING COALESCE(attempts, 1)::int AS attempt

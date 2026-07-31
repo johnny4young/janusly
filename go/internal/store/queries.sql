@@ -375,7 +375,7 @@ WHERE id = $1 AND org_id = $2 AND replay_claimed_at IS NULL;
 
 -- name: RedriveFailedRunNode :one
 UPDATE run_nodes
-SET status = 'queued', attempts = COALESCE(attempts, 0) + 1
+SET status = 'queued', attempts = 1
 WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
   AND status = 'failed'
 RETURNING COALESCE(attempts, 1)::int AS attempt;

@@ -143,3 +143,93 @@ func TestValidateFixSandboxGate(t *testing.T) {
 		t.Fatalf("validation_started audit: %d", audits)
 	}
 }
+
+// The continuation shape: only the failing node re-executes — ancestors
+// copy their terminal context from the original run (templates see the
+// same upstream outputs), descendants continue via the ordinary cascade,
+// and the exact-identity {runId, nodeId} replay re-arms the attempt to 1.
+func TestValidateFixContinuationShape(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	ctx := t.Context()
+	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "true")
+
+	var healed atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !healed.Load() {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+
+	workflow := map[string]any{
+		"id": "wf-cont", "name": "Continuation", "dslVersion": "1.0",
+		"nodes": []any{
+			map[string]any{"id": "seed", "type": "transform", "config": map[string]any{
+				"mapping": map[string]any{"semilla": "valor-ancestro"},
+			}},
+			map[string]any{"id": "calc", "type": "http", "config": map[string]any{
+				"url": upstream.URL, "timeoutMs": 500,
+			}},
+			map[string]any{"id": "notify", "type": "transform", "config": map[string]any{
+				"mapping": map[string]any{"eco": "{{context.seed.output.semilla}}"},
+			}},
+		},
+		"edges": []any{
+			map[string]any{"from": "seed", "to": "calc"},
+			map[string]any{"from": "calc", "to": "notify"},
+		},
+	}
+	res := h.call("POST", "/v1/start", map[string]any{"workflow": workflow}, "")
+	runID := extractRunID(t, res)
+	h.waitRun(runID, "failed")
+	var deadLetterID string
+	if err := pool.QueryRow(ctx, `SELECT id FROM dead_letters WHERE run_id = $1`, runID).Scan(&deadLetterID); err != nil {
+		t.Fatalf("dead letter: %v", err)
+	}
+
+	// The continuation validation: heal the upstream, propose the same DAG.
+	healed.Store(true)
+	res = h.call("POST", "/dlq/validate-fix", map[string]any{
+		"deadLetterId": deadLetterID, "suggestedWorkflow": workflow,
+	}, "")
+	if res.status != 200 {
+		t.Fatalf("validate-fix: %d %+v", res.status, res.body)
+	}
+	validationRunID := res.body["runId"].(string)
+	h.waitRun(validationRunID, "succeeded")
+
+	// The seed ancestor never re-executed: its context was COPIED (the
+	// original run produced it), and the downstream notify read it.
+	var seedState, notifyState []byte
+	var seedAttempts int
+	_ = pool.QueryRow(ctx, `SELECT state_json, attempts FROM run_nodes WHERE run_id = $1 AND node_id = 'seed'`, validationRunID).Scan(&seedState, &seedAttempts)
+	_ = pool.QueryRow(ctx, `SELECT state_json FROM run_nodes WHERE run_id = $1 AND node_id = 'notify'`, validationRunID).Scan(&notifyState)
+	if !strings.Contains(string(seedState), "valor-ancestro") {
+		t.Fatalf("ancestor context must copy: %s", seedState)
+	}
+	if !strings.Contains(string(notifyState), "valor-ancestro") {
+		t.Fatalf("descendant must read the copied context: %s", notifyState)
+	}
+	var startedEvents int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM run_events WHERE run_id = $1 AND type = 'run.started.validation'`, validationRunID).Scan(&startedEvents)
+	if startedEvents != 1 {
+		t.Fatalf("run.started.validation expected: %d", startedEvents)
+	}
+
+	// Exact-identity replay: {runId, nodeId} revives the ORIGINAL run in
+	// place with the attempt re-armed to 1 (Node parity, F05 closed).
+	res = h.call("POST", "/dlq/replay", map[string]any{"runId": runID, "nodeId": "calc"}, "")
+	if res.status != 200 {
+		t.Fatalf("exact-identity replay: %d %+v", res.status, res.body)
+	}
+	h.waitRun(runID, "succeeded")
+	var attempts int
+	_ = pool.QueryRow(ctx, `SELECT attempts FROM run_nodes WHERE run_id = $1 AND node_id = 'calc'`, runID).Scan(&attempts)
+	if attempts != 1 {
+		t.Fatalf("replay must re-arm the attempt to 1: %d", attempts)
+	}
+}

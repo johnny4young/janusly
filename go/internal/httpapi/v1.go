@@ -936,10 +936,35 @@ func (s *V1Server) rollbackWorkflow(w http.ResponseWriter, r *http.Request, rc v
 func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 	var body struct {
 		DeadLetterID string `json:"deadLetterId"`
+		RunID        string `json:"runId"`
+		NodeID       string `json:"nodeId"`
 	}
-	if err := decodeBody(r, &body); err != nil || body.DeadLetterID == "" {
+	if err := decodeBody(r, &body); err != nil {
 		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
 			map[string]any{"field": "deadLetterId"})
+	}
+	if body.DeadLetterID == "" {
+		// The exact-identity branch: the run panel replays {runId, nodeId}
+		// without a dead-letter id (reference's second /dlq/replay form).
+		if body.RunID == "" || body.NodeID == "" {
+			return opError(http.StatusBadRequest, "dlq_fields_required", "runId and nodeId are required", nil)
+		}
+		if err := s.engine.RedriveRunNode(r.Context(), rc.orgID, body.RunID, body.NodeID); err != nil {
+			switch {
+			case errors.Is(err, engine.ErrDeadLetterNotFound):
+				return opError(http.StatusForbidden, "dlq_forbidden", "Forbidden", nil)
+			case errors.Is(err, engine.ErrRedriveConflict):
+				return opError(http.StatusConflict, "dlq_replay_conflict",
+					"This run can no longer be replayed — it was cancelled or already recovered", nil)
+			default:
+				return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+			}
+		}
+		audit.Write(r.Context(), s.pool, rc.authContext, "dlq.replayed", audit.Options{
+			TargetType: "run", TargetID: body.RunID,
+			Metadata: map[string]any{"nodeId": body.NodeID},
+		})
+		return opOK(map[string]any{"ok": true})
 	}
 	if err := s.engine.RedriveDeadLetter(r.Context(), rc.orgID, body.DeadLetterID); err != nil {
 		switch {

@@ -12,6 +12,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/store"
@@ -60,9 +61,119 @@ func (e *Engine) ReplayDeadLetterAsValidation(
 		originalInput = envelope.Input
 	}
 
-	return e.StartRun(ctx, StartInput{
-		OrgID: orgID, Workflow: suggested, Input: originalInput,
-		CreatedBy: createdBy, ReplayMode: "validation",
-		ParentRunID: item.RunID, ParentNodeID: item.NodeID, ParentLinkKind: "replay",
+	// The CONTINUATION shape (reference parity): only the failing node
+	// re-executes. Ancestors copy their terminal context from the original
+	// run so templates on the failing node see the same upstream outputs;
+	// descendants stay pending (the ordinary cascade continues the
+	// validation); everything else is skipped as outside the path.
+	ancestors := collectRelatives(suggested, item.NodeID, true)
+	descendants := collectRelatives(suggested, item.NodeID, false)
+	originalRows, err := q.ListRunNodesByRun(ctx, item.RunID)
+	if err != nil {
+		return "", fmt.Errorf("read original nodes: %w", err)
+	}
+	originalByID := map[string]store.ListRunNodesByRunRow{}
+	for _, row := range originalRows {
+		originalByID[row.NodeID] = row
+	}
+
+	runID := e.newID()
+	inputJSON, err := json.Marshal(map[string]any{
+		"workflow": suggested, "input": originalInput,
+		"failingNodeId": item.NodeID, "validationEffectMode": "skip",
 	})
+	if err != nil {
+		return "", fmt.Errorf("marshal validation input: %w", err)
+	}
+	tx, err := e.pool.Begin(ctx)
+	if err != nil {
+		return "", fmt.Errorf("begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	txq := store.New(e.wrapTx(tx))
+	if err := txq.InsertRun(ctx, store.InsertRunParams{
+		ID: runID, OrgID: orgID, WorkflowVersionID: runID,
+		Status: "running", InputJson: inputJSON,
+		CreatedBy:               pgtype.Text{String: createdBy, Valid: createdBy != ""},
+		ReplayMode:              pgtype.Text{String: "validation", Valid: true},
+		ValidationEvidenceLevel: pgtype.Text{String: "static", Valid: true},
+		ParentRunID:             pgtype.Text{String: item.RunID, Valid: true},
+		ParentLinkKind:          pgtype.Text{String: "replay", Valid: true},
+	}); err != nil {
+		return "", fmt.Errorf("insert validation run: %w", err)
+	}
+	copyableStatuses := map[string]bool{"succeeded": true, "skipped": true}
+	for _, node := range suggested.Nodes {
+		original, hasOriginal := originalByID[node.ID]
+		startsQueued := node.ID == item.NodeID
+		canCopy := !startsQueued && ancestors[node.ID] && hasOriginal && copyableStatuses[original.Status]
+		continues := descendants[node.ID]
+
+		status := "skipped"
+		attempts := int32(0)
+		stateJSON := []byte(`{"skipped":{"reason":"outside_validation_path"}}`)
+		switch {
+		case canCopy:
+			status = original.Status
+			attempts = original.Attempts.Int32
+			stateJSON = original.StateJson
+			if len(stateJSON) == 0 {
+				stateJSON = []byte(`{}`)
+			}
+		case startsQueued:
+			status, attempts, stateJSON = "queued", 1, []byte(`{}`)
+		case continues:
+			status, attempts, stateJSON = "pending", 0, []byte(`{}`)
+		}
+		if err := txq.InsertRunNode(ctx, store.InsertRunNodeParams{
+			ID: e.newID(), RunID: runID, NodeID: node.ID,
+			Status: status, Attempts: pgtype.Int4{Int32: attempts, Valid: true},
+			StateJson: stateJSON,
+		}); err != nil {
+			return "", fmt.Errorf("seed validation node %s: %w", node.ID, err)
+		}
+	}
+	startedAt := eventNow()
+	payload, _ := json.Marshal(map[string]any{
+		"originalRunId": item.RunID, "failingNodeId": item.NodeID,
+		"validationEffectMode": "skip",
+	})
+	if err := txq.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
+		ID: e.newID(), RunID: runID,
+		Type: "run.started.validation", Payload: payload, CreatedAt: &startedAt,
+	}); err != nil {
+		return "", fmt.Errorf("insert run.started.validation: %w", err)
+	}
+	if err := txq.NotifyWake(ctx, runID); err != nil {
+		return "", fmt.Errorf("notify wake: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", fmt.Errorf("commit: %w", err)
+	}
+	return runID, nil
+}
+
+// collectRelatives walks the edge graph from nodeID: ancestors (walk
+// incoming) or descendants (walk outgoing), excluding the node itself.
+func collectRelatives(wf *domain.Workflow, nodeID string, ancestors bool) map[string]bool {
+	adjacency := map[string][]string{}
+	for _, edge := range wf.Edges {
+		if ancestors {
+			adjacency[edge.To] = append(adjacency[edge.To], edge.From)
+		} else {
+			adjacency[edge.From] = append(adjacency[edge.From], edge.To)
+		}
+	}
+	seen := map[string]bool{}
+	queue := append([]string{}, adjacency[nodeID]...)
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		if seen[current] {
+			continue
+		}
+		seen[current] = true
+		queue = append(queue, adjacency[current]...)
+	}
+	return seen
 }

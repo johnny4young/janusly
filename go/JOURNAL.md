@@ -1584,3 +1584,9 @@ producción necesita saber — de lo ya resuelto o informativo.
 - `StartInput` ganó `ParentRunID/ParentNodeID/ParentLinkKind` (columnas ya en el baseline) — el sustrato que T-135 reutiliza para el linaje del replay de producción.
 - Postura pilot honesta: `validationEffectMode="provider_simulation"` responde 409 unavailable (no hay simulador de efectos en este backend aún) y un `recoveryPlaybookId` responde 409 match_changed hasta que T-139 traiga los playbooks.
 - Test: 7 rechazos pre-run + el camino feliz con el delta de writes en 0 (el run original ya había pegado uno — la medida correcta es el incremento), linaje verificado y audit `recovery.validation_started`.
+
+## T-135 · Linaje de replay Node-parity (2026-07-31)
+- DECISIÓN (leyendo adapters/dlq-replay.ts de la referencia): el replay de PRODUCCIÓN de Node también es revive-in-place — claim + republicación del nodo fallido en el MISMO run con attempt re-armado a 1; el run de continuación con `parentLinkKind="replay"` existe SOLO para el sandbox de validación. La card asumía otra cosa; la fuente manda.
+- F05 CERRADA: `RedriveFailedRunNode` ahora re-arma `attempts=1` (antes +1). La entrada de `acceptedDivergences` se eliminó y la paridad F01-F17 corre verde contra el golden SIN excepción.
+- Rama exact-identity de `/dlq/replay`: el panel del run postea `{runId, nodeId}` sin dead-letter id — `RedriveRunNode` (403 cross-org indistinguible, 409 conflicto, mismo re-armado).
+- La validación de T-134 subió a la forma de CONTINUACIÓN de la referencia: ancestros copian su contexto terminal del run original (los templates del camino ven los MISMOS outputs upstream), solo el nodo fallido arranca queued (attempt 1), descendientes pending para la cascada ordinaria, el resto skipped con `outside_validation_path`; evento `run.started.validation`.

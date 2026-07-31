@@ -34,11 +34,8 @@ import (
 // acceptedDivergences maps fixture id → projection-path → the value this
 // backend produces instead of the reference's. Every entry documents WHY.
 var acceptedDivergences = map[string]map[string]any{
-	// The reference's DLQ replay re-arms the node fresh (attempts resets to
-	// 1 under its recovery-claim machinery); the pilot's redrive preserves
-	// the evidence trail and advances the counter (2 failed attempts + the
-	// redriven success = 3). Recorded in the plan §9.
-	"F05": {"nodes.fragile.attempts": float64(3)},
+	// (empty — F05 closed in T-135: the pilot's redrive now re-arms the
+	// node to attempt 1, matching the reference's recovery-claim posture.)
 }
 
 type projection struct {
