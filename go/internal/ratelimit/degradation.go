@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -32,6 +33,14 @@ func init() {
 
 // SystemOrgID is the sentinel org for infrastructure audit rows.
 const SystemOrgID = "system"
+
+// degradedBuckets is the process-wide gauge behind the reference's
+// janusly_rate_limit_degraded_buckets metric: every tracker in the
+// process contributes its transitions symmetrically.
+var degradedBuckets atomic.Int64
+
+// DegradedBucketCount reports the process-wide degraded-bucket total.
+func DegradedBucketCount() float64 { return float64(degradedBuckets.Load()) }
 
 type bucketState struct {
 	bucket          string
@@ -74,6 +83,7 @@ func (t *Tracker) RecordError(bucket, key string, cause error) {
 	if !ok {
 		entry = &bucketState{bucket: bucket, firstObservedAt: nowIso}
 		t.state[bucket] = entry
+		degradedBuckets.Add(1)
 	}
 	entry.errorCount++
 	entry.lastObservedAt = nowIso
@@ -100,6 +110,7 @@ func (t *Tracker) RecordRecovery(bucket, _ string) {
 	entry, ok := t.state[bucket]
 	if ok {
 		delete(t.state, bucket)
+		degradedBuckets.Add(-1)
 	}
 	t.mu.Unlock()
 	if !ok {

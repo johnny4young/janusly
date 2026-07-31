@@ -757,6 +757,7 @@ el chat publicado.
 | 2026-07-31 | T-090 /run/usage + costos | El stub honesto de T-032 reemplazado: `GET /run/usage` con el shape de la referencia (guardas runId/403, slice acotado 10k DESC NULLS LAST, agregado llm con knownCostUsd/unknownCostCalls + memoria por kind ordenada por actividad) y el rollup de costos en `/recovery/metrics` (`costByProvider`): agregación de la VENTANA COMPLETA en Postgres, ranking por valor, tope 100 grupos proveedor/modelo + UNA fila resto `__other__` con `aggregated:true` — totales exactos probados con 105 modelos sembrados (cada dólar aterriza en alguna fila, jamás sample crudo) |
 | 2026-07-31 | T-091 health dos niveles | `/health` público: `rateLimiter` truncado + `queue:{degraded}|null` (nunca números vivos — probado por negación de claves); `/system/queue` admin con la forma Node (`waiting/active/oldestWaitingSeconds/warnSeconds` + `maintenance:null` explícito — el pilot corre mantenimiento in-process, sin segunda cola); `/system/rate-limiter` admin con el snapshot de triage. Snapshot coalescido 5s con timeout duro de 2s (éxito Y fallo cacheados); fallo del store → `queue:null` con `ok:true`. `JANUSLY_QUEUE_LAG_WARN_SECONDS` 1..86400 default 60 |
 | 2026-07-31 | T-091 edad por elegibilidad | La edad del más viejo corre desde la ELEGIBILIDAD: `GREATEST(último evento node.queued, wake_at del retry)`; un nodo sin ninguna señal queda con edad desconocida y se EXCLUYE — el análogo honesto del matiz BullMQ de la referencia ("previously processed work exposes unknown age"), documentado en la propia query |
+| 2026-07-31 | T-092 Prometheus paridad | Series con los NOMBRES de la referencia junto a las janusly_go_* propias: `workflow_queue_waiting_jobs`/`_active_jobs` (collector cacheado 5s sobre la MISMA query de elegibilidad de T-091), `janusly_rate_limit_degraded_buckets` (gauge process-global alimentado por transiciones simétricas del tracker), y el Resource OTel renderizado a la manera Prometheus: `target_info{service_name="janusly", service_namespace="janusly", service_instance_id}` (env → HOSTNAME → os.Hostname). Bind 127.0.0.1 y arranque post-migraciones ya existían; conflicto de bind PROBADO con proceso real: exit no-cero, jamás media superficie servida |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -1052,7 +1053,7 @@ día que exista el chokepoint (T-079)**.
 | T-089 | Sustrato usage_events + seam de recorder (forma `llm.completion` lista para ola 4) | usage | P1 | done |
 | T-090 | `GET /run/usage` real + agregado de costos acotado (100 grupos + resto) | usage | P2 | done |
 | T-091 | Health de dos niveles: `/health` público-seguro + `/system/queue` admin (profundidad desde Postgres) | obs | P1 | done |
-| T-092 | Paridad de nombres Prometheus + Resource OTel (`service.name=janusly`, instance id) | obs | P2 | todo |
+| T-092 | Paridad de nombres Prometheus + Resource OTel (`service.name=janusly`, instance id) | obs | P2 | done |
 | T-093 | Lane HA: DOS instancias del engine sobre una base — property + race suites verdes | HA | P0 | todo |
 | T-094 | Singletons con lease o prueba de seguridad concurrente por bomba (campañas/retención/timers) | HA | P1 | todo |
 | T-095 | Soak: `make soak` (k6 sostenido ≥1h, vigilancia de RSS/goroutines, reporte) | HA | P1 | todo |

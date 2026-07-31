@@ -12,6 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/johnny4young/janusly/go/internal/store"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
@@ -96,4 +98,50 @@ func (c *QueueDepthCollector) Collect(ch chan<- prometheus.Metric) {
 	for state, value := range c.cache {
 		ch <- prometheus.MustNewConstMetric(c.desc, prometheus.GaugeValue, value, state)
 	}
+}
+
+// QueueParityCollector exposes the REFERENCE's queue gauge names —
+// workflow_queue_waiting_jobs / workflow_queue_active_jobs — over the
+// Postgres substrate so existing dashboards need no rename. Waiting uses
+// the eligibility semantics (queued, run running, wake-up passed).
+type QueueParityCollector struct {
+	pool        *pgxpool.Pool
+	waitingDesc *prometheus.Desc
+	activeDesc  *prometheus.Desc
+	mu          sync.Mutex
+	at          time.Time
+	waiting     float64
+	active      float64
+}
+
+// NewQueueParityCollector builds (but does not register) the collector.
+func NewQueueParityCollector(pool *pgxpool.Pool) *QueueParityCollector {
+	return &QueueParityCollector{
+		pool: pool,
+		waitingDesc: prometheus.NewDesc("workflow_queue_waiting_jobs",
+			"Eligible queued workflow nodes awaiting a worker.", nil, nil),
+		activeDesc: prometheus.NewDesc("workflow_queue_active_jobs",
+			"Workflow nodes currently executing.", nil, nil),
+	}
+}
+
+// Describe implements prometheus.Collector.
+func (c *QueueParityCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- c.waitingDesc
+	ch <- c.activeDesc
+}
+
+// Collect implements prometheus.Collector with a 5-second cache.
+func (c *QueueParityCollector) Collect(ch chan<- prometheus.Metric) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if time.Since(c.at) > 5*time.Second {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if row, err := store.New(c.pool).QueryQueueHealth(ctx); err == nil {
+			c.waiting, c.active, c.at = float64(row.Waiting), float64(row.Active), time.Now()
+		}
+	}
+	ch <- prometheus.MustNewConstMetric(c.waitingDesc, prometheus.GaugeValue, c.waiting)
+	ch <- prometheus.MustNewConstMetric(c.activeDesc, prometheus.GaugeValue, c.active)
 }

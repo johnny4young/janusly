@@ -340,3 +340,58 @@ func TestEngineMetricsExposeOnTheInternalPort(t *testing.T) {
 		}
 	}
 }
+
+// The parity metric names scrape with the reference's exact spellings,
+// and a bind conflict on the internal port aborts the boot hard.
+func TestMetricsParityNamesAndBindConflict(t *testing.T) {
+	api := bootBinary(t)
+	res, err := http.Get(api.internal + "/metrics")
+	if err != nil {
+		t.Fatalf("scrape: %v", err)
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	text := string(body)
+	for _, name := range []string{
+		"workflow_queue_waiting_jobs",
+		"workflow_queue_active_jobs",
+		"janusly_rate_limit_degraded_buckets",
+		`target_info{service_instance_id=`,
+		`service_name="janusly"`,
+		`service_namespace="janusly"`,
+	} {
+		if !strings.Contains(text, name) {
+			t.Fatalf("scrape missing %q", name)
+		}
+	}
+
+	// Bind conflict: hold the internal port ourselves, then boot — the
+	// process must exit non-zero instead of serving half its surface.
+	holder, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("holder: %v", err)
+	}
+	defer holder.Close()
+	taken := holder.Addr().(*net.TCPAddr).Port
+	conflict := exec.Command(buildBinary(t))
+	conflict.Env = append(os.Environ(),
+		fmt.Sprintf("JANUSLY_GO_PORT=%d", freePort(t)),
+		fmt.Sprintf("JANUSLY_GO_INTERNAL_PORT=%d", taken),
+	)
+	out := &bytes.Buffer{}
+	conflict.Stdout, conflict.Stderr = out, out
+	if err := conflict.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- conflict.Wait() }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatalf("bind conflict must exit non-zero; logs:\n%s", out.String())
+		}
+	case <-time.After(20 * time.Second):
+		_ = conflict.Process.Kill()
+		t.Fatalf("bind conflict must abort the boot; logs:\n%s", out.String())
+	}
+}

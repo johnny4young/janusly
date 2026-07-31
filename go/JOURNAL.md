@@ -1318,3 +1318,9 @@ producción necesita saber — de lo ya resuelto o informativo.
   y lo admin mide la edad desde la ELEGIBILIDAD — el evento node.queued o
   el wake_at del retry, con la edad desconocida excluida en vez de
   inventada: el mismo matiz que la referencia documenta sobre BullMQ.
+
+## 2026-07-31 — los dashboards no renombran (T-092)
+
+- Los nombres de la referencia scrapean junto a las series propias, el
+  Resource viaja como target_info, y el conflicto de bind se probó con
+  el binario real: exit no-cero en vez de media superficie.

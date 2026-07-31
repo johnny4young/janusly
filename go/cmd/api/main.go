@@ -22,6 +22,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/grammar"
 	"github.com/johnny4young/janusly/go/internal/httpapi"
 	"github.com/johnny4young/janusly/go/internal/migrate"
+	"github.com/johnny4young/janusly/go/internal/ratelimit"
 	"github.com/johnny4young/janusly/go/internal/usage"
 )
 
@@ -89,6 +90,24 @@ func run() error {
 	// supports N independent consumers.
 	eng := engine.New(workerPool)
 	prometheus.MustRegister(engine.NewQueueDepthCollector(pool))
+	// Reference-name parity series so existing dashboards need no rename,
+	// plus the OTel Resource rendered the Prometheus way: a target_info
+	// gauge carrying service name/namespace/instance.
+	prometheus.MustRegister(engine.NewQueueParityCollector(pool))
+	prometheus.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "janusly_rate_limit_degraded_buckets",
+		Help: "Rate-limiter buckets currently failing open in this process.",
+	}, ratelimit.DegradedBucketCount))
+	resourceInfo := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "target_info",
+		Help: "OTel Resource identity for this process.",
+		ConstLabels: prometheus.Labels{
+			"service_name": "janusly", "service_namespace": "janusly",
+			"service_instance_id": resourceInstanceID(),
+		},
+	})
+	resourceInfo.Set(1)
+	prometheus.MustRegister(resourceInfo)
 	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
 	workerCtx, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
@@ -142,4 +161,20 @@ func run() error {
 		}
 	}
 	return errors.Join(problems...)
+}
+
+// resourceInstanceID resolves the per-process identity like the
+// reference's Resource: explicit env, then HOSTNAME, then the OS.
+func resourceInstanceID() string {
+	if id := os.Getenv("OTEL_SERVICE_INSTANCE_ID"); id != "" {
+		return id
+	}
+	if id := os.Getenv("HOSTNAME"); id != "" {
+		return id
+	}
+	host, err := os.Hostname()
+	if err != nil {
+		return "unknown"
+	}
+	return host
 }
