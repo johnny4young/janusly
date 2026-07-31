@@ -261,3 +261,70 @@ func TestToolFailureFollowsResultPolicy(t *testing.T) {
 	strictRun, _ := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: mustParse(t, strict)})
 	runDispatcherToTerminal(t, eng, pool, strictRun, "failed")
 }
+
+func TestParallelForkJoinAssemblesLabelledBranches(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	doc := `{"nodes":[
+		{"id":"fork","type":"parallel_fork","config":{"branches":[
+			{"label":"pricing"},{"label":"inventory"}
+		]}},
+		{"id":"price","type":"transform","config":{"mapping":{"amount":99}}},
+		{"id":"stock","type":"transform","config":{"mapping":{"units":7}}},
+		{"id":"merge","type":"join","config":{"sources":{
+			"pricing":"price","inventory":"stock"
+		}}},
+		{"id":"read","type":"transform","config":{"mapping":{
+			"total":"{{context.merge.output.branches.pricing.amount}}"
+		}}}
+	],"edges":[
+		{"from":"fork","to":"price"},{"from":"fork","to":"stock"},
+		{"from":"price","to":"merge"},{"from":"stock","to":"merge"},
+		{"from":"merge","to":"read"}
+	]}`
+	runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: mustParse(t, doc)})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	runDispatcherToTerminal(t, eng, pool, runID, "succeeded")
+
+	var joinOutput []byte
+	_ = pool.QueryRow(ctx, "select state_json->'output' from run_nodes where run_id=$1 and node_id='merge'", runID).Scan(&joinOutput)
+	var output map[string]any
+	_ = json.Unmarshal(joinOutput, &output)
+	branches := output["branches"].(map[string]any)
+	if branches["pricing"].(map[string]any)["amount"] != float64(99) ||
+		branches["inventory"].(map[string]any)["units"] != float64(7) {
+		t.Fatalf("labelled branches broken: %s", joinOutput)
+	}
+	// Downstream reads by INTENT (label), not node id.
+	var read []byte
+	_ = pool.QueryRow(ctx, "select state_json->'output' from run_nodes where run_id=$1 and node_id='read'", runID).Scan(&read)
+	if !strings.Contains(string(read), "99") {
+		t.Fatalf("label-addressed read broken: %s", read)
+	}
+}
+
+func TestOneBranchFailingFailsTheJoin(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	// The failing branch: an http node to a blocked target, no retries.
+	doc := `{"nodes":[
+		{"id":"fork","type":"parallel_fork","config":{"branches":[{"label":"a"},{"label":"b"}]}},
+		{"id":"good","type":"noop","config":{}},
+		{"id":"bad","type":"http","config":{"url":"http://169.254.169.254/x"}},
+		{"id":"merge","type":"join","config":{"sources":{"a":"good","b":"bad"}}}
+	],"edges":[
+		{"from":"fork","to":"good"},{"from":"fork","to":"bad"},
+		{"from":"good","to":"merge"},{"from":"bad","to":"merge"}
+	]}`
+	runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: mustParse(t, doc)})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	runDispatcherToTerminal(t, eng, pool, runID, "failed")
+
+	var mergeStatus string
+	_ = pool.QueryRow(ctx, "select status from run_nodes where run_id=$1 and node_id='merge'", runID).Scan(&mergeStatus)
+	if mergeStatus != "pending" {
+		t.Fatalf("the join must never queue behind a failed branch, got %s", mergeStatus)
+	}
+}

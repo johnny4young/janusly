@@ -673,6 +673,8 @@ el chat publicado.
 | 2026-07-30 | T-035 HITO F1 | EL WEB REAL CORRE CONTRA GO: smoke Playwright verde — la app monta, el feed de Activity renderiza runs sembrados leyendo /v1/runs de Go, el approval en espera cuenta en needs-action (proyección de nodos), y CERO page errors (paneles fuera de alcance degradan como prometía el wrapper). Reproducible: `node go/conformance/run-web-smoke.mjs` (bootea binario Go + vite vía webServer de Playwright con VITE_API_URL) |
 | 2026-07-30 | hallazgo (T-035) | El gap invisible del inventario: `GET /auth/context` — el bootstrap de identidad que el web hace ANTES de todo. Sin él, `permissionsRef` queda vacío y CADA lectura cae a su fallback (síntoma engañoso: app montada, feed vacío, cero errores). Servida la rama dev-headers de Node: org sintética admin developmentFallback con las 41 claves del catálogo (extraídas de permission-catalog.ts en el pin) |
 | 2026-07-30 | T-036 tool registry | `internal/tools` con la familia json (parse/pick/set/merge) portada incluidos sus guards de prototype-pollution (`__proto__`/`prototype`/`constructor` rechazados en paths de set y saltados en merge — en Go no hay prototipo que envenenar, pero un payload del pilot puede volver al backend Node: se refutan igual). Nodo `tool` con el envelope de referencia `{tool, result}` + `resultPolicy` ("envelope" default fluye el fallo; "require_ok" falla el nodo). Catálogo `listTools()` (name/description/required/optional/inputExample/inputFields/writeSide) servido en /v1/tools y /tools. `tool` entra en PilotNodeTypes (el test de tipo-no-ejecutable migró a `ai`) |
+| 2026-07-30 | T-037 fork/join | Los shells declarativos portados de parallel-fork.ts: fork = passthrough que valida 2..10 branches únicas (≤64 chars, desc ≤280) y ecoa `{branches}`; join = ensambla `output.branches` por ETIQUETA leyendo `context[predId].output` (dup de predecessor rechazado — el copy-paste surfaceado fuerte). El fan-out/fan-in real ya lo daba el engine (ALL-AND + claim atómico) — cero primitivas nuevas de runtime, como manda la regla de la casa. Las 3 reglas del gate en domain.CheckForkJoinReadiness con severidades (warn/fail); enforcement al gate production-mode cuando exista (T-042). Un branch fallando → join jamás encola (queda pending), run failed — probado |
+| 2026-07-30 | divergencia menor | Los mensajes de fork_join_missing_branch_sources/readiness son resumidos (Node compone closest-join + labels faltantes en el mensaje); los códigos y severidades son exactos — el web matchea por código |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -896,7 +898,7 @@ compactas aquí; el detalle de paridad se lee de la fuente al ejecutar.
 | T-034 | Rollback (`POST /v1/workflows/rollback`, pre-checks Node) | F1 | P1 | done |
 | T-035 | Smoke Playwright del web contra Go (Flows list + Activity + run detail) | F1 | P0 | done |
 | T-036 | Executor `json.parse` + tool registry mínimo (`listTools()` para AI Studio read) | F2 | P1 | done |
-| T-037 | `parallel_fork` + `join` (shells declarativos sobre readiness, validación 3 reglas) | F2 | P1 | todo |
+| T-037 | `parallel_fork` + `join` (shells declarativos sobre readiness, validación 3 reglas) | F2 | P1 | done |
 | T-038 | Executor `loop` modo map puro (legacy contract) | F2 | P1 | todo |
 | T-039 | Edge conditions con evaluación completa en validación (`validateExpression` en save) | F2 | P2 | todo |
 | T-040 | Trigger ingest: `POST /v1/webhooks/:workflowId` → startRun con evento normalizado | F2 | P1 | todo |

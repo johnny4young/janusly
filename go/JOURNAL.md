@@ -632,3 +632,19 @@ local. Sin umbral pasa/no-pasa: números para aprender.
   ({{context.parse.output.result.value.customer.id}}), y el test lo
   recorre entero. resultPolicy decide si un fallo de tool mata el nodo
   o fluye como dato para que el workflow ramifique.
+
+## 2026-07-30 — parallel_fork + join (T-037)
+
+- El par que valida la tesis de T-005 una vez más: fan-out es tener
+  varias aristas salientes, "esperar todas las ramas" es el ALL-AND que
+  ya existía, y el claim único del join es el pending→queued atómico de
+  siempre. Los executors son cáscaras: validar declaraciones y dar
+  forma a outputs. Cero primitivas nuevas de runtime.
+- Lo que el par SÍ aporta es intención: el join entrega
+  output.branches.{pricing,inventory} — downstream lee por etiqueta,
+  no por id de nodo. El test lo recorre con un template que suma por
+  label.
+- La semántica de fallo salió gratis y el test lo clava: una rama
+  fallida rompe el ALL-AND, el join queda pending PARA SIEMPRE y el
+  run rueda a failed. "One branch failing fails the whole join" sin
+  una línea de código dedicada.
