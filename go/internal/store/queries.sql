@@ -1038,3 +1038,37 @@ UPDATE mcp_tool_descriptors
 SET enabled = $3, write_side = $4, rate_limit_per_min = $5, expose_to_ai = $6, updated_at = now()
 WHERE connection_id = $1 AND name = $2
 RETURNING *;
+
+-- name: InsertRecoveryCase :exec
+INSERT INTO recovery_cases (id, org_id, run_id, workflow_id, workflow_version_id, source,
+  detector_id, source_node_id, detector_kind, action, message, details_json, state, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+ON CONFLICT (org_id, run_id, detector_id) DO NOTHING;
+
+-- name: GetRecoveryCase :one
+SELECT * FROM recovery_cases WHERE org_id = $1 AND id = $2;
+
+-- name: ListRecoveryCases :many
+SELECT * FROM recovery_cases
+WHERE org_id = $1
+  AND (sqlc.narg(run_id)::text IS NULL OR run_id = sqlc.narg(run_id))
+  AND (NOT sqlc.arg(open_only)::boolean OR state NOT IN ('verified_recovered','recurred','accepted_loss','abandoned'))
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(page_limit);
+
+-- name: TransitionRecoveryCaseState :execrows
+UPDATE recovery_cases
+SET state = sqlc.arg(to_state), updated_at = now(),
+    resolved_at = CASE WHEN sqlc.arg(terminal)::boolean THEN now() ELSE resolved_at END
+WHERE org_id = $1 AND id = $2 AND state = sqlc.arg(from_state);
+
+-- name: InsertRecoveryCaseTransition :execrows
+INSERT INTO recovery_case_transitions (id, org_id, case_id, from_state, to_state, actor_kind, actor_id, evidence_json, reason, occurred_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (case_id, to_state) DO NOTHING;
+
+-- name: ListRecoveryCaseTransitions :many
+SELECT * FROM recovery_case_transitions
+WHERE org_id = $1 AND case_id = $2
+ORDER BY occurred_at, id
+LIMIT 100;

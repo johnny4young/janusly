@@ -1146,6 +1146,40 @@ func (q *Queries) GetPromptVersionByNumber(ctx context.Context, arg GetPromptVer
 	return i, err
 }
 
+const getRecoveryCase = `-- name: GetRecoveryCase :one
+SELECT id, org_id, run_id, workflow_id, workflow_version_id, source, detector_id, source_node_id, detector_kind, action, message, details_json, state, created_by, created_at, updated_at, resolved_at FROM recovery_cases WHERE org_id = $1 AND id = $2
+`
+
+type GetRecoveryCaseParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) GetRecoveryCase(ctx context.Context, arg GetRecoveryCaseParams) (RecoveryCase, error) {
+	row := q.db.QueryRow(ctx, getRecoveryCase, arg.OrgID, arg.ID)
+	var i RecoveryCase
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.RunID,
+		&i.WorkflowID,
+		&i.WorkflowVersionID,
+		&i.Source,
+		&i.DetectorID,
+		&i.SourceNodeID,
+		&i.DetectorKind,
+		&i.Action,
+		&i.Message,
+		&i.DetailsJson,
+		&i.State,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ResolvedAt,
+	)
+	return i, err
+}
+
 const getReplayCampaign = `-- name: GetReplayCampaign :one
 SELECT id, org_id, name, cluster_signature, filter_json, pacing_ms, status, total_count, replayed_count, failed_count, cancelled_count, created_by, cancelled_by, next_dispatch_at, started_at, completed_at, cancelled_at, created_at, updated_at FROM replay_campaigns WHERE org_id = $1 AND id = $2
 `
@@ -1659,6 +1693,88 @@ func (q *Queries) InsertPromptVersion(ctx context.Context, arg InsertPromptVersi
 		arg.CreatedBy,
 	)
 	return err
+}
+
+const insertRecoveryCase = `-- name: InsertRecoveryCase :exec
+INSERT INTO recovery_cases (id, org_id, run_id, workflow_id, workflow_version_id, source,
+  detector_id, source_node_id, detector_kind, action, message, details_json, state, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+ON CONFLICT (org_id, run_id, detector_id) DO NOTHING
+`
+
+type InsertRecoveryCaseParams struct {
+	ID                string
+	OrgID             string
+	RunID             string
+	WorkflowID        pgtype.Text
+	WorkflowVersionID string
+	Source            string
+	DetectorID        string
+	SourceNodeID      string
+	DetectorKind      string
+	Action            string
+	Message           string
+	DetailsJson       json.RawMessage
+	State             string
+	CreatedBy         pgtype.Text
+}
+
+func (q *Queries) InsertRecoveryCase(ctx context.Context, arg InsertRecoveryCaseParams) error {
+	_, err := q.db.Exec(ctx, insertRecoveryCase,
+		arg.ID,
+		arg.OrgID,
+		arg.RunID,
+		arg.WorkflowID,
+		arg.WorkflowVersionID,
+		arg.Source,
+		arg.DetectorID,
+		arg.SourceNodeID,
+		arg.DetectorKind,
+		arg.Action,
+		arg.Message,
+		arg.DetailsJson,
+		arg.State,
+		arg.CreatedBy,
+	)
+	return err
+}
+
+const insertRecoveryCaseTransition = `-- name: InsertRecoveryCaseTransition :execrows
+INSERT INTO recovery_case_transitions (id, org_id, case_id, from_state, to_state, actor_kind, actor_id, evidence_json, reason, occurred_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (case_id, to_state) DO NOTHING
+`
+
+type InsertRecoveryCaseTransitionParams struct {
+	ID           string
+	OrgID        string
+	CaseID       string
+	FromState    string
+	ToState      string
+	ActorKind    string
+	ActorID      pgtype.Text
+	EvidenceJson json.RawMessage
+	Reason       pgtype.Text
+	OccurredAt   time.Time
+}
+
+func (q *Queries) InsertRecoveryCaseTransition(ctx context.Context, arg InsertRecoveryCaseTransitionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertRecoveryCaseTransition,
+		arg.ID,
+		arg.OrgID,
+		arg.CaseID,
+		arg.FromState,
+		arg.ToState,
+		arg.ActorKind,
+		arg.ActorID,
+		arg.EvidenceJson,
+		arg.Reason,
+		arg.OccurredAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const insertReplayCampaign = `-- name: InsertReplayCampaign :exec
@@ -2714,6 +2830,108 @@ func (q *Queries) ListPrompts(ctx context.Context, arg ListPromptsParams) ([]Pro
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecoveryCaseTransitions = `-- name: ListRecoveryCaseTransitions :many
+SELECT id, org_id, case_id, from_state, to_state, actor_kind, actor_id, evidence_json, reason, occurred_at FROM recovery_case_transitions
+WHERE org_id = $1 AND case_id = $2
+ORDER BY occurred_at, id
+LIMIT 100
+`
+
+type ListRecoveryCaseTransitionsParams struct {
+	OrgID  string
+	CaseID string
+}
+
+func (q *Queries) ListRecoveryCaseTransitions(ctx context.Context, arg ListRecoveryCaseTransitionsParams) ([]RecoveryCaseTransition, error) {
+	rows, err := q.db.Query(ctx, listRecoveryCaseTransitions, arg.OrgID, arg.CaseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RecoveryCaseTransition
+	for rows.Next() {
+		var i RecoveryCaseTransition
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.CaseID,
+			&i.FromState,
+			&i.ToState,
+			&i.ActorKind,
+			&i.ActorID,
+			&i.EvidenceJson,
+			&i.Reason,
+			&i.OccurredAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecoveryCases = `-- name: ListRecoveryCases :many
+SELECT id, org_id, run_id, workflow_id, workflow_version_id, source, detector_id, source_node_id, detector_kind, action, message, details_json, state, created_by, created_at, updated_at, resolved_at FROM recovery_cases
+WHERE org_id = $1
+  AND ($2::text IS NULL OR run_id = $2)
+  AND (NOT $3::boolean OR state NOT IN ('verified_recovered','recurred','accepted_loss','abandoned'))
+ORDER BY created_at DESC, id DESC
+LIMIT $4
+`
+
+type ListRecoveryCasesParams struct {
+	OrgID     string
+	RunID     pgtype.Text
+	OpenOnly  bool
+	PageLimit int32
+}
+
+func (q *Queries) ListRecoveryCases(ctx context.Context, arg ListRecoveryCasesParams) ([]RecoveryCase, error) {
+	rows, err := q.db.Query(ctx, listRecoveryCases,
+		arg.OrgID,
+		arg.RunID,
+		arg.OpenOnly,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RecoveryCase
+	for rows.Next() {
+		var i RecoveryCase
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.RunID,
+			&i.WorkflowID,
+			&i.WorkflowVersionID,
+			&i.Source,
+			&i.DetectorID,
+			&i.SourceNodeID,
+			&i.DetectorKind,
+			&i.Action,
+			&i.Message,
+			&i.DetailsJson,
+			&i.State,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ResolvedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -4279,6 +4497,35 @@ WHERE w.wake_at <= now()
 // idle workers awake.
 func (q *Queries) SweepDueWakeups(ctx context.Context) (int64, error) {
 	result, err := q.db.Exec(ctx, sweepDueWakeups)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const transitionRecoveryCaseState = `-- name: TransitionRecoveryCaseState :execrows
+UPDATE recovery_cases
+SET state = $3, updated_at = now(),
+    resolved_at = CASE WHEN $4::boolean THEN now() ELSE resolved_at END
+WHERE org_id = $1 AND id = $2 AND state = $5
+`
+
+type TransitionRecoveryCaseStateParams struct {
+	OrgID     string
+	ID        string
+	ToState   string
+	Terminal  bool
+	FromState string
+}
+
+func (q *Queries) TransitionRecoveryCaseState(ctx context.Context, arg TransitionRecoveryCaseStateParams) (int64, error) {
+	result, err := q.db.Exec(ctx, transitionRecoveryCaseState,
+		arg.OrgID,
+		arg.ID,
+		arg.ToState,
+		arg.Terminal,
+		arg.FromState,
+	)
 	if err != nil {
 		return 0, err
 	}
