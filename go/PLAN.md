@@ -176,7 +176,7 @@ crítica) · P1 (importante) · P2 (stretch).
 | T-010 | Redrive desde dead_letters | P0 | done |
 | T-011 | Executor http + SSRF/DNS pinning | P0 | done |
 | T-012 | API /v1 mínima + envelopes + goldens de referencia Node | P0 | done |
-| T-013 | Arnés de paridad semántica (lane A, fixtures F01–F10) | P0 | todo |
+| T-013 | Arnés de paridad semántica (lane A, fixtures F01–F10) | P0 | done |
 | T-014 | E2E de API Go (lane B) | P0 | todo |
 | T-015 | Servidor MCP stdio + e2e vía MCP (lane C) | P1 | todo |
 | T-016 | Rendimiento: k6 + RSS + pprof vs Node | P1 | todo |
@@ -639,6 +639,9 @@ el chat publicado.
 | 2026-07-30 | decisión | Columnas que el piloto aún no llena (rollout, outcome, trace, recovery overlay del DLQ…) emiten NULL, nunca claves ausentes — el key-set completo del golden se preserva y el web F1 no necesita tolerancia. Save acepta el vocabulario completo de la plataforma (tipo no ejecutable = problema de START, no de save); binario único api+worker por ahora |
 | 2026-07-30 | corrección de testing | Los claims son globales por diseño → pools de workers de paquetes de test corriendo en paralelo se completaban nodos ajenos (un stub noop "completó" un http bloqueado). Lane de integración ahora `-p 1`; y CompleteNode/FailNode borran su wakeup consumido en la misma tx (limpieza determinista, no dependiente del sweeper) |
 | 2026-07-30 | divergencia anotada | `POST /v1/dlq/redrive` es superficie propia del piloto (Node: `/v1/dlq/replay` exact-identity); códigos `dlq_not_found`/`dlq_replay_conflict`/`runs_input_invalid`/`workflows_validation_failed` no capturados en goldens (el golden de save salió 400 por forma de body — el body es el workflow al TOPE, no `{workflow}`); paginación por cursor en listas y `workflows_save_conflict` de Node verificar en T-013. Goldens de save-éxito y dlq-replay pendientes de recaptura |
+| 2026-07-30 | HITO | Paridad semántica F01–F10 EN VERDE A LA PRIMERA: 11 proyecciones (F02 partida a/b) idénticas a los goldens del stack Node real — status final, estado+attempts por nodo, outputs proyectados, conteo de dead letters. `make parity` reproducible; fixtures compartidas en conformance/fixtures.json con pasos declarativos y `{{UPSTREAM}}` por runner |
+| 2026-07-30 | divergencia aceptada (única) | F05: el replay de Node RE-ARMA el nodo fresco (attempts vuelve a 1 bajo su maquinaria de recovery claims); el redrive del piloto preserva la evidencia y avanza el contador (2 fallos + éxito redriveado = 3). Tabla `acceptedDivergences` en el runner con el porqué |
+| 2026-07-30 | nota | Los goldens de paridad se generaron con el stack Node del worktree (pin) + stub upstream determinista idéntico en ambos runners (ok/fail/flaky+heal); ALLOW_PRIVATE_HTTP_TARGETS=true en ambos lados para F03-F05 (upstream local) |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)

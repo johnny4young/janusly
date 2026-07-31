@@ -1,0 +1,15 @@
+{
+  "runStatus": "succeeded",
+  "nodes": {
+    "fragile": {
+      "status": "succeeded",
+      "attempts": 1
+    },
+    "after": {
+      "status": "succeeded",
+      "attempts": 1
+    }
+  },
+  "outputJson": null,
+  "deadLetters": 1
+}

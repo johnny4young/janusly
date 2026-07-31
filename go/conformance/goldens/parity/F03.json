@@ -1,0 +1,15 @@
+{
+  "runStatus": "succeeded",
+  "nodes": {
+    "fetch": {
+      "status": "succeeded",
+      "attempts": 1
+    },
+    "shape": {
+      "status": "succeeded",
+      "attempts": 1
+    }
+  },
+  "outputJson": null,
+  "deadLetters": 0
+}

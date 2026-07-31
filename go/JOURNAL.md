@@ -305,3 +305,19 @@ consolidan en el informe de la puerta D15.
   completación. El bug de test reveló una mejora real del engine.
 - El binario es uno solo por ahora (API + workers) — los procesos se
   separan cuando la escala lo pida; el engine ya soporta N consumidores.
+
+## 2026-07-30 — paridad semántica F01–F10 (T-013)
+
+- El momento de la verdad del piloto: las diez fixtures (once corridas,
+  F02 partida true/false) proyectadas idénticas contra los goldens del
+  Node real — A LA PRIMERA. Todo el trabajo de leer-la-fuente-antes-de-
+  portar de las tareas anteriores se cobró aquí: cero sorpresas
+  semánticas en lineal, ramas, http, DLQ, redrive, approval, timers,
+  defaults, diamante y templates no resueltos.
+- UNA divergencia, y es honesta: el replay de Node re-arma el nodo con
+  attempts=1; el redrive del piloto preserva el rastro (attempts=3).
+  Documentada en la tabla del runner con su porqué — evidencia vs
+  re-armado limpio, una decisión de producto para F2.
+- El arnés quedó reproducible: fixtures compartidas declarativas, stub
+  upstream determinista clonado en ambos runners, `make parity` como
+  comando único. Regenerar goldens = un script contra el stack del pin.

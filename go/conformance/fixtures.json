@@ -1,0 +1,182 @@
+{
+  "comment": "Shared semantic-parity fixtures. {{UPSTREAM}} is replaced by each runner with its local stub server origin. Projection compared per run: final run status, per-node {status, attempts}, run outputJson, dead_letters row count.",
+  "fixtures": [
+    {
+      "id": "F01",
+      "name": "linear noop to transform",
+      "steps": ["start", "waitTerminal"],
+      "workflow": {
+        "id": "parity-f01",
+        "nodes": [
+          { "id": "first", "type": "noop", "config": {} },
+          { "id": "shape", "type": "transform", "config": { "mapping": { "verdict": "ok", "count": 2 } } }
+        ],
+        "edges": [{ "from": "first", "to": "shape" }]
+      }
+    },
+    {
+      "id": "F02a",
+      "name": "conditional branch true side",
+      "steps": ["start", "waitTerminal"],
+      "input": { "approve": true },
+      "workflow": {
+        "id": "parity-f02a",
+        "nodes": [
+          { "id": "gate", "type": "condition", "config": { "expression": "context.input.approve === true" } },
+          { "id": "yes", "type": "transform", "config": { "mapping": { "path": "approved" } } },
+          { "id": "no", "type": "transform", "config": { "mapping": { "path": "rejected" } } }
+        ],
+        "edges": [
+          { "from": "gate", "to": "yes", "condition": "context.gate.output.result === true" },
+          { "from": "gate", "to": "no", "condition": "context.gate.output.result === false" }
+        ]
+      }
+    },
+    {
+      "id": "F02b",
+      "name": "conditional branch false side",
+      "steps": ["start", "waitTerminal"],
+      "input": { "approve": false },
+      "workflow": {
+        "id": "parity-f02b",
+        "nodes": [
+          { "id": "gate", "type": "condition", "config": { "expression": "context.input.approve === true" } },
+          { "id": "yes", "type": "transform", "config": { "mapping": { "path": "approved" } } },
+          { "id": "no", "type": "transform", "config": { "mapping": { "path": "rejected" } } }
+        ],
+        "edges": [
+          { "from": "gate", "to": "yes", "condition": "context.gate.output.result === true" },
+          { "from": "gate", "to": "no", "condition": "context.gate.output.result === false" }
+        ]
+      }
+    },
+    {
+      "id": "F03",
+      "name": "http 200 into transform",
+      "steps": ["start", "waitTerminal"],
+      "workflow": {
+        "id": "parity-f03",
+        "nodes": [
+          { "id": "fetch", "type": "http", "config": { "url": "{{UPSTREAM}}/ok" } },
+          { "id": "shape", "type": "transform", "config": { "mapping": { "code": "{{context.fetch.output.statusCode}}" } } }
+        ],
+        "edges": [{ "from": "fetch", "to": "shape" }]
+      }
+    },
+    {
+      "id": "F04",
+      "name": "persistent http 500 dead-letters",
+      "steps": ["start", "waitTerminal"],
+      "workflow": {
+        "id": "parity-f04",
+        "nodes": [
+          { "id": "doomed", "type": "http", "config": {
+            "url": "{{UPSTREAM}}/fail",
+            "retry": { "maxAttempts": 2, "delayMs": 50 }
+          } }
+        ],
+        "edges": []
+      }
+    },
+    {
+      "id": "F05",
+      "name": "redrive after upstream heals",
+      "steps": ["start", "waitTerminal", "healUpstream", "redrive", "waitTerminal"],
+      "workflow": {
+        "id": "parity-f05",
+        "nodes": [
+          { "id": "fragile", "type": "http", "config": {
+            "url": "{{UPSTREAM}}/flaky-f05",
+            "retry": { "maxAttempts": 2, "delayMs": 50 }
+          } },
+          { "id": "after", "type": "noop", "config": {} }
+        ],
+        "edges": [{ "from": "fragile", "to": "after" }]
+      }
+    },
+    {
+      "id": "F06",
+      "name": "approval resume releases downstream",
+      "steps": ["start", "waitNodeWaiting:gate", "resume:gate", "waitTerminal"],
+      "workflow": {
+        "id": "parity-f06",
+        "nodes": [
+          { "id": "gate", "type": "approval", "config": { "message": "Parity gate" } },
+          { "id": "after", "type": "transform", "config": { "mapping": { "released": true } } }
+        ],
+        "edges": [{ "from": "gate", "to": "after" }]
+      }
+    },
+    {
+      "id": "F07",
+      "name": "wait_until one second",
+      "steps": ["start", "waitTerminal"],
+      "workflow": {
+        "id": "parity-f07",
+        "nodes": [
+          { "id": "pause", "type": "wait_until", "config": { "duration": "PT1S" } },
+          { "id": "after", "type": "noop", "config": {} }
+        ],
+        "edges": [{ "from": "pause", "to": "after" }]
+      }
+    },
+    {
+      "id": "F08",
+      "name": "trigger payload satisfied by declared defaults",
+      "steps": ["start", "waitTerminal"],
+      "input": { "triggeredBy": "webhook_received", "event": { "id": "evt-1" } },
+      "workflow": {
+        "id": "parity-f08",
+        "inputs": {
+          "type": "object",
+          "properties": {
+            "timeZone": { "type": "string", "default": "Europe/Madrid" },
+            "snoozeHours": { "type": "number", "default": 12 }
+          },
+          "required": ["timeZone", "snoozeHours"]
+        },
+        "outputs": { "zone": "{{inputs.timeZone}}" },
+        "nodes": [
+          { "id": "echo", "type": "transform", "config": { "mapping": { "zone": "{{context.input.timeZone}}" } } }
+        ],
+        "edges": []
+      }
+    },
+    {
+      "id": "F09",
+      "name": "diamond fan-out fan-in",
+      "steps": ["start", "waitTerminal"],
+      "workflow": {
+        "id": "parity-f09",
+        "nodes": [
+          { "id": "root", "type": "noop", "config": {} },
+          { "id": "left", "type": "transform", "config": { "mapping": { "side": "left" } } },
+          { "id": "right", "type": "transform", "config": { "mapping": { "side": "right" } } },
+          { "id": "join", "type": "transform", "config": { "mapping": {
+            "l": "{{context.left.output.side}}", "r": "{{context.right.output.side}}"
+          } } }
+        ],
+        "edges": [
+          { "from": "root", "to": "left" },
+          { "from": "root", "to": "right" },
+          { "from": "left", "to": "join" },
+          { "from": "right", "to": "join" }
+        ]
+      }
+    },
+    {
+      "id": "F10",
+      "name": "unresolved template under lenient policy",
+      "steps": ["start", "waitTerminal"],
+      "workflow": {
+        "id": "parity-f10",
+        "nodes": [
+          { "id": "tx", "type": "transform", "config": { "mapping": {
+            "present": "yes", "missing": "{{context.ghost.output.value}}"
+          } } }
+        ],
+        "edges": []
+      }
+    }
+  ]
+}

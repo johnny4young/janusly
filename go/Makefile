@@ -2,7 +2,7 @@ SHELL := /bin/bash
 DB_URL ?= postgres://janusly:janusly-go-local@127.0.0.1:4632/janusly_go
 PG_CONTAINER := janusly-go-pilot-postgres-1
 
-.PHONY: db-up db-down migrate schema-dump generate lint test run build
+.PHONY: db-up db-down migrate schema-dump generate lint test run build parity
 
 db-up:
 	docker compose -f docker-compose.yml up -d --wait
@@ -39,3 +39,8 @@ test:
 
 run:
 	JANUSLY_GO_DATABASE_URL=$(DB_URL) go run ./cmd/api
+
+# Semantic parity against the reference goldens (regenerate them with
+# conformance/gen-goldens.mjs against a locally booted reference stack).
+parity:
+	JANUSLY_GO_DATABASE_URL=$(DB_URL) go test -race -tags integration -count=1 -run TestSemanticParity ./internal/parity/ -v
