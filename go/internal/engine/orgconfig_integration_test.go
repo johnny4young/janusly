@@ -94,3 +94,59 @@ func TestTenantHTTPBoundsGovernExecution(t *testing.T) {
 		t.Fatalf("default-bound org must succeed: %s", status)
 	}
 }
+
+// The deferred hard cascade: expired tombstones purge with their versions
+// and metadata atomically; fresh tombstones and active workflows survive.
+func TestRetentionSweepPurgesExpiredTombstones(t *testing.T) {
+	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	defer pool.Close()
+	eng := New(pool)
+
+	org := fmt.Sprintf("org-retention-%d", time.Now().UnixNano())
+	seed := func(id string, deletedDaysAgo int) {
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO workflows (id, org_id, name) VALUES ($1, $2, 'flow')`, id, org); err != nil {
+			t.Fatalf("seed workflow: %v", err)
+		}
+		for v := 1; v <= 2; v++ {
+			if _, err := pool.Exec(ctx,
+				`INSERT INTO workflow_versions (id, org_id, workflow_id, version, dag_json)
+				 VALUES ($1, $2, $3, $4, '{}'::jsonb)`,
+				fmt.Sprintf("%s-v%d", id, v), org, id, v); err != nil {
+				t.Fatalf("seed version: %v", err)
+			}
+		}
+		if deletedDaysAgo >= 0 {
+			if _, err := pool.Exec(ctx,
+				`UPDATE workflows SET deleted_at = now() - make_interval(days => $2) WHERE id = $1`,
+				id, deletedDaysAgo); err != nil {
+				t.Fatalf("tombstone: %v", err)
+			}
+		}
+	}
+	seed(org+"-expired", 31)
+	seed(org+"-fresh", 1)
+	seed(org+"-active", -1)
+
+	deleted, err := eng.ProcessRetentionSweep(ctx, 30)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("purge count: %d", deleted)
+	}
+	var workflows, versions int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM workflows WHERE org_id = $1`, org).Scan(&workflows)
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM workflow_versions WHERE org_id = $1`, org).Scan(&versions)
+	if workflows != 2 || versions != 4 {
+		t.Fatalf("survivors: workflows=%d versions=%d", workflows, versions)
+	}
+}

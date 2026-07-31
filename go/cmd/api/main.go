@@ -74,6 +74,9 @@ func run() error {
 	go func() {
 		eng.RunReplayCampaignPump(workerCtx, cfg.PollInterval, logger)
 	}()
+	go func() {
+		eng.RunRetentionSweep(workerCtx, time.Hour, engine.RetentionDays(), logger)
+	}()
 	go eng.StartReaper(workerCtx, time.Minute, time.Hour, logger)
 	defer func() { stopWorkers(); <-workersDone }()
 

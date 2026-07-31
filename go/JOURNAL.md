@@ -908,3 +908,12 @@ producción necesita saber — de lo ya resuelto o informativo.
   registra sobre el registry base vía el seam nuevo; el catálogo del
   API y el dispatcher consumen el MISMO constructor para que las
   superficies no puedan divergir.
+
+## 2026-07-31 — sweep de retención para tombstones (T-053)
+
+- La cascada dura diferida portada con la misma CTE atómica: la familia
+  completa (workflow + versiones + metadata) se purga junta o no se
+  purga. Ventana única global de 30 días — el barrido por tenant con
+  ventana de catálogo queda para cuando el pilot tenga el catálogo
+  completo. El test siembra tres estados (expirado, fresco, activo) y
+  verifica que solo el expirado cae con sus dos versiones.

@@ -582,3 +582,28 @@ WHERE replay_campaigns.id = $1 AND replay_campaigns.status = 'running'
     SELECT 1 FROM replay_campaign_items i
     WHERE i.campaign_id = $1 AND i.status IN ('pending', 'processing'))
 RETURNING *;
+
+-- Deferred hard cascade for tombstoned workflows: one data-modifying CTE
+-- purges the expired workflows plus their versions and metadata atomically
+-- — either the whole family goes or none of it does.
+-- name: PurgeExpiredSoftDeletedWorkflows :one
+WITH expired_workflows AS (
+  SELECT id, org_id FROM workflows
+  WHERE deleted_at IS NOT NULL AND deleted_at <= sqlc.arg(cutoff)::timestamptz
+),
+deleted_versions AS (
+  DELETE FROM workflow_versions
+  WHERE (org_id, workflow_id) IN (SELECT org_id, id FROM expired_workflows)
+  RETURNING 1
+),
+deleted_metadata AS (
+  DELETE FROM workflow_metadata
+  WHERE (org_id, workflow_id) IN (SELECT org_id, id FROM expired_workflows)
+  RETURNING 1
+),
+deleted_workflows AS (
+  DELETE FROM workflows
+  WHERE id IN (SELECT id FROM expired_workflows)
+  RETURNING id
+)
+SELECT count(*)::int AS rows_deleted FROM deleted_workflows;

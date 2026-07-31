@@ -2474,6 +2474,39 @@ func (q *Queries) NotifyWake(ctx context.Context, runID string) error {
 	return err
 }
 
+const purgeExpiredSoftDeletedWorkflows = `-- name: PurgeExpiredSoftDeletedWorkflows :one
+WITH expired_workflows AS (
+  SELECT id, org_id FROM workflows
+  WHERE deleted_at IS NOT NULL AND deleted_at <= $1::timestamptz
+),
+deleted_versions AS (
+  DELETE FROM workflow_versions
+  WHERE (org_id, workflow_id) IN (SELECT org_id, id FROM expired_workflows)
+  RETURNING 1
+),
+deleted_metadata AS (
+  DELETE FROM workflow_metadata
+  WHERE (org_id, workflow_id) IN (SELECT org_id, id FROM expired_workflows)
+  RETURNING 1
+),
+deleted_workflows AS (
+  DELETE FROM workflows
+  WHERE id IN (SELECT id FROM expired_workflows)
+  RETURNING id
+)
+SELECT count(*)::int AS rows_deleted FROM deleted_workflows
+`
+
+// Deferred hard cascade for tombstoned workflows: one data-modifying CTE
+// purges the expired workflows plus their versions and metadata atomically
+// — either the whole family goes or none of it does.
+func (q *Queries) PurgeExpiredSoftDeletedWorkflows(ctx context.Context, cutoff time.Time) (int32, error) {
+	row := q.db.QueryRow(ctx, purgeExpiredSoftDeletedWorkflows, cutoff)
+	var rows_deleted int32
+	err := row.Scan(&rows_deleted)
+	return rows_deleted, err
+}
+
 const queueRunNode = `-- name: QueueRunNode :execrows
 UPDATE run_nodes SET status = 'queued', attempts = 1
 WHERE run_id = $1 AND node_id = $2 AND status = 'pending'
