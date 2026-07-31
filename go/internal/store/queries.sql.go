@@ -830,6 +830,34 @@ func (q *Queries) GetDeadLetter(ctx context.Context, arg GetDeadLetterParams) (G
 	return i, err
 }
 
+const getLatestPublishedPromptVersion = `-- name: GetLatestPublishedPromptVersion :one
+SELECT id, org_id, prompt_id, version, template_text, variables, status, created_by, created_at FROM prompt_versions
+WHERE org_id = $1 AND prompt_id = $2 AND status = 'published'
+ORDER BY version DESC LIMIT 1
+`
+
+type GetLatestPublishedPromptVersionParams struct {
+	OrgID    string
+	PromptID string
+}
+
+func (q *Queries) GetLatestPublishedPromptVersion(ctx context.Context, arg GetLatestPublishedPromptVersionParams) (PromptVersion, error) {
+	row := q.db.QueryRow(ctx, getLatestPublishedPromptVersion, arg.OrgID, arg.PromptID)
+	var i PromptVersion
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.PromptID,
+		&i.Version,
+		&i.TemplateText,
+		&i.Variables,
+		&i.Status,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getLatestWorkflowVersion = `-- name: GetLatestWorkflowVersion :one
 SELECT id, org_id, workflow_id, version, dag_json, created_by, created_at
 FROM workflow_versions
@@ -947,6 +975,112 @@ func (q *Queries) GetOrgRole(ctx context.Context, arg GetOrgRoleParams) (GetOrgR
 		&i.Description,
 		&i.IsBuiltin,
 		&i.GrantedPermissions,
+	)
+	return i, err
+}
+
+const getPromptByName = `-- name: GetPromptByName :one
+SELECT id, org_id, name, description, pinned_version_id, created_by, created_at, updated_at FROM prompts WHERE org_id = $1 AND name = $2
+`
+
+type GetPromptByNameParams struct {
+	OrgID string
+	Name  string
+}
+
+// PromptOps registry: named prompts with immutable versions; the active
+// version is the pinned one or the latest published.
+func (q *Queries) GetPromptByName(ctx context.Context, arg GetPromptByNameParams) (Prompt, error) {
+	row := q.db.QueryRow(ctx, getPromptByName, arg.OrgID, arg.Name)
+	var i Prompt
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.Description,
+		&i.PinnedVersionID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getPromptRowByID = `-- name: GetPromptRowByID :one
+SELECT id, org_id, name, description, pinned_version_id, created_by, created_at, updated_at FROM prompts WHERE org_id = $1 AND id = $2
+`
+
+type GetPromptRowByIDParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) GetPromptRowByID(ctx context.Context, arg GetPromptRowByIDParams) (Prompt, error) {
+	row := q.db.QueryRow(ctx, getPromptRowByID, arg.OrgID, arg.ID)
+	var i Prompt
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.Description,
+		&i.PinnedVersionID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getPromptVersionByID = `-- name: GetPromptVersionByID :one
+SELECT id, org_id, prompt_id, version, template_text, variables, status, created_by, created_at FROM prompt_versions WHERE org_id = $1 AND id = $2
+`
+
+type GetPromptVersionByIDParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) GetPromptVersionByID(ctx context.Context, arg GetPromptVersionByIDParams) (PromptVersion, error) {
+	row := q.db.QueryRow(ctx, getPromptVersionByID, arg.OrgID, arg.ID)
+	var i PromptVersion
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.PromptID,
+		&i.Version,
+		&i.TemplateText,
+		&i.Variables,
+		&i.Status,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getPromptVersionByNumber = `-- name: GetPromptVersionByNumber :one
+SELECT id, org_id, prompt_id, version, template_text, variables, status, created_by, created_at FROM prompt_versions
+WHERE org_id = $1 AND prompt_id = $2 AND version = $3
+`
+
+type GetPromptVersionByNumberParams struct {
+	OrgID    string
+	PromptID string
+	Version  int32
+}
+
+func (q *Queries) GetPromptVersionByNumber(ctx context.Context, arg GetPromptVersionByNumberParams) (PromptVersion, error) {
+	row := q.db.QueryRow(ctx, getPromptVersionByNumber, arg.OrgID, arg.PromptID, arg.Version)
+	var i PromptVersion
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.PromptID,
+		&i.Version,
+		&i.TemplateText,
+		&i.Variables,
+		&i.Status,
+		&i.CreatedBy,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -1368,6 +1502,58 @@ func (q *Queries) InsertOrgRole(ctx context.Context, arg InsertOrgRoleParams) er
 		arg.Description,
 		arg.IsBuiltin,
 		arg.GrantedPermissions,
+	)
+	return err
+}
+
+const insertPrompt = `-- name: InsertPrompt :exec
+INSERT INTO prompts (id, org_id, name, description, created_by)
+VALUES ($1, $2, $3, $4, $5)
+`
+
+type InsertPromptParams struct {
+	ID          string
+	OrgID       string
+	Name        string
+	Description pgtype.Text
+	CreatedBy   pgtype.Text
+}
+
+func (q *Queries) InsertPrompt(ctx context.Context, arg InsertPromptParams) error {
+	_, err := q.db.Exec(ctx, insertPrompt,
+		arg.ID,
+		arg.OrgID,
+		arg.Name,
+		arg.Description,
+		arg.CreatedBy,
+	)
+	return err
+}
+
+const insertPromptVersion = `-- name: InsertPromptVersion :exec
+INSERT INTO prompt_versions (id, org_id, prompt_id, version, template_text, variables, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+`
+
+type InsertPromptVersionParams struct {
+	ID           string
+	OrgID        string
+	PromptID     string
+	Version      int32
+	TemplateText string
+	Variables    json.RawMessage
+	CreatedBy    pgtype.Text
+}
+
+func (q *Queries) InsertPromptVersion(ctx context.Context, arg InsertPromptVersionParams) error {
+	_, err := q.db.Exec(ctx, insertPromptVersion,
+		arg.ID,
+		arg.OrgID,
+		arg.PromptID,
+		arg.Version,
+		arg.TemplateText,
+		arg.Variables,
+		arg.CreatedBy,
 	)
 	return err
 }
@@ -2317,6 +2503,45 @@ func (q *Queries) ListOrgsWithSoftDeletedWorkflows(ctx context.Context) ([]strin
 			return nil, err
 		}
 		items = append(items, org_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPrompts = `-- name: ListPrompts :many
+SELECT id, org_id, name, description, pinned_version_id, created_by, created_at, updated_at FROM prompts WHERE org_id = $1
+ORDER BY created_at DESC, id DESC LIMIT $2
+`
+
+type ListPromptsParams struct {
+	OrgID string
+	Limit int32
+}
+
+func (q *Queries) ListPrompts(ctx context.Context, arg ListPromptsParams) ([]Prompt, error) {
+	rows, err := q.db.Query(ctx, listPrompts, arg.OrgID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Prompt
+	for rows.Next() {
+		var i Prompt
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Name,
+			&i.Description,
+			&i.PinnedVersionID,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -3284,6 +3509,23 @@ func (q *Queries) MigrateOrgMemberUserID(ctx context.Context, arg MigrateOrgMemb
 	return result.RowsAffected(), nil
 }
 
+const nextPromptVersionNumber = `-- name: NextPromptVersionNumber :one
+SELECT COALESCE(max(version), 0) + 1 FROM prompt_versions
+WHERE org_id = $1 AND prompt_id = $2
+`
+
+type NextPromptVersionNumberParams struct {
+	OrgID    string
+	PromptID string
+}
+
+func (q *Queries) NextPromptVersionNumber(ctx context.Context, arg NextPromptVersionNumberParams) (int32, error) {
+	row := q.db.QueryRow(ctx, nextPromptVersionNumber, arg.OrgID, arg.PromptID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const notifyRunEvents = `-- name: NotifyRunEvents :exec
 SELECT pg_notify('janusly_go_run_events', $1::text)
 `
@@ -3302,6 +3544,25 @@ SELECT pg_notify('janusly_go_wake', $1::text)
 func (q *Queries) NotifyWake(ctx context.Context, runID string) error {
 	_, err := q.db.Exec(ctx, notifyWake, runID)
 	return err
+}
+
+const pinPromptVersion = `-- name: PinPromptVersion :execrows
+UPDATE prompts SET pinned_version_id = $3, updated_at = now()
+WHERE org_id = $1 AND id = $2
+`
+
+type PinPromptVersionParams struct {
+	OrgID           string
+	ID              string
+	PinnedVersionID pgtype.Text
+}
+
+func (q *Queries) PinPromptVersion(ctx context.Context, arg PinPromptVersionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pinPromptVersion, arg.OrgID, arg.ID, arg.PinnedVersionID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const purgeExpiredSoftDeletedWorkflows = `-- name: PurgeExpiredSoftDeletedWorkflows :one

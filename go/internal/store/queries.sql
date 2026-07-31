@@ -958,3 +958,43 @@ SELECT
 -- name: GetWorkflowAiGuidance :one
 SELECT ai_guidance_markdown FROM workflow_metadata
 WHERE org_id = $1 AND workflow_id = $2;
+
+-- PromptOps registry: named prompts with immutable versions; the active
+-- version is the pinned one or the latest published.
+-- name: GetPromptByName :one
+SELECT * FROM prompts WHERE org_id = $1 AND name = $2;
+
+-- name: InsertPrompt :exec
+INSERT INTO prompts (id, org_id, name, description, created_by)
+VALUES ($1, $2, $3, $4, $5);
+
+-- name: ListPrompts :many
+SELECT * FROM prompts WHERE org_id = $1
+ORDER BY created_at DESC, id DESC LIMIT $2;
+
+-- name: NextPromptVersionNumber :one
+SELECT COALESCE(max(version), 0) + 1 FROM prompt_versions
+WHERE org_id = $1 AND prompt_id = $2;
+
+-- name: InsertPromptVersion :exec
+INSERT INTO prompt_versions (id, org_id, prompt_id, version, template_text, variables, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7);
+
+-- name: GetLatestPublishedPromptVersion :one
+SELECT * FROM prompt_versions
+WHERE org_id = $1 AND prompt_id = $2 AND status = 'published'
+ORDER BY version DESC LIMIT 1;
+
+-- name: GetPromptVersionByID :one
+SELECT * FROM prompt_versions WHERE org_id = $1 AND id = $2;
+
+-- name: GetPromptVersionByNumber :one
+SELECT * FROM prompt_versions
+WHERE org_id = $1 AND prompt_id = $2 AND version = $3;
+
+-- name: PinPromptVersion :execrows
+UPDATE prompts SET pinned_version_id = $3, updated_at = now()
+WHERE org_id = $1 AND id = $2;
+
+-- name: GetPromptRowByID :one
+SELECT * FROM prompts WHERE org_id = $1 AND id = $2;

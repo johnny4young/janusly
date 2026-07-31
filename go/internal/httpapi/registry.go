@@ -68,6 +68,12 @@ var routeAuthz = map[string]routeGate{
 	// AI surfaces (reference permission pairs).
 	"POST /ai/generate-workflow": {auth.RoleViewer, "ai.write"},
 
+	// PromptOps registry (reference pairs: read for all, write editor+).
+	"GET /prompts":                                {auth.RoleViewer, "prompts.read"},
+	"POST /prompts":                               {auth.RoleViewer, "prompts.write"},
+	"POST /prompts/{name}/versions":               {auth.RoleViewer, "prompts.write"},
+	"POST /prompts/{name}/versions/{version}/pin": {auth.RoleViewer, "prompts.write"},
+
 	// System infrastructure snapshots (reference pairs verbatim).
 	"GET /system/queue":        {auth.RoleAdmin, "org.config.write"},
 	"GET /system/rate-limiter": {auth.RoleAdmin, "org.config.write"},

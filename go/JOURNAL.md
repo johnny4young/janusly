@@ -1426,3 +1426,11 @@ producción necesita saber — de lo ya resuelto o informativo.
   datos detrás de la cláusula de escape, los secretos se lavan al
   componer, y la matemática de donación garantiza que la org nunca borra
   la sección del workflow.
+
+## 2026-07-31 — prompts con versión y sin redeploy (T-108)
+
+- El registro portado con su semántica REAL (sirve promptRefs de nodos,
+  no el system prompt — la card especulaba); pin de una versión vieja
+  cambia el prompt activo en caliente, los ciclos de include se
+  rechazan, y una variable requerida ausente falla antes del primer
+  token.
