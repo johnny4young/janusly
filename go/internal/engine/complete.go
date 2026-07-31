@@ -305,6 +305,16 @@ func (e *Engine) RetryOrFail(ctx context.Context, claim ClaimedNode, node domain
 // snapshots for replay, the node.failed event, and the run flipped to
 // failed — one transaction, so a half-failed run can never strand.
 func (e *Engine) FailNode(ctx context.Context, claim ClaimedNode, execErr error) error {
+	if err := e.failNodeTx(ctx, claim, execErr); err != nil {
+		return err
+	}
+	// Containment rides OUTSIDE the durable failure: a breaker fault must
+	// never break the DLQ path that already committed.
+	e.afterTerminalFailure(ctx, claim)
+	return nil
+}
+
+func (e *Engine) failNodeTx(ctx context.Context, claim ClaimedNode, execErr error) error {
 	serr := serializeError(execErr)
 	eventJSON, err := json.Marshal(map[string]any{"error": serr, "attempt": claim.Attempt})
 	if err != nil {
@@ -365,6 +375,22 @@ func (e *Engine) FailNode(ctx context.Context, claim ClaimedNode, execErr error)
 		return e.flipRunTerminal(ctx, q, claim.RunID, "failed",
 			map[string]any{"failedNodes": failedNodes}, failedAt, nil)
 	})
+}
+
+// afterTerminalFailure runs the breaker evaluation OUTSIDE the completion
+// transaction (best-effort containment; the dead letter is already
+// durable). Sandbox replays never reach it — the streak query excludes
+// them and a validation run's failure carries replay_mode.
+func (e *Engine) afterTerminalFailure(ctx context.Context, claim ClaimedNode) {
+	run, err := store.New(e.pool).GetRunExecution(ctx, claim.RunID)
+	if err != nil || (run.ReplayMode.Valid && run.ReplayMode.String != "") {
+		return
+	}
+	wf, _, err := workflowFromRunInput(run.InputJson)
+	if err != nil {
+		return
+	}
+	e.maybeTripCircuitBreaker(ctx, run.OrgID, wf.ID, claim.RunID)
 }
 
 // insertDeadLetter captures the exact failed job for operator replay: the

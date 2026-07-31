@@ -98,6 +98,12 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	mux.HandleFunc("POST /validate", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeLegacy(w, server.validateCore(r, rc))
 	}))
+	mux.HandleFunc("POST /workflows/{id}/resume", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeLegacy(w, server.resumeWorkflowCore(r, rc, r.PathValue("id")))
+	}))
+	mux.HandleFunc("POST /v1/workflows/{id}/resume", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeVersioned(w, rc.id, server.resumeWorkflowCore(r, rc, r.PathValue("id")))
+	}))
 	mux.HandleFunc("GET /v1/workflows", server.auth(server.listWorkflows))
 	mux.HandleFunc("GET /v1/workflows/latest", server.auth(server.latestWorkflowVersion))
 	mux.HandleFunc("GET /v1/workflows/versions", server.auth(server.listWorkflowVersions))
@@ -368,6 +374,23 @@ func (s *V1Server) startCore(r *http.Request, rc v1Request) opResult {
 	if rejection := s.productionGate(r.Context(), rc.orgID, wf); rejection != nil {
 		return *rejection
 	}
+	// The pause table's /start row: a SAVED workflow paused by its breaker
+	// (or upstream health) REJECTS new starts, naming the actual cause —
+	// breaker vs upstream send the operator to different places.
+	if wf.ID != "" {
+		if status, err := store.New(s.pool).GetWorkflowBreakerStatus(r.Context(), store.GetWorkflowBreakerStatusParams{
+			OrgID: rc.orgID, ID: wf.ID,
+		}); err == nil && status != "active" {
+			code := "upstream_degraded"
+			if status == "paused_circuit_breaker" {
+				code = "workflow_circuit_breaker_paused"
+			}
+			return opError(http.StatusConflict, code,
+				"Workflow is paused — resume it before starting new runs",
+				map[string]any{"status": status})
+		}
+	}
+
 	// Saved-vs-adhoc: legitimate ad-hoc starts (AI Studio "Run" before
 	// Save) can be forbidden per tenant via runs.requireSavedWorkflow.
 	isAdhoc := true
@@ -1064,4 +1087,41 @@ func nullableInt(v pgtype.Int4) any {
 		return nil
 	}
 	return v.Int32
+}
+
+// resumeWorkflowCore serves POST /workflows/{id}/resume: the DELIBERATELY
+// manual breaker resume — an operator asserts the fault is fixed, the
+// flip audits who, and the pause's buffered trigger events drain
+// oldest-first (capped page; repeated calls drain the rest). Other pause
+// sources are distinct operator situations and reject.
+func (s *V1Server) resumeWorkflowCore(r *http.Request, rc v1Request, workflowID string) opResult {
+	if workflowID == "" {
+		return opError(http.StatusBadRequest, "workflows_workflow_id_required", "workflowId is required", nil)
+	}
+	outcome, _, err := s.engine.ResumeWorkflowCircuitBreaker(r.Context(), rc.orgID, workflowID, rc.userID)
+	if err != nil {
+		var notPaused *engine.ErrWorkflowNotBreakerPaused
+		switch {
+		case errors.Is(err, engine.ErrWorkflowNotFoundForResume):
+			return opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil)
+		case errors.As(err, &notPaused):
+			return opError(http.StatusConflict, "workflow_not_circuit_breaker_paused",
+				"Workflow is not paused by its circuit breaker (status: "+notPaused.Status+")",
+				map[string]any{"status": notPaused.Status})
+		default:
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		}
+	}
+	if outcome.Backfilled > 0 || outcome.Failed > 0 {
+		audit.Write(r.Context(), s.pool, rc.authContext, "workflow.trigger_backfill", audit.Options{
+			TargetType: "workflow", TargetID: workflowID,
+			Metadata: map[string]any{
+				"backfilled": outcome.Backfilled, "failed": outcome.Failed, "remaining": outcome.Remaining,
+			},
+		})
+	}
+	return opOK(map[string]any{
+		"ok": true, "workflowId": workflowID, "status": "active",
+		"backfilled": outcome.Backfilled, "failed": outcome.Failed, "remaining": outcome.Remaining,
+	})
 }

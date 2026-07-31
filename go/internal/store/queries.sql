@@ -466,10 +466,13 @@ WHERE org_id = $1 AND id = $2;
 -- claimed" and "run exists" commit or roll back together (the reference
 -- claims inside startRun's transaction the same way).
 -- name: ClaimTriggerEventStart :execrows
+-- Accepts 'received' (the ordinary ingest path) AND 'buffered' (the
+-- breaker-resume backfill): both are "owed a run" states, and the CAS
+-- keeps a concurrent backfill/relay from spawning a second run.
 UPDATE trigger_events
 SET status = 'started', run_id = $3, skipped_reason = NULL,
     backfill_claim_token = NULL, backfill_claimed_at = NULL
-WHERE org_id = $1 AND id = $2 AND status = 'received' AND run_id IS NULL;
+WHERE org_id = $1 AND id = $2 AND status IN ('received', 'buffered') AND run_id IS NULL;
 
 -- name: MarkTriggerEventOutcome :execrows
 UPDATE trigger_events
@@ -1144,3 +1147,42 @@ WHERE org_id = $1 AND id = $2 AND status = sqlc.arg(from_status);
 -- name: InsertAuditLogRow :exec
 INSERT INTO audit_logs (id, org_id, user_id, action, target_type, target_id, metadata)
 VALUES ($1, $2, $3, $4, $5, $6, $7);
+
+-- name: CountRecentWorkflowRunStatuses :many
+SELECT r.status FROM runs r
+LEFT JOIN workflow_versions v ON v.id = r.workflow_version_id AND v.org_id = r.org_id
+WHERE r.org_id = $1
+  AND COALESCE(v.workflow_id, r.workflow_version_id) = sqlc.arg(workflow_id)
+  AND r.replay_mode IS NULL
+  AND r.status IN ('succeeded', 'failed')
+ORDER BY r.created_at DESC
+LIMIT sqlc.arg(page_limit);
+
+-- name: GetWorkflowBreakerStatus :one
+SELECT status FROM workflows
+WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL;
+
+-- name: TripWorkflowCircuitBreaker :execrows
+UPDATE workflows SET status = 'paused_circuit_breaker', paused_reason = sqlc.arg(reason)
+WHERE org_id = $1 AND id = $2 AND status = 'active' AND deleted_at IS NULL;
+
+-- name: ResumeWorkflowCircuitBreaker :execrows
+UPDATE workflows SET status = 'active', paused_reason = NULL
+WHERE org_id = $1 AND id = $2 AND status = 'paused_circuit_breaker' AND deleted_at IS NULL;
+
+-- name: ClaimBufferedTriggerEvents :many
+UPDATE trigger_events SET backfill_claim_token = sqlc.arg(claim_token), backfill_claimed_at = now()
+WHERE trigger_events.id IN (
+  SELECT te.id FROM trigger_events te
+  WHERE te.org_id = sqlc.arg(org_id) AND te.workflow_id = sqlc.arg(workflow_id) AND te.status = 'buffered'
+    AND te.backfill_claim_token IS NULL
+  ORDER BY te.created_at ASC
+  LIMIT sqlc.arg(page_limit)
+  FOR UPDATE SKIP LOCKED
+)
+RETURNING trigger_events.id, trigger_events.node_id, trigger_events.payload_json, trigger_events.created_at;
+
+-- name: CountBufferedTriggerEvents :one
+SELECT count(*) FROM trigger_events te
+WHERE te.org_id = sqlc.arg(org_id) AND te.workflow_id = sqlc.arg(workflow_id) AND te.status = 'buffered'
+  AND te.backfill_claim_token IS NULL;

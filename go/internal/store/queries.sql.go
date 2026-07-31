@@ -170,6 +170,63 @@ func (q *Queries) CancelRunningReplayCampaign(ctx context.Context, arg CancelRun
 	return i, err
 }
 
+const claimBufferedTriggerEvents = `-- name: ClaimBufferedTriggerEvents :many
+UPDATE trigger_events SET backfill_claim_token = $1, backfill_claimed_at = now()
+WHERE trigger_events.id IN (
+  SELECT te.id FROM trigger_events te
+  WHERE te.org_id = $2 AND te.workflow_id = $3 AND te.status = 'buffered'
+    AND te.backfill_claim_token IS NULL
+  ORDER BY te.created_at ASC
+  LIMIT $4
+  FOR UPDATE SKIP LOCKED
+)
+RETURNING trigger_events.id, trigger_events.node_id, trigger_events.payload_json, trigger_events.created_at
+`
+
+type ClaimBufferedTriggerEventsParams struct {
+	ClaimToken pgtype.Text
+	OrgID      string
+	WorkflowID pgtype.Text
+	PageLimit  int32
+}
+
+type ClaimBufferedTriggerEventsRow struct {
+	ID          string
+	NodeID      string
+	PayloadJson json.RawMessage
+	CreatedAt   *time.Time
+}
+
+func (q *Queries) ClaimBufferedTriggerEvents(ctx context.Context, arg ClaimBufferedTriggerEventsParams) ([]ClaimBufferedTriggerEventsRow, error) {
+	rows, err := q.db.Query(ctx, claimBufferedTriggerEvents,
+		arg.ClaimToken,
+		arg.OrgID,
+		arg.WorkflowID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ClaimBufferedTriggerEventsRow
+	for rows.Next() {
+		var i ClaimBufferedTriggerEventsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.NodeID,
+			&i.PayloadJson,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const claimDeadLetterReplay = `-- name: ClaimDeadLetterReplay :execrows
 UPDATE dead_letters
 SET replay_claimed_at = now(), status = 'replayed', replayed_at = now()
@@ -297,7 +354,7 @@ const claimTriggerEventStart = `-- name: ClaimTriggerEventStart :execrows
 UPDATE trigger_events
 SET status = 'started', run_id = $3, skipped_reason = NULL,
     backfill_claim_token = NULL, backfill_claimed_at = NULL
-WHERE org_id = $1 AND id = $2 AND status = 'received' AND run_id IS NULL
+WHERE org_id = $1 AND id = $2 AND status IN ('received', 'buffered') AND run_id IS NULL
 `
 
 type ClaimTriggerEventStartParams struct {
@@ -309,6 +366,9 @@ type ClaimTriggerEventStartParams struct {
 // The start-claim CAS: runs inside the run-start transaction so "event
 // claimed" and "run exists" commit or roll back together (the reference
 // claims inside startRun's transaction the same way).
+// Accepts 'received' (the ordinary ingest path) AND 'buffered' (the
+// breaker-resume backfill): both are "owed a run" states, and the CAS
+// keeps a concurrent backfill/relay from spawning a second run.
 func (q *Queries) ClaimTriggerEventStart(ctx context.Context, arg ClaimTriggerEventStartParams) (int64, error) {
 	result, err := q.db.Exec(ctx, claimTriggerEventStart, arg.OrgID, arg.ID, arg.RunID)
 	if err != nil {
@@ -410,6 +470,24 @@ func (q *Queries) ConvergeDeadLetterReplayed(ctx context.Context, arg ConvergeDe
 	return err
 }
 
+const countBufferedTriggerEvents = `-- name: CountBufferedTriggerEvents :one
+SELECT count(*) FROM trigger_events te
+WHERE te.org_id = $1 AND te.workflow_id = $2 AND te.status = 'buffered'
+  AND te.backfill_claim_token IS NULL
+`
+
+type CountBufferedTriggerEventsParams struct {
+	OrgID      string
+	WorkflowID pgtype.Text
+}
+
+func (q *Queries) CountBufferedTriggerEvents(ctx context.Context, arg CountBufferedTriggerEventsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countBufferedTriggerEvents, arg.OrgID, arg.WorkflowID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countDeadLettersByStatus = `-- name: CountDeadLettersByStatus :many
 SELECT status, count(*) AS count FROM dead_letters
 WHERE org_id = $1 GROUP BY status
@@ -454,6 +532,43 @@ func (q *Queries) CountMembersInRole(ctx context.Context, arg CountMembersInRole
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const countRecentWorkflowRunStatuses = `-- name: CountRecentWorkflowRunStatuses :many
+SELECT r.status FROM runs r
+LEFT JOIN workflow_versions v ON v.id = r.workflow_version_id AND v.org_id = r.org_id
+WHERE r.org_id = $1
+  AND COALESCE(v.workflow_id, r.workflow_version_id) = $2
+  AND r.replay_mode IS NULL
+  AND r.status IN ('succeeded', 'failed')
+ORDER BY r.created_at DESC
+LIMIT $3
+`
+
+type CountRecentWorkflowRunStatusesParams struct {
+	OrgID      string
+	WorkflowID string
+	PageLimit  int32
+}
+
+func (q *Queries) CountRecentWorkflowRunStatuses(ctx context.Context, arg CountRecentWorkflowRunStatusesParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, countRecentWorkflowRunStatuses, arg.OrgID, arg.WorkflowID, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var status string
+		if err := rows.Scan(&status); err != nil {
+			return nil, err
+		}
+		items = append(items, status)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const countRunSemanticCases = `-- name: CountRunSemanticCases :one
@@ -1602,6 +1717,23 @@ func (q *Queries) GetWorkflowAiGuidance(ctx context.Context, arg GetWorkflowAiGu
 	var ai_guidance_markdown pgtype.Text
 	err := row.Scan(&ai_guidance_markdown)
 	return ai_guidance_markdown, err
+}
+
+const getWorkflowBreakerStatus = `-- name: GetWorkflowBreakerStatus :one
+SELECT status FROM workflows
+WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
+`
+
+type GetWorkflowBreakerStatusParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) GetWorkflowBreakerStatus(ctx context.Context, arg GetWorkflowBreakerStatusParams) (string, error) {
+	row := q.db.QueryRow(ctx, getWorkflowBreakerStatus, arg.OrgID, arg.ID)
+	var status string
+	err := row.Scan(&status)
+	return status, err
 }
 
 const getWorkflowIngestState = `-- name: GetWorkflowIngestState :one
@@ -4642,6 +4774,24 @@ func (q *Queries) RestoreWorkflow(ctx context.Context, arg RestoreWorkflowParams
 	return result.RowsAffected(), nil
 }
 
+const resumeWorkflowCircuitBreaker = `-- name: ResumeWorkflowCircuitBreaker :execrows
+UPDATE workflows SET status = 'active', paused_reason = NULL
+WHERE org_id = $1 AND id = $2 AND status = 'paused_circuit_breaker' AND deleted_at IS NULL
+`
+
+type ResumeWorkflowCircuitBreakerParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) ResumeWorkflowCircuitBreaker(ctx context.Context, arg ResumeWorkflowCircuitBreakerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, resumeWorkflowCircuitBreaker, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const reviveFailedRun = `-- name: ReviveFailedRun :execrows
 UPDATE runs SET status = 'running'
 WHERE id = $1 AND status = 'failed'
@@ -4864,6 +5014,25 @@ func (q *Queries) TransitionRecoveryCaseState(ctx context.Context, arg Transitio
 		arg.Terminal,
 		arg.FromState,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const tripWorkflowCircuitBreaker = `-- name: TripWorkflowCircuitBreaker :execrows
+UPDATE workflows SET status = 'paused_circuit_breaker', paused_reason = $3
+WHERE org_id = $1 AND id = $2 AND status = 'active' AND deleted_at IS NULL
+`
+
+type TripWorkflowCircuitBreakerParams struct {
+	OrgID  string
+	ID     string
+	Reason pgtype.Text
+}
+
+func (q *Queries) TripWorkflowCircuitBreaker(ctx context.Context, arg TripWorkflowCircuitBreakerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, tripWorkflowCircuitBreaker, arg.OrgID, arg.ID, arg.Reason)
 	if err != nil {
 		return 0, err
 	}
