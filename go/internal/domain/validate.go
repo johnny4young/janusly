@@ -74,7 +74,7 @@ var PilotNodeTypes = map[string]bool{
 	"noop": true, "transform": true, "condition": true, "http": true,
 	"wait_until": true, "approval": true, "tool": true,
 	"parallel_fork": true, "join": true, "loop": true, "webhook_received": true,
-	"ai": true, "agent": true,
+	"ai": true, "agent": true, "multi_agent": true,
 }
 
 // inputsScopePattern flags inputs.* references on edge conditions after

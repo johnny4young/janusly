@@ -73,6 +73,7 @@ func Registry() map[string]Func {
 	return map[string]Func{
 		"tool":             NewToolExecutor(toolRegistry),
 		"agent":            NewAgentExecutor(toolRegistry, httpExec),
+		"multi_agent":      NewMultiAgentExecutor(toolRegistry, httpExec),
 		"noop":             executeNoop,
 		"ai":               executeAiNode,
 		"condition":        executeCondition,

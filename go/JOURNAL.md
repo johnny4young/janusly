@@ -1486,3 +1486,9 @@ producción necesita saber — de lo ya resuelto o informativo.
 - Episodios con recall semántico solo para el planner LLM, short-circuit
   antes del primer embedding con consent off, y el evento que emite
   huellas — jamás contenido. La segunda corrida aprendió de la primera.
+
+## T-117 · multi_agent (2026-07-31)
+- `internal/executors/multiagent.go`: crew sobre `runAgentLoop`. Secuencial re-renderiza el goal de cada agente en su turno contra `{context: sharedContext, previousAgents: results}` (root `previousAgents` diferido en dispatch para este tipo de nodo) con el gancho de política estricta (`in.ReportUnresolved`) ANTES de correr el agente; paralelo resuelve todos los configs antes de lanzar goroutines — nunca difiere. `sharedContext` gana `agent_<i+1>` y `<name>` con `{output: result}` tras cada agente completado.
+- Agregación textual de la referencia: `last` (finalAnswer/finalResult del último), `all`, `first`, `best-effort` (primer no-fallido). `continueOnError` acumula `{status:"failed", error:{message}}`; sin él, secuencial propaga el error y paralelo falla con `Multi-agent <name> failed: <msg>`.
+- Eventos: `multi_agent.started/agent.started/agent.completed/agent.failed/completed`. `PilotNodeTypes` += `multi_agent`; dispatch construye AIDeps+MemoryDeps para el nodo.
+- Hallazgo: la referencia SOLO liga tarde el goal — el assert correcto del binding es el goal renderizado del evento `agent.started`, no el config del agente (eso se renderiza en dispatch y conserva el literal).

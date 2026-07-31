@@ -70,6 +70,12 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 		// renderLoopConfig split.
 		renderOpts.DeferredRoots = append([]string{"item", "index"}, renderOpts.DeferredRoots...)
 	}
+	if node.Type == "multi_agent" {
+		// Sequential crews bind previousAgents PER COMPLETED AGENT inside
+		// the executor; the parallel branch renders once before launch and
+		// never defers past it.
+		renderOpts.DeferredRoots = append([]string{"previousAgents"}, renderOpts.DeferredRoots...)
+	}
 	rendered, err := grammar.RenderTemplateWithRedactions(config, map[string]any{
 		"context": runContext,
 		"inputs":  config,

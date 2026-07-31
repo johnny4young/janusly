@@ -366,3 +366,84 @@ func TestAgentEpisodicMemory(t *testing.T) {
 		t.Fatal("episode content must never enter the event")
 	}
 }
+
+// The crew: sequential previousAgents binds per completed agent (the
+// second agent's goal template reads the first's result), parallel runs
+// all agents with no late binding, and aggregation follows the strategy.
+func TestMultiAgentCrew(t *testing.T) {
+	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	defer pool.Close()
+	eng := New(pool)
+	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
+	workerCtx, stop := context.WithCancel(context.Background())
+	defer stop()
+	go func() { _ = eng.RunWorkers(workerCtx, 2, 20*time.Millisecond, dispatcher.Execute, quietLogger()) }()
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	org := fmt.Sprintf("org-crew-%d", time.Now().UnixNano())
+
+	crewRun := func(id string, config map[string]any) map[string]any {
+		wf := &domain.Workflow{
+			ID: id, Name: "Crew", DSLVersion: "1.0",
+			Nodes: []domain.Node{{ID: "crew", Type: "multi_agent", Config: config}},
+			Edges: []domain.Edge{},
+		}
+		runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: wf})
+		if err != nil {
+			t.Fatalf("start %s: %v", id, err)
+		}
+		waitRunStatus(t, pool, runID, "succeeded", 0)
+		var raw []byte
+		_ = pool.QueryRow(ctx, `SELECT state_json FROM run_nodes WHERE run_id = $1 AND node_id = 'crew'`, runID).Scan(&raw)
+		var state struct {
+			Output map[string]any `json:"output"`
+		}
+		_ = json.Unmarshal(raw, &state)
+		return state.Output
+	}
+
+	// Sequential: agent 2's goal template reads agent 1's completed result
+	// via the DEFERRED previousAgents scope.
+	output := crewRun("wf-crew-seq", map[string]any{
+		"mode": "sequential", "aggregation": "all", "maxSteps": float64(1),
+		"agents": []any{
+			map[string]any{"name": "primero", "goal": "uppercase the word", "value": "semilla"},
+			map[string]any{"name": "segundo", "goal": "uppercase {{previousAgents.0.result.finalResult.value}}", "reflection": false},
+		},
+	})
+	agents := output["agents"].([]any)
+	if len(agents) != 2 || output["count"] != float64(2) {
+		t.Fatalf("crew shape: %+v", output)
+	}
+	// The reference late-binds the GOAL only: the second agent's goal
+	// template must have rendered against the first's completed result.
+	var goalPayload string
+	if err := pool.QueryRow(ctx, `SELECT payload->>'goal' FROM run_events
+		WHERE type = 'multi_agent.agent.started' AND payload->>'name' = 'segundo'
+		ORDER BY created_at DESC LIMIT 1`).Scan(&goalPayload); err != nil {
+		t.Fatalf("read second goal: %v", err)
+	}
+	if goalPayload != "uppercase SEMILLA" {
+		t.Fatalf("previousAgents must bind per completed agent: %q", goalPayload)
+	}
+
+	// Parallel: both run, shared context has no late binding races, and
+	// the last-strategy aggregation reads the final agent.
+	output = crewRun("wf-crew-par", map[string]any{
+		"mode": "parallel", "maxSteps": float64(1),
+		"agents": []any{
+			map[string]any{"name": "a1", "goal": "uppercase it", "value": "uno"},
+			map[string]any{"name": "a2", "goal": "uppercase it", "value": "dos"},
+		},
+	})
+	if output["mode"] != "parallel" || output["count"] != float64(2) {
+		t.Fatalf("parallel crew: %+v", output)
+	}
+}
