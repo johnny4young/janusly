@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnny4young/janusly/go/internal/ai"
 	"github.com/johnny4young/janusly/go/internal/tools"
 )
 
@@ -28,6 +29,7 @@ type AgentPlan struct {
 	Input       map[string]any `json:"input,omitempty"`
 	Reason      string         `json:"reason,omitempty"`
 	Mode        string         `json:"mode,omitempty"`
+	AiError     string         `json:"aiError,omitempty"`
 }
 
 // planAgentTool is the reference's deterministic rules ladder, verbatim.
@@ -125,7 +127,7 @@ func runAgentLoop(ctx context.Context, in Input, agentConfig map[string]any, eve
 
 		var plan AgentPlan
 		if planner == "openai" && in.AI != nil {
-			plan = planAgentToolWithLLM(ctx, in, agentConfig, planningContext, steps)
+			plan = planAgentToolWithLLM(ctx, in, agentConfig, planningContext, steps, registry, "")
 		} else {
 			plan = planAgentTool(agentConfig, planningContext)
 			plan.Mode = "rules"
@@ -256,11 +258,141 @@ func boundedText(value string, max int) string {
 	return string(runes[:max])
 }
 
-// planAgentToolWithLLM is the LLM planner seam — its real implementation
-// arrives with its own ticket; until then every call falls back to rules.
-func planAgentToolWithLLM(_ context.Context, _ Input, agentConfig map[string]any,
-	planningContext map[string]any, _ []map[string]any) AgentPlan {
-	plan := planAgentTool(agentConfig, planningContext)
-	plan.Mode = "fallback"
-	return plan
+// planAgentToolWithLLM ports the reference's LLM planner: free-json plan
+// validated against the tool catalog, every failure falling back to the
+// deterministic rules planner with aiError attribution — the loop always
+// makes progress.
+func planAgentToolWithLLM(ctx context.Context, in Input, agentConfig map[string]any,
+	planningContext map[string]any, steps []map[string]any, registry *tools.Registry,
+	recalledEpisodes string) AgentPlan {
+	deps := in.AI
+	rulesFallback := func(aiError string) AgentPlan {
+		plan := planAgentTool(agentConfig, planningContext)
+		plan.Mode, plan.AiError = "fallback", aiError
+		return plan
+	}
+	if deps == nil || deps.Client == nil || !deps.Client.Configured() {
+		return rulesFallback("llm_not_configured")
+	}
+	// Budget: a block TERMINATES the agent cleanly instead of re-firing.
+	if deps.BudgetAllowed != nil {
+		if allowed, budget := deps.BudgetAllowed(); !allowed {
+			return AgentPlan{
+				Tool: "done", Done: true, Mode: "fallback", AiError: "budget_exceeded",
+				FinalAnswer: "Agent terminated: AI cost budget exceeded.",
+				Reason:      fmt.Sprintf("Budget exceeded — agent terminated (%v of %v).", budget["monthlyUsdSpent"], budget["monthlyUsdLimit"]),
+			}
+		}
+	}
+
+	goal := agentConfig["goal"]
+	if goal == nil {
+		goal = "Choose the best tool for this workflow step."
+	}
+	systemPrompt := "You are a workflow agent planner. Select exactly one tool from availableTools, or return done=true if the goal is complete. Return only valid JSON."
+	if refRaw, ok := agentConfig["systemPromptRef"].(map[string]any); ok && deps.ResolvePrompt != nil {
+		if refName, ok := refRaw["name"].(string); ok && refName != "" {
+			version := 0
+			if v, ok := refRaw["version"].(float64); ok {
+				version = int(v)
+			}
+			variables := map[string]string{}
+			if raw, ok := agentConfig["variables"].(map[string]any); ok {
+				for key, value := range raw {
+					if text, ok := value.(string); ok {
+						variables[key] = text
+					}
+				}
+			}
+			if resolved, err := deps.ResolvePrompt(refName, version, variables); err == nil {
+				systemPrompt = resolved
+			}
+			// A resolver failure falls back silently to the hardcoded prompt.
+		}
+	}
+
+	availableTools := plannerToolsWithHTTP(registry, deps.DryRun)
+	availableNames := map[string]bool{}
+	for _, tool := range availableTools {
+		if toolName, ok := tool["name"].(string); ok {
+			availableNames[toolName] = true
+		}
+	}
+	promptPayload := map[string]any{
+		"goal": goal, "config": agentConfig, "context": planningContext,
+		"history": steps, "availableTools": availableTools,
+		"requiredJsonShape": map[string]any{
+			"done": "boolean optional", "finalAnswer": "string optional",
+			"tool":  "one available tool name when not done",
+			"input": "object with tool input when not done", "reason": "short reason",
+		},
+	}
+	if recalledEpisodes != "" {
+		promptPayload["recalledEpisodes"] = recalledEpisodes
+	}
+	promptJSON, _ := json.Marshal(promptPayload)
+	modelHint, _ := agentConfig["model"].(string)
+	result, aiErr := deps.Client.GenerateText(ctx, ai.GenerateTextInput{
+		System: systemPrompt, Prompt: string(promptJSON), ResponseFormat: "json",
+		ModelHint: modelHint,
+		Context:   ai.CallContext{OrgID: deps.OrgID, RunID: in.RunID, NodeID: in.NodeID, WorkflowID: deps.WorkflowID},
+	})
+	if aiErr != nil {
+		return rulesFallback(aiErr.Error())
+	}
+	var reply struct {
+		Done        bool           `json:"done"`
+		FinalAnswer string         `json:"finalAnswer"`
+		Tool        string         `json:"tool"`
+		Input       map[string]any `json:"input"`
+		Reason      string         `json:"reason"`
+	}
+	text := result.Text
+	if text == "" {
+		text = "{}"
+	}
+	if err := json.Unmarshal([]byte(text), &reply); err != nil {
+		return rulesFallback("LLM planner returned a malformed plan shape")
+	}
+	if reply.Done {
+		finalAnswer := reply.FinalAnswer
+		if finalAnswer == "" {
+			finalAnswer = "Done"
+		}
+		reason := reply.Reason
+		if reason == "" {
+			reason = "Goal completed"
+		}
+		return AgentPlan{Tool: "done", Done: true, FinalAnswer: finalAnswer, Reason: reason, Mode: "ai"}
+	}
+	if reply.Tool == "" || !availableNames[reply.Tool] {
+		return rulesFallback("LLM planner did not return an available tool")
+	}
+	input := reply.Input
+	if input == nil {
+		input = map[string]any{}
+	}
+	reason := reply.Reason
+	if reason == "" {
+		reason = "LLM selected tool"
+	}
+	return AgentPlan{Tool: reply.Tool, Input: input, Reason: reason, Mode: "ai"}
+}
+
+// plannerToolsWithHTTP appends the executor-level http.request entry to
+// the registry projection (read-side by default; dryRun keeps it since
+// the executor's own write gate covers sensitive methods).
+func plannerToolsWithHTTP(registry *tools.Registry, dryRun bool) []map[string]any {
+	out := registry.PlannerTools(dryRun)
+	return append(out, map[string]any{
+		"name":        "http.request",
+		"description": "Perform an outbound HTTP request through the guarded HTTP stack (SSRF-validated, bounded).",
+		"required":    []string{"url"},
+		"inputFields": []map[string]any{
+			{"name": "url", "type": "string", "required": true},
+			{"name": "method", "type": "string"}, {"name": "headers", "type": "object"},
+			{"name": "body", "type": "unknown"},
+		},
+		"writeSide": false,
+	})
 }

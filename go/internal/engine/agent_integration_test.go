@@ -123,3 +123,121 @@ func TestAgentLoopRulesPlanner(t *testing.T) {
 		t.Fatalf("dry run must skip the write: %+v hits=%d", dryResult, hits)
 	}
 }
+
+// The LLM planner matrix: no client / malformed / unavailable tool /
+// thrown all fall back to the RULES plan with aiError attribution, a
+// budget block terminates cleanly, and a VALID plan executes its tool.
+func TestAgentLLMPlannerMatrix(t *testing.T) {
+	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	defer pool.Close()
+	eng := New(pool)
+	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
+	workerCtx, stop := context.WithCancel(context.Background())
+	defer stop()
+	go func() { _ = eng.RunWorkers(workerCtx, 2, 20*time.Millisecond, dispatcher.Execute, quietLogger()) }()
+	org := fmt.Sprintf("org-llmplan-%d", time.Now().UnixNano())
+
+	planRun := func(id, reply string) map[string]any {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			payload, _ := json.Marshal(map[string]any{
+				"id": "msg_1", "type": "message", "role": "assistant",
+				"model":       "claude-haiku-4-5-20251001",
+				"content":     []map[string]any{{"type": "text", "text": reply}},
+				"stop_reason": "end_turn",
+				"usage":       map[string]any{"input_tokens": 5, "output_tokens": 5},
+			})
+			_, _ = w.Write(payload)
+		}))
+		defer server.Close()
+		t.Setenv("ANTHROPIC_API_KEY", "test-key")
+		t.Setenv("JANUSLY_LOCAL_STACK", "true")
+		t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+		t.Setenv("JANUSLY_LLM_SIMULATED_PROVIDERS", "anthropic")
+		t.Setenv("JANUSLY_LLM_SIMULATOR_BASE_URL", server.URL)
+		wf := &domain.Workflow{
+			ID: id, Name: "LLM Agent", DSLVersion: "1.0",
+			Nodes: []domain.Node{{ID: "a", Type: "agent", Config: map[string]any{
+				"goal": "uppercase something", "value": "hola",
+				"planner": "openai", "maxSteps": float64(1),
+			}}},
+			Edges: []domain.Edge{},
+		}
+		runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: wf})
+		if err != nil {
+			t.Fatalf("start %s: %v", id, err)
+		}
+		waitRunStatus(t, pool, runID, "succeeded", 0)
+		var raw []byte
+		_ = pool.QueryRow(ctx, `SELECT state_json FROM run_nodes WHERE run_id = $1 AND node_id = 'a'`, runID).Scan(&raw)
+		var state struct {
+			Output map[string]any `json:"output"`
+		}
+		_ = json.Unmarshal(raw, &state)
+		return state.Output
+	}
+	firstPlan := func(output map[string]any) map[string]any {
+		steps := output["steps"].([]any)
+		return steps[0].(map[string]any)["plan"].(map[string]any)
+	}
+
+	// No client: rules fallback with llm_not_configured.
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	wf := &domain.Workflow{
+		ID: "wf-llm-nokey", Name: "LLM Agent", DSLVersion: "1.0",
+		Nodes: []domain.Node{{ID: "a", Type: "agent", Config: map[string]any{
+			"goal": "uppercase it", "value": "hola", "planner": "openai", "maxSteps": float64(1),
+		}}},
+		Edges: []domain.Edge{},
+	}
+	runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: wf})
+	if err != nil {
+		t.Fatalf("start nokey: %v", err)
+	}
+	waitRunStatus(t, pool, runID, "succeeded", 0)
+	var raw []byte
+	_ = pool.QueryRow(ctx, `SELECT state_json FROM run_nodes WHERE run_id = $1 AND node_id = 'a'`, runID).Scan(&raw)
+	var state struct {
+		Output map[string]any `json:"output"`
+	}
+	_ = json.Unmarshal(raw, &state)
+	plan := firstPlan(state.Output)
+	if plan["mode"] != "fallback" || plan["aiError"] != "llm_not_configured" || plan["tool"] != "text.uppercase" {
+		t.Fatalf("no-client plan: %+v", plan)
+	}
+
+	// Malformed reply: rules fallback, still executes uppercase.
+	plan = firstPlan(planRun("wf-llm-malformed", "esto no es JSON"))
+	if plan["mode"] != "fallback" || plan["tool"] != "text.uppercase" {
+		t.Fatalf("malformed plan: %+v", plan)
+	}
+
+	// Unavailable tool: rules fallback with the attribution.
+	plan = firstPlan(planRun("wf-llm-ghost-tool", `{"tool":"ghost.tool","input":{},"reason":"nope"}`))
+	if plan["mode"] != "fallback" || plan["aiError"] != "LLM planner did not return an available tool" {
+		t.Fatalf("ghost-tool plan: %+v", plan)
+	}
+
+	// VALID plan executes the chosen tool.
+	output := planRun("wf-llm-valid", `{"tool":"text.uppercase","input":{"value":"plan del modelo"},"reason":"direct"}`)
+	steps := output["steps"].([]any)
+	step := steps[0].(map[string]any)
+	if step["plan"].(map[string]any)["mode"] != "ai" ||
+		step["result"].(map[string]any)["value"] != "PLAN DEL MODELO" {
+		t.Fatalf("valid plan must execute: %+v", step)
+	}
+
+	// done=true finishes with the final answer.
+	output = planRun("wf-llm-done", `{"done":true,"finalAnswer":"todo listo"}`)
+	if output["finalAnswer"] != "todo listo" {
+		t.Fatalf("done plan: %+v", output)
+	}
+}

@@ -325,3 +325,21 @@ func vectorTools() []Definition {
 		},
 	}
 }
+
+// PlannerTools is the LLM planner's availableTools projection: the
+// catalog entries (name, description, required/optional, fields), with
+// every write-side tool HIDDEN when dryRun — a validation run must not
+// even show the model a write.
+func (r *Registry) PlannerTools(dryRun bool) []map[string]any {
+	catalog := r.Catalog()
+	out := make([]map[string]any, 0, len(catalog))
+	for _, entry := range catalog {
+		if dryRun {
+			if writeSide, _ := entry["writeSide"].(bool); writeSide {
+				continue
+			}
+		}
+		out = append(out, entry)
+	}
+	return out
+}

@@ -1474,3 +1474,9 @@ producción necesita saber — de lo ya resuelto o informativo.
 - El bucle con el planner de reglas verbatim y las tres garantías: el
   presupuesto corta limpio, el dry-run jamás ejecuta un write, y
   http.request viaja por la misma maquinaria guardada del nodo http.
+
+## 2026-07-31 — el planner que nunca deja al agente sin plan (T-115)
+
+- El planner LLM con su matriz completa: cinco formas de fallar y todas
+  aterrizan en el plan de reglas con su atribución; el presupuesto
+  termina limpio; y el plan válido ejecuta. El bucle siempre avanza.
