@@ -1044,3 +1044,14 @@ producción necesita saber — de lo ya resuelto o informativo.
   original. Las capturas parciales previas no tenían fixtures http y
   nunca lo notaron. La lección de siempre: los caminos que no se
   ejercitan completos guardan sorpresas.
+
+## 2026-07-31 — números de la ola 2 (T-067)
+
+- La pregunta del retest era si una ola entera de features (gate,
+  bounds por tenant, timestamps ms, streaming, idempotencia) le costó
+  rendimiento al runtime. Respuesta: no — throughput arriba en los
+  tres escenarios respecto a F0, y la cola p99 del start compactada
+  3.7×. La tabla de evolución declara la dirección de cada métrica y
+  sus asteriscos metodológicos en vez de esconderlos: la lista de ola
+  2 mide el peor caso (org con decenas de miles de runs) y aún así
+  gana, y la comparación diamond es conservadora a favor de Node.

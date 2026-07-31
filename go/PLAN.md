@@ -719,6 +719,7 @@ el chat publicado.
 | 2026-07-31 | T-064 redrive UI | El web postea `POST /runs/redrive {runId, nodeId}` — nuevo adapter del pilot sobre su máquina de redrive: resuelve el dead letter abierto del nodo y lo reclama; devuelve el MISMO runId (revive-in-place; la referencia crea un run de continuación de replay — el web reabre lo que llegue). Smoke Playwright del loop real: fila `activity-row-run:<id>` → panel del run → `failed-node-call` visible → sanar upstream → click `redrive-node-call` → run succeeded y el nodo fallido desaparece de la UI. Hallazgos de superficie: un run fallido emite DOS filas en el feed (run + recovery; la recovery abre el drawer, no el panel) y los ad-hoc salen como "Unnamed workflow" (el nombre no viaja al summary). `/dlq/queue` (read-model experto con severity/sort/owner) queda como gap documentado |
 | 2026-07-31 | T-065 approve UI | Mismo smoke: fila del run en waiting → `waiting-step-gate` → botón "Approve and resume" (i18n en) → `/resume` → run succeeded y `waiting-steps` desaparece. Cero pageerrors en todo el loop. El runner exporta `ALLOW_PRIVATE_HTTP_TARGETS=true` (el spec hospeda su upstream sanable en loopback) |
 | 2026-07-31 | T-066 consolidación | Recaptura COMPLETA de los 18 goldens de paridad desde el stack aislado en una sola corrida: byte-idénticos a los committeados (git diff vacío — la captura es reproducible y el pin no ha derivado) y la paridad Go verde ×3 contra ellos. Hallazgo del booter: el stack aislado no exportaba `ALLOW_PRIVATE_HTTP_TARGETS=true` y el guard SSRF de Node bloqueaba el stub loopback (F03/F04/F05 capturaban un fallo DISTINTO al original) — las capturas parciales previas (F11-F17, sin fixtures http) nunca lo pisaron. Corregido en el booter |
+| 2026-07-31 | T-067 números | `conformance/perf/EVOLUTION.md`: tres momentos (Node loadgen / Go F0 loadgen / Go ola-2 k6) con columna de dirección por métrica y notas de honestidad metodológica (herramienta distinta, org poblado vs vacío, la comparación diamond conservadora a favor de Node por sus runs atascados). Titulares ola 2: start 209 runs/s (4.6× Node) con p99 69ms (7.6× menor), list 6.7k req/s @ p95 10ms sobre org de decenas de miles (el peor caso honesto — gracias al índice keyset), diamond 112 DAGs/s, 0 errores, RSS ~22-43MB en un proceso. Los features de la ola no costaron rendimiento: throughput ↑ en los tres escenarios vs F0 |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -972,6 +973,6 @@ compactas aquí; el detalle de paridad se lee de la fuente al ejecutar.
 | T-064 | Web: panel DLQ + redrive contra Go (smoke Playwright) | F1+ | P1 | todo |
 | T-065 | Web: aprobar/resume desde la UI contra Go (smoke Playwright) | F1+ | P1 | todo |
 | T-066 | Consolidación: goldens re-run completo + parity F01-F20 verde | F2 | P0 | todo |
-| T-067 | Números ola 2: retest carga con pools nuevos + tabla evolución | F2 | P1 | todo |
+| T-067 | Números ola 2: retest carga con pools nuevos + tabla evolución | F2 | P1 | done |
 | T-068 | Informe de ola 2 (REPORT-W2.md): estado F1/F2, gaps restantes, riesgo | F2 | P0 | todo |
 
