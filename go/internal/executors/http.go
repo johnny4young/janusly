@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -327,6 +328,33 @@ func (e *httpExecutor) execute(ctx context.Context, in Input) (any, error) {
 	if res.ContentLength > int64(maxBytes) {
 		return nil, fmt.Errorf("HTTP response exceeds maxResponseBytes (Content-Length %d > cap %d)", res.ContentLength, maxBytes) //nolint:staticcheck // reference message is the wire contract
 	}
+
+	// Streaming opt-in: consume the body into a bounded preview instead of
+	// buffering it whole. The persisted output is JSON-safe — a string
+	// preview plus counters, never a live stream and never JSON-projected.
+	if mode, _ := in.Config["bodyMode"].(string); mode == "stream" {
+		previewCap := streamPreviewDefault
+		if in.HTTPBounds != nil && in.HTTPBounds.StreamPreviewBytes > 0 {
+			previewCap = in.HTTPBounds.StreamPreviewBytes
+		}
+		if v, ok := in.Config["streamPreviewBytes"].(float64); ok {
+			previewCap = int(math.Max(streamPreviewMin, math.Min(v, streamPreviewMax)))
+		}
+		if res.StatusCode < 200 || res.StatusCode >= 300 {
+			return nil, &ExecErrorShape{
+				Message: fmt.Sprintf("HTTP failed: %d", res.StatusCode),
+				Name:    "HttpResponseError", Code: "E_HTTP_STATUS", StatusCode: res.StatusCode,
+			}
+		}
+		preview, totalBytes, truncated, err := consumeStreamToPreview(res.Body, previewCap, maxBytes)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"statusCode": res.StatusCode, "ok": true, "body": preview,
+			"streamed": true, "streamedBytes": totalBytes, "streamTruncated": truncated,
+		}, nil
+	}
 	limited := io.LimitReader(res.Body, int64(maxBytes)+1)
 	bodyBytes, err := io.ReadAll(limited)
 	if err != nil {
@@ -395,4 +423,44 @@ func effectivePort(u *url.URL) string {
 		return "443"
 	}
 	return "80"
+}
+
+const (
+	streamPreviewDefault = 65_536
+	streamPreviewMin     = 1_024
+	streamPreviewMax     = 1_048_576
+)
+
+// consumeStreamToPreview drains the body counting every byte (the response
+// byte cap still aborts mid-stream) while buffering only the first
+// previewCap bytes, mirroring the reference's consumeStreamToPreview.
+func consumeStreamToPreview(body io.Reader, previewCap, maxBytes int) (string, int, bool, error) {
+	preview := make([]byte, 0, min(previewCap, 64*1024))
+	chunk := make([]byte, 32*1024)
+	total := 0
+	truncated := false
+	for {
+		n, err := body.Read(chunk)
+		if n > 0 {
+			total += n
+			if total > maxBytes {
+				return "", 0, true, fmt.Errorf("HTTP response exceeds maxResponseBytes after %d bytes (cap %d)", total, maxBytes) //nolint:staticcheck // reference message is the wire contract
+			}
+			if len(preview) < previewCap {
+				take := min(n, previewCap-len(preview))
+				preview = append(preview, chunk[:take]...)
+				if take < n {
+					truncated = true
+				}
+			} else {
+				truncated = true
+			}
+		}
+		if err == io.EOF {
+			return string(preview), total, truncated, nil
+		}
+		if err != nil {
+			return "", 0, truncated, err
+		}
+	}
 }

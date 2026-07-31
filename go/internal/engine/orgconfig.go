@@ -26,6 +26,7 @@ var httpBoundSpecs = []httpBoundSpec{
 	{key: "http.timeoutMs", envKey: "JANUSLY_HTTP_TIMEOUT_MS", min: 1, def: 30_000},
 	{key: "http.maxResponseBytes", envKey: "JANUSLY_HTTP_MAX_RESPONSE_BYTES", min: 1, def: 1_000_000},
 	{key: "http.maxRedirects", envKey: "JANUSLY_HTTP_MAX_REDIRECTS", min: 0, def: 5},
+	{key: "http.streamPreviewBytes", envKey: "JANUSLY_HTTP_STREAM_PREVIEW_BYTES", min: 1_024, def: 65_536},
 }
 
 // resolveHTTPBounds applies the precedence chain over already-loaded tenant
@@ -44,10 +45,15 @@ func resolveHTTPBounds(tenant map[string]float64, lookupEnv func(string) (string
 		}
 		resolved[i] = value
 	}
+	preview := resolved[3]
+	if preview > 1_048_576 {
+		preview = 1_048_576 // catalog max — above it falls to the cap, not the default
+	}
 	return executors.HTTPBounds{
-		TimeoutMs:        resolved[0],
-		MaxResponseBytes: int(resolved[1]),
-		MaxRedirects:     int(resolved[2]),
+		TimeoutMs:          resolved[0],
+		MaxResponseBytes:   int(resolved[1]),
+		MaxRedirects:       int(resolved[2]),
+		StreamPreviewBytes: int(preview),
 	}
 }
 

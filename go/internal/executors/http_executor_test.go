@@ -271,3 +271,63 @@ func TestRedirectStripsCredentialsAcrossOrigins(t *testing.T) {
 		t.Fatalf("same-origin redirect must keep credentials: %+v", sameSeen)
 	}
 }
+
+// Streaming opt-in: bounded preview, full byte accounting, no JSON
+// projection, and the response byte cap still aborting mid-stream.
+func TestStreamingBodyModeProducesBoundedPreview(t *testing.T) {
+	big := strings.Repeat("x", 200_000)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(big))
+	}))
+	defer server.Close()
+
+	out, err := execHTTP(t, map[string]any{
+		"url": server.URL, "bodyMode": "stream", "streamPreviewBytes": float64(2048),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out["streamed"] != true || out["streamTruncated"] != true {
+		t.Fatalf("stream markers: %+v", out)
+	}
+	if preview := out["body"].(string); len(preview) != 2048 {
+		t.Fatalf("preview cap: %d bytes", len(preview))
+	}
+	if out["streamedBytes"] != 200_000 {
+		t.Fatalf("byte accounting: %v", out["streamedBytes"])
+	}
+	if _, projected := out["json"]; projected {
+		t.Fatalf("streaming previews are never JSON-projected: %+v", out)
+	}
+
+	// A small body arrives whole and untruncated.
+	small, err := execHTTP(t, map[string]any{"url": server.URL + "/", "bodyMode": "stream",
+		"streamPreviewBytes": float64(1_000_000)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if small["streamTruncated"] != false || small["streamedBytes"] != 200_000 {
+		t.Fatalf("full preview: %+v", small)
+	}
+
+	// The response byte cap still aborts mid-stream with the wire message.
+	_, err = execHTTP(t, map[string]any{
+		"url": server.URL, "bodyMode": "stream",
+		"streamPreviewBytes": float64(2048), "maxResponseBytes": float64(50_000),
+	})
+	if err == nil || !strings.Contains(err.Error(), "exceeds maxResponseBytes after") {
+		t.Fatalf("byte cap must abort the stream: %v", err)
+	}
+
+	// Preview cap clamps to the catalog range (below 1024 → 1024).
+	clamped, err := execHTTP(t, map[string]any{
+		"url": server.URL, "bodyMode": "stream", "streamPreviewBytes": float64(10),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(clamped["body"].(string)) != 1024 {
+		t.Fatalf("clamp floor: %d", len(clamped["body"].(string)))
+	}
+}

@@ -39,9 +39,10 @@ type Input struct {
 
 // HTTPBounds are the tenant-effective outbound HTTP defaults.
 type HTTPBounds struct {
-	TimeoutMs        float64
-	MaxResponseBytes int
-	MaxRedirects     int
+	TimeoutMs          float64
+	MaxResponseBytes   int
+	MaxRedirects       int
+	StreamPreviewBytes int
 }
 
 // Func executes one node and returns its output value.

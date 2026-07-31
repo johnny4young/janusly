@@ -702,6 +702,7 @@ el chat publicado.
 | 2026-07-31 | T-048 lista inflada | El k6 destapó que los números de `list` del loadgen eran contra un org VACÍO (cada invocación estrenaba org): 17k req/s con 0 filas. Con org poblado (~10k runs) la lista real daba 338 req/s @ p50 150ms |
 | 2026-07-31 | T-048 índice keyset | Causa raíz COMPARTIDA con Node (chip upstream creado): el keyset ordena por `(created_at DESC, id DESC)` pero `runs_org_created_idx` no incluye el tiebreaker `id` → bitmap + top-N sort sobre TODO el org por página (4.5ms @ 10k filas, O(runs-del-org)). Con `go_pilot_runs_org_created_id_idx` alineado: 0.27ms (17×) y la lista poblada pasa a 8.2k req/s @ p95 8ms (24×). El índice vive en la migración del pilot con prefijo `go_pilot_`; el fix Node va por el patrón two-file de índices hot-path |
 | 2026-07-31 | T-050 corte | Revisión de mitad de ola en JOURNAL: divergencias VIVAS curadas por área (ingest, runtime, plataforma) separadas de hallazgos puntuales ya resueltos; 4 chips upstream abiertos; deuda de proceso saldada listada. El §9 sigue siendo el registro crudo por ticket; el corte es el índice curado |
+| 2026-07-31 | T-051 streaming | `bodyMode:"stream"` opt-in en el nodo http: preview acotado (`streamPreviewBytes` clamp 1024..1048576, default del catálogo vía bounds del tenant + env `JANUSLY_HTTP_STREAM_PREVIEW_BYTES`), salida JSON-safe `{body, streamed, streamedBytes, streamTruncated}` con contabilidad de TODOS los bytes, cap `maxResponseBytes` abortando a MITAD del stream con el mensaje wire exacto, y previews jamás JSON-proyectados. En Go la mecánica es un solo camino de lectura (el body ya es stream) — la diferencia semántica es qué se bufferiza y qué se proyecta |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -939,7 +940,7 @@ compactas aquí; el detalle de paridad se lee de la fuente al ejecutar.
 | T-048 | Bench regresión: `make bench` guarda serie temporal en conformance/perf | F2 | P2 | done |
 | T-049 | Hardening SSRF extra: redirect cross-origin strip de headers credenciales | F2 | P1 | todo |
 | T-050 | Journal ola 2 parcial + revisión de divergencias acumuladas | F2 | P1 | todo |
-| T-051 | Streaming HTTP opt-in (`bodyMode:"stream"` → preview acotado) | F2 | P2 | todo |
+| T-051 | Streaming HTTP opt-in (`bodyMode:"stream"` → preview acotado) | F2 | P2 | done |
 | T-052 | `csv.fetch`/`csv.parse` port (RFC 4180 compartido, bounded sample) | F2 | P2 | todo |
 | T-053 | Retention sweep mínimo (`system:retention`: purga workflows tombstone >30d) | F2 | P2 | todo |
 | T-054 | `wait_until` archivo de timers vencidos masivos (lote + fairness) | F2 | P3 | todo |

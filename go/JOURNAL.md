@@ -881,3 +881,13 @@ producción necesita saber — de lo ya resuelto o informativo.
 - Integración multi-paquete siempre con `-p 1`.
 - `make migrate` aplica TAMBIÉN la migración del pilot (gap de
   instalación fresca cerrado).
+
+## 2026-07-31 — streaming HTTP con preview acotado (T-051)
+
+- El contrato de la referencia portado entero: preview con clamp del
+  catálogo, contabilidad de todos los bytes aunque solo se bufferice el
+  preview, el cap de respuesta abortando a mitad de stream con el
+  mensaje exacto, y la regla de nunca JSON-proyectar un preview. La
+  ironía agradable: en Go no existe "modo stream" mecánico — el body
+  siempre es un Reader — así que el opt-in solo cambia qué se bufferiza
+  y qué se proyecta, sin rama de transporte aparte.
