@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/johnny4young/janusly/go/internal/auth"
 	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/engine"
 	"github.com/johnny4young/janusly/go/internal/executors"
@@ -31,15 +32,16 @@ import (
 
 // V1Server owns the /v1 route surface over one engine and pool.
 type V1Server struct {
-	engine *engine.Engine
-	pool   *pgxpool.Pool
-	newID  func() string
-	hub    *streamHub
+	engine   *engine.Engine
+	pool     *pgxpool.Pool
+	newID    func() string
+	hub      *streamHub
+	resolver *auth.Resolver
 }
 
 // NewV1Handler mounts the v1 routes plus /healthz.
 func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
-	server := &V1Server{engine: eng, pool: pool, newID: uuid.NewString, hub: newStreamHub()}
+	server := &V1Server{engine: eng, pool: pool, resolver: auth.NewResolver(pool, auth.ConfigFromEnv()), newID: uuid.NewString, hub: newStreamHub()}
 	go server.hub.listen(context.Background(), pool)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -126,6 +128,8 @@ type v1Request struct {
 	orgID  string
 	userID string
 	id     string
+	// authContext carries mode/source/role for audit + permissions.
+	authContext *auth.Context
 }
 
 type handlerFunc func(w http.ResponseWriter, r *http.Request, rc v1Request)
@@ -134,16 +138,24 @@ type handlerFunc func(w http.ResponseWriter, r *http.Request, rc v1Request)
 // every handler filters by.
 func (s *V1Server) auth(next handlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		rc := v1Request{
-			orgID:  strings.TrimSpace(r.Header.Get("x-org-id")),
-			userID: strings.TrimSpace(r.Header.Get("x-user-id")),
-			id:     requestIDFrom(r),
-		}
-		if rc.orgID == "" {
-			writeV1Error(w, rc.id, http.StatusUnauthorized, "unauthorized", "Unauthorized", nil)
+		requestID := requestIDFrom(r)
+		resolved, err := s.resolver.Resolve(r.Context(), r)
+		if err != nil {
+			writeV1Error(w, requestID, http.StatusInternalServerError, "internal_error",
+				"Internal error: "+err.Error(), nil)
 			return
 		}
-		next(w, r, rc)
+		if resolved == nil {
+			// The reference's 401: message and code from the dispatcher's
+			// curated-error path.
+			writeV1Error(w, requestID, http.StatusUnauthorized, "server_request_failed",
+				"Unauthorized: missing Supabase JWT or dev headers", nil)
+			return
+		}
+		next(w, r, v1Request{
+			orgID: resolved.OrgID, userID: resolved.UserID, id: requestID,
+			authContext: resolved,
+		})
 	}
 }
 

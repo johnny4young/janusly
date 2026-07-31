@@ -655,6 +655,37 @@ func (q *Queries) GetOrgConfigValue(ctx context.Context, arg GetOrgConfigValuePa
 	return value_json, err
 }
 
+const getOrgMembership = `-- name: GetOrgMembership :one
+
+SELECT id, org_id, user_id, role FROM org_members
+WHERE org_id = $1 AND user_id = $2
+`
+
+type GetOrgMembershipParams struct {
+	OrgID  string
+	UserID string
+}
+
+type GetOrgMembershipRow struct {
+	ID     string
+	OrgID  string
+	UserID string
+	Role   string
+}
+
+// ── Membership (the grant IS the org_members row) ─────────────────────
+func (q *Queries) GetOrgMembership(ctx context.Context, arg GetOrgMembershipParams) (GetOrgMembershipRow, error) {
+	row := q.db.QueryRow(ctx, getOrgMembership, arg.OrgID, arg.UserID)
+	var i GetOrgMembershipRow
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.UserID,
+		&i.Role,
+	)
+	return i, err
+}
+
 const getReplayCampaign = `-- name: GetReplayCampaign :one
 SELECT id, org_id, name, cluster_signature, filter_json, pacing_ms, status, total_count, replayed_count, failed_count, cancelled_count, created_by, cancelled_by, next_dispatch_at, started_at, completed_at, cancelled_at, created_at, updated_at FROM replay_campaigns WHERE org_id = $1 AND id = $2
 `
@@ -1672,6 +1703,44 @@ func (q *Queries) ListOrgHTTPConfig(ctx context.Context, orgID string) ([]ListOr
 	for rows.Next() {
 		var i ListOrgHTTPConfigRow
 		if err := rows.Scan(&i.Key, &i.ValueJson); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrgMembershipsForUser = `-- name: ListOrgMembershipsForUser :many
+SELECT id, org_id, user_id, role FROM org_members
+WHERE user_id = $1
+ORDER BY created_at, id
+`
+
+type ListOrgMembershipsForUserRow struct {
+	ID     string
+	OrgID  string
+	UserID string
+	Role   string
+}
+
+func (q *Queries) ListOrgMembershipsForUser(ctx context.Context, userID string) ([]ListOrgMembershipsForUserRow, error) {
+	rows, err := q.db.Query(ctx, listOrgMembershipsForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOrgMembershipsForUserRow
+	for rows.Next() {
+		var i ListOrgMembershipsForUserRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.UserID,
+			&i.Role,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

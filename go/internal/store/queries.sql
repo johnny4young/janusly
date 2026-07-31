@@ -663,3 +663,14 @@ SELECT id FROM dead_letters
 WHERE org_id = $1 AND run_id = $2 AND node_id = $3 AND status = 'open'
 ORDER BY created_at DESC
 LIMIT 1;
+
+-- ── Membership (the grant IS the org_members row) ─────────────────────
+
+-- name: GetOrgMembership :one
+SELECT id, org_id, user_id, role FROM org_members
+WHERE org_id = $1 AND user_id = $2;
+
+-- name: ListOrgMembershipsForUser :many
+SELECT id, org_id, user_id, role FROM org_members
+WHERE user_id = $1
+ORDER BY created_at, id;

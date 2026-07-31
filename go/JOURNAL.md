@@ -1113,3 +1113,18 @@ producción necesita saber — de lo ya resuelto o informativo.
 - Frontera clara con Node: drizzle sigue mandando en develop; el pilot
   espeja sus migraciones nuevas en cada sync, y una base goose jamás
   corre pnpm migrate.
+
+## 2026-07-31 — la cadena de proveedores de identidad (T-069)
+
+- La arquitectura de auth.ts portada con sus invariantes intactos: el
+  primero de la cadena que produce un principal gana, el principal es
+  privado del paquete (los handlers jamás ven claims crudos del
+  proveedor), y el grant es la fila org_members — el hint del header o
+  del claim solo selecciona en cuál de MIS orgs trabajo. Los detalles
+  de seguridad que no se negocian: compare en tiempo constante para el
+  service token, un Bearer inválido nunca cae en cascada al siguiente
+  proveedor, y un browser no puede auto-declararse MCP.
+- Supabase se verifica con una llamada HTTP directa al Auth API — es
+  exactamente lo que el SDK de Node hace por dentro, sin arrastrar un
+  SDK. De paso el 401 del pilot adoptó la forma real del dispatcher
+  Node; la nuestra era inventada.
