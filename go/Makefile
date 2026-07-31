@@ -2,7 +2,7 @@ SHELL := /bin/bash
 DB_URL ?= postgres://janusly:janusly-go-local@127.0.0.1:4632/janusly_go
 PG_CONTAINER := janusly-go-pilot-postgres-1
 
-.PHONY: db-up db-down migrate schema-dump generate lint test run build parity ci test-pg15 bench
+.PHONY: db-up db-down migrate schema-dump generate lint test run build parity ci test-pg15 bench fuzz
 
 db-up:
 	docker compose -f docker-compose.yml up -d --wait
@@ -77,3 +77,10 @@ test-pg15:
 # scenarios, appends to conformance/perf/series.jsonl, refreshes BENCH.md.
 bench:
 	node conformance/run-bench.mjs
+
+# Grammar fuzzing: robustness properties over the two operator-facing
+# grammars (never panic; validate/evaluate agreement; total rendering).
+FUZZTIME ?= 45s
+fuzz:
+	go test ./internal/grammar/ -fuzz FuzzValidateAndEvaluateExpression -fuzztime $(FUZZTIME)
+	go test ./internal/grammar/ -fuzz FuzzRenderTemplate -fuzztime $(FUZZTIME)

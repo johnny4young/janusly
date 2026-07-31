@@ -987,3 +987,14 @@ producción necesita saber — de lo ya resuelto o informativo.
   trigger-claim, invertido — y el duplicado responde con el run
   original en un cuerpo indistinguible: idempotencia de verdad, no un
   409 que obliga al cliente a reconciliar.
+
+## 2026-07-31 — fuzzing de las gramáticas (T-061)
+
+- Once millones de entradas hostiles entre las dos gramáticas sin un
+  pánico ni una violación de propiedad. Las propiedades importan más
+  que el volumen: lo que valida limpio no puede sorprender al evaluar
+  (el acuerdo validar↔evaluar es exactamente lo que el gate de save
+  promete), y el rendering lenient es total — cualquier sintaxis de
+  template renderiza o degrada, nunca revienta. El corpus semilla
+  cubre cada operador, los word-operators, unicode y los rotos
+  clásicos (paréntesis sin cerrar, strings sin terminar, NULs).
