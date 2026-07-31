@@ -11,6 +11,7 @@ describe('web test worker policy', () => {
   })
 
   it('bounds high-core hosts without disabling file parallelism', () => {
+    expect(WEB_TEST_WORKER_CEILING).toBe(3)
     expect(resolveWebTestWorkerLimit(8)).toBe(WEB_TEST_WORKER_CEILING)
     expect(resolveWebTestWorkerLimit(14)).toBe(WEB_TEST_WORKER_CEILING)
   })

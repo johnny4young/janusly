@@ -93,7 +93,7 @@ export function resolveScheduleConfig(config: unknown): ScheduleConfig {
  * `triggeredAt` so downstream nodes / templates can read when the schedule
  * fired (e.g. `{{schedule.output.triggeredAt}}`).
  */
-export const scheduleExecutor: NodeExecutor = async (ctx) => {
+export const scheduleExecutor: NodeExecutor<"schedule"> = async (ctx) => {
   const config = resolveScheduleConfig(ctx.config);
   const triggeredAt = new Date().toISOString();
   return {

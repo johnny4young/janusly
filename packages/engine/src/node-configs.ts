@@ -20,9 +20,9 @@
  * `.optional()`). Objects use `.passthrough()` so unknown keys flow
  * through — the goal is to catch typos in REQUIRED fields without
  * rejecting workflows that ship extra metadata the executor ignores.
- * Tightening individual schemas is a per-node follow-up; the
- * compounding type-safety payoff arrives when `NodeContext.config`
- * itself becomes generic on the executor signature.
+ * Tightening individual schemas is a per-node follow-up. `NodeContext.config`
+ * is generic on the node type, so the inferred shape also protects executor
+ * implementations during refactors.
  *
  * Used by:
  * - `packages/engine/src/execute-node.ts` — the dispatcher's parse
@@ -108,7 +108,7 @@ export const AgentNodeConfigSchema = z
 
 export const MultiAgentNodeConfigSchema = z
   .object({
-    agents: z.array(z.unknown()).optional(),
+    agents: z.array(AgentNodeConfigSchema).optional(),
     mode: z.enum(["sequential", "parallel"]).optional(),
     aggregation: z.string().optional(),
     continueOnError: z.boolean().optional(),
@@ -233,6 +233,7 @@ export const HumanFormNodeConfigSchema = z
 export const SubworkflowNodeConfigSchema = z
   .object({
     workflowId: z.string().min(1, "subworkflow.workflowId is required"),
+    version: z.number().int().positive().optional(),
     input: z.unknown().optional(),
   })
   .passthrough();

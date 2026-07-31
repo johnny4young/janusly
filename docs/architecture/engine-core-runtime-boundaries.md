@@ -51,6 +51,15 @@ the queue contract.
 to concrete node executors in `node-registry.ts`; runtime core does not import
 executor-specific config schemas.
 
+The concrete registry is a `NodeExecutorMap` keyed by executor-owned node type.
+Each `NodeContext<T>.config` is inferred from `NodeConfigByType[T]`, so a field
+that belongs to another node type or has the wrong authored shape fails during
+TypeScript checking as well as at the post-template Zod parse. `executeNode`
+uses the same narrowed type for parsing and dispatch; `executeRegisteredNode`
+is the only dynamic dispatch seam. `router` and `router_llm` are intentionally
+absent because `WorkflowRuntime` owns their decision, branch-skip, semantic,
+and persistence sequence directly.
+
 ## In-memory integration testkit
 
 Engine integration tests can import `packages/engine/src/testing` instead of
@@ -137,9 +146,11 @@ empty-output behavior.
 
 ## Remaining portability work
 
-The core runtime boundary exists today. Remaining improvements are narrower:
+The core runtime boundary and typed concrete dispatch exist today. Remaining
+improvements are narrower:
 
-- keep moving executor-specific validation into typed node config parsers;
+- tighten still-loose optional config fields only when their executors are
+  touched, preserving passthrough compatibility by default;
 - preserve compatibility exports while callers finish moving to the runtime
   boundary;
 - avoid adding new infrastructure calls inside `core/*`.

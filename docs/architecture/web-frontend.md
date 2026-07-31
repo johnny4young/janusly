@@ -284,7 +284,7 @@ locale asset is absent. Do not raise a cap without measured evidence and a
 reviewed exception.
 
 The jsdom suite keeps file-level parallelism but caps Vitest workers at the
-smaller of four or the host's available parallelism. Each test file owns a
+smaller of three or the host's available parallelism. Each test file owns a
 jsdom realm and can activate multiple lazy Vite imports; allowing high-core
 hosts to schedule every realm concurrently can starve Testing Library waits
 without exposing a product defect. Do not replace this bound with broad test

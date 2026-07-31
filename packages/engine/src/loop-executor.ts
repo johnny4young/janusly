@@ -8,6 +8,7 @@
  */
 
 import { getOrgConfigSnapshot } from "@janusly/data";
+import type { NodeConfigByType } from "./node-configs";
 import { appendEvent } from "./persistence";
 import { recordValidationWriteSkip } from "./validation-evidence";
 import { safePersistPayload } from "./safe-persist";
@@ -42,7 +43,7 @@ type LoopContext = {
   nodeId: string;
   orgId: string;
   workflowId: string | null;
-  config: Record<string, unknown>;
+  config: NodeConfigByType["loop"];
   context: Record<string, unknown>;
   redactedValues?: string[];
   templatePolicy?: "lenient" | "strict";

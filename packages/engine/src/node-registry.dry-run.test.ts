@@ -312,7 +312,7 @@ describe('http node — dryRun gating', () => {
     })
   })
 
-  it.each(['POST', 'PUT', 'PATCH', 'DELETE'])(
+  it.each(['POST', 'PUT', 'PATCH', 'DELETE'] as const)(
     'gates %s in dryRun mode',
     async (method) => {
       const result = await nodeRegistry.http({

@@ -93,7 +93,7 @@ function readTriggerEvent(ctx: { context: Record<string, unknown> }): Record<str
 }
 
 /** Build a passthrough executor for a given trigger node type. */
-function makeTriggerExecutor(type: TriggerNodeType): NodeExecutor {
+function makeTriggerExecutor<T extends TriggerNodeType>(type: T): NodeExecutor<T> {
   return async (ctx) => {
     // Validate the operator's authored config as a last line of defense —
     // a malformed config that slipped past `POST /validate` (e.g. an
@@ -113,15 +113,15 @@ function makeTriggerExecutor(type: TriggerNodeType): NodeExecutor {
 }
 
 /** `email_received` trigger executor — passthrough; ingestion owns the SMTP relay. */
-export const emailReceivedExecutor: NodeExecutor = makeTriggerExecutor("email_received");
+export const emailReceivedExecutor: NodeExecutor<"email_received"> = makeTriggerExecutor("email_received");
 /** Generic JSON webhook trigger executor; ingestion owns auth and dedupe. */
-export const webhookReceivedExecutor: NodeExecutor = makeTriggerExecutor("webhook_received");
+export const webhookReceivedExecutor: NodeExecutor<"webhook_received"> = makeTriggerExecutor("webhook_received");
 /** `file_dropped` trigger executor — passthrough; ingestion owns the bucket-event listener. */
-export const fileDroppedExecutor: NodeExecutor = makeTriggerExecutor("file_dropped");
+export const fileDroppedExecutor: NodeExecutor<"file_dropped"> = makeTriggerExecutor("file_dropped");
 /** `mcp_server_event` trigger executor — passthrough; ingestion owns the MCP subscription. */
-export const mcpServerEventExecutor: NodeExecutor = makeTriggerExecutor("mcp_server_event");
+export const mcpServerEventExecutor: NodeExecutor<"mcp_server_event"> = makeTriggerExecutor("mcp_server_event");
 /** Signed PagerDuty V3 trigger executor; the API callback owns verification. */
-export const pagerDutyIncidentExecutor: NodeExecutor = makeTriggerExecutor("pagerduty_incident");
+export const pagerDutyIncidentExecutor: NodeExecutor<"pagerduty_incident"> = makeTriggerExecutor("pagerduty_incident");
 
 /** True when the node type is one of the event-driven trigger types. */
 export { isTriggerNodeType };

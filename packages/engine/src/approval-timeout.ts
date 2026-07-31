@@ -23,7 +23,7 @@ import {
 const STATUS_RETRY_DELAY_MS = 1_000;
 
 /** Approval executor — preserves legacy indefinite waits when no deadline exists. */
-export const approvalExecutor: NodeExecutor = async (ctx) => {
+export const approvalExecutor: NodeExecutor<"approval"> = async (ctx) => {
   const title = typeof ctx.config.title === "string" && ctx.config.title.trim()
     ? ctx.config.title.trim()
     : typeof ctx.config.message === "string" && ctx.config.message.trim()

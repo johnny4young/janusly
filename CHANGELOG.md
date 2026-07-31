@@ -16,6 +16,11 @@ retroactively.
 
 ### Changed
 
+- Concrete workflow executors now receive node-type-specific configuration
+  inferred from the same Zod schemas used at runtime dispatch. The registry is
+  compile-time exhaustive for executor-owned node types, while runtime-owned
+  routers remain explicitly outside it; malformed nested multi-agent entries
+  and invalid subworkflow version shapes now fail before executor logic.
 - Workflow runtime integration tests now have reusable stateful in-memory
   persistence, queue/DLQ, and scripted-executor adapters. They exercise the
   real orchestration lifecycle without Postgres or Redis while retaining
@@ -23,7 +28,7 @@ retroactively.
   safeguards; database and BullMQ suites remain authoritative for their own
   concurrency and delivery guarantees.
 - The web jsdom suite now retains file-level parallelism while bounding worker
-  concurrency to the smaller of four or the host's available parallelism. This
+  concurrency to the smaller of three or the host's available parallelism. This
   prevents high-core machines from turning lazy-module scheduling pressure into
   unrelated UI-test timeouts without hiding slow tests behind larger deadlines.
 - Web performance governance now distinguishes the complete JS/CSS deploy

@@ -172,7 +172,7 @@ export function resolveJoinSources(config: unknown): JoinSources {
  * declared branches and echoes them. The actual fan-out happens via the
  * workflow's outgoing edges from this node.
  */
-export const parallelForkExecutor: NodeExecutor = async (ctx) => {
+export const parallelForkExecutor: NodeExecutor<"parallel_fork"> = async (ctx) => {
   const branches = resolveParallelForkBranches(ctx.config);
   return {
     status: "completed",
@@ -187,7 +187,7 @@ export const parallelForkExecutor: NodeExecutor = async (ctx) => {
  * shape — the runtime's fan-in readiness check should prevent this in
  * practice) surface as `undefined` rather than throwing.
  */
-export const joinExecutor: NodeExecutor = async (ctx) => {
+export const joinExecutor: NodeExecutor<"join"> = async (ctx) => {
   const sources = resolveJoinSources(ctx.config);
   const branches: Record<string, unknown> = {};
   for (const [label, predecessorId] of Object.entries(sources)) {
