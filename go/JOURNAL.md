@@ -1392,3 +1392,9 @@ producción necesita saber — de lo ya resuelto o informativo.
 - Un servidor de captura probó el request mismo: el bloque system lleva
   el cache_control exacto cuando se opta, ni un byte cuando no, y el
   max_tokens per-call aterriza tal cual.
+
+## 2026-07-31 — la gobernanza que nunca es outage (T-103)
+
+- El gate de presupuesto con las tres zonas (sin límite, warn, block),
+  fail-soft ante consultas rotas, y la prueba clave: una llamada
+  bloqueada registra cero hits al proveedor.

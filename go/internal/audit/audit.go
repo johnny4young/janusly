@@ -114,6 +114,19 @@ func Write(ctx context.Context, pool *pgxpool.Pool, authCtx *auth.Context, actio
 	}
 }
 
+// WriteAs records a best-effort row with an explicit user id column and
+// NO auth-derived enrichment — the analogue of the reference's raw
+// audit(orgId, userId, ...) writers (the budget gate uses it).
+func WriteAs(ctx context.Context, pool *pgxpool.Pool, orgID, userID string, action Action, opts Options) {
+	err := insert(ctx, func(ctx context.Context, sql string, args ...any) error {
+		_, execErr := pool.Exec(ctx, sql, args...)
+		return execErr
+	}, orgID, userID, action, opts, nil)
+	if err != nil {
+		slog.Warn("audit write failed", "action", string(action), "error", err)
+	}
+}
+
 // SystemWrite records a system-actor row (no auth context; orgId may be
 // the "system" sentinel) — the degradation/budget/watcher writers' shape.
 func SystemWrite(ctx context.Context, pool *pgxpool.Pool, orgID, actor string, action Action, opts Options) {
