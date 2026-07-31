@@ -786,3 +786,30 @@ INSERT INTO org_configs (id, org_id, key, value_json, category, description, val
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
 ON CONFLICT (org_id, key)
 DO UPDATE SET value_json = EXCLUDED.value_json, updated_by = EXCLUDED.updated_by, updated_at = now();
+
+-- Per-org retention: the sweep resolves each org's catalog window and
+-- purges with an org-scoped cutoff.
+-- name: ListOrgsWithSoftDeletedWorkflows :many
+SELECT DISTINCT org_id FROM workflows WHERE deleted_at IS NOT NULL;
+
+-- name: PurgeExpiredSoftDeletedWorkflowsForOrg :one
+WITH expired_workflows AS (
+  SELECT w.id, w.org_id FROM workflows w
+  WHERE w.org_id = sqlc.arg(target_org)::text AND w.deleted_at IS NOT NULL
+    AND w.deleted_at <= sqlc.arg(cutoff)::timestamptz
+),
+deleted_versions AS (
+  DELETE FROM workflow_versions
+  WHERE (org_id, workflow_id) IN (SELECT org_id, id FROM expired_workflows)
+  RETURNING 1
+),
+deleted_metadata AS (
+  DELETE FROM workflow_metadata
+  WHERE (org_id, workflow_id) IN (SELECT org_id, id FROM expired_workflows)
+  RETURNING 1
+),
+deleted_workflows AS (
+  DELETE FROM workflows WHERE id IN (SELECT id FROM expired_workflows)
+  RETURNING 1
+)
+SELECT count(*) FROM deleted_workflows;

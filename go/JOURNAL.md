@@ -1284,3 +1284,10 @@ producción necesita saber — de lo ya resuelto o informativo.
   guards verbatim, resolutor por capas puro. El GET que respondía `[]` a
   una org fresca era divergencia: la referencia responde el catálogo
   completo con procedencia por clave.
+
+## 2026-07-31 — el catálogo gobierna de verdad (T-087)
+
+- requireSavedWorkflow con el 403 verbatim; el chequeo saved-vs-adhoc de
+  paso corrigió el audit de arranques (guardado → run.started). Retención
+  por org probada con dos orgs y ventanas distintas; el consent MCP lee
+  del snapshot; /health dejó de fingir salud del limiter.

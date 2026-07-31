@@ -750,6 +750,7 @@ el chat publicado.
 | 2026-07-31 | T-085 hallazgo | El punto (1) de la card era especulativo: Node NO limita start/save/resume — sus buckets reales son `"ai"` (rutas AI, aún no portadas) y `mcp.rediscover`; cablear límites inventados habría CREADO divergencia. Los buckets `ai` llegan con la ola que porte `/ai/*` |
 | 2026-07-31 | T-086 catálogo org config | Las 69 definiciones extraídas mecánicamente de `orgConfigCatalog.ts` (la card estimaba ~50) a `internal/orgconfig`: claves/tipos/defaults/envKeys/min-max/allowedValues/allowEmpty/fractional + guards de nombre y valor prohibidos verbatim. Resolutor por capas puro (fila válida → env → default; valor inválido cae a la SIGUIENTE capa, nunca aplica a medias). GET lista el catálogo completo con procedencia (el stub `[]` de T-043 era una divergencia — la referencia responde el catálogo entero a una org fresca); POST valida por el pipeline y audita |
 | 2026-07-31 | T-086 validadores diferidos | 5 claves llevan validador custom en Node (surfaceModels, operatorGuidance, memory.allowedKinds, memory.retentionDaysByKind, recovery.slaPolicies) — sus subsistemas no existen aún en el pilot; marcadas `HasDeferredValidator`, el pipeline estándar les aplica igual y el custom llega con su ola |
+| 2026-07-31 | T-087 consumidores | El catálogo gobierna: `runs.requireSavedWorkflow` en `/start` (403 `runs_adhoc_disabled` con mensaje byte-igual; el chequeo saved-vs-adhoc además CORRIGE el audit de T-081 — un start de workflow guardado ahora audita `run.started`, no `.adhoc`), `mcp.writeConsent` migrado del lector puntual al snapshot (T-057 verde encima), retención de tombstones POR ORG con la ventana del catálogo (org a 1 día purga, org a default 30 conserva — probado con dos orgs), `/health` reporta el snapshot real del tracker del limiter (el hard-coded "healthy" ya mentía). Lector del TTL de human-form disponible vía `LoadNumber` (se consume en ola 4) |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -1040,7 +1041,7 @@ día que exista el chokepoint (T-079)**.
 | T-084 | Rate limiter en Postgres (fail-open) + observabilidad de degradación | limiter | P0 | done |
 | T-085 | Limiter cableado: API global, storm-guard de triggers, MCP writes 60/min | limiter | P1 | done |
 | T-086 | Catálogo completo de org config (tipado, guards anti-secreto, GET/PUT + audit) | config | P0 | todo |
-| T-087 | Consumidores del snapshot: requireSavedWorkflow, TTLs, ventanas de retención por org | config | P1 | todo |
+| T-087 | Consumidores del snapshot: requireSavedWorkflow, TTLs, ventanas de retención por org | config | P1 | done |
 | T-088 | Retención completa por org: run_events / audit_logs / usage_events (CTE por tabla, acotada) | config | P1 | todo |
 | T-089 | Sustrato usage_events + seam de recorder (forma `llm.completion` lista para ola 4) | usage | P1 | todo |
 | T-090 | `GET /run/usage` real + agregado de costos acotado (100 grupos + resto) | usage | P2 | todo |

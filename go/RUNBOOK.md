@@ -22,7 +22,7 @@ worker aparte: la cola vive en Postgres.
 | `JANUSLY_GO_API_POOL_SIZE` | 10 | Pool de conexiones del API |
 | `JANUSLY_GO_WORKER_POOL_SIZE` | concurrencia+2 | Pool de los workers |
 | `JANUSLY_GO_HTTP_TIMEOUT_MS` | 30000 | Timeout HTTP saliente por defecto |
-| `JANUSLY_GO_RETENTION_DELETED_WORKFLOWS_DAYS` | 30 | Ventana del sweep de tombstones |
+| `JANUSLY_GO_RETENTION_DELETED_WORKFLOWS_DAYS` | 30 | Fallback global del sweep; desde T-087 la ventana real es por org vía el catálogo (`retention.deletedWorkflowsDays`, env de referencia `JANUSLY_RETENTION_DELETED_WORKFLOWS_DAYS`) |
 | `ALLOW_PRIVATE_HTTP_TARGETS` | false | Deshabilita el guard SSRF (solo dev) |
 | `JANUSLY_GO_ENV` | — | `production` activa el gate de arranque: sin `SUPABASE_URL` el binario REHÚSA salvo `ALLOW_DEV_AUTH_HEADERS=true` |
 | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | — | Modo Supabase de la cadena de auth |

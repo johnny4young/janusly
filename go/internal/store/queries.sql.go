@@ -2145,6 +2145,32 @@ func (q *Queries) ListOrgRoles(ctx context.Context, orgID string) ([]ListOrgRole
 	return items, nil
 }
 
+const listOrgsWithSoftDeletedWorkflows = `-- name: ListOrgsWithSoftDeletedWorkflows :many
+SELECT DISTINCT org_id FROM workflows WHERE deleted_at IS NOT NULL
+`
+
+// Per-org retention: the sweep resolves each org's catalog window and
+// purges with an org-scoped cutoff.
+func (q *Queries) ListOrgsWithSoftDeletedWorkflows(ctx context.Context) ([]string, error) {
+	rows, err := q.db.Query(ctx, listOrgsWithSoftDeletedWorkflows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var org_id string
+		if err := rows.Scan(&org_id); err != nil {
+			return nil, err
+		}
+		items = append(items, org_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listReplayCampaignDeadLetters = `-- name: ListReplayCampaignDeadLetters :many
 
 SELECT id, run_id, node_id, status, error_json, node_json
@@ -3082,6 +3108,41 @@ func (q *Queries) PurgeExpiredSoftDeletedWorkflows(ctx context.Context, cutoff t
 	var rows_deleted int32
 	err := row.Scan(&rows_deleted)
 	return rows_deleted, err
+}
+
+const purgeExpiredSoftDeletedWorkflowsForOrg = `-- name: PurgeExpiredSoftDeletedWorkflowsForOrg :one
+WITH expired_workflows AS (
+  SELECT w.id, w.org_id FROM workflows w
+  WHERE w.org_id = $1::text AND w.deleted_at IS NOT NULL
+    AND w.deleted_at <= $2::timestamptz
+),
+deleted_versions AS (
+  DELETE FROM workflow_versions
+  WHERE (org_id, workflow_id) IN (SELECT org_id, id FROM expired_workflows)
+  RETURNING 1
+),
+deleted_metadata AS (
+  DELETE FROM workflow_metadata
+  WHERE (org_id, workflow_id) IN (SELECT org_id, id FROM expired_workflows)
+  RETURNING 1
+),
+deleted_workflows AS (
+  DELETE FROM workflows WHERE id IN (SELECT id FROM expired_workflows)
+  RETURNING 1
+)
+SELECT count(*) FROM deleted_workflows
+`
+
+type PurgeExpiredSoftDeletedWorkflowsForOrgParams struct {
+	TargetOrg string
+	Cutoff    time.Time
+}
+
+func (q *Queries) PurgeExpiredSoftDeletedWorkflowsForOrg(ctx context.Context, arg PurgeExpiredSoftDeletedWorkflowsForOrgParams) (int64, error) {
+	row := q.db.QueryRow(ctx, purgeExpiredSoftDeletedWorkflowsForOrg, arg.TargetOrg, arg.Cutoff)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const queryAuditLogs = `-- name: QueryAuditLogs :many

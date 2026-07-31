@@ -28,6 +28,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/engine"
 	"github.com/johnny4young/janusly/go/internal/executors"
 	"github.com/johnny4young/janusly/go/internal/grammar"
+	"github.com/johnny4young/janusly/go/internal/orgconfig"
 	"github.com/johnny4young/janusly/go/internal/ratelimit"
 	"github.com/johnny4young/janusly/go/internal/store"
 )
@@ -58,7 +59,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	})
 	// Legacy public health — the web's OperationsPage polls this every 20s.
 	// Public-safe shape from the reference: no raw bucket/error/key detail.
-	// rateLimiter reads healthy (the pilot has no limiter yet) and queue
+	// rateLimiter is the degradation tracker's public snapshot; queue
 	// reflects a real bounded DB probe.
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
@@ -67,7 +68,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		payload, _ := json.Marshal(map[string]any{
 			"ok":          true,
-			"rateLimiter": map[string]any{"healthy": true, "degradedBuckets": []string{}},
+			"rateLimiter": server.limiterTracker.Public(),
 			"queue":       map[string]any{"degraded": degraded},
 		})
 		_, _ = w.Write(payload)
@@ -337,6 +338,20 @@ func (s *V1Server) startCore(r *http.Request, rc v1Request) opResult {
 	if rejection := s.productionGate(r.Context(), rc.orgID, wf); rejection != nil {
 		return *rejection
 	}
+	// Saved-vs-adhoc: legitimate ad-hoc starts (AI Studio "Run" before
+	// Save) can be forbidden per tenant via runs.requireSavedWorkflow.
+	isAdhoc := true
+	if wf.ID != "" {
+		if _, err := store.New(s.pool).GetWorkflow(r.Context(), store.GetWorkflowParams{
+			ID: wf.ID, OrgID: rc.orgID,
+		}); err == nil {
+			isAdhoc = false
+		}
+	}
+	if isAdhoc && orgconfig.LoadBool(r.Context(), s.pool, rc.orgID, "runs.requireSavedWorkflow") {
+		return opError(http.StatusForbidden, "runs_adhoc_disabled",
+			"Ad-hoc workflows are disabled. Save the workflow first.", nil)
+	}
 	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if len(idempotencyKey) > 256 {
 		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
@@ -360,9 +375,13 @@ func (s *V1Server) startCore(r *http.Request, rc v1Request) opResult {
 		}
 		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "run.started.adhoc", audit.Options{
+	startAction := audit.Action("run.started")
+	if isAdhoc {
+		startAction = "run.started.adhoc"
+	}
+	audit.Write(r.Context(), s.pool, rc.authContext, startAction, audit.Options{
 		TargetType: "run", TargetID: runID,
-		Metadata: map[string]any{"workflowId": wf.ID, "adhoc": true},
+		Metadata: map[string]any{"workflowId": wf.ID, "adhoc": isAdhoc},
 	})
 	return opOK(map[string]any{"runId": runID})
 }

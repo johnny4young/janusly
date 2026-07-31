@@ -24,6 +24,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/engine"
 	"github.com/johnny4young/janusly/go/internal/grammar"
+	"github.com/johnny4young/janusly/go/internal/orgconfig"
 	"github.com/johnny4young/janusly/go/internal/ratelimit"
 	"github.com/johnny4young/janusly/go/internal/store"
 )
@@ -504,14 +505,10 @@ func (d Deps) guardWrite(ctx context.Context, actionKey string) (bool, string) {
 	if os.Getenv("JANUSLY_MCP_WRITES_ENABLED") != "true" {
 		return false, "MCP writes are disabled at the process level (JANUSLY_MCP_WRITES_ENABLED is not 'true')."
 	}
-	raw, err := store.New(d.Pool).GetOrgConfigValue(ctx, store.GetOrgConfigValueParams{
-		OrgID: d.OrgID, Key: "mcp.writeConsent",
-	})
-	consent := false
-	if err == nil {
-		_ = json.Unmarshal(raw, &consent)
-	}
-	if !consent {
+	// The tenant consent reads through the catalog snapshot — the same
+	// layer chain as every governed setting. mcp.writeConsent has NO env
+	// fallback by design, which the catalog's empty EnvKeys encodes.
+	if !orgconfig.LoadBool(ctx, d.Pool, d.OrgID, "mcp.writeConsent") {
 		return false, "MCP writes are not consented for this organization (mcp.writeConsent is false)."
 	}
 	if d.Limiter != nil {

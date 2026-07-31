@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/johnny4young/janusly/go/internal/orgconfig"
 	"github.com/johnny4young/janusly/go/internal/store"
 )
 
@@ -29,14 +30,32 @@ func RetentionDays() int {
 	return retentionDefaultDays
 }
 
-// ProcessRetentionSweep purges workflows tombstoned longer than the window.
+// ProcessRetentionSweep purges workflows tombstoned longer than each
+// org's catalog window (retention.deletedWorkflowsDays: tenant row → env
+// → default 30). The passed retentionDays is the legacy global fallback
+// used only when the catalog resolution yields nothing sane.
 func (e *Engine) ProcessRetentionSweep(ctx context.Context, retentionDays int) (int, error) {
-	cutoff := e.now().UTC().AddDate(0, 0, -retentionDays)
-	deleted, err := store.New(e.pool).PurgeExpiredSoftDeletedWorkflows(ctx, cutoff)
+	q := store.New(e.pool)
+	orgs, err := q.ListOrgsWithSoftDeletedWorkflows(ctx)
 	if err != nil {
 		return 0, err
 	}
-	return int(deleted), nil
+	total := 0
+	for _, orgID := range orgs {
+		windowDays := int(orgconfig.LoadNumber(ctx, e.pool, orgID, "retention.deletedWorkflowsDays"))
+		if windowDays < 1 {
+			windowDays = retentionDays
+		}
+		cutoff := e.now().UTC().AddDate(0, 0, -windowDays)
+		deleted, err := q.PurgeExpiredSoftDeletedWorkflowsForOrg(ctx, store.PurgeExpiredSoftDeletedWorkflowsForOrgParams{
+			TargetOrg: orgID, Cutoff: cutoff,
+		})
+		if err != nil {
+			return total, err
+		}
+		total += int(deleted)
+	}
+	return total, nil
 }
 
 // RunRetentionSweep runs the sweep on an interval until the context ends.
