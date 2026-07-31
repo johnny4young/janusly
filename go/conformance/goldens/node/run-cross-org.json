@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/run?runId=82caeb5f-3252-4593-b640-16d724d2910e"
+  },
+  "status": 403,
+  "headers": {
+    "content-type": "application/json",
+    "x-request-id": "<present>"
+  },
+  "body": {
+    "apiVersion": "v1",
+    "requestId": "704b118c-e3fd-4679-93d1-4663795da75e",
+    "error": {
+      "code": "runs_forbidden",
+      "message": "Forbidden"
+    }
+  }
+}

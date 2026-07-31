@@ -190,6 +190,19 @@ func TestWakeupsLifecycle(t *testing.T) {
 	past := time.Now().Add(-time.Minute)
 	future := time.Now().Add(time.Hour)
 
+	// Anchor both wake-ups to real WAITING node rows: engine test suites
+	// running concurrently against the shared database sweep due wake-ups
+	// of non-waiting nodes, and these must survive that garbage collection.
+	anchorRun := uid(org, "run-wake")
+	seedRun(t, ctx, q, org, anchorRun)
+	for _, rowID := range []string{due, later} {
+		if err := q.InsertRunNode(ctx, InsertRunNodeParams{
+			ID: rowID, RunID: anchorRun, NodeID: "wait-" + rowID[:8], Status: "waiting",
+		}); err != nil {
+			t.Fatalf("insert waiting anchor: %v", err)
+		}
+	}
+
 	if err := q.UpsertWakeup(ctx, UpsertWakeupParams{RunNodeID: due, WakeAt: past, Reason: "retry"}); err != nil {
 		t.Fatalf("upsert due: %v", err)
 	}

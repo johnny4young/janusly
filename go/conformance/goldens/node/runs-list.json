@@ -1,0 +1,55 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/runs?limit=5"
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "x-request-id": "<present>"
+  },
+  "body": {
+    "apiVersion": "v1",
+    "requestId": "942bfec9-25fe-47bc-980c-9a8e04282196",
+    "data": [
+      {
+        "id": "82caeb5f-3252-4593-b640-16d724d2910e",
+        "orgId": "golden-org",
+        "workflowId": "golden-linear",
+        "workflowName": "Golden linear",
+        "workflowVersionId": "golden-linear",
+        "status": "succeeded",
+        "hasWaitingNodes": false,
+        "outcomeStatus": null,
+        "semanticViolationCount": 0,
+        "outputJson": null,
+        "parentRunId": null,
+        "parentNodeId": null,
+        "traceId": "31f88cde-93c7-46f4-aa6d-896399af79ac",
+        "replayMode": null,
+        "validationEvidenceLevel": null,
+        "createdBy": "golden-user",
+        "createdAt": "2026-07-31T00:27:31.428Z"
+      },
+      {
+        "id": "b9d06e1e-4261-4b91-8239-f6704e2fdd1b",
+        "orgId": "golden-org",
+        "workflowId": "golden-linear",
+        "workflowName": "Golden linear",
+        "workflowVersionId": "golden-linear",
+        "status": "succeeded",
+        "hasWaitingNodes": false,
+        "outcomeStatus": null,
+        "semanticViolationCount": 0,
+        "outputJson": null,
+        "parentRunId": null,
+        "parentNodeId": null,
+        "traceId": "8bf716dd-eb6a-4ad1-972e-be1db6962fc7",
+        "replayMode": null,
+        "validationEvidenceLevel": null,
+        "createdBy": "golden-user",
+        "createdAt": "2026-07-31T00:26:45.739Z"
+      }
+    ]
+  }
+}

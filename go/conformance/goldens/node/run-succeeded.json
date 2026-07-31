@@ -1,0 +1,209 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/run?runId=82caeb5f-3252-4593-b640-16d724d2910e"
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "x-request-id": "<present>"
+  },
+  "body": {
+    "apiVersion": "v1",
+    "requestId": "e2b89469-18ba-4e71-bd7c-4391ce18a693",
+    "data": {
+      "run": {
+        "id": "82caeb5f-3252-4593-b640-16d724d2910e",
+        "orgId": "golden-org",
+        "workflowVersionId": "golden-linear",
+        "workflowRolloutId": null,
+        "workflowRolloutVariant": null,
+        "status": "succeeded",
+        "outcomeStatus": null,
+        "semanticViolationCount": 0,
+        "inputJson": {
+          "input": {},
+          "workflow": {
+            "id": "golden-linear",
+            "name": "Golden linear",
+            "edges": [
+              {
+                "to": "done",
+                "from": "shape"
+              }
+            ],
+            "input": {},
+            "nodes": [
+              {
+                "id": "shape",
+                "type": "transform",
+                "config": {
+                  "mapping": {
+                    "total": 3,
+                    "verdict": "ok"
+                  }
+                }
+              },
+              {
+                "id": "done",
+                "type": "noop",
+                "config": {}
+              }
+            ],
+            "orgId": "golden-org",
+            "metadata": {
+              "tags": []
+            },
+            "createdBy": "golden-user",
+            "dslVersion": "1.0"
+          }
+        },
+        "outputJson": null,
+        "parentRunId": null,
+        "parentNodeId": null,
+        "parentLinkKind": null,
+        "parentNotificationAfter": null,
+        "traceId": "31f88cde-93c7-46f4-aa6d-896399af79ac",
+        "replayMode": null,
+        "validationEvidenceLevel": null,
+        "recoveryPlaybookValidationRecordedAt": null,
+        "recoveryPlaybookAppliedRecordedAt": null,
+        "createdBy": "golden-user",
+        "createdAt": "2026-07-31T00:27:31.428Z"
+      },
+      "nodes": [
+        {
+          "id": "e0d4e115-81bb-4dd7-ab04-1b0b00c3d0ff",
+          "runId": "82caeb5f-3252-4593-b640-16d724d2910e",
+          "nodeId": "shape",
+          "status": "succeeded",
+          "stateJson": {
+            "output": {
+              "total": 3,
+              "verdict": "ok"
+            }
+          },
+          "attempts": 1,
+          "startedAt": "2026-07-31T00:27:31.458Z",
+          "finishedAt": "2026-07-31T00:27:31.479Z",
+          "errorJson": null
+        },
+        {
+          "id": "8733332f-3e44-4997-8ea5-d03f695c821e",
+          "runId": "82caeb5f-3252-4593-b640-16d724d2910e",
+          "nodeId": "done",
+          "status": "succeeded",
+          "stateJson": {
+            "output": {}
+          },
+          "attempts": 1,
+          "startedAt": "2026-07-31T00:27:31.504Z",
+          "finishedAt": "2026-07-31T00:27:31.521Z",
+          "errorJson": null
+        }
+      ],
+      "events": [
+        {
+          "id": "48d9d20a-bd61-41a5-8323-86f94a0719c1",
+          "runId": "82caeb5f-3252-4593-b640-16d724d2910e",
+          "nodeId": null,
+          "type": "run.started",
+          "payload": {
+            "workflowVersionId": "golden-linear"
+          },
+          "createdAt": "2026-07-31T00:27:31.428Z",
+          "holdUntil": null
+        },
+        {
+          "id": "b395dc3d-9b72-4e97-9721-78f5755b7ad3",
+          "runId": "82caeb5f-3252-4593-b640-16d724d2910e",
+          "nodeId": "shape",
+          "type": "node.queued",
+          "payload": {},
+          "createdAt": "2026-07-31T00:27:31.453Z",
+          "holdUntil": null
+        },
+        {
+          "id": "e44f18c4-9c21-4934-9c4f-9c7d1fd1b948",
+          "runId": "82caeb5f-3252-4593-b640-16d724d2910e",
+          "nodeId": "shape",
+          "type": "node.running",
+          "payload": {
+            "attempt": 1
+          },
+          "createdAt": "2026-07-31T00:27:31.466Z",
+          "holdUntil": null
+        },
+        {
+          "id": "04490c73-a73a-443a-a89f-25e52bab9cfa",
+          "runId": "82caeb5f-3252-4593-b640-16d724d2910e",
+          "nodeId": "shape",
+          "type": "node.succeeded",
+          "payload": {
+            "output": {
+              "total": 3,
+              "verdict": "ok"
+            },
+            "attempt": 1
+          },
+          "createdAt": "2026-07-31T00:27:31.479Z",
+          "holdUntil": null
+        },
+        {
+          "id": "23681221-4349-461f-badc-b552d3f2f28d",
+          "runId": "82caeb5f-3252-4593-b640-16d724d2910e",
+          "nodeId": "done",
+          "type": "node.queued",
+          "payload": {},
+          "createdAt": "2026-07-31T00:27:31.504Z",
+          "holdUntil": null
+        },
+        {
+          "id": "9086b418-fe17-4e4b-9780-9556e2bd9dfd",
+          "runId": "82caeb5f-3252-4593-b640-16d724d2910e",
+          "nodeId": "done",
+          "type": "node.running",
+          "payload": {
+            "attempt": 1
+          },
+          "createdAt": "2026-07-31T00:27:31.510Z",
+          "holdUntil": null
+        },
+        {
+          "id": "555c2721-5c6e-453d-94c2-f88f0adab530",
+          "runId": "82caeb5f-3252-4593-b640-16d724d2910e",
+          "nodeId": "done",
+          "type": "node.succeeded",
+          "payload": {
+            "output": {},
+            "attempt": 1
+          },
+          "createdAt": "2026-07-31T00:27:31.521Z",
+          "holdUntil": null
+        },
+        {
+          "id": "ffaf8b11-2e5d-4648-9abe-927542a8f243",
+          "runId": "82caeb5f-3252-4593-b640-16d724d2910e",
+          "nodeId": null,
+          "type": "run.succeeded",
+          "payload": {
+            "nodes": 2
+          },
+          "createdAt": "2026-07-31T00:27:31.544Z",
+          "holdUntil": null
+        },
+        {
+          "id": "69b4d586-ff39-457e-b5f9-a1847fad1007",
+          "runId": "82caeb5f-3252-4593-b640-16d724d2910e",
+          "nodeId": null,
+          "type": "run.status_checked",
+          "payload": {},
+          "createdAt": "2026-07-31T00:27:31.552Z",
+          "holdUntil": null
+        }
+      ],
+      "eventsHasMore": false,
+      "eventsCursor": null
+    }
+  }
+}

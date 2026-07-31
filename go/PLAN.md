@@ -175,7 +175,7 @@ crítica) · P1 (importante) · P2 (stretch).
 | T-009 | wait_until + approval/waiting + POST /resume | P0 | done |
 | T-010 | Redrive desde dead_letters | P0 | done |
 | T-011 | Executor http + SSRF/DNS pinning | P0 | done |
-| T-012 | API /v1 mínima + envelopes + goldens de referencia Node | P0 | todo |
+| T-012 | API /v1 mínima + envelopes + goldens de referencia Node | P0 | done |
 | T-013 | Arnés de paridad semántica (lane A, fixtures F01–F10) | P0 | todo |
 | T-014 | E2E de API Go (lane B) | P0 | todo |
 | T-015 | Servidor MCP stdio + e2e vía MCP (lane C) | P1 | todo |
@@ -634,6 +634,11 @@ el chat publicado.
 | 2026-07-30 | decisión | Pinning por construcción: el resolver se consulta EXACTAMENTE una vez (validación) y `DialContext` marca la IP validada del mapa por host — el dial de un host no validado se rehúsa, y un pin privado se rehúsa en el socket (defensa en profundidad). Cada salto de redirect revalida y re-pinnea vía CheckRedirect |
 | 2026-07-30 | divergencia temporal | Sin org_config (bounds por tenant), sin modo streaming (`bodyMode:"stream"`), sin dry-run/validation skip de métodos write-side, sin strip de headers con credenciales en redirect cross-origin — F2. El guard write-side de retries (no reintentar writes) llega cuando exista noción de validation runs |
 | 2026-07-30 | watch-item | Flake 1/~10: TestDelayedRetryIsNotClaimableUntilDue falló una vez en suite completa (0.37s, detalle no capturado); pasa 6/6 después. Diagnosticar si recurre |
+| 2026-07-30 | goldens capturados | 17 goldens del stack Node REAL en `go/conformance/goldens/node/` (API arrancado desde el worktree limpio en el pin — el checkout principal tenía modificaciones de otra sesión; develop había avanzado 2 commits pero el diff sobre apps/api+packages era VACÍO → pin-equivalente). Envelope `{apiVersion:"v1", requestId, data|error}` + header X-Request-Id; error `{code, message, params?}` |
+| 2026-07-30 | hallazgo (goldens) | Run desconocido y run cross-org son AMBOS `403 runs_forbidden "Forbidden"` — invisibilidad indistinguible, no 404. Resume conflict = `409 runs_resume_conflict "Node is not waiting"`. `/run` y `/status` proyectan la MISMA data `{run, nodes, events, eventsCursor, eventsHasMore}`. `start` → `{runId}` con 200. Listas (`/v1/runs`, `/v1/dlq`) → data = array pelado |
+| 2026-07-30 | decisión | Columnas que el piloto aún no llena (rollout, outcome, trace, recovery overlay del DLQ…) emiten NULL, nunca claves ausentes — el key-set completo del golden se preserva y el web F1 no necesita tolerancia. Save acepta el vocabulario completo de la plataforma (tipo no ejecutable = problema de START, no de save); binario único api+worker por ahora |
+| 2026-07-30 | corrección de testing | Los claims son globales por diseño → pools de workers de paquetes de test corriendo en paralelo se completaban nodos ajenos (un stub noop "completó" un http bloqueado). Lane de integración ahora `-p 1`; y CompleteNode/FailNode borran su wakeup consumido en la misma tx (limpieza determinista, no dependiente del sweeper) |
+| 2026-07-30 | divergencia anotada | `POST /v1/dlq/redrive` es superficie propia del piloto (Node: `/v1/dlq/replay` exact-identity); códigos `dlq_not_found`/`dlq_replay_conflict`/`runs_input_invalid`/`workflows_validation_failed` no capturados en goldens (el golden de save salió 400 por forma de body — el body es el workflow al TOPE, no `{workflow}`); paginación por cursor en listas y `workflows_save_conflict` de Node verificar en T-013. Goldens de save-éxito y dlq-replay pendientes de recaptura |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)

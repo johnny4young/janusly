@@ -283,3 +283,25 @@ consolidan en el informe de la puerta D15.
   Todos los mensajes verbatim de Node.
 - Watch-item: un flake 1/~10 en TestDelayedRetryIsNotClaimableUntilDue
   bajo suite completa; pasa 6/6 después. Si recurre, capturar detalle.
+
+## 2026-07-30 — API /v1 + goldens de Node (T-012)
+
+- La paridad se volvió medible: levanté el stack Node COMPLETO desde el
+  worktree limpio (el checkout principal tenía ediciones de otra sesión
+  — capturar de ahí habría contaminado la referencia) y capturé 17
+  respuestas reales como goldens versionados.
+- El hallazgo que justifica todo el ejercicio: run desconocido y run de
+  otro tenant son AMBOS `403 runs_forbidden` — invisibilidad
+  indistinguible. Yo habría escrito 404. El golden me corrigió antes de
+  escribir una línea del handler.
+- Ocho rutas montadas sobre el engine con el envelope exacto; las
+  columnas que el piloto aún no llena salen como NULL explícito — el
+  key-set del golden se preserva completo para que el web de F1 no
+  necesite tolerancia a claves ausentes.
+- La lección de testing del día: con claims globales (correcto en
+  producción), los pools de paquetes de test en paralelo se servían
+  nodos ajenos — un stub noop "completó" un http bloqueado de otro
+  paquete. Lane -p 1 + borrado determinista del wakeup en la tx de
+  completación. El bug de test reveló una mejora real del engine.
+- El binario es uno solo por ahora (API + workers) — los procesos se
+  separan cuando la escala lo pida; el engine ya soporta N consumidores.

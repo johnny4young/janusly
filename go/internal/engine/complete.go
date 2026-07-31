@@ -68,6 +68,11 @@ func (e *Engine) CompleteNode(ctx context.Context, claim ClaimedNode, output any
 		if completed == 0 {
 			return errSkipCommit
 		}
+		// A consumed retry wake-up dies with the completion — deterministic
+		// cleanup, not sweeper-dependent.
+		if err := q.DeleteWakeup(ctx, claim.RowID); err != nil {
+			return fmt.Errorf("clear wakeup: %w", err)
+		}
 		if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
 			ID: e.newID(), RunID: claim.RunID,
 			NodeID: pgtype.Text{String: claim.NodeID, Valid: true},
@@ -164,6 +169,9 @@ func (e *Engine) FailNode(ctx context.Context, claim ClaimedNode, execErr error)
 		}
 		if failed == 0 {
 			return errSkipCommit
+		}
+		if err := q.DeleteWakeup(ctx, claim.RowID); err != nil {
+			return fmt.Errorf("clear wakeup: %w", err)
 		}
 
 		if err := e.insertDeadLetter(ctx, q, claim, run, serr, failedAt); err != nil {

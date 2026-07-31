@@ -169,6 +169,41 @@ WHERE run_id = $1
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(page_limit);
 
+-- Run summaries for the list surface: workflow identity joined through the
+-- version snapshot, plus the waiting-node flag the Activity UI reads.
+-- name: ListRunSummaries :many
+SELECT r.id, r.org_id, r.workflow_version_id, r.status, r.output_json,
+       r.parent_run_id, r.parent_node_id, r.replay_mode, r.created_by,
+       r.created_at,
+       wv.workflow_id AS workflow_id, w.name AS workflow_name,
+       EXISTS (
+         SELECT 1 FROM run_nodes rn
+         WHERE rn.run_id = r.id AND rn.status = 'waiting'
+       ) AS has_waiting_nodes
+FROM runs r
+LEFT JOIN workflow_versions wv ON wv.id = r.workflow_version_id
+LEFT JOIN workflows w ON w.id = wv.workflow_id
+WHERE r.org_id = $1
+ORDER BY r.created_at DESC, r.id DESC
+LIMIT sqlc.arg(page_limit);
+
+-- name: ListDeadLetterSummaries :many
+SELECT dl.id, dl.org_id, dl.run_id, dl.node_id, dl.attempt, dl.error_json,
+       dl.status, dl.replayed_at, dl.created_at,
+       dl.node_json->>'type' AS node_type,
+       w.name AS workflow_name
+FROM dead_letters dl
+LEFT JOIN runs r ON r.id = dl.run_id
+LEFT JOIN workflow_versions wv ON wv.id = r.workflow_version_id
+LEFT JOIN workflows w ON w.id = wv.workflow_id
+WHERE dl.org_id = $1
+ORDER BY dl.created_at DESC, dl.id DESC
+LIMIT sqlc.arg(page_limit);
+
+-- name: CountWorkflowVersions :one
+SELECT COALESCE(MAX(version), 0)::int FROM workflow_versions
+WHERE workflow_id = $1 AND org_id = $2;
+
 -- name: InsertDeadLetter :exec
 INSERT INTO dead_letters (id, org_id, run_id, node_id, attempt, workflow_json, node_json, error_json)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8);

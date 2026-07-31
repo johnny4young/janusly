@@ -124,6 +124,23 @@ func (q *Queries) CompleteRunNode(ctx context.Context, arg CompleteRunNodeParams
 	return result.RowsAffected(), nil
 }
 
+const countWorkflowVersions = `-- name: CountWorkflowVersions :one
+SELECT COALESCE(MAX(version), 0)::int FROM workflow_versions
+WHERE workflow_id = $1 AND org_id = $2
+`
+
+type CountWorkflowVersionsParams struct {
+	WorkflowID string
+	OrgID      string
+}
+
+func (q *Queries) CountWorkflowVersions(ctx context.Context, arg CountWorkflowVersionsParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countWorkflowVersions, arg.WorkflowID, arg.OrgID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const deleteWakeup = `-- name: DeleteWakeup :exec
 DELETE FROM go_pilot_wakeups WHERE run_node_id = $1
 `
@@ -564,6 +581,71 @@ func (q *Queries) InsertWorkflowVersion(ctx context.Context, arg InsertWorkflowV
 	return err
 }
 
+const listDeadLetterSummaries = `-- name: ListDeadLetterSummaries :many
+SELECT dl.id, dl.org_id, dl.run_id, dl.node_id, dl.attempt, dl.error_json,
+       dl.status, dl.replayed_at, dl.created_at,
+       dl.node_json->>'type' AS node_type,
+       w.name AS workflow_name
+FROM dead_letters dl
+LEFT JOIN runs r ON r.id = dl.run_id
+LEFT JOIN workflow_versions wv ON wv.id = r.workflow_version_id
+LEFT JOIN workflows w ON w.id = wv.workflow_id
+WHERE dl.org_id = $1
+ORDER BY dl.created_at DESC, dl.id DESC
+LIMIT $2
+`
+
+type ListDeadLetterSummariesParams struct {
+	OrgID     string
+	PageLimit int32
+}
+
+type ListDeadLetterSummariesRow struct {
+	ID           string
+	OrgID        string
+	RunID        string
+	NodeID       string
+	Attempt      int32
+	ErrorJson    json.RawMessage
+	Status       string
+	ReplayedAt   *time.Time
+	CreatedAt    *time.Time
+	NodeType     interface{}
+	WorkflowName pgtype.Text
+}
+
+func (q *Queries) ListDeadLetterSummaries(ctx context.Context, arg ListDeadLetterSummariesParams) ([]ListDeadLetterSummariesRow, error) {
+	rows, err := q.db.Query(ctx, listDeadLetterSummaries, arg.OrgID, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDeadLetterSummariesRow
+	for rows.Next() {
+		var i ListDeadLetterSummariesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.RunID,
+			&i.NodeID,
+			&i.Attempt,
+			&i.ErrorJson,
+			&i.Status,
+			&i.ReplayedAt,
+			&i.CreatedAt,
+			&i.NodeType,
+			&i.WorkflowName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDeadLetters = `-- name: ListDeadLetters :many
 SELECT id, org_id, run_id, node_id, attempt, error_json, status, created_at
 FROM dead_letters
@@ -814,6 +896,80 @@ func (q *Queries) ListRunNodesByRun(ctx context.Context, runID string) ([]ListRu
 			&i.StartedAt,
 			&i.FinishedAt,
 			&i.ErrorJson,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRunSummaries = `-- name: ListRunSummaries :many
+SELECT r.id, r.org_id, r.workflow_version_id, r.status, r.output_json,
+       r.parent_run_id, r.parent_node_id, r.replay_mode, r.created_by,
+       r.created_at,
+       wv.workflow_id AS workflow_id, w.name AS workflow_name,
+       EXISTS (
+         SELECT 1 FROM run_nodes rn
+         WHERE rn.run_id = r.id AND rn.status = 'waiting'
+       ) AS has_waiting_nodes
+FROM runs r
+LEFT JOIN workflow_versions wv ON wv.id = r.workflow_version_id
+LEFT JOIN workflows w ON w.id = wv.workflow_id
+WHERE r.org_id = $1
+ORDER BY r.created_at DESC, r.id DESC
+LIMIT $2
+`
+
+type ListRunSummariesParams struct {
+	OrgID     string
+	PageLimit int32
+}
+
+type ListRunSummariesRow struct {
+	ID                string
+	OrgID             string
+	WorkflowVersionID string
+	Status            string
+	OutputJson        json.RawMessage
+	ParentRunID       pgtype.Text
+	ParentNodeID      pgtype.Text
+	ReplayMode        pgtype.Text
+	CreatedBy         pgtype.Text
+	CreatedAt         *time.Time
+	WorkflowID        pgtype.Text
+	WorkflowName      pgtype.Text
+	HasWaitingNodes   bool
+}
+
+// Run summaries for the list surface: workflow identity joined through the
+// version snapshot, plus the waiting-node flag the Activity UI reads.
+func (q *Queries) ListRunSummaries(ctx context.Context, arg ListRunSummariesParams) ([]ListRunSummariesRow, error) {
+	rows, err := q.db.Query(ctx, listRunSummaries, arg.OrgID, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRunSummariesRow
+	for rows.Next() {
+		var i ListRunSummariesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.WorkflowVersionID,
+			&i.Status,
+			&i.OutputJson,
+			&i.ParentRunID,
+			&i.ParentNodeID,
+			&i.ReplayMode,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.WorkflowID,
+			&i.WorkflowName,
+			&i.HasWaitingNodes,
 		); err != nil {
 			return nil, err
 		}

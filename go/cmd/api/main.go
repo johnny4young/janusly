@@ -15,6 +15,8 @@ import (
 
 	"github.com/johnny4young/janusly/go/internal/boot"
 	"github.com/johnny4young/janusly/go/internal/config"
+	"github.com/johnny4young/janusly/go/internal/engine"
+	"github.com/johnny4young/janusly/go/internal/grammar"
 	"github.com/johnny4young/janusly/go/internal/httpapi"
 )
 
@@ -47,9 +49,23 @@ func run() error {
 	}
 	logger.Info("boot", "port", cfg.Port, "internal_port", cfg.InternalPort)
 
+	// The pilot ships as one binary: the API process also runs the worker
+	// pool. The processes split when scale demands it — the engine already
+	// supports N independent consumers.
+	eng := engine.New(pool)
+	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
+	workerCtx, stopWorkers := context.WithCancel(context.Background())
+	defer stopWorkers()
+	workersDone := make(chan struct{})
+	go func() {
+		defer close(workersDone)
+		_ = eng.RunWorkers(workerCtx, cfg.WorkerConcurrency, cfg.PollInterval, dispatcher.Execute, logger)
+	}()
+	defer func() { stopWorkers(); <-workersDone }()
+
 	api := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.Port),
-		Handler:           httpapi.NewAPIHandler(),
+		Handler:           httpapi.NewV1Handler(eng, pool),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	internal := &http.Server{

@@ -1,0 +1,51 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/workflows/save",
+    "body": {
+      "workflow": {
+        "id": "golden-linear",
+        "name": "Golden linear",
+        "nodes": [
+          {
+            "id": "shape",
+            "type": "transform",
+            "config": {
+              "mapping": {
+                "verdict": "ok",
+                "total": 3
+              }
+            }
+          },
+          {
+            "id": "done",
+            "type": "noop",
+            "config": {}
+          }
+        ],
+        "edges": [
+          {
+            "from": "shape",
+            "to": "done"
+          }
+        ]
+      }
+    }
+  },
+  "status": 400,
+  "headers": {
+    "content-type": "application/json",
+    "x-request-id": "<present>"
+  },
+  "body": {
+    "apiVersion": "v1",
+    "requestId": "f55a542a-bc11-4ad0-a1e3-7b009855f0cf",
+    "error": {
+      "code": "invalid_input",
+      "message": "Invalid request body",
+      "params": {
+        "field": "nodes"
+      }
+    }
+  }
+}
