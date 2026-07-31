@@ -200,24 +200,33 @@ packages/mcp-server/
     ├── index.ts         ← entry point — wires Server + StdioServerTransport
     ├── api-client.ts    ← env resolver + auth-aware fetch closure
     ├── api-client.test.ts
-    ├── tools.ts         ← Tool descriptors + dispatchTool() with switch over names
+    ├── tools.ts         ← stable catalog/dispatcher compatibility barrel
+    ├── tools-modules.test.ts
+    ├── tooling/
+    │   ├── visible-tools.ts / write-tools.ts  ← JSON Schema descriptors
+    │   ├── catalog.ts                         ← risk decoration + visibility
+    │   ├── arguments.ts                       ← strict argument projection
+    │   ├── dispatch-visible.ts / dispatch-write.ts
+    │   ├── dispatch.ts                        ← MCP result composition
+    │   └── shared.ts                          ← pure route/object helpers
     └── tools.test.ts
 ```
 
 ## Adding a new tool
 
-1. Add a descriptor to the appropriate catalog in
-   [`src/tools.ts`](src/tools.ts)—`name`, `description`, and `inputSchema`
-   (JSON Schema, not Zod). Shared decoration adds the closed top-level schema,
-   output schema, and annotations; update the risk sets when the defaults are
-   not accurate.
-2. Add a `case` arm to `runOne` mapping the tool to its API URL. Use `URLSearchParams` for query strings (catches encoding bugs).
+1. Add the descriptor to `src/tooling/visible-tools.ts` or
+   `src/tooling/write-tools.ts`—`name`, `description`, and `inputSchema` (JSON
+   Schema, not Zod). `catalog.ts` adds the closed top-level schema, output
+   schema, and annotations; update its risk sets when the defaults are not
+   accurate.
+2. Add a matching case to `dispatch-visible.ts` or `dispatch-write.ts`. Use
+   `URLSearchParams` for query strings so encoding stays explicit.
 3. Add a unit test to `tools.test.ts` asserting the URL/headers shape with a `vi.fn` `callApi`.
 4. Use the path/status constants from `@janusly/shared`; the backing route must
    have an explicit Zod contract in `V1_CONTRACT_ROUTES`.
 5. Bump the package version if anything is downstream-visible.
 
-Write tools must go through `guardMcpWrite(auth, actionKey)` in `apps/api/src/mcp-consent.ts`; that chokepoint applies the process flag, tenant consent, and per-tool rate limit for MCP-source traffic. Route audits use `auditAction`, which derives the MCP source and actor metadata. Add a write tool by extending `WRITE_TOOLS`, adding a `requireWrites`-guarded dispatch branch, guarding the backing API route, and covering both env-off refusal and env-on dispatch. Do not add destructive tools without all of those controls.
+Write tools must go through `guardMcpWrite(auth, actionKey)` in `apps/api/src/mcp-consent.ts`; that chokepoint applies the process flag, tenant consent, and per-tool rate limit for MCP-source traffic. Route audits use `auditAction`, which derives the MCP source and actor metadata. Add a write tool by extending `WRITE_TOOLS`, adding a `requireWrites`-guarded branch in `dispatch-write.ts`, guarding the backing API route, and covering both env-off refusal and env-on dispatch. Do not add destructive tools without all of those controls.
 
 The complete boundary, lifecycle rationale, protocol contract, and deliberate
 non-goals live in

@@ -16,6 +16,13 @@ retroactively.
 
 ### Changed
 
+- The MCP server's 40-tool protocol surface is now separated into bounded
+  descriptor, risk-catalog, argument-validation, always-visible dispatch, and
+  write-dispatch modules behind the existing `tools.ts` compatibility barrel.
+  Tool order, JSON Schemas, risk annotations, stable routes, structured
+  results, and the process-plus-tenant write boundary remain unchanged; an
+  architecture test fixes the 26 visible / 14 gated inventory and acyclic
+  dependency direction.
 - Engine lifecycle persistence is now separated into bounded run, node, event,
   queue-publication, and semantic-recovery ports behind the existing
   `persistence.ts` compatibility barrel. All 40 runtime exports and 10 type

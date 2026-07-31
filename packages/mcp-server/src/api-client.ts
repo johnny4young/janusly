@@ -9,8 +9,8 @@
  *
  * Used by:
  * - `packages/mcp-server/src/index.ts` — boot path constructs the client.
- * - `packages/mcp-server/src/tools.ts` — `dispatchTool` calls the closure
- *   returned by `createApiClient`.
+ * - `packages/mcp-server/src/tooling/dispatch*.ts` — route translators call
+ *   the closure returned by `createApiClient` through the stable tools barrel.
  *
  * Invariants:
  * - The MCP server never queries the DB directly. Multi-tenant scope, audit
