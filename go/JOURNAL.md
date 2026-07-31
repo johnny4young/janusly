@@ -402,3 +402,16 @@ local. Sin umbral pasa/no-pasa: números para aprender.
 - Matiz honesto: diamond con c=32 rinde MENOS que con c=8 (90 vs 136
   runs/s) — advisory lock por run + muchos workers sobre pocos runs =
   contención. La concurrencia se dimensiona a runs concurrentes.
+
+## 2026-07-30 — reaper de nodos atascados (T-020)
+
+- El único modo de fallo que el claim atómico no puede auto-sanar — un
+  worker muerto a mitad de ejecución — ya tiene su red: sweep periódico
+  que convierte la fila `running` huérfana en la superficie ordinaria
+  del operador (nodo failed + dead letter + run failed).
+- La postura es la de Node y es deliberada: fail-into-DLQ, jamás
+  re-ejecutar — el nodo atascado pudo haber cobrado la tarjeta antes de
+  morir. El operador decide con el redrive.
+- La elegancia del reuso: el reap ES FailNode — mismo CAS (un nodo que
+  completó entre scan y write nunca se pisa), misma transacción
+  terminal, mismo DLQ. El reaper son ~50 líneas de scan + loop.

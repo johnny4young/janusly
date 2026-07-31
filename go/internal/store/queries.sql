@@ -204,6 +204,18 @@ LIMIT sqlc.arg(page_limit);
 SELECT COALESCE(MAX(version), 0)::int FROM workflow_versions
 WHERE workflow_id = $1 AND org_id = $2;
 
+-- Stalled running nodes: the one failure mode the atomic claim cannot
+-- self-heal (a worker killed mid-execution). Joined to open runs only.
+-- name: FindStalledRunningNodes :many
+SELECT rn.id, rn.run_id, rn.node_id, COALESCE(rn.attempts, 1)::int AS attempt
+FROM run_nodes rn
+JOIN runs r ON r.id = rn.run_id
+WHERE rn.status = 'running'
+  AND rn.started_at < now() - make_interval(secs => sqlc.arg(threshold_seconds)::float8)
+  AND r.status IN ('running', 'failed')
+ORDER BY rn.started_at
+LIMIT sqlc.arg(batch_size);
+
 -- name: InsertDeadLetter :exec
 INSERT INTO dead_letters (id, org_id, run_id, node_id, attempt, workflow_json, node_json, error_json)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8);

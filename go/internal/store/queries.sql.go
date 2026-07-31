@@ -178,6 +178,56 @@ func (q *Queries) FailRunNode(ctx context.Context, arg FailRunNodeParams) (int64
 	return result.RowsAffected(), nil
 }
 
+const findStalledRunningNodes = `-- name: FindStalledRunningNodes :many
+SELECT rn.id, rn.run_id, rn.node_id, COALESCE(rn.attempts, 1)::int AS attempt
+FROM run_nodes rn
+JOIN runs r ON r.id = rn.run_id
+WHERE rn.status = 'running'
+  AND rn.started_at < now() - make_interval(secs => $1::float8)
+  AND r.status IN ('running', 'failed')
+ORDER BY rn.started_at
+LIMIT $2
+`
+
+type FindStalledRunningNodesParams struct {
+	ThresholdSeconds float64
+	BatchSize        int32
+}
+
+type FindStalledRunningNodesRow struct {
+	ID      string
+	RunID   string
+	NodeID  string
+	Attempt int32
+}
+
+// Stalled running nodes: the one failure mode the atomic claim cannot
+// self-heal (a worker killed mid-execution). Joined to open runs only.
+func (q *Queries) FindStalledRunningNodes(ctx context.Context, arg FindStalledRunningNodesParams) ([]FindStalledRunningNodesRow, error) {
+	rows, err := q.db.Query(ctx, findStalledRunningNodes, arg.ThresholdSeconds, arg.BatchSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FindStalledRunningNodesRow
+	for rows.Next() {
+		var i FindStalledRunningNodesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.NodeID,
+			&i.Attempt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getDeadLetter = `-- name: GetDeadLetter :one
 SELECT id, org_id, run_id, node_id, attempt, workflow_json, node_json,
        error_json, status, replayed_at, created_at, replay_claimed_at

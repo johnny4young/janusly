@@ -57,6 +57,7 @@ func run() error {
 		defer close(done)
 		_ = eng.RunWorkers(workerCtx, cfg.WorkerConcurrency, cfg.PollInterval, dispatcher.Execute, logger)
 	}()
+	go eng.StartReaper(workerCtx, time.Minute, time.Hour, logger)
 	defer func() { stopWorkers(); <-done }()
 
 	org := os.Getenv("JANUSLY_GO_ORG")

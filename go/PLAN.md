@@ -654,6 +654,7 @@ el chat publicado.
 | 2026-07-30 | sync develop | Pin avanzado 0f294ad2 → 7febb99c (merge). Diff digerido: 2 commits de calificación local (tenant-isolation + load-soak: scripts smoke, políticas, specs e2e, docs) + retoque de UserMenu.tsx. CERO impacto en apps/api / packages/engine / packages/shared — goldens y paridad siguen válidos sin recaptura. El smoke de load-soak de Node es referencia útil para el lane de rendimiento del piloto |
 | 2026-07-30 | T-019 confirmado | La separación de pools ERA el acantilado: start@50VU 49.3→274.6 runs/s (5.6×) con p99 19.9s→337ms (59×); list 2800→6220 RPS. Config nueva: `JANUSLY_GO_API_POOL_SIZE` (10) + `JANUSLY_GO_WORKER_POOL_SIZE` (0 = concurrencia+2). El primer retest mostró 7628 "errores" que eran artefacto del LOADGEN (Transport default MaxIdleConnsPerHost=2 → agotamiento de puertos efímeros a 500 runs/s; backend limpio 11966/11966) — keep-alive 512 y cero errores |
 | 2026-07-30 | hallazgo (T-019) | diamond@10VU con c=32 rinde 90/s vs 136/s con c=8: la contención del advisory lock por run crece con workers sobre POCOS runs concurrentes — la concurrencia debe dimensionarse a runs concurrentes, no solo a nodos. Anotado para la guía de operación (T-060) |
+| 2026-07-30 | T-020 reaper | Postura Node portada: fail-into-DLQ, NUNCA re-ejecutar (el side effect pudo cometerse — el operador decide vía redrive); CAS de FailNode garantiza que un nodo que completó entre scan y write jamás se pisa y réplicas concurrentes no doble-cosechan; piso de umbral 15 min en StartReaper (tests ejercitan ReapStalledNodes directo); never-throws (error por nodo → log + siguiente sweep). Identidad del stall en error_json: {name:"StalledNodeError", code:"WORKER_STALLED"} — divergencia menor: Node lleva reason:"worker_stalled" en metadata del evento |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -860,7 +861,7 @@ compactas aquí; el detalle de paridad se lee de la fuente al ejecutar.
 | # | Ticket | Fase | Pri | Estado |
 | --- | --- | --- | --- | --- |
 | T-019 | Pool DB configurable + pools separados API/workers + retest 50VU | F0.5 | P0 | done |
-| T-020 | Reaper de nodos atascados (`running` huérfanos → requeue/fail acotado) | F0.5 | P0 | todo |
+| T-020 | Reaper de nodos atascados (`running` huérfanos → requeue/fail acotado) | F0.5 | P0 | done |
 | T-021 | Cancelación de run (`POST /v1/run/cancel`, semántica Node: cancellable statuses) | F0.5 | P0 | todo |
 | T-022 | Recaptura goldens faltantes (save-éxito, dlq-replay) + golden de cancel | F0.5 | P1 | todo |
 | T-023 | Diagnóstico flake delayed-retry + captura de detalle en arnés | F0.5 | P1 | todo |
