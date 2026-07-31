@@ -83,5 +83,7 @@ func (e *Engine) RunRetentionSweep(ctx context.Context, every time.Duration, ret
 		if _, err := store.New(e.pool).CleanupExpiredRateWindows(ctx); err != nil && ctx.Err() == nil {
 			logger.Error("rate-window cleanup failed", "error", err)
 		}
+		// Per-org data retention (run_events / audit_logs / usage_events).
+		e.runDataRetention(ctx, logger)
 	}
 }

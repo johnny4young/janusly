@@ -1291,3 +1291,10 @@ producción necesita saber — de lo ya resuelto o informativo.
   paso corrigió el audit de arranques (guardado → run.started). Retención
   por org probada con dos orgs y ventanas distintas; el consent MCP lee
   del snapshot; /health dejó de fingir salud del limiter.
+
+## 2026-07-31 — la retención que drena sin bloquear (T-088)
+
+- Las tres purgas con el patrón de la referencia (lotes acotados, legal
+  hold, shape con `cappedByMaxBatches`), y una lección de rendimiento:
+  enumerar orgs por los pisos del catálogo convirtió 40 s de barrido en
+  milisegundos — una org sin datos viejos ni entra al loop.

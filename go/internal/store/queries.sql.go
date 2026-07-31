@@ -457,6 +457,79 @@ func (q *Queries) CountWorkflowVersions(ctx context.Context, arg CountWorkflowVe
 	return column_1, err
 }
 
+const deleteExpiredAuditLogsBatch = `-- name: DeleteExpiredAuditLogsBatch :execrows
+DELETE FROM audit_logs WHERE id IN (
+  SELECT a.id FROM audit_logs a
+  WHERE a.org_id = $1::text
+    AND a.created_at < $2::timestamptz
+    AND (a.hold_until IS NULL OR a.hold_until <= now())
+  LIMIT $3)
+`
+
+type DeleteExpiredAuditLogsBatchParams struct {
+	TargetOrg string
+	Cutoff    time.Time
+	BatchSize int32
+}
+
+func (q *Queries) DeleteExpiredAuditLogsBatch(ctx context.Context, arg DeleteExpiredAuditLogsBatchParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredAuditLogsBatch, arg.TargetOrg, arg.Cutoff, arg.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteExpiredRunEventsBatch = `-- name: DeleteExpiredRunEventsBatch :execrows
+DELETE FROM run_events WHERE id IN (
+  SELECT re.id FROM run_events re
+  JOIN runs r ON r.id = re.run_id
+  WHERE r.org_id = $1::text
+    AND re.created_at < $2::timestamptz
+    AND (re.hold_until IS NULL OR re.hold_until <= now())
+  LIMIT $3)
+`
+
+type DeleteExpiredRunEventsBatchParams struct {
+	TargetOrg string
+	Cutoff    time.Time
+	BatchSize int32
+}
+
+// Batched per-org data retention (the reference's subquery+LIMIT shape):
+// each round-trip removes at most one batch, honoring per-row legal holds.
+// run_events scopes through the parent run (it has no org column).
+func (q *Queries) DeleteExpiredRunEventsBatch(ctx context.Context, arg DeleteExpiredRunEventsBatchParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredRunEventsBatch, arg.TargetOrg, arg.Cutoff, arg.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteExpiredUsageEventsBatch = `-- name: DeleteExpiredUsageEventsBatch :execrows
+DELETE FROM usage_events WHERE id IN (
+  SELECT u.id FROM usage_events u
+  WHERE u.org_id = $1::text
+    AND u.created_at < $2::timestamptz
+    AND (u.hold_until IS NULL OR u.hold_until <= now())
+  LIMIT $3)
+`
+
+type DeleteExpiredUsageEventsBatchParams struct {
+	TargetOrg string
+	Cutoff    time.Time
+	BatchSize int32
+}
+
+func (q *Queries) DeleteExpiredUsageEventsBatch(ctx context.Context, arg DeleteExpiredUsageEventsBatchParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredUsageEventsBatch, arg.TargetOrg, arg.Cutoff, arg.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteOrgMember = `-- name: DeleteOrgMember :execrows
 DELETE FROM org_members WHERE org_id = $1 AND user_id = $2
 `
@@ -2145,6 +2218,39 @@ func (q *Queries) ListOrgRoles(ctx context.Context, orgID string) ([]ListOrgRole
 	return items, nil
 }
 
+const listOrgsWithRetainableData = `-- name: ListOrgsWithRetainableData :many
+SELECT DISTINCT org_id FROM (
+  SELECT r.org_id FROM runs r
+  JOIN run_events re ON re.run_id = r.id
+  WHERE re.created_at < now() - interval '7 days'
+  UNION SELECT org_id FROM audit_logs WHERE created_at < now() - interval '30 days'
+  UNION SELECT org_id FROM usage_events WHERE created_at < now() - interval '30 days'
+) all_orgs
+`
+
+// Orgs holding data old enough to POSSIBLY be expired — bounded by each
+// table's catalog FLOOR (run_events >= 7 days, audit/usage >= 30), so an
+// org with only fresh data never enters the sweep loop at all.
+func (q *Queries) ListOrgsWithRetainableData(ctx context.Context) ([]string, error) {
+	rows, err := q.db.Query(ctx, listOrgsWithRetainableData)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var org_id string
+		if err := rows.Scan(&org_id); err != nil {
+			return nil, err
+		}
+		items = append(items, org_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrgsWithSoftDeletedWorkflows = `-- name: ListOrgsWithSoftDeletedWorkflows :many
 SELECT DISTINCT org_id FROM workflows WHERE deleted_at IS NOT NULL
 `
@@ -2309,6 +2415,38 @@ func (q *Queries) ListReplayCampaigns(ctx context.Context, arg ListReplayCampaig
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRetentionConfigRows = `-- name: ListRetentionConfigRows :many
+SELECT org_id, key, value_json FROM org_configs WHERE key LIKE 'retention.%'
+`
+
+type ListRetentionConfigRowsRow struct {
+	OrgID     string
+	Key       string
+	ValueJson json.RawMessage
+}
+
+// One read for every org's retention windows — the sweep resolves the
+// layer chain in memory instead of one config query per org/table.
+func (q *Queries) ListRetentionConfigRows(ctx context.Context) ([]ListRetentionConfigRowsRow, error) {
+	rows, err := q.db.Query(ctx, listRetentionConfigRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRetentionConfigRowsRow
+	for rows.Next() {
+		var i ListRetentionConfigRowsRow
+		if err := rows.Scan(&i.OrgID, &i.Key, &i.ValueJson); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
