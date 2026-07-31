@@ -108,5 +108,41 @@
     "Node degrades gracefully at 50vu (53/s, p99 1.9s) \u2014 BullMQ's async job model parallelizes beyond OS threads; the Go pool must scale with its connection budget to match.",
     "Node stuck-diamond reproduction: 2/445 diamonds never completed (join never fired). The Go engine completed 4100/4100. Candidate confirmation of the readiness-scan ordering hazard already flagged upstream.",
     "Footprint: Go 21.9MB idle single process (29.9MB under load) vs Node ~101MB idle across api+worker plus Redis."
-  ]
+  ],
+  "go_after_t019": {
+    "config": "c=32, API pool 10, worker pool 34 (separated), loadgen keep-alive fixed",
+    "rssLoadMB": 43.0,
+    "start50vu": {
+      "iterations": 8306,
+      "ratePerSec": 274.6,
+      "p50Ms": 166.0,
+      "p95Ms": 278.9,
+      "p99Ms": 337.5,
+      "errors": 0,
+      "nodesPerSec": 549.2
+    },
+    "diamond10vu": {
+      "iterations": 2707,
+      "ratePerSec": 90.0,
+      "nodesPerSec": 359.9,
+      "p50Ms": 104.4,
+      "p95Ms": 180.4,
+      "p99Ms": 256.2,
+      "errors": 0
+    },
+    "list50vu": {
+      "iterations": 186615,
+      "ratePerSec": 6219.5,
+      "p50Ms": 6.6,
+      "p95Ms": 15.2,
+      "p99Ms": 30.5,
+      "errors": 0
+    },
+    "notes": [
+      "start@50vu: 49.3\u2192274.6 runs/s (5.6x) and p99 19.9s\u2192337ms (59x) \u2014 the pool separation WAS the cliff.",
+      "list@50vu: 2800\u21926220 RPS with p50 17.9\u21926.6ms \u2014 the dedicated API pool doubled reads.",
+      "diamond@10vu with c=32 lands at 90/s vs 136/s at c=8: per-run advisory-lock contention grows with worker count over few runs; still 3x Node. Concurrency should scale with concurrent RUNS, not just nodes.",
+      "First retest showed 7628 loadgen-side errors at 500 runs/s: Go's default Transport MaxIdleConnsPerHost=2 caused ephemeral-port churn \u2014 a LOADGEN artifact (backend clean: 11966/11966 runs succeeded); fixed with keep-alive 512."
+    ]
+  }
 }

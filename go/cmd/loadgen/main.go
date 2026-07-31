@@ -39,7 +39,11 @@ func main() {
 	org := flag.String("org", fmt.Sprintf("load-%d", time.Now().UnixNano()), "org id")
 	flag.Parse()
 
-	client := &http.Client{Timeout: 60 * time.Second}
+	transport := &http.Transport{
+		MaxIdleConns: 512, MaxIdleConnsPerHost: 512,
+		IdleConnTimeout: 90 * time.Second,
+	}
+	client := &http.Client{Timeout: 60 * time.Second, Transport: transport}
 	var mu sync.Mutex
 	var samples []sample
 	var nodesCompleted atomic.Int64

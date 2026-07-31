@@ -21,13 +21,19 @@ func NewLogger() *slog.Logger {
 }
 
 // Connect opens a bounded pgx pool and verifies connectivity with one ping,
-// so a wrong DSN fails at startup instead of on the first query.
-func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+// so a wrong DSN fails at startup instead of on the first query. Size it to
+// the caller's role: API pools serve request handlers, worker pools serve
+// claim/completion transactions — separating them keeps pollers from
+// starving executors (the load tests' 50-VU cliff).
+func Connect(ctx context.Context, databaseURL string, maxConns int) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse database url: %w", err)
 	}
-	cfg.MaxConns = 10
+	if maxConns < 1 {
+		maxConns = 10
+	}
+	cfg.MaxConns = int32(maxConns)
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("open pool: %w", err)

@@ -39,7 +39,7 @@ func run() error {
 	// Logs go to stderr — stdout belongs to the MCP transport.
 	logger := boot.NewLogger()
 
-	pool, err := boot.Connect(ctx, cfg.DatabaseURL)
+	pool, err := boot.Connect(ctx, cfg.DatabaseURL, cfg.APIPoolSize+cfg.WorkerPoolSize)
 	if err != nil {
 		return err
 	}

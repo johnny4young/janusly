@@ -24,7 +24,7 @@ func TestConnectAndProbeAgainstMigratedDatabase(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	pool, err := Connect(ctx, pilotDatabaseURL(t))
+	pool, err := Connect(ctx, pilotDatabaseURL(t), 10)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestProbeFailsAgainstUnmigratedDatabase(t *testing.T) {
 	}
 	parsed.Path = "/postgres"
 
-	pool, err := Connect(ctx, parsed.String())
+	pool, err := Connect(ctx, parsed.String(), 10)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestConnectRejectsUnreachableServer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err := Connect(ctx, "postgres://nobody:nothing@127.0.0.1:1/void")
+	_, err := Connect(ctx, "postgres://nobody:nothing@127.0.0.1:1/void", 10)
 	if err == nil {
 		t.Fatal("expected a connection error")
 	}

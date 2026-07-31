@@ -389,3 +389,16 @@ local. Sin umbral pasa/no-pasa: números para aprender.
   sola jornada de trabajo continuo contra el timebox de 3 semanas.
 - Recomendación escrita: continuar por fases, con un F0.5 corto para el
   pool de DB y los goldens faltantes. La decisión es de Johnny.
+
+## 2026-07-30 — ola 2 arranca: pools separados (T-019)
+
+- El acantilado de 50 VUs era EXACTAMENTE el pool: separar API (10) de
+  workers (concurrencia+2) llevó start@50VU de 49 a 275 runs/s con p99
+  de 19.9s a 337ms — 59× en la cola. Las lecturas doblaron a 6220 RPS.
+- El detour instructivo: el primer retest reportó 7628 errores a 500
+  runs/s… del lado del LOADGEN (MaxIdleConnsPerHost=2 default de Go →
+  churn de puertos efímeros). El backend estaba limpio: 11,966/11,966
+  runs succeeded. Herramienta de medir también se calibra.
+- Matiz honesto: diamond con c=32 rinde MENOS que con c=8 (90 vs 136
+  runs/s) — advisory lock por run + muchos workers sobre pocos runs =
+  contención. La concurrencia se dimensiona a runs concurrentes.

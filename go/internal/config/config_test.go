@@ -87,3 +87,33 @@ func TestLoadRejectsEqualPorts(t *testing.T) {
 		t.Fatalf("expected the equal-port violation, got: %v", err)
 	}
 }
+
+func TestPoolSizesDefaultAndDerive(t *testing.T) {
+	cfg, err := Load(func(string) string { return "" })
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	// API pool defaults to 10; the worker pool derives from concurrency so
+	// every executor slot can hold a transaction plus claim + listener room.
+	if cfg.APIPoolSize != 10 || cfg.WorkerPoolSize != cfg.WorkerConcurrency+2 {
+		t.Fatalf("pool defaults wrong: api=%d worker=%d", cfg.APIPoolSize, cfg.WorkerPoolSize)
+	}
+	explicit, err := Load(env(map[string]string{
+		"JANUSLY_GO_WORKER_CONCURRENCY": "32",
+		"JANUSLY_GO_API_POOL_SIZE":      "20",
+		"JANUSLY_GO_WORKER_POOL_SIZE":   "40",
+	}))
+	if err != nil {
+		t.Fatalf("load explicit: %v", err)
+	}
+	if explicit.APIPoolSize != 20 || explicit.WorkerPoolSize != 40 {
+		t.Fatalf("explicit pool sizes wrong: %+v", explicit)
+	}
+	derived, err := Load(env(map[string]string{"JANUSLY_GO_WORKER_CONCURRENCY": "32"}))
+	if err != nil {
+		t.Fatalf("load derived: %v", err)
+	}
+	if derived.WorkerPoolSize != 34 {
+		t.Fatalf("derived worker pool must scale with concurrency: %d", derived.WorkerPoolSize)
+	}
+}

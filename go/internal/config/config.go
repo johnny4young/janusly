@@ -22,6 +22,12 @@ type Config struct {
 	InternalPort int
 	// WorkerConcurrency bounds the executor goroutine pool.
 	WorkerConcurrency int
+	// APIPoolSize bounds the API-side pgx pool; the worker pool is separate
+	// so status pollers can never starve executor transactions.
+	APIPoolSize int
+	// WorkerPoolSize bounds the worker-side pgx pool. Zero means derive:
+	// concurrency + 2 (claims + completion transactions + the listener).
+	WorkerPoolSize int
 	// PollInterval is the queue's fallback poll cadence when no notification
 	// arrives; LISTEN/NOTIFY remains the primary wake-up signal.
 	PollInterval time.Duration
@@ -65,8 +71,13 @@ func Load(getenv func(string) string) (Config, error) {
 		Port:              num("JANUSLY_GO_PORT", 4600, 1, 65535),
 		InternalPort:      num("JANUSLY_GO_INTERNAL_PORT", 4601, 1, 65535),
 		WorkerConcurrency: num("JANUSLY_GO_WORKER_CONCURRENCY", 8, 1, 64),
+		APIPoolSize:       num("JANUSLY_GO_API_POOL_SIZE", 10, 1, 100),
+		WorkerPoolSize:    num("JANUSLY_GO_WORKER_POOL_SIZE", 0, 0, 100),
 		PollInterval:      time.Duration(num("JANUSLY_GO_POLL_MS", 250, 50, 5000)) * time.Millisecond,
 		HTTPTimeout:       time.Duration(num("JANUSLY_GO_HTTP_TIMEOUT_MS", 30_000, 1000, 600_000)) * time.Millisecond,
+	}
+	if cfg.WorkerPoolSize == 0 {
+		cfg.WorkerPoolSize = cfg.WorkerConcurrency + 2
 	}
 	if cfg.Port == cfg.InternalPort {
 		problems = append(problems, "JANUSLY_GO_PORT and JANUSLY_GO_INTERNAL_PORT must differ")

@@ -39,11 +39,18 @@ func run() error {
 	}
 	logger := boot.NewLogger()
 
-	pool, err := boot.Connect(ctx, cfg.DatabaseURL)
+	// Two pools, one truth from the load tests: API pollers and worker
+	// transactions must not compete for the same connection budget.
+	pool, err := boot.Connect(ctx, cfg.DatabaseURL, cfg.APIPoolSize)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
+	workerPool, err := boot.Connect(ctx, cfg.DatabaseURL, cfg.WorkerPoolSize)
+	if err != nil {
+		return err
+	}
+	defer workerPool.Close()
 	if err := boot.ProbeMigrations(ctx, pool); err != nil {
 		return err
 	}
@@ -52,7 +59,7 @@ func run() error {
 	// The pilot ships as one binary: the API process also runs the worker
 	// pool. The processes split when scale demands it — the engine already
 	// supports N independent consumers.
-	eng := engine.New(pool)
+	eng := engine.New(workerPool)
 	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
 	workerCtx, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
