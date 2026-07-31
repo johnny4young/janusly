@@ -44,13 +44,13 @@ func TestRouteRegistrySweepAsViewer(t *testing.T) {
 		}
 		res := h.call(method, path, map[string]any{}, "")
 		visited++
-		if gate.role == "editor" {
+		if gate.role == "editor" || gate.role == "admin" {
 			body := res.body
 			message, _ := body["error"].(string)
 			if enveloped, ok := body["error"].(map[string]any); ok {
 				message, _ = enveloped["message"].(string)
 			}
-			if res.status != 403 || !strings.Contains(message, "Forbidden: requires editor role") {
+			if res.status != 403 || !strings.Contains(message, "Forbidden: requires "+string(gate.role)+" role") {
 				t.Fatalf("%s: viewer must get the role 403, got %d %+v", pattern, res.status, res.body)
 			}
 			continue

@@ -400,6 +400,23 @@ func (q *Queries) CountWorkflowVersions(ctx context.Context, arg CountWorkflowVe
 	return column_1, err
 }
 
+const deleteOrgMember = `-- name: DeleteOrgMember :execrows
+DELETE FROM org_members WHERE org_id = $1 AND user_id = $2
+`
+
+type DeleteOrgMemberParams struct {
+	OrgID  string
+	UserID string
+}
+
+func (q *Queries) DeleteOrgMember(ctx context.Context, arg DeleteOrgMemberParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteOrgMember, arg.OrgID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteWakeup = `-- name: DeleteWakeup :exec
 DELETE FROM go_pilot_wakeups WHERE run_node_id = $1
 `
@@ -487,6 +504,39 @@ func (q *Queries) FindOrgMemberByEmail(ctx context.Context, arg FindOrgMemberByE
 		&i.Role,
 	)
 	return i, err
+}
+
+const findOrgMemberRowByEmail = `-- name: FindOrgMemberRowByEmail :one
+SELECT id FROM org_members WHERE org_id = $1 AND email = $2
+`
+
+type FindOrgMemberRowByEmailParams struct {
+	OrgID string
+	Email pgtype.Text
+}
+
+func (q *Queries) FindOrgMemberRowByEmail(ctx context.Context, arg FindOrgMemberRowByEmailParams) (string, error) {
+	row := q.db.QueryRow(ctx, findOrgMemberRowByEmail, arg.OrgID, arg.Email)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
+const findPendingInvitation = `-- name: FindPendingInvitation :one
+SELECT id FROM invitations
+WHERE org_id = $1 AND email = $2 AND status = 'pending'
+`
+
+type FindPendingInvitationParams struct {
+	OrgID string
+	Email string
+}
+
+func (q *Queries) FindPendingInvitation(ctx context.Context, arg FindPendingInvitationParams) (string, error) {
+	row := q.db.QueryRow(ctx, findPendingInvitation, arg.OrgID, arg.Email)
+	var id string
+	err := row.Scan(&id)
+	return id, err
 }
 
 const findStalledRunningNodes = `-- name: FindStalledRunningNodes :many
@@ -1097,6 +1147,30 @@ func (q *Queries) InsertDeadLetter(ctx context.Context, arg InsertDeadLetterPara
 		arg.WorkflowJson,
 		arg.NodeJson,
 		arg.ErrorJson,
+	)
+	return err
+}
+
+const insertInvitation = `-- name: InsertInvitation :exec
+INSERT INTO invitations (id, org_id, email, role, invited_by)
+VALUES ($1, $2, $3, $4, $5)
+`
+
+type InsertInvitationParams struct {
+	ID        string
+	OrgID     string
+	Email     string
+	Role      string
+	InvitedBy pgtype.Text
+}
+
+func (q *Queries) InsertInvitation(ctx context.Context, arg InsertInvitationParams) error {
+	_, err := q.db.Exec(ctx, insertInvitation,
+		arg.ID,
+		arg.OrgID,
+		arg.Email,
+		arg.Role,
+		arg.InvitedBy,
 	)
 	return err
 }
@@ -1767,6 +1841,77 @@ func (q *Queries) ListOrgHTTPConfig(ctx context.Context, orgID string) ([]ListOr
 	for rows.Next() {
 		var i ListOrgHTTPConfigRow
 		if err := rows.Scan(&i.Key, &i.ValueJson); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrgInvitations = `-- name: ListOrgInvitations :many
+SELECT id, org_id, email, role, invited_by, status, accepted_at, created_at
+FROM invitations WHERE org_id = $1
+ORDER BY created_at DESC, id
+`
+
+func (q *Queries) ListOrgInvitations(ctx context.Context, orgID string) ([]Invitation, error) {
+	rows, err := q.db.Query(ctx, listOrgInvitations, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Invitation
+	for rows.Next() {
+		var i Invitation
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Email,
+			&i.Role,
+			&i.InvitedBy,
+			&i.Status,
+			&i.AcceptedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrgMembers = `-- name: ListOrgMembers :many
+
+SELECT id, org_id, user_id, email, role, invited_by, created_at
+FROM org_members WHERE org_id = $1
+ORDER BY created_at, id
+`
+
+// ── Members + invitations ─────────────────────────────────────────────
+func (q *Queries) ListOrgMembers(ctx context.Context, orgID string) ([]OrgMember, error) {
+	rows, err := q.db.Query(ctx, listOrgMembers, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OrgMember
+	for rows.Next() {
+		var i OrgMember
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.UserID,
+			&i.Email,
+			&i.Role,
+			&i.InvitedBy,
+			&i.CreatedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -2893,6 +3038,24 @@ func (q *Queries) ReviveFailedRun(ctx context.Context, id string) (int64, error)
 	return result.RowsAffected(), nil
 }
 
+const revokePendingInvitation = `-- name: RevokePendingInvitation :execrows
+UPDATE invitations SET status = 'revoked'
+WHERE id = $1 AND org_id = $2 AND status = 'pending'
+`
+
+type RevokePendingInvitationParams struct {
+	ID    string
+	OrgID string
+}
+
+func (q *Queries) RevokePendingInvitation(ctx context.Context, arg RevokePendingInvitationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokePendingInvitation, arg.ID, arg.OrgID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const settleReplayCampaignItem = `-- name: SettleReplayCampaignItem :execrows
 UPDATE replay_campaign_items
 SET status = $1, error = $2, completed_at = now()
@@ -2980,6 +3143,25 @@ WHERE w.wake_at <= now()
 // idle workers awake.
 func (q *Queries) SweepDueWakeups(ctx context.Context) (int64, error) {
 	result, err := q.db.Exec(ctx, sweepDueWakeups)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updateOrgMemberRole = `-- name: UpdateOrgMemberRole :execrows
+UPDATE org_members SET role = $3
+WHERE org_id = $1 AND user_id = $2
+`
+
+type UpdateOrgMemberRoleParams struct {
+	OrgID  string
+	UserID string
+	Role   string
+}
+
+func (q *Queries) UpdateOrgMemberRole(ctx context.Context, arg UpdateOrgMemberRoleParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateOrgMemberRole, arg.OrgID, arg.UserID, arg.Role)
 	if err != nil {
 		return 0, err
 	}

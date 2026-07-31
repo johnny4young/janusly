@@ -1211,3 +1211,16 @@ producción necesita saber — de lo ya resuelto o informativo.
   convención de nombres. La forense no es falsificable: el bloque
   actor/source derivado del auth gana toda colisión con metadata del
   caller, y las claves sensibles se redactan antes del jsonb.
+
+## 2026-07-31 — las rutas de members y sus dos guards (T-076)
+
+- El guard que importa es el de auto-modificación: un admin no puede
+  degradarse ni expulsarse a sí mismo — el candado que evita el org
+  irrecuperable — y el intento BLOQUEADO se audita con la intención
+  cruda del operador, porque la revisión de seguridad quiere ver tanto
+  lo que pasó como lo que se intentó. El otro matiz portado: un cambio
+  de rol sobre un no-miembro es 404 sin fila de audit — jamás auditar
+  un cambio fantasma que no tocó nada.
+- Como estas rutas nacieron DESPUÉS del chokepoint, sus mutaciones van
+  transaccionales de cuna — más fuerte que el post-hoc de la
+  referencia, y anotado como tal.

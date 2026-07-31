@@ -690,3 +690,37 @@ WHERE id = $1 AND org_id = $2;
 SELECT id, org_id, name, inherits_from, granted_permissions
 FROM org_roles
 WHERE org_id = $1 AND name = $2;
+
+-- ── Members + invitations ─────────────────────────────────────────────
+
+-- name: ListOrgMembers :many
+SELECT id, org_id, user_id, email, role, invited_by, created_at
+FROM org_members WHERE org_id = $1
+ORDER BY created_at, id;
+
+-- name: UpdateOrgMemberRole :execrows
+UPDATE org_members SET role = $3
+WHERE org_id = $1 AND user_id = $2;
+
+-- name: DeleteOrgMember :execrows
+DELETE FROM org_members WHERE org_id = $1 AND user_id = $2;
+
+-- name: FindOrgMemberRowByEmail :one
+SELECT id FROM org_members WHERE org_id = $1 AND email = $2;
+
+-- name: ListOrgInvitations :many
+SELECT id, org_id, email, role, invited_by, status, accepted_at, created_at
+FROM invitations WHERE org_id = $1
+ORDER BY created_at DESC, id;
+
+-- name: FindPendingInvitation :one
+SELECT id FROM invitations
+WHERE org_id = $1 AND email = $2 AND status = 'pending';
+
+-- name: InsertInvitation :exec
+INSERT INTO invitations (id, org_id, email, role, invited_by)
+VALUES ($1, $2, $3, $4, $5);
+
+-- name: RevokePendingInvitation :execrows
+UPDATE invitations SET status = 'revoked'
+WHERE id = $1 AND org_id = $2 AND status = 'pending';

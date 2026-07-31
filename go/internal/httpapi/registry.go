@@ -58,6 +58,14 @@ var routeAuthz = map[string]routeGate{
 	"GET /v1/recovery/metrics": {auth.RoleViewer, "dlq.read"},
 	"GET /recovery/metrics":    {auth.RoleViewer, "dlq.read"},
 
+	// Members + invitations (reference pairs verbatim).
+	"GET /members":                          {auth.RoleViewer, "members.read"},
+	"GET /members/invitations":              {auth.RoleAdmin, "members.read"},
+	"POST /members/invite":                  {auth.RoleAdmin, "members.write"},
+	"POST /members/invitations/{id}/revoke": {auth.RoleAdmin, "members.write"},
+	"POST /members/role":                    {auth.RoleAdmin, "members.role_set"},
+	"DELETE /members":                       {auth.RoleAdmin, "members.write"},
+
 	// Replay campaigns.
 	"POST /recovery/campaigns":             {auth.RoleEditor, "dlq.replay"},
 	"POST /recovery/campaigns/preview":     {auth.RoleEditor, "dlq.replay"},
