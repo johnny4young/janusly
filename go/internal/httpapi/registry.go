@@ -64,6 +64,8 @@ var routeAuthz = map[string]routeGate{
 	"GET /recovery/drills/dossier":           {auth.RoleViewer, "recovery.read"},
 	"POST /recovery/feedback":                {auth.RoleEditor, "recovery.write"},
 	"GET /recovery/calibrations":             {auth.RoleViewer, "recovery.read"},
+	"GET /recovery/items":                    {auth.RoleViewer, "recovery.read"},
+	"POST /recovery/items/{id}/{action}":     {auth.RoleEditor, "recovery.write"},
 	"POST /recovery/playbooks/{id}/activate": {auth.RoleEditor, "recovery.write"},
 	"POST /recovery/playbooks/{id}/retire":   {auth.RoleEditor, "recovery.write"},
 	"POST /v1/workflows/{id}/resume":         {auth.RoleEditor, "workflows.write"},

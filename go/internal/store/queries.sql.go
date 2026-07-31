@@ -45,6 +45,26 @@ func (q *Queries) ActivateDraftPlaybook(ctx context.Context, arg ActivateDraftPl
 	return result.RowsAffected(), nil
 }
 
+const appendRecoveryItemComment = `-- name: AppendRecoveryItemComment :execrows
+UPDATE recovery_items
+SET comments = comments || $3::jsonb, updated_at = now()
+WHERE org_id = $1 AND id = $2 AND jsonb_array_length(comments) < 200
+`
+
+type AppendRecoveryItemCommentParams struct {
+	OrgID   string
+	ID      string
+	Comment json.RawMessage
+}
+
+func (q *Queries) AppendRecoveryItemComment(ctx context.Context, arg AppendRecoveryItemCommentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, appendRecoveryItemComment, arg.OrgID, arg.ID, arg.Comment)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const bumpRateWindow = `-- name: BumpRateWindow :one
 INSERT INTO go_pilot_rate_windows (name, key, window_start, count, expires_at)
 VALUES ($1, $2, $3, 1, $4)
@@ -1507,6 +1527,43 @@ func (q *Queries) GetRecoveryImpactRollup(ctx context.Context, orgID string) (Re
 		&i.DowntimeEndedMs,
 		&i.FirstRecoveredAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getRecoveryItemByID = `-- name: GetRecoveryItemByID :one
+SELECT id, org_id, dead_letter_id, workflow_id, owner, severity, status, sla_target_at, resolution_reason, resolved_by, resolved_at, comments, error_signature, occurrence_count, first_occurred_at, last_occurred_at, created_by, created_at, updated_at, first_action_at FROM recovery_items WHERE org_id = $1 AND id = $2
+`
+
+type GetRecoveryItemByIDParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) GetRecoveryItemByID(ctx context.Context, arg GetRecoveryItemByIDParams) (RecoveryItem, error) {
+	row := q.db.QueryRow(ctx, getRecoveryItemByID, arg.OrgID, arg.ID)
+	var i RecoveryItem
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.DeadLetterID,
+		&i.WorkflowID,
+		&i.Owner,
+		&i.Severity,
+		&i.Status,
+		&i.SlaTargetAt,
+		&i.ResolutionReason,
+		&i.ResolvedBy,
+		&i.ResolvedAt,
+		&i.Comments,
+		&i.ErrorSignature,
+		&i.OccurrenceCount,
+		&i.FirstOccurredAt,
+		&i.LastOccurredAt,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FirstActionAt,
 	)
 	return i, err
 }
@@ -3735,6 +3792,100 @@ func (q *Queries) ListRecoveryCases(ctx context.Context, arg ListRecoveryCasesPa
 	return items, nil
 }
 
+const listRecoveryItemHandoffs = `-- name: ListRecoveryItemHandoffs :many
+SELECT id, org_id, recovery_item_id, destination, credential_name, external_id, external_url, idempotency_key, last_outcome, last_status_code, last_error, last_latency_ms, dispatch_count, first_dispatched_at, last_dispatched_at, created_by FROM recovery_item_handoffs
+WHERE org_id = $1 AND recovery_item_id = $2
+ORDER BY first_dispatched_at DESC LIMIT 50
+`
+
+type ListRecoveryItemHandoffsParams struct {
+	OrgID          string
+	RecoveryItemID string
+}
+
+func (q *Queries) ListRecoveryItemHandoffs(ctx context.Context, arg ListRecoveryItemHandoffsParams) ([]RecoveryItemHandoff, error) {
+	rows, err := q.db.Query(ctx, listRecoveryItemHandoffs, arg.OrgID, arg.RecoveryItemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RecoveryItemHandoff
+	for rows.Next() {
+		var i RecoveryItemHandoff
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.RecoveryItemID,
+			&i.Destination,
+			&i.CredentialName,
+			&i.ExternalID,
+			&i.ExternalUrl,
+			&i.IdempotencyKey,
+			&i.LastOutcome,
+			&i.LastStatusCode,
+			&i.LastError,
+			&i.LastLatencyMs,
+			&i.DispatchCount,
+			&i.FirstDispatchedAt,
+			&i.LastDispatchedAt,
+			&i.CreatedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecoveryItems = `-- name: ListRecoveryItems :many
+SELECT id, org_id, dead_letter_id, workflow_id, owner, severity, status, sla_target_at, resolution_reason, resolved_by, resolved_at, comments, error_signature, occurrence_count, first_occurred_at, last_occurred_at, created_by, created_at, updated_at, first_action_at FROM recovery_items WHERE org_id = $1
+ORDER BY created_at DESC, id DESC LIMIT 100
+`
+
+func (q *Queries) ListRecoveryItems(ctx context.Context, orgID string) ([]RecoveryItem, error) {
+	rows, err := q.db.Query(ctx, listRecoveryItems, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RecoveryItem
+	for rows.Next() {
+		var i RecoveryItem
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.DeadLetterID,
+			&i.WorkflowID,
+			&i.Owner,
+			&i.Severity,
+			&i.Status,
+			&i.SlaTargetAt,
+			&i.ResolutionReason,
+			&i.ResolvedBy,
+			&i.ResolvedAt,
+			&i.Comments,
+			&i.ErrorSignature,
+			&i.OccurrenceCount,
+			&i.FirstOccurredAt,
+			&i.LastOccurredAt,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.FirstActionAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listReplayCampaignDeadLetters = `-- name: ListReplayCampaignDeadLetters :many
 
 SELECT id, run_id, node_id, status, error_json, node_json
@@ -5554,6 +5705,47 @@ func (q *Queries) TransitionRecoveryCaseState(ctx context.Context, arg Transitio
 	return result.RowsAffected(), nil
 }
 
+const transitionRecoveryItem = `-- name: TransitionRecoveryItem :execrows
+UPDATE recovery_items
+SET status = $3,
+    owner = COALESCE($4, owner),
+    severity = COALESCE($5, severity),
+    resolution_reason = CASE WHEN $3 = 'resolved' THEN $6 ELSE resolution_reason END,
+    resolved_by = CASE WHEN $3 = 'resolved' THEN $7 ELSE resolved_by END,
+    resolved_at = CASE WHEN $3 = 'resolved' THEN now() ELSE resolved_at END,
+    first_action_at = COALESCE(first_action_at, now()),
+    updated_at = now()
+WHERE org_id = $1 AND id = $2 AND status = ANY($8::text[])
+`
+
+type TransitionRecoveryItemParams struct {
+	OrgID            string
+	ID               string
+	ToStatus         string
+	NewOwner         pgtype.Text
+	NewSeverity      pgtype.Text
+	ResolutionReason pgtype.Text
+	Actor            pgtype.Text
+	FromStatuses     []string
+}
+
+func (q *Queries) TransitionRecoveryItem(ctx context.Context, arg TransitionRecoveryItemParams) (int64, error) {
+	result, err := q.db.Exec(ctx, transitionRecoveryItem,
+		arg.OrgID,
+		arg.ID,
+		arg.ToStatus,
+		arg.NewOwner,
+		arg.NewSeverity,
+		arg.ResolutionReason,
+		arg.Actor,
+		arg.FromStatuses,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const tripWorkflowCircuitBreaker = `-- name: TripWorkflowCircuitBreaker :execrows
 UPDATE workflows SET status = 'paused_circuit_breaker', paused_reason = $3
 WHERE org_id = $1 AND id = $2 AND status = 'active' AND deleted_at IS NULL
@@ -5826,6 +6018,63 @@ type UpsertRecoveryImpactRollupParams struct {
 func (q *Queries) UpsertRecoveryImpactRollup(ctx context.Context, arg UpsertRecoveryImpactRollupParams) error {
 	_, err := q.db.Exec(ctx, upsertRecoveryImpactRollup, arg.OrgID, arg.DowntimeEndedMs, arg.RecoveredAt)
 	return err
+}
+
+const upsertRecoveryItemHandoff = `-- name: UpsertRecoveryItemHandoff :one
+INSERT INTO recovery_item_handoffs (id, org_id, recovery_item_id, destination, credential_name,
+  idempotency_key, last_outcome, last_error, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (org_id, recovery_item_id, destination) DO UPDATE SET
+  dispatch_count = recovery_item_handoffs.dispatch_count + 1,
+  last_outcome = EXCLUDED.last_outcome, last_error = EXCLUDED.last_error,
+  last_dispatched_at = now()
+RETURNING id, org_id, recovery_item_id, destination, credential_name, external_id, external_url, idempotency_key, last_outcome, last_status_code, last_error, last_latency_ms, dispatch_count, first_dispatched_at, last_dispatched_at, created_by
+`
+
+type UpsertRecoveryItemHandoffParams struct {
+	ID             string
+	OrgID          string
+	RecoveryItemID string
+	Destination    string
+	CredentialName string
+	IdempotencyKey string
+	LastOutcome    string
+	LastError      pgtype.Text
+	CreatedBy      pgtype.Text
+}
+
+func (q *Queries) UpsertRecoveryItemHandoff(ctx context.Context, arg UpsertRecoveryItemHandoffParams) (RecoveryItemHandoff, error) {
+	row := q.db.QueryRow(ctx, upsertRecoveryItemHandoff,
+		arg.ID,
+		arg.OrgID,
+		arg.RecoveryItemID,
+		arg.Destination,
+		arg.CredentialName,
+		arg.IdempotencyKey,
+		arg.LastOutcome,
+		arg.LastError,
+		arg.CreatedBy,
+	)
+	var i RecoveryItemHandoff
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.RecoveryItemID,
+		&i.Destination,
+		&i.CredentialName,
+		&i.ExternalID,
+		&i.ExternalUrl,
+		&i.IdempotencyKey,
+		&i.LastOutcome,
+		&i.LastStatusCode,
+		&i.LastError,
+		&i.LastLatencyMs,
+		&i.DispatchCount,
+		&i.FirstDispatchedAt,
+		&i.LastDispatchedAt,
+		&i.CreatedBy,
+	)
+	return i, err
 }
 
 const upsertWakeup = `-- name: UpsertWakeup :exec

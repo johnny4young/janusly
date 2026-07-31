@@ -318,3 +318,106 @@ func TestCalibrationLoop(t *testing.T) {
 		t.Fatalf("toggle off must abstain: %d", remaining)
 	}
 }
+
+// The ownership drawer loop: the redrive-opened incident walks the CAS
+// ladder (concurrent double-click loses cleanly), comments append
+// bounded, the operator cannot claim the sandbox resolution reason, and
+// the handoff records its durable dispatch row.
+func TestRecoveryItemOwnership(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	ctx := t.Context()
+	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "true")
+	wfID := fmt.Sprintf("wf-own-%d", time.Now().UnixNano())
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer upstream.Close()
+	workflow := map[string]any{
+		"id": wfID, "name": "Own", "dslVersion": "1.0",
+		"nodes": []any{map[string]any{"id": "call", "type": "http", "config": map[string]any{
+			"url": upstream.URL, "timeoutMs": 500,
+		}}},
+		"edges": []any{},
+	}
+	res := h.call("POST", "/v1/start", map[string]any{"workflow": workflow}, "")
+	runID := extractRunID(t, res)
+	h.waitRun(runID, "failed")
+	var deadLetterID string
+	_ = pool.QueryRow(ctx, `SELECT id FROM dead_letters WHERE run_id = $1`, runID).Scan(&deadLetterID)
+	// El redrive abre el incidente (T-137); fallará de nuevo — da igual.
+	_ = h.call("POST", "/dlq/replay", map[string]any{"deadLetterId": deadLetterID}, "")
+	h.waitRun(runID, "failed")
+
+	res = h.call("GET", "/recovery/items", nil, "")
+	items := res.body["items"].([]any)
+	if len(items) < 1 {
+		t.Fatalf("incident expected: %+v", res.body)
+	}
+	itemID := items[0].(map[string]any)["id"].(string)
+
+	// Ladder: acknowledge (owner+severity) → in_progress → resolve.
+	res = h.call("POST", "/recovery/items/"+itemID+"/acknowledge", map[string]any{
+		"owner": "oncall-ana", "severity": "p2", "comment": "mirando el upstream",
+	}, "")
+	if res.status != 200 {
+		t.Fatalf("acknowledge: %d %+v", res.status, res.body)
+	}
+	item := res.body["item"].(map[string]any)
+	if item["status"] != "acknowledged" || item["owner"] != "oncall-ana" || item["severity"] != "p2" ||
+		item["firstActionAt"] == nil {
+		t.Fatalf("acknowledge shape: %+v", item)
+	}
+	// A second acknowledge loses the CAS (already acknowledged).
+	if res = h.call("POST", "/recovery/items/"+itemID+"/acknowledge", map[string]any{}, ""); res.status != 409 {
+		t.Fatalf("double acknowledge must 409: %d", res.status)
+	}
+	if res = h.call("POST", "/recovery/items/"+itemID+"/in_progress", map[string]any{}, ""); res.status != 200 {
+		t.Fatalf("in_progress: %d", res.status)
+	}
+	// Escalation bumps severity toward p1.
+	res = h.call("POST", "/recovery/items/"+itemID+"/escalate", map[string]any{}, "")
+	if res.status != 200 || res.body["item"].(map[string]any)["severity"] != "p1" {
+		t.Fatalf("escalate: %d %+v", res.status, res.body)
+	}
+	// The operator cannot claim the terminal-impact reason by hand.
+	if res = h.call("POST", "/recovery/items/"+itemID+"/resolve", map[string]any{
+		"resolutionReason": "sandbox_replay_succeeded",
+	}, ""); res.status != 400 {
+		t.Fatalf("sandbox reason must refuse: %d", res.status)
+	}
+	res = h.call("POST", "/recovery/items/"+itemID+"/resolve", map[string]any{
+		"resolutionReason": "upstream_fixed",
+	}, "")
+	if res.status != 200 || res.body["item"].(map[string]any)["status"] != "resolved" {
+		t.Fatalf("resolve: %d %+v", res.status, res.body)
+	}
+	if res = h.call("POST", "/recovery/items/"+itemID+"/reopen", map[string]any{}, ""); res.status != 200 {
+		t.Fatalf("reopen: %d", res.status)
+	}
+
+	// Handoff records the durable dispatch row honestly (no dispatcher).
+	res = h.call("POST", "/recovery/items/"+itemID+"/handoff", map[string]any{
+		"destination": "slack", "credentialName": "oncall-slack",
+	}, "")
+	if res.status != 200 {
+		t.Fatalf("handoff: %d %+v", res.status, res.body)
+	}
+	handoff := res.body["handoff"].(map[string]any)
+	if handoff["outcome"] != "delivery_failed" || handoff["error"] != "dispatcher_unavailable" {
+		t.Fatalf("handoff outcome: %+v", handoff)
+	}
+	// Repeat = same row, dispatch_count++.
+	res = h.call("POST", "/recovery/items/"+itemID+"/handoff", map[string]any{
+		"destination": "slack", "credentialName": "oncall-slack",
+	}, "")
+	if res.body["handoff"].(map[string]any)["dispatchCount"] != float64(2) {
+		t.Fatalf("handoff idempotency: %+v", res.body)
+	}
+	if res = h.call("POST", "/recovery/items/"+itemID+"/handoff", map[string]any{
+		"destination": "paloma",
+	}, ""); res.status != 400 {
+		t.Fatalf("bad destination: %d", res.status)
+	}
+}

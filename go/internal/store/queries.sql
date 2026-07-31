@@ -1283,3 +1283,42 @@ SELECT * FROM confidence_calibrations WHERE org_id = $1 ORDER BY approach_label;
 SELECT DISTINCT org_id FROM recovery_feedback
 WHERE created_at >= now() - make_interval(days => sqlc.arg(window_days)::int)
 LIMIT 500;
+
+-- name: ListRecoveryItems :many
+SELECT * FROM recovery_items WHERE org_id = $1
+ORDER BY created_at DESC, id DESC LIMIT 100;
+
+-- name: GetRecoveryItemByID :one
+SELECT * FROM recovery_items WHERE org_id = $1 AND id = $2;
+
+-- name: TransitionRecoveryItem :execrows
+UPDATE recovery_items
+SET status = sqlc.arg(to_status),
+    owner = COALESCE(sqlc.narg(new_owner), owner),
+    severity = COALESCE(sqlc.narg(new_severity), severity),
+    resolution_reason = CASE WHEN sqlc.arg(to_status) = 'resolved' THEN sqlc.narg(resolution_reason) ELSE resolution_reason END,
+    resolved_by = CASE WHEN sqlc.arg(to_status) = 'resolved' THEN sqlc.narg(actor) ELSE resolved_by END,
+    resolved_at = CASE WHEN sqlc.arg(to_status) = 'resolved' THEN now() ELSE resolved_at END,
+    first_action_at = COALESCE(first_action_at, now()),
+    updated_at = now()
+WHERE org_id = $1 AND id = $2 AND status = ANY(sqlc.arg(from_statuses)::text[]);
+
+-- name: AppendRecoveryItemComment :execrows
+UPDATE recovery_items
+SET comments = comments || sqlc.arg(comment)::jsonb, updated_at = now()
+WHERE org_id = $1 AND id = $2 AND jsonb_array_length(comments) < 200;
+
+-- name: UpsertRecoveryItemHandoff :one
+INSERT INTO recovery_item_handoffs (id, org_id, recovery_item_id, destination, credential_name,
+  idempotency_key, last_outcome, last_error, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (org_id, recovery_item_id, destination) DO UPDATE SET
+  dispatch_count = recovery_item_handoffs.dispatch_count + 1,
+  last_outcome = EXCLUDED.last_outcome, last_error = EXCLUDED.last_error,
+  last_dispatched_at = now()
+RETURNING *;
+
+-- name: ListRecoveryItemHandoffs :many
+SELECT * FROM recovery_item_handoffs
+WHERE org_id = $1 AND recovery_item_id = $2
+ORDER BY first_dispatched_at DESC LIMIT 50;
