@@ -746,3 +746,21 @@ local. Sin umbral pasa/no-pasa: números para aprender.
 - `ClaimedNode` ahora lleva el org del run (se puebla del row ya
   cargado en executeClaim), así que la resolución por tenant no añade
   lecturas del run.
+
+## 2026-07-30 — firma de error + clusters de fallos (T-044)
+
+- El normalizador es LA clave de agrupación cross-backend, así que se
+  portó regla por regla con sus regexes; la conversión a RE2 se razonó
+  en vez de copiarse: los lookaheads de frontera son redundantes en
+  cuerpos greedy abiertos, y solo las formas de longitud fija (AWS
+  AKIA, Google AIza) necesitan la emulación con grupo de cola. Un test
+  pin-ea la frontera ("AKIA + 17 mayúsculas NO es una key").
+- Hallazgo upstream (chip creado): en la referencia, un tool llamado
+  `json.parse` con input inválido clusteriza como `parse_error`
+  genérico — el patrón de la regla 5 matchea el nombre del tool antes
+  de que la regla de tool-input corra. El pilot reproduce el mismo
+  resultado deliberadamente: paridad primero, el fix pertenece a Node.
+- La integración confirma el dedupe con datos reales: un run fallido
+  emite muestra por AMBAS superficies (run_nodes + dead_letters) y el
+  cluster reporta frecuencia 1 con la ref DLQ ganando, mientras
+  `totalSamples: 2` conserva la contabilidad cruda como Node.

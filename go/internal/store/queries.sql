@@ -459,3 +459,25 @@ WHERE org_id = $1 AND id = $2 AND status = 'received';
 -- name: ListOrgHTTPConfig :many
 SELECT key, value_json FROM org_configs
 WHERE org_id = $1 AND category = 'http';
+
+-- ── Failure clustering samples ────────────────────────────────────────
+-- Both surfaces emit a sample for a failed run that landed in DLQ; the
+-- aggregator dedupes by (run_id, node_id) preferring the dead_letter row.
+
+-- name: ListDeadLetterFailureSamples :many
+SELECT dl.id, dl.run_id, dl.node_id, dl.error_json, dl.created_at,
+       r.input_json
+FROM dead_letters dl
+JOIN runs r ON r.id = dl.run_id
+WHERE dl.org_id = $1 AND dl.created_at >= $2
+ORDER BY dl.created_at DESC
+LIMIT 2000;
+
+-- name: ListFailedRunNodeSamples :many
+SELECT rn.run_id, rn.node_id, rn.error_json, rn.finished_at,
+       r.input_json
+FROM run_nodes rn
+JOIN runs r ON r.id = rn.run_id
+WHERE r.org_id = $1 AND rn.status = 'failed' AND rn.finished_at >= $2
+ORDER BY rn.finished_at DESC
+LIMIT 2000;

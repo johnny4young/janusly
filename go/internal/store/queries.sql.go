@@ -885,6 +885,61 @@ func (q *Queries) InsertWorkflowVersion(ctx context.Context, arg InsertWorkflowV
 	return err
 }
 
+const listDeadLetterFailureSamples = `-- name: ListDeadLetterFailureSamples :many
+
+SELECT dl.id, dl.run_id, dl.node_id, dl.error_json, dl.created_at,
+       r.input_json
+FROM dead_letters dl
+JOIN runs r ON r.id = dl.run_id
+WHERE dl.org_id = $1 AND dl.created_at >= $2
+ORDER BY dl.created_at DESC
+LIMIT 2000
+`
+
+type ListDeadLetterFailureSamplesParams struct {
+	OrgID     string
+	CreatedAt *time.Time
+}
+
+type ListDeadLetterFailureSamplesRow struct {
+	ID        string
+	RunID     string
+	NodeID    string
+	ErrorJson json.RawMessage
+	CreatedAt *time.Time
+	InputJson json.RawMessage
+}
+
+// ── Failure clustering samples ────────────────────────────────────────
+// Both surfaces emit a sample for a failed run that landed in DLQ; the
+// aggregator dedupes by (run_id, node_id) preferring the dead_letter row.
+func (q *Queries) ListDeadLetterFailureSamples(ctx context.Context, arg ListDeadLetterFailureSamplesParams) ([]ListDeadLetterFailureSamplesRow, error) {
+	rows, err := q.db.Query(ctx, listDeadLetterFailureSamples, arg.OrgID, arg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDeadLetterFailureSamplesRow
+	for rows.Next() {
+		var i ListDeadLetterFailureSamplesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.NodeID,
+			&i.ErrorJson,
+			&i.CreatedAt,
+			&i.InputJson,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDeadLetterSummaries = `-- name: ListDeadLetterSummaries :many
 SELECT dl.id, dl.org_id, dl.run_id, dl.node_id, dl.attempt, dl.error_json,
        dl.status, dl.replayed_at, dl.created_at,
@@ -1147,6 +1202,55 @@ func (q *Queries) ListDueWakeups(ctx context.Context, limit int32) ([]GoPilotWak
 	for rows.Next() {
 		var i GoPilotWakeup
 		if err := rows.Scan(&i.RunNodeID, &i.WakeAt, &i.Reason); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFailedRunNodeSamples = `-- name: ListFailedRunNodeSamples :many
+SELECT rn.run_id, rn.node_id, rn.error_json, rn.finished_at,
+       r.input_json
+FROM run_nodes rn
+JOIN runs r ON r.id = rn.run_id
+WHERE r.org_id = $1 AND rn.status = 'failed' AND rn.finished_at >= $2
+ORDER BY rn.finished_at DESC
+LIMIT 2000
+`
+
+type ListFailedRunNodeSamplesParams struct {
+	OrgID      string
+	FinishedAt *time.Time
+}
+
+type ListFailedRunNodeSamplesRow struct {
+	RunID      string
+	NodeID     string
+	ErrorJson  json.RawMessage
+	FinishedAt *time.Time
+	InputJson  json.RawMessage
+}
+
+func (q *Queries) ListFailedRunNodeSamples(ctx context.Context, arg ListFailedRunNodeSamplesParams) ([]ListFailedRunNodeSamplesRow, error) {
+	rows, err := q.db.Query(ctx, listFailedRunNodeSamples, arg.OrgID, arg.FinishedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListFailedRunNodeSamplesRow
+	for rows.Next() {
+		var i ListFailedRunNodeSamplesRow
+		if err := rows.Scan(
+			&i.RunID,
+			&i.NodeID,
+			&i.ErrorJson,
+			&i.FinishedAt,
+			&i.InputJson,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

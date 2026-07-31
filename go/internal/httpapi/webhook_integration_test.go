@@ -219,3 +219,53 @@ func TestManualStartOfTriggerWorkflowRunsWithEmptyEvent(t *testing.T) {
 		}
 	}
 }
+
+func TestFailureClustersRollup(t *testing.T) {
+	h := newAPIHarness(t)
+	// One run whose http node fails against a dead upstream → both a failed
+	// run_nodes row AND a dead_letters row for the same (run, node).
+	doc := map[string]any{
+		"id":   "wf-cluster-" + h.org,
+		"name": "Cluster Flow",
+		"nodes": []any{map[string]any{"id": "call", "type": "http",
+			"config": map[string]any{"url": "http://127.0.0.1:1", "timeoutMs": float64(300)}}},
+		"edges": []any{},
+	}
+	res := h.call("POST", "/v1/start", map[string]any{"workflow": doc}, "")
+	if res.status != 200 {
+		t.Fatalf("start: %+v", res.body)
+	}
+	runID := res.body["data"].(map[string]any)["runId"].(string)
+	h.waitRun(runID, "failed")
+
+	clusters := h.call("GET", "/v1/dlq/clusters?windowDays=7", nil, "")
+	requireEnvelope(t, clusters)
+	data := clusters.body["data"].(map[string]any)
+	if data["windowDays"] != float64(7) || data["totalSamples"] != float64(2) {
+		t.Fatalf("raw sample accounting: %+v", data)
+	}
+	rows := data["clusters"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("dual-surface samples must collapse to one cluster: %+v", rows)
+	}
+	top := rows[0].(map[string]any)
+	// The harness blocks private targets, so the failure is the SSRF guard
+	// — the signature rules classify it as an HTTP-layer guard failure.
+	if top["frequency"] != float64(1) || top["signature"] != "HTTP guard failed on http node" {
+		t.Fatalf("cluster shape: %+v", top)
+	}
+	workflows := top["affectedWorkflows"].([]any)
+	if workflows[0].(map[string]any)["workflowName"] != "Cluster Flow" {
+		t.Fatalf("workflow identity: %+v", workflows)
+	}
+	samples := top["samples"].([]any)
+	if samples[0].(map[string]any)["source"] != "dead_letter" {
+		t.Fatalf("DLQ sample must win dedup: %+v", samples)
+	}
+
+	// Legacy wire returns the same raw object, no envelope.
+	legacy := h.call("GET", "/dlq/clusters", nil, "")
+	if legacy.status != 200 || legacy.body["apiVersion"] != nil || legacy.body["clusters"] == nil {
+		t.Fatalf("legacy clusters: %+v", legacy.body)
+	}
+}

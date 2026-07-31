@@ -87,6 +87,12 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	mux.HandleFunc("POST /v1/resume", server.auth(server.resumeRun))
 	mux.HandleFunc("POST /v1/run/cancel", server.auth(server.cancelRun))
 	mux.HandleFunc("GET /v1/dlq", server.auth(server.listDeadLetters))
+	mux.HandleFunc("GET /v1/dlq/clusters", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeVersioned(w, rc.id, server.clustersCore(r, rc))
+	}))
+	mux.HandleFunc("GET /dlq/clusters", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeLegacy(w, server.clustersCore(r, rc))
+	}))
 	mux.HandleFunc("POST /v1/dlq/redrive", server.auth(server.redrive))
 	mux.HandleFunc("POST /v1/dlq/replay", server.auth(server.replayAlias))
 	mux.HandleFunc("GET /runs/{runId}/stream", server.auth(server.streamRun))
