@@ -94,16 +94,30 @@ function projection(view, deadLetterCount) {
 const spec = JSON.parse(await readFile(join(HERE, "fixtures.json"), "utf8"));
 await mkdir(OUT, { recursive: true });
 
+// GOLDENS_ONLY=F11 recaptures a single fixture without touching the rest —
+// the stack serving :3001 may have drifted from the pin the others used.
+const only = process.env.GOLDENS_ONLY;
+
 for (const fixture of spec.fixtures) {
+  if (only && fixture.id !== only) continue;
   const doc = JSON.parse(
-    JSON.stringify(fixture.workflow).replaceAll("{{UPSTREAM}}", upstream),
+    JSON.stringify(fixture.workflow).replaceAll("{{UPSTREAM}}", upstream).replaceAll("{{RUN}}", Date.now().toString(36)),
   );
   let runId = null;
   let deadLetterId = null;
 
   for (const step of fixture.steps) {
     const [verb, arg] = step.split(":");
-    if (verb === "start") {
+    if (verb === "save") {
+      const res = await api("POST", "/workflows/save", doc);
+      if (res.status !== 200) throw new Error(`${fixture.id}: save ${JSON.stringify(res)}`);
+    } else if (verb === "ingest") {
+      // The reference selects the workflow org-wide by endpoint key; the
+      // fresh per-capture org guarantees a unique match.
+      const res = await api("POST", "/triggers/webhook/ingest", fixture.ingest);
+      runId = res.body?.runId ?? res.body?.data?.runId;
+      if (!runId) throw new Error(`${fixture.id}: ingest failed ${JSON.stringify(res)}`);
+    } else if (verb === "start") {
       const res = await api("POST", "/start", { workflow: doc, input: fixture.input });
       runId = res.body?.data?.runId ?? res.body?.runId;
       if (!runId) throw new Error(`${fixture.id}: start failed ${JSON.stringify(res)}`);

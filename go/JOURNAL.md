@@ -688,3 +688,22 @@ local. Sin umbral pasa/no-pasa: números para aprender.
   el start manual sigue corriendo con evento vacío, igual que Node.
 - Hallazgo de encoder: `writeVersioned` fijaba 200 en todo éxito; el
   202 de buffered lo destapó. Éxitos no-200 ahora conservan su status.
+
+## 2026-07-30 — F11: trigger e2e con paridad real + stack de captura aislado (T-041)
+
+- F11 prueba la cadena trigger completa (save → ingest → executor →
+  template downstream → outputs de workflow) contra AMBOS backends con
+  la misma proyección; el golden vino del stack Node real y confirma
+  que los tipos del evento sobreviven el pipeline (`total: 99.5`
+  numérico de punta a punta). Paridad Go byte-igual, ×3.
+- Incidente y arreglo estructural: lanzar `pnpm dev` desde el worktree
+  colisionó por nombre de proyecto Compose (derivado del directorio) y
+  tumbó el Postgres del pilot mientras un `run-e2e` de otra sesión
+  poseía el lock y :3001 legítimamente. El volumen sobrevivió y la DB
+  se restauró, pero la lección quedó codificada: la captura de goldens
+  ahora tiene su propio stack (`run-reference-stack.mjs` + compose
+  `janusly-goldens`, puertos 4732/4733/3101) fuera del lock compartido
+  y de toda DB viva. Nunca más una captura compite con dev/e2e.
+- Segundo hallazgo: ids de workflow estáticos en fixtures con estado
+  almacenado dejan residuo global entre ejecuciones — `{{RUN}}` los
+  hace únicos por corrida en ambos drivers.

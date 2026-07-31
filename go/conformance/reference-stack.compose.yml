@@ -1,0 +1,31 @@
+# Isolated infrastructure for golden capture. Own project name and own host
+# ports so a capture NEVER contends with the repo's fixed-port Compose
+# lifecycle (run-dev / run-e2e and their shared lock) or with the pilot's
+# database. No named volumes: `down -v` leaves nothing behind — golden
+# captures are disposable by design.
+name: janusly-goldens
+
+services:
+  postgres:
+    image: ${JANUSLY_POSTGRES_IMAGE:-pgvector/pgvector:pg18}
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: workflow
+    ports:
+      - "127.0.0.1:4732:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d workflow"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:8-alpine
+    ports:
+      - "127.0.0.1:4733:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

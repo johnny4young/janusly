@@ -58,6 +58,7 @@ type fixture struct {
 	Name     string          `json:"name"`
 	Steps    []string        `json:"steps"`
 	Input    map[string]any  `json:"input"`
+	Ingest   map[string]any  `json:"ingest"`
 	Workflow json.RawMessage `json:"workflow"`
 }
 
@@ -152,11 +153,35 @@ func applyDivergences(golden projection, overrides map[string]any) projection {
 
 func runFixture(t *testing.T, driver *apiDriver, upstream *stubUpstream, fx fixture) projection {
 	t.Helper()
-	doc := json.RawMessage(strings.ReplaceAll(string(fx.Workflow), "{{UPSTREAM}}", upstream.server.URL))
+	// {{RUN}} keeps stored-state fixtures (save + ingest) collision-free:
+	// workflow ids are globally unique in the shared schema, so a static id
+	// would leave cross-run residue owned by a previous test org.
+	doc := json.RawMessage(strings.NewReplacer(
+		"{{UPSTREAM}}", upstream.server.URL,
+		"{{RUN}}", fmt.Sprintf("%d", time.Now().UnixNano()),
+	).Replace(string(fx.Workflow)))
 	var runID string
 	for _, step := range fx.Steps {
 		verb, arg, _ := strings.Cut(step, ":")
 		switch verb {
+		case "save":
+			res := driver.call(t, "POST", "/v1/workflows/save", json.RawMessage(doc))
+			if _, ok := res["data"]; !ok {
+				t.Fatalf("save failed: %v", res)
+			}
+		case "ingest":
+			// The reference ingests org-wide by endpoint key; this backend
+			// scopes the same contract to the workflow in the URL.
+			var docID struct {
+				ID string `json:"id"`
+			}
+			_ = json.Unmarshal(doc, &docID)
+			res := driver.call(t, "POST", "/v1/webhooks/"+docID.ID, fx.Ingest)
+			data, _ := res["data"].(map[string]any)
+			runID, _ = data["runId"].(string)
+			if runID == "" {
+				t.Fatalf("ingest failed: %v", res)
+			}
 		case "start":
 			body := map[string]any{"workflow": doc}
 			if fx.Input != nil {
