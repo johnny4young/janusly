@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/johnny4young/janusly/go/internal/auth"
 )
 
 // Registry completeness: the test WALKS the annotated table, so a new
@@ -44,6 +46,22 @@ func TestRouteRegistrySweepAsViewer(t *testing.T) {
 		}
 		res := h.call(method, path, map[string]any{}, "")
 		visited++
+		// A viewer-rank entry whose PERMISSION the viewer's default set
+		// lacks (e.g. ai.write) must reject at the permission layer — the
+		// reference's permission-only route shape.
+		if gate.role == auth.RoleViewer && gate.permission != "" &&
+			!auth.DefaultRoleHasPermission(auth.RoleViewer, gate.permission) {
+			message := ""
+			if enveloped, ok := res.body["error"].(map[string]any); ok {
+				message, _ = enveloped["message"].(string)
+			} else {
+				message, _ = res.body["error"].(string)
+			}
+			if res.status != 403 || !strings.Contains(message, "requires permission "+gate.permission) {
+				t.Fatalf("%s: viewer must get the permission 403, got %d %+v", pattern, res.status, res.body)
+			}
+			continue
+		}
 		if gate.role == "editor" || gate.role == "admin" {
 			body := res.body
 			message, _ := body["error"].(string)

@@ -65,6 +65,9 @@ var routeAuthz = map[string]routeGate{
 	// settings); the write is the admin pair from the reference.
 	"POST /org/config": {auth.RoleAdmin, "org.config.write"},
 
+	// AI surfaces (reference permission pairs).
+	"POST /ai/generate-workflow": {auth.RoleViewer, "ai.write"},
+
 	// System infrastructure snapshots (reference pairs verbatim).
 	"GET /system/queue":        {auth.RoleAdmin, "org.config.write"},
 	"GET /system/rate-limiter": {auth.RoleAdmin, "org.config.write"},

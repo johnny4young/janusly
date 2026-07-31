@@ -1404,3 +1404,11 @@ producción necesita saber — de lo ya resuelto o informativo.
 - La extracción de la referencia 1:1 más la reparación de truncados: un
   prefijo válido cortado a mitad de stream se cierra con conciencia de
   strings y escapes. Mil cadenas de fuzz sin un solo pánico.
+
+## 2026-07-31 — la superficie estrella genera (T-105)
+
+- free_json de punta a punta: prompt verbatim de 21KB, escalera de
+  intentos con preservación de referencias del operador, reparación
+  dirigida con los issues reales del dominio, y las 5 plantillas $0. La
+  aceptación de verdad: los evals de Node corriendo contra Go — 3/3
+  deterministas, 27 saltados, exit 0.
