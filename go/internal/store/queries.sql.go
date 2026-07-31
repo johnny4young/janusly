@@ -469,6 +469,22 @@ func (q *Queries) GetWorkflow(ctx context.Context, arg GetWorkflowParams) (Workf
 	return i, err
 }
 
+const getWorkflowOwnerState = `-- name: GetWorkflowOwnerState :one
+SELECT org_id, deleted_at FROM workflows WHERE id = $1
+`
+
+type GetWorkflowOwnerStateRow struct {
+	OrgID     string
+	DeletedAt *time.Time
+}
+
+func (q *Queries) GetWorkflowOwnerState(ctx context.Context, id string) (GetWorkflowOwnerStateRow, error) {
+	row := q.db.QueryRow(ctx, getWorkflowOwnerState, id)
+	var i GetWorkflowOwnerStateRow
+	err := row.Scan(&i.OrgID, &i.DeletedAt)
+	return i, err
+}
+
 const insertDeadLetter = `-- name: InsertDeadLetter :exec
 INSERT INTO dead_letters (id, org_id, run_id, node_id, attempt, workflow_json, node_json, error_json)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -772,6 +788,88 @@ func (q *Queries) ListDeadLetters(ctx context.Context, arg ListDeadLettersParams
 			&i.ErrorJson,
 			&i.Status,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDeletedWorkflowRows = `-- name: ListDeletedWorkflowRows :many
+SELECT w.id, w.org_id, w.name, w.created_by, w.created_at, w.status,
+       w.paused_reason, w.deleted_at,
+       (SELECT count(*) FROM runs r
+        WHERE r.org_id = w.org_id
+          AND (r.workflow_version_id = w.id OR r.workflow_version_id IN (
+            SELECT wv.id FROM workflow_versions wv WHERE wv.workflow_id = w.id
+          )))::int AS run_count,
+       COALESCE(last_run.status, '') AS last_run_status
+FROM workflows w
+LEFT JOIN LATERAL (
+  SELECT r.status FROM runs r
+  WHERE r.org_id = w.org_id
+    AND (r.workflow_version_id = w.id OR r.workflow_version_id IN (
+      SELECT wv.id FROM workflow_versions wv WHERE wv.workflow_id = w.id
+    ))
+  ORDER BY r.created_at DESC, r.id DESC LIMIT 1
+) last_run ON true
+WHERE w.org_id = $1 AND w.deleted_at IS NOT NULL
+  AND (w.deleted_at, w.id) < ($2::timestamptz, $3::text)
+ORDER BY w.deleted_at DESC, w.id DESC
+LIMIT $4
+`
+
+type ListDeletedWorkflowRowsParams struct {
+	OrgID           string
+	BeforeDeletedAt time.Time
+	BeforeID        string
+	PageLimit       int32
+}
+
+type ListDeletedWorkflowRowsRow struct {
+	ID            string
+	OrgID         string
+	Name          string
+	CreatedBy     pgtype.Text
+	CreatedAt     *time.Time
+	Status        string
+	PausedReason  pgtype.Text
+	DeletedAt     *time.Time
+	RunCount      int32
+	LastRunStatus string
+}
+
+// The trash list: the same list-row shape with deletedAt populated,
+// ordered by (deleted_at, id) DESC with its own keyset.
+func (q *Queries) ListDeletedWorkflowRows(ctx context.Context, arg ListDeletedWorkflowRowsParams) ([]ListDeletedWorkflowRowsRow, error) {
+	rows, err := q.db.Query(ctx, listDeletedWorkflowRows,
+		arg.OrgID,
+		arg.BeforeDeletedAt,
+		arg.BeforeID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDeletedWorkflowRowsRow
+	for rows.Next() {
+		var i ListDeletedWorkflowRowsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Name,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.Status,
+			&i.PausedReason,
+			&i.DeletedAt,
+			&i.RunCount,
+			&i.LastRunStatus,
 		); err != nil {
 			return nil, err
 		}
@@ -1199,13 +1297,16 @@ SELECT w.id, w.org_id, w.name, w.created_by, w.created_at, w.status,
           AND (r.workflow_version_id = w.id OR r.workflow_version_id IN (
             SELECT wv.id FROM workflow_versions wv WHERE wv.workflow_id = w.id
           )))::int AS run_count,
-       (SELECT r.status FROM runs r
-        WHERE r.org_id = w.org_id
-          AND (r.workflow_version_id = w.id OR r.workflow_version_id IN (
-            SELECT wv.id FROM workflow_versions wv WHERE wv.workflow_id = w.id
-          ))
-        ORDER BY r.created_at DESC, r.id DESC LIMIT 1) AS last_run_status
+       COALESCE(last_run.status, '') AS last_run_status
 FROM workflows w
+LEFT JOIN LATERAL (
+  SELECT r.status FROM runs r
+  WHERE r.org_id = w.org_id
+    AND (r.workflow_version_id = w.id OR r.workflow_version_id IN (
+      SELECT wv.id FROM workflow_versions wv WHERE wv.workflow_id = w.id
+    ))
+  ORDER BY r.created_at DESC, r.id DESC LIMIT 1
+) last_run ON true
 WHERE w.org_id = $1 AND w.deleted_at IS NULL
   AND (w.created_at, w.id) < ($2::timestamptz, $3::text)
   AND ($4::text IS NULL
@@ -1615,6 +1716,24 @@ func (q *Queries) RequeueRunNodeForRetry(ctx context.Context, arg RequeueRunNode
 	return result.RowsAffected(), nil
 }
 
+const restoreWorkflow = `-- name: RestoreWorkflow :execrows
+UPDATE workflows SET deleted_at = NULL
+WHERE id = $1 AND org_id = $2 AND deleted_at IS NOT NULL
+`
+
+type RestoreWorkflowParams struct {
+	ID    string
+	OrgID string
+}
+
+func (q *Queries) RestoreWorkflow(ctx context.Context, arg RestoreWorkflowParams) (int64, error) {
+	result, err := q.db.Exec(ctx, restoreWorkflow, arg.ID, arg.OrgID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const reviveFailedRun = `-- name: ReviveFailedRun :execrows
 UPDATE runs SET status = 'running'
 WHERE id = $1 AND status = 'failed'
@@ -1650,6 +1769,24 @@ func (q *Queries) SkipRunNode(ctx context.Context, arg SkipRunNodeParams) (int64
 		arg.RunID,
 		arg.NodeID,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const softDeleteWorkflow = `-- name: SoftDeleteWorkflow :execrows
+UPDATE workflows SET deleted_at = now()
+WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL
+`
+
+type SoftDeleteWorkflowParams struct {
+	ID    string
+	OrgID string
+}
+
+func (q *Queries) SoftDeleteWorkflow(ctx context.Context, arg SoftDeleteWorkflowParams) (int64, error) {
+	result, err := q.db.Exec(ctx, softDeleteWorkflow, arg.ID, arg.OrgID)
 	if err != nil {
 		return 0, err
 	}

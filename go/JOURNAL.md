@@ -578,3 +578,18 @@ local. Sin umbral pasa/no-pasa: números para aprender.
   lleva el snapshot exacto con los overlays de recovery como null
   honesto. /dlq/queue quedó para T-044: está atado a severidad/SLA/
   owners de la maquinaria de recovery que el pilot no tiene aún.
+
+## 2026-07-30 — soft-delete, trash, restore (T-033)
+
+- El ciclo de la papelera completo con la regla de la casa intacta: un
+  save jamás resucita un tombstone — el operador restaura explícito
+  primero. El guard distingue por qué falló el PK: tombstone del mismo
+  org (404) vs id de otro tenant (409).
+- Bug latente cazado de rebote: last_run_status de las listas explotaba
+  al escanear NULL para workflows sin runs — sqlc infiere los subqueries
+  escalares (y hasta LATERAL) como non-null. La lista ACTIVA tenía el
+  mismo bug dormido; el COALESCE('') + null en el wire arregla ambas.
+- Lección operativa cara: kill %1 en shell no-interactivo no mata nada.
+  Un binario de probe huérfano estuvo reclamando nodos con executors
+  reales y fabricó dos fallos fantasma que perseguí en serio. pkill por
+  ruta tras cada probe, siempre.

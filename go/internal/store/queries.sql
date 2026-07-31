@@ -35,13 +35,16 @@ SELECT w.id, w.org_id, w.name, w.created_by, w.created_at, w.status,
           AND (r.workflow_version_id = w.id OR r.workflow_version_id IN (
             SELECT wv.id FROM workflow_versions wv WHERE wv.workflow_id = w.id
           )))::int AS run_count,
-       (SELECT r.status FROM runs r
-        WHERE r.org_id = w.org_id
-          AND (r.workflow_version_id = w.id OR r.workflow_version_id IN (
-            SELECT wv.id FROM workflow_versions wv WHERE wv.workflow_id = w.id
-          ))
-        ORDER BY r.created_at DESC, r.id DESC LIMIT 1) AS last_run_status
+       COALESCE(last_run.status, '') AS last_run_status
 FROM workflows w
+LEFT JOIN LATERAL (
+  SELECT r.status FROM runs r
+  WHERE r.org_id = w.org_id
+    AND (r.workflow_version_id = w.id OR r.workflow_version_id IN (
+      SELECT wv.id FROM workflow_versions wv WHERE wv.workflow_id = w.id
+    ))
+  ORDER BY r.created_at DESC, r.id DESC LIMIT 1
+) last_run ON true
 WHERE w.org_id = $1 AND w.deleted_at IS NULL
   AND (w.created_at, w.id) < (sqlc.arg(before_created_at)::timestamptz, sqlc.arg(before_id)::text)
   AND (sqlc.narg(search)::text IS NULL
@@ -55,6 +58,42 @@ SELECT id, org_id, workflow_id, version, dag_json, created_by, created_at
 FROM workflow_versions
 WHERE workflow_id = $1 AND org_id = $2
 ORDER BY version DESC;
+
+-- name: SoftDeleteWorkflow :execrows
+UPDATE workflows SET deleted_at = now()
+WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL;
+
+-- name: RestoreWorkflow :execrows
+UPDATE workflows SET deleted_at = NULL
+WHERE id = $1 AND org_id = $2 AND deleted_at IS NOT NULL;
+
+-- name: GetWorkflowOwnerState :one
+SELECT org_id, deleted_at FROM workflows WHERE id = $1;
+
+-- The trash list: the same list-row shape with deletedAt populated,
+-- ordered by (deleted_at, id) DESC with its own keyset.
+-- name: ListDeletedWorkflowRows :many
+SELECT w.id, w.org_id, w.name, w.created_by, w.created_at, w.status,
+       w.paused_reason, w.deleted_at,
+       (SELECT count(*) FROM runs r
+        WHERE r.org_id = w.org_id
+          AND (r.workflow_version_id = w.id OR r.workflow_version_id IN (
+            SELECT wv.id FROM workflow_versions wv WHERE wv.workflow_id = w.id
+          )))::int AS run_count,
+       COALESCE(last_run.status, '') AS last_run_status
+FROM workflows w
+LEFT JOIN LATERAL (
+  SELECT r.status FROM runs r
+  WHERE r.org_id = w.org_id
+    AND (r.workflow_version_id = w.id OR r.workflow_version_id IN (
+      SELECT wv.id FROM workflow_versions wv WHERE wv.workflow_id = w.id
+    ))
+  ORDER BY r.created_at DESC, r.id DESC LIMIT 1
+) last_run ON true
+WHERE w.org_id = $1 AND w.deleted_at IS NOT NULL
+  AND (w.deleted_at, w.id) < (sqlc.arg(before_deleted_at)::timestamptz, sqlc.arg(before_id)::text)
+ORDER BY w.deleted_at DESC, w.id DESC
+LIMIT sqlc.arg(page_limit);
 
 -- name: InsertWorkflowVersion :exec
 INSERT INTO workflow_versions (id, org_id, workflow_id, version, dag_json, created_by)

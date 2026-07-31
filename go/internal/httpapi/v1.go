@@ -198,9 +198,14 @@ func (s *V1Server) saveCore(r *http.Request, rc v1Request) opResult {
 			ID: workflowID, OrgID: rc.orgID, Name: name,
 			CreatedBy: pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
 		}); err != nil {
-			// The id exists under another org: same-name collision across
-			// tenants surfaces as the reference's save-conflict code.
 			if strings.Contains(err.Error(), "workflows_pkey") {
+				// The id exists but the active-parent read missed it: either a
+				// tombstone in THIS org (a save never resurrects one — the
+				// operator restores explicitly first) or another tenant's id.
+				owner, stateErr := q.GetWorkflowOwnerState(ctx, workflowID)
+				if stateErr == nil && owner.OrgID == rc.orgID && owner.DeletedAt != nil {
+					return opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil)
+				}
 				return opError(http.StatusConflict, "workflows_save_conflict",
 					"Workflow id is already taken", nil)
 			}
@@ -698,6 +703,19 @@ func (s *V1Server) internal(w http.ResponseWriter, rc v1Request, err error) {
 		fmt.Sprintf("Internal error: %v", err), nil)
 }
 
+func parsePositiveInt(raw string, max int) (int, error) {
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("invalid")
+	}
+	if n > max {
+		n = max
+	}
+	return n, nil
+}
+
+func timeFarFuture() time.Time { return time.Now().Add(24 * time.Hour) }
+
 func parseEventsCursor(cursor string) (time.Time, string, bool) {
 	at, id, found := strings.Cut(cursor, "|")
 	if !found {
@@ -734,7 +752,17 @@ func textOrNull(t pgtype.Text) any {
 func textOrNullString(t any) any {
 	switch v := t.(type) {
 	case string:
+		// The list queries COALESCE a truly-absent aggregate to "" (sqlc
+		// cannot infer lateral nullability); the wire restores the null.
+		if v == "" {
+			return nil
+		}
 		return v
+	case *string:
+		if v == nil {
+			return nil
+		}
+		return *v
 	case pgtype.Text:
 		return textOrNull(v)
 	default:

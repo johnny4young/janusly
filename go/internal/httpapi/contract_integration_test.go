@@ -667,3 +667,70 @@ func TestLegacyDlqDetailAndCounts(t *testing.T) {
 		t.Fatalf("legacy replay conflict: %v", again.body)
 	}
 }
+
+func TestSoftDeleteTrashRestoreLifecycle(t *testing.T) {
+	h := newAPIHarness(t)
+	workflowID := "wf-trash-" + h.org
+	doc := makeLinearWorkflow(workflowID)
+	h.call("POST", "/workflows/save", doc, "")
+
+	// Delete: raw {workflowId, ok}; the workflow leaves every active read.
+	deleted := h.call("DELETE", "/workflows/"+workflowID, nil, "")
+	if deleted.body["ok"] != true {
+		t.Fatalf("delete shape: %v", deleted.body)
+	}
+	if list := h.call("GET", "/v1/workflows?q="+workflowID, nil, ""); len(list.body["data"].([]any)) != 0 {
+		t.Fatal("a tombstoned workflow must leave the active list")
+	}
+	requireError(t, h.call("GET", "/v1/workflows/latest?workflowId="+workflowID, nil, ""),
+		404, "workflow_not_found", "Workflow not found")
+
+	// A save NEVER resurrects a tombstone — the reference's house rule.
+	requireError(t, h.call("POST", "/v1/workflows/save", doc, ""),
+		404, "workflow_not_found", "Workflow not found")
+
+	// Trash lists it with deletedAt populated, keyset on (deletedAt, id).
+	// Legacy wire: the body is a BARE array, not an envelope.
+	req, _ := http.NewRequest("GET", h.server.URL+"/workflows/trash", nil)
+	req.Header.Set("x-org-id", h.org)
+	req.Header.Set("x-user-id", "api-tester")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("trash: %v", err)
+	}
+	defer res.Body.Close()
+	var trashRows []any
+	_ = json.NewDecoder(res.Body).Decode(&trashRows)
+	found := false
+	for _, raw := range trashRows {
+		row := raw.(map[string]any)
+		if row["id"] == workflowID {
+			found = true
+			if row["deletedAt"] == nil {
+				t.Fatalf("trash rows must carry deletedAt: %v", row)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("tombstoned workflow must appear in the trash")
+	}
+
+	// Restore brings it back to every read; double restore is not-found.
+	restored := h.call("POST", "/workflows/"+workflowID+"/restore", nil, "")
+	if restored.body["ok"] != true {
+		t.Fatalf("restore shape: %v", restored.body)
+	}
+	if list := h.call("GET", "/v1/workflows?q="+workflowID, nil, ""); len(list.body["data"].([]any)) != 1 {
+		t.Fatal("a restored workflow must rejoin the active list")
+	}
+	// Legacy wire errors: {error: message, code} raw, no envelope.
+	doubleRestore := h.call("POST", "/workflows/"+workflowID+"/restore", nil, "")
+	if doubleRestore.status != 404 || doubleRestore.body["code"] != "workflow_not_found" {
+		t.Fatalf("double restore legacy wire: %v", doubleRestore.body)
+	}
+	// Cross-org delete: invisible.
+	crossDelete := h.call("DELETE", "/workflows/"+workflowID, nil, h.org+"-x")
+	if crossDelete.status != 404 || crossDelete.body["code"] != "workflow_not_found" {
+		t.Fatalf("cross-org delete legacy wire: %v", crossDelete.body)
+	}
+}
