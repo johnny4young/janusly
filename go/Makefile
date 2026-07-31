@@ -2,7 +2,7 @@ SHELL := /bin/bash
 DB_URL ?= postgres://janusly:janusly-go-local@127.0.0.1:4632/janusly_go
 PG_CONTAINER := janusly-go-pilot-postgres-1
 
-.PHONY: db-up db-down migrate schema-dump generate lint test run build parity
+.PHONY: db-up db-down migrate schema-dump generate lint test run build parity ci
 
 db-up:
 	docker compose -f docker-compose.yml up -d --wait
@@ -44,3 +44,20 @@ run:
 # conformance/gen-goldens.mjs against a locally booted reference stack).
 parity:
 	JANUSLY_GO_DATABASE_URL=$(DB_URL) go test -race -tags integration -count=1 -run TestSemanticParity ./internal/parity/ -v
+
+# The one-command truth lane: everything a reviewer needs to trust the
+# branch, failing fast with an honest exit code. Assumes the pilot DB is up
+# (make db-up + make migrate once per checkout).
+ci:
+	@echo "== generate (sqlc drift check) =="
+	$(MAKE) generate
+	@git diff --quiet -- internal/store || (echo "sqlc output drifted: run make generate and commit" && exit 1)
+	@echo "== build =="
+	$(MAKE) build
+	@echo "== lint =="
+	$(MAKE) lint
+	@echo "== tests (unit + integration, -race, -p 1) =="
+	$(MAKE) test
+	@echo "== semantic parity F01-F10 =="
+	$(MAKE) parity
+	@echo "== ci green =="

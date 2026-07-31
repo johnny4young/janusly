@@ -473,3 +473,13 @@ local. Sin umbral pasa/no-pasa: números para aprender.
   misma postura anti-estampida del /health de Node.
 - El e2e escrapea el puerto interno del binario real tras un run
   completo y exige las cinco series con valores.
+
+## 2026-07-30 — make ci (T-025)
+
+- Una orden, exit honesto: generate con guard de drift del código sqlc
+  (si make generate cambia internal/store, el lane FALLA — el generado
+  descuadrado se detecta aquí, no en review), build, lint, suite -race
+  -p 1, y la paridad F01-F10 al final como sello.
+- Deliberadamente local, sin workflow de GitHub: los push del repo
+  privado cuestan dinero (regla de la casa) — la misma filosofía que
+  mantiene el eval-gate de Node fuera de CI.
