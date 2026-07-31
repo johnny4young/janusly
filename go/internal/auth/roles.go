@@ -10,9 +10,12 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/johnny4young/janusly/go/internal/store"
 )
+
+func jsonUnmarshal(raw []byte, into any) error { return json.Unmarshal(raw, into) }
 
 // Role is the built-in rank ladder.
 type Role string
@@ -48,9 +51,18 @@ func ResolveMemberRole(ctx context.Context, q *store.Queries, orgID, userID stri
 		if IsBuiltinRole(membership.Role) {
 			return &ResolvedRole{Name: membership.Role, InheritsFrom: Role(membership.Role)}, nil
 		}
-		// Custom role: the org_roles rank lookup arrives with the
-		// custom-roles ticket. Until then — and permanently for a custom
-		// name whose defining row was deleted — fail closed: no membership.
+		// Custom role: rank comes from the defining org_roles row's
+		// inheritsFrom. A custom name whose defining row was deleted (or
+		// whose inheritance is out of the closed enum) fails closed.
+		orgRole, roleErr := q.GetOrgRole(ctx, store.GetOrgRoleParams{
+			OrgID: orgID, Name: membership.Role,
+		})
+		if roleErr == nil && IsBuiltinRole(orgRole.InheritsFrom) {
+			return &ResolvedRole{Name: orgRole.Name, InheritsFrom: Role(orgRole.InheritsFrom)}, nil
+		}
+		if roleErr != nil && !errorsIsNoRows(roleErr) {
+			return nil, roleErr
+		}
 		return nil, nil
 	}
 	if err != nil && !errorsIsNoRows(err) {
@@ -64,18 +76,49 @@ func ResolveMemberRole(ctx context.Context, q *store.Queries, orgID, userID stri
 }
 
 // EffectivePermissions resolves the permission set for a role NAME in an
-// org. Until the custom-roles ticket adds org_roles overrides, the
-// effective set is the catalog's built-in default for the rank-equivalent
-// role; overrides will REPLACE (not extend) per the reference contract.
-func EffectivePermissions(role *ResolvedRole) map[string]bool {
+// org, org_roles-aware per the reference's lookup:
+//  1. An org_roles row with NON-NULL grantedPermissions is used verbatim
+//     — the override REPLACES the default set, it is not additive.
+//  2. No row (or null permissions): a built-in name falls back to the
+//     catalog defaults. A custom role always has a row, so a
+//     null-permissions custom is a data-integrity bug → empty set
+//     (fail-closed).
+func EffectivePermissions(ctx context.Context, q *store.Queries, orgID string, role *ResolvedRole) (map[string]bool, error) {
 	if role == nil {
-		return nil
+		return nil, nil
 	}
-	out := map[string]bool{}
-	for _, entry := range PermissionCatalog {
-		if entry.DefaultRoles[role.InheritsFrom] {
-			out[entry.Key] = true
+	row, err := q.GetOrgRole(ctx, store.GetOrgRoleParams{OrgID: orgID, Name: role.Name})
+	if err == nil && len(row.GrantedPermissions) > 0 && string(row.GrantedPermissions) != "null" {
+		var keys []string
+		if jsonErr := jsonUnmarshal(row.GrantedPermissions, &keys); jsonErr != nil {
+			return map[string]bool{}, nil // malformed grant list: fail closed
 		}
+		out := map[string]bool{}
+		for _, key := range keys {
+			if IsPermission(key) {
+				out[key] = true
+			}
+		}
+		return out, nil
 	}
-	return out
+	if err != nil && !errorsIsNoRows(err) {
+		return nil, err
+	}
+	if IsBuiltinRole(role.Name) || (err == nil) {
+		// Built-in defaults — also the fallback for an override row whose
+		// permissions are null (rank override only).
+		out := map[string]bool{}
+		for _, entry := range PermissionCatalog {
+			if entry.DefaultRoles[role.InheritsFrom] {
+				out[entry.Key] = true
+			}
+		}
+		if !IsBuiltinRole(role.Name) && err == nil && (len(row.GrantedPermissions) == 0 || string(row.GrantedPermissions) == "null") {
+			// Custom role with a row but null permissions: integrity bug,
+			// fail closed per the reference.
+			return map[string]bool{}, nil
+		}
+		return out, nil
+	}
+	return map[string]bool{}, nil
 }

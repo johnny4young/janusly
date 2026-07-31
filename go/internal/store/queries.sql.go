@@ -718,6 +718,38 @@ func (q *Queries) GetOrgMembership(ctx context.Context, arg GetOrgMembershipPara
 	return i, err
 }
 
+const getOrgRole = `-- name: GetOrgRole :one
+SELECT id, org_id, name, inherits_from, granted_permissions
+FROM org_roles
+WHERE org_id = $1 AND name = $2
+`
+
+type GetOrgRoleParams struct {
+	OrgID string
+	Name  string
+}
+
+type GetOrgRoleRow struct {
+	ID                 string
+	OrgID              string
+	Name               string
+	InheritsFrom       string
+	GrantedPermissions json.RawMessage
+}
+
+func (q *Queries) GetOrgRole(ctx context.Context, arg GetOrgRoleParams) (GetOrgRoleRow, error) {
+	row := q.db.QueryRow(ctx, getOrgRole, arg.OrgID, arg.Name)
+	var i GetOrgRoleRow
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.InheritsFrom,
+		&i.GrantedPermissions,
+	)
+	return i, err
+}
+
 const getReplayCampaign = `-- name: GetReplayCampaign :one
 SELECT id, org_id, name, cluster_signature, filter_json, pacing_ms, status, total_count, replayed_count, failed_count, cancelled_count, created_by, cancelled_by, next_dispatch_at, started_at, completed_at, cancelled_at, created_at, updated_at FROM replay_campaigns WHERE org_id = $1 AND id = $2
 `

@@ -685,3 +685,8 @@ WHERE org_id = $1 AND lower(email) = lower($2);
 -- name: MigrateOrgMemberUserID :execrows
 UPDATE org_members SET user_id = $3
 WHERE id = $1 AND org_id = $2;
+
+-- name: GetOrgRole :one
+SELECT id, org_id, name, inherits_from, granted_permissions
+FROM org_roles
+WHERE org_id = $1 AND name = $2;

@@ -1176,3 +1176,13 @@ producción necesita saber — de lo ya resuelto o informativo.
   solo-auth (mi extracción se contaminó con la fila POST) y /resume
   exige runs.start, no runs.write. El smoke web completo sigue verde
   con los gates activos.
+
+## 2026-07-31 — roles custom con la semántica de reemplazo (T-074)
+
+- El matiz que importaba: un override con grants no-nulos REEMPLAZA el
+  set default — el auditor custom con dos claves tiene exactamente dos
+  claves, no viewer-más-dos. Y el reemplazo aplica también a built-ins
+  sobreescritos: un org puede estrechar editor a solo-lecturas. El
+  fail-closed cubre las tres grietas: fila borrada, herencia fuera del
+  enum, y el custom con permisos null que solo puede ser un bug de
+  integridad.

@@ -44,7 +44,15 @@ func (s *V1Server) requirePermission(r *http.Request, rc v1Request, permission s
 		rejection := opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
 		return &rejection
 	}
-	if resolved == nil || !auth.EffectivePermissions(resolved)[permission] {
+	var effective map[string]bool
+	if resolved != nil {
+		effective, err = auth.EffectivePermissions(r.Context(), store.New(s.pool), rc.orgID, resolved)
+		if err != nil {
+			rejection := opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+			return &rejection
+		}
+	}
+	if resolved == nil || !effective[permission] {
 		rejection := opError(http.StatusForbidden, "server_request_failed",
 			"Forbidden: requires permission "+permission, nil)
 		return &rejection

@@ -208,3 +208,75 @@ func TestResolveMemberRoleLadder(t *testing.T) {
 		t.Fatalf("undefined custom role must fail closed: %+v", got)
 	}
 }
+
+// Custom roles: rank from inheritsFrom; a non-null grant list REPLACES the
+// defaults; a null-permissions custom row fails closed.
+func TestCustomRolesAndOverrides(t *testing.T) {
+	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+	}
+	pool, err := pgxpool.New(context.Background(), dsn)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	q := store.New(pool)
+	ctx := context.Background()
+	org := fmt.Sprintf("org-custom-%d", time.Now().UnixNano())
+
+	seedRole := func(name, inherits, grants string) {
+		var grantsSQL any
+		if grants != "" {
+			grantsSQL = grants
+		}
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO org_roles (id, org_id, name, inherits_from, granted_permissions)
+			 VALUES ($1, $2, $3, $4, $5::jsonb)`,
+			org+"-"+name, org, name, inherits, grantsSQL); err != nil {
+			t.Fatalf("seed role: %v", err)
+		}
+	}
+	seedRole("auditor", "viewer", `["dlq.read","runs.read"]`)
+	seedRole("shipper", "editor", "")
+	seedRole("broken", "viewer", "")
+	// broken gets NULL permissions but is custom → fail closed.
+	seedMember(t, pool, org, "u-auditor", "a@x.com", "auditor")
+	seedMember(t, pool, org, "u-shipper", "s@x.com", "shipper")
+
+	// Rank inheritance: auditor ranks viewer, shipper ranks editor.
+	auditor, _ := ResolveMemberRole(ctx, q, org, "u-auditor", ModeSupabase)
+	if auditor == nil || auditor.InheritsFrom != RoleViewer || auditor.Name != "auditor" {
+		t.Fatalf("auditor rank: %+v", auditor)
+	}
+	shipper, _ := ResolveMemberRole(ctx, q, org, "u-shipper", ModeSupabase)
+	if shipper == nil || shipper.InheritsFrom != RoleEditor {
+		t.Fatalf("shipper rank: %+v", shipper)
+	}
+
+	// Non-null grants REPLACE: auditor holds exactly two keys — dlq.read
+	// yes, workflows.read (a viewer default) NO.
+	effective, err := EffectivePermissions(ctx, q, org, auditor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !effective["dlq.read"] || effective["workflows.read"] || len(effective) != 2 {
+		t.Fatalf("override must replace, not extend: %+v", effective)
+	}
+
+	// Null-permissions custom row: empty set, fail closed.
+	broken := &ResolvedRole{Name: "broken", InheritsFrom: RoleViewer}
+	effective, _ = EffectivePermissions(ctx, q, org, broken)
+	if len(effective) != 0 {
+		t.Fatalf("null-permission custom must fail closed: %+v", effective)
+	}
+
+	// A BUILT-IN override with non-null grants also replaces (org narrows
+	// editor to reads only).
+	seedRole("editor", "editor", `["workflows.read","runs.read"]`)
+	editor := &ResolvedRole{Name: "editor", InheritsFrom: RoleEditor}
+	effective, _ = EffectivePermissions(ctx, q, org, editor)
+	if effective["workflows.write"] || !effective["workflows.read"] {
+		t.Fatalf("built-in override must replace defaults: %+v", effective)
+	}
+}
