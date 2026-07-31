@@ -235,3 +235,45 @@ func TestVerifiedRecoveryMetrics(t *testing.T) {
 		t.Fatalf("legacy average with one sample must equal the median: %+v", after.body)
 	}
 }
+
+// Server-side DLQ filters: status validated against the closed enum,
+// nodeId exact, workflowId through the version join.
+func TestDlqServerSideFilters(t *testing.T) {
+	h := newAPIHarness(t)
+	failRun(t, h, "wf-filter-a-"+h.org)
+	failRun(t, h, "wf-filter-b-"+h.org)
+	ids := deadLetterIDs(t, h)
+	if len(ids) != 2 {
+		t.Fatalf("seed: %v", ids)
+	}
+	// Replay one so the statuses diverge.
+	if res := h.call("POST", "/v1/dlq/redrive", map[string]any{"deadLetterId": ids[0]}, ""); res.status != 200 {
+		t.Fatalf("redrive: %+v", res.body)
+	}
+
+	rows := func(res apiResponse) []any {
+		data, _ := res.body["data"].([]any)
+		return data
+	}
+	if got := rows(h.call("GET", "/v1/dlq?status=open", nil, "")); len(got) != 1 {
+		t.Fatalf("status=open: %+v", got)
+	}
+	if got := rows(h.call("GET", "/v1/dlq?status=replayed", nil, "")); len(got) != 1 {
+		t.Fatalf("status=replayed: %+v", got)
+	}
+	if got := rows(h.call("GET", "/v1/dlq?nodeId=call", nil, "")); len(got) != 2 {
+		t.Fatalf("nodeId=call: %+v", got)
+	}
+	if got := rows(h.call("GET", "/v1/dlq?nodeId=ghost", nil, "")); len(got) != 0 {
+		t.Fatalf("nodeId=ghost: %+v", got)
+	}
+	if got := rows(h.call("GET", "/v1/dlq?workflowId=wf-filter-a-"+h.org, nil, "")); len(got) != 1 {
+		t.Fatalf("workflowId: %+v", got)
+	}
+	combined := rows(h.call("GET", "/v1/dlq?workflowId=wf-filter-a-"+h.org+"&status=resolved", nil, ""))
+	if len(combined) != 0 {
+		t.Fatalf("combined filters: %+v", combined)
+	}
+	bad := h.call("GET", "/v1/dlq?status=bogus", nil, "")
+	requireError(t, bad, 400, "dlq_invalid_status", "Invalid DLQ status")
+}

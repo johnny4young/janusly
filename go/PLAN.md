@@ -711,6 +711,7 @@ el chat publicado.
 | 2026-07-31 | T-057 consent MCP | Consent de dos flags portado de `guardMcpWrite`: `JANUSLY_MCP_WRITES_ENABLED=true` (proceso) Y `org_configs mcp.writeConsent=true` (tenant), ambos requeridos antes de que cualquier write-tool MCP actúe (save/start/redrive); mensajes de negación VERBATIM. Divergencias: el MCP del pilot es in-process, así que el 403 HTTP de Node se materializa como isError de tool con el mismo mensaje; sin rate-limit por acción (sin sustrato de limiter). Los reads jamás se gatean — probado en el mismo test del escalón |
 | 2026-07-31 | T-058 precisión | Los cursores JS viven en MILISEGUNDOS (Date) pero Go escribía timestamps con µs — un cursor ms sobre filas µs puede SALTAR eventos en la frontera de página (el tuple `(created_at,id) < (cursor)` excluye filas del mismo ms con µs mayores). Fix estructural: TODOS los run_events se estampan truncados a ms (`eventNow()`, incluido run.started que usaba `now()` de la DB) y el cursor de `/run` se acuña en ISO-ms exacto (el shape de `toISOString`) — comparaciones exactas en ambas direcciones Node↔Go |
 | 2026-07-31 | T-058 orden ASC | Segunda captura: Go servía la página de eventos en DESC crudo; `paginateRunEvents` de Node la INVIERTE a ascendente dentro de la página con el cursor apuntando al más viejo. Divergencia de wire viva desde F0 (la proyección de paridad no compara eventos) — corregida; round-trip completo probado: páginas de 2 reensamblan la línea de tiempo exacta sin saltos ni repes, colisión mismo-ms desempatada por id, shape del cursor ISO-ms verificado |
+| 2026-07-31 | T-063 filtros DLQ | Filtros server-side en `/v1/dlq` + `/dlq`: `status` validado contra el enum cerrado (fuera → 400 `dlq_invalid_status` "Invalid DLQ status" verbatim, nunca página vacía), `nodeId` exacto, `workflowId` vía el join de versiones CON el fallback ad-hoc (mismo patrón que el filtro de runs — cubre workflows no guardados cuyo version-id ES el workflow-id). Los filtros de Node que el pilot no porta (severity/sort/owner/search — necesitan el read-model de recovery queue) quedan anotados |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -960,7 +961,7 @@ compactas aquí; el detalle de paridad se lee de la fuente al ejecutar.
 | T-060 | Runbook de operación del binario (systemd/launchd, backup, upgrade) | F2 | P2 | todo |
 | T-061 | Fuzzing de gramáticas (go-fuzz corto: expresiones + templates) | F2 | P2 | todo |
 | T-062 | Property tests del queue (invariantes: exactly-once, no-orphan, terminal) | F2 | P2 | todo |
-| T-063 | Paridad de `/v1/dlq` filtros server-side (status, nodeId, workflowId) | F2 | P2 | todo |
+| T-063 | Paridad de `/v1/dlq` filtros server-side (status, nodeId, workflowId) | F2 | P2 | done |
 | T-064 | Web: panel DLQ + redrive contra Go (smoke Playwright) | F1+ | P1 | todo |
 | T-065 | Web: aprobar/resume desde la UI contra Go (smoke Playwright) | F1+ | P1 | todo |
 | T-066 | Consolidación: goldens re-run completo + parity F01-F20 verde | F2 | P0 | todo |

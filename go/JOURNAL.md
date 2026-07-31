@@ -968,3 +968,13 @@ producción necesita saber — de lo ya resuelto o informativo.
   invierte a ascendente con el cursor apuntando al evento más viejo.
   La divergencia vivía desde F0 porque la proyección de paridad no
   compara eventos — el round-trip la destapó en su primera corrida.
+
+## 2026-07-31 — filtros server-side del DLQ (T-063)
+
+- status/nodeId/workflowId filtran en SQL con la validación de la
+  referencia: un status fuera del enum es un 400 con el mensaje
+  verbatim, no una página vacía silenciosa. El filtro por workflow
+  reutiliza el patrón del fallback ad-hoc del listado de runs, así los
+  workflows sin guardar también filtran. severity/sort/owner/search
+  (que en Node viven sobre el read-model de la recovery queue) quedan
+  fuera del alcance del pilot, anotados.

@@ -1262,13 +1262,21 @@ LEFT JOIN runs r ON r.id = dl.run_id
 LEFT JOIN workflow_versions wv ON wv.id = r.workflow_version_id
 LEFT JOIN workflows w ON w.id = wv.workflow_id
 WHERE dl.org_id = $1
+  AND ($2::text IS NULL OR dl.status = $2)
+  AND ($3::text IS NULL OR dl.node_id = $3)
+  AND ($4::text IS NULL
+       OR wv.workflow_id = $4
+       OR (wv.id IS NULL AND r.workflow_version_id = $4))
 ORDER BY dl.created_at DESC, dl.id DESC
-LIMIT $2
+LIMIT $5
 `
 
 type ListDeadLetterSummariesParams struct {
-	OrgID     string
-	PageLimit int32
+	OrgID            string
+	FilterStatus     pgtype.Text
+	FilterNodeID     pgtype.Text
+	FilterWorkflowID pgtype.Text
+	PageLimit        int32
 }
 
 type ListDeadLetterSummariesRow struct {
@@ -1286,7 +1294,13 @@ type ListDeadLetterSummariesRow struct {
 }
 
 func (q *Queries) ListDeadLetterSummaries(ctx context.Context, arg ListDeadLetterSummariesParams) ([]ListDeadLetterSummariesRow, error) {
-	rows, err := q.db.Query(ctx, listDeadLetterSummaries, arg.OrgID, arg.PageLimit)
+	rows, err := q.db.Query(ctx, listDeadLetterSummaries,
+		arg.OrgID,
+		arg.FilterStatus,
+		arg.FilterNodeID,
+		arg.FilterWorkflowID,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

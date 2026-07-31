@@ -662,6 +662,8 @@ func (s *V1Server) cancelCore(r *http.Request, rc v1Request) opResult {
 	return opOK(map[string]any{"runId": body.RunID, "status": "cancelled"})
 }
 
+var deadLetterStatuses = map[string]bool{"open": true, "replayed": true, "resolved": true}
+
 func (s *V1Server) listDeadLetters(w http.ResponseWriter, r *http.Request, rc v1Request) {
 	limit := 50
 	if raw := r.URL.Query().Get("limit"); raw != "" {
@@ -669,8 +671,20 @@ func (s *V1Server) listDeadLetters(w http.ResponseWriter, r *http.Request, rc v1
 			limit = n
 		}
 	}
+	// Server-side filters, validated like the reference: an out-of-enum
+	// status is a 400, not an empty page.
+	status := r.URL.Query().Get("status")
+	if status != "" && !deadLetterStatuses[status] {
+		writeV1Error(w, rc.id, http.StatusBadRequest, "dlq_invalid_status", "Invalid DLQ status", nil)
+		return
+	}
+	nodeID := r.URL.Query().Get("nodeId")
+	workflowID := r.URL.Query().Get("workflowId")
 	rows, err := store.New(s.pool).ListDeadLetterSummaries(r.Context(), store.ListDeadLetterSummariesParams{
 		OrgID: rc.orgID, PageLimit: int32(limit),
+		FilterStatus:     pgtype.Text{String: status, Valid: status != ""},
+		FilterNodeID:     pgtype.Text{String: nodeID, Valid: nodeID != ""},
+		FilterWorkflowID: pgtype.Text{String: workflowID, Valid: workflowID != ""},
 	})
 	if err != nil {
 		s.internal(w, rc, err)

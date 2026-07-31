@@ -317,6 +317,11 @@ LEFT JOIN runs r ON r.id = dl.run_id
 LEFT JOIN workflow_versions wv ON wv.id = r.workflow_version_id
 LEFT JOIN workflows w ON w.id = wv.workflow_id
 WHERE dl.org_id = $1
+  AND (sqlc.narg(filter_status)::text IS NULL OR dl.status = sqlc.narg(filter_status))
+  AND (sqlc.narg(filter_node_id)::text IS NULL OR dl.node_id = sqlc.narg(filter_node_id))
+  AND (sqlc.narg(filter_workflow_id)::text IS NULL
+       OR wv.workflow_id = sqlc.narg(filter_workflow_id)
+       OR (wv.id IS NULL AND r.workflow_version_id = sqlc.narg(filter_workflow_id)))
 ORDER BY dl.created_at DESC, dl.id DESC
 LIMIT sqlc.arg(page_limit);
 
