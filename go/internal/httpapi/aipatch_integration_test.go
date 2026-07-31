@@ -109,7 +109,23 @@ func TestPatchWorkflowLadder(t *testing.T) {
 			}
 		}
 	}
-	if evidence := patched.body["evidence"].([]any); len(evidence) != 0 {
-		t.Fatalf("alternatives must never contaminate evidence: %+v", evidence)
+	// Evidence: deterministic rows on BOTH modes, and the alternatives
+	// never leak into it (only closed kinds appear).
+	evidence := patched.body["evidence"].([]any)
+	if len(evidence) == 0 {
+		t.Fatal("evidence side-channel must attach on the ai path")
+	}
+	for _, raw := range evidence {
+		row := raw.(map[string]any)
+		kind, _ := row["kind"].(string)
+		if kind != "recent_error" && kind != "signature_rule" {
+			t.Fatalf("unexpected evidence kind: %q", kind)
+		}
+		if snippet, _ := row["snippet"].(string); containsAny(snippet, "retry harder", "rejectedBecause") {
+			t.Fatalf("alternatives leaked into evidence: %q", snippet)
+		}
+	}
+	if fbEvidence := fallback.body["evidence"].([]any); len(fbEvidence) == 0 {
+		t.Fatal("evidence must attach on the fallback path too")
 	}
 }

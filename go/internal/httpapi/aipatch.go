@@ -25,7 +25,9 @@ import (
 	"github.com/johnny4young/janusly/go/internal/ai"
 	"github.com/johnny4young/janusly/go/internal/aibudget"
 	"github.com/johnny4young/janusly/go/internal/aiconfig"
+	"github.com/johnny4young/janusly/go/internal/aievidence"
 	"github.com/johnny4young/janusly/go/internal/aiguidance"
+	"github.com/johnny4young/janusly/go/internal/audit"
 	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/ratelimit"
 	"github.com/johnny4young/janusly/go/internal/signature"
@@ -83,6 +85,16 @@ func (s *V1Server) patchWorkflowCore(r *http.Request, rc v1Request) opResult {
 	var workflowDoc map[string]any
 	_ = json.Unmarshal(dlq.WorkflowJson, &workflowDoc)
 	original, _ := domain.Parse(dlq.WorkflowJson)
+
+	// Evidence side-channel: a deterministic projection of what the prompt
+	// composer sees — attached on BOTH the ai and fallback paths, audited
+	// only as a count.
+	evidence := aievidence.ScrubRows([]aievidence.Row{
+		aievidence.RecentErrorRow(dlq.RunID, dlq.ErrorJson),
+		aievidence.SignatureRuleRow(signature.NormalizeJSON(dlq.ErrorJson, signature.Context{
+			NodeID: dlq.NodeID, NodeType: nodeTypeOf(dlq.NodeJson),
+		}).Signature),
+	})
 	fallback := func(aiError string, model, provider string) opResult {
 		suggestion := map[string]any{
 			"workflow": workflowDoc, "rationale": patchFallbackRationale(aiError),
@@ -93,7 +105,7 @@ func (s *V1Server) patchWorkflowCore(r *http.Request, rc v1Request) opResult {
 		response := map[string]any{
 			"mode": "fallback", "suggestedWorkflow": workflowDoc,
 			"rationale":   patchFallbackRationale(aiError),
-			"suggestions": []any{suggestion}, "evidence": []any{},
+			"suggestions": []any{suggestion}, "evidence": evidence,
 			"recoveryPassport": map[string]any{
 				"failureSignature": failureSignature, "priorSameSignatureOutcome": nil,
 			},
@@ -104,6 +116,10 @@ func (s *V1Server) patchWorkflowCore(r *http.Request, rc v1Request) opResult {
 		if aiError != "" {
 			response["aiError"] = aiError
 		}
+		audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.patch_suggested", audit.Options{
+			TargetType: "dlq", TargetID: body.DeadLetterID,
+			Metadata: map[string]any{"mode": "fallback", "evidenceCount": len(evidence)},
+		})
 		return opOK(response)
 	}
 	if !client.Configured() {
@@ -181,9 +197,13 @@ func (s *V1Server) patchWorkflowCore(r *http.Request, rc v1Request) opResult {
 		}
 	}
 	top := validated[0]
+	audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.patch_suggested", audit.Options{
+		TargetType: "dlq", TargetID: body.DeadLetterID,
+		Metadata: map[string]any{"mode": "ai", "suggestions": len(validated), "evidenceCount": len(evidence)},
+	})
 	return opOK(map[string]any{
 		"mode": "ai", "suggestedWorkflow": top["workflow"], "rationale": top["rationale"],
-		"suggestions": validated, "evidence": []any{},
+		"suggestions": validated, "evidence": evidence,
 		"recoveryPassport": map[string]any{
 			"failureSignature": failureSignature, "priorSameSignatureOutcome": nil,
 		},

@@ -1441,3 +1441,10 @@ producción necesita saber — de lo ya resuelto o informativo.
   recableo), la regla de oro probada — un parche inválido jamás llega al
   wire — y las alternativas lavadas con el scrub apilado tras descubrir
   que el compartido no cubría claves sk-ant.
+
+## 2026-07-31 — el "por qué" sin segunda llamada (T-110)
+
+- El canal de evidencia portado con su realidad (respuesta, no
+  persistencia): proyección determinista con 6 kinds cerrados, caps en
+  runas — la semántica de length de JS, no bytes — y el audit llevando
+  solo el conteo.
