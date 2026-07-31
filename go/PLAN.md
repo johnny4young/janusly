@@ -754,6 +754,7 @@ el chat publicado.
 | 2026-07-31 | T-088 retención completa | run_events (vía run padre — la tabla no tiene org) / audit_logs / usage_events con el patrón subquery+LIMIT de la referencia: por org con su ventana del catálogo, `hold_until` exento, lotes acotados (defaults 10k×1000) y shape de resultado `{rowsDeleted, cutoffAt, runtimeMs, cappedByMaxBatches}` — un barrido capado sigue drenando a la hora siguiente. Probado con volumen sembrado: 250 filas a lotes de 100 con tope 2 → 200 capado, la siguiente pasada drena 50; org de ventana ancha intacta; el legal hold sobrevive |
 | 2026-07-31 | T-088 rendimiento | La enumeración de orgs se acota por los PISOS del catálogo (run_events ≥7d, audit/usage ≥30d — una org con solo datos frescos ni entra al loop) y las ventanas se leen en UNA consulta (`retention.%`) resuelta en memoria: el primer intento iteraba todas las orgs con 6 consultas por org (40 s en el DB de dev) |
 | 2026-07-31 | T-089 sustrato usage | `internal/usage`: Record con el contrato de la referencia (tokens con puntero para distinguir 0 de ausente, costUsd nil = modelo sin precio, providerSimulated, mode ai/fallback), seam process-global `SetRecorder`/`Fire` (equivalente de `setUsageRecorder`) registrado en el boot del api, y el escritor DB con la fila exacta: `metric:"llm.completion"`, quantity=totalTokens, metadata con NULOS EXPLÍCITOS para forma estable. Fire absorbe recorder ausente/org ausente/error/pánico — la telemetría jamás rompe la llamada. Listo para el LlmClient de T-101 |
+| 2026-07-31 | T-090 /run/usage + costos | El stub honesto de T-032 reemplazado: `GET /run/usage` con el shape de la referencia (guardas runId/403, slice acotado 10k DESC NULLS LAST, agregado llm con knownCostUsd/unknownCostCalls + memoria por kind ordenada por actividad) y el rollup de costos en `/recovery/metrics` (`costByProvider`): agregación de la VENTANA COMPLETA en Postgres, ranking por valor, tope 100 grupos proveedor/modelo + UNA fila resto `__other__` con `aggregated:true` — totales exactos probados con 105 modelos sembrados (cada dólar aterriza en alguna fila, jamás sample crudo) |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -1047,7 +1048,7 @@ día que exista el chokepoint (T-079)**.
 | T-087 | Consumidores del snapshot: requireSavedWorkflow, TTLs, ventanas de retención por org | config | P1 | done |
 | T-088 | Retención completa por org: run_events / audit_logs / usage_events (CTE por tabla, acotada) | config | P1 | done |
 | T-089 | Sustrato usage_events + seam de recorder (forma `llm.completion` lista para ola 4) | usage | P1 | done |
-| T-090 | `GET /run/usage` real + agregado de costos acotado (100 grupos + resto) | usage | P2 | todo |
+| T-090 | `GET /run/usage` real + agregado de costos acotado (100 grupos + resto) | usage | P2 | done |
 | T-091 | Health de dos niveles: `/health` público-seguro + `/system/queue` admin (profundidad desde Postgres) | obs | P1 | todo |
 | T-092 | Paridad de nombres Prometheus + Resource OTel (`service.name=janusly`, instance id) | obs | P2 | todo |
 | T-093 | Lane HA: DOS instancias del engine sobre una base — property + race suites verdes | HA | P0 | todo |

@@ -1304,3 +1304,10 @@ producción necesita saber — de lo ya resuelto o informativo.
 - El seam de usage con el contrato exacto de la referencia y un Fire que
   absorbe todo (error, pánico, org ausente) — cuando llegue el LlmClient
   en ola 4, la telemetría ya lo espera.
+
+## 2026-07-31 — usage por run y costos acotados (T-090)
+
+- /run/usage real con el agregado de la referencia, y el rollup de
+  costos que agrega la ventana completa en Postgres: 100 grupos + una
+  fila resto explícita, con la invariante probada de que los totales
+  quedan exactos aunque la cardinalidad se pliegue.

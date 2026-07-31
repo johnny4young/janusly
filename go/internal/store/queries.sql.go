@@ -2773,6 +2773,48 @@ func (q *Queries) ListRunSummaries(ctx context.Context, arg ListRunSummariesPara
 	return items, nil
 }
 
+const listRunUsageSlice = `-- name: ListRunUsageSlice :many
+SELECT metric, quantity, metadata FROM usage_events
+WHERE org_id = $1 AND run_id = $2
+ORDER BY created_at DESC NULLS LAST, id DESC NULLS LAST
+LIMIT $3
+`
+
+type ListRunUsageSliceParams struct {
+	OrgID string
+	RunID pgtype.Text
+	Limit int32
+}
+
+type ListRunUsageSliceRow struct {
+	Metric   string
+	Quantity int32
+	Metadata json.RawMessage
+}
+
+// Newest bounded usage slice for one run (the /run/usage read). The
+// explicit NULLS LAST matches the index order — created_at is
+// historically nullable even though new writes default it.
+func (q *Queries) ListRunUsageSlice(ctx context.Context, arg ListRunUsageSliceParams) ([]ListRunUsageSliceRow, error) {
+	rows, err := q.db.Query(ctx, listRunUsageSlice, arg.OrgID, arg.RunID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRunUsageSliceRow
+	for rows.Next() {
+		var i ListRunUsageSliceRow
+		if err := rows.Scan(&i.Metric, &i.Quantity, &i.Metadata); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRuns = `-- name: ListRuns :many
 SELECT id, org_id, workflow_version_id, status, created_by, created_at
 FROM runs
@@ -3359,6 +3401,105 @@ func (q *Queries) QueryAuditLogs(ctx context.Context, arg QueryAuditLogsParams) 
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.HoldUntil,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const queryCostByProvider = `-- name: QueryCostByProvider :many
+WITH grouped AS (
+  SELECT
+    CASE WHEN jsonb_typeof(metadata->'provider') = 'string'
+      THEN metadata->>'provider' ELSE 'unknown' END AS provider,
+    CASE WHEN jsonb_typeof(metadata->'model') = 'string'
+      THEN metadata->>'model' ELSE 'unknown' END AS model,
+    sum(CASE WHEN jsonb_typeof(metadata->'costUsd') = 'number'
+      THEN greatest((metadata->>'costUsd')::double precision, 0) ELSE 0 END)::double precision AS usd,
+    sum(greatest(quantity, 0))::double precision AS tokens,
+    sum(CASE WHEN jsonb_typeof(metadata->'inputTokens') = 'number'
+      THEN greatest((metadata->>'inputTokens')::double precision, 0) ELSE 0 END)::double precision AS input_tokens,
+    sum(CASE WHEN jsonb_typeof(metadata->'cachedInputTokens') = 'number'
+      THEN greatest((metadata->>'cachedInputTokens')::double precision, 0) ELSE 0 END)::double precision AS cached_input_tokens,
+    sum(CASE WHEN jsonb_typeof(metadata->'cacheCreationInputTokens') = 'number'
+      THEN greatest((metadata->>'cacheCreationInputTokens')::double precision, 0) ELSE 0 END)::double precision AS cache_creation_input_tokens,
+    count(*)::double precision AS calls
+  FROM usage_events
+  WHERE org_id = $1::text
+    AND metric = 'llm.completion'
+    AND created_at >= $2::timestamptz
+  GROUP BY 1, 2
+), ranked AS (
+  SELECT grouped.provider, grouped.model, grouped.usd, grouped.tokens, grouped.input_tokens, grouped.cached_input_tokens, grouped.cache_creation_input_tokens, grouped.calls, row_number() OVER (
+    ORDER BY usd DESC, tokens DESC, provider, model) AS group_rank
+  FROM grouped
+), bucketed AS (
+  SELECT
+    CASE WHEN group_rank <= 100 THEN provider ELSE '__other__' END AS provider,
+    CASE WHEN group_rank <= 100 THEN model ELSE '__other__' END AS model,
+    group_rank > 100 AS aggregated,
+    usd, tokens, input_tokens, cached_input_tokens, cache_creation_input_tokens, calls
+  FROM ranked
+)
+SELECT
+  provider, model,
+  sum(usd)::double precision AS usd,
+  sum(tokens)::double precision AS tokens,
+  sum(input_tokens)::double precision AS input_tokens,
+  sum(cached_input_tokens)::double precision AS cached_input_tokens,
+  sum(cache_creation_input_tokens)::double precision AS cache_creation_input_tokens,
+  sum(calls)::double precision AS calls,
+  aggregated
+FROM bucketed
+GROUP BY aggregated, provider, model
+ORDER BY aggregated, usd DESC, tokens DESC, provider, model
+`
+
+type QueryCostByProviderParams struct {
+	TargetOrg string
+	Since     time.Time
+}
+
+type QueryCostByProviderRow struct {
+	Provider                 string
+	Model                    string
+	Usd                      float64
+	Tokens                   float64
+	InputTokens              float64
+	CachedInputTokens        float64
+	CacheCreationInputTokens float64
+	Calls                    float64
+	Aggregated               bool
+}
+
+// Operations LLM cost rollup: aggregate the COMPLETE rolling window in
+// Postgres, rank provider/model groups by operator value, and fold every
+// group past the first 100 into one explicit aggregated remainder — the
+// totals stay exact while the response cardinality stays bounded.
+func (q *Queries) QueryCostByProvider(ctx context.Context, arg QueryCostByProviderParams) ([]QueryCostByProviderRow, error) {
+	rows, err := q.db.Query(ctx, queryCostByProvider, arg.TargetOrg, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []QueryCostByProviderRow
+	for rows.Next() {
+		var i QueryCostByProviderRow
+		if err := rows.Scan(
+			&i.Provider,
+			&i.Model,
+			&i.Usd,
+			&i.Tokens,
+			&i.InputTokens,
+			&i.CachedInputTokens,
+			&i.CacheCreationInputTokens,
+			&i.Calls,
+			&i.Aggregated,
 		); err != nil {
 			return nil, err
 		}

@@ -863,3 +863,63 @@ SELECT org_id, key, value_json FROM org_configs WHERE key LIKE 'retention.%';
 -- name: InsertUsageEvent :exec
 INSERT INTO usage_events (id, org_id, user_id, run_id, metric, quantity, metadata)
 VALUES ($1, $2, $3, $4, $5, $6, $7);
+
+-- Newest bounded usage slice for one run (the /run/usage read). The
+-- explicit NULLS LAST matches the index order — created_at is
+-- historically nullable even though new writes default it.
+-- name: ListRunUsageSlice :many
+SELECT metric, quantity, metadata FROM usage_events
+WHERE org_id = $1 AND run_id = $2
+ORDER BY created_at DESC NULLS LAST, id DESC NULLS LAST
+LIMIT $3;
+
+-- Operations LLM cost rollup: aggregate the COMPLETE rolling window in
+-- Postgres, rank provider/model groups by operator value, and fold every
+-- group past the first 100 into one explicit aggregated remainder — the
+-- totals stay exact while the response cardinality stays bounded.
+-- name: QueryCostByProvider :many
+WITH grouped AS (
+  SELECT
+    CASE WHEN jsonb_typeof(metadata->'provider') = 'string'
+      THEN metadata->>'provider' ELSE 'unknown' END AS provider,
+    CASE WHEN jsonb_typeof(metadata->'model') = 'string'
+      THEN metadata->>'model' ELSE 'unknown' END AS model,
+    sum(CASE WHEN jsonb_typeof(metadata->'costUsd') = 'number'
+      THEN greatest((metadata->>'costUsd')::double precision, 0) ELSE 0 END)::double precision AS usd,
+    sum(greatest(quantity, 0))::double precision AS tokens,
+    sum(CASE WHEN jsonb_typeof(metadata->'inputTokens') = 'number'
+      THEN greatest((metadata->>'inputTokens')::double precision, 0) ELSE 0 END)::double precision AS input_tokens,
+    sum(CASE WHEN jsonb_typeof(metadata->'cachedInputTokens') = 'number'
+      THEN greatest((metadata->>'cachedInputTokens')::double precision, 0) ELSE 0 END)::double precision AS cached_input_tokens,
+    sum(CASE WHEN jsonb_typeof(metadata->'cacheCreationInputTokens') = 'number'
+      THEN greatest((metadata->>'cacheCreationInputTokens')::double precision, 0) ELSE 0 END)::double precision AS cache_creation_input_tokens,
+    count(*)::double precision AS calls
+  FROM usage_events
+  WHERE org_id = sqlc.arg(target_org)::text
+    AND metric = 'llm.completion'
+    AND created_at >= sqlc.arg(since)::timestamptz
+  GROUP BY 1, 2
+), ranked AS (
+  SELECT grouped.*, row_number() OVER (
+    ORDER BY usd DESC, tokens DESC, provider, model) AS group_rank
+  FROM grouped
+), bucketed AS (
+  SELECT
+    CASE WHEN group_rank <= 100 THEN provider ELSE '__other__' END AS provider,
+    CASE WHEN group_rank <= 100 THEN model ELSE '__other__' END AS model,
+    group_rank > 100 AS aggregated,
+    usd, tokens, input_tokens, cached_input_tokens, cache_creation_input_tokens, calls
+  FROM ranked
+)
+SELECT
+  provider, model,
+  sum(usd)::double precision AS usd,
+  sum(tokens)::double precision AS tokens,
+  sum(input_tokens)::double precision AS input_tokens,
+  sum(cached_input_tokens)::double precision AS cached_input_tokens,
+  sum(cache_creation_input_tokens)::double precision AS cache_creation_input_tokens,
+  sum(calls)::double precision AS calls,
+  aggregated
+FROM bucketed
+GROUP BY aggregated, provider, model
+ORDER BY aggregated, usd DESC, tokens DESC, provider, model;

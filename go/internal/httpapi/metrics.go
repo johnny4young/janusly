@@ -8,6 +8,7 @@ package httpapi
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/johnny4young/janusly/go/internal/store"
 )
@@ -32,6 +33,25 @@ func (s *V1Server) recoveryMetricsCore(r *http.Request, rc v1Request) opResult {
 		}
 		return value
 	}
+	// Operations LLM cost rollup: exact totals over the whole window,
+	// bounded to 100 provider/model groups plus one explicit remainder.
+	since := time.Now().UTC().AddDate(0, 0, -windowDays)
+	costRows, err := store.New(s.pool).QueryCostByProvider(r.Context(), store.QueryCostByProviderParams{
+		TargetOrg: rc.orgID, Since: since,
+	})
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+	}
+	costByProvider := make([]map[string]any, 0, len(costRows))
+	for _, row := range costRows {
+		costByProvider = append(costByProvider, map[string]any{
+			"provider": row.Provider, "model": row.Model,
+			"usd": row.Usd, "tokens": row.Tokens,
+			"inputTokens": row.InputTokens, "cachedInputTokens": row.CachedInputTokens,
+			"cacheCreationInputTokens": row.CacheCreationInputTokens,
+			"calls":                    row.Calls, "aggregated": row.Aggregated,
+		})
+	}
 	return opOK(map[string]any{
 		"verifiedRecovery": map[string]any{
 			"metric":     "verifiedRecovery",
@@ -40,7 +60,8 @@ func (s *V1Server) recoveryMetricsCore(r *http.Request, rc v1Request) opResult {
 			"p50Ms":      numberOrNull(stats.P50Ms),
 			"p90Ms":      numberOrNull(stats.P90Ms),
 		},
-		"mttrMs":     numberOrNull(stats.MttrAvgMs),
-		"windowDays": windowDays,
+		"mttrMs":         numberOrNull(stats.MttrAvgMs),
+		"windowDays":     windowDays,
+		"costByProvider": costByProvider,
 	})
 }
