@@ -662,6 +662,7 @@ el chat publicado.
 | 2026-07-30 | T-025 make ci | Lane de verdad en una orden: generate + guard de drift de sqlc (`git diff --quiet -- internal/store` — código generado descuadrado = fallo, no sorpresa en review) + build + lint + test (-race -p 1) + parity F01-F10. Exit honesto. Deliberadamente local (no workflow de GitHub: los push del repo privado cuestan; misma filosofía del eval-gate de Node fuera de CI) |
 | 2026-07-30 | T-026 keyset /v1/runs | Cursor `before=<iso>\|<id>` del contrato (opaco; el CLIENTE deriva el siguiente de la última fila — la respuesta sigue siendo array pelado, como Node) + filtros workflowId/status. HALLAZGO: el filtro workflowId de Node lleva un fallback para runs ad-hoc — `wv.workflow_id = $f OR (wv.id IS NULL AND r.workflow_version_id = $f)` (runs-routes.ts:471-475): los starts inline sin fila de versión filtran por el version-id del run. Portado exacto. Cursor inválido → 400 invalid_input field "before". runKind=validation queda para cuando existan validation runs |
 | 2026-07-30 | T-027 workflows read | Tres rutas del inventario web: GET /v1/workflows (key set completo de WorkflowListRowSchema — runCount + lastRunStatus con el mismo match ad-hoc-aware del filtro de runs; tags []/folder null/bufferedTriggerCount 0 hasta que exista metadata/buffering), /latest (contrato NULLABLE: workflow activo sin versiones = data null, no error; dagJson round-tripea el documento guardado), /versions (newest first). Gate compartido requireActiveWorkflow: param faltante → invalid_input field workflowId; desconocido/tombstone/cross-org → el mismo workflow_not_found (invisibilidad) |
+| 2026-07-30 | T-028 CORS/browser | Middleware WithBrowserHeaders portando http.ts/server.ts: `API_ALLOWED_ORIGINS` (mismo env, mismos defaults Vite :5173/:5174), echo del Origin SOLO si está en la allowlist + Allow-Credentials, listas de Methods/Headers/Expose VERBATIM (incluye x-janusly-csrf y Last-Event-ID para el SSE de T-031), Vary: Origin siempre, OPTIONS→204, y `x-request-id` entrante honrado si pasa el patrón `[A-Za-z0-9._-]{1,128}` (un id hostil con CRLF se reemplaza por uuid — test lo fija). El requestId del envelope ahora es el del middleware — trazas cosidas cliente↔servidor |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -876,7 +877,7 @@ compactas aquí; el detalle de paridad se lee de la fuente al ejecutar.
 | T-025 | Lane `make ci` local (build+lint+test+parity, una orden, exit code honesto) | F0.5 | P1 | done |
 | T-026 | Keyset real en `/v1/runs` + `/v1/workflows` (cursor `<iso>|<id>` Node-compatible) | F0.5 | P0 | done |
 | T-027 | Rutas workflows read: GET /v1/workflows, /latest, /versions (formas golden) | F1 | P0 | done |
-| T-028 | Config CORS + headers paridad http.ts (el web browser habla con Go) | F1 | P0 | todo |
+| T-028 | Config CORS + headers paridad http.ts (el web browser habla con Go) | F1 | P0 | done |
 | T-029 | Arranque del web real contra Go: inventario de gaps de la Home/Activity (doc) | F1 | P0 | todo |
 | T-030 | GET /health con forma Node (rateLimiter/queue públicos-seguros) | F1 | P1 | todo |
 | T-031 | SSE `/runs/:id/stream` (pub del engine → hub API; web usa fetch+ReadableStream) | F1 | P0 | todo |

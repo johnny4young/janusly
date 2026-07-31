@@ -507,3 +507,16 @@ local. Sin umbral pasa/no-pasa: números para aprender.
 - El gate del padre activo es una función compartida: param faltante
   nombra el campo, y desconocido/tombstone/cross-org son el MISMO
   workflow_not_found — la invisibilidad de tenancy otra vez.
+
+## 2026-07-30 — headers de browser: CORS + request-id (T-028)
+
+- El prerequisito silencioso de F1: sin esto, el fetch del web muere en
+  preflight antes de tocar un handler. Portado verbatim de http.ts:
+  echo condicional del Origin (jamás a uno no listado — y el test
+  verifica que las listas fijas + Vary SÍ viajan igual, para no
+  envenenar cachés), credenciales solo con echo, y las listas de
+  headers exactas — incluida Last-Event-ID, que el SSE de T-031 va a
+  necesitar.
+- El x-request-id entrante se honra si es benigno (patrón estricto); un
+  id hostil con CRLF se reemplaza por uuid — pequeño endurecimiento
+  sobre Node anotado como mejora, no divergencia de forma.

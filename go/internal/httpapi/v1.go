@@ -55,7 +55,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	mux.HandleFunc("GET /v1/dlq", server.auth(server.listDeadLetters))
 	mux.HandleFunc("POST /v1/dlq/redrive", server.auth(server.redrive))
 	mux.HandleFunc("POST /v1/dlq/replay", server.auth(server.replayAlias))
-	return mux
+	return WithBrowserHeaders(mux)
 }
 
 type v1Request struct {
@@ -73,7 +73,7 @@ func (s *V1Server) auth(next handlerFunc) http.HandlerFunc {
 		rc := v1Request{
 			orgID:  strings.TrimSpace(r.Header.Get("x-org-id")),
 			userID: strings.TrimSpace(r.Header.Get("x-user-id")),
-			id:     s.newID(),
+			id:     requestIDFrom(r),
 		}
 		if rc.orgID == "" {
 			writeV1Error(w, rc.id, http.StatusUnauthorized, "unauthorized", "Unauthorized", nil)
