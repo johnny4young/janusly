@@ -660,6 +660,7 @@ el chat publicado.
 | 2026-07-30 | T-023 BUG REAL (EPQ) | El flake era un bug de concurrencia genuino: bajo READ COMMITTED, el claim de un solo UPDATE-con-subquery sufre EvalPlanQual — si la fila cambió desde el snapshot del statement, el re-check re-evalúa el `NOT EXISTS` del wakeup CON EL SNAPSHOT VIEJO (pre-insert del wakeup del retry) → un retry diferido de 60s se reclamaba al instante (~1/10). Diagnóstico por instrumentación del test (node=succeeded/2 execs=2) tras descartar procesos huérfanos y drift de reloj del VM (69ms). Fix: claim en DOS statements en una tx — lock SKIP LOCKED de candidatos + UPDATE con TODOS los guards re-checkeados en snapshot FRESCO sobre filas ya bloqueadas (sin EPQ posible). 30/30 verde post-fix |
 | 2026-07-30 | T-024 métricas | Serie propia `janusly_go_*` (nunca impostora de los exporters de Node): claims, completions{outcome}, retries, runs_terminal{status}, reaped, redrives, histograma de ejecución (buckets exponenciales 1ms..~10min), y `queue_depth{state}` vía collector custom con caché de 5s (un GROUP BY acotado; scrapes concurrentes coalescen — la postura del /health de Node). Incrementos junto al commit de cada transición; e2e verifica las 5 series contra el binario real por el puerto interno |
 | 2026-07-30 | T-025 make ci | Lane de verdad en una orden: generate + guard de drift de sqlc (`git diff --quiet -- internal/store` — código generado descuadrado = fallo, no sorpresa en review) + build + lint + test (-race -p 1) + parity F01-F10. Exit honesto. Deliberadamente local (no workflow de GitHub: los push del repo privado cuestan; misma filosofía del eval-gate de Node fuera de CI) |
+| 2026-07-30 | T-026 keyset /v1/runs | Cursor `before=<iso>\|<id>` del contrato (opaco; el CLIENTE deriva el siguiente de la última fila — la respuesta sigue siendo array pelado, como Node) + filtros workflowId/status. HALLAZGO: el filtro workflowId de Node lleva un fallback para runs ad-hoc — `wv.workflow_id = $f OR (wv.id IS NULL AND r.workflow_version_id = $f)` (runs-routes.ts:471-475): los starts inline sin fila de versión filtran por el version-id del run. Portado exacto. Cursor inválido → 400 invalid_input field "before". runKind=validation queda para cuando existan validation runs |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -872,7 +873,7 @@ compactas aquí; el detalle de paridad se lee de la fuente al ejecutar.
 | T-023 | Diagnóstico flake delayed-retry + captura de detalle en arnés | F0.5 | P1 | done |
 | T-024 | Métricas Prometheus del engine (claims, completions, profundidad, latencia) | F0.5 | P1 | done |
 | T-025 | Lane `make ci` local (build+lint+test+parity, una orden, exit code honesto) | F0.5 | P1 | done |
-| T-026 | Keyset real en `/v1/runs` + `/v1/workflows` (cursor `<iso>|<id>` Node-compatible) | F0.5 | P0 | todo |
+| T-026 | Keyset real en `/v1/runs` + `/v1/workflows` (cursor `<iso>|<id>` Node-compatible) | F0.5 | P0 | done |
 | T-027 | Rutas workflows read: GET /v1/workflows, /latest, /versions (formas golden) | F1 | P0 | todo |
 | T-028 | Config CORS + headers paridad http.ts (el web browser habla con Go) | F1 | P0 | todo |
 | T-029 | Arranque del web real contra Go: inventario de gaps de la Home/Activity (doc) | F1 | P0 | todo |

@@ -966,13 +966,22 @@ FROM runs r
 LEFT JOIN workflow_versions wv ON wv.id = r.workflow_version_id
 LEFT JOIN workflows w ON w.id = wv.workflow_id
 WHERE r.org_id = $1
+  AND (r.created_at, r.id) < ($2::timestamptz, $3::text)
+  AND ($4::text IS NULL
+       OR wv.workflow_id = $4
+       OR (wv.id IS NULL AND r.workflow_version_id = $4))
+  AND ($5::text IS NULL OR r.status = $5)
 ORDER BY r.created_at DESC, r.id DESC
-LIMIT $2
+LIMIT $6
 `
 
 type ListRunSummariesParams struct {
-	OrgID     string
-	PageLimit int32
+	OrgID            string
+	BeforeCreatedAt  time.Time
+	BeforeID         string
+	FilterWorkflowID pgtype.Text
+	FilterStatus     pgtype.Text
+	PageLimit        int32
 }
 
 type ListRunSummariesRow struct {
@@ -992,9 +1001,18 @@ type ListRunSummariesRow struct {
 }
 
 // Run summaries for the list surface: workflow identity joined through the
-// version snapshot, plus the waiting-node flag the Activity UI reads.
+// version snapshot, the waiting-node flag the Activity UI reads, the
+// (created_at, id) keyset the web walks via `before=<iso>|<id>` cursors, and
+// the contract's optional filters.
 func (q *Queries) ListRunSummaries(ctx context.Context, arg ListRunSummariesParams) ([]ListRunSummariesRow, error) {
-	rows, err := q.db.Query(ctx, listRunSummaries, arg.OrgID, arg.PageLimit)
+	rows, err := q.db.Query(ctx, listRunSummaries,
+		arg.OrgID,
+		arg.BeforeCreatedAt,
+		arg.BeforeID,
+		arg.FilterWorkflowID,
+		arg.FilterStatus,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

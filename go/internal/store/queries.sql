@@ -197,7 +197,9 @@ ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(page_limit);
 
 -- Run summaries for the list surface: workflow identity joined through the
--- version snapshot, plus the waiting-node flag the Activity UI reads.
+-- version snapshot, the waiting-node flag the Activity UI reads, the
+-- (created_at, id) keyset the web walks via `before=<iso>|<id>` cursors, and
+-- the contract's optional filters.
 -- name: ListRunSummaries :many
 SELECT r.id, r.org_id, r.workflow_version_id, r.status, r.output_json,
        r.parent_run_id, r.parent_node_id, r.replay_mode, r.created_by,
@@ -211,6 +213,11 @@ FROM runs r
 LEFT JOIN workflow_versions wv ON wv.id = r.workflow_version_id
 LEFT JOIN workflows w ON w.id = wv.workflow_id
 WHERE r.org_id = $1
+  AND (r.created_at, r.id) < (sqlc.arg(before_created_at)::timestamptz, sqlc.arg(before_id)::text)
+  AND (sqlc.narg(filter_workflow_id)::text IS NULL
+       OR wv.workflow_id = sqlc.narg(filter_workflow_id)
+       OR (wv.id IS NULL AND r.workflow_version_id = sqlc.narg(filter_workflow_id)))
+  AND (sqlc.narg(filter_status)::text IS NULL OR r.status = sqlc.narg(filter_status))
 ORDER BY r.created_at DESC, r.id DESC
 LIMIT sqlc.arg(page_limit);
 

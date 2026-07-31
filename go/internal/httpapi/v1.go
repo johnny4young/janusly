@@ -339,14 +339,32 @@ func runView(run store.GetRunRow) map[string]any {
 }
 
 func (s *V1Server) listRuns(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	query := r.URL.Query()
 	limit := 100
-	if raw := r.URL.Query().Get("limit"); raw != "" {
+	if raw := query.Get("limit"); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n > 0 && n <= 200 {
 			limit = n
 		}
 	}
+	// The `before` cursor is the contract's opaque `<iso>|<id>` keyset — the
+	// client builds the next page's cursor from the last row it received.
+	beforeCreatedAt := time.Now().Add(time.Hour)
+	beforeID := "￿"
+	if cursor := query.Get("before"); cursor != "" {
+		at, id, ok := parseEventsCursor(cursor)
+		if !ok {
+			writeV1Error(w, rc.id, http.StatusBadRequest, "invalid_input", "Invalid request body",
+				map[string]any{"field": "before"})
+			return
+		}
+		beforeCreatedAt, beforeID = at, id
+	}
+	filterWorkflow := pgtype.Text{String: query.Get("workflowId"), Valid: query.Get("workflowId") != ""}
+	filterStatus := pgtype.Text{String: query.Get("status"), Valid: query.Get("status") != ""}
 	rows, err := store.New(s.pool).ListRunSummaries(r.Context(), store.ListRunSummariesParams{
 		OrgID: rc.orgID, PageLimit: int32(limit),
+		BeforeCreatedAt: beforeCreatedAt, BeforeID: beforeID,
+		FilterWorkflowID: filterWorkflow, FilterStatus: filterStatus,
 	})
 	if err != nil {
 		s.internal(w, rc, err)

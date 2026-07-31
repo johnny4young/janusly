@@ -440,3 +440,67 @@ func TestReplayAliasMatchesReferenceShape(t *testing.T) {
 	requireError(t, h.call("POST", "/v1/dlq/replay", map[string]any{"deadLetterId": deadLetterID}, ""),
 		409, "dlq_replay_conflict", "This run can no longer be replayed — it was cancelled or already recovered")
 }
+
+func TestRunsKeysetCursorRoundTrip(t *testing.T) {
+	h := newAPIHarness(t)
+	// Five runs, two per page: the cursor the web derives from the last row
+	// must walk pages with no duplicates and no gaps.
+	for i := 0; i < 5; i++ {
+		h.call("POST", "/v1/start", map[string]any{
+			"workflow": makeLinearWorkflow(fmt.Sprintf("wf-cursor-%d-%s", i, h.org)),
+		}, "")
+	}
+	// Every run terminal BEFORE walking — the walk itself must be a pure
+	// pagination exercise, not a race against the workers.
+	settle := time.Now().Add(20 * time.Second)
+	for {
+		res := h.call("GET", "/v1/runs?limit=100&status=succeeded", nil, "")
+		if items, _ := res.body["data"].([]any); len(items) >= 5 {
+			break
+		}
+		if time.Now().After(settle) {
+			t.Fatal("runs never settled")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	seen := map[string]bool{}
+	cursor := ""
+	pages := 0
+	for {
+		path := "/v1/runs?limit=2&status=succeeded"
+		if cursor != "" {
+			path += "&before=" + strings.ReplaceAll(cursor, "|", "%7C")
+		}
+		res := h.call("GET", path, nil, "")
+		items, _ := res.body["data"].([]any)
+		if len(items) == 0 {
+			break
+		}
+		for _, raw := range items {
+			row := raw.(map[string]any)
+			id := row["id"].(string)
+			if seen[id] {
+				t.Fatalf("cursor produced duplicate %s", id)
+			}
+			seen[id] = true
+		}
+		last := items[len(items)-1].(map[string]any)
+		cursor = last["createdAt"].(string) + "|" + last["id"].(string)
+		pages++
+		if pages > 10 {
+			t.Fatal("cursor never terminated")
+		}
+	}
+	if len(seen) < 5 {
+		t.Fatalf("cursor walk lost rows: saw %d of 5+", len(seen))
+	}
+
+	// Filters: workflowId narrows to one run; a bad cursor is invalid_input.
+	one := h.call("GET", "/v1/runs?workflowId=wf-cursor-0-"+h.org, nil, "")
+	if items := one.body["data"].([]any); len(items) != 1 {
+		t.Fatalf("workflowId filter must narrow to one run, got %d", len(items))
+	}
+	requireError(t, h.call("GET", "/v1/runs?before=not-a-cursor", nil, ""),
+		400, "invalid_input", "Invalid request body")
+}

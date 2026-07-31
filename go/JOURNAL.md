@@ -483,3 +483,15 @@ local. Sin umbral pasa/no-pasa: números para aprender.
 - Deliberadamente local, sin workflow de GitHub: los push del repo
   privado cuestan dinero (regla de la casa) — la misma filosofía que
   mantiene el eval-gate de Node fuera de CI.
+
+## 2026-07-30 — keyset real en /v1/runs (T-026)
+
+- El cursor del contrato (`before=<iso>|<id>`) con la sutileza de que la
+  respuesta NO lo devuelve: el cliente lo deriva de la última fila —
+  igual que Node. El test camina 5 runs en páginas de 2 sin duplicados
+  ni huecos, construyendo el cursor como lo hará el web.
+- Hallazgo del filtro: workflowId en Node lleva un fallback OR para
+  runs ad-hoc — los starts inline no tienen fila en workflow_versions,
+  así que el filtro compara el version-id del run directamente cuando
+  el join da NULL. Mi primera versión (solo el join) devolvía 0 para
+  ad-hoc; el test lo cazó y la fuente dio la forma exacta.
