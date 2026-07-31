@@ -60,10 +60,17 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 	if config == nil {
 		config = map[string]any{}
 	}
+	renderOpts := d.renderOpts
+	if node.Type == "loop" {
+		// The loop's item/index scopes bind per iteration inside the
+		// executor; deferring them here mirrors the reference's
+		// renderLoopConfig split.
+		renderOpts.DeferredRoots = append([]string{"item", "index"}, renderOpts.DeferredRoots...)
+	}
 	rendered, err := grammar.RenderTemplateWithRedactions(config, map[string]any{
 		"context": runContext,
 		"inputs":  config,
-	}, d.renderOpts)
+	}, renderOpts)
 	if err != nil {
 		// A missing secret is already name-only — safe to surface verbatim.
 		return nil, err
@@ -86,6 +93,21 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 	output, execErr := execute(ctx, executors.Input{
 		RunID: claim.RunID, NodeID: claim.NodeID,
 		Config: renderedConfig, Context: runContext,
+		Emit: func(eventType string, payload map[string]any) {
+			eventAt := time.Now().UTC()
+			raw, err := json.Marshal(payload)
+			if err != nil {
+				return
+			}
+			_ = q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
+				ID: d.engine.newID(), RunID: claim.RunID,
+				NodeID: pgtype.Text{String: claim.NodeID, Valid: true},
+				Type:   eventType, Payload: raw, CreatedAt: &eventAt,
+			})
+		},
+		ReportUnresolved: func(paths []string) error {
+			return d.recordUnresolvedPaths(ctx, q, claim, wf, paths)
+		},
 	})
 	if execErr != nil {
 		return nil, redactExecError(execErr, rendered.RedactedValues)

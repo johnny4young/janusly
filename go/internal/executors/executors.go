@@ -24,6 +24,13 @@ type Input struct {
 	NodeID  string
 	Config  map[string]any
 	Context map[string]any
+	// Emit appends one run event through the engine (the reference's
+	// appendEvent seam); nil in unit tests that don't observe events.
+	Emit func(eventType string, payload map[string]any)
+	// ReportUnresolved feeds late-bound unresolved template paths back to
+	// the dispatcher's evidence/policy machinery; a strict template policy
+	// surfaces here as the returned error.
+	ReportUnresolved func(paths []string) error
 }
 
 // Func executes one node and returns its output value.
@@ -42,6 +49,7 @@ func Registry() map[string]Func {
 		"approval":      executeApproval,
 		"http":          NewHTTPExecutor(HTTPOptions{}),
 		"parallel_fork": executeParallelFork,
+		"loop":          executeLoop,
 		"join":          executeJoin,
 	}
 }

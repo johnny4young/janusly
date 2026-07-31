@@ -648,3 +648,18 @@ local. Sin umbral pasa/no-pasa: números para aprender.
   fallida rompe el ALL-AND, el join queda pending PARA SIEMPRE y el
   run rueda a failed. "One branch failing fails the whole join" sin
   una línea de código dedicada.
+
+## 2026-07-30 — loop modo map (T-038)
+
+- El día en que el diseño de T-006 cobró su dividendo más limpio: los
+  deferredRoots item/index que porté "porque la fuente los tenía" son
+  exactamente lo que el loop necesita — el dispatcher difiere esos
+  roots en el render de config y el executor los liga por iteración.
+  Cero cambios a la gramática.
+- Dos seams nuevos en los executors (Emit y ReportUnresolved) para que
+  el loop pueda emitir su loop.completed y devolver los paths late-
+  bound a la política del dispatcher sin tocar persistencia — los
+  executors siguen puros.
+- for_each queda honesto: falla con "not executable yet" en vez de
+  ejecutar a medias — su maquinaria (tool por ítem, presupuestos de
+  fallo, semántica write-side) merece su propio ticket.

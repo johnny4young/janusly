@@ -328,3 +328,76 @@ func TestOneBranchFailingFailsTheJoin(t *testing.T) {
 		t.Fatalf("the join must never queue behind a failed branch, got %s", mergeStatus)
 	}
 }
+
+func TestLoopMapProjectsItemsWithLateBoundScopes(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	doc := `{"nodes":[
+		{"id":"seed","type":"transform","config":{"mapping":{
+			"customers":["ada","grace","linus"]
+		}}},
+		{"id":"fan","type":"loop","config":{
+			"items":"{{context.seed.output.customers}}",
+			"mapping":{"line":"{{index}}: {{item}}","upper":"{{item}}"}
+		}}
+	],"edges":[{"from":"seed","to":"fan"}]}`
+	runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: mustParse(t, doc)})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	runDispatcherToTerminal(t, eng, pool, runID, "succeeded")
+
+	var output []byte
+	_ = pool.QueryRow(ctx, "select state_json->'output' from run_nodes where run_id=$1 and node_id='fan'", runID).Scan(&output)
+	var parsed struct {
+		Count float64 `json:"count"`
+		Items []map[string]any
+	}
+	_ = json.Unmarshal(output, &parsed)
+	if parsed.Count != 3 || len(parsed.Items) != 3 {
+		t.Fatalf("loop projection: %s", output)
+	}
+	if parsed.Items[1]["line"] != "1: grace" || parsed.Items[2]["upper"] != "linus" {
+		t.Fatalf("item/index binding broken: %s", output)
+	}
+	// The reference's loop.completed event rides the executor's Emit seam.
+	var completedEvents int
+	_ = pool.QueryRow(ctx, "select count(*) from run_events where run_id=$1 and type='loop.completed'", runID).Scan(&completedEvents)
+	if completedEvents != 1 {
+		t.Fatalf("expected one loop.completed event, got %d", completedEvents)
+	}
+}
+
+func TestLoopStringItemsSplitOnCommas(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	doc := `{"nodes":[{"id":"fan","type":"loop","config":{
+		"items":"a, b, ,c",
+		"mapping":{"v":"{{item}}"}
+	}}],"edges":[]}`
+	runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: mustParse(t, doc)})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	runDispatcherToTerminal(t, eng, pool, runID, "succeeded")
+	var output []byte
+	_ = pool.QueryRow(ctx, "select state_json->'output'->'count' from run_nodes where run_id=$1", runID).Scan(&output)
+	if strings.TrimSpace(string(output)) != "3" {
+		t.Fatalf("comma split must trim and drop empties: %s", output)
+	}
+}
+
+func TestLoopForEachModeIsHonestlyUnsupported(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	doc := `{"nodes":[{"id":"fan","type":"loop","config":{
+		"mode":"for_each","tool":"json.parse","items":["x"]
+	}}],"edges":[]}`
+	runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: mustParse(t, doc)})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	runDispatcherToTerminal(t, eng, pool, runID, "failed")
+	var errorJSON []byte
+	_ = pool.QueryRow(ctx, "select error_json from run_nodes where run_id=$1", runID).Scan(&errorJSON)
+	if !strings.Contains(string(errorJSON), "not executable by this backend yet") {
+		t.Fatalf("for_each must fail honestly: %s", errorJSON)
+	}
+}
