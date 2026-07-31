@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/johnny4young/janusly/go/internal/domain"
+	"github.com/johnny4young/janusly/go/internal/executors"
 	"github.com/johnny4young/janusly/go/internal/store"
 )
 
@@ -133,6 +134,12 @@ func (e *Engine) executeClaim(ctx context.Context, claim ClaimedNode, execute Ex
 		}
 		return
 	}
+	if waiting, ok := output.(executors.Waiting); ok {
+		if err := e.MarkNodeWaiting(ctx, claim, waiting); err != nil {
+			logger.Error("mark waiting failed", "runId", claim.RunID, "nodeId", claim.NodeID, "error", err)
+		}
+		return
+	}
 	if err := e.CompleteNode(ctx, claim, output); err != nil {
 		logger.Error("complete node failed", "runId", claim.RunID, "nodeId", claim.NodeID, "error", err)
 	}
@@ -166,6 +173,7 @@ func (e *Engine) sweepWakeups(ctx context.Context, wake chan<- struct{}, poll ti
 		case <-ctx.Done():
 			return
 		}
+		resumed := e.resumeDueTimers(ctx, q)
 		swept, err := q.SweepDueWakeups(ctx)
 		if err != nil {
 			if ctx.Err() == nil {
@@ -173,7 +181,7 @@ func (e *Engine) sweepWakeups(ctx context.Context, wake chan<- struct{}, poll ti
 			}
 			continue
 		}
-		if swept > 0 {
+		if swept > 0 || resumed > 0 {
 			select {
 			case wake <- struct{}{}:
 			default:

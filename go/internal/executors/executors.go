@@ -16,8 +16,11 @@ import (
 	"github.com/johnny4young/janusly/go/internal/grammar"
 )
 
-// Input carries one execution's rendered config and run context.
+// Input carries one execution's rendered config and run context, plus the
+// claim identity waiting-node executors embed in resume metadata.
 type Input struct {
+	RunID   string
+	NodeID  string
 	Config  map[string]any
 	Context map[string]any
 }
@@ -29,9 +32,11 @@ type Func func(ctx context.Context, in Input) (any, error)
 // dispatch with the reference's "No executor" error.
 func Registry() map[string]Func {
 	return map[string]Func{
-		"noop":      executeNoop,
-		"condition": executeCondition,
-		"transform": executeTransform,
+		"noop":       executeNoop,
+		"condition":  executeCondition,
+		"transform":  executeTransform,
+		"wait_until": executeWaitUntil,
+		"approval":   executeApproval,
 	}
 }
 

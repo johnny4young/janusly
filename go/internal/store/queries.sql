@@ -133,6 +133,19 @@ SELECT node_id, status FROM run_nodes WHERE run_id = $1;
 UPDATE runs SET status = sqlc.arg(status), output_json = sqlc.arg(output_json)
 WHERE id = sqlc.arg(id) AND status = 'running';
 
+-- name: MarkRunNodeWaiting :execrows
+UPDATE run_nodes SET status = 'waiting', state_json = sqlc.arg(state_json)
+WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
+  AND status = 'running';
+
+-- name: MarkWaitingNodeSucceeded :one
+UPDATE run_nodes
+SET status = 'succeeded', state_json = sqlc.arg(state_json),
+    finished_at = sqlc.arg(finished_at)
+WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
+  AND status = 'waiting'
+RETURNING id;
+
 -- name: SkipRunNode :execrows
 UPDATE run_nodes
 SET status = 'skipped', state_json = sqlc.arg(state_json),
@@ -198,7 +211,21 @@ DELETE FROM go_pilot_wakeups WHERE run_node_id = $1;
 -- claimable the moment its clock passes — this just trims rows and nudges
 -- idle workers awake.
 -- name: SweepDueWakeups :execrows
-DELETE FROM go_pilot_wakeups WHERE wake_at <= now();
+DELETE FROM go_pilot_wakeups w
+WHERE w.wake_at <= now()
+  AND NOT EXISTS (
+    SELECT 1 FROM run_nodes rn
+    WHERE rn.id = w.run_node_id AND rn.status = 'waiting'
+  );
+
+-- Due timers attached to still-waiting nodes: the sweeper resumes these —
+-- the auto-completion path for wait_until.
+-- name: ListDueWaitingWakeups :many
+SELECT w.run_node_id, rn.run_id, rn.node_id
+FROM go_pilot_wakeups w
+JOIN run_nodes rn ON rn.id = w.run_node_id
+WHERE w.wake_at <= now() AND rn.status = 'waiting'
+LIMIT sqlc.arg(batch_size);
 
 -- name: NotifyWake :exec
 SELECT pg_notify('janusly_go_wake', sqlc.arg(run_id)::text);

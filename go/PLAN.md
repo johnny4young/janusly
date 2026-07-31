@@ -172,7 +172,7 @@ crítica) · P1 (importante) · P2 (stretch).
 | T-006 | Gramáticas subconjunto: templates + expresiones | P0 | done |
 | T-007 | Executors: noop, transform, condition + semántica de aristas | P0 | done |
 | T-008 | Modelo de fallo: retry ladder + dead_letters | P0 | done |
-| T-009 | wait_until + approval/waiting + POST /resume | P0 | todo |
+| T-009 | wait_until + approval/waiting + POST /resume | P0 | done |
 | T-010 | Redrive desde dead_letters | P0 | todo |
 | T-011 | Executor http + SSRF/DNS pinning | P0 | todo |
 | T-012 | API /v1 mínima + envelopes + goldens de referencia Node | P0 | todo |
@@ -618,6 +618,12 @@ el chat publicado.
 | 2026-07-30 | mejora sobre card | safe-persist completo: `safePersist` = redacción de claves sensibles (regex cerrado portado de sensitive-keys.ts) + acotado con centinela; aplicado a state_json, payloads de eventos, error_json y los tres JSON del DLQ (cap 0 = sin truncar). Cierra la divergencia de redacción por claves que venía anotada |
 | 2026-07-30 | divergencia | Errores Go planos serializan `{message}` sin `name` (JS siempre lleva `name:"Error"`); `ExecError {message,name,code,statusCode}` lo aporta cuando el executor lo conoce (http en T-012). Tier transitorio (`decideTransient`) y guard write-side no portados aún — write-side llega con T-012 |
 | 2026-07-30 | nota | Seams `now()`/`randFloat` en el Engine para tests deterministas del backoff; éxito tras retry conserva `attempts=N` como evidencia (igual que Node) |
+| 2026-07-30 | corrección a la card | T-009: la card decía "resume con input como output" — Node NO hace eso para approval: `output = {}` SIEMPRE (histórico; la decisión vive en timeline+audit, no en el output — resume-run.ts:22-24). El input-como-output es solo webhook/human_form (fuera del subset). Portado Node-exacto |
+| 2026-07-30 | corrección a la card | T-009: config de wait_until es `{duration: ISO-8601}` o `{until: instante ISO}` (waiting-time.ts), no `{durationMs}` como decía la card. Parser de duraciones portado (año=365d, mes=30d, decimales; P/PT desnudos = inválidos) + instante con timezone explícita y validación de campos (día imposible, bisiestos, offsets) |
+| 2026-07-30 | paridad exacta | Checkpoint waiting: `state_json {waiting: {reason, ...metadata, waitingSince}}`; evento `node.waiting {status, reason, metadata}`; metadata timer `{kind:"timer", wakeAt, durationMs, source}`, approval `{kind:"approval", title (title||message), description?, assignee?, resumeToken:"runId:nodeId"}`; resume → `node.resumed {}`; instante pasado en `until` → delayMs 0 (resume inmediato, workflows guardados no rompen); conflicto de resume = "Node is not waiting" |
+| 2026-07-30 | decisión | El timer reutiliza `go_pilot_wakeups`: el sweeper resuelve wakeups vencidos de nodos waiting vía `ResumeRun` (mismo camino que el resume manual — idéntico a Node donde handleWaitResume llama resumeRun); el CAS waiting→succeeded hace idempotente el disparo duplicado. SweepDueWakeups ya no borra wakeups de nodos waiting (solo GC de consumidos) |
+| 2026-07-30 | decisión (postura pilot) | Approval con campos de deadline (`decisionTimeoutMs`/`until`/`onTimeout`/`escalateTo`) FALLA determinista con código `approval_deadline_unsupported_pilot` — ejecutarlo ignorando la supervisión declarada sería peor que fallar. Las políticas de deadline (arm/timeout/escalate de Node) quedan fuera del subset |
+| 2026-07-30 | nota | ResumeRun es UNA transacción (CAS + borrar wakeup + evento + scheduleDownstream) — Node lo hace en 4 pasos separados; tokens HMAC de human_form fuera de alcance (anotado en card) |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)

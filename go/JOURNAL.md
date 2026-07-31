@@ -219,3 +219,26 @@ consolidan en el informe de la puerta D15.
 - El test de retry diferido es el que más confianza da: agenda un retry
   a 60s, prueba que NADIE lo reclama en 300ms, mueve el reloj en SQL y
   ve al poll cadence reclamarlo — sin esperas reales.
+
+## 2026-07-30 — waiting: wait_until + approval/resume (T-009)
+
+- El primer estado durable no-terminal: un nodo pausa, el run sigue
+  `running`, y la resurrección — humana o de reloj — pasa por UN solo
+  camino (`ResumeRun`) con el CAS waiting→succeeded como guardia de
+  idempotencia. Doble resume, cancelación previa o disparo duplicado del
+  timer: todos pierden limpio.
+- Dos correcciones más de card contra fuente: (1) el resume de approval
+  produce output VACÍO siempre — la decisión vive en el timeline, no en
+  el output (histórico de Node); (2) la config es `duration` ISO-8601 /
+  `until` instante, no `durationMs`. El parser de duraciones e instantes
+  se portó completo, con la validación de campos de Node (días
+  imposibles, bisiestos, timezone obligatoria).
+- El timer no estrenó infraestructura: `go_pilot_wakeups` + sweeper ya
+  existían de T-008; ahora un wakeup vencido de un nodo waiting se
+  resuelve vía ResumeRun — el mismo camino del resume manual, igual que
+  Node (handleWaitResume → resumeRun). Una sola pieza nueva de SQL.
+- Postura honesta del piloto: approval con políticas de deadline falla
+  determinista en vez de ejecutar sin la supervisión declarada.
+- Detalle que me gustó portar: `until` en el pasado → delayMs 0, resume
+  inmediato — un workflow guardado válido ayer no puede volverse
+  inválido hoy en runtime.

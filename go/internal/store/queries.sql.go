@@ -625,6 +625,42 @@ func (q *Queries) ListDeadLetters(ctx context.Context, arg ListDeadLettersParams
 	return items, nil
 }
 
+const listDueWaitingWakeups = `-- name: ListDueWaitingWakeups :many
+SELECT w.run_node_id, rn.run_id, rn.node_id
+FROM go_pilot_wakeups w
+JOIN run_nodes rn ON rn.id = w.run_node_id
+WHERE w.wake_at <= now() AND rn.status = 'waiting'
+LIMIT $1
+`
+
+type ListDueWaitingWakeupsRow struct {
+	RunNodeID string
+	RunID     string
+	NodeID    string
+}
+
+// Due timers attached to still-waiting nodes: the sweeper resumes these —
+// the auto-completion path for wait_until.
+func (q *Queries) ListDueWaitingWakeups(ctx context.Context, batchSize int32) ([]ListDueWaitingWakeupsRow, error) {
+	rows, err := q.db.Query(ctx, listDueWaitingWakeups, batchSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDueWaitingWakeupsRow
+	for rows.Next() {
+		var i ListDueWaitingWakeupsRow
+		if err := rows.Scan(&i.RunNodeID, &i.RunID, &i.NodeID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDueWakeups = `-- name: ListDueWakeups :many
 SELECT run_node_id, wake_at, reason
 FROM go_pilot_wakeups
@@ -904,6 +940,26 @@ func (q *Queries) ListWorkflows(ctx context.Context, arg ListWorkflowsParams) ([
 	return items, nil
 }
 
+const markRunNodeWaiting = `-- name: MarkRunNodeWaiting :execrows
+UPDATE run_nodes SET status = 'waiting', state_json = $1
+WHERE run_id = $2 AND node_id = $3
+  AND status = 'running'
+`
+
+type MarkRunNodeWaitingParams struct {
+	StateJson json.RawMessage
+	RunID     string
+	NodeID    string
+}
+
+func (q *Queries) MarkRunNodeWaiting(ctx context.Context, arg MarkRunNodeWaitingParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markRunNodeWaiting, arg.StateJson, arg.RunID, arg.NodeID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const markRunTerminalFromRunning = `-- name: MarkRunTerminalFromRunning :execrows
 UPDATE runs SET status = $1, output_json = $2
 WHERE id = $3 AND status = 'running'
@@ -921,6 +977,34 @@ func (q *Queries) MarkRunTerminalFromRunning(ctx context.Context, arg MarkRunTer
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const markWaitingNodeSucceeded = `-- name: MarkWaitingNodeSucceeded :one
+UPDATE run_nodes
+SET status = 'succeeded', state_json = $1,
+    finished_at = $2
+WHERE run_id = $3 AND node_id = $4
+  AND status = 'waiting'
+RETURNING id
+`
+
+type MarkWaitingNodeSucceededParams struct {
+	StateJson  json.RawMessage
+	FinishedAt *time.Time
+	RunID      string
+	NodeID     string
+}
+
+func (q *Queries) MarkWaitingNodeSucceeded(ctx context.Context, arg MarkWaitingNodeSucceededParams) (string, error) {
+	row := q.db.QueryRow(ctx, markWaitingNodeSucceeded,
+		arg.StateJson,
+		arg.FinishedAt,
+		arg.RunID,
+		arg.NodeID,
+	)
+	var id string
+	err := row.Scan(&id)
+	return id, err
 }
 
 const notifyWake = `-- name: NotifyWake :exec
@@ -999,7 +1083,12 @@ func (q *Queries) SkipRunNode(ctx context.Context, arg SkipRunNodeParams) (int64
 }
 
 const sweepDueWakeups = `-- name: SweepDueWakeups :execrows
-DELETE FROM go_pilot_wakeups WHERE wake_at <= now()
+DELETE FROM go_pilot_wakeups w
+WHERE w.wake_at <= now()
+  AND NOT EXISTS (
+    SELECT 1 FROM run_nodes rn
+    WHERE rn.id = w.run_node_id AND rn.status = 'waiting'
+  )
 `
 
 // Garbage-collects consumed wake-ups. Correctness never depends on this:

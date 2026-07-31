@@ -83,9 +83,16 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 	if renderedConfig == nil {
 		renderedConfig = map[string]any{}
 	}
-	output, execErr := execute(ctx, executors.Input{Config: renderedConfig, Context: runContext})
+	output, execErr := execute(ctx, executors.Input{
+		RunID: claim.RunID, NodeID: claim.NodeID,
+		Config: renderedConfig, Context: runContext,
+	})
 	if execErr != nil {
 		return nil, errors.New(grammar.RedactString(execErr.Error(), rendered.RedactedValues))
+	}
+	if waiting, ok := output.(executors.Waiting); ok {
+		waiting.Metadata, _ = grammar.RedactValues(waiting.Metadata, rendered.RedactedValues).(map[string]any)
+		return waiting, nil
 	}
 	return grammar.RedactValues(output, rendered.RedactedValues), nil
 }

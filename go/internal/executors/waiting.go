@@ -1,0 +1,258 @@
+// Waiting-node executors and their time grammar, ported from the reference
+// (wait-until.ts, approval-timeout.ts, waiting-time.ts, iso-duration.ts).
+// wait_until pauses for an ISO 8601 duration or absolute instant; approval
+// pauses indefinitely for a human decision. Both return a Waiting value —
+// the engine owns the durable checkpoint and the wake-up clock.
+package executors
+
+import (
+	"context"
+	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// Waiting is the executor signal for a pause: the engine persists the node
+// as waiting with this metadata and, when WakeAt is set, schedules the
+// wake-up that auto-resumes it.
+type Waiting struct {
+	Reason   string
+	Metadata map[string]any
+	WakeAt   *time.Time
+}
+
+// ConfigError is a structured executor failure with a stable code — the Go
+// shape of the reference's WaitingConfigError.
+type ConfigError struct {
+	Code    string
+	Message string
+}
+
+func (e *ConfigError) Error() string { return e.Message }
+
+// Approximations inherited from the reference: year = 365 days, month = 30
+// days — calendar-aware arithmetic is intentionally out of scope.
+const (
+	dayMs    = 86_400_000
+	hourMs   = 3_600_000
+	minuteMs = 60_000
+	secondMs = 1_000
+	yearMs   = 365 * dayMs
+	monthMs  = 30 * dayMs
+)
+
+var isoDurationPattern = regexp.MustCompile(
+	`^P(?:(\d+(?:\.\d+)?)Y)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$`,
+)
+
+// ParseISODuration converts an ISO 8601 duration to milliseconds; nil for
+// malformed input, the bare P, or PT. Decimals allowed, negatives not.
+func ParseISODuration(value string) *float64 {
+	match := isoDurationPattern.FindStringSubmatch(value)
+	if match == nil {
+		return nil
+	}
+	empty := true
+	for _, group := range match[1:] {
+		if group != "" {
+			empty = false
+		}
+	}
+	if empty {
+		return nil
+	}
+	total := durationComponent(match[1], yearMs) +
+		durationComponent(match[2], monthMs) +
+		durationComponent(match[3], dayMs) +
+		durationComponent(match[4], hourMs) +
+		durationComponent(match[5], minuteMs) +
+		durationComponent(match[6], secondMs)
+	return &total
+}
+
+func durationComponent(text string, unitMs float64) float64 {
+	if text == "" {
+		return 0
+	}
+	n, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		return 0
+	}
+	return n * unitMs
+}
+
+var isoInstantPattern = regexp.MustCompile(
+	`^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|([+-])(\d{2}):(\d{2}))$`,
+)
+
+// ParseAbsoluteInstant parses an unambiguous ISO 8601 instant (explicit
+// timezone required) with the reference's field validation; nil on invalid.
+func ParseAbsoluteInstant(value string) *time.Time {
+	match := isoInstantPattern.FindStringSubmatch(strings.TrimSpace(value))
+	if match == nil {
+		return nil
+	}
+	year := mustInt(match[1])
+	month := mustInt(match[2])
+	day := mustInt(match[3])
+	hour := mustInt(match[4])
+	minute := mustInt(match[5])
+	second := 0
+	if match[6] != "" {
+		second = mustInt(match[6])
+	}
+	offsetHour, offsetMinute := 0, 0
+	if match[9] != "" {
+		offsetHour = mustInt(match[10])
+		offsetMinute = mustInt(match[11])
+	}
+	if month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month) ||
+		hour > 23 || minute > 59 || second > 59 ||
+		(match[8] != "Z" && (offsetHour > 23 || offsetMinute > 59)) {
+		return nil
+	}
+	millis := 0
+	if match[7] != "" {
+		// A 1–3 digit fraction is a left-aligned millisecond value: .5 = 500.
+		fraction := match[7] + strings.Repeat("0", 3-len(match[7]))
+		millis = mustInt(fraction)
+	}
+	offsetSeconds := 0
+	if match[8] != "Z" {
+		offsetSeconds = offsetHour*3600 + offsetMinute*60
+		if match[9] == "-" {
+			offsetSeconds = -offsetSeconds
+		}
+	}
+	instant := time.Date(year, time.Month(month), day, hour, minute, second,
+		millis*int(time.Millisecond), time.FixedZone("", offsetSeconds)).UTC()
+	return &instant
+}
+
+func mustInt(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
+}
+
+func daysInMonth(year, month int) int {
+	if month == 2 {
+		if year%4 == 0 && (year%100 != 0 || year%400 == 0) {
+			return 29
+		}
+		return 28
+	}
+	switch month {
+	case 4, 6, 9, 11:
+		return 30
+	default:
+		return 31
+	}
+}
+
+// waitUntilSchedule mirrors the reference's resolved shape.
+type waitUntilSchedule struct {
+	delayMs float64
+	wakeAt  time.Time
+	source  string
+}
+
+// resolveWaitUntilSchedule ports the reference resolver with its exact
+// codes and messages: duration XOR until, positive duration, explicit
+// timezone; a past absolute instant resumes immediately.
+func resolveWaitUntilSchedule(config map[string]any, now time.Time) (*waitUntilSchedule, error) {
+	_, hasDuration := config["duration"]
+	_, hasUntil := config["until"]
+	if hasDuration && hasUntil {
+		return nil, &ConfigError{Code: "wait_until_conflicting_time",
+			Message: "wait_until accepts either config.duration or config.until, not both"}
+	}
+	if !hasDuration && !hasUntil {
+		return nil, &ConfigError{Code: "wait_until_missing_duration",
+			Message: "wait_until requires config.duration or config.until"}
+	}
+	if hasDuration {
+		text, ok := config["duration"].(string)
+		if !ok || strings.TrimSpace(text) == "" {
+			return nil, &ConfigError{Code: "wait_until_invalid_duration",
+				Message: "wait_until.duration must be a valid ISO 8601 duration"}
+		}
+		delay := ParseISODuration(text)
+		if delay == nil {
+			return nil, &ConfigError{Code: "wait_until_invalid_duration",
+				Message: fmt.Sprintf("wait_until.duration must be a valid ISO 8601 duration, got: %s", text)}
+		}
+		if *delay <= 0 {
+			return nil, &ConfigError{Code: "wait_until_non_positive_duration",
+				Message: fmt.Sprintf("wait_until.duration must resolve to a positive number of milliseconds, got: %v", *delay)}
+		}
+		wakeAt := now.Add(time.Duration(*delay) * time.Millisecond)
+		return &waitUntilSchedule{delayMs: *delay, wakeAt: wakeAt, source: "duration"}, nil
+	}
+	text, _ := config["until"].(string)
+	instant := ParseAbsoluteInstant(text)
+	if instant == nil {
+		return nil, &ConfigError{Code: "wait_until_invalid_until",
+			Message: "wait_until.until must be an ISO 8601 date-time with an explicit timezone"}
+	}
+	delay := float64(instant.Sub(now).Milliseconds())
+	if delay < 0 {
+		delay = 0
+	}
+	return &waitUntilSchedule{delayMs: delay, wakeAt: *instant, source: "until"}, nil
+}
+
+// executeWaitUntil returns the waiting checkpoint with the timer metadata;
+// the engine schedules the wake-up from WakeAt.
+func executeWaitUntil(_ context.Context, in Input) (any, error) {
+	schedule, err := resolveWaitUntilSchedule(in.Config, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	wakeAt := schedule.wakeAt
+	return Waiting{
+		Reason: "Waiting for scheduled time",
+		Metadata: map[string]any{
+			"kind":       "timer",
+			"wakeAt":     schedule.wakeAt.UTC().Format("2006-01-02T15:04:05.000Z"),
+			"durationMs": schedule.delayMs,
+			"source":     schedule.source,
+		},
+		WakeAt: &wakeAt,
+	}, nil
+}
+
+// executeApproval pauses indefinitely for a human decision. The reference's
+// deadline policies (decisionTimeoutMs/until/onTimeout/escalateTo) are not
+// executable here yet — an approval carrying them fails deterministically
+// rather than silently dropping its supervision.
+func executeApproval(_ context.Context, in Input) (any, error) {
+	for _, field := range []string{"decisionTimeoutMs", "until", "onTimeout", "escalateTo"} {
+		if _, present := in.Config[field]; present {
+			return nil, &ConfigError{Code: "approval_deadline_unsupported_pilot",
+				Message: fmt.Sprintf("Approval config.%s is not executable by this backend yet", field)}
+		}
+	}
+	metadata := map[string]any{
+		"kind":        "approval",
+		"resumeToken": in.RunID + ":" + in.NodeID,
+	}
+	if title := trimmedString(in.Config["title"]); title != "" {
+		metadata["title"] = title
+	} else if message := trimmedString(in.Config["message"]); message != "" {
+		metadata["title"] = message
+	}
+	if description := trimmedString(in.Config["description"]); description != "" {
+		metadata["description"] = description
+	}
+	if assignee := trimmedString(in.Config["assignee"]); assignee != "" {
+		metadata["assignee"] = assignee
+	}
+	return Waiting{Reason: "Waiting for human approval", Metadata: metadata}, nil
+}
+
+func trimmedString(value any) string {
+	s, _ := value.(string)
+	return strings.TrimSpace(s)
+}
