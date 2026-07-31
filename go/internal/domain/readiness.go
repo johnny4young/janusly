@@ -423,3 +423,40 @@ func collectAncestors(wf *Workflow, nodeID string) map[string]bool {
 	}
 	return ancestors
 }
+
+// SuggestionSafety is the recovery-suggestion safety projection: whether
+// the failing node is write-side and whether an approval gate guards it.
+// Unparseable input fails SAFE (write-side, approval required, absent).
+type SuggestionSafety struct {
+	WriteSide        bool `json:"writeSide"`
+	ApprovalRequired bool `json:"approvalRequired"`
+	ApprovalPresent  bool `json:"approvalPresent"`
+}
+
+// ComputeSuggestionSafety mirrors the reference's recoverySuggestionSafety.
+func ComputeSuggestionSafety(wf *Workflow, nodeID string) SuggestionSafety {
+	if wf == nil {
+		return SuggestionSafety{WriteSide: true, ApprovalRequired: true}
+	}
+	var target *Node
+	for i := range wf.Nodes {
+		if wf.Nodes[i].ID == nodeID {
+			target = &wf.Nodes[i]
+			break
+		}
+	}
+	if target == nil {
+		return SuggestionSafety{WriteSide: true, ApprovalRequired: true}
+	}
+	writeSide := isSensitiveAction(*target, ReadinessOptions{})
+	approvalPresent := !writeSide || hasApprovalAncestor(wf, nodeID, map[string]bool{})
+	return SuggestionSafety{WriteSide: writeSide, ApprovalRequired: writeSide, ApprovalPresent: approvalPresent}
+}
+
+// IsSensitiveActionNode exposes the write-side classifier for dispatch.
+func IsSensitiveActionNode(node Node) bool { return isSensitiveAction(node, ReadinessOptions{}) }
+
+// HasApprovalAncestorIn exposes the ancestor scan for dispatch.
+func HasApprovalAncestorIn(wf *Workflow, nodeID string) bool {
+	return hasApprovalAncestor(wf, nodeID, map[string]bool{})
+}

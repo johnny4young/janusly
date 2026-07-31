@@ -1434,3 +1434,10 @@ producción necesita saber — de lo ya resuelto o informativo.
   cambia el prompt activo en caliente, los ciclos de include se
   rechazan, y una variable requerida ausente falla antes del primer
   token.
+
+## 2026-07-31 — parches que se validan antes de existir (T-109)
+
+- El patch de recovery con sus dos envelopes (config + estructural con
+  recableo), la regla de oro probada — un parche inválido jamás llega al
+  wire — y las alternativas lavadas con el scrub apilado tras descubrir
+  que el compartido no cubría claves sk-ant.

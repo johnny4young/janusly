@@ -67,6 +67,7 @@ var routeAuthz = map[string]routeGate{
 
 	// AI surfaces (reference permission pairs).
 	"POST /ai/generate-workflow": {auth.RoleViewer, "ai.write"},
+	"POST /ai/patch-workflow":    {auth.RoleEditor, "ai.write"},
 
 	// PromptOps registry (reference pairs: read for all, write editor+).
 	"GET /prompts":                                {auth.RoleViewer, "prompts.read"},
