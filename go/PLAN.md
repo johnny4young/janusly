@@ -768,6 +768,7 @@ el chat publicado.
 | 2026-07-31 | T-095 residuo del drain | Un SIGTERM al binario del soak deja nodos `pending` de runs en vuelo (el drain termina lo RECLAMADO, por diseño) — ese residuo interfirió un test de shutdown de la suite hasta limpiarlo. Nota operativa: tras un soak local, cancelar los runs `soak-%` restantes antes de correr la suite |
 | 2026-07-31 | T-098 REPORT-W3 | Cierre de ola con la misma vara: qué es ahora la plataforma (multi-tenant operable con esquema propiedad de Go), matriz de authz, evidencia que más pesa (lane HA ×3, property de secretos, el piso que se probó solo, base fresca sin Node), soak 1h estable (~33 MB RSS), 7 divergencias deliberadas cortadas, deuda consciente y recomendación de ola 4 (arrancar por T-101 LlmClient). 31/31 de la ola; 100/100 acumulados en el plan |
 | 2026-07-31 | sync ola-4 | Pin actualizado a develop@103be9e8 (12 commits). DOS migraciones drizzle nuevas espejadas como goose 00003 (índices keyset compuestos de listas) + 00004 (sweep NULLS FIRST — el hallazgo del memory de drizzle, ahora en la referencia); aplicadas al DB dev. `usage_events` NO entró en el sweep (el `NULLS LAST` de ListRunUsageSlice sigue correcto) y el lector de audit ya usaba DESC plano — alineado con el índice nuevo sin cambios. Cambios de `v1 contracts split by domain` + `typed executor dispatch` + `scripted-node testkit` de Node anotados como INSUMO de la ola 4. Merge limpio; suite 17 paquetes + lint verdes post-merge |
+| 2026-07-31 | T-099 LlmClient | `internal/ai.Client` sobre anthropic-sdk-go v1.61 con el contrato sagrado EN la frontera: cualquier fallo del SDK → `*AIError` clasificado (no_client/auth/rate_limit/overloaded/timeout/network/invalid_request/unknown), mensajes acotados a 500 bytes, y un `recover` diferido como última línea — ni un pánico del SDK llega al caller. Interfaz neutral de proveedor; hint `"<provider>/<modelo>"` con proveedor ajeno → invalid_request sin marcar. Matriz probada contra servidor falso (401/403/429/529/500/400/timeout/endpoint muerto/sin clave) + shape de éxito con passthrough de cache tokens + test de frontera: NINGÚN paquete fuera de internal/ai importa el SDK (walk del módulo completo) |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -1429,7 +1430,7 @@ la paridad por HTTP sin cambios.
 
 | # | Ticket | Área | Pri | Estado |
 | --- | --- | --- | --- | --- |
-| T-099 | LlmClient chokepoint (anthropic-sdk-go) + contrato de fallback sagrado | ai-core | P0 | todo |
+| T-099 | LlmClient chokepoint (anthropic-sdk-go) + contrato de fallback sagrado | ai-core | P0 | done |
 | T-100 | Config AI del catálogo (provider/model/timeouts/reintentos/promptMaxChars) | ai-core | P0 | todo |
 | T-101 | Usage desde el chokepoint (tokens+cache+costo, pricing + override env, simulated) | ai-core | P0 | todo |
 | T-102 | Prompt caching + `ai.maxOutputUnits` por llamada | ai-core | P1 | todo |

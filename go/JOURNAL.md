@@ -1367,3 +1367,9 @@ producción necesita saber — de lo ya resuelto o informativo.
   evidencia que más pesa: dos instancias sin perder exactly-once, cero
   secretos sobreviviendo en jsonb, un candado que casi se cierra sobre
   su propio autor, y una hora de carga en 33 MB planos.
+
+## 2026-07-31 — una sola puerta para todo token (T-099)
+
+- El chokepoint AI con el contrato de fallback viviendo EN la frontera:
+  ocho clases de error estables, recover diferido, y un test que camina
+  el módulo entero para probar que nadie más importa el SDK.
