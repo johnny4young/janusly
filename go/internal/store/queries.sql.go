@@ -3511,6 +3511,50 @@ func (q *Queries) QueryCostByProvider(ctx context.Context, arg QueryCostByProvid
 	return items, nil
 }
 
+const queryQueueHealth = `-- name: QueryQueueHealth :one
+WITH eligible AS (
+  SELECT rn.id, rn.run_id, rn.node_id
+  FROM run_nodes rn
+  JOIN runs r ON r.id = rn.run_id
+  WHERE rn.status = 'queued' AND r.status = 'running'
+    AND NOT EXISTS (
+      SELECT 1 FROM go_pilot_wakeups w
+      WHERE w.run_node_id = rn.id AND w.wake_at > now())
+)
+SELECT
+  (SELECT count(*) FROM eligible)::int AS waiting,
+  (SELECT count(*) FROM run_nodes WHERE status = 'running')::int AS active,
+  (SELECT min(candidate) FROM (
+     SELECT GREATEST(
+       COALESCE((SELECT max(ev.created_at) FROM run_events ev
+         WHERE ev.run_id = e.run_id AND ev.node_id = e.node_id
+           AND ev.type = 'node.queued'), '-infinity'::timestamptz),
+       COALESCE((SELECT w.wake_at FROM go_pilot_wakeups w
+         WHERE w.run_node_id = e.id), '-infinity'::timestamptz)
+     ) AS candidate FROM eligible e
+   ) instants
+   WHERE candidate > '-infinity'::timestamptz) AS oldest_eligible_at
+`
+
+type QueryQueueHealthRow struct {
+	Waiting          int32
+	Active           int32
+	OldestEligibleAt interface{}
+}
+
+// Queue health over the Postgres substrate: waiting = queued nodes of
+// running runs whose wake-up (if any) has passed; active = running nodes.
+// The oldest age starts at ELIGIBILITY — the latest node.queued event or
+// the retry wake-at, whichever is later. A node with neither signal has
+// unknown age and is excluded (the analogue of the reference's BullMQ
+// retry/stalled-age caveat).
+func (q *Queries) QueryQueueHealth(ctx context.Context) (QueryQueueHealthRow, error) {
+	row := q.db.QueryRow(ctx, queryQueueHealth)
+	var i QueryQueueHealthRow
+	err := row.Scan(&i.Waiting, &i.Active, &i.OldestEligibleAt)
+	return i, err
+}
+
 const queryVerifiedRecoveryStats = `-- name: QueryVerifiedRecoveryStats :one
 WITH recovered AS (
   SELECT EXTRACT(EPOCH FROM (ev.created_at - dl.created_at)) * 1000 AS duration_ms

@@ -25,6 +25,7 @@ worker aparte: la cola vive en Postgres.
 | `JANUSLY_GO_RETENTION_DELETED_WORKFLOWS_DAYS` | 30 | Fallback global del sweep; desde T-087 la ventana real es por org vía el catálogo (`retention.deletedWorkflowsDays`, env de referencia `JANUSLY_RETENTION_DELETED_WORKFLOWS_DAYS`) |
 | `ALLOW_PRIVATE_HTTP_TARGETS` | false | Deshabilita el guard SSRF (solo dev) |
 | `JANUSLY_GO_ENV` | — | `production` activa el gate de arranque: sin `SUPABASE_URL` el binario REHÚSA salvo `ALLOW_DEV_AUTH_HEADERS=true` |
+| `JANUSLY_QUEUE_LAG_WARN_SECONDS` | 60 | Umbral (1..86400) que marca `degraded` cuando el nodo elegible más viejo espera más que esto |
 | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | — | Modo Supabase de la cadena de auth |
 | `JANUSLY_API_SERVICE_TOKEN` | — | Modo service-token (comparación en tiempo constante) |
 | `JANUSLY_PRODUCTION_MODE` | — | `true` activa el readiness gate en `/start` |

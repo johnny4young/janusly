@@ -42,6 +42,7 @@ type V1Server struct {
 	resolver       *auth.Resolver
 	limiter        *ratelimit.Limiter
 	limiterTracker *ratelimit.Tracker
+	queueCache     *queueHealthCache
 }
 
 // NewV1Handler mounts the v1 routes plus /healthz.
@@ -51,6 +52,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	server.limiter = ratelimit.New(pool, ratelimit.Hooks{
 		OnError: server.limiterTracker.RecordError, OnSuccess: server.limiterTracker.RecordRecovery,
 	})
+	server.queueCache = &queueHealthCache{read: server.readQueueSnapshot}
 	go server.hub.listen(context.Background(), pool)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -64,12 +66,11 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
-		degraded := pool.Ping(ctx) != nil
 		w.Header().Set("Content-Type", "application/json")
 		payload, _ := json.Marshal(map[string]any{
 			"ok":          true,
 			"rateLimiter": server.limiterTracker.Public(),
-			"queue":       map[string]any{"degraded": degraded},
+			"queue":       server.publicQueueHealth(ctx),
 		})
 		_, _ = w.Write(payload)
 	})
@@ -134,6 +135,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	server.mountAuditRoutes(mux)
 	server.mountOrgConfigRoutes(mux)
 	server.mountRunUsageRoutes(mux)
+	server.mountSystemHealthRoutes(mux)
 	return WithBrowserHeaders(mux)
 }
 

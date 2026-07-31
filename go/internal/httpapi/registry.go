@@ -65,6 +65,10 @@ var routeAuthz = map[string]routeGate{
 	// settings); the write is the admin pair from the reference.
 	"POST /org/config": {auth.RoleAdmin, "org.config.write"},
 
+	// System infrastructure snapshots (reference pairs verbatim).
+	"GET /system/queue":        {auth.RoleAdmin, "org.config.write"},
+	"GET /system/rate-limiter": {auth.RoleAdmin, "org.config.write"},
+
 	// Members + invitations (reference pairs verbatim).
 	"GET /members":                          {auth.RoleViewer, "members.read"},
 	"GET /members/invitations":              {auth.RoleAdmin, "members.read"},

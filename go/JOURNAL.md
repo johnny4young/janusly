@@ -1311,3 +1311,10 @@ producción necesita saber — de lo ya resuelto o informativo.
   costos que agrega la ventana completa en Postgres: 100 grupos + una
   fila resto explícita, con la invariante probada de que los totales
   quedan exactos aunque la cardinalidad se pliegue.
+
+## 2026-07-31 — salud en dos niveles (T-091)
+
+- Lo público jamás enseña números vivos (probado por negación de claves)
+  y lo admin mide la edad desde la ELEGIBILIDAD — el evento node.queued o
+  el wake_at del retry, con la edad desconocida excluida en vez de
+  inventada: el mismo matiz que la referencia documenta sobre BullMQ.
