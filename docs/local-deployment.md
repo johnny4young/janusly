@@ -545,5 +545,38 @@ Evidence is written under
 `output/review/2026-07-30-security-qualification/` and contains no plaintext
 credential.
 
+Run the destructive real-identity tenant-isolation qualification:
+
+```bash
+pnpm local:tenant-isolation:smoke --confirm-reset
+```
+
+It creates two temporary Supabase identities and two organizations, then
+qualifies list reads, direct identifiers, mutations, membership authority,
+organization switching, permission-aware UI, and independent PostgreSQL row
+bindings. The viewer receives one organization grant while the owner switches
+between both. Evidence is written under
+`output/review/2026-07-30-tenant-isolation-qualification/`. The qualifier
+always removes generated Auth/tenant data and stops the stack before it
+returns.
+
+Run the destructive local load/soak qualification:
+
+```bash
+pnpm local:load-soak:smoke --confirm-reset
+```
+
+The default profile admits 200 runs with concurrency 20, then sustains four
+runs per second for 45 seconds through a six-node fan-out/fan-in workflow.
+It requires unique successful runs, exact PostgreSQL run/node counts, visible
+queue pressure, a complete workflow/maintenance drain, no dead letters or
+pending publication repairs, healthy metrics, and bilingual browser evidence.
+The recorded p50/p95/p99 values are a local-machine baseline, not a production
+capacity claim. Tune bounded local experiments with
+`JANUSLY_LOAD_BURST_RUNS`, `JANUSLY_LOAD_BURST_CONCURRENCY`,
+`JANUSLY_SOAK_SECONDS`, and `JANUSLY_SOAK_RPS`. Evidence is written under
+`output/review/2026-07-30-load-soak-qualification/`; generated workload data
+is removed and the stack is stopped on success or failure.
+
 For the short-lived development/test orchestrator use `pnpm dev`. For metrics,
 traces, dashboards, and alerts, see [Observability](observability.md).

@@ -131,6 +131,13 @@ opening a destination selects its first permitted section. Home has no
 redundant section rail. The command palette keeps direct expert routes while
 putting the four destinations first.
 
+The authenticated user popover is a non-modal labelled `dialog`, not an ARIA
+`menu`: it contains workspace switching, radios, a locale select, profile
+fields, actions, and links that are invalid direct children of `role="menu"`.
+Its trigger therefore advertises `aria-haspopup="dialog"`; keep Escape,
+outside-click dismissal, and trigger focus restoration without claiming modal
+focus containment.
+
 The Build header keeps three status domains explicit instead of presenting
 apparently contradictory generic pills: Production is deterministic draft
 readiness, Workflow is the saved runtime-health rollup, and Recovery is the

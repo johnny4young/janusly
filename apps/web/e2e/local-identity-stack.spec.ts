@@ -48,7 +48,9 @@ async function signIn(page: Page, email: string) {
 
 async function openUserMenu(page: Page) {
   await page.getByRole('button', { name: 'Open user menu' }).click()
-  await expect(page.getByRole('menu')).toBeVisible()
+  await expect(
+    page.getByRole('dialog', { name: 'Account and workspace controls' }),
+  ).toBeVisible()
 }
 
 async function signOut(page: Page) {
