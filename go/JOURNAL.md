@@ -520,3 +520,17 @@ local. Sin umbral pasa/no-pasa: números para aprender.
 - El x-request-id entrante se honra si es benigno (patrón estricto); un
   id hostil con CRLF se reemplaza por uuid — pequeño endurecimiento
   sobre Node anotado como mejora, no divergencia de forma.
+
+## 2026-07-30 — inventario de gaps F1 (T-029)
+
+- Leer api.ts del web antes de arrancar el dev server ahorró una tarde
+  de sorpresas: el cliente prefija /v1 SOLO en los GETs de su set de
+  lecturas (y des-envuelve el envelope él mismo), pero TODAS las
+  mutaciones van a rutas legacy crudas. Mi superficie /v1 de escritura
+  está... en el lado que el web no llama. Un handler, dos encoders —
+  la misma arquitectura de alias de Node — entra en T-032.
+- La buena noticia del inventario: las siete lecturas core ya están
+  alineadas; los dev-headers del web son exactamente los que el pilot
+  acepta; y el wrapper degrada offline-limpio, así que los paneles
+  fuera de alcance (AI, credenciales, SCIM…) deberían mostrar estados
+  vacíos amigables — el smoke de T-035 lo confirmará.
