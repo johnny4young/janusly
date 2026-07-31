@@ -26,6 +26,19 @@ function run(cmd, args, opts = {}) {
   });
 }
 
+// Pre-clean: the $0 fallback templates carry FIXED product-wide ids
+// (approval-gate etc. — Node parity), so a previous smoke run's save
+// blocks the next one's cross-org. The dev-only harness clears them.
+const TEMPLATE_IDS = "'http-ai-summary','api-transform-tool','approval-gate','incident-triage','email-reply'";
+const PG_CONTAINER = process.env.JANUSLY_GO_PG_CONTAINER ?? "janusly-go-pilot-postgres-1";
+console.log("== pre-clean fallback template workflows ==");
+try {
+  await run("docker", ["exec", PG_CONTAINER, "psql", "-U", "janusly", "-d", "janusly_go", "-c",
+    `DELETE FROM workflow_versions WHERE workflow_id IN (${TEMPLATE_IDS}); DELETE FROM workflows WHERE id IN (${TEMPLATE_IDS});`]);
+} catch (error) {
+  console.warn("template pre-clean skipped:", String(error));
+}
+
 console.log("== build go api ==");
 await run("go", ["build", "-o", "/tmp/janusly-go-smoke-api", "./cmd/api"], { cwd: GO_DIR });
 

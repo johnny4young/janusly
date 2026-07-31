@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -336,7 +337,18 @@ func (s *V1Server) startCore(r *http.Request, rc v1Request) opResult {
 		Workflow json.RawMessage `json:"workflow"`
 		Input    any             `json:"input"`
 	}
-	if err := decodeBody(r, &body); err != nil || len(body.Workflow) == 0 {
+	raw, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, 2<<20))
+	if err != nil || json.Unmarshal(raw, &body) != nil {
+		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
+			map[string]any{"field": "workflow"})
+	}
+	// The web sends the FLAT workflow JSON when starting without input
+	// (Node accepts both shapes) — an absent "workflow" key means the
+	// whole body IS the workflow.
+	if len(body.Workflow) == 0 {
+		body.Workflow = raw
+	}
+	if len(body.Workflow) == 0 {
 		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
 			map[string]any{"field": "workflow"})
 	}

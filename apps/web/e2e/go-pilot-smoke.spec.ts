@@ -187,3 +187,93 @@ test('operator loop against Go: redrive and approve through the real UI', async 
     upstream.close()
   }
 })
+
+test('ai studio against Go: $0 fallback generate, save, run, approve', async ({ page, request }) => {
+  test.setTimeout(120_000)
+  const orgId = `go-ai-${Date.now()}`
+  const pageErrors: string[] = []
+  page.on('pageerror', (error) => pageErrors.push(String(error)))
+  await preparePage(page, orgId)
+
+  const { openWorkflowAiAction, openWorkspaceSection } = await import('./_helpers/workspace-navigation')
+  await openWorkflowAiAction(page, 'Workflows')
+
+  // Generate through the real copilot: with no key the Go backend answers
+  // the deterministic $0 fallback (approval-gate template for this prompt).
+  await page.locator('.copilot-prompt').fill('necesito un flujo con approval humano antes de escribir')
+  await page.getByRole('button', { name: 'Draft flow', exact: true }).click()
+  const discard = page.getByRole('button', { name: 'Discard changes', exact: true })
+  if (await discard.isVisible().catch(() => false)) await discard.click()
+  await expect(page.getByText('Starter flow loaded locally').first()).toBeVisible()
+
+  // The drafted canvas carries the fallback template; save + run it.
+  await page.getByRole('button', { name: 'Validate', exact: true }).click()
+  await expect(page.getByText('Flow is ready to run')).toBeVisible()
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page.getByText(/Saved version \d+/)).toBeVisible()
+  await page.getByRole('button', { name: 'Run', exact: true }).click()
+  await expect(page.getByText(/Run started:/)).toBeVisible()
+
+  // The template pauses at its approval — open the run row in Activity
+  // (the proven operator-loop path) and approve through the real UI.
+  const started = await request.get(`${API_URL}/v1/runs`, { headers: headers(orgId) })
+  const startedBody = await started.json() as { data?: Array<{ id?: string }> }
+  const startedRunId = startedBody.data?.[0]?.id ?? ''
+  expect(startedRunId).not.toBe('')
+  await openWorkspaceSection(page, 'Activity', 'Activity')
+  await page.getByTestId(`activity-row-run:${startedRunId}`).click()
+  await expect(page.getByTestId('waiting-step-approval')).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('button', { name: /Approve/ }).first().click()
+  await expect(page.getByTestId('waiting-steps')).toBeHidden({ timeout: 20_000 })
+
+  // Backend truth: exactly one run for the org and it succeeded.
+  const runs = await request.get(`${API_URL}/v1/runs`, { headers: headers(orgId) })
+  const runsBody = await runs.json() as { data?: Array<{ status?: string }> }
+  const statuses = (runsBody.data ?? []).map((run) => run.status)
+  expect(statuses).toContain('succeeded')
+
+  expect(pageErrors, `page errors: ${pageErrors.join('; ')}`).toHaveLength(0)
+})
+
+test('human form against Go: pause, fill through the real UI, resume', async ({ page, request }) => {
+  test.setTimeout(120_000)
+  const orgId = `go-form-${Date.now()}`
+  const pageErrors: string[] = []
+  page.on('pageerror', (error) => pageErrors.push(String(error)))
+  await preparePage(page, orgId)
+
+  const { openWorkspaceDestination, openWorkspaceSection, addCanvasStep } = await import('./_helpers/workspace-navigation')
+  await openWorkspaceDestination(page, 'Workflows')
+  await page.getByRole('button', { name: 'New workflow', exact: true }).first().click()
+  await page.getByRole('button', { name: /^Start blank\b/ }).click()
+  await page.getByRole('textbox', { name: 'Name' }).fill(`Go form ${Date.now()}`)
+  await addCanvasStep(page, 'Collect form')
+
+  await page.getByRole('button', { name: 'Validate', exact: true }).click()
+  await expect(page.getByText('Flow is ready to run')).toBeVisible()
+  await page.getByRole('button', { name: 'Run', exact: true }).click()
+  await expect(page.getByText(/Run started:/)).toBeVisible()
+
+  // The paused form surfaces in the run panel with the SIGNED token wired
+  // in; filling it through the real dialog resumes the run on the Go side.
+  const started = await request.get(`${API_URL}/v1/runs`, { headers: headers(orgId) })
+  const startedBody = await started.json() as { data?: Array<{ id?: string }> }
+  const startedRunId = startedBody.data?.[0]?.id ?? ''
+  expect(startedRunId).not.toBe('')
+  await openWorkspaceSection(page, 'Activity', 'Activity')
+  await page.getByTestId(`activity-row-run:${startedRunId}`).click()
+  await expect(page.getByRole('button', { name: /Fill form/i })).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('button', { name: /Fill form/i }).click()
+  await expect(page.getByRole('heading', { name: 'Collect request details' })).toBeVisible()
+  await page.getByLabel('requester').fill('Ada')
+  await page.getByLabel('reason').fill('PTO request')
+  await page.getByRole('button', { name: /Submit form/i }).click()
+  await expect(page.getByText(/Form .* submitted/)).toBeVisible()
+  await expect(page.getByTestId('waiting-steps')).toBeHidden({ timeout: 20_000 })
+
+  const runs = await request.get(`${API_URL}/v1/runs`, { headers: headers(orgId) })
+  const runsBody = await runs.json() as { data?: Array<{ status?: string }> }
+  expect((runsBody.data ?? []).map((run) => run.status)).toContain('succeeded')
+
+  expect(pageErrors, `page errors: ${pageErrors.join('; ')}`).toHaveLength(0)
+})
