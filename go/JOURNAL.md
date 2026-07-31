@@ -707,3 +707,11 @@ local. Sin umbral pasa/no-pasa: números para aprender.
 - Segundo hallazgo: ids de workflow estáticos en fixtures con estado
   almacenado dejan residuo global entre ejecuciones — `{{RUN}}` los
   hace únicos por corrida en ambos drivers.
+
+## 2026-07-30 — cierre contable de T-003 y T-004
+
+- Auditoría del goal destapó dos `partial` obsoletos de la ola 1. La
+  evidencia real estaba completa y verde (los tests de aceptación de
+  ambos corren en la suite), así que el cierre fue puro estado — sin
+  código nuevo. La regla que queda: al terminar un ticket, el estado
+  del plan se voltea en el MISMO commit que el código.

@@ -166,8 +166,8 @@ crítica) · P1 (importante) · P2 (stretch).
 | T-000 | Bootstrap: worktree, rama, scaffold, Compose 4632, migraciones | P0 | done |
 | T-001 | Config, boot, observabilidad (4600/4601, slog, healthz, probe) | P0 | done |
 | T-002 | sqlc + inventario real del esquema + persistencia núcleo | P0 | done |
-| T-003 | Dominio: parsing + validación subconjunto (códigos de issue) | P0 | partial |
-| T-004 | startRun transaccional + defaults de inputs | P0 | partial |
+| T-003 | Dominio: parsing + validación subconjunto (códigos de issue) | P0 | done |
+| T-004 | startRun transaccional + defaults de inputs | P0 | done |
 | T-005 | Cola propia: claim loop, worker pool, LISTEN/NOTIFY | P0 | done |
 | T-006 | Gramáticas subconjunto: templates + expresiones | P0 | done |
 | T-007 | Executors: noop, transform, condition + semántica de aristas | P0 | done |
@@ -684,6 +684,7 @@ el chat publicado.
 | 2026-07-30 | T-041 F11 e2e | Fixture F11 (save → ingest → waitTerminal) prueba la cadena trigger completa contra AMBOS backends: driver Node ingesta por `POST /triggers/webhook/ingest` (selector org-wide por clave), driver Go por `POST /v1/webhooks/{workflowId}` — mismo contrato, misma proyección. Golden capturado del stack Node real: outputs preservan el TIPO del evento (`total: 99.5` numérico) a través de template → outputs de workflow; paridad Go byte-igual |
 | 2026-07-30 | T-041 stack aislado | La captura de goldens ya no depende del `pnpm dev` compartido: `conformance/run-reference-stack.mjs` + `reference-stack.compose.yml` bootean el backend Node del pin en proyecto Compose propio (`janusly-goldens`) y puertos propios (PG 4732 / Redis 4733 / API 3101 / métricas 9564-5), sin el lock de ciclo de vida y sin tocar DBs vivas; `down -v` no deja nada. Motivado por un incidente real: un `pnpm dev` lanzado desde el worktree colisionó por nombre de proyecto Compose derivado del directorio y tumbó el Postgres del pilot (volumen sobrevivió; DB restaurada con `make db-up` + verificación) mientras un `run-e2e` de otra sesión poseía legítimamente el lock y :3001. Regla nueva: NUNCA `pnpm dev`/`run-e2e` desde el worktree del pilot — capturas solo vía el stack aislado |
 | 2026-07-30 | T-041 residuo | Los fixtures con estado ALMACENADO (save+ingest) no pueden usar id de workflow estático: `workflows.id` es PK global en el esquema compartido y el residuo de una ejecución anterior (otro org) hace 404 el ingest del org fresco. Sustitución `{{RUN}}` (sufijo único por ejecución) en ambos drivers; los fixtures solo-`/start` no la necesitan (documento inline) |
+| 2026-07-30 | T-003/T-004 cierre | Ambos `partial` eran contabilidad obsoleta de la ola 1: el trabajo estaba completo y verificado. T-003: 15 casos table-driven con citas a la fuente (wv/iv), ciclo, códigos idénticos, fixtures de docs. T-004: `TestStartRunLeavesNothingOnInjectedFailure` (inyección en el tercer insert), payload trigger satisfecho por defaults, null/false explícitos ganan, NOTIFY dentro de la tx. Además T-039 re-probó el seam de T-003 y F08/F11 ejercitan T-004 en paridad real. Estados corregidos a `done` sin código nuevo |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
