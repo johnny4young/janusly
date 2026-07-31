@@ -47,6 +47,9 @@ func (e *Engine) CancelRun(ctx context.Context, runID string, reason any) error 
 	}); err != nil {
 		return fmt.Errorf("insert run.cancelled: %w", err)
 	}
+	if err := q.NotifyRunEvents(ctx, runID); err != nil {
+		return fmt.Errorf("notify run events: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}

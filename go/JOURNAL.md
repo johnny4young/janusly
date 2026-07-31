@@ -547,3 +547,19 @@ local. Sin umbral pasa/no-pasa: números para aprender.
   estático — estaba en un util del cliente), /users/me solo es POST de
   perfil, y la tarjeta de onboarding degrada amigable por diseño del
   wrapper. Tres stubs que NO había que construir.
+
+## 2026-07-30 — SSE: el vivo del run (T-031)
+
+- El protocolo del web hablado completo: handshake con retry hint,
+  catch-up acotado desde el cursor compuesto (con el overlap deliberado
+  que el cliente dedupe), tail vivo, run-status por cambio, heartbeat.
+  El reemplazo estructural: donde Node publica por Redis, el pilot
+  dispara NOTIFY dentro de cada transacción que escribe eventos — la
+  señal viaja CON el commit, y el fallback de 1s convierte cualquier
+  pérdida en retraso, jamás en agujero.
+- El test e2e cuenta la historia entera por UNA conexión: replay del
+  run.started, resume del approval, node.resumed y run-status succeeded
+  llegando en vivo, y reconexión por cursor que NO repite lo visto.
+- Bug de arnés instructivo: dos readFrames sobre el mismo bufio.Reader
+  lanzaban dos goroutines lectoras robándose líneas — un pump por
+  conexión y la verdad emergió.

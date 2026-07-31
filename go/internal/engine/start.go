@@ -151,6 +151,9 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 	if err := q.NotifyWake(ctx, runID); err != nil {
 		return "", fmt.Errorf("notify wake: %w", err)
 	}
+	if err := q.NotifyRunEvents(ctx, runID); err != nil {
+		return "", fmt.Errorf("notify run events: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", fmt.Errorf("commit: %w", err)
 	}

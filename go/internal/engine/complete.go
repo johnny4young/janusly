@@ -262,6 +262,11 @@ func (e *Engine) inCompletionTx(ctx context.Context, runID string, handler func(
 		}
 		return err
 	}
+	// Every completion-family transaction appends timeline events; the
+	// stream signal rides the same commit.
+	if err := q.NotifyRunEvents(ctx, runID); err != nil {
+		return fmt.Errorf("notify run events: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}

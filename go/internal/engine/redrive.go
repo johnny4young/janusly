@@ -91,6 +91,9 @@ func (e *Engine) RedriveDeadLetter(ctx context.Context, orgID, deadLetterID stri
 	if err := q.NotifyWake(ctx, deadLetter.RunID); err != nil {
 		return fmt.Errorf("notify wake: %w", err)
 	}
+	if err := q.NotifyRunEvents(ctx, deadLetter.RunID); err != nil {
+		return fmt.Errorf("notify run events: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}

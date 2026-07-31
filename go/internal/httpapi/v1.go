@@ -33,11 +33,13 @@ type V1Server struct {
 	engine *engine.Engine
 	pool   *pgxpool.Pool
 	newID  func() string
+	hub    *streamHub
 }
 
 // NewV1Handler mounts the v1 routes plus /healthz.
 func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
-	server := &V1Server{engine: eng, pool: pool, newID: uuid.NewString}
+	server := &V1Server{engine: eng, pool: pool, newID: uuid.NewString, hub: newStreamHub()}
+	go server.hub.listen(context.Background(), pool)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -78,6 +80,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	mux.HandleFunc("GET /v1/dlq", server.auth(server.listDeadLetters))
 	mux.HandleFunc("POST /v1/dlq/redrive", server.auth(server.redrive))
 	mux.HandleFunc("POST /v1/dlq/replay", server.auth(server.replayAlias))
+	mux.HandleFunc("GET /runs/{runId}/stream", server.auth(server.streamRun))
 	return WithBrowserHeaders(mux)
 }
 

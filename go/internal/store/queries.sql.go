@@ -874,6 +874,65 @@ func (q *Queries) ListRunEvents(ctx context.Context, arg ListRunEventsParams) ([
 	return items, nil
 }
 
+const listRunEventsAfter = `-- name: ListRunEventsAfter :many
+SELECT id, run_id, node_id, type, payload, created_at
+FROM run_events
+WHERE run_id = $1
+  AND (created_at, id) > ($2::timestamptz, $3::text)
+ORDER BY created_at ASC, id ASC
+LIMIT $4
+`
+
+type ListRunEventsAfterParams struct {
+	RunID          string
+	AfterCreatedAt time.Time
+	AfterID        string
+	PageLimit      int32
+}
+
+type ListRunEventsAfterRow struct {
+	ID        string
+	RunID     string
+	NodeID    pgtype.Text
+	Type      string
+	Payload   json.RawMessage
+	CreatedAt *time.Time
+}
+
+// Ascending page for the SSE catch-up: everything strictly after the
+// composite cursor, oldest first.
+func (q *Queries) ListRunEventsAfter(ctx context.Context, arg ListRunEventsAfterParams) ([]ListRunEventsAfterRow, error) {
+	rows, err := q.db.Query(ctx, listRunEventsAfter,
+		arg.RunID,
+		arg.AfterCreatedAt,
+		arg.AfterID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRunEventsAfterRow
+	for rows.Next() {
+		var i ListRunEventsAfterRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.NodeID,
+			&i.Type,
+			&i.Payload,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRunNodeStatuses = `-- name: ListRunNodeStatuses :many
 SELECT node_id, status FROM run_nodes WHERE run_id = $1
 `
@@ -1446,6 +1505,17 @@ func (q *Queries) MarkWaitingNodeSucceeded(ctx context.Context, arg MarkWaitingN
 	var id string
 	err := row.Scan(&id)
 	return id, err
+}
+
+const notifyRunEvents = `-- name: NotifyRunEvents :exec
+SELECT pg_notify('janusly_go_run_events', $1::text)
+`
+
+// Event-stream signal: fired inside every transaction that appends run
+// events, so SSE subscribers re-query exactly when something committed.
+func (q *Queries) NotifyRunEvents(ctx context.Context, runID string) error {
+	_, err := q.db.Exec(ctx, notifyRunEvents, runID)
+	return err
 }
 
 const notifyWake = `-- name: NotifyWake :exec

@@ -220,6 +220,16 @@ VALUES ($1, $2, $3, $4, $5);
 INSERT INTO run_events (id, run_id, node_id, type, payload, created_at)
 VALUES ($1, $2, $3, $4, $5, $6);
 
+-- Ascending page for the SSE catch-up: everything strictly after the
+-- composite cursor, oldest first.
+-- name: ListRunEventsAfter :many
+SELECT id, run_id, node_id, type, payload, created_at
+FROM run_events
+WHERE run_id = $1
+  AND (created_at, id) > (sqlc.arg(after_created_at)::timestamptz, sqlc.arg(after_id)::text)
+ORDER BY created_at ASC, id ASC
+LIMIT sqlc.arg(page_limit);
+
 -- name: ListRunEvents :many
 SELECT id, run_id, node_id, type, payload, created_at
 FROM run_events
@@ -353,3 +363,8 @@ LIMIT sqlc.arg(batch_size);
 
 -- name: NotifyWake :exec
 SELECT pg_notify('janusly_go_wake', sqlc.arg(run_id)::text);
+
+-- Event-stream signal: fired inside every transaction that appends run
+-- events, so SSE subscribers re-query exactly when something committed.
+-- name: NotifyRunEvents :exec
+SELECT pg_notify('janusly_go_run_events', sqlc.arg(run_id)::text);
