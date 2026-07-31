@@ -62,3 +62,20 @@ func ResolveMemberRole(ctx context.Context, q *store.Queries, orgID, userID stri
 	}
 	return nil, nil
 }
+
+// EffectivePermissions resolves the permission set for a role NAME in an
+// org. Until the custom-roles ticket adds org_roles overrides, the
+// effective set is the catalog's built-in default for the rank-equivalent
+// role; overrides will REPLACE (not extend) per the reference contract.
+func EffectivePermissions(role *ResolvedRole) map[string]bool {
+	if role == nil {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, entry := range PermissionCatalog {
+		if entry.DefaultRoles[role.InheritsFrom] {
+			out[entry.Key] = true
+		}
+	}
+	return out
+}

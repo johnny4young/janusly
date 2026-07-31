@@ -152,10 +152,24 @@ func (s *V1Server) auth(next handlerFunc) http.HandlerFunc {
 				"Unauthorized: missing Supabase JWT or dev headers", nil)
 			return
 		}
-		next(w, r, v1Request{
+		rc := v1Request{
 			orgID: resolved.OrgID, userID: resolved.UserID, id: requestID,
 			authContext: resolved,
-		})
+		}
+		// Central authorization: the matched mux pattern indexes the
+		// annotated registry; role first, then permission — the
+		// reference dispatcher's order. Wire-aware rejection bodies.
+		if gate, gatedRoute := routeAuthz[r.Pattern]; gatedRoute {
+			if rejection := s.checkGate(r, rc, gate); rejection != nil {
+				if strings.HasPrefix(r.URL.Path, "/v1/") {
+					writeVersioned(w, rc.id, *rejection)
+				} else {
+					writeLegacy(w, *rejection)
+				}
+				return
+			}
+		}
+		next(w, r, rc)
 	}
 }
 
@@ -206,11 +220,7 @@ func (s *V1Server) saveWorkflow(w http.ResponseWriter, r *http.Request, rc v1Req
 }
 
 func (s *V1Server) saveCore(r *http.Request, rc v1Request) opResult {
-	// Editor rank guards every version write, on both wires (the full
-	// annotated registry lands with the next ticket).
-	if rejection := s.requireRole(r, rc, auth.RoleEditor); rejection != nil {
-		return *rejection
-	}
+
 	var raw json.RawMessage
 	if err := decodeBody(r, &raw); err != nil {
 		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body", nil)

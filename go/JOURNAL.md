@@ -1161,3 +1161,18 @@ producción necesita saber — de lo ya resuelto o informativo.
   sutileza de T-071 por el camino HTTP completo: el viewer sembrado
   recibe el 403 verbatim y el fantasma del mismo org pasa por el
   auto-grant de dev.
+
+## 2026-07-31 — el registry anotado con enforcement central (T-073)
+
+- La pieza estructural de la ola: en vez de envolver handler por handler,
+  el middleware consulta el patrón matcheado del mux (Request.Pattern)
+  contra UNA tabla anotada con los pares exactos de Node — un mount
+  nuevo no puede olvidar sus gates porque el gate no vive en el mount.
+  El sweep de completitud recorre la tabla entera con un viewer
+  sembrado: cada mutación rechaza con el 403 verbatim y cada lectura
+  cruza ambas capas, distinguiendo por código los 403 del dominio (el
+  runs_forbidden del contrato de runs desconocidos) de los del gate.
+- Dos correcciones de datos que el ticket dejó: GET /org/config es
+  solo-auth (mi extracción se contaminó con la fila POST) y /resume
+  exige runs.start, no runs.write. El smoke web completo sigue verde
+  con los gates activos.

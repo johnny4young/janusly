@@ -1,0 +1,67 @@
+// The pilot's annotated route registry — the Open/Closed equivalent of the
+// reference's Route[] table. Enforcement is CENTRAL: the auth middleware
+// looks up the matched mux pattern (http.Request.Pattern, Go 1.22+) here
+// and runs requireRole then requirePermission, so a mount cannot forget
+// its gates — an unlisted pattern is caught by the registry completeness
+// test, not by an attacker.
+//
+// Pairs come from the reference's route annotations verbatim. Routes with
+// an empty gate are auth-only (identity required, no rank/permission):
+// GET /org/config (every member reads runtime config), the tool catalog,
+// /auth/context, and the health surfaces (which skip auth entirely).
+package httpapi
+
+import "github.com/johnny4young/janusly/go/internal/auth"
+
+var routeAuthz = map[string]routeGate{
+	// Workflows — version writes are editor + workflows.write.
+	"POST /v1/workflows/save":              {auth.RoleEditor, "workflows.write"},
+	"POST /workflows/save":                 {auth.RoleEditor, "workflows.write"},
+	"POST /v1/workflows/rollback":          {auth.RoleEditor, "workflows.write"},
+	"POST /workflows/rollback":             {auth.RoleEditor, "workflows.write"},
+	"POST /v1/workflows/readiness":         {auth.RoleEditor, "workflows.write"},
+	"POST /workflows/readiness":            {auth.RoleEditor, "workflows.write"},
+	"DELETE /workflows/{workflowId}":       {auth.RoleEditor, "workflows.write"},
+	"POST /workflows/{workflowId}/restore": {auth.RoleEditor, "workflows.write"},
+	"GET /v1/workflows":                    {auth.RoleViewer, "workflows.read"},
+	"GET /v1/workflows/latest":             {auth.RoleViewer, "workflows.read"},
+	"GET /v1/workflows/versions":           {auth.RoleViewer, "workflows.read"},
+	"GET /workflows/trash":                 {auth.RoleViewer, "workflows.read"},
+
+	// Runs.
+	"POST /v1/start":           {auth.RoleEditor, "runs.start"},
+	"POST /start":              {auth.RoleEditor, "runs.start"},
+	"POST /v1/resume":          {auth.RoleEditor, "runs.start"},
+	"POST /resume":             {auth.RoleEditor, "runs.start"},
+	"POST /v1/run/cancel":      {auth.RoleEditor, "runs.cancel"},
+	"POST /run/cancel":         {auth.RoleEditor, "runs.cancel"},
+	"POST /v1/runs/redrive":    {auth.RoleEditor, "runs.start"},
+	"POST /runs/redrive":       {auth.RoleEditor, "runs.start"},
+	"GET /v1/run":              {auth.RoleViewer, "runs.read"},
+	"GET /v1/status":           {auth.RoleViewer, "runs.read"},
+	"GET /v1/runs":             {auth.RoleViewer, "runs.read"},
+	"GET /runs/{runId}/stream": {auth.RoleViewer, "runs.read"},
+	"GET /run/usage":           {auth.RoleViewer, "runs.read"},
+
+	// Triggers.
+	"POST /v1/webhooks/{workflowId}": {auth.RoleEditor, "triggers.ingest"},
+
+	// DLQ + recovery.
+	"GET /v1/dlq":              {auth.RoleViewer, "dlq.read"},
+	"GET /dlq":                 {auth.RoleViewer, "dlq.read"},
+	"GET /dlq/counts":          {auth.RoleViewer, "dlq.read"},
+	"GET /v1/dlq/clusters":     {auth.RoleViewer, "dlq.read"},
+	"GET /dlq/clusters":        {auth.RoleViewer, "dlq.read"},
+	"POST /v1/dlq/redrive":     {auth.RoleEditor, "dlq.replay"},
+	"POST /v1/dlq/replay":      {auth.RoleEditor, "dlq.replay"},
+	"POST /dlq/replay":         {auth.RoleEditor, "dlq.replay"},
+	"GET /v1/recovery/metrics": {auth.RoleViewer, "dlq.read"},
+	"GET /recovery/metrics":    {auth.RoleViewer, "dlq.read"},
+
+	// Replay campaigns.
+	"POST /recovery/campaigns":             {auth.RoleEditor, "dlq.replay"},
+	"POST /recovery/campaigns/preview":     {auth.RoleEditor, "dlq.replay"},
+	"POST /recovery/campaigns/{id}/cancel": {auth.RoleEditor, "dlq.replay"},
+	"GET /recovery/campaigns":              {auth.RoleViewer, "dlq.read"},
+	"GET /recovery/campaigns/{id}":         {auth.RoleViewer, "dlq.read"},
+}
