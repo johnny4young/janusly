@@ -70,10 +70,12 @@ type RecallInput struct {
 
 // RecallEntry is one recalled row.
 type RecallEntry struct {
-	ID       string         `json:"id"`
-	Kind     string         `json:"kind"`
-	Content  string         `json:"content"`
-	Metadata map[string]any `json:"metadata,omitempty"`
+	ID         string         `json:"id"`
+	Kind       string         `json:"kind"`
+	Content    string         `json:"content"`
+	WorkflowID string         `json:"workflowId,omitempty"`
+	Similarity float64        `json:"similarity"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
 // consent evaluates the two-flag gate + kind allowlist.
@@ -154,7 +156,9 @@ func Recall(ctx context.Context, pool *pgxpool.Pool, input RecallInput) []Recall
 	if err != nil {
 		return fail("embedding_failed")
 	}
-	rows, err := pool.Query(ctx, `SELECT id, kind, content, metadata FROM memory_entries
+	rows, err := pool.Query(ctx, `SELECT id, kind, content, COALESCE(workflow_id, ''),
+		  1 - (embedding <=> $3::vector) AS similarity, metadata
+		FROM memory_entries
 		WHERE org_id = $1 AND kind = $2 AND retain_until > now()
 		  AND (hold_until IS NULL OR hold_until <= now())
 		ORDER BY embedding <=> $3::vector
@@ -168,7 +172,7 @@ func Recall(ctx context.Context, pool *pgxpool.Pool, input RecallInput) []Recall
 	for rows.Next() {
 		var entry RecallEntry
 		var metadataRaw []byte
-		if err := rows.Scan(&entry.ID, &entry.Kind, &entry.Content, &metadataRaw); err != nil {
+		if err := rows.Scan(&entry.ID, &entry.Kind, &entry.Content, &entry.WorkflowID, &entry.Similarity, &metadataRaw); err != nil {
 			continue
 		}
 		_ = json.Unmarshal(metadataRaw, &entry.Metadata)

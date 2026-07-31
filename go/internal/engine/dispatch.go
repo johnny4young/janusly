@@ -104,7 +104,7 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 	}
 	var memoryDeps *executors.MemoryDeps
 	if node.Type == "tool" || node.Type == "agent" || node.Type == "multi_agent" {
-		memoryDeps = d.buildMemoryDeps(ctx, claim)
+		memoryDeps = d.buildMemoryDeps(ctx, claim, wf.ID)
 	}
 	output, execErr := execute(ctx, executors.Input{
 		RunID: claim.RunID, NodeID: claim.NodeID,
@@ -261,7 +261,7 @@ func (d *Dispatcher) buildAIDeps(ctx context.Context, claim ClaimedNode) *execut
 
 // buildMemoryDeps wires the vector tools to the memory substrate with
 // the run's org/run identity and the validation dry-run flag.
-func (d *Dispatcher) buildMemoryDeps(ctx context.Context, claim ClaimedNode) *executors.MemoryDeps {
+func (d *Dispatcher) buildMemoryDeps(ctx context.Context, claim ClaimedNode, workflowID string) *executors.MemoryDeps {
 	pool := d.engine.pool
 	dryRun := false
 	if run, err := store.New(pool).GetRunExecution(ctx, claim.RunID); err == nil && run.ReplayMode.Valid {
@@ -282,6 +282,13 @@ func (d *Dispatcher) buildMemoryDeps(ctx context.Context, claim ClaimedNode) *ex
 				out["id"] = result.ID
 			}
 			return out
+		},
+		RecallEpisodes: func(goal string) (string, int, []string) {
+			recall := memory.RecallAgentEpisodes(ctx, pool, claim.OrgID, workflowID, claim.RunID, goal)
+			return recall.Block, recall.Count, recall.Fingerprints
+		},
+		RecordEpisode: func(goal, outcome string, success bool, stepCount int) {
+			memory.RecordAgentEpisode(ctx, pool, claim.OrgID, workflowID, claim.RunID, goal, outcome, success, stepCount)
 		},
 		Recall: func(query string) []map[string]any {
 			entries := memory.Recall(ctx, pool, memory.RecallInput{

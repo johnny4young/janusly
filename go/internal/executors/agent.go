@@ -117,6 +117,20 @@ func runAgentLoop(ctx context.Context, in Input, agentConfig map[string]any, eve
 		"reflection": reflectionEnabled, "goal": agentConfig["goal"],
 	})
 
+	// Cross-run episodic recall feeds the LLM planner ONLY (rules ignores
+	// memory) — the embedding call is skipped otherwise.
+	goalText := fmt.Sprint(agentConfig["goal"])
+	if agentConfig["goal"] == nil {
+		goalText = ""
+	}
+	episodeBlock, episodeCount := "", 0
+	var episodeFingerprints []string
+	llmConfigured := in.AI != nil && in.AI.Client != nil && in.AI.Client.Configured()
+	if planner == "openai" && llmConfigured && in.Memory != nil && in.Memory.RecallEpisodes != nil {
+		episodeBlock, episodeCount, episodeFingerprints = in.Memory.RecallEpisodes(goalText)
+	}
+	memoryInfluenceEmitted := false
+
 	steps := make([]map[string]any, 0, maxSteps)
 	var lastResult any
 	var lastReflection map[string]any
@@ -127,10 +141,19 @@ func runAgentLoop(ctx context.Context, in Input, agentConfig map[string]any, eve
 
 		var plan AgentPlan
 		if planner == "openai" && in.AI != nil {
-			plan = planAgentToolWithLLM(ctx, in, agentConfig, planningContext, steps, registry, "")
+			plan = planAgentToolWithLLM(ctx, in, agentConfig, planningContext, steps, registry, episodeBlock)
 		} else {
 			plan = planAgentTool(agentConfig, planningContext)
 			plan.Mode = "rules"
+		}
+		// Only a successfully parsed AI plan generated WITH a non-empty
+		// recall emits the memory event — no-client/malformed/thrown paths
+		// emit nothing, and episode content never enters the event.
+		if !memoryInfluenceEmitted && episodeCount > 0 && plan.Mode == "ai" {
+			emit("agent.memory.recalled", map[string]any{
+				"count": episodeCount, "fingerprints": episodeFingerprints,
+			})
+			memoryInfluenceEmitted = true
 		}
 		emit(eventPrefix+".step.planned", map[string]any{"agent": name, "iteration": i, "plan": plan})
 		decision := "use_tool"
@@ -152,6 +175,11 @@ func runAgentLoop(ctx context.Context, in Input, agentConfig map[string]any, eve
 			emit(eventPrefix+".completed", map[string]any{
 				"agent": name, "iteration": i, "finalAnswer": plan.FinalAnswer, "steps": steps,
 			})
+			// Record the episode; skipped in dry-run so sandbox runs never
+			// pollute durable memory.
+			if !dryRun && in.Memory != nil && in.Memory.RecordEpisode != nil {
+				in.Memory.RecordEpisode(goalText, plan.FinalAnswer, true, len(steps))
+			}
 			return map[string]any{"steps": steps, "finalAnswer": plan.FinalAnswer, "reflection": lastReflection}, nil
 		}
 
@@ -194,6 +222,12 @@ func runAgentLoop(ctx context.Context, in Input, agentConfig map[string]any, eve
 	emit(eventPrefix+".completed", map[string]any{
 		"agent": name, "reason": "maxSteps reached", "steps": steps, "finalResult": lastResult,
 	})
+	if !dryRun && in.Memory != nil && in.Memory.RecordEpisode != nil {
+		outcome, _ := json.Marshal(lastResult)
+		in.Memory.RecordEpisode(goalText,
+			fmt.Sprintf("Reached step budget (%d) without completing. Last result: %.500s", len(steps), string(outcome)),
+			false, len(steps))
+	}
 	return map[string]any{"steps": steps, "finalResult": lastResult, "reflection": lastReflection}, nil
 }
 

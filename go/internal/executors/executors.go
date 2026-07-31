@@ -48,6 +48,10 @@ type MemoryDeps struct {
 	DryRun bool
 	Commit func(content string, metadata map[string]any) map[string]any
 	Recall func(query string) []map[string]any
+	// Episodic seams (agent loop): recall renders the DATA-framed block;
+	// record commits one goal+outcome episode. Nil = memory off.
+	RecallEpisodes func(goal string) (block string, count int, fingerprints []string)
+	RecordEpisode  func(goal, outcome string, success bool, stepCount int)
 }
 
 // HTTPBounds are the tenant-effective outbound HTTP defaults.

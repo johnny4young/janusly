@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -239,5 +240,129 @@ func TestAgentLLMPlannerMatrix(t *testing.T) {
 	output = planRun("wf-llm-done", `{"done":true,"finalAnswer":"todo listo"}`)
 	if output["finalAnswer"] != "todo listo" {
 		t.Fatalf("done plan: %+v", output)
+	}
+}
+
+// Episodic memory: consent off never calls embeddings, the recall event
+// fires ONLY for an ai-mode plan with a non-empty recall (stable
+// content-free fingerprints), and a done agent records one episode.
+func TestAgentEpisodicMemory(t *testing.T) {
+	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	defer pool.Close()
+	eng := New(pool)
+	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
+	workerCtx, stop := context.WithCancel(context.Background())
+	defer stop()
+	go func() { _ = eng.RunWorkers(workerCtx, 2, 20*time.Millisecond, dispatcher.Execute, quietLogger()) }()
+	org := fmt.Sprintf("org-episodes-%d", time.Now().UnixNano())
+
+	var embedCalls int
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		embedCalls++
+		var body struct {
+			Prompt string `json:"prompt"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		vector := make([]float64, 1024)
+		for i, ch := range body.Prompt {
+			vector[i%1024] += float64(ch%23) / 23
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"embedding": vector})
+	}))
+	defer ollama.Close()
+	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		payload, _ := json.Marshal(map[string]any{
+			"id": "msg_1", "type": "message", "role": "assistant",
+			"model":       "claude-haiku-4-5-20251001",
+			"content":     []map[string]any{{"type": "text", "text": `{"done":true,"finalAnswer":"resuelto con backoff"}`}},
+			"stop_reason": "end_turn", "usage": map[string]any{"input_tokens": 5, "output_tokens": 5},
+		})
+		_, _ = w.Write(payload)
+	}))
+	defer llm.Close()
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("JANUSLY_LOCAL_STACK", "true")
+	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+	t.Setenv("JANUSLY_LLM_SIMULATED_PROVIDERS", "anthropic")
+	t.Setenv("JANUSLY_LLM_SIMULATOR_BASE_URL", llm.URL)
+
+	agentRun := func(id string) string {
+		wf := &domain.Workflow{
+			ID: "wf-episodes", Name: "Agente", DSLVersion: "1.0",
+			Nodes: []domain.Node{{ID: "a", Type: "agent", Config: map[string]any{
+				"goal": "arregla los timeouts del webhook", "planner": "openai", "maxSteps": float64(1),
+			}}},
+			Edges: []domain.Edge{},
+		}
+		wf.ID = id
+		runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: wf})
+		if err != nil {
+			t.Fatalf("start %s: %v", id, err)
+		}
+		waitRunStatus(t, pool, runID, "succeeded", 0)
+		return runID
+	}
+
+	// 1. Consent OFF: zero embedding calls, no episode rows, no event.
+	t.Setenv("JANUSLY_MEMORY_ENABLED", "")
+	runID := agentRun("wf-ep-off")
+	if embedCalls != 0 {
+		t.Fatalf("consent off must never call embeddings: %d", embedCalls)
+	}
+	var events int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM run_events WHERE run_id = $1 AND type = 'agent.memory.recalled'`, runID).Scan(&events)
+	if events != 0 {
+		t.Fatal("no recall event without memory")
+	}
+
+	// 2. Consent ON: the first run records an episode (no recall event —
+	// nothing to recall yet); the second recalls it and emits the event
+	// with 12-char fingerprints.
+	t.Setenv("JANUSLY_MEMORY_ENABLED", "true")
+	seed := func(key, valueJSON, valueType string) {
+		if _, err := pool.Exec(ctx, `INSERT INTO org_configs (id, org_id, key, value_json, category, description, value_type)
+			VALUES ($1, $2, $3, $4, 'memory', 'test', $5)`, org+"-"+key, org, key, valueJSON, valueType); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	seed("memory.enabled", "true", "boolean")
+	seed("memory.allowedKinds", `"agent_episode"`, "string")
+	seed("memory.embeddingBaseUrl", fmt.Sprintf("%q", ollama.URL), "string")
+
+	first := agentRun("wf-ep-one")
+	var episodes int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM memory_entries WHERE org_id = $1 AND kind = 'agent_episode'`, org).Scan(&episodes)
+	if episodes != 1 {
+		t.Fatalf("done agent must record one episode: %d", episodes)
+	}
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM run_events WHERE run_id = $1 AND type = 'agent.memory.recalled'`, first).Scan(&events)
+	if events != 0 {
+		t.Fatal("an empty recall must not emit the event")
+	}
+
+	second := agentRun("wf-ep-two")
+	var payload []byte
+	if err := pool.QueryRow(ctx, `SELECT payload FROM run_events WHERE run_id = $1 AND type = 'agent.memory.recalled'`, second).Scan(&payload); err != nil {
+		t.Fatalf("second run must emit the recall event: %v", err)
+	}
+	var event struct {
+		Count        int      `json:"count"`
+		Fingerprints []string `json:"fingerprints"`
+	}
+	_ = json.Unmarshal(payload, &event)
+	if event.Count != 1 || len(event.Fingerprints) != 1 || len(event.Fingerprints[0]) != 12 {
+		t.Fatalf("recall event shape: %+v", event)
+	}
+	if strings.Contains(string(payload), "backoff") {
+		t.Fatal("episode content must never enter the event")
 	}
 }

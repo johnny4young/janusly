@@ -1480,3 +1480,9 @@ producción necesita saber — de lo ya resuelto o informativo.
 - El planner LLM con su matriz completa: cinco formas de fallar y todas
   aterrizan en el plan de reglas con su atribución; el presupuesto
   termina limpio; y el plan válido ejecuta. El bucle siempre avanza.
+
+## 2026-07-31 — el agente que recuerda sin contar (T-116)
+
+- Episodios con recall semántico solo para el planner LLM, short-circuit
+  antes del primer embedding con consent off, y el evento que emite
+  huellas — jamás contenido. La segunda corrida aprendió de la primera.
