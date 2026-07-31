@@ -574,65 +574,79 @@ export class WorkflowRuntime {
     // round-trip (O(nodes + edges) queries on every node completion, the
     // hottest engine path). The map is seeded from every persisted row and
     // updated in place when THIS scan writes (skip → "skipped", claim →
-    // "queued"), so an intra-scan skip cascade still unblocks downstream
-    // dependents exactly like the per-node fresh reads did. Concurrent
-    // external writes were equally racy under fresh reads; the atomic
-    // `tryClaimNodeForQueue` claim remains the multi-worker correctness gate,
-    // and every completion triggers its own scan, so a node a stale snapshot
-    // misses here is picked up by the completing sibling's scan.
+    // "queued"). Concurrent external writes were equally racy under fresh
+    // reads; the atomic `tryClaimNodeForQueue` claim remains the multi-worker
+    // correctness gate, and every completion triggers its own scan, so a node
+    // a stale snapshot misses here is picked up by the completing sibling's
+    // scan.
     const statuses = new Map<string, string | undefined>(
       Object.entries(context as Record<string, { status?: string } | undefined>)
         .map(([nodeId, entry]) => [nodeId, entry?.status]),
     );
     let queued = 0;
 
-    for (const node of workflow.nodes) {
-      const incomingEdges = workflow.edges.filter((edge) => edge.to === node.id);
-      const deps = incomingEdges.map((edge) => edge.from);
-      const ready = deps.every((depId) => ["succeeded", "skipped"].includes(statuses.get(depId) ?? ""));
-      const currentStatus = statuses.get(node.id);
+    // The scan loops to a FIXPOINT (mirroring the Go pilot's
+    // scheduleDownstream): a single declaration-order pass strands any
+    // dependent declared BEFORE a node this same pass skips — the dependent
+    // was visited while its dep was still "pending", becomes ready the
+    // moment the skip lands, and nothing external ever re-triggers a scan
+    // (queued === 0 parks the run as "running" forever). Each productive
+    // pass moves ≥1 node out of "pending" in the local map and a node
+    // leaves "pending" at most once, so the loop is bounded by
+    // nodes.length passes plus one final no-change pass; repeat visits are
+    // in-memory only (`currentStatus !== "pending"` guards every write).
+    for (let changed = true; changed; ) {
+      changed = false;
+      for (const node of workflow.nodes) {
+        const incomingEdges = workflow.edges.filter((edge) => edge.to === node.id);
+        const deps = incomingEdges.map((edge) => edge.from);
+        const ready = deps.every((depId) => ["succeeded", "skipped"].includes(statuses.get(depId) ?? ""));
+        const currentStatus = statuses.get(node.id);
 
-      if (!ready || currentStatus !== "pending") continue;
+        if (!ready || currentStatus !== "pending") continue;
 
-      // Roots have no incoming edges and are unconditionally runnable. This
-      // matters when the durable publication reconciler restores a consumed
-      // root generation to `pending`: routing it through the ordinary DAG
-      // scan must republish the root, not reinterpret it as a condition miss.
-      let shouldRun = incomingEdges.length === 0;
-      for (const edge of incomingEdges) {
-        if (!edge.condition) { shouldRun = true; break; }
-        const result = evaluateExpression(edge.condition, { context, inputs: {} });
-        if (result) { shouldRun = true; break; }
+        // Roots have no incoming edges and are unconditionally runnable. This
+        // matters when the durable publication reconciler restores a consumed
+        // root generation to `pending`: routing it through the ordinary DAG
+        // scan must republish the root, not reinterpret it as a condition miss.
+        let shouldRun = incomingEdges.length === 0;
+        for (const edge of incomingEdges) {
+          if (!edge.condition) { shouldRun = true; break; }
+          const result = evaluateExpression(edge.condition, { context, inputs: {} });
+          if (result) { shouldRun = true; break; }
+        }
+
+        if (!shouldRun) {
+          statuses.set(node.id, "skipped");
+          changed = true;
+          await this.store.markNodeSkipped(runId, node.id, { reason: "Condition not met" });
+          await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.skipped", payload: { reason: "Condition not met" } }));
+          logNodeEvent({ runId, nodeId: node.id, type: "node.skipped" });
+          continue;
+        }
+
+        const claimed = await this.store.tryClaimNodeForQueue(runId, node.id, 1);
+        if (!claimed) continue;
+        statuses.set(node.id, "queued");
+        changed = true;
+        await this.queue.enqueueNode({
+          runId,
+          nodeId: node.id,
+          attempt: claimed.attempt,
+          publicationGeneration: claimed.publicationGeneration,
+          ...(claimed.recoveryClaimToken ? { recoveryClaimToken: claimed.recoveryClaimToken } : {}),
+        });
+        await this.store.markQueuePublicationSucceeded(
+          runId,
+          node.id,
+          claimed.attempt,
+          claimed.publicationGeneration,
+          claimed.recoveryClaimToken ?? undefined,
+        );
+        await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.queued" }));
+        logNodeEvent({ runId, nodeId: node.id, type: "node.queued", attempt: claimed.attempt });
+        queued++;
       }
-
-      if (!shouldRun) {
-        statuses.set(node.id, "skipped");
-        await this.store.markNodeSkipped(runId, node.id, { reason: "Condition not met" });
-        await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.skipped", payload: { reason: "Condition not met" } }));
-        logNodeEvent({ runId, nodeId: node.id, type: "node.skipped" });
-        continue;
-      }
-
-      const claimed = await this.store.tryClaimNodeForQueue(runId, node.id, 1);
-      if (!claimed) continue;
-      statuses.set(node.id, "queued");
-      await this.queue.enqueueNode({
-        runId,
-        nodeId: node.id,
-        attempt: claimed.attempt,
-        publicationGeneration: claimed.publicationGeneration,
-        ...(claimed.recoveryClaimToken ? { recoveryClaimToken: claimed.recoveryClaimToken } : {}),
-      });
-      await this.store.markQueuePublicationSucceeded(
-        runId,
-        node.id,
-        claimed.attempt,
-        claimed.publicationGeneration,
-        claimed.recoveryClaimToken ?? undefined,
-      );
-      await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.queued" }));
-      logNodeEvent({ runId, nodeId: node.id, type: "node.queued", attempt: claimed.attempt });
-      queued++;
     }
 
     if (queued === 0) {
