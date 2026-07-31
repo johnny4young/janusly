@@ -1338,3 +1338,9 @@ producción necesita saber — de lo ya resuelto o informativo.
   HA: claims, campañas, timers, reaper y retención. Ninguno necesita
   lease — y el RUNBOOK ahora dice exactamente dónde cortar si algún día
   lo necesitan.
+
+## 2026-07-31 — el contrato que no puede mentir (T-096)
+
+- 20 rutas v1 en un manifiesto sin efectos, renderizadas deterministas a
+  OpenAPI 3.1 con el envelope documentado una vez; el guard de deriva se
+  probó tocando el manifiesto sin regenerar — y falló como debía.
