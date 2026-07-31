@@ -179,7 +179,7 @@ crítica) · P1 (importante) · P2 (stretch).
 | T-013 | Arnés de paridad semántica (lane A, fixtures F01–F10) | P0 | done |
 | T-014 | E2E de API Go (lane B) | P0 | done |
 | T-015 | Servidor MCP stdio + e2e vía MCP (lane C) | P1 | done |
-| T-016 | Rendimiento: k6 + RSS + pprof vs Node | P1 | todo |
+| T-016 | Rendimiento: k6 + RSS + pprof vs Node | P1 | done |
 | T-017 | Journal consolidado + análisis de fricción | P1 | todo |
 | T-018 | Puerta D15: informe + recomendación | P0 | todo |
 | T-101 | (stretch) Tick de schedules con líder por advisory lock | P2 | todo |
@@ -646,6 +646,10 @@ el chat publicado.
 | 2026-07-30 | MCP en proceso | T-015: `cmd/mcp` con el SDK Go oficial (v1.7.0) — 6 tools sobre el engine SIN salto HTTP; fallos esperados como `isError` (postura del mcp-server Node); resultados JSON + structuredContent; el proceso corre el worker pool (los runs progresan sin otro servicio). Org por `JANUSLY_GO_ORG` (análogo dev-auth para stdio). E2E: cliente SDK in-memory ejecuta el ciclo fallo→DLQ→redrive→succeeded + conflicto legible + timeline con node.redriven |
 | 2026-07-30 | gotcha (SDK) | `json.RawMessage` en args de tool deriva schema "array de números" (es []byte) — los documentos workflow van como `map[string]any` y se re-serializan; el jsonschema del SDK valida ANTES del handler |
 | 2026-07-30 | pendiente manual | Demo con Claude real (registrar cmd/mcp vía claude mcp add y conducir el ciclo) — snippet en go/README.md; anotar en journal al hacerla |
+| 2026-07-30 | divergencia de card | T-016 sin k6 (no instalado): generador de carga PROPIO en Go (`cmd/loadgen`) — reproducible en la rama, mismos 3 escenarios, sin dependencia externa; cargas 10/50 VUs × 30s (la card decía hasta 200×2min — escalado a la máquina). Resultados crudos en conformance/perf/results-2026-07-30.json + perfil pprof CPU del diamond |
+| 2026-07-30 | números (lo bueno) | Go gana claro en baja contención: start@10VU 187.9 runs/s vs 45.9 (4.1×, p50 34.6ms vs 195.9ms); list@50VU 2800 vs 1085 RPS; diamond@10VU 136.4 vs ~29.5 runs/s. Huella: 21.9 MB idle / 34.3 pico, UN proceso — vs ~101 MB idle api+worker + Redis en Node |
+| 2026-07-30 | hallazgo (lo honesto) | Go start@50VU degrada feo con concurrencia 8 (p99 19.9s); subir a 32 arregla la cola (p99 2.3s) pero el throughput no sube y diamond@c32 COLAPSA 8× — sospechoso principal: pool de DB hardcodeado en MaxConns 10 (32 workers + pollers del API compitiendo por 10 conexiones). Follow-up F0.5: pool configurable + pools separados API/workers + retest. Node degrada con gracia a 50VU (modelo async de BullMQ) |
+| 2026-07-30 | hallazgo (Node) | 2/445 diamantes de Node NUNCA completaron (join jamás disparó; poll-timeout a 90s) y un intento previo sin límite colgó indefinido — reproducción probable del hazard de ordering del readiness scan ya reportado upstream. Go: 4100/4100 |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)

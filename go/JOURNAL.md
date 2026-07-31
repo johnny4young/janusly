@@ -351,3 +351,31 @@ consolidan en el informe de la puerta D15.
   Documentos como map[string]any.
 - Falta la demo manual con Claude real (snippet listo en README) — la
   anoto cuando Johnny la corra o la corramos juntos en una sesión.
+
+## 2026-07-30 — números: carga, RSS, pprof (T-016)
+
+Metodología: loadgen propio en Go (sin k6 — divergencia anotada), 30s
+por escenario, misma máquina, cada backend sobre su propio Postgres
+local. Sin umbral pasa/no-pasa: números para aprender.
+
+| Escenario | Go | Node |
+| --- | --- | --- |
+| start 10 VU (runs/s, p50) | **187.9**, 34.6ms | 45.9, 195.9ms |
+| start 50 VU (runs/s, p99) | 49.3, 19.9s (c=8) / 48.6, 2.3s (c=32) | 53.4, 1.9s |
+| list 50 VU (RPS, p50) | **2800**, 17.9ms | 1085, 41.6ms |
+| diamond 10 VU (runs/s) | **136.4** (545 nodos/s) | ~29.5 (5 VU, acotado) |
+| RSS idle / pico | **21.9 / 34.3 MB** (1 proceso) | ~101 MB (api+worker) + Redis |
+
+- Lo bueno: 4× en throughput de runs, 2.6× en lecturas, ~5× menos
+  memoria en un solo proceso.
+- Lo honesto: a 50 VUs el pool Go se cae de la mesa con c=8 (p99 20s) y
+  subir a c=32 colapsa el diamond 8× — el sospechoso es el pool de DB
+  fijo en 10 conexiones compitiendo entre 32 workers y los pollers del
+  API. Sigue como follow-up: pool configurable, pools separados,
+  retest. Node degrada con gracia (el modelo async de BullMQ paraleliza
+  más allá de los hilos del SO) — lección de diseño real.
+- Bonus inesperado: 2/445 diamantes de Node quedaron atascados para
+  siempre (el join nunca disparó) — reproducción probable del hazard de
+  ordering del readiness scan que ya reporté upstream. Go: 4100/4100.
+- Perfil pprof de CPU del escenario diamond guardado en
+  conformance/perf/pprof-diamond-cpu.pb.gz.

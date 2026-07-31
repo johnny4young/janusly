@@ -1,0 +1,112 @@
+{
+  "methodology": "own Go loadgen (cmd/loadgen), 30s per scenario unless noted, same machine, backends over their own local Postgres (Go: pilot pg18 @4632 single binary; Node: reference stack @5432 api+worker+redis). start/diamond latency = start\u2192terminal via /v1/status polling (20ms). No pass/fail threshold \u2014 learning numbers.",
+  "go": {
+    "rssIdleMB": 21.9,
+    "rssLoadC32MB": 29.9,
+    "processes": 1,
+    "start10vu": {
+      "iterations": 5668,
+      "ratePerSec": 187.9,
+      "p50Ms": 34.6,
+      "p95Ms": 156.2,
+      "p99Ms": 255.3,
+      "errors": 0,
+      "nodesPerSec": 375.9
+    },
+    "start50vu_c8": {
+      "iterations": 1512,
+      "ratePerSec": 49.3,
+      "p50Ms": 301.9,
+      "p95Ms": 3830.4,
+      "p99Ms": 19943.9,
+      "errors": 0
+    },
+    "start50vu_c32": {
+      "iterations": 1478,
+      "ratePerSec": 48.6,
+      "p50Ms": 939.8,
+      "p95Ms": 1816.2,
+      "p99Ms": 2337.5,
+      "errors": 0
+    },
+    "list50vu": {
+      "iterations": 84024,
+      "ratePerSec": 2800.5,
+      "p50Ms": 17.9,
+      "p95Ms": 34.6,
+      "p99Ms": 44.6,
+      "errors": 0
+    },
+    "diamond10vu_c8": {
+      "iterations": 4100,
+      "ratePerSec": 136.4,
+      "nodesPerSec": 545.6,
+      "p50Ms": 64.9,
+      "p95Ms": 115.0,
+      "p99Ms": 175.2,
+      "errors": 0
+    },
+    "diamond10vu_c32": {
+      "iterations": 495,
+      "ratePerSec": 16.3,
+      "nodesPerSec": 65.2,
+      "p50Ms": 595.9,
+      "p95Ms": 900.5,
+      "p99Ms": 1209.4,
+      "errors": 0
+    },
+    "rssPeakMB": 34.3
+  },
+  "node": {
+    "rssIdleMB": {
+      "api": 50.9,
+      "worker": 50.4
+    },
+    "processes": "api + worker + redis",
+    "start10vu": {
+      "iterations": 1390,
+      "ratePerSec": 45.9,
+      "p50Ms": 195.9,
+      "p95Ms": 393.5,
+      "p99Ms": 523.2,
+      "errors": 0,
+      "nodesPerSec": 91.8
+    },
+    "start50vu": {
+      "iterations": 1643,
+      "ratePerSec": 53.4,
+      "p50Ms": 881.4,
+      "p95Ms": 1311.4,
+      "p99Ms": 1854.0,
+      "errors": 0
+    },
+    "list50vu": {
+      "iterations": 32597,
+      "ratePerSec": 1085.5,
+      "p50Ms": 41.6,
+      "p95Ms": 77.8,
+      "p99Ms": 142.4,
+      "errors": 0
+    },
+    "diamond5vu_15s": {
+      "iterations": 445,
+      "inWindowRatePerSec": 29.5,
+      "p50Ms": 99.3,
+      "p95Ms": 154.2,
+      "p99Ms": 179.0,
+      "errors": 2,
+      "note": "2 runs POLL-TIMED-OUT at 90s \u2014 stuck diamonds (~0.45%); an earlier unbounded 10vu attempt hung indefinitely on the same shape"
+    },
+    "rssPeakMB": {
+      "api": 84.0,
+      "worker": 83.7
+    }
+  },
+  "findings": [
+    "Go wins clearly at low-contention: start@10vu 4.1x runs/s at 5.7x lower p50; list 2.6x RPS at 2.3x lower p50; diamond@10vu 4.6x runs/s vs Node's bounded 5vu sample.",
+    "Go start@50vu degrades hard at worker concurrency 8 (p99 19.9s); raising concurrency to 32 fixes the tail (p99 2.3s) but throughput stays ~49/s and diamond@c32 COLLAPSES 8x \u2014 prime suspect: the db pool hardcoded at MaxConns 10 starves 32 workers + API pollers. Follow-up: configurable pool size, separate API/worker pools, retest.",
+    "Node degrades gracefully at 50vu (53/s, p99 1.9s) \u2014 BullMQ's async job model parallelizes beyond OS threads; the Go pool must scale with its connection budget to match.",
+    "Node stuck-diamond reproduction: 2/445 diamonds never completed (join never fired). The Go engine completed 4100/4100. Candidate confirmation of the readiness-scan ordering hazard already flagged upstream.",
+    "Footprint: Go 21.9MB idle single process (29.9MB under load) vs Node ~101MB idle across api+worker plus Redis."
+  ]
+}
