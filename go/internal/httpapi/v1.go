@@ -564,8 +564,10 @@ func (s *V1Server) resumeRun(w http.ResponseWriter, r *http.Request, rc v1Reques
 
 func (s *V1Server) resumeCore(r *http.Request, rc v1Request) opResult {
 	var body struct {
-		RunID  string `json:"runId"`
-		NodeID string `json:"nodeId"`
+		RunID       string         `json:"runId"`
+		NodeID      string         `json:"nodeId"`
+		Input       map[string]any `json:"input"`
+		ResumeToken string         `json:"resumeToken"`
 	}
 	if err := decodeBody(r, &body); err != nil || body.RunID == "" || body.NodeID == "" {
 		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body", nil)
@@ -580,8 +582,15 @@ func (s *V1Server) resumeCore(r *http.Request, rc v1Request) opResult {
 		}
 		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}
-	if err := s.engine.ResumeRun(r.Context(), body.RunID, body.NodeID); err != nil {
+	if err := s.engine.ResumeRunWithInput(r.Context(), body.RunID, body.NodeID, body.Input, body.ResumeToken); err != nil {
+		var inputErr *engine.InputValidationError
 		switch {
+		case errors.As(err, &inputErr):
+			return opError(http.StatusBadRequest, "runs_input_validation_failed", "Input validation failed", nil)
+		case errors.Is(err, engine.ErrResumeTokenRequired):
+			return opError(http.StatusBadRequest, "runs_resume_token_required", "resumeToken is required", nil)
+		case errors.Is(err, engine.ErrInvalidResumeToken):
+			return opError(http.StatusForbidden, "runs_invalid_resume_token", "Invalid resume token", nil)
 		case errors.Is(err, engine.ErrResumeConflict):
 			return opError(http.StatusConflict, "runs_resume_conflict", "Node is not waiting", nil)
 		case errors.Is(err, engine.ErrResumeNodeNotFound):

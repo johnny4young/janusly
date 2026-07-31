@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"sort"
 	"strings"
 	"time"
 )
@@ -250,6 +251,62 @@ func executeApproval(_ context.Context, in Input) (any, error) {
 		metadata["assignee"] = assignee
 	}
 	return Waiting{Reason: "Waiting for human approval", Metadata: metadata}, nil
+}
+
+// executeHumanForm pauses like approval but resumes with STRUCTURED
+// input as the node output. The executor validates the declared schema
+// shape (a non-empty object schema — the reference's top AI-generation
+// failure is an empty schema) and pauses with a fields projection; the
+// ENGINE injects the signed resume token when it persists the waiting
+// checkpoint (signing needs org policy + the dedicated secret, which the
+// executor deliberately cannot see).
+func executeHumanForm(_ context.Context, in Input) (any, error) {
+	schema, _ := in.Config["schema"].(map[string]any)
+	properties, _ := schema["properties"].(map[string]any)
+	if len(properties) == 0 {
+		return nil, &ConfigError{Code: "human_form_schema_required",
+			Message: "human_form requires config.schema with at least one property"}
+	}
+	if schemaType, ok := schema["type"].(string); ok && schemaType != "object" {
+		return nil, &ConfigError{Code: "human_form_schema_required",
+			Message: "human_form schema must be an object schema"}
+	}
+	fields := make([]map[string]any, 0, len(properties))
+	names := make([]string, 0, len(properties))
+	for name := range properties {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	requiredSet := map[string]bool{}
+	if required, ok := schema["required"].([]any); ok {
+		for _, entry := range required {
+			if name, ok := entry.(string); ok {
+				requiredSet[name] = true
+			}
+		}
+	}
+	for _, name := range names {
+		propSchema, _ := properties[name].(map[string]any)
+		fieldType, _ := propSchema["type"].(string)
+		if fieldType == "" {
+			fieldType = "string"
+		}
+		fields = append(fields, map[string]any{
+			"name": name, "type": fieldType, "required": requiredSet[name],
+		})
+	}
+	metadata := map[string]any{
+		"kind":   "human_form",
+		"schema": schema,
+		"fields": fields,
+	}
+	if title := trimmedString(in.Config["title"]); title != "" {
+		metadata["title"] = title
+	}
+	if description := trimmedString(in.Config["description"]); description != "" {
+		metadata["description"] = description
+	}
+	return Waiting{Reason: "Waiting for human form input", Metadata: metadata}, nil
 }
 
 func trimmedString(value any) string {

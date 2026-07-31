@@ -12,8 +12,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"encoding/json"
+	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/executors"
+	"github.com/johnny4young/janusly/go/internal/orgconfig"
+	"github.com/johnny4young/janusly/go/internal/resumetoken"
 	"github.com/johnny4young/janusly/go/internal/store"
+	"time"
 )
 
 // ErrResumeConflict reports a resume against a node that is not waiting —
@@ -35,6 +40,23 @@ func (e *Engine) MarkNodeWaiting(ctx context.Context, claim ClaimedNode, waiting
 	}
 	for key, value := range waiting.Metadata {
 		metadata[key] = value
+	}
+	if metadata["kind"] == "human_form" {
+		// The engine signs here — org TTL policy + the dedicated secret
+		// stay out of the executor. The signed expiry travels with the
+		// link; policy changes only affect tokens issued afterwards.
+		ttl := int(orgconfig.LoadNumber(ctx, e.pool, claim.OrgID, "runs.humanFormResumeTtlSeconds"))
+		if ttl < resumetoken.MinTTLSeconds || ttl > resumetoken.DefaultTTLSeconds {
+			ttl = resumetoken.DefaultTTLSeconds
+		}
+		token, err := resumetoken.Sign(resumetoken.Binding{
+			OrgID: claim.OrgID, RunID: claim.RunID, NodeID: claim.NodeID, Purpose: "human_form",
+		}, ttl)
+		if err != nil {
+			return fmt.Errorf("sign resume token: %w", err)
+		}
+		metadata["resumeToken"] = token
+		metadata["resumeTokenExpiresAt"] = time.Now().Add(time.Duration(ttl) * time.Second).UTC().Format(time.RFC3339)
 	}
 	metadata["waitingSince"] = checkpointAt.Format("2006-01-02T15:04:05.000Z")
 	stateJSON := safePersist(map[string]any{"waiting": metadata}, stateJSONMaxBytes)
@@ -75,6 +97,23 @@ func (e *Engine) MarkNodeWaiting(ctx context.Context, claim ClaimedNode, waiting
 // reference's historical empty output — the decision lives in the run
 // timeline, never in the node output.
 func (e *Engine) ResumeRun(ctx context.Context, runID, nodeID string) error {
+	return e.ResumeRunWithInput(ctx, runID, nodeID, nil, "")
+}
+
+// Resume sentinel errors the API maps to the reference's wire shapes.
+var (
+	ErrResumeTokenRequired = errors.New("resumeToken is required")
+	ErrInvalidResumeToken  = resumetoken.ErrInvalid
+)
+
+// ResumeRunWithInput completes one still-waiting node. A human_form node
+// REQUIRES the signed resume token (bound to org/run/node/purpose) and
+// validates the input against the node's declared JSON-schema subset —
+// the validated input becomes the node output. Other waiting kinds keep
+// the historical empty output and ignore input/token. Only a
+// still-`waiting` node completes (the CAS guard), so a replayed token
+// cannot double-write output or double-enqueue downstream work.
+func (e *Engine) ResumeRunWithInput(ctx context.Context, runID, nodeID string, input map[string]any, token string) error {
 	finishedAt := eventNow()
 	return e.inCompletionTx(ctx, runID, func(q *store.Queries) error {
 		run, err := q.GetRunExecution(ctx, runID)
@@ -88,20 +127,41 @@ func (e *Engine) ResumeRun(ctx context.Context, runID, nodeID string) error {
 		if err != nil {
 			return err
 		}
-		found := false
-		for _, node := range wf.Nodes {
+		var target *domain.Node
+		for index, node := range wf.Nodes {
 			if node.ID == nodeID {
-				found = true
+				target = &wf.Nodes[index]
 				break
 			}
 		}
-		if !found {
+		if target == nil {
 			return ErrResumeNodeNotFound
+		}
+
+		output := map[string]any{}
+		if target.Type == "human_form" {
+			if token == "" {
+				return ErrResumeTokenRequired
+			}
+			if _, err := resumetoken.Verify(token, resumetoken.Binding{
+				OrgID: run.OrgID, RunID: runID, NodeID: nodeID, Purpose: "human_form",
+			}); err != nil {
+				return err
+			}
+			schema := humanFormSchema(target.Config)
+			if schema != nil {
+				if problems := domain.ValidateInputValue(schema, input, "$"); len(problems) > 0 {
+					return &InputValidationError{Errors: problems}
+				}
+			}
+			for key, value := range input {
+				output[key] = value
+			}
 		}
 
 		rowID, err := q.MarkWaitingNodeSucceeded(ctx, store.MarkWaitingNodeSucceededParams{
 			RunID: runID, NodeID: nodeID,
-			StateJson:  safePersist(map[string]any{"output": map[string]any{}}, stateJSONMaxBytes),
+			StateJson:  safePersist(map[string]any{"output": output}, stateJSONMaxBytes),
 			FinishedAt: &finishedAt,
 		})
 		if err != nil {
@@ -171,4 +231,25 @@ func (e *Engine) resumeDueTimers(ctx context.Context, q *store.Queries) int {
 		}
 	}
 	return resumed
+}
+
+// humanFormSchema projects the node's config.schema into the domain's
+// InputSchema subset for resume-time validation.
+func humanFormSchema(config map[string]any) *domain.InputSchema {
+	raw, ok := config["schema"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var schema domain.InputSchema
+	if err := json.Unmarshal(encoded, &schema); err != nil {
+		return nil
+	}
+	if schema.Type == "" {
+		schema.Type = "object"
+	}
+	return &schema
 }
