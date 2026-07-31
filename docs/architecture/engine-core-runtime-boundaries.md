@@ -27,6 +27,14 @@ packages/engine/src/
     in-memory-execution-store.ts
     in-memory-queue-adapter.ts
     scripted-node-executors.ts
+  persistence.ts        # stable compatibility barrel
+  persistence-ports/
+    run.ts              # run reads, replay, subworkflows, rollup
+    node.ts             # execution claims and node transitions
+    event.ts            # append-only lifecycle events
+    publication.ts      # durable queue and parent outboxes
+    recovery.ts         # semantic containment and resolution
+    internal.ts         # private shared projections and bounds
   worker.ts             # BullMQ process wiring
   start-run.ts          # transactional run bootstrap
   resume-run.ts         # waiting-node resume path
@@ -40,7 +48,9 @@ duplicating graph scheduling rules.
 
 `ExecutionStore` is the persistence boundary. The production implementation is
 `PostgresExecutionStore`, which wraps the existing run/node/event persistence
-helpers.
+helpers through the stable `persistence.ts` compatibility barrel. Their owning
+lifecycle ports and dependency direction are documented in
+[`engine-persistence.md`](engine-persistence.md).
 
 `QueueAdapter` is the queue boundary. The production implementation is
 `BullMQQueueAdapter`, which composes the DLQ adapter. Failed-beyond-retry jobs
@@ -153,6 +163,8 @@ improvements are narrower:
   touched, preserving passthrough compatibility by default;
 - preserve compatibility exports while callers finish moving to the runtime
   boundary;
+- keep persistence lifecycle ports acyclic and make database behavior changes
+  in their owning port rather than the compatibility barrel;
 - avoid adding new infrastructure calls inside `core/*`.
 
 Non-goals remain unchanged: do not replace BullMQ, Drizzle/Postgres, or the

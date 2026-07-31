@@ -1,6 +1,7 @@
 /**
  * `ExecutionStore` implementation backed by Postgres via Drizzle. Thin
- * pass-through to the function-style helpers in `../persistence.ts`; the
+ * pass-through to the function-style helpers in the stable `../persistence`
+ * compatibility barrel; the
  * adapter exists so `core/runtime.ts` can be tested with an in-memory
  * substitute without taking a Drizzle dep.
  *
@@ -32,7 +33,7 @@ import {
 import { getNodeStatus } from "../get-node-status";
 import type { ExecutionStore, NodeStatus, RunMetadata, RunStatus, SerializedError, WorkflowEvent } from "../core/types";
 
-/** `ExecutionStore` implementation that delegates to `../persistence.ts`. */
+/** `ExecutionStore` implementation that delegates to the persistence barrel. */
 export class PostgresExecutionStore implements ExecutionStore {
   getRunContext(runId: string, opts?: { statusesOnly?: boolean }) {
     return getRunContext(runId, opts);

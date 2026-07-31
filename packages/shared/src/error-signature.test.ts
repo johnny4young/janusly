@@ -67,6 +67,42 @@ describe("normalizeErrorSignature — network_timeout", () => {
   });
 });
 
+describe("normalizeErrorSignature — worker_stalled", () => {
+  it("clusters repeated stalls independently of their timestamp and threshold", () => {
+    const first = normalizeErrorSignature(
+      {
+        code: "worker_stalled",
+        message: "Node was left running since 2026-07-31T10:00:00.000Z, past the 60-minute stall threshold",
+      },
+      { nodeType: "http" },
+    );
+    const second = normalizeErrorSignature(
+      {
+        code: "worker_stalled",
+        message: "Node was left running since 2026-08-01T14:05:00.000Z, past the 90-minute stall threshold",
+      },
+      { nodeType: "http" },
+    );
+
+    expect(first).toEqual({
+      signature: "Worker stalled on http node",
+      category: "unknown",
+      suggestedOwner: "platform",
+    });
+    expect(second).toEqual(first);
+  });
+
+  it("does not infer a worker stall from mutable prose without the stable code", () => {
+    const result = normalizeErrorSignature(
+      new Error("Node was left running since 2026-07-31T10:00:00.000Z"),
+      { nodeType: "http" },
+    );
+
+    expect(result.signature).not.toBe("Worker stalled on http node");
+    expect(result.category).toBe("unknown");
+  });
+});
+
 describe("normalizeErrorSignature — ai_provider", () => {
   it("recognises `insufficient_quota`", () => {
     const error = { provider: "openai", message: "insufficient_quota" };

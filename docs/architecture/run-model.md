@@ -6,13 +6,14 @@ how an operator reconstructs a past run exactly as it happened. It ties
 together the deeper docs:
 
 - [`engine-core-runtime-boundaries.md`](engine-core-runtime-boundaries.md) — runtime/adapter seams.
+- [`engine-persistence.md`](engine-persistence.md) — SQL lifecycle ports and their dependency rules.
 - [`run-cancellation.md`](run-cancellation.md) — cancellation semantics.
 - [`../workflows.md`](../workflows.md) + [`../nodes.md`](../nodes.md) — how to define a workflow (DAG JSON, node configs, templating).
 - `AGENTS.md` (repo root) — the operational invariants, in exhaustive detail.
 
 ## Data model
 
-Three tables carry every execution (`packages/db/src/schema.ts`):
+Three tables carry every execution (`packages/db/src/schema/executions.ts`):
 
 | Table | One row per | Load-bearing columns |
 | --- | --- | --- |
@@ -49,9 +50,12 @@ Every transition that could race is a conditional UPDATE (compare-and-set):
   `running` node and commits its optional DLQ row, causal event, and parent-run
   failure atomically (used only by the stalled-node reaper below).
 
-The core claims live in `packages/engine/src/persistence.ts`; the stalled
-terminal boundary lives in `packages/engine/src/adapters/dead-letter-queue.ts`.
-Don't replace any of them with a read-then-write.
+The queue/execution claims live in
+`packages/engine/src/persistence-ports/publication.ts` and
+`packages/engine/src/persistence-ports/node.ts`; the stalled terminal boundary
+lives in `packages/engine/src/adapters/dead-letter-queue.ts`. The stable
+`packages/engine/src/persistence.ts` barrel preserves existing imports. Don't
+replace any claim with a read-then-write.
 
 ## Execution lifecycle
 
@@ -174,7 +178,8 @@ reattachment must not double-credit the parent.
 ## Observability
 
 - **Timeline**: every lifecycle step appends a `run_events` row through
-  `appendEvent`, which redacts ONCE via `safePersistPayload` and then both
+  `persistence-ports/event.ts:appendEvent`, which redacts ONCE via
+  `safePersistPayload` and then both
   persists and publishes the same object — a streamed event can never expose
   a value the persisted row wouldn't.
 - **Live**: `GET /runs/:runId/stream` (SSE over Redis pub/sub) streams events

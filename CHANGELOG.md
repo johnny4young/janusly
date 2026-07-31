@@ -16,6 +16,26 @@ retroactively.
 
 ### Changed
 
+- The MCP server's 40-tool protocol surface is now separated into bounded
+  descriptor, risk-catalog, argument-validation, always-visible dispatch, and
+  write-dispatch modules behind the existing `tools.ts` compatibility barrel.
+  Tool order, JSON Schemas, risk annotations, stable routes, structured
+  results, and the process-plus-tenant write boundary remain unchanged; an
+  architecture test fixes the 26 visible / 14 gated inventory and acyclic
+  dependency direction.
+- Engine lifecycle persistence is now separated into bounded run, node, event,
+  queue-publication, and semantic-recovery ports behind the existing
+  `persistence.ts` compatibility barrel. All 40 runtime exports and 10 type
+  exports remain stable, and architecture tests enforce the closed module
+  inventory and acyclic dependency direction without changing SQL, migrations,
+  public APIs, or event payloads.
+- The canonical 71-table Drizzle schema is now composed from seven
+  side-effect-free bounded-context modules behind the existing `schema.ts` and
+  `@janusly/db` barrels. Application imports and table object identity remain
+  stable, schema architecture tests enforce complete/unique composition, and
+  Drizzle Kit confirms the refactor produces no migration. Portable local
+  backups now inventory every schema domain and fail closed on empty or
+  duplicate declarations instead of assuming tables live in the barrel.
 - Stable `/v1` API contracts are now organized into side-effect-free domain
   modules behind one ordered pure manifest and the existing compatibility
   barrel. OpenAPI generation, runtime aliasing, authorization descriptors, and
@@ -261,6 +281,10 @@ retroactively.
 
 ### Fixed
 
+- Recovery Playbooks now match repeated stalled-worker failures using the
+  stable `worker_stalled` code instead of timestamp-bearing error prose, so a
+  later occurrence can revalidate the active playbook rather than appearing as
+  an unrelated failure.
 - Workflow save no longer strips documented `recovery` settings, and
   full-workflow AI improvement cannot invent or overwrite the operator-owned
   recovery policy.

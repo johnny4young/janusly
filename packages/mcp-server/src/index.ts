@@ -11,7 +11,7 @@
  *   2. `createApiClient(cfg)` — closure that injects auth headers per request.
  *   3. `Server` registered with two request handlers:
  *      - `tools/list` → returns the MCP tool descriptors.
- *      - `tools/call` → dispatches to `runOne` in `./tools`; expected
+ *      - `tools/call` → dispatches through the stable `./tools` barrel; expected
  *        validation/API failures become `{ isError: true }` tool results.
  *   4. `await server.connect(transport)` — JSON-RPC over stdio, runs forever.
  *

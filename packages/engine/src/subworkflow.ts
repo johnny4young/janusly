@@ -9,7 +9,7 @@
  *
  * Used by:
  * - `node-registry.ts` (`subworkflow: subworkflowExecutor`).
- * - `persistence.ts:updateRunStatusFromNodes` (calls `notifyParentOnTerminal`
+ * - `persistence-ports/run.ts:updateRunStatusFromNodes` (calls `notifyParentOnTerminal`
  *   when the run flips to a terminal status and has a `parent_run_id`).
  *
  * Invariants:
@@ -500,7 +500,7 @@ async function safeAppendChildEvent(childRunId: string, err: unknown): Promise<v
   }
 }
 
-// Register the notifier with `persistence.ts` so `updateRunStatusFromNodes`
+// Register the notifier with the run persistence port so `updateRunStatusFromNodes`
 // can fire it on terminal status flips. Indirection avoids the import cycle
-// that would arise from `persistence.ts` importing this module directly.
+// that would arise from the run port importing this module directly.
 setSubworkflowNotifier(notifyParentOnTerminal);

@@ -39,9 +39,8 @@
  * Used by:
  *   - `packages/engine/src/safe-persist.ts` — re-export shim; every
  *     engine-internal import path is unchanged.
- *   - `packages/engine/src/persistence.ts` — `appendEvent`,
- *     `markNodeWaiting`, `markNodeSkipped`, `markNodeSucceeded`,
- *     `markNodeFailed` (via the shim).
+ *   - `packages/engine/src/persistence-ports/{event,node,recovery,run}.ts` —
+ *     lifecycle event, state, output, and error writes (via the shim).
  *   - `packages/engine/src/adapters/dead-letter-queue.ts` — DLQ row
  *     `errorJson` / `workflowJson` / `nodeJson` (via the shim).
  *   - `apps/api/src/audit.ts` — `audit()` writes to `audit_logs.metadata`.

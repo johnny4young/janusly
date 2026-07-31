@@ -243,6 +243,14 @@ export function normalizeErrorSignature(error: unknown, context: ErrorContext = 
     };
   }
 
+  if (errorObj?.code === "worker_stalled") {
+    return {
+      signature: `Worker stalled on ${nodeType} node`,
+      category: "unknown",
+      suggestedOwner: "platform",
+    };
+  }
+
   // 2. HTTP error — explicit statusCode wins; fall back to message regex.
   const statusFromField = errorObj && typeof errorObj.statusCode === "number" && Number.isFinite(errorObj.statusCode)
     ? errorObj.statusCode

@@ -24,7 +24,7 @@ import {
 const root = fileURLToPath(new URL("../", import.meta.url));
 const supabaseCli = fileURLToPath(new URL("../node_modules/supabase/dist/supabase.js", import.meta.url));
 const migrationsDirectory = fileURLToPath(new URL("../packages/db/migrations", import.meta.url));
-const schemaFile = fileURLToPath(new URL("../packages/db/src/schema.ts", import.meta.url));
+const schemaDirectory = fileURLToPath(new URL("../packages/db/src/schema", import.meta.url));
 const defaultBackupRoot = fileURLToPath(new URL("../output/backups", import.meta.url));
 const manifestName = "manifest.json";
 const databaseName = "database.sql";
@@ -246,9 +246,25 @@ async function queryRowCounts() {
   return summary;
 }
 
-async function currentPublicTables() {
-  const source = await readFile(schemaFile, "utf8");
-  return new Set([...source.matchAll(/pgTable\(\s*["']([^"']+)/gu)].map((match) => match[1]));
+export async function readDeclaredPublicTables(directory = schemaDirectory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+    .map((entry) => join(directory, entry.name))
+    .sort((left, right) => left.localeCompare(right));
+  const names = [];
+  for (const path of files) {
+    const source = await readFile(path, "utf8");
+    names.push(...[...source.matchAll(/pgTable\(\s*["']([^"']+)/gu)].map((match) => match[1]));
+  }
+  if (names.length === 0) {
+    throw new Error("schema modules did not declare any public tables");
+  }
+  const duplicates = names.filter((name, index) => names.indexOf(name) !== index);
+  if (duplicates.length > 0) {
+    throw new Error(`schema modules declare duplicate public tables: ${[...new Set(duplicates)].sort().join(", ")}`);
+  }
+  return new Set(names);
 }
 
 async function queryLivePublicTables() {
@@ -291,7 +307,7 @@ async function backup(destination) {
   try {
     await stopContainers(stopped);
     const [declaredTables, liveTables] = await Promise.all([
-      currentPublicTables(),
+      readDeclaredPublicTables(),
       queryLivePublicTables(),
     ]);
     const excludedPublicTables = liveTables

@@ -58,6 +58,33 @@ rate limits, and audit attribution stay in one chokepoint.
 server's canonical route/status catalogs. Do not reintroduce duplicated stable
 paths or run-status enums in the dispatcher.
 
+### Tool module ownership
+
+`packages/mcp-server/src/tools.ts` is the stable compatibility barrel consumed
+by the stdio entrypoint and existing callers. Internal ownership lives under
+`packages/mcp-server/src/tooling/`:
+
+- `visible-tools.ts` owns the 26 always-visible JSON Schema descriptors;
+- `write-tools.ts` owns the 14 process-gated write descriptors;
+- `catalog.ts` decorates descriptors with closed inputs, structured output,
+  risk annotations, and process-visible catalog composition;
+- `arguments.ts` validates primitive arguments and builds bounded outbound MCP
+  connection payloads;
+- `dispatch-visible.ts` translates always-visible operations to stable API
+  routes;
+- `dispatch-write.ts` preserves the process write gate before translating
+  mutation requests;
+- `dispatch.ts` rejects unknown arguments, chooses the correct dispatcher, and
+  projects successful or expected-error MCP results;
+- `shared.ts` contains only pure route/object helpers.
+
+The dependency graph is acyclic and fixed by `tools-modules.test.ts`. No
+internal module imports the barrel. The internal directory is deliberately not
+named `tools/`: extensionless ESM consumers of `tools.ts` must never resolve a
+sibling directory instead. Add a descriptor and dispatcher case in their
+owning always-visible or write modules; preserve catalog order because clients
+may retain the advertised sequence.
+
 ## Protocol contract
 
 The current server uses the stable local `stdio` transport and advertises the
@@ -215,6 +242,8 @@ The package test suite must prove:
 - strict rejection of invalid or query-broadening arguments;
 - structured success and structured `isError` results;
 - a real SDK smoke over stdio, including one loopback HTTP API proxy call.
+- stable barrel identity, exact 26/14 descriptor ownership, closed module
+  inventory, and acyclic internal dependencies.
 
 Run:
 

@@ -8,9 +8,9 @@
  * Zod-free.
  *
  * Used by:
- * - `packages/engine/src/persistence.ts` and `core/runtime.ts` — wire-side
- *   comparisons, `inArray` clauses on cancellation paths, terminal-status
- *   guards.
+ * - `packages/engine/src/persistence-ports/{node,run}.ts` and `core/runtime.ts` —
+ *   wire-side comparisons, `inArray` clauses on cancellation paths, and
+ *   terminal-status guards.
  * - `apps/api/src/routes/runs-routes.ts` — `/run/cancel`'s
  *   "already-terminal" guard.
  * - `apps/web/src/App.tsx`, `apps/web/src/components/RightPanel.tsx` —

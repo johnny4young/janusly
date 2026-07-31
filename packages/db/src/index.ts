@@ -1,6 +1,6 @@
 /**
  * `@janusly/db` barrel — the singleton Drizzle client + a re-export of the
- * schema and the env-loader.
+ * side-effect-free schema barrel and the env-loader.
  *
  * Importing this module triggers `loadRootEnv()` and instantiates a single
  * `postgres-js` connection pool against `process.env.DATABASE_URL`. Every
@@ -10,7 +10,7 @@
  * Used by:
  * - `packages/data/src/*` — drizzle repos for routing stats, improvements,
  *   workflow rollback.
- * - `packages/engine/src/persistence.ts`, `start-run.ts`, `resume-run.ts`,
+ * - `packages/engine/src/persistence-ports/*`, `start-run.ts`, `resume-run.ts`,
  *   `billing.ts`, `secrets.ts`, `memory.ts`, `node-registry.ts` — direct
  *   `db.select/insert/update` calls.
  * - `apps/api/src/index.ts` — every route that touches Postgres.
