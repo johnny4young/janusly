@@ -698,6 +698,9 @@ el chat publicado.
 | 2026-07-31 | T-047 migrate gap | El lane destapó un gap real de setup: `make migrate` solo aplicaba las migraciones drizzle compartidas y NUNCA `migrations/0001_go_pilot.sql` (la DB dev la recibió a mano) — sin `go_pilot_wakeups` los retries/timers no agendan y F17 colgó 30s hasta timeout con la paridad tardando 541s. Ambos targets aplican ahora la migración del pilot (idempotente) tras drizzle; con el fix la paridad pg15 corre en 3.8s |
 | 2026-07-31 | T-047 race test | Segundo hallazgo del lane: el test de cancelación de campañas leía los contadores EN la respuesta del cancel, pero un item reclamado antes del cancel legítimamente termina DESPUÉS (comportamiento documentado) — en pg15 el timing lo destapó. El test ahora espera el asentamiento de todos los items y luego exige contadores veraces |
 | 2026-07-31 | T-049 strip | Strip de credenciales en redirects por ORIGEN (scheme+host+puerto efectivo, spec fetch) dentro del CheckRedirect ya existente: la lógica propia de Go compara DOMINIOS (mismo host o subdominio conserva Authorization/Cookie en cualquier puerto y nunca toca Proxy-Authorization) — un redirect al mismo host en otro puerto, un downgrade de scheme o un salto de subdominio habría reenviado la credencial. Same-origin conserva. Divergencia documentada: la semántica de método en redirects sigue siendo la de Go (301/302 reescriben todo no-GET/HEAD a GET; fetch solo POST) — reimplementar el loop manual no se justifica para el pilot |
+| 2026-07-31 | T-048 k6 | `make bench` = k6 (tres escenarios SECUENCIALES de 20s: start→terminal, list caliente, diamond F09) + serie temporal `series.jsonl` + `BENCH.md` regenerado con columna de DIRECCIÓN (↑ mejor / ↓ mejor) y veredicto que ya aplica la dirección (✅ mejora / ⚠️ regresión / ≈ igual, umbral 5%, nota de ruido ±20% por crecimiento de la base). `cmd/loadgen` se queda como herramienta de comparación CROSS-backend; k6 es la regresión mono-backend en el tiempo |
+| 2026-07-31 | T-048 lista inflada | El k6 destapó que los números de `list` del loadgen eran contra un org VACÍO (cada invocación estrenaba org): 17k req/s con 0 filas. Con org poblado (~10k runs) la lista real daba 338 req/s @ p50 150ms |
+| 2026-07-31 | T-048 índice keyset | Causa raíz COMPARTIDA con Node (chip upstream creado): el keyset ordena por `(created_at DESC, id DESC)` pero `runs_org_created_idx` no incluye el tiebreaker `id` → bitmap + top-N sort sobre TODO el org por página (4.5ms @ 10k filas, O(runs-del-org)). Con `go_pilot_runs_org_created_id_idx` alineado: 0.27ms (17×) y la lista poblada pasa a 8.2k req/s @ p95 8ms (24×). El índice vive en la migración del pilot con prefijo `go_pilot_`; el fix Node va por el patrón two-file de índices hot-path |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -932,7 +935,7 @@ compactas aquí; el detalle de paridad se lee de la fuente al ejecutar.
 | T-045 | Replay campaigns mínimo (2..N mismos-firma, paced, cancelable) | F2 | P3 | todo |
 | T-046 | Paridad lane A ampliada: F11-F20 (cancel, fork/join, loop, webhook, keyset) | F2 | P0 | todo |
 | T-047 | Postgres 15 floor: lane integración con `JANUSLY_POSTgres_IMAGE` pg15 | F2 | P2 | done |
-| T-048 | Bench regresión: `make bench` guarda serie temporal en conformance/perf | F2 | P2 | todo |
+| T-048 | Bench regresión: `make bench` guarda serie temporal en conformance/perf | F2 | P2 | done |
 | T-049 | Hardening SSRF extra: redirect cross-origin strip de headers credenciales | F2 | P1 | todo |
 | T-050 | Journal ola 2 parcial + revisión de divergencias acumuladas | F2 | P1 | todo |
 | T-051 | Streaming HTTP opt-in (`bodyMode:"stream"` → preview acotado) | F2 | P2 | todo |

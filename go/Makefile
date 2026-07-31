@@ -2,7 +2,7 @@ SHELL := /bin/bash
 DB_URL ?= postgres://janusly:janusly-go-local@127.0.0.1:4632/janusly_go
 PG_CONTAINER := janusly-go-pilot-postgres-1
 
-.PHONY: db-up db-down migrate schema-dump generate lint test run build parity ci test-pg15
+.PHONY: db-up db-down migrate schema-dump generate lint test run build parity ci test-pg15 bench
 
 db-up:
 	docker compose -f docker-compose.yml up -d --wait
@@ -72,3 +72,8 @@ test-pg15:
 	JANUSLY_GO_DATABASE_URL=postgres://janusly:janusly-go-local@127.0.0.1:4634/janusly_go \
 		go test -race -tags integration -p 1 -count=1 ./... ; \
 		status=$$?; docker compose -f pg15.compose.yml down -v; exit $$status
+
+# k6 regression bench: boots the Go binary, runs the three sequential
+# scenarios, appends to conformance/perf/series.jsonl, refreshes BENCH.md.
+bench:
+	node conformance/run-bench.mjs

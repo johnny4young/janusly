@@ -815,3 +815,20 @@ local. Sin umbral pasa/no-pasa: números para aprender.
   scheme o salto de subdominio conservaban el header. El strip por
   origen vive ahora en el mismo CheckRedirect que ya revalidaba SSRF
   por salto, con el caso "mismo host, otro puerto" pin-eado en test.
+
+## 2026-07-31 — bench de regresión con k6 + el índice que faltaba (T-048)
+
+- `make bench` corre los tres escenarios canónicos en secuencia con k6
+  y deja dos artefactos: la serie temporal cruda y una tabla que
+  cualquiera puede leer — cada métrica declara su dirección (↑ mejor /
+  ↓ mejor) y el veredicto ya la aplica, con la nota de ruido esperada
+  entre corridas consecutivas.
+- El bench se ganó el sueldo de inmediato, dos veces. Primero: los
+  números de lista del loadgen estaban inflados — cada invocación
+  estrenaba un org vacío, así que "17k req/s" listaba cero filas; con
+  un org poblado la verdad era 338 req/s a 150ms. Segundo: la causa
+  raíz es compartida con Node — el keyset ordena por (created_at, id)
+  pero el índice no lleva el tiebreaker, así que cada página ordena
+  todos los runs del org. Con el índice alineado: 17× por consulta,
+  24× en el escenario (8.2k req/s @ 8ms sobre org poblado). Chip
+  upstream con el patrón two-file para el fix en drizzle.
