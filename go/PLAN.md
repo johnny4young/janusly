@@ -180,8 +180,8 @@ crítica) · P1 (importante) · P2 (stretch).
 | T-014 | E2E de API Go (lane B) | P0 | done |
 | T-015 | Servidor MCP stdio + e2e vía MCP (lane C) | P1 | done |
 | T-016 | Rendimiento: k6 + RSS + pprof vs Node | P1 | done |
-| T-017 | Journal consolidado + análisis de fricción | P1 | todo |
-| T-018 | Puerta D15: informe + recomendación | P0 | todo |
+| T-017 | Journal consolidado + análisis de fricción | P1 | done |
+| T-018 | Puerta D15: informe + recomendación | P0 | partial |
 | T-101 | (stretch) Tick de schedules con líder por advisory lock | P2 | todo |
 | T-102 | (post-piloto) LlmClient Go sobre SDKs oficiales | P2 | todo |
 | T-103 | (post-piloto) pdf.generate: evaluación maroto v2 | P2 | todo |
