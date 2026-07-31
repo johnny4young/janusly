@@ -1324,3 +1324,10 @@ producción necesita saber — de lo ya resuelto o informativo.
 - Los nombres de la referencia scrapean junto a las series propias, el
   Resource viaja como target_info, y el conflicto de bind se probó con
   el binario real: exit no-cero en vez de media superficie.
+
+## 2026-07-31 — la afirmación del REPORT-W2, ahora probada (T-093)
+
+- Dos engines, una base: 75 DAGs, una campaña con dos bombas y 80
+  wake-ups de retry — exactly-once aguantó todo, tres corridas. Los dos
+  fallos del camino eran del arnés (Edges null; el revive-in-place acuña
+  DLQs nuevas), y ambos terminaron documentando comportamiento real.

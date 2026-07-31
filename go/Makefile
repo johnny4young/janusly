@@ -85,3 +85,8 @@ FUZZTIME ?= 45s
 fuzz:
 	go test ./internal/grammar/ -fuzz FuzzValidateAndEvaluateExpression -fuzztime $(FUZZTIME)
 	go test ./internal/grammar/ -fuzz FuzzRenderTemplate -fuzztime $(FUZZTIME)
+
+# Lane HA: dos engines con pools separados sobre la misma base — el
+# modelo in-test de dos réplicas. Corre SOLO los tests etiquetados ha.
+test-ha:
+	go test -race -tags "integration ha" -p 1 -count=1 -run 'TestHA' ./internal/engine/ -timeout 10m
