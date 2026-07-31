@@ -43,6 +43,9 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
 	mux.HandleFunc("POST /v1/workflows/save", server.auth(server.saveWorkflow))
+	mux.HandleFunc("GET /v1/workflows", server.auth(server.listWorkflows))
+	mux.HandleFunc("GET /v1/workflows/latest", server.auth(server.latestWorkflowVersion))
+	mux.HandleFunc("GET /v1/workflows/versions", server.auth(server.listWorkflowVersions))
 	mux.HandleFunc("POST /v1/start", server.auth(server.startRun))
 	mux.HandleFunc("GET /v1/run", server.auth(server.getRun))
 	mux.HandleFunc("GET /v1/status", server.auth(server.getRun))
@@ -420,6 +423,122 @@ func (s *V1Server) resumeRun(w http.ResponseWriter, r *http.Request, rc v1Reques
 		return
 	}
 	writeV1Data(w, rc.id, map[string]any{"resumed": true})
+}
+
+func (s *V1Server) listWorkflows(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	query := r.URL.Query()
+	limit := 100
+	if raw := query.Get("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+	beforeCreatedAt := time.Now().Add(time.Hour)
+	beforeID := "￿"
+	if cursor := query.Get("before"); cursor != "" {
+		at, id, ok := parseEventsCursor(cursor)
+		if !ok {
+			writeV1Error(w, rc.id, http.StatusBadRequest, "invalid_input", "Invalid request body",
+				map[string]any{"field": "before"})
+			return
+		}
+		beforeCreatedAt, beforeID = at, id
+	}
+	search := pgtype.Text{String: query.Get("q"), Valid: query.Get("q") != ""}
+	rows, err := store.New(s.pool).ListWorkflowRows(r.Context(), store.ListWorkflowRowsParams{
+		OrgID: rc.orgID, PageLimit: int32(limit),
+		BeforeCreatedAt: beforeCreatedAt, BeforeID: beforeID, Search: search,
+	})
+	if err != nil {
+		s.internal(w, rc, err)
+		return
+	}
+	items := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, map[string]any{
+			"id": row.ID, "orgId": row.OrgID, "name": row.Name,
+			"createdBy": textOrNull(row.CreatedBy), "createdAt": timeOrNull(row.CreatedAt),
+			"lastRunStatus": textOrNullString(row.LastRunStatus), "runCount": row.RunCount,
+			"bufferedTriggerCount": 0,
+			"status":               row.Status, "pausedReason": textOrNull(row.PausedReason),
+			"tags": []string{}, "folder": nil, "deletedAt": timeOrNull(row.DeletedAt),
+		})
+	}
+	writeV1Data(w, rc.id, items)
+}
+
+// versionView emits the contract's WorkflowVersion key set; columns the
+// pilot does not populate surface as explicit nulls.
+func versionView(id, orgID, workflowID string, version int32, dagJSON json.RawMessage, createdBy pgtype.Text, createdAt *time.Time) map[string]any {
+	return map[string]any{
+		"id": id, "orgId": orgID, "workflowId": workflowID, "version": version,
+		"dagJson": rawOrNull(dagJSON), "sloJson": nil, "upstreamHealthSources": nil,
+		"createdBy": textOrNull(createdBy), "createdAt": timeOrNull(createdAt),
+	}
+}
+
+// requireActiveWorkflow implements the shared parent gate: missing or
+// tombstoned parents read as the same workflow_not_found.
+func (s *V1Server) requireActiveWorkflow(w http.ResponseWriter, r *http.Request, rc v1Request) (string, bool) {
+	workflowID := strings.TrimSpace(r.URL.Query().Get("workflowId"))
+	if workflowID == "" {
+		writeV1Error(w, rc.id, http.StatusBadRequest, "invalid_input", "Invalid request body",
+			map[string]any{"field": "workflowId"})
+		return "", false
+	}
+	if _, err := store.New(s.pool).GetWorkflow(r.Context(), store.GetWorkflowParams{
+		ID: workflowID, OrgID: rc.orgID,
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeV1Error(w, rc.id, http.StatusNotFound, "workflow_not_found", "Workflow not found", nil)
+			return "", false
+		}
+		s.internal(w, rc, err)
+		return "", false
+	}
+	return workflowID, true
+}
+
+func (s *V1Server) latestWorkflowVersion(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	workflowID, ok := s.requireActiveWorkflow(w, r, rc)
+	if !ok {
+		return
+	}
+	row, err := store.New(s.pool).GetLatestWorkflowVersion(r.Context(), store.GetLatestWorkflowVersionParams{
+		WorkflowID: workflowID, OrgID: rc.orgID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The contract's response is nullable: an active workflow with no
+			// versions reads as null, not an error.
+			writeV1Data(w, rc.id, nil)
+			return
+		}
+		s.internal(w, rc, err)
+		return
+	}
+	writeV1Data(w, rc.id, versionView(row.ID, row.OrgID, row.WorkflowID, row.Version,
+		row.DagJson, row.CreatedBy, row.CreatedAt))
+}
+
+func (s *V1Server) listWorkflowVersions(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	workflowID, ok := s.requireActiveWorkflow(w, r, rc)
+	if !ok {
+		return
+	}
+	rows, err := store.New(s.pool).ListWorkflowVersions(r.Context(), store.ListWorkflowVersionsParams{
+		WorkflowID: workflowID, OrgID: rc.orgID,
+	})
+	if err != nil {
+		s.internal(w, rc, err)
+		return
+	}
+	items := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, versionView(row.ID, row.OrgID, row.WorkflowID, row.Version,
+			row.DagJson, row.CreatedBy, row.CreatedAt))
+	}
+	writeV1Data(w, rc.id, items)
 }
 
 // cancelRun ports the reference guards exactly — and note the asymmetry

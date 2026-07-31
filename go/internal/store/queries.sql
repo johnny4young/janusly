@@ -24,6 +24,38 @@ WHERE org_id = $1
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(page_limit);
 
+-- Workflow list rows with the read-surface aggregates: run count and last
+-- run status match runs either through saved versions or the ad-hoc
+-- version-id fallback, mirroring the runs-list filter.
+-- name: ListWorkflowRows :many
+SELECT w.id, w.org_id, w.name, w.created_by, w.created_at, w.status,
+       w.paused_reason, w.deleted_at,
+       (SELECT count(*) FROM runs r
+        WHERE r.org_id = w.org_id
+          AND (r.workflow_version_id = w.id OR r.workflow_version_id IN (
+            SELECT wv.id FROM workflow_versions wv WHERE wv.workflow_id = w.id
+          )))::int AS run_count,
+       (SELECT r.status FROM runs r
+        WHERE r.org_id = w.org_id
+          AND (r.workflow_version_id = w.id OR r.workflow_version_id IN (
+            SELECT wv.id FROM workflow_versions wv WHERE wv.workflow_id = w.id
+          ))
+        ORDER BY r.created_at DESC, r.id DESC LIMIT 1) AS last_run_status
+FROM workflows w
+WHERE w.org_id = $1 AND w.deleted_at IS NULL
+  AND (w.created_at, w.id) < (sqlc.arg(before_created_at)::timestamptz, sqlc.arg(before_id)::text)
+  AND (sqlc.narg(search)::text IS NULL
+       OR w.name ILIKE '%' || sqlc.narg(search) || '%'
+       OR w.id ILIKE '%' || sqlc.narg(search) || '%')
+ORDER BY w.created_at DESC, w.id DESC
+LIMIT sqlc.arg(page_limit);
+
+-- name: ListWorkflowVersions :many
+SELECT id, org_id, workflow_id, version, dag_json, created_by, created_at
+FROM workflow_versions
+WHERE workflow_id = $1 AND org_id = $2
+ORDER BY version DESC;
+
 -- name: InsertWorkflowVersion :exec
 INSERT INTO workflow_versions (id, org_id, workflow_id, version, dag_json, created_by)
 VALUES ($1, $2, $3, $4, $5, $6);

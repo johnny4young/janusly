@@ -495,3 +495,15 @@ local. Sin umbral pasa/no-pasa: números para aprender.
   así que el filtro compara el version-id del run directamente cuando
   el join da NULL. Mi primera versión (solo el join) devolvía 0 para
   ad-hoc; el test lo cazó y la fuente dio la forma exacta.
+
+## 2026-07-30 — rutas read de workflows (T-027)
+
+- Las tres lecturas que la lista de Flows del web necesita: la fila de
+  lista con sus agregados (runCount y lastRunStatus usando el MISMO
+  match ad-hoc-aware que el filtro de runs de T-026 — la lección
+  aprendida ayer aplicada hoy sin test rojo), latest con su contrato
+  nullable (workflow sin versiones = null, no error), y versions
+  newest-first.
+- El gate del padre activo es una función compartida: param faltante
+  nombra el campo, y desconocido/tombstone/cross-org son el MISMO
+  workflow_not_found — la invisibilidad de tenancy otra vez.

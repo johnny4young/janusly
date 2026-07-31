@@ -504,3 +504,60 @@ func TestRunsKeysetCursorRoundTrip(t *testing.T) {
 	requireError(t, h.call("GET", "/v1/runs?before=not-a-cursor", nil, ""),
 		400, "invalid_input", "Invalid request body")
 }
+
+func TestWorkflowReadSurfaces(t *testing.T) {
+	h := newAPIHarness(t)
+	workflowID := "wf-read-" + h.org
+	doc := makeLinearWorkflow(workflowID)
+	h.call("POST", "/v1/workflows/save", doc, "")
+	h.call("POST", "/v1/workflows/save", doc, "")
+	started := h.call("POST", "/v1/start", map[string]any{"workflow": doc}, "")
+	h.waitRun(started.body["data"].(map[string]any)["runId"].(string), "succeeded")
+
+	// List row: the contract's full key set, aggregates included.
+	list := h.call("GET", "/v1/workflows?q="+workflowID, nil, "")
+	requireEnvelope(t, list)
+	rows := list.body["data"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("search must narrow to the one workflow, got %d", len(rows))
+	}
+	row := rows[0].(map[string]any)
+	requireKeys(t, row,
+		"id", "orgId", "name", "createdBy", "createdAt", "lastRunStatus",
+		"runCount", "bufferedTriggerCount", "status", "pausedReason",
+		"tags", "folder", "deletedAt")
+	if row["runCount"] != float64(1) || row["lastRunStatus"] != "succeeded" {
+		t.Fatalf("aggregates must reflect the run: %v", row)
+	}
+
+	// Latest: nullable contract — a version row with the full key set here.
+	latest := h.call("GET", "/v1/workflows/latest?workflowId="+workflowID, nil, "")
+	requireEnvelope(t, latest)
+	version := latest.body["data"].(map[string]any)
+	requireKeys(t, version,
+		"id", "orgId", "workflowId", "version", "dagJson", "sloJson",
+		"upstreamHealthSources", "createdBy", "createdAt")
+	if version["version"] != float64(2) {
+		t.Fatalf("latest must be version 2 after two saves: %v", version["version"])
+	}
+	dag := version["dagJson"].(map[string]any)
+	if dag["id"] != workflowID {
+		t.Fatalf("dagJson must round-trip the saved document: %v", dag["id"])
+	}
+
+	// Versions: newest first.
+	versions := h.call("GET", "/v1/workflows/versions?workflowId="+workflowID, nil, "")
+	items := versions.body["data"].([]any)
+	if len(items) != 2 || items[0].(map[string]any)["version"] != float64(2) {
+		t.Fatalf("versions must list newest first: %v", items)
+	}
+
+	// Guards: missing param names the field; unknown id is workflow_not_found.
+	requireError(t, h.call("GET", "/v1/workflows/latest", nil, ""),
+		400, "invalid_input", "Invalid request body")
+	requireError(t, h.call("GET", "/v1/workflows/versions?workflowId=ghost", nil, ""),
+		404, "workflow_not_found", "Workflow not found")
+	// Cross-org: the workflow simply does not exist for another tenant.
+	requireError(t, h.call("GET", "/v1/workflows/latest?workflowId="+workflowID, nil, h.org+"-x"),
+		404, "workflow_not_found", "Workflow not found")
+}

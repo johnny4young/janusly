@@ -1102,6 +1102,141 @@ func (q *Queries) ListRuns(ctx context.Context, arg ListRunsParams) ([]ListRunsR
 	return items, nil
 }
 
+const listWorkflowRows = `-- name: ListWorkflowRows :many
+SELECT w.id, w.org_id, w.name, w.created_by, w.created_at, w.status,
+       w.paused_reason, w.deleted_at,
+       (SELECT count(*) FROM runs r
+        WHERE r.org_id = w.org_id
+          AND (r.workflow_version_id = w.id OR r.workflow_version_id IN (
+            SELECT wv.id FROM workflow_versions wv WHERE wv.workflow_id = w.id
+          )))::int AS run_count,
+       (SELECT r.status FROM runs r
+        WHERE r.org_id = w.org_id
+          AND (r.workflow_version_id = w.id OR r.workflow_version_id IN (
+            SELECT wv.id FROM workflow_versions wv WHERE wv.workflow_id = w.id
+          ))
+        ORDER BY r.created_at DESC, r.id DESC LIMIT 1) AS last_run_status
+FROM workflows w
+WHERE w.org_id = $1 AND w.deleted_at IS NULL
+  AND (w.created_at, w.id) < ($2::timestamptz, $3::text)
+  AND ($4::text IS NULL
+       OR w.name ILIKE '%' || $4 || '%'
+       OR w.id ILIKE '%' || $4 || '%')
+ORDER BY w.created_at DESC, w.id DESC
+LIMIT $5
+`
+
+type ListWorkflowRowsParams struct {
+	OrgID           string
+	BeforeCreatedAt time.Time
+	BeforeID        string
+	Search          pgtype.Text
+	PageLimit       int32
+}
+
+type ListWorkflowRowsRow struct {
+	ID            string
+	OrgID         string
+	Name          string
+	CreatedBy     pgtype.Text
+	CreatedAt     *time.Time
+	Status        string
+	PausedReason  pgtype.Text
+	DeletedAt     *time.Time
+	RunCount      int32
+	LastRunStatus string
+}
+
+// Workflow list rows with the read-surface aggregates: run count and last
+// run status match runs either through saved versions or the ad-hoc
+// version-id fallback, mirroring the runs-list filter.
+func (q *Queries) ListWorkflowRows(ctx context.Context, arg ListWorkflowRowsParams) ([]ListWorkflowRowsRow, error) {
+	rows, err := q.db.Query(ctx, listWorkflowRows,
+		arg.OrgID,
+		arg.BeforeCreatedAt,
+		arg.BeforeID,
+		arg.Search,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListWorkflowRowsRow
+	for rows.Next() {
+		var i ListWorkflowRowsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Name,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.Status,
+			&i.PausedReason,
+			&i.DeletedAt,
+			&i.RunCount,
+			&i.LastRunStatus,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkflowVersions = `-- name: ListWorkflowVersions :many
+SELECT id, org_id, workflow_id, version, dag_json, created_by, created_at
+FROM workflow_versions
+WHERE workflow_id = $1 AND org_id = $2
+ORDER BY version DESC
+`
+
+type ListWorkflowVersionsParams struct {
+	WorkflowID string
+	OrgID      string
+}
+
+type ListWorkflowVersionsRow struct {
+	ID         string
+	OrgID      string
+	WorkflowID string
+	Version    int32
+	DagJson    json.RawMessage
+	CreatedBy  pgtype.Text
+	CreatedAt  *time.Time
+}
+
+func (q *Queries) ListWorkflowVersions(ctx context.Context, arg ListWorkflowVersionsParams) ([]ListWorkflowVersionsRow, error) {
+	rows, err := q.db.Query(ctx, listWorkflowVersions, arg.WorkflowID, arg.OrgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListWorkflowVersionsRow
+	for rows.Next() {
+		var i ListWorkflowVersionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.WorkflowID,
+			&i.Version,
+			&i.DagJson,
+			&i.CreatedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWorkflows = `-- name: ListWorkflows :many
 SELECT id, org_id, name, status, created_by, created_at
 FROM workflows
