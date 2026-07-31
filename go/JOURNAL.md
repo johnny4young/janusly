@@ -1055,3 +1055,11 @@ producción necesita saber — de lo ya resuelto o informativo.
   sus asteriscos metodológicos en vez de esconderlos: la lista de ola
   2 mide el peor caso (org con decenas de miles de runs) y aún así
   gana, y la comparación diamond es conservadora a favor de Node.
+
+## 2026-07-31 — informe de ola 2: goal completo (T-068)
+
+- Treinta de treinta. El informe dice lo que un lector con poder de
+  decisión necesita: qué es el pilot hoy (la app de producción no sabe
+  que habla con Go), qué evidencia pesa (paridad reproducible,
+  rendimiento sin regresión, el loop del operador entero), qué le
+  falta para producción (plataforma, no runtime) y qué ola seguiría.
