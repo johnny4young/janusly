@@ -27,6 +27,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/ai"
 	"github.com/johnny4young/janusly/go/internal/aibudget"
 	"github.com/johnny4young/janusly/go/internal/aiconfig"
+	"github.com/johnny4young/janusly/go/internal/aiguidance"
 	"github.com/johnny4young/janusly/go/internal/audit"
 	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/grammar"
@@ -187,9 +188,16 @@ func (s *V1Server) generateFreeJson(ctx context.Context, client ai.Client, promp
 	callContext := ai.CallContext{OrgID: rc.orgID, UserID: rc.userID}
 	userPrompt := prompt
 
+	// Operator guidance (janusly.md) appends as a fenced DATA section —
+	// empty guidance leaves the base prompt byte-for-byte unchanged.
+	systemPrompt := generateSystemPrompt
+	if guidance := aiguidance.Load(ctx, s.pool, rc.orgID, ""); guidance != "" {
+		systemPrompt = generateSystemPrompt + "\n\n" + guidance
+	}
+
 	generate := func(currentPrompt string) (string, *ai.AIError) {
 		result, aiErr := client.GenerateText(ctx, ai.GenerateTextInput{
-			System: generateSystemPrompt, Prompt: currentPrompt,
+			System: systemPrompt, Prompt: currentPrompt,
 			ResponseFormat: "json", ModelHint: modelHint,
 			CacheSystemPrompt: true, Context: callContext,
 		})
@@ -358,6 +366,10 @@ func clampCandidateCount(n int) int {
 // to the single-shot ladder.
 func (s *V1Server) selectBestOfN(ctx context.Context, client ai.Client, prompt, modelHint string,
 	callContext ai.CallContext, n int, meta *generationMeta) ([]byte, int) {
+	systemPrompt := generateSystemPrompt
+	if guidance := aiguidance.Load(ctx, s.pool, callContext.OrgID, ""); guidance != "" {
+		systemPrompt = generateSystemPrompt + "\n\n" + guidance
+	}
 	type candidate struct {
 		raw      []byte
 		model    string
@@ -370,7 +382,7 @@ func (s *V1Server) selectBestOfN(ctx context.Context, client ai.Client, prompt, 
 		go func() {
 			defer wg.Done()
 			result, aiErr := client.GenerateText(ctx, ai.GenerateTextInput{
-				System: generateSystemPrompt, Prompt: prompt,
+				System: systemPrompt, Prompt: prompt,
 				ResponseFormat: "json", ModelHint: modelHint,
 				CacheSystemPrompt: true, Context: callContext,
 			})

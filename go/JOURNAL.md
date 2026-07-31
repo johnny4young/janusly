@@ -1418,3 +1418,11 @@ producción necesita saber — de lo ya resuelto o informativo.
 - Best-of-N con el scorer de la referencia y la regla que importa: un
   candidato inválido no descarta la generación si otro valida, y N=1
   ni siquiera entra a la rama.
+
+## 2026-07-31 — preferencias, jamás órdenes (T-107)
+
+- janusly.md compuesto con el framing DATA de la referencia: el intento
+  de "ignora las instrucciones previas" sobrevive solo como líneas de
+  datos detrás de la cláusula de escape, los secretos se lavan al
+  componer, y la matemática de donación garantiza que la org nunca borra
+  la sección del workflow.

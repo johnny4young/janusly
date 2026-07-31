@@ -953,3 +953,8 @@ SELECT
      ) AS candidate FROM eligible e
    ) instants
    WHERE candidate > '-infinity'::timestamptz) AS oldest_eligible_at;
+
+-- Workflow-scope operator guidance for AI prompt composition.
+-- name: GetWorkflowAiGuidance :one
+SELECT ai_guidance_markdown FROM workflow_metadata
+WHERE org_id = $1 AND workflow_id = $2;

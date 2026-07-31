@@ -1197,6 +1197,24 @@ func (q *Queries) GetWorkflow(ctx context.Context, arg GetWorkflowParams) (Workf
 	return i, err
 }
 
+const getWorkflowAiGuidance = `-- name: GetWorkflowAiGuidance :one
+SELECT ai_guidance_markdown FROM workflow_metadata
+WHERE org_id = $1 AND workflow_id = $2
+`
+
+type GetWorkflowAiGuidanceParams struct {
+	OrgID      string
+	WorkflowID string
+}
+
+// Workflow-scope operator guidance for AI prompt composition.
+func (q *Queries) GetWorkflowAiGuidance(ctx context.Context, arg GetWorkflowAiGuidanceParams) (pgtype.Text, error) {
+	row := q.db.QueryRow(ctx, getWorkflowAiGuidance, arg.OrgID, arg.WorkflowID)
+	var ai_guidance_markdown pgtype.Text
+	err := row.Scan(&ai_guidance_markdown)
+	return ai_guidance_markdown, err
+}
+
 const getWorkflowIngestState = `-- name: GetWorkflowIngestState :one
 
 SELECT org_id, status, deleted_at FROM workflows WHERE id = $1
