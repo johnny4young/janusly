@@ -287,6 +287,14 @@ retroactively.
   to re-sort the organization's entire run history on every page. Operators
   deploying to production apply the migration's sibling `production-rollout.sql`
   (concurrent index creates/drops) before `pnpm migrate`.
+- The same sort alignment now covers every other list whose index was declared
+  DESC NULLS LAST on a nullable timestamp and therefore never served its
+  query's ordering: the recovery queue's newest/oldest and status-filtered
+  pages, the audit viewer keyset and budget-gate dedup read, replay campaigns,
+  recovery feedback, prompts, buffered trigger events, and the external-runtime
+  workflow/run/step projections. Verified index-ordered (no re-sort) via
+  EXPLAIN for each consumer shape; the migration ships the same
+  `production-rollout.sql` concurrent-rollout runbook.
 
 ## Development milestone: recovery platform hardening
 

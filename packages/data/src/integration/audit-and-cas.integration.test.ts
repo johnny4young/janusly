@@ -343,7 +343,7 @@ describe("hot-path indexes present after migration", () => {
   }
 
   it("audit_logs carries the action-prefix index", async () => {
-    expect(await indexNames("audit_logs")).toContain("audit_logs_org_action_created_idx");
+    expect(await indexNames("audit_logs")).toContain("audit_logs_org_action_created_id_idx");
   });
 
   it("memory_entries carries the baseline HNSW vector index", async () => {
@@ -365,5 +365,19 @@ describe("hot-path indexes present after migration", () => {
     expect(names).toContain("workflows_org_created_id_idx");
     expect(names).toContain("workflows_org_deleted_idx");
     expect(names).not.toContain("workflows_org_created_idx");
+  });
+
+  it("dead_letters carries the NULLS FIRST keyset indexes and dropped the misaligned pair", async () => {
+    const names = await indexNames("dead_letters");
+    expect(names).toContain("dead_letters_org_created_id_idx");
+    expect(names).toContain("dead_letters_org_status_created_idx");
+    expect(names).not.toContain("dead_letters_org_created_idx");
+    expect(names).not.toContain("dead_letters_org_status_idx");
+  });
+
+  it("audit_logs carries the NULLS FIRST keyset index and dropped the misaligned one", async () => {
+    const names = await indexNames("audit_logs");
+    expect(names).toContain("audit_logs_org_created_id_idx");
+    expect(names).not.toContain("audit_logs_org_created_idx");
   });
 });
