@@ -733,5 +733,75 @@ func (e *Engine) recordRecoveryImpact(ctx context.Context, q *store.Queries, cla
 			return fmt.Errorf("upsert impact rollup: %w", err)
 		}
 	}
+
+	// The incident closes ONLY alongside terminal node success — this CAS
+	// + its audit ride the same transaction as the impact fact, so
+	// enqueue acceptance can never masquerade as recovery and the Value
+	// Dashboard and ownership views cannot drift through a crash gap.
+	actor := "system"
+	if nodeClaim.RecoveryRequestedBy.Valid && nodeClaim.RecoveryRequestedBy.String != "" {
+		actor = nodeClaim.RecoveryRequestedBy.String
+	}
+	item, err := q.FindRecoveryItemForDeadLetter(ctx, store.FindRecoveryItemForDeadLetterParams{
+		OrgID: dlq.OrgID, DeadLetterID: deadLetterID,
+	})
+	if err == nil && item.Status != "resolved" {
+		firstActionAt := recoveredAt
+		if dlq.ReplayClaimedAt != nil {
+			firstActionAt = dlq.ReplayClaimedAt.UTC()
+		} else if dlq.ReplayedAt != nil {
+			firstActionAt = dlq.ReplayedAt.UTC()
+		}
+		resolved, err := q.ResolveRecoveryItemFromTerminal(ctx, store.ResolveRecoveryItemFromTerminalParams{
+			OrgID: dlq.OrgID, ID: item.ID,
+			Actor:         pgtype.Text{String: actor, Valid: true},
+			RecoveredAt:   &recoveredAt,
+			FirstActionAt: &firstActionAt,
+			FromStatus:    item.Status,
+		})
+		if err != nil {
+			return fmt.Errorf("resolve recovery item: %w", err)
+		}
+		if resolved > 0 {
+			metadata, _ := json.Marshal(map[string]any{
+				"before": map[string]any{"status": item.Status},
+				"after":  map[string]any{"status": "resolved", "resolutionReason": "sandbox_replay_succeeded"},
+				"via":    "terminal_recovery",
+			})
+			if err := q.InsertAuditLogRow(ctx, store.InsertAuditLogRowParams{
+				ID: e.newID(), OrgID: dlq.OrgID,
+				UserID:     pgtype.Text{String: actor, Valid: true},
+				Action:     "recovery.item.resolved",
+				TargetType: pgtype.Text{String: "recovery-item", Valid: true},
+				TargetID:   pgtype.Text{String: item.ID, Valid: true},
+				Metadata:   metadata,
+			}); err != nil {
+				return fmt.Errorf("audit item resolution: %w", err)
+			}
+		}
+	}
+
+	// Playbook attribution: a claim that carried a playbook + its
+	// validation run credits the playbook's applied win atomically. The
+	// durable playbook receipt row arrives with the playbook substrate
+	// (T-139); the audit fact lands now so the trail never has a gap.
+	if nodeClaim.RecoveryPlaybookID.Valid && nodeClaim.RecoveryPlaybookID.String != "" &&
+		nodeClaim.RecoveryValidationRunID.Valid && nodeClaim.RecoveryValidationRunID.String != "" {
+		metadata, _ := json.Marshal(map[string]any{
+			"deadLetterId":    deadLetterID,
+			"validationRunId": nodeClaim.RecoveryValidationRunID.String,
+			"via":             "terminal_recovery",
+		})
+		if err := q.InsertAuditLogRow(ctx, store.InsertAuditLogRowParams{
+			ID: e.newID(), OrgID: dlq.OrgID,
+			UserID:     pgtype.Text{String: actor, Valid: true},
+			Action:     "recovery.playbook.applied",
+			TargetType: pgtype.Text{String: "recovery_playbook", Valid: true},
+			TargetID:   pgtype.Text{String: nodeClaim.RecoveryPlaybookID.String, Valid: true},
+			Metadata:   metadata,
+		}); err != nil {
+			return fmt.Errorf("audit playbook applied: %w", err)
+		}
+	}
 	return nil
 }

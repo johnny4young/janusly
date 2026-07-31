@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -82,6 +83,35 @@ func (e *Engine) RedriveDeadLetter(ctx context.Context, orgID, deadLetterID stri
 	}
 	if _, err := q.ReviveFailedRun(ctx, deadLetter.RunID); err != nil {
 		return fmt.Errorf("revive run: %w", err)
+	}
+	// The ownership incident opens WITH the replay (idempotent on the
+	// unique (org, dead_letter)): severity default p3, SLA 24h, the error
+	// signature for clustering. Resolution happens ONLY at terminal
+	// success (recordRecoveryImpact) — initiation opens work, never wins.
+	signature := ""
+	if len(deadLetter.ErrorJson) > 0 {
+		var serr struct {
+			Message string `json:"message"`
+		}
+		_ = json.Unmarshal(deadLetter.ErrorJson, &serr)
+		signature = serr.Message
+	}
+	workflowID := ""
+	var wfDoc struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(deadLetter.WorkflowJson, &wfDoc)
+	workflowID = wfDoc.ID
+	slaTarget := eventNow().Add(24 * time.Hour)
+	if _, err := q.InsertRecoveryItem(ctx, store.InsertRecoveryItemParams{
+		ID: e.newID(), OrgID: orgID, DeadLetterID: deadLetterID,
+		WorkflowID:     pgtype.Text{String: workflowID, Valid: workflowID != ""},
+		Severity:       "p3",
+		SlaTargetAt:    slaTarget,
+		ErrorSignature: pgtype.Text{String: signature, Valid: signature != ""},
+		CreatedBy:      pgtype.Text{},
+	}); err != nil {
+		return fmt.Errorf("insert recovery item: %w", err)
 	}
 
 	redrivenAt := eventNow()

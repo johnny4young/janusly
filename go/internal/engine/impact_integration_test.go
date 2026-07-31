@@ -139,3 +139,103 @@ func TestRecoveryImpactPipeline(t *testing.T) {
 		t.Fatalf("sandbox must never inflate the rollup: %d", total)
 	}
 }
+
+// The incident closes ONLY with terminal success, atomically with the
+// impact fact — and the T-055 metric now reads the durable facts.
+func TestRecoveryItemAttribution(t *testing.T) {
+	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	defer pool.Close()
+	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "true")
+	eng := New(pool)
+	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
+	workerCtx, stop := context.WithCancel(context.Background())
+	defer stop()
+	go func() { _ = eng.RunWorkers(workerCtx, 2, 20*time.Millisecond, dispatcher.Execute, quietLogger()) }()
+	org := fmt.Sprintf("org-attrib-%d", time.Now().UnixNano())
+
+	var healed atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !healed.Load() {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+
+	wf := &domain.Workflow{
+		ID: "wf-attrib", Name: "Attrib", DSLVersion: "1.0",
+		Nodes: []domain.Node{{ID: "call", Type: "http", Config: map[string]any{
+			"url": upstream.URL, "timeoutMs": 500,
+		}}},
+		Edges: []domain.Edge{},
+	}
+	runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: wf})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	waitRunStatus(t, pool, runID, "failed", 0)
+	var deadLetterID string
+	_ = pool.QueryRow(ctx, `SELECT id FROM dead_letters WHERE run_id = $1`, runID).Scan(&deadLetterID)
+
+	// 1. The redrive OPENS the incident (idempotent) but resolves nothing.
+	if err := eng.RedriveDeadLetter(ctx, org, deadLetterID); err != nil {
+		t.Fatalf("redrive: %v", err)
+	}
+	var itemStatus string
+	_ = pool.QueryRow(ctx, `SELECT status FROM recovery_items WHERE org_id = $1 AND dead_letter_id = $2`, org, deadLetterID).Scan(&itemStatus)
+	if itemStatus != "open" {
+		t.Fatalf("initiation must open, not resolve: %q", itemStatus)
+	}
+	waitRunStatus(t, pool, runID, "failed", 0)
+	_ = pool.QueryRow(ctx, `SELECT status FROM recovery_items WHERE org_id = $1 AND dead_letter_id = $2`, org, deadLetterID).Scan(&itemStatus)
+	if itemStatus != "open" {
+		t.Fatalf("a failed replay must keep the incident open: %q", itemStatus)
+	}
+
+	// 2. Heal + redrive the NEW dead letter: its incident opens and then
+	// resolves atomically with the terminal success, audited.
+	var secondDL string
+	_ = pool.QueryRow(ctx, `SELECT id FROM dead_letters WHERE run_id = $1 AND status = 'open'
+		ORDER BY created_at DESC LIMIT 1`, runID).Scan(&secondDL)
+	healed.Store(true)
+	if err := eng.RedriveDeadLetter(ctx, org, secondDL); err != nil {
+		t.Fatalf("redrive 2: %v", err)
+	}
+	waitRunStatus(t, pool, runID, "succeeded", 0)
+	var resolvedStatus, reason string
+	var firstAction *time.Time
+	_ = pool.QueryRow(ctx, `SELECT status, COALESCE(resolution_reason,''), first_action_at
+		FROM recovery_items WHERE org_id = $1 AND dead_letter_id = $2`, org, secondDL).
+		Scan(&resolvedStatus, &reason, &firstAction)
+	if resolvedStatus != "resolved" || reason != "sandbox_replay_succeeded" || firstAction == nil {
+		t.Fatalf("terminal success must resolve the incident: %s/%s/%v", resolvedStatus, reason, firstAction)
+	}
+	var resolvedAudits int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs WHERE org_id = $1 AND action = 'recovery.item.resolved'`, org).Scan(&resolvedAudits)
+	if resolvedAudits != 1 {
+		t.Fatalf("resolution audit: %d", resolvedAudits)
+	}
+
+	// 3. The metric reads the durable facts: one sample, positive p50.
+	var sample int
+	var p50 float64
+	_ = pool.QueryRow(ctx, `WITH recovered AS (
+		SELECT ie.downtime_ended_ms::float8 AS duration_ms
+		FROM recovery_impact_events ie
+		JOIN runs r ON r.id = ie.run_id AND r.org_id = ie.org_id
+		WHERE ie.org_id = $1 AND r.replay_mode IS NULL)
+		SELECT count(*)::int, COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms), -1)::float8 FROM recovered`, org).
+		Scan(&sample, &p50)
+	if sample != 1 || p50 <= 0 {
+		t.Fatalf("metric over durable facts: %d/%f", sample, p50)
+	}
+}

@@ -629,18 +629,16 @@ SELECT count(*)::int AS rows_deleted FROM deleted_workflows;
 -- pilot's equivalent of the reference's detectedAt → verifiedRecoveredAt.
 -- percentile_cont matches the reference's percentile semantics exactly.
 -- name: QueryVerifiedRecoveryStats :one
+-- The durable generation-bound facts are the ONLY source (T-137
+-- reconciliation of T-055): a row exists only when a claimed replay
+-- reached terminal success, so initiation can never inflate the metric;
+-- validation replays are excluded via the run's replay_mode.
 WITH recovered AS (
-  SELECT EXTRACT(EPOCH FROM (ev.created_at - dl.created_at)) * 1000 AS duration_ms
-  FROM dead_letters dl
-  JOIN runs r ON r.id = dl.run_id
-  JOIN LATERAL (
-    SELECT re.created_at FROM run_events re
-    WHERE re.run_id = dl.run_id AND re.type = 'run.succeeded'
-      AND re.created_at >= dl.created_at
-    ORDER BY re.created_at DESC LIMIT 1
-  ) ev ON true
-  WHERE dl.org_id = $1 AND dl.status = 'replayed' AND r.status = 'succeeded'
-    AND dl.created_at >= now() - make_interval(days => sqlc.arg(window_days)::int)
+  SELECT ie.downtime_ended_ms::float8 AS duration_ms
+  FROM recovery_impact_events ie
+  JOIN runs r ON r.id = ie.run_id AND r.org_id = ie.org_id
+  WHERE ie.org_id = $1 AND r.replay_mode IS NULL
+    AND ie.recovered_at >= now() - make_interval(days => sqlc.arg(window_days)::int)
 )
 SELECT count(*)::int AS sample_size,
        COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms), -1)::float8 AS p50_ms,
@@ -1124,3 +1122,25 @@ ON CONFLICT (org_id) DO UPDATE SET
 
 -- name: GetRecoveryImpactRollup :one
 SELECT * FROM recovery_impact_rollups WHERE org_id = $1;
+
+-- name: InsertRecoveryItem :execrows
+INSERT INTO recovery_items (id, org_id, dead_letter_id, workflow_id, severity, status, sla_target_at, error_signature, created_by)
+VALUES ($1, $2, $3, $4, $5, 'open', $6, $7, $8)
+ON CONFLICT (org_id, dead_letter_id) DO NOTHING;
+
+-- name: FindRecoveryItemForDeadLetter :one
+SELECT id, status, resolution_reason FROM recovery_items
+WHERE org_id = $1 AND dead_letter_id = $2
+FOR UPDATE;
+
+-- name: ResolveRecoveryItemFromTerminal :execrows
+UPDATE recovery_items
+SET status = 'resolved', resolution_reason = 'sandbox_replay_succeeded',
+    resolved_by = sqlc.arg(actor), resolved_at = sqlc.arg(recovered_at),
+    first_action_at = COALESCE(first_action_at, sqlc.arg(first_action_at)),
+    updated_at = sqlc.arg(recovered_at)
+WHERE org_id = $1 AND id = $2 AND status = sqlc.arg(from_status);
+
+-- name: InsertAuditLogRow :exec
+INSERT INTO audit_logs (id, org_id, user_id, action, target_type, target_id, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7);

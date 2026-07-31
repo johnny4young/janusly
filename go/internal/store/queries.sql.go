@@ -726,6 +726,30 @@ func (q *Queries) FindPendingInvitation(ctx context.Context, arg FindPendingInvi
 	return id, err
 }
 
+const findRecoveryItemForDeadLetter = `-- name: FindRecoveryItemForDeadLetter :one
+SELECT id, status, resolution_reason FROM recovery_items
+WHERE org_id = $1 AND dead_letter_id = $2
+FOR UPDATE
+`
+
+type FindRecoveryItemForDeadLetterParams struct {
+	OrgID        string
+	DeadLetterID string
+}
+
+type FindRecoveryItemForDeadLetterRow struct {
+	ID               string
+	Status           string
+	ResolutionReason pgtype.Text
+}
+
+func (q *Queries) FindRecoveryItemForDeadLetter(ctx context.Context, arg FindRecoveryItemForDeadLetterParams) (FindRecoveryItemForDeadLetterRow, error) {
+	row := q.db.QueryRow(ctx, findRecoveryItemForDeadLetter, arg.OrgID, arg.DeadLetterID)
+	var i FindRecoveryItemForDeadLetterRow
+	err := row.Scan(&i.ID, &i.Status, &i.ResolutionReason)
+	return i, err
+}
+
 const findStalledRunningNodes = `-- name: FindStalledRunningNodes :many
 SELECT rn.id, rn.run_id, rn.node_id, COALESCE(rn.attempts, 1)::int AS attempt
 FROM run_nodes rn
@@ -1655,6 +1679,34 @@ func (q *Queries) GetWorkflowVersionByID(ctx context.Context, arg GetWorkflowVer
 	return i, err
 }
 
+const insertAuditLogRow = `-- name: InsertAuditLogRow :exec
+INSERT INTO audit_logs (id, org_id, user_id, action, target_type, target_id, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+`
+
+type InsertAuditLogRowParams struct {
+	ID         string
+	OrgID      string
+	UserID     pgtype.Text
+	Action     string
+	TargetType pgtype.Text
+	TargetID   pgtype.Text
+	Metadata   json.RawMessage
+}
+
+func (q *Queries) InsertAuditLogRow(ctx context.Context, arg InsertAuditLogRowParams) error {
+	_, err := q.db.Exec(ctx, insertAuditLogRow,
+		arg.ID,
+		arg.OrgID,
+		arg.UserID,
+		arg.Action,
+		arg.TargetType,
+		arg.TargetID,
+		arg.Metadata,
+	)
+	return err
+}
+
 const insertDeadLetter = `-- name: InsertDeadLetter :exec
 INSERT INTO dead_letters (id, org_id, run_id, node_id, attempt, workflow_json, node_json, error_json)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -1932,6 +1984,40 @@ func (q *Queries) InsertRecoveryImpactEvent(ctx context.Context, arg InsertRecov
 		arg.UserID,
 		arg.RecoveredAt,
 		arg.DowntimeEndedMs,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const insertRecoveryItem = `-- name: InsertRecoveryItem :execrows
+INSERT INTO recovery_items (id, org_id, dead_letter_id, workflow_id, severity, status, sla_target_at, error_signature, created_by)
+VALUES ($1, $2, $3, $4, $5, 'open', $6, $7, $8)
+ON CONFLICT (org_id, dead_letter_id) DO NOTHING
+`
+
+type InsertRecoveryItemParams struct {
+	ID             string
+	OrgID          string
+	DeadLetterID   string
+	WorkflowID     pgtype.Text
+	Severity       string
+	SlaTargetAt    time.Time
+	ErrorSignature pgtype.Text
+	CreatedBy      pgtype.Text
+}
+
+func (q *Queries) InsertRecoveryItem(ctx context.Context, arg InsertRecoveryItemParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertRecoveryItem,
+		arg.ID,
+		arg.OrgID,
+		arg.DeadLetterID,
+		arg.WorkflowID,
+		arg.Severity,
+		arg.SlaTargetAt,
+		arg.ErrorSignature,
+		arg.CreatedBy,
 	)
 	if err != nil {
 		return 0, err
@@ -4401,17 +4487,11 @@ func (q *Queries) QueryQueueHealth(ctx context.Context) (QueryQueueHealthRow, er
 
 const queryVerifiedRecoveryStats = `-- name: QueryVerifiedRecoveryStats :one
 WITH recovered AS (
-  SELECT EXTRACT(EPOCH FROM (ev.created_at - dl.created_at)) * 1000 AS duration_ms
-  FROM dead_letters dl
-  JOIN runs r ON r.id = dl.run_id
-  JOIN LATERAL (
-    SELECT re.created_at FROM run_events re
-    WHERE re.run_id = dl.run_id AND re.type = 'run.succeeded'
-      AND re.created_at >= dl.created_at
-    ORDER BY re.created_at DESC LIMIT 1
-  ) ev ON true
-  WHERE dl.org_id = $1 AND dl.status = 'replayed' AND r.status = 'succeeded'
-    AND dl.created_at >= now() - make_interval(days => $2::int)
+  SELECT ie.downtime_ended_ms::float8 AS duration_ms
+  FROM recovery_impact_events ie
+  JOIN runs r ON r.id = ie.run_id AND r.org_id = ie.org_id
+  WHERE ie.org_id = $1 AND r.replay_mode IS NULL
+    AND ie.recovered_at >= now() - make_interval(days => $2::int)
 )
 SELECT count(*)::int AS sample_size,
        COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms), -1)::float8 AS p50_ms,
@@ -4437,6 +4517,10 @@ type QueryVerifiedRecoveryStatsRow struct {
 // detection (dead letter row) → the run's terminal success event, the
 // pilot's equivalent of the reference's detectedAt → verifiedRecoveredAt.
 // percentile_cont matches the reference's percentile semantics exactly.
+// The durable generation-bound facts are the ONLY source (T-137
+// reconciliation of T-055): a row exists only when a claimed replay
+// reached terminal success, so initiation can never inflate the metric;
+// validation replays are excluded via the run's replay_mode.
 func (q *Queries) QueryVerifiedRecoveryStats(ctx context.Context, arg QueryVerifiedRecoveryStatsParams) (QueryVerifiedRecoveryStatsRow, error) {
 	row := q.db.QueryRow(ctx, queryVerifiedRecoveryStats, arg.OrgID, arg.WindowDays)
 	var i QueryVerifiedRecoveryStatsRow
@@ -4501,6 +4585,39 @@ type RequeueRunNodeForRetryParams struct {
 
 func (q *Queries) RequeueRunNodeForRetry(ctx context.Context, arg RequeueRunNodeForRetryParams) (int64, error) {
 	result, err := q.db.Exec(ctx, requeueRunNodeForRetry, arg.Attempt, arg.RunID, arg.NodeID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const resolveRecoveryItemFromTerminal = `-- name: ResolveRecoveryItemFromTerminal :execrows
+UPDATE recovery_items
+SET status = 'resolved', resolution_reason = 'sandbox_replay_succeeded',
+    resolved_by = $3, resolved_at = $4,
+    first_action_at = COALESCE(first_action_at, $5),
+    updated_at = $4
+WHERE org_id = $1 AND id = $2 AND status = $6
+`
+
+type ResolveRecoveryItemFromTerminalParams struct {
+	OrgID         string
+	ID            string
+	Actor         pgtype.Text
+	RecoveredAt   *time.Time
+	FirstActionAt *time.Time
+	FromStatus    string
+}
+
+func (q *Queries) ResolveRecoveryItemFromTerminal(ctx context.Context, arg ResolveRecoveryItemFromTerminalParams) (int64, error) {
+	result, err := q.db.Exec(ctx, resolveRecoveryItemFromTerminal,
+		arg.OrgID,
+		arg.ID,
+		arg.Actor,
+		arg.RecoveredAt,
+		arg.FirstActionAt,
+		arg.FromStatus,
+	)
 	if err != nil {
 		return 0, err
 	}
