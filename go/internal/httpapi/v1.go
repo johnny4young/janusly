@@ -122,6 +122,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	server.legacyMutations(mux)
 	server.mountCampaignRoutes(mux)
 	server.mountMemberRoutes(mux)
+	server.mountRoleRoutes(mux)
 	return WithBrowserHeaders(mux)
 }
 

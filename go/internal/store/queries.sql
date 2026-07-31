@@ -687,7 +687,7 @@ UPDATE org_members SET user_id = $3
 WHERE id = $1 AND org_id = $2;
 
 -- name: GetOrgRole :one
-SELECT id, org_id, name, inherits_from, granted_permissions
+SELECT id, org_id, name, inherits_from, description, is_builtin, granted_permissions
 FROM org_roles
 WHERE org_id = $1 AND name = $2;
 
@@ -724,3 +724,28 @@ VALUES ($1, $2, $3, $4, $5);
 -- name: RevokePendingInvitation :execrows
 UPDATE invitations SET status = 'revoked'
 WHERE id = $1 AND org_id = $2 AND status = 'pending';
+
+-- ── Org roles CRUD ────────────────────────────────────────────────────
+
+-- name: ListOrgRoles :many
+SELECT id, org_id, name, inherits_from, description, is_builtin, granted_permissions
+FROM org_roles WHERE org_id = $1
+ORDER BY name;
+
+-- name: InsertOrgRole :exec
+INSERT INTO org_roles (id, org_id, name, inherits_from, description, is_builtin, granted_permissions)
+VALUES ($1, $2, $3, $4, $5, $6, $7);
+
+-- name: UpdateOrgRole :one
+UPDATE org_roles
+SET granted_permissions = COALESCE(sqlc.narg(granted_permissions), granted_permissions),
+    description = COALESCE(sqlc.narg(description), description),
+    inherits_from = COALESCE(sqlc.narg(inherits_from), inherits_from)
+WHERE org_id = $1 AND name = $2
+RETURNING id, org_id, name, inherits_from, description, is_builtin, granted_permissions;
+
+-- name: DeleteOrgRole :execrows
+DELETE FROM org_roles WHERE org_id = $1 AND name = $2;
+
+-- name: CountMembersInRole :one
+SELECT count(*)::int FROM org_members WHERE org_id = $1 AND role = $2;

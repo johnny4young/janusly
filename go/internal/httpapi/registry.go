@@ -66,6 +66,13 @@ var routeAuthz = map[string]routeGate{
 	"POST /members/role":                    {auth.RoleAdmin, "members.role_set"},
 	"DELETE /members":                       {auth.RoleAdmin, "members.write"},
 
+	// Roles + permission overrides.
+	"GET /org/permissions/catalog": {auth.RoleViewer, "members.read"},
+	"GET /org/roles":               {auth.RoleViewer, "members.read"},
+	"POST /org/roles":              {auth.RoleAdmin, "org.permissions.write"},
+	"POST /org/roles/{name}":       {auth.RoleAdmin, "org.permissions.write"},
+	"DELETE /org/roles/{name}":     {auth.RoleAdmin, "org.permissions.write"},
+
 	// Replay campaigns.
 	"POST /recovery/campaigns":             {auth.RoleEditor, "dlq.replay"},
 	"POST /recovery/campaigns/preview":     {auth.RoleEditor, "dlq.replay"},

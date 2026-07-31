@@ -1224,3 +1224,13 @@ producción necesita saber — de lo ya resuelto o informativo.
 - Como estas rutas nacieron DESPUÉS del chokepoint, sus mutaciones van
   transaccionales de cuna — más fuerte que el post-hoc de la
   referencia, y anotado como tal.
+
+## 2026-07-31 — CRUD de roles: el anti-lockout se probó solo (T-077)
+
+- La secuencia del test resultó ser la demostración perfecta del piso:
+  tras sobreescribir el admin built-in a una sola clave, el propio
+  actor del test (admin por dev) siguió pudiendo revertir el override
+  y expulsar miembros — porque el piso le había coercionado
+  org.permissions.write y members.write. Si el piso no existiera, el
+  test se habría bloqueado a sí mismo a mitad de camino. Nada prueba
+  mejor un candado que casi quedarse fuera.

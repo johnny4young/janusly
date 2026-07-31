@@ -383,6 +383,22 @@ func (q *Queries) CountDeadLettersByStatus(ctx context.Context, orgID string) ([
 	return items, nil
 }
 
+const countMembersInRole = `-- name: CountMembersInRole :one
+SELECT count(*)::int FROM org_members WHERE org_id = $1 AND role = $2
+`
+
+type CountMembersInRoleParams struct {
+	OrgID string
+	Role  string
+}
+
+func (q *Queries) CountMembersInRole(ctx context.Context, arg CountMembersInRoleParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countMembersInRole, arg.OrgID, arg.Role)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countWorkflowVersions = `-- name: CountWorkflowVersions :one
 SELECT COALESCE(MAX(version), 0)::int FROM workflow_versions
 WHERE workflow_id = $1 AND org_id = $2
@@ -411,6 +427,23 @@ type DeleteOrgMemberParams struct {
 
 func (q *Queries) DeleteOrgMember(ctx context.Context, arg DeleteOrgMemberParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteOrgMember, arg.OrgID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteOrgRole = `-- name: DeleteOrgRole :execrows
+DELETE FROM org_roles WHERE org_id = $1 AND name = $2
+`
+
+type DeleteOrgRoleParams struct {
+	OrgID string
+	Name  string
+}
+
+func (q *Queries) DeleteOrgRole(ctx context.Context, arg DeleteOrgRoleParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteOrgRole, arg.OrgID, arg.Name)
 	if err != nil {
 		return 0, err
 	}
@@ -769,7 +802,7 @@ func (q *Queries) GetOrgMembership(ctx context.Context, arg GetOrgMembershipPara
 }
 
 const getOrgRole = `-- name: GetOrgRole :one
-SELECT id, org_id, name, inherits_from, granted_permissions
+SELECT id, org_id, name, inherits_from, description, is_builtin, granted_permissions
 FROM org_roles
 WHERE org_id = $1 AND name = $2
 `
@@ -784,6 +817,8 @@ type GetOrgRoleRow struct {
 	OrgID              string
 	Name               string
 	InheritsFrom       string
+	Description        pgtype.Text
+	IsBuiltin          bool
 	GrantedPermissions json.RawMessage
 }
 
@@ -795,6 +830,8 @@ func (q *Queries) GetOrgRole(ctx context.Context, arg GetOrgRoleParams) (GetOrgR
 		&i.OrgID,
 		&i.Name,
 		&i.InheritsFrom,
+		&i.Description,
+		&i.IsBuiltin,
 		&i.GrantedPermissions,
 	)
 	return i, err
@@ -1171,6 +1208,34 @@ func (q *Queries) InsertInvitation(ctx context.Context, arg InsertInvitationPara
 		arg.Email,
 		arg.Role,
 		arg.InvitedBy,
+	)
+	return err
+}
+
+const insertOrgRole = `-- name: InsertOrgRole :exec
+INSERT INTO org_roles (id, org_id, name, inherits_from, description, is_builtin, granted_permissions)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+`
+
+type InsertOrgRoleParams struct {
+	ID                 string
+	OrgID              string
+	Name               string
+	InheritsFrom       string
+	Description        pgtype.Text
+	IsBuiltin          bool
+	GrantedPermissions json.RawMessage
+}
+
+func (q *Queries) InsertOrgRole(ctx context.Context, arg InsertOrgRoleParams) error {
+	_, err := q.db.Exec(ctx, insertOrgRole,
+		arg.ID,
+		arg.OrgID,
+		arg.Name,
+		arg.InheritsFrom,
+		arg.Description,
+		arg.IsBuiltin,
+		arg.GrantedPermissions,
 	)
 	return err
 }
@@ -1949,6 +2014,52 @@ func (q *Queries) ListOrgMembershipsForUser(ctx context.Context, userID string) 
 			&i.OrgID,
 			&i.UserID,
 			&i.Role,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrgRoles = `-- name: ListOrgRoles :many
+
+SELECT id, org_id, name, inherits_from, description, is_builtin, granted_permissions
+FROM org_roles WHERE org_id = $1
+ORDER BY name
+`
+
+type ListOrgRolesRow struct {
+	ID                 string
+	OrgID              string
+	Name               string
+	InheritsFrom       string
+	Description        pgtype.Text
+	IsBuiltin          bool
+	GrantedPermissions json.RawMessage
+}
+
+// ── Org roles CRUD ────────────────────────────────────────────────────
+func (q *Queries) ListOrgRoles(ctx context.Context, orgID string) ([]ListOrgRolesRow, error) {
+	rows, err := q.db.Query(ctx, listOrgRoles, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOrgRolesRow
+	for rows.Next() {
+		var i ListOrgRolesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Name,
+			&i.InheritsFrom,
+			&i.Description,
+			&i.IsBuiltin,
+			&i.GrantedPermissions,
 		); err != nil {
 			return nil, err
 		}
@@ -3166,6 +3277,54 @@ func (q *Queries) UpdateOrgMemberRole(ctx context.Context, arg UpdateOrgMemberRo
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const updateOrgRole = `-- name: UpdateOrgRole :one
+UPDATE org_roles
+SET granted_permissions = COALESCE($3, granted_permissions),
+    description = COALESCE($4, description),
+    inherits_from = COALESCE($5, inherits_from)
+WHERE org_id = $1 AND name = $2
+RETURNING id, org_id, name, inherits_from, description, is_builtin, granted_permissions
+`
+
+type UpdateOrgRoleParams struct {
+	OrgID              string
+	Name               string
+	GrantedPermissions json.RawMessage
+	Description        pgtype.Text
+	InheritsFrom       pgtype.Text
+}
+
+type UpdateOrgRoleRow struct {
+	ID                 string
+	OrgID              string
+	Name               string
+	InheritsFrom       string
+	Description        pgtype.Text
+	IsBuiltin          bool
+	GrantedPermissions json.RawMessage
+}
+
+func (q *Queries) UpdateOrgRole(ctx context.Context, arg UpdateOrgRoleParams) (UpdateOrgRoleRow, error) {
+	row := q.db.QueryRow(ctx, updateOrgRole,
+		arg.OrgID,
+		arg.Name,
+		arg.GrantedPermissions,
+		arg.Description,
+		arg.InheritsFrom,
+	)
+	var i UpdateOrgRoleRow
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.InheritsFrom,
+		&i.Description,
+		&i.IsBuiltin,
+		&i.GrantedPermissions,
+	)
+	return i, err
 }
 
 const updateRunStatusCAS = `-- name: UpdateRunStatusCAS :execrows
