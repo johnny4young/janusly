@@ -749,3 +749,16 @@ DELETE FROM org_roles WHERE org_id = $1 AND name = $2;
 
 -- name: CountMembersInRole :one
 SELECT count(*)::int FROM org_members WHERE org_id = $1 AND role = $2;
+
+-- Operator-facing audit-trail reader: org-scoped, optional action PREFIX
+-- filter, `(created_at, id)` DESC keyset so history pages backward without
+-- repeats or skips on shared timestamps. The caller over-fetches limit+1
+-- to derive hasMore + the next cursor.
+-- name: QueryAuditLogs :many
+SELECT * FROM audit_logs
+WHERE org_id = $1
+  AND (sqlc.narg(action_prefix)::text IS NULL OR action LIKE sqlc.narg(action_prefix) || '%')
+  AND (created_at < @before_created_at
+       OR (created_at = @before_created_at AND id < @before_id))
+ORDER BY created_at DESC, id DESC
+LIMIT @page_limit;

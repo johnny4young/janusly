@@ -58,6 +58,9 @@ var routeAuthz = map[string]routeGate{
 	"GET /v1/recovery/metrics": {auth.RoleViewer, "dlq.read"},
 	"GET /recovery/metrics":    {auth.RoleViewer, "dlq.read"},
 
+	// Audit trail: admin-only compliance surface (reference pair verbatim).
+	"GET /audit": {auth.RoleAdmin, "org.config.write"},
+
 	// Members + invitations (reference pairs verbatim).
 	"GET /members":                          {auth.RoleViewer, "members.read"},
 	"GET /members/invitations":              {auth.RoleAdmin, "members.read"},

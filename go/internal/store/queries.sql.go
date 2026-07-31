@@ -3010,6 +3010,64 @@ func (q *Queries) PurgeExpiredSoftDeletedWorkflows(ctx context.Context, cutoff t
 	return rows_deleted, err
 }
 
+const queryAuditLogs = `-- name: QueryAuditLogs :many
+SELECT id, org_id, user_id, action, target_type, target_id, metadata, created_at, hold_until FROM audit_logs
+WHERE org_id = $1
+  AND ($2::text IS NULL OR action LIKE $2 || '%')
+  AND (created_at < $3
+       OR (created_at = $3 AND id < $4))
+ORDER BY created_at DESC, id DESC
+LIMIT $5
+`
+
+type QueryAuditLogsParams struct {
+	OrgID           string
+	ActionPrefix    pgtype.Text
+	BeforeCreatedAt *time.Time
+	BeforeID        string
+	PageLimit       int32
+}
+
+// Operator-facing audit-trail reader: org-scoped, optional action PREFIX
+// filter, `(created_at, id)` DESC keyset so history pages backward without
+// repeats or skips on shared timestamps. The caller over-fetches limit+1
+// to derive hasMore + the next cursor.
+func (q *Queries) QueryAuditLogs(ctx context.Context, arg QueryAuditLogsParams) ([]AuditLog, error) {
+	rows, err := q.db.Query(ctx, queryAuditLogs,
+		arg.OrgID,
+		arg.ActionPrefix,
+		arg.BeforeCreatedAt,
+		arg.BeforeID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditLog
+	for rows.Next() {
+		var i AuditLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.UserID,
+			&i.Action,
+			&i.TargetType,
+			&i.TargetID,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.HoldUntil,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const queryVerifiedRecoveryStats = `-- name: QueryVerifiedRecoveryStats :one
 WITH recovered AS (
   SELECT EXTRACT(EPOCH FROM (ev.created_at - dl.created_at)) * 1000 AS duration_ms

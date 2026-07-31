@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -65,8 +66,11 @@ func marshalMetadata(metadata map[string]any) ([]byte, error) {
 	return json.Marshal(redacted)
 }
 
-const insertSQL = `INSERT INTO audit_logs (id, org_id, user_id, action, target_type, target_id, metadata)
-	VALUES ($1, $2, $3, $4, $5, $6, $7)`
+// created_at is stamped app-side truncated to milliseconds (the T-058
+// posture): the read surface's `<iso>|<id>` cursor lives in JS Date ms
+// precision, and a ms cursor over µs rows can skip page-boundary peers.
+const insertSQL = `INSERT INTO audit_logs (id, org_id, user_id, action, target_type, target_id, metadata, created_at)
+	VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
 
 func insert(ctx context.Context, exec func(context.Context, string, ...any) error,
 	orgID, userID string, action Action, opts Options, authCtx *auth.Context) error {
@@ -88,7 +92,8 @@ func insert(ctx context.Context, exec func(context.Context, string, ...any) erro
 	if userID != "" {
 		userValue = userID
 	}
-	return exec(ctx, insertSQL, uuid.NewString(), orgID, userValue, string(action), targetType, targetID, metadata)
+	return exec(ctx, insertSQL, uuid.NewString(), orgID, userValue, string(action), targetType, targetID, metadata,
+		time.Now().UTC().Truncate(time.Millisecond))
 }
 
 // Write is the best-effort non-transactional writer: failures are logged

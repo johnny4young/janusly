@@ -1249,3 +1249,9 @@ producción necesita saber — de lo ya resuelto o informativo.
 - Hallazgo: tres acciones del pump viven FUERA del catálogo tipado de la
   referencia (su system-writer no tipa) — registradas como pilot-action
   sin contaminar el pin de 147.
+
+## 2026-07-31 — el rastro se puede leer (T-082)
+
+- `GET /audit` con el wire crudo de la referencia y keyset exacto; el
+  precedente de T-058 (estampar en ms) se extendió al insert de audit,
+  cerrando un salto de frontera de página que la referencia aún tiene.

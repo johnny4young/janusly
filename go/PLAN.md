@@ -738,6 +738,8 @@ el chat publicado.
 | 2026-07-31 | T-081 retrofit de audit | Las 18 mutaciones de olas 1-2 auditan con los nombres exactos de la referencia: save/rollback/delete/restore, start adhoc/resume/cancel/redrive, dlq.replayed, trigger received/buffered/started, campañas created/cancelled. El pump audita item_replayed/item_failed (actor = creador) y completed (actor `system:replay-campaign`) |
 | 2026-07-31 | T-081 catálogo — hallazgo | `recovery.campaign.completed`/`item_replayed`/`item_failed` existen en la referencia pero los escribe su system-writer SIN tipar (fuera del catálogo `AuditAction` de 147) — se admiten vía `RegisterPilotAction` sin tocar el pin de 147 |
 | 2026-07-31 | T-081 identidades | El MCP server (escritura directa a store) audita con `Mode=service-token, Source=mcp`; un start por trigger NO es `run.started.adhoc` (0 filas verificadas); el retry convergente del relay no re-audita |
+| 2026-07-31 | T-082 GET /audit | Lector del rastro: wire crudo `{rows, nextCursor, hasMore}` de la referencia, filtro PREFIX de acción, keyset `(createdAt,id)` DESC con cursor `<iso>|<id>`, tope 200/default 100, gate admin + `org.config.write` en el registro central. Test: 5 filas en loop apretado (colisiones mismo-ms reales) reensambladas en páginas de 2 sin saltos ni repes |
+| 2026-07-31 | T-082 precisión ms | Postura T-058 extendida a audit: `created_at` se estampa app-side truncado a ms para que el cursor ms haga round-trip exacto (la referencia mantiene µs en DB y cursor ms — puede saltar pares del mismo ms en fronteras de página; el pilot es estrictamente más correcto, wire idéntico) |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -1023,7 +1025,7 @@ día que exista el chokepoint (T-079)**.
 | T-079 | Chokepoint de audit: catálogo tipado de acciones + helper `auditAction` | audit | P0 | done |
 | T-080 | `withAuditTx` (entidad + fila de audit comprometen juntas) | audit | P0 | done |
 | T-081 | Retrofit de audit a TODAS las mutaciones existentes (save/cancel/redrive/campañas/trash/MCP) | audit | P0 | done |
-| T-082 | `GET /audit` (admin, filtro por prefijo de acción, keyset, cap 200) | audit | P1 | todo |
+| T-082 | `GET /audit` (admin, filtro por prefijo de acción, keyset, cap 200) | audit | P1 | done |
 | T-083 | `safePersistPayload` formal (redacción por valor + claves + cota de bytes + centinela) | audit | P1 | todo |
 | T-084 | Rate limiter en Postgres (fail-open) + observabilidad de degradación | limiter | P0 | todo |
 | T-085 | Limiter cableado: API global, storm-guard de triggers, MCP writes 60/min | limiter | P1 | todo |
