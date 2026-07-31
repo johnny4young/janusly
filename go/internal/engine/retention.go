@@ -59,5 +59,10 @@ func (e *Engine) RunRetentionSweep(ctx context.Context, every time.Duration, ret
 		if deleted > 0 {
 			logger.Info("retention sweep purged tombstoned workflows", "count", deleted, "windowDays", retentionDays)
 		}
+		// Expired limiter windows ride the same maintenance cadence: their
+		// expiry is in the row, so the delete is safe at any interval.
+		if _, err := store.New(e.pool).CleanupExpiredRateWindows(ctx); err != nil && ctx.Err() == nil {
+			logger.Error("rate-window cleanup failed", "error", err)
+		}
 	}
 }

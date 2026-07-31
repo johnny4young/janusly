@@ -24,6 +24,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/engine"
 	"github.com/johnny4young/janusly/go/internal/grammar"
+	"github.com/johnny4young/janusly/go/internal/ratelimit"
 	"github.com/johnny4young/janusly/go/internal/store"
 )
 
@@ -34,6 +35,9 @@ type Deps struct {
 	OrgID  string
 	UserID string
 	NewID  func() string
+	// Limiter bounds MCP writes per the reference's guardMcpWrite: bucket
+	// `mcp.<actionKey>`, org key, 60/min. Nil skips the check (tests).
+	Limiter *ratelimit.Limiter
 }
 
 // auditContext derives the audit identity for MCP-originated writes: the
@@ -164,7 +168,7 @@ func expected(message string) (*mcp.CallToolResult, any, error) {
 }
 
 func (d Deps) saveWorkflow(ctx context.Context, raw json.RawMessage) (*mcp.CallToolResult, any, error) {
-	if allowed, message := d.guardWrite(ctx); !allowed {
+	if allowed, message := d.guardWrite(ctx, "workflows.save"); !allowed {
 		return expected(message)
 	}
 	wf, issues := domain.Parse(raw)
@@ -224,7 +228,7 @@ func (d Deps) saveWorkflow(ctx context.Context, raw json.RawMessage) (*mcp.CallT
 }
 
 func (d Deps) startRun(ctx context.Context, raw json.RawMessage, input map[string]any) (*mcp.CallToolResult, any, error) {
-	if allowed, message := d.guardWrite(ctx); !allowed {
+	if allowed, message := d.guardWrite(ctx, "runs.start"); !allowed {
 		return expected(message)
 	}
 	wf, issues := domain.Parse(raw)
@@ -357,7 +361,7 @@ func (d Deps) dlqList(ctx context.Context, limit int) (*mcp.CallToolResult, any,
 }
 
 func (d Deps) redrive(ctx context.Context, deadLetterID string) (*mcp.CallToolResult, any, error) {
-	if allowed, message := d.guardWrite(ctx); !allowed {
+	if allowed, message := d.guardWrite(ctx, "dlq.redrive"); !allowed {
 		return expected(message)
 	}
 	if deadLetterID == "" {
@@ -494,9 +498,9 @@ func createdAtISO(at *time.Time) string {
 // consent row must BOTH be true before any MCP write tool acts. Denials
 // return the reference's verbatim messages as expected (isError) results
 // — the pilot's MCP is in-process, so the reference's HTTP 403 surfaces
-// as a tool error instead. The per-action rate limit is not ported (the
-// pilot has no limiter substrate).
-func (d Deps) guardWrite(ctx context.Context) (bool, string) {
+// as a tool error instead. The per-action rate limit mirrors the
+// reference's guardMcpWrite: bucket `mcp.<actionKey>`, org key, 60/min.
+func (d Deps) guardWrite(ctx context.Context, actionKey string) (bool, string) {
 	if os.Getenv("JANUSLY_MCP_WRITES_ENABLED") != "true" {
 		return false, "MCP writes are disabled at the process level (JANUSLY_MCP_WRITES_ENABLED is not 'true')."
 	}
@@ -509,6 +513,13 @@ func (d Deps) guardWrite(ctx context.Context) (bool, string) {
 	}
 	if !consent {
 		return false, "MCP writes are not consented for this organization (mcp.writeConsent is false)."
+	}
+	if d.Limiter != nil {
+		if err := d.Limiter.Enforce(ctx, d.OrgID, ratelimit.Options{
+			Name: "mcp." + actionKey, Max: 60, Window: time.Minute,
+		}); err != nil {
+			return false, err.Error()
+		}
 	}
 	return true, ""
 }

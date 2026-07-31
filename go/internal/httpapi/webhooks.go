@@ -25,6 +25,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/engine"
 	"github.com/johnny4young/janusly/go/internal/executors"
 	"github.com/johnny4young/janusly/go/internal/grammar"
+	"github.com/johnny4young/janusly/go/internal/ratelimit"
 	"github.com/johnny4young/janusly/go/internal/store"
 )
 
@@ -168,6 +169,39 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 				"nodeId": nodeID, "replay": false,
 			},
 		})
+	}
+
+	// Per-trigger storm guard (Node's step order: received → guard →
+	// buffer). Over-limit records the event as skipped and answers 429
+	// with the reference's exact body.
+	var nodeConfig map[string]any
+	for _, node := range wf.Nodes {
+		if node.ID == nodeID {
+			nodeConfig = node.Config
+			break
+		}
+	}
+	ratePerMin := executors.ResolveTriggerRateLimitPerMin(nodeConfig["rateLimitPerMin"])
+	if limitErr := s.limiter.Enforce(ctx, rc.orgID, ratelimit.Options{
+		Name:   "trigger." + version.ID + "." + nodeID,
+		Max:    ratePerMin,
+		Window: time.Minute,
+	}); limitErr != nil {
+		if _, err := q.MarkTriggerEventOutcome(ctx, store.MarkTriggerEventOutcomeParams{
+			OrgID: rc.orgID, ID: triggerEventID, Status: "skipped",
+			SkippedReason: pgtype.Text{String: "rate_limited", Valid: true},
+		}); err != nil {
+			return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+		}
+		audit.Write(ctx, s.pool, rc.authContext, "trigger.event.skipped", audit.Options{
+			TargetType: "trigger_event", TargetID: triggerEventID,
+			Metadata: map[string]any{
+				"triggerType": "webhook_received", "reason": "rate_limited", "ratePerMin": ratePerMin,
+			},
+		})
+		return opResult{status: http.StatusTooManyRequests, data: map[string]any{
+			"ok": false, "skipped": true, "reason": "rate_limited", "triggerEventId": triggerEventID,
+		}}
 	}
 
 	// Buffer-on-pause: an inbound event is data the upstream system already

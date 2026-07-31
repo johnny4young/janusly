@@ -746,6 +746,8 @@ el chat publicado.
 | 2026-07-31 | T-084 limiter Postgres | La decisión del operador ejecutada: ventana fija por `(name,key,window_start)` en `go_pilot_rate_windows` (goose 00002; ventana EN la PK → un UPSERT O(1) por request, expiración por DELETE — sin vacuum-storm), FAIL-OPEN con warn ante fallo del store, hooks panic-absorbentes, 429 con el mensaje verbatim de Node. `CleanupExpired` listo para la cadencia de mantenimiento (se cablea en T-085) |
 | 2026-07-31 | T-084 degradación | Tracker en memoria + audit `rate_limit.degraded` UNA vez por (bucket, día-UTC) con dedupe en DB probado con dos réplicas (instancias con memoria fresca), `recovered` one-shot, snapshots public/admin listos para T-091. Matiz honesto documentado: el store auditado ES el store que falla — en pleno outage la señal superviviente es el snapshot en memoria (idéntico rol al del tracker de Node) |
 | 2026-07-31 | T-084 metadata sin actor | Las filas de degradación de la referencia no llevan campo `actor`; `SystemWrite` ahora omite el actor vacío para paridad byte-igual de metadata |
+| 2026-07-31 | T-085 limiter cableado | Storm-guard por trigger (bucket `trigger.<versionId>.<nodeId>`, clamp [1,10000] default 60, orden Node received→guard→buffer): sobre el límite → fila `skipped` + audit `trigger.event.skipped` con `ratePerMin` + 429 `{ok:false,skipped:true,reason:"rate_limited"}` — cierra la divergencia de T-040. MCP writes con el `guardMcpWrite` de la referencia: bucket `mcp.<tool>` 60/min por org (mensaje verbatim del limiter como tool error). Limpieza de ventanas expiradas en la cadencia del sweep de retención |
+| 2026-07-31 | T-085 hallazgo | El punto (1) de la card era especulativo: Node NO limita start/save/resume — sus buckets reales son `"ai"` (rutas AI, aún no portadas) y `mcp.rediscover`; cablear límites inventados habría CREADO divergencia. Los buckets `ai` llegan con la ola que porte `/ai/*` |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -1034,7 +1036,7 @@ día que exista el chokepoint (T-079)**.
 | T-082 | `GET /audit` (admin, filtro por prefijo de acción, keyset, cap 200) | audit | P1 | done |
 | T-083 | `safePersistPayload` formal (redacción por valor + claves + cota de bytes + centinela) | audit | P1 | done |
 | T-084 | Rate limiter en Postgres (fail-open) + observabilidad de degradación | limiter | P0 | done |
-| T-085 | Limiter cableado: API global, storm-guard de triggers, MCP writes 60/min | limiter | P1 | todo |
+| T-085 | Limiter cableado: API global, storm-guard de triggers, MCP writes 60/min | limiter | P1 | done |
 | T-086 | Catálogo completo de org config (tipado, guards anti-secreto, GET/PUT + audit) | config | P0 | todo |
 | T-087 | Consumidores del snapshot: requireSavedWorkflow, TTLs, ventanas de retención por org | config | P1 | todo |
 | T-088 | Retención completa por org: run_events / audit_logs / usage_events (CTE por tabla, acotada) | config | P1 | todo |

@@ -28,21 +28,28 @@ import (
 	"github.com/johnny4young/janusly/go/internal/engine"
 	"github.com/johnny4young/janusly/go/internal/executors"
 	"github.com/johnny4young/janusly/go/internal/grammar"
+	"github.com/johnny4young/janusly/go/internal/ratelimit"
 	"github.com/johnny4young/janusly/go/internal/store"
 )
 
 // V1Server owns the /v1 route surface over one engine and pool.
 type V1Server struct {
-	engine   *engine.Engine
-	pool     *pgxpool.Pool
-	newID    func() string
-	hub      *streamHub
-	resolver *auth.Resolver
+	engine         *engine.Engine
+	pool           *pgxpool.Pool
+	newID          func() string
+	hub            *streamHub
+	resolver       *auth.Resolver
+	limiter        *ratelimit.Limiter
+	limiterTracker *ratelimit.Tracker
 }
 
 // NewV1Handler mounts the v1 routes plus /healthz.
 func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	server := &V1Server{engine: eng, pool: pool, resolver: auth.NewResolver(pool, auth.ConfigFromEnv()), newID: uuid.NewString, hub: newStreamHub()}
+	server.limiterTracker = ratelimit.NewTracker(pool)
+	server.limiter = ratelimit.New(pool, ratelimit.Hooks{
+		OnError: server.limiterTracker.RecordError, OnSuccess: server.limiterTracker.RecordRecovery,
+	})
 	go server.hub.listen(context.Background(), pool)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {

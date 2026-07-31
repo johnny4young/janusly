@@ -86,3 +86,28 @@ func readTriggerEvent(runContext map[string]any) map[string]any {
 	}
 	return map[string]any{}
 }
+
+// Storm-guard clamp, ported from the reference's shared trigger-types:
+// the effective per-trigger rate limit from a node config's optional
+// rateLimitPerMin — default 60, clamped to [1, 10000].
+const (
+	TriggerDefaultRateLimitPerMin = 60
+	TriggerRateLimitMaxPerMin     = 10_000
+)
+
+// ResolveTriggerRateLimitPerMin clamps a config value into the documented
+// range, falling back to the default when unset or invalid.
+func ResolveTriggerRateLimitPerMin(rateLimitPerMin any) int {
+	value, ok := rateLimitPerMin.(float64)
+	if !ok {
+		return TriggerDefaultRateLimitPerMin
+	}
+	floored := int(value)
+	if floored < 1 {
+		return 1
+	}
+	if floored > TriggerRateLimitMaxPerMin {
+		return TriggerRateLimitMaxPerMin
+	}
+	return floored
+}

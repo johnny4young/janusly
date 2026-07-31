@@ -21,6 +21,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/engine"
 	"github.com/johnny4young/janusly/go/internal/grammar"
 	"github.com/johnny4young/janusly/go/internal/mcpserver"
+	"github.com/johnny4young/janusly/go/internal/ratelimit"
 )
 
 func main() {
@@ -64,8 +65,12 @@ func run() error {
 	if org == "" {
 		org = "default"
 	}
+	tracker := ratelimit.NewTracker(pool)
 	server := mcpserver.NewServer(mcpserver.Deps{
 		Engine: eng, Pool: pool, OrgID: org, UserID: "mcp", NewID: uuid.NewString,
+		Limiter: ratelimit.New(pool, ratelimit.Hooks{
+			OnError: tracker.RecordError, OnSuccess: tracker.RecordRecovery,
+		}),
 	})
 	logger.Info("mcp server ready", "org", org, "startup", time.Now().UTC().Format(time.RFC3339))
 	return server.Run(ctx, &mcp.StdioTransport{})

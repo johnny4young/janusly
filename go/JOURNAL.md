@@ -1270,3 +1270,10 @@ producción necesita saber — de lo ya resuelto o informativo.
   fail-open con warn, y el 429 con el mensaje exacto de Node. La
   degradación audita una vez por (bucket, día) — dedupe probado con dos
   réplicas de memoria fresca contra la misma base.
+
+## 2026-07-31 — el limiter en sus tres puertas (T-085)
+
+- Storm-guard por trigger con el orden exacto de Node (received → guard →
+  buffer) y el 429 con cuerpo verbatim; MCP writes con bucket por tool a
+  60/min. Hallazgo: la card pedía limitar start/save/resume "como Node" —
+  y Node no los limita; portar la realidad, no la especulación.
