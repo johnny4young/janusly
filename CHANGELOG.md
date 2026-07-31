@@ -16,6 +16,12 @@ retroactively.
 
 ### Changed
 
+- The engine's provider integration tools are now separated into bounded
+  Slack, GitHub, PagerDuty, webhook, and shared-chokepoint modules behind the
+  existing `integration-tools.ts` compatibility barrel. The exact eight-tool
+  registry surface, Zod contracts, credential resolution, rate limits, usage
+  events, SSRF-protected HTTP path, write-side classification, and never-throw
+  envelopes remain unchanged and are protected by an architecture test.
 - The MCP server's 40-tool protocol surface is now separated into bounded
   descriptor, risk-catalog, argument-validation, always-visible dispatch, and
   write-dispatch modules behind the existing `tools.ts` compatibility barrel.
