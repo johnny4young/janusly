@@ -12,8 +12,9 @@
  * When unset (focused unit tests), `publishRunEvent` no-ops.
  *
  * Used by:
- * - `packages/engine/src/persistence.ts` — `appendEvent` (every run_events
- *   row) and `updateRunStatusFromNodes` / `cancelRun` (run-level status flips).
+ * - `packages/engine/src/persistence-ports/event.ts` — `appendEvent` for every
+ *   `run_events` row.
+ * - `packages/engine/src/persistence-ports/run.ts` — terminal run status flips.
  * - `apps/api/src/index.ts` + `packages/engine/src/worker.ts` — boot path
  *   registers a Redis PUBLISH implementation.
  *
@@ -80,7 +81,7 @@ export function runIdFromRunEventChannel(channel: string): string | null {
  * the run's org. Centralizing the channel name + message shape + immutable
  * `runId→orgId` cache here keeps the API and worker publishers from drifting
  * apart from the API subscriber. `resolveOrgId` is injected (rather than
- * imported) so this module stays free of a `persistence.ts` import cycle.
+ * imported) so this module stays free of a persistence-port import cycle.
  *
  * - `publish` does the actual Redis PUBLISH (`(channel, message) => …`).
  * - `resolveOrgId` maps a runId to its immutable org, or `null` when unknown.

@@ -15,7 +15,8 @@
  *   fully covered so no lifecycle event renders as a raw type string.
  * - Most members are emitted via `workflowEvent()` from `core/runtime.ts`, but
  *   the run-level ones (`run.*`) and `node.resumed` are appended directly via
- *   `appendEvent()` in `start-run.ts` / `persistence.ts` / `resume-run.ts`.
+ *   `appendEvent()` in `start-run.ts` / `persistence-ports/event.ts` /
+ *   `resume-run.ts`.
  */
 
 import type { WorkflowEvent } from "./types";

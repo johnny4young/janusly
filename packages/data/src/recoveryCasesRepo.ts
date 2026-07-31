@@ -2,9 +2,9 @@
  * Tenant-scoped read model for durable Recovery Cases.
  *
  * Runtime writes live beside the atomic run/node transitions in
- * `packages/engine/src/persistence.ts`; this repository owns bounded reads for
- * API and UI consumers. Cases are orphan-tolerant forensic records and never
- * rely on a join to a still-existing run or workflow.
+ * `packages/engine/src/persistence-ports/recovery.ts`; this repository owns
+ * bounded reads for API and UI consumers. Cases are orphan-tolerant forensic
+ * records and never rely on a join to a still-existing run or workflow.
  */
 
 import {

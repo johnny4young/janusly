@@ -21,6 +21,15 @@ async function captureElement(locator: import('@playwright/test').Locator, name:
   await locator.screenshot({ path: `${EVIDENCE_DIR}/${name}.png` })
 }
 
+async function selectWorkerInterruptedFailure(
+  pack: import('@playwright/test').Locator,
+  locale: 'en' | 'es',
+) {
+  await pack
+    .getByLabel(locale === 'es' ? 'Escenario de fallo' : 'Failure scenario')
+    .selectOption('worker_interrupted_during_page')
+}
+
 function installConsoleErrorGuards(page: Page) {
   const errors: string[] = []
   page.on('console', (message) => {
@@ -102,6 +111,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   // can replace the catalog DOM while Playwright is clicking its action button.
   await expect(page.getByRole('heading', { name: 'Build', exact: true })).toBeVisible()
   await openWorkspaceSection(page, 'Workflows', 'Templates')
+  await selectWorkerInterruptedFailure(pack, 'en')
   const selectedBeforeInitialFailure = await selectedDeadLetterTestId(page)
   await pack.getByRole('button', { name: 'Start recovery drill', exact: true }).click()
   await openWorkspaceSection(page, 'Activity', 'Recover')
@@ -189,6 +199,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   await page.getByRole('button', { name: 'Close', exact: true }).click()
   await openWorkspaceSection(page, 'Workflows', 'Templates')
   const repeatPack = page.getByTestId('solution-pack-incident-triage')
+  await selectWorkerInterruptedFailure(repeatPack, 'en')
   const selectedBeforeRepeatedFailure = await selectedDeadLetterTestId(page)
   await repeatPack.getByRole('button', { name: 'Start recovery drill', exact: true }).click()
   await openWorkspaceSection(page, 'Activity', 'Recover')
@@ -265,6 +276,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   await page.reload()
   await openWorkspaceSection(page, 'Flujos', 'Plantillas')
   const spanishPlaybookPack = page.getByTestId('solution-pack-incident-triage')
+  await selectWorkerInterruptedFailure(spanishPlaybookPack, 'es')
   const selectedBeforeSpanishFailure = await selectedDeadLetterTestId(page)
   await spanishPlaybookPack.getByRole('button', { name: 'Iniciar ejercicio de recuperación', exact: true }).click()
   await openWorkspaceSection(page, 'Actividad', 'Recuperar')
@@ -321,6 +333,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   // smoke above and the failed-validation smoke below remain causally honest.
   await page.getByRole('button', { name: 'Cerrar', exact: true }).click()
   await openWorkspaceSection(page, 'Flujos', 'Plantillas')
+  await selectWorkerInterruptedFailure(spanishPlaybookPack, 'es')
   const selectedBeforeSpanishRegression = await selectedDeadLetterTestId(page)
   await spanishPlaybookPack.getByRole('button', { name: 'Iniciar ejercicio de recuperación', exact: true }).click()
   await openWorkspaceSection(page, 'Actividad', 'Recuperar')

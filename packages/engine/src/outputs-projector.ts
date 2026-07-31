@@ -4,7 +4,7 @@
  * terminal context. The projection runs once when the run flips to
  * `succeeded`, before `runs.outputJson` is persisted.
  *
- * Used by `persistence.ts:computeRunOutputs` (called from
+ * Used by `persistence-ports/run.ts:computeRunOutputs` (called from
  * `updateRunStatusFromNodes`) and consumable by any caller that has the
  * full context dict in hand.
  *

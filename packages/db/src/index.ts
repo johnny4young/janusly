@@ -10,7 +10,7 @@
  * Used by:
  * - `packages/data/src/*` — drizzle repos for routing stats, improvements,
  *   workflow rollback.
- * - `packages/engine/src/persistence.ts`, `start-run.ts`, `resume-run.ts`,
+ * - `packages/engine/src/persistence-ports/*`, `start-run.ts`, `resume-run.ts`,
  *   `billing.ts`, `secrets.ts`, `memory.ts`, `node-registry.ts` — direct
  *   `db.select/insert/update` calls.
  * - `apps/api/src/index.ts` — every route that touches Postgres.

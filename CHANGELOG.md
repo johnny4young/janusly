@@ -16,6 +16,12 @@ retroactively.
 
 ### Changed
 
+- Engine lifecycle persistence is now separated into bounded run, node, event,
+  queue-publication, and semantic-recovery ports behind the existing
+  `persistence.ts` compatibility barrel. All 40 runtime exports and 10 type
+  exports remain stable, and architecture tests enforce the closed module
+  inventory and acyclic dependency direction without changing SQL, migrations,
+  public APIs, or event payloads.
 - The canonical 71-table Drizzle schema is now composed from seven
   side-effect-free bounded-context modules behind the existing `schema.ts` and
   `@janusly/db` barrels. Application imports and table object identity remain
@@ -268,6 +274,10 @@ retroactively.
 
 ### Fixed
 
+- Recovery Playbooks now match repeated stalled-worker failures using the
+  stable `worker_stalled` code instead of timestamp-bearing error prose, so a
+  later occurrence can revalidate the active playbook rather than appearing as
+  an unrelated failure.
 - Workflow save no longer strips documented `recovery` settings, and
   full-workflow AI improvement cannot invent or overwrite the operator-owned
   recovery policy.
