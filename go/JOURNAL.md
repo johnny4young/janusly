@@ -1454,3 +1454,10 @@ producción necesita saber — de lo ya resuelto o informativo.
 - El executor ai con los cuatro escalones probados: $0 sucede, vivo
   responde, la validación no marca el SDK, y el proveedor muerto deja
   el fallback en el estado — jamás un run fallido por culpa del modelo.
+
+## 2026-07-31 — memoria que pide permiso dos veces (T-112)
+
+- El sustrato pgvector con el consent de dos flags + allowlist de kinds,
+  embeddings de Ollama, y la garantía probada de que nada lanza: consent
+  apagado escribe cero, Ollama muerto degrada en silencio, y cada
+  recall firma su runId para la factura.
