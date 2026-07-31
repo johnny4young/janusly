@@ -163,3 +163,48 @@ func TestSupabaseSingleMembershipDefaults(t *testing.T) {
 		t.Fatalf("single membership default: %+v %v", got, err)
 	}
 }
+
+// The role ladder: literal built-in wins; the admin auto-grant exists ONLY
+// for dev-headers and ONLY when no row exists; custom literals without a
+// defining row fail closed.
+func TestResolveMemberRoleLadder(t *testing.T) {
+	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+	}
+	pool, err := pgxpool.New(context.Background(), dsn)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	q := store.New(pool)
+	ctx := context.Background()
+	org := fmt.Sprintf("org-roles-%d", time.Now().UnixNano())
+	seedMember(t, pool, org, "viewer-user", "v@example.com", "viewer")
+	seedMember(t, pool, org, "custom-user", "c@example.com", "billing-admin")
+
+	// A row's literal role wins in EVERY mode — including dev-headers
+	// (the auto-grant is for missing rows only, the reference's subtlety).
+	for _, mode := range []Mode{ModeSupabase, ModeServiceToken, ModeDevHeaders} {
+		got, err := ResolveMemberRole(ctx, q, org, "viewer-user", mode)
+		if err != nil || got == nil || got.InheritsFrom != RoleViewer {
+			t.Fatalf("mode %s: %+v %v", mode, got, err)
+		}
+	}
+
+	// No row: dev-headers auto-grants admin; the other modes fail closed.
+	got, _ := ResolveMemberRole(ctx, q, org, "ghost", ModeDevHeaders)
+	if got == nil || got.InheritsFrom != RoleAdmin {
+		t.Fatalf("dev auto-grant: %+v", got)
+	}
+	for _, mode := range []Mode{ModeSupabase, ModeServiceToken} {
+		if got, _ := ResolveMemberRole(ctx, q, org, "ghost", mode); got != nil {
+			t.Fatalf("mode %s must not auto-grant: %+v", mode, got)
+		}
+	}
+
+	// Custom literal without its org_roles row: fail closed even in dev.
+	if got, _ := ResolveMemberRole(ctx, q, org, "custom-user", ModeDevHeaders); got != nil {
+		t.Fatalf("undefined custom role must fail closed: %+v", got)
+	}
+}

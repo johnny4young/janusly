@@ -1142,3 +1142,12 @@ producción necesita saber — de lo ya resuelto o informativo.
 - El end-to-end por el middleware usa un Supabase falso vía env — el
   mismo binario, la misma cadena, un JWT válido lee el API y uno
   forjado recibe el 401 con la forma exacta del dispatcher Node.
+
+## 2026-07-31 — la escalera de rol y sus tres sutilezas (T-071)
+
+- Lo que hacía a este ticket un ticket y no una línea: el auto-grant
+  admin de dev-headers existe SOLO cuando no hay fila — un viewer
+  sembrado sigue siendo viewer aunque entre por dev-headers, y esa
+  distinción es la que evita que el modo de desarrollo esconda bugs de
+  autorización. Service-token jamás auto-eleva, y un rol custom cuya
+  definición fue borrada falla cerrado en todos los modos.
