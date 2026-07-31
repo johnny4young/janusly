@@ -98,6 +98,12 @@ retroactively.
 
 ### Added
 
+- A privacy-bounded local moderated-usability kit records five pseudonymous
+  task observations per participant, writes owner-only session files, produces
+  a fail-closed acceptance report, and keeps automated browser readiness
+  evidence explicitly separate from the required five unfamiliar human
+  participants.
+
 - Deterministic semantic outcome recovery through `RecoveryContractV2`.
   Expression/schema detectors can observe or quarantine an unacceptable output,
   durable Recovery Cases retain append-only transition evidence, and only a

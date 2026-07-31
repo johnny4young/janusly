@@ -289,6 +289,7 @@ pnpm evals:baseline  # snapshot the current ai-mode / shape-pass rates into eval
 pnpm evals:recovery  # deterministic Recovery corpus against production classifiers, safety gates, qualification, and outcome semantics — $0
 pnpm evals:recovery:baseline # refresh the Recovery dataset hash only after every deterministic safety case passes
 pnpm test:evals      # unit-test both eval gates, then run the deterministic Recovery suite — $0, no API
+pnpm usability:study # record and aggregate pseudonymous local moderated-usability sessions
 pnpm seed:demos      # explicit opt-in demo credentials; never runs at startup
 pnpm seed:recovery-matrix  # explicit opt-in DLQ fixtures for recovery testing
 pnpm seed:full       # explicit opt-in full demo dataset; never runs at startup
@@ -386,6 +387,7 @@ Permissions are enforced per organization through `org_members`. In `dev-headers
 | HTTP API request/response examples | [`docs/api.md`](docs/api.md) |
 | Full workflow examples (DAG JSON) | [`docs/workflows.md`](docs/workflows.md) |
 | Runnable example payload | [`docs/examples/github-uppercase.json`](docs/examples/github-uppercase.json) |
+| Local moderated usability protocol and acceptance report | [`docs/usability-testing.md`](docs/usability-testing.md) |
 
 ---
 
@@ -509,6 +511,7 @@ pnpm test               # full Vitest workspace suite
 pnpm test:browser       # Vitest browser-mode (Playwright/Chromium) for `*.browser.test.tsx`
 pnpm test:accessibility # axe serious/critical gate on settled Playwright UI states
 pnpm test:e2e           # Playwright with automatic Compose up/down
+pnpm usability:study -- --help # local human-session recorder; automation is readiness evidence only
 pnpm typecheck          # TypeScript 7 across typed production and test sources
 pnpm build              # workspace production builds
 pnpm dev:doctor         # free orphaned dev ports (:3001, :5173, legacy :5174) after a crashed local run
