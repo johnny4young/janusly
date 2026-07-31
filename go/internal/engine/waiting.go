@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -29,7 +28,7 @@ var ErrResumeNodeNotFound = errors.New("Node not found") //nolint:staticcheck //
 // {waiting: {reason, ...metadata, waitingSince}} state, the node.waiting
 // event, and — for timers — the wake-up that auto-resumes it.
 func (e *Engine) MarkNodeWaiting(ctx context.Context, claim ClaimedNode, waiting executors.Waiting) error {
-	checkpointAt := time.Now().UTC()
+	checkpointAt := eventNow()
 	metadata := map[string]any{}
 	if waiting.Reason != "" {
 		metadata["reason"] = waiting.Reason
@@ -76,7 +75,7 @@ func (e *Engine) MarkNodeWaiting(ctx context.Context, claim ClaimedNode, waiting
 // reference's historical empty output — the decision lives in the run
 // timeline, never in the node output.
 func (e *Engine) ResumeRun(ctx context.Context, runID, nodeID string) error {
-	finishedAt := time.Now().UTC()
+	finishedAt := eventNow()
 	return e.inCompletionTx(ctx, runID, func(q *store.Queries) error {
 		run, err := q.GetRunExecution(ctx, runID)
 		if err != nil {

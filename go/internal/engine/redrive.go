@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -74,7 +73,7 @@ func (e *Engine) RedriveDeadLetter(ctx context.Context, orgID, deadLetterID stri
 		return fmt.Errorf("revive run: %w", err)
 	}
 
-	redrivenAt := time.Now().UTC()
+	redrivenAt := eventNow()
 	payload, err := json.Marshal(map[string]any{
 		"deadLetterId": deadLetterID, "attempt": attempt,
 	})

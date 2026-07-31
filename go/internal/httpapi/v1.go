@@ -352,10 +352,18 @@ func (s *V1Server) getRun(w http.ResponseWriter, r *http.Request, rc v1Request) 
 	if hasMore {
 		events = events[:limit]
 	}
+	// The reference returns each page ASCENDING (paginateRunEvents reverses
+	// the DESC rows), with the cursor pointing at the page's oldest event.
+	for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
+		events[i], events[j] = events[j], events[i]
+	}
 	var nextCursor any
 	if hasMore && len(events) > 0 {
-		last := events[len(events)-1]
-		nextCursor = last.CreatedAt.UTC().Format(time.RFC3339Nano) + "|" + last.ID
+		last := events[0]
+		// Millisecond ISO, exactly the reference's toISOString shape — the
+		// same precision events are WRITTEN at, so cursor comparisons are
+		// exact for cursors minted by either backend.
+		nextCursor = last.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z") + "|" + last.ID
 	}
 
 	nodeViews := make([]map[string]any, 0, len(nodes))

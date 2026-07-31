@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -267,5 +268,85 @@ func TestFailureClustersRollup(t *testing.T) {
 	legacy := h.call("GET", "/dlq/clusters", nil, "")
 	if legacy.status != 200 || legacy.body["apiVersion"] != nil || legacy.body["clusters"] == nil {
 		t.Fatalf("legacy clusters: %+v", legacy.body)
+	}
+}
+
+// Cursor round-trip parity: pages via the minted cursor reassemble the
+// exact ascending timeline with no skips or repeats — including events
+// sharing one millisecond (events are WRITTEN at ms precision, so the
+// ms-ISO cursor both backends mint compares exactly).
+func TestEventsCursorRoundTrip(t *testing.T) {
+	h := newAPIHarness(t)
+	doc := map[string]any{
+		"id": "wf-cursor-" + h.org,
+		"nodes": []any{
+			map[string]any{"id": "a", "type": "noop", "config": map[string]any{}},
+			map[string]any{"id": "b", "type": "noop", "config": map[string]any{}},
+			map[string]any{"id": "c", "type": "noop", "config": map[string]any{}},
+		},
+		"edges": []any{
+			map[string]any{"from": "a", "to": "b"},
+			map[string]any{"from": "b", "to": "c"},
+		},
+	}
+	res := h.call("POST", "/v1/start", map[string]any{"workflow": doc}, "")
+	runID := res.body["data"].(map[string]any)["runId"].(string)
+	h.waitRun(runID, "succeeded")
+
+	full := h.call("GET", "/v1/run?runId="+runID+"&eventsLimit=500", nil, "")
+	allEvents := full.body["data"].(map[string]any)["events"].([]any)
+	if len(allEvents) < 6 {
+		t.Fatalf("timeline too small: %d", len(allEvents))
+	}
+	ids := func(events []any) []string {
+		out := make([]string, 0, len(events))
+		for _, raw := range events {
+			out = append(out, raw.(map[string]any)["id"].(string))
+		}
+		return out
+	}
+	want := ids(allEvents)
+
+	// Walk pages of 2 via the minted cursor; verify the ms-ISO shape.
+	var got []string
+	cursor := ""
+	for {
+		url := "/v1/run?runId=" + runID + "&eventsLimit=2"
+		if cursor != "" {
+			url += "&eventsCursor=" + strings.ReplaceAll(cursor, "|", "%7C")
+		}
+		page := h.call("GET", url, nil, "")
+		data := page.body["data"].(map[string]any)
+		got = append(ids(data["events"].([]any)), got...)
+		next, _ := data["eventsCursor"].(string)
+		if data["eventsHasMore"] != true {
+			break
+		}
+		at, _, _ := strings.Cut(next, "|")
+		if !strings.HasSuffix(at, "Z") || len(at) != len("2006-01-02T15:04:05.000Z") {
+			t.Fatalf("cursor must be millisecond ISO: %q", next)
+		}
+		cursor = next
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("pages must reassemble the timeline\n got: %v\nwant: %v", got, want)
+	}
+
+	// Same-millisecond collision: two synthetic events sharing one ms
+	// timestamp must page through by the id tiebreaker without loss.
+	pool := testPool(t)
+	at := "2026-07-30T00:00:00.123Z"
+	prefix := fmt.Sprintf("0-collide-%d-", time.Now().UnixNano())
+	for _, id := range []string{prefix + "a", prefix + "b"} {
+		if _, err := pool.Exec(context.Background(),
+			`INSERT INTO run_events (id, run_id, type, payload, created_at)
+			 VALUES ($1, $2, 'probe', '{}'::jsonb, $3::timestamptz)`, id, runID, at); err != nil {
+			t.Fatalf("seed collision: %v", err)
+		}
+	}
+	page := h.call("GET", "/v1/run?runId="+runID+"&eventsCursor="+at+"%7C"+prefix+"b&eventsLimit=1", nil, "")
+	events := page.body["data"].(map[string]any)["events"].([]any)
+	if len(events) != 1 || events[0].(map[string]any)["id"] != prefix+"a" {
+		t.Fatalf("id tiebreaker must order the same-ms pair: %+v", events)
 	}
 }

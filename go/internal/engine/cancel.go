@@ -8,7 +8,6 @@ package engine
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/johnny4young/janusly/go/internal/store"
 )
@@ -20,7 +19,7 @@ func (e *Engine) CancelRun(ctx context.Context, runID string, reason any) error 
 	if reason == nil {
 		reason = map[string]any{}
 	}
-	cancelledAt := time.Now().UTC()
+	cancelledAt := eventNow()
 	stateJSON := safePersist(map[string]any{"cancelled": reason}, stateJSONMaxBytes)
 	eventJSON := safePersist(reason, defaultPersistMaxBytes)
 

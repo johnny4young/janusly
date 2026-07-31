@@ -58,7 +58,7 @@ func (e *Engine) CompleteNode(ctx context.Context, claim ClaimedNode, output any
 	}
 	eventJSON := safePersist(eventPayload, defaultPersistMaxBytes)
 
-	finishedAt := time.Now().UTC()
+	finishedAt := eventNow()
 	return e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries) error {
 		completed, err := q.CompleteRunNode(ctx, store.CompleteRunNodeParams{
 			RunID: claim.RunID, NodeID: claim.NodeID,
@@ -112,7 +112,7 @@ func (e *Engine) RetryOrFail(ctx context.Context, claim ClaimedNode, node domain
 	if err != nil {
 		return fmt.Errorf("marshal retry payload: %w", err)
 	}
-	retriedAt := time.Now().UTC()
+	retriedAt := eventNow()
 	return e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries) error {
 		requeued, err := q.RequeueRunNodeForRetry(ctx, store.RequeueRunNodeForRetryParams{
 			RunID: claim.RunID, NodeID: claim.NodeID,
@@ -154,7 +154,7 @@ func (e *Engine) FailNode(ctx context.Context, claim ClaimedNode, execErr error)
 		return fmt.Errorf("marshal event payload: %w", err)
 	}
 
-	failedAt := time.Now().UTC()
+	failedAt := eventNow()
 	return e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries) error {
 		run, err := q.GetRunExecution(ctx, claim.RunID)
 		if err != nil {
@@ -334,7 +334,7 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, runID
 				continue
 			}
 			if !edgeAllowsRun(wf, node.ID, runContext) {
-				skippedAt := time.Now().UTC()
+				skippedAt := eventNow()
 				stateJSON, _ := json.Marshal(map[string]any{"skipped": map[string]any{"reason": "Condition not met"}})
 				rows, err := q.SkipRunNode(ctx, store.SkipRunNodeParams{
 					RunID: runID, NodeID: node.ID,
@@ -375,7 +375,7 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, runID
 			queued++
 			changed = true
 			statuses[node.ID] = "queued"
-			queuedAt := time.Now().UTC()
+			queuedAt := eventNow()
 			if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
 				ID: e.newID(), RunID: runID,
 				NodeID: pgtype.Text{String: node.ID, Valid: true},
@@ -505,4 +505,13 @@ func workflowFromRunInput(inputJSON []byte) (*domain.Workflow, map[string]any, e
 		return nil, nil, fmt.Errorf("run workflow snapshot invalid: %+v", issues)
 	}
 	return wf, envelope.Input, nil
+}
+
+// eventNow stamps run events at MILLISECOND precision — the reference's
+// timestamps come from JS Dates (ms), and keyset cursors serialize as
+// millisecond ISO strings on both backends. A µs-precision row under an
+// ms-precision cursor can be skipped at a page boundary; truncating at
+// write time makes every cursor comparison exact in both directions.
+func eventNow() time.Time {
+	return time.Now().UTC().Truncate(time.Millisecond)
 }

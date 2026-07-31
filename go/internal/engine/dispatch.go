@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -99,7 +98,7 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 		RunID: claim.RunID, NodeID: claim.NodeID,
 		Config: renderedConfig, Context: runContext, HTTPBounds: httpBounds,
 		Emit: func(eventType string, payload map[string]any) {
-			eventAt := time.Now().UTC()
+			eventAt := eventNow()
 			raw, err := json.Marshal(payload)
 			if err != nil {
 				return
@@ -171,7 +170,7 @@ func (d *Dispatcher) recordUnresolvedPaths(ctx context.Context, q *store.Queries
 	if err != nil {
 		return fmt.Errorf("marshal unresolved-path payload: %w", err)
 	}
-	eventAt := time.Now().UTC()
+	eventAt := eventNow()
 	if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
 		ID: d.engine.newID(), RunID: claim.RunID,
 		NodeID: pgtype.Text{String: claim.NodeID, Valid: true},

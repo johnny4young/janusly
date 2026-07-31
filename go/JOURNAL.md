@@ -955,3 +955,16 @@ producción necesita saber — de lo ya resuelto o informativo.
   exactamente cuál capa falta, con los mensajes verbatim. El escalón
   completo probado en vivo: flag de proceso apagado, flag encendido con
   consent revocado, y los reads fluyendo sin gate en ambos estados.
+
+## 2026-07-31 — paridad exacta de cursores de eventos (T-058)
+
+- El ticket parecía un test y resultó dos arreglos. Primero, precisión:
+  los cursores JS son milisegundos por naturaleza (Date) y Go escribía
+  microsegundos — en la frontera exacta de página, el tuple del keyset
+  puede saltarse eventos del mismo milisegundo. Ahora todo run_event se
+  estampa truncado a ms y el cursor se acuña en el shape exacto de
+  toISOString: comparación exacta en ambas direcciones.
+- Segundo, orden: Go servía la página DESC cruda; la referencia la
+  invierte a ascendente con el cursor apuntando al evento más viejo.
+  La divergencia vivía desde F0 porque la proyección de paridad no
+  compara eventos — el round-trip la destapó en su primera corrida.

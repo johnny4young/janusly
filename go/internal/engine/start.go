@@ -169,8 +169,10 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 	}
 
 	startedPayload, _ := json.Marshal(map[string]string{"workflowVersionId": versionID})
-	if err := q.InsertRunEvent(ctx, store.InsertRunEventParams{
+	startedAt := eventNow()
+	if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
 		ID: e.newID(), RunID: runID, Type: "run.started", Payload: startedPayload,
+		CreatedAt: &startedAt,
 	}); err != nil {
 		return "", fmt.Errorf("insert run.started: %w", err)
 	}
