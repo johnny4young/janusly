@@ -331,15 +331,48 @@ func vectorTools() []Definition {
 // every write-side tool HIDDEN when dryRun — a validation run must not
 // even show the model a write.
 func (r *Registry) PlannerTools(dryRun bool) []map[string]any {
-	catalog := r.Catalog()
-	out := make([]map[string]any, 0, len(catalog))
-	for _, entry := range catalog {
-		if dryRun {
-			if writeSide, _ := entry["writeSide"].(bool); writeSide {
-				continue
-			}
+	names := make([]string, 0, len(r.byName))
+	for name := range r.byName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]map[string]any, 0, len(names))
+	for _, name := range names {
+		definition := r.byName[name]
+		if dryRun && definition.WriteSide {
+			continue
+		}
+		entry := map[string]any{
+			"name": definition.Name, "description": definition.Description,
+			"required": definition.Required, "inputFields": definition.Fields,
+			"writeSide": definition.WriteSide,
+			// jsonSchema is the PLANNER-ONLY projection: a JSON-Schema
+			// object derived from the same field table. It never leaves
+			// through the public /tools catalog — prompt plumbing only.
+			"jsonSchema": plannerJSONSchema(definition),
+		}
+		if len(definition.Optional) > 0 {
+			entry["optional"] = definition.Optional
 		}
 		out = append(out, entry)
 	}
 	return out
+}
+
+// plannerJSONSchema derives the private planner schema from the field
+// table (the reference keeps this projection out of listTools()).
+func plannerJSONSchema(definition Definition) map[string]any {
+	properties := map[string]any{}
+	for _, field := range definition.Fields {
+		fieldType := field.Type
+		if fieldType == "" {
+			fieldType = "string"
+		}
+		properties[field.Name] = map[string]any{"type": fieldType}
+	}
+	schema := map[string]any{"type": "object", "properties": properties}
+	if len(definition.Required) > 0 {
+		schema["required"] = definition.Required
+	}
+	return schema
 }

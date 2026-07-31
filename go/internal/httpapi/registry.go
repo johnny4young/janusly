@@ -21,6 +21,8 @@ var routeAuthz = map[string]routeGate{
 	"POST /workflows/rollback":             {auth.RoleEditor, "workflows.write"},
 	"POST /v1/workflows/readiness":         {auth.RoleEditor, "workflows.write"},
 	"POST /workflows/readiness":            {auth.RoleEditor, "workflows.write"},
+	"POST /v1/validate":                    {auth.RoleEditor, "workflows.write"},
+	"POST /validate":                       {auth.RoleEditor, "workflows.write"},
 	"DELETE /workflows/{workflowId}":       {auth.RoleEditor, "workflows.write"},
 	"POST /workflows/{workflowId}/restore": {auth.RoleEditor, "workflows.write"},
 	"GET /v1/workflows":                    {auth.RoleViewer, "workflows.read"},

@@ -90,6 +90,12 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	mux.HandleFunc("POST /workflows/readiness", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeLegacy(w, server.readinessCore(r, rc))
 	}))
+	mux.HandleFunc("POST /v1/validate", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeVersioned(w, rc.id, server.validateCore(r, rc))
+	}))
+	mux.HandleFunc("POST /validate", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeLegacy(w, server.validateCore(r, rc))
+	}))
 	mux.HandleFunc("GET /v1/workflows", server.auth(server.listWorkflows))
 	mux.HandleFunc("GET /v1/workflows/latest", server.auth(server.latestWorkflowVersion))
 	mux.HandleFunc("GET /v1/workflows/versions", server.auth(server.listWorkflowVersions))

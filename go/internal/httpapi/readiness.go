@@ -80,6 +80,40 @@ func (s *V1Server) productionGate(ctx context.Context, orgID string, wf *domain.
 	return &rejection
 }
 
+// validateCore serves POST /validate: the reference's structural
+// validation surface — {valid, issues} verbatim from domain.Validate,
+// accepting a flat workflow JSON or the {workflow} envelope. No pilot
+// node-type carve-out here: /validate reports the FULL issue list (the
+// save path owns the carve-out decision).
+func (s *V1Server) validateCore(r *http.Request, rc v1Request) opResult {
+	var body map[string]json.RawMessage
+	if err := decodeBody(r, &body); err != nil {
+		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body", nil)
+	}
+	candidate, ok := body["workflow"]
+	if !ok || len(candidate) == 0 {
+		full, err := json.Marshal(body)
+		if err != nil {
+			return opError(http.StatusBadRequest, "invalid_input", "Invalid request body", nil)
+		}
+		candidate = full
+	}
+	wf, parseIssues := domain.Parse(candidate)
+	if wf == nil {
+		issues := parseIssues
+		if len(issues) == 0 {
+			issues = []domain.Issue{{Code: domain.CodeInvalidContract, Message: "workflow: invalid document"}}
+		}
+		return opOK(map[string]any{"valid": false, "issues": issues})
+	}
+	result := domain.Validate(wf, grammar.DomainValidator)
+	issues := result.Issues
+	if issues == nil {
+		issues = []domain.Issue{}
+	}
+	return opOK(map[string]any{"valid": result.Valid, "issues": issues})
+}
+
 // readinessCore serves POST /workflows/readiness (both wires): the badge's
 // structural-validation-plus-readiness projection. Structurally invalid
 // workflows return a fail result (HTTP 200) with each validation issue
