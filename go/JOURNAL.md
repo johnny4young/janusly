@@ -534,3 +534,16 @@ local. Sin umbral pasa/no-pasa: números para aprender.
   acepta; y el wrapper degrada offline-limpio, así que los paneles
   fuera de alcance (AI, credenciales, SCIM…) deberían mostrar estados
   vacíos amigables — el smoke de T-035 lo confirmará.
+
+## 2026-07-30 — lecturas legacy de soporte (T-030)
+
+- /health abierto con la forma del golden y un detalle de honestidad:
+  queue.degraded sale de un ping real acotado a la DB, no de un true
+  hardcodeado — el chip de Operations verá degradación de verdad si la
+  DB se cae. /org/config devuelve la lista vacía que Node daría a una
+  org fresca.
+- La mitad del ticket fue DEPURAR el alcance contra la fuente: /ping no
+  existe como ruta del servidor (falso positivo de mi inventario
+  estático — estaba en un util del cliente), /users/me solo es POST de
+  perfil, y la tarjeta de onboarding degrada amigable por diseño del
+  wrapper. Tres stubs que NO había que construir.

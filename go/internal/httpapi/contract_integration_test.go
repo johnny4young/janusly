@@ -561,3 +561,30 @@ func TestWorkflowReadSurfaces(t *testing.T) {
 	requireError(t, h.call("GET", "/v1/workflows/latest?workflowId="+workflowID, nil, h.org+"-x"),
 		404, "workflow_not_found", "Workflow not found")
 }
+
+func TestLegacySupportReads(t *testing.T) {
+	h := newAPIHarness(t)
+	// /health is OPEN (no auth) with the reference's public-safe shape.
+	req, _ := http.NewRequest("GET", h.server.URL+"/health", nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("health: %v", err)
+	}
+	defer res.Body.Close()
+	var health map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&health)
+	if health["ok"] != true {
+		t.Fatalf("health shape: %v", health)
+	}
+	limiter := health["rateLimiter"].(map[string]any)
+	queue := health["queue"].(map[string]any)
+	if limiter["healthy"] != true || queue["degraded"] != false {
+		t.Fatalf("health sub-shapes: %v", health)
+	}
+
+	// /org/config: raw legacy body, honestly empty for a fresh org.
+	cfg := h.call("GET", "/org/config", nil, "")
+	if list, ok := cfg.body["config"].([]any); !ok || len(list) != 0 {
+		t.Fatalf("org config must be an empty list: %v", cfg.body)
+	}
+}

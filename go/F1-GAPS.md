@@ -48,10 +48,7 @@ Node. → **T-032**.
 | Ruta | Uso en el web | Nota |
 | --- | --- | --- |
 | `GET /health` | chip de rate-limiter en Operations (poll 20s) | forma pública-segura de Node → T-030 |
-| `GET /ping` | latido de conectividad | trivial → T-030 |
-| `GET /users/me` | identidad + rol del menú | dev-mode: derivar de headers → T-030 |
-| `GET /org/config` | ajustes de tenant en paneles | subset read-only honesto → T-030/T-043 |
-| `GET /onboarding` | tarjeta "first recovered run" | stub honesto → T-030 |
+| `GET /org/config` | ajustes de tenant en paneles | lista vacía honesta (org fresca) → T-030 ✅ |
 | `GET /workflows/trash` | papelera de Flows | tras soft-delete → T-033 |
 | `GET /dlq/queue` / `/dlq/counts` | panel DLQ keyset + badges | → T-032/T-044 |
 | `GET /dlq?id=` | detalle de dead letter | legacy por diseño → T-032 |
@@ -64,7 +61,10 @@ Node. → **T-032**.
 `/integrations/*` · `/eval/datasets` · `/recovery/*` (métricas/casos) ·
 `/templates` · `/tools` · `/workflows/tags|folders` · `/organizations` ·
 `/runs/replay-lab` · `/workflows/health` · `/reports/run-explain` ·
-`/run/usage`.
+`/run/usage` · `/onboarding` (tarjeta degrada a estado amigable) ·
+`/users/me` (solo existe como POST de perfil en Node; el menú deriva
+identidad de otros datos) · `/ping` (no es ruta del servidor Node —
+falso positivo del inventario inicial).
 
 Los paneles que dependen de estos deben mostrar su estado vacío/error
 amigable, no romper la página (el `ErrorBoundary` por panel de Node ayuda).
@@ -72,7 +72,6 @@ El smoke T-035 verifica exactamente eso.
 
 ## Ajustes al plan de la ola
 
-- T-030 crece: `/health` + `/ping` + `/users/me` + `/org/config` (subset) +
   `/onboarding` (stub honesto).
 - T-032 se concreta: encoders duales + alias de mutaciones legacy + `/dlq`
   detalle + `/dlq/queue` + `/dlq/counts`.

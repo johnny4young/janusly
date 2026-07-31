@@ -7,6 +7,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,6 +43,28 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
+	// Legacy public health — the web's OperationsPage polls this every 20s.
+	// Public-safe shape from the reference: no raw bucket/error/key detail.
+	// rateLimiter reads healthy (the pilot has no limiter yet) and queue
+	// reflects a real bounded DB probe.
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		degraded := pool.Ping(ctx) != nil
+		w.Header().Set("Content-Type", "application/json")
+		payload, _ := json.Marshal(map[string]any{
+			"ok":          true,
+			"rateLimiter": map[string]any{"healthy": true, "degradedBuckets": []string{}},
+			"queue":       map[string]any{"degraded": degraded},
+		})
+		_, _ = w.Write(payload)
+	})
+	// Legacy org-config read: the closed catalog with no tenant rows is an
+	// honestly EMPTY list — the same answer the reference gives a fresh org.
+	mux.HandleFunc("GET /org/config", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"config":[]}`))
+	}))
 	mux.HandleFunc("POST /v1/workflows/save", server.auth(server.saveWorkflow))
 	mux.HandleFunc("GET /v1/workflows", server.auth(server.listWorkflows))
 	mux.HandleFunc("GET /v1/workflows/latest", server.auth(server.latestWorkflowVersion))
