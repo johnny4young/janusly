@@ -210,3 +210,64 @@ func TestHTTPMethodHeadersAndBodyReachTheServer(t *testing.T) {
 	}
 	_ = json.Valid([]byte(seenBody))
 }
+
+// Cross-origin redirects must not forward credential headers — and the
+// definition is the fetch spec's ORIGIN (scheme+host+port), stricter than
+// Go's own domain-based stripping: the same host on a DIFFERENT PORT is a
+// different origin, and Proxy-Authorization is covered too.
+func TestRedirectStripsCredentialsAcrossOrigins(t *testing.T) {
+	type seen struct{ auth, proxyAuth, cookie, custom string }
+	record := func(into *seen) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			*into = seen{
+				auth: r.Header.Get("Authorization"), proxyAuth: r.Header.Get("Proxy-Authorization"),
+				cookie: r.Header.Get("Cookie"), custom: r.Header.Get("X-Trace"),
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		}
+	}
+
+	// Same host (127.0.0.1), different port: cross-origin by fetch rules.
+	var crossSeen seen
+	crossTarget := httptest.NewServer(record(&crossSeen))
+	defer crossTarget.Close()
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, crossTarget.URL+"/land", http.StatusFound)
+	}))
+	defer redirector.Close()
+
+	headers := map[string]any{
+		"Authorization":       "Bearer top-secret",
+		"Proxy-Authorization": "Basic cHJveHk=",
+		"Cookie":              "session=abc",
+		"X-Trace":             "keep-me",
+	}
+	if _, err := execHTTP(t, map[string]any{"url": redirector.URL, "headers": headers}); err != nil {
+		t.Fatal(err)
+	}
+	if crossSeen.auth != "" || crossSeen.proxyAuth != "" || crossSeen.cookie != "" {
+		t.Fatalf("credentials leaked across origins: %+v", crossSeen)
+	}
+	if crossSeen.custom != "keep-me" {
+		t.Fatalf("non-credential headers must survive: %+v", crossSeen)
+	}
+
+	// Same origin (same server, path redirect): headers are kept.
+	var sameSeen seen
+	var sameServer *httptest.Server
+	sameServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/hop" {
+			http.Redirect(w, r, sameServer.URL+"/land", http.StatusFound)
+			return
+		}
+		record(&sameSeen)(w, r)
+	}))
+	defer sameServer.Close()
+	if _, err := execHTTP(t, map[string]any{"url": sameServer.URL + "/hop", "headers": headers}); err != nil {
+		t.Fatal(err)
+	}
+	if sameSeen.auth != "Bearer top-secret" || sameSeen.cookie != "session=abc" {
+		t.Fatalf("same-origin redirect must keep credentials: %+v", sameSeen)
+	}
+}

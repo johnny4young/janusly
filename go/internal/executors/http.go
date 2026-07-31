@@ -275,6 +275,18 @@ func (e *httpExecutor) execute(ctx context.Context, in Input) (any, error) {
 			if _, err := e.validate(req.Context(), req.URL.String(), pins); err != nil {
 				return err
 			}
+			// Fetch-spec credential stripping, ORIGIN-based like the
+			// reference's manual hops: Go's own redirect logic compares
+			// DOMAINS (same host or subdomain keeps Authorization/Cookie on
+			// any port, and never touches Proxy-Authorization) — so a
+			// redirect to the same host on another port, a scheme
+			// downgrade, or a subdomain hop would forward the credential.
+			// Same-origin hops keep their headers.
+			if !sameOrigin(via[len(via)-1].URL, req.URL) {
+				for _, name := range []string{"Authorization", "Proxy-Authorization", "Cookie"} {
+					req.Header.Del(name)
+				}
+			}
 			return nil
 		},
 	}
@@ -367,4 +379,20 @@ func isJSONMediaType(value string) bool {
 	mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(value, ";", 2)[0]))
 	return mediaType == "application/json" ||
 		(strings.HasPrefix(mediaType, "application/") && strings.HasSuffix(mediaType, "+json"))
+}
+
+// sameOrigin implements the fetch spec's origin comparison — scheme, host,
+// and effective port (default 80/443 normalized).
+func sameOrigin(a, b *url.URL) bool {
+	return a.Scheme == b.Scheme && a.Hostname() == b.Hostname() && effectivePort(a) == effectivePort(b)
+}
+
+func effectivePort(u *url.URL) string {
+	if port := u.Port(); port != "" {
+		return port
+	}
+	if u.Scheme == "https" {
+		return "443"
+	}
+	return "80"
 }
