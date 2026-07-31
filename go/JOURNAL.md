@@ -1373,3 +1373,9 @@ producción necesita saber — de lo ya resuelto o informativo.
 - El chokepoint AI con el contrato de fallback viviendo EN la frontera:
   ocho clases de error estables, recover diferido, y un test que camina
   el módulo entero para probar que nadie más importa el SDK.
+
+## 2026-07-31 — el catálogo gobierna los tokens (T-100)
+
+- aiconfig resuelve todo del catálogo por capas; sin clave todo cae
+  limpio a no_client, y un tenant configurado a otro proveedor recibe
+  fallback en vez de un re-ruteo silencioso a Anthropic.
