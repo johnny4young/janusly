@@ -379,3 +379,13 @@ local. Sin umbral pasa/no-pasa: números para aprender.
   ordering del readiness scan que ya reporté upstream. Go: 4100/4100.
 - Perfil pprof de CPU del escenario diamond guardado en
   conformance/perf/pprof-diamond-cpu.pb.gz.
+
+## 2026-07-30 — puerta D15: F0 cerrada (T-018)
+
+- Las cuatro condiciones evaluadas y cumplidas; informe en REPORT-D15.md.
+- La vertical completa del engine — cola propia, executors, fallo/retry/
+  DLQ, waiting/resume, redrive, http/SSRF, API v1 con goldens, paridad
+  F01-F10, e2e del binario, MCP en proceso, números — se ejecutó en una
+  sola jornada de trabajo continuo contra el timebox de 3 semanas.
+- Recomendación escrita: continuar por fases, con un F0.5 corto para el
+  pool de DB y los goldens faltantes. La decisión es de Johnny.

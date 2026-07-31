@@ -181,7 +181,7 @@ crítica) · P1 (importante) · P2 (stretch).
 | T-015 | Servidor MCP stdio + e2e vía MCP (lane C) | P1 | done |
 | T-016 | Rendimiento: k6 + RSS + pprof vs Node | P1 | done |
 | T-017 | Journal consolidado + análisis de fricción | P1 | done |
-| T-018 | Puerta D15: informe + recomendación | P0 | partial |
+| T-018 | Puerta D15: informe + recomendación | P0 | done |
 | T-101 | (stretch) Tick de schedules con líder por advisory lock | P2 | todo |
 | T-102 | (post-piloto) LlmClient Go sobre SDKs oficiales | P2 | todo |
 | T-103 | (post-piloto) pdf.generate: evaluación maroto v2 | P2 | todo |
@@ -650,6 +650,7 @@ el chat publicado.
 | 2026-07-30 | números (lo bueno) | Go gana claro en baja contención: start@10VU 187.9 runs/s vs 45.9 (4.1×, p50 34.6ms vs 195.9ms); list@50VU 2800 vs 1085 RPS; diamond@10VU 136.4 vs ~29.5 runs/s. Huella: 21.9 MB idle / 34.3 pico, UN proceso — vs ~101 MB idle api+worker + Redis en Node |
 | 2026-07-30 | hallazgo (lo honesto) | Go start@50VU degrada feo con concurrencia 8 (p99 19.9s); subir a 32 arregla la cola (p99 2.3s) pero el throughput no sube y diamond@c32 COLAPSA 8× — sospechoso principal: pool de DB hardcodeado en MaxConns 10 (32 workers + pollers del API compitiendo por 10 conexiones). Follow-up F0.5: pool configurable + pools separados API/workers + retest. Node degrada con gracia a 50VU (modelo async de BullMQ) |
 | 2026-07-30 | hallazgo (Node) | 2/445 diamantes de Node NUNCA completaron (join jamás disparó; poll-timeout a 90s) y un intento previo sin límite colgó indefinido — reproducción probable del hazard de ordering del readiness scan ya reportado upstream. Go: 4100/4100 |
+| 2026-07-30 | F0 CERRADA | T-000..T-018 done (T-1xx stretch pendientes). Las 4 condiciones de la puerta D15 cumplidas — informe en go/REPORT-D15.md con recomendación: continuar a rewrite por fases, previo F0.5 corto (pool DB configurable+separado, recaptura de 2 goldens, demo MCP manual). La decisión estratégica es de Johnny |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
