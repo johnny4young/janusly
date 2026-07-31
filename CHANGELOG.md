@@ -16,6 +16,12 @@ retroactively.
 
 ### Changed
 
+- Workflow runtime integration tests now have reusable stateful in-memory
+  persistence, queue/DLQ, and scripted-executor adapters. They exercise the
+  real orchestration lifecycle without Postgres or Redis while retaining
+  generation, recovery-token, retry, terminal-failure, and semantic-quarantine
+  safeguards; database and BullMQ suites remain authoritative for their own
+  concurrency and delivery guarantees.
 - The web jsdom suite now retains file-level parallelism while bounding worker
   concurrency to the smaller of four or the host's available parallelism. This
   prevents high-core machines from turning lazy-module scheduling pressure into
