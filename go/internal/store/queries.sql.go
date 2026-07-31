@@ -1864,8 +1864,9 @@ func (q *Queries) InsertReplayCampaignItem(ctx context.Context, arg InsertReplay
 }
 
 const insertRun = `-- name: InsertRun :exec
-INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, created_by, replay_mode, validation_evidence_level)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, created_by, replay_mode, validation_evidence_level,
+  parent_run_id, parent_node_id, parent_link_kind)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 `
 
 type InsertRunParams struct {
@@ -1877,6 +1878,9 @@ type InsertRunParams struct {
 	CreatedBy               pgtype.Text
 	ReplayMode              pgtype.Text
 	ValidationEvidenceLevel pgtype.Text
+	ParentRunID             pgtype.Text
+	ParentNodeID            pgtype.Text
+	ParentLinkKind          pgtype.Text
 }
 
 func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) error {
@@ -1889,6 +1893,9 @@ func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) error {
 		arg.CreatedBy,
 		arg.ReplayMode,
 		arg.ValidationEvidenceLevel,
+		arg.ParentRunID,
+		arg.ParentNodeID,
+		arg.ParentLinkKind,
 	)
 	return err
 }

@@ -77,6 +77,12 @@ type StartInput struct {
 	// transaction; a duplicate aborts the new run and the caller returns
 	// the original via ErrStartIdempotencyReplay.
 	IdempotencyKey string
+	// Parent lineage: ParentLinkKind "replay" marks TRACE-ONLY lineage (a
+	// continuation/validation run points at the run it replays); depth and
+	// terminal delivery follow only executable ("subworkflow") edges.
+	ParentRunID    string
+	ParentNodeID   string
+	ParentLinkKind string
 }
 
 // ErrStartIdempotencyReplay reports a duplicate Idempotency-Key: the
@@ -157,6 +163,9 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		// sandbox produced STATIC evidence (write sides skipped), and the
 		// contract ladder reads this to decide what the run may prove.
 		ValidationEvidenceLevel: pgtype.Text{String: "static", Valid: in.ReplayMode == "validation"},
+		ParentRunID:             pgtype.Text{String: in.ParentRunID, Valid: in.ParentRunID != ""},
+		ParentNodeID:            pgtype.Text{String: in.ParentNodeID, Valid: in.ParentNodeID != ""},
+		ParentLinkKind:          pgtype.Text{String: in.ParentLinkKind, Valid: in.ParentLinkKind != ""},
 	}); err != nil {
 		return "", fmt.Errorf("insert run: %w", err)
 	}
