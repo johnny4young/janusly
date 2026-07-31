@@ -129,6 +129,21 @@ WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
 -- name: ListRunNodeStatuses :many
 SELECT node_id, status FROM run_nodes WHERE run_id = $1;
 
+-- name: GetRunOwner :one
+SELECT org_id, status FROM runs WHERE id = $1;
+
+-- name: CancelRun :exec
+UPDATE runs SET status = 'cancelled' WHERE id = $1;
+
+-- Running is deliberately excluded: an executing node finishes naturally
+-- and the post-success guard absorbs its downstream scheduling.
+-- name: CancelRunNodes :execrows
+UPDATE run_nodes
+SET status = 'cancelled', state_json = sqlc.arg(state_json),
+    finished_at = sqlc.arg(finished_at)
+WHERE run_id = sqlc.arg(run_id)
+  AND status IN ('pending', 'queued', 'waiting');
+
 -- name: MarkRunTerminalFromRunning :execrows
 UPDATE runs SET status = sqlc.arg(status), output_json = sqlc.arg(output_json)
 WHERE id = sqlc.arg(id) AND status = 'running';

@@ -25,6 +25,39 @@ func (q *Queries) AcquireRunCompletionLock(ctx context.Context, runID string) er
 	return err
 }
 
+const cancelRun = `-- name: CancelRun :exec
+UPDATE runs SET status = 'cancelled' WHERE id = $1
+`
+
+func (q *Queries) CancelRun(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, cancelRun, id)
+	return err
+}
+
+const cancelRunNodes = `-- name: CancelRunNodes :execrows
+UPDATE run_nodes
+SET status = 'cancelled', state_json = $1,
+    finished_at = $2
+WHERE run_id = $3
+  AND status IN ('pending', 'queued', 'waiting')
+`
+
+type CancelRunNodesParams struct {
+	StateJson  json.RawMessage
+	FinishedAt *time.Time
+	RunID      string
+}
+
+// Running is deliberately excluded: an executing node finishes naturally
+// and the post-success guard absorbs its downstream scheduling.
+func (q *Queries) CancelRunNodes(ctx context.Context, arg CancelRunNodesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, cancelRunNodes, arg.StateJson, arg.FinishedAt, arg.RunID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const claimDeadLetterReplay = `-- name: ClaimDeadLetterReplay :execrows
 UPDATE dead_letters SET replay_claimed_at = now()
 WHERE id = $1 AND org_id = $2 AND replay_claimed_at IS NULL
@@ -413,6 +446,22 @@ func (q *Queries) GetRunNode(ctx context.Context, arg GetRunNodeParams) (GetRunN
 		&i.FinishedAt,
 		&i.ErrorJson,
 	)
+	return i, err
+}
+
+const getRunOwner = `-- name: GetRunOwner :one
+SELECT org_id, status FROM runs WHERE id = $1
+`
+
+type GetRunOwnerRow struct {
+	OrgID  string
+	Status string
+}
+
+func (q *Queries) GetRunOwner(ctx context.Context, id string) (GetRunOwnerRow, error) {
+	row := q.db.QueryRow(ctx, getRunOwner, id)
+	var i GetRunOwnerRow
+	err := row.Scan(&i.OrgID, &i.Status)
 	return i, err
 }
 

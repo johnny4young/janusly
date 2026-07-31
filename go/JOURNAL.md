@@ -415,3 +415,17 @@ local. Sin umbral pasa/no-pasa: números para aprender.
 - La elegancia del reuso: el reap ES FailNode — mismo CAS (un nodo que
   completó entre scan y write nunca se pisa), misma transacción
   terminal, mismo DLQ. El reaper son ~50 líneas de scan + loop.
+
+## 2026-07-30 — cancelación de runs (T-021)
+
+- La semántica fina de Node portada con sus dos sutilezas: (1) `running`
+  se excluye del flip deliberadamente — el nodo en ejecución termina
+  natural y el guard post-éxito evita que programe descendientes (el
+  test lo prueba: completación tardía → nodo succeeded, downstream
+  cancelado, run cancelado); (2) el mensaje del 409 lleva el literal
+  "{{status}}" SIN interpolar + params.status — plantilla del cliente,
+  no del servidor.
+- Hallazgo de asimetría deliberada: cancel distingue 404 (no existe) de
+  403 (otro tenant), mientras las LECTURAS de run mantienen ambos como
+  403 indistinguible. Leer no revela existencia; actuar sí la requiere.
+  Fijado con test para que nadie lo "arregle".

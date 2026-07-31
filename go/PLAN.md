@@ -655,6 +655,7 @@ el chat publicado.
 | 2026-07-30 | T-019 confirmado | La separación de pools ERA el acantilado: start@50VU 49.3→274.6 runs/s (5.6×) con p99 19.9s→337ms (59×); list 2800→6220 RPS. Config nueva: `JANUSLY_GO_API_POOL_SIZE` (10) + `JANUSLY_GO_WORKER_POOL_SIZE` (0 = concurrencia+2). El primer retest mostró 7628 "errores" que eran artefacto del LOADGEN (Transport default MaxIdleConnsPerHost=2 → agotamiento de puertos efímeros a 500 runs/s; backend limpio 11966/11966) — keep-alive 512 y cero errores |
 | 2026-07-30 | hallazgo (T-019) | diamond@10VU con c=32 rinde 90/s vs 136/s con c=8: la contención del advisory lock por run crece con workers sobre POCOS runs concurrentes — la concurrencia debe dimensionarse a runs concurrentes, no solo a nodos. Anotado para la guía de operación (T-060) |
 | 2026-07-30 | T-020 reaper | Postura Node portada: fail-into-DLQ, NUNCA re-ejecutar (el side effect pudo cometerse — el operador decide vía redrive); CAS de FailNode garantiza que un nodo que completó entre scan y write jamás se pisa y réplicas concurrentes no doble-cosechan; piso de umbral 15 min en StartReaper (tests ejercitan ReapStalledNodes directo); never-throws (error por nodo → log + siguiente sweep). Identidad del stall en error_json: {name:"StalledNodeError", code:"WORKER_STALLED"} — divergencia menor: Node lleva reason:"worker_stalled" en metadata del evento |
+| 2026-07-30 | T-021 cancel | Paridad exacta de persistence.ts:505-524 + runs-routes.ts:869-889: run→cancelled incondicional (el guard terminal es del API), nodos pending/queued/waiting→cancelled con `state_json {cancelled: reason}` + finished_at, `running` EXCLUIDO (termina natural; el guard post-éxito absorbe el downstream — probado), evento `run.cancelled` payload=reason. Guards: 400 runs_run_id_required / 404 runs_run_not_found / 403 runs_forbidden / 409 runs_already_terminal con mensaje literal "Run is already {{status}}; cannot cancel" + params.status. HALLAZGO: cancel SÍ distingue 404 de 403 (las lecturas de run no) — asimetría deliberada de Node fijada con test. Wakeups de nodos cancelados los recoge el sweep (ya no-waiting) |
 | — | — | (las siguientes filas se añaden durante la ejecución) |
 
 ## 10. Alcance final: Backend + UI, sin excepciones (v4)
@@ -862,7 +863,7 @@ compactas aquí; el detalle de paridad se lee de la fuente al ejecutar.
 | --- | --- | --- | --- | --- |
 | T-019 | Pool DB configurable + pools separados API/workers + retest 50VU | F0.5 | P0 | done |
 | T-020 | Reaper de nodos atascados (`running` huérfanos → requeue/fail acotado) | F0.5 | P0 | done |
-| T-021 | Cancelación de run (`POST /v1/run/cancel`, semántica Node: cancellable statuses) | F0.5 | P0 | todo |
+| T-021 | Cancelación de run (`POST /v1/run/cancel`, semántica Node: cancellable statuses) | F0.5 | P0 | done |
 | T-022 | Recaptura goldens faltantes (save-éxito, dlq-replay) + golden de cancel | F0.5 | P1 | todo |
 | T-023 | Diagnóstico flake delayed-retry + captura de detalle en arnés | F0.5 | P1 | todo |
 | T-024 | Métricas Prometheus del engine (claims, completions, profundidad, latencia) | F0.5 | P1 | todo |

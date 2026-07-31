@@ -48,6 +48,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	mux.HandleFunc("GET /v1/status", server.auth(server.getRun))
 	mux.HandleFunc("GET /v1/runs", server.auth(server.listRuns))
 	mux.HandleFunc("POST /v1/resume", server.auth(server.resumeRun))
+	mux.HandleFunc("POST /v1/run/cancel", server.auth(server.cancelRun))
 	mux.HandleFunc("GET /v1/dlq", server.auth(server.listDeadLetters))
 	mux.HandleFunc("POST /v1/dlq/redrive", server.auth(server.redrive))
 	return mux
@@ -400,6 +401,45 @@ func (s *V1Server) resumeRun(w http.ResponseWriter, r *http.Request, rc v1Reques
 		return
 	}
 	writeV1Data(w, rc.id, map[string]any{"resumed": true})
+}
+
+// cancelRun ports the reference guards exactly — and note the asymmetry
+// with run READS: cancel distinguishes a missing run (404) from a cross-org
+// one (403), while reads keep both indistinguishable.
+func (s *V1Server) cancelRun(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	var body struct {
+		RunID  string `json:"runId"`
+		Reason any    `json:"reason"`
+	}
+	if err := decodeBody(r, &body); err != nil || body.RunID == "" {
+		writeV1Error(w, rc.id, http.StatusBadRequest, "runs_run_id_required", "runId is required", nil)
+		return
+	}
+	owner, err := store.New(s.pool).GetRunOwner(r.Context(), body.RunID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeV1Error(w, rc.id, http.StatusNotFound, "runs_run_not_found", "Run not found", nil)
+			return
+		}
+		s.internal(w, rc, err)
+		return
+	}
+	if owner.OrgID != rc.orgID {
+		writeV1Error(w, rc.id, http.StatusForbidden, "runs_forbidden", "Forbidden", nil)
+		return
+	}
+	switch owner.Status {
+	case "succeeded", "failed", "cancelled", "timed_out":
+		writeV1Error(w, rc.id, http.StatusConflict, "runs_already_terminal",
+			"Run is already {{status}}; cannot cancel",
+			map[string]any{"status": owner.Status})
+		return
+	}
+	if err := s.engine.CancelRun(r.Context(), body.RunID, body.Reason); err != nil {
+		s.internal(w, rc, err)
+		return
+	}
+	writeV1Data(w, rc.id, map[string]any{"runId": body.RunID, "status": "cancelled"})
 }
 
 func (s *V1Server) listDeadLetters(w http.ResponseWriter, r *http.Request, rc v1Request) {

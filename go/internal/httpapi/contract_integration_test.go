@@ -365,3 +365,38 @@ func TestMissingOrgHeaderIsUnauthorized(t *testing.T) {
 		t.Fatalf("missing org must be 401, got %d", res.StatusCode)
 	}
 }
+
+func TestCancelGuardsDistinguishMissingFromCrossOrg(t *testing.T) {
+	h := newAPIHarness(t)
+	approval := map[string]any{
+		"nodes": []any{
+			map[string]any{"id": "gate", "type": "approval", "config": map[string]any{"message": "hold"}},
+		},
+		"edges": []any{},
+	}
+	started := h.call("POST", "/v1/start", map[string]any{"workflow": approval}, "")
+	runID := started.body["data"].(map[string]any)["runId"].(string)
+
+	// Unlike run READS (indistinguishable 403), cancel splits 404 from 403 —
+	// ported from the reference route guards.
+	requireError(t, h.call("POST", "/v1/run/cancel", map[string]any{"runId": "ghost"}, ""),
+		404, "runs_run_not_found", "Run not found")
+	requireError(t, h.call("POST", "/v1/run/cancel", map[string]any{"runId": runID}, h.org+"-x"),
+		403, "runs_forbidden", "Forbidden")
+	requireError(t, h.call("POST", "/v1/run/cancel", nil, ""),
+		400, "runs_run_id_required", "runId is required")
+
+	cancelled := h.call("POST", "/v1/run/cancel", map[string]any{"runId": runID, "reason": map[string]any{"why": "test"}}, "")
+	requireEnvelope(t, cancelled)
+	data := cancelled.body["data"].(map[string]any)
+	if data["status"] != "cancelled" || data["runId"] != runID {
+		t.Fatalf("cancel response shape: %v", data)
+	}
+
+	already := h.call("POST", "/v1/run/cancel", map[string]any{"runId": runID}, "")
+	requireError(t, already, 409, "runs_already_terminal", "Run is already {{status}}; cannot cancel")
+	params := already.body["error"].(map[string]any)["params"].(map[string]any)
+	if params["status"] != "cancelled" {
+		t.Fatalf("terminal params must carry the status: %v", params)
+	}
+}
