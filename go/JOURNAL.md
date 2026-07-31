@@ -1398,3 +1398,9 @@ producción necesita saber — de lo ya resuelto o informativo.
 - El gate de presupuesto con las tres zonas (sin límite, warn, block),
   fail-soft ante consultas rotas, y la prueba clave: una llamada
   bloqueada registra cero hits al proveedor.
+
+## 2026-07-31 — el JSON que casi era (T-104)
+
+- La extracción de la referencia 1:1 más la reparación de truncados: un
+  prefijo válido cortado a mitad de stream se cierra con conciencia de
+  strings y escapes. Mil cadenas de fuzz sin un solo pánico.
