@@ -51,6 +51,17 @@ func NewRegistry() *Registry {
 	for _, definition := range vectorTools() {
 		registry.byName[definition.Name] = definition
 	}
+	registry.byName["text.uppercase"] = Definition{
+		Name:         "text.uppercase",
+		Description:  "Uppercase a text value.",
+		Required:     []string{"value"},
+		Fields:       []Field{{Name: "value", Type: "string", Required: true}},
+		InputExample: map[string]any{"value": "hello"},
+		Execute: func(_ context.Context, input map[string]any) (map[string]any, error) {
+			value, _ := input["value"].(string)
+			return map[string]any{"value": strings.ToUpper(value)}, nil
+		},
+	}
 	return registry
 }
 

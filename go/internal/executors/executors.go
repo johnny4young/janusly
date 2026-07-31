@@ -65,8 +65,10 @@ type Func func(ctx context.Context, in Input) (any, error)
 // dispatch with the reference's "No executor" error.
 func Registry() map[string]Func {
 	toolRegistry := NewToolRegistry()
+	httpExec := NewHTTPExecutor(HTTPOptions{})
 	return map[string]Func{
 		"tool":             NewToolExecutor(toolRegistry),
+		"agent":            NewAgentExecutor(toolRegistry, httpExec),
 		"noop":             executeNoop,
 		"ai":               executeAiNode,
 		"condition":        executeCondition,

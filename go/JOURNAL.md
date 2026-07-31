@@ -1468,3 +1468,9 @@ producción necesita saber — de lo ya resuelto o informativo.
   el registro queda puro y la identidad org/run viaja por closures. El
   consent apagado responde envelopes cerrados sin lanzar, y la
   validación salta la escritura con cero filas.
+
+## 2026-07-31 — el agente que observa y no se pasa (T-114)
+
+- El bucle con el planner de reglas verbatim y las tres garantías: el
+  presupuesto corta limpio, el dry-run jamás ejecuta un write, y
+  http.request viaja por la misma maquinaria guardada del nodo http.

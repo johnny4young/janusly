@@ -99,11 +99,11 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 		httpBounds = &bounds
 	}
 	var aiDeps *executors.AIDeps
-	if node.Type == "ai" {
+	if node.Type == "ai" || node.Type == "agent" || node.Type == "multi_agent" {
 		aiDeps = d.buildAIDeps(ctx, claim)
 	}
 	var memoryDeps *executors.MemoryDeps
-	if node.Type == "tool" {
+	if node.Type == "tool" || node.Type == "agent" || node.Type == "multi_agent" {
 		memoryDeps = d.buildMemoryDeps(ctx, claim)
 	}
 	output, execErr := execute(ctx, executors.Input{
