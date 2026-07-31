@@ -39,6 +39,10 @@ vi.mock("@janusly/engine/src/adapters/sample-failure", () => ({
   injectSampleFailure: vi.fn(),
 }));
 
+vi.mock("@janusly/engine/src/adapters/runtime-failure-drill", () => ({
+  runRuntimeFailureDrill: vi.fn(),
+}));
+
 vi.mock("@janusly/engine/src/adapters/stalled-node-drill", () => ({
   runStalledNodeDrill: vi.fn(),
 }));
@@ -60,6 +64,7 @@ import { readJson } from "../http";
 import { getCredentialByName, listOrgConfig } from "@janusly/data";
 import { startSandboxRun } from "@janusly/engine/src/adapters/sandbox-run";
 import { injectSampleFailure } from "@janusly/engine/src/adapters/sample-failure";
+import { runRuntimeFailureDrill } from "@janusly/engine/src/adapters/runtime-failure-drill";
 import { runStalledNodeDrill } from "@janusly/engine/src/adapters/stalled-node-drill";
 import { saveWorkflowVersion } from "../workflows-save";
 import { auditAction } from "../audit-helper";
@@ -70,6 +75,7 @@ const getCredentialByNameMock = vi.mocked(getCredentialByName);
 const listOrgConfigMock = vi.mocked(listOrgConfig);
 const startSandboxRunMock = vi.mocked(startSandboxRun);
 const injectSampleFailureMock = vi.mocked(injectSampleFailure);
+const runRuntimeFailureDrillMock = vi.mocked(runRuntimeFailureDrill);
 const runStalledNodeDrillMock = vi.mocked(runStalledNodeDrill);
 const saveWorkflowVersionMock = vi.mocked(saveWorkflowVersion);
 const auditActionMock = vi.mocked(auditAction);
@@ -110,6 +116,18 @@ beforeEach(() => {
   } as never);
   startSandboxRunMock.mockResolvedValue({ runId: "run-1" } as never);
   injectSampleFailureMock.mockResolvedValue({ runId: "run-9", deadLetterId: "dlq-9" } as never);
+  runRuntimeFailureDrillMock.mockResolvedValue({
+    runId: "run-runtime",
+    deadLetterId: "dlq-runtime",
+    evidence: {
+      recoveryPath: "runtime_failure",
+      boundary: "worker_dlq",
+      executedNodeId: "open_issue",
+      seededAncestorCount: 2,
+      attempts: 1,
+      runtimeMs: 18,
+    },
+  } as never);
   runStalledNodeDrillMock.mockResolvedValue({
     runId: "run-stalled",
     deadLetterId: "dlq-stalled",
@@ -264,37 +282,44 @@ describe("POST /solution-packs/:id/sample-run", () => {
 });
 
 describe("POST /solution-packs/:id/inject-failure", () => {
-  it("seeds the selected drill with durable provenance and audits its failure mode", async () => {
+  it("executes the selected drill through the worker/DLQ boundary and audits measured evidence", async () => {
     const { payload, status } = await callRoute(
       "POST",
       "/solution-packs/incident-triage/inject-failure",
-      { fixtureId: "classification_output_invalid" },
+      { fixtureId: "github_secret_unbound" },
     );
     expect(status).toBe(200);
-    expect(payload.deadLetterId).toBe("dlq-9");
-    expect(payload.fixtureId).toBe("classification_output_invalid");
-    expect(payload.failureMode).toBe("ai_output_invalid");
-    expect(payload.recoveryPath).toBe("direct_failure");
+    expect(payload.deadLetterId).toBe("dlq-runtime");
+    expect(payload.fixtureId).toBe("github_secret_unbound");
+    expect(payload.failureMode).toBe("credential_unavailable");
+    expect(payload.recoveryPath).toBe("runtime_failure");
+    expect(payload.evidence).toMatchObject({
+      boundary: "worker_dlq",
+      executedNodeId: "open_issue",
+      attempts: 1,
+    });
 
-    expect(injectSampleFailureMock).toHaveBeenCalledTimes(1);
-    const arg = injectSampleFailureMock.mock.calls[0][0];
+    expect(runRuntimeFailureDrillMock).toHaveBeenCalledTimes(1);
+    const arg = runRuntimeFailureDrillMock.mock.calls[0][0];
     expect(arg.orgId).toBe("org-1");
-    expect(arg.failedNodeId).toBe("classify");
-    expect(arg.errorJson).toMatchObject({ code: "E_AI_OUTPUT_INVALID" });
+    expect(arg.failedNodeId).toBe("open_issue");
+    expect(arg.input).toMatchObject({ event: { payload: { alertName: expect.any(String) } } });
     expect(arg.source).toEqual({
       kind: "solution_pack_drill",
       packId: "incident-triage",
-      fixtureId: "classification_output_invalid",
-      failureMode: "ai_output_invalid",
-      recoveryPath: "direct_failure",
+      fixtureId: "github_secret_unbound",
+      failureMode: "credential_unavailable",
+      recoveryPath: "runtime_failure",
     });
+    expect(injectSampleFailureMock).not.toHaveBeenCalled();
 
     expect(auditActionMock.mock.calls[0][1]).toBe("solution_pack.failure_injected");
     expect(auditActionMock.mock.calls[0][2]).toMatchObject({
       metadata: {
-        fixtureId: "classification_output_invalid",
-        failureMode: "ai_output_invalid",
-        recoveryPath: "direct_failure",
+        fixtureId: "github_secret_unbound",
+        failureMode: "credential_unavailable",
+        recoveryPath: "runtime_failure",
+        evidence: { boundary: "worker_dlq" },
       },
     });
   });
@@ -321,6 +346,7 @@ describe("POST /solution-packs/:id/inject-failure", () => {
       },
     });
     expect(injectSampleFailureMock).not.toHaveBeenCalled();
+    expect(runRuntimeFailureDrillMock).not.toHaveBeenCalled();
     expect(runStalledNodeDrillMock).toHaveBeenCalledWith(expect.objectContaining({
       orgId: "org-1",
       createdBy: "user-1",
@@ -355,5 +381,6 @@ describe("POST /solution-packs/:id/inject-failure", () => {
     expect(status).toBe(400);
     expect(payload.code).toBe("pack_no_failure_fixture");
     expect(injectSampleFailureMock).not.toHaveBeenCalled();
+    expect(runRuntimeFailureDrillMock).not.toHaveBeenCalled();
   });
 });

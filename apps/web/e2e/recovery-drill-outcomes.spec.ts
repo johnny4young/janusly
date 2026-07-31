@@ -8,6 +8,12 @@ const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 type DrillResponse = {
   deadLetterId: string
   runId: string
+  recoveryPath: 'runtime_failure'
+  evidence: {
+    boundary: 'worker_dlq'
+    executedNodeId: string
+    attempts: number
+  }
 }
 
 type DeadLetterDetail = {
@@ -59,10 +65,10 @@ async function prepareSession(page: Page, locale: 'en' | 'es'): Promise<string> 
   return orgId
 }
 
-async function startContractDrill(page: Page, actionName: string): Promise<DrillResponse> {
+async function startRuntimeDrill(page: Page, actionName: string): Promise<DrillResponse> {
   const pack = page.getByTestId('solution-pack-incident-triage')
   await expect(pack).toBeVisible()
-  await pack.locator('select').last().selectOption('github_contract_drift')
+  await pack.locator('select').last().selectOption('github_secret_unbound')
   const responsePromise = page.waitForResponse((response) => (
     response.url().endsWith('/solution-packs/incident-triage/inject-failure')
     && response.request().method() === 'POST'
@@ -70,7 +76,16 @@ async function startContractDrill(page: Page, actionName: string): Promise<Drill
   await pack.getByRole('button', { name: actionName, exact: true }).click()
   const response = await responsePromise
   expect(response.status()).toBe(200)
-  return await response.json() as DrillResponse
+  const drill = await response.json() as DrillResponse
+  expect(drill).toMatchObject({
+    recoveryPath: 'runtime_failure',
+    evidence: {
+      boundary: 'worker_dlq',
+      executedNodeId: 'open_issue',
+      attempts: 1,
+    },
+  })
+  return drill
 }
 
 async function waitForRunStatus(
@@ -94,7 +109,7 @@ test('a successful drill replay exposes terminal recovery time and recurrence mo
 
   await page.goto('/')
   await openWorkspaceSection(page, 'Workflows', 'Templates')
-  const drill = await startContractDrill(page, 'Start recovery drill')
+  const drill = await startRuntimeDrill(page, 'Start recovery drill')
   await openWorkspaceSection(page, 'Activity', 'Recover')
 
   const focusedFailure = page.locator(`[data-testid="dlq-row-${drill.deadLetterId}"]`)
@@ -164,7 +179,7 @@ test('Spanish mobile resolve records accepted loss and refreshes the selected dr
   await page.goto('/')
   await page.getByRole('button', { name: 'Navegación' }).click()
   await openWorkspaceSection(page, 'Flujos', 'Plantillas')
-  const drill = await startContractDrill(page, 'Iniciar ejercicio de recuperación')
+  const drill = await startRuntimeDrill(page, 'Iniciar ejercicio de recuperación')
   await openWorkspaceSection(page, 'Actividad', 'Recuperar')
 
   await expect(page.locator(`[data-testid="dlq-row-${drill.deadLetterId}"]`)).toBeVisible({ timeout: 30_000 })

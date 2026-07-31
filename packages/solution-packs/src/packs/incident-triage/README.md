@@ -30,12 +30,13 @@ Configure the supported Anthropic provider for live classification.
   so no issue or page goes out. The classifier must return the declared
   `{ severity, rationale }` JSON shape; fallback or malformed output cannot cross
   the condition guarding the issue-creation step.
-- **Start recovery drill** lets you reproduce malformed AI classification,
-  GitHub response-contract drift, a temporary Slack outage, or the durable
-  stale-node state left by an interrupted worker. The worker scenario crosses
-  the configured age threshold and uses the real stalled-node reaper; every
-  drill records its source before opening the recovery queue for diagnosis and
-  sandbox validation.
+- **Start recovery drill** offers two production-shaped local paths. The
+  GitHub credential drill executes `open_issue` through the real BullMQ worker,
+  retry classification, and terminal DLQ boundary; the policy correctly treats
+  a controlled missing-secret probe as non-retryable before any GitHub request.
+  The worker-interruption drill crosses the configured age threshold through
+  the real stalled-node reaper. Both open the recovery queue with measured
+  evidence.
 
 GitHub and Slack use `resultPolicy: "require_ok"`. A non-success provider
 envelope enters the recovery path and the write-side call is not retried blindly.

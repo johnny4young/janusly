@@ -33,10 +33,11 @@ template resolution.
   "card declined" payload. Write-side steps (the retry + the Slack post) are skipped
   in sandbox mode, so no real charge or message goes out. With AI configured,
   the run pauses at the approval gate so you can inspect the generated draft.
-- **Start recovery drill** lets you reproduce an unavailable credential, an
-  expired credential, or an HTTP 429 on `retry_charge`. The selected drill
-  records its source before opening the recovery queue, where you can inspect
-  evidence and validate a proposed fix.
+- **Start recovery drill** runs `retry_charge` through the real BullMQ worker,
+  retry classification, and terminal DLQ boundary. The retry policy correctly
+  treats the controlled missing-secret probe as non-retryable before any billing
+  request can start, then the drill opens the recovery queue with measured
+  runtime evidence.
 
 Both external tool steps use `resultPolicy: "require_ok"`; a provider envelope
 with `ok: false` becomes a recoverable node failure rather than a false success.

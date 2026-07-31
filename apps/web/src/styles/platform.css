@@ -8332,8 +8332,8 @@ button.we-authoring-problems__row:focus-visible {
 .we-recipe-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 760px) { .we-recipe-grid { grid-template-columns: 1fr; } }
 
-/* Solution-pack drills — explicit scenario selection keeps synthetic failures
-   truthful and inspectable before the operator opens the real recovery queue. */
+/* Solution-pack drills keep the selected controlled failure truthful and
+   inspectable before the operator opens the recovery queue. */
 .we-pack-drill {
   border-top: 1px solid var(--we-line);
   margin-top: 8px;
@@ -8363,6 +8363,10 @@ button.we-authoring-problems__row:focus-visible {
 .we-pack-drill__summary .mode-pill { flex: 0 0 auto; }
 .we-pack-drill__summary .helper-text { margin: 0; }
 .we-pack-drill__action { margin-top: 12px; width: 100%; }
+@media (max-width: 520px) {
+  .we-pack-drill__summary { flex-direction: column; }
+  .we-pack-pills { flex-direction: row; flex-wrap: wrap; }
+}
 .we-pack-cred-legend {
   align-items: center;
   display: flex;

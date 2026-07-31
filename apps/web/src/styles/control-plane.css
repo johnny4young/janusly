@@ -2139,6 +2139,23 @@
   overflow: hidden;
 }
 
+@media (max-width: 520px) {
+  .we-dlq-row {
+    gap: 6px;
+    padding-inline: 8px;
+  }
+
+  .we-dlq-row__identity { gap: 8px; }
+  .we-dlq-row .we-list-row__avatar { height: 28px; width: 28px; }
+  .we-dlq-row .we-list-row__meta { gap: 4px; }
+  .we-dlq-row .we-list-row__downtime,
+  .we-dlq-row .we-recovery-item-badge__status,
+  .we-dlq-row .we-recovery-item-badge__owner,
+  .we-dlq-row .we-recovery-item-badge__sla {
+    display: none;
+  }
+}
+
 .we-list-row__avatar {
   width: 32px;
   height: 32px;

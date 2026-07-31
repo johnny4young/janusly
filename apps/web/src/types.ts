@@ -108,7 +108,7 @@ export type SolutionPackFailureMode =
   | 'contract_drift'
   | 'upstream_unavailable'
   | 'worker_stalled'
-export type SolutionPackRecoveryPath = 'direct_failure' | 'stalled_node_reaper'
+export type SolutionPackRecoveryPath = 'direct_failure' | 'runtime_failure' | 'stalled_node_reaper'
 type PackFailureFixture = {
   id: string
   label: string

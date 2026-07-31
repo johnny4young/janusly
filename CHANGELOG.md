@@ -192,10 +192,13 @@ retroactively.
 - A unified Runs workspace with accessible Overview, Timeline, and Agents
   views, preserving direct expert access to the full reasoning and multi-agent
   surfaces through the command palette.
-- Selectable Recovery Drills in Solution Packs for credential availability and
-  expiry, malformed AI output, rate limits, upstream contract drift, and
-  provider outages. Drill runs retain durable source evidence and enter the
-  real recovery queue without exposing raw fixture errors in the catalog.
+- Selectable Recovery Drills in Solution Packs now cross real runtime
+  boundaries instead of directly inserting failed runs. Credential drills pass
+  through BullMQ, the worker, retry classification, the atomic terminal
+  transition, and the DLQ before returning measured evidence. The controlled
+  missing-secret probe is correctly non-retryable and prevents provider calls
+  and external effects. Historical direct-fixture provenance remains readable
+  but is no longer published by the current pack catalog.
 - A controlled worker-interruption drill that creates one scoped stale claim,
   honors the configured reaper threshold, exercises the production CAS/DLQ
   path, and reports measured scan, reap, dead-letter, and runtime evidence.

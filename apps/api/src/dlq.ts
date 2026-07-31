@@ -29,7 +29,7 @@ export type RecoveryDrillProvenance = {
   kind: "solution_pack_drill";
   packId: string;
   fixtureId: string;
-  recoveryPath: "direct_failure" | "stalled_node_reaper";
+  recoveryPath: "direct_failure" | "runtime_failure" | "stalled_node_reaper";
 };
 
 const DRILL_PROVENANCE_TEXT_MAX = 128;
@@ -57,7 +57,11 @@ export function parseRecoveryDrillProvenance(inputJson: unknown): RecoveryDrillP
     candidate.kind !== "solution_pack_drill"
     || !packId
     || !fixtureId
-    || (recoveryPath !== "direct_failure" && recoveryPath !== "stalled_node_reaper")
+    || (
+      recoveryPath !== "direct_failure"
+      && recoveryPath !== "runtime_failure"
+      && recoveryPath !== "stalled_node_reaper"
+    )
   ) {
     return null;
   }

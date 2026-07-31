@@ -243,18 +243,18 @@ Returns the public catalog. Requires `packs.read`.
     {
       "id": "incident-triage",
       "name": "Incident triage",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "requiredCredentials": [{ "name": "ops_slack", "kind": "slack_webhook", "purpose": "Pages your on-call channel" }],
       "nodeCount": 4,
       "samplePayloadIds": ["default"],
-      "failureFixtureIds": ["slack_5xx_transient", "classification_output_invalid", "github_contract_drift", "worker_interrupted_during_page"],
+      "failureFixtureIds": ["github_secret_unbound", "worker_interrupted_during_page"],
       "failureFixtures": [
         {
-          "id": "classification_output_invalid",
-          "label": "AI severity output malformed",
-          "description": "The drill records malformed classification as an explicit failed step; the live workflow validity gate blocks external effects.",
-          "failureMode": "ai_output_invalid",
-          "recoveryPath": "direct_failure"
+          "id": "github_secret_unbound",
+          "label": "GitHub credential unavailable",
+          "description": "The issue-creation node crosses the real worker and terminal-failure boundary. The retry policy classifies a controlled missing-secret probe as non-retryable before any GitHub request can start.",
+          "failureMode": "credential_unavailable",
+          "recoveryPath": "runtime_failure"
         }
       ]
     }
@@ -298,25 +298,39 @@ Starts a writes-skipped sandbox sample using a bundled sample payload. Requires
 
 ### `POST /solution-packs/:id/inject-failure`
 
-Starts the selected bundled recovery drill. A `direct_failure` fixture seeds a
-deterministic failed run + DLQ row. A `stalled_node_reaper` fixture instead
-creates one old `running` claim at the configured threshold and invokes the
-real org/run-scoped reaper, including its CAS and atomic DLQ/terminal path. The
-run and `node.failed` event retain a `solution_pack_drill` source block; raw
-error envelopes and workflow node ids remain absent from the catalog. Requires
+Starts the selected bundled recovery drill. A `runtime_failure` fixture clones
+the pack workflow, adds a reserved missing-secret probe to the selected node,
+seeds only completed ancestors, and publishes that node through BullMQ. The
+real worker, retry classification, atomic terminal transition, and DLQ must
+complete. Missing-secret resolution is non-retryable, so this drill reports one
+attempt; the probe resolves before provider calls or external effects. A
+`stalled_node_reaper` fixture instead creates one old `running` claim at the
+configured threshold and invokes the real org/run-scoped reaper, including its
+CAS and atomic DLQ/terminal path. The run and `node.failed` event retain a
+`solution_pack_drill` source block; raw error envelopes and workflow node ids
+remain absent from the catalog. Historical `direct_failure` rows remain
+readable but current packs do not publish direct-insert fixtures. Requires
 `packs.install`.
 
 ```json
-{ "fixtureId": "classification_output_invalid" }
+{ "fixtureId": "github_secret_unbound" }
 ```
 
 ```json
 {
   "runId": "run-id",
   "deadLetterId": "dead-letter-id",
-  "fixtureId": "classification_output_invalid",
-  "failureMode": "ai_output_invalid",
-  "recoveryPath": "direct_failure"
+  "fixtureId": "github_secret_unbound",
+  "failureMode": "credential_unavailable",
+  "recoveryPath": "runtime_failure",
+  "evidence": {
+    "recoveryPath": "runtime_failure",
+    "boundary": "worker_dlq",
+    "executedNodeId": "open_issue",
+    "seededAncestorCount": 1,
+    "attempts": 1,
+    "runtimeMs": 2200
+  }
 }
 ```
 

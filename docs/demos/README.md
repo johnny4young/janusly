@@ -52,9 +52,15 @@ them through `GET /solution-packs`, `POST /workflows/import-pack`,
 `POST /solution-packs/:id/sample-run`, and
 `POST /solution-packs/:id/inject-failure`. The current pack ids are
 `failed-payment-recovery`, `incident-triage`, and `support-escalation`.
-Fixtures declare whether they use a direct deterministic failure or the real
-stalled-node reaper; the incident-triage worker-interruption drill uses the
-latter and reports measured reaper evidence.
+Current fixtures use one of two real runtime boundaries. Credential drills
+publish the selected node through BullMQ and let the worker, retry
+classification, atomic terminal transition, and DLQ complete; the policy treats
+a reserved missing-secret probe as non-retryable before any provider or
+external effect can start. The incident-triage
+worker-interruption drill instead uses the scoped stalled-node reaper. Both
+paths report measured runtime evidence and stay isolated as validation runs.
+Legacy direct-insert drill provenance remains readable for historical rows but
+is not published by the current catalog.
 
 ## How these docs feed downstream work
 
