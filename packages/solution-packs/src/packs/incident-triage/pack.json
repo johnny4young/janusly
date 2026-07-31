@@ -3,7 +3,7 @@
   "name": "Incident triage",
   "description": "When an alert fires, classify its severity with AI, open a tracking issue on GitHub, and page the on-call channel on Slack.",
   "category": "incident_triage",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "requiredCredentials": [
     {
       "name": "ops_github",
@@ -24,20 +24,41 @@
     "name": "Incident triage",
     "inputs": {
       "type": "object",
-      "required": ["event"],
+      "required": [
+        "event"
+      ],
       "properties": {
         "event": {
           "type": "object",
-          "required": ["eventId", "payload"],
+          "required": [
+            "eventId",
+            "payload"
+          ],
           "properties": {
-            "eventId": { "type": "string", "description": "Stable delivery id from the monitoring system" },
+            "eventId": {
+              "type": "string",
+              "description": "Stable delivery id from the monitoring system"
+            },
             "payload": {
               "type": "object",
-              "required": ["alertName", "summary", "service"],
+              "required": [
+                "alertName",
+                "summary",
+                "service"
+              ],
               "properties": {
-                "alertName": { "type": "string", "description": "Short alert name from your monitoring system" },
-                "summary": { "type": "string", "description": "Alert body or description" },
-                "service": { "type": "string", "description": "Affected service name" }
+                "alertName": {
+                  "type": "string",
+                  "description": "Short alert name from your monitoring system"
+                },
+                "summary": {
+                  "type": "string",
+                  "description": "Alert body or description"
+                },
+                "service": {
+                  "type": "string",
+                  "description": "Affected service name"
+                }
               }
             }
           }
@@ -45,7 +66,13 @@
       }
     },
     "nodes": [
-      { "id": "trigger", "type": "webhook_received", "config": { "endpointKey": "incident-triage" } },
+      {
+        "id": "trigger",
+        "type": "webhook_received",
+        "config": {
+          "endpointKey": "incident-triage"
+        }
+      },
       {
         "id": "classify",
         "type": "ai",
@@ -53,10 +80,22 @@
           "prompt": "Classify this alert and return JSON with exactly two fields: severity must be sev1, sev2, or sev3; rationale must be one concise sentence. Alert: {{context.trigger.output.event.payload.alertName}} on {{context.trigger.output.event.payload.service}} — {{context.trigger.output.event.payload.summary}}",
           "outputSchema": {
             "type": "object",
-            "required": ["severity", "rationale"],
+            "required": [
+              "severity",
+              "rationale"
+            ],
             "properties": {
-              "severity": { "type": "string", "enum": ["sev1", "sev2", "sev3"] },
-              "rationale": { "type": "string" }
+              "severity": {
+                "type": "string",
+                "enum": [
+                  "sev1",
+                  "sev2",
+                  "sev3"
+                ]
+              },
+              "rationale": {
+                "type": "string"
+              }
             }
           }
         }
@@ -73,7 +112,10 @@
             "repo": "incidents",
             "title": "[incident] {{context.trigger.output.event.payload.alertName}} on {{context.trigger.output.event.payload.service}}",
             "body": "Severity: {{context.classify.output.data.severity}}\n\n{{context.classify.output.data.rationale}}\n\n{{context.trigger.output.event.payload.summary}}",
-            "labels": ["incident", "auto-triaged"]
+            "labels": [
+              "incident",
+              "auto-triaged"
+            ]
           }
         }
       },
@@ -91,9 +133,20 @@
       }
     ],
     "edges": [
-      { "from": "trigger", "to": "classify" },
-      { "from": "classify", "to": "open_issue", "condition": "context.classify.output.valid === true" },
-      { "from": "open_issue", "to": "page_oncall", "condition": "context.classify.output.valid === true" }
+      {
+        "from": "trigger",
+        "to": "classify"
+      },
+      {
+        "from": "classify",
+        "to": "open_issue",
+        "condition": "context.classify.output.valid === true"
+      },
+      {
+        "from": "open_issue",
+        "to": "page_oncall",
+        "condition": "context.classify.output.valid === true"
+      }
     ],
     "outputs": {
       "severity": "{{context.classify.output.data.severity}}",
@@ -122,48 +175,12 @@
   ],
   "failureFixtures": [
     {
-      "id": "slack_5xx_transient",
-      "label": "Slack page returned HTTP 500",
-      "description": "The on-call notification provider is temporarily unavailable after the incident issue is created.",
-      "failureMode": "upstream_unavailable",
-      "recoveryPath": "direct_failure",
-      "failedNodeId": "page_oncall",
-      "errorJson": {
-        "name": "ToolError",
-        "code": "http_error",
-        "message": "slack.post failed: upstream returned HTTP 500",
-        "statusCode": 500,
-        "node": "page_oncall"
-      }
-    },
-    {
-      "id": "classification_output_invalid",
-      "label": "AI severity output malformed",
-      "description": "The drill records malformed classification as an explicit failed step; the live workflow validity gate blocks external effects.",
-      "failureMode": "ai_output_invalid",
-      "recoveryPath": "direct_failure",
-      "failedNodeId": "classify",
-      "errorJson": {
-        "name": "AiOutputValidationError",
-        "code": "E_AI_OUTPUT_INVALID",
-        "message": "AI output did not match the required severity response contract",
-        "node": "classify"
-      }
-    },
-    {
-      "id": "github_contract_drift",
-      "label": "GitHub response contract drifted",
-      "description": "The issue provider returns a success response without the URL required by the next workflow step.",
-      "failureMode": "contract_drift",
-      "recoveryPath": "direct_failure",
-      "failedNodeId": "open_issue",
-      "errorJson": {
-        "name": "ToolOutputValidationError",
-        "code": "upstream_contract_drift",
-        "message": "github.create_issue response omitted the required result.url field",
-        "statusCode": 200,
-        "node": "open_issue"
-      }
+      "id": "github_secret_unbound",
+      "label": "GitHub credential unavailable",
+      "description": "The issue-creation node crosses the real worker and terminal-failure boundary. The retry policy classifies a controlled missing-secret probe as non-retryable before any GitHub request can start.",
+      "failureMode": "credential_unavailable",
+      "recoveryPath": "runtime_failure",
+      "failedNodeId": "open_issue"
     },
     {
       "id": "worker_interrupted_during_page",

@@ -108,7 +108,13 @@ describe("mcp_tool node executor", () => {
   });
 
   it("rejects when config is missing required fields", async () => {
-    await expect(nodeRegistry.mcp_tool({ ...baseCtx, config: { toolName: "x" } })).rejects.toThrow(/connectionAlias/);
-    await expect(nodeRegistry.mcp_tool({ ...baseCtx, config: { connectionAlias: "x" } })).rejects.toThrow(/toolName/);
+    await expect(nodeRegistry.mcp_tool({
+      ...baseCtx,
+      config: { toolName: "x" } as never,
+    })).rejects.toThrow(/connectionAlias/);
+    await expect(nodeRegistry.mcp_tool({
+      ...baseCtx,
+      config: { connectionAlias: "x" } as never,
+    })).rejects.toThrow(/toolName/);
   });
 });

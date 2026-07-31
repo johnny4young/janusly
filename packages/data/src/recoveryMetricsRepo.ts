@@ -751,7 +751,7 @@ const HEATMAP_MAX_DAYS = 90;
  * that day, `recovered` = the subset with terminal impact evidence,
  * `mttrSeconds` = median terminal recovery time. One Postgres GROUP BY,
  * oldest-first. Multi-tenant scope: `eq(deadLetters.orgId, orgId)`. The existing
- * `dead_letters_org_created_idx` covers the window scan.
+ * `dead_letters_org_created_id_idx` covers the window scan.
  */
 export async function queryRecoveryHeatmap(orgId: string, days: number): Promise<RecoveryHeatmapDay[]> {
   const windowDays = Math.min(HEATMAP_MAX_DAYS, Math.max(1, Math.floor(days)));

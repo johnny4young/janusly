@@ -1,7 +1,9 @@
 /**
- * Node executor registry — maps every `WorkflowNode["type"]` to its async
- * executor. Sister module to `tool-registry.ts` (which exposes side-effect
- * tools to agent planners and `tool` nodes).
+ * Node executor registry — maps every executor-owned `WorkflowNode["type"]`
+ * to its async executor. Router nodes remain inside `core/runtime.ts` because
+ * their decision and branch-selection state must commit through runtime ports.
+ * Sister module to `tool-registry.ts` (which exposes side-effect tools to
+ * agent planners and `tool` nodes).
  *
  * Each executor receives a `NodeExecutionContext` (the parsed node config +
  * the run-wide context) and returns either a completed status with output, a
@@ -24,8 +26,8 @@
  *   preserving the SSRF + DNS-rebinding pin.
  * - `tool` and agent tool dispatch both pass the cached org-config snapshot
  *   through the execution context; do not reintroduce a tool-name allowlist.
- * - Adding a new node type requires updating `nodeTypeValues` in
- *   `@janusly/shared` so the schema and the registry stay in lockstep.
+ * - Adding an executor-owned node type requires updating `nodeTypeValues` in
+ *   `@janusly/shared`; the typed registry then requires its implementation.
  */
 
 import { loadRootEnv } from "@janusly/db";
@@ -38,6 +40,7 @@ import {
   scrubOperatorGuidanceSecrets,
   WorkflowInputSchema,
   type AgentReasoningEventPayload,
+  type NodeType,
 } from "@janusly/shared";
 import {
   applyOrgConfigToEnv,
@@ -48,7 +51,7 @@ import { evaluateExpression } from "./expression";
 import { HttpResponseError } from "./core/http-error";
 import { withTimeout } from "./core/timeout";
 import { planAgentTool, planAgentToolWithLLM, type AgentPlanResult } from "./agent-planner";
-import type { AgentNodeConfig } from "./node-configs";
+import type { AgentNodeConfig, NodeConfigByType } from "./node-configs";
 import { appendEvent } from "./persistence";
 import {
   recordValidationWriteSkip,
@@ -92,7 +95,7 @@ import { validateInputs } from "./inputs-validator";
 
 loadRootEnv();
 
-export type NodeContext = {
+export type NodeContext<T extends NodeType = NodeType> = {
   runId: string;
   nodeId: string;
   /** Multi-tenant scope. Plumbed by `executeNode` from `runs.orgId` so the
@@ -108,7 +111,7 @@ export type NodeContext = {
    * miss in `getRunMetadata`).
    */
   workflowId: string | null;
-  config: any;
+  config: NodeConfigByType[T];
   context: Record<string, any>;
   /** Resolved secret values that must never be persisted by executors. */
   redactedValues?: string[];
@@ -168,7 +171,15 @@ export type NodeExecutionResult =
       checkpointPersisted?: boolean;
     };
 
-export type NodeExecutor = (ctx: NodeContext) => Promise<NodeExecutionResult>;
+export type NodeExecutor<T extends NodeType = NodeType> = (
+  ctx: NodeContext<T>,
+) => Promise<NodeExecutionResult>;
+
+export type RegisteredNodeType = Exclude<NodeType, "router" | "router_llm">;
+
+export type NodeExecutorMap = {
+  [T in RegisteredNodeType]: NodeExecutor<T>;
+};
 
 function fallbackAiResponse(prompt: string, context: Record<string, any>) {
   const contextKeys = Object.keys(context).filter(key => !["orgId", "userId", "createdBy"].includes(key));
@@ -259,6 +270,11 @@ type AgentReflection = {
   reason: string;
 };
 
+type ResolvedAgentConfig = AgentNodeConfig & {
+  name: string;
+  goal: string;
+};
+
 /**
  * Produce one bounded field written to `agent.reasoning`.
  * This is an operational summary, never hidden chain-of-thought: inputs,
@@ -273,7 +289,11 @@ function sanitizeAgentReasoningText(value: string, maxChars: number): string {
     .slice(0, maxChars);
 }
 
-async function runAgentLoop(ctx: NodeContext, agentConfig: AgentNodeConfig, eventPrefix = "agent") {
+async function runAgentLoop(
+  ctx: NodeContext<"agent" | "multi_agent">,
+  agentConfig: AgentNodeConfig,
+  eventPrefix = "agent",
+) {
   const planner = agentConfig.planner ?? "rules";
   const maxSteps = agentConfig.maxSteps ?? 3;
   const reflectionEnabled = Boolean(agentConfig.reflection);
@@ -479,7 +499,13 @@ function safeOutcome(value: unknown): string {
   }
 }
 
-async function buildAgentConfig(ctx: NodeContext, agent: any, index: number, sharedContext: any, results: any[]) {
+async function buildAgentConfig(
+  ctx: NodeContext<"multi_agent">,
+  agent: AgentNodeConfig,
+  index: number,
+  sharedContext: any,
+  results: any[],
+): Promise<ResolvedAgentConfig> {
   const goal = renderTemplateWithRedactions(
     agent.goal ?? ctx.config.goal ?? "Complete the task",
     {
@@ -490,6 +516,9 @@ async function buildAgentConfig(ctx: NodeContext, agent: any, index: number, sha
 
   mergeLateBoundRedactions(ctx, goal.redactedValues);
   await enforceLateBoundTemplatePolicy(ctx, goal.unresolvedPaths);
+  const resolvedGoal = typeof goal.rendered === "string"
+    ? goal.rendered
+    : String(goal.rendered ?? "");
 
   return {
     ...agent,
@@ -498,7 +527,7 @@ async function buildAgentConfig(ctx: NodeContext, agent: any, index: number, sha
     maxSteps: agent.maxSteps ?? ctx.config.maxSteps ?? 2,
     timeoutMs: agent.timeoutMs ?? ctx.config.timeoutMs,
     reflection: agent.reflection ?? ctx.config.reflection ?? true,
-    goal: goal.rendered,
+    goal: resolvedGoal,
   };
 }
 
@@ -514,7 +543,7 @@ function aggregateCrewResults(results: any[], strategy = "last") {
   return results.at(-1)?.result?.finalAnswer ?? results.at(-1)?.result?.finalResult ?? null;
 }
 
-export const nodeRegistry: Record<string, NodeExecutor> = {
+export const nodeRegistry: NodeExecutorMap = {
   http: async (ctx) => {
     const { url, method, headers, body, timeoutMs, maxResponseBytes, maxRedirects, bodyMode, streamPreviewBytes } = ctx.config;
     const resolvedMethod = (method ?? "GET").toUpperCase();
@@ -549,7 +578,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
         : orgConfig.http.streamPreviewBytes;
       const streaming = await fetchHttpTarget(url, {
         method: resolvedMethod,
-        headers,
+        headers: headers as HeadersInit | undefined,
         body: serializedBody,
         timeoutMs: resolvedTimeoutMs,
         maxResponseBytes: resolvedMaxBytes,
@@ -578,7 +607,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
 
     const result = await fetchHttpTarget(url, {
       method: resolvedMethod,
-      headers,
+      headers: headers as HeadersInit | undefined,
       body: serializedBody,
       // Optional bounds — nodes that fetch large payloads or call slow APIs
       // pass these through; otherwise tenant/runtime defaults apply.
@@ -607,7 +636,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
 
   transform: async (ctx) => {
     const output = mapInput(ctx.config.mapping, { context: ctx.context, inputs: ctx.config });
-    return { status: "completed", output };
+    return { status: "completed", output: output as Record<string, unknown> };
   },
 
   loop: executeLoop,
@@ -682,7 +711,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
 
     if (mode === "parallel") {
       const parallelResults = await Promise.allSettled(
-        agents.map(async (agent: any, index: number) => {
+        agents.map(async (agent, index) => {
           const agentConfig = await buildAgentConfig(ctx, agent, index, sharedContext, results);
 
           await appendEvent(ctx.runId, ctx.nodeId, "multi_agent.agent.started", {
@@ -1026,14 +1055,13 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   // here so the run's existing retry / DLQ machinery applies (matches
   // the `http` node contract).
   mcp_tool: async (ctx) => {
-    const { connectionAlias, toolName, input, timeoutMs } = ctx.config as {
-      connectionAlias?: unknown;
-      toolName?: unknown;
-      input?: unknown;
-      timeoutMs?: unknown;
-    };
-    if (typeof connectionAlias !== "string" || !connectionAlias) throw new Error("mcp_tool requires config.connectionAlias");
-    if (typeof toolName !== "string" || !toolName) throw new Error("mcp_tool requires config.toolName");
+    const { connectionAlias, toolName, input, timeoutMs } = ctx.config;
+    if (typeof connectionAlias !== "string" || !connectionAlias) {
+      throw new Error("mcp_tool requires config.connectionAlias");
+    }
+    if (typeof toolName !== "string" || !toolName) {
+      throw new Error("mcp_tool requires config.toolName");
+    }
 
     const mappedInput = input && typeof input === "object" && !Array.isArray(input)
       ? mapInput(input as Record<string, unknown>, { context: ctx.context, inputs: ctx.config })
@@ -1049,7 +1077,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
       connectionAlias,
       toolName,
       input: mappedInput as Record<string, unknown>,
-      timeoutMs: typeof timeoutMs === "number" ? timeoutMs : undefined,
+      timeoutMs,
       dryRun: ctx.dryRun,
       runId: ctx.runId,
       nodeId: ctx.nodeId,
@@ -1130,3 +1158,15 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   mcp_server_event: mcpServerEventExecutor,
   pagerduty_incident: pagerDutyIncidentExecutor,
 };
+
+/** Dispatch one already-parsed config through its matching executor. */
+export function executeRegisteredNode<T extends RegisteredNodeType>(
+  type: T,
+  ctx: NodeContext<T>,
+): Promise<NodeExecutionResult> {
+  return nodeRegistry[type](ctx);
+}
+
+export function isRegisteredNodeType(type: string): type is RegisteredNodeType {
+  return Object.hasOwn(nodeRegistry, type);
+}

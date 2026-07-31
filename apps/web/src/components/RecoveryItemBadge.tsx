@@ -118,7 +118,7 @@ export function RecoveryItemBadge({ item, onOpen }: Props): React.ReactElement |
         {t(`recoveryItems.severity.${item.severity}`)}
       </span>
       <span
-        className="we-pill" data-tone="neutral"
+        className="we-pill we-recovery-item-badge__status" data-tone="neutral"
         data-testid="recovery-item-status"
       >
         {t(`recoveryItems.status.${item.status}`)}

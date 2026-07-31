@@ -282,12 +282,28 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   await captureElement(recoveryQueue, 'web-en-performance-recovery-tools')
 
   await resetRouteMeasurement(page)
+  const automationResponses = Promise.all([
+    page.waitForResponse((response) => new URL(response.url()).pathname === '/v1/dlq/clusters'),
+    page.waitForResponse((response) => new URL(response.url()).pathname === '/recovery/campaigns'),
+    page.waitForResponse((response) => new URL(response.url()).pathname === '/auto-healing/pending'),
+  ])
   await page.getByTestId('recovery-automation-toggle').click()
   await expect(page.getByTestId('recovery-automation-toggle')).toHaveAttribute('aria-expanded', 'true')
-  const automationResources = await measureRoute(page, 'recoveryAutomation')
-  expect(automationResources.resources.some((path) => /FailureClustersCard-.*\.js$/.test(path))).toBe(true)
-  expect(automationResources.resources.some((path) => /ReplayCampaignsCard-.*\.js$/.test(path))).toBe(true)
-  expect(automationResources.resources.some((path) => /AutoHealingPendingCard-.*\.js$/.test(path))).toBe(true)
+  const settledAutomationResponses = await automationResponses
+  await Promise.all(settledAutomationResponses.map((response) => response.finished()))
+  const recoveryAutomationMeasurement = await measureRoute(page, 'recoveryAutomation')
+  expect(recoveryAutomationMeasurement.resources.some(
+    (path) => /FailureClustersCard-.*\.js$/.test(path),
+  )).toBe(true)
+  expect(recoveryAutomationMeasurement.resources.some(
+    (path) => /ReplayCampaignsCard-.*\.js$/.test(path),
+  )).toBe(true)
+  expect(recoveryAutomationMeasurement.resources.some(
+    (path) => /AutoHealingPendingCard-.*\.js$/.test(path),
+  )).toBe(true)
+  expect(recoveryAutomationMeasurement.resources.some((path) => path === '/v1/dlq/clusters')).toBe(true)
+  expect(recoveryAutomationMeasurement.resources.some((path) => path === '/recovery/campaigns')).toBe(true)
+  expect(recoveryAutomationMeasurement.resources.some((path) => path === '/auto-healing/pending')).toBe(true)
 
   await resetRouteMeasurement(page)
   await page.getByRole('button', { name: 'Open user menu' }).click()
@@ -302,6 +318,7 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   ))
   expect(localeSwitchResources.some((path) => /catalog-es-.*\.js$/.test(path))).toBe(true)
   expect(localeSwitchResources.some((path) => /supabase-runtime-.*\.js$/.test(path))).toBe(false)
+  const localeSwitchMeasurement = await measureRoute(page, 'localeSwitch')
   await captureElement(page.locator('.we-locale-switcher--row'), 'web-es-locale-switcher-loaded')
 
   // A fresh Spanish boot must fetch only Spanish. This catches two easy-to-
@@ -309,6 +326,7 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   // English fallback download before the first localized render.
   const esPage = await page.context().newPage()
   const esBrowserErrors = installConsoleErrorGuards(esPage)
+  await installLongTaskObserver(esPage)
   await stubApi(esPage)
   await esPage.addInitScript(() => {
     window.localStorage.clear()
@@ -325,6 +343,7 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   expect(esResources.some((path) => /catalog-es-.*\.js$/.test(path))).toBe(true)
   expect(esResources.some((path) => /catalog-en-.*\.js$/.test(path))).toBe(false)
   expect(esResources.some((path) => /supabase-runtime-.*\.js$/.test(path))).toBe(false)
+  const esHomeMeasurement = await measureRoute(esPage, 'homeEs')
   await captureElement(esHome, 'web-es-performance-home')
   expect(esBrowserErrors).toEqual([])
   await esPage.close()
@@ -334,6 +353,9 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
     workflowBuilderMeasurement,
     recoveryMeasurement,
     recoveryToolsMeasurement,
+    recoveryAutomationMeasurement,
+    localeSwitchMeasurement,
+    esHomeMeasurement,
   ]
   if (PERF_REPORT) {
     const path = resolve(PERF_REPORT)

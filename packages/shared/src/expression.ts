@@ -177,7 +177,13 @@ function evaluateBoolean(expression: string, scope: ExpressionScope, validateOnl
     return andParts.every((part) => Boolean(evaluateBoolean(part, scope, false)));
   }
 
-  const trimmed = stripOuterParens(expression.trim());
+  const bare = expression.trim();
+  const trimmed = stripOuterParens(bare);
+  // Stripping a wrapping paren group can expose `||` / `&&` operators that the
+  // top-level splits above skipped while they were nested (e.g. the
+  // `(a || b)` part of `(a || b) && c`), so re-enter the boolean grammar
+  // instead of falling through to the comparison stage.
+  if (trimmed !== bare) return evaluateBoolean(trimmed, scope, validateOnly);
   if (trimmed.startsWith("!")) return !evaluateBoolean(trimmed.slice(1), scope, validateOnly);
   if (trimmed === "true") return true;
   if (trimmed === "false") return false;

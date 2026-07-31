@@ -952,6 +952,90 @@ describe('enqueueReadyNodes — snapshot-based readiness', () => {
     expect(queued).toBe(1)
     expect(queue.enqueueNode).toHaveBeenCalledWith(expect.objectContaining({ nodeId: 'c' }))
   })
+
+  it('queues a dependent declared BEFORE the node the scan skips (hostile declaration order)', async () => {
+    // Regression — stuck-run shape: nodes declared [gate, b, a] with
+    // gate→a carrying a false condition and a→b unconditional. A single
+    // declaration-order pass visits b first (dep a still pending → not
+    // ready), THEN skips a. b is ready from that moment, but the scan has
+    // already passed it: queued === 0, updateRunStatusFromNodes sees b
+    // still pending → the run stays "running" and nothing ever triggers
+    // another scan. The scan must loop to a fixpoint so an in-scan skip
+    // unblocks dependents regardless of where they sit in the node array.
+    const hostile = {
+      dslVersion: '1.0' as const,
+      nodes: [
+        { id: 'gate', type: 'noop' as const, config: {} },
+        { id: 'b', type: 'noop' as const, config: {} }, // declared before its dep
+        { id: 'a', type: 'noop' as const, config: {} },
+      ],
+      edges: [
+        { from: 'gate', to: 'a', condition: 'false' },
+        { from: 'a', to: 'b' },
+      ],
+    }
+    const store = makeStore({
+      getRunContext: vi.fn().mockResolvedValue({
+        gate: { status: 'succeeded' },
+        b: { status: 'pending' },
+        a: { status: 'pending' },
+      }),
+    })
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(store, queue, makeExecutors())
+
+    const queued = await runtime.enqueueReadyNodes({ runId: 'r1', workflow: hostile })
+
+    expect(store.markNodeSkipped).toHaveBeenCalledWith('r1', 'a', { reason: 'Condition not met' })
+    expect(queued).toBe(1)
+    expect(queue.enqueueNode).toHaveBeenCalledWith(expect.objectContaining({ nodeId: 'b' }))
+    // One snapshot, one claim — the fixpoint loop must not re-read the
+    // context or re-claim an already-queued node on its no-change pass.
+    expect(store.getRunContext).toHaveBeenCalledTimes(1)
+    expect(store.tryClaimNodeForQueue).toHaveBeenCalledTimes(1)
+    // The scan queued work, so it must NOT run the terminal rollup that
+    // would have (wrongly) left the run parked as "running".
+    expect(store.updateRunStatusFromNodes).not.toHaveBeenCalled()
+  })
+
+  it('converges a multi-level skip cascade in fully reversed declaration order', async () => {
+    // gate→a (false) skips a; a→b (false) then skips b; b→c (unconditional,
+    // and a skipped predecessor satisfies its edge) queues c. Declared
+    // [c, b, a, gate] — every dependent precedes its dependency — so the
+    // fixpoint needs one extra pass per cascade level, not just one rescan.
+    const reversed = {
+      dslVersion: '1.0' as const,
+      nodes: [
+        { id: 'c', type: 'noop' as const, config: {} },
+        { id: 'b', type: 'noop' as const, config: {} },
+        { id: 'a', type: 'noop' as const, config: {} },
+        { id: 'gate', type: 'noop' as const, config: {} },
+      ],
+      edges: [
+        { from: 'gate', to: 'a', condition: 'false' },
+        { from: 'a', to: 'b', condition: 'false' },
+        { from: 'b', to: 'c' },
+      ],
+    }
+    const store = makeStore({
+      getRunContext: vi.fn().mockResolvedValue({
+        c: { status: 'pending' },
+        b: { status: 'pending' },
+        a: { status: 'pending' },
+        gate: { status: 'succeeded' },
+      }),
+    })
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(store, queue, makeExecutors())
+
+    const queued = await runtime.enqueueReadyNodes({ runId: 'r1', workflow: reversed })
+
+    expect(store.markNodeSkipped).toHaveBeenCalledWith('r1', 'a', { reason: 'Condition not met' })
+    expect(store.markNodeSkipped).toHaveBeenCalledWith('r1', 'b', { reason: 'Condition not met' })
+    expect(store.markNodeSkipped).toHaveBeenCalledTimes(2)
+    expect(queued).toBe(1)
+    expect(queue.enqueueNode).toHaveBeenCalledWith(expect.objectContaining({ nodeId: 'c' }))
+  })
 })
 
 describe('executeQueuedNode — router routes the decision', () => {

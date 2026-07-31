@@ -142,7 +142,25 @@ export const workflows = pgTable(
      */
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
-  (table) => [index("workflows_org_created_idx").on(table.orgId, table.createdAt.desc())],
+  (table) => [
+    // Backs the Flows list keyset (`ORDER BY created_at DESC, id DESC`) —
+    // without the `id` tiebreaker Postgres re-sorts the org's workflows on
+    // every page. Supersedes the old (org_id, created_at) index (strict prefix).
+    // `.nullsFirst()` is load-bearing: `created_at` is nullable and a plain
+    // `ORDER BY created_at DESC` means NULLS FIRST, so drizzle's default
+    // DESC NULLS LAST index cannot satisfy the sort and the planner re-sorts.
+    index("workflows_org_created_id_idx").on(
+      table.orgId,
+      table.createdAt.desc().nullsFirst(),
+      table.id.desc().nullsFirst(),
+    ),
+    // Backs the Trash list keyset (`ORDER BY deleted_at DESC, id DESC`) and
+    // the `system:retention` tombstone sweep; partial, so it only holds
+    // soft-deleted rows. NULLS FIRST for the same sort-matching reason above.
+    index("workflows_org_deleted_idx")
+      .on(table.orgId, table.deletedAt.desc().nullsFirst(), table.id.desc().nullsFirst())
+      .where(sql`"deleted_at" IS NOT NULL`),
+  ],
 );
 
 export const workflowVersions = pgTable(
@@ -341,7 +359,18 @@ export const runs = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
   (table) => [
-    index("runs_org_created_idx").on(table.orgId, table.createdAt.desc()),
+    // Backs the `GET /runs` keyset (`ORDER BY created_at DESC, id DESC`) —
+    // without the `id` tiebreaker Postgres cannot satisfy the sort from the
+    // index and top-N re-sorts the org's ENTIRE runs on every page (O(org-runs)
+    // per page). Supersedes the old (org_id, created_at) index (strict prefix).
+    // `.nullsFirst()` is load-bearing: `created_at` is nullable and a plain
+    // `ORDER BY created_at DESC` means NULLS FIRST, so drizzle's default
+    // DESC NULLS LAST index cannot satisfy the sort and the planner re-sorts.
+    index("runs_org_created_id_idx").on(
+      table.orgId,
+      table.createdAt.desc().nullsFirst(),
+      table.id.desc().nullsFirst(),
+    ),
     index("runs_parent_idx").on(table.parentRunId),
     index("runs_parent_notification_idx")
       .on(table.parentNotificationAfter, table.id)
@@ -575,12 +604,27 @@ export const deadLetters = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
   (table) => [
-    index("dead_letters_org_status_idx").on(table.orgId, table.status, table.createdAt.desc()),
+    // Backs the status-filtered recovery-queue pages (`eq(status)` +
+    // `ORDER BY created_at DESC, id DESC`). `.nullsFirst()` is load-bearing on
+    // every keyset index here: `created_at` is nullable and a plain `ORDER BY
+    // created_at DESC` means NULLS FIRST, so drizzle's default DESC NULLS LAST
+    // cannot satisfy the sort and the planner re-sorts the org's DLQ per page.
+    // A backward scan of the same index serves the `oldest` (ASC) sort.
+    index("dead_letters_org_status_created_idx").on(
+      table.orgId,
+      table.status,
+      table.createdAt.desc().nullsFirst(),
+      table.id.desc().nullsFirst(),
+    ),
     // Backs the recovery queue's default sorts (`newest` / `oldest`) when no
     // status filter is applied — with `status` in the middle of the index
     // above, Postgres can't produce keyset-ordered output and re-sorts the
     // org's entire DLQ per page.
-    index("dead_letters_org_created_idx").on(table.orgId, table.createdAt.desc(), table.id.desc()),
+    index("dead_letters_org_created_id_idx").on(
+      table.orgId,
+      table.createdAt.desc().nullsFirst(),
+      table.id.desc().nullsFirst(),
+    ),
     index("dead_letters_org_replay_claimed_idx").on(table.orgId, table.replayClaimedAt.desc()),
     index("dead_letters_org_run_node_created_idx").on(
       table.orgId,
@@ -625,7 +669,14 @@ export const replayCampaigns = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    index("replay_campaigns_org_created_idx").on(table.orgId, table.createdAt.desc()),
+    // Backs `listReplayCampaigns`' bounded `(created_at DESC, id DESC)` list;
+    // NULLS FIRST + id tiebreaker so the index can serve the sort (see the
+    // dead_letters keyset indexes for the rationale).
+    index("replay_campaigns_org_created_id_idx").on(
+      table.orgId,
+      table.createdAt.desc().nullsFirst(),
+      table.id.desc().nullsFirst(),
+    ),
     index("replay_campaigns_due_idx")
       .on(table.nextDispatchAt, table.id)
       .where(sql`"status" = 'running'`),
@@ -976,8 +1027,12 @@ export const externalWorkflows = pgTable(
   (table) => [
     uniqueIndex("external_workflows_connection_external_idx")
       .on(table.connectionId, table.externalWorkflowId),
-    index("external_workflows_org_observed_idx")
-      .on(table.orgId, table.lastObservedAt.desc()),
+    // Mirrors `listExternalWorkflows`' full ORDER BY (`lastObservedAt DESC,
+    // externalWorkflowId ASC`); NULLS FIRST because `lastObservedAt` is
+    // nullable and a plain `ORDER BY ... DESC` means NULLS FIRST — drizzle's
+    // default DESC NULLS LAST index cannot satisfy the sort.
+    index("external_workflows_org_observed_workflow_idx")
+      .on(table.orgId, table.lastObservedAt.desc().nullsFirst(), table.externalWorkflowId.asc()),
   ],
 );
 
@@ -1004,8 +1059,10 @@ export const externalRuns = pgTable(
   (table) => [
     uniqueIndex("external_runs_connection_external_idx")
       .on(table.connectionId, table.externalRunId),
-    index("external_runs_org_observed_idx")
-      .on(table.orgId, table.lastObservedAt.desc()),
+    // Mirrors `listExternalRuns`' full ORDER BY; NULLS FIRST on the nullable
+    // `lastObservedAt` so the index can serve the sort (see external_workflows).
+    index("external_runs_org_observed_created_idx")
+      .on(table.orgId, table.lastObservedAt.desc().nullsFirst(), table.createdAt.desc().nullsFirst()),
     index("external_runs_connection_workflow_idx")
       .on(table.connectionId, table.externalWorkflowId, table.lastObservedAt.desc()),
   ],
@@ -1037,8 +1094,10 @@ export const externalRunSteps = pgTable(
   (table) => [
     uniqueIndex("external_run_steps_connection_run_step_idx")
       .on(table.connectionId, table.externalRunId, table.externalStepId),
-    index("external_run_steps_org_observed_idx")
-      .on(table.orgId, table.lastObservedAt.desc()),
+    // Mirrors `listExternalRunSteps`' full ORDER BY; NULLS FIRST on the
+    // nullable `lastObservedAt` (see external_workflows).
+    index("external_run_steps_org_observed_created_idx")
+      .on(table.orgId, table.lastObservedAt.desc().nullsFirst(), table.createdAt.desc().nullsFirst()),
   ],
 );
 
@@ -1109,15 +1168,31 @@ export const auditLogs = pgTable(
     holdUntil: timestamp("hold_until", { withTimezone: true }),
   },
   (table) => [
-    index("audit_logs_org_created_idx").on(table.orgId, table.createdAt.desc()),
+    // Backs the unfiltered `GET /audit` keyset (`ORDER BY created_at DESC,
+    // id DESC`). `.nullsFirst()` is load-bearing: `created_at` is nullable and
+    // a plain `ORDER BY created_at DESC` means NULLS FIRST, so drizzle's
+    // default DESC NULLS LAST index cannot satisfy the sort and the planner
+    // re-sorts the org's audit history on every page.
+    index("audit_logs_org_created_id_idx").on(
+      table.orgId,
+      table.createdAt.desc().nullsFirst(),
+      table.id.desc().nullsFirst(),
+    ),
     // Backs the audit viewer's action-PREFIX filter
     // (`queryAuditLogs`: `action LIKE 'prefix%'`). A plain btree can't serve
     // `LIKE` under the default collation, so the migration SQL appends the
     // `text_pattern_ops` opclass to the `action` column by hand (drizzle's
     // builder can't emit an opclass — same pattern as the GIN index below).
-    // Ordered (org_id, action, created_at DESC) so the org-scoped prefix
-    // range scan feeds the newest-first keyset without a full-table sort.
-    index("audit_logs_org_action_created_idx").on(table.orgId, table.action, table.createdAt.desc()),
+    // With an EXACT action match (e.g. the budget-gate dedup read) the
+    // NULLS FIRST tail also serves `ORDER BY created_at DESC[, id DESC]`
+    // index-ordered; a multi-action prefix range still filters via the range
+    // scan and re-sorts only the bounded matches.
+    index("audit_logs_org_action_created_id_idx").on(
+      table.orgId,
+      table.action,
+      table.createdAt.desc().nullsFirst(),
+      table.id.desc().nullsFirst(),
+    ),
     // GIN over the jsonb metadata column for containment lookups
     // such as the rate-limit-degradation dedup gate
     // (`metadata @> '{"bucket":"..."}'`). jsonb_path_ops keeps the
@@ -1229,8 +1304,14 @@ export const recoveryFeedback = pgTable(
   },
   (table) => [
     // Read-side aggregation: list past feedback for this workflow when
-    // the patch route enriches a new prompt.
-    index("recovery_feedback_org_workflow_idx").on(table.orgId, table.workflowId, table.createdAt.desc()),
+    // the patch route enriches a new prompt. NULLS FIRST so the bounded
+    // newest-first reads (`ORDER BY created_at DESC LIMIT n`) can be served
+    // index-ordered (see the dead_letters keyset indexes for the rationale).
+    index("recovery_feedback_org_workflow_created_idx").on(
+      table.orgId,
+      table.workflowId,
+      table.createdAt.desc().nullsFirst(),
+    ),
     // Direct DLQ-row scoping for per-row audits.
     index("recovery_feedback_org_dlq_idx").on(table.orgId, table.deadLetterId),
   ],
@@ -1848,7 +1929,14 @@ export const prompts = pgTable(
   },
   (table) => [
     uniqueIndex("prompts_org_name_idx").on(table.orgId, table.name),
-    index("prompts_org_created_idx").on(table.orgId, table.createdAt.desc()),
+    // Backs `listPrompts`' bounded newest-first read. NULLS FIRST because
+    // `createdAt` is nullable (see the dead_letters keyset indexes); the id
+    // tiebreaker is ready for the deferred cursor pagination.
+    index("prompts_org_created_id_idx").on(
+      table.orgId,
+      table.createdAt.desc().nullsFirst(),
+      table.id.desc().nullsFirst(),
+    ),
   ],
 );
 
@@ -2742,7 +2830,15 @@ export const triggerEvents = pgTable(
     // Per-org idempotency on the inbound dedupe key (relay retries converge).
     uniqueIndex("trigger_events_org_dedupe_idx").on(table.orgId, table.dedupeKey),
     // Operator-facing recent-event feed + replay listing, newest first.
-    index("trigger_events_org_created_idx").on(table.orgId, table.createdAt.desc()),
+    // Backs `listTriggerEvents`' newest-first keyset. NULLS FIRST because
+    // `createdAt` is nullable (see the dead_letters keyset indexes); the id
+    // tiebreaker is ready for the day the keyset gains its id tie-break
+    // (today it paginates on `createdAt` alone).
+    index("trigger_events_org_created_id_idx").on(
+      table.orgId,
+      table.createdAt.desc().nullsFirst(),
+      table.id.desc().nullsFirst(),
+    ),
     // Per-trigger-node lookup (replay history for one node).
     index("trigger_events_org_node_idx").on(table.orgId, table.workflowVersionId, table.nodeId),
     // Buffered-window reads: the resume backfill lists + counts a workflow's

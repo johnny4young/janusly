@@ -40,7 +40,7 @@ export type SampleFailureDrillSource = {
   packId: string;
   fixtureId: string;
   failureMode: string;
-  recoveryPath: "direct_failure" | "stalled_node_reaper";
+  recoveryPath: "direct_failure" | "runtime_failure" | "stalled_node_reaper";
 };
 
 /** Input for a synthetic failure injection. */

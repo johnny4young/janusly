@@ -32,6 +32,25 @@ describe("parseRecoveryDrillProvenance", () => {
     });
   });
 
+  it("retains runtime-backed drill provenance without exposing measured internals", () => {
+    expect(parseRecoveryDrillProvenance({
+      drill: {
+        kind: "solution_pack_drill",
+        packId: "incident-triage",
+        fixtureId: "github_secret_unbound",
+        failureMode: "credential_unavailable",
+        recoveryPath: "runtime_failure",
+        boundary: "worker_dlq",
+        attempts: 1,
+      },
+    })).toEqual({
+      kind: "solution_pack_drill",
+      packId: "incident-triage",
+      fixtureId: "github_secret_unbound",
+      recoveryPath: "runtime_failure",
+    });
+  });
+
   it("rejects malformed, unknown, and oversized provenance", () => {
     expect(parseRecoveryDrillProvenance(null)).toBeNull();
     expect(parseRecoveryDrillProvenance({ drill: { kind: "operator_input" } })).toBeNull();

@@ -120,6 +120,12 @@ describe("MultiAgentNodeConfigSchema", () => {
     });
     expect(parsed.mode).toBe("sequential");
   });
+  it("rejects non-object agents and malformed nested agent config", () => {
+    expect(() => MultiAgentNodeConfigSchema.parse({ agents: ["summarize"] })).toThrow();
+    expect(() => MultiAgentNodeConfigSchema.parse({
+      agents: [{ name: "summarizer", planner: "unknown" }],
+    })).toThrow();
+  });
 });
 
 describe("AgentReflectionNodeConfigSchema", () => {
@@ -244,8 +250,13 @@ describe("SubworkflowNodeConfigSchema", () => {
     expect(() => SubworkflowNodeConfigSchema.parse({})).toThrow();
   });
   it("accepts canonical shape", () => {
-    const parsed = SubworkflowNodeConfigSchema.parse({ workflowId: "wf-1" });
+    const parsed = SubworkflowNodeConfigSchema.parse({ workflowId: "wf-1", version: 2 });
     expect(parsed.workflowId).toBe("wf-1");
+    expect(parsed.version).toBe(2);
+  });
+  it("rejects malformed version pins", () => {
+    expect(() => SubworkflowNodeConfigSchema.parse({ workflowId: "wf-1", version: 0 })).toThrow();
+    expect(() => SubworkflowNodeConfigSchema.parse({ workflowId: "wf-1", version: 1.5 })).toThrow();
   });
 });
 

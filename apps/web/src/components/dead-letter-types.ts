@@ -33,7 +33,7 @@ export type RecoveryDrillProvenance = {
   kind: 'solution_pack_drill'
   packId: string
   fixtureId: string
-  recoveryPath: 'direct_failure' | 'stalled_node_reaper'
+  recoveryPath: 'direct_failure' | 'runtime_failure' | 'stalled_node_reaper'
 }
 
 /** Web projection of one dead-letter row. List reads omit snapshot fields. */

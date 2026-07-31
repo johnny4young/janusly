@@ -32,9 +32,11 @@ from the schema-validated `draftReply` field.
   "can't log in" ticket. The Slack + email steps are skipped in sandbox mode, and
   with AI configured the run pauses at the agent-review form with the draft
   prefilled for editing.
-- **Start recovery drill** reproduces a bounded notification timeout on
-  `escalate`, records the drill source, and opens the recovery queue so you can
-  diagnose and validate a proposed timeout fix.
+- **Start recovery drill** executes `escalate` through the real BullMQ worker,
+  retry classification, and terminal DLQ boundary. The retry policy correctly
+  treats a controlled missing-secret probe as non-retryable before any Slack
+  request, then the drill opens the recovery queue with measured runtime
+  evidence.
 
 Slack and email use `resultPolicy: "require_ok"`, so failed delivery envelopes
 cannot be reported as successful workflow steps.

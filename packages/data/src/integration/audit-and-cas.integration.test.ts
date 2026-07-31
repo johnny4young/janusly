@@ -343,7 +343,7 @@ describe("hot-path indexes present after migration", () => {
   }
 
   it("audit_logs carries the action-prefix index", async () => {
-    expect(await indexNames("audit_logs")).toContain("audit_logs_org_action_created_idx");
+    expect(await indexNames("audit_logs")).toContain("audit_logs_org_action_created_id_idx");
   });
 
   it("memory_entries carries the baseline HNSW vector index", async () => {
@@ -352,5 +352,32 @@ describe("hot-path indexes present after migration", () => {
 
   it("trigger_events carries the buffered-window index the resume backfill scans", async () => {
     expect(await indexNames("trigger_events")).toContain("trigger_events_org_workflow_status_idx");
+  });
+
+  it("runs carries the keyset-aligned list index and dropped its strict prefix", async () => {
+    const names = await indexNames("runs");
+    expect(names).toContain("runs_org_created_id_idx");
+    expect(names).not.toContain("runs_org_created_idx");
+  });
+
+  it("workflows carries the keyset-aligned list + trash indexes and dropped the strict prefix", async () => {
+    const names = await indexNames("workflows");
+    expect(names).toContain("workflows_org_created_id_idx");
+    expect(names).toContain("workflows_org_deleted_idx");
+    expect(names).not.toContain("workflows_org_created_idx");
+  });
+
+  it("dead_letters carries the NULLS FIRST keyset indexes and dropped the misaligned pair", async () => {
+    const names = await indexNames("dead_letters");
+    expect(names).toContain("dead_letters_org_created_id_idx");
+    expect(names).toContain("dead_letters_org_status_created_idx");
+    expect(names).not.toContain("dead_letters_org_created_idx");
+    expect(names).not.toContain("dead_letters_org_status_idx");
+  });
+
+  it("audit_logs carries the NULLS FIRST keyset index and dropped the misaligned one", async () => {
+    const names = await indexNames("audit_logs");
+    expect(names).toContain("audit_logs_org_created_id_idx");
+    expect(names).not.toContain("audit_logs_org_created_idx");
   });
 });

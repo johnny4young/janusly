@@ -9,30 +9,23 @@ const PACK: SolutionPackPublic = {
   name: 'Incident triage',
   description: 'Classify an alert and notify responders.',
   category: 'incident_triage',
-  version: '1.0.0',
+  version: '1.2.0',
   requiredCredentials: [
     { name: 'ops_slack', kind: 'slack_webhook', purpose: 'Pages your on-call channel' },
   ],
   requiredOrgConfigs: [],
   nodeCount: 4,
   sampleCount: 1,
-  failureCount: 3,
+  failureCount: 2,
   samplePayloadIds: ['default'],
-  failureFixtureIds: ['slack_5xx_transient', 'classification_output_invalid', 'worker_interrupted_during_page'],
+  failureFixtureIds: ['github_secret_unbound', 'worker_interrupted_during_page'],
   failureFixtures: [
     {
-      id: 'slack_5xx_transient',
-      label: 'Slack page returned HTTP 500',
-      description: 'The notification provider is temporarily unavailable.',
-      failureMode: 'upstream_unavailable',
-      recoveryPath: 'direct_failure',
-    },
-    {
-      id: 'classification_output_invalid',
-      label: 'AI severity output malformed',
-      description: 'The model output does not satisfy the severity contract.',
-      failureMode: 'ai_output_invalid',
-      recoveryPath: 'direct_failure',
+      id: 'github_secret_unbound',
+      label: 'GitHub credential unavailable',
+      description: 'The issue node crosses the real worker boundary before a safe missing-secret probe fails.',
+      failureMode: 'credential_unavailable',
+      recoveryPath: 'runtime_failure',
     },
     {
       id: 'worker_interrupted_during_page',
@@ -120,20 +113,13 @@ describe('<SolutionPacksPanel />', () => {
 
     expect(screen.getByTestId('solution-pack-incident-triage')).toBeVisible()
     const select = screen.getByLabelText('Failure scenario')
-    expect(select).toHaveValue('slack_5xx_transient')
-    expect(screen.getByText('The on-call notification provider is temporarily unavailable after the incident issue is created.')).toBeVisible()
-
-    fireEvent.change(select, { target: { value: 'classification_output_invalid' } })
-    expect(screen.getByText('Invalid AI output')).toBeVisible()
-    expect(screen.getByText('Deterministic fixture')).toBeVisible()
-    expect(
-      screen.getByText(
-        'The drill records malformed classification as a failed step; the live validity gate blocks external effects.',
-      ),
-    ).toBeVisible()
+    expect(select).toHaveValue('github_secret_unbound')
+    expect(screen.getByText('Credential unavailable')).toBeVisible()
+    expect(screen.getByText('Real runtime path')).toBeVisible()
+    expect(screen.getByText(/real worker and terminal-failure boundary/)).toBeVisible()
 
     fireEvent.click(screen.getByRole('button', { name: 'Start recovery drill' }))
-    expect(handlers.onInjectFailure).toHaveBeenCalledWith('incident-triage', 'classification_output_invalid')
+    expect(handlers.onInjectFailure).toHaveBeenCalledWith('incident-triage', 'github_secret_unbound')
   })
 
   it('identifies the real stalled-node reaper path before starting it', () => {

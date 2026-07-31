@@ -254,7 +254,7 @@ async function getFirstChildFailure(runId: string): Promise<{ nodeId: string; er
  * Subworkflow executor. Validates depth, loads the child workflow, kicks off
  * the child run, and pauses the parent's node until the child terminates.
  */
-export const subworkflowExecutor: NodeExecutor = async (ctx) => {
+export const subworkflowExecutor: NodeExecutor<"subworkflow"> = async (ctx) => {
   const workflowId = resolveSubworkflowId(ctx.config?.workflowId);
   const requestedVersion = resolveSubworkflowVersion(ctx.config?.version);
 

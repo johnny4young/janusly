@@ -31,6 +31,7 @@
     "evals:recovery:baseline": "pnpm --filter @janusly/api exec tsx ../../scripts/run-recovery-evals.mjs --update-baseline",
     "test:scripts": "node --test scripts/*.test.mjs",
     "test:evals": "pnpm test:scripts && pnpm evals:recovery",
+    "usability:study": "node scripts/usability-study.mjs",
     "seed:recovery-matrix": "pnpm --filter @janusly/api exec tsx ../../scripts/seed-recovery-matrix.ts",
     "seed:demos": "pnpm --filter @janusly/api exec tsx ../../scripts/seed-demos.ts",
     "seed:full": "pnpm --filter @janusly/api exec tsx ../../scripts/seed-full.ts",

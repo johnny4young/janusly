@@ -3,7 +3,7 @@
   "name": "Support escalation",
   "description": "When a support ticket comes in, summarize it with AI, let a human agent review and edit the reply, escalate to the support channel, and email the customer back.",
   "category": "support_escalation",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "requiredCredentials": [
     {
       "name": "support_slack",
@@ -24,20 +24,41 @@
     "name": "Support escalation",
     "inputs": {
       "type": "object",
-      "required": ["event"],
+      "required": [
+        "event"
+      ],
       "properties": {
         "event": {
           "type": "object",
-          "required": ["eventId", "payload"],
+          "required": [
+            "eventId",
+            "payload"
+          ],
           "properties": {
-            "eventId": { "type": "string", "description": "Stable delivery id from the support system" },
+            "eventId": {
+              "type": "string",
+              "description": "Stable delivery id from the support system"
+            },
             "payload": {
               "type": "object",
-              "required": ["customer", "subject", "message"],
+              "required": [
+                "customer",
+                "subject",
+                "message"
+              ],
               "properties": {
-                "customer": { "type": "string", "description": "Customer email" },
-                "subject": { "type": "string", "description": "Ticket subject line" },
-                "message": { "type": "string", "description": "The customer's full message" }
+                "customer": {
+                  "type": "string",
+                  "description": "Customer email"
+                },
+                "subject": {
+                  "type": "string",
+                  "description": "Ticket subject line"
+                },
+                "message": {
+                  "type": "string",
+                  "description": "The customer's full message"
+                }
               }
             }
           }
@@ -45,7 +66,13 @@
       }
     },
     "nodes": [
-      { "id": "trigger", "type": "webhook_received", "config": { "endpointKey": "support-escalation" } },
+      {
+        "id": "trigger",
+        "type": "webhook_received",
+        "config": {
+          "endpointKey": "support-escalation"
+        }
+      },
       {
         "id": "summarize",
         "type": "ai",
@@ -53,10 +80,17 @@
           "prompt": "Summarize this support ticket in at most two sentences and draft a polite reply under 150 words without inventing product features. Return JSON with exactly two string fields named summary and draftReply. Subject: {{context.trigger.output.event.payload.subject}}\n\nMessage: {{context.trigger.output.event.payload.message}}",
           "outputSchema": {
             "type": "object",
-            "required": ["summary", "draftReply"],
+            "required": [
+              "summary",
+              "draftReply"
+            ],
             "properties": {
-              "summary": { "type": "string" },
-              "draftReply": { "type": "string" }
+              "summary": {
+                "type": "string"
+              },
+              "draftReply": {
+                "type": "string"
+              }
             }
           }
         }
@@ -69,10 +103,22 @@
           "description": "Edit the drafted reply if needed and approve to send it to the customer.",
           "schema": {
             "type": "object",
-            "required": ["finalReply"],
+            "required": [
+              "finalReply"
+            ],
             "properties": {
-              "finalReply": { "type": "string", "description": "Final reply body. Pre-filled from the AI draft; edit as needed." },
-              "priority": { "type": "string", "description": "Optional priority tag", "enum": ["low", "high"] }
+              "finalReply": {
+                "type": "string",
+                "description": "Final reply body. Pre-filled from the AI draft; edit as needed."
+              },
+              "priority": {
+                "type": "string",
+                "description": "Optional priority tag",
+                "enum": [
+                  "low",
+                  "high"
+                ]
+              }
             }
           },
           "initialValues": {
@@ -108,10 +154,22 @@
       }
     ],
     "edges": [
-      { "from": "trigger", "to": "summarize" },
-      { "from": "summarize", "to": "review" },
-      { "from": "review", "to": "escalate" },
-      { "from": "escalate", "to": "reply" }
+      {
+        "from": "trigger",
+        "to": "summarize"
+      },
+      {
+        "from": "summarize",
+        "to": "review"
+      },
+      {
+        "from": "review",
+        "to": "escalate"
+      },
+      {
+        "from": "escalate",
+        "to": "reply"
+      }
     ],
     "outputs": {
       "customer": "{{context.trigger.output.event.payload.customer}}",
@@ -141,18 +199,12 @@
   ],
   "failureFixtures": [
     {
-      "id": "slack_timeout",
-      "label": "Escalation post timed out",
-      "description": "The support-channel notification exceeds its bounded request timeout before the customer reply is sent.",
-      "failureMode": "upstream_unavailable",
-      "recoveryPath": "direct_failure",
-      "failedNodeId": "escalate",
-      "errorJson": {
-        "name": "ToolError",
-        "code": "network_timeout",
-        "message": "slack.post failed: request timed out after 30000ms",
-        "node": "escalate"
-      }
+      "id": "support_secret_unbound",
+      "label": "Support channel credential unavailable",
+      "description": "The escalation node crosses the real worker and terminal-failure boundary. The retry policy classifies a controlled missing-secret probe as non-retryable before any Slack request can start.",
+      "failureMode": "credential_unavailable",
+      "recoveryPath": "runtime_failure",
+      "failedNodeId": "escalate"
     }
   ]
 }

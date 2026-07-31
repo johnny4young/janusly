@@ -5,7 +5,10 @@
  * `pnpm bundle-report` remains the human-readable advisory command. CI uses
  * `pnpm bundle-check`, which reads `apps/web/performance-budgets.json`, fails
  * on explicit budget breaches or >10% growth from the checked-in baseline,
- * and writes retained Markdown + JSON evidence under `artifacts/`.
+ * and writes retained Markdown + JSON evidence under `artifacts/`. The report
+ * keeps the complete JS/CSS artifact distinct from a single-locale JS/CSS
+ * set: production ships every locale, but a normal session downloads only the
+ * selected locale until the operator explicitly switches language.
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
@@ -68,8 +71,12 @@ export function formatBundleReport(entries, { topN = DEFAULT_TOP_N, evaluation }
     lines.push('', `## Performance budgets — ${evaluation.ok ? 'PASS' : 'FAIL'}`, '')
     lines.push('| Budget | Actual | Limit | Result |', '| --- | ---: | ---: | --- |')
     lines.push(
-      `| Total gzip | ${kib(evaluation.total.actualBytes)} | ${kib(evaluation.total.limitBytes)} | ${evaluation.total.ok ? 'PASS' : 'FAIL'} |`,
+      `| Complete JS/CSS artifact | ${kib(evaluation.artifact.actualBytes)} | ${kib(evaluation.artifact.limitBytes)} | ${evaluation.artifact.ok ? 'PASS' : 'FAIL'} |`,
+      `| Worst single-locale JS/CSS | ${kib(evaluation.singleLocale.actualBytes)} | ${kib(evaluation.singleLocale.limitBytes)} | ${evaluation.singleLocale.ok ? 'PASS' : 'FAIL'} |`,
     )
+    if (evaluation.singleLocale.missing.length > 0) {
+      lines.push('', `Missing locale assets: ${evaluation.singleLocale.missing.join(', ')}`)
+    }
     for (const group of evaluation.groups) {
       lines.push(`| ${group.label} | ${kib(group.actualBytes)} | ${kib(group.limitBytes)} | ${group.ok ? 'PASS' : 'FAIL'} |`)
     }
@@ -91,9 +98,17 @@ export function formatBundleReport(entries, { topN = DEFAULT_TOP_N, evaluation }
 export function evaluateBundleBudgets(entries, budgets) {
   const assets = aggregateEntries(entries)
   const byName = new Map(assets.map((asset) => [asset.name, asset]))
-  const totalActual = entries.reduce((sum, entry) => sum + entry.gzipBytes, 0)
-  const totalLimit = budgets.totalGzipKiB * 1024
+  const artifactActual = entries.reduce((sum, entry) => sum + entry.gzipBytes, 0)
+  const artifactLimit = budgets.artifactGzipKiB * 1024
   const explicitlyBudgeted = new Set()
+
+  const localeAssets = budgets.singleLocale.assets
+  const missingLocaleAssets = localeAssets.filter((name) => !byName.has(name))
+  const localeAssetBytes = localeAssets.map((name) => byName.get(name)?.gzipBytes ?? 0)
+  const allLocaleBytes = localeAssetBytes.reduce((sum, bytes) => sum + bytes, 0)
+  const largestLocaleBytes = Math.max(0, ...localeAssetBytes)
+  const singleLocaleActual = artifactActual - allLocaleBytes + largestLocaleBytes
+  const singleLocaleLimit = budgets.singleLocale.maxGzipKiB * 1024
 
   const groups = Object.entries(budgets.assetGroups).map(([id, group]) => {
     let actualBytes = 0
@@ -138,11 +153,23 @@ export function evaluateBundleBudgets(entries, budgets) {
     }
   }
 
-  const total = { actualBytes: totalActual, limitBytes: totalLimit, ok: totalActual <= totalLimit }
+  const artifact = {
+    actualBytes: artifactActual,
+    limitBytes: artifactLimit,
+    ok: artifactActual <= artifactLimit,
+  }
+  const singleLocale = {
+    assets: localeAssets,
+    missing: missingLocaleAssets,
+    actualBytes: singleLocaleActual,
+    limitBytes: singleLocaleLimit,
+    ok: missingLocaleAssets.length === 0 && singleLocaleActual <= singleLocaleLimit,
+  }
   return {
     version: budgets.version,
-    ok: total.ok && groups.every((group) => group.ok) && regressions.length === 0,
-    total,
+    ok: artifact.ok && singleLocale.ok && groups.every((group) => group.ok) && regressions.length === 0,
+    artifact,
+    singleLocale,
     groups,
     regressions,
     newAssets,

@@ -118,6 +118,44 @@ describe("normalizeErrorSignature — tool_input", () => {
     expect(result.signature).toBe("Tool not found: mystery.thing");
     expect(result.category).toBe("tool_input");
   });
+
+  // Regression: tool names matching PARSE_ERROR_PATTERN's case-insensitive
+  // `JSON.parse` alternative must still cluster per-tool, not as parse_error.
+  it("clusters invalid input for the json.parse tool as tool_input, not parse_error", () => {
+    const result = normalizeErrorSignature(
+      new Error("Invalid tool input for json.parse: value: Required"),
+      { nodeType: "tool", toolName: "json.parse" },
+    );
+    expect(result.signature).toBe("Invalid tool input: json.parse");
+    expect(result.category).toBe("tool_input");
+  });
+
+  it("clusters invalid input for a future *.parse tool as tool_input", () => {
+    const result = normalizeErrorSignature(
+      new Error("Invalid tool input for csv.parse: rows: Required"),
+      { nodeType: "tool" },
+    );
+    expect(result.signature).toBe("Invalid tool input: csv.parse");
+    expect(result.category).toBe("tool_input");
+  });
+
+  it("clusters `tool 'json.parse' not found` as tool_input, not parse_error", () => {
+    const result = normalizeErrorSignature(
+      new Error("tool 'json.parse' not found"),
+      { nodeType: "tool" },
+    );
+    expect(result.signature).toBe("Tool not found: json.parse");
+    expect(result.category).toBe("tool_input");
+  });
+
+  it("keeps a genuine JSON failure inside the json.parse tool as parse_error", () => {
+    const result = normalizeErrorSignature(
+      new Error("Unexpected token < in JSON at position 0"),
+      { nodeType: "tool", toolName: "json.parse" },
+    );
+    expect(result.signature).toBe("Parse error in tool node");
+    expect(result.category).toBe("parse_error");
+  });
 });
 
 describe("normalizeErrorSignature — unknown fallback + secret-shape scrub", () => {

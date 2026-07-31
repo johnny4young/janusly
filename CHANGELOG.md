@@ -16,6 +16,31 @@ retroactively.
 
 ### Changed
 
+- Stable `/v1` API contracts are now organized into side-effect-free domain
+  modules behind one ordered pure manifest and the existing compatibility
+  barrel. OpenAPI generation, runtime aliasing, authorization descriptors, and
+  first-party imports retain the same contract surface while future changes no
+  longer expand one monolithic contract file.
+- Concrete workflow executors now receive node-type-specific configuration
+  inferred from the same Zod schemas used at runtime dispatch. The registry is
+  compile-time exhaustive for executor-owned node types, while runtime-owned
+  routers remain explicitly outside it; malformed nested multi-agent entries
+  and invalid subworkflow version shapes now fail before executor logic.
+- Workflow runtime integration tests now have reusable stateful in-memory
+  persistence, queue/DLQ, and scripted-executor adapters. They exercise the
+  real orchestration lifecycle without Postgres or Redis while retaining
+  generation, recovery-token, retry, terminal-failure, and semantic-quarantine
+  safeguards; database and BullMQ suites remain authoritative for their own
+  concurrency and delivery guarantees.
+- The web jsdom suite now retains file-level parallelism while bounding worker
+  concurrency to the smaller of three or the host's available parallelism. This
+  prevents high-core machines from turning lazy-module scheduling pressure into
+  unrelated UI-test timeouts without hiding slow tests behind larger deadlines.
+- Web performance governance now distinguishes the complete JS/CSS deploy
+  artifact from the worst single-locale JS/CSS set instead of treating mutually
+  exclusive English and Spanish catalogs as one normal-session transfer.
+  Browser gates now also enforce budgets for Spanish cold Home, explicit
+  locale switching, and the secondary Recovery automation disclosure.
 - The primary product navigation is now organized around six operator tasks:
   Home, Recover, Workflows, Runs, Connections, and Settings. Advanced authoring
   and administration remain available through contextual surfaces and the
@@ -97,6 +122,12 @@ retroactively.
   failed initialization or long-lived streams.
 
 ### Added
+
+- A privacy-bounded local moderated-usability kit records five pseudonymous
+  task observations per participant, writes owner-only session files, produces
+  a fail-closed acceptance report, and keeps automated browser readiness
+  evidence explicitly separate from the required five unfamiliar human
+  participants.
 
 - Deterministic semantic outcome recovery through `RecoveryContractV2`.
   Expression/schema detectors can observe or quarantine an unacceptable output,
@@ -186,10 +217,13 @@ retroactively.
 - A unified Runs workspace with accessible Overview, Timeline, and Agents
   views, preserving direct expert access to the full reasoning and multi-agent
   surfaces through the command palette.
-- Selectable Recovery Drills in Solution Packs for credential availability and
-  expiry, malformed AI output, rate limits, upstream contract drift, and
-  provider outages. Drill runs retain durable source evidence and enter the
-  real recovery queue without exposing raw fixture errors in the catalog.
+- Selectable Recovery Drills in Solution Packs now cross real runtime
+  boundaries instead of directly inserting failed runs. Credential drills pass
+  through BullMQ, the worker, retry classification, the atomic terminal
+  transition, and the DLQ before returning measured evidence. The controlled
+  missing-secret probe is correctly non-retryable and prevents provider calls
+  and external effects. Historical direct-fixture provenance remains readable
+  but is no longer published by the current pack catalog.
 - A controlled worker-interruption drill that creates one scoped stale claim,
   honors the configured reaper threshold, exercises the production CAS/DLQ
   path, and reports measured scan, reap, dead-letter, and runtime evidence.
@@ -275,6 +309,20 @@ retroactively.
   relying on Vite's transpilation to hide static drift.
 - Operator metadata, AI cost chips, active navigation, section kickers, and
   command-palette text now retain WCAG AA contrast in light and dark themes.
+- The runs list, Flows list, and Trash list keysets are now backed by
+  sort-aligned indexes (org, timestamp DESC, id DESC — NULLS FIRST to match
+  the queries' ORDER BY), replacing strict-prefix indexes that forced Postgres
+  to re-sort the organization's entire run history on every page. Operators
+  deploying to production apply the migration's sibling `production-rollout.sql`
+  (concurrent index creates/drops) before `pnpm migrate`.
+- The same sort alignment now covers every other list whose index was declared
+  DESC NULLS LAST on a nullable timestamp and therefore never served its
+  query's ordering: the recovery queue's newest/oldest and status-filtered
+  pages, the audit viewer keyset and budget-gate dedup read, replay campaigns,
+  recovery feedback, prompts, buffered trigger events, and the external-runtime
+  workflow/run/step projections. Verified index-ordered (no re-sort) via
+  EXPLAIN for each consumer shape; the migration ships the same
+  `production-rollout.sql` concurrent-rollout runbook.
 
 ## Development milestone: recovery platform hardening
 
