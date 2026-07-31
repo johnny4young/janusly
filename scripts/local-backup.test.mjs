@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import {
   computeMigrationFingerprint,
+  readDeclaredPublicTables,
   validateBackupManifest,
   verifyBackupDirectory,
 } from "./local-backup.mjs";
@@ -97,4 +98,37 @@ test("rejects malformed or foreign manifests", () => {
     }),
     /unsupported backup format/,
   );
+});
+
+test("reads declared public tables from every schema domain module", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "janusly-schema-"));
+  t.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(root, { recursive: true, force: true });
+  });
+  await writeFile(join(root, "executions.ts"), 'export const runs = pgTable("runs", {});\n');
+  await writeFile(join(root, "workflows.ts"), 'export const workflows = pgTable(\n  "workflows",\n  {},\n);\n');
+  await writeFile(join(root, "README.md"), 'pgTable("ignored", {});\n');
+
+  assert.deepEqual(
+    [...await readDeclaredPublicTables(root)].sort(),
+    ["runs", "workflows"],
+  );
+});
+
+test("reads the complete current schema inventory", async () => {
+  assert.equal((await readDeclaredPublicTables()).size, 71);
+});
+
+test("rejects empty or duplicate schema inventories", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "janusly-schema-invalid-"));
+  t.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(root, { recursive: true, force: true });
+  });
+
+  await assert.rejects(readDeclaredPublicTables(root), /did not declare any public tables/);
+  await writeFile(join(root, "one.ts"), 'export const one = pgTable("same", {});\n');
+  await writeFile(join(root, "two.ts"), 'export const two = pgTable("same", {});\n');
+  await assert.rejects(readDeclaredPublicTables(root), /duplicate public tables: same/);
 });

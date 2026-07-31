@@ -16,6 +16,13 @@ retroactively.
 
 ### Changed
 
+- The canonical 71-table Drizzle schema is now composed from seven
+  side-effect-free bounded-context modules behind the existing `schema.ts` and
+  `@janusly/db` barrels. Application imports and table object identity remain
+  stable, schema architecture tests enforce complete/unique composition, and
+  Drizzle Kit confirms the refactor produces no migration. Portable local
+  backups now inventory every schema domain and fail closed on empty or
+  duplicate declarations instead of assuming tables live in the barrel.
 - Stable `/v1` API contracts are now organized into side-effect-free domain
   modules behind one ordered pure manifest and the existing compatibility
   barrel. OpenAPI generation, runtime aliasing, authorization descriptors, and

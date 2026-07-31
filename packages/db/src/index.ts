@@ -1,6 +1,6 @@
 /**
  * `@janusly/db` barrel — the singleton Drizzle client + a re-export of the
- * schema and the env-loader.
+ * side-effect-free schema barrel and the env-loader.
  *
  * Importing this module triggers `loadRootEnv()` and instantiates a single
  * `postgres-js` connection pool against `process.env.DATABASE_URL`. Every

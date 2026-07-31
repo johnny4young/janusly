@@ -13,7 +13,8 @@ External MCP servers register per-org through `mcp_connections`. Each registered
 
 Hot files:
 
-- `packages/db/src/schema.ts` — `mcpConnections` + `mcpToolDescriptors` tables.
+- `packages/db/src/schema/integrations.ts` — `mcpConnections` +
+  `mcpToolDescriptors` tables.
 - `packages/data/src/mcpConnectionsRepo.ts` — multi-tenant-scoped CRUD + the LLM-prompt-injection helper `listExposedMcpToolsForAi`.
 - `packages/engine/src/mcp-client.ts` — transport-agnostic SDK wrapper + per-transport factories.
 - `packages/engine/src/mcp-tool-executor.ts` — per-call chokepoint (gates, env-ref resolution, rate limit, audit, usage).

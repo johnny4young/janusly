@@ -14,7 +14,7 @@
 
 /**
  * Closed enum of run lifecycle statuses. Source: `apps/api`'s `runs.status`
- * column (`packages/db/src/schema.ts`).
+ * column (`packages/db/src/schema/executions.ts`).
  */
 export type RunStatus =
   | "queued"

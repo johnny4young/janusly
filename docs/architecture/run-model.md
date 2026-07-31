@@ -12,7 +12,7 @@ together the deeper docs:
 
 ## Data model
 
-Three tables carry every execution (`packages/db/src/schema.ts`):
+Three tables carry every execution (`packages/db/src/schema/executions.ts`):
 
 | Table | One row per | Load-bearing columns |
 | --- | --- | --- |
