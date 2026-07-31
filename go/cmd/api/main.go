@@ -15,6 +15,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/johnny4young/janusly/go/internal/auth"
 	"github.com/johnny4young/janusly/go/internal/boot"
 	"github.com/johnny4young/janusly/go/internal/config"
 	"github.com/johnny4young/janusly/go/internal/engine"
@@ -52,6 +53,12 @@ func run() error {
 		return nil
 	}
 	if err := migrate.AssertMigrated(ctx, cfg.DatabaseURL); err != nil {
+		return err
+	}
+	// The reference's production fail-fast: without Supabase configured,
+	// production refuses to start unless dev headers are explicitly
+	// allowed — never a silent anonymous fallback.
+	if err := auth.ConfigFromEnv().BootError(); err != nil {
 		return err
 	}
 

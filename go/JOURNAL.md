@@ -1234,3 +1234,9 @@ producción necesita saber — de lo ya resuelto o informativo.
   org.permissions.write y members.write. Si el piso no existiera, el
   test se habría bloqueado a sí mismo a mitad de camino. Nada prueba
   mejor un candado que casi quedarse fuera.
+
+## 2026-07-31 — el binario que rehúsa arrancar mal (T-078)
+
+- Probado con el proceso real, no con un unit: producción sin Supabase
+  muere en el arranque con el mensaje exacto de la referencia, y el
+  override explícito lo revive. Jamás un fallback anónimo silencioso.

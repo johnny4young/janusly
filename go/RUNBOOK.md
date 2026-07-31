@@ -24,6 +24,9 @@ worker aparte: la cola vive en Postgres.
 | `JANUSLY_GO_HTTP_TIMEOUT_MS` | 30000 | Timeout HTTP saliente por defecto |
 | `JANUSLY_GO_RETENTION_DELETED_WORKFLOWS_DAYS` | 30 | Ventana del sweep de tombstones |
 | `ALLOW_PRIVATE_HTTP_TARGETS` | false | Deshabilita el guard SSRF (solo dev) |
+| `JANUSLY_GO_ENV` | — | `production` activa el gate de arranque: sin `SUPABASE_URL` el binario REHÚSA salvo `ALLOW_DEV_AUTH_HEADERS=true` |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | — | Modo Supabase de la cadena de auth |
+| `JANUSLY_API_SERVICE_TOKEN` | — | Modo service-token (comparación en tiempo constante) |
 | `JANUSLY_PRODUCTION_MODE` | — | `true` activa el readiness gate en `/start` |
 | `JANUSLY_REQUIRE_EVAL_COVERAGE` | — | `true` añade el warn de evals al gate |
 | `JANUSLY_MCP_WRITES_ENABLED` | — | `true` habilita escrituras MCP (más consent por org) |
