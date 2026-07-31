@@ -84,6 +84,34 @@ describe("generateWorkflowCandidates", () => {
     expect(out).toHaveLength(1);
     expect(out[0]!.workflow.id).toBe("ok");
   });
+
+  it("drops candidates that omit operator-supplied machine references", async () => {
+    const reference = "{{secret.BILLING_API_TOKEN}}";
+    const preserved = JSON.stringify({
+      id: "preserved",
+      name: "preserved",
+      nodes: [{
+        id: "charge",
+        type: "http",
+        config: {
+          url: "https://billing.example.com/charges",
+          method: "POST",
+          headers: { Authorization: reference },
+        },
+      }],
+      edges: [],
+    });
+    const llm = stubLlm([workflowJson("missing"), preserved]);
+    const out = await generateWorkflowCandidates(
+      llm,
+      "sys",
+      `POST with Authorization ${reference}`,
+      undefined,
+      ctx,
+      2,
+    );
+    expect(out.map((candidate) => candidate.workflow.id)).toEqual(["preserved"]);
+  });
 });
 
 const cleanWorkflow = {

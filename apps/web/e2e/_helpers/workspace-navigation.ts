@@ -104,6 +104,12 @@ export async function openWorkflowAiAction(
   }
 
   await openWorkspaceSection(page, destination, spanish ? 'Crear' : 'Build')
+  if (await copilot.isVisible().catch(() => false)) {
+    if (action !== 'generate') {
+      await page.getByRole('button', { name: directLabels[action], exact: true }).click()
+    }
+    return
+  }
   const labels = spanish
     ? { generate: 'Generar', explain: 'Explicar', review: 'Revisar', fix: 'Corregir' }
     : { generate: 'Generate', explain: 'Explain', review: 'Review', fix: 'Fix' }
@@ -111,6 +117,26 @@ export async function openWorkflowAiAction(
     .locator('.workspace-panel')
     .getByRole('button', { name: labels[action], exact: true })
     .click()
+}
+
+export async function openWorkflowOperation(page: Page, label: string): Promise<void> {
+  const operation = page
+    .locator('.authoring-workflow-tools')
+    .getByRole('button', { name: label, exact: true })
+  await operation.waitFor({ state: 'visible' })
+  if (await operation.getAttribute('aria-pressed') !== 'true') {
+    await operation.click()
+  }
+}
+
+export async function openRecoveryAutomation(page: Page): Promise<void> {
+  const automation = page.getByTestId('recovery-automation')
+  const toggle = page.getByTestId('recovery-automation-toggle')
+  await toggle.waitFor({ state: 'visible' })
+  if (await toggle.getAttribute('aria-expanded') !== 'true') {
+    await toggle.click()
+  }
+  await automation.locator('.we-recovery-automation__content').waitFor({ state: 'visible' })
 }
 
 export async function openCanvasStepPicker(page: Page): Promise<void> {

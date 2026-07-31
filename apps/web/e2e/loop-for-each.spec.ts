@@ -20,7 +20,7 @@ const locales = {
     processingMode: 'Processing mode',
     forEachMode: 'Run a tool for each item',
     tool: 'Tool',
-    toolInput: 'Per-item tool input',
+    toolValue: 'Value',
     concurrency: 'Concurrency',
     failureCount: 'Failed items allowed',
     workflowOutput: 'Workflow output',
@@ -32,7 +32,7 @@ const locales = {
     processingMode: 'Modo de procesamiento',
     forEachMode: 'Ejecutar una herramienta por elemento',
     tool: 'Herramienta',
-    toolInput: 'Entrada de la herramienta por elemento',
+    toolValue: 'Valor',
     concurrency: 'Concurrencia',
     failureCount: 'Elementos fallidos permitidos',
     workflowOutput: 'Salida del flujo',
@@ -200,9 +200,11 @@ test('bounded for-each authoring, runtime budgets, and diagnostics work in Engli
   const tool = englishConfig.getByLabel(locales.en.tool, { exact: true })
   await expect(tool.locator('option[value="json.parse"]')).toHaveCount(1)
   await tool.selectOption('json.parse')
-  const toolInput = englishConfig.getByLabel(locales.en.toolInput)
-  await toolInput.fill('{"value":"{{item}}"}')
-  await toolInput.blur()
+  const toolValue = englishConfig.getByRole('textbox', {
+    name: new RegExp(`^${locales.en.toolValue}\\b`),
+  })
+  await toolValue.fill('{{item}}')
+  await toolValue.blur()
   const concurrency = englishConfig.getByLabel(locales.en.concurrency)
   await concurrency.fill('2')
   await concurrency.blur()

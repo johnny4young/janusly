@@ -197,7 +197,7 @@
   border-radius: 6px;
   background: var(--we-surface);
   border: 1px solid color-mix(in srgb, var(--we-accent) 30%, transparent);
-  color: var(--we-accent);
+  color: var(--we-accent-text);
   display: grid;
   place-items: center;
 }

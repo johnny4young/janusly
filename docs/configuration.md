@@ -157,6 +157,7 @@ Guardrails:
 | `ai.anthropic.model` | `ANTHROPIC_MODEL` | `claude-haiku-4-5-20251001` | API AI endpoints, engine AI/agent nodes | Default Anthropic model for this tenant — the supported MVP target. |
 | `ai.timeoutMs` | `OPENAI_TIMEOUT_MS` | `30000` | API AI endpoints, engine AI/agent nodes | LLM request timeout in milliseconds (env name is historical; applies to every registered provider). |
 | `ai.maxRetries` | `OPENAI_MAX_RETRIES` | `2` | API AI endpoints, engine AI/agent nodes | AI SDK retry count for LLM calls (env name is historical; applies to every registered provider). |
+| `ai.maxOutputUnits` | `JANUSLY_LLM_MAX_OUTPUT_UNITS` | `4096` | Every LLM call | Hard per-call output-token ceiling (`256`–`16384`). “Units” keeps this tenant-safe setting distinct from credential/token material while the runtime forwards the value as the provider's output-token limit. |
 | `ai.promptMaxChars` | `AI_PROMPT_MAX_CHARS` | `4000` | API AI endpoints | Prompt/question length cap. |
 | `ai.rateLimitPerMin` | `AI_RATE_LIMIT_PER_MIN` | `30` | API AI endpoints | Per-org AI request limit per minute. |
 | `ai.generationMode` | `JANUSLY_AI_GENERATION_MODE` | `free_json` | `POST /ai/generate-workflow` | Workflow-generation mechanism. `free_json` asks the model for JSON text and validates server-side; `constrained` keeps the legacy provider structured-output path. Both converge through noop promotion, `sanitizeAiWorkflow`, and bounded self-repair before fallback. |

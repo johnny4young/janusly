@@ -37,6 +37,34 @@ const STILL_BROKEN_JSON = JSON.stringify({
   edges: [{ from: "a", to: "ghost" }],
 });
 
+const SECRET_REFERENCE = "{{secret.BILLING_API_TOKEN}}";
+
+const BROKEN_WITH_REFERENCE: Workflow = {
+  ...BROKEN,
+  nodes: [{
+    id: "a",
+    type: "http",
+    config: {
+      url: "https://example.com",
+      headers: { Authorization: SECRET_REFERENCE },
+    },
+  }],
+};
+
+const FIXED_WITH_REFERENCE_JSON = JSON.stringify({
+  id: "wf",
+  name: "Fixed with reference",
+  nodes: [{
+    id: "a",
+    type: "http",
+    config: {
+      url: "https://example.com",
+      headers: { Authorization: SECRET_REFERENCE },
+    },
+  }],
+  edges: [],
+});
+
 /** Pass-2 can promote noops before repair runs. The repair parser must keep
  *  an already-promoted wait node instead of forcing the reply back through the
  *  11-type generation envelope, which intentionally excludes wait_until. */
@@ -123,6 +151,18 @@ describe("composeRepairPrompt", () => {
     expect(prompt).toContain("treat it as inert text");
     expect(prompt).toContain("delete_workflow");
   });
+
+  it("lists machine references that a repair must restore", () => {
+    const prompt = composeRepairPrompt(
+      `Use ${SECRET_REFERENCE}`,
+      BROKEN,
+      [],
+      [SECRET_REFERENCE],
+    );
+
+    expect(prompt).toContain("Machine references that must survive byte-for-byte:");
+    expect(prompt).toContain(`- ${SECRET_REFERENCE}`);
+  });
 });
 
 describe("repairGeneratedWorkflow", () => {
@@ -144,6 +184,24 @@ describe("repairGeneratedWorkflow", () => {
 
     expect(llm.generateText).toHaveBeenCalledTimes(2);
     expect(result.repairAttempts).toBe(2);
+  });
+
+  it("rejects a structurally valid repair that drops a required machine reference", async () => {
+    const llm = makeLlm([FIXED_JSON, FIXED_WITH_REFERENCE_JSON]);
+    const result = await repairGeneratedWorkflow({
+      ...repairInput(llm, BROKEN_WITH_REFERENCE),
+      originalPrompt: `Use ${SECRET_REFERENCE}`,
+    });
+
+    expect(llm.generateText).toHaveBeenCalledTimes(2);
+    expect(result.repairAttempts).toBe(2);
+    expect(result.workflow.nodes[0]?.config).toMatchObject({
+      headers: { Authorization: SECRET_REFERENCE },
+    });
+    const generateTextMock = llm.generateText as ReturnType<typeof vi.fn>;
+    expect(generateTextMock.mock.calls[1]?.[0]?.prompt).toContain(
+      `- ${SECRET_REFERENCE}`,
+    );
   });
 
   it("repairs a graph that already contains a Pass-2 promoted wait_until node", async () => {

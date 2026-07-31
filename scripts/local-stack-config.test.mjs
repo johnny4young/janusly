@@ -54,15 +54,18 @@ test("local published ports are loopback-only", () => {
   assert.ok(published.every((entry) => entry.startsWith("127.0.0.1:")), published.join("\n"));
 });
 
-test("local web and API use uncommon host ports while retaining internal ports", () => {
+test("local web, API, and Redis use uncommon host ports while retaining internal ports", () => {
   assert.match(localEnvExample, /^JANUSLY_LOCAL_WEB_PORT=7310$/m);
   assert.match(localEnvExample, /^JANUSLY_LOCAL_API_PORT=7311$/m);
+  assert.match(localEnvExample, /^JANUSLY_LOCAL_REDIS_PORT=16379$/m);
   assert.match(localEnvExample, /^JANUSLY_LOCAL_API_URL=http:\/\/localhost:7311$/m);
   assert.match(localEnvExample, /^JANUSLY_LOCAL_WEB_ORIGINS=http:\/\/localhost:7310,http:\/\/127\.0\.0\.1:7310$/m);
   assert.match(compose, /\$\{JANUSLY_LOCAL_WEB_PORT:-7310\}:3000/);
   assert.match(compose, /\$\{JANUSLY_LOCAL_API_PORT:-7311\}:3001/);
+  assert.match(compose, /\$\{JANUSLY_LOCAL_REDIS_PORT:-16379\}:6379/);
   assert.doesNotMatch(compose, /JANUSLY_LOCAL_WEB_PORT:-3000/);
   assert.doesNotMatch(compose, /JANUSLY_LOCAL_API_PORT:-3001/);
+  assert.doesNotMatch(compose, /JANUSLY_LOCAL_REDIS_PORT:-6379/);
 });
 
 test("local provider routing is explicitly gated and private-target access is visible", () => {

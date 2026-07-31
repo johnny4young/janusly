@@ -37,6 +37,62 @@ test("qualification failure still runs cleanup", async () => {
   assert.deepEqual(calls, ["qualify", "cleanup"]);
 });
 
+test("qualification failure captures evidence before cleanup", async () => {
+  const calls = [];
+  await assert.rejects(
+    runQualificationWithCleanup(
+      async () => {
+        calls.push("qualify");
+        throw new Error("qualification failed");
+      },
+      async () => {
+        calls.push("cleanup");
+      },
+      "test qualification",
+      {
+        beforeCleanup: async (error) => {
+          assert.match(error.message, /qualification failed/u);
+          calls.push("capture");
+        },
+      },
+    ),
+    /qualification failed/u,
+  );
+  assert.deepEqual(calls, ["qualify", "capture", "cleanup"]);
+});
+
+test("failure capture errors never skip cleanup", async () => {
+  const calls = [];
+  await assert.rejects(
+    runQualificationWithCleanup(
+      async () => {
+        calls.push("qualify");
+        throw new Error("qualification failed");
+      },
+      async () => {
+        calls.push("cleanup");
+      },
+      "test qualification",
+      {
+        beforeCleanup: async () => {
+          calls.push("capture");
+          throw new Error("capture failed");
+        },
+      },
+    ),
+    (error) => {
+      assert.ok(error instanceof AggregateError);
+      assert.match(error.message, /failure capture failed/u);
+      assert.deepEqual(
+        error.errors.map((cause) => cause.message),
+        ["qualification failed", "capture failed"],
+      );
+      return true;
+    },
+  );
+  assert.deepEqual(calls, ["qualify", "capture", "cleanup"]);
+});
+
 test("cleanup failure prevents a successful qualification result", async () => {
   await assert.rejects(
     runQualificationWithCleanup(

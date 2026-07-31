@@ -77,7 +77,7 @@ vi.mock("../http", async (importOriginal) => {
 
 import { composeGenerationExemplars, recordGenerationExemplar } from "../ai-generation-memory";
 import { loadOperatorGuidance } from "../ai-operator-guidance";
-import { orgLlmRuntime } from "../ai-runtime";
+import { orgLlmRuntime, sanitizeAiWorkflow } from "../ai-runtime";
 import { auditAction } from "../audit-helper";
 import { gateBudget } from "../budget-gate";
 import { readJson } from "../http";
@@ -87,6 +87,7 @@ import { promoteNoopPlaceholders } from "@janusly/ai";
 import { listExposedMcpToolsForAi } from "@janusly/data";
 
 const orgLlmMock = vi.mocked(orgLlmRuntime);
+const sanitizeWorkflowMock = vi.mocked(sanitizeAiWorkflow);
 const promoteMock = vi.mocked(promoteNoopPlaceholders);
 const exposedMcpMock = vi.mocked(listExposedMcpToolsForAi);
 const exemplarsMock = vi.mocked(composeGenerationExemplars);
@@ -152,6 +153,7 @@ async function callGenerate(): Promise<{ payload: any; status: number }> {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  sanitizeWorkflowMock.mockImplementation((workflow) => workflow);
   auditMock.mockResolvedValue(undefined as never);
   readJsonMock.mockResolvedValue({ prompt: "make a flow" } as never);
   gateBudgetMock.mockResolvedValue({
@@ -300,6 +302,36 @@ describe("POST /ai/generate-workflow — generationMode dispatch", () => {
     expect(res.payload.candidateCount).toBe(1);
     // Memory off (default mock) → no exemplars logged.
     expect(meta.exemplarCount).toBe(0);
+  });
+
+  it("falls back when a late pipeline stage drops an operator machine reference", async () => {
+    const reference = "{{secret.BILLING_API_TOKEN}}";
+    const generated = JSON.stringify({
+      ...VALID_WORKFLOW,
+      nodes: [{
+        id: "n1",
+        type: "http",
+        config: {
+          url: "https://example.com",
+          headers: { Authorization: reference },
+        },
+      }],
+    });
+    const llm = makeLlm({ text: [generated] });
+    setRuntime("free_json", llm);
+    readJsonMock.mockResolvedValue({
+      prompt: `POST with Authorization ${reference}`,
+    } as never);
+    sanitizeWorkflowMock.mockReturnValueOnce(VALID_WORKFLOW as never);
+
+    const res = await callGenerate();
+
+    expect(res.status).toBe(200);
+    expect(res.payload.mode).toBe("fallback");
+    expect(res.payload.aiError).toContain(
+      "omitted operator-supplied machine references",
+    );
+    expect(recordExemplarMock).not.toHaveBeenCalled();
   });
 
   it("free_json: threads recalled few-shot exemplars into the prompt + audit, writes one back", async () => {

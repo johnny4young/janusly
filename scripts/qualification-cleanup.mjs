@@ -4,6 +4,7 @@ export async function runQualificationWithCleanup(
   qualify,
   cleanup,
   label,
+  options = {},
 ) {
   let result;
   let primaryError;
@@ -13,6 +14,15 @@ export async function runQualificationWithCleanup(
     primaryError = error;
   }
 
+  let failureCaptureError;
+  if (primaryError && options.beforeCleanup) {
+    try {
+      await options.beforeCleanup(primaryError);
+    } catch (error) {
+      failureCaptureError = error;
+    }
+  }
+
   let cleanupError;
   try {
     await cleanup();
@@ -20,6 +30,18 @@ export async function runQualificationWithCleanup(
     cleanupError = error;
   }
 
+  if (primaryError && failureCaptureError && cleanupError) {
+    throw new AggregateError(
+      [primaryError, failureCaptureError, cleanupError],
+      `${label}, failure capture, and cleanup failed`,
+    );
+  }
+  if (primaryError && failureCaptureError) {
+    throw new AggregateError(
+      [primaryError, failureCaptureError],
+      `${label} and failure capture failed`,
+    );
+  }
   if (primaryError && cleanupError) {
     throw new AggregateError(
       [primaryError, cleanupError],

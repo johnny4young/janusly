@@ -1,4 +1,7 @@
-import { openWorkspaceSection } from './_helpers/workspace-navigation'
+import {
+  openWorkflowOperation,
+  openWorkspaceSection,
+} from './_helpers/workspace-navigation'
 /**
  * Real-stack proof for progressive workflow delivery. Creates two immutable
  * semantic-contract versions, qualifies their outcome datasets through the
@@ -234,6 +237,7 @@ test('starts an accessible canary and automatically returns unhealthy traffic to
   await expect(row).toContainText(workflowName)
   await row.click()
   await openWorkspaceSection(page, 'Workflows', 'Build')
+  await openWorkflowOperation(page, 'Deployment')
 
   const panel = page.getByTestId('workflow-rollout-panel')
   await expect(panel).toContainText('Canary deployment')
@@ -289,6 +293,7 @@ test('starts an accessible canary and automatically returns unhealthy traffic to
   await expect(spanishRow).toContainText(workflowName)
   await spanishRow.click()
   await openWorkspaceSection(page, 'Flujos', 'Crear')
+  await openWorkflowOperation(page, 'Despliegue')
   const spanishPanel = page.getByTestId('workflow-rollout-panel')
   await expect(spanishPanel).toContainText('Despliegue canary')
   await expect(spanishPanel).toContainText('Revertido')

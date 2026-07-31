@@ -1320,7 +1320,7 @@
 .mode-pill-ai {
   background: var(--we-accent-soft);
   border-color: color-mix(in srgb, var(--we-accent) 34%, transparent);
-  color: var(--we-accent);
+  color: var(--we-accent-text);
 }
 
 .mode-pill-fallback,
@@ -2210,7 +2210,7 @@
 .we-list-row__pill--warning { background: var(--we-warning-soft); color: var(--we-warning-text); border-color: var(--we-warning-border-30); }
 .we-list-row__pill--danger { background: var(--we-danger-soft); color: var(--we-danger-text); border-color: var(--we-danger-border-30); }
 .we-list-row__pill--cobalt { background: var(--we-primary-soft); color: var(--we-primary); border-color: color-mix(in srgb, var(--we-primary) 28%, transparent); }
-.we-list-row__pill--cyan { background: var(--we-accent-soft); color: var(--we-accent); border-color: color-mix(in srgb, var(--we-accent) 30%, transparent); }
+.we-list-row__pill--cyan { background: var(--we-accent-soft); color: var(--we-accent-text); border-color: color-mix(in srgb, var(--we-accent) 30%, transparent); }
 
 /* Severity 3px left-border (mirrors operations / cluster row pattern). */
 .we-list-row[data-severity="success"] { border-left: 3px solid var(--we-success); }
@@ -2832,7 +2832,7 @@
   border: 1px solid transparent;
 }
 .we-ghost-lane__phase--config { color: var(--we-info); background: var(--we-info-soft); border-color: color-mix(in srgb, var(--we-info) 30%, transparent); }
-.we-ghost-lane__phase--ai { color: var(--we-accent); background: var(--we-accent-soft); border-color: color-mix(in srgb, var(--we-accent) 32%, transparent); }
+.we-ghost-lane__phase--ai { color: var(--we-accent-text); background: var(--we-accent-soft); border-color: color-mix(in srgb, var(--we-accent) 32%, transparent); }
 .we-ghost-lane__phase--http { color: var(--we-warning-text); background: var(--we-warning-soft); border-color: color-mix(in srgb, var(--we-warning) 30%, transparent); }
 .we-ghost-lane__phase--success { color: var(--we-success-text); background: var(--we-success-soft); border-color: color-mix(in srgb, var(--we-success) 28%, transparent); }
 .we-ghost-lane__bar {
@@ -2973,7 +2973,7 @@
   padding: 2px 6px;
   border-radius: var(--we-radius-pill);
   background: var(--we-accent-soft);
-  color: var(--we-accent);
+  color: var(--we-accent-text);
   border: 1px solid color-mix(in srgb, var(--we-accent) 30%, transparent);
 }
 

@@ -100,7 +100,7 @@ function providerFor(pathname) {
   if (pathname === "/v1/messages") return "anthropic";
   if (pathname.startsWith("/github/")) return "github";
   if (pathname.startsWith("/slack/")) return "slack";
-  if (pathname === "/webhook") return "webhook";
+  if (pathname === "/webhook" || pathname.startsWith("/webhook/")) return "webhook";
   if (pathname === "/email/send") return "email";
   if (pathname.startsWith("/pagerduty/")) return "pagerduty";
   return null;
@@ -183,7 +183,7 @@ async function recordWebhookEffect(req, url, entry) {
   const idempotencyKey = typeof req.headers["x-idempotency-key"] === "string"
     ? req.headers["x-idempotency-key"].trim() || null
     : null;
-  const target = url.searchParams.get("target") ?? "unknown";
+  const target = url.searchParams.get("target") ?? url.pathname;
   const scope = webhookSimulationScope(req);
   const key = JSON.stringify([scope, target, idempotencyKey ?? entry.id]);
 

@@ -242,6 +242,42 @@ describe("POST /ai/patch-workflow — AI mode", () => {
     expect(meta.suggestionsCount).toBe(1);
   });
 
+  it("ranks HTTP 5xx recovery evidence before model self-confidence", async () => {
+    patchMock.mockResolvedValue({
+      mode: "ai",
+      suggestions: [
+        {
+          patchedConfig: { url: "https://invented.example.com/read" },
+          rationale: "change the endpoint",
+          approachLabel: "fix_url",
+          confidence: 99,
+        },
+        {
+          patchedConfig: { retry: { maxAttempts: 3 } },
+          rationale: "retry the reached upstream",
+          approachLabel: "add_retry",
+          confidence: 40,
+        },
+      ],
+      model: "claude-haiku-4-5-20251001",
+      provider: "anthropic",
+    } as never);
+
+    const res = await callPatch();
+
+    expect(res.payload.suggestions.map((item: { approachLabel: string }) =>
+      item.approachLabel)).toEqual(["add_retry", "fix_url"]);
+    expect(res.payload.suggestedWorkflow.nodes[0].config).toEqual({
+      url: "https://old.example.com",
+      retry: { maxAttempts: 3 },
+    });
+    expect(
+      res.payload.suggestions[1].workflow.nodes[0].config.url,
+    ).toBe("https://invented.example.com/read");
+    const meta = (auditMock.mock.calls[0]?.[2]?.metadata ?? {}) as Record<string, unknown>;
+    expect(meta.topApproachLabel).toBe("add_retry");
+  });
+
   it("surfaces the latest same-signature healing outcome without exposing its patch", async () => {
     priorOutcomeMock.mockResolvedValueOnce({
       status: "validation_failed",
