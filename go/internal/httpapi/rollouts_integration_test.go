@@ -132,3 +132,80 @@ func TestWorkflowRolloutAssignment(t *testing.T) {
 		t.Fatalf("second decision must 409: %d", res.status)
 	}
 }
+
+// T-150: version-write locking under a live rollout (save + rollback
+// refuse with 409), incompatible external-trigger contracts refuse the
+// create, and the soft delete cancels the active deployment in the SAME
+// commit.
+func TestRolloutVersionWriteLocking(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	ctx := t.Context()
+	wfID := fmt.Sprintf("wf-lock-%d", time.Now().UnixNano())
+
+	saveVersion := func(doc map[string]any) string {
+		res := h.call("POST", "/workflows/save", doc, "")
+		if res.status != 200 {
+			t.Fatalf("save: %d %+v", res.status, res.body)
+		}
+		return res.body["versionId"].(string)
+	}
+	v1 := saveVersion(rolloutWorkflowDoc(wfID, "one"))
+	v2 := saveVersion(rolloutWorkflowDoc(wfID, "two"))
+
+	// Incompatible external triggers: the canary grows a schedule node the
+	// baseline lacks → the create refuses before any traffic splits.
+	scheduled := rolloutWorkflowDoc(wfID, "three")
+	scheduled["nodes"] = append(scheduled["nodes"].([]any), map[string]any{
+		"id": "tick", "type": "schedule", "config": map[string]any{"cron": "0 9 * * *"},
+	})
+	scheduled["edges"] = append(scheduled["edges"].([]any), map[string]any{"from": "tick", "to": "shape"})
+	v3 := saveVersion(scheduled)
+	res := h.call("POST", "/workflows/"+wfID+"/rollout", map[string]any{
+		"baselineVersionId": v1, "canaryVersionId": v3,
+		"trafficPercent": 20, "minimumSampleSize": 5, "minimumSuccessRatePercent": 90,
+	}, "")
+	if res.status != 422 || res.body["params"].(map[string]any)["reason"] != "incompatible_triggers" {
+		t.Fatalf("incompatible triggers must 422: %d %+v", res.status, res.body)
+	}
+	// Identical trigger contracts (v3 → v4 same schedule) are compatible.
+	scheduled4 := rolloutWorkflowDoc(wfID, "four")
+	scheduled4["nodes"] = append(scheduled4["nodes"].([]any), map[string]any{
+		"id": "tick", "type": "schedule", "config": map[string]any{"cron": "0 9 * * *"},
+	})
+	scheduled4["edges"] = append(scheduled4["edges"].([]any), map[string]any{"from": "tick", "to": "shape"})
+	v4 := saveVersion(scheduled4)
+	res = h.call("POST", "/workflows/"+wfID+"/rollout", map[string]any{
+		"baselineVersionId": v3, "canaryVersionId": v4,
+		"trafficPercent": 20, "minimumSampleSize": 5, "minimumSuccessRatePercent": 90,
+	}, "")
+	if res.status != 200 {
+		t.Fatalf("compatible rollout: %d %+v", res.status, res.body)
+	}
+	_ = v2
+
+	// Version writes are LOCKED while the rollout is live.
+	if res = h.call("POST", "/workflows/save", rolloutWorkflowDoc(wfID, "five"), ""); res.status != 409 ||
+		res.body["code"] != "workflow_rollout_active" {
+		t.Fatalf("save under rollout must 409: %d %+v", res.status, res.body)
+	}
+	if res = h.call("POST", "/workflows/rollback", map[string]any{
+		"workflowId": wfID, "sourceVersionId": v1,
+	}, ""); res.status != 409 || res.body["code"] != "workflow_rollout_active" {
+		t.Fatalf("rollback under rollout must 409: %d %+v", res.status, res.body)
+	}
+
+	// The soft delete cancels the live deployment atomically.
+	if res = h.call("DELETE", "/workflows/"+wfID, nil, ""); res.status != 200 {
+		t.Fatalf("delete: %d %+v", res.status, res.body)
+	}
+	var status, reason string
+	if err := pool.QueryRow(ctx, `SELECT status, COALESCE(rolled_back_reason, '') FROM workflow_rollouts
+		WHERE org_id = $1 AND workflow_id = $2 ORDER BY created_at DESC LIMIT 1`,
+		h.org, wfID).Scan(&status, &reason); err != nil {
+		t.Fatalf("rollout row: %v", err)
+	}
+	if status != "cancelled" || reason != "workflow_deleted" {
+		t.Fatalf("delete must cancel the rollout: %s %s", status, reason)
+	}
+}

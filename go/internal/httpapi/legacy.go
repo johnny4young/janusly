@@ -12,6 +12,7 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/go/internal/audit"
 	"github.com/johnny4young/janusly/go/internal/store"
@@ -60,7 +61,17 @@ func (s *V1Server) legacyMutations(mux *http.ServeMux) {
 	// Workflow lifecycle: soft delete, trash, restore — all legacy wire.
 	mux.HandleFunc("DELETE /workflows/{workflowId}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		workflowID := r.PathValue("workflowId")
-		rows, err := store.New(s.pool).SoftDeleteWorkflow(r.Context(), store.SoftDeleteWorkflowParams{
+		// Tombstone + rollout cancellation commit TOGETHER: no active
+		// deployment may outlive its deleted workflow (the create path takes
+		// the same parent lock, so none can appear in between either).
+		tx, err := s.pool.Begin(r.Context())
+		if err != nil {
+			writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+			return
+		}
+		defer func() { _ = tx.Rollback(r.Context()) }()
+		txq := store.New(tx)
+		rows, err := txq.SoftDeleteWorkflow(r.Context(), store.SoftDeleteWorkflowParams{
 			ID: workflowID, OrgID: rc.orgID,
 		})
 		if err != nil {
@@ -69,6 +80,16 @@ func (s *V1Server) legacyMutations(mux *http.ServeMux) {
 		}
 		if rows == 0 {
 			writeLegacy(w, opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil))
+			return
+		}
+		if _, err := txq.CancelActiveWorkflowRollout(r.Context(), store.CancelActiveWorkflowRolloutParams{
+			OrgID: rc.orgID, WorkflowID: workflowID, Reason: pgtype.Text{String: "workflow_deleted", Valid: true},
+		}); err != nil {
+			writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+			return
+		}
+		if err := tx.Commit(r.Context()); err != nil {
+			writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
 		audit.Write(r.Context(), s.pool, rc.authContext, "workflow.deleted", audit.Options{

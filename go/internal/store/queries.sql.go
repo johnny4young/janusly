@@ -113,6 +113,27 @@ func (q *Queries) BumpReplayCampaignCounter(ctx context.Context, arg BumpReplayC
 	return err
 }
 
+const cancelActiveWorkflowRollout = `-- name: CancelActiveWorkflowRollout :execrows
+UPDATE workflow_rollouts
+SET status = 'cancelled', rolled_back_reason = $3,
+    ended_at = now(), updated_at = now()
+WHERE org_id = $1 AND workflow_id = $2 AND status = 'active'
+`
+
+type CancelActiveWorkflowRolloutParams struct {
+	OrgID      string
+	WorkflowID string
+	Reason     pgtype.Text
+}
+
+func (q *Queries) CancelActiveWorkflowRollout(ctx context.Context, arg CancelActiveWorkflowRolloutParams) (int64, error) {
+	result, err := q.db.Exec(ctx, cancelActiveWorkflowRollout, arg.OrgID, arg.WorkflowID, arg.Reason)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const cancelPendingReplayCampaignItems = `-- name: CancelPendingReplayCampaignItems :execrows
 UPDATE replay_campaign_items SET status = 'cancelled', completed_at = now()
 WHERE org_id = $1 AND campaign_id = $2 AND status = 'pending'

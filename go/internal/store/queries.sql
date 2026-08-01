@@ -1545,3 +1545,9 @@ SELECT id FROM workflow_recovery_qualifications
 WHERE org_id = $1 AND workflow_id = $2 AND baseline_version_id = $3
   AND candidate_version_id = $4 AND dataset_version = $5 AND status = 'passed'
 LIMIT 1;
+
+-- name: CancelActiveWorkflowRollout :execrows
+UPDATE workflow_rollouts
+SET status = 'cancelled', rolled_back_reason = sqlc.arg(reason),
+    ended_at = now(), updated_at = now()
+WHERE org_id = $1 AND workflow_id = $2 AND status = 'active';

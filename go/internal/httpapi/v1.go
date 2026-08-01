@@ -323,6 +323,15 @@ func (s *V1Server) saveCore(r *http.Request, rc v1Request) opResult {
 			return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 		}
 	}
+	// Version-write locking: a live rollout owns which versions serve
+	// traffic — minting a hidden newer version would silently detach the
+	// canary from "latest". Finish the rollout first.
+	if _, err := q.FindActiveWorkflowRollout(ctx, store.FindActiveWorkflowRolloutParams{
+		OrgID: rc.orgID, WorkflowID: workflowID,
+	}); err == nil {
+		return opError(http.StatusConflict, "workflow_rollout_active",
+			"Finish the active workflow rollout before saving a new version", nil)
+	}
 	version, err := q.CountWorkflowVersions(ctx, store.CountWorkflowVersionsParams{
 		WorkflowID: workflowID, OrgID: rc.orgID,
 	})
@@ -934,6 +943,12 @@ func (s *V1Server) rollbackCore(r *http.Request, rc v1Request) opResult {
 			return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 		}
 		return opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil)
+	}
+	if _, err := q.FindActiveWorkflowRollout(ctx, store.FindActiveWorkflowRolloutParams{
+		OrgID: rc.orgID, WorkflowID: body.WorkflowID,
+	}); err == nil {
+		return opError(http.StatusConflict, "workflow_rollout_active",
+			"Finish the active workflow rollout before creating a rollback version", nil)
 	}
 	source, err := q.GetWorkflowVersionByID(ctx, store.GetWorkflowVersionByIDParams{
 		ID: body.SourceVersionID, OrgID: rc.orgID, WorkflowID: body.WorkflowID,
