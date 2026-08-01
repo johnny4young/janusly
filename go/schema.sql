@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict I3nF17zcITThTMeozpYBXnstpf9BSYZxUUSRvUaU0wJ5qTqivJfaemFli9usG2M
+\restrict is88iX6tDzBjtmfzTc3bDIIvkTMr0yOjoY7zHMBaRXbFBVd16IvUTJeIaOb2Aps
 
 -- Dumped from database version 18.4 (Debian 18.4-1.pgdg12+1)
 -- Dumped by pg_dump version 18.4 (Debian 18.4-1.pgdg12+1)
@@ -311,6 +311,270 @@ CREATE TABLE public.customer_orders_1785561557598675000 (
 --
 
 CREATE TABLE public.customer_orders_1785561646468149000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785562135456734000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785562135456734000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785562201051367000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785562201051367000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785588356045219000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785588356045219000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785592001533790000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785592001533790000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785592256794082000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785592256794082000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785594050475558000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785594050475558000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785596015712505000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785596015712505000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785596167783900000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785596167783900000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785597116215269000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785597116215269000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785597277875911000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785597277875911000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785597566168768000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785597566168768000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785597921082492000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785597921082492000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785598367360546000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785598367360546000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785613559186527000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785613559186527000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785614397033153000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785614397033153000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785614540990232000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785614540990232000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785615589411075000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785615589411075000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785615964204142000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785615964204142000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785616126682034000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785616126682034000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785616443223119000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785616443223119000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785616759062188000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785616759062188000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785617222953624000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785617222953624000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785617448496031000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785617448496031000 (
+    id text NOT NULL,
+    status text NOT NULL,
+    total numeric NOT NULL
+);
+
+
+--
+-- Name: customer_orders_1785617662462156000; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_orders_1785617662462156000 (
     id text NOT NULL,
     status text NOT NULL,
     total numeric NOT NULL
@@ -1738,6 +2002,198 @@ ALTER TABLE ONLY public.customer_orders_1785561646468149000
 
 
 --
+-- Name: customer_orders_1785562135456734000 customer_orders_1785562135456734000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785562135456734000
+    ADD CONSTRAINT customer_orders_1785562135456734000_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_orders_1785562201051367000 customer_orders_1785562201051367000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785562201051367000
+    ADD CONSTRAINT customer_orders_1785562201051367000_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_orders_1785588356045219000 customer_orders_1785588356045219000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785588356045219000
+    ADD CONSTRAINT customer_orders_1785588356045219000_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_orders_1785592001533790000 customer_orders_1785592001533790000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785592001533790000
+    ADD CONSTRAINT customer_orders_1785592001533790000_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_orders_1785592256794082000 customer_orders_1785592256794082000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785592256794082000
+    ADD CONSTRAINT customer_orders_1785592256794082000_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_orders_1785594050475558000 customer_orders_1785594050475558000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785594050475558000
+    ADD CONSTRAINT customer_orders_1785594050475558000_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_orders_1785596015712505000 customer_orders_1785596015712505000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785596015712505000
+    ADD CONSTRAINT customer_orders_1785596015712505000_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_orders_1785596167783900000 customer_orders_1785596167783900000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785596167783900000
+    ADD CONSTRAINT customer_orders_1785596167783900000_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_orders_1785597116215269000 customer_orders_1785597116215269000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785597116215269000
+    ADD CONSTRAINT customer_orders_1785597116215269000_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_orders_1785597277875911000 customer_orders_1785597277875911000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785597277875911000
+    ADD CONSTRAINT customer_orders_1785597277875911000_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_orders_1785597566168768000 customer_orders_1785597566168768000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785597566168768000
+    ADD CONSTRAINT customer_orders_1785597566168768000_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_orders_1785597921082492000 customer_orders_1785597921082492000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785597921082492000
+    ADD CONSTRAINT customer_orders_1785597921082492000_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_orders_1785598367360546000 customer_orders_1785598367360546000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785598367360546000
+    ADD CONSTRAINT customer_orders_1785598367360546000_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_orders_1785613559186527000 customer_orders_1785613559186527000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785613559186527000
+    ADD CONSTRAINT customer_orders_1785613559186527000_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_orders_1785614397033153000 customer_orders_1785614397033153000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785614397033153000
+    ADD CONSTRAINT customer_orders_1785614397033153000_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_orders_1785614540990232000 customer_orders_1785614540990232000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785614540990232000
+    ADD CONSTRAINT customer_orders_1785614540990232000_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_orders_1785615589411075000 customer_orders_1785615589411075000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785615589411075000
+    ADD CONSTRAINT customer_orders_1785615589411075000_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_orders_1785615964204142000 customer_orders_1785615964204142000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785615964204142000
+    ADD CONSTRAINT customer_orders_1785615964204142000_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_orders_1785616126682034000 customer_orders_1785616126682034000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785616126682034000
+    ADD CONSTRAINT customer_orders_1785616126682034000_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_orders_1785616443223119000 customer_orders_1785616443223119000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785616443223119000
+    ADD CONSTRAINT customer_orders_1785616443223119000_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_orders_1785616759062188000 customer_orders_1785616759062188000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785616759062188000
+    ADD CONSTRAINT customer_orders_1785616759062188000_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_orders_1785617222953624000 customer_orders_1785617222953624000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785617222953624000
+    ADD CONSTRAINT customer_orders_1785617222953624000_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_orders_1785617448496031000 customer_orders_1785617448496031000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785617448496031000
+    ADD CONSTRAINT customer_orders_1785617448496031000_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_orders_1785617662462156000 customer_orders_1785617662462156000_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_orders_1785617662462156000
+    ADD CONSTRAINT customer_orders_1785617662462156000_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: dead_letters dead_letters_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3002,6 +3458,13 @@ CREATE INDEX runs_rollout_idx ON public.runs USING btree (workflow_rollout_id, c
 
 
 --
+-- Name: runs_workflow_version_created_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX runs_workflow_version_created_idx ON public.runs USING btree (workflow_version_id, created_at DESC);
+
+
+--
 -- Name: schedule_entries_due_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3327,5 +3790,5 @@ CREATE INDEX workflows_org_deleted_idx ON public.workflows USING btree (org_id, 
 -- PostgreSQL database dump complete
 --
 
-\unrestrict I3nF17zcITThTMeozpYBXnstpf9BSYZxUUSRvUaU0wJ5qTqivJfaemFli9usG2M
+\unrestrict is88iX6tDzBjtmfzTc3bDIIvkTMr0yOjoY7zHMBaRXbFBVd16IvUTJeIaOb2Aps
 
