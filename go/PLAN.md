@@ -182,25 +182,25 @@ crítica) · P1 (importante) · P2 (stretch).
 | T-016 | Rendimiento: k6 + RSS + pprof vs Node | P1 | done |
 | T-017 | Journal consolidado + análisis de fricción | P1 | done |
 | T-018 | Puerta D15: informe + recomendación | P0 | done |
-| T-101 | (stretch) Tick de schedules con líder por advisory lock | P2 | todo |
-| T-102 | (post-piloto) LlmClient Go sobre SDKs oficiales | P2 | todo |
-| T-103 | (post-piloto) pdf.generate: evaluación maroto v2 | P2 | todo |
-| T-104 | (F3) embed.FS con el dist del web | P2 | todo |
-| T-200 | (F1) auth/context + sesión + permisos por pestaña | P0 | todo |
-| T-201 | (F1) catálogos: tools/templates/solution-packs/snippets/prompts | P0 | todo |
-| T-202 | (F1) workflows: CRUD/versions/metadata/tags/folders/health | P0 | todo |
-| T-203 | (F1) runs: list/detail/status/usage + SSE stream | P0 | todo |
-| T-204 | (F1) Recovery Center lecturas: home/metrics/items/dlq/heatmap/calibración | P0 | todo |
-| T-205 | (F1) credentials(+health)/members/roles/org-config/billing/onboarding/audit/system | P0 | todo |
-| T-206 | (F1) hito: la web arranca contra Go y navega sus pestañas de lectura | P0 | todo |
-| T-300 | (F2) escrituras DLQ/campañas/playbooks/feedback/auto-healing/alerts | P0 | todo |
-| T-301 | (F2) AI surfaces completas con contrato AI-fallback | P0 | todo |
-| T-302 | (F2) triggers/webhooks firmados + scheduler + crons system | P0 | todo |
-| T-303 | (F2) los 26 tipos de nodo + gramáticas completas (paridad total) | P0 | todo |
-| T-304 | (F2) Secret Store/HMAC/memoria/MCP/SCIM/rate limits/i18n server-events/permisos completos | P0 | todo |
-| T-305 | (F2) rollouts canary + import packs + upstream + experiments | P1 | todo |
-| T-400 | (F3) Playwright completo + browser + perf budgets verdes contra Go | P0 | todo |
-| T-401 | (F3) saldo de diferidos §9 + plan de corte y reversa | P0 | todo |
+| T-101 | (stretch) Tick de schedules con líder por advisory lock | P2 | todo → ola 6 T-177 |
+| T-102 | (post-piloto) LlmClient Go sobre SDKs oficiales | P2 | done (ola 4: chokepoint anthropic-sdk-go T-099..T-102) |
+| T-103 | (post-piloto) pdf.generate: evaluación maroto v2 | P2 | todo → ola 6 T-164 |
+| T-104 | (F3) embed.FS con el dist del web | P2 | todo (post-go/no-go — decisión de empaque del cutover) |
+| T-200 | (F1) auth/context + sesión + permisos por pestaña | P0 | done (olas 2-3: registry central + /auth/context) |
+| T-201 | (F1) catálogos: tools/templates/solution-packs/snippets/prompts | P0 | partial (tools/templates/prompts done olas 3-4; packs+snippets → ola 6 T-180) |
+| T-202 | (F1) workflows: CRUD/versions/metadata/tags/folders/health | P0 | partial (CRUD/versions/trash done olas 2-3; tags/folders/health → ola 6 T-181/T-182) |
+| T-203 | (F1) runs: list/detail/status/usage + SSE stream | P0 | done (olas 2-3) |
+| T-204 | (F1) Recovery Center lecturas: home/metrics/items/dlq/heatmap/calibración | P0 | done (ola 5: T-140..T-148) |
+| T-205 | (F1) credentials(+health)/members/roles/org-config/billing/onboarding/audit/system | P0 | partial (members/roles/org-config/audit/system done ola 3; credentials → ola 6 T-159..T-161; onboarding → T-180) |
+| T-206 | (F1) hito: la web arranca contra Go y navega sus pestañas de lectura | P0 | done (smokes 5/5, olas 3-5) |
+| T-300 | (F2) escrituras DLQ/campañas/playbooks/feedback/auto-healing/alerts | P0 | partial (todo done olas 2-5 salvo auto-healing → ola 6 T-178) |
+| T-301 | (F2) AI surfaces completas con contrato AI-fallback | P0 | done (ola 4 completa) |
+| T-302 | (F2) triggers/webhooks firmados + scheduler + crons system | P0 | partial (webhooks done ola 3; email/file/mcp → T-168/T-169; scheduler+crons → T-177..T-179) |
+| T-303 | (F2) los 26 tipos de nodo + gramáticas completas (paridad total) | P0 | partial (faltan subworkflow/schedule/loop-for_each/triggers → ola 6 T-174..T-177) |
+| T-304 | (F2) Secret Store/HMAC/memoria/MCP/SCIM/rate limits/i18n server-events/permisos completos | P0 | partial (HMAC/memoria/MCP/rate/permisos done olas 3-4; Secret Store → T-159/T-160; SCIM SIN ticket en ninguna ola — gap del plan) |
+| T-305 | (F2) rollouts canary + import packs + upstream + experiments | P1 | partial (rollouts done ola 5; packs → T-180; upstream → T-171; experiments SIN ticket — gap del plan) |
+| T-400 | (F3) Playwright completo + browser + perf budgets verdes contra Go | P0 | todo (la lane completa excede los 5 smokes; parte vive en ola 6 T-183/T-185) |
+| T-401 | (F3) saldo de diferidos §9 + plan de corte y reversa | P0 | todo → ola 6 T-187 |
 
 ## 3. Convenciones transversales (aplican a TODAS las tareas)
 
