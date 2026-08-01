@@ -1821,3 +1821,6 @@ El backlog de mejora se escribió mirando el poll de 50ms de los tests y asumió
 
 ## T-503 — queries por contexto (2026-08-01)
 El split mecánico trajo su propia trampa de verificación: el primer diff "byte-idéntico" comparaba contra un archivo generado que sqlc ya ni siquiera tocaba — evidencia vacía que parecía perfecta. La equivalencia honesta terminó siendo el conjunto de símbolos generados (795 declaraciones idénticas), el build y la suite — y el guard de drift del ci resultó agnóstico al layout porque siempre fue un git diff del directorio, no del archivo. Once archivos de contexto, ninguno sobre 500 líneas, y el T-507 (barrido EXPLAIN) ya tiene dónde anotar por contexto.
+
+## T-501 — v1.go en cuatro (2026-08-01)
+Split por rangos de declaración con goimports podando por archivo — el corte mecánico ideal: el guard es que la suite de contrato no notó NADA, porque no había nada que notar. La estructura resultante lee como el índice que el archivo monolítico escondía: constructor y auth en v1.go, sobres y helpers en encoding, y los dos planos de rutas (runs y workflows) cada uno con su vida.
