@@ -2108,3 +2108,75 @@ WHERE wv.workflow_id = $1 AND wv.org_id = $2
   AND r.created_at >= $3
 ORDER BY r.created_at DESC
 LIMIT 5000;
+
+-- name: ListSnippets :many
+SELECT * FROM snippets WHERE org_id = $1 ORDER BY lower(name) LIMIT 200;
+
+-- name: GetSnippet :one
+SELECT * FROM snippets WHERE org_id = $1 AND id = $2;
+
+-- name: FindSnippetByName :one
+SELECT * FROM snippets WHERE org_id = $1 AND lower(name) = lower($2);
+
+-- name: InsertSnippet :one
+INSERT INTO snippets (id, org_id, name, description, category, tags, builtin,
+                      nodes_json, edges_json, entry_node_id, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, false, $7, $8, $9, $10)
+RETURNING *;
+
+-- name: UpdateSnippet :one
+UPDATE snippets
+SET name = $3, description = $4, category = $5, tags = $6,
+    nodes_json = $7, edges_json = $8, entry_node_id = $9, updated_at = now()
+WHERE org_id = $1 AND id = $2 AND builtin = false
+RETURNING *;
+
+-- name: DeleteSnippet :one
+DELETE FROM snippets WHERE org_id = $1 AND id = $2 AND builtin = false
+RETURNING *;
+
+-- name: GetOnboardingProgress :one
+SELECT * FROM onboarding_progress WHERE org_id = $1 AND user_id = $2;
+
+-- name: EnsureOnboardingRow :exec
+INSERT INTO onboarding_progress (id, org_id, user_id, step, status)
+VALUES ($1, $2, $3, 'org_created', 'active')
+ON CONFLICT (org_id, user_id) DO NOTHING;
+
+-- name: SetOnboardingStep :exec
+UPDATE onboarding_progress SET step = $3, updated_at = now()
+WHERE org_id = $1 AND user_id = $2;
+
+-- name: SetOnboardingStatus :execrows
+UPDATE onboarding_progress
+SET status = sqlc.arg(status),
+    skipped_at = CASE WHEN sqlc.arg(status)::text = 'skipped' THEN now() ELSE NULL END,
+    updated_at = now()
+WHERE org_id = $1 AND user_id = $2 AND status != 'completed'
+  AND status != sqlc.arg(status)::text;
+
+-- name: CompleteOnboardingCas :execrows
+UPDATE onboarding_progress
+SET status = 'completed', step = 'completed', completed_at = now(), updated_at = now()
+WHERE org_id = $1 AND user_id = $2 AND status != 'completed';
+
+-- name: RestartOnboarding :execrows
+UPDATE onboarding_progress
+SET status = 'active', step = 'org_created', skipped_at = NULL,
+    completed_at = NULL, restarted_at = now(), updated_at = now()
+WHERE org_id = $1 AND user_id = $2;
+
+-- name: ResolveOnboardingSignals :one
+SELECT
+  EXISTS(SELECT 1 FROM credentials c WHERE c.org_id = sqlc.arg(org_id)
+         AND (sqlc.narg(since)::timestamptz IS NULL OR c.created_at >= sqlc.narg(since)::timestamptz)) AS credential_configured,
+  EXISTS(SELECT 1 FROM audit_logs a WHERE a.org_id = sqlc.arg(org_id) AND a.action = 'workflow.pack_imported'
+         AND (sqlc.narg(since)::timestamptz IS NULL OR a.created_at >= sqlc.narg(since)::timestamptz)) AS pack_installed,
+  EXISTS(SELECT 1 FROM runs r WHERE r.org_id = sqlc.arg(org_id) AND r.status = 'succeeded'
+         AND (sqlc.narg(since)::timestamptz IS NULL OR r.created_at >= sqlc.narg(since)::timestamptz)) AS first_run_succeeded,
+  EXISTS(SELECT 1 FROM dead_letters d WHERE d.org_id = sqlc.arg(org_id)
+         AND (sqlc.narg(since)::timestamptz IS NULL OR d.created_at >= sqlc.narg(since)::timestamptz)) AS failure_injected,
+  (EXISTS(SELECT 1 FROM dead_letters d2 WHERE d2.org_id = sqlc.arg(org_id) AND d2.status IN ('replayed','resolved')
+          AND (sqlc.narg(since)::timestamptz IS NULL OR d2.created_at >= sqlc.narg(since)::timestamptz))
+   OR EXISTS(SELECT 1 FROM recovery_items ri WHERE ri.org_id = sqlc.arg(org_id) AND ri.status = 'resolved'
+          AND (sqlc.narg(since)::timestamptz IS NULL OR ri.created_at >= sqlc.narg(since)::timestamptz))) AS recovery_applied;

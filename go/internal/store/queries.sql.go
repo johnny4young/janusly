@@ -632,6 +632,25 @@ func (q *Queries) ClearParentNotification(ctx context.Context, arg ClearParentNo
 	return err
 }
 
+const completeOnboardingCas = `-- name: CompleteOnboardingCas :execrows
+UPDATE onboarding_progress
+SET status = 'completed', step = 'completed', completed_at = now(), updated_at = now()
+WHERE org_id = $1 AND user_id = $2 AND status != 'completed'
+`
+
+type CompleteOnboardingCasParams struct {
+	OrgID  string
+	UserID string
+}
+
+func (q *Queries) CompleteOnboardingCas(ctx context.Context, arg CompleteOnboardingCasParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completeOnboardingCas, arg.OrgID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const completeReplayCampaignIfExhausted = `-- name: CompleteReplayCampaignIfExhausted :one
 UPDATE replay_campaigns
 SET status = 'completed', completed_at = now(), updated_at = now()
@@ -1134,6 +1153,37 @@ func (q *Queries) DeleteSlackInteractionConnection(ctx context.Context, arg Dele
 	return result.RowsAffected(), nil
 }
 
+const deleteSnippet = `-- name: DeleteSnippet :one
+DELETE FROM snippets WHERE org_id = $1 AND id = $2 AND builtin = false
+RETURNING id, org_id, name, description, category, tags, builtin, nodes_json, edges_json, entry_node_id, created_by, created_at, updated_at
+`
+
+type DeleteSnippetParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) DeleteSnippet(ctx context.Context, arg DeleteSnippetParams) (Snippet, error) {
+	row := q.db.QueryRow(ctx, deleteSnippet, arg.OrgID, arg.ID)
+	var i Snippet
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.Description,
+		&i.Category,
+		&i.Tags,
+		&i.Builtin,
+		&i.NodesJson,
+		&i.EdgesJson,
+		&i.EntryNodeID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const deleteUpstreamHealthSource = `-- name: DeleteUpstreamHealthSource :one
 DELETE FROM upstream_health_sources
 WHERE org_id = $1 AND id = $2
@@ -1183,6 +1233,23 @@ UPDATE schedule_entries SET enabled = false, updated_at = now() WHERE id = $1
 
 func (q *Queries) DisableScheduleEntry(ctx context.Context, id string) error {
 	_, err := q.db.Exec(ctx, disableScheduleEntry, id)
+	return err
+}
+
+const ensureOnboardingRow = `-- name: EnsureOnboardingRow :exec
+INSERT INTO onboarding_progress (id, org_id, user_id, step, status)
+VALUES ($1, $2, $3, 'org_created', 'active')
+ON CONFLICT (org_id, user_id) DO NOTHING
+`
+
+type EnsureOnboardingRowParams struct {
+	ID     string
+	OrgID  string
+	UserID string
+}
+
+func (q *Queries) EnsureOnboardingRow(ctx context.Context, arg EnsureOnboardingRowParams) error {
+	_, err := q.db.Exec(ctx, ensureOnboardingRow, arg.ID, arg.OrgID, arg.UserID)
 	return err
 }
 
@@ -1530,6 +1597,36 @@ func (q *Queries) FindRecoveryItemForDeadLetter(ctx context.Context, arg FindRec
 	row := q.db.QueryRow(ctx, findRecoveryItemForDeadLetter, arg.OrgID, arg.DeadLetterID)
 	var i FindRecoveryItemForDeadLetterRow
 	err := row.Scan(&i.ID, &i.Status, &i.ResolutionReason)
+	return i, err
+}
+
+const findSnippetByName = `-- name: FindSnippetByName :one
+SELECT id, org_id, name, description, category, tags, builtin, nodes_json, edges_json, entry_node_id, created_by, created_at, updated_at FROM snippets WHERE org_id = $1 AND lower(name) = lower($2)
+`
+
+type FindSnippetByNameParams struct {
+	OrgID string
+	Lower string
+}
+
+func (q *Queries) FindSnippetByName(ctx context.Context, arg FindSnippetByNameParams) (Snippet, error) {
+	row := q.db.QueryRow(ctx, findSnippetByName, arg.OrgID, arg.Lower)
+	var i Snippet
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.Description,
+		&i.Category,
+		&i.Tags,
+		&i.Builtin,
+		&i.NodesJson,
+		&i.EdgesJson,
+		&i.EntryNodeID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
 	return i, err
 }
 
@@ -2295,6 +2392,33 @@ func (q *Queries) GetMcpToolDescriptor(ctx context.Context, arg GetMcpToolDescri
 	return i, err
 }
 
+const getOnboardingProgress = `-- name: GetOnboardingProgress :one
+SELECT id, org_id, user_id, step, status, skipped_at, completed_at, restarted_at, created_at, updated_at FROM onboarding_progress WHERE org_id = $1 AND user_id = $2
+`
+
+type GetOnboardingProgressParams struct {
+	OrgID  string
+	UserID string
+}
+
+func (q *Queries) GetOnboardingProgress(ctx context.Context, arg GetOnboardingProgressParams) (OnboardingProgress, error) {
+	row := q.db.QueryRow(ctx, getOnboardingProgress, arg.OrgID, arg.UserID)
+	var i OnboardingProgress
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.UserID,
+		&i.Step,
+		&i.Status,
+		&i.SkippedAt,
+		&i.CompletedAt,
+		&i.RestartedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getOrgConfigValue = `-- name: GetOrgConfigValue :one
 SELECT value_json FROM org_configs WHERE org_id = $1 AND key = $2
 `
@@ -2961,6 +3085,36 @@ func (q *Queries) GetSlackInteractionConnectionForCallback(ctx context.Context, 
 		&i.SigningCredentialName,
 		&i.UserMappings,
 		&i.Enabled,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getSnippet = `-- name: GetSnippet :one
+SELECT id, org_id, name, description, category, tags, builtin, nodes_json, edges_json, entry_node_id, created_by, created_at, updated_at FROM snippets WHERE org_id = $1 AND id = $2
+`
+
+type GetSnippetParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) GetSnippet(ctx context.Context, arg GetSnippetParams) (Snippet, error) {
+	row := q.db.QueryRow(ctx, getSnippet, arg.OrgID, arg.ID)
+	var i Snippet
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.Description,
+		&i.Category,
+		&i.Tags,
+		&i.Builtin,
+		&i.NodesJson,
+		&i.EdgesJson,
+		&i.EntryNodeID,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -4268,6 +4422,58 @@ func (q *Queries) InsertSlackInteractionReceipt(ctx context.Context, arg InsertS
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const insertSnippet = `-- name: InsertSnippet :one
+INSERT INTO snippets (id, org_id, name, description, category, tags, builtin,
+                      nodes_json, edges_json, entry_node_id, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, false, $7, $8, $9, $10)
+RETURNING id, org_id, name, description, category, tags, builtin, nodes_json, edges_json, entry_node_id, created_by, created_at, updated_at
+`
+
+type InsertSnippetParams struct {
+	ID          string
+	OrgID       string
+	Name        string
+	Description string
+	Category    string
+	Tags        json.RawMessage
+	NodesJson   json.RawMessage
+	EdgesJson   json.RawMessage
+	EntryNodeID pgtype.Text
+	CreatedBy   pgtype.Text
+}
+
+func (q *Queries) InsertSnippet(ctx context.Context, arg InsertSnippetParams) (Snippet, error) {
+	row := q.db.QueryRow(ctx, insertSnippet,
+		arg.ID,
+		arg.OrgID,
+		arg.Name,
+		arg.Description,
+		arg.Category,
+		arg.Tags,
+		arg.NodesJson,
+		arg.EdgesJson,
+		arg.EntryNodeID,
+		arg.CreatedBy,
+	)
+	var i Snippet
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.Description,
+		&i.Category,
+		&i.Tags,
+		&i.Builtin,
+		&i.NodesJson,
+		&i.EdgesJson,
+		&i.EntryNodeID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const insertTriggerEvent = `-- name: InsertTriggerEvent :execrows
@@ -7186,6 +7392,44 @@ func (q *Queries) ListSlackInteractionConnections(ctx context.Context, orgID str
 	return items, nil
 }
 
+const listSnippets = `-- name: ListSnippets :many
+SELECT id, org_id, name, description, category, tags, builtin, nodes_json, edges_json, entry_node_id, created_by, created_at, updated_at FROM snippets WHERE org_id = $1 ORDER BY lower(name) LIMIT 200
+`
+
+func (q *Queries) ListSnippets(ctx context.Context, orgID string) ([]Snippet, error) {
+	rows, err := q.db.Query(ctx, listSnippets, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Snippet
+	for rows.Next() {
+		var i Snippet
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Name,
+			&i.Description,
+			&i.Category,
+			&i.Tags,
+			&i.Builtin,
+			&i.NodesJson,
+			&i.EdgesJson,
+			&i.EntryNodeID,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUnrecordedRolloutOutcomes = `-- name: ListUnrecordedRolloutOutcomes :many
 SELECT r.id AS run_id, r.status FROM runs r
 JOIN workflow_rollouts wr ON wr.id = r.workflow_rollout_id AND wr.org_id = r.org_id AND wr.status = 'active'
@@ -8745,6 +8989,48 @@ func (q *Queries) RequeueRunNodeForRetry(ctx context.Context, arg RequeueRunNode
 	return result.RowsAffected(), nil
 }
 
+const resolveOnboardingSignals = `-- name: ResolveOnboardingSignals :one
+SELECT
+  EXISTS(SELECT 1 FROM credentials c WHERE c.org_id = $1
+         AND ($2::timestamptz IS NULL OR c.created_at >= $2::timestamptz)) AS credential_configured,
+  EXISTS(SELECT 1 FROM audit_logs a WHERE a.org_id = $1 AND a.action = 'workflow.pack_imported'
+         AND ($2::timestamptz IS NULL OR a.created_at >= $2::timestamptz)) AS pack_installed,
+  EXISTS(SELECT 1 FROM runs r WHERE r.org_id = $1 AND r.status = 'succeeded'
+         AND ($2::timestamptz IS NULL OR r.created_at >= $2::timestamptz)) AS first_run_succeeded,
+  EXISTS(SELECT 1 FROM dead_letters d WHERE d.org_id = $1
+         AND ($2::timestamptz IS NULL OR d.created_at >= $2::timestamptz)) AS failure_injected,
+  (EXISTS(SELECT 1 FROM dead_letters d2 WHERE d2.org_id = $1 AND d2.status IN ('replayed','resolved')
+          AND ($2::timestamptz IS NULL OR d2.created_at >= $2::timestamptz))
+   OR EXISTS(SELECT 1 FROM recovery_items ri WHERE ri.org_id = $1 AND ri.status = 'resolved'
+          AND ($2::timestamptz IS NULL OR ri.created_at >= $2::timestamptz))) AS recovery_applied
+`
+
+type ResolveOnboardingSignalsParams struct {
+	OrgID string
+	Since *time.Time
+}
+
+type ResolveOnboardingSignalsRow struct {
+	CredentialConfigured bool
+	PackInstalled        bool
+	FirstRunSucceeded    bool
+	FailureInjected      bool
+	RecoveryApplied      pgtype.Bool
+}
+
+func (q *Queries) ResolveOnboardingSignals(ctx context.Context, arg ResolveOnboardingSignalsParams) (ResolveOnboardingSignalsRow, error) {
+	row := q.db.QueryRow(ctx, resolveOnboardingSignals, arg.OrgID, arg.Since)
+	var i ResolveOnboardingSignalsRow
+	err := row.Scan(
+		&i.CredentialConfigured,
+		&i.PackInstalled,
+		&i.FirstRunSucceeded,
+		&i.FailureInjected,
+		&i.RecoveryApplied,
+	)
+	return i, err
+}
+
 const resolveRecoveryItemFromTerminal = `-- name: ResolveRecoveryItemFromTerminal :execrows
 UPDATE recovery_items
 SET status = 'resolved', resolution_reason = 'sandbox_replay_succeeded',
@@ -8772,6 +9058,26 @@ func (q *Queries) ResolveRecoveryItemFromTerminal(ctx context.Context, arg Resol
 		arg.FirstActionAt,
 		arg.FromStatus,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const restartOnboarding = `-- name: RestartOnboarding :execrows
+UPDATE onboarding_progress
+SET status = 'active', step = 'org_created', skipped_at = NULL,
+    completed_at = NULL, restarted_at = now(), updated_at = now()
+WHERE org_id = $1 AND user_id = $2
+`
+
+type RestartOnboardingParams struct {
+	OrgID  string
+	UserID string
+}
+
+func (q *Queries) RestartOnboarding(ctx context.Context, arg RestartOnboardingParams) (int64, error) {
+	result, err := q.db.Exec(ctx, restartOnboarding, arg.OrgID, arg.UserID)
 	if err != nil {
 		return 0, err
 	}
@@ -9073,6 +9379,45 @@ func (q *Queries) SetMcpConnectionStatus(ctx context.Context, arg SetMcpConnecti
 		arg.StatusReason,
 		arg.LastDiscoveryAt,
 	)
+	return err
+}
+
+const setOnboardingStatus = `-- name: SetOnboardingStatus :execrows
+UPDATE onboarding_progress
+SET status = $3,
+    skipped_at = CASE WHEN $3::text = 'skipped' THEN now() ELSE NULL END,
+    updated_at = now()
+WHERE org_id = $1 AND user_id = $2 AND status != 'completed'
+  AND status != $3::text
+`
+
+type SetOnboardingStatusParams struct {
+	OrgID  string
+	UserID string
+	Status string
+}
+
+func (q *Queries) SetOnboardingStatus(ctx context.Context, arg SetOnboardingStatusParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setOnboardingStatus, arg.OrgID, arg.UserID, arg.Status)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setOnboardingStep = `-- name: SetOnboardingStep :exec
+UPDATE onboarding_progress SET step = $3, updated_at = now()
+WHERE org_id = $1 AND user_id = $2
+`
+
+type SetOnboardingStepParams struct {
+	OrgID  string
+	UserID string
+	Step   string
+}
+
+func (q *Queries) SetOnboardingStep(ctx context.Context, arg SetOnboardingStepParams) error {
+	_, err := q.db.Exec(ctx, setOnboardingStep, arg.OrgID, arg.UserID, arg.Step)
 	return err
 }
 
@@ -9589,6 +9934,57 @@ func (q *Queries) UpdateSlackInteractionConnection(ctx context.Context, arg Upda
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const updateSnippet = `-- name: UpdateSnippet :one
+UPDATE snippets
+SET name = $3, description = $4, category = $5, tags = $6,
+    nodes_json = $7, edges_json = $8, entry_node_id = $9, updated_at = now()
+WHERE org_id = $1 AND id = $2 AND builtin = false
+RETURNING id, org_id, name, description, category, tags, builtin, nodes_json, edges_json, entry_node_id, created_by, created_at, updated_at
+`
+
+type UpdateSnippetParams struct {
+	OrgID       string
+	ID          string
+	Name        string
+	Description string
+	Category    string
+	Tags        json.RawMessage
+	NodesJson   json.RawMessage
+	EdgesJson   json.RawMessage
+	EntryNodeID pgtype.Text
+}
+
+func (q *Queries) UpdateSnippet(ctx context.Context, arg UpdateSnippetParams) (Snippet, error) {
+	row := q.db.QueryRow(ctx, updateSnippet,
+		arg.OrgID,
+		arg.ID,
+		arg.Name,
+		arg.Description,
+		arg.Category,
+		arg.Tags,
+		arg.NodesJson,
+		arg.EdgesJson,
+		arg.EntryNodeID,
+	)
+	var i Snippet
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.Description,
+		&i.Category,
+		&i.Tags,
+		&i.Builtin,
+		&i.NodesJson,
+		&i.EdgesJson,
+		&i.EntryNodeID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updateUpstreamHealthSource = `-- name: UpdateUpstreamHealthSource :one
