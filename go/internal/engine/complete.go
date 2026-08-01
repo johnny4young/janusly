@@ -67,7 +67,7 @@ func (e *Engine) CompleteNode(ctx context.Context, claim ClaimedNode, output any
 	eventJSON := safePersist(eventPayload, defaultPersistMaxBytes())
 
 	finishedAt := eventNow()
-	if err := e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries) error {
+	if err := e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries, events *runEventBuffer) error {
 		completed, err := q.CompleteRunNode(ctx, store.CompleteRunNodeParams{
 			RunID: claim.RunID, NodeID: claim.NodeID,
 			StateJson:  stateJSON,
@@ -84,19 +84,13 @@ func (e *Engine) CompleteNode(ctx context.Context, claim ClaimedNode, output any
 		if err := q.DeleteWakeup(ctx, claim.RowID); err != nil {
 			return fmt.Errorf("clear wakeup: %w", err)
 		}
-		if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-			ID: e.newID(), RunID: claim.RunID,
-			NodeID: pgtype.Text{String: claim.NodeID, Valid: true},
-			Type:   "node.succeeded", Payload: eventJSON, CreatedAt: &finishedAt,
-		}); err != nil {
-			return fmt.Errorf("insert node.succeeded: %w", err)
-		}
+		events.add(e.newID(), claim.RunID, claim.NodeID, "node.succeeded", eventJSON, finishedAt)
 		metricNodeCompletions.WithLabelValues("succeeded").Inc()
 		if err := e.recordRecoveryImpact(ctx, q, claim, finishedAt); err != nil {
 			return err
 		}
 		if len(violations) > 0 {
-			quarantined, err := e.persistSemanticViolations(ctx, q, claim, violations, finishedAt)
+			quarantined, err := e.persistSemanticViolations(ctx, q, events, claim, violations, finishedAt)
 			if err != nil {
 				return err
 			}
@@ -106,7 +100,7 @@ func (e *Engine) CompleteNode(ctx context.Context, claim ClaimedNode, output any
 				return nil
 			}
 		}
-		return e.scheduleDownstream(ctx, q, claim.RunID, finishedAt)
+		return e.scheduleDownstream(ctx, q, events, claim.RunID, finishedAt)
 	}); err != nil {
 		return err
 	}
@@ -165,7 +159,7 @@ func (e *Engine) evaluateSemanticOutcome(ctx context.Context, claim ClaimedNode,
 // with node success, so no downstream node can be scheduled past an
 // unresolved business outcome.
 func (e *Engine) persistSemanticViolations(
-	ctx context.Context, q *store.Queries, claim ClaimedNode,
+	ctx context.Context, q *store.Queries, events *runEventBuffer, claim ClaimedNode,
 	violations []recovery.SemanticOutcomeViolation, finishedAt time.Time,
 ) (bool, error) {
 	run, err := q.GetRunExecution(ctx, claim.RunID)
@@ -221,13 +215,7 @@ func (e *Engine) persistSemanticViolations(
 			"action": violation.Action, "message": violation.Message,
 			"details": details,
 		}, defaultPersistMaxBytes())
-		if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-			ID: e.newID(), RunID: claim.RunID,
-			NodeID: pgtype.Text{String: claim.NodeID, Valid: true},
-			Type:   "recovery.semantic_violation", Payload: payload, CreatedAt: &finishedAt,
-		}); err != nil {
-			return false, fmt.Errorf("insert semantic_violation event: %w", err)
-		}
+		events.add(e.newID(), claim.RunID, claim.NodeID, "recovery.semantic_violation", payload, finishedAt)
 	}
 
 	counts, err := q.CountRunSemanticCases(ctx, store.CountRunSemanticCasesParams{
@@ -261,7 +249,7 @@ var errSkipCommit = fmt.Errorf("skip commit: node transition lost the compare-an
 // inCompletionTx runs handler inside one transaction that holds the per-run
 // completion lock. The lock releases on commit, which is what guarantees a
 // concurrent sibling's readiness scan reads this transaction's writes.
-func (e *Engine) inCompletionTx(ctx context.Context, runID string, handler func(q *store.Queries) error) error {
+func (e *Engine) inCompletionTx(ctx context.Context, runID string, handler func(q *store.Queries, events *runEventBuffer) error) error {
 	tx, err := e.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
@@ -271,14 +259,18 @@ func (e *Engine) inCompletionTx(ctx context.Context, runID string, handler func(
 	if err := q.AcquireRunCompletionLock(ctx, runID); err != nil {
 		return fmt.Errorf("acquire completion lock: %w", err)
 	}
-	if err := handler(q); err != nil {
+	events := &runEventBuffer{}
+	if err := handler(q, events); err != nil {
 		if err == errSkipCommit {
 			return nil
 		}
 		return err
 	}
-	// Every completion-family transaction appends timeline events; the
-	// stream signal rides the same commit.
+	// Every buffered timeline event lands in ONE CopyFrom round trip, and
+	// the stream signal rides the same commit.
+	if err := events.flush(ctx, q); err != nil {
+		return err
+	}
 	if err := q.NotifyRunEvents(ctx, runID); err != nil {
 		return fmt.Errorf("notify run events: %w", err)
 	}

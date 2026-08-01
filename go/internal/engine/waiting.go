@@ -10,7 +10,6 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"encoding/json"
 	"github.com/johnny4young/janusly/go/internal/domain"
@@ -64,7 +63,7 @@ func (e *Engine) MarkNodeWaiting(ctx context.Context, claim ClaimedNode, waiting
 		"status": "waiting", "reason": waiting.Reason, "metadata": metadata,
 	}, defaultPersistMaxBytes())
 
-	return e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries) error {
+	return e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries, events *runEventBuffer) error {
 		marked, err := q.MarkRunNodeWaiting(ctx, store.MarkRunNodeWaitingParams{
 			RunID: claim.RunID, NodeID: claim.NodeID, StateJson: stateJSON,
 		})
@@ -74,13 +73,7 @@ func (e *Engine) MarkNodeWaiting(ctx context.Context, claim ClaimedNode, waiting
 		if marked == 0 {
 			return errSkipCommit
 		}
-		if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-			ID: e.newID(), RunID: claim.RunID,
-			NodeID: pgtype.Text{String: claim.NodeID, Valid: true},
-			Type:   "node.waiting", Payload: eventJSON, CreatedAt: &checkpointAt,
-		}); err != nil {
-			return fmt.Errorf("insert node.waiting: %w", err)
-		}
+		events.add(e.newID(), claim.RunID, claim.NodeID, "node.waiting", eventJSON, checkpointAt)
 		if waiting.WakeAt != nil {
 			if err := q.UpsertWakeup(ctx, store.UpsertWakeupParams{
 				RunNodeID: claim.RowID, WakeAt: waiting.WakeAt.UTC(), Reason: "wait_until",
@@ -115,7 +108,7 @@ var (
 // cannot double-write output or double-enqueue downstream work.
 func (e *Engine) ResumeRunWithInput(ctx context.Context, runID, nodeID string, input map[string]any, token string) error {
 	finishedAt := eventNow()
-	return e.inCompletionTx(ctx, runID, func(q *store.Queries) error {
+	return e.inCompletionTx(ctx, runID, func(q *store.Queries, events *runEventBuffer) error {
 		run, err := q.GetRunExecution(ctx, runID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -173,14 +166,8 @@ func (e *Engine) ResumeRunWithInput(ctx context.Context, runID, nodeID string, i
 		if err := q.DeleteWakeup(ctx, rowID); err != nil {
 			return fmt.Errorf("clear wakeup: %w", err)
 		}
-		if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-			ID: e.newID(), RunID: runID,
-			NodeID: pgtype.Text{String: nodeID, Valid: true},
-			Type:   "node.resumed", Payload: []byte(`{}`), CreatedAt: &finishedAt,
-		}); err != nil {
-			return fmt.Errorf("insert node.resumed: %w", err)
-		}
-		return e.scheduleDownstream(ctx, q, runID, finishedAt)
+		events.add(e.newID(), runID, nodeID, "node.resumed", []byte(`{}`), finishedAt)
+		return e.scheduleDownstream(ctx, q, events, runID, finishedAt)
 	})
 }
 

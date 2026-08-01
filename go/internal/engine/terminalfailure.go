@@ -39,7 +39,7 @@ func (e *Engine) RetryOrFail(ctx context.Context, claim ClaimedNode, node domain
 		return fmt.Errorf("marshal retry payload: %w", err)
 	}
 	retriedAt := eventNow()
-	return e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries) error {
+	return e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries, events *runEventBuffer) error {
 		requeued, err := q.RequeueRunNodeForRetry(ctx, store.RequeueRunNodeForRetryParams{
 			RunID: claim.RunID, NodeID: claim.NodeID,
 			Attempt: pgtype.Int4{Int32: nextAttempt, Valid: true},
@@ -58,13 +58,7 @@ func (e *Engine) RetryOrFail(ctx context.Context, claim ClaimedNode, node domain
 		}); err != nil {
 			return fmt.Errorf("schedule retry wakeup: %w", err)
 		}
-		if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-			ID: e.newID(), RunID: claim.RunID,
-			NodeID: pgtype.Text{String: claim.NodeID, Valid: true},
-			Type:   "node.retry", Payload: eventJSON, CreatedAt: &retriedAt,
-		}); err != nil {
-			return fmt.Errorf("insert node.retry: %w", err)
-		}
+		events.add(e.newID(), claim.RunID, claim.NodeID, "node.retry", eventJSON, retriedAt)
 		return nil
 	})
 }
@@ -91,7 +85,7 @@ func (e *Engine) failNodeTx(ctx context.Context, claim ClaimedNode, execErr erro
 	}
 
 	failedAt := eventNow()
-	return e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries) error {
+	return e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries, events *runEventBuffer) error {
 		run, err := q.GetRunExecution(ctx, claim.RunID)
 		if err != nil {
 			return fmt.Errorf("read run: %w", err)
@@ -120,13 +114,7 @@ func (e *Engine) failNodeTx(ctx context.Context, claim ClaimedNode, execErr erro
 			return err
 		}
 
-		if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-			ID: e.newID(), RunID: claim.RunID,
-			NodeID: pgtype.Text{String: claim.NodeID, Valid: true},
-			Type:   "node.failed", Payload: eventJSON, CreatedAt: &failedAt,
-		}); err != nil {
-			return fmt.Errorf("insert node.failed: %w", err)
-		}
+		events.add(e.newID(), claim.RunID, claim.NodeID, "node.failed", eventJSON, failedAt)
 
 		if run.Status == "failed" {
 			return nil
@@ -141,7 +129,7 @@ func (e *Engine) failNodeTx(ctx context.Context, claim ClaimedNode, execErr erro
 				failedNodes++
 			}
 		}
-		return e.flipRunTerminal(ctx, q, claim.RunID, "failed",
+		return e.flipRunTerminal(ctx, q, events, claim.RunID, "failed",
 			map[string]any{"failedNodes": failedNodes}, failedAt, nil)
 	})
 }

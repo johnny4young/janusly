@@ -1890,3 +1890,20 @@ operativas caras: el disco del host tocó 100% (ENOSPC en el link — se liberó
 el caché go-build de 14GB) y `/healthz` NO existe en el puerto interno — el
 poll correcto para pprof es `/debug/pprof/cmdline` (dos capturas fallaron en
 silencio contra un 404).
+
+## T-509 — CopyFrom para los eventos de completion (2026-08-01)
+
+`inCompletionTx` resultó ser el lugar perfecto para esto: las nueve
+transacciones de la familia (éxito, fallo, retry, waiting, resume y los
+cuatro settles de subworkflow) ya pasaban por el mismo wrapper, así que el
+buffer de eventos se construye ahí y se vuelca en un solo CopyFrom justo
+antes del notify, dentro del mismo commit. Doce sitios migrados de
+`InsertRunEventAt` a `events.add(...)` con ids, payloads y timestamps
+idénticos — el keyset `(created_at, id)` define el orden de lectura, así que
+el batch solo puede cambiar round-trips, jamás la línea de tiempo. La
+medición usó el seam `wrapTx` que ya existía para inyectar fallos: un
+contador de Exec/CopyFrom probó cero INSERTs por-fila en el camino de
+completion y 2 COPYs para los 5 eventos del run lineal (antes 5 statements),
+con el vocabulario T-505 asertado byte a byte. El dual quedó 27/27. El par
+del checkpoint padre (subworkflow.started + node.waiting) se quedó fuera a
+propósito: vive en la transacción de START, no en la familia de completion.

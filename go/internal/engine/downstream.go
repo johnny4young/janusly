@@ -10,14 +10,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/grammar"
 	"github.com/johnny4young/janusly/go/internal/store"
 )
 
-func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, runID string, completedAt time.Time) error {
+func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, events *runEventBuffer, runID string, completedAt time.Time) error {
 	run, err := q.GetRunExecution(ctx, runID)
 	if err != nil {
 		return fmt.Errorf("read run: %w", err)
@@ -79,13 +78,7 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, runID
 				}
 				if rows > 0 {
 					payload, _ := json.Marshal(map[string]any{"reason": "Condition not met"})
-					if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-						ID: e.newID(), RunID: runID,
-						NodeID: pgtype.Text{String: node.ID, Valid: true},
-						Type:   "node.skipped", Payload: payload, CreatedAt: &skippedAt,
-					}); err != nil {
-						return fmt.Errorf("insert node.skipped: %w", err)
-					}
+					events.add(e.newID(), runID, node.ID, "node.skipped", payload, skippedAt)
 				}
 				metricNodeCompletions.WithLabelValues("skipped").Inc()
 				statuses[node.ID] = "skipped"
@@ -110,14 +103,7 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, runID
 			changed = true
 			statuses[node.ID] = "queued"
 			queuedAt := eventNow()
-			if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-				ID: e.newID(), RunID: runID,
-				NodeID: pgtype.Text{String: node.ID, Valid: true},
-				Type:   "node.queued", Payload: json.RawMessage(`{}`),
-				CreatedAt: &queuedAt,
-			}); err != nil {
-				return fmt.Errorf("insert node.queued: %w", err)
-			}
+			events.add(e.newID(), runID, node.ID, "node.queued", json.RawMessage(`{}`), queuedAt)
 		}
 	}
 
@@ -142,38 +128,33 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, runID
 		}
 	}
 	if anyFailed {
-		if err := e.flipRunTerminal(ctx, q, runID, "failed",
+		if err := e.flipRunTerminal(ctx, q, events, runID, "failed",
 			map[string]any{"failedNodes": failedNodes}, completedAt, nil); err != nil {
 			return err
 		}
-		return e.appendStatusChecked(ctx, q, runID, completedAt)
+		return e.appendStatusChecked(ctx, events, runID, completedAt)
 	}
 	if total > 0 && !anyOpen {
 		var outputJSON json.RawMessage
 		if len(wf.Outputs) > 0 {
 			outputJSON, _ = json.Marshal(projectOutputs(wf.Outputs, runContext, runInput))
 		}
-		if err := e.flipRunTerminal(ctx, q, runID, "succeeded",
+		if err := e.flipRunTerminal(ctx, q, events, runID, "succeeded",
 			map[string]any{"nodes": total}, completedAt, outputJSON); err != nil {
 			return err
 		}
-		return e.appendStatusChecked(ctx, q, runID, completedAt)
+		return e.appendStatusChecked(ctx, events, runID, completedAt)
 	}
-	return e.appendStatusChecked(ctx, q, runID, completedAt)
+	return e.appendStatusChecked(ctx, events, runID, completedAt)
 }
 
 // appendStatusChecked is the reference's fan-in settle marker: every
 // enqueue pass that queued NOTHING re-derived the run status and says so
 // (runtime.ts). +2ms so it always sorts after the terminal run event
 // (which sits at cause+1ms).
-func (e *Engine) appendStatusChecked(ctx context.Context, q *store.Queries, runID string, causeAt time.Time) error {
+func (e *Engine) appendStatusChecked(ctx context.Context, events *runEventBuffer, runID string, causeAt time.Time) error {
 	checkedAt := causeAt.Add(2 * time.Millisecond)
-	if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-		ID: e.newID(), RunID: runID, Type: "run.status_checked",
-		Payload: json.RawMessage(`{}`), CreatedAt: &checkedAt,
-	}); err != nil {
-		return fmt.Errorf("insert run.status_checked: %w", err)
-	}
+	events.add(e.newID(), runID, "", "run.status_checked", json.RawMessage(`{}`), checkedAt)
 	return nil
 }
 
@@ -207,7 +188,7 @@ func edgeAllowsRun(wf *domain.Workflow, nodeID string, runContext map[string]any
 // call performed the transition, appends the run-level event. Its timestamp
 // sits 1 ms after the causal node event so the (created_at, id) keyset never
 // orders the aggregate consequence before its cause.
-func (e *Engine) flipRunTerminal(ctx context.Context, q *store.Queries, runID, status string, payload map[string]any, causeAt time.Time, outputJSON json.RawMessage) error {
+func (e *Engine) flipRunTerminal(ctx context.Context, q *store.Queries, events *runEventBuffer, runID, status string, payload map[string]any, causeAt time.Time, outputJSON json.RawMessage) error {
 	flipped, err := q.MarkRunTerminalFromRunning(ctx, store.MarkRunTerminalFromRunningParams{
 		ID: runID, Status: status, OutputJson: outputJSON,
 	})
@@ -227,12 +208,7 @@ func (e *Engine) flipRunTerminal(ctx context.Context, q *store.Queries, runID, s
 		return fmt.Errorf("marshal run event payload: %w", err)
 	}
 	eventAt := causeAt.Add(time.Millisecond)
-	if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-		ID: e.newID(), RunID: runID, Type: "run." + status,
-		Payload: payloadJSON, CreatedAt: &eventAt,
-	}); err != nil {
-		return fmt.Errorf("insert run.%s: %w", status, err)
-	}
+	events.add(e.newID(), runID, "", "run."+status, payloadJSON, eventAt)
 	return nil
 }
 

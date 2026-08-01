@@ -362,7 +362,7 @@ func (e *Engine) settleParentOnChildSuccess(
 		"subworkflow": map[string]any{"childRunId": childRunID},
 	}, stateJSONMaxBytes)
 	settled := false
-	err := e.inCompletionTx(ctx, parentRunID, func(q *store.Queries) error {
+	err := e.inCompletionTx(ctx, parentRunID, func(q *store.Queries, events *runEventBuffer) error {
 		completed, err := q.MarkWaitingSubworkflowSucceeded(ctx, store.MarkWaitingSubworkflowSucceededParams{
 			RunID: parentRunID, NodeID: parentNodeID,
 			StateJson: state, FinishedAt: &finishedAt, ChildRunID: childRunID,
@@ -374,18 +374,12 @@ func (e *Engine) settleParentOnChildSuccess(
 			return errSkipCommit
 		}
 		payload := safePersist(map[string]any{"childRunId": childRunID}, defaultPersistMaxBytes())
-		if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-			ID: e.newID(), RunID: parentRunID,
-			NodeID: pgtype.Text{String: parentNodeID, Valid: true},
-			Type:   "subworkflow.completed", Payload: payload, CreatedAt: &finishedAt,
-		}); err != nil {
-			return fmt.Errorf("insert subworkflow.completed: %w", err)
-		}
+		events.add(e.newID(), parentRunID, parentNodeID, "subworkflow.completed", payload, finishedAt)
 		settled = true
 		// A failed parent SETTLES the wait without reopening: no downstream
 		// scheduling — a replay may later reopen the parent explicitly.
 		if parent.Status == "running" {
-			return e.scheduleDownstream(ctx, q, parentRunID, finishedAt)
+			return e.scheduleDownstream(ctx, q, events, parentRunID, finishedAt)
 		}
 		return nil
 	})
@@ -411,8 +405,8 @@ func (e *Engine) settleParentOnChildSuccess(
 	if node.Status == "succeeded" && nodeState.Subworkflow.ChildRunID == childRunID {
 		latest, err := q.GetRunParentLink(ctx, parentRunID)
 		if err == nil && latest.Status == "running" {
-			_ = e.inCompletionTx(ctx, parentRunID, func(txq *store.Queries) error {
-				return e.scheduleDownstream(ctx, txq, parentRunID, eventNow())
+			_ = e.inCompletionTx(ctx, parentRunID, func(txq *store.Queries, events *runEventBuffer) error {
+				return e.scheduleDownstream(ctx, txq, events, parentRunID, eventNow())
 			})
 		}
 		return true
@@ -442,7 +436,7 @@ func (e *Engine) settleParentOnChildFailure(
 	}
 	failedAt := eventNow()
 	settled := false
-	err := e.inCompletionTx(ctx, parentRunID, func(txq *store.Queries) error {
+	err := e.inCompletionTx(ctx, parentRunID, func(txq *store.Queries, events *runEventBuffer) error {
 		failed, err := txq.MarkWaitingSubworkflowFailed(ctx, store.MarkWaitingSubworkflowFailedParams{
 			RunID: parentRunID, NodeID: parentNodeID,
 			ErrorJson: safePersist(serr, deadLetterErrorMaxBytes), FinishedAt: &failedAt,
@@ -455,18 +449,12 @@ func (e *Engine) settleParentOnChildFailure(
 			return errSkipCommit
 		}
 		payload := safePersist(map[string]any{"error": serr}, defaultPersistMaxBytes())
-		if err := txq.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-			ID: e.newID(), RunID: parentRunID,
-			NodeID: pgtype.Text{String: parentNodeID, Valid: true},
-			Type:   "node.failed", Payload: payload, CreatedAt: &failedAt,
-		}); err != nil {
-			return fmt.Errorf("insert node.failed: %w", err)
-		}
+		events.add(e.newID(), parentRunID, parentNodeID, "node.failed", payload, failedAt)
 		settled = true
 		// A sibling may have flipped the parent already — the node settle
 		// above is all this generation owes then.
 		if parent.Status == "running" {
-			return e.flipRunTerminal(ctx, txq, parentRunID, "failed",
+			return e.flipRunTerminal(ctx, txq, events, parentRunID, "failed",
 				map[string]any{"reason": "subworkflow_failed", "childRunId": childRunID}, failedAt, nil)
 		}
 		return nil
@@ -491,8 +479,8 @@ func (e *Engine) settleParentOnChildFailure(
 	if node.Status == "failed" && nodeError.ChildRunID == childRunID {
 		latest, err := q.GetRunParentLink(ctx, parentRunID)
 		if err == nil && latest.Status == "running" {
-			_ = e.inCompletionTx(ctx, parentRunID, func(txq *store.Queries) error {
-				return e.flipRunTerminal(ctx, txq, parentRunID, "failed",
+			_ = e.inCompletionTx(ctx, parentRunID, func(txq *store.Queries, events *runEventBuffer) error {
+				return e.flipRunTerminal(ctx, txq, events, parentRunID, "failed",
 					map[string]any{"reason": "subworkflow_failed", "childRunId": childRunID}, eventNow(), nil)
 			})
 		}

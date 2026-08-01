@@ -936,6 +936,15 @@ func (q *Queries) InsertRunEventAt(ctx context.Context, arg InsertRunEventAtPara
 	return err
 }
 
+type InsertRunEventsParams struct {
+	ID        string
+	RunID     string
+	NodeID    pgtype.Text
+	Type      string
+	Payload   json.RawMessage
+	CreatedAt *time.Time
+}
+
 const insertRunNode = `-- name: InsertRunNode :exec
 INSERT INTO run_nodes (id, run_id, node_id, status, attempts, state_json)
 VALUES ($1, $2, $3, $4, $5, $6)
