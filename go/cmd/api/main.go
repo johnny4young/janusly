@@ -130,41 +130,43 @@ func run() error {
 	resourceInfo.Set(1)
 	prometheus.MustRegister(resourceInfo)
 	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
-	workerCtx, stopWorkers := context.WithCancel(context.Background())
-	defer stopWorkers()
-	workersDone := make(chan struct{})
-	go func() {
-		defer close(workersDone)
-		_ = eng.RunWorkers(workerCtx, cfg.WorkerConcurrency, cfg.PollInterval, dispatcher.Execute, logger)
-	}()
-	go func() {
-		eng.RunReplayCampaignPump(workerCtx, cfg.PollInterval, logger)
-	}()
-	go func() {
-		eng.RunRetentionSweep(workerCtx, time.Hour, engine.RetentionDays(), logger)
-	}()
-	go func() {
-		upstream.RunSweep(workerCtx, pool, time.Minute, logger)
-	}()
-	go func() {
-		eng.RunSubworkflowTerminalReconciler(workerCtx, time.Minute, logger)
-	}()
-	go func() {
-		eng.RunScheduleSweep(workerCtx, 15*time.Second, logger)
-	}()
-	go func() {
-		eng.RunAutoHealingSweep(workerCtx, 5*time.Minute, logger)
-	}()
-	go func() {
-		eng.RunMemoryConsentPurgeSweep(workerCtx, time.Hour, logger)
-	}()
+	// Every background loop runs SUPERVISED (T-512): named start, panic →
+	// recover + log + backoff restart (a sweep bug never takes the API
+	// down), and one deterministic drain on shutdown BEFORE pools close.
+	runner := boot.NewRunner(context.Background(), logger)
+	runner.Go("workers", func(ctx context.Context) {
+		_ = eng.RunWorkers(ctx, cfg.WorkerConcurrency, cfg.PollInterval, dispatcher.Execute, logger)
+	})
+	runner.Go("replay-campaign-pump", func(ctx context.Context) {
+		eng.RunReplayCampaignPump(ctx, cfg.PollInterval, logger)
+	})
+	runner.Go("retention", func(ctx context.Context) {
+		eng.RunRetentionSweep(ctx, time.Hour, engine.RetentionDays(), logger)
+	})
+	runner.Go("upstream-health", func(ctx context.Context) {
+		upstream.RunSweep(ctx, pool, time.Minute, logger)
+	})
+	runner.Go("subworkflow-terminal-reconciler", func(ctx context.Context) {
+		eng.RunSubworkflowTerminalReconciler(ctx, time.Minute, logger)
+	})
+	runner.Go("schedule-sweep", func(ctx context.Context) {
+		eng.RunScheduleSweep(ctx, 15*time.Second, logger)
+	})
+	runner.Go("auto-healing", func(ctx context.Context) {
+		eng.RunAutoHealingSweep(ctx, 5*time.Minute, logger)
+	})
+	runner.Go("memory-consent-purge", func(ctx context.Context) {
+		eng.RunMemoryConsentPurgeSweep(ctx, time.Hour, logger)
+	})
 	// Reaper cadence/threshold are env-tunable for HA deployments (and the
 	// kill-failover harness): a two-replica setup wants a threshold near
 	// its longest legitimate node runtime, not the conservative 1h default.
-	go eng.StartReaper(workerCtx,
-		envDurationMs("JANUSLY_GO_REAPER_INTERVAL_MS", time.Minute),
-		envDurationMs("JANUSLY_GO_REAPER_THRESHOLD_MS", time.Hour), logger)
-	defer func() { stopWorkers(); <-workersDone }()
+	runner.Go("stalled-node-reaper", func(ctx context.Context) {
+		eng.StartReaper(ctx,
+			envDurationMs("JANUSLY_GO_REAPER_INTERVAL_MS", time.Minute),
+			envDurationMs("JANUSLY_GO_REAPER_THRESHOLD_MS", time.Hour), logger)
+	})
+	defer runner.Shutdown()
 
 	api := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.Port),
