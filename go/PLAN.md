@@ -2189,6 +2189,14 @@ P2 = oportunista.
 | T-534 | Property tests de SCIM: secuencias aleatorias de eventos con timestamps desordenados vs invariantes | tests | P1 | todo |
 | T-535 | Bench de fallo parcial: upstream degradado + DLQ creciendo + breaker disparando, lecturas sin degradarse | tests | P1 | todo |
 
+### Evidencia de ejecución (filas §9 de la ola 7)
+
+| Ticket | Evidencia / desviaciones |
+| --- | --- |
+| T-510 (parcial) | Fix de cardinalidad de k6-soak: tags `name` fijos en los 4 requests (el runId en la URL de /v1/status minteaba una serie por poll — 800k series, k6 ~100MB con riesgo de morir antes de las 24h; ahora O(4) series y k6 plano). Humo de 3m validado sin warnings; el "creció" del heap en ventana de 3m es artefacto de calentamiento (RSS bajó −3.3%) — el arnés está diseñado para ≥1h. Soak de 24h RELANZADO con DB fresca y pools acotados; el ticket cierra cuando el veredicto aterrice en SOAK.md y se anexe a REPORT-W6. |
+| T-500 | El censo reveló trabajo MENOR al especificado: todos los caminos engine-driven YA estampaban fila de versión real (schedule, subworkflow, trigger ingest, backfill del breaker), y los doc-posted (/start, MCP, packs) igualan la convención doc-id DE NODE (verificado en reads.ts). La divergencia real era la SEMÁNTICA DE CONTEO: el pilot contaba con OR generoso donde Node cuenta SOLO runs version-linked (INNER JOIN). Alineados `ListWorkflowRows` + `ListDeletedWorkflowRows` (count + lateral); la atribución de salud intacta (su coalesce ya prefería la fila real — compat histórica de T-181). Comparador: las 2 divergencias de workflow-trash ELIMINADAS — dual 27/27 con trash OK limpio re-verificado. `TestVersionAttributionSemantics` nuevo; `TestWorkflowReadSurfaces` actualizado con nota. |
+
+
 ### Especificaciones
 
 ### T-500 · Version-id real en `/start` — P0
