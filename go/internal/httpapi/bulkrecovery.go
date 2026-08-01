@@ -249,7 +249,8 @@ func (s *V1Server) bulkReplayCore(r *http.Request, rc v1Request) opResult {
 			errorsOut = append(errorsOut, map[string]any{"deadLetterId": id, "error": "DLQ entry already " + item.Status})
 			continue
 		}
-		if err := s.engine.RedriveDeadLetter(r.Context(), rc.orgID, id); err != nil {
+		if err := s.engine.RedriveDeadLetterWithOptions(r.Context(), rc.orgID, id,
+			engine.RedriveOptions{RequestedBy: rc.userID}); err != nil {
 			errorsOut = append(errorsOut, map[string]any{"deadLetterId": id, "error": err.Error()})
 			continue
 		}
@@ -351,7 +352,7 @@ func (s *V1Server) clusterApplyCore(r *http.Request, rc v1Request) opResult {
 			})
 			continue
 		}
-		opts := engine.RedriveOptions{SignatureOverride: body.ClusterSignature}
+		opts := engine.RedriveOptions{SignatureOverride: body.ClusterSignature, RequestedBy: rc.userID}
 		if fixAppliesToMember(fix, item.WorkflowJson, item.NodeID) {
 			opts.FixWorkflowJSON = fixJSON
 			if hasClaim && id == body.RecoveryPlaybookDeadLetterID {

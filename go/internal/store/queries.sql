@@ -1340,3 +1340,46 @@ SELECT id, status FROM recovery_items WHERE org_id = $1 AND dead_letter_id = $2;
 -- name: UpdateRunWorkflowSnapshot :exec
 UPDATE runs SET input_json = jsonb_set(input_json, '{workflow}', sqlc.arg(workflow)::jsonb)
 WHERE id = $1;
+
+-- name: QueryRecurredClusterSignatures :many
+WITH recovered_items AS (
+  SELECT item.id AS item_id, item.error_signature, min(impact.recovered_at) AS recovered_at
+  FROM recovery_impact_events impact
+  JOIN runs impact_run ON impact_run.id = impact.run_id AND impact_run.org_id = impact.org_id
+  JOIN recovery_items item ON item.org_id = impact.org_id AND item.dead_letter_id = impact.dead_letter_id
+  WHERE impact.org_id = $1 AND impact.recovered_at >= $2 AND impact_run.replay_mode IS NULL
+    AND item.error_signature IS NOT NULL
+  GROUP BY item.id, item.error_signature
+)
+SELECT DISTINCT recovered.error_signature::text AS signature
+FROM recovered_items recovered
+WHERE EXISTS (
+  SELECT 1 FROM recovery_items later_item
+  JOIN dead_letters later_dlq ON later_dlq.org_id = later_item.org_id AND later_dlq.id = later_item.dead_letter_id
+  JOIN runs later_run ON later_run.id = later_dlq.run_id AND later_run.org_id = later_item.org_id
+  WHERE later_item.org_id = $1 AND later_item.id <> recovered.item_id
+    AND later_item.error_signature = recovered.error_signature
+    AND later_item.first_occurred_at > recovered.recovered_at
+    AND later_item.first_occurred_at <= recovered.recovered_at + interval '7 days'
+    AND later_run.replay_mode IS NULL
+);
+
+-- name: QueryRecoveryHeatmap :many
+SELECT to_char(date_trunc('day', dl.created_at), 'YYYY-MM-DD')::text AS day,
+       count(*)::int AS failures,
+       count(impact.dead_letter_id)::int AS recovered,
+       (coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY impact.downtime_ended_ms), 0) / 1000)::float8 AS mttr_seconds
+FROM dead_letters dl
+JOIN runs r ON r.id = dl.run_id AND r.org_id = dl.org_id
+LEFT JOIN recovery_impact_events impact ON impact.dead_letter_id = dl.id AND impact.org_id = dl.org_id
+WHERE dl.org_id = $1 AND dl.created_at >= $2 AND r.replay_mode IS NULL
+GROUP BY date_trunc('day', dl.created_at)
+ORDER BY date_trunc('day', dl.created_at) ASC
+LIMIT 90;
+
+-- name: QueryOperatorRecoveryCount :one
+SELECT count(*)::int AS recovered
+FROM recovery_impact_events impact
+JOIN runs r ON r.id = impact.run_id AND r.org_id = impact.org_id
+WHERE impact.org_id = $1 AND impact.user_id = $2
+  AND impact.recovered_at >= $3 AND r.replay_mode IS NULL;

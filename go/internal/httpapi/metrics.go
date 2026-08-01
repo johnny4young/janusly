@@ -6,6 +6,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"time"
@@ -20,11 +21,21 @@ func (s *V1Server) recoveryMetricsCore(r *http.Request, rc v1Request) opResult {
 			windowDays = min(90, max(1, parsed))
 		}
 	}
-	stats, err := store.New(s.pool).QueryVerifiedRecoveryStats(r.Context(), store.QueryVerifiedRecoveryStatsParams{
-		OrgID: rc.orgID, WindowDays: int32(windowDays),
-	})
+	value, err := s.recoveryMetricsValue(r.Context(), rc.orgID, windowDays)
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+	}
+	return opOK(value)
+}
+
+// recoveryMetricsValue is the shared read-model body (the focused route
+// and the coalesced Home snapshot must not drift).
+func (s *V1Server) recoveryMetricsValue(ctx context.Context, orgID string, windowDays int) (map[string]any, error) {
+	stats, err := store.New(s.pool).QueryVerifiedRecoveryStats(ctx, store.QueryVerifiedRecoveryStatsParams{
+		OrgID: orgID, WindowDays: int32(windowDays),
+	})
+	if err != nil {
+		return nil, err
 	}
 	// The query encodes "no sample" as -1 so sqlc scans a plain float.
 	numberOrNull := func(value float64) any {
@@ -36,11 +47,11 @@ func (s *V1Server) recoveryMetricsCore(r *http.Request, rc v1Request) opResult {
 	// Operations LLM cost rollup: exact totals over the whole window,
 	// bounded to 100 provider/model groups plus one explicit remainder.
 	since := time.Now().UTC().AddDate(0, 0, -windowDays)
-	costRows, err := store.New(s.pool).QueryCostByProvider(r.Context(), store.QueryCostByProviderParams{
-		TargetOrg: rc.orgID, Since: since,
+	costRows, err := store.New(s.pool).QueryCostByProvider(ctx, store.QueryCostByProviderParams{
+		TargetOrg: orgID, Since: since,
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return nil, err
 	}
 	costByProvider := make([]map[string]any, 0, len(costRows))
 	for _, row := range costRows {
@@ -52,7 +63,7 @@ func (s *V1Server) recoveryMetricsCore(r *http.Request, rc v1Request) opResult {
 			"calls":                    row.Calls, "aggregated": row.Aggregated,
 		})
 	}
-	return opOK(map[string]any{
+	return map[string]any{
 		"verifiedRecovery": map[string]any{
 			"metric":     "verifiedRecovery",
 			"unit":       "ms",
@@ -63,5 +74,5 @@ func (s *V1Server) recoveryMetricsCore(r *http.Request, rc v1Request) opResult {
 		"mttrMs":         numberOrNull(stats.MttrAvgMs),
 		"windowDays":     windowDays,
 		"costByProvider": costByProvider,
-	})
+	}, nil
 }

@@ -6,6 +6,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -22,21 +23,38 @@ func (s *V1Server) clustersCore(r *http.Request, rc v1Request) opResult {
 			windowDays = min(90, max(1, parsed))
 		}
 	}
-	since := time.Now().UTC().AddDate(0, 0, -windowDays)
-	ctx := r.Context()
-	q := store.New(s.pool)
-
-	deadLetters, err := q.ListDeadLetterFailureSamples(ctx, store.ListDeadLetterFailureSamplesParams{
-		OrgID: rc.orgID, CreatedAt: &since,
-	})
+	value, err := s.failureClustersValue(r.Context(), rc.orgID, windowDays)
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
 	}
-	failedNodes, err := q.ListFailedRunNodeSamples(ctx, store.ListFailedRunNodeSamplesParams{
-		OrgID: rc.orgID, FinishedAt: &since,
+	return opOK(value)
+}
+
+// homeCluster decorates the pure aggregation with the REAL post-recovery
+// recurrence flag: the signature recovered with terminal impact inside
+// the window and re-occurred within its 7-day monitoring window.
+type homeCluster struct {
+	signature.FailureCluster
+	RecurredAfterRecovery bool `json:"recurredAfterRecovery"`
+}
+
+// failureClustersValue is the shared clusters read-model (focused route +
+// Home snapshot).
+func (s *V1Server) failureClustersValue(ctx context.Context, orgID string, windowDays int) (map[string]any, error) {
+	since := time.Now().UTC().AddDate(0, 0, -windowDays)
+	q := store.New(s.pool)
+
+	deadLetters, err := q.ListDeadLetterFailureSamples(ctx, store.ListDeadLetterFailureSamplesParams{
+		OrgID: orgID, CreatedAt: &since,
 	})
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return nil, err
+	}
+	failedNodes, err := q.ListFailedRunNodeSamples(ctx, store.ListFailedRunNodeSamplesParams{
+		OrgID: orgID, FinishedAt: &since,
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	samples := make([]signature.FailureSample, 0, len(deadLetters)+len(failedNodes))
@@ -63,11 +81,27 @@ func (s *V1Server) clustersCore(r *http.Request, rc v1Request) opResult {
 		samples = append(samples, sample)
 	}
 
-	return opOK(map[string]any{
-		"clusters":     signature.ClusterFailureSamples(samples),
+	recurredRows, err := q.QueryRecurredClusterSignatures(ctx, store.QueryRecurredClusterSignaturesParams{
+		OrgID: orgID, RecoveredAt: since,
+	})
+	if err != nil {
+		return nil, err
+	}
+	recurred := make(map[string]bool, len(recurredRows))
+	for _, sig := range recurredRows {
+		recurred[sig] = true
+	}
+	clusters := make([]homeCluster, 0)
+	for _, cluster := range signature.ClusterFailureSamples(samples) {
+		clusters = append(clusters, homeCluster{
+			FailureCluster: cluster, RecurredAfterRecovery: recurred[cluster.Signature],
+		})
+	}
+	return map[string]any{
+		"clusters":     clusters,
 		"totalSamples": len(samples),
 		"windowDays":   windowDays,
-	})
+	}, nil
 }
 
 // enrichSampleFromRunInput reads workflow identity + failing-node type/tool

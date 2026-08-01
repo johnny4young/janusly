@@ -5232,6 +5232,27 @@ func (q *Queries) QueryCostByProvider(ctx context.Context, arg QueryCostByProvid
 	return items, nil
 }
 
+const queryOperatorRecoveryCount = `-- name: QueryOperatorRecoveryCount :one
+SELECT count(*)::int AS recovered
+FROM recovery_impact_events impact
+JOIN runs r ON r.id = impact.run_id AND r.org_id = impact.org_id
+WHERE impact.org_id = $1 AND impact.user_id = $2
+  AND impact.recovered_at >= $3 AND r.replay_mode IS NULL
+`
+
+type QueryOperatorRecoveryCountParams struct {
+	OrgID       string
+	UserID      pgtype.Text
+	RecoveredAt time.Time
+}
+
+func (q *Queries) QueryOperatorRecoveryCount(ctx context.Context, arg QueryOperatorRecoveryCountParams) (int32, error) {
+	row := q.db.QueryRow(ctx, queryOperatorRecoveryCount, arg.OrgID, arg.UserID, arg.RecoveredAt)
+	var recovered int32
+	err := row.Scan(&recovered)
+	return recovered, err
+}
+
 const queryQueueHealth = `-- name: QueryQueueHealth :one
 WITH eligible AS (
   SELECT rn.id, rn.run_id, rn.node_id
@@ -5274,6 +5295,106 @@ func (q *Queries) QueryQueueHealth(ctx context.Context) (QueryQueueHealthRow, er
 	var i QueryQueueHealthRow
 	err := row.Scan(&i.Waiting, &i.Active, &i.OldestEligibleAt)
 	return i, err
+}
+
+const queryRecoveryHeatmap = `-- name: QueryRecoveryHeatmap :many
+SELECT to_char(date_trunc('day', dl.created_at), 'YYYY-MM-DD')::text AS day,
+       count(*)::int AS failures,
+       count(impact.dead_letter_id)::int AS recovered,
+       (coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY impact.downtime_ended_ms), 0) / 1000)::float8 AS mttr_seconds
+FROM dead_letters dl
+JOIN runs r ON r.id = dl.run_id AND r.org_id = dl.org_id
+LEFT JOIN recovery_impact_events impact ON impact.dead_letter_id = dl.id AND impact.org_id = dl.org_id
+WHERE dl.org_id = $1 AND dl.created_at >= $2 AND r.replay_mode IS NULL
+GROUP BY date_trunc('day', dl.created_at)
+ORDER BY date_trunc('day', dl.created_at) ASC
+LIMIT 90
+`
+
+type QueryRecoveryHeatmapParams struct {
+	OrgID     string
+	CreatedAt *time.Time
+}
+
+type QueryRecoveryHeatmapRow struct {
+	Day         string
+	Failures    int32
+	Recovered   int32
+	MttrSeconds float64
+}
+
+func (q *Queries) QueryRecoveryHeatmap(ctx context.Context, arg QueryRecoveryHeatmapParams) ([]QueryRecoveryHeatmapRow, error) {
+	rows, err := q.db.Query(ctx, queryRecoveryHeatmap, arg.OrgID, arg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []QueryRecoveryHeatmapRow
+	for rows.Next() {
+		var i QueryRecoveryHeatmapRow
+		if err := rows.Scan(
+			&i.Day,
+			&i.Failures,
+			&i.Recovered,
+			&i.MttrSeconds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const queryRecurredClusterSignatures = `-- name: QueryRecurredClusterSignatures :many
+WITH recovered_items AS (
+  SELECT item.id AS item_id, item.error_signature, min(impact.recovered_at) AS recovered_at
+  FROM recovery_impact_events impact
+  JOIN runs impact_run ON impact_run.id = impact.run_id AND impact_run.org_id = impact.org_id
+  JOIN recovery_items item ON item.org_id = impact.org_id AND item.dead_letter_id = impact.dead_letter_id
+  WHERE impact.org_id = $1 AND impact.recovered_at >= $2 AND impact_run.replay_mode IS NULL
+    AND item.error_signature IS NOT NULL
+  GROUP BY item.id, item.error_signature
+)
+SELECT DISTINCT recovered.error_signature::text AS signature
+FROM recovered_items recovered
+WHERE EXISTS (
+  SELECT 1 FROM recovery_items later_item
+  JOIN dead_letters later_dlq ON later_dlq.org_id = later_item.org_id AND later_dlq.id = later_item.dead_letter_id
+  JOIN runs later_run ON later_run.id = later_dlq.run_id AND later_run.org_id = later_item.org_id
+  WHERE later_item.org_id = $1 AND later_item.id <> recovered.item_id
+    AND later_item.error_signature = recovered.error_signature
+    AND later_item.first_occurred_at > recovered.recovered_at
+    AND later_item.first_occurred_at <= recovered.recovered_at + interval '7 days'
+    AND later_run.replay_mode IS NULL
+)
+`
+
+type QueryRecurredClusterSignaturesParams struct {
+	OrgID       string
+	RecoveredAt time.Time
+}
+
+func (q *Queries) QueryRecurredClusterSignatures(ctx context.Context, arg QueryRecurredClusterSignaturesParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, queryRecurredClusterSignatures, arg.OrgID, arg.RecoveredAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var signature string
+		if err := rows.Scan(&signature); err != nil {
+			return nil, err
+		}
+		items = append(items, signature)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const queryVerifiedRecoveryStats = `-- name: QueryVerifiedRecoveryStats :one

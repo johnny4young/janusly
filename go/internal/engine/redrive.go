@@ -35,6 +35,9 @@ type RedriveOptions struct {
 	ValidationRunID   string
 	FixWorkflowJSON   []byte
 	SignatureOverride string
+	// RequestedBy attributes the eventual terminal-impact win to the
+	// operator who initiated the replay (the reference's recoveryActorId).
+	RequestedBy string
 }
 
 // RedriveDeadLetter revives the run behind one dead letter: claim the row,
@@ -103,7 +106,7 @@ func (e *Engine) RedriveDeadLetterWithOptions(ctx context.Context, orgID, deadLe
 	if err := q.StampRedriveRecoveryClaim(ctx, store.StampRedriveRecoveryClaimParams{
 		RunID: deadLetter.RunID, NodeID: deadLetter.NodeID,
 		RecoveryDeadLetterID:    pgtype.Text{String: deadLetterID, Valid: true},
-		RecoveryRequestedBy:     pgtype.Text{},
+		RecoveryRequestedBy:     pgtype.Text{String: opts.RequestedBy, Valid: opts.RequestedBy != ""},
 		RecoveryClaimToken:      pgtype.Text{String: e.newID(), Valid: true},
 		RecoveryPlaybookID:      pgtype.Text{String: playbookID, Valid: playbookID != ""},
 		RecoveryValidationRunID: pgtype.Text{String: validationRunID, Valid: validationRunID != ""},
@@ -130,12 +133,10 @@ func (e *Engine) RedriveDeadLetterWithOptions(ctx context.Context, orgID, deadLe
 	// signature for clustering. Resolution happens ONLY at terminal
 	// success (recordRecoveryImpact) — initiation opens work, never wins.
 	signature := opts.SignatureOverride
-	if signature == "" && len(deadLetter.ErrorJson) > 0 {
-		var serr struct {
-			Message string `json:"message"`
-		}
-		_ = json.Unmarshal(deadLetter.ErrorJson, &serr)
-		signature = serr.Message
+	if signature == "" {
+		// The NORMALIZED signature (same normalizer as /dlq/clusters), so
+		// item-level recurrence matching lines up with cluster signatures.
+		signature = DeadLetterSignature(deadLetter)
 	}
 	workflowID := ""
 	var wfDoc struct {

@@ -163,6 +163,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	server.mountRecoveryItemRoutes(mux)
 	server.mountRecoveryQueueRoutes(mux)
 	server.mountBulkRecoveryRoutes(mux)
+	server.mountRecoveryHomeRoutes(mux)
 	server.mountAiPatchRoutes(mux)
 	return WithBrowserHeaders(mux)
 }
@@ -1015,8 +1016,11 @@ func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 				"Recovery Playbook replay evidence cannot be verified", nil)
 		}
 	}
-	if err := s.engine.RedriveDeadLetterWithPlaybook(r.Context(), rc.orgID, body.DeadLetterID,
-		body.RecoveryPlaybookID, body.RecoveryValidationRunID); err != nil {
+	if err := s.engine.RedriveDeadLetterWithOptions(r.Context(), rc.orgID, body.DeadLetterID,
+		engine.RedriveOptions{
+			PlaybookID: body.RecoveryPlaybookID, ValidationRunID: body.RecoveryValidationRunID,
+			RequestedBy: rc.userID,
+		}); err != nil {
 		switch {
 		case errors.Is(err, engine.ErrDeadLetterNotFound):
 			return opError(http.StatusNotFound, "dlq_not_found", "Dead letter not found", nil)
