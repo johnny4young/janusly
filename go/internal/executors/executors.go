@@ -14,6 +14,7 @@ import (
 	"fmt"
 
 	"github.com/johnny4young/janusly/go/internal/grammar"
+	"github.com/johnny4young/janusly/go/internal/tools"
 )
 
 // Input carries one execution's rendered config and run context, plus the
@@ -42,6 +43,9 @@ type Input struct {
 	Memory *MemoryDeps
 	// Mcp carries the dispatcher-built MCP client seam (mcp_tool nodes).
 	Mcp *McpDeps
+	// Integrations carries the engine-built chokepoint seams (credential
+	// gate + usage recorder + guarded egress) for integration tools.
+	Integrations *tools.IntegrationDeps
 	// DryRun marks a validation (sandbox) execution: write-side tools and
 	// sensitive http methods SKIP instead of producing external effects.
 	DryRun bool

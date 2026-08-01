@@ -24,6 +24,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/prompts"
 	"github.com/johnny4young/janusly/go/internal/ratelimit"
 	"github.com/johnny4young/janusly/go/internal/store"
+	"github.com/johnny4young/janusly/go/internal/tools"
 )
 
 // Dispatcher resolves and executes one claimed node at a time.
@@ -122,6 +123,10 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 	if node.Type == "tool" || node.Type == "agent" || node.Type == "multi_agent" {
 		memoryDeps = d.buildMemoryDeps(ctx, claim, wf.ID)
 	}
+	var integrationDeps *tools.IntegrationDeps
+	if node.Type == "tool" || node.Type == "agent" || node.Type == "multi_agent" {
+		integrationDeps = d.engine.buildIntegrationDeps(claim.OrgID, claim.RunID, claim.NodeID)
+	}
 	var mcpDeps *executors.McpDeps
 	if node.Type == "mcp_tool" {
 		mcpDeps = &executors.McpDeps{
@@ -137,7 +142,7 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 	}
 	output, execErr := execute(ctx, executors.Input{
 		RunID: claim.RunID, NodeID: claim.NodeID,
-		Config: renderedConfig, Context: runContext, HTTPBounds: httpBounds, AI: aiDeps, Memory: memoryDeps, Mcp: mcpDeps, DryRun: dryRun,
+		Config: renderedConfig, Context: runContext, HTTPBounds: httpBounds, AI: aiDeps, Memory: memoryDeps, Mcp: mcpDeps, Integrations: integrationDeps, DryRun: dryRun,
 		Emit: func(eventType string, payload map[string]any) string {
 			eventAt := eventNow()
 			raw, err := json.Marshal(payload)

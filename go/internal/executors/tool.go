@@ -38,6 +38,14 @@ func NewToolExecutor(registry *tools.Registry) Func {
 			}}, nil
 		}
 
+		// Integration tools ride the shared chokepoint seams (credential
+		// gate + rate limit + usage + guarded egress). The dry-run skip
+		// above already covered their write side.
+		if tools.IsIntegrationTool(name) {
+			return map[string]any{"tool": name,
+				"result": tools.ExecuteIntegrationTool(ctx, name, input, in.Integrations)}, nil
+		}
+
 		output, err := registry.Execute(ctx, name, input)
 		result := map[string]any{"ok": true}
 		if err != nil {
