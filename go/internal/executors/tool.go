@@ -2,6 +2,11 @@
 // and returns the reference's envelope shape {tool, result}. resultPolicy
 // "require_ok" fails the node on an unsuccessful envelope; the default
 // "envelope" hands the result downstream for the workflow to branch on.
+//
+// executeRegisteredTool is the ONE interception ladder (vector seams →
+// dry-run write-side skip → integration chokepoint → plain registry) —
+// the tool node and the for_each loop both dispatch through it, so a tool
+// behaves identically no matter which node invoked it.
 package executors
 
 import (
@@ -10,6 +15,35 @@ import (
 
 	"github.com/johnny4young/janusly/go/internal/tools"
 )
+
+// executeRegisteredTool runs one tool invocation through the shared
+// interception ladder and ALWAYS answers an envelope map — a thrown
+// registry error becomes {ok:false, error} (callers needing hard failure
+// semantics, like require_ok, re-raise from the envelope).
+func executeRegisteredTool(ctx context.Context, registry *tools.Registry, name string, input map[string]any, in Input) map[string]any {
+	if name == "vector.search" || name == "vector.upsert" {
+		return executeVectorTool(name, input, in.Memory)
+	}
+	// The sandbox gate: a validation replay must not produce external
+	// effects — every registered write-side tool skips cooperatively.
+	if in.DryRun && registry.IsWriteSide(name) {
+		return map[string]any{"ok": true, "skipped": true, "reason": "validation_dry_run"}
+	}
+	// Integration tools ride the shared chokepoint seams (credential gate
+	// + rate limit + usage + guarded egress).
+	if tools.IsIntegrationTool(name) {
+		return tools.ExecuteIntegrationTool(ctx, name, input, in.Integrations)
+	}
+	output, err := registry.Execute(ctx, name, input)
+	if err != nil {
+		return map[string]any{"ok": false, "error": err.Error()}
+	}
+	result := map[string]any{"ok": true}
+	for key, value := range output {
+		result[key] = value
+	}
+	return result
+}
 
 // NewToolExecutor builds the tool-node executor over a registry.
 func NewToolExecutor(registry *tools.Registry) Func {
@@ -24,39 +58,10 @@ func NewToolExecutor(registry *tools.Registry) Func {
 		}
 		policy, _ := in.Config["resultPolicy"].(string)
 
-		// Vector tools are org-scoped: the executor intercepts them with
-		// the engine-built memory seams before generic dispatch.
-		if name == "vector.search" || name == "vector.upsert" {
-			return map[string]any{"tool": name, "result": executeVectorTool(name, input, in.Memory)}, nil
-		}
-
-		// The sandbox gate: a validation replay must not produce external
-		// effects — every registered write-side tool skips cooperatively.
-		if in.DryRun && registry.IsWriteSide(name) {
-			return map[string]any{"tool": name, "result": map[string]any{
-				"ok": true, "skipped": true, "reason": "validation_dry_run",
-			}}, nil
-		}
-
-		// Integration tools ride the shared chokepoint seams (credential
-		// gate + rate limit + usage + guarded egress). The dry-run skip
-		// above already covered their write side.
-		if tools.IsIntegrationTool(name) {
-			return map[string]any{"tool": name,
-				"result": tools.ExecuteIntegrationTool(ctx, name, input, in.Integrations)}, nil
-		}
-
-		output, err := registry.Execute(ctx, name, input)
-		result := map[string]any{"ok": true}
-		if err != nil {
-			result = map[string]any{"ok": false, "error": err.Error()}
-			if policy == "require_ok" {
-				return nil, fmt.Errorf("Tool %s returned an unsuccessful result: %s", name, err.Error()) //nolint:staticcheck // reference message is the wire contract
-			}
-		} else {
-			for key, value := range output {
-				result[key] = value
-			}
+		result := executeRegisteredTool(ctx, registry, name, input, in)
+		if result["ok"] == false && policy == "require_ok" {
+			message, _ := result["error"].(string)
+			return nil, fmt.Errorf("Tool %s returned an unsuccessful result: %s", name, message) //nolint:staticcheck // reference message is the wire contract
 		}
 		return map[string]any{"tool": name, "result": result}, nil
 	}

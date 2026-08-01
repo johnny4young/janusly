@@ -385,10 +385,12 @@ func TestLoopStringItemsSplitOnCommas(t *testing.T) {
 	}
 }
 
-func TestLoopForEachModeIsHonestlyUnsupported(t *testing.T) {
+func TestLoopUnknownModeIsHonestlyUnsupported(t *testing.T) {
+	// for_each became executable (T-174); only a mode OUTSIDE the closed
+	// set keeps the honest failure.
 	ctx, pool, eng, org := newHarness(t)
 	doc := `{"nodes":[{"id":"fan","type":"loop","config":{
-		"mode":"for_each","tool":"json.parse","items":["x"]
+		"mode":"while","tool":"json.parse","items":["x"]
 	}}],"edges":[]}`
 	runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: mustParse(t, doc)})
 	if err != nil {
@@ -398,6 +400,6 @@ func TestLoopForEachModeIsHonestlyUnsupported(t *testing.T) {
 	var errorJSON []byte
 	_ = pool.QueryRow(ctx, "select error_json from run_nodes where run_id=$1", runID).Scan(&errorJSON)
 	if !strings.Contains(string(errorJSON), "not executable by this backend yet") {
-		t.Fatalf("for_each must fail honestly: %s", errorJSON)
+		t.Fatalf("unknown loop mode must fail honestly: %s", errorJSON)
 	}
 }

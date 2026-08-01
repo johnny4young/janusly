@@ -92,7 +92,7 @@ func Registry() map[string]Func {
 		"human_form":         executeHumanForm,
 		"http":               NewHTTPExecutor(HTTPOptions{}),
 		"parallel_fork":      executeParallelFork,
-		"loop":               executeLoop,
+		"loop":               NewLoopExecutor(toolRegistry),
 		"join":               executeJoin,
 		"webhook_received":   executeWebhookReceived,
 		"pagerduty_incident": executePagerDutyIncident,

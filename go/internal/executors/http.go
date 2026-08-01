@@ -217,6 +217,9 @@ type ExecErrorShape struct {
 	Name       string
 	Code       string
 	StatusCode int
+	// WriteSide marks an error raised after external effects may have
+	// happened; the engine's retry ladder refuses whole-node retries.
+	WriteSide bool
 }
 
 func (e *ExecErrorShape) Error() string { return e.Message }

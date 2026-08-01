@@ -187,16 +187,27 @@ func redactExecError(execErr error, redactedValues []string) error {
 	message := grammar.RedactString(execErr.Error(), redactedValues)
 	var rich richError
 	if errors.As(execErr, &rich) {
-		return &ExecError{
+		out := &ExecError{
 			Message: message, Name: rich.ErrorName(),
 			Code: rich.ErrorCode(), StatusCode: rich.ErrorStatusCode(),
 		}
+		if flagged, ok := execErr.(interface{ ErrorWriteSide() bool }); ok {
+			out.WriteSide = flagged.ErrorWriteSide()
+		}
+		out.WriteSide = out.WriteSide || errorCarriesWriteSide(execErr)
+		return out
 	}
 	var config *executors.ConfigError
 	if errors.As(execErr, &config) {
 		return &ExecError{Message: message, Name: "WaitingConfigError", Code: config.Code}
 	}
 	return errors.New(message)
+}
+
+// errorCarriesWriteSide walks wrapped errors for the write-side marker.
+func errorCarriesWriteSide(execErr error) bool {
+	var shape *executors.ExecErrorShape
+	return errors.As(execErr, &shape) && shape.WriteSide
 }
 
 // recordUnresolvedPaths appends the bounded, deduplicated evidence event and

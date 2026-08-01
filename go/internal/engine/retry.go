@@ -21,6 +21,11 @@ type ExecError struct {
 	Name       string
 	Code       string
 	StatusCode int
+	// WriteSide marks an error raised AFTER external effects may have
+	// happened (reference runtime.ts: error.writeSide) — the retry ladder
+	// must not whole-node retry it; operator-gated replay is safer than
+	// duplicate external effects.
+	WriteSide bool
 }
 
 func (e *ExecError) Error() string { return e.Message }
@@ -38,6 +43,9 @@ func serializeError(err error) map[string]any {
 		}
 		if exec.StatusCode != 0 {
 			out["statusCode"] = exec.StatusCode
+		}
+		if exec.WriteSide {
+			out["writeSide"] = true
 		}
 		return out
 	}
