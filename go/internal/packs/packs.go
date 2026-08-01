@@ -38,6 +38,19 @@ type SamplePayload struct {
 	Input map[string]any `json:"input"`
 }
 
+// FailureFixture describes one curated failure scenario bundled with the
+// pack (the recovery walkthrough's raw material). Public projection =
+// id/label/description/failureMode/recoveryPath, the reference's
+// FailureFixturePublic; failedNodeId stays internal.
+type FailureFixture struct {
+	ID           string `json:"id"`
+	Label        string `json:"label"`
+	Description  string `json:"description"`
+	FailureMode  string `json:"failureMode"`
+	RecoveryPath string `json:"recoveryPath"`
+	FailedNodeID string `json:"failedNodeId"`
+}
+
 // SolutionPack is one validated catalog entry.
 type SolutionPack struct {
 	ID                  string               `json:"id"`
@@ -49,6 +62,11 @@ type SolutionPack struct {
 	RequiredOrgConfigs  []RequiredOrgConfig  `json:"requiredOrgConfigs"`
 	WorkflowJSON        json.RawMessage      `json:"workflowJson"`
 	SamplePayloads      []SamplePayload      `json:"samplePayloads"`
+	FailureFixtures     []FailureFixture     `json:"failureFixtures"`
+
+	// NodeCount is computed at init from the parsed workflow (the public
+	// catalog projection needs it without re-parsing per request).
+	NodeCount int `json:"-"`
 }
 
 var (
@@ -73,9 +91,11 @@ func init() {
 		if pack.ID == "" || len(pack.SamplePayloads) == 0 {
 			panic(fmt.Sprintf("solution-packs: %s: missing id or samplePayloads", entry.Name()))
 		}
-		if wf, _ := domain.Parse(pack.WorkflowJSON); wf == nil {
+		wf, _ := domain.Parse(pack.WorkflowJSON)
+		if wf == nil {
 			panic(fmt.Sprintf("solution-packs: %s: workflowJson failed the domain parser", entry.Name()))
 		}
+		pack.NodeCount = len(wf.Nodes)
 		if _, duplicate := byID[pack.ID]; duplicate {
 			panic(fmt.Sprintf("solution-packs: duplicate id %s", pack.ID))
 		}

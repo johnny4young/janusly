@@ -390,3 +390,42 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
     upstream.close()
   }
 })
+
+test('every workspace tab mounts against Go without page errors', async ({ page, request }) => {
+  test.setTimeout(180_000)
+  const orgId = `go-smoke-tabs-${Date.now()}`
+  const pageErrors: string[] = []
+  page.on('pageerror', (error) => pageErrors.push(String(error)))
+
+  await seed(request, orgId)
+
+  // Every ActiveTab except recoveryCase (needs a selected durable case;
+  // the store itself resets it to home on reload). Feature panels whose
+  // backend surface is a documented F1 divergence must DEGRADE — render
+  // their friendly empty/error state — never throw.
+  const tabs = [
+    'home', 'recover', 'workflows', 'members', 'copilot', 'experiments',
+    'marketplace', 'templates', 'packs', 'credentials', 'inspector',
+    'runs', 'reasoning', 'multiAgent', 'operations',
+  ] as const
+
+  for (const tab of tabs) {
+    await page.addInitScript(({ activeOrg, activeTab }) => {
+      window.localStorage.setItem('janusly:activeOrg', activeOrg)
+      window.localStorage.setItem('janusly:locale', 'en')
+      window.localStorage.setItem('janusly:activeTab', activeTab)
+    }, { activeOrg: orgId, activeTab: tab })
+    await page.goto('/')
+    // The shell must render real content for the tab (an empty #root or a
+    // white screen is a failed mount even if nothing threw).
+    await expect(page.locator('#root > *').first(), `tab ${tab} must mount`).toBeVisible()
+    if (tab === 'packs') {
+      // Not just "didn't crash": the catalog card renders from Go's
+      // reference-shaped pack projection (the boundary fallback would
+      // swallow a shape drift silently).
+      await expect(page.getByTestId('solution-pack-incident-triage')).toBeVisible()
+    }
+    await page.waitForTimeout(400)
+    expect(pageErrors, `tab ${tab} page errors: ${pageErrors.join('; ')}`).toHaveLength(0)
+  }
+})

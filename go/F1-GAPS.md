@@ -1,87 +1,62 @@
-# F1 — inventario de gaps: el web real contra Go
+# F1 — inventario de gaps: el web real contra Go (ESTADO TERMINAL)
 
-Fecha: 2026-07-30 · Fuente: lectura estática de `apps/web/src/api.ts` +
-`packages/shared/src/api-contract.ts` en el pin, contrastada con la
-superficie Go actual. Deliverable de T-029; los tickets T-030..T-035 se
-ejecutan contra esta tabla.
+Cierre: 2026-08-01 (T-183) · Método: enumeración de TODOS los call sites
+`api()` / `downloadFromApi()` de `apps/web/src` en el pin, sondeados contra
+el binario Go corriendo (dev-headers), con el wire real del cliente:
+**GETs del set `V1_READ_PATHS` van a `/v1` con envelope; todo lo demás
+(mutaciones Y lecturas fuera del set) va legacy crudo; `downloadFromApi`
+siempre va crudo sin `/v1`.**
 
-## Cómo habla el web (verificado en fuente)
+## Cómo habla el web (verificado en fuente — sin cambios)
 
 1. `VITE_API_URL` (default `:3001`) — apuntar a Go = una variable.
-2. Dev-headers `x-org-id: default` + `x-user-id: dev-user` en cada request
-   (compatibles con el auth del pilot tal cual). Supabase JWT solo si hay
-   sesión — fuera del alcance F1.
-3. **GETs** de la lista `V1_READ_PATHS` viajan con prefijo `/v1` y el
-   cliente des-envuelve `{apiVersion, requestId, data|error}` él mismo
-   (`unwrapVersionedPayload`). Errores v1 → `{error: message, code, params}`.
-4. **Mutaciones (POST/DELETE) van SIEMPRE a rutas legacy** sin envelope
-   (`versionedWirePath` corta en `method !== 'GET'`).
-5. Excepción documentada: `/dlq?id=` (detalle) va legacy aunque `/dlq` esté
-   en el set v1.
-6. El wrapper degrada offline-limpio: una ruta ausente (404) o red caída
-   produce mensaje amigable, no crash — los paneles fuera de alcance
-   degradan solos.
+2. Dev-headers `x-org-id: default` + `x-user-id: dev-user` por request.
+3. GETs de `V1_READ_PATHS` → prefijo `/v1`, el cliente des-envuelve
+   `{apiVersion, requestId, data|error}` él mismo.
+4. Mutaciones (POST/DELETE) → SIEMPRE rutas legacy sin envelope.
+5. Excepción documentada: `/dlq?id=` (detalle) va legacy.
+6. El wrapper degrada offline-limpio: 404/red caída → mensaje amigable
+   por panel (`ErrorBoundary`), nunca crash de página.
 
-## Matriz de superficie
+## ✅ Servido (verificado por sondeo + suites)
 
-### ✅ Ya servido por Go (alineado con el set v1 del web)
+Toda la superficie que el web toca en Home / Flows / AI Studio / Activity
+/ Operations responde no-404 en su wire real. Cierres finales de T-183:
 
-`GET /v1/workflows` · `/v1/workflows/latest` · `/v1/workflows/versions` ·
-`/v1/runs` (keyset+filtros) · `/v1/run` · `/v1/status` · `/v1/dlq` (lista).
+| Ruta (wire real) | Cierre |
+| --- | --- |
+| `GET /v1/templates` (+ alias legacy) | catálogo de 15 templates del reference EMBEBIDO VERBATIM (`internal/httpapi/assets/templates.json`, decoración `nameCode`/`descriptionCode`/`categoryCode` incluida) |
+| `GET /v1/workflows/schedule-preview` (+ legacy) | `{valid, nextFires[3]}` sobre `internal/cron`; cron inválido = `{valid:false}`, nunca error |
+| `GET /v1/workflows/health` | alias envelope del core legacy (T-181) |
+| `GET /v1/run/usage` | alias envelope del core legacy (tenancy-first 403 intacto) |
+| `GET /v1/memory/consent-status` | `{enabled, processEnabled, tenantEnabled, purge}`; `purge` derivado del estado durable del pilot (flip de `memory.enabled` + ventana del sweep) en el union del reference (`none/scheduled/running/unknown`) |
+| `GET /recovery/calibration-status` | `{enabled, windowDays:30, minimumSampleSize:20, calibrations}` sobre el repo de calibraciones existente |
+| `GET /mcp/connections` | lista con `toolCount`/`enabledToolCount` por conexión (mismo join del reference) |
 
-### 🔴 Bloqueante F1 — mutaciones legacy (el web NO llama /v1 en POST)
+Verificados como falsos positivos del sondeo (ya servían): rutas con
+path-param sobre entidad inexistente (404 correcto de dominio: metadata/
+folder/tags/restore sobre workflow fantasma, playbooks/items fantasma),
+`/reports/run-explain` (el web lo consume vía `downloadFromApi` crudo —
+servido desde T-147) y `GET /recovery/playbooks` (el web solo POSTea la
+promoción; no existe listado en el cliente).
 
-| Ruta legacy | Forma de respuesta legacy (Node) | Estado Go |
-| --- | --- | --- |
-| `POST /start` | cuerpo crudo (sin envelope) | solo /v1 → **alias legacy pendiente** |
-| `POST /resume` | crudo | ídem |
-| `POST /run/cancel` | crudo `{runId, status}` | ídem |
-| `POST /workflows/save` | crudo `{workflowId, versionId, version}` | ídem |
-| `POST /dlq/replay` | crudo `{ok:true}` | ídem |
+## 🟡 Divergencias documentadas (el panel degrada limpio — probado por el
+## smoke de todos los tabs sin pageerrors)
 
-Diseño: refactor de handlers a `(status, payload, errShape)` + dos
-encoders (legacy crudo / envelope v1). Un handler, dos wires — igual que
-Node. → **T-032**.
+| Superficie | Decisión |
+| --- | --- |
+| `POST /ai/explain-run` · `/ai/explain-workflow` · `/ai/review-workflow` · `/ai/suggest-improvement` · `GET /ai/health` | fuera del corte de la ola 4 (el pilot sirve generate/patch + evidencia); los botones AI secundarios degradan con mensaje amigable → destino: cutover parcial post-pilot |
+| `GET/POST /workflows/{id}/budget` · `GET /billing/budget` · `GET /billing/usage` | el gate de presupuesto del pilot vive en org config (`ai.budgetMonthlyUsd`, T-103); la superficie por-workflow y los paneles billing quedan al cutover (columnas billing del schema son placeholders) |
+| `POST /workflows/{id}/slo` | decisión T-181: el SLO viaja en el save body → `workflow_versions.slo_json`; la ruta dedicada del web degrada (el editor de SLO del canvas usa save) |
+| `GET /recovery/ledger` · `/recovery/my-wins` · `/recovery/cases` | miembros del set v1 que el web de este pin NO llama (contrato superset); la superficie semántica V2 del pilot es `/recovery/home` + `/recovery/items` + métricas |
+| `POST /causal` | panel de razonamiento causal — no entró en ninguna ola del pilot; degrada |
+| `POST /runs/replay-lab` + `/fork` | replay lab UI — diferido (el redrive/replay operativo está cubierto por DLQ/campañas) |
+| `GET /organizations` · `POST /users/me` · `POST /plugins/install` · `POST /auth/invitations/accept` | multi-org switcher / perfil / plugins / aceptación de invitación por página — flujos de identidad secundarios, degradan; destino: cutover de auth completo |
+| `GET /ping` | NO es ruta del servidor Node (falso positivo original) — cerrado |
 
-### ✅ Descubierto y servido en T-035: `GET /auth/context`
+## Cero gaps sin clasificar
 
-El bootstrap de identidad que el web hace ANTES de todo: sin él, el gate de
-permisos del cliente vacía cada lectura a su fallback (el síntoma: app
-montada, feed vacío). El pilot sirve la rama dev-headers de Node: org
-sintética admin (developmentFallback) con las 41 claves del catálogo.
-
-### 🔴 Bloqueante F1 — lecturas fuera del set v1 (legacy directo)
-
-| Ruta | Uso en el web | Nota |
-| --- | --- | --- |
-| `GET /health` | chip de rate-limiter en Operations (poll 20s) | forma pública-segura de Node → T-030 |
-| `GET /org/config` | ajustes de tenant en paneles | lista vacía honesta (org fresca) → T-030 ✅ |
-| `GET /workflows/trash` | papelera de Flows | tras soft-delete → T-033 |
-| `GET /dlq/queue` / `/dlq/counts` | panel DLQ keyset + badges | → T-032/T-044 |
-| `GET /dlq?id=` | detalle de dead letter | legacy por diseño → T-032 |
-| `GET /runs/:id/stream` | vivo del run (SSE) | → T-031 |
-
-### 🟡 Fuera de alcance F1 (degradación limpia esperada, verificar en T-035)
-
-`/ai/*` (generate/patch/explain) · `/credentials` · `/members` ·
-`/org/roles` · `/mcp/connections` · `/org/scim/*` · `/alerts/policies` ·
-`/integrations/*` · `/eval/datasets` · `/recovery/*` (métricas/casos) ·
-`/templates` · `/tools` · `/workflows/tags|folders` · `/organizations` ·
-`/runs/replay-lab` · `/workflows/health` · `/reports/run-explain` ·
-`/run/usage` · `/onboarding` (tarjeta degrada a estado amigable) ·
-`/users/me` (solo existe como POST de perfil en Node; el menú deriva
-identidad de otros datos) · `/ping` (no es ruta del servidor Node —
-falso positivo del inventario inicial).
-
-Los paneles que dependen de estos deben mostrar su estado vacío/error
-amigable, no romper la página (el `ErrorBoundary` por panel de Node ayuda).
-El smoke T-035 verifica exactamente eso.
-
-## Ajustes al plan de la ola
-
-  `/onboarding` (stub honesto).
-- T-032 se concreta: encoders duales + alias de mutaciones legacy + `/dlq`
-  detalle + `/dlq/queue` + `/dlq/counts`.
-- T-035 (smoke Playwright) valida: Home carga, Flows lista/salva, Activity
-  muestra runs, run detail con timeline, y los paneles fuera de alcance
-  degradan sin romper.
+Cada ruta enumerada de `apps/web/src` está en una de las dos tablas de
+arriba. La evidencia ejecutable es `TestF1SweepReadClosures` + el smoke
+Playwright de todos los tabs (`go-pilot-smoke.spec.ts`) vía
+`node go/conformance/run-web-smoke.mjs`.

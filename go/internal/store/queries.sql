@@ -2536,3 +2536,14 @@ VALUES (sqlc.arg(id), sqlc.arg(org_id), sqlc.arg(email), sqlc.arg(email), sqlc.a
 
 -- name: DeleteScimMembershipByEmail :execrows
 DELETE FROM org_members WHERE org_id = $1 AND email = $2;
+
+-- name: ListMcpConnections :many
+SELECT * FROM mcp_connections WHERE org_id = $1 ORDER BY alias ASC LIMIT 200;
+
+-- name: CountMemoryEntriesForOrg :one
+SELECT count(*)::int8 FROM memory_entries WHERE org_id = $1;
+
+-- The `memory.enabled=false` flip time backing the purge projection.
+-- name: GetOrgConfigRevokedAt :one
+SELECT updated_at FROM org_configs
+WHERE org_id = $1 AND key = 'memory.enabled' AND value_json = 'false'::jsonb;

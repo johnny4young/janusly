@@ -107,6 +107,15 @@ var routeAuthz = map[string]routeGate{
 	"POST /onboarding":                                            {auth.RoleViewer, "onboarding.write"},
 	"GET /workflows/health":                                       {auth.RoleViewer, "workflows.read"},
 	"GET /workflows/health/delta":                                 {auth.RoleViewer, "workflows.read"},
+
+	// F1 terminal-sweep closures (T-183): the missing wires the web reads.
+	"GET /v1/workflows/health":           {auth.RoleViewer, "workflows.read"},
+	"GET /v1/run/usage":                  {auth.RoleViewer, "runs.read"},
+	"GET /v1/workflows/schedule-preview": {auth.RoleViewer, "workflows.read"},
+	"GET /workflows/schedule-preview":    {auth.RoleViewer, "workflows.read"},
+	"GET /v1/memory/consent-status":      {auth.RoleViewer, "recovery.read"},
+	"GET /recovery/calibration-status":   {auth.RoleViewer, "recovery.read"},
+	"GET /mcp/connections":               {auth.RoleViewer, "mcp.connections.read"},
 	"GET /workflows/{workflowId}/metadata":                        {auth.RoleViewer, "workflows.read"},
 	"POST /workflows/{workflowId}/metadata":                       {auth.RoleEditor, "workflows.write"},
 	"POST /workflows/{workflowId}/folder":                         {auth.RoleEditor, "workflows.write"},

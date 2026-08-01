@@ -865,6 +865,17 @@ func (q *Queries) CountMembersInRole(ctx context.Context, arg CountMembersInRole
 	return column_1, err
 }
 
+const countMemoryEntriesForOrg = `-- name: CountMemoryEntriesForOrg :one
+SELECT count(*)::int8 FROM memory_entries WHERE org_id = $1
+`
+
+func (q *Queries) CountMemoryEntriesForOrg(ctx context.Context, orgID string) (int64, error) {
+	row := q.db.QueryRow(ctx, countMemoryEntriesForOrg, orgID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countRecentAlertDispatches = `-- name: CountRecentAlertDispatches :one
 SELECT count(*) FROM alert_dispatches
 WHERE org_id = $1 AND policy_id = $2 AND dedupe_key = $3 AND dispatched_at >= $4
@@ -2786,6 +2797,19 @@ func (q *Queries) GetOnboardingProgress(ctx context.Context, arg GetOnboardingPr
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getOrgConfigRevokedAt = `-- name: GetOrgConfigRevokedAt :one
+SELECT updated_at FROM org_configs
+WHERE org_id = $1 AND key = 'memory.enabled' AND value_json = 'false'::jsonb
+`
+
+// The `memory.enabled=false` flip time backing the purge projection.
+func (q *Queries) GetOrgConfigRevokedAt(ctx context.Context, orgID string) (*time.Time, error) {
+	row := q.db.QueryRow(ctx, getOrgConfigRevokedAt, orgID)
+	var updated_at *time.Time
+	err := row.Scan(&updated_at)
+	return updated_at, err
 }
 
 const getOrgConfigValue = `-- name: GetOrgConfigValue :one
@@ -6816,6 +6840,47 @@ func (q *Queries) ListLatestWorkflowVersionUpstreamTags(ctx context.Context, org
 	for rows.Next() {
 		var i ListLatestWorkflowVersionUpstreamTagsRow
 		if err := rows.Scan(&i.WorkflowID, &i.UpstreamHealthSources); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMcpConnections = `-- name: ListMcpConnections :many
+SELECT id, org_id, alias, transport, command, args, url, env_refs, enabled, status, status_reason, expose_to_ai, last_discovery_at, created_by, created_at, updated_at FROM mcp_connections WHERE org_id = $1 ORDER BY alias ASC LIMIT 200
+`
+
+func (q *Queries) ListMcpConnections(ctx context.Context, orgID string) ([]McpConnection, error) {
+	rows, err := q.db.Query(ctx, listMcpConnections, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []McpConnection
+	for rows.Next() {
+		var i McpConnection
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Alias,
+			&i.Transport,
+			&i.Command,
+			&i.Args,
+			&i.Url,
+			&i.EnvRefs,
+			&i.Enabled,
+			&i.Status,
+			&i.StatusReason,
+			&i.ExposeToAi,
+			&i.LastDiscoveryAt,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

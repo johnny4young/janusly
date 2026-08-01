@@ -25,7 +25,7 @@ import (
 )
 
 // memoryPurgeDelay resolves the revocation grace window (default 7 days).
-func memoryPurgeDelay() time.Duration {
+func MemoryPurgeDelay() time.Duration {
 	if raw := os.Getenv("JANUSLY_MEMORY_PURGE_DELAY_HOURS"); raw != "" {
 		if hours, err := strconv.Atoi(raw); err == nil && hours >= 0 && hours <= 24*30 {
 			return time.Duration(hours) * time.Hour
@@ -38,7 +38,7 @@ func memoryPurgeDelay() time.Duration {
 // the window. Returns orgs purged.
 func (e *Engine) SweepMemoryConsentPurges(ctx context.Context) int {
 	q := store.New(e.pool)
-	cutoff := time.Now().Add(-memoryPurgeDelay())
+	cutoff := time.Now().Add(-MemoryPurgeDelay())
 	rows, err := q.ListMemoryConsentRevokedOrgs(ctx, &cutoff)
 	if err != nil {
 		return 0

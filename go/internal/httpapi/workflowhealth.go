@@ -101,29 +101,32 @@ func workflowHealthFacts(wf *domain.Workflow) health.WorkflowFacts {
 	return facts
 }
 
+// workflowHealthCore backs BOTH wires: the legacy raw GET and the /v1
+// envelope alias (the web reads /workflows/health through the v1 set).
+func (s *V1Server) workflowHealthCore(r *http.Request, rc v1Request) opResult {
+	workflowID := r.URL.Query().Get("workflowId")
+	if workflowID == "" {
+		return opError(http.StatusBadRequest, "workflows_workflow_id_required", "workflowId is required", nil)
+	}
+	wf, issues, slo, bad := s.resolveWorkflowHealthContext(r, rc, workflowID)
+	if bad != nil {
+		return *bad
+	}
+	since := time.Now().AddDate(0, 0, -defaultHealthWindowDays)
+	row, err := store.New(s.pool).QueryWorkflowHealthSignals(r.Context(), store.QueryWorkflowHealthSignalsParams{
+		WorkflowID: workflowID, OrgID: rc.orgID, Since: &since,
+	})
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	signals, _ := healthSignalsFromRow(row)
+	score := health.Compute(workflowHealthFacts(wf), issues, signals, slo)
+	return opOK(map[string]any{"health": score})
+}
+
 func (s *V1Server) mountWorkflowHealthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /workflows/health", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		workflowID := r.URL.Query().Get("workflowId")
-		if workflowID == "" {
-			writeLegacy(w, opError(http.StatusBadRequest, "workflows_workflow_id_required", "workflowId is required", nil))
-			return
-		}
-		wf, issues, slo, bad := s.resolveWorkflowHealthContext(r, rc, workflowID)
-		if bad != nil {
-			writeLegacy(w, *bad)
-			return
-		}
-		since := time.Now().AddDate(0, 0, -defaultHealthWindowDays)
-		row, err := store.New(s.pool).QueryWorkflowHealthSignals(r.Context(), store.QueryWorkflowHealthSignalsParams{
-			WorkflowID: workflowID, OrgID: rc.orgID, Since: &since,
-		})
-		if err != nil {
-			writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
-		}
-		signals, _ := healthSignalsFromRow(row)
-		score := health.Compute(workflowHealthFacts(wf), issues, signals, slo)
-		writeLegacy(w, opOK(map[string]any{"health": score}))
+		writeLegacy(w, s.workflowHealthCore(r, rc))
 	}))
 
 	mux.HandleFunc("GET /workflows/health/delta", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {

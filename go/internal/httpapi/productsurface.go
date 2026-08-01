@@ -663,11 +663,30 @@ func (s *V1Server) packView(r *http.Request, rc v1Request, pack packs.SolutionPa
 	for _, sample := range pack.SamplePayloads {
 		samples = append(samples, map[string]any{"id": sample.ID, "label": sample.Label})
 	}
+	samplePayloadIDs := make([]string, 0, len(pack.SamplePayloads))
+	for _, sample := range pack.SamplePayloads {
+		samplePayloadIDs = append(samplePayloadIDs, sample.ID)
+	}
+	fixtureIDs := make([]string, 0, len(pack.FailureFixtures))
+	fixtures := make([]map[string]any, 0, len(pack.FailureFixtures))
+	for _, fixture := range pack.FailureFixtures {
+		fixtureIDs = append(fixtureIDs, fixture.ID)
+		fixtures = append(fixtures, map[string]any{
+			"id": fixture.ID, "label": fixture.Label, "description": fixture.Description,
+			"failureMode": fixture.FailureMode, "recoveryPath": fixture.RecoveryPath,
+		})
+	}
+	// The reference's toPublicPack projection (nodeCount/failureFixtures
+	// included — the packs panel iterates them); `configured` on each
+	// credential and the labeled `samples` list are additive pilot fields.
 	return map[string]any{
 		"id": pack.ID, "name": pack.Name, "description": pack.Description,
 		"category": pack.Category, "version": pack.Version,
 		"requiredCredentials": credentials, "requiredOrgConfigs": pack.RequiredOrgConfigs,
 		"samples": samples, "sampleCount": len(pack.SamplePayloads),
+		"nodeCount": pack.NodeCount, "failureCount": len(pack.FailureFixtures),
+		"samplePayloadIds": samplePayloadIDs, "failureFixtureIds": fixtureIDs,
+		"failureFixtures": fixtures,
 	}
 }
 
