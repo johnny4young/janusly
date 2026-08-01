@@ -113,8 +113,8 @@ LIMIT 1;
 
 -- name: InsertRun :exec
 INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, created_by, replay_mode, validation_evidence_level,
-  parent_run_id, parent_node_id, parent_link_kind)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
+  parent_run_id, parent_node_id, parent_link_kind, workflow_rollout_id, workflow_rollout_variant)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13);
 
 -- name: GetRun :one
 SELECT id, org_id, workflow_version_id, status, input_json, output_json,
@@ -1505,3 +1505,43 @@ WITH recovered_items AS (
   FROM recovered_items recovered
 )
 SELECT count(*)::int AS resolved, count(*) FILTER (WHERE recurred)::int AS recurred FROM evaluated;
+
+-- name: LockWorkflowForRollout :one
+SELECT id FROM workflows WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL FOR UPDATE;
+
+-- name: ListWorkflowVersionsForRollout :many
+SELECT id, version, dag_json FROM workflow_versions
+WHERE org_id = $1 AND workflow_id = $2 ORDER BY version DESC LIMIT 200;
+
+-- name: FindActiveWorkflowRollout :one
+SELECT id FROM workflow_rollouts WHERE org_id = $1 AND workflow_id = $2 AND status = 'active' LIMIT 1;
+
+-- name: InsertWorkflowRollout :one
+INSERT INTO workflow_rollouts (id, org_id, workflow_id, baseline_version_id, canary_version_id,
+  traffic_percent, minimum_sample_size, minimum_success_rate_percent, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING *;
+
+-- name: GetLatestWorkflowRolloutRow :one
+SELECT wr.* FROM workflow_rollouts wr
+JOIN workflows w ON w.id = wr.workflow_id AND w.org_id = wr.org_id
+WHERE wr.org_id = $1 AND wr.workflow_id = $2 AND w.deleted_at IS NULL
+ORDER BY CASE WHEN wr.status = 'active' THEN 0 ELSE 1 END, wr.created_at DESC, wr.id DESC
+LIMIT 1;
+
+-- name: GetWorkflowRolloutRow :one
+SELECT * FROM workflow_rollouts WHERE id = $1 AND org_id = $2 AND workflow_id = $3;
+
+-- name: FinishWorkflowRolloutCAS :one
+UPDATE workflow_rollouts
+SET status = sqlc.arg(new_status),
+    rolled_back_reason = CASE WHEN sqlc.arg(new_status) = 'rolled_back' THEN sqlc.narg(reason) ELSE NULL END,
+    ended_at = now(), updated_at = now()
+WHERE id = $1 AND org_id = $2 AND workflow_id = $3 AND status = 'active'
+RETURNING *;
+
+-- name: FindPassedRecoveryQualification :one
+SELECT id FROM workflow_recovery_qualifications
+WHERE org_id = $1 AND workflow_id = $2 AND baseline_version_id = $3
+  AND candidate_version_id = $4 AND dataset_version = $5 AND status = 'passed'
+LIMIT 1;

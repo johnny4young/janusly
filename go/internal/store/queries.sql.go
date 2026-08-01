@@ -837,6 +837,22 @@ func (q *Queries) FailRunNode(ctx context.Context, arg FailRunNodeParams) (int64
 	return result.RowsAffected(), nil
 }
 
+const findActiveWorkflowRollout = `-- name: FindActiveWorkflowRollout :one
+SELECT id FROM workflow_rollouts WHERE org_id = $1 AND workflow_id = $2 AND status = 'active' LIMIT 1
+`
+
+type FindActiveWorkflowRolloutParams struct {
+	OrgID      string
+	WorkflowID string
+}
+
+func (q *Queries) FindActiveWorkflowRollout(ctx context.Context, arg FindActiveWorkflowRolloutParams) (string, error) {
+	row := q.db.QueryRow(ctx, findActiveWorkflowRollout, arg.OrgID, arg.WorkflowID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
 const findLatestDeadLetterForNode = `-- name: FindLatestDeadLetterForNode :one
 SELECT id, node_id, node_json, error_json FROM dead_letters
 WHERE org_id = $1 AND run_id = $2 AND node_id = $3
@@ -1031,6 +1047,34 @@ func (q *Queries) FindOrgMemberRowByEmail(ctx context.Context, arg FindOrgMember
 	return id, err
 }
 
+const findPassedRecoveryQualification = `-- name: FindPassedRecoveryQualification :one
+SELECT id FROM workflow_recovery_qualifications
+WHERE org_id = $1 AND workflow_id = $2 AND baseline_version_id = $3
+  AND candidate_version_id = $4 AND dataset_version = $5 AND status = 'passed'
+LIMIT 1
+`
+
+type FindPassedRecoveryQualificationParams struct {
+	OrgID              string
+	WorkflowID         string
+	BaselineVersionID  string
+	CandidateVersionID string
+	DatasetVersion     string
+}
+
+func (q *Queries) FindPassedRecoveryQualification(ctx context.Context, arg FindPassedRecoveryQualificationParams) (string, error) {
+	row := q.db.QueryRow(ctx, findPassedRecoveryQualification,
+		arg.OrgID,
+		arg.WorkflowID,
+		arg.BaselineVersionID,
+		arg.CandidateVersionID,
+		arg.DatasetVersion,
+	)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
 const findPendingInvitation = `-- name: FindPendingInvitation :one
 SELECT id FROM invitations
 WHERE org_id = $1 AND email = $2 AND status = 'pending'
@@ -1209,6 +1253,56 @@ func (q *Queries) FindTriggerEventByDedupe(ctx context.Context, arg FindTriggerE
 	return i, err
 }
 
+const finishWorkflowRolloutCAS = `-- name: FinishWorkflowRolloutCAS :one
+UPDATE workflow_rollouts
+SET status = $4,
+    rolled_back_reason = CASE WHEN $4 = 'rolled_back' THEN $5 ELSE NULL END,
+    ended_at = now(), updated_at = now()
+WHERE id = $1 AND org_id = $2 AND workflow_id = $3 AND status = 'active'
+RETURNING id, org_id, workflow_id, baseline_version_id, canary_version_id, traffic_percent, minimum_sample_size, minimum_success_rate_percent, status, baseline_succeeded, baseline_failed, canary_succeeded, canary_failed, rolled_back_reason, created_by, created_at, updated_at, ended_at, last_outcome_at
+`
+
+type FinishWorkflowRolloutCASParams struct {
+	ID         string
+	OrgID      string
+	WorkflowID string
+	NewStatus  string
+	Reason     pgtype.Text
+}
+
+func (q *Queries) FinishWorkflowRolloutCAS(ctx context.Context, arg FinishWorkflowRolloutCASParams) (WorkflowRollout, error) {
+	row := q.db.QueryRow(ctx, finishWorkflowRolloutCAS,
+		arg.ID,
+		arg.OrgID,
+		arg.WorkflowID,
+		arg.NewStatus,
+		arg.Reason,
+	)
+	var i WorkflowRollout
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.WorkflowID,
+		&i.BaselineVersionID,
+		&i.CanaryVersionID,
+		&i.TrafficPercent,
+		&i.MinimumSampleSize,
+		&i.MinimumSuccessRatePercent,
+		&i.Status,
+		&i.BaselineSucceeded,
+		&i.BaselineFailed,
+		&i.CanarySucceeded,
+		&i.CanaryFailed,
+		&i.RolledBackReason,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.EndedAt,
+		&i.LastOutcomeAt,
+	)
+	return i, err
+}
+
 const getAlertPolicy = `-- name: GetAlertPolicy :one
 SELECT id, org_id, name, trigger, parameters, channels, cooldown_seconds, enabled, created_by, created_at, updated_at FROM alert_policies WHERE org_id = $1 AND id = $2
 `
@@ -1342,6 +1436,46 @@ func (q *Queries) GetLatestPublishedPromptVersion(ctx context.Context, arg GetLa
 		&i.Status,
 		&i.CreatedBy,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getLatestWorkflowRolloutRow = `-- name: GetLatestWorkflowRolloutRow :one
+SELECT wr.id, wr.org_id, wr.workflow_id, wr.baseline_version_id, wr.canary_version_id, wr.traffic_percent, wr.minimum_sample_size, wr.minimum_success_rate_percent, wr.status, wr.baseline_succeeded, wr.baseline_failed, wr.canary_succeeded, wr.canary_failed, wr.rolled_back_reason, wr.created_by, wr.created_at, wr.updated_at, wr.ended_at, wr.last_outcome_at FROM workflow_rollouts wr
+JOIN workflows w ON w.id = wr.workflow_id AND w.org_id = wr.org_id
+WHERE wr.org_id = $1 AND wr.workflow_id = $2 AND w.deleted_at IS NULL
+ORDER BY CASE WHEN wr.status = 'active' THEN 0 ELSE 1 END, wr.created_at DESC, wr.id DESC
+LIMIT 1
+`
+
+type GetLatestWorkflowRolloutRowParams struct {
+	OrgID      string
+	WorkflowID string
+}
+
+func (q *Queries) GetLatestWorkflowRolloutRow(ctx context.Context, arg GetLatestWorkflowRolloutRowParams) (WorkflowRollout, error) {
+	row := q.db.QueryRow(ctx, getLatestWorkflowRolloutRow, arg.OrgID, arg.WorkflowID)
+	var i WorkflowRollout
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.WorkflowID,
+		&i.BaselineVersionID,
+		&i.CanaryVersionID,
+		&i.TrafficPercent,
+		&i.MinimumSampleSize,
+		&i.MinimumSuccessRatePercent,
+		&i.Status,
+		&i.BaselineSucceeded,
+		&i.BaselineFailed,
+		&i.CanarySucceeded,
+		&i.CanaryFailed,
+		&i.RolledBackReason,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.EndedAt,
+		&i.LastOutcomeAt,
 	)
 	return i, err
 }
@@ -2146,6 +2280,43 @@ func (q *Queries) GetWorkflowOwnerState(ctx context.Context, id string) (GetWork
 	return i, err
 }
 
+const getWorkflowRolloutRow = `-- name: GetWorkflowRolloutRow :one
+SELECT id, org_id, workflow_id, baseline_version_id, canary_version_id, traffic_percent, minimum_sample_size, minimum_success_rate_percent, status, baseline_succeeded, baseline_failed, canary_succeeded, canary_failed, rolled_back_reason, created_by, created_at, updated_at, ended_at, last_outcome_at FROM workflow_rollouts WHERE id = $1 AND org_id = $2 AND workflow_id = $3
+`
+
+type GetWorkflowRolloutRowParams struct {
+	ID         string
+	OrgID      string
+	WorkflowID string
+}
+
+func (q *Queries) GetWorkflowRolloutRow(ctx context.Context, arg GetWorkflowRolloutRowParams) (WorkflowRollout, error) {
+	row := q.db.QueryRow(ctx, getWorkflowRolloutRow, arg.ID, arg.OrgID, arg.WorkflowID)
+	var i WorkflowRollout
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.WorkflowID,
+		&i.BaselineVersionID,
+		&i.CanaryVersionID,
+		&i.TrafficPercent,
+		&i.MinimumSampleSize,
+		&i.MinimumSuccessRatePercent,
+		&i.Status,
+		&i.BaselineSucceeded,
+		&i.BaselineFailed,
+		&i.CanarySucceeded,
+		&i.CanaryFailed,
+		&i.RolledBackReason,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.EndedAt,
+		&i.LastOutcomeAt,
+	)
+	return i, err
+}
+
 const getWorkflowVersionAnyWorkflow = `-- name: GetWorkflowVersionAnyWorkflow :one
 SELECT id, org_id, workflow_id, version, dag_json FROM workflow_versions
 WHERE id = $1 AND org_id = $2
@@ -2754,8 +2925,8 @@ func (q *Queries) InsertReplayCampaignItem(ctx context.Context, arg InsertReplay
 
 const insertRun = `-- name: InsertRun :exec
 INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, created_by, replay_mode, validation_evidence_level,
-  parent_run_id, parent_node_id, parent_link_kind)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+  parent_run_id, parent_node_id, parent_link_kind, workflow_rollout_id, workflow_rollout_variant)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 `
 
 type InsertRunParams struct {
@@ -2770,6 +2941,8 @@ type InsertRunParams struct {
 	ParentRunID             pgtype.Text
 	ParentNodeID            pgtype.Text
 	ParentLinkKind          pgtype.Text
+	WorkflowRolloutID       pgtype.Text
+	WorkflowRolloutVariant  pgtype.Text
 }
 
 func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) error {
@@ -2785,6 +2958,8 @@ func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) error {
 		arg.ParentRunID,
 		arg.ParentNodeID,
 		arg.ParentLinkKind,
+		arg.WorkflowRolloutID,
+		arg.WorkflowRolloutVariant,
 	)
 	return err
 }
@@ -2957,6 +3132,62 @@ func (q *Queries) InsertWorkflow(ctx context.Context, arg InsertWorkflowParams) 
 		arg.CreatedBy,
 	)
 	return err
+}
+
+const insertWorkflowRollout = `-- name: InsertWorkflowRollout :one
+INSERT INTO workflow_rollouts (id, org_id, workflow_id, baseline_version_id, canary_version_id,
+  traffic_percent, minimum_sample_size, minimum_success_rate_percent, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, org_id, workflow_id, baseline_version_id, canary_version_id, traffic_percent, minimum_sample_size, minimum_success_rate_percent, status, baseline_succeeded, baseline_failed, canary_succeeded, canary_failed, rolled_back_reason, created_by, created_at, updated_at, ended_at, last_outcome_at
+`
+
+type InsertWorkflowRolloutParams struct {
+	ID                        string
+	OrgID                     string
+	WorkflowID                string
+	BaselineVersionID         string
+	CanaryVersionID           string
+	TrafficPercent            int32
+	MinimumSampleSize         int32
+	MinimumSuccessRatePercent int32
+	CreatedBy                 string
+}
+
+func (q *Queries) InsertWorkflowRollout(ctx context.Context, arg InsertWorkflowRolloutParams) (WorkflowRollout, error) {
+	row := q.db.QueryRow(ctx, insertWorkflowRollout,
+		arg.ID,
+		arg.OrgID,
+		arg.WorkflowID,
+		arg.BaselineVersionID,
+		arg.CanaryVersionID,
+		arg.TrafficPercent,
+		arg.MinimumSampleSize,
+		arg.MinimumSuccessRatePercent,
+		arg.CreatedBy,
+	)
+	var i WorkflowRollout
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.WorkflowID,
+		&i.BaselineVersionID,
+		&i.CanaryVersionID,
+		&i.TrafficPercent,
+		&i.MinimumSampleSize,
+		&i.MinimumSuccessRatePercent,
+		&i.Status,
+		&i.BaselineSucceeded,
+		&i.BaselineFailed,
+		&i.CanarySucceeded,
+		&i.CanaryFailed,
+		&i.RolledBackReason,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.EndedAt,
+		&i.LastOutcomeAt,
+	)
+	return i, err
 }
 
 const insertWorkflowVersion = `-- name: InsertWorkflowVersion :exec
@@ -5041,6 +5272,42 @@ func (q *Queries) ListWorkflowVersions(ctx context.Context, arg ListWorkflowVers
 	return items, nil
 }
 
+const listWorkflowVersionsForRollout = `-- name: ListWorkflowVersionsForRollout :many
+SELECT id, version, dag_json FROM workflow_versions
+WHERE org_id = $1 AND workflow_id = $2 ORDER BY version DESC LIMIT 200
+`
+
+type ListWorkflowVersionsForRolloutParams struct {
+	OrgID      string
+	WorkflowID string
+}
+
+type ListWorkflowVersionsForRolloutRow struct {
+	ID      string
+	Version int32
+	DagJson json.RawMessage
+}
+
+func (q *Queries) ListWorkflowVersionsForRollout(ctx context.Context, arg ListWorkflowVersionsForRolloutParams) ([]ListWorkflowVersionsForRolloutRow, error) {
+	rows, err := q.db.Query(ctx, listWorkflowVersionsForRollout, arg.OrgID, arg.WorkflowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListWorkflowVersionsForRolloutRow
+	for rows.Next() {
+		var i ListWorkflowVersionsForRolloutRow
+		if err := rows.Scan(&i.ID, &i.Version, &i.DagJson); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWorkflows = `-- name: ListWorkflows :many
 SELECT id, org_id, name, status, created_by, created_at
 FROM workflows
@@ -5140,6 +5407,22 @@ func (q *Queries) LockClaimableRunNodes(ctx context.Context, batchSize int32) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockWorkflowForRollout = `-- name: LockWorkflowForRollout :one
+SELECT id FROM workflows WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL FOR UPDATE
+`
+
+type LockWorkflowForRolloutParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) LockWorkflowForRollout(ctx context.Context, arg LockWorkflowForRolloutParams) (string, error) {
+	row := q.db.QueryRow(ctx, lockWorkflowForRollout, arg.OrgID, arg.ID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
 }
 
 const markDeadLetterResolved = `-- name: MarkDeadLetterResolved :execrows

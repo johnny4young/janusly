@@ -166,6 +166,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	server.mountRecoveryHomeRoutes(mux)
 	server.mountAlertRoutes(mux)
 	server.mountReportRoutes(mux)
+	server.mountRolloutRoutes(mux)
 	server.mountAiPatchRoutes(mux)
 	return WithBrowserHeaders(mux)
 }
@@ -374,6 +375,20 @@ func (s *V1Server) startCore(r *http.Request, rc v1Request) opResult {
 		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
 			map[string]any{"field": "workflow." + contractField(issues)})
 	}
+	// A live rollout owns the deployment choice for this workflow id: the
+	// deterministic assignment picks the variant snapshot, REPLACES the
+	// request's workflow, and the run captures the frozen assignment.
+	var rolloutAssignment *engine.RolloutAssignment
+	if wf.ID != "" {
+		assignment, err := s.engine.ResolveWorkflowRolloutAssignment(r.Context(), rc.orgID, wf.ID, s.newID())
+		if err != nil {
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		}
+		if assignment != nil {
+			rolloutAssignment = assignment
+			wf = assignment.Workflow
+		}
+	}
 	// Execution needs the executable subset — here the pilot-only code IS
 	// blocking, unlike save.
 	if result := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation); !result.Valid {
@@ -419,10 +434,16 @@ func (s *V1Server) startCore(r *http.Request, rc v1Request) opResult {
 		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
 			map[string]any{"field": "Idempotency-Key"})
 	}
-	runID, err := s.engine.StartRun(r.Context(), engine.StartInput{
+	startInput := engine.StartInput{
 		OrgID: rc.orgID, Workflow: wf, Input: body.Input, CreatedBy: rc.userID,
 		IdempotencyKey: idempotencyKey,
-	})
+	}
+	if rolloutAssignment != nil {
+		startInput.WorkflowVersionID = rolloutAssignment.VersionID
+		startInput.WorkflowRolloutID = rolloutAssignment.Rollout.ID
+		startInput.WorkflowRolloutVariant = rolloutAssignment.Variant
+	}
+	runID, err := s.engine.StartRun(r.Context(), startInput)
 	if err != nil {
 		// A duplicate key is SUCCESS by definition: the original run id
 		// returns with a body indistinguishable from the first call.

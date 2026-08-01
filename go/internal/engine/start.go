@@ -83,6 +83,12 @@ type StartInput struct {
 	ParentRunID    string
 	ParentNodeID   string
 	ParentLinkKind string
+	// Rollout assignment captured AT START — the durable deployment choice
+	// (variant + rollout id) rides the run row and the run.started event so
+	// outcome receipts and audits read the frozen assignment, never a
+	// mutable rollout row.
+	WorkflowRolloutID      string
+	WorkflowRolloutVariant string
 }
 
 // ErrStartIdempotencyReplay reports a duplicate Idempotency-Key: the
@@ -166,6 +172,8 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		ParentRunID:             pgtype.Text{String: in.ParentRunID, Valid: in.ParentRunID != ""},
 		ParentNodeID:            pgtype.Text{String: in.ParentNodeID, Valid: in.ParentNodeID != ""},
 		ParentLinkKind:          pgtype.Text{String: in.ParentLinkKind, Valid: in.ParentLinkKind != ""},
+		WorkflowRolloutID:       pgtype.Text{String: in.WorkflowRolloutID, Valid: in.WorkflowRolloutID != ""},
+		WorkflowRolloutVariant:  pgtype.Text{String: in.WorkflowRolloutVariant, Valid: in.WorkflowRolloutVariant != ""},
 	}); err != nil {
 		return "", fmt.Errorf("insert run: %w", err)
 	}
@@ -215,7 +223,12 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		}
 	}
 
-	startedPayload, _ := json.Marshal(map[string]string{"workflowVersionId": versionID})
+	startedFields := map[string]string{"workflowVersionId": versionID}
+	if in.WorkflowRolloutID != "" {
+		startedFields["workflowRolloutId"] = in.WorkflowRolloutID
+		startedFields["workflowRolloutVariant"] = in.WorkflowRolloutVariant
+	}
+	startedPayload, _ := json.Marshal(startedFields)
 	startedAt := eventNow()
 	if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
 		ID: e.newID(), RunID: runID, Type: "run.started", Payload: startedPayload,
