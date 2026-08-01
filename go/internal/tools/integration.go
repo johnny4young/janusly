@@ -47,6 +47,8 @@ type IntegrationDeps struct {
 	RateLimit func(ctx context.Context, bucket string, perMin int) string
 	// Email resolves the tenant mailer posture (provider + default from).
 	Email func() EmailSettings
+	// PdfKey assembles the tenant-scoped object key for pdf.generate.
+	PdfKey PdfKeyBuilder
 }
 
 const webhookSignatureHeader = "x-janusly-signature"
@@ -66,6 +68,7 @@ func SignWebhookPayload(secret, body string, unixSeconds int64) string {
 var integrationToolNames = map[string]bool{
 	"webhook.send": true,
 	"email.send":   true,
+	"pdf.generate": true,
 }
 
 // IsIntegrationTool reports whether the executor should route this call
@@ -125,6 +128,8 @@ func ExecuteIntegrationTool(ctx context.Context, name string, input map[string]a
 	switch name {
 	case "email.send":
 		return executeEmailSend(ctx, input, deps)
+	case "pdf.generate":
+		return executePdfGenerate(ctx, input, deps)
 	case "webhook.send":
 		credential, _ := input["credential"].(string)
 		rawURL, _ := input["url"].(string)

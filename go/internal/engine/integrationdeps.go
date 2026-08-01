@@ -123,6 +123,9 @@ func (e *Engine) buildIntegrationDeps(orgID, runID, nodeID string) *tools.Integr
 			from, _ := orgconfig.LoadValue(ctx, e.pool, orgID, "email.from").(string)
 			return tools.EmailSettings{Provider: provider, From: from}
 		},
+		PdfKey: func(filename string) string {
+			return "orgs/" + orgID + "/pdf/" + e.newID() + "/" + filename
+		},
 		RateLimitPerMin: func(family string, fallback int) int {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
