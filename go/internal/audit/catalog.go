@@ -21,8 +21,6 @@ var knownActions = map[Action]bool{
 	"alert.policy.deleted":                     true,
 	"alert.policy.updated":                     true,
 	"auto_healing.decline.manual":              true,
-	"auto_healing.failed":                      true,
-	"auto_healing.apply.manual":                true,
 	"auto_healing.scan.triggered":              true,
 	"billing.budget.configured":                true,
 	"billing.usage.exported":                   true,
@@ -55,7 +53,6 @@ var knownActions = map[Action]bool{
 	"member.removed":                           true,
 	"member.role.updated":                      true,
 	"member.self_modification_blocked":         true,
-	"memory.bulk.purged":                       true,
 	"memory.consent.granted":                   true,
 	"memory.consent.revoked":                   true,
 	"onboarding.completed":                     true,
@@ -122,8 +119,6 @@ var knownActions = map[Action]bool{
 	"run.started":                              true,
 	"run.started.adhoc":                        true,
 	"slack.interaction.created":                true,
-	"slack.interaction.opened":                 true,
-	"slack.interaction.rejected":               true,
 	"slack.interaction.deleted":                true,
 	"slack.interaction.updated":                true,
 	"snippet.created":                          true,
@@ -138,10 +133,6 @@ var knownActions = map[Action]bool{
 	"trigger.event.skipped":                    true,
 	"trigger.event.started":                    true,
 	"upstream_health.source.created":           true,
-	"workflow.paused.upstream":                 true,
-	"schedule.tick.dropped":                    true,
-	"schedule.entry.disabled":                  true,
-	"workflow.resumed.upstream":                true,
 	"upstream_health.source.deleted":           true,
 	"upstream_health.source.updated":           true,
 	"workflow.circuit_breaker.resumed":         true,
@@ -168,6 +159,43 @@ var knownActions = map[Action]bool{
 	"workflow.trigger_backfill":                true,
 }
 
+// rawAuditActions holds reference actions written through the RAW audit()
+// chokepoint (system-actor / skipAuth writers), which the typed
+// AuditAction union — and therefore the parity pin above — deliberately
+// excludes: the SCIM webhook lifecycle (scim-event-handler.ts), the Slack
+// interaction callback, the upstream-health auto-pause watcher, the
+// schedule sweep, auto-healing, and the memory consent purge.
+var rawAuditActions = map[Action]bool{
+	"auto_healing.apply.manual":         true,
+	"auto_healing.failed":               true,
+	"memory.bulk.purged":                true,
+	"schedule.entry.disabled":           true,
+	"schedule.tick.dropped":             true,
+	"scim.group.membership_changed":     true,
+	"scim.group.synced":                 true,
+	"scim.user.deprovisioned":           true,
+	"scim.user.provision_collision":     true,
+	"scim.user.provision_rejected":      true,
+	"scim.user.provisioned":             true,
+	"scim.user.rekey_collision":         true,
+	"scim.user.resurrection_blocked":    true,
+	"scim.user.updated":                 true,
+	"scim.webhook.directory_revoked":    true,
+	"scim.webhook.event_replayed":       true,
+	"scim.webhook.malformed_payload":    true,
+	"scim.webhook.malformed_timestamp":  true,
+	"scim.webhook.missing_directory_id": true,
+	"scim.webhook.out_of_order":         true,
+	"scim.webhook.signature_invalid":    true,
+	"scim.webhook.unknown_directory":    true,
+	"scim.webhook.unknown_event":        true,
+	"scim.webhook.unknown_user":         true,
+	"slack.interaction.opened":          true,
+	"slack.interaction.rejected":        true,
+	"workflow.paused.upstream":          true,
+	"workflow.resumed.upstream":         true,
+}
+
 // pilotActions holds pilot-own additions, kept separate so the parity pin
 // on the reference count stays exact.
 var pilotActions = map[Action]bool{}
@@ -175,8 +203,11 @@ var pilotActions = map[Action]bool{}
 // RegisterPilotAction admits a pilot-own action name (call at init).
 func RegisterPilotAction(action Action) { pilotActions[action] = true }
 
-// IsKnown reports catalog membership (reference or pilot-own).
-func IsKnown(action Action) bool { return knownActions[action] || pilotActions[action] }
+// IsKnown reports catalog membership (reference typed-union, reference
+// raw-audit, or pilot-own).
+func IsKnown(action Action) bool {
+	return knownActions[action] || rawAuditActions[action] || pilotActions[action]
+}
 
 // ReferenceActionCount anchors the parity pin test.
 func ReferenceActionCount() int { return len(knownActions) }

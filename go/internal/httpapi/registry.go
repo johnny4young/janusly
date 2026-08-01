@@ -194,6 +194,20 @@ var routeAuthz = map[string]routeGate{
 	"POST /org/roles/{name}":       {auth.RoleAdmin, "org.permissions.write"},
 	"DELETE /org/roles/{name}":     {auth.RoleAdmin, "org.permissions.write"},
 
+	// SCIM directory sync (reference scim-routes.ts annotations verbatim;
+	// the WorkOS webhook receiver is public + signature-authorized so it
+	// lives outside this table, like the Slack/PagerDuty callbacks).
+	"GET /org/scim/directories":                 {auth.RoleViewer, "members.read"},
+	"POST /org/scim/directories":                {auth.RoleAdmin, "org.config.write"},
+	"POST /org/scim/directories/{id}":           {auth.RoleAdmin, "org.config.write"},
+	"DELETE /org/scim/directories/{id}":         {auth.RoleAdmin, "org.config.write"},
+	"GET /org/scim/groups":                      {auth.RoleViewer, "members.read"},
+	"GET /org/scim/group-role-mappings":         {auth.RoleViewer, "members.read"},
+	"POST /org/scim/group-role-mappings":        {auth.RoleAdmin, "members.role_set"},
+	"POST /org/scim/group-role-mappings/{id}":   {auth.RoleAdmin, "members.role_set"},
+	"DELETE /org/scim/group-role-mappings/{id}": {auth.RoleAdmin, "members.role_set"},
+	"POST /org/scim/resync":                     {auth.RoleAdmin, "members.role_set"},
+
 	// Replay campaigns.
 	"POST /recovery/campaigns":             {auth.RoleEditor, "dlq.replay"},
 	"POST /recovery/campaigns/preview":     {auth.RoleEditor, "dlq.replay"},
