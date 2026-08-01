@@ -110,6 +110,8 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	mux.HandleFunc("POST /v1/start", server.auth(server.startRun))
 	mux.HandleFunc("POST /v1/webhooks/{workflowId}", server.auth(server.ingestWebhook))
 	mux.HandleFunc("POST /v1/triggers/email/ingest", server.auth(server.ingestEmail))
+	mux.HandleFunc("POST /v1/triggers/file/ingest", server.auth(server.ingestFileDropped))
+	mux.HandleFunc("POST /v1/triggers/mcp/ingest", server.auth(server.ingestMcpEvent))
 	mux.HandleFunc("GET /v1/run", server.auth(server.getRun))
 	mux.HandleFunc("GET /v1/status", server.auth(server.getRun))
 	mux.HandleFunc("GET /v1/runs", server.auth(server.listRuns))

@@ -166,6 +166,95 @@ func readTriggerEvent(runContext map[string]any) map[string]any {
 	return map[string]any{}
 }
 
+func executeFileDropped(_ context.Context, in Input) (any, error) {
+	if err := ValidateFileDroppedConfig(in.Config); err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"triggeredBy": "file_dropped",
+		"triggeredAt": time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+		"event":       readTriggerEvent(in.Context),
+	}, nil
+}
+
+// ValidateFileDroppedConfig mirrors the shared config schema: bucket +
+// optional prefix scope the notifications; extensions is a bounded
+// dot-less allow-list.
+func ValidateFileDroppedConfig(config map[string]any) error {
+	bucket, _ := config["bucket"].(string)
+	if strings.TrimSpace(bucket) == "" || len(bucket) > 256 {
+		return fmt.Errorf("file_dropped.bucket is required")
+	}
+	if raw, present := config["prefix"]; present {
+		if prefix, ok := raw.(string); !ok || len(prefix) > 1024 {
+			return fmt.Errorf("file_dropped.prefix must be a string of at most 1024 characters")
+		}
+	}
+	if raw, present := config["extensions"]; present {
+		extensions, ok := raw.([]any)
+		if !ok || len(extensions) > 50 {
+			return fmt.Errorf("file_dropped.extensions must list at most 50 entries")
+		}
+		for _, rawExtension := range extensions {
+			extension, ok := rawExtension.(string)
+			if !ok || strings.TrimSpace(extension) == "" || len(extension) > 32 {
+				return fmt.Errorf("file_dropped.extensions entries must be short non-empty strings")
+			}
+		}
+	}
+	return validateTriggerRateLimit("file_dropped", config)
+}
+
+func executeMcpServerEvent(_ context.Context, in Input) (any, error) {
+	if err := ValidateMcpServerEventConfig(in.Config); err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"triggeredBy": "mcp_server_event",
+		"triggeredAt": time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+		"event":       readTriggerEvent(in.Context),
+	}, nil
+}
+
+// ValidateMcpServerEventConfig mirrors the shared config schema:
+// connectionAlias references a registered mcp_connections row and
+// resourceUri is the subscribed MCP resource; eventTypes optionally
+// filters notification method names.
+func ValidateMcpServerEventConfig(config map[string]any) error {
+	alias, _ := config["connectionAlias"].(string)
+	if strings.TrimSpace(alias) == "" || len(alias) > 128 {
+		return fmt.Errorf("mcp_server_event.connectionAlias is required")
+	}
+	resourceURI, _ := config["resourceUri"].(string)
+	if strings.TrimSpace(resourceURI) == "" || len(resourceURI) > 2048 {
+		return fmt.Errorf("mcp_server_event.resourceUri is required")
+	}
+	if raw, present := config["eventTypes"]; present {
+		eventTypes, ok := raw.([]any)
+		if !ok || len(eventTypes) > 20 {
+			return fmt.Errorf("mcp_server_event.eventTypes must list at most 20 entries")
+		}
+		for _, rawType := range eventTypes {
+			eventType, ok := rawType.(string)
+			if !ok || strings.TrimSpace(eventType) == "" || len(eventType) > 128 {
+				return fmt.Errorf("mcp_server_event.eventTypes entries must be non-empty strings")
+			}
+		}
+	}
+	return validateTriggerRateLimit("mcp_server_event", config)
+}
+
+// validateTriggerRateLimit is the shared optional rateLimitPerMin check.
+func validateTriggerRateLimit(nodeType string, config map[string]any) error {
+	if raw, present := config["rateLimitPerMin"]; present {
+		value, ok := raw.(float64)
+		if !ok || value != float64(int64(value)) || value < 1 || value > triggerRateLimitMaxPerMin {
+			return fmt.Errorf("%s.rateLimitPerMin must be an integer between 1 and %d", nodeType, triggerRateLimitMaxPerMin)
+		}
+	}
+	return nil
+}
+
 // Storm-guard clamp, ported from the reference's shared trigger-types:
 // the effective per-trigger rate limit from a node config's optional
 // rateLimitPerMin — default 60, clamped to [1, 10000].

@@ -48,6 +48,8 @@ var routeAuthz = map[string]routeGate{
 	// Triggers.
 	"POST /v1/webhooks/{workflowId}": {auth.RoleEditor, "triggers.ingest"},
 	"POST /v1/triggers/email/ingest": {auth.RoleEditor, "triggers.ingest"},
+	"POST /v1/triggers/file/ingest":  {auth.RoleEditor, "triggers.ingest"},
+	"POST /v1/triggers/mcp/ingest":   {auth.RoleEditor, "triggers.ingest"},
 
 	// DLQ + recovery.
 	"GET /v1/dlq":                                                 {auth.RoleViewer, "dlq.read"},

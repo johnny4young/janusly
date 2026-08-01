@@ -38,10 +38,13 @@ import (
 )
 
 const (
-	emailIngestMaxJSONBytes = 4 * 1_048_576
-	emailBodyMaxBytes       = 1_048_576
-	emailAttachmentMax      = 20
-	emailAttachmentMaxBytes = 1_048_576
+	emailIngestMaxJSONBytes   = 4 * 1_048_576
+	emailBodyMaxBytes         = 1_048_576
+	emailAttachmentMax        = 20
+	emailAttachmentMaxBytes   = 1_048_576
+	triggerIngestMaxJSONBytes = 1_048_576
+	fileMetadataMaxBytes      = 65_536
+	mcpEventPayloadMaxBytes   = 65_536
 )
 
 var (
@@ -227,14 +230,7 @@ func (s *V1Server) emailIngestCore(r *http.Request, rc v1Request) opResult {
 		eventID:      eventID,
 		noMatch: opError(http.StatusNotFound, "trigger_no_matching_node",
 			"No email_received trigger matches this alias", nil),
-		matchNode: func(candidate *domain.Workflow, noMatch opResult) (string, opResult) {
-			for _, node := range candidate.Nodes {
-				if node.ID == resolved.nodeID && node.Type == "email_received" {
-					return node.ID, opResult{}
-				}
-			}
-			return "", noMatch
-		},
+		matchNode: matchTriggerNodeByID(resolved.nodeID, "email_received"),
 	})
 }
 
@@ -312,4 +308,201 @@ func offloadEmailAttachments(
 func shortHash(value string, length int) string {
 	digest := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(digest[:])[:length]
+}
+
+type fileIngestBody struct {
+	Bucket      string  `json:"bucket"`
+	Key         string  `json:"key"`
+	SizeBytes   float64 `json:"sizeBytes"`
+	ContentType string  `json:"contentType"`
+	Etag        string  `json:"etag"`
+	EventName   string  `json:"eventName"`
+	ReceivedAt  string  `json:"receivedAt"`
+}
+
+func (s *V1Server) ingestFileDropped(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	writeVersioned(w, rc.id, s.fileIngestCore(r, rc))
+}
+
+func (s *V1Server) fileIngestCore(r *http.Request, rc v1Request) opResult {
+	ctx := r.Context()
+	q := store.New(s.pool)
+	var body fileIngestBody
+	if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, triggerIngestMaxJSONBytes)).Decode(&body); err != nil {
+		return opError(http.StatusBadRequest, "trigger_invalid_payload", "Invalid file-dropped payload", nil)
+	}
+	bucket := strings.TrimSpace(body.Bucket)
+	key := strings.TrimSpace(body.Key)
+	switch {
+	case bucket == "" || len(bucket) > 256:
+		return opError(http.StatusBadRequest, "trigger_invalid_payload", "bucket must be 1..256 characters", nil)
+	case key == "" || len(key) > 2048:
+		return opError(http.StatusBadRequest, "trigger_invalid_payload", "key must be 1..2048 characters", nil)
+	case body.SizeBytes < 0 || len(body.ContentType) > 256 || len(body.Etag) > 256 ||
+		len(body.EventName) > 256 || len(body.ReceivedAt) > 64:
+		return opError(http.StatusBadRequest, "trigger_invalid_payload", "file event field exceeds its cap", nil)
+	}
+	if serialized, err := json.Marshal(body); err != nil || len(serialized) > fileMetadataMaxBytes {
+		return opError(http.StatusRequestEntityTooLarge, "trigger_payload_too_large", "File event metadata exceeds the cap", nil)
+	}
+
+	resolved, ambiguous, err := resolveUniqueTriggerNode(ctx, q, rc.orgID, "file_dropped", func(config map[string]any) bool {
+		configuredBucket, _ := config["bucket"].(string)
+		if configuredBucket != bucket {
+			return false
+		}
+		if prefix, _ := config["prefix"].(string); prefix != "" && !strings.HasPrefix(key, prefix) {
+			return false
+		}
+		if rawExtensions, ok := config["extensions"].([]any); ok && len(rawExtensions) > 0 {
+			extension := ""
+			if dot := strings.LastIndex(key, "."); dot >= 0 {
+				extension = strings.ToLower(key[dot+1:])
+			}
+			for _, rawExtension := range rawExtensions {
+				if listed, ok := rawExtension.(string); ok && strings.EqualFold(listed, extension) {
+					return true
+				}
+			}
+			return false
+		}
+		return true
+	})
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+	}
+	if ambiguous {
+		return opError(http.StatusConflict, "trigger_selector_ambiguous", "Multiple active workflows match this file selector", nil)
+	}
+	if resolved == nil {
+		return opError(http.StatusNotFound, "trigger_no_matching_node", "No file_dropped trigger matches this object", nil)
+	}
+
+	receivedAt := strings.TrimSpace(body.ReceivedAt)
+	if receivedAt == "" {
+		receivedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	eventPayload := map[string]any{
+		"bucket": bucket, "key": key, "sizeBytes": body.SizeBytes,
+		"contentType": body.ContentType, "etag": body.Etag,
+		"eventName": body.EventName, "receivedAt": receivedAt,
+	}
+	return s.ingestTriggerEventCore(ctx, triggerIngestRequest{
+		orgID:        rc.orgID,
+		authContext:  rc.authContext,
+		createdBy:    rc.userID,
+		workflowID:   resolved.workflowID,
+		triggerType:  "file_dropped",
+		eventPayload: eventPayload,
+		// Dedupe on (bucket, key, etag): the same object-event retry
+		// converges; etag changes per object version so re-uploads re-fire.
+		dedupeKey: "file:" + bucket + ":" + key + ":" + body.Etag,
+		noMatch: opError(http.StatusNotFound, "trigger_no_matching_node",
+			"No file_dropped trigger matches this object", nil),
+		matchNode: matchTriggerNodeByID(resolved.nodeID, "file_dropped"),
+	})
+}
+
+type mcpIngestBody struct {
+	ConnectionAlias string         `json:"connectionAlias"`
+	ResourceURI     string         `json:"resourceUri"`
+	EventType       string         `json:"eventType"`
+	Payload         map[string]any `json:"payload"`
+	ReceivedAt      string         `json:"receivedAt"`
+}
+
+func (s *V1Server) ingestMcpEvent(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	writeVersioned(w, rc.id, s.mcpIngestCore(r, rc))
+}
+
+func (s *V1Server) mcpIngestCore(r *http.Request, rc v1Request) opResult {
+	ctx := r.Context()
+	q := store.New(s.pool)
+	var body mcpIngestBody
+	if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, triggerIngestMaxJSONBytes)).Decode(&body); err != nil {
+		return opError(http.StatusBadRequest, "trigger_invalid_payload", "Invalid MCP server-event payload", nil)
+	}
+	alias := strings.TrimSpace(body.ConnectionAlias)
+	resourceURI := strings.TrimSpace(body.ResourceURI)
+	eventType := strings.TrimSpace(body.EventType)
+	switch {
+	case alias == "" || len(alias) > 128:
+		return opError(http.StatusBadRequest, "trigger_invalid_payload", "connectionAlias must be 1..128 characters", nil)
+	case resourceURI == "" || len(resourceURI) > 2048:
+		return opError(http.StatusBadRequest, "trigger_invalid_payload", "resourceUri must be 1..2048 characters", nil)
+	case eventType == "" || len(eventType) > 128:
+		return opError(http.StatusBadRequest, "trigger_invalid_payload", "eventType must be 1..128 characters", nil)
+	case len(body.ReceivedAt) > 64:
+		return opError(http.StatusBadRequest, "trigger_invalid_payload", "receivedAt must be at most 64 characters", nil)
+	}
+	if body.Payload != nil {
+		if serialized, err := json.Marshal(body.Payload); err != nil || len(serialized) > mcpEventPayloadMaxBytes {
+			return opError(http.StatusRequestEntityTooLarge, "trigger_payload_too_large", "MCP resource payload exceeds the cap", nil)
+		}
+	}
+
+	resolved, ambiguous, err := resolveUniqueTriggerNode(ctx, q, rc.orgID, "mcp_server_event", func(config map[string]any) bool {
+		configuredAlias, _ := config["connectionAlias"].(string)
+		configuredResource, _ := config["resourceUri"].(string)
+		if configuredAlias != alias || configuredResource != resourceURI {
+			return false
+		}
+		if rawTypes, ok := config["eventTypes"].([]any); ok && len(rawTypes) > 0 {
+			for _, rawType := range rawTypes {
+				if listed, ok := rawType.(string); ok && listed == eventType {
+					return true
+				}
+			}
+			return false
+		}
+		return true
+	})
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+	}
+	if ambiguous {
+		return opError(http.StatusConflict, "trigger_selector_ambiguous", "Multiple active workflows match this MCP event selector", nil)
+	}
+	if resolved == nil {
+		return opError(http.StatusNotFound, "trigger_no_matching_node", "No mcp_server_event trigger matches this notification", nil)
+	}
+
+	receivedAt := strings.TrimSpace(body.ReceivedAt)
+	if receivedAt == "" {
+		receivedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	payload := body.Payload
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	return s.ingestTriggerEventCore(ctx, triggerIngestRequest{
+		orgID:       rc.orgID,
+		authContext: rc.authContext,
+		createdBy:   rc.userID,
+		workflowID:  resolved.workflowID,
+		triggerType: "mcp_server_event",
+		eventPayload: map[string]any{
+			"connectionAlias": alias, "resourceUri": resourceURI,
+			"eventType": eventType, "payload": payload, "receivedAt": receivedAt,
+		},
+		// No natural idempotency key for resource-changed notifications —
+		// every notification spawns a run (the upstream is the de-dup point).
+		dedupeKey: "",
+		noMatch: opError(http.StatusNotFound, "trigger_no_matching_node",
+			"No mcp_server_event trigger matches this notification", nil),
+		matchNode: matchTriggerNodeByID(resolved.nodeID, "mcp_server_event"),
+	})
+}
+
+// matchTriggerNodeByID pins the resolved node id + type — the rollout
+// recheck must find the SAME node in the assigned snapshot.
+func matchTriggerNodeByID(nodeID, nodeType string) func(*domain.Workflow, opResult) (string, opResult) {
+	return func(candidate *domain.Workflow, noMatch opResult) (string, opResult) {
+		for _, node := range candidate.Nodes {
+			if node.ID == nodeID && node.Type == nodeType {
+				return node.ID, opResult{}
+			}
+		}
+		return "", noMatch
+	}
 }
