@@ -1444,3 +1444,64 @@ ORDER BY created_at DESC, id DESC LIMIT 1;
 SELECT id, action, target_type, target_id, user_id, created_at FROM audit_logs
 WHERE org_id = $1 AND target_id = ANY(sqlc.arg(target_ids)::text[])
 ORDER BY created_at DESC, id DESC LIMIT 50;
+
+-- name: QueryTimeToFirstAction :one
+WITH samples AS (
+  SELECT extract(epoch FROM (item.first_action_at - item.created_at))::float8 AS seconds
+  FROM recovery_items item
+  JOIN dead_letters item_dlq ON item_dlq.org_id = item.org_id AND item_dlq.id = item.dead_letter_id
+  JOIN runs item_run ON item_run.org_id = item.org_id AND item_run.id = item_dlq.run_id
+  WHERE item.org_id = $1 AND item.created_at >= $2
+    AND item.first_action_at IS NOT NULL AND item_run.replay_mode IS NULL
+  UNION ALL
+  SELECT extract(epoch FROM (coalesce(dlq.replay_claimed_at, dlq.replayed_at) - dlq.created_at))::float8 AS seconds
+  FROM dead_letters dlq
+  JOIN runs fallback_run ON fallback_run.org_id = dlq.org_id AND fallback_run.id = dlq.run_id
+  WHERE dlq.org_id = $1 AND dlq.created_at >= $2
+    AND coalesce(dlq.replay_claimed_at, dlq.replayed_at) IS NOT NULL
+    AND fallback_run.replay_mode IS NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM recovery_items item WHERE item.org_id = $1 AND item.dead_letter_id = dlq.id
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM recovery_item_children child WHERE child.org_id = $1 AND child.dead_letter_id = dlq.id
+    )
+)
+SELECT count(*) FILTER (WHERE seconds >= 0)::int AS sample_size,
+       coalesce(avg(seconds) FILTER (WHERE seconds >= 0), -1)::float8 AS avg_seconds,
+       coalesce(percentile_disc(0.95) WITHIN GROUP (ORDER BY seconds)
+         FILTER (WHERE seconds >= 0), -1)::float8 AS p95_seconds
+FROM samples;
+
+-- name: QueryRecoveryRecurrence :one
+WITH recovered_items AS (
+  SELECT item.id AS item_id, item.error_signature, min(impact.recovered_at) AS recovered_at
+  FROM recovery_impact_events impact
+  JOIN runs impact_run ON impact_run.id = impact.run_id AND impact_run.org_id = impact.org_id
+  JOIN recovery_items item ON item.org_id = impact.org_id AND item.dead_letter_id = impact.dead_letter_id
+  WHERE impact.org_id = $1 AND impact.recovered_at >= $2 AND impact_run.replay_mode IS NULL
+    AND item.error_signature IS NOT NULL
+  GROUP BY item.id, item.error_signature
+), evaluated AS (
+  SELECT recovered.item_id,
+    (EXISTS (
+      SELECT 1 FROM recovery_items later_item
+      JOIN dead_letters later_dlq ON later_dlq.org_id = later_item.org_id AND later_dlq.id = later_item.dead_letter_id
+      JOIN runs later_run ON later_run.id = later_dlq.run_id AND later_run.org_id = later_item.org_id
+      WHERE later_item.org_id = $1 AND later_item.id <> recovered.item_id
+        AND later_item.error_signature = recovered.error_signature
+        AND later_item.first_occurred_at > recovered.recovered_at
+        AND later_item.first_occurred_at <= recovered.recovered_at + interval '7 days'
+        AND later_run.replay_mode IS NULL
+    ) OR EXISTS (
+      SELECT 1 FROM recovery_item_children later_child
+      JOIN dead_letters later_dlq ON later_dlq.org_id = later_child.org_id AND later_dlq.id = later_child.dead_letter_id
+      JOIN runs later_run ON later_run.id = later_dlq.run_id AND later_run.org_id = later_child.org_id
+      WHERE later_child.org_id = $1 AND later_child.recovery_item_id = recovered.item_id
+        AND later_child.occurred_at > recovered.recovered_at
+        AND later_child.occurred_at <= recovered.recovered_at + interval '7 days'
+        AND later_run.replay_mode IS NULL
+    )) AS recurred
+  FROM recovered_items recovered
+)
+SELECT count(*)::int AS resolved, count(*) FILTER (WHERE recurred)::int AS recurred FROM evaluated;

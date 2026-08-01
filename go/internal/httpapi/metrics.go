@@ -63,6 +63,34 @@ func (s *V1Server) recoveryMetricsValue(ctx context.Context, orgID string, windo
 			"calls":                    row.Calls, "aggregated": row.Aggregated,
 		})
 	}
+	// Set-once first-action latency: recovery-item transitions stamp
+	// first_action_at once; item-less tenants contribute through the
+	// pre-enqueue replay claim (never both for one incident).
+	firstAction, err := store.New(s.pool).QueryTimeToFirstAction(ctx, store.QueryTimeToFirstActionParams{
+		OrgID: orgID, CreatedAt: since,
+	})
+	if err != nil {
+		return nil, err
+	}
+	floatOrNull := func(value float64, samples int32) any {
+		if samples == 0 || value < 0 {
+			return nil
+		}
+		return value
+	}
+	// Seven-day recurrence bound to the IMMUTABLE impact event: the fix
+	// boundary is terminal success, and a same-signature later incident
+	// inside the window marks it recurred (sandbox replays never count).
+	recurrence, err := store.New(s.pool).QueryRecoveryRecurrence(ctx, store.QueryRecoveryRecurrenceParams{
+		OrgID: orgID, RecoveredAt: since,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var recurrenceRate any
+	if recurrence.Resolved > 0 {
+		recurrenceRate = float64(recurrence.Resolved-recurrence.Recurred) / float64(recurrence.Resolved) * 100
+	}
 	return map[string]any{
 		"verifiedRecovery": map[string]any{
 			"metric":     "verifiedRecovery",
@@ -71,7 +99,17 @@ func (s *V1Server) recoveryMetricsValue(ctx context.Context, orgID string, windo
 			"p50Ms":      numberOrNull(stats.P50Ms),
 			"p90Ms":      numberOrNull(stats.P90Ms),
 		},
-		"mttrMs":         numberOrNull(stats.MttrAvgMs),
+		"mttrMs": numberOrNull(stats.MttrAvgMs),
+		"timeToFirstAction": map[string]any{
+			"unit":       "seconds",
+			"sampleSize": firstAction.SampleSize,
+			"avgSeconds": floatOrNull(firstAction.AvgSeconds, firstAction.SampleSize),
+			"p95Seconds": floatOrNull(firstAction.P95Seconds, firstAction.SampleSize),
+		},
+		"recurrence": map[string]any{
+			"resolved": recurrence.Resolved, "recurred": recurrence.Recurred,
+			"stayedFixedRate": recurrenceRate, "windowDays": 7,
+		},
 		"windowDays":     windowDays,
 		"costByProvider": costByProvider,
 	}, nil

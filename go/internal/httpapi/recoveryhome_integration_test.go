@@ -154,3 +154,104 @@ func TestRecoveryHomeReadModel(t *testing.T) {
 		t.Fatalf("focused clusters must carry the flag: %+v", cluster)
 	}
 }
+
+// The T-148 metric pair: set-once first-action latency (the second
+// transition must NOT move the stamp) and the impact-bound 7-day
+// recurrence rate on /recovery/metrics.
+func TestFirstActionAndRecurrenceMetrics(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	ctx := t.Context()
+	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "true")
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	wfID := "wf-metric-" + suffix
+
+	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer broken.Close()
+	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer healthy.Close()
+	workflowDoc := func(url string) map[string]any {
+		return map[string]any{
+			"id": wfID, "name": "Metric", "dslVersion": "1.0",
+			"nodes": []any{map[string]any{"id": "call", "type": "http", "config": map[string]any{
+				"url": url, "timeoutMs": 500,
+			}}},
+			"edges": []any{},
+		}
+	}
+	runFailing := func() (string, string) {
+		res := h.call("POST", "/v1/start", map[string]any{"workflow": workflowDoc(broken.URL)}, "")
+		runID := extractRunID(t, res)
+		h.waitRun(runID, "failed")
+		var dlqID string
+		_ = pool.QueryRow(ctx, `SELECT id FROM dead_letters WHERE run_id = $1 ORDER BY created_at DESC LIMIT 1`,
+			runID).Scan(&dlqID)
+		return runID, dlqID
+	}
+
+	// Recover one incident with terminal impact (fix boundary).
+	run1, dlq1 := runFailing()
+	res := h.call("GET", "/dlq/clusters", nil, "")
+	sig := res.body["clusters"].([]any)[0].(map[string]any)["signature"].(string)
+	res = h.call("POST", "/dlq/cluster-apply", map[string]any{
+		"clusterSignature": sig, "deadLetterIds": []any{dlq1},
+		"suggestedWorkflow": workflowDoc(healthy.URL),
+	}, "")
+	if res.body["replayed"] != float64(1) {
+		t.Fatalf("apply: %+v", res.body)
+	}
+	h.waitRun(run1, "succeeded")
+
+	// Same-signature later incident inside the 7-day window → recurred.
+	_, dlq2 := runFailing()
+	if res = h.call("POST", "/dlq/replay", map[string]any{"deadLetterId": dlq2}, ""); res.status != 200 {
+		t.Fatalf("replay dlq2: %d", res.status)
+	}
+	var item2 string
+	_ = pool.QueryRow(ctx, `SELECT id FROM recovery_items WHERE org_id = $1 AND dead_letter_id = $2`,
+		h.org, dlq2).Scan(&item2)
+
+	// The unactioned incident carries NO stamp; the first operator
+	// transition sets it ONCE and later transitions never move it.
+	var pending *time.Time
+	_ = pool.QueryRow(ctx, `SELECT first_action_at FROM recovery_items WHERE id = $1`, item2).Scan(&pending)
+	if pending != nil {
+		t.Fatalf("first_action_at must start unset: %v", pending)
+	}
+	if res = h.call("POST", "/recovery/items/"+item2+"/acknowledge", map[string]any{"owner": "op"}, ""); res.status != 200 {
+		t.Fatalf("acknowledge: %d", res.status)
+	}
+	var firstAction time.Time
+	_ = pool.QueryRow(ctx, `SELECT first_action_at FROM recovery_items WHERE id = $1`, item2).Scan(&firstAction)
+	if firstAction.IsZero() {
+		t.Fatalf("acknowledge must stamp first_action_at")
+	}
+	time.Sleep(50 * time.Millisecond)
+	if res = h.call("POST", "/recovery/items/"+item2+"/in_progress", map[string]any{}, ""); res.status != 200 {
+		t.Fatalf("in_progress: %d", res.status)
+	}
+	var afterAction time.Time
+	_ = pool.QueryRow(ctx, `SELECT first_action_at FROM recovery_items WHERE id = $1`, item2).Scan(&afterAction)
+	if !afterAction.Equal(firstAction) {
+		t.Fatalf("first_action_at must be SET-ONCE: %v -> %v", firstAction, afterAction)
+	}
+
+	res = h.call("GET", "/recovery/metrics", nil, "")
+	firstActionMetric := res.body["timeToFirstAction"].(map[string]any)
+	if firstActionMetric["sampleSize"].(float64) < 2 || firstActionMetric["avgSeconds"] == nil ||
+		firstActionMetric["p95Seconds"] == nil {
+		t.Fatalf("timeToFirstAction: %+v", firstActionMetric)
+	}
+	recurrence := res.body["recurrence"].(map[string]any)
+	if recurrence["resolved"].(float64) < 1 || recurrence["recurred"].(float64) < 1 ||
+		recurrence["windowDays"] != float64(7) {
+		t.Fatalf("recurrence: %+v", recurrence)
+	}
+	if rate, ok := recurrence["stayedFixedRate"].(float64); !ok || rate < 0 || rate > 100 {
+		t.Fatalf("stayedFixedRate: %+v", recurrence)
+	}
+}
