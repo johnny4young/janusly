@@ -1836,3 +1836,19 @@ El spec pedía migrar 143 mounts a un helper para que montar sin gate no compila
 
 ## T-526 — complete.go en cuatro, con susto (2026-08-01)
 El split mecánico casi se come un archivo vivo: el spec nombraba "readiness.go" y el paquete YA tenía un readiness.go de 43 líneas con los predicados puros del DAG — mi Write lo pisó y el build lo delató en segundos (dos símbolos huérfanos). Recuperado de HEAD sin pérdida y el archivo nuevo bautizado downstream.go, que además es el nombre más honesto para lo que contiene (programar lo siguiente + asentar el run). La regla que queda: listar el paquete antes de crear archivos en un refactor — los nombres de un spec escrito ayer no saben qué existe hoy.
+
+## T-514 — Superficies AI restantes (2026-08-01)
+
+Las últimas 5 rutas `/ai/*` del reference aterrizan en un solo módulo
+(`internal/httpapi/aisurfaces.go`), y el ticket terminó siendo sobre todo un
+ejercicio de REUTILIZACIÓN: el censo previo (lección T-500/T-506) mostró que
+cada pieza pesada ya existía — `aibudget.Gate`, `aiconfig.Resolve`, el rate
+family "ai", `aievidence`, el run-explain determinista de T-147 y el motor de
+readiness. Explain-run usa el reporte T-147 como respuesta $0 y como contexto
+DATA-framed del prompt; review-workflow usa el readiness engine como review
+fallback y FUSIONA sus hallazgos con los del modelo tras sanitizarlos
+(severity fuera del enum o nodeId inventado → descartado); suggest-improvement
+valida cada replacement con el mismo juez de aigenerate y un inválido jamás
+llega al wire. Primer módulo montado 100% sobre el helper `route()` de T-525,
+con `/ai/health` en la allowlist auth-only. Tres tests de integración cubren
+fallback $0, gates por rol y modo AI simulado; suite httpapi verde y lint 0.

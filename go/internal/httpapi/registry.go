@@ -30,6 +30,8 @@ var authOnlyRoutes = map[string]bool{
 	"GET /v1/templates": true,
 	"GET /tools":        true,
 	"GET /v1/tools":     true,
+	// Read-only AI posture probe (reference ai-health-route.ts has no gate).
+	"GET /ai/health": true,
 }
 
 // route registers the gate and mounts the handler in ONE call — the
