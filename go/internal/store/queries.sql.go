@@ -1227,6 +1227,43 @@ func (q *Queries) DeleteWakeup(ctx context.Context, runNodeID string) error {
 	return err
 }
 
+const deleteWorkflowFolderBulk = `-- name: DeleteWorkflowFolderBulk :execrows
+UPDATE workflow_metadata SET folder = NULL, updated_at = now()
+WHERE org_id = $1 AND folder = $2
+`
+
+type DeleteWorkflowFolderBulkParams struct {
+	OrgID  string
+	Folder pgtype.Text
+}
+
+func (q *Queries) DeleteWorkflowFolderBulk(ctx context.Context, arg DeleteWorkflowFolderBulkParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteWorkflowFolderBulk, arg.OrgID, arg.Folder)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteWorkflowTagBulk = `-- name: DeleteWorkflowTagBulk :execrows
+UPDATE workflow_metadata
+SET tags = tags - $2::text, updated_at = now()
+WHERE org_id = $1 AND tags ? $2::text
+`
+
+type DeleteWorkflowTagBulkParams struct {
+	OrgID string
+	Tag   string
+}
+
+func (q *Queries) DeleteWorkflowTagBulk(ctx context.Context, arg DeleteWorkflowTagBulkParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteWorkflowTagBulk, arg.OrgID, arg.Tag)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const disableScheduleEntry = `-- name: DisableScheduleEntry :exec
 UPDATE schedule_entries SET enabled = false, updated_at = now() WHERE id = $1
 `
@@ -3322,6 +3359,38 @@ func (q *Queries) GetWorkflowIngestState(ctx context.Context, id string) (GetWor
 	return i, err
 }
 
+const getWorkflowMetadata = `-- name: GetWorkflowMetadata :one
+SELECT id, org_id, workflow_id, owners, runbook_markdown, description, tags, slack_channel, linear_project, severity_default, created_by, created_at, updated_at, folder, ai_guidance_markdown FROM workflow_metadata WHERE org_id = $1 AND workflow_id = $2
+`
+
+type GetWorkflowMetadataParams struct {
+	OrgID      string
+	WorkflowID string
+}
+
+func (q *Queries) GetWorkflowMetadata(ctx context.Context, arg GetWorkflowMetadataParams) (WorkflowMetadatum, error) {
+	row := q.db.QueryRow(ctx, getWorkflowMetadata, arg.OrgID, arg.WorkflowID)
+	var i WorkflowMetadatum
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.WorkflowID,
+		&i.Owners,
+		&i.RunbookMarkdown,
+		&i.Description,
+		&i.Tags,
+		&i.SlackChannel,
+		&i.LinearProject,
+		&i.SeverityDefault,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Folder,
+		&i.AiGuidanceMarkdown,
+	)
+	return i, err
+}
+
 const getWorkflowOwnerState = `-- name: GetWorkflowOwnerState :one
 SELECT org_id, deleted_at FROM workflows WHERE id = $1
 `
@@ -5310,6 +5379,64 @@ func (q *Queries) ListDeletedWorkflowRows(ctx context.Context, arg ListDeletedWo
 	return items, nil
 }
 
+const listDistinctWorkflowFolders = `-- name: ListDistinctWorkflowFolders :many
+SELECT DISTINCT m.folder::text AS folder
+FROM workflow_metadata m
+JOIN workflows w ON w.id = m.workflow_id AND w.org_id = m.org_id
+WHERE m.org_id = $1 AND m.folder IS NOT NULL AND w.deleted_at IS NULL
+ORDER BY folder ASC
+LIMIT 200
+`
+
+func (q *Queries) ListDistinctWorkflowFolders(ctx context.Context, orgID string) ([]string, error) {
+	rows, err := q.db.Query(ctx, listDistinctWorkflowFolders, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var folder string
+		if err := rows.Scan(&folder); err != nil {
+			return nil, err
+		}
+		items = append(items, folder)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDistinctWorkflowTags = `-- name: ListDistinctWorkflowTags :many
+SELECT DISTINCT jsonb_array_elements_text(m.tags)::text AS tag
+FROM workflow_metadata m
+JOIN workflows w ON w.id = m.workflow_id AND w.org_id = m.org_id
+WHERE m.org_id = $1 AND w.deleted_at IS NULL
+ORDER BY tag ASC
+LIMIT 200
+`
+
+func (q *Queries) ListDistinctWorkflowTags(ctx context.Context, orgID string) ([]string, error) {
+	rows, err := q.db.Query(ctx, listDistinctWorkflowTags, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var tag string
+		if err := rows.Scan(&tag); err != nil {
+			return nil, err
+		}
+		items = append(items, tag)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDrillRootDeadLetters = `-- name: ListDrillRootDeadLetters :many
 SELECT id FROM dead_letters
 WHERE org_id = $1 AND replay_claimed_at IS NOT NULL
@@ -6389,6 +6516,36 @@ func (q *Queries) ListOrgsWithSoftDeletedWorkflows(ctx context.Context) ([]strin
 			return nil, err
 		}
 		items = append(items, org_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOwnedActiveWorkflowIDs = `-- name: ListOwnedActiveWorkflowIDs :many
+SELECT id FROM workflows
+WHERE org_id = $1 AND id = ANY($2::text[]) AND deleted_at IS NULL
+`
+
+type ListOwnedActiveWorkflowIDsParams struct {
+	OrgID string
+	Ids   []string
+}
+
+func (q *Queries) ListOwnedActiveWorkflowIDs(ctx context.Context, arg ListOwnedActiveWorkflowIDsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listOwnedActiveWorkflowIDs, arg.OrgID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -9138,6 +9295,46 @@ func (q *Queries) RedriveFailedRunNode(ctx context.Context, arg RedriveFailedRun
 	return attempt, err
 }
 
+const renameWorkflowFolderBulk = `-- name: RenameWorkflowFolderBulk :execrows
+UPDATE workflow_metadata SET folder = $2, updated_at = now()
+WHERE org_id = $1 AND folder = $3
+`
+
+type RenameWorkflowFolderBulkParams struct {
+	OrgID      string
+	ToFolder   pgtype.Text
+	FromFolder pgtype.Text
+}
+
+func (q *Queries) RenameWorkflowFolderBulk(ctx context.Context, arg RenameWorkflowFolderBulkParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renameWorkflowFolderBulk, arg.OrgID, arg.ToFolder, arg.FromFolder)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const renameWorkflowTagBulk = `-- name: RenameWorkflowTagBulk :execrows
+UPDATE workflow_metadata
+SET tags = (tags - $2::text) || to_jsonb($3::text),
+    updated_at = now()
+WHERE org_id = $1 AND tags ? $2::text
+`
+
+type RenameWorkflowTagBulkParams struct {
+	OrgID   string
+	FromTag string
+	ToTag   string
+}
+
+func (q *Queries) RenameWorkflowTagBulk(ctx context.Context, arg RenameWorkflowTagBulkParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renameWorkflowTagBulk, arg.OrgID, arg.FromTag, arg.ToTag)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const requeueRunNodeForRetry = `-- name: RequeueRunNodeForRetry :execrows
 UPDATE run_nodes SET status = 'queued', attempts = $1
 WHERE run_id = $2 AND node_id = $3
@@ -9613,6 +9810,96 @@ func (q *Queries) SetRunSemanticOutcome(ctx context.Context, arg SetRunSemanticO
 		arg.ViolationCount,
 	)
 	return err
+}
+
+const setWorkflowFolderOnly = `-- name: SetWorkflowFolderOnly :one
+INSERT INTO workflow_metadata (id, org_id, workflow_id, folder, created_by)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (org_id, workflow_id) DO UPDATE SET
+  folder = excluded.folder, updated_at = now()
+RETURNING id, org_id, workflow_id, owners, runbook_markdown, description, tags, slack_channel, linear_project, severity_default, created_by, created_at, updated_at, folder, ai_guidance_markdown
+`
+
+type SetWorkflowFolderOnlyParams struct {
+	ID         string
+	OrgID      string
+	WorkflowID string
+	Folder     pgtype.Text
+	CreatedBy  pgtype.Text
+}
+
+func (q *Queries) SetWorkflowFolderOnly(ctx context.Context, arg SetWorkflowFolderOnlyParams) (WorkflowMetadatum, error) {
+	row := q.db.QueryRow(ctx, setWorkflowFolderOnly,
+		arg.ID,
+		arg.OrgID,
+		arg.WorkflowID,
+		arg.Folder,
+		arg.CreatedBy,
+	)
+	var i WorkflowMetadatum
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.WorkflowID,
+		&i.Owners,
+		&i.RunbookMarkdown,
+		&i.Description,
+		&i.Tags,
+		&i.SlackChannel,
+		&i.LinearProject,
+		&i.SeverityDefault,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Folder,
+		&i.AiGuidanceMarkdown,
+	)
+	return i, err
+}
+
+const setWorkflowTagsOnly = `-- name: SetWorkflowTagsOnly :one
+INSERT INTO workflow_metadata (id, org_id, workflow_id, tags, created_by)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (org_id, workflow_id) DO UPDATE SET
+  tags = excluded.tags, updated_at = now()
+RETURNING id, org_id, workflow_id, owners, runbook_markdown, description, tags, slack_channel, linear_project, severity_default, created_by, created_at, updated_at, folder, ai_guidance_markdown
+`
+
+type SetWorkflowTagsOnlyParams struct {
+	ID         string
+	OrgID      string
+	WorkflowID string
+	Tags       json.RawMessage
+	CreatedBy  pgtype.Text
+}
+
+func (q *Queries) SetWorkflowTagsOnly(ctx context.Context, arg SetWorkflowTagsOnlyParams) (WorkflowMetadatum, error) {
+	row := q.db.QueryRow(ctx, setWorkflowTagsOnly,
+		arg.ID,
+		arg.OrgID,
+		arg.WorkflowID,
+		arg.Tags,
+		arg.CreatedBy,
+	)
+	var i WorkflowMetadatum
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.WorkflowID,
+		&i.Owners,
+		&i.RunbookMarkdown,
+		&i.Description,
+		&i.Tags,
+		&i.SlackChannel,
+		&i.LinearProject,
+		&i.SeverityDefault,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Folder,
+		&i.AiGuidanceMarkdown,
+	)
+	return i, err
 }
 
 const settleReplayCampaignItem = `-- name: SettleReplayCampaignItem :execrows
@@ -10695,6 +10982,73 @@ type UpsertWakeupParams struct {
 func (q *Queries) UpsertWakeup(ctx context.Context, arg UpsertWakeupParams) error {
 	_, err := q.db.Exec(ctx, upsertWakeup, arg.RunNodeID, arg.WakeAt, arg.Reason)
 	return err
+}
+
+const upsertWorkflowMetadata = `-- name: UpsertWorkflowMetadata :one
+INSERT INTO workflow_metadata (id, org_id, workflow_id, owners, tags, description,
+                               slack_channel, linear_project, severity_default,
+                               folder, runbook_markdown, ai_guidance_markdown, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+ON CONFLICT (org_id, workflow_id) DO UPDATE SET
+  owners = excluded.owners, tags = excluded.tags, description = excluded.description,
+  slack_channel = excluded.slack_channel, linear_project = excluded.linear_project,
+  severity_default = excluded.severity_default, folder = excluded.folder,
+  runbook_markdown = excluded.runbook_markdown,
+  ai_guidance_markdown = excluded.ai_guidance_markdown, updated_at = now()
+RETURNING id, org_id, workflow_id, owners, runbook_markdown, description, tags, slack_channel, linear_project, severity_default, created_by, created_at, updated_at, folder, ai_guidance_markdown
+`
+
+type UpsertWorkflowMetadataParams struct {
+	ID                 string
+	OrgID              string
+	WorkflowID         string
+	Owners             json.RawMessage
+	Tags               json.RawMessage
+	Description        pgtype.Text
+	SlackChannel       pgtype.Text
+	LinearProject      pgtype.Text
+	SeverityDefault    pgtype.Text
+	Folder             pgtype.Text
+	RunbookMarkdown    pgtype.Text
+	AiGuidanceMarkdown pgtype.Text
+	CreatedBy          pgtype.Text
+}
+
+func (q *Queries) UpsertWorkflowMetadata(ctx context.Context, arg UpsertWorkflowMetadataParams) (WorkflowMetadatum, error) {
+	row := q.db.QueryRow(ctx, upsertWorkflowMetadata,
+		arg.ID,
+		arg.OrgID,
+		arg.WorkflowID,
+		arg.Owners,
+		arg.Tags,
+		arg.Description,
+		arg.SlackChannel,
+		arg.LinearProject,
+		arg.SeverityDefault,
+		arg.Folder,
+		arg.RunbookMarkdown,
+		arg.AiGuidanceMarkdown,
+		arg.CreatedBy,
+	)
+	var i WorkflowMetadatum
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.WorkflowID,
+		&i.Owners,
+		&i.RunbookMarkdown,
+		&i.Description,
+		&i.Tags,
+		&i.SlackChannel,
+		&i.LinearProject,
+		&i.SeverityDefault,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Folder,
+		&i.AiGuidanceMarkdown,
+	)
+	return i, err
 }
 
 const upsertWorkflowRecoveryQualification = `-- name: UpsertWorkflowRecoveryQualification :one

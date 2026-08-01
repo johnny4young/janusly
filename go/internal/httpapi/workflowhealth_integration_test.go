@@ -20,7 +20,7 @@ func TestWorkflowHealthAndDelta(t *testing.T) {
 
 	workflow := map[string]any{
 		"id": wfID, "name": "Salud", "dslVersion": "1.0",
-		"slo": map[string]any{"successRatePercent": 90.0},
+		"slo":   map[string]any{"successRatePercent": 90.0},
 		"nodes": []any{map[string]any{"id": "n", "type": "noop", "config": map[string]any{}}},
 		"edges": []any{},
 	}

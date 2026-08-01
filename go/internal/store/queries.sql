@@ -2256,3 +2256,72 @@ WHERE r.org_id = sqlc.arg(org_id)
            AND v2.created_at <= r.created_at))::int >= sqlc.narg(from_version)::int)
 ORDER BY d.created_at DESC
 LIMIT 100;
+
+-- name: GetWorkflowMetadata :one
+SELECT * FROM workflow_metadata WHERE org_id = $1 AND workflow_id = $2;
+
+-- name: UpsertWorkflowMetadata :one
+INSERT INTO workflow_metadata (id, org_id, workflow_id, owners, tags, description,
+                               slack_channel, linear_project, severity_default,
+                               folder, runbook_markdown, ai_guidance_markdown, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+ON CONFLICT (org_id, workflow_id) DO UPDATE SET
+  owners = excluded.owners, tags = excluded.tags, description = excluded.description,
+  slack_channel = excluded.slack_channel, linear_project = excluded.linear_project,
+  severity_default = excluded.severity_default, folder = excluded.folder,
+  runbook_markdown = excluded.runbook_markdown,
+  ai_guidance_markdown = excluded.ai_guidance_markdown, updated_at = now()
+RETURNING *;
+
+-- name: SetWorkflowFolderOnly :one
+INSERT INTO workflow_metadata (id, org_id, workflow_id, folder, created_by)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (org_id, workflow_id) DO UPDATE SET
+  folder = excluded.folder, updated_at = now()
+RETURNING *;
+
+-- name: SetWorkflowTagsOnly :one
+INSERT INTO workflow_metadata (id, org_id, workflow_id, tags, created_by)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (org_id, workflow_id) DO UPDATE SET
+  tags = excluded.tags, updated_at = now()
+RETURNING *;
+
+-- name: ListDistinctWorkflowTags :many
+SELECT DISTINCT jsonb_array_elements_text(m.tags)::text AS tag
+FROM workflow_metadata m
+JOIN workflows w ON w.id = m.workflow_id AND w.org_id = m.org_id
+WHERE m.org_id = $1 AND w.deleted_at IS NULL
+ORDER BY tag ASC
+LIMIT 200;
+
+-- name: ListDistinctWorkflowFolders :many
+SELECT DISTINCT m.folder::text AS folder
+FROM workflow_metadata m
+JOIN workflows w ON w.id = m.workflow_id AND w.org_id = m.org_id
+WHERE m.org_id = $1 AND m.folder IS NOT NULL AND w.deleted_at IS NULL
+ORDER BY folder ASC
+LIMIT 200;
+
+-- name: RenameWorkflowFolderBulk :execrows
+UPDATE workflow_metadata SET folder = sqlc.arg(to_folder), updated_at = now()
+WHERE org_id = $1 AND folder = sqlc.arg(from_folder);
+
+-- name: DeleteWorkflowFolderBulk :execrows
+UPDATE workflow_metadata SET folder = NULL, updated_at = now()
+WHERE org_id = $1 AND folder = sqlc.arg(folder);
+
+-- name: RenameWorkflowTagBulk :execrows
+UPDATE workflow_metadata
+SET tags = (tags - sqlc.arg(from_tag)::text) || to_jsonb(sqlc.arg(to_tag)::text),
+    updated_at = now()
+WHERE org_id = $1 AND tags ? sqlc.arg(from_tag)::text;
+
+-- name: DeleteWorkflowTagBulk :execrows
+UPDATE workflow_metadata
+SET tags = tags - sqlc.arg(tag)::text, updated_at = now()
+WHERE org_id = $1 AND tags ? sqlc.arg(tag)::text;
+
+-- name: ListOwnedActiveWorkflowIDs :many
+SELECT id FROM workflows
+WHERE org_id = $1 AND id = ANY(sqlc.arg(ids)::text[]) AND deleted_at IS NULL;
