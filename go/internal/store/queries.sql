@@ -1687,3 +1687,35 @@ WHERE org_id = $1 ORDER BY alias LIMIT 200;
 -- name: InsertCredentialFull :exec
 INSERT INTO credentials (id, org_id, name, kind, secret_ref, metadata, expires_at, created_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+
+-- name: InsertSlackInteractionConnection :exec
+INSERT INTO slack_interaction_connections (id, org_id, name, team_id, signing_credential_name,
+  user_mappings, enabled, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+
+-- name: ListSlackInteractionConnections :many
+SELECT * FROM slack_interaction_connections WHERE org_id = $1 ORDER BY name LIMIT 100;
+
+-- name: GetSlackInteractionConnection :one
+SELECT * FROM slack_interaction_connections WHERE org_id = $1 AND id = $2;
+
+-- name: GetSlackInteractionConnectionForCallback :one
+SELECT * FROM slack_interaction_connections WHERE id = $1;
+
+-- name: UpdateSlackInteractionConnection :execrows
+UPDATE slack_interaction_connections
+SET name = $3, team_id = $4, signing_credential_name = $5, user_mappings = $6,
+    enabled = $7, updated_at = now()
+WHERE org_id = $1 AND id = $2;
+
+-- name: DeleteSlackInteractionConnection :execrows
+DELETE FROM slack_interaction_connections WHERE org_id = $1 AND id = $2;
+
+-- name: PurgeExpiredSlackReceipts :exec
+DELETE FROM slack_interaction_receipts
+WHERE org_id = $1 AND connection_id = $2 AND created_at < $3;
+
+-- name: InsertSlackInteractionReceipt :execrows
+INSERT INTO slack_interaction_receipts (id, org_id, connection_id)
+VALUES ($1, $2, $3)
+ON CONFLICT (id) DO NOTHING;

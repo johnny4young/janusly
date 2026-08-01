@@ -884,6 +884,23 @@ func (q *Queries) DeleteOrgRole(ctx context.Context, arg DeleteOrgRoleParams) (i
 	return result.RowsAffected(), nil
 }
 
+const deleteSlackInteractionConnection = `-- name: DeleteSlackInteractionConnection :execrows
+DELETE FROM slack_interaction_connections WHERE org_id = $1 AND id = $2
+`
+
+type DeleteSlackInteractionConnectionParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) DeleteSlackInteractionConnection(ctx context.Context, arg DeleteSlackInteractionConnectionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSlackInteractionConnection, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteWakeup = `-- name: DeleteWakeup :exec
 DELETE FROM go_pilot_wakeups WHERE run_node_id = $1
 `
@@ -2413,6 +2430,55 @@ func (q *Queries) GetRunOwner(ctx context.Context, id string) (GetRunOwnerRow, e
 	return i, err
 }
 
+const getSlackInteractionConnection = `-- name: GetSlackInteractionConnection :one
+SELECT id, org_id, name, team_id, signing_credential_name, user_mappings, enabled, created_by, created_at, updated_at FROM slack_interaction_connections WHERE org_id = $1 AND id = $2
+`
+
+type GetSlackInteractionConnectionParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) GetSlackInteractionConnection(ctx context.Context, arg GetSlackInteractionConnectionParams) (SlackInteractionConnection, error) {
+	row := q.db.QueryRow(ctx, getSlackInteractionConnection, arg.OrgID, arg.ID)
+	var i SlackInteractionConnection
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.TeamID,
+		&i.SigningCredentialName,
+		&i.UserMappings,
+		&i.Enabled,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getSlackInteractionConnectionForCallback = `-- name: GetSlackInteractionConnectionForCallback :one
+SELECT id, org_id, name, team_id, signing_credential_name, user_mappings, enabled, created_by, created_at, updated_at FROM slack_interaction_connections WHERE id = $1
+`
+
+func (q *Queries) GetSlackInteractionConnectionForCallback(ctx context.Context, id string) (SlackInteractionConnection, error) {
+	row := q.db.QueryRow(ctx, getSlackInteractionConnectionForCallback, id)
+	var i SlackInteractionConnection
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.TeamID,
+		&i.SigningCredentialName,
+		&i.UserMappings,
+		&i.Enabled,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getStartIdempotencyRun = `-- name: GetStartIdempotencyRun :one
 SELECT run_id FROM go_pilot_start_idempotency
 WHERE org_id = $1 AND idempotency_key = $2
@@ -3482,6 +3548,57 @@ func (q *Queries) InsertRunNode(ctx context.Context, arg InsertRunNodeParams) er
 		arg.StateJson,
 	)
 	return err
+}
+
+const insertSlackInteractionConnection = `-- name: InsertSlackInteractionConnection :exec
+INSERT INTO slack_interaction_connections (id, org_id, name, team_id, signing_credential_name,
+  user_mappings, enabled, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+`
+
+type InsertSlackInteractionConnectionParams struct {
+	ID                    string
+	OrgID                 string
+	Name                  string
+	TeamID                string
+	SigningCredentialName string
+	UserMappings          json.RawMessage
+	Enabled               bool
+	CreatedBy             string
+}
+
+func (q *Queries) InsertSlackInteractionConnection(ctx context.Context, arg InsertSlackInteractionConnectionParams) error {
+	_, err := q.db.Exec(ctx, insertSlackInteractionConnection,
+		arg.ID,
+		arg.OrgID,
+		arg.Name,
+		arg.TeamID,
+		arg.SigningCredentialName,
+		arg.UserMappings,
+		arg.Enabled,
+		arg.CreatedBy,
+	)
+	return err
+}
+
+const insertSlackInteractionReceipt = `-- name: InsertSlackInteractionReceipt :execrows
+INSERT INTO slack_interaction_receipts (id, org_id, connection_id)
+VALUES ($1, $2, $3)
+ON CONFLICT (id) DO NOTHING
+`
+
+type InsertSlackInteractionReceiptParams struct {
+	ID           string
+	OrgID        string
+	ConnectionID string
+}
+
+func (q *Queries) InsertSlackInteractionReceipt(ctx context.Context, arg InsertSlackInteractionReceiptParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertSlackInteractionReceipt, arg.ID, arg.OrgID, arg.ConnectionID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const insertTriggerEvent = `-- name: InsertTriggerEvent :execrows
@@ -5771,6 +5888,41 @@ func (q *Queries) ListRuns(ctx context.Context, arg ListRunsParams) ([]ListRunsR
 	return items, nil
 }
 
+const listSlackInteractionConnections = `-- name: ListSlackInteractionConnections :many
+SELECT id, org_id, name, team_id, signing_credential_name, user_mappings, enabled, created_by, created_at, updated_at FROM slack_interaction_connections WHERE org_id = $1 ORDER BY name LIMIT 100
+`
+
+func (q *Queries) ListSlackInteractionConnections(ctx context.Context, orgID string) ([]SlackInteractionConnection, error) {
+	rows, err := q.db.Query(ctx, listSlackInteractionConnections, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SlackInteractionConnection
+	for rows.Next() {
+		var i SlackInteractionConnection
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Name,
+			&i.TeamID,
+			&i.SigningCredentialName,
+			&i.UserMappings,
+			&i.Enabled,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUnrecordedRolloutOutcomes = `-- name: ListUnrecordedRolloutOutcomes :many
 SELECT r.id AS run_id, r.status FROM runs r
 JOIN workflow_rollouts wr ON wr.id = r.workflow_rollout_id AND wr.org_id = r.org_id AND wr.status = 'active'
@@ -6387,6 +6539,22 @@ func (q *Queries) PinPromptVersion(ctx context.Context, arg PinPromptVersionPara
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const purgeExpiredSlackReceipts = `-- name: PurgeExpiredSlackReceipts :exec
+DELETE FROM slack_interaction_receipts
+WHERE org_id = $1 AND connection_id = $2 AND created_at < $3
+`
+
+type PurgeExpiredSlackReceiptsParams struct {
+	OrgID        string
+	ConnectionID string
+	CreatedAt    time.Time
+}
+
+func (q *Queries) PurgeExpiredSlackReceipts(ctx context.Context, arg PurgeExpiredSlackReceiptsParams) error {
+	_, err := q.db.Exec(ctx, purgeExpiredSlackReceipts, arg.OrgID, arg.ConnectionID, arg.CreatedAt)
+	return err
 }
 
 const purgeExpiredSoftDeletedWorkflows = `-- name: PurgeExpiredSoftDeletedWorkflows :one
@@ -7722,6 +7890,39 @@ type UpdateRunWorkflowSnapshotParams struct {
 func (q *Queries) UpdateRunWorkflowSnapshot(ctx context.Context, arg UpdateRunWorkflowSnapshotParams) error {
 	_, err := q.db.Exec(ctx, updateRunWorkflowSnapshot, arg.ID, arg.Workflow)
 	return err
+}
+
+const updateSlackInteractionConnection = `-- name: UpdateSlackInteractionConnection :execrows
+UPDATE slack_interaction_connections
+SET name = $3, team_id = $4, signing_credential_name = $5, user_mappings = $6,
+    enabled = $7, updated_at = now()
+WHERE org_id = $1 AND id = $2
+`
+
+type UpdateSlackInteractionConnectionParams struct {
+	OrgID                 string
+	ID                    string
+	Name                  string
+	TeamID                string
+	SigningCredentialName string
+	UserMappings          json.RawMessage
+	Enabled               bool
+}
+
+func (q *Queries) UpdateSlackInteractionConnection(ctx context.Context, arg UpdateSlackInteractionConnectionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateSlackInteractionConnection,
+		arg.OrgID,
+		arg.ID,
+		arg.Name,
+		arg.TeamID,
+		arg.SigningCredentialName,
+		arg.UserMappings,
+		arg.Enabled,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const upsertConfidenceCalibration = `-- name: UpsertConfidenceCalibration :exec

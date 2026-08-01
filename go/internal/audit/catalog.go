@@ -119,6 +119,8 @@ var knownActions = map[Action]bool{
 	"run.started":                              true,
 	"run.started.adhoc":                        true,
 	"slack.interaction.created":                true,
+	"slack.interaction.opened":                 true,
+	"slack.interaction.rejected":               true,
 	"slack.interaction.deleted":                true,
 	"slack.interaction.updated":                true,
 	"snippet.created":                          true,
