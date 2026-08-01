@@ -108,6 +108,21 @@ func (e *Engine) buildIntegrationDeps(orgID, runID, nodeID string) *tools.Integr
 			}
 			return result.StatusCode, result.Body, ""
 		},
+		RateLimit: func(ctx context.Context, bucket string, perMin int) string {
+			if err := limiter.Enforce(ctx, orgID, ratelimit.Options{
+				Name: bucket, Max: perMin, Window: time.Minute,
+			}); err != nil {
+				return err.Error()
+			}
+			return ""
+		},
+		Email: func() tools.EmailSettings {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			provider, _ := orgconfig.LoadValue(ctx, e.pool, orgID, "email.provider").(string)
+			from, _ := orgconfig.LoadValue(ctx, e.pool, orgID, "email.from").(string)
+			return tools.EmailSettings{Provider: provider, From: from}
+		},
 		RateLimitPerMin: func(family string, fallback int) int {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()

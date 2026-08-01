@@ -90,10 +90,10 @@ func TestRegistryValidationAndCatalog(t *testing.T) {
 		t.Fatalf("unknown tool: %v", err)
 	}
 	// 4 json tools + 3 buffered csv tools + vector pair + text.uppercase
-	// + webhook.send (integration chokepoint); csv.fetch registers from
-	// the executors package on top of this base set.
+	// + webhook.send + email.send (integration chokepoint); csv.fetch
+	// registers from the executors package on top of this base set.
 	catalog := NewRegistry().Catalog()
-	if len(catalog) != 11 {
+	if len(catalog) != 12 {
 		t.Fatalf("catalog size: %d", len(catalog))
 	}
 	first := catalog[0]

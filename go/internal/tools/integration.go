@@ -42,6 +42,11 @@ type IntegrationDeps struct {
 	RateLimitPerMin func(family string, fallback int) int
 	// Now is the clock seam (deterministic signature tests).
 	Now func() time.Time
+	// RateLimit enforces one org-scoped bucket WITHOUT a credential
+	// (email.send has no stored credential); returns "" or the message.
+	RateLimit func(ctx context.Context, bucket string, perMin int) string
+	// Email resolves the tenant mailer posture (provider + default from).
+	Email func() EmailSettings
 }
 
 const webhookSignatureHeader = "x-janusly-signature"
@@ -60,6 +65,7 @@ func SignWebhookPayload(secret, body string, unixSeconds int64) string {
 // intercept with runtime deps.
 var integrationToolNames = map[string]bool{
 	"webhook.send": true,
+	"email.send":   true,
 }
 
 // IsIntegrationTool reports whether the executor should route this call
@@ -117,6 +123,8 @@ func ExecuteIntegrationTool(ctx context.Context, name string, input map[string]a
 		}
 	}
 	switch name {
+	case "email.send":
+		return executeEmailSend(ctx, input, deps)
 	case "webhook.send":
 		credential, _ := input["credential"].(string)
 		rawURL, _ := input["url"].(string)

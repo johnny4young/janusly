@@ -54,6 +54,9 @@ func NewRegistry() *Registry {
 	for _, definition := range integrationTools() {
 		registry.byName[definition.Name] = definition
 	}
+	for _, definition := range emailTools() {
+		registry.byName[definition.Name] = definition
+	}
 	registry.byName["text.uppercase"] = Definition{
 		Name:         "text.uppercase",
 		Description:  "Uppercase a text value.",
