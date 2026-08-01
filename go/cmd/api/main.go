@@ -142,6 +142,12 @@ func run() error {
 	go func() {
 		eng.RunScheduleSweep(workerCtx, 15*time.Second, logger)
 	}()
+	go func() {
+		eng.RunAutoHealingSweep(workerCtx, 5*time.Minute, logger)
+	}()
+	go func() {
+		eng.RunMemoryConsentPurgeSweep(workerCtx, time.Hour, logger)
+	}()
 	go eng.StartReaper(workerCtx, time.Minute, time.Hour, logger)
 	defer func() { stopWorkers(); <-workersDone }()
 

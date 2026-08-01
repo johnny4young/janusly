@@ -2033,3 +2033,78 @@ WHERE id = $1;
 
 -- name: DisableScheduleEntry :exec
 UPDATE schedule_entries SET enabled = false, updated_at = now() WHERE id = $1;
+
+-- name: ListOpenDeadLettersForHealing :many
+SELECT dl.id, dl.org_id, dl.run_id, dl.node_id, dl.error_json, dl.workflow_json,
+       dl.node_json, dl.created_at
+FROM dead_letters dl
+WHERE dl.org_id = $1 AND dl.status = 'open' AND dl.created_at >= $2
+  AND NOT EXISTS (SELECT 1 FROM auto_healing_runs ahr WHERE ahr.dead_letter_id = dl.id)
+ORDER BY dl.created_at DESC
+LIMIT 200;
+
+-- name: ListHealingCandidateOrgs :many
+SELECT DISTINCT org_id FROM dead_letters
+WHERE status = 'open' AND created_at >= $1
+LIMIT 100;
+
+-- name: CountAutoHealingAttempts :one
+SELECT count(*) FROM auto_healing_runs
+WHERE org_id = $1 AND signature = $2 AND created_at >= $3;
+
+-- name: InsertAutoHealingRun :exec
+INSERT INTO auto_healing_runs (id, org_id, dead_letter_id, signature, status,
+                               proposed_patch_json, approach_label, confidence,
+                               loop_attempt_count, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
+
+-- name: SetAutoHealingValidating :execrows
+UPDATE auto_healing_runs
+SET status = 'validating', validation_run_id = $3, updated_at = now()
+WHERE org_id = $1 AND id = $2 AND status = 'proposed';
+
+-- name: ListValidatingAutoHealingRuns :many
+SELECT ahr.id, ahr.org_id, ahr.validation_run_id, r.status AS run_status,
+       r.validation_evidence_level
+FROM auto_healing_runs ahr
+JOIN runs r ON r.id = ahr.validation_run_id
+WHERE ahr.status = 'validating'
+  AND r.status IN ('succeeded', 'failed', 'cancelled', 'timed_out')
+LIMIT 200;
+
+-- name: SetAutoHealingValidationOutcome :execrows
+UPDATE auto_healing_runs
+SET status = $3, validation_evidence_level = $4, updated_at = now()
+WHERE org_id = $1 AND id = $2 AND status = 'validating';
+
+-- name: ListPendingAutoHealingRuns :many
+SELECT * FROM auto_healing_runs
+WHERE org_id = $1 AND status = 'validated'
+ORDER BY created_at DESC
+LIMIT $2;
+
+-- name: GetAutoHealingRun :one
+SELECT * FROM auto_healing_runs WHERE org_id = $1 AND id = $2;
+
+-- name: DecideAutoHealingRun :execrows
+UPDATE auto_healing_runs
+SET status = $3, decision_actor = $4, decline_reason = $5, updated_at = now()
+WHERE org_id = $1 AND id = $2 AND status = 'validated';
+
+-- name: ListMemoryConsentRevokedOrgs :many
+SELECT org_id, updated_at FROM org_configs
+WHERE key = 'memory.enabled' AND value_json = 'false'::jsonb AND updated_at <= $1;
+
+-- name: PurgeMemoryEntriesForOrg :execrows
+DELETE FROM memory_entries WHERE org_id = $1;
+
+-- name: ListScheduleFireHistory :many
+SELECT r.created_at, r.status
+FROM runs r
+JOIN workflow_versions wv ON wv.id = r.workflow_version_id
+WHERE wv.workflow_id = $1 AND wv.org_id = $2
+  AND r.org_id = $2
+  AND r.input_json -> 'input' ->> 'triggeredBy' = 'schedule'
+  AND r.created_at >= $3
+ORDER BY r.created_at DESC
+LIMIT 5000;

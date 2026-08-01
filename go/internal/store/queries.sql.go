@@ -713,6 +713,24 @@ func (q *Queries) ConvergeDeadLetterReplayed(ctx context.Context, arg ConvergeDe
 	return err
 }
 
+const countAutoHealingAttempts = `-- name: CountAutoHealingAttempts :one
+SELECT count(*) FROM auto_healing_runs
+WHERE org_id = $1 AND signature = $2 AND created_at >= $3
+`
+
+type CountAutoHealingAttemptsParams struct {
+	OrgID     string
+	Signature string
+	CreatedAt time.Time
+}
+
+func (q *Queries) CountAutoHealingAttempts(ctx context.Context, arg CountAutoHealingAttemptsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAutoHealingAttempts, arg.OrgID, arg.Signature, arg.CreatedAt)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countBufferedTriggerEvents = `-- name: CountBufferedTriggerEvents :one
 SELECT count(*) FROM trigger_events te
 WHERE te.org_id = $1 AND te.workflow_id = $2 AND te.status = 'buffered'
@@ -877,6 +895,34 @@ func (q *Queries) CountWorkflowVersions(ctx context.Context, arg CountWorkflowVe
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const decideAutoHealingRun = `-- name: DecideAutoHealingRun :execrows
+UPDATE auto_healing_runs
+SET status = $3, decision_actor = $4, decline_reason = $5, updated_at = now()
+WHERE org_id = $1 AND id = $2 AND status = 'validated'
+`
+
+type DecideAutoHealingRunParams struct {
+	OrgID         string
+	ID            string
+	Status        string
+	DecisionActor pgtype.Text
+	DeclineReason pgtype.Text
+}
+
+func (q *Queries) DecideAutoHealingRun(ctx context.Context, arg DecideAutoHealingRunParams) (int64, error) {
+	result, err := q.db.Exec(ctx, decideAutoHealingRun,
+		arg.OrgID,
+		arg.ID,
+		arg.Status,
+		arg.DecisionActor,
+		arg.DeclineReason,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteAlertPolicy = `-- name: DeleteAlertPolicy :execrows
@@ -1752,6 +1798,43 @@ func (q *Queries) GetAlertPolicy(ctx context.Context, arg GetAlertPolicyParams) 
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAutoHealingRun = `-- name: GetAutoHealingRun :one
+SELECT id, org_id, dead_letter_id, signature, status, proposed_patch_json, approach_label, confidence, validation_run_id, validation_signature, decision_actor, decline_reason, loop_attempt_count, metadata, created_at, updated_at, publication_receipt, publication_repair_after, publication_attempts, validation_evidence_level FROM auto_healing_runs WHERE org_id = $1 AND id = $2
+`
+
+type GetAutoHealingRunParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) GetAutoHealingRun(ctx context.Context, arg GetAutoHealingRunParams) (AutoHealingRun, error) {
+	row := q.db.QueryRow(ctx, getAutoHealingRun, arg.OrgID, arg.ID)
+	var i AutoHealingRun
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.DeadLetterID,
+		&i.Signature,
+		&i.Status,
+		&i.ProposedPatchJson,
+		&i.ApproachLabel,
+		&i.Confidence,
+		&i.ValidationRunID,
+		&i.ValidationSignature,
+		&i.DecisionActor,
+		&i.DeclineReason,
+		&i.LoopAttemptCount,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PublicationReceipt,
+		&i.PublicationRepairAfter,
+		&i.PublicationAttempts,
+		&i.ValidationEvidenceLevel,
 	)
 	return i, err
 }
@@ -3349,6 +3432,42 @@ func (q *Queries) InsertAuditLogRow(ctx context.Context, arg InsertAuditLogRowPa
 		arg.Action,
 		arg.TargetType,
 		arg.TargetID,
+		arg.Metadata,
+	)
+	return err
+}
+
+const insertAutoHealingRun = `-- name: InsertAutoHealingRun :exec
+INSERT INTO auto_healing_runs (id, org_id, dead_letter_id, signature, status,
+                               proposed_patch_json, approach_label, confidence,
+                               loop_attempt_count, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+`
+
+type InsertAutoHealingRunParams struct {
+	ID                string
+	OrgID             string
+	DeadLetterID      string
+	Signature         string
+	Status            string
+	ProposedPatchJson json.RawMessage
+	ApproachLabel     pgtype.Text
+	Confidence        pgtype.Int4
+	LoopAttemptCount  int32
+	Metadata          json.RawMessage
+}
+
+func (q *Queries) InsertAutoHealingRun(ctx context.Context, arg InsertAutoHealingRunParams) error {
+	_, err := q.db.Exec(ctx, insertAutoHealingRun,
+		arg.ID,
+		arg.OrgID,
+		arg.DeadLetterID,
+		arg.Signature,
+		arg.Status,
+		arg.ProposedPatchJson,
+		arg.ApproachLabel,
+		arg.Confidence,
+		arg.LoopAttemptCount,
 		arg.Metadata,
 	)
 	return err
@@ -5441,6 +5560,32 @@ func (q *Queries) ListFailedRunNodeSamples(ctx context.Context, arg ListFailedRu
 	return items, nil
 }
 
+const listHealingCandidateOrgs = `-- name: ListHealingCandidateOrgs :many
+SELECT DISTINCT org_id FROM dead_letters
+WHERE status = 'open' AND created_at >= $1
+LIMIT 100
+`
+
+func (q *Queries) ListHealingCandidateOrgs(ctx context.Context, createdAt *time.Time) ([]string, error) {
+	rows, err := q.db.Query(ctx, listHealingCandidateOrgs, createdAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var org_id string
+		if err := rows.Scan(&org_id); err != nil {
+			return nil, err
+		}
+		items = append(items, org_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLatestWorkflowVersionDags = `-- name: ListLatestWorkflowVersionDags :many
 SELECT DISTINCT ON (wv.workflow_id) wv.workflow_id, wv.dag_json
 FROM workflow_versions wv
@@ -5586,6 +5731,36 @@ func (q *Queries) ListMcpToolDescriptorsByConnection(ctx context.Context, connec
 	return items, nil
 }
 
+const listMemoryConsentRevokedOrgs = `-- name: ListMemoryConsentRevokedOrgs :many
+SELECT org_id, updated_at FROM org_configs
+WHERE key = 'memory.enabled' AND value_json = 'false'::jsonb AND updated_at <= $1
+`
+
+type ListMemoryConsentRevokedOrgsRow struct {
+	OrgID     string
+	UpdatedAt *time.Time
+}
+
+func (q *Queries) ListMemoryConsentRevokedOrgs(ctx context.Context, updatedAt *time.Time) ([]ListMemoryConsentRevokedOrgsRow, error) {
+	rows, err := q.db.Query(ctx, listMemoryConsentRevokedOrgs, updatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMemoryConsentRevokedOrgsRow
+	for rows.Next() {
+		var i ListMemoryConsentRevokedOrgsRow
+		if err := rows.Scan(&i.OrgID, &i.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOpenDeadLetterClusterMembers = `-- name: ListOpenDeadLetterClusterMembers :many
 SELECT dl.id, dl.run_id, dl.node_id, dl.error_json, dl.created_at, r.input_json
 FROM dead_letters dl
@@ -5625,6 +5800,61 @@ func (q *Queries) ListOpenDeadLetterClusterMembers(ctx context.Context, arg List
 			&i.ErrorJson,
 			&i.CreatedAt,
 			&i.InputJson,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOpenDeadLettersForHealing = `-- name: ListOpenDeadLettersForHealing :many
+SELECT dl.id, dl.org_id, dl.run_id, dl.node_id, dl.error_json, dl.workflow_json,
+       dl.node_json, dl.created_at
+FROM dead_letters dl
+WHERE dl.org_id = $1 AND dl.status = 'open' AND dl.created_at >= $2
+  AND NOT EXISTS (SELECT 1 FROM auto_healing_runs ahr WHERE ahr.dead_letter_id = dl.id)
+ORDER BY dl.created_at DESC
+LIMIT 200
+`
+
+type ListOpenDeadLettersForHealingParams struct {
+	OrgID     string
+	CreatedAt *time.Time
+}
+
+type ListOpenDeadLettersForHealingRow struct {
+	ID           string
+	OrgID        string
+	RunID        string
+	NodeID       string
+	ErrorJson    json.RawMessage
+	WorkflowJson json.RawMessage
+	NodeJson     json.RawMessage
+	CreatedAt    *time.Time
+}
+
+func (q *Queries) ListOpenDeadLettersForHealing(ctx context.Context, arg ListOpenDeadLettersForHealingParams) ([]ListOpenDeadLettersForHealingRow, error) {
+	rows, err := q.db.Query(ctx, listOpenDeadLettersForHealing, arg.OrgID, arg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOpenDeadLettersForHealingRow
+	for rows.Next() {
+		var i ListOpenDeadLettersForHealingRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.RunID,
+			&i.NodeID,
+			&i.ErrorJson,
+			&i.WorkflowJson,
+			&i.NodeJson,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -5932,6 +6162,59 @@ func (q *Queries) ListOrgsWithSoftDeletedWorkflows(ctx context.Context) ([]strin
 			return nil, err
 		}
 		items = append(items, org_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingAutoHealingRuns = `-- name: ListPendingAutoHealingRuns :many
+SELECT id, org_id, dead_letter_id, signature, status, proposed_patch_json, approach_label, confidence, validation_run_id, validation_signature, decision_actor, decline_reason, loop_attempt_count, metadata, created_at, updated_at, publication_receipt, publication_repair_after, publication_attempts, validation_evidence_level FROM auto_healing_runs
+WHERE org_id = $1 AND status = 'validated'
+ORDER BY created_at DESC
+LIMIT $2
+`
+
+type ListPendingAutoHealingRunsParams struct {
+	OrgID string
+	Limit int32
+}
+
+func (q *Queries) ListPendingAutoHealingRuns(ctx context.Context, arg ListPendingAutoHealingRunsParams) ([]AutoHealingRun, error) {
+	rows, err := q.db.Query(ctx, listPendingAutoHealingRuns, arg.OrgID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AutoHealingRun
+	for rows.Next() {
+		var i AutoHealingRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.DeadLetterID,
+			&i.Signature,
+			&i.Status,
+			&i.ProposedPatchJson,
+			&i.ApproachLabel,
+			&i.Confidence,
+			&i.ValidationRunID,
+			&i.ValidationSignature,
+			&i.DecisionActor,
+			&i.DeclineReason,
+			&i.LoopAttemptCount,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PublicationReceipt,
+			&i.PublicationRepairAfter,
+			&i.PublicationAttempts,
+			&i.ValidationEvidenceLevel,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -6825,6 +7108,49 @@ func (q *Queries) ListScheduleEntriesForWorkflow(ctx context.Context, arg ListSc
 	return items, nil
 }
 
+const listScheduleFireHistory = `-- name: ListScheduleFireHistory :many
+SELECT r.created_at, r.status
+FROM runs r
+JOIN workflow_versions wv ON wv.id = r.workflow_version_id
+WHERE wv.workflow_id = $1 AND wv.org_id = $2
+  AND r.org_id = $2
+  AND r.input_json -> 'input' ->> 'triggeredBy' = 'schedule'
+  AND r.created_at >= $3
+ORDER BY r.created_at DESC
+LIMIT 5000
+`
+
+type ListScheduleFireHistoryParams struct {
+	WorkflowID string
+	OrgID      string
+	CreatedAt  *time.Time
+}
+
+type ListScheduleFireHistoryRow struct {
+	CreatedAt *time.Time
+	Status    string
+}
+
+func (q *Queries) ListScheduleFireHistory(ctx context.Context, arg ListScheduleFireHistoryParams) ([]ListScheduleFireHistoryRow, error) {
+	rows, err := q.db.Query(ctx, listScheduleFireHistory, arg.WorkflowID, arg.OrgID, arg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListScheduleFireHistoryRow
+	for rows.Next() {
+		var i ListScheduleFireHistoryRow
+		if err := rows.Scan(&i.CreatedAt, &i.Status); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSlackInteractionConnections = `-- name: ListSlackInteractionConnections :many
 SELECT id, org_id, name, team_id, signing_credential_name, user_mappings, enabled, created_by, created_at, updated_at FROM slack_interaction_connections WHERE org_id = $1 ORDER BY name LIMIT 100
 `
@@ -6926,6 +7252,50 @@ func (q *Queries) ListUpstreamHealthSources(ctx context.Context, orgID string) (
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listValidatingAutoHealingRuns = `-- name: ListValidatingAutoHealingRuns :many
+SELECT ahr.id, ahr.org_id, ahr.validation_run_id, r.status AS run_status,
+       r.validation_evidence_level
+FROM auto_healing_runs ahr
+JOIN runs r ON r.id = ahr.validation_run_id
+WHERE ahr.status = 'validating'
+  AND r.status IN ('succeeded', 'failed', 'cancelled', 'timed_out')
+LIMIT 200
+`
+
+type ListValidatingAutoHealingRunsRow struct {
+	ID                      string
+	OrgID                   string
+	ValidationRunID         pgtype.Text
+	RunStatus               string
+	ValidationEvidenceLevel pgtype.Text
+}
+
+func (q *Queries) ListValidatingAutoHealingRuns(ctx context.Context) ([]ListValidatingAutoHealingRunsRow, error) {
+	rows, err := q.db.Query(ctx, listValidatingAutoHealingRuns)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListValidatingAutoHealingRunsRow
+	for rows.Next() {
+		var i ListValidatingAutoHealingRunsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.ValidationRunID,
+			&i.RunStatus,
+			&i.ValidationEvidenceLevel,
 		); err != nil {
 			return nil, err
 		}
@@ -7733,6 +8103,18 @@ func (q *Queries) PurgeExpiredSoftDeletedWorkflowsForOrg(ctx context.Context, ar
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const purgeMemoryEntriesForOrg = `-- name: PurgeMemoryEntriesForOrg :execrows
+DELETE FROM memory_entries WHERE org_id = $1
+`
+
+func (q *Queries) PurgeMemoryEntriesForOrg(ctx context.Context, orgID string) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeMemoryEntriesForOrg, orgID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const queryAuditLogs = `-- name: QueryAuditLogs :many
@@ -8581,6 +8963,52 @@ func (q *Queries) RotateCredentialSecretRefCAS(ctx context.Context, arg RotateCr
 	var updated_at time.Time
 	err := row.Scan(&updated_at)
 	return updated_at, err
+}
+
+const setAutoHealingValidating = `-- name: SetAutoHealingValidating :execrows
+UPDATE auto_healing_runs
+SET status = 'validating', validation_run_id = $3, updated_at = now()
+WHERE org_id = $1 AND id = $2 AND status = 'proposed'
+`
+
+type SetAutoHealingValidatingParams struct {
+	OrgID           string
+	ID              string
+	ValidationRunID pgtype.Text
+}
+
+func (q *Queries) SetAutoHealingValidating(ctx context.Context, arg SetAutoHealingValidatingParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setAutoHealingValidating, arg.OrgID, arg.ID, arg.ValidationRunID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setAutoHealingValidationOutcome = `-- name: SetAutoHealingValidationOutcome :execrows
+UPDATE auto_healing_runs
+SET status = $3, validation_evidence_level = $4, updated_at = now()
+WHERE org_id = $1 AND id = $2 AND status = 'validating'
+`
+
+type SetAutoHealingValidationOutcomeParams struct {
+	OrgID                   string
+	ID                      string
+	Status                  string
+	ValidationEvidenceLevel pgtype.Text
+}
+
+func (q *Queries) SetAutoHealingValidationOutcome(ctx context.Context, arg SetAutoHealingValidationOutcomeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setAutoHealingValidationOutcome,
+		arg.OrgID,
+		arg.ID,
+		arg.Status,
+		arg.ValidationEvidenceLevel,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setCredentialExpiry = `-- name: SetCredentialExpiry :one
