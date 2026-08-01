@@ -329,6 +329,16 @@ cannot write output or enqueue downstream work.
 
 **Recovery metrics rollup:** `GET /recovery/metrics?windowDays=…` (`role: "viewer"`) composes the bounded, tenant-scoped signals from `packages/data/src/recoveryMetricsRepo.ts` with the pure `composeRecoveryMetrics` rollup. Every execution-derived query joins or reads `runs.replayMode IS NULL`; controlled drills and validation replays cannot affect success rate, verified recovery, latency, approvals, replay outcomes, SLA attainment, recurrence, clusters, heatmap, or value estimates. Current-state approvals remain independent of the rolling window.
 
+`recoveryMetricsRepo.ts` is the stable compatibility surface over bounded
+modules in `packages/data/src/recovery-metrics/`: `impact` owns the atomic
+terminal-success write, `ledger` owns lifetime and operator projections,
+`effectiveness` owns first-action, recurrence, and SLA reads, `clusters` owns
+normalized resolved-signature counts, and `signals` composes dashboard and
+time-series reads. `contracts` owns the shared types and bounds; `signals` may
+compose the bounded cluster and effectiveness reads. Keep the graph acyclic,
+keep consumers on `@janusly/data`, and do not move any impact write outside the
+caller's terminal node transaction.
+
 `verifiedRecovery` is the versioned north-star projection: PostgreSQL computes the continuous median (`p50Ms`), p90 (`p90Ms`), sample size, and downtime sum over the complete production-only, generation-bound terminal-impact window and returns one bounded aggregate row. The separate raw-duration read stays capped at 1,000 samples only for the legacy arithmetic-average `mttr` compatibility field; it cannot bias the north-star or downtime total. The daily `mttrTrend` compatibility field carries per-day continuous medians over the same eligible facts. Web surfaces use the shared `selectRecoveryTimeMetric` helper, preferring `verifiedRecovery` and falling back only when connected to an older API during a rolling upgrade. Severity still uses `MTTR_BANDS_MS`, but is evaluated against the median.
 
 The Value Dashboard compares its operator-supplied `value.baselineMttrSeconds` baseline with the verified-recovery median, not the legacy average. `clustersResolved × minutesSavedPerRecovery / 60 × hourlyCost` remains an explicitly labeled estimate; every dollar/hour surface keeps the estimate badge and assumption disclosure. Markdown/JSON exports include the versioned verified-recovery metric and the production-only terminal ledger. SLA attainment remains undefined (`value: null`, neutral) when no production recovery items resolved in-window.

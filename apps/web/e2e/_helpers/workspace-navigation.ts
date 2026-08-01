@@ -129,6 +129,15 @@ export async function openWorkflowOperation(page: Page, label: string): Promise<
   }
 }
 
+export async function openWorkflowCreation(page: Page): Promise<void> {
+  const trigger = page.locator('button[aria-controls="workflow-creation-choices"]')
+  await trigger.waitFor({ state: 'visible' })
+  if (await trigger.getAttribute('aria-expanded') !== 'true') {
+    await trigger.click()
+  }
+  await page.getByTestId('workflow-creation-choices').waitFor({ state: 'visible' })
+}
+
 export async function openRecoveryAutomation(page: Page): Promise<void> {
   const automation = page.getByTestId('recovery-automation')
   const toggle = page.getByTestId('recovery-automation-toggle')
