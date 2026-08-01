@@ -267,12 +267,10 @@ const CASES = [
 // and does not fail the run. Keep this list SHORT and justified.
 const EXPECTED_DIVERGENCES = {
   "status-linear": [
-    ["$.body.data.events", "event-stream granularity (node emite node.queued/started por nodo; destino: alinear antes del cutover del timeline)"],
-    ["$.body.data.run.traceId", "OTel trace id no poblado en el pilot (destino: wiring OTel en cutover)"],
+    ["$.body.data.run.traceId", "OTel trace id no poblado en el pilot (destino: T-504)"],
   ],
   "run-linear": [
-    ["$.body.data.events", "event-stream granularity"],
-    ["$.body.data.run.traceId", "OTel trace id"],
+    ["$.body.data.run.traceId", "OTel trace id (destino: T-504)"],
   ],
   "runs-list": [["$.body.data[0].traceId", "OTel trace id"]],
   "org-config": [

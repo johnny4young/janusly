@@ -12,11 +12,14 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/executors"
@@ -121,6 +124,22 @@ func (e *Engine) claimBatch(ctx context.Context, batch int32) ([]ClaimedNode, er
 		return nil, err
 	}
 	metricClaims.Add(float64(len(rows)))
+	// The reference appends node.running right after the claim wins
+	// (runtime.ts). Best-effort like its await-outside-tx posture: event
+	// telemetry never blocks execution, and the executor's own terminal
+	// event still lands if this insert hits a blip.
+	for _, row := range rows {
+		attemptPayload, _ := json.Marshal(map[string]any{"attempt": row.Attempt})
+		runningAt := eventNow()
+		if err := store.New(e.pool).InsertRunEventAt(ctx, store.InsertRunEventAtParams{
+			ID: e.newID(), RunID: row.RunID,
+			NodeID: pgtype.Text{String: row.NodeID, Valid: true},
+			Type:   "node.running", Payload: attemptPayload,
+			CreatedAt: &runningAt,
+		}); err != nil && ctx.Err() == nil {
+			slog.Warn("node.running event insert failed", "runId", row.RunID, "nodeId", row.NodeID, "error", err)
+		}
+	}
 	claims := make([]ClaimedNode, 0, len(rows))
 	for _, row := range rows {
 		claims = append(claims, ClaimedNode{

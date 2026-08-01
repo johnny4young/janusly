@@ -631,16 +631,37 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, runID
 		}
 	}
 	if anyFailed {
-		return e.flipRunTerminal(ctx, q, runID, "failed",
-			map[string]any{"failedNodes": failedNodes}, completedAt, nil)
+		if err := e.flipRunTerminal(ctx, q, runID, "failed",
+			map[string]any{"failedNodes": failedNodes}, completedAt, nil); err != nil {
+			return err
+		}
+		return e.appendStatusChecked(ctx, q, runID, completedAt)
 	}
 	if total > 0 && !anyOpen {
 		var outputJSON json.RawMessage
 		if len(wf.Outputs) > 0 {
 			outputJSON, _ = json.Marshal(projectOutputs(wf.Outputs, runContext, runInput))
 		}
-		return e.flipRunTerminal(ctx, q, runID, "succeeded",
-			map[string]any{"nodes": total}, completedAt, outputJSON)
+		if err := e.flipRunTerminal(ctx, q, runID, "succeeded",
+			map[string]any{"nodes": total}, completedAt, outputJSON); err != nil {
+			return err
+		}
+		return e.appendStatusChecked(ctx, q, runID, completedAt)
+	}
+	return e.appendStatusChecked(ctx, q, runID, completedAt)
+}
+
+// appendStatusChecked is the reference's fan-in settle marker: every
+// enqueue pass that queued NOTHING re-derived the run status and says so
+// (runtime.ts). +2ms so it always sorts after the terminal run event
+// (which sits at cause+1ms).
+func (e *Engine) appendStatusChecked(ctx context.Context, q *store.Queries, runID string, causeAt time.Time) error {
+	checkedAt := causeAt.Add(2 * time.Millisecond)
+	if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
+		ID: e.newID(), RunID: runID, Type: "run.status_checked",
+		Payload: json.RawMessage(`{}`), CreatedAt: &checkedAt,
+	}); err != nil {
+		return fmt.Errorf("insert run.status_checked: %w", err)
 	}
 	return nil
 }

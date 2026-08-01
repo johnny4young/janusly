@@ -99,11 +99,16 @@ func TestStartRunCommitsSkeletonAtomically(t *testing.T) {
 	events, err := q.ListRunEvents(ctx, store.ListRunEventsParams{
 		RunID: runID, BeforeCreatedAt: time.Now().Add(time.Hour), BeforeID: "zzz", PageLimit: 10,
 	})
-	if err != nil || len(events) != 1 || events[0].Type != "run.started" {
-		t.Fatalf("expected exactly run.started: %+v err=%v", events, err)
+	// T-505: the start tx now also appends node.queued per root (the
+	// reference's initial-publication event); newest-first keyset puts it
+	// before run.started.
+	if err != nil || len(events) != 2 ||
+		events[0].Type != "node.queued" || events[0].NodeID.String != "first" ||
+		events[1].Type != "run.started" {
+		t.Fatalf("expected node.queued(first)+run.started: %+v err=%v", events, err)
 	}
 	var payload map[string]string
-	_ = json.Unmarshal(events[0].Payload, &payload)
+	_ = json.Unmarshal(events[1].Payload, &payload)
 	if payload["workflowVersionId"] != "wf-linear" {
 		t.Fatalf("event payload parity broken: %s", events[0].Payload)
 	}

@@ -15,18 +15,18 @@ hasta ±20% en rendimiento pueden ser ruido de crecimiento o térmico.
 Una regresión real se confirma con dos corridas seguidas en la misma
 dirección o un cambio de más del 25%.
 
-Última corrida: 2026-07-31T06:30:06.816Z @ `5b176113` · anterior: 2026-07-31T05:31:02.000Z @ `d1c2605e`
+Última corrida: 2026-08-01T20:18:45.612Z @ `52e4825e` · anterior: 2026-08-01T20:16:59.358Z @ `52e4825e`
 
 | Métrica | Dirección | Última | Anterior | Δ | Veredicto |
 |---|---|---|---|---|---|
-| start: runs terminados/s | ↑ mejor | 209 runs/s | 190 runs/s | +9.9% | ✅ mejora |
-| start: latencia p50 | ↓ mejor | 47.0 ms | 48.0 ms | -2.1% | ≈ igual |
-| start: latencia p95 | ↓ mejor | 51.0 ms | 73.0 ms | -30.1% | ✅ mejora |
-| start: latencia p99 | ↓ mejor | 69.2 ms | 82.0 ms | -15.6% | ✅ mejora |
-| list: lecturas/s | ↑ mejor | 6698 req/s | 1536 req/s | +336.1% | ✅ mejora |
-| list: latencia p95 | ↓ mejor | 10.0 ms | 46.0 ms | -78.3% | ✅ mejora |
-| diamond: DAGs terminados/s | ↑ mejor | 112 runs/s | 85.0 runs/s | +32.4% | ✅ mejora |
-| diamond: latencia p95 | ↓ mejor | 134 ms | 190 ms | -29.7% | ✅ mejora |
+| start: runs terminados/s | ↑ mejor | 51.9 runs/s | 44.8 runs/s | +16.0% | ✅ mejora |
+| start: latencia p50 | ↓ mejor | 189 ms | 184 ms | +2.7% | ≈ igual |
+| start: latencia p95 | ↓ mejor | 260 ms | 527 ms | -50.7% | ✅ mejora |
+| start: latencia p99 | ↓ mejor | 319 ms | 739 ms | -56.8% | ✅ mejora |
+| list: lecturas/s | ↑ mejor | 2372 req/s | 258 req/s | +819.1% | ✅ mejora |
+| list: latencia p95 | ↓ mejor | 28.0 ms | 305 ms | -90.8% | ✅ mejora |
+| diamond: DAGs terminados/s | ↑ mejor | 42.5 runs/s | 13.0 runs/s | +226.9% | ✅ mejora |
+| diamond: latencia p95 | ↓ mejor | 406 ms | 1506 ms | -73.0% | ✅ mejora |
 | errores (todas las fases) | ↓ mejor | 0.0 | 0.0 | — | — |
 
-Historial: 4 corrida(s) en `series.jsonl`.
+Historial: 11 corrida(s) en `series.jsonl`.

@@ -261,6 +261,26 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 	}); err != nil {
 		return "", fmt.Errorf("insert run.started: %w", err)
 	}
+	// The reference's initial publication appends node.queued per root
+	// (T-505 event-granularity parity). Millisecond offsets keep the
+	// (created_at, id) keyset from ever ordering a queued event before
+	// run.started or shuffling roots between reads.
+	rootIndex := 0
+	for _, node := range in.Workflow.Nodes {
+		if !roots[node.ID] {
+			continue
+		}
+		rootIndex++
+		queuedAt := startedAt.Add(time.Duration(rootIndex) * time.Millisecond)
+		if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
+			ID: e.newID(), RunID: runID,
+			NodeID: pgtype.Text{String: node.ID, Valid: true},
+			Type:   "node.queued", Payload: json.RawMessage(`{}`),
+			CreatedAt: &queuedAt,
+		}); err != nil {
+			return "", fmt.Errorf("insert node.queued: %w", err)
+		}
+	}
 
 	if in.ParentCheckpoint != nil {
 		if err := e.commitParentCheckpoint(ctx, q, in.ParentCheckpoint, runID); err != nil {
