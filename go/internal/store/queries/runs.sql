@@ -2,15 +2,20 @@
 
 -- name: InsertRun :exec
 INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, created_by, replay_mode, validation_evidence_level,
-  parent_run_id, parent_node_id, parent_link_kind, workflow_rollout_id, workflow_rollout_variant)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13);
+  parent_run_id, parent_node_id, parent_link_kind, workflow_rollout_id, workflow_rollout_variant, trace_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);
 
 -- name: GetRun :one
 SELECT id, org_id, workflow_version_id, status, input_json, output_json,
        parent_run_id, parent_node_id, replay_mode, created_by, created_at,
-       outcome_status, semantic_violation_count, validation_evidence_level
+       outcome_status, semantic_violation_count, validation_evidence_level, trace_id
 FROM runs
 WHERE id = $1 AND org_id = $2;
+
+-- The child of a subworkflow inherits the parent's correlation id so the
+-- whole chain stays copyable as one trace (reference start-run posture).
+-- name: GetRunTraceID :one
+SELECT trace_id FROM runs WHERE id = $1;
 
 -- name: ListRuns :many
 SELECT id, org_id, workflow_version_id, status, created_by, created_at
@@ -175,7 +180,7 @@ LIMIT sqlc.arg(page_limit);
 -- name: ListRunSummaries :many
 SELECT r.id, r.org_id, r.workflow_version_id, r.status, r.output_json,
        r.parent_run_id, r.parent_node_id, r.replay_mode, r.created_by,
-       r.created_at,
+       r.created_at, r.trace_id,
        coalesce(wv.workflow_id, r.workflow_version_id) AS workflow_id,
        coalesce((r.input_json->'workflow'->>'name')::text, '') AS workflow_name,
        EXISTS (

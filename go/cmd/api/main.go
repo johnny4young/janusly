@@ -24,6 +24,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/grammar"
 	"github.com/johnny4young/janusly/go/internal/httpapi"
 	"github.com/johnny4young/janusly/go/internal/migrate"
+	"github.com/johnny4young/janusly/go/internal/observability"
 	"github.com/johnny4young/janusly/go/internal/ratelimit"
 	"github.com/johnny4young/janusly/go/internal/secretstore"
 	"github.com/johnny4young/janusly/go/internal/upstream"
@@ -57,6 +58,19 @@ func run() error {
 		return err
 	}
 	logger := boot.NewLogger()
+
+	// Traces: console exporter by default, OTLP/HTTP via OTEL_EXPORTER=otlp,
+	// silent via "none" (reference otel.ts posture). Shutdown flushes the
+	// batch queue so the last spans are not dropped on SIGTERM.
+	traceShutdown, err := observability.InitTracing(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = traceShutdown(flushCtx)
+	}()
 
 	// Single-binary ops: `janusly-go migrate` applies the embedded goose
 	// migrations and exits; the serving path refuses a stale schema.

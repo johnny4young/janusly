@@ -252,7 +252,7 @@ func runView(run store.GetRunRow) map[string]any {
 		"parentRunId": textOrNull(run.ParentRunID), "parentNodeId": textOrNull(run.ParentNodeID),
 		"parentLinkKind": nil, "parentNotificationAfter": nil,
 		"recoveryPlaybookAppliedRecordedAt": nil, "recoveryPlaybookValidationRecordedAt": nil,
-		"replayMode": textOrNull(run.ReplayMode), "traceId": nil,
+		"replayMode": textOrNull(run.ReplayMode), "traceId": textOrNull(run.TraceID),
 		"validationEvidenceLevel": textOrNull(run.ValidationEvidenceLevel),
 		"createdBy":               textOrNull(run.CreatedBy), "createdAt": timeOrNull(run.CreatedAt),
 	}
@@ -299,7 +299,7 @@ func (s *V1Server) listRuns(w http.ResponseWriter, r *http.Request, rc v1Request
 			"hasWaitingNodes": row.HasWaitingNodes, "outcomeStatus": nil,
 			"semanticViolationCount": 0, "outputJson": rawOrNull(row.OutputJson),
 			"parentRunId": textOrNull(row.ParentRunID), "parentNodeId": textOrNull(row.ParentNodeID),
-			"replayMode": textOrNull(row.ReplayMode), "traceId": nil,
+			"replayMode": textOrNull(row.ReplayMode), "traceId": textOrNull(row.TraceID),
 			"validationEvidenceLevel": nil,
 			"createdBy":               textOrNull(row.CreatedBy), "createdAt": timeOrNull(row.CreatedAt),
 		})

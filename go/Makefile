@@ -52,7 +52,7 @@ parity:
 # the Go pilot, normalized diff; fails on any divergence outside the
 # annotated expected list (see CUTOVER-MAP.md).
 dual:
-	node conformance/run-reference-stack.mjs node conformance/run-dual.mjs
+	node conformance/run-reference-stack.mjs node go/conformance/run-dual.mjs
 
 # The one-command truth lane: everything a reviewer needs to trust the
 # branch, failing fast with an honest exit code. Assumes the pilot DB is up

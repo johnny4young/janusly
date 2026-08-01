@@ -41,6 +41,7 @@ function boot(name, port, internalPort) {
     env: {
       ...process.env,
       JANUSLY_GO_DATABASE_URL: DB,
+      OTEL_EXPORTER: "none",
       JANUSLY_GO_PORT: String(port),
       JANUSLY_GO_INTERNAL_PORT: String(internalPort),
       JANUSLY_GO_POLL_MS: "50",

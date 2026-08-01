@@ -18,6 +18,11 @@ import (
 
 	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/store"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/johnny4young/janusly/go/internal/observability"
 )
 
 // Engine owns run lifecycle operations over the shared schema.
@@ -94,6 +99,10 @@ type StartInput struct {
 	// mutable rollout row.
 	WorkflowRolloutID      string
 	WorkflowRolloutVariant string
+	// TraceID, when set, carries the parent chain's correlation id
+	// (subworkflow starts). Empty = a fresh id is stamped, so every root
+	// run gets one up front — the reference start-run posture.
+	TraceID string
 }
 
 // ErrStartIdempotencyReplay reports a duplicate Idempotency-Key: the
@@ -178,6 +187,15 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		delete(roots, edge.To)
 	}
 
+	// Root span per run (T-504): a no-op without a registered provider.
+	ctx, startSpan := observability.Tracer().Start(ctx, "run.start",
+		trace.WithAttributes(
+			attribute.String("janusly.run_id", runID),
+			attribute.String("janusly.org_id", in.OrgID),
+			attribute.String("janusly.workflow_version_id", versionID),
+		))
+	defer startSpan.End()
+
 	tx, err := e.pool.Begin(ctx)
 	if err != nil {
 		return "", fmt.Errorf("begin: %w", err)
@@ -185,6 +203,10 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := store.New(e.wrapTx(tx))
 
+	traceID := in.TraceID
+	if traceID == "" {
+		traceID = uuid.NewString()
+	}
 	if err := q.InsertRun(ctx, store.InsertRunParams{
 		ID: runID, OrgID: in.OrgID, WorkflowVersionID: versionID,
 		Status: "running", InputJson: inputJSON,
@@ -199,6 +221,7 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		ParentLinkKind:          pgtype.Text{String: in.ParentLinkKind, Valid: in.ParentLinkKind != ""},
 		WorkflowRolloutID:       pgtype.Text{String: in.WorkflowRolloutID, Valid: in.WorkflowRolloutID != ""},
 		WorkflowRolloutVariant:  pgtype.Text{String: in.WorkflowRolloutVariant, Valid: in.WorkflowRolloutVariant != ""},
+		TraceID:                 pgtype.Text{String: traceID, Valid: true},
 	}); err != nil {
 		return "", fmt.Errorf("insert run: %w", err)
 	}

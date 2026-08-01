@@ -24,6 +24,10 @@ import (
 	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/executors"
 	"github.com/johnny4young/janusly/go/internal/store"
+
+	"go.opentelemetry.io/otel/attribute"
+
+	"github.com/johnny4young/janusly/go/internal/observability"
 )
 
 // ExecuteFunc runs one claimed node and returns its output. The pool owns
@@ -209,7 +213,19 @@ func runExecutor(ctx context.Context, claim ClaimedNode, node domain.Node, wf *d
 			err = fmt.Errorf("executor panic: %v", r)
 		}
 	}()
-	return execute(ctx, claim, node, wf, runInput)
+	// One OTel span per claimed execution (reference worker.ts withSpan);
+	// a no-op unless a provider is registered, so untraced runs pay ~0.
+	spanErr := observability.WithSpan(ctx, "node.execute", []attribute.KeyValue{
+		attribute.String("janusly.run_id", claim.RunID),
+		attribute.String("janusly.node_id", claim.NodeID),
+		attribute.String("janusly.node_type", node.Type),
+		attribute.Int("janusly.attempt", int(claim.Attempt)),
+	}, func(spanCtx context.Context) error {
+		output, err = execute(spanCtx, claim, node, wf, runInput)
+		return err
+	})
+	_ = spanErr // identical to err; the span already recorded it
+	return output, err
 }
 
 func (e *Engine) failClaim(ctx context.Context, claim ClaimedNode, cause error, logger *slog.Logger) {

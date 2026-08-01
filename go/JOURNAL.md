@@ -1852,3 +1852,21 @@ valida cada replacement con el mismo juez de aigenerate y un inválido jamás
 llega al wire. Primer módulo montado 100% sobre el helper `route()` de T-525,
 con `/ai/health` en la allowlist auth-only. Tres tests de integración cubren
 fallback $0, gates por rol y modo AI simulado; suite httpapi verde y lint 0.
+
+## T-504 — Correlación de runs + trazas OTel (2026-08-01)
+
+El reference separa dos identidades que parecían una: `runs.traceId` NO es el
+trace id del span OTel — es un UUID de correlación estampado al arrancar y
+heredado por los subworkflows ("the whole chain remains copyable as one
+trace"). El pilot ahora hace exactamente eso: `StartRun` estampa
+`uuid.NewString()` salvo que el padre pase el suyo, y el executor de
+subworkflow consulta `GetRunTraceID` del padre antes de arrancar al hijo. Las
+trazas reales viven aparte: `internal/observability/tracing.go` con Resource
+`service.name=janusly-go`, console default / OTLP por env / `none` para
+silencio, span raíz `run.start` y `node.execute` por ejecución reclamada — y
+como `InitTracing` solo corre en `cmd/api`, los tests y procesos sin provider
+pagan el no-op global. El premio: las tres divergencias `traceId` salieron de
+la lista esperada del comparador y el dual quedó 27/27 comparando limpio
+(solo queda el artefacto org-config del reference). Bonus: `make dual` estaba
+roto de fábrica (cwd del wrapper vs ruta relativa) y nadie lo había notado
+porque las corridas anteriores fueron a mano desde la raíz.

@@ -39,6 +39,7 @@ const api = spawn("/tmp/janusly-go-soak-api", [], {
   env: {
     ...process.env,
     JANUSLY_GO_DATABASE_URL: DB,
+      OTEL_EXPORTER: "none",
     JANUSLY_GO_PORT: API_PORT,
     JANUSLY_GO_INTERNAL_PORT: INTERNAL_PORT,
     JANUSLY_GO_POLL_MS: "50",

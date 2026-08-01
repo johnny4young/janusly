@@ -36,6 +36,7 @@ const goApi = spawn("/tmp/janusly-go-dual-api", [], {
   env: {
     ...process.env,
     JANUSLY_GO_DATABASE_URL: DB,
+      OTEL_EXPORTER: "none",
     JANUSLY_GO_PORT: "4620",
     JANUSLY_GO_INTERNAL_PORT: "4621",
     JANUSLY_GO_POLL_MS: "50",
@@ -266,13 +267,6 @@ const CASES = [
 // a diff whose path starts with one of these prefixes reports as EXPECTED
 // and does not fail the run. Keep this list SHORT and justified.
 const EXPECTED_DIVERGENCES = {
-  "status-linear": [
-    ["$.body.data.run.traceId", "OTel trace id no poblado en el pilot (destino: T-504)"],
-  ],
-  "run-linear": [
-    ["$.body.data.run.traceId", "OTel trace id (destino: T-504)"],
-  ],
-  "runs-list": [["$.body.data[0].traceId", "OTel trace id"]],
   "org-config": [
     ["$.body.config[16].source", "artefacto del reference: applyOrgConfigToEnv muta process.env y las claves http.*/subworkflow.maxDepth se auto-reportan 'env' (el 'default' del pilot es el honesto)"],
     ["$.body.config[17].source", "mismo artefacto de overlay env"],

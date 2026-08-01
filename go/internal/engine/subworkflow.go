@@ -192,9 +192,12 @@ func (e *Engine) executeSubworkflowNode(
 	if dryRun {
 		childReplay = "validation"
 	}
+	// The child inherits the parent's correlation id so the whole chain
+	// remains copyable as one trace (best-effort: a blip means a fresh id).
+	parentTrace, _ := store.New(e.pool).GetRunTraceID(ctx, claim.RunID)
 	start := StartInput{
 		OrgID: claim.OrgID, Workflow: childWorkflow, WorkflowVersionID: childVersionID,
-		Input: forwarded, ReplayMode: childReplay,
+		Input: forwarded, ReplayMode: childReplay, TraceID: parentTrace.String,
 		ParentRunID: claim.RunID, ParentNodeID: claim.NodeID, ParentLinkKind: "subworkflow",
 		WorkflowRolloutID: rolloutID, WorkflowRolloutVariant: rolloutVariant,
 		ParentCheckpoint: &ParentCheckpoint{
