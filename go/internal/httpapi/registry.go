@@ -145,7 +145,6 @@ var routeAuthz = map[string]routeGate{
 	"GET /v1/workflows/schedule-preview": {auth.RoleViewer, "workflows.read"},
 	"GET /workflows/schedule-preview":    {auth.RoleViewer, "workflows.read"},
 	"GET /v1/memory/consent-status":      {auth.RoleViewer, "recovery.read"},
-	"GET /recovery/calibration-status":   {auth.RoleViewer, "recovery.read"},
 	"GET /mcp/connections":               {auth.RoleViewer, "mcp.connections.read"},
 	"GET /workflows/{workflowId}/metadata":                        {auth.RoleViewer, "workflows.read"},
 	"POST /workflows/{workflowId}/metadata":                       {auth.RoleEditor, "workflows.write"},

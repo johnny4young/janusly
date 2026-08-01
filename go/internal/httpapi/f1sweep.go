@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnny4young/janusly/go/internal/auth"
 	"github.com/johnny4young/janusly/go/internal/cron"
 	"github.com/johnny4young/janusly/go/internal/engine"
 	"github.com/johnny4young/janusly/go/internal/orgconfig"
@@ -138,7 +139,9 @@ func (s *V1Server) mountF1SweepRoutes(mux *http.ServeMux) {
 	}))
 
 	// Calibration posture for the Recovery Center tiles (legacy raw).
-	mux.HandleFunc("GET /recovery/calibration-status", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	// Mounted through route(): gate + mount colocated — the T-525 pattern
+	// new modules use (this is the exemplar migration).
+	s.route(mux, "GET /recovery/calibration-status", routeGate{auth.RoleViewer, "recovery.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		calibrations := s.listCalibrationsCore(r, rc)
 		if calibrations.status != http.StatusOK {
 			writeLegacy(w, calibrations)
@@ -150,7 +153,7 @@ func (s *V1Server) mountF1SweepRoutes(mux *http.ServeMux) {
 			"minimumSampleSize": calibrationMinSamples,
 			"calibrations":      calibrations.data["calibrations"],
 		}))
-	}))
+	})
 
 	// MCP connections list for the panel + tool config field (legacy raw;
 	// per-connection descriptor counts so the panel avoids N+1 fetches —
