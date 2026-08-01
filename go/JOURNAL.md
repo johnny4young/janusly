@@ -1870,3 +1870,23 @@ la lista esperada del comparador y el dual quedó 27/27 comparando limpio
 (solo queda el artefacto org-config del reference). Bonus: `make dual` estaba
 roto de fábrica (cwd del wrapper vs ruta relativa) y nadie lo había notado
 porque las corridas anteriores fueron a mano desde la raíz.
+
+## T-508 — Perfil de allocs + safePersist copy-on-write (2026-08-01)
+
+Perfil antes de opinar: el memprofile del micro-bench mostró que el 25% de
+los objetos alocados por `SafePersistPayload` era la copia incondicional del
+árbol en los walkers de redacción — cada evento persistido reconstruía cada
+mapa y slice aunque no hubiera NADA que redactar (el caso abrumadoramente
+común). Ambos walkers son ahora copy-on-write: el contenedor se reconstruye
+solo cuando un cambio real ocurre debajo. A/B intercalado con stash y el soak
+congelado: −22.5% allocs/op, −52.7% B/op y −30% ns/op en el caso limpio;
+−29%/−66% con valores redactados. El residuo (75%, el marshal reflect del
+stdlib) queda documentado como veredicto, no atacado — un encoder manual
+arriesga divergencia de bytes por ganancia que hoy no justifica. La mitad
+macro dejó perfiles pprof commiteados capturados a mitad de `make bench`
+(top-3 bajo carga: serialización de `getRun` 39% → destino T-527,
+`EffectivePermissions` 6.7%, regex de claves sensibles 4.5%). Dos lecciones
+operativas caras: el disco del host tocó 100% (ENOSPC en el link — se liberó
+el caché go-build de 14GB) y `/healthz` NO existe en el puerto interno — el
+poll correcto para pprof es `/debug/pprof/cmdline` (dos capturas fallaron en
+silencio contra un 404).

@@ -14,28 +14,61 @@ const RedactedPlaceholder = "[redacted]"
 
 // RedactValues recursively replaces any string occurrence of the given
 // values with the redaction placeholder. Non-string leaves pass through
-// untouched; maps and slices are rebuilt, never mutated.
+// untouched. Copy-on-write: containers are rebuilt ONLY on an actual
+// replacement underneath (T-508 — the chokepoint runs on every persisted
+// event, and the overwhelmingly common payload has nothing to redact);
+// the input tree is never mutated.
 func RedactValues(value any, redactedValues []string) any {
 	if len(redactedValues) == 0 {
 		return value
 	}
+	out, _ := redactValuesCOW(value, redactedValues)
+	return out
+}
+
+func redactValuesCOW(value any, redactedValues []string) (any, bool) {
 	switch v := value.(type) {
 	case string:
-		return RedactString(v, redactedValues)
+		replaced := RedactString(v, redactedValues)
+		return replaced, replaced != v
 	case []any:
-		out := make([]any, len(v))
+		var out []any
 		for i, item := range v {
-			out[i] = RedactValues(item, redactedValues)
+			next, changed := redactValuesCOW(item, redactedValues)
+			if !changed {
+				continue
+			}
+			if out == nil {
+				out = make([]any, len(v))
+				copy(out, v)
+			}
+			out[i] = next
 		}
-		return out
+		if out == nil {
+			return v, false
+		}
+		return out, true
 	case map[string]any:
-		out := make(map[string]any, len(v))
+		var out map[string]any
 		for key, item := range v {
-			out[key] = RedactValues(item, redactedValues)
+			next, changed := redactValuesCOW(item, redactedValues)
+			if !changed {
+				continue
+			}
+			if out == nil {
+				out = make(map[string]any, len(v))
+				for k, original := range v {
+					out[k] = original
+				}
+			}
+			out[key] = next
 		}
-		return out
+		if out == nil {
+			return v, false
+		}
+		return out, true
 	default:
-		return value
+		return value, false
 	}
 }
 
@@ -64,28 +97,60 @@ func IsSensitiveKey(key string) bool {
 	return sensitiveKeyPattern.MatchString(key)
 }
 
-// RedactSensitiveKeys deep-copies value, replacing the value of every
-// sensitive-shaped key with the redaction placeholder. Arrays recurse;
-// non-container leaves pass through.
+// RedactSensitiveKeys replaces the value of every sensitive-shaped key
+// with the redaction placeholder. Copy-on-write, like RedactValues: a
+// container is rebuilt only when a sensitive key (or a changed child)
+// actually sits underneath, so clean payloads pass through alloc-free;
+// the input tree is never mutated.
 func RedactSensitiveKeys(value any) any {
+	out, _ := redactKeysCOW(value)
+	return out
+}
+
+func redactKeysCOW(value any) (any, bool) {
 	switch v := value.(type) {
 	case []any:
-		out := make([]any, len(v))
+		var out []any
 		for i, item := range v {
-			out[i] = RedactSensitiveKeys(item)
-		}
-		return out
-	case map[string]any:
-		out := make(map[string]any, len(v))
-		for key, item := range v {
-			if IsSensitiveKey(key) {
-				out[key] = RedactedPlaceholder
+			next, changed := redactKeysCOW(item)
+			if !changed {
 				continue
 			}
-			out[key] = RedactSensitiveKeys(item)
+			if out == nil {
+				out = make([]any, len(v))
+				copy(out, v)
+			}
+			out[i] = next
 		}
-		return out
+		if out == nil {
+			return v, false
+		}
+		return out, true
+	case map[string]any:
+		var out map[string]any
+		ensure := func() map[string]any {
+			if out == nil {
+				out = make(map[string]any, len(v))
+				for k, original := range v {
+					out[k] = original
+				}
+			}
+			return out
+		}
+		for key, item := range v {
+			if IsSensitiveKey(key) {
+				ensure()[key] = RedactedPlaceholder
+				continue
+			}
+			if next, changed := redactKeysCOW(item); changed {
+				ensure()[key] = next
+			}
+		}
+		if out == nil {
+			return v, false
+		}
+		return out, true
 	default:
-		return value
+		return value, false
 	}
 }
