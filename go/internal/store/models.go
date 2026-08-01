@@ -123,6 +123,54 @@ type CredentialSecretVersion struct {
 	RevokedAt    *time.Time
 }
 
+type CustomerOrders1785560365838816000 struct {
+	ID     string
+	Status string
+	Total  pgtype.Numeric
+}
+
+type CustomerOrders1785560390885778000 struct {
+	ID     string
+	Status string
+	Total  pgtype.Numeric
+}
+
+type CustomerOrders1785560799068476000 struct {
+	ID     string
+	Status string
+	Total  pgtype.Numeric
+}
+
+type CustomerOrders1785560853448861000 struct {
+	ID     string
+	Status string
+	Total  pgtype.Numeric
+}
+
+type CustomerOrders1785560895679358000 struct {
+	ID     string
+	Status string
+	Total  pgtype.Numeric
+}
+
+type CustomerOrders1785561476295889000 struct {
+	ID     string
+	Status string
+	Total  pgtype.Numeric
+}
+
+type CustomerOrders1785561557598675000 struct {
+	ID     string
+	Status string
+	Total  pgtype.Numeric
+}
+
+type CustomerOrders1785561646468149000 struct {
+	ID     string
+	Status string
+	Total  pgtype.Numeric
+}
+
 type DeadLetter struct {
 	ID               string
 	OrgID            string
@@ -291,6 +339,13 @@ type ExternalWorkflow struct {
 	LastObservedAt     *time.Time
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+}
+
+type GoPilotGooseVersion struct {
+	ID        int32
+	VersionID int64
+	IsApplied bool
+	Tstamp    pgtype.Timestamp
 }
 
 type GoPilotRateWindow struct {
@@ -735,6 +790,7 @@ type ScheduleEntry struct {
 	CreatedBy         pgtype.Text
 	CreatedAt         *time.Time
 	UpdatedAt         *time.Time
+	NextFireAt        *time.Time
 }
 
 type ScimDirectory struct {

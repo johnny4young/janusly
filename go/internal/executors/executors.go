@@ -99,6 +99,7 @@ func Registry() map[string]Func {
 		"email_received":     executeEmailReceived,
 		"file_dropped":       executeFileDropped,
 		"mcp_server_event":   executeMcpServerEvent,
+		"schedule":           executeSchedule,
 		"mcp_tool":           NewMcpToolExecutor(),
 	}
 }

@@ -365,6 +365,11 @@ func (s *V1Server) saveCore(r *http.Request, rc v1Request) opResult {
 	}); err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}
+	// The entry set can never drift from the saved DAG: schedules re-sync
+	// from THIS snapshot on every save.
+	if err := s.engine.SyncWorkflowSchedules(ctx, q, rc.orgID, workflowID, versionID, rc.userID, wf); err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+	}
 	audit.Write(ctx, s.pool, rc.authContext, "workflow.saved", audit.Options{
 		TargetType: "workflow", TargetID: workflowID,
 		Metadata: map[string]any{"version": version + 1},
@@ -997,6 +1002,11 @@ func (s *V1Server) rollbackCore(r *http.Request, rc v1Request) opResult {
 		if strings.Contains(err.Error(), "duplicate key") {
 			return opError(http.StatusConflict, "workflows_rollback_conflict",
 				"Concurrent rollback conflict — please retry", map[string]any{"attempts": 1})
+		}
+		if rolledWf, _ := domain.Parse(source.DagJson); rolledWf != nil {
+			if err := s.engine.SyncWorkflowSchedules(ctx, q, rc.orgID, body.WorkflowID, versionID, rc.userID, rolledWf); err != nil {
+				return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+			}
 		}
 		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}

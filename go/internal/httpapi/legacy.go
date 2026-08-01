@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/go/internal/audit"
+	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/store"
 )
 
@@ -88,6 +89,14 @@ func (s *V1Server) legacyMutations(mux *http.ServeMux) {
 			writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
+		// A tombstoned workflow must never fire: its schedule entries go
+		// with it in the SAME transaction.
+		if err := txq.DeleteScheduleEntriesForWorkflow(r.Context(), store.DeleteScheduleEntriesForWorkflowParams{
+			OrgID: rc.orgID, WorkflowID: workflowID,
+		}); err != nil {
+			writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+			return
+		}
 		if err := tx.Commit(r.Context()); err != nil {
 			writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
@@ -110,6 +119,15 @@ func (s *V1Server) legacyMutations(mux *http.ServeMux) {
 		if rows == 0 {
 			writeLegacy(w, opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil))
 			return
+		}
+		// Restore re-registers schedules from the latest version.
+		if version, err := store.New(s.pool).GetLatestWorkflowVersion(r.Context(), store.GetLatestWorkflowVersionParams{
+			WorkflowID: workflowID, OrgID: rc.orgID,
+		}); err == nil {
+			if wf, _ := domain.Parse(version.DagJson); wf != nil {
+				_ = s.engine.SyncWorkflowSchedules(r.Context(), store.New(s.pool),
+					rc.orgID, workflowID, version.ID, rc.userID, wf)
+			}
 		}
 		audit.Write(r.Context(), s.pool, rc.authContext, "workflow.restored", audit.Options{
 			TargetType: "workflow", TargetID: workflowID,

@@ -17,6 +17,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/johnny4young/janusly/go/internal/cron"
 )
 
 var webhookEndpointKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
@@ -242,6 +244,27 @@ func ValidateMcpServerEventConfig(config map[string]any) error {
 		}
 	}
 	return validateTriggerRateLimit("mcp_server_event", config)
+}
+
+// ValidateScheduleConfig mirrors the schedule node's authored shape: a
+// five-field cron expression the due clock can compute from.
+func ValidateScheduleConfig(config map[string]any) error {
+	expression, _ := config["cron"].(string)
+	if strings.TrimSpace(expression) == "" {
+		return fmt.Errorf("schedule.cron is required")
+	}
+	return cron.Validate(expression)
+}
+
+func executeSchedule(_ context.Context, in Input) (any, error) {
+	if err := ValidateScheduleConfig(in.Config); err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"triggeredBy": "schedule",
+		"triggeredAt": time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+		"event":       readTriggerEvent(in.Context),
+	}, nil
 }
 
 // validateTriggerRateLimit is the shared optional rateLimitPerMin check.

@@ -136,6 +136,8 @@ var knownActions = map[Action]bool{
 	"trigger.event.started":                    true,
 	"upstream_health.source.created":           true,
 	"workflow.paused.upstream":                 true,
+	"schedule.tick.dropped":                    true,
+	"schedule.entry.disabled":                  true,
 	"workflow.resumed.upstream":                true,
 	"upstream_health.source.deleted":           true,
 	"upstream_health.source.updated":           true,

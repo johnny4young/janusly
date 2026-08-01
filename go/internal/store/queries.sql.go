@@ -45,6 +45,31 @@ func (q *Queries) ActivateDraftPlaybook(ctx context.Context, arg ActivateDraftPl
 	return result.RowsAffected(), nil
 }
 
+const advanceScheduleEntry = `-- name: AdvanceScheduleEntry :exec
+UPDATE schedule_entries
+SET next_fire_at = $2, last_run_at = $3,
+    last_run_id = CASE WHEN $4::text = '' THEN last_run_id ELSE $4::text END,
+    updated_at = now()
+WHERE id = $1
+`
+
+type AdvanceScheduleEntryParams struct {
+	ID         string
+	NextFireAt *time.Time
+	LastRunAt  *time.Time
+	LastRunID  string
+}
+
+func (q *Queries) AdvanceScheduleEntry(ctx context.Context, arg AdvanceScheduleEntryParams) error {
+	_, err := q.db.Exec(ctx, advanceScheduleEntry,
+		arg.ID,
+		arg.NextFireAt,
+		arg.LastRunAt,
+		arg.LastRunID,
+	)
+	return err
+}
+
 const appendRecoveryItemComment = `-- name: AppendRecoveryItemComment :execrows
 UPDATE recovery_items
 SET comments = comments || $3::jsonb, updated_at = now()
@@ -441,6 +466,58 @@ func (q *Queries) ClaimDueReplayCampaign(ctx context.Context) (ReplayCampaign, e
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const claimDueScheduleEntries = `-- name: ClaimDueScheduleEntries :many
+UPDATE schedule_entries SET next_fire_at = $1
+WHERE id IN (
+  SELECT due.id FROM schedule_entries AS due
+  WHERE due.enabled = true AND due.next_fire_at <= $2
+  ORDER BY due.next_fire_at
+  LIMIT $3
+  FOR UPDATE SKIP LOCKED
+)
+RETURNING id, org_id, workflow_id, workflow_version_id, node_id, cron_expression, enabled, last_run_at, last_run_id, created_by, created_at, updated_at, next_fire_at
+`
+
+type ClaimDueScheduleEntriesParams struct {
+	LeaseUntil *time.Time
+	Now        *time.Time
+	RowLimit   int32
+}
+
+func (q *Queries) ClaimDueScheduleEntries(ctx context.Context, arg ClaimDueScheduleEntriesParams) ([]ScheduleEntry, error) {
+	rows, err := q.db.Query(ctx, claimDueScheduleEntries, arg.LeaseUntil, arg.Now, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ScheduleEntry
+	for rows.Next() {
+		var i ScheduleEntry
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.WorkflowID,
+			&i.WorkflowVersionID,
+			&i.NodeID,
+			&i.CronExpression,
+			&i.Enabled,
+			&i.LastRunAt,
+			&i.LastRunID,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.NextFireAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const claimNextReplayCampaignItem = `-- name: ClaimNextReplayCampaignItem :one
@@ -971,6 +1048,29 @@ func (q *Queries) DeleteOrgRole(ctx context.Context, arg DeleteOrgRoleParams) (i
 	return result.RowsAffected(), nil
 }
 
+const deleteScheduleEntriesForWorkflow = `-- name: DeleteScheduleEntriesForWorkflow :exec
+DELETE FROM schedule_entries WHERE org_id = $1 AND workflow_id = $2
+`
+
+type DeleteScheduleEntriesForWorkflowParams struct {
+	OrgID      string
+	WorkflowID string
+}
+
+func (q *Queries) DeleteScheduleEntriesForWorkflow(ctx context.Context, arg DeleteScheduleEntriesForWorkflowParams) error {
+	_, err := q.db.Exec(ctx, deleteScheduleEntriesForWorkflow, arg.OrgID, arg.WorkflowID)
+	return err
+}
+
+const deleteScheduleEntry = `-- name: DeleteScheduleEntry :exec
+DELETE FROM schedule_entries WHERE id = $1
+`
+
+func (q *Queries) DeleteScheduleEntry(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, deleteScheduleEntry, id)
+	return err
+}
+
 const deleteSlackInteractionConnection = `-- name: DeleteSlackInteractionConnection :execrows
 DELETE FROM slack_interaction_connections WHERE org_id = $1 AND id = $2
 `
@@ -1028,6 +1128,15 @@ DELETE FROM go_pilot_wakeups WHERE run_node_id = $1
 
 func (q *Queries) DeleteWakeup(ctx context.Context, runNodeID string) error {
 	_, err := q.db.Exec(ctx, deleteWakeup, runNodeID)
+	return err
+}
+
+const disableScheduleEntry = `-- name: DisableScheduleEntry :exec
+UPDATE schedule_entries SET enabled = false, updated_at = now() WHERE id = $1
+`
+
+func (q *Queries) DisableScheduleEntry(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, disableScheduleEntry, id)
 	return err
 }
 
@@ -6673,6 +6782,49 @@ func (q *Queries) ListRuns(ctx context.Context, arg ListRunsParams) ([]ListRunsR
 	return items, nil
 }
 
+const listScheduleEntriesForWorkflow = `-- name: ListScheduleEntriesForWorkflow :many
+SELECT id, org_id, workflow_id, workflow_version_id, node_id, cron_expression, enabled, last_run_at, last_run_id, created_by, created_at, updated_at, next_fire_at FROM schedule_entries WHERE org_id = $1 AND workflow_id = $2 ORDER BY node_id
+`
+
+type ListScheduleEntriesForWorkflowParams struct {
+	OrgID      string
+	WorkflowID string
+}
+
+func (q *Queries) ListScheduleEntriesForWorkflow(ctx context.Context, arg ListScheduleEntriesForWorkflowParams) ([]ScheduleEntry, error) {
+	rows, err := q.db.Query(ctx, listScheduleEntriesForWorkflow, arg.OrgID, arg.WorkflowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ScheduleEntry
+	for rows.Next() {
+		var i ScheduleEntry
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.WorkflowID,
+			&i.WorkflowVersionID,
+			&i.NodeID,
+			&i.CronExpression,
+			&i.Enabled,
+			&i.LastRunAt,
+			&i.LastRunID,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.NextFireAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSlackInteractionConnections = `-- name: ListSlackInteractionConnections :many
 SELECT id, org_id, name, team_id, signing_credential_name, user_mappings, enabled, created_by, created_at, updated_at FROM slack_interaction_connections WHERE org_id = $1 ORDER BY name LIMIT 100
 `
@@ -9499,6 +9651,40 @@ func (q *Queries) UpsertRecoveryItemHandoff(ctx context.Context, arg UpsertRecov
 		&i.CreatedBy,
 	)
 	return i, err
+}
+
+const upsertScheduleEntry = `-- name: UpsertScheduleEntry :exec
+INSERT INTO schedule_entries (id, org_id, workflow_id, workflow_version_id, node_id,
+                              cron_expression, enabled, next_fire_at, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8)
+ON CONFLICT (org_id, workflow_version_id, node_id) DO UPDATE SET
+  cron_expression = excluded.cron_expression, next_fire_at = excluded.next_fire_at,
+  enabled = true, updated_at = now()
+`
+
+type UpsertScheduleEntryParams struct {
+	ID                string
+	OrgID             string
+	WorkflowID        string
+	WorkflowVersionID string
+	NodeID            string
+	CronExpression    string
+	NextFireAt        *time.Time
+	CreatedBy         pgtype.Text
+}
+
+func (q *Queries) UpsertScheduleEntry(ctx context.Context, arg UpsertScheduleEntryParams) error {
+	_, err := q.db.Exec(ctx, upsertScheduleEntry,
+		arg.ID,
+		arg.OrgID,
+		arg.WorkflowID,
+		arg.WorkflowVersionID,
+		arg.NodeID,
+		arg.CronExpression,
+		arg.NextFireAt,
+		arg.CreatedBy,
+	)
+	return err
 }
 
 const upsertWakeup = `-- name: UpsertWakeup :exec
