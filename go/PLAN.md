@@ -2162,7 +2162,7 @@ P2 = oportunista.
 | T-507 | Barrido EXPLAIN de las ~120 queries de la ola 6 + índices faltantes (patrón two-file) | performance | P1 | todo |
 | T-508 | Perfil de allocs (pprof heap bajo bench) + optimizaciones dirigidas de `safePersist` | performance | P1 | todo |
 | T-509 | Batch de escrituras de `run_events` en la tx de completion | performance | P2 | todo |
-| T-510 | Fix cardinalidad de k6-soak (`name` tag) + re-corrida del soak 24h confiable | performance | P0 | todo |
+| T-510 | Fix cardinalidad de k6-soak (`name` tag) + re-corrida del soak 24h confiable | performance | P0 | partial |
 | T-511 | `goleak` en engine/httpapi + test de fuga de conexiones Postgres como gate | recursos | P0 | todo |
 | T-512 | `runner.Group` para los sweeps de `cmd/api`: shutdown ordenado + panic-recovery por sweep | recursos | P1 | todo |
 | T-513 | Tope GLOBAL de proceso para pools externos de db-tools (hoy solo 5/org) | recursos | P1 | todo |

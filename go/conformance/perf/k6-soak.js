@@ -38,8 +38,15 @@ const LINEAR = JSON.stringify({
   },
 });
 
+// Every request carries a FIXED `name` tag: without it k6 keys its
+// metric series by full URL, and the unique runId in /v1/status minted
+// one series per poll — 800k series and ~100MB of k6 RSS in a long
+// soak (the T-510 finding). With name tags the series count is O(4)
+// and k6's memory stays flat for the whole 24h window.
 export function startLinear() {
-  const started = http.post(`${BASE}/v1/start`, LINEAR, { headers: HEADERS });
+  const started = http.post(`${BASE}/v1/start`, LINEAR, {
+    headers: HEADERS, tags: { name: "POST /v1/start" },
+  });
   if (started.status !== 200) {
     errors.add(1);
     sleep(1);
@@ -47,7 +54,9 @@ export function startLinear() {
   }
   const runId = started.json("data.runId");
   for (let i = 0; i < 100; i++) {
-    const status = http.get(`${BASE}/v1/status?runId=${runId}`, { headers: HEADERS });
+    const status = http.get(`${BASE}/v1/status?runId=${runId}`, {
+      headers: HEADERS, tags: { name: "GET /v1/status" },
+    });
     const state = status.json("data.run.status");
     if (state === "succeeded" || state === "failed") return;
     sleep(0.2);
@@ -56,9 +65,11 @@ export function startLinear() {
 }
 
 export function readPaths() {
-  const list = http.get(`${BASE}/v1/runs?limit=50`, { headers: HEADERS });
+  const list = http.get(`${BASE}/v1/runs?limit=50`, {
+    headers: HEADERS, tags: { name: "GET /v1/runs" },
+  });
   if (list.status !== 200) errors.add(1);
-  const health = http.get(`${BASE}/health`);
+  const health = http.get(`${BASE}/health`, { tags: { name: "GET /health" } });
   if (health.status !== 200) errors.add(1);
   sleep(0.5);
 }
