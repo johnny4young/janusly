@@ -178,3 +178,68 @@ func TestCredentialRoutes(t *testing.T) {
 		t.Fatalf("credential audits: %d", audits)
 	}
 }
+
+// T-161: the readiness badge surfaces credential_missing warns from the
+// same org-aware resolver — missing row, unresolvable secret, missing
+// MCP alias — and a registered+resolvable credential clears them.
+func TestCredentialReadiness(t *testing.T) {
+	h := newAPIHarness(t)
+	secretstore.ResetForTests()
+	t.Cleanup(secretstore.ResetForTests)
+	t.Setenv("JANUSLY_CREDENTIAL_MASTER_KEY",
+		base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")))
+	suffix := fmt.Sprint(time.Now().UnixNano())
+
+	workflowDoc := map[string]any{
+		"id": "wf-ready-" + suffix, "name": "Ready", "dslVersion": "1.0",
+		"nodes": []any{
+			map[string]any{"id": "call", "type": "tool", "config": map[string]any{
+				"tool": "text.uppercase", "credential": "missing-cred", "input": map[string]any{"value": "x"},
+			}},
+			map[string]any{"id": "mcp", "type": "mcp_tool", "config": map[string]any{
+				"connectionAlias": "ghost-alias", "tool": "x",
+			}},
+		},
+		"edges": []any{map[string]any{"from": "call", "to": "mcp"}},
+	}
+	issuesFor := func() []any {
+		res := h.call("POST", "/workflows/readiness", map[string]any{"workflow": workflowDoc}, "")
+		if res.status != 200 {
+			t.Fatalf("readiness: %d %+v", res.status, res.body)
+		}
+		return res.body["issues"].([]any)
+	}
+	countCredentialMissing := func(issues []any) int {
+		count := 0
+		for _, raw := range issues {
+			if raw.(map[string]any)["code"] == "credential_missing" {
+				count++
+			}
+		}
+		return count
+	}
+	// Missing credential row + missing MCP alias → two warns.
+	firstIssues := issuesFor()
+	if got := countCredentialMissing(firstIssues); got != 2 {
+		t.Fatalf("expected 2 credential_missing, got %d: %+v", got, firstIssues)
+	}
+	// Registered but UNRESOLVABLE (legacy env ref not set) → still warns.
+	if res := h.call("POST", "/credentials", map[string]any{
+		"name": "missing-cred", "kind": "http", "secretRef": "UNSET_ENV_" + suffix,
+	}, ""); res.status != 200 {
+		t.Fatalf("register: %d", res.status)
+	}
+	if got := countCredentialMissing(issuesFor()); got != 2 {
+		t.Fatalf("unresolvable ref must still warn: %d", got)
+	}
+	// Resolvable managed value clears the credential warn (alias remains).
+	ifMatchRes := h.call("POST", "/credentials/missing-cred/bulk-update", map[string]any{"dryRun": true}, "")
+	if res := h.call("POST", "/credentials/missing-cred/bulk-update", map[string]any{
+		"newSecretValue": "resolves-now", "ifMatch": ifMatchRes.body["updatedAt"],
+	}, ""); res.status != 200 {
+		t.Fatalf("rotate to managed: %d %+v", res.status, res.body)
+	}
+	if got := countCredentialMissing(issuesFor()); got != 1 {
+		t.Fatalf("resolvable credential must clear its warn: %d", got)
+	}
+}

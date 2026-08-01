@@ -224,11 +224,34 @@ func runFixture(t *testing.T, driver *apiDriver, upstream *stubUpstream, fx fixt
 			}
 			seenRuns[runID] = true
 		case "startExpectPaused":
-			body := map[string]any{"workflow": doc}
-			res := driver.call(t, "POST", "/v1/start", body)
-			errBody, _ := res["error"].(map[string]any)
-			if errBody == nil || errBody["code"] != "workflow_circuit_breaker_paused" {
-				t.Fatalf("expected breaker 409, got %v", res)
+			// The breaker trips POST-commit (afterTerminalFailure), so a
+			// start can race past the streak's last failure. Retry until
+			// the 409 lands; an accidentally started run is one more
+			// failure feeding the streak — wait it out and mark it seen so
+			// adoptNewestRun can never grab it.
+			deadline := time.Now().Add(15 * time.Second)
+			for {
+				res := driver.call(t, "POST", "/v1/start", map[string]any{"workflow": doc})
+				if errBody, _ := res["error"].(map[string]any); errBody != nil {
+					if errBody["code"] != "workflow_circuit_breaker_paused" {
+						t.Fatalf("expected breaker 409, got %v", res)
+					}
+					break
+				}
+				data, _ := res["data"].(map[string]any)
+				racedRun, _ := data["runId"].(string)
+				if racedRun == "" {
+					t.Fatalf("expected breaker 409, got %v", res)
+				}
+				seenRuns[racedRun] = true
+				driver.waitRun(t, racedRun, func(view map[string]any) bool {
+					status := runStatusOf(view)
+					return status == "succeeded" || status == "failed" || status == "cancelled"
+				})
+				if time.Now().After(deadline) {
+					t.Fatal("breaker never tripped")
+				}
+				time.Sleep(150 * time.Millisecond)
 			}
 		case "validateFix":
 			deadLetterID := findDeadLetter()

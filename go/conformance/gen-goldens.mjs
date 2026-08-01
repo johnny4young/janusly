@@ -148,10 +148,19 @@ for (const fixture of spec.fixtures) {
       if (!runId) throw new Error(`${fixture.id}: validateFix ${JSON.stringify(res)}`);
       seenRuns.add(runId);
     } else if (verb === "startExpectPaused") {
-      const res = await api("POST", "/start", { workflow: doc, input: fixture.input });
-      const code = res.body?.code ?? res.body?.error?.code;
-      if (res.status !== 409 || code !== "workflow_circuit_breaker_paused") {
-        throw new Error(`${fixture.id}: expected breaker 409, got ${JSON.stringify(res)}`);
+      // Mirror the Go harness: the trip may land post-commit; absorb a
+      // raced start as one more streak failure and retry.
+      const deadline = Date.now() + 15_000;
+      for (;;) {
+        const res = await api("POST", "/start", { workflow: doc, input: fixture.input });
+        const code = res.body?.code ?? res.body?.error?.code;
+        if (res.status === 409 && code === "workflow_circuit_breaker_paused") break;
+        const racedRun = res.body?.data?.runId ?? res.body?.runId;
+        if (!racedRun) throw new Error(`${fixture.id}: expected breaker 409, got ${JSON.stringify(res)}`);
+        seenRuns.add(racedRun);
+        await waitFor(racedRun, (v) => TERMINAL.has(v.run.status));
+        if (Date.now() > deadline) throw new Error(`${fixture.id}: breaker never tripped`);
+        await new Promise((r) => setTimeout(r, 150));
       }
     } else if (verb === "ingestExpectBuffered") {
       const res = await api("POST", "/triggers/webhook/ingest", fixture.ingest);

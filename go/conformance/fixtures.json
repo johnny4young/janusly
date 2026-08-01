@@ -819,6 +819,7 @@
         "waitTerminal",
         "start",
         "waitTerminal",
+        "startExpectPaused",
         "ingestExpectBuffered",
         "healUpstream",
         "resumeWorkflow",
