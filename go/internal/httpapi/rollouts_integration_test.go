@@ -333,3 +333,127 @@ func TestRolloutAutoRollback(t *testing.T) {
 		t.Fatalf("repair must re-drive receipt + counters: %d %d", repairedReceipts, repairedCounters)
 	}
 }
+
+// T-153: sandbox validation and replay revivals NEVER consume canary
+// traffic — the validation child carries no assignment and produces no
+// outcome receipt; the redriven run keeps its FROZEN original assignment
+// and its post-replay terminal cannot double-count.
+func TestValidationAndReplayNeverConsumeCanary(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	ctx := t.Context()
+	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "true")
+	wfID := fmt.Sprintf("wf-nocanary-%d", time.Now().UnixNano())
+
+	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer broken.Close()
+	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer healthy.Close()
+	httpDoc := func(url string) map[string]any {
+		return map[string]any{
+			"id": wfID, "name": "NoCanary", "dslVersion": "1.0",
+			"nodes": []any{map[string]any{"id": "call", "type": "http", "config": map[string]any{
+				"url": url, "timeoutMs": 500,
+			}}},
+			"edges": []any{},
+		}
+	}
+	res := h.call("POST", "/workflows/save", httpDoc(healthy.URL), "")
+	v1 := res.body["versionId"].(string)
+	res = h.call("POST", "/workflows/save", httpDoc(broken.URL), "")
+	v2 := res.body["versionId"].(string)
+	res = h.call("POST", "/workflows/"+wfID+"/rollout", map[string]any{
+		"baselineVersionId": v1, "canaryVersionId": v2,
+		"trafficPercent": 50, "minimumSampleSize": 100, "minimumSuccessRatePercent": 1,
+	}, "")
+	if res.status != 200 {
+		t.Fatalf("rollout: %d %+v", res.status, res.body)
+	}
+
+	// Drive starts until one CANARY run fails and lands in the DLQ.
+	var canaryRun, dlqID string
+	deadline := time.Now().Add(60 * time.Second)
+	for canaryRun == "" {
+		if time.Now().After(deadline) {
+			t.Fatalf("no canary failure arrived")
+		}
+		res = h.call("POST", "/v1/start", map[string]any{"workflow": httpDoc(healthy.URL)}, "")
+		runID := extractRunID(t, res)
+		var variant string
+		_ = pool.QueryRow(ctx, `SELECT COALESCE(workflow_rollout_variant, '') FROM runs WHERE id = $1`,
+			runID).Scan(&variant)
+		if variant == "canary" {
+			h.waitRun(runID, "failed")
+			canaryRun = runID
+			if err := pool.QueryRow(ctx, `SELECT id FROM dead_letters WHERE run_id = $1`, runID).Scan(&dlqID); err != nil {
+				t.Fatalf("dead letter: %v", err)
+			}
+		} else {
+			h.waitRun(runID, "succeeded")
+		}
+	}
+	time.Sleep(200 * time.Millisecond)
+	var receiptsBefore int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM workflow_rollout_outcomes WHERE run_id = $1`, canaryRun).Scan(&receiptsBefore)
+	if receiptsBefore != 1 {
+		t.Fatalf("failed canary must have one receipt: %d", receiptsBefore)
+	}
+
+	// The sandbox validation child: replay_mode=validation, NO rollout
+	// assignment, NO outcome receipt ever.
+	res = h.call("POST", "/dlq/validate-fix", map[string]any{
+		"deadLetterId": dlqID, "suggestedWorkflow": httpDoc(healthy.URL),
+	}, "")
+	if res.status != 200 {
+		t.Fatalf("validate-fix: %d %+v", res.status, res.body)
+	}
+	validationRun := res.body["runId"].(string)
+	h.waitRun(validationRun, "succeeded")
+	var vReplayMode, vRollout string
+	var vReceipts int
+	_ = pool.QueryRow(ctx, `SELECT COALESCE(replay_mode, ''), COALESCE(workflow_rollout_id, '') FROM runs WHERE id = $1`,
+		validationRun).Scan(&vReplayMode, &vRollout)
+	time.Sleep(200 * time.Millisecond)
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM workflow_rollout_outcomes WHERE run_id = $1`, validationRun).Scan(&vReceipts)
+	if vReplayMode != "validation" || vRollout != "" || vReceipts != 0 {
+		t.Fatalf("validation child must never consume canary: mode=%s rollout=%q receipts=%d",
+			vReplayMode, vRollout, vReceipts)
+	}
+
+	// The replay revival keeps the FROZEN assignment and cannot
+	// double-count: same rollout id + variant, receipts stay at 1, and
+	// the canary counters never move from the revival's success.
+	var failedBefore int
+	_ = pool.QueryRow(ctx, `SELECT canary_failed FROM workflow_rollouts WHERE workflow_id = $1`, wfID).Scan(&failedBefore)
+	res = h.call("POST", "/dlq/cluster-apply", map[string]any{
+		"clusterSignature": func() string {
+			res := h.call("GET", "/dlq/clusters", nil, "")
+			return res.body["clusters"].([]any)[0].(map[string]any)["signature"].(string)
+		}(),
+		"deadLetterIds":     []any{dlqID},
+		"suggestedWorkflow": httpDoc(healthy.URL),
+	}, "")
+	if res.body["replayed"] != float64(1) {
+		t.Fatalf("apply: %+v", res.body)
+	}
+	h.waitRun(canaryRun, "succeeded")
+	time.Sleep(300 * time.Millisecond)
+	var rolloutRef, variant string
+	var receiptsAfter, failedAfter, succeededAfter int
+	_ = pool.QueryRow(ctx, `SELECT COALESCE(workflow_rollout_id, ''), COALESCE(workflow_rollout_variant, '') FROM runs WHERE id = $1`,
+		canaryRun).Scan(&rolloutRef, &variant)
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM workflow_rollout_outcomes WHERE run_id = $1`, canaryRun).Scan(&receiptsAfter)
+	_ = pool.QueryRow(ctx, `SELECT canary_failed, canary_succeeded FROM workflow_rollouts WHERE workflow_id = $1`, wfID).
+		Scan(&failedAfter, &succeededAfter)
+	if rolloutRef == "" || variant != "canary" {
+		t.Fatalf("revival must keep the frozen assignment: %q %q", rolloutRef, variant)
+	}
+	if receiptsAfter != 1 || failedAfter != failedBefore || succeededAfter != 0 {
+		t.Fatalf("revival terminal must not double-count: receipts=%d failed=%d->%d succeeded=%d",
+			receiptsAfter, failedBefore, failedAfter, succeededAfter)
+	}
+}
