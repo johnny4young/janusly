@@ -1,0 +1,363 @@
+// Terminal node failure (T-526 split): retry-or-fail with the writeSide
+// no-retry channel, the dead-letter insert + recovery-item hook, the
+// post-failure breaker/alert hooks, and generation-bound recovery impact.
+package engine
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/johnny4young/janusly/go/internal/domain"
+	"github.com/johnny4young/janusly/go/internal/store"
+)
+
+func (e *Engine) RetryOrFail(ctx context.Context, claim ClaimedNode, node domain.Node, execErr error) error {
+	serr := serializeError(execErr)
+	policy := parseRetryPolicy(node.Config)
+	maxAttempts := 1
+	if policy != nil && policy.MaxAttempts > 0 {
+		maxAttempts = policy.MaxAttempts
+	}
+	// A writeSide error means external effects may already have happened —
+	// never whole-node retry it (reference runtime.ts:360); operator-gated
+	// replay is safer than duplicate effects.
+	if serr["writeSide"] == true || int(claim.Attempt) >= maxAttempts || !shouldRetry(serr, policy) {
+		return e.FailNode(ctx, claim, execErr)
+	}
+
+	nextAttempt := claim.Attempt + 1
+	delayMs := computeRetryDelay(int(nextAttempt), policy, e.randFloat)
+	wakeAt := e.now().UTC().Add(time.Duration(delayMs) * time.Millisecond)
+	eventJSON, err := json.Marshal(map[string]any{
+		"attempt": nextAttempt, "delayMs": delayMs, "error": serr,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal retry payload: %w", err)
+	}
+	retriedAt := eventNow()
+	return e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries) error {
+		requeued, err := q.RequeueRunNodeForRetry(ctx, store.RequeueRunNodeForRetryParams{
+			RunID: claim.RunID, NodeID: claim.NodeID,
+			Attempt: pgtype.Int4{Int32: nextAttempt, Valid: true},
+		})
+		if err != nil {
+			return fmt.Errorf("requeue for retry: %w", err)
+		}
+		if requeued == 0 {
+			return errSkipCommit
+		}
+		metricNodeRetries.Inc()
+		// The wake-up rides the same transaction: the anti-join on the claim
+		// keeps the row unclaimable until the backoff clock passes.
+		if err := q.UpsertWakeup(ctx, store.UpsertWakeupParams{
+			RunNodeID: claim.RowID, WakeAt: wakeAt, Reason: "retry",
+		}); err != nil {
+			return fmt.Errorf("schedule retry wakeup: %w", err)
+		}
+		if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
+			ID: e.newID(), RunID: claim.RunID,
+			NodeID: pgtype.Text{String: claim.NodeID, Valid: true},
+			Type:   "node.retry", Payload: eventJSON, CreatedAt: &retriedAt,
+		}); err != nil {
+			return fmt.Errorf("insert node.retry: %w", err)
+		}
+		return nil
+	})
+}
+
+// FailNode commits the terminal execution failure atomically: the node CAS
+// to failed, the dead-letter row carrying the exact workflow/node/error
+// snapshots for replay, the node.failed event, and the run flipped to
+// failed — one transaction, so a half-failed run can never strand.
+func (e *Engine) FailNode(ctx context.Context, claim ClaimedNode, execErr error) error {
+	if err := e.failNodeTx(ctx, claim, execErr); err != nil {
+		return err
+	}
+	// Containment rides OUTSIDE the durable failure: a breaker fault must
+	// never break the DLQ path that already committed.
+	e.afterTerminalFailure(ctx, claim)
+	return nil
+}
+
+func (e *Engine) failNodeTx(ctx context.Context, claim ClaimedNode, execErr error) error {
+	serr := serializeError(execErr)
+	eventJSON, err := json.Marshal(map[string]any{"error": serr, "attempt": claim.Attempt})
+	if err != nil {
+		return fmt.Errorf("marshal event payload: %w", err)
+	}
+
+	failedAt := eventNow()
+	return e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries) error {
+		run, err := q.GetRunExecution(ctx, claim.RunID)
+		if err != nil {
+			return fmt.Errorf("read run: %w", err)
+		}
+		if run.Status != "running" && run.Status != "failed" {
+			// Cancellation landed first; the node keeps its state elsewhere.
+			return errSkipCommit
+		}
+		failed, err := q.FailRunNode(ctx, store.FailRunNodeParams{
+			RunID: claim.RunID, NodeID: claim.NodeID,
+			ErrorJson:  safePersist(serr, deadLetterErrorMaxBytes),
+			FinishedAt: &failedAt,
+		})
+		if err != nil {
+			return fmt.Errorf("fail node: %w", err)
+		}
+		if failed == 0 {
+			return errSkipCommit
+		}
+		metricNodeCompletions.WithLabelValues("failed").Inc()
+		if err := q.DeleteWakeup(ctx, claim.RowID); err != nil {
+			return fmt.Errorf("clear wakeup: %w", err)
+		}
+
+		if err := e.insertDeadLetter(ctx, q, claim, run, serr, failedAt); err != nil {
+			return err
+		}
+
+		if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
+			ID: e.newID(), RunID: claim.RunID,
+			NodeID: pgtype.Text{String: claim.NodeID, Valid: true},
+			Type:   "node.failed", Payload: eventJSON, CreatedAt: &failedAt,
+		}); err != nil {
+			return fmt.Errorf("insert node.failed: %w", err)
+		}
+
+		if run.Status == "failed" {
+			return nil
+		}
+		statuses, err := e.nodeStatuses(ctx, q, claim.RunID)
+		if err != nil {
+			return err
+		}
+		failedNodes := 0
+		for _, status := range statuses {
+			if status == "failed" {
+				failedNodes++
+			}
+		}
+		return e.flipRunTerminal(ctx, q, claim.RunID, "failed",
+			map[string]any{"failedNodes": failedNodes}, failedAt, nil)
+	})
+}
+
+// afterTerminalFailure runs the breaker evaluation OUTSIDE the completion
+// transaction (best-effort containment; the dead letter is already
+// durable). Sandbox replays never reach it — the streak query excludes
+// them and a validation run's failure carries replay_mode.
+func (e *Engine) afterTerminalFailure(ctx context.Context, claim ClaimedNode) {
+	run, err := store.New(e.pool).GetRunExecution(ctx, claim.RunID)
+	if err != nil || (run.ReplayMode.Valid && run.ReplayMode.String != "") {
+		return
+	}
+	wf, _, err := workflowFromRunInput(run.InputJson)
+	if err != nil {
+		return
+	}
+	e.maybeTripCircuitBreaker(ctx, run.OrgID, wf.ID, claim.RunID)
+	// Rollout outcome receipt (idempotent; repair covers crash windows).
+	e.maybeRecordRolloutOutcome(ctx, claim.RunID)
+	// Alert producer: the dead letter is durable (committed with the
+	// failure tx), so the dlq.entry_created event fires here, after commit.
+	if dl, err := store.New(e.pool).FindLatestDeadLetterForNode(ctx, store.FindLatestDeadLetterForNodeParams{
+		OrgID: run.OrgID, RunID: claim.RunID, NodeID: claim.NodeID,
+	}); err == nil {
+		e.DispatchAlert(ctx, run.OrgID, "dlq.entry_created", map[string]any{
+			"deadLetterId": dl.ID, "runId": claim.RunID, "nodeId": claim.NodeID,
+			"workflowId":     wf.ID,
+			"errorSignature": deadLetterSignatureFromParts(dl.NodeID, dl.NodeJson, dl.ErrorJson),
+			"dedupeKey":      "dlq:" + wf.ID + ":" + claim.NodeID,
+		})
+	}
+}
+
+// insertDeadLetter captures the exact failed job for operator replay: the
+// full workflow and node snapshots (key-redacted, never size-truncated —
+// replay needs the exact JSON) plus the bounded error.
+func (e *Engine) insertDeadLetter(ctx context.Context, q *store.Queries, claim ClaimedNode, run store.GetRunExecutionRow, serr map[string]any, failedAt time.Time) error {
+	var envelope struct {
+		Workflow any `json:"workflow"`
+	}
+	_ = json.Unmarshal(run.InputJson, &envelope)
+	workflowJSON := safePersist(envelope.Workflow, 0)
+
+	var nodeSnapshot any
+	if wf, _, err := workflowFromRunInput(run.InputJson); err == nil {
+		for i := range wf.Nodes {
+			if wf.Nodes[i].ID == claim.NodeID {
+				raw, _ := json.Marshal(wf.Nodes[i])
+				_ = json.Unmarshal(raw, &nodeSnapshot)
+				break
+			}
+		}
+	}
+	deadLetterID := e.newID()
+	nodeJSON := safePersist(nodeSnapshot, 0)
+	errorJSON := safePersist(serr, deadLetterErrorMaxBytes)
+	if err := q.InsertDeadLetter(ctx, store.InsertDeadLetterParams{
+		ID: deadLetterID, OrgID: run.OrgID, RunID: claim.RunID, NodeID: claim.NodeID,
+		Attempt:      claim.Attempt,
+		WorkflowJson: workflowJSON,
+		NodeJson:     nodeJSON,
+		ErrorJson:    errorJSON,
+	}); err != nil {
+		return fmt.Errorf("insert dead letter: %w", err)
+	}
+	// Ownership hook: the incident opens with its dead letter (same tx);
+	// blips degrade to "no incident", never a failed completion.
+	workflowID := ""
+	var wfDoc struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(workflowJSON, &wfDoc)
+	workflowID = wfDoc.ID
+	e.autoCreateRecoveryItem(ctx, q, AutoCreateRecoveryItemInput{
+		OrgID: run.OrgID, DeadLetterID: deadLetterID, WorkflowID: workflowID,
+		ErrorSignature: deadLetterSignatureFromParts(claim.NodeID, nodeJSON, errorJSON),
+		CreatedBy:      "system",
+	})
+	return nil
+}
+
+// errSkipCommit aborts the transaction without reporting an error to the
+// caller: the CAS lost, so another actor owns the node's terminal state.
+
+func (e *Engine) recordRecoveryImpact(ctx context.Context, q *store.Queries, claim ClaimedNode, recoveredAt time.Time) error {
+	nodeClaim, err := q.GetRunNodeRecoveryClaim(ctx, store.GetRunNodeRecoveryClaimParams{
+		RunID: claim.RunID, NodeID: claim.NodeID,
+	})
+	if err != nil || !nodeClaim.RecoveryDeadLetterID.Valid || nodeClaim.RecoveryDeadLetterID.String == "" {
+		return nil
+	}
+	deadLetterID := nodeClaim.RecoveryDeadLetterID.String
+	dlq, err := q.GetDeadLetterForImpact(ctx, store.GetDeadLetterForImpactParams{
+		ID: deadLetterID, RunID: claim.RunID, NodeID: claim.NodeID,
+	})
+	if err != nil {
+		// Exact identity no longer matches — a stale claim credits nothing.
+		return nil
+	}
+	if dlq.CreatedAt == nil {
+		return nil
+	}
+	detectedAt := dlq.CreatedAt.UTC()
+	if recoveredAt.Before(detectedAt) {
+		return nil
+	}
+	downtimeMs := recoveredAt.Sub(detectedAt).Milliseconds()
+
+	if err := q.ConvergeDeadLetterReplayed(ctx, store.ConvergeDeadLetterReplayedParams{
+		ID: deadLetterID, OrgID: dlq.OrgID, RecoveredAt: &recoveredAt,
+	}); err != nil {
+		return fmt.Errorf("converge dead letter: %w", err)
+	}
+	inserted, err := q.InsertRecoveryImpactEvent(ctx, store.InsertRecoveryImpactEventParams{
+		DeadLetterID: deadLetterID, OrgID: dlq.OrgID,
+		RunID: claim.RunID, NodeID: claim.NodeID,
+		UserID:      nodeClaim.RecoveryRequestedBy,
+		RecoveredAt: recoveredAt, DowntimeEndedMs: downtimeMs,
+	})
+	if err != nil {
+		return fmt.Errorf("insert impact event: %w", err)
+	}
+	if inserted == 0 {
+		// The unique dead_letter_id already holds a win — idempotent.
+		return nil
+	}
+	// Only production recoveries enter the north-star rollup; validation
+	// drills keep their immutable fact above but never inflate value.
+	if !dlq.ReplayMode.Valid || dlq.ReplayMode.String == "" {
+		if err := q.UpsertRecoveryImpactRollup(ctx, store.UpsertRecoveryImpactRollupParams{
+			OrgID: dlq.OrgID, DowntimeEndedMs: downtimeMs, RecoveredAt: &recoveredAt,
+		}); err != nil {
+			return fmt.Errorf("upsert impact rollup: %w", err)
+		}
+	}
+
+	// The incident closes ONLY alongside terminal node success — this CAS
+	// + its audit ride the same transaction as the impact fact, so
+	// enqueue acceptance can never masquerade as recovery and the Value
+	// Dashboard and ownership views cannot drift through a crash gap.
+	actor := "system"
+	if nodeClaim.RecoveryRequestedBy.Valid && nodeClaim.RecoveryRequestedBy.String != "" {
+		actor = nodeClaim.RecoveryRequestedBy.String
+	}
+	item, err := q.FindRecoveryItemForDeadLetter(ctx, store.FindRecoveryItemForDeadLetterParams{
+		OrgID: dlq.OrgID, DeadLetterID: deadLetterID,
+	})
+	if err == nil && item.Status != "resolved" {
+		firstActionAt := recoveredAt
+		if dlq.ReplayClaimedAt != nil {
+			firstActionAt = dlq.ReplayClaimedAt.UTC()
+		} else if dlq.ReplayedAt != nil {
+			firstActionAt = dlq.ReplayedAt.UTC()
+		}
+		resolved, err := q.ResolveRecoveryItemFromTerminal(ctx, store.ResolveRecoveryItemFromTerminalParams{
+			OrgID: dlq.OrgID, ID: item.ID,
+			Actor:         pgtype.Text{String: actor, Valid: true},
+			RecoveredAt:   &recoveredAt,
+			FirstActionAt: &firstActionAt,
+			FromStatus:    item.Status,
+		})
+		if err != nil {
+			return fmt.Errorf("resolve recovery item: %w", err)
+		}
+		if resolved > 0 {
+			metadata, _ := json.Marshal(map[string]any{
+				"before": map[string]any{"status": item.Status},
+				"after":  map[string]any{"status": "resolved", "resolutionReason": "sandbox_replay_succeeded"},
+				"via":    "terminal_recovery",
+			})
+			if err := q.InsertAuditLogRow(ctx, store.InsertAuditLogRowParams{
+				ID: e.newID(), OrgID: dlq.OrgID,
+				UserID:     pgtype.Text{String: actor, Valid: true},
+				Action:     "recovery.item.resolved",
+				TargetType: pgtype.Text{String: "recovery-item", Valid: true},
+				TargetID:   pgtype.Text{String: item.ID, Valid: true},
+				Metadata:   metadata,
+			}); err != nil {
+				return fmt.Errorf("audit item resolution: %w", err)
+			}
+		}
+	}
+
+	// Playbook attribution: a claim that carried a playbook + its
+	// validation run credits the playbook's applied win atomically — the
+	// DURABLE receipt (successful_uses++, set-once on the validation run)
+	// and its audit ride the same transaction as the impact fact.
+	if nodeClaim.RecoveryPlaybookID.Valid && nodeClaim.RecoveryPlaybookID.String != "" &&
+		nodeClaim.RecoveryValidationRunID.Valid && nodeClaim.RecoveryValidationRunID.String != "" {
+		applied, err := q.RecordPlaybookApplied(ctx, store.RecordPlaybookAppliedParams{
+			OrgID: dlq.OrgID, ID: nodeClaim.RecoveryPlaybookID.String,
+			ValidationRunID: nodeClaim.RecoveryValidationRunID,
+		})
+		if err != nil {
+			return fmt.Errorf("record playbook applied: %w", err)
+		}
+		if applied == 0 {
+			// The same validation run already credited — idempotent.
+			return nil
+		}
+		metadata, _ := json.Marshal(map[string]any{
+			"deadLetterId":    deadLetterID,
+			"validationRunId": nodeClaim.RecoveryValidationRunID.String,
+			"via":             "terminal_recovery",
+		})
+		if err := q.InsertAuditLogRow(ctx, store.InsertAuditLogRowParams{
+			ID: e.newID(), OrgID: dlq.OrgID,
+			UserID:     pgtype.Text{String: actor, Valid: true},
+			Action:     "recovery.playbook.applied",
+			TargetType: pgtype.Text{String: "recovery_playbook", Valid: true},
+			TargetID:   pgtype.Text{String: nodeClaim.RecoveryPlaybookID.String, Valid: true},
+			Metadata:   metadata,
+		}); err != nil {
+			return fmt.Errorf("audit playbook applied: %w", err)
+		}
+	}
+	return nil
+}
