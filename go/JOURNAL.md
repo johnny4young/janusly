@@ -1711,3 +1711,8 @@ producción necesita saber — de lo ya resuelto o informativo.
 - Root key de UN secreto de proceso (inline o archivo), cacheada, jamás persistida, con probe de boot que falla rápido ante clave malformada — y unset sigue siendo legal (despliegues solo-legacy). El fail-closed de resolución lleva warn-once acotado por (fila, razón): el silencio total hacía indiagnosticable una root key partida entre API y worker.
 - El firewall del ref forjado: un `janusly-secret://` dañado jamás cae al proveedor de entorno, aunque exista una env var con ese nombre exacto — probado plantando la env var.
 - Detalle Go: `splitSeal` separa el `ciphertext||tag` combinado de Go en las dos columnas del schema (Node los guarda aparte) — el wire schema compartido manda.
+
+## T-160 · Rutas de credenciales + rotación (2026-07-31)
+- El loop CRUD entero con la propiedad de no-eco probada por grep del body: ni el valor, ni el ref managed, ni siquiera el NOMBRE de la env var legacy aparecen en respuesta alguna — la lista proyecta solo el bit `storage`.
+- La rotación es el corazón: preview del blast radius (una pasada por la última versión de cada workflow buscando `config.credential`/`input.credential`), y el commit bajo row lock + CAS del token `ifMatch` — versión nueva insertada, referencia permutada y la versión ANTERIOR revocada en la misma transacción (verificado por psql que revoked_at quedó estampado). El equivalente Go del withAuditTx de referencia es la tx explícita + InsertAuditLogRow: mismo commit-or-rollback conjunto.
+- El health usa el MISMO resolver org-aware que usará el runtime de integraciones (T-162) — managed y legacy no pueden derivar entre superficies; las conexiones MCP se evalúan con ese resolver también.

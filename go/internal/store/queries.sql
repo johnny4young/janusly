@@ -1636,3 +1636,54 @@ VALUES ($1, $2, $3, $4, $5, $6);
 -- name: UpdateCredentialSecretRef :exec
 UPDATE credentials SET secret_ref = sqlc.arg(secret_ref), updated_at = now()
 WHERE org_id = $1 AND id = $2;
+
+-- name: ListCredentials :many
+SELECT id, org_id, name, kind, secret_ref, metadata, created_by, created_at, updated_at, expires_at
+FROM credentials WHERE org_id = $1 ORDER BY name LIMIT 500;
+
+-- name: GetCredentialByOrgName :one
+SELECT id, org_id, name, kind, secret_ref, updated_at, expires_at
+FROM credentials WHERE org_id = $1 AND name = $2;
+
+-- name: LockCredentialByName :one
+SELECT id, kind, secret_ref, updated_at FROM credentials
+WHERE org_id = $1 AND name = $2 FOR UPDATE;
+
+-- name: RotateCredentialSecretRefCAS :one
+UPDATE credentials SET secret_ref = sqlc.arg(new_secret_ref), updated_at = now()
+WHERE org_id = $1 AND name = $2 AND updated_at = sqlc.arg(if_match)
+RETURNING updated_at;
+
+-- name: DeleteCredential :execrows
+DELETE FROM credentials WHERE org_id = $1 AND id = $2;
+
+-- name: SetCredentialExpiry :one
+UPDATE credentials SET expires_at = sqlc.narg(expires_at), updated_at = now()
+WHERE org_id = $1 AND name = $2
+  AND (sqlc.narg(if_match)::timestamptz IS NULL OR updated_at = sqlc.narg(if_match))
+RETURNING updated_at;
+
+-- name: ListLatestWorkflowVersionDags :many
+SELECT DISTINCT ON (wv.workflow_id) wv.workflow_id, wv.dag_json
+FROM workflow_versions wv
+JOIN workflows w ON w.id = wv.workflow_id AND w.org_id = wv.org_id
+WHERE wv.org_id = $1 AND w.deleted_at IS NULL
+ORDER BY wv.workflow_id, wv.version DESC
+LIMIT 1000;
+
+-- name: ListCredentialUsageRows :many
+SELECT metadata ->> 'credentialName' AS credential_name, created_at,
+       coalesce((metadata ->> 'ok')::bool, true) AS ok, metadata ->> 'error' AS error_message
+FROM usage_events
+WHERE org_id = $1 AND created_at >= $2
+  AND metric LIKE 'tool.%' AND metadata ? 'credentialName'
+ORDER BY created_at DESC
+LIMIT 10000;
+
+-- name: ListMcpConnectionsForHealth :many
+SELECT id, alias, transport, env_refs, enabled, status FROM mcp_connections
+WHERE org_id = $1 ORDER BY alias LIMIT 200;
+
+-- name: InsertCredentialFull :exec
+INSERT INTO credentials (id, org_id, name, kind, secret_ref, metadata, expires_at, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8);

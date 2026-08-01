@@ -760,6 +760,23 @@ func (q *Queries) DeleteAlertPolicy(ctx context.Context, arg DeleteAlertPolicyPa
 	return result.RowsAffected(), nil
 }
 
+const deleteCredential = `-- name: DeleteCredential :execrows
+DELETE FROM credentials WHERE org_id = $1 AND id = $2
+`
+
+type DeleteCredentialParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) DeleteCredential(ctx context.Context, arg DeleteCredentialParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteCredential, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteExpiredAuditLogsBatch = `-- name: DeleteExpiredAuditLogsBatch :execrows
 DELETE FROM audit_logs WHERE id IN (
   SELECT a.id FROM audit_logs a
@@ -1497,6 +1514,41 @@ func (q *Queries) GetCredentialByName(ctx context.Context, arg GetCredentialByNa
 		&i.Metadata,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
+const getCredentialByOrgName = `-- name: GetCredentialByOrgName :one
+SELECT id, org_id, name, kind, secret_ref, updated_at, expires_at
+FROM credentials WHERE org_id = $1 AND name = $2
+`
+
+type GetCredentialByOrgNameParams struct {
+	OrgID string
+	Name  string
+}
+
+type GetCredentialByOrgNameRow struct {
+	ID        string
+	OrgID     string
+	Name      string
+	Kind      string
+	SecretRef string
+	UpdatedAt time.Time
+	ExpiresAt *time.Time
+}
+
+func (q *Queries) GetCredentialByOrgName(ctx context.Context, arg GetCredentialByOrgNameParams) (GetCredentialByOrgNameRow, error) {
+	row := q.db.QueryRow(ctx, getCredentialByOrgName, arg.OrgID, arg.Name)
+	var i GetCredentialByOrgNameRow
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.Kind,
+		&i.SecretRef,
 		&i.UpdatedAt,
 		&i.ExpiresAt,
 	)
@@ -2796,6 +2848,36 @@ func (q *Queries) InsertCredential(ctx context.Context, arg InsertCredentialPara
 	return err
 }
 
+const insertCredentialFull = `-- name: InsertCredentialFull :exec
+INSERT INTO credentials (id, org_id, name, kind, secret_ref, metadata, expires_at, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+`
+
+type InsertCredentialFullParams struct {
+	ID        string
+	OrgID     string
+	Name      string
+	Kind      string
+	SecretRef string
+	Metadata  json.RawMessage
+	ExpiresAt *time.Time
+	CreatedBy pgtype.Text
+}
+
+func (q *Queries) InsertCredentialFull(ctx context.Context, arg InsertCredentialFullParams) error {
+	_, err := q.db.Exec(ctx, insertCredentialFull,
+		arg.ID,
+		arg.OrgID,
+		arg.Name,
+		arg.Kind,
+		arg.SecretRef,
+		arg.Metadata,
+		arg.ExpiresAt,
+		arg.CreatedBy,
+	)
+	return err
+}
+
 const insertCredentialSecretVersion = `-- name: InsertCredentialSecretVersion :exec
 INSERT INTO credential_secret_versions (id, org_id, credential_id, version, ciphertext,
   data_nonce, data_tag, wrapped_key, wrap_nonce, wrap_tag, key_version, created_by)
@@ -3799,6 +3881,89 @@ func (q *Queries) ListConfidenceCalibrations(ctx context.Context, orgID string) 
 	return items, nil
 }
 
+const listCredentialUsageRows = `-- name: ListCredentialUsageRows :many
+SELECT metadata ->> 'credentialName' AS credential_name, created_at,
+       coalesce((metadata ->> 'ok')::bool, true) AS ok, metadata ->> 'error' AS error_message
+FROM usage_events
+WHERE org_id = $1 AND created_at >= $2
+  AND metric LIKE 'tool.%' AND metadata ? 'credentialName'
+ORDER BY created_at DESC
+LIMIT 10000
+`
+
+type ListCredentialUsageRowsParams struct {
+	OrgID     string
+	CreatedAt *time.Time
+}
+
+type ListCredentialUsageRowsRow struct {
+	CredentialName interface{}
+	CreatedAt      *time.Time
+	Ok             interface{}
+	ErrorMessage   interface{}
+}
+
+func (q *Queries) ListCredentialUsageRows(ctx context.Context, arg ListCredentialUsageRowsParams) ([]ListCredentialUsageRowsRow, error) {
+	rows, err := q.db.Query(ctx, listCredentialUsageRows, arg.OrgID, arg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCredentialUsageRowsRow
+	for rows.Next() {
+		var i ListCredentialUsageRowsRow
+		if err := rows.Scan(
+			&i.CredentialName,
+			&i.CreatedAt,
+			&i.Ok,
+			&i.ErrorMessage,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCredentials = `-- name: ListCredentials :many
+SELECT id, org_id, name, kind, secret_ref, metadata, created_by, created_at, updated_at, expires_at
+FROM credentials WHERE org_id = $1 ORDER BY name LIMIT 500
+`
+
+func (q *Queries) ListCredentials(ctx context.Context, orgID string) ([]Credential, error) {
+	rows, err := q.db.Query(ctx, listCredentials, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Credential
+	for rows.Next() {
+		var i Credential
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Name,
+			&i.Kind,
+			&i.SecretRef,
+			&i.Metadata,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ExpiresAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDeadLetterFailureSamples = `-- name: ListDeadLetterFailureSamples :many
 
 SELECT dl.id, dl.run_id, dl.node_id, dl.error_json, dl.created_at,
@@ -4288,6 +4453,81 @@ func (q *Queries) ListFailedRunNodeSamples(ctx context.Context, arg ListFailedRu
 			&i.ErrorJson,
 			&i.FinishedAt,
 			&i.InputJson,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLatestWorkflowVersionDags = `-- name: ListLatestWorkflowVersionDags :many
+SELECT DISTINCT ON (wv.workflow_id) wv.workflow_id, wv.dag_json
+FROM workflow_versions wv
+JOIN workflows w ON w.id = wv.workflow_id AND w.org_id = wv.org_id
+WHERE wv.org_id = $1 AND w.deleted_at IS NULL
+ORDER BY wv.workflow_id, wv.version DESC
+LIMIT 1000
+`
+
+type ListLatestWorkflowVersionDagsRow struct {
+	WorkflowID string
+	DagJson    json.RawMessage
+}
+
+func (q *Queries) ListLatestWorkflowVersionDags(ctx context.Context, orgID string) ([]ListLatestWorkflowVersionDagsRow, error) {
+	rows, err := q.db.Query(ctx, listLatestWorkflowVersionDags, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLatestWorkflowVersionDagsRow
+	for rows.Next() {
+		var i ListLatestWorkflowVersionDagsRow
+		if err := rows.Scan(&i.WorkflowID, &i.DagJson); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMcpConnectionsForHealth = `-- name: ListMcpConnectionsForHealth :many
+SELECT id, alias, transport, env_refs, enabled, status FROM mcp_connections
+WHERE org_id = $1 ORDER BY alias LIMIT 200
+`
+
+type ListMcpConnectionsForHealthRow struct {
+	ID        string
+	Alias     string
+	Transport string
+	EnvRefs   json.RawMessage
+	Enabled   bool
+	Status    string
+}
+
+func (q *Queries) ListMcpConnectionsForHealth(ctx context.Context, orgID string) ([]ListMcpConnectionsForHealthRow, error) {
+	rows, err := q.db.Query(ctx, listMcpConnectionsForHealth, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMcpConnectionsForHealthRow
+	for rows.Next() {
+		var i ListMcpConnectionsForHealthRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Alias,
+			&i.Transport,
+			&i.EnvRefs,
+			&i.Enabled,
+			&i.Status,
 		); err != nil {
 			return nil, err
 		}
@@ -5841,6 +6081,35 @@ func (q *Queries) LockClaimableRunNodes(ctx context.Context, batchSize int32) ([
 	return items, nil
 }
 
+const lockCredentialByName = `-- name: LockCredentialByName :one
+SELECT id, kind, secret_ref, updated_at FROM credentials
+WHERE org_id = $1 AND name = $2 FOR UPDATE
+`
+
+type LockCredentialByNameParams struct {
+	OrgID string
+	Name  string
+}
+
+type LockCredentialByNameRow struct {
+	ID        string
+	Kind      string
+	SecretRef string
+	UpdatedAt time.Time
+}
+
+func (q *Queries) LockCredentialByName(ctx context.Context, arg LockCredentialByNameParams) (LockCredentialByNameRow, error) {
+	row := q.db.QueryRow(ctx, lockCredentialByName, arg.OrgID, arg.Name)
+	var i LockCredentialByNameRow
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.SecretRef,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const lockWorkflowForRollout = `-- name: LockWorkflowForRollout :one
 SELECT id FROM workflows WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL FOR UPDATE
 `
@@ -6936,6 +7205,57 @@ func (q *Queries) RevokePendingInvitation(ctx context.Context, arg RevokePending
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const rotateCredentialSecretRefCAS = `-- name: RotateCredentialSecretRefCAS :one
+UPDATE credentials SET secret_ref = $3, updated_at = now()
+WHERE org_id = $1 AND name = $2 AND updated_at = $4
+RETURNING updated_at
+`
+
+type RotateCredentialSecretRefCASParams struct {
+	OrgID        string
+	Name         string
+	NewSecretRef string
+	IfMatch      time.Time
+}
+
+func (q *Queries) RotateCredentialSecretRefCAS(ctx context.Context, arg RotateCredentialSecretRefCASParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, rotateCredentialSecretRefCAS,
+		arg.OrgID,
+		arg.Name,
+		arg.NewSecretRef,
+		arg.IfMatch,
+	)
+	var updated_at time.Time
+	err := row.Scan(&updated_at)
+	return updated_at, err
+}
+
+const setCredentialExpiry = `-- name: SetCredentialExpiry :one
+UPDATE credentials SET expires_at = $3, updated_at = now()
+WHERE org_id = $1 AND name = $2
+  AND ($4::timestamptz IS NULL OR updated_at = $4)
+RETURNING updated_at
+`
+
+type SetCredentialExpiryParams struct {
+	OrgID     string
+	Name      string
+	ExpiresAt *time.Time
+	IfMatch   *time.Time
+}
+
+func (q *Queries) SetCredentialExpiry(ctx context.Context, arg SetCredentialExpiryParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, setCredentialExpiry,
+		arg.OrgID,
+		arg.Name,
+		arg.ExpiresAt,
+		arg.IfMatch,
+	)
+	var updated_at time.Time
+	err := row.Scan(&updated_at)
+	return updated_at, err
 }
 
 const setMcpConnectionStatus = `-- name: SetMcpConnectionStatus :exec
