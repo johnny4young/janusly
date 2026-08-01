@@ -2293,6 +2293,25 @@ func (q *Queries) GetLatestWorkflowRolloutRow(ctx context.Context, arg GetLatest
 	return i, err
 }
 
+const getLatestWorkflowSlo = `-- name: GetLatestWorkflowSlo :one
+SELECT slo_json FROM workflow_versions
+WHERE org_id = $1 AND workflow_id = $2
+ORDER BY version DESC
+LIMIT 1
+`
+
+type GetLatestWorkflowSloParams struct {
+	OrgID      string
+	WorkflowID string
+}
+
+func (q *Queries) GetLatestWorkflowSlo(ctx context.Context, arg GetLatestWorkflowSloParams) (json.RawMessage, error) {
+	row := q.db.QueryRow(ctx, getLatestWorkflowSlo, arg.OrgID, arg.WorkflowID)
+	var slo_json json.RawMessage
+	err := row.Scan(&slo_json)
+	return slo_json, err
+}
+
 const getLatestWorkflowVersion = `-- name: GetLatestWorkflowVersion :one
 SELECT id, org_id, workflow_id, version, dag_json, created_by, created_at
 FROM workflow_versions
@@ -4716,8 +4735,8 @@ func (q *Queries) InsertWorkflowRolloutOutcome(ctx context.Context, arg InsertWo
 
 const insertWorkflowVersion = `-- name: InsertWorkflowVersion :exec
 INSERT INTO workflow_versions (id, org_id, workflow_id, version, dag_json, created_by,
-                               upstream_health_sources)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+                               upstream_health_sources, slo_json)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type InsertWorkflowVersionParams struct {
@@ -4728,6 +4747,7 @@ type InsertWorkflowVersionParams struct {
 	DagJson               json.RawMessage
 	CreatedBy             pgtype.Text
 	UpstreamHealthSources json.RawMessage
+	SloJson               json.RawMessage
 }
 
 func (q *Queries) InsertWorkflowVersion(ctx context.Context, arg InsertWorkflowVersionParams) error {
@@ -4739,6 +4759,7 @@ func (q *Queries) InsertWorkflowVersion(ctx context.Context, arg InsertWorkflowV
 		arg.DagJson,
 		arg.CreatedBy,
 		arg.UpstreamHealthSources,
+		arg.SloJson,
 	)
 	return err
 }
@@ -6502,6 +6523,57 @@ func (q *Queries) ListRecentAlertDispatches(ctx context.Context, arg ListRecentA
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecentDeadLetterErrorsForWorkflow = `-- name: ListRecentDeadLetterErrorsForWorkflow :many
+SELECT d.error_json
+FROM dead_letters d
+JOIN runs r ON r.id = d.run_id
+WHERE r.org_id = $1
+  AND d.created_at >= $2
+  AND (r.workflow_version_id = $3
+       OR r.workflow_version_id IN (SELECT v3.id FROM workflow_versions v3
+            WHERE v3.workflow_id = $3 AND v3.org_id = $1))
+  AND ($4::int IS NULL OR coalesce(
+        (SELECT wv.version FROM workflow_versions wv
+         WHERE wv.id = r.workflow_version_id AND wv.org_id = $1),
+        (SELECT count(*) FROM workflow_versions v2
+         WHERE v2.workflow_id = $3 AND v2.org_id = $1
+           AND v2.created_at <= r.created_at))::int >= $4::int)
+ORDER BY d.created_at DESC
+LIMIT 100
+`
+
+type ListRecentDeadLetterErrorsForWorkflowParams struct {
+	OrgID       string
+	CreatedAt   *time.Time
+	WorkflowID  string
+	FromVersion pgtype.Int4
+}
+
+func (q *Queries) ListRecentDeadLetterErrorsForWorkflow(ctx context.Context, arg ListRecentDeadLetterErrorsForWorkflowParams) ([]json.RawMessage, error) {
+	rows, err := q.db.Query(ctx, listRecentDeadLetterErrorsForWorkflow,
+		arg.OrgID,
+		arg.CreatedAt,
+		arg.WorkflowID,
+		arg.FromVersion,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []json.RawMessage
+	for rows.Next() {
+		var error_json json.RawMessage
+		if err := rows.Scan(&error_json); err != nil {
+			return nil, err
+		}
+		items = append(items, error_json)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -8825,6 +8897,103 @@ func (q *Queries) QueryVerifiedRecoveryStats(ctx context.Context, arg QueryVerif
 		&i.P50Ms,
 		&i.P90Ms,
 		&i.MttrAvgMs,
+	)
+	return i, err
+}
+
+const queryWorkflowHealthSignals = `-- name: QueryWorkflowHealthSignals :one
+WITH candidate_runs AS (
+  -- A saved workflow's plain runs carry workflow_version_id = the WORKFLOW
+  -- id (the pilot's no-rollout convention); pinned/rollout runs carry a
+  -- real version-row id. The effective version for un-pinned runs is the
+  -- number of versions saved at run time.
+  SELECT r.id, r.status, r.created_at,
+         coalesce(
+           (SELECT wv.version FROM workflow_versions wv
+            WHERE wv.id = r.workflow_version_id AND wv.org_id = $2),
+           (SELECT count(*) FROM workflow_versions v2
+            WHERE v2.workflow_id = $1 AND v2.org_id = $2
+              AND v2.created_at <= r.created_at)
+         )::int AS effective_version
+  FROM runs r
+  WHERE r.org_id = $2
+    AND r.created_at >= $3
+    AND r.replay_mode IS NULL
+    AND (r.workflow_version_id = $1
+         OR r.workflow_version_id IN (SELECT v3.id FROM workflow_versions v3
+              WHERE v3.workflow_id = $1 AND v3.org_id = $2))
+), window_runs AS (
+  SELECT id, status, created_at FROM candidate_runs
+  WHERE ($4::int IS NULL OR effective_version < $4::int)
+    AND ($5::int IS NULL OR effective_version >= $5::int)
+), terminal AS (
+  SELECT wr.id, wr.status, wr.created_at,
+         (SELECT min(e.created_at) FROM run_events e
+          WHERE e.run_id = wr.id AND e.type IN ('run.succeeded','run.failed','run.cancelled','run.timed_out')) AS terminal_at
+  FROM window_runs wr
+  WHERE wr.status IN ('succeeded','failed','cancelled','timed_out')
+)
+SELECT
+  (SELECT count(*) FROM terminal)::int AS total_runs,
+  (SELECT count(*) FROM terminal WHERE status = 'succeeded')::int AS success_count,
+  (SELECT count(*) FROM terminal WHERE status = 'failed')::int AS failure_count,
+  (SELECT count(*) FROM run_events e JOIN window_runs wr ON wr.id = e.run_id
+   WHERE e.type = 'node.retry')::int AS retry_count,
+  (SELECT count(*) FROM dead_letters d JOIN window_runs wr ON wr.id = d.run_id
+   WHERE d.status = 'open')::int AS dlq_open_count,
+  coalesce((SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY extract(epoch FROM (t.terminal_at - t.created_at)) * 1000)
+   FROM terminal t WHERE t.terminal_at IS NOT NULL), -1)::float8 AS p95_latency_ms,
+  coalesce((SELECT sum((u.metadata ->> 'costUsd')::float8) FROM usage_events u
+   JOIN window_runs wr ON wr.id = u.run_id
+   WHERE u.metadata ? 'costUsd' AND u.metadata ->> 'costUsd' != '<nil>'), 0)::float8 AS total_cost_usd,
+  coalesce((SELECT sum(u.quantity) FROM usage_events u
+   JOIN window_runs wr ON wr.id = u.run_id), 0)::float8 AS total_tokens,
+  (SELECT count(*) FROM workflow_versions v2
+   WHERE v2.workflow_id = $1 AND v2.org_id = $2)::int AS version_count,
+  (SELECT count(*) FROM window_runs WHERE status = 'running')::int AS running_count
+`
+
+type QueryWorkflowHealthSignalsParams struct {
+	WorkflowID    string
+	OrgID         string
+	Since         *time.Time
+	BeforeVersion pgtype.Int4
+	FromVersion   pgtype.Int4
+}
+
+type QueryWorkflowHealthSignalsRow struct {
+	TotalRuns    int32
+	SuccessCount int32
+	FailureCount int32
+	RetryCount   int32
+	DlqOpenCount int32
+	P95LatencyMs float64
+	TotalCostUsd float64
+	TotalTokens  float64
+	VersionCount int32
+	RunningCount int32
+}
+
+func (q *Queries) QueryWorkflowHealthSignals(ctx context.Context, arg QueryWorkflowHealthSignalsParams) (QueryWorkflowHealthSignalsRow, error) {
+	row := q.db.QueryRow(ctx, queryWorkflowHealthSignals,
+		arg.WorkflowID,
+		arg.OrgID,
+		arg.Since,
+		arg.BeforeVersion,
+		arg.FromVersion,
+	)
+	var i QueryWorkflowHealthSignalsRow
+	err := row.Scan(
+		&i.TotalRuns,
+		&i.SuccessCount,
+		&i.FailureCount,
+		&i.RetryCount,
+		&i.DlqOpenCount,
+		&i.P95LatencyMs,
+		&i.TotalCostUsd,
+		&i.TotalTokens,
+		&i.VersionCount,
+		&i.RunningCount,
 	)
 	return i, err
 }

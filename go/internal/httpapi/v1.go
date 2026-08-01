@@ -176,6 +176,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	server.mountUpstreamHealthRoutes(mux)
 	server.mountAutoHealingRoutes(mux)
 	server.mountProductSurfaceRoutes(mux)
+	server.mountWorkflowHealthRoutes(mux)
 	server.mountAiPatchRoutes(mux)
 	return WithBrowserHeaders(mux)
 }
@@ -291,6 +292,10 @@ func (s *V1Server) saveCore(r *http.Request, rc v1Request) opResult {
 	if tagIssue != "" {
 		return opError(http.StatusBadRequest, "invalid_input", tagIssue, nil)
 	}
+	sloJSON, sloIssue := parseWorkflowSloBody(raw)
+	if sloIssue != "" {
+		return opError(http.StatusBadRequest, "invalid_input", sloIssue, nil)
+	}
 	wf, issues := domain.Parse(raw)
 	if wf == nil {
 		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
@@ -364,6 +369,7 @@ func (s *V1Server) saveCore(r *http.Request, rc v1Request) opResult {
 		CreatedBy: pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
 
 		UpstreamHealthSources: upstreamTags,
+		SloJson:               sloJSON,
 	}); err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}

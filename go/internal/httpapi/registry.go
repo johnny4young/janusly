@@ -105,6 +105,8 @@ var routeAuthz = map[string]routeGate{
 	"POST /solution-packs/{id}/inject-failure":                    {auth.RoleEditor, "packs.install"},
 	"GET /onboarding":                                             {auth.RoleViewer, "onboarding.read"},
 	"POST /onboarding":                                            {auth.RoleViewer, "onboarding.write"},
+	"GET /workflows/health":                                       {auth.RoleViewer, "workflows.read"},
+	"GET /workflows/health/delta":                                 {auth.RoleViewer, "workflows.read"},
 	"GET /credentials":                                            {auth.RoleViewer, "credentials.read"},
 	"GET /credentials/health":                                     {auth.RoleViewer, "credentials.read"},
 	"POST /credentials":                                           {auth.RoleAdmin, "credentials.write"},

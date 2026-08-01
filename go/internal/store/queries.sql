@@ -97,8 +97,8 @@ LIMIT sqlc.arg(page_limit);
 
 -- name: InsertWorkflowVersion :exec
 INSERT INTO workflow_versions (id, org_id, workflow_id, version, dag_json, created_by,
-                               upstream_health_sources)
-VALUES ($1, $2, $3, $4, $5, $6, $7);
+                               upstream_health_sources, slo_json)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
 
 -- name: GetWorkflowVersionByID :one
 SELECT id, org_id, workflow_id, version, dag_json, created_by, created_at
@@ -2180,3 +2180,79 @@ SELECT
           AND (sqlc.narg(since)::timestamptz IS NULL OR d2.created_at >= sqlc.narg(since)::timestamptz))
    OR EXISTS(SELECT 1 FROM recovery_items ri WHERE ri.org_id = sqlc.arg(org_id) AND ri.status = 'resolved'
           AND (sqlc.narg(since)::timestamptz IS NULL OR ri.created_at >= sqlc.narg(since)::timestamptz))) AS recovery_applied;
+
+
+-- name: GetLatestWorkflowSlo :one
+SELECT slo_json FROM workflow_versions
+WHERE org_id = $1 AND workflow_id = $2
+ORDER BY version DESC
+LIMIT 1;
+
+-- name: QueryWorkflowHealthSignals :one
+WITH candidate_runs AS (
+  -- A saved workflow's plain runs carry workflow_version_id = the WORKFLOW
+  -- id (the pilot's no-rollout convention); pinned/rollout runs carry a
+  -- real version-row id. The effective version for un-pinned runs is the
+  -- number of versions saved at run time.
+  SELECT r.id, r.status, r.created_at,
+         coalesce(
+           (SELECT wv.version FROM workflow_versions wv
+            WHERE wv.id = r.workflow_version_id AND wv.org_id = sqlc.arg(org_id)),
+           (SELECT count(*) FROM workflow_versions v2
+            WHERE v2.workflow_id = sqlc.arg(workflow_id) AND v2.org_id = sqlc.arg(org_id)
+              AND v2.created_at <= r.created_at)
+         )::int AS effective_version
+  FROM runs r
+  WHERE r.org_id = sqlc.arg(org_id)
+    AND r.created_at >= sqlc.arg(since)
+    AND r.replay_mode IS NULL
+    AND (r.workflow_version_id = sqlc.arg(workflow_id)
+         OR r.workflow_version_id IN (SELECT v3.id FROM workflow_versions v3
+              WHERE v3.workflow_id = sqlc.arg(workflow_id) AND v3.org_id = sqlc.arg(org_id)))
+), window_runs AS (
+  SELECT id, status, created_at FROM candidate_runs
+  WHERE (sqlc.narg(before_version)::int IS NULL OR effective_version < sqlc.narg(before_version)::int)
+    AND (sqlc.narg(from_version)::int IS NULL OR effective_version >= sqlc.narg(from_version)::int)
+), terminal AS (
+  SELECT wr.id, wr.status, wr.created_at,
+         (SELECT min(e.created_at) FROM run_events e
+          WHERE e.run_id = wr.id AND e.type IN ('run.succeeded','run.failed','run.cancelled','run.timed_out')) AS terminal_at
+  FROM window_runs wr
+  WHERE wr.status IN ('succeeded','failed','cancelled','timed_out')
+)
+SELECT
+  (SELECT count(*) FROM terminal)::int AS total_runs,
+  (SELECT count(*) FROM terminal WHERE status = 'succeeded')::int AS success_count,
+  (SELECT count(*) FROM terminal WHERE status = 'failed')::int AS failure_count,
+  (SELECT count(*) FROM run_events e JOIN window_runs wr ON wr.id = e.run_id
+   WHERE e.type = 'node.retry')::int AS retry_count,
+  (SELECT count(*) FROM dead_letters d JOIN window_runs wr ON wr.id = d.run_id
+   WHERE d.status = 'open')::int AS dlq_open_count,
+  coalesce((SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY extract(epoch FROM (t.terminal_at - t.created_at)) * 1000)
+   FROM terminal t WHERE t.terminal_at IS NOT NULL), -1)::float8 AS p95_latency_ms,
+  coalesce((SELECT sum((u.metadata ->> 'costUsd')::float8) FROM usage_events u
+   JOIN window_runs wr ON wr.id = u.run_id
+   WHERE u.metadata ? 'costUsd' AND u.metadata ->> 'costUsd' != '<nil>'), 0)::float8 AS total_cost_usd,
+  coalesce((SELECT sum(u.quantity) FROM usage_events u
+   JOIN window_runs wr ON wr.id = u.run_id), 0)::float8 AS total_tokens,
+  (SELECT count(*) FROM workflow_versions v2
+   WHERE v2.workflow_id = sqlc.arg(workflow_id) AND v2.org_id = sqlc.arg(org_id))::int AS version_count,
+  (SELECT count(*) FROM window_runs WHERE status = 'running')::int AS running_count;
+
+-- name: ListRecentDeadLetterErrorsForWorkflow :many
+SELECT d.error_json
+FROM dead_letters d
+JOIN runs r ON r.id = d.run_id
+WHERE r.org_id = sqlc.arg(org_id)
+  AND d.created_at >= sqlc.arg(created_at)
+  AND (r.workflow_version_id = sqlc.arg(workflow_id)
+       OR r.workflow_version_id IN (SELECT v3.id FROM workflow_versions v3
+            WHERE v3.workflow_id = sqlc.arg(workflow_id) AND v3.org_id = sqlc.arg(org_id)))
+  AND (sqlc.narg(from_version)::int IS NULL OR coalesce(
+        (SELECT wv.version FROM workflow_versions wv
+         WHERE wv.id = r.workflow_version_id AND wv.org_id = sqlc.arg(org_id)),
+        (SELECT count(*) FROM workflow_versions v2
+         WHERE v2.workflow_id = sqlc.arg(workflow_id) AND v2.org_id = sqlc.arg(org_id)
+           AND v2.created_at <= r.created_at))::int >= sqlc.narg(from_version)::int)
+ORDER BY d.created_at DESC
+LIMIT 100;
