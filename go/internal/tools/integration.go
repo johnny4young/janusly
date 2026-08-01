@@ -52,7 +52,7 @@ var crlfPattern = regexp.MustCompile(`[\r\n]`)
 // over `${t}.${body}` — the exact bytes POSTed are the bytes signed.
 func SignWebhookPayload(secret, body string, unixSeconds int64) string {
 	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(fmt.Sprintf("%d.%s", unixSeconds, body)))
+	_, _ = fmt.Fprintf(mac, "%d.%s", unixSeconds, body)
 	return fmt.Sprintf("t=%d,v1=%s", unixSeconds, hex.EncodeToString(mac.Sum(nil)))
 }
 
