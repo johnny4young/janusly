@@ -10742,8 +10742,7 @@ func (q *Queries) RevokePendingInvitation(ctx context.Context, arg RevokePending
 }
 
 const revokeScimDirectory = `-- name: RevokeScimDirectory :execrows
-UPDATE scim_directories SET status = 'revoked', updated_at = now()
-WHERE id = $1 AND org_id = $2
+DELETE FROM scim_directories WHERE id = $1 AND org_id = $2
 `
 
 type RevokeScimDirectoryParams struct {
@@ -10751,6 +10750,10 @@ type RevokeScimDirectoryParams struct {
 	OrgID string
 }
 
+// Revoke is a HARD delete (reference revokeScimDirectory): the unique
+// (org_id) and (provider_directory_id) indexes must free up so a re-attach
+// can succeed; orphaned state/mapping rows are tolerated (no FK) and the
+// create-path collision guard absorbs SCIM-owned memberships on re-provision.
 func (q *Queries) RevokeScimDirectory(ctx context.Context, arg RevokeScimDirectoryParams) (int64, error) {
 	result, err := q.db.Exec(ctx, revokeScimDirectory, arg.ID, arg.OrgID)
 	if err != nil {

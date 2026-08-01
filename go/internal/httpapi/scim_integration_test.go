@@ -316,11 +316,25 @@ func TestScimDirectorySyncLifecycle(t *testing.T) {
 		t.Fatalf("group delete must drop roles derived from it: %q", role)
 	}
 
-	// --- Revoke closes the webhook door ----------------------------------
+	// --- Revoke is a HARD delete: the webhook door closes and the unique
+	// indexes free up so a re-attach can succeed --------------------------
 	if res = h.call("DELETE", "/org/scim/directories/"+directoryID, nil, ""); res.status != 200 {
 		t.Fatalf("revoke directory: %d %+v", res.status, res.body)
 	}
 	expectReason(deliver(event("evt-after-revoke-"+suffix, "dsync.user.created", at(18), map[string]any{
 		"id": "u-late", "email": "late-" + suffix + "@acme.com",
-	})), "directory_revoked")
+	})), "unknown_directory")
+	res = h.call("POST", "/org/scim/directories", map[string]any{
+		"providerDirectoryId": directoryProviderID, "defaultRole": "viewer",
+	}, "")
+	if res.status != 200 {
+		t.Fatalf("re-attach after revoke must succeed: %d %+v", res.status, res.body)
+	}
+	// The re-attached directory absorbs the SCIM-owned membership left by
+	// the old lifecycle (the create-path collision guard's whole point).
+	if parsed := deliver(event("evt-ana-reattach-"+suffix, "dsync.user.created", at(19), map[string]any{
+		"id": userAna, "email": anaEmail,
+	})); parsed["action"] != "provisioned" {
+		t.Fatalf("re-attach must absorb the scim-owned row: %+v", parsed)
+	}
 }

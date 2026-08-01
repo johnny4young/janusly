@@ -2410,9 +2410,12 @@ UPDATE scim_directories SET default_role = $3, updated_at = now()
 WHERE id = $1 AND org_id = $2
 RETURNING *;
 
+-- Revoke is a HARD delete (reference revokeScimDirectory): the unique
+-- (org_id) and (provider_directory_id) indexes must free up so a re-attach
+-- can succeed; orphaned state/mapping rows are tolerated (no FK) and the
+-- create-path collision guard absorbs SCIM-owned memberships on re-provision.
 -- name: RevokeScimDirectory :execrows
-UPDATE scim_directories SET status = 'revoked', updated_at = now()
-WHERE id = $1 AND org_id = $2;
+DELETE FROM scim_directories WHERE id = $1 AND org_id = $2;
 
 -- name: RecordScimDirectorySync :exec
 UPDATE scim_directories SET last_synced_at = now(), updated_at = now()
