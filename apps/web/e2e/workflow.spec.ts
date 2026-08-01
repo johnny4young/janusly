@@ -1,4 +1,8 @@
-import { addCanvasStep, openWorkspaceSection } from './_helpers/workspace-navigation'
+import {
+  addCanvasStep,
+  openWorkflowCreation,
+  openWorkspaceSection,
+} from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test } from '@playwright/test'
 
@@ -12,7 +16,7 @@ test('dev session can create, save, run, and reopen a workflow', async ({ page }
   await expect(page.getByText('dev-user')).toBeVisible()
 
   await page.getByRole('button', { name: 'Workflows', exact: true }).click()
-  await page.getByRole('button', { name: 'New workflow', exact: true }).click()
+  await openWorkflowCreation(page)
   await page.getByRole('button', { name: /^Start blank\b/ }).click()
   await page.getByRole('textbox', { name: 'Name' }).fill(workflowName)
   await addCanvasStep(page, 'Do nothing')
@@ -38,7 +42,7 @@ test('human form pauses a run, validates input, and resumes with submitted outpu
   await expect(page.getByText('dev-user')).toBeVisible()
 
   await page.getByRole('button', { name: 'Workflows', exact: true }).click()
-  await page.getByRole('button', { name: 'New workflow', exact: true }).click()
+  await openWorkflowCreation(page)
   await page.getByRole('button', { name: /^Start blank\b/ }).click()
   await page.getByRole('textbox', { name: 'Name' }).fill(`E2E Human Form ${Date.now()}`)
   await addCanvasStep(page, 'Collect form')

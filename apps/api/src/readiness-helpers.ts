@@ -5,8 +5,8 @@
  * package stays I/O-free.
  *
  * Used by `apps/api/src/routes/workflows-routes.ts` and
- * `apps/api/src/routes/runs-routes.ts` (the production-mode `/start`
- * gate).
+ * `apps/api/src/routes/run-routes/lifecycle.ts` and
+ * `apps/api/src/routes/run-routes/redrive.ts` (production-mode run gates).
  *
  * Invariants:
  * - Multi-tenant scope: the rollback query carries

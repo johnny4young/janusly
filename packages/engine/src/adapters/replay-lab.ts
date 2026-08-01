@@ -13,7 +13,7 @@
  * uniformly. Audit action distinguishes the two intents (`replay_lab.started`
  * vs `recovery.validation_started`).
  *
- * Used by `apps/api/src/routes/runs-routes.ts` (`POST /runs/replay-lab`)
+ * Used by `apps/api/src/routes/run-routes/replay-lab.ts` (`POST /runs/replay-lab`)
  * after `requireRole("editor")` and rate-limit gates.
  *
  * Invariants:

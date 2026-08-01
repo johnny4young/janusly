@@ -9,7 +9,7 @@
  * persist either form of reference in the DAG.
  *
  * Used by:
- * - `packages/engine/src/integration-tools.ts` — every integration tool's
+ * - `packages/engine/src/integration-tooling/shared.ts` — every integration tool's
  *   first step is `getCredentialByName(orgId, kind, name)`.
  *
  * Invariants:

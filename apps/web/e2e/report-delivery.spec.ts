@@ -1,4 +1,8 @@
-import { addCanvasStep, openWorkspaceSection } from './_helpers/workspace-navigation'
+import {
+  addCanvasStep,
+  openWorkflowCreation,
+  openWorkspaceSection,
+} from './_helpers/workspace-navigation'
 import { expect, test } from '@playwright/test'
 
 test.use({ viewport: { width: 1440, height: 900 } })
@@ -11,7 +15,7 @@ test('run history opens report delivery dialog and surfaces a credential error',
   await expect(page.locator('.we-home-header .section-kicker', { hasText: 'Home' })).toBeVisible()
 
   await page.getByRole('button', { name: 'Workflows', exact: true }).click()
-  await page.getByRole('button', { name: 'New workflow', exact: true }).click()
+  await openWorkflowCreation(page)
   await page.getByRole('button', { name: /^Start blank\b/ }).click()
   await page.getByRole('textbox', { name: 'Name' }).fill(workflowName)
   await addCanvasStep(page, 'Do nothing')

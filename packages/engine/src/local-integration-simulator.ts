@@ -2,7 +2,7 @@
  * Explicit local-only routing for the bundled provider simulator.
  *
  * Used by:
- * - `integration-tools.ts` for GitHub, Slack, and reserved example webhooks.
+ * - `integration-tooling/` provider modules for GitHub, Slack, PagerDuty, and reserved example webhooks.
  * - `mailer.ts` for local email delivery evidence.
  *
  * Invariants:

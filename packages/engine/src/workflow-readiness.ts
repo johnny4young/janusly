@@ -15,7 +15,7 @@
  * Used by:
  *   - `apps/api/src/routes/workflows-routes.ts` — `POST
  *     /workflows/readiness` returns the result.
- *   - `apps/api/src/routes/runs-routes.ts` — `POST /start` consults it when
+ *   - `apps/api/src/routes/run-routes/lifecycle.ts` — `POST /start` consults it when
  *     `JANUSLY_PRODUCTION_MODE` is set and rejects fail-level issues with
  *     HTTP 422.
  *   - `apps/web/src/components/WorkflowReadinessBadge.tsx` — fetches the

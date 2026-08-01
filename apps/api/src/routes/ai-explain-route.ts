@@ -6,10 +6,9 @@
  * Both uphold the AI-fallback contract: the LLM call is wrapped so any
  * failure (or a missing provider) degrades to `{ mode: "fallback", aiError,
  * ... }` — explain-workflow via `fallbackExplainWorkflow`, explain-run via
- * the `explainRun` helper's own fallback envelope. Per the AGENTS.md
- * AI-mutation contract, explain-workflow audits its fallback path too (so AI
- * outages stay visible); explain-run audits every path via the helper's
- * returned mode. Neither route mutates workflow state.
+ * the `explainRun` helper's own fallback envelope. Explain-workflow audits its
+ * fallback path too so AI outages stay visible; explain-run audits every path
+ * via the helper's returned mode. Neither route mutates workflow state.
  */
 import { and, asc, desc, eq } from "drizzle-orm";
 
@@ -110,7 +109,7 @@ export const aiExplainRoutes: Route[] = [
       // was gated to auth.orgId above (404 otherwise) and runs are never
       // deleted (cascade invariant) — a cross-tenant runId cannot reach here.
       // Don't drop the run gate above (mirrors the SSE catch-up scoping in
-      // runs-routes.ts).
+      // run-routes/stream.ts).
       const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId)).orderBy(asc(runEvents.createdAt));
       const result = await explainRun({
         llm,

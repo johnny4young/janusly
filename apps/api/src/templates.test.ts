@@ -20,7 +20,7 @@ import { asPublicTemplate, workflowTemplates } from "./templates";
 /**
  * Mapping from a tool name to the credential `kind` that tool needs
  * stored in `credentials`. Sister to the per-tool kind constants in
- * `packages/engine/src/integration-tools.ts`; updated together when a
+ * `packages/engine/src/integration-tooling/`; updated together when a
  * new credential-bearing tool lands.
  */
 const TOOL_TO_CREDENTIAL_KIND: Record<string, string> = {

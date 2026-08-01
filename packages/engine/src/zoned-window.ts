@@ -9,7 +9,7 @@
  * - `packages/engine/src/tools/time.ts` — the generic `time.window` tool,
  *   which REJECTS malformed configuration (a decision primitive must never
  *   answer from bad input).
- * - `packages/engine/src/integration-tools.ts` — the PagerDuty off-hours
+ * - `packages/engine/src/integration-tooling/pagerduty.ts` — the PagerDuty off-hours
  *   evaluator, which deliberately treats malformed configuration as "inside
  *   working hours" so a broken policy can never authorize a mutation.
  *
