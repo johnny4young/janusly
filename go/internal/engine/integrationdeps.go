@@ -135,6 +135,7 @@ func (e *Engine) buildIntegrationDeps(orgID, runID, nodeID string) *tools.Integr
 		PdfKey: func(filename string) string {
 			return "orgs/" + orgID + "/pdf/" + e.newID() + "/" + filename
 		},
+		OrgID: func() string { return orgID },
 		RateLimitPerMin: func(family string, fallback int) int {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()

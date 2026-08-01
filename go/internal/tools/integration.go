@@ -52,6 +52,8 @@ type IntegrationDeps struct {
 	Email func() EmailSettings
 	// PdfKey assembles the tenant-scoped object key for pdf.generate.
 	PdfKey PdfKeyBuilder
+	// OrgID exposes the tenant for pool keying (db.* tools); nil-safe.
+	OrgID func() string
 }
 
 const webhookSignatureHeader = "x-janusly-signature"
@@ -75,6 +77,10 @@ var integrationToolNames = map[string]bool{
 	"pagerduty.incident.get":         true,
 	"pagerduty.incident.acknowledge": true,
 	"pagerduty.incident.snooze":      true,
+	"db.schema.describe":             true,
+	"db.query.read":                  true,
+	"db.query.write":                 true,
+	"db.query.transaction":           true,
 }
 
 // IsIntegrationTool reports whether the executor should route this call
@@ -138,6 +144,8 @@ func ExecuteIntegrationTool(ctx context.Context, name string, input map[string]a
 		return executePdfGenerate(ctx, input, deps)
 	case "pagerduty.incident.get", "pagerduty.incident.acknowledge", "pagerduty.incident.snooze":
 		return executePagerDutyAPICall(ctx, name, input, deps)
+	case "db.schema.describe", "db.query.read", "db.query.write", "db.query.transaction":
+		return executeDbTool(ctx, name, input, deps)
 	case "webhook.send":
 		credential, _ := input["credential"].(string)
 		rawURL, _ := input["url"].(string)

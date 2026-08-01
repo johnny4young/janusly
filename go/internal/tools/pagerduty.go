@@ -29,12 +29,12 @@ import (
 )
 
 const (
-	pagerDutyResponseMaxBytes     = 256 * 1024
-	pagerDutyDefaultRateLimitMin  = 120
-	pagerDutySnoozeMinSeconds     = 60
-	pagerDutySnoozeMaxSeconds     = 604_800
-	pagerDutyIncidentTitleMax     = 2_000
-	pagerDutyWorkingWindowsMax    = 14
+	pagerDutyResponseMaxBytes    = 256 * 1024
+	pagerDutyDefaultRateLimitMin = 120
+	pagerDutySnoozeMinSeconds    = 60
+	pagerDutySnoozeMaxSeconds    = 604_800
+	pagerDutyIncidentTitleMax    = 2_000
+	pagerDutyWorkingWindowsMax   = 14
 )
 
 var pagerDutyActionableDefaults = map[string]bool{
