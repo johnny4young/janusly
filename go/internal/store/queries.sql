@@ -1383,3 +1383,48 @@ FROM recovery_impact_events impact
 JOIN runs r ON r.id = impact.run_id AND r.org_id = impact.org_id
 WHERE impact.org_id = $1 AND impact.user_id = $2
   AND impact.recovered_at >= $3 AND r.replay_mode IS NULL;
+
+-- name: ListAlertPolicies :many
+SELECT * FROM alert_policies WHERE org_id = $1 ORDER BY created_at DESC, id DESC LIMIT 200;
+
+-- name: ListEnabledAlertPolicies :many
+SELECT * FROM alert_policies WHERE org_id = $1 AND trigger = $2 AND enabled ORDER BY created_at ASC LIMIT 100;
+
+-- name: GetAlertPolicy :one
+SELECT * FROM alert_policies WHERE org_id = $1 AND id = $2;
+
+-- name: InsertAlertPolicy :exec
+INSERT INTO alert_policies (id, org_id, name, trigger, parameters, channels, cooldown_seconds, enabled, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
+
+-- name: UpdateAlertPolicy :execrows
+UPDATE alert_policies
+SET name = COALESCE(sqlc.narg(new_name), name),
+    parameters = COALESCE(sqlc.narg(new_parameters), parameters),
+    channels = COALESCE(sqlc.narg(new_channels), channels),
+    cooldown_seconds = COALESCE(sqlc.narg(new_cooldown_seconds), cooldown_seconds),
+    enabled = COALESCE(sqlc.narg(new_enabled), enabled),
+    updated_at = now()
+WHERE org_id = $1 AND id = $2;
+
+-- name: DeleteAlertPolicy :execrows
+DELETE FROM alert_policies WHERE org_id = $1 AND id = $2;
+
+-- name: CountRecentAlertDispatches :one
+SELECT count(*) FROM alert_dispatches
+WHERE org_id = $1 AND policy_id = $2 AND dedupe_key = $3 AND dispatched_at >= $4;
+
+-- name: InsertAlertDispatch :exec
+INSERT INTO alert_dispatches (id, org_id, policy_id, dedupe_key, outcome, channel_results, trigger_payload)
+VALUES ($1, $2, $3, $4, $5, $6, $7);
+
+-- name: ListRecentAlertDispatches :many
+SELECT * FROM alert_dispatches
+WHERE org_id = $1 AND (sqlc.narg(cursor)::timestamptz IS NULL OR dispatched_at < sqlc.narg(cursor))
+ORDER BY dispatched_at DESC, id DESC
+LIMIT sqlc.arg(page_limit);
+
+-- name: FindLatestDeadLetterForNode :one
+SELECT id, node_id, node_json, error_json FROM dead_letters
+WHERE org_id = $1 AND run_id = $2 AND node_id = $3
+ORDER BY created_at DESC, id DESC LIMIT 1;

@@ -574,6 +574,30 @@ func (q *Queries) CountMembersInRole(ctx context.Context, arg CountMembersInRole
 	return column_1, err
 }
 
+const countRecentAlertDispatches = `-- name: CountRecentAlertDispatches :one
+SELECT count(*) FROM alert_dispatches
+WHERE org_id = $1 AND policy_id = $2 AND dedupe_key = $3 AND dispatched_at >= $4
+`
+
+type CountRecentAlertDispatchesParams struct {
+	OrgID        string
+	PolicyID     string
+	DedupeKey    string
+	DispatchedAt time.Time
+}
+
+func (q *Queries) CountRecentAlertDispatches(ctx context.Context, arg CountRecentAlertDispatchesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countRecentAlertDispatches,
+		arg.OrgID,
+		arg.PolicyID,
+		arg.DedupeKey,
+		arg.DispatchedAt,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countRecentWorkflowRunStatuses = `-- name: CountRecentWorkflowRunStatuses :many
 SELECT r.status FROM runs r
 LEFT JOIN workflow_versions v ON v.id = r.workflow_version_id AND v.org_id = r.org_id
@@ -650,6 +674,23 @@ func (q *Queries) CountWorkflowVersions(ctx context.Context, arg CountWorkflowVe
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const deleteAlertPolicy = `-- name: DeleteAlertPolicy :execrows
+DELETE FROM alert_policies WHERE org_id = $1 AND id = $2
+`
+
+type DeleteAlertPolicyParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) DeleteAlertPolicy(ctx context.Context, arg DeleteAlertPolicyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteAlertPolicy, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteExpiredAuditLogsBatch = `-- name: DeleteExpiredAuditLogsBatch :execrows
@@ -794,6 +835,37 @@ func (q *Queries) FailRunNode(ctx context.Context, arg FailRunNodeParams) (int64
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const findLatestDeadLetterForNode = `-- name: FindLatestDeadLetterForNode :one
+SELECT id, node_id, node_json, error_json FROM dead_letters
+WHERE org_id = $1 AND run_id = $2 AND node_id = $3
+ORDER BY created_at DESC, id DESC LIMIT 1
+`
+
+type FindLatestDeadLetterForNodeParams struct {
+	OrgID  string
+	RunID  string
+	NodeID string
+}
+
+type FindLatestDeadLetterForNodeRow struct {
+	ID        string
+	NodeID    string
+	NodeJson  json.RawMessage
+	ErrorJson json.RawMessage
+}
+
+func (q *Queries) FindLatestDeadLetterForNode(ctx context.Context, arg FindLatestDeadLetterForNodeParams) (FindLatestDeadLetterForNodeRow, error) {
+	row := q.db.QueryRow(ctx, findLatestDeadLetterForNode, arg.OrgID, arg.RunID, arg.NodeID)
+	var i FindLatestDeadLetterForNodeRow
+	err := row.Scan(
+		&i.ID,
+		&i.NodeID,
+		&i.NodeJson,
+		&i.ErrorJson,
+	)
+	return i, err
 }
 
 const findMatchingActivePlaybook = `-- name: FindMatchingActivePlaybook :one
@@ -1079,6 +1151,34 @@ func (q *Queries) FindTriggerEventByDedupe(ctx context.Context, arg FindTriggerE
 		&i.PayloadJson,
 		&i.SkippedReason,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getAlertPolicy = `-- name: GetAlertPolicy :one
+SELECT id, org_id, name, trigger, parameters, channels, cooldown_seconds, enabled, created_by, created_at, updated_at FROM alert_policies WHERE org_id = $1 AND id = $2
+`
+
+type GetAlertPolicyParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) GetAlertPolicy(ctx context.Context, arg GetAlertPolicyParams) (AlertPolicy, error) {
+	row := q.db.QueryRow(ctx, getAlertPolicy, arg.OrgID, arg.ID)
+	var i AlertPolicy
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.Trigger,
+		&i.Parameters,
+		&i.Channels,
+		&i.CooldownSeconds,
+		&i.Enabled,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -2060,6 +2160,66 @@ func (q *Queries) GetWorkflowVersionByID(ctx context.Context, arg GetWorkflowVer
 	return i, err
 }
 
+const insertAlertDispatch = `-- name: InsertAlertDispatch :exec
+INSERT INTO alert_dispatches (id, org_id, policy_id, dedupe_key, outcome, channel_results, trigger_payload)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+`
+
+type InsertAlertDispatchParams struct {
+	ID             string
+	OrgID          string
+	PolicyID       string
+	DedupeKey      string
+	Outcome        string
+	ChannelResults json.RawMessage
+	TriggerPayload json.RawMessage
+}
+
+func (q *Queries) InsertAlertDispatch(ctx context.Context, arg InsertAlertDispatchParams) error {
+	_, err := q.db.Exec(ctx, insertAlertDispatch,
+		arg.ID,
+		arg.OrgID,
+		arg.PolicyID,
+		arg.DedupeKey,
+		arg.Outcome,
+		arg.ChannelResults,
+		arg.TriggerPayload,
+	)
+	return err
+}
+
+const insertAlertPolicy = `-- name: InsertAlertPolicy :exec
+INSERT INTO alert_policies (id, org_id, name, trigger, parameters, channels, cooldown_seconds, enabled, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+`
+
+type InsertAlertPolicyParams struct {
+	ID              string
+	OrgID           string
+	Name            string
+	Trigger         string
+	Parameters      json.RawMessage
+	Channels        json.RawMessage
+	CooldownSeconds int32
+	Enabled         bool
+	CreatedBy       pgtype.Text
+}
+
+func (q *Queries) InsertAlertPolicy(ctx context.Context, arg InsertAlertPolicyParams) error {
+	_, err := q.db.Exec(ctx, insertAlertPolicy,
+		arg.ID,
+		arg.OrgID,
+		arg.Name,
+		arg.Trigger,
+		arg.Parameters,
+		arg.Channels,
+		arg.CooldownSeconds,
+		arg.Enabled,
+		arg.CreatedBy,
+	)
+	return err
+}
+
 const insertAuditLogRow = `-- name: InsertAuditLogRow :exec
 INSERT INTO audit_logs (id, org_id, user_id, action, target_type, target_id, metadata)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -2771,6 +2931,42 @@ func (q *Queries) InsertWorkflowVersion(ctx context.Context, arg InsertWorkflowV
 	return err
 }
 
+const listAlertPolicies = `-- name: ListAlertPolicies :many
+SELECT id, org_id, name, trigger, parameters, channels, cooldown_seconds, enabled, created_by, created_at, updated_at FROM alert_policies WHERE org_id = $1 ORDER BY created_at DESC, id DESC LIMIT 200
+`
+
+func (q *Queries) ListAlertPolicies(ctx context.Context, orgID string) ([]AlertPolicy, error) {
+	rows, err := q.db.Query(ctx, listAlertPolicies, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AlertPolicy
+	for rows.Next() {
+		var i AlertPolicy
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Name,
+			&i.Trigger,
+			&i.Parameters,
+			&i.Channels,
+			&i.CooldownSeconds,
+			&i.Enabled,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCalibratableApproaches = `-- name: ListCalibratableApproaches :many
 SELECT DISTINCT approach_label FROM recovery_feedback
 WHERE org_id = $1 AND raw_confidence IS NOT NULL
@@ -3239,6 +3435,47 @@ func (q *Queries) ListDueWakeups(ctx context.Context, limit int32) ([]GoPilotWak
 	for rows.Next() {
 		var i GoPilotWakeup
 		if err := rows.Scan(&i.RunNodeID, &i.WakeAt, &i.Reason); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEnabledAlertPolicies = `-- name: ListEnabledAlertPolicies :many
+SELECT id, org_id, name, trigger, parameters, channels, cooldown_seconds, enabled, created_by, created_at, updated_at FROM alert_policies WHERE org_id = $1 AND trigger = $2 AND enabled ORDER BY created_at ASC LIMIT 100
+`
+
+type ListEnabledAlertPoliciesParams struct {
+	OrgID   string
+	Trigger string
+}
+
+func (q *Queries) ListEnabledAlertPolicies(ctx context.Context, arg ListEnabledAlertPoliciesParams) ([]AlertPolicy, error) {
+	rows, err := q.db.Query(ctx, listEnabledAlertPolicies, arg.OrgID, arg.Trigger)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AlertPolicy
+	for rows.Next() {
+		var i AlertPolicy
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Name,
+			&i.Trigger,
+			&i.Parameters,
+			&i.Channels,
+			&i.CooldownSeconds,
+			&i.Enabled,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -3750,6 +3987,48 @@ func (q *Queries) ListPrompts(ctx context.Context, arg ListPromptsParams) ([]Pro
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecentAlertDispatches = `-- name: ListRecentAlertDispatches :many
+SELECT id, org_id, policy_id, dedupe_key, dispatched_at, outcome, channel_results, trigger_payload FROM alert_dispatches
+WHERE org_id = $1 AND ($2::timestamptz IS NULL OR dispatched_at < $2)
+ORDER BY dispatched_at DESC, id DESC
+LIMIT $3
+`
+
+type ListRecentAlertDispatchesParams struct {
+	OrgID     string
+	Cursor    *time.Time
+	PageLimit int32
+}
+
+func (q *Queries) ListRecentAlertDispatches(ctx context.Context, arg ListRecentAlertDispatchesParams) ([]AlertDispatch, error) {
+	rows, err := q.db.Query(ctx, listRecentAlertDispatches, arg.OrgID, arg.Cursor, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AlertDispatch
+	for rows.Next() {
+		var i AlertDispatch
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.PolicyID,
+			&i.DedupeKey,
+			&i.DispatchedAt,
+			&i.Outcome,
+			&i.ChannelResults,
+			&i.TriggerPayload,
 		); err != nil {
 			return nil, err
 		}
@@ -5968,6 +6247,43 @@ type TripWorkflowCircuitBreakerParams struct {
 
 func (q *Queries) TripWorkflowCircuitBreaker(ctx context.Context, arg TripWorkflowCircuitBreakerParams) (int64, error) {
 	result, err := q.db.Exec(ctx, tripWorkflowCircuitBreaker, arg.OrgID, arg.ID, arg.Reason)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updateAlertPolicy = `-- name: UpdateAlertPolicy :execrows
+UPDATE alert_policies
+SET name = COALESCE($3, name),
+    parameters = COALESCE($4, parameters),
+    channels = COALESCE($5, channels),
+    cooldown_seconds = COALESCE($6, cooldown_seconds),
+    enabled = COALESCE($7, enabled),
+    updated_at = now()
+WHERE org_id = $1 AND id = $2
+`
+
+type UpdateAlertPolicyParams struct {
+	OrgID              string
+	ID                 string
+	NewName            pgtype.Text
+	NewParameters      json.RawMessage
+	NewChannels        json.RawMessage
+	NewCooldownSeconds pgtype.Int4
+	NewEnabled         pgtype.Bool
+}
+
+func (q *Queries) UpdateAlertPolicy(ctx context.Context, arg UpdateAlertPolicyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateAlertPolicy,
+		arg.OrgID,
+		arg.ID,
+		arg.NewName,
+		arg.NewParameters,
+		arg.NewChannels,
+		arg.NewCooldownSeconds,
+		arg.NewEnabled,
+	)
 	if err != nil {
 		return 0, err
 	}

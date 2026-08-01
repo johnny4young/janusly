@@ -114,6 +114,11 @@ func (e *Engine) maybeTripCircuitBreaker(ctx context.Context, orgID, workflowID 
 	}
 	slog.Error("[circuit-breaker] workflow paused",
 		"orgId", orgID, "workflowId", workflowID, "consecutiveFailures", streak, "threshold", threshold)
+	// Alert producer (post-commit; the trip CAS already deduped announcers).
+	e.DispatchAlert(ctx, orgID, "workflow.circuit_breaker_tripped", map[string]any{
+		"workflowId": workflowID, "consecutiveFailures": streak, "threshold": threshold,
+		"runId": runID, "dedupeKey": "breaker:" + workflowID,
+	})
 }
 
 func resolveBreakerThreshold(ctx context.Context, e *Engine, orgID string, workflowKnob []byte) int {

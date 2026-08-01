@@ -161,15 +161,21 @@ func (e *Engine) ActivatePlaybook(ctx context.Context, orgID, id, actor string) 
 // DeadLetterSignature derives the exact failure signature the playbook
 // match is keyed on — the SAME normalization the clustering surfaces use.
 func DeadLetterSignature(item store.GetDeadLetterRow) string {
+	return deadLetterSignatureFromParts(item.NodeID, item.NodeJson, item.ErrorJson)
+}
+
+// deadLetterSignatureFromParts is the shared normalizer entry for callers
+// holding a different row projection (alert producers, redrive).
+func deadLetterSignatureFromParts(nodeID string, nodeJSON, errorJSON []byte) string {
 	var node struct {
 		Type   string `json:"type"`
 		Config struct {
 			Tool string `json:"tool"`
 		} `json:"config"`
 	}
-	_ = json.Unmarshal(item.NodeJson, &node)
-	return signature.NormalizeJSON(item.ErrorJson, signature.Context{
-		NodeID: item.NodeID, NodeType: node.Type, ToolName: node.Config.Tool,
+	_ = json.Unmarshal(nodeJSON, &node)
+	return signature.NormalizeJSON(errorJSON, signature.Context{
+		NodeID: nodeID, NodeType: node.Type, ToolName: node.Config.Tool,
 	}).Signature
 }
 

@@ -180,6 +180,12 @@ func (e *Engine) RedriveDeadLetterWithOptions(ctx context.Context, orgID, deadLe
 		return fmt.Errorf("commit: %w", err)
 	}
 	metricRedrives.Inc()
+	// Alert producer (post-commit): the ownership incident just opened.
+	e.DispatchAlert(ctx, orgID, "recovery_item.created", map[string]any{
+		"deadLetterId": deadLetterID, "workflowId": workflowID,
+		"severity": "p3", "errorSignature": signature,
+		"dedupeKey": "item:" + deadLetterID,
+	})
 	return nil
 }
 

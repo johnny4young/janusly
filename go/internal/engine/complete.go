@@ -391,6 +391,18 @@ func (e *Engine) afterTerminalFailure(ctx context.Context, claim ClaimedNode) {
 		return
 	}
 	e.maybeTripCircuitBreaker(ctx, run.OrgID, wf.ID, claim.RunID)
+	// Alert producer: the dead letter is durable (committed with the
+	// failure tx), so the dlq.entry_created event fires here, after commit.
+	if dl, err := store.New(e.pool).FindLatestDeadLetterForNode(ctx, store.FindLatestDeadLetterForNodeParams{
+		OrgID: run.OrgID, RunID: claim.RunID, NodeID: claim.NodeID,
+	}); err == nil {
+		e.DispatchAlert(ctx, run.OrgID, "dlq.entry_created", map[string]any{
+			"deadLetterId": dl.ID, "runId": claim.RunID, "nodeId": claim.NodeID,
+			"workflowId":     wf.ID,
+			"errorSignature": deadLetterSignatureFromParts(dl.NodeID, dl.NodeJson, dl.ErrorJson),
+			"dedupeKey":      "dlq:" + wf.ID + ":" + claim.NodeID,
+		})
+	}
 }
 
 // insertDeadLetter captures the exact failed job for operator replay: the

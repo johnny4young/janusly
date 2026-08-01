@@ -164,6 +164,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	server.mountRecoveryQueueRoutes(mux)
 	server.mountBulkRecoveryRoutes(mux)
 	server.mountRecoveryHomeRoutes(mux)
+	server.mountAlertRoutes(mux)
 	server.mountAiPatchRoutes(mux)
 	return WithBrowserHeaders(mux)
 }
