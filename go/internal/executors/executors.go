@@ -96,6 +96,7 @@ func Registry() map[string]Func {
 		"join":               executeJoin,
 		"webhook_received":   executeWebhookReceived,
 		"pagerduty_incident": executePagerDutyIncident,
+		"email_received":     executeEmailReceived,
 		"mcp_tool":           NewMcpToolExecutor(),
 	}
 }

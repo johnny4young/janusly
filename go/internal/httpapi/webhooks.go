@@ -56,7 +56,13 @@ type triggerIngestRequest struct {
 	workflowID   string
 	triggerType  string
 	eventPayload map[string]any
-	dedupeKey    string
+	// dedupeKey "" means NO idempotency key: every delivery persists a new
+	// event (the upstream is the de-dup point — the reference's mcp case).
+	dedupeKey string
+	// eventID overrides the generated trigger-event id — the email seam
+	// derives it BEFORE insert so attachment object keys line up with the
+	// persisted row.
+	eventID string
 	// noMatch is the caller's opaque miss result — unknown, cross-org, and
 	// tombstoned workflows answer it identically so a caller learns nothing
 	// about what exists outside its scope.
@@ -170,7 +176,10 @@ func (s *V1Server) ingestTriggerEventCore(ctx context.Context, in triggerIngestR
 	// for backfill). The trigger node must exist in the ASSIGNED version's
 	// snapshot — mutable deployment state never redirects an event to a
 	// version that cannot serve it.
-	triggerEventID := uuid.NewString()
+	triggerEventID := in.eventID
+	if triggerEventID == "" {
+		triggerEventID = uuid.NewString()
+	}
 	effectiveVersionID := version.ID
 	var rolloutAssignment *engine.RolloutAssignment
 	if assignment, err := s.engine.ResolveWorkflowRolloutAssignment(ctx, in.orgID, in.workflowID, triggerEventID); err == nil && assignment != nil {
@@ -202,7 +211,7 @@ func (s *V1Server) ingestTriggerEventCore(ctx context.Context, in triggerIngestR
 		ID: triggerEventID, OrgID: in.orgID, TriggerType: in.triggerType,
 		WorkflowID:        pgtype.Text{String: in.workflowID, Valid: true},
 		WorkflowVersionID: effectiveVersionID, NodeID: nodeID,
-		DedupeKey:              pgtype.Text{String: in.dedupeKey, Valid: true},
+		DedupeKey:              pgtype.Text{String: in.dedupeKey, Valid: in.dedupeKey != ""},
 		PayloadJson:            payloadJSON,
 		WorkflowRolloutID:      rolloutID,
 		WorkflowRolloutVariant: rolloutVariant,
@@ -210,7 +219,7 @@ func (s *V1Server) ingestTriggerEventCore(ctx context.Context, in triggerIngestR
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}
-	if created == 0 {
+	if created == 0 && in.dedupeKey != "" {
 		existing, err := q.FindTriggerEventByDedupe(ctx, store.FindTriggerEventByDedupeParams{
 			OrgID: in.orgID, DedupeKey: pgtype.Text{String: in.dedupeKey, Valid: true},
 		})

@@ -34,6 +34,54 @@ func executeWebhookReceived(_ context.Context, in Input) (any, error) {
 	}, nil
 }
 
+var emailAliasKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9._+-]+$`)
+
+func executeEmailReceived(_ context.Context, in Input) (any, error) {
+	if err := ValidateEmailReceivedConfig(in.Config); err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"triggeredBy": "email_received",
+		"triggeredAt": time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+		"event":       readTriggerEvent(in.Context),
+	}, nil
+}
+
+// ValidateEmailReceivedConfig mirrors the shared config schema: aliasKey
+// is the per-org inbound local-part; dkimRequired defaults to true (the
+// ingestion seam enforces it); fromDomains is a bounded allow-list.
+func ValidateEmailReceivedConfig(config map[string]any) error {
+	raw, _ := config["aliasKey"].(string)
+	aliasKey := strings.TrimSpace(raw)
+	if aliasKey == "" || len(aliasKey) > 128 || !emailAliasKeyPattern.MatchString(aliasKey) {
+		return fmt.Errorf("email_received.aliasKey must be a valid email local-part")
+	}
+	if raw, present := config["dkimRequired"]; present {
+		if _, ok := raw.(bool); !ok {
+			return fmt.Errorf("email_received.dkimRequired must be a boolean")
+		}
+	}
+	if raw, present := config["fromDomains"]; present {
+		domains, ok := raw.([]any)
+		if !ok || len(domains) > 50 {
+			return fmt.Errorf("email_received.fromDomains must list at most 50 domains")
+		}
+		for _, rawDomain := range domains {
+			domain, ok := rawDomain.(string)
+			if !ok || strings.TrimSpace(domain) == "" {
+				return fmt.Errorf("email_received.fromDomains entries must be non-empty strings")
+			}
+		}
+	}
+	if raw, present := config["rateLimitPerMin"]; present {
+		value, ok := raw.(float64)
+		if !ok || value != float64(int64(value)) || value < 1 || value > triggerRateLimitMaxPerMin {
+			return fmt.Errorf("email_received.rateLimitPerMin must be an integer between 1 and %d", triggerRateLimitMaxPerMin)
+		}
+	}
+	return nil
+}
+
 func executePagerDutyIncident(_ context.Context, in Input) (any, error) {
 	if err := ValidatePagerDutyIncidentConfig(in.Config); err != nil {
 		return nil, err
