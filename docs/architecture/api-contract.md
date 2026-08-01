@@ -20,6 +20,11 @@ by prefix alone.
   stable reads, writes, and dynamic MCP connection templates, shared by API
   contracts and first-party clients.
 - `apps/api/src/routes.ts` — optional `contract` field on a route entry.
+- `apps/api/src/routes/runs-routes.ts` — stable first-match registry for run
+  routes. Its handlers live in bounded responsibility modules under
+  `apps/api/src/routes/run-routes/`; preserve the registry composition order
+  and the broad list matcher's explicit exclusions when adding an overlapping
+  `/runs` route.
 - `apps/api/src/server.ts` — exact-route-first dispatch, `/v1` alias resolution,
   query/body validation, request ID assignment, and unchanged auth/RBAC ordering.
 - `apps/api/src/http.ts` — versioned success/error envelopes and runtime output

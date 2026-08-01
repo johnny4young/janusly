@@ -3,7 +3,7 @@
  * or `human_form` node back into the queue.
  *
  * Used by:
- * - `apps/api/src/routes/runs-routes.ts` `POST /resume` — when a human
+ * - `apps/api/src/routes/run-routes/lifecycle.ts` `POST /resume` — when a human
  *   approves or a webhook payload arrives.
  *
  * Invariants:

@@ -5,7 +5,8 @@
  * and the decision-replay candidate parser used by `/causal`.
  *
  * Used by `apps/api/src/routes/ai-routes.ts`,
- * `apps/api/src/routes/runs-routes.ts` (causal replay), and
+ * `apps/api/src/routes/run-routes/diagnostics.ts` (causal replay),
+ * `apps/api/src/routes/run-routes/replay-lab.ts`, and
  * `apps/api/src/routes/dlq-routes.ts` (sandbox replay sanitization).
  *
  * Invariants:

@@ -175,6 +175,22 @@ markers retain the configured backoff. The
 child's terminal recovery claim remains the only recovery-impact fact;
 reattachment must not double-credit the parent.
 
+## HTTP route ownership
+
+`apps/api/src/routes/runs-routes.ts` is the stable ordered registry consumed by
+the API route composition. The thirteen run routes are implemented in bounded
+modules under `apps/api/src/routes/run-routes/`: `stream` owns SSE delivery,
+`reads` owns list/detail/status/usage projections, `redrive` owns production
+continuation, `lifecycle` owns start/resume/cancel, `replay-lab` owns sandbox
+replays and forks, and `diagnostics` owns comparison and causal replay.
+
+Route order is protocol behavior because dispatch is first-match-wins. The SSE
+route must remain ahead of the broad `/runs` list matcher because both match a
+stream URL. The comparison route can remain later only while the list matcher
+explicitly excludes `/runs/compare`. The run contract schemas remain in
+`apps/api/src/contracts/runs.ts`; moving a handler does not create a second
+wire contract or bypass runtime response validation.
+
 ## Observability
 
 - **Timeline**: every lifecycle step appends a `run_events` row through

@@ -11,7 +11,7 @@
  * write-side effects execute for real. The engine's `enqueueReadyNodes`
  * cascade takes over after the first node completes.
  *
- * Used by `apps/api/src/routes/runs-routes.ts` (`POST /runs/redrive`) after
+ * Used by `apps/api/src/routes/run-routes/redrive.ts` (`POST /runs/redrive`) after
  * org-scope + role gates.
  *
  * Invariants:
