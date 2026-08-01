@@ -34,6 +34,37 @@ func executeWebhookReceived(_ context.Context, in Input) (any, error) {
 	}, nil
 }
 
+func executePagerDutyIncident(_ context.Context, in Input) (any, error) {
+	if err := ValidatePagerDutyIncidentConfig(in.Config); err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"triggeredBy": "pagerduty_incident",
+		"triggeredAt": time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+		"event":       readTriggerEvent(in.Context),
+	}, nil
+}
+
+// ValidatePagerDutyIncidentConfig mirrors the shared config schema: the
+// signing value stays in Secret Store under `webhookCredential` (kind
+// pagerduty_webhook_secret); the callback URL derives from workflow+node
+// ids. The ingestion route shares this so save-time, ingest-time, and
+// run-time agree.
+func ValidatePagerDutyIncidentConfig(config map[string]any) error {
+	raw, _ := config["webhookCredential"].(string)
+	credential := strings.TrimSpace(raw)
+	if credential == "" || len(credential) > 200 {
+		return fmt.Errorf("pagerduty_incident.webhookCredential is required")
+	}
+	if raw, present := config["rateLimitPerMin"]; present {
+		value, ok := raw.(float64)
+		if !ok || value != float64(int64(value)) || value < 1 || value > triggerRateLimitMaxPerMin {
+			return fmt.Errorf("pagerduty_incident.rateLimitPerMin must be an integer between 1 and %d", triggerRateLimitMaxPerMin)
+		}
+	}
+	return nil
+}
+
 // validateWebhookReceivedConfig mirrors the shared config schema: a
 // malformed config that slipped past save-time validation (an operator
 // hand-editing advanced JSON) fails the node rather than silently

@@ -380,6 +380,7 @@ func (s *V1Server) slackCallbackHandler(w http.ResponseWriter, r *http.Request) 
 
 func (s *V1Server) mountSlackInteractionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /webhooks/slack/interactions/{id}", s.slackCallbackHandler)
+	mux.HandleFunc("POST /webhooks/pagerduty/{workflowId}/{nodeId}", s.pagerDutyCallbackHandler)
 	mux.HandleFunc("GET /integrations/slack/interactions", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		rows, err := store.New(s.pool).ListSlackInteractionConnections(r.Context(), rc.orgID)
 		if err != nil {

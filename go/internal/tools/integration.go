@@ -35,8 +35,11 @@ type IntegrationDeps struct {
 	Gate func(ctx context.Context, tool, credentialKind, credentialName string, rateLimitPerMin int) (string, string)
 	// Record fires one usage row; must never break the tool.
 	Record func(tool, credentialName string, ok bool, statusCode int, errMessage string, latencyMs int)
-	// Post performs the guarded outbound call (FetchHTTPTarget wrapper).
+	// Post performs the guarded outbound POST (FetchHTTPTarget wrapper).
 	Post func(ctx context.Context, url string, headers map[string]string, body []byte) (statusCode int, responseBody string, errMessage string)
+	// Fetch is the method-explicit guarded outbound call (the PagerDuty
+	// tools need GET/PUT); same FetchHTTPTarget chokepoint as Post.
+	Fetch func(ctx context.Context, method, url string, headers map[string]string, body []byte) (statusCode int, responseBody string, errMessage string)
 	// RateLimitPerMin resolves the per-tool tenant bound (org config →
 	// env → default), keyed by the tool's family name.
 	RateLimitPerMin func(family string, fallback int) int
@@ -66,9 +69,12 @@ func SignWebhookPayload(secret, body string, unixSeconds int64) string {
 // integrationToolNames marks the registry entries the executor must
 // intercept with runtime deps.
 var integrationToolNames = map[string]bool{
-	"webhook.send": true,
-	"email.send":   true,
-	"pdf.generate": true,
+	"webhook.send":                   true,
+	"email.send":                     true,
+	"pdf.generate":                   true,
+	"pagerduty.incident.get":         true,
+	"pagerduty.incident.acknowledge": true,
+	"pagerduty.incident.snooze":      true,
 }
 
 // IsIntegrationTool reports whether the executor should route this call
@@ -112,7 +118,7 @@ func envelopeError(message string, latencyMs int) map[string]any {
 // failure mode.
 func ExecuteIntegrationTool(ctx context.Context, name string, input map[string]any, deps *IntegrationDeps) map[string]any {
 	start := time.Now()
-	if deps == nil || deps.Gate == nil || deps.Post == nil {
+	if deps == nil || deps.Gate == nil || (deps.Post == nil && deps.Fetch == nil) {
 		return envelopeError("integration tools require run context", 0)
 	}
 	now := time.Now
@@ -130,6 +136,8 @@ func ExecuteIntegrationTool(ctx context.Context, name string, input map[string]a
 		return executeEmailSend(ctx, input, deps)
 	case "pdf.generate":
 		return executePdfGenerate(ctx, input, deps)
+	case "pagerduty.incident.get", "pagerduty.incident.acknowledge", "pagerduty.incident.snooze":
+		return executePagerDutyAPICall(ctx, name, input, deps)
 	case "webhook.send":
 		credential, _ := input["credential"].(string)
 		rawURL, _ := input["url"].(string)

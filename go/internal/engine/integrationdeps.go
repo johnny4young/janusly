@@ -108,6 +108,15 @@ func (e *Engine) buildIntegrationDeps(orgID, runID, nodeID string) *tools.Integr
 			}
 			return result.StatusCode, result.Body, ""
 		},
+		Fetch: func(ctx context.Context, method, url string, headers map[string]string, body []byte) (int, string, string) {
+			result, err := executors.FetchHTTPTarget(ctx, url, executors.FetchOptions{
+				Method: method, Headers: headers, Body: body,
+			})
+			if err != nil {
+				return 0, "", err.Error()
+			}
+			return result.StatusCode, result.Body, ""
+		},
 		RateLimit: func(ctx context.Context, bucket string, perMin int) string {
 			if err := limiter.Enforce(ctx, orgID, ratelimit.Options{
 				Name: bucket, Max: perMin, Window: time.Minute,

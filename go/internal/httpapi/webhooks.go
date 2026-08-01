@@ -6,9 +6,15 @@
 // (org, dedupe_key) idempotency so a relay retry converges to one run, the
 // buffer-on-pause posture (202: the event is accepted, its run deferred),
 // and the start-claim CAS inside the run-start transaction).
+//
+// ingestTriggerEventCore is the shared durable pipeline: the authenticated
+// webhook route and the provider-signed PagerDuty callback (pagerduty.go)
+// both feed it after their own transport validation — one anchor/dedupe/
+// storm-guard/buffer/start path, never two.
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/go/internal/audit"
+	"github.com/johnny4young/janusly/go/internal/auth"
 	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/engine"
 	"github.com/johnny4young/janusly/go/internal/executors"
@@ -41,14 +48,31 @@ type webhookIngestBody struct {
 	ReceivedAt  string         `json:"receivedAt"`
 }
 
+// triggerIngestRequest parameterizes the shared durable pipeline.
+type triggerIngestRequest struct {
+	orgID        string
+	authContext  *auth.Context
+	createdBy    string
+	workflowID   string
+	triggerType  string
+	eventPayload map[string]any
+	dedupeKey    string
+	// noMatch is the caller's opaque miss result — unknown, cross-org, and
+	// tombstoned workflows answer it identically so a caller learns nothing
+	// about what exists outside its scope.
+	noMatch opResult
+	// matchNode selects the trigger node in a workflow snapshot; the
+	// pipeline re-runs it against the rollout-assigned version so mutable
+	// deployment state never redirects an event to a version that cannot
+	// serve it.
+	matchNode func(wf *domain.Workflow, noMatch opResult) (string, opResult)
+}
+
 func (s *V1Server) ingestWebhook(w http.ResponseWriter, r *http.Request, rc v1Request) {
 	writeVersioned(w, rc.id, s.webhookIngestCore(r, rc, r.PathValue("workflowId")))
 }
 
 func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID string) opResult {
-	ctx := r.Context()
-	q := store.New(s.pool)
-
 	var body webhookIngestBody
 	if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, webhookIngestMaxBytes)).Decode(&body); err != nil {
 		return opError(http.StatusBadRequest, "trigger_invalid_payload", "Invalid webhook payload", nil)
@@ -74,27 +98,58 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 		body.Payload = map[string]any{}
 	}
 
+	eventPayload := map[string]any{
+		"endpointKey": endpointKey,
+		"eventId":     eventID,
+		"payload":     body.Payload,
+		"receivedAt":  receivedAt,
+	}
+	if eventType != "" {
+		eventPayload["eventType"] = eventType
+	}
+	return s.ingestTriggerEventCore(r.Context(), triggerIngestRequest{
+		orgID:        rc.orgID,
+		authContext:  rc.authContext,
+		createdBy:    rc.userID,
+		workflowID:   workflowID,
+		triggerType:  "webhook_received",
+		eventPayload: eventPayload,
+		dedupeKey:    "webhook:" + strings.ToLower(endpointKey) + ":" + eventID,
+		noMatch: opError(http.StatusNotFound, "trigger_no_matching_node",
+			"No webhook_received trigger matches this endpoint key", nil),
+		matchNode: func(wf *domain.Workflow, noMatch opResult) (string, opResult) {
+			return matchWebhookNode(wf, endpointKey, noMatch)
+		},
+	})
+}
+
+// ingestTriggerEventCore is the shared durable trigger pipeline: resolve +
+// scope the workflow, match the trigger node (in the rollout-assigned
+// snapshot too), persist the replay anchor idempotently, apply the storm
+// guard and buffer-on-pause postures, and start the run behind the
+// event-claim CAS.
+func (s *V1Server) ingestTriggerEventCore(ctx context.Context, in triggerIngestRequest) opResult {
+	q := store.New(s.pool)
+
 	// Unknown, cross-org, and tombstoned workflows are indistinguishable
-	// from "no matching trigger" — a webhook caller learns nothing about
-	// what exists outside its scope.
-	noMatch := opError(http.StatusNotFound, "trigger_no_matching_node",
-		"No webhook_received trigger matches this endpoint key", nil)
-	ownerState, err := q.GetWorkflowIngestState(ctx, workflowID)
+	// from "no matching trigger" — a caller learns nothing about what
+	// exists outside its scope.
+	ownerState, err := q.GetWorkflowIngestState(ctx, in.workflowID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return noMatch
+			return in.noMatch
 		}
 		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}
-	if ownerState.OrgID != rc.orgID || ownerState.DeletedAt != nil {
-		return noMatch
+	if ownerState.OrgID != in.orgID || ownerState.DeletedAt != nil {
+		return in.noMatch
 	}
 	version, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{
-		WorkflowID: workflowID, OrgID: rc.orgID,
+		WorkflowID: in.workflowID, OrgID: in.orgID,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return noMatch
+			return in.noMatch
 		}
 		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}
@@ -104,7 +159,7 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 		return opError(http.StatusUnprocessableEntity, "trigger_invalid_payload",
 			"Resolved workflow failed schema validation", nil)
 	}
-	nodeID, result := matchWebhookNode(wf, endpointKey, noMatch)
+	nodeID, result := in.matchNode(wf, in.noMatch)
 	if nodeID == "" {
 		return result
 	}
@@ -118,8 +173,8 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 	triggerEventID := uuid.NewString()
 	effectiveVersionID := version.ID
 	var rolloutAssignment *engine.RolloutAssignment
-	if assignment, err := s.engine.ResolveWorkflowRolloutAssignment(ctx, rc.orgID, workflowID, triggerEventID); err == nil && assignment != nil {
-		exactNodeID, exactResult := matchWebhookNode(assignment.Workflow, endpointKey, opError(
+	if assignment, err := s.engine.ResolveWorkflowRolloutAssignment(ctx, in.orgID, in.workflowID, triggerEventID); err == nil && assignment != nil {
+		exactNodeID, exactResult := in.matchNode(assignment.Workflow, opError(
 			http.StatusConflict, "trigger_no_matching_node",
 			"Assigned workflow version no longer contains the trigger node", nil))
 		if exactNodeID == "" || exactNodeID != nodeID {
@@ -133,16 +188,7 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 	}
 
 	// Persist the replay anchor BEFORE the run, idempotent on the dedupe key.
-	eventPayload := map[string]any{
-		"endpointKey": endpointKey,
-		"eventId":     eventID,
-		"payload":     body.Payload,
-		"receivedAt":  receivedAt,
-	}
-	if eventType != "" {
-		eventPayload["eventType"] = eventType
-	}
-	dedupeKey := "webhook:" + strings.ToLower(endpointKey) + ":" + eventID
+	eventPayload := in.eventPayload
 	payloadJSON, err := json.Marshal(map[string]any{"event": eventPayload})
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
@@ -153,10 +199,10 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 		rolloutVariant = pgtype.Text{String: rolloutAssignment.Variant, Valid: true}
 	}
 	created, err := q.InsertTriggerEvent(ctx, store.InsertTriggerEventParams{
-		ID: triggerEventID, OrgID: rc.orgID, TriggerType: "webhook_received",
-		WorkflowID:        pgtype.Text{String: workflowID, Valid: true},
+		ID: triggerEventID, OrgID: in.orgID, TriggerType: in.triggerType,
+		WorkflowID:        pgtype.Text{String: in.workflowID, Valid: true},
 		WorkflowVersionID: effectiveVersionID, NodeID: nodeID,
-		DedupeKey:              pgtype.Text{String: dedupeKey, Valid: true},
+		DedupeKey:              pgtype.Text{String: in.dedupeKey, Valid: true},
 		PayloadJson:            payloadJSON,
 		WorkflowRolloutID:      rolloutID,
 		WorkflowRolloutVariant: rolloutVariant,
@@ -166,7 +212,7 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 	}
 	if created == 0 {
 		existing, err := q.FindTriggerEventByDedupe(ctx, store.FindTriggerEventByDedupeParams{
-			OrgID: rc.orgID, DedupeKey: pgtype.Text{String: dedupeKey, Valid: true},
+			OrgID: in.orgID, DedupeKey: pgtype.Text{String: in.dedupeKey, Valid: true},
 		})
 		if err != nil {
 			return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
@@ -192,10 +238,10 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 	}
 
 	if created != 0 {
-		audit.Write(ctx, s.pool, rc.authContext, "trigger.event.received", audit.Options{
+		audit.Write(ctx, s.pool, in.authContext, "trigger.event.received", audit.Options{
 			TargetType: "trigger_event", TargetID: triggerEventID,
 			Metadata: map[string]any{
-				"triggerType": "webhook_received", "workflowId": workflowID,
+				"triggerType": in.triggerType, "workflowId": in.workflowID,
 				"nodeId": nodeID, "replay": false,
 			},
 		})
@@ -212,21 +258,21 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 		}
 	}
 	ratePerMin := executors.ResolveTriggerRateLimitPerMin(nodeConfig["rateLimitPerMin"])
-	if limitErr := s.limiter.Enforce(ctx, rc.orgID, ratelimit.Options{
+	if limitErr := s.limiter.Enforce(ctx, in.orgID, ratelimit.Options{
 		Name:   "trigger." + effectiveVersionID + "." + nodeID,
 		Max:    ratePerMin,
 		Window: time.Minute,
 	}); limitErr != nil {
 		if _, err := q.MarkTriggerEventOutcome(ctx, store.MarkTriggerEventOutcomeParams{
-			OrgID: rc.orgID, ID: triggerEventID, Status: "skipped",
+			OrgID: in.orgID, ID: triggerEventID, Status: "skipped",
 			SkippedReason: pgtype.Text{String: "rate_limited", Valid: true},
 		}); err != nil {
 			return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 		}
-		audit.Write(ctx, s.pool, rc.authContext, "trigger.event.skipped", audit.Options{
+		audit.Write(ctx, s.pool, in.authContext, "trigger.event.skipped", audit.Options{
 			TargetType: "trigger_event", TargetID: triggerEventID,
 			Metadata: map[string]any{
-				"triggerType": "webhook_received", "reason": "rate_limited", "ratePerMin": ratePerMin,
+				"triggerType": in.triggerType, "reason": "rate_limited", "ratePerMin": ratePerMin,
 			},
 		})
 		return opResult{status: http.StatusTooManyRequests, data: map[string]any{
@@ -239,16 +285,16 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 	// `buffered` (202: accepted, run deferred) instead of dropping it.
 	if ownerState.Status != "" && ownerState.Status != "active" {
 		if _, err := q.MarkTriggerEventOutcome(ctx, store.MarkTriggerEventOutcomeParams{
-			OrgID: rc.orgID, ID: triggerEventID, Status: "buffered",
+			OrgID: in.orgID, ID: triggerEventID, Status: "buffered",
 			SkippedReason: pgtype.Text{String: ownerState.Status, Valid: true},
 		}); err != nil {
 			return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 		}
-		audit.Write(ctx, s.pool, rc.authContext, "trigger.event.buffered", audit.Options{
+		audit.Write(ctx, s.pool, in.authContext, "trigger.event.buffered", audit.Options{
 			TargetType: "trigger_event", TargetID: triggerEventID,
 			Metadata: map[string]any{
-				"triggerType": "webhook_received", "reason": ownerState.Status,
-				"workflowId": workflowID, "nodeId": nodeID,
+				"triggerType": in.triggerType, "reason": ownerState.Status,
+				"workflowId": in.workflowID, "nodeId": nodeID,
 			},
 		})
 		return opResult{status: http.StatusAccepted, data: map[string]any{
@@ -258,7 +304,7 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 
 	if valid := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation); !valid.Valid {
 		_, _ = q.MarkTriggerEventOutcome(ctx, store.MarkTriggerEventOutcomeParams{
-			OrgID: rc.orgID, ID: triggerEventID, Status: "failed",
+			OrgID: in.orgID, ID: triggerEventID, Status: "failed",
 			SkippedReason: pgtype.Text{String: "workflow_parse_failed", Valid: true},
 		})
 		return opError(http.StatusUnprocessableEntity, "trigger_invalid_payload",
@@ -266,10 +312,10 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 	}
 
 	ingestStart := engine.StartInput{
-		OrgID: rc.orgID, Workflow: wf, WorkflowVersionID: effectiveVersionID,
-		CreatedBy: rc.userID, TriggerEventID: triggerEventID,
+		OrgID: in.orgID, Workflow: wf, WorkflowVersionID: effectiveVersionID,
+		CreatedBy: in.createdBy, TriggerEventID: triggerEventID,
 		Input: map[string]any{
-			"triggeredBy": "webhook_received", "triggerEventId": triggerEventID,
+			"triggeredBy": in.triggerType, "triggerEventId": triggerEventID,
 			"event": eventPayload,
 		},
 	}
@@ -281,7 +327,7 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 	if err != nil {
 		var conflict *engine.TriggerEventStartConflictError
 		if errors.As(err, &conflict) {
-			claimed, err := q.GetTriggerEvent(ctx, store.GetTriggerEventParams{OrgID: rc.orgID, ID: triggerEventID})
+			claimed, err := q.GetTriggerEvent(ctx, store.GetTriggerEventParams{OrgID: in.orgID, ID: triggerEventID})
 			if err != nil {
 				return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 			}
@@ -293,11 +339,11 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 		// The event row stays `received` so the relay's retry converges.
 		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}
-	audit.Write(ctx, s.pool, rc.authContext, "trigger.event.started", audit.Options{
+	audit.Write(ctx, s.pool, in.authContext, "trigger.event.started", audit.Options{
 		TargetType: "trigger_event", TargetID: triggerEventID,
 		Metadata: map[string]any{
-			"triggerType": "webhook_received", "runId": runID,
-			"workflowId": workflowID, "nodeId": nodeID,
+			"triggerType": in.triggerType, "runId": runID,
+			"workflowId": in.workflowID, "nodeId": nodeID,
 		},
 	})
 	return opOK(map[string]any{"ok": true, "triggerEventId": triggerEventID, "runId": runID})
