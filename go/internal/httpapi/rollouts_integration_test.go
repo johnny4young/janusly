@@ -457,3 +457,111 @@ func TestValidationAndReplayNeverConsumeCanary(t *testing.T) {
 			receiptsAfter, failedBefore, failedAfter, succeededAfter)
 	}
 }
+
+// T-154: trigger ingest resolves the rollout assignment at ACCEPT time —
+// captured on the trigger event AND the run; the trigger node must exist
+// in the ASSIGNED version (else 409 trigger_no_matching_node); buffered
+// events keep their captured assignment through the breaker backfill.
+func TestTriggerIngestRolloutAssignment(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	ctx := t.Context()
+	wfID := fmt.Sprintf("wf-ingest-roll-%d", time.Now().UnixNano())
+
+	// v1 baseline + v2 canary share the SAME webhook trigger contract.
+	res := h.call("POST", "/workflows/save", webhookWorkflow(wfID, "orders.v1"), "")
+	v1 := res.body["versionId"].(string)
+	res = h.call("POST", "/workflows/save", webhookWorkflow(wfID, "orders.v1"), "")
+	v2 := res.body["versionId"].(string)
+	res = h.call("POST", "/workflows/"+wfID+"/rollout", map[string]any{
+		"baselineVersionId": v1, "canaryVersionId": v2,
+		"trafficPercent": 50, "minimumSampleSize": 100, "minimumSuccessRatePercent": 1,
+	}, "")
+	if res.status != 200 {
+		t.Fatalf("rollout: %d %+v", res.status, res.body)
+	}
+	rolloutID := res.body["rollout"].(map[string]any)["id"].(string)
+
+	// Accepted events capture the assignment on the EVENT and the RUN,
+	// and both variants appear across enough deliveries.
+	variants := map[string]int{}
+	for i := range 20 {
+		res = h.call("POST", "/v1/webhooks/"+wfID, map[string]any{
+			"endpointKey": "orders.v1", "eventId": fmt.Sprintf("evt-roll-%d", i),
+			"payload": map[string]any{"total": i},
+		}, "")
+		if res.status != 200 {
+			t.Fatalf("ingest %d: %d %+v", i, res.status, res.body)
+		}
+		data := res.body["data"].(map[string]any)
+		eventID := data["triggerEventId"].(string)
+		runID := data["runId"].(string)
+		var eventRollout, eventVariant, eventVersion string
+		_ = pool.QueryRow(ctx, `SELECT COALESCE(workflow_rollout_id, ''), COALESCE(workflow_rollout_variant, ''),
+			workflow_version_id FROM trigger_events WHERE id = $1`, eventID).Scan(&eventRollout, &eventVariant, &eventVersion)
+		var runRollout, runVariant, runVersion string
+		_ = pool.QueryRow(ctx, `SELECT COALESCE(workflow_rollout_id, ''), COALESCE(workflow_rollout_variant, ''),
+			workflow_version_id FROM runs WHERE id = $1`, runID).Scan(&runRollout, &runVariant, &runVersion)
+		if eventRollout != rolloutID || runRollout != rolloutID || eventVariant != runVariant || eventVersion != runVersion {
+			t.Fatalf("event/run assignment must agree: %s/%s vs %s/%s", eventVariant, eventVersion, runVariant, runVersion)
+		}
+		expected := map[string]string{"baseline": v1, "canary": v2}[eventVariant]
+		if eventVersion != expected {
+			t.Fatalf("variant %s must pin its version: %s", eventVariant, eventVersion)
+		}
+		variants[eventVariant]++
+	}
+	if variants["baseline"] == 0 || variants["canary"] == 0 {
+		t.Fatalf("both variants expected: %+v", variants)
+	}
+}
+
+// The 409 arm: the baseline variant LACKS the webhook node (only the
+// canary has it) — an event assigned to baseline cannot be redirected to
+// a version that can't serve it; the ingest answers 409
+// trigger_no_matching_node instead of guessing.
+func TestTriggerIngestAssignedVersionMissingNode(t *testing.T) {
+	h := newAPIHarness(t)
+	wfID := fmt.Sprintf("wf-ingest-miss-%d", time.Now().UnixNano())
+
+	plain := map[string]any{
+		"id": wfID, "name": "no hook",
+		"nodes": []any{map[string]any{"id": "shape", "type": "noop", "config": map[string]any{}}},
+		"edges": []any{},
+	}
+	res := h.call("POST", "/workflows/save", plain, "")
+	v1 := res.body["versionId"].(string)
+	res = h.call("POST", "/workflows/save", webhookWorkflow(wfID, "late.hook"), "")
+	v2 := res.body["versionId"].(string)
+	res = h.call("POST", "/workflows/"+wfID+"/rollout", map[string]any{
+		"baselineVersionId": v1, "canaryVersionId": v2,
+		"trafficPercent": 50, "minimumSampleSize": 100, "minimumSuccessRatePercent": 1,
+	}, "")
+	if res.status != 200 {
+		t.Fatalf("rollout: %d %+v", res.status, res.body)
+	}
+	saw409, saw200 := false, false
+	for i := range 40 {
+		res = h.call("POST", "/v1/webhooks/"+wfID, map[string]any{
+			"endpointKey": "late.hook", "eventId": fmt.Sprintf("evt-miss-%d", i),
+			"payload": map[string]any{},
+		}, "")
+		switch res.status {
+		case 409:
+			if res.body["error"].(map[string]any)["code"] != "trigger_no_matching_node" {
+				t.Fatalf("409 code: %+v", res.body)
+			}
+			saw409 = true
+		case 200:
+			saw200 = true
+		default:
+			t.Fatalf("unexpected status %d: %+v", res.status, res.body)
+		}
+		if saw409 && saw200 {
+			break
+		}
+	}
+	if !saw409 || !saw200 {
+		t.Fatalf("both arms expected at 50%%: 409=%v 200=%v", saw409, saw200)
+	}
+}

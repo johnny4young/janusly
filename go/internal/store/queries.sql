@@ -446,8 +446,9 @@ SELECT org_id, status, deleted_at FROM workflows WHERE id = $1;
 
 -- name: InsertTriggerEvent :execrows
 INSERT INTO trigger_events (id, org_id, trigger_type, workflow_id,
-                            workflow_version_id, node_id, status, dedupe_key, payload_json)
-VALUES ($1, $2, $3, $4, $5, $6, 'received', $7, $8)
+                            workflow_version_id, node_id, status, dedupe_key, payload_json,
+                            workflow_rollout_id, workflow_rollout_variant)
+VALUES ($1, $2, $3, $4, $5, $6, 'received', $7, $8, $9, $10)
 ON CONFLICT (org_id, dedupe_key) DO NOTHING;
 
 -- name: FindTriggerEventByDedupe :one
@@ -1181,7 +1182,8 @@ WHERE trigger_events.id IN (
   LIMIT sqlc.arg(page_limit)
   FOR UPDATE SKIP LOCKED
 )
-RETURNING trigger_events.id, trigger_events.node_id, trigger_events.payload_json, trigger_events.created_at;
+RETURNING trigger_events.id, trigger_events.node_id, trigger_events.payload_json, trigger_events.created_at,
+          trigger_events.workflow_version_id, trigger_events.workflow_rollout_id, trigger_events.workflow_rollout_variant;
 
 -- name: CountBufferedTriggerEvents :one
 SELECT count(*) FROM trigger_events te

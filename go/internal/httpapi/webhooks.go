@@ -109,6 +109,29 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 		return result
 	}
 
+	// ACCEPT-time rollout assignment: the durable event id is the
+	// assignment key, so the deployment choice is deterministic and
+	// captured on the event BEFORE the run exists (buffered events keep it
+	// for backfill). The trigger node must exist in the ASSIGNED version's
+	// snapshot — mutable deployment state never redirects an event to a
+	// version that cannot serve it.
+	triggerEventID := uuid.NewString()
+	effectiveVersionID := version.ID
+	var rolloutAssignment *engine.RolloutAssignment
+	if assignment, err := s.engine.ResolveWorkflowRolloutAssignment(ctx, rc.orgID, workflowID, triggerEventID); err == nil && assignment != nil {
+		exactNodeID, exactResult := matchWebhookNode(assignment.Workflow, endpointKey, opError(
+			http.StatusConflict, "trigger_no_matching_node",
+			"Assigned workflow version no longer contains the trigger node", nil))
+		if exactNodeID == "" || exactNodeID != nodeID {
+			return exactResult
+		}
+		wf = assignment.Workflow
+		effectiveVersionID = assignment.VersionID
+		rolloutAssignment = assignment
+	} else if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+	}
+
 	// Persist the replay anchor BEFORE the run, idempotent on the dedupe key.
 	eventPayload := map[string]any{
 		"endpointKey": endpointKey,
@@ -124,13 +147,19 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}
-	triggerEventID := uuid.NewString()
+	rolloutID, rolloutVariant := pgtype.Text{}, pgtype.Text{}
+	if rolloutAssignment != nil {
+		rolloutID = pgtype.Text{String: rolloutAssignment.Rollout.ID, Valid: true}
+		rolloutVariant = pgtype.Text{String: rolloutAssignment.Variant, Valid: true}
+	}
 	created, err := q.InsertTriggerEvent(ctx, store.InsertTriggerEventParams{
 		ID: triggerEventID, OrgID: rc.orgID, TriggerType: "webhook_received",
 		WorkflowID:        pgtype.Text{String: workflowID, Valid: true},
-		WorkflowVersionID: version.ID, NodeID: nodeID,
-		DedupeKey:   pgtype.Text{String: dedupeKey, Valid: true},
-		PayloadJson: payloadJSON,
+		WorkflowVersionID: effectiveVersionID, NodeID: nodeID,
+		DedupeKey:              pgtype.Text{String: dedupeKey, Valid: true},
+		PayloadJson:            payloadJSON,
+		WorkflowRolloutID:      rolloutID,
+		WorkflowRolloutVariant: rolloutVariant,
 	})
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
@@ -184,7 +213,7 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 	}
 	ratePerMin := executors.ResolveTriggerRateLimitPerMin(nodeConfig["rateLimitPerMin"])
 	if limitErr := s.limiter.Enforce(ctx, rc.orgID, ratelimit.Options{
-		Name:   "trigger." + version.ID + "." + nodeID,
+		Name:   "trigger." + effectiveVersionID + "." + nodeID,
 		Max:    ratePerMin,
 		Window: time.Minute,
 	}); limitErr != nil {
@@ -236,14 +265,19 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 			"Resolved workflow failed schema validation", nil)
 	}
 
-	runID, err := s.engine.StartRun(ctx, engine.StartInput{
-		OrgID: rc.orgID, Workflow: wf, WorkflowVersionID: version.ID,
+	ingestStart := engine.StartInput{
+		OrgID: rc.orgID, Workflow: wf, WorkflowVersionID: effectiveVersionID,
 		CreatedBy: rc.userID, TriggerEventID: triggerEventID,
 		Input: map[string]any{
 			"triggeredBy": "webhook_received", "triggerEventId": triggerEventID,
 			"event": eventPayload,
 		},
-	})
+	}
+	if rolloutAssignment != nil {
+		ingestStart.WorkflowRolloutID = rolloutAssignment.Rollout.ID
+		ingestStart.WorkflowRolloutVariant = rolloutAssignment.Variant
+	}
+	runID, err := s.engine.StartRun(ctx, ingestStart)
 	if err != nil {
 		var conflict *engine.TriggerEventStartConflictError
 		if errors.As(err, &conflict) {

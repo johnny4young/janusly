@@ -280,7 +280,8 @@ WHERE trigger_events.id IN (
   LIMIT $4
   FOR UPDATE SKIP LOCKED
 )
-RETURNING trigger_events.id, trigger_events.node_id, trigger_events.payload_json, trigger_events.created_at
+RETURNING trigger_events.id, trigger_events.node_id, trigger_events.payload_json, trigger_events.created_at,
+          trigger_events.workflow_version_id, trigger_events.workflow_rollout_id, trigger_events.workflow_rollout_variant
 `
 
 type ClaimBufferedTriggerEventsParams struct {
@@ -291,10 +292,13 @@ type ClaimBufferedTriggerEventsParams struct {
 }
 
 type ClaimBufferedTriggerEventsRow struct {
-	ID          string
-	NodeID      string
-	PayloadJson json.RawMessage
-	CreatedAt   *time.Time
+	ID                     string
+	NodeID                 string
+	PayloadJson            json.RawMessage
+	CreatedAt              *time.Time
+	WorkflowVersionID      string
+	WorkflowRolloutID      pgtype.Text
+	WorkflowRolloutVariant pgtype.Text
 }
 
 func (q *Queries) ClaimBufferedTriggerEvents(ctx context.Context, arg ClaimBufferedTriggerEventsParams) ([]ClaimBufferedTriggerEventsRow, error) {
@@ -316,6 +320,9 @@ func (q *Queries) ClaimBufferedTriggerEvents(ctx context.Context, arg ClaimBuffe
 			&i.NodeID,
 			&i.PayloadJson,
 			&i.CreatedAt,
+			&i.WorkflowVersionID,
+			&i.WorkflowRolloutID,
+			&i.WorkflowRolloutVariant,
 		); err != nil {
 			return nil, err
 		}
@@ -3259,20 +3266,23 @@ func (q *Queries) InsertRunNode(ctx context.Context, arg InsertRunNodeParams) er
 
 const insertTriggerEvent = `-- name: InsertTriggerEvent :execrows
 INSERT INTO trigger_events (id, org_id, trigger_type, workflow_id,
-                            workflow_version_id, node_id, status, dedupe_key, payload_json)
-VALUES ($1, $2, $3, $4, $5, $6, 'received', $7, $8)
+                            workflow_version_id, node_id, status, dedupe_key, payload_json,
+                            workflow_rollout_id, workflow_rollout_variant)
+VALUES ($1, $2, $3, $4, $5, $6, 'received', $7, $8, $9, $10)
 ON CONFLICT (org_id, dedupe_key) DO NOTHING
 `
 
 type InsertTriggerEventParams struct {
-	ID                string
-	OrgID             string
-	TriggerType       string
-	WorkflowID        pgtype.Text
-	WorkflowVersionID string
-	NodeID            string
-	DedupeKey         pgtype.Text
-	PayloadJson       json.RawMessage
+	ID                     string
+	OrgID                  string
+	TriggerType            string
+	WorkflowID             pgtype.Text
+	WorkflowVersionID      string
+	NodeID                 string
+	DedupeKey              pgtype.Text
+	PayloadJson            json.RawMessage
+	WorkflowRolloutID      pgtype.Text
+	WorkflowRolloutVariant pgtype.Text
 }
 
 func (q *Queries) InsertTriggerEvent(ctx context.Context, arg InsertTriggerEventParams) (int64, error) {
@@ -3285,6 +3295,8 @@ func (q *Queries) InsertTriggerEvent(ctx context.Context, arg InsertTriggerEvent
 		arg.NodeID,
 		arg.DedupeKey,
 		arg.PayloadJson,
+		arg.WorkflowRolloutID,
+		arg.WorkflowRolloutVariant,
 	)
 	if err != nil {
 		return 0, err

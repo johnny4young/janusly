@@ -262,10 +262,27 @@ func (e *Engine) backfillBufferedTriggerEvents(ctx context.Context, orgID, workf
 			"event":      envelope.Event,
 			"backfilled": true,
 		}
-		_, err := e.StartRun(ctx, StartInput{
-			OrgID: orgID, Workflow: wf, WorkflowVersionID: version.ID,
+		// A buffered event that captured a rollout assignment at ACCEPT
+		// time keeps it: the backfilled run executes the CAPTURED variant
+		// snapshot, never a version the mutable rollout points at today.
+		eventWorkflow, eventVersionID := wf, version.ID
+		start := StartInput{
+			OrgID: orgID, Workflow: eventWorkflow, WorkflowVersionID: eventVersionID,
 			Input: input, CreatedBy: userID, TriggerEventID: event.ID,
-		})
+		}
+		if event.WorkflowRolloutID.Valid && event.WorkflowRolloutVariant.Valid {
+			if captured, err := q.GetWorkflowVersionAnyWorkflow(ctx, store.GetWorkflowVersionAnyWorkflowParams{
+				ID: event.WorkflowVersionID, OrgID: orgID,
+			}); err == nil {
+				if capturedWf, _ := domain.Parse(captured.DagJson); capturedWf != nil {
+					start.Workflow = capturedWf
+					start.WorkflowVersionID = event.WorkflowVersionID
+					start.WorkflowRolloutID = event.WorkflowRolloutID.String
+					start.WorkflowRolloutVariant = event.WorkflowRolloutVariant.String
+				}
+			}
+		}
+		_, err := e.StartRun(ctx, start)
 		if err != nil {
 			var conflict *TriggerEventStartConflictError
 			if errors.As(err, &conflict) {
