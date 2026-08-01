@@ -2137,3 +2137,367 @@ decisión del timebox.
   T-166 depende de T-162; T-176 depende de T-175; T-177 usa el patrón de
   T-045.
 - T-183..T-187 son terminales: exigen TODO lo anterior verde.
+
+## 18. Ola 7 — Endurecimiento post-go/no-go: arquitectura, performance, cero-leaks, fases 4-5 y tests adversariales (T-500..T-535)
+
+Origen: backlog de mejora levantado 2026-08-01 tras el cierre de la ola 6
+(REPORT-W6 = GO). Numeración: la serie T-500 evita la colisión con la
+tabla de fases (T-201..T-400). Mismo protocolo por-ticket de siempre:
+partial → implementar → tests integration + `make lint` 0 ANTES de
+commit → done + fila §9 + JOURNAL + commit local, resumen en español.
+Prioridades: P0 = destraba cutover o confiabilidad; P1 = valor directo;
+P2 = oportunista.
+
+### Tabla de la ola
+
+| Ticket | Título | Tema | Prio | Estado |
+| --- | --- | --- | --- | --- |
+| T-500 | Version-id real en `/start` de guardados (mata la convención `workflow_version_id = workflowId`) | arquitectura | P0 | todo |
+| T-501 | Partir `v1.go` (1,304 líneas) en módulos: mounts / runs / workflows / encoding | arquitectura | P1 | todo |
+| T-502 | Partir `scim.go` (1,354 líneas): verificador / dispatcher / rutas | arquitectura | P1 | todo |
+| T-503 | Partir `queries.sql` (2,584 líneas) por contexto acotado (sqlc multi-archivo) | arquitectura | P1 | todo |
+| T-504 | Wiring OTel de trazas + poblar `runs.traceId` (cierra divergencia anotada) | arquitectura | P1 | todo |
+| T-505 | Alinear granularidad del event-stream (`node.queued`/`node.started` por nodo, paridad 9-eventos) | arquitectura | P0 | todo |
+| T-506 | LISTEN/NOTIFY como despertador primario del dispatcher (poll = fallback) | performance | P1 | todo |
+| T-507 | Barrido EXPLAIN de las ~120 queries de la ola 6 + índices faltantes (patrón two-file) | performance | P1 | todo |
+| T-508 | Perfil de allocs (pprof heap bajo bench) + optimizaciones dirigidas de `safePersist` | performance | P1 | todo |
+| T-509 | Batch de escrituras de `run_events` en la tx de completion | performance | P2 | todo |
+| T-510 | Fix cardinalidad de k6-soak (`name` tag) + re-corrida del soak 24h confiable | performance | P0 | todo |
+| T-511 | `goleak` en engine/httpapi + test de fuga de conexiones Postgres como gate | recursos | P0 | todo |
+| T-512 | `runner.Group` para los sweeps de `cmd/api`: shutdown ordenado + panic-recovery por sweep | recursos | P1 | todo |
+| T-513 | Tope GLOBAL de proceso para pools externos de db-tools (hoy solo 5/org) | recursos | P1 | todo |
+| T-514 | Superficies AI restantes: `/ai/explain-run`, `/ai/explain-workflow`, `/ai/review-workflow`, `/ai/suggest-improvement`, `/ai/health` | funcionalidad | P1 | todo |
+| T-515 | Auto-healing con propuestas LLM detrás del budget gate (hoy solo `harden_retries` determinista) | funcionalidad | P1 | todo |
+| T-516 | Billing: `/billing/budget`, `/billing/usage`, `GET/POST /workflows/{id}/budget` | funcionalidad | P1 | todo |
+| T-517 | Replay-lab: `POST /runs/replay-lab` + `/fork` | funcionalidad | P1 | todo |
+| T-518 | Recovery V2 reads: `/recovery/cases`, `/recovery/ledger`, `/recovery/my-wins` | funcionalidad | P1 | todo |
+| T-519 | Identidad restante: `GET /organizations`, `POST /users/me`, aceptación de invitación por página, `/plugins/install` | funcionalidad | P2 | todo |
+| T-520 | `POST /causal` (panel de razonamiento causal, sin LLM — siempre disponible) | funcionalidad | P2 | todo |
+| T-521 | Follow-ups P2 de T-164: driver S3 SigV4 real del object store + dialect HTML de `pdf.generate` | funcionalidad | P2 | todo |
+| T-522 | (T-104) `embed.FS` con el dist del web — un solo binario desplegable | funcionalidad | P2 | todo |
+| T-523 | `ARCHITECTURE.md`: 4 diagramas mermaid (ciclo de vida del run, secuencia subworkflow, mapa de módulos, ladder de claims) + ADRs cortos | docs | P1 | todo |
+| T-524 | Bookkeeping del PLAN: voltear a done los punteros stale de la tabla de fases (T-201..T-305, T-400 parciales) | docs | P2 | todo |
+| T-525 | Helper `route()` con gate obligatorio (mata ~500 líneas de boilerplate de mounts; montar sin gate = error de compilación) | refactor | P1 | todo |
+| T-526 | Partir `complete.go` (888 líneas): terminal-failure/DLQ/hook vs readiness/fan-in | refactor | P1 | todo |
+| T-527 | Vistas tipadas (structs con tags JSON) para los wires núcleo: runs, dlq, workflows | refactor | P1 | todo |
+| T-528 | `internal/webhooksig`: unificar los 5 verificadores de firma entrante (posturas por proveedor) | refactor | P1 | todo |
+| T-529 | DX: `make verify` (escalera completa) + `make seed` (org demo con workflows/runs/DLQ/incidentes) | utilidades | P1 | todo |
+| T-530 | CLI `janusly-admin`: redrive, resync de schedules, inspección de credenciales (los curls del runbook) | utilidades | P2 | todo |
+| T-531 | Caos de Postgres: `run-chaos.mjs` — kill de la base a mitad de completion tx, reconnect de pools, recuperación verificada | tests | P0 | todo |
+| T-532 | Cobertura con piso por paquete en `make ci` + unit tests para los 6 paquetes sin tests propios (orgconfig, objectstore, packs, prompts, contract, migrate) | tests | P1 | todo |
+| T-533 | Fuzzing de los parsers que comen input externo: cron propio, CloudEvents estricto, escritor PDF | tests | P0 | todo |
+| T-534 | Property tests de SCIM: secuencias aleatorias de eventos con timestamps desordenados vs invariantes | tests | P1 | todo |
+| T-535 | Bench de fallo parcial: upstream degradado + DLQ creciendo + breaker disparando, lecturas sin degradarse | tests | P1 | todo |
+
+### Especificaciones
+
+### T-500 · Version-id real en `/start` — P0
+**Espec:** al arrancar un workflow GUARDADO sin pin, resolver la fila de
+`workflow_versions` más reciente y estampar SU id en
+`runs.workflow_version_id` (como Node); los ad-hoc inline conservan la
+convención actual (id del doc). Migrar los consumidores de la "versión
+efectiva por conteo" (health signals, heatmap, delta, rollouts) a leer el
+join directo; conservar compatibilidad de lectura para las filas
+históricas (coalesce por convención vieja). Actualizar el corpus dual:
+la divergencia anotada de `runCount`/`lastRunStatus` debe DESAPARECER de
+la lista esperada.
+**Acepta:** [ ] runs de guardados joinean versión real · [ ] health/delta
+sin la derivación por conteo · [ ] dual-run: workflow-trash pasa a OK
+limpio · [ ] filas históricas siguen leyéndose bien.
+
+### T-501 · Partir `v1.go` — P1
+**Espec:** separar en `mounts.go` (NewV1Handler + orden de mounts),
+`runsroutes.go`, `workflowroutes.go`, `encoding.go` (opResult/writeers/
+helpers). CERO cambio de wire: el contract suite y el dual-run son el
+guard. Precedente: la modularización run-routes/ del reference.
+**Acepta:** [ ] ningún archivo httpapi >700 líneas por este código ·
+[ ] contract + dual verdes sin tocar expectativas.
+
+### T-502 · Partir `scim.go` — P1
+**Espec:** `scimverify.go` (firma + parsing del evento), `scimdispatch.go`
+(guardas + handlers por tipo), `scimroutes.go` (CRUD + resync + webhook).
+Sin cambio de comportamiento; la suite lifecycle es el guard.
+**Acepta:** [ ] 3 archivos <500 líneas · [ ] lifecycle + unit verdes.
+
+### T-503 · Partir `queries.sql` — P1
+**Espec:** sqlc acepta múltiples archivos: dividir por contexto
+(engine.sql, workflows.sql, recovery.sql, scim.sql, evals.sql,
+scheduler.sql, integraciones.sql, plataforma.sql). `make generate` debe
+producir EXACTAMENTE el mismo queries.sql.go (drift check del ci lo
+verifica solo).
+**Acepta:** [ ] generate sin drift · [ ] ningún archivo de queries >500
+líneas.
+
+### T-504 · OTel trazas + `runs.traceId` — P1
+**Espec:** tracer con Resource `service.name=janusly-go`; span raíz por
+run en StartRun (traceId estampado en la fila), spans hijos por nodo en
+el dispatcher; exporter console default / OTLP por env (espejo de la
+postura del reference). Quitar `traceId` de la lista de divergencias
+esperadas del comparador.
+**Acepta:** [ ] runs.traceId poblado · [ ] spans por nodo visibles ·
+[ ] dual-run: status/run/runs-list pierden esa divergencia esperada.
+
+### T-505 · Granularidad del event-stream — P0
+**Espec:** emitir `node.queued` en cada publicación ejecutable (la
+transición que hoy solo marca run_nodes) y `node.started` al reclamar,
+con los payloads del reference; el orden relativo run.started → queued →
+started → succeeded por nodo debe igualar al de Node en el corpus dual
+(caso status-linear pasa de 5 a 9 eventos y sale de la lista esperada).
+Cuidar el costo: ambos INSERT viajan en transacciones ya existentes.
+**Acepta:** [ ] 9 eventos en el run lineal de 2 nodos · [ ] dual-run OK
+limpio en status/run · [ ] bench sin regresión >10% en start p95.
+
+### T-506 · LISTEN/NOTIFY en el dispatcher — P1
+**Espec:** el claim loop duerme sobre `WaitForNotification` del canal que
+ya alimenta el hub SSE (payload = runId listo), con el poll actual como
+fallback (timeout = intervalo configurado). Compartir la conexión LISTEN
+del hub o una segunda hijackeada CON shutdown (lección T-185).
+**Acepta:** [ ] latencia de despacho p50 <10ms con poll de 1s ·
+[ ] failover ×3 sigue verde · [ ] goleak limpio.
+
+### T-507 · Barrido EXPLAIN de la ola 6 — P1
+**Espec:** test de integración que corre `EXPLAIN (FORMAT JSON)` sobre
+las queries calientes nuevas (SCIM state/mappings, heatmap 90d, health
+signals, eval examples, experiments, recovery debounce) contra datos
+sembrados realistas y FALLA ante Seq Scan en tablas grandes; añadir los
+índices que falten con el patrón two-file (migration + production-rollout).
+**Acepta:** [ ] cero seq-scans no justificados · [ ] índices nuevos con
+sus dos archivos · [ ] lista de queries exoneradas con razón.
+
+### T-508 · Perfil de allocs + `safePersist` — P1
+**Espec:** capturar pprof heap/allocs durante `make bench`, commitear el
+perfil como artefacto, y atacar los 3 hot-spots mayores (candidato
+conocido: `SafePersistPayload` re-serializa el árbol completo por
+evento — evaluar redacción en streaming o cache del marshal).
+**Acepta:** [ ] perfil commiteado con lectura en BENCH.md · [ ] ≥1
+optimización medida (allocs/op del hot path −20% o veredicto documentado
+de por qué no).
+
+### T-509 · Batch de eventos en completion — P2
+**Espec:** agrupar los INSERT de run_events de una misma transición
+(succeeded + readiness) en un multi-VALUES; mantener orden y payloads
+byte-idénticos (goldens + dual son el guard).
+**Acepta:** [ ] round-trips de la completion −N medidos · [ ] paridad
+verde.
+
+### T-510 · k6-soak confiable + re-soak 24h — P0
+**Espec:** en `k6-soak.js`, etiquetar requests con `name` fijo por
+escenario (jamás URLs con runId — hoy 800k series y k6 ~100MB); añadir
+`--no-thresholds --summary-trend-stats` mínimos; verificación de humo
+`SOAK_DURATION=3m`. Relanzar el soak de 24h en la base aislada y anexar
+el veredicto a REPORT-W6.
+**Acepta:** [ ] k6 RSS plano en corrida de 1h · [ ] soak 24h completo con
+veredicto en SOAK.md · [ ] REPORT-W6 actualizado.
+
+### T-511 · goleak + fuga de conexiones como gate — P0
+**Espec:** `goleak.VerifyTestMain` en engine y httpapi (allowlist mínima
+documentada por goroutine legítima de proceso); test de integración que
+levanta N=10 harnesses, los cierra, y asevera que `pg_stat_activity`
+vuelve al baseline (la clase de bug del hub LISTEN, convertida en CI).
+**Acepta:** [ ] goleak verde en ambos paquetes · [ ] test de baseline de
+conexiones en la suite · [ ] allowlist con razón por entrada.
+
+### T-512 · `runner.Group` de sweeps — P1
+**Espec:** los ~8 goroutines sueltos de cmd/api (reaper, upstream,
+schedule, healing, purge, reconcilers, hub) pasan a un grupo con: arranque
+nombrado, panic-recovery por sweep (log + restart con backoff, jamás caer
+el proceso), y shutdown ordenado en SIGTERM (drenar antes de cerrar pools).
+**Acepta:** [ ] panic inyectado en un sweep no mata el proceso y el sweep
+se reinicia · [ ] SIGTERM drena en orden · [ ] goleak sigue verde.
+
+### T-513 · Tope global de pools externos — P1
+**Espec:** además del cap 5/org de db-tools, un semáforo de PROCESO
+(default 25, env) sobre el total de conexiones externas; al tope, el
+tool responde `{ok:false, error:"db_pool_exhausted"}` never-throw.
+**Acepta:** [ ] 6 orgs × 5 pools respetan el tope global · [ ] sobre
+limpio al saturar · [ ] métrica gauge del uso.
+
+### T-514 · Superficies AI restantes — P1
+**Espec:** portar las 5 rutas con el contrato AI-fallback intacto
+(free_json default, degradación a `{mode:"fallback", aiError}`), presupuesto
+por el gate existente, y evidencia AI separada de la determinista (posturas
+de las olas 4-5). `/ai/health` = snapshot de configuración/presupuesto sin
+tocar proveedor. El web deja de degradar en esos botones.
+**Acepta:** [ ] 5 rutas con paridad de shape vs reference · [ ] $0 sin
+API key (fallback probado) · [ ] smoke del web con los botones vivos.
+
+### T-515 · Auto-healing con LLM — P1
+**Espec:** detrás del doble opt-in existente + budget gate: la propuesta
+puede venir del LLM (prompt con firma+contexto scrubbed, salida = el
+MISMO grammar de patch exacto de la ola 5) con `harden_retries` como
+fallback determinista; la validación sandbox y el ack de riesgo NO
+cambian (el LLM propone, jamás aplica).
+**Acepta:** [ ] propuesta LLM validada en sandbox · [ ] sin key → cae al
+determinista actual · [ ] presupuesto respetado con contador.
+
+### T-516 · Billing — P1
+**Espec:** `GET /billing/usage` (agregados de usage_events por mes/
+proveedor/modelo, acotado como Operations), `GET/POST /billing/budget`
+(org config existente `ai.budgetMonthlyUsd` + policy), y
+`GET/POST /workflows/{id}/budget` (tabla workflow_budgets del baseline;
+el gate compuesto org→workflow se consulta en GuardedGenerateText).
+**Acepta:** [ ] budget por workflow muerde antes que el de org ·
+[ ] paneles del web dejan de degradar · [ ] shapes vs reference.
+
+### T-517 · Replay-lab — P1
+**Espec:** `POST /runs/replay-lab` (re-ejecución sandbox de un run
+histórico con overrides de input) + `/fork` (variante con workflow
+editado), ambos `replayMode="validation"` SIEMPRE (write-sides
+saltados), linaje trace-only, audits replay_lab.* ya en catálogo.
+**Acepta:** [ ] replay jamás ejecuta write-sides · [ ] fork corre el doc
+editado sin tocar versiones · [ ] linaje visible en el detalle.
+
+### T-518 · Recovery V2 reads — P1
+**Espec:** proyecciones de lectura sobre las tablas ya existentes:
+`/recovery/cases` (casos durables con keyset), `/recovery/ledger`
+(impact events con ventana), `/recovery/my-wins` (atribución por
+usuario). Solo reads: cero autoridad nueva.
+**Acepta:** [ ] shapes vs reference · [ ] keyset con tope · [ ] Activity
+del web los consume sin degradar.
+
+### T-519 · Identidad restante — P2
+**Espec:** `GET /organizations` (memberships del caller),
+`POST /users/me` (perfil), página de aceptación de invitación
+(`POST /auth/invitations/accept` con el token de la invitación), y
+`POST /plugins/install` (stub honesto con audit, como Node).
+**Acepta:** [ ] switcher multi-org del web funciona · [ ] aceptación
+end-to-end con invitación real · [ ] shapes vs reference.
+
+### T-520 · `/causal` — P2
+**Espec:** portar el razonador causal determinista (sin LLM, siempre
+disponible) con su shape de respuesta.
+**Acepta:** [ ] paridad de shape · [ ] panel del web vivo.
+
+### T-521 · S3 SigV4 + HTML de pdf — P2
+**Espec:** driver S3-compatible real (SigV4 propio sobre FetchHTTPTarget,
+sin SDK) para el object store; dialect HTML de pdf.generate (subset
+seguro → bloques del escritor propio).
+**Acepta:** [ ] round-trip contra MinIO local · [ ] HTML subset
+renderiza; lo no soportado degrada visible.
+
+### T-522 · embed.FS del dist web — P2
+**Espec:** `go:embed` del build de Vite servido por el binario bajo un
+flag; SPA fallback a index.html; los assets con cache headers.
+**Acepta:** [ ] binario único sirve el web completo · [ ] smoke de tabs
+contra el binario embebido.
+
+### T-523 · ARCHITECTURE.md — P1
+**Espec:** un documento con 4 diagramas mermaid (ciclo de vida
+run/nodo con CAS points y reaper; secuencia subworkflow con checkpoint
+atómico y handoff; mapa de módulos internal/* con dependencias
+permitidas; claim ladder + due-clock) + ADRs de una página: due-clock vs
+BullMQ, sesgos zoned-window, orphan-tolerant, sweeps vs colas, serie
+T-500.
+**Acepta:** [ ] 4 diagramas renderizan · [ ] ADRs enlazados desde el
+README del pilot.
+
+### T-524 · Bookkeeping del PLAN — P2
+**Espec:** voltear a done/superseded los punteros stale de la tabla de
+fases (T-101/103/104, T-201..T-305, T-400) con nota de dónde se cumplió
+cada uno.
+**Acepta:** [ ] cero filas con estado engañoso.
+
+### T-525 · Helper `route()` — P1
+**Espec:** `route(mux, "GET /x", gate, core)` que registra en routeAuthz
+Y monta en un solo punto — montar sin gate deja de compilar; migrar los
+mounts existentes mecánicamente (el sweep de registry verifica que nada
+se perdió).
+**Acepta:** [ ] boilerplate −400 líneas · [ ] sweep completo verde ·
+[ ] imposible montar ruta gateada fuera del helper (lint rule o tipo).
+
+### T-526 · Partir `complete.go` — P1
+**Espec:** `terminalfailure.go` (DLQ + hook + serialize) y `readiness.go`
+(fan-in + enqueue) fuera de complete.go; cero cambio de SQL ni de
+transacciones (los tests de concurrencia son el guard).
+**Acepta:** [ ] archivos <500 líneas · [ ] suite engine + HA verdes.
+
+### T-527 · Vistas tipadas núcleo — P1
+**Espec:** structs con tags JSON para los wires de runs, dlq y workflows
+(las 3 superficies más consumidas), reemplazando los map[string]any de
+los handlers; el dual-run y el contract suite pinean que el wire no se
+movió ni un byte.
+**Acepta:** [ ] 3 superficies tipadas · [ ] dual 27/27 intacto ·
+[ ] typo de key = error de compilación (demostrado).
+
+### T-528 · `internal/webhooksig` — P1
+**Espec:** extraer el 80% común de los 5 verificadores (parse t=/v1=,
+tolerancia, constant-time, multi-candidato) con posturas por proveedor
+como config (formato del header, ventana, esquema HMAC); migrar WorkOS,
+external-runtime, PagerDuty y Slack; los tests existentes de cada uno
+son el guard.
+**Acepta:** [ ] 4 verificadores sobre el módulo común · [ ] matrices de
+firma existentes verdes sin tocar casos.
+
+### T-529 · `make verify` + `make seed` — P1
+**Espec:** `verify` = generate+drift → build → lint → unit → integration
+→ parity (para-en-el-primero, tiempos por etapa); `seed` = org demo
+determinista (workflows con schedule/subworkflow/triggers, runs verdes y
+fallidos, DLQ con firmas repetidas, incidentes, credenciales dummy).
+**Acepta:** [ ] verify de una orden · [ ] seed idempotente y el web se
+ve poblado.
+
+### T-530 · CLI `janusly-admin` — P2
+**Espec:** subcomandos redrive (por dead-letter o firma), schedules
+resync/list, credentials health, runs inspect — sobre las rutas
+existentes con service token (nunca SQL directo).
+**Acepta:** [ ] los curls del runbook tienen subcomando · [ ] --json
+para scripting.
+
+### T-531 · Caos de Postgres — P0
+**Espec:** `run-chaos.mjs`: tráfico sostenido → `docker stop` del
+Postgres a mitad de vuelo → verificar que el binario NO muere, los
+sobres degradan limpio, y al `docker start` los pools reconectan solos y
+TODOS los runs pre-caída llegan a terminal (reaper + due-clock + outbox
+reparan); ×3 corridas. Es el gemelo de run-failover con la base como
+víctima en vez de la réplica.
+**Acepta:** [ ] cero runs perdidos tras la caída · [ ] reconexión sin
+reinicio del proceso · [ ] exactly-once se sostiene · [ ] ×3.
+
+### T-532 · Cobertura con piso + 6 paquetes — P1
+**Espec:** `-coverprofile` en make ci con piso por paquete (arrancar en
+el valor actual, nunca bajar); unit tests reales para orgconfig
+(resolución en capas), objectstore (traversal + escalera), packs
+(validación de boot), prompts, contract y migrate (drift).
+**Acepta:** [ ] piso pineado en ci · [ ] los 6 paquetes con tests
+propios que fallan ante mutación obvia.
+
+### T-533 · Fuzzing de parsers — P0
+**Espec:** `go test -fuzz` corpus + lane acotada (30s por parser en ci,
+larga bajo demanda) para: el parser cron de 5 campos (jamás panic, jamás
+fecha imposible), el parser CloudEvents estricto (jamás aceptar campo
+desconocido, jamás panic con UTF-8 roto), y el escritor PDF (salida
+siempre PDF-válido o error limpio ante markdown hostil).
+**Acepta:** [ ] 3 fuzz targets con corpus semilla commiteado · [ ] lane
+en ci · [ ] hallazgos (si los hay) arreglados con su caso fijado.
+
+### T-534 · Property tests SCIM — P1
+**Espec:** generador de secuencias aleatorias de eventos SCIM
+(create/update/delete/group add-remove/group delete, timestamps
+desordenados, emails colisionantes) que tras CADA secuencia asevera las
+invariantes: jamás resurrección de inactivo con ts viejo, jamás clobber
+de fila human-invited, occurrence/join siempre consistentes, replay del
+mismo event-id = no-op. Semilla fija reproducible + shrinking manual del
+caso mínimo al fallar.
+**Acepta:** [ ] ≥200 secuencias por corrida en ci · [ ] invariantes
+formuladas como funciones puras reutilizables · [ ] caso mínimo impreso
+al fallar.
+
+### T-535 · Bench de fallo parcial — P1
+**Espec:** escenario k6 "mundo hostil": upstream degradado pausando
+workflows + DLQ recibiendo fallos continuos + breaker disparando, y
+MEDIR que las lecturas (runs/dlq/health) mantienen p95 <2× el baseline
+sano; el resultado entra a BENCH.md como escenario permanente.
+**Acepta:** [ ] p95 de lecturas acotado bajo caos · [ ] escenario en
+make bench · [ ] regresiones futuras visibles en la serie.
+
+### Dependencias de la ola
+
+- T-500 antes de tocar el corpus dual (T-505 lo edita también — coordinar
+  la lista de divergencias esperadas en un solo commit cada vez).
+- T-511 y T-512 antes de T-506 (el despertador nuevo nace con goleak y
+  shutdown ordenado como red).
+- T-525 (helper route) antes de T-514/T-516/T-517/T-518/T-519/T-520 (las
+  rutas nuevas nacen con el patrón nuevo, no migradas después).
+- T-510 (k6 confiable) antes de T-535 (el bench hostil usa el mismo k6).
+- T-503 (queries multi-archivo) antes de T-507 (el barrido EXPLAIN anota
+  por archivo de contexto).
