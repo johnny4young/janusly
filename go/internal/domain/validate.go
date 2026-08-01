@@ -76,7 +76,7 @@ var PilotNodeTypes = map[string]bool{
 	"parallel_fork": true, "join": true, "loop": true, "webhook_received": true,
 	"ai": true, "agent": true, "multi_agent": true, "mcp_tool": true,
 	"pagerduty_incident": true, "email_received": true, "file_dropped": true,
-	"mcp_server_event": true,
+	"mcp_server_event": true, "subworkflow": true,
 }
 
 // inputsScopePattern flags inputs.* references on edge conditions after

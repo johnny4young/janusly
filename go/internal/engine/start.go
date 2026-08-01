@@ -83,6 +83,11 @@ type StartInput struct {
 	ParentRunID    string
 	ParentNodeID   string
 	ParentLinkKind string
+	// ParentCheckpoint, when set, commits the parent subworkflow node's
+	// exact running→waiting checkpoint plus both parent events INSIDE this
+	// start transaction — the child's roots become claimable only together
+	// with the parent's pause.
+	ParentCheckpoint *ParentCheckpoint
 	// Rollout assignment captured AT START — the durable deployment choice
 	// (variant + rollout id) rides the run row and the run.started event so
 	// outcome receipts and audits read the frozen assignment, never a
@@ -235,6 +240,12 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		CreatedAt: &startedAt,
 	}); err != nil {
 		return "", fmt.Errorf("insert run.started: %w", err)
+	}
+
+	if in.ParentCheckpoint != nil {
+		if err := e.commitParentCheckpoint(ctx, q, in.ParentCheckpoint, runID); err != nil {
+			return "", err
+		}
 	}
 
 	if err := q.NotifyWake(ctx, runID); err != nil {

@@ -65,10 +65,11 @@ func TestValidateRouteAndPlannerProjection(t *testing.T) {
 	}
 
 	// 4. /validate reports the FULL issue list — no pilot carve-out here
-	// (an unsupported-for-pilot node type still surfaces).
+	// (an unsupported-for-pilot node type still surfaces; subworkflow
+	// became executable in T-175, so `schedule` carries the carve-out now).
 	res = h.call("POST", "/validate", map[string]any{
 		"id": "wf-full", "name": "Full", "dslVersion": "1.0",
-		"nodes": []any{map[string]any{"id": "c", "type": "subworkflow", "config": map[string]any{}}},
+		"nodes": []any{map[string]any{"id": "c", "type": "schedule", "config": map[string]any{}}},
 		"edges": []any{},
 	}, "")
 	if !strings.Contains(strings.Join(issueCodes(res), ","), "node_type_unsupported_pilot") {

@@ -236,7 +236,12 @@ WHERE run_id = sqlc.arg(run_id)
   AND status IN ('pending', 'queued', 'waiting');
 
 -- name: MarkRunTerminalFromRunning :execrows
-UPDATE runs SET status = sqlc.arg(status), output_json = sqlc.arg(output_json)
+UPDATE runs SET status = sqlc.arg(status), output_json = sqlc.arg(output_json),
+    parent_notification_after = CASE
+      WHEN parent_run_id IS NOT NULL AND parent_node_id IS NOT NULL
+           AND (parent_link_kind = 'subworkflow'
+                OR (parent_link_kind IS NULL AND replay_mode IS NULL))
+      THEN now() ELSE parent_notification_after END
 WHERE id = sqlc.arg(id) AND status = 'running';
 
 -- name: MarkRunNodeWaiting :execrows
@@ -1934,3 +1939,59 @@ UPDATE workflows
 SET status = 'active', paused_reason = NULL
 WHERE org_id = $1 AND id = ANY($2::text[]) AND status = 'paused_upstream_degraded'
 RETURNING id;
+
+-- name: GetWorkflowVersionByNumber :one
+SELECT wv.id, wv.dag_json, wv.version
+FROM workflow_versions wv
+JOIN workflows w ON w.id = wv.workflow_id AND w.org_id = wv.org_id
+WHERE wv.workflow_id = $1 AND wv.org_id = $2 AND wv.version = $3
+  AND w.deleted_at IS NULL;
+
+-- name: GetRunParentLink :one
+SELECT id, org_id, status, parent_run_id, parent_node_id, parent_link_kind,
+       replay_mode, output_json, parent_notification_after
+FROM runs WHERE id = $1;
+
+-- name: MarkWaitingSubworkflowSucceeded :execrows
+UPDATE run_nodes
+SET status = 'succeeded', state_json = sqlc.arg(state_json),
+    finished_at = sqlc.arg(finished_at)
+WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
+  AND status = 'waiting'
+  AND state_json -> 'waiting' ->> 'childRunId' = sqlc.arg(child_run_id)::text;
+
+-- name: MarkWaitingSubworkflowFailed :execrows
+UPDATE run_nodes
+SET status = 'failed', error_json = sqlc.arg(error_json),
+    finished_at = sqlc.arg(finished_at)
+WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
+  AND status = 'waiting'
+  AND state_json -> 'waiting' ->> 'childRunId' = sqlc.arg(child_run_id)::text;
+
+-- name: GetRunNodeSnapshot :one
+SELECT status, state_json, error_json
+FROM run_nodes
+WHERE run_id = $1 AND node_id = $2;
+
+-- name: GetFirstFailedRunNode :one
+SELECT node_id, error_json
+FROM run_nodes
+WHERE run_id = $1 AND status = 'failed'
+ORDER BY finished_at ASC NULLS LAST, node_id ASC
+LIMIT 1;
+
+-- name: ClaimDueParentNotifications :many
+UPDATE runs SET parent_notification_after = sqlc.arg(lease_until)
+WHERE id IN (
+  SELECT due.id FROM runs AS due
+  WHERE due.parent_notification_after <= sqlc.arg(now)
+    AND due.status IN ('succeeded', 'failed', 'cancelled', 'timed_out')
+  ORDER BY due.parent_notification_after
+  LIMIT sqlc.arg(row_limit)
+  FOR UPDATE SKIP LOCKED
+)
+RETURNING id, status;
+
+-- name: ClearParentNotification :exec
+UPDATE runs SET parent_notification_after = NULL
+WHERE id = $1 AND status = $2;

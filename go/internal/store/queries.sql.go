@@ -356,6 +356,50 @@ func (q *Queries) ClaimDeadLetterReplay(ctx context.Context, arg ClaimDeadLetter
 	return result.RowsAffected(), nil
 }
 
+const claimDueParentNotifications = `-- name: ClaimDueParentNotifications :many
+UPDATE runs SET parent_notification_after = $1
+WHERE id IN (
+  SELECT due.id FROM runs AS due
+  WHERE due.parent_notification_after <= $2
+    AND due.status IN ('succeeded', 'failed', 'cancelled', 'timed_out')
+  ORDER BY due.parent_notification_after
+  LIMIT $3
+  FOR UPDATE SKIP LOCKED
+)
+RETURNING id, status
+`
+
+type ClaimDueParentNotificationsParams struct {
+	LeaseUntil *time.Time
+	Now        *time.Time
+	RowLimit   int32
+}
+
+type ClaimDueParentNotificationsRow struct {
+	ID     string
+	Status string
+}
+
+func (q *Queries) ClaimDueParentNotifications(ctx context.Context, arg ClaimDueParentNotificationsParams) ([]ClaimDueParentNotificationsRow, error) {
+	rows, err := q.db.Query(ctx, claimDueParentNotifications, arg.LeaseUntil, arg.Now, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ClaimDueParentNotificationsRow
+	for rows.Next() {
+		var i ClaimDueParentNotificationsRow
+		if err := rows.Scan(&i.ID, &i.Status); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const claimDueReplayCampaign = `-- name: ClaimDueReplayCampaign :one
 UPDATE replay_campaigns
 SET next_dispatch_at = now() + make_interval(secs => pacing_ms / 1000.0),
@@ -494,6 +538,21 @@ func (q *Queries) CleanupExpiredRateWindows(ctx context.Context) (int64, error) 
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const clearParentNotification = `-- name: ClearParentNotification :exec
+UPDATE runs SET parent_notification_after = NULL
+WHERE id = $1 AND status = $2
+`
+
+type ClearParentNotificationParams struct {
+	ID     string
+	Status string
+}
+
+func (q *Queries) ClearParentNotification(ctx context.Context, arg ClearParentNotificationParams) error {
+	_, err := q.db.Exec(ctx, clearParentNotification, arg.ID, arg.Status)
+	return err
 }
 
 const completeReplayCampaignIfExhausted = `-- name: CompleteReplayCampaignIfExhausted :one
@@ -1857,6 +1916,26 @@ func (q *Queries) GetExternalRuntimeEventReceipt(ctx context.Context, arg GetExt
 	return i, err
 }
 
+const getFirstFailedRunNode = `-- name: GetFirstFailedRunNode :one
+SELECT node_id, error_json
+FROM run_nodes
+WHERE run_id = $1 AND status = 'failed'
+ORDER BY finished_at ASC NULLS LAST, node_id ASC
+LIMIT 1
+`
+
+type GetFirstFailedRunNodeRow struct {
+	NodeID    string
+	ErrorJson json.RawMessage
+}
+
+func (q *Queries) GetFirstFailedRunNode(ctx context.Context, runID string) (GetFirstFailedRunNodeRow, error) {
+	row := q.db.QueryRow(ctx, getFirstFailedRunNode, runID)
+	var i GetFirstFailedRunNodeRow
+	err := row.Scan(&i.NodeID, &i.ErrorJson)
+	return i, err
+}
+
 const getLatestPublishedPromptVersion = `-- name: GetLatestPublishedPromptVersion :one
 SELECT id, org_id, prompt_id, version, template_text, variables, status, created_by, created_at FROM prompt_versions
 WHERE org_id = $1 AND prompt_id = $2 AND status = 'published'
@@ -2573,6 +2652,30 @@ func (q *Queries) GetRunNodeRecoveryClaim(ctx context.Context, arg GetRunNodeRec
 	return i, err
 }
 
+const getRunNodeSnapshot = `-- name: GetRunNodeSnapshot :one
+SELECT status, state_json, error_json
+FROM run_nodes
+WHERE run_id = $1 AND node_id = $2
+`
+
+type GetRunNodeSnapshotParams struct {
+	RunID  string
+	NodeID string
+}
+
+type GetRunNodeSnapshotRow struct {
+	Status    string
+	StateJson json.RawMessage
+	ErrorJson json.RawMessage
+}
+
+func (q *Queries) GetRunNodeSnapshot(ctx context.Context, arg GetRunNodeSnapshotParams) (GetRunNodeSnapshotRow, error) {
+	row := q.db.QueryRow(ctx, getRunNodeSnapshot, arg.RunID, arg.NodeID)
+	var i GetRunNodeSnapshotRow
+	err := row.Scan(&i.Status, &i.StateJson, &i.ErrorJson)
+	return i, err
+}
+
 const getRunOwner = `-- name: GetRunOwner :one
 SELECT org_id, status FROM runs WHERE id = $1
 `
@@ -2586,6 +2689,41 @@ func (q *Queries) GetRunOwner(ctx context.Context, id string) (GetRunOwnerRow, e
 	row := q.db.QueryRow(ctx, getRunOwner, id)
 	var i GetRunOwnerRow
 	err := row.Scan(&i.OrgID, &i.Status)
+	return i, err
+}
+
+const getRunParentLink = `-- name: GetRunParentLink :one
+SELECT id, org_id, status, parent_run_id, parent_node_id, parent_link_kind,
+       replay_mode, output_json, parent_notification_after
+FROM runs WHERE id = $1
+`
+
+type GetRunParentLinkRow struct {
+	ID                      string
+	OrgID                   string
+	Status                  string
+	ParentRunID             pgtype.Text
+	ParentNodeID            pgtype.Text
+	ParentLinkKind          pgtype.Text
+	ReplayMode              pgtype.Text
+	OutputJson              json.RawMessage
+	ParentNotificationAfter *time.Time
+}
+
+func (q *Queries) GetRunParentLink(ctx context.Context, id string) (GetRunParentLinkRow, error) {
+	row := q.db.QueryRow(ctx, getRunParentLink, id)
+	var i GetRunParentLinkRow
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Status,
+		&i.ParentRunID,
+		&i.ParentNodeID,
+		&i.ParentLinkKind,
+		&i.ReplayMode,
+		&i.OutputJson,
+		&i.ParentNotificationAfter,
+	)
 	return i, err
 }
 
@@ -2937,6 +3075,33 @@ func (q *Queries) GetWorkflowVersionByID(ctx context.Context, arg GetWorkflowVer
 		&i.CreatedBy,
 		&i.CreatedAt,
 	)
+	return i, err
+}
+
+const getWorkflowVersionByNumber = `-- name: GetWorkflowVersionByNumber :one
+SELECT wv.id, wv.dag_json, wv.version
+FROM workflow_versions wv
+JOIN workflows w ON w.id = wv.workflow_id AND w.org_id = wv.org_id
+WHERE wv.workflow_id = $1 AND wv.org_id = $2 AND wv.version = $3
+  AND w.deleted_at IS NULL
+`
+
+type GetWorkflowVersionByNumberParams struct {
+	WorkflowID string
+	OrgID      string
+	Version    int32
+}
+
+type GetWorkflowVersionByNumberRow struct {
+	ID      string
+	DagJson json.RawMessage
+	Version int32
+}
+
+func (q *Queries) GetWorkflowVersionByNumber(ctx context.Context, arg GetWorkflowVersionByNumberParams) (GetWorkflowVersionByNumberRow, error) {
+	row := q.db.QueryRow(ctx, getWorkflowVersionByNumber, arg.WorkflowID, arg.OrgID, arg.Version)
+	var i GetWorkflowVersionByNumberRow
+	err := row.Scan(&i.ID, &i.DagJson, &i.Version)
 	return i, err
 }
 
@@ -7052,7 +7217,12 @@ func (q *Queries) MarkRunNodeWaiting(ctx context.Context, arg MarkRunNodeWaiting
 }
 
 const markRunTerminalFromRunning = `-- name: MarkRunTerminalFromRunning :execrows
-UPDATE runs SET status = $1, output_json = $2
+UPDATE runs SET status = $1, output_json = $2,
+    parent_notification_after = CASE
+      WHEN parent_run_id IS NOT NULL AND parent_node_id IS NOT NULL
+           AND (parent_link_kind = 'subworkflow'
+                OR (parent_link_kind IS NULL AND replay_mode IS NULL))
+      THEN now() ELSE parent_notification_after END
 WHERE id = $3 AND status = 'running'
 `
 
@@ -7122,6 +7292,68 @@ func (q *Queries) MarkWaitingNodeSucceeded(ctx context.Context, arg MarkWaitingN
 	var id string
 	err := row.Scan(&id)
 	return id, err
+}
+
+const markWaitingSubworkflowFailed = `-- name: MarkWaitingSubworkflowFailed :execrows
+UPDATE run_nodes
+SET status = 'failed', error_json = $1,
+    finished_at = $2
+WHERE run_id = $3 AND node_id = $4
+  AND status = 'waiting'
+  AND state_json -> 'waiting' ->> 'childRunId' = $5::text
+`
+
+type MarkWaitingSubworkflowFailedParams struct {
+	ErrorJson  json.RawMessage
+	FinishedAt *time.Time
+	RunID      string
+	NodeID     string
+	ChildRunID string
+}
+
+func (q *Queries) MarkWaitingSubworkflowFailed(ctx context.Context, arg MarkWaitingSubworkflowFailedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markWaitingSubworkflowFailed,
+		arg.ErrorJson,
+		arg.FinishedAt,
+		arg.RunID,
+		arg.NodeID,
+		arg.ChildRunID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const markWaitingSubworkflowSucceeded = `-- name: MarkWaitingSubworkflowSucceeded :execrows
+UPDATE run_nodes
+SET status = 'succeeded', state_json = $1,
+    finished_at = $2
+WHERE run_id = $3 AND node_id = $4
+  AND status = 'waiting'
+  AND state_json -> 'waiting' ->> 'childRunId' = $5::text
+`
+
+type MarkWaitingSubworkflowSucceededParams struct {
+	StateJson  json.RawMessage
+	FinishedAt *time.Time
+	RunID      string
+	NodeID     string
+	ChildRunID string
+}
+
+func (q *Queries) MarkWaitingSubworkflowSucceeded(ctx context.Context, arg MarkWaitingSubworkflowSucceededParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markWaitingSubworkflowSucceeded,
+		arg.StateJson,
+		arg.FinishedAt,
+		arg.RunID,
+		arg.NodeID,
+		arg.ChildRunID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const maxPlaybookVersion = `-- name: MaxPlaybookVersion :one

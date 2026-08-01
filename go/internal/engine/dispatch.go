@@ -98,13 +98,23 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 		}
 	}
 
-	execute, ok := d.registry[node.Type]
-	if !ok {
-		return nil, fmt.Errorf("No executor for node type: %s", node.Type) //nolint:staticcheck // reference message is the wire contract
-	}
 	renderedConfig, _ := rendered.Rendered.(map[string]any)
 	if renderedConfig == nil {
 		renderedConfig = map[string]any{}
+	}
+	// The subworkflow node needs the engine (atomic child start + parent
+	// checkpoint), so it dispatches here instead of the executors map.
+	if node.Type == "subworkflow" {
+		replayMode := ""
+		if run, err := q.GetRunExecution(ctx, claim.RunID); err == nil && run.ReplayMode.Valid {
+			replayMode = run.ReplayMode.String
+		}
+		return d.engine.executeSubworkflowNode(ctx, claim, renderedConfig,
+			map[string]any{"input": runContext["input"]}, replayMode, rendered.RedactedValues)
+	}
+	execute, ok := d.registry[node.Type]
+	if !ok {
+		return nil, fmt.Errorf("No executor for node type: %s", node.Type) //nolint:staticcheck // reference message is the wire contract
 	}
 	var httpBounds *executors.HTTPBounds
 	if node.Type == "http" {

@@ -136,6 +136,9 @@ func run() error {
 	go func() {
 		upstream.RunSweep(workerCtx, pool, time.Minute, logger)
 	}()
+	go func() {
+		eng.RunSubworkflowTerminalReconciler(workerCtx, time.Minute, logger)
+	}()
 	go eng.StartReaper(workerCtx, time.Minute, time.Hour, logger)
 	defer func() { stopWorkers(); <-workersDone }()
 

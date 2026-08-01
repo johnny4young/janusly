@@ -165,6 +165,9 @@ func (e *Engine) executeClaim(ctx context.Context, claim ClaimedNode, execute Ex
 		if err := e.RetryOrFail(ctx, claim, *node, execErr); err != nil {
 			logger.Error("retry-or-fail failed", "runId", claim.RunID, "nodeId", claim.NodeID, "error", err)
 		}
+		// A failure may have flipped the run terminal — deliver any armed
+		// parent handoff immediately (the reconciler covers crashes).
+		e.DeliverParentNotifications(ctx, claim.RunID)
 		return
 	}
 	if waiting, ok := output.(executors.Waiting); ok {
@@ -176,6 +179,7 @@ func (e *Engine) executeClaim(ctx context.Context, claim ClaimedNode, execute Ex
 	if err := e.CompleteNode(ctx, claim, output); err != nil {
 		logger.Error("complete node failed", "runId", claim.RunID, "nodeId", claim.NodeID, "error", err)
 	}
+	e.DeliverParentNotifications(ctx, claim.RunID)
 }
 
 // runExecutor isolates executor panics so one broken node can't take the
