@@ -53,6 +53,13 @@ func TestMcpToolNodeThroughRun(t *testing.T) {
 			}}, nil, nil
 		})
 	fixture := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil))
+	// goleak (T-511): the client's session.Close leaves the SDK server's
+	// per-session jsonrpc2 readers alive — drain them explicitly.
+	t.Cleanup(func() {
+		for session := range server.Sessions() {
+			_ = session.Close()
+		}
+	})
 	defer fixture.Close()
 
 	connID := uuid.NewString()
