@@ -1921,3 +1921,20 @@ funcionando (es net-zero sobre el total). El sentinel viaja literal por
 `janusly_go_db_tool_pools` para el dashboard. El test llena el cap exacto
 con 2×5, prueba el rechazo limpio del 11°, la supervivencia de los pools
 calientes, el swap net-zero y la recuperación tras reset.
+
+## T-515 — Propuestas LLM en auto-healing (2026-08-01)
+
+El primer intento agregó un tercer knob (`autoHealing.llmProposals`) y los
+tests de paridad lo tumbaron de inmediato: el catálogo org-config está
+pinneado en las 69 definiciones del reference. Releer el spec resolvió el
+dilema — nunca pidió un knob nuevo: el doble opt-in existente + el budget
+gate SON los controles, y sin clave de proveedor el sweep queda en su
+postura $0 de siempre. `llmHealingPatch` arma un prompt DATA-framed con
+contexto scrubbed (firma normalizada, error y nodo redactados), exige el
+mismo grammar no-estructural de la ola 5 (`patchedConfig` completo +
+confidence) y solo acepta la sugerencia si el snapshot parcheado pasa el
+mismo validador de las superficies interactivas. Toda degradación cae a
+`harden_retries`, y el flujo aguas abajo (sandbox, watcher, risk-ack) no
+cambió ni una línea: el LLM propone, jamás aplica. El test de presupuesto
+usa un server-trampa que falla el test si el proveedor recibe una sola
+llamada con el budget bloqueado.
