@@ -1702,3 +1702,6 @@ producción necesita saber — de lo ya resuelto o informativo.
 - Ocho fixtures nuevas con verbos implementados en AMBOS drivers (gen-goldens.mjs para capturar del stack de referencia aislado; el harness Go para verificar): validación write-skip, breaker pausa/buffer/resume/backfill, observe/quarantine semánticos, rollout promovido/rolled-back sirviendo el snapshot correcto, y cluster-apply sanando el run con el fix.
 - La captura destapó dos exigencias del schema Zod de referencia que el port Go toleraba: `contract.effects` es clave REQUERIDA (aunque vacía) y `failure.technical.stalledNode` es booleano requerido — las fixtures ahora los llevan y ambos backends los aceptan.
 - Paridad Go 26/26 al PRIMER intento con la tabla de divergencias aceptadas VACÍA, y ×3 corridas idénticas. El golden de playbook queda diferido honesto (el loop está probado en Go por T-139; el golden cross-backend exigiría 6+ verbos más en ambos drivers).
+
+## T-158 · REPORT-W5 (2026-07-31)
+- Cierre de la ola 5: 30/30 tickets, 160/160 acumulados. El informe recoge los números (26 paquetes -race, paridad 26/26 ×3 con divergencias vacías, 5/5 smokes, matriz 28/28), las cuatro decisiones de diseño que valen conocer, y la lista completa de diferidos con su ola de destino.
