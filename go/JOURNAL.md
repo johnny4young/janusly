@@ -1693,3 +1693,7 @@ producción necesita saber — de lo ya resuelto o informativo.
 - Quinto smoke real contra Go: la ruta experta oculta (activeTab=recover) monta la cola de recuperación de verdad — el primer intento falló EXACTAMENTE como debía: el filtro Show=Open por defecto oculta la fila replayed, y el spec ahora prueba ese contrato (ampliar a All la revela).
 - Búsqueda server-side que estrecha a una fila por runId, drawer abierto por el badge del incidente con acknowledge verificado por wire, y bulk replay por el multi-select real sanando dos runs contra el upstream curable del spec. 5/5 verdes.
 - Gap conocido y honesto: el diálogo de cluster-apply (RecoveryDialog en modo cluster) no se conduce por UI en este smoke — la superficie está probada por wire (T-144) y el diálogo AI tiene su smoke de la ola 4; va al REPORT.
+
+## T-156 · Matriz de fallos de recovery (2026-07-31)
+- `internal/recovery/failmatrix`: el catálogo único de 28 casos hostiles en 5 superficies (replay, cluster-apply, validate-fix, items, queue) — cada caso fija status + código exactos o el sobre de éxito parcial. stdlib-only, sin ciclos, para que cualquier suite y el seeder lo importen.
+- La regla del proyecto (feedback de olas previas) queda cumplida para recovery igual que para AI: un modo de fallo nuevo es UNA entrada en el catálogo y aterriza en todas las superficies consumidoras; nada de exemplares sueltos de una-sola-URL-mala.
