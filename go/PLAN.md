@@ -197,8 +197,8 @@ crítica) · P1 (importante) · P2 (stretch).
 | T-301 | (F2) AI surfaces completas con contrato AI-fallback | P0 | done (ola 4 completa) |
 | T-302 | (F2) triggers/webhooks firmados + scheduler + crons system | P0 | partial (webhooks done ola 3; email/file/mcp → T-168/T-169; scheduler+crons → T-177..T-179) |
 | T-303 | (F2) los 26 tipos de nodo + gramáticas completas (paridad total) | P0 | partial (faltan subworkflow/schedule/loop-for_each/triggers → ola 6 T-174..T-177) |
-| T-304 | (F2) Secret Store/HMAC/memoria/MCP/SCIM/rate limits/i18n server-events/permisos completos | P0 | partial (HMAC/memoria/MCP/rate/permisos done olas 3-4; Secret Store → T-159/T-160; SCIM SIN ticket en ninguna ola — gap del plan) |
-| T-305 | (F2) rollouts canary + import packs + upstream + experiments | P1 | partial (rollouts done ola 5; packs → T-180; upstream → T-171; experiments SIN ticket — gap del plan) |
+| T-304 | (F2) Secret Store/HMAC/memoria/MCP/SCIM/rate limits/i18n server-events/permisos completos | P0 | partial (HMAC/memoria/MCP/rate/permisos done olas 3-4; Secret Store → T-159/T-160; SCIM → ola 6 T-191..T-194) |
+| T-305 | (F2) rollouts canary + import packs + upstream + experiments | P1 | partial (rollouts done ola 5; packs → T-180; upstream → T-171; experiments → ola 6 T-189/T-190) |
 | T-400 | (F3) Playwright completo + browser + perf budgets verdes contra Go | P0 | todo (la lane completa excede los 5 smokes; parte vive en ola 6 T-183/T-185) |
 | T-401 | (F3) saldo de diferidos §9 + plan de corte y reversa | P0 | todo → ola 6 T-187 |
 
@@ -770,6 +770,7 @@ el chat publicado.
 | 2026-07-31 | sync ola-4 | Pin actualizado a develop@103be9e8 (12 commits). DOS migraciones drizzle nuevas espejadas como goose 00003 (índices keyset compuestos de listas) + 00004 (sweep NULLS FIRST — el hallazgo del memory de drizzle, ahora en la referencia); aplicadas al DB dev. `usage_events` NO entró en el sweep (el `NULLS LAST` de ListRunUsageSlice sigue correcto) y el lector de audit ya usaba DESC plano — alineado con el índice nuevo sin cambios. Cambios de `v1 contracts split by domain` + `typed executor dispatch` + `scripted-node testkit` de Node anotados como INSUMO de la ola 4. Merge limpio; suite 17 paquetes + lint verdes post-merge |
 | 2026-07-31 | sync ola-5 | Pin actualizado a develop@dfde6a31 (3 commits, refactors puros: split del catálogo/dispatch MCP, split de persistencia del engine por lifecycle, split del schema db por dominio). CERO migraciones drizzle nuevas → sin espejo goose (la promesa "refactor puro no genera migración" se cumplió). Merge limpio; build Go verde post-merge. Los splits de la referencia son INSUMO de lectura para la ola 5 (persistence-ports/run.ts etc. ya están en su layout final) |
 | 2026-07-31 | sync ola-6 | Pin actualizado a develop@7f0e286b (3 commits, refactors puros: split de run-routes por responsabilidad, split de recovery-metrics del data layer, split de integration-tools por proveedor). CERO migraciones drizzle nuevas → sin espejo goose. Merge limpio; build Go + paridad 26/26 verdes post-merge (un FAIL transitorio no reproducido ×4 — segundo avistamiento del flake, anotado). Los splits de integration-tooling/{slack,pagerduty,webhook}.ts son INSUMO directo de la ola 6 de integraciones |
+| 2026-07-31 | dirección estratégica | Johnny decide incluir TODO en el alcance (SCIM T-191..T-194 + experiments T-189/T-190): la convicción es que el futuro del proyecto es Go — el pilot deja de ser solo una puerta go/no-go y pasa a ser la base de código definitiva para abandonar Node. El mapa strangler (T-184) pierde las exclusiones permanentes: responde cuándo migra cada ruta, no si migra. Ola 6 queda en 35 tickets (T-159..T-194) |
 | 2026-07-31 | T-099 LlmClient | `internal/ai.Client` sobre anthropic-sdk-go v1.61 con el contrato sagrado EN la frontera: cualquier fallo del SDK → `*AIError` clasificado (no_client/auth/rate_limit/overloaded/timeout/network/invalid_request/unknown), mensajes acotados a 500 bytes, y un `recover` diferido como última línea — ni un pánico del SDK llega al caller. Interfaz neutral de proveedor; hint `"<provider>/<modelo>"` con proveedor ajeno → invalid_request sin marcar. Matriz probada contra servidor falso (401/403/429/529/500/400/timeout/endpoint muerto/sin clave) + shape de éxito con passthrough de cache tokens + test de frontera: NINGÚN paquete fuera de internal/ai importa el SDK (walk del módulo completo) |
 | 2026-07-31 | T-100 config AI | `internal/aiconfig` (el análogo del ai-runtime de Node; `internal/ai` queda DB-agnóstico como packages/ai): resuelve del catálogo `ai.provider`/`ai.anthropic.model`/`ai.timeoutMs`/`ai.maxRetries`/`ai.maxOutputUnits` + settings externos (`promptMaxChars`, `rateLimitPerMin`). Clave API SOLO de env; sin clave → cliente sin configurar → todo cae a no_client (la postura $0). Tenant en proveedor ajeno → cliente sin configurar AUNQUE haya clave Anthropic (fallback, jamás re-ruteo silencioso). `TruncatePrompt` acota sobre el máximo cortando en frontera de runa (postura documentada, no error). Simulador tras el DOBLE gate explícito de la referencia |
 | 2026-07-31 | T-101 usage del chokepoint | Una fila por INTENTO (éxito Y fallback) vía el Recorder de T-089, disparada dentro del propio GenerateText: fila `ai` con tokens+cache+`costUsd` calculado de la tabla portada (`pricing.go`: snapshot 2026-04 + override `JANUSLY_LLM_PRICE_<MODEL>` con la gramática exacta), fila `fallback` con el aiError clasificado y costo nulo. Modelo desconocido → costUsd null (jamás inventado); simulador → costo CERO aunque el modelo tenga precio. Matiz honesto: el "fallback defensivo a metadata de Anthropic" de Node no aplica — aquí el SDK ES Anthropic y los cache counts vienen tipados directos |
@@ -1909,11 +1910,17 @@ Capturas SOLO por el stack aislado.
 **Acepta:** [ ] goldens capturados + paridad ×3 · [ ] recaptura completa
 byte-idéntica.
 
-## 17. Ola 6 — Integraciones + scheduler + subworkflows + listo-para-cutover (T-159..T-187)
+## 17. Ola 6 — Integraciones + scheduler + subworkflows + listo-para-cutover (T-159..T-194)
 
 **Tesis:** el resto del catálogo de nodos/tools, el cron sustrato completo,
 y la evidencia final para el go/no-go: HA validado, soak largo, seguridad
-revisada, y el mapa de cutover por ruta. Regla: secretos SOLO por
+revisada, y el mapa de cutover por ruta. **Dirección estratégica (Johnny,
+2026-07-31): se incluye TODO — SCIM y experiments entran (T-189..T-194).
+La convicción es que el futuro del proyecto es Go, no Node: el objetivo ya
+no es solo pasar una puerta go/no-go sino dejar la base de código
+definitiva para refinar y abandonar Node. Consecuencia: el mapa strangler
+de T-184 deja de tener exclusiones permanentes — responde "cuándo migra
+cada ruta", nunca "si migra".** Regla: secretos SOLO por
 `credentials.secret_ref` — jamás una URL/clave cruda en config u
 org_configs (los guards de T-086 lo imponen).
 
@@ -1950,6 +1957,12 @@ org_configs (los guards de T-086 lo imponen).
 | T-185 | HA final: suite completa a dos instancias + kill-failover + soak 24h | cutover | P0 | todo |
 | T-186 | Revisión de seguridad: matriz SSRF re-corrida, scrub e2e, matriz authz por permiso | cutover | P0 | todo |
 | T-187 | SDK Python contra Go (pytest lane) + runbook de cutover por tenant + REPORT-W6 + plantilla go/no-go | cutover | P0 | todo |
+| T-189 | `eval_datasets`: CRUD + snapshots inmutables (sustrato de experiments y del gate de evals) | ai | P1 | todo |
+| T-190 | Experiment harness: runner data-agnóstico + 3 scorers + `POST /experiments/run` recommendation-only | ai | P1 | todo |
+| T-191 | SCIM 1/4: webhook WorkOS (firma t/v1 fail-closed) + directorios attach/update/revoke + state repos | scim | P1 | todo |
+| T-192 | SCIM 2/4: dispatcher puro — 3 guardas (replay/out-of-order/resurrección) + 2 guardas de colisión + provision/deprovision con policy de dominios | scim | P0 | todo |
+| T-193 | SCIM 3/4: grupos — `deriveScimRole` v2 (mayor rango, fallback flat byte-igual) + eventos de membresía + group state | scim | P1 | todo |
+| T-194 | SCIM 4/4: admin CRUD de mapeos grupo→rol + picker de grupos + bulk re-sync (cap 5000, un audit) + smoke del panel | scim | P1 | todo |
 
 ### Cards — ola 6 (las decisiones no obvias)
 
@@ -2031,6 +2044,42 @@ normalizado (ids/timestamps fuera), reporte de divergencia; correr sobre
 el tráfico de los smokes y del harness de paridad.
 **Acepta:** [ ] comparador reporta cero diffs inesperados sobre la suite
 completa · [ ] mapa versionado en el repo.
+
+### T-189/T-190 · Experiments — P1
+**Espec:** el runner vive en un paquete data-agnóstico (mismo corte que la
+referencia: `ai` sin dep de data); cada ejemplo corre por AMBOS brazos vía
+el chokepoint LlmClient (usage events gratis); throws por lado = `aiError`
++ score 0 — NUNCA lanza. Scorers `string_equality` / `json_schema` /
+`llm_judge` con degradación determinista a token-overlap (sin cliente,
+throw, o reply inparseable). Budget-gate ANTES de correr; bucket "ai".
+**Invariante sagrada:** promoción = SOLO recomendación (`summary_json.
+recommendation` + audit `experiment.run.promotion_suggested`) — jamás
+escribe prompts/org_configs. Es la tesis de la ola 5 aplicada a prompts.
+**Acepta:** [ ] $0 end-to-end con simulador + judge degradado · [ ] test
+de que la ruta no escribe prompts ni configs · [ ] per-side throw no
+tumba el run.
+
+### T-191..T-194 · SCIM directory sync — P0/P1
+**Espec:** las 6 tablas YA están en el baseline goose. Firma estilo Stripe
+(`t=<ms>,v1=<hex>` HMAC-SHA256 del body CRUDO, fail-closed sin secret,
+±5 min, compare constant-time); webhook SIEMPRE 200 en guard-reject
+(WorkOS no debe reintentar por horas), 5xx solo en I/O real. Binding de
+org por `provider_directory_id` — el ÚNICO read sin scope del módulo;
+jamás confiar el tenant del payload. Dispatcher puro con guardas EN ORDEN:
+replay → out-of-order → resurrección; colisiones: re-key bloquea CUALQUIER
+fila preexistente, create bloquea solo filas invitadas por humanos y
+ABSORBE las scim-owned (asimetría deliberada — el re-attach depende de
+ella). La fila de dedup se libera SOLO en throw (release throw-only).
+Join key `(orgId, lower(email))` — sobrevive el rewrite del SSO.
+`deriveScimRole`: mayor rango entre grupos mapeados, sin mapeos =
+comportamiento flat byte-igual, custom roles rankean -1. Re-sync: cap
+5000 honesto (`capped`), UN audit por barrido, sin `invitedBy` (el actor
+original sobrevive). Revoke = HARD delete (el re-attach lo exige por los
+índices únicos). Sin WorkOS real en el pilot: fixtures de firma/eventos
+como la suite Node.
+**Acepta:** [ ] las 3 guardas + 2 colisiones con fixtures por caso · [ ]
+matriz de audits (~25 acciones) presente · [ ] re-attach tras revoke ·
+[ ] smoke del panel Access contra Go.
 
 ### T-187 · Cierre y go/no-go — P0
 **Espec:** SDK Python (pytest apuntando a Go — mismo wire); runbook de
