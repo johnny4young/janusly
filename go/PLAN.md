@@ -2152,7 +2152,7 @@ P2 = oportunista.
 
 | Ticket | Título | Tema | Prio | Estado |
 | --- | --- | --- | --- | --- |
-| T-500 | Version-id real en `/start` de guardados (mata la convención `workflow_version_id = workflowId`) | arquitectura | P0 | todo |
+| T-500 | Version-id real en `/start` de guardados (mata la convención `workflow_version_id = workflowId`) | arquitectura | P0 | done |
 | T-501 | Partir `v1.go` (1,304 líneas) en módulos: mounts / runs / workflows / encoding | arquitectura | P1 | todo |
 | T-502 | Partir `scim.go` (1,354 líneas): verificador / dispatcher / rutas | arquitectura | P1 | todo |
 | T-503 | Partir `queries.sql` (2,584 líneas) por contexto acotado (sqlc multi-archivo) | arquitectura | P1 | todo |

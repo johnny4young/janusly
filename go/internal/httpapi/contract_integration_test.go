@@ -529,8 +529,11 @@ func TestWorkflowReadSurfaces(t *testing.T) {
 		"id", "orgId", "name", "createdBy", "createdAt", "lastRunStatus",
 		"runCount", "bufferedTriggerCount", "status", "pausedReason",
 		"tags", "folder", "deletedAt")
-	if row["runCount"] != float64(1) || row["lastRunStatus"] != "succeeded" {
-		t.Fatalf("aggregates must reflect the run: %v", row)
+	// T-500: the reference counts ONLY version-linked runs — a doc-posted
+	// ad-hoc run (this test's start) never counts, exactly like Node. The
+	// counted case lives in TestVersionAttributionSemantics.
+	if row["runCount"] != float64(0) || row["lastRunStatus"] != nil {
+		t.Fatalf("doc-posted runs must not count (reference semantics): %v", row)
 	}
 
 	// Latest: nullable contract — a version row with the full key set here.

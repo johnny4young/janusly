@@ -31,18 +31,14 @@ LIMIT sqlc.arg(page_limit);
 SELECT w.id, w.org_id, w.name, w.created_by, w.created_at, w.status,
        w.paused_reason, w.deleted_at,
        (SELECT count(*) FROM runs r
-        WHERE r.org_id = w.org_id
-          AND (r.workflow_version_id = w.id OR r.workflow_version_id IN (
-            SELECT wv.id FROM workflow_versions wv WHERE wv.workflow_id = w.id
-          )))::int AS run_count,
+        JOIN workflow_versions wv ON wv.id = r.workflow_version_id
+        WHERE r.org_id = w.org_id AND wv.workflow_id = w.id)::int AS run_count,
        COALESCE(last_run.status, '') AS last_run_status
 FROM workflows w
 LEFT JOIN LATERAL (
   SELECT r.status FROM runs r
-  WHERE r.org_id = w.org_id
-    AND (r.workflow_version_id = w.id OR r.workflow_version_id IN (
-      SELECT wv.id FROM workflow_versions wv WHERE wv.workflow_id = w.id
-    ))
+  JOIN workflow_versions wv ON wv.id = r.workflow_version_id
+  WHERE r.org_id = w.org_id AND wv.workflow_id = w.id
   ORDER BY r.created_at DESC, r.id DESC LIMIT 1
 ) last_run ON true
 WHERE w.org_id = $1 AND w.deleted_at IS NULL
@@ -76,18 +72,14 @@ SELECT org_id, deleted_at FROM workflows WHERE id = $1;
 SELECT w.id, w.org_id, w.name, w.created_by, w.created_at, w.status,
        w.paused_reason, w.deleted_at,
        (SELECT count(*) FROM runs r
-        WHERE r.org_id = w.org_id
-          AND (r.workflow_version_id = w.id OR r.workflow_version_id IN (
-            SELECT wv.id FROM workflow_versions wv WHERE wv.workflow_id = w.id
-          )))::int AS run_count,
+        JOIN workflow_versions wv ON wv.id = r.workflow_version_id
+        WHERE r.org_id = w.org_id AND wv.workflow_id = w.id)::int AS run_count,
        COALESCE(last_run.status, '') AS last_run_status
 FROM workflows w
 LEFT JOIN LATERAL (
   SELECT r.status FROM runs r
-  WHERE r.org_id = w.org_id
-    AND (r.workflow_version_id = w.id OR r.workflow_version_id IN (
-      SELECT wv.id FROM workflow_versions wv WHERE wv.workflow_id = w.id
-    ))
+  JOIN workflow_versions wv ON wv.id = r.workflow_version_id
+  WHERE r.org_id = w.org_id AND wv.workflow_id = w.id
   ORDER BY r.created_at DESC, r.id DESC LIMIT 1
 ) last_run ON true
 WHERE w.org_id = $1 AND w.deleted_at IS NOT NULL

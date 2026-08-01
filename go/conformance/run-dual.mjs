@@ -281,10 +281,6 @@ const EXPECTED_DIVERGENCES = {
     ["$.body.config[18].source", "mismo artefacto de overlay env"],
     ["$.body.config[24].source", "mismo artefacto de overlay env"],
   ],
-  "workflow-trash": [
-    ["$.body[0].runCount", "convención pilot: runs sin pin llevan workflow_version_id=workflowId (node solo cuenta runs con fila de versión); destino: resolver version-id en start"],
-    ["$.body[0].lastRunStatus", "misma convención de version-id"],
-  ],
 };
 
 function classifyDiffs(name, diffs) {
