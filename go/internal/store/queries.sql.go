@@ -868,6 +868,60 @@ func (q *Queries) FindLatestDeadLetterForNode(ctx context.Context, arg FindLates
 	return i, err
 }
 
+const findLatestPatchAuditForRun = `-- name: FindLatestPatchAuditForRun :one
+SELECT created_at, metadata FROM audit_logs
+WHERE org_id = $1 AND action = 'ai.workflow.patch_suggested'
+  AND (metadata ->> 'runId' = $2::text OR target_id = $2::text)
+ORDER BY created_at DESC LIMIT 1
+`
+
+type FindLatestPatchAuditForRunParams struct {
+	OrgID string
+	RunID string
+}
+
+type FindLatestPatchAuditForRunRow struct {
+	CreatedAt *time.Time
+	Metadata  json.RawMessage
+}
+
+func (q *Queries) FindLatestPatchAuditForRun(ctx context.Context, arg FindLatestPatchAuditForRunParams) (FindLatestPatchAuditForRunRow, error) {
+	row := q.db.QueryRow(ctx, findLatestPatchAuditForRun, arg.OrgID, arg.RunID)
+	var i FindLatestPatchAuditForRunRow
+	err := row.Scan(&i.CreatedAt, &i.Metadata)
+	return i, err
+}
+
+const findLatestValidationRunForParent = `-- name: FindLatestValidationRunForParent :one
+SELECT id, status, validation_evidence_level, created_at FROM runs
+WHERE org_id = $1 AND parent_run_id = $2 AND replay_mode = 'validation'
+ORDER BY created_at DESC, id DESC LIMIT 1
+`
+
+type FindLatestValidationRunForParentParams struct {
+	OrgID       string
+	ParentRunID pgtype.Text
+}
+
+type FindLatestValidationRunForParentRow struct {
+	ID                      string
+	Status                  string
+	ValidationEvidenceLevel pgtype.Text
+	CreatedAt               *time.Time
+}
+
+func (q *Queries) FindLatestValidationRunForParent(ctx context.Context, arg FindLatestValidationRunForParentParams) (FindLatestValidationRunForParentRow, error) {
+	row := q.db.QueryRow(ctx, findLatestValidationRunForParent, arg.OrgID, arg.ParentRunID)
+	var i FindLatestValidationRunForParentRow
+	err := row.Scan(
+		&i.ID,
+		&i.Status,
+		&i.ValidationEvidenceLevel,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const findMatchingActivePlaybook = `-- name: FindMatchingActivePlaybook :one
 SELECT id, org_id, workflow_id, signature, version, status, title, instructions_markdown, evidence_requirements_json, source_workflow_version_id, approach_label, successful_uses, regressions, last_validated_at, last_validation_run_id, last_applied_validation_run_id, activated_at, retired_at, created_by, updated_by, created_at, updated_at FROM recovery_playbooks
 WHERE org_id = $1 AND workflow_id = $2 AND signature = $3 AND status = 'active'
@@ -2956,6 +3010,53 @@ func (q *Queries) ListAlertPolicies(ctx context.Context, orgID string) ([]AlertP
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditRowsForTargets = `-- name: ListAuditRowsForTargets :many
+SELECT id, action, target_type, target_id, user_id, created_at FROM audit_logs
+WHERE org_id = $1 AND target_id = ANY($2::text[])
+ORDER BY created_at DESC, id DESC LIMIT 50
+`
+
+type ListAuditRowsForTargetsParams struct {
+	OrgID     string
+	TargetIds []string
+}
+
+type ListAuditRowsForTargetsRow struct {
+	ID         string
+	Action     string
+	TargetType pgtype.Text
+	TargetID   pgtype.Text
+	UserID     pgtype.Text
+	CreatedAt  *time.Time
+}
+
+func (q *Queries) ListAuditRowsForTargets(ctx context.Context, arg ListAuditRowsForTargetsParams) ([]ListAuditRowsForTargetsRow, error) {
+	rows, err := q.db.Query(ctx, listAuditRowsForTargets, arg.OrgID, arg.TargetIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAuditRowsForTargetsRow
+	for rows.Next() {
+		var i ListAuditRowsForTargetsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Action,
+			&i.TargetType,
+			&i.TargetID,
+			&i.UserID,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

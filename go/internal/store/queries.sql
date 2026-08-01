@@ -1428,3 +1428,19 @@ LIMIT sqlc.arg(page_limit);
 SELECT id, node_id, node_json, error_json FROM dead_letters
 WHERE org_id = $1 AND run_id = $2 AND node_id = $3
 ORDER BY created_at DESC, id DESC LIMIT 1;
+
+-- name: FindLatestPatchAuditForRun :one
+SELECT created_at, metadata FROM audit_logs
+WHERE org_id = $1 AND action = 'ai.workflow.patch_suggested'
+  AND (metadata ->> 'runId' = sqlc.arg(run_id)::text OR target_id = sqlc.arg(run_id)::text)
+ORDER BY created_at DESC LIMIT 1;
+
+-- name: FindLatestValidationRunForParent :one
+SELECT id, status, validation_evidence_level, created_at FROM runs
+WHERE org_id = $1 AND parent_run_id = $2 AND replay_mode = 'validation'
+ORDER BY created_at DESC, id DESC LIMIT 1;
+
+-- name: ListAuditRowsForTargets :many
+SELECT id, action, target_type, target_id, user_id, created_at FROM audit_logs
+WHERE org_id = $1 AND target_id = ANY(sqlc.arg(target_ids)::text[])
+ORDER BY created_at DESC, id DESC LIMIT 50;
