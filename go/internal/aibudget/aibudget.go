@@ -18,6 +18,8 @@ import (
 	"github.com/johnny4young/janusly/go/internal/ai"
 	"github.com/johnny4young/janusly/go/internal/audit"
 	"github.com/johnny4young/janusly/go/internal/orgconfig"
+
+	"github.com/johnny4young/janusly/go/internal/store"
 )
 
 func init() {
@@ -71,6 +73,52 @@ func Check(ctx context.Context, pool *pgxpool.Pool, orgID string) CheckResult {
 	// A failed sum keeps the gate OPEN (fail-soft): spent stays 0.
 
 	scope := "org"
+	result := CheckResult{
+		MonthlyUsdSpent: spent, MonthlyUsdLimit: &limit,
+		Policy: policy, WarningPercent: warnPercent,
+		WarningThresholdCrossed: spent >= limit*warnPercent/100,
+		ResolvedScope:           &scope,
+	}
+	exceeded := spent >= limit
+	result.Allowed = policy != "block" || !exceeded
+	if exceeded {
+		result.ExceededAt = &scope
+	}
+	return result
+}
+
+// CheckScoped resolves the composite budget: the workflow override (a
+// workflow_budgets row with a positive limit) bites BEFORE the org
+// default; a missing/zero override falls through to Check (T-516).
+// Workflow spend sums this month's usage rows stamped with that
+// workflowId (the recorder writes metadata.workflowId at the chokepoint).
+func CheckScoped(ctx context.Context, pool *pgxpool.Pool, orgID, workflowID string) CheckResult {
+	if workflowID == "" {
+		return Check(ctx, pool, orgID)
+	}
+	row, err := store.New(pool).GetWorkflowBudget(ctx, store.GetWorkflowBudgetParams{
+		OrgID: orgID, WorkflowID: workflowID,
+	})
+	if err != nil || row.MonthlyUsd <= 0 {
+		return Check(ctx, pool, orgID)
+	}
+	limit := float64(row.MonthlyUsd)
+	policy := row.Policy
+	if policy != "block" {
+		policy = "warn"
+	}
+	warnPercent := float64(row.WarnPercent)
+	if warnPercent <= 0 {
+		warnPercent = 80
+	}
+	spent := 0.0
+	// A no-rows sum is SQL NULL: the scan errs and spend stays 0.
+	if summed, err := store.New(pool).SumWorkflowSpendThisMonth(ctx, store.SumWorkflowSpendThisMonthParams{
+		OrgID: orgID, WorkflowID: workflowID,
+	}); err == nil {
+		spent = summed
+	}
+	scope := "workflow"
 	result := CheckResult{
 		MonthlyUsdSpent: spent, MonthlyUsdLimit: &limit,
 		Policy: policy, WarningPercent: warnPercent,

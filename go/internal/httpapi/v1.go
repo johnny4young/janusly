@@ -182,6 +182,7 @@ func NewV1HandlerWithShutdown(eng *engine.Engine, pool *pgxpool.Pool) (http.Hand
 	server.mountF1SweepRoutes(mux)
 	server.mountAiPatchRoutes(mux)
 	server.mountAiSurfaceRoutes(mux)
+	server.mountBillingRoutes(mux)
 	return WithBrowserHeaders(mux), cancelHub
 }
 

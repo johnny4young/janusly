@@ -32,6 +32,10 @@ var authOnlyRoutes = map[string]bool{
 	"GET /v1/tools":     true,
 	// Read-only AI posture probe (reference ai-health-route.ts has no gate).
 	"GET /ai/health": true,
+	// Billing reads carry no gate in the reference (billing-routes.ts).
+	"GET /billing/usage":        true,
+	"GET /billing/usage/export": true,
+	"GET /billing/budget":       true,
 }
 
 // route registers the gate and mounts the handler in ONE call — the

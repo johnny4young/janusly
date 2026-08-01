@@ -303,7 +303,10 @@ func (d *Dispatcher) buildAIDeps(ctx context.Context, claim ClaimedNode) *execut
 	return &executors.AIDeps{
 		Client: client, OrgID: claim.OrgID, DryRun: dryRun,
 		BudgetAllowed: func() (bool, map[string]any) {
-			result := aibudget.Check(ctx, pool, claim.OrgID)
+			// Composite gate (T-516): the run's workflow override bites
+			// before the org default; resolution failure degrades to org.
+			workflowID, _ := store.New(pool).GetRunWorkflowID(ctx, claim.RunID)
+			result := aibudget.CheckScoped(ctx, pool, claim.OrgID, workflowID)
 			budget := map[string]any{
 				"monthlyUsdSpent": result.MonthlyUsdSpent, "monthlyUsdLimit": result.MonthlyUsdLimit,
 				"policy": result.Policy, "exceededAt": result.ExceededAt,

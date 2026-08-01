@@ -1938,3 +1938,17 @@ mismo validador de las superficies interactivas. Toda degradación cae a
 cambió ni una línea: el LLM propone, jamás aplica. El test de presupuesto
 usa un server-trampa que falla el test si el proveedor recibe una sola
 llamada con el budget bloqueado.
+
+## T-516 — Billing: usage, export y presupuesto compuesto (2026-08-01)
+
+Las cuatro superficies del reference aterrizaron con sus shapes exactos: el
+resumen plano back-compat, el breakdown dimensional por enum cerrado (misma
+fórmula de percentil, costUsd NULL cuando ningún row trae costo — nunca
+coerce-a-cero), el CSV con guard anti-inyección de fórmulas, y el upsert del
+override por-workflow con su escalera de códigos de error. La pieza con
+dientes es el compuesto: `CheckScoped` resuelve override de workflow →
+default de org → nada, sumando el gasto del mes por `metadata.workflowId`
+(el recorder ya lo estampaba desde el chokepoint), y el dispatcher del nodo
+`ai` ahora gatea con él — el test siembra gasto que revienta el límite del
+workflow con la org sin límite y prueba que muerde a nivel workflow,
+`resolvedScope=workflow`, y que relajar el override reabre el gate.
