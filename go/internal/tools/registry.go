@@ -60,6 +60,9 @@ func NewRegistry() *Registry {
 	for _, definition := range pdfTools() {
 		registry.byName[definition.Name] = definition
 	}
+	for _, definition := range timeWindowTools() {
+		registry.byName[definition.Name] = definition
+	}
 	registry.byName["text.uppercase"] = Definition{
 		Name:         "text.uppercase",
 		Description:  "Uppercase a text value.",
