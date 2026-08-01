@@ -25,6 +25,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/migrate"
 	"github.com/johnny4young/janusly/go/internal/ratelimit"
 	"github.com/johnny4young/janusly/go/internal/secretstore"
+	"github.com/johnny4young/janusly/go/internal/upstream"
 	"github.com/johnny4young/janusly/go/internal/usage"
 )
 
@@ -131,6 +132,9 @@ func run() error {
 	}()
 	go func() {
 		eng.RunRetentionSweep(workerCtx, time.Hour, engine.RetentionDays(), logger)
+	}()
+	go func() {
+		upstream.RunSweep(workerCtx, pool, time.Minute, logger)
 	}()
 	go eng.StartReaper(workerCtx, time.Minute, time.Hour, logger)
 	defer func() { stopWorkers(); <-workersDone }()

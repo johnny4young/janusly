@@ -96,8 +96,9 @@ ORDER BY w.deleted_at DESC, w.id DESC
 LIMIT sqlc.arg(page_limit);
 
 -- name: InsertWorkflowVersion :exec
-INSERT INTO workflow_versions (id, org_id, workflow_id, version, dag_json, created_by)
-VALUES ($1, $2, $3, $4, $5, $6);
+INSERT INTO workflow_versions (id, org_id, workflow_id, version, dag_json, created_by,
+                               upstream_health_sources)
+VALUES ($1, $2, $3, $4, $5, $6, $7);
 
 -- name: GetWorkflowVersionByID :one
 SELECT id, org_id, workflow_id, version, dag_json, created_by, created_at
@@ -1870,3 +1871,66 @@ SELECT * FROM external_recovery_cases
 WHERE org_id = $1
 ORDER BY CASE WHEN state = 'detected' THEN 0 ELSE 1 END, last_observed_at DESC
 LIMIT 200;
+
+-- name: InsertUpstreamHealthSource :one
+INSERT INTO upstream_health_sources (id, org_id, name, kind, url,
+                                     expected_components, check_interval_seconds,
+                                     enabled, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING *;
+
+-- name: ListUpstreamHealthSources :many
+SELECT * FROM upstream_health_sources
+WHERE org_id = $1
+ORDER BY lower(name);
+
+-- name: GetUpstreamHealthSource :one
+SELECT * FROM upstream_health_sources
+WHERE org_id = $1 AND id = $2;
+
+-- name: ListEnabledUpstreamHealthSources :many
+SELECT * FROM upstream_health_sources
+WHERE enabled = true;
+
+-- name: UpdateUpstreamHealthSource :one
+UPDATE upstream_health_sources
+SET name = $3, kind = $4, url = $5, expected_components = $6,
+    check_interval_seconds = $7, enabled = $8, updated_at = now()
+WHERE org_id = $1 AND id = $2
+RETURNING *;
+
+-- name: DeleteUpstreamHealthSource :one
+DELETE FROM upstream_health_sources
+WHERE org_id = $1 AND id = $2
+RETURNING *;
+
+-- name: RecordUpstreamStatus :exec
+UPDATE upstream_health_sources
+SET last_status = $3, last_degraded = $4, last_checked_at = now(),
+    last_error_reason = NULL, updated_at = now()
+WHERE org_id = $1 AND id = $2;
+
+-- name: RecordUpstreamPollError :exec
+UPDATE upstream_health_sources
+SET last_checked_at = now(), last_error_reason = $3, updated_at = now()
+WHERE org_id = $1 AND id = $2;
+
+-- name: ListLatestWorkflowVersionUpstreamTags :many
+SELECT DISTINCT ON (wv.workflow_id) wv.workflow_id, wv.upstream_health_sources
+FROM workflow_versions wv
+JOIN workflows w ON w.id = wv.workflow_id AND w.org_id = wv.org_id
+WHERE wv.org_id = $1 AND w.deleted_at IS NULL
+ORDER BY wv.workflow_id, wv.version DESC
+LIMIT 1000;
+
+-- name: PauseWorkflowsForUpstream :many
+UPDATE workflows
+SET status = 'paused_upstream_degraded', paused_reason = $3
+WHERE org_id = $1 AND id = ANY($2::text[]) AND status = 'active'
+RETURNING id;
+
+-- name: ResumeWorkflowsForUpstream :many
+UPDATE workflows
+SET status = 'active', paused_reason = NULL
+WHERE org_id = $1 AND id = ANY($2::text[]) AND status = 'paused_upstream_degraded'
+RETURNING id;

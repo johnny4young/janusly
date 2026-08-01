@@ -929,6 +929,40 @@ func (q *Queries) DeleteSlackInteractionConnection(ctx context.Context, arg Dele
 	return result.RowsAffected(), nil
 }
 
+const deleteUpstreamHealthSource = `-- name: DeleteUpstreamHealthSource :one
+DELETE FROM upstream_health_sources
+WHERE org_id = $1 AND id = $2
+RETURNING id, org_id, name, kind, url, expected_components, check_interval_seconds, enabled, last_status, last_degraded, last_checked_at, last_error_reason, created_by, created_at, updated_at
+`
+
+type DeleteUpstreamHealthSourceParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) DeleteUpstreamHealthSource(ctx context.Context, arg DeleteUpstreamHealthSourceParams) (UpstreamHealthSource, error) {
+	row := q.db.QueryRow(ctx, deleteUpstreamHealthSource, arg.OrgID, arg.ID)
+	var i UpstreamHealthSource
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.Kind,
+		&i.Url,
+		&i.ExpectedComponents,
+		&i.CheckIntervalSeconds,
+		&i.Enabled,
+		&i.LastStatus,
+		&i.LastDegraded,
+		&i.LastCheckedAt,
+		&i.LastErrorReason,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const deleteWakeup = `-- name: DeleteWakeup :exec
 DELETE FROM go_pilot_wakeups WHERE run_node_id = $1
 `
@@ -2668,6 +2702,39 @@ func (q *Queries) GetTriggerEvent(ctx context.Context, arg GetTriggerEventParams
 	return i, err
 }
 
+const getUpstreamHealthSource = `-- name: GetUpstreamHealthSource :one
+SELECT id, org_id, name, kind, url, expected_components, check_interval_seconds, enabled, last_status, last_degraded, last_checked_at, last_error_reason, created_by, created_at, updated_at FROM upstream_health_sources
+WHERE org_id = $1 AND id = $2
+`
+
+type GetUpstreamHealthSourceParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) GetUpstreamHealthSource(ctx context.Context, arg GetUpstreamHealthSourceParams) (UpstreamHealthSource, error) {
+	row := q.db.QueryRow(ctx, getUpstreamHealthSource, arg.OrgID, arg.ID)
+	var i UpstreamHealthSource
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.Kind,
+		&i.Url,
+		&i.ExpectedComponents,
+		&i.CheckIntervalSeconds,
+		&i.Enabled,
+		&i.LastStatus,
+		&i.LastDegraded,
+		&i.LastCheckedAt,
+		&i.LastErrorReason,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getWorkflow = `-- name: GetWorkflow :one
 SELECT id, org_id, name, status, paused_reason, created_by, created_at, deleted_at
 FROM workflows
@@ -3850,6 +3917,59 @@ func (q *Queries) InsertTriggerEvent(ctx context.Context, arg InsertTriggerEvent
 	return result.RowsAffected(), nil
 }
 
+const insertUpstreamHealthSource = `-- name: InsertUpstreamHealthSource :one
+INSERT INTO upstream_health_sources (id, org_id, name, kind, url,
+                                     expected_components, check_interval_seconds,
+                                     enabled, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, org_id, name, kind, url, expected_components, check_interval_seconds, enabled, last_status, last_degraded, last_checked_at, last_error_reason, created_by, created_at, updated_at
+`
+
+type InsertUpstreamHealthSourceParams struct {
+	ID                   string
+	OrgID                string
+	Name                 string
+	Kind                 string
+	Url                  string
+	ExpectedComponents   json.RawMessage
+	CheckIntervalSeconds int32
+	Enabled              bool
+	CreatedBy            pgtype.Text
+}
+
+func (q *Queries) InsertUpstreamHealthSource(ctx context.Context, arg InsertUpstreamHealthSourceParams) (UpstreamHealthSource, error) {
+	row := q.db.QueryRow(ctx, insertUpstreamHealthSource,
+		arg.ID,
+		arg.OrgID,
+		arg.Name,
+		arg.Kind,
+		arg.Url,
+		arg.ExpectedComponents,
+		arg.CheckIntervalSeconds,
+		arg.Enabled,
+		arg.CreatedBy,
+	)
+	var i UpstreamHealthSource
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.Kind,
+		&i.Url,
+		&i.ExpectedComponents,
+		&i.CheckIntervalSeconds,
+		&i.Enabled,
+		&i.LastStatus,
+		&i.LastDegraded,
+		&i.LastCheckedAt,
+		&i.LastErrorReason,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const insertUsageEvent = `-- name: InsertUsageEvent :exec
 INSERT INTO usage_events (id, org_id, user_id, run_id, metric, quantity, metadata)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -3996,17 +4116,19 @@ func (q *Queries) InsertWorkflowRolloutOutcome(ctx context.Context, arg InsertWo
 }
 
 const insertWorkflowVersion = `-- name: InsertWorkflowVersion :exec
-INSERT INTO workflow_versions (id, org_id, workflow_id, version, dag_json, created_by)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO workflow_versions (id, org_id, workflow_id, version, dag_json, created_by,
+                               upstream_health_sources)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 `
 
 type InsertWorkflowVersionParams struct {
-	ID         string
-	OrgID      string
-	WorkflowID string
-	Version    int32
-	DagJson    json.RawMessage
-	CreatedBy  pgtype.Text
+	ID                    string
+	OrgID                 string
+	WorkflowID            string
+	Version               int32
+	DagJson               json.RawMessage
+	CreatedBy             pgtype.Text
+	UpstreamHealthSources json.RawMessage
 }
 
 func (q *Queries) InsertWorkflowVersion(ctx context.Context, arg InsertWorkflowVersionParams) error {
@@ -4017,6 +4139,7 @@ func (q *Queries) InsertWorkflowVersion(ctx context.Context, arg InsertWorkflowV
 		arg.Version,
 		arg.DagJson,
 		arg.CreatedBy,
+		arg.UpstreamHealthSources,
 	)
 	return err
 }
@@ -4706,6 +4829,47 @@ func (q *Queries) ListEnabledAlertPolicies(ctx context.Context, arg ListEnabledA
 	return items, nil
 }
 
+const listEnabledUpstreamHealthSources = `-- name: ListEnabledUpstreamHealthSources :many
+SELECT id, org_id, name, kind, url, expected_components, check_interval_seconds, enabled, last_status, last_degraded, last_checked_at, last_error_reason, created_by, created_at, updated_at FROM upstream_health_sources
+WHERE enabled = true
+`
+
+func (q *Queries) ListEnabledUpstreamHealthSources(ctx context.Context) ([]UpstreamHealthSource, error) {
+	rows, err := q.db.Query(ctx, listEnabledUpstreamHealthSources)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []UpstreamHealthSource
+	for rows.Next() {
+		var i UpstreamHealthSource
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Name,
+			&i.Kind,
+			&i.Url,
+			&i.ExpectedComponents,
+			&i.CheckIntervalSeconds,
+			&i.Enabled,
+			&i.LastStatus,
+			&i.LastDegraded,
+			&i.LastCheckedAt,
+			&i.LastErrorReason,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listExposedMcpToolsForAi = `-- name: ListExposedMcpToolsForAi :many
 SELECT c.alias, d.name, d.description
 FROM mcp_connections c
@@ -5027,6 +5191,40 @@ func (q *Queries) ListLatestWorkflowVersionDags(ctx context.Context, orgID strin
 	for rows.Next() {
 		var i ListLatestWorkflowVersionDagsRow
 		if err := rows.Scan(&i.WorkflowID, &i.DagJson); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLatestWorkflowVersionUpstreamTags = `-- name: ListLatestWorkflowVersionUpstreamTags :many
+SELECT DISTINCT ON (wv.workflow_id) wv.workflow_id, wv.upstream_health_sources
+FROM workflow_versions wv
+JOIN workflows w ON w.id = wv.workflow_id AND w.org_id = wv.org_id
+WHERE wv.org_id = $1 AND w.deleted_at IS NULL
+ORDER BY wv.workflow_id, wv.version DESC
+LIMIT 1000
+`
+
+type ListLatestWorkflowVersionUpstreamTagsRow struct {
+	WorkflowID            string
+	UpstreamHealthSources json.RawMessage
+}
+
+func (q *Queries) ListLatestWorkflowVersionUpstreamTags(ctx context.Context, orgID string) ([]ListLatestWorkflowVersionUpstreamTagsRow, error) {
+	rows, err := q.db.Query(ctx, listLatestWorkflowVersionUpstreamTags, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLatestWorkflowVersionUpstreamTagsRow
+	for rows.Next() {
+		var i ListLatestWorkflowVersionUpstreamTagsRow
+		if err := rows.Scan(&i.WorkflowID, &i.UpstreamHealthSources); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -6380,6 +6578,48 @@ func (q *Queries) ListUnrecordedRolloutOutcomes(ctx context.Context, pageLimit i
 	return items, nil
 }
 
+const listUpstreamHealthSources = `-- name: ListUpstreamHealthSources :many
+SELECT id, org_id, name, kind, url, expected_components, check_interval_seconds, enabled, last_status, last_degraded, last_checked_at, last_error_reason, created_by, created_at, updated_at FROM upstream_health_sources
+WHERE org_id = $1
+ORDER BY lower(name)
+`
+
+func (q *Queries) ListUpstreamHealthSources(ctx context.Context, orgID string) ([]UpstreamHealthSource, error) {
+	rows, err := q.db.Query(ctx, listUpstreamHealthSources, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []UpstreamHealthSource
+	for rows.Next() {
+		var i UpstreamHealthSource
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Name,
+			&i.Kind,
+			&i.Url,
+			&i.ExpectedComponents,
+			&i.CheckIntervalSeconds,
+			&i.Enabled,
+			&i.LastStatus,
+			&i.LastDegraded,
+			&i.LastCheckedAt,
+			&i.LastErrorReason,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWorkflowRows = `-- name: ListWorkflowRows :many
 SELECT w.id, w.org_id, w.name, w.created_by, w.created_at, w.status,
        w.paused_reason, w.deleted_at,
@@ -6973,6 +7213,39 @@ SELECT pg_notify('janusly_go_wake', $1::text)
 func (q *Queries) NotifyWake(ctx context.Context, runID string) error {
 	_, err := q.db.Exec(ctx, notifyWake, runID)
 	return err
+}
+
+const pauseWorkflowsForUpstream = `-- name: PauseWorkflowsForUpstream :many
+UPDATE workflows
+SET status = 'paused_upstream_degraded', paused_reason = $3
+WHERE org_id = $1 AND id = ANY($2::text[]) AND status = 'active'
+RETURNING id
+`
+
+type PauseWorkflowsForUpstreamParams struct {
+	OrgID        string
+	Column2      []string
+	PausedReason pgtype.Text
+}
+
+func (q *Queries) PauseWorkflowsForUpstream(ctx context.Context, arg PauseWorkflowsForUpstreamParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, pauseWorkflowsForUpstream, arg.OrgID, arg.Column2, arg.PausedReason)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const pinPromptVersion = `-- name: PinPromptVersion :execrows
@@ -7625,6 +7898,47 @@ func (q *Queries) RecordPlaybookValidationSuccess(ctx context.Context, arg Recor
 	return result.RowsAffected(), nil
 }
 
+const recordUpstreamPollError = `-- name: RecordUpstreamPollError :exec
+UPDATE upstream_health_sources
+SET last_checked_at = now(), last_error_reason = $3, updated_at = now()
+WHERE org_id = $1 AND id = $2
+`
+
+type RecordUpstreamPollErrorParams struct {
+	OrgID           string
+	ID              string
+	LastErrorReason pgtype.Text
+}
+
+func (q *Queries) RecordUpstreamPollError(ctx context.Context, arg RecordUpstreamPollErrorParams) error {
+	_, err := q.db.Exec(ctx, recordUpstreamPollError, arg.OrgID, arg.ID, arg.LastErrorReason)
+	return err
+}
+
+const recordUpstreamStatus = `-- name: RecordUpstreamStatus :exec
+UPDATE upstream_health_sources
+SET last_status = $3, last_degraded = $4, last_checked_at = now(),
+    last_error_reason = NULL, updated_at = now()
+WHERE org_id = $1 AND id = $2
+`
+
+type RecordUpstreamStatusParams struct {
+	OrgID        string
+	ID           string
+	LastStatus   pgtype.Text
+	LastDegraded bool
+}
+
+func (q *Queries) RecordUpstreamStatus(ctx context.Context, arg RecordUpstreamStatusParams) error {
+	_, err := q.db.Exec(ctx, recordUpstreamStatus,
+		arg.OrgID,
+		arg.ID,
+		arg.LastStatus,
+		arg.LastDegraded,
+	)
+	return err
+}
+
 const redriveFailedRunNode = `-- name: RedriveFailedRunNode :one
 UPDATE run_nodes
 SET status = 'queued', attempts = 1
@@ -7732,6 +8046,38 @@ func (q *Queries) ResumeWorkflowCircuitBreaker(ctx context.Context, arg ResumeWo
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const resumeWorkflowsForUpstream = `-- name: ResumeWorkflowsForUpstream :many
+UPDATE workflows
+SET status = 'active', paused_reason = NULL
+WHERE org_id = $1 AND id = ANY($2::text[]) AND status = 'paused_upstream_degraded'
+RETURNING id
+`
+
+type ResumeWorkflowsForUpstreamParams struct {
+	OrgID   string
+	Column2 []string
+}
+
+func (q *Queries) ResumeWorkflowsForUpstream(ctx context.Context, arg ResumeWorkflowsForUpstreamParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, resumeWorkflowsForUpstream, arg.OrgID, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const retirePreviousActivePlaybookMatch = `-- name: RetirePreviousActivePlaybookMatch :execrows
@@ -8431,6 +8777,57 @@ func (q *Queries) UpdateSlackInteractionConnection(ctx context.Context, arg Upda
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const updateUpstreamHealthSource = `-- name: UpdateUpstreamHealthSource :one
+UPDATE upstream_health_sources
+SET name = $3, kind = $4, url = $5, expected_components = $6,
+    check_interval_seconds = $7, enabled = $8, updated_at = now()
+WHERE org_id = $1 AND id = $2
+RETURNING id, org_id, name, kind, url, expected_components, check_interval_seconds, enabled, last_status, last_degraded, last_checked_at, last_error_reason, created_by, created_at, updated_at
+`
+
+type UpdateUpstreamHealthSourceParams struct {
+	OrgID                string
+	ID                   string
+	Name                 string
+	Kind                 string
+	Url                  string
+	ExpectedComponents   json.RawMessage
+	CheckIntervalSeconds int32
+	Enabled              bool
+}
+
+func (q *Queries) UpdateUpstreamHealthSource(ctx context.Context, arg UpdateUpstreamHealthSourceParams) (UpstreamHealthSource, error) {
+	row := q.db.QueryRow(ctx, updateUpstreamHealthSource,
+		arg.OrgID,
+		arg.ID,
+		arg.Name,
+		arg.Kind,
+		arg.Url,
+		arg.ExpectedComponents,
+		arg.CheckIntervalSeconds,
+		arg.Enabled,
+	)
+	var i UpstreamHealthSource
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.Kind,
+		&i.Url,
+		&i.ExpectedComponents,
+		&i.CheckIntervalSeconds,
+		&i.Enabled,
+		&i.LastStatus,
+		&i.LastDegraded,
+		&i.LastCheckedAt,
+		&i.LastErrorReason,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const upsertConfidenceCalibration = `-- name: UpsertConfidenceCalibration :exec

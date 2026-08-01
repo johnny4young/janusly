@@ -173,6 +173,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	server.mountCredentialRoutes(mux)
 	server.mountSlackInteractionRoutes(mux)
 	server.mountExternalRuntimeRoutes(mux)
+	server.mountUpstreamHealthRoutes(mux)
 	server.mountAiPatchRoutes(mux)
 	return WithBrowserHeaders(mux)
 }
@@ -278,6 +279,16 @@ func (s *V1Server) saveCore(r *http.Request, rc v1Request) opResult {
 	if err := decodeBody(r, &raw); err != nil {
 		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body", nil)
 	}
+	// Optional workflow-level upstream subscription tags ride the save body
+	// (they live on workflow_versions, not in the DAG JSON).
+	var tagCarrier struct {
+		UpstreamHealthSources []string `json:"upstreamHealthSources"`
+	}
+	_ = json.Unmarshal(raw, &tagCarrier)
+	upstreamTags, tagIssue := validateUpstreamTags(tagCarrier.UpstreamHealthSources)
+	if tagIssue != "" {
+		return opError(http.StatusBadRequest, "invalid_input", tagIssue, nil)
+	}
 	wf, issues := domain.Parse(raw)
 	if wf == nil {
 		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
@@ -349,6 +360,8 @@ func (s *V1Server) saveCore(r *http.Request, rc v1Request) opResult {
 		ID: versionID, OrgID: rc.orgID, WorkflowID: workflowID,
 		Version: version + 1, DagJson: raw,
 		CreatedBy: pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
+
+		UpstreamHealthSources: upstreamTags,
 	}); err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}
@@ -1199,4 +1212,26 @@ func (s *V1Server) resumeWorkflowCore(r *http.Request, rc v1Request, workflowID 
 		"ok": true, "workflowId": workflowID, "status": "active",
 		"backfilled": outcome.Backfilled, "failed": outcome.Failed, "remaining": outcome.Remaining,
 	})
+}
+
+// validateUpstreamTags bounds the workflow-level upstream subscription
+// list (≤50 names, each 1..80 chars); nil in → nil out (column NULL).
+func validateUpstreamTags(tags []string) (json.RawMessage, string) {
+	if tags == nil {
+		return nil, ""
+	}
+	if len(tags) > 50 {
+		return nil, "upstreamHealthSources allows at most 50 names"
+	}
+	for _, tag := range tags {
+		trimmed := strings.TrimSpace(tag)
+		if trimmed == "" || len(tag) > 80 {
+			return nil, "upstreamHealthSources entries must be 1..80 characters"
+		}
+	}
+	serialized, err := json.Marshal(tags)
+	if err != nil {
+		return nil, "upstreamHealthSources not serializable"
+	}
+	return serialized, ""
 }
