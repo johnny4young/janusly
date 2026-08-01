@@ -3,7 +3,7 @@
  * a failure response. Used by the `agent_reflection` node + the agent loop's
  * reflection step to decide whether to retry vs accept a tool result.
  *
- * Used by `node-registry.ts` (`agent_reflection` executor + `runAgentLoop`).
+ * Used by `node-executors/agents.ts` (`agent_reflection` executor + `runAgentLoop`).
  *
  * Invariants:
  * - Conservative on the "did this fail" side — false positives (claim

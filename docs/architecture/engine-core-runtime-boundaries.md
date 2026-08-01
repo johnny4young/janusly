@@ -38,6 +38,16 @@ packages/engine/src/
   worker.ts             # BullMQ process wiring
   start-run.ts          # transactional run bootstrap
   resume-run.ts         # waiting-node resume path
+  node-registry.ts      # stable executor compatibility barrel
+  node-executors/
+    types.ts            # typed executor contracts
+    transport.ts        # HTTP, condition, transform, loop, tool
+    agents.ts           # agent, multi-agent, reflection
+    ai.ts               # AI completion node
+    waiting.ts          # webhook, approval, human form, noop
+    mcp.ts              # MCP tool wrapper
+    delegated.ts        # workflow delegation, waits, triggers
+    registry.ts         # exact registry composition + dispatch
 ```
 
 `worker.ts`, `resume-run.ts`, `subworkflow.ts`, replay-lab helpers, and
@@ -57,9 +67,18 @@ lifecycle ports and dependency direction are documented in
 must keep flowing through this adapter so dead-letter insertion stays part of
 the queue contract.
 
-`NodeExecutorRegistry` is the node-execution boundary. The registry delegates
-to concrete node executors in `node-registry.ts`; runtime core does not import
+`NodeExecutorRegistry` is the node-execution boundary. The stable
+`node-registry.ts` compatibility barrel delegates composition and dynamic
+dispatch to `node-executors/registry.ts`; concrete implementations are grouped
+by runtime responsibility under `node-executors/`. Runtime core does not import
 executor-specific config schemas.
+
+Concrete modules depend directly on `node-executors/types.ts`, never on the
+compatibility barrel or the composing registry. This keeps dependency flow
+acyclic while preserving the existing `node-registry.ts` import surface for
+callers and tests. Preserve the exact composition order when adding a node type;
+the order is part of the structural compatibility guard even though dispatch is
+key-based.
 
 The concrete registry is a `NodeExecutorMap` keyed by executor-owned node type.
 Each `NodeContext<T>.config` is inferred from `NodeConfigByType[T]`, so a field

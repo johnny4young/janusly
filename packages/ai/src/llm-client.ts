@@ -22,10 +22,10 @@
  *                                        `/ai/explain-run`, patch, review,
  *                                        and improvement surfaces.
  * - `packages/engine/src/agent-planner.ts` — `agent` planner `"openai"`.
- * - `packages/engine/src/node-registry.ts` — the `ai` step type.
+ * - `packages/engine/src/node-executors/ai.ts` — the `ai` step type.
  *
  * Invariants:
- * - The fallback contract (AGENTS.md) lives ABOVE this module: every caller
+ * - The fallback contract lives ABOVE this module: every caller
  *   wraps `generateText(...)` in try/catch and degrades to
  *   `{ mode: "fallback", aiError, ... }`. New error sources here (unknown
  *   provider, missing override key) intentionally throw so they flow through
@@ -296,7 +296,7 @@ export type LlmClient = {
    * the JSON Schema through each provider's structured-output capability and
    * validates the response. Throws when the model emits something the schema
    * rejects — caller's outer try/catch maps to `{ mode: "fallback", aiError }`
-   * (AGENTS.md fallback contract).
+   * (runtime fallback contract).
    */
   generateObject<T>(input: LlmGenerateObjectInput<T>): Promise<LlmGenerateObjectResult<T>>;
 };
@@ -562,7 +562,7 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
           // `Output.object({ schema })` plumbs the JSON Schema through the
           // provider's structured-output capability and validates the
           // response. Schema rejection throws here — caller's try/catch
-          // degrades to fallback per AGENTS.md.
+          // degrades through the caller's fallback contract.
           output: Output.object({
             schema: input.schema,
             name: input.schemaName,

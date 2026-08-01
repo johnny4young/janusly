@@ -1,14 +1,14 @@
 /**
  * Cross-run episodic memory for the `agent` / `multi_agent` loop.
  *
- * The agent loop in `node-registry.ts:runAgentLoop` only sees the CURRENT run's
- * events (`memory.ts:getRunMemory`). This module gives it durable, cross-run
+ * The agent loop in `node-executors/agents.ts:runAgentLoop` only sees the
+ * CURRENT run's events (`memory.ts:getRunMemory`). This module gives it durable, cross-run
  * recall over the shared pgvector memory substrate so the LLM planner can learn
  * from semantically-similar past episodes, and writes a compact episode summary
  * when an agent run completes.
  *
  * Used by:
- * - `packages/engine/src/node-registry.ts` — `runAgentLoop` recalls episodes
+ * - `packages/engine/src/node-executors/agents.ts` — `runAgentLoop` recalls episodes
  *   into the planner prompt and records one on completion.
  *
  * Invariants:

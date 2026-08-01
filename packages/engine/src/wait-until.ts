@@ -11,7 +11,7 @@
  * calls `resumeRun` — same path manual resume uses.
  *
  * Used by:
- * - `node-registry.ts` registers `wait_until: waitUntilExecutor`.
+ * - `node-executors/delegated.ts` registers `wait_until: waitUntilExecutor`.
  * - `worker.ts` dispatches `job.name === "wait-resume"` to
  *   `handleWaitResume`.
  *
@@ -27,7 +27,7 @@
  *   restart and BullMQ delivers the job at its scheduled time.
  */
 
-import type { NodeExecutor } from "./node-registry";
+import type { NodeExecutor } from "./node-executors/types";
 import { enqueueWaitUntilResume } from "./queue";
 import { getRunNodeStatus } from "./persistence";
 import { resumeRun } from "./resume-run";

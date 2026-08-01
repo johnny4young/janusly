@@ -44,7 +44,7 @@
  * resolve-and-pin and redirect policy but deliberately leaves timeout and
  * body framing to the protocol transport.
  *
- * Used by `node-registry.ts` (`http` node executor) and `tool-registry.ts`
+ * Used by `node-executors/transport.ts` (`http` node executor) and `tool-registry.ts`
  * (`http.request` tool). Both must go through `fetchHttpTarget` — direct
  * `fetch` / `undici.fetch` calls reopen the DNS-rebinding TOCTOU and skip
  * the bounds entirely.

@@ -2,11 +2,11 @@
  * Runtime contract types — the surface `core/runtime.ts` orchestrates and
  * the adapters in `adapters/*` implement. Pure types; no I/O.
  *
- * Used by `core/runtime.ts`, `adapters/*`, `node-registry.ts`, and the
+ * Used by `core/runtime.ts`, `adapters/*`, `node-executors/types.ts`, and the
  * top-level `start-run.ts` / `resume-run.ts` callers.
  *
  * Invariants:
- * - Add executor-specific shapes to `node-registry.ts`, not here. This file
+ * - Add executor-specific shapes to `node-executors/types.ts`, not here. This file
  *   stays focused on the runtime/adapter boundary.
  * - The `NodeStatus` / `RunStatus` enums match the values the database
  *   `run_nodes.status` / `runs.status` columns store. Adding a status here
@@ -113,7 +113,7 @@ export type NodeExecutionResult =
       checkpointPersisted?: boolean;
     };
 
-/** Input handed to the node executor — `node-registry.ts:NodeContext` extends with `orgId`. */
+/** Input handed to the node executor — `node-executors/types.ts:NodeContext` extends with `orgId`. */
 export type ExecuteNodeInput = {
   runId: string;
   node: WorkflowNode;

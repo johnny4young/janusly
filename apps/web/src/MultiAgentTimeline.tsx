@@ -2,7 +2,7 @@
  * Multi-agent run timeline — projects `multi_agent.*` event types from
  * `run_events` into per-agent lanes with tone-coloured chips. The web's
  * "Multi-agent timeline" tab consumes this view; the engine
- * (`packages/engine/src/node-registry.ts`) emits the matching event types.
+ * (`packages/engine/src/node-executors/agents.ts`) emits the matching event types.
  *
  * Used by `components/RightPanel.tsx` (the `multiAgent` tab) and
  * `components/RunWorkspace.tsx` (the inline Agents projection).
@@ -10,7 +10,7 @@
  * Invariants:
  * - The event-type strings parsed here match the runtime emitter exactly.
  *   Renaming `multi_agent.agent.completed` (etc) without coordinating
- *   with `node-registry.ts` breaks this view silently.
+ *   with `node-executors/agents.ts` breaks this view silently.
  * - Pagination piggy-backs on the run-events cursor: the
  *   "Load older events" button calls `onLoadOlderEvents` and the parent
  *   merges the new page into the same `events` array.

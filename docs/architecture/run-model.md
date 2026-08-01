@@ -78,9 +78,12 @@ replace any claim with a read-then-write.
    row or confuse a required redelivery with an old retained BullMQ job.
 3. **Execution** — the worker (`packages/engine/src/worker.ts`) validates the
    job payload with Zod, claims the exact `queued → running` generation while
-   holding the parent-run lock, executes the node type's
-   executor, then marks `succeeded` / `waiting` (approval, human form, wait
-   timer) / retries with the node's `retryPolicy` backoff.
+   holding the parent-run lock, dispatches the node type through
+   `execute-node.ts` and the stable `node-registry.ts` compatibility surface,
+   then marks `succeeded` / `waiting` (approval, human form, wait timer) /
+   retries with the node's `retryPolicy` backoff. Concrete executors are grouped
+   by responsibility under `node-executors/`; their dependency rules live in
+   [`engine-core-runtime-boundaries.md`](engine-core-runtime-boundaries.md).
    A `loop` with `mode='for_each'` remains one node execution rather than a new
    queue primitive: it resolves every per-item input before the first effect,
    then runs up to 1,000 registered-tool invocations through an ordered 1..20

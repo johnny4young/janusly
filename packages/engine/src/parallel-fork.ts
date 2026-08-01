@@ -28,7 +28,7 @@
  * `failed`. This matches the AC: "one branch failing fails the whole join".
  *
  * Used by:
- *   - `node-registry.ts` registers `parallel_fork: parallelForkExecutor` and
+ *   - `node-executors/delegated.ts` registers `parallel_fork: parallelForkExecutor` and
  *     `join: joinExecutor`.
  *
  * Invariants:
@@ -41,7 +41,7 @@
  *     implementation detail (node id).
  */
 
-import type { NodeExecutor } from "./node-registry";
+import type { NodeExecutor } from "./node-executors/types";
 
 const MIN_BRANCHES = 2;
 const MAX_BRANCHES = 10;

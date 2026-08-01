@@ -9,7 +9,7 @@
  * scrub treatment as the explicit `{{secret.*}}` channel.
  *
  * Used by `execute-node.ts` (every node-config render),
- * `node-registry.ts:loop` (per-iteration mapping), and tool executors
+ * `node-executors/transport.ts:loop` (per-iteration mapping), and tool executors
  * that template their inputs.
  *
  * Invariants:

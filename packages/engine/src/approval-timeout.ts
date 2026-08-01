@@ -7,7 +7,7 @@
  * duplicate delivery therefore wins cleanly instead of being overwritten.
  */
 
-import type { NodeExecutor } from "./node-registry";
+import type { NodeExecutor } from "./node-executors/types";
 import {
   escalateWaitingApprovalNode,
   failWaitingApprovalNode,

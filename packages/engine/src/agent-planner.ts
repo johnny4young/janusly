@@ -6,9 +6,9 @@
  *   - `planAgentToolWithLLM` ("openai" planner) — routes through the
  *     provider-neutral `getLlmClient()` from `@janusly/ai`. Falls back to
  *     the rules planner on any error and surfaces `aiError` per the
- *     AGENTS.md fallback contract.
+ *     runtime fallback contract.
  *
- * Used by `packages/engine/src/node-registry.ts` (`agent` and `multi_agent`
+ * Used by `packages/engine/src/node-executors/agents.ts` (`agent` and `multi_agent`
  * executors) and indirectly by `apps/api/src/index.ts` when those nodes run
  * inside a workflow.
  *
@@ -131,7 +131,7 @@ export async function planAgentToolWithLLM(
   /**
    * Per-call telemetry context. Forwarded verbatim to the LLM
    * abstraction so the recorder attributes the row to org/run/node.
-   * Omitted in unit tests; production calls from `node-registry.ts:runAgentLoop`
+   * Omitted in unit tests; production calls from `node-executors/agents.ts:runAgentLoop`
    * fill it from the executor `NodeContext`.
    */
   telemetryContext?: { orgId: string; userId?: string; runId?: string; nodeId?: string; workflowId?: string },

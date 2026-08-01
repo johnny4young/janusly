@@ -32,7 +32,7 @@
  * usage, dry-run, write-consent) is transport-agnostic.
  *
  * Used by:
- * - `packages/engine/src/node-registry.ts` — `mcp_tool` node executor.
+ * - `packages/engine/src/node-executors/mcp.ts` — `mcp_tool` node executor.
  *
  * Invariants:
  * - Multi-tenant scope: the executor receives `orgId` from the run row

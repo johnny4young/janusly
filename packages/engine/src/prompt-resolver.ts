@@ -36,7 +36,7 @@
  * `MissingPromptError`, not a silent fallback to another org's prompt.
  *
  * Used by:
- *   - `packages/engine/src/node-registry.ts` — `ai` node executor calls
+ *   - `packages/engine/src/node-executors/ai.ts` — `ai` node executor calls
  *     `resolvePromptRef` before the LLM invocation when
  *     `config.promptRef` is present.
  *   - `packages/engine/src/agent-planner.ts` — agent planner consults

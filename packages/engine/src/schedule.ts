@@ -13,7 +13,7 @@
  * separate trigger surface.
  *
  * Used by:
- * - `node-registry.ts` registers `schedule: scheduleExecutor`.
+ * - `node-executors/delegated.ts` registers `schedule: scheduleExecutor`.
  * - `workflow-validation.ts` calls `validateCronExpression` to reject
  *   malformed cron strings at `POST /validate` time.
  *
@@ -26,7 +26,7 @@
  */
 
 import { CronExpressionParser } from "cron-parser";
-import type { NodeExecutor } from "./node-registry";
+import type { NodeExecutor } from "./node-executors/types";
 
 export type ScheduleConfig = {
   /** Standard 5-field cron expression (minute / hour / day-of-month / month / day-of-week). */

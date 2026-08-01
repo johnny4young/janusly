@@ -9,7 +9,7 @@
  *   (`explainRun`, patch/improvement helpers, noop promotion).
  * - `apps/api/src/auto-healing-scanner.ts` — imports `getLlmClient` +
  *   `suggestWorkflowPatch` for scheduled recovery suggestions.
- * - `packages/engine/src/agent-planner.ts` + `node-registry.ts` — both
+ * - `packages/engine/src/agent-planner.ts` + `node-executors/ai.ts` and `node-executors/agents.ts` — both
  *   import `getLlmClient` so the engine never names a vendor.
  *
  * The provider abstraction is the single chokepoint for every

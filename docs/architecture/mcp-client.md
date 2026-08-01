@@ -19,7 +19,7 @@ Hot files:
 - `packages/engine/src/mcp-client.ts` — transport-agnostic SDK wrapper + per-transport factories.
 - `packages/engine/src/mcp-tool-executor.ts` — per-call chokepoint (gates, env-ref resolution, rate limit, audit, usage).
 - `packages/engine/src/mcp-sandbox.ts` — pure stdio sandbox profile builder + redacted stderr capture.
-- `packages/engine/src/node-registry.ts` — `mcp_tool` node wrapper that emits run timeline events and turns failed envelopes into retry/DLQ errors.
+- `packages/engine/src/node-executors/mcp.ts` — `mcp_tool` node wrapper, exported through the stable `node-registry.ts` barrel, that emits run timeline events and turns failed envelopes into retry/DLQ errors.
 - `apps/api/src/routes/mcp-routes.ts` — admin CRUD + per-tool toggles + discovery.
 - `apps/api/src/ai-prompts.ts` — `composeGenerationSystemPrompt(base, exposedTools)` injects sanitised tool descriptions into `/ai/generate-workflow`.
 

@@ -9,9 +9,9 @@
  * patch surface and the readiness rule both recommend — silently never
  * matched for the most common node type in the product.
  *
- * Used by `node-registry.ts` (http node, both the buffered and streaming
- * branches). `classifyError` (`core/retry-policy.ts`) and the transient fast
- * path (`core/transient-tier.ts`) consume `statusCode` off it.
+ * Used by `node-executors/transport.ts` (http node, both the buffered and
+ * streaming branches). `classifyError` (`core/retry-policy.ts`) and the
+ * transient fast path (`core/transient-tier.ts`) consume `statusCode` off it.
  */
 
 /** A non-OK HTTP response surfaced as a retryable-classifiable error. */

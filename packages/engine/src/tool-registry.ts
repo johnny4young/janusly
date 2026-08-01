@@ -8,7 +8,7 @@
  * immediately rather than crashing a downstream consumer.
  *
  * Used by:
- * - `packages/engine/src/node-registry.ts` — `tool` node and the agent loop
+ * - `packages/engine/src/node-executors/transport.ts` and `node-executors/agents.ts` — the `tool` node and agent loop
  *   call `executeTool`.
  * - `apps/api/src/routes/tools-routes.ts` `GET /tools` — returns
  *   `listTools()` to the AI Studio for inspector rendering.
@@ -309,8 +309,8 @@ export function validateToolInput(name: string, input: unknown): { valid: boolea
  * the node-execution boundary and emits a `node.failed` event.
  *
  * Called from:
- * - `packages/engine/src/node-registry.ts` — agent-loop tool dispatch
- * - `packages/engine/src/node-registry.ts` — `tool` node executor
+ * - `packages/engine/src/node-executors/agents.ts` — agent-loop tool dispatch
+ * - `packages/engine/src/node-executors/transport.ts` — `tool` node executor
  *
  * @throws when the tool name is unregistered, the input fails the schema, or
  *         the executor returns a value that doesn't match the output schema.

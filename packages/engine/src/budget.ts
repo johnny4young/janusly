@@ -11,7 +11,7 @@
  * Used by:
  * - `apps/api/src/routes/ai-routes.ts` — gates all 6 /ai/* routes; throws
  *   `HttpError(402, "budget_exceeded")` when policy is "block".
- * - `packages/engine/src/node-registry.ts` — gates the `ai` node executor;
+ * - `packages/engine/src/node-executors/ai.ts` — gates the `ai` node executor;
  *   block path returns `{ mode: "fallback", aiError: "budget_exceeded" }`.
  * - `packages/engine/src/agent-planner.ts` — gates planner LLM calls;
  *   block path emits a "budget_exceeded" terminate decision.
@@ -20,7 +20,7 @@
  * - Fail-soft on internal errors. When the underlying repo throws (Redis
  *   blip, DB outage), the chokepoint returns `{ allowed: true,
  *   monthlyUsdLimit: null }` so the call proceeds. Matches the
- *   rate-limit fail-open posture documented in AGENTS.md — an AI Studio
+ *   rate-limit fail-open posture — an AI Studio
  *   outage during an infra blip is worse UX than a brief over-budget
  *   window. A `[budget]` warn log fires so operators know we degraded.
  * - The AI fallback contract holds. On a block, callers degrade to

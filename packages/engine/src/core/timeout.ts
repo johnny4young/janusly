@@ -9,7 +9,7 @@
  * Used by `execute-node.ts` to enforce `config.timeoutMs` at the single
  * executor chokepoint — before this, a `tool` / `subworkflow` / `ai` /
  * `transform` node whose executor hung blocked the worker until the 5-minute
- * stalled-node reaper — and by `node-registry.ts:runAgentLoop` for per-tool
+ * stalled-node reaper — and by `node-executors/agents.ts:runAgentLoop` for per-tool
  * timeouts inside an agent (via this shared implementation, not a private
  * duplicate).
  */

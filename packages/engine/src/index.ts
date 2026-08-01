@@ -9,7 +9,7 @@
  * - `apps/api/src/index.ts` — every route that touches a workflow goes
  *   through one of these.
  * - `packages/engine/src/worker.ts` — the BullMQ worker imports tool-registry
- *   + node-registry directly (sibling import path, not via this barrel).
+ *   and execute-node directly (sibling import paths, not via this barrel).
  *
  * Invariants:
  * - Engine code is the only place that owns runtime semantics. The api +

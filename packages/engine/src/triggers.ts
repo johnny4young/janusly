@@ -19,7 +19,7 @@
  * `schedule` executor's documented behaviour.
  *
  * Used by:
- * - `node-registry.ts` — registers the trigger executors.
+ * - `node-executors/delegated.ts` — registers the trigger executors.
  * - `workflow-validation.ts` — `resolveTriggerConfig` is the per-type config
  *   gate at `POST /validate` time.
  *
@@ -44,7 +44,7 @@ import {
   type TriggerNodeType,
   type WebhookReceivedConfig,
 } from "@janusly/shared/src/trigger-types";
-import type { NodeExecutor } from "./node-registry";
+import type { NodeExecutor } from "./node-executors/types";
 
 /**
  * Resolve + validate a trigger node's config against its shared schema.

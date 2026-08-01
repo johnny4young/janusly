@@ -2,7 +2,7 @@
  * Shared preparation and dispatch helpers for registered workflow tools.
  *
  * Used by:
- * - `node-registry.ts` for ordinary `tool` nodes and agent-planner calls.
+ * - `node-executors/transport.ts` for ordinary `tool` nodes and agent-planner calls.
  * - `loop-executor.ts` for bounded per-item tool execution.
  *
  * Keeping HTTP tenant defaults and sandbox write classification here prevents

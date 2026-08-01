@@ -1,9 +1,9 @@
 /**
  * Workflow event type catalogue + builder. The runtime emits these strings
- * from `core/runtime.ts` and `node-registry.ts`; the web's run timeline +
+ * from `core/runtime.ts` and `node-executors/*`; the web's run timeline +
  * Multi-agent timeline parse them downstream.
  *
- * Used by `core/runtime.ts`, `node-registry.ts`, `start-run.ts`, and the web
+ * Used by `core/runtime.ts`, `node-executors/*`, `start-run.ts`, and the web
  * panels that consume `run_events.type`.
  *
  * Invariants:

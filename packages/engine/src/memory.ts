@@ -6,7 +6,7 @@
  * agent context (succeeded/failed/waiting/resumed/memory append) and caps
  * to the most recent `limit` entries.
  *
- * Used by `node-registry.ts:runAgentLoop` (every iteration of `agent` /
+ * Used by `node-executors/agents.ts:runAgentLoop` (every iteration of `agent` /
  * `multi_agent` nodes) to give the planner access to prior steps.
  */
 

@@ -8,7 +8,7 @@
  * failure/cancellation).
  *
  * Used by:
- * - `node-registry.ts` (`subworkflow: subworkflowExecutor`).
+ * - `node-executors/delegated.ts` (`subworkflow: subworkflowExecutor`).
  * - `persistence-ports/run.ts:updateRunStatusFromNodes` (calls `notifyParentOnTerminal`
  *   when the run flips to a terminal status and has a `parent_run_id`).
  *
@@ -43,7 +43,7 @@ import {
   updateRunStatusFromNodes,
 } from "./persistence";
 import { startRun } from "./start-run";
-import type { NodeExecutor } from "./node-registry";
+import type { NodeExecutor } from "./node-executors/types";
 import { redactValues } from "./template";
 import { BullMQQueueAdapter } from "./adapters/bullmq-queue-adapter";
 import { PostgresExecutionStore } from "./adapters/postgres-execution-store";
