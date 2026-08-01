@@ -632,6 +632,32 @@ func (q *Queries) ClearParentNotification(ctx context.Context, arg ClearParentNo
 	return err
 }
 
+const completeExperiment = `-- name: CompleteExperiment :execrows
+UPDATE experiments
+SET status = $3, summary_json = $4, completed_at = now()
+WHERE org_id = $1 AND id = $2 AND status = 'running'
+`
+
+type CompleteExperimentParams struct {
+	OrgID       string
+	ID          string
+	Status      string
+	SummaryJson json.RawMessage
+}
+
+func (q *Queries) CompleteExperiment(ctx context.Context, arg CompleteExperimentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completeExperiment,
+		arg.OrgID,
+		arg.ID,
+		arg.Status,
+		arg.SummaryJson,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const completeOnboardingCas = `-- name: CompleteOnboardingCas :execrows
 UPDATE onboarding_progress
 SET status = 'completed', step = 'completed', completed_at = now(), updated_at = now()
@@ -976,6 +1002,37 @@ func (q *Queries) DeleteCredential(ctx context.Context, arg DeleteCredentialPara
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const deleteEvalDataset = `-- name: DeleteEvalDataset :execrows
+DELETE FROM eval_datasets WHERE org_id = $1 AND id = $2
+`
+
+type DeleteEvalDatasetParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) DeleteEvalDataset(ctx context.Context, arg DeleteEvalDatasetParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteEvalDataset, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteEvalExamplesForDataset = `-- name: DeleteEvalExamplesForDataset :exec
+DELETE FROM eval_examples WHERE org_id = $1 AND dataset_id = $2
+`
+
+type DeleteEvalExamplesForDatasetParams struct {
+	OrgID     string
+	DatasetID string
+}
+
+func (q *Queries) DeleteEvalExamplesForDataset(ctx context.Context, arg DeleteEvalExamplesForDatasetParams) error {
+	_, err := q.db.Exec(ctx, deleteEvalExamplesForDataset, arg.OrgID, arg.DatasetID)
+	return err
 }
 
 const deleteExpiredAuditLogsBatch = `-- name: DeleteExpiredAuditLogsBatch :execrows
@@ -1332,6 +1389,32 @@ func (q *Queries) FindActiveWorkflowRollout(ctx context.Context, arg FindActiveW
 	var id string
 	err := row.Scan(&id)
 	return id, err
+}
+
+const findEvalDatasetByName = `-- name: FindEvalDatasetByName :one
+SELECT id, org_id, name, description, workflow_id, example_count, retention_days, created_by, created_at FROM eval_datasets WHERE org_id = $1 AND name = $2
+`
+
+type FindEvalDatasetByNameParams struct {
+	OrgID string
+	Name  string
+}
+
+func (q *Queries) FindEvalDatasetByName(ctx context.Context, arg FindEvalDatasetByNameParams) (EvalDataset, error) {
+	row := q.db.QueryRow(ctx, findEvalDatasetByName, arg.OrgID, arg.Name)
+	var i EvalDataset
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.Description,
+		&i.WorkflowID,
+		&i.ExampleCount,
+		&i.RetentionDays,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const findLatestDeadLetterForNode = `-- name: FindLatestDeadLetterForNode :one
@@ -2158,6 +2241,62 @@ func (q *Queries) GetDeadLetterForImpact(ctx context.Context, arg GetDeadLetterF
 		&i.ReplayClaimedAt,
 		&i.ReplayedAt,
 		&i.ReplayMode,
+	)
+	return i, err
+}
+
+const getEvalDataset = `-- name: GetEvalDataset :one
+SELECT id, org_id, name, description, workflow_id, example_count, retention_days, created_by, created_at FROM eval_datasets WHERE org_id = $1 AND id = $2
+`
+
+type GetEvalDatasetParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) GetEvalDataset(ctx context.Context, arg GetEvalDatasetParams) (EvalDataset, error) {
+	row := q.db.QueryRow(ctx, getEvalDataset, arg.OrgID, arg.ID)
+	var i EvalDataset
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.Description,
+		&i.WorkflowID,
+		&i.ExampleCount,
+		&i.RetentionDays,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getExperiment = `-- name: GetExperiment :one
+SELECT id, org_id, name, kind, control_ref, candidate_ref, eval_dataset_id, scorer_kind, status, summary_json, created_by, created_at, completed_at FROM experiments WHERE org_id = $1 AND id = $2
+`
+
+type GetExperimentParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) GetExperiment(ctx context.Context, arg GetExperimentParams) (Experiment, error) {
+	row := q.db.QueryRow(ctx, getExperiment, arg.OrgID, arg.ID)
+	var i Experiment
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.Kind,
+		&i.ControlRef,
+		&i.CandidateRef,
+		&i.EvalDatasetID,
+		&i.ScorerKind,
+		&i.Status,
+		&i.SummaryJson,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.CompletedAt,
 	)
 	return i, err
 }
@@ -3836,6 +3975,108 @@ func (q *Queries) InsertDeadLetter(ctx context.Context, arg InsertDeadLetterPara
 		arg.WorkflowJson,
 		arg.NodeJson,
 		arg.ErrorJson,
+	)
+	return err
+}
+
+const insertEvalDataset = `-- name: InsertEvalDataset :exec
+INSERT INTO eval_datasets (id, org_id, name, description, workflow_id,
+                           example_count, retention_days, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+`
+
+type InsertEvalDatasetParams struct {
+	ID            string
+	OrgID         string
+	Name          string
+	Description   string
+	WorkflowID    pgtype.Text
+	ExampleCount  int32
+	RetentionDays pgtype.Int4
+	CreatedBy     pgtype.Text
+}
+
+func (q *Queries) InsertEvalDataset(ctx context.Context, arg InsertEvalDatasetParams) error {
+	_, err := q.db.Exec(ctx, insertEvalDataset,
+		arg.ID,
+		arg.OrgID,
+		arg.Name,
+		arg.Description,
+		arg.WorkflowID,
+		arg.ExampleCount,
+		arg.RetentionDays,
+		arg.CreatedBy,
+	)
+	return err
+}
+
+const insertEvalExample = `-- name: InsertEvalExample :exec
+INSERT INTO eval_examples (id, org_id, dataset_id, source_feedback_id, workflow_id,
+                           dead_letter_id, failure_signature, input_context,
+                           expected_approach_label, accepted, suggestion_mode)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+`
+
+type InsertEvalExampleParams struct {
+	ID                    string
+	OrgID                 string
+	DatasetID             string
+	SourceFeedbackID      string
+	WorkflowID            pgtype.Text
+	DeadLetterID          pgtype.Text
+	FailureSignature      string
+	InputContext          string
+	ExpectedApproachLabel string
+	Accepted              bool
+	SuggestionMode        string
+}
+
+func (q *Queries) InsertEvalExample(ctx context.Context, arg InsertEvalExampleParams) error {
+	_, err := q.db.Exec(ctx, insertEvalExample,
+		arg.ID,
+		arg.OrgID,
+		arg.DatasetID,
+		arg.SourceFeedbackID,
+		arg.WorkflowID,
+		arg.DeadLetterID,
+		arg.FailureSignature,
+		arg.InputContext,
+		arg.ExpectedApproachLabel,
+		arg.Accepted,
+		arg.SuggestionMode,
+	)
+	return err
+}
+
+const insertExperiment = `-- name: InsertExperiment :exec
+INSERT INTO experiments (id, org_id, name, kind, control_ref, candidate_ref,
+                         eval_dataset_id, scorer_kind, status, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'running', $9)
+`
+
+type InsertExperimentParams struct {
+	ID            string
+	OrgID         string
+	Name          string
+	Kind          string
+	ControlRef    string
+	CandidateRef  string
+	EvalDatasetID string
+	ScorerKind    string
+	CreatedBy     pgtype.Text
+}
+
+func (q *Queries) InsertExperiment(ctx context.Context, arg InsertExperimentParams) error {
+	_, err := q.db.Exec(ctx, insertExperiment,
+		arg.ID,
+		arg.OrgID,
+		arg.Name,
+		arg.Kind,
+		arg.ControlRef,
+		arg.CandidateRef,
+		arg.EvalDatasetID,
+		arg.ScorerKind,
+		arg.CreatedBy,
 	)
 	return err
 }
@@ -5606,6 +5847,121 @@ func (q *Queries) ListEnabledUpstreamHealthSources(ctx context.Context) ([]Upstr
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEvalDatasets = `-- name: ListEvalDatasets :many
+SELECT id, org_id, name, description, workflow_id, example_count, retention_days, created_by, created_at FROM eval_datasets WHERE org_id = $1 ORDER BY created_at DESC LIMIT 100
+`
+
+func (q *Queries) ListEvalDatasets(ctx context.Context, orgID string) ([]EvalDataset, error) {
+	rows, err := q.db.Query(ctx, listEvalDatasets, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EvalDataset
+	for rows.Next() {
+		var i EvalDataset
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Name,
+			&i.Description,
+			&i.WorkflowID,
+			&i.ExampleCount,
+			&i.RetentionDays,
+			&i.CreatedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEvalExamples = `-- name: ListEvalExamples :many
+SELECT id, org_id, dataset_id, source_feedback_id, workflow_id, dead_letter_id, failure_signature, input_context, expected_approach_label, accepted, suggestion_mode, created_at FROM eval_examples WHERE org_id = $1 AND dataset_id = $2
+ORDER BY created_at ASC LIMIT 500
+`
+
+type ListEvalExamplesParams struct {
+	OrgID     string
+	DatasetID string
+}
+
+func (q *Queries) ListEvalExamples(ctx context.Context, arg ListEvalExamplesParams) ([]EvalExample, error) {
+	rows, err := q.db.Query(ctx, listEvalExamples, arg.OrgID, arg.DatasetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EvalExample
+	for rows.Next() {
+		var i EvalExample
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.DatasetID,
+			&i.SourceFeedbackID,
+			&i.WorkflowID,
+			&i.DeadLetterID,
+			&i.FailureSignature,
+			&i.InputContext,
+			&i.ExpectedApproachLabel,
+			&i.Accepted,
+			&i.SuggestionMode,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExperiments = `-- name: ListExperiments :many
+SELECT id, org_id, name, kind, control_ref, candidate_ref, eval_dataset_id, scorer_kind, status, summary_json, created_by, created_at, completed_at FROM experiments WHERE org_id = $1 ORDER BY created_at DESC LIMIT 100
+`
+
+func (q *Queries) ListExperiments(ctx context.Context, orgID string) ([]Experiment, error) {
+	rows, err := q.db.Query(ctx, listExperiments, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Experiment
+	for rows.Next() {
+		var i Experiment
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Name,
+			&i.Kind,
+			&i.ControlRef,
+			&i.CandidateRef,
+			&i.EvalDatasetID,
+			&i.ScorerKind,
+			&i.Status,
+			&i.SummaryJson,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.CompletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -8736,6 +9092,62 @@ func (q *Queries) QueryCostByProvider(ctx context.Context, arg QueryCostByProvid
 			&i.CacheCreationInputTokens,
 			&i.Calls,
 			&i.Aggregated,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const queryEligibleFeedbackForEval = `-- name: QueryEligibleFeedbackForEval :many
+SELECT rf.id AS feedback_id, rf.workflow_id, rf.dead_letter_id,
+       rf.approach_label, rf.suggestion_mode, rf.comment,
+       dl.error_json
+FROM recovery_feedback rf
+LEFT JOIN dead_letters dl ON dl.id = rf.dead_letter_id
+WHERE rf.org_id = $1
+  AND rf.accepted = true AND rf.eval_consent = true
+  AND ($2::text IS NULL OR rf.workflow_id = $2::text)
+ORDER BY rf.created_at DESC
+LIMIT 500
+`
+
+type QueryEligibleFeedbackForEvalParams struct {
+	OrgID      string
+	WorkflowID pgtype.Text
+}
+
+type QueryEligibleFeedbackForEvalRow struct {
+	FeedbackID     string
+	WorkflowID     string
+	DeadLetterID   string
+	ApproachLabel  string
+	SuggestionMode string
+	Comment        pgtype.Text
+	ErrorJson      json.RawMessage
+}
+
+func (q *Queries) QueryEligibleFeedbackForEval(ctx context.Context, arg QueryEligibleFeedbackForEvalParams) ([]QueryEligibleFeedbackForEvalRow, error) {
+	rows, err := q.db.Query(ctx, queryEligibleFeedbackForEval, arg.OrgID, arg.WorkflowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []QueryEligibleFeedbackForEvalRow
+	for rows.Next() {
+		var i QueryEligibleFeedbackForEvalRow
+		if err := rows.Scan(
+			&i.FeedbackID,
+			&i.WorkflowID,
+			&i.DeadLetterID,
+			&i.ApproachLabel,
+			&i.SuggestionMode,
+			&i.Comment,
+			&i.ErrorJson,
 		); err != nil {
 			return nil, err
 		}

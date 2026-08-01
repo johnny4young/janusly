@@ -178,6 +178,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	server.mountProductSurfaceRoutes(mux)
 	server.mountWorkflowHealthRoutes(mux)
 	server.mountWorkflowMetadataRoutes(mux)
+	server.mountEvalRoutes(mux)
 	server.mountAiPatchRoutes(mux)
 	return WithBrowserHeaders(mux)
 }

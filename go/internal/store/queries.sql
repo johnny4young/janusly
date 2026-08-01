@@ -2325,3 +2325,61 @@ WHERE org_id = $1 AND tags ? sqlc.arg(tag)::text;
 -- name: ListOwnedActiveWorkflowIDs :many
 SELECT id FROM workflows
 WHERE org_id = $1 AND id = ANY(sqlc.arg(ids)::text[]) AND deleted_at IS NULL;
+
+-- name: ListEvalDatasets :many
+SELECT * FROM eval_datasets WHERE org_id = $1 ORDER BY created_at DESC LIMIT 100;
+
+-- name: GetEvalDataset :one
+SELECT * FROM eval_datasets WHERE org_id = $1 AND id = $2;
+
+-- name: FindEvalDatasetByName :one
+SELECT * FROM eval_datasets WHERE org_id = $1 AND name = $2;
+
+-- name: InsertEvalDataset :exec
+INSERT INTO eval_datasets (id, org_id, name, description, workflow_id,
+                           example_count, retention_days, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+
+-- name: DeleteEvalDataset :execrows
+DELETE FROM eval_datasets WHERE org_id = $1 AND id = $2;
+
+-- name: DeleteEvalExamplesForDataset :exec
+DELETE FROM eval_examples WHERE org_id = $1 AND dataset_id = $2;
+
+-- name: InsertEvalExample :exec
+INSERT INTO eval_examples (id, org_id, dataset_id, source_feedback_id, workflow_id,
+                           dead_letter_id, failure_signature, input_context,
+                           expected_approach_label, accepted, suggestion_mode)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
+
+-- name: ListEvalExamples :many
+SELECT * FROM eval_examples WHERE org_id = $1 AND dataset_id = $2
+ORDER BY created_at ASC LIMIT 500;
+
+-- name: QueryEligibleFeedbackForEval :many
+SELECT rf.id AS feedback_id, rf.workflow_id, rf.dead_letter_id,
+       rf.approach_label, rf.suggestion_mode, rf.comment,
+       dl.error_json
+FROM recovery_feedback rf
+LEFT JOIN dead_letters dl ON dl.id = rf.dead_letter_id
+WHERE rf.org_id = sqlc.arg(org_id)
+  AND rf.accepted = true AND rf.eval_consent = true
+  AND (sqlc.narg(workflow_id)::text IS NULL OR rf.workflow_id = sqlc.narg(workflow_id)::text)
+ORDER BY rf.created_at DESC
+LIMIT 500;
+
+-- name: InsertExperiment :exec
+INSERT INTO experiments (id, org_id, name, kind, control_ref, candidate_ref,
+                         eval_dataset_id, scorer_kind, status, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'running', $9);
+
+-- name: CompleteExperiment :execrows
+UPDATE experiments
+SET status = $3, summary_json = $4, completed_at = now()
+WHERE org_id = $1 AND id = $2 AND status = 'running';
+
+-- name: GetExperiment :one
+SELECT * FROM experiments WHERE org_id = $1 AND id = $2;
+
+-- name: ListExperiments :many
+SELECT * FROM experiments WHERE org_id = $1 ORDER BY created_at DESC LIMIT 100;
