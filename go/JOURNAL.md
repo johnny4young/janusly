@@ -1824,3 +1824,6 @@ El split mecánico trajo su propia trampa de verificación: el primer diff "byte
 
 ## T-501 — v1.go en cuatro (2026-08-01)
 Split por rangos de declaración con goimports podando por archivo — el corte mecánico ideal: el guard es que la suite de contrato no notó NADA, porque no había nada que notar. La estructura resultante lee como el índice que el archivo monolítico escondía: constructor y auth en v1.go, sobres y helpers en encoding, y los dos planos de rutas (runs y workflows) cada uno con su vida.
+
+## T-502 — scim en cinco (2026-08-01)
+El spec decía tres archivos; el módulo pidió cinco — el receptor público del webhook y los write paths de membresía son fronteras reales (autorización distinta, transaccionalidad distinta) que merecían archivo propio en vez de estirarse dentro de dispatch y routes. La suite del ciclo de vida no movió una expectativa.
