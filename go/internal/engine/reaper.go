@@ -14,6 +14,8 @@ package engine
 import (
 	"context"
 	"log/slog"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/johnny4young/janusly/go/internal/store"
@@ -63,7 +65,18 @@ func (e *Engine) ReapStalledNodes(ctx context.Context, threshold time.Duration, 
 // long executions; tests exercise ReapStalledNodes directly with tighter
 // windows.
 func (e *Engine) StartReaper(ctx context.Context, interval, threshold time.Duration, logger *slog.Logger) {
-	const thresholdFloor = 15 * time.Minute
+	// The floor itself is overridable ONLY by explicit env — the
+	// kill-failover harness (and an expert HA operator with short-lived
+	// nodes) needs sub-15m recovery; the override logs loudly so a
+	// misconfigured production deploy is visible in the first minute.
+	thresholdFloor := 15 * time.Minute
+	if raw := os.Getenv("JANUSLY_GO_REAPER_THRESHOLD_FLOOR_MS"); raw != "" {
+		if ms, err := strconv.Atoi(raw); err == nil && ms > 0 {
+			thresholdFloor = time.Duration(ms) * time.Millisecond
+			logger.Warn("reaper threshold floor overridden by env — nodes running longer than the effective threshold WILL be failed into the DLQ",
+				"floor", thresholdFloor)
+		}
+	}
 	if threshold < thresholdFloor {
 		threshold = thresholdFloor
 	}

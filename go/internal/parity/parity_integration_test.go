@@ -99,7 +99,9 @@ func TestSemanticParity(t *testing.T) {
 	}()
 	defer func() { stopWorkers(); <-done }()
 
-	api := httptest.NewServer(httpapi.NewV1Handler(eng, pool))
+	handler, shutdownHub := httpapi.NewV1HandlerWithShutdown(eng, pool)
+	api := httptest.NewServer(handler)
+	t.Cleanup(shutdownHub)
 	defer api.Close()
 	org := fmt.Sprintf("parity-go-%d", time.Now().UnixNano())
 	driver := &apiDriver{base: api.URL, org: org}

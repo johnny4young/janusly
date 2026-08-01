@@ -56,8 +56,10 @@ func newAPIHarness(t *testing.T) *apiHarness {
 	go eng.RunReplayCampaignPump(workerCtx, 30*time.Millisecond, quietTestLogger())
 	t.Cleanup(func() { stopWorkers(); <-done })
 
-	server := httptest.NewServer(NewV1Handler(eng, pool))
+	handler, shutdownHub := NewV1HandlerWithShutdown(eng, pool)
+	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
+	t.Cleanup(shutdownHub)
 	raw := make([]byte, 6)
 	for i := range raw {
 		raw[i] = byte('a' + time.Now().UnixNano()>>uint(i*3)%26)

@@ -22,8 +22,10 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const GO_DIR = join(HERE, "..");
 const REPO = join(GO_DIR, "..");
 const PERF = join(HERE, "perf");
-const API = "http://127.0.0.1:4600";
-const INTERNAL = "http://127.0.0.1:4601";
+const API_PORT = process.env.SOAK_PORT ?? "4600";
+const INTERNAL_PORT = process.env.SOAK_INTERNAL_PORT ?? "4601";
+const API = `http://127.0.0.1:${API_PORT}`;
+const INTERNAL = `http://127.0.0.1:${INTERNAL_PORT}`;
 const DB = process.env.JANUSLY_GO_DATABASE_URL
   ?? "postgres://janusly:janusly-go-local@127.0.0.1:4632/janusly_go";
 const DURATION = process.env.SOAK_DURATION ?? "1h";
@@ -37,8 +39,8 @@ const api = spawn("/tmp/janusly-go-soak-api", [], {
   env: {
     ...process.env,
     JANUSLY_GO_DATABASE_URL: DB,
-    JANUSLY_GO_PORT: "4600",
-    JANUSLY_GO_INTERNAL_PORT: "4601",
+    JANUSLY_GO_PORT: API_PORT,
+    JANUSLY_GO_INTERNAL_PORT: INTERNAL_PORT,
     JANUSLY_GO_POLL_MS: "50",
   },
   stdio: ["ignore", "ignore", "inherit"],

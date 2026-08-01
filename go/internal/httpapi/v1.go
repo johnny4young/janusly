@@ -49,8 +49,19 @@ type V1Server struct {
 	mcp            *mcpclient.Client
 }
 
-// NewV1Handler mounts the v1 routes plus /healthz.
+// NewV1Handler mounts the v1 routes plus /healthz. The stream hub's
+// LISTEN connection lives for the process (the production shape).
 func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
+	handler, _ := NewV1HandlerWithShutdown(eng, pool)
+	return handler
+}
+
+// NewV1HandlerWithShutdown additionally returns a shutdown func that
+// cancels the stream hub's hijacked LISTEN connection. Test harnesses MUST
+// call it: the hijacked conn is invisible to pool.Close, so without the
+// cancel every harness leaks one Postgres connection for the binary's
+// lifetime (the "too many clients" suite failure under a live soak).
+func NewV1HandlerWithShutdown(eng *engine.Engine, pool *pgxpool.Pool) (http.Handler, func()) {
 	server := &V1Server{engine: eng, pool: pool, resolver: auth.NewResolver(pool, auth.ConfigFromEnv()), newID: uuid.NewString, hub: newStreamHub()}
 	server.limiterTracker = ratelimit.NewTracker(pool)
 	server.limiter = ratelimit.New(pool, ratelimit.Hooks{
@@ -58,7 +69,8 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	})
 	server.queueCache = &queueHealthCache{read: server.readQueueSnapshot}
 	server.mcp = mcpclient.New(pool, server.limiter)
-	go server.hub.listen(context.Background(), pool)
+	hubCtx, cancelHub := context.WithCancel(context.Background())
+	go server.hub.listen(hubCtx, pool)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -182,7 +194,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	server.mountScimRoutes(mux)
 	server.mountF1SweepRoutes(mux)
 	server.mountAiPatchRoutes(mux)
-	return WithBrowserHeaders(mux)
+	return WithBrowserHeaders(mux), cancelHub
 }
 
 type v1Request struct {

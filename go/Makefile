@@ -106,3 +106,9 @@ test-ha:
 # Soak sostenido (default 1h; SOAK_DURATION=3m para validar el arnés).
 soak:
 	node conformance/run-soak.mjs
+
+# Kill-failover: dos instancias sobre la misma base, SIGKILL a una a mitad
+# de vuelo; el sobreviviente absorbe todo (reaper corto vía env) y la
+# instancia caída se reincorpora. Ver conformance/run-failover.mjs.
+failover:
+	node conformance/run-failover.mjs

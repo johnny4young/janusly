@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"os/signal"
 	"syscall"
 	"time"
@@ -30,6 +31,15 @@ import (
 )
 
 const shutdownGrace = 10 * time.Second
+
+func envDurationMs(name string, fallback time.Duration) time.Duration {
+	if raw := os.Getenv(name); raw != "" {
+		if ms, err := strconv.Atoi(raw); err == nil && ms > 0 {
+			return time.Duration(ms) * time.Millisecond
+		}
+	}
+	return fallback
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -148,7 +158,12 @@ func run() error {
 	go func() {
 		eng.RunMemoryConsentPurgeSweep(workerCtx, time.Hour, logger)
 	}()
-	go eng.StartReaper(workerCtx, time.Minute, time.Hour, logger)
+	// Reaper cadence/threshold are env-tunable for HA deployments (and the
+	// kill-failover harness): a two-replica setup wants a threshold near
+	// its longest legitimate node runtime, not the conservative 1h default.
+	go eng.StartReaper(workerCtx,
+		envDurationMs("JANUSLY_GO_REAPER_INTERVAL_MS", time.Minute),
+		envDurationMs("JANUSLY_GO_REAPER_THRESHOLD_MS", time.Hour), logger)
 	defer func() { stopWorkers(); <-workersDone }()
 
 	api := &http.Server{
