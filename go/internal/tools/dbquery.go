@@ -19,6 +19,9 @@
 package tools
 
 import (
+	"errors"
+	"os"
+
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -36,10 +39,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/johnny4young/janusly/go/internal/signature"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 const (
 	dbMaxOrgPools            = 5
+	dbMaxProcessPoolsDefault = 25
 	dbMaxRowsDefault         = 100
 	dbMaxRowsLimit           = 1_000
 	dbMaxTransactionStmts    = 10
@@ -149,6 +156,28 @@ var (
 	dbPools   = map[string]*dbPoolEntry{}
 )
 
+// errDbPoolExhausted is the stable never-throw sentinel: at the process
+// cap the tool answers {ok:false, error:"db_pool_exhausted"} (T-513).
+var errDbPoolExhausted = errors.New("db_pool_exhausted")
+
+// metricDbToolPools gauges the live external-pool count for dashboards.
+var metricDbToolPools = promauto.NewGauge(prometheus.GaugeOpts{
+	Name: "janusly_go_db_tool_pools",
+	Help: "Cached external db-tool connection pools in this process.",
+})
+
+// dbMaxProcessPools resolves the PROCESS-wide external-pool cap: env
+// JANUSLY_GO_DB_TOOL_MAX_PROCESS_POOLS (1..500) or the default 25. One
+// noisy tenant can exhaust its own 5-pool budget, never the process.
+func dbMaxProcessPools() int {
+	if raw := os.Getenv("JANUSLY_GO_DB_TOOL_MAX_PROCESS_POOLS"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= 1 && n <= 500 {
+			return n
+		}
+	}
+	return dbMaxProcessPoolsDefault
+}
+
 // ResetDbPoolsForTests closes and forgets every cached external pool.
 func ResetDbPoolsForTests() {
 	dbPoolsMu.Lock()
@@ -157,6 +186,7 @@ func ResetDbPoolsForTests() {
 		entry.pool.Close()
 		delete(dbPools, key)
 	}
+	metricDbToolPools.Set(0)
 }
 
 // getDbPool caches ONE-connection pools per (org, credential), swapping on
@@ -191,6 +221,13 @@ func getDbPool(ctx context.Context, orgID, credentialName, dsn string) (*pgxpool
 		dbPools[oldest].pool.Close()
 		delete(dbPools, oldest)
 	}
+	// Process-wide semaphore over the TOTAL (T-513): a net-new pool past
+	// the cap answers the stable exhausted sentinel instead of growing —
+	// deliberately NO cross-org eviction, so one tenant cannot thrash
+	// another tenant's warm pools.
+	if len(dbPools) >= dbMaxProcessPools() {
+		return nil, errDbPoolExhausted
+	}
 
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
@@ -203,6 +240,7 @@ func getDbPool(ctx context.Context, orgID, credentialName, dsn string) (*pgxpool
 		return nil, fmt.Errorf("could not open external database pool")
 	}
 	dbPools[key] = &dbPoolEntry{pool: pool, orgID: orgID, fingerprint: fingerprint, touchedAt: time.Now()}
+	metricDbToolPools.Set(float64(len(dbPools)))
 	return pool, nil
 }
 

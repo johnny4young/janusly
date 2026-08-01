@@ -1907,3 +1907,17 @@ completion y 2 COPYs para los 5 eventos del run lineal (antes 5 statements),
 con el vocabulario T-505 asertado byte a byte. El dual quedó 27/27. El par
 del checkpoint padre (subworkflow.started + node.waiting) se quedó fuera a
 propósito: vive en la transacción de START, no en la familia de completion.
+
+## T-513 — Semáforo global de pools externos (2026-08-01)
+
+El presupuesto 5/org de db-tools protegía a cada tenant de sí mismo, pero
+nada protegía al PROCESO: 30 orgs activas = 30 conexiones externas vivas. El
+cap global (default 25, env) se evalúa después de la evicción LRU por-org,
+con dos decisiones deliberadas: al tope NO hay evicción cross-org (un tenant
+ruidoso no puede desalojar los pools calientes de otro — responde
+`db_pool_exhausted` y ya), y el swap LRU dentro del presupuesto propio sigue
+funcionando (es net-zero sobre el total). El sentinel viaja literal por
+`safeDbError` hasta el envelope never-throw del tool. Gauge nuevo
+`janusly_go_db_tool_pools` para el dashboard. El test llena el cap exacto
+con 2×5, prueba el rechazo limpio del 11°, la supervivencia de los pools
+calientes, el swap net-zero y la recuperación tras reset.
