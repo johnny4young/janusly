@@ -1322,3 +1322,21 @@ RETURNING *;
 SELECT * FROM recovery_item_handoffs
 WHERE org_id = $1 AND recovery_item_id = $2
 ORDER BY first_dispatched_at DESC LIMIT 50;
+
+-- name: ListOpenDeadLetterClusterMembers :many
+SELECT dl.id, dl.run_id, dl.node_id, dl.error_json, dl.created_at, r.input_json
+FROM dead_letters dl
+JOIN runs r ON r.id = dl.run_id
+WHERE dl.org_id = $1 AND dl.created_at >= $2 AND dl.status = 'open'
+ORDER BY dl.created_at DESC
+LIMIT 500;
+
+-- name: MarkDeadLetterResolved :execrows
+UPDATE dead_letters SET status = 'resolved' WHERE org_id = $1 AND id = $2;
+
+-- name: GetRecoveryItemForDeadLetter :one
+SELECT id, status FROM recovery_items WHERE org_id = $1 AND dead_letter_id = $2;
+
+-- name: UpdateRunWorkflowSnapshot :exec
+UPDATE runs SET input_json = jsonb_set(input_json, '{workflow}', sqlc.arg(workflow)::jsonb)
+WHERE id = $1;

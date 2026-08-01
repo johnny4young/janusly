@@ -1568,6 +1568,27 @@ func (q *Queries) GetRecoveryItemByID(ctx context.Context, arg GetRecoveryItemBy
 	return i, err
 }
 
+const getRecoveryItemForDeadLetter = `-- name: GetRecoveryItemForDeadLetter :one
+SELECT id, status FROM recovery_items WHERE org_id = $1 AND dead_letter_id = $2
+`
+
+type GetRecoveryItemForDeadLetterParams struct {
+	OrgID        string
+	DeadLetterID string
+}
+
+type GetRecoveryItemForDeadLetterRow struct {
+	ID     string
+	Status string
+}
+
+func (q *Queries) GetRecoveryItemForDeadLetter(ctx context.Context, arg GetRecoveryItemForDeadLetterParams) (GetRecoveryItemForDeadLetterRow, error) {
+	row := q.db.QueryRow(ctx, getRecoveryItemForDeadLetter, arg.OrgID, arg.DeadLetterID)
+	var i GetRecoveryItemForDeadLetterRow
+	err := row.Scan(&i.ID, &i.Status)
+	return i, err
+}
+
 const getRecoveryPlaybook = `-- name: GetRecoveryPlaybook :one
 SELECT id, org_id, workflow_id, signature, version, status, title, instructions_markdown, evidence_requirements_json, source_workflow_version_id, approach_label, successful_uses, regressions, last_validated_at, last_validation_run_id, last_applied_validation_run_id, activated_at, retired_at, created_by, updated_by, created_at, updated_at FROM recovery_playbooks WHERE org_id = $1 AND id = $2
 `
@@ -3348,6 +3369,56 @@ func (q *Queries) ListMcpToolDescriptorsByConnection(ctx context.Context, connec
 	return items, nil
 }
 
+const listOpenDeadLetterClusterMembers = `-- name: ListOpenDeadLetterClusterMembers :many
+SELECT dl.id, dl.run_id, dl.node_id, dl.error_json, dl.created_at, r.input_json
+FROM dead_letters dl
+JOIN runs r ON r.id = dl.run_id
+WHERE dl.org_id = $1 AND dl.created_at >= $2 AND dl.status = 'open'
+ORDER BY dl.created_at DESC
+LIMIT 500
+`
+
+type ListOpenDeadLetterClusterMembersParams struct {
+	OrgID     string
+	CreatedAt *time.Time
+}
+
+type ListOpenDeadLetterClusterMembersRow struct {
+	ID        string
+	RunID     string
+	NodeID    string
+	ErrorJson json.RawMessage
+	CreatedAt *time.Time
+	InputJson json.RawMessage
+}
+
+func (q *Queries) ListOpenDeadLetterClusterMembers(ctx context.Context, arg ListOpenDeadLetterClusterMembersParams) ([]ListOpenDeadLetterClusterMembersRow, error) {
+	rows, err := q.db.Query(ctx, listOpenDeadLetterClusterMembers, arg.OrgID, arg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOpenDeadLetterClusterMembersRow
+	for rows.Next() {
+		var i ListOpenDeadLetterClusterMembersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.NodeID,
+			&i.ErrorJson,
+			&i.CreatedAt,
+			&i.InputJson,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrgConfigRows = `-- name: ListOrgConfigRows :many
 SELECT key, value_json, updated_at FROM org_configs WHERE org_id = $1 LIMIT 200
 `
@@ -4691,6 +4762,23 @@ func (q *Queries) LockClaimableRunNodes(ctx context.Context, batchSize int32) ([
 	return items, nil
 }
 
+const markDeadLetterResolved = `-- name: MarkDeadLetterResolved :execrows
+UPDATE dead_letters SET status = 'resolved' WHERE org_id = $1 AND id = $2
+`
+
+type MarkDeadLetterResolvedParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) MarkDeadLetterResolved(ctx context.Context, arg MarkDeadLetterResolvedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markDeadLetterResolved, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const markLockedNodesRunning = `-- name: MarkLockedNodesRunning :many
 UPDATE run_nodes SET status = 'running', started_at = now()
 WHERE id = ANY($1::text[])
@@ -5899,6 +5987,21 @@ func (q *Queries) UpdateRunStatusCAS(ctx context.Context, arg UpdateRunStatusCAS
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const updateRunWorkflowSnapshot = `-- name: UpdateRunWorkflowSnapshot :exec
+UPDATE runs SET input_json = jsonb_set(input_json, '{workflow}', $2::jsonb)
+WHERE id = $1
+`
+
+type UpdateRunWorkflowSnapshotParams struct {
+	ID       string
+	Workflow json.RawMessage
+}
+
+func (q *Queries) UpdateRunWorkflowSnapshot(ctx context.Context, arg UpdateRunWorkflowSnapshotParams) error {
+	_, err := q.db.Exec(ctx, updateRunWorkflowSnapshot, arg.ID, arg.Workflow)
+	return err
 }
 
 const upsertConfidenceCalibration = `-- name: UpsertConfidenceCalibration :exec

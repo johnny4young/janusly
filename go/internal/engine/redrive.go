@@ -26,18 +26,38 @@ var ErrDeadLetterNotFound = errors.New("dead letter not found")
 // or a node no longer in the failed state; the API maps it to 409.
 var ErrRedriveConflict = errors.New("dead letter replay already claimed")
 
+// RedriveOptions carries the optional extras a redrive can stamp on the
+// revival: a VERIFIED playbook claim, an applied fix (replaces the run's
+// workflow snapshot so the revived node executes the patch), and a
+// cluster-signature override for the ownership incident.
+type RedriveOptions struct {
+	PlaybookID        string
+	ValidationRunID   string
+	FixWorkflowJSON   []byte
+	SignatureOverride string
+}
+
 // RedriveDeadLetter revives the run behind one dead letter: claim the row,
 // requeue the failed node with attempt+1, flip the run back to running and
 // wake the workers — one transaction, so a crash can never leave a claimed
 // dead letter without its revived node.
 func (e *Engine) RedriveDeadLetter(ctx context.Context, orgID, deadLetterID string) error {
-	return e.RedriveDeadLetterWithPlaybook(ctx, orgID, deadLetterID, "", "")
+	return e.RedriveDeadLetterWithOptions(ctx, orgID, deadLetterID, RedriveOptions{})
 }
 
 // RedriveDeadLetterWithPlaybook additionally stamps a VERIFIED playbook
 // claim on the revived node, so the terminal impact tail can credit the
 // playbook's applied win atomically (T-137).
 func (e *Engine) RedriveDeadLetterWithPlaybook(ctx context.Context, orgID, deadLetterID, playbookID, validationRunID string) error {
+	return e.RedriveDeadLetterWithOptions(ctx, orgID, deadLetterID, RedriveOptions{
+		PlaybookID: playbookID, ValidationRunID: validationRunID,
+	})
+}
+
+// RedriveDeadLetterWithOptions is the full form (cluster-apply + applied
+// fixes ride here).
+func (e *Engine) RedriveDeadLetterWithOptions(ctx context.Context, orgID, deadLetterID string, opts RedriveOptions) error {
+	playbookID, validationRunID := opts.PlaybookID, opts.ValidationRunID
 	tx, err := e.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
@@ -90,6 +110,18 @@ func (e *Engine) RedriveDeadLetterWithPlaybook(ctx context.Context, orgID, deadL
 	}); err != nil {
 		return fmt.Errorf("stamp recovery claim: %w", err)
 	}
+	// An applied fix replaces the run's workflow snapshot INSIDE the same
+	// transaction, so the revived node executes the patch and the run's
+	// recorded configuration reflects what actually ran (the reference
+	// replays the patched snapshot; the pilot's revive-in-place equivalent
+	// is the snapshot swap).
+	if len(opts.FixWorkflowJSON) > 0 {
+		if err := q.UpdateRunWorkflowSnapshot(ctx, store.UpdateRunWorkflowSnapshotParams{
+			ID: deadLetter.RunID, Workflow: opts.FixWorkflowJSON,
+		}); err != nil {
+			return fmt.Errorf("apply fix snapshot: %w", err)
+		}
+	}
 	if _, err := q.ReviveFailedRun(ctx, deadLetter.RunID); err != nil {
 		return fmt.Errorf("revive run: %w", err)
 	}
@@ -97,8 +129,8 @@ func (e *Engine) RedriveDeadLetterWithPlaybook(ctx context.Context, orgID, deadL
 	// unique (org, dead_letter)): severity default p3, SLA 24h, the error
 	// signature for clustering. Resolution happens ONLY at terminal
 	// success (recordRecoveryImpact) — initiation opens work, never wins.
-	signature := ""
-	if len(deadLetter.ErrorJson) > 0 {
+	signature := opts.SignatureOverride
+	if signature == "" && len(deadLetter.ErrorJson) > 0 {
 		var serr struct {
 			Message string `json:"message"`
 		}
