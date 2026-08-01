@@ -1566,3 +1566,40 @@ SELECT * FROM workflow_recovery_qualifications
 WHERE org_id = $1 AND workflow_id = $2 AND baseline_version_id = $3
   AND candidate_version_id = $4 AND dataset_version = $5
 ORDER BY created_at DESC, id DESC LIMIT 1;
+
+-- name: GetRunForRolloutOutcome :one
+SELECT org_id, status, replay_mode, workflow_rollout_id, workflow_rollout_variant, workflow_version_id
+FROM runs WHERE id = $1;
+
+-- name: GetActiveRolloutForOutcome :one
+SELECT * FROM workflow_rollouts WHERE id = $1 AND org_id = $2 AND status = 'active';
+
+-- name: InsertWorkflowRolloutOutcome :execrows
+INSERT INTO workflow_rollout_outcomes (run_id, org_id, rollout_id, workflow_id, variant, status)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (run_id) DO NOTHING;
+
+-- name: IncrementRolloutCounters :one
+UPDATE workflow_rollouts SET
+  baseline_succeeded = baseline_succeeded + sqlc.arg(baseline_succeeded_inc),
+  baseline_failed = baseline_failed + sqlc.arg(baseline_failed_inc),
+  canary_succeeded = canary_succeeded + sqlc.arg(canary_succeeded_inc),
+  canary_failed = canary_failed + sqlc.arg(canary_failed_inc),
+  last_outcome_at = now(), updated_at = now()
+WHERE id = $1 AND status = 'active'
+RETURNING *;
+
+-- name: AutoRollbackRollout :one
+UPDATE workflow_rollouts
+SET status = 'rolled_back', rolled_back_reason = sqlc.arg(reason), ended_at = now(), updated_at = now()
+WHERE id = $1 AND status = 'active'
+RETURNING *;
+
+-- name: ListUnrecordedRolloutOutcomes :many
+SELECT r.id AS run_id, r.status FROM runs r
+JOIN workflow_rollouts wr ON wr.id = r.workflow_rollout_id AND wr.org_id = r.org_id AND wr.status = 'active'
+LEFT JOIN workflow_rollout_outcomes o ON o.run_id = r.id
+WHERE r.workflow_rollout_id IS NOT NULL AND r.replay_mode IS NULL
+  AND r.status IN ('succeeded','failed','cancelled') AND o.run_id IS NULL
+ORDER BY r.created_at ASC, r.id ASC
+LIMIT sqlc.arg(page_limit);

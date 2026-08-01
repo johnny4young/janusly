@@ -4,6 +4,8 @@ package httpapi
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -207,5 +209,127 @@ func TestRolloutVersionWriteLocking(t *testing.T) {
 	}
 	if status != "cancelled" || reason != "workflow_deleted" {
 		t.Fatalf("delete must cancel the rollout: %s %s", status, reason)
+	}
+}
+
+// T-152: idempotent terminal receipts feeding the aggregate counters,
+// the minimum-sample auto-rollback with its atomic audit evidence,
+// frozen evidence after finish, and the bounded crash-window repair.
+func TestRolloutAutoRollback(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	ctx := t.Context()
+	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "true")
+	wfID := fmt.Sprintf("wf-auto-%d", time.Now().UnixNano())
+
+	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer broken.Close()
+
+	// v1 baseline: healthy. v2 canary: an http node against a dead
+	// upstream — every canary run fails.
+	brokenDoc := rolloutWorkflowDoc(wfID, "canary")
+	brokenDoc["nodes"] = append(brokenDoc["nodes"].([]any), map[string]any{
+		"id": "call", "type": "http", "config": map[string]any{"url": broken.URL, "timeoutMs": 500},
+	})
+	brokenDoc["edges"] = append(brokenDoc["edges"].([]any), map[string]any{"from": "done", "to": "call"})
+	res := h.call("POST", "/workflows/save", rolloutWorkflowDoc(wfID, "baseline"), "")
+	v1 := res.body["versionId"].(string)
+	res = h.call("POST", "/workflows/save", brokenDoc, "")
+	v2 := res.body["versionId"].(string)
+	res = h.call("POST", "/workflows/"+wfID+"/rollout", map[string]any{
+		"baselineVersionId": v1, "canaryVersionId": v2,
+		"trafficPercent": 50, "minimumSampleSize": 5, "minimumSuccessRatePercent": 90,
+	}, "")
+	if res.status != 200 {
+		t.Fatalf("create: %d %+v", res.status, res.body)
+	}
+	rolloutID := res.body["rollout"].(map[string]any)["id"].(string)
+
+	// Drive runs until the canary sample breaches (5 failures at 0%).
+	rolloutStatus := func() (string, string, int, int) {
+		var status, reason string
+		var canaryFailed, receipts int
+		_ = pool.QueryRow(ctx, `SELECT status, COALESCE(rolled_back_reason, ''), canary_failed
+			FROM workflow_rollouts WHERE id = $1`, rolloutID).Scan(&status, &reason, &canaryFailed)
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM workflow_rollout_outcomes WHERE rollout_id = $1`,
+			rolloutID).Scan(&receipts)
+		return status, reason, canaryFailed, receipts
+	}
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		status, _, _, _ := rolloutStatus()
+		if status == "rolled_back" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("auto-rollback did not fire")
+		}
+		res = h.call("POST", "/v1/start", map[string]any{"workflow": rolloutWorkflowDoc(wfID, "req")}, "")
+		runID := extractRunID(t, res)
+		var variant string
+		_ = pool.QueryRow(ctx, `SELECT COALESCE(workflow_rollout_variant, '') FROM runs WHERE id = $1`,
+			runID).Scan(&variant)
+		if variant == "canary" {
+			h.waitRun(runID, "failed")
+		} else {
+			h.waitRun(runID, "succeeded")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	status, reason, canaryFailed, receipts := rolloutStatus()
+	if status != "rolled_back" || reason != "canary_success_rate_breach" {
+		t.Fatalf("auto-rollback: %s %s", status, reason)
+	}
+	if canaryFailed < 5 || receipts < canaryFailed {
+		t.Fatalf("counters/receipts: failed=%d receipts=%d", canaryFailed, receipts)
+	}
+	var audited int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs
+		WHERE org_id = $1 AND action = 'workflow.rollout.auto_rolled_back' AND target_id = $2`,
+		h.org, rolloutID).Scan(&audited)
+	if audited != 1 {
+		t.Fatalf("auto-rollback must audit exactly once: %d", audited)
+	}
+
+	// Frozen evidence: a terminal arrival after the finish is IGNORED.
+	frozenFailed := canaryFailed
+	res = h.call("POST", "/v1/start", map[string]any{"workflow": rolloutWorkflowDoc(wfID, "late")}, "")
+	lateRun := extractRunID(t, res)
+	h.waitRun(lateRun, "succeeded")
+	time.Sleep(200 * time.Millisecond)
+	if _, _, nowFailed, _ := rolloutStatus(); nowFailed != frozenFailed {
+		t.Fatalf("finished rollout must keep frozen evidence")
+	}
+
+	// Crash-window repair on a SECOND live rollout: receipt+counters both
+	// missing (they commit together) → the bounded repair re-drives them.
+	wf2 := wfID + "-b"
+	res = h.call("POST", "/workflows/save", rolloutWorkflowDoc(wf2, "one"), "")
+	w1 := res.body["versionId"].(string)
+	res = h.call("POST", "/workflows/save", rolloutWorkflowDoc(wf2, "two"), "")
+	w2 := res.body["versionId"].(string)
+	res = h.call("POST", "/workflows/"+wf2+"/rollout", map[string]any{
+		"baselineVersionId": w1, "canaryVersionId": w2,
+		"trafficPercent": 50, "minimumSampleSize": 100, "minimumSuccessRatePercent": 1,
+	}, "")
+	rollout2 := res.body["rollout"].(map[string]any)["id"].(string)
+	res = h.call("POST", "/v1/start", map[string]any{"workflow": rolloutWorkflowDoc(wf2, "req")}, "")
+	repairRun := extractRunID(t, res)
+	h.waitRun(repairRun, "succeeded")
+	time.Sleep(200 * time.Millisecond)
+	// Simulate the crash window: receipt AND counter increment vanish.
+	if _, err := pool.Exec(ctx, `DELETE FROM workflow_rollout_outcomes WHERE run_id = $1`, repairRun); err != nil {
+		t.Fatalf("simulate: %v", err)
+	}
+	_, _ = pool.Exec(ctx, `UPDATE workflow_rollouts SET baseline_succeeded = 0, canary_succeeded = 0 WHERE id = $1`, rollout2)
+	// The operator read runs the bounded repair.
+	_ = h.call("GET", "/workflows/"+wf2+"/rollout", nil, "")
+	var repairedReceipts, repairedCounters int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM workflow_rollout_outcomes WHERE run_id = $1`, repairRun).Scan(&repairedReceipts)
+	_ = pool.QueryRow(ctx, `SELECT baseline_succeeded + canary_succeeded FROM workflow_rollouts WHERE id = $1`, rollout2).Scan(&repairedCounters)
+	if repairedReceipts != 1 || repairedCounters != 1 {
+		t.Fatalf("repair must re-drive receipt + counters: %d %d", repairedReceipts, repairedCounters)
 	}
 }

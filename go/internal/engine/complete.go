@@ -68,7 +68,7 @@ func (e *Engine) CompleteNode(ctx context.Context, claim ClaimedNode, output any
 	eventJSON := safePersist(eventPayload, defaultPersistMaxBytes())
 
 	finishedAt := eventNow()
-	return e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries) error {
+	if err := e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries) error {
 		completed, err := q.CompleteRunNode(ctx, store.CompleteRunNodeParams{
 			RunID: claim.RunID, NodeID: claim.NodeID,
 			StateJson:  stateJSON,
@@ -108,7 +108,14 @@ func (e *Engine) CompleteNode(ctx context.Context, claim ClaimedNode, output any
 			}
 		}
 		return e.scheduleDownstream(ctx, q, claim.RunID, finishedAt)
-	})
+	}); err != nil {
+		return err
+	}
+	// Rollout outcome receipt (post-commit, idempotent; the repair pass
+	// covers crash windows). Only meaningful when this completion rolled
+	// the run terminal — the recorder re-validates everything itself.
+	e.maybeRecordRolloutOutcome(ctx, claim.RunID)
+	return nil
 }
 
 // evaluateSemanticOutcome runs the contract's deterministic detectors for
@@ -391,6 +398,8 @@ func (e *Engine) afterTerminalFailure(ctx context.Context, claim ClaimedNode) {
 		return
 	}
 	e.maybeTripCircuitBreaker(ctx, run.OrgID, wf.ID, claim.RunID)
+	// Rollout outcome receipt (idempotent; repair covers crash windows).
+	e.maybeRecordRolloutOutcome(ctx, claim.RunID)
 	// Alert producer: the dead letter is durable (committed with the
 	// failure tx), so the dlq.entry_created event fires here, after commit.
 	if dl, err := store.New(e.pool).FindLatestDeadLetterForNode(ctx, store.FindLatestDeadLetterForNodeParams{

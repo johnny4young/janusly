@@ -33,6 +33,9 @@ func rolloutView(rollout store.WorkflowRollout) map[string]any {
 }
 
 func (s *V1Server) getRolloutCore(r *http.Request, rc v1Request, workflowID string) opResult {
+	// Bounded read-repair: receipts missed by a crash window converge on
+	// the next operator read (cron wiring lands with the scheduler wave).
+	_ = s.engine.RepairWorkflowRolloutOutcomes(r.Context(), 100)
 	rollout, err := store.New(s.pool).GetLatestWorkflowRolloutRow(r.Context(), store.GetLatestWorkflowRolloutRowParams{
 		OrgID: rc.orgID, WorkflowID: workflowID,
 	})

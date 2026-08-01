@@ -65,6 +65,45 @@ func (q *Queries) AppendRecoveryItemComment(ctx context.Context, arg AppendRecov
 	return result.RowsAffected(), nil
 }
 
+const autoRollbackRollout = `-- name: AutoRollbackRollout :one
+UPDATE workflow_rollouts
+SET status = 'rolled_back', rolled_back_reason = $2, ended_at = now(), updated_at = now()
+WHERE id = $1 AND status = 'active'
+RETURNING id, org_id, workflow_id, baseline_version_id, canary_version_id, traffic_percent, minimum_sample_size, minimum_success_rate_percent, status, baseline_succeeded, baseline_failed, canary_succeeded, canary_failed, rolled_back_reason, created_by, created_at, updated_at, ended_at, last_outcome_at
+`
+
+type AutoRollbackRolloutParams struct {
+	ID     string
+	Reason pgtype.Text
+}
+
+func (q *Queries) AutoRollbackRollout(ctx context.Context, arg AutoRollbackRolloutParams) (WorkflowRollout, error) {
+	row := q.db.QueryRow(ctx, autoRollbackRollout, arg.ID, arg.Reason)
+	var i WorkflowRollout
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.WorkflowID,
+		&i.BaselineVersionID,
+		&i.CanaryVersionID,
+		&i.TrafficPercent,
+		&i.MinimumSampleSize,
+		&i.MinimumSuccessRatePercent,
+		&i.Status,
+		&i.BaselineSucceeded,
+		&i.BaselineFailed,
+		&i.CanarySucceeded,
+		&i.CanaryFailed,
+		&i.RolledBackReason,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.EndedAt,
+		&i.LastOutcomeAt,
+	)
+	return i, err
+}
+
 const bumpRateWindow = `-- name: BumpRateWindow :one
 INSERT INTO go_pilot_rate_windows (name, key, window_start, count, expires_at)
 VALUES ($1, $2, $3, 1, $4)
@@ -1365,6 +1404,42 @@ func (q *Queries) FinishWorkflowRolloutCAS(ctx context.Context, arg FinishWorkfl
 	return i, err
 }
 
+const getActiveRolloutForOutcome = `-- name: GetActiveRolloutForOutcome :one
+SELECT id, org_id, workflow_id, baseline_version_id, canary_version_id, traffic_percent, minimum_sample_size, minimum_success_rate_percent, status, baseline_succeeded, baseline_failed, canary_succeeded, canary_failed, rolled_back_reason, created_by, created_at, updated_at, ended_at, last_outcome_at FROM workflow_rollouts WHERE id = $1 AND org_id = $2 AND status = 'active'
+`
+
+type GetActiveRolloutForOutcomeParams struct {
+	ID    string
+	OrgID string
+}
+
+func (q *Queries) GetActiveRolloutForOutcome(ctx context.Context, arg GetActiveRolloutForOutcomeParams) (WorkflowRollout, error) {
+	row := q.db.QueryRow(ctx, getActiveRolloutForOutcome, arg.ID, arg.OrgID)
+	var i WorkflowRollout
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.WorkflowID,
+		&i.BaselineVersionID,
+		&i.CanaryVersionID,
+		&i.TrafficPercent,
+		&i.MinimumSampleSize,
+		&i.MinimumSuccessRatePercent,
+		&i.Status,
+		&i.BaselineSucceeded,
+		&i.BaselineFailed,
+		&i.CanarySucceeded,
+		&i.CanaryFailed,
+		&i.RolledBackReason,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.EndedAt,
+		&i.LastOutcomeAt,
+	)
+	return i, err
+}
+
 const getAlertPolicy = `-- name: GetAlertPolicy :one
 SELECT id, org_id, name, trigger, parameters, channels, cooldown_seconds, enabled, created_by, created_at, updated_at FROM alert_policies WHERE org_id = $1 AND id = $2
 `
@@ -2089,6 +2164,34 @@ func (q *Queries) GetRunExecution(ctx context.Context, id string) (GetRunExecuti
 	return i, err
 }
 
+const getRunForRolloutOutcome = `-- name: GetRunForRolloutOutcome :one
+SELECT org_id, status, replay_mode, workflow_rollout_id, workflow_rollout_variant, workflow_version_id
+FROM runs WHERE id = $1
+`
+
+type GetRunForRolloutOutcomeRow struct {
+	OrgID                  string
+	Status                 string
+	ReplayMode             pgtype.Text
+	WorkflowRolloutID      pgtype.Text
+	WorkflowRolloutVariant pgtype.Text
+	WorkflowVersionID      string
+}
+
+func (q *Queries) GetRunForRolloutOutcome(ctx context.Context, id string) (GetRunForRolloutOutcomeRow, error) {
+	row := q.db.QueryRow(ctx, getRunForRolloutOutcome, id)
+	var i GetRunForRolloutOutcomeRow
+	err := row.Scan(
+		&i.OrgID,
+		&i.Status,
+		&i.ReplayMode,
+		&i.WorkflowRolloutID,
+		&i.WorkflowRolloutVariant,
+		&i.WorkflowVersionID,
+	)
+	return i, err
+}
+
 const getRunNode = `-- name: GetRunNode :one
 SELECT id, run_id, node_id, status, state_json, attempts, started_at,
        finished_at, error_json
@@ -2443,6 +2546,58 @@ func (q *Queries) GetWorkflowVersionByID(ctx context.Context, arg GetWorkflowVer
 		&i.DagJson,
 		&i.CreatedBy,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const incrementRolloutCounters = `-- name: IncrementRolloutCounters :one
+UPDATE workflow_rollouts SET
+  baseline_succeeded = baseline_succeeded + $2,
+  baseline_failed = baseline_failed + $3,
+  canary_succeeded = canary_succeeded + $4,
+  canary_failed = canary_failed + $5,
+  last_outcome_at = now(), updated_at = now()
+WHERE id = $1 AND status = 'active'
+RETURNING id, org_id, workflow_id, baseline_version_id, canary_version_id, traffic_percent, minimum_sample_size, minimum_success_rate_percent, status, baseline_succeeded, baseline_failed, canary_succeeded, canary_failed, rolled_back_reason, created_by, created_at, updated_at, ended_at, last_outcome_at
+`
+
+type IncrementRolloutCountersParams struct {
+	ID                   string
+	BaselineSucceededInc int32
+	BaselineFailedInc    int32
+	CanarySucceededInc   int32
+	CanaryFailedInc      int32
+}
+
+func (q *Queries) IncrementRolloutCounters(ctx context.Context, arg IncrementRolloutCountersParams) (WorkflowRollout, error) {
+	row := q.db.QueryRow(ctx, incrementRolloutCounters,
+		arg.ID,
+		arg.BaselineSucceededInc,
+		arg.BaselineFailedInc,
+		arg.CanarySucceededInc,
+		arg.CanaryFailedInc,
+	)
+	var i WorkflowRollout
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.WorkflowID,
+		&i.BaselineVersionID,
+		&i.CanaryVersionID,
+		&i.TrafficPercent,
+		&i.MinimumSampleSize,
+		&i.MinimumSuccessRatePercent,
+		&i.Status,
+		&i.BaselineSucceeded,
+		&i.BaselineFailed,
+		&i.CanarySucceeded,
+		&i.CanaryFailed,
+		&i.RolledBackReason,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.EndedAt,
+		&i.LastOutcomeAt,
 	)
 	return i, err
 }
@@ -3250,6 +3405,36 @@ func (q *Queries) InsertWorkflowRollout(ctx context.Context, arg InsertWorkflowR
 		&i.LastOutcomeAt,
 	)
 	return i, err
+}
+
+const insertWorkflowRolloutOutcome = `-- name: InsertWorkflowRolloutOutcome :execrows
+INSERT INTO workflow_rollout_outcomes (run_id, org_id, rollout_id, workflow_id, variant, status)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (run_id) DO NOTHING
+`
+
+type InsertWorkflowRolloutOutcomeParams struct {
+	RunID      string
+	OrgID      string
+	RolloutID  string
+	WorkflowID string
+	Variant    string
+	Status     string
+}
+
+func (q *Queries) InsertWorkflowRolloutOutcome(ctx context.Context, arg InsertWorkflowRolloutOutcomeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertWorkflowRolloutOutcome,
+		arg.RunID,
+		arg.OrgID,
+		arg.RolloutID,
+		arg.WorkflowID,
+		arg.Variant,
+		arg.Status,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const insertWorkflowVersion = `-- name: InsertWorkflowVersion :exec
@@ -5186,6 +5371,41 @@ func (q *Queries) ListRuns(ctx context.Context, arg ListRunsParams) ([]ListRunsR
 			&i.CreatedBy,
 			&i.CreatedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnrecordedRolloutOutcomes = `-- name: ListUnrecordedRolloutOutcomes :many
+SELECT r.id AS run_id, r.status FROM runs r
+JOIN workflow_rollouts wr ON wr.id = r.workflow_rollout_id AND wr.org_id = r.org_id AND wr.status = 'active'
+LEFT JOIN workflow_rollout_outcomes o ON o.run_id = r.id
+WHERE r.workflow_rollout_id IS NOT NULL AND r.replay_mode IS NULL
+  AND r.status IN ('succeeded','failed','cancelled') AND o.run_id IS NULL
+ORDER BY r.created_at ASC, r.id ASC
+LIMIT $1
+`
+
+type ListUnrecordedRolloutOutcomesRow struct {
+	RunID  string
+	Status string
+}
+
+func (q *Queries) ListUnrecordedRolloutOutcomes(ctx context.Context, pageLimit int32) ([]ListUnrecordedRolloutOutcomesRow, error) {
+	rows, err := q.db.Query(ctx, listUnrecordedRolloutOutcomes, pageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUnrecordedRolloutOutcomesRow
+	for rows.Next() {
+		var i ListUnrecordedRolloutOutcomesRow
+		if err := rows.Scan(&i.RunID, &i.Status); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
