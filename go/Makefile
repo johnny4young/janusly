@@ -48,6 +48,12 @@ run:
 parity:
 	JANUSLY_GO_DATABASE_URL=$(DB_URL) go test -race -tags integration -count=1 -run TestSemanticParity ./internal/parity/ -v
 
+# Dual-run shadow comparator: same corpus at the pinned Node reference AND
+# the Go pilot, normalized diff; fails on any divergence outside the
+# annotated expected list (see CUTOVER-MAP.md).
+dual:
+	node conformance/run-reference-stack.mjs node conformance/run-dual.mjs
+
 # The one-command truth lane: everything a reviewer needs to trust the
 # branch, failing fast with an honest exit code. Assumes the pilot DB is up
 # (make db-up + make migrate once per checkout).

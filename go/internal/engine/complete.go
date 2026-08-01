@@ -437,15 +437,31 @@ func (e *Engine) insertDeadLetter(ctx context.Context, q *store.Queries, claim C
 			}
 		}
 	}
+	deadLetterID := e.newID()
+	nodeJSON := safePersist(nodeSnapshot, 0)
+	errorJSON := safePersist(serr, deadLetterErrorMaxBytes)
 	if err := q.InsertDeadLetter(ctx, store.InsertDeadLetterParams{
-		ID: e.newID(), OrgID: run.OrgID, RunID: claim.RunID, NodeID: claim.NodeID,
+		ID: deadLetterID, OrgID: run.OrgID, RunID: claim.RunID, NodeID: claim.NodeID,
 		Attempt:      claim.Attempt,
 		WorkflowJson: workflowJSON,
-		NodeJson:     safePersist(nodeSnapshot, 0),
-		ErrorJson:    safePersist(serr, deadLetterErrorMaxBytes),
+		NodeJson:     nodeJSON,
+		ErrorJson:    errorJSON,
 	}); err != nil {
 		return fmt.Errorf("insert dead letter: %w", err)
 	}
+	// Ownership hook: the incident opens with its dead letter (same tx);
+	// blips degrade to "no incident", never a failed completion.
+	workflowID := ""
+	var wfDoc struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(workflowJSON, &wfDoc)
+	workflowID = wfDoc.ID
+	e.autoCreateRecoveryItem(ctx, q, AutoCreateRecoveryItemInput{
+		OrgID: run.OrgID, DeadLetterID: deadLetterID, WorkflowID: workflowID,
+		ErrorSignature: deadLetterSignatureFromParts(claim.NodeID, nodeJSON, errorJSON),
+		CreatedBy:      "system",
+	})
 	return nil
 }
 

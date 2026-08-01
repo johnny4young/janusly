@@ -183,6 +183,25 @@ func (q *Queries) BumpRateWindow(ctx context.Context, arg BumpRateWindowParams) 
 	return count, err
 }
 
+const bumpRecoveryItemOccurrence = `-- name: BumpRecoveryItemOccurrence :one
+UPDATE recovery_items
+SET occurrence_count = occurrence_count + 1, last_occurred_at = now(), updated_at = now()
+WHERE org_id = $1 AND id = $2
+RETURNING occurrence_count
+`
+
+type BumpRecoveryItemOccurrenceParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) BumpRecoveryItemOccurrence(ctx context.Context, arg BumpRecoveryItemOccurrenceParams) (int32, error) {
+	row := q.db.QueryRow(ctx, bumpRecoveryItemOccurrence, arg.OrgID, arg.ID)
+	var occurrence_count int32
+	err := row.Scan(&occurrence_count)
+	return occurrence_count, err
+}
+
 const bumpReplayCampaignCounter = `-- name: BumpReplayCampaignCounter :exec
 UPDATE replay_campaigns
 SET replayed_count = replayed_count + $2::int,
@@ -1686,6 +1705,40 @@ func (q *Queries) FindOpenDeadLetterForNode(ctx context.Context, arg FindOpenDea
 	var id string
 	err := row.Scan(&id)
 	return id, err
+}
+
+const findOpenRecoveryItemForDebounce = `-- name: FindOpenRecoveryItemForDebounce :one
+
+SELECT id, dead_letter_id FROM recovery_items
+WHERE org_id = $1 AND workflow_id = $2 AND error_signature = $3
+  AND status <> 'resolved' AND last_occurred_at >= $4
+ORDER BY last_occurred_at DESC
+LIMIT 1
+`
+
+type FindOpenRecoveryItemForDebounceParams struct {
+	OrgID          string
+	WorkflowID     pgtype.Text
+	ErrorSignature pgtype.Text
+	LastOccurredAt time.Time
+}
+
+type FindOpenRecoveryItemForDebounceRow struct {
+	ID           string
+	DeadLetterID string
+}
+
+// ── Recovery item auto-create hook (dual-run parity, T-184) ───────────
+func (q *Queries) FindOpenRecoveryItemForDebounce(ctx context.Context, arg FindOpenRecoveryItemForDebounceParams) (FindOpenRecoveryItemForDebounceRow, error) {
+	row := q.db.QueryRow(ctx, findOpenRecoveryItemForDebounce,
+		arg.OrgID,
+		arg.WorkflowID,
+		arg.ErrorSignature,
+		arg.LastOccurredAt,
+	)
+	var i FindOpenRecoveryItemForDebounceRow
+	err := row.Scan(&i.ID, &i.DeadLetterID)
+	return i, err
 }
 
 const findOrgMemberByEmail = `-- name: FindOrgMemberByEmail :one
@@ -3931,6 +3984,22 @@ func (q *Queries) GetWorkflowRolloutRow(ctx context.Context, arg GetWorkflowRoll
 	return i, err
 }
 
+const getWorkflowSeverityDefault = `-- name: GetWorkflowSeverityDefault :one
+SELECT severity_default FROM workflow_metadata WHERE org_id = $1 AND workflow_id = $2
+`
+
+type GetWorkflowSeverityDefaultParams struct {
+	OrgID      string
+	WorkflowID string
+}
+
+func (q *Queries) GetWorkflowSeverityDefault(ctx context.Context, arg GetWorkflowSeverityDefaultParams) (pgtype.Text, error) {
+	row := q.db.QueryRow(ctx, getWorkflowSeverityDefault, arg.OrgID, arg.WorkflowID)
+	var severity_default pgtype.Text
+	err := row.Scan(&severity_default)
+	return severity_default, err
+}
+
 const getWorkflowVersionAnyWorkflow = `-- name: GetWorkflowVersionAnyWorkflow :one
 SELECT id, org_id, workflow_id, version, dag_json FROM workflow_versions
 WHERE id = $1 AND org_id = $2
@@ -4831,6 +4900,32 @@ func (q *Queries) InsertRecoveryItem(ctx context.Context, arg InsertRecoveryItem
 		arg.SlaTargetAt,
 		arg.ErrorSignature,
 		arg.CreatedBy,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const insertRecoveryItemChild = `-- name: InsertRecoveryItemChild :execrows
+INSERT INTO recovery_item_children (id, org_id, recovery_item_id, dead_letter_id, occurred_at)
+VALUES ($1, $2, $3, $4, now())
+ON CONFLICT (recovery_item_id, dead_letter_id) DO NOTHING
+`
+
+type InsertRecoveryItemChildParams struct {
+	ID             string
+	OrgID          string
+	RecoveryItemID string
+	DeadLetterID   string
+}
+
+func (q *Queries) InsertRecoveryItemChild(ctx context.Context, arg InsertRecoveryItemChildParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertRecoveryItemChild,
+		arg.ID,
+		arg.OrgID,
+		arg.RecoveryItemID,
+		arg.DeadLetterID,
 	)
 	if err != nil {
 		return 0, err
@@ -5888,11 +5983,22 @@ const listDeadLetterSummaries = `-- name: ListDeadLetterSummaries :many
 SELECT dl.id, dl.org_id, dl.run_id, dl.node_id, dl.attempt, dl.error_json,
        dl.status, dl.replayed_at, dl.created_at,
        dl.node_json->>'type' AS node_type,
-       w.name AS workflow_name
+       coalesce((dl.workflow_json->>'name')::text, '') AS workflow_name,
+       ri.id AS recovery_id, ri.owner AS recovery_owner,
+       coalesce(ri.severity, '') AS recovery_severity,
+       coalesce(ri.status, '') AS recovery_status,
+       ri.sla_target_at AS recovery_sla_target_at,
+       ri.resolution_reason AS recovery_resolution_reason,
+       ri.comments AS recovery_comments,
+       ri.workflow_id AS recovery_workflow_id,
+       wm.workflow_id AS recovery_metadata_workflow_id,
+       coalesce(ri.occurrence_count, 0) AS recovery_occurrence_count,
+       ri.last_occurred_at AS recovery_last_occurred_at
 FROM dead_letters dl
 LEFT JOIN runs r ON r.id = dl.run_id
 LEFT JOIN workflow_versions wv ON wv.id = r.workflow_version_id
-LEFT JOIN workflows w ON w.id = wv.workflow_id
+LEFT JOIN recovery_items ri ON ri.org_id = dl.org_id AND ri.dead_letter_id = dl.id
+LEFT JOIN workflow_metadata wm ON wm.org_id = ri.org_id AND wm.workflow_id = ri.workflow_id
 WHERE dl.org_id = $1
   AND ($2::text IS NULL OR dl.status = $2)
   AND ($3::text IS NULL OR dl.node_id = $3)
@@ -5912,17 +6018,28 @@ type ListDeadLetterSummariesParams struct {
 }
 
 type ListDeadLetterSummariesRow struct {
-	ID           string
-	OrgID        string
-	RunID        string
-	NodeID       string
-	Attempt      int32
-	ErrorJson    json.RawMessage
-	Status       string
-	ReplayedAt   *time.Time
-	CreatedAt    *time.Time
-	NodeType     interface{}
-	WorkflowName pgtype.Text
+	ID                         string
+	OrgID                      string
+	RunID                      string
+	NodeID                     string
+	Attempt                    int32
+	ErrorJson                  json.RawMessage
+	Status                     string
+	ReplayedAt                 *time.Time
+	CreatedAt                  *time.Time
+	NodeType                   interface{}
+	WorkflowName               interface{}
+	RecoveryID                 pgtype.Text
+	RecoveryOwner              pgtype.Text
+	RecoverySeverity           string
+	RecoveryStatus             string
+	RecoverySlaTargetAt        *time.Time
+	RecoveryResolutionReason   pgtype.Text
+	RecoveryComments           json.RawMessage
+	RecoveryWorkflowID         pgtype.Text
+	RecoveryMetadataWorkflowID pgtype.Text
+	RecoveryOccurrenceCount    int32
+	RecoveryLastOccurredAt     *time.Time
 }
 
 func (q *Queries) ListDeadLetterSummaries(ctx context.Context, arg ListDeadLetterSummariesParams) ([]ListDeadLetterSummariesRow, error) {
@@ -5952,6 +6069,17 @@ func (q *Queries) ListDeadLetterSummaries(ctx context.Context, arg ListDeadLette
 			&i.CreatedAt,
 			&i.NodeType,
 			&i.WorkflowName,
+			&i.RecoveryID,
+			&i.RecoveryOwner,
+			&i.RecoverySeverity,
+			&i.RecoveryStatus,
+			&i.RecoverySlaTargetAt,
+			&i.RecoveryResolutionReason,
+			&i.RecoveryComments,
+			&i.RecoveryWorkflowID,
+			&i.RecoveryMetadataWorkflowID,
+			&i.RecoveryOccurrenceCount,
+			&i.RecoveryLastOccurredAt,
 		); err != nil {
 			return nil, err
 		}
@@ -8196,7 +8324,8 @@ const listRunSummaries = `-- name: ListRunSummaries :many
 SELECT r.id, r.org_id, r.workflow_version_id, r.status, r.output_json,
        r.parent_run_id, r.parent_node_id, r.replay_mode, r.created_by,
        r.created_at,
-       wv.workflow_id AS workflow_id, w.name AS workflow_name,
+       coalesce(wv.workflow_id, r.workflow_version_id) AS workflow_id,
+       coalesce((r.input_json->'workflow'->>'name')::text, '') AS workflow_name,
        EXISTS (
          SELECT 1 FROM run_nodes rn
          WHERE rn.run_id = r.id AND rn.status = 'waiting'
@@ -8234,8 +8363,8 @@ type ListRunSummariesRow struct {
 	ReplayMode        pgtype.Text
 	CreatedBy         pgtype.Text
 	CreatedAt         *time.Time
-	WorkflowID        pgtype.Text
-	WorkflowName      pgtype.Text
+	WorkflowID        string
+	WorkflowName      interface{}
 	HasWaitingNodes   bool
 }
 

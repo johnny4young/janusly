@@ -25,7 +25,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/store"
 )
 
-var severityDefaults = map[string]bool{"low": true, "medium": true, "high": true, "critical": true}
+var severityDefaults = map[string]bool{"p1": true, "p2": true, "p3": true, "p4": true}
 
 func workflowMetadataView(row store.WorkflowMetadatum) map[string]any {
 	var owners, tags any

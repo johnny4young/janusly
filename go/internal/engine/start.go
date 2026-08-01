@@ -141,9 +141,29 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 
 	// The persisted input records the configuration the run actually used:
 	// the snapshot plus the RESOLVED payload, so later readers see effective
-	// values even after the workflow's defaults change.
+	// values even after the workflow's defaults change. The snapshot is the
+	// reference's workflow ENTITY shape — the doc enriched with orgId /
+	// createdBy / metadata / input — pinned by the dual-run comparator.
+	workflowSnapshot := map[string]any{}
+	if raw, err := json.Marshal(in.Workflow); err == nil {
+		_ = json.Unmarshal(raw, &workflowSnapshot)
+	}
+	orgIDForSnapshot := in.OrgID
+	if orgIDForSnapshot == "" {
+		orgIDForSnapshot = "default"
+	}
+	workflowSnapshot["orgId"] = orgIDForSnapshot
+	if in.CreatedBy != "" {
+		workflowSnapshot["createdBy"] = in.CreatedBy
+	} else {
+		workflowSnapshot["createdBy"] = nil
+	}
+	workflowSnapshot["input"] = input
+	if _, present := workflowSnapshot["metadata"]; !present {
+		workflowSnapshot["metadata"] = map[string]any{"tags": []any{}}
+	}
 	inputJSON, err := json.Marshal(map[string]any{
-		"workflow": in.Workflow,
+		"workflow": workflowSnapshot,
 		"input":    input,
 	})
 	if err != nil {

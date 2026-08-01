@@ -315,8 +315,10 @@ func (s *V1Server) saveCore(r *http.Request, rc v1Request) opResult {
 		}
 	}
 	if len(blocking) > 0 {
-		return opError(http.StatusBadRequest, "workflows_validation_failed",
-			"Workflow validation failed", map[string]any{"issues": blocking})
+		rejection := opError(http.StatusBadRequest, "workflows_validation_failed",
+			"Validation failed", map[string]any{"issues": blocking})
+		rejection.legacyExtras = map[string]any{"issues": blocking}
+		return rejection
 	}
 
 	ctx := r.Context()
@@ -367,9 +369,22 @@ func (s *V1Server) saveCore(r *http.Request, rc v1Request) opResult {
 		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}
 	versionID := s.newID()
+	// The reference's WorkflowSchema.parse defaults `metadata: {tags: []}`
+	// into the persisted dagJson; mirror it so /workflows/latest and the
+	// version history serve byte-identical snapshots (dual-run pin).
+	dagJSONWithDefaults := raw
+	var dagDoc map[string]any
+	if err := json.Unmarshal(raw, &dagDoc); err == nil {
+		if _, present := dagDoc["metadata"]; !present {
+			dagDoc["metadata"] = map[string]any{"tags": []any{}}
+			if encoded, err := json.Marshal(dagDoc); err == nil {
+				dagJSONWithDefaults = encoded
+			}
+		}
+	}
 	if err := q.InsertWorkflowVersion(ctx, store.InsertWorkflowVersionParams{
 		ID: versionID, OrgID: rc.orgID, WorkflowID: workflowID,
-		Version: version + 1, DagJson: raw,
+		Version: version + 1, DagJson: dagJSONWithDefaults,
 		CreatedBy: pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
 
 		UpstreamHealthSources: upstreamTags,
@@ -437,8 +452,10 @@ func (s *V1Server) startCore(r *http.Request, rc v1Request) opResult {
 	// Execution needs the executable subset — here the pilot-only code IS
 	// blocking, unlike save.
 	if result := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation); !result.Valid {
-		return opError(http.StatusBadRequest, "workflows_validation_failed",
-			"Workflow validation failed", map[string]any{"issues": result.Issues})
+		rejection := opError(http.StatusBadRequest, "workflows_validation_failed",
+			"Validation failed", map[string]any{"issues": result.Issues})
+		rejection.legacyExtras = map[string]any{"issues": result.Issues}
+		return rejection
 	}
 	if rejection := s.productionGate(r.Context(), rc.orgID, wf); rejection != nil {
 		return *rejection
@@ -658,7 +675,7 @@ func (s *V1Server) listRuns(w http.ResponseWriter, r *http.Request, rc v1Request
 	for _, row := range rows {
 		items = append(items, map[string]any{
 			"id": row.ID, "orgId": row.OrgID,
-			"workflowId": textOrNull(row.WorkflowID), "workflowName": textOrNull(row.WorkflowName),
+			"workflowId": row.WorkflowID, "workflowName": textOrNullString(row.WorkflowName),
 			"workflowVersionId": row.WorkflowVersionID, "status": row.Status,
 			"hasWaitingNodes": row.HasWaitingNodes, "outcomeStatus": nil,
 			"semanticViolationCount": 0, "outputJson": rawOrNull(row.OutputJson),
@@ -921,12 +938,28 @@ func (s *V1Server) listDeadLetters(w http.ResponseWriter, r *http.Request, rc v1
 	}
 	items := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
+		// The ownership overlay: the auto-created incident travels with its
+		// dead letter (the reference joins the same shape into the list).
+		var recovery any
+		if row.RecoveryID.Valid {
+			recovery = map[string]any{
+				"id": row.RecoveryID.String, "owner": textOrNull(row.RecoveryOwner),
+				"severity": row.RecoverySeverity, "status": row.RecoveryStatus,
+				"slaTargetAt":        timeOrNull(row.RecoverySlaTargetAt),
+				"resolutionReason":   textOrNull(row.RecoveryResolutionReason),
+				"comments":           rawOrNull(row.RecoveryComments),
+				"workflowId":         textOrNull(row.RecoveryWorkflowID),
+				"metadataWorkflowId": textOrNull(row.RecoveryMetadataWorkflowID),
+				"occurrenceCount":    row.RecoveryOccurrenceCount,
+				"lastOccurredAt":     timeOrNull(row.RecoveryLastOccurredAt),
+			}
+		}
 		items = append(items, map[string]any{
 			"id": row.ID, "orgId": row.OrgID, "runId": row.RunID, "nodeId": row.NodeID,
 			"attempt": row.Attempt, "errorJson": rawOrNull(row.ErrorJson), "status": row.Status,
 			"replayedAt": timeOrNull(row.ReplayedAt), "createdAt": timeOrNull(row.CreatedAt),
-			"nodeType": textOrNullString(row.NodeType), "workflowName": textOrNull(row.WorkflowName),
-			"recovery": nil,
+			"nodeType": textOrNullString(row.NodeType), "workflowName": textOrNullString(row.WorkflowName),
+			"recovery": recovery,
 		})
 	}
 	writeV1Data(w, rc.id, items)

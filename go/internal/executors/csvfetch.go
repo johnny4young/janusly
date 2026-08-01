@@ -44,6 +44,7 @@ const (
 func NewToolRegistry() *tools.Registry {
 	registry := tools.NewRegistry()
 	registry.Register(csvFetchDefinition())
+	registry.Register(httpRequestDefinition())
 	return registry
 }
 

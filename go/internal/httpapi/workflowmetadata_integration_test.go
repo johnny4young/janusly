@@ -42,7 +42,7 @@ func TestWorkflowMetadataAndOrganization(t *testing.T) {
 	// Full upsert + audit projection of the AI guidance.
 	res = h.call("POST", "/workflows/"+wfA+"/metadata", map[string]any{
 		"owners": []any{"ana"}, "tags": []any{"facturación", "críticos"},
-		"description": "Flujo de cobros", "severityDefault": "high",
+		"description": "Flujo de cobros", "severityDefault": "p2",
 		"folder": "Finanzas", "aiGuidanceMarkdown": "SECRETO-NO-DEBE-AUDITARSE",
 	}, "")
 	if res.status != 200 {

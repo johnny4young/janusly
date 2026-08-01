@@ -29,10 +29,12 @@ type FetchOptions struct {
 }
 
 // FetchResult carries the upstream answer; Ok is the plain 2xx bit.
+// ContentType feeds the buffered-JSON projection (declared JSON only).
 type FetchResult struct {
-	StatusCode int
-	Body       string
-	Ok         bool
+	StatusCode  int
+	Body        string
+	Ok          bool
+	ContentType string
 }
 
 // FetchHTTPTarget performs one guarded outbound HTTP call.
@@ -109,8 +111,9 @@ func FetchHTTPTarget(ctx context.Context, rawURL string, opts FetchOptions) (Fet
 		return FetchResult{}, fmt.Errorf("HTTP response exceeds maxResponseBytes after %d bytes (cap %d)", len(bodyBytes), maxBytes) //nolint:staticcheck // reference message is the wire contract
 	}
 	return FetchResult{
-		StatusCode: res.StatusCode,
-		Body:       string(bodyBytes),
-		Ok:         res.StatusCode >= 200 && res.StatusCode < 300,
+		StatusCode:  res.StatusCode,
+		Body:        string(bodyBytes),
+		Ok:          res.StatusCode >= 200 && res.StatusCode < 300,
+		ContentType: res.Header.Get("Content-Type"),
 	}, nil
 }

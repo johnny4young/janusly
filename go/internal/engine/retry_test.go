@@ -122,7 +122,7 @@ func TestComputeRetryDelayFullJitterRange(t *testing.T) {
 
 func TestSerializeErrorShapes(t *testing.T) {
 	plain := serializeError(errors.New("boom"))
-	if !reflect.DeepEqual(plain, map[string]any{"message": "boom"}) {
+	if !reflect.DeepEqual(plain, map[string]any{"message": "boom", "name": "Error"}) {
 		t.Fatalf("plain error shape: %v", plain)
 	}
 	structured := serializeError(&ExecError{

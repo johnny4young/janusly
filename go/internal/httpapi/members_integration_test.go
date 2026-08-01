@@ -4,6 +4,8 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -88,10 +90,21 @@ func TestMemberLifecycle(t *testing.T) {
 	// The removed member's next request dies at the resolver (seed them a
 	// viewer row first elsewhere is gone — a supabase-mode caller without
 	// a row is 401; dev-mode ghost would auto-admin, so assert via list).
-	list := h.call("GET", "/members", nil, "")
-	members := list.body["members"].([]any)
-	for _, raw := range members {
-		if raw.(map[string]any)["userId"] == "u-existing" {
+	// The reference wire is a BARE array (no envelope key) — decode raw.
+	req, _ := http.NewRequest("GET", h.server.URL+"/members", nil)
+	req.Header.Set("x-org-id", h.org)
+	req.Header.Set("x-user-id", "api-tester")
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("list members: %v", err)
+	}
+	defer response.Body.Close()
+	var members []map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&members); err != nil {
+		t.Fatalf("members must be a bare array: %v", err)
+	}
+	for _, row := range members {
+		if row["userId"] == "u-existing" {
 			t.Fatal("removed member still listed")
 		}
 	}

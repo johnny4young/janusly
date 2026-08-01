@@ -11,6 +11,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"regexp"
@@ -41,10 +42,13 @@ func (s *V1Server) roleDefinedForOrg(r *http.Request, orgID, roleName string) (b
 	return false, err
 }
 
-func (s *V1Server) listMembersCore(r *http.Request, rc v1Request) opResult {
+// listMembers writes the reference's BARE array wire (sendJson(rows) —
+// no envelope key), which the dual-run comparator pinned.
+func (s *V1Server) listMembers(w http.ResponseWriter, r *http.Request, rc v1Request) {
 	rows, err := store.New(s.pool).ListOrgMembers(r.Context(), rc.orgID)
 	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil))
+		return
 	}
 	items := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
@@ -54,7 +58,8 @@ func (s *V1Server) listMembersCore(r *http.Request, rc v1Request) opResult {
 			"invitedBy": textOrNull(row.InvitedBy), "createdAt": timeOrNull(row.CreatedAt),
 		})
 	}
-	return opOK(map[string]any{"members": items})
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(items)
 }
 
 func (s *V1Server) listInvitationsCore(r *http.Request, rc v1Request) opResult {
@@ -246,9 +251,7 @@ func (s *V1Server) removeMemberCore(r *http.Request, rc v1Request) opResult {
 }
 
 func (s *V1Server) mountMemberRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /members", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		writeLegacy(w, s.listMembersCore(r, rc))
-	}))
+	mux.HandleFunc("GET /members", s.auth(s.listMembers))
 	mux.HandleFunc("GET /members/invitations", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeLegacy(w, s.listInvitationsCore(r, rc))
 	}))

@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -34,26 +35,9 @@ func (s *V1Server) listOrgConfigCore(r *http.Request, rc v1Request) opResult {
 	resolved := orgconfig.ResolveAll(tenantRows, os.LookupEnv)
 	entries := make([]map[string]any, 0, len(resolved))
 	for _, entry := range resolved {
-		view := map[string]any{
-			"key": entry.Key, "category": entry.Category, "description": entry.Description,
-			"valueType": entry.ValueType, "defaultValue": entry.Default,
-			"orgId": rc.orgID, "value": entry.Value, "source": entry.Source,
-			"updatedAt": nil,
-		}
+		view := orgConfigEntryView(entry.Definition, rc.orgID, entry.Value, entry.Source, nil)
 		if entry.Source == "tenant" {
 			view["updatedAt"] = updatedAt[entry.Key]
-		}
-		if len(entry.EnvKeys) > 0 {
-			view["envKeys"] = entry.EnvKeys
-		}
-		if len(entry.AllowedValues) > 0 {
-			view["allowedValues"] = entry.AllowedValues
-		}
-		if entry.Min != nil {
-			view["min"] = *entry.Min
-		}
-		if entry.Max != nil {
-			view["max"] = *entry.Max
 		}
 		entries = append(entries, view)
 	}
@@ -106,9 +90,39 @@ func (s *V1Server) updateOrgConfigCore(r *http.Request, rc v1Request) opResult {
 	audit.Write(ctx, s.pool, rc.authContext, "org.config.updated", audit.Options{
 		TargetType: "org_config", TargetID: def.Key, Metadata: metadata,
 	})
-	return opOK(map[string]any{
-		"key": def.Key, "value": normalized, "source": "tenant",
-	})
+	return opOK(orgConfigEntryView(*def, rc.orgID, normalized, "tenant",
+		time.Now().UTC().Format(time.RFC3339Nano)))
+}
+
+// orgConfigEntryView is the reference's full config-row projection, shared
+// by the list read and the write echo (allowEmpty/fractional emitted only
+// when true, matching the reference's omit-false serialization).
+func orgConfigEntryView(def orgconfig.Definition, orgID string, value any, source string, updatedAt any) map[string]any {
+	view := map[string]any{
+		"key": def.Key, "category": def.Category, "description": def.Description,
+		"valueType": def.ValueType, "defaultValue": def.Default,
+		"orgId": orgID, "value": value, "source": source,
+		"updatedAt": updatedAt,
+	}
+	if len(def.EnvKeys) > 0 {
+		view["envKeys"] = def.EnvKeys
+	}
+	if len(def.AllowedValues) > 0 {
+		view["allowedValues"] = def.AllowedValues
+	}
+	if def.Min != nil {
+		view["min"] = *def.Min
+	}
+	if def.Max != nil {
+		view["max"] = *def.Max
+	}
+	if def.AllowEmpty {
+		view["allowEmpty"] = true
+	}
+	if def.Fractional {
+		view["fractional"] = true
+	}
+	return view
 }
 
 func (s *V1Server) mountOrgConfigRoutes(mux *http.ServeMux) {

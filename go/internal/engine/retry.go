@@ -34,7 +34,7 @@ func (e *ExecError) Error() string { return e.Message }
 func serializeError(err error) map[string]any {
 	var exec *ExecError
 	if errors.As(err, &exec) {
-		out := map[string]any{"message": exec.Message}
+		out := map[string]any{"message": exec.Message, "name": "Error"}
 		if exec.Name != "" {
 			out["name"] = exec.Name
 		}
@@ -49,7 +49,9 @@ func serializeError(err error) map[string]any {
 		}
 		return out
 	}
-	return map[string]any{"message": err.Error()}
+	// The reference wire always carries a name (every JS Error has one);
+	// Go-side plain errors serialize as the base class.
+	return map[string]any{"message": err.Error(), "name": "Error"}
 }
 
 // RetryPolicy mirrors the reference's node-config retry shape.

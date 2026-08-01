@@ -298,7 +298,8 @@ LIMIT sqlc.arg(page_limit);
 SELECT r.id, r.org_id, r.workflow_version_id, r.status, r.output_json,
        r.parent_run_id, r.parent_node_id, r.replay_mode, r.created_by,
        r.created_at,
-       wv.workflow_id AS workflow_id, w.name AS workflow_name,
+       coalesce(wv.workflow_id, r.workflow_version_id) AS workflow_id,
+       coalesce((r.input_json->'workflow'->>'name')::text, '') AS workflow_name,
        EXISTS (
          SELECT 1 FROM run_nodes rn
          WHERE rn.run_id = r.id AND rn.status = 'waiting'
@@ -319,11 +320,22 @@ LIMIT sqlc.arg(page_limit);
 SELECT dl.id, dl.org_id, dl.run_id, dl.node_id, dl.attempt, dl.error_json,
        dl.status, dl.replayed_at, dl.created_at,
        dl.node_json->>'type' AS node_type,
-       w.name AS workflow_name
+       coalesce((dl.workflow_json->>'name')::text, '') AS workflow_name,
+       ri.id AS recovery_id, ri.owner AS recovery_owner,
+       coalesce(ri.severity, '') AS recovery_severity,
+       coalesce(ri.status, '') AS recovery_status,
+       ri.sla_target_at AS recovery_sla_target_at,
+       ri.resolution_reason AS recovery_resolution_reason,
+       ri.comments AS recovery_comments,
+       ri.workflow_id AS recovery_workflow_id,
+       wm.workflow_id AS recovery_metadata_workflow_id,
+       coalesce(ri.occurrence_count, 0) AS recovery_occurrence_count,
+       ri.last_occurred_at AS recovery_last_occurred_at
 FROM dead_letters dl
 LEFT JOIN runs r ON r.id = dl.run_id
 LEFT JOIN workflow_versions wv ON wv.id = r.workflow_version_id
-LEFT JOIN workflows w ON w.id = wv.workflow_id
+LEFT JOIN recovery_items ri ON ri.org_id = dl.org_id AND ri.dead_letter_id = dl.id
+LEFT JOIN workflow_metadata wm ON wm.org_id = ri.org_id AND wm.workflow_id = ri.workflow_id
 WHERE dl.org_id = $1
   AND (sqlc.narg(filter_status)::text IS NULL OR dl.status = sqlc.narg(filter_status))
   AND (sqlc.narg(filter_node_id)::text IS NULL OR dl.node_id = sqlc.narg(filter_node_id))
@@ -2547,3 +2559,26 @@ SELECT count(*)::int8 FROM memory_entries WHERE org_id = $1;
 -- name: GetOrgConfigRevokedAt :one
 SELECT updated_at FROM org_configs
 WHERE org_id = $1 AND key = 'memory.enabled' AND value_json = 'false'::jsonb;
+
+-- ── Recovery item auto-create hook (dual-run parity, T-184) ───────────
+
+-- name: FindOpenRecoveryItemForDebounce :one
+SELECT id, dead_letter_id FROM recovery_items
+WHERE org_id = $1 AND workflow_id = $2 AND error_signature = $3
+  AND status <> 'resolved' AND last_occurred_at >= $4
+ORDER BY last_occurred_at DESC
+LIMIT 1;
+
+-- name: InsertRecoveryItemChild :execrows
+INSERT INTO recovery_item_children (id, org_id, recovery_item_id, dead_letter_id, occurred_at)
+VALUES ($1, $2, $3, $4, now())
+ON CONFLICT (recovery_item_id, dead_letter_id) DO NOTHING;
+
+-- name: BumpRecoveryItemOccurrence :one
+UPDATE recovery_items
+SET occurrence_count = occurrence_count + 1, last_occurred_at = now(), updated_at = now()
+WHERE org_id = $1 AND id = $2
+RETURNING occurrence_count;
+
+-- name: GetWorkflowSeverityDefault :one
+SELECT severity_default FROM workflow_metadata WHERE org_id = $1 AND workflow_id = $2;

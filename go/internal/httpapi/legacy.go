@@ -26,6 +26,10 @@ type opResult struct {
 	message string
 	params  map[string]any
 	data    map[string]any
+	// legacyExtras merge top-level into the RAW legacy error body only
+	// (the reference's validation rejections carry `issues` beside
+	// error/code with no params wrapper, while /v1 keeps params).
+	legacyExtras map[string]any
 }
 
 func opOK(data map[string]any) opResult { return opResult{status: http.StatusOK, data: data} }
@@ -42,7 +46,11 @@ func writeLegacy(w http.ResponseWriter, result opResult) {
 		return
 	}
 	body := map[string]any{"error": result.message, "code": result.code}
-	if result.params != nil {
+	if result.legacyExtras != nil {
+		for key, value := range result.legacyExtras {
+			body[key] = value
+		}
+	} else if result.params != nil {
 		body["params"] = result.params
 	}
 	_ = json.NewEncoder(w).Encode(body)

@@ -807,7 +807,7 @@ func TestSaveRejectsInvalidEdgeConditions(t *testing.T) {
 		"edges": []any{map[string]any{"from": "a", "to": "b", "condition": "require('fs')"}},
 	}
 	res := h.call("POST", "/v1/workflows/save", doc, "")
-	requireError(t, res, 400, "workflows_validation_failed", "Workflow validation failed")
+	requireError(t, res, 400, "workflows_validation_failed", "Validation failed")
 	issues := res.body["error"].(map[string]any)["params"].(map[string]any)["issues"].([]any)
 	sawEdge := false
 	for _, raw := range issues {

@@ -446,7 +446,7 @@ func (d Deps) runsList(ctx context.Context, limit int, cursor, workflowID, statu
 	for _, row := range rows {
 		item := map[string]any{
 			"runId": row.ID, "status": row.Status,
-			"workflowId": row.WorkflowID.String, "workflowName": row.WorkflowName.String,
+			"workflowId": row.WorkflowID, "workflowName": stringOrEmpty(row.WorkflowName),
 			"createdAt": createdAtISO(row.CreatedAt),
 		}
 		items = append(items, item)
@@ -486,6 +486,13 @@ func (d Deps) workflowsList(ctx context.Context, limit int, cursor string) (*mcp
 		payload["nextCursor"] = createdAtISO(last.CreatedAt) + "|" + last.ID
 	}
 	return ok(payload)
+}
+
+// stringOrEmpty flattens the coalesced lateral projection (interface{})
+// back to its plain string for the MCP result table.
+func stringOrEmpty(value any) string {
+	text, _ := value.(string)
+	return text
 }
 
 func createdAtISO(at *time.Time) string {
