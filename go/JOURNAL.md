@@ -1669,3 +1669,8 @@ producción necesita saber — de lo ya resuelto o informativo.
 - save + rollback rechazan 409 `workflow_rollout_active` mientras el rollout viva: acuñar una versión nueva bajo tráfico dividido desprendería al canary de "latest" en silencio (la asignación se apaga sola y nadie lo decidió). El operador termina el rollout, después escribe versiones.
 - El DELETE tombstonea el workflow Y cancela el despliegue activo en la misma transacción — ningún rollout activo puede sobrevivir a su workflow borrado, y el create toma el mismo lock del padre, así tampoco puede aparecer uno en el medio.
 - La compatibilidad estricta de triggers externos quedó probada con el par: canary que gana un `schedule` → 422; contratos byte-idénticos → create OK.
+
+## T-151 · Receipts de calificación por par exacto (2026-07-31)
+- `internal/recovery/qualification.go`: el candidato se juzga contra el dataset INMUTABLE del baseline más sus propias fixtures, por el MISMO evaluador semántico del runtime — determinista de punta a punta: ningún nodo ejecuta, ningún provider se llama, y ningún juez LLM otorga autoridad de mutación (la tesis de la ola, verbatim). V1→V2 corre en bootstrap (aún no hay dataset del baseline); con baseline V2, cada candidato debe conservar expectativas y cobertura de detectores o el receipt sale failed con `detector_uncovered`/`expected_mismatch`.
+- El digest del dataset es sha256 del render estable (claves ordenadas) de {version, baseline, candidate} — el receipt queda anclado al contenido exacto que se evaluó, no a un id. El upsert usa el índice único de 6 columnas (org, workflow, par, dataset_version, digest).
+- El gate del create de rollout exige status=passed para el PAR EXACTO: un receipt failed no desbloquea nada, y quedó probado por wire.

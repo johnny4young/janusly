@@ -1274,6 +1274,47 @@ func (q *Queries) FindTriggerEventByDedupe(ctx context.Context, arg FindTriggerE
 	return i, err
 }
 
+const findWorkflowRecoveryQualification = `-- name: FindWorkflowRecoveryQualification :one
+SELECT id, org_id, workflow_id, baseline_version_id, candidate_version_id, dataset_version, dataset_digest, mode, status, summary_json, created_by, created_at FROM workflow_recovery_qualifications
+WHERE org_id = $1 AND workflow_id = $2 AND baseline_version_id = $3
+  AND candidate_version_id = $4 AND dataset_version = $5
+ORDER BY created_at DESC, id DESC LIMIT 1
+`
+
+type FindWorkflowRecoveryQualificationParams struct {
+	OrgID              string
+	WorkflowID         string
+	BaselineVersionID  string
+	CandidateVersionID string
+	DatasetVersion     string
+}
+
+func (q *Queries) FindWorkflowRecoveryQualification(ctx context.Context, arg FindWorkflowRecoveryQualificationParams) (WorkflowRecoveryQualification, error) {
+	row := q.db.QueryRow(ctx, findWorkflowRecoveryQualification,
+		arg.OrgID,
+		arg.WorkflowID,
+		arg.BaselineVersionID,
+		arg.CandidateVersionID,
+		arg.DatasetVersion,
+	)
+	var i WorkflowRecoveryQualification
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.WorkflowID,
+		&i.BaselineVersionID,
+		&i.CandidateVersionID,
+		&i.DatasetVersion,
+		&i.DatasetDigest,
+		&i.Mode,
+		&i.Status,
+		&i.SummaryJson,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const finishWorkflowRolloutCAS = `-- name: FinishWorkflowRolloutCAS :one
 UPDATE workflow_rollouts
 SET status = $4,
@@ -7135,4 +7176,60 @@ type UpsertWakeupParams struct {
 func (q *Queries) UpsertWakeup(ctx context.Context, arg UpsertWakeupParams) error {
 	_, err := q.db.Exec(ctx, upsertWakeup, arg.RunNodeID, arg.WakeAt, arg.Reason)
 	return err
+}
+
+const upsertWorkflowRecoveryQualification = `-- name: UpsertWorkflowRecoveryQualification :one
+INSERT INTO workflow_recovery_qualifications (id, org_id, workflow_id, baseline_version_id,
+  candidate_version_id, dataset_version, dataset_digest, mode, status, summary_json, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+ON CONFLICT (org_id, workflow_id, baseline_version_id, candidate_version_id, dataset_version, dataset_digest)
+DO UPDATE SET mode = EXCLUDED.mode, status = EXCLUDED.status,
+  summary_json = EXCLUDED.summary_json, created_at = now()
+RETURNING id, org_id, workflow_id, baseline_version_id, candidate_version_id, dataset_version, dataset_digest, mode, status, summary_json, created_by, created_at
+`
+
+type UpsertWorkflowRecoveryQualificationParams struct {
+	ID                 string
+	OrgID              string
+	WorkflowID         string
+	BaselineVersionID  string
+	CandidateVersionID string
+	DatasetVersion     string
+	DatasetDigest      string
+	Mode               string
+	Status             string
+	SummaryJson        json.RawMessage
+	CreatedBy          string
+}
+
+func (q *Queries) UpsertWorkflowRecoveryQualification(ctx context.Context, arg UpsertWorkflowRecoveryQualificationParams) (WorkflowRecoveryQualification, error) {
+	row := q.db.QueryRow(ctx, upsertWorkflowRecoveryQualification,
+		arg.ID,
+		arg.OrgID,
+		arg.WorkflowID,
+		arg.BaselineVersionID,
+		arg.CandidateVersionID,
+		arg.DatasetVersion,
+		arg.DatasetDigest,
+		arg.Mode,
+		arg.Status,
+		arg.SummaryJson,
+		arg.CreatedBy,
+	)
+	var i WorkflowRecoveryQualification
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.WorkflowID,
+		&i.BaselineVersionID,
+		&i.CandidateVersionID,
+		&i.DatasetVersion,
+		&i.DatasetDigest,
+		&i.Mode,
+		&i.Status,
+		&i.SummaryJson,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
 }

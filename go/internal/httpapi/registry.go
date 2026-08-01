@@ -76,6 +76,8 @@ var routeAuthz = map[string]routeGate{
 	"GET /workflows/{workflowId}/rollout":  {auth.RoleViewer, "workflows.read"},
 	"POST /workflows/{workflowId}/rollout": {auth.RoleAdmin, "workflows.write"},
 	"POST /workflows/{workflowId}/rollout/{rolloutId}/{decision}": {auth.RoleAdmin, "workflows.write"},
+	"GET /workflows/{workflowId}/rollout/qualification":           {auth.RoleViewer, "workflows.read"},
+	"POST /workflows/{workflowId}/rollout/qualification":          {auth.RoleAdmin, "workflows.write"},
 	"POST /recovery/items/{id}/evidence":                          {auth.RoleEditor, "recovery.read"},
 	"GET /alerts/policies":                                        {auth.RoleViewer, "alerts.read"},
 	"POST /alerts/policies":                                       {auth.RoleAdmin, "alerts.write"},

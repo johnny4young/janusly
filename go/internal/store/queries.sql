@@ -1551,3 +1551,18 @@ UPDATE workflow_rollouts
 SET status = 'cancelled', rolled_back_reason = sqlc.arg(reason),
     ended_at = now(), updated_at = now()
 WHERE org_id = $1 AND workflow_id = $2 AND status = 'active';
+
+-- name: UpsertWorkflowRecoveryQualification :one
+INSERT INTO workflow_recovery_qualifications (id, org_id, workflow_id, baseline_version_id,
+  candidate_version_id, dataset_version, dataset_digest, mode, status, summary_json, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+ON CONFLICT (org_id, workflow_id, baseline_version_id, candidate_version_id, dataset_version, dataset_digest)
+DO UPDATE SET mode = EXCLUDED.mode, status = EXCLUDED.status,
+  summary_json = EXCLUDED.summary_json, created_at = now()
+RETURNING *;
+
+-- name: FindWorkflowRecoveryQualification :one
+SELECT * FROM workflow_recovery_qualifications
+WHERE org_id = $1 AND workflow_id = $2 AND baseline_version_id = $3
+  AND candidate_version_id = $4 AND dataset_version = $5
+ORDER BY created_at DESC, id DESC LIMIT 1;
