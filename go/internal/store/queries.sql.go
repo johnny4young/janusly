@@ -1475,6 +1475,79 @@ func (q *Queries) GetAlertPolicy(ctx context.Context, arg GetAlertPolicyParams) 
 	return i, err
 }
 
+const getCredentialByName = `-- name: GetCredentialByName :one
+SELECT id, org_id, name, kind, secret_ref, metadata, created_by, created_at, updated_at, expires_at FROM credentials WHERE org_id = $1 AND kind = $2 AND name = $3
+`
+
+type GetCredentialByNameParams struct {
+	OrgID string
+	Kind  string
+	Name  string
+}
+
+func (q *Queries) GetCredentialByName(ctx context.Context, arg GetCredentialByNameParams) (Credential, error) {
+	row := q.db.QueryRow(ctx, getCredentialByName, arg.OrgID, arg.Kind, arg.Name)
+	var i Credential
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.Kind,
+		&i.SecretRef,
+		&i.Metadata,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
+const getCredentialSecretVersion = `-- name: GetCredentialSecretVersion :one
+SELECT id, org_id, credential_id, version, ciphertext, data_nonce, data_tag,
+       wrapped_key, wrap_nonce, wrap_tag, key_version
+FROM credential_secret_versions
+WHERE id = $1 AND org_id = $2 AND revoked_at IS NULL
+`
+
+type GetCredentialSecretVersionParams struct {
+	ID    string
+	OrgID string
+}
+
+type GetCredentialSecretVersionRow struct {
+	ID           string
+	OrgID        string
+	CredentialID string
+	Version      int32
+	Ciphertext   string
+	DataNonce    string
+	DataTag      string
+	WrappedKey   string
+	WrapNonce    string
+	WrapTag      string
+	KeyVersion   int32
+}
+
+func (q *Queries) GetCredentialSecretVersion(ctx context.Context, arg GetCredentialSecretVersionParams) (GetCredentialSecretVersionRow, error) {
+	row := q.db.QueryRow(ctx, getCredentialSecretVersion, arg.ID, arg.OrgID)
+	var i GetCredentialSecretVersionRow
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.CredentialID,
+		&i.Version,
+		&i.Ciphertext,
+		&i.DataNonce,
+		&i.DataTag,
+		&i.WrappedKey,
+		&i.WrapNonce,
+		&i.WrapTag,
+		&i.KeyVersion,
+	)
+	return i, err
+}
+
 const getDeadLetter = `-- name: GetDeadLetter :one
 SELECT id, org_id, run_id, node_id, attempt, workflow_json, node_json,
        error_json, status, replayed_at, created_at, replay_claimed_at
@@ -2693,6 +2766,71 @@ func (q *Queries) InsertAuditLogRow(ctx context.Context, arg InsertAuditLogRowPa
 		arg.TargetType,
 		arg.TargetID,
 		arg.Metadata,
+	)
+	return err
+}
+
+const insertCredential = `-- name: InsertCredential :exec
+INSERT INTO credentials (id, org_id, name, kind, secret_ref, created_by)
+VALUES ($1, $2, $3, $4, $5, $6)
+`
+
+type InsertCredentialParams struct {
+	ID        string
+	OrgID     string
+	Name      string
+	Kind      string
+	SecretRef string
+	CreatedBy pgtype.Text
+}
+
+func (q *Queries) InsertCredential(ctx context.Context, arg InsertCredentialParams) error {
+	_, err := q.db.Exec(ctx, insertCredential,
+		arg.ID,
+		arg.OrgID,
+		arg.Name,
+		arg.Kind,
+		arg.SecretRef,
+		arg.CreatedBy,
+	)
+	return err
+}
+
+const insertCredentialSecretVersion = `-- name: InsertCredentialSecretVersion :exec
+INSERT INTO credential_secret_versions (id, org_id, credential_id, version, ciphertext,
+  data_nonce, data_tag, wrapped_key, wrap_nonce, wrap_tag, key_version, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+`
+
+type InsertCredentialSecretVersionParams struct {
+	ID           string
+	OrgID        string
+	CredentialID string
+	Version      int32
+	Ciphertext   string
+	DataNonce    string
+	DataTag      string
+	WrappedKey   string
+	WrapNonce    string
+	WrapTag      string
+	KeyVersion   int32
+	CreatedBy    pgtype.Text
+}
+
+func (q *Queries) InsertCredentialSecretVersion(ctx context.Context, arg InsertCredentialSecretVersionParams) error {
+	_, err := q.db.Exec(ctx, insertCredentialSecretVersion,
+		arg.ID,
+		arg.OrgID,
+		arg.CredentialID,
+		arg.Version,
+		arg.Ciphertext,
+		arg.DataNonce,
+		arg.DataTag,
+		arg.WrappedKey,
+		arg.WrapNonce,
+		arg.WrapTag,
+		arg.KeyVersion,
+		arg.CreatedBy,
 	)
 	return err
 }
@@ -5908,6 +6046,24 @@ func (q *Queries) MigrateOrgMemberUserID(ctx context.Context, arg MigrateOrgMemb
 	return result.RowsAffected(), nil
 }
 
+const nextCredentialSecretVersion = `-- name: NextCredentialSecretVersion :one
+SELECT (coalesce(max(version), 0) + 1)::int AS next_version
+FROM credential_secret_versions
+WHERE org_id = $1 AND credential_id = $2
+`
+
+type NextCredentialSecretVersionParams struct {
+	OrgID        string
+	CredentialID string
+}
+
+func (q *Queries) NextCredentialSecretVersion(ctx context.Context, arg NextCredentialSecretVersionParams) (int32, error) {
+	row := q.db.QueryRow(ctx, nextCredentialSecretVersion, arg.OrgID, arg.CredentialID)
+	var next_version int32
+	err := row.Scan(&next_version)
+	return next_version, err
+}
+
 const nextPromptVersionNumber = `-- name: NextPromptVersionNumber :one
 SELECT COALESCE(max(version), 0) + 1 FROM prompt_versions
 WHERE org_id = $1 AND prompt_id = $2
@@ -6749,6 +6905,21 @@ func (q *Queries) ReviveFailedRun(ctx context.Context, id string) (int64, error)
 	return result.RowsAffected(), nil
 }
 
+const revokeCredentialSecretVersion = `-- name: RevokeCredentialSecretVersion :exec
+UPDATE credential_secret_versions SET revoked_at = now()
+WHERE id = $1 AND org_id = $2 AND revoked_at IS NULL
+`
+
+type RevokeCredentialSecretVersionParams struct {
+	ID    string
+	OrgID string
+}
+
+func (q *Queries) RevokeCredentialSecretVersion(ctx context.Context, arg RevokeCredentialSecretVersionParams) error {
+	_, err := q.db.Exec(ctx, revokeCredentialSecretVersion, arg.ID, arg.OrgID)
+	return err
+}
+
 const revokePendingInvitation = `-- name: RevokePendingInvitation :execrows
 UPDATE invitations SET status = 'revoked'
 WHERE id = $1 AND org_id = $2 AND status = 'pending'
@@ -7064,6 +7235,22 @@ func (q *Queries) UpdateAlertPolicy(ctx context.Context, arg UpdateAlertPolicyPa
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const updateCredentialSecretRef = `-- name: UpdateCredentialSecretRef :exec
+UPDATE credentials SET secret_ref = $3, updated_at = now()
+WHERE org_id = $1 AND id = $2
+`
+
+type UpdateCredentialSecretRefParams struct {
+	OrgID     string
+	ID        string
+	SecretRef string
+}
+
+func (q *Queries) UpdateCredentialSecretRef(ctx context.Context, arg UpdateCredentialSecretRefParams) error {
+	_, err := q.db.Exec(ctx, updateCredentialSecretRef, arg.OrgID, arg.ID, arg.SecretRef)
+	return err
 }
 
 const updateMcpToolFlags = `-- name: UpdateMcpToolFlags :one

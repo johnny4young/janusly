@@ -1705,3 +1705,9 @@ producción necesita saber — de lo ya resuelto o informativo.
 
 ## T-158 · REPORT-W5 (2026-07-31)
 - Cierre de la ola 5: 30/30 tickets, 160/160 acumulados. El informe recoge los números (26 paquetes -race, paridad 26/26 ×3 con divergencias vacías, 5/5 smokes, matriz 28/28), las cuatro decisiones de diseño que valen conocer, y la lista completa de diferidos con su ola de destino.
+
+## T-159 · Secret Store: envelope + root key externa (2026-07-31)
+- `internal/secretstore`: envelope doble AES-256-GCM con AAD que ata ciphertext Y wrapped key a (org, credencial, versión) — el test lo prueba re-domiciliando la fila a otro org: el sello se rompe y la resolución falla cerrada. La propiedad que el comprador de compliance de verdad quiere está probada literal: el dump de la base no contiene el plaintext.
+- Root key de UN secreto de proceso (inline o archivo), cacheada, jamás persistida, con probe de boot que falla rápido ante clave malformada — y unset sigue siendo legal (despliegues solo-legacy). El fail-closed de resolución lleva warn-once acotado por (fila, razón): el silencio total hacía indiagnosticable una root key partida entre API y worker.
+- El firewall del ref forjado: un `janusly-secret://` dañado jamás cae al proveedor de entorno, aunque exista una env var con ese nombre exacto — probado plantando la env var.
+- Detalle Go: `splitSeal` separa el `ciphertext||tag` combinado de Go en las dos columnas del schema (Node los guarda aparte) — el wire schema compartido manda.

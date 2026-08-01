@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -23,6 +24,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/httpapi"
 	"github.com/johnny4young/janusly/go/internal/migrate"
 	"github.com/johnny4young/janusly/go/internal/ratelimit"
+	"github.com/johnny4young/janusly/go/internal/secretstore"
 	"github.com/johnny4young/janusly/go/internal/usage"
 )
 
@@ -56,6 +58,14 @@ func run() error {
 	}
 	if err := migrate.AssertMigrated(ctx, cfg.DatabaseURL); err != nil {
 		return err
+	}
+	// Secret Store boot probe: a malformed root key fails fast at deploy
+	// time, not as the first credential write's 500. Unset stays legal
+	// (legacy environment references only).
+	if configured, err := secretstore.AssertCredentialRootKeyUsable(); err != nil {
+		return err
+	} else if !configured {
+		slog.Info("credential root key not configured; managed secrets disabled (legacy env refs only)")
 	}
 	// The reference's production fail-fast: without Supabase configured,
 	// production refuses to start unless dev headers are explicitly

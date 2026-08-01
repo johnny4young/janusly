@@ -1605,3 +1605,34 @@ WHERE r.workflow_rollout_id IS NOT NULL AND r.replay_mode IS NULL
   AND r.status IN ('succeeded','failed','cancelled') AND o.run_id IS NULL
 ORDER BY r.created_at ASC, r.id ASC
 LIMIT sqlc.arg(page_limit);
+
+-- name: NextCredentialSecretVersion :one
+SELECT (coalesce(max(version), 0) + 1)::int AS next_version
+FROM credential_secret_versions
+WHERE org_id = $1 AND credential_id = $2;
+
+-- name: InsertCredentialSecretVersion :exec
+INSERT INTO credential_secret_versions (id, org_id, credential_id, version, ciphertext,
+  data_nonce, data_tag, wrapped_key, wrap_nonce, wrap_tag, key_version, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12);
+
+-- name: GetCredentialSecretVersion :one
+SELECT id, org_id, credential_id, version, ciphertext, data_nonce, data_tag,
+       wrapped_key, wrap_nonce, wrap_tag, key_version
+FROM credential_secret_versions
+WHERE id = $1 AND org_id = $2 AND revoked_at IS NULL;
+
+-- name: RevokeCredentialSecretVersion :exec
+UPDATE credential_secret_versions SET revoked_at = now()
+WHERE id = $1 AND org_id = $2 AND revoked_at IS NULL;
+
+-- name: GetCredentialByName :one
+SELECT * FROM credentials WHERE org_id = $1 AND kind = $2 AND name = $3;
+
+-- name: InsertCredential :exec
+INSERT INTO credentials (id, org_id, name, kind, secret_ref, created_by)
+VALUES ($1, $2, $3, $4, $5, $6);
+
+-- name: UpdateCredentialSecretRef :exec
+UPDATE credentials SET secret_ref = sqlc.arg(secret_ref), updated_at = now()
+WHERE org_id = $1 AND id = $2;
