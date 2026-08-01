@@ -11,7 +11,38 @@
 // /auth/context, and the health surfaces (which skip auth entirely).
 package httpapi
 
-import "github.com/johnny4young/janusly/go/internal/auth"
+import (
+	"fmt"
+	"net/http"
+
+	"github.com/johnny4young/janusly/go/internal/auth"
+)
+
+// authOnlyRoutes are the ONLY patterns allowed to pass the middleware
+// with identity but no rank/permission gate (the reference's contract:
+// every member reads runtime config and the catalogs). Any OTHER pattern
+// missing from routeAuthz fails CLOSED with route_not_registered — a
+// mount can no longer silently become auth-only by forgetting its entry.
+var authOnlyRoutes = map[string]bool{
+	"GET /auth/context": true,
+	"GET /org/config":   true,
+	"GET /templates":    true,
+	"GET /v1/templates": true,
+	"GET /tools":        true,
+	"GET /v1/tools":     true,
+}
+
+// route registers the gate and mounts the handler in ONE call — the
+// colocated pattern new modules use (T-525). Re-registering the same
+// pattern with the same gate is idempotent (harnesses build many
+// handlers per process); a CONFLICTING gate is a programming error.
+func (s *V1Server) route(mux *http.ServeMux, pattern string, gate routeGate, handler handlerFunc) {
+	if existing, present := routeAuthz[pattern]; present && existing != gate {
+		panic(fmt.Sprintf("route %s registered twice with conflicting gates", pattern))
+	}
+	routeAuthz[pattern] = gate
+	mux.HandleFunc(pattern, s.auth(handler))
+}
 
 var routeAuthz = map[string]routeGate{
 	// Workflows — version writes are editor + workflows.write.

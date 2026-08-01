@@ -4,10 +4,13 @@ package httpapi
 
 import (
 	"context"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/johnny4young/janusly/go/internal/auth"
 )
 
@@ -115,5 +118,35 @@ func TestPermissionLayerRejectsIndependently(t *testing.T) {
 	if rejection == nil || rejection.status != 403 ||
 		rejection.message != "Forbidden: requires permission members.write" {
 		t.Fatalf("permission layer: %+v", rejection)
+	}
+}
+
+// T-525: the middleware fails CLOSED on a mounted-but-unregistered
+// pattern — forgetting the registry entry can never silently grant
+// auth-only access.
+func TestUnregisteredPatternFailsClosed(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	rogue := &V1Server{
+		pool: pool, resolver: auth.NewResolver(pool, auth.ConfigFromEnv()),
+		newID: uuid.NewString, hub: newStreamHub(),
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /rogue/unregistered", rogue.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	probe := httptest.NewServer(mux)
+	t.Cleanup(probe.Close)
+	req, _ := http.NewRequest("GET", probe.URL+"/rogue/unregistered", nil)
+	req.Header.Set("x-org-id", h.org)
+	req.Header.Set("x-user-id", "api-tester")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	if res.StatusCode != 500 || !strings.Contains(string(body), "route_not_registered") {
+		t.Fatalf("unregistered pattern must fail closed: %d %s", res.StatusCode, body)
 	}
 }

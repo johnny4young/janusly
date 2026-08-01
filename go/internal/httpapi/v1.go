@@ -228,6 +228,17 @@ func (s *V1Server) auth(next handlerFunc) http.HandlerFunc {
 				}
 				return
 			}
+		} else if !authOnlyRoutes[r.Pattern] {
+			// Fail CLOSED (T-525): an authenticated mount whose pattern is
+			// in neither table is a missing registry entry, not a grant.
+			rejection := opError(http.StatusInternalServerError, "route_not_registered",
+				"route "+r.Pattern+" is mounted with auth but has no registry gate", nil)
+			if strings.HasPrefix(r.URL.Path, "/v1/") {
+				writeVersioned(w, rc.id, rejection)
+			} else {
+				writeLegacy(w, rejection)
+			}
+			return
 		}
 		next(w, r, rc)
 	}
