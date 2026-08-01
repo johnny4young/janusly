@@ -277,3 +277,116 @@ test('human form against Go: pause, fill through the real UI, resume', async ({ 
 
   expect(pageErrors, `page errors: ${pageErrors.join('; ')}`).toHaveLength(0)
 })
+
+test('recovery queue, drawer, and bulk replay against Go', async ({ page, request }) => {
+  test.setTimeout(120_000)
+  const orgId = `go-queue-${Date.now()}`
+  const pageErrors: string[] = []
+  page.on('pageerror', (error) => pageErrors.push(String(error)))
+
+  const { createServer } = await import('node:http')
+  let healed = false
+  const upstream = createServer((_req, res) => {
+    if (healed) {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end('{"ok":true}')
+      return
+    }
+    res.writeHead(500)
+    res.end('down')
+  })
+  await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve))
+  const address = upstream.address()
+  const upstreamUrl = typeof address === 'object' && address ? `http://127.0.0.1:${address.port}` : ''
+
+  try {
+    const failing = {
+      id: `queue-fail-${orgId}`,
+      name: 'Queue failing flow',
+      nodes: [{ id: 'call', type: 'http', config: { url: upstreamUrl, timeoutMs: 500 } }],
+      edges: [],
+    }
+    await request.post(`${API_URL}/workflows/save`, { headers: headers(orgId), data: failing })
+    const waitStatus = async (runId: string, want: string) => {
+      const deadline = Date.now() + 30_000
+      for (;;) {
+        const res = await request.get(`${API_URL}/v1/status?runId=${runId}`, { headers: headers(orgId) })
+        const body = await res.json() as { data?: { run?: { status?: string } } }
+        if (body.data?.run?.status === want) return
+        if (Date.now() > deadline) throw new Error(`run ${runId} never reached ${want}`)
+        await new Promise((r) => setTimeout(r, 150))
+      }
+    }
+    const runIds: string[] = []
+    for (let i = 0; i < 3; i++) {
+      const started = await request.post(`${API_URL}/start`, {
+        headers: headers(orgId), data: { workflow: failing },
+      })
+      const { runId } = await started.json() as { runId: string }
+      runIds.push(runId)
+      await waitStatus(runId, 'failed')
+    }
+    // The Go /dlq bare array feeds the id lookup (T-143 closed that gap).
+    const dlqRes = await request.get(`${API_URL}/dlq`, { headers: headers(orgId) })
+    const dlqRows = await dlqRes.json() as Array<{ id: string; runId: string }>
+    expect(dlqRows.length).toBeGreaterThanOrEqual(3)
+    const byRun = new Map(dlqRows.map((row) => [row.runId, row.id]))
+
+    // One replay via API opens its ownership incident (badge + drawer).
+    await request.post(`${API_URL}/dlq/replay`, {
+      headers: headers(orgId), data: { deadLetterId: byRun.get(runIds[0]) },
+    })
+    await waitStatus(runIds[0], 'failed')
+
+    // The hidden expert route: activeTab 'recover' mounts the queue.
+    await page.addInitScript(({ activeOrg }) => {
+      window.localStorage.setItem('janusly:activeOrg', activeOrg)
+      window.localStorage.setItem('janusly:locale', 'en')
+      window.localStorage.setItem('janusly:activeTab', 'recover')
+    }, { activeOrg: orgId })
+    await page.goto('/')
+    await expect(page.getByTestId('recovery-queue')).toBeVisible()
+    // Default Show=Open lists the two open rows; the replayed one is
+    // filtered out until the operator widens the status filter.
+    await expect(page.getByTestId(`dlq-row-${byRun.get(runIds[1])}`)).toBeVisible()
+    await expect(page.getByTestId(`dlq-row-${byRun.get(runIds[2])}`)).toBeVisible()
+    await expect(page.getByTestId(`dlq-row-${byRun.get(runIds[0])}`)).toBeHidden()
+    await page.getByRole('combobox', { name: 'Show' }).selectOption({ label: 'All' })
+    for (const runId of runIds) {
+      await expect(page.getByTestId(`dlq-row-${byRun.get(runId)}`)).toBeVisible()
+    }
+
+    // Server-side search narrows to one row (matches the run id).
+    await page.getByTestId('dlq-search').fill(runIds[1])
+    await expect(page.getByTestId(`dlq-row-${byRun.get(runIds[1])}`)).toBeVisible()
+    await expect(page.getByTestId(`dlq-row-${byRun.get(runIds[0])}`)).toBeHidden()
+    await page.getByTestId('dlq-search').fill('')
+    await expect(page.getByTestId(`dlq-row-${byRun.get(runIds[0])}`)).toBeVisible()
+
+    // The drawer: open via the replayed row's incident badge, acknowledge,
+    // and the CAS ladder reflects on the wire.
+    await page.getByTestId('recovery-item-badge').first().click()
+    await expect(page.getByTestId('recovery-item-drawer')).toBeVisible()
+    await page.getByTestId('ri-action-acknowledge').click()
+    await expect.poll(async () => {
+      const res = await request.get(`${API_URL}/recovery/items`, { headers: headers(orgId) })
+      const body = await res.json() as { items: Array<{ status: string }> }
+      return body.items[0]?.status
+    }, { timeout: 10_000 }).toBe('acknowledged')
+
+    // Bulk replay through the real multi-select: heal the upstream, pick
+    // the two still-open rows, confirm, and both runs recover.
+    healed = true
+    await page.getByTestId('dlq-select-toggle').click()
+    await page.getByTestId(`dlq-select-row-${byRun.get(runIds[1])}`).click()
+    await page.getByTestId(`dlq-select-row-${byRun.get(runIds[2])}`).click()
+    await page.getByTestId('dlq-bulk-replay').click()
+    await page.getByTestId('dlq-bulk-replay-confirm').click()
+    await waitStatus(runIds[1], 'succeeded')
+    await waitStatus(runIds[2], 'succeeded')
+
+    expect(pageErrors, `page errors: ${pageErrors.join('; ')}`).toHaveLength(0)
+  } finally {
+    upstream.close()
+  }
+})

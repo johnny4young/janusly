@@ -1688,3 +1688,8 @@ producción necesita saber — de lo ya resuelto o informativo.
 - La asignación se resuelve EN LA ACEPTACIÓN con el id durable del evento como assignment key, y se captura en el evento ANTES de que el run exista — el estado mutable del despliegue nunca redirige un evento después de aceptado, y una entrega duplicada adopta el evento persistido con su asignación original.
 - El nodo trigger debe existir en el snapshot de la versión ASIGNADA: si el variant no lo tiene, 409 `trigger_no_matching_node` — por eso `webhook_received` queda deliberadamente FUERA del contrato de compatibilidad de triggers externos (schedule/email/file/mcp): el ingest re-resuelve y puede rechazar honesto, mientras los triggers de sistema no tienen a quién responderle un 409.
 - El backfill del breaker honra la asignación CAPTURADA del evento buffered — ejecuta el snapshot del variant capturado, no la versión que el rollout señale al momento del resume.
+
+## T-155 · Smokes web expertos (2026-07-31)
+- Quinto smoke real contra Go: la ruta experta oculta (activeTab=recover) monta la cola de recuperación de verdad — el primer intento falló EXACTAMENTE como debía: el filtro Show=Open por defecto oculta la fila replayed, y el spec ahora prueba ese contrato (ampliar a All la revela).
+- Búsqueda server-side que estrecha a una fila por runId, drawer abierto por el badge del incidente con acknowledge verificado por wire, y bulk replay por el multi-select real sanando dos runs contra el upstream curable del spec. 5/5 verdes.
+- Gap conocido y honesto: el diálogo de cluster-apply (RecoveryDialog en modo cluster) no se conduce por UI en este smoke — la superficie está probada por wire (T-144) y el diálogo AI tiene su smoke de la ola 4; va al REPORT.
