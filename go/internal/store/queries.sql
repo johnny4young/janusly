@@ -1719,3 +1719,154 @@ WHERE org_id = $1 AND connection_id = $2 AND created_at < $3;
 INSERT INTO slack_interaction_receipts (id, org_id, connection_id)
 VALUES ($1, $2, $3)
 ON CONFLICT (id) DO NOTHING;
+
+-- name: InsertExternalRuntimeConnection :one
+INSERT INTO external_runtime_connections (id, org_id, name, runtime_key,
+                                          signing_credential_name, enabled, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING *;
+
+-- name: ListExternalRuntimeConnections :many
+SELECT * FROM external_runtime_connections
+WHERE org_id = $1
+ORDER BY name ASC
+LIMIT 100;
+
+-- name: GetExternalRuntimeConnection :one
+SELECT * FROM external_runtime_connections
+WHERE org_id = $1 AND id = $2;
+
+-- name: GetExternalRuntimeConnectionForCallback :one
+SELECT * FROM external_runtime_connections
+WHERE id = $1;
+
+-- name: UpdateExternalRuntimeConnection :one
+UPDATE external_runtime_connections
+SET name = $3, runtime_key = $4, signing_credential_name = $5, enabled = $6,
+    updated_at = now()
+WHERE org_id = $1 AND id = $2
+RETURNING *;
+
+-- name: DeleteExternalRuntimeConnection :one
+DELETE FROM external_runtime_connections
+WHERE org_id = $1 AND id = $2
+RETURNING *;
+
+-- name: GetActiveExternalRuntimeConnection :one
+SELECT id FROM external_runtime_connections
+WHERE id = $1 AND org_id = $2 AND enabled = true;
+
+-- name: InsertExternalRuntimeEventReceipt :execrows
+INSERT INTO external_runtime_events (id, org_id, connection_id, event_id, source,
+                                     event_type, subject, event_time, sequence,
+                                     payload_json, projection_state, received_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11)
+ON CONFLICT (connection_id, source, event_id) DO NOTHING;
+
+-- name: GetExternalRuntimeEventReceipt :one
+SELECT * FROM external_runtime_events
+WHERE connection_id = $1 AND source = $2 AND event_id = $3;
+
+-- name: SetExternalRuntimeEventProjectionState :exec
+UPDATE external_runtime_events SET projection_state = $2 WHERE id = $1;
+
+-- name: UpsertExternalWorkflowPlaceholder :exec
+INSERT INTO external_workflows (id, org_id, connection_id, external_workflow_id,
+                                name, evidence_json, last_sequence)
+VALUES ($1, $2, $3, $4, $4, '[]'::jsonb, -1)
+ON CONFLICT (connection_id, external_workflow_id) DO NOTHING;
+
+-- name: UpsertExternalRunPlaceholder :exec
+INSERT INTO external_runs (id, org_id, connection_id, external_workflow_id,
+                           external_run_id, status, evidence_json, last_sequence)
+VALUES ($1, $2, $3, $4, $5, 'unknown', '[]'::jsonb, -1)
+ON CONFLICT (connection_id, external_run_id) DO NOTHING;
+
+-- name: UpsertExternalWorkflowObservation :execrows
+INSERT INTO external_workflows (id, org_id, connection_id, external_workflow_id,
+                                name, version, snapshot_json, evidence_json,
+                                last_sequence, last_event_id, last_observed_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+ON CONFLICT (connection_id, external_workflow_id) DO UPDATE SET
+  name = excluded.name, version = excluded.version,
+  snapshot_json = excluded.snapshot_json, evidence_json = excluded.evidence_json,
+  last_sequence = excluded.last_sequence, last_event_id = excluded.last_event_id,
+  last_observed_at = excluded.last_observed_at, updated_at = now()
+WHERE external_workflows.last_sequence < excluded.last_sequence;
+
+-- name: UpsertExternalRunObservation :execrows
+INSERT INTO external_runs (id, org_id, connection_id, external_workflow_id,
+                           external_run_id, status, started_at, completed_at,
+                           snapshot_json, evidence_json, last_sequence,
+                           last_event_id, last_observed_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+ON CONFLICT (connection_id, external_run_id) DO UPDATE SET
+  external_workflow_id = excluded.external_workflow_id, status = excluded.status,
+  started_at = excluded.started_at, completed_at = excluded.completed_at,
+  snapshot_json = excluded.snapshot_json, evidence_json = excluded.evidence_json,
+  last_sequence = excluded.last_sequence, last_event_id = excluded.last_event_id,
+  last_observed_at = excluded.last_observed_at, updated_at = now()
+WHERE external_runs.last_sequence < excluded.last_sequence;
+
+-- name: UpsertExternalStepObservation :execrows
+INSERT INTO external_run_steps (id, org_id, connection_id, external_workflow_id,
+                                external_run_id, external_step_id, name, status,
+                                attempt, started_at, completed_at, snapshot_json,
+                                evidence_json, last_sequence, last_event_id,
+                                last_observed_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+ON CONFLICT (connection_id, external_run_id, external_step_id) DO UPDATE SET
+  external_workflow_id = excluded.external_workflow_id, name = excluded.name,
+  status = excluded.status, attempt = excluded.attempt,
+  started_at = excluded.started_at, completed_at = excluded.completed_at,
+  snapshot_json = excluded.snapshot_json, evidence_json = excluded.evidence_json,
+  last_sequence = excluded.last_sequence, last_event_id = excluded.last_event_id,
+  last_observed_at = excluded.last_observed_at, updated_at = now()
+WHERE external_run_steps.last_sequence < excluded.last_sequence;
+
+-- name: UpsertExternalRecoveryCaseDetected :exec
+INSERT INTO external_recovery_cases (id, org_id, connection_id, subject_key,
+                                     subject_kind, external_workflow_id,
+                                     external_run_id, external_step_id, state,
+                                     failure_snapshot_json, evidence_json,
+                                     first_detected_at, last_observed_at,
+                                     observed_recovered_at, last_sequence,
+                                     last_event_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'detected', $9, $10, $11, $11, NULL, $12, $13)
+ON CONFLICT (connection_id, subject_key) DO UPDATE SET
+  state = 'detected', failure_snapshot_json = excluded.failure_snapshot_json,
+  evidence_json = excluded.evidence_json, last_observed_at = excluded.last_observed_at,
+  observed_recovered_at = NULL, last_sequence = excluded.last_sequence,
+  last_event_id = excluded.last_event_id, updated_at = now()
+WHERE external_recovery_cases.last_sequence < excluded.last_sequence;
+
+-- name: MarkExternalRecoveryCaseRecovered :exec
+UPDATE external_recovery_cases
+SET state = 'observed_recovered', evidence_json = $5, last_observed_at = $6,
+    observed_recovered_at = $6, last_sequence = $4, last_event_id = $7,
+    updated_at = now()
+WHERE org_id = $1 AND connection_id = $2 AND subject_key = $3 AND last_sequence < $4;
+
+-- name: ListExternalWorkflows :many
+SELECT * FROM external_workflows
+WHERE org_id = $1
+ORDER BY last_observed_at DESC NULLS LAST, external_workflow_id ASC
+LIMIT 100;
+
+-- name: ListExternalRuns :many
+SELECT * FROM external_runs
+WHERE org_id = $1
+ORDER BY last_observed_at DESC NULLS LAST, created_at DESC
+LIMIT 100;
+
+-- name: ListExternalRunSteps :many
+SELECT * FROM external_run_steps
+WHERE org_id = $1
+ORDER BY last_observed_at DESC NULLS LAST, created_at DESC
+LIMIT 200;
+
+-- name: ListExternalRecoveryCases :many
+SELECT * FROM external_recovery_cases
+WHERE org_id = $1
+ORDER BY CASE WHEN state = 'detected' THEN 0 ELSE 1 END, last_observed_at DESC
+LIMIT 200;

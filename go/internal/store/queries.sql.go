@@ -850,6 +850,34 @@ func (q *Queries) DeleteExpiredUsageEventsBatch(ctx context.Context, arg DeleteE
 	return result.RowsAffected(), nil
 }
 
+const deleteExternalRuntimeConnection = `-- name: DeleteExternalRuntimeConnection :one
+DELETE FROM external_runtime_connections
+WHERE org_id = $1 AND id = $2
+RETURNING id, org_id, name, runtime_key, signing_credential_name, enabled, created_by, created_at, updated_at
+`
+
+type DeleteExternalRuntimeConnectionParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) DeleteExternalRuntimeConnection(ctx context.Context, arg DeleteExternalRuntimeConnectionParams) (ExternalRuntimeConnection, error) {
+	row := q.db.QueryRow(ctx, deleteExternalRuntimeConnection, arg.OrgID, arg.ID)
+	var i ExternalRuntimeConnection
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.RuntimeKey,
+		&i.SigningCredentialName,
+		&i.Enabled,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const deleteOrgMember = `-- name: DeleteOrgMember :execrows
 DELETE FROM org_members WHERE org_id = $1 AND user_id = $2
 `
@@ -1445,6 +1473,23 @@ func (q *Queries) FinishWorkflowRolloutCAS(ctx context.Context, arg FinishWorkfl
 	return i, err
 }
 
+const getActiveExternalRuntimeConnection = `-- name: GetActiveExternalRuntimeConnection :one
+SELECT id FROM external_runtime_connections
+WHERE id = $1 AND org_id = $2 AND enabled = true
+`
+
+type GetActiveExternalRuntimeConnectionParams struct {
+	ID    string
+	OrgID string
+}
+
+func (q *Queries) GetActiveExternalRuntimeConnection(ctx context.Context, arg GetActiveExternalRuntimeConnectionParams) (string, error) {
+	row := q.db.QueryRow(ctx, getActiveExternalRuntimeConnection, arg.ID, arg.OrgID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getActiveRolloutForOutcome = `-- name: GetActiveRolloutForOutcome :one
 SELECT id, org_id, workflow_id, baseline_version_id, canary_version_id, traffic_percent, minimum_sample_size, minimum_success_rate_percent, status, baseline_succeeded, baseline_failed, canary_succeeded, canary_failed, rolled_back_reason, created_by, created_at, updated_at, ended_at, last_outcome_at FROM workflow_rollouts WHERE id = $1 AND org_id = $2 AND status = 'active'
 `
@@ -1694,6 +1739,86 @@ func (q *Queries) GetDeadLetterForImpact(ctx context.Context, arg GetDeadLetterF
 		&i.ReplayClaimedAt,
 		&i.ReplayedAt,
 		&i.ReplayMode,
+	)
+	return i, err
+}
+
+const getExternalRuntimeConnection = `-- name: GetExternalRuntimeConnection :one
+SELECT id, org_id, name, runtime_key, signing_credential_name, enabled, created_by, created_at, updated_at FROM external_runtime_connections
+WHERE org_id = $1 AND id = $2
+`
+
+type GetExternalRuntimeConnectionParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) GetExternalRuntimeConnection(ctx context.Context, arg GetExternalRuntimeConnectionParams) (ExternalRuntimeConnection, error) {
+	row := q.db.QueryRow(ctx, getExternalRuntimeConnection, arg.OrgID, arg.ID)
+	var i ExternalRuntimeConnection
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.RuntimeKey,
+		&i.SigningCredentialName,
+		&i.Enabled,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getExternalRuntimeConnectionForCallback = `-- name: GetExternalRuntimeConnectionForCallback :one
+SELECT id, org_id, name, runtime_key, signing_credential_name, enabled, created_by, created_at, updated_at FROM external_runtime_connections
+WHERE id = $1
+`
+
+func (q *Queries) GetExternalRuntimeConnectionForCallback(ctx context.Context, id string) (ExternalRuntimeConnection, error) {
+	row := q.db.QueryRow(ctx, getExternalRuntimeConnectionForCallback, id)
+	var i ExternalRuntimeConnection
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.RuntimeKey,
+		&i.SigningCredentialName,
+		&i.Enabled,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getExternalRuntimeEventReceipt = `-- name: GetExternalRuntimeEventReceipt :one
+SELECT id, org_id, connection_id, event_id, source, event_type, subject, event_time, sequence, payload_json, projection_state, received_at FROM external_runtime_events
+WHERE connection_id = $1 AND source = $2 AND event_id = $3
+`
+
+type GetExternalRuntimeEventReceiptParams struct {
+	ConnectionID string
+	Source       string
+	EventID      string
+}
+
+func (q *Queries) GetExternalRuntimeEventReceipt(ctx context.Context, arg GetExternalRuntimeEventReceiptParams) (ExternalRuntimeEvent, error) {
+	row := q.db.QueryRow(ctx, getExternalRuntimeEventReceipt, arg.ConnectionID, arg.Source, arg.EventID)
+	var i ExternalRuntimeEvent
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.ConnectionID,
+		&i.EventID,
+		&i.Source,
+		&i.EventType,
+		&i.Subject,
+		&i.EventTime,
+		&i.Sequence,
+		&i.PayloadJson,
+		&i.ProjectionState,
+		&i.ReceivedAt,
 	)
 	return i, err
 }
@@ -3011,6 +3136,90 @@ func (q *Queries) InsertDeadLetter(ctx context.Context, arg InsertDeadLetterPara
 		arg.ErrorJson,
 	)
 	return err
+}
+
+const insertExternalRuntimeConnection = `-- name: InsertExternalRuntimeConnection :one
+INSERT INTO external_runtime_connections (id, org_id, name, runtime_key,
+                                          signing_credential_name, enabled, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, org_id, name, runtime_key, signing_credential_name, enabled, created_by, created_at, updated_at
+`
+
+type InsertExternalRuntimeConnectionParams struct {
+	ID                    string
+	OrgID                 string
+	Name                  string
+	RuntimeKey            string
+	SigningCredentialName string
+	Enabled               bool
+	CreatedBy             string
+}
+
+func (q *Queries) InsertExternalRuntimeConnection(ctx context.Context, arg InsertExternalRuntimeConnectionParams) (ExternalRuntimeConnection, error) {
+	row := q.db.QueryRow(ctx, insertExternalRuntimeConnection,
+		arg.ID,
+		arg.OrgID,
+		arg.Name,
+		arg.RuntimeKey,
+		arg.SigningCredentialName,
+		arg.Enabled,
+		arg.CreatedBy,
+	)
+	var i ExternalRuntimeConnection
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.RuntimeKey,
+		&i.SigningCredentialName,
+		&i.Enabled,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const insertExternalRuntimeEventReceipt = `-- name: InsertExternalRuntimeEventReceipt :execrows
+INSERT INTO external_runtime_events (id, org_id, connection_id, event_id, source,
+                                     event_type, subject, event_time, sequence,
+                                     payload_json, projection_state, received_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11)
+ON CONFLICT (connection_id, source, event_id) DO NOTHING
+`
+
+type InsertExternalRuntimeEventReceiptParams struct {
+	ID           string
+	OrgID        string
+	ConnectionID string
+	EventID      string
+	Source       string
+	EventType    string
+	Subject      pgtype.Text
+	EventTime    time.Time
+	Sequence     int64
+	PayloadJson  json.RawMessage
+	ReceivedAt   time.Time
+}
+
+func (q *Queries) InsertExternalRuntimeEventReceipt(ctx context.Context, arg InsertExternalRuntimeEventReceiptParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertExternalRuntimeEventReceipt,
+		arg.ID,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.EventID,
+		arg.Source,
+		arg.EventType,
+		arg.Subject,
+		arg.EventTime,
+		arg.Sequence,
+		arg.PayloadJson,
+		arg.ReceivedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const insertInvitation = `-- name: InsertInvitation :exec
@@ -4522,6 +4731,219 @@ func (q *Queries) ListExposedMcpToolsForAi(ctx context.Context, orgID string) ([
 	for rows.Next() {
 		var i ListExposedMcpToolsForAiRow
 		if err := rows.Scan(&i.Alias, &i.Name, &i.Description); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExternalRecoveryCases = `-- name: ListExternalRecoveryCases :many
+SELECT id, org_id, connection_id, subject_key, subject_kind, external_workflow_id, external_run_id, external_step_id, state, failure_snapshot_json, evidence_json, first_detected_at, last_observed_at, observed_recovered_at, last_sequence, last_event_id, created_at, updated_at FROM external_recovery_cases
+WHERE org_id = $1
+ORDER BY CASE WHEN state = 'detected' THEN 0 ELSE 1 END, last_observed_at DESC
+LIMIT 200
+`
+
+func (q *Queries) ListExternalRecoveryCases(ctx context.Context, orgID string) ([]ExternalRecoveryCase, error) {
+	rows, err := q.db.Query(ctx, listExternalRecoveryCases, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ExternalRecoveryCase
+	for rows.Next() {
+		var i ExternalRecoveryCase
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.ConnectionID,
+			&i.SubjectKey,
+			&i.SubjectKind,
+			&i.ExternalWorkflowID,
+			&i.ExternalRunID,
+			&i.ExternalStepID,
+			&i.State,
+			&i.FailureSnapshotJson,
+			&i.EvidenceJson,
+			&i.FirstDetectedAt,
+			&i.LastObservedAt,
+			&i.ObservedRecoveredAt,
+			&i.LastSequence,
+			&i.LastEventID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExternalRunSteps = `-- name: ListExternalRunSteps :many
+SELECT id, org_id, connection_id, external_workflow_id, external_run_id, external_step_id, name, status, attempt, started_at, completed_at, snapshot_json, evidence_json, last_sequence, last_event_id, last_observed_at, created_at, updated_at FROM external_run_steps
+WHERE org_id = $1
+ORDER BY last_observed_at DESC NULLS LAST, created_at DESC
+LIMIT 200
+`
+
+func (q *Queries) ListExternalRunSteps(ctx context.Context, orgID string) ([]ExternalRunStep, error) {
+	rows, err := q.db.Query(ctx, listExternalRunSteps, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ExternalRunStep
+	for rows.Next() {
+		var i ExternalRunStep
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.ConnectionID,
+			&i.ExternalWorkflowID,
+			&i.ExternalRunID,
+			&i.ExternalStepID,
+			&i.Name,
+			&i.Status,
+			&i.Attempt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.SnapshotJson,
+			&i.EvidenceJson,
+			&i.LastSequence,
+			&i.LastEventID,
+			&i.LastObservedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExternalRuns = `-- name: ListExternalRuns :many
+SELECT id, org_id, connection_id, external_workflow_id, external_run_id, status, started_at, completed_at, snapshot_json, evidence_json, last_sequence, last_event_id, last_observed_at, created_at, updated_at FROM external_runs
+WHERE org_id = $1
+ORDER BY last_observed_at DESC NULLS LAST, created_at DESC
+LIMIT 100
+`
+
+func (q *Queries) ListExternalRuns(ctx context.Context, orgID string) ([]ExternalRun, error) {
+	rows, err := q.db.Query(ctx, listExternalRuns, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ExternalRun
+	for rows.Next() {
+		var i ExternalRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.ConnectionID,
+			&i.ExternalWorkflowID,
+			&i.ExternalRunID,
+			&i.Status,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.SnapshotJson,
+			&i.EvidenceJson,
+			&i.LastSequence,
+			&i.LastEventID,
+			&i.LastObservedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExternalRuntimeConnections = `-- name: ListExternalRuntimeConnections :many
+SELECT id, org_id, name, runtime_key, signing_credential_name, enabled, created_by, created_at, updated_at FROM external_runtime_connections
+WHERE org_id = $1
+ORDER BY name ASC
+LIMIT 100
+`
+
+func (q *Queries) ListExternalRuntimeConnections(ctx context.Context, orgID string) ([]ExternalRuntimeConnection, error) {
+	rows, err := q.db.Query(ctx, listExternalRuntimeConnections, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ExternalRuntimeConnection
+	for rows.Next() {
+		var i ExternalRuntimeConnection
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Name,
+			&i.RuntimeKey,
+			&i.SigningCredentialName,
+			&i.Enabled,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExternalWorkflows = `-- name: ListExternalWorkflows :many
+SELECT id, org_id, connection_id, external_workflow_id, name, version, snapshot_json, evidence_json, last_sequence, last_event_id, last_observed_at, created_at, updated_at FROM external_workflows
+WHERE org_id = $1
+ORDER BY last_observed_at DESC NULLS LAST, external_workflow_id ASC
+LIMIT 100
+`
+
+func (q *Queries) ListExternalWorkflows(ctx context.Context, orgID string) ([]ExternalWorkflow, error) {
+	rows, err := q.db.Query(ctx, listExternalWorkflows, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ExternalWorkflow
+	for rows.Next() {
+		var i ExternalWorkflow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.ConnectionID,
+			&i.ExternalWorkflowID,
+			&i.Name,
+			&i.Version,
+			&i.SnapshotJson,
+			&i.EvidenceJson,
+			&i.LastSequence,
+			&i.LastEventID,
+			&i.LastObservedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -6295,6 +6717,37 @@ func (q *Queries) MarkDeadLetterResolved(ctx context.Context, arg MarkDeadLetter
 	return result.RowsAffected(), nil
 }
 
+const markExternalRecoveryCaseRecovered = `-- name: MarkExternalRecoveryCaseRecovered :exec
+UPDATE external_recovery_cases
+SET state = 'observed_recovered', evidence_json = $5, last_observed_at = $6,
+    observed_recovered_at = $6, last_sequence = $4, last_event_id = $7,
+    updated_at = now()
+WHERE org_id = $1 AND connection_id = $2 AND subject_key = $3 AND last_sequence < $4
+`
+
+type MarkExternalRecoveryCaseRecoveredParams struct {
+	OrgID          string
+	ConnectionID   string
+	SubjectKey     string
+	LastSequence   int64
+	EvidenceJson   json.RawMessage
+	LastObservedAt time.Time
+	LastEventID    string
+}
+
+func (q *Queries) MarkExternalRecoveryCaseRecovered(ctx context.Context, arg MarkExternalRecoveryCaseRecoveredParams) error {
+	_, err := q.db.Exec(ctx, markExternalRecoveryCaseRecovered,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.SubjectKey,
+		arg.LastSequence,
+		arg.EvidenceJson,
+		arg.LastObservedAt,
+		arg.LastEventID,
+	)
+	return err
+}
+
 const markLockedNodesRunning = `-- name: MarkLockedNodesRunning :many
 UPDATE run_nodes SET status = 'running', started_at = now()
 WHERE id = ANY($1::text[])
@@ -7426,6 +7879,20 @@ func (q *Queries) SetCredentialExpiry(ctx context.Context, arg SetCredentialExpi
 	return updated_at, err
 }
 
+const setExternalRuntimeEventProjectionState = `-- name: SetExternalRuntimeEventProjectionState :exec
+UPDATE external_runtime_events SET projection_state = $2 WHERE id = $1
+`
+
+type SetExternalRuntimeEventProjectionStateParams struct {
+	ID              string
+	ProjectionState string
+}
+
+func (q *Queries) SetExternalRuntimeEventProjectionState(ctx context.Context, arg SetExternalRuntimeEventProjectionStateParams) error {
+	_, err := q.db.Exec(ctx, setExternalRuntimeEventProjectionState, arg.ID, arg.ProjectionState)
+	return err
+}
+
 const setMcpConnectionStatus = `-- name: SetMcpConnectionStatus :exec
 UPDATE mcp_connections
 SET status = $3, status_reason = $4, last_discovery_at = $5, updated_at = now()
@@ -7741,6 +8208,47 @@ func (q *Queries) UpdateCredentialSecretRef(ctx context.Context, arg UpdateCrede
 	return err
 }
 
+const updateExternalRuntimeConnection = `-- name: UpdateExternalRuntimeConnection :one
+UPDATE external_runtime_connections
+SET name = $3, runtime_key = $4, signing_credential_name = $5, enabled = $6,
+    updated_at = now()
+WHERE org_id = $1 AND id = $2
+RETURNING id, org_id, name, runtime_key, signing_credential_name, enabled, created_by, created_at, updated_at
+`
+
+type UpdateExternalRuntimeConnectionParams struct {
+	OrgID                 string
+	ID                    string
+	Name                  string
+	RuntimeKey            string
+	SigningCredentialName string
+	Enabled               bool
+}
+
+func (q *Queries) UpdateExternalRuntimeConnection(ctx context.Context, arg UpdateExternalRuntimeConnectionParams) (ExternalRuntimeConnection, error) {
+	row := q.db.QueryRow(ctx, updateExternalRuntimeConnection,
+		arg.OrgID,
+		arg.ID,
+		arg.Name,
+		arg.RuntimeKey,
+		arg.SigningCredentialName,
+		arg.Enabled,
+	)
+	var i ExternalRuntimeConnection
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.RuntimeKey,
+		&i.SigningCredentialName,
+		&i.Enabled,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateMcpToolFlags = `-- name: UpdateMcpToolFlags :one
 UPDATE mcp_tool_descriptors
 SET enabled = $3, write_side = $4, rate_limit_per_min = $5, expose_to_ai = $6, updated_at = now()
@@ -7953,6 +8461,269 @@ func (q *Queries) UpsertConfidenceCalibration(ctx context.Context, arg UpsertCon
 		arg.SampleSize,
 		arg.CurveSlope,
 		arg.CurveIntercept,
+	)
+	return err
+}
+
+const upsertExternalRecoveryCaseDetected = `-- name: UpsertExternalRecoveryCaseDetected :exec
+INSERT INTO external_recovery_cases (id, org_id, connection_id, subject_key,
+                                     subject_kind, external_workflow_id,
+                                     external_run_id, external_step_id, state,
+                                     failure_snapshot_json, evidence_json,
+                                     first_detected_at, last_observed_at,
+                                     observed_recovered_at, last_sequence,
+                                     last_event_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'detected', $9, $10, $11, $11, NULL, $12, $13)
+ON CONFLICT (connection_id, subject_key) DO UPDATE SET
+  state = 'detected', failure_snapshot_json = excluded.failure_snapshot_json,
+  evidence_json = excluded.evidence_json, last_observed_at = excluded.last_observed_at,
+  observed_recovered_at = NULL, last_sequence = excluded.last_sequence,
+  last_event_id = excluded.last_event_id, updated_at = now()
+WHERE external_recovery_cases.last_sequence < excluded.last_sequence
+`
+
+type UpsertExternalRecoveryCaseDetectedParams struct {
+	ID                  string
+	OrgID               string
+	ConnectionID        string
+	SubjectKey          string
+	SubjectKind         string
+	ExternalWorkflowID  string
+	ExternalRunID       string
+	ExternalStepID      pgtype.Text
+	FailureSnapshotJson json.RawMessage
+	EvidenceJson        json.RawMessage
+	FirstDetectedAt     time.Time
+	LastSequence        int64
+	LastEventID         string
+}
+
+func (q *Queries) UpsertExternalRecoveryCaseDetected(ctx context.Context, arg UpsertExternalRecoveryCaseDetectedParams) error {
+	_, err := q.db.Exec(ctx, upsertExternalRecoveryCaseDetected,
+		arg.ID,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.SubjectKey,
+		arg.SubjectKind,
+		arg.ExternalWorkflowID,
+		arg.ExternalRunID,
+		arg.ExternalStepID,
+		arg.FailureSnapshotJson,
+		arg.EvidenceJson,
+		arg.FirstDetectedAt,
+		arg.LastSequence,
+		arg.LastEventID,
+	)
+	return err
+}
+
+const upsertExternalRunObservation = `-- name: UpsertExternalRunObservation :execrows
+INSERT INTO external_runs (id, org_id, connection_id, external_workflow_id,
+                           external_run_id, status, started_at, completed_at,
+                           snapshot_json, evidence_json, last_sequence,
+                           last_event_id, last_observed_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+ON CONFLICT (connection_id, external_run_id) DO UPDATE SET
+  external_workflow_id = excluded.external_workflow_id, status = excluded.status,
+  started_at = excluded.started_at, completed_at = excluded.completed_at,
+  snapshot_json = excluded.snapshot_json, evidence_json = excluded.evidence_json,
+  last_sequence = excluded.last_sequence, last_event_id = excluded.last_event_id,
+  last_observed_at = excluded.last_observed_at, updated_at = now()
+WHERE external_runs.last_sequence < excluded.last_sequence
+`
+
+type UpsertExternalRunObservationParams struct {
+	ID                 string
+	OrgID              string
+	ConnectionID       string
+	ExternalWorkflowID string
+	ExternalRunID      string
+	Status             string
+	StartedAt          *time.Time
+	CompletedAt        *time.Time
+	SnapshotJson       json.RawMessage
+	EvidenceJson       json.RawMessage
+	LastSequence       int64
+	LastEventID        pgtype.Text
+	LastObservedAt     *time.Time
+}
+
+func (q *Queries) UpsertExternalRunObservation(ctx context.Context, arg UpsertExternalRunObservationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, upsertExternalRunObservation,
+		arg.ID,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.ExternalWorkflowID,
+		arg.ExternalRunID,
+		arg.Status,
+		arg.StartedAt,
+		arg.CompletedAt,
+		arg.SnapshotJson,
+		arg.EvidenceJson,
+		arg.LastSequence,
+		arg.LastEventID,
+		arg.LastObservedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const upsertExternalRunPlaceholder = `-- name: UpsertExternalRunPlaceholder :exec
+INSERT INTO external_runs (id, org_id, connection_id, external_workflow_id,
+                           external_run_id, status, evidence_json, last_sequence)
+VALUES ($1, $2, $3, $4, $5, 'unknown', '[]'::jsonb, -1)
+ON CONFLICT (connection_id, external_run_id) DO NOTHING
+`
+
+type UpsertExternalRunPlaceholderParams struct {
+	ID                 string
+	OrgID              string
+	ConnectionID       string
+	ExternalWorkflowID string
+	ExternalRunID      string
+}
+
+func (q *Queries) UpsertExternalRunPlaceholder(ctx context.Context, arg UpsertExternalRunPlaceholderParams) error {
+	_, err := q.db.Exec(ctx, upsertExternalRunPlaceholder,
+		arg.ID,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.ExternalWorkflowID,
+		arg.ExternalRunID,
+	)
+	return err
+}
+
+const upsertExternalStepObservation = `-- name: UpsertExternalStepObservation :execrows
+INSERT INTO external_run_steps (id, org_id, connection_id, external_workflow_id,
+                                external_run_id, external_step_id, name, status,
+                                attempt, started_at, completed_at, snapshot_json,
+                                evidence_json, last_sequence, last_event_id,
+                                last_observed_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+ON CONFLICT (connection_id, external_run_id, external_step_id) DO UPDATE SET
+  external_workflow_id = excluded.external_workflow_id, name = excluded.name,
+  status = excluded.status, attempt = excluded.attempt,
+  started_at = excluded.started_at, completed_at = excluded.completed_at,
+  snapshot_json = excluded.snapshot_json, evidence_json = excluded.evidence_json,
+  last_sequence = excluded.last_sequence, last_event_id = excluded.last_event_id,
+  last_observed_at = excluded.last_observed_at, updated_at = now()
+WHERE external_run_steps.last_sequence < excluded.last_sequence
+`
+
+type UpsertExternalStepObservationParams struct {
+	ID                 string
+	OrgID              string
+	ConnectionID       string
+	ExternalWorkflowID string
+	ExternalRunID      string
+	ExternalStepID     string
+	Name               string
+	Status             string
+	Attempt            int32
+	StartedAt          *time.Time
+	CompletedAt        *time.Time
+	SnapshotJson       json.RawMessage
+	EvidenceJson       json.RawMessage
+	LastSequence       int64
+	LastEventID        pgtype.Text
+	LastObservedAt     *time.Time
+}
+
+func (q *Queries) UpsertExternalStepObservation(ctx context.Context, arg UpsertExternalStepObservationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, upsertExternalStepObservation,
+		arg.ID,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.ExternalWorkflowID,
+		arg.ExternalRunID,
+		arg.ExternalStepID,
+		arg.Name,
+		arg.Status,
+		arg.Attempt,
+		arg.StartedAt,
+		arg.CompletedAt,
+		arg.SnapshotJson,
+		arg.EvidenceJson,
+		arg.LastSequence,
+		arg.LastEventID,
+		arg.LastObservedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const upsertExternalWorkflowObservation = `-- name: UpsertExternalWorkflowObservation :execrows
+INSERT INTO external_workflows (id, org_id, connection_id, external_workflow_id,
+                                name, version, snapshot_json, evidence_json,
+                                last_sequence, last_event_id, last_observed_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+ON CONFLICT (connection_id, external_workflow_id) DO UPDATE SET
+  name = excluded.name, version = excluded.version,
+  snapshot_json = excluded.snapshot_json, evidence_json = excluded.evidence_json,
+  last_sequence = excluded.last_sequence, last_event_id = excluded.last_event_id,
+  last_observed_at = excluded.last_observed_at, updated_at = now()
+WHERE external_workflows.last_sequence < excluded.last_sequence
+`
+
+type UpsertExternalWorkflowObservationParams struct {
+	ID                 string
+	OrgID              string
+	ConnectionID       string
+	ExternalWorkflowID string
+	Name               string
+	Version            pgtype.Text
+	SnapshotJson       json.RawMessage
+	EvidenceJson       json.RawMessage
+	LastSequence       int64
+	LastEventID        pgtype.Text
+	LastObservedAt     *time.Time
+}
+
+func (q *Queries) UpsertExternalWorkflowObservation(ctx context.Context, arg UpsertExternalWorkflowObservationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, upsertExternalWorkflowObservation,
+		arg.ID,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.ExternalWorkflowID,
+		arg.Name,
+		arg.Version,
+		arg.SnapshotJson,
+		arg.EvidenceJson,
+		arg.LastSequence,
+		arg.LastEventID,
+		arg.LastObservedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const upsertExternalWorkflowPlaceholder = `-- name: UpsertExternalWorkflowPlaceholder :exec
+INSERT INTO external_workflows (id, org_id, connection_id, external_workflow_id,
+                                name, evidence_json, last_sequence)
+VALUES ($1, $2, $3, $4, $4, '[]'::jsonb, -1)
+ON CONFLICT (connection_id, external_workflow_id) DO NOTHING
+`
+
+type UpsertExternalWorkflowPlaceholderParams struct {
+	ID                 string
+	OrgID              string
+	ConnectionID       string
+	ExternalWorkflowID string
+}
+
+func (q *Queries) UpsertExternalWorkflowPlaceholder(ctx context.Context, arg UpsertExternalWorkflowPlaceholderParams) error {
+	_, err := q.db.Exec(ctx, upsertExternalWorkflowPlaceholder,
+		arg.ID,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.ExternalWorkflowID,
 	)
 	return err
 }

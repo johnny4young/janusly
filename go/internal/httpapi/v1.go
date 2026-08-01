@@ -172,6 +172,7 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	server.mountRolloutRoutes(mux)
 	server.mountCredentialRoutes(mux)
 	server.mountSlackInteractionRoutes(mux)
+	server.mountExternalRuntimeRoutes(mux)
 	server.mountAiPatchRoutes(mux)
 	return WithBrowserHeaders(mux)
 }
