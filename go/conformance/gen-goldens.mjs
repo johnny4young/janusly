@@ -100,17 +100,32 @@ const only = process.env.GOLDENS_ONLY ? new Set(process.env.GOLDENS_ONLY.split("
 
 for (const fixture of spec.fixtures) {
   if (only && !only.has(fixture.id)) continue;
-  const doc = JSON.parse(
-    JSON.stringify(fixture.workflow).replaceAll("{{UPSTREAM}}", upstream).replaceAll("{{RUN}}", Date.now().toString(36)),
+  const runToken = Date.now().toString(36);
+  const fill = (value) => JSON.parse(
+    JSON.stringify(value).replaceAll("{{UPSTREAM}}", upstream).replaceAll("{{RUN}}", runToken),
   );
+  const doc = fill(fixture.workflow);
+  const docV2 = fixture.workflowV2 ? fill(fixture.workflowV2) : null;
   let runId = null;
   let deadLetterId = null;
+  const savedVersions = [];
+  const seenRuns = new Set();
+  let rolloutId = null;
+
+  const findDeadLetter = async () => {
+    const dlq = await api("GET", "/v1/dlq?limit=50");
+    const rows = dlq.body?.data ?? [];
+    const row = rows.find((r) => r.runId === runId);
+    if (!row) throw new Error(`${fixture.id}: no dead letter for run`);
+    return row.id;
+  };
 
   for (const step of fixture.steps) {
     const [verb, arg] = step.split(":");
     if (verb === "save") {
       const res = await api("POST", "/workflows/save", doc);
       if (res.status !== 200) throw new Error(`${fixture.id}: save ${JSON.stringify(res)}`);
+      savedVersions.push(res.body?.versionId ?? res.body?.data?.versionId);
     } else if (verb === "ingest") {
       // The reference selects the workflow org-wide by endpoint key; the
       // fresh per-capture org guarantees a unique match.
@@ -121,6 +136,65 @@ for (const fixture of spec.fixtures) {
       const res = await api("POST", "/start", { workflow: doc, input: fixture.input });
       runId = res.body?.data?.runId ?? res.body?.runId;
       if (!runId) throw new Error(`${fixture.id}: start failed ${JSON.stringify(res)}`);
+      seenRuns.add(runId);
+    } else if (verb === "saveV2") {
+      const res = await api("POST", "/workflows/save", docV2);
+      if (res.status !== 200) throw new Error(`${fixture.id}: saveV2 ${JSON.stringify(res)}`);
+      savedVersions.push(res.body?.versionId ?? res.body?.data?.versionId);
+    } else if (verb === "validateFix") {
+      deadLetterId = await findDeadLetter();
+      const res = await api("POST", "/dlq/validate-fix", { deadLetterId, suggestedWorkflow: doc });
+      runId = res.body?.runId ?? res.body?.data?.runId;
+      if (!runId) throw new Error(`${fixture.id}: validateFix ${JSON.stringify(res)}`);
+      seenRuns.add(runId);
+    } else if (verb === "startExpectPaused") {
+      const res = await api("POST", "/start", { workflow: doc, input: fixture.input });
+      const code = res.body?.code ?? res.body?.error?.code;
+      if (res.status !== 409 || code !== "workflow_circuit_breaker_paused") {
+        throw new Error(`${fixture.id}: expected breaker 409, got ${JSON.stringify(res)}`);
+      }
+    } else if (verb === "ingestExpectBuffered") {
+      const res = await api("POST", "/triggers/webhook/ingest", fixture.ingest);
+      const buffered = res.body?.buffered ?? res.body?.data?.buffered;
+      if (res.status !== 202 || buffered !== true) {
+        throw new Error(`${fixture.id}: expected buffered 202, got ${JSON.stringify(res)}`);
+      }
+    } else if (verb === "resumeWorkflow") {
+      const res = await api("POST", `/workflows/${doc.id}/resume`, {});
+      if (res.status !== 200) throw new Error(`${fixture.id}: resumeWorkflow ${JSON.stringify(res)}`);
+    } else if (verb === "adoptNewestRun") {
+      const deadline = Date.now() + 20_000;
+      for (;;) {
+        const res = await api("GET", "/runs?limit=50");
+        const rows = res.body?.data ?? res.body ?? [];
+        const fresh = rows.find((r) => r.workflowId === doc.id && !seenRuns.has(r.id));
+        if (fresh) { runId = fresh.id; seenRuns.add(runId); break; }
+        if (Date.now() > deadline) throw new Error(`${fixture.id}: backfilled run never appeared`);
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    } else if (verb === "waitRunWaiting") {
+      await waitFor(runId, (v) => v.run.status === "waiting");
+    } else if (verb === "rolloutCreate") {
+      const res = await api("POST", `/workflows/${doc.id}/rollout`, {
+        baselineVersionId: savedVersions[0], canaryVersionId: savedVersions[1],
+        trafficPercent: 20, minimumSampleSize: 5, minimumSuccessRatePercent: 90,
+      });
+      rolloutId = res.body?.rollout?.id ?? res.body?.data?.rollout?.id;
+      if (!rolloutId) throw new Error(`${fixture.id}: rolloutCreate ${JSON.stringify(res)}`);
+    } else if (verb === "rolloutPromote" || verb === "rolloutRollback") {
+      const decision = verb === "rolloutPromote" ? "promote" : "rollback";
+      const res = await api("POST", `/workflows/${doc.id}/rollout/${rolloutId}/${decision}`, {});
+      if (res.status !== 200) throw new Error(`${fixture.id}: ${verb} ${JSON.stringify(res)}`);
+    } else if (verb === "clusterApplyFix") {
+      deadLetterId = await findDeadLetter();
+      const clusters = await api("GET", "/dlq/clusters");
+      const signature = (clusters.body?.clusters ?? clusters.body?.data?.clusters ?? [])[0]?.signature;
+      if (!signature) throw new Error(`${fixture.id}: no cluster signature`);
+      const res = await api("POST", "/dlq/cluster-apply", {
+        clusterSignature: signature, deadLetterIds: [deadLetterId], suggestedWorkflow: docV2,
+      });
+      const replayed = res.body?.replayed ?? res.body?.data?.replayed;
+      if (replayed !== 1) throw new Error(`${fixture.id}: clusterApplyFix ${JSON.stringify(res)}`);
     } else if (verb === "cancel") {
       const res = await api("POST", "/run/cancel", { runId });
       if (res.status !== 200) throw new Error(`${fixture.id}: cancel ${JSON.stringify(res)}`);

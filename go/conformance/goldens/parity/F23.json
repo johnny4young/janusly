@@ -1,0 +1,11 @@
+{
+  "runStatus": "succeeded",
+  "nodes": {
+    "b2": {
+      "status": "succeeded",
+      "attempts": 1
+    }
+  },
+  "outputJson": null,
+  "deadLetters": 0
+}

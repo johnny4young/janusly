@@ -1697,3 +1697,8 @@ producción necesita saber — de lo ya resuelto o informativo.
 ## T-156 · Matriz de fallos de recovery (2026-07-31)
 - `internal/recovery/failmatrix`: el catálogo único de 28 casos hostiles en 5 superficies (replay, cluster-apply, validate-fix, items, queue) — cada caso fija status + código exactos o el sobre de éxito parcial. stdlib-only, sin ciclos, para que cualquier suite y el seeder lo importen.
 - La regla del proyecto (feedback de olas previas) queda cumplida para recovery igual que para AI: un modo de fallo nuevo es UNA entrada en el catálogo y aterriza en todas las superficies consumidoras; nada de exemplares sueltos de una-sola-URL-mala.
+
+## T-157 · Fixtures F18–F25 + goldens (2026-07-31)
+- Ocho fixtures nuevas con verbos implementados en AMBOS drivers (gen-goldens.mjs para capturar del stack de referencia aislado; el harness Go para verificar): validación write-skip, breaker pausa/buffer/resume/backfill, observe/quarantine semánticos, rollout promovido/rolled-back sirviendo el snapshot correcto, y cluster-apply sanando el run con el fix.
+- La captura destapó dos exigencias del schema Zod de referencia que el port Go toleraba: `contract.effects` es clave REQUERIDA (aunque vacía) y `failure.technical.stalledNode` es booleano requerido — las fixtures ahora los llevan y ambos backends los aceptan.
+- Paridad Go 26/26 al PRIMER intento con la tabla de divergencias aceptadas VACÍA, y ×3 corridas idénticas. El golden de playbook queda diferido honesto (el loop está probado en Go por T-139; el golden cross-backend exigiría 6+ verbos más en ambos drivers).

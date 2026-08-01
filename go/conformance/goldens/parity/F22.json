@@ -1,0 +1,15 @@
+{
+  "runStatus": "waiting",
+  "nodes": {
+    "calc": {
+      "status": "succeeded",
+      "attempts": 1
+    },
+    "after": {
+      "status": "pending",
+      "attempts": 0
+    }
+  },
+  "outputJson": null,
+  "deadLetters": 0
+}

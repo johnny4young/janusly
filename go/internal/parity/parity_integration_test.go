@@ -51,12 +51,13 @@ type nodeShape struct {
 }
 
 type fixture struct {
-	ID       string          `json:"id"`
-	Name     string          `json:"name"`
-	Steps    []string        `json:"steps"`
-	Input    map[string]any  `json:"input"`
-	Ingest   map[string]any  `json:"ingest"`
-	Workflow json.RawMessage `json:"workflow"`
+	ID         string          `json:"id"`
+	Name       string          `json:"name"`
+	Steps      []string        `json:"steps"`
+	Input      map[string]any  `json:"input"`
+	Ingest     map[string]any  `json:"ingest"`
+	Workflow   json.RawMessage `json:"workflow"`
+	WorkflowV2 json.RawMessage `json:"workflowV2"`
 }
 
 func TestSemanticParity(t *testing.T) {
@@ -153,18 +154,49 @@ func runFixture(t *testing.T, driver *apiDriver, upstream *stubUpstream, fx fixt
 	// {{RUN}} keeps stored-state fixtures (save + ingest) collision-free:
 	// workflow ids are globally unique in the shared schema, so a static id
 	// would leave cross-run residue owned by a previous test org.
-	doc := json.RawMessage(strings.NewReplacer(
+	fill := strings.NewReplacer(
 		"{{UPSTREAM}}", upstream.server.URL,
 		"{{RUN}}", fmt.Sprintf("%d", time.Now().UnixNano()),
-	).Replace(string(fx.Workflow)))
-	var runID string
+	)
+	doc := json.RawMessage(fill.Replace(string(fx.Workflow)))
+	var docV2 json.RawMessage
+	if len(fx.WorkflowV2) > 0 {
+		docV2 = json.RawMessage(fill.Replace(string(fx.WorkflowV2)))
+	}
+	var docID struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(doc, &docID)
+	var runID, rolloutID string
+	var savedVersions []string
+	seenRuns := map[string]bool{}
+	findDeadLetter := func() string {
+		list := driver.call(t, "GET", "/v1/dlq?limit=50", nil)
+		items, _ := list["data"].([]any)
+		for _, item := range items {
+			row := item.(map[string]any)
+			if row["runId"] == runID {
+				return row["id"].(string)
+			}
+		}
+		t.Fatal("no dead letter for run")
+		return ""
+	}
 	for _, step := range fx.Steps {
 		verb, arg, _ := strings.Cut(step, ":")
 		switch verb {
-		case "save":
-			res := driver.call(t, "POST", "/v1/workflows/save", json.RawMessage(doc))
-			if _, ok := res["data"]; !ok {
-				t.Fatalf("save failed: %v", res)
+		case "save", "saveV2":
+			body := doc
+			if verb == "saveV2" {
+				body = docV2
+			}
+			res := driver.call(t, "POST", "/v1/workflows/save", json.RawMessage(body))
+			data, ok := res["data"].(map[string]any)
+			if !ok {
+				t.Fatalf("%s failed: %v", verb, res)
+			}
+			if versionID, ok := data["versionId"].(string); ok {
+				savedVersions = append(savedVersions, versionID)
 			}
 		case "ingest":
 			// The reference ingests org-wide by endpoint key; this backend
@@ -189,6 +221,100 @@ func runFixture(t *testing.T, driver *apiDriver, upstream *stubUpstream, fx fixt
 			runID, _ = data["runId"].(string)
 			if runID == "" {
 				t.Fatalf("start failed: %v", res)
+			}
+			seenRuns[runID] = true
+		case "startExpectPaused":
+			body := map[string]any{"workflow": doc}
+			res := driver.call(t, "POST", "/v1/start", body)
+			errBody, _ := res["error"].(map[string]any)
+			if errBody == nil || errBody["code"] != "workflow_circuit_breaker_paused" {
+				t.Fatalf("expected breaker 409, got %v", res)
+			}
+		case "validateFix":
+			deadLetterID := findDeadLetter()
+			res := driver.call(t, "POST", "/v1/dlq/validate-fix", map[string]any{
+				"deadLetterId": deadLetterID, "suggestedWorkflow": json.RawMessage(doc),
+			})
+			data, _ := res["data"].(map[string]any)
+			runID, _ = data["runId"].(string)
+			if runID == "" {
+				t.Fatalf("validateFix failed: %v", res)
+			}
+			seenRuns[runID] = true
+		case "ingestExpectBuffered":
+			res := driver.call(t, "POST", "/v1/webhooks/"+docID.ID, fx.Ingest)
+			data, _ := res["data"].(map[string]any)
+			if data == nil || data["buffered"] != true {
+				t.Fatalf("expected buffered ingest, got %v", res)
+			}
+		case "resumeWorkflow":
+			res := driver.call(t, "POST", "/v1/workflows/"+docID.ID+"/resume", map[string]any{})
+			if _, ok := res["data"]; !ok {
+				t.Fatalf("resumeWorkflow failed: %v", res)
+			}
+		case "adoptNewestRun":
+			deadline := time.Now().Add(20 * time.Second)
+			for {
+				res := driver.call(t, "GET", "/v1/runs?limit=50", nil)
+				rows, _ := res["data"].([]any)
+				adopted := ""
+				for _, raw := range rows {
+					row := raw.(map[string]any)
+					if row["workflowId"] == docID.ID && !seenRuns[row["id"].(string)] {
+						adopted = row["id"].(string)
+						break
+					}
+				}
+				if adopted != "" {
+					runID = adopted
+					seenRuns[runID] = true
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("backfilled run never appeared")
+				}
+				time.Sleep(200 * time.Millisecond)
+			}
+		case "waitRunWaiting":
+			driver.waitRun(t, runID, func(view map[string]any) bool {
+				return runStatusOf(view) == "waiting"
+			})
+		case "rolloutCreate":
+			if len(savedVersions) < 2 {
+				t.Fatal("rolloutCreate needs two saved versions")
+			}
+			res := driver.call(t, "POST", "/workflows/"+docID.ID+"/rollout", map[string]any{
+				"baselineVersionId": savedVersions[0], "canaryVersionId": savedVersions[1],
+				"trafficPercent": 20, "minimumSampleSize": 5, "minimumSuccessRatePercent": 90,
+			})
+			rollout, _ := res["rollout"].(map[string]any)
+			if rollout == nil {
+				t.Fatalf("rolloutCreate failed: %v", res)
+			}
+			rolloutID = rollout["id"].(string)
+		case "rolloutPromote", "rolloutRollback":
+			decision := "rollback"
+			if verb == "rolloutPromote" {
+				decision = "promote"
+			}
+			res := driver.call(t, "POST", "/workflows/"+docID.ID+"/rollout/"+rolloutID+"/"+decision, map[string]any{})
+			if _, ok := res["rollout"]; !ok {
+				t.Fatalf("%s failed: %v", verb, res)
+			}
+		case "clusterApplyFix":
+			deadLetterID := findDeadLetter()
+			clusters := driver.call(t, "GET", "/dlq/clusters", nil)
+			clusterRows, _ := clusters["clusters"].([]any)
+			if len(clusterRows) == 0 {
+				t.Fatalf("no cluster signature: %v", clusters)
+			}
+			signature := clusterRows[0].(map[string]any)["signature"].(string)
+			res := driver.call(t, "POST", "/dlq/cluster-apply", map[string]any{
+				"clusterSignature": signature, "deadLetterIds": []any{deadLetterID},
+				"suggestedWorkflow": json.RawMessage(docV2),
+			})
+			if res["replayed"] != float64(1) {
+				t.Fatalf("clusterApplyFix failed: %v", res)
 			}
 		case "cancel":
 			res := driver.call(t, "POST", "/v1/run/cancel", map[string]any{"runId": runID})
