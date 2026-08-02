@@ -230,6 +230,11 @@ func TestRolloutAutoRollback(t *testing.T) {
 	// v1 baseline: healthy. v2 canary: an http node against a dead
 	// upstream — every canary run fails.
 	brokenDoc := rolloutWorkflowDoc(wfID, "canary")
+	// This test owns rollout rollback, not the independent recovery circuit
+	// breaker. Without an explicit opt-out, a random assignment streak of five
+	// canary failures can pause the workflow at the default threshold before
+	// the rollout evaluator observes its own five-outcome sample.
+	brokenDoc["recovery"] = map[string]any{"circuitBreaker": false}
 	brokenDoc["nodes"] = append(brokenDoc["nodes"].([]any), map[string]any{
 		"id": "call", "type": "http", "config": map[string]any{"url": broken.URL, "timeoutMs": 500},
 	})
