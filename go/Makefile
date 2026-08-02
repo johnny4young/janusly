@@ -2,7 +2,7 @@ SHELL := /bin/bash
 DB_URL ?= postgres://janusly:janusly-go-local@127.0.0.1:4632/janusly_go
 PG_CONTAINER := janusly-go-pilot-postgres-1
 
-.PHONY: db-up db-down migrate schema-dump generate lint test run build parity ci test-pg15 bench fuzz contract web-embed
+.PHONY: db-up db-down migrate schema-dump generate lint test run build parity ci test-pg15 bench fuzz contract web-embed verify seed
 
 db-up:
 	docker compose -f docker-compose.yml up -d --wait
@@ -120,3 +120,11 @@ web-embed:
 	cd .. && pnpm --filter @janusly/web build
 	rm -rf internal/webdist/dist
 	cp -R ../apps/web/dist internal/webdist/dist
+
+# T-529 DX lane: the one-command truth ladder (fail-fast, per-stage
+# timing) and the deterministic demo org (API-driven, idempotent).
+verify:
+	@bash scripts/verify.sh
+
+seed:
+	go run ./cmd/seed

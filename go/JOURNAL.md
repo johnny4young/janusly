@@ -2082,3 +2082,17 @@ constant-time, skew) y cada postura queda como config declarativa; los
 quirks irreductibles (el patrón de dígitos de Slack, el missing_header de
 WorkOS) viven en adapters de diez líneas. El guard fue no tocar un solo caso
 de las matrices de firma existentes — pasaron todas a la primera.
+
+## T-529 — make verify + make seed (2026-08-01)
+
+La escalera de verify quedó con la propiedad que importa: para en el primer
+rojo y te dice cuánto costó cada etapa (la corrida real: 4.4 minutos, con
+integration dominando a 205s — dato útil para decidir cuándo correrla
+completa). El seed tomó la decisión de principio de no tocar SQL jamás: todo
+por la API pública con dev headers, así que lo que puebla es exactamente lo
+que el producto puede crear — incluida la degradación honesta de las
+credenciales cuando el Secret Store no está configurado en dev. El fallo
+determinista usa un dominio .invalid: firma repetible, cero superficie SSRF,
+y las dos corridas fallidas forman el cluster DLQ que auto-crea los dos
+incidentes. La idempotencia se probó corriendo dos veces contra el mismo
+API: segunda pasada todo skip, cero errores.
