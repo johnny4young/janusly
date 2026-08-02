@@ -3,3 +3,7 @@
 /loadgen
 /api
 /mcp
+# T-522: the real Vite bundle is copied in by `make web-embed`; only the
+# placeholder index.html is tracked.
+internal/webdist/dist/*
+!internal/webdist/dist/index.html

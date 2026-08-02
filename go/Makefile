@@ -2,7 +2,7 @@ SHELL := /bin/bash
 DB_URL ?= postgres://janusly:janusly-go-local@127.0.0.1:4632/janusly_go
 PG_CONTAINER := janusly-go-pilot-postgres-1
 
-.PHONY: db-up db-down migrate schema-dump generate lint test run build parity ci test-pg15 bench fuzz contract
+.PHONY: db-up db-down migrate schema-dump generate lint test run build parity ci test-pg15 bench fuzz contract web-embed
 
 db-up:
 	docker compose -f docker-compose.yml up -d --wait
@@ -112,3 +112,11 @@ soak:
 # instancia caída se reincorpora. Ver conformance/run-failover.mjs.
 failover:
 	node conformance/run-failover.mjs
+
+# Single-binary web (T-522): build the Vite bundle and copy it into the
+# embed root before `go build`. The committed dist/ is only a placeholder;
+# the real assets stay out of git.
+web-embed:
+	cd .. && pnpm --filter @janusly/web build
+	rm -rf internal/webdist/dist
+	cp -R ../apps/web/dist internal/webdist/dist

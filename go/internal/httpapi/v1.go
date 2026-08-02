@@ -21,6 +21,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/executors"
 	"github.com/johnny4young/janusly/go/internal/mcpclient"
 	"github.com/johnny4young/janusly/go/internal/ratelimit"
+	"github.com/johnny4young/janusly/go/internal/webdist"
 )
 
 // V1Server owns the /v1 route surface over one engine and pool.
@@ -187,6 +188,13 @@ func NewV1HandlerWithShutdown(eng *engine.Engine, pool *pgxpool.Pool) (http.Hand
 	server.mountRecoveryReadRoutes(mux)
 	server.mountIdentityRoutes(mux)
 	server.mountCausalRoutes(mux)
+	if webdist.Enabled() {
+		// Single-binary mode (T-522): the embedded Vite bundle rides the
+		// mux's own catch-all — every unmatched GET serves static assets
+		// or the SPA shell. Public by design (static content, no tenant
+		// data); API patterns above always win by specificity.
+		mux.Handle("GET /", webdist.Handler())
+	}
 	return WithBrowserHeaders(mux), cancelHub
 }
 

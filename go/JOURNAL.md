@@ -2028,3 +2028,16 @@ pedía degradación visible y el silencio del reference esconde la resta. El
 test de sanitización planta un script con "stolen secrets", un img de
 tracking y un href javascript:, y prueba que ninguno sobrevive pero el
 contenido seguro alrededor sí.
+
+## T-522 — Single-binary con el web embebido (2026-08-01)
+
+La decisión de montaje resultó la parte interesante: en vez de un wrapper
+que decide "¿es ruta API?" (frágil — habría que enumerar prefijos), el
+bundle se monta como patrón `GET /` del propio mux y la especificidad de Go
+1.22 hace el trabajo — toda ruta API más específica gana, y lo demás cae al
+estático o al fallback SPA. Higiene de git: el dist commiteado es un
+placeholder de una página que dice honestamente "corre make web-embed"; el
+bundle real (2.2MB) se copia al embed root en build time y vive en
+.gitignore. El smoke corrió contra el binario real con el bundle de
+producción: shell SPA en `/`, asset hasheado con `immutable`, ruta client-side
+con fallback correcto y `/healthz` intacto.
