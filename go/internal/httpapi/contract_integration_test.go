@@ -32,6 +32,14 @@ type apiHarness struct {
 }
 
 func newAPIHarness(t *testing.T) *apiHarness {
+	return newAPIHarnessWithWorkers(t, true)
+}
+
+func newAPIHarnessWithoutWorkers(t *testing.T) *apiHarness {
+	return newAPIHarnessWithWorkers(t, false)
+}
+
+func newAPIHarnessWithWorkers(t *testing.T, startWorkers bool) *apiHarness {
 	t.Helper()
 	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
 	if dsn == "" {
@@ -46,15 +54,17 @@ func newAPIHarness(t *testing.T) *apiHarness {
 	t.Cleanup(pool.Close)
 
 	eng := engine.New(pool)
-	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
-	workerCtx, stopWorkers := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		_ = eng.RunWorkers(workerCtx, 2, 30*time.Millisecond, dispatcher.Execute, quietTestLogger())
-	}()
-	go eng.RunReplayCampaignPump(workerCtx, 30*time.Millisecond, quietTestLogger())
-	t.Cleanup(func() { stopWorkers(); <-done })
+	if startWorkers {
+		dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
+		workerCtx, stopWorkers := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_ = eng.RunWorkers(workerCtx, 2, 30*time.Millisecond, dispatcher.Execute, quietTestLogger())
+		}()
+		go eng.RunReplayCampaignPump(workerCtx, 30*time.Millisecond, quietTestLogger())
+		t.Cleanup(func() { stopWorkers(); <-done })
+	}
 
 	handler, shutdownHub := NewV1HandlerWithShutdown(eng, pool)
 	server := httptest.NewServer(handler)

@@ -18,7 +18,6 @@ func TestTwoTierQueueHealth(t *testing.T) {
 
 	// A stale eligible queued node: running run, queued node, and its
 	// node.queued event 120 seconds in the past (the eligibility instant).
-	stamp := time.Now().UnixNano()
 	org := "org-qhealth"
 	runID := "run-qhealth"
 	_, _ = pool.Exec(ctx, `DELETE FROM run_events WHERE run_id = 'run-qhealth'`)
@@ -43,10 +42,10 @@ func TestTwoTierQueueHealth(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM run_nodes WHERE run_id = 'run-qhealth'`)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM runs WHERE id = 'run-qhealth'`)
 	})
-	_ = stamp
-
 	// Fresh harness = fresh 5s snapshot cache.
-	h := newAPIHarness(t)
+	// It deliberately owns no workers: a worker racing this read would claim
+	// the seeded queued row and make an observability assertion nondeterministic.
+	h := newAPIHarnessWithoutWorkers(t)
 
 	// Admin detail: the stale node counts, its age measured from the
 	// queued event, maintenance explicitly null (in-process loops).
