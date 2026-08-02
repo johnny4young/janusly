@@ -104,6 +104,7 @@ exact candidate commit:
 | SEC-005 | P1 | Supabase identity and embedding-provider responses were JSON-decoded without a decoded-body byte cap. | fixed in architecture review |
 | SEC-006 | P1 | Credentialed CORS honored `API_ALLOWED_ORIGINS=*` in production, which is unsafe once browser-session reads and mutations are enabled. | fixed in architecture review |
 | AUTH-001 | P0 | Go omits the Node `janusly-session` provider and WorkOS browser-session lifecycle, while the web already depends on cookie-session endpoints. | open |
+| AUTH-002 | P0 | Go labels bootstrap surfaces identity-scoped but dispatches them through tenant membership resolution, so a legitimate zero-membership identity cannot bootstrap. | open |
 
 ## Architecture review decisions
 
@@ -130,3 +131,27 @@ The exact band passed `make ci` on 2026-08-02: generated SQL and OpenAPI were
 clean, coverage floors held, build and lint passed, `govulncheck` found no
 reachable vulnerabilities, the race-enabled integration suite passed, and
 semantic parity F01-F25 remained green.
+
+### Durable session provider and identity boundary
+
+The second authentication-parity band adds the four-mode provider chain in the
+same priority as Node: a valid `janusly-session` cookie wins over Supabase,
+service-token, and development headers. The opaque cookie id is resolved on
+every request through `auth_sessions`; revoked, expired, and missing rows fall
+through, while a database failure remains visible instead of silently
+downgrading to another provider. The generated store queries cover normalized
+creation, active lookup on database time, idempotent revocation, and a
+user-bound organization switch that preserves the original expiry.
+
+The resolver now exposes two explicit products: `ResolveIdentity` returns only
+provider-verified identity and can succeed with zero memberships, while
+`Resolve` still requires `org_members` before returning a tenant `Context` for
+human providers. Integration tests prove both halves against PostgreSQL and
+also prove that a session organization hint is never authority by itself.
+
+`AUTH-001` and `AUTH-002` remain open: the HTTP dispatcher does not consume the
+new identity product yet, and session discovery/logout/organization-switch,
+WorkOS SSO, and the full bootstrap projection are not part of this band.
+The exact band passed `make ci` on 2026-08-02, including sqlc/OpenAPI drift
+checks, coverage floors, build, lint, reachable-vulnerability analysis, the
+race-enabled PostgreSQL integration suite, and semantic parity F01-F25.

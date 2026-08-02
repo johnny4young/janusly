@@ -2,8 +2,14 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/johnny4young/janusly/go/internal/browsersession"
+	"github.com/johnny4young/janusly/go/internal/signedtoken"
+	"github.com/johnny4young/janusly/go/internal/store"
 )
 
 func makeResolver(cfg Config) *Resolver {
@@ -24,7 +30,79 @@ func principalFor(t *testing.T, rv *Resolver, headers map[string]string) *princi
 	for name, value := range headers {
 		req.Header.Set(name, value)
 	}
-	return rv.extract(context.Background(), req)
+	p, err := rv.extract(context.Background(), req)
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	return p
+}
+
+func TestJanuslySessionRunsFirstAndExposesIdentity(t *testing.T) {
+	t.Setenv("JANUSLY_RESUME_TOKEN_SECRET", "auth-session-test-secret")
+	browserToken, err := browsersession.CreateToken("session-1", 600)
+	if err != nil {
+		t.Fatalf("browser token: %v", err)
+	}
+	full := makeResolver(Config{
+		SupabaseURL: "https://sb.example", SupabaseKey: "k",
+		ServiceToken: "svc-secret-token",
+	})
+	full.getActiveSession = func(context.Context, string) (store.AuthSession, error) {
+		return store.AuthSession{
+			ID: "session-1", UserID: "sso-user", Email: "Alice@Example.com",
+			OrgID: "org-sso", ExpiresAt: time.Now().Add(10 * time.Minute),
+		}, nil
+	}
+
+	p := principalFor(t, full, map[string]string{
+		"Cookie": browsersession.CookieName + "=" + browserToken.Value,
+		// A fresh browser session must beat a stale-but-valid Supabase JWT.
+		"Authorization": "Bearer valid-jwt", "x-org-id": "org-supabase",
+	})
+	if p == nil || p.providerName != ModeJanuslySession || p.providerUserID != "sso-user" ||
+		p.providerOrgHint != "org-sso" || p.declaredSource != SourceSSO || p.browserSessionID != "session-1" {
+		t.Fatalf("session precedence: %+v", p)
+	}
+
+	req := httptest.NewRequest("GET", "/auth/context", nil)
+	req.Header.Set("Cookie", browsersession.CookieName+"="+browserToken.Value)
+	identity, err := full.ResolveIdentity(context.Background(), req)
+	if err != nil || identity == nil || identity.UserID != "sso-user" ||
+		identity.Email != "alice@example.com" || identity.OrgHint != "org-sso" ||
+		identity.BrowserSessionID != "session-1" {
+		t.Fatalf("identity without membership: %+v %v", identity, err)
+	}
+}
+
+func TestInvalidSessionFallsThroughButStoreFailureDoesNot(t *testing.T) {
+	t.Setenv("JANUSLY_RESUME_TOKEN_SECRET", "auth-session-test-secret")
+	full := makeResolver(Config{SupabaseURL: "https://sb.example", SupabaseKey: "k"})
+
+	wrongPurpose, _, err := signedtoken.Sign("sso_state", map[string]string{"sessionId": "session-1"}, 600)
+	if err != nil {
+		t.Fatalf("wrong-purpose token: %v", err)
+	}
+	p := principalFor(t, full, map[string]string{
+		"Cookie":        browsersession.CookieName + "=" + wrongPurpose,
+		"Authorization": "Bearer valid-jwt",
+	})
+	if p == nil || p.providerName != ModeSupabase {
+		t.Fatalf("invalid session must fall through to the next provider: %+v", p)
+	}
+
+	valid, err := browsersession.CreateToken("session-1", 600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbErr := errors.New("session store unavailable")
+	full.getActiveSession = func(context.Context, string) (store.AuthSession, error) {
+		return store.AuthSession{}, dbErr
+	}
+	req := httptest.NewRequest("GET", "/auth/context", nil)
+	req.Header.Set("Cookie", browsersession.CookieName+"="+valid.Value)
+	if _, err := full.ResolveIdentity(context.Background(), req); !errors.Is(err, dbErr) {
+		t.Fatalf("store failure must not silently downgrade providers: %v", err)
+	}
 }
 
 // Chain precedence, ported from the reference's priority order.
