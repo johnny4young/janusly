@@ -5,12 +5,9 @@
 package httpapi
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
-	"strconv"
-	"strings"
 	"time"
+
+	"github.com/johnny4young/janusly/go/internal/webhooksig"
 )
 
 const (
@@ -71,41 +68,18 @@ func verifyWorkOsSignature(header, rawBody, secret string, now time.Time) (bool,
 	if header == "" {
 		return false, "missing_header"
 	}
-	timestampStr, signatureHex := "", ""
-	for _, part := range strings.Split(header, ",") {
-		key, value, found := strings.Cut(strings.TrimSpace(part), "=")
-		if !found {
-			continue
-		}
-		switch key {
-		case "t":
-			timestampStr = value
-		case "v1":
-			signatureHex = value
-		}
-	}
-	if timestampStr == "" || signatureHex == "" {
+	timestampRaw, candidates := webhooksig.ParseHeader(header, "t", "v1")
+	if timestampRaw == "" || len(candidates) == 0 {
 		return false, "malformed_header"
 	}
-	if _, err := hex.DecodeString(signatureHex); err != nil || len(signatureHex)%2 != 0 {
-		return false, "malformed_header"
-	}
-	timestampMs, err := strconv.ParseInt(timestampStr, 10, 64)
-	if err != nil || timestampMs <= 0 {
-		return false, "malformed_header"
-	}
-	deltaMs := now.UnixMilli() - timestampMs
-	if deltaMs > scimSignatureToleranceSeconds*1000 {
-		return false, "expired"
-	}
-	if deltaMs < -scimSignatureToleranceSeconds*1000 {
-		return false, "future_timestamp"
-	}
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(timestampStr + "." + rawBody))
-	expectedHex := hex.EncodeToString(mac.Sum(nil))
-	if !hmac.Equal([]byte(expectedHex), []byte(signatureHex)) {
-		return false, "signature_mismatch"
+	_, reason := webhooksig.Verify(timestampRaw, candidates, rawBody, secret, now.Unix(), webhooksig.Posture{
+		Compose:               func(t, body string) string { return t + "." + body },
+		ToleranceSeconds:      scimSignatureToleranceSeconds,
+		TimestampMillis:       true,
+		AsymmetricSkewReasons: true,
+	})
+	if reason != "" {
+		return false, reason
 	}
 	return true, ""
 }

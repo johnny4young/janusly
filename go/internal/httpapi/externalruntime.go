@@ -19,17 +19,12 @@ package httpapi
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -43,6 +38,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/secretstore"
 	"github.com/johnny4young/janusly/go/internal/signature"
 	"github.com/johnny4young/janusly/go/internal/store"
+	"github.com/johnny4young/janusly/go/internal/webhooksig"
 )
 
 const (
@@ -70,36 +66,17 @@ var (
 // `t=<unix-seconds>,v1=<hex>` over `${timestamp}.${rawBody}`, constant
 // time, bounded clock skew.
 func verifyExternalRuntimeSignature(signatureHeader, rawBody, secret string, nowSeconds int64) bool {
-	if secret == "" {
-		return false
-	}
-	timestampValue, signatureValue := "", ""
-	for _, part := range strings.Split(signatureHeader, ",") {
-		part = strings.TrimSpace(part)
-		switch {
-		case strings.HasPrefix(part, "t="):
-			timestampValue = part[2:]
-		case strings.HasPrefix(part, "v1="):
-			signatureValue = strings.ToLower(part[3:])
+	timestampRaw, candidates := webhooksig.ParseHeader(signatureHeader, "t", "v1")
+	for _, candidate := range candidates {
+		if !externalHexSigPattern.MatchString(candidate) {
+			return false
 		}
 	}
-	if !externalHexSigPattern.MatchString(signatureValue) {
-		return false
-	}
-	timestamp, err := strconv.ParseInt(timestampValue, 10, 64)
-	if err != nil || timestamp <= 0 {
-		return false
-	}
-	if skew := nowSeconds - timestamp; skew > externalRuntimeToleranceSeconds || skew < -externalRuntimeToleranceSeconds {
-		return false
-	}
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = fmt.Fprintf(mac, "%d.%s", timestamp, rawBody)
-	candidate, err := hex.DecodeString(signatureValue)
-	if err != nil {
-		return false
-	}
-	return hmac.Equal(candidate, mac.Sum(nil))
+	_, reason := webhooksig.Verify(timestampRaw, candidates, rawBody, secret, nowSeconds, webhooksig.Posture{
+		Compose:          func(t, body string) string { return t + "." + body },
+		ToleranceSeconds: externalRuntimeToleranceSeconds,
+	})
+	return reason == ""
 }
 
 /* ------------------------- strict event contract ----------------------- */

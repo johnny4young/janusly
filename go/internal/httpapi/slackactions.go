@@ -10,18 +10,13 @@
 package httpapi
 
 import (
-	"crypto/hmac"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"net/url"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +26,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/auth"
 	"github.com/johnny4young/janusly/go/internal/secretstore"
 	"github.com/johnny4young/janusly/go/internal/store"
+	"github.com/johnny4young/janusly/go/internal/webhooksig"
 )
 
 const (
@@ -54,23 +50,21 @@ func verifySlackSignature(timestampHeader, signatureHeader, rawBody, secret stri
 	if secret == "" {
 		return 0, "missing_secret"
 	}
+	// Slack's provider quirks stay here: separate timestamp header with
+	// its own digit bound, and a v0= prefixed hex signature.
 	if matched, _ := regexp.MatchString(`^\d{1,12}$`, timestampHeader); !matched {
 		return 0, "malformed_timestamp"
-	}
-	timestamp, _ := strconv.ParseInt(timestampHeader, 10, 64)
-	if math.Abs(float64(nowUnix-timestamp)) > slackSignatureMaxAgeSeconds {
-		return 0, "timestamp_skew"
 	}
 	if matched, _ := regexp.MatchString(`^v0=[a-f0-9]{64}$`, signatureHeader); !matched {
 		return 0, "malformed_signature"
 	}
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = fmt.Fprintf(mac, "v0:%d:%s", timestamp, rawBody)
-	expected := "v0=" + hex.EncodeToString(mac.Sum(nil))
-	if subtle.ConstantTimeCompare([]byte(signatureHeader), []byte(expected)) != 1 {
-		return 0, "signature_mismatch"
-	}
-	return timestamp, ""
+	timestamp, reason := webhooksig.Verify(timestampHeader,
+		[]string{strings.TrimPrefix(signatureHeader, "v0=")}, rawBody, secret, nowUnix,
+		webhooksig.Posture{
+			Compose:          func(t, body string) string { return "v0:" + t + ":" + body },
+			ToleranceSeconds: slackSignatureMaxAgeSeconds,
+		})
+	return timestamp, reason
 }
 
 type slackInteraction struct {

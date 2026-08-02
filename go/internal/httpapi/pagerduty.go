@@ -11,9 +11,6 @@
 package httpapi
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -25,6 +22,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/executors"
 	"github.com/johnny4young/janusly/go/internal/secretstore"
 	"github.com/johnny4young/janusly/go/internal/store"
+	"github.com/johnny4young/janusly/go/internal/webhooksig"
 )
 
 const pagerDutyWebhookBodyMaxBytes = 2 * 1024 * 1024
@@ -33,26 +31,16 @@ const pagerDutyWebhookBodyMaxBytes = 2 * 1024 * 1024
 // more comma-separated `v1=<hex HMAC-SHA256(raw-body)>` values, each
 // compared constant-time. The raw body is verified before JSON parsing.
 func verifyPagerDutySignature(rawBody, signatureHeader, secret string) bool {
-	if rawBody == "" || signatureHeader == "" || secret == "" {
+	if rawBody == "" || signatureHeader == "" {
 		return false
 	}
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(rawBody))
-	expected := mac.Sum(nil)
-	for _, item := range strings.Split(signatureHeader, ",") {
-		value := strings.TrimSpace(item)
-		if !strings.HasPrefix(value, "v1=") {
-			continue
-		}
-		candidate, err := hex.DecodeString(value[3:])
-		if err != nil || len(candidate) != len(expected) {
-			continue
-		}
-		if hmac.Equal(candidate, expected) {
-			return true
-		}
-	}
-	return false
+	// No timestamp in the V3 posture; every v1= candidate is tried
+	// (secret rotation sends several).
+	_, candidates := webhooksig.ParseHeader(signatureHeader, "", "v1")
+	_, reason := webhooksig.Verify("", candidates, rawBody, secret, 0, webhooksig.Posture{
+		Compose: func(_, body string) string { return body },
+	})
+	return reason == ""
 }
 
 // pagerDutyWebhookEvent is the bounded projection extracted from a V3 body.

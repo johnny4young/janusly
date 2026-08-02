@@ -2070,3 +2070,15 @@ semanas armado: el test del due-clock del scheduler exigía >30 minutos al
 siguiente fire de un cron `0 3 * * *` UTC — es decir, fallaba TODOS los días
 de 21:30 a 22:00 hora local. La aserción ahora pide alineación al tope de
 hora, no distancia.
+
+## T-528 — webhooksig: un core, cuatro posturas (2026-08-01)
+
+Los cuatro verificadores repetían la misma escalera con variaciones sutiles
+que son EL contrato de cada proveedor: WorkOS firma sobre milisegundos y
+distingue expired de future_timestamp, PagerDuty no tiene timestamp y manda
+varios candidatos durante la rotación, Slack trae el timestamp en su propio
+header y prefija v0=. El core extrae la escalera (parse, hex, HMAC,
+constant-time, skew) y cada postura queda como config declarativa; los
+quirks irreductibles (el patrón de dígitos de Slack, el missing_header de
+WorkOS) viven en adapters de diez líneas. El guard fue no tocar un solo caso
+de las matrices de firma existentes — pasaron todas a la primera.
