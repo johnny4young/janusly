@@ -2181,3 +2181,17 @@ de honestidad importa: si el generador de caos produce menos de 20 starts,
 el bench se declara rojo porque la fase hostil no probó nada. La dependencia
 declarada con T-510 resultó ser solo la regla de no-co-residencia — el
 veredicto del soak no hacía falta, congelarlo durante la medición sí.
+
+## T-510 — Veredicto del soak 24h: estable, con un falso flag instructivo (2026-08-02)
+
+El detector automático gritó "CRECIÓ" y la investigación lo desmontó en diez
+minutos de análisis de la serie: el heap por octavos es plano en ~8.8 MB
+durante las últimas dieciocho horas — lo que se movió fue el BASELINE, no la
+cola. El segundo octavo cayó a 5.5 MB porque esta misma sesión le hizo la
+vida imposible al host (la caída del Postgres por el disco lleno y las
+ventanas SIGSTOP de los benches congelaron la carga, y un engine sin carga
+encoge su heap), y ese hueco deprimió el promedio del primer cuarto contra
+el que se compara. RSS bajando y goroutines planas no dejan lugar a otra
+lectura: estable, sin fuga. La lección para el detector quedó anotada:
+excluir del promedio las muestras bajo congelamiento. Con esto, el último
+criterio del go/no-go pasa a verde y REPORT-W6 queda sin asteriscos.

@@ -74,7 +74,7 @@ taxonomía de nombres de error por runtime. Ninguna bloquea las fases 1-3.
 | Paridad de wire sobre corpus real | 0 diffs fuera de lista anotada | ✅ 27/27 |
 | Web real completo sin errores | 15/15 tabs + 5 flujos | ✅ |
 | Exactly-once bajo crash de réplica | 0 dobles ejecuciones ×3 corridas | ✅ |
-| Estabilidad sostenida | soak sin crecimiento >10% | ✅ 1h (ola 3); 24h en curso |
+| Estabilidad sostenida | soak sin crecimiento >10% | ✅ 24h COMPLETO (2026-08-02): heap plano ~8.8 MB las últimas 18h, RSS a la baja (final 28 MB), goroutines planas ~41; el flag automático del veredicto fue artefacto del baseline (outage del Postgres del host + ventanas SIGSTOP de benches deprimieron el primer cuarto) — investigación en SOAK.md anexo T-510 |
 | Seguridad ejecutable | matrices SSRF/scrub/authz verdes | ✅ |
 | SDK externo contra Go | pytest live verde | ✅ 5/5 |
 | Rollback operativo | runbook + mismo-Postgres | ✅ documentado |
@@ -82,5 +82,7 @@ taxonomía de nombres de error por runtime. Ninguna bloquea las fases 1-3.
 **Recomendación: GO.** Arrancar fase 1 del strangler (núcleo de
 ejecución) por un tenant interno con el runbook, con `make dual` como
 gate de regresión permanente y las fases 4-5 portándose detrás del
-proxy. El único criterio pendiente (veredicto 24h) es autónomo y no
-bloquea empezar por fase 1 con el rollback de un minuto documentado.
+proxy. El último criterio pendiente cerró el 2026-08-02: el soak de 24h
+terminó ESTABLE (1412 muestras; heap plano, RSS decreciente, goroutines
+planas — anexo T-510 en SOAK.md con la investigación del falso flag).
+Todos los criterios del go/no-go están ahora en ✅.
