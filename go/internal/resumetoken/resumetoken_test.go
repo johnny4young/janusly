@@ -81,3 +81,16 @@ func TestResumeTokenMatrix(t *testing.T) {
 		t.Fatalf("production must demand the dedicated secret: %v", err)
 	}
 }
+
+func TestLegacyResumeTokenRemainsByteCompatible(t *testing.T) {
+	t.Setenv("JANUSLY_RESUME_TOKEN_SECRET", "compat-secret")
+	binding := Binding{OrgID: "org-a", RunID: "run-1", NodeID: "form", Purpose: "human_form"}
+	token, err := SignLegacy(binding, 1_700_000_000)
+	if err != nil {
+		t.Fatalf("sign legacy: %v", err)
+	}
+	const referenceToken = "v1.eyJvcmdJZCI6Im9yZy1hIiwicnVuSWQiOiJydW4tMSIsIm5vZGVJZCI6ImZvcm0iLCJwdXJwb3NlIjoiaHVtYW5fZm9ybSIsImlzc3VlZEF0IjoxNzAwMDAwMDAwfQ.Wng8hLIEq-SRdslKyOstWK3HckddcXL1Mp5wb2yICA4"
+	if token != referenceToken {
+		t.Fatalf("reference token drift:\nwant %s\n got %s", referenceToken, token)
+	}
+}

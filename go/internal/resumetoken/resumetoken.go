@@ -13,23 +13,13 @@
 package resumetoken
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"os"
-	"strings"
 	"time"
+
+	"github.com/johnny4young/janusly/go/internal/tokenhmac"
 )
 
 const (
-	tokenVersion   = "v1"
-	devSecret      = "janusly-dev-resume-token-secret"
-	secretEnv      = "JANUSLY_RESUME_TOKEN_SECRET"
-	productionMode = "JANUSLY_PRODUCTION_MODE"
-
 	// MinTTLSeconds..DefaultTTLSeconds is the closed range for newly
 	// issued tokens ("left over a long weekend" without an indefinite
 	// shelf life for a leaked URL).
@@ -62,26 +52,6 @@ type Binding struct {
 	Purpose string
 }
 
-func secret() (string, error) {
-	if configured := os.Getenv(secretEnv); configured != "" {
-		return configured, nil
-	}
-	if os.Getenv(productionMode) == "true" {
-		return "", fmt.Errorf("%s is required in production", secretEnv)
-	}
-	return devSecret, nil
-}
-
-func signPayload(encodedPayload string) (string, error) {
-	key, err := secret()
-	if err != nil {
-		return "", err
-	}
-	mac := hmac.New(sha256.New, []byte(key))
-	mac.Write([]byte(tokenVersion + "." + encodedPayload))
-	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
-}
-
 // Sign creates a token for the binding with the given TTL (clamped
 // validation: outside [MinTTLSeconds, DefaultTTLSeconds] is an error, the
 // caller resolves policy BEFORE signing).
@@ -94,40 +64,19 @@ func Sign(binding Binding, ttlSeconds int) (string, error) {
 		OrgID: binding.OrgID, RunID: binding.RunID, NodeID: binding.NodeID,
 		Purpose: binding.Purpose, IssuedAt: issuedAt, ExpiresAt: issuedAt + int64(ttlSeconds),
 	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return "", err
-	}
-	encoded := base64.RawURLEncoding.EncodeToString(raw)
-	signature, err := signPayload(encoded)
-	if err != nil {
-		return "", err
-	}
-	return tokenVersion + "." + encoded + "." + signature, nil
+	return tokenhmac.SignJSON(payload)
 }
 
 // Verify checks signature, binding, and the signed expiry. Legacy tokens
 // without expiresAt keep the original verifier boundary: valid AT exactly
 // seven days, expired one second later.
 func Verify(token string, expected Binding) (*Payload, error) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 || parts[0] != tokenVersion {
-		return nil, ErrInvalid
-	}
-	expectedSignature, err := signPayload(parts[1])
-	if err != nil {
-		return nil, err
-	}
-	if !hmac.Equal([]byte(parts[2]), []byte(expectedSignature)) {
-		return nil, ErrInvalid
-	}
-	decoded, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return nil, ErrInvalid
-	}
 	var payload Payload
-	if err := json.Unmarshal(decoded, &payload); err != nil {
-		return nil, ErrInvalid
+	if err := tokenhmac.VerifyJSON(token, &payload); err != nil {
+		if errors.Is(err, tokenhmac.ErrInvalid) {
+			return nil, ErrInvalid
+		}
+		return nil, err
 	}
 	if payload.OrgID != expected.OrgID || payload.RunID != expected.RunID ||
 		payload.NodeID != expected.NodeID || payload.Purpose != expected.Purpose ||
@@ -154,14 +103,5 @@ func SignLegacy(binding Binding, issuedAt int64) (string, error) {
 		OrgID: binding.OrgID, RunID: binding.RunID, NodeID: binding.NodeID,
 		Purpose: binding.Purpose, IssuedAt: issuedAt,
 	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return "", err
-	}
-	encoded := base64.RawURLEncoding.EncodeToString(raw)
-	signature, err := signPayload(encoded)
-	if err != nil {
-		return "", err
-	}
-	return tokenVersion + "." + encoded + "." + signature, nil
+	return tokenhmac.SignJSON(payload)
 }

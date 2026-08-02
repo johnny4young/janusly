@@ -102,4 +102,31 @@ exact candidate commit:
 | SEC-002 | P1 | CI did not run `govulncheck`, and the developer-installed scanner was built with Go 1.25 so it could not parse the Go 1.26 source tree. | fixed in architecture review |
 | SEC-003 | P1 | Public and internal HTTP servers bounded only header-read time; full request reads, idle connections, and header bytes retained unbounded/default policy. | fixed in architecture review |
 | SEC-005 | P1 | Supabase identity and embedding-provider responses were JSON-decoded without a decoded-body byte cap. | fixed in architecture review |
+| SEC-006 | P1 | Credentialed CORS honored `API_ALLOWED_ORIGINS=*` in production, which is unsafe once browser-session reads and mutations are enabled. | fixed in architecture review |
 | AUTH-001 | P0 | Go omits the Node `janusly-session` provider and WorkOS browser-session lifecycle, while the web already depends on cookie-session endpoints. | open |
+
+## Architecture review decisions
+
+### Browser-session security foundation
+
+The first authentication-parity band deliberately stops before adding routes or
+database access. It establishes one shared `v1` HMAC implementation for human
+resume, SSO-state, and browser-session tokens while keeping their payloads and
+purpose checks separate. Fixed-vector tests prove that existing resume tokens
+and the Node generic signed-token envelope retain byte-compatible JSON order,
+base64url encoding, and signatures.
+
+The browser cookie carries only the opaque server-side session id and uses
+`HttpOnly`, `SameSite=Lax`, `Path=/`, a bounded `Max-Age`, and HTTPS-derived or
+explicit `Secure`. Cookie mutations must pass both the custom CSRF marker and
+the same concrete-origin policy used by CORS. Development retains wildcard
+compatibility, but production ignores `*`; production cookie deployments must
+name every allowed origin explicitly.
+
+This band does **not** close `AUTH-001`. The live session row, provider-neutral
+identity dispatcher, discovery/logout/organization-switch routes, WorkOS SSO,
+and zero-membership bootstrap behavior remain required in later focused bands.
+The exact band passed `make ci` on 2026-08-02: generated SQL and OpenAPI were
+clean, coverage floors held, build and lint passed, `govulncheck` found no
+reachable vulnerabilities, the race-enabled integration suite passed, and
+semantic parity F01-F25 remained green.

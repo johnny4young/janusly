@@ -37,6 +37,19 @@ func allowedOrigins() []string {
 	return out
 }
 
+func isAllowedRequestOrigin(origin string) bool {
+	if origin == "" {
+		return false
+	}
+	production := os.Getenv("JANUSLY_GO_ENV") == "production"
+	for _, candidate := range allowedOrigins() {
+		if candidate == origin || (candidate == "*" && !production) {
+			return true
+		}
+	}
+	return false
+}
+
 func resolveRequestID(inbound string) string {
 	trimmed := strings.TrimSpace(inbound)
 	if requestIDPattern.MatchString(trimmed) {
@@ -53,24 +66,7 @@ func WithBrowserHeaders(next http.Handler) http.Handler {
 		origin := r.Header.Get("Origin")
 
 		headers := w.Header()
-		allowed := allowedOrigins()
-		allowAny := false
-		for _, candidate := range allowed {
-			if candidate == "*" {
-				allowAny = true
-			}
-		}
-		originAllowed := false
-		if origin != "" {
-			if allowAny {
-				originAllowed = true
-			}
-			for _, candidate := range allowed {
-				if candidate == origin {
-					originAllowed = true
-				}
-			}
-		}
+		originAllowed := isAllowedRequestOrigin(origin)
 		if originAllowed {
 			headers.Set("Access-Control-Allow-Origin", origin)
 			headers.Set("Access-Control-Allow-Credentials", "true")

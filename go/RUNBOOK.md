@@ -37,6 +37,10 @@ dependencies.
 | `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` | Supabase authentication mode |
 | `ALLOW_DEV_AUTH_HEADERS=true` | explicit production bypass when Supabase is absent; use only in controlled environments |
 | `JANUSLY_API_SERVICE_TOKEN` | service-token authentication mode |
+| `JANUSLY_RESUME_TOKEN_SECRET` | dedicated HMAC secret for resume, SSO-state, and browser-session tokens; required in production and never shared with the API service token |
+| `API_ALLOWED_ORIGINS` | comma-separated concrete browser origins; `*` is ignored in production |
+| `JANUSLY_WEB_BASE_URL` | public web URL used to infer the browser session cookie's `Secure` attribute |
+| `JANUSLY_SESSION_COOKIE_SECURE=true|false` | explicit override for the session cookie `Secure` attribute |
 | `JANUSLY_CREDENTIAL_MASTER_KEY` or `_FILE` | managed credential envelope root key; invalid material fails boot |
 | `JANUSLY_MCP_WRITES_ENABLED=true` | process half of MCP server write consent |
 | `JANUSLY_MCP_CLIENT_WRITES_ENABLED=true` | process half of external MCP client write consent |

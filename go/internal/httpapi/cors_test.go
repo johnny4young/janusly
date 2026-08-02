@@ -61,6 +61,20 @@ func TestDisallowedOriginNeverEchoes(t *testing.T) {
 	}
 }
 
+func TestWildcardOriginIsDisabledInProduction(t *testing.T) {
+	t.Setenv("API_ALLOWED_ORIGINS", "*")
+	t.Setenv("JANUSLY_GO_ENV", "")
+	if got := corsProbe(t, http.MethodGet, "https://preview.example", "").Header().Get("Access-Control-Allow-Origin"); got == "" {
+		t.Fatal("development wildcard must retain reference compatibility")
+	}
+
+	t.Setenv("JANUSLY_GO_ENV", "production")
+	h := corsProbe(t, http.MethodGet, "https://attacker.example", "").Header()
+	if h.Get("Access-Control-Allow-Origin") != "" || h.Get("Access-Control-Allow-Credentials") != "" {
+		t.Fatalf("credentialed production CORS must require a concrete origin: %v", h)
+	}
+}
+
 func TestInboundRequestIDIsHonored(t *testing.T) {
 	rec := corsProbe(t, http.MethodGet, "", "trace-abc-123")
 	if rec.Header().Get("X-Request-Id") != "trace-abc-123" {
