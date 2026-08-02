@@ -10,11 +10,13 @@ status and open gates live in [`AUDIT.md`](AUDIT.md).
 
 ## Principle
 
-Traffic moves by coherent route and work-ownership family, not by arbitrary
-individual handler. HTTP rollback is a proxy change because both runtimes can
-use the same PostgreSQL state, but data compatibility, BullMQ drain, in-flight
-work, and scheduler ownership must be rehearsed before that mechanism is called
-a proven rollback.
+Read-only HTTP traffic moves by coherent route family, not by arbitrary
+individual handler. The work plane does **not** move by tenant: Go's
+PostgreSQL claim and background sweep queries are database-global. Every
+mutating entry route, worker, scheduler, timer, campaign, reconciler, and
+maintenance loop therefore transfers in one global cut after the BullMQ drain
+and rollback rehearsal. HTTP rollback is a proxy change only after that work
+plane is quiescent; shared PostgreSQL is not an ownership fence.
 
 All five route phases have Go implementations. That means no family is planned
 to remain permanently on Node; it does **not** mean all five phases are already
@@ -30,9 +32,13 @@ certified for production traffic.
 | **4 — AI surfaces** | generation, patch, explain run/workflow, review, suggest improvement, health | provider-neutral fallback, budget/rate gates, scrub, evidence framing, invalid-output rejection |
 | **5 — billing and budget ownership** | `/billing/*` and workflow budget routes | contract shapes, complete-window aggregation, organization/workflow budget composition |
 
-Phase boundaries also define non-HTTP ownership. Scheduler, trigger ingestion,
-replay campaigns, delayed approvals/timers, and jobs already present in BullMQ
-must move with their owning phase; proxy routing cannot transfer queued state.
+These phases are certification groupings, not independent live work owners.
+Before the global work-plane switch, a production Go candidate must be passive
+and only safe reads may shadow or move. At the switch, all mutating route
+families and non-HTTP ownership transfer together. Afterward, remaining
+read-only families may continue their gradual proxy move. Scheduler, trigger
+ingestion, replay campaigns, delayed approvals/timers, and jobs already present
+in BullMQ cannot be transferred by proxy routing.
 
 ## Stable and transitional proxy shapes
 
@@ -44,20 +50,21 @@ janusly.example.com {
 }
 ```
 
-During a gradual transition, Node matchers come first:
+After the global work-plane transition, remaining read-only Node matchers may
+still come first:
 
 ```caddy
 janusly.example.com {
-  # Example only: these families still belong to Node for this tenant.
-  @node path /billing/* /ai/explain-run /ai/review-workflow
+  # Example only: these read projections still come from Node.
+  @node path /billing/usage /ai/health
   reverse_proxy @node node-api:3001
   reverse_proxy go-api:4600
 }
 ```
 
-Tenant selection must be combined with the family matcher. A family rollback
-restores its matcher only after the originating runtime's in-flight and queued
-work reaches the rehearsed handoff state.
+Do not put mutating routes in a gradual matcher. A work-plane rollback restores
+Node mutations only after Go's in-flight and queued work reaches the rehearsed
+handoff state.
 
 ## Deliberate normalized differences
 

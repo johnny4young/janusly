@@ -78,12 +78,17 @@ Example client configuration:
       "command": "/usr/local/bin/janusly-go-mcp",
       "env": {
         "JANUSLY_GO_DATABASE_URL": "postgres://janusly:janusly-go-local@127.0.0.1:4632/janusly_go",
+        "JANUSLY_GO_WORK_PLANE_ENABLED": "true",
         "JANUSLY_GO_ORG": "default"
       }
     }
   }
 }
 ```
+
+Because this MCP process runs its own workers, enable it only when the shared
+work plane is already owned by Go, never during Node ownership or passive
+shadowing.
 
 ## Core configuration
 
@@ -92,6 +97,7 @@ Example client configuration:
 | `JANUSLY_GO_DATABASE_URL` | local pilot DSN | PostgreSQL connection |
 | `JANUSLY_GO_PORT` | `4600` | public API listener |
 | `JANUSLY_GO_INTERNAL_PORT` | `4601` | loopback metrics and pprof listener |
+| `JANUSLY_GO_WORK_PLANE_ENABLED` | active outside production; passive in production | explicitly own queue claims, due clocks, and mutation loops |
 | `JANUSLY_GO_WORKER_CONCURRENCY` | `8` | executor goroutines, range 1–64 |
 | `JANUSLY_GO_POLL_MS` | `250` | LISTEN/NOTIFY fallback poll, range 50–5000 ms |
 | `JANUSLY_GO_ORG` | `default` | MCP server organization scope |

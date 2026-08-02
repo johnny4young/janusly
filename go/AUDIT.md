@@ -76,7 +76,7 @@ exact candidate commit:
 3. Node-created data remains readable by Go and the rollback runtime can read
    the post-switch state required for recovery.
 4. BullMQ, schedulers, delayed work, and in-flight runs have a rehearsed drain
-   and rollback procedure; two runtimes never own the same tenant scheduler.
+   and rollback procedure; two runtimes never own the global work plane.
 5. Full web behavior is exercised against both backends.
 6. Security, HA, failover, chaos, fuzz, SDK, and performance gates pass.
 7. Documentation distinguishes implemented, locally validated, shadowed, and
@@ -96,6 +96,7 @@ exact candidate commit:
 | EVD-001 | P1 | `SOAK.md` cited an untracked random-name series, so the 24-hour verdict was not reproducible from a clean checkout. | fixed in this band |
 | TST-001 | P0 | The full Playwright lane was deferred from the pilot and remains a cutover gate. | open |
 | QUE-001 | P0 | The current cutover runbook forbids dual schedulers but does not yet prove a BullMQ/in-flight-work drain and rollback procedure. | open |
+| QUE-002 | P0 | The cutover map promised per-tenant work ownership even though Go claims and background sweeps are database-global. | fixed in architecture review |
 | SRC-001 | P2 | Go source comments contain 134 internal ticket identifiers instead of durable behavioral explanations. | open |
 | MOD-001 | P2 | Go 1.26 idioms were not enforced, allowing avoidable allocation and synchronization boilerplate to accumulate. | fixed in this band |
 | PAR-001 | P1 | Go org-config writes and environment fallbacks accepted non-finite or negative fractional integer inputs differently from Node and skipped Node's string normalization. | fixed in architecture review |
@@ -305,3 +306,34 @@ that rolls back the preceding membership plus login audit. The exact band
 passed `make ci` on 2026-08-02: sqlc/OpenAPI drift, coverage floors, build,
 lint, `govulncheck`, race-enabled PostgreSQL integration, and semantic parity
 F01-F25 are green.
+
+### Global work-plane ownership gate
+
+The first queue-transition band closes `QUE-002` and deliberately leaves the
+drain rehearsal in `QUE-001` open. The previous per-tenant runbook contradicted
+the implementation: Go workers claim eligible PostgreSQL rows globally and
+the schedule, campaign, reaper, reconciliation, retention, health, and purge
+loops are process-wide. A proxy tenant matcher cannot fence those consumers.
+
+The supported transition now moves one global work plane. A production Go
+process defaults passive until `JANUSLY_GO_WORK_PLANE_ENABLED=true` is
+explicit. Passive mode does not open the worker pool or start any background
+mutation loop, rejects unsafe HTTP methods plus stateful SSO and audited-export
+GETs before handler execution, and keeps safe reads available for shadow
+comparison. The response header `X-Janusly-Work-Plane` and internal
+`janusly_go_work_plane_active` gauge make ownership observable; the in-process
+MCP server refuses passive startup because it owns workers by design.
+
+The cutover map and runbook now reserve gradual routing for safe reads. Every
+mutating entry route and non-HTTP producer/consumer moves together only after
+Node producers stop and the BullMQ/PostgreSQL handoff matrix is clean. The next
+queue band must implement and execute that inventory/drain/rollback rehearsal
+before `QUE-001` can close.
+
+Unit coverage proves production-default passive, explicit activation, safe
+read/preflight passthrough, and pre-handler rejection of unsafe methods and
+stateful GETs. A real production-mode process smoke observed passive header,
+503, and gauge `0`, then active header, auth dispatch, and gauge `1` after the
+explicit flip. The exact band passed `make ci` on 2026-08-02: sqlc/OpenAPI
+drift, coverage floors, build, lint, `govulncheck`, race-enabled PostgreSQL
+integration, and semantic parity F01-F25 are green.

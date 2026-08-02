@@ -1,9 +1,11 @@
-# Per-tenant cutover runbook — Node.js to Go
+# Global work-plane cutover runbook — Node.js to Go
 
 This is the candidate transition procedure. [`CUTOVER-MAP.md`](CUTOVER-MAP.md)
 defines route families; this document defines traffic ownership, observation,
-and rollback. It is not production-certified until the P0 data, BullMQ,
-in-flight-work, and full-browser gates in [`AUDIT.md`](AUDIT.md) pass.
+and rollback. Read-only HTTP families may shadow or move gradually, but the
+execution worker and background mutation loops are database-global and move as
+one work plane. This runbook is not production-certified until the P0 data,
+BullMQ, in-flight-work, and full-browser gates in [`AUDIT.md`](AUDIT.md) pass.
 
 ## Environment prerequisites
 
@@ -16,34 +18,49 @@ in-flight-work, and full-browser gates in [`AUDIT.md`](AUDIT.md) pass.
 4. Required auth, resume-token, webhook, credential-root, provider, and service
    secrets are available to the candidate without copying secret values into
    organization configuration.
-5. The proxy can switch one tenant and route family atomically and can restore
-   the previous mapping without a deployment.
-6. The queue-transition rehearsal has classified and drained BullMQ delayed,
+5. Every side-by-side production Go process runs with
+   `JANUSLY_GO_WORK_PLANE_ENABLED=false`; safe shadow responses report
+   `X-Janusly-Work-Plane: passive` and metric
+   `janusly_go_work_plane_active 0`.
+6. The proxy can freeze every mutating route while keeping reads available,
+   then switch the complete mutation surface atomically without a deployment.
+7. The queue-transition rehearsal has classified and drained BullMQ delayed,
    active, waiting, scheduled, replay-campaign, approval, and timer work. Until
-   that rehearsal is recorded, do not switch a tenant.
+   that rehearsal is recorded, do not switch the work plane.
 
 ## Ownership rule
 
-At every instant, one runtime owns each tenant's entry and scheduler family.
-Never run Node and Go schedulers for the same tenant concurrently. During a
-gradual cut, the proxy and the queue-drain ledger must agree on the owner; HTTP
-routing alone does not transfer already queued work.
+At every instant, one runtime owns the complete work plane: new run entry,
+PostgreSQL node claims, BullMQ delivery, schedules, timers, replay campaigns,
+reconcilers, reapers, and maintenance loops. The current Go claim and sweep
+queries are intentionally global, so a per-tenant worker split is not a valid
+deployment shape. HTTP routing alone does not transfer queued work.
 
-## Tenant switch
+## Global work-plane switch
 
-1. Choose a quiet window with no active rollout or replay campaign.
-2. Stop creating new Node jobs for the family and record the drain watermark.
-3. Drain or explicitly park every pre-watermark Node job according to the
-   rehearsed queue matrix. Do not convert jobs by editing Redis or PostgreSQL.
-4. Optionally pause schedule workflows for sensitive tenants. A tick observed
-   while paused is deliberately dropped and audited rather than backfilled.
-5. Switch the tenant/family matcher to Go and reload the proxy.
-6. Within two minutes verify:
+1. Keep the Go candidate passive and choose a quiet window with no active
+   rollout or replay campaign in any organization.
+2. Freeze every mutating ingress route at the proxy and record the freeze
+   watermark. Safe reads may remain available.
+3. Gracefully stop Node API producers, then drain and stop both Node BullMQ
+   workers. No producer may remain able to materialize a new job.
+4. Remove recurring Node scheduler ownership and drain or explicitly park
+   every pre-watermark job according to the rehearsed queue matrix. Do not
+   convert jobs by editing Redis or PostgreSQL.
+5. Verify zero active Node job, the expected durable PostgreSQL handoff rows,
+   and captured database/Redis checkpoints. Any unexplained `running` node
+   aborts the switch.
+6. Restart the Go candidate with `JANUSLY_GO_WORK_PLANE_ENABLED=true`; require
+   `X-Janusly-Work-Plane: active` and `janusly_go_work_plane_active 1` before
+   unfreezing traffic.
+7. Switch every mutating route to Go, reload the proxy, and unfreeze writes.
+8. Within two minutes verify:
    - `GET /healthz` and `GET /health`;
    - one no-op workflow run;
    - `GET /v1/runs` and the Activity UI;
-   - no newly eligible Node job exists beyond the recorded watermark.
-7. Record the exact proxy config, binary commit, database backup/checkpoint,
+   - no newly eligible Node job exists beyond the recorded watermark;
+   - no passive-gate 503 occurred after unfreezing.
+9. Record the exact proxy config, binary commit, database/Redis checkpoints,
    queue watermarks, smoke run, and operator.
 
 ## First 24 hours
@@ -57,7 +74,7 @@ routing alone does not transfer already queued work.
   recovery clusters.
 - Circuit-breaker and operational audits.
 - PostgreSQL connections and LISTEN sessions versus the reviewed baseline.
-- Redis/BullMQ must stay flat for the transferred family; growth means Node is
+- Redis/BullMQ must stay flat after the work-plane transfer; growth means Node is
   still producing work and the cut must stop.
 
 Use the reviewed 24-hour series in `conformance/perf/SOAK.md` as a reference,
@@ -65,15 +82,16 @@ not as a substitute for candidate-environment observation.
 
 ## Rollback
 
-1. Stop new Go entries for the affected tenant/family.
-2. Drain Go-owned in-flight work according to the rehearsed state matrix. Keep
-   the originating runtime responsible for its claims; do not let the other
-   runtime guess how to reap them.
-3. Restore the proxy matcher to Node and reload it.
-4. Resume Node scheduling only after confirming Go scheduling is disabled for
-   that tenant.
-5. Verify a Node no-op run and the Activity UI against the restored path.
-6. Add the divergence to the dual/browser corpus and complete the post-mortem
+1. Freeze every mutating ingress route.
+2. Stop the Go HTTP listener and gracefully drain its work plane. Keep Go
+   responsible for its `running` claims; do not let Node guess how to reap
+   them. Any unexplained active claim aborts rollback.
+3. Restart Go passive and require its header/metric to report passive.
+4. Restore Node producers and BullMQ workers only after confirming the Go work
+   plane is disabled and the rollback queue matrix is satisfied.
+5. Restore every mutating route to Node, reload the proxy, and unfreeze writes.
+6. Verify a Node no-op run and the Activity UI against the restored path.
+7. Add the divergence to the dual/browser corpus and complete the post-mortem
    before attempting another switch.
 
 Rollback is not considered proven until it has been executed against
@@ -83,7 +101,9 @@ rollback compatibility.
 
 ## Prohibited shortcuts
 
-- No concurrent Node and Go scheduler ownership for one tenant.
+- No concurrent Node and Go work-plane ownership for the shared database.
+- No per-tenant worker split until both runtimes implement and prove a shared
+  tenant ownership fence.
 - No direct data edits to make a divergence disappear.
 - No `pnpm migrate` against a goose-provisioned database.
 - No force-push, remote `main` update, or production switch based solely on a

@@ -125,11 +125,15 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
-	workerPool, err := boot.Connect(ctx, cfg.DatabaseURL, cfg.WorkerPoolSize)
-	if err != nil {
-		return err
+	enginePool := pool
+	if cfg.WorkPlaneEnabled {
+		workerPool, err := boot.Connect(ctx, cfg.DatabaseURL, cfg.WorkerPoolSize)
+		if err != nil {
+			return err
+		}
+		defer workerPool.Close()
+		enginePool = workerPool
 	}
-	defer workerPool.Close()
 	if err := boot.ProbeMigrations(ctx, pool); err != nil {
 		return err
 	}
@@ -137,12 +141,16 @@ func run() error {
 	// setUsageRecorder(recordUsage) boot step) — registered before any
 	// surface that could fire an LLM call.
 	usage.SetRecorder(usage.NewDBRecorder(pool))
-	logger.Info("boot", "port", cfg.Port, "internal_port", cfg.InternalPort)
+	workPlaneMode := "passive"
+	if cfg.WorkPlaneEnabled {
+		workPlaneMode = "active"
+	}
+	logger.Info("boot", "port", cfg.Port, "internal_port", cfg.InternalPort, "work_plane", workPlaneMode)
 
 	// The pilot ships as one binary: the API process also runs the worker
 	// pool. The processes split when scale demands it — the engine already
 	// supports N independent consumers.
-	eng := engine.New(workerPool)
+	eng := engine.New(enginePool)
 	prometheus.MustRegister(engine.NewQueueDepthCollector(pool))
 	// Reference-name parity series so existing dashboards need no rename,
 	// plus the OTel Resource rendered the Prometheus way: a target_info
@@ -162,46 +170,60 @@ func run() error {
 	})
 	resourceInfo.Set(1)
 	prometheus.MustRegister(resourceInfo)
+	prometheus.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "janusly_go_work_plane_active",
+		Help: "Whether this process owns PostgreSQL claims and background mutation loops.",
+	}, func() float64 {
+		if cfg.WorkPlaneEnabled {
+			return 1
+		}
+		return 0
+	}))
 	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
 	// Every background loop runs SUPERVISED (T-512): named start, panic →
 	// recover + log + backoff restart (a sweep bug never takes the API
 	// down), and one deterministic drain on shutdown BEFORE pools close.
 	runner := boot.NewRunner(context.Background(), logger)
-	runner.Go("workers", func(ctx context.Context) {
-		_ = eng.RunWorkers(ctx, cfg.WorkerConcurrency, cfg.PollInterval, dispatcher.Execute, logger)
-	})
-	runner.Go("replay-campaign-pump", func(ctx context.Context) {
-		eng.RunReplayCampaignPump(ctx, cfg.PollInterval, logger)
-	})
-	runner.Go("retention", func(ctx context.Context) {
-		eng.RunRetentionSweep(ctx, time.Hour, engine.RetentionDays(), logger)
-	})
-	runner.Go("upstream-health", func(ctx context.Context) {
-		upstream.RunSweep(ctx, pool, time.Minute, logger)
-	})
-	runner.Go("subworkflow-terminal-reconciler", func(ctx context.Context) {
-		eng.RunSubworkflowTerminalReconciler(ctx, time.Minute, logger)
-	})
-	runner.Go("schedule-sweep", func(ctx context.Context) {
-		eng.RunScheduleSweep(ctx, 15*time.Second, logger)
-	})
-	runner.Go("auto-healing", func(ctx context.Context) {
-		eng.RunAutoHealingSweep(ctx, 5*time.Minute, logger)
-	})
-	runner.Go("memory-consent-purge", func(ctx context.Context) {
-		eng.RunMemoryConsentPurgeSweep(ctx, time.Hour, logger)
-	})
-	// Reaper cadence/threshold are env-tunable for HA deployments (and the
-	// kill-failover harness): a two-replica setup wants a threshold near
-	// its longest legitimate node runtime, not the conservative 1h default.
-	runner.Go("stalled-node-reaper", func(ctx context.Context) {
-		eng.StartReaper(ctx,
-			envDurationMs("JANUSLY_GO_REAPER_INTERVAL_MS", time.Minute),
-			envDurationMs("JANUSLY_GO_REAPER_THRESHOLD_MS", time.Hour), logger)
-	})
+	if cfg.WorkPlaneEnabled {
+		runner.Go("workers", func(ctx context.Context) {
+			_ = eng.RunWorkers(ctx, cfg.WorkerConcurrency, cfg.PollInterval, dispatcher.Execute, logger)
+		})
+		runner.Go("replay-campaign-pump", func(ctx context.Context) {
+			eng.RunReplayCampaignPump(ctx, cfg.PollInterval, logger)
+		})
+		runner.Go("retention", func(ctx context.Context) {
+			eng.RunRetentionSweep(ctx, time.Hour, engine.RetentionDays(), logger)
+		})
+		runner.Go("upstream-health", func(ctx context.Context) {
+			upstream.RunSweep(ctx, pool, time.Minute, logger)
+		})
+		runner.Go("subworkflow-terminal-reconciler", func(ctx context.Context) {
+			eng.RunSubworkflowTerminalReconciler(ctx, time.Minute, logger)
+		})
+		runner.Go("schedule-sweep", func(ctx context.Context) {
+			eng.RunScheduleSweep(ctx, 15*time.Second, logger)
+		})
+		runner.Go("auto-healing", func(ctx context.Context) {
+			eng.RunAutoHealingSweep(ctx, 5*time.Minute, logger)
+		})
+		runner.Go("memory-consent-purge", func(ctx context.Context) {
+			eng.RunMemoryConsentPurgeSweep(ctx, time.Hour, logger)
+		})
+		// Reaper cadence/threshold are env-tunable for HA deployments (and the
+		// kill-failover harness): a two-replica setup wants a threshold near
+		// its longest legitimate node runtime, not the conservative 1h default.
+		runner.Go("stalled-node-reaper", func(ctx context.Context) {
+			eng.StartReaper(ctx,
+				envDurationMs("JANUSLY_GO_REAPER_INTERVAL_MS", time.Minute),
+				envDurationMs("JANUSLY_GO_REAPER_THRESHOLD_MS", time.Hour), logger)
+		})
+	} else {
+		logger.Warn("work plane passive; background claims and mutations are disabled")
+	}
 	defer runner.Shutdown()
 
-	api := newHTTPServer(fmt.Sprintf(":%d", cfg.Port), httpapi.NewV1Handler(eng, pool))
+	publicHandler := httpapi.WithWorkPlaneGate(httpapi.NewV1Handler(eng, pool), cfg.WorkPlaneEnabled)
+	api := newHTTPServer(fmt.Sprintf(":%d", cfg.Port), publicHandler)
 	internal := newHTTPServer(
 		fmt.Sprintf("127.0.0.1:%d", cfg.InternalPort),
 		httpapi.NewInternalHandler(),

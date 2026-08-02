@@ -36,7 +36,8 @@ const goApi = spawn("/tmp/janusly-go-dual-api", [], {
   env: {
     ...process.env,
     JANUSLY_GO_DATABASE_URL: DB,
-      OTEL_EXPORTER: "none",
+    JANUSLY_GO_WORK_PLANE_ENABLED: "true",
+    OTEL_EXPORTER: "none",
     JANUSLY_GO_PORT: "4620",
     JANUSLY_GO_INTERNAL_PORT: "4621",
     JANUSLY_GO_POLL_MS: "50",

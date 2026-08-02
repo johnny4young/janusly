@@ -33,6 +33,10 @@ type Config struct {
 	PollInterval time.Duration
 	// HTTPTimeout bounds outbound http executor calls.
 	HTTPTimeout time.Duration
+	// WorkPlaneEnabled controls every queue consumer and background mutation
+	// loop. Production defaults passive so a shadow candidate cannot claim
+	// shared work before the operator explicitly transfers ownership.
+	WorkPlaneEnabled bool
 }
 
 // defaultDatabaseURL matches the compose project in this directory.
@@ -65,6 +69,22 @@ func Load(getenv func(string) string) (Config, error) {
 		}
 		return v
 	}
+	boolean := func(name string, def bool) bool {
+		raw := strings.TrimSpace(getenv(name))
+		if raw == "" {
+			return def
+		}
+		switch raw {
+		case "true":
+			return true
+		case "false":
+			return false
+		default:
+			problems = append(problems, fmt.Sprintf("%s must be true or false, got %q", name, raw))
+			return def
+		}
+	}
+	production := strings.TrimSpace(getenv("JANUSLY_GO_ENV")) == "production"
 
 	cfg := Config{
 		DatabaseURL:       str("JANUSLY_GO_DATABASE_URL", defaultDatabaseURL),
@@ -75,6 +95,7 @@ func Load(getenv func(string) string) (Config, error) {
 		WorkerPoolSize:    num("JANUSLY_GO_WORKER_POOL_SIZE", 0, 0, 100),
 		PollInterval:      time.Duration(num("JANUSLY_GO_POLL_MS", 250, 50, 5000)) * time.Millisecond,
 		HTTPTimeout:       time.Duration(num("JANUSLY_GO_HTTP_TIMEOUT_MS", 30_000, 1000, 600_000)) * time.Millisecond,
+		WorkPlaneEnabled:  boolean("JANUSLY_GO_WORK_PLANE_ENABLED", !production),
 	}
 	if cfg.WorkerPoolSize == 0 {
 		cfg.WorkerPoolSize = cfg.WorkerConcurrency + 2

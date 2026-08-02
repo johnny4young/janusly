@@ -21,6 +21,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.WorkerConcurrency != 8 || cfg.PollInterval != 250*time.Millisecond {
 		t.Fatalf("unexpected worker defaults: %+v", cfg)
 	}
+	if !cfg.WorkPlaneEnabled {
+		t.Fatal("development must keep the work plane enabled by default")
+	}
 	if !strings.Contains(cfg.DatabaseURL, "4632/janusly_go") {
 		t.Fatalf("unexpected database default: %s", cfg.DatabaseURL)
 	}
@@ -51,6 +54,7 @@ func TestLoadRejectsOutOfRangeWithRangeInMessage(t *testing.T) {
 		{"concurrency zero", "JANUSLY_GO_WORKER_CONCURRENCY", "0", "[1, 64]"},
 		{"poll below floor", "JANUSLY_GO_POLL_MS", "10", "[50, 5000]"},
 		{"not a number", "JANUSLY_GO_HTTP_TIMEOUT_MS", "soon", "[1000, 600000]"},
+		{"invalid work plane", "JANUSLY_GO_WORK_PLANE_ENABLED", "yes", "true or false"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -62,6 +66,35 @@ func TestLoadRejectsOutOfRangeWithRangeInMessage(t *testing.T) {
 				t.Fatalf("message must name the variable and its range, got: %v", err)
 			}
 		})
+	}
+}
+
+func TestWorkPlaneDefaultsPassiveInProductionAndRequiresExplicitActivation(t *testing.T) {
+	passive, err := Load(env(map[string]string{"JANUSLY_GO_ENV": "production"}))
+	if err != nil {
+		t.Fatalf("load passive: %v", err)
+	}
+	if passive.WorkPlaneEnabled {
+		t.Fatal("production shadow must default to a passive work plane")
+	}
+
+	active, err := Load(env(map[string]string{
+		"JANUSLY_GO_ENV":                "production",
+		"JANUSLY_GO_WORK_PLANE_ENABLED": "true",
+	}))
+	if err != nil {
+		t.Fatalf("load active: %v", err)
+	}
+	if !active.WorkPlaneEnabled {
+		t.Fatal("explicit production activation must enable the work plane")
+	}
+
+	developmentPassive, err := Load(env(map[string]string{"JANUSLY_GO_WORK_PLANE_ENABLED": "false"}))
+	if err != nil {
+		t.Fatalf("load development passive: %v", err)
+	}
+	if developmentPassive.WorkPlaneEnabled {
+		t.Fatal("explicit passive mode must win outside production too")
 	}
 }
 

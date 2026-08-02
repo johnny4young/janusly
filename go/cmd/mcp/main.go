@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -36,6 +37,9 @@ func run() error {
 	cfg, err := config.Load(os.Getenv)
 	if err != nil {
 		return err
+	}
+	if !cfg.WorkPlaneEnabled {
+		return errors.New("MCP server requires JANUSLY_GO_WORK_PLANE_ENABLED=true")
 	}
 	// Logs go to stderr — stdout belongs to the MCP transport.
 	logger := boot.NewLogger()

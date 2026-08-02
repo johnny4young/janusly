@@ -19,6 +19,7 @@ dependencies.
 | `JANUSLY_GO_DATABASE_URL` | local pilot DSN | PostgreSQL connection |
 | `JANUSLY_GO_PORT` | `4600` | public API listener |
 | `JANUSLY_GO_INTERNAL_PORT` | `4601` | loopback Prometheus and pprof listener |
+| `JANUSLY_GO_WORK_PLANE_ENABLED` | active outside production; passive in production | process-wide ownership of claims, due clocks, and mutation loops |
 | `JANUSLY_GO_WORKER_CONCURRENCY` | `8` | node executors, range 1–64 |
 | `JANUSLY_GO_API_POOL_SIZE` | `10` | API PostgreSQL pool, range 1–100 |
 | `JANUSLY_GO_WORKER_POOL_SIZE` | concurrency + 2 | worker PostgreSQL pool, range 1–100 |
@@ -76,6 +77,24 @@ is intentionally present but empty, and the Node runner could replay historical
 migrations. Do not apply SQL files from the removed `go/migrations/` path; it
 was folded into the embedded baseline.
 
+### Work-plane ownership
+
+The execution worker and every background mutation loop operate across the
+whole database; they are not tenant-filtered. A production process therefore
+defaults to a **passive** work plane until
+`JANUSLY_GO_WORK_PLANE_ENABLED=true` is explicit. Passive mode opens only the
+API pool, starts no claim/due-clock/reaper/sweep loop, and rejects every unsafe
+HTTP method plus the stateful SSO and audited-export GETs with 503 before
+handler execution. Safe reads, liveness, health, and preflight remain available
+for shadow comparison. Development stays active by default for local
+compatibility.
+
+Every public response carries `X-Janusly-Work-Plane: active|passive`; the
+internal metric `janusly_go_work_plane_active` is `1` only for an active
+owner. The in-process MCP server always owns workers and therefore refuses to
+start while the gate is passive. Do not enable two runtimes' work planes
+against the same database; follow [`RUNBOOK-CUTOVER.md`](RUNBOOK-CUTOVER.md).
+
 Health endpoints:
 
 - `GET /healthz` on the public port: process liveness.
@@ -96,6 +115,7 @@ After=network-online.target postgresql.service
 ExecStart=/usr/local/bin/janusly-go
 Environment=JANUSLY_GO_DATABASE_URL=postgres://janusly:…@127.0.0.1:5432/janusly
 Environment=JANUSLY_GO_ENV=production
+Environment=JANUSLY_GO_WORK_PLANE_ENABLED=true
 Restart=on-failure
 RestartSec=2
 TimeoutStopSec=20

@@ -47,6 +47,7 @@ const api = spawn("/tmp/janusly-go-smoke-api", [], {
   env: {
     ...process.env,
     JANUSLY_GO_DATABASE_URL: DB,
+    JANUSLY_GO_WORK_PLANE_ENABLED: "true",
     JANUSLY_GO_PORT: "4600",
     JANUSLY_GO_INTERNAL_PORT: "4601",
     JANUSLY_GO_POLL_MS: "50",
