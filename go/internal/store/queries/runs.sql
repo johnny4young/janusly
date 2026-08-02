@@ -160,6 +160,13 @@ VALUES ($1, $2, $3, $4, $5, $6);
 
 -- composite cursor, oldest first.
 
+-- The /causal decision explorer: one exact decision.made event,
+-- pinned to run + node so a foreign event id cannot leak.
+-- name: GetDecisionEvent :one
+SELECT id, run_id, node_id, type, payload, created_at
+FROM run_events
+WHERE id = $1 AND run_id = $2 AND node_id = $3 AND type = 'decision.made';
+
 -- name: ListRunEventsAfter :many
 SELECT id, run_id, node_id, type, payload, created_at
 FROM run_events

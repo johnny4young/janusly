@@ -427,6 +427,47 @@ func (q *Queries) GetAutoHealingRun(ctx context.Context, arg GetAutoHealingRunPa
 	return i, err
 }
 
+const getDecisionEvent = `-- name: GetDecisionEvent :one
+
+
+SELECT id, run_id, node_id, type, payload, created_at
+FROM run_events
+WHERE id = $1 AND run_id = $2 AND node_id = $3 AND type = 'decision.made'
+`
+
+type GetDecisionEventParams struct {
+	ID     string
+	RunID  string
+	NodeID pgtype.Text
+}
+
+type GetDecisionEventRow struct {
+	ID        string
+	RunID     string
+	NodeID    pgtype.Text
+	Type      string
+	Payload   json.RawMessage
+	CreatedAt *time.Time
+}
+
+// Ascending page for the SSE catch-up: everything strictly after the
+// composite cursor, oldest first.
+// The /causal decision explorer: one exact decision.made event,
+// pinned to run + node so a foreign event id cannot leak.
+func (q *Queries) GetDecisionEvent(ctx context.Context, arg GetDecisionEventParams) (GetDecisionEventRow, error) {
+	row := q.db.QueryRow(ctx, getDecisionEvent, arg.ID, arg.RunID, arg.NodeID)
+	var i GetDecisionEventRow
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.NodeID,
+		&i.Type,
+		&i.Payload,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getExternalRuntimeConnection = `-- name: GetExternalRuntimeConnection :one
 SELECT id, org_id, name, runtime_key, signing_credential_name, enabled, created_by, created_at, updated_at FROM external_runtime_connections
 WHERE org_id = $1 AND id = $2
@@ -1285,8 +1326,6 @@ func (q *Queries) ListRunEvents(ctx context.Context, arg ListRunEventsParams) ([
 }
 
 const listRunEventsAfter = `-- name: ListRunEventsAfter :many
-
-
 SELECT id, run_id, node_id, type, payload, created_at
 FROM run_events
 WHERE run_id = $1
@@ -1311,8 +1350,6 @@ type ListRunEventsAfterRow struct {
 	CreatedAt *time.Time
 }
 
-// Ascending page for the SSE catch-up: everything strictly after the
-// composite cursor, oldest first.
 func (q *Queries) ListRunEventsAfter(ctx context.Context, arg ListRunEventsAfterParams) ([]ListRunEventsAfterRow, error) {
 	rows, err := q.db.Query(ctx, listRunEventsAfter,
 		arg.RunID,

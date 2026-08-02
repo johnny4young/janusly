@@ -1998,3 +1998,15 @@ de plugins. Dos hallazgos: `member.joined` es una acción real del reference
 que el port del catálogo omitió (pin movido 147→148 deliberadamente), y la
 DB dev compartida acumula memberships de corridas previas — el test de
 proyección necesita identidad única o el LIMIT 50 lo trunca.
+
+## T-520 — Explorador de decisiones causal (2026-08-01)
+
+Lógica pura, cero I/O, cero LLM: la fórmula del reference calculada a mano en
+el test (0.22 para el candidato barato-rápido con los pesos 40/40/20), las
+tres estrategias de sort, los deltas contra el ELEGIDO — no contra el mejor —
+y los strings de explicación literales. El detalle fiel que vale la pena
+notar: un run ajeno responde 403 `runs_forbidden`, no 404 — así lo hace el
+reference en esta ruta y copiar la anomalía es paridad. El pilot no tiene
+emisor de `decision.made` (el router engine quedó fuera del alcance del
+pilot), pero la superficie de lectura no depende de él: el evento puede
+llegar por shadow ingestion o un port futuro, y el test lo siembra directo.
