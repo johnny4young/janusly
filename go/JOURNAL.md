@@ -2107,3 +2107,16 @@ del ingest flaky truncado y legible, el redrive devolvió `redriven: true`
 contra un dead letter real, y el resync de schedules resultó ser el
 rollback-a-la-versión-actual (el engine re-sincroniza en cada save) — con el
 aprendizaje de que esa ruta pide `sourceVersionId`, no `version`.
+
+## T-531 — Caos de Postgres ×3 (2026-08-01)
+
+El gemelo del failover con la base como víctima, y con su propio container
+de Postgres porque el compartido hospeda el soak — matar la base del soak
+para probar caos habría contaminado el veredicto de T-510. Los tres
+veredictos por ronda salieron limpios las tres veces: el proceso sobrevive
+la caída respondiendo 500s honestos (jamás un hang), los pools de pgx
+reconectan solos al volver la base (cero reinicios), y los 33 runs pre-caída
+llegaron todos a terminal — los tres cuya transacción de completion murió
+con la base los cosechó el reaper a failed+DLQ, que es exactamente la
+postura "recuperado ruidosamente, jamás perdido" del failover. Cero dobles
+ejecuciones en las tres rondas.

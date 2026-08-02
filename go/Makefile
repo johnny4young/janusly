@@ -2,7 +2,7 @@ SHELL := /bin/bash
 DB_URL ?= postgres://janusly:janusly-go-local@127.0.0.1:4632/janusly_go
 PG_CONTAINER := janusly-go-pilot-postgres-1
 
-.PHONY: db-up db-down migrate schema-dump generate lint test run build parity ci test-pg15 bench fuzz contract web-embed verify seed
+.PHONY: db-up db-down migrate schema-dump generate lint test run build parity ci test-pg15 bench fuzz contract web-embed verify seed chaos
 
 db-up:
 	docker compose -f docker-compose.yml up -d --wait
@@ -128,3 +128,8 @@ verify:
 
 seed:
 	go run ./cmd/seed
+
+# T-531 Postgres chaos: the failover twin with the DATABASE as the
+# victim. Runs its OWN Postgres container (never the shared pilot DB).
+chaos:
+	node conformance/run-chaos.mjs
