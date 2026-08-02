@@ -75,7 +75,10 @@ func parseStored(def *Definition, raw json.RawMessage) (any, bool) {
 		return v, true
 	default:
 		v, ok := decoded.(string)
-		return v, ok
+		if !ok || !inAllowedValues(def, v) {
+			return nil, false
+		}
+		return v, true
 	}
 }
 
@@ -102,8 +105,27 @@ func parseEnv(def *Definition, raw string) (any, bool) {
 		if raw == "" && !def.AllowEmpty {
 			return nil, false
 		}
+		if !inAllowedValues(def, raw) {
+			return nil, false
+		}
 		return raw, true
 	}
+}
+
+// inAllowedValues enforces the closed enum on BOTH layers: a stored or
+// env value outside AllowedValues falls through instead of half-applying
+// (defense in depth over the write-path validation — rows can predate an
+// enum tightening).
+func inAllowedValues(def *Definition, v string) bool {
+	if len(def.AllowedValues) == 0 {
+		return true
+	}
+	for _, allowed := range def.AllowedValues {
+		if allowed == v {
+			return true
+		}
+	}
+	return false
 }
 
 func inRange(def *Definition, v float64) bool {

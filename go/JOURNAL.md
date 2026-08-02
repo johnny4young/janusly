@@ -2120,3 +2120,17 @@ llegaron todos a terminal — los tres cuya transacción de completion murió
 con la base los cosechó el reaper a failed+DLQ, que es exactamente la
 postura "recuperado ruidosamente, jamás perdido" del failover. Cero dobles
 ejecuciones en las tres rondas.
+
+## T-532 — Piso de cobertura + los seis paquetes desnudos (2026-08-01)
+
+El premio de la iteración fue que el primer test nuevo cazó un gap real: la
+resolución de org-config no validaba `AllowedValues` en ninguna capa — una
+fila fuera del enum (escrita antes de un apriete del catálogo, o sembrada
+directo) se aplicaba en vez de caer al default. Endurecido en ambas capas.
+El resto fue disciplina: seis paquetes con tests que fallan ante mutación
+obvia, cada uno probando SU contrato real (la gramática de prompts resultó
+ser `{{var.x}}`, no `{{x}}` — el test se escribió contra el código, no
+contra la suposición). Los pisos quedaron pineados en los valores actuales
+con la regla de solo-subir, y la mutación se demostró en vivo: piso a 99 →
+exit 1 señalando al paquete. migrate pinnea 0 con honestidad — su unit
+guarda el contrato del embed y su runtime corre en cada boot de integración.

@@ -64,6 +64,8 @@ ci:
 	@echo "== generate (sqlc drift check) =="
 	$(MAKE) generate
 	@git diff --quiet -- internal/store || (echo "sqlc output drifted: run make generate and commit" && exit 1)
+	@echo "== coverage floors (T-532) =="
+	@bash scripts/coverage-floor.sh
 	@echo "== contract (drift check) =="
 	$(MAKE) contract
 	@git diff --quiet -- contract/ || (echo "openapi contract drifted: run make contract and commit" && exit 1)
