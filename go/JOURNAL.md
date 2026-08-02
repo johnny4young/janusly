@@ -1952,3 +1952,20 @@ default de org → nada, sumando el gasto del mes por `metadata.workflowId`
 `ai` ahora gatea con él — el test siembra gasto que revienta el límite del
 workflow con la org sin límite y prueba que muerde a nivel workflow,
 `resolvedScope=workflow`, y que relajar el override reabre el gate.
+
+## T-517 — Replay Lab: sandbox de run completo + fork dirigido (2026-08-01)
+
+El precedente de validatefix (inserción directa con clases de nodo + NotifyWake)
+hizo el adapter casi mecánico: el lab de run completo siembra roots queued y
+el resto pending, y el fork clasifica cada nodo del DAG en cuatro clases —
+predecesor clonado como succeeded con el state del run fuente, nodo fork
+queued (con seed `{input: override}` opcional), downstream pending, y todo lo
+demás skipped con razón explícita para que el sandbox jamás ejecute ramas
+ajenas. Los dos escriben `replayMode=validation` (el gate dry-run existente
+salta los write-sides — el test lo prueba con un contador tripwire que queda
+congelado), linaje trace-only y traceId NULL como el reference. La escalera
+de códigos de error se copió literal, incluido el 404 idéntico para ids
+ajenos (sin enumeration leak) y el cap de 64 KiB del override. Incidencia de
+la iteración: el Postgres de dev amaneció muerto (exit 255, secuela de la
+presión de disco de la tarde) — reiniciado en caliente, el soak sobrevivió
+con un gap de ~5 minutos que quedará visible en su serie.
