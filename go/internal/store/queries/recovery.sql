@@ -149,6 +149,17 @@ ON CONFLICT (org_id) DO UPDATE SET
 -- name: GetRecoveryImpactRollup :one
 SELECT * FROM recovery_impact_rollups WHERE org_id = $1;
 
+-- Personal momentum (T-518 /recovery/my-wins): terminally successful DLQ
+-- recoveries attributed to ONE operator, production runs only (the run
+-- join drops sandbox lineage exactly like the reference projection).
+-- name: CountOperatorRecoveries :one
+SELECT count(*)::int
+FROM recovery_impact_events e
+JOIN runs r ON r.id = e.run_id AND r.org_id = e.org_id
+WHERE e.org_id = $1 AND e.user_id = $2
+  AND e.recovered_at >= sqlc.arg(since)::timestamptz
+  AND r.replay_mode IS NULL;
+
 -- name: InsertRecoveryItem :execrows
 INSERT INTO recovery_items (id, org_id, dead_letter_id, workflow_id, severity, status, sla_target_at, error_signature, created_by)
 VALUES ($1, $2, $3, $4, $5, 'open', $6, $7, $8)

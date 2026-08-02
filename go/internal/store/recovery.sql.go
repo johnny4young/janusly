@@ -116,6 +116,31 @@ func (q *Queries) CountDeadLettersByStatus(ctx context.Context, orgID string) ([
 	return items, nil
 }
 
+const countOperatorRecoveries = `-- name: CountOperatorRecoveries :one
+SELECT count(*)::int
+FROM recovery_impact_events e
+JOIN runs r ON r.id = e.run_id AND r.org_id = e.org_id
+WHERE e.org_id = $1 AND e.user_id = $2
+  AND e.recovered_at >= $3::timestamptz
+  AND r.replay_mode IS NULL
+`
+
+type CountOperatorRecoveriesParams struct {
+	OrgID  string
+	UserID pgtype.Text
+	Since  time.Time
+}
+
+// Personal momentum (T-518 /recovery/my-wins): terminally successful DLQ
+// recoveries attributed to ONE operator, production runs only (the run
+// join drops sandbox lineage exactly like the reference projection).
+func (q *Queries) CountOperatorRecoveries(ctx context.Context, arg CountOperatorRecoveriesParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countOperatorRecoveries, arg.OrgID, arg.UserID, arg.Since)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const findOpenRecoveryItemForDebounce = `-- name: FindOpenRecoveryItemForDebounce :one
 SELECT id, dead_letter_id FROM recovery_items
 WHERE org_id = $1 AND workflow_id = $2 AND error_signature = $3

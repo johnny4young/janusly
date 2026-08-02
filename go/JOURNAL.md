@@ -1969,3 +1969,16 @@ ajenos (sin enumeration leak) y el cap de 64 KiB del override. Incidencia de
 la iteración: el Postgres de dev amaneció muerto (exit 255, secuela de la
 presión de disco de la tarde) — reiniciado en caliente, el soak sobrevivió
 con un gap de ~5 minutos que quedará visible en su serie.
+
+## T-518 — Recovery V2 reads (2026-08-01)
+
+Censo primero, otra vez con premio: las queries de casos y del rollup ya
+existían de la ola 5 — el ticket real era montar cuatro rutas de proyección
+y UNA query nueva (`CountOperatorRecoveries`, con el join a runs que
+descarta linaje sandbox, exactamente como la proyección del reference). Los
+detalles con dientes: el listado excluye por default los cuatro estados
+terminales, `/recovery/ledger` lee el rollup O(1) y una fila ausente es el
+ledger cero (nunca un error), y `/recovery/my-wins` toma la identidad
+exclusivamente del auth context — el caller no puede preguntar por otro
+operador. El test siembra un evento atribuido al caller, otro a un tercero
+y otro con linaje sandbox, y prueba que solo cuenta el primero.
