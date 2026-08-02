@@ -2096,3 +2096,14 @@ determinista usa un dominio .invalid: firma repetible, cero superficie SSRF,
 y las dos corridas fallidas forman el cluster DLQ que auto-crea los dos
 incidentes. La idempotencia se probó corriendo dos veces contra el mismo
 API: segunda pasada todo skip, cero errores.
+
+## T-530 — janusly-admin (2026-08-01)
+
+El principio del CLI es el mismo del seed: jamás SQL directo — cada
+subcomando es un curl del runbook con mejor ergonomía, así que el CLI puede
+exactamente lo que la API autoriza con ese token y nada más. La aceptación
+corrió los cuatro grupos contra la org demo: el inspect mostró el ENOTFOUND
+del ingest flaky truncado y legible, el redrive devolvió `redriven: true`
+contra un dead letter real, y el resync de schedules resultó ser el
+rollback-a-la-versión-actual (el engine re-sincroniza en cada save) — con el
+aprendizaje de que esa ruta pide `sourceVersionId`, no `version`.
