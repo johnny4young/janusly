@@ -6,8 +6,8 @@
 // `{{name}}` placeholders substitute BEFORE parsing; unknown ones stay
 // visible on purpose (operators see the typo, not an empty cell). The
 // artifact lands in the object store under the caller-assembled per-org
-// key; the envelope NEVER throws. The reference's HTML dialect is a
-// documented follow-up (markdown is its default).
+// key; the envelope NEVER throws. The HTML dialect (T-521) lives in
+// pdfhtml.go; markdown stays the default format.
 package tools
 
 import (
@@ -77,9 +77,9 @@ func executePdfGenerate(ctx context.Context, input map[string]any, deps *Integra
 	if template == "" || len(template) > pdfTemplateMax {
 		return map[string]any{"ok": false, "provider": "noop", "error": "pdf.generate requires template (≤200000 chars)"}
 	}
-	if format != "" && format != "markdown" {
+	if format != "" && format != "markdown" && format != "html" {
 		return map[string]any{"ok": false, "provider": "noop",
-			"error": "pdf.generate format \"" + format + "\" is not supported by this backend yet (markdown only)"}
+			"error": "pdf.generate format \"" + format + "\" is not supported (markdown or html)"}
 	}
 	variables := map[string]string{}
 	if rawVariables, ok := input["variables"].(map[string]any); ok {
@@ -121,7 +121,13 @@ func executePdfGenerate(ctx context.Context, input map[string]any, deps *Integra
 		}
 	}
 
-	document := RenderMarkdownPDF(SubstituteVariables(template, variables))
+	substituted := SubstituteVariables(template, variables)
+	var document []byte
+	if format == "html" {
+		document = RenderHTMLPDF(substituted)
+	} else {
+		document = RenderMarkdownPDF(substituted)
+	}
 	key := "pdf/" + filename
 	if deps != nil && deps.PdfKey != nil {
 		key = deps.PdfKey(filename)

@@ -56,12 +56,12 @@ func TestPdfGenerateEnvelope(t *testing.T) {
 	if result["ok"] != false || !strings.Contains(result["error"].(string), "Object store not configured") {
 		t.Fatalf("noop store: %+v", result)
 	}
-	// html dialect refused honestly.
+	// Unknown dialects refused honestly (html is supported since T-521).
 	result = ExecuteIntegrationTool(ctx, "pdf.generate", map[string]any{
-		"template": "<h1>Hi</h1>", "format": "html",
+		"template": "x", "format": "docx",
 	}, deps)
 	if result["ok"] != false || !strings.Contains(result["error"].(string), "not supported") {
-		t.Fatalf("html refuse: %+v", result)
+		t.Fatalf("unknown format refuse: %+v", result)
 	}
 	// Local provider round-trip with the tenant key.
 	root := t.TempDir()

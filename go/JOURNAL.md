@@ -2010,3 +2010,21 @@ reference en esta ruta y copiar la anomalía es paridad. El pilot no tiene
 emisor de `decision.made` (el router engine quedó fuera del alcance del
 pilot), pero la superficie de lectura no depende de él: el evento puede
 llegar por shadow ingestion o un port futuro, y el test lo siembra directo.
+
+## T-521 — S3 SigV4 real + dialect HTML del PDF (2026-08-01)
+
+El driver S3 es SigV4 a mano — cadena HMAC, canonicalización, PUT firmado
+por headers y presigned GET por query — con la decisión de diseño copiada
+del reference: el bypass del chokepoint SSRF es deliberado porque el
+endpoint es configuración del operador, no input del autor del workflow. El
+test más valioso es la fake S3 que NO confía en el cliente: reconstruye el
+canonical request desde el http.Request crudo y verifica la firma
+server-side, igual que MinIO — con el disco al 99% no tenía sentido bajar la
+imagen de MinIO para probar la misma matemática (desviación anotada). El
+dialect HTML mapea la whitelist exacta del reference a los mismos bloques
+del writer propio, con una mejora deliberada sobre el reference: el deny-set
+deja un marcador visible `[removed: <tag>]` en el documento — la aceptación
+pedía degradación visible y el silencio del reference esconde la resta. El
+test de sanitización planta un script con "stolen secrets", un img de
+tracking y un href javascript:, y prueba que ninguno sobrevive pero el
+contenido seguro alrededor sí.

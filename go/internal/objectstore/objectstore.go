@@ -15,7 +15,6 @@
 package objectstore
 
 import (
-	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -59,7 +58,9 @@ func sanitizeKey(key string) string {
 
 // Put stores one object. NEVER panics or errors out-of-band.
 func Put(providerOverride, key string, body []byte, contentType string) PutResult {
-	_ = contentType
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
 	safeKey := sanitizeKey(key)
 	if safeKey == "" || len(body) == 0 {
 		return PutResult{Ok: false, Provider: "noop", Error: "object store key or body invalid"}
@@ -86,10 +87,9 @@ func Put(providerOverride, key string, body []byte, contentType string) PutResul
 		fileURL := url.URL{Scheme: "file", Path: filepath.ToSlash(absDestination)}
 		return PutResult{Ok: true, Provider: "local", URL: fileURL.String(), Key: safeKey}
 	case "s3":
-		// The seam: selection + envelope are wired; the SigV4 driver is
-		// the documented follow-up and plugs here without caller changes.
-		return PutResult{Ok: false, Provider: "s3",
-			Error: fmt.Sprintf("S3 driver pending for bucket %q — use the local provider or wire the SigV4 driver", os.Getenv("JANUSLY_OBJECT_STORE_BUCKET"))}
+		// The real SigV4 driver (T-521): hand-rolled signing, path-style
+		// against custom endpoints (MinIO/R2), presigned GET or CDN URLs.
+		return s3Put(safeKey, body, contentType)
 	default:
 		return PutResult{Ok: false, Provider: "noop",
 			Error: "Object store not configured. Set JANUSLY_OBJECT_STORE_PROVIDER=local|s3 and its settings."}
