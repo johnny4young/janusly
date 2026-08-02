@@ -136,8 +136,14 @@ WHERE org_id = $1 AND scim_directory_id = $2 AND provider_group_id = $3;
 -- user-stable join key — not (org_id, user_id); see the reference's
 -- upsertMembershipByEmail. The update preserves invited_by (and user_id,
 -- which the SSO backfill may have rewritten) unless a new inviter is given.
+-- The lookup matches the email COLUMN or an email-shaped user_id: the
+-- legacy pre-invite rows seed userId with the email and leave the email
+-- column NULL (the auth resolver's backfill acknowledges them) — without
+-- this arm the collision guard is blind to them and provisioning 500s
+-- on the (org_id, user_id) unique index forever (T-534 property find).
 -- name: FindScimMemberByEmail :one
-SELECT id, user_id, role, invited_by FROM org_members WHERE org_id = $1 AND email = $2;
+SELECT id, user_id, role, invited_by FROM org_members
+WHERE org_id = $1 AND (email = $2 OR lower(user_id) = $2);
 
 -- name: UpdateScimMembershipByEmail :execrows
 UPDATE org_members SET email = sqlc.arg(email), role = sqlc.arg(role),
@@ -148,5 +154,9 @@ WHERE id = sqlc.arg(id) AND org_id = sqlc.arg(org_id);
 INSERT INTO org_members (id, org_id, user_id, email, role, invited_by)
 VALUES (sqlc.arg(id), sqlc.arg(org_id), sqlc.arg(email), sqlc.arg(email), sqlc.arg(role), sqlc.narg(invited_by));
 
+-- Deprovisioning only ever deletes rows SCIM itself created — a
+-- human-invited row sharing the email must survive a directory delete
+-- (T-534 property find: the unguarded delete could remove the human).
 -- name: DeleteScimMembershipByEmail :execrows
-DELETE FROM org_members WHERE org_id = $1 AND email = $2;
+DELETE FROM org_members
+WHERE org_id = $1 AND email = $2 AND invited_by = sqlc.arg(invited_by);

@@ -285,6 +285,7 @@ func (s *V1Server) scimUserUpdated(ctx context.Context, directory store.ScimDire
 		}
 		if _, err := q.DeleteScimMembershipByEmail(ctx, store.DeleteScimMembershipByEmailParams{
 			OrgID: orgID, Email: pgtype.Text{String: oldEmail, Valid: true},
+			InvitedBy: pgtype.Text{String: scimActor, Valid: true},
 		}); err != nil {
 			return scimResult{}, err
 		}
@@ -353,6 +354,7 @@ func (s *V1Server) scimUserDeleted(ctx context.Context, directory store.ScimDire
 
 	if _, err := q.DeleteScimMembershipByEmail(ctx, store.DeleteScimMembershipByEmailParams{
 		OrgID: orgID, Email: pgtype.Text{String: strings.ToLower(existing.Email), Valid: true},
+		InvitedBy: pgtype.Text{String: scimActor, Valid: true},
 	}); err != nil {
 		return scimResult{}, err
 	}

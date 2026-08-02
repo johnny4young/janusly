@@ -2148,3 +2148,22 @@ documento estructuralmente válido ante cualquier hostilidad, incluidos los
 paréntesis sin balancear que estresan el escape del stream y la inyección
 de %%EOF. 45 segundos reales por fuzzer, cuatro de cuatro sin hallazgos —
 que después del gap real de T-532 es un resultado que se agradece.
+
+## T-534 — Property tests de SCIM: dos bugs reales (2026-08-01)
+
+El ticket que más pagó de la ola. La secuencia CERO del generador ya
+encontró el primer bug: las filas humanas legacy con user_id=email y la
+columna email en NULL — exactamente el patrón que el backfill del resolver
+de auth reconoce — eran invisibles al collision guard, así que provisionar
+ese email reventaba contra el índice único de org_members con un 500 que
+WorkOS reintentaría para siempre. Buscando el segundo veredicto apareció el
+bug espejo: el delete de deprovisioning borraba por (org, email) sin
+preguntar quién creó la fila — un directory delete podía borrar a un humano.
+Ambos fixes son una línea de SQL con su comentario. En el camino, el error
+del webhook se tragaba sin log (ahora slog.Warn con la causa), y las
+invariantes se refinaron dos veces contra los hallazgos de emails
+colisionantes — la membresía es por-email, así que el invariante correcto es
+"el rol de la fila es la derivación de ALGÚN sharer activo", no "de este
+usuario". El shrinking greedy imprimió secuencias mínimas de 14-15 eventos
+para cada hallazgo, con la semilla para reproducir. 200 secuencias verdes en
+21.6 segundos.

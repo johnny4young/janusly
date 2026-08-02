@@ -64,16 +64,21 @@ func (q *Queries) DeleteScimGroupState(ctx context.Context, id string) error {
 }
 
 const deleteScimMembershipByEmail = `-- name: DeleteScimMembershipByEmail :execrows
-DELETE FROM org_members WHERE org_id = $1 AND email = $2
+DELETE FROM org_members
+WHERE org_id = $1 AND email = $2 AND invited_by = $3
 `
 
 type DeleteScimMembershipByEmailParams struct {
-	OrgID string
-	Email pgtype.Text
+	OrgID     string
+	Email     pgtype.Text
+	InvitedBy pgtype.Text
 }
 
+// Deprovisioning only ever deletes rows SCIM itself created — a
+// human-invited row sharing the email must survive a directory delete
+// (T-534 property find: the unguarded delete could remove the human).
 func (q *Queries) DeleteScimMembershipByEmail(ctx context.Context, arg DeleteScimMembershipByEmailParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteScimMembershipByEmail, arg.OrgID, arg.Email)
+	result, err := q.db.Exec(ctx, deleteScimMembershipByEmail, arg.OrgID, arg.Email, arg.InvitedBy)
 	if err != nil {
 		return 0, err
 	}
@@ -155,7 +160,8 @@ func (q *Queries) FindScimGroupRoleMappingByGroup(ctx context.Context, arg FindS
 }
 
 const findScimMemberByEmail = `-- name: FindScimMemberByEmail :one
-SELECT id, user_id, role, invited_by FROM org_members WHERE org_id = $1 AND email = $2
+SELECT id, user_id, role, invited_by FROM org_members
+WHERE org_id = $1 AND (email = $2 OR lower(user_id) = $2)
 `
 
 type FindScimMemberByEmailParams struct {
@@ -174,6 +180,11 @@ type FindScimMemberByEmailRow struct {
 // user-stable join key — not (org_id, user_id); see the reference's
 // upsertMembershipByEmail. The update preserves invited_by (and user_id,
 // which the SSO backfill may have rewritten) unless a new inviter is given.
+// The lookup matches the email COLUMN or an email-shaped user_id: the
+// legacy pre-invite rows seed userId with the email and leave the email
+// column NULL (the auth resolver's backfill acknowledges them) — without
+// this arm the collision guard is blind to them and provisioning 500s
+// on the (org_id, user_id) unique index forever (T-534 property find).
 func (q *Queries) FindScimMemberByEmail(ctx context.Context, arg FindScimMemberByEmailParams) (FindScimMemberByEmailRow, error) {
 	row := q.db.QueryRow(ctx, findScimMemberByEmail, arg.OrgID, arg.Email)
 	var i FindScimMemberByEmailRow

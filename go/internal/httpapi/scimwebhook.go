@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/johnny4young/janusly/go/internal/store"
+	"log/slog"
 )
 
 /* ------------------------------ webhook route ----------------------------- */
@@ -77,6 +78,10 @@ func (s *V1Server) scimWebhookHandler(w http.ResponseWriter, r *http.Request) {
 
 	result, err := s.handleScimEvent(ctx, directory, event)
 	if err != nil {
+		// The generic 500 is deliberate (no internals to the caller), but
+		// the CAUSE must land in the logs or a prod 500 is undiagnosable.
+		slog.Warn("scim webhook event failed", "eventId", event.ID,
+			"eventType", event.Event, "error", err)
 		writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 		return
 	}
