@@ -72,9 +72,8 @@ type Context struct {
 	// for the dev-headers admin auto-grant case (permissions layer decides).
 	MembershipRole string
 	// Email is the verified provider email (Supabase or browser session); for
-	// dev-headers it is the user id itself when email-shaped — the lab
-	// convention the membership resolver already leans on. Empty means the
-	// identity has no usable email (service tokens).
+	// dev-headers and service tokens it remains empty because those transports
+	// do not prove ownership of an email address.
 	Email string
 }
 
@@ -239,14 +238,10 @@ func (rv *Resolver) extract(ctx context.Context, r *http.Request) (*principal, e
 		orgID := strings.TrimSpace(r.Header.Get("x-org-id"))
 		userID := strings.TrimSpace(r.Header.Get("x-user-id"))
 		if orgID != "" && userID != "" {
-			email := ""
-			if strings.Contains(userID, "@") {
-				email = strings.ToLower(userID)
-			}
 			return &principal{
 				providerName:      ModeDevHeaders,
 				providerUserID:    userID,
-				providerUserEmail: email,
+				providerUserEmail: "",
 				providerOrgHint:   orgID,
 				declaredSource:    declaredSource(r, SourceDev),
 			}, nil

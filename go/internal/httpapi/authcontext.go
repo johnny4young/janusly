@@ -4,7 +4,7 @@
 package httpapi
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
 	"net/http"
 	"sort"
@@ -35,13 +35,12 @@ func displayName(value, fallback string) string {
 	return fallback
 }
 
-func (s *V1Server) authContext(w http.ResponseWriter, r *http.Request, rc identityRequest) {
+func (s *V1Server) authContextCore(ctx context.Context, rc identityRequest) opResult {
 	q := store.New(s.pool)
 	identity := rc.identity
-	rows, err := q.ListIdentityMemberships(r.Context(), identity.UserID)
+	rows, err := q.ListIdentityMemberships(ctx, identity.UserID)
 	if err != nil {
-		writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-		return
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	truncated := len(rows) > identityMembershipLimit
 	if truncated {
@@ -50,15 +49,13 @@ func (s *V1Server) authContext(w http.ResponseWriter, r *http.Request, rc identi
 
 	organizations := make([]map[string]any, 0, len(rows)+1)
 	for _, row := range rows {
-		resolved, roleErr := auth.ResolveMemberRole(r.Context(), q, row.OrgID, identity.UserID, identity.Mode)
+		resolved, roleErr := auth.ResolveMemberRole(ctx, q, row.OrgID, identity.UserID, identity.Mode)
 		if roleErr != nil {
-			writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
-		permissions, permissionErr := auth.EffectivePermissions(r.Context(), q, row.OrgID, resolved)
+		permissions, permissionErr := auth.EffectivePermissions(ctx, q, row.OrgID, resolved)
 		if permissionErr != nil {
-			writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
 		permissionKeys := make([]string, 0, len(permissions))
 		for key := range permissions {
@@ -86,15 +83,13 @@ func (s *V1Server) authContext(w http.ResponseWriter, r *http.Request, rc identi
 			}
 		}
 		if !found {
-			resolved, roleErr := auth.ResolveMemberRole(r.Context(), q, identity.OrgHint, identity.UserID, identity.Mode)
+			resolved, roleErr := auth.ResolveMemberRole(ctx, q, identity.OrgHint, identity.UserID, identity.Mode)
 			if roleErr != nil {
-				writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-				return
+				return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 			}
-			permissions, permissionErr := auth.EffectivePermissions(r.Context(), q, identity.OrgHint, resolved)
+			permissions, permissionErr := auth.EffectivePermissions(ctx, q, identity.OrgHint, resolved)
 			if permissionErr != nil {
-				writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-				return
+				return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 			}
 			permissionKeys := make([]string, 0, len(permissions))
 			for key := range permissions {
@@ -114,24 +109,22 @@ func (s *V1Server) authContext(w http.ResponseWriter, r *http.Request, rc identi
 	}
 
 	profileName, profileEmail := any(nil), identityEmail(identity.Email)
-	profile, profileErr := q.GetUserProfile(r.Context(), identity.UserID)
+	profile, profileErr := q.GetUserProfile(ctx, identity.UserID)
 	if profileErr == nil {
 		profileName = textOrNull(profile.Name)
 		if profile.Email.Valid {
 			profileEmail = profile.Email.String
 		}
 	} else if !errors.Is(profileErr, pgx.ErrNoRows) {
-		writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-		return
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 
 	invitations := []map[string]any{}
 	invitationsTruncated := false
 	if identity.Email != "" {
-		invitationRows, invitationErr := q.ListIdentityInvitations(r.Context(), identity.Email)
+		invitationRows, invitationErr := q.ListIdentityInvitations(ctx, identity.Email)
 		if invitationErr != nil {
-			writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
-			return
+			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
 		invitationsTruncated = len(invitationRows) > identityInvitationLimit
 		if invitationsTruncated {
@@ -176,6 +169,9 @@ func (s *V1Server) authContext(w http.ResponseWriter, r *http.Request, rc identi
 		"needsOrganization":     usableCount == 0,
 		"truncated":             truncated, "invitationsTruncated": invitationsTruncated,
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(payload)
+	return opOK(payload)
+}
+
+func (s *V1Server) authContext(w http.ResponseWriter, r *http.Request, rc identityRequest) {
+	writeLegacy(w, s.authContextCore(r.Context(), rc))
 }

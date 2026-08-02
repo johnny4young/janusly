@@ -105,7 +105,7 @@ exact candidate commit:
 | SEC-006 | P1 | Credentialed CORS honored `API_ALLOWED_ORIGINS=*` in production, which is unsafe once browser-session reads and mutations are enabled. | fixed in architecture review |
 | AUTH-001 | P0 | Go now resolves durable `janusly-session` cookies and serves their lifecycle routes, but still lacks the WorkOS SSO issuance callback that creates those sessions. | open |
 | AUTH-002 | P0 | Go labels bootstrap surfaces identity-scoped but dispatches them through tenant membership resolution, so a legitimate zero-membership identity cannot bootstrap. | fixed in architecture review |
-| AUTH-003 | P0 | Go still lacks atomic first-organization creation and atomic invitation acceptance with the exact Node bootstrap response/error contract. | open |
+| AUTH-003 | P0 | Go still lacks atomic first-organization creation and atomic invitation acceptance with the exact Node bootstrap response/error contract. | fixed in architecture review |
 
 ## Architecture review decisions
 
@@ -183,5 +183,31 @@ membership denial, session rotation, both tenant and identity CSRF paths,
 zero-membership bootstrap, and the closed route registries. The exact band
 passed `make ci` on 2026-08-02: sqlc/OpenAPI drift, coverage, build, lint,
 `govulncheck`, race-enabled integration, and semantic parity F01-F25 are green.
-WorkOS session issuance and atomic first-organization/invitation transactions
-remain open as `AUTH-001` and `AUTH-003`.
+WorkOS session issuance remains open as `AUTH-001`.
+
+### Atomic identity bootstrap
+
+The fourth authentication-parity band closes `AUTH-003`. `POST /organizations`
+now accepts only personal Supabase/development identities and commits the
+global profile, free-plan organization, admin founder grant, and `org.created`
+receipt in one transaction. Optional provider claims never erase an existing
+profile, organization/profile names use the Node UTF-16 length contract, and a
+successful response is the full bounded bootstrap context with HTTP 201.
+
+Invitation acceptance now locks the matching pending id plus verified email,
+then commits the accepted state, normalized profile, conflict-safe membership
+grant, and `member.joined` receipt together. Missing, mismatched, already-used,
+and concurrent-loser invitations share Node's non-disclosing 404 envelope; the
+single winner receives the full bootstrap context. The transaction audit
+primitive binds the provider-verified actor while taking the organization only
+from state proved inside the transaction, so an organization hint cannot forge
+the forensic tenant. Development headers no longer infer a verified email from
+an email-shaped user id.
+
+Tests prove rollback on a mid-bootstrap organization conflict, preservation of
+an existing optional profile, exact persisted organization/member/profile/audit
+rows, and one winner plus seven identical unavailable results under concurrent
+invitation acceptance. The exact implementation passed `make ci` on
+2026-08-02: sqlc/OpenAPI drift, coverage floors, build, lint, `govulncheck`, the
+race-enabled PostgreSQL integration suite, and semantic parity F01-F25 are
+green.

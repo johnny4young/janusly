@@ -156,6 +156,11 @@ func TestDevHeadersGate(t *testing.T) {
 		p.providerName != ModeDevHeaders {
 		t.Fatalf("dev auto-allow: %+v", p)
 	}
+	if p := principalFor(t, dev, map[string]string{
+		"x-org-id": "o", "x-user-id": "looks-like@example.com",
+	}); p == nil || p.providerUserEmail != "" {
+		t.Fatalf("dev headers must not infer a verified email: %+v", p)
+	}
 
 	// Production without the explicit override: no dev headers.
 	prod := makeResolver(Config{Production: true, AllowDevHeaders: false, SupabaseURL: "https://sb", SupabaseKey: "k"})

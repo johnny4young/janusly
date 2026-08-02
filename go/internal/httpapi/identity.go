@@ -4,10 +4,15 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
+	"unicode/utf16"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/go/internal/audit"
@@ -15,14 +20,123 @@ import (
 	"github.com/johnny4young/janusly/go/internal/store"
 )
 
+const identityMaxJSONBodyBytes int64 = 1_048_576
+
+func decodeIdentityRecord(r *http.Request) (map[string]any, *opResult) {
+	raw, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, identityMaxJSONBodyBytes))
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			rejection := opError(http.StatusRequestEntityTooLarge, "server_request_failed",
+				fmt.Sprintf("Request body too large. Limit is %d bytes", identityMaxJSONBodyBytes), nil)
+			return nil, &rejection
+		}
+		rejection := opError(http.StatusBadRequest, "server_request_failed", "Invalid JSON body", nil)
+		return nil, &rejection
+	}
+	if len(raw) == 0 {
+		return map[string]any{}, nil
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		rejection := opError(http.StatusBadRequest, "server_request_failed", "Invalid JSON body", nil)
+		return nil, &rejection
+	}
+	record, _ := value.(map[string]any)
+	if record == nil {
+		record = map[string]any{}
+	}
+	return record, nil
+}
+
 // normalizedIdentityName mirrors the reference: trim, collapse interior
 // whitespace, 2..max chars — or empty when out of contract.
 func normalizedIdentityName(value string, maxLength int) string {
 	normalized := strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
-	if len(normalized) < 2 || len(normalized) > maxLength {
+	// JavaScript String.length counts UTF-16 code units. Match the Node oracle
+	// for non-ASCII names instead of accidentally enforcing a UTF-8 byte limit.
+	length := len(utf16.Encode([]rune(normalized)))
+	if length < 2 || length > maxLength {
 		return ""
 	}
 	return normalized
+}
+
+func selectedIdentityContext(s *V1Server, r *http.Request, rc identityRequest, orgID string, status int) opResult {
+	selected := *rc.identity
+	selected.OrgHint = orgID
+	rc.identity = &selected
+	result := s.authContextCore(r.Context(), rc)
+	if result.data != nil {
+		result.status = status
+	}
+	return result
+}
+
+func identityText(value string) pgtype.Text {
+	return pgtype.Text{String: value, Valid: value != ""}
+}
+
+// organizationCreateCore commits the global profile, organization, founder
+// grant, and forensic event together. Browser SSO sessions deliberately cannot
+// create another tenant; the Node bootstrap contract requires a personal
+// Supabase/dev identity for this operation.
+func (s *V1Server) organizationCreateCore(r *http.Request, rc identityRequest) opResult {
+	identity := rc.identity
+	if identity.Mode == auth.ModeServiceToken || identity.Mode == auth.ModeJanuslySession {
+		return opError(http.StatusForbidden, "identity_human_required", "Use a personal account to create an organization", nil)
+	}
+	body, rejection := decodeIdentityRecord(r)
+	if rejection != nil {
+		return *rejection
+	}
+	rawName, _ := body["name"].(string)
+	organizationName := normalizedIdentityName(rawName, 80)
+	if organizationName == "" {
+		return opError(http.StatusBadRequest, "organization_name_invalid", "Organization name must contain 2 to 80 characters", nil)
+	}
+
+	profileName := ""
+	if raw, present := body["profileName"]; present && raw != nil && raw != "" {
+		value, ok := raw.(string)
+		if !ok {
+			return opError(http.StatusBadRequest, "profile_name_invalid", "Profile name must contain 2 to 100 characters", nil)
+		}
+		profileName = normalizedIdentityName(value, 100)
+		if profileName == "" {
+			return opError(http.StatusBadRequest, "profile_name_invalid", "Profile name must contain 2 to 100 characters", nil)
+		}
+	}
+
+	orgID := "org_" + s.newID()
+	memberID := s.newID()
+	ctx := r.Context()
+	err := audit.WithIdentityAuditTx(ctx, s.pool, identity, func(tx pgx.Tx, txAudit audit.IdentityTxAudit) error {
+		q := store.New(tx)
+		if _, err := q.UpsertIdentityProfile(ctx, store.UpsertIdentityProfileParams{
+			ID: identity.UserID, Name: identityText(profileName), Email: identityText(identity.Email),
+		}); err != nil {
+			return err
+		}
+		if err := q.InsertIdentityOrganization(ctx, store.InsertIdentityOrganizationParams{
+			ID: orgID, Name: organizationName,
+		}); err != nil {
+			return err
+		}
+		if err := q.InsertFounderMembership(ctx, store.InsertFounderMembershipParams{
+			ID: memberID, OrgID: orgID, UserID: identity.UserID, Email: identityText(identity.Email),
+		}); err != nil {
+			return err
+		}
+		return txAudit(orgID, "org.created", audit.Options{
+			TargetType: "organization", TargetID: orgID,
+			Metadata: map[string]any{"name": organizationName, "plan": "free", "founderRole": "admin"},
+		})
+	})
+	if err != nil {
+		return opError(http.StatusInternalServerError, "organization_create_failed", "Organization could not be created", nil)
+	}
+	return selectedIdentityContext(s, r, rc, orgID, http.StatusCreated)
 }
 
 // organizationsCore lists the caller's REAL memberships (org name + plan
@@ -70,56 +184,74 @@ func (s *V1Server) usersMeCore(r *http.Request, rc v1Request) opResult {
 	})
 }
 
-// invitationAcceptCore: verified-email identities only; the CAS flips a
-// still-pending row exactly once and the membership lands with it.
+var errInvitationUnavailable = errors.New("invitation unavailable")
+
+// invitationAcceptCore locks a still-pending invitation and commits its state,
+// verified profile, membership grant, and audit row together. Every unavailable
+// state uses the same 404 so invitation ids cannot disclose their target email.
 func (s *V1Server) invitationAcceptCore(r *http.Request, rc identityRequest) opResult {
 	identity := rc.identity
 	if identity.Email == "" ||
 		(identity.Mode != auth.ModeSupabase && identity.Mode != auth.ModeJanuslySession) {
 		return opError(http.StatusForbidden, "identity_email_required", "A verified account email is required", nil)
 	}
-	var body struct {
-		InvitationID string `json:"invitationId"`
+	body, rejection := decodeIdentityRecord(r)
+	if rejection != nil {
+		return *rejection
 	}
-	if err := decodeBody(r, &body); err != nil || strings.TrimSpace(body.InvitationID) == "" {
+	invitationID, _ := body["invitationId"].(string)
+	if strings.TrimSpace(invitationID) == "" {
 		return opError(http.StatusBadRequest, "invitation_id_required", "Invitation id is required", nil)
 	}
-	invitationID := strings.TrimSpace(body.InvitationID)
+	invitationID = strings.TrimSpace(invitationID)
 	ctx := r.Context()
-	q := store.New(s.pool)
-	invitation, err := q.GetInvitationByID(ctx, invitationID)
-	if err != nil {
-		return opError(http.StatusNotFound, "invitation_not_found", "Invitation not found", nil)
-	}
-	if !strings.EqualFold(invitation.Email, identity.Email) {
-		// Identical envelope to not-found: an invitation id must not leak
-		// whose email it targets.
-		return opError(http.StatusNotFound, "invitation_not_found", "Invitation not found", nil)
-	}
-	accepted, err := q.AcceptInvitation(ctx, invitationID)
-	if err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
-	}
-	if accepted == 0 {
-		return opError(http.StatusConflict, "invitation_not_pending", "Invitation is no longer pending", nil)
-	}
-	if _, err := q.InsertOrgMember(ctx, store.InsertOrgMemberParams{
-		ID: uuid.NewString(), OrgID: invitation.OrgID, UserID: rc.userID, Role: invitation.Role,
-	}); err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
-	}
-	auditContext := &auth.Context{
-		OrgID: invitation.OrgID, UserID: identity.UserID,
-		Mode: identity.Mode, Source: identity.Source,
-		ServiceTokenSuffix: identity.ServiceTokenSuffix, BrowserSessionID: identity.BrowserSessionID,
-	}
-	audit.Write(ctx, s.pool, auditContext, "member.joined", audit.Options{
-		TargetType: "invitation", TargetID: invitationID,
-		Metadata: map[string]any{"organizationId": invitation.OrgID, "role": invitation.Role},
+	acceptedOrgID := ""
+	err := audit.WithIdentityAuditTx(ctx, s.pool, identity, func(tx pgx.Tx, txAudit audit.IdentityTxAudit) error {
+		q := store.New(tx)
+		invitation, err := q.LockPendingIdentityInvitation(ctx, store.LockPendingIdentityInvitationParams{
+			ID: invitationID, Email: strings.ToLower(strings.TrimSpace(identity.Email)),
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errInvitationUnavailable
+		}
+		if err != nil {
+			return err
+		}
+		updated, err := q.MarkIdentityInvitationAccepted(ctx, invitation.ID)
+		if err != nil {
+			return err
+		}
+		if updated != 1 {
+			return errInvitationUnavailable
+		}
+		if _, err := q.UpsertIdentityProfile(ctx, store.UpsertIdentityProfileParams{
+			ID: identity.UserID, Name: pgtype.Text{}, Email: identityText(strings.ToLower(strings.TrimSpace(identity.Email))),
+		}); err != nil {
+			return err
+		}
+		if err := q.UpsertInvitedIdentityMembership(ctx, store.UpsertInvitedIdentityMembershipParams{
+			ID: s.newID(), OrgID: invitation.OrgID, UserID: identity.UserID,
+			Email: identityText(strings.ToLower(strings.TrimSpace(identity.Email))), Role: invitation.Role,
+			InvitedBy: invitation.InvitedBy,
+		}); err != nil {
+			return err
+		}
+		if err := txAudit(invitation.OrgID, "member.joined", audit.Options{
+			TargetType: "member", TargetID: identity.UserID,
+			Metadata: map[string]any{"via": "invitation", "invitationId": invitation.ID, "role": invitation.Role},
+		}); err != nil {
+			return err
+		}
+		acceptedOrgID = invitation.OrgID
+		return nil
 	})
-	return opOK(map[string]any{
-		"accepted": true, "organizationId": invitation.OrgID, "role": invitation.Role,
-	})
+	if errors.Is(err, errInvitationUnavailable) {
+		return opError(http.StatusNotFound, "identity_invitation_not_found", "Invitation is no longer available", nil)
+	}
+	if err != nil {
+		return opError(http.StatusInternalServerError, "identity_invitation_accept_failed", "Invitation could not be accepted", nil)
+	}
+	return selectedIdentityContext(s, r, rc, acceptedOrgID, http.StatusOK)
 }
 
 // pluginInstallCore is the reference's honest stub: persist the install
@@ -157,6 +289,9 @@ func (s *V1Server) mountIdentityRoutes(mux *http.ServeMux) {
 	// profile updates remain tenant-authenticated like the reference.
 	mux.HandleFunc("GET /organizations", s.identity(func(w http.ResponseWriter, r *http.Request, rc identityRequest) {
 		writeLegacy(w, s.organizationsCore(r, rc))
+	}))
+	mux.HandleFunc("POST /organizations", s.identity(func(w http.ResponseWriter, r *http.Request, rc identityRequest) {
+		writeLegacy(w, s.organizationCreateCore(r, rc))
 	}))
 	mux.HandleFunc("POST /users/me", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeLegacy(w, s.usersMeCore(r, rc))

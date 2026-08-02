@@ -94,6 +94,51 @@ SET name = EXCLUDED.name,
     updated_at = now()
 RETURNING id, name, email;
 
+-- Bootstrap profile upserts never erase an existing name/email merely because
+-- the current provider omitted that optional claim.
+-- name: UpsertIdentityProfile :one
+INSERT INTO users (id, name, email, updated_at)
+VALUES ($1, $2, $3, now())
+ON CONFLICT (id) DO UPDATE
+SET name = coalesce(EXCLUDED.name, users.name),
+    email = coalesce(EXCLUDED.email, users.email),
+    updated_at = now()
+RETURNING id, name, email;
+
+-- name: InsertIdentityOrganization :exec
+INSERT INTO organizations (id, name, plan)
+VALUES ($1, $2, 'free');
+
+-- Founder membership is a strict insert: the organization id is new inside
+-- the same transaction, so a conflict is a real invariant violation.
+-- name: InsertFounderMembership :exec
+INSERT INTO org_members (id, org_id, user_id, email, role, invited_by)
+VALUES ($1, $2, $3, $4, 'admin', NULL);
+
+-- name: LockPendingIdentityInvitation :one
+SELECT id, org_id, email, role, invited_by
+FROM invitations
+WHERE id = $1
+  AND lower(email) = lower(sqlc.arg(email)::text)
+  AND status = 'pending'
+FOR UPDATE;
+
+-- name: MarkIdentityInvitationAccepted :execrows
+UPDATE invitations
+SET status = 'accepted', accepted_at = now()
+WHERE id = $1 AND status = 'pending';
+
+-- The verified provider id is the durable membership key. Re-acceptance of a
+-- newly issued invitation for the same org updates the existing grant exactly
+-- like the Node oracle.
+-- name: UpsertInvitedIdentityMembership :exec
+INSERT INTO org_members (id, org_id, user_id, email, role, invited_by)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (org_id, user_id) DO UPDATE
+SET email = EXCLUDED.email,
+    role = EXCLUDED.role,
+    invited_by = EXCLUDED.invited_by;
+
 -- name: InsertOrgMember :execrows
 INSERT INTO org_members (id, org_id, user_id, role)
 VALUES ($1, $2, $3, $4)

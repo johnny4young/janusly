@@ -250,6 +250,45 @@ func (q *Queries) GetUserProfile(ctx context.Context, id string) (GetUserProfile
 	return i, err
 }
 
+const insertFounderMembership = `-- name: InsertFounderMembership :exec
+INSERT INTO org_members (id, org_id, user_id, email, role, invited_by)
+VALUES ($1, $2, $3, $4, 'admin', NULL)
+`
+
+type InsertFounderMembershipParams struct {
+	ID     string
+	OrgID  string
+	UserID string
+	Email  pgtype.Text
+}
+
+// Founder membership is a strict insert: the organization id is new inside
+// the same transaction, so a conflict is a real invariant violation.
+func (q *Queries) InsertFounderMembership(ctx context.Context, arg InsertFounderMembershipParams) error {
+	_, err := q.db.Exec(ctx, insertFounderMembership,
+		arg.ID,
+		arg.OrgID,
+		arg.UserID,
+		arg.Email,
+	)
+	return err
+}
+
+const insertIdentityOrganization = `-- name: InsertIdentityOrganization :exec
+INSERT INTO organizations (id, name, plan)
+VALUES ($1, $2, 'free')
+`
+
+type InsertIdentityOrganizationParams struct {
+	ID   string
+	Name string
+}
+
+func (q *Queries) InsertIdentityOrganization(ctx context.Context, arg InsertIdentityOrganizationParams) error {
+	_, err := q.db.Exec(ctx, insertIdentityOrganization, arg.ID, arg.Name)
+	return err
+}
+
 const insertInstalledPlugin = `-- name: InsertInstalledPlugin :exec
 INSERT INTO installed_plugins (id, org_id, plugin_id, config_json, installed_by)
 VALUES ($1, $2, $3, $4, $5)
@@ -631,6 +670,55 @@ func (q *Queries) ListUserMemberships(ctx context.Context, userID string) ([]Lis
 	return items, nil
 }
 
+const lockPendingIdentityInvitation = `-- name: LockPendingIdentityInvitation :one
+SELECT id, org_id, email, role, invited_by
+FROM invitations
+WHERE id = $1
+  AND lower(email) = lower($2::text)
+  AND status = 'pending'
+FOR UPDATE
+`
+
+type LockPendingIdentityInvitationParams struct {
+	ID    string
+	Email string
+}
+
+type LockPendingIdentityInvitationRow struct {
+	ID        string
+	OrgID     string
+	Email     string
+	Role      string
+	InvitedBy pgtype.Text
+}
+
+func (q *Queries) LockPendingIdentityInvitation(ctx context.Context, arg LockPendingIdentityInvitationParams) (LockPendingIdentityInvitationRow, error) {
+	row := q.db.QueryRow(ctx, lockPendingIdentityInvitation, arg.ID, arg.Email)
+	var i LockPendingIdentityInvitationRow
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Email,
+		&i.Role,
+		&i.InvitedBy,
+	)
+	return i, err
+}
+
+const markIdentityInvitationAccepted = `-- name: MarkIdentityInvitationAccepted :execrows
+UPDATE invitations
+SET status = 'accepted', accepted_at = now()
+WHERE id = $1 AND status = 'pending'
+`
+
+func (q *Queries) MarkIdentityInvitationAccepted(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.Exec(ctx, markIdentityInvitationAccepted, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const migrateOrgMemberUserID = `-- name: MigrateOrgMemberUserID :execrows
 UPDATE org_members SET user_id = $3
 WHERE id = $1 AND org_id = $2
@@ -733,6 +821,70 @@ func (q *Queries) UpdateOrgRole(ctx context.Context, arg UpdateOrgRoleParams) (U
 		&i.GrantedPermissions,
 	)
 	return i, err
+}
+
+const upsertIdentityProfile = `-- name: UpsertIdentityProfile :one
+INSERT INTO users (id, name, email, updated_at)
+VALUES ($1, $2, $3, now())
+ON CONFLICT (id) DO UPDATE
+SET name = coalesce(EXCLUDED.name, users.name),
+    email = coalesce(EXCLUDED.email, users.email),
+    updated_at = now()
+RETURNING id, name, email
+`
+
+type UpsertIdentityProfileParams struct {
+	ID    string
+	Name  pgtype.Text
+	Email pgtype.Text
+}
+
+type UpsertIdentityProfileRow struct {
+	ID    string
+	Name  pgtype.Text
+	Email pgtype.Text
+}
+
+// Bootstrap profile upserts never erase an existing name/email merely because
+// the current provider omitted that optional claim.
+func (q *Queries) UpsertIdentityProfile(ctx context.Context, arg UpsertIdentityProfileParams) (UpsertIdentityProfileRow, error) {
+	row := q.db.QueryRow(ctx, upsertIdentityProfile, arg.ID, arg.Name, arg.Email)
+	var i UpsertIdentityProfileRow
+	err := row.Scan(&i.ID, &i.Name, &i.Email)
+	return i, err
+}
+
+const upsertInvitedIdentityMembership = `-- name: UpsertInvitedIdentityMembership :exec
+INSERT INTO org_members (id, org_id, user_id, email, role, invited_by)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (org_id, user_id) DO UPDATE
+SET email = EXCLUDED.email,
+    role = EXCLUDED.role,
+    invited_by = EXCLUDED.invited_by
+`
+
+type UpsertInvitedIdentityMembershipParams struct {
+	ID        string
+	OrgID     string
+	UserID    string
+	Email     pgtype.Text
+	Role      string
+	InvitedBy pgtype.Text
+}
+
+// The verified provider id is the durable membership key. Re-acceptance of a
+// newly issued invitation for the same org updates the existing grant exactly
+// like the Node oracle.
+func (q *Queries) UpsertInvitedIdentityMembership(ctx context.Context, arg UpsertInvitedIdentityMembershipParams) error {
+	_, err := q.db.Exec(ctx, upsertInvitedIdentityMembership,
+		arg.ID,
+		arg.OrgID,
+		arg.UserID,
+		arg.Email,
+		arg.Role,
+		arg.InvitedBy,
+	)
+	return err
 }
 
 const upsertUserProfile = `-- name: UpsertUserProfile :one

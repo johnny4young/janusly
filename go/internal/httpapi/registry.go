@@ -41,6 +41,7 @@ var authOnlyRoutes = map[string]bool{
 var identityOnlyRoutes = map[string]bool{
 	"GET /auth/context":               true,
 	"GET /organizations":              true,
+	"POST /organizations":             true,
 	"POST /auth/invitations/accept":   true,
 	"POST /auth/session/organization": true,
 }

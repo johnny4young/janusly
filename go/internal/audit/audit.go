@@ -149,6 +149,12 @@ func SystemWrite(ctx context.Context, pool *pgxpool.Pool, orgID, actor string, a
 // TxAudit is the tx-bound audit function handed to WithAuditTx handlers.
 type TxAudit func(action Action, opts Options) error
 
+// IdentityTxAudit binds the provider-verified actor while allowing the
+// transaction to supply the organization it just proved or created. This is
+// the bootstrap analogue of TxAudit: an untrusted organization hint never
+// reaches the audit row, and the handler cannot forge the actor identity.
+type IdentityTxAudit func(orgID string, action Action, opts Options) error
+
 // WithAuditTx runs the handler inside one transaction with a tx-bound
 // audit writer: entity rows and audit rows commit or roll back together.
 // Unlike the best-effort writer, a failed audit insert here FAILS the
@@ -170,6 +176,42 @@ func WithAuditTx(ctx context.Context, pool *pgxpool.Pool, authCtx *auth.Context,
 			_, execErr := tx.Exec(ctx, sql, args...)
 			return execErr
 		}, orgID, userID, action, opts, authCtx)
+	}
+	if err := handler(tx, txAudit); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// WithIdentityAuditTx atomically pairs bootstrap writes with an audit row
+// whose organization becomes known only inside the transaction. It is used by
+// organization creation, invitation acceptance, and SSO provisioning; tenant
+// routes should keep using WithAuditTx with their authorized Context.
+func WithIdentityAuditTx(ctx context.Context, pool *pgxpool.Pool, identity *auth.Identity,
+	handler func(tx pgx.Tx, audit IdentityTxAudit) error) error {
+	if identity == nil {
+		return fmt.Errorf("identity audit tx requires an identity")
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin identity audit tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	txAudit := func(orgID string, action Action, opts Options) error {
+		if orgID == "" {
+			return fmt.Errorf("identity audit tx requires an organization")
+		}
+		authCtx := &auth.Context{
+			OrgID: orgID, UserID: identity.UserID, Email: identity.Email,
+			Mode: identity.Mode, Source: identity.Source,
+			ServiceTokenSuffix: identity.ServiceTokenSuffix,
+			BrowserSessionID:   identity.BrowserSessionID,
+		}
+		return insert(ctx, func(ctx context.Context, sql string, args ...any) error {
+			_, execErr := tx.Exec(ctx, sql, args...)
+			return execErr
+		}, orgID, identity.UserID, action, opts, authCtx)
 	}
 	if err := handler(tx, txAudit); err != nil {
 		return err

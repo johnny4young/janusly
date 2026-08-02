@@ -149,3 +149,39 @@ func TestWithAuditTxAtomicity(t *testing.T) {
 		t.Fatal("tx-bound audit must reject a typo'd action")
 	}
 }
+
+func TestWithIdentityAuditTxBindsActorAndDynamicOrganization(t *testing.T) {
+	pool := testPool(t)
+	org := fmt.Sprintf("org-identity-audittx-%d", time.Now().UnixNano())
+	identity := &auth.Identity{
+		UserID: "bootstrap-user", Email: "user@example.com",
+		Mode: auth.ModeSupabase, Source: auth.SourceWeb,
+	}
+
+	err := WithIdentityAuditTx(context.Background(), pool, identity, func(tx pgx.Tx, audit IdentityTxAudit) error {
+		if _, err := tx.Exec(context.Background(),
+			`INSERT INTO organizations (id, name) VALUES ($1, 'Bootstrap Org')`, org); err != nil {
+			return err
+		}
+		return audit(org, "org.created", Options{
+			TargetType: "organization", TargetID: org,
+			Metadata: map[string]any{"actor": "spoofed"},
+		})
+	})
+	if err != nil {
+		t.Fatalf("identity audit tx: %v", err)
+	}
+	action, metadata := lastRow(t, pool, org)
+	if action != "org.created" || metadata["source"] != "web" {
+		t.Fatalf("dynamic audit identity: action=%q metadata=%+v", action, metadata)
+	}
+	actor, _ := metadata["actor"].(map[string]any)
+	if actor == nil || actor["userId"] != identity.UserID || actor["mode"] != "supabase" {
+		t.Fatalf("provider identity must own actor metadata: %+v", metadata)
+	}
+
+	if err := WithIdentityAuditTx(context.Background(), pool, nil,
+		func(pgx.Tx, IdentityTxAudit) error { return nil }); err == nil {
+		t.Fatal("nil identity must fail before beginning a transaction")
+	}
+}

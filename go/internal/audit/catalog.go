@@ -173,6 +173,7 @@ var rawAuditActions = map[Action]bool{
 	"auto_healing.apply.manual":         true,
 	"auto_healing.failed":               true,
 	"memory.bulk.purged":                true,
+	"org.created":                       true,
 	"recovery.item.created":             true,
 	"recovery.item.occurrence_attached": true,
 	"schedule.entry.disabled":           true,
