@@ -22,6 +22,7 @@ import (
 	"math"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -374,12 +375,7 @@ func stringSlice(raw any) []string {
 }
 
 func containsString(haystack []string, needle string) bool {
-	for _, candidate := range haystack {
-		if candidate == needle {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(haystack, needle)
 }
 
 // parseWorkingWindows converts the wire shape leniently — malformed

@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 
@@ -86,9 +87,7 @@ func externalTriggerContract(wf *domain.Workflow) string {
 			continue
 		}
 		config := map[string]any{}
-		for key, value := range node.Config {
-			config[key] = value
-		}
+		maps.Copy(config, node.Config)
 		triggers = append(triggers, map[string]any{"id": node.ID, "type": node.Type, "config": config})
 	}
 	return stableJSON(triggers)

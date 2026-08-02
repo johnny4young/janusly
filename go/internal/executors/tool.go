@@ -12,6 +12,7 @@ package executors
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"github.com/johnny4young/janusly/go/internal/tools"
 )
@@ -39,9 +40,7 @@ func executeRegisteredTool(ctx context.Context, registry *tools.Registry, name s
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
 	result := map[string]any{"ok": true}
-	for key, value := range output {
-		result[key] = value
-	}
+	maps.Copy(result, output)
 	return result
 }
 

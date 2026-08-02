@@ -13,6 +13,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -217,9 +218,7 @@ func (s *V1Server) slackCallbackHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	rejected := func(reason string, metadata map[string]any) {
 		payload := map[string]any{"reason": reason}
-		for key, value := range metadata {
-			payload[key] = value
-		}
+		maps.Copy(payload, metadata)
 		audit.Write(r.Context(), s.pool, &auth.Context{OrgID: connection.OrgID, UserID: "slack:interaction"},
 			"slack.interaction.rejected", audit.Options{
 				TargetType: "slack-interaction", TargetID: connection.ID, Metadata: payload,
@@ -348,9 +347,7 @@ func (s *V1Server) slackCallbackHandler(w http.ResponseWriter, r *http.Request) 
 		"before": map[string]any{"status": item.Status, "owner": textOrNull(item.Owner)},
 		"after":  map[string]any{"status": after.Status, "owner": textOrNull(after.Owner)},
 	}
-	for key, value := range slackMetadata {
-		transitionMetadata[key] = value
-	}
+	maps.Copy(transitionMetadata, slackMetadata)
 	auditMetadataJSON, _ := json.Marshal(transitionMetadata)
 	if err := txq.InsertAuditLogRow(ctx, store.InsertAuditLogRowParams{
 		ID: s.newID(), OrgID: connection.OrgID,

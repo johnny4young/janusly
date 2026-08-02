@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -60,12 +61,7 @@ func alertListAllows(list []string, value string) bool {
 	if len(list) == 0 {
 		return true
 	}
-	for _, entry := range list {
-		if entry == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, value)
 }
 
 // alertPolicyMatches evaluates the pilot-supported per-trigger parameter

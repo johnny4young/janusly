@@ -168,12 +168,12 @@ func main() {
 		fmt.Printf("  runs already populated (%d) — skipping\n", runCount)
 	} else {
 		started := []string{}
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			started = append(started, startSaved("demo-pipeline", map[string]any{"total": fmt.Sprint(100 + i)}))
 		}
 		started = append(started, startSaved("demo-parent", nil))
 		// Two failures with the SAME signature → a DLQ cluster + incident.
-		for i := 0; i < 2; i++ {
+		for range 2 {
 			started = append(started, startSaved("demo-flaky-ingest", nil))
 		}
 		fmt.Printf("  started %d runs; waiting for terminal states…\n", len(started))

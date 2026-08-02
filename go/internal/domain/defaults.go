@@ -4,6 +4,8 @@
 // while explicit null and false are supplied values and always win.
 package domain
 
+import "maps"
+
 // ApplyInputDefaults fills declared defaults into a run-start payload and
 // returns a new value; the caller's payload is never mutated. Run it BEFORE
 // validation: it is what lets a workflow declare a required setting and
@@ -39,9 +41,7 @@ func applyDefaults(schema *InputSchema, value any, present bool) (any, bool) {
 
 	filled := map[string]any{}
 	if baseMap, ok := base.(map[string]any); ok {
-		for k, v := range baseMap {
-			filled[k] = v
-		}
+		maps.Copy(filled, baseMap)
 	}
 	// Sorted for determinism; the reference iterates declaration order, and
 	// the parity harness compares results, not fill order. Prototype-shaped

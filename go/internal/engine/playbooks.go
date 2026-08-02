@@ -65,7 +65,7 @@ func (e *Engine) CreatePlaybookDraft(ctx context.Context, input PlaybookDraftInp
 	if input.EvidenceRequirements == nil {
 		evidenceJSON = []byte(`{}`)
 	}
-	for attempt := 0; attempt < 3; attempt++ {
+	for range 3 {
 		version, err := q.MaxPlaybookVersion(ctx, store.MaxPlaybookVersionParams{
 			OrgID: input.OrgID, Signature: input.Signature,
 		})

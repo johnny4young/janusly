@@ -12,6 +12,7 @@ package executors
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"strings"
 
 	"github.com/johnny4young/janusly/go/internal/ai"
@@ -105,9 +106,7 @@ func executeAiNode(ctx context.Context, in Input) (any, error) {
 		if hasOutputSchema {
 			out["valid"] = false
 		}
-		for key, value := range extra {
-			out[key] = value
-		}
+		maps.Copy(out, extra)
 		return out
 	}
 

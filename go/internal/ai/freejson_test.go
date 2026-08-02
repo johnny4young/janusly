@@ -77,7 +77,7 @@ func TestFreeJSONFuzzNeverPanics(t *testing.T) {
 	rng := rand.New(rand.NewPCG(42, 7))
 	alphabet := `{}[]",:\`
 	pieces := []string{validJSON, "```json", "```", "prose ", "\uFEFF", "\x00", `"key":`, "null,", "[1,2"}
-	for run := 0; run < 1000; run++ {
+	for range 1000 {
 		var builder strings.Builder
 		for i := rng.IntN(20); i >= 0; i-- {
 			if rng.IntN(3) == 0 {

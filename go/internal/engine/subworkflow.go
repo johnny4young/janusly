@@ -294,7 +294,7 @@ func (e *Engine) commitParentCheckpoint(
 func (e *Engine) DeliverParentNotifications(ctx context.Context, runID string) {
 	q := store.New(e.pool)
 	current := runID
-	for hop := 0; hop < subworkflowDepthWalkerMax; hop++ {
+	for range subworkflowDepthWalkerMax {
 		row, err := q.GetRunParentLink(ctx, current)
 		if err != nil || row.ParentNotificationAfter == nil || !isTerminalRunStatus(row.Status) {
 			return

@@ -87,7 +87,7 @@ func consent(ctx context.Context, pool *pgxpool.Pool, orgID, kind string) (bool,
 		return false, "memory_disabled"
 	}
 	allowed, _ := orgconfig.LoadValue(ctx, pool, orgID, "memory.allowedKinds").(string)
-	for _, entry := range strings.Split(allowed, ",") {
+	for entry := range strings.SplitSeq(allowed, ",") {
 		if strings.TrimSpace(entry) == kind {
 			return true, ""
 		}

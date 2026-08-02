@@ -10,6 +10,7 @@ package httpapi
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"sort"
 	"strings"
@@ -261,7 +262,7 @@ func (s *V1Server) buildReviewFallback(wf *domain.Workflow) map[string]any {
 		}
 		issues = append(issues, map[string]any{
 			"code": issue.Code, "severity": severity, "message": issue.Message,
-			"nodeId": issue.NodeID,
+			"nodeId":     issue.NodeID,
 			"rationale":  "Deterministic readiness rule (same engine as the production gate).",
 			"suggestion": suggestion,
 		})
@@ -300,9 +301,7 @@ func (s *V1Server) reviewWorkflowCore(r *http.Request, rc v1Request) opResult {
 	fallbackReview := s.buildReviewFallback(wf)
 	writeAudit := func(mode string, extra map[string]any) {
 		metadata := map[string]any{"mode": mode}
-		for key, value := range extra {
-			metadata[key] = value
-		}
+		maps.Copy(metadata, extra)
 		audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.reviewed", audit.Options{
 			TargetType: "ai", TargetID: wf.ID, Metadata: metadata,
 		})
@@ -421,9 +420,7 @@ func (s *V1Server) suggestImprovementCore(r *http.Request, rc v1Request) opResul
 	wf := workflowFromDoc(body.Workflow)
 	writeAudit := func(mode string, extra map[string]any) {
 		metadata := map[string]any{"mode": mode}
-		for key, value := range extra {
-			metadata[key] = value
-		}
+		maps.Copy(metadata, extra)
 		audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.improvement_suggested", audit.Options{
 			TargetType: "ai", Metadata: metadata,
 		})
@@ -456,8 +453,8 @@ func (s *V1Server) suggestImprovementCore(r *http.Request, rc v1Request) opResul
 	}
 	workflowJSON, _ := json.Marshal(body.Workflow)
 	result, aiErr := client.GenerateText(ctx, ai.GenerateTextInput{
-		System: "You improve Janusly workflow DAGs. Reply with ONLY a JSON object {\"rationale\",\"suggestions\":[{\"patchedWorkflowJson\",\"rationale\",\"approachLabel\",\"confidence\"}]} where patchedWorkflowJson is the FULL improved workflow as a JSON-encoded string keeping the same id.",
-		Prompt: fmt.Sprintf("Focus: %s\n\nWORKFLOW (data):\n%s", focus, string(workflowJSON)),
+		System:         "You improve Janusly workflow DAGs. Reply with ONLY a JSON object {\"rationale\",\"suggestions\":[{\"patchedWorkflowJson\",\"rationale\",\"approachLabel\",\"confidence\"}]} where patchedWorkflowJson is the FULL improved workflow as a JSON-encoded string keeping the same id.",
+		Prompt:         fmt.Sprintf("Focus: %s\n\nWORKFLOW (data):\n%s", focus, string(workflowJSON)),
 		ResponseFormat: "json", ModelHint: body.Model, CacheSystemPrompt: true,
 		Context: ai.CallContext{OrgID: rc.orgID, UserID: rc.userID, WorkflowID: wf.ID},
 	})

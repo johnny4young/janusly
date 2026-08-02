@@ -8,6 +8,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -239,9 +240,7 @@ func (s *V1Server) patchedDeadLetterSnapshot(r *http.Request, orgID, deadLetterI
 		if config == nil {
 			config = map[string]any{}
 		}
-		for key, value := range patch {
-			config[key] = value
-		}
+		maps.Copy(config, patch)
 		node["config"] = config
 		fixed, err := json.Marshal(document)
 		if err != nil {

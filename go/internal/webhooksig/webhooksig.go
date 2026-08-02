@@ -19,7 +19,7 @@ import (
 // raw value and every candidate signature under sigKey (providers may
 // send multiple candidates during secret rotation).
 func ParseHeader(header, timestampKey, sigKey string) (timestampRaw string, candidates []string) {
-	for _, part := range strings.Split(header, ",") {
+	for part := range strings.SplitSeq(header, ",") {
 		key, value, found := strings.Cut(strings.TrimSpace(part), "=")
 		if !found {
 			continue

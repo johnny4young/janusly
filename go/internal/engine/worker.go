@@ -46,26 +46,20 @@ func (e *Engine) RunWorkers(ctx context.Context, concurrency int, poll time.Dura
 	wake := make(chan struct{}, 1)
 
 	var listeners sync.WaitGroup
-	listeners.Add(1)
-	go func() {
-		defer listeners.Done()
+	listeners.Go(func() {
 		e.listenForWakeups(ctx, wake, logger)
-	}()
+	})
 
 	var sweepers sync.WaitGroup
-	sweepers.Add(1)
-	go func() {
-		defer sweepers.Done()
+	sweepers.Go(func() {
 		e.sweepWakeups(ctx, wake, poll, logger)
-	}()
+	})
 
 	var workers sync.WaitGroup
-	for i := 0; i < concurrency; i++ {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
+	for range concurrency {
+		workers.Go(func() {
 			e.workerLoop(ctx, wake, poll, execute, logger)
-		}()
+		})
 	}
 	workers.Wait()
 	listeners.Wait()

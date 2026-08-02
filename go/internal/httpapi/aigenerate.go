@@ -18,6 +18,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"regexp"
 	"strings"
@@ -307,9 +308,7 @@ func issueSummary(issues []domain.Issue) string {
 // withMode merges the mode (+ optional aiError) onto a workflow document.
 func withMode(workflow map[string]any, mode, aiError string) map[string]any {
 	out := make(map[string]any, len(workflow)+2)
-	for key, value := range workflow {
-		out[key] = value
-	}
+	maps.Copy(out, workflow)
 	out["mode"] = mode
 	if aiError != "" {
 		out["aiError"] = aiError
@@ -379,9 +378,7 @@ func (s *V1Server) selectBestOfN(ctx context.Context, client ai.Client, prompt, 
 	results := make([]*candidate, n)
 	var wg sync.WaitGroup
 	for i := range n {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			result, aiErr := client.GenerateText(ctx, ai.GenerateTextInput{
 				System: systemPrompt, Prompt: prompt,
 				ResponseFormat: "json", ModelHint: modelHint,
@@ -399,7 +396,7 @@ func (s *V1Server) selectBestOfN(ctx context.Context, client ai.Client, prompt, 
 				return
 			}
 			results[i] = &candidate{raw: raw, model: result.Model, provider: result.Provider}
-		}()
+		})
 	}
 	wg.Wait()
 

@@ -16,6 +16,7 @@ package failcat
 
 import (
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -50,22 +51,22 @@ type ReplyCase struct {
 // SuccessEnvelope wraps assistant text in a minimal valid Anthropic
 // messages response.
 func SuccessEnvelope(text string) string {
-	quoted := ""
+	var quoted strings.Builder
 	for _, r := range text {
 		switch r {
 		case '"':
-			quoted += `\"`
+			quoted.WriteString(`\"`)
 		case '\\':
-			quoted += `\\`
+			quoted.WriteString(`\\`)
 		case '\n':
-			quoted += `\n`
+			quoted.WriteString(`\n`)
 		default:
-			quoted += string(r)
+			quoted.WriteString(string(r))
 		}
 	}
 	return `{"id":"msg_fx","type":"message","role":"assistant",` +
 		`"model":"claude-haiku-4-5-20251001",` +
-		`"content":[{"type":"text","text":"` + quoted + `"}],` +
+		`"content":[{"type":"text","text":"` + quoted.String() + `"}],` +
 		`"stop_reason":"end_turn",` +
 		`"usage":{"input_tokens":12,"output_tokens":7}}`
 }

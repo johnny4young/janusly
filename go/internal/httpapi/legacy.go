@@ -9,6 +9,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
@@ -47,9 +48,7 @@ func writeLegacy(w http.ResponseWriter, result opResult) {
 	}
 	body := map[string]any{"error": result.message, "code": result.code}
 	if result.legacyExtras != nil {
-		for key, value := range result.legacyExtras {
-			body[key] = value
-		}
+		maps.Copy(body, result.legacyExtras)
 	} else if result.params != nil {
 		body["params"] = result.params
 	}

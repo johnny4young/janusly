@@ -12,6 +12,7 @@ package executors
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sync"
 
 	"github.com/johnny4young/janusly/go/internal/grammar"
@@ -43,9 +44,7 @@ func runMultiAgent(ctx context.Context, in Input, registry *tools.Registry, http
 		}
 	}
 	sharedContext := map[string]any{}
-	for key, value := range in.Context {
-		sharedContext[key] = value
-	}
+	maps.Copy(sharedContext, in.Context)
 	results := make([]any, 0, len(agentsRaw))
 	emit("multi_agent.started", map[string]any{
 		"mode": mode, "aggregation": aggregation, "count": len(agentsRaw), "goal": in.Config["goal"],
@@ -87,12 +86,10 @@ func runMultiAgent(ctx context.Context, in Input, registry *tools.Registry, http
 		outcomes := make([]settled, len(configs))
 		var wg sync.WaitGroup
 		for index, config := range configs {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				value, err := runOne(index, config, sharedContext)
 				outcomes[index] = settled{value: value, err: err}
-			}()
+			})
 		}
 		wg.Wait()
 		for index, outcome := range outcomes {
@@ -164,9 +161,7 @@ func resolveCrewAgentConfig(in Input, raw any, index int, sharedContext map[stri
 		agent = map[string]any{}
 	}
 	merged := map[string]any{}
-	for key, value := range agent {
-		merged[key] = value
-	}
+	maps.Copy(merged, agent)
 	if merged["name"] == nil {
 		merged["name"] = fmt.Sprintf("agent_%d", index+1)
 	}

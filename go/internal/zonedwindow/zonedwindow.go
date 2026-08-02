@@ -21,6 +21,7 @@ package zonedwindow
 
 import (
 	"regexp"
+	"slices"
 	"time"
 	_ "time/tzdata"
 )
@@ -82,12 +83,7 @@ func ZonedClock(at time.Time, timeZone string) (Clock, bool) {
 // day.
 func Contains(clock Clock, days []int, startMinute, endMinute int) bool {
 	includes := func(day int) bool {
-		for _, candidate := range days {
-			if candidate == day {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(days, day)
 	}
 	if startMinute < endMinute {
 		return includes(clock.Day) && clock.Minute >= startMinute && clock.Minute < endMinute

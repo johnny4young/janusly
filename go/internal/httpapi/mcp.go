@@ -50,7 +50,7 @@ func (s *V1Server) createMcpConnectionCore(r *http.Request, rc v1Request) opResu
 		// command is already allowlisted (env or tenant CSV).
 		allowlist, _ := orgconfig.LoadValue(ctx, s.pool, rc.orgID, "mcp.clientCommandAllowlist").(string)
 		allowed := false
-		for _, entry := range strings.Split(allowlist, ",") {
+		for entry := range strings.SplitSeq(allowlist, ",") {
 			if strings.TrimSpace(entry) == body.Command {
 				allowed = true
 				break

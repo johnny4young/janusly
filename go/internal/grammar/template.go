@@ -141,7 +141,7 @@ func MapInput(mapping any, scope map[string]any) (any, error) {
 // link returns (nil, false), mirroring the reference's undefined.
 func GetByPath(source any, path string) (any, bool) {
 	current := source
-	for _, key := range strings.Split(path, ".") {
+	for key := range strings.SplitSeq(path, ".") {
 		child := childValue(current, key)
 		if isUndefined(child) {
 			return nil, false

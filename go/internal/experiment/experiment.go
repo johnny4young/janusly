@@ -95,10 +95,10 @@ func normalizeForEquality(value string) string {
 // tokenOverlap is the deterministic Jaccard fallback in [0,1].
 func tokenOverlap(a, b string) float64 {
 	tokensA, tokensB := map[string]bool{}, map[string]bool{}
-	for _, token := range strings.Fields(normalizeForEquality(a)) {
+	for token := range strings.FieldsSeq(normalizeForEquality(a)) {
 		tokensA[token] = true
 	}
-	for _, token := range strings.Fields(normalizeForEquality(b)) {
+	for token := range strings.FieldsSeq(normalizeForEquality(b)) {
 		tokensB[token] = true
 	}
 	if len(tokensA) == 0 && len(tokensB) == 0 {

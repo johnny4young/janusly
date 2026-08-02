@@ -9,6 +9,8 @@
 package recovery
 
 import (
+	"maps"
+
 	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/grammar"
 )
@@ -70,14 +72,10 @@ func EvaluateSemanticOutcome(input struct {
 	}
 	existing := map[string]any{}
 	if prior, ok := input.Context[input.SourceNodeID].(map[string]any); ok {
-		for key, value := range prior {
-			existing[key] = value
-		}
+		maps.Copy(existing, prior)
 	}
 	context := map[string]any{}
-	for key, value := range input.Context {
-		context[key] = value
-	}
+	maps.Copy(context, input.Context)
 	existing["status"] = "succeeded"
 	existing["output"] = input.Output
 	context[input.SourceNodeID] = existing

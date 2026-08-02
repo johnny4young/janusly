@@ -76,8 +76,6 @@ func autonomyProfile(level *int, source string, detectorIds []string, unavailabl
 	}
 }
 
-func levelPtr(level int) *int { return &level }
-
 // ResolveRecoveryAutonomyProfile projects one failure class through the
 // contract: failure override wins when present (it can only be lower —
 // the validator enforced the ceiling), the workflow default otherwise,
@@ -97,9 +95,9 @@ func ResolveRecoveryAutonomyProfile(contract *RecoveryContract, failureClass Rec
 			key = "stalledNode"
 		}
 		if override, present := contract.Failure.Technical.Autonomy[key]; present {
-			return autonomyProfile(levelPtr(override), "failure_override", nil, "")
+			return autonomyProfile(new(override), "failure_override", nil, "")
 		}
-		return autonomyProfile(levelPtr(contract.AutonomyLevel), "workflow_default", nil, "")
+		return autonomyProfile(new(contract.AutonomyLevel), "workflow_default", nil, "")
 	}
 
 	if contract.Version != "2" {
@@ -110,9 +108,9 @@ func ResolveRecoveryAutonomyProfile(contract *RecoveryContract, failureClass Rec
 			continue
 		}
 		if detector.AutonomyLevel != nil {
-			return autonomyProfile(levelPtr(*detector.AutonomyLevel), "failure_override", []string{detector.ID}, "")
+			return autonomyProfile(new(*detector.AutonomyLevel), "failure_override", []string{detector.ID}, "")
 		}
-		return autonomyProfile(levelPtr(contract.AutonomyLevel), "workflow_default", []string{detector.ID}, "")
+		return autonomyProfile(new(contract.AutonomyLevel), "workflow_default", []string{detector.ID}, "")
 	}
 	return autonomyProfile(nil, "unavailable", semanticIds, "failure_policy_missing")
 }
@@ -154,5 +152,5 @@ func CombineRecoveryAutonomyProfiles(profiles []RecoveryAutonomyProfile) Recover
 	if len(profiles) == 1 {
 		source = profiles[0].Source
 	}
-	return autonomyProfile(levelPtr(minimum), source, detectorIds, "")
+	return autonomyProfile(new(minimum), source, detectorIds, "")
 }

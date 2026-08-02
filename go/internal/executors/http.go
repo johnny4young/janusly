@@ -14,11 +14,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -195,10 +197,8 @@ func (e *httpExecutor) validate(ctx context.Context, rawURL string, pins *pinned
 			Code:    "ENOTFOUND",
 		}
 	}
-	for _, ip := range ips {
-		if IsPrivateIP(ip) {
-			return nil, fmt.Errorf("HTTP target resolves to a private address and is blocked: %s", hostname) //nolint:staticcheck // reference message is the wire contract
-		}
+	if slices.ContainsFunc(ips, IsPrivateIP) {
+		return nil, fmt.Errorf("HTTP target resolves to a private address and is blocked: %s", hostname) //nolint:staticcheck // reference message is the wire contract
 	}
 	if len(ips) == 0 {
 		return nil, fmt.Errorf("HTTP target did not resolve to any address: %s", hostname) //nolint:staticcheck // reference message is the wire contract
@@ -387,9 +387,7 @@ func (e *httpExecutor) execute(ctx context.Context, in Input) (any, error) {
 		"ok":         ok,
 		"body":       string(bodyBytes),
 	}
-	for key, value := range projectHTTPJSON(bodyBytes, res.Header.Get("Content-Type")) {
-		output[key] = value
-	}
+	maps.Copy(output, projectHTTPJSON(bodyBytes, res.Header.Get("Content-Type")))
 	return output, nil
 }
 

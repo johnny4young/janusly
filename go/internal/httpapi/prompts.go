@@ -113,7 +113,7 @@ func (s *V1Server) createPromptVersionCore(r *http.Request, rc v1Request, name s
 	}
 	// Bounded unique-violation retry, the shared version-writer policy.
 	var created store.PromptVersion
-	for attempt := 0; attempt < 3; attempt++ {
+	for range 3 {
 		next, err := q.NextPromptVersionNumber(ctx, store.NextPromptVersionNumberParams{
 			OrgID: rc.orgID, PromptID: prompt.ID,
 		})

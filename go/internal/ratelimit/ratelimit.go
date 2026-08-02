@@ -81,10 +81,7 @@ func (l *Limiter) Enforce(ctx context.Context, key string, opts Options) error {
 	// still counts as a "store worked" signal.
 	fireHook(func() { l.hooks.OnSuccess(opts.Name, key) }, l.hooks.OnSuccess == nil)
 	if int(count) > opts.Max {
-		retryAfter := int(time.Until(expiresAt).Seconds()) + 1
-		if retryAfter < 1 {
-			retryAfter = 1
-		}
+		retryAfter := max(int(time.Until(expiresAt).Seconds())+1, 1)
 		return &LimitError{Bucket: opts.Name, RetryAfterSec: retryAfter}
 	}
 	return nil

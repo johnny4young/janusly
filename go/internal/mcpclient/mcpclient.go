@@ -499,7 +499,7 @@ func (w *cappedStderr) Write(p []byte) (int, error) {
 func stdioAllowedCommands(ctx context.Context, pool *pgxpool.Pool, orgID string) map[string]bool {
 	allowed := map[string]bool{}
 	tenant, _ := orgconfig.LoadValue(ctx, pool, orgID, "mcp.clientCommandAllowlist").(string)
-	for _, entry := range strings.Split(tenant, ",") {
+	for entry := range strings.SplitSeq(tenant, ",") {
 		if trimmed := strings.TrimSpace(entry); trimmed != "" {
 			allowed[trimmed] = true
 		}

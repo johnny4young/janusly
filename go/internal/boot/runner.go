@@ -33,9 +33,7 @@ func NewRunner(parent context.Context, logger *slog.Logger) *Runner {
 
 // Go starts one named supervised loop. fn should block until ctx ends.
 func (r *Runner) Go(name string, fn func(ctx context.Context)) {
-	r.wg.Add(1)
-	go func() {
-		defer r.wg.Done()
+	r.wg.Go(func() {
 		backoff := time.Second
 		for {
 			started := time.Now()
@@ -61,7 +59,7 @@ func (r *Runner) Go(name string, fn func(ctx context.Context)) {
 				backoff *= 2
 			}
 		}
-	}()
+	})
 }
 
 func (r *Runner) runOnce(name string, fn func(ctx context.Context)) (panicked bool) {

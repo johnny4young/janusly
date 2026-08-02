@@ -5,6 +5,7 @@ package orgconfig
 
 import (
 	"encoding/json"
+	"slices"
 	"strconv"
 )
 
@@ -120,12 +121,7 @@ func inAllowedValues(def *Definition, v string) bool {
 	if len(def.AllowedValues) == 0 {
 		return true
 	}
-	for _, allowed := range def.AllowedValues {
-		if allowed == v {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(def.AllowedValues, v)
 }
 
 func inRange(def *Definition, v float64) bool {

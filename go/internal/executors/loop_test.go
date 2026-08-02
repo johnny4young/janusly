@@ -2,6 +2,7 @@ package executors
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -139,10 +140,5 @@ func TestForEachLoopExecutor(t *testing.T) {
 }
 
 func contains(haystack []string, needle string) bool {
-	for _, candidate := range haystack {
-		if candidate == needle {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(haystack, needle)
 }

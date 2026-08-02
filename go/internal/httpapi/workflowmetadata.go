@@ -15,6 +15,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"strings"
 
@@ -46,9 +47,7 @@ func workflowMetadataView(row store.WorkflowMetadatum) map[string]any {
 // preserving change evidence.
 func metadataForAudit(view map[string]any) map[string]any {
 	projected := map[string]any{}
-	for key, value := range view {
-		projected[key] = value
-	}
+	maps.Copy(projected, view)
 	guidance, _ := view["aiGuidanceMarkdown"].(string)
 	projected["aiGuidanceMarkdown"] = map[string]any{
 		"configured": guidance != "", "bytes": len(guidance),

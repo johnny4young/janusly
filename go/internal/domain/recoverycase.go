@@ -6,6 +6,8 @@
 // INSIDE the same CAS transaction that writes the receipt.
 package domain
 
+import "slices"
+
 // RecoveryCaseStates is the closed lifecycle vocabulary, in order.
 var RecoveryCaseStates = []string{
 	"detected", "contained", "diagnosed", "candidates_ready",
@@ -42,12 +44,7 @@ func ListLegalRecoveryCaseTransitions(state string) []string {
 
 // IsLegalRecoveryCaseTransition reports whether from → to is in the map.
 func IsLegalRecoveryCaseTransition(from, to string) bool {
-	for _, next := range legalRecoveryCaseTransitions[from] {
-		if next == to {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(legalRecoveryCaseTransitions[from], to)
 }
 
 // IsRecoveryCaseState reports vocabulary membership.

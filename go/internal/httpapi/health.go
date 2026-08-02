@@ -86,10 +86,7 @@ func (s *V1Server) readQueueSnapshot(ctx context.Context) (*queueSnapshot, error
 		WarnSeconds: resolveQueueLagWarnSeconds(),
 	}
 	if oldest, ok := row.OldestEligibleAt.(time.Time); ok && row.Waiting > 0 {
-		age := int(time.Since(oldest).Seconds())
-		if age < 0 {
-			age = 0
-		}
+		age := max(int(time.Since(oldest).Seconds()), 0)
 		snapshot.OldestWaitingSeconds = &age
 	}
 	return snapshot, nil

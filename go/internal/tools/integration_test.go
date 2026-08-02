@@ -54,7 +54,7 @@ func TestIntegrationEnvelopeNeverThrows(t *testing.T) {
 		t.Fatalf("CRLF must refuse: %+v", result)
 	}
 	many := map[string]any{}
-	for i := 0; i < 11; i++ {
+	for i := range 11 {
 		many[strings.Repeat("h", i+1)] = "v"
 	}
 	bad["headers"] = many

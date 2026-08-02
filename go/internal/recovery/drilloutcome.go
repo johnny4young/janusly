@@ -121,10 +121,7 @@ func BuildRecoveryDrillOutcome(facts DrillOutcomeFacts, now time.Time) DrillOutc
 
 	var elapsedMs *int64
 	if facts.RootCreatedAt != nil && completedAt != nil {
-		delta := completedAt.Sub(*facts.RootCreatedAt).Milliseconds()
-		if delta < 0 {
-			delta = 0
-		}
+		delta := max(completedAt.Sub(*facts.RootCreatedAt).Milliseconds(), 0)
 		elapsedMs = &delta
 	}
 
@@ -139,13 +136,7 @@ func BuildRecoveryDrillOutcome(facts DrillOutcomeFacts, now time.Time) DrillOutc
 		}
 	}
 
-	attemptCount := facts.AttemptCount
-	if attemptCount < 1 {
-		attemptCount = 1
-	}
-	if attemptCount > RecoveryDrillReplayChainLimit {
-		attemptCount = RecoveryDrillReplayChainLimit
-	}
+	attemptCount := min(max(facts.AttemptCount, 1), RecoveryDrillReplayChainLimit)
 	return DrillOutcome{
 		Status: status, StartedAt: isoPtr(facts.RootCreatedAt),
 		CompletedAt: isoPtr(completedAt), ElapsedMs: elapsedMs,

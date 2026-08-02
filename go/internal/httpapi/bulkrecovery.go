@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -313,11 +314,8 @@ func (s *V1Server) clusterApplyCore(r *http.Request, rc v1Request) opResult {
 	if hasClaim {
 		representativeOK := false
 		if body.RecoveryPlaybookDeadLetterID != "" && fix != nil {
-			for _, id := range ids {
-				if id == body.RecoveryPlaybookDeadLetterID {
-					representativeOK = true
-					break
-				}
+			if slices.Contains(ids, body.RecoveryPlaybookDeadLetterID) {
+				representativeOK = true
 			}
 		}
 		if representativeOK {

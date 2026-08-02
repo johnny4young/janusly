@@ -24,6 +24,7 @@ package engine
 
 import (
 	"fmt"
+	"maps"
 
 	"context"
 	"encoding/json"
@@ -316,9 +317,7 @@ func applyHealingPatch(workflowJSON []byte, nodeID string, patch map[string]any)
 		if config == nil {
 			config = map[string]any{}
 		}
-		for key, value := range patch {
-			config[key] = value
-		}
+		maps.Copy(config, patch)
 		node["config"] = config
 		fixed, err := json.Marshal(document)
 		if err != nil {

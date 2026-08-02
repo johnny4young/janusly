@@ -56,11 +56,11 @@ func Parse(expression string) (*Schedule, error) {
 func parseField(field string, spec fieldSpec) (map[int]bool, bool, error) {
 	values := map[int]bool{}
 	isWildcard := true
-	for _, part := range strings.Split(field, ",") {
+	for part := range strings.SplitSeq(field, ",") {
 		rangePart, step := part, 1
-		if slash := strings.Index(part, "/"); slash >= 0 {
-			rangePart = part[:slash]
-			parsed, err := strconv.Atoi(part[slash+1:])
+		if before, after, ok := strings.Cut(part, "/"); ok {
+			rangePart = before
+			parsed, err := strconv.Atoi(after)
 			if err != nil || parsed < 1 {
 				return nil, false, fmt.Errorf("invalid cron step in %s field: %q", spec.name, part)
 			}

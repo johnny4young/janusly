@@ -91,17 +91,11 @@ func ComposeBlock(orgGuidance, workflowGuidance string) string {
 	}
 	prefix := header + "\n\n"
 	suffix := "\n\n" + escape
-	bodyBudget := CombinedMaxBytes - len(prefix) - len(suffix)
-	if bodyBudget < 0 {
-		bodyBudget = 0
-	}
+	bodyBudget := max(CombinedMaxBytes-len(prefix)-len(suffix), 0)
 	var body string
 	if organization != "" && workflow != "" {
 		separator := "\n\n"
-		available := bodyBudget - len(separator)
-		if available < 0 {
-			available = 0
-		}
+		available := max(bodyBudget-len(separator), 0)
 		organizationBudget := available / 2
 		workflowBudget := available - organizationBudget
 		// A short scope donates its unused share; when both are long they

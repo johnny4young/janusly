@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 
 	"github.com/johnny4young/janusly/go/internal/tools"
 )
@@ -74,8 +75,6 @@ func executeHTTPRequestTool(ctx context.Context, input map[string]any) (map[stri
 	output := map[string]any{
 		"statusCode": result.StatusCode, "ok": result.Ok, "body": result.Body,
 	}
-	for key, value := range projectHTTPJSON([]byte(result.Body), result.ContentType) {
-		output[key] = value
-	}
+	maps.Copy(output, projectHTTPJSON([]byte(result.Body), result.ContentType))
 	return output, nil
 }

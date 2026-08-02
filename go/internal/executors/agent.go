@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -259,9 +260,7 @@ func executeAgentTool(ctx context.Context, in Input, plan AgentPlan, agentConfig
 		}
 		result := map[string]any{"ok": true}
 		if outputMap, ok := output.(map[string]any); ok {
-			for key, value := range outputMap {
-				result[key] = value
-			}
+			maps.Copy(result, outputMap)
 		}
 		return result
 	}
@@ -273,9 +272,7 @@ func executeAgentTool(ctx context.Context, in Input, plan AgentPlan, agentConfig
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
 	result := map[string]any{"ok": true}
-	for key, value := range output {
-		result[key] = value
-	}
+	maps.Copy(result, output)
 	return result
 }
 

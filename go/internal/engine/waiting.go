@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 
 	"github.com/jackc/pgx/v5"
 
@@ -37,9 +38,7 @@ func (e *Engine) MarkNodeWaiting(ctx context.Context, claim ClaimedNode, waiting
 	if waiting.Reason != "" {
 		metadata["reason"] = waiting.Reason
 	}
-	for key, value := range waiting.Metadata {
-		metadata[key] = value
-	}
+	maps.Copy(metadata, waiting.Metadata)
 	if metadata["kind"] == "human_form" {
 		// The engine signs here — org TTL policy + the dedicated secret
 		// stay out of the executor. The signed expiry travels with the
@@ -147,9 +146,7 @@ func (e *Engine) ResumeRunWithInput(ctx context.Context, runID, nodeID string, i
 					return &InputValidationError{Errors: problems}
 				}
 			}
-			for key, value := range input {
-				output[key] = value
-			}
+			maps.Copy(output, input)
 		}
 
 		rowID, err := q.MarkWaitingNodeSucceeded(ctx, store.MarkWaitingNodeSucceededParams{

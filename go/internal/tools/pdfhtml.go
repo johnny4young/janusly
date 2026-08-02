@@ -85,7 +85,7 @@ func (r *htmlPdfRenderer) walk(node *html.Node, depth int) {
 	switch node.Type {
 	case html.TextNode:
 		if r.inPre {
-			for _, line := range strings.Split(node.Data, "\n") {
+			for line := range strings.SplitSeq(node.Data, "\n") {
 				if strings.TrimSpace(line) != "" {
 					r.lines = append(r.lines, pdfLine{text: line, font: "F4", size: 9})
 				}

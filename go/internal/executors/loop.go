@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"strings"
 	"sync"
@@ -43,7 +44,7 @@ func normalizeItems(raw any) []any {
 		return value
 	case string:
 		var items []any
-		for _, part := range strings.Split(value, ",") {
+		for part := range strings.SplitSeq(value, ",") {
 			if trimmed := strings.TrimSpace(part); trimmed != "" {
 				items = append(items, trimmed)
 			}
@@ -250,15 +251,10 @@ func executeForEachLoop(ctx context.Context, registry *tools.Registry, in Input,
 	// context (node timeout) stops dequeuing NEW items cooperatively.
 	outcomes := make([]loopItemOutcome, len(items))
 	var nextIndex atomic.Int64
-	workerCount := concurrency
-	if workerCount > len(items) {
-		workerCount = len(items)
-	}
+	workerCount := min(concurrency, len(items))
 	var wg sync.WaitGroup
-	for worker := 0; worker < workerCount; worker++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range workerCount {
+		wg.Go(func() {
 			for {
 				index := int(nextIndex.Add(1)) - 1
 				if index >= len(items) || ctx.Err() != nil {
@@ -287,7 +283,7 @@ func executeForEachLoop(ctx context.Context, registry *tools.Registry, in Input,
 				}
 				outcomes[index] = outcome
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if ctx.Err() != nil {
@@ -376,9 +372,7 @@ func executeForEachLoop(ctx context.Context, registry *tools.Registry, in Input,
 	}
 
 	output := map[string]any{"mode": "for_each"}
-	for key, value := range details {
-		output[key] = value
-	}
+	maps.Copy(output, details)
 	if in.Emit != nil {
 		in.Emit("loop.completed", output)
 	}

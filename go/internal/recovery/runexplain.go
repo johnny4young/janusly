@@ -126,10 +126,7 @@ func BuildRunExplainReport(run RunExplainRun, nodes []RunExplainNode, events []R
 				}
 			}
 		}
-		attempts := failed.Attempts
-		if attempts < 1 {
-			attempts = 1
-		}
+		attempts := max(failed.Attempts, 1)
 		failedBlock = map[string]any{
 			"nodeId": safeText(failed.NodeID, 120), "status": failed.Status, "attempts": attempts,
 			"startedAt": isoOrNil(failed.StartedAt), "finishedAt": isoOrNil(failed.FinishedAt),

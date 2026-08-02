@@ -60,13 +60,13 @@ func TestViewTagsExplicitAndNeverOmitEmpty(t *testing.T) {
 		RecoveryOverlayView{}, WorkflowListItemView{}, VersionView{},
 	} {
 		viewType := reflect.TypeOf(view)
-		for i := 0; i < viewType.NumField(); i++ {
-			tag := viewType.Field(i).Tag.Get("json")
+		for field := range viewType.Fields() {
+			tag := field.Tag.Get("json")
 			if tag == "" {
-				t.Fatalf("%s.%s has no json tag", viewType.Name(), viewType.Field(i).Name)
+				t.Fatalf("%s.%s has no json tag", viewType.Name(), field.Name)
 			}
 			if strings.Contains(tag, "omitempty") {
-				t.Fatalf("%s.%s uses omitempty — the contract demands explicit nulls", viewType.Name(), viewType.Field(i).Name)
+				t.Fatalf("%s.%s uses omitempty — the contract demands explicit nulls", viewType.Name(), field.Name)
 			}
 		}
 	}

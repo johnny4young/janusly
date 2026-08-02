@@ -77,8 +77,8 @@ func simulatorBaseURL() (string, bool) {
 		os.Getenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR") != "true" {
 		return "", false
 	}
-	simulated := strings.Split(os.Getenv("JANUSLY_LLM_SIMULATED_PROVIDERS"), ",")
-	for _, name := range simulated {
+	simulated := strings.SplitSeq(os.Getenv("JANUSLY_LLM_SIMULATED_PROVIDERS"), ",")
+	for name := range simulated {
 		if strings.TrimSpace(name) == "anthropic" {
 			return os.Getenv("JANUSLY_LLM_SIMULATOR_BASE_URL"), true
 		}

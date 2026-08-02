@@ -31,17 +31,15 @@ func fireUsage(ctx context.Context, call CallContext, record usageRecord) {
 		CostUsd: record.costUsd,
 	}
 	if record.usage != nil {
-		out.InputTokens = intPtr(record.usage.InputTokens)
-		out.OutputTokens = intPtr(record.usage.OutputTokens)
-		out.TotalTokens = intPtr(record.usage.TotalTokens)
+		out.InputTokens = new(record.usage.InputTokens)
+		out.OutputTokens = new(record.usage.OutputTokens)
+		out.TotalTokens = new(record.usage.TotalTokens)
 		if record.usage.CachedInputTokens > 0 {
-			out.CachedInputTokens = intPtr(record.usage.CachedInputTokens)
+			out.CachedInputTokens = new(record.usage.CachedInputTokens)
 		}
 		if record.usage.CacheCreationInputTokens > 0 {
-			out.CacheCreationInputTokens = intPtr(record.usage.CacheCreationInputTokens)
+			out.CacheCreationInputTokens = new(record.usage.CacheCreationInputTokens)
 		}
 	}
 	usage.Fire(ctx, out)
 }
-
-func intPtr(v int) *int { return &v }

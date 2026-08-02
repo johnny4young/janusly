@@ -5,6 +5,7 @@
 package grammar
 
 import (
+	"maps"
 	"regexp"
 	"strings"
 )
@@ -57,9 +58,7 @@ func redactValuesCOW(value any, redactedValues []string) (any, bool) {
 			}
 			if out == nil {
 				out = make(map[string]any, len(v))
-				for k, original := range v {
-					out[k] = original
-				}
+				maps.Copy(out, v)
 			}
 			out[key] = next
 		}
@@ -131,9 +130,7 @@ func redactKeysCOW(value any) (any, bool) {
 		ensure := func() map[string]any {
 			if out == nil {
 				out = make(map[string]any, len(v))
-				for k, original := range v {
-					out[k] = original
-				}
+				maps.Copy(out, v)
 			}
 			return out
 		}

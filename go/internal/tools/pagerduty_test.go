@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"maps"
 	"testing"
 	"time"
 )
@@ -20,9 +21,7 @@ func TestPagerDutyPolicyEvaluate(t *testing.T) {
 			"id": "PINC1", "status": "triggered", "title": "db down", "urgency": "high",
 			"serviceId": "PSVC1", "assignedUserIds": []any{"PUSER1"},
 		}
-		for key, value := range overrides {
-			base[key] = value
-		}
+		maps.Copy(base, overrides)
 		return base
 	}
 	evaluate := func(overrides map[string]any) map[string]any {
@@ -33,9 +32,7 @@ func TestPagerDutyPolicyEvaluate(t *testing.T) {
 			"incident":   incident(nil), "pagerDutyUserId": "PUSER1",
 			"timeZone": "UTC", "workingHours": workingHours,
 		}
-		for key, value := range overrides {
-			input[key] = value
-		}
+		maps.Copy(input, overrides)
 		result, err := registry.Execute(context.Background(), "pagerduty.policy.evaluate", input)
 		if err != nil {
 			t.Fatalf("policy.evaluate must never error: %v", err)

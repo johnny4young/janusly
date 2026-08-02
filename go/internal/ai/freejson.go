@@ -12,6 +12,7 @@ package ai
 import (
 	"encoding/json"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -121,8 +122,8 @@ func repairTruncated(text string) (string, bool) {
 		repaired = strings.TrimRight(repaired, " \t\n\r")
 		repaired += "null"
 	}
-	for i := len(stack) - 1; i >= 0; i-- {
-		if stack[i] == '{' {
+	for _, v := range slices.Backward(stack) {
+		if v == '{' {
 			repaired += "}"
 		} else {
 			repaired += "]"

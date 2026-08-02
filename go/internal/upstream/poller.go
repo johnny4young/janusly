@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -162,11 +163,8 @@ func listTaggedWorkflowIDs(ctx context.Context, q *store.Queries, orgID, sourceN
 	}
 	var matched []string
 	for _, row := range rows {
-		for _, tag := range ExpectedComponents(row.UpstreamHealthSources) {
-			if tag == sourceName {
-				matched = append(matched, row.WorkflowID)
-				break
-			}
+		if slices.Contains(ExpectedComponents(row.UpstreamHealthSources), sourceName) {
+			matched = append(matched, row.WorkflowID)
 		}
 	}
 	return matched

@@ -69,13 +69,8 @@ func usagePercentile(sorted []float64, p float64) any {
 	if len(sorted) == 0 {
 		return nil
 	}
-	idx := int(float64(len(sorted))*p+0.999999) - 1
-	if idx < 0 {
-		idx = 0
-	}
-	if idx > len(sorted)-1 {
-		idx = len(sorted) - 1
-	}
+	idx := max(int(float64(len(sorted))*p+0.999999)-1, 0)
+	idx = min(idx, len(sorted)-1)
 	return sorted[idx]
 }
 
@@ -165,7 +160,7 @@ func (s *V1Server) usageSlice(r *http.Request, rc v1Request) ([]store.ListUsageE
 
 func parseBreakdownDimensions(raw string) ([]string, string) {
 	dimensions := []string{}
-	for _, token := range strings.Split(raw, ",") {
+	for token := range strings.SplitSeq(raw, ",") {
 		token = strings.TrimSpace(token)
 		if token == "" {
 			continue

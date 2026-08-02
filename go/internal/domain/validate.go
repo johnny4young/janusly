@@ -6,6 +6,7 @@ package domain
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -254,10 +255,8 @@ func hasCycle(nodes []Node, edges []Edge) bool {
 			return false
 		}
 		state[id] = visiting
-		for _, next := range graph[id] {
-			if visit(next) {
-				return true
-			}
+		if slices.ContainsFunc(graph[id], visit) {
+			return true
 		}
 		state[id] = visited
 		return false

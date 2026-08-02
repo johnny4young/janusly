@@ -53,7 +53,7 @@ func RecallAgentEpisodes(ctx context.Context, pool *pgxpool.Pool, orgID, workflo
 	}
 	allowed, _ := orgconfig.LoadValue(ctx, pool, orgID, "memory.allowedKinds").(string)
 	kindAllowed := false
-	for _, entry := range strings.Split(allowed, ",") {
+	for entry := range strings.SplitSeq(allowed, ",") {
 		if strings.TrimSpace(entry) == agentEpisodeKind {
 			kindAllowed = true
 			break

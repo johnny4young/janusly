@@ -41,7 +41,7 @@ func TestRunnerRestartsPanickingSweep(t *testing.T) {
 func TestRunnerShutdownDrains(t *testing.T) {
 	runner := NewRunner(context.Background(), quiet())
 	var running atomic.Int32
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		runner.Go("loop", func(ctx context.Context) {
 			running.Add(1)
 			defer running.Add(-1)

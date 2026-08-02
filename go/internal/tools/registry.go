@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 )
@@ -216,7 +217,7 @@ func jsonTools() []Definition {
 
 func pickByPath(source any, path string) any {
 	current := source
-	for _, segment := range strings.Split(path, ".") {
+	for segment := range strings.SplitSeq(path, ".") {
 		if segment == "" {
 			continue
 		}
@@ -242,7 +243,7 @@ func pickByPath(source any, path string) any {
 
 func setByPath(source any, path string, value any) (any, error) {
 	segments := []string{}
-	for _, segment := range strings.Split(path, ".") {
+	for segment := range strings.SplitSeq(path, ".") {
 		if segment != "" {
 			segments = append(segments, segment)
 		}
@@ -257,17 +258,13 @@ func setByPath(source any, path string, value any) (any, error) {
 	}
 	root := map[string]any{}
 	if existing, ok := source.(map[string]any); ok {
-		for key, item := range existing {
-			root[key] = item
-		}
+		maps.Copy(root, existing)
 	}
 	cursor := root
 	for _, segment := range segments[:len(segments)-1] {
 		next := map[string]any{}
 		if existing, ok := cursor[segment].(map[string]any); ok {
-			for key, item := range existing {
-				next[key] = item
-			}
+			maps.Copy(next, existing)
 		}
 		cursor[segment] = next
 		cursor = next
@@ -278,9 +275,7 @@ func setByPath(source any, path string, value any) (any, error) {
 
 func deepMerge(left, right map[string]any) map[string]any {
 	out := map[string]any{}
-	for key, value := range left {
-		out[key] = value
-	}
+	maps.Copy(out, left)
 	for key, value := range right {
 		if prototypeKeys[key] {
 			continue

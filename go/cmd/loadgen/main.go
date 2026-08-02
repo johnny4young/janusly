@@ -149,9 +149,7 @@ func main() {
 	deadline := time.Now().Add(*duration)
 	var wg sync.WaitGroup
 	for v := 0; v < *vus; v++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for time.Now().Before(deadline) {
 				switch *scenario {
 				case "start":
@@ -167,7 +165,7 @@ func main() {
 					os.Exit(2)
 				}
 			}
-		}()
+		})
 	}
 	begun := time.Now()
 	wg.Wait()
@@ -184,10 +182,7 @@ func main() {
 		if len(samples) == 0 {
 			return math.NaN()
 		}
-		idx := int(math.Ceil(p*float64(len(samples)))) - 1
-		if idx < 0 {
-			idx = 0
-		}
+		idx := max(int(math.Ceil(p*float64(len(samples))))-1, 0)
 		return samples[idx].latency.Seconds() * 1000
 	}
 	out := map[string]any{

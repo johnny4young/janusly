@@ -97,3 +97,4 @@ exact candidate commit:
 | TST-001 | P0 | The full Playwright lane was deferred from the pilot and remains a cutover gate. | open |
 | QUE-001 | P0 | The current cutover runbook forbids dual schedulers but does not yet prove a BullMQ/in-flight-work drain and rollback procedure. | open |
 | SRC-001 | P2 | Go source comments contain 134 internal ticket identifiers instead of durable behavioral explanations. | open |
+| MOD-001 | P2 | Go 1.26 idioms were not enforced, allowing avoidable allocation and synchronization boilerplate to accumulate. | fixed in this band |

@@ -215,14 +215,14 @@ func (c *anthropicClient) GenerateText(ctx context.Context, input GenerateTextIn
 		return nil, &AIError{Class: "unknown", Message: "provider returned an empty response"}
 	}
 
-	text := ""
+	var text strings.Builder
 	for _, block := range message.Content {
 		if block.Type == "text" {
-			text += block.Text
+			text.WriteString(block.Text)
 		}
 	}
 	out := &GenerateTextResult{
-		Text:              text,
+		Text:              text.String(),
 		FinishReason:      string(message.StopReason),
 		Provider:          "anthropic",
 		Model:             model,

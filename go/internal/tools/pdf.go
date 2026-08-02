@@ -170,7 +170,7 @@ func RenderMarkdownPDF(markdown string) []byte {
 	}
 	inCode := false
 	listIndex := 0
-	for _, raw := range strings.Split(markdown, "\n") {
+	for raw := range strings.SplitSeq(markdown, "\n") {
 		line := strings.TrimRight(raw, " \t")
 		switch {
 		case strings.HasPrefix(line, "```"):

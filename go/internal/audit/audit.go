@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"time"
 
 	"github.com/google/uuid"
@@ -43,9 +44,7 @@ type Options struct {
 // overwrites caller keys.
 func enrich(authCtx *auth.Context, metadata map[string]any) map[string]any {
 	enriched := map[string]any{}
-	for key, value := range metadata {
-		enriched[key] = value
-	}
+	maps.Copy(enriched, metadata)
 	if authCtx != nil {
 		enriched["source"] = string(authCtx.Source)
 		actor := map[string]any{"userId": authCtx.UserID, "mode": string(authCtx.Mode)}

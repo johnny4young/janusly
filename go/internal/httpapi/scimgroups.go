@@ -6,6 +6,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -249,7 +250,7 @@ func (s *V1Server) upsertScimMembership(ctx context.Context, orgID, lowerEmail, 
 func scimAllowedDomains(ctx context.Context, pool orgconfig.Querier, orgID string) []string {
 	raw, _ := orgconfig.LoadValue(ctx, pool, orgID, "auth.allowedEmailDomains").(string)
 	var domains []string
-	for _, entry := range strings.Split(raw, ",") {
+	for entry := range strings.SplitSeq(raw, ",") {
 		if trimmed := strings.ToLower(strings.TrimSpace(entry)); trimmed != "" {
 			domains = append(domains, trimmed)
 		}
@@ -258,10 +259,5 @@ func scimAllowedDomains(ctx context.Context, pool orgconfig.Querier, orgID strin
 }
 
 func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, want)
 }
