@@ -1,6 +1,7 @@
 package orgconfig
 
 import (
+	"math"
 	"strings"
 	"testing"
 )
@@ -17,8 +18,12 @@ func TestNormalizeCatalogValues(t *testing.T) {
 		{name: "boolean type", key: "runs.requireSavedWorkflow", input: "true", wantErr: "must be a boolean"},
 		{name: "integer normalization", key: "ai.generationCandidates", input: 3.9, want: float64(3)},
 		{name: "number type", key: "ai.generationCandidates", input: "3", wantErr: "must be a finite number"},
+		{name: "not a number", key: "ai.generationCandidates", input: math.NaN(), wantErr: "must be a finite number"},
+		{name: "positive infinity", key: "ai.generationCandidates", input: math.Inf(1), wantErr: "must be a finite number"},
+		{name: "negative infinity", key: "ai.generationCandidates", input: math.Inf(-1), wantErr: "must be a finite number"},
 		{name: "minimum", key: "ai.generationCandidates", input: float64(0), wantErr: "must be >= 1"},
 		{name: "maximum", key: "ai.generationCandidates", input: float64(6), wantErr: "must be <= 5"},
+		{name: "floor before minimum", key: "ai.maxRetries", input: -0.1, wantErr: "must be >= 0"},
 		{name: "fractional", key: "value.hourlyCost", input: 125.75, want: 125.75},
 		{name: "trim string", key: "ai.provider", input: " anthropic ", want: "anthropic"},
 		{name: "string type", key: "ai.provider", input: true, wantErr: "must be a string"},

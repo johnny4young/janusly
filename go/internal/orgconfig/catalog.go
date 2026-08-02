@@ -14,6 +14,7 @@ package orgconfig
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"slices"
 	"strings"
@@ -154,12 +155,12 @@ func Normalize(def *Definition, value any) (any, error) {
 		return typed, nil
 	case "number":
 		typed, ok := value.(float64)
-		if !ok {
+		if !ok || math.IsNaN(typed) || math.IsInf(typed, 0) {
 			return nil, fmt.Errorf("%s must be a finite number", def.Key)
 		}
 		normalized := typed
 		if !def.Fractional {
-			normalized = float64(int64(typed))
+			normalized = math.Floor(typed)
 		}
 		if def.Min != nil && normalized < *def.Min {
 			return nil, fmt.Errorf("%s must be >= %s", def.Key, trimFloat(*def.Min))

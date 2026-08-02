@@ -64,3 +64,42 @@ func TestResolveAllCoversTheCatalog(t *testing.T) {
 		t.Fatalf("ResolveAll must cover the whole catalog: %d vs %d", len(resolved), len(Definitions))
 	}
 }
+
+func TestResolutionNormalizesEnvironmentValues(t *testing.T) {
+	envValues := map[string]string{
+		"JANUSLY_AI_GENERATION_CANDIDATES": "3.9",
+		"JANUSLY_LLM_PROVIDER":             " anthropic ",
+		"JANUSLY_MAILER_FROM":              " sender@example.com ",
+		"JANUSLY_MCP_ALLOWED_COMMANDS":     "",
+	}
+	env := func(key string) (string, bool) {
+		value, ok := envValues[key]
+		return value, ok
+	}
+
+	value, source := ResolveValue("ai.generationCandidates", nil, env)
+	if source != "env" || value != float64(3) {
+		t.Fatalf("integer env normalization: %v %q", value, source)
+	}
+	value, source = ResolveValue("ai.provider", nil, env)
+	if source != "env" || value != "anthropic" {
+		t.Fatalf("string env normalization: %v %q", value, source)
+	}
+	value, source = ResolveValue("email.from", nil, env)
+	if source != "env" || value != "sender@example.com" {
+		t.Fatalf("open string env normalization: %v %q", value, source)
+	}
+	value, source = ResolveValue("mcp.clientCommandAllowlist", nil, env)
+	if source != "default" || value != "" {
+		t.Fatalf("empty env must fall through: %v %q", value, source)
+	}
+
+	envValues["JANUSLY_AI_GENERATION_CANDIDATES"] = "NaN"
+	if value, source = ResolveValue("ai.generationCandidates", nil, env); source != "default" || value != float64(1) {
+		t.Fatalf("non-finite env must fall through: %v %q", value, source)
+	}
+	envValues["JANUSLY_MAILER_FROM"] = "Bearer abc"
+	if value, source = ResolveValue("email.from", nil, env); source != "default" || value != "onboarding@resend.dev" {
+		t.Fatalf("secret-shaped env must fall through: %v %q", value, source)
+	}
+}

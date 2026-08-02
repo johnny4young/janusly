@@ -5,6 +5,7 @@ package orgconfig
 
 import (
 	"encoding/json"
+	"math"
 	"slices"
 	"strconv"
 )
@@ -47,7 +48,7 @@ func resolveOne(def *Definition, tenantRows map[string]json.RawMessage, lookupEn
 	}
 	for _, envKey := range def.EnvKeys {
 		raw, ok := lookupEnv(envKey)
-		if !ok {
+		if !ok || raw == "" {
 			continue
 		}
 		if value, ok := parseEnv(def, raw); ok {
@@ -90,26 +91,24 @@ func parseEnv(def *Definition, raw string) (any, bool) {
 	switch def.ValueType {
 	case "boolean":
 		if raw == "true" {
-			return true, true
+			value, err := Normalize(def, true)
+			return value, err == nil
 		}
 		if raw == "false" {
-			return false, true
+			value, err := Normalize(def, false)
+			return value, err == nil
 		}
 		return nil, false
 	case "number":
 		parsed, err := strconv.ParseFloat(raw, 64)
-		if err != nil || !inRange(def, parsed) {
+		if err != nil {
 			return nil, false
 		}
-		return parsed, true
+		value, err := Normalize(def, parsed)
+		return value, err == nil
 	default:
-		if raw == "" && !def.AllowEmpty {
-			return nil, false
-		}
-		if !inAllowedValues(def, raw) {
-			return nil, false
-		}
-		return raw, true
+		value, err := Normalize(def, raw)
+		return value, err == nil
 	}
 }
 
@@ -125,6 +124,9 @@ func inAllowedValues(def *Definition, v string) bool {
 }
 
 func inRange(def *Definition, v float64) bool {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return false
+	}
 	if def.Min != nil && v < *def.Min {
 		return false
 	}
