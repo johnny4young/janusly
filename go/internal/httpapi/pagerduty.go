@@ -12,7 +12,6 @@ package httpapi
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -179,7 +178,10 @@ func (s *V1Server) pagerDutyCallbackHandler(w http.ResponseWriter, r *http.Reque
 	}); err == nil {
 		signingSecret = secretstore.ResolveCredentialSecretRef(ctx, q, ownerState.OrgID, credential.SecretRef)
 	}
-	rawBody, _ := io.ReadAll(io.LimitReader(r.Body, pagerDutyWebhookBodyMaxBytes))
+	rawBody, ok := readRawBody(w, r, pagerDutyWebhookBodyMaxBytes)
+	if !ok {
+		return
+	}
 	if !verifyPagerDutySignature(string(rawBody), r.Header.Get("x-pagerduty-signature"), signingSecret) {
 		writeLegacy(w, opError(http.StatusForbidden, "pagerduty_invalid_signature", "invalid PagerDuty signature", nil))
 		return

@@ -92,6 +92,7 @@ exact candidate commit:
 | DOC-003 | P0 | The cutover map claimed every route phase could move to Go before data, queue, and full-browser certification. | fixed in this band |
 | OPS-001 | P1 | `make migrate` still executed the superseded standalone pilot SQL after goose despite claiming single-binary schema ownership. | fixed in this band |
 | BLD-001 | P0 | A clean checkout could not compile because the root `dist/` ignore swallowed the claimed tracked webdist placeholder required by `go:embed`. | fixed in this band |
+| SEC-001 | P1 | Four signed webhook handlers silently truncated oversized raw bodies, diverging from Node's hard 413 cap and verifying/parsing only a prefix. | fixed in architecture review |
 | EVD-001 | P1 | `SOAK.md` cited an untracked random-name series, so the 24-hour verdict was not reproducible from a clean checkout. | fixed in this band |
 | TST-001 | P0 | The full Playwright lane was deferred from the pilot and remains a cutover gate. | open |
 | QUE-001 | P0 | The current cutover runbook forbids dual schedulers but does not yet prove a BullMQ/in-flight-work drain and rollback procedure. | open |

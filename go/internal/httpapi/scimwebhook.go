@@ -6,7 +6,6 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"os"
 	"time"
@@ -21,7 +20,10 @@ import (
 
 func (s *V1Server) scimWebhookHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	rawBody, _ := io.ReadAll(io.LimitReader(r.Body, scimBodyMaxBytes))
+	rawBody, ok := readRawBody(w, r, scimBodyMaxBytes)
+	if !ok {
+		return
+	}
 	header := r.Header.Get("WorkOS-Signature")
 
 	if valid, reason := verifyWorkOsSignature(header, string(rawBody), os.Getenv("WORKOS_WEBHOOK_SECRET"), time.Now()); !valid {

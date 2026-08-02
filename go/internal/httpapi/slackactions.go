@@ -13,7 +13,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -205,7 +204,10 @@ func (s *V1Server) slackCallbackHandler(w http.ResponseWriter, r *http.Request) 
 	}); err == nil {
 		secret = secretstore.ResolveCredentialSecretRef(r.Context(), q, connection.OrgID, credential.SecretRef)
 	}
-	rawBody, _ := io.ReadAll(io.LimitReader(r.Body, slackBodyMaxBytes))
+	rawBody, ok := readRawBody(w, r, slackBodyMaxBytes)
+	if !ok {
+		return
+	}
 	timestamp, reason := verifySlackSignature(
 		r.Header.Get("x-slack-request-timestamp"), r.Header.Get("x-slack-signature"),
 		string(rawBody), secret, time.Now().Unix())

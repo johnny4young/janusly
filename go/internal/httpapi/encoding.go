@@ -1,11 +1,13 @@
-// Wire encoders + parsing helpers shared by every v1/legacy handler:
-// the {apiVersion, requestId, data|error} envelope writers, body decode,
-// cursor/int parsing, and the null-projection helpers (T-501 split).
+// Wire encoders + parsing helpers shared by every v1/legacy handler: the
+// {apiVersion, requestId, data|error} envelope writers, bounded body decode,
+// cursor/int parsing, and null projections.
 package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -40,6 +42,24 @@ func writeV1Error(w http.ResponseWriter, requestID string, status int, code, mes
 
 func decodeBody(r *http.Request, into any) error {
 	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 2<<20)).Decode(into)
+}
+
+// readRawBody preserves the exact signed bytes while enforcing the same hard
+// cap as the Node compatibility runtime. LimitReader alone is insufficient:
+// it silently turns an oversized signed payload into a valid truncated prefix.
+func readRawBody(w http.ResponseWriter, r *http.Request, maxBytes int64) ([]byte, bool) {
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBytes))
+	if err == nil {
+		return raw, true
+	}
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeLegacy(w, opError(http.StatusRequestEntityTooLarge, "server_request_failed",
+			fmt.Sprintf("Request body too large. Limit is %d bytes", maxBytes), nil))
+		return nil, false
+	}
+	writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+	return nil, false
 }
 
 var unmarshalFieldPattern = regexp.MustCompile(`rawWorkflow\.(\w+)`)

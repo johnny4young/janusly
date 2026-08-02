@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"math"
 	"net/http"
 	"regexp"
@@ -587,7 +586,10 @@ func (s *V1Server) externalRuntimeCallbackHandler(w http.ResponseWriter, r *http
 	}); err == nil {
 		secret = secretstore.ResolveCredentialSecretRef(ctx, q, connection.OrgID, credential.SecretRef)
 	}
-	rawBody, _ := io.ReadAll(io.LimitReader(r.Body, externalRuntimeBodyMaxBytes))
+	rawBody, ok := readRawBody(w, r, externalRuntimeBodyMaxBytes)
+	if !ok {
+		return
+	}
 	if !verifyExternalRuntimeSignature(r.Header.Get("x-janusly-signature"), string(rawBody), secret, time.Now().Unix()) {
 		writeLegacy(w, opError(http.StatusUnauthorized, "external_runtime_invalid_signature", "invalid external runtime signature", nil))
 		return
