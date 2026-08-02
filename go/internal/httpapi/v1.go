@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/johnny4young/janusly/go/internal/auth"
+	"github.com/johnny4young/janusly/go/internal/authpolicy"
 	"github.com/johnny4young/janusly/go/internal/browsersession"
 	"github.com/johnny4young/janusly/go/internal/engine"
 	"github.com/johnny4young/janusly/go/internal/executors"
@@ -32,6 +33,7 @@ type V1Server struct {
 	newID          func() string
 	hub            *streamHub
 	resolver       *auth.Resolver
+	authPolicy     *authpolicy.Evaluator
 	limiter        *ratelimit.Limiter
 	limiterTracker *ratelimit.Tracker
 	queueCache     *queueHealthCache
@@ -52,6 +54,12 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 // lifetime (the "too many clients" suite failure under a live soak).
 func NewV1HandlerWithShutdown(eng *engine.Engine, pool *pgxpool.Pool) (http.Handler, func()) {
 	server := &V1Server{engine: eng, pool: pool, resolver: auth.NewResolver(pool, auth.ConfigFromEnv()), newID: uuid.NewString, hub: newStreamHub()}
+	server.authPolicy = authpolicy.New(pool)
+	server.resolver.SetPolicyEvaluator(func(ctx context.Context, input auth.PolicyInput) bool {
+		return server.authPolicy.Evaluate(ctx, authpolicy.Input{
+			OrgID: input.OrgID, UserID: input.UserID, Email: input.Email, Mode: input.Mode,
+		}).Allowed
+	})
 	server.limiterTracker = ratelimit.NewTracker(pool)
 	server.limiter = ratelimit.New(pool, ratelimit.Hooks{
 		OnError: server.limiterTracker.RecordError, OnSuccess: server.limiterTracker.RecordRecovery,

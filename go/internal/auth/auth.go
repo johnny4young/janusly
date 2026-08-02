@@ -89,6 +89,19 @@ type Identity struct {
 	BrowserSessionID   string
 }
 
+// PolicyInput is the provider-neutral shape handed to the one per-org policy
+// evaluator after membership resolution proves the tenant. The auth package
+// owns the invocation seam; the concrete evaluator is injected at server boot
+// to avoid coupling provider extraction to policy storage/audit packages.
+type PolicyInput struct {
+	OrgID, UserID, Email string
+	Mode                 Mode
+}
+
+// PolicyEvaluator returns false when the resolved principal must not enter the
+// tenant. Implementations are fail-soft on their own storage/audit writes.
+type PolicyEvaluator func(context.Context, PolicyInput) bool
+
 // principal is the untrusted carrier of provider-supplied claims.
 type principal struct {
 	providerName       Mode
@@ -110,6 +123,7 @@ type Resolver struct {
 	allowDevHeaders  bool
 	verifySupabase   func(ctx context.Context, token string) (userID string, email string, ok bool)
 	getActiveSession func(ctx context.Context, sessionID string) (store.AuthSession, error)
+	evaluatePolicy   PolicyEvaluator
 }
 
 // Config mirrors the reference's boot-time gate inputs.
@@ -165,6 +179,10 @@ func NewResolver(pool *pgxpool.Pool, cfg Config) *Resolver {
 	}
 	return r
 }
+
+// SetPolicyEvaluator wires the centralized policy boundary at process boot.
+// Tests that exercise extraction in isolation may leave it nil.
+func (rv *Resolver) SetPolicyEvaluator(evaluate PolicyEvaluator) { rv.evaluatePolicy = evaluate }
 
 func constantTimeBearerMatch(header, expected string) bool {
 	if header == "" || expected == "" {
@@ -274,9 +292,10 @@ func (rv *Resolver) Resolve(ctx context.Context, r *http.Request) (*Context, err
 		return nil, nil
 	}
 	q := store.New(rv.pool)
+	var resolved *Context
 	switch p.providerName {
 	case ModeSupabase, ModeJanuslySession:
-		return rv.resolveHumanMembership(ctx, q, p)
+		resolved, err = rv.resolveHumanMembership(ctx, q, p)
 	case ModeServiceToken:
 		orgID := p.providerOrgHint
 		if orgID == "" {
@@ -290,11 +309,11 @@ func (rv *Resolver) Resolve(ctx context.Context, r *http.Request) (*Context, err
 		} else if !errorsIsNoRows(err) {
 			return nil, err
 		}
-		return &Context{
+		resolved = &Context{
 			OrgID: orgID, UserID: p.providerUserID, Mode: ModeServiceToken,
 			Source: p.declaredSource, ServiceTokenSuffix: p.serviceTokenSuffix,
 			MembershipRole: role,
-		}, nil
+		}
 	default: // dev-headers
 		role := ""
 		if membership, err := q.GetOrgMembership(ctx, store.GetOrgMembershipParams{
@@ -304,12 +323,21 @@ func (rv *Resolver) Resolve(ctx context.Context, r *http.Request) (*Context, err
 		} else if !errorsIsNoRows(err) {
 			return nil, err
 		}
-		return &Context{
+		resolved = &Context{
 			OrgID: p.providerOrgHint, UserID: p.providerUserID,
 			Mode: ModeDevHeaders, Source: p.declaredSource,
 			MembershipRole: role, Email: p.providerUserEmail,
-		}, nil
+		}
 	}
+	if err != nil || resolved == nil {
+		return resolved, err
+	}
+	if rv.evaluatePolicy != nil && !rv.evaluatePolicy(ctx, PolicyInput{
+		OrgID: resolved.OrgID, UserID: resolved.UserID, Email: resolved.Email, Mode: resolved.Mode,
+	}) {
+		return nil, nil
+	}
+	return resolved, nil
 }
 
 // resolveHumanMembership: the security-relevant branch — the hint is a

@@ -103,7 +103,7 @@ exact candidate commit:
 | SEC-003 | P1 | Public and internal HTTP servers bounded only header-read time; full request reads, idle connections, and header bytes retained unbounded/default policy. | fixed in architecture review |
 | SEC-005 | P1 | Supabase identity and embedding-provider responses were JSON-decoded without a decoded-body byte cap. | fixed in architecture review |
 | SEC-006 | P1 | Credentialed CORS honored `API_ALLOWED_ORIGINS=*` in production, which is unsafe once browser-session reads and mutations are enabled. | fixed in architecture review |
-| AUTH-001 | P0 | Go now resolves durable `janusly-session` cookies and serves their lifecycle routes, but still lacks the WorkOS SSO issuance callback that creates those sessions. | open |
+| AUTH-001 | P0 | Go now has durable browser sessions plus tenant-scoped WorkOS persistence, one-time state, and centralized policy evaluation, but still lacks the WorkOS HTTP start/callback path that issues those sessions. | open |
 | AUTH-002 | P0 | Go labels bootstrap surfaces identity-scoped but dispatches them through tenant membership resolution, so a legitimate zero-membership identity cannot bootstrap. | fixed in architecture review |
 | AUTH-003 | P0 | Go still lacks atomic first-organization creation and atomic invitation acceptance with the exact Node bootstrap response/error contract. | fixed in architecture review |
 
@@ -211,3 +211,32 @@ invitation acceptance. The exact implementation passed `make ci` on
 2026-08-02: sqlc/OpenAPI drift, coverage floors, build, lint, `govulncheck`, the
 race-enabled PostgreSQL integration suite, and semantic parity F01-F25 are
 green.
+
+### SSO persistence and centralized policy foundation
+
+The fifth authentication-parity band establishes the fail-closed primitives
+needed by the WorkOS HTTP lifecycle without mixing provider network behavior
+into the same commit. Tenant-scoped sqlc queries now cover bounded WorkOS SSO
+connection CRUD, exact-key authentication-policy reads, and atomic live-nonce
+consumption. The nonce delete returns the single winning row, so concurrent or
+expired callback attempts cannot reuse an authorization response.
+
+SSO state now uses the shared signed-token envelope with the dedicated
+`sso_state` purpose, a ten-minute lifetime, and explicit organization, nonce,
+and callback bindings. A centralized evaluator runs only after the resolver has
+proved the provider identity and tenant grant. It preserves the Node policy
+matrix: service tokens bypass human policy, development identities enforce SSO
+unless the explicit local bypass is enabled, Supabase identities enforce SSO,
+domain, and MFA-marker policy, and durable Janusly sessions enforce domain and
+MFA-marker policy without reapplying the SSO-entry requirement. Policy
+rejections write a bounded `auth.policy.rejected` receipt, while policy reads
+fail to their documented defaults instead of widening configuration scope.
+
+Unit and PostgreSQL integration tests prove tenant isolation, partial updates
+and revocation, exactly one concurrent nonce consumer, expiry rejection,
+narrow policy loading, provider-specific decisions, audit evidence, and
+middleware enforcement. The exact implementation passed `make ci` on
+2026-08-02: sqlc/OpenAPI drift, coverage floors, build, lint, `govulncheck`, the
+race-enabled PostgreSQL integration suite, and semantic parity F01-F25 are
+green. `AUTH-001` remains open until the guarded WorkOS client and exact
+start/callback session-issuance contract are served and validated.

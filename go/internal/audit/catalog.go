@@ -170,6 +170,7 @@ var knownActions = map[Action]bool{
 // interaction callback, the upstream-health auto-pause watcher, the
 // schedule sweep, auto-healing, and the memory consent purge.
 var rawAuditActions = map[Action]bool{
+	"auth.policy.rejected":               true,
 	"auto_healing.apply.manual":         true,
 	"auto_healing.failed":               true,
 	"memory.bulk.purged":                true,

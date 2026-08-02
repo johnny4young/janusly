@@ -52,6 +52,35 @@ func seedMember(t *testing.T, pool *pgxpool.Pool, org, userID, email, role strin
 	}
 }
 
+func TestResolverRunsInjectedPolicyAfterTenantResolution(t *testing.T) {
+	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+	}
+	pool, err := pgxpool.New(t.Context(), dsn)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	rv := NewResolver(pool, Config{AllowDevHeaders: true})
+	var observed PolicyInput
+	rv.SetPolicyEvaluator(func(_ context.Context, input PolicyInput) bool {
+		observed = input
+		return false
+	})
+	req := httptest.NewRequest("GET", "/tools", nil)
+	req.Header.Set("x-org-id", "policy-org")
+	req.Header.Set("x-user-id", "looks-like@example.com")
+	resolved, err := rv.Resolve(t.Context(), req)
+	if err != nil || resolved != nil {
+		t.Fatalf("policy rejection must resolve to nil: resolved=%+v err=%v", resolved, err)
+	}
+	if observed.OrgID != "policy-org" || observed.UserID != "looks-like@example.com" ||
+		observed.Mode != ModeDevHeaders || observed.Email != "" {
+		t.Fatalf("policy input must use resolved provider truth: %+v", observed)
+	}
+}
+
 func TestSupabaseMembershipResolution(t *testing.T) {
 	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
 	if dsn == "" {
