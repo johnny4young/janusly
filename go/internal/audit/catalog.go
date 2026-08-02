@@ -166,12 +166,16 @@ var knownActions = map[Action]bool{
 // rawAuditActions holds reference actions written through the RAW audit()
 // chokepoint (system-actor / skipAuth writers), which the typed
 // AuditAction union — and therefore the parity pin above — deliberately
-// excludes: the SCIM webhook lifecycle (scim-event-handler.ts), the Slack
-// interaction callback, the upstream-health auto-pause watcher, the
-// schedule sweep, auto-healing, and the memory consent purge.
+// excludes: the SCIM webhook lifecycle (scim-event-handler.ts), the public
+// WorkOS SSO lifecycle, the Slack interaction callback, the upstream-health
+// auto-pause watcher, the schedule sweep, auto-healing, and the memory consent
+// purge.
 var rawAuditActions = map[Action]bool{
 	"auth.policy.rejected":               true,
+	"auth.sso.callback_failed":           true,
+	"auth.sso.login":                     true,
 	"auth.sso.start":                     true,
+	"auth.sso.state_invalid":             true,
 	"auto_healing.apply.manual":         true,
 	"auto_healing.failed":               true,
 	"memory.bulk.purged":                true,

@@ -296,3 +296,32 @@ func (q *Queries) UpdateSsoConnection(ctx context.Context, arg UpdateSsoConnecti
 	)
 	return i, err
 }
+
+const upsertSsoMembership = `-- name: UpsertSsoMembership :exec
+INSERT INTO org_members (id, org_id, user_id, email, role, invited_by)
+VALUES ($1, $2, $3, $4, 'viewer', NULL)
+ON CONFLICT (org_id, user_id) DO UPDATE
+SET email = EXCLUDED.email,
+    role = EXCLUDED.role,
+    invited_by = NULL
+`
+
+type UpsertSsoMembershipParams struct {
+	ID     string
+	OrgID  string
+	UserID string
+	Email  pgtype.Text
+}
+
+// The WorkOS profile id is the durable membership key. Callback
+// provisioning intentionally mirrors the compatibility runtime: every
+// successful login refreshes the verified email and viewer grant.
+func (q *Queries) UpsertSsoMembership(ctx context.Context, arg UpsertSsoMembershipParams) error {
+	_, err := q.db.Exec(ctx, upsertSsoMembership,
+		arg.ID,
+		arg.OrgID,
+		arg.UserID,
+		arg.Email,
+	)
+	return err
+}

@@ -103,7 +103,7 @@ exact candidate commit:
 | SEC-003 | P1 | Public and internal HTTP servers bounded only header-read time; full request reads, idle connections, and header bytes retained unbounded/default policy. | fixed in architecture review |
 | SEC-005 | P1 | Supabase identity and embedding-provider responses were JSON-decoded without a decoded-body byte cap. | fixed in architecture review |
 | SEC-006 | P1 | Credentialed CORS honored `API_ALLOWED_ORIGINS=*` in production, which is unsafe once browser-session reads and mutations are enabled. | fixed in architecture review |
-| AUTH-001 | P0 | Go now has durable browser sessions, WorkOS connection administration, and the guarded SSO start flow, but still lacks the callback that atomically provisions membership and issues a session. | open |
+| AUTH-001 | P0 | Go lacked the complete WorkOS browser-session issuance lifecycle required by the web. | fixed in architecture review |
 | AUTH-002 | P0 | Go labels bootstrap surfaces identity-scoped but dispatches them through tenant membership resolution, so a legitimate zero-membership identity cannot bootstrap. | fixed in architecture review |
 | AUTH-003 | P0 | Go still lacks atomic first-organization creation and atomic invitation acceptance with the exact Node bootstrap response/error contract. | fixed in architecture review |
 
@@ -276,3 +276,32 @@ floors, build, lint, `govulncheck`, race-enabled PostgreSQL integration, and
 semantic parity F01-F25 are green. `AUTH-001` remains open only for the exact
 callback verification, policy, atomic membership/audit/session issuance, and
 browser completion redirect.
+
+### Atomic WorkOS callback and session issuance
+
+The seventh authentication-parity band closes `AUTH-001`. The public callback
+requires both deployment URLs and the WorkOS `code` plus signed `state`, then
+checks HMAC purpose/expiry, exact callback binding, atomic live-nonce
+consumption, active tenant connection, and the returned WorkOS connection id
+in that order. Invalid signatures use the non-attributable `default` audit
+tenant; valid but mismatched/replayed state retains the signed organization for
+forensics. Exchange, connection, and policy failures write the reference's
+bounded `auth.sso.callback_failed` reasons without provisioning a grant.
+
+The WorkOS profile enters the centralized policy evaluator as a
+`janusly-session` identity before any mutation. On allow, a single PostgreSQL
+transaction upserts the verified-email viewer membership, writes
+`auth.sso.login`, and persists the revocable session at the organization policy
+TTL. A failure at any later write rolls all three back; only the separate
+failure receipt remains. After commit, the browser receives the purpose-bound
+opaque session id in an `HttpOnly`, `SameSite=Lax` cookie and a no-store 302 to
+`/auth/sso/complete`; no session material enters the redirect URL.
+
+Integration tests prove successful provisioning and 30-minute policy TTL,
+one-time replay rejection before a second WorkOS exchange, callback and
+connection binding, allowed-domain denial with both policy and SSO receipts,
+network failure without membership, and a forced session primary-key conflict
+that rolls back the preceding membership plus login audit. The exact band
+passed `make ci` on 2026-08-02: sqlc/OpenAPI drift, coverage floors, build,
+lint, `govulncheck`, race-enabled PostgreSQL integration, and semantic parity
+F01-F25 are green.

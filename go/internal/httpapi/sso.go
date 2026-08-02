@@ -1,9 +1,10 @@
-// WorkOS SSO administration and authorization start. The public callback is
-// implemented in the next authentication band because its membership, audit,
-// and browser-session writes form one separate transactional boundary.
+// WorkOS SSO administration plus the public authorization start/callback.
+// Callback state and provider bindings fail before provisioning; membership,
+// login audit, and the revocable browser session commit in one transaction.
 package httpapi
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -12,13 +13,18 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/go/internal/audit"
+	"github.com/johnny4young/janusly/go/internal/auth"
+	"github.com/johnny4young/janusly/go/internal/authpolicy"
+	"github.com/johnny4young/janusly/go/internal/browsersession"
 	"github.com/johnny4young/janusly/go/internal/ssostate"
 	"github.com/johnny4young/janusly/go/internal/store"
+	"github.com/johnny4young/janusly/go/internal/workos"
 )
 
 const ssoMaxJSONBodyBytes int64 = 1_048_576
@@ -240,6 +246,149 @@ func (s *V1Server) startSso(w http.ResponseWriter, r *http.Request) {
 	redirectNoStore(w, authorizeURL)
 }
 
+func (s *V1Server) invalidSsoState(ctx context.Context, orgID, reason string) {
+	audit.WriteAs(ctx, s.pool, orgID, "sso", "auth.sso.state_invalid", audit.Options{
+		TargetType: "sso_state", Metadata: map[string]any{"reason": reason},
+	})
+}
+
+func (s *V1Server) failedSsoCallback(ctx context.Context, orgID, userID, connectionID, reason string, metadata map[string]any) {
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	metadata["reason"] = reason
+	audit.WriteAs(ctx, s.pool, orgID, userID, "auth.sso.callback_failed", audit.Options{
+		TargetType: "sso_connection", TargetID: connectionID, Metadata: metadata,
+	})
+}
+
+func (s *V1Server) callbackSso(w http.ResponseWriter, r *http.Request) {
+	callbackURL := os.Getenv("JANUSLY_SSO_CALLBACK_URL")
+	webBaseURL := os.Getenv("JANUSLY_WEB_BASE_URL")
+	if callbackURL == "" || webBaseURL == "" {
+		writeLegacy(w, opError(http.StatusInternalServerError, "sso_not_configured", "SSO is not configured", nil))
+		return
+	}
+	code := r.URL.Query().Get("code")
+	stateToken := r.URL.Query().Get("state")
+	if code == "" || stateToken == "" {
+		writeLegacy(w, opError(http.StatusBadRequest, "sso_code_and_state_required", "code and state are required", nil))
+		return
+	}
+	envelope, err := ssostate.Verify(stateToken)
+	if err != nil {
+		s.invalidSsoState(r.Context(), "default", "invalid_signature_or_expiry")
+		writeLegacy(w, opError(http.StatusBadRequest, "sso_invalid_state", "invalid state", nil))
+		return
+	}
+	state := envelope.Payload
+	if state.CallbackURL != callbackURL {
+		s.invalidSsoState(r.Context(), state.OrgID, "callback_url_mismatch")
+		writeLegacy(w, opError(http.StatusBadRequest, "sso_invalid_state", "invalid state", nil))
+		return
+	}
+	if _, err := store.New(s.pool).ConsumeSsoNonce(r.Context(), store.ConsumeSsoNonceParams{
+		OrgID: state.OrgID, Nonce: state.Nonce,
+	}); errors.Is(err, pgx.ErrNoRows) {
+		s.invalidSsoState(r.Context(), state.OrgID, "nonce_replayed_or_expired")
+		writeLegacy(w, opError(http.StatusBadRequest, "sso_invalid_state", "invalid state", nil))
+		return
+	} else if err != nil {
+		writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+		return
+	}
+	connection, err := store.New(s.pool).FindSsoConnectionForOrg(r.Context(), state.OrgID)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && connection.Status != "active") {
+		s.failedSsoCallback(r.Context(), state.OrgID, "sso", "", "connection_missing", nil)
+		writeLegacy(w, opError(http.StatusNotFound, "sso_no_active_connection",
+			"no active SSO connection for this org", nil))
+		return
+	}
+	if err != nil {
+		writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+		return
+	}
+	if s.workos == nil {
+		s.failedSsoCallback(r.Context(), state.OrgID, "sso", connection.ID, "exchange_failed", nil)
+		writeLegacy(w, opError(http.StatusBadRequest, "sso_exchange_failed", "SSO exchange failed", nil))
+		return
+	}
+	profile, err := s.workos.ExchangeCode(r.Context(), code, callbackURL)
+	if err != nil {
+		reason := "exchange_failed"
+		var exchangeErr *workos.ExchangeError
+		if errors.As(err, &exchangeErr) {
+			reason = fmt.Sprintf("workos_%d", exchangeErr.StatusCode)
+		}
+		s.failedSsoCallback(r.Context(), state.OrgID, "sso", connection.ID, reason, nil)
+		writeLegacy(w, opError(http.StatusBadRequest, "sso_exchange_failed", "SSO exchange failed", nil))
+		return
+	}
+	if profile.ConnectionID != connection.ProviderConnectionID {
+		s.failedSsoCallback(r.Context(), state.OrgID, "sso", connection.ID, "connection_id_mismatch", map[string]any{
+			"expectedConnectionId": connection.ProviderConnectionID,
+			"profileConnectionId":  profile.ConnectionID,
+		})
+		writeLegacy(w, opError(http.StatusBadRequest, "sso_connection_mismatch", "SSO connection mismatch", nil))
+		return
+	}
+	decision := s.authPolicy.Evaluate(r.Context(), authpolicy.Input{
+		OrgID: state.OrgID, UserID: profile.ID, Email: profile.Email,
+		Mode: auth.ModeJanuslySession, Connection: &connection, ProvidedConnection: true,
+	})
+	if !decision.Allowed {
+		s.failedSsoCallback(r.Context(), state.OrgID, profile.ID, connection.ID, "policy_rejected",
+			map[string]any{"policyKey": decision.PolicyKey})
+		writeLegacy(w, opError(http.StatusForbidden, "sso_policy_violation",
+			"SSO login blocked by org policy ("+decision.PolicyKey+")",
+			map[string]any{"policyKey": decision.PolicyKey}))
+		return
+	}
+	identity := &auth.Identity{
+		UserID: profile.ID, Email: profile.Email, OrgHint: state.OrgID,
+		Mode: auth.ModeJanuslySession, Source: auth.SourceSSO,
+	}
+	var session store.AuthSession
+	err = audit.WithIdentityAuditTx(r.Context(), s.pool, identity, func(tx pgx.Tx, txAudit audit.IdentityTxAudit) error {
+		q := store.New(tx)
+		if err := q.UpsertSsoMembership(r.Context(), store.UpsertSsoMembershipParams{
+			ID: s.newID(), OrgID: state.OrgID, UserID: profile.ID,
+			Email: pgtype.Text{String: profile.Email, Valid: profile.Email != ""},
+		}); err != nil {
+			return err
+		}
+		if err := txAudit(state.OrgID, "auth.sso.login", audit.Options{
+			TargetType: "sso_connection", TargetID: connection.ID,
+			Metadata: map[string]any{
+				"via": "workos", "connectionId": connection.ProviderConnectionID,
+				"email": profile.Email,
+			},
+		}); err != nil {
+			return err
+		}
+		var err error
+		session, err = q.CreateAuthSession(r.Context(), store.CreateAuthSessionParams{
+			ID: s.newID(), UserID: profile.ID, Email: profile.Email, OrgID: state.OrgID,
+			ExpiresAt: time.Now().Add(time.Duration(decision.SessionTTLSeconds) * time.Second),
+		})
+		return err
+	})
+	if err != nil {
+		s.failedSsoCallback(r.Context(), state.OrgID, profile.ID, connection.ID,
+			"membership_persist_failed", map[string]any{"detail": err.Error()})
+		writeLegacy(w, opError(http.StatusInternalServerError, "sso_membership_persist_failed",
+			"membership_persist_failed", nil))
+		return
+	}
+	sessionToken, err := browsersession.CreateToken(session.ID, decision.SessionTTLSeconds)
+	if err != nil {
+		writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+		return
+	}
+	w.Header().Set("Set-Cookie", browsersession.SessionCookie(sessionToken.Value, decision.SessionTTLSeconds))
+	redirectNoStore(w, strings.TrimSuffix(webBaseURL, "/")+"/auth/sso/complete")
+}
+
 func (s *V1Server) mountSsoRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /org/sso/connections", s.auth(s.listSsoConnections))
 	mux.HandleFunc("POST /org/sso/connections", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
@@ -252,4 +401,5 @@ func (s *V1Server) mountSsoRoutes(mux *http.ServeMux) {
 		writeLegacy(w, s.revokeSsoConnection(r, rc))
 	}))
 	mux.HandleFunc("GET /auth/sso/start", s.startSso)
+	mux.HandleFunc("GET /auth/sso/callback", s.callbackSso)
 }

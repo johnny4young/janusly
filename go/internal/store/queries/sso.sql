@@ -51,6 +51,17 @@ RETURNING id, org_id, provider, provider_connection_id, status, enforced_sso,
 INSERT INTO sso_state_nonces (id, org_id, nonce, expires_at)
 VALUES ($1, $2, $3, $4);
 
+-- The WorkOS profile id is the durable membership key. Callback
+-- provisioning intentionally mirrors the compatibility runtime: every
+-- successful login refreshes the verified email and viewer grant.
+-- name: UpsertSsoMembership :exec
+INSERT INTO org_members (id, org_id, user_id, email, role, invited_by)
+VALUES ($1, $2, $3, $4, 'viewer', NULL)
+ON CONFLICT (org_id, user_id) DO UPDATE
+SET email = EXCLUDED.email,
+    role = EXCLUDED.role,
+    invited_by = NULL;
+
 -- DELETE ... RETURNING is the single-use claim: exactly one concurrent
 -- callback can consume a live nonce; expired rows never authorize a login.
 -- name: ConsumeSsoNonce :one

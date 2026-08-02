@@ -6,14 +6,100 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/johnny4young/janusly/go/internal/authpolicy"
+	"github.com/johnny4young/janusly/go/internal/browsersession"
 	"github.com/johnny4young/janusly/go/internal/ssostate"
+	"github.com/johnny4young/janusly/go/internal/store"
+	"github.com/johnny4young/janusly/go/internal/workos"
 )
+
+type stubWorkOSClient struct {
+	profile       workos.Profile
+	exchangeError error
+	exchangeCalls int
+}
+
+func (c *stubWorkOSClient) BuildAuthorizeURL(_, _, _ string) (string, error) {
+	return "https://api.workos.com/sso/authorize?stub=1", nil
+}
+
+func (c *stubWorkOSClient) ExchangeCode(context.Context, string, string) (workos.Profile, error) {
+	c.exchangeCalls++
+	return c.profile, c.exchangeError
+}
+
+func newPublicSsoServer(t *testing.T, pool *pgxpool.Pool, client workosClient, newID func() string) *httptest.Server {
+	t.Helper()
+	if newID == nil {
+		newID = uuid.NewString
+	}
+	server := &V1Server{pool: pool, newID: newID, workos: client, authPolicy: authpolicy.New(pool)}
+	mux := http.NewServeMux()
+	server.mountSsoRoutes(mux)
+	probe := httptest.NewServer(WithBrowserHeaders(mux))
+	t.Cleanup(probe.Close)
+	return probe
+}
+
+func callPublicSso(t *testing.T, baseURL, path string) (int, http.Header, map[string]any) {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodGet, baseURL+path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body := map[string]any{}
+	_ = json.NewDecoder(response.Body).Decode(&body)
+	return response.StatusCode, response.Header, body
+}
+
+func seedSsoConnection(t *testing.T, pool *pgxpool.Pool, orgID, connectionID string) string {
+	t.Helper()
+	id := uuid.NewString()
+	if _, err := store.New(pool).CreateSsoConnection(t.Context(), store.CreateSsoConnectionParams{
+		ID: id, OrgID: orgID, Provider: "workos", ProviderConnectionID: connectionID,
+	}); err != nil {
+		t.Fatalf("seed SSO connection: %v", err)
+	}
+	return id
+}
+
+func issueCallbackState(t *testing.T, pool *pgxpool.Pool, orgID, callbackURL string, persistNonce bool) string {
+	t.Helper()
+	nonce := uuid.NewString()
+	state, err := ssostate.Create(orgID, nonce, callbackURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persistNonce {
+		if err := store.New(pool).RecordSsoNonce(t.Context(), store.RecordSsoNonceParams{
+			ID: uuid.NewString(), OrgID: orgID, Nonce: nonce, ExpiresAt: state.ExpiresAt,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return state.Value
+}
 
 func callSsoWithoutFollowing(t *testing.T, h *apiHarness, path string) (int, http.Header, []byte) {
 	t.Helper()
@@ -171,5 +257,239 @@ func TestSsoStartCreatesBoundSingleUseStateAndRedirectsWithoutAuth(t *testing.T)
 	t.Setenv("JANUSLY_SSO_CALLBACK_URL", "https://api.example.com/auth/sso/callback")
 	if status, _, raw := callSsoWithoutFollowing(t, h, "/auth/sso/start?orgId=missing-org"); status != http.StatusNotFound || !strings.Contains(string(raw), "sso_no_active_connection") {
 		t.Fatalf("missing connection: %d %s", status, raw)
+	}
+}
+
+func TestSsoCallbackAtomicallyProvisionsMembershipAuditAndSession(t *testing.T) {
+	const callbackURL = "https://api.example.com/auth/sso/callback"
+	t.Setenv("JANUSLY_RESUME_TOKEN_SECRET", "sso-callback-success-secret")
+	t.Setenv("JANUSLY_SSO_CALLBACK_URL", callbackURL)
+	t.Setenv("JANUSLY_WEB_BASE_URL", "https://app.example.com/")
+	pool := testPool(t)
+	orgID := "callback-success-" + uuid.NewString()
+	connectionID := "conn_success_" + uuid.NewString()
+	connectionRowID := seedSsoConnection(t, pool, orgID, connectionID)
+	if err := store.New(pool).UpsertOrgConfigValue(t.Context(), store.UpsertOrgConfigValueParams{
+		ID: uuid.NewString(), OrgID: orgID, Key: "auth.sessionTtlSeconds",
+		ValueJson: []byte(`1800`), Category: "auth", Description: "test",
+		ValueType: "number", UpdatedBy: pgtype.Text{String: "tester", Valid: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	client := &stubWorkOSClient{profile: workos.Profile{
+		ID: "workos-user-" + uuid.NewString(), Email: "alice@acme.com", ConnectionID: connectionID,
+	}}
+	server := newPublicSsoServer(t, pool, client, nil)
+	state := issueCallbackState(t, pool, orgID, callbackURL, true)
+	path := "/auth/sso/callback?code=code_success&state=" + url.QueryEscape(state)
+	status, headers, body := callPublicSso(t, server.URL, path)
+	if status != http.StatusFound || headers.Get("Location") != "https://app.example.com/auth/sso/complete" ||
+		!strings.Contains(headers.Get("Set-Cookie"), browsersession.CookieName+"=") ||
+		strings.Contains(headers.Get("Location"), browsersession.CookieName) || len(body) != 0 {
+		t.Fatalf("callback: status=%d headers=%v body=%+v", status, headers, body)
+	}
+
+	var memberEmail, role string
+	var invitedBy pgtype.Text
+	if err := pool.QueryRow(t.Context(), `SELECT email, role, invited_by FROM org_members
+		WHERE org_id = $1 AND user_id = $2`, orgID, client.profile.ID).Scan(&memberEmail, &role, &invitedBy); err != nil ||
+		memberEmail != "alice@acme.com" || role != "viewer" || invitedBy.Valid {
+		t.Fatalf("membership: email=%q role=%q invitedBy=%+v err=%v", memberEmail, role, invitedBy, err)
+	}
+	var sessionID string
+	var expiresAt time.Time
+	if err := pool.QueryRow(t.Context(), `SELECT id, expires_at FROM auth_sessions
+		WHERE org_id = $1 AND user_id = $2 AND revoked_at IS NULL`, orgID, client.profile.ID).Scan(&sessionID, &expiresAt); err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	remaining := time.Until(expiresAt)
+	if remaining < 29*time.Minute || remaining > 31*time.Minute {
+		t.Fatalf("policy TTL = %v", remaining)
+	}
+	responseCookie := (&http.Response{Header: headers}).Cookies()[0]
+	request := httptest.NewRequest(http.MethodGet, "/auth/session", nil)
+	request.AddCookie(responseCookie)
+	if got := browsersession.ReadSessionID(request); got != sessionID {
+		t.Fatalf("opaque cookie resolves %q, want %q", got, sessionID)
+	}
+	var loginAudits int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_logs
+		WHERE org_id = $1 AND user_id = $2 AND action = 'auth.sso.login'
+		  AND target_id = $3`, orgID, client.profile.ID, connectionRowID).Scan(&loginAudits); err != nil || loginAudits != 1 {
+		t.Fatalf("login audit: count=%d err=%v", loginAudits, err)
+	}
+	if client.exchangeCalls != 1 {
+		t.Fatalf("exchange calls = %d", client.exchangeCalls)
+	}
+
+	// A successful callback consumes the nonce; replay never reaches WorkOS or
+	// creates another durable session.
+	replayStatus, _, replayBody := callPublicSso(t, server.URL, path)
+	if replayStatus != http.StatusBadRequest || replayBody["code"] != "sso_invalid_state" || client.exchangeCalls != 1 {
+		t.Fatalf("replay: status=%d body=%+v calls=%d", replayStatus, replayBody, client.exchangeCalls)
+	}
+	var sessions int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM auth_sessions
+		WHERE org_id = $1 AND user_id = $2`, orgID, client.profile.ID).Scan(&sessions); err != nil || sessions != 1 {
+		t.Fatalf("session replay count=%d err=%v", sessions, err)
+	}
+}
+
+func TestSsoCallbackRejectsStateConnectionAndPolicyBeforeProvisioning(t *testing.T) {
+	const callbackURL = "https://api.example.com/auth/sso/callback"
+	t.Setenv("JANUSLY_RESUME_TOKEN_SECRET", "sso-callback-rejection-secret")
+	t.Setenv("JANUSLY_SSO_CALLBACK_URL", callbackURL)
+	t.Setenv("JANUSLY_WEB_BASE_URL", "https://app.example.com")
+	pool := testPool(t)
+
+	t.Run("tampered state", func(t *testing.T) {
+		client := &stubWorkOSClient{}
+		server := newPublicSsoServer(t, pool, client, nil)
+		status, _, body := callPublicSso(t, server.URL, "/auth/sso/callback?code=code&state=tampered")
+		if status != http.StatusBadRequest || body["code"] != "sso_invalid_state" || client.exchangeCalls != 0 {
+			t.Fatalf("tampered: %d %+v calls=%d", status, body, client.exchangeCalls)
+		}
+		var audits int
+		_ = pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_logs
+			WHERE org_id = 'default' AND action = 'auth.sso.state_invalid'
+			  AND metadata->>'reason' = 'invalid_signature_or_expiry'`).Scan(&audits)
+		if audits == 0 {
+			t.Fatal("tampered state must leave a defensive audit")
+		}
+	})
+
+	t.Run("callback binding", func(t *testing.T) {
+		orgID := "callback-binding-" + uuid.NewString()
+		state := issueCallbackState(t, pool, orgID, "https://old.example.com/callback", true)
+		client := &stubWorkOSClient{}
+		server := newPublicSsoServer(t, pool, client, nil)
+		status, _, body := callPublicSso(t, server.URL, "/auth/sso/callback?code=code&state="+url.QueryEscape(state))
+		if status != http.StatusBadRequest || body["code"] != "sso_invalid_state" || client.exchangeCalls != 0 {
+			t.Fatalf("binding: %d %+v calls=%d", status, body, client.exchangeCalls)
+		}
+		var nonces int
+		_ = pool.QueryRow(t.Context(), `SELECT count(*) FROM sso_state_nonces WHERE org_id = $1`, orgID).Scan(&nonces)
+		if nonces != 1 {
+			t.Fatalf("callback mismatch must reject before nonce consumption: %d", nonces)
+		}
+	})
+
+	t.Run("connection binding", func(t *testing.T) {
+		orgID := "connection-binding-" + uuid.NewString()
+		seedSsoConnection(t, pool, orgID, "conn_expected")
+		state := issueCallbackState(t, pool, orgID, callbackURL, true)
+		client := &stubWorkOSClient{profile: workos.Profile{
+			ID: "mismatch-user", Email: "mismatch@acme.com", ConnectionID: "conn_other",
+		}}
+		server := newPublicSsoServer(t, pool, client, nil)
+		status, _, body := callPublicSso(t, server.URL, "/auth/sso/callback?code=code&state="+url.QueryEscape(state))
+		if status != http.StatusBadRequest || body["code"] != "sso_connection_mismatch" || client.exchangeCalls != 1 {
+			t.Fatalf("connection: %d %+v calls=%d", status, body, client.exchangeCalls)
+		}
+		var members int
+		_ = pool.QueryRow(t.Context(), `SELECT count(*) FROM org_members WHERE org_id = $1`, orgID).Scan(&members)
+		if members != 0 {
+			t.Fatalf("connection mismatch provisioned %d members", members)
+		}
+	})
+
+	t.Run("allowed domain policy", func(t *testing.T) {
+		orgID := "callback-policy-" + uuid.NewString()
+		connectionID := "conn_policy_" + uuid.NewString()
+		seedSsoConnection(t, pool, orgID, connectionID)
+		if err := store.New(pool).UpsertOrgConfigValue(t.Context(), store.UpsertOrgConfigValueParams{
+			ID: uuid.NewString(), OrgID: orgID, Key: "auth.allowedEmailDomains",
+			ValueJson: []byte(`"acme.com"`), Category: "auth", Description: "test",
+			ValueType: "string", UpdatedBy: pgtype.Text{String: "tester", Valid: true},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		state := issueCallbackState(t, pool, orgID, callbackURL, true)
+		client := &stubWorkOSClient{profile: workos.Profile{
+			ID: "policy-user", Email: "bob@partner.example", ConnectionID: connectionID,
+		}}
+		server := newPublicSsoServer(t, pool, client, nil)
+		status, _, body := callPublicSso(t, server.URL, "/auth/sso/callback?code=code&state="+url.QueryEscape(state))
+		params, _ := body["params"].(map[string]any)
+		if status != http.StatusForbidden || body["code"] != "sso_policy_violation" ||
+			params["policyKey"] != "auth.allowedEmailDomains" {
+			t.Fatalf("policy: %d %+v", status, body)
+		}
+		var members, policyAudits, callbackAudits int
+		_ = pool.QueryRow(t.Context(), `SELECT count(*) FROM org_members WHERE org_id = $1`, orgID).Scan(&members)
+		_ = pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_logs
+			WHERE org_id = $1 AND action = 'auth.policy.rejected'`, orgID).Scan(&policyAudits)
+		_ = pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_logs
+			WHERE org_id = $1 AND action = 'auth.sso.callback_failed'
+			  AND metadata->>'reason' = 'policy_rejected'`, orgID).Scan(&callbackAudits)
+		if members != 0 || policyAudits != 1 || callbackAudits != 1 {
+			t.Fatalf("policy effects: members=%d policyAudits=%d callbackAudits=%d", members, policyAudits, callbackAudits)
+		}
+	})
+}
+
+func TestSsoCallbackRollsBackMembershipAndLoginAuditWhenSessionInsertFails(t *testing.T) {
+	const callbackURL = "https://api.example.com/auth/sso/callback"
+	t.Setenv("JANUSLY_RESUME_TOKEN_SECRET", "sso-callback-rollback-secret")
+	t.Setenv("JANUSLY_SSO_CALLBACK_URL", callbackURL)
+	t.Setenv("JANUSLY_WEB_BASE_URL", "https://app.example.com")
+	pool := testPool(t)
+	orgID := "callback-rollback-" + uuid.NewString()
+	connectionID := "conn_rollback_" + uuid.NewString()
+	connectionRowID := seedSsoConnection(t, pool, orgID, connectionID)
+	forcedID := uuid.NewString()
+	if _, err := store.New(pool).CreateAuthSession(t.Context(), store.CreateAuthSessionParams{
+		ID: forcedID, UserID: "existing-user", Email: "existing@example.com",
+		OrgID: orgID, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	client := &stubWorkOSClient{profile: workos.Profile{
+		ID: "rollback-user-" + uuid.NewString(), Email: "rollback@acme.com", ConnectionID: connectionID,
+	}}
+	server := newPublicSsoServer(t, pool, client, func() string { return forcedID })
+	state := issueCallbackState(t, pool, orgID, callbackURL, true)
+	status, _, body := callPublicSso(t, server.URL,
+		"/auth/sso/callback?code=code&state="+url.QueryEscape(state))
+	if status != http.StatusInternalServerError || body["code"] != "sso_membership_persist_failed" {
+		t.Fatalf("rollback response: %d %+v", status, body)
+	}
+	var members, loginAudits, failureAudits int
+	_ = pool.QueryRow(t.Context(), `SELECT count(*) FROM org_members
+		WHERE org_id = $1 AND user_id = $2`, orgID, client.profile.ID).Scan(&members)
+	_ = pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_logs
+		WHERE org_id = $1 AND user_id = $2 AND action = 'auth.sso.login'`, orgID, client.profile.ID).Scan(&loginAudits)
+	_ = pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_logs
+		WHERE org_id = $1 AND user_id = $2 AND action = 'auth.sso.callback_failed'
+		  AND target_id = $3 AND metadata->>'reason' = 'membership_persist_failed'`,
+		orgID, client.profile.ID, connectionRowID).Scan(&failureAudits)
+	if members != 0 || loginAudits != 0 || failureAudits != 1 {
+		t.Fatalf("rollback effects: members=%d loginAudits=%d failureAudits=%d", members, loginAudits, failureAudits)
+	}
+}
+
+func TestSsoCallbackMapsExchangeFailuresWithoutProvisioning(t *testing.T) {
+	const callbackURL = "https://api.example.com/auth/sso/callback"
+	t.Setenv("JANUSLY_RESUME_TOKEN_SECRET", "sso-callback-exchange-secret")
+	t.Setenv("JANUSLY_SSO_CALLBACK_URL", callbackURL)
+	t.Setenv("JANUSLY_WEB_BASE_URL", "https://app.example.com")
+	pool := testPool(t)
+	orgID := "callback-exchange-" + uuid.NewString()
+	connectionID := "conn_exchange_" + uuid.NewString()
+	seedSsoConnection(t, pool, orgID, connectionID)
+	client := &stubWorkOSClient{exchangeError: errors.New("network unavailable")}
+	server := newPublicSsoServer(t, pool, client, nil)
+	state := issueCallbackState(t, pool, orgID, callbackURL, true)
+	status, _, body := callPublicSso(t, server.URL,
+		"/auth/sso/callback?code=code&state="+url.QueryEscape(state))
+	if status != http.StatusBadRequest || body["code"] != "sso_exchange_failed" {
+		t.Fatalf("exchange: %d %+v", status, body)
+	}
+	var members, audits int
+	_ = pool.QueryRow(t.Context(), `SELECT count(*) FROM org_members WHERE org_id = $1`, orgID).Scan(&members)
+	_ = pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_logs WHERE org_id = $1
+		AND action = 'auth.sso.callback_failed' AND metadata->>'reason' = 'exchange_failed'`, orgID).Scan(&audits)
+	if members != 0 || audits != 1 {
+		t.Fatalf("exchange effects: members=%d audits=%d", members, audits)
 	}
 }
