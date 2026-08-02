@@ -66,6 +66,11 @@ type Context struct {
 	// MembershipRole is the org_members row's role when one exists; empty
 	// for the dev-headers admin auto-grant case (permissions layer decides).
 	MembershipRole string
+	// Email is the verified provider email (supabase claims); for
+	// dev-headers it is the user id itself when email-shaped — the lab
+	// convention the membership resolver already leans on. Empty means the
+	// identity has no usable email (service tokens).
+	Email string
 }
 
 // principal is the untrusted carrier of provider-supplied claims.
@@ -245,10 +250,14 @@ func (rv *Resolver) Resolve(ctx context.Context, r *http.Request) (*Context, err
 		} else if !errorsIsNoRows(err) {
 			return nil, err
 		}
+		email := ""
+		if strings.Contains(p.providerUserID, "@") {
+			email = strings.ToLower(p.providerUserID)
+		}
 		return &Context{
 			OrgID: p.providerOrgHint, UserID: p.providerUserID,
 			Mode: ModeDevHeaders, Source: p.declaredSource,
-			MembershipRole: role,
+			MembershipRole: role, Email: email,
 		}, nil
 	}
 }
@@ -267,6 +276,7 @@ func (rv *Resolver) resolveSupabaseMembership(ctx context.Context, q *store.Quer
 			return &Context{
 				OrgID: p.providerOrgHint, UserID: p.providerUserID,
 				Mode: ModeSupabase, Source: SourceWeb, MembershipRole: membership.Role,
+				Email: strings.ToLower(p.providerUserEmail),
 			}, nil
 		}
 		if !errorsIsNoRows(err) {
@@ -290,6 +300,7 @@ func (rv *Resolver) resolveSupabaseMembership(ctx context.Context, q *store.Quer
 				return &Context{
 					OrgID: p.providerOrgHint, UserID: p.providerUserID,
 					Mode: ModeSupabase, Source: SourceWeb, MembershipRole: byEmail.Role,
+					Email: strings.ToLower(p.providerUserEmail),
 				}, nil
 			}
 			if err != nil && !errorsIsNoRows(err) {
@@ -306,6 +317,7 @@ func (rv *Resolver) resolveSupabaseMembership(ctx context.Context, q *store.Quer
 		return &Context{
 			OrgID: memberships[0].OrgID, UserID: p.providerUserID,
 			Mode: ModeSupabase, Source: SourceWeb, MembershipRole: memberships[0].Role,
+			Email: strings.ToLower(p.providerUserEmail),
 		}, nil
 	}
 	return nil, nil // zero or ambiguous — force x-org-id

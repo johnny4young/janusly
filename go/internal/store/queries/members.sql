@@ -53,6 +53,43 @@ WHERE org_id = $1 AND email = $2 AND status = 'pending';
 INSERT INTO invitations (id, org_id, email, role, invited_by)
 VALUES ($1, $2, $3, $4, $5);
 
+-- Identity surfaces (T-519): the caller's memberships with org names,
+-- profile upsert, the invitation-accept CAS, and the plugin stub row.
+
+-- name: ListUserMemberships :many
+SELECT m.org_id, m.role, coalesce(o.name, m.org_id) AS organization_name, o.plan
+FROM org_members m
+LEFT JOIN organizations o ON o.id = m.org_id
+WHERE m.user_id = $1
+ORDER BY m.org_id
+LIMIT 50;
+
+-- name: UpsertUserProfile :one
+INSERT INTO users (id, name, email)
+VALUES ($1, $2, $3)
+ON CONFLICT (id) DO UPDATE
+SET name = EXCLUDED.name,
+    email = coalesce(EXCLUDED.email, users.email),
+    updated_at = now()
+RETURNING id, name, email;
+
+-- name: InsertOrgMember :execrows
+INSERT INTO org_members (id, org_id, user_id, role)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT DO NOTHING;
+
+-- name: GetInvitationByID :one
+SELECT id, org_id, email, role, status FROM invitations WHERE id = $1;
+
+-- The accept CAS: only a still-pending row flips, exactly once.
+-- name: AcceptInvitation :execrows
+UPDATE invitations SET status = 'accepted', accepted_at = now()
+WHERE id = $1 AND status = 'pending';
+
+-- name: InsertInstalledPlugin :exec
+INSERT INTO installed_plugins (id, org_id, plugin_id, config_json, installed_by)
+VALUES ($1, $2, $3, $4, $5);
+
 -- name: RevokePendingInvitation :execrows
 UPDATE invitations SET status = 'revoked'
 WHERE id = $1 AND org_id = $2 AND status = 'pending';

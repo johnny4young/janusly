@@ -1982,3 +1982,19 @@ ledger cero (nunca un error), y `/recovery/my-wins` toma la identidad
 exclusivamente del auth context — el caller no puede preguntar por otro
 operador. El test siembra un evento atribuido al caller, otro a un tercero
 y otro con linaje sandbox, y prueba que solo cuenta el primero.
+
+## T-519 — Identidad restante (2026-08-01)
+
+El cimiento fue darle `Email` a `auth.Context`: supabase lo trae del claim
+verificado y dev-headers lo deriva del user id con forma de email — la misma
+convención que el resolver de membresías ya usaba para el backfill de
+huérfanos legacy. Sobre eso, cuatro superficies: la proyección real de
+memberships (con cero memberships incluido — por eso es auth-only), el
+upsert de perfil con la normalización exacta del reference, la aceptación de
+invitación (403 sin email verificado, envelope idéntico a not-found para el
+email equivocado — un invitation id no filtra a quién apunta, CAS que pierde
+el segundo intento, membership + audit en el mismo flujo) y el stub honesto
+de plugins. Dos hallazgos: `member.joined` es una acción real del reference
+que el port del catálogo omitió (pin movido 147→148 deliberadamente), y la
+DB dev compartida acumula memberships de corridas previas — el test de
+proyección necesita identidad única o el LIMIT 50 lo trunca.

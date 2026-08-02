@@ -185,6 +185,7 @@ func NewV1HandlerWithShutdown(eng *engine.Engine, pool *pgxpool.Pool) (http.Hand
 	server.mountBillingRoutes(mux)
 	server.mountReplayLabRoutes(mux)
 	server.mountRecoveryReadRoutes(mux)
+	server.mountIdentityRoutes(mux)
 	return WithBrowserHeaders(mux), cancelHub
 }
 

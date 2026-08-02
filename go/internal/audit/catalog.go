@@ -50,6 +50,10 @@ var knownActions = map[Action]bool{
 	"mcp.tool.enabled":                         true,
 	"mcp.tool.expose_to_ai_set":                true,
 	"mcp.tool.rate_limit_set":                  true,
+	// member.joined is a real reference action (apps/api/src/auth.ts
+	// invitation/domain provisioning) the original port missed; added with
+	// T-519's invitation-accept flow. The pin test moves 147 -> 148.
+	"member.joined":                            true,
 	"member.removed":                           true,
 	"member.role.updated":                      true,
 	"member.self_modification_blocked":         true,

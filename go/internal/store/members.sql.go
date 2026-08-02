@@ -12,6 +12,20 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const acceptInvitation = `-- name: AcceptInvitation :execrows
+UPDATE invitations SET status = 'accepted', accepted_at = now()
+WHERE id = $1 AND status = 'pending'
+`
+
+// The accept CAS: only a still-pending row flips, exactly once.
+func (q *Queries) AcceptInvitation(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.Exec(ctx, acceptInvitation, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countMembersInRole = `-- name: CountMembersInRole :one
 SELECT count(*)::int FROM org_members WHERE org_id = $1 AND role = $2
 `
@@ -127,6 +141,31 @@ func (q *Queries) FindPendingInvitation(ctx context.Context, arg FindPendingInvi
 	return id, err
 }
 
+const getInvitationByID = `-- name: GetInvitationByID :one
+SELECT id, org_id, email, role, status FROM invitations WHERE id = $1
+`
+
+type GetInvitationByIDRow struct {
+	ID     string
+	OrgID  string
+	Email  string
+	Role   string
+	Status string
+}
+
+func (q *Queries) GetInvitationByID(ctx context.Context, id string) (GetInvitationByIDRow, error) {
+	row := q.db.QueryRow(ctx, getInvitationByID, id)
+	var i GetInvitationByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Email,
+		&i.Role,
+		&i.Status,
+	)
+	return i, err
+}
+
 const getOrgMembership = `-- name: GetOrgMembership :one
 
 SELECT id, org_id, user_id, role FROM org_members
@@ -194,6 +233,30 @@ func (q *Queries) GetOrgRole(ctx context.Context, arg GetOrgRoleParams) (GetOrgR
 	return i, err
 }
 
+const insertInstalledPlugin = `-- name: InsertInstalledPlugin :exec
+INSERT INTO installed_plugins (id, org_id, plugin_id, config_json, installed_by)
+VALUES ($1, $2, $3, $4, $5)
+`
+
+type InsertInstalledPluginParams struct {
+	ID          string
+	OrgID       string
+	PluginID    string
+	ConfigJson  json.RawMessage
+	InstalledBy pgtype.Text
+}
+
+func (q *Queries) InsertInstalledPlugin(ctx context.Context, arg InsertInstalledPluginParams) error {
+	_, err := q.db.Exec(ctx, insertInstalledPlugin,
+		arg.ID,
+		arg.OrgID,
+		arg.PluginID,
+		arg.ConfigJson,
+		arg.InstalledBy,
+	)
+	return err
+}
+
 const insertInvitation = `-- name: InsertInvitation :exec
 INSERT INTO invitations (id, org_id, email, role, invited_by)
 VALUES ($1, $2, $3, $4, $5)
@@ -216,6 +279,32 @@ func (q *Queries) InsertInvitation(ctx context.Context, arg InsertInvitationPara
 		arg.InvitedBy,
 	)
 	return err
+}
+
+const insertOrgMember = `-- name: InsertOrgMember :execrows
+INSERT INTO org_members (id, org_id, user_id, role)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT DO NOTHING
+`
+
+type InsertOrgMemberParams struct {
+	ID     string
+	OrgID  string
+	UserID string
+	Role   string
+}
+
+func (q *Queries) InsertOrgMember(ctx context.Context, arg InsertOrgMemberParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertOrgMember,
+		arg.ID,
+		arg.OrgID,
+		arg.UserID,
+		arg.Role,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const insertOrgRole = `-- name: InsertOrgRole :exec
@@ -397,6 +486,50 @@ func (q *Queries) ListOrgRoles(ctx context.Context, orgID string) ([]ListOrgRole
 	return items, nil
 }
 
+const listUserMemberships = `-- name: ListUserMemberships :many
+
+SELECT m.org_id, m.role, coalesce(o.name, m.org_id) AS organization_name, o.plan
+FROM org_members m
+LEFT JOIN organizations o ON o.id = m.org_id
+WHERE m.user_id = $1
+ORDER BY m.org_id
+LIMIT 50
+`
+
+type ListUserMembershipsRow struct {
+	OrgID            string
+	Role             string
+	OrganizationName string
+	Plan             pgtype.Text
+}
+
+// Identity surfaces (T-519): the caller's memberships with org names,
+// profile upsert, the invitation-accept CAS, and the plugin stub row.
+func (q *Queries) ListUserMemberships(ctx context.Context, userID string) ([]ListUserMembershipsRow, error) {
+	rows, err := q.db.Query(ctx, listUserMemberships, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUserMembershipsRow
+	for rows.Next() {
+		var i ListUserMembershipsRow
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.Role,
+			&i.OrganizationName,
+			&i.Plan,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const migrateOrgMemberUserID = `-- name: MigrateOrgMemberUserID :execrows
 UPDATE org_members SET user_id = $3
 WHERE id = $1 AND org_id = $2
@@ -498,5 +631,34 @@ func (q *Queries) UpdateOrgRole(ctx context.Context, arg UpdateOrgRoleParams) (U
 		&i.IsBuiltin,
 		&i.GrantedPermissions,
 	)
+	return i, err
+}
+
+const upsertUserProfile = `-- name: UpsertUserProfile :one
+INSERT INTO users (id, name, email)
+VALUES ($1, $2, $3)
+ON CONFLICT (id) DO UPDATE
+SET name = EXCLUDED.name,
+    email = coalesce(EXCLUDED.email, users.email),
+    updated_at = now()
+RETURNING id, name, email
+`
+
+type UpsertUserProfileParams struct {
+	ID    string
+	Name  pgtype.Text
+	Email pgtype.Text
+}
+
+type UpsertUserProfileRow struct {
+	ID    string
+	Name  pgtype.Text
+	Email pgtype.Text
+}
+
+func (q *Queries) UpsertUserProfile(ctx context.Context, arg UpsertUserProfileParams) (UpsertUserProfileRow, error) {
+	row := q.db.QueryRow(ctx, upsertUserProfile, arg.ID, arg.Name, arg.Email)
+	var i UpsertUserProfileRow
+	err := row.Scan(&i.ID, &i.Name, &i.Email)
 	return i, err
 }
