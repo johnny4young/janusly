@@ -3,6 +3,14 @@
 /loadgen
 /api
 /mcp
+# Local Go command/test outputs. Release artifacts are built in a dedicated
+# output directory rather than from these default command names.
+/seed
+/*.test
+# Harness scratch outputs. Bounded canonical series and reviewed soak evidence
+# use deterministic tracked names instead.
+conformance/perf/k6-hostile-last.json
+conformance/perf/soak-ms*.jsonl
 # T-522: the real Vite bundle is copied in by `make web-embed`; only the
 # placeholder index.html is tracked.
 internal/webdist/dist/*

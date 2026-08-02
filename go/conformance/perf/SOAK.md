@@ -1,38 +1,41 @@
-# Soak — última corrida
+# Soak — latest reviewed run
 
-- runId: msas0wmu
-- duración: 24h (muestras cada 60s, 1412 muestras)
+- run ID: msas0wmu
+- duration: 24h (samples every 60s, 1,412 samples)
 - k6: ok
-- veredicto: **CRECIÓ — investigar antes de promover**
+- automated verdict: **GROWTH FLAG — investigated below**
+- reviewed verdict: **STABLE — no leak**
 
-Comparación primer cuarto vs último cuarto de la corrida (una carga
-sostenida con crecimiento >10% entre extremos señala fuga; el arranque
-caliente queda absorbido por el promedio del primer cuarto).
+First-quarter versus last-quarter comparison. The automated detector flags
+more than 10% growth between the endpoints; averaging the first quarter is
+intended to absorb warm-up.
 
-| Señal | Primer cuarto | Último cuarto | Δ | Dirección |
+| Signal | First quarter | Last quarter | Δ | Direction |
 | --- | --- | --- | --- | --- |
-| RSS | 36.3 MB | 32.9 MB | -9.4% | ▼ bajó |
-| Goroutines | 41 | 41 | -0.7% | ◆ estable |
-| Heap in use | 7.1 MB | 8.8 MB | 24.4% | ▲ creció |
+| RSS | 36.3 MB | 32.9 MB | -9.4% | ▼ lower |
+| Goroutines | 41 | 41 | -0.7% | ◆ stable |
+| Heap in use | 7.1 MB | 8.8 MB | 24.4% | ▲ higher |
 
-Serie completa: `soak-msas0wmu.jsonl`.
+Complete series: `soak-2026-08-01-24h.jsonl` (SHA-256
+`854215d3e641fc97c04c79baf6eaa30b457b1ae71222132cac3fe5b9488a3896`).
 
-## Anexo T-510 — investigación del veredicto (2026-08-02)
+## Reviewed investigation (2026-08-02)
 
-El veredicto automático marcó "CRECIÓ" por el +24.4% de heap entre primer
-y último cuarto — es un ARTEFACTO del baseline, no una fuga:
+The automatic verdict flagged the 24.4% heap difference between the first and
+last quarters. Inspection of the complete series shows that this is a baseline
+artifact, not a leak:
 
-- Heap por octavos: 8.7 · **5.5** · 8.8 · 8.9 · 8.9 · 8.8 · 8.8 · 8.9 MB —
-  plano en ~8.8 MB durante las últimas ~18 horas. El segundo octavo cayó a
-  5.5 MB (la caída del Postgres del host + las ventanas SIGSTOP de los
-  benches T-508/T-535 congelaron la carga), deprimiendo el promedio del
-  primer cuarto a 7.1 MB. La cola no subió; el baseline bajó.
-- RSS: tendencia a la BAJA (35.5 → 32.8 MB por octavos; final 28.0 MB;
-  el pico global de 42.5 MB fue la muestra 2, el arranque).
-- Goroutines: planas (~41; rango 28–54 = churn normal de workers).
+- Heap by eighth: 8.7 · **5.5** · 8.8 · 8.9 · 8.9 · 8.8 · 8.8 · 8.9 MiB.
+  It remained near 8.8 MiB for the last ~18 hours. The second eighth fell to
+  5.5 MiB when the host PostgreSQL outage and the benchmark SIGSTOP windows
+  froze load. That depressed the first-quarter baseline; the tail did not
+  grow.
+- RSS trended down (35.5 → 32.8 MiB by eighth; 28.0 MiB final). The global
+  42.5 MiB peak occurred in sample 2 during startup.
+- Goroutines remained flat at approximately 41 (range 28–54, consistent with
+  ordinary worker churn).
 
-Lectura honesta: **ESTABLE — sin fuga**. Una carga sostenida de 24h con
-heap plano, RSS decreciente y goroutines planas no admite otra
-conclusión; el detector de >10% entre cuartos extremos necesita un
-baseline sin ventanas de congelamiento (mejora anotada para el próximo
-relanzamiento: excluir muestras bajo SIGSTOP/outage del promedio).
+Reviewed conclusion: **STABLE — no leak**. The detector must exclude intervals
+where load is frozen or its dependency is unavailable before comparing endpoint
+quarters. That detector correction remains a future harness improvement; the
+raw series is retained so this conclusion can be independently recalculated.
