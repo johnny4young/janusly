@@ -31,7 +31,26 @@ import (
 	"github.com/johnny4young/janusly/go/internal/usage"
 )
 
-const shutdownGrace = 10 * time.Second
+const (
+	shutdownGrace           = 10 * time.Second
+	serverReadHeaderTimeout = 10 * time.Second
+	serverReadTimeout       = 30 * time.Second
+	serverIdleTimeout       = 2 * time.Minute
+	serverMaxHeaderBytes    = 64 << 10
+)
+
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: serverReadHeaderTimeout,
+		ReadTimeout:       serverReadTimeout,
+		IdleTimeout:       serverIdleTimeout,
+		MaxHeaderBytes:    serverMaxHeaderBytes,
+		// A process-wide WriteTimeout would terminate long-lived run SSE
+		// streams. Non-streaming handlers own bounded contexts instead.
+	}
+}
 
 func envDurationMs(name string, fallback time.Duration) time.Duration {
 	if raw := os.Getenv(name); raw != "" {
@@ -182,16 +201,11 @@ func run() error {
 	})
 	defer runner.Shutdown()
 
-	api := &http.Server{
-		Addr:              fmt.Sprintf(":%d", cfg.Port),
-		Handler:           httpapi.NewV1Handler(eng, pool),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-	internal := &http.Server{
-		Addr:              fmt.Sprintf("127.0.0.1:%d", cfg.InternalPort),
-		Handler:           httpapi.NewInternalHandler(),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
+	api := newHTTPServer(fmt.Sprintf(":%d", cfg.Port), httpapi.NewV1Handler(eng, pool))
+	internal := newHTTPServer(
+		fmt.Sprintf("127.0.0.1:%d", cfg.InternalPort),
+		httpapi.NewInternalHandler(),
+	)
 
 	failures := make(chan error, 2)
 	for _, srv := range []*http.Server{api, internal} {
