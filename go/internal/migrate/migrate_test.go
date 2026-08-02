@@ -8,10 +8,9 @@ import (
 	"testing"
 )
 
-// T-532: the embedded migration set is the schema's source of truth —
-// versions must be unique, contiguous from 1, and every file
-// goose-shaped. A drifted or duplicated version breaks boot, so it
-// breaks here first.
+// The embedded migration set is the schema's source of truth. Versions must
+// be unique and contiguous from 1, and every file must be goose-shaped. A
+// drifted or duplicated version breaks boot, so it breaks here first.
 func TestEmbeddedMigrationsWellFormed(t *testing.T) {
 	pattern := regexp.MustCompile(`^(\d{5})_[a-z0-9_-]+\.sql$`)
 	versions := []int{}
@@ -45,6 +44,23 @@ func TestEmbeddedMigrationsWellFormed(t *testing.T) {
 	for i, version := range versions {
 		if version != i+1 {
 			t.Fatalf("versions must be contiguous from 1: %v", versions)
+		}
+	}
+}
+
+func TestBaselineContainsPilotBootstrapObjects(t *testing.T) {
+	raw, err := fs.ReadFile(migrations, "sql/00001_baseline.sql")
+	if err != nil {
+		t.Fatalf("read baseline: %v", err)
+	}
+	baseline := string(raw)
+	for _, object := range []string{
+		"go_pilot_wakeups",
+		"go_pilot_start_idempotency",
+		"go_pilot_runs_org_created_id_idx",
+	} {
+		if !strings.Contains(baseline, object) {
+			t.Errorf("embedded baseline is missing legacy pilot object %q", object)
 		}
 	}
 }

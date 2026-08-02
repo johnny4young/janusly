@@ -10,18 +10,12 @@ db-up:
 db-down:
 	docker compose -f docker-compose.yml down
 
-# The shared drizzle migrations are the single schema author. Running them
-# through the repo's own tooling keeps the drizzle.__drizzle_migrations
-# journal that the boot probe asserts. Pilot-only objects (go_pilot_* tables)
-# follow from ./migrations, applied idempotently to the pilot database only.
-# goose owns the pilot's schema (2026-07-31 decision): migrations embed in
-# the binary; no Node repo needed. Pre-goose databases get stamped at the
-# baseline automatically on first run.
+# Goose owns Go-runtime databases. Migrations, including the original
+# go_pilot_* bootstrap objects, are embedded in the binary; no Node runner or
+# second SQL loop participates. Pre-goose databases are stamped at the baseline
+# before later versions run.
 migrate:
 	JANUSLY_GO_DATABASE_URL=$(DB_URL) go run ./cmd/api migrate
-	for f in migrations/*.sql; do \
-		docker exec -i $(PG_CONTAINER) psql -v ON_ERROR_STOP=1 -U janusly -d janusly_go < $$f; \
-	done
 
 # schema.sql feeds sqlc so `make generate` works without a live database.
 # Regenerate after any migration change; the file is committed on purpose.

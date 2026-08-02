@@ -1,5 +1,10 @@
 # REPORT-W6 — Ola 6: integraciones, scheduler, subworkflows, listo-para-cutover
 
+> Historical implementation snapshot (2026-08-01). Wave 7 later implemented
+> the deferred route families and closed several listed divergences. See
+> `REPORT-W7.md` for the implementation closure and `AUDIT.md` for independent
+> certification status. This report is not a current production approval.
+
 Cierre: 2026-08-01 · 35/35 tickets (T-159..T-187, T-189..T-194; T-188 en ola 3)
 · 190/190 acumulados del plan · dirección estratégica vigente (2026-07-31):
 **el pilot es la base definitiva; todo migra, nada queda "en Node" permanente.**

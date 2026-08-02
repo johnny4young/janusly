@@ -58,7 +58,7 @@ The interrupted runs and generated binaries are not certification evidence.
 | Band | Required evidence | State |
 | --- | --- | --- |
 | 1. Baseline and evidence custody | fetched refs, ancestry, clean isolated worktree, raw-evidence inventory | complete |
-| 2. Documentation and architecture truth | implementation-to-claim matrix; current AGENTS, reports, cutover map, and runbook | pending |
+| 2. Documentation and architecture truth | implementation-to-claim matrix; current AGENTS, reports, cutover map, and runbook | complete |
 | 3. Architecture and safety review | file-level findings for engine, API, persistence, concurrency, security, and allocation posture | pending |
 | 4. Node/Go contract parity | routes, wire shapes, errors, durable side effects, negative cases, and UI-facing behavior | pending |
 | 5. Data and queue transition | fresh/legacy/rollback database matrix plus BullMQ and in-flight-work drain rehearsal | pending |
@@ -87,8 +87,12 @@ exact candidate commit:
 
 | ID | Severity | Finding | Status |
 | --- | --- | --- | --- |
-| DOC-001 | P1 | `AGENTS.md` still says the completed pilot is not mergeable and describes the pre-goose schema workflow. | open |
-| DOC-002 | P1 | `REPORT-W6.md` is a wave-6 snapshot and must not be treated as the final wave-7 certification report. | open |
+| DOC-001 | P1 | `AGENTS.md` still said the completed pilot was not mergeable and described the pre-goose schema workflow. | fixed in this band |
+| DOC-002 | P1 | `REPORT-W6.md` was a wave-6 snapshot but was presented as the current cutover decision. | fixed in this band |
+| DOC-003 | P0 | The cutover map claimed every route phase could move to Go before data, queue, and full-browser certification. | fixed in this band |
+| OPS-001 | P1 | `make migrate` still executed the superseded standalone pilot SQL after goose despite claiming single-binary schema ownership. | fixed in this band |
+| BLD-001 | P0 | A clean checkout could not compile because the root `dist/` ignore swallowed the claimed tracked webdist placeholder required by `go:embed`. | fixed in this band |
 | EVD-001 | P1 | `SOAK.md` cited an untracked random-name series, so the 24-hour verdict was not reproducible from a clean checkout. | fixed in this band |
 | TST-001 | P0 | The full Playwright lane was deferred from the pilot and remains a cutover gate. | open |
 | QUE-001 | P0 | The current cutover runbook forbids dual schedulers but does not yet prove a BullMQ/in-flight-work drain and rollback procedure. | open |
+| SRC-001 | P2 | Go source comments contain 134 internal ticket identifiers instead of durable behavioral explanations. | open |

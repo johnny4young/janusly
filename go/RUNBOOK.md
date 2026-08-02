@@ -1,59 +1,97 @@
-# Runbook de operación — binario Go del pilot
+# Janusly Go operations runbook
 
-Un solo binario (`cmd/api`) sirve el API, los workers, el pump de campañas
-de replay, el sweep de retención y el stream SSE. Sin Redis, sin proceso
-worker aparte: la cola vive en Postgres.
+`cmd/api` is a single process containing the public API, execution workers,
+SSE hub, replay-campaign pump, retention, upstream-health, subworkflow,
+schedule, auto-healing, consent-purge, and stalled-node loops. PostgreSQL is
+the durable queue and due clock. Redis and BullMQ are not Go runtime delivery
+dependencies.
 
-## Requisitos
+## Requirements
 
-- PostgreSQL 15+ (baseline 18; el lane `make test-pg15` prueba el floor).
-- El esquema compartido migrado (`make migrate` — aplica drizzle Y la
-  migración propia del pilot; ver «Migraciones»).
+- Go toolchain pinned by `go.mod` (`go1.26.5`).
+- PostgreSQL 15 or newer; PostgreSQL 18 is the primary baseline.
+- A database migrated by the same candidate binary.
 
-## Variables de entorno
+## Core process configuration
 
-| Variable | Default | Qué controla |
-|---|---|---|
-| `JANUSLY_GO_DATABASE_URL` | — (requerida) | DSN de Postgres |
-| `JANUSLY_GO_PORT` | 4600 | Puerto del API público |
-| `JANUSLY_GO_INTERNAL_PORT` | 4601 | pprof + métricas internas |
-| `JANUSLY_GO_WORKER_CONCURRENCY` | 8 | Workers de ejecución de nodos |
-| `JANUSLY_GO_POLL_MS` | 500 | Poll del queue (NOTIFY lo adelanta) |
-| `JANUSLY_GO_API_POOL_SIZE` | 10 | Pool de conexiones del API |
-| `JANUSLY_GO_WORKER_POOL_SIZE` | concurrencia+2 | Pool de los workers |
-| `JANUSLY_GO_HTTP_TIMEOUT_MS` | 30000 | Timeout HTTP saliente por defecto |
-| `JANUSLY_GO_RETENTION_DELETED_WORKFLOWS_DAYS` | 30 | Fallback global del sweep; desde T-087 la ventana real es por org vía el catálogo (`retention.deletedWorkflowsDays`, env de referencia `JANUSLY_RETENTION_DELETED_WORKFLOWS_DAYS`) |
-| `ALLOW_PRIVATE_HTTP_TARGETS` | false | Deshabilita el guard SSRF (solo dev) |
-| `JANUSLY_GO_ENV` | — | `production` activa el gate de arranque: sin `SUPABASE_URL` el binario REHÚSA salvo `ALLOW_DEV_AUTH_HEADERS=true` |
-| `JANUSLY_QUEUE_LAG_WARN_SECONDS` | 60 | Umbral (1..86400) que marca `degraded` cuando el nodo elegible más viejo espera más que esto |
-| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | — | Modo Supabase de la cadena de auth |
-| `JANUSLY_API_SERVICE_TOKEN` | — | Modo service-token (comparación en tiempo constante) |
-| `JANUSLY_PRODUCTION_MODE` | — | `true` activa el readiness gate en `/start` |
-| `JANUSLY_REQUIRE_EVAL_COVERAGE` | — | `true` añade el warn de evals al gate |
-| `JANUSLY_MCP_WRITES_ENABLED` | — | `true` habilita escrituras MCP (más consent por org) |
-| `JANUSLY_HTTP_TIMEOUT_MS` / `_MAX_RESPONSE_BYTES` / `_MAX_REDIRECTS` / `_STREAM_PREVIEW_BYTES` | 30000 / 1 MB / 5 / 64 KB | Capa env de los bounds por tenant |
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `JANUSLY_GO_DATABASE_URL` | local pilot DSN | PostgreSQL connection |
+| `JANUSLY_GO_PORT` | `4600` | public API listener |
+| `JANUSLY_GO_INTERNAL_PORT` | `4601` | loopback Prometheus and pprof listener |
+| `JANUSLY_GO_WORKER_CONCURRENCY` | `8` | node executors, range 1–64 |
+| `JANUSLY_GO_API_POOL_SIZE` | `10` | API PostgreSQL pool, range 1–100 |
+| `JANUSLY_GO_WORKER_POOL_SIZE` | concurrency + 2 | worker PostgreSQL pool, range 1–100 |
+| `JANUSLY_GO_POLL_MS` | `250` | LISTEN/NOTIFY fallback poll, range 50–5000 ms |
+| `JANUSLY_GO_HTTP_TIMEOUT_MS` | `30000` | process-level outbound HTTP timeout |
+| `JANUSLY_GO_REAPER_INTERVAL_MS` | `60000` | stalled-node reaper cadence |
+| `JANUSLY_GO_REAPER_THRESHOLD_MS` | `3600000` | stale claim threshold; keep above the longest valid node runtime |
+| `JANUSLY_GO_REAPER_THRESHOLD_FLOOR_MS` | `900000` | expert-only override of the 15-minute safety floor; emits a warning |
+| `JANUSLY_GO_SERVE_WEB` | unset | serve the embedded web bundle when `true` |
 
-## Construir y correr
+## Security and provider configuration
+
+| Variable | Purpose |
+| --- | --- |
+| `JANUSLY_GO_ENV=production` | enables production auth boot checks |
+| `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` | Supabase authentication mode |
+| `ALLOW_DEV_AUTH_HEADERS=true` | explicit production bypass when Supabase is absent; use only in controlled environments |
+| `JANUSLY_API_SERVICE_TOKEN` | service-token authentication mode |
+| `JANUSLY_CREDENTIAL_MASTER_KEY` or `_FILE` | managed credential envelope root key; invalid material fails boot |
+| `JANUSLY_MCP_WRITES_ENABLED=true` | process half of MCP server write consent |
+| `JANUSLY_MCP_CLIENT_WRITES_ENABLED=true` | process half of external MCP client write consent |
+| `JANUSLY_MCP_STDIO_ALLOWED_COMMANDS` | closed stdio command allowlist fallback |
+| `ALLOW_PRIVATE_HTTP_TARGETS=true` | disables private-target SSRF protection; development fixtures only |
+| `JANUSLY_PRODUCTION_MODE=true` | enforce workflow readiness on `/start` |
+| `JANUSLY_REQUIRE_EVAL_COVERAGE=true` | add evaluation-coverage readiness requirements |
+| `OTEL_EXPORTER` | `console`, `otlp`, or `none`; unknown values fail startup |
+| `OTEL_SERVICE_INSTANCE_ID` | stable process identity for traces and metrics |
+
+Outbound HTTP, email, AI, object-store, and run policies resolve through the
+closed organization configuration catalog. Secret values never belong in
+organization configuration. Object-store credentials use the standard AWS
+credential variables for S3-compatible storage; see `internal/objectstore/`.
+
+## Build, migrate, and run
 
 ```bash
-cd go && go build -o /usr/local/bin/janusly-go ./cmd/api
-JANUSLY_GO_DATABASE_URL='postgres://…' janusly-go
+cd go
+go build -o ./bin/janusly-go ./cmd/api
+JANUSLY_GO_DATABASE_URL='postgres://…' ./bin/janusly-go migrate
+JANUSLY_GO_DATABASE_URL='postgres://…' ./bin/janusly-go
 ```
 
-Salud: `GET /healthz` (proceso vivo) — úsalo como health check del
-supervisor. El apagado limpio drena los workers: envía `SIGTERM` y espera
-(gracia de 10s).
+`janusly-go migrate` applies the embedded goose migrations from
+`internal/migrate/sql/`. A fresh database receives the complete baseline and
+subsequent versions. A pre-goose Janusly database is stamped at the baseline
+before later migrations run. Serving refuses a database behind the latest
+embedded version.
 
-### systemd (Linux)
+Do not apply `pnpm migrate` to a goose-provisioned database. The Drizzle journal
+is intentionally present but empty, and the Node runner could replay historical
+migrations. Do not apply SQL files from the removed `go/migrations/` path; it
+was folded into the embedded baseline.
+
+Health endpoints:
+
+- `GET /healthz` on the public port: process liveness.
+- `GET /health`: public-safe dependency posture.
+- `GET /metrics` on `127.0.0.1:4601`: Prometheus metrics.
+- pprof endpoints on the same internal loopback listener.
+
+## Supervisor examples
+
+Minimal systemd service:
 
 ```ini
 [Unit]
-Description=Janusly Go pilot
+Description=Janusly Go backend
 After=network-online.target postgresql.service
 
 [Service]
 ExecStart=/usr/local/bin/janusly-go
 Environment=JANUSLY_GO_DATABASE_URL=postgres://janusly:…@127.0.0.1:5432/janusly
+Environment=JANUSLY_GO_ENV=production
 Restart=on-failure
 RestartSec=2
 TimeoutStopSec=20
@@ -62,86 +100,51 @@ TimeoutStopSec=20
 WantedBy=multi-user.target
 ```
 
-### launchd (macOS)
+SIGTERM stops the HTTP listeners, cancels and joins supervised background
+loops, flushes tracing, and releases pools within the 10-second process grace.
 
-`~/Library/LaunchAgents/com.janusly.gopilot.plist` con `ProgramArguments`
-apuntando al binario, `EnvironmentVariables` con el DSN, `KeepAlive` true.
-`launchctl load` para instalar; `launchctl unload` detiene con SIGTERM.
+## Backup, restore, and upgrade
 
-## Migraciones
-
-goose (Go puro) es el dueño del esquema del pilot desde 2026-07-31. Las
-migraciones viven EMBEBIDAS en el binario:
+All Go runtime state is in PostgreSQL:
 
 ```bash
-janusly-go migrate
-```
-
-Eso es todo — sin Node, sin pnpm, sin psql. Una base fresca recibe el
-baseline completo (esquema compartido + objetos del pilot); una base
-provisionada antes de goose se estampa en el baseline automáticamente sin
-re-ejecutarlo. El binario rehúsa servir contra una base des-migrada. La
-contabilidad vive en `go_pilot_goose_version` (jamás choca con la de
-drizzle). Regla de sincronización: cada sync con develop espeja las
-migraciones drizzle nuevas como migraciones goose numeradas.
-
-Nota: una base provisionada por goose NO debe correr `pnpm migrate` del
-repo Node (la tabla drizzle existe vacía y drizzle re-ejecutaría todo).
-
-## Copia de seguridad y restauración
-
-Todo el estado vive en Postgres — la copia de la base ES la copia del
-sistema:
-
-```bash
-pg_dump -Fc -d "$JANUSLY_GO_DATABASE_URL" > janusly-$(date +%F).dump
+pg_dump -Fc -d "$JANUSLY_GO_DATABASE_URL" > "janusly-$(date +%F).dump"
 pg_restore -d "$JANUSLY_GO_DATABASE_URL" --clean --if-exists janusly.dump
 ```
 
-Tras restaurar en caliente no hace falta nada más: los timers vencidos
-durante la ventana los drena el sweep justo (lotes round-robin por run) y
-las campañas retoman su due-clock. Los runs que estaban `running` con nodos
-huérfanos los recupera el reaper de nodos atascados.
+After restore, overdue due-clock rows remain durable and are processed when the
+loops resume. Stale running claims are failed loudly by the reaper rather than
+silently executed twice.
 
-## Actualización (upgrade)
+Candidate upgrade procedure:
 
-1. `pg_dump` (arriba).
-2. Aplica migraciones nuevas (`make migrate` o los SQL a mano).
-3. Reemplaza el binario y reinicia el servicio (`systemctl restart`).
-   El SIGTERM drena los trabajos en vuelo; los claims con lease que un
-   crash dejara a medias los recupera el reaper.
-4. Verifica: `GET /healthz`, después `GET /recovery/metrics` y una corrida
-   de humo (`POST /start` con un noop).
+1. Capture a database backup and the exact old/new binary checksums.
+2. Run the new binary's `migrate` subcommand.
+3. Replace the binary and send SIGTERM to the old process.
+4. Verify `/healthz`, `/health`, the internal metrics endpoint, and a no-op run.
 
-Rollback del binario = reinstalar el anterior; el esquema es
-backward-tolerant dentro de la ola (los objetos del pilot solo se añaden).
+Do not claim schema rollback compatibility merely because migrations are
+additive. The audit in `AUDIT.md` requires a Node-created → Go-upgraded → Node
+rollback rehearsal before cutover approval.
 
-## Diagnóstico rápido
+## Fast diagnosis
 
-| Síntoma | Primer paso |
-|---|---|
-| Runs en `running` sin avanzar | `SELECT count(*) FROM run_nodes WHERE status='queued'` — si crece, revisa workers en el log; el reaper repone claims muertos |
-| Timers que no disparan | ¿existe `go_pilot_wakeups`? (`janusly-go migrate` pendiente = el gap clásico) |
-| 403 en tools MCP de escritura | El escalón de consent: env primero, luego la fila `mcp.writeConsent` del org |
-| Latencia de lista alta | `ANALYZE runs;` y confirma el índice `go_pilot_runs_org_created_id_idx` |
-| Todo 500 | El DSN: el binario no arranca a medias — si responde, la base era alcanzable al boot |
+| Symptom | First check |
+| --- | --- |
+| Runs remain `running` | queue metrics, worker logs, and stale-claim age versus the reaper threshold |
+| Timers do not fire | latest goose version and rows in `go_pilot_wakeups` |
+| MCP writes return 403 | process flag, organization consent, member role, and permission |
+| Lists slow down | query-plan gate, table statistics, and the matching keyset index |
+| API returns dependency 500s | PostgreSQL reachability and pool budgets; startup never intentionally serves a stale schema |
+| Internal port unreachable remotely | expected; it binds to loopback by design |
 
-## HA — múltiples réplicas sobre una base
+## Multiple replicas
 
-El binario no tiene singletons con lease: cada loop de fondo es seguro
-con N réplicas por diseño, y el lane `make test-ha` (dos engines, pools
-separados, misma base) lo prueba en cada corrida. La matriz:
+Workers claim nodes through `FOR UPDATE SKIP LOCKED` plus transition CAS.
+Replay campaigns, wakeups, reaping, and bounded maintenance loops use durable
+claims, idempotent writes, or CAS settlement. Duplicate empty scans are
+tolerated; duplicate effects are not.
 
-| Loop | Estrategia | Prueba |
-| --- | --- | --- |
-| Workers (claims de nodos) | Escalera de claim: `FOR UPDATE SKIP LOCKED` + re-chequeo con snapshot fresco + CAS por transición | 75 DAGs de propiedad con starts repartidos entre instancias (`TestHAPropertyDAGs...`) |
-| Bomba de campañas | Claim de despacho atómico (el UPDATE due empuja `next_dispatch_at`; el segundo corredor re-evalúa y no encuentra fila) + token de claim por item + CAS de asentamiento + CAS de completion | Una campaña drenada por dos bombas: items una vez, una sola auditoría de completion (`TestHACampaignNoDoubleDispatch`) |
-| Timers de retry (wake-ups) | El wake-up vive en la fila; el claim ladder lo consume y la transacción de completion lo borra | 40 nodos × 2 retries entre dos instancias: 80 eventos exactos, cero wake-ups filtrados (`TestHAMassTimers...`) |
-| Reaper de nodos varados | La escritura terminal ES el CAS de `FailNode` — un ganador por nodo | Dos reapers sobre la misma cohorte: 5 dead letters exactas (`TestHAConcurrentReapers...`) |
-| Retención (tombstones + datos + ventanas del limiter) | DELETEs idempotentes por lotes acotados; una réplica gemela solo duplica trabajo, jamás filas | Dos barridos simultáneos: los conteos SUMAN el total sembrado, sin doble conteo (`TestHAConcurrentRetentionSweeps`) |
-
-Trabajo duplicado tolerado: los SELECT de sondeo de cada réplica (acotados
-por el intervalo de poll) y algún lote de retención vacío. A la escala del
-pilot no amerita lease; si el negocio lo pide, el punto de corte es un
-advisory lock `pg_try_advisory_lock` con renovación alrededor de cada
-`Run*`-loop — la matriz de arriba dice exactamente dónde.
+Before increasing replicas, budget both API and worker pools against
+PostgreSQL `max_connections`. Re-run `make test-ha`, `make failover`, the
+connection-baseline test, and the appropriate soak on the exact candidate.

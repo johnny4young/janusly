@@ -1,68 +1,90 @@
-# Runbook de cutover por tenant — Node → Go
+# Per-tenant cutover runbook — Node.js to Go
 
-Complementa `CUTOVER-MAP.md` (QUÉ familia migra y cuándo); este runbook
-es el CÓMO de un switch por tenant, su monitoreo y su rollback.
+This is the candidate transition procedure. [`CUTOVER-MAP.md`](CUTOVER-MAP.md)
+defines route families; this document defines traffic ownership, observation,
+and rollback. It is not production-certified until the P0 data, BullMQ,
+in-flight-work, and full-browser gates in [`AUDIT.md`](AUDIT.md) pass.
 
-## Pre-requisitos (una vez por entorno)
+## Environment prerequisites
 
-1. `make dual` verde en el entorno (27/27 fuera de la lista anotada).
-2. Go desplegado junto a Node contra el MISMO Postgres/Redis, con:
-   - `JANUSLY_API_SERVICE_TOKEN` (los SDKs lo usan; probado por la lane
-     `run-sdk-live.mjs`), secreto de resume tokens, secretos de webhooks.
-   - Pools acotados al presupuesto real de `max_connections` (lección
-     T-185: API+worker de CADA réplica suman contra el mismo servidor).
-   - Reaper: threshold ≥ la ejecución legítima más larga del tenant
-     (`JANUSLY_GO_REAPER_THRESHOLD_MS`; el floor de 15m protege por
-     default).
-3. Proxy con split por familia (ejemplo Caddy en CUTOVER-MAP.md) y la
-   lista @node de fases 4-5.
+1. The exact Go candidate passes the complete audit ladder, not only
+   `make dual`.
+2. Node and Go are deployed side by side against a rehearsed copy of the same
+   PostgreSQL state. Node retains its Redis/BullMQ dependencies while it owns
+   any route or queued-work family; Go does not consume BullMQ jobs.
+3. Pool totals for every replica fit the PostgreSQL connection budget.
+4. Required auth, resume-token, webhook, credential-root, provider, and service
+   secrets are available to the candidate without copying secret values into
+   organization configuration.
+5. The proxy can switch one tenant and route family atomically and can restore
+   the previous mapping without a deployment.
+6. The queue-transition rehearsal has classified and drained BullMQ delayed,
+   active, waiting, scheduled, replay-campaign, approval, and timer work. Until
+   that rehearsal is recorded, do not switch a tenant.
 
-## Switch de un tenant
+## Ownership rule
 
-El estado vive en el mismo Postgres: el switch es SOLO de tráfico.
+At every instant, one runtime owns each tenant's entry and scheduler family.
+Never run Node and Go schedulers for the same tenant concurrently. During a
+gradual cut, the proxy and the queue-drain ledger must agree on the owner; HTTP
+routing alone does not transfer already queued work.
 
-1. **Ventana tranquila**: elegir un momento sin campañas de replay ni
-   rollouts activos del tenant (`GET /recovery/campaigns`,
-   `GET /workflows/{id}/rollout`).
-2. **Congelar entradas programadas** (opcional, tenants sensibles):
-   pausar workflows con `schedule` (el tick en pausa se DESCARTA con
-   audit — nunca thundering herd al reanudar).
-3. **Mover la familia/tenant en el proxy** (matcher por header
-   `x-org-id` si el split es por tenant, o por ruta si es por familia)
-   y recargar.
-4. **Smoke inmediato** (2 min): `GET /healthz`, un run de humo del
-   tenant (`POST /start` de un workflow noop), `GET /v1/runs` y el tab
-   Activity del web apuntado al proxy.
+## Tenant switch
 
-## Monitoreo (primeras 24h del tenant)
+1. Choose a quiet window with no active rollout or replay campaign.
+2. Stop creating new Node jobs for the family and record the drain watermark.
+3. Drain or explicitly park every pre-watermark Node job according to the
+   rehearsed queue matrix. Do not convert jobs by editing Redis or PostgreSQL.
+4. Optionally pause schedule workflows for sensitive tenants. A tick observed
+   while paused is deliberately dropped and audited rather than backfilled.
+5. Switch the tenant/family matcher to Go and reload the proxy.
+6. Within two minutes verify:
+   - `GET /healthz` and `GET /health`;
+   - one no-op workflow run;
+   - `GET /v1/runs` and the Activity UI;
+   - no newly eligible Node job exists beyond the recorded watermark.
+7. Record the exact proxy config, binary commit, database backup/checkpoint,
+   queue watermarks, smoke run, and operator.
 
-- `GET /health` (público-seguro): `rateLimiter` + `queue.degraded`.
-- `GET /system/queue` (admin): waiting/active/oldest por cola.
-- Métricas Prometheus (9464/9465): `go_goroutines`,
-  `process_resident_memory_bytes`, `janusly_*` de colas y rate limits —
-  los umbrales de referencia salen del soak (`conformance/perf/SOAK.md`).
-- DLQ del tenant: `GET /dlq/counts` — un pico de firmas nuevas tras el
-  switch es la señal de divergencia de comportamiento; comparar la firma
-  contra el histórico ANTES de asumir bug de Go.
-- Audit: `GET /audit?action=workflow.circuit_breaker` — breakers
-  disparados post-switch.
+## First 24 hours
+
+- Public dependency posture: `GET /health`.
+- Administrative queue posture: `GET /system/queue`.
+- Prometheus and Go runtime signals: `GET /metrics` on the candidate's internal
+  loopback port (4601 by default), including goroutines, RSS, queue depth, node
+  latency, reaper activity, and degraded rate-limit buckets.
+- Tenant DLQ and new failure signatures: `/dlq/counts`, queue read model, and
+  recovery clusters.
+- Circuit-breaker and operational audits.
+- PostgreSQL connections and LISTEN sessions versus the reviewed baseline.
+- Redis/BullMQ must stay flat for the transferred family; growth means Node is
+  still producing work and the cut must stop.
+
+Use the reviewed 24-hour series in `conformance/perf/SOAK.md` as a reference,
+not as a substitute for candidate-environment observation.
 
 ## Rollback
 
-1. Re-apuntar el matcher del tenant/familia a Node y recargar el proxy
-   (< 1 min; sin migración de datos — mismo Postgres).
-2. Los runs EN VUELO arrancados por Go terminan en Go si el proceso
-   sigue vivo (drenar con SIGTERM: termina lo reclamado). Si Go murió:
-   el reaper de Node NO conoce las filas `running` de Go — resolverlas
-   con el redrive operativo (`POST /v1/dlq/redrive`) tras el reap manual
-   (`UPDATE run_nodes SET ...` NO: usar el flujo DLQ).
-3. Post-mortem con `make dual` + el caso que divergió añadido al corpus
-   ANTES de reintentar el switch.
+1. Stop new Go entries for the affected tenant/family.
+2. Drain Go-owned in-flight work according to the rehearsed state matrix. Keep
+   the originating runtime responsible for its claims; do not let the other
+   runtime guess how to reap them.
+3. Restore the proxy matcher to Node and reload it.
+4. Resume Node scheduling only after confirming Go scheduling is disabled for
+   that tenant.
+5. Verify a Node no-op run and the Activity UI against the restored path.
+6. Add the divergence to the dual/browser corpus and complete the post-mortem
+   before attempting another switch.
 
-## Qué NO hacer
+Rollback is not considered proven until it has been executed against
+Node-created data, Go-upgraded data, delayed work, and an in-flight run. Shared
+PostgreSQL reduces the data-movement cost; it does not by itself prove semantic
+rollback compatibility.
 
-- No correr dos schedulers activos para el MISMO tenant en ambos
-  backends (doble disparo de crons): el split de familia `schedule` es
-  todo-o-nada por tenant.
-- No "arreglar" divergencias editando datos: el comparador y el corpus
-  son el mecanismo; los datos compartidos son la garantía del rollback.
+## Prohibited shortcuts
+
+- No concurrent Node and Go scheduler ownership for one tenant.
+- No direct data edits to make a divergence disappear.
+- No `pnpm migrate` against a goose-provisioned database.
+- No force-push, remote `main` update, or production switch based solely on a
+  historical green report.
