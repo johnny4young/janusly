@@ -2057,3 +2057,16 @@ engañosas de la tabla de fases volteadas a done/superseded con la nota de
 dónde se cumplió cada una — el caso interesante es T-400, superseded con la
 decisión explícita de REPORT-W6 de que la lane Playwright completa es tarea
 del cutover, no del pilot.
+
+## T-527 — Views tipadas para runs/dlq/workflows (2026-08-01)
+
+Siete structs con tags JSON reemplazan los literales map de los tres wires
+más consumidos. Las dos decisiones que importan: cero `omitempty` (el
+contrato exige nulls explícitos y un test reflect lo hace incumplible), y el
+doble guard — el key-set exacto pinneado por test (typo en el tag = rojo) más
+el typo de campo que ya no compila. El dual quedó 27/27 intacto: el wire no
+se movió un byte. La sorpresa de la iteración fue cazar un flake que llevaba
+semanas armado: el test del due-clock del scheduler exigía >30 minutos al
+siguiente fire de un cron `0 3 * * *` UTC — es decir, fallaba TODOS los días
+de 21:30 a 22:00 hora local. La aserción ahora pide alineación al tope de
+hora, no distancia.

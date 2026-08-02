@@ -233,14 +233,8 @@ func (s *V1Server) legacyMutations(mux *http.ServeMux) {
 			writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
-		writeLegacy(w, opOK(map[string]any{
-			"id": row.ID, "orgId": row.OrgID, "runId": row.RunID, "nodeId": row.NodeID,
-			"attempt": row.Attempt, "workflowJson": rawOrNull(row.WorkflowJson),
-			"nodeJson": rawOrNull(row.NodeJson), "errorJson": rawOrNull(row.ErrorJson),
-			"status": row.Status, "replayedAt": timeOrNull(row.ReplayedAt),
-			"createdAt":       timeOrNull(row.CreatedAt),
-			"replayClaimedAt": timeOrNull(row.ReplayClaimedAt),
-			"suspectVersion":  nil, "drill": nil, "drillOutcome": nil,
-		}))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(newDeadLetterDetailView(row))
 	}))
 }

@@ -240,23 +240,9 @@ func (s *V1Server) getRun(w http.ResponseWriter, r *http.Request, rc v1Request) 
 }
 
 // runView emits the reference's full run key set; columns this backend does
-// not populate yet surface as nulls, never as missing keys.
-func runView(run store.GetRunRow) map[string]any {
-	return map[string]any{
-		"id": run.ID, "orgId": run.OrgID,
-		"workflowVersionId": run.WorkflowVersionID,
-		"workflowRolloutId": nil, "workflowRolloutVariant": nil,
-		"status": run.Status, "outcomeStatus": textOrNull(run.OutcomeStatus),
-		"semanticViolationCount": run.SemanticViolationCount,
-		"inputJson":              rawOrNull(run.InputJson), "outputJson": rawOrNull(run.OutputJson),
-		"parentRunId": textOrNull(run.ParentRunID), "parentNodeId": textOrNull(run.ParentNodeID),
-		"parentLinkKind": nil, "parentNotificationAfter": nil,
-		"recoveryPlaybookAppliedRecordedAt": nil, "recoveryPlaybookValidationRecordedAt": nil,
-		"replayMode": textOrNull(run.ReplayMode), "traceId": textOrNull(run.TraceID),
-		"validationEvidenceLevel": textOrNull(run.ValidationEvidenceLevel),
-		"createdBy":               textOrNull(run.CreatedBy), "createdAt": timeOrNull(run.CreatedAt),
-	}
-}
+// not populate yet surface as nulls, never as missing keys (T-527: the
+// typed RunView makes a typo'd key a compile error).
+func runView(run store.GetRunRow) RunView { return newRunView(run) }
 
 func (s *V1Server) listRuns(w http.ResponseWriter, r *http.Request, rc v1Request) {
 	query := r.URL.Query()
@@ -290,19 +276,9 @@ func (s *V1Server) listRuns(w http.ResponseWriter, r *http.Request, rc v1Request
 		s.internal(w, rc, err)
 		return
 	}
-	items := make([]map[string]any, 0, len(rows))
+	items := make([]RunSummaryView, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, map[string]any{
-			"id": row.ID, "orgId": row.OrgID,
-			"workflowId": row.WorkflowID, "workflowName": textOrNullString(row.WorkflowName),
-			"workflowVersionId": row.WorkflowVersionID, "status": row.Status,
-			"hasWaitingNodes": row.HasWaitingNodes, "outcomeStatus": nil,
-			"semanticViolationCount": 0, "outputJson": rawOrNull(row.OutputJson),
-			"parentRunId": textOrNull(row.ParentRunID), "parentNodeId": textOrNull(row.ParentNodeID),
-			"replayMode": textOrNull(row.ReplayMode), "traceId": textOrNull(row.TraceID),
-			"validationEvidenceLevel": nil,
-			"createdBy":               textOrNull(row.CreatedBy), "createdAt": timeOrNull(row.CreatedAt),
-		})
+		items = append(items, newRunSummaryView(row))
 	}
 	writeV1Data(w, rc.id, items)
 }
@@ -436,31 +412,11 @@ func (s *V1Server) listDeadLetters(w http.ResponseWriter, r *http.Request, rc v1
 		s.internal(w, rc, err)
 		return
 	}
-	items := make([]map[string]any, 0, len(rows))
+	// The ownership overlay travels with its dead letter (the reference
+	// joins the same shape); the typed view owns the key set (T-527).
+	items := make([]DeadLetterSummaryView, 0, len(rows))
 	for _, row := range rows {
-		// The ownership overlay: the auto-created incident travels with its
-		// dead letter (the reference joins the same shape into the list).
-		var recovery any
-		if row.RecoveryID.Valid {
-			recovery = map[string]any{
-				"id": row.RecoveryID.String, "owner": textOrNull(row.RecoveryOwner),
-				"severity": row.RecoverySeverity, "status": row.RecoveryStatus,
-				"slaTargetAt":        timeOrNull(row.RecoverySlaTargetAt),
-				"resolutionReason":   textOrNull(row.RecoveryResolutionReason),
-				"comments":           rawOrNull(row.RecoveryComments),
-				"workflowId":         textOrNull(row.RecoveryWorkflowID),
-				"metadataWorkflowId": textOrNull(row.RecoveryMetadataWorkflowID),
-				"occurrenceCount":    row.RecoveryOccurrenceCount,
-				"lastOccurredAt":     timeOrNull(row.RecoveryLastOccurredAt),
-			}
-		}
-		items = append(items, map[string]any{
-			"id": row.ID, "orgId": row.OrgID, "runId": row.RunID, "nodeId": row.NodeID,
-			"attempt": row.Attempt, "errorJson": rawOrNull(row.ErrorJson), "status": row.Status,
-			"replayedAt": timeOrNull(row.ReplayedAt), "createdAt": timeOrNull(row.CreatedAt),
-			"nodeType": textOrNullString(row.NodeType), "workflowName": textOrNullString(row.WorkflowName),
-			"recovery": recovery,
-		})
+		items = append(items, newDeadLetterSummaryView(row))
 	}
 	writeV1Data(w, rc.id, items)
 }

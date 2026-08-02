@@ -72,10 +72,12 @@ func TestScheduleNodeDueClockLoop(t *testing.T) {
 	if via != "schedule" {
 		t.Fatalf("run input must carry triggeredBy schedule: %q", via)
 	}
-	// The clock advanced to the NEXT cron fire, not the lease.
+	// The clock advanced to the NEXT cron fire, not the lease. Assert
+	// ALIGNMENT (top-of-hour instant in the future) instead of distance —
+	// the old >30min check flaked every second half of the hour.
 	_ = pool.QueryRow(ctx, `SELECT next_fire_at FROM schedule_entries WHERE id = $1`, entryID).Scan(&nextFireAt)
-	if !nextFireAt.After(time.Now().Add(30 * time.Minute)) {
-		t.Fatalf("clock must advance to the next cron fire: %v", nextFireAt)
+	if !nextFireAt.After(time.Now()) || nextFireAt.UTC().Minute() != 0 || nextFireAt.UTC().Second() != 0 {
+		t.Fatalf("clock must advance to the next hourly cron fire: %v", nextFireAt)
 	}
 
 	// A PAUSED workflow drops the tick loudly — no run, audited, advanced.

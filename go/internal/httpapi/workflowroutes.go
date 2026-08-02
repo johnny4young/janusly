@@ -181,28 +181,17 @@ func (s *V1Server) listWorkflows(w http.ResponseWriter, r *http.Request, rc v1Re
 		s.internal(w, rc, err)
 		return
 	}
-	items := make([]map[string]any, 0, len(rows))
+	items := make([]WorkflowListItemView, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, map[string]any{
-			"id": row.ID, "orgId": row.OrgID, "name": row.Name,
-			"createdBy": textOrNull(row.CreatedBy), "createdAt": timeOrNull(row.CreatedAt),
-			"lastRunStatus": textOrNullString(row.LastRunStatus), "runCount": row.RunCount,
-			"bufferedTriggerCount": 0,
-			"status":               row.Status, "pausedReason": textOrNull(row.PausedReason),
-			"tags": []string{}, "folder": nil, "deletedAt": timeOrNull(row.DeletedAt),
-		})
+		items = append(items, newWorkflowListItemView(row))
 	}
 	writeV1Data(w, rc.id, items)
 }
 
 // versionView emits the contract's WorkflowVersion key set; columns the
 // pilot does not populate surface as explicit nulls.
-func versionView(id, orgID, workflowID string, version int32, dagJSON json.RawMessage, createdBy pgtype.Text, createdAt *time.Time) map[string]any {
-	return map[string]any{
-		"id": id, "orgId": orgID, "workflowId": workflowID, "version": version,
-		"dagJson": rawOrNull(dagJSON), "sloJson": nil, "upstreamHealthSources": nil,
-		"createdBy": textOrNull(createdBy), "createdAt": timeOrNull(createdAt),
-	}
+func versionView(id, orgID, workflowID string, version int32, dagJSON json.RawMessage, createdBy pgtype.Text, createdAt *time.Time) VersionView {
+	return newVersionView(id, orgID, workflowID, version, dagJSON, createdBy, createdAt)
 }
 
 // requireActiveWorkflow implements the shared parent gate: missing or
@@ -261,7 +250,7 @@ func (s *V1Server) listWorkflowVersions(w http.ResponseWriter, r *http.Request, 
 		s.internal(w, rc, err)
 		return
 	}
-	items := make([]map[string]any, 0, len(rows))
+	items := make([]VersionView, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, versionView(row.ID, row.OrgID, row.WorkflowID, row.Version,
 			row.DagJson, row.CreatedBy, row.CreatedAt))
