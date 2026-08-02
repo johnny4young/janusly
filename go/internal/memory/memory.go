@@ -23,6 +23,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/johnny4young/janusly/go/internal/httpjson"
 	"github.com/johnny4young/janusly/go/internal/orgconfig"
 )
 
@@ -40,7 +41,10 @@ var defaultRetentionDays = map[string]int{
 	"workflow_vector": 180, "agent_episode": 180,
 }
 
-const embeddingDimension = 1024
+const (
+	embeddingDimension        = 1024
+	embeddingResponseMaxBytes = 256 << 10
+)
 
 // CommitInput is one memory write.
 type CommitInput struct {
@@ -235,7 +239,7 @@ func embed(ctx context.Context, baseURL, model, text string) ([]float64, error) 
 	var decoded struct {
 		Embedding []float64 `json:"embedding"`
 	}
-	if err := json.NewDecoder(res.Body).Decode(&decoded); err != nil {
+	if err := httpjson.Decode(res.Body, embeddingResponseMaxBytes, &decoded); err != nil {
 		return nil, err
 	}
 	if len(decoded.Embedding) != embeddingDimension {

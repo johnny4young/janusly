@@ -6,13 +6,16 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/johnny4young/janusly/go/internal/httpjson"
 )
 
 var supabaseHTTPClient = &http.Client{Timeout: 10 * time.Second}
+
+const supabaseUserResponseMaxBytes = 64 << 10
 
 func verifySupabaseUser(ctx context.Context, baseURL, apiKey, token string) (string, string, bool) {
 	if baseURL == "" || apiKey == "" || token == "" {
@@ -37,7 +40,7 @@ func verifySupabaseUser(ctx context.Context, baseURL, apiKey, token string) (str
 		ID    string `json:"id"`
 		Email string `json:"email"`
 	}
-	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil || payload.ID == "" {
+	if err := httpjson.Decode(res.Body, supabaseUserResponseMaxBytes, &payload); err != nil || payload.ID == "" {
 		return "", "", false
 	}
 	return payload.ID, strings.ToLower(payload.Email), true
