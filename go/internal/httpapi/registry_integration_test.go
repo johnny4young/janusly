@@ -135,6 +135,9 @@ func TestUnregisteredPatternFailsClosed(t *testing.T) {
 	mux.HandleFunc("GET /rogue/unregistered", rogue.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
+	mux.HandleFunc("GET /rogue/identity", rogue.identity(func(w http.ResponseWriter, r *http.Request, rc identityRequest) {
+		w.WriteHeader(http.StatusOK)
+	}))
 	probe := httptest.NewServer(mux)
 	t.Cleanup(probe.Close)
 	req, _ := http.NewRequest("GET", probe.URL+"/rogue/unregistered", nil)
@@ -148,5 +151,17 @@ func TestUnregisteredPatternFailsClosed(t *testing.T) {
 	body, _ := io.ReadAll(res.Body)
 	if res.StatusCode != 500 || !strings.Contains(string(body), "route_not_registered") {
 		t.Fatalf("unregistered pattern must fail closed: %d %s", res.StatusCode, body)
+	}
+	identityReq, _ := http.NewRequest("GET", probe.URL+"/rogue/identity", nil)
+	identityReq.Header.Set("x-org-id", h.org)
+	identityReq.Header.Set("x-user-id", "api-tester")
+	identityRes, err := http.DefaultClient.Do(identityReq)
+	if err != nil {
+		t.Fatalf("identity probe: %v", err)
+	}
+	defer identityRes.Body.Close()
+	identityBody, _ := io.ReadAll(identityRes.Body)
+	if identityRes.StatusCode != 500 || !strings.Contains(string(identityBody), "route_not_registered") {
+		t.Fatalf("unregistered identity pattern must fail closed: %d %s", identityRes.StatusCode, identityBody)
 	}
 }

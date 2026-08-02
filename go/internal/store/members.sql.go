@@ -233,6 +233,23 @@ func (q *Queries) GetOrgRole(ctx context.Context, arg GetOrgRoleParams) (GetOrgR
 	return i, err
 }
 
+const getUserProfile = `-- name: GetUserProfile :one
+SELECT id, name, email FROM users WHERE id = $1
+`
+
+type GetUserProfileRow struct {
+	ID    string
+	Name  pgtype.Text
+	Email pgtype.Text
+}
+
+func (q *Queries) GetUserProfile(ctx context.Context, id string) (GetUserProfileRow, error) {
+	row := q.db.QueryRow(ctx, getUserProfile, id)
+	var i GetUserProfileRow
+	err := row.Scan(&i.ID, &i.Name, &i.Email)
+	return i, err
+}
+
 const insertInstalledPlugin = `-- name: InsertInstalledPlugin :exec
 INSERT INTO installed_plugins (id, org_id, plugin_id, config_json, installed_by)
 VALUES ($1, $2, $3, $4, $5)
@@ -333,6 +350,90 @@ func (q *Queries) InsertOrgRole(ctx context.Context, arg InsertOrgRoleParams) er
 		arg.GrantedPermissions,
 	)
 	return err
+}
+
+const listIdentityInvitations = `-- name: ListIdentityInvitations :many
+SELECT i.id, i.org_id, i.role, o.name AS organization_name
+FROM invitations i
+LEFT JOIN organizations o ON o.id = i.org_id
+WHERE lower(i.email) = lower($1::text) AND i.status = 'pending'
+ORDER BY i.created_at, i.id
+LIMIT 51
+`
+
+type ListIdentityInvitationsRow struct {
+	ID               string
+	OrgID            string
+	Role             string
+	OrganizationName pgtype.Text
+}
+
+func (q *Queries) ListIdentityInvitations(ctx context.Context, email string) ([]ListIdentityInvitationsRow, error) {
+	rows, err := q.db.Query(ctx, listIdentityInvitations, email)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListIdentityInvitationsRow
+	for rows.Next() {
+		var i ListIdentityInvitationsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Role,
+			&i.OrganizationName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIdentityMemberships = `-- name: ListIdentityMemberships :many
+SELECT m.org_id, m.role, o.name AS organization_name, o.plan AS organization_plan
+FROM org_members m
+LEFT JOIN organizations o ON o.id = m.org_id
+WHERE m.user_id = $1
+ORDER BY o.name, m.org_id
+LIMIT 201
+`
+
+type ListIdentityMembershipsRow struct {
+	OrgID            string
+	Role             string
+	OrganizationName pgtype.Text
+	OrganizationPlan pgtype.Text
+}
+
+// Identity bootstrap uses one extra row to report truncation without an
+// unbounded count. The LEFT JOIN preserves orphan-tolerant membership truth.
+func (q *Queries) ListIdentityMemberships(ctx context.Context, userID string) ([]ListIdentityMembershipsRow, error) {
+	rows, err := q.db.Query(ctx, listIdentityMemberships, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListIdentityMembershipsRow
+	for rows.Next() {
+		var i ListIdentityMembershipsRow
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.Role,
+			&i.OrganizationName,
+			&i.OrganizationPlan,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listOrgInvitations = `-- name: ListOrgInvitations :many

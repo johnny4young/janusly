@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/johnny4young/janusly/go/internal/auth"
+	"github.com/johnny4young/janusly/go/internal/browsersession"
 	"github.com/johnny4young/janusly/go/internal/engine"
 	"github.com/johnny4young/janusly/go/internal/executors"
 	"github.com/johnny4young/janusly/go/internal/mcpclient"
@@ -139,7 +140,7 @@ func NewV1HandlerWithShutdown(eng *engine.Engine, pool *pgxpool.Pool) (http.Hand
 	mux.HandleFunc("POST /v1/dlq/redrive", server.auth(server.redrive))
 	mux.HandleFunc("POST /v1/dlq/replay", server.auth(server.replayAlias))
 	mux.HandleFunc("GET /runs/{runId}/stream", server.auth(server.streamRun))
-	mux.HandleFunc("GET /auth/context", server.auth(server.authContext))
+	mux.HandleFunc("GET /auth/context", server.identity(server.authContext))
 	// The AI Studio's tool catalog; the web calls it through /v1.
 	mux.HandleFunc("GET /v1/tools", server.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeV1Data(w, rc.id, executors.NewToolRegistry().Catalog())
@@ -186,6 +187,7 @@ func NewV1HandlerWithShutdown(eng *engine.Engine, pool *pgxpool.Pool) (http.Hand
 	server.mountBillingRoutes(mux)
 	server.mountReplayLabRoutes(mux)
 	server.mountRecoveryReadRoutes(mux)
+	server.mountBrowserSessionRoutes(mux)
 	server.mountIdentityRoutes(mux)
 	server.mountCausalRoutes(mux)
 	if webdist.Enabled() {
@@ -208,8 +210,93 @@ type v1Request struct {
 
 type handlerFunc func(w http.ResponseWriter, r *http.Request, rc v1Request)
 
-// auth is the pilot's dev-header gate: the org header is the tenancy scope
-// every handler filters by.
+type identityRequest struct {
+	userID   string
+	id       string
+	identity *auth.Identity
+}
+
+type identityHandlerFunc func(w http.ResponseWriter, r *http.Request, rc identityRequest)
+
+func unsafeMethod(method string) bool {
+	return method != http.MethodGet && method != http.MethodHead
+}
+
+func writeMiddlewareRejection(w http.ResponseWriter, r *http.Request, requestID string, rejection opResult) {
+	if strings.HasPrefix(r.URL.Path, "/v1/") {
+		writeVersioned(w, requestID, rejection)
+	} else {
+		writeLegacy(w, rejection)
+	}
+}
+
+func requireSessionCSRF(r *http.Request, mode auth.Mode) *opResult {
+	if mode != auth.ModeJanuslySession || !unsafeMethod(r.Method) {
+		return nil
+	}
+	if err := browsersession.RequireCSRF(r, isAllowedRequestOrigin); err != nil {
+		rejection := opError(http.StatusForbidden, "server_request_failed", err.Error(), nil)
+		return &rejection
+	}
+	return nil
+}
+
+// identity resolves only provider identity. It is intentionally incapable of
+// producing an org scope and is restricted to the closed bootstrap registry.
+func (s *V1Server) identity(next identityHandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		requestID := requestIDFrom(r)
+		resolved, err := s.resolver.ResolveIdentity(r.Context(), r)
+		if err != nil {
+			writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil))
+			return
+		}
+		if resolved == nil {
+			writeLegacy(w, opError(http.StatusUnauthorized, "server_request_failed",
+				"Unauthorized: missing or invalid identity provider", nil))
+			return
+		}
+		if !identityOnlyRoutes[r.Pattern] {
+			writeLegacy(w, opError(http.StatusInternalServerError, "route_not_registered",
+				"route "+r.Pattern+" is mounted with identity but is not identity-only", nil))
+			return
+		}
+		if rejection := requireSessionCSRF(r, resolved.Mode); rejection != nil {
+			writeMiddlewareRejection(w, r, requestID, *rejection)
+			return
+		}
+		next(w, r, identityRequest{userID: resolved.UserID, id: requestID, identity: resolved})
+	}
+}
+
+// optionalIdentity is the signed-out browser probe: provider errors remain
+// visible, but a missing/invalid provider is passed to the handler as nil.
+func (s *V1Server) optionalIdentity(next identityHandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		requestID := requestIDFrom(r)
+		resolved, err := s.resolver.ResolveIdentity(r.Context(), r)
+		if err != nil {
+			writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil))
+			return
+		}
+		if !optionalIdentityRoutes[r.Pattern] {
+			writeLegacy(w, opError(http.StatusInternalServerError, "route_not_registered",
+				"route "+r.Pattern+" is mounted with optional identity but is not registered", nil))
+			return
+		}
+		next(w, r, identityRequest{userID: userIDOrEmpty(resolved), id: requestID, identity: resolved})
+	}
+}
+
+func userIDOrEmpty(identity *auth.Identity) string {
+	if identity == nil {
+		return ""
+	}
+	return identity.UserID
+}
+
+// auth resolves provider identity through a real membership-authorized tenant
+// context, then applies the closed role/permission registry.
 func (s *V1Server) auth(next handlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		requestID := requestIDFrom(r)
@@ -252,6 +339,10 @@ func (s *V1Server) auth(next handlerFunc) http.HandlerFunc {
 			} else {
 				writeLegacy(w, rejection)
 			}
+			return
+		}
+		if rejection := requireSessionCSRF(r, resolved.Mode); rejection != nil {
+			writeMiddlewareRejection(w, r, requestID, *rejection)
 			return
 		}
 		next(w, r, rc)

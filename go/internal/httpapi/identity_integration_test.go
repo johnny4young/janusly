@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/johnny4young/janusly/go/internal/browsersession"
+	"github.com/johnny4young/janusly/go/internal/store"
 )
 
 // T-519: the remaining identity surfaces — membership projection,
@@ -75,6 +78,8 @@ func TestIdentitySurfaces(t *testing.T) {
 }
 
 func TestInvitationAcceptFlow(t *testing.T) {
+	t.Setenv("JANUSLY_RESUME_TOKEN_SECRET", "invitation-session-secret")
+	t.Setenv("API_ALLOWED_ORIGINS", "http://localhost:5173")
 	h := newAPIHarness(t)
 	pool := testPool(t)
 	ctx := context.Background()
@@ -92,16 +97,31 @@ func TestInvitationAcceptFlow(t *testing.T) {
 	if res := h.call("POST", "/auth/invitations/accept", map[string]any{"invitationId": invitationID}, ""); res.status != 403 {
 		t.Fatalf("email-less identity must 403: %d %+v", res.status, res.body)
 	}
+	sessionFor := func(userID, email string) string {
+		sessionID := "session-" + userID + "-" + suffix
+		if _, err := store.New(pool).CreateAuthSession(ctx, store.CreateAuthSessionParams{
+			ID: sessionID, UserID: userID, Email: email, OrgID: h.org,
+			ExpiresAt: time.Now().Add(10 * time.Minute),
+		}); err != nil {
+			t.Fatalf("seed browser session: %v", err)
+		}
+		token, err := browsersession.CreateToken(sessionID, 600)
+		if err != nil {
+			t.Fatalf("create browser token: %v", err)
+		}
+		return browsersession.CookieName + "=" + token.Value
+	}
+	csrfHeaders := map[string]string{"Origin": "http://localhost:5173", browsersession.CSRFHeader: "1"}
 	// A mismatched verified email gets the IDENTICAL not-found envelope.
-	if res := h.callWithHeaders("POST", "/auth/invitations/accept",
-		map[string]any{"invitationId": invitationID}, h.org,
-		map[string]string{"x-user-id": "mallory@example.com"}); res.status != 404 {
+	if res := callBrowserSession(t, h, "POST", "/auth/invitations/accept",
+		sessionFor("mallory-user", "mallory@example.com"),
+		map[string]any{"invitationId": invitationID}, csrfHeaders); res.status != 404 {
 		t.Fatalf("wrong email must read as not found: %d %+v", res.status, res.body)
 	}
 	// The invited email accepts: CAS + membership row + audit.
-	accepted := h.callWithHeaders("POST", "/auth/invitations/accept",
-		map[string]any{"invitationId": invitationID}, h.org,
-		map[string]string{"x-user-id": "Alice@Example.com"})
+	aliceCookie := sessionFor("Alice@Example.com", "Alice@Example.com")
+	accepted := callBrowserSession(t, h, "POST", "/auth/invitations/accept", aliceCookie,
+		map[string]any{"invitationId": invitationID}, csrfHeaders)
 	if accepted.status != 200 || accepted.body["organizationId"] != targetOrg || accepted.body["role"] != "editor" {
 		t.Fatalf("accept: %d %+v", accepted.status, accepted.body)
 	}
@@ -112,9 +132,8 @@ func TestInvitationAcceptFlow(t *testing.T) {
 		t.Fatalf("membership must land with the CAS: role=%q status=%q", memberRole, invitationStatus)
 	}
 	// A second accept loses the CAS.
-	if res := h.callWithHeaders("POST", "/auth/invitations/accept",
-		map[string]any{"invitationId": invitationID}, h.org,
-		map[string]string{"x-user-id": "alice@example.com"}); res.status != 409 {
+	if res := callBrowserSession(t, h, "POST", "/auth/invitations/accept", aliceCookie,
+		map[string]any{"invitationId": invitationID}, csrfHeaders); res.status != 409 {
 		t.Fatalf("second accept must 409: %d %+v", res.status, res.body)
 	}
 	if res := h.call("POST", "/auth/invitations/accept", map[string]any{"invitationId": "ghost"}, ""); res.status != 403 && res.status != 404 {

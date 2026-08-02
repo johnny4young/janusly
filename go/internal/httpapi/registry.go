@@ -5,10 +5,10 @@
 // its gates — an unlisted pattern is caught by the registry completeness
 // test, not by an attacker.
 //
-// Pairs come from the reference's route annotations verbatim. Routes with
-// an empty gate are auth-only (identity required, no rank/permission):
-// GET /org/config (every member reads runtime config), the tool catalog,
-// /auth/context, and the health surfaces (which skip auth entirely).
+// Pairs come from the reference's route annotations verbatim. Routes with an
+// empty tenant gate are auth-only (membership required, no rank/permission).
+// Bootstrap identity and optional-identity routes have separate closed
+// registries below.
 package httpapi
 
 import (
@@ -24,7 +24,6 @@ import (
 // missing from routeAuthz fails CLOSED with route_not_registered — a
 // mount can no longer silently become auth-only by forgetting its entry.
 var authOnlyRoutes = map[string]bool{
-	"GET /auth/context": true,
 	"GET /org/config":   true,
 	"GET /templates":    true,
 	"GET /v1/templates": true,
@@ -36,11 +35,18 @@ var authOnlyRoutes = map[string]bool{
 	"GET /billing/usage":        true,
 	"GET /billing/usage/export": true,
 	"GET /billing/budget":       true,
-	// Identity-scoped surfaces (reference identity-only routes): they must
-	// work for callers with zero usable memberships.
-	"GET /organizations":            true,
-	"POST /users/me":                true,
-	"POST /auth/invitations/accept": true,
+	"POST /users/me":            true,
+}
+
+var identityOnlyRoutes = map[string]bool{
+	"GET /auth/context":               true,
+	"GET /organizations":              true,
+	"POST /auth/invitations/accept":   true,
+	"POST /auth/session/organization": true,
+}
+
+var optionalIdentityRoutes = map[string]bool{
+	"GET /auth/session": true,
 }
 
 // route registers the gate and mounts the handler in ONE call — the

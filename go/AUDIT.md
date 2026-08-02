@@ -103,8 +103,9 @@ exact candidate commit:
 | SEC-003 | P1 | Public and internal HTTP servers bounded only header-read time; full request reads, idle connections, and header bytes retained unbounded/default policy. | fixed in architecture review |
 | SEC-005 | P1 | Supabase identity and embedding-provider responses were JSON-decoded without a decoded-body byte cap. | fixed in architecture review |
 | SEC-006 | P1 | Credentialed CORS honored `API_ALLOWED_ORIGINS=*` in production, which is unsafe once browser-session reads and mutations are enabled. | fixed in architecture review |
-| AUTH-001 | P0 | Go omits the Node `janusly-session` provider and WorkOS browser-session lifecycle, while the web already depends on cookie-session endpoints. | open |
-| AUTH-002 | P0 | Go labels bootstrap surfaces identity-scoped but dispatches them through tenant membership resolution, so a legitimate zero-membership identity cannot bootstrap. | open |
+| AUTH-001 | P0 | Go now resolves durable `janusly-session` cookies and serves their lifecycle routes, but still lacks the WorkOS SSO issuance callback that creates those sessions. | open |
+| AUTH-002 | P0 | Go labels bootstrap surfaces identity-scoped but dispatches them through tenant membership resolution, so a legitimate zero-membership identity cannot bootstrap. | fixed in architecture review |
+| AUTH-003 | P0 | Go still lacks atomic first-organization creation and atomic invitation acceptance with the exact Node bootstrap response/error contract. | open |
 
 ## Architecture review decisions
 
@@ -155,3 +156,32 @@ WorkOS SSO, and the full bootstrap projection are not part of this band.
 The exact band passed `make ci` on 2026-08-02, including sqlc/OpenAPI drift
 checks, coverage floors, build, lint, reachable-vulnerability analysis, the
 race-enabled PostgreSQL integration suite, and semantic parity F01-F25.
+
+### Session HTTP lifecycle and identity dispatcher
+
+The third authentication-parity band connects the resolver's two products to
+separate fail-closed HTTP dispatchers. Tenant routes still receive only a
+membership-authorized `Context`; the closed identity registry receives only
+provider `Identity`, and an unregistered identity mount fails with
+`route_not_registered`. Cookie-authenticated mutations in either dispatcher
+must pass the same custom-marker and concrete-origin CSRF gate before handler
+execution.
+
+The Go API now serves the browser contract already used by the web:
+`GET /auth/session` is an optional, console-clean signed-out probe;
+`POST /auth/session/logout` revokes the server row and clears the cookie; and
+`POST /auth/session/organization` proves membership, updates only the matching
+live user session, preserves the original expiry, and reissues the signed
+cookie. `GET /auth/context` now uses provider identity rather than tenant auth
+and returns bounded memberships, roles, sorted permissions, profile,
+invitations, selection state, and the labelled development fallback. A live
+session with zero memberships receives `needsOrganization: true` instead of a
+401, closing `AUTH-002`.
+
+Integration coverage exercises discovery, revocation, organization switching,
+membership denial, session rotation, both tenant and identity CSRF paths,
+zero-membership bootstrap, and the closed route registries. The exact band
+passed `make ci` on 2026-08-02: sqlc/OpenAPI drift, coverage, build, lint,
+`govulncheck`, race-enabled integration, and semantic parity F01-F25 are green.
+WorkOS session issuance and atomic first-organization/invitation transactions
+remain open as `AUTH-001` and `AUTH-003`.

@@ -64,6 +64,27 @@ WHERE m.user_id = $1
 ORDER BY m.org_id
 LIMIT 50;
 
+-- Identity bootstrap uses one extra row to report truncation without an
+-- unbounded count. The LEFT JOIN preserves orphan-tolerant membership truth.
+-- name: ListIdentityMemberships :many
+SELECT m.org_id, m.role, o.name AS organization_name, o.plan AS organization_plan
+FROM org_members m
+LEFT JOIN organizations o ON o.id = m.org_id
+WHERE m.user_id = $1
+ORDER BY o.name, m.org_id
+LIMIT 201;
+
+-- name: GetUserProfile :one
+SELECT id, name, email FROM users WHERE id = $1;
+
+-- name: ListIdentityInvitations :many
+SELECT i.id, i.org_id, i.role, o.name AS organization_name
+FROM invitations i
+LEFT JOIN organizations o ON o.id = i.org_id
+WHERE lower(i.email) = lower(sqlc.arg(email)::text) AND i.status = 'pending'
+ORDER BY i.created_at, i.id
+LIMIT 51;
+
 -- name: UpsertUserProfile :one
 INSERT INTO users (id, name, email)
 VALUES ($1, $2, $3)

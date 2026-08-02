@@ -1,6 +1,5 @@
-// Remaining identity surfaces (T-519; reference auth-context-routes.ts +
-// plugins-routes.ts): the caller's membership projection, the profile
-// upsert, invitation acceptance, and the honest plugin-install stub.
+// Identity and plugin surfaces: membership projection, profile upsert,
+// invitation acceptance, and the honest plugin-install stub.
 package httpapi
 
 import (
@@ -29,7 +28,7 @@ func normalizedIdentityName(value string, maxLength int) string {
 // organizationsCore lists the caller's REAL memberships (org name + plan
 // + role). Works for identities with zero memberships — the multi-org
 // switcher needs the empty list, not a 403.
-func (s *V1Server) organizationsCore(r *http.Request, rc v1Request) opResult {
+func (s *V1Server) organizationsCore(r *http.Request, rc identityRequest) opResult {
 	rows, err := store.New(s.pool).ListUserMemberships(r.Context(), rc.userID)
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
@@ -73,8 +72,10 @@ func (s *V1Server) usersMeCore(r *http.Request, rc v1Request) opResult {
 
 // invitationAcceptCore: verified-email identities only; the CAS flips a
 // still-pending row exactly once and the membership lands with it.
-func (s *V1Server) invitationAcceptCore(r *http.Request, rc v1Request) opResult {
-	if rc.authContext.Email == "" {
+func (s *V1Server) invitationAcceptCore(r *http.Request, rc identityRequest) opResult {
+	identity := rc.identity
+	if identity.Email == "" ||
+		(identity.Mode != auth.ModeSupabase && identity.Mode != auth.ModeJanuslySession) {
 		return opError(http.StatusForbidden, "identity_email_required", "A verified account email is required", nil)
 	}
 	var body struct {
@@ -90,7 +91,7 @@ func (s *V1Server) invitationAcceptCore(r *http.Request, rc v1Request) opResult 
 	if err != nil {
 		return opError(http.StatusNotFound, "invitation_not_found", "Invitation not found", nil)
 	}
-	if !strings.EqualFold(invitation.Email, rc.authContext.Email) {
+	if !strings.EqualFold(invitation.Email, identity.Email) {
 		// Identical envelope to not-found: an invitation id must not leak
 		// whose email it targets.
 		return opError(http.StatusNotFound, "invitation_not_found", "Invitation not found", nil)
@@ -107,7 +108,12 @@ func (s *V1Server) invitationAcceptCore(r *http.Request, rc v1Request) opResult 
 	}); err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
 	}
-	audit.Write(ctx, s.pool, rc.authContext, "member.joined", audit.Options{
+	auditContext := &auth.Context{
+		OrgID: invitation.OrgID, UserID: identity.UserID,
+		Mode: identity.Mode, Source: identity.Source,
+		ServiceTokenSuffix: identity.ServiceTokenSuffix, BrowserSessionID: identity.BrowserSessionID,
+	}
+	audit.Write(ctx, s.pool, auditContext, "member.joined", audit.Options{
 		TargetType: "invitation", TargetID: invitationID,
 		Metadata: map[string]any{"organizationId": invitation.OrgID, "role": invitation.Role},
 	})
@@ -147,16 +153,15 @@ func (s *V1Server) pluginInstallCore(r *http.Request, rc v1Request) opResult {
 }
 
 func (s *V1Server) mountIdentityRoutes(mux *http.ServeMux) {
-	// Membership projection, profile, and invitation acceptance are
-	// identity-scoped (auth-only): they must work with zero usable
-	// memberships, exactly like the reference's identity-only routes.
-	mux.HandleFunc("GET /organizations", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	// Membership projection and invitation acceptance use provider identity;
+	// profile updates remain tenant-authenticated like the reference.
+	mux.HandleFunc("GET /organizations", s.identity(func(w http.ResponseWriter, r *http.Request, rc identityRequest) {
 		writeLegacy(w, s.organizationsCore(r, rc))
 	}))
 	mux.HandleFunc("POST /users/me", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeLegacy(w, s.usersMeCore(r, rc))
 	}))
-	mux.HandleFunc("POST /auth/invitations/accept", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	mux.HandleFunc("POST /auth/invitations/accept", s.identity(func(w http.ResponseWriter, r *http.Request, rc identityRequest) {
 		writeLegacy(w, s.invitationAcceptCore(r, rc))
 	}))
 	s.route(mux, "POST /plugins/install", routeGate{auth.RoleAdmin, "workflows.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
