@@ -2195,3 +2195,13 @@ el que se compara. RSS bajando y goroutines planas no dejan lugar a otra
 lectura: estable, sin fuga. La lección para el detector quedó anotada:
 excluir del promedio las muestras bajo congelamiento. Con esto, el último
 criterio del go/no-go pasa a verde y REPORT-W6 queda sin asteriscos.
+
+## Refresh del CUTOVER-MAP al estado post-ola-7 (2026-08-02)
+
+El mapa se escribió en el corte de la ola 6, cuando las fases 4 y 5 eran
+"Node hasta portarlas" — y la ola 7 las portó todas. La actualización deja
+las cinco fases con evidencia verde y el split estable en "todo a Go" (el
+matcher @node queda como patrón de transición gradual, no como necesidad),
+recorta la tabla de divergencias a las dos clases que quedan (ambas
+deliberadas del lado honesto) y anota cuáles murieron en la ola 7 con su
+ticket. Node pasa de upstream requerido a destino de rollback.
