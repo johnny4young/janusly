@@ -2041,3 +2041,19 @@ bundle real (2.2MB) se copia al embed root en build time y vive en
 .gitignore. El smoke corrió contra el binario real con el bundle de
 producción: shell SPA en `/`, asset hasheado con `immutable`, ruta client-side
 con fallback correcto y `/healthz` intacto.
+
+## T-523 + T-524 — ARCHITECTURE.md y limpieza del PLAN (2026-08-01)
+
+ARCHITECTURE.md nuevo con los cuatro diagramas que un contribuidor necesita
+para no romper nada: el ciclo de vida con cada punto CAS nombrado, la
+secuencia de subworkflow con su checkpoint de una transacción, el mapa de
+módulos con las reglas que las flechas codifican, y el claim ladder con el
+due-clock. Los cuatro renderizan (verificado con beautiful-mermaid, 4/4).
+Los cinco ADRs capturan las decisiones que no se leen del código: due-clock
+sobre BullMQ, los sesgos del zoned-window que NO se unifican, la postura
+orphan-tolerant, sweeps sobre colas, y la serie T-500 como institución
+census-first con sus incidentes reales. T-524 de paso: las 13 filas
+engañosas de la tabla de fases volteadas a done/superseded con la nota de
+dónde se cumplió cada una — el caso interesante es T-400, superseded con la
+decisión explícita de REPORT-W6 de que la lane Playwright completa es tarea
+del cutover, no del pilot.

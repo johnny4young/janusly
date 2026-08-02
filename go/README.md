@@ -5,7 +5,9 @@ executable node subset, v1 API shaped against reference goldens, and an MCP
 stdio server exposing the operator loop to agents.
 
 Start here: [`PLAN.md`](PLAN.md) (source of truth), [`JOURNAL.md`](JOURNAL.md)
-(execution journal), [`AGENTS.md`](AGENTS.md) (cross-agent onboarding).
+(execution journal), [`AGENTS.md`](AGENTS.md) (cross-agent onboarding),
+[`ARCHITECTURE.md`](ARCHITECTURE.md) (lifecycle/subworkflow/module/claim
+diagrams + the ADRs behind the pilot's non-obvious decisions).
 
 ## Quick start
 
