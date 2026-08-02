@@ -2134,3 +2134,17 @@ contra la suposición). Los pisos quedaron pineados en los valores actuales
 con la regla de solo-subir, y la mutación se demostró en vivo: piso a 99 →
 exit 1 señalando al paquete. migrate pinnea 0 con honestidad — su unit
 guarda el contrato del embed y su runtime corre en cada boot de integración.
+
+## T-533 — Fuzzing de cron, CloudEvents y PDF (2026-08-01)
+
+Tres fuzzers nuevos sobre los parsers que comen input de afuera, cada uno
+con su propiedad de fondo en vez de solo "no panic": el cron aceptado jamás
+puede producir un fire que no avance o no esté alineado al minuto (y la
+cadena Next∘Next sigue avanzando — sin puntos fijos), el CloudEvents
+estricto tiene la strictness FUZZEADA (inyectar un campo desconocido a
+cualquier evento aceptado debe voltearlo a rechazo — la propiedad z.strict
+del reference como invariante ejecutable), y los escritores PDF producen un
+documento estructuralmente válido ante cualquier hostilidad, incluidos los
+paréntesis sin balancear que estresan el escape del stream y la inyección
+de %%EOF. 45 segundos reales por fuzzer, cuatro de cuatro sin hallazgos —
+que después del gap real de T-532 es un resultado que se agradece.

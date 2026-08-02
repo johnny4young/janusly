@@ -99,6 +99,10 @@ FUZZTIME ?= 45s
 fuzz:
 	go test ./internal/grammar/ -fuzz FuzzValidateAndEvaluateExpression -fuzztime $(FUZZTIME)
 	go test ./internal/grammar/ -fuzz FuzzRenderTemplate -fuzztime $(FUZZTIME)
+	go test ./internal/cron/ -fuzz FuzzCronParse -fuzztime $(FUZZTIME) -run '^$$'
+	go test ./internal/httpapi/ -fuzz FuzzParseExternalRuntimeEvent -fuzztime $(FUZZTIME) -run '^$$'
+	go test ./internal/tools/ -fuzz FuzzRenderMarkdownPDF -fuzztime $(FUZZTIME) -run '^$$'
+	go test ./internal/tools/ -fuzz FuzzRenderHTMLPDF -fuzztime $(FUZZTIME) -run '^$$'
 
 # Lane HA: dos engines con pools separados sobre la misma base — el
 # modelo in-test de dos réplicas. Corre SOLO los tests etiquetados ha.
