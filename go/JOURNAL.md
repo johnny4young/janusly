@@ -2167,3 +2167,17 @@ colisionantes — la membresía es por-email, así que el invariante correcto es
 usuario". El shrinking greedy imprimió secuencias mínimas de 14-15 eventos
 para cada hallazgo, con la semilla para reproducir. 200 secuencias verdes en
 21.6 segundos.
+
+## T-535 — Bench de mundo hostil (2026-08-01)
+
+La pregunta del ticket es la que un operador haría en el peor día: cuando el
+DLQ está creciendo y el breaker disparando, ¿las pantallas siguen
+respondiendo? El escenario k6 arma exactamente ese día — 1928 starts
+fallidos en 35 segundos contra un upstream irresoluble, el mismo workflow
+tropezando hasta que el breaker lo pausa — y mide las tres lecturas núcleo
+contra su propio baseline sano de 20 segundos antes. Las tres quedaron
+acotadas con holgura (1.22×, 1.41×, 1.34× contra el límite de 2×). El guard
+de honestidad importa: si el generador de caos produce menos de 20 starts,
+el bench se declara rojo porque la fase hostil no probó nada. La dependencia
+declarada con T-510 resultó ser solo la regla de no-co-residencia — el
+veredicto del soak no hacía falta, congelarlo durante la medición sí.

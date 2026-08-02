@@ -2,7 +2,7 @@ SHELL := /bin/bash
 DB_URL ?= postgres://janusly:janusly-go-local@127.0.0.1:4632/janusly_go
 PG_CONTAINER := janusly-go-pilot-postgres-1
 
-.PHONY: db-up db-down migrate schema-dump generate lint test run build parity ci test-pg15 bench fuzz contract web-embed verify seed chaos
+.PHONY: db-up db-down migrate schema-dump generate lint test run build parity ci test-pg15 bench fuzz contract web-embed verify seed chaos bench-hostile
 
 db-up:
 	docker compose -f docker-compose.yml up -d --wait
@@ -139,3 +139,9 @@ seed:
 # victim. Runs its OWN Postgres container (never the shared pilot DB).
 chaos:
 	node conformance/run-chaos.mjs
+
+# T-535 hostile-world bench: reads must stay under 2x the healthy p95
+# while the DLQ grows and the breaker trips. NEVER co-resident with the
+# 24h soak (SIGSTOP it first).
+bench-hostile:
+	node conformance/run-hostile-bench.mjs

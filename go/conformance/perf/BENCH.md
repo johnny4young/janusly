@@ -69,3 +69,16 @@ es el `encoding/json.Marshal` reflect final — irreducible sin un encoder
 manual (riesgo de divergencia de bytes) o cambio de librería; queda
 documentado, no atacado. El guard `TestRedactionWalkersDoNotMutateInput`
 fija que los walkers COW jamás mutan el árbol del caller.
+
+## Escenario hostil (T-535) — 2026-08-02T03:33:22.212Z @ `f2a85520`
+
+Lecturas bajo caos (DLQ creciendo + breaker disparando, 1928 starts fallidos):
+p95 hostil debe quedar bajo 2× el baseline sano.
+
+| Lectura | p95 sano | p95 hostil | ratio | veredicto |
+|---|---|---|---|---|
+| runs list | 3.9 ms | 4.8 ms | 1.22× | ✅ acotado |
+| dlq list | 3.6 ms | 5.1 ms | 1.41× | ✅ acotado |
+| health | 0.2 ms | 0.2 ms | 1.34× | ✅ acotado |
+
+Serie: `hostile-series.jsonl`.
