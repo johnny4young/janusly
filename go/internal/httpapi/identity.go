@@ -5,8 +5,6 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"unicode/utf16"
@@ -23,30 +21,7 @@ import (
 const identityMaxJSONBodyBytes int64 = 1_048_576
 
 func decodeIdentityRecord(r *http.Request) (map[string]any, *opResult) {
-	raw, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, identityMaxJSONBodyBytes))
-	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			rejection := opError(http.StatusRequestEntityTooLarge, "server_request_failed",
-				fmt.Sprintf("Request body too large. Limit is %d bytes", identityMaxJSONBodyBytes), nil)
-			return nil, &rejection
-		}
-		rejection := opError(http.StatusBadRequest, "server_request_failed", "Invalid JSON body", nil)
-		return nil, &rejection
-	}
-	if len(raw) == 0 {
-		return map[string]any{}, nil
-	}
-	var value any
-	if err := json.Unmarshal(raw, &value); err != nil {
-		rejection := opError(http.StatusBadRequest, "server_request_failed", "Invalid JSON body", nil)
-		return nil, &rejection
-	}
-	record, _ := value.(map[string]any)
-	if record == nil {
-		record = map[string]any{}
-	}
-	return record, nil
+	return decodeJSONRecord(r, identityMaxJSONBodyBytes)
 }
 
 // normalizedIdentityName mirrors the reference: trim, collapse interior

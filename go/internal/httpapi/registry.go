@@ -218,6 +218,14 @@ var routeAuthz = map[string]routeGate{
 	// settings); the write is the admin pair from the reference.
 	"POST /org/config": {auth.RoleAdmin, "org.config.write"},
 
+	// WorkOS SSO connection administration. The public start/callback routes
+	// are state- and provider-authorized and therefore do not enter this
+	// tenant-auth registry.
+	"GET /org/sso/connections":         {auth.RoleAdmin, "org.config.write"},
+	"POST /org/sso/connections":        {auth.RoleAdmin, "org.config.write"},
+	"POST /org/sso/connections/{id}":   {auth.RoleAdmin, "org.config.write"},
+	"DELETE /org/sso/connections/{id}": {auth.RoleAdmin, "org.config.write"},
+
 	// AI surfaces (reference permission pairs).
 	"POST /ai/generate-workflow": {auth.RoleViewer, "ai.write"},
 	"POST /ai/patch-workflow":    {auth.RoleEditor, "ai.write"},

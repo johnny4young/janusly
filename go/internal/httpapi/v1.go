@@ -24,7 +24,13 @@ import (
 	"github.com/johnny4young/janusly/go/internal/mcpclient"
 	"github.com/johnny4young/janusly/go/internal/ratelimit"
 	"github.com/johnny4young/janusly/go/internal/webdist"
+	"github.com/johnny4young/janusly/go/internal/workos"
 )
+
+type workosClient interface {
+	BuildAuthorizeURL(connectionID, redirectURI, state string) (string, error)
+	ExchangeCode(context.Context, string, string) (workos.Profile, error)
+}
 
 // V1Server owns the /v1 route surface over one engine and pool.
 type V1Server struct {
@@ -38,6 +44,7 @@ type V1Server struct {
 	limiterTracker *ratelimit.Tracker
 	queueCache     *queueHealthCache
 	mcp            *mcpclient.Client
+	workos         workosClient
 }
 
 // NewV1Handler mounts the v1 routes plus /healthz. The stream hub's
@@ -53,7 +60,14 @@ func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 // cancel every harness leaks one Postgres connection for the binary's
 // lifetime (the "too many clients" suite failure under a live soak).
 func NewV1HandlerWithShutdown(eng *engine.Engine, pool *pgxpool.Pool) (http.Handler, func()) {
-	server := &V1Server{engine: eng, pool: pool, resolver: auth.NewResolver(pool, auth.ConfigFromEnv()), newID: uuid.NewString, hub: newStreamHub()}
+	return newV1HandlerWithWorkOS(eng, pool, workos.NewFromEnv())
+}
+
+func newV1HandlerWithWorkOS(eng *engine.Engine, pool *pgxpool.Pool, client workosClient) (http.Handler, func()) {
+	server := &V1Server{
+		engine: eng, pool: pool, resolver: auth.NewResolver(pool, auth.ConfigFromEnv()),
+		newID: uuid.NewString, hub: newStreamHub(), workos: client,
+	}
 	server.authPolicy = authpolicy.New(pool)
 	server.resolver.SetPolicyEvaluator(func(ctx context.Context, input auth.PolicyInput) bool {
 		return server.authPolicy.Evaluate(ctx, authpolicy.Input{
@@ -195,6 +209,7 @@ func NewV1HandlerWithShutdown(eng *engine.Engine, pool *pgxpool.Pool) (http.Hand
 	server.mountBillingRoutes(mux)
 	server.mountReplayLabRoutes(mux)
 	server.mountRecoveryReadRoutes(mux)
+	server.mountSsoRoutes(mux)
 	server.mountBrowserSessionRoutes(mux)
 	server.mountIdentityRoutes(mux)
 	server.mountCausalRoutes(mux)

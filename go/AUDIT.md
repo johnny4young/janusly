@@ -103,7 +103,7 @@ exact candidate commit:
 | SEC-003 | P1 | Public and internal HTTP servers bounded only header-read time; full request reads, idle connections, and header bytes retained unbounded/default policy. | fixed in architecture review |
 | SEC-005 | P1 | Supabase identity and embedding-provider responses were JSON-decoded without a decoded-body byte cap. | fixed in architecture review |
 | SEC-006 | P1 | Credentialed CORS honored `API_ALLOWED_ORIGINS=*` in production, which is unsafe once browser-session reads and mutations are enabled. | fixed in architecture review |
-| AUTH-001 | P0 | Go now has durable browser sessions plus tenant-scoped WorkOS persistence, one-time state, and centralized policy evaluation, but still lacks the WorkOS HTTP start/callback path that issues those sessions. | open |
+| AUTH-001 | P0 | Go now has durable browser sessions, WorkOS connection administration, and the guarded SSO start flow, but still lacks the callback that atomically provisions membership and issues a session. | open |
 | AUTH-002 | P0 | Go labels bootstrap surfaces identity-scoped but dispatches them through tenant membership resolution, so a legitimate zero-membership identity cannot bootstrap. | fixed in architecture review |
 | AUTH-003 | P0 | Go still lacks atomic first-organization creation and atomic invitation acceptance with the exact Node bootstrap response/error contract. | fixed in architecture review |
 
@@ -238,5 +238,41 @@ narrow policy loading, provider-specific decisions, audit evidence, and
 middleware enforcement. The exact implementation passed `make ci` on
 2026-08-02: sqlc/OpenAPI drift, coverage floors, build, lint, `govulncheck`, the
 race-enabled PostgreSQL integration suite, and semantic parity F01-F25 are
-green. `AUTH-001` remains open until the guarded WorkOS client and exact
-start/callback session-issuance contract are served and validated.
+green. `AUTH-001` remains open until the exact WorkOS callback and atomic
+session-issuance contract are served and validated.
+
+### WorkOS administration and authorization start
+
+The sixth authentication-parity band serves the tenant-admin half of the SSO
+contract and the public authorization start without prematurely combining the
+callback's transactional identity writes. `GET`, `POST`, update, and revoke on
+`/org/sso/connections` preserve the Node validation/error envelopes, raw row
+projections, admin plus `org.config.write` gate, soft revocation, tenant
+invisibility, and the three typed audit actions. Their JSON bodies use the
+reference's one-megabyte hard cap and `readJson` plus `asRecord` semantics.
+
+`GET /auth/sso/start` is intentionally public and requires an active
+tenant-scoped WorkOS connection. It creates a cryptographically random nonce,
+persists the exact expiry from the signed state envelope, binds organization,
+callback URL, and connection into the WorkOS redirect, writes
+`auth.sso.start` before redirecting, and returns the reference's 302 plus
+`Cache-Control: no-store` browser response. Missing organization, callback
+configuration, and active connection retain their stable error codes.
+
+The minimal WorkOS client uses the shared SSRF validation and DNS-pinned
+transport instead of a vendor SDK, pins `WorkOS-Version: 2024-07-01`, bounds
+exchange time to 30 seconds and response bytes to 64 KiB, and never stores the
+returned access token. Credential-bearing exchanges explicitly refuse
+redirects: stripping authorization headers is not enough when a 307/308 could
+replay the form-encoded client secret in the request body.
+
+Validation first exposed an independent probabilistic test bug: five
+consecutive canary assignments could trip the recovery circuit breaker before
+`TestRolloutAutoRollback` observed its own five-failure sample. Commit
+`b52321e2` makes that rollout-specific test opt out of the separate policy; ten
+race-enabled repetitions and an isolated `make ci` passed. The WorkOS band
+then passed its own full `make ci` on 2026-08-02: sqlc/OpenAPI drift, coverage
+floors, build, lint, `govulncheck`, race-enabled PostgreSQL integration, and
+semantic parity F01-F25 are green. `AUTH-001` remains open only for the exact
+callback verification, policy, atomic membership/audit/session issuance, and
+browser completion redirect.

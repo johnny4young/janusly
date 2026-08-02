@@ -26,6 +26,10 @@ type FetchOptions struct {
 	TimeoutMs        int
 	MaxResponseBytes int
 	MaxRedirects     int
+	// DisableRedirects is for credential-bearing fixed-endpoint calls. A
+	// 307/308 otherwise replays the request body — including form secrets —
+	// to the redirect target even when credential headers are stripped.
+	DisableRedirects bool
 }
 
 // FetchResult carries the upstream answer; Ok is the plain 2xx bit.
@@ -67,6 +71,9 @@ func FetchHTTPTarget(ctx context.Context, rawURL string, opts FetchOptions) (Fet
 		Transport: transport,
 		Timeout:   time.Duration(timeoutMs) * time.Millisecond,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if opts.DisableRedirects {
+				return http.ErrUseLastResponse
+			}
 			if len(via) > maxRedirects {
 				return fmt.Errorf("HTTP redirect limit exceeded; last hop %s -> %s", via[len(via)-1].URL, req.URL) //nolint:staticcheck // reference message is the wire contract
 			}
