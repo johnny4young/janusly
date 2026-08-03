@@ -138,6 +138,7 @@ func newV1HandlerWithWorkOS(eng *engine.Engine, pool *pgxpool.Pool, client worko
 	mux.HandleFunc("GET /v1/workflows/latest", server.auth(server.latestWorkflowVersion))
 	mux.HandleFunc("GET /v1/workflows/versions", server.auth(server.listWorkflowVersions))
 	mux.HandleFunc("POST /v1/start", server.auth(server.startRun))
+	mux.HandleFunc("POST /triggers/webhook/ingest", server.auth(server.ingestWebhookBySelector))
 	mux.HandleFunc("POST /v1/webhooks/{workflowId}", server.auth(server.ingestWebhook))
 	mux.HandleFunc("POST /v1/triggers/email/ingest", server.auth(server.ingestEmail))
 	mux.HandleFunc("POST /v1/triggers/file/ingest", server.auth(server.ingestFileDropped))

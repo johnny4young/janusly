@@ -1,11 +1,11 @@
-// Webhook trigger ingestion. Pilot-shaped route — POST /v1/webhooks/{workflowId}
-// (the reference selects the workflow org-wide by endpoint key at
-// POST /triggers/webhook/ingest; the pilot scopes the selector to one
-// workflow and keeps the rest of the contract: normalized payload
-// validation, the trigger_events replay anchor persisted BEFORE the run,
-// (org, dedupe_key) idempotency so a relay retry converges to one run, the
-// buffer-on-pause posture (202: the event is accepted, its run deferred),
-// and the start-claim CAS inside the run-start transaction).
+// Webhook trigger ingestion. The reference route
+// POST /triggers/webhook/ingest resolves one unique active workflow across
+// the organization by endpoint key. The earlier pilot-specific
+// POST /v1/webhooks/{workflowId} stays as a compatibility route, but both
+// enter the same normalized payload validation, trigger_events replay anchor
+// persisted BEFORE the run, (org, dedupe_key) idempotency, buffer-on-pause
+// posture (202: the event is accepted, its run deferred), and start-claim CAS
+// inside the run-start transaction.
 //
 // ingestTriggerEventCore is the shared durable pipeline: the authenticated
 // webhook route and the provider-signed PagerDuty callback (pagerduty.go)
@@ -78,25 +78,66 @@ func (s *V1Server) ingestWebhook(w http.ResponseWriter, r *http.Request, rc v1Re
 	writeVersioned(w, rc.id, s.webhookIngestCore(r, rc, r.PathValue("workflowId")))
 }
 
+func (s *V1Server) ingestWebhookBySelector(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	writeLegacy(w, s.webhookSelectorIngestCore(r, rc))
+}
+
+func (s *V1Server) webhookSelectorIngestCore(r *http.Request, rc v1Request) opResult {
+	body, invalid := decodeWebhookIngestBody(r)
+	if invalid.status != 0 {
+		return invalid
+	}
+	if invalid = validateWebhookIngestBody(body); invalid.status != 0 {
+		return invalid
+	}
+	endpointKey := strings.TrimSpace(body.EndpointKey)
+	resolved, ambiguous, err := resolveUniqueTriggerNode(
+		r.Context(), store.New(s.pool), rc.orgID, "webhook_received",
+		func(config map[string]any) bool {
+			configured, configErr := executors.ResolveWebhookEndpointKey(config)
+			return configErr == nil && strings.EqualFold(configured, endpointKey)
+		},
+	)
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
+	}
+	if ambiguous {
+		return opError(http.StatusConflict, "trigger_selector_ambiguous",
+			"Multiple active workflows use this webhook endpoint key", nil)
+	}
+	if resolved == nil {
+		return opError(http.StatusNotFound, "trigger_no_matching_node",
+			"No webhook_received trigger matches this endpoint key", nil)
+	}
+	return s.webhookIngestBodyCore(r.Context(), rc, resolved.workflowID, body)
+}
+
 func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID string) opResult {
+	body, invalid := decodeWebhookIngestBody(r)
+	if invalid.status != 0 {
+		return invalid
+	}
+	return s.webhookIngestBodyCore(r.Context(), rc, workflowID, body)
+}
+
+func decodeWebhookIngestBody(r *http.Request) (webhookIngestBody, opResult) {
 	var body webhookIngestBody
 	if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, webhookIngestMaxBytes)).Decode(&body); err != nil {
-		return opError(http.StatusBadRequest, "trigger_invalid_payload", "Invalid webhook payload", nil)
+		return webhookIngestBody{}, opError(http.StatusBadRequest, "trigger_invalid_payload", "Invalid webhook payload", nil)
+	}
+	return body, opResult{}
+}
+
+func (s *V1Server) webhookIngestBodyCore(
+	ctx context.Context, rc v1Request, workflowID string, body webhookIngestBody,
+) opResult {
+	if invalid := validateWebhookIngestBody(body); invalid.status != 0 {
+		return invalid
 	}
 	endpointKey := strings.TrimSpace(body.EndpointKey)
 	eventID := strings.TrimSpace(body.EventID)
 	eventType := strings.TrimSpace(body.EventType)
 	receivedAt := strings.TrimSpace(body.ReceivedAt)
-	switch {
-	case endpointKey == "" || len(endpointKey) > 128:
-		return opError(http.StatusBadRequest, "trigger_invalid_payload", "endpointKey must be 1..128 characters", nil)
-	case eventID == "" || len(eventID) > 256:
-		return opError(http.StatusBadRequest, "trigger_invalid_payload", "eventId must be 1..256 characters", nil)
-	case len(eventType) > 128:
-		return opError(http.StatusBadRequest, "trigger_invalid_payload", "eventType must be at most 128 characters", nil)
-	case len(receivedAt) > 64:
-		return opError(http.StatusBadRequest, "trigger_invalid_payload", "receivedAt must be at most 64 characters", nil)
-	}
 	if receivedAt == "" {
 		receivedAt = time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 	}
@@ -113,7 +154,7 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 	if eventType != "" {
 		eventPayload["eventType"] = eventType
 	}
-	return s.ingestTriggerEventCore(r.Context(), triggerIngestRequest{
+	return s.ingestTriggerEventCore(ctx, triggerIngestRequest{
 		orgID:        rc.orgID,
 		authContext:  rc.authContext,
 		createdBy:    rc.userID,
@@ -127,6 +168,24 @@ func (s *V1Server) webhookIngestCore(r *http.Request, rc v1Request, workflowID s
 			return matchWebhookNode(wf, endpointKey, noMatch)
 		},
 	})
+}
+
+func validateWebhookIngestBody(body webhookIngestBody) opResult {
+	endpointKey := strings.TrimSpace(body.EndpointKey)
+	eventID := strings.TrimSpace(body.EventID)
+	eventType := strings.TrimSpace(body.EventType)
+	receivedAt := strings.TrimSpace(body.ReceivedAt)
+	switch {
+	case endpointKey == "" || len(endpointKey) > 128:
+		return opError(http.StatusBadRequest, "trigger_invalid_payload", "endpointKey must be 1..128 characters", nil)
+	case eventID == "" || len(eventID) > 256:
+		return opError(http.StatusBadRequest, "trigger_invalid_payload", "eventId must be 1..256 characters", nil)
+	case len(eventType) > 128:
+		return opError(http.StatusBadRequest, "trigger_invalid_payload", "eventType must be at most 128 characters", nil)
+	case len(receivedAt) > 64:
+		return opError(http.StatusBadRequest, "trigger_invalid_payload", "receivedAt must be at most 64 characters", nil)
+	}
+	return opResult{}
 }
 
 // ingestTriggerEventCore is the shared durable trigger pipeline: resolve +

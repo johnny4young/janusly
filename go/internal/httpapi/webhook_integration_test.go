@@ -115,6 +115,48 @@ func TestWebhookIngestSpawnsOneConvergentRun(t *testing.T) {
 	}
 }
 
+func TestWebhookLegacySelectorResolvesOneActiveWorkflow(t *testing.T) {
+	h := newAPIHarness(t)
+	invalid := h.call("POST", "/triggers/webhook/ingest", map[string]any{"eventId": "missing-selector"}, "")
+	if invalid.status != 400 || invalid.body["code"] != "trigger_invalid_payload" {
+		t.Fatalf("legacy validation must precede selector resolution: %d %+v", invalid.status, invalid.body)
+	}
+
+	wfID := "wf-hook-selector-" + h.org
+	if res := h.call("POST", "/v1/workflows/save", webhookWorkflow(wfID, "Alerts.v1"), ""); res.status != 200 {
+		t.Fatalf("save: %+v", res.body)
+	}
+
+	event := map[string]any{
+		"endpointKey": "alerts.V1",
+		"eventId":     "selector-event-1",
+		"eventType":   "alert.opened",
+		"payload":     map[string]any{"total": 7.0},
+	}
+	res := h.call("POST", "/triggers/webhook/ingest", event, "")
+	if res.status != 200 || res.body["ok"] != true || res.body["runId"] == nil || res.body["triggerEventId"] == nil {
+		t.Fatalf("legacy ingest: %d %+v", res.status, res.body)
+	}
+	runID := res.body["runId"].(string)
+	h.waitRun(runID, "succeeded")
+
+	retry := h.call("POST", "/triggers/webhook/ingest", event, "")
+	if retry.status != 200 || retry.body["duplicate"] != true || retry.body["runId"] != runID {
+		t.Fatalf("legacy retry must converge: %d %+v", retry.status, retry.body)
+	}
+
+	otherID := "wf-hook-selector-ambiguous-" + h.org
+	if saved := h.call("POST", "/v1/workflows/save", webhookWorkflow(otherID, "ALERTS.V1"), ""); saved.status != 200 {
+		t.Fatalf("save ambiguous workflow: %+v", saved.body)
+	}
+	ambiguous := h.call("POST", "/triggers/webhook/ingest", map[string]any{
+		"endpointKey": "alerts.v1", "eventId": "selector-event-2",
+	}, "")
+	if ambiguous.status != 409 || ambiguous.body["code"] != "trigger_selector_ambiguous" {
+		t.Fatalf("org-wide ambiguity: %d %+v", ambiguous.status, ambiguous.body)
+	}
+}
+
 func TestWebhookIngestContractErrors(t *testing.T) {
 	h := newAPIHarness(t)
 	wfID := "wf-hookerr-" + h.org
