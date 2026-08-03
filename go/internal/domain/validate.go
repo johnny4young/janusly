@@ -29,6 +29,9 @@ const (
 	CodeEdgeConditionInputsScope = "edge_condition_inputs_scope"
 	CodeInputDefaultTypeMismatch = "input_default_type_mismatch"
 	CodeScheduleInvalidCron      = "schedule_invalid_cron"
+	CodeHumanFormInvalidSchema   = "human_form_invalid_schema"
+	CodeHumanFormEmptySchema     = "human_form_empty_schema"
+	CodeHumanFormInvalidInitial  = "human_form_invalid_initial_values"
 	CodeCycleDetected            = "cycle_detected"
 	CodeMissingStartNode         = "missing_start_node"
 	// Pilot-only: the type is valid in the full platform but this backend
@@ -146,6 +149,19 @@ func ValidateWithSemanticFixtures(wf *Workflow, validExpression ExpressionValida
 		if node.Type == "schedule" {
 			if _, err := ResolveScheduleConfig(node.Config); err != nil {
 				push(Issue{Code: CodeScheduleInvalidCron, Message: err.Error(), NodeID: node.ID})
+			}
+		}
+		if node.Type == "human_form" {
+			schema, valid := ParseInputSchemaValue(node.Config["schema"])
+			if !valid {
+				push(Issue{Code: CodeHumanFormInvalidSchema, Message: "Human form node requires a valid config.schema", NodeID: node.ID})
+			} else if schema.Type == "object" && len(schema.Properties) == 0 {
+				push(Issue{Code: CodeHumanFormEmptySchema, Message: "Human form node requires at least one field in config.schema.properties", NodeID: node.ID})
+			} else if initialValues, present := node.Config["initialValues"]; present {
+				if errs := ValidateInputValue(schema, initialValues, "$"); len(errs) > 0 {
+					push(Issue{Code: CodeHumanFormInvalidInitial,
+						Message: "Human form config.initialValues does not satisfy config.schema: " + strings.Join(errs, "; "), NodeID: node.ID})
+				}
 			}
 		}
 		if node.Type == "approval" {

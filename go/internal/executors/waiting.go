@@ -221,7 +221,8 @@ func executeApproval(_ context.Context, in Input) (any, error) {
 func executeHumanForm(_ context.Context, in Input) (any, error) {
 	schema, _ := in.Config["schema"].(map[string]any)
 	properties, _ := schema["properties"].(map[string]any)
-	if len(properties) == 0 {
+	inputSchema, validSchema := domain.ParseInputSchemaValue(schema)
+	if !validSchema || len(properties) == 0 {
 		return nil, &ConfigError{Code: "human_form_schema_required",
 			Message: "human_form requires config.schema with at least one property"}
 	}
@@ -255,6 +256,7 @@ func executeHumanForm(_ context.Context, in Input) (any, error) {
 	}
 	metadata := map[string]any{
 		"kind":   "human_form",
+		"title":  "Human input required",
 		"schema": schema,
 		"fields": fields,
 	}
@@ -264,7 +266,13 @@ func executeHumanForm(_ context.Context, in Input) (any, error) {
 	if description := trimmedString(in.Config["description"]); description != "" {
 		metadata["description"] = description
 	}
-	return Waiting{Reason: "Waiting for human form input", Metadata: metadata}, nil
+	if initialValues, present := in.Config["initialValues"]; present {
+		if errs := domain.ValidateInputValue(inputSchema, initialValues, "$"); len(errs) > 0 {
+			return nil, fmt.Errorf("human_form.initialValues invalid: %s", strings.Join(errs, "; "))
+		}
+		metadata["initialValues"] = initialValues
+	}
+	return Waiting{Reason: "Waiting for form submission", Metadata: metadata}, nil
 }
 
 func trimmedString(value any) string {

@@ -24,6 +24,38 @@ type InputSchema struct {
 	Default     json.RawMessage         `json:"default,omitempty"`
 }
 
+// ParseInputSchemaValue projects a decoded JSON value into the shared schema
+// subset and rejects unknown type tags anywhere in the recursive tree.
+func ParseInputSchemaValue(value any) (*InputSchema, bool) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, false
+	}
+	var schema InputSchema
+	if err := json.Unmarshal(raw, &schema); err != nil || !validInputSchemaShape(&schema) {
+		return nil, false
+	}
+	return &schema, true
+}
+
+func validInputSchemaShape(schema *InputSchema) bool {
+	switch schema.Type {
+	case "string", "number", "boolean":
+		return true
+	case "object":
+		for _, child := range schema.Properties {
+			if child == nil || !validInputSchemaShape(child) {
+				return false
+			}
+		}
+		return true
+	case "array":
+		return schema.Items == nil || validInputSchemaShape(schema.Items)
+	default:
+		return false
+	}
+}
+
 // HasDefault reports whether a default was declared at all.
 func (s *InputSchema) HasDefault() bool { return len(s.Default) > 0 }
 

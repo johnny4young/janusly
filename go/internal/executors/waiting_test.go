@@ -135,6 +135,50 @@ func TestApprovalMetadataShape(t *testing.T) {
 	}
 }
 
+func TestHumanFormInitialValuesContract(t *testing.T) {
+	untitledConfig := map[string]any{
+		"schema": map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"note": map[string]any{"type": "string"}},
+		},
+	}
+	untitled, err := executeHumanForm(context.Background(), Input{Config: untitledConfig})
+	if err != nil || untitled.(Waiting).Metadata["title"] != "Human input required" {
+		t.Fatalf("default title parity broken: %+v err %v", untitled, err)
+	}
+
+	config := map[string]any{
+		"title": " Review response ",
+		"schema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"summary":  map[string]any{"type": "string"},
+				"approved": map[string]any{"type": "boolean"},
+			},
+			"required": []any{"summary"},
+		},
+		"initialValues": map[string]any{"summary": "AI draft", "approved": false},
+	}
+	out, err := executeHumanForm(context.Background(), Input{Config: config})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	waiting := out.(Waiting)
+	if waiting.Reason != "Waiting for form submission" || waiting.Metadata["title"] != "Review response" {
+		t.Fatalf("waiting wire: %+v", waiting)
+	}
+	initial := waiting.Metadata["initialValues"].(map[string]any)
+	if initial["summary"] != "AI draft" || initial["approved"] != false {
+		t.Fatalf("initial values missing: %+v", initial)
+	}
+
+	config["initialValues"] = map[string]any{"summary": float64(42)}
+	if _, err := executeHumanForm(context.Background(), Input{Config: config}); err == nil ||
+		err.Error() != "human_form.initialValues invalid: $.summary must be string, got number" {
+		t.Fatalf("invalid initial values: %v", err)
+	}
+}
+
 func TestWebhookMetadataShape(t *testing.T) {
 	out, err := Registry()["webhook"](context.Background(), Input{RunID: "r1", NodeID: "trigger"})
 	if err != nil {

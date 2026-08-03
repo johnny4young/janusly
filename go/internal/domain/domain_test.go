@@ -136,6 +136,24 @@ func TestTransformMissingMapping(t *testing.T) {
 	}
 }
 
+func TestHumanFormSchemaAndInitialValues(t *testing.T) {
+	invalid := Validate(parseOK(t, `{"nodes":[
+		{"id":"missing","type":"human_form","config":{}},
+		{"id":"empty","type":"human_form","config":{"schema":{"type":"object","properties":{}}}},
+		{"id":"prefill","type":"human_form","config":{"schema":{"type":"object","properties":{"summary":{"type":"string"}},"required":["summary"]},"initialValues":{"summary":42}}}
+	],"edges":[]}`), nil)
+	requireIssue(t, invalid, CodeHumanFormInvalidSchema, "valid config.schema")
+	requireIssue(t, invalid, CodeHumanFormEmptySchema, "at least one field")
+	requireIssue(t, invalid, CodeHumanFormInvalidInitial, "$.summary must be string, got number")
+
+	valid := Validate(parseOK(t, `{"nodes":[{"id":"review","type":"human_form","config":{
+		"schema":{"type":"object","properties":{"summary":{"type":"string"}},"required":["summary"]},
+		"initialValues":{"summary":"draft"}}}],"edges":[]}`), nil)
+	if !valid.Valid {
+		t.Fatalf("valid initial values rejected: %+v", valid.Issues)
+	}
+}
+
 func TestEdgeEndpointsMustExist(t *testing.T) {
 	// wv:356-359 — missing endpoints report per edge with the synthetic
 	// edge_<index> id when the edge declares none.
