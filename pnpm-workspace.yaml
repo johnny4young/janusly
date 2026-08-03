@@ -38,3 +38,9 @@ overrides:
   # never mounts that static handler, but the audit gate is severity-based, not
   # reachability-based. Drop once the MCP SDK depends on >=2.0.5 itself.
   "@hono/node-server": ">=2.0.5"
+
+  # GHSA-fxqj-rqcc-2cmp: postcss <=8.5.22 can follow an attacker-controlled
+  # sourceMappingURL to an arbitrary local .map file when `from` is unset.
+  # Tooling-only transitive via Vite/Vitest; pin to the current patched release
+  # until those parents resolve to >=8.5.23 without an override.
+  postcss: "8.5.25"
