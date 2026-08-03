@@ -26,14 +26,14 @@ type opResult struct {
 	code    string
 	message string
 	params  map[string]any
-	data    map[string]any
+	data    any
 	// legacyExtras merge top-level into the RAW legacy error body only
 	// (the reference's validation rejections carry `issues` beside
 	// error/code with no params wrapper, while /v1 keeps params).
 	legacyExtras map[string]any
 }
 
-func opOK(data map[string]any) opResult { return opResult{status: http.StatusOK, data: data} }
+func opOK(data any) opResult { return opResult{status: http.StatusOK, data: data} }
 
 func opError(status int, code, message string, params map[string]any) opResult {
 	return opResult{status: status, code: code, message: message, params: params}
@@ -42,7 +42,7 @@ func opError(status int, code, message string, params map[string]any) opResult {
 func writeLegacy(w http.ResponseWriter, result opResult) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(result.status)
-	if result.data != nil {
+	if result.data != nil || (result.status >= 200 && result.status < 300 && result.code == "") {
 		_ = json.NewEncoder(w).Encode(result.data)
 		return
 	}
@@ -56,7 +56,7 @@ func writeLegacy(w http.ResponseWriter, result opResult) {
 }
 
 func writeVersioned(w http.ResponseWriter, requestID string, result opResult) {
-	if result.data != nil {
+	if result.data != nil || (result.status >= 200 && result.status < 300 && result.code == "") {
 		// Non-200 successes keep their status (202 = accepted, run deferred).
 		writeV1(w, requestID, result.status, map[string]any{"data": result.data})
 		return
@@ -190,6 +190,12 @@ func (s *V1Server) legacyMutations(mux *http.ServeMux) {
 	alias("POST /workflows/save", s.saveCore)
 	alias("POST /workflows/rollback", s.rollbackCore)
 	alias("POST /dlq/replay", s.replayCore)
+	alias("GET /run", s.getRunCore)
+	alias("GET /status", s.getRunCore)
+	alias("GET /runs", s.listRunsCore)
+	alias("GET /workflows", s.listWorkflowsCore)
+	alias("GET /workflows/latest", s.latestWorkflowVersionCore)
+	alias("GET /workflows/versions", s.listWorkflowVersionsCore)
 
 	// Legacy DLQ reads the web keeps on the raw wire by design.
 	mux.HandleFunc("GET /dlq/counts", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {

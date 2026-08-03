@@ -154,6 +154,10 @@ func (s *V1Server) saveCore(r *http.Request, rc v1Request) opResult {
 }
 
 func (s *V1Server) listWorkflows(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	writeVersioned(w, rc.id, s.listWorkflowsCore(r, rc))
+}
+
+func (s *V1Server) listWorkflowsCore(r *http.Request, rc v1Request) opResult {
 	query := r.URL.Query()
 	limit := 100
 	if raw := query.Get("limit"); raw != "" {
@@ -166,9 +170,8 @@ func (s *V1Server) listWorkflows(w http.ResponseWriter, r *http.Request, rc v1Re
 	if cursor := query.Get("before"); cursor != "" {
 		at, id, ok := parseEventsCursor(cursor)
 		if !ok {
-			writeV1Error(w, rc.id, http.StatusBadRequest, "invalid_input", "Invalid request body",
+			return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
 				map[string]any{"field": "before"})
-			return
 		}
 		beforeCreatedAt, beforeID = at, id
 	}
@@ -178,14 +181,13 @@ func (s *V1Server) listWorkflows(w http.ResponseWriter, r *http.Request, rc v1Re
 		BeforeCreatedAt: beforeCreatedAt, BeforeID: beforeID, Search: search,
 	})
 	if err != nil {
-		s.internal(w, rc, err)
-		return
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
 	}
 	items := make([]WorkflowListItemView, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, newWorkflowListItemView(row))
 	}
-	writeV1Data(w, rc.id, items)
+	return opOK(items)
 }
 
 // versionView emits the contract's WorkflowVersion key set; columns the
@@ -196,30 +198,34 @@ func versionView(id, orgID, workflowID string, version int32, dagJSON json.RawMe
 
 // requireActiveWorkflow implements the shared parent gate: missing or
 // tombstoned parents read as the same workflow_not_found.
-func (s *V1Server) requireActiveWorkflow(w http.ResponseWriter, r *http.Request, rc v1Request) (string, bool) {
+func (s *V1Server) requireActiveWorkflow(r *http.Request, rc v1Request) (string, *opResult) {
 	workflowID := strings.TrimSpace(r.URL.Query().Get("workflowId"))
 	if workflowID == "" {
-		writeV1Error(w, rc.id, http.StatusBadRequest, "invalid_input", "Invalid request body",
+		result := opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
 			map[string]any{"field": "workflowId"})
-		return "", false
+		return "", &result
 	}
 	if _, err := store.New(s.pool).GetWorkflow(r.Context(), store.GetWorkflowParams{
 		ID: workflowID, OrgID: rc.orgID,
 	}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			writeV1Error(w, rc.id, http.StatusNotFound, "workflow_not_found", "Workflow not found", nil)
-			return "", false
+			result := opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil)
+			return "", &result
 		}
-		s.internal(w, rc, err)
-		return "", false
+		result := opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return "", &result
 	}
-	return workflowID, true
+	return workflowID, nil
 }
 
 func (s *V1Server) latestWorkflowVersion(w http.ResponseWriter, r *http.Request, rc v1Request) {
-	workflowID, ok := s.requireActiveWorkflow(w, r, rc)
-	if !ok {
-		return
+	writeVersioned(w, rc.id, s.latestWorkflowVersionCore(r, rc))
+}
+
+func (s *V1Server) latestWorkflowVersionCore(r *http.Request, rc v1Request) opResult {
+	workflowID, rejection := s.requireActiveWorkflow(r, rc)
+	if rejection != nil {
+		return *rejection
 	}
 	row, err := store.New(s.pool).GetLatestWorkflowVersion(r.Context(), store.GetLatestWorkflowVersionParams{
 		WorkflowID: workflowID, OrgID: rc.orgID,
@@ -228,34 +234,35 @@ func (s *V1Server) latestWorkflowVersion(w http.ResponseWriter, r *http.Request,
 		if errors.Is(err, pgx.ErrNoRows) {
 			// The contract's response is nullable: an active workflow with no
 			// versions reads as null, not an error.
-			writeV1Data(w, rc.id, nil)
-			return
+			return opOK(nil)
 		}
-		s.internal(w, rc, err)
-		return
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
 	}
-	writeV1Data(w, rc.id, versionView(row.ID, row.OrgID, row.WorkflowID, row.Version,
+	return opOK(versionView(row.ID, row.OrgID, row.WorkflowID, row.Version,
 		row.DagJson, row.CreatedBy, row.CreatedAt))
 }
 
 func (s *V1Server) listWorkflowVersions(w http.ResponseWriter, r *http.Request, rc v1Request) {
-	workflowID, ok := s.requireActiveWorkflow(w, r, rc)
-	if !ok {
-		return
+	writeVersioned(w, rc.id, s.listWorkflowVersionsCore(r, rc))
+}
+
+func (s *V1Server) listWorkflowVersionsCore(r *http.Request, rc v1Request) opResult {
+	workflowID, rejection := s.requireActiveWorkflow(r, rc)
+	if rejection != nil {
+		return *rejection
 	}
 	rows, err := store.New(s.pool).ListWorkflowVersions(r.Context(), store.ListWorkflowVersionsParams{
 		WorkflowID: workflowID, OrgID: rc.orgID,
 	})
 	if err != nil {
-		s.internal(w, rc, err)
-		return
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
 	}
 	items := make([]VersionView, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, versionView(row.ID, row.OrgID, row.WorkflowID, row.Version,
 			row.DagJson, row.CreatedBy, row.CreatedAt))
 	}
-	writeV1Data(w, rc.id, items)
+	return opOK(items)
 }
 
 // cancelRun ports the reference guards exactly — and note the asymmetry

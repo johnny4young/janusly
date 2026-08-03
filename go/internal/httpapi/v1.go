@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	contractdoc "github.com/johnny4young/janusly/go/contract"
 	"github.com/johnny4young/janusly/go/internal/auth"
 	"github.com/johnny4young/janusly/go/internal/authpolicy"
 	"github.com/johnny4young/janusly/go/internal/browsersession"
@@ -86,6 +87,12 @@ func newV1HandlerWithWorkOS(eng *engine.Engine, pool *pgxpool.Pool, client worko
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+	// Public generated contract. Exact mux patterns win before the embedded
+	// SPA catch-all and the bytes are the same artifact `make ci` drift-checks.
+	mux.HandleFunc("GET /v1/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(contractdoc.OpenAPI)
 	})
 	// Legacy public health — the web's OperationsPage polls this every 20s.
 	// Public-safe shape from the reference: no raw bucket/error/key detail.

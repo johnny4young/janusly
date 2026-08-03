@@ -155,6 +155,10 @@ const eventsPageDefault = 200
 // getRun serves both /v1/run and /v1/status: the reference projects the
 // same {run, nodes, events, eventsCursor, eventsHasMore} data for both.
 func (s *V1Server) getRun(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	writeVersioned(w, rc.id, s.getRunCore(r, rc))
+}
+
+func (s *V1Server) getRunCore(r *http.Request, rc v1Request) opResult {
 	runID := r.URL.Query().Get("runId")
 	ctx := r.Context()
 	q := store.New(s.pool)
@@ -162,16 +166,13 @@ func (s *V1Server) getRun(w http.ResponseWriter, r *http.Request, rc v1Request) 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Unknown and cross-org are indistinguishable, per the golden.
-			writeV1Error(w, rc.id, http.StatusForbidden, "runs_forbidden", "Forbidden", nil)
-			return
+			return opError(http.StatusForbidden, "runs_forbidden", "Forbidden", nil)
 		}
-		s.internal(w, rc, err)
-		return
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
 	}
 	nodes, err := q.ListRunNodesByRun(ctx, runID)
 	if err != nil {
-		s.internal(w, rc, err)
-		return
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
 	}
 
 	beforeCreatedAt := time.Now().Add(time.Hour)
@@ -192,8 +193,7 @@ func (s *V1Server) getRun(w http.ResponseWriter, r *http.Request, rc v1Request) 
 		PageLimit: int32(limit + 1),
 	})
 	if err != nil {
-		s.internal(w, rc, err)
-		return
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
 	}
 	hasMore := len(events) > limit
 	if hasMore {
@@ -230,7 +230,7 @@ func (s *V1Server) getRun(w http.ResponseWriter, r *http.Request, rc v1Request) 
 			"createdAt": timeOrNull(event.CreatedAt), "holdUntil": nil,
 		})
 	}
-	writeV1Data(w, rc.id, map[string]any{
+	return opOK(map[string]any{
 		"run":           runView(run),
 		"nodes":         nodeViews,
 		"events":        eventViews,
@@ -245,6 +245,10 @@ func (s *V1Server) getRun(w http.ResponseWriter, r *http.Request, rc v1Request) 
 func runView(run store.GetRunRow) RunView { return newRunView(run) }
 
 func (s *V1Server) listRuns(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	writeVersioned(w, rc.id, s.listRunsCore(r, rc))
+}
+
+func (s *V1Server) listRunsCore(r *http.Request, rc v1Request) opResult {
 	query := r.URL.Query()
 	limit := 100
 	if raw := query.Get("limit"); raw != "" {
@@ -259,9 +263,8 @@ func (s *V1Server) listRuns(w http.ResponseWriter, r *http.Request, rc v1Request
 	if cursor := query.Get("before"); cursor != "" {
 		at, id, ok := parseEventsCursor(cursor)
 		if !ok {
-			writeV1Error(w, rc.id, http.StatusBadRequest, "invalid_input", "Invalid request body",
+			return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
 				map[string]any{"field": "before"})
-			return
 		}
 		beforeCreatedAt, beforeID = at, id
 	}
@@ -273,14 +276,13 @@ func (s *V1Server) listRuns(w http.ResponseWriter, r *http.Request, rc v1Request
 		FilterWorkflowID: filterWorkflow, FilterStatus: filterStatus,
 	})
 	if err != nil {
-		s.internal(w, rc, err)
-		return
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
 	}
 	items := make([]RunSummaryView, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, newRunSummaryView(row))
 	}
-	writeV1Data(w, rc.id, items)
+	return opOK(items)
 }
 
 func (s *V1Server) resumeRun(w http.ResponseWriter, r *http.Request, rc v1Request) {

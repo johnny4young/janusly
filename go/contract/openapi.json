@@ -63,7 +63,7 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/v1/dlq": {
+    "/dlq": {
       "get": {
         "operationId": "get_v1_dlq",
         "responses": {
@@ -106,7 +106,7 @@
         "summary": "Dead-letter list with server-side filters"
       }
     },
-    "/v1/dlq/clusters": {
+    "/dlq/clusters": {
       "get": {
         "operationId": "get_v1_dlq_clusters",
         "responses": {
@@ -149,7 +149,7 @@
         "summary": "Failure clusters over open dead letters"
       }
     },
-    "/v1/dlq/redrive": {
+    "/dlq/redrive": {
       "post": {
         "operationId": "post_v1_dlq_redrive",
         "requestBody": {
@@ -215,7 +215,7 @@
         "summary": "Redrive one dead letter"
       }
     },
-    "/v1/dlq/replay": {
+    "/dlq/replay": {
       "post": {
         "operationId": "post_v1_dlq_replay",
         "requestBody": {
@@ -281,7 +281,115 @@
         "summary": "Replay one dead letter (reference wire)"
       }
     },
-    "/v1/recovery/metrics": {
+    "/memory/consent-status": {
+      "get": {
+        "operationId": "get_v1_memory_consent-status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "processEnabled": {
+                              "type": "boolean"
+                            },
+                            "purge": {
+                              "type": "object"
+                            },
+                            "tenantEnabled": {
+                              "type": "boolean"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Tenant memory consent and purge posture"
+      }
+    },
+    "/recovery/ledger": {
+      "get": {
+        "operationId": "get_v1_recovery_ledger",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "downtimeEndedMs": {
+                              "type": "number"
+                            },
+                            "sinceIso": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "totalRecovered": {
+                              "type": "number"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Lifetime verified-recovery impact ledger"
+      }
+    },
+    "/recovery/metrics": {
       "get": {
         "operationId": "get_v1_recovery_metrics",
         "responses": {
@@ -341,7 +449,55 @@
         "summary": "Verified-recovery north star + cost rollup"
       }
     },
-    "/v1/resume": {
+    "/recovery/my-wins": {
+      "get": {
+        "operationId": "get_v1_recovery_my-wins",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "recovered": {
+                              "type": "number"
+                            },
+                            "windowDays": {
+                              "type": "number"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Current operator recovery wins"
+      }
+    },
+    "/resume": {
       "post": {
         "operationId": "post_v1_resume",
         "requestBody": {
@@ -411,7 +567,7 @@
         "summary": "Resume one waiting node"
       }
     },
-    "/v1/run": {
+    "/run": {
       "get": {
         "operationId": "get_v1_run",
         "responses": {
@@ -477,7 +633,7 @@
         "summary": "One run with nodes and paginated events"
       }
     },
-    "/v1/run/cancel": {
+    "/run/cancel": {
       "post": {
         "operationId": "post_v1_run_cancel",
         "requestBody": {
@@ -550,7 +706,64 @@
         "summary": "Cancel a non-terminal run"
       }
     },
-    "/v1/runs": {
+    "/run/usage": {
+      "get": {
+        "operationId": "get_v1_run_usage",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "llm": {
+                              "type": "object"
+                            },
+                            "loadedRows": {
+                              "type": "number"
+                            },
+                            "memory": {
+                              "type": "object"
+                            },
+                            "rowCap": {
+                              "type": "number"
+                            },
+                            "truncated": {
+                              "type": "boolean"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Bounded per-run AI and memory usage"
+      }
+    },
+    "/runs": {
       "get": {
         "operationId": "get_v1_runs",
         "responses": {
@@ -593,7 +806,7 @@
         "summary": "Keyset-paginated run list"
       }
     },
-    "/v1/runs/redrive": {
+    "/runs/redrive": {
       "post": {
         "operationId": "post_v1_runs_redrive",
         "requestBody": {
@@ -667,7 +880,7 @@
         "summary": "Redrive by run and node (revive-in-place)"
       }
     },
-    "/v1/start": {
+    "/start": {
       "post": {
         "operationId": "post_v1_start",
         "requestBody": {
@@ -780,7 +993,7 @@
         "summary": "Start a run of an inline workflow document"
       }
     },
-    "/v1/status": {
+    "/status": {
       "get": {
         "operationId": "get_v1_status",
         "responses": {
@@ -846,7 +1059,7 @@
         "summary": "Alias of /v1/run"
       }
     },
-    "/v1/tools": {
+    "/tools": {
       "get": {
         "operationId": "get_v1_tools",
         "responses": {
@@ -889,7 +1102,7 @@
         "summary": "The AI Studio tool catalog"
       }
     },
-    "/v1/webhooks/{workflowId}": {
+    "/webhooks/{workflowId}": {
       "post": {
         "operationId": "post_v1_webhooks_workflowId",
         "requestBody": {
@@ -971,7 +1184,7 @@
         "summary": "Ingest one webhook trigger event"
       }
     },
-    "/v1/workflows": {
+    "/workflows": {
       "get": {
         "operationId": "get_v1_workflows",
         "responses": {
@@ -1014,7 +1227,7 @@
         "summary": "Keyset-paginated workflow list"
       }
     },
-    "/v1/workflows/latest": {
+    "/workflows/latest": {
       "get": {
         "operationId": "get_v1_workflows_latest",
         "responses": {
@@ -1057,7 +1270,7 @@
         "summary": "Latest version of one workflow (nullable)"
       }
     },
-    "/v1/workflows/readiness": {
+    "/workflows/readiness": {
       "post": {
         "operationId": "post_v1_workflows_readiness",
         "requestBody": {
@@ -1172,7 +1385,7 @@
         "summary": "Deterministic production-readiness check"
       }
     },
-    "/v1/workflows/rollback": {
+    "/workflows/rollback": {
       "post": {
         "operationId": "post_v1_workflows_rollback",
         "requestBody": {
@@ -1248,7 +1461,7 @@
         "summary": "Append a prior snapshot as the new latest version"
       }
     },
-    "/v1/workflows/save": {
+    "/workflows/save": {
       "post": {
         "operationId": "post_v1_workflows_save",
         "requestBody": {
@@ -1355,7 +1568,58 @@
         "summary": "Save a workflow as a new immutable version"
       }
     },
-    "/v1/workflows/versions": {
+    "/workflows/schedule-preview": {
+      "get": {
+        "operationId": "get_v1_workflows_schedule-preview",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "properties": {
+                            "nextFires": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "valid": {
+                              "type": "boolean"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Validate a cron expression and preview its next fires"
+      }
+    },
+    "/workflows/versions": {
       "get": {
         "operationId": "get_v1_workflows_versions",
         "responses": {
@@ -1398,5 +1662,11 @@
         "summary": "All versions of one workflow"
       }
     }
-  }
+  },
+  "servers": [
+    {
+      "description": "Version 1",
+      "url": "/v1"
+    }
+  ]
 }

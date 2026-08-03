@@ -79,6 +79,17 @@ func (s *V1Server) memoryPurgeProjection(r *http.Request, rc v1Request, tenantEn
 	return map[string]any{"status": "scheduled", "scheduledFor": scheduledFor.UTC().Format(time.RFC3339)}
 }
 
+func (s *V1Server) memoryConsentStatusCore(r *http.Request, rc v1Request) opResult {
+	processEnabled := os.Getenv("JANUSLY_MEMORY_ENABLED") == "true"
+	tenantEnabled := orgconfig.LoadBool(r.Context(), s.pool, rc.orgID, "memory.enabled")
+	return opOK(map[string]any{
+		"enabled":        processEnabled && tenantEnabled,
+		"processEnabled": processEnabled,
+		"tenantEnabled":  tenantEnabled,
+		"purge":          s.memoryPurgeProjection(r, rc, tenantEnabled),
+	})
+}
+
 func (s *V1Server) mountF1SweepRoutes(mux *http.ServeMux) {
 	// The AI Studio templates panel (v1 read set).
 	mux.HandleFunc("GET /v1/templates", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
@@ -128,14 +139,10 @@ func (s *V1Server) mountF1SweepRoutes(mux *http.ServeMux) {
 
 	// Memory governance status for the Recovery Center warning card.
 	mux.HandleFunc("GET /v1/memory/consent-status", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		processEnabled := os.Getenv("JANUSLY_MEMORY_ENABLED") == "true"
-		tenantEnabled := orgconfig.LoadBool(r.Context(), s.pool, rc.orgID, "memory.enabled")
-		writeV1Data(w, rc.id, map[string]any{
-			"enabled":        processEnabled && tenantEnabled,
-			"processEnabled": processEnabled,
-			"tenantEnabled":  tenantEnabled,
-			"purge":          s.memoryPurgeProjection(r, rc, tenantEnabled),
-		})
+		writeVersioned(w, rc.id, s.memoryConsentStatusCore(r, rc))
+	}))
+	mux.HandleFunc("GET /memory/consent-status", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeLegacy(w, s.memoryConsentStatusCore(r, rc))
 	}))
 
 	// Calibration posture for the Recovery Center tiles (legacy raw).
@@ -147,11 +154,12 @@ func (s *V1Server) mountF1SweepRoutes(mux *http.ServeMux) {
 			writeLegacy(w, calibrations)
 			return
 		}
+		calibrationData, _ := calibrations.data.(map[string]any)
 		writeLegacy(w, opOK(map[string]any{
 			"enabled":           orgconfig.LoadBool(r.Context(), s.pool, rc.orgID, "ai.confidenceCalibrationEnabled"),
 			"windowDays":        calibrationWindowDays,
 			"minimumSampleSize": calibrationMinSamples,
-			"calibrations":      calibrations.data["calibrations"],
+			"calibrations":      calibrationData["calibrations"],
 		}))
 	})
 

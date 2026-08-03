@@ -75,8 +75,11 @@ var routeAuthz = map[string]routeGate{
 	"DELETE /workflows/{workflowId}":       {auth.RoleEditor, "workflows.write"},
 	"POST /workflows/{workflowId}/restore": {auth.RoleEditor, "workflows.write"},
 	"GET /v1/workflows":                    {auth.RoleViewer, "workflows.read"},
+	"GET /workflows":                       {auth.RoleViewer, "workflows.read"},
 	"GET /v1/workflows/latest":             {auth.RoleViewer, "workflows.read"},
+	"GET /workflows/latest":                {auth.RoleViewer, "workflows.read"},
 	"GET /v1/workflows/versions":           {auth.RoleViewer, "workflows.read"},
+	"GET /workflows/versions":              {auth.RoleViewer, "workflows.read"},
 	"GET /workflows/trash":                 {auth.RoleViewer, "workflows.read"},
 
 	// Runs.
@@ -89,8 +92,11 @@ var routeAuthz = map[string]routeGate{
 	"POST /v1/runs/redrive":    {auth.RoleEditor, "runs.start"},
 	"POST /runs/redrive":       {auth.RoleEditor, "runs.start"},
 	"GET /v1/run":              {auth.RoleViewer, "runs.read"},
+	"GET /run":                 {auth.RoleViewer, "runs.read"},
 	"GET /v1/status":           {auth.RoleViewer, "runs.read"},
+	"GET /status":              {auth.RoleViewer, "runs.read"},
 	"GET /v1/runs":             {auth.RoleViewer, "runs.read"},
+	"GET /runs":                {auth.RoleViewer, "runs.read"},
 	"GET /runs/{runId}/stream": {auth.RoleViewer, "runs.read"},
 	"GET /run/usage":           {auth.RoleViewer, "runs.read"},
 
@@ -163,6 +169,7 @@ var routeAuthz = map[string]routeGate{
 	"GET /v1/workflows/schedule-preview":                          {auth.RoleViewer, "workflows.read"},
 	"GET /workflows/schedule-preview":                             {auth.RoleViewer, "workflows.read"},
 	"GET /v1/memory/consent-status":                               {auth.RoleViewer, "recovery.read"},
+	"GET /memory/consent-status":                                  {auth.RoleViewer, "recovery.read"},
 	"GET /mcp/connections":                                        {auth.RoleViewer, "mcp.connections.read"},
 	"GET /workflows/{workflowId}/metadata":                        {auth.RoleViewer, "workflows.read"},
 	"POST /workflows/{workflowId}/metadata":                       {auth.RoleEditor, "workflows.write"},

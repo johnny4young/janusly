@@ -36,9 +36,9 @@ func (s *V1Server) recoveryCasesCore(r *http.Request, rc v1Request) opResult {
 	}
 	runID := query.Get("runId")
 	rows, err := store.New(s.pool).ListRecoveryCases(r.Context(), store.ListRecoveryCasesParams{
-		OrgID:    rc.orgID,
-		RunID:    pgtype.Text{String: runID, Valid: runID != ""},
-		OpenOnly: query.Get("openOnly") != "false",
+		OrgID:     rc.orgID,
+		RunID:     pgtype.Text{String: runID, Valid: runID != ""},
+		OpenOnly:  query.Get("openOnly") != "false",
 		PageLimit: int32(limit),
 	})
 	if err != nil {
@@ -101,13 +101,25 @@ func (s *V1Server) mountRecoveryReadRoutes(mux *http.ServeMux) {
 	s.route(mux, "GET /recovery/cases", gate, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeLegacy(w, s.recoveryCasesCore(r, rc))
 	})
+	s.route(mux, "GET /v1/recovery/cases", gate, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeVersioned(w, rc.id, s.recoveryCasesCore(r, rc))
+	})
 	s.route(mux, "GET /recovery/cases/{caseId}", gate, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeLegacy(w, s.recoveryCaseCore(r, rc))
+	})
+	s.route(mux, "GET /v1/recovery/cases/{caseId}", gate, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeVersioned(w, rc.id, s.recoveryCaseCore(r, rc))
 	})
 	s.route(mux, "GET /recovery/ledger", gate, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeLegacy(w, s.recoveryLedgerCore(r, rc))
 	})
+	s.route(mux, "GET /v1/recovery/ledger", gate, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeVersioned(w, rc.id, s.recoveryLedgerCore(r, rc))
+	})
 	s.route(mux, "GET /recovery/my-wins", gate, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeLegacy(w, s.recoveryMyWinsCore(r, rc))
+	})
+	s.route(mux, "GET /v1/recovery/my-wins", gate, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeVersioned(w, rc.id, s.recoveryMyWinsCore(r, rc))
 	})
 }

@@ -18,10 +18,11 @@ import (
 func main() {
 	paths := map[string]map[string]any{}
 	for _, route := range contract.Routes {
-		item, ok := paths[route.Path]
+		path := strings.TrimPrefix(route.Path, "/v1")
+		item, ok := paths[path]
 		if !ok {
 			item = map[string]any{}
-			paths[route.Path] = item
+			paths[path] = item
 		}
 		operation := map[string]any{
 			"summary":     route.Summary,
@@ -66,7 +67,8 @@ func main() {
 			"version":     "0.1.0",
 			"description": "Generated from the side-effect-free route manifest in internal/contract. Every response wraps in the v1 envelope; the envelope is documented once in components and referenced everywhere.",
 		},
-		"paths": paths,
+		"servers": []any{map[string]any{"url": "/v1", "description": "Version 1"}},
+		"paths":   paths,
 		"components": map[string]any{
 			"schemas": map[string]any{
 				"V1Envelope": map[string]any{
