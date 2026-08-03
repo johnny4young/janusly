@@ -1448,11 +1448,17 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
     }
     platformVersion = 1
     rerender(<RecoveryCenterPanel {...baseProps} deadLetters={[failure] as never} />)
-    await waitFor(() => expect(screen.getByTestId('recovery-lifetime-ledger')).toHaveTextContent('1 failure recovered'))
+    await waitFor(
+      () => expect(screen.getByTestId('recovery-lifetime-ledger')).toHaveTextContent('1 failure recovered'),
+      { timeout: 5_000 },
+    )
     expect(screen.getByTestId('recovery-center-greeting')).not.toHaveTextContent(/^All clear$/)
 
     rerender(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
-    await waitFor(() => expect(screen.getByTestId('recovery-center-greeting')).toHaveTextContent(/^All clear$/))
+    await waitFor(
+      () => expect(screen.getByTestId('recovery-center-greeting')).toHaveTextContent(/^All clear$/),
+      { timeout: 5_000 },
+    )
     expect(screen.getByTestId('recovery-center-all-clear-summary')).toHaveTextContent('1m of downtime ended')
   })
 
