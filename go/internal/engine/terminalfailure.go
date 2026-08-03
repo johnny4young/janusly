@@ -342,31 +342,16 @@ func (e *Engine) recordRecoveryImpact(ctx context.Context, q *store.Queries, cla
 	// and its audit ride the same transaction as the impact fact.
 	if nodeClaim.RecoveryPlaybookID.Valid && nodeClaim.RecoveryPlaybookID.String != "" &&
 		nodeClaim.RecoveryValidationRunID.Valid && nodeClaim.RecoveryValidationRunID.String != "" {
-		applied, err := q.RecordPlaybookApplied(ctx, store.RecordPlaybookAppliedParams{
-			OrgID: dlq.OrgID, ID: nodeClaim.RecoveryPlaybookID.String,
-			ValidationRunID: nodeClaim.RecoveryValidationRunID,
-		})
+		applied, err := e.recordPlaybookAppliedWithQueries(
+			ctx, q, dlq.OrgID, nodeClaim.RecoveryPlaybookID.String,
+			nodeClaim.RecoveryValidationRunID.String, deadLetterID, actor,
+		)
 		if err != nil {
 			return fmt.Errorf("record playbook applied: %w", err)
 		}
-		if applied == 0 {
+		if !applied {
 			// The same validation run already credited — idempotent.
 			return nil
-		}
-		metadata, _ := json.Marshal(map[string]any{
-			"deadLetterId":    deadLetterID,
-			"validationRunId": nodeClaim.RecoveryValidationRunID.String,
-			"via":             "terminal_recovery",
-		})
-		if err := q.InsertAuditLogRow(ctx, store.InsertAuditLogRowParams{
-			ID: e.newID(), OrgID: dlq.OrgID,
-			UserID:     pgtype.Text{String: actor, Valid: true},
-			Action:     "recovery.playbook.applied",
-			TargetType: pgtype.Text{String: "recovery_playbook", Valid: true},
-			TargetID:   pgtype.Text{String: nodeClaim.RecoveryPlaybookID.String, Valid: true},
-			Metadata:   metadata,
-		}); err != nil {
-			return fmt.Errorf("audit playbook applied: %w", err)
 		}
 	}
 	return nil

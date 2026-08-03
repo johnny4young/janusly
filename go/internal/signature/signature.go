@@ -129,6 +129,17 @@ func Normalize(errValue any, ctx Context) Result {
 		}
 	}
 
+	// A reaped node's human-readable message contains its startedAt instant.
+	// Key the known machine code instead so repeated worker interruptions
+	// remain one exact-match recovery cluster and one reusable playbook.
+	if errObj != nil && errObj["code"] == "worker_stalled" {
+		return Result{
+			Signature:      "Worker stalled on " + nodeType + " node",
+			Category:       "unknown",
+			SuggestedOwner: "platform",
+		}
+	}
+
 	// 2. HTTP error — explicit statusCode wins; message regex second.
 	status := 0
 	if errObj != nil {

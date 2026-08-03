@@ -456,11 +456,12 @@ func (s *V1Server) redrive(w http.ResponseWriter, r *http.Request, rc v1Request)
 
 func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 	var body struct {
-		DeadLetterID            string `json:"deadLetterId"`
-		RunID                   string `json:"runId"`
-		NodeID                  string `json:"nodeId"`
-		RecoveryPlaybookID      string `json:"recoveryPlaybookId"`
-		RecoveryValidationRunID string `json:"recoveryValidationRunId"`
+		DeadLetterID            string          `json:"deadLetterId"`
+		RunID                   string          `json:"runId"`
+		NodeID                  string          `json:"nodeId"`
+		SuggestedWorkflow       json.RawMessage `json:"suggestedWorkflow"`
+		RecoveryPlaybookID      string          `json:"recoveryPlaybookId"`
+		RecoveryValidationRunID string          `json:"recoveryValidationRunId"`
 	}
 	if err := decodeBody(r, &body); err != nil {
 		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body",
@@ -493,15 +494,49 @@ func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 		return opError(http.StatusBadRequest, "recovery_playbook_invalid_body",
 			"recoveryPlaybookId and recoveryValidationRunId must be provided together", nil)
 	}
-	if body.RecoveryPlaybookID != "" {
-		item, err := store.New(s.pool).GetDeadLetter(r.Context(), store.GetDeadLetterParams{
-			ID: body.DeadLetterID, OrgID: rc.orgID,
-		})
-		if err != nil {
-			return opError(http.StatusNotFound, "dlq_not_found", "Dead letter not found", nil)
+	item, err := store.New(s.pool).GetDeadLetter(r.Context(), store.GetDeadLetterParams{
+		ID: body.DeadLetterID, OrgID: rc.orgID,
+	})
+	if err != nil {
+		return opError(http.StatusNotFound, "dlq_not_found", "Dead letter not found", nil)
+	}
+	var fix *domain.Workflow
+	var fixJSON []byte
+	if len(body.SuggestedWorkflow) > 0 && string(body.SuggestedWorkflow) != "null" {
+		parsed, issues := domain.Parse(body.SuggestedWorkflow)
+		if parsed == nil {
+			reason := "unknown"
+			if len(issues) > 0 {
+				reason = issues[0].Message
+			}
+			return opError(http.StatusBadRequest, "dlq_workflow_schema_invalid",
+				"suggestedWorkflow failed schema validation: "+reason, map[string]any{"reason": reason})
 		}
-		wf, _ := domain.Parse(item.WorkflowJson)
-		if wf == nil || !s.engine.VerifyPlaybookReplayClaim(r.Context(), rc.orgID, item, wf,
+		validation := domain.ValidateWithSemanticFixtures(parsed, grammar.DomainValidator, recovery.FixtureOutcomesForValidation)
+		for _, issue := range validation.Issues {
+			if issue.Code != domain.CodeNodeTypeUnsupportedPilot {
+				return opError(http.StatusBadRequest, "dlq_workflow_schema_invalid",
+					"suggestedWorkflow failed schema validation: "+issue.Message,
+					map[string]any{"reason": issue.Message})
+			}
+		}
+		failingNodePresent := false
+		for i := range parsed.Nodes {
+			if parsed.Nodes[i].ID == item.NodeID {
+				failingNodePresent = true
+				break
+			}
+		}
+		if !failingNodePresent {
+			return opError(http.StatusBadRequest, "dlq_failing_node_missing",
+				fmt.Sprintf("suggestedWorkflow does not contain the failing node id %q", item.NodeID),
+				map[string]any{"nodeId": item.NodeID})
+		}
+		fix = parsed
+		fixJSON, _ = json.Marshal(parsed)
+	}
+	if body.RecoveryPlaybookID != "" {
+		if fix == nil || !s.engine.VerifyPlaybookReplayClaim(r.Context(), rc.orgID, item, fix,
 			body.RecoveryPlaybookID, body.RecoveryValidationRunID) {
 			return opError(http.StatusUnprocessableEntity, "recovery_playbook_outcome_invalid",
 				"Recovery Playbook replay evidence cannot be verified", nil)
@@ -510,7 +545,7 @@ func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 	if err := s.engine.RedriveDeadLetterWithOptions(r.Context(), rc.orgID, body.DeadLetterID,
 		engine.RedriveOptions{
 			PlaybookID: body.RecoveryPlaybookID, ValidationRunID: body.RecoveryValidationRunID,
-			RequestedBy: rc.userID,
+			FixWorkflowJSON: fixJSON, RequestedBy: rc.userID,
 		}); err != nil {
 		switch {
 		case errors.Is(err, engine.ErrDeadLetterNotFound):

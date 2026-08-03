@@ -8,6 +8,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -106,9 +107,54 @@ func (q *Queries) CompleteReplayCampaignIfExhausted(ctx context.Context, id stri
 	return i, err
 }
 
+const findLatestAcceptedRecoveryFeedback = `-- name: FindLatestAcceptedRecoveryFeedback :one
+SELECT id, workflow_id, approach_label, suggestion_mode, created_at
+FROM recovery_feedback
+WHERE org_id = $1 AND dead_letter_id = $2 AND accepted = true
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type FindLatestAcceptedRecoveryFeedbackParams struct {
+	OrgID        string
+	DeadLetterID string
+}
+
+type FindLatestAcceptedRecoveryFeedbackRow struct {
+	ID             string
+	WorkflowID     string
+	ApproachLabel  string
+	SuggestionMode string
+	CreatedAt      *time.Time
+}
+
+func (q *Queries) FindLatestAcceptedRecoveryFeedback(ctx context.Context, arg FindLatestAcceptedRecoveryFeedbackParams) (FindLatestAcceptedRecoveryFeedbackRow, error) {
+	row := q.db.QueryRow(ctx, findLatestAcceptedRecoveryFeedback, arg.OrgID, arg.DeadLetterID)
+	var i FindLatestAcceptedRecoveryFeedbackRow
+	err := row.Scan(
+		&i.ID,
+		&i.WorkflowID,
+		&i.ApproachLabel,
+		&i.SuggestionMode,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const findMatchingActivePlaybook = `-- name: FindMatchingActivePlaybook :one
-SELECT id, org_id, workflow_id, signature, version, status, title, instructions_markdown, evidence_requirements_json, source_workflow_version_id, approach_label, successful_uses, regressions, last_validated_at, last_validation_run_id, last_applied_validation_run_id, activated_at, retired_at, created_by, updated_by, created_at, updated_at FROM recovery_playbooks
-WHERE org_id = $1 AND workflow_id = $2 AND signature = $3 AND status = 'active'
+SELECT p.id, p.org_id, p.workflow_id, p.signature, p.version, p.status, p.title, p.instructions_markdown, p.evidence_requirements_json, p.source_workflow_version_id, p.approach_label, p.successful_uses, p.regressions, p.last_validated_at, p.last_validation_run_id, p.last_applied_validation_run_id, p.activated_at, p.retired_at, p.created_by, p.updated_by, p.created_at, p.updated_at FROM recovery_playbooks p
+WHERE p.org_id = $1 AND p.workflow_id = $2 AND p.signature = $3 AND p.status = 'active'
+  AND EXISTS (
+    SELECT 1 FROM workflows w
+    WHERE w.id = p.workflow_id AND w.org_id = p.org_id AND w.deleted_at IS NULL
+  )
+  AND EXISTS (
+    SELECT 1 FROM workflow_versions v
+    WHERE v.id = p.source_workflow_version_id
+      AND v.org_id = p.org_id AND v.workflow_id = p.workflow_id
+  )
+ORDER BY p.version DESC
+LIMIT 1
 `
 
 type FindMatchingActivePlaybookParams struct {
@@ -546,21 +592,39 @@ func (q *Queries) MaxPlaybookVersion(ctx context.Context, arg MaxPlaybookVersion
 }
 
 const recordPlaybookApplied = `-- name: RecordPlaybookApplied :execrows
+WITH claimed AS (
+  UPDATE runs SET recovery_playbook_applied_recorded_at = now()
+  WHERE org_id = $3 AND id = $1
+    AND replay_mode = 'validation' AND recovery_playbook_applied_recorded_at IS NULL
+    AND EXISTS (
+      SELECT 1 FROM recovery_playbooks p
+      WHERE p.org_id = $3 AND p.id = $4 AND p.status = 'active'
+    )
+  RETURNING 1
+)
 UPDATE recovery_playbooks
 SET successful_uses = successful_uses + 1,
-    last_applied_validation_run_id = $3, updated_at = now()
-WHERE org_id = $1 AND id = $2
-  AND (last_applied_validation_run_id IS NULL OR last_applied_validation_run_id <> $3)
+    last_applied_validation_run_id = $1,
+    updated_at = now(), updated_by = $2
+WHERE recovery_playbooks.org_id = $3 AND recovery_playbooks.id = $4
+  AND recovery_playbooks.status = 'active'
+  AND EXISTS (SELECT 1 FROM claimed)
 `
 
 type RecordPlaybookAppliedParams struct {
+	ValidationRunID pgtype.Text
+	Actor           pgtype.Text
 	OrgID           string
 	ID              string
-	ValidationRunID pgtype.Text
 }
 
 func (q *Queries) RecordPlaybookApplied(ctx context.Context, arg RecordPlaybookAppliedParams) (int64, error) {
-	result, err := q.db.Exec(ctx, recordPlaybookApplied, arg.OrgID, arg.ID, arg.ValidationRunID)
+	result, err := q.db.Exec(ctx, recordPlaybookApplied,
+		arg.ValidationRunID,
+		arg.Actor,
+		arg.OrgID,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -568,18 +632,38 @@ func (q *Queries) RecordPlaybookApplied(ctx context.Context, arg RecordPlaybookA
 }
 
 const recordPlaybookValidationRegression = `-- name: RecordPlaybookValidationRegression :execrows
+WITH claimed AS (
+  UPDATE runs SET recovery_playbook_validation_recorded_at = now()
+  WHERE org_id = $3 AND id = $1
+    AND replay_mode = 'validation' AND recovery_playbook_validation_recorded_at IS NULL
+    AND EXISTS (
+      SELECT 1 FROM recovery_playbooks p
+      WHERE p.org_id = $3 AND p.id = $4
+    )
+  RETURNING 1
+)
 UPDATE recovery_playbooks
-SET status = 'retired', retired_at = now(), regressions = regressions + 1, updated_at = now()
-WHERE org_id = $1 AND id = $2 AND status <> 'retired'
+SET status = 'retired', retired_at = now(), regressions = regressions + 1,
+    last_validation_run_id = $1, updated_at = now(),
+    updated_by = $2
+WHERE recovery_playbooks.org_id = $3 AND recovery_playbooks.id = $4
+  AND EXISTS (SELECT 1 FROM claimed)
 `
 
 type RecordPlaybookValidationRegressionParams struct {
-	OrgID string
-	ID    string
+	ValidationRunID pgtype.Text
+	Actor           pgtype.Text
+	OrgID           string
+	ID              string
 }
 
 func (q *Queries) RecordPlaybookValidationRegression(ctx context.Context, arg RecordPlaybookValidationRegressionParams) (int64, error) {
-	result, err := q.db.Exec(ctx, recordPlaybookValidationRegression, arg.OrgID, arg.ID)
+	result, err := q.db.Exec(ctx, recordPlaybookValidationRegression,
+		arg.ValidationRunID,
+		arg.Actor,
+		arg.OrgID,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -587,23 +671,60 @@ func (q *Queries) RecordPlaybookValidationRegression(ctx context.Context, arg Re
 }
 
 const recordPlaybookValidationSuccess = `-- name: RecordPlaybookValidationSuccess :execrows
+WITH claimed AS (
+  UPDATE runs SET recovery_playbook_validation_recorded_at = now()
+  WHERE org_id = $3 AND id = $1
+    AND replay_mode = 'validation' AND recovery_playbook_validation_recorded_at IS NULL
+    AND EXISTS (
+      SELECT 1 FROM recovery_playbooks p
+      WHERE p.org_id = $3 AND p.id = $4
+    )
+  RETURNING 1
+)
 UPDATE recovery_playbooks
-SET last_validated_at = now(), last_validation_run_id = $3, updated_at = now()
-WHERE org_id = $1 AND id = $2 AND status <> 'retired'
+SET last_validated_at = now(), last_validation_run_id = $1,
+    updated_at = now(), updated_by = $2
+WHERE recovery_playbooks.org_id = $3 AND recovery_playbooks.id = $4
+  AND EXISTS (SELECT 1 FROM claimed)
 `
 
 type RecordPlaybookValidationSuccessParams struct {
+	ValidationRunID pgtype.Text
+	Actor           pgtype.Text
 	OrgID           string
 	ID              string
-	ValidationRunID pgtype.Text
 }
 
 func (q *Queries) RecordPlaybookValidationSuccess(ctx context.Context, arg RecordPlaybookValidationSuccessParams) (int64, error) {
-	result, err := q.db.Exec(ctx, recordPlaybookValidationSuccess, arg.OrgID, arg.ID, arg.ValidationRunID)
+	result, err := q.db.Exec(ctx, recordPlaybookValidationSuccess,
+		arg.ValidationRunID,
+		arg.Actor,
+		arg.OrgID,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const recoveryImpactExists = `-- name: RecoveryImpactExists :one
+SELECT EXISTS (
+  SELECT 1 FROM recovery_impact_events
+  WHERE org_id = $1 AND dead_letter_id = $2
+)::boolean
+`
+
+type RecoveryImpactExistsParams struct {
+	OrgID        string
+	DeadLetterID string
+}
+
+func (q *Queries) RecoveryImpactExists(ctx context.Context, arg RecoveryImpactExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, recoveryImpactExists, arg.OrgID, arg.DeadLetterID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const retirePreviousActivePlaybookMatch = `-- name: RetirePreviousActivePlaybookMatch :execrows

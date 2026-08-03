@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"time"
 
-
 	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/grammar"
 	"github.com/johnny4young/janusly/go/internal/store"
@@ -202,7 +201,9 @@ func (e *Engine) flipRunTerminal(ctx context.Context, q *store.Queries, events *
 	// A validation run carrying a playbook claim reports its outcome here:
 	// success refreshes evidence, failure auto-retires (in the same tx as
 	// the terminal flip, so evidence and outcome can't drift).
-	e.recordPlaybookValidationOutcome(ctx, q, runID, status)
+	if err := e.recordPlaybookValidationOutcome(ctx, q, runID, status); err != nil {
+		return fmt.Errorf("record playbook validation outcome: %w", err)
+	}
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal run event payload: %w", err)

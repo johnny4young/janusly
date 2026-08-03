@@ -24,8 +24,8 @@ import (
 )
 
 const (
-	playbookTitleMaxChars        = 200
-	playbookInstructionsMaxChars = 20_000
+	playbookTitleMaxChars        = 120
+	playbookInstructionsMaxChars = 4_000
 )
 
 // Playbook lifecycle sentinel errors (API maps to wire shapes).
@@ -227,43 +227,158 @@ func WorkflowsEqual(a, b *domain.Workflow) bool {
 	return errA == nil && errB == nil && bytes.Equal(rawA, rawB)
 }
 
-// recordPlaybookValidationOutcome runs at a validation run's terminal
-// flip: success refreshes the evidence; failure AUTO-RETIRES with a
-// regression mark (audited) — a playbook that regressed in its own
-// sandbox holds no authority.
-func (e *Engine) recordPlaybookValidationOutcome(ctx context.Context, q *store.Queries, runID, status string) {
+// recordPlaybookValidationOutcome runs at a validation run's terminal flip.
+// The run marker and playbook mutation share the caller's transaction, so a
+// later outcome read can be idempotent without racing terminal completion.
+func (e *Engine) recordPlaybookValidationOutcome(ctx context.Context, q *store.Queries, runID, status string) error {
 	run, err := q.GetRunExecution(ctx, runID)
 	if err != nil || !run.ReplayMode.Valid || run.ReplayMode.String != "validation" {
-		return
+		return nil
 	}
 	var envelope struct {
 		RecoveryPlaybookID string `json:"recoveryPlaybookId"`
 	}
 	if json.Unmarshal(run.InputJson, &envelope) != nil || envelope.RecoveryPlaybookID == "" {
-		return
+		return nil
 	}
-	if status == "succeeded" {
-		_, _ = q.RecordPlaybookValidationSuccess(ctx, store.RecordPlaybookValidationSuccessParams{
-			OrgID: run.OrgID, ID: envelope.RecoveryPlaybookID,
-			ValidationRunID: pgtype.Text{String: runID, Valid: true},
-		})
-		return
+	_, err = e.recordPlaybookValidationWithQueries(
+		ctx, q, run.OrgID, envelope.RecoveryPlaybookID, runID, status == "succeeded", "system",
+	)
+	return err
+}
+
+func (e *Engine) recordPlaybookValidationWithQueries(
+	ctx context.Context,
+	q *store.Queries,
+	orgID, playbookID, validationRunID string,
+	succeeded bool,
+	actor string,
+) (bool, error) {
+	params := store.RecordPlaybookValidationSuccessParams{
+		OrgID: orgID, ID: playbookID,
+		ValidationRunID: pgtype.Text{String: validationRunID, Valid: true},
+		Actor:           pgtype.Text{String: actor, Valid: actor != ""},
 	}
-	retired, err := q.RecordPlaybookValidationRegression(ctx, store.RecordPlaybookValidationRegressionParams{
-		OrgID: run.OrgID, ID: envelope.RecoveryPlaybookID,
-	})
-	if err != nil || retired == 0 {
-		return
+	var (
+		recorded int64
+		err      error
+	)
+	if succeeded {
+		recorded, err = q.RecordPlaybookValidationSuccess(ctx, params)
+	} else {
+		recorded, err = q.RecordPlaybookValidationRegression(ctx, store.RecordPlaybookValidationRegressionParams(params))
 	}
-	metadata, _ := json.Marshal(map[string]any{"validationRunId": runID, "via": "sandbox_regression"})
-	_ = q.InsertAuditLogRow(ctx, store.InsertAuditLogRowParams{
-		ID: e.newID(), OrgID: run.OrgID,
-		UserID:     pgtype.Text{String: "system", Valid: true},
-		Action:     "recovery.playbook.regressed",
+	if err != nil {
+		return false, err
+	}
+	if recorded == 0 {
+		return false, nil
+	}
+	action := "recovery.playbook.validated"
+	if !succeeded {
+		action = "recovery.playbook.regressed"
+	}
+	metadata, _ := json.Marshal(map[string]any{"validationRunId": validationRunID})
+	if err := q.InsertAuditLogRow(ctx, store.InsertAuditLogRowParams{
+		ID: e.newID(), OrgID: orgID,
+		UserID:     pgtype.Text{String: actor, Valid: actor != ""},
+		Action:     action,
 		TargetType: pgtype.Text{String: "recovery_playbook", Valid: true},
-		TargetID:   pgtype.Text{String: envelope.RecoveryPlaybookID, Valid: true},
+		TargetID:   pgtype.Text{String: playbookID, Valid: true},
 		Metadata:   metadata,
+	}); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// RecordPlaybookValidationOutcome is the explicit outcome/read-back path.
+// Terminal completion normally wins the marker first; callers then receive
+// recorded=false and the already-converged playbook.
+func (e *Engine) RecordPlaybookValidationOutcome(
+	ctx context.Context,
+	orgID, playbookID, validationRunID string,
+	succeeded bool,
+	actor string,
+) (store.RecoveryPlaybook, bool, error) {
+	tx, err := e.pool.Begin(ctx)
+	if err != nil {
+		return store.RecoveryPlaybook{}, false, fmt.Errorf("begin validation outcome: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := store.New(e.wrapTx(tx))
+	recorded, err := e.recordPlaybookValidationWithQueries(
+		ctx, q, orgID, playbookID, validationRunID, succeeded, actor,
+	)
+	if err != nil {
+		return store.RecoveryPlaybook{}, false, fmt.Errorf("record validation outcome: %w", err)
+	}
+	playbook, err := q.GetRecoveryPlaybook(ctx, store.GetRecoveryPlaybookParams{OrgID: orgID, ID: playbookID})
+	if err != nil {
+		return store.RecoveryPlaybook{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return store.RecoveryPlaybook{}, false, fmt.Errorf("commit validation outcome: %w", err)
+	}
+	return playbook, recorded, nil
+}
+
+func (e *Engine) recordPlaybookAppliedWithQueries(
+	ctx context.Context,
+	q *store.Queries,
+	orgID, playbookID, validationRunID, deadLetterID, actor string,
+) (bool, error) {
+	recorded, err := q.RecordPlaybookApplied(ctx, store.RecordPlaybookAppliedParams{
+		OrgID: orgID, ID: playbookID,
+		ValidationRunID: pgtype.Text{String: validationRunID, Valid: true},
+		Actor:           pgtype.Text{String: actor, Valid: actor != ""},
 	})
+	if err != nil || recorded == 0 {
+		return false, err
+	}
+	metadata, _ := json.Marshal(map[string]any{
+		"deadLetterId": deadLetterID, "validationRunId": validationRunID,
+	})
+	if err := q.InsertAuditLogRow(ctx, store.InsertAuditLogRowParams{
+		ID: e.newID(), OrgID: orgID,
+		UserID:     pgtype.Text{String: actor, Valid: actor != ""},
+		Action:     "recovery.playbook.applied",
+		TargetType: pgtype.Text{String: "recovery_playbook", Valid: true},
+		TargetID:   pgtype.Text{String: playbookID, Valid: true},
+		Metadata:   metadata,
+	}); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// RecordPlaybookApplied confirms a terminally successful use. The terminal
+// impact transaction normally records it first; this route-safe form is an
+// idempotent convergence/read-back operation.
+func (e *Engine) RecordPlaybookApplied(
+	ctx context.Context,
+	orgID, playbookID, validationRunID, deadLetterID, actor string,
+) (store.RecoveryPlaybook, bool, error) {
+	tx, err := e.pool.Begin(ctx)
+	if err != nil {
+		return store.RecoveryPlaybook{}, false, fmt.Errorf("begin applied outcome: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := store.New(e.wrapTx(tx))
+	recorded, err := e.recordPlaybookAppliedWithQueries(
+		ctx, q, orgID, playbookID, validationRunID, deadLetterID, actor,
+	)
+	if err != nil {
+		return store.RecoveryPlaybook{}, false, fmt.Errorf("record applied outcome: %w", err)
+	}
+	playbook, err := q.GetRecoveryPlaybook(ctx, store.GetRecoveryPlaybookParams{OrgID: orgID, ID: playbookID})
+	if err != nil {
+		return store.RecoveryPlaybook{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return store.RecoveryPlaybook{}, false, fmt.Errorf("commit applied outcome: %w", err)
+	}
+	return playbook, recorded, nil
 }
 
 func truncateRunes(value string, max int) string {

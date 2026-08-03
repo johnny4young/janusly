@@ -34,37 +34,62 @@ func TestRecoveryPlaybookLoop(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	workflow := map[string]any{
+	failing := map[string]any{
+		"id": wfID, "name": "Playbook", "dslVersion": "1.0",
+		"nodes": []any{map[string]any{"id": "call", "type": "http", "config": map[string]any{
+			"url": upstream.URL, "timeoutMs": 200,
+		}}},
+		"edges": []any{},
+	}
+	fixed := map[string]any{
 		"id": wfID, "name": "Playbook", "dslVersion": "1.0",
 		"nodes": []any{map[string]any{"id": "call", "type": "http", "config": map[string]any{
 			"url": upstream.URL, "timeoutMs": 500,
 		}}},
 		"edges": []any{},
 	}
-	if res := h.call("POST", "/workflows/save", workflow, ""); res.status >= 300 {
+	if res := h.call("POST", "/workflows/save", failing, ""); res.status >= 300 {
 		t.Fatalf("save: %d", res.status)
 	}
-	res := h.call("POST", "/v1/start", map[string]any{"workflow": workflow}, "")
+	res := h.call("POST", "/v1/start", map[string]any{"workflow": failing}, "")
 	runID := extractRunID(t, res)
 	h.waitRun(runID, "failed")
 	var deadLetterID string
 	_ = pool.QueryRow(ctx, `SELECT id FROM dead_letters WHERE run_id = $1`, runID).Scan(&deadLetterID)
 
-	// 1. Fresh sandbox evidence: heal + validate-fix (no playbook yet).
+	// 1. A fresh sandbox passes the changed snapshot. Saving and replaying that
+	// exact snapshot happen later and remain separate production decisions.
 	healed.Store(true)
 	res = h.call("POST", "/dlq/validate-fix", map[string]any{
-		"deadLetterId": deadLetterID, "suggestedWorkflow": workflow,
+		"deadLetterId": deadLetterID, "suggestedWorkflow": fixed,
 	}, "")
 	if res.status != 200 {
 		t.Fatalf("validate-fix: %d %+v", res.status, res.body)
 	}
 	validationRunID := res.body["runId"].(string)
 	h.waitRun(validationRunID, "succeeded")
+	res = h.call("POST", "/workflows/save", fixed, "")
+	if res.status != 200 {
+		t.Fatalf("save fixed snapshot: %d %+v", res.status, res.body)
+	}
+	sourceVersionID := res.body["versionId"].(string)
+	res = h.call("POST", "/dlq/replay", map[string]any{
+		"deadLetterId": deadLetterID, "suggestedWorkflow": fixed,
+	}, "")
+	if res.status != 200 {
+		t.Fatalf("apply fixed snapshot: %d %+v", res.status, res.body)
+	}
+	h.waitRun(runID, "succeeded")
+	res = h.call("POST", "/recovery/feedback", map[string]any{
+		"deadLetterId": deadLetterID, "suggestionMode": "ai",
+		"approachLabel": "raise_timeout", "accepted": true,
+	}, "")
+	if res.status != 200 {
+		t.Fatalf("accepted feedback: %d %+v", res.status, res.body)
+	}
 
-	// 2. Draft (idempotent on source version) + manual activation.
-	var sourceVersionID string
-	_ = pool.QueryRow(ctx, `SELECT id FROM workflow_versions WHERE org_id = $1 AND workflow_id = $2
-		ORDER BY version DESC LIMIT 1`, h.org, wfID).Scan(&sourceVersionID)
+	// 2. Promotion re-verifies every server-owned fact. The public view omits
+	// the executable source DAG while preserving the complete operator summary.
 	draftBody := map[string]any{
 		"deadLetterId": deadLetterID, "title": "Reintenta tras sanar upstream",
 		"instructionsMarkdown":    "1. Verifica el upstream. 2. Replay.",
@@ -74,7 +99,12 @@ func TestRecoveryPlaybookLoop(t *testing.T) {
 	if res.status != 201 {
 		t.Fatalf("draft: %d %+v", res.status, res.body)
 	}
-	playbookID := res.body["playbook"].(map[string]any)["id"].(string)
+	draftView := res.body["playbook"].(map[string]any)
+	playbookID := draftView["id"].(string)
+	if draftView["instructionsMarkdown"] == nil || draftView["createdAt"] == nil || draftView["updatedAt"] == nil ||
+		draftView["sourceWorkflowVersionId"] != nil || draftView["orgId"] != nil {
+		t.Fatalf("public playbook view drifted: %+v", draftView)
+	}
 	if res = h.call("POST", "/recovery/playbooks", draftBody, ""); res.status != 200 || res.body["created"] != false {
 		t.Fatalf("draft idempotency: %d %+v", res.status, res.body)
 	}
@@ -82,10 +112,27 @@ func TestRecoveryPlaybookLoop(t *testing.T) {
 		t.Fatalf("activate: %d %+v", res.status, res.body)
 	}
 
-	// 3. Match lookup finds the active playbook for this failure.
-	res = h.call("GET", "/recovery/playbooks/match?deadLetterId="+deadLetterID, nil, "")
+	// 3. A new occurrence with the exact same workflow and signature offers
+	// the playbook. Explicit use returns the immutable source, never executes it.
+	healed.Store(false)
+	res = h.call("POST", "/v1/start", map[string]any{"workflow": failing}, "")
+	secondRunID := extractRunID(t, res)
+	h.waitRun(secondRunID, "failed")
+	var secondDeadLetterID string
+	_ = pool.QueryRow(ctx, `SELECT id FROM dead_letters WHERE run_id = $1`, secondRunID).Scan(&secondDeadLetterID)
+	res = h.call("GET", "/recovery/playbooks/match?deadLetterId="+secondDeadLetterID, nil, "")
 	if res.status != 200 || res.body["playbook"] == nil {
 		t.Fatalf("match: %d %+v", res.status, res.body)
+	}
+	res = h.call("POST", "/recovery/playbooks/"+playbookID+"/use", map[string]any{
+		"deadLetterId": secondDeadLetterID,
+	}, "")
+	if res.status != 200 {
+		t.Fatalf("explicit use: %d %+v", res.status, res.body)
+	}
+	suggestion := res.body["suggestion"].(map[string]any)
+	if suggestion["mode"] != "playbook" || suggestion["playbook"].(map[string]any)["id"] != playbookID {
+		t.Fatalf("use suggestion: %+v", suggestion)
 	}
 
 	// 4. The replay claim: playbook alone (without validation run) → 400;
@@ -93,18 +140,20 @@ func TestRecoveryPlaybookLoop(t *testing.T) {
 	// FRESH sandbox run carrying the playbook — run one via validate-fix
 	// with the playbook claim (exact match verified server-side).
 	if res = h.call("POST", "/dlq/replay", map[string]any{
-		"deadLetterId": deadLetterID, "recoveryPlaybookId": playbookID,
+		"deadLetterId": secondDeadLetterID, "recoveryPlaybookId": playbookID,
 	}, ""); res.status != 400 {
 		t.Fatalf("half claim must 400: %d", res.status)
 	}
 	if res = h.call("POST", "/dlq/replay", map[string]any{
-		"deadLetterId": deadLetterID, "recoveryPlaybookId": playbookID,
+		"deadLetterId": secondDeadLetterID, "suggestedWorkflow": fixed,
+		"recoveryPlaybookId":      playbookID,
 		"recoveryValidationRunId": "run-falso",
 	}, ""); res.status != 422 {
 		t.Fatalf("bogus evidence must 422: %d", res.status)
 	}
+	healed.Store(true)
 	res = h.call("POST", "/dlq/validate-fix", map[string]any{
-		"deadLetterId": deadLetterID, "suggestedWorkflow": workflow,
+		"deadLetterId": secondDeadLetterID, "suggestedWorkflow": fixed,
 		"recoveryPlaybookId": playbookID,
 	}, "")
 	if res.status != 200 {
@@ -112,14 +161,28 @@ func TestRecoveryPlaybookLoop(t *testing.T) {
 	}
 	freshValidationRunID := res.body["runId"].(string)
 	h.waitRun(freshValidationRunID, "succeeded")
+	res = h.call("POST", "/recovery/playbooks/"+playbookID+"/outcome", map[string]any{
+		"deadLetterId": secondDeadLetterID, "validationRunId": freshValidationRunID, "phase": "validation",
+	}, "")
+	if res.status != 200 || res.body["recorded"] != false {
+		t.Fatalf("validation outcome read-back: %d %+v", res.status, res.body)
+	}
 	res = h.call("POST", "/dlq/replay", map[string]any{
-		"deadLetterId": deadLetterID, "recoveryPlaybookId": playbookID,
+		"deadLetterId": secondDeadLetterID, "suggestedWorkflow": fixed,
+		"recoveryPlaybookId":      playbookID,
 		"recoveryValidationRunId": freshValidationRunID,
 	}, "")
 	if res.status != 200 {
 		t.Fatalf("verified claim replay: %d %+v", res.status, res.body)
 	}
-	h.waitRun(runID, "succeeded")
+	h.waitRun(secondRunID, "succeeded")
+	res = h.call("POST", "/recovery/playbooks/"+playbookID+"/outcome", map[string]any{
+		"deadLetterId": secondDeadLetterID, "validationRunId": freshValidationRunID, "phase": "applied",
+	}, "")
+	if res.status != 200 || res.body["recorded"] != false ||
+		res.body["playbook"].(map[string]any)["successfulUses"] != float64(1) {
+		t.Fatalf("applied outcome read-back: %d %+v", res.status, res.body)
+	}
 
 	// 5. The applied receipt landed atomically with the terminal win.
 	var uses int
@@ -136,17 +199,34 @@ func TestRecoveryPlaybookLoop(t *testing.T) {
 		t.Fatalf("applied audit: %d", appliedAudits)
 	}
 
-	// 6. Regression auto-retire: break the upstream, run the playbook's
-	// sandbox again — the FAILED validation retires it with the mark.
+	// Executable match reads fail closed when the parent workflow is in Trash,
+	// while restoring the same parent makes the intact immutable source usable.
+	if res = h.call("DELETE", "/workflows/"+wfID, nil, ""); res.status != 200 {
+		t.Fatalf("soft delete workflow: %d %+v", res.status, res.body)
+	}
+	res = h.call("GET", "/recovery/playbooks/match?deadLetterId="+secondDeadLetterID, nil, "")
+	if res.status != 200 || res.body["playbook"] != nil {
+		t.Fatalf("tombstoned workflow must not offer a playbook: %d %+v", res.status, res.body)
+	}
+	if res = h.call("POST", "/workflows/"+wfID+"/restore", map[string]any{}, ""); res.status != 200 {
+		t.Fatalf("restore workflow: %d %+v", res.status, res.body)
+	}
+	res = h.call("GET", "/recovery/playbooks/match?deadLetterId="+secondDeadLetterID, nil, "")
+	if res.status != 200 || res.body["playbook"] == nil {
+		t.Fatalf("restored workflow must offer the playbook: %d %+v", res.status, res.body)
+	}
+
+	// 6. A later fresh sandbox regression retires the playbook automatically;
+	// the outcome endpoint remains an idempotent read-back of that transition.
 	healed.Store(false)
-	res = h.call("POST", "/v1/start", map[string]any{"workflow": workflow}, "")
+	res = h.call("POST", "/v1/start", map[string]any{"workflow": failing}, "")
 	thirdRunID := extractRunID(t, res)
 	h.waitRun(thirdRunID, "failed")
 	var thirdDL string
 	_ = pool.QueryRow(ctx, `SELECT id FROM dead_letters WHERE run_id = $1 AND status = 'open'
 		ORDER BY created_at DESC LIMIT 1`, thirdRunID).Scan(&thirdDL)
 	res = h.call("POST", "/dlq/validate-fix", map[string]any{
-		"deadLetterId": thirdDL, "suggestedWorkflow": workflow,
+		"deadLetterId": thirdDL, "suggestedWorkflow": fixed,
 		"recoveryPlaybookId": playbookID,
 	}, "")
 	if res.status != 200 {
@@ -154,6 +234,12 @@ func TestRecoveryPlaybookLoop(t *testing.T) {
 	}
 	regressionRunID := res.body["runId"].(string)
 	h.waitRun(regressionRunID, "failed")
+	res = h.call("POST", "/recovery/playbooks/"+playbookID+"/outcome", map[string]any{
+		"deadLetterId": thirdDL, "validationRunId": regressionRunID, "phase": "validation",
+	}, "")
+	if res.status != 200 || res.body["recorded"] != false {
+		t.Fatalf("regression outcome read-back: %d %+v", res.status, res.body)
+	}
 	var status string
 	var regressions int
 	_ = pool.QueryRow(ctx, `SELECT status, regressions FROM recovery_playbooks WHERE id = $1`, playbookID).

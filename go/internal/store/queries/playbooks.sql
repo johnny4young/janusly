@@ -57,8 +57,19 @@ RETURNING *;
 SELECT * FROM recovery_playbooks WHERE org_id = $1 AND id = $2;
 
 -- name: FindMatchingActivePlaybook :one
-SELECT * FROM recovery_playbooks
-WHERE org_id = $1 AND workflow_id = $2 AND signature = $3 AND status = 'active';
+SELECT p.* FROM recovery_playbooks p
+WHERE p.org_id = $1 AND p.workflow_id = $2 AND p.signature = $3 AND p.status = 'active'
+  AND EXISTS (
+    SELECT 1 FROM workflows w
+    WHERE w.id = p.workflow_id AND w.org_id = p.org_id AND w.deleted_at IS NULL
+  )
+  AND EXISTS (
+    SELECT 1 FROM workflow_versions v
+    WHERE v.id = p.source_workflow_version_id
+      AND v.org_id = p.org_id AND v.workflow_id = p.workflow_id
+  )
+ORDER BY p.version DESC
+LIMIT 1;
 
 -- name: FindPlaybookBySourceVersion :one
 SELECT * FROM recovery_playbooks
@@ -90,21 +101,71 @@ SET status = 'retired', retired_at = now(), updated_at = now(), updated_by = sql
 WHERE org_id = $1 AND id = $2 AND status <> 'retired';
 
 -- name: RecordPlaybookValidationSuccess :execrows
+WITH claimed AS (
+  UPDATE runs SET recovery_playbook_validation_recorded_at = now()
+  WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(validation_run_id)
+    AND replay_mode = 'validation' AND recovery_playbook_validation_recorded_at IS NULL
+    AND EXISTS (
+      SELECT 1 FROM recovery_playbooks p
+      WHERE p.org_id = sqlc.arg(org_id) AND p.id = sqlc.arg(id)
+    )
+  RETURNING 1
+)
 UPDATE recovery_playbooks
-SET last_validated_at = now(), last_validation_run_id = sqlc.arg(validation_run_id), updated_at = now()
-WHERE org_id = $1 AND id = $2 AND status <> 'retired';
+SET last_validated_at = now(), last_validation_run_id = sqlc.arg(validation_run_id),
+    updated_at = now(), updated_by = sqlc.narg(actor)
+WHERE recovery_playbooks.org_id = sqlc.arg(org_id) AND recovery_playbooks.id = sqlc.arg(id)
+  AND EXISTS (SELECT 1 FROM claimed);
 
 -- name: RecordPlaybookValidationRegression :execrows
+WITH claimed AS (
+  UPDATE runs SET recovery_playbook_validation_recorded_at = now()
+  WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(validation_run_id)
+    AND replay_mode = 'validation' AND recovery_playbook_validation_recorded_at IS NULL
+    AND EXISTS (
+      SELECT 1 FROM recovery_playbooks p
+      WHERE p.org_id = sqlc.arg(org_id) AND p.id = sqlc.arg(id)
+    )
+  RETURNING 1
+)
 UPDATE recovery_playbooks
-SET status = 'retired', retired_at = now(), regressions = regressions + 1, updated_at = now()
-WHERE org_id = $1 AND id = $2 AND status <> 'retired';
+SET status = 'retired', retired_at = now(), regressions = regressions + 1,
+    last_validation_run_id = sqlc.arg(validation_run_id), updated_at = now(),
+    updated_by = sqlc.narg(actor)
+WHERE recovery_playbooks.org_id = sqlc.arg(org_id) AND recovery_playbooks.id = sqlc.arg(id)
+  AND EXISTS (SELECT 1 FROM claimed);
 
 -- name: RecordPlaybookApplied :execrows
+WITH claimed AS (
+  UPDATE runs SET recovery_playbook_applied_recorded_at = now()
+  WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(validation_run_id)
+    AND replay_mode = 'validation' AND recovery_playbook_applied_recorded_at IS NULL
+    AND EXISTS (
+      SELECT 1 FROM recovery_playbooks p
+      WHERE p.org_id = sqlc.arg(org_id) AND p.id = sqlc.arg(id) AND p.status = 'active'
+    )
+  RETURNING 1
+)
 UPDATE recovery_playbooks
 SET successful_uses = successful_uses + 1,
-    last_applied_validation_run_id = sqlc.arg(validation_run_id), updated_at = now()
-WHERE org_id = $1 AND id = $2
-  AND (last_applied_validation_run_id IS NULL OR last_applied_validation_run_id <> sqlc.arg(validation_run_id));
+    last_applied_validation_run_id = sqlc.arg(validation_run_id),
+    updated_at = now(), updated_by = sqlc.narg(actor)
+WHERE recovery_playbooks.org_id = sqlc.arg(org_id) AND recovery_playbooks.id = sqlc.arg(id)
+  AND recovery_playbooks.status = 'active'
+  AND EXISTS (SELECT 1 FROM claimed);
+
+-- name: FindLatestAcceptedRecoveryFeedback :one
+SELECT id, workflow_id, approach_label, suggestion_mode, created_at
+FROM recovery_feedback
+WHERE org_id = $1 AND dead_letter_id = $2 AND accepted = true
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: RecoveryImpactExists :one
+SELECT EXISTS (
+  SELECT 1 FROM recovery_impact_events
+  WHERE org_id = $1 AND dead_letter_id = $2
+)::boolean;
 
 -- name: ListDrillRootDeadLetters :many
 SELECT id FROM dead_letters
