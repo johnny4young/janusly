@@ -18,11 +18,12 @@ import (
 
 	"github.com/johnny4young/janusly/go/internal/audit"
 	"github.com/johnny4young/janusly/go/internal/cron"
+	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/engine"
 	"github.com/johnny4young/janusly/go/internal/store"
 )
 
-func autoHealingRunView(row store.AutoHealingRun) map[string]any {
+func autoHealingRunView(row store.AutoHealingRun, autonomy domain.TechnicalRecoveryAutonomyAssessment) map[string]any {
 	var patch any
 	_ = json.Unmarshal(row.ProposedPatchJson, &patch)
 	var metadata any
@@ -34,6 +35,7 @@ func autoHealingRunView(row store.AutoHealingRun) map[string]any {
 		"confidence":              row.Confidence.Int32,
 		"validationRunId":         textOrNull(row.ValidationRunID),
 		"validationEvidenceLevel": textOrNull(row.ValidationEvidenceLevel),
+		"autonomyAssessment":      autonomy,
 		"loopAttemptCount":        row.LoopAttemptCount,
 		"metadata":                metadata,
 		"createdAt":               isoMillis(row.CreatedAt), "updatedAt": isoMillis(row.UpdatedAt),
@@ -48,29 +50,41 @@ func (s *V1Server) mountAutoHealingRoutes(mux *http.ServeMux) {
 				limit = int32(parsed)
 			}
 		}
-		rows, err := store.New(s.pool).ListPendingAutoHealingRuns(r.Context(), store.ListPendingAutoHealingRunsParams{
+		q := store.New(s.pool)
+		rows, err := q.ListPendingAutoHealingRuns(r.Context(), store.ListPendingAutoHealingRunsParams{
 			OrgID: rc.orgID, Limit: limit,
 		})
 		if err != nil {
 			writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
+		assessments, err := assessAutoHealingRows(r.Context(), q, rc.orgID, rows)
+		if err != nil {
+			writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+			return
+		}
 		views := make([]map[string]any, 0, len(rows))
-		for _, row := range rows {
-			views = append(views, autoHealingRunView(row))
+		for index, row := range rows {
+			views = append(views, autoHealingRunView(row, assessments[index]))
 		}
 		writeLegacy(w, opOK(map[string]any{"rows": views}))
 	}))
 
 	mux.HandleFunc("GET /auto-healing/{id}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
-		row, err := store.New(s.pool).GetAutoHealingRun(r.Context(), store.GetAutoHealingRunParams{
+		q := store.New(s.pool)
+		row, err := q.GetAutoHealingRun(r.Context(), store.GetAutoHealingRunParams{
 			OrgID: rc.orgID, ID: r.PathValue("id"),
 		})
 		if err != nil {
 			writeLegacy(w, opError(http.StatusNotFound, "autoheal_not_found", "Not found", nil))
 			return
 		}
-		writeLegacy(w, opOK(map[string]any{"row": autoHealingRunView(row)}))
+		assessments, err := assessAutoHealingRows(r.Context(), q, rc.orgID, []store.AutoHealingRun{row})
+		if err != nil {
+			writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+			return
+		}
+		writeLegacy(w, opOK(map[string]any{"row": autoHealingRunView(row, assessments[0])}))
 	}))
 
 	mux.HandleFunc("POST /auto-healing/{id}/decide", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {

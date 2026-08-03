@@ -1162,6 +1162,80 @@ func (q *Queries) InsertSeededRunNode(ctx context.Context, arg InsertSeededRunNo
 	return err
 }
 
+const listAutoHealingAutonomyFacts = `-- name: ListAutoHealingAutonomyFacts :many
+WITH selected AS (
+  SELECT id, dead_letter_id, signature
+  FROM auto_healing_runs
+  WHERE org_id = $1
+    AND id = ANY($2::text[])
+), verified AS (
+  SELECT ahr.signature,
+         count(DISTINCT rie.dead_letter_id)::bigint AS prior_verified_recoveries
+  FROM auto_healing_runs ahr
+  JOIN recovery_impact_events rie
+    ON rie.org_id = ahr.org_id
+   AND rie.dead_letter_id = ahr.dead_letter_id
+  WHERE ahr.org_id = $1
+    AND ahr.status = 'applied'
+    AND ahr.signature IN (SELECT signature FROM selected)
+  GROUP BY ahr.signature
+)
+SELECT selected.id AS auto_healing_id,
+       (dl.id IS NOT NULL)::boolean AS context_found,
+       COALESCE(dl.workflow_json, '{}'::jsonb)::jsonb AS workflow_json,
+       COALESCE(dl.node_id, '')::text AS node_id,
+       COALESCE(dl.error_json, '{}'::jsonb)::jsonb AS error_json,
+       COALESCE(verified.prior_verified_recoveries, 0)::bigint AS prior_verified_recoveries
+FROM selected
+LEFT JOIN dead_letters dl
+  ON dl.org_id = $1
+ AND dl.id = selected.dead_letter_id
+LEFT JOIN verified ON verified.signature = selected.signature
+ORDER BY selected.id
+LIMIT 200
+`
+
+type ListAutoHealingAutonomyFactsParams struct {
+	OrgID string
+	Ids   []string
+}
+
+type ListAutoHealingAutonomyFactsRow struct {
+	AutoHealingID           string
+	ContextFound            bool
+	WorkflowJson            json.RawMessage
+	NodeID                  string
+	ErrorJson               json.RawMessage
+	PriorVerifiedRecoveries int64
+}
+
+func (q *Queries) ListAutoHealingAutonomyFacts(ctx context.Context, arg ListAutoHealingAutonomyFactsParams) ([]ListAutoHealingAutonomyFactsRow, error) {
+	rows, err := q.db.Query(ctx, listAutoHealingAutonomyFacts, arg.OrgID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAutoHealingAutonomyFactsRow
+	for rows.Next() {
+		var i ListAutoHealingAutonomyFactsRow
+		if err := rows.Scan(
+			&i.AutoHealingID,
+			&i.ContextFound,
+			&i.WorkflowJson,
+			&i.NodeID,
+			&i.ErrorJson,
+			&i.PriorVerifiedRecoveries,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listExternalRunSteps = `-- name: ListExternalRunSteps :many
 SELECT id, org_id, connection_id, external_workflow_id, external_run_id, external_step_id, name, status, attempt, started_at, completed_at, snapshot_json, evidence_json, last_sequence, last_event_id, last_observed_at, created_at, updated_at FROM external_run_steps
 WHERE org_id = $1

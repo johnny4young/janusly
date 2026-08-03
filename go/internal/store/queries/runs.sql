@@ -572,6 +572,38 @@ LIMIT $2;
 -- name: GetAutoHealingRun :one
 SELECT * FROM auto_healing_runs WHERE org_id = $1 AND id = $2;
 
+-- name: ListAutoHealingAutonomyFacts :many
+WITH selected AS (
+  SELECT id, dead_letter_id, signature
+  FROM auto_healing_runs
+  WHERE org_id = sqlc.arg(org_id)
+    AND id = ANY(sqlc.arg(ids)::text[])
+), verified AS (
+  SELECT ahr.signature,
+         count(DISTINCT rie.dead_letter_id)::bigint AS prior_verified_recoveries
+  FROM auto_healing_runs ahr
+  JOIN recovery_impact_events rie
+    ON rie.org_id = ahr.org_id
+   AND rie.dead_letter_id = ahr.dead_letter_id
+  WHERE ahr.org_id = sqlc.arg(org_id)
+    AND ahr.status = 'applied'
+    AND ahr.signature IN (SELECT signature FROM selected)
+  GROUP BY ahr.signature
+)
+SELECT selected.id AS auto_healing_id,
+       (dl.id IS NOT NULL)::boolean AS context_found,
+       COALESCE(dl.workflow_json, '{}'::jsonb)::jsonb AS workflow_json,
+       COALESCE(dl.node_id, '')::text AS node_id,
+       COALESCE(dl.error_json, '{}'::jsonb)::jsonb AS error_json,
+       COALESCE(verified.prior_verified_recoveries, 0)::bigint AS prior_verified_recoveries
+FROM selected
+LEFT JOIN dead_letters dl
+  ON dl.org_id = sqlc.arg(org_id)
+ AND dl.id = selected.dead_letter_id
+LEFT JOIN verified ON verified.signature = selected.signature
+ORDER BY selected.id
+LIMIT 200;
+
 -- name: DecideAutoHealingRun :execrows
 UPDATE auto_healing_runs
 SET status = $3, decision_actor = $4, decline_reason = $5, updated_at = now()

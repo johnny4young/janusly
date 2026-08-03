@@ -40,7 +40,7 @@ type RecoveryAutonomyProfile struct {
 	Level             *int                          `json:"level"`
 	Source            string                        `json:"source"`
 	DetectorIDs       []string                      `json:"detectorIds"`
-	UnavailableReason string                        `json:"unavailableReason,omitempty"`
+	UnavailableReason *string                       `json:"unavailableReason"`
 	Capabilities      RecoveryAutonomyCapabilitySet `json:"capabilities"`
 	Factors           []RecoveryAutonomyFactor      `json:"factors"`
 }
@@ -65,9 +65,13 @@ func autonomyProfile(level *int, source string, detectorIds []string, unavailabl
 	}
 	ids := make([]string, len(detectorIds))
 	copy(ids, detectorIds)
+	var unavailable *string
+	if unavailableReason != "" {
+		unavailable = new(unavailableReason)
+	}
 	return RecoveryAutonomyProfile{
 		Level: level, Source: source, DetectorIDs: ids,
-		UnavailableReason: unavailableReason,
+		UnavailableReason: unavailable,
 		Capabilities: RecoveryAutonomyCapabilitySet{
 			Observe: enabled(0), Recommend: enabled(1), Validate: enabled(2),
 			ApplyWithApproval: enabled(3), AutonomousApply: enabled(4),
@@ -135,7 +139,10 @@ func CombineRecoveryAutonomyProfiles(profiles []RecoveryAutonomyProfile) Recover
 	}
 	for _, item := range profiles {
 		if item.Level == nil {
-			reason := item.UnavailableReason
+			reason := "failure_policy_missing"
+			if item.UnavailableReason != nil {
+				reason = *item.UnavailableReason
+			}
 			if reason == "" {
 				reason = "failure_policy_missing"
 			}

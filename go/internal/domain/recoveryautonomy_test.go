@@ -65,7 +65,7 @@ func TestResolveRecoveryAutonomyProfile(t *testing.T) {
 	missing := ResolveRecoveryAutonomyProfile(autonomyContract(3, nil),
 		RecoveryFailureClass{Kind: "semantic", DetectorID: "missing"})
 	if missing.Level != nil || missing.Source != "unavailable" ||
-		missing.UnavailableReason != "failure_policy_missing" ||
+		missing.UnavailableReason == nil || *missing.UnavailableReason != "failure_policy_missing" ||
 		missing.Capabilities.ApplyWithApproval || missing.Capabilities.AutonomousApply {
 		t.Fatalf("fail closed: %+v", missing)
 	}
@@ -87,7 +87,7 @@ func TestResolveRecoveryAutonomyProfile(t *testing.T) {
 	// No contract at all → unavailable, contract_missing.
 	none := ResolveRecoveryAutonomyProfile(nil,
 		RecoveryFailureClass{Kind: "semantic", DetectorID: "d"})
-	if none.Level != nil || none.UnavailableReason != "contract_missing" {
+	if none.Level != nil || none.UnavailableReason == nil || *none.UnavailableReason != "contract_missing" {
 		t.Fatalf("missing contract: %+v", none)
 	}
 
@@ -98,7 +98,7 @@ func TestResolveRecoveryAutonomyProfile(t *testing.T) {
 	v1.Failure.Semantic = RecoverySemanticFailure{Mode: "disabled"}
 	semanticV1 := ResolveRecoveryAutonomyProfile(v1,
 		RecoveryFailureClass{Kind: "semantic", DetectorID: "approved-answer"})
-	if semanticV1.Level != nil || semanticV1.UnavailableReason != "failure_policy_missing" {
+	if semanticV1.Level != nil || semanticV1.UnavailableReason == nil || *semanticV1.UnavailableReason != "failure_policy_missing" {
 		t.Fatalf("v1 semantic must fail closed: %+v", semanticV1)
 	}
 	technicalV1 := ResolveRecoveryAutonomyProfile(v1,
