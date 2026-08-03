@@ -41,6 +41,7 @@ const SEEDED_RUN_IDS = [
   "concurrent",
   "recovery-failed",
   "recovery-succeeded",
+  "recovery-drill",
   "stale-generation",
 ].map((suffix) => `${RUN_TAG}-${suffix}`);
 
@@ -62,12 +63,18 @@ async function waitForBlockedRunNodeUpdate(): Promise<void> {
   throw new Error("Replay claim did not reach the blocked run_nodes update");
 }
 
-async function seedRun(runId: string, runStatus: string, nodeStatus: string): Promise<void> {
+async function seedRun(
+  runId: string,
+  runStatus: string,
+  nodeStatus: string,
+  replayMode?: "validation",
+): Promise<void> {
   await db.insert(runs).values({
     id: runId,
     orgId: ORG,
     workflowVersionId: `${runId}-wfv`,
     status: runStatus,
+    ...(replayMode ? { replayMode } : {}),
   });
   await db.insert(runNodes).values({
     id: `${runId}-n`,
@@ -335,6 +342,42 @@ describe("claimReplayTransition (real Postgres)", () => {
       successClaim.recoveryClaimToken,
     )).toBe(false);
     await expect(queryRecoveryLedger(ORG)).resolves.toMatchObject({ totalRecovered: baseline.totalRecovered + 1 });
+  });
+
+  it("records drill evidence without crediting production recovery metrics", async () => {
+    const baseline = await queryRecoveryLedger(ORG);
+    const runId = `${RUN_TAG}-recovery-drill`;
+    await seedRun(runId, "failed", "failed", "validation");
+    const deadLetterId = await seedDlq(runId, "drill-dlq", 90_000);
+
+    const claim = await claimReplayTransition(runId, "n1", {
+      deadLetterId,
+      recoveryActorId: "operator-drill",
+    });
+    expect(await claimNodeForExecution(
+      runId,
+      "n1",
+      1,
+      claim.recoveryClaimToken,
+      claim.publicationGeneration,
+    )).toBe("claimed");
+    expect(await markNodeSucceededWithEvent(
+      runId,
+      "n1",
+      { ok: true },
+      1,
+      claim.recoveryClaimToken,
+    )).toBe(true);
+
+    await expect(
+      db.select().from(recoveryImpactEvents).where(eq(recoveryImpactEvents.deadLetterId, deadLetterId)),
+    ).resolves.toHaveLength(1);
+    await expect(queryRecoveryLedger(ORG)).resolves.toEqual(baseline);
+    await expect(queryOperatorRecoveryCount(
+      ORG,
+      "operator-drill",
+      new Date(Date.now() - 86_400_000),
+    )).resolves.toBe(0);
   });
 
   it("rejects a stale worker after the reaper and a newer replay generation", async () => {

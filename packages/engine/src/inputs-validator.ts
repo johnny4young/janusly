@@ -14,7 +14,7 @@
  *   The grammar is small enough that a 100kB validator dependency would be
  *   the wrong trade.
  * - The grammar must stay in lockstep with `WorkflowInputSchema` in
- *   `packages/shared/src/workflow.ts`. Adding a new primitive type means
+ *   `packages/shared/src/value-schema.ts`. Adding a new primitive type means
  *   adding a branch to both files.
  */
 
@@ -26,7 +26,7 @@ export type InputsValidationResult = { valid: true } | { valid: false; errors: s
 /**
  * Thrown by `startRun` when a workflow declared `inputs` and the run-start
  * payload doesn't satisfy the shape. The `POST /start` route handler in
- * `apps/api/src/routes/runs-routes.ts` catches and returns 400 with the
+ * `apps/api/src/routes/run-routes/lifecycle.ts` catches and returns 400 with the
  * error list.
  */
 export class WorkflowInputValidationError extends Error {

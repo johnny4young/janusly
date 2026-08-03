@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1
 
-FROM node:24-alpine AS build
+FROM node:24.18.0-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS build
 
 WORKDIR /app
 
-RUN corepack enable
+RUN npm install --global pnpm@11.17.0
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY apps/web/package.json apps/web/package.json
@@ -33,7 +33,7 @@ ENV JANUSLY_BUILD_ID=$JANUSLY_BUILD_ID
 
 RUN pnpm --filter @janusly/web build
 
-FROM node:24-alpine AS runtime
+FROM node:24.18.0-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS runtime
 
 WORKDIR /app
 

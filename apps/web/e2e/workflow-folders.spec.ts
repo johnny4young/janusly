@@ -51,7 +51,7 @@ test('Flows list groups by folder and persists a collapsed section across reload
 
   await page.goto('/')
   await expect(page.getByText('dev-user')).toBeVisible()
-  await page.getByRole('button', { name: 'Flows' }).click()
+  await page.getByRole('button', { name: 'Workflows', exact: true }).click()
   await page.getByRole('button', { name: 'Refresh' }).click()
 
   const sectionA = page.locator(`[data-testid="workflows-folder-${folderA}"]`)
@@ -80,7 +80,7 @@ test('Flows list groups by folder and persists a collapsed section across reload
     return raw ? (JSON.parse(raw) as { collapsedFolders?: string[] }).collapsedFolders ?? [] : []
   })).toContain(folderA)
   await expect(page.getByText('dev-user')).toBeVisible()
-  await page.getByRole('button', { name: 'Flows' }).click()
+  await page.getByRole('button', { name: 'Workflows', exact: true }).click()
   await expect(sectionA).toHaveJSProperty('open', false)
   await page.getByRole('button', { name: 'Refresh' }).click()
   await expect(sectionA).toBeVisible()
@@ -103,7 +103,7 @@ test('Flows list folder filter narrows the list server-side and clears back to a
 
   await page.goto('/')
   await expect(page.getByText('dev-user')).toBeVisible()
-  await page.getByRole('button', { name: 'Flows' }).click()
+  await page.getByRole('button', { name: 'Workflows', exact: true }).click()
   await page.getByRole('button', { name: 'Refresh' }).click()
 
   const aRow = page.locator(`[data-testid="workflows-row-${aId}"]`)
@@ -136,7 +136,7 @@ test('Flows list drag-to-folder reassigns a workflow by dropping its row on a fo
 
   await page.goto('/')
   await expect(page.getByText('dev-user')).toBeVisible()
-  await page.getByRole('button', { name: 'Flows' }).click()
+  await page.getByRole('button', { name: 'Workflows', exact: true }).click()
   await page.getByRole('button', { name: 'Refresh' }).click()
 
   const sectionA = page.locator(`[data-testid="workflows-folder-${folderA}"]`)

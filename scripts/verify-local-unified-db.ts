@@ -9,11 +9,25 @@
 import { client } from "@janusly/db";
 
 const expectEmpty = process.argv.includes("--expect-empty");
+const expectOnboarding = process.argv.includes("--expect-onboarding");
+
+if (expectEmpty && expectOnboarding) {
+  throw new Error("choose only one database expectation");
+}
 
 type TopologyRow = {
   database_name: string;
   auth_users_table: string | null;
   janusly_workflows_table: string | null;
+};
+
+type CountsRow = {
+  auth_users: number;
+  janusly_users: number;
+  organizations: number;
+  workflows: number;
+  credentials: number;
+  org_configs: number;
 };
 
 async function main(): Promise<void> {
@@ -28,15 +42,8 @@ async function main(): Promise<void> {
     throw new Error("unified database is missing auth.users or public.workflows");
   }
 
-  if (expectEmpty) {
-    type CountsRow = {
-      auth_users: number;
-      janusly_users: number;
-      organizations: number;
-      workflows: number;
-      credentials: number;
-      org_configs: number;
-    };
+  let verifiedCounts: CountsRow | null = null;
+  if (expectEmpty || expectOnboarding) {
     const [counts] = await client<CountsRow[]>`
       SELECT
         (SELECT count(*)::int FROM auth.users) AS auth_users,
@@ -46,9 +53,32 @@ async function main(): Promise<void> {
         (SELECT count(*)::int FROM public.credentials) AS credentials,
         (SELECT count(*)::int FROM public.org_configs) AS org_configs
     `;
-    if (!counts || Object.values(counts).some((count) => count !== 0)) {
-      throw new Error(`expected an empty manual-start database, received ${JSON.stringify(counts)}`);
+    const expected = expectEmpty
+      ? {
+          auth_users: 0,
+          janusly_users: 0,
+          organizations: 0,
+          workflows: 0,
+          credentials: 0,
+          org_configs: 0,
+        }
+      : {
+          auth_users: 1,
+          janusly_users: 0,
+          organizations: 0,
+          workflows: 0,
+          credentials: 0,
+          org_configs: 0,
+        };
+    if (
+      !counts
+      || Object.entries(expected).some(([key, value]) => counts[key as keyof CountsRow] !== value)
+    ) {
+      throw new Error(
+        `expected ${expectEmpty ? "an empty manual-start database" : "one onboarding identity without tenant data"}, received ${JSON.stringify(counts)}`,
+      );
     }
+    verifiedCounts = counts;
   }
 
   console.log(JSON.stringify({
@@ -56,6 +86,8 @@ async function main(): Promise<void> {
     database: topology.database_name,
     schemas: ["auth", "public"],
     empty: expectEmpty,
+    onboarding: expectOnboarding,
+    counts: verifiedCounts,
   }));
 }
 

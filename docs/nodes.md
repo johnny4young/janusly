@@ -2,7 +2,7 @@
 
 Every workflow is a DAG of `nodes` connected by `edges`. Each node has an `id`, a `type` (one of the supported types below), and a `config` object validated by the engine.
 
-The runtime supports the full closed node set from `packages/shared/src/workflow.ts`: `http`, `condition`, `tool`, `agent`, `multi_agent`, `agent_reflection`, `loop`, `router`, `router_llm`, `transform`, `ai`, `webhook`, `approval`, `human_form`, `noop`, `subworkflow`, `wait_until`, `parallel_fork`, `join`, `schedule`, `mcp_tool`, `webhook_received`, `email_received`, `file_dropped`, and `mcp_server_event`. `/ai/generate-workflow` emits only the smaller AI-generation subset; Pass 2 auto-promotes wired placeholder families (`wait_until`, `schedule`, and uniquely matched exposed `mcp_tool` noops), while operators promote the remaining advanced runtime nodes in the Inspector or by editing the workflow JSON.
+The runtime supports the full closed node set from `packages/shared/src/workflow.ts`: `http`, `condition`, `tool`, `agent`, `multi_agent`, `agent_reflection`, `loop`, `router`, `router_llm`, `transform`, `ai`, `webhook`, `approval`, `human_form`, `noop`, `subworkflow`, `wait_until`, `parallel_fork`, `join`, `schedule`, `mcp_tool`, `webhook_received`, `email_received`, `file_dropped`, `mcp_server_event`, and `pagerduty_incident`. `/ai/generate-workflow` emits only the smaller AI-generation subset; Pass 2 auto-promotes wired placeholder families (`wait_until`, `schedule`, and uniquely matched exposed `mcp_tool` noops), while operators promote the remaining advanced runtime nodes in the Inspector or by editing the workflow JSON.
 
 Templating is supported in any string config value via `{{...}}`:
 
@@ -137,6 +137,14 @@ Supported operators: `===`, `!==`, `==`, `!=`, `>`, `<`, `>=`, `<=`, `contains`,
 - `matches` is a bounded whole-string glob match: `*` matches any run of characters and `?` matches one character. Patterns are capped at 256 characters and values at 16,384 characters; it is intentionally not a regular-expression engine.
 - `in` checks whether the left value is a member of an array path or literal, for example `'billing' in context.input.tags`.
 - Ordered comparisons are numeric for two numbers and lexicographic for two strings, so equal-width ISO 8601 timestamps compare naturally. A number paired with a numeric string preserves the legacy numeric coercion; incompatible runtime values remain non-fatal and evaluate `false`, while statically invalid literal/operator combinations are rejected during validation.
+
+In the workflow Inspector, **Match one rule** configures the common
+path-versus-literal case without requiring expression syntax. It offers only
+declared workflow inputs and outputs from steps that can reach the rule.
+Condition nodes and conditional edges use the same editor. Choose
+**Use an advanced expression** for `&&`, `||`, list membership, parentheses, or
+other composed rules; Janusly preserves an existing advanced expression
+exactly instead of simplifying it.
 
 ```jsonc
 {
@@ -559,17 +567,19 @@ Invokes a tool from an org-registered external MCP connection. The connection an
 
 ## Event-driven triggers
 
-`webhook_received`, `email_received`, `file_dropped`, and `mcp_server_event` are passthrough
-trigger nodes. The executor never talks to SMTP, a bucket, or an MCP server;
-the API ingestion seam owns all external I/O. Ingestion routes normalize the
-payload, write a `trigger_events` row, apply a per-trigger storm guard, and
-start a run with the normalized event under `input.event`. Replay uses the
-stored payload from that structured event row.
+`webhook_received`, `email_received`, `file_dropped`, `mcp_server_event`, and
+`pagerduty_incident` are passthrough trigger nodes. The executor never talks to
+SMTP, a bucket, MCP, or PagerDuty; the API ingestion seam owns all external
+I/O. Ingestion routes normalize the payload, write a `trigger_events` row,
+apply a per-trigger storm guard, and start a run with the normalized event
+under `input.event`. Replay uses the stored payload from that structured event
+row.
 
 - `POST /triggers/webhook/ingest` matches `webhook_received.config.endpointKey`; callers must supply a stable `eventId`, and retries converge on one run.
 - `POST /triggers/email/ingest` matches `email_received.config.aliasKey`, then enforces DKIM and optional `fromDomains`.
 - `POST /triggers/file/ingest` matches `file_dropped.config.bucket` plus optional `prefix` / `extensions`.
 - `POST /triggers/mcp/ingest` matches `mcp_server_event.config.connectionAlias`, `resourceUri`, and optional `eventTypes`.
+- `POST /webhooks/pagerduty/:workflowId/:nodeId` selects a `pagerduty_incident` node and verifies the exact raw PagerDuty V3 payload with the tenant credential named by `config.webhookCredential` before durable ingestion.
 - `POST /triggers/events/:id/replay` replays a stored event against the current latest workflow version.
 
 Inbound selectors must be unique among active workflows in an organization. A
@@ -623,6 +633,17 @@ that path the trigger output carries an empty `event` object.
     "connectionAlias": "notion",
     "resourceUri": "notion://database/customer-tasks",
     "eventTypes": ["notifications/resources/updated"]
+  }
+}
+```
+
+```jsonc
+{
+  "id": "pagerduty_alert",
+  "type": "pagerduty_incident",
+  "config": {
+    "webhookCredential": "pagerduty-webhook",
+    "rateLimitPerMin": 60
   }
 }
 ```

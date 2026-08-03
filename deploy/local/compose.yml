@@ -25,6 +25,8 @@ x-app-environment: &app-environment
   ALLOW_PRIVATE_HTTP_TARGETS: "true"
   JANUSLY_LLM_PROVIDER: anthropic
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-https://api.anthropic.com/v1}
+  JANUSLY_LLM_SIMULATED_PROVIDERS: ${JANUSLY_LLM_SIMULATED_PROVIDERS:-}
   OLLAMA_BASE_URL: http://ollama:11434
   JANUSLY_MEMORY_ENABLED: ${JANUSLY_MEMORY_ENABLED:-false}
   JANUSLY_EMBEDDING_PROVIDER: ${JANUSLY_EMBEDDING_PROVIDER:-ollama}
@@ -39,7 +41,7 @@ services:
     volumes:
       - redis_data:/data
     ports:
-      - "127.0.0.1:${JANUSLY_LOCAL_REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${JANUSLY_LOCAL_REDIS_PORT:-16379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

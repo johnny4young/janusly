@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api'
 import { initI18n } from '../i18n'
+import type { ToolSchema } from '../types'
 
 vi.mock('../api', () => ({
   api: vi.fn(),
@@ -41,6 +42,30 @@ describe('<QuickConfigEditor /> resilience wiring', () => {
     expect(screen.getByTestId('resilience-fieldset')).toBeInTheDocument()
   })
 
+  it('routes condition nodes through the guided branch-rule editor', () => {
+    const onUpdate = vi.fn()
+    render(
+      <QuickConfigEditor
+        nodeId="gate"
+        type="condition"
+        config={{ expression: 'context.fetch.output.ok === true' }}
+        tools={[]}
+        workflowNodes={[
+          { id: 'fetch', position: { x: 0, y: 0 }, data: { label: 'Fetch order', type: 'http', config: {} } },
+          { id: 'gate', position: { x: 100, y: 0 }, data: { label: 'Check order', type: 'condition', config: {} } },
+        ]}
+        workflowEdges={[{ id: 'fetch-gate', source: 'fetch', target: 'gate', data: {} }]}
+        onUpdate={onUpdate}
+      />,
+    )
+
+    expect(screen.getByLabelText('Run rule')).toBeVisible()
+    fireEvent.change(screen.getByLabelText('Condition'), { target: { value: '!==' } })
+    expect(onUpdate).toHaveBeenLastCalledWith({
+      expression: 'context.fetch.output.ok !== true',
+    })
+  })
+
   it('merges a resilience edit into the current node config', () => {
     const onUpdate = vi.fn()
     render(
@@ -54,6 +79,7 @@ describe('<QuickConfigEditor /> resilience wiring', () => {
       />,
     )
 
+    fireEvent.click(screen.getByTestId('resilience-disclosure').querySelector('summary')!)
     const retryAttempts = screen.getByLabelText('Retry attempts')
     fireEvent.change(retryAttempts, { target: { value: '3' } })
     fireEvent.blur(retryAttempts)
@@ -90,21 +116,134 @@ describe('<QuickConfigEditor /> resilience wiring', () => {
           description: 'Parse a JSON string into its native object, array, or primitive value.',
           descriptionCode: 'json-parse',
           required: ['value'],
+          inputFields: [{ name: 'value', kind: 'string', required: true }],
+          writeSide: false,
         }]}
         onUpdate={vi.fn()}
       />,
     )
     expect(screen.getByText('Interpreta una cadena JSON como su objeto, arreglo o valor primitivo nativo.')).toBeInTheDocument()
   })
+
+  it('authors a complete HTTP request without advanced JSON', () => {
+    const onUpdate = vi.fn()
+    render(
+      <QuickConfigEditor
+        {...emptyWorkflowGraph}
+        nodeId="create-order"
+        type="http"
+        config={{
+          method: 'POST',
+          url: 'https://api.example.com/orders',
+        }}
+        tools={[]}
+        onUpdate={onUpdate}
+      />,
+    )
+
+    expect(screen.getByLabelText('HTTP method')).toHaveValue('POST')
+    expect(screen.getByLabelText('Request URL')).toHaveValue('https://api.example.com/orders')
+    expect(screen.getByLabelText('JSON body')).toHaveValue('')
+
+    fireEvent.change(screen.getByLabelText('JSON body'), {
+      target: { value: '{\n  "orderId": "ord_42"\n}' },
+    })
+    fireEvent.blur(screen.getByLabelText('JSON body'))
+    expect(onUpdate).toHaveBeenLastCalledWith({
+      method: 'POST',
+      url: 'https://api.example.com/orders',
+      body: { orderId: 'ord_42' },
+    })
+
+    fireEvent.click(screen.getByText('Request & response options'))
+    const headers = screen.getByLabelText('Headers (JSON)')
+    fireEvent.change(headers, {
+      target: { value: '{\n  "Content-Type": "application/json"\n}' },
+    })
+    fireEvent.blur(headers)
+    expect(onUpdate).toHaveBeenLastCalledWith({
+      method: 'POST',
+      url: 'https://api.example.com/orders',
+      headers: { 'Content-Type': 'application/json' },
+    })
+  })
+
+  it('configures bounded streaming and removes stream-only keys when buffering', () => {
+    const onUpdate = vi.fn()
+    const view = render(
+      <QuickConfigEditor
+        {...emptyWorkflowGraph}
+        nodeId="download-report"
+        type="http"
+        config={{
+          method: 'GET',
+          url: 'https://api.example.com/report.csv',
+          bodyMode: 'stream',
+          streamPreviewBytes: 32768,
+        }}
+        tools={[]}
+        onUpdate={onUpdate}
+      />,
+    )
+
+    expect(screen.getByTestId('http-options')).toHaveAttribute('open')
+    expect(screen.getByLabelText('Response handling')).toHaveValue('stream')
+    expect(screen.getByLabelText('Preview bytes')).toHaveValue(32768)
+
+    fireEvent.change(screen.getByLabelText('Response handling'), {
+      target: { value: 'buffer' },
+    })
+    expect(onUpdate).toHaveBeenLastCalledWith({
+      method: 'GET',
+      url: 'https://api.example.com/report.csv',
+    })
+
+    view.rerender(
+      <QuickConfigEditor
+        {...emptyWorkflowGraph}
+        nodeId="download-report"
+        type="http"
+        config={{ method: 'GET', url: 'https://api.example.com/report.csv' }}
+        tools={[]}
+        onUpdate={onUpdate}
+      />,
+    )
+    expect(screen.queryByLabelText('JSON body')).toBeNull()
+  })
+
+  it('keeps malformed Spanish headers local until valid JSON is committed', () => {
+    initI18n('es')
+    const onUpdate = vi.fn()
+    render(
+      <QuickConfigEditor
+        {...emptyWorkflowGraph}
+        nodeId="fetch"
+        type="http"
+        config={{ url: 'https://api.example.com' }}
+        tools={[]}
+        onUpdate={onUpdate}
+      />,
+    )
+
+    fireEvent.click(screen.getByText('Opciones de petición y respuesta'))
+    const headers = screen.getByLabelText('Cabeceras (JSON)')
+    fireEvent.change(headers, { target: { value: '{' } })
+    fireEvent.blur(headers)
+
+    expect(screen.getByText('El valor debe ser JSON válido')).toBeInTheDocument()
+    expect(onUpdate).not.toHaveBeenCalled()
+  })
 })
 
 describe('<QuickConfigEditor /> bounded per-item processing', () => {
-  const tools = [{
+  const tools: ToolSchema[] = [{
     name: 'text.uppercase',
     description: 'Convert text to uppercase.',
     descriptionCode: 'text-uppercase',
     required: ['value'],
     inputExample: { value: 'hello' },
+    inputFields: [{ name: 'value', kind: 'string', required: true }],
+    writeSide: false,
   }]
 
   it('keeps the legacy mapping editor as the default loop mode', () => {

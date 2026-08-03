@@ -3,7 +3,7 @@
  *   POST /recovery/items/:id/evidence?format=json|markdown
  *   POST /recovery/items/:id/evidence/deliver
  *
- * Coverage targets (the ticket AC):
+ * Coverage guarantees:
  * - Tenant scope: the resolver is called with `auth.orgId`; a null bundle
  *   (cross-org / missing item) returns a uniform 404, no enumeration.
  * - The `report.evidence.exported` audit row is written on a successful

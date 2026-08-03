@@ -133,10 +133,15 @@ export type AuditAction =
   | "recovery.item.commented"
   // recovery feedback
   | "recovery.feedback"
+  | "recovery.semantic_resolved"
   // eval datasets (built from opted-in accepted recovery feedback)
   | "eval.dataset.created"
   | "eval.dataset.deleted"
   | "eval.dataset.exported"
+  // external runtime observer connections
+  | "external_runtime.connection.created"
+  | "external_runtime.connection.updated"
+  | "external_runtime.connection.deleted"
   // prompt/model experiments (A/B control-vs-candidate against an eval dataset)
   | "experiment.run.started"
   | "experiment.run.completed"
@@ -197,6 +202,7 @@ export type AuditAction =
   | "workflow.rollout.started"
   | "workflow.rollout.promoted"
   | "workflow.rollout.rolled_back"
+  | "workflow.recovery_qualification.recorded"
   | "workflow.slo.set"
   | "workflow.deleted"
   | "workflow.restored"

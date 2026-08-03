@@ -86,6 +86,8 @@ export async function runStalledNodeDrill(
       status: "running",
       createdBy: input.createdBy ?? null,
       inputJson: safePersistPayload({ workflow: input.workflow, input: {}, drill }),
+      replayMode: "validation",
+      validationEvidenceLevel: "static",
       createdAt: stalledAt,
     });
     await tx.insert(runNodes).values({
@@ -128,8 +130,8 @@ export async function runStalledNodeDrill(
     || result.deadLettered !== 1
     || !deadLetterId
   ) {
-    // The seed remains a legitimate stale row for the periodic production
-    // sweep; never delete a possibly committed terminal result on ambiguity.
+    // Keep the scoped seed for inspection; deleting it could erase a terminal
+    // result that committed before an ambiguous process or database failure.
     throw new Error(
       `stalled-node drill did not complete: scanned=${result.scanned} `
       + `reaped=${result.reaped} deadLettered=${result.deadLettered}`,

@@ -29,7 +29,7 @@ export type RecoveryDrillProvenance = {
   kind: "solution_pack_drill";
   packId: string;
   fixtureId: string;
-  recoveryPath: "direct_failure" | "stalled_node_reaper";
+  recoveryPath: "direct_failure" | "runtime_failure" | "stalled_node_reaper";
 };
 
 const DRILL_PROVENANCE_TEXT_MAX = 128;
@@ -57,7 +57,11 @@ export function parseRecoveryDrillProvenance(inputJson: unknown): RecoveryDrillP
     candidate.kind !== "solution_pack_drill"
     || !packId
     || !fixtureId
-    || (recoveryPath !== "direct_failure" && recoveryPath !== "stalled_node_reaper")
+    || (
+      recoveryPath !== "direct_failure"
+      && recoveryPath !== "runtime_failure"
+      && recoveryPath !== "stalled_node_reaper"
+    )
   ) {
     return null;
   }
@@ -489,15 +493,39 @@ export async function getRecoveryDrillProvenance(
   return parseRecoveryDrillProvenance(rows[0]?.inputJson);
 }
 
-/** Flip status to `replayed` and stamp `replayedAt`. Called after re-enqueue. */
-export async function markDeadLetterReplayed(orgId: string, id: string) {
-  await db.update(deadLetters)
+/**
+ * Flip status to `replayed` and stamp `replayedAt`. When an expected receipt
+ * is supplied, completion is idempotent for that exact replay claim and never
+ * overwrites a concurrent manual resolution.
+ */
+export async function markDeadLetterReplayed(
+  orgId: string,
+  id: string,
+  expectedReplayClaimToken?: string,
+): Promise<boolean> {
+  const predicates = [
+    eq(deadLetters.id, id),
+    eq(deadLetters.orgId, orgId),
+  ];
+  if (expectedReplayClaimToken) {
+    predicates.push(
+      eq(deadLetters.replayClaimToken, expectedReplayClaimToken),
+      or(
+        eq(deadLetters.status, "open"),
+        eq(deadLetters.status, "replayed"),
+      )!,
+    );
+  }
+  const updated = await db.update(deadLetters)
     .set({ status: "replayed", replayedAt: new Date() })
-    .where(and(eq(deadLetters.id, id), eq(deadLetters.orgId, orgId)));
+    .where(and(...predicates))
+    .returning({ id: deadLetters.id });
+  if (updated.length === 0) return false;
   // The org's recovery metrics just changed — drop the cached rollup so the
   // dashboard reflects the replay immediately instead of after the TTL.
   invalidateRecoveryMetricsCache(orgId);
   publishCacheInvalidation({ kind: "recovery-metrics", orgId });
+  return true;
 }
 
 /** Flip status to `resolved` (closed without replay). */

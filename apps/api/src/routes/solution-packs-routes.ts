@@ -39,6 +39,7 @@ import { getCredentialByName, listOrgConfig } from "@janusly/data";
 import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
 import { startSandboxRun } from "@janusly/engine/src/adapters/sandbox-run";
 import { injectSampleFailure } from "@janusly/engine/src/adapters/sample-failure";
+import { runRuntimeFailureDrill } from "@janusly/engine/src/adapters/runtime-failure-drill";
 import { runStalledNodeDrill } from "@janusly/engine/src/adapters/stalled-node-drill";
 import { WorkflowSchema } from "@janusly/shared";
 
@@ -114,6 +115,50 @@ async function computeMissingDeps(
   return { missingCredentials, missingOrgConfigs };
 }
 
+async function executeRecoveryDrill(input: {
+  orgId: string;
+  createdBy: string | null;
+  pack: SolutionPack;
+  fixture: SolutionPack["failureFixtures"][number];
+}) {
+  const { orgId, createdBy, pack, fixture } = input;
+  const sourceBase = {
+    kind: "solution_pack_drill" as const,
+    packId: pack.id,
+    fixtureId: fixture.id,
+    failureMode: fixture.failureMode,
+  };
+
+  switch (fixture.recoveryPath) {
+    case "runtime_failure":
+      return runRuntimeFailureDrill({
+        orgId,
+        createdBy,
+        workflow: pack.workflowJson,
+        failedNodeId: fixture.failedNodeId,
+        input: pack.samplePayloads[0]?.input ?? {},
+        source: { ...sourceBase, recoveryPath: "runtime_failure" },
+      });
+    case "stalled_node_reaper":
+      return runStalledNodeDrill({
+        orgId,
+        createdBy,
+        workflow: pack.workflowJson,
+        failedNodeId: fixture.failedNodeId,
+        source: { ...sourceBase, recoveryPath: "stalled_node_reaper" },
+      });
+    case "direct_failure":
+      return injectSampleFailure({
+        orgId,
+        createdBy,
+        workflow: pack.workflowJson,
+        failedNodeId: fixture.failedNodeId,
+        errorJson: fixture.errorJson,
+        source: { ...sourceBase, recoveryPath: "direct_failure" },
+      });
+  }
+}
+
 export const solutionPacksRoutes: Route[] = [
   // Two-segment action routes MUST precede the bare `/solution-packs/:id`
   // matcher so the first-match-wins dispatcher doesn't treat the action as
@@ -181,28 +226,12 @@ export const solutionPacksRoutes: Route[] = [
         return sendError(res, "pack_no_failure_fixture", "No matching failure fixture for this pack", 400);
       }
 
-      const sourceBase = {
-        kind: "solution_pack_drill" as const,
-        packId: pack.id,
-        fixtureId: fixture.id,
-        failureMode: fixture.failureMode,
-      };
-      const result = fixture.recoveryPath === "stalled_node_reaper"
-        ? await runStalledNodeDrill({
-            orgId: auth.orgId,
-            createdBy: auth.userId,
-            workflow: pack.workflowJson,
-            failedNodeId: fixture.failedNodeId,
-            source: { ...sourceBase, recoveryPath: "stalled_node_reaper" },
-          })
-        : await injectSampleFailure({
-            orgId: auth.orgId,
-            createdBy: auth.userId,
-            workflow: pack.workflowJson,
-            failedNodeId: fixture.failedNodeId,
-            errorJson: fixture.errorJson,
-            source: { ...sourceBase, recoveryPath: "direct_failure" },
-          });
+      const result = await executeRecoveryDrill({
+        orgId: auth.orgId,
+        createdBy: auth.userId,
+        pack,
+        fixture,
+      });
       const { runId, deadLetterId } = result;
       const evidence = "evidence" in result ? result.evidence : undefined;
 

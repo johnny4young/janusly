@@ -39,6 +39,15 @@ to `runs.inputJson.input`, so a run record shows the configuration it actually
 used even after the workflow's defaults later change. A supplied value always
 wins, including an explicit `null` or `false`.
 
+In the web app, pressing **Run** opens a generated form when `inputs` is
+declared. Schema keys remain the runtime contract and are never rewritten, but
+the form displays readable labels, places required fields first, shows
+required/optional state, and requires an explicit Yes/No choice for required
+booleans. Optional values without a default remain absent until supplied;
+declared defaults are prefilled and still revalidated by `startRun`. API
+clients send the original keys in
+`{ "workflow": <dag>, "input": <payload> }`.
+
 Defaults are also what make declared inputs usable at all on a trigger-driven
 workflow: a webhook or schedule run supplies `{ triggeredBy, event, … }` and
 never the declared fields, so a required input without a default would reject

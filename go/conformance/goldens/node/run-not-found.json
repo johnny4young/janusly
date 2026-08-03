@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/run?runId=ghost-run-id"
+  },
+  "status": 403,
+  "headers": {
+    "content-type": "application/json",
+    "x-request-id": "<present>"
+  },
+  "body": {
+    "apiVersion": "v1",
+    "requestId": "33cbaecc-cd21-4f4e-ac01-94ee01b949cb",
+    "error": {
+      "code": "runs_forbidden",
+      "message": "Forbidden"
+    }
+  }
+}

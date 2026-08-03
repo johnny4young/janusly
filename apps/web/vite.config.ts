@@ -1,8 +1,12 @@
 /// <reference types="vitest" />
 import { execFileSync } from 'node:child_process'
+import { availableParallelism } from 'node:os'
+import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { compactI18nCatalogs } from '../../scripts/compact-i18n-plugin.mjs'
+import { resolveWebTestWorkerLimit } from './vitest-worker-policy'
 
 /**
  * Real build stamp, computed once at config load: `<date>-<short-sha>`.
@@ -22,7 +26,13 @@ function buildId(): string {
 }
 
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    compactI18nCatalogs({
+      canonicalPath: resolve(import.meta.dirname, 'src/i18n/locales/en/common.json'),
+    }),
+    react(),
+    tailwindcss(),
+  ],
   define: {
     __BUILD_ID__: JSON.stringify(buildId()),
   },
@@ -35,9 +45,46 @@ export default defineConfig(({ mode }) => ({
     // shipped to the browser on the first cold load. Future error-tracking
     // sidecar can flip this to 'hidden' to emit .map files without inlining.
     sourcemap: mode !== 'production',
+    cssMinify: 'lightningcss',
     rollupOptions: {
       output: {
         manualChunks: (id) => {
+          if (
+            id.endsWith('/src/i18n/catalog-keys.ts')
+            || id.includes('janusly-catalog=keys')
+          ) {
+            return 'catalog-keys'
+          }
+          if (id.includes('/i18n/catalog-core-en') || id.includes('/i18n/catalog-workspace-en')) {
+            return 'catalog-en'
+          }
+          if (id.includes('/i18n/catalog-core-es') || id.includes('/i18n/catalog-workspace-es')) {
+            return 'catalog-es'
+          }
+          if (
+            id.endsWith('/src/App.tsx')
+            || id.endsWith('/src/AppWorkspace.tsx')
+            || id.includes('/src/hooks/app-command')
+            || id.includes('/src/hooks/useApp')
+            || id.endsWith('/src/hooks/useIdentityBootstrap.ts')
+            || id.endsWith('/src/hooks/useIntegrationCommands.ts')
+            || id.endsWith('/src/hooks/useRunCommands.ts')
+            || id.endsWith('/src/hooks/useWorkflowCommands.ts')
+            || id.endsWith('/src/components/RecoveryCenterPanel.tsx')
+            || id.endsWith('/src/components/RecoveryCenterView.tsx')
+          ) {
+            return 'app-workspace'
+          }
+          if (
+            id.endsWith('/src/components/RightPanel.tsx')
+            || id.endsWith('/src/components/WorkflowsDashboard.tsx')
+            || id.endsWith('/src/components/WorkflowsDashboardView.tsx')
+            || id.endsWith('/src/components/workflows-dashboard-model.ts')
+            || id.endsWith('/src/components/WorkflowOperationsPanel.tsx')
+            || id.endsWith('/src/components/input-display-label.ts')
+          ) {
+            return 'workflow-workspace'
+          }
           if (!id.includes('node_modules')) return undefined
           // `@xyflow/*` is reached ONLY through the dynamic `CanvasWorkspace`
           // import (nothing on the boot path imports an `@xyflow` value — the
@@ -61,6 +108,11 @@ export default defineConfig(({ mode }) => ({
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
     exclude: ['src/**/*.browser.test.{ts,tsx}', 'node_modules/**'],
+    // Each file owns a jsdom realm and may activate several lazy Vite imports.
+    // Keep file concurrency, but cap aggregate realm/import pressure so test
+    // deadlines measure component behavior rather than host scheduler delay.
+    fileParallelism: true,
+    maxWorkers: resolveWebTestWorkerLimit(availableParallelism()),
     css: true,
   },
 }))

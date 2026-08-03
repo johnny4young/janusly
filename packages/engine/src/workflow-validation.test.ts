@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { workflowVersionMax } from '@janusly/shared'
+import {
+  workflowVersionMax,
+  type RecoveryContractV2,
+} from '@janusly/shared'
 import { validateWorkflow } from './workflow-validation'
 
 describe('validateWorkflow', () => {
@@ -80,6 +83,224 @@ describe('validateWorkflow', () => {
     const codes = result.issues.map(issue => issue.code)
     expect(codes).toContain('cycle_detected')
     expect(codes).toContain('edge_invalid_to')
+  })
+
+  it('accepts a deterministic semantic detector that dominates every declared effect', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'answer', type: 'noop', config: {} },
+        { id: 'notify', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'answer', to: 'notify' }],
+      recovery: {
+        contract: semanticContract({
+          effects: [{
+            nodeId: 'notify',
+            kind: 'notification',
+            idempotency: 'required',
+            receipt: 'runtime',
+          }],
+        }),
+      },
+    })
+
+    expect(result).toEqual({ valid: true, issues: [] })
+  })
+
+  it('rejects semantic quarantine that can be bypassed before an effect', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'answer', type: 'noop', config: {} },
+        { id: 'other-root', type: 'noop', config: {} },
+        { id: 'notify', type: 'noop', config: {} },
+      ],
+      edges: [
+        { from: 'answer', to: 'notify' },
+        { from: 'other-root', to: 'notify' },
+      ],
+      recovery: {
+        contract: semanticContract({
+          effects: [{
+            nodeId: 'notify',
+            kind: 'notification',
+            idempotency: 'required',
+            receipt: 'runtime',
+          }],
+        }),
+      },
+    })
+
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'semantic_detector_does_not_guard_effect',
+      nodeId: 'notify',
+    }))
+  })
+
+  it('rejects invalid detectors and fixture expectations before save', () => {
+    const candidate = semanticContract()
+    candidate.failure.semantic.detectors[0] = {
+      id: 'acceptable-answer',
+      sourceNodeId: 'answer',
+      kind: 'expression',
+      passWhen: 'context.answer.output.(',
+      action: 'quarantine',
+      message: 'The answer must come from the configured model',
+    }
+    candidate.failure.semantic.evaluationFixtures = [
+      {
+        id: 'wrong-expectation',
+        sourceNodeId: 'answer',
+        output: { mode: 'fallback' },
+        expected: 'pass',
+      },
+      {
+        id: 'known-violation',
+        sourceNodeId: 'answer',
+        output: { mode: 'fallback' },
+        expected: 'violation',
+      },
+    ]
+    const result = validateWorkflow({
+      nodes: [{ id: 'answer', type: 'noop', config: {} }],
+      edges: [],
+      recovery: { contract: candidate },
+    })
+
+    expect(result.issues.map(issue => issue.code)).toEqual(expect.arrayContaining([
+      'semantic_detector_invalid_expression',
+      'semantic_fixture_mismatch',
+    ]))
+  })
+
+  it('requires every write-side node to be declared by a semantic contract', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'answer', type: 'noop', config: {} },
+        {
+          id: 'mutate',
+          type: 'http',
+          config: { method: 'POST', url: 'https://api.example.com/write' },
+        },
+      ],
+      edges: [{ from: 'answer', to: 'mutate' }],
+      recovery: { contract: semanticContract() },
+    })
+
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'semantic_effect_not_declared',
+      nodeId: 'mutate',
+    }))
+  })
+
+  it('rejects detector sources whose completion bypasses or conflicts with quarantine', () => {
+    const deferred = semanticContract()
+    deferred.failure.semantic.detectors[0] = {
+      id: 'acceptable-answer',
+      sourceNodeId: 'approval',
+      kind: 'expression',
+      passWhen: 'context.approval.output.approved === true',
+      action: 'quarantine',
+      message: 'The answer must come from the configured model',
+    }
+    deferred.failure.semantic.evaluationFixtures = [
+      {
+        id: 'approval-pass',
+        sourceNodeId: 'approval',
+        output: { approved: true },
+        expected: 'pass',
+      },
+      {
+        id: 'approval-fail',
+        sourceNodeId: 'approval',
+        output: { approved: false },
+        expected: 'violation',
+      },
+    ]
+    const deferredResult = validateWorkflow({
+      nodes: [{ id: 'approval', type: 'approval', config: {} }],
+      edges: [],
+      recovery: { contract: deferred },
+    })
+    expect(deferredResult.issues).toContainEqual(expect.objectContaining({
+      code: 'semantic_detector_deferred_source',
+      nodeId: 'approval',
+    }))
+
+    const router = semanticContract()
+    router.failure.semantic.detectors[0] = {
+      id: 'acceptable-answer',
+      sourceNodeId: 'route',
+      kind: 'expression',
+      passWhen: 'context.route.output.decision.chosenNodeId === "next"',
+      action: 'quarantine',
+      message: 'The answer must come from the configured model',
+    }
+    router.failure.semantic.evaluationFixtures = [
+      {
+        id: 'router-pass',
+        sourceNodeId: 'route',
+        output: { decision: { chosenNodeId: 'next' } },
+        expected: 'pass',
+      },
+      {
+        id: 'router-fail',
+        sourceNodeId: 'route',
+        output: { decision: { chosenNodeId: 'other' } },
+        expected: 'violation',
+      },
+    ]
+    const routerResult = validateWorkflow({
+      nodes: [
+        {
+          id: 'route',
+          type: 'router',
+          config: { candidates: [{ nodeId: 'next' }] },
+        },
+        { id: 'next', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'route', to: 'next' }],
+      recovery: { contract: router },
+    })
+    expect(routerResult.issues).toContainEqual(expect.objectContaining({
+      code: 'semantic_quarantine_router_source',
+      nodeId: 'route',
+    }))
+  })
+
+  it('requires positive and detector-specific negative fixtures', () => {
+    const candidate = semanticContract()
+    candidate.failure.semantic.detectors.push({
+      id: 'required-text',
+      sourceNodeId: 'answer',
+      kind: 'expression',
+      passWhen: 'context.answer.output.text === "ok"',
+      action: 'observe',
+      message: 'A reviewed text result is required',
+    })
+    candidate.failure.semantic.evaluationFixtures = [
+      {
+        id: 'all-pass',
+        sourceNodeId: 'answer',
+        output: { mode: 'ai', text: 'ok' },
+        expected: 'pass',
+      },
+      {
+        id: 'mode-only-fail',
+        sourceNodeId: 'answer',
+        output: { mode: 'fallback', text: 'ok' },
+        expected: 'violation',
+      },
+    ]
+
+    const result = validateWorkflow({
+      nodes: [{ id: 'answer', type: 'noop', config: {} }],
+      edges: [],
+      recovery: { contract: candidate },
+    })
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'semantic_detector_missing_violation_fixture',
+      nodeId: 'answer',
+    }))
   })
 
   it('validates required tool inputs', () => {
@@ -187,6 +408,39 @@ describe('validateWorkflow', () => {
     expect(codes).toContain('ai_missing_prompt')
     expect(codes).toContain('agent_missing_goal')
     expect(codes.filter(c => c === 'transform_missing_mapping').length).toBe(2)
+  })
+
+  it('accepts a prompt reference as the AI node prompt source', () => {
+    const result = validateWorkflow({
+      nodes: [{
+        id: 'classify',
+        type: 'ai',
+        config: {
+          promptRef: { name: 'invoice_classifier', version: 2 },
+          variables: { customer: 'Ada' },
+          outputSchema: {
+            type: 'object',
+            properties: { risk: { type: 'string' } },
+            required: ['risk'],
+          },
+        },
+      }],
+      edges: [],
+    })
+
+    expect(result).toEqual({ valid: true, issues: [] })
+  })
+
+  it('rejects blank inline and referenced AI prompt sources', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'inline', type: 'ai', config: { prompt: '   ' } },
+        { id: 'saved', type: 'ai', config: { promptRef: { name: '   ' } } },
+      ],
+      edges: [],
+    })
+
+    expect(result.issues.filter(issue => issue.code === 'ai_missing_prompt')).toHaveLength(2)
   })
 
   it('validates human_form schema before runtime execution', () => {
@@ -571,6 +825,63 @@ describe('validateWorkflow', () => {
     }))
   })
 })
+
+function semanticContract(overrides: Record<string, unknown> = {}): RecoveryContractV2 {
+  const contract = {
+    version: '2' as const,
+    failure: {
+      technical: {
+        terminalNodeFailure: true as const,
+        stalledNode: true,
+      },
+      semantic: {
+        mode: 'deterministic' as const,
+        detectors: [{
+          id: 'acceptable-answer',
+          sourceNodeId: 'answer',
+          kind: 'expression' as const,
+          passWhen: 'context.answer.output.mode === "ai"',
+          action: 'quarantine' as const,
+          message: 'The answer must come from the configured model',
+        }],
+        evaluationFixtures: [
+          {
+            id: 'accepts-ai',
+            sourceNodeId: 'answer',
+            output: { mode: 'ai' },
+            expected: 'pass' as const,
+          },
+          {
+            id: 'rejects-fallback',
+            sourceNodeId: 'answer',
+            output: { mode: 'fallback' },
+            expected: 'violation' as const,
+          },
+        ],
+      },
+    },
+    evidence: {
+      required: [
+        'failure_snapshot',
+        'audit_trail',
+        'terminal_outcome',
+      ],
+    },
+    effects: [],
+    repairs: { allowed: ['retry'] },
+    validation: { minimumEvidenceLevel: 'static' as const },
+    approval: {
+      productionMutation: 'required' as const,
+      permission: 'recovery.write' as const,
+    },
+    autonomyLevel: 3 as const,
+    verification: {
+      kind: 'generation_bound_terminal_success' as const,
+    },
+    recurrence: { windowDays: 7 },
+  } satisfies RecoveryContractV2
+  return { ...contract, ...overrides } as RecoveryContractV2
+}
 
 describe('validateWorkflow — subworkflow composition', () => {
   it('accepts an exact positive version pin', () => {

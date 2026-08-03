@@ -509,7 +509,7 @@ export const reportsRoutes: Route[] = [
     } },
 
   // GET /reports/value-dashboard?windowDays=N&format=markdown|json
-  // Operator-facing MTTR + value rollup. Same data the in-app dashboard
+  // Operator-facing verified-recovery + value rollup. Same data the in-app dashboard
   // renders, packaged as a downloadable artefact for sharing with a
   // stakeholder ("here's what the platform recovered for us this month").
   // Multi-tenant scoped on `auth.orgId` — no enumeration of other orgs.
@@ -675,7 +675,7 @@ function buildValueDashboardMarkdown(args: {
   lines.push("## Recovery metrics");
   lines.push("");
   lines.push(`- **Success rate**: ${metrics.successRate.display} — ${metrics.successRate.rationale}`);
-  lines.push(`- **MTTR (measured)**: ${metrics.mttr.display} — ${metrics.mttr.rationale}`);
+  lines.push(`- **Median time to verified recovery**: ${metrics.verifiedRecovery.display} — ${metrics.verifiedRecovery.rationale}`);
   lines.push(`- **p95 latency**: ${metrics.p95Latency.display} — ${metrics.p95Latency.rationale}`);
   lines.push(`- **Approvals pending**: ${metrics.approvalsPending.display} — ${metrics.approvalsPending.rationale}`);
   lines.push(`- **Replay rate**: ${metrics.replayRate.display} — ${metrics.replayRate.rationale}`);
@@ -696,9 +696,9 @@ function buildValueDashboardMarkdown(args: {
   lines.push(`- **Dollars saved (estimate)**: $${ve.dollarSaved.toFixed(2)}`);
   if (ve.mttrDeltaSeconds != null) {
     const sign = ve.mttrDeltaSeconds >= 0 ? "−" : "+";
-    lines.push(`- **MTTR delta vs baseline**: ${sign}${Math.abs(ve.mttrDeltaSeconds)} seconds (baseline ${ve.assumptions.baselineMttrSeconds}s)`);
+    lines.push(`- **Verified-recovery delta vs baseline**: ${sign}${Math.abs(ve.mttrDeltaSeconds)} seconds (baseline ${ve.assumptions.baselineMttrSeconds}s)`);
   } else {
-    lines.push("- **MTTR delta vs baseline**: awaiting private-beta baseline (`value.baselineMttrSeconds` is unset).");
+    lines.push("- **Verified-recovery delta vs baseline**: awaiting private-beta baseline (`value.baselineMttrSeconds` is unset).");
   }
   lines.push("");
   lines.push("## Assumptions");
@@ -706,7 +706,7 @@ function buildValueDashboardMarkdown(args: {
   lines.push(`- _Estimate based on operator-supplied assumptions._`);
   lines.push(`- Engineer hourly cost: $${ve.assumptions.hourlyCost.toFixed(2)} (USD-equivalent)`);
   lines.push(`- Minutes saved per resolved failure: ${ve.assumptions.minutesSavedPerRecovery}`);
-  lines.push(`- Pre-Janusly MTTR baseline: ${ve.assumptions.baselineMttrSeconds === 0 ? "unset" : `${ve.assumptions.baselineMttrSeconds}s`}`);
+  lines.push(`- Pre-Janusly recovery-time baseline: ${ve.assumptions.baselineMttrSeconds === 0 ? "unset" : `${ve.assumptions.baselineMttrSeconds}s`}`);
   lines.push("");
   lines.push("### Formula");
   lines.push("");

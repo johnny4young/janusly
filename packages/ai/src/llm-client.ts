@@ -57,11 +57,12 @@ import { getUsageRecorder, type UsageRecord } from "./usage-recorder";
 //
 // Adding a provider = one entry below. No conditionals elsewhere read the
 // provider name. The four required fields are: which env vars hold the API
-// key + model id, the default model when none is set, and a `create(apiKey)`
-// closure that returns a `(modelId) => LanguageModel` factory bound to the
-// API key. Optional `applyJsonMode` wraps the model so the provider's native
-// JSON mode is enforced when `generateText` is called with
-// `responseFormat: "json"`.
+// key + model id, the default model when none is set, and a `create(apiKey,
+// baseURL?)` closure that returns a `(modelId) => LanguageModel` factory bound
+// to the API key. Optional base-URL fields keep proxy/simulator support inside
+// the registry instead of adding provider-name branches to the factory.
+// `applyJsonMode` wraps the model so the provider's native JSON mode is
+// enforced when `generateText` is called with `responseFormat: "json"`.
 
 /** Shape of one entry in the `PROVIDERS` registry. */
 export type ProviderSpec = {
@@ -71,8 +72,12 @@ export type ProviderSpec = {
   envModel: string;
   /** Default model id when `envModel` is unset. */
   defaultModel: string;
-  /** Build a model factory bound to the given API key. */
-  create: (apiKey: string) => (modelId: string) => LanguageModel;
+  /** Optional env var for an explicit provider-compatible proxy endpoint. */
+  envBaseURL?: string;
+  /** Normalize a configured base URL before it reaches the provider SDK. */
+  normalizeBaseURL?: (baseURL: string) => string;
+  /** Build a model factory bound to the given API key and optional base URL. */
+  create: (apiKey: string, baseURL?: string) => (modelId: string) => LanguageModel;
   /**
    * Optional: wrap the model so the provider's native JSON mode applies when
    * `generateText` is invoked with `responseFormat: "json"`. The wrapper must
@@ -110,21 +115,13 @@ const PROVIDERS: Record<string, ProviderSpec> = {
   anthropic: {
     envApiKey: "ANTHROPIC_API_KEY",
     envModel: "ANTHROPIC_MODEL",
+    envBaseURL: "ANTHROPIC_BASE_URL",
     defaultModel: "claude-haiku-4-5-20251001",
-    create: (apiKey) => {
-      // Defensive baseURL handling: Claude Desktop sets a shell-wide
-      // `ANTHROPIC_BASE_URL=https://api.anthropic.com` (without `/v1`) which
-      // the SDK reads as-is, producing `/messages` 404s instead of
-      // `/v1/messages`. Auto-append `/v1` when the env points at the
-      // canonical host but is missing the version segment, so a stale
-      // shell var doesn't quietly break the AI surface. Operators who
-      // intentionally proxy elsewhere set their own URL with `/v1` and the
-      // condition below leaves it alone.
-      const envBaseURL = process.env.ANTHROPIC_BASE_URL?.trim();
-      const needsV1 =
-        envBaseURL &&
-        /^https?:\/\/api\.anthropic\.com\/?$/i.test(envBaseURL);
-      const baseURL = needsV1 ? "https://api.anthropic.com/v1" : undefined;
+    normalizeBaseURL: (configured) =>
+      /^https?:\/\/api\.anthropic\.com\/?$/i.test(configured)
+        ? "https://api.anthropic.com/v1"
+        : configured.replace(/\/+$/u, ""),
+    create: (apiKey, baseURL) => {
       const anthropic = createAnthropic(baseURL ? { apiKey, baseURL } : { apiKey });
       return (modelId) => anthropic(modelId);
     },
@@ -133,6 +130,18 @@ const PROVIDERS: Record<string, ProviderSpec> = {
   },
   // Add a new provider here. e.g. ollama / mistral / google. Four fields.
 };
+
+function boundedInteger(
+  raw: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed >= minimum && parsed <= maximum
+    ? parsed
+    : fallback;
+}
 
 // ─── (b) Public types ────────────────────────────────────────────────────
 
@@ -201,6 +210,8 @@ export type LlmGenerateTextResult = {
   provider: string;
   /** Resolved model id. */
   model: string;
+  /** True only for an explicitly declared provider-compatible simulator. */
+  providerSimulated: boolean;
   /** Wall-clock latency from the abstraction's POV (ms). */
   latencyMs: number;
   /** Cost in USD; null when no price entry exists for the model. */
@@ -268,6 +279,8 @@ export type LlmGenerateObjectResult<T> = {
   provider: string;
   /** Resolved model id. */
   model: string;
+  /** True only for an explicitly declared provider-compatible simulator. */
+  providerSimulated: boolean;
   /** Wall-clock latency from the abstraction's POV (ms). */
   latencyMs: number;
   /** Cost in USD; null when no price entry exists for the model. */
@@ -296,10 +309,16 @@ export type ResolvedLlmConfig = {
   apiKeys: Record<string, string>;
   /** Default model per provider (env override or registry default). */
   defaultModels: Record<string, string>;
+  /** Explicit provider-compatible proxy/simulator base URLs. */
+  baseURLs: Record<string, string>;
+  /** Provider registry keys whose calls are simulated and therefore cost $0. */
+  simulatedProviders: string[];
   /** Single timeout shared across providers. */
   timeoutMs: number;
   /** AI SDK-built-in retry on rate-limit + 5xx. */
   maxRetries: number;
+  /** Hard output ceiling forwarded to every provider call. */
+  maxOutputTokens: number;
 };
 
 // ─── (c) Factory ─────────────────────────────────────────────────────────
@@ -331,19 +350,48 @@ export function resolveLlmConfig(env: NodeJS.ProcessEnv): ResolvedLlmConfig | nu
 
   const apiKeys: Record<string, string> = {};
   const defaultModels: Record<string, string> = {};
+  const baseURLs: Record<string, string> = {};
   for (const [name, spec] of Object.entries(PROVIDERS)) {
     const key = env[spec.envApiKey];
     if (key) apiKeys[name] = key;
     defaultModels[name] = env[spec.envModel] ?? spec.defaultModel;
+    const configuredBaseURL = spec.envBaseURL
+      ? env[spec.envBaseURL]?.trim()
+      : undefined;
+    if (configuredBaseURL) {
+      baseURLs[name] = spec.normalizeBaseURL
+        ? spec.normalizeBaseURL(configuredBaseURL)
+        : configuredBaseURL.replace(/\/+$/u, "");
+    }
   }
+  const simulationEnabled =
+    env.JANUSLY_LOCAL_STACK === "true" &&
+    env.JANUSLY_LOCAL_INTEGRATION_SIMULATOR === "true";
+  const simulatedProviders = simulationEnabled
+    ? (env.JANUSLY_LLM_SIMULATED_PROVIDERS ?? "")
+        .split(",")
+        .map((name) => name.trim().toLowerCase())
+        .filter(
+          (name, index, values) =>
+            Boolean(PROVIDERS[name]) && values.indexOf(name) === index,
+        )
+    : [];
   if (Object.keys(apiKeys).length === 0) return null;
 
   return {
     provider: resolvedProvider,
     apiKeys,
     defaultModels,
+    baseURLs,
+    simulatedProviders,
     timeoutMs: Number(env.OPENAI_TIMEOUT_MS ?? 30_000),
     maxRetries: Number(env.OPENAI_MAX_RETRIES ?? 2),
+    maxOutputTokens: boundedInteger(
+      env.JANUSLY_LLM_MAX_OUTPUT_UNITS,
+      4_096,
+      256,
+      16_384,
+    ),
   };
 }
 
@@ -399,7 +447,7 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
       if (!spec) throw new Error(`unknown provider '${name}'`);
       const apiKey = cfg.apiKeys[name];
       if (!apiKey) throw new Error(`provider '${name}' not configured (set ${spec.envApiKey})`);
-      f = spec.create(apiKey);
+      f = spec.create(apiKey, cfg.baseURLs[name]);
       factories.set(name, f);
     }
     return f;
@@ -411,6 +459,7 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
       const providerName = overrideProvider ?? cfg.provider;
       const spec = PROVIDERS[providerName];
       const modelId = overrideModel ?? cfg.defaultModels[providerName] ?? spec?.defaultModel ?? "unknown";
+      const providerSimulated = cfg.simulatedProviders.includes(providerName);
 
       // Measure wall-clock latency around the SDK invocation so the
       // recorder can attribute slow calls. The recorder fires on BOTH the
@@ -430,6 +479,7 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
           system: buildSystemPrompt(providerName, input.system, input.cacheSystemPrompt),
           prompt: input.prompt,
           maxRetries: cfg.maxRetries,
+          maxOutputTokens: cfg.maxOutputTokens,
           abortSignal: AbortSignal.timeout(cfg.timeoutMs),
         });
       } catch (error) {
@@ -439,6 +489,8 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
           provider: providerName,
           model: modelId,
           latencyMs,
+          costUsd: providerSimulated ? 0 : undefined,
+          providerSimulated,
           mode: "fallback",
           aiError: error instanceof Error ? error.message : String(error),
         });
@@ -455,7 +507,9 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
           }
         : undefined;
       const cacheUsage = readCacheTokenUsage(aiResult);
-      const costUsd = computeCostUsd(getModelPrice(providerName, modelId), usage);
+      const costUsd = providerSimulated
+        ? 0
+        : computeCostUsd(getModelPrice(providerName, modelId), usage);
 
       void fireUsageRecorder({
         context: input.context,
@@ -467,6 +521,7 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
         ...cacheUsage,
         latencyMs,
         costUsd,
+        providerSimulated,
         mode: "ai",
       });
 
@@ -476,6 +531,7 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
         usage,
         provider: providerName,
         model: modelId,
+        providerSimulated,
         latencyMs,
         costUsd,
       };
@@ -489,6 +545,7 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
       const spec = PROVIDERS[providerName];
       const modelId =
         overrideModel ?? cfg.defaultModels[providerName] ?? spec?.defaultModel ?? "unknown";
+      const providerSimulated = cfg.simulatedProviders.includes(providerName);
 
       const startedAt = Date.now();
       let aiResult: Awaited<ReturnType<typeof aiGenerateText>>;
@@ -500,6 +557,7 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
           system: buildSystemPrompt(providerName, input.system, input.cacheSystemPrompt),
           prompt: input.prompt,
           maxRetries: cfg.maxRetries,
+          maxOutputTokens: cfg.maxOutputTokens,
           abortSignal: AbortSignal.timeout(cfg.timeoutMs),
           // `Output.object({ schema })` plumbs the JSON Schema through the
           // provider's structured-output capability and validates the
@@ -518,6 +576,8 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
           provider: providerName,
           model: modelId,
           latencyMs,
+          costUsd: providerSimulated ? 0 : undefined,
+          providerSimulated,
           mode: "fallback",
           aiError: error instanceof Error ? error.message : String(error),
         });
@@ -534,7 +594,9 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
           }
         : undefined;
       const cacheUsage = readCacheTokenUsage(aiResult);
-      const costUsd = computeCostUsd(getModelPrice(providerName, modelId), usage);
+      const costUsd = providerSimulated
+        ? 0
+        : computeCostUsd(getModelPrice(providerName, modelId), usage);
 
       // AI SDK 7 exposes the validated structured payload at `output`.
       // Throw before the success recorder fires if it is unexpectedly absent.
@@ -551,6 +613,7 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
           ...cacheUsage,
           latencyMs,
           costUsd,
+          providerSimulated,
           mode: "fallback",
           aiError: error.message,
         });
@@ -567,6 +630,7 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
         ...cacheUsage,
         latencyMs,
         costUsd,
+        providerSimulated,
         mode: "ai",
       });
 
@@ -576,6 +640,7 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
         usage,
         provider: providerName,
         model: modelId,
+        providerSimulated,
         latencyMs,
         costUsd,
       };
@@ -599,6 +664,7 @@ async function fireUsageRecorder(input: {
   cacheCreationInputTokens?: number;
   latencyMs: number;
   costUsd?: number | null;
+  providerSimulated: boolean;
   mode: "ai" | "fallback";
   aiError?: string;
 }): Promise<void> {
@@ -621,6 +687,7 @@ async function fireUsageRecorder(input: {
     cacheCreationInputTokens: input.cacheCreationInputTokens,
     latencyMs: input.latencyMs,
     costUsd: input.costUsd,
+    providerSimulated: input.providerSimulated,
     mode: input.mode,
     aiError: input.aiError,
   };

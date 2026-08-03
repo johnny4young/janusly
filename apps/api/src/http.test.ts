@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type http from "node:http";
 import { z } from "zod";
 
-import { readJson, sendJson, type CorsAwareResponse } from "./http";
+import { corsHeaders, readJson, sendJson, type CorsAwareResponse } from "./http";
 
 /** Build a fake `IncomingMessage` that emits the given Buffer chunks. `readJson` only consumes the stream surface (`data`/`error`/`end` + `destroy`), which `Readable` provides. */
 function fakeRequest(chunks: Buffer[]): http.IncomingMessage {
@@ -95,6 +95,28 @@ function fakeResponse(opts: { acceptEncoding?: string; origin?: string } = {}) {
 function largePayload() {
   return { note: "x".repeat(4096), items: Array.from({ length: 20 }, (_, i) => ({ i, label: `row-${i}` })) };
 }
+
+describe("corsHeaders", () => {
+  it("echoes only an explicitly allowlisted browser origin", () => {
+    const allowed = fakeResponse({ origin: "http://localhost:5173" });
+
+    expect(corsHeaders(allowed.res)).toMatchObject({
+      "Access-Control-Allow-Origin": "http://localhost:5173",
+      "Access-Control-Allow-Credentials": "true",
+    });
+  });
+
+  it.each([undefined, "https://attacker.example", "null"])(
+    "omits credentialed CORS headers for %s",
+    (origin) => {
+      const { res } = fakeResponse({ origin });
+      const headers = corsHeaders(res);
+
+      expect(headers).not.toHaveProperty("Access-Control-Allow-Origin");
+      expect(headers).not.toHaveProperty("Access-Control-Allow-Credentials");
+    },
+  );
+});
 
 describe("sendJson gzip", () => {
   const priorFlag = process.env.JANUSLY_HTTP_COMPRESSION;

@@ -3,6 +3,7 @@ import { createServer } from 'node:http'
 import { once } from 'node:events'
 import type { AddressInfo } from 'node:net'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 
 const API_URL = process.env.E2E_API_URL ?? 'http://localhost:3001'
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
@@ -24,7 +25,6 @@ type RunSnapshot = {
 type LocaleContract = {
   locale: 'en' | 'es'
   flows: string
-  stepSetup: string
   runs: string
   viewTimeline: string
   strictLabel: string
@@ -38,8 +38,7 @@ type LocaleContract = {
 const LOCALES: LocaleContract[] = [
   {
     locale: 'en',
-    flows: 'Flows',
-    stepSetup: 'Step setup',
+    flows: 'Workflows',
     runs: 'Runs',
     viewTimeline: 'View timeline',
     strictLabel: 'Fail on a missing value',
@@ -52,7 +51,6 @@ const LOCALES: LocaleContract[] = [
   {
     locale: 'es',
     flows: 'Flujos',
-    stepSetup: 'Configuración de paso',
     runs: 'Ejecuciones',
     viewTimeline: 'Ver cronología',
     strictLabel: 'Fallar ante un valor ausente',
@@ -109,13 +107,23 @@ async function pollUntilTerminal(
   throw new Error(`Run ${runId} did not reach a terminal status`)
 }
 
-function installBrowserErrorGuards(page: Page): string[] {
-  const errors: string[] = []
+function installBrowserErrorGuards(page: Page): {
+  consoleErrors: string[]
+  responseErrors: string[]
+} {
+  const consoleErrors: string[] = []
+  const responseErrors: string[] = []
   page.on('console', message => {
-    if (message.type() === 'error') errors.push(message.text())
+    if (message.type() !== 'error') return
+    const location = message.location().url
+    consoleErrors.push(location ? `${message.text()} @ ${location}` : message.text())
   })
-  page.on('pageerror', error => errors.push(error.message))
-  return errors
+  page.on('pageerror', error => consoleErrors.push(error.message))
+  page.on('response', response => {
+    if (response.status() < 400) return
+    responseErrors.push(`${response.status()} ${new URL(response.url()).pathname}`)
+  })
+  return { consoleErrors, responseErrors }
 }
 
 async function hideUnrelatedOverlays(page: Page): Promise<void> {
@@ -148,11 +156,19 @@ async function openWorkflow(
   const row = page.getByTestId(`workflows-row-${workflowId}`)
   await expect(row).toContainText(workflowName)
   await row.click()
-  await page.getByRole('button', { name: contract.stepSetup, exact: true }).click()
+  await openWorkspaceSection(
+    page,
+    contract.flows,
+    contract.locale === 'en' ? 'Build' : 'Crear',
+  )
 }
 
 async function openRunFromHistory(page: Page, contract: LocaleContract, runId: string): Promise<void> {
-  await page.getByRole('button', { name: contract.runs, exact: true }).click()
+  await openWorkspaceSection(
+    page,
+    contract.locale === 'en' ? 'Activity' : 'Actividad',
+    contract.runs,
+  )
   const overview = page.getByTestId('run-workspace-tab-overview')
   if (await overview.isVisible().catch(() => false)) await overview.click()
   const history = page.getByTestId('runs-history-virtual-list')
@@ -420,7 +436,7 @@ test('HTTP JSON and unresolved templates stay explicit from runtime through the 
     await captureUnresolvedEvent(page, spanish, lenientRunId, spanish.unresolvedLenient, 'web-es-template-unresolved-lenient-warning')
     await captureUnresolvedEvent(page, spanish, strictRunId, spanish.unresolvedStrict, 'web-es-template-unresolved-strict-warning')
 
-    expect(browserErrors).toEqual([])
+    expect(browserErrors).toEqual({ consoleErrors: [], responseErrors: [] })
   } finally {
     await httpFixture.close()
   }

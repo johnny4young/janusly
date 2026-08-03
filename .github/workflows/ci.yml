@@ -49,8 +49,8 @@ jobs:
       - name: Test (jsdom)
         run: pnpm test
 
-      - name: Test script utilities
-        run: pnpm test:scripts
+      - name: Test script utilities and deterministic recovery evals
+        run: pnpm test:evals
 
   test_browser:
     name: Browser tests
@@ -152,13 +152,9 @@ jobs:
           path: apps/web/playwright-report/
           retention-days: 7
 
-  test_compat_pg15:
-    name: Integration lanes on Postgres 15 (oldest supported)
+  test_integration_pg18:
+    name: Integration lanes on Postgres 18
     runs-on: ubuntu-latest
-    env:
-      # The compose file parametrizes the postgres image; the script owns the
-      # full lifecycle (AGENTS.md: no compose orchestration in workflow YAML).
-      JANUSLY_POSTGRES_IMAGE: pgvector/pgvector:pg15
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
@@ -168,8 +164,68 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
-      - name: Integration lanes (real Postgres 15)
+      - name: Integration lanes (real Postgres 18)
         run: pnpm test:integration
+
+  # Go pilot lane — rides the SAME triggers as every other job (a private
+  # repo bills per push, so the lane adds zero new pushes). No Compose in
+  # the workflow YAML per the repo rule: the job talks to a plain service
+  # container and runs the pilot's own make ci (sqlc + contract drift
+  # guards, build, lint, unit + integration -race, semantic parity).
+  test_go:
+    name: Go pilot (make ci)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: janusly
+          POSTGRES_PASSWORD: janusly-go-local
+          POSTGRES_DB: janusly_go
+        ports:
+          - 4632:5432
+        options: >-
+          --health-cmd "pg_isready -U janusly -d janusly_go"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      # The other PR jobs exercise GitHub's synthetic merge ref. The Go lane
+      # additionally needs an artifact for the reviewed PR head itself, because
+      # rollout evidence is bound to that immutable candidate commit and tree.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v9.3.0
+        with:
+          version: v2.12.2
+          install-only: true
+      - name: Migrate (goose)
+        working-directory: go
+        run: go run ./cmd/api migrate
+        env:
+          JANUSLY_GO_DATABASE_URL: postgres://janusly:janusly-go-local@127.0.0.1:4632/janusly_go
+      - name: make ci
+        working-directory: go
+        run: make ci
+        env:
+          JANUSLY_GO_DATABASE_URL: postgres://janusly:janusly-go-local@127.0.0.1:4632/janusly_go
+      - name: Build exact deployable Go artifact
+        working-directory: go
+        run: make release-artifact
+      - name: Upload exact Go artifact and manifest
+        uses: actions/upload-artifact@v7
+        with:
+          name: janusly-go-${{ github.event.pull_request.head.sha || github.sha }}
+          path: artifacts/go-release/native/
+          if-no-files-found: error
+          retention-days: 30
 
   dep_audit:
     name: Dependency audit

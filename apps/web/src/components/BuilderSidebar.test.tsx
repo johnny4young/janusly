@@ -30,10 +30,8 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof BuilderSidebar>>
       'ai.write', 'evals.read', 'packs.read', 'credentials.read', 'members.read',
     ],
     onWorkflowNameChange: vi.fn(),
-    onAdd: vi.fn(),
     onValidate: vi.fn(),
     onSave: vi.fn(),
-    onNew: vi.fn(),
     onStart: vi.fn(),
     onOpenTab: vi.fn(),
     onOpenHelp: vi.fn(),
@@ -51,7 +49,6 @@ describe('<BuilderSidebar />', () => {
   it('hides unauthorized destinations and disables write actions', () => {
     renderSidebar({ permissions: ['workflows.read', 'runs.read'] })
 
-    expect(screen.queryByRole('button', { name: /Members/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Credentials/ })).not.toBeInTheDocument()
     expect(screen.queryByText('AI operator')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
@@ -83,19 +80,11 @@ describe('<BuilderSidebar />', () => {
     expect(runButton).not.toBeDisabled()
   })
 
-  it('keeps palette steps clickable while exposing a copy drag payload', () => {
-    const props = renderSidebar()
-    const setData = vi.fn()
-    const dataTransfer = { setData, effectAllowed: 'all' } as unknown as DataTransfer
-    const step = screen.getAllByRole('button', { name: 'Call an API' })[0]
+  it('keeps step discovery out of global navigation', () => {
+    renderSidebar()
 
-    expect(step).toHaveAttribute('draggable', 'true')
-    fireEvent.dragStart(step, { dataTransfer })
-    expect(setData).toHaveBeenCalledWith('application/x-janusly-node-type', 'http')
-    expect(dataTransfer.effectAllowed).toBe('copy')
-
-    fireEvent.click(step)
-    expect(props.onAdd).toHaveBeenCalledWith('http')
+    expect(screen.queryByRole('button', { name: 'Call an API' })).not.toBeInTheDocument()
+    expect(screen.getByRole('searchbox', { name: 'Search sections…' })).toBeInTheDocument()
   })
 
   it('opens real keyboard help and does not render the dead whats-new affordance', () => {
@@ -105,10 +94,46 @@ describe('<BuilderSidebar />', () => {
     expect(screen.queryByRole('button', { name: "What's new" })).not.toBeInTheDocument()
   })
 
-  it('keeps run evidence in one primary destination', () => {
+  it('keeps run evidence in one global destination', () => {
     renderSidebar()
 
-    expect(screen.getByRole('button', { name: /^Runs$/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Activity$/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Runs$/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Multi-agent timeline$/ })).not.toBeInTheDocument()
+  })
+
+  it('exposes four global destinations and keeps authoring chrome contextual', () => {
+    renderSidebar({ activeTab: 'home' })
+
+    expect(screen.getByRole('button', { name: /^Home/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Workflows$/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Activity$/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Settings$/ })).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Name' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Call an API' })).not.toBeInTheDocument()
+    expect(screen.getByRole('searchbox', { name: 'Search sections…' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Advanced/ })).not.toBeInTheDocument()
+  })
+
+  it('ignores former group state without hiding the global destinations', () => {
+    window.localStorage.setItem('janusly:sidebar:state', JSON.stringify({
+      openGroups: ['pinned', 'build', 'run'],
+      openCategories: ['ai'],
+      collapsed: false,
+    }))
+
+    renderSidebar({ activeTab: 'home' })
+
+    expect(screen.getByText('Workspace')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Activity$/ })).toBeInTheDocument()
+  })
+
+  it('marks an internal section through its parent destination', () => {
+    const props = renderSidebar({ activeTab: 'recover' })
+
+    const activity = screen.getByRole('button', { name: /^Activity$/ })
+    expect(activity).toHaveAttribute('aria-current', 'page')
+    fireEvent.click(activity)
+    expect(props.onOpenTab).toHaveBeenCalledWith('runs')
   })
 })

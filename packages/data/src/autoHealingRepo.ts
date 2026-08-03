@@ -7,23 +7,19 @@
  * Used by:
  * - `packages/engine/src/auto-healing-scanner.ts` — top-of-loop
  *   diagnosis + per-candidate proposal/validation transitions.
- * - `packages/engine/src/auto-healing-watcher.ts` — outcome recording
- *   and auto-apply CAS-style transition.
+ * - `apps/api/src/auto-healing-watcher.ts` — outcome recording and
+ *   durable apply publication.
  * - `apps/api/src/routes/auto-healing-routes.ts` — pending list,
- *   detail view, and operator decision route (CAS-style apply/decline
- *   so the watcher's auto-apply branch and the operator's manual
- *   click cannot double-apply).
+ *   detail view, and operator decision route.
  *
  * Invariants:
  * - Multi-tenant scope: every query carries
  *   `eq(autoHealingRuns.orgId, orgId)`. The pending list, the
  *   loop-breaker count, and the idempotency check are all single-index
  *   lookups.
- * - The transitions `validated → applied` and `validated → declined`
- *   are CAS-style — the UPDATE filters on `status = "validated"` so
- *   only the first writer wins. `recordDecision` returns whether the
- *   update affected a row; the operator decision route turns the
- *   `false` case into 409 `signature_already_resolved`.
+ * - Accepted decisions claim `validated → publishing` with a stable
+ *   publication receipt. `applied` is terminal only after the exact DLQ
+ *   replay claim is durable. Declines claim `validated → declined`.
  * - Audit rows are written via direct `db.insert(auditLogs)` (the
  *   `audit()` chokepoint lives in `apps/api` and the data package
  *   cannot import upward). Metadata fields are repo-controlled enums,
@@ -35,9 +31,15 @@
  *   scanner at that moment.
  */
 
-import { and, count, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, lte, ne, sql } from "drizzle-orm";
 import { db, autoHealingRuns, auditLogs } from "@janusly/db";
 import { safePersistPayload } from "@janusly/shared/src/safe-persist";
+import type { ValidationEvidenceLevel } from "@janusly/shared";
+import {
+  withAuditTx,
+  type DrizzleTx,
+  type TxAudit,
+} from "./audit-tx";
 
 // ─── Closed enums ───────────────────────────────────────────────────────────
 
@@ -48,6 +50,8 @@ export const AUTO_HEALING_STATUS = [
   "validating",
   "validated",
   "validation_failed",
+  "publishing",
+  "publish_failed",
   "applied",
   "declined",
   "failed",
@@ -87,7 +91,11 @@ export type AutoHealingRun = {
   confidence: number | null;
   validationRunId: string | null;
   validationSignature: string | null;
+  validationEvidenceLevel: ValidationEvidenceLevel | null;
   decisionActor: string | null;
+  publicationReceipt: string | null;
+  publicationRepairAfter: Date | null;
+  publicationAttempts: number;
   declineReason: AutoHealingDeclineReason | null;
   loopAttemptCount: number;
   metadata: Record<string, unknown> | null;
@@ -107,7 +115,12 @@ function rowToRecord(row: typeof autoHealingRuns.$inferSelect): AutoHealingRun {
     confidence: row.confidence,
     validationRunId: row.validationRunId,
     validationSignature: row.validationSignature,
+    validationEvidenceLevel:
+      (row.validationEvidenceLevel as ValidationEvidenceLevel | null) ?? null,
     decisionActor: row.decisionActor,
+    publicationReceipt: row.publicationReceipt,
+    publicationRepairAfter: row.publicationRepairAfter,
+    publicationAttempts: row.publicationAttempts,
     declineReason: row.declineReason as AutoHealingDeclineReason | null,
     loopAttemptCount: row.loopAttemptCount,
     metadata: (row.metadata as Record<string, unknown> | null) ?? null,
@@ -201,8 +214,17 @@ export async function recordValidationStarted(id: string, validationRunId: strin
 }
 
 export type RecordValidationOutcomeInput =
-  | { outcome: "validated"; validationSignature?: string | null }
-  | { outcome: "validation_failed"; validationSignature: string | null; reason: "validation_failed" | "signature_changed" | "validation_timeout" | "feature_disabled" };
+  | {
+      outcome: "validated";
+      validationSignature?: string | null;
+      validationEvidenceLevel: ValidationEvidenceLevel;
+    }
+  | {
+      outcome: "validation_failed";
+      validationSignature: string | null;
+      validationEvidenceLevel: ValidationEvidenceLevel;
+      reason: "validation_failed" | "signature_changed" | "validation_timeout" | "feature_disabled";
+    };
 
 /**
  * Record the sandbox validation outcome. Two cases:
@@ -224,6 +246,7 @@ export async function recordValidationOutcome(
   const updates: Partial<typeof autoHealingRuns.$inferInsert> = {
     status: input.outcome,
     validationSignature: input.validationSignature ?? null,
+    validationEvidenceLevel: input.validationEvidenceLevel,
     updatedAt: new Date(),
   };
   if (!validated) {
@@ -240,61 +263,248 @@ export async function recordValidationOutcome(
     validated,
     signatureChanged: !validated && (input as { reason?: string }).reason === "signature_changed",
     reason: validated ? null : (input as { reason: string }).reason,
+    validationEvidenceLevel: input.validationEvidenceLevel,
   });
 }
 
-export type RecordDecisionInput = {
-  actor: string;
-  accepted: boolean;
-  declineReason?: AutoHealingDeclineReason;
-};
+export type ClaimApplyPublicationResult =
+  | { claimed: true; receipt: string }
+  | { claimed: false; receipt: null };
 
-export type RecordDecisionResult = { applied: boolean };
+const PUBLICATION_LEASE_MS = 2 * 60 * 1000;
+const PUBLICATION_RETRY_MS = 60 * 1000;
 
 /**
- * CAS-style transition `validated → applied | declined`. The UPDATE
- * filters on `status = "validated"`, so a second concurrent caller
- * (operator click racing the watcher's auto-apply, or vice versa)
- * sees zero rows affected and the helper returns `applied: false`.
- *
- * Writes one `auto_healing.applied` audit row on accept OR one
- * `auto_healing.declined` audit row on decline. Both rows mirror the
- * row's `decisionActor` so audit-log readers can distinguish auto vs
- * operator decisions via `metadata.decisionActor`.
+ * Claims an accepted decision without asserting that the repair is applied.
+ * The stable receipt is passed into the DLQ replay transition and becomes the
+ * causal proof used by crash recovery.
  */
-export async function recordDecision(
+export async function claimApplyPublication(
+  orgId: string,
   id: string,
-  input: RecordDecisionInput,
-): Promise<RecordDecisionResult> {
-  const newStatus: AutoHealingStatus = input.accepted ? "applied" : "declined";
+  actor: string,
+): Promise<ClaimApplyPublicationResult> {
+  const receipt = crypto.randomUUID();
+  const now = new Date();
   const updated = await db
     .update(autoHealingRuns)
     .set({
-      status: newStatus,
-      decisionActor: input.actor,
-      declineReason: input.accepted ? null : input.declineReason ?? "manual_review",
-      updatedAt: new Date(),
+      status: "publishing",
+      decisionActor: actor,
+      declineReason: null,
+      publicationReceipt: receipt,
+      publicationRepairAfter: new Date(now.getTime() + PUBLICATION_LEASE_MS),
+      publicationAttempts: sql`${autoHealingRuns.publicationAttempts} + 1`,
+      updatedAt: now,
     })
-    .where(and(eq(autoHealingRuns.id, id), eq(autoHealingRuns.status, "validated")))
-    .returning({
-      orgId: autoHealingRuns.orgId,
-      signature: autoHealingRuns.signature,
-      deadLetterId: autoHealingRuns.deadLetterId,
+    .where(and(
+      eq(autoHealingRuns.orgId, orgId),
+      eq(autoHealingRuns.id, id),
+      eq(autoHealingRuns.status, "validated"),
+    ))
+    .returning({ id: autoHealingRuns.id });
+  return updated.length > 0
+    ? { claimed: true, receipt }
+    : { claimed: false, receipt: null };
+}
+
+/**
+ * Leases a due publication repair. Moving the due clock prevents healthy
+ * replicas from repeatedly racing while one process checks the durable claim.
+ */
+export async function claimApplyPublicationRetry(
+  orgId: string,
+  id: string,
+  now = new Date(),
+): Promise<string | null> {
+  const updated = await db
+    .update(autoHealingRuns)
+    .set({
+      status: "publishing",
+      publicationRepairAfter: new Date(now.getTime() + PUBLICATION_LEASE_MS),
+      publicationAttempts: sql`${autoHealingRuns.publicationAttempts} + 1`,
+      updatedAt: now,
+    })
+    .where(and(
+      eq(autoHealingRuns.orgId, orgId),
+      eq(autoHealingRuns.id, id),
+      inArray(autoHealingRuns.status, ["publishing", "publish_failed"]),
+      lte(autoHealingRuns.publicationRepairAfter, now),
+    ))
+    .returning({ receipt: autoHealingRuns.publicationReceipt });
+  return updated[0]?.receipt ?? null;
+}
+
+/**
+ * Records a retryable publication failure. The row remains repairable and
+ * never appears as applied until its receipt matches a durable replay claim.
+ */
+export async function recordApplyPublicationFailure(
+  orgId: string,
+  id: string,
+  receipt: string,
+  errorMessage: string,
+): Promise<void> {
+  const now = new Date();
+  await runAuditedTransition(async (tx, audit) => {
+    const updated = await tx
+      .update(autoHealingRuns)
+      .set({
+        status: "publish_failed",
+        publicationRepairAfter: new Date(now.getTime() + PUBLICATION_RETRY_MS),
+        updatedAt: now,
+      })
+      .where(and(
+        eq(autoHealingRuns.orgId, orgId),
+        eq(autoHealingRuns.id, id),
+        eq(autoHealingRuns.status, "publishing"),
+        eq(autoHealingRuns.publicationReceipt, receipt),
+      ))
+      .returning({ id: autoHealingRuns.id });
+    if (updated.length === 0) return;
+    await audit({
+      orgId,
+      userId: null,
+      action: "auto_healing.publish_failed",
+      targetType: "auto_healing_run",
+      targetId: id,
+      metadata: {
+        publicationReceipt: receipt,
+        error: errorMessage,
+      },
     });
-  const row = updated[0];
-  if (!row) return { applied: false };
-  await writeAudit(
-    row.orgId,
-    input.accepted ? "auto_healing.applied" : "auto_healing.declined",
-    id,
-    {
-      decisionActor: input.actor,
-      signature: row.signature,
-      deadLetterId: row.deadLetterId,
-      declineReason: input.accepted ? null : input.declineReason ?? "manual_review",
-    },
-  );
-  return { applied: true };
+  });
+}
+
+/** Records a non-retryable apply failure after a publication claim. */
+export async function recordApplyTerminalFailure(
+  orgId: string,
+  id: string,
+  receipt: string,
+  reason: AutoHealingDeclineReason,
+  errorMessage: string,
+): Promise<void> {
+  await runAuditedTransition(async (tx, audit) => {
+    const updated = await tx
+      .update(autoHealingRuns)
+      .set({
+        status: "failed",
+        declineReason: reason,
+        publicationRepairAfter: null,
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(autoHealingRuns.orgId, orgId),
+        eq(autoHealingRuns.id, id),
+        inArray(autoHealingRuns.status, ["publishing", "publish_failed"]),
+        eq(autoHealingRuns.publicationReceipt, receipt),
+      ))
+      .returning({ id: autoHealingRuns.id });
+    if (updated.length === 0) return;
+    await audit({
+      orgId,
+      userId: null,
+      action: "auto_healing.failed",
+      targetType: "auto_healing_run",
+      targetId: id,
+      metadata: {
+        publicationReceipt: receipt,
+        reason,
+        error: errorMessage,
+      },
+    });
+  });
+}
+
+/**
+ * Completes the accepted decision only after the exact receipt is durable on
+ * the DLQ replay claim. CAS semantics keep the applied audit single-write.
+ */
+export async function completeApplyPublication(
+  orgId: string,
+  id: string,
+  receipt: string,
+): Promise<boolean> {
+  return runAuditedTransition(async (tx, audit) => {
+    const updated = await tx
+      .update(autoHealingRuns)
+      .set({
+        status: "applied",
+        publicationRepairAfter: null,
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(autoHealingRuns.orgId, orgId),
+        eq(autoHealingRuns.id, id),
+        inArray(autoHealingRuns.status, ["publishing", "publish_failed"]),
+        eq(autoHealingRuns.publicationReceipt, receipt),
+      ))
+      .returning({
+        signature: autoHealingRuns.signature,
+        deadLetterId: autoHealingRuns.deadLetterId,
+        decisionActor: autoHealingRuns.decisionActor,
+      });
+    const row = updated[0];
+    if (!row) return false;
+    await audit({
+      orgId,
+      userId: null,
+      action: "auto_healing.applied",
+      targetType: "auto_healing_run",
+      targetId: id,
+      metadata: {
+        decisionActor: row.decisionActor,
+        signature: row.signature,
+        deadLetterId: row.deadLetterId,
+        publicationReceipt: receipt,
+      },
+    });
+    return true;
+  });
+}
+
+/** CAS-style operator decline. */
+export async function recordDeclineDecision(
+  orgId: string,
+  id: string,
+  actor: string,
+  declineReason: AutoHealingDeclineReason = "manual_review",
+): Promise<boolean> {
+  return runAuditedTransition(async (tx, audit) => {
+    const updated = await tx
+      .update(autoHealingRuns)
+      .set({
+        status: "declined",
+        decisionActor: actor,
+        declineReason,
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(autoHealingRuns.orgId, orgId),
+        eq(autoHealingRuns.id, id),
+        eq(autoHealingRuns.status, "validated"),
+      ))
+      .returning({
+        signature: autoHealingRuns.signature,
+        deadLetterId: autoHealingRuns.deadLetterId,
+      });
+    const row = updated[0];
+    if (!row) return false;
+    await audit({
+      orgId,
+      userId: null,
+      action: "auto_healing.declined",
+      targetType: "auto_healing_run",
+      targetId: id,
+      metadata: {
+        decisionActor: actor,
+        signature: row.signature,
+        deadLetterId: row.deadLetterId,
+        declineReason,
+      },
+    });
+    return true;
+  });
 }
 
 /**
@@ -507,6 +717,28 @@ export async function listValidatingRows(): Promise<AutoHealingRun[]> {
 }
 
 /**
+ * Global repair scan for accepted decisions whose publication lease expired.
+ * This is system-only and intentionally cross-tenant; route surfaces must use
+ * org-scoped reads instead.
+ */
+export async function listDueApplyPublications(
+  now = new Date(),
+  limit = 100,
+): Promise<AutoHealingRun[]> {
+  const capped = Math.max(1, Math.min(200, limit));
+  const rows = await db
+    .select()
+    .from(autoHealingRuns)
+    .where(and(
+      inArray(autoHealingRuns.status, ["publishing", "publish_failed"]),
+      lte(autoHealingRuns.publicationRepairAfter, now),
+    ))
+    .orderBy(autoHealingRuns.publicationRepairAfter, autoHealingRuns.id)
+    .limit(capped);
+  return rows.map(rowToRecord);
+}
+
+/**
  * Watcher-side: rows stuck in `validating` for longer than
  * `staleHours` get auto-declined with reason `validation_timeout`.
  * Returns the count of rows that were swept so the watcher can log.
@@ -561,6 +793,14 @@ export async function getDeadLetterIdsWithExistingRun(
 }
 
 // ─── Audit (private) ────────────────────────────────────────────────────────
+
+async function runAuditedTransition<T>(
+  handler: (tx: DrizzleTx, audit: TxAudit) => Promise<T>,
+): Promise<T> {
+  const outcome = await withAuditTx(handler);
+  if (!outcome.ok) throw new Error(outcome.error);
+  return outcome.result;
+}
 
 async function writeAudit(
   orgId: string,

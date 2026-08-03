@@ -1,0 +1,19 @@
+{
+  "runStatus": "succeeded",
+  "nodes": {
+    "gate": {
+      "status": "succeeded",
+      "attempts": 1
+    },
+    "yes": {
+      "status": "succeeded",
+      "attempts": 1
+    },
+    "no": {
+      "status": "skipped",
+      "attempts": 0
+    }
+  },
+  "outputJson": null,
+  "deadLetters": 0
+}

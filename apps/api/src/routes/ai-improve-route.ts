@@ -59,15 +59,16 @@ export const aiImproveRoutes: Route[] = [
       }
 
       const workflow = parsed.data;
-      // Display identity, layout, and template failure policy are operator-
-      // authored controls, not part of an LLM's semantic improvement remit.
-      // Keep them out of the prompt and restore the originals after validating
-      // each full replacement.
+      // Display identity, layout, template behavior, and recovery policy are
+      // operator-authored controls, not part of an LLM's improvement remit.
+      // Keep them out of the prompt and restore them after validating each
+      // full replacement.
       const workflowForImprovement: Workflow = {
         ...workflow,
         nodes: workflow.nodes.map(({ label: _label, ...node }) => node),
         ui: undefined,
         templatePolicy: undefined,
+        recovery: undefined,
       };
       const helperResult: SuggestImprovementResult = await suggestWorkflowImprovement({
         llm,
@@ -119,8 +120,10 @@ export const aiImproveRoutes: Route[] = [
             const reparsed = WorkflowSchema.safeParse(parsedWorkflow);
             if (!reparsed.success) continue;
             const sanitized = preserveAuthoringMetadata(workflow, sanitizeAiWorkflow(reparsed.data));
+            const restored = WorkflowSchema.safeParse(sanitized);
+            if (!restored.success) continue;
             validated.push({
-              workflow: sanitized,
+              workflow: restored.data,
               rationale: item.rationale,
               approachLabel: item.approachLabel,
               confidence: item.confidence,
@@ -207,9 +210,13 @@ export const aiImproveRoutes: Route[] = [
     } },
 ];
 
-/** Keep operator-authored labels, layout, and failure policy stable across AI replacements. */
+/** Keep operator-authored labels, layout, and runtime policies stable across AI replacements. */
 function preserveAuthoringMetadata(original: Workflow, suggestion: Workflow): Workflow {
-  const { templatePolicy: _suggestedTemplatePolicy, ...suggestionWithoutPolicy } = suggestion
+  const {
+    templatePolicy: _suggestedTemplatePolicy,
+    recovery: _suggestedRecovery,
+    ...suggestionWithoutPolicy
+  } = suggestion
   const originalNodes = new Map(original.nodes.map(node => [node.id, node]))
   const nodes = suggestion.nodes.map(({ label: _suggestedLabel, ...node }) => {
     const label = originalNodes.get(node.id)?.label
@@ -224,5 +231,6 @@ function preserveAuthoringMetadata(original: Workflow, suggestion: Workflow): Wo
     nodes,
     ...(Object.keys(positions).length > 0 ? { ui: { positions } } : { ui: undefined }),
     ...(original.templatePolicy ? { templatePolicy: original.templatePolicy } : {}),
+    ...(original.recovery ? { recovery: original.recovery } : {}),
   }
 }

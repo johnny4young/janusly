@@ -9,11 +9,13 @@ import {
 import { consumeRecoveryFocusDay } from './recovery-day-focus-bus'
 import {
   buildGreeting,
+  countActiveRecoveryBlockers,
   computeRecommendedActions,
   humanizeAge,
+  listActiveRuns,
   readErrorSignature,
   type RecommendedActionSignals,
-} from './recovery-center/helpers'
+} from './recovery-center/recovery-center-model'
 
 vi.mock('../api', () => ({ api: vi.fn() }))
 
@@ -53,14 +55,28 @@ const baseProps = {
   runNodes: [],
   deadLetters: [],
   onOpenTab: vi.fn(),
+  onOpenRecoveryCase: vi.fn(),
   onOpenRun: vi.fn(),
-  onApproveNode: vi.fn(),
   onOpenRecoveryQueue: vi.fn(),
 }
 
 const baseMetrics = {
   successRate: { value: 87, display: '87%', severity: 'healthy', rationale: 'Workflow success rate' },
-  mttr: { value: 12, display: '12m', severity: 'warn', rationale: 'Mean time to recovery' },
+  verifiedRecovery: {
+    value: 7 * 60_000,
+    display: '7m',
+    severity: 'warn',
+    rationale: 'Verified recovery median',
+    rationaleCode: 'verified_recovery.summary',
+    rationaleMeta: { count: 3, p50: '7m', p90: '12m' },
+    definitionVersion: '1',
+    metric: 'time_to_verified_recovery',
+    unit: 'milliseconds',
+    sampleSize: 3,
+    p50Ms: 7 * 60_000,
+    p90Ms: 12 * 60_000,
+  },
+  mttr: { value: 12, display: '12m', severity: 'warn', rationale: 'Legacy mean time to recovery' },
   p95Latency: { value: 240, display: '240ms', severity: 'healthy', rationale: 'p95 latency' },
   approvalsPending: { value: 0, display: '0', severity: 'healthy', rationale: 'No human action waiting' },
   replayRate: { value: 78, display: '78%', severity: 'healthy', rationale: 'Replay success rate' },
@@ -100,6 +116,65 @@ const baseValidation = {
   byFailureMode: [],
 }
 
+type ApiMockHandler = (
+  path: string,
+  options?: unknown,
+) => Promise<unknown>
+
+function mockRecoveryApi(handler: ApiMockHandler) {
+  const settleValue = async (
+    loader: () => Promise<unknown>,
+  ): Promise<{ status: 'ok'; value: unknown } | { status: 'unavailable' }> => {
+    try {
+      return { status: 'ok', value: await loader() }
+    } catch {
+      return { status: 'unavailable' }
+    }
+  }
+  const settle = (path: string, options?: unknown) =>
+    settleValue(() => handler(path, options))
+  const queue = async (options?: unknown) => {
+    const counts = await handler('/dlq/counts', options) as { open?: unknown }
+    const open = counts?.open
+    if (typeof open !== 'number' || !Number.isInteger(open) || open < 0) {
+      throw new Error('invalid queue counts')
+    }
+    const page = open > 0
+      ? await handler('/dlq/queue?status=open&sort=oldest&limit=1', options) as { items?: unknown }
+      : { items: [] }
+    return {
+      counts,
+      oldestOpen: Array.isArray(page?.items) ? page.items[0] ?? null : null,
+    }
+  }
+
+  vi.mocked(api).mockImplementation(async (path: string, options?: unknown) => {
+    if (path !== '/recovery/home' && path !== '/recovery/home?scope=impact') {
+      return handler(path, options)
+    }
+    const impact = {
+      ledger: await settle('/recovery/ledger', options),
+      wins: await settle('/recovery/my-wins?days=30', options),
+      queue: await settleValue(() => queue(options)),
+    }
+    const sections = path.endsWith('scope=impact')
+      ? impact
+      : {
+          metrics: await settle('/recovery/metrics', options),
+          clusters: await settle('/dlq/clusters', options),
+          heatmap: await settle('/recovery/heatmap?days=90', options),
+          validation: await settle('/recovery/validation?windowDays=30', options),
+          cases: await settle('/recovery/cases?limit=50', options),
+          ...impact,
+        }
+    return {
+      scope: path.endsWith('scope=impact') ? 'impact' : 'full',
+      generatedAt: '2026-07-28T00:00:00.000Z',
+      sections,
+    }
+  })
+}
+
 beforeEach(() => {
   consumeRecoveryAllClear()
   consumeRecoveryFocusDay()
@@ -113,109 +188,160 @@ beforeEach(() => {
   localStorage.removeItem('janusly:recovery:hideIntro')
   baseProps.onOpenTab = vi.fn()
   baseProps.onOpenRun = vi.fn()
-  baseProps.onApproveNode = vi.fn()
   baseProps.onOpenRecoveryQueue = vi.fn()
 })
 
+async function openHomeInsights() {
+  fireEvent.click(screen.getByTestId('home-insights-toggle'))
+  await screen.findByTestId('home-insights-content')
+}
+
+describe('countActiveRecoveryBlockers', () => {
+  it('counts semantic quarantine from the run projection even when every node is terminal', () => {
+    expect(countActiveRecoveryBlockers([
+      {
+        id: 'run-semantic',
+        status: 'waiting',
+        outcomeStatus: 'semantic_quarantined',
+      },
+    ], [
+      { nodeId: 'answer', status: 'succeeded' },
+    ], 'run-semantic')).toBe(1)
+  })
+
+  it('uses the selected node fallback without double-counting a projected run', () => {
+    const waitingNode = [{ nodeId: 'approval', status: 'waiting' }]
+    expect(countActiveRecoveryBlockers([], waitingNode, 'run-selected')).toBe(1)
+    expect(countActiveRecoveryBlockers([
+      { id: 'run-selected', status: 'waiting' },
+    ], waitingNode, 'run-selected')).toBe(1)
+  })
+
+  it('merges semantic case ids without double-counting the run projection', () => {
+    expect(countActiveRecoveryBlockers([
+      { id: 'run-semantic', status: 'waiting' },
+    ], [], null, ['run-semantic', 'run-other'])).toBe(2)
+  })
+})
+
+describe('listActiveRuns', () => {
+  it('keeps only canonical open statuses, newest first, and respects the limit', () => {
+    const runs = [
+      { id: 'old-running', status: 'running', createdAt: '2026-07-28T10:00:00.000Z' },
+      { id: 'done', status: 'succeeded', createdAt: '2026-07-28T14:00:00.000Z' },
+      { id: 'new-waiting', status: 'waiting', createdAt: '2026-07-28T13:00:00.000Z' },
+      { id: 'created', status: 'created', createdAt: '2026-07-28T12:00:00.000Z' },
+      { id: 'stale-paused', status: 'paused', createdAt: '2026-07-28T15:00:00.000Z' },
+    ]
+
+    expect(listActiveRuns(runs, 2).map((run) => run.id)).toEqual([
+      'new-waiting',
+      'created',
+    ])
+  })
+
+  it('returns no rows for a non-positive limit', () => {
+    expect(listActiveRuns([{ id: 'running', status: 'running' }], 0)).toEqual([])
+  })
+})
+
 // ─────────────────────────────────────────────────────────────────────────
-// computeRecommendedActions — 6 priority-rule fixtures
+// computeRecommendedActions — bounded operational priority fixtures
 // ─────────────────────────────────────────────────────────────────────────
 
 describe('computeRecommendedActions', () => {
+  const signals = (
+    overrides: Partial<RecommendedActionSignals>,
+  ): RecommendedActionSignals => ({
+    openFailures: 0,
+    pendingApprovals: 0,
+    semanticCases: 0,
+    topClusterFrequency: 0,
+    healthScore: 95,
+    ...overrides,
+  })
+
   it('prioritizes pending approvals first when waiting nodes > 0', () => {
-    const signals: RecommendedActionSignals = {
+    const actions = computeRecommendedActions(signals({
       openFailures: 5,
       pendingApprovals: 2,
       topClusterFrequency: 4,
       healthScore: 55,
-      totalRuns: 100,
-    }
-    const actions = computeRecommendedActions(signals)
+    }))
     expect(actions[0]!.id).toBe('resolve_approvals')
     expect(actions[0]!.severity).toBe('warning')
-    expect(actions[0]!.ctaTab).toBe('runs')
+    expect(actions[0]!.ctaTab).toBe('recover')
     expect(actions[0]!.title).toContain('Resolve 2 approval')
   })
 
+  it('surfaces declared business-outcome incidents before diagnostic work', () => {
+    const actions = computeRecommendedActions(signals({
+      semanticCases: 2,
+      topClusterFrequency: 4,
+      healthScore: 55,
+    }))
+    expect(actions[0]!.id).toBe('review_semantic_cases')
+    expect(actions[0]!.severity).toBe('danger')
+    expect(actions[0]!.title).toContain('2 business outcome incidents')
+  })
+
   it('falls through to recover_cluster when no approvals but a frequency-≥2 cluster exists', () => {
-    const actions = computeRecommendedActions({
+    const actions = computeRecommendedActions(signals({
       openFailures: 5,
-      pendingApprovals: 0,
       topClusterFrequency: 4,
       healthScore: 90,
-      totalRuns: 50,
-    })
+    }))
     expect(actions[0]!.id).toBe('recover_cluster')
     expect(actions[0]!.severity).toBe('cobalt')
     expect(actions[0]!.ctaTab).toBe('operations')
     expect(actions[0]!.title).toContain('Recover all 4')
+    expect(actions.some((action) => action.id === 'triage_failures')).toBe(false)
   })
 
   it('falls through to triage_failures when no approvals and no qualifying cluster', () => {
-    const actions = computeRecommendedActions({
+    const actions = computeRecommendedActions(signals({
       openFailures: 3,
-      pendingApprovals: 0,
       topClusterFrequency: 1,
       healthScore: 90,
-      totalRuns: 50,
-    })
+    }))
     expect(actions[0]!.id).toBe('triage_failures')
     expect(actions[0]!.severity).toBe('warning')
-    expect(actions[0]!.title).toContain('triage 3 failure')
+    expect(actions[0]!.title).toBe('Triage Recovery Queue · Open: 3')
   })
 
   it('flags review_workflow_risk with severity danger when health < 60', () => {
-    const actions = computeRecommendedActions({
-      openFailures: 0,
-      pendingApprovals: 0,
-      topClusterFrequency: 0,
+    const actions = computeRecommendedActions(signals({
       healthScore: 45,
-      totalRuns: 50,
-    })
+    }))
     expect(actions[0]!.id).toBe('review_workflow_risk')
     expect(actions[0]!.severity).toBe('danger')
   })
 
   it('flags review_workflow_risk with severity warning when health 60-79', () => {
-    const actions = computeRecommendedActions({
-      openFailures: 0,
-      pendingApprovals: 0,
-      topClusterFrequency: 0,
+    const actions = computeRecommendedActions(signals({
       healthScore: 72,
-      totalRuns: 50,
-    })
+    }))
     expect(actions[0]!.id).toBe('review_workflow_risk')
     expect(actions[0]!.severity).toBe('warning')
   })
 
-  it('surfaces the getting-started demo for new operators with no signals', () => {
-    const actions = computeRecommendedActions({
-      openFailures: 0,
-      pendingApprovals: 0,
-      topClusterFrequency: 0,
-      healthScore: 90,
-      totalRuns: 2,
-    })
-    expect(actions[0]!.id).toBe('run_getting_started')
-    expect(actions[0]!.severity).toBe('cyan')
-    // CTA routes to AI Studio so the operator can draft a real first flow
-    // (the previous "Browse recipes" placeholder pointed at a demo recipe
-    // that doesn't exist).
-    expect(actions[0]!.ctaTab).toBe('copilot')
+  it('caps the priority inbox at three actions', () => {
+    const actions = computeRecommendedActions(signals({
+      openFailures: 5,
+      pendingApprovals: 2,
+      semanticCases: 1,
+      topClusterFrequency: 4,
+      healthScore: 45,
+    }))
+    expect(actions.map((action) => action.id)).toEqual([
+      'resolve_approvals',
+      'review_semantic_cases',
+      'recover_cluster',
+    ])
   })
 
-  it('falls through to healthy_try_studio when every signal is clean', () => {
-    const actions = computeRecommendedActions({
-      openFailures: 0,
-      pendingApprovals: 0,
-      topClusterFrequency: 0,
-      healthScore: 95,
-      totalRuns: 100,
-    })
-    expect(actions).toHaveLength(1)
-    expect(actions[0]!.id).toBe('healthy_try_studio')
-    expect(actions[0]!.severity).toBe('success')
-    expect(actions[0]!.ctaTab).toBe('copilot')
+  it('returns no artificial task when every operational signal is clean', () => {
+    expect(computeRecommendedActions(signals({}))).toEqual([])
   })
 })
 
@@ -224,43 +350,75 @@ describe('computeRecommendedActions', () => {
 // ─────────────────────────────────────────────────────────────────────────
 
 describe('buildGreeting', () => {
+  const semanticClear = {
+    semanticOutcomePosture: 'clear' as const,
+    semanticCaseCount: 0,
+  }
+
   it('says "Good morning" before noon', () => {
-    const g = buildGreeting({ hour: 9, displayName: 'Jane', openFailures: 0, pendingApprovals: 0, healthScore: 95, totalRuns: 10 })
+    const g = buildGreeting({ hour: 9, displayName: 'Jane', openFailures: 0, pendingApprovals: 0, healthScore: 95, totalRuns: 10, ...semanticClear })
     expect(g.salutation).toBe('Good morning, Jane.')
   })
   it('says "Good afternoon" 12-17', () => {
-    const g = buildGreeting({ hour: 14, displayName: 'Jane', openFailures: 0, pendingApprovals: 0, healthScore: 95, totalRuns: 10 })
+    const g = buildGreeting({ hour: 14, displayName: 'Jane', openFailures: 0, pendingApprovals: 0, healthScore: 95, totalRuns: 10, ...semanticClear })
     expect(g.salutation).toBe('Good afternoon, Jane.')
   })
   it('says "Good evening" after 18', () => {
-    const g = buildGreeting({ hour: 20, displayName: 'Jane', openFailures: 0, pendingApprovals: 0, healthScore: 95, totalRuns: 10 })
+    const g = buildGreeting({ hour: 20, displayName: 'Jane', openFailures: 0, pendingApprovals: 0, healthScore: 95, totalRuns: 10, ...semanticClear })
     expect(g.salutation).toBe('Good evening, Jane.')
   })
   it('drops the name filler when displayName is null', () => {
     // Operator with no resolvable name reads cleaner as "Good morning."
     // than "Good morning, there." — the former feels intentional, the
     // latter feels like a stale placeholder.
-    const g = buildGreeting({ hour: 9, displayName: null, openFailures: 0, pendingApprovals: 0, healthScore: null, totalRuns: 0 })
+    const g = buildGreeting({ hour: 9, displayName: null, openFailures: 0, pendingApprovals: 0, healthScore: null, totalRuns: 0, ...semanticClear })
     expect(g.salutation).toBe('Good morning.')
   })
   it('subline reflects approvals waiting', () => {
-    const g = buildGreeting({ hour: 9, displayName: 'J', openFailures: 3, pendingApprovals: 2, healthScore: 80, totalRuns: 50 })
+    const g = buildGreeting({ hour: 9, displayName: 'J', openFailures: 3, pendingApprovals: 2, healthScore: 80, totalRuns: 50, ...semanticClear })
     expect(g.subline).toContain('2 approval')
   })
   it('subline reflects open failures when no approvals', () => {
-    const g = buildGreeting({ hour: 9, displayName: 'J', openFailures: 3, pendingApprovals: 0, healthScore: 80, totalRuns: 50 })
+    const g = buildGreeting({ hour: 9, displayName: 'J', openFailures: 3, pendingApprovals: 0, healthScore: 80, totalRuns: 50, ...semanticClear })
     expect(g.subline).toContain('3 run')
   })
   it('subline celebrates when health ≥ 80 and no signals', () => {
-    const g = buildGreeting({ hour: 9, displayName: 'J', openFailures: 0, pendingApprovals: 0, healthScore: 96, totalRuns: 50 })
+    const g = buildGreeting({ hour: 9, displayName: 'J', openFailures: 0, pendingApprovals: 0, healthScore: 96, totalRuns: 50, ...semanticClear })
     expect(g.subline).toContain('All clear')
+  })
+  it('prioritizes known semantic incidents over clean health signals', () => {
+    const g = buildGreeting({
+      hour: 9,
+      displayName: 'J',
+      openFailures: 0,
+      pendingApprovals: 0,
+      healthScore: 96,
+      totalRuns: 50,
+      semanticOutcomePosture: 'attention',
+      semanticCaseCount: 2,
+    })
+    expect(g.subline).toContain('2 business outcome incidents need review')
+  })
+  it('does not claim a clean posture while semantic outcomes are unavailable', () => {
+    const g = buildGreeting({
+      hour: 9,
+      displayName: 'J',
+      openFailures: 0,
+      pendingApprovals: 0,
+      healthScore: 96,
+      totalRuns: 50,
+      semanticOutcomePosture: 'unavailable',
+      semanticCaseCount: 0,
+    })
+    expect(g.subline).toContain('could not be confirmed')
+    expect(g.subline).not.toContain('All clear')
   })
   it('subline falls to the clean-posture line when no runs yet (the pitch carries the welcome)', () => {
     // The hero pitch right below the greeting already explains what
     // Janusly does — duplicating that with a "Welcome to Janusly" subline
     // wastes attention. New-operator subline now matches the steady-state
     // clean posture: "Recovery posture is clean across the last 30 days."
-    const g = buildGreeting({ hour: 9, displayName: 'J', openFailures: 0, pendingApprovals: 0, healthScore: null, totalRuns: 0 })
+    const g = buildGreeting({ hour: 9, displayName: 'J', openFailures: 0, pendingApprovals: 0, healthScore: null, totalRuns: 0, ...semanticClear })
     expect(g.subline).toContain('Recovery posture is clean')
   })
 })
@@ -291,7 +449,7 @@ describe('helpers', () => {
 // ─────────────────────────────────────────────────────────────────────────
 
 describe('<RecoveryCenterPanel /> — empty state', () => {
-  it('renders urgent metrics without waiting for the contextual heatmap', async () => {
+  it('loads the coordinated Home snapshot through one recovery request', async () => {
     let releaseHeatmap: ((value: unknown) => void) | undefined
     const pendingHeatmap = new Promise((resolve) => { releaseHeatmap = resolve })
     const readyClusters = {
@@ -305,7 +463,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
       totalSamples: 2,
       windowDays: 30,
     }
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return readyClusters
       if (path === '/recovery/heatmap?days=90') return pendingHeatmap
@@ -318,30 +476,81 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
 
     render(<RecoveryCenterPanel {...baseProps} />)
 
-    await waitFor(() => {
-      const calls = vi.mocked(api).mock.calls.map(([path]) => path)
-      expect(calls).toEqual(expect.arrayContaining([
-        '/recovery/metrics',
-        '/dlq/clusters',
-        '/recovery/heatmap?days=90',
-        '/recovery/validation?windowDays=30',
-        '/recovery/ledger',
-        '/recovery/my-wins?days=30',
-      ]))
-      expect(screen.getByTestId('recovery-center-metric-mttr')).toHaveTextContent('12m')
-      expect(screen.getByText('Slow heatmap cluster')).toBeInTheDocument()
-      expect(screen.getByTestId('recovery-validation-section')).toHaveTextContent('1/1')
-    })
+    expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/home')
+    expect(vi.mocked(api)).not.toHaveBeenCalledWith('/recovery/metrics')
+    await openHomeInsights()
+    expect(screen.getByTestId('recovery-center-metric-verified-recovery'))
+      .not.toHaveTextContent('7m')
     await act(async () => {
       releaseHeatmap?.({ days: [] })
       await pendingHeatmap
     })
+    await waitFor(() => {
+      expect(screen.getByTestId('recovery-center-metric-verified-recovery')).toHaveTextContent('7m')
+      expect(screen.getByText('Slow heatmap cluster')).toBeInTheDocument()
+      expect(screen.getByTestId('recovery-validation-section')).toHaveTextContent('1/1')
+    })
+  })
+
+  it('keeps healthy Home sections visible when one wire section is malformed', async () => {
+    const healthyClusters = {
+      clusters: [{
+        signature: 'http:rate-limit',
+        category: 'http_error' as const,
+        frequency: 2,
+        suggestedOwner: 'ops' as const,
+        lastSeen: '2026-07-27T12:00:00.000Z',
+      }],
+      totalSamples: 2,
+      windowDays: 30,
+    }
+    mockRecoveryApi(async (path: string) => {
+      if (path === '/recovery/metrics') {
+        return {
+          ...baseMetrics,
+          replayRate: { ...baseMetrics.replayRate, display: 42 },
+        }
+      }
+      if (path === '/dlq/clusters') return healthyClusters
+      if (path === '/recovery/heatmap?days=90') return { days: [] }
+      if (path === '/recovery/validation?windowDays=30') return baseValidation
+      if (path === '/recovery/cases?limit=50') return { cases: [] }
+      if (path === '/recovery/ledger') {
+        return {
+          totalRecovered: 0,
+          downtimeEndedMs: 0,
+          sinceIso: null,
+        }
+      }
+      if (path === '/recovery/my-wins?days=30') {
+        return { recovered: 0, windowDays: 30 }
+      }
+      if (path === '/dlq/counts') return { open: 0 }
+      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
+        return {
+          allowed: true,
+          monthlyUsdSpent: 0,
+          monthlyUsdLimit: null,
+          policy: 'warn',
+        }
+      }
+      throw new Error(`unexpected fetch: ${path}`)
+    })
+
+    render(<RecoveryCenterPanel {...baseProps} />)
+    await openHomeInsights()
+
+    expect(await screen.findByText('http:rate-limit')).toBeInTheDocument()
+    expect(screen.getByTestId('recovery-validation-section'))
+      .toHaveTextContent('1/1')
+    expect(screen.getByTestId('recovery-center-metric-verified-recovery'))
+      .not.toHaveTextContent('7m')
   })
 
   it('waits for terminal-run history before exposing the walkthrough dismissal', async () => {
     let releaseMetrics: ((value: unknown) => void) | undefined
     const pendingMetrics = new Promise((resolve) => { releaseMetrics = resolve })
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return pendingMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -352,21 +561,29 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
 
     render(<RecoveryCenterPanel {...baseProps} />)
-    expect(screen.queryByTestId('recovery-flow-demo')).not.toBeInTheDocument()
+    await openHomeInsights()
+    expect(screen.queryByTestId('recovery-lab-entry')).not.toBeInTheDocument()
 
     releaseMetrics?.({ ...baseMetrics, terminalRuns: 0 })
-    expect(await screen.findByTestId('recovery-flow-demo')).toBeInTheDocument()
+    expect(await screen.findByTestId('recovery-lab-entry')).toBeInTheDocument()
   })
 
   it('does not render a previous organization snapshot during an org switch', async () => {
     let releaseFirstMetrics: ((value: unknown) => void) | undefined
     const firstMetrics = new Promise((resolve) => { releaseFirstMetrics = resolve })
     let metricsCalls = 0
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') {
         metricsCalls += 1
         if (metricsCalls === 1) return firstMetrics
-        return { ...baseMetrics, mttr: { ...baseMetrics.mttr, value: 22, display: '22m' } }
+        return {
+          ...baseMetrics,
+          verifiedRecovery: {
+            ...baseMetrics.verifiedRecovery,
+            value: 22 * 60_000,
+            display: '22m',
+          },
+        }
       }
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -377,24 +594,33 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
 
     const { rerender } = render(<RecoveryCenterPanel {...baseProps} />)
+    await openHomeInsights()
     await waitFor(() => expect(metricsCalls).toBe(1))
     activeOrgId = 'org-b'
     rerender(<RecoveryCenterPanel {...baseProps} />)
+    await openHomeInsights()
     await waitFor(() => {
       expect(metricsCalls).toBe(2)
-      expect(screen.getByTestId('recovery-center-metric-mttr')).toHaveTextContent('22m')
+      expect(screen.getByTestId('recovery-center-metric-verified-recovery')).toHaveTextContent('22m')
     })
 
-    releaseFirstMetrics?.({ ...baseMetrics, mttr: { ...baseMetrics.mttr, value: 99, display: '99m' } })
+    releaseFirstMetrics?.({
+      ...baseMetrics,
+      verifiedRecovery: {
+        ...baseMetrics.verifiedRecovery,
+        value: 99 * 60_000,
+        display: '99m',
+      },
+    })
     await Promise.resolve()
-    expect(screen.getByTestId('recovery-center-metric-mttr')).not.toHaveTextContent('99m')
+    expect(screen.getByTestId('recovery-center-metric-verified-recovery')).not.toHaveTextContent('99m')
   })
 
   it('does not render a previous organization metrics error during an org switch', async () => {
     let releaseSecondMetrics: ((value: unknown) => void) | undefined
     const secondMetrics = new Promise((resolve) => { releaseSecondMetrics = resolve })
     let metricsCalls = 0
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') {
         metricsCalls += 1
         if (metricsCalls === 1) throw new Error('Org A metrics failed')
@@ -409,18 +635,19 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
 
     const { rerender } = render(<RecoveryCenterPanel {...baseProps} />)
-    expect(await screen.findByText(/Org A metrics failed/)).toBeInTheDocument()
+    await openHomeInsights()
+    expect(await screen.findByText(/Metrics unavailable/i)).toBeInTheDocument()
 
     activeOrgId = 'org-b'
     rerender(<RecoveryCenterPanel {...baseProps} />)
-    expect(screen.queryByText(/Org A metrics failed/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Metrics unavailable/i)).not.toBeInTheDocument()
 
     releaseSecondMetrics?.(baseMetrics)
     await waitFor(() => expect(metricsCalls).toBe(2))
   })
 
   it('keeps a fresh-workspace dismissal session-only', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return { ...baseMetrics, terminalRuns: 0 }
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -431,14 +658,15 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
 
     render(<RecoveryCenterPanel {...baseProps} />)
-    fireEvent.click(await screen.findByTestId('recovery-flow-demo-dismiss'))
+    await openHomeInsights()
+    fireEvent.click(await screen.findByTestId('recovery-lab-entry-dismiss'))
 
     expect(dismissRecoveryIntroThisSession).toHaveBeenCalledOnce()
     expect(localStorage.getItem('janusly:recovery:hideIntro')).toBeNull()
   })
 
   it('keeps the durable dismissal after real terminal history', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -449,13 +677,14 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
 
     render(<RecoveryCenterPanel {...baseProps} />)
-    fireEvent.click(await screen.findByTestId('recovery-flow-demo-dismiss'))
+    await openHomeInsights()
+    fireEvent.click(await screen.findByTestId('recovery-lab-entry-dismiss'))
 
     expect(localStorage.getItem('janusly:recovery:hideIntro')).toBe('true')
   })
 
   it('renders the welcome hero when no runs / no DLQ / no waiting nodes', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -465,17 +694,20 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
 
     render(<RecoveryCenterPanel {...baseProps} />)
+    await openHomeInsights()
 
     await waitFor(() => {
-      expect(screen.getByTestId('recovery-flow-demo')).toBeInTheDocument()
+      expect(screen.getByTestId('recovery-lab-entry')).toBeInTheDocument()
     })
-    expect(screen.getByText('From failure to fix in one screen.')).toBeInTheDocument()
+    expect(screen.getByText('Create your first recovery evidence.')).toBeInTheDocument()
+    expect(screen.getByText(/no incidents or sample activity/i)).toBeInTheDocument()
+    expect(screen.queryByText(/0x9af2|stripe\.charge|412ms|92 AI/)).toBeNull()
     expect(screen.getByTestId('recovery-center-empty-cta-studio')).toBeInTheDocument()
     expect(screen.getByTestId('recovery-center-empty-cta-recipes')).toBeInTheDocument()
   })
 
   it('opens AI Studio when the empty-state Studio CTA is clicked', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -485,14 +717,15 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
 
     render(<RecoveryCenterPanel {...baseProps} />)
-    await waitFor(() => expect(screen.getByTestId('recovery-flow-demo')).toBeInTheDocument())
+    await openHomeInsights()
+    await waitFor(() => expect(screen.getByTestId('recovery-lab-entry')).toBeInTheDocument())
 
     fireEvent.click(screen.getByTestId('recovery-center-empty-cta-studio'))
     expect(baseProps.onOpenTab).toHaveBeenCalledWith('copilot')
   })
 
   it('opens Recipes when the empty-state Recipes CTA is clicked', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -502,7 +735,8 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
 
     render(<RecoveryCenterPanel {...baseProps} />)
-    await waitFor(() => expect(screen.getByTestId('recovery-flow-demo')).toBeInTheDocument())
+    await openHomeInsights()
+    await waitFor(() => expect(screen.getByTestId('recovery-lab-entry')).toBeInTheDocument())
 
     fireEvent.click(screen.getByTestId('recovery-center-empty-cta-recipes'))
     expect(baseProps.onOpenTab).toHaveBeenCalledWith('templates')
@@ -511,7 +745,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
 
 describe('<RecoveryCenterPanel /> — recovery impact', () => {
   function mockImpactReads(options: { ledgerFails?: boolean; winsFails?: boolean } = {}) {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -539,6 +773,7 @@ describe('<RecoveryCenterPanel /> — recovery impact', () => {
   it('renders lifetime organization value and the authenticated operator wins', async () => {
     mockImpactReads()
     render(<RecoveryCenterPanel {...baseProps} />)
+    await openHomeInsights()
 
     expect(await screen.findByTestId('recovery-lifetime-ledger')).toHaveTextContent(
       'Since day one: 12 failures recovered · 3h 15m of downtime ended',
@@ -551,6 +786,7 @@ describe('<RecoveryCenterPanel /> — recovery impact', () => {
   it('keeps personal wins visible when the lifetime ledger fails independently', async () => {
     mockImpactReads({ ledgerFails: true })
     render(<RecoveryCenterPanel {...baseProps} />)
+    await openHomeInsights()
 
     expect(await screen.findByTestId('recovery-center-personal-wins')).toBeInTheDocument()
     expect(screen.queryByTestId('recovery-lifetime-ledger')).not.toBeInTheDocument()
@@ -559,6 +795,7 @@ describe('<RecoveryCenterPanel /> — recovery impact', () => {
   it('keeps lifetime value visible when personal wins fail independently', async () => {
     mockImpactReads({ winsFails: true })
     render(<RecoveryCenterPanel {...baseProps} />)
+    await openHomeInsights()
 
     expect(await screen.findByTestId('recovery-lifetime-ledger')).toBeInTheDocument()
     expect(screen.queryByTestId('recovery-center-personal-wins')).not.toBeInTheDocument()
@@ -568,7 +805,7 @@ describe('<RecoveryCenterPanel /> — recovery impact', () => {
     let releaseFirstWins: ((value: unknown) => void) | undefined
     const firstWins = new Promise((resolve) => { releaseFirstWins = resolve })
     let winsCalls = 0
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -617,8 +854,8 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     windowDays: 30,
   }
 
-  it('renders the populated recovery metrics and operator tiles', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+  it('keeps priority work above the fold and diagnostics behind one disclosure', async () => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -634,15 +871,13 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       deadLetters={populatedDlq as never}
     />)
 
-    await waitFor(() => {
-      expect(screen.getByTestId('recovery-center-tile-queue')).toBeInTheDocument()
-      expect(screen.getByTestId('recovery-center-tile-clusters')).toBeInTheDocument()
-      expect(screen.getByTestId('recovery-center-tile-approvals')).toBeInTheDocument()
-      expect(screen.getByTestId('recovery-center-tile-actions')).toBeInTheDocument()
-    })
-    expect(screen.getByText('Invoice flow')).toBeInTheDocument()
+    expect(await screen.findByTestId('home-priority-inbox')).toBeInTheDocument()
+    expect(screen.getByTestId('recovery-center-action-resolve_approvals')).toBeInTheDocument()
+    expect(await screen.findByTestId('recovery-center-action-recover_cluster')).toBeInTheDocument()
+    expect(screen.queryByTestId('recovery-center-metric-strip')).not.toBeInTheDocument()
+
+    await openHomeInsights()
     expect(await screen.findByText('Missing secret: GITHUB_TOKEN')).toBeInTheDocument()
-    expect(screen.getByText('Approve invoice')).toBeInTheDocument()
     // SLA attainment metric tile renders from metrics.slaAttainment. Assert on
     // the label + stable testId, not the display value — the count-up animation
     // means the numeric text isn't settled synchronously in jsdom.
@@ -655,10 +890,10 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     expect(screen.getByText('Re-failed after fix')).toBeInTheDocument()
   })
 
-  it('hands Open queue to the focused recovery navigation callback', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+  it('opens the exact oldest visible failure from the priority inbox', async () => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
-      if (path === '/dlq/clusters') return populatedClusters
+      if (path === '/dlq/clusters') return baseClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
         return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn', warningPercent: 80, warningThresholdCrossed: false, exceededAt: null, resolvedScope: null }
       }
@@ -670,13 +905,13 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       runNodes={populatedNodes as never}
       deadLetters={populatedDlq as never}
     />)
-    await waitFor(() => expect(screen.getByTestId('recovery-center-queue-open-all')).toBeInTheDocument())
-    fireEvent.click(screen.getByTestId('recovery-center-queue-open-all'))
-    expect(baseProps.onOpenRecoveryQueue).toHaveBeenCalledOnce()
+    const cta = await screen.findByTestId('recovery-center-action-cta-triage_failures')
+    fireEvent.click(cta)
+    expect(baseProps.onOpenRecoveryQueue).toHaveBeenCalledWith('dlq-1')
   })
 
-  it('routes Open clusters → operations tab', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+  it('routes clustered recovery work to operations', async () => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -690,13 +925,19 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       runNodes={populatedNodes as never}
       deadLetters={populatedDlq as never}
     />)
-    await waitFor(() => expect(screen.getByTestId('recovery-center-clusters-open-all')).toBeInTheDocument())
-    fireEvent.click(screen.getByTestId('recovery-center-clusters-open-all'))
+    fireEvent.click(await screen.findByTestId('recovery-center-action-cta-recover_cluster'))
     expect(baseProps.onOpenTab).toHaveBeenCalledWith('operations')
   })
 
-  it('clicking a recovery-queue row opens the underlying run + Runs tab', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+  it('opens an active workflow directly in Activity', async () => {
+    const activeRun = {
+      id: 'run-active',
+      status: 'running',
+      workflowId: 'workflow-active',
+      workflowName: 'Invoice monitor',
+      createdAt: '2026-07-28T12:00:00.000Z',
+    }
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -706,19 +947,18 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     })
     render(<RecoveryCenterPanel
       {...baseProps}
-      runs={populatedRuns as never}
-      runNodes={populatedNodes as never}
+      runs={[...populatedRuns, activeRun] as never}
+      runNodes={[]}
       deadLetters={populatedDlq as never}
     />)
-    await waitFor(() => expect(screen.getByTestId('recovery-center-queue-row-dlq-1')).toBeInTheDocument())
-    fireEvent.click(screen.getByTestId('recovery-center-queue-row-dlq-1'))
-    // openRun now switches to the runs tab itself (before its fetch resolves),
-    // so the row passes the target tab through instead of a separate onOpenTab.
-    expect(baseProps.onOpenRun).toHaveBeenCalledWith('run-1', 'runs')
+    const row = await screen.findByTestId('home-active-run-run-active')
+    expect(row).toHaveTextContent('Invoice monitor')
+    fireEvent.click(row)
+    expect(baseProps.onOpenRun).toHaveBeenCalledWith('run-active', 'runs')
   })
 
   it('clicking a metric strip cell routes to the expected detail tab', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -732,10 +972,11 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       runNodes={populatedNodes as never}
       deadLetters={populatedDlq as never}
     />)
+    await openHomeInsights()
     await waitFor(() => expect(screen.getByTestId('recovery-center-metric-failures')).toBeInTheDocument())
     fireEvent.click(screen.getByTestId('recovery-center-metric-failures'))
     expect(baseProps.onOpenRecoveryQueue).toHaveBeenCalledOnce()
-    fireEvent.click(screen.getByTestId('recovery-center-metric-mttr'))
+    fireEvent.click(screen.getByTestId('recovery-center-metric-verified-recovery'))
     expect(baseProps.onOpenTab).toHaveBeenLastCalledWith('operations')
     fireEvent.click(screen.getByTestId('recovery-center-metric-approvals'))
     expect(baseProps.onOpenTab).toHaveBeenLastCalledWith('runs')
@@ -743,13 +984,13 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     expect(baseProps.onOpenTab).toHaveBeenLastCalledWith('operations')
   })
 
-  it('drills an MTTR sparkline point into the matching recovery day', async () => {
+  it('drills a verified-recovery trend point into the matching recovery day', async () => {
     const trend = [
       { day: '2026-07-01', seconds: 300 },
       { day: '2026-07-02', seconds: 240 },
       { day: '2026-07-03', seconds: 180 },
     ]
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return { ...baseMetrics, mttrTrend: trend }
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -760,14 +1001,22 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     })
 
     render(<RecoveryCenterPanel {...baseProps} runs={populatedRuns as never} />)
+    await openHomeInsights()
     fireEvent.click(await screen.findByTestId('vitals-sparkline-point-1'))
 
-    expect(baseProps.onOpenTab).toHaveBeenCalledWith('runs')
+    expect(baseProps.onOpenTab).toHaveBeenCalledWith('recover')
     expect(consumeRecoveryFocusDay()).toBe('2026-07-02')
   })
 
-  it('recommended-actions tile leads with the approvals action when approvals are pending', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+  it('leads with approval work and opens the exact waiting run', async () => {
+    const waitingRun = {
+      id: 'run-waiting',
+      status: 'waiting',
+      hasWaitingNodes: true,
+      workflowName: 'Approval workflow',
+      createdAt: '2026-07-28T13:00:00.000Z',
+    }
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -777,18 +1026,17 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     })
     render(<RecoveryCenterPanel
       {...baseProps}
-      runs={populatedRuns as never}
+      runs={[...populatedRuns, waitingRun] as never}
       runNodes={populatedNodes as never}
       deadLetters={populatedDlq as never}
     />)
     await waitFor(() => expect(screen.getByTestId('recovery-center-action-resolve_approvals')).toBeInTheDocument())
-    // The first action's CTA is the "Open runs" routing for approvals.
     fireEvent.click(screen.getByTestId('recovery-center-action-cta-resolve_approvals'))
-    expect(baseProps.onOpenTab).toHaveBeenCalledWith('runs')
+    expect(baseProps.onOpenRun).toHaveBeenCalledWith('run-waiting', 'runs')
   })
 
   it('renders the Recovery Center-greeting header with the user display name', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -818,8 +1066,9 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       day: new Date(todayMs - daysAgo * dayMs).toISOString().slice(0, 10),
       failures: 1,
       recovered: 1,
+      mttrSeconds: 0,
     }))
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') {
@@ -848,7 +1097,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       ...populatedDlq[0],
       createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
     }
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -864,14 +1113,17 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
 
     render(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
 
-    expect(await screen.findByTestId('recovery-center-greeting')).toHaveTextContent('1 run needs recovery')
+    await waitFor(() => {
+      expect(screen.getByTestId('recovery-center-action-triage_failures'))
+        .toHaveTextContent('Triage Recovery Queue · Open: 1')
+    })
     const downtime = await screen.findByTestId('recovery-center-longest-downtime')
     expect(downtime).toHaveTextContent(/5h/)
     expect(downtime).toHaveAttribute('data-severity', 'danger')
   })
 
   it('does not invent a clean streak for a workspace without heatmap activity', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
@@ -883,8 +1135,128 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
 
     render(<RecoveryCenterPanel {...baseProps} />)
 
-    await screen.findByTestId('recovery-flow-demo')
+    await openHomeInsights()
+    await screen.findByTestId('recovery-lab-entry')
     expect(screen.queryByTestId('recovery-center-clean-streak')).toBeNull()
+  })
+})
+
+describe('<RecoveryCenterPanel /> — semantic outcome incidents', () => {
+  it('surfaces semantic work as a priority and opens the exact case', async () => {
+    mockRecoveryApi(async (path: string) => {
+      if (path === '/recovery/metrics') return baseMetrics
+      if (path === '/dlq/clusters') return baseClusters
+      if (path === '/recovery/heatmap?days=90') return { days: [] }
+      if (path === '/recovery/validation?windowDays=30') return baseValidation
+      if (path === '/recovery/cases?limit=50') {
+        return {
+          cases: [
+            {
+              id: 'case-1',
+              orgId: 'default',
+              runId: 'run-1',
+              workflowId: 'workflow-1',
+              workflowVersionId: 'version-1',
+              source: 'semantic_violation',
+              detectorId: 'ai-mode',
+              sourceNodeId: 'answer',
+              detectorKind: 'expression',
+              action: 'quarantine',
+              message: 'AI output is required',
+              detailsJson: ['$.mode must equal "ai"'],
+              state: 'contained',
+              createdBy: 'dev-user',
+              createdAt: '2026-07-27T12:00:00.000Z',
+              updatedAt: '2026-07-27T12:00:00.000Z',
+              resolvedAt: null,
+            },
+            {
+              id: 'case-2',
+              orgId: 'default',
+              runId: 'run-2',
+              workflowId: 'workflow-2',
+              workflowVersionId: 'version-2',
+              source: 'semantic_violation',
+              detectorId: 'review-note',
+              sourceNodeId: 'review',
+              detectorKind: 'schema',
+              action: 'observe',
+              message: 'Review note is missing',
+              detailsJson: ['$.note is required'],
+              state: 'detected',
+              createdBy: 'dev-user',
+              createdAt: '2026-07-27T11:00:00.000Z',
+              updatedAt: '2026-07-27T11:00:00.000Z',
+              resolvedAt: null,
+            },
+          ],
+        }
+      }
+      if (path === '/recovery/ledger') return null
+      if (path === '/recovery/my-wins?days=30') return { recovered: 0, windowDays: 30 }
+      if (path.startsWith('/dlq/counts')) return { open: 0 }
+      if (path.startsWith('/dlq/queue')) return { items: [] }
+      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
+        return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn' }
+      }
+      if (path === '/recovery/calibration-status') {
+        return { enabled: true, windowDays: 30, minimumSampleSize: 20, calibrations: [] }
+      }
+      throw new Error(`unexpected fetch: ${path}`)
+    })
+
+    render(<RecoveryCenterPanel {...baseProps} />)
+
+    const action = await screen.findByTestId('recovery-center-action-review_semantic_cases')
+    expect(action).toHaveTextContent('2 business outcome incidents')
+    expect(screen.getByText('2 business outcome incidents need review.')).toBeVisible()
+    expect(screen.getByTestId('recovery-center-greeting').closest('header'))
+      .not.toHaveAttribute('data-all-clear')
+    fireEvent.click(screen.getByTestId('recovery-center-action-cta-review_semantic_cases'))
+    expect(baseProps.onOpenRecoveryCase).toHaveBeenCalledWith('case-1')
+    expect(api).not.toHaveBeenCalledWith(
+      expect.stringContaining('/resolve'),
+      expect.anything(),
+    )
+  })
+
+  it.each([
+    ['request failure', new Error('semantic projection unavailable')],
+    ['invalid success payload', {}],
+  ])('does not present an all-clear state after a semantic %s', async (_label, semanticResponse) => {
+    mockRecoveryApi(async (path: string) => {
+      if (path === '/recovery/cases?limit=50') {
+        if (semanticResponse instanceof Error) throw semanticResponse
+        return semanticResponse
+      }
+      if (path === '/recovery/metrics') return baseMetrics
+      if (path === '/dlq/clusters') return baseClusters
+      if (path === '/recovery/heatmap?days=90') return { days: [] }
+      if (path === '/recovery/validation?windowDays=30') return baseValidation
+      if (path === '/recovery/ledger') return null
+      if (path === '/recovery/my-wins?days=30') return { recovered: 0, windowDays: 30 }
+      if (path.startsWith('/dlq/counts')) return { open: 0 }
+      if (path.startsWith('/dlq/queue')) return { items: [] }
+      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
+        return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn' }
+      }
+      if (path === '/recovery/calibration-status') {
+        return { enabled: true, windowDays: 30, minimumSampleSize: 20, calibrations: [] }
+      }
+      return null
+    })
+
+    render(<RecoveryCenterPanel {...baseProps} />)
+
+    expect(
+      await screen.findByText(/Business outcome posture could not be confirmed/i),
+    ).toBeVisible()
+    expect(screen.getByTestId('home-health-summary')).toHaveTextContent('Status is incomplete')
+    expect(screen.getByTestId('recovery-center-greeting').closest('header'))
+      .not.toHaveAttribute('data-all-clear')
+    expect(screen.queryByTestId('recovery-center-action-review_semantic_cases')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(bumpPlatformVersion).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -892,10 +1264,11 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
   let recoveryLedger = { totalRecovered: 0, downtimeEndedMs: 0, sinceIso: null as string | null }
 
   function mockAllClearApis() {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return { ...baseMetrics, downtimeEndedMs: 7_200_000 }
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
+      if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/recovery/ledger') return recoveryLedger
       if (path === '/recovery/my-wins?days=30') return { recovered: 0, windowDays: 30 }
       if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
@@ -928,8 +1301,9 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
     recoveryLedger = { totalRecovered: 0, downtimeEndedMs: 0, sinceIso: null }
     mockAllClearApis()
     const { rerender } = render(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
-    await screen.findByTestId('recovery-flow-demo')
-    await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/ledger'))
+    await openHomeInsights()
+    await screen.findByTestId('recovery-lab-entry')
+    await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/home'))
 
     recoveryLedger = {
       totalRecovered: 1,
@@ -954,7 +1328,7 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0)
       })
-      expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/ledger')
+      expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/home')
 
       recoveryLedger = {
         totalRecovered: 1,
@@ -965,7 +1339,6 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
         await vi.advanceTimersByTimeAsync(60_000)
       })
 
-      expect(screen.getByTestId('recovery-lifetime-ledger')).toHaveTextContent('1 failure recovered')
       expect(screen.getByTestId('recovery-center-greeting')).toHaveTextContent(/^All clear$/)
       expect(screen.getByTestId('recovery-center-all-clear-summary')).toHaveTextContent('2m of downtime ended')
     } finally {
@@ -985,22 +1358,22 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0)
       })
-      const ledgerCalls = () => vi.mocked(api).mock.calls
-        .filter(([path]) => path === '/recovery/ledger')
+      const impactCalls = () => vi.mocked(api).mock.calls
+        .filter(([path]) => path === '/recovery/home' || path === '/recovery/home?scope=impact')
         .length
-      expect(ledgerCalls()).toBe(1)
+      expect(impactCalls()).toBe(1)
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(120_000)
       })
-      expect(ledgerCalls()).toBe(1)
+      expect(impactCalls()).toBe(1)
 
       hidden.mockReturnValue(false)
       await act(async () => {
         document.dispatchEvent(new Event('visibilitychange'))
         await vi.advanceTimersByTimeAsync(0)
       })
-      expect(ledgerCalls()).toBe(2)
+      expect(impactCalls()).toBe(2)
     } finally {
       view.unmount()
       hidden.mockRestore()
@@ -1017,10 +1390,11 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
       workflowJson: {}, nodeJson: {}, errorJson: {}, createdAt: new Date().toISOString(),
     }
     const deadLetters = [failure] as never
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return { ...baseMetrics, downtimeEndedMs: 120_000 }
       if (path === '/dlq/clusters') return baseClusters
       if (path === '/recovery/heatmap?days=90') return { days: [] }
+      if (path === '/recovery/cases?limit=50') return { cases: [] }
       if (path === '/recovery/ledger') return recoveryLedger
       if (path === '/recovery/my-wins?days=30') return { recovered: recoveryLedger.totalRecovered, windowDays: 30 }
       if (path === '/dlq/counts') return { open: openCount }
@@ -1036,7 +1410,7 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0)
       })
-      expect(vi.mocked(api)).toHaveBeenCalledWith('/dlq/queue?status=open&sort=oldest&limit=1')
+      expect(vi.mocked(api)).toHaveBeenCalledWith('/recovery/home')
 
       recoveryLedger = {
         totalRecovered: 1,
@@ -1064,6 +1438,7 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
       workflowJson: {}, nodeJson: {}, errorJson: {}, createdAt: new Date().toISOString(),
     }
     const { rerender } = render(<RecoveryCenterPanel {...baseProps} deadLetters={[failure] as never} />)
+    await openHomeInsights()
     await screen.findByTestId('recovery-center-longest-downtime')
 
     recoveryLedger = {
@@ -1073,11 +1448,17 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
     }
     platformVersion = 1
     rerender(<RecoveryCenterPanel {...baseProps} deadLetters={[failure] as never} />)
-    await waitFor(() => expect(screen.getByTestId('recovery-lifetime-ledger')).toHaveTextContent('1 failure recovered'))
+    await waitFor(
+      () => expect(screen.getByTestId('recovery-lifetime-ledger')).toHaveTextContent('1 failure recovered'),
+      { timeout: 5_000 },
+    )
     expect(screen.getByTestId('recovery-center-greeting')).not.toHaveTextContent(/^All clear$/)
 
     rerender(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
-    await waitFor(() => expect(screen.getByTestId('recovery-center-greeting')).toHaveTextContent(/^All clear$/))
+    await waitFor(
+      () => expect(screen.getByTestId('recovery-center-greeting')).toHaveTextContent(/^All clear$/),
+      { timeout: 5_000 },
+    )
     expect(screen.getByTestId('recovery-center-all-clear-summary')).toHaveTextContent('1m of downtime ended')
   })
 
@@ -1087,7 +1468,8 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
 
     render(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
 
-    await screen.findByTestId('recovery-flow-demo')
+    await openHomeInsights()
+    await screen.findByTestId('recovery-lab-entry')
     expect(screen.getByTestId('recovery-center-greeting')).not.toHaveTextContent(/^All clear$/)
     expect(screen.queryByTestId('celebration-burst')).toBeNull()
   })
@@ -1104,14 +1486,15 @@ describe('<RecoveryCenterPanel /> — all-clear moment', () => {
     unmount()
 
     render(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
-    await screen.findByTestId('recovery-flow-demo')
+    await openHomeInsights()
+    await screen.findByTestId('recovery-lab-entry')
     expect(screen.getByTestId('recovery-center-greeting')).not.toHaveTextContent(/^All clear$/)
   })
 })
 
 describe('<RecoveryCenterPanel /> — degraded metrics endpoint', () => {
   it('surfaces a soft warning when /recovery/metrics fails but still renders tiles', async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => {
+    mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') throw new Error('Recovery metrics unavailable')
       if (path === '/dlq/clusters') return baseClusters
       // The Budget tile (5th tile) reads /billing/budget on the same
@@ -1129,6 +1512,7 @@ describe('<RecoveryCenterPanel /> — degraded metrics endpoint', () => {
       runNodes={[]}
       deadLetters={[{ id: 'dlq-x', runId: 'r1', nodeId: 'http', attempt: 1, status: 'open', workflowJson: { name: 'Demo' }, nodeJson: {}, errorJson: { signature: 'HTTP 401' }, createdAt: new Date().toISOString() }] as never}
     />)
+    await openHomeInsights()
 
     await waitFor(() => {
       // Targeted match — the empty-budget tile also exposes role="status"
@@ -1139,7 +1523,7 @@ describe('<RecoveryCenterPanel /> — degraded metrics endpoint', () => {
       expect(banner).toBeDefined()
       expect(banner).toHaveTextContent(/Metrics unavailable/i)
     })
-    // The Recovery Center still renders the populated tiles even when metrics fail.
-    expect(screen.getByTestId('recovery-center-tile-queue')).toBeInTheDocument()
+    expect(screen.getByTestId('home-health-summary')).toHaveTextContent('Status is incomplete')
+    expect(screen.getByTestId('recovery-center-action-triage_failures')).toBeInTheDocument()
   })
 })

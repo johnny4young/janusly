@@ -6,13 +6,23 @@
  * rollback; this panel only renders a defensive projection and bounded inputs.
  */
 
-import { GitBranch, ShieldCheck } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { GitBranch } from 'lucide-react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 
 import { api } from '../api'
 import { tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
 import { useConfirm } from './ConfirmDialog'
+import type {
+  RecoveryQualificationGate,
+} from './WorkflowRecoveryQualification'
+
+const WorkflowRecoveryQualification = lazy(() => import('./WorkflowRecoveryQualification').then(module => ({
+  default: module.WorkflowRecoveryQualification,
+})))
+const WorkflowRolloutStatus = lazy(() => import('./WorkflowRolloutStatus').then(module => ({
+  default: module.WorkflowRolloutStatus,
+})))
 
 type VersionRow = { id: string; version: number }
 type RolloutStatus = 'active' | 'promoted' | 'rolled_back' | 'cancelled'
@@ -125,6 +135,7 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
   const [versions, setVersions] = useState<VersionRow[]>([])
   const [rollout, setRollout] = useState<WorkflowRollout | null>(null)
   const [draft, setDraft] = useState<Draft>(DEFAULT_DRAFT)
+  const [qualificationGate, setQualificationGate] = useState<RecoveryQualificationGate | null>(null)
   const [loading, setLoading] = useState(false)
   const [mutating, setMutating] = useState(false)
 
@@ -132,6 +143,7 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
     if (!workflowId) {
       setVersions([])
       setRollout(null)
+      setQualificationGate(null)
       return
     }
     let cancelled = false
@@ -162,11 +174,19 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
   const baseline = versions.find(version => version.id === rollout?.baselineVersionId)
   const canary = versions.find(version => version.id === rollout?.canaryVersionId)
   const rolloutControlsLatest = Boolean(rollout && latest?.id === rollout.canaryVersionId)
-  const canCreate = versions.length >= 2 && (!rollout || !rolloutControlsLatest)
-  const canaryRate = useMemo(
-    () => rollout ? successRate(rollout.canarySucceeded, rollout.canaryFailed) : null,
-    [rollout],
-  )
+  const qualificationBaselineVersionId = rollout && rolloutControlsLatest
+    ? rollout.baselineVersionId
+    : draft.baselineVersionId
+  const qualificationCandidateVersionId = rollout && rolloutControlsLatest
+    ? rollout.canaryVersionId
+    : latest?.id
+  const canaryRate = rollout
+    ? successRate(rollout.canarySucceeded, rollout.canaryFailed)
+    : null
+
+  useEffect(() => {
+    setQualificationGate(null)
+  }, [qualificationBaselineVersionId, qualificationCandidateVersionId])
 
   if (!workflowId) return null
 
@@ -238,47 +258,48 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
       {loading && <p className="helper-text" role="status">{t('workflowRollout.loading')}</p>}
 
       {!loading && rollout && rolloutControlsLatest && (
-        <div className="we-rollout-panel__status" data-testid="workflow-rollout-status">
-          <div className="we-rollout-panel__versions">
-            <span>{t('workflowRollout.baselineVersion', { version: baseline?.version ?? '?' })}</span>
-            <strong>{t('workflowRollout.trafficToCanary', { percent: rollout.trafficPercent, version: canary?.version ?? '?' })}</strong>
-          </div>
-          <progress
-            className="we-rollout-panel__progress"
-            max={100}
-            value={rollout.trafficPercent}
-            aria-label={t('workflowRollout.trafficProgress')}
+        <Suspense fallback={<p className="helper-text" role="status">{t('workflowRollout.loading')}</p>}>
+          <WorkflowRolloutStatus
+            status={rollout.status}
+            trafficPercent={rollout.trafficPercent}
+            minimumSampleSize={rollout.minimumSampleSize}
+            minimumSuccessRatePercent={rollout.minimumSuccessRatePercent}
+            baselineVersion={baseline?.version}
+            canaryVersion={canary?.version}
+            baselineRuns={rollout.baselineSucceeded + rollout.baselineFailed}
+            canaryRuns={rollout.canarySucceeded + rollout.canaryFailed}
+            canarySuccessRate={canaryRate}
+            readOnly={readOnly}
+            mutating={mutating}
+            onDecide={decision => { void decide(decision) }}
           />
-          <div className="we-rollout-panel__metrics">
-            <div><span>{t('workflowRollout.baselineRuns')}</span><strong>{rollout.baselineSucceeded + rollout.baselineFailed}</strong></div>
-            <div><span>{t('workflowRollout.canaryRuns')}</span><strong>{rollout.canarySucceeded + rollout.canaryFailed}</strong></div>
-            <div><span>{t('workflowRollout.canarySuccess')}</span><strong>{canaryRate === null ? '—' : `${canaryRate.toFixed(1)}%`}</strong></div>
-            <div><span>{t('workflowRollout.guardrail')}</span><strong>≥ {rollout.minimumSuccessRatePercent}% / {rollout.minimumSampleSize}</strong></div>
-          </div>
-          {!readOnly && rollout.status === 'active' && (
-            <div className="we-rollout-panel__actions">
-              <button type="button" className="command-button command-button-primary" disabled={mutating} onClick={() => void decide('promote')}>
-                {t('workflowRollout.promote')}
-              </button>
-              <button type="button" className="command-button command-button-danger" disabled={mutating} onClick={() => void decide('rollback')}>
-                {t('workflowRollout.rollback')}
-              </button>
-            </div>
-          )}
-          {rollout.status !== 'active' && (
-            <p className="we-rollout-panel__decision">
-              <ShieldCheck size={15} aria-hidden="true" />
-              {t(`workflowRollout.decision.${rollout.status}`)}
-            </p>
-          )}
-        </div>
+        </Suspense>
       )}
 
       {!loading && versions.length < 2 && (
         <p className="we-rollout-panel__empty">{t('workflowRollout.needsVersions')}</p>
       )}
 
-      {!readOnly && !loading && canCreate && latest && (
+      {!loading
+        && versions.length >= 2
+        && qualificationBaselineVersionId
+        && qualificationCandidateVersionId && (
+        <Suspense fallback={<p className="helper-text" role="status">{t('workflowRollout.qualification.loading')}</p>}>
+          <WorkflowRecoveryQualification
+            workflowId={workflowId}
+            baselineVersionId={qualificationBaselineVersionId}
+            candidateVersionId={qualificationCandidateVersionId}
+            readOnly={readOnly}
+            onGateChange={setQualificationGate}
+          />
+        </Suspense>
+      )}
+
+      {!readOnly
+        && !loading
+        && versions.length >= 2
+        && (!rollout || !rolloutControlsLatest)
+        && latest && (
         <form className="we-rollout-panel__form" onSubmit={event => { event.preventDefault(); void createRollout() }}>
           <div className="we-rollout-panel__pair">
             <label className="we-field">
@@ -293,21 +314,42 @@ export function WorkflowRolloutPanel({ readOnly = false }: { readOnly?: boolean 
             </div>
           </div>
           <div className="we-rollout-panel__fields">
-            <label className="we-field">
-              <span>{t('workflowRollout.traffic')}</span>
-              <input type="number" min={1} max={50} value={draft.trafficPercent} disabled={mutating} onChange={event => setDraft({ ...draft, trafficPercent: Number(event.target.value) })} />
-            </label>
-            <label className="we-field">
-              <span>{t('workflowRollout.sample')}</span>
-              <input type="number" min={5} max={100} value={draft.minimumSampleSize} disabled={mutating} onChange={event => setDraft({ ...draft, minimumSampleSize: Number(event.target.value) })} />
-            </label>
-            <label className="we-field">
-              <span>{t('workflowRollout.successRate')}</span>
-              <input type="number" min={1} max={100} value={draft.minimumSuccessRatePercent} disabled={mutating} onChange={event => setDraft({ ...draft, minimumSuccessRatePercent: Number(event.target.value) })} />
-            </label>
+            <div className="we-field">
+              <label htmlFor="workflow-rollout-traffic">{t('workflowRollout.traffic')}</label>
+              <span className="we-rollout-panel__input-unit">
+                <input id="workflow-rollout-traffic" type="number" min={1} max={50} value={draft.trafficPercent} disabled={mutating} onChange={event => setDraft({ ...draft, trafficPercent: Number(event.target.value) })} />
+                <span aria-hidden="true">{t('workflowRollout.percentUnit')}</span>
+              </span>
+            </div>
+            <div className="we-field">
+              <label htmlFor="workflow-rollout-minimum-outcomes">{t('workflowRollout.sample')}</label>
+              <input id="workflow-rollout-minimum-outcomes" type="number" min={5} max={100} value={draft.minimumSampleSize} disabled={mutating} onChange={event => setDraft({ ...draft, minimumSampleSize: Number(event.target.value) })} />
+            </div>
+            <div className="we-field">
+              <label htmlFor="workflow-rollout-success-floor">{t('workflowRollout.successRate')}</label>
+              <span className="we-rollout-panel__input-unit">
+                <input id="workflow-rollout-success-floor" type="number" min={1} max={100} value={draft.minimumSuccessRatePercent} disabled={mutating} onChange={event => setDraft({ ...draft, minimumSuccessRatePercent: Number(event.target.value) })} />
+                <span aria-hidden="true">{t('workflowRollout.percentUnit')}</span>
+              </span>
+            </div>
           </div>
           <p className="helper-text">{t('workflowRollout.guardrailHint')}</p>
-          <button type="submit" className="command-button command-button-primary" disabled={mutating || !draft.baselineVersionId}>
+          {qualificationGate?.required && qualificationGate.status !== 'passed' && (
+            <p className="we-rollout-panel__qualification-blocked">
+              {t('workflowRollout.qualification.blockedHint')}
+            </p>
+          )}
+          <button
+            type="submit"
+            className="command-button command-button-primary"
+            disabled={
+              mutating
+              || !draft.baselineVersionId
+              || qualificationGate === null
+              || qualificationGate.loading
+              || (qualificationGate.required && qualificationGate.status !== 'passed')
+            }
+          >
             {mutating ? t('workflowRollout.starting') : t('workflowRollout.start')}
           </button>
         </form>

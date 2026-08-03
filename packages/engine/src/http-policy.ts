@@ -39,6 +39,11 @@
  * `.body` directly. The two callers (`http` node + `http.request` tool)
  * each only consume `statusCode` / `ok` / `body` / `headers`.
  *
+ * Protocol clients that must retain a live response stream (notably MCP SSE
+ * and Streamable HTTP) use `createPinnedHttpFetch`. It applies the same
+ * resolve-and-pin and redirect policy but deliberately leaves timeout and
+ * body framing to the protocol transport.
+ *
  * Used by `node-registry.ts` (`http` node executor) and `tool-registry.ts`
  * (`http.request` tool). Both must go through `fetchHttpTarget` — direct
  * `fetch` / `undici.fetch` calls reopen the DNS-rebinding TOCTOU and skip
@@ -76,22 +81,24 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
  * hand A's credential to B. Same-origin redirects keep their headers.
  */
 const SENSITIVE_REDIRECT_HEADERS = new Set(["authorization", "proxy-authorization", "cookie"]);
+const BODY_REDIRECT_HEADERS = new Set([
+  "content-encoding",
+  "content-language",
+  "content-location",
+  "content-type",
+  "content-length",
+]);
 
 /**
- * Strip credential-bearing headers from `init` when the redirect crosses
- * origins (scheme + host + port). Returns `init` untouched for same-origin
- * hops or when there is nothing to strip. Handles the three `HeadersInit`
- * shapes (`Headers`, entry array, plain record); the stripped result is
+ * Strip selected headers from all three `HeadersInit` shapes. The result is
  * normalized to a plain record, which both `undici.fetch` and global `fetch`
  * accept.
  */
-function stripSensitiveHeadersOnCrossOrigin(
+function stripHeaders(
   init: RequestInit | undefined,
-  fromUrl: string,
-  toUrl: string,
+  names: ReadonlySet<string>,
 ): RequestInit | undefined {
   if (!init?.headers) return init;
-  if (new URL(fromUrl).origin === new URL(toUrl).origin) return init;
 
   const entries: Array<[string, string]> =
     init.headers instanceof Headers
@@ -100,9 +107,49 @@ function stripSensitiveHeadersOnCrossOrigin(
         ? init.headers.map(([name, value]) => [String(name), String(value)] as [string, string])
         : Object.entries(init.headers as Record<string, string>);
 
-  const kept = entries.filter(([name]) => !SENSITIVE_REDIRECT_HEADERS.has(name.toLowerCase()));
+  const kept = entries.filter(([name]) => !names.has(name.toLowerCase()));
   if (kept.length === entries.length) return init;
   return { ...init, headers: Object.fromEntries(kept) };
+}
+
+/**
+ * Credential-bearing request headers must NOT follow a redirect to a
+ * different origin. Same-origin redirects keep them.
+ */
+function stripSensitiveHeadersOnCrossOrigin(
+  init: RequestInit | undefined,
+  fromUrl: string,
+  toUrl: string,
+): RequestInit | undefined {
+  if (new URL(fromUrl).origin === new URL(toUrl).origin) return init;
+  return stripHeaders(init, SENSITIVE_REDIRECT_HEADERS);
+}
+
+/**
+ * Apply fetch-compatible redirect method semantics and cross-origin secret
+ * stripping. 301/302 rewrite POST only; 303 rewrites every method except
+ * GET/HEAD; 307/308 preserve method and body. When a body is dropped, its
+ * representation headers are dropped as well.
+ */
+function redirectRequestInit(
+  status: number,
+  requestInit: RequestInit | undefined,
+  fromUrl: string,
+  toUrl: string,
+): RequestInit | undefined {
+  const method = (requestInit?.method ?? "GET").toUpperCase();
+  const rewriteToGet =
+    ((status === 301 || status === 302) && method === "POST")
+    || (status === 303 && method !== "GET" && method !== "HEAD");
+
+  let nextInit = requestInit;
+  if (rewriteToGet) {
+    nextInit = stripHeaders(
+      { ...(requestInit ?? {}), method: "GET", body: undefined },
+      BODY_REDIRECT_HEADERS,
+    );
+  }
+  return stripSensitiveHeadersOnCrossOrigin(nextInit, fromUrl, toUrl);
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -305,8 +352,115 @@ async function validateAndResolveTarget(rawUrl: unknown): Promise<{ url: string;
  * URL string. Throws on any rejection so callers can surface a 400/403.
  */
 export async function validateHttpTarget(rawUrl: unknown): Promise<string> {
-  const { url } = await validateAndResolveTarget(rawUrl);
+  const { url, agent } = await validateAndResolveTarget(rawUrl);
+  // `validateHttpTarget` performs policy validation only. No request owns the
+  // per-resolution agent, so close it immediately instead of retaining an
+  // unused dispatcher until garbage collection.
+  if (agent) await agent.close();
   return url;
+}
+
+export type PinnedHttpFetch = {
+  fetch: (url: string | URL, init?: RequestInit) => Promise<Response>;
+  /**
+   * Abort any still-live protocol streams and release their per-request
+   * dispatchers. Idempotent.
+   */
+  close(): Promise<void>;
+};
+
+/**
+ * Response-preserving counterpart to `fetchHttpTarget` for protocol clients.
+ *
+ * Every request and redirect hop is resolved, validated, and pinned to the
+ * exact public IP used by the TCP connect. A fresh dispatcher is used per
+ * request so distinct MCP calls cannot inherit a stale DNS decision. The
+ * dispatcher begins graceful retirement as soon as response headers arrive;
+ * undici keeps the body stream alive and completes retirement when the caller
+ * consumes or cancels it. `close()` force-destroys any active streams.
+ *
+ * This helper intentionally does not impose the ordinary HTTP timeout or body
+ * cap: an SSE response is expected to remain open, and MCP message framing is
+ * owned by the SDK transport. Redirect count and credential stripping remain
+ * bounded and mandatory.
+ */
+export function createPinnedHttpFetch(options: { maxRedirects?: number } = {}): PinnedHttpFetch {
+  const maxRedirects = nonNegativeIntOrFallback(options.maxRedirects, defaultMaxRedirects());
+  const activeAgents = new Set<Agent>();
+  let closed = false;
+
+  function retireAgent(agent: Agent) {
+    void agent.close()
+      .catch(() => undefined)
+      .finally(() => activeAgents.delete(agent));
+  }
+
+  async function fetchHop(
+    rawUrl: string | URL,
+    requestInit: RequestInit | undefined,
+    redirectsRemaining: number,
+  ): Promise<Response> {
+    if (closed) throw new Error("Pinned HTTP fetch is closed");
+
+    const { url, agent } = await validateAndResolveTarget(rawUrl.toString());
+    // `close()` can race a slow DNS lookup. Do not let the just-created
+    // dispatcher escape after shutdown or start a request the owning MCP
+    // client can no longer cancel.
+    if (closed) {
+      if (agent) await agent.destroy().catch(() => undefined);
+      throw new Error("Pinned HTTP fetch is closed");
+    }
+    const baseInit: RequestInit = {
+      ...(requestInit ?? {}),
+      redirect: "manual",
+    };
+
+    let response: Response;
+    if (agent) {
+      activeAgents.add(agent);
+      try {
+        response = (await undiciFetch(url, {
+          ...baseInit,
+          dispatcher: agent,
+        } as Parameters<typeof undiciFetch>[1])) as unknown as Response;
+      } catch (error) {
+        activeAgents.delete(agent);
+        await agent.destroy().catch(() => undefined);
+        throw error;
+      }
+      // Graceful close waits for the active response body. It prevents the
+      // per-request agent from retaining an idle socket after the SDK drains
+      // the JSON or SSE stream.
+      retireAgent(agent);
+    } else {
+      response = await globalThis.fetch(url, baseInit);
+    }
+
+    if (!REDIRECT_STATUSES.has(response.status)) return response;
+
+    const location = response.headers.get("location");
+    if (!location) return response;
+
+    try { await response.body?.cancel(); } catch { /* best effort */ }
+    if (redirectsRemaining <= 0) {
+      throw new Error(`HTTP redirect limit exceeded; last hop ${url} -> ${location}`);
+    }
+
+    const nextUrl = new URL(location, url).toString();
+    const nextInit = redirectRequestInit(response.status, requestInit, url, nextUrl);
+    return fetchHop(nextUrl, nextInit, redirectsRemaining - 1);
+  }
+
+  return {
+    fetch: (url, init) => fetchHop(url, init, maxRedirects),
+    async close() {
+      if (closed) return;
+      closed = true;
+      const agents = [...activeAgents];
+      activeAgents.clear();
+      await Promise.allSettled(agents.map((agent) => agent.destroy()));
+    },
+  };
 }
 
 /** Already-consumed result of `fetchHttpTarget` in the default `bodyMode: "buffer"` path. The body has been read, capped, and decoded — callers can't sidestep the byte cap. */
@@ -712,16 +866,7 @@ async function fetchOneHop(
     }
 
     const nextUrl = new URL(location, url).toString();
-    // Per HTTP spec: 301/302/303 coerce method to GET and drop the body for
-    // historical browser-compat reasons; 307/308 preserve method + body.
-    let nextInit: RequestInit | undefined = requestInit;
-    if (res.status === 301 || res.status === 302 || res.status === 303) {
-      nextInit = { ...(requestInit ?? {}), method: "GET", body: undefined };
-    }
-    // Credential headers never follow a cross-origin redirect (fetch-spec
-    // behavior). Applied AFTER the method coercion so the stripped init is
-    // what actually flows to the next hop — and to every hop after it.
-    nextInit = stripSensitiveHeadersOnCrossOrigin(nextInit, url, nextUrl);
+    const nextInit = redirectRequestInit(res.status, requestInit, url, nextUrl);
 
     return fetchOneHop(nextUrl, nextInit, controller, maxBytes, redirectsRemaining - 1, bodyMode);
   }

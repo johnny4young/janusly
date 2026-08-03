@@ -13,7 +13,7 @@
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react'
 
 import { useT } from '../../i18n'
-import { buildHeatmapCells, type HeatmapCell, type HeatmapDay } from './helpers'
+import { buildHeatmapCells, type HeatmapCell, type HeatmapDay } from './recovery-center-model'
 
 export function RecoveryHeatmap({
   days,

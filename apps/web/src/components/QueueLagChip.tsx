@@ -56,7 +56,7 @@ export function parseQueueHealthOverview(value: unknown): QueueHealthOverview {
   return { workflow, maintenance }
 }
 
-/** Delayed and unavailable snapshots both deserve the Reliability dot. */
+/** Delayed and unavailable snapshots both deserve the Infrastructure dot. */
 export function queueNeedsAttention(health: QueueHealth | null): boolean {
   return health === null
     || (health.oldestWaitingSeconds !== null

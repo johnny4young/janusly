@@ -46,7 +46,7 @@ export function resolveWaitUntilDelay(config: unknown, nowMs = Date.now()): numb
 }
 
 /** Executor for the `wait_until` node — schedules the wake-up and returns the waiting checkpoint. */
-export const waitUntilExecutor: NodeExecutor = async (ctx) => {
+export const waitUntilExecutor: NodeExecutor<"wait_until"> = async (ctx) => {
   const schedule = resolveWaitUntilSchedule(ctx.config);
   await enqueueWaitUntilResume(ctx.runId, ctx.nodeId, schedule.delayMs);
   return {

@@ -139,7 +139,7 @@ export function ReplayCampaignsCard({ canCancel = true }: { canCancel?: boolean 
                     <small>{new Date(campaign.createdAt).toLocaleString(getResolvedLocale())}</small>
                   </div>
                 </div>
-                <span className="we-pill" data-tone={tone}>{t(`replayCampaign.status.${campaign.status}` as never)}</span>
+                <span className="we-pill" data-tone={tone}>{t(`replayCampaign.status.${campaign.status}`)}</span>
               </div>
               <div
                 className="we-replay-campaign__progress"

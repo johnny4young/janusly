@@ -5,6 +5,7 @@ import type {
   NodeExecutorRegistry,
   QueueAdapter,
 } from './types'
+import type { Workflow } from '@janusly/shared'
 
 // Mock the data repos the runtime imports so tests don't reach Postgres.
 // Each mock returns a benign no-op default; individual tests can override
@@ -52,6 +53,11 @@ function makeStore(overrides: Partial<ExecutionStore> = {}): ExecutionStore {
     markQueuePublicationSucceeded: vi.fn().mockResolvedValue(true),
     markNodeSucceeded: vi.fn().mockResolvedValue(true),
     markNodeSucceededWithEvent: vi.fn().mockResolvedValue(true),
+    markNodeSucceededWithOutcome: vi.fn().mockResolvedValue({
+      completed: true,
+      quarantined: false,
+      caseIds: [],
+    }),
     markNodeFailed: vi.fn().mockResolvedValue(true),
     markNodeWaiting: vi.fn().mockResolvedValue(true),
     markNodeSkipped: vi.fn().mockResolvedValue(undefined),
@@ -83,6 +89,67 @@ function makeFailingExecutors(error = new Error('temporary outage')): NodeExecut
 const node = { id: 'n1', type: 'noop' as const, config: {} }
 const workflow = { dslVersion: '1.0' as const, nodes: [node], edges: [] }
 const input = { runId: 'r1', node, workflow }
+
+function semanticWorkflow(): Workflow {
+  return {
+    ...workflow,
+    recovery: {
+      contract: {
+        version: '2',
+        failure: {
+          technical: {
+            terminalNodeFailure: true,
+            stalledNode: true,
+          },
+          semantic: {
+            mode: 'deterministic',
+            detectors: [{
+              id: 'ai-mode',
+              sourceNodeId: 'n1',
+              kind: 'expression',
+              passWhen: 'context.n1.output.mode === "ai"',
+              action: 'quarantine',
+              message: 'AI output is required',
+            }],
+            evaluationFixtures: [
+              {
+                id: 'ai-mode-pass',
+                sourceNodeId: 'n1',
+                output: { mode: 'ai' },
+                expected: 'pass',
+              },
+              {
+                id: 'ai-mode-fail',
+                sourceNodeId: 'n1',
+                output: { mode: 'fallback' },
+                expected: 'violation',
+              },
+            ],
+          },
+        },
+        evidence: {
+          required: [
+            'failure_snapshot',
+            'audit_trail',
+            'terminal_outcome',
+          ],
+        },
+        effects: [],
+        repairs: { allowed: ['retry'] },
+        validation: { minimumEvidenceLevel: 'static' },
+        approval: {
+          productionMutation: 'required',
+          permission: 'recovery.write',
+        },
+        autonomyLevel: 3,
+        verification: {
+          kind: 'generation_bound_terminal_success',
+        },
+        recurrence: { windowDays: 7 },
+      },
+    },
+  }
+}
 
 describe('executeQueuedNode — cancellation guards', () => {
   beforeEach(() => vi.clearAllMocks())
@@ -139,6 +206,48 @@ describe('executeQueuedNode — cancellation guards', () => {
     expect(store.markNodeSucceededWithEvent).toHaveBeenCalledWith('r1', 'n1', { x: 1 }, 1, undefined)
     // appendEvent still fires for node.running (and enqueueReadyNodes events).
     expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'node.running' }))
+  })
+
+  it('atomically quarantines an unacceptable semantic outcome before downstream publication', async () => {
+    const store = makeStore({
+      getRunStatus: vi.fn().mockResolvedValue('waiting'),
+      markNodeSucceededWithOutcome: vi.fn().mockResolvedValue({
+        completed: true,
+        quarantined: true,
+        caseIds: ['sem-1'],
+      }),
+    })
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(
+      store,
+      queue,
+      makeExecutors({
+        status: 'completed',
+        output: { mode: 'fallback' },
+      }),
+    )
+    const withContract = semanticWorkflow()
+
+    await runtime.executeQueuedNode({
+      runId: 'r1',
+      node,
+      workflow: withContract,
+    })
+
+    expect(store.markNodeSucceededWithOutcome).toHaveBeenCalledWith(
+      'r1',
+      'n1',
+      { mode: 'fallback' },
+      1,
+      [expect.objectContaining({
+        detectorId: 'ai-mode',
+        action: 'quarantine',
+      })],
+      undefined,
+    )
+    expect(store.markNodeSucceededWithEvent).not.toHaveBeenCalled()
+    expect(store.updateRunStatusFromNodes).not.toHaveBeenCalled()
+    expect(queue.enqueueNode).not.toHaveBeenCalled()
   })
 
   it('stops a stale recovery generation before success events or downstream scheduling', async () => {
@@ -654,6 +763,21 @@ describe('enqueueReadyNodes — cancellation head guard', () => {
     expect(store.tryClaimNodeForQueue).not.toHaveBeenCalled()
   })
 
+  it('returns 0 immediately while a semantic quarantine keeps the run waiting', async () => {
+    const store = makeStore({
+      getRunStatus: vi.fn().mockResolvedValue('waiting'),
+    })
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(store, queue, makeExecutors())
+
+    expect(
+      await runtime.enqueueReadyNodes({ runId: 'r1', workflow }),
+    ).toBe(0)
+    expect(store.getRunContext).not.toHaveBeenCalled()
+    expect(store.tryClaimNodeForQueue).not.toHaveBeenCalled()
+    expect(queue.enqueueNode).not.toHaveBeenCalled()
+  })
+
   it('requeues a pending root restored by the publication reconciler', async () => {
     const store = makeStore({
       getRunContext: vi.fn().mockResolvedValue({ n1: { status: 'pending' } }),
@@ -825,6 +949,90 @@ describe('enqueueReadyNodes — snapshot-based readiness', () => {
     const queued = await runtime.enqueueReadyNodes({ runId: 'r1', workflow: cascade })
 
     expect(store.markNodeSkipped).toHaveBeenCalledWith('r1', 'b', { reason: 'Condition not met' })
+    expect(queued).toBe(1)
+    expect(queue.enqueueNode).toHaveBeenCalledWith(expect.objectContaining({ nodeId: 'c' }))
+  })
+
+  it('queues a dependent declared BEFORE the node the scan skips (hostile declaration order)', async () => {
+    // Regression — stuck-run shape: nodes declared [gate, b, a] with
+    // gate→a carrying a false condition and a→b unconditional. A single
+    // declaration-order pass visits b first (dep a still pending → not
+    // ready), THEN skips a. b is ready from that moment, but the scan has
+    // already passed it: queued === 0, updateRunStatusFromNodes sees b
+    // still pending → the run stays "running" and nothing ever triggers
+    // another scan. The scan must loop to a fixpoint so an in-scan skip
+    // unblocks dependents regardless of where they sit in the node array.
+    const hostile = {
+      dslVersion: '1.0' as const,
+      nodes: [
+        { id: 'gate', type: 'noop' as const, config: {} },
+        { id: 'b', type: 'noop' as const, config: {} }, // declared before its dep
+        { id: 'a', type: 'noop' as const, config: {} },
+      ],
+      edges: [
+        { from: 'gate', to: 'a', condition: 'false' },
+        { from: 'a', to: 'b' },
+      ],
+    }
+    const store = makeStore({
+      getRunContext: vi.fn().mockResolvedValue({
+        gate: { status: 'succeeded' },
+        b: { status: 'pending' },
+        a: { status: 'pending' },
+      }),
+    })
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(store, queue, makeExecutors())
+
+    const queued = await runtime.enqueueReadyNodes({ runId: 'r1', workflow: hostile })
+
+    expect(store.markNodeSkipped).toHaveBeenCalledWith('r1', 'a', { reason: 'Condition not met' })
+    expect(queued).toBe(1)
+    expect(queue.enqueueNode).toHaveBeenCalledWith(expect.objectContaining({ nodeId: 'b' }))
+    // One snapshot, one claim — the fixpoint loop must not re-read the
+    // context or re-claim an already-queued node on its no-change pass.
+    expect(store.getRunContext).toHaveBeenCalledTimes(1)
+    expect(store.tryClaimNodeForQueue).toHaveBeenCalledTimes(1)
+    // The scan queued work, so it must NOT run the terminal rollup that
+    // would have (wrongly) left the run parked as "running".
+    expect(store.updateRunStatusFromNodes).not.toHaveBeenCalled()
+  })
+
+  it('converges a multi-level skip cascade in fully reversed declaration order', async () => {
+    // gate→a (false) skips a; a→b (false) then skips b; b→c (unconditional,
+    // and a skipped predecessor satisfies its edge) queues c. Declared
+    // [c, b, a, gate] — every dependent precedes its dependency — so the
+    // fixpoint needs one extra pass per cascade level, not just one rescan.
+    const reversed = {
+      dslVersion: '1.0' as const,
+      nodes: [
+        { id: 'c', type: 'noop' as const, config: {} },
+        { id: 'b', type: 'noop' as const, config: {} },
+        { id: 'a', type: 'noop' as const, config: {} },
+        { id: 'gate', type: 'noop' as const, config: {} },
+      ],
+      edges: [
+        { from: 'gate', to: 'a', condition: 'false' },
+        { from: 'a', to: 'b', condition: 'false' },
+        { from: 'b', to: 'c' },
+      ],
+    }
+    const store = makeStore({
+      getRunContext: vi.fn().mockResolvedValue({
+        c: { status: 'pending' },
+        b: { status: 'pending' },
+        a: { status: 'pending' },
+        gate: { status: 'succeeded' },
+      }),
+    })
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(store, queue, makeExecutors())
+
+    const queued = await runtime.enqueueReadyNodes({ runId: 'r1', workflow: reversed })
+
+    expect(store.markNodeSkipped).toHaveBeenCalledWith('r1', 'a', { reason: 'Condition not met' })
+    expect(store.markNodeSkipped).toHaveBeenCalledWith('r1', 'b', { reason: 'Condition not met' })
+    expect(store.markNodeSkipped).toHaveBeenCalledTimes(2)
     expect(queued).toBe(1)
     expect(queue.enqueueNode).toHaveBeenCalledWith(expect.objectContaining({ nodeId: 'c' }))
   })

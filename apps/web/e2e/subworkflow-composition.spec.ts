@@ -1,5 +1,6 @@
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 
 const API_URL = process.env.E2E_API_URL ?? 'http://localhost:3001'
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
@@ -12,8 +13,7 @@ type RunSnapshot = {
 
 const locales = {
   en: {
-    flows: 'Flows',
-    stepSetup: 'Step setup',
+    flows: 'Workflows',
     version: 'Version pin',
     pinned: /Pinned to exact version v\d+\. Clear the field to follow latest\./,
     latest: 'Leave blank to use the latest saved version at run time.',
@@ -21,7 +21,6 @@ const locales = {
   },
   es: {
     flows: 'Flujos',
-    stepSetup: 'Configuración de paso',
     version: 'Versión fija',
     pinned: /Fijado en la versión exacta v\d+\. Borra el campo para seguir la última\./,
     latest: 'Déjalo vacío para usar la última versión guardada al ejecutar.',
@@ -104,7 +103,11 @@ async function openVersionField(
   const row = page.getByTestId(`workflows-row-${workflowId}`)
   await expect(row).toContainText(workflowName)
   await row.click()
-  await page.getByRole('button', { name: contract.stepSetup, exact: true }).click()
+  await openWorkspaceSection(
+    page,
+    contract.flows,
+    locale === 'en' ? 'Build' : 'Crear',
+  )
   await page.locator('.react-flow__node[data-id="call-child"] .workflow-node').click()
   const surface = page.getByTestId('inspector-node-call-child').getByTestId('subworkflow-version-field')
   return { field: surface.getByLabel(contract.version), surface }

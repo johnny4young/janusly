@@ -1,7 +1,7 @@
 /**
  * Zero-dependency path catalogs for the stable `/v1` API lane.
  *
- * Used by `apps/api/src/api-contracts.ts` and `apps/web/src/api.ts`. Keeping the
+ * Used by `apps/api/src/contracts/*` and `apps/web/src/api.ts`. Keeping the
  * values here prevents the browser transport map from drifting from OpenAPI.
  */
 
@@ -10,6 +10,8 @@ export const V1_READ_PATHS = {
   recoveryMetrics: "/recovery/metrics",
   recoveryLedger: "/recovery/ledger",
   recoveryMyWins: "/recovery/my-wins",
+  recoveryCases: "/recovery/cases",
+  recoveryCase: "/recovery/cases/{caseId}",
   templates: "/templates",
   tools: "/tools",
   workflows: "/workflows",
@@ -37,9 +39,12 @@ export const V1_WRITE_PATHS = {
   saveWorkflow: "/workflows/save",
   rollbackWorkflow: "/workflows/rollback",
   startRun: "/start",
+  redriveRun: "/runs/redrive",
   resumeRun: "/resume",
   cancelRun: "/run/cancel",
+  resumeWorkflow: "/workflows/{workflowId}/resume",
   replayDeadLetter: "/dlq/replay",
+  recoverSemanticCase: "/recovery/cases/{caseId}/resolve",
 } as const;
 
 export type V1WritePath = typeof V1_WRITE_PATHS[keyof typeof V1_WRITE_PATHS];

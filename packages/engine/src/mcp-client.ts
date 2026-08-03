@@ -12,16 +12,14 @@
  *    third-party MCP server cannot read `DATABASE_URL` or any other
  *    `process.env` value the worker carries.
  *  - `createSseMcpClient({url, headers})` opens a legacy SSE
- *    connection to a remote MCP server. The URL is validated up-front
- *    through the same target-policy validator that backs
- *    `fetchHttpTarget`, so localhost / private-IP / link-local targets
- *    are rejected before the SDK transport is constructed. The SDK
- *    transport still owns the actual SSE fetch path.
+ *    connection to a remote MCP server. The URL is validated up-front,
+ *    then every SDK fetch is routed through Janusly's response-preserving
+ *    pinned fetch adapter so validation and TCP connect use the same IP.
  *  - `createHttpMcpClient({url, headers})` opens a Streamable HTTP
  *    connection (the canonical MCP transport per the June 2025 spec;
- *    supersedes SSE). Same SSRF gate as `sse`, same headers
- *    pass-through. The SDK's `StreamableHTTPClientTransport` owns the
- *    POST + optional SSE wire format.
+ *    supersedes SSE). Same SSRF and DNS-rebinding posture as `sse`, same
+ *    headers pass-through. The SDK's `StreamableHTTPClientTransport`
+ *    owns the POST + optional SSE wire format.
  *
  * The factory itself does NOT call `connect()` — the caller does that
  * inside a try/finally so `close()` always runs even if the connect
@@ -52,7 +50,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { validateHttpTarget } from "./http-policy";
+import { createPinnedHttpFetch, validateHttpTarget } from "./http-policy";
 import {
   buildSandboxProfile,
   captureRedactedStderr,
@@ -299,36 +297,29 @@ export function createStdioMcpClient(input: StdioClientInput): McpClient {
 }
 
 /**
- * SSE MCP client. The URL is validated through `validateHttpTarget`'s
- * SSRF chokepoint immediately before the transport opens so private-
- * IP / localhost / link-local targets are rejected up-front.
- *
- * Known v1 limitation: the SDK's SSE transport uses Node's global
- * `fetch` (and the `eventsource` package for the server-sent-events
- * stream), neither of which goes through the pinned `undici.Agent`
- * dispatcher that `fetchHttpTarget` uses for `http` nodes +
- * `http.request` tool. The TCP connect runs a fresh DNS lookup
- * separate from `validateHttpTarget`'s validation pass, so a slow
- * DNS-rebinding attack between validation and connect (microseconds
- * apart, but not zero) could land on a private IP that validation
- * rejected. Follow-up hardening should fork the eventsource transport
- * or write a custom SSE reader that routes through the same pinned
- * dispatcher. For v1, the operator's deliberate URL registration +
- * the up-front `validateHttpTarget` call are the perimeter.
+ * SSE MCP client. The URL is validated through `validateHttpTarget` before
+ * the transport is constructed. Both the EventSource stream and recurring
+ * POSTs use `createPinnedHttpFetch`, closing the DNS validation/connect gap
+ * while preserving the SDK's long-lived response handling.
  */
 export async function createSseMcpClient(input: {
   url: string;
   headers?: Record<string, string>;
 }): Promise<McpClient> {
-  // Reject private-IP / localhost / link-local targets before we open
-  // the SSE stream. The SDK still owns the actual fetch path, so this
-  // does not inherit fetchHttpTarget's pinned dispatcher.
-  await validateHttpTarget(input.url);
-  const url = new URL(input.url);
-  const transport = new SSEClientTransport(url, {
-    requestInit: input.headers ? { headers: input.headers } : undefined,
-  });
-  return buildClient(transport);
+  const pinned = createPinnedHttpFetch();
+  try {
+    await validateHttpTarget(input.url);
+    const url = new URL(input.url);
+    const transport = new SSEClientTransport(url, {
+      requestInit: input.headers ? { headers: input.headers } : undefined,
+      fetch: pinned.fetch,
+      eventSourceInit: { fetch: pinned.fetch },
+    });
+    return buildClient(transport, { onClose: pinned.close });
+  } catch (error) {
+    await pinned.close();
+    throw error;
+  }
 }
 
 /**
@@ -336,39 +327,39 @@ export async function createSseMcpClient(input: {
  * 2025-06-18; supersedes `sse`). The URL is validated through the
  * same `validateHttpTarget` SSRF chokepoint immediately before the
  * transport opens so private-IP / localhost / link-local / metadata
- * targets are rejected up-front.
+ * targets are rejected up-front. Every SDK request then runs through
+ * `createPinnedHttpFetch`, which revalidates and pins each connect and
+ * every redirect hop.
  *
  * Wire shape: a single HTTPS endpoint that accepts JSON-RPC over POST
  * and optionally opens an SSE stream (server-to-client GET) for
  * server-initiated messages. The SDK's `StreamableHTTPClientTransport`
- * owns both halves; this factory only wires the URL + headers.
- *
- * Known v1 limitation: same as `createSseMcpClient` — the SDK's HTTP
- * fetch path does NOT go through the pinned `undici.Agent` dispatcher
- * that `fetchHttpTarget` uses for `http` nodes + `http.request` tool.
- * The TCP connect runs a fresh DNS lookup separate from
- * `validateHttpTarget`'s validation pass, so a slow DNS-rebinding
- * attack between validation and connect (microseconds apart, but not
- * zero) could land on a private IP that validation rejected. Same
- * follow-up applies to both transports.
+ * owns both halves; this factory wires the URL, headers, and secure fetch.
  */
 export async function createHttpMcpClient(input: {
   url: string;
   headers?: Record<string, string>;
 }): Promise<McpClient> {
-  await validateHttpTarget(input.url);
-  const url = new URL(input.url);
-  const transport = new StreamableHTTPClientTransport(url, {
-    requestInit: input.headers ? { headers: input.headers } : undefined,
-  });
-  return buildClient(transport);
+  const pinned = createPinnedHttpFetch();
+  try {
+    await validateHttpTarget(input.url);
+    const url = new URL(input.url);
+    const transport = new StreamableHTTPClientTransport(url, {
+      requestInit: input.headers ? { headers: input.headers } : undefined,
+      fetch: pinned.fetch,
+    });
+    return buildClient(transport, { onClose: pinned.close });
+  } catch (error) {
+    await pinned.close();
+    throw error;
+  }
 }
 
 type BuildClientHooks = {
   /** Stdio transports register their stderr capture + lifetime timer on first connect. */
   onConnect?: () => void;
-  /** Stdio transports clear timers + remove the ephemeral cwd on close. */
-  onClose?: () => void;
+  /** Release transport-specific resources after the SDK client closes. */
+  onClose?: () => void | Promise<void>;
   /** Returns the sandbox snapshot for `client.getSandboxSnapshot()`. */
   snapshot?: () => SandboxClientSnapshot;
   /** Read-only view of the sandbox kill flags so we can map SDK errors. */
@@ -389,13 +380,17 @@ function buildClient(
     { capabilities: {} },
   );
   let connected = false;
+  let connectAttempted = false;
+  let closed = false;
 
   async function ensureConnected(): Promise<void> {
     if (connected) return;
+    if (closed) throw new Error("MCP client is closed");
     // The Client.connect signature accepts the Transport; we type-erase
     // here because the SDK exposes Transport via a structural interface
     // that doesn't survive `import type` in our build.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    connectAttempted = true;
     await client.connect(transport as any);
     connected = true;
     if (hooks.onConnect) hooks.onConnect();
@@ -452,21 +447,20 @@ function buildClient(
       }
     },
     async close() {
-      if (!connected) {
-        // Always run cleanup hooks even if connect never succeeded —
-        // the sandbox layer allocated a cwd in the factory before any
-        // connect attempt, so that dir needs removing regardless.
-        if (hooks.onClose) hooks.onClose();
-        return;
-      }
+      if (closed) return;
+      closed = true;
       try {
-        await client.close();
+        // A connect attempt may open a child process or socket before the SDK
+        // rejects initialization. Close the client even when `connected` was
+        // never set so partially-open transports do not leak.
+        if (connectAttempted) await client.close();
       } catch {
         // Closing a partially-connected transport may throw; the caller
         // already has the error from the failed operation. Drop silently.
+      } finally {
+        connected = false;
+        if (hooks.onClose) await hooks.onClose();
       }
-      connected = false;
-      if (hooks.onClose) hooks.onClose();
     },
     getSandboxSnapshot: hooks.snapshot ? () => hooks.snapshot!() : undefined,
   };

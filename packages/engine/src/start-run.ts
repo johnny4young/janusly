@@ -2,12 +2,12 @@
  * `startRun` — bootstrap one run of a workflow.
  *
  * Wraps the `runs` insert + the batch `runNodes` insert + the `run.started`
- * event in a single Drizzle transaction. AGENTS.md invariant: don't split
- * this back into per-node inserts — the atomicity is what guarantees a
- * partially-started run never escapes to the queue.
+ * event in a single Drizzle transaction. Keep these writes together: the
+ * atomicity guarantees that a partially-started run never escapes to the
+ * queue.
  *
  * Used by:
- * - `apps/api/src/routes/runs-routes.ts` `POST /start` — primary caller.
+ * - `apps/api/src/routes/run-routes/lifecycle.ts` `POST /start` — primary caller.
  * - `apps/api/src/routes/trigger-ingest-routes.ts` — inbound event starts and
  *   claimed-event backfill.
  * - `packages/engine/src/resume-run.ts` — for restart-from-checkpoint paths.
@@ -192,6 +192,8 @@ export async function startRun(workflow: StartableWorkflow) {
       parentNodeId: workflow.parentNodeId ?? null,
       parentLinkKind: workflow.parentCheckpoint ? "subworkflow" : null,
       replayMode: workflow.replayMode ?? null,
+      validationEvidenceLevel:
+        workflow.replayMode === "validation" ? "static" : null,
       // Every root run gets a correlation id up front; subworkflows pass the
       // inherited value so the whole chain remains copyable as one trace.
       traceId: workflow.traceId ?? crypto.randomUUID(),

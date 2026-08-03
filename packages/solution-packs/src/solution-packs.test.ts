@@ -32,6 +32,16 @@ describe("solution packs catalog", () => {
       failureMode: "upstream_unavailable",
       recoveryPath: "stalled_node_reaper",
     }).success).toBe(false);
+    expect(FailureFixtureSchema.safeParse({
+      ...base,
+      failureMode: "worker_stalled",
+      recoveryPath: "runtime_failure",
+    }).success).toBe(false);
+    expect(FailureFixtureSchema.safeParse({
+      ...base,
+      failureMode: "contract_drift",
+      recoveryPath: "runtime_failure",
+    }).success).toBe(false);
   });
 
   it("loads the three ICP packs with unique ids", () => {
@@ -120,6 +130,9 @@ describe("solution packs catalog", () => {
         if (fixture.recoveryPath === "direct_failure") {
           expect(fixture.errorJson, `${pack.id}:${fixture.id} direct error`).toBeTypeOf("object");
           expect(fixture.failureMode, `${pack.id}:${fixture.id} direct mode`).not.toBe("worker_stalled");
+        } else if (fixture.recoveryPath === "runtime_failure") {
+          expect(fixture, `${pack.id}:${fixture.id} runtime path`).not.toHaveProperty("errorJson");
+          expect(fixture.failureMode, `${pack.id}:${fixture.id} safe runtime mode`).toBe("credential_unavailable");
         } else {
           expect(fixture, `${pack.id}:${fixture.id} must not bypass the reaper`).not.toHaveProperty("errorJson");
           expect(fixture.failureMode, `${pack.id}:${fixture.id} reaper mode`).toBe("worker_stalled");
@@ -129,14 +142,29 @@ describe("solution packs catalog", () => {
     }
   });
 
-  it("covers every deterministic failure mode in the catalog", () => {
+  it("keeps public drills on real local runtime boundaries", () => {
     const covered = new Set(packs.flatMap((pack) => pack.failureFixtures.map((fixture) => fixture.failureMode)));
-    expect([...covered].sort()).toEqual([...SOLUTION_PACK_FAILURE_MODES].sort());
+    expect([...covered].sort()).toEqual(["credential_unavailable", "worker_stalled"]);
+    expect(SOLUTION_PACK_FAILURE_MODES).toEqual(expect.arrayContaining([...covered]));
+    for (const pack of packs) {
+      expect(pack.failureFixtures.some((fixture) => fixture.recoveryPath === "runtime_failure"), pack.id).toBe(true);
+      expect(pack.failureFixtures.some((fixture) => fixture.recoveryPath === "direct_failure"), pack.id).toBe(false);
+    }
   });
 
-  it("covers every supported recovery path in the catalog", () => {
+  it("keeps legacy direct fixtures schema-compatible without publishing them", () => {
     const covered = new Set(packs.flatMap((pack) => pack.failureFixtures.map((fixture) => fixture.recoveryPath)));
-    expect([...covered].sort()).toEqual([...SOLUTION_PACK_RECOVERY_PATHS].sort());
+    expect([...covered].sort()).toEqual(["runtime_failure", "stalled_node_reaper"]);
+    expect(SOLUTION_PACK_RECOVERY_PATHS).toContain("direct_failure");
+    expect(FailureFixtureSchema.safeParse({
+      id: "historical",
+      label: "Historical fixture",
+      description: "Retained only so old persisted provenance remains readable.",
+      failureMode: "upstream_unavailable",
+      recoveryPath: "direct_failure",
+      failedNodeId: "node-1",
+      errorJson: { message: "historical" },
+    }).success).toBe(true);
   });
 
   it("every pack has at least one sample payload and one failure fixture", () => {

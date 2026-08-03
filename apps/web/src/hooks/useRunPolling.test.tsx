@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { useRunPolling } from './useRunPolling'
+import type { RunSummaryUpdateStarter } from './useBootstrapData'
 
 vi.mock('../api', () => ({ api: vi.fn() }))
 
@@ -11,12 +12,14 @@ function Harness({
   runId,
   onTerminal = vi.fn(),
   captureLoadStatus,
+  beginRunSummaryUpdate = () => () => true,
 }: {
   runId: string | null
   onTerminal?: () => void
   captureLoadStatus?: (loadStatus: (id: string) => Promise<unknown>) => void
+  beginRunSummaryUpdate?: RunSummaryUpdateStarter
 }) {
-  const { loadStatus } = useRunPolling(runId, onTerminal, vi.fn())
+  const { loadStatus } = useRunPolling(runId, onTerminal, beginRunSummaryUpdate)
   useEffect(() => {
     captureLoadStatus?.(loadStatus)
   }, [captureLoadStatus, loadStatus])
@@ -157,5 +160,27 @@ describe('useRunPolling request ownership', () => {
     })
 
     expect(useWorkflowStore.getState().runNodes).toEqual([{ nodeId: 'node-a', status: 'succeeded' }])
+  })
+
+  it('reserves summary ownership before awaiting the status response', async () => {
+    let resolveStatus!: (value: unknown) => void
+    vi.mocked(api).mockImplementation(() => new Promise(resolve => { resolveStatus = resolve }))
+    useWorkflowStore.setState({ runId: 'run-a' })
+    const commit = vi.fn(() => true)
+    const beginRunSummaryUpdate = vi.fn(() => commit)
+
+    render(
+      <Harness
+        runId="run-a"
+        beginRunSummaryUpdate={beginRunSummaryUpdate}
+      />,
+    )
+    await waitFor(() => expect(api).toHaveBeenCalledTimes(1))
+    expect(beginRunSummaryUpdate).toHaveBeenCalledWith('run-a')
+
+    await act(async () => {
+      resolveStatus({ run: { id: 'run-a', status: 'running' } })
+    })
+    expect(commit).toHaveBeenCalledWith({ id: 'run-a', status: 'running' })
   })
 })

@@ -531,6 +531,10 @@ a { color: var(--we-primary); }
   min-height: 0;
 }
 
+.workspace-grid--authoring {
+  grid-template-columns: 300px minmax(480px, 1fr) minmax(320px, 360px);
+}
+
 /* When the right panel is hidden (Recovery Center / home tab), the main
    column expands across the column the panel used to occupy so the Recovery Center
    reads as a hero landing page instead of a stripe in the middle of the
@@ -545,6 +549,9 @@ a { color: var(--we-primary); }
    `html[data-sidebar-collapsed]` so the outer grid column can shrink too. */
 html[data-sidebar-collapsed="true"] .workspace-grid {
   grid-template-columns: 56px minmax(460px, 1fr) 420px;
+}
+html[data-sidebar-collapsed="true"] .workspace-grid--authoring {
+  grid-template-columns: 56px minmax(480px, 1fr) minmax(320px, 360px);
 }
 html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   grid-template-columns: 56px 1fr;
@@ -1104,27 +1111,124 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   cursor: default;
 }
 
-/* AI Studio node palette — draggable-step chips over the canvas (mirrors the
-   .canvas-toolbar glass treatment). Only mounts when WorkflowCanvas receives
-   paletteNodeTypes + onAddNode (AI Studio), so other tabs are unaffected. */
-.canvas-palette {
+/* One authoring entry for every step type. The searchable menu stays inside
+   the lazy canvas chunk so the catalog never grows the application boot path. */
+.canvas-step-picker {
   position: absolute;
   top: 16px;
   left: 220px;
-  z-index: 3;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px 10px;
-  background: var(--we-surface-glass);
-  border: 1px solid var(--we-line);
-  border-radius: 8px;
-  box-shadow: 0 10px 28px -18px var(--we-shadow-ink-35);
-  backdrop-filter: blur(10px);
-  max-width: calc(100% - 236px);
+  z-index: 4;
 }
 
-.canvas-palette .sb-chip { grid-template-columns: 1fr; }
+.canvas-step-picker__trigger {
+  background: var(--we-surface-glass);
+}
+
+.canvas-step-picker__trigger[aria-expanded="true"] {
+  background: var(--we-primary-soft);
+  border-color: var(--we-primary);
+  color: var(--we-primary);
+}
+
+.canvas-step-picker__menu {
+  background: var(--we-surface);
+  border: 1px solid var(--we-line-strong);
+  border-radius: 12px;
+  display: grid;
+  gap: 10px;
+  left: 0;
+  max-height: calc(100vh - 190px);
+  overflow: hidden;
+  padding: 12px;
+  position: absolute;
+  top: calc(100% + 7px);
+  width: 380px;
+}
+
+.canvas-step-picker__menu[data-dragging="true"] {
+  opacity: 0.18;
+  pointer-events: none;
+}
+
+.canvas-step-picker__head {
+  align-items: flex-start;
+  display: flex;
+  justify-content: space-between;
+}
+
+.canvas-step-picker__head strong,
+.canvas-step-picker__head small {
+  display: block;
+}
+
+.canvas-step-picker__head strong {
+  font-size: 13px;
+}
+
+.canvas-step-picker__head small {
+  color: var(--we-muted);
+  font-size: 11px;
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
+.canvas-step-picker__groups {
+  display: grid;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.canvas-step-picker__group {
+  display: grid;
+  gap: 5px;
+}
+
+.canvas-step-picker__group > span {
+  color: var(--we-muted);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.canvas-step-picker__group > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.canvas-step-picker__group button {
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  display: grid;
+  gap: 2px;
+  min-height: 52px;
+  padding: 8px;
+  text-align: left;
+}
+
+.canvas-step-picker__group button:hover {
+  background: var(--we-primary-soft);
+  border-color: var(--we-primary);
+}
+
+.canvas-step-picker__group button strong {
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.canvas-step-picker__group button small {
+  color: var(--we-muted);
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.canvas-step-picker__empty {
+  color: var(--we-muted);
+  font-size: 12px;
+  margin: 10px 0;
+  text-align: center;
+}
 
 .workflow-minimap {
   border: 1px solid var(--we-line-strong);
@@ -1132,6 +1236,3 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   box-shadow: 0 12px 30px -22px var(--we-shadow-ink-45);
   overflow: hidden;
 }
-
-.sb-chip[draggable="true"] { cursor: grab; }
-.sb-chip[draggable="true"]:active { cursor: grabbing; }

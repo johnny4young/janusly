@@ -78,6 +78,7 @@ import {
   applyConfigPatchToWorkflow,
   applyStructuralPatchToWorkflow,
 } from "./patch-workflow-merge";
+import { rankRecoverySuggestions } from "./recovery-suggestion-ranking";
 import { sanitizeAiWorkflow } from "./ai-runtime";
 
 /** The deterministic BullMQ scheduler id for the recurring scan. */
@@ -411,9 +412,7 @@ function mergeFirstValidSuggestion(input: {
     confidence: number;
   }>;
 }): { workflow: Workflow; approachLabel: string; confidence: number } | null {
-  // Sort by confidence descending — same posture as the dialog's per-suggestion
-  // sort, so the auto-healing path picks the LLM's top choice.
-  const sorted = [...input.suggestions].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+  const sorted = rankRecoverySuggestions(input.suggestions);
   for (const suggestion of sorted) {
     try {
       const merged =

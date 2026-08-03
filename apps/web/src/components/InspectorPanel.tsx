@@ -17,17 +17,18 @@ import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
 import { AiUsageFooter } from './AiUsageFooter'
 import { useConfirm } from './ConfirmDialog'
-import { pickErrorMessage } from './recovery-dialog/helpers'
+import { pickErrorMessage } from './recovery-dialog/recovery-dialog-model'
 import { QuickConfigEditor } from './QuickConfigEditor'
-import { ExpressionAssistant } from './ExpressionAssistant'
+import { BranchRuleEditor } from './BranchRuleEditor'
 import {
   AUTHORING_FOCUS_EVENT,
   consumeAuthoringFocus,
   parseAuthoringFocusEvent,
   type AuthoringFocusRequest,
 } from './authoring-focus-bus'
+import { loadWorkflowIoEditor } from './workflow-io-loader'
 
-const WorkflowIoEditor = React.lazy(() => import('./WorkflowIoEditor').then(module => ({ default: module.WorkflowIoEditor })))
+const WorkflowIoEditor = React.lazy(() => loadWorkflowIoEditor().then(module => ({ default: module.WorkflowIoEditor })))
 
 type InspectorPanelProps = {
   readOnly?: boolean
@@ -305,9 +306,9 @@ export function InspectorPanel({
         <div className="section-kicker">{t('rightPanel.inspector.pathKicker')}</div>
         <h3>{t('rightPanel.inspector.pathTitle', { source: selectedEdge.source, target: selectedEdge.target })}</h3>
         <fieldset className="we-fieldset" disabled={readOnly}>
-          <ExpressionAssistant
+          <BranchRuleEditor
             key={selectedEdge.id}
-            id="edge-condition"
+            id={`edge-${selectedEdge.id}-branch-rule`}
             label={t('rightPanel.inspector.runOnlyWhen')}
             value={selectedEdge.data?.condition ?? ''}
             onChange={(value) => onUpdateEdgeCondition(selectedEdge.id, value)}

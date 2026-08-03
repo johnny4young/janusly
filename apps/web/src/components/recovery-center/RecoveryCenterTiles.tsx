@@ -2,64 +2,44 @@
  * Recovery Center tile family.
  *
  * All tiles share the `RecoveryCenterTile` shell (header + body + optional
- * footer link) and the `AllClearState` empty-state, so co-locating them in
- * one file is cleaner than eight micro-files. Each tile takes its data as
- * props from the composer (`../RecoveryCenterPanel.tsx`) — no tile
- * re-fetches what the panel already holds, except `BudgetTile` and
- * `CalibrationHealthTile`, which each own a distinct read-only endpoint
- * the panel does not fetch.
+ * footer link) and the `AllClearState` empty-state. These are secondary
+ * insight tiles only; operational queue, approval, and semantic-case rows
+ * belong to Activity or their exact workspaces. Most tiles take data from
+ * Home, while `BudgetTile` and `CalibrationHealthTile` own distinct
+ * read-only endpoints that the Home snapshot does not fetch.
  *
- * Pure presentational logic lives in `./helpers.ts` (`readWorkflowName`,
- * `readErrorSignature`, `humanizeAge`, `clusterCategoryLabel`,
- * `clusterOwnerLabel`, `budgetBand`).
+ * Pure presentational logic lives in `recovery-center-model.ts`.
  *
- * Used by `../RecoveryCenterPanel.tsx`.
+ * Used by `HomeInsights.tsx`.
  */
 
 import React, { useEffect, useState } from 'react'
 import {
-  AlertTriangle,
-  ArrowRight,
   BarChart3,
-  Check,
-  CheckSquare,
   ChevronRight,
   CircleCheck,
   Coins,
-  Compass,
   Eye,
   Gauge,
-  Inbox,
-  Layers,
-  PlayCircle,
-  ShieldAlert,
-  Sparkles,
-  Users,
 } from 'lucide-react'
-import type { ActiveTab, RunNode, RunSummary } from '../../types'
+import type { ActiveTab } from '../../types'
 import { api } from '../../api'
 import { useWorkflowStore } from '../../store'
 import { getResolvedLocale, useT } from '../../i18n'
 import { requestOperationsSection } from '../operations-section-bus'
-import { approachLabelDisplay } from '../recovery-dialog/helpers'
+import { selectRecoveryTimeMetric } from '../recovery-metrics'
+import { approachLabelDisplay } from '../recovery-dialog/recovery-dialog-model'
 import type { PatchApproachLabel } from '../recovery-dialog/types'
-import type { DeadLetter } from '../DeadLettersPanel'
 import {
   budgetBand,
   type CalibrationStatusEnvelope,
   clusterCategoryLabel,
   clusterOwnerLabel,
-  downtimeSeverity,
-  humanizeAge,
-  readErrorSignature,
-  readWorkflowName,
   type BudgetEnvelope,
   type FailureCluster,
-  type RecommendedAction,
-  type RecommendedActionId,
   type RecommendedActionSeverity,
   type RecoveryMetrics,
-} from './helpers'
+} from './recovery-center-model'
 
 // ─────────────────────────────────────────────────────────────────────────
 // RecoveryCenterTile — the shared shell every tile renders into.
@@ -142,6 +122,7 @@ export function OperatorTodayTile({
   onOpenTab: (tab: ActiveTab) => void
 }) {
   const { t } = useT()
+  const recoveryTime = metrics ? selectRecoveryTimeMetric(metrics) : null
   return (
     <RecoveryCenterTile
       title={t('recoveryCenter.tile.today.title')}
@@ -177,90 +158,10 @@ export function OperatorTodayTile({
         </div>
         <div className="we-operator-mini__cell">
           <div className="we-operator-mini__lbl">{t('recoveryCenter.tile.today.mttr')}</div>
-          <div className="we-operator-mini__val">{metrics?.mttr.display ?? '—'}</div>
+          <div className="we-operator-mini__val">{recoveryTime?.display ?? '—'}</div>
           <div className="we-operator-mini__delta">{t('recoveryCenter.tile.today.pending')} {waitingNodes}</div>
         </div>
       </div>
-    </RecoveryCenterTile>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// RecoveryQueueTile — top open dead-letters.
-// ─────────────────────────────────────────────────────────────────────────
-
-export function RecoveryQueueTile({
-  deadLetters,
-  runs,
-  nowMs,
-  onOpenRun,
-  onOpenQueue,
-}: {
-  deadLetters: DeadLetter[]
-  runs: RunSummary[]
-  nowMs: number | null
-  onOpenRun: (runId: string, targetTab?: ActiveTab) => void | Promise<void>
-  onOpenQueue: () => void
-}) {
-  const { t } = useT()
-  const top = deadLetters.slice(0, 3)
-  return (
-    <RecoveryCenterTile
-      title={t('recoveryCenter.tile.queue.title')}
-      kicker={t('recoveryCenter.tile.queue.kicker')}
-      severity={deadLetters.length === 0 ? 'success' : 'warning'}
-      icon={<Inbox size={18} aria-hidden="true" />}
-      testId="recovery-center-tile-queue"
-      footer={(
-        <button
-          type="button"
-          className="we-recovery-center-tile__link"
-          onClick={onOpenQueue}
-          data-testid="recovery-center-queue-open-all"
-        >
-          {t('recoveryCenter.tile.queue.openAll')} <ChevronRight size={14} aria-hidden="true" />
-        </button>
-      )}
-    >
-      {top.length === 0 ? (
-        <AllClearState
-          message={t('recoveryCenter.tile.queue.empty')}
-          testId="recovery-center-queue-allclear"
-        />
-      ) : (
-        <ul className="we-recovery-center-rows">
-          {top.map((dlq) => {
-            const workflowName = readWorkflowName(dlq, runs)
-            const signature = readErrorSignature(dlq.errorJson)
-            const age = humanizeAge(dlq.createdAt, nowMs)
-            const ageSeverity = downtimeSeverity(dlq.createdAt, nowMs)
-            return (
-              <li key={dlq.id}>
-                <button
-                  type="button"
-                  className="we-recovery-center-row"
-                  onClick={() => {
-                    // openRun switches to the runs tab itself before its fetch resolves.
-                    void onOpenRun(dlq.runId, 'runs')
-                  }}
-                  data-testid={`recovery-center-queue-row-${dlq.id}`}
-                >
-                  <span className="we-recovery-center-row__title">{workflowName}</span>
-                  <span className="we-recovery-center-row__meta">
-                    <code className="we-recovery-center-row__node">{dlq.nodeId}</code>
-                    <span className="we-recovery-center-row__pill" data-severity="warning">{signature}</span>
-                  </span>
-                  <span
-                    className="we-recovery-center-row__age"
-                    data-severity={ageSeverity}
-                    data-testid={`recovery-center-queue-age-${dlq.id}`}
-                  >{age}</span>
-                </button>
-              </li>
-            )
-          })}
-        </ul>
-      )}
     </RecoveryCenterTile>
   )
 }
@@ -328,166 +229,6 @@ export function FailureClustersTile({
           })}
         </ul>
       )}
-    </RecoveryCenterTile>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// PendingApprovalsTile — waiting approval / human-form nodes.
-// ─────────────────────────────────────────────────────────────────────────
-
-export function PendingApprovalsTile({
-  waitingNodes,
-  runs,
-  onOpenRun,
-  onOpenTab,
-  onApproveNode,
-}: {
-  waitingNodes: RunNode[]
-  runs: RunSummary[]
-  onOpenRun: (runId: string, targetTab?: ActiveTab) => void | Promise<void>
-  onOpenTab: (tab: ActiveTab) => void
-  onApproveNode: (nodeId: string) => void | Promise<void>
-}) {
-  const { t } = useT()
-  const top = waitingNodes.slice(0, 3)
-  return (
-    <RecoveryCenterTile
-      title={t('recoveryCenter.tile.approvals.title')}
-      kicker={t('recoveryCenter.tile.approvals.kicker')}
-      severity={waitingNodes.length === 0 ? 'success' : 'warning'}
-      icon={<CheckSquare size={18} aria-hidden="true" />}
-      testId="recovery-center-tile-approvals"
-      footer={(
-        <button
-          type="button"
-          className="we-recovery-center-tile__link"
-          onClick={() => onOpenTab('runs')}
-          data-testid="recovery-center-approvals-open-all"
-        >
-          {t('recoveryCenter.tile.approvals.openAll')} <ChevronRight size={14} aria-hidden="true" />
-        </button>
-      )}
-    >
-      {top.length === 0 ? (
-        <AllClearState
-          message={t('recoveryCenter.tile.approvals.empty')}
-          testId="recovery-center-approvals-allclear"
-        />
-      ) : (
-        <ul className="we-recovery-signoff">
-          {top.map((node) => {
-            const waiting = (node.stateJson as {
-              waiting?: { kind?: string; title?: string; assignee?: string; timeoutState?: string }
-            } | undefined)?.waiting
-            const kind = waiting?.kind ?? 'approval'
-            const title = waiting?.title
-              ?? (kind === 'human_form' ? t('recoveryCenter.tile.approvals.formTitle') : t('recoveryCenter.tile.approvals.approvalTitle'))
-            const matchingRun = runs.find((entry) => entry.workflowVersionId && entry.status === 'paused')
-            const runId = matchingRun?.id
-            return (
-              <li key={node.nodeId} className="we-recovery-signoff-row" data-testid={`recovery-center-approvals-row-${node.nodeId}`}>
-                <span className="we-recovery-signoff-row__ic" aria-hidden="true">
-                  <ShieldAlert size={14} />
-                </span>
-                <div className="we-recovery-signoff-row__body">
-                  <strong>{title}</strong>
-                  <p>
-                    <code>{node.nodeId}</code>
-                    <span> · {kind === 'human_form' ? t('recoveryCenter.tile.approvals.kindForm') : t('recoveryCenter.tile.approvals.kindApproval')} · {t('recoveryCenter.tile.approvals.waiting')}</span>
-                  </p>
-                  {waiting?.assignee && (
-                    <p data-testid={`recovery-center-approval-owner-${node.nodeId}`}>
-                      {waiting.timeoutState === 'escalated'
-                        ? t('recoveryCenter.tile.approvals.escalatedOwner', { assignee: waiting.assignee })
-                        : t('recoveryCenter.tile.approvals.owner', { assignee: waiting.assignee })}
-                    </p>
-                  )}
-                  <div className="we-recovery-signoff-row__acts">
-                    {kind === 'approval' && (
-                      <button
-                        type="button"
-                        className="command-button command-button-primary command-button-compact"
-                        onClick={() => onApproveNode(node.nodeId)}
-                      >
-                        <Check size={14} aria-hidden="true" />
-                        <span>{t('recoveryCenter.tile.approvals.apply')}</span>
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="command-button command-button-compact"
-                      onClick={() => {
-                        // With a runId, openRun switches to the runs tab itself;
-                        // without one, fall back to just opening the runs list.
-                        if (runId) void onOpenRun(runId, 'runs')
-                        else onOpenTab('runs')
-                      }}
-                    >
-                      {t('recoveryCenter.tile.approvals.hold')}
-                    </button>
-                  </div>
-                </div>
-              </li>
-            )
-          })}
-        </ul>
-      )}
-    </RecoveryCenterTile>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// RecommendedActionsTile — renders the deterministic action list from
-// `computeRecommendedActions` (logic lives in `./helpers.ts`).
-// ─────────────────────────────────────────────────────────────────────────
-
-export function RecommendedActionsTile({
-  actions,
-  onOpenTab,
-}: {
-  actions: RecommendedAction[]
-  onOpenTab: (tab: ActiveTab) => void
-}) {
-  const { t } = useT()
-  const iconByAction: Record<RecommendedActionId, React.ReactNode> = {
-    resolve_approvals: <Users size={16} aria-hidden="true" />,
-    recover_cluster: <Layers size={16} aria-hidden="true" />,
-    triage_failures: <AlertTriangle size={16} aria-hidden="true" />,
-    review_workflow_risk: <Gauge size={16} aria-hidden="true" />,
-    run_getting_started: <PlayCircle size={16} aria-hidden="true" />,
-    healthy_try_studio: <Sparkles size={16} aria-hidden="true" />,
-  }
-  return (
-    <RecoveryCenterTile
-      title={t('recoveryCenter.tile.actions.title')}
-      kicker={t('recoveryCenter.tile.actions.kicker')}
-      severity={actions[0]?.severity ?? 'cobalt'}
-      icon={<Compass size={18} aria-hidden="true" />}
-      testId="recovery-center-tile-actions"
-    >
-      <ol className="we-recovery-center-actions">
-        {actions.map((action) => (
-          <li key={action.id} data-severity={action.severity} data-testid={`recovery-center-action-${action.id}`}>
-            <span className="we-recovery-center-actions__icon" aria-hidden="true">
-              {iconByAction[action.id]}
-            </span>
-            <div className="we-recovery-center-actions__copy">
-              <strong>{action.title}</strong>
-              <small>{action.body}</small>
-            </div>
-            <button
-              type="button"
-              className="command-button command-button-primary"
-              onClick={() => onOpenTab(action.ctaTab)}
-              data-testid={`recovery-center-action-cta-${action.id}`}
-            >
-              {action.ctaLabel}
-              <ArrowRight size={14} aria-hidden="true" />
-            </button>
-          </li>
-        ))}
-      </ol>
     </RecoveryCenterTile>
   )
 }
@@ -645,7 +386,7 @@ export function BudgetTile({ onOpenTab }: { onOpenTab: (tab: ActiveTab) => void 
           type="button"
           className="we-recovery-center-tile__link"
           onClick={() => {
-            requestOperationsSection('reliability')
+            requestOperationsSection('ai')
             onOpenTab('operations')
           }}
           data-testid="recovery-center-budget-open-settings"

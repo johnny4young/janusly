@@ -1,3 +1,8 @@
+import {
+  addCanvasStep,
+  openWorkspaceDestination,
+  openWorkspaceSection,
+} from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { createServer, type ServerResponse } from 'node:http'
 import { once } from 'node:events'
@@ -62,14 +67,22 @@ function matchesRunsFilter(rawUrl: string, workflowId: string, status: string): 
 }
 
 async function openRuns(page: Page, locale: 'en' | 'es'): Promise<void> {
-  await page.getByRole('button', { name: locale === 'en' ? 'Runs' : 'Ejecuciones', exact: true }).click()
+  await openWorkspaceSection(
+    page,
+    locale === 'en' ? 'Activity' : 'Actividad',
+    locale === 'en' ? 'Runs' : 'Ejecuciones',
+  )
   const overview = page.getByTestId('run-workspace-tab-overview')
   if (await overview.isVisible().catch(() => false)) await overview.click()
   await expect(page.getByTestId('runs-history-virtual-list')).toBeVisible()
 }
 
-async function openRunFromHistory(page: Page, runId: string): Promise<void> {
-  const history = page.getByTestId('runs-history-virtual-list')
+async function openRunFromHistory(
+  page: Page,
+  runId: string,
+  listTestId = 'runs-history-virtual-list',
+): Promise<void> {
+  const history = page.getByTestId(listTestId)
   const prefix = `${runId.slice(0, 8)}…`
   // Filter changes fetch asynchronously. Wait for the virtual list to receive
   // at least one row before deciding that its current scroll range is empty.
@@ -132,8 +145,8 @@ test('a real running node pulses, honors reduced motion, and cannot mutate the a
   try {
     await page.goto('/')
     await hideUnrelatedOverlays(page)
-    await page.getByRole('button', { name: /^AI Studio\b/ }).click()
-    await page.locator('.sb-palette').getByRole('button', { name: 'Call an API', exact: true }).click()
+    await openWorkspaceSection(page, 'Workflows', 'Build')
+    await addCanvasStep(page, 'Call an API')
 
     const authorCanvas = page.locator('.workspace-canvas-wrapper .canvas-frame[data-mode="author"]')
     const authorViewport = authorCanvas.locator('.react-flow__viewport')
@@ -147,8 +160,8 @@ test('a real running node pulses, honors reduced motion, and cannot mutate the a
     await expect.poll(() => authorViewport.getAttribute('style')).not.toBe(beforeZoom)
     const authorViewportAfterZoom = await authorViewport.getAttribute('style')
 
-    await page.getByRole('button', { name: 'Runs', exact: true }).click()
-    await expect(page.getByTestId('run-history-status-filter')).toBeVisible()
+    await openWorkspaceDestination(page, 'Activity')
+    await expect(page.getByTestId('activity-filter-running')).toBeVisible()
     const running = await startRun(request, {
       id: `e2e-observation-running-${Date.now()}`,
       name: 'E2E held running node',
@@ -162,8 +175,14 @@ test('a real running node pulses, honors reduced motion, and cannot mutate the a
     runId = running.runId
     await target.connected
 
-    await page.getByTestId('run-history-status-filter').selectOption('running')
-    await openRunFromHistory(page, runId)
+    const refreshResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return url.pathname.endsWith('/runs') && response.ok()
+    })
+    await page.getByTestId('activity-refresh').click()
+    await refreshResponse
+    await page.getByTestId('activity-filter-running').click()
+    await openRunFromHistory(page, runId, 'activity-feed-list')
     const englishMap = await assertRunObservationMap(page, 'held_request', 'running', 'en')
     const runningNode = englishMap.locator('.react-flow__node[data-id="held_request"] .workflow-node')
     await expect.poll(() => runningNode.evaluate(element => getComputedStyle(element).animationName)).toContain('we-running-node-pulse')
@@ -183,7 +202,7 @@ test('a real running node pulses, honors reduced motion, and cannot mutate the a
     expect(await runningNode.evaluate(element => getComputedStyle(element).boxShadow)).not.toBe('none')
     await captureElement(englishMap, 'web-en-run-map-running-reduced-motion')
 
-    await page.getByRole('button', { name: /^AI Studio\b/ }).click()
+    await openWorkspaceSection(page, 'Workflows', 'Build')
     await expect(authorCanvas).toBeVisible()
     expect(await authorCanvas.locator('.react-flow__node').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-id')))).toEqual(authorNodeIds)
     expect(await authorViewport.getAttribute('style')).toBe(authorViewportAfterZoom)
@@ -193,9 +212,9 @@ test('a real running node pulses, honors reduced motion, and cannot mutate the a
     await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
     await page.reload()
     await hideUnrelatedOverlays(page)
-    await openRuns(page, 'es')
-    await page.getByTestId('run-history-status-filter').selectOption('running')
-    await openRunFromHistory(page, runId)
+    await openWorkspaceDestination(page, 'Actividad')
+    await page.getByTestId('activity-filter-running').click()
+    await openRunFromHistory(page, runId, 'activity-feed-list')
     const spanishMap = await assertRunObservationMap(page, 'held_request', 'running', 'es')
     await expect.poll(() => spanishMap.locator('.workflow-node[data-status="running"]').evaluate(element => getComputedStyle(element).animationName)).toContain('we-running-node-pulse')
     await captureElement(spanishMap, 'web-es-run-map-running-pulse')
@@ -324,14 +343,15 @@ test('active runs explain identity, trigger, chronology, and waits in both local
 
   await openRuns(page, 'en')
   await openRunFromHistory(page, waiting.runId)
+  const englishWaitingMap = await assertRunObservationMap(page, 'approve_refund', 'waiting', 'en')
+  await captureElement(englishWaitingMap, 'web-en-run-map-waiting-readonly')
+  await openWorkspaceSection(page, 'Activity', 'Recover')
   const englishWaiting = page.getByTestId('waiting-steps')
   await expect(englishWaiting).toContainText('Approval')
   await expect(englishWaiting).toContainText('Approve refund evidence')
   await expect(englishWaiting).toContainText('Confirm the invoice and customer history before release.')
   await expect(englishWaiting).toContainText('Waiting for')
   await expect(englishWaiting.getByRole('button', { name: 'Approve and resume' })).toBeVisible()
-  const englishWaitingMap = await assertRunObservationMap(page, 'approve_refund', 'waiting', 'en')
-  await captureElement(englishWaitingMap, 'web-en-run-map-waiting-readonly')
   await captureElement(englishWaiting, 'web-en-run-waiting-approval')
 
   await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
@@ -381,14 +401,7 @@ test('active runs explain identity, trigger, chronology, and waits in both local
 
   await openRuns(page, 'es')
   await openRunFromHistory(page, waiting.runId)
-  const spanishWaiting = page.getByTestId('waiting-steps')
-  await expect(spanishWaiting).toContainText('Aprobación')
-  await expect(spanishWaiting).toContainText('En espera durante')
-  await expect(spanishWaiting.getByRole('button', { name: 'Aprobar y reanudar' })).toBeVisible()
   const spanishWaitingMap = await assertRunObservationMap(page, 'approve_refund', 'waiting', 'es')
-  await captureElement(spanishWaitingMap, 'web-es-run-map-waiting-readonly')
-  await captureElement(spanishWaiting, 'web-es-run-waiting-approval')
-
   await page.setViewportSize({ width: 1150, height: 900 })
   const stackedWorkspace = page.getByTestId('run-observation-workspace')
   const stackedMapBox = await spanishWaitingMap.boundingBox()
@@ -398,6 +411,13 @@ test('active runs explain identity, trigger, chronology, and waits in both local
   expect(stackedPanelBox!.y).toBeGreaterThanOrEqual(stackedMapBox!.y + stackedMapBox!.height)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await captureElement(spanishWaitingMap, 'web-es-run-map-waiting-stacked')
+  await openWorkspaceSection(page, 'Actividad', 'Recuperar')
+  const spanishWaiting = page.getByTestId('waiting-steps')
+  await expect(spanishWaiting).toContainText('Aprobación')
+  await expect(spanishWaiting).toContainText('En espera durante')
+  await expect(spanishWaiting.getByRole('button', { name: 'Aprobar y reanudar' })).toBeVisible()
+  await captureElement(spanishWaiting, 'web-es-run-waiting-approval')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 
   expect(browserErrors).toEqual([])
 })

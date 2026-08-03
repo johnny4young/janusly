@@ -6,13 +6,14 @@ how an operator reconstructs a past run exactly as it happened. It ties
 together the deeper docs:
 
 - [`engine-core-runtime-boundaries.md`](engine-core-runtime-boundaries.md) — runtime/adapter seams.
+- [`engine-persistence.md`](engine-persistence.md) — SQL lifecycle ports and their dependency rules.
 - [`run-cancellation.md`](run-cancellation.md) — cancellation semantics.
 - [`../workflows.md`](../workflows.md) + [`../nodes.md`](../nodes.md) — how to define a workflow (DAG JSON, node configs, templating).
 - `AGENTS.md` (repo root) — the operational invariants, in exhaustive detail.
 
 ## Data model
 
-Three tables carry every execution (`packages/db/src/schema.ts`):
+Three tables carry every execution (`packages/db/src/schema/executions.ts`):
 
 | Table | One row per | Load-bearing columns |
 | --- | --- | --- |
@@ -49,9 +50,12 @@ Every transition that could race is a conditional UPDATE (compare-and-set):
   `running` node and commits its optional DLQ row, causal event, and parent-run
   failure atomically (used only by the stalled-node reaper below).
 
-The core claims live in `packages/engine/src/persistence.ts`; the stalled
-terminal boundary lives in `packages/engine/src/adapters/dead-letter-queue.ts`.
-Don't replace any of them with a read-then-write.
+The queue/execution claims live in
+`packages/engine/src/persistence-ports/publication.ts` and
+`packages/engine/src/persistence-ports/node.ts`; the stalled terminal boundary
+lives in `packages/engine/src/adapters/dead-letter-queue.ts`. The stable
+`packages/engine/src/persistence.ts` barrel preserves existing imports. Don't
+replace any claim with a read-then-write.
 
 ## Execution lifecycle
 
@@ -171,10 +175,27 @@ markers retain the configured backoff. The
 child's terminal recovery claim remains the only recovery-impact fact;
 reattachment must not double-credit the parent.
 
+## HTTP route ownership
+
+`apps/api/src/routes/runs-routes.ts` is the stable ordered registry consumed by
+the API route composition. The thirteen run routes are implemented in bounded
+modules under `apps/api/src/routes/run-routes/`: `stream` owns SSE delivery,
+`reads` owns list/detail/status/usage projections, `redrive` owns production
+continuation, `lifecycle` owns start/resume/cancel, `replay-lab` owns sandbox
+replays and forks, and `diagnostics` owns comparison and causal replay.
+
+Route order is protocol behavior because dispatch is first-match-wins. The SSE
+route must remain ahead of the broad `/runs` list matcher because both match a
+stream URL. The comparison route can remain later only while the list matcher
+explicitly excludes `/runs/compare`. The run contract schemas remain in
+`apps/api/src/contracts/runs.ts`; moving a handler does not create a second
+wire contract or bypass runtime response validation.
+
 ## Observability
 
 - **Timeline**: every lifecycle step appends a `run_events` row through
-  `appendEvent`, which redacts ONCE via `safePersistPayload` and then both
+  `persistence-ports/event.ts:appendEvent`, which redacts ONCE via
+  `safePersistPayload` and then both
   persists and publishes the same object — a streamed event can never expose
   a value the persisted row wouldn't.
 - **Live**: `GET /runs/:runId/stream` (SSE over Redis pub/sub) streams events

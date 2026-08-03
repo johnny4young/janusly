@@ -19,6 +19,7 @@ import {
   recoveryImpactEvents,
   recoveryImpactRollups,
   recoveryItems,
+  runs,
 } from "@janusly/db";
 import { queryAuditLogs } from "../auditLogsRepo";
 import { rotateCredentialSecretRef } from "../credentialsRepo";
@@ -45,6 +46,8 @@ afterAll(async () => {
   await db.delete(auditLogs).where(eq(auditLogs.orgId, ORG_OTHER));
   await db.delete(deadLetters).where(eq(deadLetters.orgId, ORG));
   await db.delete(deadLetters).where(eq(deadLetters.orgId, ORG_OTHER));
+  await db.delete(runs).where(eq(runs.orgId, ORG));
+  await db.delete(runs).where(eq(runs.orgId, ORG_OTHER));
   await db.delete(credentials).where(eq(credentials.orgId, ORG));
 });
 
@@ -115,7 +118,7 @@ describe("queryAuditLogs — real Postgres", () => {
 });
 
 describe("recovery impact aggregates — real Postgres", () => {
-  it("materializes only terminal success and isolates ledger and wins by tenant, actor, and window", async () => {
+  it("materializes terminal evidence while isolating production credit by tenant, actor, and window", async () => {
     const now = new Date();
     const recent = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const old = new Date(now.getTime() - 45 * 24 * 60 * 60 * 1000);
@@ -127,11 +130,20 @@ describe("recovery impact aggregates — real Postgres", () => {
       recoveredAt: Date;
       downtimeMs: number;
       withRecoveryItem?: boolean;
+      replayMode?: "validation" | null;
     }): Promise<boolean> {
       const orgId = input.orgId ?? ORG;
       const deadLetterId = `${RUN_TAG}-${input.suffix}`;
       const runId = `${deadLetterId}-run`;
       const nodeId = `${deadLetterId}-node`;
+      await db.insert(runs).values({
+        id: runId,
+        orgId,
+        workflowVersionId: `${runId}-version`,
+        status: "failed",
+        replayMode: input.replayMode ?? null,
+        createdAt: new Date(input.recoveredAt.getTime() - input.downtimeMs),
+      });
       await db.insert(deadLetters).values({
         id: deadLetterId,
         orgId,
@@ -164,12 +176,26 @@ describe("recovery impact aggregates — real Postgres", () => {
     }
 
     await expect(record({ suffix: "recent-a", recoveredAt: recent, downtimeMs: 5 * 60_000, withRecoveryItem: true })).resolves.toBe(true);
-    await expect(record({ suffix: "recent-b", recoveredAt: now, downtimeMs: -60_000 })).resolves.toBe(true);
+    await expect(record({ suffix: "recent-b", recoveredAt: now, downtimeMs: -60_000 })).resolves.toBe(false);
     await expect(record({ suffix: "other-user", userId: "operator-b", recoveredAt: recent, downtimeMs: 10 * 60_000 })).resolves.toBe(true);
+    await expect(record({ suffix: "same-clock", userId: "operator-c", recoveredAt: now, downtimeMs: 0 })).resolves.toBe(true);
     await expect(record({ suffix: "old", recoveredAt: old, downtimeMs: 20 * 60_000 })).resolves.toBe(true);
     await expect(record({ suffix: "other-org", orgId: ORG_OTHER, recoveredAt: recent, downtimeMs: 30 * 60_000 })).resolves.toBe(true);
+    await expect(record({
+      suffix: "validation",
+      recoveredAt: now,
+      downtimeMs: 2 * 60_000,
+      replayMode: "validation",
+    })).resolves.toBe(true);
 
     // A replay that never reaches terminal success has a DLQ row but no impact event.
+    await db.insert(runs).values({
+      id: `${RUN_TAG}-failed-run`,
+      orgId: ORG,
+      workflowVersionId: `${RUN_TAG}-failed-version`,
+      status: "failed",
+      createdAt: new Date(now.getTime() - 60 * 60_000),
+    });
     await db.insert(deadLetters).values({
       id: `${RUN_TAG}-failed-attempt`,
       orgId: ORG,
@@ -209,7 +235,7 @@ describe("recovery impact aggregates — real Postgres", () => {
     });
 
     const since = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    await expect(queryOperatorRecoveryCount(ORG, "operator-a", since)).resolves.toBe(2);
+    await expect(queryOperatorRecoveryCount(ORG, "operator-a", since)).resolves.toBe(1);
     await expect(queryOperatorRecoveryCount(ORG, "operator-b", since)).resolves.toBe(1);
     await expect(queryOperatorRecoveryCount(ORG_OTHER, "operator-a", since)).resolves.toBe(1);
 
@@ -241,7 +267,18 @@ describe("recovery impact aggregates — real Postgres", () => {
     ]));
 
     const signals = await queryRecoveryMetricsSignals(ORG, 30);
-    expect([...signals.mttrDurations].sort((a, b) => a - b)).toEqual([5 * 60_000, 10 * 60_000]);
+    expect(signals.runStatusCounts.total).toBe(5);
+    expect([...signals.mttrDurations].sort((a, b) => a - b)).toEqual([
+      0,
+      5 * 60_000,
+      10 * 60_000,
+    ]);
+    expect(signals.verifiedRecovery).toEqual({
+      sampleSize: 3,
+      p50Ms: 5 * 60_000,
+      p90Ms: 9 * 60_000,
+      downtimeEndedMs: 15 * 60_000,
+    });
     expect(signals.replayOutcomes).toEqual({
       totalEntries: 4,
       replayedSuccess: 3,
@@ -249,6 +286,7 @@ describe("recovery impact aggregates — real Postgres", () => {
     });
     expect(signals.resolvedClusters.totalEntries).toBe(3);
     const heatmap = await queryRecoveryHeatmap(ORG, 30);
+    expect(heatmap.reduce((sum, day) => sum + day.failures, 0)).toBe(6);
     expect(heatmap.reduce((sum, day) => sum + day.recovered, 0)).toBe(3);
 
     // Worker retries cannot inflate the event or rollup because deadLetterId is unique.
@@ -305,7 +343,7 @@ describe("hot-path indexes present after migration", () => {
   }
 
   it("audit_logs carries the action-prefix index", async () => {
-    expect(await indexNames("audit_logs")).toContain("audit_logs_org_action_created_idx");
+    expect(await indexNames("audit_logs")).toContain("audit_logs_org_action_created_id_idx");
   });
 
   it("memory_entries carries the baseline HNSW vector index", async () => {
@@ -314,5 +352,32 @@ describe("hot-path indexes present after migration", () => {
 
   it("trigger_events carries the buffered-window index the resume backfill scans", async () => {
     expect(await indexNames("trigger_events")).toContain("trigger_events_org_workflow_status_idx");
+  });
+
+  it("runs carries the keyset-aligned list index and dropped its strict prefix", async () => {
+    const names = await indexNames("runs");
+    expect(names).toContain("runs_org_created_id_idx");
+    expect(names).not.toContain("runs_org_created_idx");
+  });
+
+  it("workflows carries the keyset-aligned list + trash indexes and dropped the strict prefix", async () => {
+    const names = await indexNames("workflows");
+    expect(names).toContain("workflows_org_created_id_idx");
+    expect(names).toContain("workflows_org_deleted_idx");
+    expect(names).not.toContain("workflows_org_created_idx");
+  });
+
+  it("dead_letters carries the NULLS FIRST keyset indexes and dropped the misaligned pair", async () => {
+    const names = await indexNames("dead_letters");
+    expect(names).toContain("dead_letters_org_created_id_idx");
+    expect(names).toContain("dead_letters_org_status_created_idx");
+    expect(names).not.toContain("dead_letters_org_created_idx");
+    expect(names).not.toContain("dead_letters_org_status_idx");
+  });
+
+  it("audit_logs carries the NULLS FIRST keyset index and dropped the misaligned one", async () => {
+    const names = await indexNames("audit_logs");
+    expect(names).toContain("audit_logs_org_created_id_idx");
+    expect(names).not.toContain("audit_logs_org_created_idx");
   });
 });

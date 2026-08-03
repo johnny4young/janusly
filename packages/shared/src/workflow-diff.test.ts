@@ -261,6 +261,26 @@ describe("computeWorkflowDiff — workflow-level fields", () => {
       tag: null,
     });
   });
+
+  it("captures workflow identity and recovery policy changes", () => {
+    const before = makeWorkflow({
+      id: "billing",
+      recovery: { circuitBreaker: 3 },
+    });
+    const after = makeWorkflow({
+      id: "billing-copy",
+      recovery: { circuitBreaker: 5 },
+    });
+
+    const result = computeWorkflowDiff(before, after);
+
+    expect(result.workflow).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "id" }),
+        expect.objectContaining({ path: "recovery.circuitBreaker" }),
+      ]),
+    );
+  });
 });
 
 describe("computeWorkflowDiff — determinism", () => {

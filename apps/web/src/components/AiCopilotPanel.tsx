@@ -16,10 +16,10 @@
  *   literals; engine-emitted review issue codes go through tAiReviewIssue.
  */
 
-import { useEffect, useMemo, useState } from 'react'
-import { Bot, BrainCircuit, CheckCircle2, GitBranch, KeyRound, MessageSquareText, RefreshCw, Route, ShieldCheck, Sparkles, Workflow } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Bot, BrainCircuit, CheckCircle2, GitBranch, KeyRound, MessageSquareText, RefreshCw, Route, ShieldCheck, Sparkles, Workflow, Wrench } from 'lucide-react'
 import { formatAiModeLabel } from '../constants'
-import type { AiCandidateBackoff, AiHealth, AiMode, ReviewFindings, WorkflowDefinition } from '../types'
+import type { AiAuthoringActionRequest, AiCandidateBackoff, AiHealth, AiMode, ReviewFindings, WorkflowDefinition, WorkflowImprovementResult, WorkflowImprovementSuggestion } from '../types'
 import { estimatePromptCostUsd, formatEstimateLabel } from '@janusly/shared/src/llm-pricing'
 import { tAiReviewIssue, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
@@ -29,10 +29,11 @@ import { BrandMark } from './BrandMark'
 // Real spend varies; these are order-of-magnitude indicators chosen from
 // typical run sizes against `anthropic/claude-haiku-4-5-20251001`. Refine
 // these values only with measured medians from `usage_events`.
-const ASSUMED_TOKEN_BUDGETS: Record<'generate' | 'explain' | 'review', { input: number; output: number }> = {
+const ASSUMED_TOKEN_BUDGETS: Record<'generate' | 'explain' | 'review' | 'fix', { input: number; output: number }> = {
   generate: { input: 4_000, output: 2_000 },
   explain: { input: 2_000, output: 1_000 },
   review: { input: 4_000, output: 1_500 },
+  fix: { input: 5_000, output: 2_000 },
 }
 
 type AiCopilotPanelProps = {
@@ -47,6 +48,9 @@ type AiCopilotPanelProps = {
   } | null>
   onExplainWorkflow: () => Promise<{ mode: AiMode; explanation: string; model?: string; aiError?: string }>
   onReviewWorkflow: () => Promise<{ mode: AiMode; review: ReviewFindings; model?: string; aiError?: string }>
+  actionRequest: AiAuthoringActionRequest | null
+  onSuggestWorkflowImprovement: () => Promise<WorkflowImprovementResult>
+  onApplyWorkflowImprovement: (suggestion: WorkflowImprovementSuggestion) => Promise<boolean>
   onOpenRuns: () => void
   onOpenTemplates: () => void
 }
@@ -55,6 +59,7 @@ type ResultState =
   | { kind: 'workflow'; mode: AiMode; title: string; body: string; aiError?: string; bonBackoff?: AiCandidateBackoff }
   | { kind: 'explanation'; mode: AiMode; title: string; body: string; aiError?: string }
   | { kind: 'review'; mode: AiMode; title: string; review: ReviewFindings; aiError?: string }
+  | { kind: 'fix'; mode: AiMode; title: string; suggestions: WorkflowImprovementSuggestion[]; aiError?: string }
 
 const MODE_COPY_KEYS: Record<AiMode, string> = {
   ai: 'aiCopilot.modeCopy.ai',
@@ -69,6 +74,9 @@ export function AiCopilotPanel({
   onGenerateWorkflow,
   onExplainWorkflow,
   onReviewWorkflow,
+  actionRequest,
+  onSuggestWorkflowImprovement,
+  onApplyWorkflowImprovement,
   onOpenRuns,
   onOpenTemplates,
 }: AiCopilotPanelProps) {
@@ -81,8 +89,15 @@ export function AiCopilotPanel({
   ]
 
   const [prompt, setPrompt] = useState(starterPrompts[0])
-  const [loading, setLoading] = useState<'generate' | 'explain' | 'review' | null>(null)
+  const [loading, setLoading] = useState<'generate' | 'explain' | 'review' | 'fix' | null>(null)
   const [result, setResult] = useState<ResultState | null>(null)
+  const promptRef = useRef<HTMLTextAreaElement | null>(null)
+  const processedRequestRef = useRef<number | null>(null)
+  const requestedActionHandlersRef = useRef<{
+    explain: () => Promise<void>
+    review: () => Promise<void>
+    fix: () => Promise<void>
+  } | null>(null)
   const currentWorkflowId = useWorkflowStore((state) => state.currentWorkflowId)
   // Clear a stale explain/review result when the operator switches workflows so
   // they don't read another flow's analysis. A freshly generated draft (kind
@@ -177,7 +192,7 @@ export function AiCopilotPanel({
       setResult({
         kind: 'workflow',
         mode: response.mode,
-        title: t(titleKey as never),
+        title: t(titleKey),
         body: t('aiCopilot.draftedBody', {
           name: response.workflow.name ?? response.workflow.id ?? (t('aiCopilot.untitledWorkflow')),
         }),
@@ -247,6 +262,44 @@ export function AiCopilotPanel({
     }
   }
 
+  const fix = async () => {
+    setLoading('fix')
+    try {
+      const response = await onSuggestWorkflowImprovement()
+      setResult({
+        kind: 'fix',
+        mode: response.mode,
+        title: response.mode === 'ai'
+          ? t('aiCopilot.fixReady')
+          : t('aiCopilot.fixUnavailable'),
+        suggestions: response.mode === 'ai' ? response.suggestions : [],
+        aiError: response.aiError,
+      })
+    } catch (error) {
+      setResult({
+        kind: 'fix',
+        mode: 'error',
+        title: t('aiCopilot.fixFailed'),
+        suggestions: [],
+        aiError: error instanceof Error ? error.message : t('aiCopilot.fixFailedBody'),
+      })
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  requestedActionHandlersRef.current = { explain, review, fix }
+
+  useEffect(() => {
+    if (!actionRequest || processedRequestRef.current === actionRequest.id) return
+    processedRequestRef.current = actionRequest.id
+    if (actionRequest.action === 'generate') {
+      promptRef.current?.focus()
+      return
+    }
+    void requestedActionHandlersRef.current?.[actionRequest.action]()
+  }, [actionRequest])
+
   const reviewSummary = (review: ReviewFindings, mode: AiMode): string => {
     if (mode === 'error') return t('aiCopilot.reviewError')
     if (review.status === 'pass') return t('aiCopilot.reviewPass')
@@ -280,6 +333,7 @@ export function AiCopilotPanel({
         </div>
 
         <textarea
+          ref={promptRef}
           className="code-field code-field-short copilot-prompt"
           value={prompt}
           disabled={loading === 'generate'}
@@ -311,6 +365,11 @@ export function AiCopilotPanel({
             <span>{loading === 'review' ? t('aiCopilot.reviewing') : t('aiCopilot.review')}</span>
             <CostEstimateChip action="review" model={health?.model} />
           </button>
+          <button className="command-button" disabled={loading === 'fix'} onClick={fix}>
+            <Wrench size={16} aria-hidden="true" />
+            <span>{loading === 'fix' ? t('aiCopilot.fixing') : t('aiCopilot.fix')}</span>
+            <CostEstimateChip action="fix" model={health?.model} />
+          </button>
         </div>
       </section>
 
@@ -319,7 +378,7 @@ export function AiCopilotPanel({
           live region doesn't reliably announce. The fallback / error sub-blocks
           keep their own role="alert" / role="status". */}
       <div className="ai-copilot__results" aria-live="polite">
-      {result && result.kind !== 'review' && (
+      {result && result.kind !== 'review' && result.kind !== 'fix' && (
         <section className="we-card result-panel">
           <div className="split-row">
             <strong>{result.title}</strong>
@@ -333,7 +392,7 @@ export function AiCopilotPanel({
               <span>{t('aiCopilot.fallbackBannerBody')}</span>
             </div>
           )}
-          <p className="helper-text">{t(MODE_COPY_KEYS[result.mode] as never)}</p>
+          <p className="helper-text">{t(MODE_COPY_KEYS[result.mode])}</p>
           <div className="result-body">{result.body}</div>
           {result.kind === 'workflow' && result.bonBackoff && (
             <div className="issue" role="status" data-testid="ai-candidate-backoff">
@@ -382,6 +441,46 @@ export function AiCopilotPanel({
                 )
               })}
             </ul>
+          )}
+        </section>
+      )}
+
+      {result && result.kind === 'fix' && (
+        <section className="we-card result-panel">
+          <div className="split-row">
+            <strong>{result.title}</strong>
+            <span className={`mode-pill mode-pill-${result.mode}`}>{formatAiModeLabel(result.mode)}</span>
+          </div>
+          {result.suggestions.length > 0 ? (
+            <div className="ai-fix-list">
+              {result.suggestions.map((suggestion, index) => (
+                <article className="ai-fix-card" key={`${suggestion.approachLabel}-${index}`}>
+                  <div className="split-row">
+                    <strong>{suggestion.approachLabel}</strong>
+                    <span className="mode-pill mode-pill-neutral">
+                      {t('aiCopilot.fixConfidence', { percent: Math.round(suggestion.confidence * 100) })}
+                    </span>
+                  </div>
+                  <p>{suggestion.rationale}</p>
+                  <button
+                    type="button"
+                    className="command-button command-button-primary"
+                    onClick={() => { void onApplyWorkflowImprovement(suggestion) }}
+                  >
+                    <Wrench size={13} aria-hidden="true" />
+                    <span>{t('aiCopilot.fixApply')}</span>
+                  </button>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="helper-text">{t('aiCopilot.fixNoSuggestion')}</p>
+          )}
+          {result.aiError && (
+            <div className={`issue ${result.mode === 'error' ? 'issue-error' : 'issue-warn'}`} role="status">
+              <strong>{t('aiCopilot.aiFailedTitle')}</strong>{' '}
+              <span>{describeAiError(result.aiError)}</span>
+            </div>
           )}
         </section>
       )}
@@ -445,7 +544,7 @@ export function AiCopilotPanel({
  * of this file). Real spend varies; the audit + Recovery Center Budget tile
  * show the truth post-call.
  */
-function CostEstimateChip({ action, model }: { action: 'generate' | 'explain' | 'review'; model?: string }) {
+function CostEstimateChip({ action, model }: { action: 'generate' | 'explain' | 'review' | 'fix'; model?: string }) {
   const label = useMemo(() => {
     if (!model) return null
     const budget = ASSUMED_TOKEN_BUDGETS[action]

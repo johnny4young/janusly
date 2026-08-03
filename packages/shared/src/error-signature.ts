@@ -243,6 +243,14 @@ export function normalizeErrorSignature(error: unknown, context: ErrorContext = 
     };
   }
 
+  if (errorObj?.code === "worker_stalled") {
+    return {
+      signature: `Worker stalled on ${nodeType} node`,
+      category: "unknown",
+      suggestedOwner: "platform",
+    };
+  }
+
   // 2. HTTP error — explicit statusCode wins; fall back to message regex.
   const statusFromField = errorObj && typeof errorObj.statusCode === "number" && Number.isFinite(errorObj.statusCode)
     ? errorObj.statusCode
@@ -299,16 +307,11 @@ export function normalizeErrorSignature(error: unknown, context: ErrorContext = 
     };
   }
 
-  // 5. Parse / JSON error.
-  if (PARSE_ERROR_PATTERN.test(message)) {
-    return {
-      signature: `Parse error in ${nodeType} node`,
-      category: "parse_error",
-      suggestedOwner: "workflow_author",
-    };
-  }
-
-  // 6. Tool-shape errors.
+  // 5. Tool-shape errors. MUST run before the parse rule: the tool-registry
+  //    messages embed the tool NAME ("Invalid tool input for json.parse: …",
+  //    "tool 'json.parse' not found"), and a `*.parse` tool name would match
+  //    PARSE_ERROR_PATTERN's case-insensitive `JSON.parse` alternative and
+  //    mis-cluster as a generic parse_error instead of a per-tool tool_input.
   const toolInputMatch = matchToolError(message);
   if (toolInputMatch) {
     const labeledTool = context.toolName ?? toolInputMatch.tool;
@@ -317,6 +320,15 @@ export function normalizeErrorSignature(error: unknown, context: ErrorContext = 
     return {
       signature: `${verb}: ${cleanTool}`,
       category: "tool_input",
+      suggestedOwner: "workflow_author",
+    };
+  }
+
+  // 6. Parse / JSON error.
+  if (PARSE_ERROR_PATTERN.test(message)) {
+    return {
+      signature: `Parse error in ${nodeType} node`,
+      category: "parse_error",
       suggestedOwner: "workflow_author",
     };
   }

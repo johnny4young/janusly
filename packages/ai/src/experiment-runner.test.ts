@@ -1,7 +1,7 @@
 /**
  * Tests for the experiment runner.
  *
- * Coverage targets (the ticket AC):
+ * Coverage guarantees:
  * - Deterministic fixture eval: a stubbed client where the candidate
  *   returns the gold answer and control returns garbage → candidate wins,
  *   recommendation = promote_candidate.

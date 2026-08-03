@@ -85,7 +85,12 @@ describe("runStalledNodeDrill (real Postgres)", () => {
     });
 
     const [run] = await db
-      .select({ status: runs.status, inputJson: runs.inputJson })
+      .select({
+        status: runs.status,
+        inputJson: runs.inputJson,
+        replayMode: runs.replayMode,
+        validationEvidenceLevel: runs.validationEvidenceLevel,
+      })
       .from(runs)
       .where(eq(runs.id, result.runId));
     const [node] = await db
@@ -117,6 +122,8 @@ describe("runStalledNodeDrill (real Postgres)", () => {
         thresholdMinutes: 15,
       },
     });
+    expect(run?.replayMode).toBe("validation");
+    expect(run?.validationEvidenceLevel).toBe("static");
     expect(node).toMatchObject({
       status: "failed",
       errorJson: { code: "worker_stalled" },

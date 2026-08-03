@@ -245,7 +245,8 @@ test('Recovery impact is tenant-safe, personal, localized, and visible in focuse
   })
   page.on('pageerror', (error) => pageErrors.push(error.message))
   page.on('response', (response) => {
-    if (response.url().includes('/recovery/ledger') || response.url().includes('/recovery/my-wins')) {
+    const url = new URL(response.url())
+    if (url.pathname === '/recovery/home' && url.searchParams.get('scope') === 'impact') {
       recoveryReadResponses.push(response.url())
     }
   })
@@ -263,9 +264,10 @@ test('Recovery impact is tenant-safe, personal, localized, and visible in focuse
 
   await prepareSession(page, orgId)
   await page.goto('/')
+  await page.getByTestId('home-insights-toggle').click()
   const hero = page.locator('.we-recovery-center-hero')
   const valueDashboard = page.locator('.we-recovery-center-value')
-  await expect(hero.getByTestId('recovery-center-personal-wins')).toHaveText(
+  await expect(valueDashboard.getByTestId('recovery-insights-personal-wins')).toHaveText(
     'You recovered 2 failures in the last 30 days',
   )
   await expect(valueDashboard.getByTestId('recovery-lifetime-ledger')).toHaveText(
@@ -273,12 +275,13 @@ test('Recovery impact is tenant-safe, personal, localized, and visible in focuse
   )
   await waitForHealthRingToSettle(hero)
   await hideUnrelatedOverlays(page)
-  await capture(hero, 'web-en-recovery-personal-wins-default')
+  await capture(valueDashboard.getByTestId('recovery-insights-personal-wins'), 'web-en-recovery-personal-wins-default')
   await capture(valueDashboard, 'web-en-recovery-lifetime-ledger-default')
 
   await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
   await page.reload()
-  await expect(hero.getByTestId('recovery-center-personal-wins')).toHaveText(
+  await page.getByTestId('home-insights-toggle').click()
+  await expect(valueDashboard.getByTestId('recovery-insights-personal-wins')).toHaveText(
     'Recuperaste 2 fallos en los últimos 30 días',
   )
   await expect(valueDashboard.getByTestId('recovery-lifetime-ledger')).toHaveText(
@@ -286,7 +289,7 @@ test('Recovery impact is tenant-safe, personal, localized, and visible in focuse
   )
   await waitForHealthRingToSettle(hero)
   await hideUnrelatedOverlays(page)
-  await capture(hero, 'web-es-recovery-personal-wins-default')
+  await capture(valueDashboard.getByTestId('recovery-insights-personal-wins'), 'web-es-recovery-personal-wins-default')
   await capture(valueDashboard, 'web-es-recovery-lifetime-ledger-default')
 
   // Load one still-open failure into the bootstrap page, then complete it
@@ -295,8 +298,9 @@ test('Recovery impact is tenant-safe, personal, localized, and visible in focuse
   // poll surfaces the worker-owned terminal fact.
   const backgroundImpact = await seedPendingBackgroundRecovery(orgId)
   await page.reload()
+  await page.getByTestId('home-insights-toggle').click()
   await expect(page.getByTestId('recovery-center-metric-failures')).toContainText('1')
-  const readsBeforeCompletion = recoveryReadResponses.filter((url) => url.includes('/recovery/my-wins')).length
+  const readsBeforeCompletion = recoveryReadResponses.length
   await completeBackgroundRecovery(orgId, backgroundImpact)
   expect(await getV1(request, orgId, '/recovery/ledger')).toMatchObject({
     data: { totalRecovered: 5, downtimeEndedMs: 12_600_000 },
@@ -305,7 +309,7 @@ test('Recovery impact is tenant-safe, personal, localized, and visible in focuse
     data: { recovered: 3, windowDays: 30 },
   })
   await expect.poll(
-    () => recoveryReadResponses.filter((url) => url.includes('/recovery/my-wins')).length,
+    () => recoveryReadResponses.length,
     { timeout: 15_000 },
   ).toBeGreaterThan(readsBeforeCompletion)
   await expect(hero.getByTestId('recovery-center-greeting')).toHaveText(

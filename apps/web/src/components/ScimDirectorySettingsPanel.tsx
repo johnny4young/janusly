@@ -239,7 +239,7 @@ export function ScimDirectorySettingsPanel({
         membersChanged?: number;
       };
       addToast(
-        // NOTE: do not name the count variable `count` — i18next reserves it
+        // Keep the collection total distinct from the row index.
         // for pluralization, which would route to `_one`/`_other` keys.
         t("scim.mappings.resync.toast", {
           members: result?.membersResynced ?? 0,

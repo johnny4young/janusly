@@ -7,127 +7,28 @@ import {
   ensureLocalEnv,
   getLocalStackSettings,
   localEnvFile,
+  removeLocalGeneratedConfiguration,
 } from "./local-env.mjs";
+import { assertCleanInstallRequest } from "./local-clean-install-policy.mjs";
+import {
+  buildLocalComposeEnvironment,
+  localPlaceholderDatabaseUrl,
+  readLocalSupabaseStatus,
+  startLocalSupabase,
+  stopLocalSupabase,
+} from "./local-supabase.mjs";
+import {
+  formatLocalStackStatus,
+  inspectLocalSupabase,
+} from "./local-stack-status.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const composeFile = "deploy/local/compose.yml";
 const command = process.argv[2] ?? "up";
 const authProfile = process.argv.includes("--auth");
-const authExclusions = [
-  "realtime",
-  "storage-api",
-  "imgproxy",
-  "postgres-meta",
-  "studio",
-  "edge-runtime",
-  "logflare",
-  "vector",
-  "supavisor",
-  "mailpit",
-  "postgrest",
-].join(",");
-const placeholderDatabaseUrl = "postgres://unused:unused@127.0.0.1:1/postgres";
 let composeEnvironment = {
-  JANUSLY_LOCAL_DATABASE_URL: placeholderDatabaseUrl,
+  JANUSLY_LOCAL_DATABASE_URL: localPlaceholderDatabaseUrl,
 };
-
-function run(commandName, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const capture = options.capture || options.sensitive;
-    const child = spawn(commandName, args, {
-      cwd: root,
-      stdio: capture ? ["ignore", "pipe", "pipe"] : "inherit",
-      env: {
-        ...process.env,
-        // The local CLI is the only Supabase component that can emit usage
-        // telemetry. The self-hosted containers themselves do not phone home.
-        SUPABASE_TELEMETRY_DISABLED: "1",
-        DO_NOT_TRACK: "1",
-        ...composeEnvironment,
-      },
-    });
-    let stdout = "";
-    let stderr = "";
-    if (capture) {
-      child.stdout.on("data", (chunk) => { stdout += chunk; });
-      child.stderr.on("data", (chunk) => { stderr += chunk; });
-    }
-    child.on("error", reject);
-    child.on("exit", (code) => code === 0
-      ? resolve({ stdout, stderr })
-      : reject(new Error(
-        `${commandName} ${args.join(" ")} exited ${code}${!options.sensitive && stderr ? `: ${stderr.trim()}` : ""}`,
-      )));
-  });
-}
-
-function parseEnvOutput(output) {
-  const values = {};
-  for (const line of output.split(/\r?\n/)) {
-    const match = line.match(/^([A-Z][A-Z0-9_]*)=(.*)$/);
-    if (!match) continue;
-    const [, key, raw] = match;
-    const trimmed = raw.trim();
-    values[key] = trimmed.startsWith('"') && trimmed.endsWith('"')
-      ? JSON.parse(trimmed)
-      : trimmed;
-  }
-  return values;
-}
-
-function containerUrl(raw) {
-  const parsed = new URL(raw);
-  parsed.hostname = "host.docker.internal";
-  return parsed.toString();
-}
-
-async function readLocalSupabaseStatus() {
-  const { stdout } = await run(
-    "pnpm",
-    ["exec", "supabase", "status", "-o", "env"],
-    { sensitive: true },
-  );
-  return parseEnvOutput(stdout);
-}
-
-function configureSupabaseEnvironment(status, { authEnabled }) {
-  const databaseUrl = status.DB_URL;
-  if (!databaseUrl) {
-    throw new Error("Supabase local status did not expose DB_URL");
-  }
-
-  composeEnvironment = {
-    JANUSLY_LOCAL_DATABASE_URL: containerUrl(databaseUrl),
-    JANUSLY_LOCAL_ALLOW_DEV_AUTH_HEADERS: authEnabled ? "false" : "true",
-  };
-
-  if (!authEnabled) return;
-
-  const apiUrl = status.API_URL;
-  const anonKey = status.ANON_KEY ?? status.PUBLISHABLE_KEY;
-  const serviceRoleKey = status.SERVICE_ROLE_KEY ?? status.SECRET_KEY;
-  if (!apiUrl || !anonKey || !serviceRoleKey) {
-    throw new Error("Supabase local status did not expose API_URL, an anonymous/publishable key, and a service-role/secret key");
-  }
-  const parsed = new URL(apiUrl);
-  Object.assign(composeEnvironment, {
-    JANUSLY_LOCAL_SUPABASE_PUBLIC_URL: apiUrl.replace("127.0.0.1", "localhost"),
-    JANUSLY_LOCAL_SUPABASE_INTERNAL_URL: `http://host.docker.internal:${parsed.port}`,
-    JANUSLY_LOCAL_SUPABASE_ANON_KEY: anonKey,
-    JANUSLY_LOCAL_SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
-  });
-}
-
-async function startLocalSupabase({ authEnabled }) {
-  // Supabase prints its local JWTs and secret keys even after a successful
-  // start. Capture the output so routine lifecycle logs never disclose them.
-  await run("pnpm", ["exec", "supabase", "start", "-x", authExclusions], { sensitive: true });
-  configureSupabaseEnvironment(await readLocalSupabaseStatus(), { authEnabled });
-}
-
-async function stopLocalSupabase({ reset = false } = {}) {
-  await run("pnpm", ["exec", "supabase", "stop", ...(reset ? ["--no-backup"] : [])]);
-}
 
 function compose(args, options = {}) {
   return new Promise((resolve, reject) => {
@@ -159,7 +60,7 @@ async function waitFor(url, timeoutMs = 240_000) {
 
 await ensureLocalEnv();
 await ensureLocalCredentialMasterKey();
-const settings = await getLocalStackSettings();
+let settings = await getLocalStackSettings();
 
 async function waitForStack() {
   await Promise.all([
@@ -169,18 +70,49 @@ async function waitForStack() {
   ]);
 }
 
-if (command === "up") {
-  await startLocalSupabase({ authEnabled: authProfile });
+async function startStack({ authEnabled }) {
+  composeEnvironment = await startLocalSupabase({ authEnabled });
   await compose(["up", "-d", "--build"]);
   try {
     await waitForStack();
-    console.log(
-      `[local] ready: web ${settings.webUrl} · api ${settings.apiUrl} · provider mode ${settings.simulatorEnabled ? "simulator" : "external"} · identity ${authProfile ? "supabase" : "dev-headers"}`,
-    );
   } catch (error) {
     await compose(["logs", "--tail", "150"]);
     throw error;
   }
+}
+
+async function verifyUnifiedDatabase(expectation) {
+  composeEnvironment = buildLocalComposeEnvironment(
+    await readLocalSupabaseStatus(),
+    { authEnabled: authProfile },
+  );
+  await compose([
+    "run", "--rm", "--no-deps", "api",
+    "pnpm", "--filter", "@janusly/api", "exec", "tsx",
+    "../../scripts/verify-local-unified-db.ts",
+    ...(expectation === "empty" ? ["--expect-empty"] : []),
+    ...(expectation === "onboarding" ? ["--expect-onboarding"] : []),
+  ]);
+}
+
+if (command === "up") {
+  await startStack({ authEnabled: authProfile });
+  console.log(
+    `[local] ready: web ${settings.webUrl} · api ${settings.apiUrl} · provider mode ${settings.simulatorEnabled ? "simulator" : "external"} · identity ${authProfile ? "supabase" : "dev-headers"}`,
+  );
+} else if (command === "clean-install") {
+  assertCleanInstallRequest(process.argv.slice(3));
+  await compose(["down", "-v", "--remove-orphans"]);
+  await stopLocalSupabase({ reset: true });
+  await removeLocalGeneratedConfiguration();
+  await ensureLocalEnv();
+  await ensureLocalCredentialMasterKey();
+  settings = await getLocalStackSettings();
+  await startStack({ authEnabled: true });
+  await verifyUnifiedDatabase("empty");
+  console.log(
+    `[local] clean installation ready: web ${settings.webUrl} · api ${settings.apiUrl} · identity supabase · database empty`,
+  );
 } else if (command === "down") {
   await compose(["down"]);
   await stopLocalSupabase();
@@ -195,29 +127,45 @@ if (command === "up") {
   await waitForStack();
   console.log("[local] restarted and healthy");
 } else if (command === "status") {
-  const status = await readLocalSupabaseStatus();
-  configureSupabaseEnvironment(status, { authEnabled: authProfile });
+  const inspection = await inspectLocalSupabase(readLocalSupabaseStatus);
+  if (inspection.status) {
+    composeEnvironment = buildLocalComposeEnvironment(
+      inspection.status,
+      { authEnabled: authProfile },
+    );
+  }
   await compose(["ps"]);
-  console.log(
-    `[local] unified Supabase PostgreSQL ready${authProfile && status.API_URL ? ` · Auth ${status.API_URL}` : ""}`,
-  );
+  console.log(formatLocalStackStatus(inspection, { authEnabled: authProfile }));
 } else if (command === "fixtures") {
-  configureSupabaseEnvironment(await readLocalSupabaseStatus(), { authEnabled: false });
+  composeEnvironment = buildLocalComposeEnvironment(
+    await readLocalSupabaseStatus(),
+    { authEnabled: false },
+  );
   await compose([
     "run", "--rm", "--no-deps", "api",
     "pnpm", "--filter", "@janusly/api", "exec", "tsx",
     "../../scripts/setup-local-smoke-fixtures.ts",
   ]);
-} else if (command === "verify-db") {
-  configureSupabaseEnvironment(await readLocalSupabaseStatus(), { authEnabled: authProfile });
+} else if (command === "recovery-lab-cleanup") {
+  composeEnvironment = buildLocalComposeEnvironment(
+    await readLocalSupabaseStatus(),
+    { authEnabled: false },
+  );
   await compose([
     "run", "--rm", "--no-deps", "api",
     "pnpm", "--filter", "@janusly/api", "exec", "tsx",
-    "../../scripts/verify-local-unified-db.ts",
-    ...(process.argv.includes("--expect-empty") ? ["--expect-empty"] : []),
+    "../../scripts/cleanup-local-recovery-lab.ts",
   ]);
+} else if (command === "verify-db") {
+  await verifyUnifiedDatabase(
+    process.argv.includes("--expect-empty")
+      ? "empty"
+      : process.argv.includes("--expect-onboarding")
+        ? "onboarding"
+        : "topology",
+  );
 } else if (command === "logs") {
   await compose(["logs", "-f", "--tail", "150"]);
 } else {
-  throw new Error("usage: node scripts/local-stack.mjs up|down|reset|restart|status|fixtures|verify-db|logs [--auth] [--expect-empty]");
+  throw new Error("usage: node scripts/local-stack.mjs up|clean-install|down|reset|restart|status|fixtures|recovery-lab-cleanup|verify-db|logs [--auth] [--confirm-reset] [--expect-empty|--expect-onboarding]");
 }

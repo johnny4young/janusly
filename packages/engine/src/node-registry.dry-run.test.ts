@@ -7,6 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const llmGenerateTextMock = vi.hoisted(() => vi.fn())
+const recordValidationWriteSkipMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@janusly/ai', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@janusly/ai')>()
@@ -32,6 +33,10 @@ vi.mock('./persistence', async (importOriginal) => {
     appendEvent: vi.fn().mockResolvedValue(undefined),
   }
 })
+
+vi.mock('./validation-evidence', () => ({
+  recordValidationWriteSkip: recordValidationWriteSkipMock,
+}))
 
 vi.mock('@janusly/data/src/orgConfigRepo', () => ({
   getOrgConfigSnapshot: vi.fn().mockResolvedValue({
@@ -92,6 +97,7 @@ beforeEach(() => {
   fetchHttpTargetMock.mockReset()
   consumeStreamToPreviewMock.mockReset()
   appendEventMock.mockReset()
+  recordValidationWriteSkipMock.mockReset().mockResolvedValue('skip-event-id')
   appendEventMock.mockImplementation(async (_runId, _nodeId, type) => (
     type.endsWith('.step.planned') ? 'planned-event-id' : `event-${type}`
   ))
@@ -122,7 +128,7 @@ describe('http node — dryRun gating', () => {
       output: { statusCode: 0, ok: true, body: null, dryRun: true },
     })
     expect(fetchHttpTargetMock).not.toHaveBeenCalled()
-    expect(appendEventMock).toHaveBeenCalledWith(
+    expect(recordValidationWriteSkipMock).toHaveBeenCalledWith(
       'run-1',
       'fetch',
       'node.dry_run.skipped',
@@ -148,7 +154,7 @@ describe('http node — dryRun gating', () => {
     expect(result.status).toBe('completed')
     if (result.status !== 'completed') return
     expect(result.output).toMatchObject({ statusCode: 200, ok: true })
-    expect(appendEventMock).not.toHaveBeenCalledWith(
+    expect(recordValidationWriteSkipMock).not.toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
       'node.dry_run.skipped',
@@ -173,6 +179,28 @@ describe('http node — dryRun gating', () => {
     expect(result.status).toBe('completed')
     if (result.status !== 'completed') return
     expect(result.output).toMatchObject({ statusCode: 201, ok: true })
+  })
+
+  it.each([
+    ['false', false, 'false'],
+    ['null', null, 'null'],
+  ])('preserves an explicit %s JSON request body', async (_label, body, expectedBody) => {
+    fetchHttpTargetMock.mockResolvedValueOnce({
+      statusCode: 204,
+      ok: true,
+      body: '',
+      headers: {},
+    } as never)
+
+    await nodeRegistry.http({
+      ...baseCtx,
+      config: { url: 'https://x.example', method: 'POST', body },
+    })
+
+    expect(fetchHttpTargetMock).toHaveBeenCalledWith(
+      'https://x.example',
+      expect.objectContaining({ body: expectedBody }),
+    )
   })
 
   it('projects valid declared JSON while preserving the original HTTP body', async () => {
@@ -284,7 +312,7 @@ describe('http node — dryRun gating', () => {
     })
   })
 
-  it.each(['POST', 'PUT', 'PATCH', 'DELETE'])(
+  it.each(['POST', 'PUT', 'PATCH', 'DELETE'] as const)(
     'gates %s in dryRun mode',
     async (method) => {
       const result = await nodeRegistry.http({
@@ -313,7 +341,7 @@ describe('tool node — dryRun gating', () => {
       output: { tool: 'http.request', dryRun: true, skipped: true },
     })
     expect(fetchHttpTargetMock).not.toHaveBeenCalled()
-    expect(appendEventMock).toHaveBeenCalledWith(
+    expect(recordValidationWriteSkipMock).toHaveBeenCalledWith(
       'run-1',
       'fetch',
       'tool.dry_run.skipped',
@@ -367,7 +395,7 @@ describe('tool node — dryRun gating', () => {
         status: 'completed',
         output: { tool, dryRun: true, skipped: true },
       })
-      expect(appendEventMock).toHaveBeenCalledWith(
+      expect(recordValidationWriteSkipMock).toHaveBeenCalledWith(
         'run-1',
         'fetch',
         'tool.dry_run.skipped',
@@ -387,7 +415,7 @@ describe('tool node — dryRun gating', () => {
       status: 'completed',
       output: { tool: 'vector.upsert', dryRun: true, skipped: true },
     })
-    expect(appendEventMock).toHaveBeenCalledWith(
+    expect(recordValidationWriteSkipMock).toHaveBeenCalledWith(
       'run-1',
       'fetch',
       'tool.dry_run.skipped',
@@ -615,7 +643,7 @@ describe('agent node — dryRun gating', () => {
       finalResult: { tool: 'email.send', dryRun: true, skipped: true },
     })
     expect(send).not.toHaveBeenCalled()
-    expect(appendEventMock).toHaveBeenCalledWith(
+    expect(recordValidationWriteSkipMock).toHaveBeenCalledWith(
       'run-1',
       'agent',
       'tool.dry_run.skipped',

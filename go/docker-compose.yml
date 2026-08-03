@@ -1,0 +1,23 @@
+name: janusly-go-pilot
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg18
+    ports:
+      - "127.0.0.1:4632:5432"
+    environment:
+      POSTGRES_DB: janusly_go
+      POSTGRES_USER: janusly
+      POSTGRES_PASSWORD: ${JANUSLY_GO_PG_PASSWORD:-janusly-go-local}
+    volumes:
+      # PG 18+ images keep data in a versioned subdirectory; the mount point
+      # moved up to /var/lib/postgresql (mounting .../data errors at boot).
+      - janusly_go_pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U janusly -d janusly_go"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  janusly_go_pgdata:

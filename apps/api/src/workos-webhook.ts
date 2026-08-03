@@ -13,7 +13,7 @@
  * channels on the hex compare.
  *
  * The verifier mirrors the OUTBOUND signature shape that
- * `webhook.send` emits in `packages/engine/src/integration-tools.ts`
+ * `webhook.send` emits in `packages/engine/src/integration-tooling/webhook.ts`
  * — same algorithm, opposite direction.
  *
  * Used by:

@@ -30,6 +30,11 @@
  * should stop the line.
  */
 
+import {
+  RECOVERY_CIRCUIT_BREAKER_MAX,
+  RECOVERY_CIRCUIT_BREAKER_MIN,
+} from "@janusly/shared";
+
 /** Env kill switch. Default: ENABLED. */
 export const CIRCUIT_BREAKER_ENV = "JANUSLY_CIRCUIT_BREAKER_ENABLED";
 
@@ -42,8 +47,10 @@ export const CIRCUIT_BREAKER_ENV = "JANUSLY_CIRCUIT_BREAKER_ENABLED";
 export const DEFAULT_CIRCUIT_BREAKER_THRESHOLD = 5;
 
 /** Bounds for an operator-supplied threshold. 1 would trip on a single blip. */
-export const MIN_CIRCUIT_BREAKER_THRESHOLD = 2;
-export const MAX_CIRCUIT_BREAKER_THRESHOLD = 100;
+export const MIN_CIRCUIT_BREAKER_THRESHOLD =
+  RECOVERY_CIRCUIT_BREAKER_MIN;
+export const MAX_CIRCUIT_BREAKER_THRESHOLD =
+  RECOVERY_CIRCUIT_BREAKER_MAX;
 
 /** Resolve the effective threshold for a workflow, or null when disabled. */
 export function resolveCircuitBreakerThreshold(input: {

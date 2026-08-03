@@ -22,7 +22,7 @@
  * Used by:
  * - `apps/api/src/index.ts` — boot path: `setIntegrationUsageRecorder(recordIntegrationUsage)`.
  * - `packages/engine/src/worker.ts` — boot path: same.
- * - `packages/engine/src/integration-tools.ts` — fires the recorder.
+ * - `packages/engine/src/integration-tooling/shared.ts` — fires the recorder.
  *
  * Invariants:
  * - Multi-tenant scope: every record carries `orgId`. The fire helper

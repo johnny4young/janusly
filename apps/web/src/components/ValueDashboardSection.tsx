@@ -1,6 +1,6 @@
 /**
  * Value Dashboard — the commercial-pitch surface that sits inside the
- * Recovery Center. Renders MTTR before/after, clusters resolved,
+ * Recovery Center. Renders recovery time before/after, clusters resolved,
  * estimated hours saved, and estimated dollar savings.
  *
  * Every dollar/hour surface carries an "estimate" badge + tooltip
@@ -21,7 +21,11 @@ import { Award, Download, FileText, History } from 'lucide-react'
 
 import { downloadFromApi } from '../api'
 import { getResolvedLocale, useT } from '../i18n'
-import { formatDuration, type RecoveryLedger } from './recovery-center/helpers'
+import {
+  formatDuration,
+  type OperatorWins,
+  type RecoveryLedger,
+} from './recovery-center/recovery-center-model'
 
 export type ClustersResolvedMetric = {
   value: number | null
@@ -44,8 +48,8 @@ export type ValueEstimate = {
 }
 
 export type ValueDashboardSectionProps = {
-  mttrMs: number | null
-  mttrDisplay: string
+  recoveryTimeMs: number | null
+  recoveryTimeDisplay: string
   clustersResolved?: ClustersResolvedMetric
   valueEstimate?: ValueEstimate
   windowDays: number
@@ -53,6 +57,8 @@ export type ValueDashboardSectionProps = {
   downtimeEndedMs?: number
   /** Lifetime measured recovery value; hidden until at least one replay succeeds. */
   ledger?: RecoveryLedger | null
+  /** Personal recovery momentum for the authenticated operator. */
+  personalWins?: OperatorWins | null
   /** When true, the section renders the private-beta-pending empty state. */
   terminalRunsZero: boolean
 }
@@ -93,13 +99,24 @@ export function ValueDashboardSection(props: ValueDashboardSectionProps) {
 
   const baselineMttrSeconds = valueEstimate?.assumptions.baselineMttrSeconds ?? 0
   const baselineUnset = baselineMttrSeconds === 0
-  const mttrSeconds = props.mttrMs != null ? Math.round(props.mttrMs / 1000) : null
+  const recoveryTimeSeconds = props.recoveryTimeMs != null
+    ? Math.round(props.recoveryTimeMs / 1000)
+    : null
   const ledgerLine = props.ledger && props.ledger.totalRecovered > 0 ? (
     <p className="we-recovery-center-value__lifetime" data-testid="recovery-lifetime-ledger">
       <History size={14} aria-hidden="true" />
       {t('recoveryCenter.value.lifetimeImpact', {
         count: props.ledger.totalRecovered,
         duration: formatDuration(props.ledger.downtimeEndedMs),
+      })}
+    </p>
+  ) : null
+  const personalWinsLine = props.personalWins && props.personalWins.recovered > 0 ? (
+    <p className="we-recovery-center-value__lifetime" data-testid="recovery-insights-personal-wins">
+      <Award size={14} aria-hidden="true" />
+      {t('recoveryCenter.hero.personalWins', {
+        count: props.personalWins.recovered,
+        days: props.personalWins.windowDays,
       })}
     </p>
   ) : null
@@ -114,6 +131,7 @@ export function ValueDashboardSection(props: ValueDashboardSectionProps) {
           {t('recoveryCenter.value.title')}
         </h2>
         <p className="we-recovery-center-value__empty">{t('recoveryCenter.value.privateBetaPending')}</p>
+        {personalWinsLine}
         {ledgerLine}
       </section>
     )
@@ -138,6 +156,7 @@ export function ValueDashboardSection(props: ValueDashboardSectionProps) {
             {t('recoveryCenter.value.title')}
           </h2>
           <p className="we-recovery-center-value__subtitle">{t('recoveryCenter.value.subtitle')}</p>
+          {personalWinsLine}
           {ledgerLine}
         </div>
         <div className="we-recovery-center-value__actions">
@@ -163,7 +182,7 @@ export function ValueDashboardSection(props: ValueDashboardSectionProps) {
       </header>
 
       <div className="we-recovery-center-value__grid">
-        {/* MTTR Before */}
+        {/* Recovery-time baseline */}
         <div className="we-recovery-center-value__card">
           <div className="we-recovery-center-value__label">{t('recoveryCenter.value.mttrBefore.label')}</div>
           <div className="we-recovery-center-value__value">
@@ -171,14 +190,14 @@ export function ValueDashboardSection(props: ValueDashboardSectionProps) {
           </div>
         </div>
 
-        {/* MTTR After */}
+        {/* Current verified-recovery time */}
         <div className="we-recovery-center-value__card">
           <div className="we-recovery-center-value__label">{t('recoveryCenter.value.mttrAfter.label')}</div>
-          <div className="we-recovery-center-value__value">{props.mttrDisplay}</div>
+          <div className="we-recovery-center-value__value">{props.recoveryTimeDisplay}</div>
         </div>
 
-        {/* MTTR Delta */}
-        {valueEstimate?.mttrDeltaSeconds != null && mttrSeconds != null && (
+        {/* Recovery-time delta */}
+        {valueEstimate?.mttrDeltaSeconds != null && recoveryTimeSeconds != null && (
           <div className="we-recovery-center-value__card">
             <div className="we-recovery-center-value__label">
               {t('recoveryCenter.value.mttrDelta.label')}

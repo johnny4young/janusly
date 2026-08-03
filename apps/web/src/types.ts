@@ -53,6 +53,13 @@ export type ReviewFindings = {
   status: 'pass' | 'warn' | 'fail'
   issues: AiReviewIssue[]
 }
+export type ToolInputFieldSchema = {
+  name: string
+  kind: 'string' | 'number' | 'integer' | 'boolean' | 'json'
+  required: boolean
+  options?: string[]
+}
+
 export type ToolSchema = {
   name: string
   description: string
@@ -61,6 +68,9 @@ export type ToolSchema = {
   required?: string[]
   optional?: string[]
   inputExample?: Record<string, unknown>
+  inputFields: ToolInputFieldSchema[]
+  /** True when some valid invocations can mutate external state. */
+  writeSide: boolean
 }
 export type Template = {
   id: string
@@ -82,6 +92,8 @@ export type Credential = {
   storage?: 'managed' | 'environment'
   metadata?: JsonObject
   expiresAt?: string | null
+  createdBy?: string | null
+  createdAt?: string | null
 }
 
 /** One required credential a solution pack declares (name + kind + purpose; never a secret value). */
@@ -96,7 +108,7 @@ export type SolutionPackFailureMode =
   | 'contract_drift'
   | 'upstream_unavailable'
   | 'worker_stalled'
-export type SolutionPackRecoveryPath = 'direct_failure' | 'stalled_node_reaper'
+export type SolutionPackRecoveryPath = 'direct_failure' | 'runtime_failure' | 'stalled_node_reaper'
 type PackFailureFixture = {
   id: string
   label: string
@@ -127,6 +139,12 @@ export type SolutionPackPublic = {
  * workflow refuses new runs, so the list must say so.
  */
 export type SavedWorkflow = { id: string; orgId: string; name: string; createdBy?: string; createdAt?: string; updatedAt?: string; lastRunStatus?: string | null; runCount?: number; bufferedTriggerCount?: number; status?: string; pausedReason?: string | null; tags?: string[]; folder?: string | null; deletedAt?: string | null }
+export type ValidationEvidenceLevel =
+  | 'static'
+  | 'writes_skipped'
+  | 'provider_simulated'
+  | 'live_canary'
+
 export type RunSummary = {
   id: string
   orgId?: string
@@ -136,6 +154,16 @@ export type RunSummary = {
   workflowName?: string | null
   workflowVersionId?: string
   status: string
+  /** True when the bounded run projection found at least one waiting node. */
+  hasWaitingNodes?: boolean
+  /** Business-outcome posture, independent from technical run status. */
+  outcomeStatus?:
+    | 'semantic_violation'
+    | 'semantic_quarantined'
+    | 'semantic_recovered'
+    | 'semantic_accepted_loss'
+    | null
+  semanticViolationCount?: number
   createdBy?: string
   createdAt?: string
   /** Full run-start envelope. Present on `/run` and `/status`; omitted from the bounded `/runs` list. */
@@ -150,6 +178,58 @@ export type RunSummary = {
    * Drives whether the "Open in Lab" button surfaces (no nested labs).
    */
   replayMode?: string | null
+  /** Strength of evidence produced by a validation run. */
+  validationEvidenceLevel?: ValidationEvidenceLevel | null
+}
+
+export type RecoveryCase = {
+  id: string
+  orgId: string
+  runId: string
+  workflowId: string | null
+  workflowVersionId: string
+  source: 'semantic_violation'
+  detectorId: string
+  sourceNodeId: string
+  detectorKind: 'expression' | 'schema'
+  action: 'observe' | 'quarantine'
+  message: string
+  detailsJson: unknown
+  state:
+    | 'detected'
+    | 'contained'
+    | 'diagnosed'
+    | 'candidates_ready'
+    | 'validating'
+    | 'awaiting_approval'
+    | 'publishing'
+    | 'monitoring'
+    | 'verified_recovered'
+    | 'recurred'
+    | 'accepted_loss'
+    | 'abandoned'
+  createdBy: string | null
+  createdAt: string
+  updatedAt: string
+  resolvedAt: string | null
+}
+export type RecoveryCaseTransition = {
+  id: string
+  orgId: string
+  caseId: string
+  fromState: RecoveryCase['state']
+  toState: RecoveryCase['state']
+  actorKind: 'system' | 'user' | 'agent'
+  actorId: string | null
+  evidenceJson: unknown
+  reason: string | null
+  occurredAt: string
+}
+export type SemanticCaseResolution = {
+  runId: string
+  sourceNodeId: string
+  resumed: boolean
+  resolvedCaseIds: string[]
 }
 export type OrgRole = 'viewer' | 'editor' | 'admin'
 export type OrgMember = { id: string; orgId: string; userId: string; email?: string; role: OrgRole; invitedBy?: string; createdAt?: string }
@@ -194,6 +274,11 @@ export type McpToolDescriptor = {
 }
 
 export type AiMode = 'ai' | 'fallback' | 'error'
+export type AiAuthoringAction = 'generate' | 'explain' | 'review' | 'fix'
+export type AiAuthoringActionRequest = {
+  id: number
+  action: AiAuthoringAction
+}
 
 /** Budget-driven reduction of Best-of-N candidates for one AI generation. */
 export type AiCandidateBackoff = { from: number; to: number }
@@ -214,7 +299,7 @@ export function parseAiCandidateBackoff(value: unknown): AiCandidateBackoff | un
   return { from, to }
 }
 export type AiHealth = { enabled: boolean; provider?: string; model: string; timeoutMs: number; maxRetries: number }
-export type ActiveTab = 'home' | 'workflows' | 'members' | 'copilot' | 'experiments' | 'marketplace' | 'templates' | 'packs' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'multiAgent' | 'operations'
+export type ActiveTab = 'home' | 'recover' | 'workflows' | 'members' | 'copilot' | 'experiments' | 'marketplace' | 'templates' | 'packs' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'multiAgent' | 'operations' | 'recoveryCase'
 
 /**
  * Tabs that NEED the React Flow canvas mounted as their main slot. Today
@@ -304,6 +389,18 @@ export type WorkflowDefinition = {
   templatePolicy?: 'lenient' | 'strict'
   /** Editor-only layout metadata; runtime consumers ignore it. */
   ui?: { positions?: Record<string, { x: number; y: number }> }
+}
+export type WorkflowImprovementSuggestion = {
+  workflow: WorkflowDefinition
+  rationale: string
+  approachLabel: string
+  confidence: number
+}
+export type WorkflowImprovementResult = {
+  mode: AiMode
+  suggestions: WorkflowImprovementSuggestion[]
+  model?: string
+  aiError?: string
 }
 export type WorkflowGraphNode = Node<WorkflowNodeData>
 export type WorkflowGraphEdge = Edge<WorkflowEdgeData & { hasCondition?: boolean }>

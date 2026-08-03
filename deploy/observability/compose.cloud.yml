@@ -15,6 +15,7 @@ services:
       GRAFANA_CLOUD_INSTANCE_ID: ${GRAFANA_CLOUD_INSTANCE_ID:?Set GRAFANA_CLOUD_INSTANCE_ID}
       GRAFANA_CLOUD_API_TOKEN: ${GRAFANA_CLOUD_API_TOKEN:?Set GRAFANA_CLOUD_API_TOKEN}
       JANUSLY_ENVIRONMENT: ${JANUSLY_ENVIRONMENT:-production}
+      JANUSLY_GO_METRICS_ADDRESS: ${JANUSLY_GO_METRICS_ADDRESS:-host.docker.internal:4601}
     extra_hosts:
       - host.docker.internal:host-gateway
     volumes:

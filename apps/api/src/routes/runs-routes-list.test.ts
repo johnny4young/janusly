@@ -3,7 +3,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { directLimitMock, eqMock, isNullMock, limitMock, ltMock, replayDecisionMock, selectMock, sendJsonMock } = vi.hoisted(() => {
-  const limit = vi.fn(async () => [{ id: 'run-1', workflowId: 'wf-1', status: 'failed' }])
+  const limit = vi.fn(async () => [{
+    id: 'run-1',
+    workflowId: 'wf-1',
+    status: 'failed',
+    hasWaitingNodes: false,
+  }])
   const orderBy = vi.fn(() => ({ limit }))
   const where = vi.fn(() => ({ orderBy }))
   const leftJoin = vi.fn(() => ({ where }))
@@ -50,7 +55,10 @@ vi.mock('@janusly/db', () => ({
     nodeId: 'run_events.node_id',
     type: 'run_events.type',
   },
-  runNodes: {},
+  runNodes: {
+    runId: 'run_nodes.run_id',
+    status: 'run_nodes.status',
+  },
   runs: {
     id: 'runs.id',
     orgId: 'runs.org_id',
@@ -309,7 +317,12 @@ describe('GET /runs history filters', () => {
     expect(eqMock).toHaveBeenCalledWith('runs.created_at', new Date('2026-07-10T12:00:00.000Z'))
     expect(ltMock).toHaveBeenCalledWith('runs.id', 'run-9')
     expect(limitMock).toHaveBeenCalledWith(1)
-    expect(sendJsonMock).toHaveBeenLastCalledWith({}, [{ id: 'run-1', workflowId: 'wf-1', status: 'failed' }])
+    expect(sendJsonMock).toHaveBeenLastCalledWith({}, [{
+      id: 'run-1',
+      workflowId: 'wf-1',
+      status: 'failed',
+      hasWaitingNodes: false,
+    }])
   })
 
   it('rejects an unknown status without touching the database', async () => {

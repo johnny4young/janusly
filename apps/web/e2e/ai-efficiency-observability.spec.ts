@@ -1,4 +1,5 @@
-/** Real-stack proof for AI/run efficiency in Operations, Reasoning, and Copilot. */
+import { openWorkflowAiAction, openWorkspaceSection } from './_helpers/workspace-navigation'
+/** Real-stack proof for AI/run efficiency in Settings, Reasoning, and Copilot. */
 
 import { execFile } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
@@ -15,8 +16,8 @@ type Locale = 'en' | 'es'
 
 const copy = {
   en: {
-    operations: 'Operations',
     costHeading: 'Cost breakdown',
+    costTable: 'Cost breakdown table',
     cacheLabel: 'Prompt cache efficiency',
     runs: 'Runs',
     timeline: 'View timeline',
@@ -32,8 +33,8 @@ const copy = {
     knownCost: '0.0425',
   },
   es: {
-    operations: 'Operaciones',
     costHeading: 'Desglose de costo',
+    costTable: 'Tabla de desglose de costo',
     cacheLabel: 'Eficiencia de la caché de instrucciones',
     runs: 'Ejecuciones',
     timeline: 'Ver cronología',
@@ -145,7 +146,11 @@ async function capture(locator: Locator, name: string): Promise<void> {
 }
 
 async function openRunFromHistory(page: Page, runId: string, locale: Locale): Promise<void> {
-  await page.getByRole('button', { name: copy[locale].runs, exact: true }).click()
+  await openWorkspaceSection(
+    page,
+    locale === 'en' ? 'Activity' : 'Actividad',
+    copy[locale].runs,
+  )
   const overviewTab = page.getByTestId('run-workspace-tab-overview')
   if (await overviewTab.isVisible().catch(() => false)) await overviewTab.click()
   const history = page.getByTestId('runs-history-virtual-list')
@@ -285,18 +290,44 @@ test('AI and run efficiency are observable in English and Spanish', async ({ pag
     }
     await hideUnrelatedOverlays(page)
 
-    await page.getByRole('button', { name: copy[locale].operations, exact: true }).click()
+    await openWorkspaceSection(
+      page,
+      locale === 'en' ? 'Settings' : 'Configuración',
+      locale === 'en' ? 'Workspace' : 'Espacio de trabajo',
+    )
+    await page.getByTestId('operations-rail-tab-usage').click()
     const costCard = page.locator('.we-card').filter({ hasText: copy[locale].costHeading }).first()
+    const costTable = page.getByTestId('settings-usage-cost-table')
     const cacheSummary = costCard.getByLabel(copy[locale].cacheLabel)
     await expect(cacheSummary).toContainText('50%')
     await expect(cacheSummary).toContainText(copy[locale].cacheTokens)
     await expect(costCard).toContainText(copy[locale].createdTokens)
+    await expect(costTable).toHaveAccessibleName(copy[locale].costTable)
+    await expect(costTable).toHaveAttribute('tabindex', '0')
     await hideUnrelatedOverlays(page)
     await capture(costCard, `web-${locale}-operations-cache-efficiency-ready`)
+    if (locale === 'es') {
+      await page.setViewportSize({ width: 390, height: 844 })
+      const mobileSidebar = page.locator('#workspace-sidebar')
+      await expect(mobileSidebar).toHaveAttribute('aria-hidden', 'true')
+      await expect(mobileSidebar).toHaveCSS('visibility', 'hidden')
+      await expect(costTable).toBeVisible()
+      const compactTable = await costTable.evaluate(element => ({
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+      }))
+      expect(compactTable.clientWidth).toBeGreaterThan(0)
+      expect(compactTable.scrollWidth).toBeGreaterThan(compactTable.clientWidth)
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth),
+      ).toBeLessThanOrEqual(2)
+      await capture(costCard, 'web-es-operations-cache-efficiency-mobile')
+      await page.setViewportSize({ width: 1280, height: 720 })
+    }
 
     await captureRunUsageStates(page, runId, locale)
 
-    await page.getByRole('button', { name: /^AI Studio\b/ }).click()
+    await openWorkflowAiAction(page, locale === 'en' ? 'Workflows' : 'Flujos')
     await page.locator('.copilot-prompt').fill(locale === 'en'
       ? 'Draft a budget-aware approval flow.'
       : 'Arma un flujo de aprobación ajustado al presupuesto.')

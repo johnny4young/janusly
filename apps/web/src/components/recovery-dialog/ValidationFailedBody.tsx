@@ -11,8 +11,8 @@ import { AlertCircle } from 'lucide-react'
 import { Trans, useT } from '../../i18n'
 import type { WorkflowDefinition } from '../../types'
 import { WorkflowDiffView } from '../WorkflowDiffView'
-import type { DeadLetter } from '../DeadLettersPanel'
-import { classifyRecoveryError, pickErrorMessage } from './helpers'
+import type { DeadLetter } from '../dead-letter-types'
+import { classifyRecoveryError, pickErrorMessage } from './recovery-dialog-model'
 import { RecoveryPassportCard } from './RecoveryPassportCard'
 import type { PatchSuggestion } from './types'
 
@@ -58,7 +58,7 @@ export function ValidationFailedBody({
       ) : null}
       {category ? (
         <p className="helper-text we-recovery-error-summary">
-          {t(`recoveryDialog.errorSummary.${category}` as never)}
+          {t(`recoveryDialog.errorSummary.${category}`)}
         </p>
       ) : null}
       {message ? (

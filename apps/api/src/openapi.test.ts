@@ -27,7 +27,7 @@ describe("OpenAPI v1 contract", () => {
       ...Object.values(V1_READ_PATHS),
       ...Object.values(V1_WRITE_PATHS),
       ...Object.values(V1_MCP_PATHS),
-    ])].sort());
+    ])].sort((a, b) => a.localeCompare(b)));
     expect(document.paths["/run"].get.operationId).toBe("getRun");
     expect(document.paths["/reports/run-explain"].get.operationId).toBe("getRunExplainReport");
     expect(document.paths["/run"].get.responses).toHaveProperty("200");
@@ -42,8 +42,11 @@ describe("OpenAPI v1 contract", () => {
     expect(runSuccess.content["application/json"].schema.properties.data)
       .not.toHaveProperty("additionalProperties");
     expect(document.paths["/start"].post.operationId).toBe("startRun");
+    expect(document.paths["/runs/redrive"].post.operationId).toBe("redriveRun");
     expect(document.paths["/resume"].post.operationId).toBe("resumeRun");
     expect(document.paths["/run/cancel"].post.operationId).toBe("cancelRun");
+    expect(document.paths["/workflows/{workflowId}/resume"].post.operationId)
+      .toBe("resumeWorkflow");
     expect(document.paths["/mcp/connections/{alias}"].delete.operationId)
       .toBe("deleteMcpConnection");
     expect(document.paths["/mcp/connections/{alias}/tools/{toolName}"].post)

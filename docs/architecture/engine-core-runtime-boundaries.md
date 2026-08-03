@@ -23,6 +23,18 @@ packages/engine/src/
     replay-lab.ts
     sandbox-run.ts
     sample-failure.ts
+  testing/
+    in-memory-execution-store.ts
+    in-memory-queue-adapter.ts
+    scripted-node-executors.ts
+  persistence.ts        # stable compatibility barrel
+  persistence-ports/
+    run.ts              # run reads, replay, subworkflows, rollup
+    node.ts             # execution claims and node transitions
+    event.ts            # append-only lifecycle events
+    publication.ts      # durable queue and parent outboxes
+    recovery.ts         # semantic containment and resolution
+    internal.ts         # private shared projections and bounds
   worker.ts             # BullMQ process wiring
   start-run.ts          # transactional run bootstrap
   resume-run.ts         # waiting-node resume path
@@ -36,7 +48,9 @@ duplicating graph scheduling rules.
 
 `ExecutionStore` is the persistence boundary. The production implementation is
 `PostgresExecutionStore`, which wraps the existing run/node/event persistence
-helpers.
+helpers through the stable `persistence.ts` compatibility barrel. Their owning
+lifecycle ports and dependency direction are documented in
+[`engine-persistence.md`](engine-persistence.md).
 
 `QueueAdapter` is the queue boundary. The production implementation is
 `BullMQQueueAdapter`, which composes the DLQ adapter. Failed-beyond-retry jobs
@@ -46,6 +60,34 @@ the queue contract.
 `NodeExecutorRegistry` is the node-execution boundary. The registry delegates
 to concrete node executors in `node-registry.ts`; runtime core does not import
 executor-specific config schemas.
+
+The concrete registry is a `NodeExecutorMap` keyed by executor-owned node type.
+Each `NodeContext<T>.config` is inferred from `NodeConfigByType[T]`, so a field
+that belongs to another node type or has the wrong authored shape fails during
+TypeScript checking as well as at the post-template Zod parse. `executeNode`
+uses the same narrowed type for parsing and dispatch; `executeRegisteredNode`
+is the only dynamic dispatch seam. `router` and `router_llm` are intentionally
+absent because `WorkflowRuntime` owns their decision, branch-skip, semantic,
+and persistence sequence directly.
+
+## In-memory integration testkit
+
+Engine integration tests can import `packages/engine/src/testing` instead of
+assembling a fresh object of mocked adapter methods. `InMemoryExecutionStore`
+is stateful across a complete run and models node status transitions, queue
+publication generations, recovery claim tokens, run rollups, event history,
+terminal failure persistence, and deterministic semantic cases.
+`InMemoryQueueAdapter` keeps separate pending-publication and append-only
+publication/DLQ histories, while `ScriptedNodeExecutorRegistry` selects async
+handlers by node id or node type.
+
+The testkit deliberately runs the real `WorkflowRuntime`; it is not a second
+orchestrator and must not copy readiness, retry, or semantic-evaluation logic.
+Its compare-and-set behavior is deterministic within one process, which makes
+it suitable for lifecycle integration tests. PostgreSQL integration tests
+remain authoritative for transaction isolation, row locking, and SQL-specific
+constraints; BullMQ integration tests remain authoritative for delivery and
+Redis behavior.
 
 ## Runtime lifecycle
 
@@ -114,13 +156,15 @@ empty-output behavior.
 
 ## Remaining portability work
 
-The core runtime boundary exists today. Remaining improvements are narrower:
+The core runtime boundary and typed concrete dispatch exist today. Remaining
+improvements are narrower:
 
-- add a reusable in-memory adapter package for integration tests instead of
-  per-test mocks;
-- keep moving executor-specific validation into typed node config parsers;
+- tighten still-loose optional config fields only when their executors are
+  touched, preserving passthrough compatibility by default;
 - preserve compatibility exports while callers finish moving to the runtime
   boundary;
+- keep persistence lifecycle ports acyclic and make database behavior changes
+  in their owning port rather than the compatibility barrel;
 - avoid adding new infrastructure calls inside `core/*`.
 
 Non-goals remain unchanged: do not replace BullMQ, Drizzle/Postgres, or the

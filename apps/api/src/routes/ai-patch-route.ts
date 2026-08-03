@@ -53,6 +53,7 @@ import { localeFromRequest } from "../locale";
 import { withBudgetWarning } from "../ai-route-helpers";
 import type { Route } from "../routes";
 import { recoverySuggestionSafety, type RecoverySuggestionSafety } from "../recovery-suggestion-safety";
+import { rankRecoverySuggestions } from "../recovery-suggestion-ranking";
 
 /**
  * Index the stored calibration curves by `approachLabel` for O(1) lookup
@@ -388,7 +389,7 @@ export const aiPatchRoutes: Route[] = [
 
       if (helperResult.mode === "ai") {
         const originalParsed = WorkflowSchema.safeParse(dlq.workflowJson);
-        const validated: ValidatedSuggestion[] = [];
+        let validated: ValidatedSuggestion[] = [];
         if (originalParsed.success) {
           for (const rawItem of helperResult.suggestions) {
             try {
@@ -424,7 +425,7 @@ export const aiPatchRoutes: Route[] = [
               // empty-list branch below degrades to fallback.
             }
           }
-          validated.sort((a, b) => b.confidence - a.confidence);
+          validated = rankRecoverySuggestions(validated, dlq.errorJson);
         }
 
         if (validated.length > 0) {

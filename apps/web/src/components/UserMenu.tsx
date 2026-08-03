@@ -135,7 +135,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
   const currentOrganization = currentSessionOrganization(identityContext)
   const role = currentOrganization?.role ?? 'viewer'
   const roleLabel = role === 'viewer' || role === 'editor' || role === 'admin'
-    ? t(`userMenu.role.${role}` as never)
+    ? t(`userMenu.role.${role}`)
     : role
   const canOpenOperations = sessionCan(identityContext, 'recovery.read')
   const canManageCredentials = sessionCan(identityContext, 'credentials.write')
@@ -275,7 +275,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
         type="button"
         className="user-menu__trigger"
         onClick={() => setOpen(prev => !prev)}
-        aria-haspopup="menu"
+        aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={triggerLabel}
       >
@@ -285,7 +285,12 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
       </button>
 
       {open && (
-        <div className="user-menu__popover" role="menu">
+        <div
+          className="user-menu__popover"
+          role="dialog"
+          aria-modal="false"
+          aria-label={t('userMenu.dialogLabel')}
+        >
           {/* Identity strip */}
           <div className="user-menu__id">
             <span className="user-menu__id-avatar" aria-hidden="true">{initials(email)}</span>
@@ -389,7 +394,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
                 <span>{t('userMenu.ai.subtitle')}</span>
               </strong>
               <span className={`user-menu__ai-pill user-menu__ai-pill--${aiStatus.state}`}>
-                {t(aiStatus.pillKey as never)}
+                {t(aiStatus.pillKey)}
               </span>
             </div>
             <div className="user-menu__ai-meta">
@@ -405,7 +410,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
               {canManageBudget && <button
                 type="button"
                 onClick={() => {
-                  requestOperationsSection('reliability')
+                  requestOperationsSection('ai')
                   onOpenTab?.('operations')
                   setOpen(false)
                 }}

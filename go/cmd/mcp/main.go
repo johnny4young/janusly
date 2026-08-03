@@ -1,0 +1,91 @@
+// Command mcp runs the pilot's MCP stdio server: a thin in-process layer
+// over the engine (no HTTP hop) that lets an agent save workflows, start
+// and inspect runs, and drive the dead-letter redrive loop. The process
+// also runs the worker pool so runs progress with no other service up.
+//
+// Org scope comes from JANUSLY_GO_ORG (default "default") — the pilot's
+// dev-auth analogue for a stdio transport.
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/johnny4young/janusly/go/internal/boot"
+	"github.com/johnny4young/janusly/go/internal/config"
+	"github.com/johnny4young/janusly/go/internal/engine"
+	"github.com/johnny4young/janusly/go/internal/grammar"
+	"github.com/johnny4young/janusly/go/internal/mcpserver"
+	"github.com/johnny4young/janusly/go/internal/migrate"
+	"github.com/johnny4young/janusly/go/internal/ratelimit"
+)
+
+func main() {
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, "fatal:", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	ctx := context.Background()
+	cfg, err := config.Load(os.Getenv)
+	if err != nil {
+		return err
+	}
+	if !cfg.WorkPlaneEnabled {
+		return errors.New("MCP server requires JANUSLY_GO_WORK_PLANE_ENABLED=true")
+	}
+	// Logs go to stderr — stdout belongs to the MCP transport.
+	logger := boot.NewLogger()
+
+	if err := migrate.AssertMigrated(ctx, cfg.DatabaseURL); err != nil {
+		return err
+	}
+	pool, err := boot.Connect(ctx, cfg.DatabaseURL, cfg.APIPoolSize+cfg.WorkerPoolSize)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	if err := boot.ProbeMigrations(ctx, pool); err != nil {
+		return err
+	}
+
+	eng := engine.New(pool)
+	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
+	workerCtx, stopWorkers := context.WithCancel(context.Background())
+	defer stopWorkers()
+	// BOTH background loops must be drained before the deferred
+	// pool.Close() above runs (defers unwind LIFO). The reaper used to be
+	// an unsynchronized `go`, so a normal stdio session teardown could
+	// leave it querying a pool that was already closing.
+	var background sync.WaitGroup
+	background.Go(func() {
+		_ = eng.RunWorkers(workerCtx, cfg.WorkerConcurrency, cfg.PollInterval, dispatcher.Execute, logger)
+	})
+	background.Go(func() {
+		eng.StartReaper(workerCtx, time.Minute, time.Hour, logger)
+	})
+	defer func() { stopWorkers(); background.Wait() }()
+
+	org := os.Getenv("JANUSLY_GO_ORG")
+	if org == "" {
+		org = "default"
+	}
+	tracker := ratelimit.NewTracker(pool)
+	server := mcpserver.NewServer(mcpserver.Deps{
+		Engine: eng, Pool: pool, OrgID: org, UserID: "mcp", NewID: uuid.NewString,
+		Limiter: ratelimit.New(pool, ratelimit.Hooks{
+			OnError: tracker.RecordError, OnSuccess: tracker.RecordRecovery,
+		}),
+	})
+	logger.Info("mcp server ready", "org", org, "startup", time.Now().UTC().Format(time.RFC3339))
+	return server.Run(ctx, &mcp.StdioTransport{})
+}

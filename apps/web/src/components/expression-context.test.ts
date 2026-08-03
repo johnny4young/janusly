@@ -4,6 +4,7 @@ import {
   buildExpressionSuggestions,
   collectReachableUpstreamNodeIds,
   findUnresolvedExpressionReferences,
+  inspectExpressionAuthoring,
 } from './expression-context'
 
 const nodes = [
@@ -23,17 +24,25 @@ describe('expression graph context', () => {
     expect(collectReachableUpstreamNodeIds({ nodes, edges, targetNodeId: 'gate' })).toEqual(['fetch', 'shape'])
     const tokens = buildExpressionSuggestions({ nodes, edges, targetNodeId: 'gate', mode: 'node' }).map((item) => item.token)
     expect(tokens).toContain('context.fetch.output.statusCode')
-    expect(tokens).toContain('context.fetch.output.json')
     expect(tokens).toContain('context.fetch.output.jsonParseSkipped')
     expect(tokens).toContain('context.shape.output.total')
-    expect(tokens).toEqual(expect.arrayContaining([
-      ' contains ""',
-      ' startsWith ""',
-      ' matches ""',
-      ' in []',
-    ]))
+    expect(tokens).not.toContain('context.fetch.output.json')
     expect(tokens).not.toContain('context.gate.output')
     expect(tokens).not.toContain('context.isolated.output')
+    expect(buildExpressionSuggestions({
+      nodes,
+      edges,
+      targetNodeId: 'gate',
+      mode: 'node',
+      workflowInputs: {
+        type: 'object',
+        properties: { amount: { type: 'number' } },
+      },
+    }))
+      .toContainEqual(expect.objectContaining({
+        token: 'context.input.amount',
+        valueType: 'number',
+      }))
   })
 
   it('includes the source node itself for an edge condition', () => {
@@ -85,5 +94,21 @@ describe('expression graph context', () => {
     expect(findUnresolvedExpressionReferences('context.input[0].amount > 0', suggestions, 'node')).toEqual([])
     expect(findUnresolvedExpressionReferences('inputs[0].amount > 0', suggestions, 'node')).toEqual([])
     expect(findUnresolvedExpressionReferences('inputs[0].amount > 0', suggestions, 'edge')).toEqual(['inputs[0].amount'])
+  })
+
+  it('shares one contextual validation result between guided and advanced authoring', () => {
+    const suggestions = buildExpressionSuggestions({ nodes, edges, targetNodeId: 'gate', mode: 'node' })
+    expect(inspectExpressionAuthoring('context.fetch.output.ok === true', suggestions, 'node'))
+      .toEqual({ status: 'valid' })
+    expect(inspectExpressionAuthoring("context.fetch.output.json.state === 'ready'", suggestions, 'node'))
+      .toEqual({ status: 'valid' })
+    expect(inspectExpressionAuthoring('context.isolated.output.ok === true', suggestions, 'node'))
+      .toEqual({
+        status: 'invalid',
+        code: 'unresolved',
+        references: ['context.isolated.output.ok'],
+      })
+    expect(inspectExpressionAuthoring('inputs.threshold > 0', suggestions, 'edge'))
+      .toEqual({ status: 'invalid', code: 'invalid_grammar' })
   })
 })

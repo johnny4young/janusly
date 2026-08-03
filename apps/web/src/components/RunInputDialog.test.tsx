@@ -18,8 +18,9 @@ function makeProps(
 describe('<RunInputDialog />', () => {
   it('marks required fields with aria-required', () => {
     render(<RunInputDialog {...makeProps()} />)
-    const field = screen.getByLabelText(/invoiceId/i)
+    const field = screen.getByLabelText(/Invoice ID/i)
     expect(field).toHaveAttribute('aria-required', 'true')
+    expect(screen.getByText('Required')).toBeInTheDocument()
   })
 
   it('blocks submit and surfaces a local error when a required field is empty', () => {
@@ -27,17 +28,17 @@ describe('<RunInputDialog />', () => {
     render(<RunInputDialog {...makeProps({ onSubmit })} />)
     fireEvent.click(screen.getByRole('button', { name: /Run workflow/i }))
     expect(onSubmit).not.toHaveBeenCalled()
-    expect(screen.getByText(/invoiceId is required/i)).toBeInTheDocument()
+    expect(screen.getByText(/Invoice ID is required/i)).toBeInTheDocument()
   })
 
   it('clears a local field error as soon as the field changes', () => {
     render(<RunInputDialog {...makeProps()} />)
     fireEvent.click(screen.getByRole('button', { name: /Run workflow/i }))
-    expect(screen.getByText(/invoiceId is required/i)).toBeInTheDocument()
+    expect(screen.getByText(/Invoice ID is required/i)).toBeInTheDocument()
 
-    fireEvent.change(screen.getByLabelText(/invoiceId/i), { target: { value: 'INV-1' } })
+    fireEvent.change(screen.getByLabelText(/Invoice ID/i), { target: { value: 'INV-1' } })
 
-    expect(screen.queryByText(/invoiceId is required/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Invoice ID is required/i)).not.toBeInTheDocument()
   })
 
   it('submits with parsed values, coercing number fields', async () => {
@@ -51,7 +52,7 @@ describe('<RunInputDialog />', () => {
       required: ['invoiceId', 'amount'],
     }
     render(<RunInputDialog {...makeProps({ inputs: schema, onSubmit })} />)
-    fireEvent.change(screen.getByLabelText(/invoiceId/i), { target: { value: 'INV-1' } })
+    fireEvent.change(screen.getByLabelText(/Invoice ID/i), { target: { value: 'INV-1' } })
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '42' } })
     fireEvent.click(screen.getByRole('button', { name: /Run workflow/i }))
     expect(onSubmit).toHaveBeenCalledTimes(1)
@@ -77,7 +78,7 @@ describe('<RunInputDialog />', () => {
     })} />)
 
     expect(screen.getByLabelText(/name/i)).toHaveValue('Ada')
-    expect(screen.getByLabelText(/active/i)).toBeChecked()
+    expect(screen.getByLabelText(/Active/i)).toHaveValue('true')
     fireEvent.click(screen.getByRole('button', { name: /Run workflow/i }))
     expect(onSubmit).toHaveBeenCalledWith({ customer: { name: 'Ada', active: true } })
   })
@@ -102,7 +103,7 @@ describe('<RunInputDialog />', () => {
     render(<RunInputDialog {...makeProps({ inputs: schema, onSubmit })} />)
 
     expect(screen.getByLabelText(/name/i)).toHaveValue('Ada')
-    expect(screen.getByLabelText(/active/i)).toBeChecked()
+    expect(screen.getByLabelText(/Active/i)).toHaveValue('true')
     fireEvent.click(screen.getByRole('button', { name: /Run workflow/i }))
     expect(onSubmit).toHaveBeenCalledWith({ customer: { name: 'Ada', active: true } })
   })
@@ -110,7 +111,7 @@ describe('<RunInputDialog />', () => {
   it('maps a JSONPath server error to the matching field', () => {
     const props = makeProps({ serverErrors: ['$.invoiceId must be a UUID'] })
     render(<RunInputDialog {...props} />)
-    expect(screen.getByText(/invoiceId must be a UUID/i)).toBeInTheDocument()
+    expect(screen.getByText(/Invoice ID must be a UUID/i)).toBeInTheDocument()
   })
 
   it('calls onCancel from the close button and from the ESC key', () => {
@@ -122,7 +123,7 @@ describe('<RunInputDialog />', () => {
     expect(onCancel).toHaveBeenCalledTimes(2)
   })
 
-  it('renders boolean checkbox + enum select and submits the right values', () => {
+  it('renders boolean and enum selects and submits the right values', () => {
     const onSubmit = vi.fn()
     const schema: WorkflowInputSchemaShape = {
       type: 'object',
@@ -133,10 +134,44 @@ describe('<RunInputDialog />', () => {
       required: ['priority'],
     }
     render(<RunInputDialog {...makeProps({ inputs: schema, onSubmit })} />)
-    fireEvent.click(screen.getByLabelText(/published/i))
+    fireEvent.change(screen.getByLabelText(/Published/i), { target: { value: 'true' } })
     fireEvent.change(screen.getByLabelText(/priority/i), { target: { value: 'high' } })
     fireEvent.click(screen.getByRole('button', { name: /Run workflow/i }))
     expect(onSubmit).toHaveBeenCalledWith({ published: true, priority: 'high' })
+  })
+
+  it('requires an explicit true or false choice for required booleans', () => {
+    const onSubmit = vi.fn()
+    const schema: WorkflowInputSchemaShape = {
+      type: 'object',
+      properties: { notifyCustomer: { type: 'boolean' } },
+      required: ['notifyCustomer'],
+    }
+    render(<RunInputDialog {...makeProps({ inputs: schema, onSubmit })} />)
+
+    const choice = screen.getByRole('combobox', { name: 'Notify Customer' })
+    expect(choice).toHaveValue('')
+    fireEvent.click(screen.getByRole('button', { name: /Run workflow/i }))
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(screen.getByText('Notify Customer is required')).toBeInTheDocument()
+
+    fireEvent.change(choice, { target: { value: 'false' } })
+    fireEvent.click(screen.getByRole('button', { name: /Run workflow/i }))
+    expect(onSubmit).toHaveBeenCalledWith({ notifyCustomer: false })
+  })
+
+  it('keeps an untouched optional boolean absent from the submitted payload', () => {
+    const onSubmit = vi.fn()
+    const schema: WorkflowInputSchemaShape = {
+      type: 'object',
+      properties: { send_email: { type: 'boolean' } },
+    }
+    render(<RunInputDialog {...makeProps({ inputs: schema, onSubmit })} />)
+
+    expect(screen.getByRole('combobox', { name: 'Send Email' })).toHaveValue('')
+    expect(screen.getByText('Optional')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Run workflow/i }))
+    expect(onSubmit).toHaveBeenCalledWith({})
   })
 
   it('parses an array root via JSON textarea and rejects malformed JSON', () => {

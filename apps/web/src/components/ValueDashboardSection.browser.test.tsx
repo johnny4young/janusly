@@ -7,8 +7,8 @@ describe('<ValueDashboardSection /> (browser smoke)', () => {
   it('lays out the lifetime recovery ledger in real Chromium', () => {
     render(
       <ValueDashboardSection
-        mttrMs={60_000}
-        mttrDisplay="1m"
+        recoveryTimeMs={60_000}
+        recoveryTimeDisplay="1m"
         terminalRunsZero={false}
         windowDays={30}
         ledger={{

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { render, waitFor } from '@testing-library/react'
 import { ReactFlowProvider } from '@xyflow/react'
 import { WorkflowCanvas } from './WorkflowCanvas'
+import '../styles/canvas.css'
 import type { WorkflowGraphEdge, WorkflowGraphNode } from '../types'
 import { initI18n } from '../i18n'
 import { useWorkflowStore } from '../store'
@@ -151,7 +152,6 @@ describe('WorkflowCanvas (browser mode)', () => {
   it('accepts a palette drop at the pointer while retaining click-based authoring', async () => {
     const onAddNode = vi.fn()
     const { container, findByText } = mountCanvas({
-      paletteNodeTypes: ['http'],
       onAddNode,
     })
     await findByText('Alpha step')
@@ -195,13 +195,12 @@ describe('WorkflowCanvas (browser mode)', () => {
     const { container, findByText } = mountCanvas({
       nodes,
       edges: [],
-      paletteNodeTypes: ['http'],
       onAddNode,
     })
     await findByText('Alpha step')
     const targets = [
       container.querySelector('.canvas-toolbar'),
-      container.querySelector('.canvas-palette'),
+      container.querySelector('.canvas-step-picker'),
       container.querySelector('.react-flow__controls'),
       container.querySelector('.react-flow__minimap'),
     ]
@@ -227,7 +226,6 @@ describe('WorkflowCanvas (browser mode)', () => {
     const { findByTestId } = mountCanvas({
       nodes: [],
       edges: [],
-      paletteNodeTypes: ['http'],
       onAddNode,
     })
     const empty = await findByTestId('canvas-empty')
@@ -314,11 +312,10 @@ describe('WorkflowCanvas (browser mode)', () => {
         onConnect: vi.fn(),
         onNodeClick: vi.fn(),
         onEdgeClick: vi.fn(),
-        paletteNodeTypes: ['noop'],
         onAddNode: (type: string) => useWorkflowStore.getState().addNode(type),
         viewportWorkflowId: 'wf-empty-zoom',
       }
-      const { container, getByRole } = render(
+      const { container, getByRole, findByRole } = render(
         <ReactFlowProvider>
           <div style={{ width: 1024, height: 720, position: 'relative' }}>
             <WorkflowCanvas {...props} />
@@ -330,7 +327,9 @@ describe('WorkflowCanvas (browser mode)', () => {
         const viewport = container.querySelector('.react-flow__viewport') as HTMLElement
         expect(viewport.style.transform).toMatch(/translate\(\s*0px,\s*0px\s*\)\s*scale\(\s*0\.5\s*\)/)
       })
-      getByRole('button', { name: /^Do nothing$/ }).click()
+      getByRole('button', { name: 'Add step' }).click()
+      const doNothing = await findByRole('button', { name: /^Do nothing/ })
+      doNothing.click()
 
       const [added] = useWorkflowStore.getState().nodes
       expect(added.position.x).toBeCloseTo(905, 0)
@@ -344,6 +343,18 @@ describe('WorkflowCanvas (browser mode)', () => {
         workflowRevision: previous.workflowRevision,
       })
     }
+  })
+
+  it('hides authoring controls when the current user has read-only access', async () => {
+    const { findByText, queryByRole, container } = mountCanvas({
+      readOnly: true,
+      onAddNode: vi.fn(),
+    })
+
+    await findByText('Alpha step')
+    expect(queryByRole('button', { name: 'Add step' })).toBeNull()
+    expect(container.querySelector('.react-flow__node[data-id="alpha"]'))
+      .not.toHaveClass('draggable')
   })
 
   it('localizes observe-mode controls, edge names, and read-only instructions in Spanish', async () => {

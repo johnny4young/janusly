@@ -16,7 +16,7 @@ describe('<BudgetBlockedBanner />', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('surfaces the latest 402 envelope and clears it from the Operations CTA', () => {
+  it('surfaces the latest 402 envelope and clears it from the Settings CTA', () => {
     const onOpenTab = vi.fn()
     useWorkflowStore.getState().setBudgetBlocked({
       monthlyUsdSpent: 12,

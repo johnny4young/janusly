@@ -157,6 +157,7 @@ Guardrails:
 | `ai.anthropic.model` | `ANTHROPIC_MODEL` | `claude-haiku-4-5-20251001` | API AI endpoints, engine AI/agent nodes | Default Anthropic model for this tenant — the supported MVP target. |
 | `ai.timeoutMs` | `OPENAI_TIMEOUT_MS` | `30000` | API AI endpoints, engine AI/agent nodes | LLM request timeout in milliseconds (env name is historical; applies to every registered provider). |
 | `ai.maxRetries` | `OPENAI_MAX_RETRIES` | `2` | API AI endpoints, engine AI/agent nodes | AI SDK retry count for LLM calls (env name is historical; applies to every registered provider). |
+| `ai.maxOutputUnits` | `JANUSLY_LLM_MAX_OUTPUT_UNITS` | `4096` | Every LLM call | Hard per-call output-token ceiling (`256`–`16384`). “Units” keeps this tenant-safe setting distinct from credential/token material while the runtime forwards the value as the provider's output-token limit. |
 | `ai.promptMaxChars` | `AI_PROMPT_MAX_CHARS` | `4000` | API AI endpoints | Prompt/question length cap. |
 | `ai.rateLimitPerMin` | `AI_RATE_LIMIT_PER_MIN` | `30` | API AI endpoints | Per-org AI request limit per minute. |
 | `ai.generationMode` | `JANUSLY_AI_GENERATION_MODE` | `free_json` | `POST /ai/generate-workflow` | Workflow-generation mechanism. `free_json` asks the model for JSON text and validates server-side; `constrained` keeps the legacy provider structured-output path. Both converge through noop promotion, `sanitizeAiWorkflow`, and bounded self-repair before fallback. |
@@ -254,6 +255,8 @@ Credential Secret Store. Tenant config selects only safe behavior.
 | `JANUSLY_LLM_PROVIDER` | `anthropic` (matches the supported posture; explicit set still recommended) | `packages/ai`, `apps/api` | Default provider registry key. Registered values: `openai`, `anthropic`. The supported runtime target is `anthropic` — see AGENTS.md "AI integration" for the operating posture. |
 | `ANTHROPIC_API_KEY` | unset | `packages/ai` | Enables Anthropic-backed AI calls and explicit `anthropic/model` overrides. |
 | `ANTHROPIC_MODEL` | `claude-haiku-4-5-20251001` | `packages/ai`, `apps/api` | Default Anthropic model. |
+| `ANTHROPIC_BASE_URL` | Anthropic SDK default | `packages/ai` | Optional Anthropic-compatible proxy endpoint. The canonical host is normalized to `/v1`; custom URLs are preserved without a trailing slash. The local Recovery Lab points this at its loopback simulator. |
+| `JANUSLY_LLM_SIMULATED_PROVIDERS` | unset | local Recovery Lab only | Comma-separated provider names whose local-compatible calls must be labeled simulated and costed at zero. Ignored unless both `JANUSLY_LOCAL_STACK=true` and `JANUSLY_LOCAL_INTEGRATION_SIMULATOR=true`; never use it to describe live provider traffic. |
 | `JANUSLY_LLM_PRICE_<MODEL>` | built-in pricing table | `packages/ai/src/pricing.ts` | Optional cost override as `<inputUsdPer1M>,<outputUsdPer1M>`, for example `JANUSLY_LLM_PRICE_GPT_4O_MINI=0.15,0.60` or `JANUSLY_LLM_PRICE_CLAUDE_HAIKU_4_5=1.00,5.00`. |
 
 ## Memory And Embeddings
@@ -343,6 +346,7 @@ integration settings.
 | `JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL` | unset | integration simulator routing | Process-owned simulator base URL. Credentials, query strings, and fragments are rejected. PagerDuty uses its `/pagerduty` API projection only when this gate is true. |
 | `JANUSLY_LOCAL_STACK` | `false` | explicit smoke fixtures | Required marker before qualification-only credential/config fixtures can run. Normal startup never invokes them. |
 | `JANUSLY_LOCAL_ORG_ID` | `default` | smoke scripts | Development organization exercised only by explicit provider qualification. |
+| `JANUSLY_RECOVERY_LAB_ORG_ID` | `local-recovery-lab` | Real Recovery Lab scripts | Isolated organization used by `local:recovery-lab`; must begin with `local-recovery-lab` so cleanup cannot target an ordinary tenant. |
 
 The Compose-specific `JANUSLY_LOCAL_*_PORT`, sender, and browser URL settings
 are documented in the tracked `deploy/local/local.env.example`. The Supabase

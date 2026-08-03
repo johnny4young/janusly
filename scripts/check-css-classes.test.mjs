@@ -42,6 +42,15 @@ test("reads exact classes and dynamic prefixes from TypeScript literals only", (
   assert.equal(references.prefixes.has("we-status--"), true);
 });
 
+test("ignores omitted array bindings while indexing class references", () => {
+  const references = extractTypeScriptClassReferences(`
+    const [, unused] = ["ignored-card", "non-visual-state"];
+    const view = <div className="owned-card" data-state={unused} />;
+  `, "component.tsx");
+
+  assert.deepEqual(Array.from(references.classes), ["owned-card"]);
+});
+
 test("unrelated production literals do not own CSS selectors", () => {
   const orphans = findOrphanCssClasses({
     cssSources: [".owned-card {} .dead-card {}"],

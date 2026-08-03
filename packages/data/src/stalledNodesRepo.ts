@@ -16,11 +16,10 @@
  *   is a deliberate cross-org sweep (a system maintenance task, like the
  *   retention sweeps) — the per-row `orgId` keeps the downstream writes
  *   tenant-scoped.
- * - Only PRODUCTION runs (`replay_mode IS NULL`) are returned. Sandbox /
- *   validation / replay-lab runs are ephemeral previews the UI abandons on
- *   no-progress; reaping them would add DLQ + recovery-item noise for runs
- *   that carry no durable promise. Matches the `isNull(runs.replayMode)`
- *   exclusion the health / cluster rollups already use.
+ * - The periodic cross-org sweep returns only PRODUCTION runs
+ *   (`replay_mode IS NULL`). An exact `{ orgId, runId }` drill scope may select
+ *   its own validation run so the operator can exercise this real boundary
+ *   without making validation data visible to the global maintenance sweep.
  * - Only NON-TERMINAL runs are returned — a node left `running` under a run
  *   that already flipped terminal (rare race) is not a stuck run.
  */
@@ -65,10 +64,10 @@ export type FindStalledRunningNodesInput = {
 };
 
 /**
- * Find production-run nodes stuck in `running` since before `olderThan`,
- * oldest first, capped at `limit`. Joins `run_nodes` to `runs` for the org +
- * snapshot and to exclude terminal / sandbox runs. Read-only — the engine-side
- * reaper performs the conditional fail + dead-letter + status rollup.
+ * Find nodes stuck in `running` since before `olderThan`, oldest first, capped
+ * at `limit`. Global scans exclude sandbox runs; an exact drill scope is the
+ * only exception. Read-only — the engine-side reaper performs the conditional
+ * fail + dead-letter + status rollup.
  */
 export async function findStalledRunningNodes(
   input: FindStalledRunningNodesInput,
@@ -91,10 +90,9 @@ export async function findStalledRunningNodes(
         sql`${runNodes.startedAt} is not null`,
         lt(runNodes.startedAt, input.olderThan),
         inArray(runs.status, [...NON_TERMINAL_RUN_STATUSES]),
-        isNull(runs.replayMode),
         ...(input.scope
           ? [eq(runs.orgId, input.scope.orgId), eq(runs.id, input.scope.runId)]
-          : []),
+          : [isNull(runs.replayMode)]),
       ),
     )
     .orderBy(runNodes.startedAt)

@@ -1,3 +1,7 @@
+import {
+  openRecoveryAutomation,
+  openWorkspaceSection,
+} from './_helpers/workspace-navigation'
 /**
  * Real-stack proof for paced replay campaigns: genuine failed runs form one
  * server-verified cohort, the operator creates a durable campaign in English,
@@ -126,7 +130,8 @@ test('creates, observes, and stops a paced campaign in English and Spanish', asy
     }
   })
   await page.goto('/')
-  await page.getByRole('button', { name: 'Runs', exact: true }).click()
+  await openWorkspaceSection(page, 'Activity', 'Recover')
+  await openRecoveryAutomation(page)
 
   const queue = page.getByTestId('recovery-queue')
   await expect(queue).toBeVisible()
@@ -160,6 +165,8 @@ test('creates, observes, and stops a paced campaign in English and Spanish', asy
   await page.setViewportSize({ width: 390, height: 844 })
   await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
   await page.reload()
+  await openWorkspaceSection(page, 'Actividad', 'Recuperar')
+  await openRecoveryAutomation(page)
   const spanishCard = page.getByTestId('replay-campaigns-card')
   await expect(spanishCard).toContainText('Payments recovery')
   await expect(spanishCard).toContainText('En curso')

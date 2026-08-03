@@ -2,7 +2,8 @@
 
 > Typed TypeScript client for the Janusly HTTP API. Resource-style methods,
 > async iterators for run listing and event streaming, a typed error class
-> hierarchy, an opt-in retry layer, and a webhook signature verifier.
+> hierarchy, an opt-in retry layer, a webhook signature verifier, and a
+> signed external-runtime observer emitter.
 > Node 24, ESM, generated declarations, and zero runtime dependencies.
 
 ## Install
@@ -252,6 +253,39 @@ The verifier checks three things, in order:
 1. The header parses into a valid `t=<seconds>,v1=<hex>` pair (otherwise `reason: "malformed_header"`).
 2. The timestamp is within ±5 minutes of the receiver's clock (configurable via `toleranceSeconds`; otherwise `reason: "timestamp_skew"`).
 3. The HMAC-SHA256 over `${timestamp}.${rawBody}` matches `v1` byte-for-byte via `crypto.timingSafeEqual` (otherwise `reason: "signature_mismatch"`).
+
+### 8. Emit external runtime lifecycle evidence
+
+Use the standalone observer when another engine owns execution and Janusly
+should receive a read-only operational shadow. Keep the source event id stable
+across retries and increment `sequence` for each subject:
+
+```typescript
+import { ExternalRuntimeObserver } from "@janusly/sdk";
+
+const observer = new ExternalRuntimeObserver({
+  callbackUrl: process.env.JANUSLY_EXTERNAL_RUNTIME_CALLBACK!,
+  secret: process.env.JANUSLY_EXTERNAL_RUNTIME_SECRET!,
+});
+
+await observer.send({
+  specversion: "1.0",
+  id: temporalEventId,
+  source: "urn:temporal:payments",
+  type: "io.janusly.external.run.observed",
+  time: new Date().toISOString(),
+  data: {
+    externalWorkflowId: "payment-reconciliation",
+    externalRunId: workflowRunId,
+    sequence,
+    status: "failed",
+  },
+});
+```
+
+The observer signs the exact JSON bytes with the connection-scoped secret.
+It does not retry, resume, cancel, or otherwise control the source runtime;
+those capabilities require a separate explicit adapter contract.
 
 ## Error handling
 

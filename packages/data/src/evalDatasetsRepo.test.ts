@@ -9,7 +9,7 @@
  * chainable shape. `drizzle-orm`'s `eq`/`and` are stubbed to capture
  * their args so we can assert the opt-in gate + tenant scope predicates.
  *
- * Coverage targets (the ticket AC):
+ * Coverage guarantees:
  * - Opt-in enforcement: the eligible-feedback query carries BOTH
  *   `eq(accepted, true)` AND `eq(evalConsent, true)` — a non-consented
  *   (or non-accepted) row is never pulled.

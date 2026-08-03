@@ -11,7 +11,7 @@
  * write-side effects execute for real. The engine's `enqueueReadyNodes`
  * cascade takes over after the first node completes.
  *
- * Used by `apps/api/src/routes/runs-routes.ts` (`POST /runs/redrive`) after
+ * Used by `apps/api/src/routes/run-routes/redrive.ts` (`POST /runs/redrive`) after
  * org-scope + role gates.
  *
  * Invariants:
@@ -49,7 +49,7 @@ export type RedriveInput = {
   /** The target `workflow_versions.id` — recorded on the new run for attribution. */
   targetWorkflowVersionId: string;
   /** The source run's trigger input, carried forward so `context.input` resolves. */
-  input: Record<string, unknown>;
+  input: unknown;
   createdBy?: string | null;
   /** Correlation id inherited from the failed source run. */
   traceId?: string | null;

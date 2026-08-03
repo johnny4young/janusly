@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 
@@ -7,6 +8,12 @@ const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 type DrillResponse = {
   deadLetterId: string
   runId: string
+  recoveryPath: 'runtime_failure'
+  evidence: {
+    boundary: 'worker_dlq'
+    executedNodeId: string
+    attempts: number
+  }
 }
 
 type DeadLetterDetail = {
@@ -58,10 +65,10 @@ async function prepareSession(page: Page, locale: 'en' | 'es'): Promise<string> 
   return orgId
 }
 
-async function startContractDrill(page: Page, packName: string, actionName: string): Promise<DrillResponse> {
-  const pack = page.locator('.list-card').filter({ hasText: packName }).first()
+async function startRuntimeDrill(page: Page, actionName: string): Promise<DrillResponse> {
+  const pack = page.getByTestId('solution-pack-incident-triage')
   await expect(pack).toBeVisible()
-  await pack.locator('select').last().selectOption('github_contract_drift')
+  await pack.locator('select').last().selectOption('github_secret_unbound')
   const responsePromise = page.waitForResponse((response) => (
     response.url().endsWith('/solution-packs/incident-triage/inject-failure')
     && response.request().method() === 'POST'
@@ -69,7 +76,16 @@ async function startContractDrill(page: Page, packName: string, actionName: stri
   await pack.getByRole('button', { name: actionName, exact: true }).click()
   const response = await responsePromise
   expect(response.status()).toBe(200)
-  return await response.json() as DrillResponse
+  const drill = await response.json() as DrillResponse
+  expect(drill).toMatchObject({
+    recoveryPath: 'runtime_failure',
+    evidence: {
+      boundary: 'worker_dlq',
+      executedNodeId: 'open_issue',
+      attempts: 1,
+    },
+  })
+  return drill
 }
 
 async function waitForRunStatus(
@@ -92,8 +108,9 @@ test('a successful drill replay exposes terminal recovery time and recurrence mo
   const orgId = await prepareSession(page, 'en')
 
   await page.goto('/')
-  await page.getByRole('button', { name: 'Packs', exact: true }).click()
-  const drill = await startContractDrill(page, 'Incident triage', 'Start recovery drill')
+  await openWorkspaceSection(page, 'Workflows', 'Templates')
+  const drill = await startRuntimeDrill(page, 'Start recovery drill')
+  await openWorkspaceSection(page, 'Activity', 'Recover')
 
   const focusedFailure = page.locator(`[data-testid="dlq-row-${drill.deadLetterId}"]`)
   await expect(focusedFailure).toBeVisible({ timeout: 30_000 })
@@ -121,8 +138,8 @@ test('a successful drill replay exposes terminal recovery time and recurrence mo
 
   // Remount the queue after the API-driven replay so its detail read observes
   // the immutable terminal-impact row written by the worker.
-  await page.getByRole('button', { name: 'Packs', exact: true }).click()
-  await page.getByRole('button', { name: 'Runs', exact: true }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Templates')
+  await openWorkspaceSection(page, 'Activity', 'Recover')
   await page.locator('#dlq-filter').selectOption('all')
   await expect(focusedFailure).toBeVisible({ timeout: 30_000 })
   await focusedFailure.click()
@@ -135,6 +152,7 @@ test('a successful drill replay exposes terminal recovery time and recurrence mo
   await captureEvidence(recoveredOutcome, 'recovery-drill-outcome-en-recovered')
 
   await page.getByRole('button', { name: /^Home\b/ }).click()
+  await page.getByTestId('home-insights-toggle').click()
   const validation = page.getByTestId('recovery-validation-section')
   await expect(validation).toContainText('Recovery validation')
   await expect(validation).toContainText('1/1')
@@ -160,8 +178,9 @@ test('Spanish mobile resolve records accepted loss and refreshes the selected dr
 
   await page.goto('/')
   await page.getByRole('button', { name: 'Navegación' }).click()
-  await page.locator('#workspace-sidebar').getByRole('button', { name: 'Packs', exact: true }).click()
-  const drill = await startContractDrill(page, 'Triage de incidentes', 'Iniciar ejercicio de recuperación')
+  await openWorkspaceSection(page, 'Flujos', 'Plantillas')
+  const drill = await startRuntimeDrill(page, 'Iniciar ejercicio de recuperación')
+  await openWorkspaceSection(page, 'Actividad', 'Recuperar')
 
   await expect(page.locator(`[data-testid="dlq-row-${drill.deadLetterId}"]`)).toBeVisible({ timeout: 30_000 })
   const outcome = page.getByTestId('dlq-recovery-drill-outcome')
@@ -175,18 +194,24 @@ test('Spanish mobile resolve records accepted loss and refreshes the selected dr
   await page.getByRole('button', { name: 'Resolver', exact: true }).click()
   expect((await resolveResponse).status()).toBe(200)
 
-  await expect(outcome.getByRole('status')).toHaveText('Pérdida aceptada', { timeout: 30_000 })
-  await expect(outcome).toContainText('Registrado a partir de la decisión del operador de aceptar la pérdida.')
-  await expect(outcome).toContainText('Tiempo de recuperación')
-  await expect(outcome).toContainText('La reincidencia se evalúa después de una recuperación verificada.')
+  await page.locator('#dlq-filter').selectOption('all')
+  const resolvedRow = page.locator(`[data-testid="dlq-row-${drill.deadLetterId}"]`)
+  await expect(resolvedRow).toBeVisible({ timeout: 30_000 })
+  await resolvedRow.click()
+  const resolvedOutcome = page.getByTestId('dlq-recovery-drill-outcome')
+  await expect(resolvedOutcome.getByRole('status')).toHaveText('Pérdida aceptada', { timeout: 30_000 })
+  await expect(resolvedOutcome).toContainText('Registrado a partir de la decisión del operador de aceptar la pérdida.')
+  await expect(resolvedOutcome).toContainText('Tiempo de recuperación')
+  await expect(resolvedOutcome).toContainText('La reincidencia se evalúa después de una recuperación verificada.')
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   expect(overflow).toBeLessThanOrEqual(2)
   await dismissToasts(page)
-  await captureEvidence(outcome, 'recovery-drill-outcome-es-accepted-loss-mobile')
+  await captureEvidence(resolvedOutcome, 'recovery-drill-outcome-es-accepted-loss-mobile')
 
   await page.getByRole('button', { name: 'Navegación' }).click()
   await page.locator('#workspace-sidebar').getByRole('button', { name: /^Inicio\b/ }).click()
+  await page.getByTestId('home-insights-toggle').click()
   const validation = page.getByTestId('recovery-validation-section')
   await expect(validation).toContainText('Validación de recuperación')
   await expect(validation).toContainText('1/1')

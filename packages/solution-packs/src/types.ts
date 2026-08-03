@@ -77,9 +77,9 @@ export const SamplePayloadSchema = z.object({
 export type SamplePayload = z.infer<typeof SamplePayloadSchema>;
 
 /**
- * Failure modes that can be reproduced safely by inserting a deterministic
- * failed run. Process-failure simulation is intentionally absent: worker
- * interruption must exercise the stalled-node reaper rather than bypass it.
+ * Failure modes described by the code-resident catalog. Current public drills
+ * exercise only failure modes that can cross a real local runtime boundary
+ * safely; historical direct fixtures remain schema-compatible.
  */
 export const SOLUTION_PACK_FAILURE_MODES = [
   "credential_unavailable",
@@ -96,6 +96,7 @@ export type SolutionPackFailureMode = (typeof SOLUTION_PACK_FAILURE_MODES)[numbe
 
 export const SOLUTION_PACK_RECOVERY_PATHS = [
   "direct_failure",
+  "runtime_failure",
   "stalled_node_reaper",
 ] as const;
 
@@ -104,10 +105,10 @@ export type SolutionPackRecoveryPath = (typeof SOLUTION_PACK_RECOVERY_PATHS)[num
 
 /**
  * A known, intentional failure the operator can inject to watch the
- * recovery loop run. `failedNodeId` must exist in the pack's workflow;
- * direct fixtures carry the persisted `errorJson` envelope the Recovery
- * dialog reads. Stalled-node fixtures deliberately omit it because the real
- * reaper authors the `worker_stalled` error.
+ * recovery loop run. `failedNodeId` must exist in the pack's workflow.
+ * Historical direct fixtures carry the persisted `errorJson` envelope;
+ * runtime credential fixtures let the worker author the missing-secret error;
+ * stalled-node fixtures let the real reaper author `worker_stalled`.
  */
 const FailureFixtureBaseSchema = z.object({
   id: z.string().trim().min(1),
@@ -123,6 +124,9 @@ export const FailureFixtureSchema = z.discriminatedUnion("recoveryPath", [
     errorJson: z.record(z.string(), z.unknown()),
   }).strict(),
   FailureFixtureBaseSchema.extend({
+    recoveryPath: z.literal("runtime_failure"),
+  }).strict(),
+  FailureFixtureBaseSchema.extend({
     recoveryPath: z.literal("stalled_node_reaper"),
   }).strict(),
 ]).superRefine((fixture, ctx) => {
@@ -133,6 +137,16 @@ export const FailureFixtureSchema = z.discriminatedUnion("recoveryPath", [
       code: "custom",
       message: "worker_stalled fixtures must use stalled_node_reaper, and that path is reserved for worker_stalled",
       path: ["recoveryPath"],
+    });
+  }
+  if (
+    fixture.recoveryPath === "runtime_failure"
+    && fixture.failureMode !== "credential_unavailable"
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      message: "runtime_failure currently reproduces only credential_unavailable",
+      path: ["failureMode"],
     });
   }
 });

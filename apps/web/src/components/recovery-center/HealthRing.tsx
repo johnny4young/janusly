@@ -11,7 +11,7 @@
 import { useT } from '../../i18n'
 import { useAnimatedNumber } from '../../hooks/useAnimatedNumber'
 import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion'
-import { healthBand } from './helpers'
+import { healthBand } from './recovery-center-model'
 
 const HEALTH_RING_SIZE = 96
 const HEALTH_RING_STROKE = 9

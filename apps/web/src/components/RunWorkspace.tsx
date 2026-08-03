@@ -37,12 +37,16 @@ export type RunWorkspaceView = 'overview' | 'timeline' | 'agents'
 type LoadRunUsage = (runId: string, signal: AbortSignal) => Promise<unknown>
 type ReplayDecision = (eventId: string, nodeId: string, signal: AbortSignal) => Promise<unknown>
 
-export type RunWorkspaceProps = Omit<RunsPanelProps, 'onViewTimeline'> & {
+export type RunWorkspaceProps = Omit<
+  RunsPanelProps,
+  'mode' | 'onViewTimeline' | 'variant'
+> & {
   eventsHasMore?: boolean
   onLoadOlderEvents?: () => void | Promise<void>
   onOpenFullView: (tab: 'reasoning' | 'multiAgent') => void
   onLoadRunUsage?: LoadRunUsage
   onReplayDecision?: ReplayDecision
+  runsPanelVariant?: RunsPanelProps['variant']
 }
 
 const VIEW_ORDER: readonly RunWorkspaceView[] = ['overview', 'timeline', 'agents']
@@ -164,6 +168,7 @@ export function RunWorkspace({
   onReplayDecision,
   eventsHasMore,
   onLoadOlderEvents,
+  runsPanelVariant,
   ...runsProps
 }: RunWorkspaceProps) {
   const { t } = useT()
@@ -210,7 +215,11 @@ export function RunWorkspace({
           hidden={effectiveView !== panelView}
         >
           {effectiveView === 'overview' && panelView === 'overview' && (
-            <RunsPanel {...runsProps} onViewTimeline={() => selectView('timeline')} />
+            <RunsPanel
+              {...runsProps}
+              variant={runsPanelVariant}
+              onViewTimeline={() => selectView('timeline')}
+            />
           )}
           {effectiveView === 'timeline' && panelView === 'timeline' && (
             <Suspense fallback={<p className="helper-text">{t('common.working')}</p>}>

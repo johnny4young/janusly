@@ -19,7 +19,7 @@ type LocaleContract = {
 const LOCALES: LocaleContract[] = [
   {
     locale: 'en',
-    flows: 'Flows',
+    flows: 'Workflows',
     httpNode: 'Call an API',
     stepKind: 'Step kind',
     dialogTitle: 'Change step kind?',

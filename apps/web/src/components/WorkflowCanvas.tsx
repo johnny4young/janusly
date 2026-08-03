@@ -16,11 +16,12 @@ import { workflowNodeTypes } from './WorkflowStepNode'
 import { workflowEdgeTypes } from './WorkflowEdge'
 import { ErrorBoundary } from './ErrorBoundary'
 import { useConfirm } from './ConfirmDialog'
-import { formatStatusLabel, getNodeHelper, getNodeLabel, nodeTypes } from '../constants'
+import { formatStatusLabel, getNodeLabel, nodeTypes } from '../constants'
 import { readCanvasViewport, writeCanvasViewport } from '../canvas-viewport'
 import { useT } from '../i18n'
 import { registerNodePlacementResolver } from '../store'
-import { hasNodePaletteDrag, readNodePaletteDrag, writeNodePaletteDrag } from '../canvas-node-drag'
+import { hasNodePaletteDrag, readNodePaletteDrag } from '../canvas-node-drag'
+import { CanvasStepPicker } from './CanvasStepPicker'
 import '@xyflow/react/dist/style.css'
 
 type WorkflowCanvasProps = {
@@ -31,10 +32,6 @@ type WorkflowCanvasProps = {
   onConnect: OnConnect
   onNodeClick: NodeMouseHandler<WorkflowGraphNode>
   onEdgeClick: EdgeMouseHandler<WorkflowGraphEdge>
-  /** When present (AI Studio), renders a draggable-step palette over the
-   *  canvas. Omitted elsewhere — the palette renders null, so the locked
-   *  browser tests (which pass neither prop) are unaffected. */
-  paletteNodeTypes?: string[]
   onAddNode?: (type: string, position?: { x: number; y: number }) => void
   /** When present, the canvas restores this workflow's last saved viewport
    *  (zoom + pan) on mount instead of fitting-to-view, and persists user
@@ -44,6 +41,7 @@ type WorkflowCanvasProps = {
   /** `observe` renders an immutable run snapshot: operators can pan/zoom and
    *  focus nodes, but cannot drag, connect, reconnect, or delete anything. */
   mode?: 'author' | 'observe'
+  readOnly?: boolean
   /** Keep the mounted editor inert while its tab is hidden. This preserves
    *  viewport/selection without letting its document-level keyboard handlers
    *  react to an interaction in a different workspace. */
@@ -61,11 +59,11 @@ function acceptsCanvasDrop(target: EventTarget | null): boolean {
 /** Render the workflow editor canvas with React Flow + custom step nodes.
  *  Memoized so it only re-renders when its (stable) graph + handler props
  *  actually change, not on every unrelated store tick from the App root. */
-export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onNodeClick, onEdgeClick, paletteNodeTypes, onAddNode, viewportWorkflowId, mode = 'author', active = true }: WorkflowCanvasProps) {
+export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onNodeClick, onEdgeClick, onAddNode, viewportWorkflowId, mode = 'author', readOnly = false, active = true }: WorkflowCanvasProps) {
   const { t } = useT()
   const confirmDialog = useConfirm()
   const observing = mode === 'observe'
-  const editing = active && !observing
+  const editing = active && !observing && !readOnly
   const frameRef = useRef<HTMLDivElement | null>(null)
   const { getZoom, screenToFlowPosition } = useReactFlow<WorkflowGraphNode, WorkflowGraphEdge>()
   const resolveNodeTopLeft = useCallback((screenPoint: { x: number; y: number }) => {
@@ -224,23 +222,7 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
           {observing && <span className="we-pill" data-tone="info">{t('canvas.readOnly')}</span>}
         </div>
       </div>
-      {paletteNodeTypes && onAddNode && paletteNodeTypes.length > 0 && (
-        <div className="canvas-palette" role="toolbar" aria-label={t('canvas.palette')}>
-          {paletteNodeTypes.map((type) => (
-            <button
-              key={type}
-              type="button"
-              className="sb-chip"
-              draggable
-              onDragStart={(event) => writeNodePaletteDrag(event.dataTransfer, type)}
-              onClick={() => onAddNode(type)}
-              title={`${getNodeLabel(type)} — ${getNodeHelper(type)}`}
-            >
-              <span className="sb-chip__label">{getNodeLabel(type)}</span>
-            </button>
-          ))}
-        </div>
-      )}
+      {editing && onAddNode && <CanvasStepPicker onAddNode={onAddNode} />}
       <div className="canvas-flow-surface" onDragOver={handleDragOver} onDrop={handleDrop}>
         <ErrorBoundary fallback={canvasErrorFallback} resetKey={viewportWorkflowId} logTag="canvas">
           <ReactFlow

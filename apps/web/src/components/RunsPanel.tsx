@@ -17,10 +17,11 @@
  */
 
 import { useEffect, useState } from 'react'
-import { Activity, CheckCircle2, CircleX, Copy, FlaskConical, GitBranch, ListChecks } from 'lucide-react'
+import { Activity, CheckCircle2, CircleX, Copy, Download, FlaskConical, GitBranch, ListChecks, Send, ShieldAlert } from 'lucide-react'
 import type { RunEvent, RunNode, RunSummary, SavedWorkflow, WorkflowInputSchemaShape } from '../types'
-import { isTerminalRunStatus } from '@janusly/shared/src/status'
+import { isOpenRunStatus, isTerminalRunStatus } from '@janusly/shared/src/status'
 import { formatCompactDuration, formatStatusLabel, formatNodeDuration } from '../constants'
+import { downloadFromApi } from '../api'
 import { useWorkflowStore } from '../store'
 import { getResolvedLocale, useT } from '../i18n'
 import { DeadLettersPanel } from './DeadLettersPanel'
@@ -33,9 +34,10 @@ import { PanelChrome } from './panel-primitives'
 import { UsageSummaryCard } from './UsageSummaryCard'
 import { RunStreamChip } from './RunStreamChip'
 import { VitalSignsStrip, withSeverityLabels, type VitalSignsTile } from './VitalSignsStrip'
-import { pickErrorMessage } from './recovery-dialog/helpers'
+import { pickErrorMessage } from './recovery-dialog/recovery-dialog-model'
 import { getRunFinishedAt, getRunTerminalAt, getRunTriggerInput, getRunWaitingInfo, getRunWorkflowIdentity, type RunWaitKind } from '../run-observability'
 import { RunHistoryList } from './RunHistoryList'
+import { ValidationEvidencePill } from './ValidationEvidencePill'
 
 type HumanFormWaiting = {
   title?: string
@@ -78,13 +80,15 @@ function isWorkflowInputSchemaShape(value: unknown): value is WorkflowInputSchem
 }
 
 export type RunsPanelProps = {
+  mode?: 'runs' | 'recovery'
+  variant?: 'standalone' | 'activity-detail'
   runs: RunSummary[]
   workflows: SavedWorkflow[]
   usage: Record<string, number>
   runNodes: RunNode[]
   runEvents?: RunEvent[]
   activeRunId?: string | null
-  onOpenRun: (id: string) => void
+  onOpenRun: (id: string) => void | Promise<void>
   onRefreshPlatform: () => void
   onApproveNode: (nodeId: string) => void
   onSubmitHumanForm: SubmitHumanFormHandler
@@ -133,6 +137,8 @@ function canResumeWaitingKind(kind: RunWaitKind): boolean {
 }
 
 export function RunsPanel({
+  mode = 'runs',
+  variant = 'standalone',
   runs,
   workflows,
   usage,
@@ -161,7 +167,7 @@ export function RunsPanel({
   const waitingNodes = runNodes.filter(node => node.status === 'waiting')
   const failedNodes = runNodes.filter(node => node.status === 'failed')
   const completedRuns = runs.filter(run => run.status === 'succeeded').length
-  const activeRuns = runs.filter(run => run.status === 'running' || run.status === 'queued').length
+  const activeRuns = runs.filter(run => isOpenRunStatus(run.status)).length
   const failedRuns = runs.filter(run => run.status === 'failed').length
   const [activeHumanFormNodeId, setActiveHumanFormNodeId] = useState<string | null>(null)
   const [humanFormErrors, setHumanFormErrors] = useState<string[]>([])
@@ -193,7 +199,9 @@ export function RunsPanel({
   const activeRunInput = activeRun ? getRunTriggerInput(activeRun) : undefined
   const activeRunFinishedAt = getRunTerminalAt(runEvents) ?? getRunFinishedAt(runNodes)
   const [clockNow, setClockNow] = useState(() => Date.now())
-  const shouldTickClock = Boolean(activeRun && !isTerminalRunStatus(activeRun.status)) || waitingNodes.length > 0
+  const shouldTickClock =
+    (mode === 'runs' && Boolean(activeRun && !isTerminalRunStatus(activeRun.status)))
+    || (mode === 'recovery' && waitingNodes.length > 0)
   useEffect(() => {
     if (!shouldTickClock) return
     setClockNow(Date.now())
@@ -260,26 +268,39 @@ export function RunsPanel({
       rationale: failedRuns > 0
         ? (t('rightPanel.runs.metric.failedOpen'))
         : (t('rightPanel.runs.metric.failedClear')),
-      onClick: failedRuns > 0 ? () => setActiveTab('home') : undefined,
+      onClick: failedRuns > 0 ? () => setActiveTab('recover') : undefined,
       ariaLabel: failedRuns > 0 ? (t('rightPanel.runs.metric.failedAria')) : undefined,
       testId: 'runs-metric-failed',
     },
   ]
+  const recoveryMode = mode === 'recovery'
+  const activityDetail = variant === 'activity-detail'
+  const showRunActions = recoveryMode || activityDetail
 
   return (
-    <PanelChrome title={t('rightPanel.runs.title')} description={t('rightPanel.runs.description')} icon={<Activity size={18} />}>
-      <VitalSignsStrip
+    <PanelChrome
+      title={t(recoveryMode ? 'rightPanel.recover.title' : 'rightPanel.runs.title')}
+      description={t(recoveryMode ? 'rightPanel.recover.description' : 'rightPanel.runs.description')}
+      icon={recoveryMode ? <ShieldAlert size={18} /> : <Activity size={18} />}
+    >
+      {!recoveryMode && !activityDetail && <VitalSignsStrip
         tiles={withSeverityLabels(runMetricTiles, t)}
         ariaLabel={t('rightPanel.runs.summaryAria')}
         testId="runs-metric-strip"
-      />
+      />}
 
-      {activeRunId && (
+      {!recoveryMode && activeRunId && (
         <section className="we-card we-run-overview" data-testid="run-overview">
           <div className="split-row we-run-overview__header">
             <span className="we-run-overview__title">
               <strong>{activeRunIdentity?.name ?? activeRunIdentity?.id ?? t('rightPanel.runs.activeRun')}</strong>
               {activeRun && <span className="status-pill" data-status={activeRun.status}>{formatStatusLabel(activeRun.status)}</span>}
+              {activeRun?.replayMode === 'validation' && activeRun.validationEvidenceLevel && (
+                <ValidationEvidencePill
+                  level={activeRun.validationEvidenceLevel}
+                  testId="active-run-validation-evidence"
+                />
+              )}
               <RunStreamChip />
             </span>
             <div className="we-run-overview__actions">
@@ -309,6 +330,35 @@ export function RunsPanel({
                 >
                   {t('rightPanel.runs.cancelRun')}
                 </button>
+              )}
+              {activeRun && (
+                <>
+                  <button
+                    type="button"
+                    className="small-command"
+                    onClick={async () => {
+                      try {
+                        await downloadFromApi(`/reports/run-explain?runId=${encodeURIComponent(activeRun.id)}`)
+                        addToast(t('rightPanel.runs.exportSuccess'), 'success')
+                      } catch (error) {
+                        addToast(error instanceof Error ? error.message : t('rightPanel.runs.exportFailed'), 'error')
+                      }
+                    }}
+                    aria-label={t('rightPanel.runs.exportAria', { id: activeRun.id })}
+                  >
+                    <Download size={12} aria-hidden="true" />
+                    {t('rightPanel.runs.export')}
+                  </button>
+                  <button
+                    type="button"
+                    className="small-command"
+                    onClick={() => setDeliveryRun(activeRun)}
+                    aria-label={t('rightPanel.runs.sendAria', { id: activeRun.id })}
+                  >
+                    <Send size={12} aria-hidden="true" />
+                    {t('rightPanel.runs.send')}
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -380,11 +430,13 @@ export function RunsPanel({
         </section>
       )}
 
-      <RunExplainChat runId={activeRunId} />
+      {!recoveryMode && activeRunId && <RunExplainChat runId={activeRunId} />}
 
-      <UsageSummaryCard usage={usage} onRefreshPlatform={onRefreshPlatform} />
+      {!recoveryMode && !activityDetail && (
+        <UsageSummaryCard usage={usage} onRefreshPlatform={onRefreshPlatform} />
+      )}
 
-      {waitingNodes.length > 0 && (
+      {showRunActions && waitingNodes.length > 0 && (
         <section className="we-card action-card" data-testid="waiting-steps">
           <div>
             <strong>{t('rightPanel.runs.pausedTitle')}</strong>
@@ -472,7 +524,7 @@ export function RunsPanel({
         </section>
       )}
 
-      {activeHumanFormNode && activeHumanForm && (
+      {showRunActions && activeHumanFormNode && activeHumanForm && (
         <HumanFormDialog
           key={activeHumanFormNode.nodeId}
           title={activeHumanForm.title}
@@ -502,7 +554,7 @@ export function RunsPanel({
         />
       )}
 
-      {failedNodes.length > 0 && (
+      {showRunActions && failedNodes.length > 0 && (
         <section className="we-card action-card">
           <div>
             <strong>{t('rightPanel.runs.attentionTitle')}</strong>
@@ -552,7 +604,7 @@ export function RunsPanel({
         </section>
       )}
 
-      {canStartRuns && forkableNodes.length > 0 && (
+      {!recoveryMode && canStartRuns && forkableNodes.length > 0 && (
         <section className="we-card action-card">
           <div>
             <strong>{t('replayLab.fork.sectionKicker')}</strong>
@@ -576,7 +628,7 @@ export function RunsPanel({
         </section>
       )}
 
-      <DeadLettersPanel
+      {recoveryMode && <DeadLettersPanel
         onRefresh={onRefreshPlatform}
         onReplay={onReplayDeadLetter}
         onResolve={onResolveDeadLetter}
@@ -586,17 +638,17 @@ export function RunsPanel({
         canUseRecovery={canUseRecovery}
         canReadAutoHealing={canReadAutoHealing}
         canDecideAutoHealing={canDecideAutoHealing}
-      />
+      />}
 
-      <RunHistoryList
+      {!recoveryMode && !activityDetail && <RunHistoryList
         runs={runs}
         workflows={workflows}
         onOpenRun={onOpenRun}
         onOpenLab={canStartRuns ? setLabSourceRun : undefined}
         onSend={setDeliveryRun}
-      />
+      />}
 
-      {labSourceRun && (
+      {!recoveryMode && labSourceRun && (
         <ReplayLabDialog
           sourceRun={{
             id: labSourceRun.id,
@@ -608,7 +660,7 @@ export function RunsPanel({
         />
       )}
 
-      {forkTargetNodeId && activeRun && (
+      {!recoveryMode && forkTargetNodeId && activeRun && (
         <ReplayLabForkDialog
           sourceRun={{
             id: activeRun.id,
@@ -620,7 +672,7 @@ export function RunsPanel({
         />
       )}
 
-      {deliveryRun && (
+      {!recoveryMode && deliveryRun && (
         <ReportDeliveryDialog
           sourceRun={{
             id: deliveryRun.id,

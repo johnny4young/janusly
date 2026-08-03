@@ -24,6 +24,8 @@ set is:
 - `GET /v1/recovery/metrics`
 - `GET /v1/recovery/ledger`
 - `GET /v1/recovery/my-wins`
+- `GET /v1/recovery/cases`
+- `POST /v1/recovery/cases/{caseId}/resolve`
 - `GET /v1/templates`
 - `GET /v1/tools`
 - `POST /v1/ai/generate-workflow`
@@ -86,9 +88,10 @@ rest of the registry discoverable without duplicating every handler body.
 | --- | --- | --- |
 | Account bootstrap | `/auth/session*`, `/auth/context`, `/auth/invitations/accept`, `/organizations`, `/users/me` | Provider identity, revocable browser sessions, first organization, invitation acceptance, workspace selection, and global profile. |
 | Org config / roles / permissions | `/org/config`, `/org/permissions/catalog`, `/org/roles*` | Tenant runtime config, permission catalog, custom roles. |
+| External runtime observers | `/integrations/external-runtimes`, `/webhooks/external-runtimes/:connectionId` | Signed, idempotent, read-only workflow/run/step lifecycle projections. |
 | Enterprise identity | `/org/sso/connections*`, `/auth/sso/start`, `/auth/sso/callback`, `/org/scim/directories*`, `/webhooks/workos/directory` | WorkOS SSO + SCIM admin and webhook surfaces. |
 | MCP client admin | `/mcp/connections*`, `/mcp/connections/:alias/tools*` | Register external MCP servers, rediscover descriptors, enable tools, rate-limit tools, expose selected descriptors to AI. |
-| Recovery operations | `/recovery/items*`, `/recovery/items/:id/handoff`, `/auto-healing*`, `/alerts/*` | Recovery Center item workflow, cross-team handoff, supervised auto-healing queue, alert policies. |
+| Recovery operations | `/recovery/items*`, `/recovery/cases*`, `/recovery/items/:id/handoff`, `/auto-healing*`, `/alerts/*` | Technical incident workflow, deterministic semantic outcome cases, cross-team handoff, supervised auto-healing queue, alert policies. |
 | PromptOps / evals / experiments | `/prompts*`, `/eval/datasets*`, `/experiments*` | Versioned prompt registry, opted-in eval datasets, experiment runs and readouts. |
 | Triggers and snippets | `/triggers/*/ingest`, `/triggers/events*`, `/snippets*`, `/onboarding` | External event ingestion, replay, reusable workflow snippets, onboarding state. |
 | Solution packs and reports | `/solution-packs*`, `/workflows/import-pack`, `/reports/run-explain*`, `/reports/value-dashboard` | Demo/import packs, run explain exports/delivery, value dashboard exports. |
@@ -118,7 +121,7 @@ that permission is the authorization gate.
 | Runs | `POST /start`, `GET /runs`, `GET /run`, `GET /run/usage`, `GET /status`, `GET /runs/:id/stream`, `POST /resume`, `POST /run/cancel`, `POST /runs/replay-lab`, `POST /runs/replay-lab/fork`, `GET /runs/compare`, `GET /causal` | viewer/editor + run perms | Start, poll, inspect bounded resource usage, stream, resume, cancel, sandbox replay, fork, compare, and router explainability. |
 | Credentials | `GET /credentials`, `GET /credentials/health`, `POST /credentials`, `POST /credentials/:name/bulk-update`, `DELETE /credentials/:name`, `POST /credentials/:name/expiry` | viewer/admin + credential perms | Operator-facing credential rows; values default to the encrypted Secret Store (`storage: "managed"`), and health/rotation never echo secret material. Optional operator-declared `expiresAt` powers the expiry-warning alert. |
 | AI helpers | `GET /ai/health`, `POST /ai/generate-workflow`, `POST /ai/explain-workflow`, `POST /ai/review-workflow`, `POST /ai/patch-workflow`, `POST /ai/suggest-improvement`, `POST /ai/explain-run` | `ai.write`; editor additionally required for patch/suggest | Provider-neutral LLM surfaces with deterministic fallback/audit contracts. Generation and patch also expose strict `/v1` aliases. |
-| DLQ/recovery loop | `GET /dlq`, `GET /dlq/clusters`, `GET /dlq/cluster-members`, `POST /dlq/resolve`, `POST /dlq/validate-fix`, `POST /dlq/cluster-apply`, `POST /dlq/replay`, `GET /recovery/metrics`, `POST /recovery/feedback` | viewer/editor + DLQ perms | Dead-letter triage, validation sandbox, clustered replay, metrics, and feedback. |
+| DLQ/recovery loop | `GET /dlq`, `GET /dlq/clusters`, `GET /dlq/cluster-members`, `POST /dlq/resolve`, `POST /dlq/validate-fix`, `POST /dlq/cluster-apply`, `POST /dlq/replay`, `GET /recovery/home`, `GET /recovery/cases`, `POST /recovery/cases/:caseId/resolve`, `GET /recovery/metrics`, `POST /recovery/feedback` | viewer/editor + DLQ or recovery perms | Dead-letter triage, coalesced Home read model, deterministic semantic containment, validation sandbox, clustered replay, metrics, and feedback. |
 | Recovery items | `GET /recovery/items`, `GET /recovery/items/:id`, `GET /recovery/items/:id/children`, `POST /recovery/items/:id/acknowledge`, `POST /recovery/items/:id/in-progress`, `POST /recovery/items/:id/waiting-external`, `POST /recovery/items/:id/escalate`, `POST /recovery/items/:id/assign`, `POST /recovery/items/:id/resolve`, `POST /recovery/items/:id/reopen`, `POST /recovery/items/:id/comment`, `POST /recovery/items/:id/evidence`, `POST /recovery/items/:id/handoff` | viewer/editor + recovery perms | Incident workflow, evidence export, and cross-team handoff. |
 | Auto-healing/alerts | `GET /auto-healing/pending`, `GET /auto-healing/:id`, `POST /auto-healing/:id/decide`, `POST /auto-healing/scan`, `GET /alerts/policies`, `POST /alerts/policies`, `POST /alerts/policies/:id`, `DELETE /alerts/policies/:id`, `GET /alerts/recent` | viewer/editor/admin + feature perms | Supervised repair decisions, on-demand scan, alert policies, recent dispatch feed. |
 | PromptOps/evals | `GET /prompts`, `POST /prompts`, `GET /prompts/:name`, `GET /prompts/:name/versions/:version`, `POST /prompts/:name/versions`, `POST /prompts/:name/versions/:version/pin`, `GET /eval/datasets`, `POST /eval/datasets`, `GET /eval/datasets/:id`, `GET /eval/datasets/:id/export?format=jsonl|json`, `DELETE /eval/datasets/:id`, `GET /experiments`, `POST /experiments/run`, `GET /experiments/:id` | viewer/editor/admin + prompt/eval perms | Versioned prompt registry, opted-in eval datasets, synchronous model/prompt experiments. |
@@ -161,23 +164,47 @@ Lists tools registered in the engine. Used by the workflow builder and by agents
     "description": "Make an HTTP request to an external API.",
     "required": ["url"],
     "optional": ["method", "headers", "body"],
-    "inputExample": { "url": "https://example.com", "method": "GET" }
+    "inputExample": { "url": "https://example.com", "method": "GET" },
+    "inputFields": [
+      { "name": "url", "kind": "string", "required": true },
+      { "name": "method", "kind": "string", "required": false },
+      { "name": "headers", "kind": "json", "required": false },
+      { "name": "body", "kind": "json", "required": false }
+    ],
+    "writeSide": true
   },
   {
     "name": "text.uppercase",
     "description": "Convert text to uppercase.",
     "required": ["value"],
-    "inputExample": { "value": "hello" }
+    "inputExample": { "value": "hello" },
+    "inputFields": [
+      { "name": "value", "kind": "string", "required": true }
+    ],
+    "writeSide": false
   },
   {
     "name": "json.pick",
     "description": "Pick a value from workflow context using a dot path.",
     "required": ["path"],
     "optional": ["source"],
-    "inputExample": { "path": "1.output.statusCode" }
+    "inputExample": { "path": "1.output.statusCode" },
+    "inputFields": [
+      { "name": "path", "kind": "string", "required": true },
+      { "name": "source", "kind": "json", "required": false }
+    ],
+    "writeSide": false
   }
 ]
 ```
+
+`writeSide` means that at least one valid invocation can mutate external state;
+input-sensitive tools such as `http.request` still determine the exact effect
+from the configured input at runtime. The builder uses this bit for safety
+guidance; runtime dry-run and recovery gates remain authoritative.
+`inputFields` is the compact browser-form projection derived from the execution
+schema. It deliberately omits the planner-only JSON Schema; Advanced JSON
+remains available for exact input objects and future fields.
 
 ### `GET /templates`
 
@@ -216,18 +243,18 @@ Returns the public catalog. Requires `packs.read`.
     {
       "id": "incident-triage",
       "name": "Incident triage",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "requiredCredentials": [{ "name": "ops_slack", "kind": "slack_webhook", "purpose": "Pages your on-call channel" }],
       "nodeCount": 4,
       "samplePayloadIds": ["default"],
-      "failureFixtureIds": ["slack_5xx_transient", "classification_output_invalid", "github_contract_drift", "worker_interrupted_during_page"],
+      "failureFixtureIds": ["github_secret_unbound", "worker_interrupted_during_page"],
       "failureFixtures": [
         {
-          "id": "classification_output_invalid",
-          "label": "AI severity output malformed",
-          "description": "The drill records malformed classification as an explicit failed step; the live workflow validity gate blocks external effects.",
-          "failureMode": "ai_output_invalid",
-          "recoveryPath": "direct_failure"
+          "id": "github_secret_unbound",
+          "label": "GitHub credential unavailable",
+          "description": "The issue-creation node crosses the real worker and terminal-failure boundary. The retry policy classifies a controlled missing-secret probe as non-retryable before any GitHub request can start.",
+          "failureMode": "credential_unavailable",
+          "recoveryPath": "runtime_failure"
         }
       ]
     }
@@ -271,25 +298,39 @@ Starts a writes-skipped sandbox sample using a bundled sample payload. Requires
 
 ### `POST /solution-packs/:id/inject-failure`
 
-Starts the selected bundled recovery drill. A `direct_failure` fixture seeds a
-deterministic failed run + DLQ row. A `stalled_node_reaper` fixture instead
-creates one old `running` claim at the configured threshold and invokes the
-real org/run-scoped reaper, including its CAS and atomic DLQ/terminal path. The
-run and `node.failed` event retain a `solution_pack_drill` source block; raw
-error envelopes and workflow node ids remain absent from the catalog. Requires
+Starts the selected bundled recovery drill. A `runtime_failure` fixture clones
+the pack workflow, adds a reserved missing-secret probe to the selected node,
+seeds only completed ancestors, and publishes that node through BullMQ. The
+real worker, retry classification, atomic terminal transition, and DLQ must
+complete. Missing-secret resolution is non-retryable, so this drill reports one
+attempt; the probe resolves before provider calls or external effects. A
+`stalled_node_reaper` fixture instead creates one old `running` claim at the
+configured threshold and invokes the real org/run-scoped reaper, including its
+CAS and atomic DLQ/terminal path. The run and `node.failed` event retain a
+`solution_pack_drill` source block; raw error envelopes and workflow node ids
+remain absent from the catalog. Historical `direct_failure` rows remain
+readable but current packs do not publish direct-insert fixtures. Requires
 `packs.install`.
 
 ```json
-{ "fixtureId": "classification_output_invalid" }
+{ "fixtureId": "github_secret_unbound" }
 ```
 
 ```json
 {
   "runId": "run-id",
   "deadLetterId": "dead-letter-id",
-  "fixtureId": "classification_output_invalid",
-  "failureMode": "ai_output_invalid",
-  "recoveryPath": "direct_failure"
+  "fixtureId": "github_secret_unbound",
+  "failureMode": "credential_unavailable",
+  "recoveryPath": "runtime_failure",
+  "evidence": {
+    "recoveryPath": "runtime_failure",
+    "boundary": "worker_dlq",
+    "executedNodeId": "open_issue",
+    "seededAncestorCount": 1,
+    "attempts": 1,
+    "runtimeMs": 2200
+  }
 }
 ```
 
@@ -785,6 +826,50 @@ Integration tools reference credentials by operator-facing name, for example:
 
 Direct `http` nodes do not dereference `credentials` rows. They can still use deployment-owned env templates such as `{{secret.SLACK_BOT_TOKEN}}` or `{{env.SLACK_BOT_TOKEN}}` in headers.
 
+### External runtime shadow mode
+
+Create a managed credential with kind
+`external_runtime_signing_secret`, then register an observer:
+
+```http
+POST /integrations/external-runtimes
+```
+
+```json
+{
+  "name": "Temporal production",
+  "runtimeKey": "temporal-prod",
+  "signingCredentialName": "temporal-observer",
+  "enabled": true
+}
+```
+
+The response includes an opaque `callbackUrl`. Send one CloudEvents 1.0 JSON
+event to that URL with
+`X-Janusly-Signature: t=<unix>,v1=<HMAC-SHA256(timestamp.rawBody)>`.
+Supported event types are
+`io.janusly.external.workflow.observed`,
+`io.janusly.external.run.observed`, and
+`io.janusly.external.step.observed`; every `data` object requires a monotonic
+integer `sequence`. The callback returns 202:
+
+```json
+{
+  "accepted": true,
+  "duplicate": false,
+  "projectionState": "applied",
+  "eventId": "temporal-event-42",
+  "receivedAt": "2026-07-27T12:30:01.000Z"
+}
+```
+
+Exact event retries return `duplicate: true`. A lower/equal sequence is
+retained as forensic evidence with `projectionState: "stale"` but cannot
+regress the latest workflow/run/step state. `GET
+/integrations/external-runtimes` returns the bounded observer-only connection,
+workflow, run, step, and recovery-case projections. The API exposes no external
+retry/resume/cancel/replay endpoint.
+
 ### PagerDuty workflow generation and callback
 
 Create `pagerduty_api_token` and `pagerduty_webhook_secret` credentials, then
@@ -997,7 +1082,33 @@ For `headers` (HTTP nodes) and `input` (tool nodes), the LLM emits a bounded `Ar
 { "deadLetterId": "<uuid>", "suggestedWorkflow": { "...DAG..." } }
 ```
 
-Replays the proposed patch in a writes-skipped sandbox run. Returns `{ "runId": "<uuid>" }`. Poll `GET /run?runId=<uuid>` until terminal — `succeeded` gates the production save+replay chain; `failed` / `cancelled` surfaces the failed node's `errorJson` so the operator can iterate.
+Replays the proposed patch in a writes-skipped sandbox run. Returns `{ "runId": "<uuid>" }`. Poll `GET /run?runId=<uuid>` until terminal — `succeeded` gates the production save+redrive chain; `failed` / `cancelled` surfaces the failed node's `errorJson` so the operator can iterate.
+
+### `POST /runs/redrive` (stable: `POST /v1/runs/redrive`)
+
+```json
+{
+  "runId": "<failed-source-run>",
+  "nodeId": "<optional-when-unambiguous>",
+  "workflowVersionId": "<optional-saved-target-version>"
+}
+```
+
+Continues a failed saved-workflow run from the failed node, reusing only
+upstream outputs that succeeded and executing the latest saved version unless
+`workflowVersionId` selects another version. This is the production operation
+to use after validating and saving a patch. Reissuing the same source node and
+target version returns the existing continuation run id rather than publishing
+duplicate work. `dlq.replay` is different: it retries the exact failed node on
+the original run snapshot.
+
+### `POST /workflows/:id/resume` (stable: `POST /v1/workflows/{workflowId}/resume`)
+
+Clears only a recovery-circuit-breaker pause and starts an oldest-first bounded
+backfill of trigger events buffered while the workflow was paused. The response
+is `{ "ok": true, "workflowId": "...", "status": "active", "backfilled": N,
+"failed": N, "remaining": N }`. Repeat only while `remaining > 0`; pause states
+owned by other subsystems are rejected rather than being cleared broadly.
 
 ### `GET /dlq/clusters?windowDays=30`
 
@@ -1048,9 +1159,160 @@ Recovery before/after rollup. Splits the same time window by version cutoff: run
 
 `delta` is `null` until `after.signals.totalRuns >= 5` (constant `MIN_RUNS_FOR_DELTA` in `@janusly/engine/src/workflow-health`); the dialog renders the run counter + same-failure pill while waiting. `recentRunsAgainstAfter` is always populated and includes in-flight runs (`running`) so the operator sees activity from run 1. `sameFailureSinceApply` is `null` when `priorFailureSignature` is omitted — when supplied, the route normalizes each new DLQ row's `errorJson` and counts matches against the supplied signature; defense-in-depth, the `priorSignature` echoed in the response is the caller-supplied input verbatim, never a freshly-derived signature. `priorVersion` is `null` when the workflow only has one version. Mounted by `<RecoveryDeltaCard>` inside the recovery dialog's `applied` step.
 
+### `GET /recovery/cases?openOnly=true&runId=<id>&limit=100`
+
+Lists durable deterministic semantic-outcome cases for the current
+organization. Requires `viewer` plus `recovery.read`. `openOnly` defaults to
+`true`; `limit` defaults to 100 and is bounded to 1–200. A malformed or
+fractional limit uses the default rather than changing the query bound.
+
+```json
+{
+  "cases": [
+    {
+      "id": "case-...",
+      "orgId": "default",
+      "runId": "run-...",
+      "workflowId": "workflow-...",
+      "workflowVersionId": "version-...",
+      "source": "semantic_violation",
+      "detectorId": "answer-grounded",
+      "sourceNodeId": "answer",
+      "detectorKind": "expression",
+      "action": "quarantine",
+      "message": "The answer must be grounded before delivery.",
+      "detailsJson": null,
+      "state": "contained",
+      "createdBy": "dev-user",
+      "createdAt": "2026-07-27T17:00:00.000Z",
+      "updatedAt": "2026-07-27T17:00:00.000Z",
+      "resolvedAt": null
+    }
+  ]
+}
+```
+
+An `observe` case records a failed business-outcome check without pausing the
+run. A `quarantine` case means downstream work was not scheduled and the run
+is waiting for an operator decision.
+
+### `POST /recovery/cases/:caseId/resolve`
+
+Requires `editor` plus `recovery.write`. Replacement mode validates the
+supplied JSON against every deterministic detector attached to the same
+source node before any downstream effect can resume:
+
+```json
+{
+  "decision": "replace",
+  "output": { "answer": "Verified response", "grounded": true },
+  "reason": "Validated against the source record."
+}
+```
+
+Observe-only cases, or a quarantined business result the operator intentionally
+accepts, use an explicit loss decision:
+
+```json
+{
+  "decision": "accept_loss",
+  "reason": "The degraded result is acceptable for this execution."
+}
+```
+
+The response is:
+
+```json
+{
+  "ok": true,
+  "runId": "run-...",
+  "sourceNodeId": "answer",
+  "decision": "replace",
+  "resumed": true,
+  "resolvedCaseIds": ["case-..."]
+}
+```
+
+`resumed` is `false` for an observe-only acknowledgment and whenever another
+open quarantine still blocks the run. Same-source cases close together in one
+transaction. Replacement validation failures return
+`recovery_semantic_output_invalid`; concurrent or already-resolved decisions
+return `recovery_case_conflict`.
+
+### `GET /recovery/home?scope=full|impact`
+
+Internal web read model for the Recovery Center. It has no `/v1` alias: stable
+automation clients should continue to use the focused recovery, DLQ, and report
+contracts. The default `full` scope coalesces metrics, failure clusters, the
+90-day heatmap, the 30-day validation dossier, open semantic cases, the
+lifetime recovery ledger, the current operator's 30-day wins, and the
+authoritative open-queue count/oldest row.
+
+```json
+{
+  "scope": "full",
+  "generatedAt": "2026-07-28T00:00:00.000Z",
+  "sections": {
+    "metrics": { "status": "ok", "value": { "terminalRuns": 87 } },
+    "clusters": { "status": "ok", "value": { "clusters": [] } },
+    "heatmap": { "status": "ok", "value": { "days": [], "windowDays": 90 } },
+    "validation": { "status": "unavailable" },
+    "cases": { "status": "ok", "value": { "cases": [] } },
+    "ledger": { "status": "ok", "value": { "totalRecovered": 12 } },
+    "wins": { "status": "ok", "value": { "recovered": 3, "windowDays": 30 } },
+    "queue": {
+      "status": "ok",
+      "value": { "counts": { "open": 1 }, "oldestOpen": { "id": "dlq-..." } }
+    }
+  }
+}
+```
+
+Every section settles independently. A repository/query failure or missing
+section-specific permission produces `{ "status": "unavailable" }` for only
+that section; it never changes another section's status. The route itself
+requires `recovery.read`; clusters and queue additionally require `dlq.read`,
+while validation additionally requires `reports.read`.
+
+`scope=impact` returns only `ledger`, `wins`, and `queue`. The web uses that
+bounded shape for background convergence polling so it does not repeatedly
+execute the heavier Home projections.
+
 ### `GET /recovery/metrics?windowDays=30`
 
-Org-level Operations dashboard payload — recovery metric cards (success rate, MTTR, p95 latency, approvals pending, replay rate, SLA attainment, cost) each with `value` / `display` / `severity` / `rationale`. `slaAttainment` additionally carries `resolvedInWindow` and `metSla`; when no items resolved in-window its `value` is `null`/neutral, not `0%`. The cost/cache projection aggregates every `llm.completion` in the requested rolling window in PostgreSQL, returns the highest-value 100 provider/model groups, and folds any remaining groups into one row with `aggregated: true`; totals and cache share still include that remainder. Severity bands are tunable constants in the engine module.
+Org-level Operations dashboard payload. `verifiedRecovery` is the versioned
+production-only north-star:
+
+```json
+{
+  "definitionVersion": "1",
+  "metric": "time_to_verified_recovery",
+  "unit": "milliseconds",
+  "sampleSize": 8,
+  "p50Ms": 92000,
+  "p90Ms": 310000,
+  "value": 92000,
+  "display": "1m 32s",
+  "severity": "healthy",
+  "rationale": "Median 1m 32s across 8 verified recoveries · p90 5m 10s.",
+  "rationaleCode": "verified_recovery.summary"
+}
+```
+
+The clock starts at durable failure detection and stops only at a
+generation-bound terminal success. Validation runs, accepted loss, abandoned
+work, and invalid clocks are excluded. PostgreSQL computes sample size,
+continuous p50/p90, and downtime over the complete eligible window; the
+1,000-row raw-duration cap applies only to legacy arithmetic-average `mttr`.
+Current Janusly UI and exports prefer `verifiedRecovery`. Other cards include success rate, p95 latency, approvals
+pending, replay rate, SLA attainment, first-action time, recurrence, and cost,
+each with `value` / `display` / `severity` / `rationale`.
+`slaAttainment` additionally carries `resolvedInWindow` and `metSla`; when no
+production items resolved in-window its `value` is `null`/neutral, not `0%`.
+The cost/cache projection aggregates every `llm.completion` in the requested
+rolling window in PostgreSQL, returns the highest-value 100 provider/model
+groups, and folds any remaining groups into one row with `aggregated: true`;
+totals and cache share still include that remainder.
 
 ### `POST /recovery/feedback`
 
@@ -1122,7 +1384,7 @@ Surface highlights:
 
 - **`client.runs.*`** — start saved workflows, list the current capped runs page as an async iterator, get details, poll until terminal, stream events (async iterator), resume `human_form` / `approval` nodes with engine-signed resume tokens.
 - **`client.reports.exportRunExplain(runId, { format })`** — download the run-explain artefact (markdown or JSON) with the suggested filename from `Content-Disposition`.
-- **`client.recovery.getMetrics({ windowDays })`** — operations rollup (success rate, MTTR, p95 latency, approvals pending, replay rate, cost).
+- **`client.recovery.getMetrics({ windowDays })`** — operations rollup (success rate, versioned median time to verified recovery, legacy MTTR compatibility, p95 latency, approvals pending, replay rate, and cost).
 - **`client.webhooks.verifySignature({ body, signatureHeader, secret })`** — Stripe-style HMAC-SHA256 verifier for inbound Janusly webhooks (`x-janusly-signature: t=<unix-seconds>,v1=<hex>` over `${t}.${body}`). Uses `crypto.timingSafeEqual` + ±5-min clock-skew tolerance.
 
 Two auth modes: **service-token** (sends `Authorization: Bearer <token>` + `x-user-id` defaulting to `"sdk-user"`) and **caller-supplied bearer** (Authorization only, identity carried in the token). `x-org-id` is always sent.

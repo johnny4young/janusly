@@ -1,3 +1,4 @@
+import { openWorkflowAiAction } from './_helpers/workspace-navigation'
 import { expect, test, type Page } from '@playwright/test'
 
 function captureBrowserErrors(page: Page) {
@@ -70,23 +71,29 @@ test('Problems and graph context guide an author to a valid branch expression', 
   })
 
   await page.goto('/')
-  await page.getByRole('button', { name: /^AI Studio\b/ }).click()
+  await openWorkflowAiAction(page, 'Workflows')
   await page.getByRole('button', { name: 'Draft flow', exact: true }).click()
   await page.getByRole('button', { name: 'Review this flow', exact: true }).click()
   await page.locator('.workflow-node').filter({ hasText: 'Branch rule' }).click()
 
+  await page.getByRole('button', { name: /^Problems\b/ }).click()
   await expect(page.getByTestId('authoring-problems')).toBeVisible()
-  await expect(page.getByTestId('authoring-problem-branch_needs_context')).toContainText('AI review')
+  const aiReviewProblem = page.getByTestId('authoring-problem-branch_needs_context')
+  await expect(aiReviewProblem).toContainText('AI review')
+  await aiReviewProblem.click()
+  const branchMode = page.getByLabel('Run rule')
+  await expect(branchMode).toHaveValue('simple')
+  await expect(page.getByRole('option', { name: 'context.fetch.output.statusCode' })).toHaveCount(1)
+  await expect(page.getByRole('option', { name: 'context.isolated.output' })).toHaveCount(0)
+  await expect(page.getByRole('option', { name: 'context.input.amount' })).toHaveCount(1)
+  await branchMode.selectOption('advanced')
   const expression = page.getByLabel('Branch expression')
   await expect(expression).toHaveValue('context.fetch.output.ok === true')
-  await page.getByRole('button', { name: 'Use context' }).click()
-  await expect(page.getByRole('button', { name: 'Insert context.fetch.output.statusCode at the cursor' })).toBeVisible()
-  await expect(page.getByText('context.isolated.output', { exact: true })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Insert context.input.amount at the cursor' })).toBeVisible()
 
   await expression.fill('process.exit()')
   await expect(page.getByTestId('authoring-problem-branch_needs_context')).toHaveCount(0)
-  await expect(page.getByRole('alert')).toContainText('Unsupported expression token')
+  await expect(page.getByRole('alert')).toContainText('does not match the supported runtime grammar')
+  await page.getByRole('button', { name: /^Problems\b/ }).click()
   await page.getByRole('button', { name: 'Run checks' }).click()
   const invalidProblem = page.getByTestId('authoring-problem-condition_invalid_expression')
   await expect(invalidProblem).toBeVisible()
@@ -94,7 +101,7 @@ test('Problems and graph context guide an author to a valid branch expression', 
   await expect(page.getByTestId('inspector-node-gate')).toBeFocused()
 
   await expression.fill('context.fetch.output.statusCode === 200')
-  await expect(page.getByText('Expression matches the runtime grammar.')).toBeVisible()
+  await expect(page.getByRole('alert')).toHaveCount(0)
   await expect(invalidProblem).toHaveCount(0)
 
   // A delayed structural response for an older expression must not repopulate
@@ -104,20 +111,25 @@ test('Problems and graph context guide an author to a valid branch expression', 
     await route.continue()
   })
   await expression.fill('process.exit()')
+  await page.getByRole('button', { name: /^Problems\b/ }).click()
   const staleValidationResponse = page.waitForResponse((response) => response.url().endsWith('/validate'))
   await page.getByRole('button', { name: 'Run checks' }).click()
+  await page.getByRole('button', { name: 'Step', exact: true }).click()
   await expression.fill('context.fetch.output.statusCode === 201')
   await staleValidationResponse
+  await page.getByRole('button', { name: /^Problems\b/ }).click()
   await expect(invalidProblem).toHaveCount(0)
 
   // The same revision guard applies to AI review findings that complete after
   // the operator has already changed the graph.
-  await page.getByRole('button', { name: /^AI Studio\b/ }).click()
+  await openWorkflowAiAction(page, 'Workflows')
   const staleReviewResponse = page.waitForResponse((response) => response.url().endsWith('/ai/review-workflow'))
   await page.getByRole('button', { name: 'Review this flow', exact: true }).click()
   await page.locator('.workflow-node').filter({ hasText: 'Branch rule' }).click()
+  await page.getByLabel('Run rule').selectOption('advanced')
   await page.getByLabel('Branch expression').fill('context.fetch.output.statusCode === 202')
   await staleReviewResponse
+  await page.getByRole('button', { name: /^Problems\b/ }).click()
   await expect(page.getByTestId('authoring-problem-branch_needs_context')).toHaveCount(0)
   expect(browserErrors).toEqual([])
 })

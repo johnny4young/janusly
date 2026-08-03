@@ -95,6 +95,29 @@ describe("recovery effectiveness signals", () => {
     const noItemDlq = `${TAG}-metric-no-item-dlq`;
     const itemFirstActionAt = new Date(createdAt.getTime() + 60_000);
     const noItemFirstActionAt = new Date(createdAt.getTime() + 180_000);
+    await db.insert(runs).values([
+      {
+        id: `${itemDlq}-run`,
+        orgId: METRICS_ORG,
+        workflowVersionId: "workflow-a-v1",
+        status: "failed",
+        createdAt,
+      },
+      {
+        id: `${noItemDlq}-run`,
+        orgId: METRICS_ORG,
+        workflowVersionId: "workflow-a-v1",
+        status: "failed",
+        createdAt,
+      },
+      {
+        id: `${TAG}-other-no-item-dlq-run`,
+        orgId: OTHER_ORG,
+        workflowVersionId: "workflow-a-v1",
+        status: "failed",
+        createdAt,
+      },
+    ]);
     await db.insert(deadLetters).values([
       dlqValue({ id: itemDlq, createdAt }),
       dlqValue({ id: noItemDlq, createdAt, replayClaimedAt: noItemFirstActionAt }),

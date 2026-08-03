@@ -21,7 +21,9 @@
  *     external call's resilience.
  *   - `approval` — a node of type `approval` was added or removed.
  *   - `rationale` — workflow-level metadata field that affects
- *     readability (`name`, `metadata.*`).
+ *     readability (`name`, `metadata.*`). Identity, template policy, and
+ *     Recovery policy changes are also retained even when they have no
+ *     presentation tag.
  *
  * Pure — no I/O, no network, no DB access. Easy to unit-test.
  */
@@ -44,12 +46,14 @@ export type DiffableEdge = {
 };
 
 export type DiffableWorkflow = {
+  id?: string;
   dslVersion?: string;
   name?: string;
   metadata?: unknown;
   inputs?: unknown;
   outputs?: unknown;
   templatePolicy?: unknown;
+  recovery?: unknown;
   nodes?: DiffableNode[];
   edges?: DiffableEdge[];
 };
@@ -147,7 +151,16 @@ export function computeWorkflowDiff(before: DiffableWorkflow, after: DiffableWor
 
 /* ----------------------------- Workflow-level ----------------------------- */
 
-const WORKFLOW_LEVEL_FIELDS = ["dslVersion", "name", "metadata", "inputs", "outputs", "templatePolicy"] as const;
+const WORKFLOW_LEVEL_FIELDS = [
+  "id",
+  "dslVersion",
+  "name",
+  "metadata",
+  "inputs",
+  "outputs",
+  "templatePolicy",
+  "recovery",
+] as const;
 
 function diffWorkflowLevel(before: DiffableWorkflow, after: DiffableWorkflow): FieldChange[] {
   const changes: FieldChange[] = [];

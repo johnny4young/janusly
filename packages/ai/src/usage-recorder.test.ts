@@ -15,6 +15,7 @@ const baseRecord: UsageRecord = {
   totalTokens: 150,
   latencyMs: 1234,
   costUsd: 0.000045,
+  providerSimulated: false,
   mode: "ai",
 };
 

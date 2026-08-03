@@ -9,8 +9,8 @@
  *
  * Used by:
  * - `packages/mcp-server/src/index.ts` — boot path constructs the client.
- * - `packages/mcp-server/src/tools.ts` — `dispatchTool` calls the closure
- *   returned by `createApiClient`.
+ * - `packages/mcp-server/src/tooling/dispatch*.ts` — route translators call
+ *   the closure returned by `createApiClient` through the stable tools barrel.
  *
  * Invariants:
  * - The MCP server never queries the DB directly. Multi-tenant scope, audit
@@ -83,11 +83,11 @@ export function createApiClient(cfg: ApiClientConfig): CallApi {
       "content-type": "application/json",
       "x-org-id": cfg.orgId,
       "x-user-id": cfg.userId,
-      // Self-declared source label. The API honors this only in
-      // service-token mode (see `apps/api/src/auth.ts`). It's used for
-      // audit tagging and per-tool rate-limit bucketing on the API
-      // side, never as an authorization gate (those gates check env
-      // and `org_configs.mcp.writeConsent`).
+      // Self-declared source label. The API honors this in service-token and
+      // local dev-header modes, but never for Supabase browser sessions (see
+      // `apps/api/src/auth.ts`). It is used for audit tagging and per-tool
+      // rate-limit bucketing, never as an authorization gate (those gates
+      // check env and `org_configs.mcp.writeConsent`).
       "x-janusly-source": "mcp",
       ...((init.headers as Record<string, string> | undefined) ?? {}),
     };

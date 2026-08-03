@@ -260,6 +260,27 @@ describe("POST /runs/redrive happy path", () => {
     expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), { runId: "run-2" });
   });
 
+  it("preserves a primitive source input instead of coercing it to an object", async () => {
+    bodyBox.value = { runId: "run-1" };
+    dbQueue.push([{ ...SOURCE_RUN, inputJson: { workflow: { id: "wf-1" }, input: false } }]);
+    dbQueue.push([{ nodeId: "n1", status: "failed" }]);
+    dbQueue.push([{ workflowId: "wf-1" }]);
+    dbQueue.push([{ id: "wf-1", status: "active" }]);
+    dbQueue.push([{ id: "wfv-2", workflowId: "wf-1", dagJson: VALID_DAG }]);
+    redriveRunMock.mockResolvedValueOnce({
+      ok: true,
+      runId: "run-primitive",
+      predecessorCount: 0,
+      wasCreated: true,
+    });
+
+    await invoke();
+
+    expect(redriveRunMock).toHaveBeenCalledWith(
+      expect.objectContaining({ input: false }),
+    );
+  });
+
   it("returns an existing continuation without duplicating its audit", async () => {
     bodyBox.value = { runId: "run-1" };
     dbQueue.push([SOURCE_RUN]);

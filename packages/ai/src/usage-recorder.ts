@@ -54,6 +54,8 @@ export type UsageRecord = {
   latencyMs: number;
   /** Cost in USD; null when no price entry exists for the model. */
   costUsd?: number | null;
+  /** Explicit provider-compatible simulator; never bill its token usage. */
+  providerSimulated: boolean;
   /** "ai" on success, "fallback" when the underlying call threw. */
   mode: "ai" | "fallback";
   /** Set when mode === "fallback". */

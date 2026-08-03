@@ -1,7 +1,8 @@
 /** Reads host-facing settings for the persistent local Docker stack. */
 
 import { randomBytes } from "node:crypto";
-import { access, chmod, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, chmod, copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 
 export const localEnvFile = "deploy/local/local.env";
 export const localEnvExampleFile = "deploy/local/local.env.example";
@@ -28,14 +29,40 @@ export function parseEnvFile(source) {
   return values;
 }
 
-export async function ensureLocalEnv() {
-  const target = new URL(localEnvFile, rootUrl);
+export async function ensurePrivateCopy(source, target) {
   try {
     await access(target);
   } catch {
-    await copyFile(new URL(localEnvExampleFile, rootUrl), target);
+    try {
+      await copyFile(source, target, constants.COPYFILE_EXCL);
+    } catch (error) {
+      if (!error || typeof error !== "object" || !("code" in error) || error.code !== "EEXIST") {
+        throw error;
+      }
+    }
+  }
+  await chmod(target, 0o600);
+}
+
+export async function ensureLocalEnv() {
+  const target = new URL(localEnvFile, rootUrl);
+  let existed = true;
+  try {
+    await access(target);
+  } catch {
+    existed = false;
+  }
+  await ensurePrivateCopy(new URL(localEnvExampleFile, rootUrl), target);
+  if (!existed) {
     console.log(`[local] created ${localEnvFile} from the tracked example`);
   }
+}
+
+export async function removeLocalGeneratedConfiguration(baseUrl = rootUrl) {
+  await Promise.all([
+    rm(new URL(localEnvFile, baseUrl), { force: true }),
+    rm(new URL("deploy/local/.secrets/", baseUrl), { recursive: true, force: true }),
+  ]);
 }
 
 /** Create the one local SecretStore root key without ever printing it. */

@@ -129,14 +129,14 @@ export function getNodePreset(type: string): JsonObject {
  * Closed enum of node types we ship UI strings for. We keep this list
  * separate from `nodePresets` so that lookups for an unknown / experimental
  * type fall back gracefully (`label = id, helper = generic`) without
- * tripping the i18next missing-key warning for catalog noise.
+ * emitting missing-key diagnostics for unknown catalog families.
  */
 const KNOWN_NODE_TYPES = new Set(nodeTypes)
 
 /** Human label for a node type (falls back to the raw id with `_` → space). */
 export function getNodeLabel(type: string): string {
   if (KNOWN_NODE_TYPES.has(type)) {
-    return t(`nodes.${type}.label` as never)
+    return t(`nodes.${type}.label`)
   }
   return type.replaceAll('_', ' ')
 }
@@ -144,7 +144,7 @@ export function getNodeLabel(type: string): string {
 /** Helper / hint text for a node type (used in the step-picker subtitle). */
 export function getNodeHelper(type: string): string {
   if (KNOWN_NODE_TYPES.has(type)) {
-    return t(`nodes.${type}.helper` as never)
+    return t(`nodes.${type}.helper`)
   }
   return t('nodes.fallbackHelper')
 }
@@ -152,7 +152,19 @@ export function getNodeHelper(type: string): string {
 /** One-line config summary for the Inspector header (e.g. "GET https://api.example.com"). */
 export function getNodeConfigSummary(type: string, config: JsonObject): string {
   if (type === 'http') return readString(config.url) ?? (t('nodeSummary.http.empty'))
-  if (type === 'ai') return compact(readString(config.prompt) ?? (t('nodeSummary.ai.empty')))
+  if (type === 'ai') {
+    const promptRef = config.promptRef
+    if (promptRef && typeof promptRef === 'object' && !Array.isArray(promptRef)) {
+      const name = readString((promptRef as JsonObject).name)
+      if (name) {
+        const version = (promptRef as JsonObject).version
+        return typeof version === 'number' && Number.isSafeInteger(version) && version > 0
+          ? t('nodeSummary.ai.savedVersion', { name, version })
+          : t('nodeSummary.ai.saved', { name })
+      }
+    }
+    return compact(readString(config.prompt) ?? (t('nodeSummary.ai.empty')))
+  }
   if (type === 'tool') return readString(config.tool) ?? (t('nodeSummary.tool.empty'))
   if (type === 'agent') return compact(readString(config.goal) ?? (t('nodeSummary.agent.empty')))
   if (type === 'multi_agent') {
@@ -253,13 +265,13 @@ const KNOWN_STATUSES: ReadonlySet<string> = new Set([
 
 /** Human label for a node/run status string (e.g. `"running"` → `"Running"`). */
 export function formatStatusLabel(status: string): string {
-  if (KNOWN_STATUSES.has(status)) return t(`status.${status}` as never)
+  if (KNOWN_STATUSES.has(status)) return t(`status.${status}`)
   return status.replaceAll('_', ' ')
 }
 
 /** Label for the AI mode chip — surfaces `"AI"` / `"Fallback"` / `"Error"` per AGENTS.md fallback contract. */
 export function formatAiModeLabel(mode: 'ai' | 'fallback' | 'error'): string {
-  return t(`aiMode.${mode}` as never)
+  return t(`aiMode.${mode}`)
 }
 
 /** Compact run-node duration (`started_at`→`finished_at`) as `42s` / `1m 20s`.

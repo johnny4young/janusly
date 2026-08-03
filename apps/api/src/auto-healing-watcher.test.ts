@@ -10,15 +10,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const hoisted = vi.hoisted(() => ({
   selectFromMock: vi.fn(),
   upsertJobSchedulerMock: vi.fn(),
-  replayDeadLetterMock: vi.fn(),
-  markDeadLetterReplayedMock: vi.fn(),
 }));
 
 vi.mock("@janusly/db", () => ({
   db: {
     select: vi.fn(() => ({ from: hoisted.selectFromMock })),
   },
-  deadLetters: { orgId: "org_id", id: "id", runId: "run_id", nodeId: "node_id" },
   runs: { id: "id", orgId: "org_id", status: "status", inputJson: "input_json" },
   runNodes: { runId: "run_id", status: "status", nodeId: "node_id", errorJson: "error_json" },
 }));
@@ -30,7 +27,6 @@ vi.mock("./auto-healing-queue", () => ({
 vi.mock("@janusly/data/src/autoHealingRepo", () => ({
   countRecentAttemptsBySignature: vi.fn(),
   listValidatingRows: vi.fn(),
-  recordDecision: vi.fn(),
   recordValidationOutcome: vi.fn(),
   sweepStaleValidating: vi.fn(),
 }));
@@ -44,18 +40,9 @@ vi.mock("./auto-healing-consent", () => ({
   isAutoHealingAllowed: vi.fn(),
 }));
 
-vi.mock("@janusly/engine/src/adapters/dlq-replay", () => ({
-  DLQReplayAdapter: class {
-    replayDeadLetter = hoisted.replayDeadLetterMock;
-  },
-}));
-
-vi.mock("./dlq", () => ({
-  markDeadLetterReplayed: hoisted.markDeadLetterReplayedMock,
-}));
-
-vi.mock("./audit", () => ({
-  audit: vi.fn(),
+vi.mock("./auto-healing-apply", () => ({
+  applyValidatedAutoHealing: vi.fn(),
+  repairAutoHealingPublications: vi.fn(),
 }));
 
 import {
@@ -68,9 +55,12 @@ import {
   listValidatingRows,
   recordValidationOutcome,
   sweepStaleValidating,
-  recordDecision,
   countRecentAttemptsBySignature,
 } from "@janusly/data/src/autoHealingRepo";
+import {
+  applyValidatedAutoHealing,
+  repairAutoHealingPublications,
+} from "./auto-healing-apply";
 import {
   isAutoApplyAllowed,
   isAutoHealingAllowed,
@@ -82,13 +72,12 @@ const selectFromMock = hoisted.selectFromMock;
 const listMock = vi.mocked(listValidatingRows);
 const sweepMock = vi.mocked(sweepStaleValidating);
 const outcomeMock = vi.mocked(recordValidationOutcome);
-const decisionMock = vi.mocked(recordDecision);
+const applyMock = vi.mocked(applyValidatedAutoHealing);
+const repairMock = vi.mocked(repairAutoHealingPublications);
 const isAutoHealingAllowedMock = vi.mocked(isAutoHealingAllowed);
 const isAutoApplyAllowedMock = vi.mocked(isAutoApplyAllowed);
 const snapshotMock = vi.mocked(getOrgConfigSnapshot);
 const countMock = vi.mocked(countRecentAttemptsBySignature);
-const replayDeadLetterMock = hoisted.replayDeadLetterMock;
-const markDeadLetterReplayedMock = hoisted.markDeadLetterReplayedMock;
 
 function fakeRow(overrides: Partial<{ status: string; signature: string; validationRunId: string; proposedPatchJson: unknown }> = {}) {
   return {
@@ -101,8 +90,11 @@ function fakeRow(overrides: Partial<{ status: string; signature: string; validat
     approachLabel: "fix_url",
     confidence: 85,
     validationRunId: overrides.validationRunId ?? "vr-1",
-    validationSignature: null,
-    decisionActor: null,
+  validationSignature: null,
+  decisionActor: null,
+  publicationReceipt: null,
+  publicationRepairAfter: null,
+  publicationAttempts: 0,
     declineReason: null,
     loopAttemptCount: 0,
     metadata: null,
@@ -111,9 +103,18 @@ function fakeRow(overrides: Partial<{ status: string; signature: string; validat
   } as never;
 }
 
-function mockTerminalRunStatus(status: string) {
+function mockTerminalRunStatus(
+  status: string,
+  validationEvidenceLevel = "static",
+) {
   // db.select for the validation-run terminal-status lookup: .from(runs).where(inArray)
-  const where = vi.fn().mockResolvedValue([{ id: "vr-1", orgId: "org-1", status, inputJson: null }]);
+  const where = vi.fn().mockResolvedValue([{
+    id: "vr-1",
+    orgId: "org-1",
+    status,
+    inputJson: null,
+    validationEvidenceLevel,
+  }]);
   selectFromMock.mockReturnValueOnce({ where });
   return where;
 }
@@ -124,15 +125,23 @@ beforeEach(() => {
   listMock.mockReset().mockResolvedValue([]);
   sweepMock.mockReset().mockResolvedValue(0);
   outcomeMock.mockReset();
-  decisionMock.mockReset().mockResolvedValue({ applied: true });
+  applyMock.mockReset().mockResolvedValue({
+    outcome: "applied",
+    row: fakeRow(),
+    receipt: "receipt-1",
+  });
+  repairMock.mockReset().mockResolvedValue({
+    scanned: 0,
+    applied: 0,
+    pending: 0,
+    failed: 0,
+  });
   isAutoHealingAllowedMock.mockReset().mockResolvedValue({ allowed: true });
   isAutoApplyAllowedMock.mockReset().mockResolvedValue({ allowed: false, reason: "process_disabled", message: "" });
   snapshotMock.mockReset().mockResolvedValue({
     autoHealing: { enabled: true, autoApply: false, maxAttemptsPerSignature: 3, loopWindowDays: 14 },
   } as never);
   countMock.mockReset().mockResolvedValue(0);
-  replayDeadLetterMock.mockReset().mockResolvedValue(undefined);
-  markDeadLetterReplayedMock.mockReset().mockResolvedValue(undefined);
 });
 
 describe("registerAutoHealingWatcherScheduler", () => {
@@ -158,7 +167,7 @@ describe("handleAutoHealingWatchTrigger", () => {
     }));
   });
 
-  it("attributes an auto-applied replay and marks the DLQ row after enqueue", async () => {
+  it("delegates an eligible auto-apply to the durable publication service", async () => {
     listMock.mockResolvedValueOnce([fakeRow({
       proposedPatchJson: {
         id: "wf-1",
@@ -167,20 +176,40 @@ describe("handleAutoHealingWatchTrigger", () => {
         edges: [],
       },
     })]);
-    mockTerminalRunStatus("succeeded");
-    const limit = vi.fn().mockResolvedValue([{ runId: "run-1", nodeId: "n-1" }]);
-    selectFromMock.mockReturnValueOnce({ where: vi.fn(() => ({ limit })) } as never);
+    mockTerminalRunStatus("succeeded", "provider_simulated");
     isAutoApplyAllowedMock.mockResolvedValueOnce({ allowed: true });
 
     await handleAutoHealingWatchTrigger();
 
-    expect(decisionMock).toHaveBeenCalledWith("row-1", { actor: "auto", accepted: true });
-    expect(replayDeadLetterMock).toHaveBeenCalledWith(expect.objectContaining({
-      runId: "run-1",
-      deadLetterId: "dlq-1",
-      recoveryActorId: "system:auto-healing",
+    expect(applyMock).toHaveBeenCalledWith({
+      orgId: "org-1",
+      id: "row-1",
+      authority: {
+        kind: "autonomous",
+        actor: "system:auto-healing",
+      },
+    });
+  });
+
+  it("does not auto-apply when validation skipped external writes", async () => {
+    listMock.mockResolvedValueOnce([fakeRow({
+      proposedPatchJson: {
+        id: "wf-1",
+        name: "Workflow",
+        nodes: [{ id: "n-1", type: "noop", config: {} }],
+        edges: [],
+      },
+    })]);
+    mockTerminalRunStatus("succeeded", "writes_skipped");
+    isAutoApplyAllowedMock.mockResolvedValueOnce({ allowed: true });
+
+    await handleAutoHealingWatchTrigger();
+
+    expect(outcomeMock).toHaveBeenCalledWith("row-1", expect.objectContaining({
+      outcome: "validated",
+      validationEvidenceLevel: "writes_skipped",
     }));
-    expect(markDeadLetterReplayedMock).toHaveBeenCalledWith("org-1", "dlq-1");
+    expect(applyMock).not.toHaveBeenCalled();
   });
 
   it("skips rows whose validation run belongs to another org", async () => {
@@ -239,6 +268,24 @@ describe("handleAutoHealingWatchTrigger", () => {
       await handleAutoHealingWatchTrigger();
       expect(sweepMock).toHaveBeenCalledTimes(1);
       expect(logSpy.mock.calls[0]?.[0]).toMatch(/swept 7 stale/);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("repairs expired publication leases before scanning validation rows", async () => {
+    repairMock.mockResolvedValueOnce({
+      scanned: 1,
+      applied: 1,
+      pending: 0,
+      failed: 0,
+    });
+    listMock.mockResolvedValueOnce([]);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await handleAutoHealingWatchTrigger();
+      expect(repairMock).toHaveBeenCalledTimes(1);
+      expect(sweepMock).toHaveBeenCalledTimes(1);
     } finally {
       logSpy.mockRestore();
     }

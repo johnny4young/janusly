@@ -271,21 +271,21 @@ function BeforeOnlySkeleton({
   afterVersion: number
 }) {
   if (!snapshot) {
-    return <div className="we-recovery-delta-skeleton">{runtimeT('recoveryDelta.skeletonLoading', { version: afterVersion }) as string}</div>
+    return <div className="we-recovery-delta-skeleton">{runtimeT('recoveryDelta.skeletonLoading', { version: afterVersion })}</div>
   }
   // For afterVersion=1 there is no prior version to label, so drop the
   // "(v0)" parenthetical — versions are 1-based.
   const label = afterVersion > 1
-    ? (runtimeT('recoveryDelta.beforeApplyVersion', { prior: afterVersion - 1 }) as string)
-    : (runtimeT('recoveryDelta.beforeApply') as string)
+    ? (runtimeT('recoveryDelta.beforeApplyVersion', { prior: afterVersion - 1 }))
+    : (runtimeT('recoveryDelta.beforeApply'))
   const detail = snapshot.signals.p95LatencyMs != null
-    ? (runtimeT('recoveryDelta.beforeHealthLatency', { score: snapshot.score, latency: formatMs(snapshot.signals.p95LatencyMs) }) as string)
-    : (runtimeT('recoveryDelta.beforeHealth', { score: snapshot.score }) as string)
+    ? (runtimeT('recoveryDelta.beforeHealthLatency', { score: snapshot.score, latency: formatMs(snapshot.signals.p95LatencyMs) }))
+    : (runtimeT('recoveryDelta.beforeHealth', { score: snapshot.score }))
   return (
     <div className="we-recovery-delta-skeleton">
       <span className="we-recovery-delta-skeleton__label">{label}</span>
       <span className="we-recovery-delta-skeleton__value">{detail}</span>
-      <span className="we-recovery-delta-skeleton__hint">{runtimeT('recoveryDelta.skeletonHint') as string}</span>
+      <span className="we-recovery-delta-skeleton__hint">{runtimeT('recoveryDelta.skeletonHint')}</span>
     </div>
   )
 }
@@ -300,8 +300,8 @@ function RunCounterPill({
   if (counts.totalRuns === 0 && counts.running === 0) {
     return (
       <div className="we-recovery-delta-pill we-recovery-delta-pill--counter" data-testid="recovery-delta-counter">
-        <span className="we-recovery-delta-pill__value">{runtimeT('recoveryDelta.noRunsYet', { version: afterVersion }) as string}</span>
-        <span className="we-recovery-delta-pill__sentence">{runtimeT('recoveryDelta.noRunsHint') as string}</span>
+        <span className="we-recovery-delta-pill__value">{runtimeT('recoveryDelta.noRunsYet', { version: afterVersion })}</span>
+        <span className="we-recovery-delta-pill__sentence">{runtimeT('recoveryDelta.noRunsHint')}</span>
       </div>
     )
   }
@@ -309,11 +309,11 @@ function RunCounterPill({
   // as single text nodes (Testing-Library `getByText` doesn't reach across
   // sibling text nodes from a JSX template literal mix).
   const valueText = counts.running > 0
-    ? (runtimeT('recoveryDelta.runsValueRunning', { version: afterVersion, total: counts.totalRuns, running: counts.running }) as string)
-    : (runtimeT('recoveryDelta.runsValue', { version: afterVersion, total: counts.totalRuns }) as string)
+    ? (runtimeT('recoveryDelta.runsValueRunning', { version: afterVersion, total: counts.totalRuns, running: counts.running }))
+    : (runtimeT('recoveryDelta.runsValue', { version: afterVersion, total: counts.totalRuns }))
   const sentenceText = counts.running > 0
-    ? (runtimeT('recoveryDelta.runsSentenceRunning', { succeeded: counts.succeeded, failed: counts.failed, running: counts.running }) as string)
-    : (runtimeT('recoveryDelta.runsSentence', { succeeded: counts.succeeded, failed: counts.failed }) as string)
+    ? (runtimeT('recoveryDelta.runsSentenceRunning', { succeeded: counts.succeeded, failed: counts.failed, running: counts.running }))
+    : (runtimeT('recoveryDelta.runsSentence', { succeeded: counts.succeeded, failed: counts.failed }))
   return (
     <div className="we-recovery-delta-pill we-recovery-delta-pill--counter" data-testid="recovery-delta-counter">
       <span className="we-recovery-delta-pill__value">{valueText}</span>
@@ -332,24 +332,24 @@ function SameFailurePill({
   if (count === 0) {
     return (
       <div className="we-recovery-delta-pill we-recovery-delta-pill--same-failure we-recovery-delta-pill--success" data-testid="recovery-delta-same-failure">
-        <span className="we-recovery-delta-pill__value">{runtimeT('recoveryDelta.sameFailureZero') as string}</span>
-        <span className="we-recovery-delta-pill__sentence">{runtimeT('recoveryDelta.sameFailureZeroSentence') as string}</span>
+        <span className="we-recovery-delta-pill__value">{runtimeT('recoveryDelta.sameFailureZero')}</span>
+        <span className="we-recovery-delta-pill__sentence">{runtimeT('recoveryDelta.sameFailureZeroSentence')}</span>
       </div>
     )
   }
   const link = sampleDeadLetterIds.length > 0
     ? `?dlqFocus=${encodeURIComponent(sampleDeadLetterIds[0]!)}`
     : null
-  const valueText = runtimeT('recoveryDelta.sameFailureValue', { count }) as string
+  const valueText = runtimeT('recoveryDelta.sameFailureValue', { count })
   return (
     <div className="we-recovery-delta-pill we-recovery-delta-pill--same-failure we-recovery-delta-pill--danger" data-testid="recovery-delta-same-failure">
       <span className="we-recovery-delta-pill__value">{valueText}</span>
       <span className="we-recovery-delta-pill__sentence">
-        {runtimeT('recoveryDelta.sameFailureSentence') as string}
+        {runtimeT('recoveryDelta.sameFailureSentence')}
         {link ? (
           <>
             {' '}
-            <a href={link} className="we-recovery-delta-failure-link">{runtimeT('recoveryDelta.viewDlq') as string}</a>
+            <a href={link} className="we-recovery-delta-failure-link">{runtimeT('recoveryDelta.viewDlq')}</a>
           </>
         ) : null}
       </span>
@@ -359,10 +359,10 @@ function SameFailurePill({
 
 function HealthPill({ before, after, delta }: { before: number; after: number; delta: number }) {
   const sentence = delta > 0
-    ? (runtimeT('recoveryDelta.healthImproved', { count: delta }) as string)
+    ? (runtimeT('recoveryDelta.healthImproved', { count: delta }))
     : delta < 0
-      ? (runtimeT('recoveryDelta.healthDropped', { count: Math.abs(delta) }) as string)
-      : (runtimeT('recoveryDelta.healthUnchanged') as string)
+      ? (runtimeT('recoveryDelta.healthDropped', { count: Math.abs(delta) }))
+      : (runtimeT('recoveryDelta.healthUnchanged'))
   return (
     <div className={`we-recovery-delta-pill ${tintForHealth(delta)}`}>
       <span className="we-recovery-delta-pill__value">
@@ -377,10 +377,10 @@ function LatencyPill({ beforeMs, afterMs, deltaMs }: { beforeMs: number; afterMs
   const ratio = beforeMs > 0 ? Math.abs(deltaMs) / beforeMs : 0
   const pct = Math.round(ratio * 100)
   const sentence = deltaMs < 0
-    ? (runtimeT('recoveryDelta.faster', { pct }) as string)
+    ? (runtimeT('recoveryDelta.faster', { pct }))
     : deltaMs > 0
-      ? (runtimeT('recoveryDelta.slower', { pct }) as string)
-      : (runtimeT('recoveryDelta.sameSpeed') as string)
+      ? (runtimeT('recoveryDelta.slower', { pct }))
+      : (runtimeT('recoveryDelta.sameSpeed'))
   // Lower is better — flip the tint mapping so a NEGATIVE delta is success-tinted.
   return (
     <div className={`we-recovery-delta-pill ${tintForLowerIsBetter(deltaMs)}`}>
@@ -408,10 +408,10 @@ function CostPill({
   const beforePerRun = beforeRuns > 0 ? beforeCost / beforeRuns : 0
   const afterPerRun = afterRuns > 0 ? afterCost / afterRuns : 0
   const sentence = deltaPerRun < 0
-    ? (runtimeT('recoveryDelta.cheaper', { usd: formatUsd(Math.abs(deltaPerRun)) }) as string)
+    ? (runtimeT('recoveryDelta.cheaper', { usd: formatUsd(Math.abs(deltaPerRun)) }))
     : deltaPerRun > 0
-      ? (runtimeT('recoveryDelta.moreExpensive', { usd: formatUsd(deltaPerRun) }) as string)
-      : (runtimeT('recoveryDelta.sameCost') as string)
+      ? (runtimeT('recoveryDelta.moreExpensive', { usd: formatUsd(deltaPerRun) }))
+      : (runtimeT('recoveryDelta.sameCost'))
   return (
     <div className={`we-recovery-delta-pill ${tintForLowerIsBetter(deltaPerRun)}`}>
       <span className="we-recovery-delta-pill__value">
@@ -432,7 +432,7 @@ function GatheringRow({
   threshold: number
 }) {
   const pct = Math.min(100, Math.round((currentRuns / threshold) * 100))
-  const label = runtimeT('recoveryDelta.gathering', { current: currentRuns, threshold, version: afterVersion }) as string
+  const label = runtimeT('recoveryDelta.gathering', { current: currentRuns, threshold, version: afterVersion })
   return (
     <div className="we-recovery-delta-gathering">
       <div className="we-recovery-delta-gathering__label">{label}</div>

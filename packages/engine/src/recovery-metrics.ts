@@ -22,6 +22,8 @@
  * here as additional metrics.
  */
 
+import { RECOVERY_NORTH_STAR_DEFINITION_V1 } from "@janusly/shared";
+
 /** Severity tier for a single metric card. */
 export type MetricSeverity = "healthy" | "warn" | "unhealthy" | "neutral";
 
@@ -30,6 +32,8 @@ export type RecoveryMetricRationaleCode =
   | "success_rate.summary"
   | "mttr.empty"
   | "mttr.summary"
+  | "verified_recovery.empty"
+  | "verified_recovery.summary"
   | "latency.insufficient"
   | "latency.summary"
   | "approvals.none"
@@ -122,15 +126,24 @@ export type RecoveryRecurrenceCounts = {
   recurredSignatures: string[];
 };
 
-/** One per-day point for the MTTR trend sparkline. `day` is `YYYY-MM-DD`, `seconds` the day's avg recovery time. */
+/** One per-day point for the recovery trend. `day` is `YYYY-MM-DD`, `seconds` the day's median verified-recovery time. */
 export type MttrTrendPoint = { day: string; seconds: number };
+
+export type VerifiedRecoveryStats = {
+  sampleSize: number;
+  p50Ms: number | null;
+  p90Ms: number | null;
+  downtimeEndedMs: number;
+};
 
 /** Raw signals the data repo returns; the rollup converts to `RecoveryMetrics`. */
 export type RecoveryMetricsSignals = {
   runStatusCounts: RunStatusCounts;
-  /** Recovery durations (ms) for replayed DLQ rows. */
+  /** Exact aggregate over the complete eligible production window. */
+  verifiedRecovery?: VerifiedRecoveryStats;
+  /** Bounded compatibility sample used only by legacy arithmetic-average MTTR. */
   mttrDurations: number[];
-  /** Per-day avg recovery time (last ≤14 days, oldest-first) for the MTTR sparkline. Optional so pre-existing test fixtures stay valid. */
+  /** Per-day median verified-recovery time (last ≤14 days, oldest-first). Optional so pre-existing test fixtures stay valid. */
   mttrTrend?: MttrTrendPoint[];
   approvalsPending: number;
   costByProvider: CostProviderRow[];
@@ -150,6 +163,16 @@ export type RecoveryMetric = {
   rationale: string;
   rationaleCode: RecoveryMetricRationaleCode;
   rationaleMeta?: Record<string, string | number | boolean>;
+};
+
+/** Explicit v1 north-star projection; legacy `mttr` remains for compatibility. */
+export type VerifiedRecoveryMetric = RecoveryMetric & {
+  definitionVersion: typeof RECOVERY_NORTH_STAR_DEFINITION_V1.version;
+  metric: typeof RECOVERY_NORTH_STAR_DEFINITION_V1.key;
+  unit: typeof RECOVERY_NORTH_STAR_DEFINITION_V1.unit;
+  sampleSize: number;
+  p50Ms: number | null;
+  p90Ms: number | null;
 };
 
 /**
@@ -189,6 +212,7 @@ export type ValueEstimate = {
 /** Full UI-friendly rollup returned by `composeRecoveryMetrics`. */
 export type RecoveryMetrics = {
   successRate: RecoveryMetric;
+  verifiedRecovery: VerifiedRecoveryMetric;
   mttr: RecoveryMetric;
   p95Latency: RecoveryMetric;
   approvalsPending: RecoveryMetric;
@@ -207,9 +231,9 @@ export type RecoveryMetrics = {
   windowDays: number;
   /** Total terminal runs (succeeded + failed + cancelled) — useful as the denominator for downstream per-workflow rollups. */
   terminalRuns: number;
-  /** Per-day avg recovery time (last ≤14 days, oldest-first) driving the MTTR tile's trend sparkline. `[]` when nothing replayed. */
+  /** Per-day median verified-recovery time (last ≤14 days, oldest-first) driving the recovery tile's trend sparkline. */
   mttrTrend: MttrTrendPoint[];
-  /** Total automation downtime closed in the window (ms), summed from terminal recovery-impact events. A measured figure (not an estimate); bounded by the MTTR sample cap like `mttr` itself. */
+  /** Total automation downtime closed in the complete window (ms), summed from eligible terminal recovery-impact events. */
   downtimeEndedMs: number;
 };
 
@@ -294,6 +318,10 @@ export function composeRecoveryMetrics(
   assumptions: ValueAssumptions = DEFAULT_VALUE_ASSUMPTIONS,
 ): RecoveryMetrics {
   const successRate = computeSuccessRate(signals.runStatusCounts);
+  const verifiedRecovery = computeVerifiedRecovery(
+    signals.mttrDurations,
+    signals.verifiedRecovery,
+  );
   const mttr = computeMttr(signals.mttrDurations);
   const p95Latency = computeLatency(signals.p95LatencyMs);
   const approvalsPending = computeApprovals(signals.approvalsPending);
@@ -305,7 +333,7 @@ export function composeRecoveryMetrics(
   const recurrenceRate = computeRecurrenceRate(signals.recurrence);
   const valueEstimate = estimateValueSavings(
     signals.resolvedClusters.totalClusters,
-    mttr.value != null ? Math.round(mttr.value / 1000) : null,
+    verifiedRecovery.value != null ? Math.round(verifiedRecovery.value / 1000) : null,
     assumptions,
   );
   const terminalRuns =
@@ -315,6 +343,7 @@ export function composeRecoveryMetrics(
 
   return {
     successRate,
+    verifiedRecovery,
     mttr,
     p95Latency,
     approvalsPending,
@@ -328,7 +357,8 @@ export function composeRecoveryMetrics(
     windowDays,
     terminalRuns,
     mttrTrend: signals.mttrTrend ?? [],
-    downtimeEndedMs: signals.mttrDurations.reduce((sum, ms) => sum + ms, 0),
+    downtimeEndedMs: signals.verifiedRecovery?.downtimeEndedMs
+      ?? signals.mttrDurations.reduce((sum, ms) => sum + ms, 0),
   };
 }
 
@@ -496,6 +526,87 @@ function computeSuccessRate(counts: RunStatusCounts): RecoveryMetric {
  */
 function nearestRankIndex(length: number, fraction: number): number {
   return Math.min(Math.max(0, Math.ceil(length * fraction) - 1), length - 1);
+}
+
+/**
+ * PostgreSQL `percentile_cont` semantics over an ascending, non-empty sample.
+ * Rounding keeps the public contract in integer milliseconds while preserving
+ * the interpolated median instead of selecting one side of an even sample.
+ */
+function continuousPercentile(
+  sorted: readonly number[],
+  fraction: number,
+): number {
+  const rank = (sorted.length - 1) * fraction;
+  const lowerIndex = Math.floor(rank);
+  const upperIndex = Math.ceil(rank);
+  const lower = sorted[lowerIndex]!;
+  const upper = sorted[upperIndex]!;
+  return Math.round(lower + (upper - lower) * (rank - lowerIndex));
+}
+
+function computeVerifiedRecovery(
+  durations: number[],
+  aggregate?: VerifiedRecoveryStats,
+): VerifiedRecoveryMetric {
+  const hasCompleteAggregate = aggregate
+    && aggregate.sampleSize > 0
+    && aggregate.p50Ms != null
+    && aggregate.p90Ms != null;
+  if (!hasCompleteAggregate && durations.length === 0) {
+    return {
+      definitionVersion: RECOVERY_NORTH_STAR_DEFINITION_V1.version,
+      metric: RECOVERY_NORTH_STAR_DEFINITION_V1.key,
+      unit: RECOVERY_NORTH_STAR_DEFINITION_V1.unit,
+      sampleSize: 0,
+      p50Ms: null,
+      p90Ms: null,
+      value: null,
+      display: "—",
+      severity: "neutral",
+      rationale:
+        "No production workflow has reached a generation-bound verified recovery in this window.",
+      rationaleCode: "verified_recovery.empty",
+    };
+  }
+  const sorted = hasCompleteAggregate
+    ? null
+    : [...durations].sort((a, b) => a - b);
+  const p50Ms = hasCompleteAggregate
+    ? aggregate!.p50Ms!
+    : continuousPercentile(sorted!, 0.5);
+  const p90Ms = hasCompleteAggregate
+    ? aggregate!.p90Ms!
+    : continuousPercentile(sorted!, 0.9);
+  const sampleSize = hasCompleteAggregate
+    ? aggregate!.sampleSize
+    : sorted!.length;
+  const severity: MetricSeverity =
+    p50Ms <= MTTR_BANDS_MS.healthy
+      ? "healthy"
+      : p50Ms <= MTTR_BANDS_MS.warn
+        ? "warn"
+        : "unhealthy";
+  const p50 = formatDurationMs(p50Ms);
+  const p90 = formatDurationMs(p90Ms);
+  return {
+    definitionVersion: RECOVERY_NORTH_STAR_DEFINITION_V1.version,
+    metric: RECOVERY_NORTH_STAR_DEFINITION_V1.key,
+    unit: RECOVERY_NORTH_STAR_DEFINITION_V1.unit,
+    sampleSize,
+    p50Ms,
+    p90Ms,
+    value: p50Ms,
+    display: p50,
+    severity,
+    rationale: `Median ${p50} across ${sampleSize} verified ${sampleSize === 1 ? "recovery" : "recoveries"} · p90 ${p90}.`,
+    rationaleCode: "verified_recovery.summary",
+    rationaleMeta: {
+      count: sampleSize,
+      p50,
+      p90,
+    },
+  };
 }
 
 function computeMttr(durations: number[]): RecoveryMetric {

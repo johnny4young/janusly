@@ -21,7 +21,10 @@ import { type LlmClient } from "@janusly/ai";
 import { checkWorkflowReadiness } from "@janusly/engine/src/workflow-readiness";
 import { type Workflow } from "@janusly/shared";
 
-import { parseGeneratedWorkflow } from "./ai-generate-freejson";
+import {
+  missingPromptTemplateReferences,
+  parseGeneratedWorkflow,
+} from "./ai-generate-freejson";
 import { sanitizeAiWorkflow } from "./ai-runtime";
 
 /** Inclusive bounds for the configured candidate count (`ai.generationCandidates`). */
@@ -102,7 +105,10 @@ export async function generateWorkflowCandidates(
   for (const outcome of settled) {
     if (outcome.status !== "fulfilled") continue;
     const workflow = parseGeneratedWorkflow(outcome.value.text ?? "");
-    if (workflow) {
+    if (
+      workflow
+      && missingPromptTemplateReferences(prompt, workflow).length === 0
+    ) {
       candidates.push({ workflow, model: outcome.value.model, provider: outcome.value.provider });
     }
   }

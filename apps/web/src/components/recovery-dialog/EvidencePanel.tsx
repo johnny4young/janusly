@@ -10,7 +10,7 @@
 import { useMemo } from 'react'
 import { scrubEvidenceRow, type EvidenceRow } from '@janusly/shared/src/ai-evidence'
 import { useT } from '../../i18n'
-import { evidenceKindLabel } from './helpers'
+import { evidenceKindLabel } from './recovery-dialog-model'
 
 /**
  * Collapsible "Why this suggestion?" panel. Renders one chip per evidence

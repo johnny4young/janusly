@@ -11,10 +11,19 @@ import { useEffect, useRef } from 'react'
 import { Keyboard, X } from 'lucide-react'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { useT } from '../i18n'
+import {
+  canOpenWorkspaceDestination,
+  type WorkspaceDestination,
+} from '../workspace-locations'
 
 type Group = {
   title: string
-  items: Array<{ keys: string[]; description: string; permission?: string }>
+  items: Array<{
+    keys: string[]
+    description: string
+    permission?: string
+    destination?: WorkspaceDestination
+  }>
 }
 
 export function ShortcutsModal({ open, onClose, permissions }: {
@@ -40,14 +49,16 @@ export function ShortcutsModal({ open, onClose, permissions }: {
 
   if (!open) return null
 
-  const groups: Group[] = [
+  const groups = ([
     {
       title: t('shortcuts.group.global'),
       items: [
         { keys: ['⌘', 'K'], description: t('shortcuts.cmdk') },
         { keys: ['⌘', 'S'], description: t('shortcuts.save'), permission: 'workflows.write' },
-        { keys: ['⌘', '1'], description: t('shortcuts.home'), permission: 'recovery.read' },
-        { keys: ['⌘', '2'], description: t('shortcuts.studio'), permission: 'ai.write' },
+        { keys: ['⌘', '1'], description: t('shortcuts.home'), destination: 'home' },
+        { keys: ['⌘', '2'], description: t('shortcuts.workflows'), destination: 'workflows' },
+        { keys: ['⌘', '3'], description: t('shortcuts.activity'), destination: 'activity' },
+        { keys: ['⌘', '4'], description: t('shortcuts.settings'), destination: 'settings' },
         { keys: ['?'], description: t('shortcuts.helpThis') },
         { keys: ['⌃', '⇧', 'Q'], description: t('shortcuts.signOut') },
       ],
@@ -74,11 +85,13 @@ export function ShortcutsModal({ open, onClose, permissions }: {
         { keys: ['⌘/Ctrl', '↵'], description: t('shortcuts.recoveryResolve'), permission: 'recovery.write' },
       ],
     },
-  ].map((group) => ({
+  ] satisfies Group[]).map((group) => ({
     ...group,
     items: permissions === undefined
       ? group.items
-      : group.items.filter((item) => !item.permission || permissions.includes(item.permission)),
+      : group.items.filter((item) =>
+        (!item.permission || permissions.includes(item.permission))
+        && (!item.destination || canOpenWorkspaceDestination(item.destination, permissions))),
   })).filter((group) => group.items.length > 0)
 
   return (

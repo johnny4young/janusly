@@ -13,7 +13,7 @@
  * uniformly. Audit action distinguishes the two intents (`replay_lab.started`
  * vs `recovery.validation_started`).
  *
- * Used by `apps/api/src/routes/runs-routes.ts` (`POST /runs/replay-lab`)
+ * Used by `apps/api/src/routes/run-routes/replay-lab.ts` (`POST /runs/replay-lab`)
  * after `requireRole("editor")` and rate-limit gates.
  *
  * Invariants:
@@ -98,6 +98,7 @@ export async function replayRunAsValidation(
       workflowVersionId,
       status: "running",
       replayMode: "validation",
+      validationEvidenceLevel: "static",
       createdBy: createdBy ?? null,
       // Mirror the `startRun` shape: `inputJson` carries the workflow
       // snapshot AND the trigger input so `{{input.*}}` references
@@ -324,6 +325,7 @@ export async function replayRunAsValidationFork(
       workflowVersionId,
       status: "running",
       replayMode: "validation",
+      validationEvidenceLevel: "static",
       createdBy: createdBy ?? null,
       // Workflow stored RAW (like `startRun`) so the slim queue worker can
       // reload an executable DAG via `loadRunWorkflowRaw`.

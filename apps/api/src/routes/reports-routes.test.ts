@@ -224,6 +224,18 @@ const valueAssumptions = {
 
 const valueMetrics = {
   successRate: { value: 80, display: "80%", severity: "healthy", rationale: "8 of 10 runs succeeded." },
+  verifiedRecovery: {
+    value: 60_000,
+    display: "1m",
+    severity: "healthy",
+    rationale: "Median 1m across one verified recovery.",
+    definitionVersion: "1",
+    metric: "time_to_verified_recovery",
+    unit: "milliseconds",
+    sampleSize: 1,
+    p50Ms: 60_000,
+    p90Ms: 60_000,
+  },
   mttr: { value: 60_000, display: "1m", severity: "healthy", rationale: "Recovered quickly." },
   p95Latency: { value: 12_000, display: "12s", severity: "neutral", rationale: "Within bounds." },
   approvalsPending: { value: 1, display: "1", severity: "neutral", rationale: "One approval pending." },
@@ -589,6 +601,7 @@ describe("/reports/value-dashboard — export", () => {
     expect(headers["Content-Disposition"]).toContain("janusly-value-dashboard-org-1-");
     expect(headers["Content-Disposition"]).toContain("-30d.md");
     const markdown = resEndMock.mock.calls[0]![0] as string;
+    expect(markdown).toContain("**Median time to verified recovery**: 1m");
     expect(markdown).toContain("**SLA attainment**: 90.0% — 9 of 10 resolved within SLA.");
     expect(markdown).toContain("**Failures recovered**: 4");
     expect(markdown).toContain("**Downtime ended (measured)**: 12000 ms");

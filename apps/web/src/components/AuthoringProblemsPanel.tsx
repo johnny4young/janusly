@@ -32,12 +32,14 @@ export function AuthoringProblemsPanel({
   aiReviewIssues,
   workflowEdges,
   onValidate,
+  onOpenProblem,
 }: {
   validationIssues: ValidationIssue[]
   readiness: ReadinessResult | null
   aiReviewIssues: AiReviewIssue[]
   workflowEdges: WorkflowGraphEdge[]
   onValidate(): Promise<boolean>
+  onOpenProblem?(): void
 }) {
   const { t } = useT()
   const selectNode = useWorkflowStore((state) => state.selectNode)
@@ -55,12 +57,14 @@ export function AuthoringProblemsPanel({
       else requestAuthoringFocus({ kind: 'node', id: problem.nodeId })
       selectNode(problem.nodeId)
       setActiveTab('inspector')
+      onOpenProblem?.()
       return
     }
     if (problem.edgeId) {
       requestAuthoringFocus({ kind: 'edge', id: problem.edgeId })
       selectEdge(problem.edgeId)
       setActiveTab('inspector')
+      onOpenProblem?.()
     }
   }
 
@@ -106,11 +110,11 @@ export function AuthoringProblemsPanel({
               <>
                 <span className="we-authoring-problems__severity" data-severity={problem.severity}>
                   <AlertTriangle size={13} aria-hidden="true" />
-                  {t(`problems.severity.${problem.severity}` as never)}
+                  {t(`problems.severity.${problem.severity}`)}
                 </span>
                 <span className="we-authoring-problems__message">{localizeProblem(problem)}</span>
                 <span className="we-authoring-problems__meta">
-                  {problem.sources.map((source) => t(`problems.source.${source}` as never)).join(' · ')}
+                  {problem.sources.map((source) => t(`problems.source.${source}`)).join(' · ')}
                   {location ? ` · ${location}` : ''}
                 </span>
                 {locatable && <ExternalLink className="we-authoring-problems__open" size={13} aria-hidden="true" />}

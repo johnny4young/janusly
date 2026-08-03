@@ -14,16 +14,19 @@ import {
   isMemoryAllowed,
   getOrgConfigSnapshot,
   listCalibrations,
-  queryRecoveryFeedbackHealth,
   queryOperatorRecoveryCount,
+  queryRecoveryFeedbackHealth,
   queryRecoveryLedger,
   queryRecoveryValidation,
   recordRecoveryFeedback,
-  queryRecoveryMetricsSignals,
   queryRecoveryHeatmap,
+  getRecoveryCase,
+  listRecoveryCases,
+  listRecoveryCaseTransitions,
+  resolveRecoveryCaseAutonomyProfile,
 } from "@janusly/data";
 import { MIN_CALIBRATION_SAMPLES } from "@janusly/engine/src/confidence-calibration";
-import { composeRecoveryMetrics } from "@janusly/engine/src/recovery-metrics";
+import { recoverSemanticOutcome } from "@janusly/engine/src/semantic-recovery";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 
 import {
@@ -32,17 +35,21 @@ import {
   RecoveryFeedbackBodySchema,
 } from "../ai-patch-feedback";
 import { auditAction } from "../audit-helper";
-import { getCachedRecoveryMetrics, setCachedRecoveryMetrics } from "../metrics-cache";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { RATE_LIMIT_DEFAULTS_PER_MIN, RATE_LIMIT_WINDOW_MS } from "../constants";
 import { getDeadLetter } from "../dlq";
 import { asRecord, readJson, sendError, sendJson } from "../http";
+import { guardMcpWrite } from "../mcp-consent";
 import { enforceRateLimit } from "../rate-limit";
+import { queryRecoveryMetricsReadModel } from "../recovery-read-models";
 import type { Route } from "../routes";
 import {
   recoveryLedgerContract,
+  getRecoveryCaseContract,
+  listRecoveryCasesContract,
   recoveryMetricsContract,
   recoveryMyWinsContract,
+  recoverSemanticCaseContract,
 } from "../api-contracts";
 
 /** Extract the saved workflow identifier from a DLQ snapshot without trusting client input. */
@@ -51,7 +58,227 @@ function workflowIdFromSnapshot(workflowJson: unknown): string | null {
   return typeof id === "string" && id.length > 0 ? id : null;
 }
 
+type ParsedRecoveryCaseId =
+  | { ok: true; caseId: string }
+  | { ok: false; code: "not_found" | "invalid" };
+
+function parseRecoveryCaseId(
+  rawUrl: string | undefined,
+  pattern: RegExp,
+): ParsedRecoveryCaseId {
+  const pathname = new URL(rawUrl ?? "", "http://localhost").pathname;
+  const match = pathname.match(pattern);
+  if (!match?.[1]) return { ok: false, code: "not_found" };
+  try {
+    const caseId = decodeURIComponent(match[1]);
+    return caseId.length > 0
+      ? { ok: true, caseId }
+      : { ok: false, code: "not_found" };
+  } catch {
+    return { ok: false, code: "invalid" };
+  }
+}
+
 export const recoveryRoutes: Route[] = [
+  {
+    method: "GET",
+    match: (url) =>
+      url === "/recovery/cases" ||
+      url.startsWith("/recovery/cases?"),
+    role: "viewer",
+    permission: "recovery.read",
+    contract: listRecoveryCasesContract,
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const rawLimit = Number(url.searchParams.get("limit"));
+      const limit = Number.isInteger(rawLimit)
+        ? Math.min(Math.max(rawLimit, 1), 200)
+        : 100;
+      return sendJson(res, {
+        cases: await listRecoveryCases(auth.orgId, {
+          openOnly:
+            url.searchParams.get("openOnly") !== "false",
+          runId: url.searchParams.get("runId") ?? undefined,
+          limit,
+        }),
+      });
+    },
+  },
+
+  {
+    method: "GET",
+    match: (url) =>
+      /^\/recovery\/cases\/[^/?]+(\?|$)/.test(url) &&
+      !/^\/recovery\/cases\/[^/?]+\/resolve(\?|$)/.test(url),
+    role: "viewer",
+    permission: "recovery.read",
+    contract: getRecoveryCaseContract,
+    handler: async ({ req, res, auth }) => {
+      const parsedCaseId = parseRecoveryCaseId(
+        req.url,
+        /^\/recovery\/cases\/([^/]+)$/,
+      );
+      if (!parsedCaseId.ok) {
+        return sendError(
+          res,
+          parsedCaseId.code === "invalid"
+            ? "invalid_input"
+            : "recovery_case_not_found",
+          parsedCaseId.code === "invalid"
+            ? "Invalid recovery case id"
+            : "Recovery case not found",
+          parsedCaseId.code === "invalid" ? 400 : 404,
+        );
+      }
+      const recoveryCase = await getRecoveryCase(
+        auth.orgId,
+        parsedCaseId.caseId,
+      );
+      if (!recoveryCase) {
+        return sendError(
+          res,
+          "recovery_case_not_found",
+          "Recovery case not found",
+          404,
+        );
+      }
+      const [transitions, autonomy] = await Promise.all([
+        listRecoveryCaseTransitions(
+          auth.orgId,
+          parsedCaseId.caseId,
+        ),
+        resolveRecoveryCaseAutonomyProfile(
+          auth.orgId,
+          recoveryCase,
+        ),
+      ]);
+      return sendJson(res, {
+        case: recoveryCase,
+        transitions,
+        autonomy,
+      });
+    },
+  },
+
+  {
+    method: "POST",
+    match: (url) =>
+      /^\/recovery\/cases\/[^/?]+\/resolve(\?|$)/.test(url),
+    role: "editor",
+    permission: "recovery.write",
+    contract: recoverSemanticCaseContract,
+    handler: async ({ req, res, auth }) => {
+      const mcpGate = await guardMcpWrite(
+        auth,
+        "recovery.cases.resolve",
+      );
+      if (!mcpGate.ok) {
+        return sendJson(res, mcpGate.body, mcpGate.status);
+      }
+      const parsedCaseId = parseRecoveryCaseId(
+        req.url,
+        /^\/recovery\/cases\/([^/]+)\/resolve$/,
+      );
+      if (!parsedCaseId.ok) {
+        return sendError(
+          res,
+          parsedCaseId.code === "invalid"
+            ? "invalid_input"
+            : "recovery_case_not_found",
+          parsedCaseId.code === "invalid"
+            ? "Invalid recovery case id"
+            : "Recovery case not found",
+          parsedCaseId.code === "invalid" ? 400 : 404,
+        );
+      }
+      const parsed =
+        recoverSemanticCaseContract.request.body.safeParse(
+          await readJson(req, MAX_JSON_BODY_BYTES),
+        );
+      if (!parsed.success) {
+        return sendError(
+          res,
+          "invalid_input",
+          "Invalid semantic recovery decision",
+          400,
+          {
+            issueCount: parsed.error.issues.length,
+            firstIssue:
+              parsed.error.issues[0]?.message ?? "Invalid input",
+          },
+        );
+      }
+      const result = await recoverSemanticOutcome({
+        orgId: auth.orgId,
+        caseId: parsedCaseId.caseId,
+        actorId: auth.userId,
+        ...parsed.data,
+      });
+      if (result.status === "not_found") {
+        return sendError(
+          res,
+          "recovery_case_not_found",
+          "Recovery case not found",
+          404,
+        );
+      }
+      if (result.status === "conflict") {
+        return sendError(
+          res,
+          "recovery_case_conflict",
+          result.reason,
+          409,
+        );
+      }
+      if (result.status === "invalid_output") {
+        return sendError(
+          res,
+          "recovery_semantic_output_invalid",
+          "Replacement output does not satisfy the recovery contract",
+          422,
+          {
+            violationCount: result.violations.length,
+            firstViolation:
+              result.violations[0]?.message ??
+              "Semantic detector failed",
+          },
+        );
+      }
+      if (result.status === "policy_blocked") {
+        return sendError(
+          res,
+          "recovery_autonomy_policy_blocked",
+          "The effective recovery autonomy policy does not permit applying a replacement",
+          409,
+          {
+            level: result.profile.level ?? "unavailable",
+            detectorCount: result.profile.detectorIds.length,
+          },
+        );
+      }
+
+      await auditAction(auth, "recovery.semantic_resolved", {
+        targetType: "recovery_case",
+        targetId: parsedCaseId.caseId,
+        metadata: {
+          runId: result.runId,
+          sourceNodeId: result.sourceNodeId,
+          decision: result.decision,
+          resumed: result.resumed,
+          resolvedCaseIds: result.resolvedCaseIds,
+        },
+      });
+      return sendJson(res, {
+        ok: true,
+        runId: result.runId,
+        sourceNodeId: result.sourceNodeId,
+        decision: result.decision,
+        resumed: result.resumed,
+        resolvedCaseIds: result.resolvedCaseIds,
+      });
+    },
+  },
+
   // Org-level recovery metrics — composes run status counts, MTTR, p95
   // latency, approvals pending, replay rate, and cost-by-provider into
   // a single rollup the Operations dashboard renders.
@@ -63,22 +290,13 @@ export const recoveryRoutes: Route[] = [
       const url = new URL(req.url ?? "", "http://localhost");
       const rawWindow = Number.parseInt(url.searchParams.get("windowDays") ?? "", 10);
       const windowDays = Number.isFinite(rawWindow) ? Math.min(90, Math.max(1, rawWindow)) : 30;
-      // Short-TTL micro-cache: repeated polls (multiple operators, the web's
-      // platformVersion refetch) reuse the composed envelope instead of
-      // re-running the ~8-query signal fan-out. Invalidated on DLQ mutations.
-      const cached = getCachedRecoveryMetrics(auth.orgId, windowDays);
-      if (cached) return sendJson(res, cached);
-      // Read the value-dashboard assumptions in parallel with the
-      // metrics signals. The rollup is fully additive — clients that
-      // don't read `valueEstimate` / `clustersResolved` get the same
-      // shape as before plus the new fields, byte-for-byte back-compat.
-      const [signals, snapshot] = await Promise.all([
-        queryRecoveryMetricsSignals(auth.orgId, windowDays),
-        getOrgConfigSnapshot(auth.orgId),
-      ]);
-      const metrics = composeRecoveryMetrics(signals, windowDays, snapshot.value);
-      setCachedRecoveryMetrics(auth.orgId, windowDays, metrics);
-      return sendJson(res, metrics);
+      return sendJson(
+        res,
+        await queryRecoveryMetricsReadModel(
+          auth.orgId,
+          windowDays,
+        ),
+      );
     } },
 
   // Lifetime measured recovery value. This remains separate from the rolling

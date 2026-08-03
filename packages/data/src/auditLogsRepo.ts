@@ -157,7 +157,7 @@ export type DeleteExpiredAuditLogsResult = {
  * most `batchSize` rows; the loop exits when a batch returns fewer
  * than `batchSize` rows OR when `maxBatches` is reached. The inner
  * SELECT scans `created_at` (the existing
- * `audit_logs_org_created_idx` participates partially; planner uses an
+ * `audit_logs_org_created_id_idx` participates partially; planner uses an
  * Index Scan or Bitmap Index Scan once the table grows past the
  * "tiny" threshold).
  */

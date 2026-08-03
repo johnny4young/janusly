@@ -12,8 +12,8 @@
  *   exceeded, and memoizes the parsed body so contract validation and the
  *   route handler can share one stream read — callers shouldn't read the
  *   stream themselves.
- * - `corsHeaders` returns `null` for the Origin when the request came from
- *   a non-allowlisted origin; never `*` with credentials.
+ * - `corsHeaders` omits credentialed CORS headers unless the request Origin
+ *   is explicitly allowlisted.
  */
 
 import http from "http";
@@ -117,15 +117,18 @@ export function corsHeaders(res: http.ServerResponse) {
   const origin = response.requestOrigin;
   const allowedOrigins = getAllowedOrigins();
   const allowAny = allowedOrigins.includes("*");
-  const allowedOrigin = !origin
-    ? "*"
-    : allowAny || allowedOrigins.includes(origin)
-      ? origin
-      : "null";
+  const allowedOrigin = origin
+    && (allowAny || allowedOrigins.includes(origin))
+    ? origin
+    : undefined;
 
   return {
-    "Access-Control-Allow-Origin": allowedOrigin,
-    "Access-Control-Allow-Credentials": "true",
+    ...(allowedOrigin
+      ? {
+          "Access-Control-Allow-Origin": allowedOrigin,
+          "Access-Control-Allow-Credentials": "true",
+        }
+      : {}),
     "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization, x-org-id, x-user-id, x-janusly-csrf, x-request-id, Accept-Language, Last-Event-ID",
     "Access-Control-Expose-Headers": "Content-Disposition, X-Request-Id",

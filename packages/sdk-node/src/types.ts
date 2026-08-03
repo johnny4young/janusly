@@ -14,7 +14,7 @@
 
 /**
  * Closed enum of run lifecycle statuses. Source: `apps/api`'s `runs.status`
- * column (`packages/db/src/schema.ts`).
+ * column (`packages/db/src/schema/executions.ts`).
  */
 export type RunStatus =
   | "queued"
@@ -55,6 +55,8 @@ export type RunSummary = {
   workflowVersionId: string;
   /** Workflow display name when joined server-side. May be null for ad-hoc runs. */
   workflowName?: string | null;
+  /** True when the run currently has at least one node waiting for a person. */
+  hasWaitingNodes?: boolean;
   /**
    * Sandbox replay marker: `"validation"` for Replay Lab runs, `null` for
    * production runs. Documented in AGENTS.md under "Sandbox replay gate".

@@ -79,6 +79,7 @@ import {
   listWorkflowsContract,
   listWorkflowVersionsContract,
   rollbackWorkflowContract,
+  resumeWorkflowContract,
   saveWorkflowContract,
   validateWorkflowContract,
 } from "../api-contracts";
@@ -881,6 +882,7 @@ export const workflowsRoutes: Route[] = [
       return path.startsWith("/workflows/") && path.endsWith("/resume");
     },
     permission: "workflows.write",
+    contract: resumeWorkflowContract,
     handler: async ({ req, res, auth }) => {
       const resumeMcpGate = await guardMcpWrite(auth, "workflows.resume");
       if (!resumeMcpGate.ok) return sendJson(res, resumeMcpGate.body, resumeMcpGate.status);

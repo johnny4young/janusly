@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
 
@@ -47,7 +48,9 @@ async function signIn(page: Page, email: string) {
 
 async function openUserMenu(page: Page) {
   await page.getByRole('button', { name: 'Open user menu' }).click()
-  await expect(page.getByRole('menu')).toBeVisible()
+  await expect(
+    page.getByRole('dialog', { name: 'Account and workspace controls' }),
+  ).toBeVisible()
 }
 
 async function signOut(page: Page) {
@@ -82,7 +85,7 @@ test('real local identity covers onboarding, organizations, roles, and truthful 
   await expect(page.getByRole('button', { name: 'Open user menu' })).toBeVisible()
   await expect(page.locator('.bottom-status-bar')).toContainText(organizationName)
   await capture(page, 'identity-owner-workspace')
-  await page.getByRole('button', { name: 'Step setup', exact: true }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Build')
   await expect(page.getByTestId('canvas-empty')).toBeVisible()
   await expect(page.locator('.react-flow__node')).toHaveCount(0)
   await expect(page.locator('.top-bar-breadcrumb')).toContainText('Untitled Workflow')
@@ -108,9 +111,8 @@ test('real local identity covers onboarding, organizations, roles, and truthful 
   await page.getByRole('button', { name: /Accept$/ }).click()
   await expect(page.getByRole('button', { name: 'Open user menu' })).toBeVisible()
   await expect(page.locator('.bottom-status-bar')).toContainText(organizationName)
-  await expect(page.getByRole('button', { name: 'New', exact: true })).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeDisabled()
+  await page.getByRole('button', { name: 'Workflows', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'New workflow', exact: true }).first()).toBeDisabled()
   await openTeam(page)
   await expect(page.getByRole('button', { name: 'Invite', exact: true })).toBeDisabled()
   await expect(page.getByLabel(`Role for ${memberEmail}`)).toBeDisabled()
@@ -125,6 +127,10 @@ test('real local identity covers onboarding, organizations, roles, and truthful 
   await signOut(page)
 
   await signIn(page, memberEmail)
+  await page.getByRole('button', { name: 'Workflows', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'New workflow', exact: true }).first()).toBeEnabled()
+  await page.getByRole('button', { name: 'New workflow', exact: true }).first().click()
+  await page.getByRole('button', { name: /^Start blank\b/ }).click()
   await expect(page.getByRole('button', { name: 'New', exact: true })).toBeEnabled()
   await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
   await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeEnabled()
@@ -144,7 +150,8 @@ test('local identity and organization membership survive a complete stack restar
   await signIn(page, memberEmail)
   await expect(page.getByRole('button', { name: 'Open user menu' })).toBeVisible()
   await expect(page.locator('.bottom-status-bar')).toContainText(organizationName)
-  await expect(page.getByRole('button', { name: 'New', exact: true })).toBeEnabled()
+  await page.getByRole('button', { name: 'Workflows', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'New workflow', exact: true }).first()).toBeEnabled()
   await capture(page, 'identity-persisted-after-restart')
 
   expect(browserErrors).toEqual([])

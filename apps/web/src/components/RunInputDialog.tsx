@@ -26,9 +26,19 @@ import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, Play, Workflow, X } from 'lucide-react'
 import type { WorkflowInputSchemaShape } from '../types'
 import { useT } from '../i18n'
-import { t as runtimeT } from '../i18n/runtime'
+import {
+  getRunInputValue,
+  initialRunInputState,
+  inputDisplayLabel,
+  orderedRunInputEntries,
+  parseRunInputState,
+  setRunInputValue,
+  splitRunInputServerErrors,
+  type RunInputErrorMap,
+  type RunInputFormState,
+} from './run-input-model'
 
-type RunInputDialogProps = {
+export type RunInputDialogProps = {
   /** Declared `inputs` schema for the current workflow. Required because the dialog is only mounted when inputs exist. */
   inputs: WorkflowInputSchemaShape
   /** Optional schema-valid value used to prefill the form on mount. */
@@ -57,12 +67,6 @@ type RunInputDialogProps = {
   onCancel: () => void
 }
 
-/** Local form state — leaf values stored as strings so empty `""` is meaningful, JSON parsed at submit. */
-type FormState = Record<string, unknown>
-
-/** Field-path → user-visible error string. Computed per render from local + server errors. */
-type ErrorMap = Record<string, string>
-
 export function RunInputDialog({
   inputs,
   initialValue,
@@ -85,24 +89,19 @@ export function RunInputDialog({
   const resolvedSubmittingLabel = submittingLabel ?? (t('runInput.starting'))
   const resolvedCloseLabel = closeLabel ?? (t('runInput.close'))
   const isObjectRoot = inputs.type === 'object' && inputs.properties
-  const [state, setState] = useState<FormState>(() => initialFormState(inputs, initialValue))
-  const [localErrors, setLocalErrors] = useState<ErrorMap>({})
+  const [state, setState] = useState<RunInputFormState>(() => initialRunInputState(inputs, initialValue))
+  const [localErrors, setLocalErrors] = useState<RunInputErrorMap>({})
   const firstFieldRef = useRef<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null>(null)
   const dialogRef = useRef<HTMLDivElement | null>(null)
-  useDialogFocusTrap(dialogRef)
+  useDialogFocusTrap(dialogRef, { initialFocus: firstFieldRef })
 
   // Server errors are remapped per render (no caching) so re-fetching a
   // fresh `serverErrors` prop replaces the inline error text without a
   // dance through useEffect.
   const { mappedServerErrors, formLevelServerErrors } = useMemo(
-    () => splitServerErrors(serverErrors ?? [], inputs),
+    () => splitRunInputServerErrors(serverErrors ?? [], inputs),
     [serverErrors, inputs],
   )
-
-  // Focus the first field on mount so the user can start typing immediately.
-  useEffect(() => {
-    firstFieldRef.current?.focus()
-  }, [])
 
   // ESC closes — common modal expectation. Suppress while a submit is in
   // flight so the operator can't unmount the dialog before the POST
@@ -120,7 +119,7 @@ export function RunInputDialog({
   const handleSubmit = useCallback(
     async (event: React.FormEvent) => {
       event.preventDefault()
-      const { value, errors } = parseFormState(state, inputs)
+      const { value, errors } = parseRunInputState(state, inputs)
       if (Object.keys(errors).length > 0) {
         setLocalErrors(errors)
         return
@@ -143,7 +142,7 @@ export function RunInputDialog({
     })
   }, [])
 
-  const errors: ErrorMap = { ...mappedServerErrors, ...localErrors }
+  const errors: RunInputErrorMap = { ...mappedServerErrors, ...localErrors }
 
   // Cancel paths (backdrop click, close button, ESC) must no-op while a
   // submit is in flight. Without this guard the parent can unmount the
@@ -210,6 +209,7 @@ export function RunInputDialog({
             <PrimitiveOrArrayField
               schema={inputs}
               path=""
+              required={inputs.default === undefined}
               state={state}
               setState={setState}
               errors={errors}
@@ -242,9 +242,9 @@ export function RunInputDialog({
 type FieldProps = {
   schema: WorkflowInputSchemaShape
   path: string
-  state: FormState
-  setState: React.Dispatch<React.SetStateAction<FormState>>
-  errors: ErrorMap
+  state: RunInputFormState
+  setState: React.Dispatch<React.SetStateAction<RunInputFormState>>
+  errors: RunInputErrorMap
   /** Drop the local error for `path` from the dialog's error map — invoked when the field value changes. */
   clearLocalError: (path: string) => void
   firstFieldRef?: React.MutableRefObject<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null>
@@ -255,7 +255,7 @@ type FieldProps = {
 function ObjectFields({ schema, path, state, setState, errors, clearLocalError, firstFieldRef }: FieldProps) {
   if (schema.type !== 'object' || !schema.properties) return null
   const requiredSet = new Set(schema.required ?? [])
-  const entries = Object.entries(schema.properties)
+  const entries = orderedRunInputEntries(schema)
 
   return (
     <div className="run-input-grid">
@@ -272,7 +272,7 @@ function ObjectFields({ schema, path, state, setState, errors, clearLocalError, 
             errors={errors}
             clearLocalError={clearLocalError}
             required={requiredSet.has(key)}
-            label={key}
+            label={inputDisplayLabel(key)}
             firstFieldRef={isFirst ? firstFieldRef : undefined}
           />
         )
@@ -283,12 +283,15 @@ function ObjectFields({ schema, path, state, setState, errors, clearLocalError, 
 
 function FieldRouter(props: FieldProps) {
   const { schema } = props
+  const { t } = useT()
   if (schema.type === 'object' && schema.properties) {
     return (
       <fieldset className="run-input-fieldset">
-        <legend className="field-label">
-          {props.label ?? props.path}
-          {props.required && <span aria-hidden="true" className="run-input-required">*</span>}
+        <legend className="field-label run-input-field-label">
+          <span>{props.label ?? inputDisplayLabel(props.path)}</span>
+          <small data-required={props.required ? 'true' : 'false'} aria-hidden="true">
+            {props.required ? t('runInput.required') : t('runInput.optional')}
+          </small>
         </legend>
         {schema.description && <p className="helper-text">{schema.description}</p>}
         <ObjectFields
@@ -317,13 +320,14 @@ function PrimitiveOrArrayField({
   required,
   label,
 }: FieldProps) {
+  const { t } = useT()
   const inputId = `run-input-${path || 'root'}`
   const errorId = `${inputId}-error`
   const error = errors[path]
-  const displayLabel = label ?? (path || (runtimeT('runInput.fallbackLabel') as string))
-  const value = getAtPath(state, path)
+  const displayLabel = label ?? inputDisplayLabel(path)
+  const value = getRunInputValue(state, path)
   const setValue = (next: unknown) => {
-    setState((prev) => setAtPath(prev, path, next))
+    setState((prev) => setRunInputValue(prev, path, next))
     // Drop the field's stale local error so a value typed after a failed
     // submit clears the inline message immediately rather than waiting
     // for the next submit attempt.
@@ -331,9 +335,11 @@ function PrimitiveOrArrayField({
   }
 
   const labelNode = (
-    <label className="field-label" htmlFor={inputId}>
-      {displayLabel}
-      {required && <span aria-hidden="true" className="run-input-required">*</span>}
+    <label className="field-label run-input-field-label" htmlFor={inputId}>
+      <span>{displayLabel}</span>
+      <small data-required={required ? 'true' : 'false'} aria-hidden="true">
+        {required ? t('runInput.required') : t('runInput.optional')}
+      </small>
     </label>
   )
 
@@ -351,7 +357,7 @@ function PrimitiveOrArrayField({
         aria-describedby={error ? errorId : undefined}
         ref={firstFieldRef as React.MutableRefObject<HTMLSelectElement | null> | undefined}
       >
-        <option value="">{runtimeT('runInput.select') as string}</option>
+        <option value="">{t('runInput.select')}</option>
         {schema.enum.map((option) => {
           const text = typeof option === 'string' ? option : JSON.stringify(option)
           return (
@@ -392,19 +398,23 @@ function PrimitiveOrArrayField({
     )
   } else if (schema.type === 'boolean') {
     control = (
-      <label className="run-input-checkbox">
-        <input
-          id={inputId}
-          type="checkbox"
-          checked={value === true}
-          onChange={(event) => setValue(event.target.checked)}
-          aria-required={required || undefined}
-          aria-invalid={error ? true : undefined}
-          aria-describedby={error ? errorId : undefined}
-          ref={firstFieldRef as React.MutableRefObject<HTMLInputElement | null> | undefined}
-        />
-        <span>{runtimeT('runInput.enabled') as string}</span>
-      </label>
+      <select
+        id={inputId}
+        className="text-field"
+        value={value === true ? 'true' : value === false ? 'false' : ''}
+        onChange={(event) => {
+          const selected = event.target.value
+          setValue(selected === '' ? undefined : selected === 'true')
+        }}
+        aria-required={required || undefined}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? errorId : undefined}
+        ref={firstFieldRef as React.MutableRefObject<HTMLSelectElement | null> | undefined}
+      >
+        <option value="">{t('runInput.select')}</option>
+        <option value="true">{t('runInput.booleanTrue')}</option>
+        <option value="false">{t('runInput.booleanFalse')}</option>
+      </select>
     )
   } else if (schema.type === 'array') {
     control = (
@@ -451,273 +461,4 @@ function PrimitiveOrArrayField({
       )}
     </div>
   )
-}
-
-/* ----------------------------- Form state I/O ----------------------------- */
-
-function initialFormState(schema: WorkflowInputSchemaShape, initialValue?: unknown): FormState {
-  if (schema.type === 'object' && schema.properties) {
-    const obj: FormState = {}
-    const effectiveValue = initialValue !== undefined ? initialValue : schema.default
-    const supplied = isRecord(effectiveValue) ? effectiveValue : {}
-    for (const [key, child] of Object.entries(schema.properties)) {
-      obj[key] = initialLeafValue(child, supplied[key])
-    }
-    return obj
-  }
-  return { __root__: initialLeafValue(schema, initialValue) }
-}
-
-function initialLeafValue(schema: WorkflowInputSchemaShape, supplied?: unknown): unknown {
-  const effectiveValue = supplied !== undefined ? supplied : schema.default
-  if (effectiveValue !== undefined) {
-    if (schema.type === 'object' && schema.properties && isRecord(effectiveValue)) {
-      const nested: Record<string, unknown> = {}
-      for (const [key, child] of Object.entries(schema.properties)) {
-        nested[key] = initialLeafValue(child, effectiveValue[key])
-      }
-      return nested
-    }
-    return effectiveValue
-  }
-  // A declared default prefills the field, so the operator sees the value the
-  // run would use and only edits what they mean to override. The engine
-  // applies the same default server-side, so leaving it untouched is a no-op.
-  if (schema.type === 'boolean') return false
-  if (schema.type === 'object' && schema.properties) {
-    const nested: Record<string, unknown> = {}
-    for (const [key, child] of Object.entries(schema.properties)) {
-      nested[key] = initialLeafValue(child)
-    }
-    return nested
-  }
-  return ''
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function getAtPath(state: FormState, path: string): unknown {
-  if (!path) return state.__root__
-  const segments = path.split('.')
-  let cursor: unknown = state
-  for (const segment of segments) {
-    if (typeof cursor !== 'object' || cursor === null) return undefined
-    cursor = (cursor as Record<string, unknown>)[segment]
-  }
-  return cursor
-}
-
-function setAtPath(state: FormState, path: string, value: unknown): FormState {
-  if (!path) return { ...state, __root__: value }
-  const segments = path.split('.')
-  const next: FormState = { ...state }
-  let cursor: Record<string, unknown> = next
-  for (let i = 0; i < segments.length - 1; i++) {
-    const segment = segments[i]
-    const existing = cursor[segment]
-    cursor[segment] = typeof existing === 'object' && existing !== null && !Array.isArray(existing)
-      ? { ...(existing as Record<string, unknown>) }
-      : {}
-    cursor = cursor[segment] as Record<string, unknown>
-  }
-  cursor[segments[segments.length - 1]] = value
-  return next
-}
-
-function parseFormState(
-  state: FormState,
-  schema: WorkflowInputSchemaShape,
-): { value: unknown; errors: ErrorMap } {
-  if (schema.type === 'object' && schema.properties) {
-    const errors: ErrorMap = {}
-    const value = parseObject(schema, state, '', errors)
-    return { value, errors }
-  }
-  const errors: ErrorMap = {}
-  const value = parseLeaf(schema, state.__root__, '', errors, false)
-  return { value, errors }
-}
-
-function parseObject(
-  schema: WorkflowInputSchemaShape,
-  raw: unknown,
-  path: string,
-  errors: ErrorMap,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = {}
-  if (schema.type !== 'object' || !schema.properties) return out
-  const requiredSet = new Set(schema.required ?? [])
-  const obj = (raw && typeof raw === 'object' && !Array.isArray(raw))
-    ? (raw as Record<string, unknown>)
-    : {}
-  for (const [key, child] of Object.entries(schema.properties)) {
-    const childPath = path ? `${path}.${key}` : key
-    const isRequired = requiredSet.has(key)
-    if (child.type === 'object' && child.properties) {
-      const nested = parseObject(child, obj[key], childPath, errors)
-      // A required nested object whose shape declares its own required
-      // keys is already caught by the recursion below — but a required
-      // nested object that we end up with as `{}` (because the parent
-      // never populated it and the child has no required keys of its
-      // own) still satisfies the parent's "required" intent only when
-      // the operator typed at least one value. Guard the empty-object
-      // case explicitly so `required: ['user']` actually means it.
-      if (isRequired && Object.keys(nested).filter((k) => nested[k] !== undefined).length === 0) {
-        errors[childPath] = runtimeT('runInput.error.required', { label: prettyLabel(childPath) }) as string
-      }
-      out[key] = nested
-      continue
-    }
-    out[key] = parseLeaf(child, obj[key], childPath, errors, isRequired)
-  }
-  return out
-}
-
-/**
- * Coerce one primitive/array leaf from form state. `required` decides
- * whether an empty value yields an error or just falls through as
- * undefined (engine still validates regardless).
- */
-function parseLeaf(
-  schema: WorkflowInputSchemaShape,
-  raw: unknown,
-  path: string,
-  errors: ErrorMap,
-  required: boolean,
-): unknown {
-  const requiredError = (p: string) => runtimeT('runInput.error.required', { label: prettyLabel(p) }) as string
-  if (schema.type === 'string') {
-    const text = typeof raw === 'string' ? raw : ''
-    if (!text) {
-      if (required) errors[path] = requiredError(path)
-      return undefined
-    }
-    return text
-  }
-  if (schema.type === 'number') {
-    if (raw === '' || raw === undefined || raw === null) {
-      if (required) errors[path] = requiredError(path)
-      return undefined
-    }
-    const num = typeof raw === 'number' ? raw : Number(raw)
-    if (!Number.isFinite(num)) {
-      errors[path] = runtimeT('runInput.error.notNumber', { label: prettyLabel(path) }) as string
-      return undefined
-    }
-    return num
-  }
-  if (schema.type === 'boolean') {
-    return raw === true
-  }
-  if (schema.type === 'array') {
-    if (typeof raw === 'string') {
-      const trimmed = raw.trim()
-      if (!trimmed) {
-        if (required) errors[path] = requiredError(path)
-        return undefined
-      }
-      try {
-        const parsed = JSON.parse(trimmed)
-        if (!Array.isArray(parsed)) {
-          errors[path] = runtimeT('runInput.error.notArray', { label: prettyLabel(path) }) as string
-          return undefined
-        }
-        return parsed
-      } catch {
-        errors[path] = runtimeT('runInput.error.notJson', { label: prettyLabel(path) }) as string
-        return undefined
-      }
-    }
-    if (Array.isArray(raw)) return raw
-    if (required) errors[path] = requiredError(path)
-    return undefined
-  }
-  // Unknown / fallback object literal
-  if (typeof raw === 'string') {
-    const trimmed = raw.trim()
-    if (!trimmed) {
-      if (required) errors[path] = requiredError(path)
-      return undefined
-    }
-    try {
-      return JSON.parse(trimmed)
-    } catch {
-      errors[path] = runtimeT('runInput.error.notJson', { label: prettyLabel(path) }) as string
-      return undefined
-    }
-  }
-  return raw
-}
-
-/* ----------------------------- Server errors ----------------------------- */
-
-function splitServerErrors(
-  raw: string[],
-  schema: WorkflowInputSchemaShape,
-): { mappedServerErrors: ErrorMap; formLevelServerErrors: string[] } {
-  const mapped: ErrorMap = {}
-  const formLevel: string[] = []
-  const knownPaths = collectFieldPaths(schema, '')
-
-  for (const message of raw) {
-    if (!message.startsWith('$.') && message !== '$') {
-      formLevel.push(message)
-      continue
-    }
-    const stripped = message.replace(/^\$\.?/, '')
-    // The error message format is `<path> <reason>`. The path portion is
-    // the leading whitespace-less prefix; everything after the first space
-    // is the human-readable reason.
-    const firstSpace = stripped.indexOf(' ')
-    const pathSegment = firstSpace === -1 ? stripped : stripped.slice(0, firstSpace)
-    const reason = firstSpace === -1 ? stripped : stripped.slice(firstSpace + 1)
-    const fieldPath = matchKnownPath(pathSegment, knownPaths) ?? pathSegment
-    if (!fieldPath) {
-      // Bare `$` / `$.` root errors come through with empty pathSegment
-      // and reason — surface the original message verbatim so the banner
-      // never renders a blank line.
-      const fallback = reason || stripped || message
-      if (fallback) formLevel.push(fallback)
-      continue
-    }
-    const display = reason
-      ? (runtimeT('runInput.error.serverPrefix', { label: prettyLabel(fieldPath), reason }) as string)
-      : stripped
-    mapped[fieldPath] = display
-  }
-
-  return { mappedServerErrors: mapped, formLevelServerErrors: formLevel }
-}
-
-function collectFieldPaths(schema: WorkflowInputSchemaShape, prefix: string): string[] {
-  if (schema.type === 'object' && schema.properties) {
-    return Object.entries(schema.properties).flatMap(([key, child]) => {
-      const childPath = prefix ? `${prefix}.${key}` : key
-      if (child.type === 'object' && child.properties) {
-        return [childPath, ...collectFieldPaths(child, childPath)]
-      }
-      return [childPath]
-    })
-  }
-  return ['']
-}
-
-function matchKnownPath(segment: string, knownPaths: string[]): string | undefined {
-  if (knownPaths.includes(segment)) return segment
-  // Longest-prefix match — handles the `$.user.email` → `user.email` case
-  // when a field's name has a dot in it (rare, but cheap to support).
-  let best: string | undefined
-  for (const candidate of knownPaths) {
-    if (segment === candidate || segment.startsWith(`${candidate}.`) || segment.startsWith(`${candidate}[`)) {
-      if (!best || candidate.length > best.length) best = candidate
-    }
-  }
-  return best
-}
-
-function prettyLabel(path: string): string {
-  if (!path) return runtimeT('runInput.fallbackLabel') as string
-  return path
 }

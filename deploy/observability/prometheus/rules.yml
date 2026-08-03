@@ -19,6 +19,50 @@ groups:
           summary: Janusly worker metrics are unavailable
           description: Alloy cannot scrape the worker Prometheus endpoint for two minutes.
 
+      - alert: JanuslyGoMetricsMissing
+        expr: max_over_time(janusly_go_work_plane_active{job="janusly-go"}[24h]) >= 0 and up{job="janusly-go"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Janusly Go candidate metrics are unavailable
+          description: A previously observed Go candidate has been unreachable for two minutes.
+
+      - alert: JanuslyMutationOwnershipOverlap
+        expr: max(janusly_go_work_plane_active{job="janusly-go"}) * (max(workflow_queue_active_jobs{job="janusly-worker"}) + max(maintenance_queue_active_jobs{job="janusly-worker"})) > 0
+        for: 15s
+        labels:
+          severity: critical
+        annotations:
+          summary: Node and Go are both executing mutation work
+          description: Go owns the work plane while the Node worker still reports active workflow or maintenance jobs.
+
+      - alert: JanuslyNodeBacklogAfterGoActivation
+        expr: max(janusly_go_work_plane_active{job="janusly-go"}) * (max(workflow_queue_waiting_jobs{job="janusly-worker"}) + max(maintenance_queue_waiting_jobs{job="janusly-worker"})) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Node queues retained work after Go activation
+          description: Go owns the work plane but the legacy BullMQ lanes still contain waiting work.
+
+      - alert: JanuslyGoQueueStalled
+        expr: max(janusly_go_queue_depth{job="janusly-go",state="queued"}) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Go durable work has remained queued
+          description: At least one eligible Go run node has remained queued for five minutes.
+
+      - alert: JanuslyGoTerminalFailures
+        expr: sum(increase(janusly_go_runs_terminal_total{job="janusly-go",status=~"failed|cancelled"}[5m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Go terminal run failures were observed
+          description: The Go candidate recorded one or more failed or cancelled runs in five minutes.
+
       - alert: JanuslyWorkflowQueueWaiting
         expr: max(workflow_queue_waiting_jobs) > 0
         for: 5m

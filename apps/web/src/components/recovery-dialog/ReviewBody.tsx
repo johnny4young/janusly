@@ -11,16 +11,16 @@
 
 import React from 'react'
 import { AlertCircle } from 'lucide-react'
+import type { RecoverySandboxStatus } from '@janusly/shared/src/recovery-passport'
 import { useT } from '../../i18n'
 import type { WorkflowDefinition } from '../../types'
 import { WorkflowDiffView } from '../WorkflowDiffView'
-import type { DeadLetter } from '../DeadLettersPanel'
+import type { DeadLetter } from '../dead-letter-types'
 import { EvidencePanel } from './EvidencePanel'
 import { AlternativeHypothesesPanel } from './AlternativeHypothesesPanel'
 import { LearningHealthBadge } from './LearningHealthBadge'
 import { RecoveryPassportCard } from './RecoveryPassportCard'
-import type { RecoverySandboxStatus } from './recovery-passport'
-import { approachLabelDisplay, resolveConfidenceDisplay, suggestionTabKey } from './helpers'
+import { approachLabelDisplay, resolveConfidenceDisplay, suggestionTabKey } from './recovery-dialog-model'
 import type { PatchSuggestion, SuggestionTab } from './types'
 
 export function ReviewBody({

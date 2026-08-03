@@ -20,7 +20,7 @@ import { useT } from './i18n'
  * full-screen confirms) without forcing each caller to portal into the
  * document body.
  */
-export function Layout({ sidebar, main, panel, header, overlay, statusBar }: {
+export function Layout({ sidebar, main, panel, header, overlay, statusBar, authoring = false }: {
   sidebar: React.ReactNode
   main: React.ReactNode
   /** When `null` / `undefined` / `false`, the right panel is hidden and
@@ -33,6 +33,8 @@ export function Layout({ sidebar, main, panel, header, overlay, statusBar }: {
   /** Optional 32px footer rendered under the workspace — the operator
    *  status bar (queue / DLQ / active runs / build / shortcuts). */
   statusBar?: React.ReactNode
+  /** Gives the canvas a wider center column than list/detail workspaces. */
+  authoring?: boolean
 }) {
   const { t } = useT()
   const hasPanel = panel !== null && panel !== undefined && panel !== false
@@ -96,7 +98,11 @@ export function Layout({ sidebar, main, panel, header, overlay, statusBar }: {
         />
       )}
 
-      <div className={hasPanel ? "workspace-grid" : "workspace-grid workspace-grid--no-panel"}>
+      <div className={[
+        'workspace-grid',
+        !hasPanel && 'workspace-grid--no-panel',
+        authoring && 'workspace-grid--authoring',
+      ].filter(Boolean).join(' ')}>
         <div
           ref={mobileNavRef}
           id="workspace-sidebar"

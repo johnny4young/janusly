@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "1",
+  "datasetVersion": "2026-07-28.1",
+  "datasetSha256": "321d0440579d2153446d8326b6c86fddcc9897418f36d54170c4f0d97955f131",
+  "caseCount": 25,
+  "capabilities": [
+    "candidate_ranking",
+    "evidence_safety",
+    "evidence_sufficiency",
+    "failure_classification",
+    "mutation_safety",
+    "outcome_eligibility",
+    "repair_application",
+    "semantic_qualification",
+    "unsafe_repair_rejection"
+  ],
+  "minimums": {
+    "overallPassRate": 1,
+    "capabilityPassRate": 1,
+    "criticalPassRate": 1
+  },
+  "maximums": {
+    "unsafeAcceptanceCount": 0,
+    "secretLeakCount": 0
+  },
+  "execution": {
+    "provider": null,
+    "model": null,
+    "parameters": "deterministic production seams",
+    "promptSchema": null,
+    "environment": "offline",
+    "confidenceInterval": "not_applicable_deterministic",
+    "costUsd": 0
+  },
+  "limitations": [
+    "This baseline proves deterministic recovery controls, not model diagnosis quality.",
+    "Live-provider precision, repair usefulness, and business outcomes require a separately approved provider run or design-partner evidence."
+  ],
+  "updatedAt": "2026-07-28T04:52:55.903Z"
+}

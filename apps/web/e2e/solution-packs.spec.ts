@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 
@@ -64,14 +65,20 @@ test('Solution Packs install, sample-run, and recovery-drill flows work from the
   await page.goto('/')
   await expect(page.getByText('dev-user')).toBeVisible()
 
-  await page.getByRole('button', { name: 'Packs', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Solution Packs', exact: true })).toBeVisible()
+  await openWorkspaceSection(page, 'Workflows', 'Templates')
+  await expect(page.getByRole('heading', { name: 'Templates', exact: true })).toBeVisible()
 
-  const incidentPack = page.locator('.list-card').filter({ hasText: 'Incident triage' }).first()
+  const incidentPack = page.getByTestId('solution-pack-incident-triage')
   await expect(incidentPack).toBeVisible()
   await expect(incidentPack.getByLabel('ops_github missing (github_token)')).toBeVisible()
   await expect(incidentPack.getByLabel('ops_slack missing (slack_webhook)')).toBeVisible()
   const drillSelect = incidentPack.getByLabel('Failure scenario')
+  await drillSelect.selectOption('github_secret_unbound')
+  await expect(incidentPack.getByText('Credential unavailable', { exact: true })).toBeVisible()
+  await expect(incidentPack.getByText('Real runtime path')).toBeVisible()
+  await expect(incidentPack.getByText(/real worker and terminal-failure boundary/)).toBeVisible()
+  await captureEvidence(incidentPack, 'solution-packs-en-runtime-failure-drill')
+
   await drillSelect.selectOption('worker_interrupted_during_page')
   await expect(incidentPack.getByText('Worker interrupted', { exact: true })).toBeVisible()
   await expect(incidentPack.getByText('Real reaper path')).toBeVisible()
@@ -80,17 +87,18 @@ test('Solution Packs install, sample-run, and recovery-drill flows work from the
 
   await incidentPack.getByRole('button', { name: 'Install', exact: true }).click()
   await expect(page.getByText(/Pack installed/)).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Step setup', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Build', exact: true })).toBeVisible()
   await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Incident triage')
   await expect(page.locator('.workflow-node').filter({ hasText: 'Run a tool' })).toHaveCount(2)
 
-  await page.getByRole('button', { name: 'Packs', exact: true }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Templates')
   const sampleResponsePromise = page.waitForResponse(response => response.url().endsWith('/solution-packs/incident-triage/sample-run'))
   await incidentPack.getByRole('button', { name: 'Preview sample run', exact: true }).click()
   const sampleResponse = await sampleResponsePromise
   expect(sampleResponse.status()).toBe(200)
   const sampleBody = await sampleResponse.json() as { runId: string }
   await expect(page.getByText('Sample run started in the sandbox.')).toBeVisible()
+  await openWorkspaceSection(page, 'Activity', 'Runs')
   await expect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible()
   await expect(page.getByTestId('run-overview').locator('.status-pill[data-status]')).toBeVisible({ timeout: 30_000 })
   const sampleRun = await pollRun(request, orgId, sampleBody.runId)
@@ -100,7 +108,7 @@ test('Solution Packs install, sample-run, and recovery-drill flows work from the
     expect.objectContaining({ nodeId: 'page_oncall', status: 'skipped' }),
   ]))
 
-  await page.getByRole('button', { name: 'Packs', exact: true }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Templates')
   await incidentPack.getByLabel('Failure scenario').selectOption('worker_interrupted_during_page')
   const requestPromise = page.waitForRequest((request) => request.url().endsWith('/solution-packs/incident-triage/inject-failure'))
   const responsePromise = page.waitForResponse((response) => response.url().endsWith('/solution-packs/incident-triage/inject-failure'))
@@ -118,18 +126,14 @@ test('Solution Packs install, sample-run, and recovery-drill flows work from the
   expect(drillBody.evidence.thresholdMinutes).toBeLessThanOrEqual(1440)
   expect(drillBody.evidence.simulatedStallMs).toBe(drillBody.evidence.thresholdMinutes * 60_000 + 1_000)
   await expect(page.getByText('Recovery drill created')).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible()
-  const focusedFailure = page.locator('[data-testid^="dlq-row-"][data-selected="true"]').filter({ hasText: 'page_oncall' }).first()
-  await expect(focusedFailure).toBeVisible({ timeout: 30_000 })
-  await expect(focusedFailure).toBeFocused()
-  const targetInMainViewport = await focusedFailure.evaluate((node) => {
-    const main = node.closest('.workspace-main')
-    if (!main) return false
-    const target = node.getBoundingClientRect()
-    const viewport = main.getBoundingClientRect()
-    return target.top >= viewport.top - 2 && target.bottom <= viewport.bottom + 2
-  })
-  expect(targetInMainViewport).toBe(true)
+  const activityRecovery = page.getByTestId('activity-recovery-detail')
+  await expect(activityRecovery).toBeVisible()
+  await expect(activityRecovery).toContainText('Run a tool')
+  await expect(activityRecovery).toContainText('worker_stalled')
+  await openWorkspaceSection(page, 'Activity', 'Recover')
+  await expect(page.getByRole('heading', { name: 'Recover', exact: true })).toBeVisible()
+  const selectedFailure = page.locator('[data-testid^="dlq-row-"][data-selected="true"]').filter({ hasText: 'page_oncall' }).first()
+  await expect(selectedFailure).toBeVisible({ timeout: 30_000 })
   const drillContext = page.getByTestId('dlq-recovery-drill-context')
   await expect(drillContext).toContainText('Recovery drill')
   await expect(drillContext).toContainText('Real reaper path')
@@ -146,29 +150,36 @@ test('Spanish recovery drills remain usable on mobile without horizontal overflo
   await prepareSession(page, 'es')
   await page.goto('/')
   await page.getByRole('button', { name: 'Navegación' }).click()
-  await page.locator('#workspace-sidebar').getByRole('button', { name: 'Packs', exact: true }).click()
+  await openWorkspaceSection(page, 'Flujos', 'Plantillas')
 
-  await expect(page.getByRole('heading', { name: 'Solution Packs', exact: true })).toBeVisible()
-  const incidentPack = page.locator('.list-card').filter({ hasText: 'Triage de incidentes' }).first()
+  await expect(page.getByRole('heading', { name: 'Plantillas', exact: true })).toBeVisible()
+  const incidentPack = page.getByTestId('solution-pack-incident-triage')
   await expect(incidentPack).toBeVisible()
-  await incidentPack.getByLabel('Escenario de fallo').selectOption('github_contract_drift')
-  await expect(incidentPack.getByText('Cambio de contrato')).toBeVisible()
-  await expect(incidentPack.getByText('Escenario determinista')).toBeVisible()
-  await expect(incidentPack.getByText(/sin la URL que requiere el siguiente paso/)).toBeVisible()
-  await captureEvidence(incidentPack, 'solution-packs-es-contract-drift-mobile')
+  await incidentPack.getByLabel('Escenario de fallo').selectOption('github_secret_unbound')
+  await expect(incidentPack.getByText('Credencial no disponible')).toBeVisible()
+  await expect(incidentPack.getByText('Ruta real del runtime')).toBeVisible()
+  await expect(incidentPack.getByText(/worker real y el límite de fallo terminal/)).toBeVisible()
+  await captureEvidence(incidentPack, 'solution-packs-es-runtime-failure-mobile')
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   expect(overflow).toBeLessThanOrEqual(2)
 
   await incidentPack.getByRole('button', { name: 'Iniciar ejercicio de recuperación', exact: true }).click()
   await expect(page.getByText('Ejercicio de recuperación creado')).toBeVisible()
+  await openWorkspaceSection(page, 'Actividad', 'Recuperar')
   const focusedFailure = page.locator('[data-testid^="dlq-row-"][data-selected="true"]').filter({ hasText: 'open_issue' }).first()
   await expect(focusedFailure).toBeVisible({ timeout: 30_000 })
+  const focusedIdentity = focusedFailure.locator('.we-dlq-row__identity')
+  await expect(focusedIdentity.getByText('open_issue', { exact: true })).toBeVisible()
+  expect((await focusedIdentity.boundingBox())?.width ?? 0).toBeGreaterThan(100)
   const drillContext = page.getByTestId('dlq-recovery-drill-context')
   await expect(drillContext).toContainText('Ejercicio de recuperación')
-  await expect(drillContext).toContainText('Escenario determinista')
   await dismissToasts(page)
-  await captureEvidence(page.getByTestId('recovery-queue'), 'solution-packs-es-contract-drift-recovery-queue')
+  await expect(drillContext).toContainText('Ruta real del runtime')
+  const recoveryOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  expect(recoveryOverflow).toBeLessThanOrEqual(2)
+  await captureEvidence(focusedFailure, 'solution-packs-es-runtime-failure-row')
+  await captureEvidence(drillContext, 'solution-packs-es-runtime-failure-context')
 
   expect(browserErrors).toEqual([])
 })

@@ -107,12 +107,16 @@ describe("POST /ai/suggest-improvement — auth gate", () => {
 });
 
 describe("POST /ai/suggest-improvement — AI mode", () => {
-  it("keeps operator-authored labels, layout, and template policy out of the prompt and restores them", async () => {
+  it("keeps operator-authored labels, layout, template, and recovery policies out of the prompt and restores them", async () => {
+    const recovery = {
+      circuitBreaker: { consecutiveFailures: 5 },
+    } as const;
     readJsonMock.mockResolvedValue({ workflow: {
       ...VALID_WORKFLOW,
       nodes: [{ ...VALID_WORKFLOW.nodes[0], label: "Billing API" }],
       ui: { positions: { n1: { x: 320, y: 180 } } },
       templatePolicy: "strict",
+      recovery,
     } } as never);
     suggestMock.mockResolvedValue({
       mode: "ai",
@@ -120,6 +124,7 @@ describe("POST /ai/suggest-improvement — AI mode", () => {
         patchedWorkflowJson: JSON.stringify({
           ...VALID_WORKFLOW,
           templatePolicy: "lenient",
+          recovery: { circuitBreaker: false },
           nodes: [{ ...VALID_WORKFLOW.nodes[0], config: { url: "https://example.com", timeoutMs: 30_000 } }],
         }),
         rationale: "bound the request",
@@ -133,14 +138,21 @@ describe("POST /ai/suggest-improvement — AI mode", () => {
     const res = await callImprove();
 
     const helperInput = suggestMock.mock.calls[0]?.[0] as {
-      workflow: { ui?: unknown; templatePolicy?: string; nodes: Array<{ label?: string }> };
+      workflow: {
+        ui?: unknown;
+        templatePolicy?: string;
+        recovery?: unknown;
+        nodes: Array<{ label?: string }>;
+      };
     } | undefined;
     expect(helperInput?.workflow.ui).toBeUndefined();
     expect(helperInput?.workflow.templatePolicy).toBeUndefined();
+    expect(helperInput?.workflow.recovery).toBeUndefined();
     expect(helperInput?.workflow.nodes[0]?.label).toBeUndefined();
     expect(res.payload.suggestedWorkflow.nodes[0].label).toBe("Billing API");
     expect(res.payload.suggestedWorkflow.ui).toEqual({ positions: { n1: { x: 320, y: 180 } } });
     expect(res.payload.suggestedWorkflow.templatePolicy).toBe("strict");
+    expect(res.payload.suggestedWorkflow.recovery).toEqual(recovery);
   });
 
   it("validates each suggestion and returns mode:ai + audits mode:ai", async () => {
@@ -187,6 +199,90 @@ describe("POST /ai/suggest-improvement — AI mode", () => {
     const res = await callImprove();
 
     expect(res.payload.suggestedWorkflow).not.toHaveProperty("templatePolicy");
+  });
+
+  it("does not let a full-workflow suggestion invent recovery policy", async () => {
+    suggestMock.mockResolvedValue({
+      mode: "ai",
+      suggestions: [{
+        patchedWorkflowJson: JSON.stringify({
+          ...VALID_WORKFLOW,
+          recovery: { circuitBreaker: false },
+        }),
+        rationale: "disable failure containment",
+        approachLabel: "resilience",
+        confidence: 75,
+      }],
+      model: "claude-haiku-4-5-20251001",
+      provider: "anthropic",
+    } as never);
+
+    const res = await callImprove();
+
+    expect(res.payload.suggestedWorkflow).not.toHaveProperty("recovery");
+  });
+
+  it("rejects a suggestion that makes the restored recovery policy invalid", async () => {
+    const recovery = {
+      contract: {
+        version: "1",
+        failure: {
+          technical: { terminalNodeFailure: true, stalledNode: true },
+          semantic: { mode: "disabled" },
+        },
+        evidence: {
+          required: [
+            "failure_snapshot",
+            "audit_trail",
+            "terminal_outcome",
+          ],
+        },
+        effects: [{
+          nodeId: "n1",
+          kind: "external_write",
+          idempotency: "required",
+          receipt: "runtime",
+        }],
+        repairs: { allowed: ["retry"] },
+        validation: { minimumEvidenceLevel: "static" },
+        approval: {
+          productionMutation: "required",
+          permission: "recovery.write",
+        },
+        autonomyLevel: 1,
+        verification: {
+          kind: "generation_bound_terminal_success",
+        },
+        recurrence: { windowDays: 7 },
+      },
+    } as const;
+    readJsonMock.mockResolvedValue({
+      workflow: { ...VALID_WORKFLOW, recovery },
+    } as never);
+    suggestMock.mockResolvedValue({
+      mode: "ai",
+      suggestions: [{
+        patchedWorkflowJson: JSON.stringify({
+          ...VALID_WORKFLOW,
+          nodes: [{
+            id: "replacement",
+            type: "http",
+            config: { url: "https://example.com" },
+          }],
+        }),
+        rationale: "replace the effect node",
+        approachLabel: "resilience",
+        confidence: 75,
+      }],
+      model: "claude-haiku-4-5-20251001",
+      provider: "anthropic",
+    } as never);
+
+    const res = await callImprove();
+
+    expect(res.payload.mode).toBe("fallback");
+    expect(res.payload.aiError).toBe("no_valid_suggestions");
+    expect(res.payload.suggestedWorkflow.recovery).toEqual(recovery);
   });
 
   it("degrades to fallback when no AI suggestion survives validation", async () => {

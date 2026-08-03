@@ -1,9 +1,10 @@
 # Janusly
 
 > **The operational backbone for AI workflows.**
-> Janusly is being built to make AI workflows feel less like fragile demos and more like production infrastructure: observable, recoverable, reviewable, auditable.
+>
+> Janusly is an agent-native workflow orchestration and recovery platform. Build, run, observe, and recover durable AI automations—with human approvals, audit trails, and deterministic safeguards.
 
-**Purpose:** make AI workflows dependable enough for the boring, critical work companies actually run every day.
+**Purpose:** turn fragile AI automations into dependable operations for the boring, critical work companies actually run every day.
 
 ## Why Janusly exists
 
@@ -11,9 +12,11 @@ Every company is racing to put AI into production. Most discover the same hard t
 
 Workflow tools were built for the **integration era** — drag-and-drop connectors between APIs that already worked. They were not built for the **AI era**, where the hardest question is not "how do I wire these systems together?" but "what happens when the model returns nonsense, the secret expires, or a step that worked yesterday fails today?"
 
-**Janusly is being built to answer that question.** The vision is a control plane for AI workflows where every step leaves evidence, every failure creates a recovery path, every fix can be reviewed before rollout, and every workflow can evolve without losing human control. Running an AI workflow should become as operationally boring as running a database: instrumented, backed up, recoverable, auditable, and trusted enough for work that matters.
+**Janusly answers that question by treating recovery as a first-class runtime concern.**
 
-The number we hold ourselves to is **Mean Time To Recovery for failed automations**: from hours to minutes, from minutes to seconds.
+It provides a control plane where humans and AI agents can operate workflows without surrendering deterministic safeguards: every step leaves evidence, every failure creates a recovery path, every fix can be reviewed before rollout, and every workflow can evolve without losing human control. Running an AI workflow should become as operationally boring as running a database: instrumented, backed up, recoverable, auditable, and trusted enough for work that matters.
+
+The number we hold ourselves to is the **median time from a detected production failure to a generation-bound, verified recovery**: from hours to minutes, from minutes to seconds. Replay accepted or patch saved does not stop that clock.
 
 ## Where Janusly is going
 
@@ -32,16 +35,27 @@ This is the destination, not a claim that every edge is finished today. The dire
 
 The recovery loop is production-shaped end to end:
 
-- **Observable runtime.** Postgres-backed DAG execution with per-node `run_events`, live SSE run streaming, a unified Runs workspace for overview / chronology / agent activity, a Recovery Center home surfacing failed runs / failure clusters / pending approvals / MTTR-style recovery metrics, and OpenTelemetry traces + Prometheus metrics.
+- **Observable runtime.** Postgres-backed DAG execution with per-node `run_events`, live SSE run streaming, a unified Runs workspace for overview / chronology / agent activity, a Recovery Center home surfacing failed runs / failure clusters / pending approvals / production-only verified-recovery metrics, and OpenTelemetry traces + Prometheus metrics.
+- **Versioned recovery policy and semantic containment.** Workflows persist an operator-owned `RecoveryContractV1` or `RecoveryContractV2` that declares failure boundaries, required evidence, external effects, repair classes, validation strength, approval/autonomy posture, terminal verification, and recurrence. V2 evaluates operator-authored expression/schema checks over completed outputs: observe-only violations become durable cases, while quarantine violations stop downstream effects until an operator supplies a detector-valid replacement or explicitly accepts the outcome. Inline fixtures replay the exact runtime evaluator before save; before a semantic canary can receive production traffic, the candidate must also pass a deterministic comparison against its own fixtures and the immutable baseline dataset. No LLM judgment can authorize a mutation.
 - **Diagnosis + patch.** AI failure explanation and 1–3 patch suggestions with self-rated confidence, calibrated per approach against the team's own accept/reject history, with a Recovery Confidence Passport that scores whether a patch is safe to apply.
-- **Safe recovery.** Sandbox validation (write-side effects skipped) before any patch saves, immediate cluster-level apply for small cohorts, paced and cancellable replay campaigns with durable per-item progress for larger cohorts, one-click rollback through version history, production redrive that continues a failed run on the patched version, and progressive baseline/canary delivery with minimum-sample automatic return when the canary success guardrail is breached.
+- **Safe recovery.** Effect-free sandbox validation by default, plus explicitly gated provider-simulated validation for idempotent local effects with durable receipts, before any patch saves; immediate cluster-level apply for small cohorts, paced and cancellable replay campaigns with durable per-item progress for larger cohorts, one-click rollback through version history, production redrive that continues a failed run on the patched version, and progressive baseline/canary delivery with minimum-sample automatic return when the canary success guardrail is breached.
 - **Reproducible recovery drills.** Solution Packs expose safe, selectable credential, AI-output, rate-limit, contract-drift, upstream-failure, and worker-interruption scenarios. Every drill records its source and enters the same recovery queue used by runtime failures; the worker-interruption scenario crosses the configured age threshold and exercises the real stalled-node reaper rather than inserting a synthetic terminal failure. Recovery Queue measures each drill from failure to verified terminal success or accepted loss and then observes the existing seven-day production recurrence window. Recovery Center turns those bounded facts into a per-organization validation dossier with explicit completion, recovery, operator-intervention, timing, and failure-mode denominators plus Markdown/JSON exports; partner count, setup time, and willingness-to-pay remain external evidence.
 - **Containment.** A transient-error fast path that auto-retries the failures that would have healed anyway (429 / dropped connection / gateway timeout) before they reach the DLQ, and a circuit breaker that pauses a workflow after repeated failures — buffering inbound trigger events for backfill on resume instead of dropping them.
 - **Evidence-gated Recovery Playbooks** that promote a proven fix, with a per-playbook success scorecard.
-- **Operate + govern.** Visual React Flow builder, per-org RBAC with a closed permission catalog and custom roles, append-only audit log per action, SSO (WorkOS) + SCIM directory sync, cost/budget governance, an encrypted tenant Credential Secret Store, signed Slack recovery buttons, prompt-generated deterministic PagerDuty off-hours workflows with optional post-action AI summaries, an MCP client (workflow tool nodes) and MCP server (proxying the API to agent ecosystems), and typed Node + Python SDKs.
+- **Operate + govern.** Visual React Flow builder, per-org RBAC with a closed permission catalog and custom roles, append-only audit log per action, SSO (WorkOS) + SCIM directory sync, cost/budget governance, an encrypted tenant Credential Secret Store, signed read-only shadow ingestion for externally executed workflows, signed Slack recovery buttons, prompt-generated deterministic PagerDuty off-hours workflows with optional post-action AI summaries, an MCP client (workflow tool nodes) and MCP server (proxying the API to agent ecosystems), and typed Node + Python SDKs.
 - **Runs without an LLM.** Every AI surface degrades to a deterministic fallback, so the runtime works with no model key configured.
 
-**In one line:** Run critical AI workflows, explain failures, propose sandbox-validated fixes, redrive on the fix, and evolve workflow versions with full auditability — under human supervision.
+**In one line:** Let humans and AI agents build, run, inspect, and safely recover critical workflows on a durable, auditable runtime.
+
+### Current qualification boundary
+
+Janusly is an engineering preview, not a tagged public release. The committed
+Recovery corpus proves deterministic classifiers, safety gates, patch
+application, qualification, and outcome-accounting behavior; it does not prove
+live-model diagnosis quality or business value. External runtime support is
+read-only shadow observation today, not remote cancel/retry/redrive control.
+Provider-simulated local journeys are labeled as simulation and do not stand in
+for design-partner or production evidence.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for release-facing traceability. Architecture
 invariants and operational contracts live under [`docs/architecture/`](docs/architecture/).
@@ -120,7 +134,7 @@ The worker lives at `packages/engine/src/worker.ts` and runs with `pnpm --filter
 
 | Layer       | Library                                                                |
 | ----------- | ---------------------------------------------------------------------- |
-| Runtime     | Node.js 24, Postgres 15+ (18 baseline), Redis 8                           |
+| Runtime     | Node.js 24, PostgreSQL 18, Redis 8                                     |
 | TypeScript  | 7.0                                                                     |
 | Backend     | `bullmq`, `ioredis`, `drizzle-orm`/`postgres-js`, Vercel `ai` SDK      |
 | AI          | Vercel AI SDK with **`anthropic/claude-haiku-4-5-20251001`** as the supported MVP provider. `LlmClient` registry also carries `openai` for future expansion, but production posture is Anthropic-only until cross-provider verification reopens it. Every AI surface has a deterministic fallback; attempted LLM-call failures surface `{ mode: "fallback", aiError, ... }`. |
@@ -136,21 +150,26 @@ The worker lives at `packages/engine/src/worker.ts` and runs with `pnpm --filter
 ## Requirements
 
 - Node.js **24** (`engines.node` rejects earlier and future major versions)
-- PNPM **11** (`corepack enable`; the exact version is pinned in `packageManager`)
+- pnpm **11.17.0** (install it directly; the exact version is pinned in
+  `packageManager` and consumed by pnpm plus `pnpm/action-setup`)
 - Docker (for Postgres + Redis 8 + Ollama services in local dev)
 - (Optional) Anthropic API key — see [`docs/ai.md`](docs/ai.md). MVP support posture is Anthropic-only; OpenAI is registered in the provider abstraction but not currently a verified runtime target.
 
 ### Supported-version matrix (self-host)
 
-The **floor** is the oldest version CI proves green; the **baseline** is what the dev/prod fleet runs. Node 24 is the only supported JavaScript runtime and every Node CI lane uses it. `test_compat_pg15` separately proves the Postgres 15 compatibility floor.
+Janusly supports one runtime version per foundational service. Local
+development, CI, and self-hosted Compose all use the same PostgreSQL major.
 
-| Component | Floor (CI-verified) | Baseline (dev/prod) |
-| --------- | ------------------- | ------------------- |
-| Node.js   | 24 LTS (Krypton)    | 24 LTS (Krypton)    |
-| Postgres  | 15 (+ `pgvector`)   | 18 (+ `pgvector`)   |
-| Redis     | 8                   | 8                   |
+| Component | Supported version |
+| --------- | ----------------- |
+| Node.js   | 24 LTS (Krypton)  |
+| PostgreSQL | 18 (+ `pgvector`) |
+| Redis     | 8                 |
 
-Self-hosting on an older Postgres? Point Compose at it: `JANUSLY_POSTGRES_IMAGE=pgvector/pgvector:pg15 docker compose up postgres`.
+The optional Supabase Auth development profile is an upstream-managed
+exception: the pinned Supabase CLI currently accepts PostgreSQL 17 but rejects
+18. That database is not a supported Janusly self-host/runtime target; every
+Janusly-owned database and CI lane is PostgreSQL 18.
 
 ---
 
@@ -160,7 +179,7 @@ Three steps to a working local stack with the dev-mode UI (no auth setup needed)
 
 ```bash
 # 1. Install dependencies
-corepack enable
+npm install --global pnpm@11.17.0
 pnpm install
 
 # 2. Start Postgres, Redis, Ollama, API, worker, and web
@@ -195,15 +214,31 @@ workflows, credentials, tenant configuration, or example canvas nodes; create
 the first account and workspace manually. Unlike the short-lived `pnpm dev`
 test topology, this stack keeps API and worker behavior production-shaped.
 Explicit smoke commands can install bounded provider fixtures and locally
-simulate GitHub, Slack, signed webhooks, and email without contacting public
-providers. See
+simulate GitHub, Slack, signed webhooks, email, and the supported Anthropic
+messages transport without contacting public providers.
+`pnpm local:recovery-lab` additionally proves one combined journey: a
+schema-valid but business-invalid AI result is deterministically quarantined
+and replaced by an operator before any effect runs; the resumed workflow then
+crosses a real provider boundary, fails into the DLQ, validates a repair with a
+durable provider receipt, publishes/redrives, verifies recovery, and rejects a
+duplicate effect. The LLM and downstream provider evidence is explicitly
+`provider_simulated`; it is not presented as live Anthropic or production
+proof. See
 [`docs/local-deployment.md`](docs/local-deployment.md) for lifecycle commands,
 failure injection, persistence, safety boundaries, optional Ollama memory, and
 the explicit simulator-to-external-provider switch for private real-use tests.
 
 ### Use Janusly from Claude Desktop / Cursor (MCP)
 
-`packages/mcp-server` ships an MCP server over stdio. It always advertises read-only inspection, preflight, and AI-authoring tools; when both MCP write-consent flags are enabled it additionally advertises workflow authoring, run operation, exact-DLQ replay, rollback, and outbound-connection management. Contracted tools use runtime-validated `/v1` envelopes; `reports.run_explain` consumes the structured JSON contract while downloadable report artifacts remain on the unversioned route, and `dlq.replay` requires the `deadLetterId` returned by `dlq.list` so terminal recovery evidence stays attributable. With `pnpm dev` running, drop this into `~/Library/Application Support/Claude/claude_desktop_config.json` (or your platform equivalent) and restart Claude Desktop:
+`packages/mcp-server` ships an agent-complete workflow surface over stdio:
+discover, author, validate, save, start, poll, inspect, resume/cancel, and
+recover. It advertises 24 inspection/AI tools plus 13 writes only when both MCP
+write-consent flags are enabled. Every tool uses a runtime-validated `/v1`
+contract, closed input schema, structured result, and explicit risk hints;
+expected failures return normal `isError` tool results. Secrets and broad
+platform administration remain operator-owned. With `pnpm dev` running, drop
+this into `~/Library/Application Support/Claude/claude_desktop_config.json` (or
+your platform equivalent) and restart Claude Desktop:
 
 ```jsonc
 {
@@ -221,7 +256,9 @@ the explicit simulator-to-external-provider switch for private real-use tests.
 }
 ```
 
-See [`packages/mcp-server/README.md`](packages/mcp-server/README.md) for the architecture, auth flow, and how to add new tools.
+See [`packages/mcp-server/README.md`](packages/mcp-server/README.md) for setup,
+and [`docs/architecture/mcp-server.md`](docs/architecture/mcp-server.md) for the
+architecture and deliberate control-plane boundaries.
 
 ### Root commands
 
@@ -231,6 +268,8 @@ pnpm local:auth:up   # persistent empty-start lab: Supabase Auth + one PostgreSQ
 pnpm local:db:verify # prove auth/public share that database
 pnpm local:smoke     # inbound event + GitHub/Slack/webhook/email simulator path
 pnpm local:failure-smoke # controlled provider outage + fail-closed DLQ evidence
+pnpm local:recovery-lab # combined semantic + provider-simulated recovery proof
+pnpm local:recovery-lab:destroy # remove the isolated Lab tenant and simulator evidence
 pnpm local:ui-smoke  # Chromium smoke against the persistent stack
 pnpm local:verify    # provider smoke + full restart persistence proof
 pnpm local:down      # stop the persistent stack without deleting its volumes
@@ -251,7 +290,10 @@ pnpm test:integration # data integration lane: Compose Postgres + migrate + real
 pnpm evals           # scripts/run-evals.mjs against /ai/generate-workflow (assumes pnpm dev is up)
 pnpm evals:local     # one-command local regression gate: boots Compose + API, runs golden evals, tears down (spends AI credits only if a provider key is configured)
 pnpm evals:baseline  # snapshot the current ai-mode / shape-pass rates into evals/baseline.json (the regression floors)
-pnpm test:evals      # node:test for the eval-gate logic (scripts/evals-baseline.mjs) — $0, no API
+pnpm evals:recovery  # deterministic Recovery corpus against production classifiers, safety gates, qualification, and outcome semantics — $0
+pnpm evals:recovery:baseline # refresh the Recovery dataset hash only after every deterministic safety case passes
+pnpm test:evals      # unit-test both eval gates, then run the deterministic Recovery suite — $0, no API
+pnpm usability:study # record and aggregate pseudonymous local moderated-usability sessions
 pnpm seed:demos      # explicit opt-in demo credentials; never runs at startup
 pnpm seed:recovery-matrix  # explicit opt-in DLQ fixtures for recovery testing
 pnpm seed:full       # explicit opt-in full demo dataset; never runs at startup
@@ -299,7 +341,7 @@ The AI surfaces are listed in detail in [`docs/ai.md`](docs/ai.md). Quick summar
 | Feature | Endpoint / surface | Without provider key | With key |
 | --- | --- | --- | --- |
 | Suggest 1–3 alternative patches for a failed run | `POST /ai/patch-workflow` | `{ mode: "fallback" }` with the original workflow untouched | Array of suggestions with `approachLabel` + self-rated confidence per tab; route fan-out-merges + validates each |
-| Sandbox-validate a patch before saving | `POST /dlq/validate-fix` | Always available — sandbox is provider-agnostic | Same; gates the production save+replay chain |
+| Sandbox-validate a patch before saving | `POST /dlq/validate-fix` | Always available — sandbox is provider-agnostic | Same; gates the production save+redrive chain |
 | Apply a patch across every DLQ entry sharing a failure signature | `POST /dlq/cluster-apply` | Always available | Same; recovery dialog reuses the multi-suggestion tabs in cluster mode |
 | Preview and run a paced, cancellable replay campaign | `POST /recovery/campaigns/preview`, `POST /recovery/campaigns` | Always available — deterministic cohort verification and durable queueing | Same |
 | Failure clustering | `GET /dlq/clusters` | Always available — deterministic signature classifier | Same |
@@ -349,6 +391,7 @@ Permissions are enforced per organization through `org_members`. In `dev-headers
 | HTTP API request/response examples | [`docs/api.md`](docs/api.md) |
 | Full workflow examples (DAG JSON) | [`docs/workflows.md`](docs/workflows.md) |
 | Runnable example payload | [`docs/examples/github-uppercase.json`](docs/examples/github-uppercase.json) |
+| Local moderated usability protocol and acceptance report | [`docs/usability-testing.md`](docs/usability-testing.md) |
 
 ---
 
@@ -423,6 +466,13 @@ Inspector and evidence stays in run history. See
 [`docs/architecture/integrations.md`](docs/architecture/integrations.md#prompt-generated-pagerduty-off-hours-workflow)
 and [`docs/local-deployment.md`](docs/local-deployment.md#pagerduty-local-qualification).
 
+External workflow engines use an `external_runtime_signing_secret` credential.
+Create the observer in Operations → Integrations, then emit workflow/run/step
+lifecycle events with `ExternalRuntimeObserver` from the Node SDK. Janusly
+keeps a read-only, monotonic shadow and never treats observed recovery as a
+Janusly-verified effect. See
+[`docs/architecture/integrations.md`](docs/architecture/integrations.md#external-runtime-shadow-mode).
+
 #### Raw template secrets
 
 ```json
@@ -465,6 +515,7 @@ pnpm test               # full Vitest workspace suite
 pnpm test:browser       # Vitest browser-mode (Playwright/Chromium) for `*.browser.test.tsx`
 pnpm test:accessibility # axe serious/critical gate on settled Playwright UI states
 pnpm test:e2e           # Playwright with automatic Compose up/down
+pnpm usability:study -- --help # local human-session recorder; automation is readiness evidence only
 pnpm typecheck          # TypeScript 7 across typed production and test sources
 pnpm build              # workspace production builds
 pnpm dev:doctor         # free orphaned dev ports (:3001, :5173, legacy :5174) after a crashed local run
@@ -481,7 +532,7 @@ Acronyms used throughout this README and the wider Janusly codebase ([`AGENTS.md
 | --- | --- | --- |
 | **AI** | Artificial Intelligence | Anything routed through an LLM provider (Anthropic by default). Every AI surface has a deterministic non-AI fallback. |
 | **API** | Application Programming Interface | The HTTP control plane in `apps/api` (plain Node `http`, no framework). |
-| **CAS** | Compare-And-Swap | The "atomic claim" pattern used in concurrency-sensitive transitions — `UPDATE … WHERE status='pending'` in `tryClaimNodeForQueue`, and `UPDATE … WHERE status='validated'` in auto-healing `recordDecision` so concurrent operator-click vs auto-apply can't double-apply (loser returns 409). |
+| **CAS** | Compare-And-Swap | The "atomic claim" pattern used in concurrency-sensitive transitions — `UPDATE … WHERE status='pending'` in `tryClaimNodeForQueue`, and `UPDATE … WHERE status='validated'` in the auto-healing publication claim so concurrent operator-click vs auto-apply cannot double-publish (the loser returns 409 while the winner completes through the durable replay receipt). |
 | **CRUD** | Create / Read / Update / Delete | Basic record-level operations against a resource (e.g. workflows, members, credentials). |
 | **CSS** | Cascading Style Sheets | The design system is hand-written CSS behind the ordered `apps/web/src/index.css` entrypoint; Tailwind 4 CSS-first tokens live in `apps/web/src/styles/foundations.css`. |
 | **DAG** | Directed Acyclic Graph | The workflow shape: nodes + edges, no cycles. The engine executes nodes in topological order. |
@@ -497,7 +548,7 @@ Acronyms used throughout this README and the wider Janusly codebase ([`AGENTS.md
 | **LTS** | Long-Term Support | Node.js 24 LTS (codename Krypton) is the only supported JavaScript runtime. |
 | **MCP** | Model Context Protocol | The Anthropic-defined protocol for exposing tools to LLM clients. Janusly ships an MCP server (`packages/mcp-server`) and consumes external MCP servers as `mcp_tool` workflow nodes. |
 | **MFA** | Multi-Factor Authentication | A marker flag on `org_configs.auth.mfaRequired`. **Informational only** — Janusly warn-logs server-side when set, but actual enforcement happens at the IdP (Okta / Azure AD carry the claim, Supabase does not). |
-| **MTTR** | Mean Time To Recovery | The north-star metric: how long from a failed automation to that automation working again. Surfaced on `GET /recovery/metrics` and as an SLO threshold field (`mttrSeconds`). |
+| **MTTR** | Mean Time To Recovery | A legacy arithmetic-average compatibility field on `GET /recovery/metrics` and the existing SLO threshold name (`mttrSeconds`). Janusly's versioned product north-star is the median production time to a generation-bound verified recovery (`verifiedRecovery`). |
 | **MVP** | Minimum Viable Product | The current shipping scope — Anthropic-only LLM support, single recovery loop, no cross-provider verification yet. |
 | **OTEL** | OpenTelemetry | The tracing / metrics stack. Tracer + Meter carry `service.name="janusly"`; Prometheus exporter is wired in. |
 | **p95** | 95th percentile | Latency notation: 95% of runs / nodes finish at or below this duration. Surfaced on the workflow health rollup, the recovery metrics dashboard, and as an SLO threshold (`p95DurationMs`). |

@@ -27,6 +27,7 @@ import { billingRoutes } from "./routes/billing-routes";
 import { credentialsRoutes } from "./routes/credentials-routes";
 import { dlqRoutes } from "./routes/dlq-routes";
 import { evalDatasetsRoutes } from "./routes/eval-datasets-routes";
+import { externalRuntimeRoutes } from "./routes/external-runtime-routes";
 import { experimentsRoutes } from "./routes/experiments-routes";
 import { healthRoutes } from "./routes/health-routes";
 import { mcpRoutes } from "./routes/mcp-routes";
@@ -42,6 +43,7 @@ import { recoveryItemsRoutes } from "./routes/recovery-items-routes";
 import { recoveryPlaybooksRoutes } from "./routes/recovery-playbooks-routes";
 import { replayCampaignsRoutes } from "./routes/replay-campaigns-routes";
 import { recoveryRoutes } from "./routes/recovery-routes";
+import { recoveryHomeRoutes } from "./routes/recovery-home-routes";
 import { reportsRoutes } from "./routes/reports-routes";
 import { rolesRoutes } from "./routes/roles-routes";
 import { runsRoutes } from "./routes/runs-routes";
@@ -71,6 +73,7 @@ export const routes: Route[] = [
   ...ssoRoutes,
   ...scimRoutes,
   ...slackInteractionsRoutes,
+  ...externalRuntimeRoutes,
   ...pagerDutyRoutes,
   ...rolesRoutes,
   ...mcpRoutes,
@@ -86,6 +89,7 @@ export const routes: Route[] = [
   ...auditRoutes,
   ...recoveryPlaybooksRoutes,
   ...replayCampaignsRoutes,
+  ...recoveryHomeRoutes,
   ...recoveryRoutes,
   ...reportsRoutes,
   ...aiRoutes,

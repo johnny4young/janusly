@@ -62,7 +62,10 @@ Both go through the SAME flow: review → sandbox → apply → replay. The sand
 
 ## Closing metric
 
-**Mean Time To Recovery for failed automations.** Without Janusly: discover the failure (alert → ticket → triage), fix the secret in the secrets manager, redeploy, retry — 30 minutes to 2 hours, multiple people involved. With Janusly: ~3 minutes, one operator, no redeploy, audit-clean.
+**Time to verified recovery.** Read the actual production-only elapsed time from
+the Recovery Center after the generation-bound replay succeeds. “30 minutes to
+2 hours without Janusly” and “about 3 minutes with Janusly” are rehearsal
+assumptions for the talk track, not measured customer or product evidence.
 
 ## 3-5 minute talk track
 
@@ -79,4 +82,4 @@ Both go through the SAME flow: review → sandbox → apply → replay. The sand
 > Re-run. New approval pauses. I approve. http call fires — and fails again. This time the AI says "Your secret is unbound. Swap to one that's wired." Diff, sandbox, apply. For the live green finish, I point the placeholder billing URL at my sandbox endpoint and bind the replacement secret. Re-run. Approval pauses, I approve, billing call succeeds, customer email sends.
 >
 > **(3:30–4:30, the close)**
-> Two failures, two recovery patterns, all reviewable, all replayable. The number we track is Mean Time To Recovery — what just took five minutes used to take an hour and four people. This is the Janusly difference: workflows that explain, recover, and safely evolve.
+> Two failures, two recovery patterns, all reviewable, all replayable. Janusly records the production clock from detected failure to generation-bound verified recovery; compare that measured value with your own baseline. This is the Janusly difference: workflows that explain, recover, and safely evolve.

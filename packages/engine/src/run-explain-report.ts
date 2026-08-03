@@ -41,6 +41,7 @@ export type RunExplainRunSnapshot = {
   workflowVersionId?: string | null;
   parentRunId?: string | null;
   replayMode?: string | null;
+  validationEvidenceLevel?: string | null;
   createdAt?: Date | string | null;
   /** Optional inputJson — used to derive the workflow name when persisted; never rendered raw. */
   inputJson?: unknown;
@@ -102,6 +103,7 @@ export type RunExplainReportJson = {
     workflowVersionId: string | null;
     parentRunId: string | null;
     replayMode: string | null;
+    validationEvidenceLevel: string | null;
     createdAt: string | null;
     isFailure: boolean;
   };
@@ -279,6 +281,9 @@ function renderMarkdown(json: RunExplainReportJson): string {
   if (json.summary.createdAt) lines.push(`- **Created at:** ${json.summary.createdAt}`);
   if (json.summary.parentRunId) lines.push(`- **Parent run:** \`${markdownEscape(json.summary.parentRunId)}\``);
   if (json.summary.replayMode) lines.push(`- **Replay mode:** ${json.summary.replayMode} (sandbox — not a production run)`);
+  if (json.summary.validationEvidenceLevel) {
+    lines.push(`- **Validation evidence:** ${json.summary.validationEvidenceLevel}`);
+  }
   lines.push("");
 
   if (json.rootCause) {
@@ -367,6 +372,7 @@ export function buildRunExplainReport(input: BuildRunExplainReportInput): RunExp
       workflowVersionId: run.workflowVersionId ?? null,
       parentRunId: run.parentRunId ?? null,
       replayMode: run.replayMode ?? null,
+      validationEvidenceLevel: run.validationEvidenceLevel ?? null,
       createdAt: toIsoOrNull(run.createdAt),
       isFailure,
     },

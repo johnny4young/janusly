@@ -67,6 +67,42 @@ describe("normalizeErrorSignature — network_timeout", () => {
   });
 });
 
+describe("normalizeErrorSignature — worker_stalled", () => {
+  it("clusters repeated stalls independently of their timestamp and threshold", () => {
+    const first = normalizeErrorSignature(
+      {
+        code: "worker_stalled",
+        message: "Node was left running since 2026-07-31T10:00:00.000Z, past the 60-minute stall threshold",
+      },
+      { nodeType: "http" },
+    );
+    const second = normalizeErrorSignature(
+      {
+        code: "worker_stalled",
+        message: "Node was left running since 2026-08-01T14:05:00.000Z, past the 90-minute stall threshold",
+      },
+      { nodeType: "http" },
+    );
+
+    expect(first).toEqual({
+      signature: "Worker stalled on http node",
+      category: "unknown",
+      suggestedOwner: "platform",
+    });
+    expect(second).toEqual(first);
+  });
+
+  it("does not infer a worker stall from mutable prose without the stable code", () => {
+    const result = normalizeErrorSignature(
+      new Error("Node was left running since 2026-07-31T10:00:00.000Z"),
+      { nodeType: "http" },
+    );
+
+    expect(result.signature).not.toBe("Worker stalled on http node");
+    expect(result.category).toBe("unknown");
+  });
+});
+
 describe("normalizeErrorSignature — ai_provider", () => {
   it("recognises `insufficient_quota`", () => {
     const error = { provider: "openai", message: "insufficient_quota" };
@@ -117,6 +153,44 @@ describe("normalizeErrorSignature — tool_input", () => {
     );
     expect(result.signature).toBe("Tool not found: mystery.thing");
     expect(result.category).toBe("tool_input");
+  });
+
+  // Regression: tool names matching PARSE_ERROR_PATTERN's case-insensitive
+  // `JSON.parse` alternative must still cluster per-tool, not as parse_error.
+  it("clusters invalid input for the json.parse tool as tool_input, not parse_error", () => {
+    const result = normalizeErrorSignature(
+      new Error("Invalid tool input for json.parse: value: Required"),
+      { nodeType: "tool", toolName: "json.parse" },
+    );
+    expect(result.signature).toBe("Invalid tool input: json.parse");
+    expect(result.category).toBe("tool_input");
+  });
+
+  it("clusters invalid input for a future *.parse tool as tool_input", () => {
+    const result = normalizeErrorSignature(
+      new Error("Invalid tool input for csv.parse: rows: Required"),
+      { nodeType: "tool" },
+    );
+    expect(result.signature).toBe("Invalid tool input: csv.parse");
+    expect(result.category).toBe("tool_input");
+  });
+
+  it("clusters `tool 'json.parse' not found` as tool_input, not parse_error", () => {
+    const result = normalizeErrorSignature(
+      new Error("tool 'json.parse' not found"),
+      { nodeType: "tool" },
+    );
+    expect(result.signature).toBe("Tool not found: json.parse");
+    expect(result.category).toBe("tool_input");
+  });
+
+  it("keeps a genuine JSON failure inside the json.parse tool as parse_error", () => {
+    const result = normalizeErrorSignature(
+      new Error("Unexpected token < in JSON at position 0"),
+      { nodeType: "tool", toolName: "json.parse" },
+    );
+    expect(result.signature).toBe("Parse error in tool node");
+    expect(result.category).toBe("parse_error");
   });
 });
 

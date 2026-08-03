@@ -1,11 +1,13 @@
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { addCanvasStep, openWorkflowAiAction, openWorkspaceSection } from './_helpers/workspace-navigation'
 
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 
 const locales = {
   en: {
-    aiStudio: 'AI Studio',
+    workflows: 'Workflows',
+    settings: 'Settings',
     hero: 'Describe the outcome. Janusly builds the flow.',
     connections: 'Connections',
     name: 'Connection name',
@@ -17,7 +19,8 @@ const locales = {
     added: (name: string) => `Credential ${name} added`,
   },
   es: {
-    aiStudio: 'AI Studio',
+    workflows: 'Flujos',
+    settings: 'Configuración',
     hero: 'Describe el resultado. Janusly arma el flujo.',
     connections: 'Conexiones',
     name: 'Nombre de la conexión',
@@ -58,10 +61,9 @@ async function waitForAuthoringCanvas(
 ): Promise<void> {
   const canvas = page.locator('.workspace-canvas-wrapper')
   const nodes = canvas.locator('.workflow-node')
-  const palette = page.locator('.sb-palette')
   if (await nodes.count() === 0) {
     for (const label of labels) {
-      await palette.getByRole('button', { name: label, exact: true }).first().click()
+      await addCanvasStep(page, label)
     }
   }
   await expect(nodes).toHaveCount(3)
@@ -108,21 +110,33 @@ test('grouped control-plane panels and shared mutations remain bilingual', async
     }
 
     const copy = locales[locale]
-    await page.getByRole('button', { name: new RegExp(`^${copy.aiStudio}\\b`) }).click()
+    await openWorkflowAiAction(page, copy.workflows)
     await expect(page.getByText(copy.hero, { exact: true })).toBeVisible()
     await waitForAuthoringCanvas(page, copy.authoringNodes)
     await capture(page.locator('.workspace-grid'), `web-${locale}-control-plane-authoring-default`)
 
-    await page.getByRole('button', { name: copy.connections, exact: true }).click()
-    await expect(page.getByRole('heading', { name: copy.connections, exact: true })).toBeVisible()
+    await openWorkspaceSection(page, copy.settings, copy.connections)
+    await expect(page.getByRole('heading', {
+      name: copy.connections,
+      exact: true,
+      level: 2,
+    })).toBeVisible()
 
     const connectionName = `control_plane_${locale}_${stamp}`
-    await page.getByLabel(copy.name, { exact: true }).fill(connectionName)
+    await page
+      .locator('.we-connections-inventory .we-card__header')
+      .getByRole('button', { name: copy.add, exact: true })
+      .click()
+    const connectionDialog = page.getByRole('dialog')
+    await expect(connectionDialog).toBeVisible()
+    await connectionDialog.getByLabel(copy.name, { exact: true }).fill(connectionName)
     // Managed storage is the default: the form asks for the secret value
     // itself, which the API envelope-encrypts. The legacy environment-reference
     // mode stays reachable through the storage selector above this field.
-    await page.getByLabel(copy.secretValue, { exact: true }).fill(`control-plane-${locale}-${stamp}`)
-    await page.getByRole('button', { name: copy.add, exact: true }).click()
+    await connectionDialog
+      .getByLabel(copy.secretValue, { exact: true })
+      .fill(`control-plane-${locale}-${stamp}`)
+    await connectionDialog.getByRole('button', { name: copy.add, exact: true }).click()
 
     const successToast = page.getByText(copy.added(connectionName), { exact: true })
     await expect(successToast).toBeVisible()
@@ -134,8 +148,13 @@ test('grouped control-plane panels and shared mutations remain bilingual', async
     expect(overflow).toBeLessThanOrEqual(2)
     await capture(main, `web-${locale}-control-plane-connection-result`)
 
-    await page.getByRole('button', { name: copy.runs, exact: true }).click()
+    await openWorkspaceSection(
+      page,
+      locale === 'en' ? 'Activity' : 'Actividad',
+      copy.runs,
+    )
     await expect(page.getByRole('heading', { name: copy.runs, exact: true })).toBeVisible()
+    await expect(page.getByTestId('activity-run-history')).toBeVisible()
   }
 
   expect(browserErrors).toEqual([])

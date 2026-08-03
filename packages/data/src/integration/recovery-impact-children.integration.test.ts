@@ -11,6 +11,7 @@ import {
   recoveryImpactRollups,
   recoveryItemChildren,
   recoveryItems,
+  runs,
 } from "@janusly/db";
 import { recordRecoveryImpactTx } from "../recoveryMetricsRepo";
 
@@ -29,11 +30,28 @@ afterAll(async () => {
   await db.delete(recoveryItems).where(eq(recoveryItems.orgId, ORG));
   await db.delete(auditLogs).where(eq(auditLogs.orgId, ORG));
   await db.delete(deadLetters).where(eq(deadLetters.orgId, ORG));
+  await db.delete(runs).where(eq(runs.orgId, ORG));
 });
 
 describe("recordRecoveryImpactTx debounced children", () => {
   it("resolves and audits the shared parent exactly once", async () => {
     const failedAt = new Date(Date.now() - 60_000);
+    await db.insert(runs).values([
+      {
+        id: `${RUN}-parent`,
+        orgId: ORG,
+        workflowVersionId: "workflow-a-v1",
+        status: "failed",
+        createdAt: new Date(failedAt.getTime() - 1_000),
+      },
+      {
+        id: RUN,
+        orgId: ORG,
+        workflowVersionId: "workflow-a-v1",
+        status: "failed",
+        createdAt: failedAt,
+      },
+    ]);
     await db.insert(deadLetters).values([
       {
         id: PARENT_DLQ,

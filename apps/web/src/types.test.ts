@@ -22,6 +22,7 @@ describe('parseAiCandidateBackoff', () => {
 
 const ALL_TABS: ActiveTab[] = [
   'home',
+  'recover',
   'workflows',
   'members',
   'copilot',
@@ -35,6 +36,7 @@ const ALL_TABS: ActiveTab[] = [
   'reasoning',
   'multiAgent',
   'operations',
+  'recoveryCase',
 ]
 
 describe('CANVAS_TABS contract', () => {
@@ -57,6 +59,7 @@ describe('CANVAS_TABS contract', () => {
     // is NOT a canvas tab even though it doesn't render in the
     // contextual main-slot path.
     expect(nonCanvasTabs).toContain('home')
+    expect(nonCanvasTabs).toContain('recover')
     expect(nonCanvasTabs).toContain('operations')
     expect(nonCanvasTabs).toContain('experiments')
     expect(nonCanvasTabs).toContain('credentials')
@@ -67,6 +70,7 @@ describe('CANVAS_TABS contract', () => {
     expect(nonCanvasTabs).toContain('multiAgent')
     expect(nonCanvasTabs).toContain('workflows')
     expect(nonCanvasTabs).toContain('reasoning')
+    expect(nonCanvasTabs).toContain('recoveryCase')
   })
 
   it.each(ALL_TABS)('isCanvasTab(%s) is a closed boolean (never throws)', (tab) => {
@@ -98,6 +102,7 @@ describe('getCanvasVisibility — canvas mount + visibility decision', () => {
   )
 
   const NON_CANVAS_NON_HOME: ActiveTab[] = [
+    'recover',
     'workflows',
     'members',
     'marketplace',
@@ -109,6 +114,7 @@ describe('getCanvasVisibility — canvas mount + visibility decision', () => {
     'multiAgent',
     'operations',
     'experiments',
+    'recoveryCase',
   ]
   it.each(NON_CANVAS_NON_HOME)(
     '%s: before first activation, canvas stays unmounted and contextual slot renders',

@@ -111,6 +111,72 @@ describe("resolveLlmConfig", () => {
     expect(cfg!.defaultModels.anthropic).toBe("claude-sonnet-4-5");
   });
 
+  it("defaults and overrides the hard output-token ceiling", () => {
+    const defaults = resolveLlmConfig({
+      ANTHROPIC_API_KEY: "sk-ant-x",
+    } as NodeJS.ProcessEnv);
+    const configured = resolveLlmConfig({
+      ANTHROPIC_API_KEY: "sk-ant-x",
+      JANUSLY_LLM_MAX_OUTPUT_UNITS: "2048",
+    } as NodeJS.ProcessEnv);
+
+    expect(defaults!.maxOutputTokens).toBe(4096);
+    expect(configured!.maxOutputTokens).toBe(2048);
+  });
+
+  it("rejects malformed direct env output limits back to the safe default", () => {
+    for (const value of ["NaN", "255", "16385", "2048.5"]) {
+      const cfg = resolveLlmConfig({
+        ANTHROPIC_API_KEY: "sk-ant-x",
+        JANUSLY_LLM_MAX_OUTPUT_UNITS: value,
+      } as NodeJS.ProcessEnv);
+      expect(cfg!.maxOutputTokens).toBe(4096);
+    }
+  });
+
+  it("preserves an explicit Anthropic-compatible proxy base URL", () => {
+    const cfg = resolveLlmConfig({
+      ANTHROPIC_API_KEY: "local-key",
+      ANTHROPIC_BASE_URL: "http://provider-simulator:4010/v1/",
+    } as NodeJS.ProcessEnv);
+
+    expect(cfg!.baseURLs.anthropic).toBe(
+      "http://provider-simulator:4010/v1",
+    );
+  });
+
+  it("repairs the canonical Anthropic host when its version segment is absent", () => {
+    const cfg = resolveLlmConfig({
+      ANTHROPIC_API_KEY: "sk-ant-x",
+      ANTHROPIC_BASE_URL: "https://api.anthropic.com",
+    } as NodeJS.ProcessEnv);
+
+    expect(cfg!.baseURLs.anthropic).toBe(
+      "https://api.anthropic.com/v1",
+    );
+  });
+
+  it("accepts only known, deduplicated simulated provider names", () => {
+    const cfg = resolveLlmConfig({
+      ANTHROPIC_API_KEY: "local-key",
+      JANUSLY_LOCAL_STACK: "true",
+      JANUSLY_LOCAL_INTEGRATION_SIMULATOR: "true",
+      JANUSLY_LLM_SIMULATED_PROVIDERS:
+        " anthropic,unknown,anthropic ",
+    } as NodeJS.ProcessEnv);
+
+    expect(cfg!.simulatedProviders).toEqual(["anthropic"]);
+  });
+
+  it("ignores simulated-provider declarations outside the explicit local stack", () => {
+    const cfg = resolveLlmConfig({
+      ANTHROPIC_API_KEY: "sk-ant-x",
+      JANUSLY_LLM_SIMULATED_PROVIDERS: "anthropic",
+    } as NodeJS.ProcessEnv);
+
+    expect(cfg!.simulatedProviders).toEqual([]);
+  });
+
   it("falls back to anthropic with a warning when JANUSLY_LLM_PROVIDER is unknown", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const cfg = resolveLlmConfig({
@@ -148,6 +214,7 @@ describe("createLlmClient — happy paths", () => {
     expect(opts.model).toBeDefined();
     expect(opts.prompt).toBe("hi");
     expect(opts.maxRetries).toBe(2);
+    expect(opts.maxOutputTokens).toBe(4096);
     expect(opts.abortSignal).toBeInstanceOf(AbortSignal);
     expect(result).toMatchObject({
       text: "hello world",
@@ -161,6 +228,23 @@ describe("createLlmClient — happy paths", () => {
     expect(typeof result.latencyMs).toBe("number");
     expect(result.latencyMs).toBeGreaterThanOrEqual(0);
     expect(result.costUsd).toBeCloseTo(10 * 0.15 / 1e6 + 20 * 0.6 / 1e6, 9);
+    expect(result.providerSimulated).toBe(false);
+  });
+
+  it("labels provider-compatible simulations and never attributes cloud cost", async () => {
+    const cfg = resolveLlmConfig({
+      ANTHROPIC_API_KEY: "local-key",
+      JANUSLY_LOCAL_STACK: "true",
+      JANUSLY_LOCAL_INTEGRATION_SIMULATOR: "true",
+      JANUSLY_LLM_SIMULATED_PROVIDERS: "anthropic",
+    } as NodeJS.ProcessEnv)!;
+    const result = await createLlmClient(cfg).generateText({
+      prompt: "hi",
+    });
+
+    expect(result.provider).toBe("anthropic");
+    expect(result.providerSimulated).toBe(true);
+    expect(result.costUsd).toBe(0);
   });
 
   it("wraps the openai model with spec-level JSON-mode middleware when responseFormat is 'json'", async () => {
@@ -442,6 +526,7 @@ describe("usage recorder fires on success and failure", () => {
       inputTokens: 100,
       outputTokens: 50,
       totalTokens: 150,
+      providerSimulated: false,
       mode: "ai",
     });
     expect(typeof record.latencyMs).toBe("number");
@@ -646,6 +731,64 @@ describe("usage recorder fires on success and failure", () => {
     const record = recorder.mock.calls[0][0] as UsageRecord;
     expect(record.model).toBe("gpt-future-9000");
     expect(record.costUsd).toBeNull();
+  });
+
+  it("records simulated provider evidence with zero cost", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      text: "ok",
+      finishReason: "stop",
+      usage: { inputTokens: 10, outputTokens: 20 },
+    });
+    const recorder = vi.fn();
+    setUsageRecorder(recorder);
+    const cfg = resolveLlmConfig({
+      ANTHROPIC_API_KEY: "local-key",
+      JANUSLY_LOCAL_STACK: "true",
+      JANUSLY_LOCAL_INTEGRATION_SIMULATOR: "true",
+      JANUSLY_LLM_SIMULATED_PROVIDERS: "anthropic",
+    } as NodeJS.ProcessEnv)!;
+    await createLlmClient(cfg).generateText({
+      prompt: "hi",
+      context: { orgId: "org-1" },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(recorder.mock.calls[0][0]).toMatchObject({
+      provider: "anthropic",
+      providerSimulated: true,
+      costUsd: 0,
+      mode: "ai",
+    });
+  });
+
+  it("records failed simulated provider calls with zero cost", async () => {
+    generateTextMock.mockRejectedValueOnce(new Error("simulated outage"));
+    const recorder = vi.fn();
+    setUsageRecorder(recorder);
+    const cfg = resolveLlmConfig({
+      ANTHROPIC_API_KEY: "local-key",
+      JANUSLY_LOCAL_STACK: "true",
+      JANUSLY_LOCAL_INTEGRATION_SIMULATOR: "true",
+      JANUSLY_LLM_SIMULATED_PROVIDERS: "anthropic",
+    } as NodeJS.ProcessEnv)!;
+
+    await expect(
+      createLlmClient(cfg).generateText({
+        prompt: "hi",
+        context: { orgId: "org-1" },
+      }),
+    ).rejects.toThrow("simulated outage");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(recorder.mock.calls[0][0]).toMatchObject({
+      provider: "anthropic",
+      providerSimulated: true,
+      costUsd: 0,
+      mode: "fallback",
+      aiError: "simulated outage",
+    });
   });
 });
 

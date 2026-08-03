@@ -1,3 +1,7 @@
+import {
+  openWorkflowOperation,
+  openWorkspaceSection,
+} from './_helpers/workspace-navigation'
 /**
  * Real-stack acceptance for inspectable AI policy and decisions.
  *
@@ -105,14 +109,15 @@ async function switchLocale(page: Page, locale: Locale): Promise<void> {
   await hideUnrelatedOverlays(page)
 }
 
-async function openOperationsReliability(page: Page, locale: Locale): Promise<void> {
-  await page.getByRole('button', {
-    name: locale === 'en' ? 'Operations' : 'Operaciones',
-    exact: true,
-  }).click()
-  const reliability = page.getByTestId('operations-rail-tab-reliability')
-  await expect(reliability).toBeVisible()
-  await reliability.click()
+async function openAiSettings(page: Page, locale: Locale): Promise<void> {
+  await openWorkspaceSection(
+    page,
+    locale === 'en' ? 'Settings' : 'Configuración',
+    locale === 'en' ? 'Workspace' : 'Espacio de trabajo',
+  )
+  const ai = page.getByTestId('operations-rail-tab-ai')
+  await expect(ai).toBeVisible()
+  await ai.click()
 }
 
 async function openWorkflowMetadata(
@@ -122,7 +127,7 @@ async function openWorkflowMetadata(
   workflowName: string,
 ): Promise<Locator> {
   await page.getByRole('button', {
-    name: locale === 'en' ? 'Flows' : 'Flujos',
+    name: locale === 'en' ? 'Workflows' : 'Flujos',
     exact: true,
   }).click()
   const row = page.getByTestId(`workflows-row-${workflowId}`)
@@ -134,10 +139,12 @@ async function openWorkflowMetadata(
   })
   await row.click()
   expect((await workflowResponse).ok()).toBe(true)
-  await page.getByRole('button', {
-    name: locale === 'en' ? 'Step setup' : 'Configuración de paso',
+  const configure = page.getByTestId('workspace-section-nav').getByRole('button', {
+    name: locale === 'en' ? 'Build' : 'Crear',
     exact: true,
-  }).click()
+  })
+  if (await configure.getAttribute('aria-current') !== 'page') await configure.click()
+  await openWorkflowOperation(page, locale === 'en' ? 'About' : 'Acerca de')
   const panel = page.locator('.we-workflow-metadata-panel')
   await expect(panel).toBeVisible()
   return panel
@@ -207,10 +214,11 @@ async function findDeadLetter(
 }
 
 async function openRunTimeline(page: Page, locale: Locale, runId: string): Promise<void> {
-  await page.getByRole('button', {
-    name: locale === 'en' ? 'Runs' : 'Ejecuciones',
-    exact: true,
-  }).click()
+  await openWorkspaceSection(
+    page,
+    locale === 'en' ? 'Activity' : 'Actividad',
+    locale === 'en' ? 'Runs' : 'Ejecuciones',
+  )
   const overviewTab = page.getByTestId('run-workspace-tab-overview')
   if (await overviewTab.isVisible().catch(() => false)) await overviewTab.click()
   const history = page.getByTestId('runs-history-virtual-list')
@@ -246,10 +254,11 @@ async function openRecoverySuggestion(
   deadLetterId: string,
   nodeId: string,
 ): Promise<Locator> {
-  await page.getByRole('button', {
-    name: locale === 'en' ? 'Runs' : 'Ejecuciones',
-    exact: true,
-  }).click()
+  await openWorkspaceSection(
+    page,
+    locale === 'en' ? 'Activity' : 'Actividad',
+    locale === 'en' ? 'Recover' : 'Recuperar',
+  )
   const queue = page.getByTestId('recovery-queue')
   await expect(queue).toBeVisible()
   await queue.getByTestId('dlq-search').fill(nodeId)
@@ -300,7 +309,7 @@ test('organization and workflow guidance survive real saves, retry, and both loc
   await page.goto('/')
   await hideUnrelatedOverlays(page)
 
-  await page.getByRole('button', { name: 'Operations', exact: true }).click()
+  await openWorkspaceSection(page, 'Settings', 'Workspace')
   let failOrgLoads = true
   let delayNextOrgSave = true
   await page.route('**/org/config', async route => {
@@ -319,7 +328,7 @@ test('organization and workflow guidance survive real saves, retry, and both loc
     }
     await route.continue()
   })
-  await page.getByTestId('operations-rail-tab-reliability').click()
+  await page.getByTestId('operations-rail-tab-ai').click()
 
   const orgCard = page.getByTestId('ai-guidance-settings')
   const orgInput = orgCard.getByTestId('ai-guidance-org-input')
@@ -406,7 +415,7 @@ test('organization and workflow guidance survive real saves, retry, and both loc
   await capture(englishWorkflowField, 'web-en-workflow-guidance-saved')
 
   await switchLocale(page, 'es')
-  await openOperationsReliability(page, 'es')
+  await openAiSettings(page, 'es')
   const spanishOrgCard = page.getByTestId('ai-guidance-settings')
   const spanishOrgInput = spanishOrgCard.getByTestId('ai-guidance-org-input')
   await expect(spanishOrgInput).toHaveValue(englishOrgGuidance)

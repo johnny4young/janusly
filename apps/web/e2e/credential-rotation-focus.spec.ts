@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
 import { seedCredential } from './_helpers/demo-helpers'
@@ -29,7 +30,7 @@ test('credential rotation owns focus, traps both Tab directions, and restores it
   })
 
   await page.goto('/')
-  await page.getByRole('button', { name: 'Connections', exact: true }).click()
+  await openWorkspaceSection(page, 'Settings', 'Connections')
   const credentialCard = page.locator('.list-card').filter({ hasText: credentialName })
   await expect(credentialCard).toBeVisible()
   const rotateTrigger = credentialCard.getByRole('button', { name: 'Rotate secret', exact: true })

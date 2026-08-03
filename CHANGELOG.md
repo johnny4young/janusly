@@ -16,6 +16,74 @@ retroactively.
 
 ### Changed
 
+- The engine's provider integration tools are now separated into bounded
+  Slack, GitHub, PagerDuty, webhook, and shared-chokepoint modules behind the
+  existing `integration-tools.ts` compatibility barrel. The exact eight-tool
+  registry surface, Zod contracts, credential resolution, rate limits, usage
+  events, SSRF-protected HTTP path, write-side classification, and never-throw
+  envelopes remain unchanged and are protected by an architecture test.
+- The MCP server's 40-tool protocol surface is now separated into bounded
+  descriptor, risk-catalog, argument-validation, always-visible dispatch, and
+  write-dispatch modules behind the existing `tools.ts` compatibility barrel.
+  Tool order, JSON Schemas, risk annotations, stable routes, structured
+  results, and the process-plus-tenant write boundary remain unchanged; an
+  architecture test fixes the 26 visible / 14 gated inventory and acyclic
+  dependency direction.
+- Engine lifecycle persistence is now separated into bounded run, node, event,
+  queue-publication, and semantic-recovery ports behind the existing
+  `persistence.ts` compatibility barrel. All 40 runtime exports and 10 type
+  exports remain stable, and architecture tests enforce the closed module
+  inventory and acyclic dependency direction without changing SQL, migrations,
+  public APIs, or event payloads.
+- The canonical 71-table Drizzle schema is now composed from seven
+  side-effect-free bounded-context modules behind the existing `schema.ts` and
+  `@janusly/db` barrels. Application imports and table object identity remain
+  stable, schema architecture tests enforce complete/unique composition, and
+  Drizzle Kit confirms the refactor produces no migration. Portable local
+  backups now inventory every schema domain and fail closed on empty or
+  duplicate declarations instead of assuming tables live in the barrel.
+- Stable `/v1` API contracts are now organized into side-effect-free domain
+  modules behind one ordered pure manifest and the existing compatibility
+  barrel. OpenAPI generation, runtime aliasing, authorization descriptors, and
+  first-party imports retain the same contract surface while future changes no
+  longer expand one monolithic contract file.
+- Concrete workflow executors now receive node-type-specific configuration
+  inferred from the same Zod schemas used at runtime dispatch. The registry is
+  compile-time exhaustive for executor-owned node types, while runtime-owned
+  routers remain explicitly outside it; malformed nested multi-agent entries
+  and invalid subworkflow version shapes now fail before executor logic.
+- Workflow runtime integration tests now have reusable stateful in-memory
+  persistence, queue/DLQ, and scripted-executor adapters. They exercise the
+  real orchestration lifecycle without Postgres or Redis while retaining
+  generation, recovery-token, retry, terminal-failure, and semantic-quarantine
+  safeguards; database and BullMQ suites remain authoritative for their own
+  concurrency and delivery guarantees.
+- The web jsdom suite now retains file-level parallelism while bounding worker
+  concurrency to the smaller of three or the host's available parallelism. This
+  prevents high-core machines from turning lazy-module scheduling pressure into
+  unrelated UI-test timeouts without hiding slow tests behind larger deadlines.
+- Web performance governance now distinguishes the complete JS/CSS deploy
+  artifact from the worst single-locale JS/CSS set instead of treating mutually
+  exclusive English and Spanish catalogs as one normal-session transfer.
+  Browser gates now also enforce budgets for Spanish cold Home, explicit
+  locale switching, and the secondary Recovery automation disclosure.
+- The primary product navigation is now organized around six operator tasks:
+  Home, Recover, Workflows, Runs, Connections, and Settings. Advanced authoring
+  and administration remain available through contextual surfaces and the
+  command palette, while saved deep links and permission checks remain intact.
+- Recovery Center Home now reads one coalesced, permission-aware snapshot.
+  Individual sections still fail independently, so a malformed or unavailable
+  source cannot blank healthy recovery evidence.
+- Supervised auto-healing now authorizes narrow autonomous publication only at
+  the durable claim boundary. The server re-evaluates the immutable recovery
+  policy, exact repair diff, validation strength, prior verified impact,
+  one-execution blast radius, rollback availability, and effect-receipt posture;
+  a failed factor keeps the candidate operator-gated.
+- Recovery Center, Operations, and value exports now use a versioned
+  production-only median time to verified recovery, with p90 as a guardrail.
+  Validation runs and invalid recovery clocks are excluded from impact writes
+  and windowed operational metrics; the legacy average `mttr` response field
+  remains for compatible clients.
 - Integration credential values now default to an organization-scoped encrypted
   PostgreSQL Secret Store protected by one external deployment root key.
   Environment-variable references remain an explicit migration mode, while
@@ -64,12 +132,62 @@ retroactively.
 - The Python SDK's synchronous and asynchronous run/recovery resources now use
   the same stable `/v1` envelopes, typed protocol-drift errors, filters, and
   keyset cursor semantics as the Node SDK.
-- The stdio MCP server now consumes stable envelopes for contracted workflow,
-  run, recovery, and outbound-connection operations while preserving legacy
-  calls for routes that do not yet have explicit contracts.
+- The stdio MCP server now consumes stable envelopes for every published
+  workflow, run, recovery, report, memory, and outbound-connection operation.
+- The stdio MCP server now exposes an agent-complete workflow lifecycle with
+  structured tool results, risk annotations, recoverable `isError` failures,
+  complete stable list filters, primitive JSON run inputs, durable run polling
+  and usage tools, recovery/memory evidence, and outbound-connection updates.
+  Patched failures can be continued on a saved version through idempotent run
+  redrive, and circuit-breaker pauses can be resumed with bounded trigger
+  backfill. Broad platform administration, workflow trash controls, and secret
+  values remain deliberately outside the agent surface.
+- Outbound MCP Streamable HTTP and legacy SSE connections now use the same
+  connect-time DNS pin and redirect revalidation as Janusly HTTP tools,
+  including cross-origin credential stripping and deterministic cleanup after
+  failed initialization or long-lived streams.
 
 ### Added
 
+- A privacy-bounded local moderated-usability kit records five pseudonymous
+  task observations per participant, writes owner-only session files, produces
+  a fail-closed acceptance report, and keeps automated browser readiness
+  evidence explicitly separate from the required five unfamiliar human
+  participants.
+
+- Deterministic semantic outcome recovery through `RecoveryContractV2`.
+  Expression/schema detectors can observe or quarantine an unacceptable output,
+  durable Recovery Cases retain append-only transition evidence, and only a
+  detector-valid replacement or explicit accepted loss can continue a
+  quarantined workflow.
+- A dedicated Recovery Case workspace and stable API/MCP operations for listing,
+  inspecting, and resolving semantic cases without reconstructing the lifecycle
+  across unrelated panels.
+- Exact baseline/candidate semantic dataset qualification before canary traffic.
+  Qualification runs no nodes or provider effects, rejects stale evaluator
+  receipts, and never grants mutation authority to an LLM judge.
+- Signed, idempotent shadow ingestion for externally executed workflows. The
+  API, Operations UI, and Node SDK retain monotonic workflow/run/step
+  projections and bounded scrubbed evidence while deliberately exposing no
+  external control authority or Janusly verified-recovery credit.
+- A committed 25-case, provider-free Recovery evaluation corpus covering nine
+  deterministic production capabilities. Its fail-closed baseline pins the
+  dataset hash and requires 100% overall, per-capability, and safety-critical
+  pass rates with zero unsafe acceptances and zero secret leaks; CI runs the
+  suite at no provider cost.
+- An explicit Real Recovery Lab that creates and destroys one isolated local
+  payment-retry tenant, injects a provider-boundary failure, reaches the real
+  DLQ, validates an idempotent webhook repair through the normal engine path,
+  persists a provider-scoped effect receipt, publishes and redrives the repair,
+  verifies the recovery ledger, and proves duplicate delivery does not repeat
+  the provider effect. English/Spanish browser evidence and a machine-readable
+  result bundle are produced by one local command.
+- Versioned `RecoveryContractV1` and `RecoveryCaseState` domain contracts. A
+  workflow can retain operator-owned technical-failure, evidence, effect,
+  repair, validation, approval/autonomy, verification, and recurrence policy;
+  legal case transitions require actor-attributed evidence receipts. Historical
+  V1 snapshots remain compatible and keep semantic detection disabled unless an
+  operator explicitly adopts V2.
 - Prompt-generated PagerDuty V3 workflows: recognized off-hours requests
   compile locally into a visible signed-trigger, authoritative-read,
   deterministic-policy, acknowledge, snooze, and evidence graph. Credential
@@ -125,10 +243,13 @@ retroactively.
 - A unified Runs workspace with accessible Overview, Timeline, and Agents
   views, preserving direct expert access to the full reasoning and multi-agent
   surfaces through the command palette.
-- Selectable Recovery Drills in Solution Packs for credential availability and
-  expiry, malformed AI output, rate limits, upstream contract drift, and
-  provider outages. Drill runs retain durable source evidence and enter the
-  real recovery queue without exposing raw fixture errors in the catalog.
+- Selectable Recovery Drills in Solution Packs now cross real runtime
+  boundaries instead of directly inserting failed runs. Credential drills pass
+  through BullMQ, the worker, retry classification, the atomic terminal
+  transition, and the DLQ before returning measured evidence. The controlled
+  missing-secret probe is correctly non-retryable and prevents provider calls
+  and external effects. Historical direct-fixture provenance remains readable
+  but is no longer published by the current pack catalog.
 - A controlled worker-interruption drill that creates one scoped stale claim,
   honors the configured reaper threshold, exercises the production CAS/DLQ
   path, and reports measured scan, reap, dead-letter, and runtime evidence.
@@ -166,6 +287,13 @@ retroactively.
 
 ### Fixed
 
+- Recovery Playbooks now match repeated stalled-worker failures using the
+  stable `worker_stalled` code instead of timestamp-bearing error prose, so a
+  later occurrence can revalidate the active playbook rather than appearing as
+  an unrelated failure.
+- Workflow save no longer strips documented `recovery` settings, and
+  full-workflow AI improvement cannot invent or overwrite the operator-owned
+  recovery policy.
 - Opening Step setup no longer injects a three-node Sample workflow; a new
   workspace starts with an untitled, empty canvas and explicit add-step
   guidance.
@@ -211,6 +339,20 @@ retroactively.
   relying on Vite's transpilation to hide static drift.
 - Operator metadata, AI cost chips, active navigation, section kickers, and
   command-palette text now retain WCAG AA contrast in light and dark themes.
+- The runs list, Flows list, and Trash list keysets are now backed by
+  sort-aligned indexes (org, timestamp DESC, id DESC — NULLS FIRST to match
+  the queries' ORDER BY), replacing strict-prefix indexes that forced Postgres
+  to re-sort the organization's entire run history on every page. Operators
+  deploying to production apply the migration's sibling `production-rollout.sql`
+  (concurrent index creates/drops) before `pnpm migrate`.
+- The same sort alignment now covers every other list whose index was declared
+  DESC NULLS LAST on a nullable timestamp and therefore never served its
+  query's ordering: the recovery queue's newest/oldest and status-filtered
+  pages, the audit viewer keyset and budget-gate dedup read, replay campaigns,
+  recovery feedback, prompts, buffered trigger events, and the external-runtime
+  workflow/run/step projections. Verified index-ordered (no re-sort) via
+  EXPLAIN for each consumer shape; the migration ships the same
+  `production-rollout.sql` concurrent-rollout runbook.
 
 ## Development milestone: recovery platform hardening
 

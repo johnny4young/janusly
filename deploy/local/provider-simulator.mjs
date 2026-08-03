@@ -15,18 +15,31 @@ const dataDir = process.env.SIMULATOR_DATA_DIR ?? "/data";
 const statePath = `${dataDir}/state.json`;
 const requestPath = `${dataDir}/requests.jsonl`;
 const pagerDutyStatePath = `${dataDir}/pagerduty-incidents.json`;
+const webhookEffectsPath = `${dataDir}/webhook-effects.json`;
 const bodyLimit = 1_000_000;
-const providers = ["github", "slack", "webhook", "email", "pagerduty"];
-const modes = ["success", "failure", "malformed"];
+const webhookEffectLimit = 2_000;
+const providerModes = {
+  github: ["success", "failure", "malformed"],
+  slack: ["success", "failure", "malformed"],
+  webhook: ["success", "failure", "malformed"],
+  email: ["success", "failure", "malformed"],
+  pagerduty: ["success", "failure", "malformed"],
+  anthropic: ["success", "failure", "malformed", "semantic_violation"],
+};
+const providers = Object.keys(providerModes);
 const state = Object.fromEntries(providers.map((provider) => [provider, "success"]));
 let recordTail = Promise.resolve();
+let webhookEffectTail = Promise.resolve();
 const pagerDutyIncidents = new Map();
+const webhookEffects = new Map();
 
 await mkdir(dataDir, { recursive: true });
 try {
   const persisted = JSON.parse(await readFile(statePath, "utf8"));
   for (const provider of providers) {
-    if (modes.includes(persisted[provider])) state[provider] = persisted[provider];
+    if (providerModes[provider].includes(persisted[provider])) {
+      state[provider] = persisted[provider];
+    }
   }
 } catch {
   // First boot has no state file.
@@ -42,6 +55,18 @@ try {
   }
 } catch {
   // First boot has no PagerDuty incident state.
+}
+try {
+  const persistedEffects = JSON.parse(await readFile(webhookEffectsPath, "utf8"));
+  if (Array.isArray(persistedEffects)) {
+    for (const effect of persistedEffects.slice(-webhookEffectLimit)) {
+      if (effect && typeof effect === "object" && typeof effect.key === "string") {
+        webhookEffects.set(effect.key, effect);
+      }
+    }
+  }
+} catch {
+  // First boot has no webhook effect state.
 }
 
 function send(res, statusCode, body, contentType = "application/json") {
@@ -72,9 +97,10 @@ async function readBody(req) {
 }
 
 function providerFor(pathname) {
+  if (pathname === "/v1/messages") return "anthropic";
   if (pathname.startsWith("/github/")) return "github";
   if (pathname.startsWith("/slack/")) return "slack";
-  if (pathname === "/webhook") return "webhook";
+  if (pathname === "/webhook" || pathname.startsWith("/webhook/")) return "webhook";
   if (pathname === "/email/send") return "email";
   if (pathname.startsWith("/pagerduty/")) return "pagerduty";
   return null;
@@ -115,6 +141,9 @@ async function recordRequest(provider, req, url, body) {
     method: req.method,
     path: url.pathname,
     target: url.searchParams.get("target"),
+    idempotencyKey: typeof req.headers["x-idempotency-key"] === "string"
+      ? req.headers["x-idempotency-key"]
+      : null,
     body: body.json ?? body.raw.slice(0, 4_000),
   };
   const write = recordTail.then(async () => {
@@ -136,6 +165,85 @@ async function listRequests() {
   }
 }
 
+function webhookSimulationScope(req) {
+  return req.headers["x-janusly-simulation-scope"] === "validation"
+    ? "validation"
+    : "production";
+}
+
+async function persistWebhookEffects() {
+  await writeFile(
+    webhookEffectsPath,
+    `${JSON.stringify([...webhookEffects.values()], null, 2)}\n`,
+    "utf8",
+  );
+}
+
+async function recordWebhookEffect(req, url, entry) {
+  const idempotencyKey = typeof req.headers["x-idempotency-key"] === "string"
+    ? req.headers["x-idempotency-key"].trim() || null
+    : null;
+  const target = url.searchParams.get("target") ?? url.pathname;
+  const scope = webhookSimulationScope(req);
+  const key = JSON.stringify([scope, target, idempotencyKey ?? entry.id]);
+
+  const operation = webhookEffectTail.then(async () => {
+    const existing = idempotencyKey ? webhookEffects.get(key) : null;
+    if (existing) {
+      existing.deliveryCount = Number(existing.deliveryCount ?? 1) + 1;
+      existing.lastRequestId = entry.id;
+      existing.lastReceivedAt = entry.receivedAt;
+      await persistWebhookEffects();
+      return {
+        kind: "provider_simulation_receipt",
+        version: 1,
+        provider: "webhook",
+        operation: "deliver",
+        scope,
+        effectId: existing.effectId,
+        idempotencyKey,
+        applied: false,
+        duplicate: true,
+        requestId: entry.id,
+      };
+    }
+
+    const effect = {
+      key,
+      effectId: crypto.randomUUID(),
+      scope,
+      target,
+      idempotencyKey,
+      firstRequestId: entry.id,
+      lastRequestId: entry.id,
+      createdAt: entry.receivedAt,
+      lastReceivedAt: entry.receivedAt,
+      deliveryCount: 1,
+    };
+    webhookEffects.set(key, effect);
+    while (webhookEffects.size > webhookEffectLimit) {
+      const oldest = webhookEffects.keys().next().value;
+      if (typeof oldest !== "string") break;
+      webhookEffects.delete(oldest);
+    }
+    await persistWebhookEffects();
+    return {
+      kind: "provider_simulation_receipt",
+      version: 1,
+      provider: "webhook",
+      operation: "deliver",
+      scope,
+      effectId: effect.effectId,
+      idempotencyKey,
+      applied: true,
+      duplicate: false,
+      requestId: entry.id,
+    };
+  });
+  webhookEffectTail = operation.catch(() => {});
+  return operation;
+}
+
 function githubResponse(pathname, mode, entry) {
   if (mode === "failure") return [503, { message: "simulated GitHub outage" }];
   const comment = /\/issues\/\d+\/comments$/.test(pathname);
@@ -143,6 +251,56 @@ function githubResponse(pathname, mode, entry) {
   return comment
     ? [201, { id: 43, html_url: `http://localhost:${port}/ui/comments/43`, requestId: entry.id }]
     : [201, { number: 42, html_url: `http://localhost:${port}/ui/issues/42`, requestId: entry.id }];
+}
+
+function anthropicResponse(mode, entry, body) {
+  if (mode === "failure") {
+    return [
+      503,
+      {
+        type: "error",
+        error: {
+          type: "api_error",
+          message: "simulated Anthropic outage",
+        },
+      },
+    ];
+  }
+  if (mode === "malformed") {
+    return [200, { id: `msg_${entry.id}`, type: "message" }];
+  }
+
+  const assessment = mode === "semantic_violation"
+    ? {
+        decision: "hold",
+        riskScore: 0.92,
+        reason: "The model could not verify the retry against the business policy.",
+      }
+    : {
+        decision: "retry",
+        riskScore: 0.12,
+        reason: "The retry is within the configured business policy.",
+      };
+  const text = JSON.stringify(assessment);
+  return [
+    200,
+    {
+      id: `msg_${entry.id.replaceAll("-", "")}`,
+      type: "message",
+      role: "assistant",
+      model:
+        typeof body.json?.model === "string"
+          ? body.json.model
+          : "claude-haiku-4-5-20251001",
+      content: [{ type: "text", text }],
+      stop_reason: "end_turn",
+      stop_sequence: null,
+      usage: {
+        input_tokens: 40,
+        output_tokens: Math.max(1, Math.ceil(text.length / 4)),
+      },
+    },
+  ];
 }
 
 const server = createServer(async (req, res) => {
@@ -161,11 +319,26 @@ const server = createServer(async (req, res) => {
       send(res, 200, { ok: true });
       return;
     }
+    if (req.method === "GET" && url.pathname === "/effects") {
+      await webhookEffectTail;
+      send(res, 200, { effects: [...webhookEffects.values()] });
+      return;
+    }
+    if (req.method === "DELETE" && url.pathname === "/effects") {
+      await webhookEffectTail;
+      webhookEffects.clear();
+      await rm(webhookEffectsPath, { force: true });
+      send(res, 200, { ok: true });
+      return;
+    }
     if (req.method === "POST" && url.pathname === "/control") {
       const body = await readBody(req);
       const provider = body.json?.provider;
       const mode = body.json?.mode;
-      if (!providers.includes(provider) || !modes.includes(mode)) {
+      if (
+        !providers.includes(provider)
+        || !providerModes[provider].includes(mode)
+      ) {
         send(res, 400, { error: "provider and mode must be valid closed values" });
         return;
       }
@@ -184,6 +357,16 @@ const server = createServer(async (req, res) => {
     const body = await readBody(req);
     const entry = await recordRequest(provider, req, url, body);
     const mode = state[provider];
+
+    if (provider === "anthropic") {
+      if (req.method !== "POST") {
+        send(res, 405, { error: "method_not_allowed" });
+        return;
+      }
+      const [statusCode, payload] = anthropicResponse(mode, entry, body);
+      send(res, statusCode, payload);
+      return;
+    }
 
     if (provider === "pagerduty") {
       if (mode === "failure") {
@@ -242,8 +425,11 @@ const server = createServer(async (req, res) => {
     }
     if (provider === "webhook") {
       if (mode === "failure") send(res, 503, { error: "simulated webhook outage" });
-      else if (mode === "malformed") send(res, 200, "unexpected", "text/plain");
-      else send(res, 202, { accepted: true, requestId: entry.id });
+      else {
+        const receipt = await recordWebhookEffect(req, url, entry);
+        if (mode === "malformed") send(res, 200, "unexpected", "text/plain");
+        else send(res, 202, { accepted: true, requestId: entry.id, receipt });
+      }
       return;
     }
     if (mode === "failure") send(res, 503, { error: "simulated email outage" });
@@ -256,7 +442,9 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`[provider-simulator] listening on http://${host}:${port}`);
+  const address = server.address();
+  const listeningPort = typeof address === "object" && address ? address.port : port;
+  console.log(`[provider-simulator] listening on http://${host}:${listeningPort}`);
 });
 
 for (const signal of ["SIGINT", "SIGTERM"]) {

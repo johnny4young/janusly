@@ -112,7 +112,9 @@ worth understanding before you connect one you did not write:
   connection is even opened.
 - **Remote URLs are SSRF-gated.** `http` and `sse` targets are validated before
   the transport is constructed, rejecting localhost, private ranges,
-  link-local, and cloud metadata endpoints.
+  link-local, and cloud metadata endpoints. Every SDK request and redirect is
+  then revalidated and connected through the exact checked public IP, including
+  the legacy EventSource stream.
 - **`stdio` runs a process on your infrastructure**, so it is the most guarded:
   the command must appear in an allowlist (`JANUSLY_MCP_ALLOWED_COMMANDS` or a
   tenant override, fail-closed when both are empty), the child's environment is
@@ -124,12 +126,9 @@ worth understanding before you connect one you did not write:
 - **Every call emits start/completion run events and a usage event**, scoped
   per tenant. Administrative connection/tool changes use the audit log.
 
-Two limits worth knowing rather than discovering later. First, the `http`/`sse`
-transports validate the URL up front but their TCP connect does not reuse the
-pinned DNS dispatcher that `http` nodes use, so deliberate operator
-registration is the real perimeter for a rebinding attack. Second, a tool that
-vanishes upstream keeps its cached descriptor; workflows calling it fail into
-the normal recovery path rather than silently changing behavior.
+One limit worth knowing rather than discovering later: a tool that vanishes
+upstream keeps its cached descriptor. Workflows calling it fail into the normal
+recovery path rather than silently changing behavior.
 
 ## When to use what
 
@@ -141,8 +140,32 @@ the normal recovery path rather than silently changing behavior.
 | Your own database | `db.query.*` with a `postgres` credential |
 | A recurring weekday/time-of-day rule | `time.window`, not a connector |
 
+## Let an external AI agent operate Janusly
+
+The sibling `@janusly/mcp-server` runs over stdio and exposes an
+agent-complete workflow lifecycle: discover → author → validate/readiness →
+save → run/poll → inspect/recover. A patch saved as a new workflow version is
+continued with `runs.redrive`; `dlq.replay` intentionally retries the original
+run snapshot instead. A recovery-circuit pause can be cleared with the narrow
+`workflows.resume` operation, which backfills buffered triggers in bounded
+pages. Tool results are available as both JSON text and `structuredContent`;
+expected validation/API failures stay in the tool loop as `isError: true`.
+
+This does **not** mean an agent receives unrestricted platform administration.
+Secrets, users/memberships, arbitrary tenant configuration, deployment
+rollouts, and workflow trash/delete/restore controls remain operator-owned. The
+write subset also requires both `JANUSLY_MCP_WRITES_ENABLED=true` and tenant
+`mcp.writeConsent=true`, in addition to normal route permissions.
+
+Janusly run IDs already provide durable asynchronous execution, so the server
+uses `runs.start` + `runs.status` rather than duplicating state into the
+experimental MCP Tasks utility. See
+[`docs/architecture/mcp-server.md`](architecture/mcp-server.md) for the exact
+surface and rationale.
+
 ---
 
-Implementation details — transport internals, the six sanitisation layers,
-descriptor lifecycle, audit actions, permission catalog entries — live in
+Implementation details for consuming third-party MCP tools—transport internals,
+the sanitisation layers, descriptor lifecycle, audit actions, and permission
+catalog entries—live in
 [`docs/architecture/mcp-client.md`](architecture/mcp-client.md).

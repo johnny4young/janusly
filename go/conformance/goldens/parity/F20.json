@@ -1,0 +1,15 @@
+{
+  "runStatus": "succeeded",
+  "nodes": {
+    "inbox": {
+      "status": "succeeded",
+      "attempts": 1
+    },
+    "call": {
+      "status": "succeeded",
+      "attempts": 1
+    }
+  },
+  "outputJson": null,
+  "deadLetters": 0
+}

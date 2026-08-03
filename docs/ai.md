@@ -29,7 +29,7 @@ This guide covers local setup. For production secret management, point the same 
 | Feature | Endpoint / surface | Without key | With key |
 | --- | --- | --- | --- |
 | Suggest 1–3 alternative patches for a failing node | `POST /ai/patch-workflow` | `{ mode: "fallback" }` with a single 0-confidence "other" item and the original workflow untouched | Per-failing-node-type envelope returns `suggestions: Array<{ workflow, rationale, approachLabel, confidence }>` (1–3 items, sorted by confidence desc). Recovery dialog renders one tab per item. |
-| Sandbox-validate a proposed patch before saving | `POST /dlq/validate-fix` | Always available — sandbox is provider-agnostic | Same; gates the production save+replay chain |
+| Sandbox-validate a proposed patch before saving | `POST /dlq/validate-fix` | Always available — sandbox is provider-agnostic | Same; gates the production save+redrive chain |
 | Apply a patch across every DLQ entry sharing a failure signature | `POST /dlq/cluster-apply` | Always available | Same; recovery dialog reuses the multi-suggestion tabs in cluster mode |
 | Failure clustering | `GET /dlq/clusters` | Always available — deterministic signature classifier | Same |
 | Roll back a workflow to any prior version | `POST /workflows/rollback` | Always available — pure CRUD | Same |
@@ -209,6 +209,23 @@ baseline's tolerance band does). An `ai` case that falls back without an
 run stays green at $0. Refresh the baseline floors with `pnpm evals:baseline`;
 the pure gate logic is unit-tested at $0 via `pnpm test:evals`.
 
+Recovery has a separate committed, provider-free regression corpus:
+[`evals/recovery-intelligence.json`](../evals/recovery-intelligence.json).
+`pnpm evals:recovery` evaluates those cases through the production failure
+normalizer, config/structural patch appliers, mutation-safety projection,
+candidate-ranking helper, semantic qualification evaluator, Level 4 evidence
+gate, and verified-recovery sample builder. Its committed
+[`evals/recovery-baseline.json`](../evals/recovery-baseline.json) requires a
+100% overall, per-capability, and safety-critical pass rate, zero unsafe
+acceptances, and zero secret leaks. Dataset version, stable SHA-256, and case
+count are part of the gate, so changing the corpus requires an explicit
+`pnpm evals:recovery:baseline` after every case is green.
+
+The Recovery corpus is deterministic control evidence, not a claim about LLM
+diagnosis precision or patch usefulness. It makes no provider call and costs
+$0. Live Anthropic quality, business usefulness, and production recurrence
+still require an explicitly approved provider run or design-partner evidence.
+
 Use `pnpm evals:local` when you want the wrapper to boot Postgres + Redis,
 apply migrations, start the API, run the same golden evals, and tear the stack
 down. It can spend provider credits when `ANTHROPIC_API_KEY` is reachable. The
@@ -236,10 +253,36 @@ selected set.
 ## 5. Use it from the UI
 
 1. **Open** <http://localhost:5173>.
-2. Start in **AI Copilot** and describe the outcome you want. With no key, Janusly loads a deterministic starter workflow; with a key, it drafts a workflow from the prompt.
-3. Click **Explain current flow** to get a plain-language explanation of the canvas.
-4. Click **Run** on the workflow.
-5. Switch to **Run history** and ask Janusly what happened. Each reply tags `mode: "ai"` (LLM) or `mode: "fallback"` (deterministic) so you always know which path served the answer.
+2. Open **Workflows**. For a new workflow, choose **Describe it** to ask
+   Janusly for a draft, or **Start blank** to author it directly.
+3. In **Build**, select an **AI prompt** step on the canvas. **Quick setup**
+   offers two prompt sources:
+   - **Write it here** stores an inline `config.prompt`.
+   - **Use a saved prompt** stores `config.promptRef`. Choose a prompt from the
+     organization registry; Advanced options can pin an exact version and
+     supply its declared variables. When version is blank, the runtime uses the
+     prompt's pinned version or otherwise its latest version.
+4. Choose the output contract:
+   - **Text** returns the answer under `output.response`.
+   - **JSON text** asks the provider for JSON but still returns the text under
+     `output.response`.
+   - **Validated structured data** validates the response against the shown
+     JSON Schema subset and exposes accepted fields under `output.data`.
+5. Leave **Model override** blank to use the organization default. If it is
+   necessary to override it, use an approved Anthropic model.
+6. Save, then click **Run**. Without a configured provider, on budget/provider
+   failure, on missing prompt data, or on an invalid structured result, the AI
+   step completes through the deterministic `mode: "fallback"` path instead
+   of crashing the workflow. Structured-output fallbacks include
+   `valid: false`.
+7. Open **Activity → Runs** and ask Janusly what happened. Each AI response
+   identifies `mode: "ai"` or `mode: "fallback"` so the serving path remains
+   explicit.
+
+Saved prompts are currently created and versioned through the REST API or MCP;
+the Build Inspector intentionally consumes that registry rather than creating a
+second browser-only prompt store. See the PromptOps routes in
+[`docs/api.md`](api.md).
 
 ---
 

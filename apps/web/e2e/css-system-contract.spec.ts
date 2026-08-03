@@ -1,12 +1,13 @@
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 
 const API_URL = process.env.E2E_API_URL ?? 'http://localhost:3001'
 const DEV_HEADERS = { 'Content-Type': 'application/json', 'x-org-id': 'default', 'x-user-id': 'dev-user' }
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 
 const copy = {
-  en: { flows: 'Flows', connections: 'Connections' },
+  en: { flows: 'Workflows', connections: 'Connections' },
   es: { flows: 'Flujos', connections: 'Conexiones' },
 } as const
 
@@ -74,7 +75,7 @@ test('canonical card and pill CSS contracts render in both locales', async ({ pa
       await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
       await page.reload()
     }
-    await expect(page.getByText('dev-user')).toBeVisible()
+    await expect(page.locator('.user-menu__trigger-name')).toHaveText('dev-user')
 
     await page.getByRole('button', { name: copy[locale].flows, exact: true }).click()
     const row = page.getByTestId(`workflows-row-${workflowId}`)
@@ -89,8 +90,12 @@ test('canonical card and pill CSS contracts render in both locales', async ({ pa
     await expect(page.locator('.panel-card')).toHaveCount(0)
     await capture(row, `web-${locale}-css-system-flow-pill`)
 
-    await page.getByRole('button', { name: copy[locale].connections, exact: true }).click()
-    const card = page.locator('section.we-card.connection-form')
+    await openWorkspaceSection(
+      page,
+      locale === 'en' ? 'Settings' : 'Configuración',
+      copy[locale].connections,
+    )
+    const card = page.locator('section.we-card.we-connections-inventory')
     await expect(card).toBeVisible()
     await expect.poll(() => card.evaluate((element) => {
       const style = getComputedStyle(element)

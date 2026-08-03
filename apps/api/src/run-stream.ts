@@ -17,7 +17,7 @@
  *
  * Used by:
  * - `apps/api/src/index.ts` — boot: `registerRunEventPublisher()`.
- * - `apps/api/src/routes/runs-routes.ts` — the `GET /runs/:runId/stream` route
+ * - `apps/api/src/routes/run-routes/stream.ts` — the `GET /runs/:runId/stream` route
  *   adds/removes subscribers.
  *
  * Org isolation (defense in depth): the channel is keyed by `runId` and a run

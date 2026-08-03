@@ -8,51 +8,16 @@
  */
 
 import { mkdir } from 'node:fs/promises'
-import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 
-const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']
-const BLOCKING_IMPACTS = new Set(['serious', 'critical'])
+import { expectNoBlockingAccessibilityViolations } from './_helpers/accessibility'
+import {
+  addCanvasStep,
+  openWorkflowAiAction,
+  openWorkspaceSection,
+} from './_helpers/workspace-navigation'
+
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
-
-type BlockingViolation = {
-  context: string
-  impact: string
-  rule: string
-  help: string
-  nodes: Array<{
-    target: string[]
-    summary: string
-  }>
-}
-
-async function expectNoBlockingAccessibilityViolations(page: Page, context: string): Promise<void> {
-  await page.locator('html').evaluate((root) => {
-    for (const animation of root.getAnimations({ subtree: true })) {
-      const endTime = animation.effect?.getComputedTiming().endTime
-      if (typeof endTime === 'number' && Number.isFinite(endTime)) animation.finish()
-    }
-  })
-
-  const results = await new AxeBuilder({ page })
-    .withTags(WCAG_TAGS)
-    .analyze()
-
-  const violations: BlockingViolation[] = results.violations
-    .filter((violation) => violation.impact && BLOCKING_IMPACTS.has(violation.impact))
-    .map((violation) => ({
-      context,
-      impact: violation.impact ?? 'unknown',
-      rule: violation.id,
-      help: violation.help,
-      nodes: violation.nodes.map((node) => ({
-        target: node.target.map(String),
-        summary: node.failureSummary ?? node.html,
-      })),
-    }))
-
-  expect(violations, `${context} must have no serious or critical axe violations`).toEqual([])
-}
 
 function installBrowserErrorGuards(page: Page): string[] {
   const errors: string[] = []
@@ -74,34 +39,48 @@ async function capture(surface: Locator, filename: string): Promise<void> {
   })
 }
 
-test('Recovery Center and its primary queue path meet the accessibility floor', async ({ page }) => {
+async function prepareIsolatedSession(page: Page, locale: 'en' | 'es'): Promise<void> {
+  const orgId = `accessibility-${locale}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  await page.addInitScript(({ activeOrg, selectedLocale }) => {
+    window.localStorage.setItem('janusly:activeOrg', activeOrg)
+    window.localStorage.setItem('janusly:locale', selectedLocale)
+  }, { activeOrg: orgId, selectedLocale: locale })
+}
+
+test('Home and its primary Activity path meet the accessibility floor', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   const errors = installBrowserErrorGuards(page)
+  await prepareIsolatedSession(page, 'en')
   await page.goto('/')
 
   const hero = page.locator('.we-recovery-center-hero')
   await expect(hero).toBeVisible()
-  await expectNoBlockingAccessibilityViolations(page, 'Recovery Center home')
-  await capture(page.locator('.workspace-main'), 'accessibility-en-recovery-center')
+  await expectNoBlockingAccessibilityViolations(page, 'Home')
+  await capture(page.locator('.workspace-main'), 'accessibility-en-home')
 
-  await page.getByTestId('recovery-center-queue-open-all').click()
-  const queue = page.getByTestId('recovery-queue')
-  await expect(queue).toBeFocused()
-  await expectNoBlockingAccessibilityViolations(page, 'Recovery queue')
-  await capture(queue, 'accessibility-en-recovery-queue')
+  await page.getByTestId('home-active-work').getByRole('button', { name: 'Activity' }).click()
+  await expect(page.getByRole('heading', { name: 'Activity', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Recent activity' })).toBeVisible()
+  await expectNoBlockingAccessibilityViolations(page, 'Activity')
+  await capture(page.locator('.workspace-main'), 'accessibility-en-activity')
   expect(errors).toEqual([])
 })
 
-test('AI Studio and command palette meet the accessibility floor', async ({ page }) => {
+test('workflow builder and command palette meet the accessibility floor', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   const errors = installBrowserErrorGuards(page)
   await page.goto('/')
 
-  await page.getByRole('button', { name: /^AI Studio\b/ }).click()
+  await openWorkspaceSection(page, 'Workflows', 'Build')
   const studio = page.locator('.workspace-main')
   await expect(studio.locator('.react-flow')).toBeVisible()
-  await expectNoBlockingAccessibilityViolations(page, 'AI Studio')
-  await capture(studio, 'accessibility-en-ai-studio')
+  await addCanvasStep(page, 'Call an API')
+  await page.getByLabel('HTTP method', { exact: true }).selectOption('POST')
+  await page.getByText('Request & response options', { exact: true }).click()
+  await expect(page.getByLabel('JSON body', { exact: true })).toBeVisible()
+  await expect(page.getByLabel('Headers (JSON)', { exact: true })).toBeVisible()
+  await expectNoBlockingAccessibilityViolations(page, 'Workflow HTTP setup')
+  await capture(studio, 'accessibility-en-http-step-setup')
 
   await page.keyboard.press('ControlOrMeta+K')
   const palette = page.getByTestId('command-palette')
@@ -111,13 +90,57 @@ test('AI Studio and command palette meet the accessibility floor', async ({ page
   expect(errors).toEqual([])
 })
 
+test('AI-generated workflow result meets the accessibility floor', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const errors = installBrowserErrorGuards(page)
+  await prepareIsolatedSession(page, 'en')
+  await page.route('**/ai/generate-workflow', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      mode: 'ai',
+      provider: 'anthropic',
+      model: 'claude-haiku-4-5-20251001',
+      dslVersion: '1.0',
+      id: 'accessible-generated-flow',
+      name: 'Accessible approval flow',
+      nodes: [
+        {
+          id: 'fetch',
+          type: 'http',
+          config: { method: 'GET', url: 'https://api.github.com' },
+        },
+        {
+          id: 'approval',
+          type: 'approval',
+          config: { message: 'Review the API result.' },
+        },
+      ],
+      edges: [{ from: 'fetch', to: 'approval' }],
+    }),
+  }))
+  await page.goto('/')
+
+  await openWorkflowAiAction(page, 'Workflows')
+  await page.locator('.copilot-prompt').fill('Draft an API flow with human approval.')
+  await page.getByRole('button', { name: 'Draft flow', exact: true }).click()
+
+  const result = page.locator('.result-panel')
+  await expect(result).toContainText('Flow drafted by AI')
+  await expect(result.locator('.mode-pill-ai')).toBeVisible()
+  await expect(page.locator('.workflow-node').filter({ hasText: 'Ask approval' })).toBeVisible()
+  await expectNoBlockingAccessibilityViolations(page, 'AI-generated workflow result')
+  await capture(page.locator('.app-shell'), 'accessibility-en-ai-generated-result')
+  expect(errors).toEqual([])
+})
+
 test('Solution Packs recovery-drill selection meets the accessibility floor', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   const errors = installBrowserErrorGuards(page)
   await page.goto('/')
 
-  await page.getByRole('button', { name: 'Packs', exact: true }).click()
-  const pack = page.locator('.list-card').filter({ hasText: 'Incident triage' }).first()
+  await openWorkspaceSection(page, 'Workflows', 'Templates')
+  const pack = page.getByTestId('solution-pack-incident-triage')
   await expect(pack).toBeVisible()
   await pack.getByLabel('Failure scenario').selectOption('worker_interrupted_during_page')
   await expect(pack.getByText('Real reaper path')).toBeVisible()
@@ -144,8 +167,8 @@ test('mobile navigation meets the accessibility floor while open', async ({ page
 test('Spanish dark-mode Recovery Center and command palette meet the accessibility floor', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   const errors = installBrowserErrorGuards(page)
+  await prepareIsolatedSession(page, 'es')
   await page.addInitScript(() => {
-    window.localStorage.setItem('janusly:locale', 'es')
     window.localStorage.setItem('janusly:theme', 'dark')
   })
   await page.goto('/')

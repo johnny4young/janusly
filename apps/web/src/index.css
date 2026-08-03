@@ -1,6 +1,8 @@
-@import "tailwindcss";
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
 @import "./styles/foundations.css";
 @import "./styles/control-plane.css";
+@import "./styles/navigation.css";
 @import "./styles/workflow.css";
 @import "./styles/platform.css";
 @import "./styles/accessibility.css";
@@ -9,5 +11,6 @@
  * Ordered entrypoint for Janusly's dependency-free web design system.
  *
  * Used by: apps/web/src/main.tsx.
- * Invariant: keep imports in this order; feature modules refine earlier shared primitives.
+ * Invariant: keep imports in this order; canvas-only React Flow styles are
+ * demand-loaded by CanvasWorkspace instead of joining the Home cold path.
  */

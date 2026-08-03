@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { changeRuntimeLocale } from '../../i18n'
 import { RecoveryHeatmap } from './RecoveryHeatmap'
-import type { HeatmapDay } from './helpers'
+import type { HeatmapDay } from './recovery-center-model'
 
 // A fixed clock so the densified grid's day keys are deterministic.
 const NOW = Date.UTC(2026, 6, 6, 12, 0, 0)

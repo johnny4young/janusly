@@ -196,6 +196,17 @@ describe('tool-registry', () => {
     const textUpper = tools.find(tool => tool.name === 'text.uppercase')
     expect(textUpper?.required).toEqual(['value'])
     expect(textUpper?.optional).toBeUndefined()
+    expect(textUpper?.inputFields).toEqual([
+      { name: 'value', kind: 'string', required: true },
+    ])
+    expect(textUpper?.writeSide).toBe(false)
+    expect(http?.writeSide).toBe(true)
+    expect(http?.inputFields).toEqual(expect.arrayContaining([
+      { name: 'url', kind: 'string', required: true },
+      { name: 'headers', kind: 'json', required: false },
+      { name: 'maxResponseBytes', kind: 'integer', required: false },
+      { name: 'bodyMode', kind: 'string', required: false, options: ['buffer', 'stream'] },
+    ]))
     const dbRead = tools.find(tool => tool.name === 'db.query.read')
     expect(dbRead?.required).toEqual(['credential', 'sql'])
     expect(dbRead?.optional?.slice().sort()).toEqual(['maxRows', 'params', 'timeoutMs'])
@@ -238,10 +249,23 @@ describe('tool-registry', () => {
       'vector.upsert',
     ]))
 
-    // The web-facing contract remains compact; planner-only schemas do not
-    // increase the GET /tools payload.
+    // The web-facing contract stays compact: it exposes bounded field
+    // descriptors, never the planner-only JSON Schema.
     expect(publicTools[0]).not.toHaveProperty('inputSchema')
-    expect(publicTools[0]).not.toHaveProperty('writeSide')
+    expect(typeof publicTools[0]?.writeSide).toBe('boolean')
+    expect(publicTools.every(tool => Array.isArray(tool.inputFields))).toBe(true)
+    for (const tool of publicTools) {
+      const catalogKeys = [...(tool.required ?? []), ...(tool.optional ?? [])].sort()
+      const requiredOrder = [...tool.inputFields]
+        .sort((left, right) => Number(right.required) - Number(left.required))
+        .map(field => field.required)
+      expect(tool.inputFields.map(field => field.name).sort(), tool.name).toEqual(catalogKeys)
+      expect(tool.inputFields.map(field => field.required), tool.name).toEqual(requiredOrder)
+      for (const field of tool.inputFields) {
+        expect(field.required, `${tool.name}.${field.name}`).toBe(tool.required?.includes(field.name) ?? false)
+        if (field.options) expect(field.options.length, `${tool.name}.${field.name}`).toBeGreaterThan(0)
+      }
+    }
   })
 
   /* -------- text.* -------- */

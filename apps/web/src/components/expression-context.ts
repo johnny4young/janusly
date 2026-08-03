@@ -1,21 +1,28 @@
 /** Pure graph projection for safe expression-authoring suggestions. */
 
+import { validateExpression } from '@janusly/shared/src/expression'
 import type { WorkflowGraphEdge, WorkflowGraphNode, WorkflowInputSchemaShape } from '../types'
 
-export type ExpressionSuggestionKind = 'input' | 'upstream' | 'root' | 'operator'
+export type ExpressionValueType = 'string' | 'number' | 'boolean' | 'array' | 'unknown'
 export type ExpressionSuggestion = {
-  id: string
   token: string
-  kind: ExpressionSuggestionKind
+  kind: 'input' | 'upstream'
   nodeId?: string
-  /** Caret position relative to the inserted token; defaults to its end. */
-  caretOffset?: number
+  valueType?: ExpressionValueType
 }
+export type ExpressionAuthoringState =
+  | { status: 'empty' }
+  | { status: 'valid' }
+  | {
+      status: 'invalid'
+      code: 'invalid_grammar' | 'unresolved'
+      references?: string[]
+    }
 
 const knownOutputFields: Record<string, string[]> = {
-  http: ['statusCode', 'ok', 'body', 'json', 'jsonParseError', 'jsonParseSkipped'],
+  http: ['statusCode', 'ok', 'body', 'jsonParseError', 'jsonParseSkipped'],
   condition: ['result'],
-  loop: ['count', 'items'],
+  loop: ['count'],
   ai: ['mode', 'response'],
   agent: ['result'],
   multi_agent: ['result'],
@@ -25,19 +32,31 @@ const knownOutputFields: Record<string, string[]> = {
 function collectInputPaths(
   schema: WorkflowInputSchemaShape | undefined,
   prefix = 'context.input',
-): string[] {
+): Array<{ token: string; valueType: ExpressionValueType }> {
   if (!schema) return []
   if (schema.type === 'object' && schema.properties) {
     return Object.entries(schema.properties).flatMap(([key, child]) => {
       const path = `${prefix}.${key}`
-      return [path, ...collectInputPaths(child, path)]
+      return [
+        { token: path, valueType: expressionValueType(child.type) },
+        ...collectInputPaths(child, path),
+      ]
     })
   }
   if (schema.type === 'array' && schema.items) {
     const itemPath = `${prefix}[0]`
-    return [itemPath, ...collectInputPaths(schema.items, itemPath)]
+    return [
+      { token: itemPath, valueType: expressionValueType(schema.items.type) },
+      ...collectInputPaths(schema.items, itemPath),
+    ]
   }
   return []
+}
+
+function expressionValueType(type: WorkflowInputSchemaShape['type']): ExpressionValueType {
+  return type === 'string' || type === 'number' || type === 'boolean' || type === 'array'
+    ? type
+    : 'unknown'
 }
 
 /** Return only nodes that can have completed before the expression executes. */
@@ -109,32 +128,20 @@ export function buildExpressionSuggestions({
     includeTarget: mode === 'edge',
   })
 
-  const suggestions: ExpressionSuggestion[] = [
-    { id: 'root-context', token: 'context', kind: 'root' },
-    ...(mode === 'node' ? [{ id: 'root-inputs', token: 'inputs', kind: 'root' as const }] : []),
-    { id: 'workflow-input-root', token: 'context.input', kind: 'input' },
-    ...collectInputPaths(workflowInputs).map((token) => ({ id: `input-${token}`, token, kind: 'input' as const })),
-  ]
+  const suggestions: ExpressionSuggestion[] = collectInputPaths(workflowInputs)
+    .map(({ token, valueType }) => ({
+      token,
+      valueType,
+      kind: 'input' as const,
+    }))
 
   for (const nodeId of upstreamIds) {
     const node = byId.get(nodeId)
     if (!node) continue
     for (const token of inferredOutputPaths(node)) {
-      suggestions.push({ id: `upstream-${token}`, token, kind: 'upstream', nodeId })
+      suggestions.push({ token, kind: 'upstream', nodeId })
     }
   }
-
-  suggestions.push(
-    { id: 'operator-true', token: ' === true', kind: 'operator' },
-    { id: 'operator-not-null', token: ' != null', kind: 'operator' },
-    { id: 'operator-positive', token: ' > 0', kind: 'operator' },
-    { id: 'operator-contains', token: ' contains ""', kind: 'operator', caretOffset: 11 },
-    { id: 'operator-starts-with', token: ' startsWith ""', kind: 'operator', caretOffset: 13 },
-    { id: 'operator-matches', token: ' matches ""', kind: 'operator', caretOffset: 10 },
-    { id: 'operator-in', token: ' in []', kind: 'operator', caretOffset: 5 },
-    { id: 'operator-and', token: ' && ', kind: 'operator' },
-    { id: 'operator-or', token: ' || ', kind: 'operator' },
-  )
 
   return suggestions
 }
@@ -148,7 +155,7 @@ export function findUnresolvedExpressionReferences(
   const withoutStrings = expression.replace(/'[^']*'|"[^"]*"/g, '')
   const references = withoutStrings.match(/\b(?:context|inputs)(?:\.[A-Za-z0-9_$-]+|\[\d+\])*/g) ?? []
   const inputPaths = suggestions.filter((item) => item.kind === 'input').map((item) => item.token)
-  const inputShapeKnown = inputPaths.length > 1
+  const inputShapeKnown = inputPaths.length > 0
   const upstreamBases = suggestions
     .filter((item) => item.kind === 'upstream' && item.token.endsWith('.output'))
     .map((item) => item.token)
@@ -162,4 +169,23 @@ export function findUnresolvedExpressionReferences(
     }
     return !upstreamBases.some((base) => reference === base || reference.startsWith(`${base}.`))
   }))]
+}
+
+export function inspectExpressionAuthoring(
+  expression: string,
+  suggestions: ExpressionSuggestion[],
+  mode: 'node' | 'edge',
+): ExpressionAuthoringState {
+  if (!expression.trim()) return { status: 'empty' }
+  const parserResult = validateExpression(expression)
+  if (!parserResult.valid) {
+    return { status: 'invalid', code: 'invalid_grammar' }
+  }
+  if (mode === 'edge' && /\binputs(?:\.|\[)/.test(expression.replace(/'[^']*'|"[^"]*"/g, ''))) {
+    return { status: 'invalid', code: 'invalid_grammar' }
+  }
+  const unresolved = findUnresolvedExpressionReferences(expression, suggestions, mode)
+  return unresolved.length > 0
+    ? { status: 'invalid', code: 'unresolved', references: unresolved }
+    : { status: 'valid' }
 }

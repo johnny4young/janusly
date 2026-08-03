@@ -5,9 +5,8 @@
  *   - Multi-tenant scope on every read.
  *   - Diagnose / propose / validate / decide write the matching
  *     audit rows.
- *   - `recordDecision` is CAS-style — the second call against an
- *     already-applied row returns `{applied: false}` without writing
- *     a second audit row.
+ *   - Accepted decisions claim publication before `applied`; only a matching
+ *     durable receipt can complete the state transition.
  *   - `countRecentAttemptsBySignature` filters by window.
  *   - `sweepStaleValidating` flips stuck rows and writes the audit
  *     batch.
@@ -17,15 +16,24 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const insertValuesMock = vi.fn();
-const updateSetMock = vi.fn();
-const selectFromMock = vi.fn();
+const {
+  insertValuesMock,
+  updateSetMock,
+  selectFromMock,
+  transactionMock,
+} = vi.hoisted(() => ({
+  insertValuesMock: vi.fn(),
+  updateSetMock: vi.fn(),
+  selectFromMock: vi.fn(),
+  transactionMock: vi.fn(),
+}));
 
 vi.mock("@janusly/db", () => ({
   db: {
     insert: vi.fn(() => ({ values: insertValuesMock })),
     update: vi.fn(() => ({ set: updateSetMock })),
     select: vi.fn(() => ({ from: selectFromMock })),
+    transaction: transactionMock,
   },
   autoHealingRuns: {
     id: "id_col",
@@ -33,6 +41,11 @@ vi.mock("@janusly/db", () => ({
     deadLetterId: "dead_letter_id_col",
     signature: "signature_col",
     status: "status_col",
+    publicationReceipt: "publication_receipt_col",
+    publicationRepairAfter: "publication_repair_after_col",
+    publicationAttempts: "publication_attempts_col",
+    decisionActor: "decision_actor_col",
+    validationEvidenceLevel: "validation_evidence_level_col",
     createdAt: "created_at_col",
     updatedAt: "updated_at_col",
   } as Record<string, string>,
@@ -41,8 +54,10 @@ vi.mock("@janusly/db", () => ({
 
 import { db } from "@janusly/db";
 import {
+  claimApplyPublication,
+  completeApplyPublication,
   createDiagnosis,
-  recordDecision,
+  recordDeclineDecision,
   recordImmediateDecline,
   recordValidationOutcome,
   countRecentAttemptsBySignature,
@@ -62,6 +77,9 @@ beforeEach(() => {
   dbInsertMock.mockClear();
   dbUpdateMock.mockClear();
   dbSelectMock.mockClear();
+  transactionMock.mockReset().mockImplementation(
+    async (handler: (tx: typeof db) => Promise<unknown>) => handler(db),
+  );
 });
 
 afterEach(() => {
@@ -120,11 +138,16 @@ describe("recordValidationOutcome", () => {
     const where = vi.fn(() => ({ returning }));
     updateSetMock.mockReturnValue({ where });
 
-    await recordValidationOutcome("row-1", { outcome: "validated", validationSignature: null });
+    await recordValidationOutcome("row-1", {
+      outcome: "validated",
+      validationSignature: null,
+      validationEvidenceLevel: "writes_skipped",
+    });
 
     expect(updateSetMock).toHaveBeenCalledWith(expect.objectContaining({
       status: "validated",
       validationSignature: null,
+      validationEvidenceLevel: "writes_skipped",
     }));
     // One follow-up insert for the audit row.
     expect(insertValuesMock).toHaveBeenCalledTimes(1);
@@ -142,6 +165,7 @@ describe("recordValidationOutcome", () => {
     await recordValidationOutcome("row-1", {
       outcome: "validation_failed",
       validationSignature: "different-sig",
+      validationEvidenceLevel: "static",
       reason: "signature_changed",
     });
 
@@ -160,32 +184,82 @@ describe("recordValidationOutcome", () => {
   });
 });
 
-describe("recordDecision — CAS-style apply/decline", () => {
-  it("returns applied:true and writes the audit row when the CAS update affects a row", async () => {
+describe("durable apply decision", () => {
+  it("claims validated to publishing without writing an applied audit", async () => {
+    const returning = vi.fn().mockResolvedValue([{ id: "row-1" }]);
+    const where = vi.fn(() => ({ returning }));
+    updateSetMock.mockReturnValue({ where });
+
+    const result = await claimApplyPublication("org-1", "row-1", "user-1");
+
+    expect(result.claimed).toBe(true);
+    expect(result.receipt).toEqual(expect.any(String));
+    expect(updateSetMock).toHaveBeenCalledWith(expect.objectContaining({
+      status: "publishing",
+      decisionActor: "user-1",
+      publicationReceipt: result.receipt,
+    }));
+    expect(insertValuesMock).not.toHaveBeenCalled();
+  });
+
+  it("writes the applied audit only when a matching receipt completes the transition", async () => {
     const returning = vi.fn().mockResolvedValue([
-      { orgId: "org-1", signature: "sig-foo", deadLetterId: "dlq-1" },
+      {
+        signature: "sig-foo",
+        deadLetterId: "dlq-1",
+        decisionActor: "user-1",
+      },
     ]);
     const where = vi.fn(() => ({ returning }));
     updateSetMock.mockReturnValue({ where });
 
-    const result = await recordDecision("row-1", { actor: "user-1", accepted: true });
+    const result = await completeApplyPublication(
+      "org-1",
+      "row-1",
+      "receipt-1",
+    );
 
-    expect(result).toEqual({ applied: true });
+    expect(result).toBe(true);
     expect(insertValuesMock).toHaveBeenCalledWith(expect.objectContaining({
       action: "auto_healing.applied",
-      metadata: expect.objectContaining({ decisionActor: "user-1", signature: "sig-foo" }),
+      metadata: expect.objectContaining({
+        decisionActor: "user-1",
+        signature: "sig-foo",
+        publicationReceipt: "receipt-1",
+      }),
     }));
   });
 
-  it("returns applied:false and writes NO audit row when CAS update affects zero rows (race lost)", async () => {
+  it("writes no audit when completion loses the CAS race", async () => {
     const returning = vi.fn().mockResolvedValue([]);
     const where = vi.fn(() => ({ returning }));
     updateSetMock.mockReturnValue({ where });
 
-    const result = await recordDecision("row-1", { actor: "user-1", accepted: true });
+    const result = await completeApplyPublication(
+      "org-1",
+      "row-1",
+      "receipt-1",
+    );
 
-    expect(result).toEqual({ applied: false });
+    expect(result).toBe(false);
     expect(insertValuesMock).not.toHaveBeenCalled();
+  });
+
+  it("declines with a tenant-scoped CAS and one audit", async () => {
+    const returning = vi.fn().mockResolvedValue([
+      { signature: "sig-foo", deadLetterId: "dlq-1" },
+    ]);
+    const where = vi.fn(() => ({ returning }));
+    updateSetMock.mockReturnValue({ where });
+
+    await expect(
+      recordDeclineDecision("org-1", "row-1", "user-1"),
+    ).resolves.toBe(true);
+
+    expect(insertValuesMock).toHaveBeenCalledWith(expect.objectContaining({
+      action: "auto_healing.declined",
+      metadata: expect.objectContaining({ decisionActor: "user-1" }),
+    }));
   });
 });
 

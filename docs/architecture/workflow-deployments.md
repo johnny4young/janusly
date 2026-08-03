@@ -39,6 +39,16 @@ deployment/version state, so concurrent replicas cannot append a version under
 live split traffic. Soft deletion atomically tombstones the workflow and
 cancels active deployment control while preserving rollout history.
 
+When either immutable rollout version carries `RecoveryContractV2`, creation
+also requires a passing pre-deployment outcome qualification for the exact
+baseline/candidate pair and current evaluator dataset version. V1→V2 uses a
+bootstrap comparison against the candidate fixtures; V2→V2 additionally
+replays the candidate detector against the baseline fixture snapshot; V2→V1
+fails because it removes semantic protection. The pure comparator executes no
+workflow nodes or effects. Its bounded receipt is durable in
+`workflow_recovery_qualifications`, but the rollout transaction remains the
+authorization boundary and rejects absent or stale evidence.
+
 Every terminal production run contributes at most one
 `workflow_rollout_outcomes` receipt. Success/failure counters update in the
 same transaction. Cancelled runs retain a receipt but do not bias success
@@ -59,14 +69,17 @@ new baseline/canary pair can be created.
 The read-only `GET /workflows/:id/rollout` requires `workflows.read`. Creating
 or deciding a rollout requires both admin rank and `workflows.write`:
 
+- `GET /workflows/:id/rollout/qualification`
+- `POST /workflows/:id/rollout/qualification`
 - `POST /workflows/:id/rollout`
 - `POST /workflows/:id/rollout/:rolloutId/promote`
 - `POST /workflows/:id/rollout/:rolloutId/rollback`
 
 The Inspector's `WorkflowRolloutPanel` lists immutable versions, bounds every
-input to the server contract, shows baseline/canary outcome counts, and uses
-accessible confirmations for promotion and rollback. The server remains the
-authority for eligibility, authorization, assignment, and guardrail decisions.
+input to the server contract, requires and explains outcome-dataset evidence,
+shows baseline/canary outcome counts, and uses accessible confirmations for
+promotion and rollback. The server remains the authority for eligibility,
+authorization, assignment, and guardrail decisions.
 
 ## Do not break
 
@@ -75,5 +88,9 @@ authority for eligibility, authorization, assignment, and guardrail decisions.
 - Never count validation/replay outcomes toward rollout health.
 - Never update counters without the run-id receipt in the same transaction.
 - Never allow a version write while the active rollout owns deployment state.
+- Never accept a semantic qualification from another version pair or evaluator
+  dataset version.
+- Never execute workflow nodes, providers, or effects during deterministic
+  outcome qualification.
 - Never remove the maintenance repair path because the immediate terminal
   observer is intentionally best-effort and must not unwind a committed run.

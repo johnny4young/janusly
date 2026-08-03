@@ -8,9 +8,9 @@
  * Zod-free.
  *
  * Used by:
- * - `packages/engine/src/persistence.ts` and `core/runtime.ts` — wire-side
- *   comparisons, `inArray` clauses on cancellation paths, terminal-status
- *   guards.
+ * - `packages/engine/src/persistence-ports/{node,run}.ts` and `core/runtime.ts` —
+ *   wire-side comparisons, `inArray` clauses on cancellation paths, and
+ *   terminal-status guards.
  * - `apps/api/src/routes/runs-routes.ts` — `/run/cancel`'s
  *   "already-terminal" guard.
  * - `apps/web/src/App.tsx`, `apps/web/src/components/RightPanel.tsx` —
@@ -73,6 +73,9 @@ export const TERMINAL_RUN_STATUSES: ReadonlySet<RunTerminalStatus> = new Set(run
 /** `Set` of node open statuses — used by `updateRunStatusFromNodes` to detect "any work still pending." */
 export const NODE_OPEN_STATUSES: ReadonlySet<NodeOpenStatus> = new Set(nodeOpenStatusValues);
 
+/** `Set` of run open statuses — used by read-side activity and operational counters. */
+export const RUN_OPEN_STATUSES: ReadonlySet<RunOpenStatus> = new Set(runOpenStatusValues);
+
 /** Type guard for terminal node statuses received from persisted rows or API payloads. */
 export function isTerminalNodeStatus(status: unknown): status is NodeTerminalStatus {
   return typeof status === "string" && TERMINAL_NODE_STATUSES.has(status as NodeTerminalStatus);
@@ -86,4 +89,9 @@ export function isTerminalRunStatus(status: unknown): status is RunTerminalStatu
 /** Type guard for open node statuses received from persisted rows or API payloads. */
 export function isOpenNodeStatus(status: unknown): status is NodeOpenStatus {
   return typeof status === "string" && NODE_OPEN_STATUSES.has(status as NodeOpenStatus);
+}
+
+/** Type guard for open run statuses received from persisted rows or API payloads. */
+export function isOpenRunStatus(status: unknown): status is RunOpenStatus {
+  return typeof status === "string" && RUN_OPEN_STATUSES.has(status as RunOpenStatus);
 }

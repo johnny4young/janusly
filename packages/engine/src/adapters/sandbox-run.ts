@@ -119,6 +119,7 @@ export async function startSandboxRun(args: SandboxRunInput): Promise<{ runId: s
       workflowVersionId,
       status: "running",
       replayMode: "validation",
+      validationEvidenceLevel: "static",
       createdBy: createdBy ?? null,
       // Workflow stored RAW (like `startRun`) so the slim queue worker can
       // reload an executable DAG via `loadRunWorkflowRaw` — key-redaction /

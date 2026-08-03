@@ -2,19 +2,30 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const source = await readFile(new URL("./local-stack.mjs", import.meta.url), "utf8");
+const source = await readFile(new URL("./local-supabase.mjs", import.meta.url), "utf8");
 
 test("Supabase lifecycle commands capture credential-bearing output", () => {
   assert.match(
     source,
-    /run\(\s*"pnpm",\s*\["exec", "supabase", "start", "-x", authExclusions\],\s*\{ sensitive: true \}\s*\)/,
+    /const supabaseCli = fileURLToPath\(\s*new URL\("\.\.\/node_modules\/supabase\/dist\/supabase\.js", import\.meta\.url\),\s*\)/,
   );
-
-  const safeStatusCalls = source.match(
-    /run\(\s*"pnpm",\s*\["exec", "supabase", "status", "-o", "env"\],\s*\{ sensitive: true \},?\s*\)/g,
+  assert.match(
+    source,
+    /function runSupabase\(argumentsList, options = \{\}\)/,
   );
-  assert.equal(safeStatusCalls?.length, 1);
-  assert.doesNotMatch(source, /run\(\s*"pnpm",\s*\["exec", "supabase", "status"\]\s*\)/);
+  assert.match(
+    source,
+    /const startArguments = \[\s*"start",\s*"--network-id",\s*localSupabaseNetwork,\s*"-x",\s*authExclusions,\s*\]/,
+  );
+  assert.match(
+    source,
+    /runSupabase\(startArguments, \{ sensitive: true \}\)/,
+  );
+  assert.match(
+    source,
+    /runSupabase\(\["status", "-o", "env"\], \{\s*sensitive: true,\s*\}\)/,
+  );
+  assert.doesNotMatch(source, /runSupabase\(\["status"(?:, "-o", "env")?\]\s*\)/);
 });
 
 test("sensitive command failures omit captured stderr", () => {

@@ -12,14 +12,11 @@ import { Plus, Trash2 } from 'lucide-react'
 import type { WorkflowDefinition, WorkflowInputSchemaShape } from '../types'
 import { useT } from '../i18n'
 
-type WorkflowIoEditorProps = {
-  workflowId: string
-  inputs?: WorkflowDefinition['inputs']
-  outputs?: WorkflowDefinition['outputs']
-  templatePolicy?: WorkflowDefinition['templatePolicy']
-  onChangeInputs: (inputs: WorkflowDefinition['inputs']) => void
-  onChangeOutputs: (outputs: WorkflowDefinition['outputs']) => void
-  onChangeTemplatePolicy: (policy: WorkflowDefinition['templatePolicy']) => void
+type SchemaFieldsEditorProps = {
+  scope: string
+  schema?: unknown
+  form?: boolean
+  onChange: (schema: WorkflowInputSchemaShape | undefined) => void
 }
 
 const INPUT_TYPES: WorkflowInputSchemaShape['type'][] = ['string', 'number', 'boolean', 'object', 'array']
@@ -39,197 +36,128 @@ function shapeForType(type: WorkflowInputSchemaShape['type'], description?: stri
   return base
 }
 
-export function WorkflowIoEditor({
-  workflowId,
-  inputs,
-  outputs,
-  templatePolicy,
-  onChangeInputs,
-  onChangeOutputs,
-  onChangeTemplatePolicy,
-}: WorkflowIoEditorProps) {
+export function SchemaFieldsEditor({
+  scope,
+  schema,
+  form = false,
+  onChange,
+}: SchemaFieldsEditorProps) {
   const { t } = useT()
-  const editableInputs = !inputs || inputs.type === 'object'
-  const properties = editableInputs ? inputs?.properties ?? {} : {}
-  const required = new Set(editableInputs ? inputs?.required ?? [] : [])
-  const outputEntries = Object.entries(outputs ?? {})
-
-  const writeInputs = (nextProperties: Record<string, WorkflowInputSchemaShape>, nextRequired: Set<string>) => {
-    if (Object.keys(nextProperties).length === 0) {
-      onChangeInputs(undefined)
+  const parsedSchema = schema && typeof schema === 'object' && !Array.isArray(schema)
+    ? schema as WorkflowInputSchemaShape
+    : undefined
+  const fields = parsedSchema?.type === 'object' && parsedSchema.properties
+    ? Object.values(parsedSchema.properties)
+    : []
+  const editable = schema === undefined || (
+    parsedSchema?.type === 'object'
+    && (!form || fields.every(shape => {
+      const index = INPUT_TYPES.indexOf(shape?.type)
+      return index >= 0 && index < 3
+    }))
+  )
+  const properties = editable && parsedSchema?.type === 'object' ? parsedSchema.properties ?? {} : {}
+  const required = new Set(editable && parsedSchema?.type === 'object' ? parsedSchema.required ?? [] : [])
+  const writeSchema = (nextProperties: Record<string, WorkflowInputSchemaShape>, nextRequired: Set<string>) => {
+    if (Object.keys(nextProperties).length === 0 && !form) {
+      onChange(undefined)
       return
     }
-    onChangeInputs({
-      ...(inputs?.type === 'object' ? inputs : {}),
+    onChange({
+      ...(parsedSchema?.type === 'object' ? parsedSchema : {}),
       type: 'object',
       properties: nextProperties,
-      ...(nextRequired.size > 0 ? { required: [...nextRequired].filter(name => Object.hasOwn(nextProperties, name)) } : { required: undefined }),
+      ...(nextRequired.size > 0
+        ? { required: [...nextRequired].filter(name => Object.hasOwn(nextProperties, name)) }
+        : { required: undefined }),
     })
   }
-
-  const addInput = () => {
+  const addField = () => {
     const name = nextName('input', Object.keys(properties))
-    writeInputs({ ...properties, [name]: { type: 'string' } }, required)
+    writeSchema({ ...properties, [name]: { type: 'string' } }, required)
   }
-
-  const renameInput = (from: string, rawTo: string): boolean => {
+  const renameField = (from: string, rawTo: string): boolean => {
     const to = rawTo.trim()
     if (!to || (to !== from && Object.hasOwn(properties, to))) return false
     if (to === from) return true
-    const nextProperties = Object.fromEntries(Object.entries(properties).map(([name, shape]) => [name === from ? to : name, shape]))
+    const nextProperties = Object.fromEntries(
+      Object.entries(properties).map(([name, shape]) => [name === from ? to : name, shape]),
+    )
     const nextRequired = new Set([...required].map(name => name === from ? to : name))
-    writeInputs(nextProperties, nextRequired)
+    writeSchema(nextProperties, nextRequired)
     return true
   }
-
-  const updateInput = (name: string, shape: WorkflowInputSchemaShape) => {
-    writeInputs({ ...properties, [name]: shape }, required)
+  const updateField = (name: string, shape: WorkflowInputSchemaShape) => {
+    writeSchema({ ...properties, [name]: shape }, required)
   }
-
-  const removeInput = (name: string) => {
+  const removeField = (name: string) => {
     const nextProperties = { ...properties }
     delete nextProperties[name]
     const nextRequired = new Set(required)
     nextRequired.delete(name)
-    writeInputs(nextProperties, nextRequired)
+    writeSchema(nextProperties, nextRequired)
   }
-
   const toggleRequired = (name: string, checked: boolean) => {
     const nextRequired = new Set(required)
     if (checked) nextRequired.add(name)
     else nextRequired.delete(name)
-    writeInputs(properties, nextRequired)
-  }
-
-  const addOutput = () => {
-    const name = nextName('result', Object.keys(outputs ?? {}))
-    onChangeOutputs({ ...outputs, [name]: '' })
-  }
-
-  const renameOutput = (from: string, rawTo: string): boolean => {
-    const to = rawTo.trim()
-    if (!to || (to !== from && Object.hasOwn(outputs ?? {}, to))) return false
-    if (to === from) return true
-    const next = Object.fromEntries(outputEntries.map(([name, template]) => [name === from ? to : name, template]))
-    onChangeOutputs(next)
-    return true
-  }
-
-  const updateOutput = (name: string, template: string) => onChangeOutputs({ ...outputs, [name]: template })
-  const removeOutput = (name: string) => {
-    const next = { ...outputs }
-    delete next[name]
-    onChangeOutputs(Object.keys(next).length > 0 ? next : undefined)
+    writeSchema(properties, nextRequired)
   }
 
   return (
-    <section className="we-card we-workflow-io" data-testid="workflow-io-card">
-      <div className="section-kicker">{t('rightPanel.inspector.ioKicker')}</div>
-      <h3>{t('rightPanel.inspector.ioTitle')}</h3>
-      <p className="helper-text">{t('rightPanel.inspector.ioHelper')}</p>
-
-      <div className="we-workflow-io__section" data-testid="workflow-template-policy">
-        <div className="we-workflow-io__heading">
-          <div>
-            <strong>{t('rightPanel.inspector.templatePolicyLabel')}</strong>
-            <p>{t('rightPanel.inspector.templatePolicyHelper')}</p>
-          </div>
-          <label className="checkbox-row">
-            <input
-              type="checkbox"
-              checked={templatePolicy === 'strict'}
-              onChange={(event) => onChangeTemplatePolicy(event.target.checked ? 'strict' : undefined)}
-            />
-            {t('rightPanel.inspector.templatePolicyStrict')}
-          </label>
+    <div className="we-workflow-io__section" data-testid="workflow-inputs-editor">
+      <div className="we-workflow-io__heading">
+        <div>
+          <strong>{t(form ? 'rightPanel.quickConfig.fieldsSchema' : 'rightPanel.inspector.inputsLabel')}</strong>
+          <p>{t(form ? 'rightPanel.quickConfig.humanFormHelper' : 'rightPanel.inspector.inputsHelper')}</p>
         </div>
-        <p className="we-workflow-io__empty" role="status">
-          {t(templatePolicy === 'strict'
-            ? 'rightPanel.inspector.templatePolicyStrictStatus'
-            : 'rightPanel.inspector.templatePolicyLenientStatus')}
-        </p>
-      </div>
-
-      <div className="we-workflow-io__section" data-testid="workflow-inputs-editor">
-        <div className="we-workflow-io__heading">
-          <div>
-            <strong>{t('rightPanel.inspector.inputsLabel')}</strong>
-            <p>{t('rightPanel.inspector.inputsHelper')}</p>
-          </div>
-          {editableInputs && (
-            <button type="button" className="small-command" onClick={addInput} data-testid="workflow-input-add">
-              <Plus size={13} aria-hidden="true" />
-              {t('rightPanel.inspector.addInput')}
-            </button>
-          )}
-        </div>
-        {!editableInputs ? (
-          <div className="issue issue-warning" role="status">
-            {t('rightPanel.inspector.inputRootUnsupported', { type: inputs.type })}
-          </div>
-        ) : Object.entries(properties).length === 0 ? (
-          <p className="we-workflow-io__empty">{t('rightPanel.inspector.noInputs')}</p>
-        ) : (
-          <div className="we-workflow-io__rows">
-            {Object.entries(properties).map(([name, shape]) => (
-              <InputRow
-                key={`${workflowId}:${name}`}
-                name={name}
-                shape={shape}
-                required={required.has(name)}
-                onRename={(next) => renameInput(name, next)}
-                onTypeChange={(type) => updateInput(name, shapeForType(type, shape.description))}
-                onDescriptionChange={(description) => updateInput(name, { ...shape, description: description || undefined })}
-                onDefaultChange={(value) => {
-                  // Clearing removes the key entirely — a lingering
-                  // `default: undefined` would serialize differently across
-                  // JSON round-trips and read as "declared" to a future editor.
-                  const { default: _cleared, ...rest } = shape
-                  updateInput(name, value === undefined ? rest : { ...rest, default: value })
-                }}
-                onRequiredChange={(checked) => toggleRequired(name, checked)}
-                onRemove={() => removeInput(name)}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="we-workflow-io__section" data-testid="workflow-outputs-editor">
-        <div className="we-workflow-io__heading">
-          <div>
-            <strong>{t('rightPanel.inspector.outputsLabel')}</strong>
-            <p>{t('rightPanel.inspector.outputsHelper')}</p>
-          </div>
-          <button type="button" className="small-command" onClick={addOutput} data-testid="workflow-output-add">
+        {editable && (
+          <button type="button" className="small-command" onClick={addField} data-testid="workflow-input-add">
             <Plus size={13} aria-hidden="true" />
-            {t('rightPanel.inspector.addOutput')}
+            {t('rightPanel.inspector.addInput')}
           </button>
-        </div>
-        {outputEntries.length === 0 ? (
-          <p className="we-workflow-io__empty">{t('rightPanel.inspector.noOutputs')}</p>
-        ) : (
-          <div className="we-workflow-io__rows">
-            {outputEntries.map(([name, template]) => (
-              <OutputRow
-                key={`${workflowId}:${name}`}
-                name={name}
-                template={template}
-                onRename={(next) => renameOutput(name, next)}
-                onTemplateChange={(next) => updateOutput(name, next)}
-                onRemove={() => removeOutput(name)}
-              />
-            ))}
-          </div>
         )}
       </div>
-    </section>
+      {!editable ? (
+        <div className="issue issue-warning" role="status">
+          {t('rightPanel.inspector.inputRootUnsupported', { type: parsedSchema?.type ?? 'unknown' })}
+        </div>
+      ) : Object.keys(properties).length === 0 ? (
+        <p className="we-workflow-io__empty">
+          {t('rightPanel.inspector.noInputs')}
+        </p>
+      ) : (
+        <div className="we-workflow-io__rows">
+          {Object.entries(properties).map(([name, shape]) => (
+            <InputRow
+              key={`${scope}:${name}`}
+              name={name}
+              shape={shape}
+              form={form}
+              required={required.has(name)}
+              onRename={(next) => renameField(name, next)}
+              onTypeChange={(type) => updateField(name, shapeForType(type, shape.description))}
+              onDescriptionChange={(description) => updateField(name, { ...shape, description: description || undefined })}
+              onDefaultChange={(value) => {
+                const { default: _cleared, ...rest } = shape
+                updateField(name, value === undefined ? rest : { ...rest, default: value })
+              }}
+              onRequiredChange={(checked) => toggleRequired(name, checked)}
+              onRemove={() => removeField(name)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
-function InputRow({ name, shape, required, onRename, onTypeChange, onDescriptionChange, onDefaultChange, onRequiredChange, onRemove }: {
+export default SchemaFieldsEditor
+
+function InputRow({ name, shape, form, required, onRename, onTypeChange, onDescriptionChange, onDefaultChange, onRequiredChange, onRemove }: {
   name: string
   shape: WorkflowInputSchemaShape
+  form: boolean
   required: boolean
   onRename: (name: string) => boolean
   onTypeChange: (type: WorkflowInputSchemaShape['type']) => void
@@ -267,7 +195,7 @@ function InputRow({ name, shape, required, onRename, onTypeChange, onDescription
         <label>
           <span className="we-sr-only">{t('rightPanel.inspector.inputTypeAria', { name })}</span>
           <select className="text-field text-field--compact" value={shape.type} onChange={(event) => onTypeChange(event.target.value as WorkflowInputSchemaShape['type'])}>
-            {INPUT_TYPES.map(type => <option key={type} value={type}>{t(`rightPanel.inspector.inputType.${type}`)}</option>)}
+            {INPUT_TYPES.slice(0, form ? 3 : 5).map(type => <option key={type} value={type}>{t(`rightPanel.inspector.inputType.${type}`)}</option>)}
           </select>
         </label>
         <label className="checkbox-row we-workflow-io__required">
@@ -290,7 +218,7 @@ function InputRow({ name, shape, required, onRename, onTypeChange, onDescription
         placeholder={t('rightPanel.inspector.inputDescriptionPlaceholder')}
         aria-label={t('rightPanel.inspector.inputDescriptionAria', { name })}
       />
-      <InputDefaultField name={name} shape={shape} onChange={onDefaultChange} />
+      {!form && <InputDefaultField name={name} shape={shape} onChange={onDefaultChange} />}
       {nameError && <p id={nameErrorId} className="we-workflow-io__error" role="alert">{t('rightPanel.inspector.nameConflict')}</p>}
     </div>
   )
@@ -421,6 +349,113 @@ function NumberDefaultField({ label, value, placeholder, onChange }: {
   )
 }
 
+type WorkflowIoEditorProps = {
+  workflowId: string
+  inputs?: WorkflowDefinition['inputs']
+  outputs?: WorkflowDefinition['outputs']
+  templatePolicy?: WorkflowDefinition['templatePolicy']
+  onChangeInputs: (inputs: WorkflowDefinition['inputs']) => void
+  onChangeOutputs: (outputs: WorkflowDefinition['outputs']) => void
+  onChangeTemplatePolicy: (policy: WorkflowDefinition['templatePolicy']) => void
+}
+export function WorkflowIoEditor({
+  workflowId,
+  inputs,
+  outputs,
+  templatePolicy,
+  onChangeInputs,
+  onChangeOutputs,
+  onChangeTemplatePolicy,
+}: WorkflowIoEditorProps) {
+  const { t } = useT()
+  const outputEntries = Object.entries(outputs ?? {})
+
+  const addOutput = () => {
+    const name = nextName('result', Object.keys(outputs ?? {}))
+    onChangeOutputs({ ...outputs, [name]: '' })
+  }
+
+  const renameOutput = (from: string, rawTo: string): boolean => {
+    const to = rawTo.trim()
+    if (!to || (to !== from && Object.hasOwn(outputs ?? {}, to))) return false
+    if (to === from) return true
+    const next = Object.fromEntries(outputEntries.map(([name, template]) => [name === from ? to : name, template]))
+    onChangeOutputs(next)
+    return true
+  }
+
+  const updateOutput = (name: string, template: string) => onChangeOutputs({ ...outputs, [name]: template })
+  const removeOutput = (name: string) => {
+    const next = { ...outputs }
+    delete next[name]
+    onChangeOutputs(Object.keys(next).length > 0 ? next : undefined)
+  }
+
+  return (
+    <section className="we-card we-workflow-io" data-testid="workflow-io-card">
+      <div className="section-kicker">{t('rightPanel.inspector.ioKicker')}</div>
+      <h3>{t('rightPanel.inspector.ioTitle')}</h3>
+      <p className="helper-text">{t('rightPanel.inspector.ioHelper')}</p>
+
+      <div className="we-workflow-io__section" data-testid="workflow-template-policy">
+        <div className="we-workflow-io__heading">
+          <div>
+            <strong>{t('rightPanel.inspector.templatePolicyLabel')}</strong>
+            <p>{t('rightPanel.inspector.templatePolicyHelper')}</p>
+          </div>
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={templatePolicy === 'strict'}
+              onChange={(event) => onChangeTemplatePolicy(event.target.checked ? 'strict' : undefined)}
+            />
+            {t('rightPanel.inspector.templatePolicyStrict')}
+          </label>
+        </div>
+        <p className="we-workflow-io__empty" role="status">
+          {t(templatePolicy === 'strict'
+            ? 'rightPanel.inspector.templatePolicyStrictStatus'
+            : 'rightPanel.inspector.templatePolicyLenientStatus')}
+        </p>
+      </div>
+
+      <SchemaFieldsEditor
+        scope={workflowId}
+        schema={inputs}
+        onChange={onChangeInputs}
+      />
+
+      <div className="we-workflow-io__section" data-testid="workflow-outputs-editor">
+        <div className="we-workflow-io__heading">
+          <div>
+            <strong>{t('rightPanel.inspector.outputsLabel')}</strong>
+            <p>{t('rightPanel.inspector.outputsHelper')}</p>
+          </div>
+          <button type="button" className="small-command" onClick={addOutput} data-testid="workflow-output-add">
+            <Plus size={13} aria-hidden="true" />
+            {t('rightPanel.inspector.addOutput')}
+          </button>
+        </div>
+        {outputEntries.length === 0 ? (
+          <p className="we-workflow-io__empty">{t('rightPanel.inspector.noOutputs')}</p>
+        ) : (
+          <div className="we-workflow-io__rows">
+            {outputEntries.map(([name, template]) => (
+              <OutputRow
+                key={`${workflowId}:${name}`}
+                name={name}
+                template={template}
+                onRename={(next) => renameOutput(name, next)}
+                onTemplateChange={(next) => updateOutput(name, next)}
+                onRemove={() => removeOutput(name)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
 function OutputRow({ name, template, onRename, onTemplateChange, onRemove }: {
   name: string
   template: string

@@ -1,7 +1,7 @@
 /** Operator-facing measurement card for a code-authored recovery drill. */
 
 import { getResolvedLocale, useT } from '../../i18n'
-import { formatDuration } from '../recovery-center/helpers'
+import { formatDuration } from '../recovery-center/recovery-center-model'
 
 export type RecoveryDrillOutcome = {
   status: 'awaiting_action' | 'replay_in_progress' | 'recovered' | 'accepted_loss' | 'measurement_incomplete'

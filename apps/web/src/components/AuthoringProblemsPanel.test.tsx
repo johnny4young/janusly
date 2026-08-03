@@ -18,6 +18,7 @@ beforeEach(() => {
 
 describe('<AuthoringProblemsPanel />', () => {
   it('navigates node and edge findings with keyboard-accessible buttons', () => {
+    const onOpenProblem = vi.fn()
     const { rerender } = render(
       <AuthoringProblemsPanel
         validationIssues={[{ code: 'condition_invalid_expression', message: 'Bad', nodeId: 'gate' }]}
@@ -25,10 +26,12 @@ describe('<AuthoringProblemsPanel />', () => {
         aiReviewIssues={[]}
         workflowEdges={[]}
         onValidate={vi.fn(async () => false)}
+        onOpenProblem={onOpenProblem}
       />,
     )
     fireEvent.click(screen.getByRole('button', { name: 'Open problem on step gate' }))
     expect(useWorkflowStore.getState().selectedNodeId).toBe('gate')
+    expect(onOpenProblem).toHaveBeenCalledOnce()
 
     rerender(
       <AuthoringProblemsPanel
@@ -37,10 +40,12 @@ describe('<AuthoringProblemsPanel />', () => {
         aiReviewIssues={[]}
         workflowEdges={[{ id: 'path-a', source: 'first', target: 'second', data: {} }]}
         onValidate={vi.fn(async () => false)}
+        onOpenProblem={onOpenProblem}
       />,
     )
     fireEvent.click(screen.getByRole('button', { name: 'Open problem on path path-a' }))
     expect(useWorkflowStore.getState().selectedEdgeId).toBe('path-a')
+    expect(onOpenProblem).toHaveBeenCalledTimes(2)
   })
 
   it('reuses the resilience fieldset handoff for readiness findings', () => {

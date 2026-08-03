@@ -242,6 +242,72 @@ describe("composeRecoveryMetrics — MTTR formatting + bands", () => {
   });
 });
 
+describe("composeRecoveryMetrics — verified recovery north star", () => {
+  it("reports the median and p90 from production terminal outcomes", () => {
+    const metric = composeRecoveryMetrics(
+      baseSignals({
+        mttrDurations: [60_000, 120_000, 300_000, 600_000],
+      }),
+      30,
+    ).verifiedRecovery;
+
+    expect(metric).toMatchObject({
+      definitionVersion: "1",
+      metric: "time_to_verified_recovery",
+      unit: "milliseconds",
+      sampleSize: 4,
+      p50Ms: 210_000,
+      p90Ms: 510_000,
+      value: 210_000,
+      display: "3m 30s",
+      rationaleCode: "verified_recovery.summary",
+      rationaleMeta: {
+        count: 4,
+        p50: "3m 30s",
+        p90: "8m 30s",
+      },
+    });
+  });
+
+  it("is explicit and neutral before the first eligible outcome", () => {
+    expect(
+      composeRecoveryMetrics(baseSignals(), 30).verifiedRecovery,
+    ).toMatchObject({
+      definitionVersion: "1",
+      metric: "time_to_verified_recovery",
+      sampleSize: 0,
+      p50Ms: null,
+      p90Ms: null,
+      value: null,
+      rationaleCode: "verified_recovery.empty",
+    });
+  });
+
+  it("prefers the complete PostgreSQL aggregate over the bounded legacy sample", () => {
+    const result = composeRecoveryMetrics(
+      baseSignals({
+        verifiedRecovery: {
+          sampleSize: 1_500,
+          p50Ms: 180_000,
+          p90Ms: 540_000,
+          downtimeEndedMs: 90_000_000,
+        },
+        mttrDurations: [60_000],
+      }),
+      30,
+    );
+
+    expect(result.verifiedRecovery).toMatchObject({
+      sampleSize: 1_500,
+      p50Ms: 180_000,
+      p90Ms: 540_000,
+      value: 180_000,
+    });
+    expect(result.mttr.value).toBe(60_000);
+    expect(result.downtimeEndedMs).toBe(90_000_000);
+  });
+});
+
 describe("composeRecoveryMetrics — p95 latency", () => {
   it("4_000ms → healthy", () => {
     const result = composeRecoveryMetrics(baseSignals({ p95LatencyMs: 4_000 }), 30);
@@ -453,5 +519,19 @@ describe("composeRecoveryMetrics — clustersResolved + valueEstimate", () => {
     expect(result.valueEstimate.dollarSaved).toBe(1000); // 10 × $100
     expect(result.valueEstimate.mttrDeltaSeconds).toBeNull(); // baseline unset
     expect(result.valueEstimate.assumptions.hourlyCost).toBe(100);
+  });
+
+  it("compares the configured baseline to the verified-recovery median, not the legacy average", () => {
+    const result = composeRecoveryMetrics(
+      baseSignals({
+        mttrDurations: [60_000, 120_000, 10 * 60 * 60_000],
+        resolvedClusters: { totalClusters: 1, totalEntries: 1, capped: false },
+      }),
+      30,
+      { hourlyCost: 50, minutesSavedPerRecovery: 30, baselineMttrSeconds: 3_600 },
+    );
+
+    expect(result.verifiedRecovery.p50Ms).toBe(120_000);
+    expect(result.valueEstimate.mttrDeltaSeconds).toBe(3_480);
   });
 });

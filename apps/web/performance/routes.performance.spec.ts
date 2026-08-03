@@ -158,6 +158,8 @@ async function stubApi(page: Page) {
         workflowJson: { id: 'workflow-perf', name: row.workflowName, nodes: [{ id: row.nodeId, type: 'noop', config: {} }], edges: [] },
         nodeJson: { id: row.nodeId, type: 'noop', config: {} },
       }
+    } else if (pathname === '/dlq') {
+      body = rows
     } else if (pathname === '/recovery/metrics') {
       body = {
         successRate: { value: 0, display: '—', severity: 'neutral', rationale: 'No terminal runs.' },
@@ -188,6 +190,8 @@ async function stubApi(page: Page) {
         byFailureMode: [],
       }
     } else if (pathname === '/dlq/clusters') body = { clusters: [], totalSamples: 0, windowDays: 30 }
+    else if (pathname === '/recovery/campaigns') body = { campaigns: [] }
+    else if (pathname === '/auto-healing/pending') body = { rows: [] }
     else if (pathname === '/billing/budget') {
       body = { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn', warningPercent: 80, warningThresholdCrossed: false, exceededAt: null, resolvedScope: 'org' }
     } else if (['/tools', '/templates', '/solution-packs', '/credentials', '/runs', '/dlq', '/workflows'].includes(pathname)) {
@@ -224,41 +228,89 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   expect(homeMeasurement.resources.some((path) => /catalog-en-.*\.js$/.test(path))).toBe(true)
   expect(homeMeasurement.resources.some((path) => /catalog-es-.*\.js$/.test(path))).toBe(false)
   expect(homeMeasurement.resources.some((path) => /supabase-runtime-.*\.js$/.test(path))).toBe(false)
-  expectWithinBudget(homeMeasurement)
   await captureElement(home, 'web-en-performance-home')
 
+  const workflowsDestination = page.getByRole('button', { name: /^Workflows\b/ })
+  await expect(workflowsDestination).toBeVisible()
+  await workflowsDestination.click()
+  const createWorkflowAction = page.locator(
+    'button[aria-controls="workflow-creation-choices"]',
+  )
+  await expect(createWorkflowAction).toBeVisible()
+  await expect(createWorkflowAction).toBeEnabled()
   await resetRouteMeasurement(page)
-  await page.getByRole('button', { name: /^AI Studio\b/ }).click()
+  await createWorkflowAction.click()
+  await page.getByRole('button', { name: /^Start blank\b/ }).click()
   const canvas = page.locator('.workspace-main .react-flow').first()
   await expect(canvas).toBeVisible()
-  const aiStudioMeasurement = await measureRoute(page, 'aiStudio')
-  expect(aiStudioMeasurement.resources.some((path) => /CanvasWorkspace-.*\.js$/.test(path))).toBe(true)
-  expectWithinBudget(aiStudioMeasurement)
-  await captureElement(canvas, 'web-en-performance-ai-studio')
+  const workflowBuilderMeasurement = await measureRoute(page, 'workflowBuilder')
+  expect(workflowBuilderMeasurement.resources.some((path) => /CanvasWorkspace-.*\.js$/.test(path))).toBe(true)
+  await captureElement(canvas, 'web-en-performance-workflow-builder')
 
   await page.getByRole('button', { name: /^Home\b/ }).click()
-  await page.getByTestId('recovery-center-queue-open-all').click()
-  const secondRow = page.getByTestId('dlq-row-perf-b')
+  await page.getByTestId('recovery-center-action-cta-triage_failures').click()
+  const secondRow = page.getByTestId('activity-row-recovery:perf-b')
   await expect(secondRow).toBeVisible()
+  const activityResources = await page.evaluate(() => (
+    (performance.getEntriesByType('resource') as PerformanceResourceTiming[])
+      .map((entry) => new URL(entry.name).pathname)
+  ))
+  expect(activityResources.some(
+    (path) => /ActivityRecoveryDetail-.*\.js$/.test(path),
+  )).toBe(true)
   await resetRouteMeasurement(page)
   await secondRow.click()
-  const detail = page.locator('.detail-box').filter({ hasText: 'notify_owner' })
+  const detail = page.getByTestId('activity-recovery-detail')
   await expect(detail).toContainText('Delivery failed')
   const recoveryMeasurement = await measureRoute(page, 'selectedRecovery')
   expect(recoveryMeasurement.resources.some((path) => path === '/dlq')).toBe(true)
   expect(recoveryMeasurement.transferredBytes).toBeGreaterThan(0)
-  expectWithinBudget(recoveryMeasurement)
   await captureElement(detail, 'web-en-performance-selected-recovery')
+
+  await page.getByRole('button', { name: /^Activity\b/ }).click()
+  const recoveryTools = page.getByTestId('activity-open-recovery-tools')
+  await expect(recoveryTools).toBeVisible()
+  await resetRouteMeasurement(page)
+  await recoveryTools.click()
+  const recoveryQueue = page.getByTestId('recovery-queue')
+  await expect(recoveryQueue).toBeVisible()
+  const recoveryToolsMeasurement = await measureRoute(page, 'recoveryTools')
+  expect(recoveryToolsMeasurement.resources.some((path) => /RunsPanel-.*\.js$/.test(path))).toBe(true)
+  expect(recoveryToolsMeasurement.resources.some((path) => /FailureClustersCard-.*\.js$/.test(path))).toBe(false)
+  expect(recoveryToolsMeasurement.resources.some((path) => /ReplayCampaignsCard-.*\.js$/.test(path))).toBe(false)
+  expect(recoveryToolsMeasurement.resources.some((path) => /AutoHealingPendingCard-.*\.js$/.test(path))).toBe(false)
+  await captureElement(recoveryQueue, 'web-en-performance-recovery-tools')
+
+  await resetRouteMeasurement(page)
+  const automationResponses = Promise.all([
+    page.waitForResponse((response) => new URL(response.url()).pathname === '/v1/dlq/clusters'),
+    page.waitForResponse((response) => new URL(response.url()).pathname === '/recovery/campaigns'),
+    page.waitForResponse((response) => new URL(response.url()).pathname === '/auto-healing/pending'),
+  ])
+  await page.getByTestId('recovery-automation-toggle').click()
+  await expect(page.getByTestId('recovery-automation-toggle')).toHaveAttribute('aria-expanded', 'true')
+  const settledAutomationResponses = await automationResponses
+  await Promise.all(settledAutomationResponses.map((response) => response.finished()))
+  const recoveryAutomationMeasurement = await measureRoute(page, 'recoveryAutomation')
+  expect(recoveryAutomationMeasurement.resources.some(
+    (path) => /FailureClustersCard-.*\.js$/.test(path),
+  )).toBe(true)
+  expect(recoveryAutomationMeasurement.resources.some(
+    (path) => /ReplayCampaignsCard-.*\.js$/.test(path),
+  )).toBe(true)
+  expect(recoveryAutomationMeasurement.resources.some(
+    (path) => /AutoHealingPendingCard-.*\.js$/.test(path),
+  )).toBe(true)
+  expect(recoveryAutomationMeasurement.resources.some((path) => path === '/v1/dlq/clusters')).toBe(true)
+  expect(recoveryAutomationMeasurement.resources.some((path) => path === '/recovery/campaigns')).toBe(true)
+  expect(recoveryAutomationMeasurement.resources.some((path) => path === '/auto-healing/pending')).toBe(true)
 
   await resetRouteMeasurement(page)
   await page.getByRole('button', { name: 'Open user menu' }).click()
   const localeSwitcher = page.getByRole('combobox', { name: 'Change language' })
   await localeSwitcher.selectOption('es')
-  // Switching locale lazy-loads the Spanish catalog, which remounts the header
-  // subtree and closes the user menu. Reopen it (Spanish label now) before
-  // asserting the switcher itself reflects the new locale.
-  await expect(page.getByRole('button', { name: 'Abrir menú de usuario' })).toBeVisible()
-  await page.getByRole('button', { name: 'Abrir menú de usuario' }).click()
+  // Locale changes update the active catalog in place, so the appearance menu
+  // stays open and keeps the operator's current interaction context.
   await expect(page.getByRole('combobox', { name: 'Cambiar idioma' })).toHaveValue('es')
   const localeSwitchResources = await page.evaluate(() => (
     (performance.getEntriesByType('resource') as PerformanceResourceTiming[])
@@ -266,6 +318,7 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   ))
   expect(localeSwitchResources.some((path) => /catalog-es-.*\.js$/.test(path))).toBe(true)
   expect(localeSwitchResources.some((path) => /supabase-runtime-.*\.js$/.test(path))).toBe(false)
+  const localeSwitchMeasurement = await measureRoute(page, 'localeSwitch')
   await captureElement(page.locator('.we-locale-switcher--row'), 'web-es-locale-switcher-loaded')
 
   // A fresh Spanish boot must fetch only Spanish. This catches two easy-to-
@@ -273,6 +326,7 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   // English fallback download before the first localized render.
   const esPage = await page.context().newPage()
   const esBrowserErrors = installConsoleErrorGuards(esPage)
+  await installLongTaskObserver(esPage)
   await stubApi(esPage)
   await esPage.addInitScript(() => {
     window.localStorage.clear()
@@ -281,7 +335,7 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   await esPage.goto('/')
   const esHome = esPage.locator('.we-recovery-center-hero')
   await expect(esHome).toBeVisible()
-  await expect(esPage.getByTestId('recovery-center-greeting')).toContainText('ejecuciones necesitan recuperación')
+  await expect(esHome.locator('.section-kicker')).toHaveText('Inicio')
   const esResources = await esPage.evaluate(() => (
     (performance.getEntriesByType('resource') as PerformanceResourceTiming[])
       .map((entry) => new URL(entry.name).pathname)
@@ -289,15 +343,25 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   expect(esResources.some((path) => /catalog-es-.*\.js$/.test(path))).toBe(true)
   expect(esResources.some((path) => /catalog-en-.*\.js$/.test(path))).toBe(false)
   expect(esResources.some((path) => /supabase-runtime-.*\.js$/.test(path))).toBe(false)
+  const esHomeMeasurement = await measureRoute(esPage, 'homeEs')
   await captureElement(esHome, 'web-es-performance-home')
   expect(esBrowserErrors).toEqual([])
   await esPage.close()
 
-  const measurements = [homeMeasurement, aiStudioMeasurement, recoveryMeasurement]
+  const measurements = [
+    homeMeasurement,
+    workflowBuilderMeasurement,
+    recoveryMeasurement,
+    recoveryToolsMeasurement,
+    recoveryAutomationMeasurement,
+    localeSwitchMeasurement,
+    esHomeMeasurement,
+  ]
   if (PERF_REPORT) {
     const path = resolve(PERF_REPORT)
     await mkdir(dirname(path), { recursive: true })
     await writeFile(path, `${JSON.stringify({ generatedAt: new Date().toISOString(), measurements }, null, 2)}\n`)
   }
   expect(browserErrors).toEqual([])
+  for (const measurement of measurements) expectWithinBudget(measurement)
 })

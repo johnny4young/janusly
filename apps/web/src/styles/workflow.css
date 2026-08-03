@@ -1,213 +1,9 @@
 /**
- * React Flow, workflow nodes, feedback, timeline, sidebar, and account surfaces.
+ * Shared feedback, workflow, account, and Home surfaces.
  *
  * Used by: apps/web/src/index.css in declaration order; do not import directly.
  * Invariant: preserve module order because later feature rules intentionally refine shared primitives.
  */
-
-/* ==========================================================================
-   React Flow and workflow nodes
-   Styles third-party React Flow chrome and Janusly custom workflow step nodes.
-   Keep React Flow class overrides scoped to .react-flow__* selectors.
-   ========================================================================== */
-.react-flow__node {
-  border-radius: 8px;
-  color: var(--we-ink);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.react-flow__node-workflowStep {
-  background: transparent;
-  border: 0;
-  box-shadow: none;
-}
-
-.workflow-node {
-  background: var(--we-surface);
-  border: 1.5px solid var(--we-line-strong);
-  border-radius: 8px;
-  box-sizing: border-box;
-  box-shadow: 0 18px 34px -26px var(--we-shadow-ink-45);
-  min-width: 238px;
-  padding: 11px;
-  position: relative;
-  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
-  width: 238px;
-}
-
-.workflow-node[data-selected="true"] {
-  border-color: var(--we-primary);
-  box-shadow: 0 0 0 4px var(--we-primary-ring), 0 22px 42px -28px var(--we-primary-shadow);
-}
-
-.workflow-node[data-status="running"] {
-  background: var(--we-info-soft);
-  border-color: var(--we-info);
-}
-
-.canvas-frame[data-mode="observe"] .workflow-node[data-status="running"] {
-  animation: we-running-node-pulse 1.8s ease-out infinite;
-  box-shadow: 0 0 0 0 var(--we-info-border-30);
-}
-.workflow-node[data-status="waiting"],
-.workflow-node[data-status="queued"] { border-color: var(--we-warning); background: var(--we-warning-soft); }
-.workflow-node[data-status="succeeded"] { border-color: var(--we-success); background: var(--we-success-soft); }
-.workflow-node[data-status="failed"],
-.workflow-node[data-status="error"] { border-color: var(--we-danger); background: var(--we-danger-soft); }
-
-@keyframes we-running-node-pulse {
-  50% { box-shadow: 0 0 0 8px transparent; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .canvas-frame[data-mode="observe"] .workflow-node[data-status="running"] {
-    animation: none;
-    box-shadow: 0 0 0 3px var(--we-info-border-30), 0 18px 34px -26px var(--we-shadow-ink-45);
-  }
-}
-
-/* Custom React Flow edge — selection state rides on the data-selected
- * attribute set by `WorkflowEdge.tsx`, so the upstream `visibleEdges`
- * memo doesn't need to rebuild inline style objects per render.
- *
- * Selectors include the `path` element + RF's class + our class to
- * outrank `@xyflow/react`'s defaults. RF ships
- * `.react-flow__edge.selected .react-flow__edge-path` at specificity
- * 0,0,3,0 — class-only combinations tie it and lose on load order
- * (RF's stylesheet is bundled after ours via Vite). Adding the `path`
- * element selector adds one tag weight so our rules win at 0,0,2,1
- * (base, against RF's 0,0,1,0) and 0,0,3,1 (selected, against RF's
- * 0,0,3,0). Without it the edge renders as RF's default 1px grey →
- * grey-on-select instead of faint 1.8px → cobalt 2.8px on selection. */
-path.react-flow__edge-path.we-edge {
-  stroke: var(--we-faint);
-  stroke-width: 1.8px;
-  transition: stroke-width 80ms ease-out, stroke 80ms ease-out;
-}
-path.react-flow__edge-path.we-edge[data-selected="true"] {
-  stroke: var(--we-primary);
-  stroke-width: 2.8px;
-}
-.we-edge-label {
-  position: absolute;
-  background: var(--we-surface);
-  border: 1px solid var(--we-line);
-  border-radius: 4px;
-  color: var(--we-text-secondary);
-  font-size: 11px;
-  padding: 2px 6px;
-  pointer-events: all;
-}
-.we-edge-label[data-selected="true"] {
-  border-color: var(--we-primary);
-  color: var(--we-primary);
-}
-
-/* Virtualized list container — used by `useVirtualList`. Becomes the
- * scroll surface for unbounded operator lists (DLQ rows + future
- * panels). `overscroll-behavior: contain` prevents the scroll chain
- * from propagating to the outer page when the user scrolls past the
- * panel's ends. */
-.we-virtual-list {
-  max-height: 60vh;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-.workflow-node-head {
-  align-items: center;
-  display: grid;
-  gap: 8px;
-  grid-template-columns: 28px minmax(0, 1fr) auto;
-}
-
-.workflow-node-icon {
-  align-items: center;
-  background: var(--we-surface);
-  border: 1px solid var(--we-line);
-  border-radius: 8px;
-  color: var(--we-primary);
-  display: inline-flex;
-  height: 28px;
-  justify-content: center;
-  width: 28px;
-}
-
-.workflow-node-title {
-  font-size: 13px;
-  font-weight: 800;
-  line-height: 1.2;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workflow-node-status {
-  font-size: 9px;
-  padding: 3px 7px;
-}
-
-.workflow-node p {
-  color: var(--we-muted);
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1.35;
-  margin: 8px 0 0;
-}
-
-.workflow-node-summary {
-  background: var(--we-surface-node-summary);
-  border: 1px solid var(--we-line);
-  border-radius: 7px;
-  color: var(--we-ink-soft);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.35;
-  margin-top: 10px;
-  overflow: hidden;
-  padding: 7px 8px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workflow-handle {
-  background: var(--we-ink);
-  border: 2px solid var(--we-surface);
-  height: 10px;
-  width: 10px;
-}
-
-.workflow-handle-target { top: -5px; }
-.workflow-handle-source { bottom: -5px; }
-
-.react-flow__controls {
-  border: 1px solid var(--we-line-strong);
-  border-radius: 8px;
-  box-shadow: 0 6px 20px -8px var(--we-shadow-ink-20);
-  overflow: hidden;
-}
-
-.react-flow__controls-button {
-  background: var(--we-surface);
-  color: var(--we-ink-soft);
-  border-bottom: 1px solid var(--we-line);
-}
-
-.react-flow__edge-textbg {
-  fill: var(--we-surface);
-  stroke: var(--we-line);
-  stroke-width: 1px;
-}
-
-.react-flow__edge-text {
-  fill: var(--we-ink-soft);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.react-flow__attribution { background: transparent; }
 
 /* ==========================================================================
    Toast feedback
@@ -404,245 +200,6 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   font-size: 12px;
 }
 
-/* ==========================================================================
-   Sidebar (redesigned)
-   Replaces the legacy `.sidebar-section` stack. New shell: workflow card +
-   AI strip + search + grouped views + step palette + footer utility strip.
-   Mirrors `ui_kits/studio/sidebar.html` from the design-system zip.
-   ========================================================================== */
-.builder-sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding: 0;
-  background: var(--we-surface);
-  height: 100%;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: thin;
-}
-
-/* Workflow header card */
-.sb-workflow {
-  margin: 12px;
-  padding: 12px;
-  border: 1px solid var(--we-line);
-  border-radius: 10px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--we-primary) 4%, var(--we-surface) 96%), var(--we-surface));
-  display: grid;
-  gap: 10px;
-}
-
-.sb-workflow__top {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
-  align-items: center;
-}
-
-.sb-workflow__name {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.sb-workflow__name-ic { color: var(--we-primary); flex-shrink: 0; }
-
-.sb-workflow__name-input {
-  flex: 1;
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--we-ink);
-  letter-spacing: -0.01em;
-  padding: 2px 0;
-  outline: none;
-}
-
-.sb-workflow__name-input:focus {
-  background: var(--we-surface);
-  box-shadow: 0 0 0 2px var(--we-primary-ring);
-  border-radius: 4px;
-}
-
-.sb-workflow__name-edit {
-  color: var(--we-faint);
-  flex-shrink: 0;
-}
-
-.sb-env {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 7px;
-  border-radius: var(--we-radius-pill);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.sb-env--sandbox {
-  background: var(--we-success-soft);
-  color: var(--we-success-text);
-  border: 1px solid var(--we-success-border-30);
-}
-
-.sb-env--production {
-  background: var(--we-danger-soft);
-  color: var(--we-danger-text);
-  border: 1px solid var(--we-danger-border-30);
-}
-
-.sb-workflow__meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  color: var(--we-muted);
-  font-family: var(--font-mono);
-  flex-wrap: wrap;
-}
-
-.sb-workflow__meta b {
-  color: var(--we-ink-soft);
-  font-weight: 600;
-  font-family: var(--font-sans);
-}
-
-.sb-workflow__dot {
-  width: 7px;
-  height: 7px;
-  border-radius: var(--we-radius-pill);
-  background: var(--we-faint);
-}
-
-.sb-workflow__dot--connected { background: var(--we-success); animation: we-pulse 1.4s ease-in-out infinite; }
-.sb-workflow__dot--connecting { background: var(--we-warning); animation: we-pulse 1s ease-in-out infinite; }
-.sb-workflow__dot--error { background: var(--we-danger); }
-.sb-workflow__sep { color: var(--we-line-strong); }
-.sb-workflow__unsaved { color: var(--we-warning-text); font-weight: 600; }
-
-/* Spinner for in-flight header actions (Validate / Save / Run). */
-.we-spin { animation: we-spin-kf 0.8s linear infinite; }
-@keyframes we-spin-kf { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .we-spin { animation: none; } }
-
-.sb-workflow__acts {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr auto;
-  gap: 6px;
-  align-items: stretch;
-}
-
-.sb-workflow__ghost {
-  height: 30px;
-  padding: 0 6px;
-  border: 1px solid var(--we-line-strong);
-  border-radius: 7px;
-  background: var(--we-surface);
-  color: var(--we-ink-soft);
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-}
-
-.sb-workflow__ghost:hover {
-  color: var(--we-primary);
-  border-color: var(--we-primary);
-}
-
-.sb-workflow__run {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border: 0;
-  padding: 0 12px;
-  border-radius: 7px;
-  background: linear-gradient(135deg, var(--we-primary), var(--we-primary-strong));
-  color: var(--we-brand-glyph);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 6px 12px -6px var(--we-primary-shadow);
-}
-
-.sb-workflow__run:hover { filter: brightness(1.05); }
-
-/* AI mode 1-line strip */
-.sb-ai-strip {
-  margin: 0 12px 12px;
-  padding: 8px 10px;
-  border: 1px solid color-mix(in srgb, var(--we-accent) 22%, transparent);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--we-accent) 6%, var(--we-surface) 94%);
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 8px;
-  align-items: center;
-  cursor: pointer;
-  text-align: left;
-}
-
-.sb-ai-strip:hover { border-color: color-mix(in srgb, var(--we-accent) 40%, transparent); }
-
-.sb-ai-strip__ic {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  background: var(--we-surface);
-  border: 1px solid color-mix(in srgb, var(--we-accent) 30%, transparent);
-  color: var(--we-accent);
-  display: grid;
-  place-items: center;
-}
-
-.sb-ai-strip__body { min-width: 0; }
-
-.sb-ai-strip__body strong {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--we-ink);
-  display: block;
-  line-height: 1.2;
-}
-
-.sb-ai-strip__body small {
-  font-size: 10px;
-  color: var(--we-muted);
-  font-family: var(--font-mono);
-  display: block;
-  line-height: 1.2;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sb-ai-strip__pill {
-  padding: 1px 6px;
-  border-radius: var(--we-radius-pill);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.sb-ai-strip__pill--live {
-  background: var(--we-success-soft);
-  color: var(--we-success-text);
-  border: 1px solid var(--we-success-border-30);
-}
-
-.sb-ai-strip__pill--local {
-  background: var(--we-surface-muted);
-  color: var(--we-muted);
-  border: 1px solid var(--we-line);
-}
-
 /* Search */
 /* Inline search box for list panels (Templates / Packs). Same look as the
    sidebar .sb-search, minus the side gutters + trailing shortcut column. */
@@ -672,394 +229,157 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 }
 .we-panel-search input::placeholder { color: var(--we-muted); }
 
-.sb-search {
-  margin: 0 12px 10px;
-  padding: 6px 10px;
-  border: 1px solid var(--we-line-strong);
-  border-radius: 8px;
-  background: var(--we-surface);
+.authoring-ai-actions {
   display: grid;
-  grid-template-columns: 16px 1fr auto;
-  gap: 8px;
-  align-items: center;
-}
-
-.sb-search:focus-within {
-  border-color: var(--we-primary);
-  box-shadow: 0 0 0 3px var(--we-primary-ring);
-}
-
-.sb-search svg { color: var(--we-muted); }
-
-.sb-search input {
-  width: 100%;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  font-size: 12px;
-  color: var(--we-ink);
-}
-
-.sb-search input::placeholder { color: var(--we-muted); }
-
-.sb-search kbd {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  background: var(--we-surface-muted);
-  border: 1px solid var(--we-line);
-  border-radius: 4px;
-  padding: 1px 5px;
-  color: var(--we-muted);
-}
-
-/* Grouped views */
-.sb-groups { display: contents; }
-
-.sb-group { padding: 0 12px; margin-bottom: 6px; }
-
-.sb-group__head,
-.sb-group__head--static {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: 8px 6px 4px;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--we-muted);
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-}
-
-.sb-group__head--static { cursor: default; }
-
-.sb-group__head-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.sb-group__chev {
-  color: var(--we-faint);
-  transition: transform 120ms ease;
-}
-
-.sb-group--open > .sb-group__head .sb-group__chev { transform: rotate(90deg); }
-
-.sb-group__count {
-  color: var(--we-faint);
-  font-family: var(--font-mono);
-  font-weight: 700;
-  font-size: 9px;
-  padding: 1px 5px;
-  border-radius: var(--we-radius-pill);
-  background: var(--we-surface-muted);
-  border: 1px solid var(--we-line);
-}
-
-.sb-group__list { list-style: none; padding: 0; margin: 0; display: grid; gap: 2px; }
-
-.sb-view {
-  display: grid;
-  grid-template-columns: 22px 1fr auto;
   gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--we-primary-ring);
+  border-radius: 10px;
+  background: var(--we-primary-soft);
+}
+
+.authoring-ai-actions > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.authoring-ai-actions > div:first-child strong { font-size: 12px; }
+.authoring-ai-actions > div:first-child span { color: var(--we-muted); font-size: 12px; }
+
+.authoring-ai-actions__buttons {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.authoring-ai-actions__buttons .small-command {
+  justify-content: center;
+  min-width: 0;
+  padding-inline: 6px;
+}
+
+.authoring-scope-nav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--we-line);
+  border-radius: 9px;
+  background: var(--we-surface-muted);
+}
+
+.authoring-scope-nav button {
+  display: inline-flex;
   align-items: center;
-  padding: 7px 8px;
-  border-radius: 7px;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
   background: transparent;
-  border: 0;
+  color: var(--we-muted);
   cursor: pointer;
-  text-align: left;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.authoring-scope-nav button[data-active="true"] {
+  border-color: var(--we-line-strong);
+  background: var(--we-surface);
+  color: var(--we-ink);
+}
+
+.authoring-scope-nav button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.authoring-scope-nav small {
+  display: inline-grid;
+  min-width: 17px;
+  height: 17px;
+  place-items: center;
+  border-radius: var(--we-radius-pill);
+  background: var(--we-danger-soft);
+  color: var(--we-danger-text);
+  font: 700 9px/1 var(--font-mono);
+}
+
+.authoring-workflow-tools {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-top: 1px solid var(--we-line);
+}
+
+.authoring-workflow-tools__heading {
+  display: grid;
+  gap: 3px;
+}
+
+.authoring-workflow-tools__heading strong {
+  font-size: 13px;
+}
+
+.authoring-workflow-tools__heading span {
+  color: var(--we-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.authoring-workflow-tools__nav {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 8px;
+}
+
+.authoring-workflow-tools__nav .small-command {
+  justify-content: flex-start;
+  min-height: 34px;
+}
+
+.authoring-workflow-tools__nav .small-command[aria-pressed="true"] {
+  color: var(--we-primary);
+  border-color: color-mix(in srgb, var(--we-primary) 40%, var(--we-line));
+  background: color-mix(in srgb, var(--we-primary) 8%, var(--we-surface));
+}
+
+.ai-fix-list {
+  display: grid;
+  gap: 8px;
+}
+
+.ai-fix-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  background: var(--we-surface-muted);
+}
+
+.ai-fix-card p {
+  margin: 0;
   color: var(--we-ink-soft);
   font-size: 12px;
-  font-weight: 500;
-  width: 100%;
+  line-height: 1.45;
 }
 
-.sb-view:hover { background: var(--we-surface-muted); color: var(--we-ink); }
+.ai-fix-card .command-button { justify-self: start; }
 
-.sb-view__ic {
-  width: 22px;
-  height: 22px;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--we-ink-soft);
+.template-catalog-section {
   display: grid;
-  place-items: center;
-}
-
-.sb-view__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.sb-view__meta {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--we-muted);
-}
-
-.sb-view--on {
-  background: var(--we-primary-soft);
-  color: var(--we-primary-text);
-  font-weight: 600;
-}
-
-.sb-view--on .sb-view__ic { color: var(--we-primary-text); }
-.sb-view--on .sb-view__meta { color: var(--we-primary-text); }
-
-/* Step palette */
-.sb-categories { display: contents; }
-
-.sb-pinned { margin-top: 4px; }
-
-.sb-cat { padding: 0 12px; margin-bottom: 4px; }
-
-.sb-cat__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: 6px 6px 4px;
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--we-ink-soft);
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-}
-
-.sb-cat__head-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.sb-cat__head-ic { color: var(--we-primary); display: inline-flex; }
-
-.sb-cat__head-meta {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--we-faint);
-  font-family: var(--font-mono);
-  font-size: 10px;
-}
-
-.sb-cat__chev { transition: transform 120ms ease; }
-
-.sb-cat--open > .sb-cat__head .sb-cat__chev { transform: rotate(90deg); }
-
-.sb-palette {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  padding: 0 6px;
-}
-
-.sb-chip {
-  display: grid;
-  grid-template-columns: 20px 1fr;
-  gap: 6px;
-  align-items: center;
-  padding: 6px 7px;
-  border: 1px solid var(--we-line-strong);
-  border-radius: 6px;
-  background: var(--we-surface);
-  cursor: pointer;
-  text-align: left;
-  color: var(--we-ink);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.sb-chip:hover { border-color: var(--we-primary); color: var(--we-primary); }
-
-.sb-chip__ic {
-  width: 20px;
-  height: 20px;
-  border-radius: 5px;
-  background: var(--we-surface-muted);
-  border: 1px solid var(--we-line);
-  color: var(--we-ink-soft);
-  display: grid;
-  place-items: center;
-}
-
-.sb-chip:hover .sb-chip__ic {
-  color: var(--we-primary);
-  border-color: color-mix(in srgb, var(--we-primary) 28%, transparent);
-  background: var(--we-primary-soft);
-}
-
-.sb-chip__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.sb-chip--pinned {
-  border-color: color-mix(in srgb, var(--we-primary) 22%, transparent);
-  background: color-mix(in srgb, var(--we-primary) 4%, var(--we-surface) 96%);
-}
-
-/* Footer */
-.sb-footer {
-  margin-top: auto;
-  padding: 8px 14px;
-  border-top: 1px solid var(--we-line);
-  background: color-mix(in srgb, var(--we-surface-2) 70%, var(--we-surface) 30%);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  font-size: 11px;
-  color: var(--we-muted);
 }
 
-.sb-footer__live {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--font-mono);
+.template-catalog-section + .template-catalog-section {
+  margin-top: 4px;
+  padding-top: 14px;
+  border-top: 1px solid var(--we-line);
 }
 
-.sb-footer__live--connected { color: var(--we-success-text); }
-
-.sb-footer__live--connected .sb-footer__dot { background: var(--we-success); }
-
-.sb-footer__dot {
-  width: 6px;
-  height: 6px;
-  border-radius: var(--we-radius-pill);
-  background: var(--we-faint);
-}
-
-.sb-footer__actions { display: inline-flex; gap: 6px; }
-
-.sb-footer__actions button {
-  background: transparent;
-  border: 1px solid var(--we-line);
-  border-radius: 6px;
-  padding: 4px;
-  color: var(--we-muted);
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-}
-
-.sb-footer__actions button:hover { color: var(--we-primary); border-color: var(--we-primary); }
-
-/* Collapsed rail — show only the workflow run icon-button, the AI strip
-   pill, the view icons, and the collapse-toggle. Everything else hides. */
-.builder-sidebar[data-collapsed="true"] {
-  width: 56px;
-  overflow-x: hidden;
-}
-
-/* Collapsed workflow card — strip the gradient bg / border, render the
-   actions as four flat 32x32 icon buttons stacked centered. The Run
-   button keeps its cobalt-cyan gradient (now icon-only). */
-.builder-sidebar[data-collapsed="true"] .sb-workflow {
-  margin: 8px 0;
-  padding: 0;
-  gap: 6px;
-  grid-template-columns: 1fr;
-  background: transparent;
-  border: 0;
-}
-.builder-sidebar[data-collapsed="true"] .sb-workflow__top,
-.builder-sidebar[data-collapsed="true"] .sb-workflow__meta,
-.builder-sidebar[data-collapsed="true"] .sb-workflow__name,
-.builder-sidebar[data-collapsed="true"] .sb-env,
-.builder-sidebar[data-collapsed="true"] .sb-search,
-.builder-sidebar[data-collapsed="true"] .sb-ai-strip__body,
-.builder-sidebar[data-collapsed="true"] .sb-ai-strip__pill,
-.builder-sidebar[data-collapsed="true"] .sb-group__head,
-.builder-sidebar[data-collapsed="true"] .sb-cat__head,
-.builder-sidebar[data-collapsed="true"] .sb-view__label,
-.builder-sidebar[data-collapsed="true"] .sb-view__meta,
-.builder-sidebar[data-collapsed="true"] .sb-chip__label,
-.builder-sidebar[data-collapsed="true"] .sb-palette,
-.builder-sidebar[data-collapsed="true"] .sb-categories,
-.builder-sidebar[data-collapsed="true"] .sb-pinned .sb-palette,
-.builder-sidebar[data-collapsed="true"] .sb-footer__live,
-.builder-sidebar[data-collapsed="true"] .sb-workflow__run span {
-  display: none;
-}
-
-.builder-sidebar[data-collapsed="true"] .sb-workflow__acts {
-  grid-template-columns: 1fr;
-  gap: 4px;
-  justify-items: center;
-}
-
-.builder-sidebar[data-collapsed="true"] .sb-workflow__ghost,
-.builder-sidebar[data-collapsed="true"] .sb-workflow__run {
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border-radius: 8px;
-}
-
-.builder-sidebar[data-collapsed="true"] .sb-workflow__run {
-  /* Re-render as a square icon-only button while preserving the
-     cobalt-cyan gradient and the cobalt-tinted shadow. */
-  display: grid;
-  place-items: center;
-  gap: 0;
-}
-
-.builder-sidebar[data-collapsed="true"] .sb-ai-strip {
-  margin: 0 6px 8px;
-  padding: 6px;
-  grid-template-columns: 1fr;
-  justify-items: center;
-}
-
-.builder-sidebar[data-collapsed="true"] .sb-group,
-.builder-sidebar[data-collapsed="true"] .sb-cat { padding: 0 6px; }
-
-.builder-sidebar[data-collapsed="true"] .sb-group__list {
-  display: grid;
-  gap: 2px;
-}
-
-.builder-sidebar[data-collapsed="true"] .sb-view {
-  grid-template-columns: 1fr;
-  justify-items: center;
-  padding: 8px 6px;
-  position: relative;
-}
-
-.builder-sidebar[data-collapsed="true"] .sb-view::after {
-  content: attr(title);
-  position: absolute;
-  left: calc(100% + 8px);
-  top: 50%;
-  transform: translateY(-50%);
-  white-space: nowrap;
-  background: var(--we-surface);
-  border: 1px solid var(--we-line);
-  border-radius: 6px;
-  padding: 4px 8px;
-  font-size: 11px;
-  color: var(--we-ink);
-  box-shadow: 0 6px 14px var(--we-shadow-ink-14);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 120ms ease;
-  z-index: 10;
-}
-
-.builder-sidebar[data-collapsed="true"] .sb-view:hover::after {
-  opacity: 1;
-}
-
-.builder-sidebar[data-collapsed="true"] .sb-footer {
-  padding: 8px 6px;
-  justify-content: center;
-}
-.builder-sidebar[data-collapsed="true"] .sb-footer__actions {
-  gap: 4px;
-  flex-direction: column;
-}
 /* ==========================================================================
    User menu (redesigned)
    Identity strip + workspace + recent orgs + AI operator + theme/density +
@@ -1411,7 +731,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   gap: 6px;
 }
 
-.user-menu__ai-top strong svg { color: var(--we-accent); }
+.user-menu__ai-top strong svg { color: var(--we-accent-text); }
 
 .user-menu__ai-pill {
   display: inline-flex;
@@ -1427,7 +747,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 
 .user-menu__ai-pill--live {
   background: var(--we-accent-soft);
-  color: var(--we-accent);
+  color: var(--we-accent-text);
   border: 1px solid color-mix(in srgb, var(--we-accent) 30%, transparent);
 }
 
@@ -1764,7 +1084,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 
 .recovery-center-composer__answer-pill--ai {
   background: var(--we-accent-soft);
-  color: var(--we-accent);
+  color: var(--we-accent-text);
   border: 1px solid color-mix(in srgb, var(--we-accent) 30%, transparent);
 }
 
@@ -1799,68 +1119,6 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 .we-recovery-center-tile[data-severity="warning"] { border-left-color: var(--we-warning); }
 .we-recovery-center-tile[data-severity="danger"] { border-left-color: var(--we-danger); }
 .we-recovery-center-tile[data-severity="neutral"] { border-left-color: var(--we-line-strong); }
-
-/* Pending sign-off rows — warning-soft tinted card with inline Apply/Hold. */
-.we-recovery-signoff {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.we-recovery-signoff-row {
-  display: grid;
-  grid-template-columns: 24px 1fr;
-  gap: 10px;
-  padding: 10px;
-  border: 1px solid color-mix(in srgb, var(--we-warning) 25%, transparent);
-  background: var(--we-warning-soft);
-  border-left: 3px solid var(--we-warning);
-  border-radius: 8px;
-}
-
-.we-recovery-signoff-row__ic {
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  background: var(--we-surface);
-  border: 1px solid color-mix(in srgb, var(--we-warning) 30%, transparent);
-  color: var(--we-warning-text);
-  display: grid;
-  place-items: center;
-}
-
-.we-recovery-signoff-row__body strong {
-  display: block;
-  font-size: 13px;
-  color: var(--we-ink);
-  line-height: 1.25;
-}
-
-.we-recovery-signoff-row__body p {
-  margin: 2px 0 8px;
-  font-size: 11px;
-  color: var(--we-ink-soft);
-  line-height: 1.45;
-}
-
-.we-recovery-signoff-row__body p code {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--we-ink);
-  background: var(--we-surface);
-  border: 1px solid var(--we-line);
-  border-radius: 4px;
-  padding: 1px 5px;
-}
-
-.we-recovery-signoff-row__acts {
-  display: inline-flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
 
 .command-button-compact {
   min-height: 28px;
@@ -1932,7 +1190,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 
 .we-recovery-watch-row__state--ready {
   background: var(--we-accent-soft);
-  color: var(--we-accent);
+  color: var(--we-accent-text);
   border: 1px solid color-mix(in srgb, var(--we-accent) 34%, transparent);
 }
 

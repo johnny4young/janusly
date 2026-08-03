@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 /**
  * Real-browser proof for recovery momentum and truthful replay feedback.
  * Each case uses a private dev-header org and the product's own demo-failure
@@ -109,10 +110,16 @@ async function runRecoveryCycle(
 
   await prepareIsolatedSession(page, contract.locale, options.reducedMotion)
   await page.goto('/')
+  await page.getByTestId('home-insights-toggle').click()
 
-  const demoButton = page.getByTestId('recovery-center-empty-cta-demo')
-  await expect(demoButton).toBeVisible()
-  await demoButton.click()
+  const drillButton = page.getByTestId('recovery-center-empty-cta-drill')
+  await expect(drillButton).toBeVisible()
+  await drillButton.click()
+  await openWorkspaceSection(
+    page,
+    contract.locale === 'en' ? 'Activity' : 'Actividad',
+    contract.locale === 'en' ? 'Recover' : 'Recuperar',
+  )
 
   const queue = page.getByTestId('recovery-queue')
   await expect(queue).toBeVisible()
@@ -125,8 +132,14 @@ async function runRecoveryCycle(
   await waitForHealthRingToSettle(hero)
   await hideUnrelatedOverlays(page)
   await captureElement(hero, `web-${contract.locale}-recovery-hero-action`)
+  await captureElement(page.locator('.workspace-main'), `web-${contract.locale}-home-action-workspace`)
 
-  await hero.getByTestId('recovery-center-open-queue').click()
+  await page.getByTestId('recovery-center-action-cta-triage_failures').click()
+  await openWorkspaceSection(
+    page,
+    contract.locale === 'en' ? 'Activity' : 'Actividad',
+    contract.locale === 'en' ? 'Recover' : 'Recuperar',
+  )
   await expect(queue).toBeVisible()
   const activeRow = queue.locator('[data-dead-letter-id]').first()
   await activeRow.click()
@@ -196,11 +209,13 @@ test('replaying one of two failures never publishes a false all-clear', async ({
   const orgId = await prepareIsolatedSession(page, 'en', false)
   await page.goto('/')
 
-  await page.getByTestId('recovery-center-empty-cta-demo').click()
+  await page.getByTestId('home-insights-toggle').click()
+  await page.getByTestId('recovery-center-empty-cta-drill').click()
+  await openWorkspaceSection(page, 'Activity', 'Recover')
   await expect(page.getByTestId('recovery-queue')).toBeVisible()
   await injectDemoFailure(request, orgId)
   await page.reload()
-  await page.getByRole('button', { name: 'Runs', exact: true }).click()
+  await openWorkspaceSection(page, 'Activity', 'Recover')
 
   const queue = page.getByTestId('recovery-queue')
   await expect(queue.locator('[data-dead-letter-id]')).toHaveCount(2)
@@ -213,6 +228,6 @@ test('replaying one of two failures never publishes a false all-clear', async ({
   // A retry can fail again and replace the claimed dead letter with a fresh
   // one. The truthful contract is that recovery work remains visible, not
   // that the transient open count must fall from two to exactly one.
-  await expect(hero.getByTestId('recovery-center-greeting')).toContainText(/needs? recovery/)
+  await expect(page.getByTestId('recovery-center-action-triage_failures')).toBeVisible()
   await expect(hero.getByTestId('celebration-burst')).toHaveCount(0)
 })

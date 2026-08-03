@@ -11,7 +11,7 @@ import { requestRecoveryQueueFocus } from './recovery-queue-focus-bus'
 // filters + sorts before the page cap, folds the recovery overlay inline, and
 // returns a { items, nextCursor, hasMore } keyset envelope. The default stub
 // returns an empty page; `dlqMock` simulates the server for filter/sort cases.
-// Child cards (FailureClustersCard / AutoHealingPendingCard) get empty defaults.
+// Supplementary recovery cards are deferred until the operator expands them.
 vi.mock('../api', () => ({
   api: vi.fn(async (path?: unknown) => {
     if (typeof path !== 'string') return { items: [], clusters: [], runs: [], proposals: [] }
@@ -29,9 +29,8 @@ vi.mock('../clipboard', () => ({
 const initialState = useWorkflowStore.getState()
 
 // The recovery queue makes TWO fetches: `/dlq/queue?…` (the filtered/paginated
-// list) and `/dlq/counts` (the org-wide mini-grid summary). The sibling
-// `/dlq/clusters` + `/auto-healing/*` cards expect object shapes. Default to an
-// empty page / zero counts and card-safe objects for the rest.
+// list) and `/dlq/counts` (the org-wide mini-grid summary). Default to an empty
+// page / zero counts and card-safe objects for explicitly expanded automation.
 const defaultApiMock = async (path: string): Promise<unknown> => {
   if (path.startsWith('/dlq/counts')) return { total: 0, open: 0, replayed: 0, resolved: 0 }
   if (path.startsWith('/dlq/queue')) return { items: [] as DeadLetter[], nextCursor: null, hasMore: false }
@@ -151,6 +150,32 @@ describe('<DeadLettersPanel />', () => {
     })
   })
 
+  it('puts the queue first and defers supplementary recovery reads until expanded', async () => {
+    vi.mocked(api).mockImplementation(dlqMock([]))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+
+    const empty = await screen.findByTestId('dlq-empty')
+    expect(empty).toBeInTheDocument()
+    const queue = screen.getByTestId('recovery-queue')
+    const automation = screen.getByTestId('recovery-automation')
+    expect(queue.compareDocumentPosition(automation) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+
+    const initialPaths = vi.mocked(api).mock.calls.map(([path]) => String(path))
+    expect(initialPaths.some((path) => path.startsWith('/dlq/queue'))).toBe(true)
+    expect(initialPaths).toContain('/dlq/counts')
+    expect(initialPaths.some((path) => path.startsWith('/dlq/clusters'))).toBe(false)
+    expect(initialPaths.some((path) => path.startsWith('/recovery/campaigns'))).toBe(false)
+    expect(initialPaths.some((path) => path.startsWith('/auto-healing'))).toBe(false)
+
+    fireEvent.click(screen.getByTestId('recovery-automation-toggle'))
+    await waitFor(() => {
+      const paths = vi.mocked(api).mock.calls.map(([path]) => String(path))
+      expect(paths).toContain('/dlq/clusters')
+      expect(paths).toContain('/recovery/campaigns?limit=8')
+      expect(paths).toContain('/auto-healing/pending')
+    })
+  })
+
   it('renders all rows under the jsdom 0-height fallback when the server returns 100', async () => {
     const rows = Array.from({ length: 100 }, (_, i) => mockDeadLetter(String(i + 1)))
     vi.mocked(api).mockImplementation(dlqMock(rows))
@@ -190,6 +215,45 @@ describe('<DeadLettersPanel />', () => {
     fireEvent.keyDown(row, { key: 'Enter', metaKey: true })
     expect(onReplay).not.toHaveBeenCalled()
     expect(onResolve).not.toHaveBeenCalled()
+  })
+
+  it('waits for the full selected failure snapshot before enabling recovery', async () => {
+    const row = mockDeadLetter('detail-gated', {
+      workflowJson: undefined,
+      nodeJson: undefined,
+    })
+    let releaseDetail!: (value: DeadLetter) => void
+    const detail = new Promise<DeadLetter>((resolve) => {
+      releaseDetail = resolve
+    })
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.startsWith('/dlq/counts')) return countsFromRows([row])
+      if (path.startsWith('/dlq/queue')) {
+        return { items: [row], nextCursor: null, hasMore: false }
+      }
+      if (path === '/dlq?id=detail-gated') return detail
+      return { items: [], clusters: [], runs: [], proposals: [] }
+    })
+
+    render(
+      <DeadLettersPanel
+        onRefresh={vi.fn()}
+        onReplay={vi.fn()}
+        onResolve={vi.fn()}
+      />,
+    )
+
+    const suggest = await screen.findByRole('button', {
+      name: /suggest fix/i,
+    })
+    expect(suggest).toBeDisabled()
+
+    releaseDetail({
+      ...row,
+      workflowJson: { dslVersion: '1.0', nodes: [], edges: [] },
+      nodeJson: { id: row.nodeId, type: 'noop', config: {} },
+    })
+    await waitFor(() => expect(suggest).toBeEnabled())
   })
 
   it('labels a selected recovery drill with its actual recovery path', async () => {

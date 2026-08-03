@@ -73,6 +73,8 @@ export type ApiErrorCode =
   | "workflow_rollout_invalid"
   | "workflow_rollout_not_found"
   | "workflow_rollout_not_active"
+  | "workflow_recovery_qualification_invalid"
+  | "workflow_recovery_qualification_required"
   // upstream health sources
   | "upstream_source_not_found"
   | "upstream_source_duplicate"
@@ -120,7 +122,6 @@ export type ApiErrorCode =
   | "alerts_policy_refinement_failed"
   | "alerts_policy_system_trigger_only"
   // auto-healing
-  | "autoheal_apply_replay_failed"
   | "autoheal_dlq_or_node_missing"
   | "autoheal_invalid_body"
   | "autoheal_missing_id"
@@ -129,6 +130,7 @@ export type ApiErrorCode =
   | "autoheal_rate_limited"
   | "autoheal_not_pending"
   | "autoheal_already_resolved"
+  | "autoheal_validation_risk_ack_required"
   // billing
   | "billing_monthly_usd_invalid"
   | "billing_policy_invalid"
@@ -236,6 +238,10 @@ export type ApiErrorCode =
   | "recovery_item_transition_invalid"
   | "recovery_item_not_escalation"
   | "recovery_item_comment_cap_reached"
+  | "recovery_case_not_found"
+  | "recovery_case_conflict"
+  | "recovery_autonomy_policy_blocked"
+  | "recovery_semantic_output_invalid"
   | "recovery_playbook_acceptance_required"
   | "recovery_playbook_apply_required"
   | "recovery_playbook_evidence_required"
@@ -252,6 +258,9 @@ export type ApiErrorCode =
   | "replay_campaign_not_running"
   | "recovery_playbook_source_mismatch"
   | "recovery_playbook_validation_required"
+  | "recovery_provider_simulation_unavailable"
+  | "recovery_provider_simulation_unsupported"
+  | "recovery_validation_effect_mode_invalid"
   // reports
   | "reports_invalid_request"
   | "reports_rate_limit_exceeded"
@@ -320,6 +329,10 @@ export type ApiErrorCode =
   // server
   | "server_internal_error"
   | "server_not_found"
+  | "external_runtime_conflict"
+  | "external_runtime_invalid_request"
+  | "external_runtime_invalid_signature"
+  | "external_runtime_not_found"
   | "slack_interaction_conflict"
   | "slack_interaction_invalid_request"
   | "slack_interaction_invalid_signature"

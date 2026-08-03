@@ -44,7 +44,7 @@ import { AlertCircle, Play, RefreshCcw, Sparkles, X } from 'lucide-react'
 import { normalizeErrorSignature } from '@janusly/shared/src/error-signature'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
-import type { DeadLetter } from './DeadLettersPanel'
+import type { DeadLetter } from './dead-letter-types'
 import { Trans, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { AppliedBody } from './recovery-dialog/AppliedBody'
@@ -55,7 +55,7 @@ import {
   isActionableSuggestion,
   normalisePatchSuggestion,
   pickFailedNodeErrorJson,
-} from './recovery-dialog/helpers'
+} from './recovery-dialog/recovery-dialog-model'
 import type {
   ClusterApplyResult,
   PatchSuggestion,
@@ -302,7 +302,7 @@ export function RecoveryDialog({
         if (cancelled) return
         setStep({
           kind: 'error',
-          message: error instanceof Error ? error.message : (runtimeT('recoveryDialog.errors.validationPolling') as string),
+          message: error instanceof Error ? error.message : (runtimeT('recoveryDialog.errors.validationPolling')),
         })
       }
     }

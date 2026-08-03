@@ -7,12 +7,24 @@ by prefix alone.
 
 ## Sources of truth
 
-- `apps/api/src/api-contracts.ts` — Zod request/response schemas and the pure
-  `V1_CONTRACT_ROUTES` manifest.
+- `apps/api/src/contracts/<domain>.ts` — bounded-domain route contracts and
+  their precise Zod request/response schemas.
+- `apps/api/src/contracts/schemas.ts` — internal side-effect-free wire schemas
+  shared by more than one contract domain.
+- `apps/api/src/contracts/manifest.ts` — the ordered, pure
+  `V1_CONTRACT_ROUTES` composition consumed by runtime aliasing and OpenAPI
+  tooling.
+- `apps/api/src/api-contracts.ts` — compatibility barrel for existing API and
+  test imports; new definitions belong in the domain modules.
 - `packages/shared/src/api-contract.ts` — zero-dependency path catalogs for
   stable reads, writes, and dynamic MCP connection templates, shared by API
   contracts and first-party clients.
 - `apps/api/src/routes.ts` — optional `contract` field on a route entry.
+- `apps/api/src/routes/runs-routes.ts` — stable first-match registry for run
+  routes. Its handlers live in bounded responsibility modules under
+  `apps/api/src/routes/run-routes/`; preserve the registry composition order
+  and the broad list matcher's explicit exclusions when adding an overlapping
+  `/runs` route.
 - `apps/api/src/server.ts` — exact-route-first dispatch, `/v1` alias resolution,
   query/body validation, request ID assignment, and unchanged auth/RBAC ordering.
 - `apps/api/src/http.ts` — versioned success/error envelopes and runtime output
@@ -120,15 +132,17 @@ the response header and v1 envelope. CORS exposes `X-Request-Id` and
 
 ## Adding a contracted route
 
-1. Define precise Zod wire schemas and an `ApiRouteContract` in
-   `api-contracts.ts`. Dates are ISO strings because validation occurs after
-   JSON serialization.
+1. Define precise Zod wire schemas and an `ApiRouteContract` in the matching
+   `contracts/<domain>.ts` module. Promote a schema to `contracts/schemas.ts`
+   only when multiple domains share it. Dates are ISO strings because
+   validation occurs after JSON serialization.
 2. For a dynamic path, declare a strict `request.path` schema whose keys match
    every `{parameter}` in the OpenAPI path template. The dispatcher validates
    decoded values and the generator emits required OpenAPI path parameters.
 3. Attach the contract to the real route entry without changing its role,
    permission, or tenant-scoped handler.
-4. Add the matching method/gates/contract to `V1_CONTRACT_ROUTES`.
+4. Add the matching method/gates/contract to the ordered
+   `contracts/manifest.ts` `V1_CONTRACT_ROUTES` composition.
 5. Add a stable read, mutation, or path template to the matching catalog in
    `packages/shared/src/api-contract.ts`. If the browser should migrate a GET
    immediately, its transport reads `V1_READ_PATHS` directly.

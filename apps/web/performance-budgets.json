@@ -1,98 +1,136 @@
 {
-  "version": 1,
-  "totalGzipKiB": 602,
+  "version": 3,
+  "artifactGzipKiB": 580,
+  "singleLocale": {
+    "assets": [
+      "catalog-en.js",
+      "catalog-es.js"
+    ],
+    "maxGzipKiB": 530
+  },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
     "reactVendor": {
       "label": "React vendor",
-      "assets": ["react-vendor.js"],
-      "maxGzipKiB": 135
+      "assets": [
+        "react-vendor.js"
+      ],
+      "maxGzipKiB": 60
     },
     "entry": {
       "label": "Entry JavaScript",
-      "assets": ["index.js"],
-      "maxGzipKiB": 8
+      "assets": [
+        "index.js"
+      ],
+      "maxGzipKiB": 2
     },
     "canvas": {
       "label": "Canvas workspace",
-      "assets": ["CanvasWorkspace.js", "CanvasWorkspace.css"],
-      "maxGzipKiB": 65
+      "assets": [
+        "CanvasWorkspace.js",
+        "CanvasWorkspace.css"
+      ],
+      "maxGzipKiB": 68
     }
   },
   "routeBudgets": {
     "home": {
-      "maxTransferredKiB": 300,
+      "maxTransferredKiB": 250,
       "maxLongTaskMs": 500
     },
-    "aiStudio": {
-      "maxTransferredKiB": 100,
+    "homeEs": {
+      "maxTransferredKiB": 250,
+      "maxLongTaskMs": 500
+    },
+    "workflowBuilder": {
+      "maxTransferredKiB": 90,
       "maxLongTaskMs": 300
     },
     "selectedRecovery": {
-      "maxTransferredKiB": 100,
+      "maxTransferredKiB": 90,
+      "maxLongTaskMs": 200
+    },
+    "recoveryTools": {
+      "maxTransferredKiB": 90,
+      "maxLongTaskMs": 200
+    },
+    "recoveryAutomation": {
+      "maxTransferredKiB": 20,
+      "maxLongTaskMs": 200
+    },
+    "localeSwitch": {
+      "maxTransferredKiB": 55,
       "maxLongTaskMs": 200
     }
   },
   "baselineGzipKiB": {
-    "api.js": 3.31,
-    "App.js": 49.81,
-    "canvas-node-drag.js": 0.2,
-    "CelebrationBurst.js": 0.27,
-    "CommandPalette.js": 2.8,
-    "CredentialRotateModal.js": 2.01,
-    "docs-link.js": 0.25,
-    "EmptyState.js": 0.45,
-    "ErrorBoundary.js": 0.52,
-    "error-signature.js": 1.92,
-    "ExperimentsPanel.js": 4.18,
-    "helpers.js": 2.87,
-    "icons-vendor.js": 16.31,
-    "identity-context.js": 0.14,
-    "index.css": 36.52,
-    "LoadingSkeleton.js": 0.41,
-    "MembersPanel.js": 2.42,
-    "MultiAgentTimeline.js": 2.06,
-    "operations-section-bus.js": 0.4,
-    "OperationsPage.js": 21.58,
-    "panel-primitives.js": 0.67,
-    "recovery-all-clear-coordinator.js": 1.63,
-    "recovery-item.js": 0.61,
-    "recovery-queue-focus-bus.js": 0.71,
-    "ReasoningPanel.js": 6.03,
-    "RecoveryDialog.js": 13.42,
-    "PlaybookPromotionCard.js": 1.6,
-    "PlaybookMatchCard.js": 1.08,
+    "ActivityRecoveryDetail.js": 2.22,
+    "ActivityWorkspace.js": 3.52,
+    "AiGuidanceSettingsPanel.js": 1.31,
+    "AlertPoliciesPanel.js": 4.24,
+    "app-workspace.js": 71.07,
+    "AutoHealingPendingCard.js": 2.34,
+    "AuditLogPanel.js": 1.46,
+    "AuthPolicySettingsPanel.js": 1.73,
+    "BudgetSettingsPanel.js": 2.29,
+    "CanvasWorkspace.css": 3.4,
+    "CanvasWorkspace.js": 58.89,
+    "catalog-en.js": 40.64,
+    "catalog-es.js": 45.56,
+    "CommandPalette.js": 3,
+    "ConnectionsPanel.js": 4.52,
+    "ExperimentsPanel.js": 3.42,
+    "ExternalRuntimePanel.js": 2.54,
+    "FailureClustersCard.js": 2.64,
+    "HomeInsights.js": 7.57,
+    "icons-vendor.js": 6.17,
+    "index.css": 40.68,
+    "index.js": 0.82,
+    "McpConnectionsPanel.js": 3.07,
+    "MembersPanel.js": 2.15,
+    "MemoryGovernancePanel.js": 0.83,
+    "MultiAgentTimeline.js": 1.78,
+    "OperationsPage.js": 5.37,
+    "PermissionGrantsPanel.js": 2.34,
     "playbook-scorecard.js": 0.13,
-    "RollbackConfirmDialog.js": 1.58,
+    "PlaybookMatchCard.js": 0.95,
+    "PlaybookPromotionCard.js": 1.25,
+    "react-vendor.js": 55.23,
+    "ReasoningPanel.js": 5.99,
+    "RecentAlertsCard.js": 1.18,
+    "recovery-item.js": 0.6,
+    "RecoveryCasePanel.js": 3.5,
+    "RecoveryDialog.js": 9.8,
+    "ReplayCampaignsCard.js": 1.6,
+    "RollbackConfirmDialog.js": 1.27,
     "rolldown-runtime.js": 0.41,
-    "RunInputDialog.js": 3.29,
-    "RunWorkspace.js": 27.64,
-    "RunStreamChip.js": 3.58,
-    "ScheduleHistoryPanel.js": 2.37,
-    "schemas.js": 17.87,
-    "ShortcutsModal.js": 1.1,
-    "SnippetInsertMenu.js": 4.19,
-    "SolutionPacksPanel.js": 1.75,
-    "store.js": 3.93,
-    "constants.js": 2.17,
-    "catalog-en.js": 56.63,
-    "catalog-es.js": 62.5,
-    "supabase-runtime.js": 50.25,
-    "preload-helper.js": 0.66,
-    "useDialogFocusTrap.js": 0.57,
-    "useMemoryConsentStatus.js": 0.77,
-    "usePrefersReducedMotion.js": 2.1,
-    "useVirtualList.js": 0.91,
-    "VersionHistoryPanel.js": 3,
-    "VitalSignsStrip.js": 3.93,
-    "workflow-diff.js": 1.29,
-    "WorkflowDiffView.js": 2.08,
-    "WorkflowHealthBadge.js": 1.51,
-    "WorkflowIoEditor.js": 2.56,
-    "WorkflowMetadataPanel.js": 2.74,
-    "WorkflowRolloutPanel.js": 2.58,
-    "WorkflowsDashboard.js": 8.97,
-    "WorkflowSloPanel.js": 1.43,
-    "operator-guidance.js": 2.14
+    "RunExplainChat.js": 4.32,
+    "RunInputDialog.js": 3.26,
+    "RunsPanel.js": 25.7,
+    "RunStreamChip.js": 0.58,
+    "RunWorkspace.js": 1.76,
+    "ScheduleHistoryPanel.js": 1.96,
+    "schemas.js": 17.88,
+    "ScimDirectorySettingsPanel.js": 2.41,
+    "ShortcutsModal.js": 1.07,
+    "SlackInteractionsPanel.js": 2.56,
+    "SnippetInsertMenu.js": 3.92,
+    "SolutionPacksPanel.js": 1.85,
+    "supabase-runtime.js": 21.13,
+    "ToolInputFields.js": 1.51,
+    "UpstreamHealthPanel.js": 2.39,
+    "url.js": 0.12,
+    "useVirtualList.js": 0.9,
+    "ValidationEvidencePill.js": 0.3,
+    "VersionHistoryPanel.js": 2.54,
+    "VitalSignsStrip.js": 2.11,
+    "workflow-workspace.js": 38.92,
+    "WorkflowDiffView.js": 1.55,
+    "WorkflowIoEditor.js": 2.54,
+    "WorkflowMetadataPanel.js": 2.7,
+    "WorkflowRecoveryQualification.js": 1.81,
+    "WorkflowRolloutPanel.js": 2.69,
+    "WorkflowRolloutStatus.js": 0.66,
+    "WorkflowSloPanel.js": 1.22
   }
 }

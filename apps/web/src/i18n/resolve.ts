@@ -1,7 +1,7 @@
 /**
  * Pure helpers for resolving the `'system'` AppLanguage to a concrete
  * RuntimeLocale by inspecting `navigator.languages`. No side effects, no
- * React, no i18next — easy to unit test.
+ * No React or runtime dependencies, so locale resolution stays easy to test.
  *
  * Mirror of `lingua/src/shared/i18n/resources.ts` (resolveSystemLanguage).
  */

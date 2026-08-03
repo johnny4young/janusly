@@ -1,0 +1,33 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/start",
+    "body": {
+      "workflow": {
+        "id": "golden2-gate",
+        "nodes": [
+          {
+            "id": "gate",
+            "type": "approval",
+            "config": {
+              "message": "hold"
+            }
+          }
+        ],
+        "edges": []
+      }
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "x-request-id": "<present>"
+  },
+  "body": {
+    "apiVersion": "v1",
+    "requestId": "f8409cd0-2d4e-4b2e-a42e-6c42f5fc6f93",
+    "data": {
+      "runId": "be74b0bc-2054-4068-a145-3205362b07ca"
+    }
+  }
+}

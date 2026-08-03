@@ -1,3 +1,4 @@
+import { addCanvasStep, openWorkspaceSection } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 
@@ -7,7 +8,6 @@ const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
 type LocaleContract = {
   locale: 'en' | 'es'
   flows: string
-  stepSetup: string
   addInput: string
   inputName: string
   inputType: string
@@ -27,8 +27,7 @@ type LocaleContract = {
 const LOCALES: LocaleContract[] = [
   {
     locale: 'en',
-    flows: 'Flows',
-    stepSetup: 'Step setup',
+    flows: 'Workflows',
     addInput: 'Add input',
     inputName: 'Input name: input',
     inputType: 'Type for input invoiceId',
@@ -47,7 +46,6 @@ const LOCALES: LocaleContract[] = [
   {
     locale: 'es',
     flows: 'Flujos',
-    stepSetup: 'Configuración de paso',
     addInput: 'Agregar entrada',
     inputName: 'Nombre de la entrada: input',
     inputType: 'Tipo de la entrada invoiceId',
@@ -133,7 +131,11 @@ async function openWorkflow(page: Page, contract: LocaleContract, workflowId: st
   const row = page.getByTestId(`workflows-row-${workflowId}`)
   await expect(row).toContainText(workflowName)
   await row.click()
-  await page.getByRole('button', { name: contract.stepSetup, exact: true }).click()
+  await openWorkspaceSection(
+    page,
+    contract.flows,
+    contract.locale === 'en' ? 'Build' : 'Crear',
+  )
 }
 
 test.describe.configure({ mode: 'serial' })
@@ -193,8 +195,12 @@ for (const contract of LOCALES) {
     expect(afterDrag.y).toBeGreaterThan(beforeDrag.y + 50)
 
     const canvasFrame = page.locator('.canvas-frame[data-mode="author"]')
-    await page.getByRole('button', { name: /^AI Studio\b/ }).click()
-    await canvasFrame.locator('.canvas-palette').getByRole('button', { name: contract.newNodeLabel, exact: true }).click()
+    await openWorkspaceSection(
+      page,
+      contract.locale === 'en' ? 'Workflows' : 'Flujos',
+      contract.locale === 'en' ? 'Build' : 'Crear',
+    )
+    await addCanvasStep(page, contract.newNodeLabel)
     const allNodes = canvasFrame.locator('.react-flow__node')
     await expect(allNodes).toHaveCount(3)
     const newNode = allNodes.last()

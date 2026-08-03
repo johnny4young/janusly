@@ -27,6 +27,7 @@ beforeEach(() => {
       eventsCursor: null,
       eventsHasMore: false,
       activeTab: 'multiAgent',
+      activeRecoveryCaseId: null,
       streamStatus: 'idle',
       toasts: [],
       platformVersion: 0,
@@ -52,7 +53,7 @@ describe('useWorkflowStore', () => {
 
   it('addNode appends a node with its preset config and an empty label (leaf component resolves)', () => {
     useWorkflowStore.getState().addNode('http')
-    const { nodes } = useWorkflowStore.getState()
+    const { nodes, selectedNodeId, selectedEdgeId } = useWorkflowStore.getState()
     expect(nodes).toHaveLength(1)
     expect(nodes[0].data.type).toBe('http')
     // `data.label` stays empty so `WorkflowStepNode` resolves it via
@@ -60,6 +61,8 @@ describe('useWorkflowStore', () => {
     // out of the upstream `visibleNodes` memo dep array.
     expect(nodes[0].data.label).toBe('')
     expect(nodes[0].data.config).toEqual({ url: 'https://api.github.com' })
+    expect(selectedNodeId).toBe(nodes[0].id)
+    expect(selectedEdgeId).toBeNull()
   })
 
   it('starts with a clean blank draft rather than example workflow data', () => {
@@ -456,6 +459,17 @@ describe('useWorkflowStore', () => {
     }
   })
 
+  it('opens a recovery case as contextual non-persistent workspace state', () => {
+    window.localStorage.setItem('janusly:activeTab', 'home')
+    useWorkflowStore.getState().openRecoveryCase('case-42')
+
+    expect(useWorkflowStore.getState()).toMatchObject({
+      activeTab: 'recoveryCase',
+      activeRecoveryCaseId: 'case-42',
+    })
+    expect(window.localStorage.getItem('janusly:activeTab')).toBe('home')
+  })
+
   // bumpPlatformVersion coalesce behavior is covered in the dedicated
   // `useWorkflowStore.bumpPlatformVersion (coalesce)` describe block
   // below — it uses fake timers to assert the 100ms trailing-edge
@@ -628,6 +642,31 @@ describe('useWorkflowStore', () => {
     expect(state.events).toEqual([])
   })
 
+  it('patches only the currently selected run detail', () => {
+    useWorkflowStore.setState({
+      runId: 'run-a',
+      runDetail: {
+        id: 'run-a',
+        status: 'running',
+        inputJson: { input: { invoiceId: '42' } },
+      },
+    })
+
+    useWorkflowStore.getState().patchRunDetail('run-b', { status: 'failed' })
+    expect(useWorkflowStore.getState().runDetail?.status).toBe('running')
+
+    useWorkflowStore.getState().patchRunDetail('run-a', {
+      status: 'succeeded',
+      outputJson: { result: 'ok' },
+    })
+    expect(useWorkflowStore.getState().runDetail).toEqual({
+      id: 'run-a',
+      status: 'succeeded',
+      inputJson: { input: { invoiceId: '42' } },
+      outputJson: { result: 'ok' },
+    })
+  })
+
   it('invalidates run ownership when authoring replaces the workflow', () => {
     const generation = useWorkflowStore.getState().runTransitionGeneration
     useWorkflowStore.getState().hydrateWorkflow({ id: 'wf-a', nodes: [], edges: [] })
@@ -641,7 +680,7 @@ describe('useWorkflowStore', () => {
   // the workspace contents in the main slot for these (instead of the
   // React Flow canvas), so we pin a handful of representative tabs to
   // guard against accidental enum drift.
-  it.each(['operations', 'experiments', 'members', 'credentials'] as const)(
+  it.each(['operations', 'experiments', 'members', 'credentials', 'recoveryCase'] as const)(
     'setActiveTab accepts the non-canvas tab "%s"',
     (tab) => {
       useWorkflowStore.getState().setActiveTab(tab)

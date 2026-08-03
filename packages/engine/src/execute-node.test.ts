@@ -21,14 +21,8 @@ const isWriteSideNodeMock = vi.fn().mockReturnValue(false);
 const appendEventMock = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("./node-registry", () => ({
-  nodeRegistry: {
-    // No entry in NODE_CONFIG_SCHEMAS for this type, so executeNode falls
-    // through to the loose post-template config — letting the tests assert
-    // the RENDERED config without a schema stripping unknown keys.
-    test_probe: (ctx: unknown) => executorMock(ctx),
-    loop: (ctx: unknown) => executorMock(ctx),
-    multi_agent: (ctx: unknown) => executorMock(ctx),
-  },
+  isRegisteredNodeType: (type: string) => ["noop", "loop", "multi_agent"].includes(type),
+  executeRegisteredNode: (_type: string, ctx: unknown) => executorMock(ctx),
   isWriteSideNode: (...args: unknown[]) => isWriteSideNodeMock(...args),
 }));
 
@@ -63,7 +57,7 @@ describe("executeNode run-input plumbing", () => {
     });
     getRunContextMock.mockResolvedValue({});
 
-    await executeNode({ runId: "run-1", node: { id: "t1", type: "test_probe", config: {} } as never });
+    await executeNode({ runId: "run-1", node: { id: "t1", type: "noop", config: {} } });
 
     expect(executorMock).toHaveBeenCalledTimes(1);
     const ctx = executorMock.mock.calls[0][0] as { context: Record<string, unknown> };
@@ -79,7 +73,7 @@ describe("executeNode run-input plumbing", () => {
 
     await executeNode({
       runId: "run-1",
-      node: { id: "n1", type: "test_probe", config: { to: "{{context.input.customer.email}}" } } as never,
+      node: { id: "n1", type: "noop", config: { to: "{{context.input.customer.email}}" } },
     });
 
     const ctx = executorMock.mock.calls[0][0] as { config: Record<string, unknown> };
@@ -92,7 +86,7 @@ describe("executeNode run-input plumbing", () => {
       input: { status: "succeeded", attempts: 1, state: {}, output: { legacy: true }, error: null },
     });
 
-    await executeNode({ runId: "run-1", node: { id: "n1", type: "test_probe", config: {} } as never });
+    await executeNode({ runId: "run-1", node: { id: "n1", type: "noop", config: {} } });
 
     const ctx = executorMock.mock.calls[0][0] as { context: Record<string, any> };
     // The guarded merge keeps the node's slot — byte-for-byte legacy behaviour.
@@ -104,7 +98,7 @@ describe("executeNode run-input plumbing", () => {
     getRunMetadataMock.mockResolvedValue({ ...BASE_META, input: undefined });
     getRunContextMock.mockResolvedValue({});
 
-    await executeNode({ runId: "run-1", node: { id: "n1", type: "test_probe", config: {} } as never });
+    await executeNode({ runId: "run-1", node: { id: "n1", type: "noop", config: {} } });
 
     const ctx = executorMock.mock.calls[0][0] as { context: Record<string, unknown> };
     expect(ctx.context.input).toEqual({});
@@ -124,7 +118,7 @@ describe("executeNode unresolved-template policy", () => {
       runId: "run-1",
       node: {
         id: "notify",
-        type: "test_probe",
+        type: "noop",
         config: {
           subject: "{{context.upstream.output.missing}} / {{ context.upstream.output.missing }}",
           body: "{{inputs.unknown}}",
@@ -150,7 +144,7 @@ describe("executeNode unresolved-template policy", () => {
 
     const error = await executeNode({
       runId: "run-1",
-      node: { id: "charge", type: "test_probe", config: { amount: "{{context.invoice.output.amount}}" } } as never,
+      node: { id: "charge", type: "noop", config: { amount: "{{context.invoice.output.amount}}" } },
     }).catch((value) => value);
 
     expect(error).toMatchObject({ code: "UNRESOLVED_TEMPLATE_PATH", paths: ["context.invoice.output.amount"] });
@@ -166,7 +160,7 @@ describe("executeNode unresolved-template policy", () => {
       runId: "run-1",
       node: {
         id: "notify",
-        type: "test_probe",
+        type: "noop",
         config: { endpoint: "{{env.private_endpoint}}" },
       } as never,
     });
@@ -275,7 +269,7 @@ describe("executeNode unresolved-template policy", () => {
 
     const error = await executeNode({
       runId: "run-1",
-      node: { id: "bounded", type: "test_probe", config } as never,
+      node: { id: "bounded", type: "noop", config },
     }).catch((value) => value);
 
     expect(error).toMatchObject({
@@ -303,12 +297,12 @@ describe("executeNode timeout enforcement", () => {
 
     const err = await executeNode({
       runId: "run-1",
-      node: { id: "n1", type: "test_probe", config: { timeoutMs: 40 } } as never,
+      node: { id: "n1", type: "noop", config: { timeoutMs: 40 } },
     }).catch((e) => e);
 
     expect(err).toBeInstanceOf(Error);
     expect((err as { code?: string }).code).toBe("NODE_TIMEOUT");
-    expect((err as Error).message).toContain("test_probe timed out after 40ms");
+    expect((err as Error).message).toContain("noop timed out after 40ms");
     const ctx = executorMock.mock.calls[0]?.[0] as { signal?: AbortSignal };
     expect(ctx.signal?.aborted).toBe(true);
   });
@@ -319,7 +313,7 @@ describe("executeNode timeout enforcement", () => {
 
     const err = await executeNode({
       runId: "run-1",
-      node: { id: "n1", type: "test_probe", config: { timeoutMs: 40 } } as never,
+      node: { id: "n1", type: "noop", config: { timeoutMs: 40 } },
     }).catch((e) => e);
 
     expect((err as { code?: string; writeSide?: boolean }).code).toBe("NODE_TIMEOUT");
@@ -332,7 +326,7 @@ describe("executeNode timeout enforcement", () => {
 
     const err = await executeNode({
       runId: "run-1",
-      node: { id: "n1", type: "test_probe", config: { timeoutMs: 40 } } as never,
+      node: { id: "n1", type: "noop", config: { timeoutMs: 40 } },
     }).catch((e) => e);
 
     expect((err as { writeSide?: boolean }).writeSide).toBe(false);
@@ -343,7 +337,7 @@ describe("executeNode timeout enforcement", () => {
 
     const result = await executeNode({
       runId: "run-1",
-      node: { id: "n1", type: "test_probe", config: {} } as never,
+      node: { id: "n1", type: "noop", config: {} },
     });
 
     expect(result.status).toBe("succeeded");
@@ -357,7 +351,7 @@ describe("executeNode timeout enforcement", () => {
 
     const result = await executeNode({
       runId: "run-1",
-      node: { id: "n1", type: "test_probe", config: {} } as never,
+      node: { id: "n1", type: "noop", config: {} },
     });
 
     expect(result).toMatchObject({ status: "succeeded", writeSideExecuted: true });
@@ -393,7 +387,7 @@ describe("executeNode timeout enforcement", () => {
     try {
       const err = await executeNode({
         runId: "run-1",
-        node: { id: "n1", type: "test_probe", config: { timeoutMs: 30 } } as never,
+        node: { id: "n1", type: "noop", config: { timeoutMs: 30 } },
       }).catch((e) => e);
       expect((err as { code?: string }).code).toBe("NODE_TIMEOUT");
       // Now the abandoned executor rejects late.

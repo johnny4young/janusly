@@ -10,8 +10,11 @@ import { z } from "zod";
 
 import {
   createWorkflowRollout,
+  findWorkflowRecoveryQualification,
   finishWorkflowRollout,
   getLatestWorkflowRollout,
+  recordWorkflowRecoveryQualification,
+  resolveWorkflowRecoveryQualificationVersions,
   WORKFLOW_ROLLOUT_SAMPLE_MAX,
   WORKFLOW_ROLLOUT_SAMPLE_MIN,
   WORKFLOW_ROLLOUT_SUCCESS_RATE_MAX,
@@ -20,13 +23,20 @@ import {
   WORKFLOW_ROLLOUT_TRAFFIC_MIN,
   type WorkflowRollout,
 } from "@janusly/data";
+import {
+  qualifyRecoveryCandidate,
+  toRecoveryQualificationReceiptSummary,
+} from "@janusly/engine";
+import { RECOVERY_QUALIFICATION_DATASET_VERSION } from "@janusly/shared";
 
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { readJson, sendError, sendJson } from "../http";
 import type { Route } from "../routes";
 
-const ROOT_PATH = /^\/workflows\/([^/?]+)\/rollout(?:\?|$)/;
+const ROOT_PATH = /^\/workflows\/([^/?]+)\/rollout(?:\?.*)?$/;
+const QUALIFICATION_PATH =
+  /^\/workflows\/([^/?]+)\/rollout\/qualification(?:\?.*)?$/;
 const DECISION_PATH = /^\/workflows\/([^/?]+)\/rollout\/([^/?]+)\/([^/?]+)(?:\?|$)/;
 
 const CreateBodySchema = z.object({
@@ -41,6 +51,11 @@ const CreateBodySchema = z.object({
 
 const DecisionBodySchema = z.object({
   reason: z.string().trim().max(500).optional(),
+}).strict();
+
+const QualificationBodySchema = z.object({
+  baselineVersionId: z.string().trim().min(1).max(255),
+  candidateVersionId: z.string().trim().min(1).max(255),
 }).strict();
 
 function decodePathPart(value: string | undefined): string | null {
@@ -75,7 +90,196 @@ function projectRollout(rollout: WorkflowRollout) {
   };
 }
 
+function projectQualification(
+  qualification: NonNullable<
+    Awaited<ReturnType<typeof findWorkflowRecoveryQualification>>
+  >,
+) {
+  return {
+    id: qualification.id,
+    workflowId: qualification.workflowId,
+    baselineVersionId: qualification.baselineVersionId,
+    candidateVersionId: qualification.candidateVersionId,
+    datasetVersion: qualification.datasetVersion,
+    datasetDigest: qualification.datasetDigest,
+    mode: qualification.mode,
+    status: qualification.status,
+    summary: qualification.summaryJson,
+    createdAt: qualification.createdAt,
+  };
+}
+
+function qualificationPairFromUrl(
+  url: string | undefined,
+): { baselineVersionId: string; candidateVersionId: string } | null {
+  try {
+    const parsed = new URL(url ?? "", "http://janusly.local");
+    const result = QualificationBodySchema.safeParse({
+      baselineVersionId: parsed.searchParams.get("baselineVersionId"),
+      candidateVersionId: parsed.searchParams.get("candidateVersionId"),
+    });
+    return result.success ? result.data : null;
+  } catch {
+    return null;
+  }
+}
+
 export const workflowRolloutsRoutes: Route[] = [
+  {
+    method: "GET",
+    match: (url) => QUALIFICATION_PATH.test(url),
+    permission: "workflows.read",
+    handler: async ({ req, res, auth }) => {
+      const workflowId = decodePathPart(
+        QUALIFICATION_PATH.exec(req.url ?? "")?.[1],
+      );
+      const pair = qualificationPairFromUrl(req.url);
+      if (!workflowId || !pair) {
+        return sendError(
+          res,
+          "workflow_recovery_qualification_invalid",
+          "Recovery qualification version pair is invalid",
+          400,
+        );
+      }
+      const resolved = await resolveWorkflowRecoveryQualificationVersions({
+        orgId: auth.orgId,
+        workflowId,
+        ...pair,
+      });
+      if (resolved.kind === "not_found") {
+        return sendError(
+          res,
+          "workflow_not_found",
+          "Workflow not found",
+          404,
+        );
+      }
+      if (resolved.kind !== "resolved") {
+        return sendError(
+          res,
+          "workflow_recovery_qualification_invalid",
+          "Workflow versions are not eligible for qualification",
+          422,
+          { reason: resolved.kind },
+        );
+      }
+      const required =
+        resolved.baseline.workflow.recovery?.contract?.version === "2"
+        || resolved.candidate.workflow.recovery?.contract?.version === "2";
+      const qualification = required
+        ? await findWorkflowRecoveryQualification({
+            orgId: auth.orgId,
+            workflowId,
+            ...pair,
+            datasetVersion: RECOVERY_QUALIFICATION_DATASET_VERSION,
+          })
+        : null;
+      return sendJson(res, {
+        required,
+        qualification: qualification
+          ? projectQualification(qualification)
+          : null,
+      });
+    },
+  },
+  {
+    method: "POST",
+    match: (url) => QUALIFICATION_PATH.test(url),
+    role: "admin",
+    permission: "workflows.write",
+    handler: async ({ req, res, auth }) => {
+      const workflowId = decodePathPart(
+        QUALIFICATION_PATH.exec(req.url ?? "")?.[1],
+      );
+      const pair = QualificationBodySchema.safeParse(
+        await readJson(req, MAX_JSON_BODY_BYTES),
+      );
+      if (!workflowId || !pair.success) {
+        return sendError(
+          res,
+          "workflow_recovery_qualification_invalid",
+          "Recovery qualification version pair is invalid",
+          400,
+        );
+      }
+      const resolved = await resolveWorkflowRecoveryQualificationVersions({
+        orgId: auth.orgId,
+        workflowId,
+        ...pair.data,
+      });
+      if (resolved.kind === "not_found") {
+        return sendError(
+          res,
+          "workflow_not_found",
+          "Workflow not found",
+          404,
+        );
+      }
+      if (resolved.kind !== "resolved") {
+        return sendError(
+          res,
+          "workflow_recovery_qualification_invalid",
+          "Workflow versions are not eligible for qualification",
+          422,
+          { reason: resolved.kind },
+        );
+      }
+
+      const summary = qualifyRecoveryCandidate({
+        baseline: resolved.baseline.workflow,
+        candidate: resolved.candidate.workflow,
+      });
+      if (
+        summary.status === "not_required"
+        || summary.mode === "not_required"
+      ) {
+        return sendJson(res, {
+          required: false,
+          qualification: null,
+          summary,
+        });
+      }
+      const qualification = await recordWorkflowRecoveryQualification({
+        orgId: auth.orgId,
+        workflowId,
+        baselineVersionId: resolved.baseline.id,
+        candidateVersionId: resolved.candidate.id,
+        datasetVersion: summary.datasetVersion,
+        datasetDigest: summary.datasetDigest,
+        mode: summary.mode,
+        status: summary.status,
+        summaryJson: toRecoveryQualificationReceiptSummary(summary),
+        createdBy: auth.userId,
+      });
+      await auditAction(
+        auth,
+        "workflow.recovery_qualification.recorded",
+        {
+          targetType: "workflow_recovery_qualification",
+          targetId: qualification.id,
+          metadata: {
+            workflowId,
+            baselineVersionId: resolved.baseline.id,
+            candidateVersionId: resolved.candidate.id,
+            datasetVersion: summary.datasetVersion,
+            datasetDigest: summary.datasetDigest,
+            mode: summary.mode,
+            status: summary.status,
+            candidateAssertionCount:
+              summary.candidateAssertionCount,
+            failedCandidateAssertions:
+              summary.failedCandidateAssertions,
+            regressionCount: summary.regressionCount,
+          },
+        },
+      );
+      return sendJson(res, {
+        required: true,
+        qualification: projectQualification(qualification),
+      });
+    },
+  },
   {
     method: "GET",
     match: (url) => ROOT_PATH.test(url),
@@ -110,6 +314,14 @@ export const workflowRolloutsRoutes: Route[] = [
       }
       if (result.kind === "active_exists") {
         return sendError(res, "workflow_rollout_active", "This workflow already has an active rollout", 409);
+      }
+      if (result.kind === "recovery_qualification_required") {
+        return sendError(
+          res,
+          "workflow_recovery_qualification_required",
+          "Pass the semantic outcome dataset comparison before starting this rollout",
+          409,
+        );
       }
       if (result.kind !== "created") {
         return sendError(

@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 
@@ -152,29 +153,30 @@ test('v1 contracts stay legacy-compatible and power the real web reads', async (
     error: { code: 'runs_forbidden', message: 'Forbidden' },
   })
 
-  const observedV1Paths = new Set<string>()
+  const observedReadPaths = new Set<string>()
   page.on('response', (response) => {
     const path = new URL(response.url()).pathname
-    if (path.startsWith('/v1/')) observedV1Paths.add(path)
+    observedReadPaths.add(path)
   })
 
   await page.goto('/')
+  await page.getByTestId('home-insights-toggle').click()
   const metricStrip = page.getByTestId('recovery-center-metric-strip')
   await expect(metricStrip).toBeVisible()
   await captureElement(metricStrip, 'web-en-v1-recovery-metrics')
 
-  await page.getByRole('button', { name: 'Flows', exact: true }).click()
+  await page.getByRole('button', { name: 'Workflows', exact: true }).click()
   const workflowRow = page.getByTestId(`workflows-row-${workflowId}`)
   await expect(workflowRow).toBeVisible()
   await captureElement(workflowRow, 'web-en-v1-workflow-row')
 
-  await page.getByRole('button', { name: 'Runs', exact: true }).click()
+  await openWorkspaceSection(page, 'Activity', 'Runs')
   const runHistory = page.getByTestId('runs-history-virtual-list')
   await expect(runHistory).toContainText(`${runId.slice(0, 8)}…`)
   await captureElement(runHistory, 'web-en-v1-run-history')
 
-  expect(observedV1Paths.has('/v1/recovery/metrics')).toBe(true)
-  expect(observedV1Paths.has('/v1/workflows')).toBe(true)
-  expect(observedV1Paths.has('/v1/runs')).toBe(true)
+  expect(observedReadPaths.has('/recovery/home')).toBe(true)
+  expect(observedReadPaths.has('/v1/workflows')).toBe(true)
+  expect(observedReadPaths.has('/v1/runs')).toBe(true)
   expect(browserErrors).toEqual([])
 })

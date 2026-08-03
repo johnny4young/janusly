@@ -1,3 +1,4 @@
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 /**
  * Real-stack proof for signed Slack recovery actions and their admin UI.
  * Creates a genuine failed run, configures the connection through the English
@@ -155,7 +156,7 @@ test('configures and executes signed recovery actions in English and Spanish', a
     window.localStorage.setItem('janusly:operations:section', 'integrations')
   }, orgId)
   await page.goto('/')
-  await page.getByRole('button', { name: 'Operations', exact: true }).click()
+  await openWorkspaceSection(page, 'Settings', 'Workspace')
   const panel = page.locator('.we-slack-interactions')
   await expect(panel).toBeVisible()
   await panel.getByRole('button', { name: 'New connection' }).click()

@@ -2,8 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   getLocalIntegrationSimulatorUrl,
+  isLocalIntegrationSimulatorEndpoint,
   isLocalSlackSimulatorUrl,
+  isLocalWebhookPlaceholder,
   localIntegrationSimulatorEndpoint,
+  parseProviderSimulationReceipt,
   resolveLocalWebhookDestination,
 } from "./local-integration-simulator";
 
@@ -41,9 +44,33 @@ describe("local integration simulator routing", () => {
 
   it("rewrites only reserved example.com webhook placeholders", () => {
     enable("http://provider-simulator:4010");
-    expect(resolveLocalWebhookDestination("https://billing.example.com/charges/retry"))
+    const destination = resolveLocalWebhookDestination("https://billing.example.com/charges/retry");
+    expect(destination)
       .toBe("http://provider-simulator:4010/webhook?target=https%3A%2F%2Fbilling.example.com%2Fcharges%2Fretry");
+    expect(isLocalIntegrationSimulatorEndpoint(destination, "/webhook")).toBe(true);
+    expect(isLocalIntegrationSimulatorEndpoint("http://provider-simulator:4010/webhook-evil", "/webhook")).toBe(false);
+    expect(isLocalWebhookPlaceholder("https://billing.example.com/charges/retry")).toBe(true);
+    expect(isLocalWebhookPlaceholder("https://user:secret@billing.example.com/charges/retry")).toBe(false);
     expect(resolveLocalWebhookDestination("https://api.example.org/real"))
       .toBe("https://api.example.org/real");
+  });
+
+  it("accepts only complete internally consistent provider receipts", () => {
+    const receipt = {
+      kind: "provider_simulation_receipt",
+      version: 1,
+      provider: "webhook",
+      operation: "deliver",
+      scope: "validation",
+      effectId: "effect-1",
+      idempotencyKey: "invoice-1",
+      applied: true,
+      duplicate: false,
+      requestId: "request-1",
+    };
+    expect(parseProviderSimulationReceipt(receipt, "validation")).toEqual(receipt);
+    expect(parseProviderSimulationReceipt({ ...receipt, scope: "production" }, "validation")).toBeNull();
+    expect(parseProviderSimulationReceipt({ ...receipt, duplicate: true }, "validation")).toBeNull();
+    expect(parseProviderSimulationReceipt({ ...receipt, effectId: "" }, "validation")).toBeNull();
   });
 });

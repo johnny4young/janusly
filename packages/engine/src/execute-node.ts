@@ -15,8 +15,13 @@
  *   `error_json`.
  */
 
-import { nodeRegistry, isWriteSideNode } from "./node-registry";
-import { NODE_CONFIG_SCHEMAS } from "./node-configs";
+import {
+  executeRegisteredNode,
+  isRegisteredNodeType,
+  isWriteSideNode,
+  type NodeExecutionResult as RegisteredNodeExecutionResult,
+} from "./node-registry";
+import { parseNodeConfig } from "./node-configs";
 import { getNodeTimeoutMs, NodeTimeoutError, withTimeout } from "./core/timeout";
 import { appendEvent, getRunContext, getRunMetadata } from "./persistence";
 import {
@@ -27,7 +32,7 @@ import {
   renderTemplateWithRedactions,
 } from "./template";
 import type { ExecuteNodeInput, NodeExecutionResult } from "./core/types";
-import type { NodeType } from "@janusly/shared/src/workflow";
+import { isProviderSimulationToolInvocation } from "./tool-execution";
 
 type RenderedConfig = ReturnType<typeof renderTemplateWithRedactions>;
 
@@ -148,11 +153,10 @@ export async function executeNode(
 ): Promise<NodeExecutionResult> {
   const { node, runId, recoveryClaimToken } = input;
 
-  const executor = nodeRegistry[node.type];
-
-  if (!executor) {
+  if (!isRegisteredNodeType(node.type)) {
     throw new Error(`No executor for node type: ${node.type}`);
   }
+  const nodeType = node.type;
 
   // Resolve org scope + workflow id once per node execution so
   // executors can attribute usage telemetry without duplicating the
@@ -175,6 +179,7 @@ export async function executeNode(
   // without committing external state. Reuses the single `getRunMetadata`
   // row above — no second per-node `runs` lookup.
   const dryRun = meta.replayMode === "validation";
+  const validationEffectMode = meta.validationEffectMode ?? "skip";
 
   const context = await getRunContext(runId);
 
@@ -214,7 +219,7 @@ export async function executeNode(
     }
   }
 
-  let result: Awaited<ReturnType<typeof executor>>;
+  let result: RegisteredNodeExecutionResult;
   let renderedWriteSide = false;
   try {
     // Inner refinement: validate the (post-template) config against the
@@ -223,12 +228,16 @@ export async function executeNode(
     // `z.record(z.string(), z.unknown())` lets through. A parse failure
     // throws here and rides the same catch below so the error message
     // flows through `redactError` (the standard chokepoint) — no
-    // ZodError path / message escapes without redaction. Unknown node
-    // types fall through to the loose post-template config (the
-    // dispatcher errored above if no executor matched).
-    const configSchema = NODE_CONFIG_SCHEMAS[node.type as NodeType];
-    const parsedConfig = configSchema ? configSchema.parse(resolvedConfig) : resolvedConfig;
-    renderedWriteSide = !dryRun && isWriteSideNode({
+    // ZodError path / message escapes without redaction.
+    const parsedConfig = parseNodeConfig(nodeType, resolvedConfig);
+    const executesQualifiedProviderEffect = dryRun
+      && validationEffectMode === "provider_simulation"
+      && node.type === "tool"
+      && isProviderSimulationToolInvocation(
+        String((parsedConfig as Record<string, unknown>).tool ?? ""),
+        (parsedConfig as Record<string, unknown>).input,
+      );
+    renderedWriteSide = (!dryRun || executesQualifiedProviderEffect) && isWriteSideNode({
       type: node.type,
       config: parsedConfig as Record<string, unknown>,
     });
@@ -243,7 +252,7 @@ export async function executeNode(
     const timeoutMs = getNodeTimeoutMs(node);
     const timeoutController = timeoutMs ? new AbortController() : undefined;
     result = await withTimeout(
-      executor({
+      executeRegisteredNode(nodeType, {
         runId,
         nodeId: node.id,
         orgId,
@@ -254,6 +263,7 @@ export async function executeNode(
         recoveryClaimToken,
         signal: timeoutController?.signal,
         dryRun,
+        validationEffectMode,
         templatePolicy: meta.templatePolicy ?? "lenient",
       }),
       timeoutMs,

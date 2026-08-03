@@ -10,6 +10,7 @@ import en from './locales/en/common.json'
 import es from './locales/es/common.json'
 import { initI18n } from './init'
 import { tValidationIssue, tReadinessIssue, tAiReviewIssue, tRunEvent, tFailureCluster, tHealthRationale, tRecoveryMetricRationale, tApiError, tServerFallback } from './server-events'
+import { tToolInputLabel } from './tool-input-label'
 
 beforeAll(() => {
   initI18n('en')
@@ -46,6 +47,16 @@ describe('tReadinessIssue', () => {
       nodeId: 'gate',
     })
     expect(result).toBe('La expresión de la condición no es válida')
+  })
+
+  it('localizes API-side readiness checks instead of falling back to English', () => {
+    initI18n('es')
+    const result = tReadinessIssue({
+      code: 'workflow_missing_rollback_version',
+      severity: 'warn',
+      message: 'Only one workflow version exists.',
+    })
+    expect(result).toBe('Rollback no disponible — solo hay una versión guardada')
   })
 })
 
@@ -162,6 +173,22 @@ describe('tRecoveryMetricRationale', () => {
       rationaleMeta: { held: 9, resolved: 10, recurred: 1 },
     })).toBe('9 de 10 recuperaciones terminales no han vuelto a fallar con la misma firma durante los siete días siguientes.')
   })
+
+  it('pluralizes verified-recovery samples', () => {
+    initI18n('es')
+
+    expect(tRecoveryMetricRationale({
+      rationale: 'fallback',
+      rationaleCode: 'verified_recovery.summary',
+      rationaleMeta: { p50: '1m', p90: '1m', count: 1 },
+    })).toBe('Mediana 1m en 1 recuperación verificada · p90 1m.')
+
+    expect(tRecoveryMetricRationale({
+      rationale: 'fallback',
+      rationaleCode: 'verified_recovery.summary',
+      rationaleMeta: { p50: '2m', p90: '5m', count: 3 },
+    })).toBe('Mediana 2m en 3 recuperaciones verificadas · p90 5m.')
+  })
 })
 
 describe('tServerFallback', () => {
@@ -173,6 +200,19 @@ describe('tServerFallback', () => {
     expect(tServerFallback(null)).toBe('')
     expect(tServerFallback(undefined)).toBe('')
     expect(tServerFallback('')).toBe('')
+  })
+})
+
+describe('tToolInputLabel', () => {
+  it('translates a known field label in each locale', () => {
+    expect(tToolInputLabel('credential', 'Credential')).toBe('Credential')
+
+    initI18n('es')
+    expect(tToolInputLabel('credential', 'Credential')).toBe('Credencial')
+  })
+
+  it('retains the readable fallback for an unknown field key', () => {
+    expect(tToolInputLabel('futureField', 'Future field')).toBe('Future field')
   })
 })
 

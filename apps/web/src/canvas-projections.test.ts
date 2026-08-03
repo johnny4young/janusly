@@ -202,7 +202,7 @@ describe('projectVisibleNodes', () => {
     // but does not OVERWRITE it with a t()-resolved string. Inputs from
     // the editor carry `label: ''` (empty), so the WorkflowStepNode
     // fallback resolves the label via `getNodeLabel(type)` at render
-    // time, which lets the i18n.language dep drop from the upstream memo.
+    // time, which lets the locale-runtime dependency drop from the upstream memo.
     expect((projected.data as { label: string }).label).toBe('')
   })
 })

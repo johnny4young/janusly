@@ -44,7 +44,10 @@ The demo's recovery angle is the one nobody plans for: "what if Slack rate-limit
 
 ## Closing metric
 
-**Mean Time To Recovery for failed Slack pings, before vs after Janusly.** A typical operator-driven recovery (find the failed alert, manually file the GitHub issue, paste the link into Slack) is 4-8 minutes. Janusly's auto-recover loop is under 60 seconds end-to-end including the operator picking the suggestion.
+**Time to verified recovery for a failed Slack notification.** Record the
+actual production-only clock after the generation-bound replay succeeds.
+“4–8 minutes manually” and “under 60 seconds with Janusly” are demonstration
+assumptions until a design partner supplies a measured baseline and result.
 
 ## 3-5 minute talk track
 
@@ -61,4 +64,4 @@ The demo's recovery angle is the one nobody plans for: "what if Slack rate-limit
 > Now watch what happens when Slack rate-limits us. The flow doesn't crash — it captures the failure, the Recovery Queue offers a one-click fix, sandbox validation runs, and we're back to green. From "Slack is down" to "Slack is fixed" — under a minute, no operator paged.
 >
 > **(3:30–4:30, the close)**
-> Three integrations, one flow, the audit trail your security team wants, and a recovery story your on-call team will love. The number we track for you is Mean Time To Recovery — and this demo just took ours from minutes to seconds.
+> Three integrations, one flow, the audit trail your security team wants, and a recovery story your on-call team will love. Janusly records the time from detected failure to verified recovery so you can compare it with your own measured baseline.

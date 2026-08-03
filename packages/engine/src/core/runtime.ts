@@ -40,6 +40,7 @@ import { incNodeFailure, incNodeRetry, recordNodeDuration } from "../observabili
 import { workflowEvent } from "./events";
 import { shouldRetry, computeRetryDelay } from "./retry-policy";
 import { decideTransient, isTransientTierEnabled, transientAttemptFromCounters } from "./transient-tier";
+import { evaluateSemanticOutcome } from "../semantic-outcomes";
 import {
   getRoutingStats,
   updateRoutingStats,
@@ -180,12 +181,37 @@ export class WorkflowRuntime {
 
           await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "decision.made", payload: decision }));
           logNodeEvent({ runId, nodeId: node.id, type: "decision.made", attempt });
-          const completed = await this.store.markNodeSucceeded(
-            runId,
-            node.id,
-            { decision },
-            recoveryClaimToken,
-          );
+          const semanticOutcome = evaluateSemanticOutcome({
+            contract: input.workflow.recovery?.contract,
+            sourceNodeId: node.id,
+            output: { decision },
+            context,
+          });
+          const completion = semanticOutcome.evaluated > 0
+            ? await this.store.markNodeSucceededWithOutcome(
+                runId,
+                node.id,
+                { decision },
+                attempt,
+                semanticOutcome.violations,
+                recoveryClaimToken,
+              )
+            : {
+                completed: await this.store.markNodeSucceeded(
+                  runId,
+                  node.id,
+                  { decision },
+                  recoveryClaimToken,
+                ),
+                quarantined: false,
+                caseIds: [],
+              };
+          const completed = completion.completed;
+          /*
+           * The semantic gate is committed with node success. Routing state
+           * can still be made deterministic below, but no successor is
+           * published while the run remains quarantined.
+           */
           if (!completed) return;
           const durationMs = Date.now() - start;
           recordNodeDuration(durationMs, { node_type: node.type });
@@ -222,7 +248,13 @@ export class WorkflowRuntime {
           // cancellation that lands while this node was running shouldn't
           // re-queue work for the operator who just cancelled.
           const postDecisionStatus = await this.store.getRunStatus(runId);
-          if (postDecisionStatus === "cancelled" || postDecisionStatus === "failed") return;
+          if (
+            postDecisionStatus === "cancelled" ||
+            postDecisionStatus === "failed" ||
+            postDecisionStatus === "waiting"
+          ) {
+            return;
+          }
           await this.enqueueReadyNodes(input);
           return;
         }
@@ -259,14 +291,33 @@ export class WorkflowRuntime {
       // together in one transaction (`markNodeSucceededWithEvent`), so the
       // event never repeats the (potentially 1 MB) output the node row
       // already stores.
-      const completed = await this.store.markNodeSucceededWithEvent(
-        runId,
-        node.id,
-        result?.output ?? {},
-        attempt,
-        recoveryClaimToken,
-      );
-      if (!completed) return;
+      const semanticOutcome = evaluateSemanticOutcome({
+        contract: input.workflow.recovery?.contract,
+        sourceNodeId: node.id,
+        output: result?.output ?? {},
+        context,
+      });
+      const completion = semanticOutcome.evaluated > 0
+        ? await this.store.markNodeSucceededWithOutcome(
+            runId,
+            node.id,
+            result?.output ?? {},
+            attempt,
+            semanticOutcome.violations,
+            recoveryClaimToken,
+          )
+        : {
+            completed: await this.store.markNodeSucceededWithEvent(
+              runId,
+              node.id,
+              result?.output ?? {},
+              attempt,
+              recoveryClaimToken,
+            ),
+            quarantined: false,
+            caseIds: [],
+          };
+      if (!completion.completed) return;
       recordNodeDuration(durationMs, { node_type: node.type });
       await updateRoutingStats({ orgId: metadata?.orgId, nodeId: node.id, reward: 1, success: true });
       logNodeEvent({ runId, nodeId: node.id, type: "node.succeeded", attempt, durationMs });
@@ -277,7 +328,13 @@ export class WorkflowRuntime {
       // already running when cancellation landed, so its row stays where it
       // is — but downstream work shouldn't be queued for a cancelled run.
       const postStatus = await this.store.getRunStatus(runId);
-      if (postStatus === "cancelled" || postStatus === "failed") return;
+      if (
+        postStatus === "cancelled" ||
+        postStatus === "failed" ||
+        postStatus === "waiting"
+      ) {
+        return;
+      }
 
       await this.enqueueReadyNodes(input);
     } catch (err: any) {
@@ -498,7 +555,13 @@ export class WorkflowRuntime {
     // notifier, resume-run, the runtime itself) all pre-check, but this
     // guard catches any future caller that forgets to.
     const status = await this.store.getRunStatus(runId);
-    if (status === "cancelled" || status === "failed") return 0;
+    if (
+      status === "cancelled" ||
+      status === "failed" ||
+      status === "waiting"
+    ) {
+      return 0;
+    }
     // Cheap path: the readiness scan only reads node STATUSES unless some
     // edge carries a `condition` (whose expression can reach into outputs).
     // Skipping state_json here matters — this runs after EVERY completion,
@@ -511,65 +574,79 @@ export class WorkflowRuntime {
     // round-trip (O(nodes + edges) queries on every node completion, the
     // hottest engine path). The map is seeded from every persisted row and
     // updated in place when THIS scan writes (skip → "skipped", claim →
-    // "queued"), so an intra-scan skip cascade still unblocks downstream
-    // dependents exactly like the per-node fresh reads did. Concurrent
-    // external writes were equally racy under fresh reads; the atomic
-    // `tryClaimNodeForQueue` claim remains the multi-worker correctness gate,
-    // and every completion triggers its own scan, so a node a stale snapshot
-    // misses here is picked up by the completing sibling's scan.
+    // "queued"). Concurrent external writes were equally racy under fresh
+    // reads; the atomic `tryClaimNodeForQueue` claim remains the multi-worker
+    // correctness gate, and every completion triggers its own scan, so a node
+    // a stale snapshot misses here is picked up by the completing sibling's
+    // scan.
     const statuses = new Map<string, string | undefined>(
       Object.entries(context as Record<string, { status?: string } | undefined>)
         .map(([nodeId, entry]) => [nodeId, entry?.status]),
     );
     let queued = 0;
 
-    for (const node of workflow.nodes) {
-      const incomingEdges = workflow.edges.filter((edge) => edge.to === node.id);
-      const deps = incomingEdges.map((edge) => edge.from);
-      const ready = deps.every((depId) => ["succeeded", "skipped"].includes(statuses.get(depId) ?? ""));
-      const currentStatus = statuses.get(node.id);
+    // The scan loops to a FIXPOINT (mirroring the Go pilot's
+    // scheduleDownstream): a single declaration-order pass strands any
+    // dependent declared BEFORE a node this same pass skips — the dependent
+    // was visited while its dep was still "pending", becomes ready the
+    // moment the skip lands, and nothing external ever re-triggers a scan
+    // (queued === 0 parks the run as "running" forever). Each productive
+    // pass moves ≥1 node out of "pending" in the local map and a node
+    // leaves "pending" at most once, so the loop is bounded by
+    // nodes.length passes plus one final no-change pass; repeat visits are
+    // in-memory only (`currentStatus !== "pending"` guards every write).
+    for (let changed = true; changed; ) {
+      changed = false;
+      for (const node of workflow.nodes) {
+        const incomingEdges = workflow.edges.filter((edge) => edge.to === node.id);
+        const deps = incomingEdges.map((edge) => edge.from);
+        const ready = deps.every((depId) => ["succeeded", "skipped"].includes(statuses.get(depId) ?? ""));
+        const currentStatus = statuses.get(node.id);
 
-      if (!ready || currentStatus !== "pending") continue;
+        if (!ready || currentStatus !== "pending") continue;
 
-      // Roots have no incoming edges and are unconditionally runnable. This
-      // matters when the durable publication reconciler restores a consumed
-      // root generation to `pending`: routing it through the ordinary DAG
-      // scan must republish the root, not reinterpret it as a condition miss.
-      let shouldRun = incomingEdges.length === 0;
-      for (const edge of incomingEdges) {
-        if (!edge.condition) { shouldRun = true; break; }
-        const result = evaluateExpression(edge.condition, { context, inputs: {} });
-        if (result) { shouldRun = true; break; }
+        // Roots have no incoming edges and are unconditionally runnable. This
+        // matters when the durable publication reconciler restores a consumed
+        // root generation to `pending`: routing it through the ordinary DAG
+        // scan must republish the root, not reinterpret it as a condition miss.
+        let shouldRun = incomingEdges.length === 0;
+        for (const edge of incomingEdges) {
+          if (!edge.condition) { shouldRun = true; break; }
+          const result = evaluateExpression(edge.condition, { context, inputs: {} });
+          if (result) { shouldRun = true; break; }
+        }
+
+        if (!shouldRun) {
+          statuses.set(node.id, "skipped");
+          changed = true;
+          await this.store.markNodeSkipped(runId, node.id, { reason: "Condition not met" });
+          await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.skipped", payload: { reason: "Condition not met" } }));
+          logNodeEvent({ runId, nodeId: node.id, type: "node.skipped" });
+          continue;
+        }
+
+        const claimed = await this.store.tryClaimNodeForQueue(runId, node.id, 1);
+        if (!claimed) continue;
+        statuses.set(node.id, "queued");
+        changed = true;
+        await this.queue.enqueueNode({
+          runId,
+          nodeId: node.id,
+          attempt: claimed.attempt,
+          publicationGeneration: claimed.publicationGeneration,
+          ...(claimed.recoveryClaimToken ? { recoveryClaimToken: claimed.recoveryClaimToken } : {}),
+        });
+        await this.store.markQueuePublicationSucceeded(
+          runId,
+          node.id,
+          claimed.attempt,
+          claimed.publicationGeneration,
+          claimed.recoveryClaimToken ?? undefined,
+        );
+        await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.queued" }));
+        logNodeEvent({ runId, nodeId: node.id, type: "node.queued", attempt: claimed.attempt });
+        queued++;
       }
-
-      if (!shouldRun) {
-        statuses.set(node.id, "skipped");
-        await this.store.markNodeSkipped(runId, node.id, { reason: "Condition not met" });
-        await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.skipped", payload: { reason: "Condition not met" } }));
-        logNodeEvent({ runId, nodeId: node.id, type: "node.skipped" });
-        continue;
-      }
-
-      const claimed = await this.store.tryClaimNodeForQueue(runId, node.id, 1);
-      if (!claimed) continue;
-      statuses.set(node.id, "queued");
-      await this.queue.enqueueNode({
-        runId,
-        nodeId: node.id,
-        attempt: claimed.attempt,
-        publicationGeneration: claimed.publicationGeneration,
-        ...(claimed.recoveryClaimToken ? { recoveryClaimToken: claimed.recoveryClaimToken } : {}),
-      });
-      await this.store.markQueuePublicationSucceeded(
-        runId,
-        node.id,
-        claimed.attempt,
-        claimed.publicationGeneration,
-        claimed.recoveryClaimToken ?? undefined,
-      );
-      await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.queued" }));
-      logNodeEvent({ runId, nodeId: node.id, type: "node.queued", attempt: claimed.attempt });
-      queued++;
     }
 
     if (queued === 0) {

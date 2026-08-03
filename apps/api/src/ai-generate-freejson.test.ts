@@ -1,14 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import type { LlmClient, LlmGenerateTextResult } from "@janusly/ai";
+import type { Workflow } from "@janusly/shared";
 
 import {
   FREE_JSON_MAX_ATTEMPTS,
   extractJsonObject,
   generateWorkflowFreeJson,
+  missingPromptTemplateReferences,
   parseGeneratedWorkflow,
+  promptTemplateReferences,
 } from "./ai-generate-freejson";
 
-const VALID_WORKFLOW = {
+const VALID_WORKFLOW: Workflow = {
+  dslVersion: "1.0",
   id: "wf-test",
   name: "Test flow",
   nodes: [{ id: "n1", type: "http", config: { url: "https://example.com" } }],
@@ -17,7 +21,14 @@ const VALID_WORKFLOW = {
 const VALID_JSON = JSON.stringify(VALID_WORKFLOW);
 
 function textResult(text: string): LlmGenerateTextResult {
-  return { text, provider: "anthropic", model: "claude-haiku-4-5-20251001", latencyMs: 5, usage: {} };
+  return {
+    text,
+    provider: "anthropic",
+    model: "claude-haiku-4-5-20251001",
+    providerSimulated: false,
+    latencyMs: 5,
+    usage: {},
+  };
 }
 
 // Mock LlmClient whose generateText returns queued replies in order.
@@ -71,6 +82,34 @@ describe("parseGeneratedWorkflow", () => {
     expect(wf?.nodes.map((node) => node.type)).toContain("parallel_fork");
     expect(wf?.nodes.map((node) => node.type)).toContain("join");
   });
+  it("preserves HTTP headers and bounded JSON bodies", () => {
+    const wf = parseGeneratedWorkflow(JSON.stringify({
+      nodes: [{
+        id: "charge",
+        type: "http",
+        config: {
+          url: "https://billing.example.com/charges",
+          method: "POST",
+          headers: {
+            Authorization: "{{secret.BILLING_API_TOKEN}}",
+            "Content-Type": "application/json",
+          },
+          body: {
+            customerId: "{{context.input.customerId}}",
+            amount: "{{context.input.amount}}",
+          },
+        },
+      }],
+      edges: [],
+    }));
+    expect(wf?.nodes[0]?.config).toMatchObject({
+      headers: { Authorization: "{{secret.BILLING_API_TOKEN}}" },
+      body: {
+        customerId: "{{context.input.customerId}}",
+        amount: "{{context.input.amount}}",
+      },
+    });
+  });
   it("returns null on malformed JSON", () => {
     expect(parseGeneratedWorkflow("{ not valid json ]")).toBeNull();
   });
@@ -80,6 +119,25 @@ describe("parseGeneratedWorkflow", () => {
   });
   it("returns null on empty text", () => {
     expect(parseGeneratedWorkflow("")).toBeNull();
+  });
+});
+
+describe("prompt template fidelity", () => {
+  it("extracts supported references once and reports omissions", () => {
+    const prompt = [
+      "{{secret.BILLING_API_TOKEN}}",
+      "{{context.fetch.output.id}}",
+      "{{secret.BILLING_API_TOKEN}}",
+      "{{unsupported.value}}",
+    ].join(" ");
+    expect(promptTemplateReferences(prompt)).toEqual([
+      "{{secret.BILLING_API_TOKEN}}",
+      "{{context.fetch.output.id}}",
+    ]);
+    expect(missingPromptTemplateReferences(prompt, VALID_WORKFLOW)).toEqual([
+      "{{secret.BILLING_API_TOKEN}}",
+      "{{context.fetch.output.id}}",
+    ]);
   });
 });
 
@@ -103,6 +161,37 @@ describe("generateWorkflowFreeJson", () => {
     // The retry appends a corrective nudge to the prompt.
     const secondCall = (llm.generateText as ReturnType<typeof vi.fn>).mock.calls[1][0];
     expect(secondCall.prompt).toContain("Return ONLY the JSON workflow object");
+  });
+
+  it("retries a valid draft that dropped an operator-supplied reference", async () => {
+    const reference = "{{secret.BILLING_API_TOKEN}}";
+    const corrected = JSON.stringify({
+      ...VALID_WORKFLOW,
+      nodes: [{
+        id: "n1",
+        type: "http",
+        config: {
+          url: "https://example.com",
+          headers: { Authorization: reference },
+        },
+      }],
+    });
+    const llm = makeLlm(VALID_JSON, corrected);
+    const result = await generateWorkflowFreeJson(
+      llm,
+      "sys",
+      `POST with Authorization ${reference}`,
+      undefined,
+      ctx,
+    );
+    expect(result.attempts).toBe(2);
+    expect(result.workflow.nodes[0]?.config).toMatchObject({
+      headers: { Authorization: reference },
+    });
+    const secondCall = (llm.generateText as ReturnType<typeof vi.fn>).mock.calls[1][0];
+    expect(secondCall.prompt).toContain(
+      `Preserve these exact references byte-for-byte in the relevant config values: ${reference}`,
+    );
   });
 
   it("throws after exhausting attempts so the caller degrades to fallback", async () => {

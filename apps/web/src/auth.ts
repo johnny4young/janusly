@@ -28,10 +28,10 @@
 import type {
   AuthChangeEvent,
   AuthResponse,
+  GoTrueClient,
   Session,
-  SupabaseClient,
   User,
-} from '@supabase/supabase-js'
+} from '@supabase/auth-js'
 import {
   resumeApiRequestLifecycle,
   rotateApiRequestLifecycle,
@@ -45,13 +45,15 @@ const apiUrl = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://l
 /** True when both Supabase env vars are present in the build. */
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey)
 
-let supabaseClientPromise: Promise<SupabaseClient | null> | null = null
+type SupabaseAuthFacade = { auth: GoTrueClient }
+
+let supabaseClientPromise: Promise<SupabaseAuthFacade | null> | null = null
 
 /**
  * Demand-load the singleton Supabase client. Dev-header builds return before
  * evaluating the dynamic import, so the vendor chunk stays off the cold path.
  */
-export function getSupabaseClient(): Promise<SupabaseClient | null> {
+export function getSupabaseClient(): Promise<SupabaseAuthFacade | null> {
   if (!isSupabaseConfigured) return Promise.resolve(null)
   if (!supabaseClientPromise) {
     supabaseClientPromise = import('./supabase-runtime')
@@ -161,7 +163,7 @@ function ensureBrowserSession(): Promise<BrowserSessionIdentity | null> {
   return browserSessionProbe
 }
 
-type SupabaseAuthClient = SupabaseClient['auth']
+type SupabaseAuthClient = GoTrueClient
 type SignOutResponse = Awaited<ReturnType<SupabaseAuthClient['signOut']>>
 type SessionResponse = Awaited<ReturnType<SupabaseAuthClient['getSession']>>
 type AuthSubscriptionResponse = ReturnType<SupabaseAuthClient['onAuthStateChange']>

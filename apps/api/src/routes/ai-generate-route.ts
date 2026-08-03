@@ -19,7 +19,10 @@ import { type Workflow } from "@janusly/shared";
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { budgetAwareCandidateCount, generateWorkflowCandidates, selectBestCandidate } from "../ai-generate-bestofn";
 import { composeGenerationExemplars, recordGenerationExemplar, type GenerationExemplarsResult } from "../ai-generation-memory";
-import { generateWorkflowFreeJson } from "../ai-generate-freejson";
+import {
+  generateWorkflowFreeJson,
+  missingPromptTemplateReferences,
+} from "../ai-generate-freejson";
 import { MAX_REPAIR_ATTEMPTS, repairGeneratedWorkflow } from "../ai-repair-workflow";
 import { composeGenerationSystemPrompt, GENERATE_WORKFLOW_SYSTEM_PROMPT } from "../ai-prompts";
 import { loadOperatorGuidance } from "../ai-operator-guidance";
@@ -281,6 +284,11 @@ export const aiGenerateRoutes: Route[] = [
           repairAttempts = repaired.repairAttempts;
           genModel = repaired.model;
           genProvider = repaired.provider;
+        }
+        if (missingPromptTemplateReferences(promptText, workflow).length > 0) {
+          throw new Error(
+            "generated workflow omitted operator-supplied machine references",
+          );
         }
         // Few-shot WRITE side: persist this prompt → workflow-shape exemplar
         // for future similar prompts. Fire-and-forget + consent-gated inside

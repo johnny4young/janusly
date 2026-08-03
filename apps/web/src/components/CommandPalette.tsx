@@ -18,7 +18,6 @@ import {
   Boxes,
   CheckCircle2,
   Compass,
-  Database,
   Gauge,
   GitBranch,
   Home,
@@ -43,6 +42,11 @@ import { useT } from '../i18n'
 import { applyTheme, type ThemePreference } from '../theme'
 import { openDocsUrl, parseDocsUrl } from '../docs-link'
 import { rankPaletteMatches } from '../command-palette-search'
+import {
+  WORKSPACE_DESTINATION_DEFINITIONS,
+  resolveWorkspaceDestinationTarget,
+  type WorkspaceDestination,
+} from '../workspace-locations'
 
 const STORAGE_KEY = 'janusly:palette:recent'
 const RECENT_LIMIT = 4
@@ -116,15 +120,36 @@ function persistRecent(ids: CommandId[]): void {
   }
 }
 
-function buildCommands(docsUrl: string | null | undefined): Command[] {
+const DESTINATION_COMMAND_ICONS: Record<WorkspaceDestination, React.ReactNode> = {
+  home: <Home size={14} />,
+  workflows: <Workflow size={14} />,
+  activity: <Activity size={14} />,
+  settings: <Gauge size={14} />,
+}
+
+function buildCommands(
+  docsUrl: string | null | undefined,
+  permissions?: readonly string[],
+): Command[] {
+  const destinationCommands = WORKSPACE_DESTINATION_DEFINITIONS.flatMap<Command>((destination) => {
+    const target = resolveWorkspaceDestinationTarget(destination.id, permissions)
+    if (!target) return []
+    return [{
+      id: `go.destination.${destination.id}`,
+      labelKey: `palette.destination.${destination.id}`,
+      icon: DESTINATION_COMMAND_ICONS[destination.id],
+      group: 'nav',
+      shortcut: destination.shortcut,
+      run: ({ openTab }) => { openTab(target) },
+    }]
+  })
+
   const navCommands: Command[] = [
-    { id: 'go.home', labelKey: 'palette.nav.home', icon: <Home size={14} />, group: 'nav', shortcut: '⌘1', permission: 'recovery.read', run: ({ openTab }) => { openTab('home') } },
-    { id: 'go.copilot', labelKey: 'palette.nav.copilot', icon: <Sparkles size={14} />, group: 'nav', shortcut: '⌘2', permission: 'ai.write', run: ({ openTab }) => { openTab('copilot') } },
-    { id: 'go.workflows', labelKey: 'palette.nav.workflows', icon: <Database size={14} />, group: 'nav', permission: 'workflows.read', run: ({ openTab }) => { openTab('workflows') } },
+    { id: 'go.recover', labelKey: 'palette.nav.recover', icon: <ShieldAlert size={14} />, group: 'nav', permission: 'recovery.read', run: ({ openTab }) => { openTab('recover') } },
+    { id: 'go.copilot', labelKey: 'palette.nav.copilot', icon: <Sparkles size={14} />, group: 'nav', permission: 'ai.write', run: ({ openTab }) => { openTab('copilot') } },
     { id: 'go.inspector', labelKey: 'palette.nav.inspector', icon: <GitBranch size={14} />, group: 'nav', permission: 'workflows.read', run: ({ openTab }) => { openTab('inspector') } },
     { id: 'go.runs', labelKey: 'palette.nav.runs', icon: <Activity size={14} />, group: 'nav', permission: 'runs.read', run: ({ openTab }) => { openTab('runs') } },
     { id: 'go.multiAgent', labelKey: 'palette.nav.multiAgent', icon: <Layers3 size={14} />, group: 'nav', permission: 'workflows.read', run: ({ openTab }) => { openTab('multiAgent') } },
-    { id: 'go.operations', labelKey: 'palette.nav.operations', icon: <Gauge size={14} />, group: 'nav', permission: 'recovery.read', run: ({ openTab }) => { openTab('operations') } },
     { id: 'go.members', labelKey: 'palette.nav.members', icon: <Users size={14} />, group: 'nav', permission: 'members.read', run: ({ openTab }) => { openTab('members') } },
     { id: 'go.templates', labelKey: 'palette.nav.templates', icon: <Workflow size={14} />, group: 'nav', permission: 'workflows.read', run: ({ openTab }) => { openTab('templates') } },
     { id: 'go.marketplace', labelKey: 'palette.nav.marketplace', icon: <Boxes size={14} />, group: 'nav', permission: 'workflows.read', run: ({ openTab }) => { openTab('marketplace') } },
@@ -137,7 +162,7 @@ function buildCommands(docsUrl: string | null | undefined): Command[] {
     { id: 'action.save', labelKey: 'palette.action.save', icon: <Save size={14} />, group: 'action', permission: 'workflows.write', run: ({ onSave }) => { onSave() } },
     { id: 'action.run', labelKey: 'palette.action.run', icon: <Play size={14} />, group: 'action', permission: 'runs.start', run: ({ onStart }) => { onStart() } },
     { id: 'action.insertSnippet', labelKey: 'palette.action.insertSnippet', icon: <Layers size={14} />, group: 'action', permission: 'workflows.write', run: ({ onInsertSnippet }) => { onInsertSnippet() } },
-    { id: 'action.recover', labelKey: 'palette.action.recover', icon: <ShieldAlert size={14} />, group: 'action', permission: 'recovery.read', run: ({ openTab }) => { openTab('home') } },
+    { id: 'action.recover', labelKey: 'palette.action.recover', icon: <ShieldAlert size={14} />, group: 'action', permission: 'recovery.read', run: ({ openTab }) => { openTab('recover') } },
     { id: 'action.openRuns', labelKey: 'palette.action.openRuns', icon: <PlayCircle size={14} />, group: 'action', permission: 'runs.read', run: ({ openTab }) => { openTab('runs') } },
     { id: 'action.openRecipes', labelKey: 'palette.action.openRecipes', icon: <Compass size={14} />, group: 'action', permission: 'workflows.read', run: ({ openTab }) => { openTab('templates') } },
   ]
@@ -167,7 +192,7 @@ function buildCommands(docsUrl: string | null | undefined): Command[] {
     { id: 'system.signOut', labelKey: 'palette.system.signOut', icon: <LogOut size={14} />, group: 'system', run: ({ onSignOut }) => { onSignOut() } },
   ]
 
-  return [...navCommands, ...actionCommands, ...systemCommands]
+  return [...destinationCommands, ...navCommands, ...actionCommands, ...systemCommands]
 }
 
 const GROUP_KEY_LABELS: Record<Command['group'] | 'dynamic', string> = {
@@ -206,7 +231,7 @@ export function CommandPalette({
   useDialogFocusTrap(dialogRef, { active: open })
 
   const commands = useMemo<Command[]>(() => {
-    const base = buildCommands(safeDocsUrl)
+    const base = buildCommands(safeDocsUrl, permissions)
     const dynamicCommands: Command[] = [
       ...workflows.slice(0, 20).map<Command>((wf) => ({
         id: `workflow.${wf.id}`,
@@ -271,7 +296,7 @@ export function CommandPalette({
   }, [open, onClose])
 
   const labelFor = useCallback(
-    (cmd: Command): string => dynamicLabels.get(cmd.id) ?? (t(cmd.labelKey as never)),
+    (cmd: Command): string => dynamicLabels.get(cmd.id) ?? (t(cmd.labelKey)),
     [dynamicLabels, t],
   )
 
@@ -367,7 +392,7 @@ export function CommandPalette({
                 id={commandOptionId(idx)}
                 role="option"
                 aria-selected={idx === activeIndex}
-                title={cmd.hintKey ? (t(cmd.hintKey as never)) : labelFor(cmd)}
+                title={cmd.hintKey ? (t(cmd.hintKey)) : labelFor(cmd)}
                 className={idx === activeIndex ? 'we-cmdk-row we-cmdk-row--active' : 'we-cmdk-row'}
                 onMouseEnter={() => setActiveIndex(idx)}
                 onMouseDown={(event) => { event.preventDefault(); runCommand(cmd) }}
@@ -377,7 +402,7 @@ export function CommandPalette({
                 {isRecent ? (
                   <span className="we-cmdk-row__pill">{t('palette.recentTag')}</span>
                 ) : (
-                  <span className="we-cmdk-row__group">{t(GROUP_KEY_LABELS[dynamicLabels.has(cmd.id) ? 'dynamic' : cmd.group] as never)}</span>
+                  <span className="we-cmdk-row__group">{t(GROUP_KEY_LABELS[dynamicLabels.has(cmd.id) ? 'dynamic' : cmd.group])}</span>
                 )}
                 {cmd.shortcut ? <kbd className="we-cmdk-row__kbd">{cmd.shortcut}</kbd> : null}
               </li>

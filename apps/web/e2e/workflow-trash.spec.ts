@@ -11,7 +11,7 @@ type LocaleContract = {
 }
 
 const LOCALES: LocaleContract[] = [
-  { locale: 'en', flows: 'Flows', empty: 'Trash is empty' },
+  { locale: 'en', flows: 'Workflows', empty: 'Trash is empty' },
   { locale: 'es', flows: 'Flujos', empty: 'La Papelera está vacía' },
 ]
 

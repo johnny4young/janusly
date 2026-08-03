@@ -161,3 +161,71 @@ export function JsonConfigField({ scope, label, value, onChange }: { scope: stri
     </div>
   )
 }
+
+export function OptionalJsonConfigField({
+  scope,
+  label,
+  value,
+  onChange,
+  describedBy,
+  placeholder,
+}: {
+  scope: string
+  label: string
+  value: unknown
+  onChange: (value: unknown | undefined) => void
+  describedBy?: string
+  placeholder?: string
+}) {
+  const { t } = useT()
+  const [error, setError] = useState<string | null>(null)
+  const serializedValue = value === undefined ? '' : JSON.stringify(value, null, 2)
+  const [draft, setDraft] = useState(serializedValue)
+  const id = fieldId(scope, label)
+  const errorId = `${id}-error`
+
+  useEffect(() => {
+    setDraft((current) => {
+      if (current.trim() === '' && value === undefined) return current
+      try {
+        return JSON.stringify(JSON.parse(current)) === JSON.stringify(value)
+          ? current
+          : serializedValue
+      } catch {
+        return serializedValue
+      }
+    })
+    setError(null)
+  }, [serializedValue, value])
+
+  return (
+    <div className="config-field-row">
+      <label className="field-label" htmlFor={id}>{label}</label>
+      <textarea
+        id={id}
+        className="code-field code-field-short"
+        value={draft}
+        placeholder={placeholder}
+        aria-describedby={describedBy}
+        aria-invalid={error ? true : undefined}
+        aria-errormessage={error ? errorId : undefined}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={(event) => {
+          const next = event.target.value.trim()
+          if (!next) {
+            if (value !== undefined) onChange(undefined)
+            setError(null)
+            return
+          }
+          try {
+            onChange(JSON.parse(next))
+            setError(null)
+          } catch {
+            setError(t('rightPanel.jsonField.invalidJson'))
+          }
+        }}
+      />
+      {error && <div id={errorId} className="issue issue-error" role="alert">{error}</div>}
+    </div>
+  )
+}

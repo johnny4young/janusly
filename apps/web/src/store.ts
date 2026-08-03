@@ -28,13 +28,14 @@
 
 import { create } from 'zustand'
 import type { Connection, OnEdgesChange, OnNodesChange } from '@xyflow/react'
-import type { Session, User } from '@supabase/supabase-js'
+import type { Session, User } from '@supabase/auth-js'
 import type { ActiveTab, JsonObject, RunEvent, RunNode, RunSummary, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
 import type { OnboardingState } from '@janusly/shared/src/onboarding'
 import type { SessionContext } from './identity-context'
 import { getNodePreset } from './constants'
 import { t } from './i18n/runtime'
 import { workflowToGraph } from './canvas-projections'
+import { PERSISTED_WORKSPACE_TABS } from './workspace-locations'
 
 /**
  * Build the config for an explicit step-kind change.
@@ -191,6 +192,8 @@ type WorkflowStore = {
   eventsCursor: string | null
   eventsHasMore: boolean
   activeTab: ActiveTab
+  /** Contextual Recovery Case selection. Cleared on identity changes and not persisted across reloads. */
+  activeRecoveryCaseId: string | null
   streamStatus: StreamStatus
   streamTransport: StreamTransport
   toasts: Toast[]
@@ -243,12 +246,14 @@ type WorkflowStore = {
 
   setRunId: (id: string | null) => void
   setRunDetail: (run: RunSummary | null) => void
+  patchRunDetail: (runId: string, patch: Partial<RunSummary>) => void
   setRunNodes: (nodes: RunNode[]) => void
   mergeRunNode: (node: RunNode) => void
   addEvents: (events: RunEvent[]) => void
   setEvents: (events: RunEvent[]) => void
   setEventsPagination: (cursor: string | null, hasMore: boolean) => void
   setActiveTab: (tab: ActiveTab) => void
+  openRecoveryCase: (caseId: string) => void
   setStreamStatus: (status: StreamStatus) => void
   setStreamTransport: (transport: StreamTransport) => void
   resetRun: () => void
@@ -275,20 +280,16 @@ let pendingBumpTimer: ReturnType<typeof setTimeout> | null = null
 const TOAST_TTL_DEFAULT_MS = 3500
 const TOAST_TTL_ERROR_MS = 6000
 
-// Persist the operator's last top-level tab so a refresh restores context
-// instead of dropping back to Home. The stored value is validated against the
-// known set; anything unknown/removed falls back to Home. Keep PERSISTED_TABS
-// in sync with the ActiveTab union in ./types (drift just disables restore for
-// the new tab — it never throws).
+// Persist the operator's last internal location so a refresh restores both its
+// global destination and contextual section. Values from the former top-level
+// navigation remain valid and are projected into the new four-destination shell.
 const ACTIVE_TAB_KEY = 'janusly:activeTab'
-const PERSISTED_TABS: readonly ActiveTab[] = [
-  'home', 'workflows', 'members', 'copilot', 'marketplace', 'templates',
-  'packs', 'credentials', 'inspector', 'runs', 'reasoning', 'multiAgent', 'operations', 'experiments',
-]
 function readStoredActiveTab(): ActiveTab {
   try {
     const raw = window.localStorage.getItem(ACTIVE_TAB_KEY)
-    return raw && (PERSISTED_TABS as readonly string[]).includes(raw) ? (raw as ActiveTab) : 'home'
+    return raw && (PERSISTED_WORKSPACE_TABS as readonly string[]).includes(raw)
+      ? (raw as ActiveTab)
+      : 'home'
   } catch {
     return 'home'
   }
@@ -362,7 +363,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
   currentWorkflowId: initialWorkflowId,
   // `main.tsx` starts downloading App in parallel with the locale catalog, so
-  // module evaluation can precede i18next initialization. App fills this
+  // module evaluation can precede catalog initialization. App fills this
   // sentinel before paint; never translate during store module evaluation.
   currentWorkflowName: '',
   currentWorkflowSaved: false,
@@ -387,6 +388,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   // recovery). When the operator has navigated elsewhere, the last tab is
   // restored from localStorage so a refresh doesn't drop them back to Home.
   activeTab: readStoredActiveTab(),
+  activeRecoveryCaseId: null,
   streamStatus: 'idle',
   streamTransport: 'idle',
   toasts: [],
@@ -406,6 +408,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           identityContext: null,
           identityReady: false,
           toasts: [],
+          activeRecoveryCaseId: null,
+          activeTab: state.activeTab === 'recoveryCase' ? 'home' : state.activeTab,
           ...clearedRunProjection(state.runTransitionGeneration),
           recoveryIntroDismissedThisSession: false,
         }
@@ -422,6 +426,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     // Notifications belong to the departing identity/workspace. Keeping them
     // after logout can disclose stale operational details to the next user.
     toasts: [],
+    activeRecoveryCaseId: null,
+    activeTab: state.activeTab === 'recoveryCase' ? 'home' : state.activeTab,
     recoveryIntroDismissedThisSession: false,
     ...clearedRunProjection(state.runTransitionGeneration),
   })),
@@ -435,6 +441,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     set((state) => ({
       workflowDirty: true,
       workflowRevision: state.workflowRevision + 1,
+      selectedNodeId: id,
+      selectedEdgeId: null,
       nodes: state.nodes.concat({
         id,
         position: position ?? nodePlacementResolver?.() ?? { x: 120 + state.nodes.length * 80, y: 120 + state.nodes.length * 40 },
@@ -524,7 +532,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       selectedNodeId: null,
       selectedEdgeId: null,
       ...clearedRunProjection(state.runTransitionGeneration),
-      activeTab: 'copilot',
+      activeTab: 'inspector',
       workflowRevision: state.workflowRevision + 1,
     }))
   },
@@ -638,6 +646,11 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     ? { runId: id }
     : { ...clearedRunProjection(state.runTransitionGeneration), runId: id }),
   setRunDetail: (runDetail) => set({ runDetail }),
+  patchRunDetail: (runId, patch) => set((state) => (
+    state.runId === runId && state.runDetail?.id === runId
+      ? { runDetail: { ...state.runDetail, ...patch, id: runId } }
+      : state
+  )),
   setRunNodes: (nodes) => set({ runNodes: nodes }),
   mergeRunNode: (incoming) => set((state) => {
     const index = state.runNodes.findIndex((node) => node.nodeId === incoming.nodeId)
@@ -669,6 +682,9 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   setActiveTab: (tab) => {
     persistActiveTab(tab)
     set({ activeTab: tab })
+  },
+  openRecoveryCase: (caseId) => {
+    set({ activeRecoveryCaseId: caseId, activeTab: 'recoveryCase' })
   },
   setStreamStatus: (streamStatus) => set({ streamStatus }),
   setStreamTransport: (streamTransport) => set({ streamTransport }),

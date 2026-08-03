@@ -150,17 +150,17 @@ describe("database schema contract", () => {
 
   it("preserves the hot-path index shapes used by recovery and durable repair", () => {
     const expected: Record<string, { table: string; columns: string[]; where?: string }> = {
-      audit_logs_org_action_created_idx: {
+      audit_logs_org_action_created_id_idx: {
         table: "audit_logs",
-        columns: ["org_id", "action", "created_at"],
+        columns: ["org_id", "action", "created_at", "id"],
       },
       dead_letters_org_run_node_created_idx: {
         table: "dead_letters",
         columns: ["org_id", "run_id", "node_id", "created_at"],
       },
-      dead_letters_org_status_idx: {
+      dead_letters_org_status_created_idx: {
         table: "dead_letters",
-        columns: ["org_id", "status", "created_at"],
+        columns: ["org_id", "status", "created_at", "id"],
       },
       memory_entries_org_retain_until_idx: {
         table: "memory_entries",

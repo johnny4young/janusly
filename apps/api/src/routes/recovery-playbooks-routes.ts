@@ -165,6 +165,8 @@ export const recoveryPlaybooksRoutes: Route[] = [
       if (
         !validation
         || validation.replayMode !== "validation"
+        || validation.validationEvidenceLevel == null
+        || validation.validationEvidenceLevel === "writes_skipped"
         || validation.parentRunId !== evidence.deadLetter.runId
         || validation.status !== "succeeded"
         || !validation.createdAt
@@ -349,6 +351,15 @@ export const recoveryPlaybooksRoutes: Route[] = [
       }
 
       const succeeded = run.status === "succeeded";
+      if (
+        succeeded
+        && (
+          run.validationEvidenceLevel == null
+          || run.validationEvidenceLevel === "writes_skipped"
+        )
+      ) {
+        return sendError(res, "recovery_playbook_outcome_invalid", "Recovery Playbook outcome cannot be verified", 422);
+      }
       const validationOutcome = await recordRecoveryPlaybookValidationOutcome({
         orgId: auth.orgId,
         id: path.id,

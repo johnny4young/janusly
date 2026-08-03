@@ -1,0 +1,13 @@
+{
+  "id": "approval-gate",
+  "name": "Pause for human approval",
+  "nodes": [
+    { "id": "begin",   "type": "noop",     "config": {} },
+    { "id": "publish", "type": "approval", "config": { "message": "Approve to publish to production" } },
+    { "id": "done",    "type": "noop",     "config": {} }
+  ],
+  "edges": [
+    { "from": "begin",   "to": "publish" },
+    { "from": "publish", "to": "done" }
+  ]
+}
