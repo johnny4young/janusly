@@ -5,21 +5,15 @@ dist/
 # clean checkout. Generated frontend assets remain ignored except for it.
 !internal/webdist/dist/
 !internal/webdist/dist/index.html
-apps/web/dist/
 .playwright-cli/
 .playwright-mcp/
-apps/web/playwright-report/
-apps/web/test-results/
-apps/web/.vitest-attachments/
-apps/web/**/__screenshots__/
+web/playwright-report/
+web/test-results/
+web/.vitest-attachments/
+web/**/__screenshots__/
 output/
 artifacts/
-# Ephemeral eval-run output from scripts/model-eval-compare.ts (the harness
-# .ts is committed; its per-run results are not).
-scripts/model-eval-results.*
 .env
-deploy/local/local.env
-deploy/local/.secrets/
 .env.local
 .env.*.local
 deploy/observability/cloud.env
@@ -37,10 +31,4 @@ docs/PLAN.md
 docs/proposals/
 docs/marketing/
 
-# Python sibling at packages/sdk-python (first Python package in the monorepo)
-__pycache__/
-*.py[cod]
-.pytest_cache/
-*.egg-info/
-packages/sdk-python/.venv/
 default.profraw

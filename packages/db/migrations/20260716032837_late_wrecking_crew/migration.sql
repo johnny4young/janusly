@@ -1,1 +1,0 @@
-ALTER TABLE "workflow_metadata" ADD COLUMN "ai_guidance_markdown" text;

@@ -1,1 +1,0 @@
-CREATE UNIQUE INDEX "runs_redrive_idempotency_idx" ON "runs" ("org_id","parent_run_id","parent_node_id","workflow_version_id") WHERE "parent_link_kind" = 'replay' AND "replay_mode" IS NULL AND "input_json" ? 'redrive';
