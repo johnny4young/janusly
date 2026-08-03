@@ -364,7 +364,7 @@ func (q *Queries) FailWaitingApprovalDeadline(ctx context.Context, arg FailWaiti
 }
 
 const findLatestDeadLetterForNode = `-- name: FindLatestDeadLetterForNode :one
-SELECT id, node_id, node_json, error_json FROM dead_letters
+SELECT id, node_id, attempt, node_json, error_json FROM dead_letters
 WHERE org_id = $1 AND run_id = $2 AND node_id = $3
 ORDER BY created_at DESC, id DESC LIMIT 1
 `
@@ -378,6 +378,7 @@ type FindLatestDeadLetterForNodeParams struct {
 type FindLatestDeadLetterForNodeRow struct {
 	ID        string
 	NodeID    string
+	Attempt   int32
 	NodeJson  json.RawMessage
 	ErrorJson json.RawMessage
 }
@@ -388,6 +389,7 @@ func (q *Queries) FindLatestDeadLetterForNode(ctx context.Context, arg FindLates
 	err := row.Scan(
 		&i.ID,
 		&i.NodeID,
+		&i.Attempt,
 		&i.NodeJson,
 		&i.ErrorJson,
 	)
@@ -945,6 +947,80 @@ func (q *Queries) InsertExternalRuntimeEventReceipt(ctx context.Context, arg Ins
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const insertRecoveryDrillRun = `-- name: InsertRecoveryDrillRun :exec
+INSERT INTO runs (
+  id, org_id, workflow_version_id, status, input_json, created_by,
+  replay_mode, validation_evidence_level, created_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, 'validation', 'static', $7)
+`
+
+type InsertRecoveryDrillRunParams struct {
+	ID                string
+	OrgID             string
+	WorkflowVersionID string
+	Status            string
+	InputJson         json.RawMessage
+	CreatedBy         pgtype.Text
+	CreatedAt         *time.Time
+}
+
+// Recovery drills reproduce a server-authored historical claim and therefore
+// need an explicit creation clock. Ordinary run starts must keep using
+// InsertRun so callers cannot backdate production traffic.
+func (q *Queries) InsertRecoveryDrillRun(ctx context.Context, arg InsertRecoveryDrillRunParams) error {
+	_, err := q.db.Exec(ctx, insertRecoveryDrillRun,
+		arg.ID,
+		arg.OrgID,
+		arg.WorkflowVersionID,
+		arg.Status,
+		arg.InputJson,
+		arg.CreatedBy,
+		arg.CreatedAt,
+	)
+	return err
+}
+
+const insertRecoveryDrillRunNode = `-- name: InsertRecoveryDrillRunNode :exec
+INSERT INTO run_nodes (
+  id, run_id, node_id, status, attempts, state_json,
+  started_at, finished_at,
+  queue_publication_repair_after, queue_publication_generation
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+`
+
+type InsertRecoveryDrillRunNodeParams struct {
+	ID                          string
+	RunID                       string
+	NodeID                      string
+	Status                      string
+	Attempts                    pgtype.Int4
+	StateJson                   json.RawMessage
+	StartedAt                   *time.Time
+	FinishedAt                  *time.Time
+	QueuePublicationRepairAfter *time.Time
+	QueuePublicationGeneration  int32
+}
+
+// Server-owned drills seed only the checkpoints required to exercise one
+// exact runtime boundary. This is deliberately not a general mutation API.
+func (q *Queries) InsertRecoveryDrillRunNode(ctx context.Context, arg InsertRecoveryDrillRunNodeParams) error {
+	_, err := q.db.Exec(ctx, insertRecoveryDrillRunNode,
+		arg.ID,
+		arg.RunID,
+		arg.NodeID,
+		arg.Status,
+		arg.Attempts,
+		arg.StateJson,
+		arg.StartedAt,
+		arg.FinishedAt,
+		arg.QueuePublicationRepairAfter,
+		arg.QueuePublicationGeneration,
+	)
+	return err
 }
 
 const insertRun = `-- name: InsertRun :exec

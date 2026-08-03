@@ -71,3 +71,32 @@ func TestViewTagsExplicitAndNeverOmitEmpty(t *testing.T) {
 		}
 	}
 }
+
+func TestParseRecoveryDrillProvenance(t *testing.T) {
+	got := parseRecoveryDrillProvenance(json.RawMessage(`{
+		"drill":{
+			"kind":"solution_pack_drill",
+			"packId":"incident-triage",
+			"fixtureId":"worker_interrupted_during_page",
+			"failureMode":"worker_stalled",
+			"recoveryPath":"stalled_node_reaper",
+			"thresholdMinutes":60
+		}
+	}`))
+	if got == nil || got.PackID != "incident-triage" ||
+		got.FixtureID != "worker_interrupted_during_page" ||
+		got.RecoveryPath != "stalled_node_reaper" {
+		t.Fatalf("valid server provenance was not projected: %+v", got)
+	}
+	for _, raw := range []json.RawMessage{
+		json.RawMessage(`{"drill":{"kind":"operator_input","packId":"p","fixtureId":"f","recoveryPath":"runtime_failure"}}`),
+		json.RawMessage(`{"drill":{"kind":"solution_pack_drill","packId":"p","fixtureId":"f","recoveryPath":"invented"}}`),
+		json.RawMessage(`{"drill":{"kind":"solution_pack_drill","packId":"p","fixtureId":"","recoveryPath":"runtime_failure"}}`),
+		json.RawMessage(`{"drill":{"kind":"solution_pack_drill","packId":"` + strings.Repeat("x", 129) + `","fixtureId":"f","recoveryPath":"runtime_failure"}}`),
+		json.RawMessage(`{"drill":"not-an-object"}`),
+	} {
+		if parsed := parseRecoveryDrillProvenance(raw); parsed != nil {
+			t.Fatalf("untrusted drill provenance must fail closed: %+v", parsed)
+		}
+	}
+}

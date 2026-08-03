@@ -7,7 +7,8 @@
 //     client-side canvas delta, so `/{id}/inserted` is an audit beacon.
 //   - Solution packs: the embedded catalog (internal/packs) + install as
 //     a draft workflow version, one-click sandbox sample run, and a
-//     deterministic inject-failure that seeds the DLQ for onboarding.
+//     deterministic recovery drills that cross the real worker/DLQ or
+//     stalled-node reaper boundary.
 //   - Onboarding: derive-on-read milestones from durable org state (no
 //     event hooks); the persisted row is only the per-user high-water +
 //     status latch; completion audits exactly once via CAS.
@@ -17,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -452,29 +454,95 @@ func (s *V1Server) mountProductSurfaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /solution-packs/{id}/inject-failure", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		pack := packs.Get(r.PathValue("id"))
 		if pack == nil {
-			writeLegacy(w, opError(http.StatusNotFound, "solution_pack_not_found", "Solution pack not found", nil))
+			writeLegacy(w, opError(http.StatusNotFound, "pack_not_found", "Solution pack not found", nil))
 			return
 		}
-		// Deterministic PRODUCTION failure: a run whose only node fails at
-		// runtime, landing a real dead letter for the recovery walkthrough
-		// — no network, no external effect.
-		doc := fmt.Sprintf(`{"id":"pack-failure-%s","name":"Injected sample failure (%s)","dslVersion":"1.0",
-			"nodes":[{"id":"inject","type":"condition","config":{"expression":"context.__janusly_injected__.boom("}}],
-			"edges":[]}`, s.newID()[:8], pack.ID)
-		wf, _ := domain.Parse([]byte(doc))
-		runID, err := s.engine.StartRun(r.Context(), engine.StartInput{
-			OrgID: rc.orgID, Workflow: wf, CreatedBy: rc.userID,
-			Input: map[string]any{"packId": pack.ID, "injected": true},
-		})
-		if err != nil {
-			writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil))
+		body, rejection := decodeJSONRecord(r, 1_048_576)
+		if rejection != nil {
+			writeLegacy(w, *rejection)
+			return
+		}
+		fixtureID := ""
+		if raw, present := body["fixtureId"]; present {
+			value, valid := raw.(string)
+			fixtureID = strings.TrimSpace(value)
+			if !valid || fixtureID == "" {
+				writeLegacy(w, opResult{status: http.StatusUnprocessableEntity, data: map[string]any{
+					"error": "invalid inject-failure body",
+					"issues": []map[string]any{{
+						"path": []string{"fixtureId"}, "message": "Expected a non-empty string",
+					}},
+				}})
+				return
+			}
+		}
+		var fixture *packs.FailureFixture
+		for i := range pack.FailureFixtures {
+			if fixtureID == "" || pack.FailureFixtures[i].ID == fixtureID {
+				fixture = &pack.FailureFixtures[i]
+				break
+			}
+		}
+		if fixture == nil {
+			writeLegacy(w, opError(http.StatusBadRequest, "pack_no_failure_fixture", "No matching failure fixture for this pack", nil))
+			return
+		}
+		wf, _ := domain.Parse(pack.WorkflowJSON)
+		if wf == nil {
+			writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Pack workflow is not executable", nil))
+			return
+		}
+		source := engine.RecoveryDrillSource{
+			Kind: "solution_pack_drill", PackID: pack.ID, FixtureID: fixture.ID,
+			FailureMode: fixture.FailureMode, RecoveryPath: fixture.RecoveryPath,
+		}
+		drillInput := engine.RecoveryDrillInput{
+			OrgID: rc.orgID, CreatedBy: rc.userID, Workflow: wf,
+			FailedNodeID: fixture.FailedNodeID, Source: source,
+		}
+		if len(pack.SamplePayloads) > 0 {
+			drillInput.Input = pack.SamplePayloads[0].Input
+		}
+
+		var runID, deadLetterID string
+		var evidence any
+		switch fixture.RecoveryPath {
+		case "runtime_failure":
+			result, err := s.engine.RunRuntimeFailureDrill(r.Context(), drillInput)
+			if err != nil {
+				slog.Error("solution-pack runtime recovery drill failed",
+					"packId", pack.ID, "fixtureId", fixture.ID, "error", err)
+				writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Recovery drill failed", nil))
+				return
+			}
+			runID, deadLetterID, evidence = result.RunID, result.DeadLetterID, result.Evidence
+		case "stalled_node_reaper":
+			result, err := s.engine.RunStalledNodeDrill(r.Context(), drillInput)
+			if err != nil {
+				slog.Error("solution-pack stalled-node recovery drill failed",
+					"packId", pack.ID, "fixtureId", fixture.ID, "error", err)
+				writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Recovery drill failed", nil))
+				return
+			}
+			runID, deadLetterID, evidence = result.RunID, result.DeadLetterID, result.Evidence
+		default:
+			writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Unsupported recovery drill path", nil))
 			return
 		}
 		audit.Write(r.Context(), s.pool, rc.authContext, "solution_pack.failure_injected", audit.Options{
 			TargetType: "solution_pack", TargetID: pack.ID,
-			Metadata: map[string]any{"runId": runID},
+			Metadata: map[string]any{
+				"packId": pack.ID, "fixtureId": fixture.ID,
+				"failureMode": fixture.FailureMode, "recoveryPath": fixture.RecoveryPath,
+				"failedNodeId": fixture.FailedNodeID, "runId": runID,
+				"deadLetterId": deadLetterID, "evidence": evidence,
+			},
 		})
-		writeLegacy(w, opResult{status: http.StatusAccepted, data: map[string]any{"ok": true, "runId": runID}})
+		writeLegacy(w, opOK(map[string]any{
+			"runId": runID, "deadLetterId": deadLetterID,
+			"fixtureId": fixture.ID, "failureMode": fixture.FailureMode,
+			"recoveryPath": fixture.RecoveryPath, "evidence": evidence,
+		}))
 	}))
 
 	/* onboarding */

@@ -5,6 +5,16 @@ INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, created_b
   parent_run_id, parent_node_id, parent_link_kind, workflow_rollout_id, workflow_rollout_variant, trace_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);
 
+-- Recovery drills reproduce a server-authored historical claim and therefore
+-- need an explicit creation clock. Ordinary run starts must keep using
+-- InsertRun so callers cannot backdate production traffic.
+-- name: InsertRecoveryDrillRun :exec
+INSERT INTO runs (
+  id, org_id, workflow_version_id, status, input_json, created_by,
+  replay_mode, validation_evidence_level, created_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, 'validation', 'static', $7);
+
 -- name: GetRun :one
 SELECT id, org_id, workflow_version_id, status, input_json, output_json,
        parent_run_id, parent_node_id, replay_mode, created_by, created_at,
@@ -41,6 +51,16 @@ VALUES (
   CASE WHEN $4 = 'queued' THEN clock_timestamp() ELSE NULL END,
   CASE WHEN $4 = 'queued' THEN 1 ELSE 0 END
 );
+
+-- Server-owned drills seed only the checkpoints required to exercise one
+-- exact runtime boundary. This is deliberately not a general mutation API.
+-- name: InsertRecoveryDrillRunNode :exec
+INSERT INTO run_nodes (
+  id, run_id, node_id, status, attempts, state_json,
+  started_at, finished_at,
+  queue_publication_repair_after, queue_publication_generation
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
 
 -- name: GetRunNode :one
 SELECT id, run_id, node_id, status, state_json, attempts, started_at,
@@ -421,7 +441,7 @@ UPDATE runs SET input_json = jsonb_set(input_json, '{workflow}', sqlc.arg(workfl
 WHERE id = $1;
 
 -- name: FindLatestDeadLetterForNode :one
-SELECT id, node_id, node_json, error_json FROM dead_letters
+SELECT id, node_id, attempt, node_json, error_json FROM dead_letters
 WHERE org_id = $1 AND run_id = $2 AND node_id = $3
 ORDER BY created_at DESC, id DESC LIMIT 1;
 

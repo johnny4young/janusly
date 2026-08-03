@@ -72,7 +72,15 @@ func (e *Engine) RetryOrFail(ctx context.Context, claim ClaimedNode, node domain
 // snapshots for replay, the node.failed event, and the run flipped to
 // failed — one transaction, so a half-failed run can never strand.
 func (e *Engine) FailNode(ctx context.Context, claim ClaimedNode, execErr error) error {
-	if err := e.failNodeTx(ctx, claim, execErr); err != nil {
+	return e.failNodeWithEventFields(ctx, claim, execErr, nil)
+}
+
+// failNodeWithEventFields preserves the ordinary atomic failure boundary while
+// allowing a server-owned recovery mechanism to attach bounded causal facts to
+// node.failed. Executor errors must use FailNode; callers cannot replace the
+// canonical error or attempt fields.
+func (e *Engine) failNodeWithEventFields(ctx context.Context, claim ClaimedNode, execErr error, fields map[string]any) error {
+	if err := e.failNodeTx(ctx, claim, execErr, fields); err != nil {
 		return err
 	}
 	// Containment rides OUTSIDE the durable failure: a breaker fault must
@@ -81,9 +89,15 @@ func (e *Engine) FailNode(ctx context.Context, claim ClaimedNode, execErr error)
 	return nil
 }
 
-func (e *Engine) failNodeTx(ctx context.Context, claim ClaimedNode, execErr error) error {
+func (e *Engine) failNodeTx(ctx context.Context, claim ClaimedNode, execErr error, fields map[string]any) error {
 	serr := serializeError(execErr)
-	eventJSON, err := json.Marshal(map[string]any{"error": serr, "attempt": claim.Attempt})
+	eventPayload := map[string]any{"error": serr, "attempt": claim.Attempt}
+	for key, value := range fields {
+		if _, canonical := eventPayload[key]; !canonical {
+			eventPayload[key] = value
+		}
+	}
+	eventJSON, err := json.Marshal(eventPayload)
 	if err != nil {
 		return fmt.Errorf("marshal event payload: %w", err)
 	}

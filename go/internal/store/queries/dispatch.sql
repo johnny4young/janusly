@@ -40,12 +40,29 @@ RETURNING id, run_id, node_id, COALESCE(attempts, 1)::int AS attempt;
 SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(run_id)::text, 0));
 
 -- name: FindStalledRunningNodes :many
-SELECT rn.id, rn.run_id, rn.node_id, COALESCE(rn.attempts, 1)::int AS attempt
+SELECT rn.id, rn.run_id, rn.node_id, COALESCE(rn.attempts, 1)::int AS attempt,
+       rn.started_at
 FROM run_nodes rn
 JOIN runs r ON r.id = rn.run_id
 WHERE rn.status = 'running'
   AND rn.started_at < now() - make_interval(secs => sqlc.arg(threshold_seconds)::float8)
   AND r.status IN ('running', 'failed')
+ORDER BY rn.started_at
+LIMIT sqlc.arg(batch_size);
+
+-- A controlled drill must not sweep unrelated production work. The exact
+-- tenant/run scope crosses the same running-node CAS and terminal boundary as
+-- the ordinary reaper after this bounded selection.
+-- name: FindScopedStalledRunningNodes :many
+SELECT rn.id, rn.run_id, rn.node_id, COALESCE(rn.attempts, 1)::int AS attempt,
+       rn.started_at
+FROM run_nodes rn
+JOIN runs r ON r.id = rn.run_id
+WHERE rn.status = 'running'
+  AND rn.started_at < now() - make_interval(secs => sqlc.arg(threshold_seconds)::float8)
+  AND r.status IN ('running', 'failed')
+  AND r.org_id = sqlc.arg(org_id)
+  AND r.id = sqlc.arg(run_id)
 ORDER BY rn.started_at
 LIMIT sqlc.arg(batch_size);
 

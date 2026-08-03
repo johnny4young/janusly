@@ -230,7 +230,8 @@ func (s *V1Server) legacyMutations(mux *http.ServeMux) {
 			_ = json.NewEncoder(w).Encode(items)
 			return
 		}
-		row, err := store.New(s.pool).GetDeadLetter(r.Context(), store.GetDeadLetterParams{ID: id, OrgID: rc.orgID})
+		q := store.New(s.pool)
+		row, err := q.GetDeadLetter(r.Context(), store.GetDeadLetterParams{ID: id, OrgID: rc.orgID})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				writeLegacy(w, opError(http.StatusNotFound, "dlq_not_found", "Dead letter not found", nil))
@@ -239,8 +240,17 @@ func (s *V1Server) legacyMutations(mux *http.ServeMux) {
 			writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
+		view := newDeadLetterDetailView(row)
+		if run, runErr := q.GetRun(r.Context(), store.GetRunParams{ID: row.RunID, OrgID: rc.orgID}); runErr == nil {
+			view.Drill = parseRecoveryDrillProvenance(run.InputJson)
+			if view.Drill != nil {
+				if outcome, outcomeErr := s.queryDrillOutcome(r.Context(), rc.orgID, row.ID); outcomeErr == nil {
+					view.DrillOutcome = outcome
+				}
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(newDeadLetterDetailView(row))
+		_ = json.NewEncoder(w).Encode(view)
 	}))
 }

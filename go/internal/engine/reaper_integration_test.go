@@ -37,7 +37,8 @@ func TestReaperFailsStalledNodeIntoDLQ(t *testing.T) {
 	if nodeStatus != "failed" || runStatus != "failed" {
 		t.Fatalf("reap must terminate node and run: %s/%s", nodeStatus, runStatus)
 	}
-	if string(errorJSON) == "" || !strings.Contains(string(errorJSON), "WORKER_STALLED") {
+	if string(errorJSON) == "" || !strings.Contains(string(errorJSON), "worker_stalled") ||
+		!strings.Contains(string(errorJSON), "WorkerStalledError") {
 		t.Fatalf("stall identity must persist: %s", errorJSON)
 	}
 	var deadLetters int

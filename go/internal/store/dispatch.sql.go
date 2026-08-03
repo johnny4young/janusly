@@ -332,8 +332,72 @@ func (q *Queries) DeleteWakeup(ctx context.Context, runNodeID string) error {
 	return err
 }
 
+const findScopedStalledRunningNodes = `-- name: FindScopedStalledRunningNodes :many
+SELECT rn.id, rn.run_id, rn.node_id, COALESCE(rn.attempts, 1)::int AS attempt,
+       rn.started_at
+FROM run_nodes rn
+JOIN runs r ON r.id = rn.run_id
+WHERE rn.status = 'running'
+  AND rn.started_at < now() - make_interval(secs => $1::float8)
+  AND r.status IN ('running', 'failed')
+  AND r.org_id = $2
+  AND r.id = $3
+ORDER BY rn.started_at
+LIMIT $4
+`
+
+type FindScopedStalledRunningNodesParams struct {
+	ThresholdSeconds float64
+	OrgID            string
+	RunID            string
+	BatchSize        int32
+}
+
+type FindScopedStalledRunningNodesRow struct {
+	ID        string
+	RunID     string
+	NodeID    string
+	Attempt   int32
+	StartedAt *time.Time
+}
+
+// A controlled drill must not sweep unrelated production work. The exact
+// tenant/run scope crosses the same running-node CAS and terminal boundary as
+// the ordinary reaper after this bounded selection.
+func (q *Queries) FindScopedStalledRunningNodes(ctx context.Context, arg FindScopedStalledRunningNodesParams) ([]FindScopedStalledRunningNodesRow, error) {
+	rows, err := q.db.Query(ctx, findScopedStalledRunningNodes,
+		arg.ThresholdSeconds,
+		arg.OrgID,
+		arg.RunID,
+		arg.BatchSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FindScopedStalledRunningNodesRow
+	for rows.Next() {
+		var i FindScopedStalledRunningNodesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.NodeID,
+			&i.Attempt,
+			&i.StartedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const findStalledRunningNodes = `-- name: FindStalledRunningNodes :many
-SELECT rn.id, rn.run_id, rn.node_id, COALESCE(rn.attempts, 1)::int AS attempt
+SELECT rn.id, rn.run_id, rn.node_id, COALESCE(rn.attempts, 1)::int AS attempt,
+       rn.started_at
 FROM run_nodes rn
 JOIN runs r ON r.id = rn.run_id
 WHERE rn.status = 'running'
@@ -349,10 +413,11 @@ type FindStalledRunningNodesParams struct {
 }
 
 type FindStalledRunningNodesRow struct {
-	ID      string
-	RunID   string
-	NodeID  string
-	Attempt int32
+	ID        string
+	RunID     string
+	NodeID    string
+	Attempt   int32
+	StartedAt *time.Time
 }
 
 func (q *Queries) FindStalledRunningNodes(ctx context.Context, arg FindStalledRunningNodesParams) ([]FindStalledRunningNodesRow, error) {
@@ -369,6 +434,7 @@ func (q *Queries) FindStalledRunningNodes(ctx context.Context, arg FindStalledRu
 			&i.RunID,
 			&i.NodeID,
 			&i.Attempt,
+			&i.StartedAt,
 		); err != nil {
 			return nil, err
 		}

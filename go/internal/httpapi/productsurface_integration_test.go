@@ -125,17 +125,28 @@ func TestProductSurfaceLoop(t *testing.T) {
 		t.Fatalf("sample run must be validation: %q", replayMode)
 	}
 
-	// Inject-failure lands a REAL dead letter deterministically.
-	res = h.call("POST", "/solution-packs/"+packID+"/inject-failure", nil, "")
-	if res.status != 202 {
+	// The selected runtime fixture crosses the real worker/DLQ boundary and
+	// returns the exact dead-letter identity only after it is durable.
+	fixtureIDs := pack["failureFixtureIds"].([]any)
+	res = h.call("POST", "/solution-packs/"+packID+"/inject-failure", map[string]any{
+		"fixtureId": fixtureIDs[0],
+	}, "")
+	if res.status != 200 || res.body["deadLetterId"] == "" ||
+		res.body["fixtureId"] != fixtureIDs[0] || res.body["recoveryPath"] != "runtime_failure" {
 		t.Fatalf("inject failure: %d %+v", res.status, res.body)
 	}
 	failureRunID := res.body["runId"].(string)
-	h.waitRun(failureRunID, "failed")
 	var dlqCount int
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM dead_letters WHERE run_id = $1`, failureRunID).Scan(&dlqCount)
 	if dlqCount != 1 {
 		t.Fatalf("injected failure must dead-letter: %d", dlqCount)
+	}
+	detail := h.call("GET", "/dlq?id="+res.body["deadLetterId"].(string), nil, "")
+	drill, _ := detail.body["drill"].(map[string]any)
+	outcome, _ := detail.body["drillOutcome"].(map[string]any)
+	if detail.status != 200 || drill["fixtureId"] != fixtureIDs[0] ||
+		outcome["status"] != "awaiting_action" {
+		t.Fatalf("drill detail/outcome: %d %+v", detail.status, detail.body)
 	}
 
 	// ── onboarding derives the new milestones + completes via recovery ──
@@ -175,5 +186,84 @@ func TestProductSurfaceLoop(t *testing.T) {
 	if res = h.call("POST", "/onboarding", map[string]any{"action": "restart"}, ""); res.status != 200 ||
 		res.body["completed"] == true {
 		t.Fatalf("restart must reopen: %d %+v", res.status, res.body)
+	}
+}
+
+func TestSolutionPackSelectedStalledDrill(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	ctx := t.Context()
+	t.Setenv("JANUSLY_GO_REAPER_THRESHOLD_MS", "900000")
+
+	before := 0
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM runs WHERE org_id=$1`, h.org).Scan(&before)
+	unknown := h.call("POST", "/solution-packs/incident-triage/inject-failure", map[string]any{
+		"fixtureId": "not-a-drill",
+	}, "")
+	if unknown.status != 400 || unknown.body["code"] != "pack_no_failure_fixture" {
+		t.Fatalf("unknown fixture must fail closed: %d %+v", unknown.status, unknown.body)
+	}
+	afterUnknown := 0
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM runs WHERE org_id=$1`, h.org).Scan(&afterUnknown)
+	if afterUnknown != before {
+		t.Fatalf("unknown fixture persisted a run: before=%d after=%d", before, afterUnknown)
+	}
+
+	res := h.call("POST", "/solution-packs/incident-triage/inject-failure", map[string]any{
+		"fixtureId": "worker_interrupted_during_page",
+	}, "")
+	if res.status != 200 || res.body["fixtureId"] != "worker_interrupted_during_page" ||
+		res.body["failureMode"] != "worker_stalled" ||
+		res.body["recoveryPath"] != "stalled_node_reaper" {
+		t.Fatalf("selected stalled drill: %d %+v", res.status, res.body)
+	}
+	evidence := res.body["evidence"].(map[string]any)
+	if evidence["thresholdMinutes"] != float64(15) ||
+		evidence["scanned"] != float64(1) || evidence["reaped"] != float64(1) ||
+		evidence["deadLettered"] != float64(1) {
+		t.Fatalf("stalled evidence: %+v", evidence)
+	}
+	runID := res.body["runId"].(string)
+	deadLetterID := res.body["deadLetterId"].(string)
+	var nodeID, runStatus, nodeStatus, replayMode, evidenceLevel string
+	if err := pool.QueryRow(ctx, `
+		SELECT dl.node_id, r.status, rn.status, coalesce(r.replay_mode,''),
+		       coalesce(r.validation_evidence_level,'')
+		FROM dead_letters dl
+		JOIN runs r ON r.id=dl.run_id
+		JOIN run_nodes rn ON rn.run_id=dl.run_id AND rn.node_id=dl.node_id
+		WHERE dl.org_id=$1 AND dl.id=$2 AND dl.run_id=$3
+	`, h.org, deadLetterID, runID).Scan(
+		&nodeID, &runStatus, &nodeStatus, &replayMode, &evidenceLevel,
+	); err != nil {
+		t.Fatalf("read stalled drill: %v", err)
+	}
+	if nodeID != "page_oncall" || runStatus != "failed" || nodeStatus != "failed" ||
+		replayMode != "validation" || evidenceLevel != "static" {
+		t.Fatalf("stalled durable state: node=%s run=%s/%s mode=%s evidence=%s",
+			nodeID, runStatus, nodeStatus, replayMode, evidenceLevel)
+	}
+	detail := h.call("GET", "/dlq?id="+deadLetterID, nil, "")
+	drill := detail.body["drill"].(map[string]any)
+	outcome := detail.body["drillOutcome"].(map[string]any)
+	if drill["kind"] != "solution_pack_drill" ||
+		drill["fixtureId"] != "worker_interrupted_during_page" ||
+		drill["recoveryPath"] != "stalled_node_reaper" ||
+		outcome["status"] != "awaiting_action" ||
+		outcome["latestDeadLetterId"] != deadLetterID {
+		t.Fatalf("stalled drill detail: %+v", detail.body)
+	}
+	if foreign := h.call("GET", "/dlq?id="+deadLetterID, nil, h.org+"-other"); foreign.status != 404 {
+		t.Fatalf("drill detail must remain tenant-invisible: %d %+v", foreign.status, foreign.body)
+	}
+	var audits int
+	_ = pool.QueryRow(ctx, `
+		SELECT count(*) FROM audit_logs
+		WHERE org_id=$1 AND action='solution_pack.failure_injected'
+		  AND metadata->>'fixtureId'='worker_interrupted_during_page'
+		  AND metadata->>'deadLetterId'=$2
+	`, h.org, deadLetterID).Scan(&audits)
+	if audits != 1 {
+		t.Fatalf("measured drill audit missing: %d", audits)
 	}
 }

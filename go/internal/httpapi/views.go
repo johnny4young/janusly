@@ -166,6 +166,42 @@ type DeadLetterDetailView struct {
 	DrillOutcome    any             `json:"drillOutcome"`
 }
 
+type recoveryDrillProvenance struct {
+	Kind         string `json:"kind"`
+	PackID       string `json:"packId"`
+	FixtureID    string `json:"fixtureId"`
+	RecoveryPath string `json:"recoveryPath"`
+}
+
+func parseRecoveryDrillProvenance(inputJSON json.RawMessage) *recoveryDrillProvenance {
+	var envelope struct {
+		Drill map[string]any `json:"drill"`
+	}
+	if json.Unmarshal(inputJSON, &envelope) != nil || envelope.Drill == nil {
+		return nil
+	}
+	text := func(key string) string {
+		value, _ := envelope.Drill[key].(string)
+		if value == "" || len(value) > 128 {
+			return ""
+		}
+		return value
+	}
+	kind := text("kind")
+	packID := text("packId")
+	fixtureID := text("fixtureId")
+	recoveryPath := text("recoveryPath")
+	if kind != "solution_pack_drill" || packID == "" || fixtureID == "" ||
+		(recoveryPath != "direct_failure" &&
+			recoveryPath != "runtime_failure" &&
+			recoveryPath != "stalled_node_reaper") {
+		return nil
+	}
+	return &recoveryDrillProvenance{
+		Kind: kind, PackID: packID, FixtureID: fixtureID, RecoveryPath: recoveryPath,
+	}
+}
+
 func newDeadLetterDetailView(row store.GetDeadLetterRow) DeadLetterDetailView {
 	return DeadLetterDetailView{
 		ID: row.ID, OrgID: row.OrgID, RunID: row.RunID, NodeID: row.NodeID,

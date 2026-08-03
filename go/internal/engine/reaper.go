@@ -13,6 +13,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"strconv"
@@ -20,6 +21,19 @@ import (
 
 	"github.com/johnny4young/janusly/go/internal/store"
 )
+
+type stalledCandidate struct {
+	RowID     string
+	RunID     string
+	NodeID    string
+	Attempt   int32
+	StartedAt *time.Time
+}
+
+type stalledReapResult struct {
+	Scanned int
+	Reaped  int
+}
 
 // ReapStalledNodes fails every node stuck in running longer than threshold,
 // dead-lettering each through the ordinary terminal-failure transaction.
@@ -40,24 +54,67 @@ func (e *Engine) ReapStalledNodes(ctx context.Context, threshold time.Duration, 
 		return 0
 	}
 	reaped := 0
+	fields := map[string]any{"reason": "worker_stalled"}
 	for _, row := range rows {
-		claim := ClaimedNode{RowID: row.ID, RunID: row.RunID, NodeID: row.NodeID, Attempt: row.Attempt}
-		err := e.FailNode(ctx, claim, &ExecError{
-			Message: "Node execution stalled: the worker likely died mid-execution",
-			Name:    "StalledNodeError", Code: "WORKER_STALLED",
-		})
-		if err != nil {
-			if ctx.Err() == nil {
-				logger.Error("stalled-node reap failed", "runId", row.RunID, "nodeId", row.NodeID, "error", err)
-			}
-			continue
+		candidate := stalledCandidate{
+			RowID: row.ID, RunID: row.RunID, NodeID: row.NodeID,
+			Attempt: row.Attempt, StartedAt: row.StartedAt,
 		}
-		reaped++
-		metricReapedNodes.Inc()
-		logger.Warn("stalled node reaped into the DLQ",
-			"runId", row.RunID, "nodeId", row.NodeID, "attempt", row.Attempt)
+		if e.reapStalledCandidate(ctx, candidate, threshold, fields, logger) {
+			reaped++
+		}
 	}
 	return reaped
+}
+
+// reapScopedStalledNodes crosses the same terminal boundary as the production
+// sweep, but its database selection is pinned to one tenant and one drill run.
+// It is intentionally unexported: only the server-authored drill adapter may
+// request a scoped reap.
+func (e *Engine) reapScopedStalledNodes(ctx context.Context, orgID, runID string, threshold time.Duration, fields map[string]any, logger *slog.Logger) (stalledReapResult, error) {
+	rows, err := store.New(e.pool).FindScopedStalledRunningNodes(ctx, store.FindScopedStalledRunningNodesParams{
+		ThresholdSeconds: threshold.Seconds(), OrgID: orgID, RunID: runID, BatchSize: 1,
+	})
+	if err != nil {
+		return stalledReapResult{}, fmt.Errorf("scoped stalled-node scan: %w", err)
+	}
+	result := stalledReapResult{Scanned: len(rows)}
+	for _, row := range rows {
+		candidate := stalledCandidate{
+			RowID: row.ID, RunID: row.RunID, NodeID: row.NodeID,
+			Attempt: row.Attempt, StartedAt: row.StartedAt,
+		}
+		if e.reapStalledCandidate(ctx, candidate, threshold, fields, logger) {
+			result.Reaped++
+		}
+	}
+	return result, nil
+}
+
+func (e *Engine) reapStalledCandidate(ctx context.Context, row stalledCandidate, threshold time.Duration, fields map[string]any, logger *slog.Logger) bool {
+	minutes := int64(threshold.Round(time.Minute) / time.Minute)
+	claim := ClaimedNode{RowID: row.RowID, RunID: row.RunID, NodeID: row.NodeID, Attempt: row.Attempt}
+	since := "unknown"
+	if row.StartedAt != nil {
+		since = row.StartedAt.UTC().Format(time.RFC3339Nano)
+	}
+	err := e.failNodeWithEventFields(ctx, claim, &ExecError{
+		Message: fmt.Sprintf(
+			"Node was left running since %s, past the %d-minute stall threshold — the worker executing it most likely crashed or was evicted mid-node. Failed by the stalled-node reaper so the run reaches a terminal state; replay from the dead-letter queue once the cause is understood (the node may have already run a side effect).",
+			since, minutes,
+		),
+		Name: "WorkerStalledError", Code: "worker_stalled",
+	}, fields)
+	if err != nil {
+		if ctx.Err() == nil {
+			logger.Error("stalled-node reap failed", "runId", row.RunID, "nodeId", row.NodeID, "error", err)
+		}
+		return false
+	}
+	metricReapedNodes.Inc()
+	logger.Warn("stalled node reaped into the DLQ",
+		"runId", row.RunID, "nodeId", row.NodeID, "attempt", row.Attempt)
+	return true
 }
 
 // StartReaper runs the periodic sweep until ctx cancels. The threshold
