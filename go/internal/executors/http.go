@@ -217,6 +217,9 @@ type ExecErrorShape struct {
 	Name       string
 	Code       string
 	StatusCode int
+	// Details carries bounded structured diagnostics that operators need to
+	// understand the failure without reconstructing executor-local state.
+	Details any
 	// WriteSide marks an error raised after external effects may have
 	// happened; the engine's retry ladder refuses whole-node retries.
 	WriteSide bool
@@ -232,6 +235,9 @@ func (e *ExecErrorShape) ErrorCode() string { return e.Code }
 
 // ErrorStatusCode exposes the HTTP status for Nxx classification.
 func (e *ExecErrorShape) ErrorStatusCode() int { return e.StatusCode }
+
+// ErrorDetails exposes bounded structured diagnostics for persistence.
+func (e *ExecErrorShape) ErrorDetails() any { return e.Details }
 
 func (e *httpExecutor) execute(ctx context.Context, in Input) (any, error) {
 	rawURL, _ := in.Config["url"].(string)

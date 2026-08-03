@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/johnny4young/janusly/go/internal/executors"
 	"github.com/johnny4young/janusly/go/internal/grammar"
 )
 
@@ -129,9 +130,11 @@ func TestSerializeErrorShapes(t *testing.T) {
 	}
 	structured := serializeError(&ExecError{
 		Message: "upstream 503", Name: "HttpError", Code: "E_UPSTREAM", StatusCode: 503,
+		Details: map[string]any{"attempt": 2},
 	})
 	want := map[string]any{
 		"message": "upstream 503", "name": "HttpError", "code": "E_UPSTREAM", "statusCode": 503,
+		"details": map[string]any{"attempt": 2},
 	}
 	if !reflect.DeepEqual(structured, want) {
 		t.Fatalf("structured error shape: %v", structured)
@@ -144,6 +147,18 @@ func TestSerializeErrorShapes(t *testing.T) {
 	}
 	if !reflect.DeepEqual(templateError, templateWant) {
 		t.Fatalf("rich domain error shape: %v", templateError)
+	}
+	rich := &executors.ExecErrorShape{
+		Message: "failed with resolved-value", Name: "DetailedError", Code: "DETAILED",
+		Details: map[string]any{"sample": "resolved-value"},
+	}
+	redacted := redactExecError(rich, []string{"resolved-value"})
+	redactedWant := map[string]any{
+		"message": "failed with [redacted]", "name": "DetailedError", "code": "DETAILED",
+		"details": map[string]any{"sample": "[redacted]"},
+	}
+	if got := serializeError(redacted); !reflect.DeepEqual(got, redactedWant) {
+		t.Fatalf("rich details must survive redacted: %v", got)
 	}
 }
 

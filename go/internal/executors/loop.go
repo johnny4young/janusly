@@ -75,6 +75,7 @@ func NewLoopExecutor(registry *tools.Registry) Func {
 			return nil, &ExecErrorShape{
 				Message: fmt.Sprintf("Loop contains %d items; maximum is %d", len(items), loopMaxItems),
 				Name:    "LoopItemLimitError", Code: "LOOP_ITEM_LIMIT_EXCEEDED",
+				Details: map[string]any{"count": len(items), "maxItems": loopMaxItems},
 			}
 		}
 		if mode == "for_each" {
@@ -366,6 +367,7 @@ func executeForEachLoop(ctx context.Context, registry *tools.Registry, in Input,
 		return nil, &ExecErrorShape{
 			Message: fmt.Sprintf("Loop failure budget exceeded: %d of %d items failed", failedCount, len(items)),
 			Name:    "LoopFailureBudgetExceededError", Code: "LOOP_FAILURE_BUDGET_EXCEEDED",
+			Details: details,
 			// Effects may already have happened: never whole-node retry.
 			WriteSide: !in.DryRun && registry.IsWriteSide(tool),
 		}

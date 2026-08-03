@@ -21,6 +21,7 @@ type ExecError struct {
 	Name       string
 	Code       string
 	StatusCode int
+	Details    any
 	// WriteSide marks an error raised AFTER external effects may have
 	// happened (reference runtime.ts: error.writeSide) — the retry ladder
 	// must not whole-node retry it; operator-gated replay is safer than
@@ -30,6 +31,10 @@ type ExecError struct {
 
 func (e *ExecError) Error() string { return e.Message }
 
+// ErrorDetails lets wrapped executor diagnostics survive the retry and
+// terminal-failure lifecycle without coupling the engine to executor types.
+func (e *ExecError) ErrorDetails() any { return e.Details }
+
 // richError is the identity contract structured domain/executor errors
 // satisfy so classification survives both redaction and persistence.
 type richError interface {
@@ -37,6 +42,10 @@ type richError interface {
 	ErrorName() string
 	ErrorCode() string
 	ErrorStatusCode() int
+}
+
+type detailedError interface {
+	ErrorDetails() any
 }
 
 // serializeError projects any error into the persisted error_json shape.
@@ -53,6 +62,9 @@ func serializeError(err error) map[string]any {
 		if exec.StatusCode != 0 {
 			out["statusCode"] = exec.StatusCode
 		}
+		if exec.Details != nil {
+			out["details"] = exec.Details
+		}
 		if exec.WriteSide {
 			out["writeSide"] = true
 		}
@@ -66,6 +78,10 @@ func serializeError(err error) map[string]any {
 		}
 		if statusCode := rich.ErrorStatusCode(); statusCode != 0 {
 			out["statusCode"] = statusCode
+		}
+		var detailed detailedError
+		if errors.As(err, &detailed) && detailed.ErrorDetails() != nil {
+			out["details"] = detailed.ErrorDetails()
 		}
 		return out
 	}

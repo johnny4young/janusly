@@ -192,6 +192,10 @@ func redactExecError(execErr error, redactedValues []string) error {
 			Message: message, Name: rich.ErrorName(),
 			Code: rich.ErrorCode(), StatusCode: rich.ErrorStatusCode(),
 		}
+		var detailed detailedError
+		if errors.As(execErr, &detailed) && detailed.ErrorDetails() != nil {
+			out.Details = grammar.RedactValues(detailed.ErrorDetails(), redactedValues)
+		}
 		if flagged, ok := execErr.(interface{ ErrorWriteSide() bool }); ok {
 			out.WriteSide = flagged.ErrorWriteSide()
 		}

@@ -54,7 +54,8 @@ func TestForEachLoopThroughDispatcher(t *testing.T) {
 	if attempts != 1 {
 		t.Fatalf("writeSide breach must not retry: attempts=%d", attempts)
 	}
-	if !strings.Contains(errorJSON, "LOOP_FAILURE_BUDGET_EXCEEDED") || !strings.Contains(errorJSON, `"writeSide": true`) {
+	if !strings.Contains(errorJSON, "LOOP_FAILURE_BUDGET_EXCEEDED") || !strings.Contains(errorJSON, `"writeSide": true`) ||
+		!strings.Contains(errorJSON, `"details":`) || !strings.Contains(errorJSON, `"failedIndices": [`) {
 		t.Fatalf("error identity: %s", errorJSON)
 	}
 	var budgetEvents int

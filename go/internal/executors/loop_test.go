@@ -81,6 +81,11 @@ func TestForEachLoopExecutor(t *testing.T) {
 	if !ok || shape.Code != "LOOP_FAILURE_BUDGET_EXCEEDED" || !shape.WriteSide {
 		t.Fatalf("write-side budget breach: %+v", err)
 	}
+	details, ok := shape.Details.(map[string]any)
+	if !ok || details["count"] != 1 || details["failedCount"] != 1 ||
+		len(details["failures"].([]any)) != 1 {
+		t.Fatalf("write-side budget details: %+v", shape.Details)
+	}
 	if !contains(*events, "loop.failure_budget.exceeded") {
 		t.Fatalf("budget event missing: %v", *events)
 	}
