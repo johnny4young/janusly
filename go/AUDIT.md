@@ -59,11 +59,11 @@ The interrupted runs and generated binaries are not certification evidence.
 | --- | --- | --- |
 | 1. Baseline and evidence custody | fetched refs, ancestry, clean isolated worktree, raw-evidence inventory | complete |
 | 2. Documentation and architecture truth | implementation-to-claim matrix; current AGENTS, reports, cutover map, and runbook | complete |
-| 3. Architecture and safety review | file-level findings for engine, API, persistence, concurrency, security, and allocation posture | pending |
-| 4. Node/Go contract parity | routes, wire shapes, errors, durable side effects, negative cases, and UI-facing behavior | pending |
+| 3. Architecture and safety review | file-level findings for engine, API, persistence, concurrency, security, and allocation posture | complete |
+| 4. Node/Go contract parity | routes, wire shapes, errors, durable side effects, negative cases, and UI-facing behavior | complete |
 | 5. Data and queue transition | fresh/legacy/rollback database matrix plus BullMQ and in-flight-work drain rehearsal | complete |
-| 6. Clean validation ladder | CI, race, PG15/18, HA, failover, chaos, fuzz, SDK, benchmark, and soak-evidence audit | pending |
-| 7. Full web certification | complete Playwright coverage against Node and Go, EN/ES screenshots, zero unexplained console errors | pending |
+| 6. Clean validation ladder | CI, race, PG15/18, HA, failover, chaos, fuzz, SDK, benchmark, and soak-evidence audit | complete |
+| 7. Full web certification | complete Playwright coverage against Node and Go, EN/ES screenshots, zero unexplained console errors | complete |
 | 8. Integration candidate | exact candidate commit revalidated on `go-integration`, promoted to `develop`, with `main` PR left pending | pending |
 
 ## Exit criteria
@@ -94,12 +94,13 @@ exact candidate commit:
 | BLD-001 | P0 | A clean checkout could not compile because the root `dist/` ignore swallowed the claimed tracked webdist placeholder required by `go:embed`. | fixed in this band |
 | SEC-001 | P1 | Four signed webhook handlers silently truncated oversized raw bodies, diverging from Node's hard 413 cap and verifying/parsing only a prefix. | fixed in architecture review |
 | EVD-001 | P1 | `SOAK.md` cited an untracked random-name series, so the 24-hour verdict was not reproducible from a clean checkout. | fixed in this band |
-| TST-001 | P0 | The full Playwright lane was deferred from the pilot and remains a cutover gate. | open |
+| TST-001 | P0 | The full Playwright lane was deferred from the pilot and remains a cutover gate. | fixed in full web certification |
 | TST-002 | P1 | The queue-health integration test started workers that could claim its fixture before the snapshot assertion. | fixed in architecture review |
 | QUE-001 | P0 | The current cutover runbook forbids dual schedulers but does not yet prove a BullMQ/in-flight-work drain and rollback procedure. | fixed in queue transition review |
 | QUE-002 | P0 | The cutover map promised per-tenant work ownership even though Go claims and background sweeps are database-global. | fixed in architecture review |
 | QUE-003 | P0 | Go-created queued nodes did not maintain Node's publication outbox, so rollback could strand roots/downstream/redrives or lose retry backoff. | fixed in queue transition review |
 | SRC-001 | P2 | Go source comments contain 134 internal ticket identifiers instead of durable behavioral explanations. | open |
+| EVD-002 | P1 | `make bench` rewrote the complete benchmark report and erased independent allocation and hostile-world evidence. | fixed in clean validation review |
 | MOD-001 | P2 | Go 1.26 idioms were not enforced, allowing avoidable allocation and synchronization boilerplate to accumulate. | fixed in this band |
 | PAR-001 | P1 | Go org-config writes and environment fallbacks accepted non-finite or negative fractional integer inputs differently from Node and skipped Node's string normalization. | fixed in architecture review |
 | SEC-002 | P1 | CI did not run `govulncheck`, and the developer-installed scanner was built with Go 1.25 so it could not parse the Go 1.26 source tree. | fixed in architecture review |
@@ -451,3 +452,98 @@ generation; Node's real execution CAS accepts it; and the next Go migration
 cleans the spent clock before a final green Node-to-Go gate. The machine-readable
 result is `conformance/queue-handoff-evidence.json`, keyed by the staged Git
 source tree before adding the receipt itself, rather than a mutable branch name.
+
+## Candidate certification evidence
+
+This review reached the runtime candidate at `adf9705b` and then added the
+evidence-preservation fix at `91b8aca4`. The latter changes only conformance
+scripts, their tests, and performance receipts; it does not change the API or
+work-plane binary. The complete `make ci` and PostgreSQL 15 race lanes were run
+against the staged tree that became `91b8aca4`.
+
+### Architecture, safety, and contract parity
+
+The focused review commits from `c16724ca` through `adf9705b` close the
+security, authentication, migration, queue-ownership, runtime, and wire-shape
+findings recorded above. Each implementation band was followed by focused
+tests, the complete Go CI ladder, PostgreSQL 15 compatibility when persistence
+changed, and browser evidence when the web consumed the surface.
+
+The normalized dual-runtime corpus was regenerated from the frozen Node oracle
+and compared with the candidate: all 27 cases were identical after
+normalization. The only excluded fields are the four documented organization
+configuration source labels in `CUTOVER-MAP.md`; no response, error, database,
+event, audit, queue, or rollback divergence was added to the expected list.
+The Go semantic integration lane independently passed F01 through F25.
+
+### Full browser corpus
+
+The complete default Playwright corpus ran serially against both backends from
+the same checkout:
+
+| Backend | Passed | Intentionally skipped | Failed | Duration |
+| --- | ---: | ---: | ---: | ---: |
+| frozen Node reference | 114 | 22 | 0 | 7.6 minutes |
+| Go candidate | 120 | 16 | 0 | 8.3 minutes |
+
+The count difference is exactly the six Go-pilot smoke cases, all of which ran
+and passed against Go and are intentionally skipped against Node. The 16 skips
+common to both runs are explicit opt-in qualification profiles for the
+persistent Supabase stack, real Anthropic traffic, the persistent Recovery Lab,
+semantic-outcome qualification, and forward/rollback orchestration. They were
+not silently counted as passes and are separate from the backend-swappable
+default corpus.
+
+The executed corpus covers both English and Spanish and completed with no test
+failure or unexplained page/console-error assertion. Eighteen inspected local
+screenshots remain under `output/review/go-audit/`, covering recovery momentum,
+real Solution Pack drills, and technical autonomy in both locales, including
+mobile Spanish evidence. The final technical-autonomy pair has SHA-256
+`d1247aad6fdc6f18c07d2e0ab12bea351840689e4265b02a6048cc036a615fcd`
+(English) and
+`bc6fe450dc8661725982c812cc3a6822153f618ec1721b7bf2203ba72bd1c183`
+(Spanish), byte-identical to the matching Node captures.
+
+### Clean validation and failure drills
+
+The exact staged candidate passed:
+
+- `make ci`: sqlc and OpenAPI drift checks, the closed queue policy, all 12
+  conformance-script tests, coverage floors, build, zero lint findings,
+  `govulncheck`, the complete race-enabled unit/integration suite, and F01-F25;
+- the complete race-enabled integration suite on PostgreSQL 15;
+- the HA-tagged two-pool engine lane under the race detector;
+- replica crash failover: 60 runs settled after one active replica was
+  `SIGKILL`ed (59 succeeded and one claimed node was loudly reaped), then the
+  restarted replica served a 61st terminal run;
+- three dedicated-PostgreSQL chaos rounds: the API returned bounded 500
+  envelopes while the database was stopped, pools reconnected without a
+  process restart, all 33 pre-outage runs became terminal, and exactly-once
+  held; two claimed nodes were loudly reaped rather than lost;
+- all six 45-second fuzz targets for expressions, templates, cron, external
+  runtime events, Markdown PDF, and HTML PDF;
+- the live Python SDK lane: 5/5 wire tests against the Go API;
+- the isolated Node-to-Go-to-Node-to-Go ownership rehearsal. The refreshed
+  receipt attests tree `9b2a87f048a7eb46f7495fa9b94a09299f5d7b56` and every
+  phase is green.
+
+### Performance and retained soak evidence
+
+Two consecutive healthy k6 runs against the runtime candidate reported zero
+errors and agreed within 2.1% on every metric. The latest run sustained 238
+starts/s, 3,539 list reads/s, and 140 completed diamond DAGs/s, with p95 values
+of 58 ms, 16 ms, and 104 ms respectively.
+
+Three hostile samples were retained rather than cherry-picked. The final strict
+green sample absorbed 1,938 failing starts with zero HTTP errors; hostile/quiet
+p95 ratios were 0.70x for run reads, 1.36x for DLQ reads, and 1.99x for public
+health. `91b8aca4` prevents either benchmark writer from deleting independent
+reviewed evidence and pins the preservation behavior in CI.
+
+The committed soak contains 1,412 samples over 24.0065 hours and has SHA-256
+`854215d3e641fc97c04c79baf6eaa30b457b1ae71222132cac3fe5b9488a3896`.
+Independent recomputation reproduced the reviewed conclusion: RSS fell 9.40%,
+goroutines fell 0.70%, and the apparent 24.38% heap quarter delta is caused by
+a documented low-load second eighth. The last six eighths remain flat near
+8.8-8.9 MiB, so the retained evidence supports **stable, no leak** without
+rewriting the raw automated growth flag.
