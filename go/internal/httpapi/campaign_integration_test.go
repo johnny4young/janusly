@@ -341,15 +341,21 @@ func requireRecoveryMetricsContract(t *testing.T, body map[string]any) {
 // nodeId exact, workflowId through the version join.
 func TestDlqServerSideFilters(t *testing.T) {
 	h := newAPIHarness(t)
+	pool := testPool(t)
 	failRun(t, h, "wf-filter-a-"+h.org)
 	failRun(t, h, "wf-filter-b-"+h.org)
 	ids := deadLetterIDs(t, h)
 	if len(ids) != 2 {
 		t.Fatalf("seed: %v", ids)
 	}
-	// Replay one so the statuses diverge.
-	if res := h.call("POST", "/v1/dlq/redrive", map[string]any{"deadLetterId": ids[0]}, ""); res.status != 200 {
-		t.Fatalf("redrive: %+v", res.body)
+	// Seed one terminal replay state directly: this test owns query filters,
+	// not worker/redrive behavior. Redriving through the live harness would
+	// race the retried failing node, which can legitimately create a third
+	// dead letter before the filter assertions run.
+	if _, err := pool.Exec(context.Background(), `
+		UPDATE dead_letters SET status = 'replayed', replayed_at = now()
+		WHERE org_id = $1 AND id = $2`, h.org, ids[0]); err != nil {
+		t.Fatalf("seed replayed status: %v", err)
 	}
 
 	rows := func(res apiResponse) []any {
