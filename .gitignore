@@ -2,9 +2,9 @@ node_modules/
 .pnpm-store/
 dist/
 # The Go binary needs a tracked fallback file so //go:embed compiles from a
-# clean checkout. Generated Vite assets remain ignored by go/.gitignore.
-!go/internal/webdist/dist/
-!go/internal/webdist/dist/index.html
+# clean checkout. Generated frontend assets remain ignored except for it.
+!internal/webdist/dist/
+!internal/webdist/dist/index.html
 apps/web/dist/
 .playwright-cli/
 .playwright-mcp/
