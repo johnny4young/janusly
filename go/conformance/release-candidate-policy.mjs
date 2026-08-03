@@ -16,6 +16,7 @@ export const REQUIRED_LOCAL_CHECKS = Object.freeze([
 export const REQUIRED_EXTERNAL_GATES = Object.freeze([
   "remote_review",
   "remote_ci",
+  "qualification",
   "shadow",
   "canary",
   "rollback",

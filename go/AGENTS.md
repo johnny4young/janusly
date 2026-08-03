@@ -81,7 +81,7 @@ Release evidence is generated under ignored `../artifacts/` paths by
 `make release-review`; it binds every local check and the queue round-trip to
 the exact candidate commit/tree. `make release-production-check` never deploys
 or changes traffic: it only requires the separately captured remote review,
-remote CI, shadow, canary, and rollback receipts described in
+remote CI, qualification, shadow, canary, and rollback receipts described in
 [`RELEASE-CANDIDATE.md`](RELEASE-CANDIDATE.md).
 
 ## Runtime invariants
