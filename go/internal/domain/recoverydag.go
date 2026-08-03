@@ -8,6 +8,8 @@
 // already be persisted before replacement.
 package domain
 
+import "slices"
+
 // deferredCompletionNodeTypes complete outside the inline semantic
 // interception point (reference set, verbatim).
 var deferredCompletionNodeTypes = map[string]bool{
@@ -136,12 +138,8 @@ func validateSemanticContractDAG(wf *Workflow, validExpression ExpressionValidat
 			if outcome.Expected == "pass" && outcome.Actual == "pass" {
 				hasPass = true
 			}
-			if outcome.Expected == "violation" {
-				for _, id := range outcome.ViolationDetectorIDs {
-					if id == detector.ID {
-						hasViolation = true
-					}
-				}
+			if outcome.Expected == "violation" && slices.Contains(outcome.ViolationDetectorIDs, detector.ID) {
+				hasViolation = true
 			}
 		}
 		if !hasPass {

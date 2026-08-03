@@ -116,7 +116,12 @@ func (t *Tracker) RecordRecovery(bucket, _ string) {
 	if !ok {
 		return
 	}
-	audit.SystemWrite(context.Background(), t.pool, SystemOrgID, "", "rate_limit.recovered", audit.Options{
+	// Bounded: this hook fires exactly when infrastructure is misbehaving,
+	// so an unbounded write would let a stalled database hold the caller
+	// (and its rate-limit decision path) indefinitely.
+	ctx, cancel := context.WithTimeout(context.Background(), degradationAuditTimeout)
+	defer cancel()
+	audit.SystemWrite(ctx, t.pool, SystemOrgID, "", "rate_limit.recovered", audit.Options{
 		TargetType: "rate_limit_bucket", TargetID: bucket,
 		Metadata: map[string]any{
 			"bucket": bucket, "firstObservedAt": entry.firstObservedAt,
@@ -125,10 +130,16 @@ func (t *Tracker) RecordRecovery(bucket, _ string) {
 	})
 }
 
+// degradationAuditTimeout bounds the best-effort audit writes below.
+const degradationAuditTimeout = 5 * time.Second
+
 // writeDegradedAudit dedupes against the DB before inserting: a prior
 // replica may already have written today's row for this bucket.
 func (t *Tracker) writeDegradedAudit(bucket, key, message, firstObservedAt, today string) {
-	ctx := context.Background()
+	// Same bound as the recovery path: degraded infrastructure must not
+	// turn a best-effort audit into an unbounded wait.
+	ctx, cancel := context.WithTimeout(context.Background(), degradationAuditTimeout)
+	defer cancel()
 	var existing int
 	err := t.pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs
 		WHERE org_id = $1 AND action = 'rate_limit.degraded'

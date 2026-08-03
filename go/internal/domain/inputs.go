@@ -6,8 +6,9 @@ package domain
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -180,10 +181,6 @@ func invalidInputDefaults(schema *InputSchema, path string) []invalidDefault {
 }
 
 func sortedKeys(m map[string]*InputSchema) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(m))
 	return keys
 }

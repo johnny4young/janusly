@@ -15,6 +15,7 @@
 package objectstore
 
 import (
+	"context"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -57,7 +58,7 @@ func sanitizeKey(key string) string {
 }
 
 // Put stores one object. NEVER panics or errors out-of-band.
-func Put(providerOverride, key string, body []byte, contentType string) PutResult {
+func Put(ctx context.Context, providerOverride, key string, body []byte, contentType string) PutResult {
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
@@ -89,7 +90,7 @@ func Put(providerOverride, key string, body []byte, contentType string) PutResul
 	case "s3":
 		// The real SigV4 driver: hand-rolled signing, path-style
 		// against custom endpoints (MinIO/R2), presigned GET or CDN URLs.
-		return s3Put(safeKey, body, contentType)
+		return s3Put(ctx, safeKey, body, contentType)
 	default:
 		return PutResult{Ok: false, Provider: "noop",
 			Error: "Object store not configured. Set JANUSLY_OBJECT_STORE_PROVIDER=local|s3 and its settings."}

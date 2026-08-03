@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -61,13 +62,18 @@ func run() error {
 	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
 	workerCtx, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
+	// BOTH background loops must be drained before the deferred
+	// pool.Close() above runs (defers unwind LIFO). The reaper used to be
+	// an unsynchronized `go`, so a normal stdio session teardown could
+	// leave it querying a pool that was already closing.
+	var background sync.WaitGroup
+	background.Go(func() {
 		_ = eng.RunWorkers(workerCtx, cfg.WorkerConcurrency, cfg.PollInterval, dispatcher.Execute, logger)
-	}()
-	go eng.StartReaper(workerCtx, time.Minute, time.Hour, logger)
-	defer func() { stopWorkers(); <-done }()
+	})
+	background.Go(func() {
+		eng.StartReaper(workerCtx, time.Minute, time.Hour, logger)
+	})
+	defer func() { stopWorkers(); background.Wait() }()
 
 	org := os.Getenv("JANUSLY_GO_ORG")
 	if org == "" {

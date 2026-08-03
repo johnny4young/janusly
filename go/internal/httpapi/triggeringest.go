@@ -213,7 +213,7 @@ func (s *V1Server) emailIngestCore(r *http.Request, rc v1Request) opResult {
 	if receivedAt == "" {
 		receivedAt = time.Now().UTC().Format(time.RFC3339)
 	}
-	storedAttachments := offloadEmailAttachments(rc.orgID, eventID, body.Attachments, body.AttachmentBodies)
+	storedAttachments := offloadEmailAttachments(r.Context(), rc.orgID, eventID, body.Attachments, body.AttachmentBodies)
 	eventPayload := map[string]any{
 		"aliasKey": aliasKey, "from": from, "to": body.To,
 		"subject": body.Subject, "body": body.Body, "dkimPass": body.DkimPass,
@@ -240,7 +240,7 @@ func (s *V1Server) emailIngestCore(r *http.Request, rc v1Request) opResult {
 // sees the attachment was dropped. eventID "" (no messageId) still gets a
 // stable per-delivery prefix from the caller-less fallback below.
 func offloadEmailAttachments(
-	orgID, eventID string,
+	ctx context.Context, orgID, eventID string,
 	attachments []emailAttachmentMeta, bodies map[string]string,
 ) []any {
 	out := make([]any, 0, len(attachments))
@@ -294,7 +294,7 @@ func offloadEmailAttachments(
 			prefix = "adhoc-" + shortHash(orgID+meta.Filename+fmt.Sprint(index, len(decoded)), 16)
 		}
 		objectKey := fmt.Sprintf("orgs/%s/email/%s/%d-%s", orgID, prefix, index, safeName)
-		result := objectstore.Put("", objectKey, decoded, meta.ContentType)
+		result := objectstore.Put(ctx, "", objectKey, decoded, meta.ContentType)
 		if result.Ok {
 			entry["stored"] = true
 			entry["objectKey"] = objectKey

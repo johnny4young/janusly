@@ -6,8 +6,9 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
-	"sort"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 
@@ -170,11 +171,7 @@ func (s *V1Server) runComparisonCore(r *http.Request, rc v1Request) opResult {
 		usageByNode[runComparisonUsageKey{runID: row.RunID, nodeID: row.NodeID}] = row
 	}
 
-	orderedNodeIDs := make([]string, 0, len(nodeIDs))
-	for nodeID := range nodeIDs {
-		orderedNodeIDs = append(orderedNodeIDs, nodeID)
-	}
-	sort.Strings(orderedNodeIDs)
+	orderedNodeIDs := slices.Sorted(maps.Keys(nodeIDs))
 	perNode := make([]runComparisonNode, 0, len(orderedNodeIDs))
 	for _, nodeID := range orderedNodeIDs {
 		baseNode, hasBase := baseByNode[nodeID]

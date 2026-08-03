@@ -92,7 +92,12 @@ func (c *QueueDepthCollector) Collect(ch chan<- prometheus.Metric) {
 				}
 			}
 			rows.Close()
-			c.cache, c.at = fresh, time.Now()
+			// Only cache a COMPLETE scan: a mid-iteration failure would
+			// otherwise publish partial queue depths as authoritative for
+			// the next 5s, which reads as a queue that suddenly drained.
+			if rows.Err() == nil {
+				c.cache, c.at = fresh, time.Now()
+			}
 		}
 	}
 	for state, value := range c.cache {

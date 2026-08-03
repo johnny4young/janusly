@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -63,6 +64,22 @@ func envDurationMs(name string, fallback time.Duration) time.Duration {
 	return fallback
 }
 
+// requireSigningSecret fails STARTUP when a production deployment has no
+// dedicated token-signing secret. Without it the signer falls back to a
+// constant that ships in the source tree, and the failure only surfaced
+// lazily at the first token operation — long after the process began
+// serving traffic. Same posture as the provenance gate above: refuse to
+// start rather than run in an unverifiable configuration.
+func requireSigningSecret(production bool) error {
+	if !production {
+		return nil
+	}
+	if strings.TrimSpace(os.Getenv("JANUSLY_RESUME_TOKEN_SECRET")) == "" {
+		return errors.New("JANUSLY_RESUME_TOKEN_SECRET is required when JANUSLY_GO_ENV=production")
+	}
+	return nil
+}
+
 func requireBuildProvenance(production bool, identity buildinfo.Identity) error {
 	if !production {
 		return nil
@@ -103,6 +120,9 @@ func run() error {
 		return err
 	}
 	if err := requireBuildProvenance(cfg.Production, identity); err != nil {
+		return err
+	}
+	if err := requireSigningSecret(cfg.Production); err != nil {
 		return err
 	}
 	logger := boot.NewLogger()

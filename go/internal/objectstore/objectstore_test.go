@@ -26,19 +26,19 @@ func TestProviderLadder(t *testing.T) {
 	t.Setenv("JANUSLY_OBJECT_STORE_BUCKET", "")
 	t.Setenv("JANUSLY_OBJECT_STORE_LOCAL_DIR", "")
 	// Unconfigured → noop with the honest envelope.
-	if result := Put("", "k.pdf", []byte("x"), ""); result.Ok || result.Provider != "noop" {
+	if result := Put(t.Context(), "", "k.pdf", []byte("x"), ""); result.Ok || result.Provider != "noop" {
 		t.Fatalf("noop default: %+v", result)
 	}
 	// s3 requested WITHOUT a bucket → still noop (the ladder requires both).
 	t.Setenv("JANUSLY_OBJECT_STORE_PROVIDER", "s3")
-	if result := Put("", "k.pdf", []byte("x"), ""); result.Provider != "noop" {
+	if result := Put(t.Context(), "", "k.pdf", []byte("x"), ""); result.Provider != "noop" {
 		t.Fatalf("s3 without bucket must stay noop: %+v", result)
 	}
 	// Local round-trip + escape defense.
 	root := t.TempDir()
 	t.Setenv("JANUSLY_OBJECT_STORE_PROVIDER", "local")
 	t.Setenv("JANUSLY_OBJECT_STORE_LOCAL_DIR", root)
-	result := Put("", "org/doc.pdf", []byte("payload"), "application/pdf")
+	result := Put(t.Context(), "", "org/doc.pdf", []byte("payload"), "application/pdf")
 	if !result.Ok || result.Provider != "local" {
 		t.Fatalf("local put: %+v", result)
 	}
@@ -47,10 +47,10 @@ func TestProviderLadder(t *testing.T) {
 		t.Fatalf("local read-back: %v %q", err, written)
 	}
 	// Empty body / hostile key degrade, never write.
-	if result := Put("", "", []byte("x"), ""); result.Ok {
+	if result := Put(t.Context(), "", "", []byte("x"), ""); result.Ok {
 		t.Fatalf("empty key must degrade: %+v", result)
 	}
-	if result := Put("", "k.pdf", nil, ""); result.Ok {
+	if result := Put(t.Context(), "", "k.pdf", nil, ""); result.Ok {
 		t.Fatalf("empty body must degrade: %+v", result)
 	}
 }

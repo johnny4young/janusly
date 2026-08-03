@@ -6,6 +6,7 @@ package authpolicy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"slices"
@@ -180,5 +181,11 @@ func (e *Evaluator) Evaluate(ctx context.Context, input Input) Decision {
 }
 
 func errorsIsNoRows(err error) bool {
-	return err == pgx.ErrNoRows || (err != nil && err.Error() == pgx.ErrNoRows.Error())
+	// errors.Is, not == plus a message comparison: a wrapped ErrNoRows
+	// ("read membership: no rows in result set") defeated BOTH of the old
+	// clauses, turning "this principal has no grant" into a hard failure
+	// on the authentication hot path. The store is sqlc-generated and
+	// returns the raw pgx error today, so this is a landmine, not a live
+	// bug — but the rest of the repo already uses errors.Is here.
+	return errors.Is(err, pgx.ErrNoRows)
 }

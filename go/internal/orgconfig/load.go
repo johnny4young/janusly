@@ -48,6 +48,28 @@ func LoadValue(ctx context.Context, db Querier, orgID, key string) any {
 	return value
 }
 
+// LoadValues resolves SEVERAL keys with one query. Callers that need more
+// than one key must prefer this over repeated LoadValue calls: every
+// LoadValue acquires its own pool connection, and a caller that already
+// holds an open transaction multiplies that pressure against the worker
+// pool budget (concurrency+2, one connection permanently hijacked for
+// LISTEN). Read failures degrade to catalog defaults, same as LoadValue —
+// config reads must never take the governed operation down.
+func LoadValues(ctx context.Context, db Querier, orgID string, keys ...string) map[string]any {
+	tenantRows := map[string]json.RawMessage{}
+	if rows, err := store.New(db).ListOrgConfigRows(ctx, orgID); err == nil {
+		for _, row := range rows {
+			tenantRows[row.Key] = row.ValueJson
+		}
+	}
+	values := make(map[string]any, len(keys))
+	for _, key := range keys {
+		value, _ := ResolveValue(key, tenantRows, os.LookupEnv)
+		values[key] = value
+	}
+	return values
+}
+
 // LoadBool is LoadValue for boolean keys.
 func LoadBool(ctx context.Context, db Querier, orgID, key string) bool {
 	value, _ := LoadValue(ctx, db, orgID, key).(bool)

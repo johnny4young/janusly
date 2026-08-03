@@ -9,7 +9,8 @@ package executors
 import (
 	"context"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -80,11 +81,7 @@ func resolveJoinSources(config map[string]any) (map[string]string, error) {
 	if len(raw) > maxBranches {
 		return nil, fmt.Errorf("join.config.sources supports at most %d branches (got %d)", maxBranches, len(raw))
 	}
-	labels := make([]string, 0, len(raw))
-	for label := range raw {
-		labels = append(labels, label)
-	}
-	sort.Strings(labels)
+	labels := slices.Sorted(maps.Keys(raw))
 	sources := map[string]string{}
 	seenPredecessors := map[string]bool{}
 	for _, label := range labels {

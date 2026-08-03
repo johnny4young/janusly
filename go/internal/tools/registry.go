@@ -10,7 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -86,11 +86,7 @@ func NewRegistry() *Registry {
 
 // Catalog is the public listTools() projection, name-sorted for stability.
 func (r *Registry) Catalog() []map[string]any {
-	names := make([]string, 0, len(r.byName))
-	for name := range r.byName {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	names := slices.Sorted(maps.Keys(r.byName))
 	out := make([]map[string]any, 0, len(names))
 	for _, name := range names {
 		definition := r.byName[name]
@@ -344,11 +340,7 @@ func vectorTools() []Definition {
 // every write-side tool HIDDEN when dryRun — a validation run must not
 // even show the model a write.
 func (r *Registry) PlannerTools(dryRun bool) []map[string]any {
-	names := make([]string, 0, len(r.byName))
-	for name := range r.byName {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	names := slices.Sorted(maps.Keys(r.byName))
 	out := make([]map[string]any, 0, len(names))
 	for _, name := range names {
 		definition := r.byName[name]

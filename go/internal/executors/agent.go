@@ -107,7 +107,12 @@ func runAgentLoop(ctx context.Context, in Input, agentConfig map[string]any, eve
 		maxSteps = int(raw)
 	}
 	reflectionEnabled, _ := agentConfig["reflection"].(bool)
-	dryRun := in.AI != nil && in.AI.DryRun
+	// The sandbox contract ("a validation replay never runs a write side")
+	// must hold on the authoritative per-execution flag, exactly like
+	// tool.go and http.go read it. Deriving it from AIDeps alone made the
+	// guarantee depend on the dispatcher always building a non-nil AI dep:
+	// true today, but a nil AI would have silently re-enabled real writes.
+	dryRun := in.DryRun || (in.AI != nil && in.AI.DryRun)
 	emit := func(eventType string, payload map[string]any) string {
 		if in.Emit != nil {
 			return in.Emit(eventType, payload)

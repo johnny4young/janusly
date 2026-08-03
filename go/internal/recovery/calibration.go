@@ -35,7 +35,7 @@ type CalibrationCurve struct {
 }
 
 func clampFloat(value, low, high float64) float64 {
-	return math.Min(high, math.Max(low, value))
+	return min(high, max(low, value))
 }
 
 func bucketIndex(rawConfidence float64) int {

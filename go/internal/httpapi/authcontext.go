@@ -6,8 +6,9 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"maps"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -57,11 +58,7 @@ func (s *V1Server) authContextCore(ctx context.Context, rc identityRequest) opRe
 		if permissionErr != nil {
 			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
-		permissionKeys := make([]string, 0, len(permissions))
-		for key := range permissions {
-			permissionKeys = append(permissionKeys, key)
-		}
-		sort.Strings(permissionKeys)
+		permissionKeys := slices.Sorted(maps.Keys(permissions))
 		roleName, roleBase := row.Role, any(nil)
 		if resolved != nil {
 			roleName, roleBase = resolved.Name, string(resolved.InheritsFrom)
@@ -91,11 +88,7 @@ func (s *V1Server) authContextCore(ctx context.Context, rc identityRequest) opRe
 			if permissionErr != nil {
 				return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 			}
-			permissionKeys := make([]string, 0, len(permissions))
-			for key := range permissions {
-				permissionKeys = append(permissionKeys, key)
-			}
-			sort.Strings(permissionKeys)
+			permissionKeys := slices.Sorted(maps.Keys(permissions))
 			roleName, roleBase := "admin", "admin"
 			if resolved != nil {
 				roleName, roleBase = resolved.Name, string(resolved.InheritsFrom)

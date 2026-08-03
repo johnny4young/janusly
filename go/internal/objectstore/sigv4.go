@@ -15,14 +15,18 @@
 package objectstore
 
 import (
+	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -73,11 +77,7 @@ func uriEncode(value string, encodeSlash bool) string {
 
 // canonicalQuery sorts and encodes query parameters per SigV4.
 func canonicalQuery(values url.Values) string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(values))
 	parts := make([]string, 0, len(keys))
 	for _, key := range keys {
 		sorted := append([]string(nil), values[key]...)
@@ -158,8 +158,11 @@ func (cfg s3Config) objectURL(key string) (base *url.URL, path string, err error
 
 var s3HTTPClient = &http.Client{Timeout: 30 * time.Second}
 
-// s3Put uploads via SigV4-signed PUT and returns the object URL.
-func s3Put(key string, body []byte, contentType string) PutResult {
+// s3Put uploads via SigV4-signed PUT and returns the object URL. The
+// context is honored: without it a stalled endpoint pinned the calling
+// worker for the full client timeout and survived both run cancellation
+// and graceful shutdown.
+func s3Put(ctx context.Context, key string, body []byte, contentType string) PutResult {
 	cfg, configErr := loadS3Config()
 	if configErr != "" {
 		return PutResult{Ok: false, Provider: "s3", Error: configErr}
@@ -179,7 +182,10 @@ func s3Put(key string, body []byte, contentType string) PutResult {
 	signed := []string{"content-type", "host", "x-amz-content-sha256", "x-amz-date"}
 	signature, scope := signV4(http.MethodPut, path, url.Values{}, headers, signed, payloadHash, cfg.secret, cfg.region, now)
 
-	request, err := http.NewRequest(http.MethodPut, base.Scheme+"://"+base.Host+path, strings.NewReader(string(body)))
+	// bytes.NewReader over the slice: the previous strings.NewReader(string(body))
+	// copied the whole payload (multi-MB PDFs) for no reason.
+	request, err := http.NewRequestWithContext(ctx, http.MethodPut,
+		base.Scheme+"://"+base.Host+path, bytes.NewReader(body))
 	if err != nil {
 		return PutResult{Ok: false, Provider: "s3", Error: "s3 request build failed"}
 	}

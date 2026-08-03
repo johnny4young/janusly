@@ -126,7 +126,7 @@ func TestS3PutRoundTrip(t *testing.T) {
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "test-secret-key")
 
 	body := []byte("%PDF-1.4 round trip payload")
-	result := Put("", "org-1/pdf/invoice.pdf", body, "application/pdf")
+	result := Put(t.Context(), "", "org-1/pdf/invoice.pdf", body, "application/pdf")
 	if !result.Ok || result.Provider != "s3" {
 		t.Fatalf("put: %+v", result)
 	}
@@ -145,14 +145,14 @@ func TestS3PutRoundTrip(t *testing.T) {
 
 	// Missing credentials degrade to the never-throw envelope.
 	t.Setenv("AWS_ACCESS_KEY_ID", "")
-	if degraded := Put("", "k.pdf", body, "application/pdf"); degraded.Ok || !strings.Contains(degraded.Error, "credentials missing") {
+	if degraded := Put(t.Context(), "", "k.pdf", body, "application/pdf"); degraded.Ok || !strings.Contains(degraded.Error, "credentials missing") {
 		t.Fatalf("credential degradation: %+v", degraded)
 	}
 
 	// A CDN base URL replaces the presigned URL shape.
 	t.Setenv("AWS_ACCESS_KEY_ID", "test-access-key")
 	t.Setenv("JANUSLY_OBJECT_STORE_PUBLIC_BASE_URL", "https://cdn.example.com")
-	cdn := Put("", "org-1/pdf/report two.pdf", body, "application/pdf")
+	cdn := Put(t.Context(), "", "org-1/pdf/report two.pdf", body, "application/pdf")
 	if !cdn.Ok || cdn.URL != "https://cdn.example.com/org-1/pdf/report%20two.pdf" {
 		t.Fatalf("cdn url: %+v", cdn)
 	}

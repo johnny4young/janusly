@@ -70,7 +70,6 @@ func SubstituteVariables(template string, variables map[string]string) string {
 
 // executePdfGenerate runs the tool through the chokepoint deps.
 func executePdfGenerate(ctx context.Context, input map[string]any, deps *IntegrationDeps) map[string]any {
-	_ = ctx
 	start := time.Now()
 	template, _ := input["template"].(string)
 	format, _ := input["format"].(string)
@@ -132,7 +131,7 @@ func executePdfGenerate(ctx context.Context, input map[string]any, deps *Integra
 	if deps != nil && deps.PdfKey != nil {
 		key = deps.PdfKey(filename)
 	}
-	result := objectstore.Put("", key, document, "application/pdf")
+	result := objectstore.Put(ctx, "", key, document, "application/pdf")
 	if !result.Ok {
 		record(result.Provider, false, result.Error)
 		return map[string]any{"ok": false, "provider": result.Provider, "error": result.Error}
@@ -153,8 +152,11 @@ type pdfLine struct {
 }
 
 var (
-	boldPattern   = regexp.MustCompile(`\*\*([^*]+)\*\*`)
-	italicPattern = regexp.MustCompile(`\*([^*]+)\*`)
+	boldPattern = regexp.MustCompile(`\*\*([^*]+)\*\*`)
+	// Numbered-list marker: hoisted here because it sits in a per-line
+	// switch and used to be compiled (twice) for every matching line.
+	numberedListPattern = regexp.MustCompile(`^\d+\. `)
+	italicPattern       = regexp.MustCompile(`\*([^*]+)\*`)
 )
 
 // RenderMarkdownPDF renders the markdown subset into a PDF 1.4 document.
@@ -192,9 +194,9 @@ func RenderMarkdownPDF(markdown string) []byte {
 			listIndex = 0
 		case strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* "):
 			push("•  "+stripInline(line[2:]), "F1", 11)
-		case regexp.MustCompile(`^\d+\. `).MatchString(line):
+		case numberedListPattern.MatchString(line):
 			listIndex++
-			push(fmt.Sprintf("%d.  %s", listIndex, stripInline(regexp.MustCompile(`^\d+\. `).ReplaceAllString(line, ""))), "F1", 11)
+			push(fmt.Sprintf("%d.  %s", listIndex, stripInline(numberedListPattern.ReplaceAllString(line, ""))), "F1", 11)
 		case line == "":
 			lines = append(lines, pdfLine{text: "", font: "F1", size: 11})
 			listIndex = 0

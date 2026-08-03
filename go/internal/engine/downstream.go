@@ -15,6 +15,15 @@ import (
 	"github.com/johnny4young/janusly/go/internal/store"
 )
 
+// Constant skip payloads: these used to be re-serialized on every pass of
+// the fixed-point readiness loop, once per node, for a value that never
+// changes. Hoisting also collapses three copies of the same literal
+// reason string into one place.
+var (
+	skippedEdgeState   = json.RawMessage(`{"skipped":{"reason":"Condition not met"}}`)
+	skippedEdgePayload = json.RawMessage(`{"reason":"Condition not met"}`)
+)
+
 func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, events *runEventBuffer, runID string, completedAt time.Time) error {
 	run, err := q.GetRunExecution(ctx, runID)
 	if err != nil {
@@ -67,7 +76,7 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, event
 			}
 			if !edgeAllowsRun(wf, node.ID, runContext) {
 				skippedAt := eventNow()
-				stateJSON, _ := json.Marshal(map[string]any{"skipped": map[string]any{"reason": "Condition not met"}})
+				stateJSON := skippedEdgeState
 				rows, err := q.SkipRunNode(ctx, store.SkipRunNodeParams{
 					RunID: runID, NodeID: node.ID,
 					StateJson: stateJSON, FinishedAt: &skippedAt,
@@ -76,7 +85,7 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, event
 					return fmt.Errorf("skip node %s: %w", node.ID, err)
 				}
 				if rows > 0 {
-					payload, _ := json.Marshal(map[string]any{"reason": "Condition not met"})
+					payload := skippedEdgePayload
 					events.add(e.newID(), runID, node.ID, "node.skipped", payload, skippedAt)
 				}
 				metricNodeCompletions.WithLabelValues("skipped").Inc()

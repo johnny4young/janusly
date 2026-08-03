@@ -260,6 +260,11 @@ func dbJSONSafe(value any) any {
 }
 
 func collectDbRows(rows pgx.Rows, maxRows int) ([]any, bool, error) {
+	// Close on EVERY exit: a mid-iteration Values() failure used to return
+	// with the rows still open, handing a dirty connection back to the
+	// external pool (the caller's deferred rollback discards its error, so
+	// the fault surfaced later, on someone else's query).
+	defer rows.Close()
 	fieldDescriptions := rows.FieldDescriptions()
 	collected := make([]any, 0, maxRows)
 	truncated := false
@@ -279,17 +284,29 @@ func collectDbRows(rows pgx.Rows, maxRows int) ([]any, bool, error) {
 		collected = append(collected, record)
 	}
 	rows.Close()
-	if err := rows.Err(); err != nil {
+	if err := rows.Err(); err != nil { // safe after Close; the deferred Close is a no-op
 		return nil, false, err
 	}
 	return collected, truncated, nil
 }
 
 // safeDbError redacts connection URLs and secret shapes; never empty.
-func safeDbError(err error) string {
+// redactedValues carries the RESOLVED credential material (the DSN):
+// pgx quotes the whole connection string verbatim in parse failures, and
+// a credential whose secretRef points at a process environment variable
+// would otherwise echo that variable's value straight back to the
+// workflow author through the tool envelope. Value-based redaction is
+// the same posture safePersistPayload takes for persisted payloads —
+// shape-based scrubbing alone cannot catch an arbitrary secret.
+func safeDbError(err error, redactedValues ...string) string {
 	raw := "database query failed"
 	if err != nil && err.Error() != "" {
 		raw = err.Error()
+	}
+	for _, value := range redactedValues {
+		if strings.TrimSpace(value) != "" {
+			raw = strings.ReplaceAll(raw, value, "[redacted]")
+		}
 	}
 	scrubbed := strings.TrimSpace(signature.ScrubSecretShapes(dbPostgresURL.ReplaceAllString(raw, "[REDACTED_POSTGRES_URL]")))
 	if scrubbed == "" {
@@ -501,18 +518,20 @@ func executeDbTool(ctx context.Context, name string, input map[string]any, deps 
 	if deps.OrgID != nil {
 		orgID = deps.OrgID()
 	}
+	// From here on every error may quote the resolved DSN verbatim.
+	safeErr := func(err error) string { return safeDbError(err, dsn) }
 	pool, err := getDbPool(ctx, orgID, credential, dsn)
 	if err != nil {
-		return answerError(safeDbError(err))
+		return answerError(safeErr(err))
 	}
 
 	tx, err := pool.Begin(ctx)
 	if err != nil {
-		return answerError(safeDbError(err))
+		return answerError(safeErr(err))
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	if _, err := tx.Exec(ctx, fmt.Sprintf("set local statement_timeout = %d", timeoutMs)); err != nil {
-		return answerError(safeDbError(err))
+		return answerError(safeErr(err))
 	}
 
 	switch name {
@@ -522,14 +541,14 @@ func executeDbTool(ctx context.Context, name string, input map[string]any, deps 
 		sql, params := buildSchemaDescribeQuery(schema, rawTables)
 		rows, err := tx.Query(ctx, sql, params...)
 		if err != nil {
-			return answerError(safeDbError(err))
+			return answerError(safeErr(err))
 		}
 		collected, _, err := collectDbRows(rows, dbSchemaDescribeRowLimit+1)
 		if err != nil {
-			return answerError(safeDbError(err))
+			return answerError(safeErr(err))
 		}
 		if err := tx.Commit(ctx); err != nil {
-			return answerError(safeDbError(err))
+			return answerError(safeErr(err))
 		}
 		truncated := len(collected) > dbSchemaDescribeRowLimit
 		if truncated {
@@ -543,14 +562,14 @@ func executeDbTool(ctx context.Context, name string, input map[string]any, deps 
 		wrapped := fmt.Sprintf("select * from (%s) as janusly_db_query limit %d", statement.sql, maxRows+1)
 		rows, err := tx.Query(ctx, wrapped, statement.params...)
 		if err != nil {
-			return answerError(safeDbError(err))
+			return answerError(safeErr(err))
 		}
 		collected, truncated, err := collectDbRows(rows, maxRows)
 		if err != nil {
-			return answerError(safeDbError(err))
+			return answerError(safeErr(err))
 		}
 		if err := tx.Commit(ctx); err != nil {
-			return answerError(safeDbError(err))
+			return answerError(safeErr(err))
 		}
 		record(true, "")
 		return map[string]any{"ok": true, "rows": collected, "rowCount": len(collected), "truncated": truncated, "latencyMs": latency()}
@@ -559,11 +578,11 @@ func executeDbTool(ctx context.Context, name string, input map[string]any, deps 
 		statement := statements[0]
 		rows, err := tx.Query(ctx, statement.sql, statement.params...)
 		if err != nil {
-			return answerError(safeDbError(err))
+			return answerError(safeErr(err))
 		}
 		collected, truncated, err := collectDbRows(rows, maxRows)
 		if err != nil {
-			return answerError(safeDbError(err))
+			return answerError(safeErr(err))
 		}
 		rowCount := len(collected)
 		commandTag := rows.CommandTag()
@@ -571,7 +590,7 @@ func executeDbTool(ctx context.Context, name string, input map[string]any, deps 
 			rowCount = int(commandTag.RowsAffected())
 		}
 		if err := tx.Commit(ctx); err != nil {
-			return answerError(safeDbError(err))
+			return answerError(safeErr(err))
 		}
 		record(true, "")
 		return map[string]any{"ok": true, "rows": collected, "rowCount": rowCount, "truncated": truncated, "latencyMs": latency()}
@@ -585,11 +604,11 @@ func executeDbTool(ctx context.Context, name string, input map[string]any, deps 
 			}
 			rows, err := tx.Query(ctx, sql, statement.params...)
 			if err != nil {
-				return answerError(safeDbError(err))
+				return answerError(safeErr(err))
 			}
 			collected, truncated, err := collectDbRows(rows, maxRows)
 			if err != nil {
-				return answerError(safeDbError(err))
+				return answerError(safeErr(err))
 			}
 			rowCount := len(collected)
 			if tag := rows.CommandTag(); tag.RowsAffected() > 0 && rowCount == 0 {
@@ -598,7 +617,7 @@ func executeDbTool(ctx context.Context, name string, input map[string]any, deps 
 			results = append(results, map[string]any{"rows": collected, "rowCount": rowCount, "truncated": truncated})
 		}
 		if err := tx.Commit(ctx); err != nil {
-			return answerError(safeDbError(err))
+			return answerError(safeErr(err))
 		}
 		record(true, "")
 		return map[string]any{"ok": true, "results": results, "latencyMs": latency()}

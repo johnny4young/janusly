@@ -8,8 +8,9 @@ package executors
 import (
 	"context"
 	"fmt"
+	"maps"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -231,11 +232,7 @@ func executeHumanForm(_ context.Context, in Input) (any, error) {
 			Message: "human_form schema must be an object schema"}
 	}
 	fields := make([]map[string]any, 0, len(properties))
-	names := make([]string, 0, len(properties))
-	for name := range properties {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	names := slices.Sorted(maps.Keys(properties))
 	requiredSet := map[string]bool{}
 	if required, ok := schema["required"].([]any); ok {
 		for _, entry := range required {

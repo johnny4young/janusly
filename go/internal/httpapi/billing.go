@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -168,13 +169,7 @@ func parseBreakdownDimensions(raw string) ([]string, string) {
 		if !usageBreakdownDimensions[token] {
 			return nil, token
 		}
-		duplicate := false
-		for _, existing := range dimensions {
-			if existing == token {
-				duplicate = true
-			}
-		}
-		if !duplicate {
+		if !slices.Contains(dimensions, token) {
 			dimensions = append(dimensions, token)
 		}
 	}

@@ -13,7 +13,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/johnny4young/janusly/go/internal/domain"
@@ -84,11 +85,7 @@ func stableRender(value any) string {
 		}
 		return "[" + strings.Join(parts, ",") + "]"
 	case map[string]any:
-		keys := make([]string, 0, len(typed))
-		for key := range typed {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
+		keys := slices.Sorted(maps.Keys(typed))
 		parts := make([]string, 0, len(keys))
 		for _, key := range keys {
 			keyJSON, _ := json.Marshal(key)

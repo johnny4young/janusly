@@ -40,12 +40,12 @@ var slaMinutesBySeverity = map[string]float64{"p1": 60, "p2": 240, "p3": 1440, "
 
 // resolveSlaTarget applies `recovery.slaPolicies` overrides (partial JSON
 // map, per-severity 1..43200 minutes) over the built-ins.
-func resolveSlaTarget(ctx context.Context, db orgconfig.Querier, orgID, severity string, now time.Time) time.Time {
+func resolveSlaTarget(config map[string]any, severity string, now time.Time) time.Time {
 	minutes := slaMinutesBySeverity[severity]
 	if minutes == 0 {
 		minutes = slaMinutesBySeverity["p3"]
 	}
-	if raw, _ := orgconfig.LoadValue(ctx, db, orgID, "recovery.slaPolicies").(string); strings.TrimSpace(raw) != "" {
+	if raw, _ := config["recovery.slaPolicies"].(string); strings.TrimSpace(raw) != "" {
 		var policies map[string]float64
 		if err := json.Unmarshal([]byte(raw), &policies); err == nil {
 			if override, ok := policies[severity]; ok && override >= 1 && override <= 43200 {
@@ -69,10 +69,19 @@ type AutoCreateRecoveryItemInput struct {
 // (tx-bound at the DLQ insert site, so incident and dead letter commit
 // together). Errors degrade silently — telemetry never breaks completion.
 func (e *Engine) autoCreateRecoveryItem(ctx context.Context, q *store.Queries, input AutoCreateRecoveryItemInput) {
-	if !orgconfig.LoadBool(ctx, e.pool, input.OrgID, "recovery.autoCreateItems") {
+	// ONE config read for the three keys this hook needs. The caller holds
+	// an open completion transaction plus its per-run advisory lock, so the
+	// three separate reads this replaced took three more pool connections
+	// each — precisely during the mass-failure storms this hook exists to
+	// handle, when every worker is in the same state. Deliberately still on
+	// e.pool, not the transaction's connection: a failed config read must
+	// keep degrading silently instead of poisoning the completion tx.
+	config := orgconfig.LoadValues(ctx, e.pool, input.OrgID,
+		"recovery.autoCreateItems", "recovery.debounceWindowSeconds", "recovery.slaPolicies")
+	if enabled, _ := config["recovery.autoCreateItems"].(bool); !enabled {
 		return
 	}
-	window := orgconfig.LoadNumber(ctx, e.pool, input.OrgID, "recovery.debounceWindowSeconds")
+	window, _ := config["recovery.debounceWindowSeconds"].(float64)
 
 	// Failure-storm debounce: attach to a still-open same-signature
 	// incident inside the window instead of spawning a new one. The alert
@@ -129,7 +138,7 @@ func (e *Engine) autoCreateRecoveryItem(ctx context.Context, q *store.Queries, i
 		ID: itemID, OrgID: input.OrgID, DeadLetterID: input.DeadLetterID,
 		WorkflowID:     pgtype.Text{String: input.WorkflowID, Valid: input.WorkflowID != ""},
 		Severity:       severity,
-		SlaTargetAt:    resolveSlaTarget(ctx, e.pool, input.OrgID, severity, now),
+		SlaTargetAt:    resolveSlaTarget(config, severity, now),
 		ErrorSignature: pgtype.Text{String: input.ErrorSignature, Valid: input.ErrorSignature != ""},
 		CreatedBy:      pgtype.Text{String: input.CreatedBy, Valid: input.CreatedBy != ""},
 	})

@@ -27,6 +27,7 @@ package auth
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -405,7 +406,13 @@ func (rv *Resolver) resolveHumanMembership(ctx context.Context, q *store.Queries
 }
 
 func errorsIsNoRows(err error) bool {
-	return err == pgx.ErrNoRows || (err != nil && err.Error() == pgx.ErrNoRows.Error())
+	// errors.Is, not == plus a message comparison: a wrapped ErrNoRows
+	// ("read membership: no rows in result set") defeated BOTH of the old
+	// clauses, turning "this principal has no grant" into a hard failure
+	// on the authentication hot path. The store is sqlc-generated and
+	// returns the raw pgx error today, so this is a landmine, not a live
+	// bug — but the rest of the repo already uses errors.Is here.
+	return errors.Is(err, pgx.ErrNoRows)
 }
 
 // verifySupabaseHTTP validates the access token against the Supabase Auth

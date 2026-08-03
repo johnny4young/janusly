@@ -11,6 +11,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -356,7 +357,7 @@ func (e *Engine) persistSemanticViolations(
 // requeues the node with attempt+1 and a wake-up at the computed backoff;
 // anything else commits the terminal failure with its dead-letter capture.
 
-var errSkipCommit = fmt.Errorf("skip commit: node transition lost the compare-and-set")
+var errSkipCommit = errors.New("skip commit: node transition lost the compare-and-set")
 
 // inCompletionTx runs handler inside one transaction that holds the per-run
 // completion lock. The lock releases on commit, which is what guarantees a
@@ -373,7 +374,7 @@ func (e *Engine) inCompletionTx(ctx context.Context, runID string, handler func(
 	}
 	events := &runEventBuffer{}
 	if err := handler(q, events); err != nil {
-		if err == errSkipCommit {
+		if errors.Is(err, errSkipCommit) {
 			return nil
 		}
 		return err
