@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 
 import { NODE_ORACLE_COMMIT } from "./queue-handoff-policy.mjs";
 import { BENCHMARK_CAMPAIGN_POLICY_VERSION, MIN_BENCHMARK_SAMPLES } from "./benchmark-campaign-policy.mjs";
+import { validateReleaseArtifactManifest } from "./release-artifact-policy.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const goRoot = resolve(scriptDir, "..");
@@ -56,12 +57,14 @@ async function writeAtomic(path, body) {
 function parseArgs(argv) {
   const options = {
     output: resolve(repoRoot, "artifacts/go-release-checks.json"),
+    artifact: resolve(repoRoot, "artifacts/go-release/native/manifest.json"),
     queue: resolve(repoRoot, "artifacts/go-queue-handoff-evidence.json"),
     benchmark: resolve(repoRoot, "artifacts/go-benchmark-campaign.json"),
     benchmarkMarkdown: resolve(repoRoot, "artifacts/go-benchmark-campaign.md"),
   };
   for (const arg of argv) {
     if (arg.startsWith("--output=")) options.output = resolve(process.cwd(), arg.slice(9));
+    else if (arg.startsWith("--artifact=")) options.artifact = resolve(process.cwd(), arg.slice(11));
     else if (arg.startsWith("--queue=")) options.queue = resolve(process.cwd(), arg.slice(8));
     else if (arg.startsWith("--benchmark=")) options.benchmark = resolve(process.cwd(), arg.slice(12));
     else if (arg.startsWith("--benchmark-markdown=")) options.benchmarkMarkdown = resolve(process.cwd(), arg.slice(21));
@@ -98,6 +101,33 @@ async function main() {
       durationMs: Date.now() - started,
     };
   }
+
+  process.stdout.write("\n== go_release_artifact: exact native binary provenance ==\n");
+  const artifactStarted = Date.now();
+  const artifactOutputDir = dirname(options.artifact);
+  const artifactChild = run("make", [
+    "release-artifact",
+    `RELEASE_ARTIFACT_OUTPUT_DIR=${artifactOutputDir}`,
+  ], { cwd: goRoot, stdio: "inherit" });
+  let artifactSummary = null;
+  let artifactError = null;
+  if (artifactChild.status === 0) {
+    try {
+      const artifactManifest = JSON.parse(await readFile(options.artifact, "utf8"));
+      artifactSummary = validateReleaseArtifactManifest(artifactManifest, candidate);
+    } catch (error) {
+      artifactError = error instanceof Error ? error.message : String(error);
+    }
+  }
+  receipt.checks.go_release_artifact = {
+    pass: artifactChild.status === 0 && artifactSummary !== null,
+    command: "make release-artifact",
+    exitCode: artifactChild.status,
+    durationMs: Date.now() - artifactStarted,
+    manifest: options.artifact,
+    summary: artifactSummary,
+    error: artifactError,
+  };
 
   process.stdout.write("\n== go_benchmark_campaign: five co-scheduled isolated PostgreSQL 18 A/B pairs ==\n");
   const benchmarkStarted = Date.now();
@@ -172,6 +202,7 @@ async function main() {
   receipt.pass = Object.values(receipt.checks).every(check => check.pass === true) && receipt.queueHandoff.pass;
   await writeAtomic(options.output, `${JSON.stringify(receipt, null, 2)}\n`);
   process.stdout.write(`\nRelease check receipt: ${options.output}\n`);
+  process.stdout.write(`Release artifact manifest: ${options.artifact}\n`);
   process.stdout.write(`Queue handoff receipt: ${options.queue}\n`);
   process.stdout.write(`Benchmark campaign receipt: ${options.benchmark}\n`);
   process.stdout.write(`Local release checks: ${receipt.pass ? "PASS" : "FAIL"}\n`);

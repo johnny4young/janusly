@@ -35,7 +35,7 @@ dependencies.
 
 | Variable | Purpose |
 | --- | --- |
-| `JANUSLY_GO_ENV=production` | enables production auth boot checks |
+| `JANUSLY_GO_ENV=production` | enables production auth checks and rejects binaries without verified commit/tree/executable provenance |
 | `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` | Supabase authentication mode |
 | `ALLOW_DEV_AUTH_HEADERS=true` | explicit production bypass when Supabase is absent; use only in controlled environments |
 | `JANUSLY_API_SERVICE_TOKEN` | service-token authentication mode |
@@ -60,12 +60,31 @@ credential variables for S3-compatible storage; see `internal/objectstore/`.
 
 ## Build, migrate, and run
 
+Development builds remain convenient:
+
 ```bash
 cd go
 go build -o ./bin/janusly-go ./cmd/api
 JANUSLY_GO_DATABASE_URL='postgres://…' ./bin/janusly-go migrate
 JANUSLY_GO_DATABASE_URL='postgres://…' ./bin/janusly-go
 ```
+
+They intentionally have no release provenance and cannot boot with
+`JANUSLY_GO_ENV=production`. Build the deployable native artifact from a clean
+exact-candidate checkout instead:
+
+```bash
+cd go
+make release-artifact
+../artifacts/go-release/native/janusly-go provenance
+cat ../artifacts/go-release/native/manifest.json
+```
+
+The builder disables CGO and implicit VCS metadata, uses `-trimpath`, clears the
+Go build ID, injects the exact commit and tree, hashes the finished executable,
+and asks that executable to report its own identity. The manifest is validated
+before it is written. The local target never publishes or deploys the output;
+remote CI uploads the binary and manifest together.
 
 `janusly-go migrate` applies the embedded goose migrations from
 `internal/migrate/sql/`. A fresh database receives the complete baseline and
@@ -104,6 +123,8 @@ Health endpoints:
 
 - `GET /healthz` on the public port: process liveness.
 - `GET /health`: public-safe dependency posture.
+- `GET /build` on `127.0.0.1:4601`: no-store JSON containing only schema,
+  commit, tree, finished executable SHA-256, and verification state.
 - `GET /metrics` on `127.0.0.1:4601`: Prometheus metrics. A containerized
   collector requires `JANUSLY_GO_INTERNAL_HOST=0.0.0.0` plus a host firewall or
   private network because the same listener also serves pprof.
@@ -149,10 +170,12 @@ silently executed twice.
 
 Candidate upgrade procedure:
 
-1. Capture a database backup and the exact old/new binary checksums.
-2. Run the new binary's `migrate` subcommand.
+1. Capture a database backup and retain both old/new artifact manifests.
+2. Verify the new binary's `provenance` output against its manifest, then run
+   that same binary's `migrate` subcommand.
 3. Replace the binary and send SIGTERM to the old process.
-4. Verify `/healthz`, `/health`, the internal metrics endpoint, and a no-op run.
+4. Verify `/healthz`, `/health`, internal `/build` and `/metrics`, and a no-op
+   run. Use `make runtime-proof` to retain a machine-collected snapshot.
 
 Do not claim schema rollback compatibility merely because migrations are
 additive. The audit in `AUDIT.md` requires a Node-created → Go-upgraded → Node
@@ -170,6 +193,7 @@ never infer it from an empty-looking queue dashboard.
 | Lists slow down | query-plan gate, table statistics, and the matching keyset index |
 | API returns dependency 500s | PostgreSQL reachability and pool budgets; startup never intentionally serves a stale schema |
 | Internal port unreachable remotely | expected; it binds to loopback by design |
+| Production rejects build provenance | deploy the CI artifact and matching manifest; ordinary `go build` output is development-only |
 
 ## Multiple replicas
 

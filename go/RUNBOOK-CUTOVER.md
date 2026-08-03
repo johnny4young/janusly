@@ -17,10 +17,11 @@ evidence envelopes and record-only aggregate policy live in
 1. The exact Go candidate passes the complete audit ladder, not only
    `make dual`. Run `make release-review` from a clean, fetched checkout and
    retain its commit/tree-bound JSON and Markdown manifest; any review blocker
-   aborts publication. Remote CI must publish the immutable Go artifact
-   SHA-256, and every shadow/cutover/canary/rollback record must repeat the
-   running commit, tree, and matching artifact digest. A healthy runtime from
-   another checkout is not evidence for this candidate.
+   aborts publication. Remote CI must publish the exact binary with its
+   validated release artifact manifest. Every shadow/cutover/canary/rollback
+   record must embed machine-collected runtime proof for the matching
+   commit/tree/executable digest. A healthy runtime from another checkout is
+   not evidence for this candidate.
 2. Node and Go are deployed side by side against a rehearsed copy of the same
    PostgreSQL state. Node retains its Redis/BullMQ dependencies while it owns
    any route or queued-work family; Go does not consume BullMQ jobs.
@@ -31,7 +32,9 @@ evidence envelopes and record-only aggregate policy live in
 5. Every side-by-side production Go process runs with
    `JANUSLY_GO_WORK_PLANE_ENABLED=false`; safe shadow responses report
    `X-Janusly-Work-Plane: passive` and metric
-   `janusly_go_work_plane_active 0`.
+   `janusly_go_work_plane_active 0`. Capture one passive runtime proof before
+   shadow sampling and another after it; their timestamps must span the full
+   declared shadow duration.
 6. The proxy can freeze every mutating route while keeping reads available,
    then switch the complete mutation surface atomically without a deployment.
 7. The exact candidate's `make -C go queue-handoff-rehearsal` is green, and a
@@ -79,9 +82,9 @@ deployment shape. HTTP routing alone does not transfer queued work.
    legacy repeatable, truncation, or cross-snapshot movement. Any red verdict
    aborts the switch.
 7. Restart the exact CI-built Go artifact with
-   `JANUSLY_GO_WORK_PLANE_ENABLED=true`; require its commit, tree, and artifact
-   SHA-256 to match the candidate plus `X-Janusly-Work-Plane: active` and
-   `janusly_go_work_plane_active 1` before unfreezing traffic.
+   `JANUSLY_GO_WORK_PLANE_ENABLED=true`; collect an active runtime proof and
+   require its commit, tree, and executable SHA-256 to match the CI manifest
+   before unfreezing traffic.
 8. Switch every mutating route to Go, reload the proxy, and unfreeze writes.
 9. Within two minutes verify:
    - `GET /healthz` and `GET /health`;
@@ -103,6 +106,9 @@ deployment shape. HTTP routing alone does not transfer queued work.
 - Prometheus and Go runtime signals: `GET /metrics` on the candidate's internal
   loopback port (4601 by default), including goroutines, RSS, queue depth, node
   latency, reaper activity, and degraded rate-limit buckets.
+- Capture an active runtime proof after every 1%, 5%, 25%, 50%, and 100% stage
+  soak. The first proof precedes the 1% stage; adjacent timestamps must cover
+  the declared soak and every proof must retain the CI artifact digest.
 - Tenant DLQ and new failure signatures: `/dlq/counts`, queue read model, and
   recovery clusters.
 - Circuit-breaker and operational audits.
@@ -120,7 +126,8 @@ not as a substitute for candidate-environment observation.
    responsible for its `running` claims; do not let Node guess how to reap
    them. Any unexplained active claim aborts rollback. Queued Go generations
    remain recoverable through the shared Node publication markers.
-3. Restart Go passive and require its header/metric to report passive.
+3. Restart Go passive and capture a passive runtime proof for the exact
+   artifact being rolled back.
 4. Run the `go-to-node` gate while Node is still stopped. Every queued
    generation must have either its exact BullMQ delivery or a durable Node
    publication marker; retry marker and Go wakeup deadlines must match. Restore

@@ -5,10 +5,13 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/pprof"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/johnny4young/janusly/go/internal/buildinfo"
 )
 
 // NewAPIHandler builds the public mux. Routes arrive as the engine grows;
@@ -26,8 +29,13 @@ func NewAPIHandler() http.Handler {
 // NewInternalHandler builds the observability mux: Prometheus metrics (the
 // default registry already carries the Go runtime collectors) and the pprof
 // family for profiles.
-func NewInternalHandler() http.Handler {
+func NewInternalHandler(identity buildinfo.Identity) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /build", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(identity)
+	})
 	mux.Handle("GET /metrics", promhttp.Handler())
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
 	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)

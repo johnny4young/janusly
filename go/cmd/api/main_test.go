@@ -2,7 +2,10 @@ package main
 
 import (
 	"net/http"
+	"strings"
 	"testing"
+
+	"github.com/johnny4young/janusly/go/internal/buildinfo"
 )
 
 func TestNewHTTPServerUsesBoundedListenerPolicy(t *testing.T) {
@@ -26,5 +29,27 @@ func TestNewHTTPServerUsesBoundedListenerPolicy(t *testing.T) {
 	}
 	if server.WriteTimeout != 0 {
 		t.Fatalf("WriteTimeout must remain disabled for SSE, got %s", server.WriteTimeout)
+	}
+}
+
+func TestRequireBuildProvenanceOnlyFailsClosedInProduction(t *testing.T) {
+	development := buildinfo.Identity{SchemaVersion: buildinfo.SchemaVersion}
+	if err := requireBuildProvenance(false, development); err != nil {
+		t.Fatalf("development binary rejected: %v", err)
+	}
+	if err := requireBuildProvenance(true, development); err == nil ||
+		!strings.Contains(err.Error(), "production requires verified build provenance") {
+		t.Fatalf("production accepted an unverified binary: %v", err)
+	}
+
+	release := buildinfo.Identity{
+		SchemaVersion:  buildinfo.SchemaVersion,
+		Commit:         strings.Repeat("a", 40),
+		Tree:           strings.Repeat("b", 40),
+		ArtifactSHA256: strings.Repeat("c", 64),
+		Verified:       true,
+	}
+	if err := requireBuildProvenance(true, release); err != nil {
+		t.Fatalf("production rejected verified provenance: %v", err)
 	}
 }

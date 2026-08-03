@@ -4,12 +4,17 @@ PG_CONTAINER := janusly-go-pilot-postgres-1
 SCHEMA_DB := janusly_go_schema_dump
 SCHEMA_DB_URL ?= postgres://janusly:janusly-go-local@127.0.0.1:4632/$(SCHEMA_DB)
 
-.PHONY: db-up db-down migrate schema-dump generate lint vuln test run build parity ci test-pg18 bench benchmark-campaign fuzz contract web-embed verify seed chaos bench-hostile script-test queue-handoff-test queue-handoff queue-handoff-rehearsal release-checks release-manifest release-review release-production-check external-gate-template external-gate-record
+.PHONY: db-up db-down migrate schema-dump generate lint vuln test run build parity ci test-pg18 bench benchmark-campaign fuzz contract web-embed verify seed chaos bench-hostile script-test queue-handoff-test queue-handoff queue-handoff-rehearsal release-artifact runtime-proof release-checks release-manifest release-review release-production-check external-gate-template external-gate-record
 
 RELEASE_ARTIFACTS ?= ../artifacts
+RELEASE_ARTIFACT_OUTPUT_DIR ?= $(RELEASE_ARTIFACTS)/go-release/native
 RELEASE_MANIFEST_ARGS ?=
 EXTERNAL_GATE ?=
 EXTERNAL_EVIDENCE ?=
+RUNTIME_PUBLIC_ORIGIN ?=
+RUNTIME_INTERNAL_ORIGIN ?=
+RUNTIME_MODE ?=
+RUNTIME_PROOF_OUTPUT ?=
 BENCHMARK_SAMPLES ?= 5
 
 db-up:
@@ -42,6 +47,25 @@ generate:
 
 build:
 	go build ./...
+
+# Native deployable binary with exact commit/tree ldflags and a SHA-256 read
+# back from the finished executable. Output is ignored and never published by
+# this target; CI owns the separate upload step.
+release-artifact:
+	node conformance/build-release-artifact.mjs \
+		--output-dir="$(RELEASE_ARTIFACT_OUTPUT_DIR)"
+
+# Credential-free snapshot of the deployed binary identity and work-plane
+# ownership. The internal origin must reach the non-public listener.
+runtime-proof:
+	@test -n "$(RUNTIME_PUBLIC_ORIGIN)" || (echo "RUNTIME_PUBLIC_ORIGIN is required" && exit 2)
+	@test -n "$(RUNTIME_INTERNAL_ORIGIN)" || (echo "RUNTIME_INTERNAL_ORIGIN is required" && exit 2)
+	@test -n "$(RUNTIME_MODE)" || (echo "RUNTIME_MODE is required" && exit 2)
+	node conformance/collect-runtime-proof.mjs \
+		--public-origin="$(RUNTIME_PUBLIC_ORIGIN)" \
+		--internal-origin="$(RUNTIME_INTERNAL_ORIGIN)" \
+		--mode="$(RUNTIME_MODE)" \
+		$(if $(RUNTIME_PROOF_OUTPUT),--output="$(RUNTIME_PROOF_OUTPUT)")
 
 lint:
 	golangci-lint run ./...
@@ -94,6 +118,7 @@ queue-handoff-rehearsal:
 release-checks:
 	node conformance/run-release-checks.mjs \
 		--output=$(RELEASE_ARTIFACTS)/go-release-checks.json \
+		--artifact=$(RELEASE_ARTIFACTS)/go-release/native/manifest.json \
 		--queue=$(RELEASE_ARTIFACTS)/go-queue-handoff-evidence.json \
 		--benchmark=$(RELEASE_ARTIFACTS)/go-benchmark-campaign.json \
 		--benchmark-markdown=$(RELEASE_ARTIFACTS)/go-benchmark-campaign.md
@@ -101,6 +126,7 @@ release-checks:
 release-manifest:
 	node conformance/run-release-candidate.mjs \
 		--checks=$(RELEASE_ARTIFACTS)/go-release-checks.json \
+		--artifact=$(RELEASE_ARTIFACTS)/go-release/native/manifest.json \
 		--queue=$(RELEASE_ARTIFACTS)/go-queue-handoff-evidence.json \
 		--external=$(RELEASE_ARTIFACTS)/go-external-gates.json \
 		--json=$(RELEASE_ARTIFACTS)/go-release-candidate.json \

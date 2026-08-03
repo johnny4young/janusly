@@ -27,6 +27,9 @@ func TestLoadDefaults(t *testing.T) {
 	if !cfg.WorkPlaneEnabled {
 		t.Fatal("development must keep the work plane enabled by default")
 	}
+	if cfg.Production {
+		t.Fatal("development defaults must not enable the production boot posture")
+	}
 	if !strings.Contains(cfg.DatabaseURL, "4632/janusly_go") {
 		t.Fatalf("unexpected database default: %s", cfg.DatabaseURL)
 	}
@@ -81,6 +84,9 @@ func TestWorkPlaneDefaultsPassiveInProductionAndRequiresExplicitActivation(t *te
 	}
 	if passive.WorkPlaneEnabled {
 		t.Fatal("production shadow must default to a passive work plane")
+	}
+	if !passive.Production {
+		t.Fatal("production environment must be explicit in the loaded config")
 	}
 
 	active, err := Load(env(map[string]string{

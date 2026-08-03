@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -31,6 +32,11 @@ var (
 	buildErr  error
 )
 
+const (
+	e2eBuildCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	e2eBuildTree   = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+)
+
 func buildBinary(t *testing.T) string {
 	t.Helper()
 	buildOnce.Do(func() {
@@ -42,7 +48,10 @@ func buildBinary(t *testing.T) string {
 			return
 		}
 		binPath = filepath.Join(dir, "janusly-go-api")
-		cmd := exec.Command("go", "build", "-o", binPath, "./cmd/api")
+		ldflags := "-X github.com/johnny4young/janusly/go/internal/buildinfo.buildCommit=" + e2eBuildCommit +
+			" -X github.com/johnny4young/janusly/go/internal/buildinfo.buildTree=" + e2eBuildTree
+		cmd := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-ldflags", ldflags,
+			"-o", binPath, "./cmd/api")
 		cmd.Dir = ".."
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -338,6 +347,36 @@ func TestEngineMetricsExposeOnTheInternalPort(t *testing.T) {
 		if !strings.Contains(body, series) {
 			t.Fatalf("metric series %s missing from scrape", series)
 		}
+	}
+}
+
+func TestInternalBuildIdentityMatchesTheFinishedBinary(t *testing.T) {
+	api := bootBinary(t)
+	res, err := http.Get(api.internal + "/build")
+	if err != nil {
+		t.Fatalf("get build identity: %v", err)
+	}
+	defer res.Body.Close()
+	var identity struct {
+		SchemaVersion  int    `json:"schemaVersion"`
+		Commit         string `json:"commit"`
+		Tree           string `json:"tree"`
+		ArtifactSHA256 string `json:"artifactSha256"`
+		Verified       bool   `json:"verified"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&identity); err != nil {
+		t.Fatalf("decode build identity: %v", err)
+	}
+	body, err := os.ReadFile(buildBinary(t))
+	if err != nil {
+		t.Fatalf("read built binary: %v", err)
+	}
+	wantDigest := fmt.Sprintf("%x", sha256.Sum256(body))
+	if res.StatusCode != http.StatusOK || res.Header.Get("Cache-Control") != "no-store" ||
+		identity.SchemaVersion != 1 || identity.Commit != e2eBuildCommit || identity.Tree != e2eBuildTree ||
+		identity.ArtifactSHA256 != wantDigest || !identity.Verified {
+		t.Fatalf("unexpected build identity status=%d cache=%q identity=%+v wantDigest=%s",
+			res.StatusCode, res.Header.Get("Cache-Control"), identity, wantDigest)
 	}
 }
 

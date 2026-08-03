@@ -188,11 +188,19 @@ jobs:
           --health-cmd "pg_isready -U janusly -d janusly_go"
           --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
-      - uses: actions/checkout@v4
+      # The other PR jobs exercise GitHub's synthetic merge ref. The Go lane
+      # additionally needs an artifact for the reviewed PR head itself, because
+      # rollout evidence is bound to that immutable candidate commit and tree.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: go/go.mod
           cache-dependency-path: go/go.sum
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
       - name: Install golangci-lint
         run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$(go env GOPATH)/bin" v2.12.2
       - name: Migrate (goose)
@@ -205,6 +213,16 @@ jobs:
         run: make ci
         env:
           JANUSLY_GO_DATABASE_URL: postgres://janusly:janusly-go-local@127.0.0.1:4632/janusly_go
+      - name: Build exact deployable Go artifact
+        working-directory: go
+        run: make release-artifact
+      - name: Upload exact Go artifact and manifest
+        uses: actions/upload-artifact@v7
+        with:
+          name: janusly-go-${{ github.event.pull_request.head.sha || github.sha }}
+          path: artifacts/go-release/native/
+          if-no-files-found: error
+          retention-days: 30
 
   dep_audit:
     name: Dependency audit

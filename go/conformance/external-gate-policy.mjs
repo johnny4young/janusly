@@ -4,8 +4,13 @@
 
 import { ALL_LOCAL_PROFILES } from "../../scripts/qualification-profiles.mjs";
 import { NODE_ORACLE_COMMIT } from "./queue-handoff-policy.mjs";
+import {
+  releaseArtifactTemplate,
+  validateReleaseArtifactManifest,
+} from "./release-artifact-policy.mjs";
+import { runtimeProofTemplate, validateRuntimeProof } from "./runtime-proof-policy.mjs";
 
-export const EXTERNAL_GATE_POLICY_VERSION = 2;
+export const EXTERNAL_GATE_POLICY_VERSION = 3;
 export const EXTERNAL_GATE_IDS = Object.freeze([
   "remote_review",
   "remote_ci",
@@ -44,17 +49,15 @@ function finite(value, label, minimum = 0) {
   return value;
 }
 
-function sha256(value, label) {
-  requireCondition(/^[0-9a-f]{64}$/u.test(value ?? ""), `${label} SHA-256 is required`);
-  return value;
+function exactArtifact(actual, expected, label) {
+  requireCondition(actual === expected, `${label} used a different Go artifact`);
 }
 
-function validateGoRuntime(report, candidate) {
-  exactCandidate(report.goRuntime, candidate, "Go runtime");
+function runtimeSummary(proof) {
   return {
-    runtimeCommit: report.goRuntime.commit,
-    runtimeTree: report.goRuntime.tree,
-    artifactSha256: sha256(report.goRuntime.artifactSha256, "Go runtime artifact"),
+    runtimeCommit: proof.runtimeCommit,
+    runtimeTree: proof.runtimeTree,
+    artifactSha256: proof.artifactSha256,
   };
 }
 
@@ -89,10 +92,11 @@ function validateRemoteCi(evidence, candidate) {
     nonEmpty(check?.name, "CI check name");
     requireCondition(check.conclusion === "success", `CI check ${check.name} did not succeed`);
   }
+  const artifact = validateReleaseArtifactManifest(run.artifactManifest, candidate);
   return {
     url: run.url,
     requiredChecks: run.requiredChecks.length,
-    artifactSha256: sha256(run.artifactSha256, "CI artifact"),
+    ...artifact,
   };
 }
 
@@ -110,7 +114,6 @@ function validateQualification(evidence, candidate) {
 
 function validateShadow(evidence, candidate) {
   const report = evidence.report ?? {};
-  const runtime = validateGoRuntime(report, candidate);
   nonEmpty(report.environment, "shadow environment");
   requireCondition(report.environment !== "local", "production shadow evidence cannot use the local environment");
   requireCondition(report.mode === "read_only_mirror", "shadow must suppress Go write effects");
@@ -120,35 +123,43 @@ function validateShadow(evidence, candidate) {
   requireCondition(report.unexpectedDiffs === 0, "shadow has unexpected differences");
   requireCondition(report.criticalDiffs === 0, "shadow has critical differences");
   requireCondition(report.duplicatedEffects === 0, "shadow duplicated write effects");
-  requireCondition(report.goPassiveProof?.header === "passive", "shadow Go passive header proof is missing");
-  requireCondition(report.goPassiveProof?.metric === 0, "shadow Go work-plane metric is not passive");
+  requireCondition(Array.isArray(report.runtimeProofs) && report.runtimeProofs.length === 2,
+    "shadow requires exactly two passive runtime proofs");
+  const start = validateRuntimeProof(report.runtimeProofs[0], candidate, "passive");
+  const finish = validateRuntimeProof(report.runtimeProofs[1], candidate, "passive");
+  exactArtifact(finish.artifactSha256, start.artifactSha256, "shadow runtime proof");
+  requireCondition(finish.capturedAtMs >= start.capturedAtMs,
+    "shadow runtime proofs are not time ordered");
+  const proofSpanMinutes = (finish.capturedAtMs - start.capturedAtMs) / 60_000;
+  requireCondition(proofSpanMinutes >= report.durationMinutes,
+    "shadow runtime proofs do not span the declared duration");
   for (const dimension of ["http", "database", "events", "audits", "queues"]) {
     requireCondition(report.compared?.[dimension] === true, `shadow did not compare ${dimension}`);
   }
   return {
-    ...runtime,
+    ...runtimeSummary(finish),
     environment: report.environment,
     samples: report.sampleCount,
     durationMinutes: report.durationMinutes,
+    runtimeProofs: report.runtimeProofs.length,
+    runtimeProofSpanMinutes: proofSpanMinutes,
   };
 }
 
 function validateCutover(evidence, candidate) {
   const report = evidence.report ?? {};
-  const runtime = validateGoRuntime(report, candidate);
+  const runtime = validateRuntimeProof(report.runtimeProof, candidate, "active");
   nonEmpty(report.environment, "cutover environment");
   nonEmpty(report.freezeWatermark, "cutover freeze watermark");
   requireCondition(report.mutatingIngressFrozen === true, "mutating ingress was not frozen");
   requireCondition(report.nodeProducersStopped === true, "Node producers were not stopped");
   requireCondition(report.nodeToGoGate?.pass === true, "node-to-go handoff gate did not pass");
   requireCondition(report.nodeToGoGate?.testedTree === candidate.tree, "node-to-go gate used a different candidate tree");
-  requireCondition(report.goActiveProof?.header === "active", "Go active header proof is missing");
-  requireCondition(report.goActiveProof?.metric === 1, "Go work-plane metric is not active");
   requireCondition(report.duplicatedOwnershipSeconds === 0, "Node and Go had overlapping work-plane ownership");
   requireCondition(/^[0-9a-f]{64}$/u.test(report.proxyConfigSha256 ?? ""), "proxy config SHA-256 is required");
   nonEmpty(report.smokeRunId, "cutover smoke run id");
   return {
-    ...runtime,
+    ...runtimeSummary(runtime),
     environment: report.environment,
     freezeWatermark: report.freezeWatermark,
     smokeRunId: report.smokeRunId,
@@ -157,13 +168,12 @@ function validateCutover(evidence, candidate) {
 
 function validateCanary(evidence, candidate) {
   const report = evidence.report ?? {};
-  const runtime = validateGoRuntime(report, candidate);
+  const startedRuntime = validateRuntimeProof(report.startedRuntimeProof, candidate, "active");
   nonEmpty(report.environment, "canary environment");
   requireCondition(report.mutationOwner === "go", "Go must own the global work plane before gradual read routing");
-  requireCondition(report.goActiveProof?.header === "active", "canary Go active header proof is missing");
-  requireCondition(report.goActiveProof?.metric === 1, "canary Go work-plane metric is not active");
   requireCondition(report.autoRollbackTriggered === false, "canary triggered automatic rollback");
   requireCondition(Array.isArray(report.stages) && report.stages.length === CANARY_PERCENTAGES.length, "canary stage count drifted");
+  let previousProof = startedRuntime;
   for (const [index, percent] of CANARY_PERCENTAGES.entries()) {
     const stage = report.stages[index] ?? {};
     requireCondition(stage.percent === percent, `canary stage ${index} must be ${percent}%`);
@@ -171,18 +181,26 @@ function validateCanary(evidence, candidate) {
     finite(stage.soakMinutes, `canary ${percent}% soak`, percent === 100 ? 1_440 : 30);
     requireCondition(stage.criticalErrors === 0, `canary ${percent}% has critical errors`);
     requireCondition(stage.stopThresholdsPassed === true, `canary ${percent}% failed a stop threshold`);
+    const stageProof = validateRuntimeProof(stage.runtimeProof, candidate, "active");
+    exactArtifact(stageProof.artifactSha256, startedRuntime.artifactSha256,
+      `canary ${percent}% runtime proof`);
+    requireCondition(stageProof.capturedAtMs >= previousProof.capturedAtMs + stage.soakMinutes * 60_000,
+      `canary ${percent}% runtime proof does not cover its declared soak`);
+    previousProof = stageProof;
   }
   return {
-    ...runtime,
+    ...runtimeSummary(previousProof),
     environment: report.environment,
     stages: CANARY_PERCENTAGES,
     finalSoakMinutes: report.stages.at(-1).soakMinutes,
+    runtimeProofs: CANARY_PERCENTAGES.length + 1,
+    runtimeProofSpanMinutes: (previousProof.capturedAtMs - startedRuntime.capturedAtMs) / 60_000,
   };
 }
 
 function validateRollback(evidence, candidate) {
   const report = evidence.report ?? {};
-  const runtime = validateGoRuntime(report, candidate);
+  const runtime = validateRuntimeProof(report.runtimeProof, candidate, "passive");
   nonEmpty(report.environment, "rollback environment");
   requireCondition(report.nodeOracleCommit === NODE_ORACLE_COMMIT, "rollback used a different Node oracle");
   requireCondition(report.goToNodeGate?.pass === true, "go-to-node handoff gate did not pass");
@@ -192,13 +210,11 @@ function validateRollback(evidence, candidate) {
   requireCondition(report.activityUiPass === true, "restored Activity UI did not pass");
   requireCondition(report.dataLossCount === 0, "rollback lost persisted data");
   requireCondition(report.inFlightLossCount === 0, "rollback lost in-flight work");
-  requireCondition(report.goPassiveProof?.header === "passive", "rollback Go passive header proof is missing");
-  requireCondition(report.goPassiveProof?.metric === 0, "rollback Go work-plane metric is not passive");
   finite(report.maxRtoSeconds, "maximum rollback RTO", 1);
   finite(report.rtoSeconds, "rollback RTO", 0);
   requireCondition(report.rtoSeconds <= report.maxRtoSeconds, "rollback exceeded its RTO boundary");
   return {
-    ...runtime,
+    ...runtimeSummary(runtime),
     environment: report.environment,
     rtoSeconds: report.rtoSeconds,
     maxRtoSeconds: report.maxRtoSeconds,
@@ -255,7 +271,7 @@ export function externalGateTemplate(gate, candidate) {
         url: "",
         headSha: candidate.commit,
         conclusion: "",
-        artifactSha256: "",
+        artifactManifest: releaseArtifactTemplate(candidate),
         requiredChecks: [{ name: "", conclusion: "" }],
       },
     };
@@ -277,7 +293,6 @@ export function externalGateTemplate(gate, candidate) {
     return {
       ...template,
       report: {
-        goRuntime: { ...candidate, artifactSha256: "" },
         environment: "",
         mode: "read_only_mirror",
         sampleCount: 0,
@@ -286,7 +301,10 @@ export function externalGateTemplate(gate, candidate) {
         unexpectedDiffs: null,
         criticalDiffs: null,
         duplicatedEffects: null,
-        goPassiveProof: { header: "", metric: null },
+        runtimeProofs: [
+          runtimeProofTemplate(candidate, "passive"),
+          runtimeProofTemplate(candidate, "passive"),
+        ],
         compared: { http: false, database: false, events: false, audits: false, queues: false },
       },
     };
@@ -295,13 +313,12 @@ export function externalGateTemplate(gate, candidate) {
     return {
       ...template,
       report: {
-        goRuntime: { ...candidate, artifactSha256: "" },
         environment: "",
         freezeWatermark: "",
         mutatingIngressFrozen: false,
         nodeProducersStopped: false,
         nodeToGoGate: { pass: false, testedTree: candidate.tree },
-        goActiveProof: { header: "", metric: 0 },
+        runtimeProof: runtimeProofTemplate(candidate, "active"),
         duplicatedOwnershipSeconds: null,
         proxyConfigSha256: "",
         smokeRunId: "",
@@ -312,10 +329,9 @@ export function externalGateTemplate(gate, candidate) {
     return {
       ...template,
       report: {
-        goRuntime: { ...candidate, artifactSha256: "" },
         environment: "",
         mutationOwner: "go",
-        goActiveProof: { header: "", metric: null },
+        startedRuntimeProof: runtimeProofTemplate(candidate, "active"),
         autoRollbackTriggered: null,
         stages: CANARY_PERCENTAGES.map(percent => ({
           percent,
@@ -323,6 +339,7 @@ export function externalGateTemplate(gate, candidate) {
           soakMinutes: 0,
           criticalErrors: null,
           stopThresholdsPassed: false,
+          runtimeProof: runtimeProofTemplate(candidate, "active"),
         })),
       },
     };
@@ -330,7 +347,6 @@ export function externalGateTemplate(gate, candidate) {
   return {
     ...template,
     report: {
-      goRuntime: { ...candidate, artifactSha256: "" },
       environment: "",
       nodeOracleCommit: NODE_ORACLE_COMMIT,
       goToNodeGate: { pass: false, testedTree: candidate.tree },
@@ -339,7 +355,7 @@ export function externalGateTemplate(gate, candidate) {
       activityUiPass: false,
       dataLossCount: null,
       inFlightLossCount: null,
-      goPassiveProof: { header: "", metric: null },
+      runtimeProof: runtimeProofTemplate(candidate, "passive"),
       rtoSeconds: null,
       maxRtoSeconds: null,
     },

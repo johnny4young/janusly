@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/johnny4young/janusly/go/internal/auth"
 	"github.com/johnny4young/janusly/go/internal/boot"
+	"github.com/johnny4young/janusly/go/internal/buildinfo"
 	"github.com/johnny4young/janusly/go/internal/config"
 	"github.com/johnny4young/janusly/go/internal/engine"
 	"github.com/johnny4young/janusly/go/internal/grammar"
@@ -61,6 +63,16 @@ func envDurationMs(name string, fallback time.Duration) time.Duration {
 	return fallback
 }
 
+func requireBuildProvenance(production bool, identity buildinfo.Identity) error {
+	if !production {
+		return nil
+	}
+	if err := identity.Validate(); err != nil {
+		return fmt.Errorf("production requires verified build provenance: %w", err)
+	}
+	return nil
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "fatal:", err)
@@ -72,8 +84,25 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	identity, err := buildinfo.Current()
+	if err != nil {
+		return err
+	}
+	// The provenance command is deliberately database- and configuration-free:
+	// CI verifies the finished bytes before publishing them, and operators can
+	// inspect an artifact without granting it runtime credentials.
+	if len(os.Args) > 1 && os.Args[1] == "provenance" {
+		if err := identity.Validate(); err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(identity)
+	}
+
 	cfg, err := config.Load(nil)
 	if err != nil {
+		return err
+	}
+	if err := requireBuildProvenance(cfg.Production, identity); err != nil {
 		return err
 	}
 	logger := boot.NewLogger()
@@ -146,7 +175,9 @@ func run() error {
 		workPlaneMode = "active"
 	}
 	logger.Info("boot", "port", cfg.Port, "internal_host", cfg.InternalHost,
-		"internal_port", cfg.InternalPort, "work_plane", workPlaneMode)
+		"internal_port", cfg.InternalPort, "work_plane", workPlaneMode,
+		"build_verified", identity.Verified, "build_commit", identity.Commit,
+		"build_tree", identity.Tree, "artifact_sha256", identity.ArtifactSHA256)
 
 	// The pilot ships as one binary: the API process also runs the worker
 	// pool. The processes split when scale demands it — the engine already
@@ -240,7 +271,7 @@ func run() error {
 	api := newHTTPServer(fmt.Sprintf(":%d", cfg.Port), publicHandler)
 	internal := newHTTPServer(
 		fmt.Sprintf("%s:%d", cfg.InternalHost, cfg.InternalPort),
-		httpapi.NewInternalHandler(),
+		httpapi.NewInternalHandler(identity),
 	)
 
 	failures := make(chan error, 2)

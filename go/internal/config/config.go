@@ -14,6 +14,9 @@ import (
 
 // Config is the validated process configuration.
 type Config struct {
+	// Production enables the fail-closed boot posture for authentication,
+	// work-plane ownership, and immutable build provenance.
+	Production bool
 	// DatabaseURL points at the pilot PostgreSQL (shared-schema database).
 	DatabaseURL string
 	// Port serves the public API.
@@ -90,6 +93,7 @@ func Load(getenv func(string) string) (Config, error) {
 	production := strings.TrimSpace(getenv("JANUSLY_GO_ENV")) == "production"
 
 	cfg := Config{
+		Production:        production,
 		DatabaseURL:       str("JANUSLY_GO_DATABASE_URL", defaultDatabaseURL),
 		Port:              num("JANUSLY_GO_PORT", 4600, 1, 65535),
 		InternalPort:      num("JANUSLY_GO_INTERNAL_PORT", 4601, 1, 65535),

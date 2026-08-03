@@ -49,17 +49,25 @@ const PROVENANCE_FILES = Object.freeze([
   "go/go.sum",
   "go/AUDIT.md",
   "go/RUNBOOK-CUTOVER.md",
+  "go/internal/buildinfo/buildinfo.go",
   "go/conformance/benchmark-campaign-policy.mjs",
   "go/conformance/benchmark.compose.yml",
   "go/conformance/perf/campaign-baseline.json",
   "go/conformance/perf/k6-bench-ab.js",
   "go/conformance/run-bench-ab.mjs",
   "go/conformance/run-benchmark-campaign.mjs",
+  "go/conformance/build-release-artifact.mjs",
+  "go/conformance/collect-runtime-proof.mjs",
+  "go/conformance/external-gate-policy.mjs",
+  "go/conformance/release-artifact-policy.mjs",
+  "go/conformance/release-candidate-policy.mjs",
+  "go/conformance/runtime-proof-policy.mjs",
   "go/conformance/run-web-smoke.mjs",
   "go/conformance/run-web-qualification.mjs",
   "go/conformance/web-qualification.compose.yml",
   "scripts/qualification-profiles.mjs",
   "scripts/run-qualification-profiles.mjs",
+  ".github/workflows/ci.yml",
   "deploy/observability/grafana/dashboards/janusly-go-migration.json",
 ]);
 
@@ -135,6 +143,7 @@ function parseArgs(argv) {
     json: null,
     markdown: null,
     checks: resolve(repoRoot, "artifacts/go-release-checks.json"),
+    artifact: resolve(repoRoot, "artifacts/go-release/native/manifest.json"),
     queue: resolve(repoRoot, "artifacts/go-queue-handoff-evidence.json"),
     external: resolve(repoRoot, "artifacts/go-external-gates.json"),
     check: null,
@@ -143,6 +152,7 @@ function parseArgs(argv) {
     if (arg.startsWith("--json=")) options.json = resolve(process.cwd(), arg.slice(7));
     else if (arg.startsWith("--markdown=")) options.markdown = resolve(process.cwd(), arg.slice(11));
     else if (arg.startsWith("--checks=")) options.checks = resolve(process.cwd(), arg.slice(9));
+    else if (arg.startsWith("--artifact=")) options.artifact = resolve(process.cwd(), arg.slice(11));
     else if (arg.startsWith("--queue=")) options.queue = resolve(process.cwd(), arg.slice(8));
     else if (arg.startsWith("--external=")) options.external = resolve(process.cwd(), arg.slice(11));
     else if (arg === "--check-review") options.check = "review";
@@ -162,6 +172,7 @@ function markdown(manifest) {
     `- Generated: ${manifest.generatedAt}`,
     `- Ready for review: **${manifest.verdict.readyForReview ? "yes" : "no"}**`,
     `- Ready for production: **${manifest.verdict.readyForProduction ? "yes" : "no"}**`,
+    `- Release artifact: \`${manifest.verdict.releaseArtifact?.artifactSha256 ?? "missing"}\``,
     "",
     "## Review blockers",
     "",
@@ -213,10 +224,11 @@ async function main() {
     goIntegrationAncestor: isAncestor(goIntegration),
     nodeOracle,
   };
-  const [runtime, provenance, checkReceipt, queueHandoffReceipt, externalGateReceipt] = await Promise.all([
+  const [runtime, provenance, checkReceipt, releaseArtifactManifest, queueHandoffReceipt, externalGateReceipt] = await Promise.all([
     collectRuntime(),
     Promise.all(PROVENANCE_FILES.map(sha256File)),
     readOptionalJson(options.checks),
+    readOptionalJson(options.artifact),
     readOptionalJson(options.queue),
     readOptionalJson(options.external),
   ]);
@@ -226,6 +238,7 @@ async function main() {
     runtime,
     nodeOracleExpected: NODE_ORACLE_COMMIT,
     checkReceipt,
+    releaseArtifactManifest,
     queueHandoffReceipt,
     externalGateReceipt,
   });
@@ -239,6 +252,7 @@ async function main() {
     provenance,
     receipts: {
       localChecks: options.checks,
+      releaseArtifact: options.artifact,
       queueHandoff: options.queue,
       externalGates: options.external,
     },

@@ -13,6 +13,26 @@ const TREE = "b".repeat(40);
 const ORACLE = "c".repeat(40);
 const ARTIFACT_SHA256 = "9".repeat(64);
 
+function releaseArtifactManifest() {
+  return {
+    schemaVersion: 1,
+    candidate: { commit: COMMIT, tree: TREE },
+    target: { goos: "linux", goarch: "amd64", cgoEnabled: false },
+    toolchain: "go1.26.5",
+    build: { trimpath: true, buildVcs: false, buildId: "" },
+    artifact: { file: "janusly-go", sha256: ARTIFACT_SHA256, bytes: 12_345 },
+    runtimeIdentity: {
+      schemaVersion: 1,
+      commit: COMMIT,
+      tree: TREE,
+      artifactSha256: ARTIFACT_SHA256,
+      verified: true,
+    },
+    sourceTreeUnchanged: true,
+    pass: true,
+  };
+}
+
 function externalSummary(id) {
   if (id === "remote_ci") return { gate: id, artifactSha256: ARTIFACT_SHA256 };
   if (["shadow", "cutover", "canary", "rollback"].includes(id)) {
@@ -27,6 +47,8 @@ function externalSummary(id) {
 }
 
 function passingInput() {
+  const checks = Object.fromEntries(REQUIRED_LOCAL_CHECKS.map(id => [id, { pass: true }]));
+  checks.go_release_artifact.summary = { artifactSha256: ARTIFACT_SHA256 };
   return {
     candidate: { commit: COMMIT, tree: TREE, branch: "develop", dirty: false },
     nodeOracleExpected: ORACLE,
@@ -41,10 +63,11 @@ function passingInput() {
       aheadOfOriginDevelop: 12,
     },
     runtime: { postgresql18Only: true },
+    releaseArtifactManifest: releaseArtifactManifest(),
     checkReceipt: {
       schemaVersion: 1,
       candidate: { commit: COMMIT, tree: TREE },
-      checks: Object.fromEntries(REQUIRED_LOCAL_CHECKS.map(id => [id, { pass: true }])),
+      checks,
     },
     queueHandoffReceipt: {
       schemaVersion: 1,
@@ -81,6 +104,26 @@ test("stale and incomplete evidence fails review closed", () => {
     "queue_handoff_stale",
     "queue_handoff_failed",
   ]));
+});
+
+test("missing or stale release artifact fails review closed", () => {
+  const missing = passingInput();
+  delete missing.releaseArtifactManifest;
+  let verdict = evaluateReleaseCandidate(missing);
+  assert.equal(verdict.readyForReview, false);
+  assert.equal(verdict.reviewBlockers.some(row => row.code === "release_artifact_missing"), true);
+
+  const stale = passingInput();
+  stale.releaseArtifactManifest.runtimeIdentity.tree = "0".repeat(40);
+  verdict = evaluateReleaseCandidate(stale);
+  assert.equal(verdict.readyForReview, false);
+  assert.equal(verdict.reviewBlockers.some(row => row.code === "release_artifact_invalid"), true);
+
+  const mismatchedReceipt = passingInput();
+  mismatchedReceipt.checkReceipt.checks.go_release_artifact.summary.artifactSha256 = "8".repeat(64);
+  verdict = evaluateReleaseCandidate(mismatchedReceipt);
+  assert.equal(verdict.readyForReview, false);
+  assert.equal(verdict.reviewBlockers.some(row => row.code === "release_artifact_receipt_mismatch"), true);
 });
 
 test("dirty, divergent, non-PG18 candidates fail review closed", () => {

@@ -5,6 +5,7 @@ import {
   EXTERNAL_GATE_IDS,
   EXTERNAL_GATE_POLICY_VERSION,
 } from "./external-gate-policy.mjs";
+import { validateReleaseArtifactManifest } from "./release-artifact-policy.mjs";
 
 export const REQUIRED_LOCAL_CHECKS = Object.freeze([
   "root_lint",
@@ -14,6 +15,7 @@ export const REQUIRED_LOCAL_CHECKS = Object.freeze([
   "root_test",
   "root_integration_pg18",
   "go_ci_pg18",
+  "go_release_artifact",
   "go_revalidation_pg18",
   "go_benchmark_campaign",
   "source_tree_unchanged",
@@ -75,6 +77,20 @@ export function evaluateReleaseCandidate(input) {
     reviewBlockers.push(issue("postgresql_policy_failed", "Every Janusly-owned database service must use fixed PostgreSQL 18"));
   }
 
+  let releaseArtifact = null;
+  if (!input.releaseArtifactManifest) {
+    reviewBlockers.push(issue("release_artifact_missing", "Exact-candidate Go release artifact manifest is missing"));
+  } else {
+    try {
+      releaseArtifact = validateReleaseArtifactManifest(input.releaseArtifactManifest, candidate);
+    } catch (error) {
+      reviewBlockers.push(issue(
+        "release_artifact_invalid",
+        `Go release artifact is invalid: ${error instanceof Error ? error.message : String(error)}`,
+      ));
+    }
+  }
+
   const checks = input.checkReceipt;
   if (!checks) {
     reviewBlockers.push(issue("local_checks_missing", "Exact-candidate local check receipt is missing"));
@@ -90,6 +106,13 @@ export function evaluateReleaseCandidate(input) {
       } else if (check.pass !== true) {
         reviewBlockers.push(issue("local_check_failed", `Required local check ${id} did not pass`, { check: id }));
       }
+    }
+    if (releaseArtifact && checks.checks?.go_release_artifact?.pass === true &&
+      checks.checks.go_release_artifact.summary?.artifactSha256 !== releaseArtifact.artifactSha256) {
+      reviewBlockers.push(issue(
+        "release_artifact_receipt_mismatch",
+        "Local check receipt and release artifact manifest describe different executable bytes",
+      ));
     }
   }
 
@@ -181,5 +204,6 @@ export function evaluateReleaseCandidate(input) {
     productionBlockers,
     warnings,
     externalGateStates,
+    releaseArtifact,
   };
 }

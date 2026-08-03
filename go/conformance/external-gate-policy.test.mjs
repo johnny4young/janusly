@@ -12,8 +12,38 @@ import {
 const candidate = { commit: "a".repeat(40), tree: "b".repeat(40) };
 const artifactSha256 = "c".repeat(64);
 
-function goRuntime() {
-  return { ...candidate, artifactSha256 };
+function releaseArtifactManifest() {
+  return {
+    schemaVersion: 1,
+    candidate: { ...candidate },
+    target: { goos: "linux", goarch: "amd64", cgoEnabled: false },
+    toolchain: "go1.26.5",
+    build: { trimpath: true, buildVcs: false, buildId: "" },
+    artifact: { file: "janusly-go", sha256: artifactSha256, bytes: 12_345 },
+    runtimeIdentity: {
+      schemaVersion: 1,
+      ...candidate,
+      artifactSha256,
+      verified: true,
+    },
+    sourceTreeUnchanged: true,
+    pass: true,
+  };
+}
+
+function runtimeProof(mode, capturedAt) {
+  return {
+    schemaVersion: 1,
+    candidate: { ...candidate },
+    capturedAt,
+    runtime: {
+      schemaVersion: 1,
+      ...candidate,
+      artifactSha256,
+      verified: true,
+    },
+    workPlane: { header: mode, metric: mode === "active" ? 1 : 0 },
+  };
 }
 
 function base(gate) {
@@ -44,7 +74,7 @@ function evidenceFor(gate) {
       url: "https://github.com/johnny4young/janusly/actions/runs/1",
       headSha: candidate.commit,
       conclusion: "success",
-      artifactSha256,
+      artifactManifest: releaseArtifactManifest(),
       requiredChecks: [
         { name: "build_test", conclusion: "success" },
         { name: "test_go", conclusion: "success" },
@@ -61,7 +91,6 @@ function evidenceFor(gate) {
     };
   } else if (gate === "shadow") {
     evidence.report = {
-      goRuntime: goRuntime(),
       environment: "staging-mirror",
       mode: "read_only_mirror",
       sampleCount: 1_000,
@@ -70,40 +99,47 @@ function evidenceFor(gate) {
       unexpectedDiffs: 0,
       criticalDiffs: 0,
       duplicatedEffects: 0,
-      goPassiveProof: { header: "passive", metric: 0 },
+      runtimeProofs: [
+        runtimeProof("passive", "2026-08-03T11:00:00.000Z"),
+        runtimeProof("passive", "2026-08-03T14:00:00.000Z"),
+      ],
       compared: { http: true, database: true, events: true, audits: true, queues: true },
     };
   } else if (gate === "cutover") {
     evidence.report = {
-      goRuntime: goRuntime(),
+      runtimeProof: runtimeProof("active", "2026-08-03T14:00:00.000Z"),
       environment: "staging-cutover",
       freezeWatermark: "watermark-1",
       mutatingIngressFrozen: true,
       nodeProducersStopped: true,
       nodeToGoGate: { pass: true, testedTree: candidate.tree },
-      goActiveProof: { header: "active", metric: 1 },
       duplicatedOwnershipSeconds: 0,
       proxyConfigSha256: "c".repeat(64),
       smokeRunId: "smoke-run-1",
     };
   } else if (gate === "canary") {
+    let capturedAtMs = Date.parse("2026-08-01T12:00:00.000Z");
     evidence.report = {
-      goRuntime: goRuntime(),
       environment: "staging-canary",
       mutationOwner: "go",
-      goActiveProof: { header: "active", metric: 1 },
+      startedRuntimeProof: runtimeProof("active", new Date(capturedAtMs).toISOString()),
       autoRollbackTriggered: false,
-      stages: [1, 5, 25, 50, 100].map(percent => ({
-        percent,
-        samples: 1_000,
-        soakMinutes: percent === 100 ? 1_440 : 60,
-        criticalErrors: 0,
-        stopThresholdsPassed: true,
-      })),
+      stages: [1, 5, 25, 50, 100].map(percent => {
+        const soakMinutes = percent === 100 ? 1_440 : 60;
+        capturedAtMs += soakMinutes * 60_000;
+        return {
+          percent,
+          samples: 1_000,
+          soakMinutes,
+          criticalErrors: 0,
+          stopThresholdsPassed: true,
+          runtimeProof: runtimeProof("active", new Date(capturedAtMs).toISOString()),
+        };
+      }),
     };
   } else {
     evidence.report = {
-      goRuntime: goRuntime(),
+      runtimeProof: runtimeProof("passive", "2026-08-03T14:00:00.000Z"),
       environment: "staging-rollback",
       nodeOracleCommit: NODE_ORACLE_COMMIT,
       goToNodeGate: { pass: true, testedTree: candidate.tree },
@@ -112,7 +148,6 @@ function evidenceFor(gate) {
       activityUiPass: true,
       dataLossCount: 0,
       inFlightLossCount: 0,
-      goPassiveProof: { header: "passive", metric: 0 },
       rtoSeconds: 90,
       maxRtoSeconds: 300,
     };
@@ -138,10 +173,10 @@ test("runtime gates require the exact CI-built Go artifact", () => {
   const remoteCi = validateExternalGateEvidence("remote_ci", evidenceFor("remote_ci"), candidate);
   assert.equal(remoteCi.artifactSha256, artifactSha256);
   const ciWithoutArtifact = evidenceFor("remote_ci");
-  delete ciWithoutArtifact.run.artifactSha256;
+  delete ciWithoutArtifact.run.artifactManifest;
   assert.throws(
     () => validateExternalGateEvidence("remote_ci", ciWithoutArtifact, candidate),
-    /CI artifact SHA-256 is required/u,
+    /release artifact manifest schema is unsupported/u,
   );
 
   for (const gate of ["shadow", "cutover", "canary", "rollback"]) {
@@ -160,17 +195,22 @@ test("runtime gates require the exact CI-built Go artifact", () => {
       },
     );
 
-    evidence.report.goRuntime.artifactSha256 = "not-a-sha256";
+    const proof = gate === "shadow"
+      ? evidence.report.runtimeProofs[1]
+      : gate === "canary"
+        ? evidence.report.stages.at(-1).runtimeProof
+        : evidence.report.runtimeProof;
+    proof.runtime.artifactSha256 = "not-a-sha256";
     assert.throws(
       () => validateExternalGateEvidence(gate, evidence, candidate),
-      /Go runtime artifact SHA-256 is required/u,
+      /runtime artifact SHA-256 is required/u,
       gate,
     );
-    evidence.report.goRuntime.artifactSha256 = artifactSha256;
-    evidence.report.goRuntime.commit = "0".repeat(40);
+    proof.runtime.artifactSha256 = artifactSha256;
+    proof.runtime.commit = "0".repeat(40);
     assert.throws(
       () => validateExternalGateEvidence(gate, evidence, candidate),
-      /Go runtime commit does not match/u,
+      /runtime build identity commit does not match/u,
       gate,
     );
   }
@@ -181,10 +221,12 @@ test("every external gate template is exact-candidate and fail-closed", () => {
     const template = externalGateTemplate(gate, candidate);
     assert.equal(template.gate, gate);
     assert.deepEqual(template.candidate, candidate);
-    if (gate === "remote_ci") assert.equal(template.run.artifactSha256, "");
-    if (["shadow", "cutover", "canary", "rollback"].includes(gate)) {
-      assert.deepEqual(template.report.goRuntime, { ...candidate, artifactSha256: "" });
+    if (gate === "remote_ci") assert.deepEqual(template.run.artifactManifest.candidate, candidate);
+    if (gate === "shadow") assert.equal(template.report.runtimeProofs.length, 2);
+    if (gate === "cutover" || gate === "rollback") {
+      assert.deepEqual(template.report.runtimeProof.candidate, candidate);
     }
+    if (gate === "canary") assert.deepEqual(template.report.startedRuntimeProof.candidate, candidate);
     assert.throws(() => validateExternalGateEvidence(gate, template, candidate), undefined, gate);
   }
 });
@@ -197,9 +239,12 @@ test("shadow rejects local, write-capable, incomplete comparisons", () => {
   evidence.report.mode = "write_mirror";
   assert.throws(() => validateExternalGateEvidence("shadow", evidence, candidate), /suppress Go write effects/u);
   evidence.report.mode = "read_only_mirror";
-  evidence.report.goPassiveProof.header = "active";
-  assert.throws(() => validateExternalGateEvidence("shadow", evidence, candidate), /passive header/u);
-  evidence.report.goPassiveProof = { header: "passive", metric: 0 };
+  evidence.report.runtimeProofs[1].workPlane.header = "active";
+  assert.throws(() => validateExternalGateEvidence("shadow", evidence, candidate), /header is not passive/u);
+  evidence.report.runtimeProofs[1].workPlane.header = "passive";
+  evidence.report.runtimeProofs[1].capturedAt = "2026-08-03T12:00:00.000Z";
+  assert.throws(() => validateExternalGateEvidence("shadow", evidence, candidate), /do not span/u);
+  evidence.report.runtimeProofs[1].capturedAt = "2026-08-03T14:00:00.000Z";
   evidence.report.compared.audits = false;
   assert.throws(() => validateExternalGateEvidence("shadow", evidence, candidate), /compare audits/u);
 });
@@ -209,11 +254,14 @@ test("canary requires ordered stages and a full final soak", () => {
   evidence.report.stages[2].percent = 30;
   assert.throws(() => validateExternalGateEvidence("canary", evidence, candidate), /must be 25%/u);
   evidence.report.stages[2].percent = 25;
-  evidence.report.goActiveProof.metric = 0;
+  evidence.report.stages[2].runtimeProof.workPlane.metric = 0;
   assert.throws(() => validateExternalGateEvidence("canary", evidence, candidate), /metric is not active/u);
-  evidence.report.goActiveProof.metric = 1;
+  evidence.report.stages[2].runtimeProof.workPlane.metric = 1;
   evidence.report.stages.at(-1).soakMinutes = 1_439;
   assert.throws(() => validateExternalGateEvidence("canary", evidence, candidate), /at least 1440/u);
+  evidence.report.stages.at(-1).soakMinutes = 1_440;
+  evidence.report.stages.at(-1).runtimeProof.capturedAt = evidence.report.stages.at(-2).runtimeProof.capturedAt;
+  assert.throws(() => validateExternalGateEvidence("canary", evidence, candidate), /does not cover/u);
 });
 
 test("qualification, cutover, and rollback retain their safety boundaries", () => {
@@ -226,9 +274,9 @@ test("qualification, cutover, and rollback retain their safety boundaries", () =
   assert.throws(() => validateExternalGateEvidence("cutover", cutover, candidate), /overlapping/u);
 
   const rollback = evidenceFor("rollback");
-  rollback.report.goPassiveProof.metric = 1;
+  rollback.report.runtimeProof.workPlane.metric = 1;
   assert.throws(() => validateExternalGateEvidence("rollback", rollback, candidate), /metric is not passive/u);
-  rollback.report.goPassiveProof.metric = 0;
+  rollback.report.runtimeProof.workPlane.metric = 0;
   rollback.report.dataLossCount = 1;
   assert.throws(() => validateExternalGateEvidence("rollback", rollback, candidate), /lost persisted data/u);
 });
