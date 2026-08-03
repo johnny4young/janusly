@@ -11,10 +11,9 @@ services:
       - "127.0.0.1:${JANUSLY_REDIS_HOST_PORT:-6379}:6379"
 
   postgres:
-    # Parametrized so the CI compat job (and any self-host operator) can run
-    # the SAME lifecycle against the oldest supported Postgres. Default stays
-    # the dev/prod baseline.
-    image: ${JANUSLY_POSTGRES_IMAGE:-pgvector/pgvector:pg18}
+    # Janusly supports one database major across local, CI, and self-hosted
+    # runtimes so version-specific behavior cannot drift between lanes.
+    image: pgvector/pgvector:pg18
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres

@@ -7,7 +7,7 @@ name: janusly-goldens
 
 services:
   postgres:
-    image: ${JANUSLY_POSTGRES_IMAGE:-pgvector/pgvector:pg18}
+    image: pgvector/pgvector:pg18
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres

@@ -134,7 +134,7 @@ The worker lives at `packages/engine/src/worker.ts` and runs with `pnpm --filter
 
 | Layer       | Library                                                                |
 | ----------- | ---------------------------------------------------------------------- |
-| Runtime     | Node.js 24, Postgres 15+ (18 baseline), Redis 8                           |
+| Runtime     | Node.js 24, PostgreSQL 18, Redis 8                                     |
 | TypeScript  | 7.0                                                                     |
 | Backend     | `bullmq`, `ioredis`, `drizzle-orm`/`postgres-js`, Vercel `ai` SDK      |
 | AI          | Vercel AI SDK with **`anthropic/claude-haiku-4-5-20251001`** as the supported MVP provider. `LlmClient` registry also carries `openai` for future expansion, but production posture is Anthropic-only until cross-provider verification reopens it. Every AI surface has a deterministic fallback; attempted LLM-call failures surface `{ mode: "fallback", aiError, ... }`. |
@@ -157,15 +157,19 @@ The worker lives at `packages/engine/src/worker.ts` and runs with `pnpm --filter
 
 ### Supported-version matrix (self-host)
 
-The **floor** is the oldest version CI proves green; the **baseline** is what the dev/prod fleet runs. Node 24 is the only supported JavaScript runtime and every Node CI lane uses it. `test_compat_pg15` separately proves the Postgres 15 compatibility floor.
+Janusly supports one runtime version per foundational service. Local
+development, CI, and self-hosted Compose all use the same PostgreSQL major.
 
-| Component | Floor (CI-verified) | Baseline (dev/prod) |
-| --------- | ------------------- | ------------------- |
-| Node.js   | 24 LTS (Krypton)    | 24 LTS (Krypton)    |
-| Postgres  | 15 (+ `pgvector`)   | 18 (+ `pgvector`)   |
-| Redis     | 8                   | 8                   |
+| Component | Supported version |
+| --------- | ----------------- |
+| Node.js   | 24 LTS (Krypton)  |
+| PostgreSQL | 18 (+ `pgvector`) |
+| Redis     | 8                 |
 
-Self-hosting on an older Postgres? Point Compose at it: `JANUSLY_POSTGRES_IMAGE=pgvector/pgvector:pg15 docker compose up postgres`.
+The optional Supabase Auth development profile is an upstream-managed
+exception: the pinned Supabase CLI currently accepts PostgreSQL 17 but rejects
+18. That database is not a supported Janusly self-host/runtime target; every
+Janusly-owned database and CI lane is PostgreSQL 18.
 
 ---
 

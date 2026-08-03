@@ -152,13 +152,9 @@ jobs:
           path: apps/web/playwright-report/
           retention-days: 7
 
-  test_compat_pg15:
-    name: Integration lanes on Postgres 15 (oldest supported)
+  test_integration_pg18:
+    name: Integration lanes on Postgres 18
     runs-on: ubuntu-latest
-    env:
-      # The compose file parametrizes the postgres image; the script owns the
-      # full lifecycle (AGENTS.md: no compose orchestration in workflow YAML).
-      JANUSLY_POSTGRES_IMAGE: pgvector/pgvector:pg15
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
@@ -168,7 +164,7 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
-      - name: Integration lanes (real Postgres 15)
+      - name: Integration lanes (real Postgres 18)
         run: pnpm test:integration
 
   # Go pilot lane — rides the SAME triggers as every other job (a private

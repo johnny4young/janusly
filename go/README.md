@@ -32,7 +32,7 @@ make verify      # generate/drift, build, lint, unit, integration, parity
 make run         # API + supervised background workers on :4600
 ```
 
-Additional gates include `make ci`, `make test-pg15`, `make dual`,
+Additional gates include `make ci`, `make test-pg18`, `make dual`,
 `make test-ha`, `make failover`, `make chaos`, `make fuzz`, and
 `make bench-hostile`. Queue cutover additionally requires
 `make queue-handoff-rehearsal` and a live `make queue-handoff` report. See the

@@ -9,7 +9,7 @@ dependencies.
 ## Requirements
 
 - Go toolchain pinned by `go.mod` (`go1.26.5`).
-- PostgreSQL 15 or newer; PostgreSQL 18 is the primary baseline.
+- PostgreSQL 18 with `pgvector`; no older database major is supported.
 - A database migrated by the same candidate binary.
 
 ## Core process configuration

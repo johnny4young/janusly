@@ -68,9 +68,10 @@ make migrate     # embedded goose migrations only
 make verify      # generate/drift, build, lint, unit, integration, parity
 ```
 
-The PostgreSQL 15 floor is exercised by `make test-pg15`. Toolchain versions
-are pinned by `go.mod` (`go1.26.5`) and the repository package manifests
-(Node.js 24 and pnpm 11 for frontend/reference tooling).
+The only supported database major is PostgreSQL 18. `make test-pg18` repeats
+the full race-enabled integration suite in an isolated PostgreSQL 18 container.
+Toolchain versions are pinned by `go.mod` (`go1.26.5`) and the repository
+package manifests (Node.js 24 and pnpm 11 for frontend/reference tooling).
 
 Default ports are API 4600, internal metrics/pprof 4601, and PostgreSQL 4632.
 Do not expose the internal listener publicly.

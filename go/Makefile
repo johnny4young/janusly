@@ -4,7 +4,7 @@ PG_CONTAINER := janusly-go-pilot-postgres-1
 SCHEMA_DB := janusly_go_schema_dump
 SCHEMA_DB_URL ?= postgres://janusly:janusly-go-local@127.0.0.1:4632/$(SCHEMA_DB)
 
-.PHONY: db-up db-down migrate schema-dump generate lint vuln test run build parity ci test-pg15 bench fuzz contract web-embed verify seed chaos bench-hostile script-test queue-handoff-test queue-handoff queue-handoff-rehearsal
+.PHONY: db-up db-down migrate schema-dump generate lint vuln test run build parity ci test-pg18 bench fuzz contract web-embed verify seed chaos bench-hostile script-test queue-handoff-test queue-handoff queue-handoff-rehearsal
 
 db-up:
 	docker compose -f docker-compose.yml up -d --wait
@@ -108,14 +108,14 @@ ci:
 	$(MAKE) parity
 	@echo "== ci green =="
 
-# Postgres 15 floor: the full integration suite against an ephemeral pg15
-# container (port 4634), mirroring the reference CI's test_compat_pg15 lane.
-test-pg15:
-	docker compose -f pg15.compose.yml up -d --wait
+# PostgreSQL 18 revalidation: the full integration suite against an isolated
+# container on port 4634, matching the only supported database major.
+test-pg18:
+	docker compose -f pg18.compose.yml up -d --wait
 	JANUSLY_GO_DATABASE_URL=postgres://janusly:janusly-go-local@127.0.0.1:4634/janusly_go go run ./cmd/api migrate
 	JANUSLY_GO_DATABASE_URL=postgres://janusly:janusly-go-local@127.0.0.1:4634/janusly_go \
 		go test -race -tags integration -p 1 -count=1 ./... ; \
-		status=$$?; docker compose -f pg15.compose.yml down -v; exit $$status
+		status=$$?; docker compose -f pg18.compose.yml down -v; exit $$status
 
 # k6 regression bench: boots the Go binary, runs the three sequential
 # scenarios, appends to conformance/perf/series.jsonl, refreshes BENCH.md.

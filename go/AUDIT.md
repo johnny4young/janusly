@@ -62,7 +62,7 @@ The interrupted runs and generated binaries are not certification evidence.
 | 3. Architecture and safety review | file-level findings for engine, API, persistence, concurrency, security, and allocation posture | complete |
 | 4. Node/Go contract parity | routes, wire shapes, errors, durable side effects, negative cases, and UI-facing behavior | complete |
 | 5. Data and queue transition | fresh/legacy/rollback database matrix plus BullMQ and in-flight-work drain rehearsal | complete |
-| 6. Clean validation ladder | CI, race, PG15/18, HA, failover, chaos, fuzz, SDK, benchmark, and soak-evidence audit | complete |
+| 6. Clean validation ladder | CI, race, PostgreSQL 18, HA, failover, chaos, fuzz, SDK, benchmark, and soak-evidence audit | complete |
 | 7. Full web certification | complete Playwright coverage against Node and Go, EN/ES screenshots, zero unexplained console errors | complete |
 | 8. Integration candidate | exact candidate commit revalidated on `go-integration`, promoted to local `develop`, with `main` PR left pending | complete |
 
@@ -587,3 +587,25 @@ traffic, or a release. `origin/develop`, `origin/main`, the pull request to
 `main`, and every production traffic change remain untouched and require
 separate owner authorization. The frozen `nodejs-legacy` rollback line and the
 original evidence-bearing `go-pilot` worktree remain intact.
+
+### PostgreSQL 18-only policy
+
+Janusly now supports PostgreSQL 18 as its only database major. The root
+integration job, every Janusly-owned Compose service, and the isolated Go
+revalidation lane all use the fixed `pgvector/pgvector:pg18` image; the older
+compatibility target and database-image override were removed. Historical
+PostgreSQL 15 references above remain as immutable evidence of tests that were
+actually run, not as a current support promise.
+
+The optional Supabase Auth development profile is the sole upstream-managed
+exception. Supabase CLI 2.109.1 rejects `db.major_version = 18`, so that local
+identity lab remains on its latest accepted PostgreSQL 17 image until the
+upstream CLI supports 18. It is not a Janusly runtime or self-hosting target.
+
+The PostgreSQL 18-only change was revalidated on 2026-08-03. The configuration
+policy suite passed 3/3 tests, the root script suite passed 160/160 tests,
+`make test-pg18` passed the complete race-enabled Go integration suite, and the
+full `make ci` ladder passed against the PostgreSQL 18 development service.
+`pnpm test:integration` also passed against the fixed PostgreSQL 18 root
+service: 20 data files / 75 tests, 2 API files / 4 tests, and 11 engine files /
+60 tests.
