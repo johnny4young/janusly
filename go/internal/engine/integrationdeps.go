@@ -147,3 +147,15 @@ func (e *Engine) buildIntegrationDeps(orgID, runID, nodeID string) *tools.Integr
 		},
 	}
 }
+
+// ExecuteIntegrationTool routes API-level delivery surfaces through the same
+// credential, rate-limit, usage, and guarded-egress chokepoint as workflow
+// tool nodes. Route callers provide no node id because the usage belongs to
+// the run-level operation rather than a run_nodes execution.
+func (e *Engine) ExecuteIntegrationTool(
+	ctx context.Context,
+	orgID, runID, name string,
+	input map[string]any,
+) map[string]any {
+	return tools.ExecuteIntegrationTool(ctx, name, input, e.buildIntegrationDeps(orgID, runID, ""))
+}

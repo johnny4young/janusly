@@ -4,7 +4,8 @@
 // gate: the run / item read is org-scoped and a cross-org id returns
 // the same 404 as a missing one. Secrets are redacted at write time
 // (safe-persist) AND re-scrubbed at render time in the pure builder.
-// Delivery (Slack / GitHub / webhook) needs the integrations wave.
+// Delivery routes Slack / GitHub / webhook through the same integration
+// chokepoint as workflow tool nodes.
 package httpapi
 
 import (
@@ -12,6 +13,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -19,10 +22,108 @@ import (
 
 	"github.com/johnny4young/janusly/go/internal/audit"
 	"github.com/johnny4young/janusly/go/internal/engine"
+	"github.com/johnny4young/janusly/go/internal/ratelimit"
 	"github.com/johnny4young/janusly/go/internal/recovery"
 	"github.com/johnny4young/janusly/go/internal/signature"
 	"github.com/johnny4young/janusly/go/internal/store"
 )
+
+const (
+	reportsDeliverRateLimitPerMin = 60
+	reportSlackTextMax            = 3000
+)
+
+type reportDeliveryDestination struct {
+	Kind           string   `json:"kind"`
+	CredentialName string   `json:"credentialName"`
+	Owner          string   `json:"owner"`
+	Repo           string   `json:"repo"`
+	Labels         []string `json:"labels"`
+	URL            string   `json:"url"`
+}
+
+type reportDeliveryRequest struct {
+	RunID       string                    `json:"runId"`
+	Destination reportDeliveryDestination `json:"destination"`
+}
+
+func validateReportDeliveryRequest(body reportDeliveryRequest) string {
+	if strings.TrimSpace(body.RunID) == "" {
+		return "runId is required"
+	}
+	destination := body.Destination
+	if destination.Kind != "slack" && destination.Kind != "github" && destination.Kind != "webhook" {
+		return "destination.kind must be slack, github, or webhook"
+	}
+	if strings.TrimSpace(destination.CredentialName) == "" {
+		return "destination.credentialName is required"
+	}
+	if destination.Kind == "github" {
+		if strings.TrimSpace(destination.Owner) == "" {
+			return "destination.owner is required for github destination"
+		}
+		if strings.TrimSpace(destination.Repo) == "" {
+			return "destination.repo is required for github destination"
+		}
+		if len(destination.Labels) > 10 {
+			return "destination.labels must contain at most 10 labels"
+		}
+		for _, label := range destination.Labels {
+			if strings.TrimSpace(label) == "" {
+				return "destination.labels must not contain empty labels"
+			}
+		}
+	}
+	if destination.Kind == "webhook" {
+		parsed, err := url.ParseRequestURI(destination.URL)
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return "destination.url must be an absolute http(s) URL"
+		}
+	}
+	return ""
+}
+
+func buildRunExplainSlackText(report map[string]any, workflowName, runID string) string {
+	summary, _ := report["summary"].(map[string]any)
+	status, _ := summary["status"].(string)
+	if workflowName == "" {
+		workflowName = "(ad-hoc workflow)"
+	}
+	shortID := runID
+	if len(shortID) > 8 {
+		shortID = shortID[:8]
+	}
+	lines := []string{fmt.Sprintf("*Janusly run explain: %s – %s – %s*", workflowName, status, shortID)}
+	if root, ok := report["rootCause"].(map[string]any); ok {
+		lines = append(lines, fmt.Sprintf("Root cause: %v (%v)", root["signature"], root["category"]))
+	}
+	if failed, ok := report["failedNode"].(map[string]any); ok {
+		lines = append(lines, fmt.Sprintf("Failed node: %v — %v", failed["nodeId"], failed["errorSummary"]))
+	}
+	if next, ok := report["nextAction"].(string); ok && next != "" {
+		lines = append(lines, "Next action: "+next)
+	}
+	if publicBase := strings.TrimSpace(os.Getenv("JANUSLY_PUBLIC_APP_URL")); publicBase != "" {
+		lines = append(lines, "Full report: "+strings.TrimRight(publicBase, "/")+
+			"/reports/run-explain?runId="+url.QueryEscape(runID))
+	}
+	text := strings.Join(lines, "\n")
+	if len(text) > reportSlackTextMax {
+		return text[:reportSlackTextMax-3] + "…"
+	}
+	return text
+}
+
+func buildRunExplainGitHubTitle(workflowName, runStatus, runID string) string {
+	if workflowName == "" {
+		workflowName = "(ad-hoc workflow)"
+	}
+	shortID := runID
+	if len(shortID) > 8 {
+		shortID = shortID[:8]
+	}
+	return fmt.Sprintf("Janusly run explain: %s – %s (%s)", workflowName, runStatus, shortID)
+}
 
 // resolveRunExplain loads the org-gated snapshots and builds the report.
 func (s *V1Server) resolveRunExplain(ctx context.Context, orgID, runID string) (map[string]any, string, bool) {
@@ -124,6 +225,129 @@ func (s *V1Server) runExplainHandler(w http.ResponseWriter, r *http.Request, rc 
 	}
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 	_, _ = w.Write([]byte(markdown))
+}
+
+func (s *V1Server) runExplainDeliveryHandler(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	var body reportDeliveryRequest
+	if err := decodeBody(r, &body); err != nil {
+		writeLegacy(w, opError(http.StatusBadRequest, "reports_invalid_request", "Invalid request: body", nil))
+		return
+	}
+	if message := validateReportDeliveryRequest(body); message != "" {
+		writeLegacy(w, opError(http.StatusBadRequest, "reports_invalid_request", "Invalid request: "+message, nil))
+		return
+	}
+	destination := body.Destination
+	auditFormat := "markdown"
+	if destination.Kind == "webhook" {
+		auditFormat = "json"
+	}
+	writeDeliveryAudit := func(metadata map[string]any) {
+		metadata["destination"] = destination.Kind
+		metadata["format"] = auditFormat
+		metadata["runId"] = body.RunID
+		metadata["credentialName"] = destination.CredentialName
+		audit.Write(r.Context(), s.pool, rc.authContext, "report.run_explain.delivered", audit.Options{
+			TargetType: "run", TargetID: body.RunID, Metadata: metadata,
+		})
+	}
+	if err := s.limiter.Enforce(r.Context(), rc.orgID, ratelimit.Options{
+		Name: "reports.deliver", Max: reportsDeliverRateLimitPerMin, Window: time.Minute,
+	}); err != nil {
+		writeDeliveryAudit(map[string]any{
+			"ok": false, "error": "rate_limit_exceeded", "latencyMs": 0,
+			"workflowId": nil, "workflowName": nil, "runStatus": nil,
+		})
+		writeLegacy(w, opError(http.StatusTooManyRequests, "reports_rate_limit_exceeded", err.Error(), nil))
+		return
+	}
+
+	q := store.New(s.pool)
+	run, err := q.GetRun(r.Context(), store.GetRunParams{ID: body.RunID, OrgID: rc.orgID})
+	if err != nil {
+		writeLegacy(w, opError(http.StatusNotFound, "reports_run_not_found", "Run not found", nil))
+		return
+	}
+	report, markdown, ok := s.resolveRunExplain(r.Context(), rc.orgID, body.RunID)
+	if !ok {
+		writeLegacy(w, opError(http.StatusNotFound, "reports_run_not_found", "Run not found", nil))
+		return
+	}
+	var snapshot struct {
+		Workflow struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"workflow"`
+	}
+	_ = json.Unmarshal(run.InputJson, &snapshot)
+
+	toolName := "slack.post"
+	toolInput := map[string]any{
+		"credential": destination.CredentialName,
+		"text":       buildRunExplainSlackText(report, snapshot.Workflow.Name, body.RunID),
+	}
+	switch destination.Kind {
+	case "github":
+		toolName = "github.create_issue"
+		toolInput = map[string]any{
+			"credential": destination.CredentialName,
+			"owner":      destination.Owner,
+			"repo":       destination.Repo,
+			"title":      buildRunExplainGitHubTitle(snapshot.Workflow.Name, run.Status, body.RunID),
+			"body":       markdown,
+		}
+		if len(destination.Labels) > 0 {
+			toolInput["labels"] = destination.Labels
+		}
+	case "webhook":
+		toolName = "webhook.send"
+		toolInput = map[string]any{
+			"credential": destination.CredentialName,
+			"url":        destination.URL,
+			"payload":    report,
+		}
+	}
+	outcome := s.engine.ExecuteIntegrationTool(r.Context(), rc.orgID, body.RunID, toolName, toolInput)
+	result := map[string]any{
+		"ok": outcome["ok"] == true, "destination": destination.Kind,
+		"latencyMs": numberOrZero(outcome["latencyMs"]),
+	}
+	for _, key := range []string{"statusCode", "error"} {
+		if value, present := outcome[key]; present {
+			result[key] = value
+		}
+	}
+	if issueURL, ok := outcome["url"].(string); ok && issueURL != "" {
+		result["deliveryId"] = issueURL
+	}
+	auditMetadata := map[string]any{
+		"ok": result["ok"], "latencyMs": result["latencyMs"],
+		"workflowId": nilIfBlank(snapshot.Workflow.ID), "workflowName": nilIfBlank(snapshot.Workflow.Name),
+		"runStatus": run.Status,
+	}
+	for _, key := range []string{"statusCode", "error"} {
+		if value, present := result[key]; present {
+			auditMetadata[key] = value
+		}
+	}
+	writeDeliveryAudit(auditMetadata)
+	writeLegacy(w, opOK(result))
+}
+
+func numberOrZero(value any) any {
+	switch value.(type) {
+	case int, int32, int64, float32, float64:
+		return value
+	default:
+		return 0
+	}
+}
+
+func nilIfBlank(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 // recoveryEvidenceCore assembles the single downloadable audit-evidence
@@ -263,5 +487,6 @@ func renderEvidenceMarkdown(report map[string]any) string {
 
 func (s *V1Server) mountReportRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /reports/run-explain", s.auth(s.runExplainHandler))
+	mux.HandleFunc("POST /reports/run-explain/deliver", s.auth(s.runExplainDeliveryHandler))
 	mux.HandleFunc("POST /recovery/items/{id}/evidence", s.auth(s.recoveryEvidenceHandler))
 }

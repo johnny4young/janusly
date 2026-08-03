@@ -98,6 +98,39 @@ func TestRunExplainAndEvidenceExports(t *testing.T) {
 		t.Fatalf("cross-org must 404: %d", foreign.status)
 	}
 
+	// Delivery uses the shared integration chokepoint. Runtime failures are
+	// 200 envelopes (never route throws) and audit both the operator-visible
+	// credential name and the failed outcome without exposing a secret ref.
+	delivery := h.call("POST", "/reports/run-explain/deliver", map[string]any{
+		"runId": runID,
+		"destination": map[string]any{
+			"kind": "slack", "credentialName": "missing-smoke-credential",
+		},
+	}, "")
+	if delivery.status != 200 || delivery.body["ok"] != false || delivery.body["destination"] != "slack" ||
+		delivery.body["error"] != "credential not found: missing-smoke-credential" {
+		t.Fatalf("missing-credential delivery envelope: %d %+v", delivery.status, delivery.body)
+	}
+	var deliveryAudits int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs
+		WHERE org_id = $1 AND action = 'report.run_explain.delivered' AND target_id = $2
+		  AND metadata @> '{"destination":"slack","format":"markdown","ok":false,"credentialName":"missing-smoke-credential"}'::jsonb`,
+		h.org, runID).Scan(&deliveryAudits)
+	if deliveryAudits != 1 {
+		t.Fatalf("delivery failure must audit itself: %d", deliveryAudits)
+	}
+	if invalid := h.call("POST", "/reports/run-explain/deliver", map[string]any{
+		"runId": runID, "destination": map[string]any{"kind": "github", "credentialName": "bot"},
+	}, ""); invalid.status != 400 {
+		t.Fatalf("github destination requires owner+repo: %d %+v", invalid.status, invalid.body)
+	}
+	if foreignDelivery := h.call("POST", "/reports/run-explain/deliver", map[string]any{
+		"runId":       runID,
+		"destination": map[string]any{"kind": "slack", "credentialName": "missing"},
+	}, h.org+"-other"); foreignDelivery.status != 404 {
+		t.Fatalf("cross-org delivery must 404: %d %+v", foreignDelivery.status, foreignDelivery.body)
+	}
+
 	// Evidence bundle: replay opens the incident + a validation run
 	// exists; the export stitches every block and audits itself.
 	var dlqID string

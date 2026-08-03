@@ -100,6 +100,9 @@ var routeAuthz = map[string]routeGate{
 	"GET /runs/{runId}/stream": {auth.RoleViewer, "runs.read"},
 	"GET /run/usage":           {auth.RoleViewer, "runs.read"},
 
+	// Reports.
+	"POST /reports/run-explain/deliver": {auth.RoleEditor, "reports.deliver"},
+
 	// Triggers.
 	"POST /triggers/webhook/ingest":  {auth.RoleEditor, "triggers.ingest"},
 	"POST /v1/webhooks/{workflowId}": {auth.RoleEditor, "triggers.ingest"},
