@@ -75,6 +75,9 @@ Toolchain versions are pinned by `go.mod` (`go1.26.5`) and the repository
 package manifests (Node.js 24 and pnpm 11 for frontend/reference tooling).
 
 Default ports are API 4600, internal metrics/pprof 4601, and PostgreSQL 4632.
+The internal listener stays on `127.0.0.1` unless
+`JANUSLY_GO_INTERNAL_HOST=0.0.0.0` explicitly opens it to a private collector
+network; that listener also carries pprof and must never be internet-exposed.
 Do not expose the internal listener publicly.
 
 Release evidence is generated under ignored `../artifacts/` paths by

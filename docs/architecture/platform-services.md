@@ -34,6 +34,19 @@ The Runs panel uses the shell's bounded page while filters are empty and perform
 
 **Queue pressure:** the worker registers asynchronous gauges for both delivery lanes through independent, coalesced BullMQ observability readers with bounded retries and a hard read timeout: `workflow_queue_waiting_jobs` / `workflow_queue_active_jobs` and `maintenance_queue_waiting_jobs` / `maintenance_queue_active_jobs`. Neither reader reuses the canonical delivery connection whose unbounded retries are correct for job execution but unsafe for scrapes. Redis or malformed adapter values omit only that lane's scrape instead of affecting execution. API and worker also register `janusly_rate_limit_degraded_buckets` from their own process-local degradation tracker, so dashboards aggregate by the shared `service.name="janusly"` resource plus `service.instance.id` instead of assuming one global in-memory view. Prometheus startup is explicit after each process's migration check (`apps/api/src/index.ts`, `packages/engine/src/worker.ts`), with local defaults 9464 for API and 9465 for worker; both honor `OTEL_METRICS_PORT`, bind to loopback unless `OTEL_METRICS_HOST` explicitly opens another interface, fail startup on bind conflicts, and shut the exporter down during graceful termination. The API owns one bounded request-path reader and five-second cache per queue. Oldest waiting age is derived from BullMQ eligibility (`timestamp + original delay`), not raw creation time, so newly promoted approval/timer jobs do not appear overdue immediately. BullMQ does not retain the exact transition when previously processed work returns through retry or stalled recovery; those jobs therefore expose unknown age rather than deriving it from the earlier attempt start and publishing a false alert. Unauthenticated `GET /health` exposes only `queue: { degraded: boolean } | null`, combining the two lane thresholds without live details. Admin `GET /system/queue` preserves the workflow `{ waiting, active, oldestWaitingSeconds, warnSeconds }` fields at the top level and adds a nullable `maintenance` snapshot. `JANUSLY_QUEUE_LAG_WARN_SECONDS` defaults to 60; `JANUSLY_MAINTENANCE_QUEUE_LAG_WARN_SECONDS` defaults to 300; both accept 1..86400. Operations polls the admin projection on the existing 20-second infrastructure cadence and renders each lane independently. Never add queue counts, ages, Redis errors, or keys to public `/health`.
 
+**Go migration telemetry:** Alloy scrapes the candidate as a separate
+`job="janusly-go"` target on its internal port rather than relabeling its
+native `janusly_go_*` series as Node metrics. The migration dashboard combines
+that explicit target with the legacy worker's BullMQ gauges only to detect the
+two forbidden transition states: active Node delivery while Go owns the work
+plane, and legacy waiting work after Go activation. Go's internal listener
+remains `127.0.0.1:4601` by default; a containerized collector requires the
+closed `JANUSLY_GO_INTERNAL_HOST=0.0.0.0` opt-in plus a private network or host
+firewall because the same listener serves pprof. Missing Go telemetry,
+ownership overlap, post-activation Node backlog, stalled Go queued work, and
+Go terminal failures are explicit alert rules. These infrastructure signals
+do not replace the exact-candidate shadow/cutover/canary/rollback receipts.
+
 ## Recovery north-star projection
 
 The organization-level recovery north-star is versioned independently from

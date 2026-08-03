@@ -18,6 +18,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Port != 4600 || cfg.InternalPort != 4601 {
 		t.Fatalf("unexpected ports: %+v", cfg)
 	}
+	if cfg.InternalHost != "127.0.0.1" {
+		t.Fatalf("internal listener must default to loopback: %+v", cfg)
+	}
 	if cfg.WorkerConcurrency != 8 || cfg.PollInterval != 250*time.Millisecond {
 		t.Fatalf("unexpected worker defaults: %+v", cfg)
 	}
@@ -32,13 +35,14 @@ func TestLoadDefaults(t *testing.T) {
 func TestLoadOverrides(t *testing.T) {
 	cfg, err := Load(env(map[string]string{
 		"JANUSLY_GO_PORT":               "4700",
+		"JANUSLY_GO_INTERNAL_HOST":      "0.0.0.0",
 		"JANUSLY_GO_WORKER_CONCURRENCY": "2",
 		"JANUSLY_GO_POLL_MS":            "500",
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Port != 4700 || cfg.WorkerConcurrency != 2 || cfg.PollInterval != 500*time.Millisecond {
+	if cfg.Port != 4700 || cfg.InternalHost != "0.0.0.0" || cfg.WorkerConcurrency != 2 || cfg.PollInterval != 500*time.Millisecond {
 		t.Fatalf("overrides not applied: %+v", cfg)
 	}
 }
@@ -55,6 +59,7 @@ func TestLoadRejectsOutOfRangeWithRangeInMessage(t *testing.T) {
 		{"poll below floor", "JANUSLY_GO_POLL_MS", "10", "[50, 5000]"},
 		{"not a number", "JANUSLY_GO_HTTP_TIMEOUT_MS", "soon", "[1000, 600000]"},
 		{"invalid work plane", "JANUSLY_GO_WORK_PLANE_ENABLED", "yes", "true or false"},
+		{"invalid internal host", "JANUSLY_GO_INTERNAL_HOST", "metrics.example.com", "127.0.0.1 or 0.0.0.0"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -21,6 +21,7 @@ const POSTGRES_CONFIGS = Object.freeze([
   "docker-compose.yml",
   "go/docker-compose.yml",
   "go/pg18.compose.yml",
+  "go/conformance/benchmark.compose.yml",
   "go/conformance/reference-stack.compose.yml",
 ]);
 
@@ -32,6 +33,7 @@ const IMAGE_SOURCES = Object.freeze([
   "docker-compose.yml",
   "go/docker-compose.yml",
   "go/pg18.compose.yml",
+  "go/conformance/benchmark.compose.yml",
   "go/conformance/reference-stack.compose.yml",
   "deploy/local/compose.yml",
   "deploy/observability/compose.local.yml",
@@ -45,6 +47,13 @@ const PROVENANCE_FILES = Object.freeze([
   "go/go.sum",
   "go/AUDIT.md",
   "go/RUNBOOK-CUTOVER.md",
+  "go/conformance/benchmark-campaign-policy.mjs",
+  "go/conformance/benchmark.compose.yml",
+  "go/conformance/perf/campaign-baseline.json",
+  "go/conformance/perf/k6-bench-ab.js",
+  "go/conformance/run-bench-ab.mjs",
+  "go/conformance/run-benchmark-campaign.mjs",
+  "deploy/observability/grafana/dashboards/janusly-go-migration.json",
 ]);
 
 function git(args, { allowFailure = false } = {}) {

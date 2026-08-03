@@ -90,6 +90,10 @@ deployment shape. HTTP routing alone does not transfer queued work.
 
 ## First 24 hours
 
+- Keep the `Janusly Go Migration` Grafana dashboard open and treat
+  `JanuslyMutationOwnershipOverlap` or `JanuslyNodeBacklogAfterGoActivation` as
+  immediate rollback signals; no amount of healthy read traffic overrides a
+  split mutation plane.
 - Public dependency posture: `GET /health`.
 - Administrative queue posture: `GET /system/queue`.
 - Prometheus and Go runtime signals: `GET /metrics` on the candidate's internal

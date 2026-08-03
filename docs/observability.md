@@ -1,15 +1,16 @@
 # Observability Operations Guide
 
-Janusly exposes OpenTelemetry traces and Prometheus metrics from the API and
-worker. The starter kit in `deploy/observability` turns those signals into a
-usable local dashboard and can forward them to Grafana Cloud without changing
-application code.
+Janusly exposes OpenTelemetry traces and Prometheus metrics from the Node API,
+Node worker, and Go migration candidate. The starter kit in
+`deploy/observability` turns those signals into usable local dashboards and can
+forward them to Grafana Cloud without changing application code.
 
 ## What The Signals Answer
 
 | Signal | Janusly source | Use it to answer |
 | --- | --- | --- |
 | Metrics | API `:9464`, worker `:9465` | Is work queued, failing, retrying, or rate-limit degraded? |
+| Go migration metrics | candidate internal listener `:4601` | Is Go passive or active, are Node and Go overlapping, and did Go latency or recovery pressure regress? |
 | Traces | OTLP/HTTP exporter | Where did a request or workflow node spend time? |
 | Product evidence | Postgres run events, audit logs, DLQ, recovery metrics | What happened to this tenant, run, or recovery action? |
 | Logs | API/worker stdout | What did one process report around an incident? |
@@ -42,6 +43,7 @@ than following mutable `latest` tags.
    OTEL_METRICS_HOST=0.0.0.0
    OTEL_EXPORTER=otlp
    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:4318/v1/traces
+   JANUSLY_GO_INTERNAL_HOST=0.0.0.0
    ```
 
    Do not set a shared `OTEL_METRICS_PORT` in the root `.env`: the API and
@@ -60,6 +62,12 @@ than following mutable `latest` tags.
    to loopback; the local admin login is `admin` / `janusly-local` unless
    `GRAFANA_ADMIN_PASSWORD` is set before startup.
 
+   During the Go migration, also open
+   <http://127.0.0.1:3000/d/janusly-go-migration>. **Janusly Go Migration**
+   separates Go-native metrics from the Node exporters and makes work-plane
+   ownership, legacy queue overlap/backlog, Go terminal outcomes, latency, and
+   durable queue state visible.
+
 4. Inspect the pipeline at <http://127.0.0.1:12345>, Prometheus at
    <http://127.0.0.1:9090>, and Tempo through Grafana Explore.
 
@@ -69,10 +77,11 @@ than following mutable `latest` tags.
    pnpm observability:down
    ```
 
-`OTEL_METRICS_HOST=0.0.0.0` is needed here because Alloy runs in another
-network namespace. Do not expose ports `9464`/`9465` on an untrusted network;
-prefer a private container network, host firewall, or loopback when the
-collector runs beside the processes.
+`OTEL_METRICS_HOST=0.0.0.0` and `JANUSLY_GO_INTERNAL_HOST=0.0.0.0` are needed
+here because Alloy runs in another network namespace. Do not expose ports
+`9464`, `9465`, or `4601` on an untrusted network. The Go internal listener
+also serves pprof, so protect it with a private network or host firewall and
+retain the default loopback binding when the collector runs beside the process.
 
 ## Grafana Cloud Profile
 
@@ -89,8 +98,10 @@ docker compose \
 metric-write and trace-write permissions required by Alloy. The Janusly app
 uses the same OTLP settings as the local profile because Alloy still receives
 traces on loopback port `4318`. Import
-`deploy/observability/grafana/dashboards/janusly-operations.json` into the
-cloud stack and select its Prometheus data source.
+both JSON files under `deploy/observability/grafana/dashboards/` into the cloud
+stack and select its Prometheus data source. Set
+`JANUSLY_GO_METRICS_ADDRESS` in `cloud.env` when Alloy reaches the candidate at
+an address other than `host.docker.internal:4601`.
 
 ## Queue Topology And Activation
 
@@ -133,8 +144,11 @@ corruption, and are designed to be idempotent.
 ## Alerts And Customization
 
 Prometheus loads `deploy/observability/prometheus/rules.yml`. The initial rules
-cover missing API/worker targets, sustained workflow or maintenance backlog,
-fail-open rate-limit degradation, and node failures. They appear in
+cover missing API/worker targets, a previously observed Go target becoming
+unreachable, sustained workflow or maintenance backlog,
+fail-open rate-limit degradation, and node failures. Migration-specific rules
+also page on simultaneous Node/Go mutation work, legacy queue backlog after Go
+activation, stalled Go durable work, and Go terminal failures. They appear in
 Prometheus immediately. To deliver notifications, connect Prometheus to an
 Alertmanager or reproduce the rules in Grafana Alerting with a contact point.
 
@@ -160,11 +174,12 @@ Redis and Postgres do not need to be restarted for either operation.
 
 If the dashboard has no Janusly series:
 
-1. Check `http://127.0.0.1:9464/metrics` and `:9465/metrics` on the host.
+1. Check `http://127.0.0.1:9464/metrics`, `:9465/metrics`, and the Go candidate
+   at `:4601/metrics` on the host.
 2. Check Alloy targets and logs with
    `docker compose -f deploy/observability/compose.local.yml logs alloy`.
 3. Confirm `OTEL_METRICS_HOST=0.0.0.0` was present when Janusly started.
-4. Query `up{job=~"janusly-api|janusly-worker"}` in Prometheus.
+4. Query `up{job=~"janusly-api|janusly-worker|janusly-go"}` in Prometheus.
 
 If traces are absent, confirm `OTEL_EXPORTER=otlp`, use an endpoint ending in
 `/v1/traces`, and generate a new request after restart. The legacy Jaeger

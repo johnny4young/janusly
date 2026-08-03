@@ -15,6 +15,7 @@ export const REQUIRED_LOCAL_CHECKS = Object.freeze([
   "root_integration_pg18",
   "go_ci_pg18",
   "go_revalidation_pg18",
+  "go_benchmark_campaign",
   "source_tree_unchanged",
 ]);
 

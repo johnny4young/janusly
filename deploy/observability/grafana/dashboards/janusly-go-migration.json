@@ -1,0 +1,114 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "mappings": [{ "options": { "0": { "color": "red", "text": "DOWN" }, "1": { "color": "green", "text": "UP" } }, "type": "value" }], "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{ "expr": "max(up{job=\"janusly-go\",environment=~\"$environment\"})", "legendFormat": "Go target", "refId": "A" }],
+      "title": "Go metrics target",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "mappings": [{ "options": { "0": { "color": "blue", "text": "PASSIVE" }, "1": { "color": "green", "text": "ACTIVE" } }, "type": "value" }], "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }, { "color": "green", "value": 1 }] } }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{ "expr": "max(janusly_go_work_plane_active{job=\"janusly-go\",environment=~\"$environment\"})", "legendFormat": "work plane", "refId": "A" }],
+      "title": "Go work-plane ownership",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{ "expr": "(max(janusly_go_work_plane_active{job=\"janusly-go\",environment=~\"$environment\"}) or vector(0)) * ((max(workflow_queue_active_jobs{job=\"janusly-worker\",environment=~\"$environment\"}) or vector(0)) + (max(maintenance_queue_active_jobs{job=\"janusly-worker\",environment=~\"$environment\"}) or vector(0)))", "legendFormat": "overlap jobs", "refId": "A" }],
+      "title": "Mutation ownership overlap",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }] } }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{ "expr": "(max(janusly_go_work_plane_active{job=\"janusly-go\",environment=~\"$environment\"}) or vector(0)) * ((max(workflow_queue_waiting_jobs{job=\"janusly-worker\",environment=~\"$environment\"}) or vector(0)) + (max(maintenance_queue_waiting_jobs{job=\"janusly-worker\",environment=~\"$environment\"}) or vector(0)))", "legendFormat": "legacy backlog", "refId": "A" }],
+      "title": "Node backlog after Go activation",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 30, "lineWidth": 1, "showPoints": "never", "spanNulls": false }, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "id": 5,
+      "options": { "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [{ "expr": "sum by (status) (increase(janusly_go_runs_terminal_total{job=\"janusly-go\",environment=~\"$environment\"}[5m]))", "legendFormat": "{{status}}", "refId": "A" }],
+      "title": "Go terminal runs / 5m",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 30, "lineWidth": 1, "showPoints": "never", "spanNulls": false }, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "id": 6,
+      "options": { "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [{ "expr": "sum by (outcome) (increase(janusly_go_node_completions_total{job=\"janusly-go\",environment=~\"$environment\"}[5m]))", "legendFormat": "{{outcome}}", "refId": "A" }],
+      "title": "Go node outcomes / 5m",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 12, "lineWidth": 2, "showPoints": "never", "spanNulls": false }, "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+      "id": 7,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le) (rate(janusly_go_node_execution_seconds_bucket{job=\"janusly-go\",environment=~\"$environment\"}[5m])))", "legendFormat": "p95", "refId": "A" }],
+      "title": "Go node execution p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 12, "lineWidth": 2, "showPoints": "never", "spanNulls": false }, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+      "id": 8,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [{ "expr": "max by (state) (janusly_go_queue_depth{job=\"janusly-go\",environment=~\"$environment\"})", "legendFormat": "{{state}}", "refId": "A" }],
+      "title": "Go durable queue state",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 25, "lineWidth": 1, "showPoints": "never", "spanNulls": false }, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 21 },
+      "id": 9,
+      "options": { "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "expr": "sum(increase(janusly_go_node_retries_total{job=\"janusly-go\",environment=~\"$environment\"}[5m]))", "legendFormat": "retries", "refId": "A" },
+        { "expr": "sum(increase(janusly_go_reaped_nodes_total{job=\"janusly-go\",environment=~\"$environment\"}[5m]))", "legendFormat": "reaped", "refId": "B" },
+        { "expr": "sum(increase(janusly_go_redrives_total{job=\"janusly-go\",environment=~\"$environment\"}[5m]))", "legendFormat": "redrives", "refId": "C" }
+      ],
+      "title": "Go recovery pressure / 5m",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 42,
+  "tags": ["janusly", "go", "migration"],
+  "templating": { "list": [{ "allValue": ".*", "current": { "text": "All", "value": "$__all" }, "datasource": { "type": "prometheus", "uid": "prometheus" }, "definition": "label_values(up, environment)", "includeAll": true, "label": "Environment", "multi": true, "name": "environment", "query": { "query": "label_values(up, environment)", "refId": "PrometheusVariableQueryEditor-VariableQuery" }, "refresh": 1, "type": "query" }] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Janusly Go Migration",
+  "uid": "janusly-go-migration",
+  "version": 1
+}

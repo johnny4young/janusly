@@ -145,7 +145,8 @@ func run() error {
 	if cfg.WorkPlaneEnabled {
 		workPlaneMode = "active"
 	}
-	logger.Info("boot", "port", cfg.Port, "internal_port", cfg.InternalPort, "work_plane", workPlaneMode)
+	logger.Info("boot", "port", cfg.Port, "internal_host", cfg.InternalHost,
+		"internal_port", cfg.InternalPort, "work_plane", workPlaneMode)
 
 	// The pilot ships as one binary: the API process also runs the worker
 	// pool. The processes split when scale demands it — the engine already
@@ -238,7 +239,7 @@ func run() error {
 	publicHandler := httpapi.WithWorkPlaneGate(publicAPI, cfg.WorkPlaneEnabled)
 	api := newHTTPServer(fmt.Sprintf(":%d", cfg.Port), publicHandler)
 	internal := newHTTPServer(
-		fmt.Sprintf("127.0.0.1:%d", cfg.InternalPort),
+		fmt.Sprintf("%s:%d", cfg.InternalHost, cfg.InternalPort),
 		httpapi.NewInternalHandler(),
 	)
 

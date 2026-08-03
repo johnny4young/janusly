@@ -100,6 +100,7 @@ shadowing.
 | `JANUSLY_GO_DATABASE_URL` | local pilot DSN | PostgreSQL connection |
 | `JANUSLY_GO_PORT` | `4600` | public API listener |
 | `JANUSLY_GO_INTERNAL_PORT` | `4601` | loopback metrics and pprof listener |
+| `JANUSLY_GO_INTERNAL_HOST` | `127.0.0.1` | internal bind; `0.0.0.0` is an explicit private-collector opt-in |
 | `JANUSLY_GO_WORK_PLANE_ENABLED` | active outside production; passive in production | explicitly own queue claims, due clocks, and mutation loops |
 | `JANUSLY_GO_WORKER_CONCURRENCY` | `8` | executor goroutines, range 1–64 |
 | `JANUSLY_GO_POLL_MS` | `250` | LISTEN/NOTIFY fallback poll, range 50–5000 ms |

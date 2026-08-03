@@ -26,14 +26,42 @@ test("local observability profile pins every image and loopback-publishes servic
   assert.match(compose, /GF_ANALYTICS_REPORTING_ENABLED:\s+"false"/);
 });
 
-test("Alloy profiles scrape both Janusly processes and use OTLP", async () => {
+test("Alloy profiles scrape Node and Go processes and use OTLP", async () => {
   for (const profile of ["alloy/local.alloy", "alloy/cloud.alloy"]) {
     const config = await load(profile);
     assert.match(config, /host\.docker\.internal:9464/);
     assert.match(config, /host\.docker\.internal:9465/);
+    assert.match(config, /janusly-go/);
     assert.match(config, /otelcol\.receiver\.otlp/);
     assert.doesNotMatch(config, /jaeger/i);
   }
+});
+
+test("migration dashboard and alerts expose Go ownership without metric impersonation", async () => {
+  const dashboard = JSON.parse(await load("grafana/dashboards/janusly-go-migration.json"));
+  const expressionText = dashboard.panels.flatMap(panel =>
+    (panel.targets ?? []).map(target => target.expr)).join("\n");
+
+  assert.equal(dashboard.uid, "janusly-go-migration");
+  assert.equal(dashboard.title, "Janusly Go Migration");
+  assert.equal(dashboard.panels.length, 9);
+  for (const metric of [
+    "janusly_go_work_plane_active",
+    "janusly_go_runs_terminal_total",
+    "janusly_go_node_completions_total",
+    "janusly_go_node_execution_seconds_bucket",
+    "janusly_go_queue_depth",
+    "workflow_queue_active_jobs",
+  ]) assert.match(expressionText, new RegExp(metric));
+
+  const rules = await load("prometheus/rules.yml");
+  for (const alert of [
+    "JanuslyGoMetricsMissing",
+    "JanuslyMutationOwnershipOverlap",
+    "JanuslyNodeBacklogAfterGoActivation",
+    "JanuslyGoQueueStalled",
+    "JanuslyGoTerminalFailures",
+  ]) assert.match(rules, new RegExp(`alert: ${alert}`));
 });
 
 test("starter dashboard and rules cover the operational baseline", async () => {
@@ -75,5 +103,7 @@ test("cloud profile requires credentials without committing a real token", async
 
   assert.match(compose, /GRAFANA_CLOUD_API_TOKEN:\s+\$\{GRAFANA_CLOUD_API_TOKEN:\?/);
   assert.match(example, /GRAFANA_CLOUD_API_TOKEN=replace-with-a-cloud-access-policy-token/);
+  assert.match(compose, /JANUSLY_GO_METRICS_ADDRESS/);
+  assert.match(example, /JANUSLY_GO_METRICS_ADDRESS=host\.docker\.internal:4601/);
   assert.doesNotMatch(example, /glc_[A-Za-z0-9+/=_-]{20,}/);
 });

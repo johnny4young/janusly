@@ -20,6 +20,9 @@ type Config struct {
 	Port int
 	// InternalPort serves Prometheus metrics and pprof; never exposed publicly.
 	InternalPort int
+	// InternalHost is loopback unless an operator explicitly opens the
+	// metrics/pprof listener to a private collector network.
+	InternalHost string
 	// WorkerConcurrency bounds the executor goroutine pool.
 	WorkerConcurrency int
 	// APIPoolSize bounds the API-side pgx pool; the worker pool is separate
@@ -90,6 +93,7 @@ func Load(getenv func(string) string) (Config, error) {
 		DatabaseURL:       str("JANUSLY_GO_DATABASE_URL", defaultDatabaseURL),
 		Port:              num("JANUSLY_GO_PORT", 4600, 1, 65535),
 		InternalPort:      num("JANUSLY_GO_INTERNAL_PORT", 4601, 1, 65535),
+		InternalHost:      str("JANUSLY_GO_INTERNAL_HOST", "127.0.0.1"),
 		WorkerConcurrency: num("JANUSLY_GO_WORKER_CONCURRENCY", 8, 1, 64),
 		APIPoolSize:       num("JANUSLY_GO_API_POOL_SIZE", 10, 1, 100),
 		WorkerPoolSize:    num("JANUSLY_GO_WORKER_POOL_SIZE", 0, 0, 100),
@@ -102,6 +106,10 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	if cfg.Port == cfg.InternalPort {
 		problems = append(problems, "JANUSLY_GO_PORT and JANUSLY_GO_INTERNAL_PORT must differ")
+	}
+	if cfg.InternalHost != "127.0.0.1" && cfg.InternalHost != "0.0.0.0" {
+		problems = append(problems, fmt.Sprintf(
+			"JANUSLY_GO_INTERNAL_HOST must be 127.0.0.1 or 0.0.0.0, got %q", cfg.InternalHost))
 	}
 	if len(problems) > 0 {
 		return Config{}, fmt.Errorf("invalid configuration: %s", strings.Join(problems, "; "))

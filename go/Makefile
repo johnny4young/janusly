@@ -4,12 +4,13 @@ PG_CONTAINER := janusly-go-pilot-postgres-1
 SCHEMA_DB := janusly_go_schema_dump
 SCHEMA_DB_URL ?= postgres://janusly:janusly-go-local@127.0.0.1:4632/$(SCHEMA_DB)
 
-.PHONY: db-up db-down migrate schema-dump generate lint vuln test run build parity ci test-pg18 bench fuzz contract web-embed verify seed chaos bench-hostile script-test queue-handoff-test queue-handoff queue-handoff-rehearsal release-checks release-manifest release-review release-production-check external-gate-template external-gate-record
+.PHONY: db-up db-down migrate schema-dump generate lint vuln test run build parity ci test-pg18 bench benchmark-campaign fuzz contract web-embed verify seed chaos bench-hostile script-test queue-handoff-test queue-handoff queue-handoff-rehearsal release-checks release-manifest release-review release-production-check external-gate-template external-gate-record
 
 RELEASE_ARTIFACTS ?= ../artifacts
 RELEASE_MANIFEST_ARGS ?=
 EXTERNAL_GATE ?=
 EXTERNAL_EVIDENCE ?=
+BENCHMARK_SAMPLES ?= 5
 
 db-up:
 	docker compose -f docker-compose.yml up -d --wait
@@ -93,7 +94,9 @@ queue-handoff-rehearsal:
 release-checks:
 	node conformance/run-release-checks.mjs \
 		--output=$(RELEASE_ARTIFACTS)/go-release-checks.json \
-		--queue=$(RELEASE_ARTIFACTS)/go-queue-handoff-evidence.json
+		--queue=$(RELEASE_ARTIFACTS)/go-queue-handoff-evidence.json \
+		--benchmark=$(RELEASE_ARTIFACTS)/go-benchmark-campaign.json \
+		--benchmark-markdown=$(RELEASE_ARTIFACTS)/go-benchmark-campaign.md
 
 release-manifest:
 	node conformance/run-release-candidate.mjs \
@@ -160,6 +163,15 @@ test-pg18:
 # scenarios, appends to conformance/perf/series.jsonl, refreshes BENCH.md.
 bench:
 	node conformance/run-bench.mjs
+
+# Exact-candidate repeated benchmark: five co-scheduled A/B pairs by default.
+# Each side receives its own fresh PG18 instance/database; receipts stay under
+# ignored artifacts and the tracked historical series is not modified.
+benchmark-campaign:
+	node conformance/run-benchmark-campaign.mjs --samples=$(BENCHMARK_SAMPLES) \
+		--output=$(RELEASE_ARTIFACTS)/go-benchmark-campaign.json \
+		--markdown=$(RELEASE_ARTIFACTS)/go-benchmark-campaign.md \
+		--evidence=$(RELEASE_ARTIFACTS)/go-benchmark-campaign
 
 # Grammar fuzzing: robustness properties over the two operator-facing
 # grammars (never panic; validate/evaluate agreement; total rendering).

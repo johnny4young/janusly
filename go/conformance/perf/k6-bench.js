@@ -130,5 +130,6 @@ export function handleSummary(data) {
     diamond: { iterations: count("diamond_iterations"), ratePerSec: count("diamond_iterations") / DURATION, ...trend("diamond_to_terminal_ms") },
     errors: count("bench_errors"),
   };
-  return { "go/conformance/perf/k6-last.json": JSON.stringify(summary, null, 2) };
+  const output = __ENV.BENCH_SUMMARY_PATH || "go/conformance/perf/k6-last.json";
+  return { [output]: JSON.stringify(summary, null, 2) };
 }

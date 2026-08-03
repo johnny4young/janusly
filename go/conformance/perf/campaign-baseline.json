@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "policyVersion": 4,
+  "id": "pre-campaign-gate-2026-08-03",
+  "sourceCommit": "1fc210f1bf95d1400d299e4ea9af5f49805f1b66",
+  "sourceTree": "7536c9452bf0a924cf63343111ba2aa5a293436b",
+  "reason": "Exact reviewed candidate immediately before the repeated benchmark and migration telemetry band."
+}

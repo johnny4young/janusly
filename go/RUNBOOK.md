@@ -19,6 +19,7 @@ dependencies.
 | `JANUSLY_GO_DATABASE_URL` | local pilot DSN | PostgreSQL connection |
 | `JANUSLY_GO_PORT` | `4600` | public API listener |
 | `JANUSLY_GO_INTERNAL_PORT` | `4601` | loopback Prometheus and pprof listener |
+| `JANUSLY_GO_INTERNAL_HOST` | `127.0.0.1` | internal listener bind; only `0.0.0.0` explicitly opens it to a private collector network |
 | `JANUSLY_GO_WORK_PLANE_ENABLED` | active outside production; passive in production | process-wide ownership of claims, due clocks, and mutation loops |
 | `JANUSLY_GO_WORKER_CONCURRENCY` | `8` | node executors, range 1–64 |
 | `JANUSLY_GO_API_POOL_SIZE` | `10` | API PostgreSQL pool, range 1–100 |
@@ -103,7 +104,9 @@ Health endpoints:
 
 - `GET /healthz` on the public port: process liveness.
 - `GET /health`: public-safe dependency posture.
-- `GET /metrics` on `127.0.0.1:4601`: Prometheus metrics.
+- `GET /metrics` on `127.0.0.1:4601`: Prometheus metrics. A containerized
+  collector requires `JANUSLY_GO_INTERNAL_HOST=0.0.0.0` plus a host firewall or
+  private network because the same listener also serves pprof.
 - pprof endpoints on the same internal loopback listener.
 
 ## Supervisor examples
