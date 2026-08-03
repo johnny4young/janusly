@@ -5,6 +5,7 @@ package domain
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"slices"
 	"strings"
@@ -14,26 +15,29 @@ import (
 // Issue codes emitted by Parse and Validate. Closed set; additions must
 // exist in the reference first (except the explicit pilot-only code).
 const (
-	CodeInvalidContract          = "invalid_contract"
-	CodeEmptyWorkflow            = "empty_workflow"
-	CodeDuplicateNodeID          = "duplicate_node_id"
-	CodeNodeIDReserved           = "node_id_reserved"
-	CodeUnsupportedNodeType      = "unsupported_node_type"
-	CodeHTTPMissingURL           = "http_missing_url"
-	CodeConditionMissingExpr     = "condition_missing_expression"
-	CodeConditionInvalidExpr     = "condition_invalid_expression"
-	CodeTransformMissingMapping  = "transform_missing_mapping"
-	CodeEdgeInvalidFrom          = "edge_invalid_from"
-	CodeEdgeInvalidTo            = "edge_invalid_to"
-	CodeEdgeInvalidCondition     = "edge_invalid_condition"
-	CodeEdgeConditionInputsScope = "edge_condition_inputs_scope"
-	CodeInputDefaultTypeMismatch = "input_default_type_mismatch"
-	CodeScheduleInvalidCron      = "schedule_invalid_cron"
-	CodeHumanFormInvalidSchema   = "human_form_invalid_schema"
-	CodeHumanFormEmptySchema     = "human_form_empty_schema"
-	CodeHumanFormInvalidInitial  = "human_form_invalid_initial_values"
-	CodeCycleDetected            = "cycle_detected"
-	CodeMissingStartNode         = "missing_start_node"
+	CodeInvalidContract            = "invalid_contract"
+	CodeEmptyWorkflow              = "empty_workflow"
+	CodeDuplicateNodeID            = "duplicate_node_id"
+	CodeNodeIDReserved             = "node_id_reserved"
+	CodeUnsupportedNodeType        = "unsupported_node_type"
+	CodeHTTPMissingURL             = "http_missing_url"
+	CodeConditionMissingExpr       = "condition_missing_expression"
+	CodeConditionInvalidExpr       = "condition_invalid_expression"
+	CodeTransformMissingMapping    = "transform_missing_mapping"
+	CodeEdgeInvalidFrom            = "edge_invalid_from"
+	CodeEdgeInvalidTo              = "edge_invalid_to"
+	CodeEdgeInvalidCondition       = "edge_invalid_condition"
+	CodeEdgeConditionInputsScope   = "edge_condition_inputs_scope"
+	CodeInputDefaultTypeMismatch   = "input_default_type_mismatch"
+	CodeScheduleInvalidCron        = "schedule_invalid_cron"
+	CodeHumanFormInvalidSchema     = "human_form_invalid_schema"
+	CodeHumanFormEmptySchema       = "human_form_empty_schema"
+	CodeHumanFormInvalidInitial    = "human_form_invalid_initial_values"
+	CodeSubworkflowMissingWorkflow = "subworkflow_missing_workflow"
+	CodeSubworkflowSelfReference   = "subworkflow_self_reference"
+	CodeSubworkflowInvalidVersion  = "subworkflow_invalid_version"
+	CodeCycleDetected              = "cycle_detected"
+	CodeMissingStartNode           = "missing_start_node"
 	// Pilot-only: the type is valid in the full platform but this backend
 	// does not execute it yet. Deliberately distinct from
 	// unsupported_node_type, which means the type is invalid everywhere.
@@ -133,6 +137,22 @@ func ValidateWithSemanticFixtures(wf *Workflow, validExpression ExpressionValida
 		if node.Type == "http" && isJSFalsy(node.Config["url"]) {
 			push(Issue{Code: CodeHTTPMissingURL, Message: "HTTP node requires config.url", NodeID: node.ID})
 		}
+		if node.Type == "subworkflow" {
+			workflowID, _ := node.Config["workflowId"].(string)
+			workflowID = strings.TrimSpace(workflowID)
+			if workflowID == "" {
+				push(Issue{Code: CodeSubworkflowMissingWorkflow, Message: "Subworkflow node requires config.workflowId", NodeID: node.ID})
+			} else if wf.ID != "" && workflowID == wf.ID {
+				push(Issue{Code: CodeSubworkflowSelfReference, Message: "A workflow cannot call itself directly", NodeID: node.ID})
+			}
+			if version, present := node.Config["version"]; present && !validWorkflowVersion(version) {
+				push(Issue{
+					Code:    CodeSubworkflowInvalidVersion,
+					Message: "Subworkflow config.version must be an integer between 1 and 2147483647",
+					NodeID:  node.ID,
+				})
+			}
+		}
 		if node.Type == "condition" {
 			if isJSFalsy(node.Config["expression"]) {
 				push(Issue{Code: CodeConditionMissingExpr, Message: "Condition node requires config.expression", NodeID: node.ID})
@@ -230,6 +250,32 @@ func ValidateWithSemanticFixtures(wf *Workflow, validExpression ExpressionValida
 	}
 
 	return ValidationResult{Valid: len(issues) == 0, Issues: issues}
+}
+
+const workflowVersionMax = int64(2_147_483_647)
+
+func validWorkflowVersion(value any) bool {
+	switch version := value.(type) {
+	case float64:
+		return version >= 1 && version <= float64(workflowVersionMax) && math.Trunc(version) == version
+	case float32:
+		asFloat64 := float64(version)
+		return asFloat64 >= 1 && asFloat64 <= float64(workflowVersionMax) && math.Trunc(asFloat64) == asFloat64
+	case int:
+		return version >= 1 && int64(version) <= workflowVersionMax
+	case int32:
+		return version >= 1 && int64(version) <= workflowVersionMax
+	case int64:
+		return version >= 1 && version <= workflowVersionMax
+	case uint:
+		return version >= 1 && uint64(version) <= uint64(workflowVersionMax)
+	case uint32:
+		return version >= 1 && uint64(version) <= uint64(workflowVersionMax)
+	case uint64:
+		return version >= 1 && version <= uint64(workflowVersionMax)
+	default:
+		return false
+	}
 }
 
 // isJSFalsy mirrors the reference's truthiness checks on config fields:

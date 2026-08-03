@@ -77,7 +77,27 @@ func TestValidateRouteAndPlannerProjection(t *testing.T) {
 		t.Fatalf("pilot carve-out must NOT hide issues on /validate: %+v", res.body)
 	}
 
-	// 5. GET /tools (public catalog) never carries the planner-only
+	// 5. Invalid subworkflow authoring stays in the draft so this shared gate
+	// blocks both the keyboard save path and a direct save request.
+	invalidSubworkflow := map[string]any{
+		"id": "wf-parent", "name": "Parent", "dslVersion": "1.0",
+		"nodes": []any{map[string]any{
+			"id": "child", "type": "subworkflow",
+			"config": map[string]any{"workflowId": "wf-child", "version": "0"},
+		}},
+		"edges": []any{},
+	}
+	res = h.call("POST", "/validate", invalidSubworkflow, "")
+	if res.status != 200 || res.body["valid"] != false ||
+		!strings.Contains(strings.Join(issueCodes(res), ","), "subworkflow_invalid_version") {
+		t.Fatalf("subworkflow validation parity: %d %+v", res.status, res.body)
+	}
+	res = h.call("POST", "/workflows/save", invalidSubworkflow, "")
+	if res.status != 400 || res.body["code"] != "workflows_validation_failed" {
+		t.Fatalf("invalid subworkflow save must fail closed: %d %+v", res.status, res.body)
+	}
+
+	// 6. GET /tools (public catalog) never carries the planner-only
 	// jsonSchema; PlannerTools does.
 	res = h.call("GET", "/tools", nil, "")
 	if res.status != 200 {
