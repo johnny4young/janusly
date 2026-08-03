@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -281,6 +282,12 @@ func TestRecoveryDrillOutcomeRoutes(t *testing.T) {
 	h.waitRun(runID, "failed")
 	var rootDL string
 	_ = pool.QueryRow(ctx, `SELECT id FROM dead_letters WHERE run_id = $1`, runID).Scan(&rootDL)
+	if _, err := pool.Exec(ctx, `UPDATE runs SET input_json = jsonb_set(
+		coalesce(input_json, '{}'::jsonb), '{drill}',
+		'{"kind":"solution_pack_drill","packId":"incident-triage","fixtureId":"github_secret_unbound","failureMode":"secret_unbound","recoveryPath":"runtime_failure"}'::jsonb
+	) WHERE org_id = $1 AND id = $2`, h.org, runID); err != nil {
+		t.Fatalf("mark controlled drill provenance: %v", err)
+	}
 
 	// Mid-flight: claimed replay against a broken upstream → in progress /
 	// awaiting on the follow-up dead letter.
@@ -319,18 +326,80 @@ func TestRecoveryDrillOutcomeRoutes(t *testing.T) {
 		t.Fatalf("elapsed: %+v", outcome["elapsedMs"])
 	}
 
-	// The dossier aggregates the org's measured drills.
-	res = h.call("GET", "/recovery/drills/dossier", nil, "")
+	// The focused route, Home section, and pilot-only dossier alias share the
+	// full bounded validation contract.
+	res = h.call("GET", "/recovery/validation?windowDays=365", nil, "")
 	if res.status != 200 {
-		t.Fatalf("dossier: %d", res.status)
+		t.Fatalf("validation: %d %+v", res.status, res.body)
 	}
-	drills := res.body["drills"].([]any)
-	if len(drills) < 1 {
-		t.Fatalf("dossier must list the drill: %+v", res.body)
+	if res.body["windowDays"] != float64(90) || res.body["sampleLimit"] != float64(100) || res.body["sampleCapped"] != false {
+		t.Fatalf("validation bounds: %+v", res.body)
 	}
-	summary := res.body["summary"].(map[string]any)
-	if summary["recovered"] == nil {
-		t.Fatalf("dossier summary: %+v", summary)
+	totals := res.body["totals"].(map[string]any)
+	if totals["drills"] != float64(1) || totals["completed"] != float64(1) ||
+		totals["recovered"] != float64(1) || totals["recoveryRatePercent"] != float64(100) {
+		t.Fatalf("validation totals: %+v", totals)
+	}
+	resolution := res.body["resolution"].(map[string]any)
+	if resolution["operator"] != float64(1) || resolution["operatorInterventionRatePercent"] != float64(100) {
+		t.Fatalf("validation resolution: %+v", resolution)
+	}
+	samples := res.body["samples"].([]any)
+	if len(samples) != 1 || samples[0].(map[string]any)["runId"] != runID || samples[0].(map[string]any)["resolutionMode"] != "operator" {
+		t.Fatalf("validation samples: %+v", samples)
+	}
+
+	home := h.call("GET", "/recovery/home", nil, "")
+	homeValidation := home.body["sections"].(map[string]any)["validation"].(map[string]any)
+	if homeValidation["status"] != "ok" || homeValidation["value"].(map[string]any)["sampleLimit"] != float64(100) {
+		t.Fatalf("home validation section: %+v", homeValidation)
+	}
+	alias := h.call("GET", "/recovery/drills/dossier", nil, "")
+	if alias.status != 200 || alias.body["totals"].(map[string]any)["recovered"] != float64(1) {
+		t.Fatalf("dossier alias: %d %+v", alias.status, alias.body)
+	}
+
+	markdownRes, markdownBody := h.rawGet(t, "/reports/recovery-validation?windowDays=30&format=markdown")
+	if markdownRes.StatusCode != 200 || !strings.Contains(markdownRes.Header.Get("Content-Disposition"), "janusly-recovery-validation-") ||
+		!strings.Contains(string(markdownBody), "Recovery rate among completed outcomes**: 1/1 (100.0%)") {
+		t.Fatalf("validation markdown export: %d %q\n%s", markdownRes.StatusCode,
+			markdownRes.Header.Get("Content-Disposition"), markdownBody)
+	}
+	jsonRes, jsonBody := h.rawGet(t, "/reports/recovery-validation?windowDays=30&format=json")
+	if jsonRes.StatusCode != 200 || !strings.Contains(string(jsonBody), `"evidence":"controlled_recovery_drills"`) ||
+		!strings.Contains(string(jsonBody), `"limitations":["external_partner_count","setup_time","willingness_to_pay"]`) {
+		t.Fatalf("validation JSON export: %d %s", jsonRes.StatusCode, jsonBody)
+	}
+	if invalid, _ := h.rawGet(t, "/reports/recovery-validation?format=pdf"); invalid.StatusCode != 400 {
+		t.Fatalf("validation unknown export format: %d", invalid.StatusCode)
+	}
+	var exports int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs WHERE org_id = $1
+		AND action = 'report.recovery_validation.exported' AND target_id = $1`, h.org).Scan(&exports)
+	if exports != 2 {
+		t.Fatalf("validation exports must be audited: %d", exports)
+	}
+	foreign := h.call("GET", "/recovery/validation", nil, h.org+"-other")
+	if foreign.status != 200 || foreign.body["totals"].(map[string]any)["drills"] != float64(0) {
+		t.Fatalf("validation tenant isolation: %d %+v", foreign.status, foreign.body)
+	}
+
+	// A server-authored drill without a durable DLQ anchor remains visible as
+	// missing evidence rather than disappearing or being inferred as healthy.
+	missingRun := "run-drill-missing-" + h.org
+	if _, err := pool.Exec(ctx, `INSERT INTO runs (id, org_id, workflow_version_id, status, input_json)
+		VALUES ($1, $2, 'wf-missing', 'succeeded',
+		'{"drill":{"kind":"solution_pack_drill","packId":"incident-triage","fixtureId":"missing-boundary","failureMode":"unknown","recoveryPath":"runtime_failure"}}'::jsonb)`,
+		missingRun, h.org); err != nil {
+		t.Fatalf("seed missing-evidence drill: %v", err)
+	}
+	missing := h.call("GET", "/recovery/validation", nil, "")
+	missingTotals := missing.body["totals"].(map[string]any)
+	missingSamples := missing.body["samples"].([]any)
+	if missing.status != 200 || missingTotals["drills"] != float64(2) ||
+		missingTotals["missingEvidence"] != float64(1) || len(missingSamples) != 2 ||
+		missingSamples[0].(map[string]any)["runId"] != missingRun || missingSamples[0].(map[string]any)["outcome"] != nil {
+		t.Fatalf("missing evidence must stay explicit: %d %+v", missing.status, missing.body)
 	}
 
 	// Unknown dead letter → 404.

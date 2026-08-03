@@ -403,32 +403,6 @@ func (q *Queries) InsertReplayCampaignItem(ctx context.Context, arg InsertReplay
 	return err
 }
 
-const listDrillRootDeadLetters = `-- name: ListDrillRootDeadLetters :many
-SELECT id FROM dead_letters
-WHERE org_id = $1 AND replay_claimed_at IS NOT NULL
-ORDER BY created_at DESC LIMIT 50
-`
-
-func (q *Queries) ListDrillRootDeadLetters(ctx context.Context, orgID string) ([]string, error) {
-	rows, err := q.db.Query(ctx, listDrillRootDeadLetters, orgID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		items = append(items, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listReplayCampaignDeadLetters = `-- name: ListReplayCampaignDeadLetters :many
 
 SELECT id, run_id, node_id, status, error_json, node_json

@@ -166,8 +166,3 @@ SELECT EXISTS (
   SELECT 1 FROM recovery_impact_events
   WHERE org_id = $1 AND dead_letter_id = $2
 )::boolean;
-
--- name: ListDrillRootDeadLetters :many
-SELECT id FROM dead_letters
-WHERE org_id = $1 AND replay_claimed_at IS NOT NULL
-ORDER BY created_at DESC LIMIT 50;

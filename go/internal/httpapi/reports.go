@@ -1,11 +1,8 @@
-// Reports — GET /reports/run-explain (the shareable Markdown/JSON
-// artefact for one run) and POST /recovery/items/{id}/evidence (the
-// downloadable audit-evidence bundle for one incident). Multi-tenant
-// gate: the run / item read is org-scoped and a cross-org id returns
-// the same 404 as a missing one. Secrets are redacted at write time
-// (safe-persist) AND re-scrubbed at render time in the pure builder.
-// Delivery routes Slack / GitHub / webhook through the same integration
-// chokepoint as workflow tool nodes.
+// Reports — run explain, controlled-drill validation, and incident evidence.
+// Every export is tenant scoped and shares its pure builder with the matching
+// in-product projection. Secrets are redacted at write time (safe-persist)
+// AND re-scrubbed at render time. Delivery routes Slack / GitHub / webhook
+// through the same integration chokepoint as workflow tool nodes.
 package httpapi
 
 import (
@@ -189,6 +186,80 @@ func reportAttachmentName(prefix, id, status, format string) string {
 		extension = "json"
 	}
 	return fmt.Sprintf("%s-%s-%s.%s", prefix, short, status, extension)
+}
+
+func recoveryValidationFilename(orgID string, report recovery.RecoveryValidationReport, format string) string {
+	shortOrg := orgID
+	if len(shortOrg) > 8 {
+		shortOrg = shortOrg[:8]
+	}
+	var slug strings.Builder
+	lastDash := false
+	for _, char := range strings.ToLower(shortOrg) {
+		valid := char >= 'a' && char <= 'z' || char >= '0' && char <= '9'
+		if valid {
+			slug.WriteRune(char)
+			lastDash = false
+		} else if slug.Len() > 0 && !lastDash {
+			slug.WriteByte('-')
+			lastDash = true
+		}
+	}
+	orgSlug := strings.Trim(slug.String(), "-")
+	if orgSlug == "" {
+		orgSlug = "org"
+	}
+	date := report.GeneratedAt
+	if len(date) > 10 {
+		date = date[:10]
+	}
+	extension := "md"
+	if format == "json" {
+		extension = "json"
+	}
+	return fmt.Sprintf("janusly-recovery-validation-%s-%s-%dd.%s", orgSlug, date, report.WindowDays, extension)
+}
+
+func (s *V1Server) recoveryValidationReportHandler(w http.ResponseWriter, r *http.Request, rc v1Request) {
+	format := strings.ToLower(r.URL.Query().Get("format"))
+	if format == "" {
+		format = "markdown"
+	}
+	if format != "markdown" && format != "json" {
+		writeLegacy(w, opError(http.StatusBadRequest, "reports_unknown_format",
+			"Unknown format. Use \"markdown\" or \"json\".", map[string]any{"format": format}))
+		return
+	}
+	report, err := s.queryRecoveryValidation(
+		r.Context(), rc.orgID, recoveryValidationWindow(r), time.Now().UTC(),
+	)
+	if err != nil {
+		writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil))
+		return
+	}
+	audit.Write(r.Context(), s.pool, rc.authContext, "report.recovery_validation.exported", audit.Options{
+		TargetType: "org", TargetID: rc.orgID,
+		Metadata: map[string]any{
+			"format": format, "windowDays": report.WindowDays,
+			"drills": report.Totals.Drills, "sampleCapped": report.SampleCapped,
+		},
+	})
+	filename := recoveryValidationFilename(rc.orgID, report, format)
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"; filename*=UTF-8''"+url.PathEscape(filename))
+	w.Header().Set("Access-Control-Expose-Headers", "Content-Disposition, X-Request-Id")
+	if format == "json" {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"scope": map[string]any{
+				"orgId": rc.orgID, "evidence": "controlled_recovery_drills",
+				"limitations": []string{"external_partner_count", "setup_time", "willingness_to_pay"},
+			},
+			"report": report,
+		})
+		return
+	}
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	_, _ = w.Write([]byte(recovery.BuildRecoveryValidationMarkdown(rc.orgID, report)))
 }
 
 func (s *V1Server) runExplainHandler(w http.ResponseWriter, r *http.Request, rc v1Request) {
@@ -487,6 +558,7 @@ func renderEvidenceMarkdown(report map[string]any) string {
 
 func (s *V1Server) mountReportRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /reports/run-explain", s.auth(s.runExplainHandler))
+	s.route(mux, "GET /reports/recovery-validation", routeGate{role: "viewer", permission: "reports.read"}, s.recoveryValidationReportHandler)
 	mux.HandleFunc("POST /reports/run-explain/deliver", s.auth(s.runExplainDeliveryHandler))
 	mux.HandleFunc("POST /recovery/items/{id}/evidence", s.auth(s.recoveryEvidenceHandler))
 }

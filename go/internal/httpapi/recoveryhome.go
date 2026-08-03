@@ -146,23 +146,10 @@ func (s *V1Server) recoveryHomeCore(r *http.Request, rc v1Request) opResult {
 			}
 			return map[string]any{"cases": cases}, nil
 		})
-		// The pilot's validation section is the measured-drill dossier
-		// summary (statuses over the 50 most recent drill roots) — same
-		// facts the /recovery/drills/dossier export ships.
+		// Controlled-drill evidence shares the exact report builder and one
+		// bounded SQL projection with the focused API and exports.
 		settleSection(sections, "validation", func() (any, error) {
-			roots, err := q.ListDrillRootDeadLetters(ctx, rc.orgID)
-			if err != nil {
-				return nil, err
-			}
-			summary := map[string]int{}
-			for _, rootID := range roots {
-				outcome, err := s.queryDrillOutcome(ctx, rc.orgID, rootID)
-				if err != nil {
-					continue
-				}
-				summary[outcome.Status]++
-			}
-			return map[string]any{"drills": len(roots), "summary": summary, "windowDays": 30}, nil
+			return s.queryRecoveryValidation(ctx, rc.orgID, 30, time.Now().UTC())
 		})
 	}
 	return opOK(map[string]any{

@@ -143,7 +143,9 @@ func TestRecoveryHomeReadModel(t *testing.T) {
 		t.Fatalf("cases section: %+v", cases)
 	}
 	validation := homeSection(t, res.body, "validation")
-	if validation["drills"].(float64) < 1 {
+	validationTotals := validation["totals"].(map[string]any)
+	if validation["sampleLimit"] != float64(100) || validationTotals["drills"] != float64(0) ||
+		len(validation["samples"].([]any)) != 0 {
 		t.Fatalf("validation: %+v", validation)
 	}
 
