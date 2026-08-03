@@ -1,0 +1,150 @@
+#!/usr/bin/env node
+
+// Execute the complete local review ladder against one clean candidate and
+// emit ignored, commit/tree-bound receipts. External review and traffic gates
+// are deliberately outside this command.
+
+import { spawnSync } from "node:child_process";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { NODE_ORACLE_COMMIT } from "./queue-handoff-policy.mjs";
+
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const goRoot = resolve(scriptDir, "..");
+const repoRoot = resolve(goRoot, "..");
+
+const commands = Object.freeze([
+  { id: "root_lint", command: "pnpm", args: ["lint"], cwd: repoRoot },
+  { id: "root_scripts", command: "pnpm", args: ["test:scripts"], cwd: repoRoot },
+  { id: "root_contract", command: "pnpm", args: ["contract:check"], cwd: repoRoot },
+  { id: "root_build", command: "pnpm", args: ["build"], cwd: repoRoot },
+  { id: "root_test", command: "pnpm", args: ["test"], cwd: repoRoot },
+  { id: "root_integration_pg18", command: "pnpm", args: ["test:integration"], cwd: repoRoot },
+  { id: "go_ci_pg18", command: "make", args: ["ci"], cwd: goRoot },
+  { id: "go_revalidation_pg18", command: "make", args: ["test-pg18"], cwd: goRoot },
+]);
+
+function run(command, args, options = {}) {
+  return spawnSync(command, args, {
+    cwd: options.cwd ?? repoRoot,
+    env: { ...process.env, ...options.env },
+    encoding: "utf8",
+    stdio: options.stdio ?? "pipe",
+  });
+}
+
+function git(args) {
+  const child = run("git", args);
+  if (child.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${child.stderr || child.stdout}`);
+  return child.stdout.trim();
+}
+
+function display(command, args) {
+  return [command, ...args].join(" ");
+}
+
+async function writeAtomic(path, body) {
+  await mkdir(dirname(path), { recursive: true });
+  const temporary = `${path}.${process.pid}.tmp`;
+  await writeFile(temporary, body, { mode: 0o600 });
+  await rename(temporary, path);
+}
+
+function parseArgs(argv) {
+  const options = {
+    output: resolve(repoRoot, "artifacts/go-release-checks.json"),
+    queue: resolve(repoRoot, "artifacts/go-queue-handoff-evidence.json"),
+  };
+  for (const arg of argv) {
+    if (arg.startsWith("--output=")) options.output = resolve(process.cwd(), arg.slice(9));
+    else if (arg.startsWith("--queue=")) options.queue = resolve(process.cwd(), arg.slice(8));
+    else throw new Error(`Unknown argument: ${arg}`);
+  }
+  return options;
+}
+
+async function main() {
+  const options = parseArgs(process.argv.slice(2));
+  const statusBefore = git(["status", "--porcelain=v1", "--untracked-files=all"]);
+  if (statusBefore) throw new Error(`release checks require a clean worktree:\n${statusBefore}`);
+
+  const candidate = {
+    commit: git(["rev-parse", "HEAD"]),
+    tree: git(["rev-parse", "HEAD^{tree}"]),
+  };
+  const receipt = {
+    schemaVersion: 1,
+    candidate,
+    startedAt: new Date().toISOString(),
+    checks: {},
+  };
+
+  for (const check of commands) {
+    const label = display(check.command, check.args);
+    process.stdout.write(`\n== ${check.id}: ${label} ==\n`);
+    const started = Date.now();
+    const child = run(check.command, check.args, { cwd: check.cwd, stdio: "inherit" });
+    receipt.checks[check.id] = {
+      pass: child.status === 0,
+      command: label,
+      exitCode: child.status,
+      durationMs: Date.now() - started,
+    };
+  }
+
+  const queueTemporary = `${options.queue}.${process.pid}.tmp`;
+  process.stdout.write("\n== queue_handoff: isolated Node -> Go -> Node -> Go rehearsal ==\n");
+  const queueStarted = Date.now();
+  const queueChild = run(process.execPath, [resolve(scriptDir, "run-queue-handoff-rehearsal.mjs")], {
+    cwd: goRoot,
+    stdio: "inherit",
+    env: {
+      JANUSLY_HANDOFF_TESTED_TREE: candidate.tree,
+      JANUSLY_HANDOFF_EVIDENCE: queueTemporary,
+      GOCACHE: process.env.GOCACHE ?? "/private/tmp/janusly-go-build-cache",
+    },
+  });
+  let queueReceiptValid = false;
+  if (queueChild.status === 0) {
+    const queueReceipt = JSON.parse(await readFile(queueTemporary, "utf8"));
+    queueReceiptValid = queueReceipt.schemaVersion === 1 &&
+      queueReceipt.testedTree === candidate.tree &&
+      queueReceipt.nodeOracleCommit === NODE_ORACLE_COMMIT &&
+      queueReceipt.pass === true;
+    if (queueReceiptValid) {
+      await mkdir(dirname(options.queue), { recursive: true });
+      await rename(queueTemporary, options.queue);
+    }
+  }
+  if (!queueReceiptValid) await unlink(queueTemporary).catch(() => undefined);
+  receipt.queueHandoff = {
+    pass: queueChild.status === 0 && queueReceiptValid,
+    exitCode: queueChild.status,
+    durationMs: Date.now() - queueStarted,
+    receipt: options.queue,
+  };
+
+  const finalCommit = git(["rev-parse", "HEAD"]);
+  const finalTree = git(["rev-parse", "HEAD^{tree}"]);
+  const statusAfter = git(["status", "--porcelain=v1", "--untracked-files=all"]);
+  receipt.checks.source_tree_unchanged = {
+    pass: finalCommit === candidate.commit && finalTree === candidate.tree && statusAfter === "",
+    command: "git identity and cleanliness recheck",
+    exitCode: finalCommit === candidate.commit && finalTree === candidate.tree && statusAfter === "" ? 0 : 1,
+    durationMs: 0,
+  };
+  receipt.finishedAt = new Date().toISOString();
+  receipt.pass = Object.values(receipt.checks).every(check => check.pass === true) && receipt.queueHandoff.pass;
+  await writeAtomic(options.output, `${JSON.stringify(receipt, null, 2)}\n`);
+  process.stdout.write(`\nRelease check receipt: ${options.output}\n`);
+  process.stdout.write(`Queue handoff receipt: ${options.queue}\n`);
+  process.stdout.write(`Local release checks: ${receipt.pass ? "PASS" : "FAIL"}\n`);
+  if (!receipt.pass) process.exitCode = 2;
+}
+
+main().catch(error => {
+  console.error(`[release-checks] ${error instanceof Error ? error.stack : String(error)}`);
+  process.exitCode = 1;
+});

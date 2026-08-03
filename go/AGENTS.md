@@ -66,6 +66,7 @@ cd go
 make db-up       # PostgreSQL 18 on 127.0.0.1:4632
 make migrate     # embedded goose migrations only
 make verify      # generate/drift, build, lint, unit, integration, parity
+make release-review # exact-head local receipts + fail-closed review manifest
 ```
 
 The only supported database major is PostgreSQL 18. `make test-pg18` repeats
@@ -75,6 +76,13 @@ package manifests (Node.js 24 and pnpm 11 for frontend/reference tooling).
 
 Default ports are API 4600, internal metrics/pprof 4601, and PostgreSQL 4632.
 Do not expose the internal listener publicly.
+
+Release evidence is generated under ignored `../artifacts/` paths by
+`make release-review`; it binds every local check and the queue round-trip to
+the exact candidate commit/tree. `make release-production-check` never deploys
+or changes traffic: it only requires the separately captured remote review,
+remote CI, shadow, canary, and rollback receipts described in
+[`RELEASE-CANDIDATE.md`](RELEASE-CANDIDATE.md).
 
 ## Runtime invariants
 

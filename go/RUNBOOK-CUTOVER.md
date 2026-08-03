@@ -13,7 +13,9 @@ that gate rather than infer safety from queue depth alone.
 ## Environment prerequisites
 
 1. The exact Go candidate passes the complete audit ladder, not only
-   `make dual`.
+   `make dual`. Run `make release-review` from a clean, fetched checkout and
+   retain its commit/tree-bound JSON and Markdown manifest; any review blocker
+   aborts publication.
 2. Node and Go are deployed side by side against a rehearsed copy of the same
    PostgreSQL state. Node retains its Redis/BullMQ dependencies while it owns
    any route or queued-work family; Go does not consume BullMQ jobs.

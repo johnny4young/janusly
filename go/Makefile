@@ -4,7 +4,10 @@ PG_CONTAINER := janusly-go-pilot-postgres-1
 SCHEMA_DB := janusly_go_schema_dump
 SCHEMA_DB_URL ?= postgres://janusly:janusly-go-local@127.0.0.1:4632/$(SCHEMA_DB)
 
-.PHONY: db-up db-down migrate schema-dump generate lint vuln test run build parity ci test-pg18 bench fuzz contract web-embed verify seed chaos bench-hostile script-test queue-handoff-test queue-handoff queue-handoff-rehearsal
+.PHONY: db-up db-down migrate schema-dump generate lint vuln test run build parity ci test-pg18 bench fuzz contract web-embed verify seed chaos bench-hostile script-test queue-handoff-test queue-handoff queue-handoff-rehearsal release-checks release-manifest release-review release-production-check
+
+RELEASE_ARTIFACTS ?= ../artifacts
+RELEASE_MANIFEST_ARGS ?=
 
 db-up:
 	docker compose -f docker-compose.yml up -d --wait
@@ -82,6 +85,28 @@ queue-handoff:
 # Full isolated Node -> Go -> Node -> Go queue ownership rehearsal.
 queue-handoff-rehearsal:
 	node conformance/run-queue-handoff-rehearsal.mjs
+
+# Exact-commit local validation receipts. Artifacts are ignored so evidence can
+# hash the candidate tree without becoming part of that tree.
+release-checks:
+	node conformance/run-release-checks.mjs \
+		--output=$(RELEASE_ARTIFACTS)/go-release-checks.json \
+		--queue=$(RELEASE_ARTIFACTS)/go-queue-handoff-evidence.json
+
+release-manifest:
+	node conformance/run-release-candidate.mjs \
+		--checks=$(RELEASE_ARTIFACTS)/go-release-checks.json \
+		--queue=$(RELEASE_ARTIFACTS)/go-queue-handoff-evidence.json \
+		--external=$(RELEASE_ARTIFACTS)/go-external-gates.json \
+		--json=$(RELEASE_ARTIFACTS)/go-release-candidate.json \
+		--markdown=$(RELEASE_ARTIFACTS)/go-release-candidate.md \
+		$(RELEASE_MANIFEST_ARGS)
+
+release-review: release-checks
+	$(MAKE) release-manifest RELEASE_MANIFEST_ARGS=--check-review
+
+release-production-check:
+	$(MAKE) release-manifest RELEASE_MANIFEST_ARGS=--check-production
 
 ci:
 	@echo "== generate (sqlc drift check) =="
