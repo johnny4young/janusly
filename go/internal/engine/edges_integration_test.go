@@ -197,7 +197,8 @@ func TestStrictTemplatePolicyFailsBeforeConsumingMissingValue(t *testing.T) {
 
 	var errorJSON []byte
 	_ = pool.QueryRow(ctx, "select error_json from run_nodes where run_id=$1 and node_id='tx'", runID).Scan(&errorJSON)
-	if !strings.Contains(string(errorJSON), "Node config contains 1 unresolved template path") {
+	if !strings.Contains(string(errorJSON), "Node config contains 1 unresolved template path") ||
+		!strings.Contains(string(errorJSON), `"code": "UNRESOLVED_TEMPLATE_PATH"`) {
 		t.Fatalf("strict policy must fail with the envelope message: %s", errorJSON)
 	}
 }

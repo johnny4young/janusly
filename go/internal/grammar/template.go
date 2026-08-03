@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -73,6 +74,10 @@ func (e *UnresolvedTemplatePathError) Error() string {
 	return fmt.Sprintf("Node config contains %d unresolved template path%s", e.Count, plural)
 }
 
+func (*UnresolvedTemplatePathError) ErrorName() string    { return "UnresolvedTemplatePathError" }
+func (*UnresolvedTemplatePathError) ErrorCode() string    { return "UNRESOLVED_TEMPLATE_PATH" }
+func (*UnresolvedTemplatePathError) ErrorStatusCode() int { return 0 }
+
 // NewUnresolvedTemplatePathError bounds the recorded paths like the
 // reference envelope.
 func NewUnresolvedTemplatePathError(paths []string) *UnresolvedTemplatePathError {
@@ -121,6 +126,10 @@ func RenderTemplateWithRedactions(value any, scope map[string]any, opts RenderOp
 	if err != nil {
 		return RenderResult{}, err
 	}
+	// Go maps do not retain the authored JSON property order. Canonicalize the
+	// evidence once after rendering so retries and replicas emit the same bounded
+	// path list rather than inheriting randomized map iteration.
+	slices.Sort(state.unresolved)
 	return RenderResult{
 		Rendered:        rendered,
 		RedactedValues:  state.redacted,

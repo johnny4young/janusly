@@ -30,6 +30,15 @@ type ExecError struct {
 
 func (e *ExecError) Error() string { return e.Message }
 
+// richError is the identity contract structured domain/executor errors
+// satisfy so classification survives both redaction and persistence.
+type richError interface {
+	error
+	ErrorName() string
+	ErrorCode() string
+	ErrorStatusCode() int
+}
+
 // serializeError projects any error into the persisted error_json shape.
 func serializeError(err error) map[string]any {
 	var exec *ExecError
@@ -46,6 +55,17 @@ func serializeError(err error) map[string]any {
 		}
 		if exec.WriteSide {
 			out["writeSide"] = true
+		}
+		return out
+	}
+	var rich richError
+	if errors.As(err, &rich) {
+		out := map[string]any{"message": rich.Error(), "name": rich.ErrorName()}
+		if code := rich.ErrorCode(); code != "" {
+			out["code"] = code
+		}
+		if statusCode := rich.ErrorStatusCode(); statusCode != 0 {
+			out["statusCode"] = statusCode
 		}
 		return out
 	}

@@ -181,15 +181,6 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 	return grammar.RedactValues(output, rendered.RedactedValues), nil
 }
 
-// richError is the identity contract structured executor errors satisfy so
-// classification survives redaction.
-type richError interface {
-	error
-	ErrorName() string
-	ErrorCode() string
-	ErrorStatusCode() int
-}
-
 // redactExecError scrubs resolved secret/env values from the message while
 // preserving the error's classification identity (name/code/status) — the
 // retry ladder reads those fields to match retryOn patterns like "5xx".

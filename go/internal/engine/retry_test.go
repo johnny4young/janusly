@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/johnny4young/janusly/go/internal/grammar"
 )
 
 // Cases port core/retry-policy.ts semantics; the delay math and jitter use
@@ -133,6 +135,15 @@ func TestSerializeErrorShapes(t *testing.T) {
 	}
 	if !reflect.DeepEqual(structured, want) {
 		t.Fatalf("structured error shape: %v", structured)
+	}
+	templateError := serializeError(grammar.NewUnresolvedTemplatePathError([]string{"context.missing"}))
+	templateWant := map[string]any{
+		"message": "Node config contains 1 unresolved template path",
+		"name":    "UnresolvedTemplatePathError",
+		"code":    "UNRESOLVED_TEMPLATE_PATH",
+	}
+	if !reflect.DeepEqual(templateError, templateWant) {
+		t.Fatalf("rich domain error shape: %v", templateError)
 	}
 }
 

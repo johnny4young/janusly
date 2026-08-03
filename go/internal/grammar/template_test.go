@@ -147,20 +147,9 @@ func TestCollectsUnresolvedPathsOnceAndAnonymizesEnvNames(t *testing.T) {
 	if !reflect.DeepEqual(result.Rendered, want) {
 		t.Fatalf("rendered %#v", result.Rendered)
 	}
-	// Map iteration order varies in Go, so assert set membership + size
-	// instead of the reference's insertion order (divergence noted in plan).
-	if len(result.UnresolvedPaths) != 2 {
-		t.Fatalf("dedup broken: %v", result.UnresolvedPaths)
-	}
-	seen := map[string]bool{}
-	for _, p := range result.UnresolvedPaths {
-		seen[p] = true
-		if p == "env.MISSING_PRIVATE_ENDPOINT" {
-			t.Fatal("env name must be anonymized")
-		}
-	}
-	if !seen["context.fetch.output.json.customer.id"] || !seen["env.*"] {
-		t.Fatalf("expected anonymized entries, got %v", result.UnresolvedPaths)
+	wantPaths := []string{"context.fetch.output.json.customer.id", "env.*"}
+	if !reflect.DeepEqual(result.UnresolvedPaths, wantPaths) {
+		t.Fatalf("expected stable anonymized entries %v, got %v", wantPaths, result.UnresolvedPaths)
 	}
 }
 
@@ -315,6 +304,11 @@ func TestUnresolvedTemplatePathErrorEnvelope(t *testing.T) {
 	one := NewUnresolvedTemplatePathError([]string{"context.a.output.x"})
 	if one.Error() != "Node config contains 1 unresolved template path" || one.Truncated {
 		t.Fatalf("singular envelope broken: %v", one)
+	}
+	if one.ErrorName() != "UnresolvedTemplatePathError" ||
+		one.ErrorCode() != "UNRESOLVED_TEMPLATE_PATH" || one.ErrorStatusCode() != 0 {
+		t.Fatalf("structured identity broken: name=%q code=%q status=%d",
+			one.ErrorName(), one.ErrorCode(), one.ErrorStatusCode())
 	}
 	many := make([]string, 25)
 	for i := range many {
