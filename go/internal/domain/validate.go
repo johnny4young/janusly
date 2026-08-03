@@ -28,6 +28,7 @@ const (
 	CodeEdgeInvalidCondition     = "edge_invalid_condition"
 	CodeEdgeConditionInputsScope = "edge_condition_inputs_scope"
 	CodeInputDefaultTypeMismatch = "input_default_type_mismatch"
+	CodeScheduleInvalidCron      = "schedule_invalid_cron"
 	CodeCycleDetected            = "cycle_detected"
 	CodeMissingStartNode         = "missing_start_node"
 	// Pilot-only: the type is valid in the full platform but this backend
@@ -141,6 +142,11 @@ func ValidateWithSemanticFixtures(wf *Workflow, validExpression ExpressionValida
 		}
 		if node.Type == "transform" && !isNonEmptyObject(node.Config["mapping"]) {
 			push(Issue{Code: CodeTransformMissingMapping, Message: "Transform node requires a non-empty config.mapping object", NodeID: node.ID})
+		}
+		if node.Type == "schedule" {
+			if _, err := ResolveScheduleConfig(node.Config); err != nil {
+				push(Issue{Code: CodeScheduleInvalidCron, Message: err.Error(), NodeID: node.ID})
+			}
 		}
 		if node.Type == "approval" {
 			if _, err := ResolveApprovalWaitingConfig(node.Config, time.Now()); err != nil {

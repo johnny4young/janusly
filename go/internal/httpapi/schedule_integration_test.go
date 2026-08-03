@@ -25,7 +25,7 @@ func TestScheduleNodeDueClockLoop(t *testing.T) {
 		"id": wfID, "name": "Nightly", "dslVersion": "1.0",
 		"nodes": []any{
 			map[string]any{"id": "tick", "type": "schedule",
-				"config": map[string]any{"cron": "0 3 * * *"}},
+				"config": map[string]any{"cronExpression": "0 3 * * *"}},
 			map[string]any{"id": "step", "type": "transform",
 				"config": map[string]any{"mapping": map[string]any{
 					"via": "{{context.input.triggeredBy}}",
@@ -71,6 +71,13 @@ func TestScheduleNodeDueClockLoop(t *testing.T) {
 		lastRunID).Scan(&via)
 	if via != "schedule" {
 		t.Fatalf("run input must carry triggeredBy schedule: %q", via)
+	}
+	var firedCron string
+	_ = pool.QueryRow(ctx,
+		`SELECT state_json->'output'->>'cronExpression' FROM run_nodes WHERE run_id = $1 AND node_id = 'tick'`,
+		lastRunID).Scan(&firedCron)
+	if firedCron != "0 3 * * *" {
+		t.Fatalf("schedule node output must carry its canonical cronExpression: %q", firedCron)
 	}
 	// The clock advanced to the NEXT cron fire, not the lease. Assert
 	// ALIGNMENT (top-of-hour instant in the future) instead of distance —

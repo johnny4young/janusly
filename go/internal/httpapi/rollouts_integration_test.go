@@ -159,7 +159,7 @@ func TestRolloutVersionWriteLocking(t *testing.T) {
 	// baseline lacks → the create refuses before any traffic splits.
 	scheduled := rolloutWorkflowDoc(wfID, "three")
 	scheduled["nodes"] = append(scheduled["nodes"].([]any), map[string]any{
-		"id": "tick", "type": "schedule", "config": map[string]any{"cron": "0 9 * * *"},
+		"id": "tick", "type": "schedule", "config": map[string]any{"cronExpression": "0 9 * * *"},
 	})
 	scheduled["edges"] = append(scheduled["edges"].([]any), map[string]any{"from": "tick", "to": "shape"})
 	v3 := saveVersion(scheduled)
@@ -173,7 +173,7 @@ func TestRolloutVersionWriteLocking(t *testing.T) {
 	// Identical trigger contracts (v3 → v4 same schedule) are compatible.
 	scheduled4 := rolloutWorkflowDoc(wfID, "four")
 	scheduled4["nodes"] = append(scheduled4["nodes"].([]any), map[string]any{
-		"id": "tick", "type": "schedule", "config": map[string]any{"cron": "0 9 * * *"},
+		"id": "tick", "type": "schedule", "config": map[string]any{"cronExpression": "0 9 * * *"},
 	})
 	scheduled4["edges"] = append(scheduled4["edges"].([]any), map[string]any{"from": "tick", "to": "shape"})
 	v4 := saveVersion(scheduled4)

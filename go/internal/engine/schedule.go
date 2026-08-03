@@ -53,8 +53,13 @@ func (e *Engine) SyncWorkflowSchedules(
 		if node.Type != "schedule" {
 			continue
 		}
-		expression, _ := node.Config["cron"].(string)
-		schedule, err := cron.Parse(expression)
+		config, err := domain.ResolveScheduleConfig(node.Config)
+		if err != nil || !config.Enabled {
+			// Save-time validation rejects malformed configs; disabled schedules
+			// deliberately have no durable scheduler entry.
+			continue
+		}
+		schedule, err := cron.Parse(config.CronExpression)
 		if err != nil {
 			// Save-time validation rejects bad cron; a snapshot that slipped
 			// past simply registers nothing for this node.
@@ -67,7 +72,7 @@ func (e *Engine) SyncWorkflowSchedules(
 		if err := q.UpsertScheduleEntry(ctx, store.UpsertScheduleEntryParams{
 			ID: e.newID(), OrgID: orgID, WorkflowID: workflowID,
 			WorkflowVersionID: versionID, NodeID: node.ID,
-			CronExpression: expression, NextFireAt: &next,
+			CronExpression: config.CronExpression, NextFireAt: &next,
 			CreatedBy: pgtype.Text{String: createdBy, Valid: createdBy != ""},
 		}); err != nil {
 			return err

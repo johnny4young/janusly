@@ -53,3 +53,22 @@ func TestWebhookReceivedPassesEventThrough(t *testing.T) {
 		t.Fatalf("triggeredAt missing: %+v", result)
 	}
 }
+
+func TestScheduleUsesCanonicalConfigAndOutput(t *testing.T) {
+	out, err := executeSchedule(context.Background(), Input{Config: map[string]any{
+		"cronExpression": " 0 9 1 * * ", "enabled": false,
+	}})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	result := out.(map[string]any)
+	if result["cronExpression"] != "0 9 1 * *" {
+		t.Fatalf("cron output: %+v", result)
+	}
+	if _, ok := result["triggeredAt"].(string); !ok {
+		t.Fatalf("triggeredAt missing: %+v", result)
+	}
+	if _, legacy := result["triggeredBy"]; legacy {
+		t.Fatalf("schedule output must not use the event-trigger envelope: %+v", result)
+	}
+}
