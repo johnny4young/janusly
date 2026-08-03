@@ -10,10 +10,12 @@ independently. Do not infer certification from a completed plan row.
    criteria.
 2. [`ARCHITECTURE.md`](ARCHITECTURE.md) — lifecycle, module boundaries, claim
    ladder, and ADRs.
-3. [`PLAN.md`](PLAN.md) and [`JOURNAL.md`](JOURNAL.md) — historical execution
+3. [`QUEUE-HANDOFF.md`](QUEUE-HANDOFF.md) before changing queue, retry,
+   scheduler, migration, or cutover behavior.
+4. [`PLAN.md`](PLAN.md) and [`JOURNAL.md`](JOURNAL.md) — historical execution
    record and implementation rationale. These files are intentionally Spanish;
    new repository-facing documentation and code remain English.
-4. The relevant root architecture document under `docs/architecture/` before
+5. The relevant root architecture document under `docs/architecture/` before
    changing that feature area. The preserved `nodejs-legacy` branch is the
    compatibility and rollback oracle.
 
@@ -77,6 +79,12 @@ Do not expose the internal listener publicly.
 
 - PostgreSQL `run_nodes` plus due-clock tables are the Go work queue; Redis and
   BullMQ are not Go delivery dependencies.
+- Every Go transition into `run_nodes.status='queued'` also maintains Node's
+  existing queue-publication generation/repair marker. It is a dormant rollback
+  outbox while Go owns the plane; do not clear or repurpose it.
+- BullMQ handoff is fail-closed over four queues. Unknown queues/jobs/schedulers,
+  legacy repeatables, moving/truncated inventory, active/executable work, and
+  materialized schedule ticks block activation.
 - All claims, completions, replays, and terminal effects preserve their CAS and
   transaction boundaries.
 - Every tenant read/write remains organization-scoped.

@@ -29,9 +29,18 @@ LIMIT sqlc.arg(page_limit);
 UPDATE runs SET status = $4, output_json = COALESCE($5, output_json)
 WHERE id = $1 AND org_id = $2 AND status = $3;
 
+-- Initial executable roots expose one Node-compatible rollback generation;
+-- pending descendants do not become publishable until readiness queues them.
 -- name: InsertRunNode :exec
-INSERT INTO run_nodes (id, run_id, node_id, status, attempts, state_json)
-VALUES ($1, $2, $3, $4, $5, $6);
+INSERT INTO run_nodes (
+  id, run_id, node_id, status, attempts, state_json,
+  queue_publication_repair_after, queue_publication_generation
+)
+VALUES (
+  $1, $2, $3, $4, $5, $6,
+  CASE WHEN $4 = 'queued' THEN clock_timestamp() ELSE NULL END,
+  CASE WHEN $4 = 'queued' THEN 1 ELSE 0 END
+);
 
 -- name: GetRunNode :one
 SELECT id, run_id, node_id, status, state_json, attempts, started_at,
@@ -87,8 +96,13 @@ WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
 -- name: GetRunExecution :one
 SELECT status, org_id, input_json, replay_mode FROM runs WHERE id = $1;
 
+-- The Node outbox deadline is the same instant as Go's retry wakeup. Node's
+-- reconciler therefore cannot publish the rollback delivery before backoff.
 -- name: RequeueRunNodeForRetry :execrows
-UPDATE run_nodes SET status = 'queued', attempts = sqlc.arg(attempt)
+UPDATE run_nodes
+SET status = 'queued', attempts = sqlc.arg(attempt),
+    queue_publication_repair_after = sqlc.arg(wake_at),
+    queue_publication_generation = queue_publication_generation + 1
 WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
   AND status = 'running';
 
@@ -244,9 +258,12 @@ LIMIT sqlc.arg(page_limit);
 
 -- can never linger as an eligible "open" member of a second cohort.
 
+-- A Go-created redrive remains recoverable by Node before its Go claim.
 -- name: RedriveFailedRunNode :one
 UPDATE run_nodes
-SET status = 'queued', attempts = 1
+SET status = 'queued', attempts = 1,
+    queue_publication_repair_after = clock_timestamp(),
+    queue_publication_generation = queue_publication_generation + 1
 WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
   AND status = 'failed'
 RETURNING COALESCE(attempts, 1)::int AS attempt;

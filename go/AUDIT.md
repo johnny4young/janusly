@@ -61,7 +61,7 @@ The interrupted runs and generated binaries are not certification evidence.
 | 2. Documentation and architecture truth | implementation-to-claim matrix; current AGENTS, reports, cutover map, and runbook | complete |
 | 3. Architecture and safety review | file-level findings for engine, API, persistence, concurrency, security, and allocation posture | pending |
 | 4. Node/Go contract parity | routes, wire shapes, errors, durable side effects, negative cases, and UI-facing behavior | pending |
-| 5. Data and queue transition | fresh/legacy/rollback database matrix plus BullMQ and in-flight-work drain rehearsal | pending |
+| 5. Data and queue transition | fresh/legacy/rollback database matrix plus BullMQ and in-flight-work drain rehearsal | complete |
 | 6. Clean validation ladder | CI, race, PG15/18, HA, failover, chaos, fuzz, SDK, benchmark, and soak-evidence audit | pending |
 | 7. Full web certification | complete Playwright coverage against Node and Go, EN/ES screenshots, zero unexplained console errors | pending |
 | 8. Integration candidate | exact candidate commit revalidated on `go-integration`, promoted to `develop`, with `main` PR left pending | pending |
@@ -96,8 +96,9 @@ exact candidate commit:
 | EVD-001 | P1 | `SOAK.md` cited an untracked random-name series, so the 24-hour verdict was not reproducible from a clean checkout. | fixed in this band |
 | TST-001 | P0 | The full Playwright lane was deferred from the pilot and remains a cutover gate. | open |
 | TST-002 | P1 | The queue-health integration test started workers that could claim its fixture before the snapshot assertion. | fixed in architecture review |
-| QUE-001 | P0 | The current cutover runbook forbids dual schedulers but does not yet prove a BullMQ/in-flight-work drain and rollback procedure. | open |
+| QUE-001 | P0 | The current cutover runbook forbids dual schedulers but does not yet prove a BullMQ/in-flight-work drain and rollback procedure. | fixed in queue transition review |
 | QUE-002 | P0 | The cutover map promised per-tenant work ownership even though Go claims and background sweeps are database-global. | fixed in architecture review |
+| QUE-003 | P0 | Go-created queued nodes did not maintain Node's publication outbox, so rollback could strand roots/downstream/redrives or lose retry backoff. | fixed in queue transition review |
 | SRC-001 | P2 | Go source comments contain 134 internal ticket identifiers instead of durable behavioral explanations. | open |
 | MOD-001 | P2 | Go 1.26 idioms were not enforced, allowing avoidable allocation and synchronization boilerplate to accumulate. | fixed in this band |
 | PAR-001 | P1 | Go org-config writes and environment fallbacks accepted non-finite or negative fractional integer inputs differently from Node and skipped Node's string normalization. | fixed in architecture review |
@@ -410,3 +411,43 @@ queued node before the snapshot read. Commit `7e60338d` gives observability
 tests a no-worker harness. Twenty race-enabled repetitions passed before the
 full PostgreSQL 15 race/integration lane passed on 2026-08-02, closing
 `TST-002`.
+
+### BullMQ drain and rollback handoff
+
+`QUE-001` is closed by an executable cross-store gate, not by a queue-depth
+claim. The frozen Node oracle owns four BullMQ queues: `workflow-nodes`,
+`maintenance-jobs`, `alerts-system`, and `auto-healing-system`. The policy
+catalog covers every current producer/dispatcher and all dynamic workflow,
+maintenance, alert, and auto-healing schedulers. A bounded read-only Redis scan
+also rejects a fifth queue; unknown jobs/schedulers, deprecated repeatables,
+truncated results, and identities that move across the before/after snapshot
+all fail closed.
+
+The reviewed handoff drains every active job, `execute-node` delivery, queued
+executable row, and materialized `schedule-trigger`. Only exact timer,
+approval, replay-campaign, consent-purge, and idempotent system-scan deliveries
+may remain parked. Their PostgreSQL checkpoint, clock, or campaign identity is
+validated before Go activation. Scheduler retirement uses BullMQ's public
+`removeJobScheduler` API and performs no removal if any ownership is unknown;
+there is no Redis-key or ad hoc PostgreSQL conversion path.
+
+The review found a separate rollback P0, recorded as `QUE-003`: Go did not
+maintain Node's existing queue-publication outbox, so a Go-created queued root,
+downstream node, redrive, or retry could be invisible to Node after rollback.
+Every Go queued generation now increments `queue_publication_generation` and
+sets `queue_publication_repair_after` in the same status transaction. A retry
+uses the exact Go wakeup instant; a Go claim clears the marker. Node's unchanged
+reconciler therefore republishes ready work, waits for future backoff, and
+clears only the Redis-accepted generation. A later Go migration removes a
+spent private retry wakeup after Node consumes it.
+
+The isolated rehearsal creates a temporary PostgreSQL database and ephemeral
+Redis, then proves: the initial unsafe inventory is red; an unknown fifth
+queue/job/scheduler causes zero scheduler removals; reviewed schedulers across
+all four queues retire; executable work drains while timer, approval, campaign,
+and purge work remains safely parked; a Go retry is not published before its
+deadline; Node's real queue-publication reconciler publishes the exact due
+generation; Node's real execution CAS accepts it; and the next Go migration
+cleans the spent clock before a final green Node-to-Go gate. The machine-readable
+result is `conformance/queue-handoff-evidence.json`, keyed by the staged Git
+source tree before adding the receipt itself, rather than a mutable branch name.

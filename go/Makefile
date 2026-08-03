@@ -4,7 +4,7 @@ PG_CONTAINER := janusly-go-pilot-postgres-1
 SCHEMA_DB := janusly_go_schema_dump
 SCHEMA_DB_URL ?= postgres://janusly:janusly-go-local@127.0.0.1:4632/$(SCHEMA_DB)
 
-.PHONY: db-up db-down migrate schema-dump generate lint vuln test run build parity ci test-pg15 bench fuzz contract web-embed verify seed chaos bench-hostile
+.PHONY: db-up db-down migrate schema-dump generate lint vuln test run build parity ci test-pg15 bench fuzz contract web-embed verify seed chaos bench-hostile queue-handoff-test queue-handoff queue-handoff-rehearsal
 
 db-up:
 	docker compose -f docker-compose.yml up -d --wait
@@ -66,10 +66,26 @@ dual:
 contract:
 	go run ./cmd/contract
 
+# Pure fail-closed queue catalog/verdict tests. The live gate below additionally
+# requires the frozen Node workspace dependencies, Redis, and PostgreSQL.
+queue-handoff-test:
+	node --check conformance/queue-handoff.mjs
+	node --test conformance/queue-handoff-policy.test.mjs
+
+HANDOFF_DIRECTION ?= node-to-go
+queue-handoff:
+	node conformance/queue-handoff.mjs verify --direction=$(HANDOFF_DIRECTION)
+
+# Full isolated Node -> Go -> Node -> Go queue ownership rehearsal.
+queue-handoff-rehearsal:
+	node conformance/run-queue-handoff-rehearsal.mjs
+
 ci:
 	@echo "== generate (sqlc drift check) =="
 	$(MAKE) generate
 	@git diff --quiet -- internal/store || (echo "sqlc output drifted: run make generate and commit" && exit 1)
+	@echo "== queue handoff policy =="
+	$(MAKE) queue-handoff-test
 	@echo "== coverage floors (T-532) =="
 	@bash scripts/coverage-floor.sh
 	@echo "== contract (drift check) =="

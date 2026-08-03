@@ -6,6 +6,9 @@ and rollback. Read-only HTTP families may shadow or move gradually, but the
 execution worker and background mutation loops are database-global and move as
 one work plane. This runbook is not production-certified until the P0 data,
 BullMQ, in-flight-work, and full-browser gates in [`AUDIT.md`](AUDIT.md) pass.
+The closed four-queue/job matrix, executable commands, and rollback publication
+contract live in [`QUEUE-HANDOFF.md`](QUEUE-HANDOFF.md); an operator must use
+that gate rather than infer safety from queue depth alone.
 
 ## Environment prerequisites
 
@@ -24,9 +27,10 @@ BullMQ, in-flight-work, and full-browser gates in [`AUDIT.md`](AUDIT.md) pass.
    `janusly_go_work_plane_active 0`.
 6. The proxy can freeze every mutating route while keeping reads available,
    then switch the complete mutation surface atomically without a deployment.
-7. The queue-transition rehearsal has classified and drained BullMQ delayed,
-   active, waiting, scheduled, replay-campaign, approval, and timer work. Until
-   that rehearsal is recorded, do not switch the work plane.
+7. The exact candidate's `make -C go queue-handoff-rehearsal` is green, and a
+   live `node-to-go` gate has classified all four BullMQ queues, discovered no
+   fifth queue or legacy repeatable ownership, retired every scheduler, drained
+   executable/schedule work, and validated every parked durable delivery.
 8. Run the exact candidate's `migrate` subcommand while every Go process is
    passive. It must install the Node runtime bridge, reconstruct every durable
    timer and approval-deadline wakeup, initialize every enabled schedule due
@@ -52,17 +56,21 @@ deployment shape. HTTP routing alone does not transfer queued work.
    rollout or replay campaign in any organization.
 2. Freeze every mutating ingress route at the proxy and record the freeze
    watermark. Safe reads may remain available.
-3. Gracefully stop Node API producers, then drain and stop both Node BullMQ
-   workers. No producer may remain able to materialize a new job.
-4. Remove recurring Node scheduler ownership and drain or explicitly park
-   every pre-watermark job according to the rehearsed queue matrix. Do not
-   convert jobs by editing Redis or PostgreSQL.
+3. Gracefully stop Node API, alerts, and auto-healing producers, then drain and
+   stop both engine BullMQ workers. No producer may remain able to materialize
+   a new job.
+4. Run the reviewed `retire-schedulers --confirm-node-producers-stopped`
+   command, then drain every `execute-node` and materialized `schedule-trigger`
+   according to [`QUEUE-HANDOFF.md`](QUEUE-HANDOFF.md). Park only the closed
+   durable/idempotent allowlist. Do not convert jobs by ad hoc Redis or
+   PostgreSQL edits.
 5. Run the exact Go candidate's `migrate` subcommand, then restart it passive
    and require its exact-version/runtime-bridge boot gate to pass.
-6. Verify zero active Node job, the expected durable PostgreSQL handoff rows,
-   initialized timer/schedule clocks, and captured database/Redis checkpoints.
-   Any unexplained `running` node or active-readiness rejection aborts the
-   switch.
+6. Run the double-sampled `node-to-go` gate and capture its JSON. It must report
+   zero scheduler, active/executable/schedule delivery, `running`/executable
+   `queued` row, malformed waiting bridge, unarmed schedule, unknown queue/job,
+   legacy repeatable, truncation, or cross-snapshot movement. Any red verdict
+   aborts the switch.
 7. Restart the Go candidate with `JANUSLY_GO_WORK_PLANE_ENABLED=true`; require
    `X-Janusly-Work-Plane: active` and `janusly_go_work_plane_active 1` before
    unfreezing traffic.
@@ -98,10 +106,13 @@ not as a substitute for candidate-environment observation.
 1. Freeze every mutating ingress route.
 2. Stop the Go HTTP listener and gracefully drain its work plane. Keep Go
    responsible for its `running` claims; do not let Node guess how to reap
-   them. Any unexplained active claim aborts rollback.
+   them. Any unexplained active claim aborts rollback. Queued Go generations
+   remain recoverable through the shared Node publication markers.
 3. Restart Go passive and require its header/metric to report passive.
-4. Restore Node producers and BullMQ workers only after confirming the Go work
-   plane is disabled and the rollback queue matrix is satisfied.
+4. Run the `go-to-node` gate while Node is still stopped. Every queued
+   generation must have either its exact BullMQ delivery or a durable Node
+   publication marker; retry marker and Go wakeup deadlines must match. Restore
+   Node producers/workers only after this gate and the passive proof pass.
 5. Restore every mutating route to Node, reload the proxy, and unfreeze writes.
 6. Verify a Node no-op run and the Activity UI against the restored path.
 7. Add the divergence to the dual/browser corpus and complete the post-mortem
@@ -118,6 +129,8 @@ rollback compatibility.
 - No per-tenant worker split until both runtimes implement and prove a shared
   tenant ownership fence.
 - No direct data edits to make a divergence disappear.
+- No manual Redis key deletion or PostgreSQL marker rewrite; scheduler removal
+  uses only the reviewed BullMQ command.
 - No `pnpm migrate` against a goose-provisioned database.
 - No force-push, remote `main` update, or production switch based solely on a
   historical green report.

@@ -18,6 +18,8 @@ Read next:
 - [`RUNBOOK.md`](RUNBOOK.md) — build and operations.
 - [`RUNBOOK-CUTOVER.md`](RUNBOOK-CUTOVER.md) and
   [`CUTOVER-MAP.md`](CUTOVER-MAP.md) — candidate transition procedure.
+- [`QUEUE-HANDOFF.md`](QUEUE-HANDOFF.md) — executable BullMQ drain, parked-job,
+  rollback-outbox, and rehearsal contract.
 - [`PLAN.md`](PLAN.md) and [`JOURNAL.md`](JOURNAL.md) — historical execution
   record.
 
@@ -32,8 +34,9 @@ make run         # API + supervised background workers on :4600
 
 Additional gates include `make ci`, `make test-pg15`, `make dual`,
 `make test-ha`, `make failover`, `make chaos`, `make fuzz`, and
-`make bench-hostile`. See the audit ledger before interpreting a historical
-green result as current evidence.
+`make bench-hostile`. Queue cutover additionally requires
+`make queue-handoff-rehearsal` and a live `make queue-handoff` report. See the
+audit ledger before interpreting a historical green result as current evidence.
 
 ## Binaries
 

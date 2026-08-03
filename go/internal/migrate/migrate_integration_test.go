@@ -144,6 +144,33 @@ func TestUpgradePreGooseNodeRuntimeDatabase(t *testing.T) {
 		t.Fatalf("migration version = %d, want %d", current, latest)
 	}
 
+	// A Go retry published back to Node can leave its private wakeup behind
+	// after Node consumes the shared publication marker. Repeat migration must
+	// discard spent clocks without deleting a still-queued retry.
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO run_nodes (id, run_id, node_id, status, state_json) VALUES
+			('spent-retry-node', 'spent-retry-run', 'spent', 'succeeded', '{}'::jsonb),
+			('queued-retry-node', 'queued-retry-run', 'queued', 'queued', '{}'::jsonb);
+		INSERT INTO go_pilot_wakeups (run_node_id, wake_at, reason) VALUES
+			('spent-retry-node', now() + interval '1 minute', 'retry'),
+			('queued-retry-node', now() + interval '1 minute', 'retry');
+	`); err != nil {
+		t.Fatalf("seed rollback retry clocks: %v", err)
+	}
+	if err := Up(ctx, dsn); err != nil {
+		t.Fatalf("reconcile rollback retry clocks: %v", err)
+	}
+	var spent, queued int
+	if err := db.QueryRowContext(ctx, `
+		SELECT count(*) FILTER (WHERE run_node_id='spent-retry-node'),
+		       count(*) FILTER (WHERE run_node_id='queued-retry-node')
+		FROM go_pilot_wakeups`).Scan(&spent, &queued); err != nil {
+		t.Fatalf("read reconciled retry clocks: %v", err)
+	}
+	if spent != 0 || queued != 1 {
+		t.Fatalf("runtime bridge retry cleanup = spent %d queued %d", spent, queued)
+	}
+
 	var timerWakeAt time.Time
 	var timerReason string
 	if err := db.QueryRowContext(ctx,

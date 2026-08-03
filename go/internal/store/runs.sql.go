@@ -1052,8 +1052,15 @@ type InsertRunEventsParams struct {
 }
 
 const insertRunNode = `-- name: InsertRunNode :exec
-INSERT INTO run_nodes (id, run_id, node_id, status, attempts, state_json)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO run_nodes (
+  id, run_id, node_id, status, attempts, state_json,
+  queue_publication_repair_after, queue_publication_generation
+)
+VALUES (
+  $1, $2, $3, $4, $5, $6,
+  CASE WHEN $4 = 'queued' THEN clock_timestamp() ELSE NULL END,
+  CASE WHEN $4 = 'queued' THEN 1 ELSE 0 END
+)
 `
 
 type InsertRunNodeParams struct {
@@ -1065,6 +1072,8 @@ type InsertRunNodeParams struct {
 	StateJson json.RawMessage
 }
 
+// Initial executable roots expose one Node-compatible rollback generation;
+// pending descendants do not become publishable until readiness queues them.
 func (q *Queries) InsertRunNode(ctx context.Context, arg InsertRunNodeParams) error {
 	_, err := q.db.Exec(ctx, insertRunNode,
 		arg.ID,
@@ -1850,7 +1859,9 @@ const redriveFailedRunNode = `-- name: RedriveFailedRunNode :one
 
 
 UPDATE run_nodes
-SET status = 'queued', attempts = 1
+SET status = 'queued', attempts = 1,
+    queue_publication_repair_after = clock_timestamp(),
+    queue_publication_generation = queue_publication_generation + 1
 WHERE run_id = $1 AND node_id = $2
   AND status = 'failed'
 RETURNING COALESCE(attempts, 1)::int AS attempt
@@ -1866,6 +1877,7 @@ type RedriveFailedRunNodeParams struct {
 // The claim is also the lifecycle flip: one statement takes the causal
 // replay claim AND moves the row open → replayed, so a claimed dead letter
 // can never linger as an eligible "open" member of a second cohort.
+// A Go-created redrive remains recoverable by Node before its Go claim.
 func (q *Queries) RedriveFailedRunNode(ctx context.Context, arg RedriveFailedRunNodeParams) (int32, error) {
 	row := q.db.QueryRow(ctx, redriveFailedRunNode, arg.RunID, arg.NodeID)
 	var attempt int32
@@ -1874,19 +1886,30 @@ func (q *Queries) RedriveFailedRunNode(ctx context.Context, arg RedriveFailedRun
 }
 
 const requeueRunNodeForRetry = `-- name: RequeueRunNodeForRetry :execrows
-UPDATE run_nodes SET status = 'queued', attempts = $1
-WHERE run_id = $2 AND node_id = $3
+UPDATE run_nodes
+SET status = 'queued', attempts = $1,
+    queue_publication_repair_after = $2,
+    queue_publication_generation = queue_publication_generation + 1
+WHERE run_id = $3 AND node_id = $4
   AND status = 'running'
 `
 
 type RequeueRunNodeForRetryParams struct {
 	Attempt pgtype.Int4
+	WakeAt  *time.Time
 	RunID   string
 	NodeID  string
 }
 
+// The Node outbox deadline is the same instant as Go's retry wakeup. Node's
+// reconciler therefore cannot publish the rollback delivery before backoff.
 func (q *Queries) RequeueRunNodeForRetry(ctx context.Context, arg RequeueRunNodeForRetryParams) (int64, error) {
-	result, err := q.db.Exec(ctx, requeueRunNodeForRetry, arg.Attempt, arg.RunID, arg.NodeID)
+	result, err := q.db.Exec(ctx, requeueRunNodeForRetry,
+		arg.Attempt,
+		arg.WakeAt,
+		arg.RunID,
+		arg.NodeID,
+	)
 	if err != nil {
 		return 0, err
 	}

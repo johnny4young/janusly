@@ -31,6 +31,18 @@ func reconcileRuntimeBridge(ctx context.Context, db *sql.DB) error {
 }
 
 func reconcileWaitingWakeups(ctx context.Context, db *sql.DB) error {
+	// A rollback-published Go retry is consumed by Node through the shared
+	// queue-publication outbox. Node does not know the Go wakeup table, so its
+	// terminal/running transition can leave that already-spent clock behind.
+	// Preserve clocks only while they can still gate queued or waiting work.
+	if _, err := db.ExecContext(ctx, `
+		DELETE FROM go_pilot_wakeups w
+		USING run_nodes rn
+		WHERE w.run_node_id = rn.id
+		  AND rn.status NOT IN ('queued', 'waiting')`); err != nil {
+		return fmt.Errorf("clear spent runtime wakeups: %w", err)
+	}
+
 	// A due retry row inherited by an indefinite human checkpoint used to be
 	// mistaken for a timer. Only the two bounded waiting kinds may own a wakeup.
 	if _, err := db.ExecContext(ctx, `

@@ -525,7 +525,9 @@ func (q *Queries) LockClaimableRunNodes(ctx context.Context, batchSize int32) ([
 }
 
 const markLockedNodesRunning = `-- name: MarkLockedNodesRunning :many
-UPDATE run_nodes SET status = 'running', started_at = now()
+UPDATE run_nodes
+SET status = 'running', started_at = now(),
+    queue_publication_repair_after = NULL
 WHERE id = ANY($1::text[])
   AND status = 'queued'
   AND NOT EXISTS (
@@ -542,6 +544,7 @@ type MarkLockedNodesRunningRow struct {
 	Attempt int32
 }
 
+// A successful Go claim consumes this generation's rollback marker.
 func (q *Queries) MarkLockedNodesRunning(ctx context.Context, ids []string) ([]MarkLockedNodesRunningRow, error) {
 	rows, err := q.db.Query(ctx, markLockedNodesRunning, ids)
 	if err != nil {
@@ -616,7 +619,10 @@ func (q *Queries) QueryQueueHealth(ctx context.Context) (QueryQueueHealthRow, er
 
 const queueRunNode = `-- name: QueueRunNode :execrows
 
-UPDATE run_nodes SET status = 'queued', attempts = 1
+UPDATE run_nodes
+SET status = 'queued', attempts = 1,
+    queue_publication_repair_after = clock_timestamp(),
+    queue_publication_generation = queue_publication_generation + 1
 WHERE run_id = $1 AND node_id = $2 AND status = 'pending'
 `
 
@@ -626,6 +632,9 @@ type QueueRunNodeParams struct {
 }
 
 // Dispatch plane: claims, queue publication, wakeups, locks, reaper.
+// Keep Node's existing publication outbox current while Go owns delivery.
+// It is dormant under single-owner Go execution and becomes the rollback
+// source if Node must recreate BullMQ jobs.
 func (q *Queries) QueueRunNode(ctx context.Context, arg QueueRunNodeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, queueRunNode, arg.RunID, arg.NodeID)
 	if err != nil {

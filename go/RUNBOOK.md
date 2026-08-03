@@ -153,7 +153,9 @@ Candidate upgrade procedure:
 
 Do not claim schema rollback compatibility merely because migrations are
 additive. The audit in `AUDIT.md` requires a Node-created → Go-upgraded → Node
-rollback rehearsal before cutover approval.
+rollback rehearsal before cutover approval. The Redis/PostgreSQL ownership
+transfer is a separate gate; follow [`QUEUE-HANDOFF.md`](QUEUE-HANDOFF.md) and
+never infer it from an empty-looking queue dashboard.
 
 ## Fast diagnosis
 

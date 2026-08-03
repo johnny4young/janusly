@@ -43,6 +43,7 @@ func (e *Engine) RetryOrFail(ctx context.Context, claim ClaimedNode, node domain
 		requeued, err := q.RequeueRunNodeForRetry(ctx, store.RequeueRunNodeForRetryParams{
 			RunID: claim.RunID, NodeID: claim.NodeID,
 			Attempt: pgtype.Int4{Int32: nextAttempt, Valid: true},
+			WakeAt:  &wakeAt,
 		})
 		if err != nil {
 			return fmt.Errorf("requeue for retry: %w", err)

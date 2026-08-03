@@ -1,7 +1,13 @@
 -- Dispatch plane: claims, queue publication, wakeups, locks, reaper.
 
+-- Keep Node's existing publication outbox current while Go owns delivery.
+-- It is dormant under single-owner Go execution and becomes the rollback
+-- source if Node must recreate BullMQ jobs.
 -- name: QueueRunNode :execrows
-UPDATE run_nodes SET status = 'queued', attempts = 1
+UPDATE run_nodes
+SET status = 'queued', attempts = 1,
+    queue_publication_repair_after = clock_timestamp(),
+    queue_publication_generation = queue_publication_generation + 1
 WHERE run_id = $1 AND node_id = $2 AND status = 'pending';
 
 -- name: LockClaimableRunNodes :many
@@ -17,8 +23,11 @@ ORDER BY rn.id
 LIMIT sqlc.arg(batch_size)
 FOR UPDATE OF rn SKIP LOCKED;
 
+-- A successful Go claim consumes this generation's rollback marker.
 -- name: MarkLockedNodesRunning :many
-UPDATE run_nodes SET status = 'running', started_at = now()
+UPDATE run_nodes
+SET status = 'running', started_at = now(),
+    queue_publication_repair_after = NULL
 WHERE id = ANY(sqlc.arg(ids)::text[])
   AND status = 'queued'
   AND NOT EXISTS (

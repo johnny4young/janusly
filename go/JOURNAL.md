@@ -2222,3 +2222,27 @@ switch. While separating wakeup reasons, the band also found and fixed an older
 bug: a human wait could inherit a due retry wakeup and auto-resume. Waiting
 transitions now clear the execution clock before installing their own bounded
 clock or remaining indefinite.
+
+## BullMQ work-plane handoff and rollback outbox (2026-08-02)
+
+The handoff inventory is now a closed contract rather than an operator guess:
+four Node queues, their current job and scheduler identities, and the durable
+PostgreSQL states that make each item executable, parkable, or unsafe. The
+rehearsal proves that an unknown fifth queue, job, or scheduler fails closed;
+that executable node work and materialized schedule ticks must drain; and that
+only reviewed schedulers can be retired after Node producers have stopped.
+
+The rollback half exposed the deeper defect. Go-created roots, downstream
+nodes, redrives, and retries did not maintain Node's dormant queue-publication
+outbox, so a rollback could strand queued work even when the database looked
+healthy. Go now rotates the existing publication generation on every queued
+transition, preserves the retry due time exactly, and clears the marker only
+when a node is claimed. The rehearsal imports the frozen Node reconciler and
+claim path to prove a due Go retry becomes one deterministic BullMQ delivery,
+is claimed once, and has its spent Go wakeup removed by the next bridge pass.
+
+Full CI also uncovered an independent test-fixture defect: the circuit-breaker
+resume test left its simulated upstream unhealthy, so backfilled work could
+legitimately trip a fresh breaker before the assertion. Commit d5829e48 makes
+the operator remediation explicit by restoring the upstream before resume;
+twenty race-enabled repetitions passed.

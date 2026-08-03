@@ -38,7 +38,9 @@ and only safe reads may shadow or move. At the switch, all mutating route
 families and non-HTTP ownership transfer together. Afterward, remaining
 read-only families may continue their gradual proxy move. Scheduler, trigger
 ingestion, replay campaigns, delayed approvals/timers, and jobs already present
-in BullMQ cannot be transferred by proxy routing.
+in BullMQ cannot be transferred by proxy routing. Their closed drain/park
+classification and fail-closed live gate are defined in
+[`QUEUE-HANDOFF.md`](QUEUE-HANDOFF.md).
 
 The exact Go candidate must migrate the shared Node database while passive
 before the global switch. That bridge installs the Go-only dispatch tables,
@@ -46,6 +48,12 @@ reconstructs timer and approval-deadline wakeups, and initializes enabled
 schedule due clocks. Run the same idempotent migration again after Node is
 quiesced; exact-version boot then fails closed if any bounded waiting
 checkpoint lacks its matching durable Go clock.
+
+Go also maintains Node's existing PostgreSQL queue-publication marker on every
+queued generation, including the exact retry deadline. This marker is dormant
+while Go owns the work plane, but lets Node's existing reconciler recreate
+ready or delayed BullMQ delivery during rollback without rewriting Redis. The
+`go-to-node` gate requires that bridge before Node restarts.
 
 ## Stable and transitional proxy shapes
 
@@ -104,3 +112,10 @@ The dual comparator must fail on every difference outside its explicit
 normalization list. Certification adds database-effect comparisons, the full
 browser matrix, queue transition, and rollback rehearsal described in
 `AUDIT.md`; a 27/27 HTTP result alone is not a cutover decision.
+
+Queue ownership evidence is separate:
+
+```bash
+make -C go queue-handoff-rehearsal
+make -C go queue-handoff HANDOFF_DIRECTION=node-to-go
+```
