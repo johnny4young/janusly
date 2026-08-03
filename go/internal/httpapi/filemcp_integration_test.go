@@ -116,7 +116,7 @@ func TestFileAndMcpTriggerIngest(t *testing.T) {
 	mcpEvent := map[string]any{
 		"connectionAlias": alias, "resourceUri": resource,
 		"eventType": "notifications/resources/updated",
-		"payload":   map[string]any{"accountId": "A-77"},
+		"payload":   map[string]any{"accountId": "account-77"},
 	}
 	// The eventTypes filter rejects unlisted notification methods.
 	if status, _ := ingest("/v1/triggers/mcp/ingest", map[string]any{

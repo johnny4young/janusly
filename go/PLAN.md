@@ -523,7 +523,7 @@ pprof guardado en la rama.
 
 ### T-017 · Journal consolidado (D14 tarde) — P1
 
-Consolidar `docs/proposals/20260730-go-pilot-journal.md`: fricciones con
+Consolidar `go/JOURNAL.md`: fricciones con
 ejemplos concretos (qué costó más/menos que TS), divergencias aceptadas,
 mejoras T-1xx implementadas.
 **Commit:** `docs(pilot): consolidated friction journal` (en la rama).
@@ -1055,7 +1055,7 @@ concreto.** Garantías verificadas:
 - Para usar OTRO agente: dale la rama y una sola instrucción — "lee
   `go/AGENTS.md` y sigue el protocolo". El estado de tareas está en el plan
   versionado, no en la memoria de ningún agente.
-- La copia del plan en `docs/proposals/` del checkout de Johnny es una
+- Cualquier copia externa del plan es una
   conveniencia de lectura, NO fuente de verdad; puede desactualizarse sin
   consecuencia.
 - Única dependencia externa a la rama: el repositorio mismo (migraciones
