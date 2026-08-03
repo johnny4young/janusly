@@ -4,7 +4,7 @@ services:
   postgres:
     image: pgvector/pgvector:pg18
     ports:
-      - "4632:5432"
+      - "127.0.0.1:4632:5432"
     environment:
       POSTGRES_DB: janusly_go
       POSTGRES_USER: janusly

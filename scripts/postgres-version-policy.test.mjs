@@ -12,6 +12,8 @@ const [
   goCompose,
   goRevalidationCompose,
   referenceCompose,
+  benchmarkCompose,
+  webQualificationCompose,
   goMakefile,
   supabaseConfig,
 ] = await Promise.all([
@@ -20,20 +22,38 @@ const [
   source("../go/docker-compose.yml"),
   source("../go/pg18.compose.yml"),
   source("../go/conformance/reference-stack.compose.yml"),
+  source("../go/conformance/benchmark.compose.yml"),
+  source("../go/conformance/web-qualification.compose.yml"),
   source("../go/Makefile"),
   source("../supabase/config.toml"),
 ]);
 
+const ownedPostgresComposes = [
+  rootCompose,
+  goCompose,
+  goRevalidationCompose,
+  referenceCompose,
+  benchmarkCompose,
+  webQualificationCompose,
+];
+
 test("every Janusly-owned PostgreSQL service is fixed to major 18", () => {
-  for (const compose of [
-    rootCompose,
-    goCompose,
-    goRevalidationCompose,
-    referenceCompose,
-  ]) {
+  for (const compose of ownedPostgresComposes) {
     assert.match(compose, /image: pgvector\/pgvector:pg18/);
     assert.doesNotMatch(compose, /pgvector\/pgvector:pg1[4-7]/);
     assert.doesNotMatch(compose, /^\s+image:\s*\$\{/m);
+  }
+});
+
+test("every Janusly-owned PostgreSQL service publishes only on loopback", () => {
+  for (const compose of ownedPostgresComposes) {
+    const published = [...compose.matchAll(/^\s+- "([^"]+:5432)"$/gm)]
+      .map(match => match[1]);
+    assert.ok(published.length > 0, "expected at least one published PostgreSQL port");
+    assert.ok(
+      published.every(entry => entry.startsWith("127.0.0.1:")),
+      published.join("\n"),
+    );
   }
 });
 
