@@ -135,6 +135,20 @@ func TestApprovalMetadataShape(t *testing.T) {
 	}
 }
 
+func TestWebhookMetadataShape(t *testing.T) {
+	out, err := Registry()["webhook"](context.Background(), Input{RunID: "r1", NodeID: "trigger"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	waiting, ok := out.(Waiting)
+	if !ok || waiting.Reason != "Waiting for external webhook resume" || waiting.WakeAt != nil {
+		t.Fatalf("webhook must wait indefinitely: %+v", out)
+	}
+	if waiting.Metadata["kind"] != "webhook" || waiting.Metadata["resumeToken"] != "r1:trigger" {
+		t.Fatalf("metadata parity broken: %+v", waiting.Metadata)
+	}
+}
+
 func TestApprovalDeadlineMetadata(t *testing.T) {
 	relative, err := Registry()["approval"](context.Background(), Input{
 		RunID: "r1", NodeID: "gate",

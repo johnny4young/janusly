@@ -289,8 +289,9 @@ var (
 // ResumeRunWithInput completes one still-waiting node. A human_form node
 // REQUIRES the signed resume token (bound to org/run/node/purpose) and
 // validates the input against the node's declared JSON-schema subset —
-// the validated input becomes the node output. Other waiting kinds keep
-// the historical empty output and ignore input/token. Only a
+// the validated input becomes the node output. A webhook node also captures
+// its authenticated resume payload as output; other waiting kinds keep the
+// historical empty output and ignore input/token. Only a
 // still-`waiting` node completes (the CAS guard), so a replayed token
 // cannot double-write output or double-enqueue downstream work.
 func (e *Engine) ResumeRunWithInput(ctx context.Context, runID, nodeID string, input map[string]any, token string) error {
@@ -334,6 +335,8 @@ func (e *Engine) ResumeRunWithInput(ctx context.Context, runID, nodeID string, i
 					return &InputValidationError{Errors: problems}
 				}
 			}
+		}
+		if target.Type == "human_form" || target.Type == "webhook" {
 			maps.Copy(output, input)
 		}
 
@@ -351,7 +354,11 @@ func (e *Engine) ResumeRunWithInput(ctx context.Context, runID, nodeID string, i
 		if err := q.DeleteWakeup(ctx, rowID); err != nil {
 			return fmt.Errorf("clear wakeup: %w", err)
 		}
-		events.add(e.newID(), runID, nodeID, "node.resumed", []byte(`{}`), finishedAt)
+		eventPayload := json.RawMessage(`{}`)
+		if target.Type == "human_form" || target.Type == "webhook" {
+			eventPayload = safePersist(map[string]any{"output": output}, defaultPersistMaxBytes())
+		}
+		events.add(e.newID(), runID, nodeID, "node.resumed", eventPayload, finishedAt)
 		return e.scheduleDownstream(ctx, q, events, runID, finishedAt)
 	})
 }

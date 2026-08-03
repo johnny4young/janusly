@@ -88,6 +88,7 @@ func Registry() map[string]Func {
 		"condition":          executeCondition,
 		"transform":          executeTransform,
 		"wait_until":         executeWaitUntil,
+		"webhook":            executeWebhook,
 		"approval":           executeApproval,
 		"human_form":         executeHumanForm,
 		"http":               NewHTTPExecutor(HTTPOptions{}),

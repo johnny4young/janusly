@@ -159,6 +159,19 @@ func executeWaitUntil(_ context.Context, in Input) (any, error) {
 	}, nil
 }
 
+// executeWebhook persists the legacy external-resume checkpoint. The
+// authenticated /resume route supplies the webhook payload later; the engine
+// copies that payload into this node's output before releasing downstream work.
+func executeWebhook(_ context.Context, in Input) (any, error) {
+	return Waiting{
+		Reason: "Waiting for external webhook resume",
+		Metadata: map[string]any{
+			"kind":        "webhook",
+			"resumeToken": in.RunID + ":" + in.NodeID,
+		},
+	}, nil
+}
+
 // executeApproval persists the reference's indefinite or bounded human
 // decision checkpoint. Relative deadlines are deliberately materialized by
 // the engine from the checkpoint timestamp, not this executor's start clock.

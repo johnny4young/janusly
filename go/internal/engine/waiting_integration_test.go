@@ -94,6 +94,57 @@ func TestApprovalPausesAndResumeCompletesEndToEnd(t *testing.T) {
 	}
 }
 
+func TestWebhookResumeCapturesPayloadEndToEnd(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	doc := `{"nodes":[
+		{"id":"trigger","type":"webhook","config":{}},
+		{"id":"after","type":"transform","config":{"mapping":{"customer":"{{context.trigger.output.customer}}"}}}
+	],"edges":[{"from":"trigger","to":"after"}]}`
+	runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: mustParse(t, doc)})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	stop := startPool(t, eng)
+	defer stop()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var status string
+		_ = pool.QueryRow(ctx, "select status from run_nodes where run_id=$1 and node_id='trigger'", runID).Scan(&status)
+		if status == "waiting" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("webhook never reached waiting")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	payload := map[string]any{"customer": "leah@example.com", "amountUsd": float64(49)}
+	if err := eng.ResumeRunWithInput(ctx, runID, "trigger", payload, ""); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	waitRun(t, pool, runID, "succeeded", 15*time.Second)
+
+	var output, eventPayload []byte
+	_ = pool.QueryRow(ctx, "select state_json->'output' from run_nodes where run_id=$1 and node_id='trigger'", runID).Scan(&output)
+	_ = pool.QueryRow(ctx, "select payload from run_events where run_id=$1 and node_id='trigger' and type='node.resumed'", runID).Scan(&eventPayload)
+	var outputValue, eventValue map[string]any
+	_ = json.Unmarshal(output, &outputValue)
+	_ = json.Unmarshal(eventPayload, &eventValue)
+	if outputValue["customer"] != "leah@example.com" || outputValue["amountUsd"] != float64(49) {
+		t.Fatalf("webhook output: %s", output)
+	}
+	if eventOutput, ok := eventValue["output"].(map[string]any); !ok || eventOutput["customer"] != "leah@example.com" {
+		t.Fatalf("webhook resume event: %s", eventPayload)
+	}
+	var downstream []byte
+	_ = pool.QueryRow(ctx, "select state_json->'output' from run_nodes where run_id=$1 and node_id='after'", runID).Scan(&downstream)
+	if !strings.Contains(string(downstream), "leah@example.com") {
+		t.Fatalf("downstream did not receive webhook output: %s", downstream)
+	}
+}
+
 func TestDoubleResumeConflicts(t *testing.T) {
 	ctx, pool, eng, org := newHarness(t)
 	runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: mustParse(t, approvalDoc)})
