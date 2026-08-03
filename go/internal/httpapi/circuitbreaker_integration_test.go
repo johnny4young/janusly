@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -21,7 +22,13 @@ func TestCircuitBreakerLoop(t *testing.T) {
 	ctx := t.Context()
 	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "true")
 
+	var upstreamHealthy atomic.Bool
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if upstreamHealthy.Load() {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true}`))
+			return
+		}
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer upstream.Close()
@@ -98,6 +105,10 @@ func TestCircuitBreakerLoop(t *testing.T) {
 	}
 
 	// 5. The manual resume flips + audits + backfills OLDEST-FIRST.
+	// Make the dependency healthy first: otherwise the three backfilled runs
+	// legitimately form a fresh failure streak and can re-trip before this
+	// assertion observes the resume transition.
+	upstreamHealthy.Store(true)
 	res = h.call("POST", "/workflows/"+wfID+"/resume", map[string]any{}, "")
 	if res.status != 200 || res.body["backfilled"] != float64(3) {
 		t.Fatalf("resume+backfill: %d %+v", res.status, res.body)
