@@ -35,6 +35,19 @@ func recoveryItemView(row store.RecoveryItem) map[string]any {
 	}
 }
 
+func recoveryItemHandoffView(row store.RecoveryItemHandoff) map[string]any {
+	return map[string]any{
+		"id": row.ID, "orgId": row.OrgID, "recoveryItemId": row.RecoveryItemID,
+		"destination": row.Destination, "credentialName": row.CredentialName,
+		"externalId": textOrNull(row.ExternalID), "externalUrl": textOrNull(row.ExternalUrl),
+		"idempotencyKey": row.IdempotencyKey, "lastOutcome": row.LastOutcome,
+		"lastStatusCode": nullableInt(row.LastStatusCode), "lastError": textOrNull(row.LastError),
+		"lastLatencyMs": nullableInt(row.LastLatencyMs), "dispatchCount": row.DispatchCount,
+		"firstDispatchedAt": row.FirstDispatchedAt, "lastDispatchedAt": row.LastDispatchedAt,
+		"createdBy": textOrNull(row.CreatedBy),
+	}
+}
+
 func (s *V1Server) listRecoveryItemsCore(r *http.Request, rc v1Request) opResult {
 	rows, err := store.New(s.pool).ListRecoveryItems(r.Context(), rc.orgID)
 	if err != nil {
@@ -45,6 +58,30 @@ func (s *V1Server) listRecoveryItemsCore(r *http.Request, rc v1Request) opResult
 		items = append(items, recoveryItemView(row))
 	}
 	return opOK(map[string]any{"items": items})
+}
+
+func (s *V1Server) recoveryItemDetailCore(r *http.Request, rc v1Request, id string) opResult {
+	q := store.New(s.pool)
+	item, err := q.GetRecoveryItemByID(r.Context(), store.GetRecoveryItemByIDParams{
+		OrgID: rc.orgID, ID: id,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return opError(http.StatusNotFound, "recovery_item_not_found", "Recovery item not found", nil)
+		}
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+	}
+	handoffRows, err := q.ListRecoveryItemHandoffs(r.Context(), store.ListRecoveryItemHandoffsParams{
+		OrgID: rc.orgID, RecoveryItemID: id,
+	})
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+	}
+	handoffs := make([]map[string]any, 0, len(handoffRows))
+	for _, row := range handoffRows {
+		handoffs = append(handoffs, recoveryItemHandoffView(row))
+	}
+	return opOK(map[string]any{"item": recoveryItemView(item), "handoffs": handoffs})
 }
 
 func (s *V1Server) recoveryItemActionCore(r *http.Request, rc v1Request, id, action string) opResult {
@@ -205,6 +242,9 @@ func (s *V1Server) recoveryItemHandoffCore(r *http.Request, rc v1Request, id str
 func (s *V1Server) mountRecoveryItemRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /recovery/items", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeLegacy(w, s.listRecoveryItemsCore(r, rc))
+	}))
+	mux.HandleFunc("GET /recovery/items/{id}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeLegacy(w, s.recoveryItemDetailCore(r, rc, r.PathValue("id")))
 	}))
 	mux.HandleFunc("POST /recovery/items/{id}/{action}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		action := r.PathValue("action")

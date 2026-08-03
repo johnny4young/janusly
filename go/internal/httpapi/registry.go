@@ -133,6 +133,7 @@ var routeAuthz = map[string]routeGate{
 	"POST /recovery/feedback":                      {auth.RoleEditor, "recovery.write"},
 	"GET /recovery/calibrations":                   {auth.RoleViewer, "recovery.read"},
 	"GET /recovery/items":                          {auth.RoleViewer, "recovery.read"},
+	"GET /recovery/items/{id}":                     {auth.RoleViewer, "recovery.read"},
 	"GET /recovery/home":                           {auth.RoleViewer, "recovery.read"},
 	"GET /integrations/slack/interactions":         {auth.RoleAdmin, "credentials.write"},
 	"POST /integrations/slack/interactions":        {auth.RoleAdmin, "credentials.write"},

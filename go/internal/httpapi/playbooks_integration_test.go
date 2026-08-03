@@ -415,6 +415,26 @@ func TestRecoveryItemOwnership(t *testing.T) {
 	if res.body["handoff"].(map[string]any)["dispatchCount"] != float64(2) {
 		t.Fatalf("handoff idempotency: %+v", res.body)
 	}
+	detail := h.call("GET", "/recovery/items/"+itemID, nil, "")
+	if detail.status != http.StatusOK {
+		t.Fatalf("item detail: %d %+v", detail.status, detail.body)
+	}
+	detailItem := detail.body["item"].(map[string]any)
+	if detailItem["id"] != itemID || detailItem["status"] != "reopened" {
+		t.Fatalf("item detail shape: %+v", detailItem)
+	}
+	handoffs := detail.body["handoffs"].([]any)
+	if len(handoffs) != 1 {
+		t.Fatalf("item handoff detail: %+v", handoffs)
+	}
+	detailHandoff := handoffs[0].(map[string]any)
+	if detailHandoff["destination"] != "slack" || detailHandoff["credentialName"] != "oncall-slack" ||
+		detailHandoff["dispatchCount"] != float64(2) {
+		t.Fatalf("item handoff shape: %+v", detailHandoff)
+	}
+	if crossOrg := h.call("GET", "/recovery/items/"+itemID, nil, h.org+"-other"); crossOrg.status != http.StatusNotFound || crossOrg.body["code"] != "recovery_item_not_found" {
+		t.Fatalf("cross-org detail must not enumerate: %d %+v", crossOrg.status, crossOrg.body)
+	}
 	if res = h.call("POST", "/recovery/items/"+itemID+"/handoff", map[string]any{
 		"destination": "paloma",
 	}, ""); res.status != 400 {
