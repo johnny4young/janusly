@@ -27,6 +27,16 @@ BullMQ, in-flight-work, and full-browser gates in [`AUDIT.md`](AUDIT.md) pass.
 7. The queue-transition rehearsal has classified and drained BullMQ delayed,
    active, waiting, scheduled, replay-campaign, approval, and timer work. Until
    that rehearsal is recorded, do not switch the work plane.
+8. Run the exact candidate's `migrate` subcommand while every Go process is
+   passive. It must install the Node runtime bridge, reconstruct every durable
+   timer wakeup, initialize every enabled schedule due clock, and finish with
+   no readiness error. The migration is idempotent and must be run again after
+   correcting any malformed legacy checkpoint.
+9. Active startup must pass the separate work-plane readiness gate. Until Go
+   implements approval deadline parity, resolve every unhandled waiting
+   approval deadline and publish a compatible latest version or retire every
+   non-deleted workflow whose latest DAG declares `decisionTimeoutMs`, `until`,
+   `onTimeout`, or `escalateTo`.
 
 ## Ownership rule
 
@@ -47,21 +57,24 @@ deployment shape. HTTP routing alone does not transfer queued work.
 4. Remove recurring Node scheduler ownership and drain or explicitly park
    every pre-watermark job according to the rehearsed queue matrix. Do not
    convert jobs by editing Redis or PostgreSQL.
-5. Verify zero active Node job, the expected durable PostgreSQL handoff rows,
-   and captured database/Redis checkpoints. Any unexplained `running` node
-   aborts the switch.
-6. Restart the Go candidate with `JANUSLY_GO_WORK_PLANE_ENABLED=true`; require
+5. Run the exact Go candidate's `migrate` subcommand, then restart it passive
+   and require its exact-version/runtime-bridge boot gate to pass.
+6. Verify zero active Node job, the expected durable PostgreSQL handoff rows,
+   initialized timer/schedule clocks, and captured database/Redis checkpoints.
+   Any unexplained `running` node or active-readiness rejection aborts the
+   switch.
+7. Restart the Go candidate with `JANUSLY_GO_WORK_PLANE_ENABLED=true`; require
    `X-Janusly-Work-Plane: active` and `janusly_go_work_plane_active 1` before
    unfreezing traffic.
-7. Switch every mutating route to Go, reload the proxy, and unfreeze writes.
-8. Within two minutes verify:
+8. Switch every mutating route to Go, reload the proxy, and unfreeze writes.
+9. Within two minutes verify:
    - `GET /healthz` and `GET /health`;
    - one no-op workflow run;
    - `GET /v1/runs` and the Activity UI;
    - no newly eligible Node job exists beyond the recorded watermark;
    - no passive-gate 503 occurred after unfreezing.
-9. Record the exact proxy config, binary commit, database/Redis checkpoints,
-   queue watermarks, smoke run, and operator.
+10. Record the exact proxy config, binary commit, migration version,
+    database/Redis checkpoints, queue watermarks, smoke run, and operator.
 
 ## First 24 hours
 

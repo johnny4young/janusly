@@ -95,6 +95,7 @@ exact candidate commit:
 | SEC-001 | P1 | Four signed webhook handlers silently truncated oversized raw bodies, diverging from Node's hard 413 cap and verifying/parsing only a prefix. | fixed in architecture review |
 | EVD-001 | P1 | `SOAK.md` cited an untracked random-name series, so the 24-hour verdict was not reproducible from a clean checkout. | fixed in this band |
 | TST-001 | P0 | The full Playwright lane was deferred from the pilot and remains a cutover gate. | open |
+| TST-002 | P1 | The queue-health integration test started workers that could claim its fixture before the snapshot assertion. | fixed in architecture review |
 | QUE-001 | P0 | The current cutover runbook forbids dual schedulers but does not yet prove a BullMQ/in-flight-work drain and rollback procedure. | open |
 | QUE-002 | P0 | The cutover map promised per-tenant work ownership even though Go claims and background sweeps are database-global. | fixed in architecture review |
 | SRC-001 | P2 | Go source comments contain 134 internal ticket identifiers instead of durable behavioral explanations. | open |
@@ -107,6 +108,9 @@ exact candidate commit:
 | AUTH-001 | P0 | Go lacked the complete WorkOS browser-session issuance lifecycle required by the web. | fixed in architecture review |
 | AUTH-002 | P0 | Go labels bootstrap surfaces identity-scoped but dispatches them through tenant membership resolution, so a legitimate zero-membership identity cannot bootstrap. | fixed in architecture review |
 | AUTH-003 | P0 | Go still lacks atomic first-organization creation and atomic invitation acceptance with the exact Node bootstrap response/error contract. | fixed in architecture review |
+| DAT-001 | P0 | A pre-Goose Node database was stamped at baseline one even though it lacked Go-owned idempotency/wakeup tables and initialized schedule/timer due clocks. | fixed in architecture review |
+| DAT-002 | P1 | `make schema-dump` dumped the shared integration database, committing timestamped fixture tables and a random PostgreSQL 18 restrict key. | fixed in architecture review |
+| PAR-002 | P0 | Go still cannot execute Node approval deadline policies; an active-cutover gate now prevents stranding existing checkpoints or invoking saved unsupported workflows. | open |
 
 ## Architecture review decisions
 
@@ -337,3 +341,45 @@ stateful GETs. A real production-mode process smoke observed passive header,
 explicit flip. The exact band passed `make ci` on 2026-08-02: sqlc/OpenAPI
 drift, coverage floors, build, lint, `govulncheck`, race-enabled PostgreSQL
 integration, and semantic parity F01-F25 are green.
+
+### Pre-Goose Node database runtime bridge
+
+The first data-transition band closes `DAT-001`. A database with the shared
+Node schema no longer becomes operational merely because migration one was
+stamped. Migration seven idempotently installs the Go-owned start-idempotency
+and wakeup tables, removes the obsolete duplicate runs index, and then a
+bounded reconciler reconstructs missing timer wakeups from durable Node
+`run_nodes.state_json` checkpoints. Enabled schedules receive their first
+`next_fire_at` from the same Go cron parser used at runtime; migration time is
+the reference, so upgrade never fabricates an immediate scheduled run.
+
+The migration lifecycle now holds one database advisory lock, pins it to one
+physical connection, and stamps versions zero and one in one transaction. It
+also recognizes and repairs the partial journal shape produced if an older
+binary stopped after creating the journal. Both migration and boot assert the
+runtime bridge, and a binary refuses a database that is either behind or ahead
+of its exact embedded version.
+
+Passive Go remains available for read/shadow traffic after schema upgrade.
+Active API and MCP startup additionally inspect unresolved Node approval
+deadline checkpoints and the latest DAG of every non-deleted workflow. Either
+shape fails closed because Go does not yet execute that policy. This prevents unsafe
+activation but does not close `PAR-002`; complete approval deadline parity
+remains required before certification.
+
+An isolated PostgreSQL integration test creates a temporary database, applies
+the captured baseline, removes the Go-only objects and due-clock column, leaves
+a partial version-zero journal, and proves upgrade, timer/schedule backfill,
+idempotent retry, malformed-timer rejection, readiness repair, and both
+approval cutover gates. `make schema-dump` now creates and destroys its own
+freshly migrated database and pins PostgreSQL 18's restrict key. Two
+consecutive dumps were byte-identical and removed 32 transient
+`customer_orders_<timestamp>` fixture tables from `schema.sql` plus their 32
+unused generated sqlc model types, closing `DAT-002`.
+
+The PostgreSQL 15 validation first exposed an independent queue-health test
+race: its ordinary API harness started consumers that could claim the seeded
+queued node before the snapshot read. Commit `7e60338d` gives observability
+tests a no-worker harness. Twenty race-enabled repetitions passed before the
+full PostgreSQL 15 race/integration lane passed on 2026-08-02, closing
+`TST-002`.

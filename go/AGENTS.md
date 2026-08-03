@@ -43,8 +43,9 @@ independently. Do not infer certification from a completed plan row.
 
 The Go binary owns Go-runtime databases through embedded goose migrations in
 `internal/migrate/sql/`. `janusly-go migrate` is the only supported migration
-command for those databases, and boot refuses a schema behind the embedded
-version.
+command for those databases, and boot requires the exact embedded version plus
+the completed Node runtime bridge. Active API/MCP startup also applies the
+work-plane readiness gate; passive read/shadow startup does not.
 
 The Node compatibility line still authors its schema with Drizzle. When a Node
 schema change must be consumed by Go, mirror it deliberately as the next goose

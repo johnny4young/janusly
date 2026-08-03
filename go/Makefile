@@ -1,6 +1,8 @@
 SHELL := /bin/bash
 DB_URL ?= postgres://janusly:janusly-go-local@127.0.0.1:4632/janusly_go
 PG_CONTAINER := janusly-go-pilot-postgres-1
+SCHEMA_DB := janusly_go_schema_dump
+SCHEMA_DB_URL ?= postgres://janusly:janusly-go-local@127.0.0.1:4632/$(SCHEMA_DB)
 
 .PHONY: db-up db-down migrate schema-dump generate lint vuln test run build parity ci test-pg15 bench fuzz contract web-embed verify seed chaos bench-hostile
 
@@ -12,15 +14,22 @@ db-down:
 
 # Goose owns Go-runtime databases. Migrations, including the original
 # go_pilot_* bootstrap objects, are embedded in the binary; no Node runner or
-# second SQL loop participates. Pre-goose databases are stamped at the baseline
-# before later versions run.
+# second SQL loop participates. Pre-goose databases are stamped at the shared
+# Node baseline before later versions install and reconcile Go runtime state.
 migrate:
 	JANUSLY_GO_DATABASE_URL=$(DB_URL) go run ./cmd/api migrate
 
 # schema.sql feeds sqlc so `make generate` works without a live database.
-# Regenerate after any migration change; the file is committed on purpose.
+# Regenerate from a fresh migrated database after any migration change. Never
+# dump the shared integration database: tests create transient fixture tables.
 schema-dump:
-	docker exec $(PG_CONTAINER) pg_dump -U janusly -d janusly_go --schema-only --no-owner --no-privileges > schema.sql
+	@set -euo pipefail; \
+		docker exec $(PG_CONTAINER) dropdb -U janusly --if-exists --force $(SCHEMA_DB); \
+		trap 'docker exec $(PG_CONTAINER) dropdb -U janusly --if-exists --force $(SCHEMA_DB) >/dev/null' EXIT; \
+		docker exec $(PG_CONTAINER) createdb -U janusly -T template0 $(SCHEMA_DB); \
+		JANUSLY_GO_DATABASE_URL=$(SCHEMA_DB_URL) go run ./cmd/api migrate; \
+		docker exec $(PG_CONTAINER) pg_dump -U janusly -d $(SCHEMA_DB) --schema-only --no-owner --no-privileges \
+			--restrict-key=januslyGoSchema20260802 > schema.sql
 
 generate:
 	go tool sqlc generate

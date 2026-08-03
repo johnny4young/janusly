@@ -40,6 +40,13 @@ read-only families may continue their gradual proxy move. Scheduler, trigger
 ingestion, replay campaigns, delayed approvals/timers, and jobs already present
 in BullMQ cannot be transferred by proxy routing.
 
+The exact Go candidate must migrate the shared Node database while passive
+before the global switch. That bridge installs the Go-only dispatch tables,
+reconstructs timer wakeups, and initializes enabled schedule due clocks. A
+passive process may still serve safe shadow reads, but active startup fails
+closed while an unresolved Node approval deadline or any non-deleted workflow's
+latest DAG still contains unsupported approval deadline policy.
+
 ## Stable and transitional proxy shapes
 
 After every phase is certified, the stable Caddy shape is:

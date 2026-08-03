@@ -4,7 +4,8 @@
 // the binary (single-binary ops story), version bookkeeping lives in the
 // pilot-owned table go_pilot_goose_version so it never collides with
 // drizzle's own bookkeeping, and databases provisioned BEFORE goose
-// adoption are stamped at the baseline version without re-executing it.
+// adoption are stamped at the shared Node baseline before later migrations
+// install and reconcile Go-owned runtime state.
 //
 // Sync protocol (PLAN §0, ampliado): every develop sync reviews new files
 // under packages/db/migrations and mirrors them here as numbered goose
@@ -30,6 +31,8 @@ const versionTable = "go_pilot_goose_version"
 // baselineVersion is the migration that captures the pre-goose schema.
 const baselineVersion = 1
 
+const migrationLockKey int64 = 0x4a616e75736c7947 // "JanuslyG"
+
 func open(databaseURL string) (*sql.DB, error) {
 	db, err := sql.Open("pgx", databaseURL)
 	if err != nil {
@@ -44,9 +47,12 @@ func configure() {
 	goose.SetLogger(goose.NopLogger())
 }
 
-// hasPreGooseSchema reports a database that was provisioned before goose
-// adoption: the shared schema exists but goose bookkeeping does not.
-func hasPreGooseSchema(ctx context.Context, db *sql.DB) (bool, error) {
+// needsBaselineStamp reports a database that was provisioned before goose
+// adoption, including an old interrupted stamp that created only the journal
+// or its version-zero row. A fresh goose database cannot have the runs table
+// before migration one commits, so runs plus a journal below one is the
+// unambiguous legacy/repair shape.
+func needsBaselineStamp(ctx context.Context, db *sql.DB) (bool, error) {
 	var schemaExists, gooseExists bool
 	if err := db.QueryRowContext(ctx,
 		`SELECT EXISTS (SELECT 1 FROM information_schema.tables
@@ -58,13 +64,32 @@ func hasPreGooseSchema(ctx context.Context, db *sql.DB) (bool, error) {
 		 WHERE table_schema = 'public' AND table_name = $1)`, versionTable).Scan(&gooseExists); err != nil {
 		return false, err
 	}
-	return schemaExists && !gooseExists, nil
+	if !schemaExists {
+		return false, nil
+	}
+	if !gooseExists {
+		return true, nil
+	}
+	var current int64
+	if err := db.QueryRowContext(ctx, fmt.Sprintf(
+		`SELECT COALESCE(MAX(version_id) FILTER (WHERE is_applied), 0) FROM %s`, versionTable)).Scan(&current); err != nil {
+		return false, err
+	}
+	return current < baselineVersion, nil
 }
 
 // stampBaseline records the baseline as applied WITHOUT executing it —
-// the pre-goose database already carries that exact schema.
+// the pre-goose database already carries the shared Node schema. The stamp is
+// one transaction and idempotently repairs the partial journal shape emitted
+// by older binaries if they stopped between journal creation and version one.
 func stampBaseline(ctx context.Context, db *sql.DB) error {
-	if _, err := db.ExecContext(ctx, fmt.Sprintf(`
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin baseline stamp: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (
 			id serial PRIMARY KEY,
 			version_id bigint NOT NULL,
@@ -74,12 +99,30 @@ func stampBaseline(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("create version table: %w", err)
 	}
 	for _, version := range []int64{0, baselineVersion} {
-		if _, err := db.ExecContext(ctx, fmt.Sprintf(
-			`INSERT INTO %s (version_id, is_applied) VALUES ($1, true)`, versionTable), version); err != nil {
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
+			INSERT INTO %s (version_id, is_applied)
+			SELECT $1, true
+			WHERE NOT EXISTS (
+				SELECT 1 FROM %s WHERE version_id = $1 AND is_applied
+			)`, versionTable, versionTable), version); err != nil {
 			return fmt.Errorf("stamp version %d: %w", version, err)
 		}
 	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit baseline stamp: %w", err)
+	}
 	return nil
+}
+
+func acquireMigrationLock(ctx context.Context, db *sql.DB) (func(), error) {
+	if _, err := db.ExecContext(ctx, `SELECT pg_advisory_lock($1)`, migrationLockKey); err != nil {
+		return nil, fmt.Errorf("acquire migration lock: %w", err)
+	}
+	return func() {
+		// Up pins the sql.DB to one physical connection, so the unlock runs on
+		// the same PostgreSQL session that acquired the advisory lock.
+		_, _ = db.ExecContext(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, migrationLockKey)
+	}, nil
 }
 
 // Up brings the database to the latest embedded version. Fresh databases
@@ -92,8 +135,17 @@ func Up(ctx context.Context, databaseURL string) error {
 		return err
 	}
 	defer func() { _ = db.Close() }()
+	// The session-level advisory lock must remain on the same physical
+	// connection across inspection, stamping, goose, and reconciliation.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	release, err := acquireMigrationLock(ctx, db)
+	if err != nil {
+		return err
+	}
+	defer release()
 
-	preGoose, err := hasPreGooseSchema(ctx, db)
+	preGoose, err := needsBaselineStamp(ctx, db)
 	if err != nil {
 		return fmt.Errorf("inspect schema state: %w", err)
 	}
@@ -104,6 +156,12 @@ func Up(ctx context.Context, databaseURL string) error {
 	}
 	if err := goose.UpContext(ctx, db, "sql"); err != nil {
 		return fmt.Errorf("goose up: %w", err)
+	}
+	if err := reconcileRuntimeBridge(ctx, db); err != nil {
+		return err
+	}
+	if err := assertRuntimeBridge(ctx, db); err != nil {
+		return err
 	}
 	return nil
 }
@@ -127,8 +185,11 @@ func AssertMigrated(ctx context.Context, databaseURL string) error {
 	if err != nil {
 		return err
 	}
-	if current < latest {
-		return fmt.Errorf("database is at migration %d but the binary embeds %d: run the `migrate` subcommand first", current, latest)
+	if current != latest {
+		return fmt.Errorf("database is at migration %d but the binary embeds %d: run the matching binary's `migrate` subcommand first", current, latest)
+	}
+	if err := assertRuntimeBridge(ctx, db); err != nil {
+		return err
 	}
 	return nil
 }

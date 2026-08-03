@@ -64,3 +64,21 @@ func TestBaselineContainsPilotBootstrapObjects(t *testing.T) {
 		}
 	}
 }
+
+func TestNodeRuntimeBridgeRecreatesStampedObjects(t *testing.T) {
+	raw, err := fs.ReadFile(migrations, "sql/00007_node_runtime_bridge.sql")
+	if err != nil {
+		t.Fatalf("read Node runtime bridge: %v", err)
+	}
+	bridge := string(raw)
+	for _, fragment := range []string{
+		"CREATE TABLE IF NOT EXISTS go_pilot_start_idempotency",
+		"CREATE TABLE IF NOT EXISTS go_pilot_wakeups",
+		"CREATE INDEX IF NOT EXISTS go_pilot_wakeups_due_idx",
+		"DROP INDEX IF EXISTS go_pilot_runs_org_created_id_idx",
+	} {
+		if !strings.Contains(bridge, fragment) {
+			t.Errorf("Node runtime bridge is missing %q", fragment)
+		}
+	}
+}

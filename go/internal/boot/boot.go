@@ -1,7 +1,6 @@
 // Package boot wires the process foundations: structured logging, the pgx
-// pool, and the migration probe that refuses to serve against an unmigrated
-// database. The Go binary never migrates — drizzle-kit owns the schema — so
-// the probe is the contract that keeps that boundary honest.
+// pool, and the second in-process migration probe that refuses to serve after
+// the command-level embedded-Goose gate has passed an unmigrated database.
 package boot
 
 import (

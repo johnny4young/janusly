@@ -103,6 +103,11 @@ func run() error {
 	if err := migrate.AssertMigrated(ctx, cfg.DatabaseURL); err != nil {
 		return err
 	}
+	if cfg.WorkPlaneEnabled {
+		if err := migrate.AssertWorkPlaneReady(ctx, cfg.DatabaseURL); err != nil {
+			return err
+		}
+	}
 	// Secret Store boot probe: a malformed root key fails fast at deploy
 	// time, not as the first credential write's 500. Unset stays legal
 	// (legacy environment references only).

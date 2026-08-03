@@ -22,6 +22,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/engine"
 	"github.com/johnny4young/janusly/go/internal/grammar"
 	"github.com/johnny4young/janusly/go/internal/mcpserver"
+	"github.com/johnny4young/janusly/go/internal/migrate"
 	"github.com/johnny4young/janusly/go/internal/ratelimit"
 )
 
@@ -44,6 +45,12 @@ func run() error {
 	// Logs go to stderr — stdout belongs to the MCP transport.
 	logger := boot.NewLogger()
 
+	if err := migrate.AssertMigrated(ctx, cfg.DatabaseURL); err != nil {
+		return err
+	}
+	if err := migrate.AssertWorkPlaneReady(ctx, cfg.DatabaseURL); err != nil {
+		return err
+	}
 	pool, err := boot.Connect(ctx, cfg.DatabaseURL, cfg.APIPoolSize+cfg.WorkerPoolSize)
 	if err != nil {
 		return err
