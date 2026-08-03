@@ -45,6 +45,7 @@ dependencies.
 | `JANUSLY_WEB_BASE_URL` | public web URL used to infer the browser session cookie's `Secure` attribute |
 | `JANUSLY_SESSION_COOKIE_SECURE=true|false` | explicit override for the session cookie `Secure` attribute |
 | `JANUSLY_CREDENTIAL_MASTER_KEY` or `_FILE` | managed credential envelope root key; invalid material fails boot |
+| `JANUSLY_CREDENTIAL_ENV_ALLOWLIST` | comma-separated names (trailing `*` allowed) a legacy credential `secretRef` may point at. The platform's own namespace — `JANUSLY_*`, `SUPABASE_*`, `WORKOS_*`, `AWS_*`, `OTEL_*`, `ALLOW_*`, `DATABASE_URL`, `PATH`, provider API keys — is refused whether or not this is set; the allowlist narrows what remains. Names under `JANUSLY_CRED_` are the deliberate carve-out for tenant material kept in the environment |
 | `JANUSLY_MCP_WRITES_ENABLED=true` | process half of MCP server write consent |
 | `JANUSLY_MCP_CLIENT_WRITES_ENABLED=true` | process half of external MCP client write consent |
 | `JANUSLY_MCP_STDIO_ALLOWED_COMMANDS` | closed stdio command allowlist fallback |

@@ -55,6 +55,11 @@ func parseSecretInput(body map[string]any, valueField, refField string) (secretI
 	if !envVarName.MatchString(rawRef) || len(rawRef) > envVarNameMax {
 		return secretInput{}, "invalid"
 	}
+	// Shape alone never made a reference safe: the platform's own
+	// configuration variables are shaped exactly like a tenant's.
+	if !secretstore.EnvRefAllowed(rawRef) {
+		return secretInput{}, "reserved"
+	}
 	return secretInput{managed: false, value: rawRef}, ""
 }
 
@@ -261,12 +266,15 @@ func (s *V1Server) createCredentialCore(r *http.Request, rc v1Request) opResult 
 	}
 	secret, problem := parseSecretInput(body, "secretValue", "secretRef")
 	if problem != "" {
-		code := "credentials_invalid_secret_ref"
-		if problem == "required" {
+		code, message := "credentials_invalid_secret_ref", "Provide exactly one of secretValue or secretRef"
+		switch problem {
+		case "required":
 			code = "credentials_fields_required"
+		case "reserved":
+			code = "credentials_reserved_secret_ref"
+			message = "secretRef names a reserved platform variable; use the managed store or a JANUSLY_CRED_ name"
 		}
-		return opError(http.StatusBadRequest, code,
-			"Provide exactly one of secretValue or secretRef", nil)
+		return opError(http.StatusBadRequest, code, message, nil)
 	}
 	_, expiryPresent := body["expiresAt"]
 	expiresAt, ok := parseFutureExpiry(body["expiresAt"], expiryPresent)
@@ -354,6 +362,12 @@ func (s *V1Server) bulkUpdateCredentialCore(r *http.Request, rc v1Request, name 
 	}
 	secret, problem := parseSecretInput(body, "newSecretValue", "newSecretRef")
 	if problem != "" {
+		// Rotation is the other way a credential can acquire a reserved
+		// reference, so it needs the same distinct answer as creation.
+		if problem == "reserved" {
+			return opError(http.StatusBadRequest, "credentials_reserved_secret_ref",
+				"newSecretRef names a reserved platform variable; use the managed store or a JANUSLY_CRED_ name", nil)
+		}
 		return opError(http.StatusBadRequest, "credentials_invalid_secret_ref",
 			"Provide exactly one of newSecretValue or newSecretRef", nil)
 	}

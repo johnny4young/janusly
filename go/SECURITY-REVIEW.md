@@ -108,7 +108,18 @@ with a regression test:
   match before consuming anything. A blocked callback burns no nonce, so
   the legitimate browser can still finish its own login.
 
-Still open (root cause, needs an operator policy decision): a credential
-`secretRef` may name ANY process environment variable. Value-based
-redaction now stops the known echo path through db-tool errors, but an
-allowlist is what closes the class.
+- **A credential `secretRef` can no longer name the platform's own
+  configuration.** The legacy environment provider resolved whatever name
+  a row carried, so an organization admin — self-service in every tenant —
+  could point a credential at `JANUSLY_API_SERVICE_TOKEN`,
+  `JANUSLY_CREDENTIAL_MASTER_KEY`, or `JANUSLY_GO_DATABASE_URL` and wait
+  for one echo path to surface the value. Value-based redaction closed the
+  known echo (db-tool parse errors quoting the DSN); this closes the class.
+  `secretstore.EnvRefAllowed` refuses the reserved namespace — `JANUSLY_*`,
+  `SUPABASE_*`, `WORKOS_*`, `AWS_*`, `OTEL_*`, `ALLOW_*`, plus `PATH`,
+  `DATABASE_URL`, `REDIS_URL` and the provider API keys — with or without
+  `JANUSLY_CREDENTIAL_ENV_ALLOWLIST` configured, and `JANUSLY_CRED_` is the
+  carve-out for deliberate tenant material. It is enforced twice: create
+  and rotate reject a reserved name with `credentials_reserved_secret_ref`,
+  and resolution itself refuses, so a row written out of band — the table
+  is shared with the compatibility runtime — still cannot resolve.

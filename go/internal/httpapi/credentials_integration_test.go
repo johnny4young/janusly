@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/johnny4young/janusly/go/internal/secretstore"
+	"github.com/johnny4young/janusly/go/internal/store"
 )
 
 // The credential loop by wire: create (managed + legacy), the no-echo
@@ -241,5 +242,73 @@ func TestCredentialReadiness(t *testing.T) {
 	}
 	if got := countCredentialMissing(issuesFor()); got != 1 {
 		t.Fatalf("resolvable credential must clear its warn: %d", got)
+	}
+}
+
+// The escalation the allowlist closes, end to end: an organization admin
+// — self-service in every tenant — points a credential at the platform's
+// own configuration. Resolution then only has to surface once (an
+// upstream error quoting a malformed DSN, a future tool that forwards
+// the value) to leak the service token, the credential master key, or
+// the database URL, turning one tenant's admin into platform access.
+func TestCredentialSecretRefCannotNamePlatformVariables(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	suffix := fmt.Sprint(time.Now().UnixNano())
+
+	for _, reserved := range []string{
+		"JANUSLY_API_SERVICE_TOKEN", "JANUSLY_CREDENTIAL_MASTER_KEY",
+		"JANUSLY_GO_DATABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "AWS_SECRET_ACCESS_KEY",
+	} {
+		res := h.call("POST", "/credentials", map[string]any{
+			"name": "exfil-" + suffix, "kind": "http", "secretRef": reserved,
+		}, "")
+		if res.status != 400 || res.body["code"] != "credentials_reserved_secret_ref" {
+			t.Fatalf("%s must be refused at creation: %d %+v", reserved, res.status, res.body)
+		}
+	}
+
+	// Rotation is the other door onto the same reference.
+	// Seeded with an ordinary legacy reference: the managed store needs a
+	// master key this test has no reason to configure.
+	if res := h.call("POST", "/credentials", map[string]any{
+		"name": "rotate-me-" + suffix, "kind": "http", "secretRef": "ACME_ORIGINAL_" + suffix,
+	}, ""); res.status != 200 {
+		t.Fatalf("seed credential: %d %+v", res.status, res.body)
+	}
+	preview := h.call("POST", "/credentials/rotate-me-"+suffix+"/bulk-update",
+		map[string]any{"dryRun": true}, "")
+	if preview.status != 200 {
+		t.Fatalf("rotation preview: %d %+v", preview.status, preview.body)
+	}
+	if res := h.call("POST", "/credentials/rotate-me-"+suffix+"/bulk-update", map[string]any{
+		"newSecretRef": "JANUSLY_API_SERVICE_TOKEN",
+		"ifMatch":      preview.body["updatedAt"],
+	}, ""); res.status != 400 || res.body["code"] != "credentials_reserved_secret_ref" {
+		t.Fatalf("rotation onto a reserved variable must be refused: %d %+v", res.status, res.body)
+	}
+
+	// Defense in depth: a row that already names a reserved variable —
+	// the credentials table is shared with the compatibility runtime —
+	// must refuse to RESOLVE, not merely refuse to be created.
+	t.Setenv("JANUSLY_API_SERVICE_TOKEN", "svc-token-that-must-not-leak")
+	if _, err := pool.Exec(t.Context(),
+		`INSERT INTO credentials (id, org_id, name, kind, secret_ref)
+		 VALUES ($1, $2, $3, 'http', 'JANUSLY_API_SERVICE_TOKEN')`,
+		"cred-legacy-"+suffix, h.org, "smuggled-"+suffix); err != nil {
+		t.Fatalf("seed out-of-band row: %v", err)
+	}
+	resolved := secretstore.ResolveCredentialSecretRef(t.Context(), store.New(pool),
+		h.org, "JANUSLY_API_SERVICE_TOKEN")
+	if resolved != "" {
+		t.Fatalf("a pre-existing reserved reference must not resolve, got %q", resolved)
+	}
+
+	// An ordinary tenant variable still resolves — the guard is targeted,
+	// not a blanket ban on the legacy provider.
+	t.Setenv("ACME_PARTNER_TOKEN_"+suffix, "partner-value")
+	if got := secretstore.ResolveCredentialSecretRef(t.Context(), store.New(pool),
+		h.org, "ACME_PARTNER_TOKEN_"+suffix); got != "partner-value" {
+		t.Fatalf("an ordinary reference must still resolve, got %q", got)
 	}
 }

@@ -296,6 +296,15 @@ func ResolveCredentialSecretRef(ctx context.Context, q *store.Queries, orgID, se
 		if strings.HasPrefix(secretRef, secretRefPrefix) {
 			return ""
 		}
+		// The legacy environment provider is restricted: see envpolicy.go.
+		// Enforced HERE and not only at the write path, because the
+		// credentials table is shared with the compatibility runtime and
+		// may already hold a row that names a reserved variable.
+		if !EnvRefAllowed(secretRef) {
+			slog.Error("[secret-store] refused a credential reference to a reserved environment variable",
+				"orgId", orgID, "secretRef", secretRef)
+			return ""
+		}
 		value := os.Getenv(secretRef)
 		if strings.TrimSpace(value) == "" {
 			return ""
