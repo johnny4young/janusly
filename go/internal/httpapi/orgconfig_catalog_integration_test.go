@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnny4young/janusly/go/internal/orgconfig"
 )
@@ -114,6 +115,79 @@ func TestOrgConfigCatalogSurface(t *testing.T) {
 		"key": "http.timeoutMs", "value": float64(1000),
 	}, "", viewerHeaders); res.status != 403 {
 		t.Fatalf("viewer write must 403: %d %+v", res.status, res.body)
+	}
+}
+
+func TestMemoryConsentTransitionSchedulesPurgeAndAudits(t *testing.T) {
+	t.Setenv("JANUSLY_MEMORY_ENABLED", "true")
+	h := newAPIHarness(t)
+	pool := testPool(t)
+
+	if res := h.call("POST", "/org/config", map[string]any{
+		"key": "memory.enabled", "value": true,
+	}, ""); res.status != 200 {
+		t.Fatalf("grant memory consent: %d %+v", res.status, res.body)
+	}
+	if res := h.call("POST", "/org/config", map[string]any{
+		"key": "memory.enabled", "value": false,
+	}, ""); res.status != 200 {
+		t.Fatalf("revoke memory consent: %d %+v", res.status, res.body)
+	}
+
+	status := h.call("GET", "/memory/consent-status", nil, "")
+	purge, ok := status.body["purge"].(map[string]any)
+	if status.status != 200 || status.body["tenantEnabled"] != false || !ok || purge["status"] != "scheduled" {
+		t.Fatalf("revocation must expose a scheduled purge: %d %+v", status.status, status.body)
+	}
+	scheduledFor, ok := purge["scheduledFor"].(string)
+	if !ok {
+		t.Fatalf("scheduled purge needs a deadline: %+v", purge)
+	}
+	deadline, err := time.Parse(time.RFC3339, scheduledFor)
+	if err != nil || !deadline.After(time.Now()) {
+		t.Fatalf("scheduled deadline must be future RFC3339: %q %v", scheduledFor, err)
+	}
+
+	for _, transition := range []struct {
+		action         string
+		previous, next bool
+	}{
+		{"memory.consent.granted", false, true},
+		{"memory.consent.revoked", true, false},
+	} {
+		var count int
+		if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_logs
+			WHERE org_id = $1 AND action = $2 AND target_type = 'org_config'
+			  AND target_id = 'memory.enabled'
+			  AND metadata @> jsonb_build_object('previousValue', $3::boolean, 'newValue', $4::boolean)`,
+			h.org, transition.action, transition.previous, transition.next).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("%s audit: count=%d err=%v", transition.action, count, err)
+		}
+	}
+
+	if res := h.call("POST", "/org/config", map[string]any{
+		"key": "memory.enabled", "value": true,
+	}, ""); res.status != 200 {
+		t.Fatalf("re-grant memory consent: %d %+v", res.status, res.body)
+	}
+	status = h.call("GET", "/memory/consent-status", nil, "")
+	purge, _ = status.body["purge"].(map[string]any)
+	if status.body["tenantEnabled"] != true || purge["status"] != "none" {
+		t.Fatalf("re-grant must cancel due-clock purge: %+v", status.body)
+	}
+	var cancelled int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_logs
+		WHERE org_id = $1 AND action = 'memory.consent.granted'
+		  AND metadata @> '{"previousValue":false,"newValue":true,"pendingPurgeCancelled":true}'::jsonb`,
+		h.org).Scan(&cancelled); err != nil || cancelled != 1 {
+		t.Fatalf("grant audits must record due-clock cancellation: count=%d err=%v", cancelled, err)
+	}
+	var noPending int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_logs
+		WHERE org_id = $1 AND action = 'memory.consent.granted'
+		  AND metadata @> '{"previousValue":false,"newValue":true,"pendingPurgeCancelled":false}'::jsonb`,
+		h.org).Scan(&noPending); err != nil || noPending != 1 {
+		t.Fatalf("initial grant must not invent a pending purge: count=%d err=%v", noPending, err)
 	}
 }
 

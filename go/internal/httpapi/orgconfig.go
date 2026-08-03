@@ -73,6 +73,21 @@ func (s *V1Server) updateOrgConfigCore(r *http.Request, rc v1Request) opResult {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
 	}
 	ctx := r.Context()
+	var previousMemoryEnabled *bool
+	previousMemorySource := ""
+	if def.Key == "memory.enabled" {
+		if resolved, loadErr := orgconfig.LoadResolved(ctx, s.pool, rc.orgID); loadErr == nil {
+			for _, entry := range resolved {
+				if entry.Key == def.Key {
+					if previous, ok := entry.Value.(bool); ok {
+						previousMemoryEnabled = &previous
+						previousMemorySource = entry.Source
+					}
+					break
+				}
+			}
+		}
+	}
 	if err := store.New(s.pool).UpsertOrgConfigValue(ctx, store.UpsertOrgConfigValueParams{
 		ID: s.newID(), OrgID: rc.orgID, Key: def.Key, ValueJson: valueJSON,
 		Category: def.Category, Description: def.Description, ValueType: def.ValueType,
@@ -90,6 +105,25 @@ func (s *V1Server) updateOrgConfigCore(r *http.Request, rc v1Request) opResult {
 	audit.Write(ctx, s.pool, rc.authContext, "org.config.updated", audit.Options{
 		TargetType: "org_config", TargetID: def.Key, Metadata: metadata,
 	})
+	if def.Key == "memory.enabled" && previousMemoryEnabled != nil {
+		if enabled, ok := normalized.(bool); ok && enabled != *previousMemoryEnabled {
+			transition := map[string]any{
+				"previousValue": *previousMemoryEnabled,
+				"newValue":      enabled,
+			}
+			action := audit.Action("memory.consent.revoked")
+			if enabled {
+				action = "memory.consent.granted"
+				// The false config row is the Go due-clock. Replacing it with
+				// true removes the org from the purge sweep atomically, so a
+				// pending deadline was cancelled without queue bookkeeping.
+				transition["pendingPurgeCancelled"] = previousMemorySource == "tenant"
+			}
+			audit.Write(ctx, s.pool, rc.authContext, action, audit.Options{
+				TargetType: "org_config", TargetID: def.Key, Metadata: transition,
+			})
+		}
+	}
 	return opOK(orgConfigEntryView(*def, rc.orgID, normalized, "tenant",
 		time.Now().UTC().Format(time.RFC3339Nano)))
 }

@@ -12,10 +12,13 @@ package httpapi
 import (
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/johnny4young/janusly/go/internal/auth"
 	"github.com/johnny4young/janusly/go/internal/cron"
@@ -59,6 +62,19 @@ func (s *V1Server) memoryPurgeProjection(r *http.Request, rc v1Request, tenantEn
 		return none
 	}
 	q := store.New(s.pool)
+	revoked, err := q.GetOrgConfigRevokedAt(r.Context(), rc.orgID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return none
+	}
+	if err != nil || revoked == nil {
+		return map[string]any{"status": "unknown", "scheduledFor": nil}
+	}
+	// Same window the sweep enforces (JANUSLY_MEMORY_PURGE_DELAY_HOURS,
+	// default seven days).
+	scheduledFor := revoked.Add(engine.MemoryPurgeDelay())
+	if time.Now().Before(scheduledFor) {
+		return map[string]any{"status": "scheduled", "scheduledFor": scheduledFor.UTC().Format(time.RFC3339)}
+	}
 	remaining, err := q.CountMemoryEntriesForOrg(r.Context(), rc.orgID)
 	if err != nil {
 		return map[string]any{"status": "unknown", "scheduledFor": nil}
@@ -66,17 +82,7 @@ func (s *V1Server) memoryPurgeProjection(r *http.Request, rc v1Request, tenantEn
 	if remaining == 0 {
 		return none
 	}
-	revoked, err := q.GetOrgConfigRevokedAt(r.Context(), rc.orgID)
-	if err != nil || revoked == nil {
-		return map[string]any{"status": "unknown", "scheduledFor": nil}
-	}
-	// Same window the sweep enforces (JANUSLY_MEMORY_PURGE_DELAY_HOURS,
-	// default seven days).
-	scheduledFor := revoked.Add(engine.MemoryPurgeDelay())
-	if !time.Now().Before(scheduledFor) {
-		return map[string]any{"status": "running", "scheduledFor": scheduledFor.UTC().Format(time.RFC3339)}
-	}
-	return map[string]any{"status": "scheduled", "scheduledFor": scheduledFor.UTC().Format(time.RFC3339)}
+	return map[string]any{"status": "running", "scheduledFor": scheduledFor.UTC().Format(time.RFC3339)}
 }
 
 func (s *V1Server) memoryConsentStatusCore(r *http.Request, rc v1Request) opResult {
