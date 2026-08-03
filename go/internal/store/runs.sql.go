@@ -1342,6 +1342,63 @@ func (q *Queries) ListPendingAutoHealingRuns(ctx context.Context, arg ListPendin
 	return items, nil
 }
 
+const listRunComparisonUsage = `-- name: ListRunComparisonUsage :many
+SELECT coalesce(run_id, '')::text AS run_id,
+       coalesce(metadata->>'nodeId', '')::text AS node_id,
+       coalesce(sum(quantity), 0)::bigint AS tokens,
+       count(*) FILTER (WHERE jsonb_typeof(metadata->'costUsd') = 'number') > 0 AS has_cost,
+       coalesce(sum((metadata->>'costUsd')::double precision)
+         FILTER (WHERE jsonb_typeof(metadata->'costUsd') = 'number'), 0)::double precision AS cost_usd
+FROM usage_events
+WHERE org_id = $1
+  AND run_id = ANY($2::text[])
+  AND metadata->>'nodeId' IS NOT NULL
+GROUP BY run_id, metadata->>'nodeId'
+ORDER BY run_id, metadata->>'nodeId'
+`
+
+type ListRunComparisonUsageParams struct {
+	OrgID  string
+	RunIds []string
+}
+
+type ListRunComparisonUsageRow struct {
+	RunID   string
+	NodeID  string
+	Tokens  int64
+	HasCost bool
+	CostUsd float64
+}
+
+// Aggregate comparison telemetry in Postgres so the read stays exact without
+// materializing an unbounded usage-event slice in the API process. Malformed
+// or unknown costs remain null; token quantities still aggregate independently.
+func (q *Queries) ListRunComparisonUsage(ctx context.Context, arg ListRunComparisonUsageParams) ([]ListRunComparisonUsageRow, error) {
+	rows, err := q.db.Query(ctx, listRunComparisonUsage, arg.OrgID, arg.RunIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRunComparisonUsageRow
+	for rows.Next() {
+		var i ListRunComparisonUsageRow
+		if err := rows.Scan(
+			&i.RunID,
+			&i.NodeID,
+			&i.Tokens,
+			&i.HasCost,
+			&i.CostUsd,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRunEvents = `-- name: ListRunEvents :many
 SELECT id, run_id, node_id, type, payload, created_at
 FROM run_events

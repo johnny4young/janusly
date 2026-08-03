@@ -186,6 +186,7 @@ func newV1HandlerWithWorkOS(eng *engine.Engine, pool *pgxpool.Pool, client worko
 	server.mountAuditRoutes(mux)
 	server.mountOrgConfigRoutes(mux)
 	server.mountRunUsageRoutes(mux)
+	server.mountRunComparisonRoutes(mux)
 	server.mountSystemHealthRoutes(mux)
 	server.mountAiGenerateRoutes(mux)
 	server.mountPromptRoutes(mux)

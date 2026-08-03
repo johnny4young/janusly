@@ -55,6 +55,23 @@ FROM run_nodes
 WHERE run_id = $1
 ORDER BY id;
 
+-- Aggregate comparison telemetry in Postgres so the read stays exact without
+-- materializing an unbounded usage-event slice in the API process. Malformed
+-- or unknown costs remain null; token quantities still aggregate independently.
+-- name: ListRunComparisonUsage :many
+SELECT coalesce(run_id, '')::text AS run_id,
+       coalesce(metadata->>'nodeId', '')::text AS node_id,
+       coalesce(sum(quantity), 0)::bigint AS tokens,
+       count(*) FILTER (WHERE jsonb_typeof(metadata->'costUsd') = 'number') > 0 AS has_cost,
+       coalesce(sum((metadata->>'costUsd')::double precision)
+         FILTER (WHERE jsonb_typeof(metadata->'costUsd') = 'number'), 0)::double precision AS cost_usd
+FROM usage_events
+WHERE org_id = sqlc.arg(org_id)
+  AND run_id = ANY(sqlc.arg(run_ids)::text[])
+  AND metadata->>'nodeId' IS NOT NULL
+GROUP BY run_id, metadata->>'nodeId'
+ORDER BY run_id, metadata->>'nodeId';
+
 -- The claim is the queue's consume operation, split in TWO statements
 
 -- inside one transaction on purpose. A single UPDATE-with-subquery is
