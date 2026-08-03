@@ -64,7 +64,7 @@ The interrupted runs and generated binaries are not certification evidence.
 | 5. Data and queue transition | fresh/legacy/rollback database matrix plus BullMQ and in-flight-work drain rehearsal | complete |
 | 6. Clean validation ladder | CI, race, PG15/18, HA, failover, chaos, fuzz, SDK, benchmark, and soak-evidence audit | complete |
 | 7. Full web certification | complete Playwright coverage against Node and Go, EN/ES screenshots, zero unexplained console errors | complete |
-| 8. Integration candidate | exact candidate commit revalidated on `go-integration`, promoted to `develop`, with `main` PR left pending | pending |
+| 8. Integration candidate | exact candidate commit revalidated on `go-integration`, promoted to local `develop`, with `main` PR left pending | complete |
 
 ## Exit criteria
 
@@ -565,3 +565,25 @@ provide provenance rather than implementation guidance.
 The staged source-hygiene tree passed syntax and formatting checks, all 12
 conformance-script tests, the complete `make ci` ladder on PostgreSQL 18, and
 the complete race-enabled PostgreSQL 15 compatibility lane.
+
+### Local integration promotion
+
+The runtime candidate `5bd2b02d0b2e561bfca28e28ebcae01573966f9e`
+(tree `515b6915c3e7a16ed5facb3c4c6f6a3e28702712`) was checked out on the
+new local `go-integration` branch in a clean worktree, without the audit
+harness's deliberate uncommitted edits. From that exact commit, the complete
+`make ci` ladder passed on PostgreSQL 18 and the complete race-enabled suite
+passed on an ephemeral PostgreSQL 15 instance.
+
+The local `develop` line was created at the frozen `origin/develop`
+`26ad2f29d96b060df886af63e556b71751b6dab1`. Because that commit is an ancestor
+of the candidate, `git merge --ff-only go-integration` advanced local
+`develop` without a merge commit to the integration head containing this
+record. Post-promotion ancestry and ref equality checks prove local
+`go-integration` and local `develop` resolve to the same commit and tree.
+
+This is local integration evidence, not remote publication, production shadow
+traffic, or a release. `origin/develop`, `origin/main`, the pull request to
+`main`, and every production traffic change remain untouched and require
+separate owner authorization. The frozen `nodejs-legacy` rollback line and the
+original evidence-bearing `go-pilot` worktree remain intact.
