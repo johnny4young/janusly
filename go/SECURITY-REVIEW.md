@@ -79,3 +79,36 @@ consistente cuando se decida en el reference.
    + flag al reference).
 3. Sweep editor y matriz SSRF del tool `http.request` no existían —
    añadidos y verdes.
+
+## Posture changes from the PR #23 review (2026-08-03)
+
+Three findings that had been left as owner decisions were applied, each
+with a regression test:
+
+- **The auth-policy evaluator fails CLOSED.** `LoadConfig` and
+  `readConnection` used to absorb storage faults and return "no policy",
+  so a partial outage — membership read succeeds, policy read times out —
+  silently switched off both enforced SSO and the allowed-domain list
+  while still handing out sessions. An unreadable policy is now a denial
+  attributed to `auth.policyUnavailable`, distinguishable in the audit
+  trail from a real rejection. Service tokens are exempt: no user policy
+  applies to them, so a policy fault must not take machine callers down.
+- **`ALLOW_DEV_SSO_BYPASS` cannot reach production.** The flag also
+  waives enforced SSO for real Supabase identities, so a value carried
+  over from staging would void an organization's SSO requirement for the
+  life of the process. Production now refuses to boot with it set, and
+  the evaluator ignores it even if a different binary starts anyway.
+- **The SSO `state` is bound to the browser that started the flow.** The
+  signature proved "Janusly issued this" and the database nonce proved
+  "used once", but nothing proved "used by the same browser" — so an
+  attacker could complete their own authorize step and hand the callback
+  URL to a victim, logging that victim's browser into the ATTACKER's
+  identity. `startSso` now sets a short-lived HttpOnly `SameSite=Lax`
+  cookie carrying the nonce, and the callback requires a constant-time
+  match before consuming anything. A blocked callback burns no nonce, so
+  the legitimate browser can still finish its own login.
+
+Still open (root cause, needs an operator policy decision): a credential
+`secretRef` may name ANY process environment variable. Value-based
+redaction now stops the known echo path through db-tool errors, but an
+allowlist is what closes the class.

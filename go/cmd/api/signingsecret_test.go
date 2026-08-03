@@ -30,3 +30,24 @@ func TestRequireSigningSecret(t *testing.T) {
 		t.Fatal("blank secret must be rejected")
 	}
 }
+
+// The SSO development bypass also disables enforced SSO for real
+// Supabase identities, so production must refuse to start with it set
+// rather than run with an organization's SSO requirement silently void.
+func TestRefuseDevBypassInProduction(t *testing.T) {
+	t.Setenv("ALLOW_DEV_SSO_BYPASS", "true")
+	if err := refuseDevBypassInProduction(false); err != nil {
+		t.Fatalf("development may keep the bypass: %v", err)
+	}
+	err := refuseDevBypassInProduction(true)
+	if err == nil {
+		t.Fatal("production with the bypass set must refuse to start")
+	}
+	if !strings.Contains(err.Error(), "ALLOW_DEV_SSO_BYPASS") {
+		t.Fatalf("the error must name the variable: %v", err)
+	}
+	t.Setenv("ALLOW_DEV_SSO_BYPASS", "")
+	if err := refuseDevBypassInProduction(true); err != nil {
+		t.Fatalf("production without the bypass must start: %v", err)
+	}
+}

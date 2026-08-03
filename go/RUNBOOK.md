@@ -35,9 +35,10 @@ dependencies.
 
 | Variable | Purpose |
 | --- | --- |
-| `JANUSLY_GO_ENV=production` | enables production auth checks and rejects binaries without verified commit/tree/executable provenance |
+| `JANUSLY_GO_ENV=production` | enables production auth checks and refuses to start without verified commit/tree/executable provenance, without `JANUSLY_RESUME_TOKEN_SECRET`, or with `ALLOW_DEV_SSO_BYPASS` set |
 | `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` | Supabase authentication mode |
 | `ALLOW_DEV_AUTH_HEADERS=true` | explicit production bypass when Supabase is absent; use only in controlled environments |
+| `ALLOW_DEV_SSO_BYPASS=true` | development only — waives an organization's enforced-SSO requirement. Unlike the header bypass it also applies to real Supabase identities, so production refuses to BOOT with it set and the policy evaluator ignores it regardless |
 | `JANUSLY_API_SERVICE_TOKEN` | service-token authentication mode |
 | `JANUSLY_RESUME_TOKEN_SECRET` | dedicated HMAC secret for resume, SSO-state, and browser-session tokens; required in production and never shared with the API service token |
 | `API_ALLOWED_ORIGINS` | comma-separated concrete browser origins; `*` is ignored in production |

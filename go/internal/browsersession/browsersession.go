@@ -76,6 +76,10 @@ func cookieValue(token string, ttlSeconds int) string {
 	return value
 }
 
+// SecureCookie exposes the deployment's cookie posture so sibling flows
+// (the SSO state binding) inherit it instead of re-deriving it.
+func SecureCookie() bool { return secureCookie() }
+
 func secureCookie() bool {
 	switch os.Getenv("JANUSLY_SESSION_COOKIE_SECURE") {
 	case "true":

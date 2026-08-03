@@ -20,6 +20,15 @@ import (
 	"github.com/johnny4young/janusly/go/internal/store"
 )
 
+func policyTestDSN(t *testing.T) string {
+	t.Helper()
+	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+	}
+	return dsn
+}
+
 func policyTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
@@ -177,5 +186,48 @@ func TestEvaluatorLoadsNarrowConfigAndAuditsRejections(t *testing.T) {
 		`SELECT count(*) FROM audit_logs WHERE org_id = $1 AND action = 'auth.policy.rejected'`, orgID,
 	).Scan(&audits); err != nil || audits != 2 {
 		t.Fatalf("rejection audits: count=%d err=%v", audits, err)
+	}
+}
+
+// A policy store that cannot be read must DENY. The window this closes is
+// a partial outage — the membership read succeeds while the policy read
+// times out — where the evaluator used to silently drop both enforced SSO
+// and the allowed-domain list and hand out a session anyway.
+func TestEvaluatorFailsClosedWhenPolicyStoreIsUnreadable(t *testing.T) {
+	pool := policyTestPool(t)
+	ctx := context.Background()
+	orgID := "org-policy-closed-" + fmt.Sprint(time.Now().UnixNano())
+
+	// A healthy pool with no policy rows is "no policy configured": allow.
+	healthy := New(pool)
+	if decision := healthy.Evaluate(ctx, Input{
+		OrgID: orgID, UserID: "u1", Email: "someone@anywhere.com", Mode: auth.ModeSupabase,
+	}); !decision.Allowed {
+		t.Fatalf("an org without policy rows must be allowed: %+v", decision)
+	}
+
+	// A closed pool is "policy unknown": deny, with the outage-specific
+	// policy key so the audit trail never reads as a real rejection.
+	broken, err := pgxpool.New(ctx, policyTestDSN(t))
+	if err != nil {
+		t.Fatalf("spare pool: %v", err)
+	}
+	broken.Close()
+	decision := New(broken).Evaluate(ctx, Input{
+		OrgID: orgID, UserID: "u1", Email: "someone@anywhere.com", Mode: auth.ModeSupabase,
+	})
+	if decision.Allowed {
+		t.Fatal("an unreadable policy store must fail CLOSED")
+	}
+	if decision.PolicyKey != PolicyUnavailable {
+		t.Fatalf("denial must be attributed to the outage: %+v", decision)
+	}
+
+	// Service tokens carry no user policy: a storage fault must not take
+	// machine callers down with it.
+	if machine := New(broken).Evaluate(ctx, Input{
+		OrgID: orgID, UserID: "svc", Mode: auth.ModeServiceToken,
+	}); !machine.Allowed {
+		t.Fatalf("service tokens must survive a policy-store fault: %+v", machine)
 	}
 }

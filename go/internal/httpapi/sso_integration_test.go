@@ -54,11 +54,17 @@ func newPublicSsoServer(t *testing.T, pool *pgxpool.Pool, client workosClient, n
 	return probe
 }
 
-func callPublicSso(t *testing.T, baseURL, path string) (int, http.Header, map[string]any) {
+func callPublicSso(t *testing.T, baseURL, path string, bindingNonce ...string) (int, http.Header, map[string]any) {
 	t.Helper()
 	request, err := http.NewRequest(http.MethodGet, baseURL+path, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// A real browser returns from the identity provider carrying the
+	// binding cookie startSso set; omitting it models a callback replayed
+	// in a DIFFERENT browser.
+	if len(bindingNonce) == 1 && bindingNonce[0] != "" {
+		request.AddCookie(&http.Cookie{Name: ssostate.BrowserCookieName, Value: bindingNonce[0]})
 	}
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
@@ -84,7 +90,10 @@ func seedSsoConnection(t *testing.T, pool *pgxpool.Pool, orgID, connectionID str
 	return id
 }
 
-func issueCallbackState(t *testing.T, pool *pgxpool.Pool, orgID, callbackURL string, persistNonce bool) string {
+// issueCallbackState returns the signed state AND its nonce: the nonce is
+// what the initiating browser carries back as the binding cookie, so a
+// test that wants a legitimate callback must present both.
+func issueCallbackState(t *testing.T, pool *pgxpool.Pool, orgID, callbackURL string, persistNonce bool) (string, string) {
 	t.Helper()
 	nonce := uuid.NewString()
 	state, err := ssostate.Create(orgID, nonce, callbackURL)
@@ -98,7 +107,7 @@ func issueCallbackState(t *testing.T, pool *pgxpool.Pool, orgID, callbackURL str
 			t.Fatal(err)
 		}
 	}
-	return state.Value
+	return state.Value, nonce
 }
 
 func callSsoWithoutFollowing(t *testing.T, h *apiHarness, path string) (int, http.Header, []byte) {
@@ -280,9 +289,9 @@ func TestSsoCallbackAtomicallyProvisionsMembershipAuditAndSession(t *testing.T) 
 		ID: "workos-user-" + uuid.NewString(), Email: "alice@acme.com", ConnectionID: connectionID,
 	}}
 	server := newPublicSsoServer(t, pool, client, nil)
-	state := issueCallbackState(t, pool, orgID, callbackURL, true)
+	state, nonce := issueCallbackState(t, pool, orgID, callbackURL, true)
 	path := "/auth/sso/callback?code=code_success&state=" + url.QueryEscape(state)
-	status, headers, body := callPublicSso(t, server.URL, path)
+	status, headers, body := callPublicSso(t, server.URL, path, nonce)
 	if status != http.StatusFound || headers.Get("Location") != "https://app.example.com/auth/sso/complete" ||
 		!strings.Contains(headers.Get("Set-Cookie"), browsersession.CookieName+"=") ||
 		strings.Contains(headers.Get("Location"), browsersession.CookieName) || len(body) != 0 {
@@ -324,7 +333,7 @@ func TestSsoCallbackAtomicallyProvisionsMembershipAuditAndSession(t *testing.T) 
 
 	// A successful callback consumes the nonce; replay never reaches WorkOS or
 	// creates another durable session.
-	replayStatus, _, replayBody := callPublicSso(t, server.URL, path)
+	replayStatus, _, replayBody := callPublicSso(t, server.URL, path, nonce)
 	if replayStatus != http.StatusBadRequest || replayBody["code"] != "sso_invalid_state" || client.exchangeCalls != 1 {
 		t.Fatalf("replay: status=%d body=%+v calls=%d", replayStatus, replayBody, client.exchangeCalls)
 	}
@@ -360,10 +369,10 @@ func TestSsoCallbackRejectsStateConnectionAndPolicyBeforeProvisioning(t *testing
 
 	t.Run("callback binding", func(t *testing.T) {
 		orgID := "callback-binding-" + uuid.NewString()
-		state := issueCallbackState(t, pool, orgID, "https://old.example.com/callback", true)
+		state, nonce := issueCallbackState(t, pool, orgID, "https://old.example.com/callback", true)
 		client := &stubWorkOSClient{}
 		server := newPublicSsoServer(t, pool, client, nil)
-		status, _, body := callPublicSso(t, server.URL, "/auth/sso/callback?code=code&state="+url.QueryEscape(state))
+		status, _, body := callPublicSso(t, server.URL, "/auth/sso/callback?code=code&state="+url.QueryEscape(state), nonce)
 		if status != http.StatusBadRequest || body["code"] != "sso_invalid_state" || client.exchangeCalls != 0 {
 			t.Fatalf("binding: %d %+v calls=%d", status, body, client.exchangeCalls)
 		}
@@ -377,12 +386,12 @@ func TestSsoCallbackRejectsStateConnectionAndPolicyBeforeProvisioning(t *testing
 	t.Run("connection binding", func(t *testing.T) {
 		orgID := "connection-binding-" + uuid.NewString()
 		seedSsoConnection(t, pool, orgID, "conn_expected")
-		state := issueCallbackState(t, pool, orgID, callbackURL, true)
+		state, nonce := issueCallbackState(t, pool, orgID, callbackURL, true)
 		client := &stubWorkOSClient{profile: workos.Profile{
 			ID: "mismatch-user", Email: "mismatch@acme.com", ConnectionID: "conn_other",
 		}}
 		server := newPublicSsoServer(t, pool, client, nil)
-		status, _, body := callPublicSso(t, server.URL, "/auth/sso/callback?code=code&state="+url.QueryEscape(state))
+		status, _, body := callPublicSso(t, server.URL, "/auth/sso/callback?code=code&state="+url.QueryEscape(state), nonce)
 		if status != http.StatusBadRequest || body["code"] != "sso_connection_mismatch" || client.exchangeCalls != 1 {
 			t.Fatalf("connection: %d %+v calls=%d", status, body, client.exchangeCalls)
 		}
@@ -404,12 +413,12 @@ func TestSsoCallbackRejectsStateConnectionAndPolicyBeforeProvisioning(t *testing
 		}); err != nil {
 			t.Fatal(err)
 		}
-		state := issueCallbackState(t, pool, orgID, callbackURL, true)
+		state, nonce := issueCallbackState(t, pool, orgID, callbackURL, true)
 		client := &stubWorkOSClient{profile: workos.Profile{
 			ID: "policy-user", Email: "bob@partner.example", ConnectionID: connectionID,
 		}}
 		server := newPublicSsoServer(t, pool, client, nil)
-		status, _, body := callPublicSso(t, server.URL, "/auth/sso/callback?code=code&state="+url.QueryEscape(state))
+		status, _, body := callPublicSso(t, server.URL, "/auth/sso/callback?code=code&state="+url.QueryEscape(state), nonce)
 		params, _ := body["params"].(map[string]any)
 		if status != http.StatusForbidden || body["code"] != "sso_policy_violation" ||
 			params["policyKey"] != "auth.allowedEmailDomains" {
@@ -448,9 +457,9 @@ func TestSsoCallbackRollsBackMembershipAndLoginAuditWhenSessionInsertFails(t *te
 		ID: "rollback-user-" + uuid.NewString(), Email: "rollback@acme.com", ConnectionID: connectionID,
 	}}
 	server := newPublicSsoServer(t, pool, client, func() string { return forcedID })
-	state := issueCallbackState(t, pool, orgID, callbackURL, true)
+	state, nonce := issueCallbackState(t, pool, orgID, callbackURL, true)
 	status, _, body := callPublicSso(t, server.URL,
-		"/auth/sso/callback?code=code&state="+url.QueryEscape(state))
+		"/auth/sso/callback?code=code&state="+url.QueryEscape(state), nonce)
 	if status != http.StatusInternalServerError || body["code"] != "sso_membership_persist_failed" {
 		t.Fatalf("rollback response: %d %+v", status, body)
 	}
@@ -479,9 +488,9 @@ func TestSsoCallbackMapsExchangeFailuresWithoutProvisioning(t *testing.T) {
 	seedSsoConnection(t, pool, orgID, connectionID)
 	client := &stubWorkOSClient{exchangeError: errors.New("network unavailable")}
 	server := newPublicSsoServer(t, pool, client, nil)
-	state := issueCallbackState(t, pool, orgID, callbackURL, true)
+	state, nonce := issueCallbackState(t, pool, orgID, callbackURL, true)
 	status, _, body := callPublicSso(t, server.URL,
-		"/auth/sso/callback?code=code&state="+url.QueryEscape(state))
+		"/auth/sso/callback?code=code&state="+url.QueryEscape(state), nonce)
 	if status != http.StatusBadRequest || body["code"] != "sso_exchange_failed" {
 		t.Fatalf("exchange: %d %+v", status, body)
 	}
@@ -491,5 +500,57 @@ func TestSsoCallbackMapsExchangeFailuresWithoutProvisioning(t *testing.T) {
 		AND action = 'auth.sso.callback_failed' AND metadata->>'reason' = 'exchange_failed'`, orgID).Scan(&audits)
 	if members != 0 || audits != 1 {
 		t.Fatalf("exchange effects: members=%d audits=%d", members, audits)
+	}
+}
+
+// Login-CSRF: an attacker completes the authorize step themselves, then
+// hands the resulting callback URL to a victim. The state signature is
+// genuine and the nonce is unused, so signature + single-use checks both
+// pass — only the browser binding stops the victim's browser from being
+// logged into the ATTACKER's identity. The nonce must survive so the
+// legitimate browser can still finish its own flow.
+func TestSsoCallbackRequiresTheBrowserThatStartedTheFlow(t *testing.T) {
+	const callbackURL = "https://api.example.com/auth/sso/callback"
+	t.Setenv("JANUSLY_RESUME_TOKEN_SECRET", "sso-binding-secret")
+	t.Setenv("JANUSLY_SSO_CALLBACK_URL", callbackURL)
+	t.Setenv("JANUSLY_WEB_BASE_URL", "https://app.example.com/")
+	pool := testPool(t)
+	orgID := "callback-binding-" + uuid.NewString()
+	connectionID := "conn_binding_" + uuid.NewString()
+	seedSsoConnection(t, pool, orgID, connectionID)
+	server := newPublicSsoServer(t, pool, &stubWorkOSClient{
+		profile: workos.Profile{
+			ID: "wos_binding_" + uuid.NewString(), Email: "victim@acme.com",
+			ConnectionID: connectionID,
+		},
+	}, nil)
+
+	state, nonce := issueCallbackState(t, pool, orgID, callbackURL, true)
+	path := "/auth/sso/callback?code=code_success&state=" + url.QueryEscape(state)
+
+	// No cookie at all — the victim's browser never visited startSso.
+	status, _, body := callPublicSso(t, server.URL, path)
+	if status != http.StatusBadRequest || body["code"] != "sso_invalid_state" {
+		t.Fatalf("callback without the binding must be rejected: %d %+v", status, body)
+	}
+	// A cookie from a DIFFERENT flow must not satisfy the binding either.
+	status, _, body = callPublicSso(t, server.URL, path, uuid.NewString())
+	if status != http.StatusBadRequest || body["code"] != "sso_invalid_state" {
+		t.Fatalf("callback with a foreign binding must be rejected: %d %+v", status, body)
+	}
+
+	// Neither rejection may burn the nonce or provision anything.
+	var nonces, members int
+	_ = pool.QueryRow(t.Context(),
+		`SELECT count(*) FROM sso_state_nonces WHERE org_id = $1`, orgID).Scan(&nonces)
+	_ = pool.QueryRow(t.Context(),
+		`SELECT count(*) FROM org_members WHERE org_id = $1`, orgID).Scan(&members)
+	if nonces != 1 || members != 0 {
+		t.Fatalf("a blocked callback must not consume state or provision: nonces=%d members=%d", nonces, members)
+	}
+
+	// The browser that actually started the flow still completes it.
+	if status, _, body = callPublicSso(t, server.URL, path, nonce); status != http.StatusFound {
+		t.Fatalf("the initiating browser must still succeed: %d %+v", status, body)
 	}
 }

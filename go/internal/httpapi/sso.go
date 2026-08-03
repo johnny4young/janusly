@@ -243,6 +243,10 @@ func (s *V1Server) startSso(w http.ResponseWriter, r *http.Request) {
 			"provider": connection.Provider, "connectionId": connection.ProviderConnectionID,
 		},
 	})
+	// Bind the flow to THIS browser: the callback must arrive carrying the
+	// same nonce we just handed out, so a captured authorize redirect
+	// cannot be replayed inside somebody else's browser.
+	w.Header().Add("Set-Cookie", ssostate.BrowserCookie(nonce, browsersession.SecureCookie()))
 	redirectNoStore(w, authorizeURL)
 }
 
@@ -284,6 +288,21 @@ func (s *V1Server) callbackSso(w http.ResponseWriter, r *http.Request) {
 	state := envelope.Payload
 	if state.CallbackURL != callbackURL {
 		s.invalidSsoState(r.Context(), state.OrgID, "callback_url_mismatch")
+		writeLegacy(w, opError(http.StatusBadRequest, "sso_invalid_state", "invalid state", nil))
+		return
+	}
+	// Third leg of the state check, alongside the signature and the
+	// single-use nonce: the browser completing the flow must be the one
+	// that started it. Cleared unconditionally — this cookie is good for
+	// exactly one callback, successful or not.
+	binding, _ := r.Cookie(ssostate.BrowserCookieName)
+	w.Header().Add("Set-Cookie", ssostate.ClearBrowserCookie(browsersession.SecureCookie()))
+	if binding == nil || !ssostate.BrowserBindingMatches(binding.Value, state.Nonce) {
+		reason := "browser_binding_missing"
+		if binding != nil {
+			reason = "browser_binding_mismatch"
+		}
+		s.invalidSsoState(r.Context(), state.OrgID, reason)
 		writeLegacy(w, opError(http.StatusBadRequest, "sso_invalid_state", "invalid state", nil))
 		return
 	}

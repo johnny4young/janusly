@@ -70,6 +70,19 @@ func envDurationMs(name string, fallback time.Duration) time.Duration {
 // lazily at the first token operation — long after the process began
 // serving traffic. Same posture as the provenance gate above: refuse to
 // start rather than run in an unverifiable configuration.
+// refuseDevBypassInProduction stops a production boot when the SSO
+// development escape hatch is set. It disables enforced SSO for real
+// provider identities, so a value carried over from a staging
+// environment would silently void an organization's SSO requirement for
+// as long as the process runs. Loud at startup beats invisible at
+// runtime; the evaluator ignores it in production regardless.
+func refuseDevBypassInProduction(production bool) error {
+	if production && os.Getenv("ALLOW_DEV_SSO_BYPASS") == "true" {
+		return errors.New("ALLOW_DEV_SSO_BYPASS must not be set when JANUSLY_GO_ENV=production")
+	}
+	return nil
+}
+
 func requireSigningSecret(production bool) error {
 	if !production {
 		return nil
@@ -123,6 +136,9 @@ func run() error {
 		return err
 	}
 	if err := requireSigningSecret(cfg.Production); err != nil {
+		return err
+	}
+	if err := refuseDevBypassInProduction(cfg.Production); err != nil {
 		return err
 	}
 	logger := boot.NewLogger()

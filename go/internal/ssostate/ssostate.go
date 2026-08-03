@@ -4,7 +4,10 @@
 package ssostate
 
 import (
+	"crypto/subtle"
 	"errors"
+	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/johnny4young/janusly/go/internal/signedtoken"
@@ -27,6 +30,44 @@ type Payload struct {
 type Token struct {
 	Value     string
 	ExpiresAt time.Time
+}
+
+// BrowserCookieName carries the flow's nonce back from the browser that
+// STARTED the login. The signed state proves "Janusly issued this"; the
+// database nonce proves "used once". Neither proves "used by the same
+// browser that asked for it" — without that third leg an attacker can
+// capture their OWN authorize redirect and hand the resulting callback
+// URL to a victim, whose browser then completes a login into the
+// ATTACKER's identity (OAuth login-CSRF).
+const BrowserCookieName = "janusly_sso_state"
+
+// BrowserCookie serializes the binding cookie. SameSite=Lax is required,
+// not incidental: the identity provider returns through a top-level GET
+// navigation, which Strict would refuse to send the cookie on.
+func BrowserCookie(nonce string, secure bool) string {
+	value := BrowserCookieName + "=" + url.QueryEscape(nonce) +
+		"; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + strconv.Itoa(TTLSeconds)
+	if secure {
+		value += "; Secure"
+	}
+	return value
+}
+
+// ClearBrowserCookie expires the binding immediately: one flow, one cookie.
+func ClearBrowserCookie(secure bool) string {
+	value := BrowserCookieName + "=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+	if secure {
+		value += "; Secure"
+	}
+	return value
+}
+
+// BrowserBindingMatches compares in constant time.
+func BrowserBindingMatches(cookieNonce, stateNonce string) bool {
+	if cookieNonce == "" || stateNonce == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(cookieNonce), []byte(stateNonce)) == 1
 }
 
 // Create signs one ten-minute state token.
