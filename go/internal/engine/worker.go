@@ -228,9 +228,9 @@ func (e *Engine) failClaim(ctx context.Context, claim ClaimedNode, cause error, 
 	}
 }
 
-// sweepWakeups garbage-collects due wake-up rows on the poll cadence and
-// nudges idle workers when any were due. Claim correctness never depends on
-// it — the claim's anti-join compares wake_at to now() directly.
+// sweepWakeups applies due waiting policies, garbage-collects consumed rows,
+// and nudges idle workers when any work advanced. Claim correctness never
+// depends on it — the claim's anti-join compares wake_at to now() directly.
 func (e *Engine) sweepWakeups(ctx context.Context, wake chan<- struct{}, poll time.Duration, logger *slog.Logger) {
 	q := store.New(e.pool)
 	for {
@@ -239,7 +239,7 @@ func (e *Engine) sweepWakeups(ctx context.Context, wake chan<- struct{}, poll ti
 		case <-ctx.Done():
 			return
 		}
-		resumed := e.resumeDueTimers(ctx, q)
+		processed := e.processDueWaitingWakeups(ctx, q)
 		swept, err := q.SweepDueWakeups(ctx)
 		if err != nil {
 			if ctx.Err() == nil {
@@ -247,7 +247,7 @@ func (e *Engine) sweepWakeups(ctx context.Context, wake chan<- struct{}, poll ti
 			}
 			continue
 		}
-		if swept > 0 || resumed > 0 {
+		if swept > 0 || processed > 0 {
 			select {
 			case wake <- struct{}{}:
 			default:

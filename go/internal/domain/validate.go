@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Issue codes emitted by Parse and Validate. Closed set; additions must
@@ -140,6 +141,15 @@ func ValidateWithSemanticFixtures(wf *Workflow, validExpression ExpressionValida
 		}
 		if node.Type == "transform" && !isNonEmptyObject(node.Config["mapping"]) {
 			push(Issue{Code: CodeTransformMissingMapping, Message: "Transform node requires a non-empty config.mapping object", NodeID: node.ID})
+		}
+		if node.Type == "approval" {
+			if _, err := ResolveApprovalWaitingConfig(node.Config, time.Now()); err != nil {
+				code := "approval_invalid_deadline"
+				if configErr, ok := err.(*WaitingConfigError); ok {
+					code = configErr.Code
+				}
+				push(Issue{Code: code, Message: err.Error(), NodeID: node.ID})
+			}
 		}
 	}
 

@@ -2205,3 +2205,20 @@ matcher @node queda como patrón de transición gradual, no como necesidad),
 recorta la tabla de divergencias a las dos clases que quedan (ambas
 deliberadas del lado honesto) y anota cuáles murieron en la ola 7 con su
 ticket. Node pasa de upstream requerido a destino de rollback.
+
+## Approval deadline parity and Node checkpoint continuation (2026-08-02)
+
+The pilot's earlier fail-closed limitation is superseded. Approval authoring
+and runtime now share the exact deadline grammar, relative decision windows
+start at the durable waiting checkpoint, and PostgreSQL owns reason-specific
+timer and approval clocks. `fail` and `auto_reject` terminate the approval and
+run without releasing downstream nodes; `escalate` reassigns the still-waiting
+checkpoint exactly once. The per-run lock plus deadline-generation CAS makes
+manual resume, duplicate HA sweepers, and stale delivery races harmless.
+
+The Node database bridge now reconstructs these clocks as well as timers, so a
+Node-created bounded approval can finish under Go after the global ownership
+switch. While separating wakeup reasons, the band also found and fixed an older
+bug: a human wait could inherit a due retry wakeup and auto-resume. Waiting
+transitions now clear the execution clock before installing their own bounded
+clock or remaining indefinite.

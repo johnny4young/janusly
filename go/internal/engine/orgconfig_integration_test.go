@@ -225,7 +225,7 @@ func TestMassTimerBacklogDrainsFairly(t *testing.T) {
 	}
 
 	// Drain: one sweep clears the whole backlog (123 > one 50-batch).
-	resumed := eng.resumeDueTimers(ctx, q)
+	resumed := eng.processDueWaitingWakeups(ctx, q)
 	if resumed != 123 {
 		t.Fatalf("drained %d of 123", resumed)
 	}

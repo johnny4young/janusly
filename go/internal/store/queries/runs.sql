@@ -134,6 +134,27 @@ WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
   AND status = 'waiting'
 RETURNING id;
 
+-- Exact approval-deadline generation CAS. Manual resume, cancellation,
+-- escalation, or duplicate sweep delivery makes this a no-op.
+-- name: FailWaitingApprovalDeadline :execrows
+UPDATE run_nodes
+SET status = 'failed', error_json = sqlc.arg(error_json),
+    finished_at = sqlc.arg(finished_at), waiting_repair_after = NULL
+WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
+  AND status = 'waiting'
+  AND state_json #>> '{waiting,kind}' = 'approval'
+  AND state_json #>> '{waiting,deadlineAt}' = sqlc.arg(expected_deadline_at)::text
+  AND state_json #>> '{waiting,timeoutState}' IS NULL;
+
+-- name: EscalateWaitingApprovalDeadline :execrows
+UPDATE run_nodes
+SET state_json = sqlc.arg(state_json), waiting_repair_after = NULL
+WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
+  AND status = 'waiting'
+  AND state_json #>> '{waiting,kind}' = 'approval'
+  AND state_json #>> '{waiting,deadlineAt}' = sqlc.arg(expected_deadline_at)::text
+  AND state_json #>> '{waiting,timeoutState}' IS NULL;
+
 -- name: SkipRunNode :execrows
 UPDATE run_nodes
 SET status = 'skipped', state_json = sqlc.arg(state_json),

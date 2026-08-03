@@ -2,7 +2,6 @@ package executors
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 )
@@ -136,14 +135,40 @@ func TestApprovalMetadataShape(t *testing.T) {
 	}
 }
 
-func TestApprovalDeadlinePoliciesAreOutOfScope(t *testing.T) {
-	// Executing an approval while silently dropping its declared deadline
-	// supervision would be worse than failing — pin the deterministic error.
-	_, err := Registry()["approval"](context.Background(), Input{
+func TestApprovalDeadlineMetadata(t *testing.T) {
+	relative, err := Registry()["approval"](context.Background(), Input{
 		RunID: "r1", NodeID: "gate",
 		Config: map[string]any{"message": "x", "decisionTimeoutMs": float64(60000)},
 	})
-	if err == nil || !strings.Contains(err.Error(), "decisionTimeoutMs is not executable by this backend yet") {
-		t.Fatalf("deadline fields must fail deterministically: %v", err)
+	if err != nil {
+		t.Fatalf("relative deadline: %v", err)
+	}
+	relativeWaiting := relative.(Waiting)
+	if relativeWaiting.WakeAt != nil || relativeWaiting.Metadata["decisionTimeoutMs"] != int64(60_000) ||
+		relativeWaiting.Metadata["onTimeout"] != "fail" {
+		t.Fatalf("relative deadline must start at checkpoint: %+v", relativeWaiting)
+	}
+	if _, present := relativeWaiting.Metadata["deadlineAt"]; present {
+		t.Fatalf("executor must not materialize the relative clock: %+v", relativeWaiting.Metadata)
+	}
+
+	absolute, err := Registry()["approval"](context.Background(), Input{
+		RunID: "r1", NodeID: "gate",
+		Config: map[string]any{
+			"until": "2099-01-02T03:04:05Z", "onTimeout": "escalate",
+			"assignee": " tier-1 ", "escalateTo": " tier-2 ",
+		},
+	})
+	if err != nil {
+		t.Fatalf("absolute deadline: %v", err)
+	}
+	absoluteWaiting := absolute.(Waiting)
+	wantWake := time.Date(2099, 1, 2, 3, 4, 5, 0, time.UTC)
+	if absoluteWaiting.WakeAt == nil || !absoluteWaiting.WakeAt.Equal(wantWake) ||
+		absoluteWaiting.Metadata["deadlineAt"] != "2099-01-02T03:04:05.000Z" ||
+		absoluteWaiting.Metadata["onTimeout"] != "escalate" ||
+		absoluteWaiting.Metadata["assignee"] != "tier-1" ||
+		absoluteWaiting.Metadata["escalateTo"] != "tier-2" {
+		t.Fatalf("absolute escalation metadata broken: %+v", absoluteWaiting)
 	}
 }

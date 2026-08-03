@@ -413,13 +413,16 @@ func (q *Queries) GetRunNodeRecoveryClaim(ctx context.Context, arg GetRunNodeRec
 }
 
 const listDueWaitingWakeups = `-- name: ListDueWaitingWakeups :many
-SELECT run_node_id, run_id, node_id
+SELECT run_node_id, run_id, node_id, wake_at, reason
 FROM (
-  SELECT w.run_node_id, rn.run_id, rn.node_id,
+  SELECT w.run_node_id, rn.run_id, rn.node_id, w.wake_at, w.reason,
          ROW_NUMBER() OVER (PARTITION BY rn.run_id ORDER BY w.wake_at, w.run_node_id) AS run_rank
   FROM go_pilot_wakeups w
   JOIN run_nodes rn ON rn.id = w.run_node_id
+  JOIN runs r ON r.id = rn.run_id
   WHERE w.wake_at <= now() AND rn.status = 'waiting'
+    AND r.status = 'running'
+    AND w.reason IN ('wait_until', 'approval_timeout')
 ) ranked
 ORDER BY run_rank, run_node_id
 LIMIT $1
@@ -429,6 +432,8 @@ type ListDueWaitingWakeupsRow struct {
 	RunNodeID string
 	RunID     string
 	NodeID    string
+	WakeAt    time.Time
+	Reason    string
 }
 
 func (q *Queries) ListDueWaitingWakeups(ctx context.Context, batchSize int32) ([]ListDueWaitingWakeupsRow, error) {
@@ -440,7 +445,13 @@ func (q *Queries) ListDueWaitingWakeups(ctx context.Context, batchSize int32) ([
 	var items []ListDueWaitingWakeupsRow
 	for rows.Next() {
 		var i ListDueWaitingWakeupsRow
-		if err := rows.Scan(&i.RunNodeID, &i.RunID, &i.NodeID); err != nil {
+		if err := rows.Scan(
+			&i.RunNodeID,
+			&i.RunID,
+			&i.NodeID,
+			&i.WakeAt,
+			&i.Reason,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

@@ -70,11 +70,11 @@ JANUSLY_GO_DATABASE_URL='postgres://…' ./bin/janusly-go
 `internal/migrate/sql/`. A fresh database receives the complete baseline and
 subsequent versions. A pre-goose Node database is transactionally stamped at
 the shared baseline before later migrations install the Go-owned runtime
-tables, reconstruct durable timer wakeups, and initialize enabled schedule due
-clocks. Serving refuses a database whose version differs from the exact binary
-or whose runtime bridge is incomplete. Active serving additionally applies the
-cutover-readiness rules in `RUNBOOK-CUTOVER.md`; passive shadow reads remain
-available while those work-plane-specific gates are unresolved.
+tables, reconstruct durable timer and approval-deadline wakeups, and initialize
+enabled schedule due clocks. Serving refuses a database whose version differs
+from the exact binary or whose runtime bridge is incomplete. Active serving
+additionally applies the ownership rules in `RUNBOOK-CUTOVER.md`; passive
+shadow reads remain available until the global work-plane switch.
 
 Do not apply `pnpm migrate` to a goose-provisioned database. The Drizzle journal
 is intentionally present but empty, and the Node runner could replay historical

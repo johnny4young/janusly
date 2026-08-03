@@ -42,10 +42,10 @@ in BullMQ cannot be transferred by proxy routing.
 
 The exact Go candidate must migrate the shared Node database while passive
 before the global switch. That bridge installs the Go-only dispatch tables,
-reconstructs timer wakeups, and initializes enabled schedule due clocks. A
-passive process may still serve safe shadow reads, but active startup fails
-closed while an unresolved Node approval deadline or any non-deleted workflow's
-latest DAG still contains unsupported approval deadline policy.
+reconstructs timer and approval-deadline wakeups, and initializes enabled
+schedule due clocks. Run the same idempotent migration again after Node is
+quiesced; exact-version boot then fails closed if any bounded waiting
+checkpoint lacks its matching durable Go clock.
 
 ## Stable and transitional proxy shapes
 

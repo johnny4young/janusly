@@ -270,6 +270,36 @@ func (q *Queries) DeleteExternalRuntimeConnection(ctx context.Context, arg Delet
 	return i, err
 }
 
+const escalateWaitingApprovalDeadline = `-- name: EscalateWaitingApprovalDeadline :execrows
+UPDATE run_nodes
+SET state_json = $1, waiting_repair_after = NULL
+WHERE run_id = $2 AND node_id = $3
+  AND status = 'waiting'
+  AND state_json #>> '{waiting,kind}' = 'approval'
+  AND state_json #>> '{waiting,deadlineAt}' = $4::text
+  AND state_json #>> '{waiting,timeoutState}' IS NULL
+`
+
+type EscalateWaitingApprovalDeadlineParams struct {
+	StateJson          json.RawMessage
+	RunID              string
+	NodeID             string
+	ExpectedDeadlineAt string
+}
+
+func (q *Queries) EscalateWaitingApprovalDeadline(ctx context.Context, arg EscalateWaitingApprovalDeadlineParams) (int64, error) {
+	result, err := q.db.Exec(ctx, escalateWaitingApprovalDeadline,
+		arg.StateJson,
+		arg.RunID,
+		arg.NodeID,
+		arg.ExpectedDeadlineAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const failRunNode = `-- name: FailRunNode :execrows
 UPDATE run_nodes
 SET status = 'failed', error_json = $1,
@@ -291,6 +321,41 @@ func (q *Queries) FailRunNode(ctx context.Context, arg FailRunNodeParams) (int64
 		arg.FinishedAt,
 		arg.RunID,
 		arg.NodeID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const failWaitingApprovalDeadline = `-- name: FailWaitingApprovalDeadline :execrows
+UPDATE run_nodes
+SET status = 'failed', error_json = $1,
+    finished_at = $2, waiting_repair_after = NULL
+WHERE run_id = $3 AND node_id = $4
+  AND status = 'waiting'
+  AND state_json #>> '{waiting,kind}' = 'approval'
+  AND state_json #>> '{waiting,deadlineAt}' = $5::text
+  AND state_json #>> '{waiting,timeoutState}' IS NULL
+`
+
+type FailWaitingApprovalDeadlineParams struct {
+	ErrorJson          json.RawMessage
+	FinishedAt         *time.Time
+	RunID              string
+	NodeID             string
+	ExpectedDeadlineAt string
+}
+
+// Exact approval-deadline generation CAS. Manual resume, cancellation,
+// escalation, or duplicate sweep delivery makes this a no-op.
+func (q *Queries) FailWaitingApprovalDeadline(ctx context.Context, arg FailWaitingApprovalDeadlineParams) (int64, error) {
+	result, err := q.db.Exec(ctx, failWaitingApprovalDeadline,
+		arg.ErrorJson,
+		arg.FinishedAt,
+		arg.RunID,
+		arg.NodeID,
+		arg.ExpectedDeadlineAt,
 	)
 	if err != nil {
 		return 0, err

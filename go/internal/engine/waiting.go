@@ -6,19 +6,20 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
+	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
-	"encoding/json"
 	"github.com/johnny4young/janusly/go/internal/domain"
 	"github.com/johnny4young/janusly/go/internal/executors"
 	"github.com/johnny4young/janusly/go/internal/orgconfig"
 	"github.com/johnny4young/janusly/go/internal/resumetoken"
 	"github.com/johnny4young/janusly/go/internal/store"
-	"time"
 )
 
 // ErrResumeConflict reports a resume against a node that is not waiting —
@@ -31,7 +32,7 @@ var ErrResumeNodeNotFound = errors.New("Node not found") //nolint:staticcheck //
 
 // MarkNodeWaiting commits the pause checkpoint: node running→waiting with
 // {waiting: {reason, ...metadata, waitingSince}} state, the node.waiting
-// event, and — for timers — the wake-up that auto-resumes it.
+// event, and any reason-specific timer/approval wake-up.
 func (e *Engine) MarkNodeWaiting(ctx context.Context, claim ClaimedNode, waiting executors.Waiting) error {
 	checkpointAt := eventNow()
 	metadata := map[string]any{}
@@ -56,7 +57,24 @@ func (e *Engine) MarkNodeWaiting(ctx context.Context, claim ClaimedNode, waiting
 		metadata["resumeToken"] = token
 		metadata["resumeTokenExpiresAt"] = time.Now().Add(time.Duration(ttl) * time.Second).UTC().Format(time.RFC3339)
 	}
+	metadata = domain.MaterializeApprovalWaitingMetadata(metadata, checkpointAt)
 	metadata["waitingSince"] = checkpointAt.Format("2006-01-02T15:04:05.000Z")
+
+	var wakeAt *time.Time
+	var wakeReason string
+	switch metadata["kind"] {
+	case "timer":
+		wakeAt = waiting.WakeAt
+		wakeReason = "wait_until"
+	case "approval":
+		if rawDeadline, ok := metadata["deadlineAt"].(string); ok {
+			wakeAt = domain.ParseAbsoluteInstant(rawDeadline)
+			if wakeAt == nil {
+				return fmt.Errorf("approval waiting checkpoint has invalid deadlineAt %q", rawDeadline)
+			}
+			wakeReason = "approval_timeout"
+		}
+	}
 	stateJSON := safePersist(map[string]any{"waiting": metadata}, stateJSONMaxBytes)
 	eventJSON := safePersist(map[string]any{
 		"status": "waiting", "reason": waiting.Reason, "metadata": metadata,
@@ -73,15 +91,185 @@ func (e *Engine) MarkNodeWaiting(ctx context.Context, claim ClaimedNode, waiting
 			return errSkipCommit
 		}
 		events.add(e.newID(), claim.RunID, claim.NodeID, "node.waiting", eventJSON, checkpointAt)
-		if waiting.WakeAt != nil {
+		// A claim may arrive after a retry wakeup became due. Replacing or
+		// clearing it in the same checkpoint transaction prevents a human wait
+		// from inheriting a retry clock and auto-resuming.
+		if err := q.DeleteWakeup(ctx, claim.RowID); err != nil {
+			return fmt.Errorf("clear execution wakeup: %w", err)
+		}
+		if wakeAt != nil {
 			if err := q.UpsertWakeup(ctx, store.UpsertWakeupParams{
-				RunNodeID: claim.RowID, WakeAt: waiting.WakeAt.UTC(), Reason: "wait_until",
+				RunNodeID: claim.RowID, WakeAt: wakeAt.UTC(), Reason: wakeReason,
 			}); err != nil {
-				return fmt.Errorf("schedule wait wakeup: %w", err)
+				return fmt.Errorf("schedule %s wakeup: %w", wakeReason, err)
 			}
 		}
 		return nil
 	})
+}
+
+// processApprovalTimeout applies one exact persisted deadline generation.
+// The per-run completion lock serializes it with manual resume/cancellation;
+// the node predicates still form the durable CAS for duplicate HA sweepers.
+func (e *Engine) processApprovalTimeout(
+	ctx context.Context,
+	runID, nodeID string,
+	expectedWakeAt time.Time,
+) (bool, error) {
+	applied := false
+	err := e.inCompletionTx(ctx, runID, func(q *store.Queries, events *runEventBuffer) error {
+		run, err := q.GetRunExecution(ctx, runID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return errSkipCommit
+			}
+			return fmt.Errorf("read approval run: %w", err)
+		}
+		if run.Status != "running" {
+			return errSkipCommit
+		}
+		node, err := q.GetRunNode(ctx, store.GetRunNodeParams{RunID: runID, NodeID: nodeID})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return errSkipCommit
+			}
+			return fmt.Errorf("read waiting approval: %w", err)
+		}
+		if node.Status != "waiting" {
+			return errSkipCommit
+		}
+		var state map[string]any
+		if err := json.Unmarshal(node.StateJson, &state); err != nil {
+			return fmt.Errorf("decode waiting approval state: %w", err)
+		}
+		waiting, _ := state["waiting"].(map[string]any)
+		if waiting["kind"] != "approval" {
+			if err := q.DeleteWakeup(ctx, node.ID); err != nil {
+				return fmt.Errorf("clear mismatched approval wakeup: %w", err)
+			}
+			return nil
+		}
+		if timeoutState, present := waiting["timeoutState"]; present && timeoutState != nil {
+			if err := q.DeleteWakeup(ctx, node.ID); err != nil {
+				return fmt.Errorf("clear handled approval wakeup: %w", err)
+			}
+			return nil
+		}
+		deadlineAt, _ := waiting["deadlineAt"].(string)
+		deadline := domain.ParseAbsoluteInstant(deadlineAt)
+		if deadline == nil {
+			return fmt.Errorf("waiting approval %q has invalid deadlineAt %q", node.ID, deadlineAt)
+		}
+		if !deadline.Equal(expectedWakeAt) {
+			// A stale delivery must never apply a newer generation. Repair the
+			// durable clock to the currently persisted generation instead.
+			if err := q.UpsertWakeup(ctx, store.UpsertWakeupParams{
+				RunNodeID: node.ID, WakeAt: deadline.UTC(), Reason: "approval_timeout",
+			}); err != nil {
+				return fmt.Errorf("re-arm current approval deadline: %w", err)
+			}
+			return nil
+		}
+
+		policy, _ := waiting["onTimeout"].(string)
+		if policy == "escalate" {
+			escalateTo := strings.TrimSpace(waitingString(waiting["escalateTo"]))
+			if escalateTo != "" {
+				previousAssignee := strings.TrimSpace(waitingString(waiting["assignee"]))
+				escalatedAt := eventNow()
+				nextWaiting := make(map[string]any, len(waiting)+4)
+				maps.Copy(nextWaiting, waiting)
+				nextWaiting["assignee"] = escalateTo
+				nextWaiting["timeoutState"] = "escalated"
+				nextWaiting["escalatedAt"] = escalatedAt.Format("2006-01-02T15:04:05.000Z")
+				if previousAssignee != "" {
+					nextWaiting["escalatedFrom"] = previousAssignee
+				}
+				nextState := make(map[string]any, len(state))
+				maps.Copy(nextState, state)
+				nextState["waiting"] = nextWaiting
+				updated, err := q.EscalateWaitingApprovalDeadline(ctx, store.EscalateWaitingApprovalDeadlineParams{
+					RunID: runID, NodeID: nodeID, ExpectedDeadlineAt: deadlineAt,
+					StateJson: safePersist(nextState, stateJSONMaxBytes),
+				})
+				if err != nil {
+					return fmt.Errorf("escalate waiting approval: %w", err)
+				}
+				if updated == 0 {
+					return errSkipCommit
+				}
+				if err := q.DeleteWakeup(ctx, node.ID); err != nil {
+					return fmt.Errorf("clear escalated approval wakeup: %w", err)
+				}
+				payload := map[string]any{
+					"deadlineAt": deadlineAt, "assignee": escalateTo, "waiting": nextWaiting,
+				}
+				if previousAssignee != "" {
+					payload["previousAssignee"] = previousAssignee
+				}
+				events.add(e.newID(), runID, nodeID, "approval.escalated",
+					safePersist(payload, defaultPersistMaxBytes()), escalatedAt)
+				applied = true
+				return nil
+			}
+		}
+
+		if policy != "auto_reject" {
+			policy = "fail"
+		}
+		autoRejected := policy == "auto_reject"
+		code := "approval_timed_out"
+		reason := "Approval deadline expired"
+		eventType := "approval.timed_out"
+		if autoRejected {
+			code = "approval_auto_rejected"
+			reason = "Approval automatically rejected at deadline"
+			eventType = "approval.auto_rejected"
+		}
+		errorPayload := map[string]any{
+			"code": code, "reason": reason, "deadlineAt": deadlineAt, "onTimeout": policy,
+		}
+		failedAt := eventNow()
+		failed, err := q.FailWaitingApprovalDeadline(ctx, store.FailWaitingApprovalDeadlineParams{
+			RunID: runID, NodeID: nodeID, ExpectedDeadlineAt: deadlineAt,
+			ErrorJson: safePersist(errorPayload, deadLetterErrorMaxBytes), FinishedAt: &failedAt,
+		})
+		if err != nil {
+			return fmt.Errorf("fail waiting approval: %w", err)
+		}
+		if failed == 0 {
+			return errSkipCommit
+		}
+		metricNodeCompletions.WithLabelValues("failed").Inc()
+		if err := q.DeleteWakeup(ctx, node.ID); err != nil {
+			return fmt.Errorf("clear failed approval wakeup: %w", err)
+		}
+		events.add(e.newID(), runID, nodeID, eventType, safePersist(map[string]any{
+			"deadlineAt": deadlineAt, "onTimeout": policy, "error": errorPayload,
+		}, defaultPersistMaxBytes()), failedAt)
+		statuses, err := e.nodeStatuses(ctx, q, runID)
+		if err != nil {
+			return err
+		}
+		failedNodes := 0
+		for _, status := range statuses {
+			if status == "failed" {
+				failedNodes++
+			}
+		}
+		if err := e.flipRunTerminal(ctx, q, events, runID, "failed",
+			map[string]any{"failedNodes": failedNodes}, failedAt, nil); err != nil {
+			return err
+		}
+		applied = true
+		return nil
+	})
+	return applied, err
+}
+
+func waitingString(value any) string {
+	text, _ := value.(string)
+	return text
 }
 
 // ResumeRun completes one still-waiting node and queues its downstream
@@ -168,53 +356,60 @@ func (e *Engine) ResumeRunWithInput(ctx context.Context, runID, nodeID string, i
 	})
 }
 
-// Timer-sweep bounds: one poll tick keeps draining fair batches until the
+// Waiting-sweep bounds: one poll tick keeps draining fair batches until the
 // backlog empties or the per-sweep budget is spent, so a mass expiry
 // (downtime window) recovers in few ticks without an unbounded tick.
 const (
-	timerSweepBatchSize = 50
-	timerSweepMaxPerRun = 2_000
+	waitingSweepBatchSize = 50
+	waitingSweepMaxPerRun = 2_000
 )
 
-// resumeDueTimers auto-completes every waiting node whose wake-up clock has
-// passed — the wait_until firing path. Batches are run-fair (round-robin by
-// run) and the drain loop continues past one batch under backlog. A
-// conflict means another actor (manual resume, cancellation) advanced the
-// node first; that is the idempotency contract, not an error.
-func (e *Engine) resumeDueTimers(ctx context.Context, q *store.Queries) int {
-	resumed := 0
-	for resumed < timerSweepMaxPerRun {
-		due, err := q.ListDueWaitingWakeups(ctx, timerSweepBatchSize)
+// processDueWaitingWakeups dispatches each durable clock by reason: timers
+// resume downstream work, while approval deadlines apply their terminal or
+// escalation policy. Batches remain run-fair and bounded under backlog.
+func (e *Engine) processDueWaitingWakeups(ctx context.Context, q *store.Queries) int {
+	processed := 0
+	for processed < waitingSweepMaxPerRun {
+		due, err := q.ListDueWaitingWakeups(ctx, waitingSweepBatchSize)
 		if err != nil || len(due) == 0 {
-			return resumed
+			return processed
 		}
 		progressed := 0
-		for _, timer := range due {
+		for _, wakeup := range due {
 			if ctx.Err() != nil {
-				return resumed
+				return processed
 			}
-			err := e.ResumeRun(ctx, timer.RunID, timer.NodeID)
-			if err == nil {
-				resumed++
-				progressed++
-				continue
+			switch wakeup.Reason {
+			case "approval_timeout":
+				applied, err := e.processApprovalTimeout(ctx, wakeup.RunID, wakeup.NodeID, wakeup.WakeAt)
+				if err == nil {
+					progressed++
+					if applied {
+						processed++
+					}
+				}
+			case "wait_until":
+				err := e.ResumeRun(ctx, wakeup.RunID, wakeup.NodeID)
+				if err == nil {
+					processed++
+					progressed++
+				} else if errors.Is(err, ErrResumeConflict) {
+					// Another actor advanced it — the backlog still shrank.
+					progressed++
+				}
 			}
-			if errors.Is(err, ErrResumeConflict) {
-				// Another actor advanced it — the backlog still shrank.
-				progressed++
-			}
-			// Other errors leave the wake-up in place for the next sweep.
+			// Infrastructure/config errors leave the clock for the next sweep.
 		}
 		if progressed == 0 {
 			// Nothing moved (persistent failures): stop instead of spinning
 			// on the same head-of-line batch within this tick.
-			return resumed
+			return processed
 		}
-		if len(due) < timerSweepBatchSize {
-			return resumed
+		if len(due) < waitingSweepBatchSize {
+			return processed
 		}
 	}
-	return resumed
+	return processed
 }
 
 // humanFormSchema projects the node's config.schema into the domain's

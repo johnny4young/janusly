@@ -13,68 +13,14 @@ import (
 
 const bridgeBatchSize = 256
 
-// AssertWorkPlaneReady rejects durable Node states that this Go runtime cannot
-// continue safely. Passive read/shadow processes deliberately do not call this
-// gate; every active API/MCP process does before starting a worker or mutation
-// loop. New Go approvals with deadline policy already fail at their executor,
-// so the query covers legacy Node checkpoints and saved workflows.
-func AssertWorkPlaneReady(ctx context.Context, databaseURL string) error {
-	db, err := open(databaseURL)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = db.Close() }()
-
-	var runNodeID string
-	err = db.QueryRowContext(ctx, `
-		SELECT id
-		FROM run_nodes
-		WHERE status = 'waiting'
-		  AND state_json #>> '{waiting,kind}' = 'approval'
-		  AND COALESCE(state_json #>> '{waiting,deadlineAt}', '') <> ''
-		  AND COALESCE(state_json #>> '{waiting,timeoutState}', '') = ''
-		ORDER BY id
-		LIMIT 1`).Scan(&runNodeID)
-	if err == nil {
-		return fmt.Errorf("work plane is not ready for Go: waiting approval %q has an unresolved Node deadline", runNodeID)
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("inspect waiting approval deadlines: %w", err)
-	}
-
-	var workflowID, nodeID string
-	err = db.QueryRowContext(ctx, `
-		SELECT w.id, node ->> 'id'
-		FROM workflows w
-		JOIN LATERAL (
-			SELECT dag_json
-			FROM workflow_versions
-			WHERE workflow_id = w.id AND org_id = w.org_id
-			ORDER BY version DESC
-			LIMIT 1
-		) latest ON true
-		CROSS JOIN LATERAL jsonb_array_elements(COALESCE(latest.dag_json -> 'nodes', '[]'::jsonb)) node
-		WHERE w.deleted_at IS NULL
-		  AND node ->> 'type' = 'approval'
-		  AND COALESCE(node -> 'config', '{}'::jsonb) ?| ARRAY['decisionTimeoutMs', 'until', 'onTimeout', 'escalateTo']
-		ORDER BY w.id, node ->> 'id'
-		LIMIT 1`).Scan(&workflowID, &nodeID)
-	if err == nil {
-		return fmt.Errorf("work plane is not ready for Go: workflow %q approval %q uses unsupported deadline policy", workflowID, nodeID)
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("inspect saved approval deadline policy: %w", err)
-	}
-	return nil
-}
-
-type timerBridgeRow struct {
+type waitingBridgeRow struct {
 	id     string
-	wakeAt time.Time
+	kind   string
+	target time.Time
 }
 
 func reconcileRuntimeBridge(ctx context.Context, db *sql.DB) error {
-	if err := backfillTimerWakeups(ctx, db); err != nil {
+	if err := reconcileWaitingWakeups(ctx, db); err != nil {
 		return err
 	}
 	var after time.Time
@@ -84,67 +30,107 @@ func reconcileRuntimeBridge(ctx context.Context, db *sql.DB) error {
 	return backfillScheduleDueClocks(ctx, db, after)
 }
 
-func backfillTimerWakeups(ctx context.Context, db *sql.DB) error {
+func reconcileWaitingWakeups(ctx context.Context, db *sql.DB) error {
+	// A due retry row inherited by an indefinite human checkpoint used to be
+	// mistaken for a timer. Only the two bounded waiting kinds may own a wakeup.
+	if _, err := db.ExecContext(ctx, `
+		DELETE FROM go_pilot_wakeups w
+		USING run_nodes rn
+		WHERE w.run_node_id = rn.id
+		  AND rn.status = 'waiting'
+		  AND NOT (
+			(rn.state_json #>> '{waiting,kind}' = 'timer'
+			 AND COALESCE(rn.state_json #>> '{waiting,wakeAt}', '') <> '')
+			OR
+			(rn.state_json #>> '{waiting,kind}' = 'approval'
+			 AND COALESCE(rn.state_json #>> '{waiting,deadlineAt}', '') <> ''
+			 AND COALESCE(rn.state_json #>> '{waiting,timeoutState}', '') = '')
+		  )`); err != nil {
+		return fmt.Errorf("clear incompatible waiting wakeups: %w", err)
+	}
+
+	lastID := ""
 	for {
 		tx, err := db.BeginTx(ctx, nil)
 		if err != nil {
-			return fmt.Errorf("begin timer bridge: %w", err)
+			return fmt.Errorf("begin waiting-checkpoint bridge: %w", err)
 		}
 		rows, err := tx.QueryContext(ctx, `
-			SELECT rn.id, COALESCE(rn.state_json #>> '{waiting,wakeAt}', '')
+			SELECT rn.id,
+			       rn.state_json #>> '{waiting,kind}',
+			       CASE
+			         WHEN rn.state_json #>> '{waiting,kind}' = 'approval'
+			           THEN COALESCE(rn.state_json #>> '{waiting,deadlineAt}', '')
+			         ELSE COALESCE(rn.state_json #>> '{waiting,wakeAt}', '')
+			       END
 			FROM run_nodes rn
 			WHERE rn.status = 'waiting'
-			  AND rn.state_json #>> '{waiting,kind}' = 'timer'
-			  AND NOT EXISTS (
-				SELECT 1 FROM go_pilot_wakeups w WHERE w.run_node_id = rn.id
+			  AND rn.id > $1
+			  AND (
+			    rn.state_json #>> '{waiting,kind}' = 'timer'
+			    OR (
+			      rn.state_json #>> '{waiting,kind}' = 'approval'
+			      AND COALESCE(rn.state_json #>> '{waiting,deadlineAt}', '') <> ''
+			      AND COALESCE(rn.state_json #>> '{waiting,timeoutState}', '') = ''
+			    )
 			  )
 			ORDER BY rn.id
-			LIMIT $1
-			FOR UPDATE OF rn`, bridgeBatchSize)
+			LIMIT $2
+			FOR UPDATE OF rn`, lastID, bridgeBatchSize)
 		if err != nil {
 			_ = tx.Rollback()
-			return fmt.Errorf("select Node timer checkpoints: %w", err)
+			return fmt.Errorf("select Node waiting checkpoints: %w", err)
 		}
-		batch := make([]timerBridgeRow, 0, bridgeBatchSize)
+		batch := make([]waitingBridgeRow, 0, bridgeBatchSize)
 		for rows.Next() {
-			var id, rawWakeAt string
-			if err := rows.Scan(&id, &rawWakeAt); err != nil {
+			var id, kind, rawTarget string
+			if err := rows.Scan(&id, &kind, &rawTarget); err != nil {
 				_ = rows.Close()
 				_ = tx.Rollback()
-				return fmt.Errorf("scan Node timer checkpoint: %w", err)
+				return fmt.Errorf("scan Node waiting checkpoint: %w", err)
 			}
-			wakeAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(rawWakeAt))
+			target, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(rawTarget))
 			if err != nil {
 				_ = rows.Close()
 				_ = tx.Rollback()
-				return fmt.Errorf("waiting timer %q has invalid wakeAt %q: %w", id, rawWakeAt, err)
+				field := "wakeAt"
+				if kind == "approval" {
+					field = "deadlineAt"
+				}
+				return fmt.Errorf("waiting %s %q has invalid %s %q: %w", kind, id, field, rawTarget, err)
 			}
-			batch = append(batch, timerBridgeRow{id: id, wakeAt: wakeAt.UTC()})
+			batch = append(batch, waitingBridgeRow{id: id, kind: kind, target: target.UTC()})
 		}
 		if err := rows.Err(); err != nil {
 			_ = rows.Close()
 			_ = tx.Rollback()
-			return fmt.Errorf("iterate Node timer checkpoints: %w", err)
+			return fmt.Errorf("iterate Node waiting checkpoints: %w", err)
 		}
 		if err := rows.Close(); err != nil {
 			_ = tx.Rollback()
-			return fmt.Errorf("close Node timer checkpoints: %w", err)
+			return fmt.Errorf("close Node waiting checkpoints: %w", err)
 		}
-		for _, timer := range batch {
+		for _, checkpoint := range batch {
+			reason := "wait_until"
+			if checkpoint.kind == "approval" {
+				reason = "approval_timeout"
+			}
 			if _, err := tx.ExecContext(ctx, `
 				INSERT INTO go_pilot_wakeups (run_node_id, wake_at, reason)
-				VALUES ($1, $2, 'wait_until')
-				ON CONFLICT (run_node_id) DO NOTHING`, timer.id, timer.wakeAt); err != nil {
+				VALUES ($1, $2, $3)
+				ON CONFLICT (run_node_id) DO UPDATE
+				SET wake_at = EXCLUDED.wake_at, reason = EXCLUDED.reason`, checkpoint.id, checkpoint.target, reason); err != nil {
 				_ = tx.Rollback()
-				return fmt.Errorf("backfill waiting timer %q: %w", timer.id, err)
+				return fmt.Errorf("backfill waiting %s %q: %w", checkpoint.kind, checkpoint.id, err)
 			}
 		}
 		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit timer bridge: %w", err)
+			return fmt.Errorf("commit waiting-checkpoint bridge: %w", err)
 		}
 		if len(batch) < bridgeBatchSize {
 			return nil
 		}
+		lastID = batch[len(batch)-1].id
 	}
 }
 
@@ -274,13 +260,38 @@ func assertRuntimeBridge(ctx context.Context, db *sql.DB) error {
 			WHERE rn.status = 'waiting'
 			  AND rn.state_json #>> '{waiting,kind}' = 'timer'
 			  AND NOT EXISTS (
-				SELECT 1 FROM go_pilot_wakeups w WHERE w.run_node_id = rn.id
+				SELECT 1 FROM go_pilot_wakeups w
+				WHERE w.run_node_id = rn.id
+				  AND w.reason = 'wait_until'
+				  AND w.wake_at = (rn.state_json #>> '{waiting,wakeAt}')::timestamptz
 			  )
 		)`).Scan(&missingTimers); err != nil {
 		return fmt.Errorf("inspect waiting timer bridge: %w", err)
 	}
 	if missingTimers {
 		return errors.New("database runtime bridge is incomplete: waiting timers lack durable Go wakeups; rerun migrate")
+	}
+
+	var missingApprovals bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM run_nodes rn
+			WHERE rn.status = 'waiting'
+			  AND rn.state_json #>> '{waiting,kind}' = 'approval'
+			  AND COALESCE(rn.state_json #>> '{waiting,deadlineAt}', '') <> ''
+			  AND COALESCE(rn.state_json #>> '{waiting,timeoutState}', '') = ''
+			  AND NOT EXISTS (
+				SELECT 1 FROM go_pilot_wakeups w
+				WHERE w.run_node_id = rn.id
+				  AND w.reason = 'approval_timeout'
+				  AND w.wake_at = (rn.state_json #>> '{waiting,deadlineAt}')::timestamptz
+			  )
+		)`).Scan(&missingApprovals); err != nil {
+		return fmt.Errorf("inspect waiting approval bridge: %w", err)
+	}
+	if missingApprovals {
+		return errors.New("database runtime bridge is incomplete: waiting approvals lack durable Go deadline wakeups; rerun migrate")
 	}
 
 	var missingScheduleClocks bool

@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/johnny4young/janusly/go/internal/domain"
 )
 
 // Waiting is the executor signal for a pause: the engine persists the node
@@ -24,14 +26,9 @@ type Waiting struct {
 	WakeAt   *time.Time
 }
 
-// ConfigError is a structured executor failure with a stable code — the Go
-// shape of the reference's WaitingConfigError.
-type ConfigError struct {
-	Code    string
-	Message string
-}
-
-func (e *ConfigError) Error() string { return e.Message }
+// ConfigError keeps the executor-facing name while sharing the pure workflow
+// grammar with authoring validation.
+type ConfigError = domain.WaitingConfigError
 
 // Approximations inherited from the reference: year = 365 days, month = 30
 // days — calendar-aware arithmetic is intentionally out of scope.
@@ -84,72 +81,10 @@ func durationComponent(text string, unitMs float64) float64 {
 	return n * unitMs
 }
 
-var isoInstantPattern = regexp.MustCompile(
-	`^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|([+-])(\d{2}):(\d{2}))$`,
-)
-
 // ParseAbsoluteInstant parses an unambiguous ISO 8601 instant (explicit
 // timezone required) with the reference's field validation; nil on invalid.
 func ParseAbsoluteInstant(value string) *time.Time {
-	match := isoInstantPattern.FindStringSubmatch(strings.TrimSpace(value))
-	if match == nil {
-		return nil
-	}
-	year := mustInt(match[1])
-	month := mustInt(match[2])
-	day := mustInt(match[3])
-	hour := mustInt(match[4])
-	minute := mustInt(match[5])
-	second := 0
-	if match[6] != "" {
-		second = mustInt(match[6])
-	}
-	offsetHour, offsetMinute := 0, 0
-	if match[9] != "" {
-		offsetHour = mustInt(match[10])
-		offsetMinute = mustInt(match[11])
-	}
-	if month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month) ||
-		hour > 23 || minute > 59 || second > 59 ||
-		(match[8] != "Z" && (offsetHour > 23 || offsetMinute > 59)) {
-		return nil
-	}
-	millis := 0
-	if match[7] != "" {
-		// A 1–3 digit fraction is a left-aligned millisecond value: .5 = 500.
-		fraction := match[7] + strings.Repeat("0", 3-len(match[7]))
-		millis = mustInt(fraction)
-	}
-	offsetSeconds := 0
-	if match[8] != "Z" {
-		offsetSeconds = offsetHour*3600 + offsetMinute*60
-		if match[9] == "-" {
-			offsetSeconds = -offsetSeconds
-		}
-	}
-	instant := time.Date(year, time.Month(month), day, hour, minute, second,
-		millis*int(time.Millisecond), time.FixedZone("", offsetSeconds)).UTC()
-	return &instant
-}
-
-func mustInt(s string) int {
-	n, _ := strconv.Atoi(s)
-	return n
-}
-
-func daysInMonth(year, month int) int {
-	if month == 2 {
-		if year%4 == 0 && (year%100 != 0 || year%400 == 0) {
-			return 29
-		}
-		return 28
-	}
-	switch month {
-	case 4, 6, 9, 11:
-		return 30
-	default:
-		return 31
-	}
+	return domain.ParseAbsoluteInstant(value)
 }
 
 // waitUntilSchedule mirrors the reference's resolved shape.
@@ -224,16 +159,13 @@ func executeWaitUntil(_ context.Context, in Input) (any, error) {
 	}, nil
 }
 
-// executeApproval pauses indefinitely for a human decision. The reference's
-// deadline policies (decisionTimeoutMs/until/onTimeout/escalateTo) are not
-// executable here yet — an approval carrying them fails deterministically
-// rather than silently dropping its supervision.
+// executeApproval persists the reference's indefinite or bounded human
+// decision checkpoint. Relative deadlines are deliberately materialized by
+// the engine from the checkpoint timestamp, not this executor's start clock.
 func executeApproval(_ context.Context, in Input) (any, error) {
-	for _, field := range []string{"decisionTimeoutMs", "until", "onTimeout", "escalateTo"} {
-		if _, present := in.Config[field]; present {
-			return nil, &ConfigError{Code: "approval_deadline_unsupported_pilot",
-				Message: fmt.Sprintf("Approval config.%s is not executable by this backend yet", field)}
-		}
+	resolved, err := domain.ResolveApprovalWaitingConfig(in.Config, time.Now())
+	if err != nil {
+		return nil, err
 	}
 	metadata := map[string]any{
 		"kind":        "approval",
@@ -247,10 +179,23 @@ func executeApproval(_ context.Context, in Input) (any, error) {
 	if description := trimmedString(in.Config["description"]); description != "" {
 		metadata["description"] = description
 	}
-	if assignee := trimmedString(in.Config["assignee"]); assignee != "" {
-		metadata["assignee"] = assignee
+	if resolved.Assignee != "" {
+		metadata["assignee"] = resolved.Assignee
 	}
-	return Waiting{Reason: "Waiting for human approval", Metadata: metadata}, nil
+	var wakeAt *time.Time
+	if resolved.RelativeTimeoutMS != nil {
+		metadata["decisionTimeoutMs"] = *resolved.RelativeTimeoutMS
+		metadata["onTimeout"] = resolved.OnTimeout
+	} else if resolved.DeadlineAt != "" {
+		metadata["deadlineAt"] = resolved.DeadlineAt
+		metadata["delayMs"] = resolved.DelayMS
+		metadata["onTimeout"] = resolved.OnTimeout
+		wakeAt = domain.ParseAbsoluteInstant(resolved.DeadlineAt)
+	}
+	if resolved.EscalateTo != "" {
+		metadata["escalateTo"] = resolved.EscalateTo
+	}
+	return Waiting{Reason: "Waiting for human approval", Metadata: metadata, WakeAt: wakeAt}, nil
 }
 
 // executeHumanForm pauses like approval but resumes with STRUCTURED

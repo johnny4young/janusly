@@ -155,6 +155,18 @@ func TestUpgradePreGooseNodeRuntimeDatabase(t *testing.T) {
 	if !timerWakeAt.Equal(expectedWakeAt) || timerReason != "wait_until" {
 		t.Fatalf("timer bridge = (%s, %q), want (%s, wait_until)", timerWakeAt, timerReason, expectedWakeAt)
 	}
+	var approvalWakeAt time.Time
+	var approvalReason string
+	if err := db.QueryRowContext(ctx,
+		`SELECT wake_at, reason FROM go_pilot_wakeups WHERE run_node_id = 'approval-node'`).
+		Scan(&approvalWakeAt, &approvalReason); err != nil {
+		t.Fatalf("read bridged approval deadline: %v", err)
+	}
+	expectedApprovalAt := time.Date(2026, 8, 3, 13, 0, 0, 0, time.UTC)
+	if !approvalWakeAt.Equal(expectedApprovalAt) || approvalReason != "approval_timeout" {
+		t.Fatalf("approval bridge = (%s, %q), want (%s, approval_timeout)",
+			approvalWakeAt, approvalReason, expectedApprovalAt)
+	}
 
 	var enabledNext, disabledNext sql.NullTime
 	if err := db.QueryRowContext(ctx,
@@ -184,32 +196,18 @@ func TestUpgradePreGooseNodeRuntimeDatabase(t *testing.T) {
 		t.Fatalf("idempotent migration moved due clock from %s to %s", firstNext, enabledNext.Time)
 	}
 
-	err = AssertWorkPlaneReady(ctx, dsn)
-	if err == nil || !strings.Contains(err.Error(), "waiting approval \"approval-node\"") {
-		t.Fatalf("unresolved Node approval deadline must block active Go: %v", err)
+	// A Node checkpoint arriving after the last migration is detected at boot
+	// and repaired by the same idempotent bridge before Go owns the work plane.
+	if _, err := db.ExecContext(ctx,
+		`DELETE FROM go_pilot_wakeups WHERE run_node_id = 'approval-node'`); err != nil {
+		t.Fatalf("remove approval wakeup for readiness test: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		UPDATE run_nodes
-		SET state_json = jsonb_set(state_json, '{waiting,timeoutState}', '"escalated"'::jsonb)
-		WHERE id = 'approval-node'
-	`); err != nil {
-		t.Fatalf("mark legacy approval deadline handled: %v", err)
+	if err := AssertMigrated(ctx, dsn); err == nil ||
+		!strings.Contains(err.Error(), "waiting approvals lack durable Go deadline wakeups") {
+		t.Fatalf("missing approval wakeup must fail boot readiness: %v", err)
 	}
-	err = AssertWorkPlaneReady(ctx, dsn)
-	if err == nil || !strings.Contains(err.Error(), "workflow \"workflow-approval\" approval \"gate\"") {
-		t.Fatalf("saved unsupported approval policy must block active Go: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO workflow_versions (id, org_id, workflow_id, version, dag_json)
-		VALUES (
-			'version-approval-safe', 'org-1', 'workflow-approval', 2,
-			'{"nodes":[{"id":"gate","type":"approval","config":{}}],"edges":[]}'::jsonb
-		)
-	`); err != nil {
-		t.Fatalf("publish compatible latest workflow version: %v", err)
-	}
-	if err := AssertWorkPlaneReady(ctx, dsn); err != nil {
-		t.Fatalf("resolved checkpoints and compatible latest workflows must be ready: %v", err)
+	if err := Up(ctx, dsn); err != nil {
+		t.Fatalf("repeat migration must repair approval wakeup: %v", err)
 	}
 
 	if _, err := db.ExecContext(ctx, `

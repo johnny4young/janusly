@@ -29,14 +29,14 @@ BullMQ, in-flight-work, and full-browser gates in [`AUDIT.md`](AUDIT.md) pass.
    that rehearsal is recorded, do not switch the work plane.
 8. Run the exact candidate's `migrate` subcommand while every Go process is
    passive. It must install the Node runtime bridge, reconstruct every durable
-   timer wakeup, initialize every enabled schedule due clock, and finish with
-   no readiness error. The migration is idempotent and must be run again after
-   correcting any malformed legacy checkpoint.
-9. Active startup must pass the separate work-plane readiness gate. Until Go
-   implements approval deadline parity, resolve every unhandled waiting
-   approval deadline and publish a compatible latest version or retire every
-   non-deleted workflow whose latest DAG declares `decisionTimeoutMs`, `until`,
-   `onTimeout`, or `escalateTo`.
+   timer and approval-deadline wakeup, initialize every enabled schedule due
+   clock, and finish with no readiness error. The migration is idempotent and
+   must run again after Node is quiesced and after correcting any malformed
+   legacy checkpoint.
+9. The exact candidate must retain green approval-deadline evidence for
+   relative and absolute clocks, `fail`, `auto_reject`, and `escalate`, stale
+   generation rejection, manual-resume/HA-sweeper races, and continuation of a
+   Node-created waiting checkpoint.
 
 ## Ownership rule
 

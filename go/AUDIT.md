@@ -110,7 +110,7 @@ exact candidate commit:
 | AUTH-003 | P0 | Go still lacks atomic first-organization creation and atomic invitation acceptance with the exact Node bootstrap response/error contract. | fixed in architecture review |
 | DAT-001 | P0 | A pre-Goose Node database was stamped at baseline one even though it lacked Go-owned idempotency/wakeup tables and initialized schedule/timer due clocks. | fixed in architecture review |
 | DAT-002 | P1 | `make schema-dump` dumped the shared integration database, committing timestamped fixture tables and a random PostgreSQL 18 restrict key. | fixed in architecture review |
-| PAR-002 | P0 | Go still cannot execute Node approval deadline policies; an active-cutover gate now prevents stranding existing checkpoints or invoking saved unsupported workflows. | open |
+| PAR-002 | P0 | Go could not execute Node approval deadline policies or continue a bounded Node waiting checkpoint. | fixed in architecture review |
 
 ## Architecture review decisions
 
@@ -360,22 +360,49 @@ binary stopped after creating the journal. Both migration and boot assert the
 runtime bridge, and a binary refuses a database that is either behind or ahead
 of its exact embedded version.
 
-Passive Go remains available for read/shadow traffic after schema upgrade.
-Active API and MCP startup additionally inspect unresolved Node approval
-deadline checkpoints and the latest DAG of every non-deleted workflow. Either
-shape fails closed because Go does not yet execute that policy. This prevents unsafe
-activation but does not close `PAR-002`; complete approval deadline parity
-remains required before certification.
+The bridge now also reconstructs bounded Node approval clocks with the
+`approval_timeout` reason. Boot requires the exact clock/reason pair for every
+unhandled approval deadline, so the final migration after Node quiescence is a
+fail-closed continuation gate rather than a ban on supported workflow policy.
 
 An isolated PostgreSQL integration test creates a temporary database, applies
 the captured baseline, removes the Go-only objects and due-clock column, leaves
 a partial version-zero journal, and proves upgrade, timer/schedule backfill,
 idempotent retry, malformed-timer rejection, readiness repair, and both
-approval cutover gates. `make schema-dump` now creates and destroys its own
+timer/approval checkpoint bridges. `make schema-dump` now creates and destroys its own
 freshly migrated database and pins PostgreSQL 18's restrict key. Two
 consecutive dumps were byte-identical and removed 32 transient
 `customer_orders_<timestamp>` fixture tables from `schema.sql` plus their 32
 unused generated sqlc model types, closing `DAT-002`.
+
+### Approval deadline parity
+
+`PAR-002` is closed by one shared pure approval-time grammar used by authoring
+validation, executor resolution, and checkpoint materialization. Relative
+`decisionTimeoutMs` starts from the durable waiting transition; absolute
+`until` retains the explicit-timezone contract. The engine persists a
+reason-specific PostgreSQL clock and dispatches `fail`, terminal
+`auto_reject`, or non-terminal `escalate` without advancing downstream work.
+
+The timeout path holds the per-run completion lock and still applies an exact
+deadline-generation node CAS. Manual resume, cancellation, duplicate HA
+sweepers, and stale deliveries therefore have one winner. Escalation preserves
+the waiting checkpoint, reassigns the operator, records `approval.escalated`,
+and clears the consumed clock; terminal policies write the Node-compatible
+error and event envelopes plus one `run.failed`. A stale generation re-arms
+the currently persisted clock instead of applying it.
+
+The same change fixes a pre-existing wakeup ownership bug: every waiting
+transition now clears an inherited execution/retry clock before optionally
+installing its own bounded timer or approval clock. Otherwise a retry that
+became due immediately before an indefinite approval or human form could have
+auto-resumed that human checkpoint. Integration coverage proves all three
+policies, relative materialization, manual-resume/HA races, stale-generation
+rejection, Node-checkpoint continuation, and inherited-clock cleanup.
+The exact staged candidate passed `make ci` on PostgreSQL 18 (generation and
+OpenAPI drift, coverage floors, build, zero-issue lint, `govulncheck`, the full
+race-enabled integration suite, and semantic parity F01-F25) plus the complete
+race-enabled PostgreSQL 15 compatibility lane.
 
 The PostgreSQL 15 validation first exposed an independent queue-health test
 race: its ordinary API harness started consumers that could claim the seeded
