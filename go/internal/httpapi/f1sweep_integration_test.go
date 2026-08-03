@@ -56,9 +56,12 @@ func TestF1SweepReadClosures(t *testing.T) {
 	if res.status != 200 {
 		t.Fatalf("v1 health: %d %+v", res.status, res.body)
 	}
-	healthData := res.body["data"].(map[string]any)["health"].(map[string]any)
+	healthData := res.body["data"].(map[string]any)
 	if healthData["score"] == nil {
 		t.Fatalf("health score missing: %+v", healthData)
+	}
+	if _, wrapped := healthData["health"]; wrapped {
+		t.Fatalf("v1 health data must be the score itself: %+v", healthData)
 	}
 
 	// v1 run/usage alias keeps the tenancy-first contract (unknown run 403).

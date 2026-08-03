@@ -37,7 +37,10 @@ func TestWorkflowHealthAndDelta(t *testing.T) {
 	if res.status != 200 {
 		t.Fatalf("health: %d %+v", res.status, res.body)
 	}
-	healthBlock := res.body["health"].(map[string]any)
+	healthBlock := res.body
+	if _, wrapped := healthBlock["health"]; wrapped {
+		t.Fatalf("legacy health must be the raw score: %+v", healthBlock)
+	}
 	if healthBlock["status"] != "healthy" {
 		t.Fatalf("healthy workflow: %+v", healthBlock)
 	}

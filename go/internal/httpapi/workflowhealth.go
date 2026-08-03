@@ -101,8 +101,8 @@ func workflowHealthFacts(wf *domain.Workflow) health.WorkflowFacts {
 	return facts
 }
 
-// workflowHealthCore backs BOTH wires: the legacy raw GET and the /v1
-// envelope alias (the web reads /workflows/health through the v1 set).
+// workflowHealthCore backs BOTH wires: the legacy raw GET returns the score
+// itself, while the /v1 alias places that same score directly under `data`.
 func (s *V1Server) workflowHealthCore(r *http.Request, rc v1Request) opResult {
 	workflowID := r.URL.Query().Get("workflowId")
 	if workflowID == "" {
@@ -121,7 +121,7 @@ func (s *V1Server) workflowHealthCore(r *http.Request, rc v1Request) opResult {
 	}
 	signals, _ := healthSignalsFromRow(row)
 	score := health.Compute(workflowHealthFacts(wf), issues, signals, slo)
-	return opOK(map[string]any{"health": score})
+	return opOK(score)
 }
 
 func (s *V1Server) mountWorkflowHealthRoutes(mux *http.ServeMux) {

@@ -98,7 +98,7 @@ func TestVersionAttributionSemantics(t *testing.T) {
 	// Health attribution keeps seeing BOTH kinds (coalesce: version row
 	// join for the stamped run, count-derivation for the doc-id run).
 	health := h.call("GET", "/v1/workflows/health?workflowId="+workflowID, nil, "")
-	score := health.body["data"].(map[string]any)["health"].(map[string]any)
+	score := health.body["data"].(map[string]any)
 	if score["score"] == nil {
 		t.Fatalf("health must attribute doc-id runs: %+v", score)
 	}
