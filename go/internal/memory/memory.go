@@ -82,12 +82,22 @@ type RecallEntry struct {
 	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
-// consent evaluates the two-flag gate + kind allowlist.
-func consent(ctx context.Context, pool *pgxpool.Pool, orgID, kind string) (bool, string) {
+// Enabled evaluates only the two master consent flags. Route callers use it
+// before scheduling asynchronous commits so a memory-disabled organization
+// observes no usage rows, audit noise, or embedding work at all.
+func Enabled(ctx context.Context, pool *pgxpool.Pool, orgID string) bool {
 	if os.Getenv("JANUSLY_MEMORY_ENABLED") != "true" {
-		return false, "memory_disabled"
+		return false
 	}
 	if !orgconfig.LoadBool(ctx, pool, orgID, "memory.enabled") {
+		return false
+	}
+	return true
+}
+
+// consent evaluates the two-flag gate + kind allowlist.
+func consent(ctx context.Context, pool *pgxpool.Pool, orgID, kind string) (bool, string) {
+	if !Enabled(ctx, pool, orgID) {
 		return false, "memory_disabled"
 	}
 	allowed, _ := orgconfig.LoadValue(ctx, pool, orgID, "memory.allowedKinds").(string)

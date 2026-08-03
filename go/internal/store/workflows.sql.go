@@ -1218,11 +1218,12 @@ func (q *Queries) ListOwnedActiveWorkflowIDs(ctx context.Context, arg ListOwnedA
 	return items, nil
 }
 
-const listRecentDeadLetterErrorsForWorkflow = `-- name: ListRecentDeadLetterErrorsForWorkflow :many
-SELECT d.error_json
+const listRecentDeadLettersForWorkflowDelta = `-- name: ListRecentDeadLettersForWorkflowDelta :many
+SELECT d.id, d.error_json, d.node_id, d.node_json
 FROM dead_letters d
 JOIN runs r ON r.id = d.run_id
-WHERE r.org_id = $1
+WHERE d.org_id = $1
+  AND r.org_id = $1
   AND d.created_at >= $2
   AND (r.workflow_version_id = $3
        OR r.workflow_version_id IN (SELECT v3.id FROM workflow_versions v3
@@ -1237,15 +1238,22 @@ ORDER BY d.created_at DESC
 LIMIT 100
 `
 
-type ListRecentDeadLetterErrorsForWorkflowParams struct {
+type ListRecentDeadLettersForWorkflowDeltaParams struct {
 	OrgID       string
 	CreatedAt   *time.Time
 	WorkflowID  string
 	FromVersion pgtype.Int4
 }
 
-func (q *Queries) ListRecentDeadLetterErrorsForWorkflow(ctx context.Context, arg ListRecentDeadLetterErrorsForWorkflowParams) ([]json.RawMessage, error) {
-	rows, err := q.db.Query(ctx, listRecentDeadLetterErrorsForWorkflow,
+type ListRecentDeadLettersForWorkflowDeltaRow struct {
+	ID        string
+	ErrorJson json.RawMessage
+	NodeID    string
+	NodeJson  json.RawMessage
+}
+
+func (q *Queries) ListRecentDeadLettersForWorkflowDelta(ctx context.Context, arg ListRecentDeadLettersForWorkflowDeltaParams) ([]ListRecentDeadLettersForWorkflowDeltaRow, error) {
+	rows, err := q.db.Query(ctx, listRecentDeadLettersForWorkflowDelta,
 		arg.OrgID,
 		arg.CreatedAt,
 		arg.WorkflowID,
@@ -1255,13 +1263,18 @@ func (q *Queries) ListRecentDeadLetterErrorsForWorkflow(ctx context.Context, arg
 		return nil, err
 	}
 	defer rows.Close()
-	var items []json.RawMessage
+	var items []ListRecentDeadLettersForWorkflowDeltaRow
 	for rows.Next() {
-		var error_json json.RawMessage
-		if err := rows.Scan(&error_json); err != nil {
+		var i ListRecentDeadLettersForWorkflowDeltaRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ErrorJson,
+			&i.NodeID,
+			&i.NodeJson,
+		); err != nil {
 			return nil, err
 		}
-		items = append(items, error_json)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1616,6 +1629,69 @@ func (q *Queries) LockWorkflowForRollout(ctx context.Context, arg LockWorkflowFo
 	return id, err
 }
 
+const queryRecentRunsAgainstWorkflowVersion = `-- name: QueryRecentRunsAgainstWorkflowVersion :one
+WITH candidate_runs AS (
+  SELECT r.status,
+         coalesce(
+           (SELECT wv.version FROM workflow_versions wv
+            WHERE wv.id = r.workflow_version_id AND wv.org_id = $2),
+           (SELECT count(*) FROM workflow_versions v2
+            WHERE v2.workflow_id = $3 AND v2.org_id = $2
+              AND v2.created_at <= r.created_at)
+         )::int AS effective_version
+  FROM runs r
+  WHERE r.org_id = $2
+    AND r.created_at >= $4
+    AND r.replay_mode IS NULL
+    AND (r.workflow_version_id = $3
+         OR r.workflow_version_id IN (SELECT v3.id FROM workflow_versions v3
+              WHERE v3.workflow_id = $3 AND v3.org_id = $2))
+)
+SELECT
+  count(*)::int AS total_runs,
+  count(*) FILTER (WHERE status = 'succeeded')::int AS succeeded,
+  count(*) FILTER (WHERE status IN ('failed', 'cancelled', 'timed_out'))::int AS failed,
+  count(*) FILTER (WHERE status IN ('created', 'running', 'waiting'))::int AS running
+FROM candidate_runs
+WHERE effective_version >= $1::int
+`
+
+type QueryRecentRunsAgainstWorkflowVersionParams struct {
+	FromVersion int32
+	OrgID       string
+	WorkflowID  string
+	Since       *time.Time
+}
+
+type QueryRecentRunsAgainstWorkflowVersionRow struct {
+	TotalRuns int32
+	Succeeded int32
+	Failed    int32
+	Running   int32
+}
+
+// The post-Apply dialog needs every production status, not just terminal
+// health samples: an in-flight run is visible immediately while the score
+// remains below its sample floor. Keep the effective-version rules identical
+// to QueryWorkflowHealthSignals so plain pilot runs and pinned rollout runs
+// land on the same side of the cutoff.
+func (q *Queries) QueryRecentRunsAgainstWorkflowVersion(ctx context.Context, arg QueryRecentRunsAgainstWorkflowVersionParams) (QueryRecentRunsAgainstWorkflowVersionRow, error) {
+	row := q.db.QueryRow(ctx, queryRecentRunsAgainstWorkflowVersion,
+		arg.FromVersion,
+		arg.OrgID,
+		arg.WorkflowID,
+		arg.Since,
+	)
+	var i QueryRecentRunsAgainstWorkflowVersionRow
+	err := row.Scan(
+		&i.TotalRuns,
+		&i.Succeeded,
+		&i.Failed,
+		&i.Running,
+	)
+	return i, err
+}
+
 const queryWorkflowHealthSignals = `-- name: QueryWorkflowHealthSignals :one
 WITH candidate_runs AS (
   -- A saved workflow's plain runs carry workflow_version_id = the WORKFLOW
@@ -1664,8 +1740,7 @@ SELECT
   coalesce((SELECT sum(u.quantity) FROM usage_events u
    JOIN window_runs wr ON wr.id = u.run_id), 0)::float8 AS total_tokens,
   (SELECT count(*) FROM workflow_versions v2
-   WHERE v2.workflow_id = $1 AND v2.org_id = $2)::int AS version_count,
-  (SELECT count(*) FROM window_runs WHERE status = 'running')::int AS running_count
+   WHERE v2.workflow_id = $1 AND v2.org_id = $2)::int AS version_count
 `
 
 type QueryWorkflowHealthSignalsParams struct {
@@ -1686,7 +1761,6 @@ type QueryWorkflowHealthSignalsRow struct {
 	TotalCostUsd float64
 	TotalTokens  float64
 	VersionCount int32
-	RunningCount int32
 }
 
 func (q *Queries) QueryWorkflowHealthSignals(ctx context.Context, arg QueryWorkflowHealthSignalsParams) (QueryWorkflowHealthSignalsRow, error) {
@@ -1708,7 +1782,6 @@ func (q *Queries) QueryWorkflowHealthSignals(ctx context.Context, arg QueryWorkf
 		&i.TotalCostUsd,
 		&i.TotalTokens,
 		&i.VersionCount,
-		&i.RunningCount,
 	)
 	return i, err
 }

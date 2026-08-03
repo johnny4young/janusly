@@ -527,43 +527,6 @@ func (q *Queries) InsertRecoveryCaseTransition(ctx context.Context, arg InsertRe
 	return result.RowsAffected(), nil
 }
 
-const insertRecoveryFeedback = `-- name: InsertRecoveryFeedback :exec
-INSERT INTO recovery_feedback (id, org_id, user_id, dead_letter_id, workflow_id,
-  suggestion_mode, approach_label, accepted, raw_confidence, comment, eval_consent)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-`
-
-type InsertRecoveryFeedbackParams struct {
-	ID             string
-	OrgID          string
-	UserID         pgtype.Text
-	DeadLetterID   string
-	WorkflowID     string
-	SuggestionMode string
-	ApproachLabel  string
-	Accepted       bool
-	RawConfidence  pgtype.Int4
-	Comment        pgtype.Text
-	EvalConsent    bool
-}
-
-func (q *Queries) InsertRecoveryFeedback(ctx context.Context, arg InsertRecoveryFeedbackParams) error {
-	_, err := q.db.Exec(ctx, insertRecoveryFeedback,
-		arg.ID,
-		arg.OrgID,
-		arg.UserID,
-		arg.DeadLetterID,
-		arg.WorkflowID,
-		arg.SuggestionMode,
-		arg.ApproachLabel,
-		arg.Accepted,
-		arg.RawConfidence,
-		arg.Comment,
-		arg.EvalConsent,
-	)
-	return err
-}
-
 const insertRecoveryImpactEvent = `-- name: InsertRecoveryImpactEvent :execrows
 INSERT INTO recovery_impact_events (dead_letter_id, org_id, run_id, node_id, user_id, recovered_at, downtime_ended_ms)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -1893,6 +1856,74 @@ func (q *Queries) QueryVerifiedRecoveryStats(ctx context.Context, arg QueryVerif
 		&i.DowntimeEndedMs,
 	)
 	return i, err
+}
+
+const recordRecoveryFeedback = `-- name: RecordRecoveryFeedback :exec
+WITH recorded AS (
+  INSERT INTO recovery_feedback (id, org_id, user_id, dead_letter_id, workflow_id,
+    suggestion_mode, approach_label, accepted, raw_confidence, comment, eval_consent)
+  VALUES ($2, $3, $4, $5,
+    $6, $7, $8,
+    $9, $10, $11, $12)
+  RETURNING org_id, workflow_id, approach_label, accepted, created_at
+)
+INSERT INTO recovery_feedback_health (id, org_id, workflow_id, approach_label,
+  feedback_last_seen, accepted_fix_last_seen)
+SELECT $1, org_id, workflow_id, approach_label, created_at,
+       CASE WHEN accepted THEN created_at ELSE NULL END
+FROM recorded
+ON CONFLICT (org_id, workflow_id, approach_label) DO UPDATE SET
+  feedback_last_seen = GREATEST(
+    EXCLUDED.feedback_last_seen,
+    recovery_feedback_health.feedback_last_seen
+  ),
+  accepted_fix_last_seen = CASE
+    WHEN EXCLUDED.accepted_fix_last_seen IS NULL
+      THEN recovery_feedback_health.accepted_fix_last_seen
+    ELSE COALESCE(
+      GREATEST(
+        EXCLUDED.accepted_fix_last_seen,
+        recovery_feedback_health.accepted_fix_last_seen
+      ),
+      EXCLUDED.accepted_fix_last_seen
+    )
+  END
+`
+
+type RecordRecoveryFeedbackParams struct {
+	HealthID       string
+	ID             string
+	OrgID          string
+	UserID         pgtype.Text
+	DeadLetterID   string
+	WorkflowID     string
+	SuggestionMode string
+	ApproachLabel  string
+	Accepted       bool
+	RawConfidence  pgtype.Int4
+	Comment        pgtype.Text
+	EvalConsent    bool
+}
+
+// Source decision + compact freshness projection are one durable fact. A
+// concurrent older request may commit last, so both clocks advance with
+// GREATEST rather than commit order.
+func (q *Queries) RecordRecoveryFeedback(ctx context.Context, arg RecordRecoveryFeedbackParams) error {
+	_, err := q.db.Exec(ctx, recordRecoveryFeedback,
+		arg.HealthID,
+		arg.ID,
+		arg.OrgID,
+		arg.UserID,
+		arg.DeadLetterID,
+		arg.WorkflowID,
+		arg.SuggestionMode,
+		arg.ApproachLabel,
+		arg.Accepted,
+		arg.RawConfidence,
+		arg.Comment,
+		arg.EvalConsent,
+	)
+	return err
 }
 
 const setAutoHealingValidating = `-- name: SetAutoHealingValidating :execrows

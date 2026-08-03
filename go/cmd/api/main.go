@@ -233,7 +233,9 @@ func run() error {
 	}
 	defer runner.Shutdown()
 
-	publicHandler := httpapi.WithWorkPlaneGate(httpapi.NewV1Handler(eng, pool), cfg.WorkPlaneEnabled)
+	publicAPI, shutdownPublicAPI := httpapi.NewV1HandlerWithShutdown(eng, pool)
+	defer shutdownPublicAPI()
+	publicHandler := httpapi.WithWorkPlaneGate(publicAPI, cfg.WorkPlaneEnabled)
 	api := newHTTPServer(fmt.Sprintf(":%d", cfg.Port), publicHandler)
 	internal := newHTTPServer(
 		fmt.Sprintf("127.0.0.1:%d", cfg.InternalPort),

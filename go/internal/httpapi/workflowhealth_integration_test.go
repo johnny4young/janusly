@@ -4,6 +4,8 @@ package httpapi
 
 import (
 	"fmt"
+	"net/url"
+	"slices"
 	"testing"
 	"time"
 )
@@ -67,8 +69,31 @@ func TestWorkflowHealthAndDelta(t *testing.T) {
 	if res.status != 200 {
 		t.Fatalf("delta: %d %+v", res.status, res.body)
 	}
+	wantDeltaKeys := []string{
+		"after", "afterVersion", "before", "delta", "hasEnoughData", "priorVersion",
+		"recentRunsAgainstAfter", "sameFailureSinceApply", "windowDays", "workflowId",
+	}
+	if got := keysOf(res.body); !slices.Equal(got, wantDeltaKeys) {
+		t.Fatalf("delta key contract: got %v want %v", got, wantDeltaKeys)
+	}
 	if res.body["hasEnoughData"] != false {
 		t.Fatalf("fresh after-side must gather data: %+v", res.body)
+	}
+	if res.body["delta"] != nil || res.body["sameFailureSinceApply"] != nil {
+		t.Fatalf("fresh delta/signature blocks must be null: %+v", res.body)
+	}
+	if res.body["workflowId"] != wfID || res.body["afterVersion"] != float64(2) ||
+		res.body["windowDays"] != float64(30) {
+		t.Fatalf("delta identity/window: %+v", res.body)
+	}
+	recent := res.body["recentRunsAgainstAfter"].(map[string]any)
+	if recent["totalRuns"] != float64(0) || recent["succeeded"] != float64(0) ||
+		recent["failed"] != float64(0) || recent["running"] != float64(0) {
+		t.Fatalf("fresh run counter: %+v", recent)
+	}
+	prior := res.body["priorVersion"].(map[string]any)
+	if prior["version"] != float64(1) || prior["versionId"] == "" {
+		t.Fatalf("prior version affordance: %+v", prior)
 	}
 	before := res.body["before"].(map[string]any)["signals"].(map[string]any)
 	if before["totalRuns"] != float64(6) {
@@ -86,10 +111,71 @@ func TestWorkflowHealthAndDelta(t *testing.T) {
 	if res.status != 200 || res.body["hasEnoughData"] != true {
 		t.Fatalf("after side with 5 runs: %+v", res.body)
 	}
-	sameFailure := res.body["sameFailure"].(map[string]any)
-	if sameFailure["checked"] != true || sameFailure["recurred"] != false {
+	sameFailure := res.body["sameFailureSinceApply"].(map[string]any)
+	if sameFailure["count"] != float64(0) || sameFailure["priorSignature"] != "sig-nunca-vista" ||
+		len(sameFailure["sampleDeadLetterIds"].([]any)) != 0 {
 		t.Fatalf("same-failure clean case: %+v", sameFailure)
 	}
-	_ = pool
-	_ = ctx
+	delta := res.body["delta"].(map[string]any)
+	if got := keysOf(delta); !slices.Equal(got, []string{"costPerRunUsd", "p95LatencyMs", "score"}) {
+		t.Fatalf("delta metric contract: %v", got)
+	}
+	recent = res.body["recentRunsAgainstAfter"].(map[string]any)
+	if recent["totalRuns"] != float64(5) || recent["succeeded"] != float64(5) ||
+		recent["failed"] != float64(0) || recent["running"] != float64(0) {
+		t.Fatalf("post-Apply run counter: %+v", recent)
+	}
+
+	// One production failure and one still-running production run are both
+	// visible in the always-on counter, while only the terminal failure
+	// contributes to health. A validation run is excluded from both.
+	failureRunID := "run-health-failure-" + suffix
+	dlqID := "dlq-health-failure-" + suffix
+	if _, err := pool.Exec(ctx, `INSERT INTO runs (id, org_id, workflow_version_id, status, input_json)
+		VALUES ($1, $2, $3, 'failed', '{}')`, failureRunID, h.org, wfID); err != nil {
+		t.Fatalf("seed failed run: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO dead_letters
+		(id, org_id, run_id, node_id, workflow_json, node_json, error_json)
+		VALUES ($1, $2, $3, 'request', $4::jsonb, '{"type":"http"}',
+		        '{"message":"HTTP 401 unauthorized"}')`, dlqID, h.org, failureRunID,
+		fmt.Sprintf(`{"id":%q,"nodes":[],"edges":[]}`, wfID)); err != nil {
+		t.Fatalf("seed matching DLQ: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO runs (id, org_id, workflow_version_id, status, input_json)
+		VALUES ($1, $2, $3, 'running', '{}'), ($4, $2, $3, 'succeeded', '{}')`,
+		"run-health-open-"+suffix, h.org, wfID, "run-health-validation-"+suffix); err != nil {
+		t.Fatalf("seed open/validation runs: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE runs SET replay_mode = 'validation' WHERE id = $1`,
+		"run-health-validation-"+suffix); err != nil {
+		t.Fatalf("mark validation run: %v", err)
+	}
+	res = h.call("GET", "/workflows/health/delta?workflowId="+wfID+
+		"&afterVersion=2.0&priorFailureSignature="+url.QueryEscape("HTTP 401 on http node"), nil, "")
+	if res.status != 200 {
+		t.Fatalf("delta with recurrence: %d %+v", res.status, res.body)
+	}
+	recent = res.body["recentRunsAgainstAfter"].(map[string]any)
+	if recent["totalRuns"] != float64(7) || recent["succeeded"] != float64(5) ||
+		recent["failed"] != float64(1) || recent["running"] != float64(1) {
+		t.Fatalf("production-only status counter: %+v", recent)
+	}
+	sameFailure = res.body["sameFailureSinceApply"].(map[string]any)
+	samples := sameFailure["sampleDeadLetterIds"].([]any)
+	if sameFailure["count"] != float64(1) || sameFailure["priorSignature"] != "HTTP 401 on http node" ||
+		len(samples) != 1 || samples[0] != dlqID {
+		t.Fatalf("same-failure recurrence: %+v", sameFailure)
+	}
+
+	// Integer query values follow Number(...) semantics, and valid values
+	// outside the supported window are clamped rather than defaulted.
+	if clamped := h.call("GET", "/workflows/health/delta?workflowId="+wfID+
+		"&afterVersion=2&windowDays=0", nil, ""); clamped.body["windowDays"] != float64(1) {
+		t.Fatalf("low window clamp: %+v", clamped.body)
+	}
+	if clamped := h.call("GET", "/workflows/health/delta?workflowId="+wfID+
+		"&afterVersion=2&windowDays=99", nil, ""); clamped.body["windowDays"] != float64(30) {
+		t.Fatalf("high window clamp: %+v", clamped.body)
+	}
 }

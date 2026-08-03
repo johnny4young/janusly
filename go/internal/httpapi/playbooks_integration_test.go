@@ -258,6 +258,17 @@ func TestCalibrationLoop(t *testing.T) {
 	h := newAPIHarness(t)
 	pool := testPool(t)
 	ctx := t.Context()
+	runID, deadLetterID := "run-fb-"+h.org, "dl-fb-"+h.org
+	if _, err := pool.Exec(ctx, `INSERT INTO runs (id, org_id, workflow_version_id, status, input_json)
+		VALUES ($1, $2, 'wf-fb', 'failed', '{}')`, runID, h.org); err != nil {
+		t.Fatalf("seed feedback run: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO dead_letters
+		(id, org_id, run_id, node_id, workflow_json, node_json, error_json)
+		VALUES ($1, $2, $3, 'call', '{"id":"wf-fb"}', '{"type":"http"}',
+		        '{"message":"HTTP 500"}')`, deadLetterID, h.org, runID); err != nil {
+		t.Fatalf("seed feedback DLQ: %v", err)
+	}
 
 	// 24 labeled decisions: confident suggestions mostly accepted.
 	for i := 0; i < 24; i++ {
@@ -267,7 +278,7 @@ func TestCalibrationLoop(t *testing.T) {
 			confidence, accepted = 90, i%6 != 0
 		}
 		res := h.call("POST", "/recovery/feedback", map[string]any{
-			"deadLetterId": fmt.Sprintf("dl-fb-%d", i), "workflowId": "wf-fb",
+			"deadLetterId": deadLetterID, "suggestionMode": "ai",
 			"approachLabel": "add_retry", "accepted": accepted,
 			"rawConfidence": confidence,
 		}, "")
@@ -277,7 +288,7 @@ func TestCalibrationLoop(t *testing.T) {
 	}
 	// Invalid label refuses.
 	if res := h.call("POST", "/recovery/feedback", map[string]any{
-		"deadLetterId": "dl-x", "workflowId": "wf-fb",
+		"deadLetterId": deadLetterID, "suggestionMode": "ai",
 		"approachLabel": "magia", "accepted": true,
 	}, ""); res.status != 400 {
 		t.Fatalf("bad label: %d", res.status)

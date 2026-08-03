@@ -5,69 +5,259 @@
 package httpapi
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"math"
 	"net/http"
+	"strings"
+	"time"
+	"unicode/utf16"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/johnny4young/janusly/go/internal/aiconfig"
 	"github.com/johnny4young/janusly/go/internal/audit"
+	"github.com/johnny4young/janusly/go/internal/memory"
+	"github.com/johnny4young/janusly/go/internal/ratelimit"
+	"github.com/johnny4young/janusly/go/internal/signature"
 	"github.com/johnny4young/janusly/go/internal/store"
 )
 
-var feedbackApproachLabels = map[string]bool{
-	"add_retry": true, "raise_timeout": true, "swap_secret_ref": true,
-	"add_approval": true, "fix_url": true, "other": true,
+const (
+	feedbackTextMaxCodeUnits        = 2000
+	recoveryMemoryCommentMaxRunes   = 60
+	recoveryMemorySignatureMaxRunes = 120
+	patchMemoryRationaleMaxRunes    = 1200
+)
+
+func isFeedbackApproachLabel(value string) bool {
+	switch value {
+	case "add_retry", "raise_timeout", "swap_secret_ref", "add_approval", "fix_url", "other":
+		return true
+	default:
+		return false
+	}
+}
+
+func isFeedbackSuggestionMode(value string) bool {
+	switch value {
+	case "ai", "fallback", "playbook":
+		return true
+	default:
+		return false
+	}
+}
+
+// optionalJSON distinguishes omission from an explicit null. Zod optional
+// fields accept the former and reject the latter, while encoding/json's plain
+// pointers collapse both states.
+type optionalJSON[T any] struct {
+	Value   T
+	Present bool
+	Null    bool
+}
+
+func (value *optionalJSON[T]) UnmarshalJSON(raw []byte) error {
+	value.Present = true
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		value.Null = true
+		return nil
+	}
+	return json.Unmarshal(raw, &value.Value)
+}
+
+type recoveryFeedbackBody struct {
+	DeadLetterID   string               `json:"deadLetterId"`
+	SuggestionMode string               `json:"suggestionMode"`
+	ApproachLabel  string               `json:"approachLabel"`
+	Accepted       optionalJSON[bool]   `json:"accepted"`
+	Comment        optionalJSON[string] `json:"comment"`
+	EvalConsent    optionalJSON[bool]   `json:"evalConsent"`
+	Rationale      optionalJSON[string] `json:"rationale"`
+	RawConfidence  optionalJSON[float64] `json:"rawConfidence"`
+}
+
+func jsStringLength(value string) int {
+	length := 0
+	for _, r := range value {
+		length += utf16.RuneLen(r)
+	}
+	return length
+}
+
+func validRecoveryFeedbackBody(body recoveryFeedbackBody) bool {
+	if body.DeadLetterID == "" || jsStringLength(body.DeadLetterID) > 256 ||
+		!isFeedbackSuggestionMode(body.SuggestionMode) || !isFeedbackApproachLabel(body.ApproachLabel) ||
+		!body.Accepted.Present || body.Accepted.Null {
+		return false
+	}
+	if body.Comment.Null || body.Rationale.Null || body.EvalConsent.Null || body.RawConfidence.Null {
+		return false
+	}
+	if body.Comment.Present && jsStringLength(body.Comment.Value) > feedbackTextMaxCodeUnits {
+		return false
+	}
+	if body.Rationale.Present && jsStringLength(body.Rationale.Value) > feedbackTextMaxCodeUnits {
+		return false
+	}
+	return !body.RawConfidence.Present || (body.RawConfidence.Value >= 0 && body.RawConfidence.Value <= 100 &&
+		!math.IsNaN(body.RawConfidence.Value) && !math.IsInf(body.RawConfidence.Value, 0) &&
+		math.Trunc(body.RawConfidence.Value) == body.RawConfidence.Value)
+}
+
+func workflowIDFromFeedbackSnapshot(raw json.RawMessage) string {
+	var snapshot struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(raw, &snapshot) != nil {
+		return ""
+	}
+	return snapshot.ID
+}
+
+func truncateMemoryText(value string, maxRunes int) string {
+	count, cutoff := 0, len(value)
+	for index := range value {
+		if count == maxRunes-1 {
+			cutoff = index
+		}
+		if count == maxRunes {
+			return strings.TrimRight(value[:cutoff], " \t\r\n") + "…"
+		}
+		count++
+	}
+	return value
+}
+
+func composeRecoveryMemoryContent(approachLabel, comment, failureSignature string) string {
+	safeSignature := truncateMemoryText(signature.ScrubSecretShapes(failureSignature), recoveryMemorySignatureMaxRunes)
+	comment = strings.TrimSpace(comment)
+	commentSegment := "(none)"
+	if comment != "" {
+		commentSegment = truncateMemoryText(signature.ScrubSecretShapes(comment), recoveryMemoryCommentMaxRunes)
+	}
+	return "approachLabel=" + approachLabel + " — operator accepted. Failure signature: " +
+		safeSignature + ". Comment: " + commentSegment
+}
+
+func composePatchMemoryContent(approachLabel, rationale string) string {
+	safe := truncateMemoryText(signature.ScrubSecretShapes(strings.TrimSpace(rationale)), patchMemoryRationaleMaxRunes)
+	return "approachLabel=" + approachLabel + ". Rationale: " + safe
+}
+
+func feedbackNodeContext(raw json.RawMessage) (nodeType, toolName string) {
+	var node struct {
+		Type   string `json:"type"`
+		Config struct {
+			Tool string `json:"tool"`
+		} `json:"config"`
+	}
+	_ = json.Unmarshal(raw, &node)
+	return node.Type, node.Config.Tool
+}
+
+func (s *V1Server) scheduleFeedbackMemory(
+	ctx context.Context,
+	rc v1Request,
+	dlq store.GetDeadLetterRow,
+	body recoveryFeedbackBody,
+	workflowID, safeComment string,
+) {
+	if !body.Accepted.Value || !memory.Enabled(ctx, s.pool, rc.orgID) {
+		return
+	}
+	nodeType, toolName := feedbackNodeContext(dlq.NodeJson)
+	failureSignature := signature.NormalizeJSON(dlq.ErrorJson, signature.Context{
+		NodeID: dlq.NodeID, NodeType: nodeType, ToolName: toolName,
+	}).Signature
+	recoveryContent := composeRecoveryMemoryContent(body.ApproachLabel, safeComment, failureSignature)
+	patchContent := ""
+	if body.Rationale.Present && body.Rationale.Value != "" {
+		patchContent = composePatchMemoryContent(body.ApproachLabel, body.Rationale.Value)
+	}
+	s.runBackground(func(background context.Context) {
+		memory.Commit(background, s.pool, memory.CommitInput{
+			OrgID: rc.orgID, WorkflowID: workflowID, RunID: dlq.RunID,
+			Kind: "recovery_rationale", Content: recoveryContent,
+			Metadata: map[string]any{
+				"approachLabel": body.ApproachLabel, "accepted": true,
+				"suggestionMode": body.SuggestionMode, "deadLetterId": body.DeadLetterID,
+			},
+		})
+		if patchContent == "" {
+			return
+		}
+		memory.Commit(background, s.pool, memory.CommitInput{
+			OrgID: rc.orgID, WorkflowID: workflowID, RunID: dlq.RunID,
+			Kind: "patch_rationale", Content: patchContent,
+			Metadata: map[string]any{
+				"approachLabel":  body.ApproachLabel,
+				"suggestionMode": body.SuggestionMode, "deadLetterId": body.DeadLetterID,
+			},
+		})
+	})
 }
 
 func (s *V1Server) recordFeedbackCore(r *http.Request, rc v1Request) opResult {
-	var body struct {
-		DeadLetterID   string `json:"deadLetterId"`
-		WorkflowID     string `json:"workflowId"`
-		SuggestionMode string `json:"suggestionMode"`
-		ApproachLabel  string `json:"approachLabel"`
-		Accepted       *bool  `json:"accepted"`
-		RawConfidence  *int32 `json:"rawConfidence"`
-		Comment        string `json:"comment"`
-		EvalConsent    bool   `json:"evalConsent"`
+	_, settings := aiconfig.Resolve(r.Context(), s.pool, rc.orgID)
+	if limitErr := s.limiter.Enforce(r.Context(), rc.orgID, ratelimit.Options{
+		Name: "ai", Max: settings.RateLimitPerMin, Window: time.Minute,
+	}); limitErr != nil {
+		return opError(http.StatusTooManyRequests, "rate_limited", limitErr.Error(), nil)
 	}
-	if err := decodeBody(r, &body); err != nil || body.DeadLetterID == "" ||
-		body.WorkflowID == "" || body.Accepted == nil {
-		return opError(http.StatusBadRequest, "recovery_feedback_invalid_body",
-			"deadLetterId, workflowId and accepted are required", nil)
+
+	var body recoveryFeedbackBody
+	if err := decodeBody(r, &body); err != nil || !validRecoveryFeedbackBody(body) {
+		return opError(http.StatusBadRequest, "recovery_invalid_feedback_body", "Invalid feedback body", nil)
 	}
-	if !feedbackApproachLabels[body.ApproachLabel] {
-		return opError(http.StatusBadRequest, "recovery_feedback_invalid_body",
-			"approachLabel must be one of the closed set", nil)
+
+	ctx := r.Context()
+	q := store.New(s.pool)
+	dlq, err := q.GetDeadLetter(ctx, store.GetDeadLetterParams{ID: body.DeadLetterID, OrgID: rc.orgID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return opError(http.StatusNotFound, "dlq_not_found", "DLQ entry not found", nil)
+		}
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	if body.RawConfidence != nil && (*body.RawConfidence < 0 || *body.RawConfidence > 100) {
-		return opError(http.StatusBadRequest, "recovery_feedback_invalid_body",
-			"rawConfidence must be 0..100", nil)
+	workflowID := workflowIDFromFeedbackSnapshot(dlq.WorkflowJson)
+	if workflowID == "" {
+		return opError(http.StatusUnprocessableEntity, "recovery_feedback_saved_only",
+			"Feedback is only recorded for saved workflows", nil)
 	}
-	mode := body.SuggestionMode
-	if mode == "" {
-		mode = "fallback"
-	}
+
 	rawConfidence := pgtype.Int4{}
-	if body.RawConfidence != nil {
-		rawConfidence = pgtype.Int4{Int32: *body.RawConfidence, Valid: true}
+	if body.RawConfidence.Present {
+		rawConfidence = pgtype.Int4{Int32: int32(body.RawConfidence.Value), Valid: true}
 	}
-	if len(body.Comment) > 2000 {
-		body.Comment = body.Comment[:2000]
+	safeComment := ""
+	if body.Comment.Present && body.Comment.Value != "" {
+		safeComment = signature.ScrubSecretShapes(body.Comment.Value)
 	}
-	if err := store.New(s.pool).InsertRecoveryFeedback(r.Context(), store.InsertRecoveryFeedbackParams{
-		ID: s.newID(), OrgID: rc.orgID,
+	if err := q.RecordRecoveryFeedback(ctx, store.RecordRecoveryFeedbackParams{
+		ID: s.newID(), HealthID: s.newID(), OrgID: rc.orgID,
 		UserID:       pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
-		DeadLetterID: body.DeadLetterID, WorkflowID: body.WorkflowID,
-		SuggestionMode: mode, ApproachLabel: body.ApproachLabel,
-		Accepted: *body.Accepted, RawConfidence: rawConfidence,
-		Comment:     pgtype.Text{String: body.Comment, Valid: body.Comment != ""},
-		EvalConsent: body.EvalConsent,
+		DeadLetterID: body.DeadLetterID, WorkflowID: workflowID,
+		SuggestionMode: body.SuggestionMode, ApproachLabel: body.ApproachLabel,
+		Accepted: body.Accepted.Value, RawConfidence: rawConfidence,
+		Comment:     pgtype.Text{String: safeComment, Valid: safeComment != ""},
+		EvalConsent: body.EvalConsent.Present && body.EvalConsent.Value,
 	}); err != nil {
-		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	audit.Write(r.Context(), s.pool, rc.authContext, "recovery.feedback", audit.Options{
-		TargetType: "dlq", TargetID: body.DeadLetterID,
-		Metadata: map[string]any{"accepted": *body.Accepted, "approachLabel": body.ApproachLabel},
+
+	evalConsent := body.EvalConsent.Present && body.EvalConsent.Value
+	audit.Write(ctx, s.pool, rc.authContext, "recovery.feedback", audit.Options{
+		TargetType: "dead_letter", TargetID: body.DeadLetterID,
+		Metadata: map[string]any{
+			"approachLabel": body.ApproachLabel, "suggestionMode": body.SuggestionMode,
+			"accepted": body.Accepted.Value, "evalConsent": evalConsent,
+		},
 	})
+	s.scheduleFeedbackMemory(ctx, rc, dlq, body, workflowID, safeComment)
 	return opOK(map[string]any{"ok": true})
 }
 

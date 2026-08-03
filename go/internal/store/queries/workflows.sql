@@ -328,14 +328,45 @@ SELECT
   coalesce((SELECT sum(u.quantity) FROM usage_events u
    JOIN window_runs wr ON wr.id = u.run_id), 0)::float8 AS total_tokens,
   (SELECT count(*) FROM workflow_versions v2
-   WHERE v2.workflow_id = sqlc.arg(workflow_id) AND v2.org_id = sqlc.arg(org_id))::int AS version_count,
-  (SELECT count(*) FROM window_runs WHERE status = 'running')::int AS running_count;
+   WHERE v2.workflow_id = sqlc.arg(workflow_id) AND v2.org_id = sqlc.arg(org_id))::int AS version_count;
 
--- name: ListRecentDeadLetterErrorsForWorkflow :many
-SELECT d.error_json
+-- The post-Apply dialog needs every production status, not just terminal
+-- health samples: an in-flight run is visible immediately while the score
+-- remains below its sample floor. Keep the effective-version rules identical
+-- to QueryWorkflowHealthSignals so plain pilot runs and pinned rollout runs
+-- land on the same side of the cutoff.
+-- name: QueryRecentRunsAgainstWorkflowVersion :one
+WITH candidate_runs AS (
+  SELECT r.status,
+         coalesce(
+           (SELECT wv.version FROM workflow_versions wv
+            WHERE wv.id = r.workflow_version_id AND wv.org_id = sqlc.arg(org_id)),
+           (SELECT count(*) FROM workflow_versions v2
+            WHERE v2.workflow_id = sqlc.arg(workflow_id) AND v2.org_id = sqlc.arg(org_id)
+              AND v2.created_at <= r.created_at)
+         )::int AS effective_version
+  FROM runs r
+  WHERE r.org_id = sqlc.arg(org_id)
+    AND r.created_at >= sqlc.arg(since)
+    AND r.replay_mode IS NULL
+    AND (r.workflow_version_id = sqlc.arg(workflow_id)
+         OR r.workflow_version_id IN (SELECT v3.id FROM workflow_versions v3
+              WHERE v3.workflow_id = sqlc.arg(workflow_id) AND v3.org_id = sqlc.arg(org_id)))
+)
+SELECT
+  count(*)::int AS total_runs,
+  count(*) FILTER (WHERE status = 'succeeded')::int AS succeeded,
+  count(*) FILTER (WHERE status IN ('failed', 'cancelled', 'timed_out'))::int AS failed,
+  count(*) FILTER (WHERE status IN ('created', 'running', 'waiting'))::int AS running
+FROM candidate_runs
+WHERE effective_version >= sqlc.arg(from_version)::int;
+
+-- name: ListRecentDeadLettersForWorkflowDelta :many
+SELECT d.id, d.error_json, d.node_id, d.node_json
 FROM dead_letters d
 JOIN runs r ON r.id = d.run_id
-WHERE r.org_id = sqlc.arg(org_id)
+WHERE d.org_id = sqlc.arg(org_id)
+  AND r.org_id = sqlc.arg(org_id)
   AND d.created_at >= sqlc.arg(created_at)
   AND (r.workflow_version_id = sqlc.arg(workflow_id)
        OR r.workflow_version_id IN (SELECT v3.id FROM workflow_versions v3

@@ -275,10 +275,39 @@ SELECT id, status, resolution_reason FROM recovery_items
 WHERE org_id = $1 AND dead_letter_id = $2
 FOR UPDATE;
 
--- name: InsertRecoveryFeedback :exec
-INSERT INTO recovery_feedback (id, org_id, user_id, dead_letter_id, workflow_id,
-  suggestion_mode, approach_label, accepted, raw_confidence, comment, eval_consent)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
+-- Source decision + compact freshness projection are one durable fact. A
+-- concurrent older request may commit last, so both clocks advance with
+-- GREATEST rather than commit order.
+-- name: RecordRecoveryFeedback :exec
+WITH recorded AS (
+  INSERT INTO recovery_feedback (id, org_id, user_id, dead_letter_id, workflow_id,
+    suggestion_mode, approach_label, accepted, raw_confidence, comment, eval_consent)
+  VALUES (sqlc.arg(id), sqlc.arg(org_id), sqlc.narg(user_id), sqlc.arg(dead_letter_id),
+    sqlc.arg(workflow_id), sqlc.arg(suggestion_mode), sqlc.arg(approach_label),
+    sqlc.arg(accepted), sqlc.narg(raw_confidence), sqlc.narg(comment), sqlc.arg(eval_consent))
+  RETURNING org_id, workflow_id, approach_label, accepted, created_at
+)
+INSERT INTO recovery_feedback_health (id, org_id, workflow_id, approach_label,
+  feedback_last_seen, accepted_fix_last_seen)
+SELECT sqlc.arg(health_id), org_id, workflow_id, approach_label, created_at,
+       CASE WHEN accepted THEN created_at ELSE NULL END
+FROM recorded
+ON CONFLICT (org_id, workflow_id, approach_label) DO UPDATE SET
+  feedback_last_seen = GREATEST(
+    EXCLUDED.feedback_last_seen,
+    recovery_feedback_health.feedback_last_seen
+  ),
+  accepted_fix_last_seen = CASE
+    WHEN EXCLUDED.accepted_fix_last_seen IS NULL
+      THEN recovery_feedback_health.accepted_fix_last_seen
+    ELSE COALESCE(
+      GREATEST(
+        EXCLUDED.accepted_fix_last_seen,
+        recovery_feedback_health.accepted_fix_last_seen
+      ),
+      EXCLUDED.accepted_fix_last_seen
+    )
+  END;
 
 -- name: ListCalibrationSamples :many
 SELECT raw_confidence, accepted FROM recovery_feedback

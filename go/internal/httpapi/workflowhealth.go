@@ -10,6 +10,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -25,7 +26,44 @@ import (
 
 const defaultHealthWindowDays = 30
 
-func healthSignalsFromRow(row store.QueryWorkflowHealthSignalsRow) (health.Signals, int) {
+type recoveryDelta struct {
+	Score         int      `json:"score"`
+	P95LatencyMs  *float64 `json:"p95LatencyMs"`
+	CostPerRunUsd *float64 `json:"costPerRunUsd"`
+}
+
+type recentRunsAgainstAfter struct {
+	TotalRuns int `json:"totalRuns"`
+	Succeeded int `json:"succeeded"`
+	Failed    int `json:"failed"`
+	Running   int `json:"running"`
+}
+
+type sameFailureSinceApply struct {
+	Count               int      `json:"count"`
+	SampleDeadLetterIDs []string `json:"sampleDeadLetterIds"`
+	PriorSignature      string   `json:"priorSignature"`
+}
+
+type priorWorkflowVersion struct {
+	Version   int    `json:"version"`
+	VersionID string `json:"versionId"`
+}
+
+type workflowHealthDelta struct {
+	WorkflowID             string                 `json:"workflowId"`
+	AfterVersion           int                    `json:"afterVersion"`
+	WindowDays             int                    `json:"windowDays"`
+	HasEnoughData          bool                   `json:"hasEnoughData"`
+	Before                 health.Score           `json:"before"`
+	After                  health.Score           `json:"after"`
+	Delta                  *recoveryDelta         `json:"delta"`
+	RecentRunsAgainstAfter recentRunsAgainstAfter `json:"recentRunsAgainstAfter"`
+	SameFailureSinceApply  *sameFailureSinceApply `json:"sameFailureSinceApply"`
+	PriorVersion           *priorWorkflowVersion  `json:"priorVersion"`
+}
+
+func healthSignalsFromRow(row store.QueryWorkflowHealthSignalsRow) health.Signals {
 	signals := health.Signals{
 		TotalRuns: int(row.TotalRuns), SuccessCount: int(row.SuccessCount),
 		FailureCount: int(row.FailureCount), RetryCount: int(row.RetryCount),
@@ -39,7 +77,7 @@ func healthSignalsFromRow(row store.QueryWorkflowHealthSignalsRow) (health.Signa
 		value := row.P95LatencyMs
 		signals.P95LatencyMs = &value
 	}
-	return signals, int(row.RunningCount)
+	return signals
 }
 
 // resolveWorkflowHealthContext loads the tenant-gated latest version, its
@@ -119,9 +157,41 @@ func (s *V1Server) workflowHealthCore(r *http.Request, rc v1Request) opResult {
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	signals, _ := healthSignalsFromRow(row)
+	signals := healthSignalsFromRow(row)
 	score := health.Compute(workflowHealthFacts(wf), issues, signals, slo)
 	return opOK(score)
+}
+
+// parseIntegerNumber mirrors Number(...) + Number.isInteger(...) for the
+// query values the Node compatibility runtime accepts (for example `2.0`
+// and `1e1`). The result is bounded to Postgres integer because workflow
+// versions use that exact storage type.
+func parseIntegerNumber(raw string) (int, bool) {
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || math.Trunc(value) != value ||
+		value < math.MinInt32 || value > math.MaxInt32 {
+		return 0, false
+	}
+	return int(value), true
+}
+
+func buildRecoveryDelta(before, after health.Score, beforeSignals, afterSignals health.Signals) *recoveryDelta {
+	if afterSignals.TotalRuns < health.MinRunsForDelta {
+		return nil
+	}
+	var p95Delta *float64
+	if beforeSignals.P95LatencyMs != nil && afterSignals.P95LatencyMs != nil {
+		p95Delta = new(*afterSignals.P95LatencyMs - *beforeSignals.P95LatencyMs)
+	}
+	var costDelta *float64
+	if beforeSignals.TotalRuns > 0 && afterSignals.TotalRuns > 0 {
+		beforeCost := beforeSignals.TotalCostUsd / float64(beforeSignals.TotalRuns)
+		afterCost := afterSignals.TotalCostUsd / float64(afterSignals.TotalRuns)
+		costDelta = new(afterCost - beforeCost)
+	}
+	return &recoveryDelta{
+		Score: after.Score - before.Score, P95LatencyMs: p95Delta, CostPerRunUsd: costDelta,
+	}
 }
 
 func (s *V1Server) mountWorkflowHealthRoutes(mux *http.ServeMux) {
@@ -132,20 +202,20 @@ func (s *V1Server) mountWorkflowHealthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /workflows/health/delta", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		query := r.URL.Query()
 		workflowID := query.Get("workflowId")
-		afterVersion, err := strconv.Atoi(query.Get("afterVersion"))
+		afterVersion, validAfterVersion := parseIntegerNumber(query.Get("afterVersion"))
 		if workflowID == "" {
 			writeLegacy(w, opError(http.StatusBadRequest, "workflows_workflow_id_required", "workflowId is required", nil))
 			return
 		}
-		if err != nil || afterVersion < 1 {
+		if !validAfterVersion || afterVersion < 1 {
 			writeLegacy(w, opError(http.StatusBadRequest, "workflows_after_version_invalid",
 				"afterVersion must be a positive integer", nil))
 			return
 		}
 		windowDays := defaultHealthWindowDays
 		if raw := query.Get("windowDays"); raw != "" {
-			if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 1 && parsed <= 30 {
-				windowDays = parsed
+			if parsed, ok := parseIntegerNumber(raw); ok {
+				windowDays = min(30, max(1, parsed))
 			}
 		}
 		priorSignature := query.Get("priorFailureSignature")
@@ -175,46 +245,78 @@ func (s *V1Server) mountWorkflowHealthRoutes(mux *http.ServeMux) {
 			return
 		}
 		facts := workflowHealthFacts(wf)
-		beforeSignals, _ := healthSignalsFromRow(beforeRow)
-		afterSignals, runningAfter := healthSignalsFromRow(afterRow)
+		beforeSignals := healthSignalsFromRow(beforeRow)
+		afterSignals := healthSignalsFromRow(afterRow)
 		before := health.Compute(facts, issues, beforeSignals, slo)
 		after := health.Compute(facts, issues, afterSignals, slo)
 
+		recentRow, err := q.QueryRecentRunsAgainstWorkflowVersion(ctx,
+			store.QueryRecentRunsAgainstWorkflowVersionParams{
+				WorkflowID: workflowID, OrgID: rc.orgID, Since: &since, FromVersion: cutoff,
+			})
+		if err != nil {
+			writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+			return
+		}
+		recent := recentRunsAgainstAfter{
+			TotalRuns: int(recentRow.TotalRuns), Succeeded: int(recentRow.Succeeded),
+			Failed: int(recentRow.Failed), Running: int(recentRow.Running),
+		}
+
 		// Same-failure check: post-cutoff dead letters whose normalized
-		// signature matches the prior failure's.
-		sameFailureCount := 0
+		// signature matches the caller-supplied prior failure. Only that
+		// caller value is echoed; freshly-derived signatures never cross
+		// this response boundary.
+		var sameFailure *sameFailureSinceApply
 		if priorSignature != "" {
-			rows, err := q.ListRecentDeadLetterErrorsForWorkflow(ctx, store.ListRecentDeadLetterErrorsForWorkflowParams{
+			rows, err := q.ListRecentDeadLettersForWorkflowDelta(ctx, store.ListRecentDeadLettersForWorkflowDeltaParams{
 				WorkflowID: workflowID, OrgID: rc.orgID, CreatedAt: &since,
 				FromVersion: pgtype.Int4{Int32: cutoff, Valid: true},
 			})
-			if err == nil {
-				for _, errorJSON := range rows {
-					if signature.NormalizeJSON(errorJSON, signature.Context{}).Signature == priorSignature {
-						sameFailureCount++
-					}
+			if err != nil {
+				writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+				return
+			}
+			sameFailure = &sameFailureSinceApply{
+				SampleDeadLetterIDs: make([]string, 0, min(5, len(rows))), PriorSignature: priorSignature,
+			}
+			for _, row := range rows {
+				normalized := signature.NormalizeJSON(row.ErrorJson, signature.Context{
+					NodeID: row.NodeID, NodeType: nodeTypeOf(row.NodeJson),
+				})
+				if normalized.Signature != priorSignature {
+					continue
+				}
+				sameFailure.Count++
+				if len(sameFailure.SampleDeadLetterIDs) < 5 {
+					sameFailure.SampleDeadLetterIDs = append(sameFailure.SampleDeadLetterIDs, row.ID)
 				}
 			}
 		}
 
-		writeLegacy(w, opOK(map[string]any{
-			"before": before, "after": after,
-			"delta": map[string]any{
-				"score":        after.Score - before.Score,
-				"successCount": afterSignals.SuccessCount - beforeSignals.SuccessCount,
-				"failureCount": afterSignals.FailureCount - beforeSignals.FailureCount,
-				"dlqOpenCount": afterSignals.DlqOpenCount - beforeSignals.DlqOpenCount,
-			},
-			"runStatusCounter": map[string]any{
-				"terminal": afterSignals.TotalRuns, "running": runningAfter,
-			},
-			"hasEnoughData":   afterSignals.TotalRuns >= health.MinRunsForDelta,
-			"minRunsForDelta": health.MinRunsForDelta,
-			"sameFailure": map[string]any{
-				"checked":  priorSignature != "",
-				"recurred": sameFailureCount > 0,
-				"count":    sameFailureCount,
-			},
+		var priorVersion *priorWorkflowVersion
+		if afterVersion > 1 {
+			row, err := q.GetWorkflowVersionByNumber(ctx, store.GetWorkflowVersionByNumberParams{
+				WorkflowID: workflowID, OrgID: rc.orgID, Version: cutoff - 1,
+			})
+			switch {
+			case err == nil:
+				priorVersion = &priorWorkflowVersion{Version: int(row.Version), VersionID: row.ID}
+			case errors.Is(err, pgx.ErrNoRows):
+				// A missing historical row is a valid no-rollback posture.
+			default:
+				writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+				return
+			}
+		}
+
+		writeLegacy(w, opOK(workflowHealthDelta{
+			WorkflowID: workflowID, AfterVersion: afterVersion, WindowDays: windowDays,
+			HasEnoughData: afterSignals.TotalRuns >= health.MinRunsForDelta,
+			Before:        before, After: after,
+			Delta:                  buildRecoveryDelta(before, after, beforeSignals, afterSignals),
+			RecentRunsAgainstAfter: recent, SameFailureSinceApply: sameFailure,
+			PriorVersion: priorVersion,
 		}))
 	}))
 }
@@ -243,6 +345,3 @@ func parseWorkflowSloBody(raw json.RawMessage) (json.RawMessage, string) {
 	}
 	return serialized, ""
 }
-
-var _ = errors.Is
-var _ = pgx.ErrNoRows

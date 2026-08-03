@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -46,6 +47,8 @@ type V1Server struct {
 	queueCache     *queueHealthCache
 	mcp            *mcpclient.Client
 	workos         workosClient
+	background     context.Context
+	backgroundWG   sync.WaitGroup
 }
 
 // NewV1Handler mounts the v1 routes plus /healthz. The stream hub's
@@ -65,9 +68,10 @@ func NewV1HandlerWithShutdown(eng *engine.Engine, pool *pgxpool.Pool) (http.Hand
 }
 
 func newV1HandlerWithWorkOS(eng *engine.Engine, pool *pgxpool.Pool, client workosClient) (http.Handler, func()) {
+	serverCtx, cancelServer := context.WithCancel(context.Background())
 	server := &V1Server{
 		engine: eng, pool: pool, resolver: auth.NewResolver(pool, auth.ConfigFromEnv()),
-		newID: uuid.NewString, hub: newStreamHub(), workos: client,
+		newID: uuid.NewString, hub: newStreamHub(), workos: client, background: serverCtx,
 	}
 	server.authPolicy = authpolicy.New(pool)
 	server.resolver.SetPolicyEvaluator(func(ctx context.Context, input auth.PolicyInput) bool {
@@ -81,8 +85,7 @@ func newV1HandlerWithWorkOS(eng *engine.Engine, pool *pgxpool.Pool, client worko
 	})
 	server.queueCache = &queueHealthCache{read: server.readQueueSnapshot}
 	server.mcp = mcpclient.New(pool, server.limiter)
-	hubCtx, cancelHub := context.WithCancel(context.Background())
-	go server.hub.listen(hubCtx, pool)
+	go server.hub.listen(serverCtx, pool)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -229,7 +232,20 @@ func newV1HandlerWithWorkOS(eng *engine.Engine, pool *pgxpool.Pool, client worko
 		// data); API patterns above always win by specificity.
 		mux.Handle("GET /", webdist.Handler())
 	}
-	return WithBrowserHeaders(mux), cancelHub
+	shutdown := func() {
+		cancelServer()
+		server.backgroundWG.Wait()
+	}
+	return WithBrowserHeaders(mux), shutdown
+}
+
+// runBackground owns fire-and-forget route work under the server lifetime.
+// Request cancellation must not discard already-accepted feedback memory,
+// while process shutdown still cancels and joins every outstanding task.
+func (s *V1Server) runBackground(run func(context.Context)) {
+	s.backgroundWG.Go(func() {
+		run(s.background)
+	})
 }
 
 type v1Request struct {
