@@ -63,6 +63,41 @@ func TestRunUsageAndCostRollup(t *testing.T) {
 		t.Fatalf("slice bookkeeping: %+v", res.body)
 	}
 
+	// The UI-friendly contract preserves exact totals, presents known provider
+	// names, and exposes cache efficiency. The additive legacy list remains raw.
+	focusedMetrics := h.call("GET", "/recovery/metrics?windowDays=30", nil, "")
+	if focusedMetrics.status != 200 {
+		t.Fatalf("focused metrics read: %d %+v", focusedMetrics.status, focusedMetrics.body)
+	}
+	costMetric := focusedMetrics.body["costThisWindow"].(map[string]any)
+	if costMetric["value"] != 0.0015 {
+		t.Fatalf("focused UI cost total: %+v", costMetric)
+	}
+	providers := costMetric["providers"].([]any)
+	foundHaiku := false
+	for _, raw := range providers {
+		row := raw.(map[string]any)
+		if row["model"] == "haiku" {
+			foundHaiku = true
+			if row["provider"] != "Anthropic" || row["inputTokens"] != float64(160) ||
+				row["cachedInputTokens"] != float64(100) {
+				t.Fatalf("display provider/cache row: %+v", row)
+			}
+		}
+	}
+	if !foundHaiku {
+		t.Fatal("display cost rows omitted the haiku group")
+	}
+	cache := costMetric["cache"].(map[string]any)
+	if cache["inputTokens"] != float64(168) || cache["readTokens"] != float64(100) ||
+		cache["creationTokens"] != float64(0) {
+		t.Fatalf("cache totals: %+v", cache)
+	}
+	share := cache["readSharePercent"].(float64)
+	if share < 59.52 || share > 59.53 {
+		t.Fatalf("cache share: %+v", cache)
+	}
+
 	// Cost rollup: 105 distinct models, $1 + i millis each — the response
 	// folds the 5 cheapest into one remainder whose totals stay exact.
 	for i := range 105 {
@@ -70,6 +105,9 @@ func TestRunUsageAndCostRollup(t *testing.T) {
 			fmt.Sprintf(`{"provider":"anthropic","model":"model-%03d","costUsd":%f}`, i, 1.0+float64(i)/1000))
 	}
 	metrics := h.call("GET", "/recovery/metrics?windowDays=30", nil, "")
+	if metrics.status != 200 {
+		t.Fatalf("metrics read: %d %+v", metrics.status, metrics.body)
+	}
 	rows := metrics.body["costByProvider"].([]any)
 	if len(rows) > 102 { // 100 exact + remainder + the seeded haiku/mystery groups fold in
 		t.Fatalf("rollup must bound cardinality: %d rows", len(rows))
@@ -101,5 +139,16 @@ func TestRunUsageAndCostRollup(t *testing.T) {
 	}
 	if exactCalls+aggregated["calls"].(float64) != 108 { // 105 + 3 run rows
 		t.Fatalf("call totals: exact=%f remainder=%v", exactCalls, aggregated["calls"])
+	}
+
+	// The bounded display projection and legacy list share exact totals even
+	// after low-value groups have been folded into the remainder bucket.
+	costMetric = metrics.body["costThisWindow"].(map[string]any)
+	if costMetric["value"].(float64) != totalUsd {
+		t.Fatalf("UI cost total: want %f got %+v", totalUsd, costMetric)
+	}
+	providers = costMetric["providers"].([]any)
+	if len(providers) != len(rows) {
+		t.Fatalf("display/legacy cardinality drift: display=%d legacy=%d", len(providers), len(rows))
 	}
 }

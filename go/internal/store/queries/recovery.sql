@@ -85,8 +85,113 @@ WITH recovered AS (
 SELECT count(*)::int AS sample_size,
        COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms), -1)::float8 AS p50_ms,
        COALESCE(percentile_cont(0.9) WITHIN GROUP (ORDER BY duration_ms), -1)::float8 AS p90_ms,
-       COALESCE(avg(duration_ms), -1)::float8 AS mttr_avg_ms
+       COALESCE(avg(duration_ms), -1)::float8 AS mttr_avg_ms,
+       COALESCE(sum(duration_ms), 0)::float8 AS downtime_ended_ms
 FROM recovered;
+
+-- name: QueryRecoveryDashboardSignals :one
+-- Bounded production-only signals for the UI-friendly recovery metrics
+-- projection. The current approval count is intentionally not windowed.
+WITH recent_runs AS MATERIALIZED (
+  SELECT id, status
+  FROM runs
+  WHERE org_id = sqlc.arg(target_org)
+    AND created_at >= sqlc.arg(since_at)
+    AND replay_mode IS NULL
+  ORDER BY created_at DESC, id DESC
+  LIMIT 10000
+), event_durations AS MATERIALIZED (
+  SELECT e.run_id,
+         extract(epoch FROM (max(e.created_at) - min(e.created_at)))::float8 * 1000 AS duration_ms
+  FROM run_events e
+  JOIN recent_runs r ON r.id = e.run_id
+  GROUP BY e.run_id
+  ORDER BY max(e.created_at) DESC, e.run_id DESC
+  LIMIT 5000
+), attempts AS MATERIALIZED (
+  SELECT dlq.id, dlq.org_id, dlq.run_id, dlq.node_id,
+         coalesce(dlq.replay_claimed_at, dlq.replayed_at) AS replay_boundary
+  FROM dead_letters dlq
+  JOIN runs attempt_run ON attempt_run.id = dlq.run_id AND attempt_run.org_id = dlq.org_id
+  WHERE dlq.org_id = sqlc.arg(target_org)
+    AND coalesce(dlq.replay_claimed_at, dlq.replayed_at) >= sqlc.arg(since_at)
+    AND attempt_run.replay_mode IS NULL
+), outcomes AS MATERIALIZED (
+  SELECT attempts.id,
+         bool_or(impact.dead_letter_id IS NOT NULL) AS succeeded,
+         bool_or(later_run.id IS NOT NULL) AS reopened
+  FROM attempts
+  LEFT JOIN recovery_impact_events impact ON impact.dead_letter_id = attempts.id
+  LEFT JOIN dead_letters later
+    ON later.org_id = attempts.org_id
+   AND later.run_id = attempts.run_id
+   AND later.node_id = attempts.node_id
+   AND later.id <> attempts.id
+   AND later.created_at > attempts.replay_boundary
+  LEFT JOIN runs later_run
+    ON later_run.id = later.run_id
+   AND later_run.org_id = later.org_id
+   AND later_run.replay_mode IS NULL
+  GROUP BY attempts.id
+)
+SELECT
+  (SELECT count(*) FILTER (WHERE status = 'succeeded') FROM recent_runs)::int AS succeeded,
+  (SELECT count(*) FILTER (WHERE status = 'failed') FROM recent_runs)::int AS failed,
+  (SELECT count(*) FILTER (WHERE status = 'cancelled') FROM recent_runs)::int AS cancelled,
+  (SELECT count(*) FILTER (WHERE status = 'running') FROM recent_runs)::int AS running,
+  (SELECT count(*) FILTER (WHERE status = 'queued') FROM recent_runs)::int AS queued,
+  (SELECT count(*) FROM recent_runs)::int AS total,
+  (SELECT count(*)
+     FROM run_nodes node
+     JOIN runs run ON run.id = node.run_id
+    WHERE run.org_id = sqlc.arg(target_org)
+      AND run.replay_mode IS NULL
+      AND node.status = 'waiting'
+      AND node.state_json #>> '{waiting,reason}' = 'Waiting for human approval')::int AS approvals_pending,
+  CASE WHEN (SELECT count(*) FROM event_durations WHERE duration_ms > 0) >= 5
+    THEN (SELECT percentile_disc(0.95) WITHIN GROUP (ORDER BY duration_ms)
+            FROM event_durations WHERE duration_ms > 0)
+    ELSE -1
+  END::float8 AS p95_latency_ms,
+  (SELECT count(*) FROM attempts)::int AS replay_total_entries,
+  (SELECT count(*) FILTER (WHERE succeeded) FROM outcomes)::int AS replayed_success,
+  (SELECT count(*) FILTER (WHERE NOT succeeded AND reopened) FROM outcomes)::int AS replayed_and_reopened,
+  (SELECT count(*)
+     FROM recovery_items item
+     JOIN dead_letters dlq ON dlq.org_id = item.org_id AND dlq.id = item.dead_letter_id
+     JOIN runs run ON run.org_id = item.org_id AND run.id = dlq.run_id
+    WHERE item.org_id = sqlc.arg(target_org)
+      AND item.status = 'resolved'
+      AND item.resolved_at >= sqlc.arg(since_at)
+      AND run.replay_mode IS NULL)::int AS sla_resolved,
+  (SELECT count(*)
+     FROM recovery_items item
+     JOIN dead_letters dlq ON dlq.org_id = item.org_id AND dlq.id = item.dead_letter_id
+     JOIN runs run ON run.org_id = item.org_id AND run.id = dlq.run_id
+    WHERE item.org_id = sqlc.arg(target_org)
+      AND item.status = 'resolved'
+      AND item.resolved_at >= sqlc.arg(since_at)
+      AND item.resolved_at <= item.sla_target_at
+      AND run.replay_mode IS NULL)::int AS sla_met;
+
+-- name: QueryRecoveryMttrTrend :many
+SELECT to_char(date_trunc('day', impact.recovered_at), 'YYYY-MM-DD') AS day,
+       round(percentile_cont(0.5) WITHIN GROUP (ORDER BY impact.downtime_ended_ms))::bigint AS median_ms
+FROM recovery_impact_events impact
+JOIN runs run ON run.id = impact.run_id AND run.org_id = impact.org_id
+WHERE impact.org_id = $1 AND impact.recovered_at >= $2 AND run.replay_mode IS NULL
+GROUP BY date_trunc('day', impact.recovered_at)
+ORDER BY date_trunc('day', impact.recovered_at) DESC
+LIMIT 14;
+
+-- name: ListResolvedRecoveryFailureRows :many
+SELECT dlq.node_id, dlq.node_json, dlq.error_json
+FROM recovery_impact_events impact
+JOIN dead_letters dlq ON dlq.id = impact.dead_letter_id
+JOIN runs run ON run.id = impact.run_id AND run.org_id = impact.org_id
+WHERE impact.org_id = $1 AND impact.recovered_at >= $2 AND run.replay_mode IS NULL
+ORDER BY impact.recovered_at DESC, impact.dead_letter_id DESC
+LIMIT 10001;
 
 -- name: InsertRecoveryCase :exec
 INSERT INTO recovery_cases (id, org_id, run_id, workflow_id, workflow_version_id, source,

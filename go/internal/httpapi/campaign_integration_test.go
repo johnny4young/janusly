@@ -208,10 +208,16 @@ func TestVerifiedRecoveryMetrics(t *testing.T) {
 
 	// Empty org: sample 0, null percentiles.
 	empty := h.call("GET", "/v1/recovery/metrics", nil, "")
+	if empty.status != http.StatusOK {
+		t.Fatalf("empty metrics status: %d %+v", empty.status, empty.body)
+	}
 	requireEnvelope(t, empty)
 	data := empty.body["data"].(map[string]any)
+	requireRecoveryMetricsContract(t, data)
 	vr := data["verifiedRecovery"].(map[string]any)
-	if vr["sampleSize"] != float64(0) || vr["p50Ms"] != nil || data["mttrMs"] != nil {
+	if vr["definitionVersion"] != "1" || vr["metric"] != "time_to_verified_recovery" ||
+		vr["unit"] != "milliseconds" || vr["sampleSize"] != float64(0) ||
+		vr["p50Ms"] != nil || data["mttrMs"] != nil {
 		t.Fatalf("empty metrics: %+v", data)
 	}
 
@@ -250,9 +256,13 @@ func TestVerifiedRecoveryMetrics(t *testing.T) {
 	h.waitRun(runID, "succeeded")
 
 	after := h.call("GET", "/recovery/metrics?windowDays=7", nil, "")
+	if after.status != http.StatusOK {
+		t.Fatalf("recovery metrics status: %d %+v", after.status, after.body)
+	}
 	if after.body["apiVersion"] != nil {
 		t.Fatalf("legacy wire must be raw: %+v", after.body)
 	}
+	requireRecoveryMetricsContract(t, after.body)
 	vr = after.body["verifiedRecovery"].(map[string]any)
 	p50, _ := vr["p50Ms"].(float64)
 	p90, _ := vr["p90Ms"].(float64)
@@ -261,6 +271,69 @@ func TestVerifiedRecoveryMetrics(t *testing.T) {
 	}
 	if mttr, _ := after.body["mttrMs"].(float64); mttr != p50 {
 		t.Fatalf("legacy average with one sample must equal the median: %+v", after.body)
+	}
+}
+
+func requireRecoveryMetricsContract(t *testing.T, body map[string]any) {
+	t.Helper()
+	metricKeys := []string{
+		"successRate", "verifiedRecovery", "mttr", "p95Latency", "approvalsPending",
+		"replayRate", "costThisWindow", "clustersResolved", "slaAttainment",
+		"timeToFirstAction", "recurrenceRate",
+	}
+	for _, key := range metricKeys {
+		metric, ok := body[key].(map[string]any)
+		if !ok {
+			t.Fatalf("%s metric missing: %+v", key, body[key])
+		}
+		if _, ok := metric["value"]; !ok {
+			t.Fatalf("%s value missing: %+v", key, metric)
+		}
+		if _, ok := metric["display"].(string); !ok {
+			t.Fatalf("%s display missing: %+v", key, metric)
+		}
+		if _, ok := metric["severity"].(string); !ok {
+			t.Fatalf("%s severity missing: %+v", key, metric)
+		}
+		if _, ok := metric["rationale"].(string); !ok {
+			t.Fatalf("%s rationale missing: %+v", key, metric)
+		}
+		if _, ok := metric["rationaleCode"].(string); !ok {
+			t.Fatalf("%s rationaleCode missing: %+v", key, metric)
+		}
+	}
+	verified := body["verifiedRecovery"].(map[string]any)
+	if verified["definitionVersion"] != "1" || verified["metric"] != "time_to_verified_recovery" ||
+		verified["unit"] != "milliseconds" {
+		t.Fatalf("verified recovery definition: %+v", verified)
+	}
+	cost := body["costThisWindow"].(map[string]any)
+	if _, ok := cost["providers"].([]any); !ok {
+		t.Fatalf("cost providers missing: %+v", cost)
+	}
+	cache, ok := cost["cache"].(map[string]any)
+	if !ok || cache["inputTokens"] == nil || cache["readTokens"] == nil || cache["creationTokens"] == nil {
+		t.Fatalf("cost cache missing: %+v", cost)
+	}
+	clusters := body["clustersResolved"].(map[string]any)
+	if clusters["totalEntries"] == nil || clusters["capped"] == nil {
+		t.Fatalf("cluster metadata missing: %+v", clusters)
+	}
+	sla := body["slaAttainment"].(map[string]any)
+	if sla["resolvedInWindow"] == nil || sla["metSla"] == nil {
+		t.Fatalf("SLA metadata missing: %+v", sla)
+	}
+	if _, ok := body["valueEstimate"].(map[string]any); !ok {
+		t.Fatalf("value estimate missing: %+v", body["valueEstimate"])
+	}
+	if _, ok := body["terminalRuns"].(float64); !ok {
+		t.Fatalf("terminal run count missing: %+v", body["terminalRuns"])
+	}
+	if _, ok := body["mttrTrend"].([]any); !ok {
+		t.Fatalf("MTTR trend missing: %+v", body["mttrTrend"])
+	}
+	if _, ok := body["downtimeEndedMs"].(float64); !ok {
+		t.Fatalf("downtime total missing: %+v", body["downtimeEndedMs"])
 	}
 }
 
