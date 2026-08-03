@@ -696,9 +696,11 @@ SELECT dl.id, dl.run_id, dl.node_id, dl.error_json, dl.created_at,
        r.input_json
 FROM dead_letters dl
 JOIN runs r ON r.id = dl.run_id
-WHERE dl.org_id = $1 AND dl.created_at >= $2
+WHERE dl.org_id = $1
+  AND dl.created_at >= $2
+  AND r.replay_mode IS NULL
 ORDER BY dl.created_at DESC
-LIMIT 2000
+LIMIT 500
 `
 
 type ListDeadLetterFailureSamplesParams struct {

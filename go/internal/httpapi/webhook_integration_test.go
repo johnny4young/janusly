@@ -326,6 +326,29 @@ func TestFailureClustersRollup(t *testing.T) {
 	if legacy.status != 200 || legacy.body["apiVersion"] != nil || legacy.body["clusters"] == nil {
 		t.Fatalf("legacy clusters: %+v", legacy.body)
 	}
+
+	// Validation failures stay visible in the operator's recovery queue and
+	// validation dossier, but they are not production failure-cluster signals.
+	// Both raw sources must be excluded together or the failed run_nodes row
+	// would keep the cluster alive after the DLQ source was filtered.
+	if _, err := testPool(t).Exec(t.Context(),
+		`UPDATE runs SET replay_mode = 'validation' WHERE id = $1`, runID); err != nil {
+		t.Fatalf("mark validation run: %v", err)
+	}
+	clusters = h.call("GET", "/v1/dlq/clusters?windowDays=7", nil, "")
+	requireEnvelope(t, clusters)
+	data = clusters.body["data"].(map[string]any)
+	if data["totalSamples"] != float64(0) || len(data["clusters"].([]any)) != 0 {
+		t.Fatalf("validation samples must be absent from clusters: %+v", data)
+	}
+	home := h.call("GET", "/recovery/home", nil, "")
+	if len(homeSection(t, home.body, "clusters")["clusters"].([]any)) != 0 {
+		t.Fatalf("Home clusters must exclude validation runs: %+v", home.body)
+	}
+	queue := homeSection(t, home.body, "queue")
+	if queue["counts"].(map[string]any)["open"] != float64(1) {
+		t.Fatalf("validation failure must remain actionable in queue: %+v", queue)
+	}
 }
 
 // Cursor round-trip parity: pages via the minted cursor reassemble the

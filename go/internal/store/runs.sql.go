@@ -1307,9 +1307,12 @@ SELECT rn.run_id, rn.node_id, rn.error_json, rn.finished_at,
        r.input_json
 FROM run_nodes rn
 JOIN runs r ON r.id = rn.run_id
-WHERE r.org_id = $1 AND rn.status = 'failed' AND rn.finished_at >= $2
-ORDER BY rn.finished_at DESC
-LIMIT 2000
+WHERE r.org_id = $1
+  AND rn.status = 'failed'
+  AND r.replay_mode IS NULL
+  AND COALESCE(rn.finished_at, r.created_at) >= $2
+ORDER BY COALESCE(rn.finished_at, r.created_at) DESC
+LIMIT 500
 `
 
 type ListFailedRunNodeSamplesParams struct {
