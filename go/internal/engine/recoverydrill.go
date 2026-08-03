@@ -185,7 +185,7 @@ func (e *Engine) insertRuntimeFailureDrill(ctx context.Context, input RecoveryDr
 			}
 			state["output"] = output
 		}
-		if err := q.InsertRecoveryDrillRunNode(ctx, store.InsertRecoveryDrillRunNodeParams{
+		if err := q.InsertSeededRunNode(ctx, store.InsertSeededRunNodeParams{
 			ID: e.newID(), RunID: runID, NodeID: node.ID, Status: status,
 			Attempts: pgtype.Int4{Int32: attempts, Valid: true}, StateJson: safePersist(state, stateJSONMaxBytes),
 			StartedAt: startedAt, FinishedAt: finishedAt,
@@ -351,7 +351,7 @@ func (e *Engine) RunStalledNodeDrill(ctx context.Context, input RecoveryDrillInp
 	}); err != nil {
 		return StalledNodeDrillResult{}, fmt.Errorf("insert stalled-node recovery drill: %w", err)
 	}
-	if err := q.InsertRecoveryDrillRunNode(ctx, store.InsertRecoveryDrillRunNodeParams{
+	if err := q.InsertSeededRunNode(ctx, store.InsertSeededRunNodeParams{
 		ID: e.newID(), RunID: runID, NodeID: input.FailedNodeID, Status: "running",
 		Attempts: pgtype.Int4{Int32: 1, Valid: true}, StateJson: json.RawMessage(`{}`),
 		StartedAt: &stalledAt,

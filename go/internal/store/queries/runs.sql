@@ -52,9 +52,9 @@ VALUES (
   CASE WHEN $4 = 'queued' THEN 1 ELSE 0 END
 );
 
--- Server-owned drills seed only the checkpoints required to exercise one
--- exact runtime boundary. This is deliberately not a general mutation API.
--- name: InsertRecoveryDrillRunNode :exec
+-- Server-owned sandbox adapters seed only the checkpoints required to enter
+-- one exact runtime boundary. This is deliberately not a general mutation API.
+-- name: InsertSeededRunNode :exec
 INSERT INTO run_nodes (
   id, run_id, node_id, status, attempts, state_json,
   started_at, finished_at,

@@ -4,7 +4,9 @@ package httpapi
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,8 +84,18 @@ func TestProductSurfaceLoop(t *testing.T) {
 	if res.status != 200 || len(res.body["packs"].([]any)) != 3 {
 		t.Fatalf("pack catalog: %d %+v", res.status, res.body)
 	}
-	pack := res.body["packs"].([]any)[0].(map[string]any)
-	packID := pack["id"].(string)
+	packID := "incident-triage"
+	var pack map[string]any
+	for _, raw := range res.body["packs"].([]any) {
+		candidate := raw.(map[string]any)
+		if candidate["id"] == packID {
+			pack = candidate
+			break
+		}
+	}
+	if pack == nil {
+		t.Fatalf("incident pack missing from catalog: %+v", res.body)
+	}
 	// Dependency hints carry EXISTENCE only.
 	deps := pack["requiredCredentials"].([]any)
 	if len(deps) > 0 {
@@ -113,16 +125,87 @@ func TestProductSurfaceLoop(t *testing.T) {
 		t.Fatalf("re-install must append a version: %d", versions)
 	}
 
-	// Sample run is a SANDBOX (validation replay mode).
+	// Sample run rejects malformed/unknown selectors without persisting, then
+	// seeds the bundled external trigger and executes the workflow body as a
+	// SANDBOX (validation replay mode).
+	var beforeSamples int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM runs WHERE org_id = $1`, h.org).Scan(&beforeSamples)
+	invalidSample := h.call("POST", "/solution-packs/"+packID+"/sample-run", map[string]any{
+		"samplePayloadId": 42,
+	}, "")
+	if invalidSample.status != 422 || invalidSample.body["error"] != "invalid sample-run body" {
+		t.Fatalf("invalid sample selector: %d %+v", invalidSample.status, invalidSample.body)
+	}
+	missingSample := h.call("POST", "/solution-packs/"+packID+"/sample-run", map[string]any{
+		"samplePayloadId": "missing",
+	}, "")
+	if missingSample.status != 400 || missingSample.body["code"] != "pack_missing_sample_payload" {
+		t.Fatalf("unknown sample selector: %d %+v", missingSample.status, missingSample.body)
+	}
+	var afterRejectedSamples int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM runs WHERE org_id = $1`, h.org).Scan(&afterRejectedSamples)
+	if afterRejectedSamples != beforeSamples {
+		t.Fatalf("rejected sample selector persisted a run: before=%d after=%d",
+			beforeSamples, afterRejectedSamples)
+	}
+
 	res = h.call("POST", "/solution-packs/"+packID+"/sample-run", map[string]any{}, "")
-	if res.status != 202 || res.body["sandbox"] != true {
+	if res.status != 200 || res.body["samplePayloadId"] != "default" || len(res.body) != 2 {
 		t.Fatalf("sample run: %d %+v", res.status, res.body)
 	}
 	sampleRunID := res.body["runId"].(string)
+	h.waitRun(sampleRunID, "succeeded")
 	var replayMode string
 	_ = pool.QueryRow(ctx, `SELECT coalesce(replay_mode,'') FROM runs WHERE id = $1`, sampleRunID).Scan(&replayMode)
 	if replayMode != "validation" {
 		t.Fatalf("sample run must be validation: %q", replayMode)
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT node_id, status, state_json
+		FROM run_nodes WHERE run_id = $1 ORDER BY node_id
+	`, sampleRunID)
+	if err != nil {
+		t.Fatalf("sample nodes: %v", err)
+	}
+	sampleStatuses := map[string]string{}
+	var triggerState []byte
+	for rows.Next() {
+		var nodeID, status string
+		var state []byte
+		if err := rows.Scan(&nodeID, &status, &state); err != nil {
+			rows.Close()
+			t.Fatalf("scan sample node: %v", err)
+		}
+		sampleStatuses[nodeID] = status
+		if nodeID == "trigger" {
+			triggerState = state
+		}
+	}
+	rows.Close()
+	if sampleStatuses["trigger"] != "succeeded" || sampleStatuses["open_issue"] != "skipped" ||
+		sampleStatuses["page_oncall"] != "skipped" || !strings.Contains(string(triggerState), `"sample-alert-db-pool"`) {
+		t.Fatalf("sandbox sample lifecycle: statuses=%+v trigger=%s", sampleStatuses, triggerState)
+	}
+	var source string
+	if err := pool.QueryRow(ctx, `
+		SELECT payload->>'source' FROM run_events
+		WHERE run_id = $1 AND type = 'run.started.sandbox'
+	`, sampleRunID).Scan(&source); err != nil || source != "pack:"+packID {
+		t.Fatalf("sandbox sample provenance: source=%q err=%v", source, err)
+	}
+	var sampleAuditMetadata []byte
+	if err := pool.QueryRow(ctx, `
+		SELECT metadata FROM audit_logs
+		WHERE org_id = $1 AND action = 'solution_pack.sample_run_started'
+		ORDER BY created_at DESC LIMIT 1
+	`, h.org).Scan(&sampleAuditMetadata); err != nil {
+		t.Fatalf("sample audit metadata: %s err=%v", sampleAuditMetadata, err)
+	}
+	var sampleAudit map[string]any
+	if err := json.Unmarshal(sampleAuditMetadata, &sampleAudit); err != nil ||
+		sampleAudit["packId"] != packID || sampleAudit["samplePayloadId"] != "default" ||
+		sampleAudit["runId"] != sampleRunID {
+		t.Fatalf("sample audit metadata: %+v err=%v", sampleAudit, err)
 	}
 
 	// The selected runtime fixture crosses the real worker/DLQ boundary and

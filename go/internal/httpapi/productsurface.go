@@ -414,29 +414,50 @@ func (s *V1Server) mountProductSurfaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /solution-packs/{id}/sample-run", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		pack := packs.Get(r.PathValue("id"))
 		if pack == nil {
-			writeLegacy(w, opError(http.StatusNotFound, "solution_pack_not_found", "Solution pack not found", nil))
+			writeLegacy(w, opError(http.StatusNotFound, "pack_not_found", "Solution pack not found", nil))
 			return
 		}
-		var body struct {
-			SampleID string `json:"sampleId"`
+		body, rejection := decodeJSONRecord(r, 1_048_576)
+		if rejection != nil {
+			writeLegacy(w, *rejection)
+			return
 		}
-		_ = decodeBody(r, &body)
-		sample := pack.SamplePayloads[0]
-		for _, candidate := range pack.SamplePayloads {
-			if candidate.ID == body.SampleID {
-				sample = candidate
+		samplePayloadID := ""
+		if raw, present := body["samplePayloadId"]; present {
+			value, valid := raw.(string)
+			samplePayloadID = strings.TrimSpace(value)
+			if !valid || samplePayloadID == "" {
+				writeLegacy(w, opResult{status: http.StatusUnprocessableEntity, data: map[string]any{
+					"error": "invalid sample-run body",
+					"issues": []map[string]any{{
+						"path": []string{"samplePayloadId"}, "message": "Expected a non-empty string",
+					}},
+				}})
+				return
+			}
+		}
+		var sample *packs.SamplePayload
+		for i := range pack.SamplePayloads {
+			if samplePayloadID == "" || pack.SamplePayloads[i].ID == samplePayloadID {
+				sample = &pack.SamplePayloads[i]
 				break
 			}
+		}
+		if sample == nil {
+			writeLegacy(w, opError(http.StatusBadRequest, "pack_missing_sample_payload",
+				"No matching sample payload for this pack", nil))
+			return
 		}
 		wf, _ := domain.Parse(pack.WorkflowJSON)
 		if wf == nil {
 			writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "pack workflow unparseable", nil))
 			return
 		}
-		// The sample run is a SANDBOX: write sides skip, memory untouched.
-		runID, err := s.engine.StartRun(r.Context(), engine.StartInput{
+		// The sample run is a SANDBOX whose external trigger has already fired:
+		// roots carry the bundled payload while write sides remain dry-run skipped.
+		runID, err := s.engine.StartSandboxRun(r.Context(), engine.SandboxRunInput{
 			OrgID: rc.orgID, Workflow: wf, CreatedBy: rc.userID,
-			ReplayMode: "validation", Input: sample.Input,
+			Input: sample.Input, Source: "pack:" + pack.ID,
 		})
 		if err != nil {
 			writeLegacy(w, opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil))
@@ -444,11 +465,11 @@ func (s *V1Server) mountProductSurfaceRoutes(mux *http.ServeMux) {
 		}
 		audit.Write(r.Context(), s.pool, rc.authContext, "solution_pack.sample_run_started", audit.Options{
 			TargetType: "solution_pack", TargetID: pack.ID,
-			Metadata: map[string]any{"runId": runID, "sampleId": sample.ID},
+			Metadata: map[string]any{
+				"packId": pack.ID, "samplePayloadId": sample.ID, "runId": runID,
+			},
 		})
-		writeLegacy(w, opResult{status: http.StatusAccepted, data: map[string]any{
-			"ok": true, "runId": runID, "sandbox": true,
-		}})
+		writeLegacy(w, opOK(map[string]any{"runId": runID, "samplePayloadId": sample.ID}))
 	}))
 
 	mux.HandleFunc("POST /solution-packs/{id}/inject-failure", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {

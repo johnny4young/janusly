@@ -983,46 +983,6 @@ func (q *Queries) InsertRecoveryDrillRun(ctx context.Context, arg InsertRecovery
 	return err
 }
 
-const insertRecoveryDrillRunNode = `-- name: InsertRecoveryDrillRunNode :exec
-INSERT INTO run_nodes (
-  id, run_id, node_id, status, attempts, state_json,
-  started_at, finished_at,
-  queue_publication_repair_after, queue_publication_generation
-)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-`
-
-type InsertRecoveryDrillRunNodeParams struct {
-	ID                          string
-	RunID                       string
-	NodeID                      string
-	Status                      string
-	Attempts                    pgtype.Int4
-	StateJson                   json.RawMessage
-	StartedAt                   *time.Time
-	FinishedAt                  *time.Time
-	QueuePublicationRepairAfter *time.Time
-	QueuePublicationGeneration  int32
-}
-
-// Server-owned drills seed only the checkpoints required to exercise one
-// exact runtime boundary. This is deliberately not a general mutation API.
-func (q *Queries) InsertRecoveryDrillRunNode(ctx context.Context, arg InsertRecoveryDrillRunNodeParams) error {
-	_, err := q.db.Exec(ctx, insertRecoveryDrillRunNode,
-		arg.ID,
-		arg.RunID,
-		arg.NodeID,
-		arg.Status,
-		arg.Attempts,
-		arg.StateJson,
-		arg.StartedAt,
-		arg.FinishedAt,
-		arg.QueuePublicationRepairAfter,
-		arg.QueuePublicationGeneration,
-	)
-	return err
-}
-
 const insertRun = `-- name: InsertRun :exec
 
 INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, created_by, replay_mode, validation_evidence_level,
@@ -1158,6 +1118,46 @@ func (q *Queries) InsertRunNode(ctx context.Context, arg InsertRunNodeParams) er
 		arg.Status,
 		arg.Attempts,
 		arg.StateJson,
+	)
+	return err
+}
+
+const insertSeededRunNode = `-- name: InsertSeededRunNode :exec
+INSERT INTO run_nodes (
+  id, run_id, node_id, status, attempts, state_json,
+  started_at, finished_at,
+  queue_publication_repair_after, queue_publication_generation
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+`
+
+type InsertSeededRunNodeParams struct {
+	ID                          string
+	RunID                       string
+	NodeID                      string
+	Status                      string
+	Attempts                    pgtype.Int4
+	StateJson                   json.RawMessage
+	StartedAt                   *time.Time
+	FinishedAt                  *time.Time
+	QueuePublicationRepairAfter *time.Time
+	QueuePublicationGeneration  int32
+}
+
+// Server-owned sandbox adapters seed only the checkpoints required to enter
+// one exact runtime boundary. This is deliberately not a general mutation API.
+func (q *Queries) InsertSeededRunNode(ctx context.Context, arg InsertSeededRunNodeParams) error {
+	_, err := q.db.Exec(ctx, insertSeededRunNode,
+		arg.ID,
+		arg.RunID,
+		arg.NodeID,
+		arg.Status,
+		arg.Attempts,
+		arg.StateJson,
+		arg.StartedAt,
+		arg.FinishedAt,
+		arg.QueuePublicationRepairAfter,
+		arg.QueuePublicationGeneration,
 	)
 	return err
 }
