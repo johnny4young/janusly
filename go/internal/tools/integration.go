@@ -22,6 +22,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -72,6 +74,7 @@ func SignWebhookPayload(secret, body string, unixSeconds int64) string {
 // intercept with runtime deps.
 var integrationToolNames = map[string]bool{
 	"webhook.send":                   true,
+	"github.create_issue":            true,
 	"email.send":                     true,
 	"pdf.generate":                   true,
 	"pagerduty.incident.get":         true,
@@ -93,26 +96,49 @@ func integrationTools() []Definition {
 		// unit tests) — the envelope contract still holds: never throw.
 		return map[string]any{"ok": false, "error": "integration tools require run context", "latencyMs": 0}, nil
 	}
-	return []Definition{{
-		Name:        "webhook.send",
-		Description: "POST a signed JSON payload to an external URL with an HMAC-SHA256 signature header.",
-		Required:    []string{"credential", "url", "payload"},
-		Optional:    []string{"signatureHeader", "headers"},
-		Fields: []Field{
-			{Name: "credential", Type: "string", Required: true},
-			{Name: "url", Type: "string", Required: true},
-			{Name: "payload", Type: "object", Required: true},
-			{Name: "signatureHeader", Type: "string"},
-			{Name: "headers", Type: "object"},
+	return []Definition{
+		{
+			Name:        "github.create_issue",
+			Description: "Create a GitHub issue using a stored PAT credential.",
+			Required:    []string{"credential", "owner", "repo", "title"},
+			Optional:    []string{"body", "labels", "assignees"},
+			Fields: []Field{
+				{Name: "credential", Type: "string", Required: true},
+				{Name: "owner", Type: "string", Required: true},
+				{Name: "repo", Type: "string", Required: true},
+				{Name: "title", Type: "string", Required: true},
+				{Name: "body", Type: "string"},
+				{Name: "labels", Type: "json"},
+				{Name: "assignees", Type: "json"},
+			},
+			InputExample: map[string]any{
+				"credential": "bot-github", "owner": "janusly", "repo": "demo",
+				"title": "Incident triage", "body": "Details…",
+			},
+			WriteSide: true,
+			Execute:   unavailable,
 		},
-		InputExample: map[string]any{
-			"credential": "partner-webhook",
-			"url":        "https://partner.example.com/hooks/incident",
-			"payload":    map[string]any{"event": "incident", "severity": "high"},
+		{
+			Name:        "webhook.send",
+			Description: "POST a signed JSON payload to an external URL with an HMAC-SHA256 signature header.",
+			Required:    []string{"credential", "url", "payload"},
+			Optional:    []string{"signatureHeader", "headers"},
+			Fields: []Field{
+				{Name: "credential", Type: "string", Required: true},
+				{Name: "url", Type: "string", Required: true},
+				{Name: "payload", Type: "object", Required: true},
+				{Name: "signatureHeader", Type: "string"},
+				{Name: "headers", Type: "object"},
+			},
+			InputExample: map[string]any{
+				"credential": "partner-webhook",
+				"url":        "https://partner.example.com/hooks/incident",
+				"payload":    map[string]any{"event": "incident", "severity": "high"},
+			},
+			WriteSide: true,
+			Execute:   unavailable,
 		},
-		WriteSide: true,
-		Execute:   unavailable,
-	}}
+	}
 }
 
 func envelopeError(message string, latencyMs int) map[string]any {
@@ -146,6 +172,8 @@ func ExecuteIntegrationTool(ctx context.Context, name string, input map[string]a
 		return executePagerDutyAPICall(ctx, name, input, deps)
 	case "db.schema.describe", "db.query.read", "db.query.write", "db.query.transaction":
 		return executeDbTool(ctx, name, input, deps)
+	case "github.create_issue":
+		return executeGitHubCreateIssue(ctx, input, deps, latency, record)
 	case "webhook.send":
 		credential, _ := input["credential"].(string)
 		rawURL, _ := input["url"].(string)
@@ -211,6 +239,123 @@ func ExecuteIntegrationTool(ctx context.Context, name string, input map[string]a
 	default:
 		return envelopeError("Unknown integration tool: "+name, latency())
 	}
+}
+
+func githubAPIBase() string {
+	if os.Getenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR") == "true" {
+		if base := strings.TrimSpace(os.Getenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL")); base != "" {
+			return strings.TrimRight(base, "/") + "/github"
+		}
+	}
+	return "https://api.github.com"
+}
+
+func stringSliceInput(input map[string]any, key string, max int) ([]string, bool) {
+	raw, present := input[key]
+	if !present {
+		return nil, true
+	}
+	var values []any
+	switch typed := raw.(type) {
+	case []any:
+		values = typed
+	case []string:
+		values = make([]any, len(typed))
+		for i, value := range typed {
+			values[i] = value
+		}
+	default:
+		return nil, false
+	}
+	if len(values) > max {
+		return nil, false
+	}
+	result := make([]string, 0, len(values))
+	for _, rawValue := range values {
+		value, ok := rawValue.(string)
+		if !ok || strings.TrimSpace(value) == "" {
+			return nil, false
+		}
+		result = append(result, value)
+	}
+	return result, true
+}
+
+func executeGitHubCreateIssue(
+	ctx context.Context,
+	input map[string]any,
+	deps *IntegrationDeps,
+	latency func() int,
+	record func(string, bool, int, string),
+) map[string]any {
+	credential, _ := input["credential"].(string)
+	owner, _ := input["owner"].(string)
+	repo, _ := input["repo"].(string)
+	title, _ := input["title"].(string)
+	bodyRaw, bodyProvided := input["body"]
+	body, bodyValid := bodyRaw.(string)
+	labels, labelsValid := stringSliceInput(input, "labels", 50)
+	assignees, assigneesValid := stringSliceInput(input, "assignees", 10)
+	if strings.TrimSpace(credential) == "" || strings.TrimSpace(owner) == "" ||
+		strings.TrimSpace(repo) == "" || strings.TrimSpace(title) == "" ||
+		(bodyProvided && !bodyValid) || !labelsValid || !assigneesValid {
+		return envelopeError("github.create_issue requires valid credential, owner, repo, title, body, labels, and assignees", latency())
+	}
+	rateLimit := 60
+	if deps.RateLimitPerMin != nil {
+		rateLimit = deps.RateLimitPerMin("github", 60)
+	}
+	secret, gateError := deps.Gate(ctx, "github.create_issue", "github_token", credential, rateLimit)
+	if gateError != "" {
+		record(credential, false, 0, gateError)
+		return envelopeError(gateError, latency())
+	}
+	payload := map[string]any{"title": title}
+	if bodyProvided && body != "" {
+		payload["body"] = body
+	}
+	if _, present := input["labels"]; present {
+		payload["labels"] = labels
+	}
+	if _, present := input["assignees"]; present {
+		payload["assignees"] = assignees
+	}
+	serialized, err := json.Marshal(payload)
+	if err != nil {
+		record(credential, false, 0, "payload serialization failed")
+		return envelopeError("payload serialization failed", latency())
+	}
+	target := githubAPIBase() + "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/issues"
+	statusCode, responseBody, postError := deps.Post(ctx, target, map[string]string{
+		"content-type":         "application/json",
+		"accept":               "application/vnd.github+json",
+		"authorization":        "Bearer " + secret,
+		"user-agent":           "janusly-mcp-integration",
+		"x-github-api-version": "2022-11-28",
+	}, serialized)
+	if postError != "" {
+		record(credential, false, statusCode, postError)
+		return envelopeError(postError, latency())
+	}
+	var parsed map[string]any
+	_ = json.Unmarshal([]byte(responseBody), &parsed)
+	if statusCode == 201 {
+		result := map[string]any{"ok": true, "statusCode": statusCode, "latencyMs": latency()}
+		if issueNumber, ok := parsed["number"].(float64); ok {
+			result["issueNumber"] = issueNumber
+		}
+		if issueURL, ok := parsed["html_url"].(string); ok {
+			result["url"] = issueURL
+		}
+		record(credential, true, statusCode, "")
+		return result
+	}
+	message, _ := parsed["message"].(string)
+	if message == "" {
+		message = fmt.Sprintf("github responded %d", statusCode)
+	}
+	record(credential, false, statusCode, message)
+	return map[string]any{"ok": false, "statusCode": statusCode, "error": message, "latencyMs": latency()}
 }
 
 func truncateBody(body string) string {

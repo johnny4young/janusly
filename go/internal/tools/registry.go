@@ -17,7 +17,7 @@ import (
 // Field describes one input field for the catalog's bounded form projection.
 type Field struct {
 	Name     string `json:"name"`
-	Type     string `json:"type"`
+	Type     string `json:"kind"`
 	Required bool   `json:"required"`
 }
 

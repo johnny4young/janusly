@@ -140,7 +140,7 @@ func (e *Engine) buildIntegrationDeps(orgID, runID, nodeID string) *tools.Integr
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 			if configured := orgconfig.LoadNumber(ctx, e.pool, orgID,
-				fmt.Sprintf("integrations.%s.rateLimitPerMin", family)); configured > 0 {
+				fmt.Sprintf("%s.rateLimitPerMin", family)); configured > 0 {
 				return int(configured)
 			}
 			return integrationEnvBound(family, fallback)

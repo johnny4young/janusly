@@ -76,9 +76,21 @@ func TestIntegrationChokepoint(t *testing.T) {
 	// Receiver verifies the Stripe-style signature over the EXACT body.
 	var mu sync.Mutex
 	verified, received := false, 0
+	githubAuth, githubPath, githubTitle := "", "", ""
 	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := make([]byte, r.ContentLength)
 		_, _ = r.Body.Read(body)
+		if strings.HasPrefix(r.URL.Path, "/github/repos/") {
+			var payload map[string]any
+			_ = json.Unmarshal(body, &payload)
+			mu.Lock()
+			githubAuth, githubPath = r.Header.Get("authorization"), r.URL.Path
+			githubTitle, _ = payload["title"].(string)
+			mu.Unlock()
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"number":42,"html_url":"https://github.example/issues/42"}`))
+			return
+		}
 		signature := r.Header.Get("x-janusly-signature")
 		mu.Lock()
 		received++
@@ -108,6 +120,56 @@ func TestIntegrationChokepoint(t *testing.T) {
 	if !verified || received != 1 {
 		mu.Unlock()
 		t.Fatalf("receiver must verify the signature: verified=%v received=%d", verified, received)
+	}
+	mu.Unlock()
+
+	// GitHub rides the identical gate/egress/usage chokepoint, uses the
+	// reference catalog key for its tenant rate override, and rewrites only
+	// behind the explicit local simulator gate.
+	githubCredentialID := "cred-github-" + org
+	githubSecret := "github-super-secret-" + org
+	if err := q.InsertCredential(ctx, store.InsertCredentialParams{
+		ID: githubCredentialID, OrgID: org, Name: "bot-github", Kind: "github_token", SecretRef: "PLACEHOLDER",
+		CreatedBy: pgtype.Text{String: "test", Valid: true},
+	}); err != nil {
+		t.Fatalf("github credential: %v", err)
+	}
+	_, _, githubSecretRef, err := secretstore.CreateCredentialSecretVersion(ctx, q, struct {
+		ID           string
+		OrgID        string
+		CredentialID string
+		SecretValue  string
+		CreatedBy    string
+	}{OrgID: org, CredentialID: githubCredentialID, SecretValue: githubSecret})
+	if err != nil {
+		t.Fatalf("github secret: %v", err)
+	}
+	if err := q.UpdateCredentialSecretRef(ctx, store.UpdateCredentialSecretRefParams{
+		OrgID: org, ID: githubCredentialID, SecretRef: githubSecretRef,
+	}); err != nil {
+		t.Fatalf("github ref: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO org_configs
+		(id, org_id, key, value_json, category, description, value_type, updated_at)
+		VALUES ($1, $2, 'github.rateLimitPerMin', '17'::jsonb, 'integrations', 'test', 'number', now())`,
+		"cfg-github-"+org, org); err != nil {
+		t.Fatalf("github rate config: %v", err)
+	}
+	if got := deps.RateLimitPerMin("github", 60); got != 17 {
+		t.Fatalf("github tenant rate limit: %d", got)
+	}
+	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL", receiver.URL)
+	githubResult := tools.ExecuteIntegrationTool(ctx, "github.create_issue", map[string]any{
+		"credential": "bot-github", "owner": "acme", "repo": "incidents", "title": "Incident",
+	}, deps)
+	if githubResult["ok"] != true || githubResult["issueNumber"] != float64(42) {
+		t.Fatalf("github create issue: %+v", githubResult)
+	}
+	mu.Lock()
+	if githubAuth != "Bearer "+githubSecret || githubPath != "/github/repos/acme/incidents/issues" || githubTitle != "Incident" {
+		mu.Unlock()
+		t.Fatalf("github request: auth=%q path=%q title=%q", githubAuth, githubPath, githubTitle)
 	}
 	mu.Unlock()
 
@@ -147,5 +209,11 @@ func TestIntegrationChokepoint(t *testing.T) {
 		WHERE org_id = $1 AND metric = 'tool.webhook.send'`, org).Scan(&usageRows)
 	if usageRows < 3 {
 		t.Fatalf("usage rows: %d", usageRows)
+	}
+	var githubUsageRows int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM usage_events
+		WHERE org_id = $1 AND metric = 'tool.github.create_issue'`, org).Scan(&githubUsageRows)
+	if githubUsageRows != 1 {
+		t.Fatalf("github usage rows: %d", githubUsageRows)
 	}
 }

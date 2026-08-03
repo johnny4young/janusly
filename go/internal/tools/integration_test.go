@@ -2,10 +2,115 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestGitHubCreateIssueContract(t *testing.T) {
+	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "")
+	ctx := context.Background()
+	var gate struct {
+		tool, kind, credential string
+		rate                   int
+	}
+	var posted struct {
+		url     string
+		headers map[string]string
+		body    map[string]any
+	}
+	var records []map[string]any
+	deps := &IntegrationDeps{
+		Gate: func(_ context.Context, tool, kind, credential string, rate int) (string, string) {
+			gate.tool, gate.kind, gate.credential, gate.rate = tool, kind, credential, rate
+			return "ghp-never-echo", ""
+		},
+		RateLimitPerMin: func(family string, fallback int) int {
+			if family != "github" || fallback != 60 {
+				t.Fatalf("rate family: %s %d", family, fallback)
+			}
+			return 17
+		},
+		Post: func(_ context.Context, target string, headers map[string]string, body []byte) (int, string, string) {
+			posted.url, posted.headers = target, headers
+			if err := json.Unmarshal(body, &posted.body); err != nil {
+				t.Fatalf("request JSON: %v", err)
+			}
+			return 201, `{"number":42,"html_url":"https://github.com/janusly/demo/issues/42"}`, ""
+		},
+		Record: func(tool, credential string, ok bool, status int, message string, latency int) {
+			records = append(records, map[string]any{
+				"tool": tool, "credential": credential, "ok": ok,
+				"status": status, "message": message, "latency": latency,
+			})
+		},
+	}
+	result := ExecuteIntegrationTool(ctx, "github.create_issue", map[string]any{
+		"credential": "bot-github", "owner": "weird/owner", "repo": "weird repo",
+		"title": "Incident", "body": "Details", "labels": []any{"sev-1"},
+		"assignees": []string{"octocat"},
+	}, deps)
+	if result["ok"] != true || result["issueNumber"] != float64(42) ||
+		result["url"] != "https://github.com/janusly/demo/issues/42" || result["statusCode"] != 201 {
+		t.Fatalf("success envelope: %+v", result)
+	}
+	if gate.tool != "github.create_issue" || gate.kind != "github_token" ||
+		gate.credential != "bot-github" || gate.rate != 17 {
+		t.Fatalf("credential gate: %+v", gate)
+	}
+	if posted.url != "https://api.github.com/repos/weird%2Fowner/weird%20repo/issues" ||
+		posted.headers["authorization"] != "Bearer ghp-never-echo" ||
+		posted.headers["x-github-api-version"] != "2022-11-28" ||
+		posted.body["title"] != "Incident" {
+		t.Fatalf("request: %+v", posted)
+	}
+	if len(records) != 1 || records[0]["ok"] != true || records[0]["status"] != 201 {
+		t.Fatalf("usage record: %+v", records)
+	}
+
+	deps.Post = func(context.Context, string, map[string]string, []byte) (int, string, string) {
+		return 422, `{"message":"Validation Failed"}`, ""
+	}
+	failed := ExecuteIntegrationTool(ctx, "github.create_issue", map[string]any{
+		"credential": "bot-github", "owner": "janusly", "repo": "demo", "title": "Incident",
+	}, deps)
+	if failed["ok"] != false || failed["statusCode"] != 422 || failed["error"] != "Validation Failed" ||
+		strings.Contains(mustJSON(t, failed), "ghp-") {
+		t.Fatalf("failure envelope: %+v", failed)
+	}
+
+	invalid := ExecuteIntegrationTool(ctx, "github.create_issue", map[string]any{
+		"credential": "bot-github", "owner": "janusly", "repo": "demo", "title": "Incident",
+		"labels": []any{""},
+	}, deps)
+	if invalid["ok"] != false || !strings.Contains(invalid["error"].(string), "requires valid") {
+		t.Fatalf("invalid labels: %+v", invalid)
+	}
+
+	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL", "http://provider-simulator:4010/")
+	deps.Post = func(_ context.Context, target string, _ map[string]string, _ []byte) (int, string, string) {
+		if target != "http://provider-simulator:4010/github/repos/acme/incidents/issues" {
+			t.Fatalf("simulator URL: %s", target)
+		}
+		return 201, `{"number":1}`, ""
+	}
+	if simulated := ExecuteIntegrationTool(ctx, "github.create_issue", map[string]any{
+		"credential": "bot-github", "owner": "acme", "repo": "incidents", "title": "Local",
+	}, deps); simulated["ok"] != true {
+		t.Fatalf("simulator: %+v", simulated)
+	}
+}
+
+func mustJSON(t *testing.T, value any) string {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(encoded)
+}
 
 // The signature is Stripe-shaped and deterministic over (secret, body, t).
 func TestSignWebhookPayload(t *testing.T) {

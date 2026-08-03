@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -90,11 +91,12 @@ func TestRegistryValidationAndCatalog(t *testing.T) {
 		t.Fatalf("unknown tool: %v", err)
 	}
 	// 4 json tools + 3 buffered csv tools + vector pair + text.uppercase
-	// + webhook.send + email.send + pdf.generate (integration chokepoint)
+	// + webhook.send + github.create_issue + email.send + pdf.generate
+	// (integration chokepoint)
 	// + time.window + 4 pagerduty.* + 4 db.*; csv.fetch registers from the
 	// executors package on top of this base set.
 	catalog := NewRegistry().Catalog()
-	if len(catalog) != 22 {
+	if len(catalog) != 23 {
 		t.Fatalf("catalog size: %d", len(catalog))
 	}
 	first := catalog[0]
@@ -105,5 +107,19 @@ func TestRegistryValidationAndCatalog(t *testing.T) {
 	}
 	if first["writeSide"] != false {
 		t.Fatal("json tools are read-side")
+	}
+	var github map[string]any
+	for _, entry := range catalog {
+		if entry["name"] == "github.create_issue" {
+			github = entry
+			break
+		}
+	}
+	if github == nil || github["writeSide"] != true {
+		t.Fatalf("github.create_issue catalog entry: %+v", github)
+	}
+	encoded, _ := json.Marshal(github["inputFields"])
+	if !strings.Contains(string(encoded), `"kind":"string"`) || strings.Contains(string(encoded), `"type":`) {
+		t.Fatalf("inputFields must use the reference kind wire: %s", encoded)
 	}
 }
