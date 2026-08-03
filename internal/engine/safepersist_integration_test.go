@@ -23,9 +23,9 @@ import (
 // column (run_nodes.state_json / error_json, run_events.payload,
 // dead_letters.workflow_json / node_json / error_json).
 func TestSafePersistPropertyNoSecretSurvivesJsonb(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()

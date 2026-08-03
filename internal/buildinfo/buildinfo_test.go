@@ -20,7 +20,7 @@ func TestFromExecutableHashesTheFinishedArtifact(t *testing.T) {
 	commit, tree := strings.Repeat("a", 40), strings.Repeat("b", 40)
 	withBuildIdentity(t, commit, tree)
 	body := []byte("finished release artifact\n")
-	path := filepath.Join(t.TempDir(), "janusly-go")
+	path := filepath.Join(t.TempDir(), "janusly")
 	if err := os.WriteFile(path, body, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestFromExecutableHashesTheFinishedArtifact(t *testing.T) {
 
 func TestDevelopmentIdentityFailsClosed(t *testing.T) {
 	withBuildIdentity(t, "development", "")
-	path := filepath.Join(t.TempDir(), "janusly-go")
+	path := filepath.Join(t.TempDir(), "janusly")
 	if err := os.WriteFile(path, []byte("binary"), 0o700); err != nil {
 		t.Fatal(err)
 	}

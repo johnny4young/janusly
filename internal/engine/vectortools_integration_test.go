@@ -23,9 +23,9 @@ import (
 // closed envelopes without ever throwing, consent on round-trips an
 // upsert into a later search, and a validation replay SKIPS the write.
 func TestVectorToolsThroughRuns(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)

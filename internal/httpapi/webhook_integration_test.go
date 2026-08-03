@@ -32,7 +32,7 @@ func webhookWorkflow(id, endpointKey string) map[string]any {
 
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	pool, err := pgxpool.New(context.Background(), os.Getenv("JANUSLY_GO_DATABASE_URL"))
+	pool, err := pgxpool.New(context.Background(), os.Getenv("JANUSLY_DATABASE_URL"))
 	if err != nil {
 		t.Fatalf("pool: %v", err)
 	}

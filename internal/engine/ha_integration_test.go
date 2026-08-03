@@ -24,9 +24,9 @@ import (
 // + fresh-snapshot re-check + CAS) is the guarantee under test.
 func newHAEngines(t *testing.T) (*Engine, *Engine, *pgxpool.Pool) {
 	t.Helper()
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set; run through `make test-ha`")
+		t.Skip("JANUSLY_DATABASE_URL not set; run through `make test-ha`")
 	}
 	poolA, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {
@@ -231,7 +231,7 @@ func TestHAMassTimersAcrossTwoInstances(t *testing.T) {
 		t.Fatalf("40 nodes x 2 retries = 80 retry events, got %d", retryEvents)
 	}
 	var leakedWakeups int
-	_ = pool.QueryRow(ctx, `SELECT count(*) FROM go_pilot_wakeups w
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM run_wakeups w
 		JOIN run_nodes rn ON rn.id = w.run_node_id
 		JOIN runs r ON r.id = rn.run_id WHERE r.org_id = $1`, org).Scan(&leakedWakeups)
 	if leakedWakeups != 0 {

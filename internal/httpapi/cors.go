@@ -41,7 +41,7 @@ func isAllowedRequestOrigin(origin string) bool {
 	if origin == "" {
 		return false
 	}
-	production := os.Getenv("JANUSLY_GO_ENV") == "production"
+	production := os.Getenv("JANUSLY_ENV") == "production"
 	for _, candidate := range allowedOrigins() {
 		if candidate == origin || (candidate == "*" && !production) {
 			return true

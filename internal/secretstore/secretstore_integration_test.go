@@ -23,9 +23,9 @@ func testKey() string {
 
 func poolAndQueries(t *testing.T) (*pgxpool.Pool, *store.Queries) {
 	t.Helper()
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	pool, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {

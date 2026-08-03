@@ -22,9 +22,9 @@ import (
 
 func newHarness(t *testing.T) (context.Context, *pgxpool.Pool, *Engine, string) {
 	t.Helper()
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set; run through `make test`")
+		t.Skip("JANUSLY_DATABASE_URL not set; run through `make test`")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
@@ -62,7 +62,7 @@ func TestStartRunCommitsSkeletonAtomically(t *testing.T) {
 		t.Fatalf("acquire listener: %v", err)
 	}
 	defer listener.Release()
-	if _, err := listener.Exec(ctx, "listen janusly_go_wake"); err != nil {
+	if _, err := listener.Exec(ctx, "listen janusly_wake"); err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 

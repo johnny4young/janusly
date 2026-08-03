@@ -203,7 +203,7 @@ func TestWaitUntilAutoCompletesThroughTheClock(t *testing.T) {
 		t.Fatalf("timer metadata parity broken: %s", state)
 	}
 	var leftover int
-	_ = pool.QueryRow(ctx, `select count(*) from go_pilot_wakeups w
+	_ = pool.QueryRow(ctx, `select count(*) from run_wakeups w
 		join run_nodes rn on rn.id = w.run_node_id where rn.run_id=$1`, runID).Scan(&leftover)
 	if leftover != 0 {
 		t.Fatalf("consumed timer wakeups must be gone, %d remain", leftover)

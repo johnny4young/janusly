@@ -279,7 +279,7 @@ func (e *Engine) RunRuntimeFailureDrill(ctx context.Context, input RecoveryDrill
 
 func configuredStallThreshold() time.Duration {
 	threshold := defaultStallThreshold
-	if raw := os.Getenv("JANUSLY_GO_REAPER_THRESHOLD_MS"); raw != "" {
+	if raw := os.Getenv("JANUSLY_REAPER_THRESHOLD_MS"); raw != "" {
 		if milliseconds, err := strconv.ParseInt(raw, 10, 64); err == nil && milliseconds > 0 {
 			threshold = time.Duration(milliseconds) * time.Millisecond
 		}
@@ -289,7 +289,7 @@ func configuredStallThreshold() time.Duration {
 		}
 	}
 	floor := minStallThreshold
-	if raw := os.Getenv("JANUSLY_GO_REAPER_THRESHOLD_FLOOR_MS"); raw != "" {
+	if raw := os.Getenv("JANUSLY_REAPER_THRESHOLD_FLOOR_MS"); raw != "" {
 		if milliseconds, err := strconv.ParseInt(raw, 10, 64); err == nil && milliseconds > 0 {
 			floor = time.Duration(milliseconds) * time.Millisecond
 		}

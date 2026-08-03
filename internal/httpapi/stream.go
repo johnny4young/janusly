@@ -82,7 +82,7 @@ func (h *streamHub) listen(ctx context.Context, pool *pgxpool.Pool) {
 		pooled, err := pool.Acquire(ctx)
 		if err == nil {
 			conn := pooled.Hijack()
-			if _, listenErr := conn.Exec(ctx, "listen janusly_go_run_events"); listenErr == nil {
+			if _, listenErr := conn.Exec(ctx, "listen janusly_run_events"); listenErr == nil {
 				for {
 					notification, waitErr := conn.WaitForNotification(ctx)
 					if waitErr != nil {

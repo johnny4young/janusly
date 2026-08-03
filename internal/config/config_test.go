@@ -15,7 +15,7 @@ func TestLoadDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Port != 4600 || cfg.InternalPort != 4601 {
+	if cfg.Port != 3001 || cfg.InternalPort != 9464 {
 		t.Fatalf("unexpected ports: %+v", cfg)
 	}
 	if cfg.InternalHost != "127.0.0.1" {
@@ -24,23 +24,20 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.WorkerConcurrency != 8 || cfg.PollInterval != 250*time.Millisecond {
 		t.Fatalf("unexpected worker defaults: %+v", cfg)
 	}
-	if !cfg.WorkPlaneEnabled {
-		t.Fatal("development must keep the work plane enabled by default")
-	}
 	if cfg.Production {
 		t.Fatal("development defaults must not enable the production boot posture")
 	}
-	if !strings.Contains(cfg.DatabaseURL, "4632/janusly_go") {
+	if !strings.Contains(cfg.DatabaseURL, "5432/janusly") {
 		t.Fatalf("unexpected database default: %s", cfg.DatabaseURL)
 	}
 }
 
 func TestLoadOverrides(t *testing.T) {
 	cfg, err := Load(env(map[string]string{
-		"JANUSLY_GO_PORT":               "4700",
-		"JANUSLY_GO_INTERNAL_HOST":      "0.0.0.0",
-		"JANUSLY_GO_WORKER_CONCURRENCY": "2",
-		"JANUSLY_GO_POLL_MS":            "500",
+		"JANUSLY_PORT":               "4700",
+		"JANUSLY_INTERNAL_HOST":      "0.0.0.0",
+		"JANUSLY_WORKER_CONCURRENCY": "2",
+		"JANUSLY_POLL_MS":            "500",
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -57,12 +54,11 @@ func TestLoadRejectsOutOfRangeWithRangeInMessage(t *testing.T) {
 		value string
 		want  string
 	}{
-		{"port too high", "JANUSLY_GO_PORT", "70000", "[1, 65535]"},
-		{"concurrency zero", "JANUSLY_GO_WORKER_CONCURRENCY", "0", "[1, 64]"},
-		{"poll below floor", "JANUSLY_GO_POLL_MS", "10", "[50, 5000]"},
-		{"not a number", "JANUSLY_GO_HTTP_TIMEOUT_MS", "soon", "[1000, 600000]"},
-		{"invalid work plane", "JANUSLY_GO_WORK_PLANE_ENABLED", "yes", "true or false"},
-		{"invalid internal host", "JANUSLY_GO_INTERNAL_HOST", "metrics.example.com", "127.0.0.1 or 0.0.0.0"},
+		{"port too high", "JANUSLY_PORT", "70000", "[1, 65535]"},
+		{"concurrency zero", "JANUSLY_WORKER_CONCURRENCY", "0", "[1, 64]"},
+		{"poll below floor", "JANUSLY_POLL_MS", "10", "[50, 5000]"},
+		{"not a number", "JANUSLY_HTTP_TIMEOUT_MS", "soon", "[1000, 600000]"},
+		{"invalid internal host", "JANUSLY_INTERNAL_HOST", "metrics.example.com", "127.0.0.1 or 0.0.0.0"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -77,55 +73,33 @@ func TestLoadRejectsOutOfRangeWithRangeInMessage(t *testing.T) {
 	}
 }
 
-func TestWorkPlaneDefaultsPassiveInProductionAndRequiresExplicitActivation(t *testing.T) {
-	passive, err := Load(env(map[string]string{"JANUSLY_GO_ENV": "production"}))
+func TestProductionEnvironmentIsExplicit(t *testing.T) {
+	cfg, err := Load(env(map[string]string{"JANUSLY_ENV": "production"}))
 	if err != nil {
-		t.Fatalf("load passive: %v", err)
+		t.Fatalf("load production: %v", err)
 	}
-	if passive.WorkPlaneEnabled {
-		t.Fatal("production shadow must default to a passive work plane")
-	}
-	if !passive.Production {
-		t.Fatal("production environment must be explicit in the loaded config")
-	}
-
-	active, err := Load(env(map[string]string{
-		"JANUSLY_GO_ENV":                "production",
-		"JANUSLY_GO_WORK_PLANE_ENABLED": "true",
-	}))
-	if err != nil {
-		t.Fatalf("load active: %v", err)
-	}
-	if !active.WorkPlaneEnabled {
-		t.Fatal("explicit production activation must enable the work plane")
-	}
-
-	developmentPassive, err := Load(env(map[string]string{"JANUSLY_GO_WORK_PLANE_ENABLED": "false"}))
-	if err != nil {
-		t.Fatalf("load development passive: %v", err)
-	}
-	if developmentPassive.WorkPlaneEnabled {
-		t.Fatal("explicit passive mode must win outside production too")
+	if !cfg.Production {
+		t.Fatal("production environment must enable the production boot posture")
 	}
 }
 
 func TestLoadAggregatesEveryProblem(t *testing.T) {
 	_, err := Load(env(map[string]string{
-		"JANUSLY_GO_PORT":    "0",
-		"JANUSLY_GO_POLL_MS": "1",
+		"JANUSLY_PORT":    "0",
+		"JANUSLY_POLL_MS": "1",
 	}))
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	if !strings.Contains(err.Error(), "JANUSLY_GO_PORT") || !strings.Contains(err.Error(), "JANUSLY_GO_POLL_MS") {
+	if !strings.Contains(err.Error(), "JANUSLY_PORT") || !strings.Contains(err.Error(), "JANUSLY_POLL_MS") {
 		t.Fatalf("expected both violations reported, got: %v", err)
 	}
 }
 
 func TestLoadRejectsEqualPorts(t *testing.T) {
 	_, err := Load(env(map[string]string{
-		"JANUSLY_GO_PORT":          "4600",
-		"JANUSLY_GO_INTERNAL_PORT": "4600",
+		"JANUSLY_PORT":          "3001",
+		"JANUSLY_INTERNAL_PORT": "3001",
 	}))
 	if err == nil || !strings.Contains(err.Error(), "must differ") {
 		t.Fatalf("expected the equal-port violation, got: %v", err)
@@ -143,9 +117,9 @@ func TestPoolSizesDefaultAndDerive(t *testing.T) {
 		t.Fatalf("pool defaults wrong: api=%d worker=%d", cfg.APIPoolSize, cfg.WorkerPoolSize)
 	}
 	explicit, err := Load(env(map[string]string{
-		"JANUSLY_GO_WORKER_CONCURRENCY": "32",
-		"JANUSLY_GO_API_POOL_SIZE":      "20",
-		"JANUSLY_GO_WORKER_POOL_SIZE":   "40",
+		"JANUSLY_WORKER_CONCURRENCY": "32",
+		"JANUSLY_API_POOL_SIZE":      "20",
+		"JANUSLY_WORKER_POOL_SIZE":   "40",
 	}))
 	if err != nil {
 		t.Fatalf("load explicit: %v", err)
@@ -153,7 +127,7 @@ func TestPoolSizesDefaultAndDerive(t *testing.T) {
 	if explicit.APIPoolSize != 20 || explicit.WorkerPoolSize != 40 {
 		t.Fatalf("explicit pool sizes wrong: %+v", explicit)
 	}
-	derived, err := Load(env(map[string]string{"JANUSLY_GO_WORKER_CONCURRENCY": "32"}))
+	derived, err := Load(env(map[string]string{"JANUSLY_WORKER_CONCURRENCY": "32"}))
 	if err != nil {
 		t.Fatalf("load derived: %v", err)
 	}

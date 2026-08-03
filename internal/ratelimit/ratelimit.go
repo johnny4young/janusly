@@ -46,7 +46,7 @@ func (e *LimitError) Error() string {
 	return fmt.Sprintf("Rate limit exceeded for %s. Retry in %ds.", e.Bucket, e.RetryAfterSec)
 }
 
-// Limiter enforces fixed windows over go_pilot_rate_windows.
+// Limiter enforces fixed windows over rate_limit_windows.
 type Limiter struct {
 	pool  *pgxpool.Pool
 	hooks Hooks

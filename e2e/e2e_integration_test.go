@@ -42,12 +42,12 @@ func buildBinary(t *testing.T) string {
 	buildOnce.Do(func() {
 		// A stable temp dir: t.TempDir() would vanish with the first test
 		// while later tests still exec the binary.
-		dir, err := os.MkdirTemp("", "janusly-go-e2e-")
+		dir, err := os.MkdirTemp("", "janusly-e2e-")
 		if err != nil {
 			buildErr = err
 			return
 		}
-		binPath = filepath.Join(dir, "janusly-go-api")
+		binPath = filepath.Join(dir, "janusly-api")
 		ldflags := "-X github.com/johnny4young/janusly/internal/buildinfo.buildCommit=" + e2eBuildCommit +
 			" -X github.com/johnny4young/janusly/internal/buildinfo.buildTree=" + e2eBuildTree
 		cmd := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-ldflags", ldflags,
@@ -83,17 +83,17 @@ type binaryAPI struct {
 
 func bootBinary(t *testing.T) *binaryAPI {
 	t.Helper()
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set; run through `make test`")
+		t.Skip("JANUSLY_DATABASE_URL not set; run through `make test`")
 	}
 	bin := buildBinary(t)
 	port, internal := freePort(t), freePort(t)
 	cmd := exec.Command(bin)
 	cmd.Env = append(os.Environ(),
-		fmt.Sprintf("JANUSLY_GO_PORT=%d", port),
-		fmt.Sprintf("JANUSLY_GO_INTERNAL_PORT=%d", internal),
-		"JANUSLY_GO_POLL_MS=50",
+		fmt.Sprintf("JANUSLY_PORT=%d", port),
+		fmt.Sprintf("JANUSLY_INTERNAL_PORT=%d", internal),
+		"JANUSLY_POLL_MS=50",
 		"ALLOW_PRIVATE_HTTP_TARGETS=true",
 	)
 	logs := &bytes.Buffer{}
@@ -338,11 +338,11 @@ func TestEngineMetricsExposeOnTheInternalPort(t *testing.T) {
 	raw, _ := io.ReadAll(res.Body)
 	body := string(raw)
 	for _, series := range []string{
-		"janusly_go_claims_total",
-		`janusly_go_node_completions_total{outcome="succeeded"}`,
-		"janusly_go_node_execution_seconds_bucket",
-		`janusly_go_runs_terminal_total{status="succeeded"}`,
-		`janusly_go_queue_depth{state="queued"}`,
+		"janusly_claims_total",
+		`janusly_node_completions_total{outcome="succeeded"}`,
+		"janusly_node_execution_seconds_bucket",
+		`janusly_runs_terminal_total{status="succeeded"}`,
+		`janusly_queue_depth{state="queued"}`,
 	} {
 		if !strings.Contains(body, series) {
 			t.Fatalf("metric series %s missing from scrape", series)
@@ -416,8 +416,8 @@ func TestMetricsParityNamesAndBindConflict(t *testing.T) {
 	taken := holder.Addr().(*net.TCPAddr).Port
 	conflict := exec.Command(buildBinary(t))
 	conflict.Env = append(os.Environ(),
-		fmt.Sprintf("JANUSLY_GO_PORT=%d", freePort(t)),
-		fmt.Sprintf("JANUSLY_GO_INTERNAL_PORT=%d", taken),
+		fmt.Sprintf("JANUSLY_PORT=%d", freePort(t)),
+		fmt.Sprintf("JANUSLY_INTERNAL_PORT=%d", taken),
 	)
 	out := &bytes.Buffer{}
 	conflict.Stdout, conflict.Stderr = out, out

@@ -126,7 +126,7 @@ func devSSOBypassEnabled() bool {
 	if os.Getenv("ALLOW_DEV_SSO_BYPASS") != "true" {
 		return false
 	}
-	if strings.TrimSpace(os.Getenv("JANUSLY_GO_ENV")) == "production" ||
+	if strings.TrimSpace(os.Getenv("JANUSLY_ENV")) == "production" ||
 		os.Getenv("JANUSLY_PRODUCTION_MODE") == "true" {
 		slog.Error("[auth-policy] ALLOW_DEV_SSO_BYPASS is set in production and is being IGNORED")
 		return false

@@ -280,7 +280,7 @@ func (q *Queries) ClaimNextReplayCampaignItem(ctx context.Context, arg ClaimNext
 }
 
 const claimStartIdempotencyKey = `-- name: ClaimStartIdempotencyKey :execrows
-INSERT INTO go_pilot_start_idempotency (org_id, idempotency_key, run_id)
+INSERT INTO run_start_idempotency (org_id, idempotency_key, run_id)
 VALUES ($1, $2, $3)
 ON CONFLICT (org_id, idempotency_key) DO NOTHING
 `
@@ -324,7 +324,7 @@ func (q *Queries) ClaimTriggerEventStart(ctx context.Context, arg ClaimTriggerEv
 }
 
 const deleteWakeup = `-- name: DeleteWakeup :exec
-DELETE FROM go_pilot_wakeups WHERE run_node_id = $1
+DELETE FROM run_wakeups WHERE run_node_id = $1
 `
 
 func (q *Queries) DeleteWakeup(ctx context.Context, runNodeID string) error {
@@ -483,7 +483,7 @@ SELECT run_node_id, run_id, node_id, wake_at, reason
 FROM (
   SELECT w.run_node_id, rn.run_id, rn.node_id, w.wake_at, w.reason,
          ROW_NUMBER() OVER (PARTITION BY rn.run_id ORDER BY w.wake_at, w.run_node_id) AS run_rank
-  FROM go_pilot_wakeups w
+  FROM run_wakeups w
   JOIN run_nodes rn ON rn.id = w.run_node_id
   JOIN runs r ON r.id = rn.run_id
   WHERE w.wake_at <= now() AND rn.status = 'waiting'
@@ -530,21 +530,21 @@ func (q *Queries) ListDueWaitingWakeups(ctx context.Context, batchSize int32) ([
 
 const listDueWakeups = `-- name: ListDueWakeups :many
 SELECT run_node_id, wake_at, reason
-FROM go_pilot_wakeups
+FROM run_wakeups
 WHERE wake_at <= now()
 ORDER BY wake_at
 LIMIT $1
 `
 
-func (q *Queries) ListDueWakeups(ctx context.Context, limit int32) ([]GoPilotWakeup, error) {
+func (q *Queries) ListDueWakeups(ctx context.Context, limit int32) ([]RunWakeup, error) {
 	rows, err := q.db.Query(ctx, listDueWakeups, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []GoPilotWakeup
+	var items []RunWakeup
 	for rows.Next() {
-		var i GoPilotWakeup
+		var i RunWakeup
 		if err := rows.Scan(&i.RunNodeID, &i.WakeAt, &i.Reason); err != nil {
 			return nil, err
 		}
@@ -562,7 +562,7 @@ FROM run_nodes rn
 JOIN runs r ON r.id = rn.run_id
 WHERE rn.status = 'queued' AND r.status = 'running'
   AND NOT EXISTS (
-    SELECT 1 FROM go_pilot_wakeups w
+    SELECT 1 FROM run_wakeups w
     WHERE w.run_node_id = rn.id AND w.wake_at > now()
   )
 ORDER BY rn.id
@@ -597,7 +597,7 @@ SET status = 'running', started_at = now(),
 WHERE id = ANY($1::text[])
   AND status = 'queued'
   AND NOT EXISTS (
-    SELECT 1 FROM go_pilot_wakeups w
+    SELECT 1 FROM run_wakeups w
     WHERE w.run_node_id = run_nodes.id AND w.wake_at > now()
   )
 RETURNING id, run_id, node_id, COALESCE(attempts, 1)::int AS attempt
@@ -637,7 +637,7 @@ func (q *Queries) MarkLockedNodesRunning(ctx context.Context, ids []string) ([]M
 }
 
 const notifyRunEvents = `-- name: NotifyRunEvents :exec
-SELECT pg_notify('janusly_go_run_events', $1::text)
+SELECT pg_notify('janusly_run_events', $1::text)
 `
 
 func (q *Queries) NotifyRunEvents(ctx context.Context, runID string) error {
@@ -652,7 +652,7 @@ WITH eligible AS (
   JOIN runs r ON r.id = rn.run_id
   WHERE rn.status = 'queued' AND r.status = 'running'
     AND NOT EXISTS (
-      SELECT 1 FROM go_pilot_wakeups w
+      SELECT 1 FROM run_wakeups w
       WHERE w.run_node_id = rn.id AND w.wake_at > now())
 )
 SELECT
@@ -663,7 +663,7 @@ SELECT
        COALESCE((SELECT max(ev.created_at) FROM run_events ev
          WHERE ev.run_id = e.run_id AND ev.node_id = e.node_id
            AND ev.type = 'node.queued'), '-infinity'::timestamptz),
-       COALESCE((SELECT w.wake_at FROM go_pilot_wakeups w
+       COALESCE((SELECT w.wake_at FROM run_wakeups w
          WHERE w.run_node_id = e.id), '-infinity'::timestamptz)
      ) AS candidate FROM eligible e
    ) instants
@@ -740,7 +740,7 @@ func (q *Queries) StampRedriveRecoveryClaim(ctx context.Context, arg StampRedriv
 }
 
 const sweepDueWakeups = `-- name: SweepDueWakeups :execrows
-DELETE FROM go_pilot_wakeups w
+DELETE FROM run_wakeups w
 WHERE w.wake_at <= now()
   AND NOT EXISTS (
     SELECT 1 FROM run_nodes rn
@@ -757,7 +757,7 @@ func (q *Queries) SweepDueWakeups(ctx context.Context) (int64, error) {
 }
 
 const upsertWakeup = `-- name: UpsertWakeup :exec
-INSERT INTO go_pilot_wakeups (run_node_id, wake_at, reason)
+INSERT INTO run_wakeups (run_node_id, wake_at, reason)
 VALUES ($1, $2, $3)
 ON CONFLICT (run_node_id) DO UPDATE SET wake_at = EXCLUDED.wake_at, reason = EXCLUDED.reason
 `

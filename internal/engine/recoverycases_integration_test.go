@@ -21,9 +21,9 @@ import (
 // receipt, an illegal jump writes nothing), single-visit re-entry, and a
 // concurrent operator race with exactly one winner.
 func TestRecoveryCaseTransitions(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)

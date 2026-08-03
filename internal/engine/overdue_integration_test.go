@@ -51,7 +51,7 @@ func TestOverdueTimerFiresAfterPollingGap(t *testing.T) {
 	time.Sleep(1200 * time.Millisecond)
 	var overdue int
 	_ = pool.QueryRow(ctx,
-		`SELECT count(*) FROM go_pilot_wakeups w JOIN run_nodes n ON n.id = w.run_node_id
+		`SELECT count(*) FROM run_wakeups w JOIN run_nodes n ON n.id = w.run_node_id
 		 WHERE n.run_id = $1 AND w.wake_at <= now()`, runID).Scan(&overdue)
 	if overdue != 1 {
 		t.Fatalf("the due wakeup must survive the gap in Postgres: %d", overdue)

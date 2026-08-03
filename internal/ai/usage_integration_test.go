@@ -21,9 +21,9 @@ import (
 // an unknown model never invents a cost, a simulated provider always
 // records zero.
 func TestChokepointRecordsUsagePerAttempt(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	pool, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {

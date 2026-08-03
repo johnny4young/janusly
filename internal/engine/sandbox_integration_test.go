@@ -25,9 +25,9 @@ import (
 // level from birth. The same workflow in production mode fires the
 // effect — proving the gate is the replay mode, not the workflow.
 func TestSandboxReplayGate(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)

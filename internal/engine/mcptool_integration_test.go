@@ -25,9 +25,9 @@ import (
 // answers, the node persists {status, output}, the event family lands,
 // and a failing envelope drives the node into the ordinary failure path.
 func TestMcpToolNodeThroughRun(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)

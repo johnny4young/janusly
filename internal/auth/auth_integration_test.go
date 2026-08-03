@@ -53,9 +53,9 @@ func seedMember(t *testing.T, pool *pgxpool.Pool, org, userID, email, role strin
 }
 
 func TestResolverRunsInjectedPolicyAfterTenantResolution(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	pool, err := pgxpool.New(t.Context(), dsn)
 	if err != nil {
@@ -82,9 +82,9 @@ func TestResolverRunsInjectedPolicyAfterTenantResolution(t *testing.T) {
 }
 
 func TestSupabaseMembershipResolution(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	pool, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {
@@ -157,9 +157,9 @@ func TestSupabaseMembershipResolution(t *testing.T) {
 
 // Single-membership convenience: no hint needed when unambiguous.
 func TestSupabaseSingleMembershipDefaults(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	pool, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {
@@ -197,9 +197,9 @@ func TestSupabaseSingleMembershipDefaults(t *testing.T) {
 // for dev-headers and ONLY when no row exists; custom literals without a
 // defining row fail closed.
 func TestResolveMemberRoleLadder(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	pool, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {
@@ -241,9 +241,9 @@ func TestResolveMemberRoleLadder(t *testing.T) {
 // Custom roles: rank from inheritsFrom; a non-null grant list REPLACES the
 // defaults; a null-permissions custom row fails closed.
 func TestCustomRolesAndOverrides(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	pool, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {

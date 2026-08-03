@@ -3,7 +3,7 @@
 // observability/{otel,tracer,resource,trace-exporter}.ts).
 //
 // Invariants ported:
-//   - Resource carries service.name="janusly-go" (the pilot's own service
+//   - Resource carries service.name="janusly" (the pilot's own service
 //     identity — dashboards distinguish it from the reference's
 //     "janusly"), service.namespace="janusly", service.instance.id
 //     (OTEL_SERVICE_INSTANCE_ID → HOSTNAME → os.Hostname()).
@@ -32,7 +32,7 @@ import (
 )
 
 // TracerName is the instrumentation-scope name every pilot span uses.
-const TracerName = "janusly-go"
+const TracerName = "janusly"
 
 // serviceResource mirrors the reference's resource.ts attribute set.
 func serviceResource() *resource.Resource {

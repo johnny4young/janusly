@@ -18,11 +18,11 @@ import (
 // tracks the live total.
 
 func TestGlobalDbPoolCap(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set; run through `make test`")
+		t.Skip("JANUSLY_DATABASE_URL not set; run through `make test`")
 	}
-	t.Setenv("JANUSLY_GO_DB_TOOL_MAX_PROCESS_POOLS", "10")
+	t.Setenv("JANUSLY_DB_TOOL_MAX_PROCESS_POOLS", "10")
 	ResetDbPoolsForTests()
 	t.Cleanup(ResetDbPoolsForTests)
 	ctx := context.Background()

@@ -217,7 +217,7 @@ func TestDelayedRetryIsNotClaimableUntilDue(t *testing.T) {
 			// executions the stub saw, wake-up rows, and the claimable queue
 			// ahead of this node.
 			var wakeups int
-			_ = pool.QueryRow(ctx, `select count(*) from go_pilot_wakeups w
+			_ = pool.QueryRow(ctx, `select count(*) from run_wakeups w
 				join run_nodes rn on rn.id = w.run_node_id where rn.run_id=$1`, runID).Scan(&wakeups)
 			var queuedAhead int
 			_ = pool.QueryRow(ctx, `select count(*) from run_nodes rn join runs r on r.id=rn.run_id
@@ -234,7 +234,7 @@ func TestDelayedRetryIsNotClaimableUntilDue(t *testing.T) {
 
 	// Move the backoff clock: the wake-up becomes due and the poll cadence
 	// claims it — no NOTIFY involved, no real 60s wait.
-	if _, err := pool.Exec(ctx, `update go_pilot_wakeups set wake_at = now() - interval '1 second'
+	if _, err := pool.Exec(ctx, `update run_wakeups set wake_at = now() - interval '1 second'
 		where run_node_id = (select id from run_nodes where run_id=$1)`, runID); err != nil {
 		t.Fatalf("advance clock: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestDelayedRetryIsNotClaimableUntilDue(t *testing.T) {
 		t.Fatalf("expected exactly two executions across the retry, got %d", n)
 	}
 	var leftoverWakeups int
-	_ = pool.QueryRow(ctx, `select count(*) from go_pilot_wakeups
+	_ = pool.QueryRow(ctx, `select count(*) from run_wakeups
 		where run_node_id = (select id from run_nodes where run_id=$1)`, runID).Scan(&leftoverWakeups)
 	if leftoverWakeups != 0 {
 		t.Fatalf("consumed wake-ups must be swept, %d remain", leftoverWakeups)

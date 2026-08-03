@@ -810,7 +810,7 @@ const getStartIdempotencyRun = `-- name: GetStartIdempotencyRun :one
 
 
 
-SELECT run_id FROM go_pilot_start_idempotency
+SELECT run_id FROM run_start_idempotency
 WHERE org_id = $1 AND idempotency_key = $2
 `
 

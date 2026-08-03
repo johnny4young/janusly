@@ -1,7 +1,7 @@
 -- Org config, audit, snippets, onboarding, alerts, reports, misc.
 
 -- name: NotifyWake :exec
-SELECT pg_notify('janusly_go_wake', sqlc.arg(run_id)::text);
+SELECT pg_notify('janusly_wake', sqlc.arg(run_id)::text);
 
 -- name: ListOrgHTTPConfig :many
 SELECT key, value_json FROM org_configs
@@ -51,14 +51,14 @@ LIMIT @page_limit;
 -- Rate limiter: one O(1) UPSERT per request — the fixed window lives in
 -- the PK, so a fresh window is an insert and a repeat hit an increment.
 -- name: BumpRateWindow :one
-INSERT INTO go_pilot_rate_windows (name, key, window_start, count, expires_at)
+INSERT INTO rate_limit_windows (name, key, window_start, count, expires_at)
 VALUES ($1, $2, $3, 1, $4)
 ON CONFLICT (name, key, window_start)
-DO UPDATE SET count = go_pilot_rate_windows.count + 1
+DO UPDATE SET count = rate_limit_windows.count + 1
 RETURNING count;
 
 -- name: CleanupExpiredRateWindows :execrows
-DELETE FROM go_pilot_rate_windows WHERE expires_at < now();
+DELETE FROM rate_limit_windows WHERE expires_at < now();
 
 -- Org-config rows for the layered catalog read. The closed catalog is
 -- ~69 keys; the 200 cap guards a pathological row count, like the

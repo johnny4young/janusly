@@ -15,9 +15,9 @@ import (
 // Config is the validated process configuration.
 type Config struct {
 	// Production enables the fail-closed boot posture for authentication,
-	// work-plane ownership, and immutable build provenance.
+	// external integrations, and immutable build provenance.
 	Production bool
-	// DatabaseURL points at the pilot PostgreSQL (shared-schema database).
+	// DatabaseURL points at the PostgreSQL database owned by Janusly.
 	DatabaseURL string
 	// Port serves the public API.
 	Port int
@@ -39,14 +39,10 @@ type Config struct {
 	PollInterval time.Duration
 	// HTTPTimeout bounds outbound http executor calls.
 	HTTPTimeout time.Duration
-	// WorkPlaneEnabled controls every queue consumer and background mutation
-	// loop. Production defaults passive so a shadow candidate cannot claim
-	// shared work before the operator explicitly transfers ownership.
-	WorkPlaneEnabled bool
 }
 
 // defaultDatabaseURL matches the compose project in this directory.
-const defaultDatabaseURL = "postgres://janusly:janusly-go-local@127.0.0.1:4632/janusly_go"
+const defaultDatabaseURL = "postgres://janusly:janusly-local@127.0.0.1:5432/janusly"
 
 // Load reads configuration through getenv (nil means os.Getenv, injectable
 // for tests) and aggregates every violation into one error so a broken
@@ -75,45 +71,29 @@ func Load(getenv func(string) string) (Config, error) {
 		}
 		return v
 	}
-	boolean := func(name string, def bool) bool {
-		raw := strings.TrimSpace(getenv(name))
-		if raw == "" {
-			return def
-		}
-		switch raw {
-		case "true":
-			return true
-		case "false":
-			return false
-		default:
-			problems = append(problems, fmt.Sprintf("%s must be true or false, got %q", name, raw))
-			return def
-		}
-	}
-	production := strings.TrimSpace(getenv("JANUSLY_GO_ENV")) == "production"
+	production := strings.TrimSpace(getenv("JANUSLY_ENV")) == "production"
 
 	cfg := Config{
 		Production:        production,
-		DatabaseURL:       str("JANUSLY_GO_DATABASE_URL", defaultDatabaseURL),
-		Port:              num("JANUSLY_GO_PORT", 4600, 1, 65535),
-		InternalPort:      num("JANUSLY_GO_INTERNAL_PORT", 4601, 1, 65535),
-		InternalHost:      str("JANUSLY_GO_INTERNAL_HOST", "127.0.0.1"),
-		WorkerConcurrency: num("JANUSLY_GO_WORKER_CONCURRENCY", 8, 1, 64),
-		APIPoolSize:       num("JANUSLY_GO_API_POOL_SIZE", 10, 1, 100),
-		WorkerPoolSize:    num("JANUSLY_GO_WORKER_POOL_SIZE", 0, 0, 100),
-		PollInterval:      time.Duration(num("JANUSLY_GO_POLL_MS", 250, 50, 5000)) * time.Millisecond,
-		HTTPTimeout:       time.Duration(num("JANUSLY_GO_HTTP_TIMEOUT_MS", 30_000, 1000, 600_000)) * time.Millisecond,
-		WorkPlaneEnabled:  boolean("JANUSLY_GO_WORK_PLANE_ENABLED", !production),
+		DatabaseURL:       str("JANUSLY_DATABASE_URL", defaultDatabaseURL),
+		Port:              num("JANUSLY_PORT", 3001, 1, 65535),
+		InternalPort:      num("JANUSLY_INTERNAL_PORT", 9464, 1, 65535),
+		InternalHost:      str("JANUSLY_INTERNAL_HOST", "127.0.0.1"),
+		WorkerConcurrency: num("JANUSLY_WORKER_CONCURRENCY", 8, 1, 64),
+		APIPoolSize:       num("JANUSLY_API_POOL_SIZE", 10, 1, 100),
+		WorkerPoolSize:    num("JANUSLY_WORKER_POOL_SIZE", 0, 0, 100),
+		PollInterval:      time.Duration(num("JANUSLY_POLL_MS", 250, 50, 5000)) * time.Millisecond,
+		HTTPTimeout:       time.Duration(num("JANUSLY_HTTP_TIMEOUT_MS", 30_000, 1000, 600_000)) * time.Millisecond,
 	}
 	if cfg.WorkerPoolSize == 0 {
 		cfg.WorkerPoolSize = cfg.WorkerConcurrency + 2
 	}
 	if cfg.Port == cfg.InternalPort {
-		problems = append(problems, "JANUSLY_GO_PORT and JANUSLY_GO_INTERNAL_PORT must differ")
+		problems = append(problems, "JANUSLY_PORT and JANUSLY_INTERNAL_PORT must differ")
 	}
 	if cfg.InternalHost != "127.0.0.1" && cfg.InternalHost != "0.0.0.0" {
 		problems = append(problems, fmt.Sprintf(
-			"JANUSLY_GO_INTERNAL_HOST must be 127.0.0.1 or 0.0.0.0, got %q", cfg.InternalHost))
+			"JANUSLY_INTERNAL_HOST must be 127.0.0.1 or 0.0.0.0, got %q", cfg.InternalHost))
 	}
 	if len(problems) > 0 {
 		return Config{}, fmt.Errorf("invalid configuration: %s", strings.Join(problems, "; "))

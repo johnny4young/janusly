@@ -258,7 +258,7 @@ func TestCredentialSecretRefCannotNamePlatformVariables(t *testing.T) {
 
 	for _, reserved := range []string{
 		"JANUSLY_API_SERVICE_TOKEN", "JANUSLY_CREDENTIAL_MASTER_KEY",
-		"JANUSLY_GO_DATABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "AWS_SECRET_ACCESS_KEY",
+		"JANUSLY_DATABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "AWS_SECRET_ACCESS_KEY",
 	} {
 		res := h.call("POST", "/credentials", map[string]any{
 			"name": "exfil-" + suffix, "kind": "http", "secretRef": reserved,

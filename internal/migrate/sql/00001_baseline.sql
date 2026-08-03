@@ -1,11 +1,6 @@
 -- +goose Up
--- Baseline: the complete shared schema (drizzle-owned tables) plus the
--- pilot's own objects, captured at develop@1ad09028. Fresh databases get
--- everything from this one migration; databases provisioned before goose
--- adoption are stamped as already at this version without executing it.
--- psql meta-commands from pg_dump are stripped (they are not SQL).
--- Future changes land as numbered migrations after this file, and every
--- develop sync mirrors any new drizzle migration here.
+-- Fresh-install PostgreSQL 18 baseline owned exclusively by Janusly.
+-- Existing databases and configuration from earlier runtimes are unsupported.
 -- +goose StatementBegin
 --
 -- PostgreSQL database dump
@@ -18,22 +13,13 @@
 SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
--- (SET transaction_timeout removed: PG 17+ parameter; the floor is 15)
+SET transaction_timeout = 0;
 SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
--- (search_path reset removed: every object below is schema-qualified,
--- and goose's own version insert needs the default search_path)
 SET check_function_bodies = false;
 SET xmloption = content;
 SET client_min_messages = warning;
 SET row_security = off;
-
---
--- Name: drizzle; Type: SCHEMA; Schema: -; Owner: -
---
-
-CREATE SCHEMA drizzle;
-
 
 --
 -- Name: vector; Type: EXTENSION; Schema: -; Owner: -
@@ -52,39 +38,6 @@ COMMENT ON EXTENSION vector IS 'vector data type and ivfflat and hnsw access met
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
-
---
--- Name: __drizzle_migrations; Type: TABLE; Schema: drizzle; Owner: -
---
-
-CREATE TABLE drizzle.__drizzle_migrations (
-    id integer NOT NULL,
-    hash text NOT NULL,
-    created_at bigint,
-    name text,
-    applied_at timestamp with time zone DEFAULT now()
-);
-
-
---
--- Name: __drizzle_migrations_id_seq; Type: SEQUENCE; Schema: drizzle; Owner: -
---
-
-CREATE SEQUENCE drizzle.__drizzle_migrations_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: __drizzle_migrations_id_seq; Type: SEQUENCE OWNED BY; Schema: drizzle; Owner: -
---
-
-ALTER SEQUENCE drizzle.__drizzle_migrations_id_seq OWNED BY drizzle.__drizzle_migrations.id;
-
 
 --
 -- Name: alert_dispatches; Type: TABLE; Schema: public; Owner: -
@@ -451,10 +404,23 @@ CREATE TABLE public.external_workflows (
 
 
 --
--- Name: go_pilot_start_idempotency; Type: TABLE; Schema: public; Owner: -
+-- Name: rate_limit_windows; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.go_pilot_start_idempotency (
+CREATE TABLE public.rate_limit_windows (
+    name text NOT NULL,
+    key text NOT NULL,
+    window_start timestamp with time zone NOT NULL,
+    count integer DEFAULT 1 NOT NULL,
+    expires_at timestamp with time zone NOT NULL
+);
+
+
+--
+-- Name: run_start_idempotency; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.run_start_idempotency (
     org_id text NOT NULL,
     idempotency_key text NOT NULL,
     run_id text NOT NULL,
@@ -463,10 +429,10 @@ CREATE TABLE public.go_pilot_start_idempotency (
 
 
 --
--- Name: go_pilot_wakeups; Type: TABLE; Schema: public; Owner: -
+-- Name: run_wakeups; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.go_pilot_wakeups (
+CREATE TABLE public.run_wakeups (
     run_node_id text NOT NULL,
     wake_at timestamp with time zone NOT NULL,
     reason text NOT NULL
@@ -1037,7 +1003,8 @@ CREATE TABLE public.schedule_entries (
     last_run_id text,
     created_by text,
     created_at timestamp with time zone DEFAULT now(),
-    updated_at timestamp with time zone DEFAULT now()
+    updated_at timestamp with time zone DEFAULT now(),
+    next_fire_at timestamp with time zone
 );
 
 
@@ -1463,21 +1430,6 @@ CREATE TABLE public.workflows (
 
 
 --
--- Name: __drizzle_migrations id; Type: DEFAULT; Schema: drizzle; Owner: -
---
-
-ALTER TABLE ONLY drizzle.__drizzle_migrations ALTER COLUMN id SET DEFAULT nextval('drizzle.__drizzle_migrations_id_seq'::regclass);
-
-
---
--- Name: __drizzle_migrations __drizzle_migrations_pkey; Type: CONSTRAINT; Schema: drizzle; Owner: -
---
-
-ALTER TABLE ONLY drizzle.__drizzle_migrations
-    ADD CONSTRAINT __drizzle_migrations_pkey PRIMARY KEY (id);
-
-
---
 -- Name: alert_dispatches alert_dispatches_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1622,19 +1574,27 @@ ALTER TABLE ONLY public.external_workflows
 
 
 --
--- Name: go_pilot_start_idempotency go_pilot_start_idempotency_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: rate_limit_windows rate_limit_windows_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.go_pilot_start_idempotency
-    ADD CONSTRAINT go_pilot_start_idempotency_pkey PRIMARY KEY (org_id, idempotency_key);
+ALTER TABLE ONLY public.rate_limit_windows
+    ADD CONSTRAINT rate_limit_windows_pkey PRIMARY KEY (name, key, window_start);
 
 
 --
--- Name: go_pilot_wakeups go_pilot_wakeups_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: run_start_idempotency run_start_idempotency_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.go_pilot_wakeups
-    ADD CONSTRAINT go_pilot_wakeups_pkey PRIMARY KEY (run_node_id);
+ALTER TABLE ONLY public.run_start_idempotency
+    ADD CONSTRAINT run_start_idempotency_pkey PRIMARY KEY (org_id, idempotency_key);
+
+
+--
+-- Name: run_wakeups run_wakeups_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.run_wakeups
+    ADD CONSTRAINT run_wakeups_pkey PRIMARY KEY (run_node_id);
 
 
 --
@@ -2097,17 +2057,17 @@ CREATE INDEX audit_logs_metadata_gin_idx ON public.audit_logs USING gin (metadat
 
 
 --
--- Name: audit_logs_org_action_created_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: audit_logs_org_action_created_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX audit_logs_org_action_created_idx ON public.audit_logs USING btree (org_id, action text_pattern_ops, created_at DESC NULLS LAST);
+CREATE INDEX audit_logs_org_action_created_id_idx ON public.audit_logs USING btree (org_id, action text_pattern_ops, created_at DESC, id DESC);
 
 
 --
--- Name: audit_logs_org_created_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: audit_logs_org_created_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX audit_logs_org_created_idx ON public.audit_logs USING btree (org_id, created_at DESC NULLS LAST);
+CREATE INDEX audit_logs_org_created_id_idx ON public.audit_logs USING btree (org_id, created_at DESC, id DESC);
 
 
 --
@@ -2188,10 +2148,10 @@ CREATE UNIQUE INDEX credentials_org_name_idx ON public.credentials USING btree (
 
 
 --
--- Name: dead_letters_org_created_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: dead_letters_org_created_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX dead_letters_org_created_idx ON public.dead_letters USING btree (org_id, created_at DESC NULLS LAST, id DESC NULLS LAST);
+CREATE INDEX dead_letters_org_created_id_idx ON public.dead_letters USING btree (org_id, created_at DESC, id DESC);
 
 
 --
@@ -2209,10 +2169,10 @@ CREATE INDEX dead_letters_org_run_node_created_idx ON public.dead_letters USING 
 
 
 --
--- Name: dead_letters_org_status_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: dead_letters_org_status_created_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX dead_letters_org_status_idx ON public.dead_letters USING btree (org_id, status, created_at DESC NULLS LAST);
+CREATE INDEX dead_letters_org_status_created_idx ON public.dead_letters USING btree (org_id, status, created_at DESC, id DESC);
 
 
 --
@@ -2272,10 +2232,10 @@ CREATE UNIQUE INDEX external_run_steps_connection_run_step_idx ON public.externa
 
 
 --
--- Name: external_run_steps_org_observed_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: external_run_steps_org_observed_created_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX external_run_steps_org_observed_idx ON public.external_run_steps USING btree (org_id, last_observed_at DESC NULLS LAST);
+CREATE INDEX external_run_steps_org_observed_created_idx ON public.external_run_steps USING btree (org_id, last_observed_at DESC, created_at DESC);
 
 
 --
@@ -2293,10 +2253,10 @@ CREATE INDEX external_runs_connection_workflow_idx ON public.external_runs USING
 
 
 --
--- Name: external_runs_org_observed_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: external_runs_org_observed_created_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX external_runs_org_observed_idx ON public.external_runs USING btree (org_id, last_observed_at DESC NULLS LAST);
+CREATE INDEX external_runs_org_observed_created_idx ON public.external_runs USING btree (org_id, last_observed_at DESC, created_at DESC);
 
 
 --
@@ -2342,24 +2302,17 @@ CREATE UNIQUE INDEX external_workflows_connection_external_idx ON public.externa
 
 
 --
--- Name: external_workflows_org_observed_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: external_workflows_org_observed_workflow_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX external_workflows_org_observed_idx ON public.external_workflows USING btree (org_id, last_observed_at DESC NULLS LAST);
-
-
---
--- Name: go_pilot_runs_org_created_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX go_pilot_runs_org_created_id_idx ON public.runs USING btree (org_id, created_at DESC, id DESC);
+CREATE INDEX external_workflows_org_observed_workflow_idx ON public.external_workflows USING btree (org_id, last_observed_at DESC, external_workflow_id);
 
 
 --
--- Name: go_pilot_wakeups_due_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: run_wakeups_due_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX go_pilot_wakeups_due_idx ON public.go_pilot_wakeups USING btree (wake_at);
+CREATE INDEX run_wakeups_due_idx ON public.run_wakeups USING btree (wake_at);
 
 
 --
@@ -2461,10 +2414,10 @@ CREATE UNIQUE INDEX prompt_versions_org_prompt_version_idx ON public.prompt_vers
 
 
 --
--- Name: prompts_org_created_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: prompts_org_created_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX prompts_org_created_idx ON public.prompts USING btree (org_id, created_at DESC NULLS LAST);
+CREATE INDEX prompts_org_created_id_idx ON public.prompts USING btree (org_id, created_at DESC, id DESC);
 
 
 --
@@ -2538,10 +2491,10 @@ CREATE INDEX recovery_feedback_org_dlq_idx ON public.recovery_feedback USING btr
 
 
 --
--- Name: recovery_feedback_org_workflow_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: recovery_feedback_org_workflow_created_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX recovery_feedback_org_workflow_idx ON public.recovery_feedback USING btree (org_id, workflow_id, created_at DESC NULLS LAST);
+CREATE INDEX recovery_feedback_org_workflow_created_idx ON public.recovery_feedback USING btree (org_id, workflow_id, created_at DESC);
 
 
 --
@@ -2699,10 +2652,10 @@ CREATE INDEX replay_campaigns_due_idx ON public.replay_campaigns USING btree (ne
 
 
 --
--- Name: replay_campaigns_org_created_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: replay_campaigns_org_created_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX replay_campaigns_org_created_idx ON public.replay_campaigns USING btree (org_id, created_at DESC NULLS LAST);
+CREATE INDEX replay_campaigns_org_created_id_idx ON public.replay_campaigns USING btree (org_id, created_at DESC, id DESC);
 
 
 --
@@ -2748,10 +2701,10 @@ CREATE INDEX run_nodes_waiting_target_idx ON public.run_nodes USING btree (waiti
 
 
 --
--- Name: runs_org_created_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: runs_org_created_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX runs_org_created_idx ON public.runs USING btree (org_id, created_at DESC NULLS LAST);
+CREATE INDEX runs_org_created_id_idx ON public.runs USING btree (org_id, created_at DESC, id DESC);
 
 
 --
@@ -2787,6 +2740,20 @@ CREATE UNIQUE INDEX runs_redrive_idempotency_idx ON public.runs USING btree (org
 --
 
 CREATE INDEX runs_rollout_idx ON public.runs USING btree (workflow_rollout_id, created_at DESC NULLS LAST);
+
+
+--
+-- Name: runs_workflow_version_created_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX runs_workflow_version_created_idx ON public.runs USING btree (workflow_version_id, created_at DESC);
+
+
+--
+-- Name: schedule_entries_due_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX schedule_entries_due_idx ON public.schedule_entries USING btree (next_fire_at) WHERE (enabled = true);
 
 
 --
@@ -2944,10 +2911,10 @@ CREATE INDEX trigger_events_backfill_claim_idx ON public.trigger_events USING bt
 
 
 --
--- Name: trigger_events_org_created_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: trigger_events_org_created_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX trigger_events_org_created_idx ON public.trigger_events USING btree (org_id, created_at DESC NULLS LAST);
+CREATE INDEX trigger_events_org_created_id_idx ON public.trigger_events USING btree (org_id, created_at DESC, id DESC);
 
 
 --
@@ -3091,16 +3058,20 @@ CREATE UNIQUE INDEX workflow_versions_org_workflow_version_idx ON public.workflo
 
 
 --
--- Name: workflows_org_created_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: workflows_org_created_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX workflows_org_created_idx ON public.workflows USING btree (org_id, created_at DESC NULLS LAST);
+CREATE INDEX workflows_org_created_id_idx ON public.workflows USING btree (org_id, created_at DESC, id DESC);
+
+
+--
+-- Name: workflows_org_deleted_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX workflows_org_deleted_idx ON public.workflows USING btree (org_id, deleted_at DESC, id DESC) WHERE (deleted_at IS NOT NULL);
 
 
 --
 -- PostgreSQL database dump complete
 --
-
-
-
 -- +goose StatementEnd

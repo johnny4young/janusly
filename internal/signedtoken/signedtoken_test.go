@@ -55,7 +55,7 @@ func TestSignedTokenRejectsInvalidLifetimeAndRequiresProductionSecret(t *testing
 	}
 
 	t.Setenv("JANUSLY_RESUME_TOKEN_SECRET", "")
-	t.Setenv("JANUSLY_GO_ENV", "production")
+	t.Setenv("JANUSLY_ENV", "production")
 	if _, _, err := Sign("sso_session", sessionPayload{}, 600); err == nil || errors.Is(err, ErrInvalid) {
 		t.Fatalf("production must require the dedicated secret: %v", err)
 	}

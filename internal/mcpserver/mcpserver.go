@@ -53,7 +53,7 @@ func (d Deps) auditContext() *auth.Context {
 // NewServer builds the MCP server with the pilot's eight tools registered.
 func NewServer(deps Deps) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{
-		Name:    "janusly-go",
+		Name:    "janusly",
 		Title:   "Janusly (Go pilot)",
 		Version: "0.1.0",
 	}, nil)

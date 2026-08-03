@@ -1,4 +1,4 @@
-// Command api boots the pilot API: validated configuration, database pool,
+// Command api boots Janusly: validated configuration, database pools,
 // migration probe, and the public + internal HTTP servers, with a graceful
 // shutdown that lets in-flight requests finish.
 package main
@@ -78,7 +78,7 @@ func envDurationMs(name string, fallback time.Duration) time.Duration {
 // runtime; the evaluator ignores it in production regardless.
 func refuseDevBypassInProduction(production bool) error {
 	if production && os.Getenv("ALLOW_DEV_SSO_BYPASS") == "true" {
-		return errors.New("ALLOW_DEV_SSO_BYPASS must not be set when JANUSLY_GO_ENV=production")
+		return errors.New("ALLOW_DEV_SSO_BYPASS must not be set when JANUSLY_ENV=production")
 	}
 	return nil
 }
@@ -88,7 +88,7 @@ func requireSigningSecret(production bool) error {
 		return nil
 	}
 	if strings.TrimSpace(os.Getenv("JANUSLY_RESUME_TOKEN_SECRET")) == "" {
-		return errors.New("JANUSLY_RESUME_TOKEN_SECRET is required when JANUSLY_GO_ENV=production")
+		return errors.New("JANUSLY_RESUME_TOKEN_SECRET is required when JANUSLY_ENV=production")
 	}
 	return nil
 }
@@ -144,7 +144,7 @@ func run() error {
 	logger := boot.NewLogger()
 
 	// Traces: console exporter by default, OTLP/HTTP via OTEL_EXPORTER=otlp,
-	// silent via "none" (reference otel.ts posture). Shutdown flushes the
+	// silent via "none". Shutdown flushes the
 	// batch queue so the last spans are not dropped on SIGTERM.
 	traceShutdown, err := observability.InitTracing(ctx)
 	if err != nil {
@@ -156,7 +156,7 @@ func run() error {
 		_ = traceShutdown(flushCtx)
 	}()
 
-	// Single-binary ops: `janusly-go migrate` applies the embedded goose
+	// Single-binary ops: `janusly migrate` applies the embedded goose
 	// migrations and exits; the serving path refuses a stale schema.
 	if len(os.Args) > 1 && os.Args[1] == "migrate" {
 		if err := migrate.Up(ctx, cfg.DatabaseURL); err != nil {
@@ -174,9 +174,9 @@ func run() error {
 	if configured, err := secretstore.AssertCredentialRootKeyUsable(); err != nil {
 		return err
 	} else if !configured {
-		slog.Info("credential root key not configured; managed secrets disabled (legacy env refs only)")
+		slog.Info("credential root key not configured; managed secrets disabled (environment refs only)")
 	}
-	// The reference's production fail-fast: without Supabase configured,
+	// Without Supabase configured,
 	// production refuses to start unless dev headers are explicitly
 	// allowed — never a silent anonymous fallback.
 	if err := auth.ConfigFromEnv().BootError(); err != nil {
@@ -190,50 +190,41 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
-	enginePool := pool
-	if cfg.WorkPlaneEnabled {
-		workerPool, err := boot.Connect(ctx, cfg.DatabaseURL, cfg.WorkerPoolSize)
-		if err != nil {
-			return err
-		}
-		defer workerPool.Close()
-		enginePool = workerPool
+	workerPool, err := boot.Connect(ctx, cfg.DatabaseURL, cfg.WorkerPoolSize)
+	if err != nil {
+		return err
 	}
+	defer workerPool.Close()
 	if err := boot.ProbeMigrations(ctx, pool); err != nil {
 		return err
 	}
-	// Process-global LLM telemetry recorder (the reference's
-	// setUsageRecorder(recordUsage) boot step) — registered before any
+	// Process-global LLM telemetry recorder, registered before any
 	// surface that could fire an LLM call.
 	usage.SetRecorder(usage.NewDBRecorder(pool))
-	workPlaneMode := "passive"
-	if cfg.WorkPlaneEnabled {
-		workPlaneMode = "active"
-	}
 	logger.Info("boot", "port", cfg.Port, "internal_host", cfg.InternalHost,
-		"internal_port", cfg.InternalPort, "work_plane", workPlaneMode,
+		"internal_port", cfg.InternalPort,
 		"build_verified", identity.Verified, "build_commit", identity.Commit,
 		"build_tree", identity.Tree, "artifact_sha256", identity.ArtifactSHA256)
 
-	// The pilot ships as one binary: the API process also runs the worker
+	// Janusly ships as one binary: the API process also runs the worker
 	// pool. The processes split when scale demands it — the engine already
 	// supports N independent consumers.
-	eng := engine.New(enginePool)
+	eng := engine.New(workerPool)
 	prometheus.MustRegister(engine.NewQueueDepthCollector(pool))
-	// Reference-name parity series so existing dashboards need no rename,
-	// plus the OTel Resource rendered the Prometheus way: a target_info
+	// Stable workflow queue series plus the OTel Resource rendered the
+	// Prometheus way: a target_info
 	// gauge carrying service name/namespace/instance.
-	prometheus.MustRegister(engine.NewQueueParityCollector(pool))
+	prometheus.MustRegister(engine.NewWorkflowQueueCollector(pool))
 	prometheus.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 		Name: "janusly_rate_limit_degraded_buckets",
 		Help: "Rate-limiter buckets currently failing open in this process.",
 	}, ratelimit.DegradedBucketCount))
-	// Maintenance runs as supervised in-process loops in the Go binary. The
-	// reference names stay present with an always-drained value so dashboards
-	// and certification can distinguish a clear lane from missing telemetry.
+	// Maintenance runs as supervised in-process loops in the binary. Stable
+	// metrics stay present with an always-drained value so dashboards can
+	// distinguish a clear lane from missing telemetry.
 	for _, metric := range []struct{ name, help string }{
-		{"maintenance_queue_waiting_jobs", "Maintenance jobs awaiting the in-process work plane."},
-		{"maintenance_queue_active_jobs", "Maintenance jobs active in the in-process work plane."},
+		{"maintenance_queue_waiting_jobs", "Maintenance jobs awaiting an in-process worker."},
+		{"maintenance_queue_active_jobs", "Maintenance jobs active in an in-process worker."},
 	} {
 		prometheus.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Name: metric.name, Help: metric.help,
@@ -249,62 +240,46 @@ func run() error {
 	})
 	resourceInfo.Set(1)
 	prometheus.MustRegister(resourceInfo)
-	prometheus.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-		Name: "janusly_go_work_plane_active",
-		Help: "Whether this process owns PostgreSQL claims and background mutation loops.",
-	}, func() float64 {
-		if cfg.WorkPlaneEnabled {
-			return 1
-		}
-		return 0
-	}))
 	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
 	// Every background loop runs SUPERVISED: named start, panic →
 	// recover + log + backoff restart (a sweep bug never takes the API
 	// down), and one deterministic drain on shutdown BEFORE pools close.
 	runner := boot.NewRunner(context.Background(), logger)
-	if cfg.WorkPlaneEnabled {
-		runner.Go("workers", func(ctx context.Context) {
-			_ = eng.RunWorkers(ctx, cfg.WorkerConcurrency, cfg.PollInterval, dispatcher.Execute, logger)
-		})
-		runner.Go("replay-campaign-pump", func(ctx context.Context) {
-			eng.RunReplayCampaignPump(ctx, cfg.PollInterval, logger)
-		})
-		runner.Go("retention", func(ctx context.Context) {
-			eng.RunRetentionSweep(ctx, time.Hour, engine.RetentionDays(), logger)
-		})
-		runner.Go("upstream-health", func(ctx context.Context) {
-			upstream.RunSweep(ctx, pool, time.Minute, logger)
-		})
-		runner.Go("subworkflow-terminal-reconciler", func(ctx context.Context) {
-			eng.RunSubworkflowTerminalReconciler(ctx, time.Minute, logger)
-		})
-		runner.Go("schedule-sweep", func(ctx context.Context) {
-			eng.RunScheduleSweep(ctx, 15*time.Second, logger)
-		})
-		runner.Go("auto-healing", func(ctx context.Context) {
-			eng.RunAutoHealingSweep(ctx, 5*time.Minute, logger)
-		})
-		runner.Go("memory-consent-purge", func(ctx context.Context) {
-			eng.RunMemoryConsentPurgeSweep(ctx, time.Hour, logger)
-		})
-		// Reaper cadence/threshold are env-tunable for HA deployments (and the
-		// kill-failover harness): a two-replica setup wants a threshold near
-		// its longest legitimate node runtime, not the conservative 1h default.
-		runner.Go("stalled-node-reaper", func(ctx context.Context) {
-			eng.StartReaper(ctx,
-				envDurationMs("JANUSLY_GO_REAPER_INTERVAL_MS", time.Minute),
-				envDurationMs("JANUSLY_GO_REAPER_THRESHOLD_MS", time.Hour), logger)
-		})
-	} else {
-		logger.Warn("work plane passive; background claims and mutations are disabled")
-	}
+	runner.Go("workers", func(ctx context.Context) {
+		_ = eng.RunWorkers(ctx, cfg.WorkerConcurrency, cfg.PollInterval, dispatcher.Execute, logger)
+	})
+	runner.Go("replay-campaign-pump", func(ctx context.Context) {
+		eng.RunReplayCampaignPump(ctx, cfg.PollInterval, logger)
+	})
+	runner.Go("retention", func(ctx context.Context) {
+		eng.RunRetentionSweep(ctx, time.Hour, engine.RetentionDays(), logger)
+	})
+	runner.Go("upstream-health", func(ctx context.Context) {
+		upstream.RunSweep(ctx, pool, time.Minute, logger)
+	})
+	runner.Go("subworkflow-terminal-reconciler", func(ctx context.Context) {
+		eng.RunSubworkflowTerminalReconciler(ctx, time.Minute, logger)
+	})
+	runner.Go("schedule-sweep", func(ctx context.Context) {
+		eng.RunScheduleSweep(ctx, 15*time.Second, logger)
+	})
+	runner.Go("auto-healing", func(ctx context.Context) {
+		eng.RunAutoHealingSweep(ctx, 5*time.Minute, logger)
+	})
+	runner.Go("memory-consent-purge", func(ctx context.Context) {
+		eng.RunMemoryConsentPurgeSweep(ctx, time.Hour, logger)
+	})
+	// Reaper cadence/threshold are env-tunable for HA deployments.
+	runner.Go("stalled-node-reaper", func(ctx context.Context) {
+		eng.StartReaper(ctx,
+			envDurationMs("JANUSLY_REAPER_INTERVAL_MS", time.Minute),
+			envDurationMs("JANUSLY_REAPER_THRESHOLD_MS", time.Hour), logger)
+	})
 	defer runner.Shutdown()
 
 	publicAPI, shutdownPublicAPI := httpapi.NewV1HandlerWithShutdown(eng, pool)
 	defer shutdownPublicAPI()
-	publicHandler := httpapi.WithWorkPlaneGate(publicAPI, cfg.WorkPlaneEnabled)
-	api := newHTTPServer(fmt.Sprintf(":%d", cfg.Port), publicHandler)
+	api := newHTTPServer(fmt.Sprintf(":%d", cfg.Port), publicAPI)
 	internal := newHTTPServer(
 		fmt.Sprintf("%s:%d", cfg.InternalHost, cfg.InternalPort),
 		httpapi.NewInternalHandler(identity),
@@ -338,7 +313,7 @@ func run() error {
 }
 
 // resourceInstanceID resolves the per-process identity like the
-// reference's Resource: explicit env, then HOSTNAME, then the OS.
+// OTel Resource: explicit env, then HOSTNAME, then the OS.
 func resourceInstanceID() string {
 	if id := os.Getenv("OTEL_SERVICE_INSTANCE_ID"); id != "" {
 		return id

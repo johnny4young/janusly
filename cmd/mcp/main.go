@@ -1,15 +1,14 @@
-// Command mcp runs the pilot's MCP stdio server: a thin in-process layer
+// Command mcp runs Janusly's MCP stdio server: a thin in-process layer
 // over the engine (no HTTP hop) that lets an agent save workflows, start
 // and inspect runs, and drive the dead-letter redrive loop. The process
 // also runs the worker pool so runs progress with no other service up.
 //
-// Org scope comes from JANUSLY_GO_ORG (default "default") — the pilot's
+// Org scope comes from JANUSLY_ORG (default "default") — the local
 // dev-auth analogue for a stdio transport.
 package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -39,9 +38,6 @@ func run() error {
 	cfg, err := config.Load(os.Getenv)
 	if err != nil {
 		return err
-	}
-	if !cfg.WorkPlaneEnabled {
-		return errors.New("MCP server requires JANUSLY_GO_WORK_PLANE_ENABLED=true")
 	}
 	// Logs go to stderr — stdout belongs to the MCP transport.
 	logger := boot.NewLogger()
@@ -75,7 +71,7 @@ func run() error {
 	})
 	defer func() { stopWorkers(); background.Wait() }()
 
-	org := os.Getenv("JANUSLY_GO_ORG")
+	org := os.Getenv("JANUSLY_ORG")
 	if org == "" {
 		org = "default"
 	}

@@ -1,7 +1,7 @@
 /**
  * Go-pilot smoke: the REAL React app pointed at the Go backend
  * (VITE_API_URL) must boot, read the /v1 surfaces, and render real data.
- * Guarded behind JANUSLY_GO_SMOKE=1 so the ordinary Node e2e lane never
+ * Guarded behind JANUSLY_SMOKE=1 so the ordinary Node e2e lane never
  * runs it; driven by go/conformance/run-web-smoke.mjs.
  */
 import {
@@ -13,7 +13,7 @@ import {
 
 const API_URL = process.env.E2E_API_URL ?? 'http://127.0.0.1:4600'
 
-test.skip(process.env.JANUSLY_GO_SMOKE !== '1', 'go-pilot smoke runs only via run-web-smoke.mjs')
+test.skip(process.env.JANUSLY_SMOKE !== '1', 'go-pilot smoke runs only via run-web-smoke.mjs')
 
 function headers(orgId: string): Record<string, string> {
   return {

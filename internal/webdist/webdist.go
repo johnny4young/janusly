@@ -25,7 +25,7 @@ var embedded embed.FS
 
 // Enabled reports whether the single-binary web flag is on.
 func Enabled() bool {
-	return os.Getenv("JANUSLY_GO_SERVE_WEB") == "true"
+	return os.Getenv("JANUSLY_SERVE_WEB") == "true"
 }
 
 // Handler serves the embedded production bundle.

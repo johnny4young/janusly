@@ -24,9 +24,9 @@ import (
 // config: the 50ms tenant timeout kills a 300ms upstream, while an org with
 // no row rides the platform default and succeeds.
 func TestTenantHTTPBoundsGovernExecution(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "true")
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -100,9 +100,9 @@ func TestTenantHTTPBoundsGovernExecution(t *testing.T) {
 // The deferred hard cascade: expired tombstones purge with their versions
 // and metadata atomically; fresh tombstones and active workflows survive.
 func TestRetentionSweepPurgesExpiredTombstones(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)
@@ -157,9 +157,9 @@ func TestRetentionSweepPurgesExpiredTombstones(t *testing.T) {
 // and batches interleave runs (round-robin fairness) so one run's pile
 // cannot monopolize a batch.
 func TestMassTimerBacklogDrainsFairly(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)
@@ -199,7 +199,7 @@ func TestMassTimerBacklogDrainsFairly(t *testing.T) {
 				t.Fatalf("seed node: %v", err)
 			}
 			if _, err := pool.Exec(ctx,
-				`INSERT INTO go_pilot_wakeups (run_node_id, wake_at, reason)
+				`INSERT INTO run_wakeups (run_node_id, wake_at, reason)
 				 VALUES ($1, now() - interval '1 hour', 'wait_until')`, rowID); err != nil {
 				t.Fatalf("seed wakeup: %v", err)
 			}
@@ -231,7 +231,7 @@ func TestMassTimerBacklogDrainsFairly(t *testing.T) {
 	}
 	var remaining int
 	_ = pool.QueryRow(ctx,
-		`SELECT count(*) FROM go_pilot_wakeups w JOIN run_nodes rn ON rn.id = w.run_node_id
+		`SELECT count(*) FROM run_wakeups w JOIN run_nodes rn ON rn.id = w.run_node_id
 		 WHERE rn.run_id IN ($1, $2)`, hog, small).Scan(&remaining)
 	if remaining != 0 {
 		t.Fatalf("wakeups left: %d", remaining)

@@ -162,15 +162,15 @@ var errDbPoolExhausted = errors.New("db_pool_exhausted")
 
 // metricDbToolPools gauges the live external-pool count for dashboards.
 var metricDbToolPools = promauto.NewGauge(prometheus.GaugeOpts{
-	Name: "janusly_go_db_tool_pools",
+	Name: "janusly_db_tool_pools",
 	Help: "Cached external db-tool connection pools in this process.",
 })
 
 // dbMaxProcessPools resolves the PROCESS-wide external-pool cap: env
-// JANUSLY_GO_DB_TOOL_MAX_PROCESS_POOLS (1..500) or the default 25. One
+// JANUSLY_DB_TOOL_MAX_PROCESS_POOLS (1..500) or the default 25. One
 // noisy tenant can exhaust its own 5-pool budget, never the process.
 func dbMaxProcessPools() int {
-	if raw := os.Getenv("JANUSLY_GO_DB_TOOL_MAX_PROCESS_POOLS"); raw != "" {
+	if raw := os.Getenv("JANUSLY_DB_TOOL_MAX_PROCESS_POOLS"); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n >= 1 && n <= 500 {
 			return n
 		}

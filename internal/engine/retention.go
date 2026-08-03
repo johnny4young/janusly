@@ -1,7 +1,7 @@
 // Minimal retention sweep — the deferred hard cascade for soft-deleted
 // workflows. The reference's system:retention cron purges per-org with a
 // tenant-configurable window; the pilot sweeps globally with one default
-// window (30 days, env JANUSLY_GO_RETENTION_DELETED_WORKFLOWS_DAYS), using
+// window (30 days, env JANUSLY_RETENTION_DELETED_WORKFLOWS_DAYS), using
 // the same atomic CTE shape: versions + metadata + workflow rows go
 // together or not at all. Orphaned runs / audit rows stay, per the
 // repo-wide orphan-tolerant cascade posture.
@@ -22,7 +22,7 @@ const retentionDefaultDays = 30
 
 // RetentionDays resolves the tombstone window from the environment.
 func RetentionDays() int {
-	if raw := os.Getenv("JANUSLY_GO_RETENTION_DELETED_WORKFLOWS_DAYS"); raw != "" {
+	if raw := os.Getenv("JANUSLY_RETENTION_DELETED_WORKFLOWS_DAYS"); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 1 {
 			return parsed
 		}

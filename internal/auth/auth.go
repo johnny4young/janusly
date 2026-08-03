@@ -142,7 +142,7 @@ func ConfigFromEnv() Config {
 		SupabaseURL:     os.Getenv("SUPABASE_URL"),
 		SupabaseKey:     os.Getenv("SUPABASE_SERVICE_ROLE_KEY"),
 		ServiceToken:    os.Getenv("JANUSLY_API_SERVICE_TOKEN"),
-		Production:      os.Getenv("JANUSLY_GO_ENV") == "production",
+		Production:      os.Getenv("JANUSLY_ENV") == "production",
 		AllowDevHeaders: os.Getenv("ALLOW_DEV_AUTH_HEADERS") == "true",
 	}
 }

@@ -301,7 +301,7 @@ func (c *Client) dialSession(
 		return nil, nil, fmt.Errorf("unsupported mcp transport: %s", connection.Transport)
 	}
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "janusly-go-pilot", Version: "0.1.0"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "janusly-pilot", Version: "0.1.0"}, nil)
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
 		return nil, sandbox, err

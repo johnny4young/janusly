@@ -89,7 +89,7 @@ func TestRuntimeFailureDrillCrossesWorkerDLQBoundary(t *testing.T) {
 
 func TestStalledNodeDrillUsesExactScopedReaper(t *testing.T) {
 	ctx, pool, eng, org := newHarness(t)
-	t.Setenv("JANUSLY_GO_REAPER_THRESHOLD_MS", "900000")
+	t.Setenv("JANUSLY_REAPER_THRESHOLD_MS", "900000")
 	workflow := mustParse(t, `{
 		"id":"incident-triage","nodes":[
 			{"id":"trigger","type":"noop","config":{}},

@@ -139,14 +139,6 @@ type DeadLetter struct {
 	ReplayClaimedAt  *time.Time
 }
 
-type DrizzleDrizzleMigration struct {
-	ID        int32
-	Hash      string
-	CreatedAt pgtype.Int8
-	Name      pgtype.Text
-	AppliedAt *time.Time
-}
-
 type EvalDataset struct {
 	ID            string
 	OrgID         string
@@ -293,34 +285,6 @@ type ExternalWorkflow struct {
 	UpdatedAt          time.Time
 }
 
-type GoPilotGooseVersion struct {
-	ID        int32
-	VersionID int64
-	IsApplied bool
-	Tstamp    pgtype.Timestamp
-}
-
-type GoPilotRateWindow struct {
-	Name        string
-	Key         string
-	WindowStart time.Time
-	Count       int32
-	ExpiresAt   time.Time
-}
-
-type GoPilotStartIdempotency struct {
-	OrgID          string
-	IdempotencyKey string
-	RunID          string
-	CreatedAt      time.Time
-}
-
-type GoPilotWakeup struct {
-	RunNodeID string
-	WakeAt    time.Time
-	Reason    string
-}
-
 type InstalledPlugin struct {
 	ID          string
 	OrgID       string
@@ -339,6 +303,13 @@ type Invitation struct {
 	Status     string
 	AcceptedAt *time.Time
 	CreatedAt  *time.Time
+}
+
+type JanuslySchemaVersion struct {
+	ID        int32
+	VersionID int64
+	IsApplied bool
+	Tstamp    pgtype.Timestamp
 }
 
 type McpConnection struct {
@@ -473,6 +444,14 @@ type PromptVersion struct {
 	Status       string
 	CreatedBy    pgtype.Text
 	CreatedAt    *time.Time
+}
+
+type RateLimitWindow struct {
+	Name        string
+	Key         string
+	WindowStart time.Time
+	Count       int32
+	ExpiresAt   time.Time
 }
 
 type RecoveryCase struct {
@@ -727,6 +706,19 @@ type RunNode struct {
 	WaitingRepairAfter          *time.Time
 	QueuePublicationRepairAfter *time.Time
 	QueuePublicationGeneration  int32
+}
+
+type RunStartIdempotency struct {
+	OrgID          string
+	IdempotencyKey string
+	RunID          string
+	CreatedAt      time.Time
+}
+
+type RunWakeup struct {
+	RunNodeID string
+	WakeAt    time.Time
+	Reason    string
 }
 
 type ScheduleEntry struct {

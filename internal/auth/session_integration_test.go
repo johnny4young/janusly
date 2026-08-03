@@ -31,9 +31,9 @@ func sessionRequest(t *testing.T, sessionID string) *http.Request {
 }
 
 func TestJanuslySessionLifecycleAndMembershipBoundary(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	t.Setenv("JANUSLY_RESUME_TOKEN_SECRET", "session-integration-secret")
 	pool, err := pgxpool.New(t.Context(), dsn)
@@ -108,9 +108,9 @@ func TestJanuslySessionLifecycleAndMembershipBoundary(t *testing.T) {
 }
 
 func TestSessionIdentityCanExistWithoutMembership(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	t.Setenv("JANUSLY_RESUME_TOKEN_SECRET", "session-integration-secret")
 	pool, err := pgxpool.New(context.Background(), dsn)

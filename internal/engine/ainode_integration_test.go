@@ -39,9 +39,9 @@ func aiWorkflow(id string) *domain.Workflow {
 // mode:"ai" with usage on the state; a DEAD provider → the node still
 // completes (never fails the run); a validation replay never dials.
 func TestAiNodeFallbackContract(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)
@@ -155,9 +155,9 @@ func containsString(haystack, needle string) bool {
 // The shared wire catalog against the ai NODE: a provider failure NEVER
 // fails the node — the run succeeds with {mode:"fallback", aiError}.
 func TestAiNodeFailureMatrix(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)

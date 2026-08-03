@@ -25,9 +25,9 @@ import (
 // expected tool error with the limiter's verbatim message; reads and
 // other tools stay unaffected.
 func TestMcpWriteRateLimit(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)
@@ -50,7 +50,7 @@ func TestMcpWriteRateLimit(t *testing.T) {
 	for _, offset := range []time.Duration{0, time.Minute} {
 		windowStart := time.Now().UTC().Truncate(time.Minute).Add(offset)
 		expires := windowStart.Add(time.Minute)
-		if _, err := pool.Exec(ctx, `INSERT INTO go_pilot_rate_windows (name, key, window_start, count, expires_at)
+		if _, err := pool.Exec(ctx, `INSERT INTO rate_limit_windows (name, key, window_start, count, expires_at)
 			VALUES ('mcp.workflows.save', $1, $2, 60, $3)`, org, windowStart, expires); err != nil {
 			t.Fatalf("saturate window: %v", err)
 		}

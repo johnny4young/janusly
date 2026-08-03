@@ -41,9 +41,9 @@ func newAPIHarnessWithoutWorkers(t *testing.T) *apiHarness {
 
 func newAPIHarnessWithWorkers(t *testing.T, startWorkers bool) *apiHarness {
 	t.Helper()
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set; run through `make test`")
+		t.Skip("JANUSLY_DATABASE_URL not set; run through `make test`")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	t.Cleanup(cancel)

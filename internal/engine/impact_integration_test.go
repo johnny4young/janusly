@@ -24,9 +24,9 @@ import (
 // failed redrive credits nothing; the second redrive of the same dead
 // letter cannot double-count.
 func TestRecoveryImpactPipeline(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)
@@ -143,9 +143,9 @@ func TestRecoveryImpactPipeline(t *testing.T) {
 // The incident closes ONLY with terminal success, atomically with the
 // impact fact — and the metric now reads the durable facts.
 func TestRecoveryItemAttribution(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)

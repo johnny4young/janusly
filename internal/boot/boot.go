@@ -44,10 +44,7 @@ func Connect(ctx context.Context, databaseURL string, maxConns int) (*pgxpool.Po
 	return pool, nil
 }
 
-// ErrNotMigrated reports a database behind the embedded goose migrations.
-// goose owns the pilot's schema since 2026-07-31; a goose-provisioned
-// database carries the drizzle bookkeeping TABLE (schema baseline) but not
-// its rows, so probing drizzle would reject a perfectly migrated database.
+// ErrNotMigrated reports a database behind the embedded Goose baseline.
 var ErrNotMigrated = errors.New(
 	"database is not migrated: run the binary's `migrate` subcommand first",
 )
@@ -57,7 +54,7 @@ var ErrNotMigrated = errors.New(
 func ProbeMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	var current int64
 	err := pool.QueryRow(ctx,
-		"SELECT COALESCE(MAX(version_id), 0) FROM go_pilot_goose_version WHERE is_applied").Scan(&current)
+		"SELECT COALESCE(MAX(version_id), 0) FROM janusly_schema_version WHERE is_applied").Scan(&current)
 	if err != nil {
 		return fmt.Errorf("%w (probe query failed: %v)", ErrNotMigrated, err)
 	}

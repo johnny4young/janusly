@@ -276,7 +276,7 @@ func TestSolutionPackSelectedStalledDrill(t *testing.T) {
 	h := newAPIHarness(t)
 	pool := testPool(t)
 	ctx := t.Context()
-	t.Setenv("JANUSLY_GO_REAPER_THRESHOLD_MS", "900000")
+	t.Setenv("JANUSLY_REAPER_THRESHOLD_MS", "900000")
 
 	before := 0
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM runs WHERE org_id=$1`, h.org).Scan(&before)

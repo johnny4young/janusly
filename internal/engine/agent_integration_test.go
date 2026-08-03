@@ -24,9 +24,9 @@ import (
 // cutting clean at maxSteps, and a validation dry-run never executing a
 // write-side plan.
 func TestAgentLoopRulesPlanner(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)
@@ -129,9 +129,9 @@ func TestAgentLoopRulesPlanner(t *testing.T) {
 // thrown all fall back to the RULES plan with aiError attribution, a
 // budget block terminates cleanly, and a VALID plan executes its tool.
 func TestAgentLLMPlannerMatrix(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)
@@ -247,9 +247,9 @@ func TestAgentLLMPlannerMatrix(t *testing.T) {
 // fires ONLY for an ai-mode plan with a non-empty recall (stable
 // content-free fingerprints), and a done agent records one episode.
 func TestAgentEpisodicMemory(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)
@@ -371,9 +371,9 @@ func TestAgentEpisodicMemory(t *testing.T) {
 // second agent's goal template reads the first's result), parallel runs
 // all agents with no late binding, and aggregation follows the strategy.
 func TestMultiAgentCrew(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)
@@ -453,9 +453,9 @@ func TestMultiAgentCrew(t *testing.T) {
 // binds — AFTER the first agent completed — and lenient emits ONE
 // deduplicated template.unresolved_path evidence event for that phase.
 func TestDeferredScopeStrictPolicy(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)
@@ -535,9 +535,9 @@ func TestDeferredScopeStrictPolicy(t *testing.T) {
 // The loop's item scope under strict: a mapping over a missing item field
 // fails per iteration through the SAME recordUnresolvedPaths chokepoint.
 func TestLoopItemScopeStrictPolicy(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)

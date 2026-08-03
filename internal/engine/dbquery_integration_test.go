@@ -25,9 +25,9 @@ import (
 // call. The "customer database" is a scratch table reached through its
 // own stored postgres credential.
 func TestDbQueryToolsLoop(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	secretstore.ResetForTests()
 	t.Cleanup(secretstore.ResetForTests)

@@ -1,8 +1,7 @@
 // Engine metrics on the default Prometheus registry, served by the internal
-// port's /metrics. Counter names carry the pilot's own janusly_go_ prefix —
-// they are new series, not impostors of the reference's exporters. Queue
-// depth is a custom collector with a short cache so scrapes stay bounded and
-// can never stampede the database.
+// port's /metrics. Runtime counters use the janusly_ prefix. Queue depth is
+// a custom collector with a short cache so scrapes stay bounded and can never
+// stampede the database.
 package engine
 
 import (
@@ -19,37 +18,37 @@ import (
 
 var (
 	metricClaims = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "janusly_go_claims_total",
+		Name: "janusly_claims_total",
 		Help: "Queue claims consumed by the worker pool.",
 	})
 	metricNodeCompletions = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "janusly_go_node_completions_total",
+		Name: "janusly_node_completions_total",
 		Help: "Terminal node transitions by outcome.",
 	}, []string{"outcome"})
 	metricNodeRetries = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "janusly_go_node_retries_total",
+		Name: "janusly_node_retries_total",
 		Help: "Retry requeues scheduled by the failure ladder.",
 	})
 	metricRunsTerminal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "janusly_go_runs_terminal_total",
+		Name: "janusly_runs_terminal_total",
 		Help: "Run-level terminal transitions by status.",
 	}, []string{"status"})
 	metricReapedNodes = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "janusly_go_reaped_nodes_total",
+		Name: "janusly_reaped_nodes_total",
 		Help: "Stalled running nodes failed into the DLQ by the reaper.",
 	})
 	metricRedrives = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "janusly_go_redrives_total",
+		Name: "janusly_redrives_total",
 		Help: "Dead letters successfully redriven.",
 	})
 	metricNodeExecution = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name:    "janusly_go_node_execution_seconds",
+		Name:    "janusly_node_execution_seconds",
 		Help:    "Executor wall time per claimed node.",
 		Buckets: prometheus.ExponentialBuckets(0.001, 2.5, 12),
 	})
 )
 
-// QueueDepthCollector exposes janusly_go_queue_depth{state} from one bounded
+// QueueDepthCollector exposes janusly_queue_depth{state} from one bounded
 // GROUP BY, cached briefly so concurrent scrapes coalesce.
 type QueueDepthCollector struct {
 	pool  *pgxpool.Pool
@@ -63,7 +62,7 @@ type QueueDepthCollector struct {
 func NewQueueDepthCollector(pool *pgxpool.Pool) *QueueDepthCollector {
 	return &QueueDepthCollector{
 		pool: pool,
-		desc: prometheus.NewDesc("janusly_go_queue_depth",
+		desc: prometheus.NewDesc("janusly_queue_depth",
 			"Open run-node rows by state.", []string{"state"}, nil),
 	}
 }
@@ -105,11 +104,10 @@ func (c *QueueDepthCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 }
 
-// QueueParityCollector exposes the REFERENCE's queue gauge names —
-// workflow_queue_waiting_jobs / workflow_queue_active_jobs — over the
-// Postgres substrate so existing dashboards need no rename. Waiting uses
-// the eligibility semantics (queued, run running, wake-up passed).
-type QueueParityCollector struct {
+// WorkflowQueueCollector exposes workflow_queue_waiting_jobs and
+// workflow_queue_active_jobs. Waiting uses eligibility semantics: queued,
+// parent run active, and any wake-up already due.
+type WorkflowQueueCollector struct {
 	pool        *pgxpool.Pool
 	waitingDesc *prometheus.Desc
 	activeDesc  *prometheus.Desc
@@ -119,9 +117,9 @@ type QueueParityCollector struct {
 	active      float64
 }
 
-// NewQueueParityCollector builds (but does not register) the collector.
-func NewQueueParityCollector(pool *pgxpool.Pool) *QueueParityCollector {
-	return &QueueParityCollector{
+// NewWorkflowQueueCollector builds (but does not register) the collector.
+func NewWorkflowQueueCollector(pool *pgxpool.Pool) *WorkflowQueueCollector {
+	return &WorkflowQueueCollector{
 		pool: pool,
 		waitingDesc: prometheus.NewDesc("workflow_queue_waiting_jobs",
 			"Eligible queued workflow nodes awaiting a worker.", nil, nil),
@@ -131,13 +129,13 @@ func NewQueueParityCollector(pool *pgxpool.Pool) *QueueParityCollector {
 }
 
 // Describe implements prometheus.Collector.
-func (c *QueueParityCollector) Describe(ch chan<- *prometheus.Desc) {
+func (c *WorkflowQueueCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.waitingDesc
 	ch <- c.activeDesc
 }
 
 // Collect implements prometheus.Collector with a 5-second cache.
-func (c *QueueParityCollector) Collect(ch chan<- prometheus.Metric) {
+func (c *WorkflowQueueCollector) Collect(ch chan<- prometheus.Metric) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if time.Since(c.at) > 5*time.Second {

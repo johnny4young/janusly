@@ -93,7 +93,7 @@ func TestApprovalDeadlinePoliciesEndToEnd(t *testing.T) {
 				}
 			}
 			var wakeups int
-			_ = pool.QueryRow(ctx, `SELECT count(*) FROM go_pilot_wakeups w
+			_ = pool.QueryRow(ctx, `SELECT count(*) FROM run_wakeups w
 				JOIN run_nodes rn ON rn.id=w.run_node_id WHERE rn.run_id=$1`, runID).Scan(&wakeups)
 			if wakeups != 0 {
 				t.Fatalf("handled deadline wakeup leaked: %d", wakeups)
@@ -114,7 +114,7 @@ func TestApprovalDeadlineManualResumeAndHASweepRace(t *testing.T) {
 		WHERE run_id=$1 AND node_id='gate'`, runID, deadlineAt); err != nil {
 		t.Fatalf("set due approval state: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE go_pilot_wakeups
+	if _, err := pool.Exec(ctx, `UPDATE run_wakeups
 		SET wake_at=$2::timestamptz
 		WHERE run_node_id=(SELECT id FROM run_nodes WHERE run_id=$1 AND node_id='gate')`, runID, deadlineAt); err != nil {
 		t.Fatalf("set due approval wakeup: %v", err)
@@ -145,7 +145,7 @@ func TestApprovalDeadlineManualResumeAndHASweepRace(t *testing.T) {
 		AND type IN ('approval.timed_out','node.resumed')`, runID).Scan(&causal)
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM run_events WHERE run_id=$1
 		AND type IN ('run.failed','run.succeeded')`, runID).Scan(&terminal)
-	_ = pool.QueryRow(ctx, `SELECT count(*) FROM go_pilot_wakeups w
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM run_wakeups w
 		JOIN run_nodes rn ON rn.id=w.run_node_id WHERE rn.run_id=$1`, runID).Scan(&wakeups)
 	if causal != 1 || terminal != 1 || wakeups != 0 {
 		t.Fatalf("exactly one race winner required: causal=%d terminal=%d wakeups=%d", causal, terminal, wakeups)
@@ -164,7 +164,7 @@ func TestStaleApprovalDeadlineRearmsCurrentGeneration(t *testing.T) {
 		WHERE run_id=$1 AND node_id='gate'`, runID, currentText); err != nil {
 		t.Fatalf("seed current generation: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE go_pilot_wakeups
+	if _, err := pool.Exec(ctx, `UPDATE run_wakeups
 		SET wake_at=$2
 		WHERE run_node_id=(SELECT id FROM run_nodes WHERE run_id=$1 AND node_id='gate')`,
 		runID, oldDeadline); err != nil {
@@ -178,7 +178,7 @@ func TestStaleApprovalDeadlineRearmsCurrentGeneration(t *testing.T) {
 	var nodeStatus string
 	var wakeAt time.Time
 	_ = pool.QueryRow(ctx, `SELECT status FROM run_nodes WHERE run_id=$1 AND node_id='gate'`, runID).Scan(&nodeStatus)
-	_ = pool.QueryRow(ctx, `SELECT wake_at FROM go_pilot_wakeups WHERE run_node_id=(
+	_ = pool.QueryRow(ctx, `SELECT wake_at FROM run_wakeups WHERE run_node_id=(
 		SELECT id FROM run_nodes WHERE run_id=$1 AND node_id='gate')`, runID).Scan(&wakeAt)
 	if nodeStatus != "waiting" || !wakeAt.Equal(currentDeadline) {
 		t.Fatalf("current generation was not preserved: status=%s wakeAt=%s", nodeStatus, wakeAt)
@@ -200,7 +200,7 @@ func TestNodeApprovalCheckpointContinuesInGo(t *testing.T) {
 		runID, runID+"-gate", deadlineAt); err != nil {
 		t.Fatalf("seed Node node checkpoint: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO go_pilot_wakeups (run_node_id, wake_at, reason)
+	if _, err := pool.Exec(ctx, `INSERT INTO run_wakeups (run_node_id, wake_at, reason)
 		VALUES ($1, $2::timestamptz, 'approval_timeout')`, runID+"-gate", deadlineAt); err != nil {
 		t.Fatalf("seed Node deadline clock: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestIndefiniteApprovalClearsInheritedRetryWakeup(t *testing.T) {
 		t.Fatalf("claim approval: %+v err=%v", claims, err)
 	}
 	claim := claims[0]
-	if _, err := pool.Exec(ctx, `INSERT INTO go_pilot_wakeups (run_node_id, wake_at, reason)
+	if _, err := pool.Exec(ctx, `INSERT INTO run_wakeups (run_node_id, wake_at, reason)
 		VALUES ($1, now()-interval '1 second', 'retry')`, claim.RowID); err != nil {
 		t.Fatalf("seed inherited retry wakeup: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestIndefiniteApprovalClearsInheritedRetryWakeup(t *testing.T) {
 		t.Fatalf("mark waiting: %v", err)
 	}
 	var wakeups int
-	_ = pool.QueryRow(ctx, `SELECT count(*) FROM go_pilot_wakeups WHERE run_node_id=$1`, claim.RowID).Scan(&wakeups)
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM run_wakeups WHERE run_node_id=$1`, claim.RowID).Scan(&wakeups)
 	if wakeups != 0 {
 		t.Fatalf("indefinite human wait inherited a retry clock: %d", wakeups)
 	}

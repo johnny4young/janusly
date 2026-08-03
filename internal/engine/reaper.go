@@ -127,7 +127,7 @@ func (e *Engine) StartReaper(ctx context.Context, interval, threshold time.Durat
 	// nodes) needs sub-15m recovery; the override logs loudly so a
 	// misconfigured production deploy is visible in the first minute.
 	thresholdFloor := 15 * time.Minute
-	if raw := os.Getenv("JANUSLY_GO_REAPER_THRESHOLD_FLOOR_MS"); raw != "" {
+	if raw := os.Getenv("JANUSLY_REAPER_THRESHOLD_FLOOR_MS"); raw != "" {
 		if ms, err := strconv.Atoi(raw); err == nil && ms > 0 {
 			thresholdFloor = time.Duration(ms) * time.Millisecond
 			logger.Warn("reaper threshold floor overridden by env — nodes running longer than the effective threshold WILL be failed into the DLQ",

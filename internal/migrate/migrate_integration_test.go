@@ -4,22 +4,19 @@ package migrate
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"net/url"
 	"os"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/pressly/goose/v3"
 )
 
 func migrationDatabaseURL(t *testing.T) string {
 	t.Helper()
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set; run through make test")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	return dsn
 }
@@ -63,228 +60,94 @@ func createMigrationTestDatabase(t *testing.T) string {
 	return targetURL.String()
 }
 
-func prepareNodeRuntimeDatabase(t *testing.T, ctx context.Context, dsn string) {
-	t.Helper()
-	configure()
-	db, err := open(dsn)
-	if err != nil {
-		t.Fatalf("open isolated migration database: %v", err)
-	}
-	defer func() { _ = db.Close() }()
-	if err := goose.UpToContext(ctx, db, "sql", baselineVersion); err != nil {
-		t.Fatalf("apply captured shared baseline: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		DROP INDEX IF EXISTS go_pilot_runs_org_created_id_idx;
-		DROP TABLE go_pilot_start_idempotency;
-		DROP TABLE go_pilot_wakeups;
-		ALTER TABLE schedule_entries DROP COLUMN IF EXISTS next_fire_at;
-		DROP TABLE go_pilot_goose_version;
-		CREATE TABLE go_pilot_goose_version (
-			id serial PRIMARY KEY,
-			version_id bigint NOT NULL,
-			is_applied boolean NOT NULL,
-			tstamp timestamp NOT NULL DEFAULT now()
-		);
-		INSERT INTO go_pilot_goose_version (version_id, is_applied) VALUES (0, true);
-
-		INSERT INTO schedule_entries (
-			id, org_id, workflow_id, workflow_version_id, node_id, cron_expression, enabled
-		) VALUES
-			('enabled-schedule', 'org-1', 'workflow-schedule', 'version-schedule', 'cron', '* * * * *', true),
-			('disabled-schedule', 'org-1', 'workflow-schedule', 'version-schedule', 'cron-off', '* * * * *', false);
-
-		INSERT INTO run_nodes (id, run_id, node_id, status, state_json) VALUES
-			('timer-node', 'run-timer', 'wait', 'waiting',
-			 '{"waiting":{"kind":"timer","wakeAt":"2026-08-03T12:34:56.789Z"}}'::jsonb),
-			('approval-node', 'run-approval', 'gate', 'waiting',
-			 '{"waiting":{"kind":"approval","deadlineAt":"2026-08-03T13:00:00.000Z","onTimeout":"fail"}}'::jsonb);
-
-		INSERT INTO workflows (id, org_id, name, status)
-		VALUES ('workflow-approval', 'org-1', 'Deadline approval', 'active');
-		INSERT INTO workflow_versions (id, org_id, workflow_id, version, dag_json)
-		VALUES (
-			'version-approval', 'org-1', 'workflow-approval', 1,
-			'{"nodes":[{"id":"gate","type":"approval","config":{"decisionTimeoutMs":60000,"onTimeout":"fail"}}],"edges":[]}'::jsonb
-		);
-	`); err != nil {
-		t.Fatalf("shape captured baseline as a pre-Goose Node database: %v", err)
-	}
-}
-
-func TestUpgradePreGooseNodeRuntimeDatabase(t *testing.T) {
+func TestFreshMigrationIsIdempotentAndComplete(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	dsn := createMigrationTestDatabase(t)
-	prepareNodeRuntimeDatabase(t, ctx, dsn)
 
+	if err := AssertMigrated(ctx, dsn); err == nil || !strings.Contains(err.Error(), "database is not migrated") {
+		t.Fatalf("empty database must fail the boot gate: %v", err)
+	}
 	if err := Up(ctx, dsn); err != nil {
-		t.Fatalf("upgrade pre-Goose Node database: %v", err)
+		t.Fatalf("migrate fresh database: %v", err)
+	}
+	if err := Up(ctx, dsn); err != nil {
+		t.Fatalf("repeat migration idempotently: %v", err)
 	}
 	if err := AssertMigrated(ctx, dsn); err != nil {
-		t.Fatalf("upgraded database must pass the boot gate: %v", err)
+		t.Fatalf("migrated database must pass the boot gate: %v", err)
 	}
 
 	db, err := open(dsn)
 	if err != nil {
-		t.Fatalf("open upgraded database: %v", err)
+		t.Fatalf("open migrated database: %v", err)
 	}
 	defer func() { _ = db.Close() }()
 
-	latest, err := latestEmbeddedVersion()
-	if err != nil {
-		t.Fatalf("latest embedded version: %v", err)
+	var serverVersion int
+	if err := db.QueryRowContext(ctx, `SHOW server_version_num`).Scan(&serverVersion); err != nil {
+		t.Fatalf("read PostgreSQL version: %v", err)
 	}
+	if serverVersion < 180000 || serverVersion >= 190000 {
+		t.Fatalf("integration database must be PostgreSQL 18, got server_version_num=%d", serverVersion)
+	}
+
 	var current int64
 	if err := db.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(version_id) FILTER (WHERE is_applied), 0) FROM go_pilot_goose_version`).Scan(&current); err != nil {
+		`SELECT COALESCE(MAX(version_id) FILTER (WHERE is_applied), 0) FROM janusly_schema_version`).Scan(&current); err != nil {
 		t.Fatalf("read migrated version: %v", err)
 	}
-	if current != latest {
-		t.Fatalf("migration version = %d, want %d", current, latest)
+	if current != 1 {
+		t.Fatalf("migration version = %d, want 1", current)
 	}
 
-	// A Go retry published back to Node can leave its private wakeup behind
-	// after Node consumes the shared publication marker. Repeat migration must
-	// discard spent clocks without deleting a still-queued retry.
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO run_nodes (id, run_id, node_id, status, state_json) VALUES
-			('spent-retry-node', 'spent-retry-run', 'spent', 'succeeded', '{}'::jsonb),
-			('queued-retry-node', 'queued-retry-run', 'queued', 'queued', '{}'::jsonb);
-		INSERT INTO go_pilot_wakeups (run_node_id, wake_at, reason) VALUES
-			('spent-retry-node', now() + interval '1 minute', 'retry'),
-			('queued-retry-node', now() + interval '1 minute', 'retry');
-	`); err != nil {
-		t.Fatalf("seed rollback retry clocks: %v", err)
+	for _, relation := range []string{"rate_limit_windows", "run_start_idempotency", "run_wakeups"} {
+		var found bool
+		if err := db.QueryRowContext(ctx, `SELECT to_regclass('public.' || $1) IS NOT NULL`, relation).Scan(&found); err != nil {
+			t.Fatalf("inspect relation %s: %v", relation, err)
+		}
+		if !found {
+			t.Errorf("current relation %s is missing", relation)
+		}
 	}
-	if err := Up(ctx, dsn); err != nil {
-		t.Fatalf("reconcile rollback retry clocks: %v", err)
-	}
-	var spent, queued int
+
+	var obsoleteCount int
+	unsupportedPrefix := strings.Join([]string{"go", "pilot"}, "_") + "%"
 	if err := db.QueryRowContext(ctx, `
-		SELECT count(*) FILTER (WHERE run_node_id='spent-retry-node'),
-		       count(*) FILTER (WHERE run_node_id='queued-retry-node')
-		FROM go_pilot_wakeups`).Scan(&spent, &queued); err != nil {
-		t.Fatalf("read reconciled retry clocks: %v", err)
+		SELECT
+			(SELECT count(*) FROM pg_namespace WHERE nspname = 'drizzle') +
+			(SELECT count(*) FROM information_schema.tables
+			 WHERE table_schema = 'public' AND table_name LIKE $1)
+	`, unsupportedPrefix).Scan(&obsoleteCount); err != nil {
+		t.Fatalf("inspect unsupported schema objects: %v", err)
 	}
-	if spent != 0 || queued != 1 {
-		t.Fatalf("runtime bridge retry cleanup = spent %d queued %d", spent, queued)
-	}
-
-	var timerWakeAt time.Time
-	var timerReason string
-	if err := db.QueryRowContext(ctx,
-		`SELECT wake_at, reason FROM go_pilot_wakeups WHERE run_node_id = 'timer-node'`).
-		Scan(&timerWakeAt, &timerReason); err != nil {
-		t.Fatalf("read bridged timer: %v", err)
-	}
-	expectedWakeAt := time.Date(2026, 8, 3, 12, 34, 56, 789_000_000, time.UTC)
-	if !timerWakeAt.Equal(expectedWakeAt) || timerReason != "wait_until" {
-		t.Fatalf("timer bridge = (%s, %q), want (%s, wait_until)", timerWakeAt, timerReason, expectedWakeAt)
-	}
-	var approvalWakeAt time.Time
-	var approvalReason string
-	if err := db.QueryRowContext(ctx,
-		`SELECT wake_at, reason FROM go_pilot_wakeups WHERE run_node_id = 'approval-node'`).
-		Scan(&approvalWakeAt, &approvalReason); err != nil {
-		t.Fatalf("read bridged approval deadline: %v", err)
-	}
-	expectedApprovalAt := time.Date(2026, 8, 3, 13, 0, 0, 0, time.UTC)
-	if !approvalWakeAt.Equal(expectedApprovalAt) || approvalReason != "approval_timeout" {
-		t.Fatalf("approval bridge = (%s, %q), want (%s, approval_timeout)",
-			approvalWakeAt, approvalReason, expectedApprovalAt)
+	if obsoleteCount != 0 {
+		t.Fatalf("fresh database contains %d unsupported schema objects", obsoleteCount)
 	}
 
-	var enabledNext, disabledNext sql.NullTime
-	if err := db.QueryRowContext(ctx,
-		`SELECT next_fire_at FROM schedule_entries WHERE id = 'enabled-schedule'`).Scan(&enabledNext); err != nil {
-		t.Fatalf("read enabled schedule due clock: %v", err)
+	if _, err := db.ExecContext(ctx, `DROP TABLE run_wakeups`); err != nil {
+		t.Fatalf("damage schema for readiness test: %v", err)
 	}
-	if !enabledNext.Valid || enabledNext.Time.Second() != 0 || enabledNext.Time.Nanosecond() != 0 {
-		t.Fatalf("enabled schedule next_fire_at must be a minute-aligned instant, got %v", enabledNext)
+	if err := AssertMigrated(ctx, dsn); err == nil || !strings.Contains(err.Error(), "run_wakeups") {
+		t.Fatalf("incomplete schema must fail the boot gate explicitly: %v", err)
 	}
-	if err := db.QueryRowContext(ctx,
-		`SELECT next_fire_at FROM schedule_entries WHERE id = 'disabled-schedule'`).Scan(&disabledNext); err != nil {
-		t.Fatalf("read disabled schedule due clock: %v", err)
-	}
-	if disabledNext.Valid {
-		t.Fatalf("disabled schedule must remain unarmed, got %s", disabledNext.Time)
-	}
+}
 
-	firstNext := enabledNext.Time
-	if err := Up(ctx, dsn); err != nil {
-		t.Fatalf("repeat migration idempotently: %v", err)
+func TestExistingSchemaIsNotUpgraded(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	dsn := createMigrationTestDatabase(t)
+	db, err := open(dsn)
+	if err != nil {
+		t.Fatalf("open isolated database: %v", err)
 	}
-	if err := db.QueryRowContext(ctx,
-		`SELECT next_fire_at FROM schedule_entries WHERE id = 'enabled-schedule'`).Scan(&enabledNext); err != nil {
-		t.Fatalf("reread enabled schedule due clock: %v", err)
+	if _, err := db.ExecContext(ctx, `CREATE TABLE runs (id text PRIMARY KEY)`); err != nil {
+		_ = db.Close()
+		t.Fatalf("seed incompatible schema: %v", err)
 	}
-	if !enabledNext.Time.Equal(firstNext) {
-		t.Fatalf("idempotent migration moved due clock from %s to %s", firstNext, enabledNext.Time)
-	}
+	_ = db.Close()
 
-	// A Node checkpoint arriving after the last migration is detected at boot
-	// and repaired by the same idempotent bridge before Go owns the work plane.
-	if _, err := db.ExecContext(ctx,
-		`DELETE FROM go_pilot_wakeups WHERE run_node_id = 'approval-node'`); err != nil {
-		t.Fatalf("remove approval wakeup for readiness test: %v", err)
-	}
-	if err := AssertMigrated(ctx, dsn); err == nil ||
-		!strings.Contains(err.Error(), "waiting approvals lack durable Go deadline wakeups") {
-		t.Fatalf("missing approval wakeup must fail boot readiness: %v", err)
-	}
-	if err := Up(ctx, dsn); err != nil {
-		t.Fatalf("repeat migration must repair approval wakeup: %v", err)
-	}
-
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO run_nodes (id, run_id, node_id, status, state_json)
-		VALUES ('invalid-timer', 'run-invalid', 'wait', 'waiting',
-			'{"waiting":{"kind":"timer","wakeAt":"not-an-instant"}}'::jsonb)
-	`); err != nil {
-		t.Fatalf("insert malformed legacy timer: %v", err)
-	}
-	if err := AssertMigrated(ctx, dsn); err == nil ||
-		!strings.Contains(err.Error(), "waiting timers lack durable Go wakeups") {
-		t.Fatalf("missing timer wakeup must fail boot readiness: %v", err)
-	}
-	if err := Up(ctx, dsn); err == nil ||
-		!strings.Contains(err.Error(), "waiting timer \"invalid-timer\" has invalid wakeAt") {
-		t.Fatalf("malformed timer must fail migration explicitly: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		UPDATE run_nodes
-		SET state_json = '{"waiting":{"kind":"timer","wakeAt":"2026-08-04T00:00:00Z"}}'::jsonb
-		WHERE id = 'invalid-timer'
-	`); err != nil {
-		t.Fatalf("repair malformed legacy timer: %v", err)
-	}
-	if err := Up(ctx, dsn); err != nil {
-		t.Fatalf("retry migration after repairing timer: %v", err)
-	}
-
-	if _, err := db.ExecContext(ctx,
-		`UPDATE schedule_entries SET next_fire_at = NULL WHERE id = 'enabled-schedule'`); err != nil {
-		t.Fatalf("remove due clock for readiness test: %v", err)
-	}
-	if err := AssertMigrated(ctx, dsn); err == nil ||
-		!strings.Contains(err.Error(), "enabled schedules lack next_fire_at") {
-		t.Fatalf("missing due clock must fail boot readiness: %v", err)
-	}
-	if err := Up(ctx, dsn); err != nil {
-		t.Fatalf("retry migration must repair missing due clock: %v", err)
-	}
-	if err := AssertMigrated(ctx, dsn); err != nil {
-		t.Fatalf("repaired database must pass the boot gate: %v", err)
-	}
-
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO go_pilot_goose_version (version_id, is_applied)
-		VALUES ($1, true)`, latest+1); err != nil {
-		t.Fatalf("simulate a database newer than the binary: %v", err)
-	}
-	if err := AssertMigrated(ctx, dsn); err == nil ||
-		!strings.Contains(err.Error(), fmt.Sprintf("database is at migration %d but the binary embeds %d", latest+1, latest)) {
-		t.Fatalf("older binary must reject a newer database: %v", err)
+	if err := Up(ctx, dsn); err == nil {
+		t.Fatal("an existing incompatible schema must not be stamped or upgraded")
 	}
 }

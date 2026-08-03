@@ -29,9 +29,9 @@ import (
 
 func newMCPSession(t *testing.T) (*mcp.ClientSession, string) {
 	t.Helper()
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set; run through `make test`")
+		t.Skip("JANUSLY_DATABASE_URL not set; run through `make test`")
 	}
 	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "true")
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -317,7 +317,7 @@ func TestMcpWriteConsentLadder(t *testing.T) {
 
 func poolForTest(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	pool, err := pgxpool.New(context.Background(), os.Getenv("JANUSLY_GO_DATABASE_URL"))
+	pool, err := pgxpool.New(context.Background(), os.Getenv("JANUSLY_DATABASE_URL"))
 	if err != nil {
 		t.Fatalf("pool: %v", err)
 	}

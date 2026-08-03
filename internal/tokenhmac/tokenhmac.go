@@ -75,7 +75,7 @@ func secret() (string, error) {
 	if configured := os.Getenv(secretEnv); configured != "" {
 		return configured, nil
 	}
-	if os.Getenv("JANUSLY_GO_ENV") == "production" ||
+	if os.Getenv("JANUSLY_ENV") == "production" ||
 		os.Getenv("JANUSLY_PRODUCTION_MODE") == "true" ||
 		os.Getenv("NODE_ENV") == "production" {
 		return "", fmt.Errorf("%s is required in production", secretEnv)

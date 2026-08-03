@@ -29,9 +29,9 @@ import (
 // bites, and every call lands one usage row — with the secret never
 // echoed in any envelope.
 func TestIntegrationChokepoint(t *testing.T) {
-	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
+	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("JANUSLY_GO_DATABASE_URL not set")
+		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
 	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "true")
 	secretstore.ResetForTests()
