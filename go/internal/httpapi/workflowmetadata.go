@@ -121,28 +121,31 @@ func (s *V1Server) mountWorkflowMetadataRoutes(mux *http.ServeMux) {
 			writeLegacy(w, opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil))
 			return
 		}
-		var body workflowMetadataBody
-		if err := decodeBody(r, &body); err != nil {
-			writeLegacy(w, opError(http.StatusBadRequest, "workflow_metadata_invalid", "invalid metadata body", nil))
+		var body struct {
+			Metadata *workflowMetadataBody `json:"metadata"`
+		}
+		if err := decodeBody(r, &body); err != nil || body.Metadata == nil {
+			writeLegacy(w, opError(http.StatusUnprocessableEntity, "workflow_metadata_invalid", "invalid workflow metadata body", nil))
 			return
 		}
-		if message := validateMetadataBody(&body); message != "" {
-			writeLegacy(w, opError(http.StatusBadRequest, "workflow_metadata_invalid", message, nil))
+		metadata := body.Metadata
+		if message := validateMetadataBody(metadata); message != "" {
+			writeLegacy(w, opError(http.StatusUnprocessableEntity, "workflow_metadata_invalid", message, nil))
 			return
 		}
-		owners, _ := json.Marshal(orEmptySlice(body.Owners))
-		tags, _ := json.Marshal(orEmptySlice(body.Tags))
+		owners, _ := json.Marshal(orEmptySlice(metadata.Owners))
+		tags, _ := json.Marshal(orEmptySlice(metadata.Tags))
 		row, err := store.New(s.pool).UpsertWorkflowMetadata(r.Context(), store.UpsertWorkflowMetadataParams{
 			ID: s.newID(), OrgID: rc.orgID, WorkflowID: workflowID,
 			Owners: owners, Tags: tags,
-			Description:     pgtype.Text{String: body.Description, Valid: body.Description != ""},
-			SlackChannel:    pgtype.Text{String: body.SlackChannel, Valid: body.SlackChannel != ""},
-			LinearProject:   pgtype.Text{String: body.LinearProject, Valid: body.LinearProject != ""},
-			SeverityDefault: pgtype.Text{String: body.SeverityDefault, Valid: body.SeverityDefault != ""},
-			Folder:          pgtype.Text{String: body.Folder, Valid: body.Folder != ""},
-			RunbookMarkdown: pgtype.Text{String: body.RunbookMarkdown, Valid: body.RunbookMarkdown != ""},
+			Description:     pgtype.Text{String: metadata.Description, Valid: metadata.Description != ""},
+			SlackChannel:    pgtype.Text{String: metadata.SlackChannel, Valid: metadata.SlackChannel != ""},
+			LinearProject:   pgtype.Text{String: metadata.LinearProject, Valid: metadata.LinearProject != ""},
+			SeverityDefault: pgtype.Text{String: metadata.SeverityDefault, Valid: metadata.SeverityDefault != ""},
+			Folder:          pgtype.Text{String: metadata.Folder, Valid: metadata.Folder != ""},
+			RunbookMarkdown: pgtype.Text{String: metadata.RunbookMarkdown, Valid: metadata.RunbookMarkdown != ""},
 			AiGuidanceMarkdown: pgtype.Text{
-				String: body.AiGuidanceMarkdown, Valid: body.AiGuidanceMarkdown != "",
+				String: metadata.AiGuidanceMarkdown, Valid: metadata.AiGuidanceMarkdown != "",
 			},
 			CreatedBy: pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
 		})

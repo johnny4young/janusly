@@ -41,9 +41,11 @@ func TestWorkflowMetadataAndOrganization(t *testing.T) {
 
 	// Full upsert + audit projection of the AI guidance.
 	res = h.call("POST", "/workflows/"+wfA+"/metadata", map[string]any{
-		"owners": []any{"ana"}, "tags": []any{"facturación", "críticos"},
-		"description": "Flujo de cobros", "severityDefault": "p2",
-		"folder": "Finanzas", "aiGuidanceMarkdown": "SECRETO-NO-DEBE-AUDITARSE",
+		"metadata": map[string]any{
+			"owners": []any{"ana"}, "tags": []any{"facturación", "críticos"},
+			"description": "Flujo de cobros", "severityDefault": "p2",
+			"folder": "Finanzas", "aiGuidanceMarkdown": "SECRETO-NO-DEBE-AUDITARSE",
+		},
 	}, "")
 	if res.status != 200 {
 		t.Fatalf("upsert metadata: %d %+v", res.status, res.body)
@@ -54,6 +56,12 @@ func TestWorkflowMetadataAndOrganization(t *testing.T) {
 		h.org).Scan(&auditMetadata)
 	if strings.Contains(auditMetadata, "SECRETO-NO-DEBE-AUDITARSE") || !strings.Contains(auditMetadata, `"configured": true`) {
 		t.Fatalf("audit must project AI guidance: %s", auditMetadata)
+	}
+	// The reference requires the wrapper; a direct shape must never silently
+	// replace the row with empty metadata.
+	res = h.call("POST", "/workflows/"+wfA+"/metadata", map[string]any{"description": "lost"}, "")
+	if res.status != 422 || res.body["code"] != "workflow_metadata_invalid" {
+		t.Fatalf("unwrapped metadata must fail closed: %d %+v", res.status, res.body)
 	}
 
 	// The NARROW folder route leaves the rest untouched.
