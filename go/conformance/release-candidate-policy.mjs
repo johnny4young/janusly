@@ -1,6 +1,11 @@
 // Pure release-candidate policy. Collection and command execution live in the
 // run-* adapters so the fail-closed verdict stays deterministic and unit-testable.
 
+import {
+  EXTERNAL_GATE_IDS,
+  EXTERNAL_GATE_POLICY_VERSION,
+} from "./external-gate-policy.mjs";
+
 export const REQUIRED_LOCAL_CHECKS = Object.freeze([
   "root_lint",
   "root_scripts",
@@ -13,14 +18,7 @@ export const REQUIRED_LOCAL_CHECKS = Object.freeze([
   "source_tree_unchanged",
 ]);
 
-export const REQUIRED_EXTERNAL_GATES = Object.freeze([
-  "remote_review",
-  "remote_ci",
-  "qualification",
-  "shadow",
-  "canary",
-  "rollback",
-]);
+export const REQUIRED_EXTERNAL_GATES = EXTERNAL_GATE_IDS;
 
 function issue(code, message, details = {}) {
   return { code, message, ...details };
@@ -123,17 +121,35 @@ export function evaluateReleaseCandidate(input) {
   const externalGateStates = {};
   const productionBlockers = [...reviewBlockers];
   const externalMatches = externalReceipt && matchesCandidate(externalReceipt, candidate);
-  if (externalReceipt && externalReceipt.schemaVersion !== 1) {
+  let externalUsable = Boolean(externalReceipt && externalMatches);
+  if (externalReceipt && externalReceipt.schemaVersion !== 2) {
     productionBlockers.push(issue("external_gate_schema_unsupported", "External gate receipt schema is unsupported"));
+    externalUsable = false;
+  } else if (externalReceipt && externalReceipt.policyVersion !== EXTERNAL_GATE_POLICY_VERSION) {
+    productionBlockers.push(issue("external_gate_policy_stale", "External gate receipt used a different policy version"));
+    externalUsable = false;
   } else if (externalReceipt && !externalMatches) {
     productionBlockers.push(issue("external_gate_receipt_stale", "External gate receipt belongs to a different candidate"));
+    externalUsable = false;
   }
   for (const gate of REQUIRED_EXTERNAL_GATES) {
-    const status = externalMatches ? externalReceipt.gates?.[gate]?.status : undefined;
+    const row = externalUsable ? externalReceipt.gates?.[gate] : undefined;
+    let status = row?.status;
+    if (status === "pass" && (
+      !/^[0-9a-f]{64}$/u.test(row.evidenceSha256 ?? "") ||
+      !Number.isFinite(Date.parse(row.validatedAt ?? "")) ||
+      !row.summary || typeof row.summary !== "object" || Array.isArray(row.summary)
+    )) {
+      status = "invalid";
+    }
     externalGateStates[gate] = status ?? "pending";
     if (status !== "pass") {
       productionBlockers.push(issue(
-        status === "fail" ? "external_gate_failed" : "external_gate_pending",
+        status === "fail"
+          ? "external_gate_failed"
+          : status === "invalid"
+            ? "external_gate_invalid"
+            : "external_gate_pending",
         `External gate ${gate} has not passed`,
         { gate, status: status ?? "pending" },
       ));

@@ -8,7 +8,9 @@ one work plane. This runbook is not production-certified until the P0 data,
 BullMQ, in-flight-work, and full-browser gates in [`AUDIT.md`](AUDIT.md) pass.
 The closed four-queue/job matrix, executable commands, and rollback publication
 contract live in [`QUEUE-HANDOFF.md`](QUEUE-HANDOFF.md); an operator must use
-that gate rather than infer safety from queue depth alone.
+that gate rather than infer safety from queue depth alone. The exact-candidate
+evidence envelopes and record-only aggregate policy live in
+[`EXTERNAL-GATES.md`](EXTERNAL-GATES.md).
 
 ## Environment prerequisites
 

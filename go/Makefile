@@ -4,10 +4,12 @@ PG_CONTAINER := janusly-go-pilot-postgres-1
 SCHEMA_DB := janusly_go_schema_dump
 SCHEMA_DB_URL ?= postgres://janusly:janusly-go-local@127.0.0.1:4632/$(SCHEMA_DB)
 
-.PHONY: db-up db-down migrate schema-dump generate lint vuln test run build parity ci test-pg18 bench fuzz contract web-embed verify seed chaos bench-hostile script-test queue-handoff-test queue-handoff queue-handoff-rehearsal release-checks release-manifest release-review release-production-check
+.PHONY: db-up db-down migrate schema-dump generate lint vuln test run build parity ci test-pg18 bench fuzz contract web-embed verify seed chaos bench-hostile script-test queue-handoff-test queue-handoff queue-handoff-rehearsal release-checks release-manifest release-review release-production-check external-gate-template external-gate-record
 
 RELEASE_ARTIFACTS ?= ../artifacts
 RELEASE_MANIFEST_ARGS ?=
+EXTERNAL_GATE ?=
+EXTERNAL_EVIDENCE ?=
 
 db-up:
 	docker compose -f docker-compose.yml up -d --wait
@@ -107,6 +109,18 @@ release-review: release-checks
 
 release-production-check:
 	$(MAKE) release-manifest RELEASE_MANIFEST_ARGS=--check-production
+
+external-gate-template:
+	@test -n "$(EXTERNAL_GATE)" || (echo "EXTERNAL_GATE is required" && exit 2)
+	@node conformance/run-external-gate.mjs --template=$(EXTERNAL_GATE)
+
+external-gate-record:
+	@test -n "$(EXTERNAL_GATE)" || (echo "EXTERNAL_GATE is required" && exit 2)
+	@test -n "$(EXTERNAL_EVIDENCE)" || (echo "EXTERNAL_EVIDENCE is required" && exit 2)
+	@node conformance/run-external-gate.mjs \
+		--gate=$(EXTERNAL_GATE) \
+		--input="$(EXTERNAL_EVIDENCE)" \
+		--output="$(RELEASE_ARTIFACTS)/go-external-gates.json"
 
 ci:
 	@echo "== generate (sqlc drift check) =="

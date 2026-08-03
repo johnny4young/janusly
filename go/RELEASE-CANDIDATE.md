@@ -42,8 +42,9 @@ tree still require separately captured receipts for:
 2. remote CI on the reviewed head;
 3. the exact-head opt-in qualification profiles;
 4. write-safe shadow comparison;
-5. gradual canary progression with stop thresholds; and
-6. an executed rollback rehearsal.
+5. the global work-plane cutover;
+6. gradual canary progression with stop thresholds; and
+7. an executed rollback rehearsal.
 
 List the closed qualification catalog with `pnpm qualification:list`. Execute
 one profile, a comma-separated subset, or every no-credit local profile with:
@@ -63,6 +64,11 @@ catalog. Its weekly schedule runs only the cheap Supabase configuration drift
 probe: `pnpm qualification:supabase-pg18` remains green while the pinned CLI
 rejects PostgreSQL 18 and deliberately turns red as soon as the CLI accepts it,
 forcing removal and requalification of the PostgreSQL 17 Auth-lab exception.
+
+[`EXTERNAL-GATES.md`](EXTERNAL-GATES.md) defines the machine-validated evidence
+contract and record-only commands for all seven gates. Shadow evidence is
+strictly read-only. It cannot authorize a per-tenant or overlapping mutation
+plane; Node-to-Go work-plane ownership moves globally at the cutover gate.
 
 `make release-production-check` only evaluates those receipts. It performs no
 remote or traffic mutation and fails while any external gate is missing,

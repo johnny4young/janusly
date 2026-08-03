@@ -6,6 +6,7 @@ import {
   REQUIRED_EXTERNAL_GATES,
   REQUIRED_LOCAL_CHECKS,
 } from "./release-candidate-policy.mjs";
+import { EXTERNAL_GATE_POLICY_VERSION } from "./external-gate-policy.mjs";
 
 const COMMIT = "a".repeat(40);
 const TREE = "b".repeat(40);
@@ -91,9 +92,15 @@ test("dirty, divergent, non-PG18 candidates fail review closed", () => {
 test("every exact external gate is required for production readiness", () => {
   const input = passingInput();
   input.externalGateReceipt = {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    policyVersion: EXTERNAL_GATE_POLICY_VERSION,
     candidate: { commit: COMMIT, tree: TREE },
-    gates: Object.fromEntries(REQUIRED_EXTERNAL_GATES.map(id => [id, { status: "pass" }])),
+    gates: Object.fromEntries(REQUIRED_EXTERNAL_GATES.map(id => [id, {
+      status: "pass",
+      validatedAt: "2026-08-03T14:00:00.000Z",
+      evidenceSha256: "9".repeat(64),
+      summary: { gate: id },
+    }])),
   };
   let verdict = evaluateReleaseCandidate(input);
   assert.equal(verdict.readyForReview, true);
@@ -108,6 +115,13 @@ test("every exact external gate is required for production readiness", () => {
     gate: "canary",
     status: "fail",
   });
+
+  input.externalGateReceipt.gates.canary.status = "pass";
+  input.externalGateReceipt.gates.shadow.summary = [];
+  verdict = evaluateReleaseCandidate(input);
+  assert.equal(verdict.readyForProduction, false);
+  assert.equal(verdict.productionBlockers.some(blocker =>
+    blocker.code === "external_gate_invalid" && blocker.gate === "shadow"), true);
 });
 
 test("missing required local checks are named individually", () => {
