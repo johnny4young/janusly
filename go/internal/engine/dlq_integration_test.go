@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -84,6 +85,18 @@ func TestFlakyNodeSucceedsOnThirdAttempt(t *testing.T) {
 	_ = pool.QueryRow(ctx, "select count(*) from dead_letters where run_id=$1", runID).Scan(&deadLetters)
 	if deadLetters != 0 {
 		t.Fatalf("a recovered node must not dead-letter, got %d rows", deadLetters)
+	}
+
+	var pulls, successes, failures int
+	var value, meanReward float64
+	if err := pool.QueryRow(ctx, `SELECT pulls, value, mean_reward, success_count, failure_count
+		FROM routing_stats WHERE org_id=$1 AND node_id='flaky'`, org).
+		Scan(&pulls, &value, &meanReward, &successes, &failures); err != nil {
+		t.Fatalf("routing outcome stats: %v", err)
+	}
+	if pulls != 3 || value != -1 || math.Abs(meanReward-(-1.0/3.0)) > 1e-6 || successes != 1 || failures != 2 {
+		t.Fatalf("routing outcome stats = pulls=%d value=%v mean=%v successes=%d failures=%d",
+			pulls, value, meanReward, successes, failures)
 	}
 }
 

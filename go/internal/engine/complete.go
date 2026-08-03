@@ -32,6 +32,12 @@ type ClaimedNode struct {
 	OrgID string
 }
 
+type completionOptions struct {
+	beforeSuccess    func(q *store.Queries, events *runEventBuffer, finishedAt time.Time) error
+	beforeDownstream func(q *store.Queries, events *runEventBuffer, finishedAt time.Time) error
+	skipSuccessEvent bool
+}
+
 // CompleteNode commits a successful execution: node succeeded with its
 // output, the node.succeeded event (output inlined only under the 8 KB
 // threshold), ready successors queued with their node.queued events, and the
@@ -39,6 +45,63 @@ type ClaimedNode struct {
 // error when the CAS finds the node no longer running — another actor owns
 // that transition.
 func (e *Engine) CompleteNode(ctx context.Context, claim ClaimedNode, output any) error {
+	return e.completeNode(ctx, claim, output, completionOptions{})
+}
+
+// CompleteRouterNode commits the deterministic decision, its causal event,
+// and every losing direct-successor skip in the same completion transaction.
+// The readiness scan therefore cannot observe the router as succeeded while
+// both branches are still eligible for publication.
+func (e *Engine) CompleteRouterNode(ctx context.Context, claim ClaimedNode, plan RouterExecution) error {
+	decisionJSON, err := json.Marshal(plan.Decision)
+	if err != nil {
+		return fmt.Errorf("marshal router decision: %w", err)
+	}
+	decisionValue := map[string]any{}
+	if err := json.Unmarshal(decisionJSON, &decisionValue); err != nil {
+		return fmt.Errorf("project router decision: %w", err)
+	}
+	decisionPayload := safePersist(decisionValue, defaultPersistMaxBytes())
+	return e.completeNode(ctx, claim, map[string]any{"decision": decisionValue}, completionOptions{
+		// The compatibility runtime uses decision.made as the router's
+		// timeline receipt and advances the node row without a second,
+		// redundant node.succeeded event carrying the same decision.
+		skipSuccessEvent: true,
+		beforeSuccess: func(_ *store.Queries, events *runEventBuffer, finishedAt time.Time) error {
+			events.add(e.newID(), claim.RunID, claim.NodeID, "decision.made", decisionPayload, finishedAt)
+			return nil
+		},
+		beforeDownstream: func(q *store.Queries, events *runEventBuffer, finishedAt time.Time) error {
+			chosen := plan.Decision.ChosenNodeID
+			if chosen == "" {
+				return nil
+			}
+			reason := fmt.Sprintf("Router %s chose %s", claim.NodeID, chosen)
+			stateJSON := safePersist(map[string]any{"skipped": map[string]any{"reason": reason}}, stateJSONMaxBytes)
+			payloadJSON := safePersist(map[string]any{"reason": reason}, defaultPersistMaxBytes())
+			for _, candidate := range plan.Candidates {
+				if candidate.NodeID == chosen || !plan.SuccessorIDs[candidate.NodeID] {
+					continue
+				}
+				skipped, err := q.SkipRunNode(ctx, store.SkipRunNodeParams{
+					RunID: claim.RunID, NodeID: candidate.NodeID,
+					StateJson: stateJSON, FinishedAt: &finishedAt,
+				})
+				if err != nil {
+					return fmt.Errorf("skip router candidate %s: %w", candidate.NodeID, err)
+				}
+				if skipped == 0 {
+					continue
+				}
+				events.add(e.newID(), claim.RunID, candidate.NodeID, "node.skipped", payloadJSON, finishedAt)
+				metricNodeCompletions.WithLabelValues("skipped").Inc()
+			}
+			return nil
+		},
+	})
+}
+
+func (e *Engine) completeNode(ctx context.Context, claim ClaimedNode, output any, opts completionOptions) error {
 	if output == nil {
 		output = map[string]any{}
 	}
@@ -79,26 +142,43 @@ func (e *Engine) CompleteNode(ctx context.Context, claim ClaimedNode, output any
 		if completed == 0 {
 			return errSkipCommit
 		}
+		if err := e.recordRoutingOutcome(ctx, q, claim, 1, true, finishedAt); err != nil {
+			return err
+		}
 		// A consumed retry wake-up dies with the completion — deterministic
 		// cleanup, not sweeper-dependent.
 		if err := q.DeleteWakeup(ctx, claim.RowID); err != nil {
 			return fmt.Errorf("clear wakeup: %w", err)
 		}
-		events.add(e.newID(), claim.RunID, claim.NodeID, "node.succeeded", eventJSON, finishedAt)
+		if opts.beforeSuccess != nil {
+			if err := opts.beforeSuccess(q, events, finishedAt); err != nil {
+				return err
+			}
+		}
+		if !opts.skipSuccessEvent {
+			events.add(e.newID(), claim.RunID, claim.NodeID, "node.succeeded", eventJSON, finishedAt)
+		}
 		metricNodeCompletions.WithLabelValues("succeeded").Inc()
 		if err := e.recordRecoveryImpact(ctx, q, claim, finishedAt); err != nil {
 			return err
 		}
+		quarantined := false
 		if len(violations) > 0 {
-			quarantined, err := e.persistSemanticViolations(ctx, q, events, claim, violations, finishedAt)
+			quarantined, err = e.persistSemanticViolations(ctx, q, events, claim, violations, finishedAt)
 			if err != nil {
 				return err
 			}
-			if quarantined {
-				// The business-outcome gate: the run parks in waiting BEFORE
-				// any downstream node can be scheduled.
-				return nil
+		}
+		if opts.beforeDownstream != nil {
+			if err := opts.beforeDownstream(q, events, finishedAt); err != nil {
+				return err
 			}
+		}
+		if quarantined {
+			// The business-outcome gate: the run parks in waiting BEFORE
+			// any downstream node can be scheduled. Router loser skips may
+			// already have landed above, matching the compatibility runtime.
+			return nil
 		}
 		return e.scheduleDownstream(ctx, q, events, claim.RunID, finishedAt)
 	}); err != nil {
@@ -108,6 +188,38 @@ func (e *Engine) CompleteNode(ctx context.Context, claim ClaimedNode, output any
 	// covers crash windows). Only meaningful when this completion rolled
 	// the run terminal — the recorder re-validates everything itself.
 	e.maybeRecordRolloutOutcome(ctx, claim.RunID)
+	return nil
+}
+
+// recordRoutingOutcome updates the per-tenant reinforcement counter only
+// after the caller's node CAS has won. Keeping it on the same transaction
+// removes both lost observations and double credit under competing workers.
+func (e *Engine) recordRoutingOutcome(
+	ctx context.Context, q *store.Queries, claim ClaimedNode,
+	reward float32, success bool, recordedAt time.Time,
+) error {
+	orgID := claim.OrgID
+	if orgID == "" {
+		run, err := q.GetRunExecution(ctx, claim.RunID)
+		if err != nil {
+			return fmt.Errorf("resolve routing outcome tenant: %w", err)
+		}
+		orgID = run.OrgID
+	}
+	if orgID == "" {
+		return nil
+	}
+	successCount, failureCount := int32(0), int32(1)
+	if success {
+		successCount, failureCount = 1, 0
+	}
+	if err := q.RecordRoutingOutcome(ctx, store.RecordRoutingOutcomeParams{
+		ID: e.newID(), OrgID: orgID, NodeID: claim.NodeID,
+		Reward: reward, SuccessCount: successCount, FailureCount: failureCount,
+		UpdatedAt: &recordedAt,
+	}); err != nil {
+		return fmt.Errorf("record routing outcome: %w", err)
+	}
 	return nil
 }
 

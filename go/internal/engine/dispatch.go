@@ -35,6 +35,15 @@ type Dispatcher struct {
 	mcp        *mcpclient.Client
 }
 
+// RouterExecution carries the internal routing plan from deterministic
+// dispatch into the specialized completion transaction. Only Decision is
+// persisted; Candidates are retained solely to skip losing successors.
+type RouterExecution struct {
+	Decision     domain.DecisionOutput
+	Candidates   []domain.DecisionCandidate
+	SuccessorIDs map[string]bool
+}
+
 // NewDispatcher wires the executor registry over this engine. Env access
 // defaults to the process environment; secrets default to none (every
 // {{secret.X}} is a hard failure) until a secret source is configured.
@@ -111,6 +120,38 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 		}
 		return d.engine.executeSubworkflowNode(ctx, claim, renderedConfig,
 			map[string]any{"input": runContext["input"]}, replayMode, rendered.RedactedValues)
+	}
+	if node.Type == "router" || node.Type == "router_llm" {
+		candidates := domain.NormalizeDecisionCandidates(renderedConfig["candidates"])
+		if len(candidates) == 0 {
+			return nil, fmt.Errorf("%s node requires at least one valid routing candidate", node.Type)
+		}
+		rows, err := q.ListRoutingStats(ctx, claim.OrgID)
+		if err != nil {
+			return nil, fmt.Errorf("load routing stats: %w", err)
+		}
+		stats := make(map[string]domain.RoutingStat, len(rows))
+		for _, row := range rows {
+			stats[row.NodeID] = domain.RoutingStat{
+				Pulls: row.Pulls, MeanReward: float64(row.MeanReward),
+			}
+		}
+		successorIDs := map[string]bool{}
+		for _, edge := range wf.Edges {
+			if edge.From == node.ID {
+				successorIDs[edge.To] = true
+			}
+		}
+		return RouterExecution{
+			Decision: domain.Decide(domain.DecisionInput{
+				Candidates:  candidates,
+				Preferences: domain.DecisionPreferencesFromValue(runContext["preferences"]),
+				Budget:      domain.DecisionBudgetFromValue(runContext["budget"]),
+				RLStats:     stats,
+				Strategy:    domain.NormalizeDecisionStrategy(renderedConfig["strategy"]),
+			}),
+			Candidates: candidates, SuccessorIDs: successorIDs,
+		}, nil
 	}
 	execute, ok := d.registry[node.Type]
 	if !ok {

@@ -15,29 +15,35 @@ import (
 // Issue codes emitted by Parse and Validate. Closed set; additions must
 // exist in the reference first (except the explicit pilot-only code).
 const (
-	CodeInvalidContract            = "invalid_contract"
-	CodeEmptyWorkflow              = "empty_workflow"
-	CodeDuplicateNodeID            = "duplicate_node_id"
-	CodeNodeIDReserved             = "node_id_reserved"
-	CodeUnsupportedNodeType        = "unsupported_node_type"
-	CodeHTTPMissingURL             = "http_missing_url"
-	CodeConditionMissingExpr       = "condition_missing_expression"
-	CodeConditionInvalidExpr       = "condition_invalid_expression"
-	CodeTransformMissingMapping    = "transform_missing_mapping"
-	CodeEdgeInvalidFrom            = "edge_invalid_from"
-	CodeEdgeInvalidTo              = "edge_invalid_to"
-	CodeEdgeInvalidCondition       = "edge_invalid_condition"
-	CodeEdgeConditionInputsScope   = "edge_condition_inputs_scope"
-	CodeInputDefaultTypeMismatch   = "input_default_type_mismatch"
-	CodeScheduleInvalidCron        = "schedule_invalid_cron"
-	CodeHumanFormInvalidSchema     = "human_form_invalid_schema"
-	CodeHumanFormEmptySchema       = "human_form_empty_schema"
-	CodeHumanFormInvalidInitial    = "human_form_invalid_initial_values"
-	CodeSubworkflowMissingWorkflow = "subworkflow_missing_workflow"
-	CodeSubworkflowSelfReference   = "subworkflow_self_reference"
-	CodeSubworkflowInvalidVersion  = "subworkflow_invalid_version"
-	CodeCycleDetected              = "cycle_detected"
-	CodeMissingStartNode           = "missing_start_node"
+	CodeInvalidContract             = "invalid_contract"
+	CodeEmptyWorkflow               = "empty_workflow"
+	CodeDuplicateNodeID             = "duplicate_node_id"
+	CodeNodeIDReserved              = "node_id_reserved"
+	CodeUnsupportedNodeType         = "unsupported_node_type"
+	CodeHTTPMissingURL              = "http_missing_url"
+	CodeConditionMissingExpr        = "condition_missing_expression"
+	CodeConditionInvalidExpr        = "condition_invalid_expression"
+	CodeTransformMissingMapping     = "transform_missing_mapping"
+	CodeEdgeInvalidFrom             = "edge_invalid_from"
+	CodeEdgeInvalidTo               = "edge_invalid_to"
+	CodeEdgeInvalidCondition        = "edge_invalid_condition"
+	CodeEdgeConditionInputsScope    = "edge_condition_inputs_scope"
+	CodeInputDefaultTypeMismatch    = "input_default_type_mismatch"
+	CodeScheduleInvalidCron         = "schedule_invalid_cron"
+	CodeHumanFormInvalidSchema      = "human_form_invalid_schema"
+	CodeHumanFormEmptySchema        = "human_form_empty_schema"
+	CodeHumanFormInvalidInitial     = "human_form_invalid_initial_values"
+	CodeSubworkflowMissingWorkflow  = "subworkflow_missing_workflow"
+	CodeSubworkflowSelfReference    = "subworkflow_self_reference"
+	CodeSubworkflowInvalidVersion   = "subworkflow_invalid_version"
+	CodeRouterCandidateUnknown      = "router_candidate_unknown"
+	CodeRouterCandidateNotSuccessor = "router_candidate_not_successor"
+	CodeRouterMissingCandidates     = "router_missing_candidates"
+	CodeRouterInvalidCandidate      = "router_invalid_candidate"
+	CodeRouterCandidateMissingID    = "router_candidate_missing_node_id"
+	CodeRouterCandidateUnknownID    = "router_candidate_unknown_node_id"
+	CodeCycleDetected               = "cycle_detected"
+	CodeMissingStartNode            = "missing_start_node"
 	// Pilot-only: the type is valid in the full platform but this backend
 	// does not execute it yet. Deliberately distinct from
 	// unsupported_node_type, which means the type is invalid everywhere.
@@ -84,6 +90,7 @@ var PilotNodeTypes = map[string]bool{
 	"noop": true, "transform": true, "condition": true, "http": true,
 	"wait_until": true, "webhook": true, "approval": true, "human_form": true, "tool": true,
 	"parallel_fork": true, "join": true, "loop": true, "webhook_received": true,
+	"router": true, "router_llm": true,
 	"ai": true, "agent": true, "multi_agent": true, "mcp_tool": true,
 	"pagerduty_incident": true, "email_received": true, "file_dropped": true,
 	"mcp_server_event": true, "subworkflow": true, "schedule": true,
@@ -119,6 +126,10 @@ func ValidateWithSemanticFixtures(wf *Workflow, validExpression ExpressionValida
 		push(Issue{Code: CodeEmptyWorkflow, Message: "Workflow must include at least one node"})
 	}
 
+	allNodeIDs := map[string]bool{}
+	for _, node := range wf.Nodes {
+		allNodeIDs[node.ID] = true
+	}
 	nodeIDs := map[string]bool{}
 	for _, node := range wf.Nodes {
 		if nodeIDs[node.ID] {
@@ -151,6 +162,62 @@ func ValidateWithSemanticFixtures(wf *Workflow, validExpression ExpressionValida
 					Message: "Subworkflow config.version must be an integer between 1 and 2147483647",
 					NodeID:  node.ID,
 				})
+			}
+		}
+		if node.Type == "router" || node.Type == "router_llm" {
+			entries, isArray := arrayValues(node.Config["candidates"])
+			if isArray {
+				outgoing := map[string]bool{}
+				for _, edge := range wf.Edges {
+					if edge.From == node.ID {
+						outgoing[edge.To] = true
+					}
+				}
+				for _, candidate := range entries {
+					entry, ok := candidate.(map[string]any)
+					if !ok || entry == nil {
+						continue
+					}
+					candidateID := trimmedString(entry["nodeId"])
+					if candidateID == "" {
+						candidateID = trimmedString(entry["id"])
+					}
+					if candidateID == "" {
+						continue
+					}
+					if !allNodeIDs[candidateID] {
+						push(Issue{Code: CodeRouterCandidateUnknown, Message: "Router candidate does not exist: " + candidateID, NodeID: node.ID})
+					} else if !outgoing[candidateID] {
+						push(Issue{
+							Code:    CodeRouterCandidateNotSuccessor,
+							Message: fmt.Sprintf("Router candidate %q must be a direct successor (add an edge %s → %s) or the decision cannot route", candidateID, node.ID, candidateID),
+							NodeID:  node.ID,
+						})
+					}
+				}
+			}
+
+			if !isArray || len(entries) == 0 {
+				push(Issue{Code: CodeRouterMissingCandidates, Message: fmt.Sprintf("%s node requires a non-empty config.candidates array", node.Type), NodeID: node.ID})
+			} else {
+				for index, candidate := range entries {
+					entry, ok := candidate.(map[string]any)
+					if !ok || entry == nil {
+						push(Issue{Code: CodeRouterInvalidCandidate, Message: fmt.Sprintf("%s candidate at index %d must be an object", node.Type, index), NodeID: node.ID})
+						continue
+					}
+					candidateID := trimmedString(entry["nodeId"])
+					if candidateID == "" {
+						candidateID = trimmedString(entry["id"])
+					}
+					if candidateID == "" {
+						push(Issue{Code: CodeRouterCandidateMissingID, Message: fmt.Sprintf("%s candidate at index %d must have a non-empty nodeId (legacy \"id\" also accepted)", node.Type, index), NodeID: node.ID})
+						continue
+					}
+					if !allNodeIDs[candidateID] {
+						push(Issue{Code: CodeRouterCandidateUnknownID, Message: fmt.Sprintf("%s candidate at index %d references an unknown node: %s", node.Type, index, candidateID), NodeID: node.ID})
+					}
+				}
 			}
 		}
 		if node.Type == "condition" {

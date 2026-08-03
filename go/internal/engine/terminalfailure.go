@@ -51,6 +51,9 @@ func (e *Engine) RetryOrFail(ctx context.Context, claim ClaimedNode, node domain
 		if requeued == 0 {
 			return errSkipCommit
 		}
+		if err := e.recordRoutingOutcome(ctx, q, claim, -1, false, retriedAt); err != nil {
+			return err
+		}
 		metricNodeRetries.Inc()
 		// The wake-up rides the same transaction: the anti-join on the claim
 		// keeps the row unclaimable until the backoff clock passes.
@@ -105,6 +108,10 @@ func (e *Engine) failNodeTx(ctx context.Context, claim ClaimedNode, execErr erro
 		}
 		if failed == 0 {
 			return errSkipCommit
+		}
+		claim.OrgID = run.OrgID
+		if err := e.recordRoutingOutcome(ctx, q, claim, -1, false, failedAt); err != nil {
+			return err
 		}
 		metricNodeCompletions.WithLabelValues("failed").Inc()
 		if err := q.DeleteWakeup(ctx, claim.RowID); err != nil {

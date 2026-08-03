@@ -8,7 +8,10 @@ package domain
 
 import (
 	"fmt"
+	"math"
+	"reflect"
 	"sort"
+	"strings"
 )
 
 // DecisionCandidate mirrors the reference candidate profile.
@@ -22,9 +25,46 @@ type DecisionCandidate struct {
 // DecisionPreferences weight the scoring axes; zero-value = the
 // reference defaults (40/40/20).
 type DecisionPreferences struct {
-	WeightCost    *float64
-	WeightLatency *float64
-	WeightQuality *float64
+	WeightCost     *float64
+	WeightLatency  *float64
+	WeightQuality  *float64
+	MinSuccessRate *float64
+	MaxLatencyMs   *float64
+}
+
+// DecisionBudget optionally removes candidates whose declared average cost
+// exceeds the run's routing budget. When every candidate exceeds the limit,
+// the unfiltered ranking remains available instead of producing no route.
+type DecisionBudget struct {
+	LimitUSD *float64
+}
+
+// RoutingStat is the bounded reinforcement input used by Decide. The engine
+// loads it tenant-scoped from routing_stats; candidates need at least three
+// observations before the small historical bias applies.
+type RoutingStat struct {
+	Pulls      int32
+	MeanReward float64
+}
+
+// DecisionInput is the deterministic router contract shared by router and
+// router_llm nodes. The latter name is retained for workflow compatibility;
+// neither type calls an LLM in the supported runtime.
+type DecisionInput struct {
+	Candidates  []DecisionCandidate
+	Preferences *DecisionPreferences
+	Budget      *DecisionBudget
+	RLStats     map[string]RoutingStat
+	Strategy    string // "auto" | "cheapest" | "fastest" | "balanced"
+}
+
+// DecisionOutput is persisted under the router node's output and emitted as
+// the decision.made event payload.
+type DecisionOutput struct {
+	ChosenNodeID string                    `json:"chosenNodeId,omitempty"`
+	Reason       string                    `json:"reason"`
+	Confidence   float64                   `json:"confidence"`
+	Ranking      []RankedDecisionCandidate `json:"ranking"`
 }
 
 // RankedDecisionCandidate is one scored row (lower score = better).
@@ -102,6 +142,211 @@ func ScoreDecisionCandidate(candidate DecisionCandidate, preferences *DecisionPr
 			Quality: candidate.SuccessRate, Penalty: penalty,
 		},
 	}
+}
+
+// NormalizeDecisionCandidates accepts the canonical {nodeId} shape and the
+// legacy {id} alias emitted by older generated workflows. Invalid entries are
+// dropped at runtime as defence in depth; validation rejects them on save.
+func NormalizeDecisionCandidates(raw any) []DecisionCandidate {
+	entries, ok := arrayValues(raw)
+	if !ok {
+		return nil
+	}
+	out := make([]DecisionCandidate, 0, len(entries))
+	for _, entry := range entries {
+		object, ok := entry.(map[string]any)
+		if !ok || object == nil {
+			continue
+		}
+		nodeID := trimmedString(object["nodeId"])
+		if nodeID == "" {
+			nodeID = trimmedString(object["id"])
+		}
+		if nodeID == "" {
+			continue
+		}
+		candidate := DecisionCandidate{NodeID: nodeID}
+		if value, ok := finiteNumber(object["avgCost"]); ok {
+			candidate.AvgCost = value
+		}
+		if value, ok := finiteNumber(object["avgLatencyMs"]); ok {
+			candidate.AvgLatencyMs = value
+		}
+		if value, ok := finiteNumber(object["successRate"]); ok {
+			candidate.SuccessRate = value
+		}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+// DecisionPreferencesFromValue projects the loose runtime context into the
+// same optional numeric preferences consumed by the reference engine.
+func DecisionPreferencesFromValue(value any) *DecisionPreferences {
+	object, ok := value.(map[string]any)
+	if !ok || object == nil {
+		return nil
+	}
+	return &DecisionPreferences{
+		WeightCost:     numberPointer(object["weightCost"]),
+		WeightLatency:  numberPointer(object["weightLatency"]),
+		WeightQuality:  numberPointer(object["weightQuality"]),
+		MinSuccessRate: numberPointer(object["minSuccessRate"]),
+		MaxLatencyMs:   numberPointer(object["maxLatencyMs"]),
+	}
+}
+
+// DecisionBudgetFromValue projects an optional run-context budget.
+func DecisionBudgetFromValue(value any) *DecisionBudget {
+	object, ok := value.(map[string]any)
+	if !ok || object == nil {
+		return nil
+	}
+	return &DecisionBudget{LimitUSD: numberPointer(object["limitUsd"])}
+}
+
+// NormalizeDecisionStrategy keeps the runtime's closed strategy enum. An
+// unknown authored value degrades to the reference's auto scoring posture.
+func NormalizeDecisionStrategy(value any) string {
+	strategy, _ := value.(string)
+	switch strategy {
+	case "auto", "cheapest", "fastest", "balanced":
+		return strategy
+	default:
+		return ""
+	}
+}
+
+// Decide applies constraints, score weighting, the bounded reinforcement
+// bias, explicit strategy ordering, and the optional budget in the same order
+// as the Node compatibility oracle.
+func Decide(input DecisionInput) DecisionOutput {
+	constrained := make([]DecisionCandidate, 0, len(input.Candidates))
+	for _, candidate := range input.Candidates {
+		if input.Preferences != nil && input.Preferences.MinSuccessRate != nil {
+			threshold := *input.Preferences.MinSuccessRate
+			if threshold > 1 {
+				threshold /= 100
+			}
+			if candidate.SuccessRate < threshold {
+				continue
+			}
+		}
+		if input.Preferences != nil && input.Preferences.MaxLatencyMs != nil &&
+			candidate.AvgLatencyMs > *input.Preferences.MaxLatencyMs {
+			continue
+		}
+		constrained = append(constrained, candidate)
+	}
+	pool := constrained
+	if len(pool) == 0 {
+		pool = input.Candidates
+	}
+
+	ranking := make([]RankedDecisionCandidate, 0, len(pool))
+	for _, candidate := range pool {
+		ranked := ScoreDecisionCandidate(candidate, input.Preferences)
+		if stat, ok := input.RLStats[candidate.NodeID]; ok && stat.Pulls >= 3 {
+			ranked.Score -= stat.MeanReward * 0.1
+		}
+		ranking = append(ranking, ranked)
+	}
+	// applyRlAdjustments sorts by the adjusted score before the explicit
+	// strategy. Stable later sorts preserve that order for equal cost/latency.
+	sort.SliceStable(ranking, func(a, b int) bool { return ranking[a].Score < ranking[b].Score })
+	strategy := NormalizeDecisionStrategy(input.Strategy)
+	switch strategy {
+	case "cheapest":
+		sort.SliceStable(ranking, func(a, b int) bool { return ranking[a].Breakdown.Cost < ranking[b].Breakdown.Cost })
+	case "fastest":
+		sort.SliceStable(ranking, func(a, b int) bool { return ranking[a].Breakdown.Latency < ranking[b].Breakdown.Latency })
+	default:
+		sort.SliceStable(ranking, func(a, b int) bool { return ranking[a].Score < ranking[b].Score })
+	}
+
+	if input.Budget != nil && input.Budget.LimitUSD != nil {
+		budgetSafe := make([]RankedDecisionCandidate, 0, len(ranking))
+		for _, candidate := range ranking {
+			if candidate.Breakdown.Cost <= *input.Budget.LimitUSD {
+				budgetSafe = append(budgetSafe, candidate)
+			}
+		}
+		if len(budgetSafe) > 0 {
+			ranking = budgetSafe
+		}
+	}
+
+	if len(ranking) == 0 {
+		return DecisionOutput{
+			Reason: "No eligible candidate found", Confidence: 0,
+			Ranking: []RankedDecisionCandidate{},
+		}
+	}
+	best := ranking[0]
+	strategyLabel := strategy
+	if strategyLabel == "" {
+		strategyLabel = "auto"
+	}
+	return DecisionOutput{
+		ChosenNodeID: best.NodeID,
+		Reason: fmt.Sprintf("Selected %s using %s strategy: cost=%v, latency=%v, quality=%v",
+			best.NodeID, strategyLabel, best.Breakdown.Cost, best.Breakdown.Latency, best.Breakdown.Quality),
+		Confidence: math.Max(0.5, math.Min(1, 1-best.Score)),
+		Ranking:    ranking,
+	}
+}
+
+func arrayValues(value any) ([]any, bool) {
+	if value == nil {
+		return nil, false
+	}
+	raw := reflect.ValueOf(value)
+	if raw.Kind() != reflect.Slice && raw.Kind() != reflect.Array {
+		return nil, false
+	}
+	out := make([]any, raw.Len())
+	for index := 0; index < raw.Len(); index++ {
+		out[index] = raw.Index(index).Interface()
+	}
+	return out, true
+}
+
+func trimmedString(value any) string {
+	text, _ := value.(string)
+	return strings.TrimSpace(text)
+}
+
+func numberPointer(value any) *float64 {
+	number, ok := finiteNumber(value)
+	if !ok {
+		return nil
+	}
+	return &number
+}
+
+func finiteNumber(value any) (float64, bool) {
+	var number float64
+	switch typed := value.(type) {
+	case float64:
+		number = typed
+	case float32:
+		number = float64(typed)
+	case int:
+		number = float64(typed)
+	case int32:
+		number = float64(typed)
+	case int64:
+		number = float64(typed)
+	case uint:
+		number = float64(typed)
+	case uint32:
+		number = float64(typed)
+	case uint64:
+		number = float64(typed)
+	default:
+		return 0, false
+	}
+	return number, !math.IsNaN(number) && !math.IsInf(number, 0)
 }
 
 // ReplayDecision recomputes the ranking and explains the recorded choice.

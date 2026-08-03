@@ -193,8 +193,14 @@ func (e *Engine) executeClaim(ctx context.Context, claim ClaimedNode, execute Ex
 		}
 		return
 	}
-	if err := e.CompleteNode(ctx, claim, output); err != nil {
-		logger.Error("complete node failed", "runId", claim.RunID, "nodeId", claim.NodeID, "error", err)
+	var completionErr error
+	if router, ok := output.(RouterExecution); ok {
+		completionErr = e.CompleteRouterNode(ctx, claim, router)
+	} else {
+		completionErr = e.CompleteNode(ctx, claim, output)
+	}
+	if completionErr != nil {
+		logger.Error("complete node failed", "runId", claim.RunID, "nodeId", claim.NodeID, "error", completionErr)
 	}
 	e.DeliverParentNotifications(ctx, claim.RunID)
 }
