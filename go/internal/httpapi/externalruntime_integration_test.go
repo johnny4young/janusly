@@ -190,6 +190,30 @@ func TestExternalRuntimeShadowIngestion(t *testing.T) {
 			len(res.body["workflows"].([]any)), len(res.body["runs"].([]any)),
 			len(res.body["steps"].([]any)), len(res.body["cases"].([]any)))
 	}
+	caseRows := res.body["cases"].([]any)
+	states := map[string]map[string]any{}
+	for _, raw := range caseRows {
+		row := raw.(map[string]any)
+		state, _ := row["state"].(string)
+		states[state] = row
+		if _, leaked := row["State"]; leaked {
+			t.Fatalf("shadow case leaked Go field names: %+v", row)
+		}
+	}
+	if recoveredCase := states["observed_recovered"]; recoveredCase == nil ||
+		recoveredCase["connectionId"] != connectionID || recoveredCase["externalRunId"] != "run-9" ||
+		recoveredCase["observedRecoveredAt"] == nil {
+		t.Fatalf("recovered case wire projection: %+v", recoveredCase)
+	}
+	if detectedCase := states["detected"]; detectedCase == nil ||
+		detectedCase["externalStepId"] != "charge" || detectedCase["firstDetectedAt"] == nil {
+		t.Fatalf("detected case wire projection: %+v", detectedCase)
+	}
+	runRows := res.body["runs"].([]any)
+	if run := runRows[0].(map[string]any); run["connectionId"] == nil || run["externalRunId"] == nil ||
+		run["lastObservedAt"] == nil {
+		t.Fatalf("external run wire projection: %+v", run)
+	}
 
 	// Disabling the connection closes the door (opaque 404).
 	if res := h.call("POST", "/integrations/external-runtimes/"+connectionID, map[string]any{

@@ -524,6 +524,64 @@ func externalRuntimeConnectionView(row store.ExternalRuntimeConnection) map[stri
 	}
 }
 
+func externalWorkflowView(row store.ExternalWorkflow) map[string]any {
+	return map[string]any{
+		"id": row.ID, "orgId": row.OrgID, "connectionId": row.ConnectionID,
+		"externalWorkflowId": row.ExternalWorkflowID, "name": row.Name,
+		"version": textOrNull(row.Version), "snapshotJson": normalizedRaw(row.SnapshotJson),
+		"evidenceJson": normalizedRaw(row.EvidenceJson), "lastSequence": row.LastSequence,
+		"lastEventId": textOrNull(row.LastEventID), "lastObservedAt": timeOrNull(row.LastObservedAt),
+		"createdAt": row.CreatedAt, "updatedAt": row.UpdatedAt,
+	}
+}
+
+func externalRunView(row store.ExternalRun) map[string]any {
+	return map[string]any{
+		"id": row.ID, "orgId": row.OrgID, "connectionId": row.ConnectionID,
+		"externalWorkflowId": row.ExternalWorkflowID, "externalRunId": row.ExternalRunID,
+		"status": row.Status, "startedAt": timeOrNull(row.StartedAt),
+		"completedAt": timeOrNull(row.CompletedAt), "snapshotJson": normalizedRaw(row.SnapshotJson),
+		"evidenceJson": normalizedRaw(row.EvidenceJson), "lastSequence": row.LastSequence,
+		"lastEventId": textOrNull(row.LastEventID), "lastObservedAt": timeOrNull(row.LastObservedAt),
+		"createdAt": row.CreatedAt, "updatedAt": row.UpdatedAt,
+	}
+}
+
+func externalRunStepView(row store.ExternalRunStep) map[string]any {
+	return map[string]any{
+		"id": row.ID, "orgId": row.OrgID, "connectionId": row.ConnectionID,
+		"externalWorkflowId": row.ExternalWorkflowID, "externalRunId": row.ExternalRunID,
+		"externalStepId": row.ExternalStepID, "name": row.Name, "status": row.Status,
+		"attempt": row.Attempt, "startedAt": timeOrNull(row.StartedAt),
+		"completedAt": timeOrNull(row.CompletedAt), "snapshotJson": normalizedRaw(row.SnapshotJson),
+		"evidenceJson": normalizedRaw(row.EvidenceJson), "lastSequence": row.LastSequence,
+		"lastEventId": textOrNull(row.LastEventID), "lastObservedAt": timeOrNull(row.LastObservedAt),
+		"createdAt": row.CreatedAt, "updatedAt": row.UpdatedAt,
+	}
+}
+
+func externalRecoveryCaseView(row store.ExternalRecoveryCase) map[string]any {
+	return map[string]any{
+		"id": row.ID, "orgId": row.OrgID, "connectionId": row.ConnectionID,
+		"subjectKey": row.SubjectKey, "subjectKind": row.SubjectKind,
+		"externalWorkflowId": row.ExternalWorkflowID, "externalRunId": row.ExternalRunID,
+		"externalStepId": textOrNull(row.ExternalStepID), "state": row.State,
+		"failureSnapshotJson": normalizedRaw(row.FailureSnapshotJson),
+		"evidenceJson":        normalizedRaw(row.EvidenceJson), "firstDetectedAt": row.FirstDetectedAt,
+		"lastObservedAt": row.LastObservedAt, "observedRecoveredAt": timeOrNull(row.ObservedRecoveredAt),
+		"lastSequence": row.LastSequence, "lastEventId": row.LastEventID,
+		"createdAt": row.CreatedAt, "updatedAt": row.UpdatedAt,
+	}
+}
+
+func mapRows[T any](rows []T, view func(T) map[string]any) []map[string]any {
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, view(row))
+	}
+	return out
+}
+
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
@@ -648,10 +706,10 @@ func (s *V1Server) mountExternalRuntimeRoutes(mux *http.ServeMux) {
 		writeLegacy(w, opOK(map[string]any{
 			"observerOnly": true,
 			"connections":  connectionViews,
-			"workflows":    externalRows(workflows),
-			"runs":         externalRows(runs),
-			"steps":        externalRows(steps),
-			"cases":        externalRows(cases),
+			"workflows":    mapRows(workflows, externalWorkflowView),
+			"runs":         mapRows(runs, externalRunView),
+			"steps":        mapRows(steps, externalRunStepView),
+			"cases":        mapRows(cases, externalRecoveryCaseView),
 		}))
 	}))
 
@@ -734,22 +792,4 @@ func (s *V1Server) mountExternalRuntimeRoutes(mux *http.ServeMux) {
 		})
 		writeLegacy(w, opOK(map[string]any{"ok": true}))
 	}))
-}
-
-// externalRows JSON-rounds sqlc rows into wire maps (timestamps →
-// RFC3339, jsonb → parsed values) for the read-only shadow response.
-func externalRows[T any](rows []T) []any {
-	out := make([]any, 0, len(rows))
-	for _, row := range rows {
-		serialized, err := json.Marshal(row)
-		if err != nil {
-			continue
-		}
-		var generic map[string]any
-		if err := json.Unmarshal(serialized, &generic); err != nil {
-			continue
-		}
-		out = append(out, generic)
-	}
-	return out
 }
