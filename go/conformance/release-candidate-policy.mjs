@@ -20,6 +20,7 @@ export const REQUIRED_LOCAL_CHECKS = Object.freeze([
 ]);
 
 export const REQUIRED_EXTERNAL_GATES = EXTERNAL_GATE_IDS;
+const RUNTIME_ARTIFACT_GATES = Object.freeze(["shadow", "cutover", "canary", "rollback"]);
 
 function issue(code, message, details = {}) {
   return { code, message, ...details };
@@ -133,6 +134,10 @@ export function evaluateReleaseCandidate(input) {
     productionBlockers.push(issue("external_gate_receipt_stale", "External gate receipt belongs to a different candidate"));
     externalUsable = false;
   }
+  const ciArtifactSha256 = externalUsable
+    ? externalReceipt.gates?.remote_ci?.summary?.artifactSha256
+    : null;
+  const ciArtifactValid = /^[0-9a-f]{64}$/u.test(ciArtifactSha256 ?? "");
   for (const gate of REQUIRED_EXTERNAL_GATES) {
     const row = externalUsable ? externalReceipt.gates?.[gate] : undefined;
     let status = row?.status;
@@ -140,6 +145,18 @@ export function evaluateReleaseCandidate(input) {
       !/^[0-9a-f]{64}$/u.test(row.evidenceSha256 ?? "") ||
       !Number.isFinite(Date.parse(row.validatedAt ?? "")) ||
       !row.summary || typeof row.summary !== "object" || Array.isArray(row.summary)
+    )) {
+      status = "invalid";
+    }
+    if (status === "pass" && gate === "remote_ci" && !ciArtifactValid) {
+      status = "invalid";
+    }
+    if (status === "pass" && RUNTIME_ARTIFACT_GATES.includes(gate) && (
+      row.summary.runtimeCommit !== candidate.commit ||
+      row.summary.runtimeTree !== candidate.tree ||
+      !/^[0-9a-f]{64}$/u.test(row.summary.artifactSha256 ?? "") ||
+      !ciArtifactValid ||
+      row.summary.artifactSha256 !== ciArtifactSha256
     )) {
       status = "invalid";
     }

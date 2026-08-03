@@ -11,6 +11,20 @@ import { EXTERNAL_GATE_POLICY_VERSION } from "./external-gate-policy.mjs";
 const COMMIT = "a".repeat(40);
 const TREE = "b".repeat(40);
 const ORACLE = "c".repeat(40);
+const ARTIFACT_SHA256 = "9".repeat(64);
+
+function externalSummary(id) {
+  if (id === "remote_ci") return { gate: id, artifactSha256: ARTIFACT_SHA256 };
+  if (["shadow", "cutover", "canary", "rollback"].includes(id)) {
+    return {
+      gate: id,
+      runtimeCommit: COMMIT,
+      runtimeTree: TREE,
+      artifactSha256: ARTIFACT_SHA256,
+    };
+  }
+  return { gate: id };
+}
 
 function passingInput() {
   return {
@@ -99,7 +113,7 @@ test("every exact external gate is required for production readiness", () => {
       status: "pass",
       validatedAt: "2026-08-03T14:00:00.000Z",
       evidenceSha256: "9".repeat(64),
-      summary: { gate: id },
+      summary: externalSummary(id),
     }])),
   };
   let verdict = evaluateReleaseCandidate(input);
@@ -121,7 +135,42 @@ test("every exact external gate is required for production readiness", () => {
   verdict = evaluateReleaseCandidate(input);
   assert.equal(verdict.readyForProduction, false);
   assert.equal(verdict.productionBlockers.some(blocker =>
-    blocker.code === "external_gate_invalid" && blocker.gate === "shadow"), true);
+      blocker.code === "external_gate_invalid" && blocker.gate === "shadow"), true);
+});
+
+test("runtime gates must use the exact artifact certified by remote CI", () => {
+  const input = passingInput();
+  input.externalGateReceipt = {
+    schemaVersion: 2,
+    policyVersion: EXTERNAL_GATE_POLICY_VERSION,
+    candidate: { commit: COMMIT, tree: TREE },
+    gates: Object.fromEntries(REQUIRED_EXTERNAL_GATES.map(id => [id, {
+      status: "pass",
+      validatedAt: "2026-08-03T14:00:00.000Z",
+      evidenceSha256: "8".repeat(64),
+      summary: externalSummary(id),
+    }])),
+  };
+
+  input.externalGateReceipt.gates.canary.summary.artifactSha256 = "7".repeat(64);
+  let verdict = evaluateReleaseCandidate(input);
+  assert.equal(verdict.readyForProduction, false);
+  assert.equal(verdict.externalGateStates.canary, "invalid");
+
+  input.externalGateReceipt.gates.canary.summary.artifactSha256 = ARTIFACT_SHA256;
+  input.externalGateReceipt.gates.shadow.summary.runtimeTree = "0".repeat(40);
+  verdict = evaluateReleaseCandidate(input);
+  assert.equal(verdict.readyForProduction, false);
+  assert.equal(verdict.externalGateStates.shadow, "invalid");
+
+  input.externalGateReceipt.gates.shadow.summary.runtimeTree = TREE;
+  delete input.externalGateReceipt.gates.remote_ci.summary.artifactSha256;
+  verdict = evaluateReleaseCandidate(input);
+  assert.equal(verdict.readyForProduction, false);
+  assert.equal(verdict.externalGateStates.remote_ci, "invalid");
+  for (const gate of ["shadow", "cutover", "canary", "rollback"]) {
+    assert.equal(verdict.externalGateStates[gate], "invalid", gate);
+  }
 });
 
 test("missing required local checks are named individually", () => {

@@ -89,6 +89,9 @@ forcing removal and requalification of the PostgreSQL 17 Auth-lab exception.
 contract and record-only commands for all seven gates. Shadow evidence is
 strictly read-only. It cannot authorize a per-tenant or overlapping mutation
 plane; Node-to-Go work-plane ownership moves globally at the cutover gate.
+Remote CI binds an immutable Go artifact SHA-256, and every runtime gate must
+prove that the running commit, tree, and artifact digest match that exact
+candidate.
 
 `make release-production-check` only evaluates those receipts. It performs no
 remote or traffic mutation and fails while any external gate is missing,

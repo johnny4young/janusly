@@ -17,7 +17,10 @@ evidence envelopes and record-only aggregate policy live in
 1. The exact Go candidate passes the complete audit ladder, not only
    `make dual`. Run `make release-review` from a clean, fetched checkout and
    retain its commit/tree-bound JSON and Markdown manifest; any review blocker
-   aborts publication.
+   aborts publication. Remote CI must publish the immutable Go artifact
+   SHA-256, and every shadow/cutover/canary/rollback record must repeat the
+   running commit, tree, and matching artifact digest. A healthy runtime from
+   another checkout is not evidence for this candidate.
 2. Node and Go are deployed side by side against a rehearsed copy of the same
    PostgreSQL state. Node retains its Redis/BullMQ dependencies while it owns
    any route or queued-work family; Go does not consume BullMQ jobs.
@@ -75,9 +78,10 @@ deployment shape. HTTP routing alone does not transfer queued work.
    `queued` row, malformed waiting bridge, unarmed schedule, unknown queue/job,
    legacy repeatable, truncation, or cross-snapshot movement. Any red verdict
    aborts the switch.
-7. Restart the Go candidate with `JANUSLY_GO_WORK_PLANE_ENABLED=true`; require
-   `X-Janusly-Work-Plane: active` and `janusly_go_work_plane_active 1` before
-   unfreezing traffic.
+7. Restart the exact CI-built Go artifact with
+   `JANUSLY_GO_WORK_PLANE_ENABLED=true`; require its commit, tree, and artifact
+   SHA-256 to match the candidate plus `X-Janusly-Work-Plane: active` and
+   `janusly_go_work_plane_active 1` before unfreezing traffic.
 8. Switch every mutating route to Go, reload the proxy, and unfreeze writes.
 9. Within two minutes verify:
    - `GET /healthz` and `GET /health`;
