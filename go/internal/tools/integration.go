@@ -75,6 +75,7 @@ func SignWebhookPayload(secret, body string, unixSeconds int64) string {
 var integrationToolNames = map[string]bool{
 	"webhook.send":                   true,
 	"github.create_issue":            true,
+	"slack.post":                     true,
 	"email.send":                     true,
 	"pdf.generate":                   true,
 	"pagerduty.incident.get":         true,
@@ -97,6 +98,20 @@ func integrationTools() []Definition {
 		return map[string]any{"ok": false, "error": "integration tools require run context", "latencyMs": 0}, nil
 	}
 	return []Definition{
+		{
+			Name:        "slack.post",
+			Description: "Send a message to a Slack channel via a stored Incoming Webhook URL.",
+			Required:    []string{"credential"},
+			Optional:    []string{"text", "blocks"},
+			Fields: []Field{
+				{Name: "credential", Type: "string", Required: true},
+				{Name: "text", Type: "string"},
+				{Name: "blocks", Type: "json"},
+			},
+			InputExample: map[string]any{"credential": "incidents-slack", "text": "Incident detected."},
+			WriteSide:    true,
+			Execute:      unavailable,
+		},
 		{
 			Name:        "github.create_issue",
 			Description: "Create a GitHub issue using a stored PAT credential.",
@@ -174,6 +189,8 @@ func ExecuteIntegrationTool(ctx context.Context, name string, input map[string]a
 		return executeDbTool(ctx, name, input, deps)
 	case "github.create_issue":
 		return executeGitHubCreateIssue(ctx, input, deps, latency, record)
+	case "slack.post":
+		return executeSlackPost(ctx, input, deps, latency, record)
 	case "webhook.send":
 		credential, _ := input["credential"].(string)
 		rawURL, _ := input["url"].(string)
@@ -239,6 +256,104 @@ func ExecuteIntegrationTool(ctx context.Context, name string, input map[string]a
 	default:
 		return envelopeError("Unknown integration tool: "+name, latency())
 	}
+}
+
+func isSlackHookURL(raw string) bool {
+	candidate, err := url.Parse(raw)
+	if err != nil || candidate.User != nil {
+		return false
+	}
+	if candidate.Scheme == "https" && strings.EqualFold(candidate.Hostname(), "hooks.slack.com") {
+		return true
+	}
+	if os.Getenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR") != "true" {
+		return false
+	}
+	base, err := url.Parse(strings.TrimSpace(os.Getenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL")))
+	if err != nil || base.Scheme == "" || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
+		return false
+	}
+	prefix := strings.TrimRight(base.Path, "/") + "/slack/"
+	return candidate.Scheme == base.Scheme && candidate.Host == base.Host && strings.HasPrefix(candidate.Path, prefix)
+}
+
+func slackBlocksInput(input map[string]any) ([]map[string]any, bool, bool) {
+	raw, present := input["blocks"]
+	if !present {
+		return nil, false, true
+	}
+	values, ok := raw.([]any)
+	if !ok || len(values) > 50 {
+		return nil, true, false
+	}
+	blocks := make([]map[string]any, 0, len(values))
+	for _, rawBlock := range values {
+		block, ok := rawBlock.(map[string]any)
+		if !ok {
+			return nil, true, false
+		}
+		blocks = append(blocks, block)
+	}
+	return blocks, true, true
+}
+
+func executeSlackPost(
+	ctx context.Context,
+	input map[string]any,
+	deps *IntegrationDeps,
+	latency func() int,
+	record func(string, bool, int, string),
+) map[string]any {
+	credential, _ := input["credential"].(string)
+	textRaw, textProvided := input["text"]
+	text, textValid := textRaw.(string)
+	blocks, blocksProvided, blocksValid := slackBlocksInput(input)
+	if strings.TrimSpace(credential) == "" || (textProvided && !textValid) || !blocksValid ||
+		(strings.TrimSpace(text) == "" && (!blocksProvided || len(blocks) == 0)) {
+		return envelopeError("slack.post requires `text` or non-empty `blocks`.", latency())
+	}
+	rateLimit := 60
+	if deps.RateLimitPerMin != nil {
+		rateLimit = deps.RateLimitPerMin("slack", 60)
+	}
+	hookURL, gateError := deps.Gate(ctx, "slack.post", "slack_webhook", credential, rateLimit)
+	if gateError != "" {
+		record(credential, false, 0, gateError)
+		return envelopeError(gateError, latency())
+	}
+	if !isSlackHookURL(hookURL) {
+		message := "slack webhook URL must point at hooks.slack.com or the enabled local simulator"
+		record(credential, false, 0, message)
+		return envelopeError(message, latency())
+	}
+	payload := map[string]any{}
+	if strings.TrimSpace(text) != "" {
+		payload["text"] = text
+	}
+	if blocksProvided {
+		payload["blocks"] = blocks
+	}
+	serialized, err := json.Marshal(payload)
+	if err != nil {
+		record(credential, false, 0, "payload serialization failed")
+		return envelopeError("payload serialization failed", latency())
+	}
+	statusCode, responseBody, postError := deps.Post(ctx, hookURL,
+		map[string]string{"content-type": "application/json"}, serialized)
+	if postError != "" {
+		// Slack webhook tokens live in the URL path. The guarded transport's
+		// diagnostic can contain that URL, so never surface it downstream.
+		message := "network error calling slack webhook"
+		record(credential, false, 0, message)
+		return envelopeError(message, latency())
+	}
+	if statusCode < 200 || statusCode >= 300 {
+		message := fmt.Sprintf("slack responded %d: %s", statusCode, truncateBody(responseBody))
+		record(credential, false, statusCode, message)
+		return map[string]any{"ok": false, "statusCode": statusCode, "error": message, "latencyMs": latency()}
+	}
+	record(credential, true, statusCode, "")
+	return map[string]any{"ok": true, "statusCode": statusCode, "latencyMs": latency()}
 }
 
 func githubAPIBase() string {

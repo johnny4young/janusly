@@ -103,6 +103,108 @@ func TestGitHubCreateIssueContract(t *testing.T) {
 	}
 }
 
+func TestSlackPostContract(t *testing.T) {
+	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "")
+	ctx := context.Background()
+	hookURL := "https://hooks.slack.com/services/T00/B00/secret-token"
+	postCalls := 0
+	var posted map[string]any
+	var recorded []map[string]any
+	deps := &IntegrationDeps{
+		Gate: func(_ context.Context, tool, kind, credential string, rate int) (string, string) {
+			if tool != "slack.post" || kind != "slack_webhook" || credential != "incidents-slack" || rate != 19 {
+				t.Fatalf("gate: %s %s %s %d", tool, kind, credential, rate)
+			}
+			return hookURL, ""
+		},
+		RateLimitPerMin: func(family string, fallback int) int {
+			if family != "slack" || fallback != 60 {
+				t.Fatalf("rate family: %s %d", family, fallback)
+			}
+			return 19
+		},
+		Post: func(_ context.Context, target string, headers map[string]string, body []byte) (int, string, string) {
+			postCalls++
+			if target != hookURL || headers["content-type"] != "application/json" {
+				t.Fatalf("post target: %s %+v", target, headers)
+			}
+			if err := json.Unmarshal(body, &posted); err != nil {
+				t.Fatal(err)
+			}
+			return 200, "ok", ""
+		},
+		Record: func(tool, credential string, ok bool, status int, message string, latency int) {
+			recorded = append(recorded, map[string]any{
+				"tool": tool, "credential": credential, "ok": ok,
+				"status": status, "message": message, "latency": latency,
+			})
+		},
+	}
+	result := ExecuteIntegrationTool(ctx, "slack.post", map[string]any{
+		"credential": "incidents-slack", "text": "Incident detected.",
+	}, deps)
+	if result["ok"] != true || result["statusCode"] != 200 || posted["text"] != "Incident detected." ||
+		postCalls != 1 || len(recorded) != 1 || recorded[0]["ok"] != true {
+		t.Fatalf("success: result=%+v posted=%+v records=%+v calls=%d", result, posted, recorded, postCalls)
+	}
+
+	invalid := ExecuteIntegrationTool(ctx, "slack.post", map[string]any{
+		"credential": "incidents-slack", "blocks": []any{},
+	}, deps)
+	if invalid["ok"] != false || !strings.Contains(invalid["error"].(string), "non-empty") || postCalls != 1 {
+		t.Fatalf("empty content: %+v", invalid)
+	}
+
+	deps.Gate = func(context.Context, string, string, string, int) (string, string) {
+		return "https://evil.example.com/services/secret", ""
+	}
+	invalidURL := ExecuteIntegrationTool(ctx, "slack.post", map[string]any{
+		"credential": "incidents-slack", "text": "Hi",
+	}, deps)
+	if invalidURL["ok"] != false || !strings.Contains(invalidURL["error"].(string), "hooks.slack.com") || postCalls != 1 {
+		t.Fatalf("invalid hook URL: %+v", invalidURL)
+	}
+
+	deps.Gate = func(context.Context, string, string, string, int) (string, string) { return hookURL, "" }
+	deps.Post = func(context.Context, string, map[string]string, []byte) (int, string, string) {
+		return 0, "", "redirect exposed " + hookURL
+	}
+	network := ExecuteIntegrationTool(ctx, "slack.post", map[string]any{
+		"credential": "incidents-slack", "text": "Hi",
+	}, deps)
+	if network["error"] != "network error calling slack webhook" || strings.Contains(mustJSON(t, network), "secret-token") {
+		t.Fatalf("network scrub: %+v", network)
+	}
+
+	deps.Post = func(context.Context, string, map[string]string, []byte) (int, string, string) {
+		return 400, "invalid_payload", ""
+	}
+	rejected := ExecuteIntegrationTool(ctx, "slack.post", map[string]any{
+		"credential": "incidents-slack", "blocks": []any{map[string]any{"type": "section"}},
+	}, deps)
+	if rejected["ok"] != false || rejected["statusCode"] != 400 ||
+		!strings.Contains(rejected["error"].(string), "invalid_payload") {
+		t.Fatalf("non-2xx: %+v", rejected)
+	}
+
+	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL", "http://provider-simulator:4010")
+	deps.Gate = func(context.Context, string, string, string, int) (string, string) {
+		return "http://provider-simulator:4010/slack/services/local/ops", ""
+	}
+	deps.Post = func(_ context.Context, target string, _ map[string]string, _ []byte) (int, string, string) {
+		if target != "http://provider-simulator:4010/slack/services/local/ops" {
+			t.Fatalf("simulator target: %s", target)
+		}
+		return 200, "ok", ""
+	}
+	if simulated := ExecuteIntegrationTool(ctx, "slack.post", map[string]any{
+		"credential": "incidents-slack", "text": "Local page",
+	}, deps); simulated["ok"] != true {
+		t.Fatalf("simulator: %+v", simulated)
+	}
+}
+
 func mustJSON(t *testing.T, value any) string {
 	t.Helper()
 	encoded, err := json.Marshal(value)
