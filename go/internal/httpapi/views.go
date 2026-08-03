@@ -129,10 +129,10 @@ func newDeadLetterSummaryView(row store.ListDeadLetterSummariesRow) DeadLetterSu
 		recovery = RecoveryOverlayView{
 			ID: row.RecoveryID.String, Owner: textOrNull(row.RecoveryOwner),
 			Severity: row.RecoverySeverity, Status: row.RecoveryStatus,
-			SlaTargetAt:      timeOrNull(row.RecoverySlaTargetAt),
-			ResolutionReason: textOrNull(row.RecoveryResolutionReason),
-			Comments:         normalizedRaw(row.RecoveryComments),
-			WorkflowID:       textOrNull(row.RecoveryWorkflowID),
+			SlaTargetAt:        timeOrNull(row.RecoverySlaTargetAt),
+			ResolutionReason:   textOrNull(row.RecoveryResolutionReason),
+			Comments:           normalizedRaw(row.RecoveryComments),
+			WorkflowID:         textOrNull(row.RecoveryWorkflowID),
 			MetadataWorkflowID: textOrNull(row.RecoveryMetadataWorkflowID),
 			OccurrenceCount:    row.RecoveryOccurrenceCount,
 			LastOccurredAt:     timeOrNull(row.RecoveryLastOccurredAt),
@@ -200,9 +200,19 @@ func newWorkflowListItemView(row store.ListWorkflowRowsRow) WorkflowListItemView
 		ID: row.ID, OrgID: row.OrgID, Name: row.Name,
 		CreatedBy: textOrNull(row.CreatedBy), CreatedAt: timeOrNull(row.CreatedAt),
 		LastRunStatus: textOrNullString(row.LastRunStatus), RunCount: row.RunCount,
-		Status: row.Status, PausedReason: textOrNull(row.PausedReason),
-		Tags: []string{}, DeletedAt: timeOrNull(row.DeletedAt),
+		BufferedTriggerCount: int(row.BufferedTriggerCount),
+		Status:               row.Status, PausedReason: textOrNull(row.PausedReason),
+		Tags: decodeStringArray(row.Tags), Folder: textOrNull(row.Folder),
+		DeletedAt: timeOrNull(row.DeletedAt),
 	}
+}
+
+func decodeStringArray(raw json.RawMessage) []string {
+	values := make([]string, 0)
+	if len(raw) == 0 || json.Unmarshal(raw, &values) != nil {
+		return []string{}
+	}
+	return values
 }
 
 // VersionView is the contract's WorkflowVersion key set.
@@ -221,7 +231,7 @@ type VersionView struct {
 func newVersionView(id, orgID, workflowID string, version int32, dagJSON json.RawMessage, createdBy pgtype.Text, createdAt *time.Time) VersionView {
 	return VersionView{
 		ID: id, OrgID: orgID, WorkflowID: workflowID, Version: version,
-		DagJSON: normalizedRaw(dagJSON),
+		DagJSON:   normalizedRaw(dagJSON),
 		CreatedBy: textOrNull(createdBy), CreatedAt: timeOrNull(createdAt),
 	}
 }

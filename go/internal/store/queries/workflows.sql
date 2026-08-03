@@ -19,27 +19,42 @@ ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(page_limit);
 
 -- Workflow list rows with the read-surface aggregates: run count and last
--- run status match runs either through saved versions or the ad-hoc
--- version-id fallback, mirroring the runs-list filter.
+-- run status include production runs linked through saved versions only. The
+-- metadata join drives tags/folders and the buffered-trigger count includes
+-- both parked events and abandoned backfill claims after the shared 5m lease.
 -- name: ListWorkflowRows :many
 SELECT w.id, w.org_id, w.name, w.created_by, w.created_at, w.status,
        w.paused_reason, w.deleted_at,
        (SELECT count(*) FROM runs r
         JOIN workflow_versions wv ON wv.id = r.workflow_version_id
-        WHERE r.org_id = w.org_id AND wv.workflow_id = w.id)::int AS run_count,
-       COALESCE(last_run.status, '') AS last_run_status
+        WHERE r.org_id = w.org_id AND wv.workflow_id = w.id
+          AND r.replay_mode IS NULL)::int AS run_count,
+       COALESCE(last_run.status, '') AS last_run_status,
+       COALESCE(m.tags, '[]'::jsonb) AS tags,
+       m.folder,
+       (SELECT count(*) FROM trigger_events te
+        WHERE te.org_id = w.org_id AND te.workflow_id = w.id
+          AND (te.status = 'buffered'
+               OR (te.status = 'backfilling'
+                   AND te.backfill_claimed_at < now() - interval '5 minutes')))::int
+         AS buffered_trigger_count
 FROM workflows w
+LEFT JOIN workflow_metadata m ON m.org_id = w.org_id AND m.workflow_id = w.id
 LEFT JOIN LATERAL (
   SELECT r.status FROM runs r
   JOIN workflow_versions wv ON wv.id = r.workflow_version_id
   WHERE r.org_id = w.org_id AND wv.workflow_id = w.id
+    AND r.replay_mode IS NULL
   ORDER BY r.created_at DESC, r.id DESC LIMIT 1
 ) last_run ON true
 WHERE w.org_id = $1 AND w.deleted_at IS NULL
   AND (w.created_at, w.id) < (sqlc.arg(before_created_at)::timestamptz, sqlc.arg(before_id)::text)
-  AND (sqlc.narg(search)::text IS NULL
-       OR w.name ILIKE '%' || sqlc.narg(search) || '%'
-       OR w.id ILIKE '%' || sqlc.narg(search) || '%')
+  AND (COALESCE(sqlc.arg(tags)::jsonb, '[]'::jsonb) = '[]'::jsonb
+       OR COALESCE(m.tags, '[]'::jsonb) @> sqlc.arg(tags)::jsonb)
+  AND (sqlc.narg(folder)::text IS NULL OR m.folder = sqlc.narg(folder)::text)
+  AND (sqlc.narg(search_pattern)::text IS NULL
+       OR w.name ILIKE sqlc.narg(search_pattern)::text ESCAPE '\'
+       OR w.id ILIKE sqlc.narg(search_pattern)::text ESCAPE '\')
 ORDER BY w.created_at DESC, w.id DESC
 LIMIT sqlc.arg(page_limit);
 
@@ -67,13 +82,24 @@ SELECT w.id, w.org_id, w.name, w.created_by, w.created_at, w.status,
        w.paused_reason, w.deleted_at,
        (SELECT count(*) FROM runs r
         JOIN workflow_versions wv ON wv.id = r.workflow_version_id
-        WHERE r.org_id = w.org_id AND wv.workflow_id = w.id)::int AS run_count,
-       COALESCE(last_run.status, '') AS last_run_status
+        WHERE r.org_id = w.org_id AND wv.workflow_id = w.id
+          AND r.replay_mode IS NULL)::int AS run_count,
+       COALESCE(last_run.status, '') AS last_run_status,
+       COALESCE(m.tags, '[]'::jsonb) AS tags,
+       m.folder,
+       (SELECT count(*) FROM trigger_events te
+        WHERE te.org_id = w.org_id AND te.workflow_id = w.id
+          AND (te.status = 'buffered'
+               OR (te.status = 'backfilling'
+                   AND te.backfill_claimed_at < now() - interval '5 minutes')))::int
+         AS buffered_trigger_count
 FROM workflows w
+LEFT JOIN workflow_metadata m ON m.org_id = w.org_id AND m.workflow_id = w.id
 LEFT JOIN LATERAL (
   SELECT r.status FROM runs r
   JOIN workflow_versions wv ON wv.id = r.workflow_version_id
   WHERE r.org_id = w.org_id AND wv.workflow_id = w.id
+    AND r.replay_mode IS NULL
   ORDER BY r.created_at DESC, r.id DESC LIMIT 1
 ) last_run ON true
 WHERE w.org_id = $1 AND w.deleted_at IS NOT NULL

@@ -49,7 +49,7 @@ func TestHotQueryPlansAreIndexServed(t *testing.T) {
 	now := "2026-08-01T00:00:00Z"
 	cases := []explainCase{
 		// The T-500 count semantics: runs joined through version rows.
-		{"listWorkflowRows", listWorkflowRows, []any{"org-x", now, "id-x", nil, int32(50)}},
+		{"listWorkflowRows", listWorkflowRows, []any{"org-x", now, "id-x", "[]", nil, nil, int32(50)}},
 		{"listDeletedWorkflowRows", listDeletedWorkflowRows, []any{"org-x", now, "id-x", int32(50)}},
 		{"listRunSummaries", listRunSummaries, []any{"org-x", now, "id-x", nil, nil, int32(50)}},
 		{"listDeadLetterSummaries", listDeadLetterSummaries, []any{"org-x", nil, nil, nil, int32(50)}},

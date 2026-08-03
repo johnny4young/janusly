@@ -171,9 +171,10 @@ func (s *V1Server) legacyMutations(mux *http.ServeMux) {
 				"id": row.ID, "orgId": row.OrgID, "name": row.Name,
 				"createdBy": textOrNull(row.CreatedBy), "createdAt": timeOrNull(row.CreatedAt),
 				"lastRunStatus": textOrNullString(row.LastRunStatus), "runCount": row.RunCount,
-				"bufferedTriggerCount": 0,
+				"bufferedTriggerCount": row.BufferedTriggerCount,
 				"status":               row.Status, "pausedReason": textOrNull(row.PausedReason),
-				"tags": []string{}, "folder": nil, "deletedAt": timeOrNull(row.DeletedAt),
+				"tags": decodeStringArray(row.Tags), "folder": textOrNull(row.Folder),
+				"deletedAt": timeOrNull(row.DeletedAt),
 			})
 		}
 		w.Header().Set("Content-Type", "application/json")

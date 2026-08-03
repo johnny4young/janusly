@@ -175,10 +175,36 @@ func (s *V1Server) listWorkflowsCore(r *http.Request, rc v1Request) opResult {
 		}
 		beforeCreatedAt, beforeID = at, id
 	}
-	search := pgtype.Text{String: query.Get("q"), Valid: query.Get("q") != ""}
+	tags := make([]string, 0, 20)
+	seenTags := make(map[string]struct{}, 20)
+	for _, raw := range query["tag"] {
+		tag := strings.TrimSpace(raw)
+		if tag == "" || len(tag) > 40 {
+			continue
+		}
+		if _, seen := seenTags[tag]; seen {
+			continue
+		}
+		seenTags[tag] = struct{}{}
+		tags = append(tags, tag)
+		if len(tags) == 20 {
+			break
+		}
+	}
+	tagsJSON, _ := json.Marshal(tags)
+
+	folder := pgtype.Text{}
+	if value := strings.TrimSpace(query.Get("folder")); value != "" && len(value) <= 60 {
+		folder = pgtype.Text{String: value, Valid: true}
+	}
+	searchPattern := pgtype.Text{}
+	if value := strings.TrimSpace(query.Get("q")); value != "" && len(value) <= 100 {
+		searchPattern = pgtype.Text{String: "%" + escapeWorkflowLikePattern(value) + "%", Valid: true}
+	}
 	rows, err := store.New(s.pool).ListWorkflowRows(r.Context(), store.ListWorkflowRowsParams{
 		OrgID: rc.orgID, PageLimit: int32(limit),
-		BeforeCreatedAt: beforeCreatedAt, BeforeID: beforeID, Search: search,
+		BeforeCreatedAt: beforeCreatedAt, BeforeID: beforeID,
+		Tags: tagsJSON, Folder: folder, SearchPattern: searchPattern,
 	})
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
@@ -188,6 +214,10 @@ func (s *V1Server) listWorkflowsCore(r *http.Request, rc v1Request) opResult {
 		items = append(items, newWorkflowListItemView(row))
 	}
 	return opOK(items)
+}
+
+func escapeWorkflowLikePattern(value string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(value)
 }
 
 // versionView emits the contract's WorkflowVersion key set; columns the

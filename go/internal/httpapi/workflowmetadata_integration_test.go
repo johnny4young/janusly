@@ -78,6 +78,39 @@ func TestWorkflowMetadataAndOrganization(t *testing.T) {
 		t.Fatalf("narrow folder must not wipe the row: %+v", metadata)
 	}
 
+	// The active list folds metadata and buffered work into each row, and its
+	// tag/folder filters apply before the cap. An abandoned backfill claim is
+	// visible after the same five-minute lease as the reference implementation.
+	var versionID string
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM workflow_versions WHERE org_id = $1 AND workflow_id = $2 ORDER BY version DESC LIMIT 1`,
+		h.org, wfA).Scan(&versionID); err != nil {
+		t.Fatalf("latest version: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO trigger_events
+		(id, org_id, trigger_type, workflow_id, workflow_version_id, node_id, status, payload_json,
+		 backfill_claim_token, backfill_claimed_at)
+		VALUES ($1, $2, 'email_received', $3, $4, 'n', 'buffered', '{}'::jsonb, NULL, NULL),
+		       ($5, $2, 'email_received', $3, $4, 'n', 'backfilling', '{}'::jsonb, 'stale', now() - interval '6 minutes'),
+		       ($6, $2, 'email_received', $3, $4, 'n', 'backfilling', '{}'::jsonb, 'fresh', now())`,
+		"buffered-"+suffix, h.org, wfA, versionID, "stale-"+suffix, "fresh-"+suffix); err != nil {
+		t.Fatalf("seed buffered events: %v", err)
+	}
+	res = h.call("GET", "/v1/workflows?tag=facturaci%C3%B3n&tag=cr%C3%ADticos&folder=Operaciones&q="+wfA, nil, "")
+	rows := res.body["data"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("metadata filters must select wfA: %+v", res.body)
+	}
+	listRow := rows[0].(map[string]any)
+	if listRow["folder"] != "Operaciones" || listRow["bufferedTriggerCount"] != float64(2) ||
+		!strings.Contains(fmt.Sprint(listRow["tags"]), "facturación") {
+		t.Fatalf("active list metadata/buffer fold: %+v", listRow)
+	}
+	res = h.call("GET", "/v1/workflows?tag=facturaci%C3%B3n&tag=missing", nil, "")
+	if rows = res.body["data"].([]any); len(rows) != 0 {
+		t.Fatalf("repeated tags must AND together: %+v", rows)
+	}
+
 	// Distinct dropdowns.
 	res = h.call("GET", "/workflows/tags", nil, "")
 	tags := fmt.Sprint(res.body["tags"])
