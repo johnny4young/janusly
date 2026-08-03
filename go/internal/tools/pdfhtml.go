@@ -1,4 +1,4 @@
-// The pdf.generate HTML dialect (T-521; reference pdf-renderer.ts): a
+// The pdf.generate HTML dialect (reference pdf-renderer.ts): a
 // closed, sanitized subset parsed with golang.org/x/net/html and mapped
 // onto the SAME pdfLine blocks the markdown renderer feeds the writer.
 //

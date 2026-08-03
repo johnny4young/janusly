@@ -8,7 +8,7 @@
 //	loop-breaker → idempotency → diagnose row → DETERMINISTIC patch
 //	proposal → sandbox validation replay → pending operator decision.
 //
-// Proposal source (T-515): behind the existing double opt-in + the
+// Proposal source: behind the existing double opt-in + the
 // budget gate, the proposal may come from the LLM — same wave-5 non-structural patch grammar as the
 // interactive aipatch surface (a replacement config for the failing
 // node, validated through the shared workflow validator before it is

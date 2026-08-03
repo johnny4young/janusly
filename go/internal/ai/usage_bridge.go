@@ -1,5 +1,5 @@
 // The telemetry bridge from the chokepoint to the process-global usage
-// recorder (T-089): one row per attempt, success AND fallback, fired
+// recorder: one row per attempt, success AND fallback, fired
 // fire-and-forget — the recorder's own contract already guarantees a
 // telemetry failure never breaks the LLM call it measures.
 package ai

@@ -16,7 +16,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/store"
 )
 
-// T-509: completion-family transactions land their timeline events in ONE
+// Completion-family transactions land their timeline events in ONE
 // CopyFrom round trip. The counter rides the wrapTx DI seam (the flakyTx
 // precedent) and distinguishes per-row event INSERTs from bulk copies.
 

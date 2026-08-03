@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// T-520: GET /causal — org-scoped 403, event pinned to run+node+type,
+// GET /causal — org-scoped 403, event pinned to run+node+type,
 // and the replayed ranking with the reference shape.
 
 func TestCausalDecisionExplorer(t *testing.T) {

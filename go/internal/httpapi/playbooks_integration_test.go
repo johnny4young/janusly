@@ -512,7 +512,7 @@ func TestRecoveryItemOwnership(t *testing.T) {
 	h.waitRun(runID, "failed")
 	var deadLetterID string
 	_ = pool.QueryRow(ctx, `SELECT id FROM dead_letters WHERE run_id = $1`, runID).Scan(&deadLetterID)
-	// El redrive abre el incidente (T-137); fallará de nuevo — da igual.
+	// Redrive reopens the incident; this fixture fails again as expected.
 	_ = h.call("POST", "/dlq/replay", map[string]any{"deadLetterId": deadLetterID}, "")
 	h.waitRun(runID, "failed")
 

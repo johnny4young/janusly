@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// T-533: the 5-field cron parser eats operator input — it must NEVER
+// The 5-field cron parser eats operator input — it must NEVER
 // panic, and an accepted schedule must NEVER produce an impossible or
 // non-advancing fire time.
 func FuzzCronParse(f *testing.F) {

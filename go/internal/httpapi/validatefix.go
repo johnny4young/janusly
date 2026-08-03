@@ -3,9 +3,9 @@
 // skipped) seeded with the failing entry's exact input. The suggested
 // workflow passes the SAME grammar gate as /ai/patch-workflow output
 // before any run is seeded. Pilot posture: validationEffectMode supports
-// only the default write-skip ("provider_simulation" answers 409 — the
-// effect simulator is not part of this backend yet), and playbook claims
-// answer 409 until T-139 lands the playbook substrate.
+// only the default write-skip ("provider_simulation" answers 409 because
+// the effect simulator is not part of this backend yet). An optional
+// playbook claim is revalidated against the exact failure before seeding.
 package httpapi
 
 import (
@@ -77,8 +77,8 @@ func (s *V1Server) validateFixCore(r *http.Request, rc v1Request) opResult {
 	result := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation)
 	var blocking []domain.Issue
 	for _, issue := range result.Issues {
-		// Pilot-unsupported node types do not block a sandbox seed — the
-		// DAG itself is sound (save-time posture, T-106 precedent).
+		// Pilot-unsupported node types do not block a sandbox seed when the
+		// DAG itself is sound under the save-time validation posture.
 		if issue.Code != domain.CodeNodeTypeUnsupportedPilot {
 			blocking = append(blocking, issue)
 		}

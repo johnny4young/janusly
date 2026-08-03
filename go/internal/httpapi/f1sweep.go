@@ -1,4 +1,4 @@
-// F1 terminal-sweep read closures (T-183): the last routes the real web
+// F1 terminal-sweep read closures: the last routes the real web
 // touches that the pilot did not yet serve on the exact wire the client
 // uses. The web's api() sends V1_READ_PATHS GETs to /v1 with the envelope
 // (templates, schedule-preview, workflows/health, run/usage,
@@ -152,8 +152,8 @@ func (s *V1Server) mountF1SweepRoutes(mux *http.ServeMux) {
 	}))
 
 	// Calibration posture for the Recovery Center tiles (legacy raw).
-	// Mounted through route(): gate + mount colocated — the T-525 pattern
-	// new modules use (this is the exemplar migration).
+	// Mounted through route so the gate and handler registration stay
+	// colocated; new modules use this as the exemplar migration.
 	s.route(mux, "GET /recovery/calibration-status", routeGate{auth.RoleViewer, "recovery.read"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		calibrations := s.listCalibrationsCore(r, rc)
 		if calibrations.status != http.StatusOK {

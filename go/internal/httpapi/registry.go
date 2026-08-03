@@ -51,7 +51,7 @@ var optionalIdentityRoutes = map[string]bool{
 }
 
 // route registers the gate and mounts the handler in ONE call — the
-// colocated pattern new modules use (T-525). Re-registering the same
+// colocated pattern new modules use. Re-registering the same
 // pattern with the same gate is idempotent (harnesses build many
 // handlers per process); a CONFLICTING gate is a programming error.
 func (s *V1Server) route(mux *http.ServeMux, pattern string, gate routeGate, handler handlerFunc) {
@@ -168,7 +168,7 @@ var routeAuthz = map[string]routeGate{
 	"GET /workflows/health":                        {auth.RoleViewer, "workflows.read"},
 	"GET /workflows/health/delta":                  {auth.RoleViewer, "workflows.read"},
 
-	// F1 terminal-sweep closures (T-183): the missing wires the web reads.
+	// F1 terminal-sweep closures: the missing wires the web reads.
 	"GET /v1/workflows/health":                                    {auth.RoleViewer, "workflows.read"},
 	"GET /v1/run/usage":                                           {auth.RoleViewer, "runs.read"},
 	"GET /v1/workflows/schedule-preview":                          {auth.RoleViewer, "workflows.read"},

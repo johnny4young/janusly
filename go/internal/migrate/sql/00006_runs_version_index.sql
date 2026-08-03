@@ -1,6 +1,6 @@
 -- +goose Up
--- Hot-path index (T-507 EXPLAIN sweep finding): the schedule heatmap,
--- the T-500 version-linked run counts, and the DLQ/health joins all reach
+-- Hot-path index (EXPLAIN sweep finding): the schedule heatmap,
+-- the version-linked run counts, and the DLQ/health joins all reach
 -- runs THROUGH workflow_versions (wv.id = r.workflow_version_id) — with
 -- no index on that column the join degenerates to an org-wide scan.
 -- Plain CREATE INDEX here (transactional, near-instant on dev/CI sizes);

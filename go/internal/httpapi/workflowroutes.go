@@ -1,6 +1,6 @@
 // Workflow lifecycle handlers: save (with upstream tags + SLO carriers),
-// list/latest/versions reads, rollback, and the circuit-breaker resume
-// (T-501 split; wires unchanged — contract + dual-run are the guard).
+// list/latest/versions reads, rollback, and circuit-breaker resume. The
+// contract and dual-run suites guard the preserved wire behavior.
 package httpapi
 
 import (

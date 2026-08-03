@@ -15,7 +15,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/store"
 )
 
-// T-504: every root run is stamped with a correlation trace id at start,
+// Every root run is stamped with a correlation trace id at start,
 // a subworkflow child INHERITS the parent's id (the whole chain stays
 // copyable as one trace), and node executions emit OTel spans when a
 // provider is registered — a no-op otherwise.

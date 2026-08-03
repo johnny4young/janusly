@@ -14,7 +14,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/aibudget"
 )
 
-// T-516: bounded usage reporting + the composite budget (workflow
+// Bounded usage reporting + the composite budget (workflow
 // override bites before the org default) + the per-workflow budget write.
 
 func seedUsage(t *testing.T, org, workflowID, model string, quantity int, costUsd float64, mode string) {

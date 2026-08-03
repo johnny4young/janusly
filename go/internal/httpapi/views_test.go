@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// T-527: the typed views pin their EXACT wire key sets. A typo'd JSON tag
+// The typed views pin their EXACT wire key sets. A typo'd JSON tag
 // breaks this test; a typo'd field name no longer compiles at all.
 
 func viewKeys(t *testing.T, view any) []string {

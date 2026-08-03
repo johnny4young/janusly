@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// T-532: the layered resolution IS the contract — tenant row beats env
+// The layered resolution IS the contract — tenant row beats env
 // beats catalog default, out-of-contract values fall through, ranges and
 // closed enums reject.
 

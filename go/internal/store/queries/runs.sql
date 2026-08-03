@@ -221,8 +221,8 @@ VALUES ($1, $2, $3, $4, $5);
 INSERT INTO run_events (id, run_id, node_id, type, payload, created_at)
 VALUES ($1, $2, $3, $4, $5, $6);
 
--- One COPY for every event a completion-family transaction appends
--- (T-509): same columns and payload bytes as InsertRunEventAt, one
+-- One COPY for every event a completion-family transaction appends:
+-- same columns and payload bytes as InsertRunEventAt, one
 -- round trip instead of one per event.
 -- name: InsertRunEvents :copyfrom
 INSERT INTO run_events (id, run_id, node_id, type, payload, created_at)

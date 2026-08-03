@@ -1,4 +1,4 @@
-// Billing surfaces (T-516; reference apps/api/src/routes/billing-routes.ts
+// Billing surfaces (reference apps/api/src/routes/billing-routes.ts
 // + packages/engine/src/billing.ts): bounded usage reporting (flat summary
 // + closed-enum dimensional breakdown + CSV export) and the budget
 // surfaces (composite read envelope + the per-workflow override write).

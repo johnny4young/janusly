@@ -1,4 +1,4 @@
-// SCIM wire primitives (T-502 split): the WorkOS signature verifier
+// SCIM wire primitives: the WorkOS signature verifier
 // (fail-closed reason ladder, constant-time), the event envelope parser,
 // primary-email extraction, and the pure role derivation (highest-rank
 // wins, defaultRole fallback).

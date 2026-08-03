@@ -16,7 +16,7 @@ import (
 )
 
 // The chokepoint writes one usage_events row per attempt through the
-// T-089 recorder — the exact reference row on success (tokens, cache
+// recorder: the exact reference row on success (tokens, cache
 // counts, computed cost) and the fallback row with the classified error;
 // an unknown model never invents a cost, a simulated provider always
 // records zero.

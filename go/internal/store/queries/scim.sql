@@ -140,7 +140,8 @@ WHERE org_id = $1 AND scim_directory_id = $2 AND provider_group_id = $3;
 -- legacy pre-invite rows seed userId with the email and leave the email
 -- column NULL (the auth resolver's backfill acknowledges them) — without
 -- this arm the collision guard is blind to them and provisioning 500s
--- on the (org_id, user_id) unique index forever (T-534 property find).
+-- on the (org_id, user_id) unique index forever; the lookup must include
+-- the legacy user_id-as-email shape.
 -- name: FindScimMemberByEmail :one
 SELECT id, user_id, role, invited_by FROM org_members
 WHERE org_id = $1 AND (email = $2 OR lower(user_id) = $2);
@@ -154,9 +155,9 @@ WHERE id = sqlc.arg(id) AND org_id = sqlc.arg(org_id);
 INSERT INTO org_members (id, org_id, user_id, email, role, invited_by)
 VALUES (sqlc.arg(id), sqlc.arg(org_id), sqlc.arg(email), sqlc.arg(email), sqlc.arg(role), sqlc.narg(invited_by));
 
--- Deprovisioning only ever deletes rows SCIM itself created — a
--- human-invited row sharing the email must survive a directory delete
--- (T-534 property find: the unguarded delete could remove the human).
+-- Deprovisioning only ever deletes rows SCIM itself created. A
+-- human-invited row sharing the email must survive a directory delete;
+-- the unguarded form could remove the human-owned row.
 -- name: DeleteScimMembershipByEmail :execrows
 DELETE FROM org_members
 WHERE org_id = $1 AND email = $2 AND invited_by = sqlc.arg(invited_by);

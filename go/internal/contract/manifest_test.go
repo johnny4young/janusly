@@ -2,7 +2,7 @@ package contract
 
 import "testing"
 
-// T-532: the manifest is pure data the generator trusts — every entry
+// The manifest is pure data the generator trusts — every entry
 // carries a method, a versioned path, and a response shape; no
 // duplicates hide behind reorderings.
 func TestManifestInvariants(t *testing.T) {

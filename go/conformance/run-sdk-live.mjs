@@ -1,4 +1,4 @@
-// SDK-Python live lane (T-187): boots the Go binary with a service token,
+// SDK-Python live lane: boots the Go binary with a service token,
 // seeds the org membership + one saved workflow, and runs the SDK's
 // pytest live module against the REAL wire:
 //

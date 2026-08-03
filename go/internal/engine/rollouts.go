@@ -37,7 +37,7 @@ const (
 )
 
 // RecoveryQualificationDatasetVersion pins the immutable dataset the
-// qualification receipts reference (T-151).
+// qualification receipts reference.
 const RecoveryQualificationDatasetVersion = "1"
 
 // externalTriggerTypes: rollout variants must agree on these nodes
@@ -189,7 +189,7 @@ func (e *Engine) CreateWorkflowRollout(ctx context.Context, input struct {
 		return RolloutActiveExists, nil, nil
 	}
 	// A V2 recovery contract on EITHER side demands a passed dataset
-	// qualification receipt for this exact version pair (T-151).
+	// qualification receipt for this exact version pair.
 	needsQualification := (baselineWorkflow.Recovery != nil && baselineWorkflow.Recovery.Contract != nil &&
 		baselineWorkflow.Recovery.Contract.Version == "2") ||
 		(canaryWorkflow.Recovery != nil && canaryWorkflow.Recovery.Contract != nil &&

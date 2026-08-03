@@ -1,4 +1,4 @@
-// Downstream scheduling + run settle (T-526 split): the readiness scan
+// Downstream scheduling + run settle: the readiness scan
 // with the atomic queue claim, edge-condition gating, terminal run flip
 // (cause+1ms ordering) and the status_checked settle marker. The pure
 // readiness predicates live in readiness.go.

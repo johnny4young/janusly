@@ -161,7 +161,7 @@ func (s *V1Server) readinessCore(r *http.Request, rc v1Request) opResult {
 // credential names + MCP aliases resolved per readiness pass.
 const readinessCredentialRefCap = 50
 
-// credentialReadinessIssues (T-161, the T-042 gap): one DAG pass collects
+// credentialReadinessIssues performs one DAG pass that collects
 // distinct credential names + MCP aliases (combined cap 50 — checked
 // after each potential insert so a node carrying both can't sneak past
 // the bound by 1), then each unique reference resolves AT MOST once

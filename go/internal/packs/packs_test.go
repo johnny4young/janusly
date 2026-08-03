@@ -2,7 +2,7 @@ package packs
 
 import "testing"
 
-// T-532: the boot validation IS the contract — every embedded pack
+// The boot validation IS the contract — every embedded pack
 // parsed, workflow-valid, unique; the accessors behave.
 func TestCatalogBootInvariants(t *testing.T) {
 	all := List()

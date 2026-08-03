@@ -157,7 +157,7 @@ var (
 )
 
 // errDbPoolExhausted is the stable never-throw sentinel: at the process
-// cap the tool answers {ok:false, error:"db_pool_exhausted"} (T-513).
+// cap the tool answers {ok:false, error:"db_pool_exhausted"}.
 var errDbPoolExhausted = errors.New("db_pool_exhausted")
 
 // metricDbToolPools gauges the live external-pool count for dashboards.
@@ -221,7 +221,7 @@ func getDbPool(ctx context.Context, orgID, credentialName, dsn string) (*pgxpool
 		dbPools[oldest].pool.Close()
 		delete(dbPools, oldest)
 	}
-	// Process-wide semaphore over the TOTAL (T-513): a net-new pool past
+	// Process-wide semaphore over the TOTAL: a net-new pool past
 	// the cap answers the stable exhausted sentinel instead of growing —
 	// deliberately NO cross-org eviction, so one tenant cannot thrash
 	// another tenant's warm pools.

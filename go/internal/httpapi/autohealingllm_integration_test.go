@@ -13,7 +13,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/engine"
 )
 
-// T-515: the healing proposal may come from the LLM behind the extra
+// The healing proposal may come from the LLM behind the extra
 // autoHealing.llmProposals opt-in + the budget gate — same wave-5
 // non-structural patch grammar, sandbox validation unchanged. Every
 // degradation keeps the deterministic harden_retries proposal.

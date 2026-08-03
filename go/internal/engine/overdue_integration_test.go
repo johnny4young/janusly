@@ -11,7 +11,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/grammar"
 )
 
-// T-179 verification: the pilot's "overdue checkpoint" posture. The
+// Verification: the pilot's "overdue checkpoint" posture. The
 // reference needs a dedicated overdue reconciler because BullMQ delayed
 // jobs can be lost; the pilot's wake-up clock lives in Postgres, so a
 // wakeup that came due while NO worker was polling simply fires on the

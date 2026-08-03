@@ -26,7 +26,7 @@ func rolloutWorkflowDoc(id, verdict string) map[string]any {
 	}
 }
 
-// The rollout substrate (T-149): create-validation ladder (bounds, canary
+// The rollout substrate: create-validation ladder (bounds, canary
 // strictly newer AND latest, one active per workflow), the deterministic
 // sha256 assignment captured on the run row AND the run.started event,
 // and the promote decision routing all future traffic to the canary.
@@ -135,7 +135,7 @@ func TestWorkflowRolloutAssignment(t *testing.T) {
 	}
 }
 
-// T-150: version-write locking under a live rollout (save + rollback
+// Version-write locking under a live rollout (save + rollback
 // refuse with 409), incompatible external-trigger contracts refuse the
 // create, and the soft delete cancels the active deployment in the SAME
 // commit.
@@ -212,7 +212,7 @@ func TestRolloutVersionWriteLocking(t *testing.T) {
 	}
 }
 
-// T-152: idempotent terminal receipts feeding the aggregate counters,
+// Idempotent terminal receipts feeding the aggregate counters,
 // the minimum-sample auto-rollback with its atomic audit evidence,
 // frozen evidence after finish, and the bounded crash-window repair.
 func TestRolloutAutoRollback(t *testing.T) {
@@ -339,7 +339,7 @@ func TestRolloutAutoRollback(t *testing.T) {
 	}
 }
 
-// T-153: sandbox validation and replay revivals NEVER consume canary
+// Sandbox validation and replay revivals NEVER consume canary
 // traffic — the validation child carries no assignment and produces no
 // outcome receipt; the redriven run keeps its FROZEN original assignment
 // and its post-replay terminal cannot double-count.
@@ -463,7 +463,7 @@ func TestValidationAndReplayNeverConsumeCanary(t *testing.T) {
 	}
 }
 
-// T-154: trigger ingest resolves the rollout assignment at ACCEPT time —
+// Trigger ingest resolves the rollout assignment at ACCEPT time —
 // captured on the trigger event AND the run; the trigger node must exist
 // in the ASSIGNED version (else 409 trigger_no_matching_node); buffered
 // events keep their captured assignment through the breaker backfill.

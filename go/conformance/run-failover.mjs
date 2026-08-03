@@ -1,4 +1,4 @@
-// Kill-failover harness (T-185): two Go instances over the SAME Postgres,
+// Kill-failover harness: two Go instances over the SAME Postgres,
 // sustained run traffic, one instance SIGKILLed mid-flight (the crash
 // case — no drain), and the survivor must absorb everything:
 //

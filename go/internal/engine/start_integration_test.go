@@ -99,7 +99,7 @@ func TestStartRunCommitsSkeletonAtomically(t *testing.T) {
 	events, err := q.ListRunEvents(ctx, store.ListRunEventsParams{
 		RunID: runID, BeforeCreatedAt: time.Now().Add(time.Hour), BeforeID: "zzz", PageLimit: 10,
 	})
-	// T-505: the start tx now also appends node.queued per root (the
+	// The start tx now also appends node.queued per root (the
 	// reference's initial-publication event); newest-first keyset puts it
 	// before run.started.
 	if err != nil || len(events) != 2 ||

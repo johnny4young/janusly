@@ -16,7 +16,7 @@ const RedactedPlaceholder = "[redacted]"
 // RedactValues recursively replaces any string occurrence of the given
 // values with the redaction placeholder. Non-string leaves pass through
 // untouched. Copy-on-write: containers are rebuilt ONLY on an actual
-// replacement underneath (T-508 — the chokepoint runs on every persisted
+// replacement underneath (the chokepoint runs on every persisted
 // event, and the overwhelmingly common payload has nothing to redact);
 // the input tree is never mutated.
 func RedactValues(value any, redactedValues []string) any {

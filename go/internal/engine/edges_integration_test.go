@@ -387,7 +387,7 @@ func TestLoopStringItemsSplitOnCommas(t *testing.T) {
 }
 
 func TestLoopUnknownModeIsHonestlyUnsupported(t *testing.T) {
-	// for_each became executable (T-174); only a mode OUTSIDE the closed
+	// for_each became executable; only a mode OUTSIDE the closed
 	// set keeps the honest failure.
 	ctx, pool, eng, org := newHarness(t)
 	doc := `{"nodes":[{"id":"fan","type":"loop","config":{

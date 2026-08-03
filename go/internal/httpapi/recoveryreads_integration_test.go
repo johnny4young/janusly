@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// T-518: the three Recovery V2 read projections — durable cases (bounded
+// The three Recovery V2 read projections — durable cases (bounded
 // list + detail), the constant-time ledger, and per-operator momentum.
 // Reads only; the seeds go straight to the tables the writers own.
 

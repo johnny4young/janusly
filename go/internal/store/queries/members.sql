@@ -53,7 +53,7 @@ WHERE org_id = $1 AND email = $2 AND status = 'pending';
 INSERT INTO invitations (id, org_id, email, role, invited_by)
 VALUES ($1, $2, $3, $4, $5);
 
--- Identity surfaces (T-519): the caller's memberships with org names,
+-- Identity surfaces: the caller's memberships with org names,
 -- profile upsert, the invitation-accept CAS, and the plugin stub row.
 
 -- name: ListUserMemberships :many

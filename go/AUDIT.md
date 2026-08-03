@@ -99,7 +99,7 @@ exact candidate commit:
 | QUE-001 | P0 | The current cutover runbook forbids dual schedulers but does not yet prove a BullMQ/in-flight-work drain and rollback procedure. | fixed in queue transition review |
 | QUE-002 | P0 | The cutover map promised per-tenant work ownership even though Go claims and background sweeps are database-global. | fixed in architecture review |
 | QUE-003 | P0 | Go-created queued nodes did not maintain Node's publication outbox, so rollback could strand roots/downstream/redrives or lose retry backoff. | fixed in queue transition review |
-| SRC-001 | P2 | Go source comments contain 134 internal ticket identifiers instead of durable behavioral explanations. | open |
+| SRC-001 | P2 | Go source comments carried more than 130 internal ticket identifiers instead of durable behavioral explanations. | fixed in source-hygiene review |
 | EVD-002 | P1 | `make bench` rewrote the complete benchmark report and erased independent allocation and hostile-world evidence. | fixed in clean validation review |
 | MOD-001 | P2 | Go 1.26 idioms were not enforced, allowing avoidable allocation and synchronization boilerplate to accumulate. | fixed in this band |
 | PAR-001 | P1 | Go org-config writes and environment fallbacks accepted non-finite or negative fractional integer inputs differently from Node and skipped Node's string normalization. | fixed in architecture review |
@@ -547,3 +547,21 @@ goroutines fell 0.70%, and the apparent 24.38% heap quarter delta is caused by
 a documented low-load second eighth. The last six eighths remain flat near
 8.8-8.9 MiB, so the retained evidence supports **stable, no leak** without
 rewriting the raw automated growth flag.
+
+### Source-comment hygiene
+
+`SRC-001` is closed by replacing internal ticket references with durable
+behavioral explanations. The baseline `.go` scan contained 133 `T-###` tokens
+across 130 lines; the review also covered SQL query sources, generated SQLC
+comments, JavaScript/MJS harnesses, shell scripts, and the Makefile so routine
+generation cannot reintroduce the references.
+
+The authoritative SQL query comments were updated before `make generate`, and
+the generated store files now match them. A source-only scan under `go/` across
+Go, SQL, JavaScript/MJS, shell, and Makefile inputs returns zero `T-###` tokens;
+historical identifiers remain only in review and evidence documents where they
+provide provenance rather than implementation guidance.
+
+The staged source-hygiene tree passed syntax and formatting checks, all 12
+conformance-script tests, the complete `make ci` ladder on PostgreSQL 18, and
+the complete race-enabled PostgreSQL 15 compatibility lane.

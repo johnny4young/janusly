@@ -1,16 +1,17 @@
-// AWS Signature V4 signing + the real S3-compatible driver (T-521).
+// AWS Signature V4 signing + the real S3-compatible driver.
 // Hand-rolled over net/http — no SDK, mirroring the reference's
 // S3Provider posture (which deliberately bypasses the SSRF chokepoint:
 // the endpoint is OPERATOR configuration, not workflow-author input).
 //
 // Env contract (reference S3ObjectStoreOptions):
-//   JANUSLY_OBJECT_STORE_BUCKET            — required for the s3 provider
-//   JANUSLY_OBJECT_STORE_ENDPOINT          — MinIO/R2 custom endpoint;
-//     when set, path-style URLs are forced (certificate-of-name reality)
-//   JANUSLY_OBJECT_STORE_REGION            — default us-east-1
-//   JANUSLY_OBJECT_STORE_PUBLIC_BASE_URL   — CDN-fronted public URLs
-//   JANUSLY_OBJECT_STORE_PRESIGN_TTL_SECONDS — presigned GET TTL (3600)
-//   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY — standard credentials
+//
+//	JANUSLY_OBJECT_STORE_BUCKET            — required for the s3 provider
+//	JANUSLY_OBJECT_STORE_ENDPOINT          — MinIO/R2 custom endpoint;
+//	  when set, path-style URLs are forced (certificate-of-name reality)
+//	JANUSLY_OBJECT_STORE_REGION            — default us-east-1
+//	JANUSLY_OBJECT_STORE_PUBLIC_BASE_URL   — CDN-fronted public URLs
+//	JANUSLY_OBJECT_STORE_PRESIGN_TTL_SECONDS — presigned GET TTL (3600)
+//	AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY — standard credentials
 package objectstore
 
 import (

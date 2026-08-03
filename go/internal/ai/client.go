@@ -51,12 +51,12 @@ type GenerateTextInput struct {
 	// keeps the configured provider; "<provider>/<model>" names both.
 	ModelHint string
 	// CacheSystemPrompt marks the system prompt as an ephemeral cache
-	// breakpoint (T-102 consumes it; plumbed now so the input is stable).
+	// breakpoint; the field is plumbed here so the input remains stable.
 	CacheSystemPrompt bool
 	// MaxOutputUnits caps output tokens for this call; 0 = the resolved
 	// default.
 	MaxOutputUnits int
-	// Context carries usage-telemetry attribution (T-101 consumes it).
+	// Context carries usage-telemetry attribution into the recorder.
 	Context CallContext
 }
 
@@ -103,8 +103,8 @@ type Client interface {
 	Configured() bool
 }
 
-// Config is the resolved client configuration (T-100 layers the org
-// catalog on top of these process defaults).
+// Config is the resolved client configuration; the organization catalog
+// layers tenant values on top of these process defaults.
 type Config struct {
 	APIKey  string
 	Model   string

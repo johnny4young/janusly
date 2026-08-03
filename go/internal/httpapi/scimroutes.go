@@ -1,4 +1,4 @@
-// SCIM route surface (T-502 split): admin CRUD on directories and
+// SCIM route surface: admin CRUD on directories and
 // group-role mappings, the groups picker, bulk resync, and the public
 // signature-authorized WorkOS webhook receiver.
 package httpapi

@@ -1,5 +1,5 @@
 // Ordered buffer for the run_events a completion-family transaction
-// appends (T-509). Sites add rows in causal order; inCompletionTx flushes
+// appends. Sites add rows in causal order; inCompletionTx flushes
 // the whole buffer in ONE CopyFrom round trip right before the stream
 // notify, instead of one INSERT per event. Payload bytes, ids, and
 // created_at values are exactly what the per-row inserts produced — the
@@ -27,8 +27,8 @@ func (b *runEventBuffer) add(id, runID, nodeID, kind string, payload json.RawMes
 	created := at
 	b.rows = append(b.rows, store.InsertRunEventsParams{
 		ID: id, RunID: runID,
-		NodeID:    pgtype.Text{String: nodeID, Valid: nodeID != ""},
-		Type:      kind, Payload: payload, CreatedAt: &created,
+		NodeID: pgtype.Text{String: nodeID, Valid: nodeID != ""},
+		Type:   kind, Payload: payload, CreatedAt: &created,
 	})
 }
 

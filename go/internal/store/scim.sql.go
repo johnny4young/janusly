@@ -74,9 +74,9 @@ type DeleteScimMembershipByEmailParams struct {
 	InvitedBy pgtype.Text
 }
 
-// Deprovisioning only ever deletes rows SCIM itself created — a
-// human-invited row sharing the email must survive a directory delete
-// (T-534 property find: the unguarded delete could remove the human).
+// Deprovisioning only ever deletes rows SCIM itself created. A
+// human-invited row sharing the email must survive a directory delete;
+// the unguarded form could remove the human-owned row.
 func (q *Queries) DeleteScimMembershipByEmail(ctx context.Context, arg DeleteScimMembershipByEmailParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteScimMembershipByEmail, arg.OrgID, arg.Email, arg.InvitedBy)
 	if err != nil {
@@ -184,7 +184,8 @@ type FindScimMemberByEmailRow struct {
 // legacy pre-invite rows seed userId with the email and leave the email
 // column NULL (the auth resolver's backfill acknowledges them) — without
 // this arm the collision guard is blind to them and provisioning 500s
-// on the (org_id, user_id) unique index forever (T-534 property find).
+// on the (org_id, user_id) unique index forever; the lookup must include
+// the legacy user_id-as-email shape.
 func (q *Queries) FindScimMemberByEmail(ctx context.Context, arg FindScimMemberByEmailParams) (FindScimMemberByEmailRow, error) {
 	row := q.db.QueryRow(ctx, findScimMemberByEmail, arg.OrgID, arg.Email)
 	var i FindScimMemberByEmailRow

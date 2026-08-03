@@ -1,6 +1,6 @@
 // Run lifecycle handlers: start (rollout assignment + production gate),
-// run/status/list reads with the events keyset, resume, cancel, DLQ list
-// + redrive/replay (T-501 split; wires unchanged).
+// run/status/list reads with the events keyset, resume, cancel, DLQ list,
+// redrive, and replay. The split preserves the existing wire contract.
 package httpapi
 
 import (
@@ -240,8 +240,8 @@ func (s *V1Server) getRunCore(r *http.Request, rc v1Request) opResult {
 }
 
 // runView emits the reference's full run key set; columns this backend does
-// not populate yet surface as nulls, never as missing keys (T-527: the
-// typed RunView makes a typo'd key a compile error).
+// not populate yet surface as nulls, never as missing keys. The typed
+// RunView makes a typo'd key a compile error.
 func runView(run store.GetRunRow) RunView { return newRunView(run) }
 
 func (s *V1Server) listRuns(w http.ResponseWriter, r *http.Request, rc v1Request) {
@@ -415,7 +415,7 @@ func (s *V1Server) listDeadLetters(w http.ResponseWriter, r *http.Request, rc v1
 		return
 	}
 	// The ownership overlay travels with its dead letter (the reference
-	// joins the same shape); the typed view owns the key set (T-527).
+	// joins the same shape); the typed view owns the key set.
 	items := make([]DeadLetterSummaryView, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, newDeadLetterSummaryView(row))

@@ -1,4 +1,4 @@
-// SCIM group handlers + shared membership write paths (T-502 split):
+// SCIM group handlers + shared membership write paths:
 // group sync/delete, membership add/remove with role recompute, the
 // (org_id, lower(email))-keyed upsert, and the domain-policy reader.
 package httpapi

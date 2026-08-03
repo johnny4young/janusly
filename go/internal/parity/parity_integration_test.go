@@ -34,8 +34,8 @@ import (
 // acceptedDivergences maps fixture id → projection-path → the value this
 // backend produces instead of the reference's. Every entry documents WHY.
 var acceptedDivergences = map[string]map[string]any{
-	// (empty — F05 closed in T-135: the pilot's redrive now re-arms the
-	// node to attempt 1, matching the reference's recovery-claim posture.)
+	// Empty: F05 now re-arms the node at attempt 1, matching the
+	// reference's recovery-claim posture.
 }
 
 type projection struct {

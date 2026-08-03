@@ -643,7 +643,7 @@ type ListUserMembershipsRow struct {
 	Plan             pgtype.Text
 }
 
-// Identity surfaces (T-519): the caller's memberships with org names,
+// Identity surfaces: the caller's memberships with org names,
 // profile upsert, the invitation-accept CAS, and the plugin stub row.
 func (q *Queries) ListUserMemberships(ctx context.Context, userID string) ([]ListUserMembershipsRow, error) {
 	rows, err := q.db.Query(ctx, listUserMemberships, userID)

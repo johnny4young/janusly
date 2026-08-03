@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// T-511: the Postgres-connection baseline gate — the LISTEN-hijack leak
-// class (T-185) converted into CI. Ten full harness lifecycles (server +
+// The Postgres-connection baseline gate — the LISTEN-hijack leak
+// class converted into CI. Ten full harness lifecycles (server +
 // engine workers + stream hub + pools) must return the server's
 // connection count to its baseline; a hijacked or orphaned connection
 // per harness shows up as a monotonic climb.

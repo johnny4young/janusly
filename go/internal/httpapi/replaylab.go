@@ -1,4 +1,4 @@
-// Replay Lab routes (T-517; reference run-routes/replay-lab.ts): the
+// Replay Lab routes (reference run-routes/replay-lab.ts): the
 // whole-run sandbox replay (optionally with a patched workflow) and the
 // targeted fork. Editor + runs.start, "ai" rate family, org-scoped
 // source with identical 404s (no enumeration leak), nested labs

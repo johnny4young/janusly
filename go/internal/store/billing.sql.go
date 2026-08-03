@@ -78,7 +78,7 @@ type ListUsageEventsForBillingRow struct {
 	CreatedAt *time.Time
 }
 
-// Billing reads/writes (T-516): bounded usage slices, the per-workflow
+// Billing reads/writes: bounded usage slices, the per-workflow
 // budget override, and the workflow-scope month spend for the composite
 // budget gate (workflow override -> org default -> none).
 func (q *Queries) ListUsageEventsForBilling(ctx context.Context, arg ListUsageEventsForBillingParams) ([]ListUsageEventsForBillingRow, error) {

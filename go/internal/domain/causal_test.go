@@ -2,7 +2,7 @@ package domain
 
 import "testing"
 
-// T-520: the deterministic decision replay — reference scoring formula
+// The deterministic decision replay — reference scoring formula
 // (weighted cost + latency + quality penalty, 40/40/20 defaults, lower
 // wins), strategy sorts, deltas vs the chosen row, and the exact
 // explanation strings.

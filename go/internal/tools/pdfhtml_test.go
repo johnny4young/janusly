@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// T-521 HTML dialect: the safe subset renders, the deny-set drops tag AND
+// HTML dialect: the safe subset renders, the deny-set drops tag AND
 // children with a VISIBLE marker, and hostile hrefs lose the link.
 
 func TestRenderHTMLPDFSubset(t *testing.T) {

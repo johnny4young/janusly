@@ -1,4 +1,4 @@
-// janusly-admin (T-530): the runbook curls as subcommands — every action
+// janusly-admin: the runbook curls as subcommands — every action
 // goes through the EXISTING HTTP routes with a service token (or dev
 // headers), never direct SQL, so the CLI can do exactly what the API
 // authorizes and nothing more.

@@ -116,7 +116,7 @@ type principal struct {
 // Resolver owns the provider chain and the membership resolution.
 type Resolver struct {
 	pool *pgxpool.Pool
-	// Seams for tests and for the Supabase HTTP verifier (T-070).
+	// Seams for tests and for the Supabase HTTP verifier.
 	supabaseURL      string
 	supabaseKey      string
 	serviceToken     string

@@ -14,7 +14,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/auth"
 )
 
-// T-186 security review, executable half.
+// Security review, executable half.
 
 // The editor sweep completes the per-rank authz matrix (the viewer sweep
 // covers the bottom rank): every admin-gated pattern rejects an editor
@@ -92,7 +92,7 @@ func TestSecretScrubEndToEnd(t *testing.T) {
 		"id": "scrub-" + suffix, "name": "Scrub e2e", "dslVersion": "1.0",
 		"nodes": []any{
 			map[string]any{"id": "boom", "type": "http", "config": map[string]any{
-				"url": "http://127.0.0.1:1/unreachable",
+				"url":     "http://127.0.0.1:1/unreachable",
 				"headers": map[string]any{"authorization": "Bearer " + secret},
 				"apiKey":  secret,
 				"retry":   map[string]any{"maxAttempts": 1},

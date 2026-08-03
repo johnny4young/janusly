@@ -73,8 +73,8 @@ LIMIT 500;
 -- percentile_cont matches the reference's percentile semantics exactly.
 
 -- name: QueryVerifiedRecoveryStats :one
--- The durable generation-bound facts are the ONLY source (T-137
--- reconciliation of T-055): a row exists only when a claimed replay
+-- The durable generation-bound facts are the only reconciliation source:
+-- a row exists only when a claimed replay
 -- reached terminal success, so initiation can never inflate the metric;
 -- validation replays are excluded via the run's replay_mode.
 WITH recovered AS (
@@ -256,7 +256,7 @@ ON CONFLICT (org_id) DO UPDATE SET
 -- name: GetRecoveryImpactRollup :one
 SELECT * FROM recovery_impact_rollups WHERE org_id = $1;
 
--- Personal momentum (T-518 /recovery/my-wins): terminally successful DLQ
+-- Personal momentum (/recovery/my-wins): terminally successful DLQ
 -- recoveries attributed to ONE operator, production runs only (the run
 -- join drops sandbox lineage exactly like the reference projection).
 -- name: CountOperatorRecoveries :one

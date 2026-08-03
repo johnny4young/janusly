@@ -1,4 +1,4 @@
-// Terminal node failure (T-526 split): retry-or-fail with the writeSide
+// Terminal node failure: retry-or-fail with the writeSide
 // no-retry channel, the dead-letter insert + recovery-item hook, the
 // post-failure breaker/alert hooks, and generation-bound recovery impact.
 package engine

@@ -91,7 +91,7 @@ ci:
 	$(MAKE) queue-handoff-test
 	@echo "== conformance script tests =="
 	$(MAKE) script-test
-	@echo "== coverage floors (T-532) =="
+	@echo "== coverage floors =="
 	@bash scripts/coverage-floor.sh
 	@echo "== contract (drift check) =="
 	$(MAKE) contract
@@ -148,7 +148,7 @@ soak:
 failover:
 	node conformance/run-failover.mjs
 
-# Single-binary web (T-522): build the Vite bundle and copy it into the
+# Single-binary web: build the Vite bundle and copy it into the
 # embed root before `go build`. The committed dist/ is only a placeholder;
 # the real assets stay out of git.
 web-embed:
@@ -156,7 +156,7 @@ web-embed:
 	rm -rf internal/webdist/dist
 	cp -R ../apps/web/dist internal/webdist/dist
 
-# T-529 DX lane: the one-command truth ladder (fail-fast, per-stage
+# DX lane: the one-command truth ladder (fail-fast, per-stage
 # timing) and the deterministic demo org (API-driven, idempotent).
 verify:
 	@bash scripts/verify.sh
@@ -164,12 +164,12 @@ verify:
 seed:
 	go run ./cmd/seed
 
-# T-531 Postgres chaos: the failover twin with the DATABASE as the
+# Postgres chaos: the failover twin with the DATABASE as the
 # victim. Runs its OWN Postgres container (never the shared pilot DB).
 chaos:
 	node conformance/run-chaos.mjs
 
-# T-535 hostile-world bench: reads must stay under 2x the healthy p95
+# Hostile-world bench: reads must stay under 2x the healthy p95
 # while the DLQ grows and the breaker trips. NEVER co-resident with the
 # 24h soak (SIGSTOP it first).
 bench-hostile:

@@ -42,8 +42,8 @@ func (r iteratorForInsertRunEvents) Err() error {
 	return nil
 }
 
-// One COPY for every event a completion-family transaction appends
-// (T-509): same columns and payload bytes as InsertRunEventAt, one
+// One COPY for every event a completion-family transaction appends:
+// same columns and payload bytes as InsertRunEventAt, one
 // round trip instead of one per event.
 func (q *Queries) InsertRunEvents(ctx context.Context, arg []InsertRunEventsParams) (int64, error) {
 	return q.db.CopyFrom(ctx, []string{"run_events"}, []string{"id", "run_id", "node_id", "type", "payload", "created_at"}, &iteratorForInsertRunEvents{rows: arg})

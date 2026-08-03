@@ -41,7 +41,7 @@ const LINEAR = JSON.stringify({
 // Every request carries a FIXED `name` tag: without it k6 keys its
 // metric series by full URL, and the unique runId in /v1/status minted
 // one series per poll — 800k series and ~100MB of k6 RSS in a long
-// soak (the T-510 finding). With name tags the series count is O(4)
+// soak. With name tags the series count is O(4)
 // and k6's memory stays flat for the whole 24h window.
 export function startLinear() {
   const started = http.post(`${BASE}/v1/start`, LINEAR, {

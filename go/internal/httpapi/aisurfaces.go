@@ -1,4 +1,4 @@
-// The remaining /ai/* surfaces (T-514; reference ai-explain-route.ts,
+// The remaining /ai/* surfaces (reference ai-explain-route.ts,
 // ai-review-route.ts, ai-improve-route.ts, ai-health-route.ts): explain a
 // workflow or a run in prose, review a DAG for production readiness, and
 // suggest full-replacement improvements — plus the read-only provider
@@ -173,7 +173,7 @@ func (s *V1Server) explainRunCore(r *http.Request, rc v1Request) opResult {
 			"question exceeds {{maxChars}} characters", map[string]any{"maxChars": settings.PromptMaxChars})
 	}
 	ctx := r.Context()
-	// The deterministic run-explain (T-147) is BOTH the fallback answer
+	// The deterministic run-explain is BOTH the fallback answer
 	// and the AI prompt's grounding context.
 	report, markdown, ok := s.resolveRunExplain(ctx, rc.orgID, body.RunID)
 	if !ok {

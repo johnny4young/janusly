@@ -157,7 +157,7 @@ func TestRecoveryHomeReadModel(t *testing.T) {
 	}
 }
 
-// The T-148 metric pair: set-once first-action latency (the second
+// The metric pair: set-once first-action latency (the second
 // transition must NOT move the stamp) and the impact-bound 7-day
 // recurrence rate on /recovery/metrics.
 func TestFirstActionAndRecurrenceMetrics(t *testing.T) {

@@ -87,7 +87,7 @@ func Put(providerOverride, key string, body []byte, contentType string) PutResul
 		fileURL := url.URL{Scheme: "file", Path: filepath.ToSlash(absDestination)}
 		return PutResult{Ok: true, Provider: "local", URL: fileURL.String(), Key: safeKey}
 	case "s3":
-		// The real SigV4 driver (T-521): hand-rolled signing, path-style
+		// The real SigV4 driver: hand-rolled signing, path-style
 		// against custom endpoints (MinIO/R2), presigned GET or CDN URLs.
 		return s3Put(safeKey, body, contentType)
 	default:

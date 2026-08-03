@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// The per-trigger storm guard end to end (closes the T-040 divergence):
+// The per-trigger storm guard end to end proves the compatibility contract:
 // a trigger over its configured rateLimitPerMin marks the event skipped,
 // audits trigger.event.skipped, and answers 429 with the reference's
 // exact body — while a distinct trigger keeps its own budget.

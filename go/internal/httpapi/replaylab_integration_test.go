@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// T-517: the Replay Lab. A whole-run sandbox replay NEVER executes
+// The Replay Lab. A whole-run sandbox replay NEVER executes
 // write-sides, a patched replay runs the edited doc without touching
 // workflow_versions, lineage is trace-only, and the targeted fork clones
 // succeeded predecessors, honors the input override, and skips

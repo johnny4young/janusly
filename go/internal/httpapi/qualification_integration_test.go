@@ -61,7 +61,7 @@ func qualificationWorkflowDoc(id string, recovery map[string]any) map[string]any
 	return doc
 }
 
-// T-151: qualification receipts per EXACT version pair — the immutable
+// Qualification receipts per EXACT version pair — the immutable
 // dataset digest, bootstrap (V1→V2) vs compare modes, the passed receipt
 // unlocking the rollout create gate, and a coverage regression failing
 // the candidate (no node runs, no provider is called, no LLM judge).

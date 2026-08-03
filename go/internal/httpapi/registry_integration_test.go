@@ -121,7 +121,7 @@ func TestPermissionLayerRejectsIndependently(t *testing.T) {
 	}
 }
 
-// T-525: the middleware fails CLOSED on a mounted-but-unregistered
+// The middleware fails CLOSED on a mounted-but-unregistered
 // pattern — forgetting the registry entry can never silently grant
 // auth-only access.
 func TestUnregisteredPatternFailsClosed(t *testing.T) {

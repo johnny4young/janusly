@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// T-500: run-count semantics match the reference — the Flows list counts
+// Run-count semantics match the reference — the Flows list counts
 // ONLY version-linked runs (engine-driven paths stamp real version-row
 // ids; a doc-posted ad-hoc run never counts, exactly like Node), while
 // the health attribution still sees BOTH kinds via its coalesce.

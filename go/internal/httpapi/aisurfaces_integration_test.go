@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-// T-514: the remaining /ai/* surfaces. The $0 fallback contract is the
+// The remaining /ai/* surfaces. The $0 fallback contract is the
 // backbone — every surface must answer usefully with NO provider, audit
 // both paths, and clamp AI output to the closed contracts.
 
@@ -78,7 +78,7 @@ func TestAiSurfacesFallbackContract(t *testing.T) {
 		t.Fatalf("no provider must mean zero suggestions: %+v", suggested.body)
 	}
 
-	// Explain-run: the T-147 deterministic report is the fallback answer.
+	// Explain-run: the deterministic report is the fallback answer.
 	started := h.call("POST", "/start", map[string]any{"workflow": map[string]any{
 		"id": "ai-surf-run", "name": "One noop", "dslVersion": "1.0",
 		"nodes": []any{map[string]any{"id": "only", "type": "noop", "config": map[string]any{}}},

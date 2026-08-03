@@ -1,4 +1,4 @@
-// Replay Lab adapters (T-517; reference packages/engine/src/adapters/
+// Replay Lab adapters (reference packages/engine/src/adapters/
 // replay-lab.ts): standalone sandbox replay of ANY historic run (whole
 // DAG from roots) and the targeted FORK (start at one node, predecessors
 // cloned from the source run's terminal state). Both write

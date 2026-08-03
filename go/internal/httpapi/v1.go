@@ -226,7 +226,7 @@ func newV1HandlerWithWorkOS(eng *engine.Engine, pool *pgxpool.Pool, client worko
 	server.mountIdentityRoutes(mux)
 	server.mountCausalRoutes(mux)
 	if webdist.Enabled() {
-		// Single-binary mode (T-522): the embedded Vite bundle rides the
+		// Single-binary mode: the embedded Vite bundle rides the
 		// mux's own catch-all — every unmatched GET serves static assets
 		// or the SPA shell. Public by design (static content, no tenant
 		// data); API patterns above always win by specificity.
@@ -378,7 +378,7 @@ func (s *V1Server) auth(next handlerFunc) http.HandlerFunc {
 				return
 			}
 		} else if !authOnlyRoutes[r.Pattern] {
-			// Fail CLOSED (T-525): an authenticated mount whose pattern is
+			// Fail CLOSED: an authenticated mount whose pattern is
 			// in neither table is a missing registry entry, not a grant.
 			rejection := opError(http.StatusInternalServerError, "route_not_registered",
 				"route "+r.Pattern+" is mounted with auth but has no registry gate", nil)

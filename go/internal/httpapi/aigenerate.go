@@ -8,10 +8,10 @@
 // attempted, WITHOUT aiError when no provider is configured — that
 // distinction is what lets `pnpm evals` skip ai-mode cases at $0.
 //
-// Deferred to their own tickets: Best-of-N (T-106), few-shot exemplars +
-// operator guidance (T-107), PromptOps registry (T-108), pass-2 noop
-// promotion and the PagerDuty deterministic recipe (§9 divergence: a
-// budget-blocked PagerDuty prompt answers 402 here, not the recipe).
+// This route includes Best-of-N and bounded operator guidance. It does
+// not apply few-shot exemplars, PromptOps selection, second-pass noop
+// promotion, or the deterministic PagerDuty recipe; a budget-blocked
+// PagerDuty prompt therefore answers 402 here rather than emitting it.
 package httpapi
 
 import (

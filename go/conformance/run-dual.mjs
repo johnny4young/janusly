@@ -1,4 +1,4 @@
-// Dual-run shadow comparator (T-184): drives an IDENTICAL deterministic
+// Dual-run shadow comparator: drives an IDENTICAL deterministic
 // request corpus at the pinned Node reference backend AND the Go pilot,
 // normalizes both wires (ids / timestamps / request ids out), and reports
 // any divergence. Zero unexpected diffs = the strangler proxy can move a

@@ -1,4 +1,4 @@
-// GET /causal (T-520; reference run-routes/diagnostics.ts): the
+// GET /causal (reference run-routes/diagnostics.ts): the
 // deterministic decision explorer — replays a recorded decision.made
 // event's ranking under current preferences. No LLM; always available.
 package httpapi

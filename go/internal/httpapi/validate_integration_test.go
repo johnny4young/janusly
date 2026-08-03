@@ -66,7 +66,7 @@ func TestValidateRouteAndPlannerProjection(t *testing.T) {
 
 	// 4. /validate reports the FULL issue list — no pilot carve-out here
 	// (an unsupported-for-pilot node type still surfaces; subworkflow and
-	// schedule became executable in T-175/T-177, so `agent_reflection`
+	// schedule are executable, so `agent_reflection`
 	// carries the carve-out now).
 	res = h.call("POST", "/validate", map[string]any{
 		"id": "wf-full", "name": "Full", "dslVersion": "1.0",

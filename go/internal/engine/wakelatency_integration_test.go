@@ -12,7 +12,7 @@ import (
 	"github.com/johnny4young/janusly/go/internal/grammar"
 )
 
-// T-506 (verificación): NOTIFY — not the poll — drives dispatch. With a
+// Verification: NOTIFY — not the poll — drives dispatch. With a
 // deliberately LONG poll (2s), a three-node chain finishing well under one
 // poll interval proves every hop (start → claim, completion → readiness →
 // claim) woke through LISTEN/NOTIFY. Poll-driven dispatch would need

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# make verify (T-529): the one-command truth ladder — fail on the FIRST
+# make verify: the one-command truth ladder — fail on the FIRST
 # broken stage, print per-stage timing. Assumes the pilot DB is up
 # (make db-up + make migrate once per checkout).
 set -u

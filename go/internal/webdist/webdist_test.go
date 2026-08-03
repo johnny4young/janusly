@@ -7,7 +7,7 @@ import (
 	"testing/fstest"
 )
 
-// T-522: exact files serve with the right cache posture; everything else
+// Exact files serve with the right cache posture; everything else
 // falls back to index.html (SPA client routes).
 func TestHandlerServingContract(t *testing.T) {
 	dist := fstest.MapFS{

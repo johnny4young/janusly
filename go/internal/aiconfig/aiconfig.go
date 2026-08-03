@@ -1,7 +1,7 @@
 // Tenant-resolved AI configuration — the pilot's analogue of the
 // reference's ai-runtime tenant client construction. internal/ai stays
 // DB-agnostic (like packages/ai); THIS package reads the org-config
-// catalog (T-086's layer chain: tenant row → env → default) and builds
+// catalog's tenant row → env → default chain and builds
 // the chokepoint client plus the per-surface settings every AI route and
 // executor shares. The API key comes from env ONLY — the catalog never
 // stores secrets — and a missing key simply yields an unconfigured

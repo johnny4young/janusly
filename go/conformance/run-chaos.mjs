@@ -1,4 +1,4 @@
-// Postgres chaos harness (T-531): the twin of run-failover with the
+// Postgres chaos harness: the twin of run-failover with the
 // DATABASE as the victim instead of a replica. Sustained run traffic,
 // `docker stop` of Postgres mid-flight, then three verdicts:
 //

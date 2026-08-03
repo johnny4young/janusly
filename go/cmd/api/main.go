@@ -191,7 +191,7 @@ func run() error {
 		return 0
 	}))
 	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
-	// Every background loop runs SUPERVISED (T-512): named start, panic →
+	// Every background loop runs SUPERVISED: named start, panic →
 	// recover + log + backoff restart (a sweep bug never takes the API
 	// down), and one deterministic drain on shutdown BEFORE pools close.
 	runner := boot.NewRunner(context.Background(), logger)

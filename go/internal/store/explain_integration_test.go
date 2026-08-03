@@ -1,6 +1,6 @@
 //go:build integration
 
-// T-507: the executable EXPLAIN sweep over the hot queries. With
+// The executable EXPLAIN sweep over the hot queries. With
 // enable_seqscan forced off, a Seq Scan surviving in the plan over a
 // WATCHED (grows-with-usage) table means no index CAN serve the
 // predicate — a missing index, not a cost-based choice. Runs against the
@@ -48,7 +48,7 @@ func TestHotQueryPlansAreIndexServed(t *testing.T) {
 
 	now := "2026-08-01T00:00:00Z"
 	cases := []explainCase{
-		// The T-500 count semantics: runs joined through version rows.
+		// The count semantics: runs joined through version rows.
 		{"listWorkflowRows", listWorkflowRows, []any{"org-x", now, "id-x", "[]", nil, nil, int32(50)}},
 		{"listDeletedWorkflowRows", listDeletedWorkflowRows, []any{"org-x", now, "id-x", int32(50)}},
 		{"listRunSummaries", listRunSummaries, []any{"org-x", now, "id-x", nil, nil, int32(50)}},

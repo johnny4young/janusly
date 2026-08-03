@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// T-532: the pure substitution half — declared variables enforce, the
+// The pure substitution half — declared variables enforce, the
 // missing-variable error names the gap, unknown supplied keys are inert.
 func TestSubstituteVariables(t *testing.T) {
 	declared := []byte(`[{"name":"customer","required":true},{"name":"tone","default":"neutral"}]`)

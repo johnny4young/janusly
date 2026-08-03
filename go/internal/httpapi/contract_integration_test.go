@@ -539,7 +539,7 @@ func TestWorkflowReadSurfaces(t *testing.T) {
 		"id", "orgId", "name", "createdBy", "createdAt", "lastRunStatus",
 		"runCount", "bufferedTriggerCount", "status", "pausedReason",
 		"tags", "folder", "deletedAt")
-	// T-500: the reference counts ONLY version-linked runs — a doc-posted
+	// The reference counts ONLY version-linked runs — a doc-posted
 	// ad-hoc run (this test's start) never counts, exactly like Node. The
 	// counted case lives in TestVersionAttributionSemantics.
 	if row["runCount"] != float64(0) || row["lastRunStatus"] != nil {
@@ -599,8 +599,8 @@ func TestLegacySupportReads(t *testing.T) {
 	}
 
 	// /org/config: raw legacy body — the FULL closed catalog with layered
-	// provenance, exactly what the reference answers a fresh org (the
-	// earlier empty-list stub was a divergence, closed by T-086).
+	// provenance, exactly what the reference answers a fresh org. The
+	// earlier empty-list stub was a divergence and is covered here.
 	cfg := h.call("GET", "/org/config", nil, "")
 	if list, ok := cfg.body["config"].([]any); !ok || len(list) != 69 {
 		t.Fatalf("org config must list the whole catalog: %v", cfg.body)

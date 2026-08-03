@@ -187,7 +187,7 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		delete(roots, edge.To)
 	}
 
-	// Root span per run (T-504): a no-op without a registered provider.
+	// Root span per run: a no-op without a registered provider.
 	ctx, startSpan := observability.Tracer().Start(ctx, "run.start",
 		trace.WithAttributes(
 			attribute.String("janusly.run_id", runID),
@@ -285,7 +285,7 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		return "", fmt.Errorf("insert run.started: %w", err)
 	}
 	// The reference's initial publication appends node.queued per root
-	// (T-505 event-granularity parity). Millisecond offsets keep the
+	// (event-granularity parity). Millisecond offsets keep the
 	// (created_at, id) keyset from ever ordering a queued event before
 	// run.started or shuffling roots between reads.
 	rootIndex := 0

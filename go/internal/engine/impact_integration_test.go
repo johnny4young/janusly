@@ -141,7 +141,7 @@ func TestRecoveryImpactPipeline(t *testing.T) {
 }
 
 // The incident closes ONLY with terminal success, atomically with the
-// impact fact — and the T-055 metric now reads the durable facts.
+// impact fact — and the metric now reads the durable facts.
 func TestRecoveryItemAttribution(t *testing.T) {
 	dsn := os.Getenv("JANUSLY_GO_DATABASE_URL")
 	if dsn == "" {

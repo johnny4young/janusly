@@ -1,4 +1,4 @@
-// Recovery V2 read projections (T-518; reference recovery-routes.ts +
+// Recovery V2 read projections (reference recovery-routes.ts +
 // recovery-metrics/ledger.ts): durable recovery cases, the constant-time
 // lifetime impact ledger, and the operator's personal momentum. Reads
 // ONLY — zero new authority; every projection is org-scoped and bounded.

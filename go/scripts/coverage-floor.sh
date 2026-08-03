@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# T-532 coverage floors: per-package minimums pinned at the value each
+# Coverage floors: per-package minimums pinned at the value each
 # package had when its floor landed (rounded down) — floors only ratchet
 # UP, never down. The unit (no-tag) lane only; DB-bound runtime coverage
 # lives in the integration lane. migrate pins 0 honestly: its unit test

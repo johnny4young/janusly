@@ -1,4 +1,4 @@
-// Hostile-world bench wrapper (T-535): boots the Go binary against the
+// Hostile-world bench wrapper: boots the Go binary against the
 // pilot DB, runs conformance/perf/k6-hostile.js (baseline reads → chaos
 // writes + hostile reads), and enforces the bounded-degradation
 // contract: hostile p95 must stay under 2× the healthy baseline p95 for
@@ -88,7 +88,7 @@ const stamp = new Date().toISOString();
 const table = rows.map((r) =>
   `| ${r.name} | ${r.baseline?.toFixed(1) ?? "?"} ms | ${r.hostile?.toFixed(1) ?? "?"} ms | ${r.ratio ? r.ratio.toFixed(2) + "×" : "?"} | ${r.verdict} |`
 ).join("\n");
-const section = `## Escenario hostil (T-535) — ${stamp} @ \`${commit}\`\n\nLecturas bajo caos (DLQ creciendo + breaker disparando, ${chaosCount} starts fallidos):\np95 hostil debe quedar bajo ${RATIO_LIMIT}× el baseline sano.\n\n| Lectura | p95 sano | p95 hostil | ratio | veredicto |\n|---|---|---|---|---|\n${table}\n\nSerie: \`hostile-series.jsonl\`.`;
+const section = `## Hostile scenario — ${stamp} @ \`${commit}\`\n\nReads under chaos (growing DLQ + tripped breaker, ${chaosCount} failed starts):\nhostile p95 must remain below ${RATIO_LIMIT}× the healthy baseline.\n\n| Read | healthy p95 | hostile p95 | ratio | verdict |\n|---|---|---|---|---|\n${table}\n\nSeries: \`hostile-series.jsonl\`.`;
 const existingReport = readFileSync(benchPath, "utf8");
 writeFileSync(benchPath, replaceHostileReport(existingReport, section));
 

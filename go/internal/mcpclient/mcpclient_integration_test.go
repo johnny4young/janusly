@@ -87,7 +87,7 @@ func startFixtureServer(t *testing.T) *httptest.Server {
 		})
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
 	fixture := httptest.NewServer(handler)
-	// goleak (T-511): the client's session.Close leaves the SDK server's
+	// goleak: the client's session.Close leaves the SDK server's
 	// per-session jsonrpc2 readers alive — drain them explicitly.
 	t.Cleanup(func() {
 		for session := range server.Sessions() {
@@ -282,7 +282,7 @@ func TestMcpDiscoveryAndExposure(t *testing.T) {
 			return &mcp.CallToolResult{}, nil, nil
 		})
 	fixture := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil))
-	// goleak (T-511): the client's session.Close leaves the SDK server's
+	// goleak: the client's session.Close leaves the SDK server's
 	// per-session jsonrpc2 readers alive — drain them explicitly.
 	t.Cleanup(func() {
 		for session := range server.Sessions() {

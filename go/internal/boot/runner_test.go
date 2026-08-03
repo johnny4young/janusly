@@ -16,8 +16,8 @@ type discard struct{}
 
 func (discard) Write(p []byte) (int, error) { return len(p), nil }
 
-// A panicking sweep restarts (with backoff) instead of dying silently or
-// killing the process — the T-512 acceptance.
+// A panicking sweep restarts with backoff instead of dying silently or
+// killing the process, preserving the supervised-restart contract.
 func TestRunnerRestartsPanickingSweep(t *testing.T) {
 	runner := NewRunner(context.Background(), quiet())
 	var starts atomic.Int32

@@ -18,7 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// T-534: property-based SCIM. A deterministic generator produces random
+// Property-based SCIM. A deterministic generator produces random
 // event sequences (create/update/delete/group add-remove/group delete,
 // SHUFFLED timestamps, colliding emails) and after EVERY sequence the
 // invariants run as pure functions over the durable state:

@@ -10,8 +10,8 @@ import (
 )
 
 // TestMain gates BOTH lanes (unit and integration) on goroutine hygiene:
-// any goroutine still alive after the package's tests is a failure (T-511
-// — the stream-hub LISTEN leak class, converted into CI).
+// any goroutine still alive after the package's tests is a failure; the
+// stream-hub LISTEN leak class is therefore enforced in CI.
 func TestMain(m *testing.M) {
 	code := m.Run()
 	// Client keep-alives are per-process idle conns, not leaks — close

@@ -50,7 +50,7 @@ func (e *Engine) RedriveDeadLetter(ctx context.Context, orgID, deadLetterID stri
 
 // RedriveDeadLetterWithPlaybook additionally stamps a VERIFIED playbook
 // claim on the revived node, so the terminal impact tail can credit the
-// playbook's applied win atomically (T-137).
+// playbook's applied win atomically.
 func (e *Engine) RedriveDeadLetterWithPlaybook(ctx context.Context, orgID, deadLetterID, playbookID, validationRunID string) error {
 	return e.RedriveDeadLetterWithOptions(ctx, orgID, deadLetterID, RedriveOptions{
 		PlaybookID: playbookID, ValidationRunID: validationRunID,

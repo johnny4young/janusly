@@ -1,4 +1,4 @@
-// Causal-reasoning replay (T-520; reference packages/domain/src/
+// Causal-reasoning replay (reference packages/domain/src/
 // causalReasoning.ts + decisionEngine.ts scoring): given a recorded
 // decision (chosen candidate + alternatives), recompute scores under the
 // current preferences so the UI can show "why this won" without

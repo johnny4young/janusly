@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// T-532: the provider ladder and the traversal defenses of the base
+// The provider ladder and the traversal defenses of the base
 // module (the SigV4 driver has its own suite).
 
 func TestSanitizeKeyRefusesTraversal(t *testing.T) {

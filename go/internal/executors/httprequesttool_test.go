@@ -11,8 +11,8 @@ import (
 
 // The http.request TOOL rides the same SSRF chokepoint as the http node:
 // a private target is rejected before any dial unless the explicit env
-// escape hatch is set (T-186 security-review coverage for the surface
-// added in T-184).
+// escape hatch is set. This is executable security coverage for the
+// integration-tool surface.
 func TestHTTPRequestToolBlocksPrivateTargets(t *testing.T) {
 	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "false")
 	_, err := executeHTTPRequestTool(context.Background(), map[string]any{

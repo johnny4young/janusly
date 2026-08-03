@@ -56,7 +56,7 @@ func TestPdfGenerateEnvelope(t *testing.T) {
 	if result["ok"] != false || !strings.Contains(result["error"].(string), "Object store not configured") {
 		t.Fatalf("noop store: %+v", result)
 	}
-	// Unknown dialects refused honestly (html is supported since T-521).
+	// Unknown dialects are refused honestly; HTML is explicitly supported.
 	result = ExecuteIntegrationTool(ctx, "pdf.generate", map[string]any{
 		"template": "x", "format": "docx",
 	}, deps)

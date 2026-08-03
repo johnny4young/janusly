@@ -1,4 +1,4 @@
-// Runner — the supervised sweep group (T-512): every background loop the
+// Runner — the supervised sweep group: every background loop the
 // process owns starts NAMED, restarts with backoff when it PANICS (a bug
 // in one sweep must never take the API down with it), and drains in a
 // deterministic reverse order on shutdown BEFORE the caller closes pools.

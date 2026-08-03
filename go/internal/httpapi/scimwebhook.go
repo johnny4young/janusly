@@ -1,4 +1,4 @@
-// The public WorkOS webhook receiver (T-502 split): signature gate →
+// The public WorkOS webhook receiver: signature gate →
 // JSON/envelope validation → org binding by provider_directory_id →
 // dispatcher; always 200 on guard rejections, 5xx only on real I/O.
 package httpapi

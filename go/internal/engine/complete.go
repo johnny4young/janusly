@@ -111,7 +111,7 @@ func (e *Engine) completeNode(ctx context.Context, claim ClaimedNode, output any
 	}
 	stateJSON := safePersist(map[string]any{"output": output}, stateJSONMaxBytes)
 
-	// Deterministic semantic interception (T-132): evaluate the contract's
+	// Deterministic semantic interception: evaluate the contract's
 	// detectors for this source node BEFORE the completion transaction, on
 	// the pre-completion context snapshot with the exact output overlaid.
 	violations, evalErr := e.evaluateSemanticOutcome(ctx, claim, output)

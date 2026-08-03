@@ -1,4 +1,4 @@
-// Shared inbound-webhook signature core (T-528): the 80% every verifier
+// Shared inbound-webhook signature core: the 80% every verifier
 // repeats — `k=v` header parsing, hex sanity, HMAC-SHA256 over a
 // composed payload, constant-time compare, bounded clock skew,
 // multi-candidate tolerance — with the per-provider POSTURES (header

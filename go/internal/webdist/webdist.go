@@ -1,4 +1,4 @@
-// Single-binary web serving (T-522): the Vite dist embedded via go:embed
+// Single-binary web serving: the Vite dist embedded via go:embed
 // and served with SPA fallback + cache headers, behind an explicit env
 // flag so the API's default posture (headless) is unchanged.
 //

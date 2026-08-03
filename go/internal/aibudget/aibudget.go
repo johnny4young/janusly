@@ -89,7 +89,7 @@ func Check(ctx context.Context, pool *pgxpool.Pool, orgID string) CheckResult {
 
 // CheckScoped resolves the composite budget: the workflow override (a
 // workflow_budgets row with a positive limit) bites BEFORE the org
-// default; a missing/zero override falls through to Check (T-516).
+// default; a missing/zero override falls through to Check.
 // Workflow spend sums this month's usage rows stamped with that
 // workflowId (the recorder writes metadata.workflowId at the chokepoint).
 func CheckScoped(ctx context.Context, pool *pgxpool.Pool, orgID, workflowID string) CheckResult {

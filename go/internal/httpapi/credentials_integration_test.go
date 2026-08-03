@@ -179,7 +179,7 @@ func TestCredentialRoutes(t *testing.T) {
 	}
 }
 
-// T-161: the readiness badge surfaces credential_missing warns from the
+// The readiness badge surfaces credential_missing warns from the
 // same org-aware resolver — missing row, unresolvable secret, missing
 // MCP alias — and a registered+resolvable credential clears them.
 func TestCredentialReadiness(t *testing.T) {

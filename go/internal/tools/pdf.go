@@ -6,7 +6,7 @@
 // `{{name}}` placeholders substitute BEFORE parsing; unknown ones stay
 // visible on purpose (operators see the typo, not an empty cell). The
 // artifact lands in the object store under the caller-assembled per-org
-// key; the envelope NEVER throws. The HTML dialect (T-521) lives in
+// key; the envelope NEVER throws. The HTML dialect lives in
 // pdfhtml.go; markdown stays the default format.
 package tools
 

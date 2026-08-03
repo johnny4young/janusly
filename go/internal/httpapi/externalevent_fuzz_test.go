@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// T-533: the strict CloudEvents parser eats EXTERNAL input — it must
+// The strict CloudEvents parser eats EXTERNAL input — it must
 // never panic (broken UTF-8 included), only ever accept the three known
 // types, and stay strict: injecting one unknown envelope field into an
 // accepted event must flip it to rejected.

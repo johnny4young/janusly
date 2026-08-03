@@ -24,8 +24,8 @@ var ErrValidateFixFailingNodeMissing = errors.New("suggested workflow does not c
 
 // ReplayDeadLetterAsValidation seeds a validation run of the SUGGESTED
 // workflow with the original run's resolved input. The new run carries
-// replayMode="validation" (write-side skips + static evidence, from
-// T-133) and trace-only lineage (parentLinkKind="replay") back to the
+// replayMode="validation" (write-side skips plus static evidence) and
+// trace-only lineage (parentLinkKind="replay") back to the
 // failed run for the Recovery dialog's before/after projection.
 func (e *Engine) ReplayDeadLetterAsValidation(
 	ctx context.Context, orgID, deadLetterID string, suggested *domain.Workflow, createdBy string,

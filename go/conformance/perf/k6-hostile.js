@@ -1,4 +1,4 @@
-// Hostile-world bench (T-535): measure the READ paths while the platform
+// Hostile-world bench: measure the READ paths while the platform
 // is having a bad day. Three phases:
 //
 //   baseline_reads (0-20s)  — runs/dlq/health p95 with the system quiet.
@@ -9,8 +9,8 @@
 //
 // The wrapper (run-hostile-bench.mjs) computes hostile-p95 / baseline-p95
 // per read family and fails when any ratio exceeds 2× — the bounded-
-// degradation contract. Fixed metric names throughout (the T-510
-// cardinality lesson: never a runId in a series name).
+// degradation contract. Fixed metric names keep cardinality bounded;
+// run identifiers never appear in a series name.
 import http from "k6/http";
 import { sleep } from "k6";
 import { Counter, Trend } from "k6/metrics";

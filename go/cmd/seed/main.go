@@ -1,4 +1,4 @@
-// make seed (T-529): a deterministic demo org driven ENTIRELY through the
+// make seed: a deterministic demo org driven ENTIRELY through the
 // public API with dev headers — never direct SQL — so what the seed
 // creates is exactly what the product can create. Idempotent: workflows
 // and credentials are create-if-missing, runs are topped up only until

@@ -1,5 +1,5 @@
 // Typed wire views for the three most-consumed surfaces — runs, DLQ, and
-// workflows (T-527). Structs with JSON tags replace the handler
+// workflows. Structs with JSON tags replace the handler
 // map[string]any literals so a typo'd key is a COMPILE error, and the
 // pinned key-set tests + the dual comparator guard that the wire did not
 // move a byte. Fields deliberately avoid omitempty: the contract says

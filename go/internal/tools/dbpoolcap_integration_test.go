@@ -12,7 +12,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
-// T-513: the per-org 5-pool budget nests under a PROCESS-wide semaphore.
+// The per-org 5-pool budget nests under a PROCESS-wide semaphore.
 // At the cap a net-new pool answers the stable db_pool_exhausted sentinel
 // (never-throw at the tool layer), warm pools keep serving, and the gauge
 // tracks the live total.

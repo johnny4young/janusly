@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// T-533: the PDF writers eat workflow-author templates — hostile input
+// The PDF writers eat workflow-author templates — hostile input
 // must yield a structurally valid PDF (header + EOF trailer), never a
 // panic and never garbage output.
 func pdfShapeOK(t *testing.T, document []byte, label string) {

@@ -67,8 +67,8 @@ func marshalMetadata(metadata map[string]any) ([]byte, error) {
 	return grammar.SafePersistPayload(metadata, grammar.PersistOptions{}), nil
 }
 
-// created_at is stamped app-side truncated to milliseconds (the T-058
-// posture): the read surface's `<iso>|<id>` cursor lives in JS Date ms
+// created_at is stamped app-side and truncated to milliseconds; the read
+// surface's `<iso>|<id>` cursor lives in JS Date ms
 // precision, and a ms cursor over µs rows can skip page-boundary peers.
 const insertSQL = `INSERT INTO audit_logs (id, org_id, user_id, action, target_type, target_id, metadata, created_at)
 	VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
