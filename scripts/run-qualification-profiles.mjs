@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 // Run explicit opt-in qualification orchestrators against one clean source
-// tree and emit an ignored exact-candidate receipt. No profile runs without a
-// destructive-data acknowledgement; real-provider use needs a second consent.
+// tree and emit an ignored exact-candidate receipt. Profiles that can reset
+// local data require acknowledgement; real-provider use needs a second consent.
 
 import { spawnSync } from "node:child_process";
 import { mkdir, rename, writeFile } from "node:fs/promises";
@@ -16,6 +16,7 @@ import {
   resolveQualificationProfiles,
 } from "./qualification-profiles.mjs";
 
+const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 
 function run(command, args, options = {}) {
@@ -33,7 +34,7 @@ function git(args) {
   return child.stdout.trim();
 }
 
-function parseArgs(argv) {
+export function parseQualificationArgs(argv, cwd = process.cwd()) {
   const options = {
     profiles: null,
     output: resolve(repoRoot, "artifacts/go-qualification.json"),
@@ -43,9 +44,10 @@ function parseArgs(argv) {
     list: false,
   };
   for (const arg of argv) {
+    if (arg === "--") continue;
     if (arg.startsWith("--profiles=")) options.profiles = arg.slice(11);
-    else if (arg.startsWith("--output=")) options.output = resolve(process.cwd(), arg.slice(9));
-    else if (arg.startsWith("--evidence=")) options.evidence = resolve(process.cwd(), arg.slice(11));
+    else if (arg.startsWith("--output=")) options.output = resolve(cwd, arg.slice(9));
+    else if (arg.startsWith("--evidence=")) options.evidence = resolve(cwd, arg.slice(11));
     else if (arg === "--confirm-destructive") options.confirmDestructive = true;
     else if (arg === "--confirm-provider-cost") options.confirmProviderCost = true;
     else if (arg === "--list") options.list = true;
@@ -77,7 +79,7 @@ function commandLabel([command, args]) {
 }
 
 async function main() {
-  const options = parseArgs(process.argv.slice(2));
+  const options = parseQualificationArgs(process.argv.slice(2));
   if (options.list) {
     printCatalog();
     return;
@@ -167,7 +169,9 @@ async function main() {
   if (!receipt.pass) process.exitCode = 2;
 }
 
-main().catch(error => {
-  console.error(`[qualification] ${error instanceof Error ? error.stack : String(error)}`);
-  process.exitCode = 1;
-});
+if (resolve(process.argv[1] ?? "") === scriptPath) {
+  main().catch(error => {
+    console.error(`[qualification] ${error instanceof Error ? error.stack : String(error)}`);
+    process.exitCode = 1;
+  });
+}

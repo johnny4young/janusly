@@ -82,16 +82,11 @@ export const QUALIFICATION_PROFILES = Object.freeze({
     steps: [["pnpm", ["local:load-soak:smoke", "--", "--confirm-reset"]]],
   },
   go_web: {
-    description: "Six Go-only browser smoke journeys",
-    destructive: true,
+    description: "Six Go-only browser smoke journeys on isolated PostgreSQL 18",
+    destructive: false,
     providerCost: false,
     covers: ["go-pilot-smoke.spec.ts"],
-    steps: [
-      ["make", ["-C", "go", "db-up"]],
-      ["make", ["-C", "go", "migrate"]],
-      ["node", ["go/conformance/run-web-smoke.mjs"]],
-    ],
-    cleanup: [["make", ["-C", "go", "db-down"]]],
+    steps: [["node", ["go/conformance/run-web-qualification.mjs"]]],
   },
   real_provider: {
     description: "Real Anthropic identity, usage, cost, and browser qualification",

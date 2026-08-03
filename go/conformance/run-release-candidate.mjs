@@ -23,6 +23,7 @@ const POSTGRES_CONFIGS = Object.freeze([
   "go/pg18.compose.yml",
   "go/conformance/benchmark.compose.yml",
   "go/conformance/reference-stack.compose.yml",
+  "go/conformance/web-qualification.compose.yml",
 ]);
 
 const IMAGE_SOURCES = Object.freeze([
@@ -35,6 +36,7 @@ const IMAGE_SOURCES = Object.freeze([
   "go/pg18.compose.yml",
   "go/conformance/benchmark.compose.yml",
   "go/conformance/reference-stack.compose.yml",
+  "go/conformance/web-qualification.compose.yml",
   "deploy/local/compose.yml",
   "deploy/observability/compose.local.yml",
   "deploy/observability/compose.cloud.yml",
@@ -53,6 +55,11 @@ const PROVENANCE_FILES = Object.freeze([
   "go/conformance/perf/k6-bench-ab.js",
   "go/conformance/run-bench-ab.mjs",
   "go/conformance/run-benchmark-campaign.mjs",
+  "go/conformance/run-web-smoke.mjs",
+  "go/conformance/run-web-qualification.mjs",
+  "go/conformance/web-qualification.compose.yml",
+  "scripts/qualification-profiles.mjs",
+  "scripts/run-qualification-profiles.mjs",
   "deploy/observability/grafana/dashboards/janusly-go-migration.json",
 ]);
 

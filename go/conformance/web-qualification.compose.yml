@@ -1,0 +1,19 @@
+# Ephemeral PostgreSQL 18 for the Go-only browser qualification. This project
+# is deliberately distinct from the persistent janusly-go-pilot database; the
+# runner refuses to adopt an existing project and always removes its volume.
+name: janusly-go-web-qualification
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg18
+    ports:
+      - "127.0.0.1:${JANUSLY_GO_WEB_QUALIFICATION_PG_PORT:-4637}:5432"
+    environment:
+      POSTGRES_DB: janusly_go
+      POSTGRES_USER: janusly
+      POSTGRES_PASSWORD: janusly-go-web-qualification
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U janusly -d janusly_go"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

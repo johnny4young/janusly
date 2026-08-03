@@ -59,4 +59,4 @@ promoción; no existe listado en el cliente).
 Cada ruta enumerada de `apps/web/src` está en una de las dos tablas de
 arriba. La evidencia ejecutable es `TestF1SweepReadClosures` + el smoke
 Playwright de todos los tabs (`go-pilot-smoke.spec.ts`) vía
-`node go/conformance/run-web-smoke.mjs`.
+`node go/conformance/run-web-qualification.mjs`.

@@ -80,7 +80,10 @@ jobs:
           ANTHROPIC_API_KEY: ${{ inputs.profile == 'real_provider' && secrets.ANTHROPIC_API_KEY || '' }}
           JANUSLY_REAL_PROVIDER_BUDGET_USD: ${{ inputs.profile == 'real_provider' && inputs.provider_budget_usd || '' }}
         run: |
-          args=(--profiles="${{ inputs.profile }}" --confirm-destructive)
+          args=(--profiles="${{ inputs.profile }}")
+          if [[ "${{ inputs.profile }}" != "go_web" ]]; then
+            args+=(--confirm-destructive)
+          fi
           if [[ "${{ inputs.profile }}" == "real_provider" ]]; then
             args+=(--confirm-provider-cost)
           fi

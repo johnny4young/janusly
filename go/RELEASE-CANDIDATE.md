@@ -64,6 +64,15 @@ one profile, a comma-separated subset, or every no-credit local profile with:
 pnpm qualification:run -- --profiles=all_local --confirm-destructive
 ```
 
+The `go_web` profile is the one non-destructive exception: it uses a dedicated
+task-owned PostgreSQL 18 project and private ports, refuses to adopt an existing
+project, and removes only its own volume. It can be run independently without
+the destructive acknowledgement:
+
+```bash
+pnpm qualification:run -- --profiles=go_web
+```
+
 The runner emits `artifacts/go-qualification.json` and separate evidence
 directories, stops after the first failed profile, runs each profile's cleanup,
 and rejects a changed source tree. The real-provider profile is excluded from

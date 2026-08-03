@@ -49,6 +49,22 @@ test("destructive and provider-cost consent are independent", () => {
   );
 });
 
+test("go_web owns an isolated non-destructive runner", () => {
+  const profile = QUALIFICATION_PROFILES.go_web;
+  assert.equal(profile.destructive, false);
+  assert.equal(profile.providerCost, false);
+  assert.deepEqual(profile.steps, [["node", ["go/conformance/run-web-qualification.mjs"]]]);
+  assert.equal("cleanup" in profile, false);
+  assert.deepEqual(
+    assertQualificationRequest({
+      profileIds: ["go_web"],
+      confirmDestructive: false,
+      confirmProviderCost: false,
+    }),
+    ["go_web"],
+  );
+});
+
 test("the catalog owns every opt-in Playwright profile", () => {
   const covered = new Set(Object.values(QUALIFICATION_PROFILES).flatMap(profile => profile.covers));
   assert.deepEqual(covered, new Set([
