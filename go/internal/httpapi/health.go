@@ -21,10 +21,11 @@ import (
 )
 
 const (
-	queueLagWarnSecondsDefault = 60
-	queueLagWarnSecondsMax     = 86_400
-	queueSnapshotTTL           = 5 * time.Second
-	queueSnapshotTimeout       = 2 * time.Second
+	queueLagWarnSecondsDefault            = 60
+	maintenanceQueueLagWarnSecondsDefault = 300
+	queueLagWarnSecondsMax                = 86_400
+	queueSnapshotTTL                      = 5 * time.Second
+	queueSnapshotTimeout                  = 2 * time.Second
 )
 
 // queueSnapshot is the reference's QueueHealthSnapshot.
@@ -37,13 +38,21 @@ type queueSnapshot struct {
 
 // resolveQueueLagWarnSeconds clamps the env threshold into [1, 86400].
 func resolveQueueLagWarnSeconds() int {
-	raw := os.Getenv("JANUSLY_QUEUE_LAG_WARN_SECONDS")
+	return resolveQueueWarnSeconds("JANUSLY_QUEUE_LAG_WARN_SECONDS", queueLagWarnSecondsDefault)
+}
+
+func resolveMaintenanceQueueLagWarnSeconds() int {
+	return resolveQueueWarnSeconds("JANUSLY_MAINTENANCE_QUEUE_LAG_WARN_SECONDS", maintenanceQueueLagWarnSecondsDefault)
+}
+
+func resolveQueueWarnSeconds(envName string, fallback int) int {
+	raw := os.Getenv(envName)
 	if raw == "" {
-		return queueLagWarnSecondsDefault
+		return fallback
 	}
 	parsed, err := strconv.Atoi(raw)
 	if err != nil || parsed < 1 || parsed > queueLagWarnSecondsMax {
-		return queueLagWarnSecondsDefault
+		return fallback
 	}
 	return parsed
 }
@@ -107,8 +116,9 @@ func (s *V1Server) publicQueueHealth(ctx context.Context) any {
 
 func (s *V1Server) mountSystemHealthRoutes(mux *http.ServeMux) {
 	// Admin queue detail: workflow fields at the stable top level plus the
-	// additive maintenance snapshot — null in the pilot, which runs its
-	// maintenance loops in-process rather than on a second queue.
+	// additive maintenance snapshot. Go runs maintenance loops in-process,
+	// so their truthful queue-compatible projection is an always-drained lane
+	// rather than unavailable telemetry.
 	mux.HandleFunc("GET /system/queue", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		snapshot := s.queueCache.get(r.Context())
 		if snapshot == nil {
@@ -119,7 +129,9 @@ func (s *V1Server) mountSystemHealthRoutes(mux *http.ServeMux) {
 			"waiting": snapshot.Waiting, "active": snapshot.Active,
 			"oldestWaitingSeconds": intPtrOrNull(snapshot.OldestWaitingSeconds),
 			"warnSeconds":          snapshot.WarnSeconds,
-			"maintenance":          nil,
+			"maintenance": queueSnapshot{
+				Waiting: 0, Active: 0, WarnSeconds: resolveMaintenanceQueueLagWarnSeconds(),
+			},
 		}))
 	}))
 	mux.HandleFunc("GET /system/rate-limiter", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {

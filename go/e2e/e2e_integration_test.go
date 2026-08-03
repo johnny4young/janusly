@@ -355,6 +355,8 @@ func TestMetricsParityNamesAndBindConflict(t *testing.T) {
 	for _, name := range []string{
 		"workflow_queue_waiting_jobs",
 		"workflow_queue_active_jobs",
+		"maintenance_queue_waiting_jobs",
+		"maintenance_queue_active_jobs",
 		"janusly_rate_limit_degraded_buckets",
 		`target_info{service_instance_id=`,
 		`service_name="janusly"`,

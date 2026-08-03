@@ -13,6 +13,7 @@ import (
 // ELIGIBILITY with the warn threshold flipping degraded.
 func TestTwoTierQueueHealth(t *testing.T) {
 	t.Setenv("JANUSLY_QUEUE_LAG_WARN_SECONDS", "1")
+	t.Setenv("JANUSLY_MAINTENANCE_QUEUE_LAG_WARN_SECONDS", "7")
 	pool := testPool(t)
 	ctx := context.Background()
 
@@ -48,7 +49,7 @@ func TestTwoTierQueueHealth(t *testing.T) {
 	h := newAPIHarnessWithoutWorkers(t)
 
 	// Admin detail: the stale node counts, its age measured from the
-	// queued event, maintenance explicitly null (in-process loops).
+	// queued event, maintenance projected as a drained in-process lane.
 	admin := h.call("GET", "/system/queue", nil, "")
 	if admin.status != 200 {
 		t.Fatalf("admin queue: %d %+v", admin.status, admin.body)
@@ -63,8 +64,10 @@ func TestTwoTierQueueHealth(t *testing.T) {
 	if admin.body["warnSeconds"] != float64(1) {
 		t.Fatalf("env warn threshold: %+v", admin.body)
 	}
-	if value, present := admin.body["maintenance"]; !present || value != nil {
-		t.Fatalf("maintenance must be explicit null: %+v", admin.body)
+	maintenance, ok := admin.body["maintenance"].(map[string]any)
+	if !ok || maintenance["waiting"] != float64(0) || maintenance["active"] != float64(0) ||
+		maintenance["oldestWaitingSeconds"] != nil || maintenance["warnSeconds"] != float64(7) {
+		t.Fatalf("maintenance drained-lane projection: %+v", admin.body)
 	}
 
 	// Public /health: coarse degraded=true (age > warn) and NEVER the
