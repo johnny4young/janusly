@@ -1,3 +1,4 @@
+<!-- janusly:healthy-benchmark:start -->
 # Bench de regresión (k6)
 
 Corridas secuenciales de 20s por escenario contra el binario Go en la
@@ -15,21 +16,22 @@ hasta ±20% en rendimiento pueden ser ruido de crecimiento o térmico.
 Una regresión real se confirma con dos corridas seguidas en la misma
 dirección o un cambio de más del 25%.
 
-Última corrida: 2026-08-01T22:19:27.658Z @ `e44af31d` · anterior: 2026-08-01T22:14:36.005Z @ `e44af31d`
+Última corrida: 2026-08-03T09:31:51.637Z @ `adf9705b` · anterior: 2026-08-03T09:22:15.400Z @ `adf9705b`
 
 | Métrica | Dirección | Última | Anterior | Δ | Veredicto |
 |---|---|---|---|---|---|
-| start: runs terminados/s | ↑ mejor | 89.7 runs/s | 67.3 runs/s | +33.3% | ✅ mejora |
-| start: latencia p50 | ↓ mejor | 103 ms | 110 ms | -6.4% | ✅ mejora |
-| start: latencia p95 | ↓ mejor | 169 ms | 479 ms | -64.6% | ✅ mejora |
-| start: latencia p99 | ↓ mejor | 276 ms | 696 ms | -60.3% | ✅ mejora |
-| list: lecturas/s | ↑ mejor | 2638 req/s | 2953 req/s | -10.7% | ⚠️ regresión |
-| list: latencia p95 | ↓ mejor | 35.0 ms | 23.0 ms | +52.2% | ⚠️ regresión |
-| diamond: DAGs terminados/s | ↑ mejor | 42.5 runs/s | 58.2 runs/s | -26.9% | ⚠️ regresión |
-| diamond: latencia p95 | ↓ mejor | 388 ms | 284 ms | +36.8% | ⚠️ regresión |
+| start: runs terminados/s | ↑ mejor | 238 runs/s | 241 runs/s | -1.3% | ≈ igual |
+| start: latencia p50 | ↓ mejor | 34.0 ms | 34.0 ms | +0.0% | ≈ igual |
+| start: latencia p95 | ↓ mejor | 58.0 ms | 58.0 ms | +0.0% | ≈ igual |
+| start: latencia p99 | ↓ mejor | 61.0 ms | 62.0 ms | -1.6% | ≈ igual |
+| list: lecturas/s | ↑ mejor | 3539 req/s | 3606 req/s | -1.9% | ≈ igual |
+| list: latencia p95 | ↓ mejor | 16.0 ms | 16.0 ms | +0.0% | ≈ igual |
+| diamond: DAGs terminados/s | ↑ mejor | 140 runs/s | 139 runs/s | +0.7% | ≈ igual |
+| diamond: latencia p95 | ↓ mejor | 104 ms | 106 ms | -2.1% | ≈ igual |
 | errores (todas las fases) | ↓ mejor | 0.0 | 0.0 | — | — |
 
-Historial: 14 corrida(s) en `series.jsonl`.
+Historial: 13 corrida(s) en `series.jsonl`.
+<!-- janusly:healthy-benchmark:end -->
 
 ## Perfil de allocs T-508 (2026-08-01, commit posterior a `e44af31d`)
 
@@ -70,15 +72,17 @@ manual (riesgo de divergencia de bytes) o cambio de librería; queda
 documentado, no atacado. El guard `TestRedactionWalkersDoNotMutateInput`
 fija que los walkers COW jamás mutan el árbol del caller.
 
-## Escenario hostil (T-535) — 2026-08-02T03:33:22.212Z @ `f2a85520`
+<!-- janusly:hostile-benchmark:start -->
+## Escenario hostil (T-535) — 2026-08-03T09:29:21.401Z @ `adf9705b`
 
-Lecturas bajo caos (DLQ creciendo + breaker disparando, 1928 starts fallidos):
+Lecturas bajo caos (DLQ creciendo + breaker disparando, 1938 starts fallidos):
 p95 hostil debe quedar bajo 2× el baseline sano.
 
 | Lectura | p95 sano | p95 hostil | ratio | veredicto |
 |---|---|---|---|---|
-| runs list | 3.9 ms | 4.8 ms | 1.22× | ✅ acotado |
-| dlq list | 3.6 ms | 5.1 ms | 1.41× | ✅ acotado |
-| health | 0.2 ms | 0.2 ms | 1.34× | ✅ acotado |
+| runs list | 7.5 ms | 5.3 ms | 0.70× | ✅ acotado |
+| dlq list | 4.0 ms | 5.5 ms | 1.36× | ✅ acotado |
+| health | 0.7 ms | 1.4 ms | 1.99× | ✅ acotado |
 
 Serie: `hostile-series.jsonl`.
+<!-- janusly:hostile-benchmark:end -->

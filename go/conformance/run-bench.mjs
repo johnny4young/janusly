@@ -16,6 +16,8 @@ import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
+import { replaceHealthyReport } from "./perf-report.mjs";
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GO_DIR = join(HERE, "..");
 const REPO = join(GO_DIR, "..");
@@ -132,5 +134,7 @@ for (const metric of METRICS) {
 }
 
 lines.push("", `Historial: ${series.length} corrida(s) en \`series.jsonl\`.`, "");
-writeFileSync(join(PERF, "BENCH.md"), lines.join("\n"));
+const benchPath = join(PERF, "BENCH.md");
+const existingReport = existsSync(benchPath) ? readFileSync(benchPath, "utf8") : "";
+writeFileSync(benchPath, replaceHealthyReport(existingReport, lines.join("\n")));
 console.error("== bench: BENCH.md updated ==");

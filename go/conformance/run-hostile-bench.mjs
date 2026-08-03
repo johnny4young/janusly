@@ -11,10 +11,12 @@
 // first — the co-residency rule); requires the pilot DB up.
 
 import { execFileSync, spawn } from "node:child_process";
-import { appendFileSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+
+import { replaceHostileReport } from "./perf-report.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GO_DIR = join(HERE, "..");
@@ -86,8 +88,9 @@ const stamp = new Date().toISOString();
 const table = rows.map((r) =>
   `| ${r.name} | ${r.baseline?.toFixed(1) ?? "?"} ms | ${r.hostile?.toFixed(1) ?? "?"} ms | ${r.ratio ? r.ratio.toFixed(2) + "×" : "?"} | ${r.verdict} |`
 ).join("\n");
-const section = `\n## Escenario hostil (T-535) — ${stamp} @ \`${commit}\`\n\nLecturas bajo caos (DLQ creciendo + breaker disparando, ${chaosCount} starts fallidos):\np95 hostil debe quedar bajo ${RATIO_LIMIT}× el baseline sano.\n\n| Lectura | p95 sano | p95 hostil | ratio | veredicto |\n|---|---|---|---|---|\n${table}\n\nSerie: \`hostile-series.jsonl\`.\n`;
-appendFileSync(benchPath, section);
+const section = `## Escenario hostil (T-535) — ${stamp} @ \`${commit}\`\n\nLecturas bajo caos (DLQ creciendo + breaker disparando, ${chaosCount} starts fallidos):\np95 hostil debe quedar bajo ${RATIO_LIMIT}× el baseline sano.\n\n| Lectura | p95 sano | p95 hostil | ratio | veredicto |\n|---|---|---|---|---|\n${table}\n\nSerie: \`hostile-series.jsonl\`.`;
+const existingReport = readFileSync(benchPath, "utf8");
+writeFileSync(benchPath, replaceHostileReport(existingReport, section));
 
 console.log("\n== hostile bench ==");
 for (const r of rows) {
