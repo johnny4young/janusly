@@ -201,7 +201,7 @@ func extractCommittedTree(root, destination string) error {
 			if err := os.MkdirAll(path, os.FileMode(header.Mode)&0o777); err != nil {
 				return fmt.Errorf("create staged directory %s: %w", clean, err)
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 				return fmt.Errorf("create staged parent %s: %w", clean, err)
 			}
