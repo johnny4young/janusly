@@ -1,5 +1,5 @@
-// Supervised auto-healing (reference apps/api/src/auto-healing-*.ts,
-// pilot-bounded). A periodic sweep walks orgs with recent open DLQ rows,
+// Supervised auto-healing (reference the API contract*.ts,
+// runtime-bounded). A periodic sweep walks orgs with recent open DLQ rows,
 // and for each org that OPTED IN (env master gate JANUSLY_AUTO_HEALING_ENABLED
 // AND org config autoHealing.enabled — no env fallback per tenant, by
 // design) it groups open dead letters by normalized signature and, for
@@ -17,7 +17,7 @@
 // envelope (retry + timeout hardening). The LLM only ever PROPOSES —
 // sandbox validation and the operator risk-ack path are unchanged. The watcher half promotes `validating` rows whose sandbox
 // replay reached a terminal status: succeeded → `validated` (pending the
-// operator's decision — auto-apply stays off in the pilot), failed →
+// operator's decision — auto-apply stays off in the runtime), failed →
 // `validation_failed` + audit. Apply happens in the decision route via
 // the fix-snapshot redrive. Never throws; per-candidate failures skip.
 package engine
@@ -225,7 +225,7 @@ func (e *Engine) llmHealingPatch(ctx context.Context, orgID string, row store.Li
 	// The sweep only reaches here for orgs behind the existing double
 	// opt-in (env master gate + autoHealing.enabled); the LLM adds no
 	// third knob — a configured provider key + the budget gate ARE the
-	// cost controls, and no key keeps the pilot's $0 posture.
+	// cost controls, and no key keeps the runtime's $0 posture.
 	client, _ := aiconfig.Resolve(ctx, e.pool, orgID)
 	if client == nil || !client.Configured() {
 		return nil, 0
@@ -276,7 +276,7 @@ func (e *Engine) llmHealingPatch(ctx context.Context, orgID string, row store.Li
 	return patched, confidence
 }
 
-// deterministicHealingPatch is the pilot's $0 proposal: harden the failing
+// deterministicHealingPatch is the runtime's $0 proposal: harden the failing
 // node with a bounded retry policy + a longer timeout. Structural or
 // unknown failures propose nothing (the operator's interactive AI patch
 // surface handles those).

@@ -12,7 +12,7 @@ describe('workspace locations', () => {
     const expected: Record<ActiveTab, string> = {
       home: 'home',
       workflows: 'workflows',
-      copilot: 'workflows',
+      'ai-studio': 'workflows',
       inspector: 'workflows',
       templates: 'workflows',
       packs: 'workflows',

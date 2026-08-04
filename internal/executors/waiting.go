@@ -1,4 +1,4 @@
-// Waiting-node executors and their time grammar, ported from the reference
+// Waiting-node executors and their time grammar, implements the contract
 // (wait-until.ts, approval-timeout.ts, waiting-time.ts, iso-duration.ts).
 // wait_until pauses for an ISO 8601 duration or absolute instant; approval
 // pauses indefinitely for a human decision. Both return a Waiting value —
@@ -31,7 +31,7 @@ type Waiting struct {
 // grammar with authoring validation.
 type ConfigError = domain.WaitingConfigError
 
-// Approximations inherited from the reference: year = 365 days, month = 30
+// Approximations inherited from the contract: year = 365 days, month = 30
 // days — calendar-aware arithmetic is intentionally out of scope.
 const (
 	dayMs    = 86_400_000
@@ -83,19 +83,19 @@ func durationComponent(text string, unitMs float64) float64 {
 }
 
 // ParseAbsoluteInstant parses an unambiguous ISO 8601 instant (explicit
-// timezone required) with the reference's field validation; nil on invalid.
+// timezone required) with the contract's field validation; nil on invalid.
 func ParseAbsoluteInstant(value string) *time.Time {
 	return domain.ParseAbsoluteInstant(value)
 }
 
-// waitUntilSchedule mirrors the reference's resolved shape.
+// waitUntilSchedule mirrors the contract's resolved shape.
 type waitUntilSchedule struct {
 	delayMs float64
 	wakeAt  time.Time
 	source  string
 }
 
-// resolveWaitUntilSchedule ports the reference resolver with its exact
+// resolveWaitUntilSchedule ports the contract resolver with its exact
 // codes and messages: duration XOR until, positive duration, explicit
 // timezone; a past absolute instant resumes immediately.
 func resolveWaitUntilSchedule(config map[string]any, now time.Time) (*waitUntilSchedule, error) {
@@ -173,7 +173,7 @@ func executeWebhook(_ context.Context, in Input) (any, error) {
 	}, nil
 }
 
-// executeApproval persists the reference's indefinite or bounded human
+// executeApproval persists the contract's indefinite or bounded human
 // decision checkpoint. Relative deadlines are deliberately materialized by
 // the engine from the checkpoint timestamp, not this executor's start clock.
 func executeApproval(_ context.Context, in Input) (any, error) {
@@ -214,7 +214,7 @@ func executeApproval(_ context.Context, in Input) (any, error) {
 
 // executeHumanForm pauses like approval but resumes with STRUCTURED
 // input as the node output. The executor validates the declared schema
-// shape (a non-empty object schema — the reference's top AI-generation
+// shape (a non-empty object schema — the contract's top AI-generation
 // failure is an empty schema) and pauses with a fields projection; the
 // ENGINE injects the signed resume token when it persists the waiting
 // checkpoint (signing needs org policy + the dedicated secret, which the

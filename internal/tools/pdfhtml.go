@@ -191,7 +191,7 @@ func (r *htmlPdfRenderer) walk(node *html.Node, depth int) {
 			r.push(strings.Join(cells, " | "), "F1", 10)
 			return
 		}
-		// Unknown tag: children pass through (reference posture).
+		// Unknown tag: children pass through (contract posture).
 		r.walkChildren(node, depth)
 		return
 	default:

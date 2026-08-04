@@ -1,7 +1,7 @@
 // The `agent` node executor — the plan → tool → observe loop with a step
-// budget, ported from the reference's runAgentLoop with its deterministic
+// budget, implements the contract's runAgentLoop with its deterministic
 // RULES planner as the no-key default (the LLM planner arrives with its
-// own ticket and falls back here). Every iteration emits the reference's
+// own ticket and falls back here). Every iteration emits the contract's
 // event family (started, step.started, step.planned, agent.reasoning,
 // tool.started/completed, reflection, completed); a validation dry-run
 // SKIPS write-side tools at execution (and the LLM planner additionally
@@ -34,7 +34,7 @@ type AgentPlan struct {
 	AiError     string         `json:"aiError,omitempty"`
 }
 
-// planAgentTool is the reference's deterministic rules ladder, verbatim.
+// planAgentTool is the contract's deterministic rules ladder, verbatim.
 func planAgentTool(config map[string]any, planningContext map[string]any) AgentPlan {
 	if tool, ok := config["tool"].(string); ok && tool != "" {
 		input, _ := config["input"].(map[string]any)
@@ -293,7 +293,7 @@ func hasFailureSignal(result map[string]any) bool {
 }
 
 // Per-field caps for the stable operator-facing rationale contract —
-// pinned to the reference's run-events.ts values.
+// pinned to the contract's run-events.ts values.
 const (
 	agentReasoningAgentMaxChars  = 120
 	agentReasoningScopeMaxChars  = 160
@@ -332,7 +332,7 @@ func fallbackReasoningText(value, fallback string) string {
 	return value
 }
 
-// planAgentToolWithLLM ports the reference's LLM planner: free-json plan
+// planAgentToolWithLLM ports the contract's LLM planner: free-json plan
 // validated against the tool catalog, every failure falling back to the
 // deterministic rules planner with aiError attribution — the loop always
 // makes progress.

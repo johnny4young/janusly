@@ -16,7 +16,7 @@ const PACK_SEPARATOR = '\0'
 
 const WORKSPACE_PREFIXES = [
   'activity.',
-  'aiCopilot.',
+  'aiStudio.',
   'aiGuidance.',
   'aiReview.',
   'authoring.',

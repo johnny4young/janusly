@@ -2,7 +2,7 @@
 // GET /recovery/metrics (both wires): median + p90 time from failure
 // detection (the dead-letter row) to the run's verified terminal success
 // after a replay, plus the legacy arithmetic-average MTTR for
-// compatibility with the reference's older dashboard shape.
+// compatibility with the contract's older dashboard shape.
 package httpapi
 
 import (

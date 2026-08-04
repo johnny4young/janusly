@@ -17,7 +17,7 @@ import (
 // Registry completeness: the test WALKS the annotated table, so a new
 // gated route must appear here (the sweep fails on an unvisited entry) and
 // a mutation can never silently lose its gate. A seeded viewer: every
-// editor-gated pattern rejects with the reference's role 403; every
+// editor-gated pattern rejects with the contract's role 403; every
 // viewer-gated read passes both layers.
 func TestRouteRegistrySweepAsViewer(t *testing.T) {
 	h := newAPIHarness(t)
@@ -51,7 +51,7 @@ func TestRouteRegistrySweepAsViewer(t *testing.T) {
 		visited++
 		// A viewer-rank entry whose PERMISSION the viewer's default set
 		// lacks (e.g. ai.write) must reject at the permission layer — the
-		// reference's permission-only route shape.
+		// contract's permission-only route shape.
 		if gate.role == auth.RoleViewer && gate.permission != "" &&
 			!auth.DefaultRoleHasPermission(auth.RoleViewer, gate.permission) {
 			message := ""

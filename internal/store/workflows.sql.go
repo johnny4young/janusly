@@ -1673,7 +1673,7 @@ type QueryRecentRunsAgainstWorkflowVersionRow struct {
 // The post-Apply dialog needs every production status, not just terminal
 // health samples: an in-flight run is visible immediately while the score
 // remains below its sample floor. Keep the effective-version rules identical
-// to QueryWorkflowHealthSignals so plain pilot runs and pinned rollout runs
+// to QueryWorkflowHealthSignals so plain runtime runs and pinned rollout runs
 // land on the same side of the cutoff.
 func (q *Queries) QueryRecentRunsAgainstWorkflowVersion(ctx context.Context, arg QueryRecentRunsAgainstWorkflowVersionParams) (QueryRecentRunsAgainstWorkflowVersionRow, error) {
 	row := q.db.QueryRow(ctx, queryRecentRunsAgainstWorkflowVersion,
@@ -1695,7 +1695,7 @@ func (q *Queries) QueryRecentRunsAgainstWorkflowVersion(ctx context.Context, arg
 const queryWorkflowHealthSignals = `-- name: QueryWorkflowHealthSignals :one
 WITH candidate_runs AS (
   -- A saved workflow's plain runs carry workflow_version_id = the WORKFLOW
-  -- id (the pilot's no-rollout convention); pinned/rollout runs carry a
+  -- id (the runtime's no-rollout convention); pinned/rollout runs carry a
   -- real version-row id. The effective version for un-pinned runs is the
   -- number of versions saved at run time.
   SELECT r.id, r.status, r.created_at,

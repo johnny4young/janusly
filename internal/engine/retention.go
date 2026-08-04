@@ -1,6 +1,6 @@
 // Minimal retention sweep — the deferred hard cascade for soft-deleted
-// workflows. The reference's system:retention cron purges per-org with a
-// tenant-configurable window; the pilot sweeps globally with one default
+// workflows. The contract's system:retention cron purges per-org with a
+// tenant-configurable window; the runtime sweeps globally with one default
 // window (30 days, env JANUSLY_RETENTION_DELETED_WORKFLOWS_DAYS), using
 // the same atomic CTE shape: versions + metadata + workflow rows go
 // together or not at all. Orphaned runs / audit rows stay, per the

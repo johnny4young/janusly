@@ -23,12 +23,12 @@ import (
 )
 
 // ErrResumeConflict reports a resume against a node that is not waiting —
-// the API maps it to 409, matching the reference's ResumeRunConflictError.
-var ErrResumeConflict = errors.New("Node is not waiting") //nolint:staticcheck // reference message is the wire contract
+// the API maps it to 409, matching the contract's ResumeRunConflictError.
+var ErrResumeConflict = errors.New("Node is not waiting") //nolint:staticcheck // contract message is the wire contract
 
 // ErrResumeNodeNotFound reports a resume naming a node outside the run's
 // workflow snapshot.
-var ErrResumeNodeNotFound = errors.New("Node not found") //nolint:staticcheck // reference message is the wire contract
+var ErrResumeNodeNotFound = errors.New("Node not found") //nolint:staticcheck // contract message is the wire contract
 
 // MarkNodeWaiting commits the pause checkpoint: node running→waiting with
 // {waiting: {reason, ...metadata, waitingSince}} state, the node.waiting
@@ -274,13 +274,13 @@ func waitingString(value any) string {
 
 // ResumeRun completes one still-waiting node and queues its downstream
 // work, all in one transaction. Approval and wait_until keep the
-// reference's historical empty output — the decision lives in the run
+// contract's historical empty output — the decision lives in the run
 // timeline, never in the node output.
 func (e *Engine) ResumeRun(ctx context.Context, runID, nodeID string) error {
 	return e.ResumeRunWithInput(ctx, runID, nodeID, nil, "")
 }
 
-// Resume sentinel errors the API maps to the reference's wire shapes.
+// Resume sentinel errors the API maps to the contract's wire shapes.
 var (
 	ErrResumeTokenRequired = errors.New("resumeToken is required")
 	ErrInvalidResumeToken  = resumetoken.ErrInvalid
@@ -300,7 +300,7 @@ func (e *Engine) ResumeRunWithInput(ctx context.Context, runID, nodeID string, i
 		run, err := q.GetRunExecution(ctx, runID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return fmt.Errorf("Run not found") //nolint:staticcheck // reference message is the wire contract
+				return fmt.Errorf("Run not found") //nolint:staticcheck // contract message is the wire contract
 			}
 			return fmt.Errorf("read run: %w", err)
 		}

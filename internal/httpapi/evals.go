@@ -289,8 +289,8 @@ func (s *V1Server) mountEvalRoutes(mux *http.ServeMux) {
 			})
 		}
 		// kind=model: refs ARE model hints. kind=prompt: refs are system
-		// prompts (the pilot's flattened-arm shape; PromptOps refs resolve
-		// upstream in the reference).
+		// prompts (the runtime's flattened-arm shape; PromptOps refs resolve
+		// upstream in the contract).
 		controlArm, candidateArm := experiment.Arm{}, experiment.Arm{}
 		if body.Kind == "model" {
 			controlArm.ModelHint, candidateArm.ModelHint = body.ControlRef, body.CandidateRef

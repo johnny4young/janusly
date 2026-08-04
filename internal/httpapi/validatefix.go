@@ -2,7 +2,7 @@
 // proposed fix by running it as a fresh validation replay (write sides
 // skipped) seeded with the failing entry's exact input. The suggested
 // workflow passes the SAME grammar gate as /ai/patch-workflow output
-// before any run is seeded. Pilot posture: validationEffectMode supports
+// before any run is seeded. Runtime posture: validationEffectMode supports
 // only the default write-skip ("provider_simulation" answers 409 because
 // the effect simulator is not part of this backend yet). An optional
 // playbook claim is revalidated against the exact failure before seeding.
@@ -77,9 +77,9 @@ func (s *V1Server) validateFixCore(r *http.Request, rc v1Request) opResult {
 	result := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation)
 	var blocking []domain.Issue
 	for _, issue := range result.Issues {
-		// Pilot-unsupported node types do not block a sandbox seed when the
+		// Runtime-unsupported node types do not block a sandbox seed when the
 		// DAG itself is sound under the save-time validation posture.
-		if issue.Code != domain.CodeNodeTypeUnsupportedPilot {
+		if issue.Code != domain.CodeNodeTypeNotExecutable {
 			blocking = append(blocking, issue)
 		}
 	}

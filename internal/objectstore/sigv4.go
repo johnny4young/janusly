@@ -1,5 +1,5 @@
 // AWS Signature V4 signing + the real S3-compatible driver.
-// Hand-rolled over net/http — no SDK, mirroring the reference's
+// Hand-rolled over net/http — no SDK, mirroring the contract's
 // S3Provider posture (which deliberately bypasses the SSRF chokepoint:
 // the endpoint is OPERATOR configuration, not workflow-author input).
 //

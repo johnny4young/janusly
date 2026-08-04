@@ -755,7 +755,7 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   width: 1px;
 }
 .usecase-row p,
-.copilot-hero p {
+.ai-studio-hero p {
   color: var(--we-muted);
   font-size: 12px;
   line-height: 1.45;

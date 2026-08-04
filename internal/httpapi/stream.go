@@ -1,9 +1,9 @@
-// Live run streaming over SSE, shaped to the reference protocol the web
+// Live run streaming over SSE, shaped to the contract protocol the web
 // already speaks (fetch + ReadableStream, never EventSource): a retry hint
 // and connected comment on open, database catch-up from the Last-Event-ID
 // composite cursor (bounded, with the catchup-truncated reconnect signal),
 // then the live tail — driven here by the Postgres event notify instead of
-// the reference's Redis hub, with a polling fallback so a lost notification
+// the contract's Redis hub, with a polling fallback so a lost notification
 // only delays, never loses.
 package httpapi
 
@@ -104,7 +104,7 @@ func (h *streamHub) listen(ctx context.Context, pool *pgxpool.Pool) {
 	}
 }
 
-// streamRun handles GET /runs/{runId}/stream with the reference's guard:
+// streamRun handles GET /runs/{runId}/stream with the contract's guard:
 // an unknown or cross-org run is the indistinguishable 403.
 func (s *V1Server) streamRun(w http.ResponseWriter, r *http.Request, rc v1Request) {
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")

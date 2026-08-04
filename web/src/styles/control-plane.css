@@ -1337,11 +1337,11 @@
 }
 
 /* ==========================================================================
-   AI copilot and chat surfaces
+   AI Studio and chat surfaces
    AI Studio hero, prompt controls, supported-use-case rows, and run chat
    message cards.
    ========================================================================== */
-.copilot-hero {
+.ai-studio-hero {
   align-items: flex-start;
   border: 1px solid var(--we-line);
   border-radius: 8px;
@@ -1354,14 +1354,14 @@
   box-shadow: 0 12px 30px -24px var(--we-shadow-ink-35);
 }
 
-.copilot-hero--branded {
+.ai-studio-hero--branded {
   padding: 20px 18px;
   border-radius: 12px;
 }
 
-.copilot-hero--branded h2 { margin-top: 10px; }
+.ai-studio-hero--branded h2 { margin-top: 10px; }
 
-.copilot-hero h2 {
+.ai-studio-hero h2 {
   color: var(--we-ink);
   font-size: 22px;
   font-weight: 800;
@@ -1370,30 +1370,30 @@
   margin: 12px 0 0;
 }
 
-.copilot-hero svg {
+.ai-studio-hero svg {
   color: var(--we-primary);
   flex: 0 0 auto;
 }
 
-.copilot-prompt {
+.ai-studio-prompt {
   margin-top: 12px;
 }
 
 .suggestion-row,
 .chat-starters,
-.copilot-actions,
-.copilot-secondary-actions {
+.ai-studio-actions,
+.ai-studio-secondary-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 10px;
 }
 
-.copilot-actions .command-button {
+.ai-studio-actions .command-button {
   flex: 1 1 160px;
 }
 
-.copilot-secondary-actions .command-button {
+.ai-studio-secondary-actions .command-button {
   flex: 1 1 0;
 }
 
@@ -3284,7 +3284,7 @@
 .we-operator-mini__delta[data-severity="danger"] { color: var(--we-danger-text); }
 
 /* ==========================================================================
-   Final polish pass — Inspector, AiCopilot result body, MultiAgentTimeline,
+   Final polish pass — Inspector, AiAI Studio result body, MultiAgentTimeline,
    Recovery (delta card / failure clusters / dialog body), RunExplainChat,
    settings panels, and empty hero. All token-driven; no markup rewrites.
    ========================================================================== */

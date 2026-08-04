@@ -1,6 +1,6 @@
 // Route authorization gates over the auth package's ladder: requireRole
 // (rank-based) now, requirePermission (catalog-based) with the annotated
-// registry ticket. 403 bodies carry the reference dispatcher's exact
+// registry ticket. 403 bodies carry the contract dispatcher's exact
 // message shape ("Forbidden: requires <role> role" under
 // server_request_failed).
 package httpapi
@@ -33,7 +33,7 @@ func (s *V1Server) requireRole(r *http.Request, rc v1Request, required auth.Role
 }
 
 // requirePermission enforces the catalog layer after the rank layer, with
-// the reference's verbatim 403 ("Forbidden: requires permission <key>").
+// the contract's verbatim 403 ("Forbidden: requires permission <key>").
 func (s *V1Server) requirePermission(r *http.Request, rc v1Request, permission string) *opResult {
 	mode := auth.ModeDevHeaders
 	if rc.authContext != nil {
@@ -61,7 +61,7 @@ func (s *V1Server) requirePermission(r *http.Request, rc v1Request, permission s
 }
 
 // routeGate is one registry annotation: when both are set, BOTH must pass,
-// role first — the reference dispatcher's order.
+// role first — the contract dispatcher's order.
 type routeGate struct {
 	role       auth.Role
 	permission string

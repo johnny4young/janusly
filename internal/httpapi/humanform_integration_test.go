@@ -53,7 +53,7 @@ func TestHumanFormResumeLoop(t *testing.T) {
 	// Wait for the pause + read the signed token from waiting metadata.
 	token := waitFormToken(t, pool, ctx, runID, "form")
 
-	// 1. Missing token → 400 with the reference code.
+	// 1. Missing token → 400 with the contract code.
 	res = h.call("POST", "/resume", map[string]any{
 		"runId": runID, "nodeId": "form", "input": map[string]any{"monto": 5},
 	}, "")

@@ -1,7 +1,7 @@
 // free_json extraction — the measured-reliability piece of the default
 // generation mode (the project's finding: free-JSON beat constrained).
-// ExtractJSONObject is the reference's exact grammar: strip markdown
-// fences, slice the outermost object. ParseJSONValue layers the pilot's
+// ExtractJSONObject is the contract's exact grammar: strip markdown
+// fences, slice the outermost object. ParseJSONValue layers the runtime's
 // hardening on top per the wave card: BOM/unicode tolerance, top-level
 // arrays, and a bounded repair for TRUNCATED model output (a valid prefix
 // cut mid-stream gets its open strings/brackets closed). Extraction can
@@ -18,7 +18,7 @@ import (
 
 var fencePattern = regexp.MustCompile("(?i)```(?:json)?")
 
-// ExtractJSONObject ports the reference's extractJsonObject verbatim:
+// ExtractJSONObject ports the contract's extractJsonObject verbatim:
 // trim, strip fences, slice first '{' to last '}', else the trimmed text.
 func ExtractJSONObject(text string) string {
 	t := strings.TrimSpace(strings.TrimPrefix(text, "\uFEFF"))

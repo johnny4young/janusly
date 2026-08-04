@@ -24,7 +24,7 @@ import { lazy, Suspense, useCallback, useMemo, useState } from 'react'
 import { Activity, Boxes, Database, FlaskConical, Layers3, Plug, Users, Workflow } from 'lucide-react'
 import type { ActiveTab, AiAuthoringActionRequest, AiCandidateBackoff, AiHealth, AiMode, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, WorkflowDefinition, WorkflowImprovementResult, WorkflowImprovementSuggestion } from '../types'
 import type { DeadLetter } from './dead-letter-types'
-import { AiCopilotPanel } from './AiCopilotPanel'
+import { AiStudioPanel } from './AiStudioPanel'
 import { AuthoringPanel, type AuthoringPanelModel } from './AuthoringPanel'
 import { EmptyView, PanelChrome, PanelSearch } from './panel-primitives'
 import { ErrorBoundary } from './ErrorBoundary'
@@ -211,8 +211,8 @@ function RightPanelRouter(props: RightPanelProps) {
     canReadAutoHealing: can('autohealing.read'),
     canDecideAutoHealing: can('autohealing.decide'),
   }
-  if (props.tab === 'copilot') return (
-    <AiCopilotPanel
+  if (props.tab === 'ai-studio') return (
+    <AiStudioPanel
       health={authoring.aiHealth}
       workflowName={authoring.currentWorkflowName}
       onGenerateWorkflow={authoring.onGenerateWorkflow}
@@ -388,7 +388,7 @@ export function TemplatesPanel({
             icon={<Workflow size={22} />}
             title={t('rightPanel.templates.empty.title')}
             body={t('rightPanel.templates.empty.body')}
-            cta={{ label: t('rightPanel.templates.empty.cta'), onClick: () => setActiveTab('copilot') }}
+            cta={{ label: t('rightPanel.templates.empty.cta'), onClick: () => setActiveTab('ai-studio') }}
           />
         </div>
       ) : (

@@ -57,7 +57,7 @@ func (s *V1Server) saveCore(r *http.Request, rc v1Request) opResult {
 	result := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation)
 	var blocking []domain.Issue
 	for _, issue := range result.Issues {
-		if issue.Code != domain.CodeNodeTypeUnsupportedPilot {
+		if issue.Code != domain.CodeNodeTypeNotExecutable {
 			blocking = append(blocking, issue)
 		}
 	}
@@ -116,7 +116,7 @@ func (s *V1Server) saveCore(r *http.Request, rc v1Request) opResult {
 		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}
 	versionID := s.newID()
-	// The reference's WorkflowSchema.parse defaults `metadata: {tags: []}`
+	// The contract's WorkflowSchema.parse defaults `metadata: {tags: []}`
 	// into the persisted dagJson; mirror it so /workflows/latest and the
 	// version history serve byte-identical snapshots (dual-run pin).
 	dagJSONWithDefaults := raw
@@ -221,7 +221,7 @@ func escapeWorkflowLikePattern(value string) string {
 }
 
 // versionView emits the contract's WorkflowVersion key set; columns the
-// pilot does not populate surface as explicit nulls.
+// runtime does not populate surface as explicit nulls.
 func versionView(id, orgID, workflowID string, version int32, dagJSON json.RawMessage, createdBy pgtype.Text, createdAt *time.Time) VersionView {
 	return newVersionView(id, orgID, workflowID, version, dagJSON, createdBy, createdAt)
 }
@@ -295,7 +295,7 @@ func (s *V1Server) listWorkflowVersionsCore(r *http.Request, rc v1Request) opRes
 	return opOK(items)
 }
 
-// cancelRun ports the reference guards exactly — and note the asymmetry
+// cancelRun ports the contract guards exactly — and note the asymmetry
 // with run READS: cancel distinguishes a missing run (404) from a cross-org
 // one (403), while reads keep both indistinguishable.
 
@@ -376,8 +376,8 @@ func (s *V1Server) rollbackWorkflow(w http.ResponseWriter, r *http.Request, rc v
 	writeVersioned(w, rc.id, s.rollbackCore(r, rc))
 }
 
-// replayCore is the shared engine redrive with the reference's replay wire
-// (success {ok:true}); the pilot-own redrive route reuses it with a richer
+// replayCore is the shared engine redrive with the contract's replay wire
+// (success {ok:true}); the runtime-own redrive route reuses it with a richer
 // body.
 
 func (s *V1Server) resumeWorkflowCore(r *http.Request, rc v1Request, workflowID string) opResult {

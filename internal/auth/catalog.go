@@ -1,12 +1,12 @@
-// The closed permission catalog, extracted from the reference
-// (apps/api/src/permission-catalog.ts). 41 keys across 20 active
-// categories; a parity test pins the exact key set so a catalog change
+// The closed permission catalog, extracted from the contract
+// (the API contract). 41 keys across 20 active
+// categories; a consistency test pins the exact key set so a catalog change
 // upstream is a loud failure here, never silent drift. Adding a key means
-// one entry plus its default roles — same contract as the reference.
+// one entry plus its default roles — same contract as the contract.
 package auth
 
-// PermissionEntry mirrors the reference's catalog rows (descriptions stay
-// with the reference; the pilot needs keys, categories, and defaults).
+// PermissionEntry mirrors the contract's catalog rows (descriptions stay
+// with the contract; the runtime needs keys, categories, and defaults).
 type PermissionEntry struct {
 	Key          string
 	Category     string
@@ -90,7 +90,7 @@ func MandatoryAdminPermissions() []string {
 // CoerceAdminFloor applies the floor to an override of `roleName`,
 // returning the merged set plus the keys that were coerced in (the audit
 // records them under metadata.coerced). Custom roles that merely INHERIT
-// admin rank are deliberately not coerced — the reference's billing-admin
+// admin rank are deliberately not coerced — the contract's billing-admin
 // case, a deliberate narrow admin.
 func CoerceAdminFloor(roleName string, permissions []string) (merged, coerced []string) {
 	if roleName != string(RoleAdmin) {

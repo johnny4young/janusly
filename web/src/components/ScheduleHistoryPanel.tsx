@@ -130,7 +130,7 @@ export function ScheduleHistoryPanel({ workflowId: explicit }: ScheduleHistoryPa
     // Localized short weekday names (Sun..Sat) via Intl — respects the UI
     // language without hardcoding English. `timeZone: 'UTC'` is load-bearing:
     // the grid buckets fires by UTC day-of-week (and the hour labels are raw
-    // UTC), so the row labels must read the reference instant in UTC too —
+    // UTC), so the row labels must read the contract instant in UTC too —
     // otherwise a negative-offset browser would shift every label back a day
     // and mislabel the rows against their own data.
     const fmt = new Intl.DateTimeFormat(locale, { weekday: 'short', timeZone: 'UTC' })

@@ -2,7 +2,7 @@
 // whole-run sandbox replay (optionally with a patched workflow) and the
 // targeted fork. Editor + runs.start, "ai" rate family, org-scoped
 // source with identical 404s (no enumeration leak), nested labs
-// rejected, and the reference's exact error-code ladder.
+// rejected, and the contract's exact error-code ladder.
 package httpapi
 
 import (

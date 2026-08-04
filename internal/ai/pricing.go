@@ -1,4 +1,4 @@
-// Server-side cost computation, ported from the reference's pricing
+// Server-side cost computation, implements the contract's pricing
 // modules: the static MODEL_PRICES snapshot overlaid by the server-only
 // JANUSLY_LLM_PRICE_<MODEL>=<input>,<output> env override. An unknown
 // model yields a nil price and callers record costUsd as null — never a
@@ -18,9 +18,9 @@ type ModelPrice struct {
 	OutputUsdPer1M float64
 }
 
-// modelPrices mirrors the reference snapshot (2026-04). Keys lowercase.
+// modelPrices mirrors the contract snapshot (2026-04). Keys lowercase.
 var modelPrices = map[string]ModelPrice{
-	// OpenAI (kept for table parity even though the pilot is Anthropic-only)
+	// OpenAI (kept for table consistency even though the runtime is Anthropic-only)
 	"gpt-4o-mini":  {0.15, 0.6},
 	"gpt-4o":       {2.5, 10.0},
 	"gpt-4.1":      {2.0, 8.0},

@@ -1,4 +1,4 @@
-// Run Explain Report — the pure builder ported from the reference's
+// Run Explain Report — the pure builder implements the contract's
 // run-explain-report.ts: a shareable Markdown + JSON artefact summarising
 // one run for a stakeholder (summary, root cause via the shared
 // signature taxonomy, failed node, capped timeline, suggested fix from

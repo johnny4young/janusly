@@ -124,7 +124,7 @@ func TestIntegrationChokepoint(t *testing.T) {
 	mu.Unlock()
 
 	// GitHub rides the identical gate/egress/usage chokepoint, uses the
-	// reference catalog key for its tenant rate override, and rewrites only
+	// contract catalog key for its tenant rate override, and rewrites only
 	// behind the explicit local simulator gate.
 	githubCredentialID := "cred-github-" + org
 	githubSecret := "github-super-secret-" + org

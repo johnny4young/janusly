@@ -1,5 +1,5 @@
 // Provider-neutral LLM chokepoint — the single gate every AI surface in
-// the pilot speaks through, ported from the reference's LlmClient. The
+// the runtime speaks through, implements the contract's LlmClient. The
 // supported completion posture is Anthropic-only (claude-haiku-4-5) via
 // the official anthropic-sdk-go, but the INTERFACE never names a vendor:
 // call sites see GenerateText(input) -> (result, *AIError).
@@ -39,12 +39,12 @@ type AIError struct {
 
 func (e *AIError) Error() string { return e.Class + ": " + e.Message }
 
-// GenerateTextInput mirrors the reference's LlmGenerateTextInput.
+// GenerateTextInput mirrors the contract's LlmGenerateTextInput.
 type GenerateTextInput struct {
 	System string
 	Prompt string
 	// ResponseFormat is the provider-agnostic JSON hint. Anthropic has no
-	// native JSON mode (the reference's registry entry is a no-op there
+	// native JSON mode (the contract's registry entry is a no-op there
 	// too); free_json extraction happens above this layer.
 	ResponseFormat string
 	// ModelHint overrides the resolved model for one call: a bare model id
@@ -69,7 +69,7 @@ type CallContext struct {
 	WorkflowID string
 }
 
-// GenerateTextResult mirrors the reference's LlmGenerateTextResult.
+// GenerateTextResult mirrors the contract's LlmGenerateTextResult.
 type GenerateTextResult struct {
 	Text         string
 	FinishReason string
@@ -168,7 +168,7 @@ func (c *anthropicClient) GenerateText(ctx context.Context, input GenerateTextIn
 	}
 	model := c.cfg.Model
 	if hint := strings.TrimSpace(input.ModelHint); hint != "" {
-		// "<provider>/<model>" names both; the pilot's only provider is
+		// "<provider>/<model>" names both; the runtime's only provider is
 		// anthropic, so any other prefix is an invalid request.
 		if provider, bare, ok := strings.Cut(hint, "/"); ok {
 			if provider != "anthropic" {

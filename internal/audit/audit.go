@@ -1,12 +1,12 @@
-// Audit writers, ported from the reference's two chokepoints:
+// Audit writers, implements the contract's two chokepoints:
 //
-//	Write        the module-level best-effort writer (apps/api/src/audit.ts)
+//	Write        the module-level best-effort writer (the API contract)
 //	             — a failed audit insert on a non-transactional path is
 //	             logged and swallowed, never breaking the operation.
-//	WithAuditTx  the transactional pairing (packages/data/src/audit-tx.ts)
+//	WithAuditTx  the transactional pairing (the source contract)
 //	             — the entity write and its audit row commit or roll back
 //	             TOGETHER; the handler receives a tx-bound audit function,
-//	             and here the compiler enforces what the reference could
+//	             and here the compiler enforces what the contract could
 //	             only enforce by naming convention.
 //	ForAction    the typed helper (auditAction): action validated against
 //	             the closed catalog, caller metadata enriched with the
@@ -33,14 +33,14 @@ import (
 	"github.com/johnny4young/janusly/internal/grammar"
 )
 
-// Options mirror the reference's AuditActionOptions.
+// Options mirror the contract's AuditActionOptions.
 type Options struct {
 	TargetType string
 	TargetID   string
 	Metadata   map[string]any
 }
 
-// enrich applies the reference's collision rule: the auth-derived block
+// enrich applies the contract's collision rule: the auth-derived block
 // overwrites caller keys.
 func enrich(authCtx *auth.Context, metadata map[string]any) map[string]any {
 	enriched := map[string]any{}
@@ -114,7 +114,7 @@ func Write(ctx context.Context, pool *pgxpool.Pool, authCtx *auth.Context, actio
 }
 
 // WriteAs records a best-effort row with an explicit user id column and
-// NO auth-derived enrichment — the analogue of the reference's raw
+// NO auth-derived enrichment — the analogue of the contract's raw
 // audit(orgId, userId, ...) writers (the budget gate uses it).
 func WriteAs(ctx context.Context, pool *pgxpool.Pool, orgID, userID string, action Action, opts Options) {
 	err := insert(ctx, func(ctx context.Context, sql string, args ...any) error {

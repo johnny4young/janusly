@@ -1,5 +1,5 @@
-// Declared-input schema subset and its validator, ported from
-// packages/engine/src/inputs-validator.ts. Message strings are part of the
+// Declared-input schema subset and its validator, implements
+// the source contract Message strings are part of the
 // contract: they surface verbatim in validation issues and API errors.
 package domain
 
@@ -14,7 +14,7 @@ import (
 
 // InputSchema is the JSON-Schema subset a workflow declares for its inputs.
 // Default is kept raw so an absent default and an explicit null default stay
-// distinguishable, exactly like `undefined` versus `null` in the reference.
+// distinguishable, exactly like `undefined` versus `null` in the contract.
 type InputSchema struct {
 	Type        string                  `json:"type"`
 	Description string                  `json:"description,omitempty"`

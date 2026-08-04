@@ -1,5 +1,5 @@
-// Structural validation ported check by check, in the reference's order,
-// from packages/engine/src/workflow-validation.ts. Codes and messages are
+// Structural validation ported check by check, in the contract's order,
+// from the source contract Codes and messages are
 // wire contract: the web matches codes for localized messages.
 package domain
 
@@ -13,7 +13,7 @@ import (
 )
 
 // Issue codes emitted by Parse and Validate. Closed set; additions must
-// exist in the reference first (except the explicit pilot-only code).
+// exist in the contract first (except the explicit runtime-only code).
 const (
 	CodeInvalidContract             = "invalid_contract"
 	CodeEmptyWorkflow               = "empty_workflow"
@@ -44,13 +44,13 @@ const (
 	CodeRouterCandidateUnknownID    = "router_candidate_unknown_node_id"
 	CodeCycleDetected               = "cycle_detected"
 	CodeMissingStartNode            = "missing_start_node"
-	// Pilot-only: the type is valid in the full platform but this backend
+	// Runtime-only: the type is valid in the full platform but this backend
 	// does not execute it yet. Deliberately distinct from
 	// unsupported_node_type, which means the type is invalid everywhere.
-	CodeNodeTypeUnsupportedPilot = "node_type_unsupported_pilot"
+	CodeNodeTypeNotExecutable = "node_type_not_executable"
 )
 
-// Issue mirrors the reference's validation issue shape on the wire.
+// Issue mirrors the contract's validation issue shape on the wire.
 type Issue struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -85,8 +85,8 @@ var platformNodeTypes = map[string]bool{
 	"mcp_server_event": true, "pagerduty_incident": true,
 }
 
-// PilotNodeTypes is the executable subset of this backend today.
-var PilotNodeTypes = map[string]bool{
+// ExecutableNodeTypes is the executable subset of this backend today.
+var ExecutableNodeTypes = map[string]bool{
 	"noop": true, "transform": true, "condition": true, "http": true,
 	"wait_until": true, "webhook": true, "approval": true, "human_form": true, "tool": true,
 	"parallel_fork": true, "join": true, "loop": true, "webhook_received": true,
@@ -97,7 +97,7 @@ var PilotNodeTypes = map[string]bool{
 }
 
 // inputsScopePattern flags inputs.* references on edge conditions after
-// quoted string literals are stripped, mirroring the reference's guard.
+// quoted string literals are stripped, mirroring the contract's guard.
 var (
 	quotedLiteralPattern = regexp.MustCompile(`'[^']*'|"[^"]*"`)
 	inputsScopePattern   = regexp.MustCompile(`\binputs(\.|\[)`)
@@ -113,7 +113,7 @@ func Validate(wf *Workflow, validExpression ExpressionValidator) ValidationResul
 // ValidateWithSemanticFixtures is Validate plus the bounded-fixture
 // qualification that needs the runtime evaluator (injected so domain
 // stays grammar-free; every product surface passes the real evaluator
-// from internal/recovery, mirroring the reference's single validator).
+// from internal/recovery, mirroring the contract's single validator).
 func ValidateWithSemanticFixtures(wf *Workflow, validExpression ExpressionValidator, replayFixtures SemanticFixtureEvaluator) ValidationResult {
 	if validExpression == nil {
 		validExpression = PermissiveExpressions
@@ -142,8 +142,8 @@ func ValidateWithSemanticFixtures(wf *Workflow, validExpression ExpressionValida
 		}
 		if !platformNodeTypes[node.Type] {
 			push(Issue{Code: CodeUnsupportedNodeType, Message: "Unsupported node type: " + node.Type, NodeID: node.ID})
-		} else if !PilotNodeTypes[node.Type] {
-			push(Issue{Code: CodeNodeTypeUnsupportedPilot, Message: fmt.Sprintf("Node type %q is not executable by this backend yet", node.Type), NodeID: node.ID})
+		} else if !ExecutableNodeTypes[node.Type] {
+			push(Issue{Code: CodeNodeTypeNotExecutable, Message: fmt.Sprintf("Node type %q is not executable by this backend yet", node.Type), NodeID: node.ID})
 		}
 		if node.Type == "http" && isJSFalsy(node.Config["url"]) {
 			push(Issue{Code: CodeHTTPMissingURL, Message: "HTTP node requires config.url", NodeID: node.ID})
@@ -345,7 +345,7 @@ func validWorkflowVersion(value any) bool {
 	}
 }
 
-// isJSFalsy mirrors the reference's truthiness checks on config fields:
+// isJSFalsy mirrors the contract's truthiness checks on config fields:
 // absent, null, empty string, false and zero all read as missing.
 func isJSFalsy(value any) bool {
 	switch v := value.(type) {

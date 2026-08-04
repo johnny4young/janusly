@@ -1,4 +1,4 @@
-// SCIM directory sync (reference apps/api/src/scim-event-handler.ts +
+// SCIM directory sync (reference the API contract +
 // scim-resync.ts + routes/scim-routes.ts + workos-webhook.ts): the inbound
 // WorkOS Directory Sync webhook, the pure event dispatcher with its three
 // deterministic guards (replay → malformed timestamp → per-type dispatch,

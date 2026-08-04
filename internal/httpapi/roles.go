@@ -1,4 +1,4 @@
-// Org roles CRUD + permission overrides, ported from the reference's
+// Org roles CRUD + permission overrides, implements the contract's
 // roles routes: custom-role creation (name grammar, built-in names
 // rejected toward the override path), the update route that serves BOTH
 // built-in overrides (row upserted on first override; inheritsFrom
@@ -349,7 +349,7 @@ func (s *V1Server) deleteRoleCore(r *http.Request, rc v1Request, rawName string)
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
 	}
 	if membersAffected > 0 {
-		// The reference's envelope carries membersAffected at BOTH levels.
+		// The contract's envelope carries membersAffected at BOTH levels.
 		return opResult{status: http.StatusConflict, code: "role_in_use",
 			message: "cannot delete a role with active members",
 			params:  map[string]any{"membersAffected": membersAffected},

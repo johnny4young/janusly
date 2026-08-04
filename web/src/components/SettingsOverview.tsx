@@ -45,7 +45,7 @@ export function SettingsOverview({
     }
     if (area === 'ai') {
       if (aiHealth === null) return t('badges.health.unavailable')
-      return t(aiHealth?.enabled ? 'aiCopilot.healthOn' : 'aiCopilot.healthOff')
+      return t(aiHealth?.enabled ? 'aiStudio.healthOn' : 'aiStudio.healthOff')
     }
     return null
   }

@@ -14,7 +14,7 @@ import (
 	"github.com/johnny4young/janusly/internal/store"
 )
 
-// decisionCandidatesFromPayload mirrors the reference parser: rows come
+// decisionCandidatesFromPayload mirrors the contract parser: rows come
 // from payload.ranking, keyed by breakdown.{cost,latency,quality};
 // rows without a nodeId are dropped.
 func decisionCandidatesFromPayload(payload []byte) (candidates []domain.DecisionCandidate, chosenNodeID string) {

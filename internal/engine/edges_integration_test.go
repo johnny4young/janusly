@@ -75,11 +75,11 @@ func TestConditionalBranchExecutesOnlyTheTrueSide(t *testing.T) {
 	if noStatus != "skipped" {
 		t.Fatalf("false branch must be skipped, got %s", noStatus)
 	}
-	// The skipped node's state carries the reference's exact reason shape.
+	// The skipped node's state carries the contract's exact reason shape.
 	var skipped map[string]map[string]string
 	_ = json.Unmarshal(noState, &skipped)
 	if skipped["skipped"]["reason"] != "Condition not met" {
-		t.Fatalf("skip state parity broken: %s", noState)
+		t.Fatalf("skip state contract mismatch: %s", noState)
 	}
 	var skipEvents int
 	_ = pool.QueryRow(ctx, "select count(*) from run_events where run_id=$1 and type='node.skipped' and node_id='no'", runID).Scan(&skipEvents)
@@ -89,7 +89,7 @@ func TestConditionalBranchExecutesOnlyTheTrueSide(t *testing.T) {
 }
 
 func TestSuccessorOfSkippedNodeStillRuns(t *testing.T) {
-	// Reference semantics read from enqueueReadyNodes: a skipped predecessor
+	// Contract semantics read from enqueueReadyNodes: a skipped predecessor
 	// SATISFIES its outgoing unconditional edges — skip does not cascade.
 	// The downstream node runs against the skipped node's empty output.
 	ctx, pool, eng, org := newHarness(t)
@@ -174,7 +174,7 @@ func TestUnresolvedTemplatePathEmitsEvidenceEvent(t *testing.T) {
 	_ = json.Unmarshal(payload, &parsed)
 	if parsed.Count != 1 || parsed.Policy != "lenient" || parsed.Truncated ||
 		len(parsed.Paths) != 1 || parsed.Paths[0] != "context.ghost.output.value" {
-		t.Fatalf("evidence payload parity broken: %s", payload)
+		t.Fatalf("evidence payload contract mismatch: %s", payload)
 	}
 	// Lenient policy: the node still succeeds with the empty-string render.
 	var state []byte
@@ -224,7 +224,7 @@ func TestToolNodeRunsThroughTheRegistry(t *testing.T) {
 	_ = pool.QueryRow(ctx, "select state_json->'output' from run_nodes where run_id=$1 and node_id='parse'", runID).Scan(&state)
 	var output map[string]any
 	_ = json.Unmarshal(state, &output)
-	// Envelope parity: {tool, result} with the tool's own fields under result.
+	// Envelope consistency: {tool, result} with the tool's own fields under result.
 	if output["tool"] != "json.parse" {
 		t.Fatalf("tool envelope: %s", state)
 	}
@@ -360,7 +360,7 @@ func TestLoopMapProjectsItemsWithLateBoundScopes(t *testing.T) {
 	if parsed.Items[1]["line"] != "1: grace" || parsed.Items[2]["upper"] != "linus" {
 		t.Fatalf("item/index binding broken: %s", output)
 	}
-	// The reference's loop.completed event rides the executor's Emit seam.
+	// The contract's loop.completed event rides the executor's Emit seam.
 	var completedEvents int
 	_ = pool.QueryRow(ctx, "select count(*) from run_events where run_id=$1 and type='loop.completed'", runID).Scan(&completedEvents)
 	if completedEvents != 1 {

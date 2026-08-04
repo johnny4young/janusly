@@ -2,7 +2,7 @@
 // (JANUSLY_PRODUCTION_MODE=true → fail-level issues reject with 422) and
 // the badge route POST /workflows/readiness the studio polls. Same engine
 // check for both, layered with the DB-side rollback-availability warn —
-// mirroring the reference's split (pure engine rules + API-layered issues).
+// mirroring the contract's split (pure engine rules + API-layered issues).
 package httpapi
 
 import (
@@ -84,9 +84,9 @@ func (s *V1Server) productionGate(ctx context.Context, orgID string, wf *domain.
 	return &rejection
 }
 
-// validateCore serves POST /validate: the reference's structural
+// validateCore serves POST /validate: the contract's structural
 // validation surface — {valid, issues} verbatim from domain.Validate,
-// accepting a flat workflow JSON or the {workflow} envelope. No pilot
+// accepting a flat workflow JSON or the {workflow} envelope. No runtime
 // node-type carve-out here: /validate reports the FULL issue list (the
 // save path owns the carve-out decision).
 func (s *V1Server) validateCore(r *http.Request, rc v1Request) opResult {

@@ -19,7 +19,7 @@ import (
 	"github.com/johnny4young/janusly/internal/grammar"
 )
 
-// The rules-planner agent loop through real runs: the reference's fixture
+// The rules-planner agent loop through real runs: the contract's fixture
 // ladder (explicit tool / uppercase goal / http goal), the step budget
 // cutting clean at maxSteps, and a validation dry-run never executing a
 // write-side plan.
@@ -422,7 +422,7 @@ func TestMultiAgentCrew(t *testing.T) {
 	if len(agents) != 2 || output["count"] != float64(2) {
 		t.Fatalf("crew shape: %+v", output)
 	}
-	// The reference late-binds the GOAL only: the second agent's goal
+	// The contract late-binds the GOAL only: the second agent's goal
 	// template must have rendered against the first's completed result.
 	var goalPayload string
 	if err := pool.QueryRow(ctx, `SELECT payload->>'goal' FROM run_events

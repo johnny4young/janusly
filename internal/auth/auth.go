@@ -1,5 +1,5 @@
-// Package auth is the request-authentication entry point, ported from the
-// reference resolver (apps/api/src/auth.ts): a provider CHAIN where the
+// Package auth is the request-authentication entry point, implements the
+// reference resolver (the API contract): a provider CHAIN where the
 // first extractor that yields a principal wins, and membership resolution
 // where the grant IS the org_members row — an org hint (header or claim)
 // is a scope selector, never authority.
@@ -127,7 +127,7 @@ type Resolver struct {
 	evaluatePolicy   PolicyEvaluator
 }
 
-// Config mirrors the reference's boot-time gate inputs.
+// Config mirrors the contract's boot-time gate inputs.
 type Config struct {
 	SupabaseURL     string
 	SupabaseKey     string
@@ -136,7 +136,7 @@ type Config struct {
 	AllowDevHeaders bool
 }
 
-// ConfigFromEnv reads the reference's environment contract.
+// ConfigFromEnv reads the contract's environment contract.
 func ConfigFromEnv() Config {
 	return Config{
 		SupabaseURL:     os.Getenv("SUPABASE_URL"),
@@ -147,7 +147,7 @@ func ConfigFromEnv() Config {
 	}
 }
 
-// BootError is the reference's fail-fast: production without Supabase and
+// BootError is the contract's fail-fast: production without Supabase and
 // without the explicit dev-headers override must refuse to start.
 func (c Config) BootError() error {
 	if c.SupabaseURL == "" && c.Production && !c.AllowDevHeaders {
@@ -203,7 +203,7 @@ func declaredSource(r *http.Request, fallback Source) Source {
 	return fallback
 }
 
-// extract runs the chain in the reference's priority order.
+// extract runs the chain in the contract's priority order.
 func (rv *Resolver) extract(ctx context.Context, r *http.Request) (*principal, error) {
 	// 1. Janusly browser session. Missing, invalid, revoked, or expired
 	// sessions fall through; store failures remain visible to the dispatcher.
@@ -342,10 +342,10 @@ func (rv *Resolver) Resolve(ctx context.Context, r *http.Request) (*Context, err
 }
 
 // resolveHumanMembership: the security-relevant branch — the hint is a
-// SCOPE selector; the grant is the org_members row. The pilot ports steps
+// SCOPE selector; the grant is the org_members row. The runtime ports steps
 // 1 (direct match), 3 (hint-less single membership) and 4 (hint-less
 // multiple → nil); the provisioning paths (legacy backfill, invitations,
-// verified domains, SSO JIT) stay with the reference for now.
+// verified domains, SSO JIT) stay with the contract for now.
 func (rv *Resolver) resolveHumanMembership(ctx context.Context, q *store.Queries, p *principal) (*Context, error) {
 	if p.providerOrgHint != "" {
 		membership, err := q.GetOrgMembership(ctx, store.GetOrgMembershipParams{
@@ -416,7 +416,7 @@ func errorsIsNoRows(err error) bool {
 }
 
 // verifySupabaseHTTP validates the access token against the Supabase Auth
-// API — the same network validation the reference performs through its
+// API — the same network validation the contract performs through its
 // SDK (supabase.auth.getUser). Full implementation lands with the
 // supabase-mode ticket; the seam exists so tests can inject verifiers.
 func (rv *Resolver) verifySupabaseHTTP(ctx context.Context, token string) (string, string, bool) {

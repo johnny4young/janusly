@@ -1,16 +1,16 @@
-// Error-signature normalizer — the pure clustering key, ported from the
-// reference (packages/shared/src/error-signature.ts). First-match-wins
+// Error-signature normalizer — the pure clustering key, implements the
+// reference (the source contract). First-match-wins
 // rules produce a stable, human-readable label ("HTTP 401 on http node",
 // "Missing secret: GITHUB_TOKEN") so the operator sees one cluster per
 // problem instead of one DLQ row per occurrence.
 //
-// Hard safety property inherited from the reference: no secret value ever
+// Hard safety property inherited from the contract: no secret value ever
 // appears in a returned signature. Key-redaction happens upstream at the
 // persistence chokepoint, but free-form error MESSAGES can carry
 // token-shaped substrings; the secret-shape scrub here is the last line
 // of defence.
 //
-// RE2 note: the reference's boundary lookaheads `(?=$|[^A-Za-z0-9])`
+// RE2 note: the contract's boundary lookaheads `(?=$|[^A-Za-z0-9])`
 // are unsupported in RE2. For open-ended token bodies ({20,} greedy) the
 // lookahead is redundant — greed already consumes every body char, so the
 // next char is necessarily a boundary. Only the fixed-length shapes (AWS
@@ -25,7 +25,7 @@ import (
 	"strings"
 )
 
-// Result mirrors the reference's SignatureResult triple.
+// Result mirrors the contract's SignatureResult triple.
 type Result struct {
 	Signature      string `json:"signature"`
 	Category       string `json:"category"`
@@ -52,7 +52,7 @@ var secretShapes = []secretShape{
 	{pattern: regexp.MustCompile(`(^|[^A-Za-z0-9])(sk-[A-Za-z0-9]{20,})`)},
 	{pattern: regexp.MustCompile(`(^|[^A-Za-z0-9])(ghp_[A-Za-z0-9]{20,})`)},
 	// Fine-grained GitHub PAT: `_` in the body spans the internal separator
-	// so the WHOLE token redacts, exactly like the reference.
+	// so the WHOLE token redacts, exactly like the contract.
 	{pattern: regexp.MustCompile(`(^|[^A-Za-z0-9])(github_pat_[A-Za-z0-9_]{20,})`)},
 	{pattern: regexp.MustCompile(`(^|[^A-Za-z0-9])(gh[ousr]_[A-Za-z0-9]{20,})`)},
 	{pattern: regexp.MustCompile(`(^|[^A-Za-z0-9])(xox[baprs]-[A-Za-z0-9-]{10,})`)},
@@ -102,7 +102,7 @@ var aiProviderReasons = []struct {
 }
 
 // Normalize extracts the stable cluster signature from one raw error value
-// (any decoded JSON) with first-match-wins rules in the reference's order.
+// (any decoded JSON) with first-match-wins rules in the contract's order.
 func Normalize(errValue any, ctx Context) Result {
 	nodeType := ctx.NodeType
 	if nodeType == "" {

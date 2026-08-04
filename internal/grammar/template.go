@@ -1,11 +1,11 @@
-// Template engine for node configs and tool inputs, ported from the
+// Template engine for node configs and tool inputs, implements the
 // reference: substitutes {{context.<nodeId>.output.<path>}},
 // {{context.input.<name>}}, {{inputs.<name>}}, {{secret.NAME}} and
 // {{env.NAME}}. Every resolved secret AND env value (length >= 4) lands in a
 // redaction list so callers can strip plaintext from outputs and errors
 // before persistence — the renderer itself never persists anything.
 //
-// Contract inherited from the reference:
+// Contract inherited from the contract:
 //   - a string that is exactly one {{...}} reference returns the resolved
 //     value's native type (arrays/objects/numbers survive);
 //   - multi-reference strings interpolate (objects as JSON, null as "");
@@ -147,7 +147,7 @@ func MapInput(mapping any, scope map[string]any) (any, error) {
 }
 
 // GetByPath walks a dotted path (numeric segments index arrays); any absent
-// link returns (nil, false), mirroring the reference's undefined.
+// link returns (nil, false), mirroring the contract's undefined.
 func GetByPath(source any, path string) (any, bool) {
 	current := source
 	for key := range strings.SplitSeq(path, ".") {
@@ -190,7 +190,7 @@ func renderValue(value any, scope map[string]any, state *renderState) (any, erro
 }
 
 func renderString(value string, scope map[string]any, state *renderState) (any, error) {
-	// Single-template-reference shape: the whole string is one {{...}}, so
+	// Single-template-contract shape: the whole string is one {{...}}, so
 	// the resolved value keeps its native type — without this, a templated
 	// array would degrade into its JSON string form.
 	if match := singleRefPattern.FindStringSubmatch(value); match != nil {

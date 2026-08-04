@@ -1,5 +1,5 @@
 // Org-wide event-driven trigger ingestion (reference
-// apps/api/src/routes/trigger-ingest-routes.ts): the normalized inbound
+// the API contract): the normalized inbound
 // seam for `email_received` — and the shared org-wide selector resolver
 // the other event triggers reuse. The relay/bucket-listener/subscriber
 // has already normalized the upstream event; these routes validate the
@@ -62,7 +62,7 @@ type resolvedTriggerNode struct {
 // resolveUniqueTriggerNode scans the latest version of every active
 // workflow in the org for trigger nodes of `triggerType` whose config
 // matches. Exactly one match resolves; zero and many are the caller's
-// 404/409. Mirrors the reference's resolveUniqueTriggerNode.
+// 404/409. Mirrors the contract's resolveUniqueTriggerNode.
 func resolveUniqueTriggerNode(
 	ctx context.Context, q *store.Queries, orgID, triggerType string,
 	match func(config map[string]any) bool,

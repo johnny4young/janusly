@@ -1,4 +1,4 @@
-// The `http.request` registered tool (reference packages/engine/src/
+// The `http.request` registered tool (reference the source contract
 // tools/http.ts): one guarded outbound HTTP call for tool nodes and the
 // agent planner. Invariant (AGENTS.md "HTTP/SSRF"): it MUST go through
 // FetchHTTPTarget — the pinned dialer prevents DNS rebinding; a direct

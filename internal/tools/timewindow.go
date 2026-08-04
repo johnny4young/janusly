@@ -1,5 +1,5 @@
 // time.window — the ONE zone-aware weekday/time-of-day decision primitive
-// (reference packages/engine/src/tools/time.ts). Zone resolution and
+// (reference the source contract). Zone resolution and
 // midnight-crossing matching come from internal/zonedwindow, shared with
 // the PagerDuty off-hours evaluator. The BIAS stays here: this tool
 // REJECTS malformed configuration (an unknown zone or unparseable window
@@ -30,12 +30,12 @@ type localWindow struct {
 }
 
 // parseEpochValue accepts an ISO-8601/RFC3339 string or a numeric epoch in
-// milliseconds — the reference's toEpochMs contract.
+// milliseconds — the contract's toEpochMs contract.
 func parseEpochValue(value any) (time.Time, error) {
 	switch typed := value.(type) {
 	case float64:
 		if math.IsNaN(typed) || math.IsInf(typed, 0) {
-			return time.Time{}, fmt.Errorf("Invalid date/time: %v", typed) //nolint:staticcheck // reference message is the wire contract
+			return time.Time{}, fmt.Errorf("Invalid date/time: %v", typed) //nolint:staticcheck // contract message is the wire contract
 		}
 		return time.UnixMilli(int64(typed)).UTC(), nil
 	case string:
@@ -44,9 +44,9 @@ func parseEpochValue(value any) (time.Time, error) {
 				return parsed, nil
 			}
 		}
-		return time.Time{}, fmt.Errorf("Invalid date/time: %s", typed) //nolint:staticcheck // reference message is the wire contract
+		return time.Time{}, fmt.Errorf("Invalid date/time: %s", typed) //nolint:staticcheck // contract message is the wire contract
 	default:
-		return time.Time{}, fmt.Errorf("Invalid date/time: %v", value) //nolint:staticcheck // reference message is the wire contract
+		return time.Time{}, fmt.Errorf("Invalid date/time: %v", value) //nolint:staticcheck // contract message is the wire contract
 	}
 }
 
@@ -124,7 +124,7 @@ func executeTimeWindow(_ context.Context, input map[string]any) (map[string]any,
 	// PagerDuty evaluator's.
 	clock, ok := zonedwindow.ZonedClock(at, timeZone)
 	if !ok {
-		return nil, fmt.Errorf("Invalid IANA time zone: %s", timeZone) //nolint:staticcheck // reference message is the wire contract
+		return nil, fmt.Errorf("Invalid IANA time zone: %s", timeZone) //nolint:staticcheck // contract message is the wire contract
 	}
 
 	var matched map[string]any
@@ -132,10 +132,10 @@ func executeTimeWindow(_ context.Context, input map[string]any) (map[string]any,
 		start, startOK := zonedwindow.ParseLocalMinute(window.start)
 		end, endOK := zonedwindow.ParseLocalMinute(window.end)
 		if !startOK || !endOK {
-			return nil, fmt.Errorf("Invalid window time (expected 24h HH:MM): %s-%s", window.start, window.end) //nolint:staticcheck // reference message is the wire contract
+			return nil, fmt.Errorf("Invalid window time (expected 24h HH:MM): %s-%s", window.start, window.end) //nolint:staticcheck // contract message is the wire contract
 		}
 		if start == end {
-			return nil, fmt.Errorf("Ambiguous window %s-%s: start and end must differ", window.start, window.end) //nolint:staticcheck // reference message is the wire contract
+			return nil, fmt.Errorf("Ambiguous window %s-%s: start and end must differ", window.start, window.end) //nolint:staticcheck // contract message is the wire contract
 		}
 		if matched == nil && zonedwindow.Contains(clock, window.days, start, end) {
 			daysAny := make([]any, 0, len(window.days))

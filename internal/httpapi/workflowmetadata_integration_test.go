@@ -57,7 +57,7 @@ func TestWorkflowMetadataAndOrganization(t *testing.T) {
 	if strings.Contains(auditMetadata, "SECRETO-NO-DEBE-AUDITARSE") || !strings.Contains(auditMetadata, `"configured": true`) {
 		t.Fatalf("audit must project AI guidance: %s", auditMetadata)
 	}
-	// The reference requires the wrapper; a direct shape must never silently
+	// The contract requires the wrapper; a direct shape must never silently
 	// replace the row with empty metadata.
 	res = h.call("POST", "/workflows/"+wfA+"/metadata", map[string]any{"description": "lost"}, "")
 	if res.status != 422 || res.body["code"] != "workflow_metadata_invalid" {
@@ -80,7 +80,7 @@ func TestWorkflowMetadataAndOrganization(t *testing.T) {
 
 	// The active list folds metadata and buffered work into each row, and its
 	// tag/folder filters apply before the cap. An abandoned backfill claim is
-	// visible after the same five-minute lease as the reference implementation.
+	// visible after the same five-minute lease as the contract implementation.
 	var versionID string
 	if err := pool.QueryRow(ctx,
 		`SELECT id FROM workflow_versions WHERE org_id = $1 AND workflow_id = $2 ORDER BY version DESC LIMIT 1`,

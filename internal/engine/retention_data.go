@@ -1,8 +1,8 @@
 // Per-org data retention over run_events / audit_logs / usage_events —
-// the reference's batched-purge shape: each table sweeps one org at a
+// the contract's batched-purge shape: each table sweeps one org at a
 // time with that org's catalog window, deleting in bounded batches
 // (subquery + LIMIT) so a huge backlog never holds a long transaction,
-// honoring per-row hold_until legal holds, and reporting the reference's
+// honoring per-row hold_until legal holds, and reporting the contract's
 // result shape {rowsDeleted, cutoffAt, runtimeMs, cappedByMaxBatches} —
 // a capped sweep means more rows remain and the next hourly fire
 // continues the drain.
@@ -25,7 +25,7 @@ const (
 	retentionMaxBatchesDefault = 1_000
 )
 
-// PurgeResult mirrors the reference's DeleteExpired*Result.
+// PurgeResult mirrors the contract's DeleteExpired*Result.
 type PurgeResult struct {
 	RowsDeleted        int    `json:"rowsDeleted"`
 	CutoffAt           string `json:"cutoffAt"`
@@ -62,7 +62,7 @@ var dataRetentionTables = []dataRetentionTable{
 }
 
 // ProcessDataRetentionSweep purges expired rows across every org and
-// table. batchSize/maxBatches <= 0 use the reference defaults; results
+// table. batchSize/maxBatches <= 0 use the contract defaults; results
 // come back keyed "<org>/<table>" for the caller's logging.
 func (e *Engine) ProcessDataRetentionSweep(ctx context.Context, batchSize, maxBatches int) (map[string]PurgeResult, error) {
 	if batchSize <= 0 {

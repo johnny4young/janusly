@@ -1,4 +1,4 @@
-// FetchHTTPTarget — the reference's fetchHttpTarget layering for Go: the
+// FetchHTTPTarget — the contract's fetchHttpTarget layering for Go: the
 // SAME SSRF validation, DNS-pinned dial, per-hop revalidation, origin
 // credential stripping, timeout, byte cap, and redirect bound as the
 // `http` node executor, but WITHOUT the non-2xx failure policy — callers
@@ -75,7 +75,7 @@ func FetchHTTPTarget(ctx context.Context, rawURL string, opts FetchOptions) (Fet
 				return http.ErrUseLastResponse
 			}
 			if len(via) > maxRedirects {
-				return fmt.Errorf("HTTP redirect limit exceeded; last hop %s -> %s", via[len(via)-1].URL, req.URL) //nolint:staticcheck // reference message is the wire contract
+				return fmt.Errorf("HTTP redirect limit exceeded; last hop %s -> %s", via[len(via)-1].URL, req.URL) //nolint:staticcheck // contract message is the wire contract
 			}
 			if _, err := executor.validate(req.Context(), req.URL.String(), pins); err != nil {
 				return err
@@ -104,7 +104,7 @@ func FetchHTTPTarget(ctx context.Context, rawURL string, opts FetchOptions) (Fet
 	res, err := client.Do(req)
 	if err != nil {
 		if ctx.Err() != nil || strings.Contains(err.Error(), "Client.Timeout") {
-			return FetchResult{}, fmt.Errorf("HTTP request timed out after %dms", timeoutMs) //nolint:staticcheck // reference message is the wire contract
+			return FetchResult{}, fmt.Errorf("HTTP request timed out after %dms", timeoutMs) //nolint:staticcheck // contract message is the wire contract
 		}
 		return FetchResult{}, err
 	}
@@ -115,7 +115,7 @@ func FetchHTTPTarget(ctx context.Context, rawURL string, opts FetchOptions) (Fet
 		return FetchResult{}, err
 	}
 	if len(bodyBytes) > maxBytes {
-		return FetchResult{}, fmt.Errorf("HTTP response exceeds maxResponseBytes after %d bytes (cap %d)", len(bodyBytes), maxBytes) //nolint:staticcheck // reference message is the wire contract
+		return FetchResult{}, fmt.Errorf("HTTP response exceeds maxResponseBytes after %d bytes (cap %d)", len(bodyBytes), maxBytes) //nolint:staticcheck // contract message is the wire contract
 	}
 	return FetchResult{
 		StatusCode:  res.StatusCode,

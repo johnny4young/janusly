@@ -20,7 +20,7 @@ import (
 	"github.com/johnny4young/janusly/internal/ratelimit"
 )
 
-// MCP writes carry the reference's per-tool org rate limit: bucket
+// MCP writes carry the contract's per-tool org rate limit: bucket
 // `mcp.<tool>`, 60/min. A saturated window turns the write into the
 // expected tool error with the limiter's verbatim message; reads and
 // other tools stay unaffected.

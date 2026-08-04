@@ -1,5 +1,5 @@
 // The `schedule` node's dispatch substrate (reference schedule.ts +
-// schedule-scheduler.ts + syncWorkflowSchedules). The pilot has no BullMQ
+// schedule-scheduler.ts + syncWorkflowSchedules). The runtime has no external queue service
 // job scheduler: each schedule_entries row carries its own `nextFireAt`
 // due clock (the replay-campaign pattern) and a leased sweep claims due
 // rows with FOR UPDATE SKIP LOCKED.

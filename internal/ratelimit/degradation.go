@@ -1,4 +1,4 @@
-// Rate-limiter degradation tracker, ported from the reference: fail-open
+// Rate-limiter degradation tracker, implements the contract: fail-open
 // keeps a store outage from cascading into 429s, but silence is an
 // observability gap — the tracker makes the blip visible WITHOUT touching
 // the fail-open posture. In-memory per-process state; the audit trail
@@ -6,7 +6,7 @@
 // events, so the dedup key deliberately OMITS the org — with a
 // belt-and-suspenders DB check so multi-replica deployments degrading
 // together still write ONE row. orgId uses the "system" sentinel. All
-// audit writes are best-effort: in the pilot the audited store IS the
+// audit writes are best-effort: in the runtime the audited store IS the
 // failing store, so during the outage itself the in-memory snapshot is
 // the surviving signal (the /health surface reads it).
 package ratelimit
@@ -27,14 +27,14 @@ import (
 func init() {
 	// Reference actions written by its untyped data-layer system writer —
 	// admitted here without counting against the typed-catalog pin.
-	audit.RegisterPilotAction("rate_limit.degraded")
-	audit.RegisterPilotAction("rate_limit.recovered")
+	audit.RegisterRuntimeAction("rate_limit.degraded")
+	audit.RegisterRuntimeAction("rate_limit.recovered")
 }
 
 // SystemOrgID is the sentinel org for infrastructure audit rows.
 const SystemOrgID = "system"
 
-// degradedBuckets is the process-wide gauge behind the reference's
+// degradedBuckets is the process-wide gauge behind the contract's
 // janusly_rate_limit_degraded_buckets metric: every tracker in the
 // process contributes its transitions symmetrically.
 var degradedBuckets atomic.Int64

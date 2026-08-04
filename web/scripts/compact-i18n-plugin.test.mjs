@@ -70,7 +70,7 @@ test('catalog values use a collision-safe packed projection', () => {
   )
 })
 
-test('compact catalog projection rejects parity drift and non-string values', () => {
+test('compact catalog projection rejects consistency drift and non-string values', () => {
   assert.throws(
     () => projectCompactCatalog(
       { 'app.title': 'Janusly' },

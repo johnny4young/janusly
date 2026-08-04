@@ -6,8 +6,8 @@ linters:
     - modernize
   exclusions:
     rules:
-      # The grammar package ports the reference evaluator's error messages
-      # verbatim — they are a wire/parity contract, capitalization included.
+      # The grammar package ports the contract evaluator's error messages
+      # verbatim — they are a wire/consistency contract, capitalization included.
       - path: internal/grammar/
         linters: [staticcheck]
         text: "ST1005"

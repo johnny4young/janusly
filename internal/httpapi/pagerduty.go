@@ -1,5 +1,5 @@
 // Provider-signed PagerDuty V3 trigger ingestion (reference
-// apps/api/src/routes/pagerduty-routes.ts + pagerduty-webhooks.ts).
+// the API contract + pagerduty-webhooks.ts).
 //
 // The callback path selects one saved workflow + node. It is NOT
 // authority: the exact raw body must verify against the node's
@@ -211,7 +211,7 @@ func (s *V1Server) pagerDutyCallbackHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	// The signature — not a session — is the authority; audits carry the
-	// system actor like the reference's system:pagerduty.
+	// system actor like the contract's system:pagerduty.
 	result := s.ingestTriggerEventCore(ctx, triggerIngestRequest{
 		orgID:        ownerState.OrgID,
 		authContext:  &auth.Context{OrgID: ownerState.OrgID, UserID: "system:pagerduty"},

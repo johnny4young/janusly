@@ -1,8 +1,8 @@
-// Role resolution, ported from the reference's permissions ladder
-// (apps/api/src/permissions.ts:resolveMemberRole): the org_members row's
+// Role resolution, implements the contract's permissions ladder
+// (the API contract:resolveMemberRole): the org_members row's
 // literal role wins; a non-built-in literal consults org_roles for rank
 // inheritance (that branch lands with the custom-roles ticket — until
-// then a custom literal fails closed, which is exactly the reference's
+// then a custom literal fails closed, which is exactly the contract's
 // posture for a deleted custom role still referenced by a member); and
 // ONLY dev-headers mode auto-grants admin when NO row exists — the local
 // development convenience that service-token and supabase never get.
@@ -76,7 +76,7 @@ func ResolveMemberRole(ctx context.Context, q *store.Queries, orgID, userID stri
 }
 
 // EffectivePermissions resolves the permission set for a role NAME in an
-// org, org_roles-aware per the reference's lookup:
+// org, org_roles-aware per the contract's lookup:
 //  1. An org_roles row with NON-NULL grantedPermissions is used verbatim
 //     — the override REPLACES the default set, it is not additive.
 //  2. No row (or null permissions): a built-in name falls back to the
@@ -115,7 +115,7 @@ func EffectivePermissions(ctx context.Context, q *store.Queries, orgID string, r
 		}
 		if !IsBuiltinRole(role.Name) && err == nil && (len(row.GrantedPermissions) == 0 || string(row.GrantedPermissions) == "null") {
 			// Custom role with a row but null permissions: integrity bug,
-			// fail closed per the reference.
+			// fail closed per the contract.
 			return map[string]bool{}, nil
 		}
 		return out, nil

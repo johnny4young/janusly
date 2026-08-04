@@ -36,7 +36,7 @@ export type CommonCatalog = typeof enCommon
 export type CatalogFragment = Record<string, string>
 export type CatalogNamespace = 'core' | 'workspace'
 
-/** Translation keys are validated by catalog parity and runtime fallback tests. */
+/** Translation keys are validated by catalog consistency and runtime fallback tests. */
 export type TranslationKey = string
 
 /** Interpolation/options accepted by the application translation chokepoint. */
@@ -45,7 +45,7 @@ export type TranslationOptions = Record<string, unknown>
 /**
  * Translation signature exposed to application code. Keeping the return value
  * concrete keeps call sites lightweight under TypeScript 7; catalog
- * completeness remains enforced by the parity/runtime test suite.
+ * completeness remains enforced by the consistency/runtime test suite.
  */
 export type Translate = (key: TranslationKey, options?: TranslationOptions) => string
 

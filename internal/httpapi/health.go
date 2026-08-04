@@ -1,4 +1,4 @@
-// Two-tier infrastructure health, ported from the reference's health
+// Two-tier infrastructure health, implements the contract's health
 // routes: the open GET /health carries only public-safe blocks (the
 // limiter tracker's truncated snapshot and a coarse queue {degraded} —
 // never live counts or latency on an unauthenticated route), while the
@@ -28,7 +28,7 @@ const (
 	queueSnapshotTimeout                  = 2 * time.Second
 )
 
-// queueSnapshot is the reference's QueueHealthSnapshot.
+// queueSnapshot is the contract's QueueHealthSnapshot.
 type queueSnapshot struct {
 	Waiting              int  `json:"waiting"`
 	Active               int  `json:"active"`

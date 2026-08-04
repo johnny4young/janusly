@@ -10,7 +10,7 @@ import (
 	"github.com/johnny4young/janusly/internal/tools"
 )
 
-// POST /validate parity: the reference's {valid, issues} shape with the
+// POST /validate consistency: the contract's {valid, issues} shape with the
 // shared issue codes, accepting flat or {workflow}-enveloped bodies —
 // and GET /tools never leaks the planner-only jsonSchema projection.
 func TestValidateRouteAndPlannerProjection(t *testing.T) {
@@ -50,7 +50,7 @@ func TestValidateRouteAndPlannerProjection(t *testing.T) {
 	}
 
 	// 3. Broken edge target → edge_invalid_to; declared-input default type
-	// mismatch → input_default_type_mismatch. Code-level parity with Node.
+	// mismatch → input_default_type_mismatch. Code-level consistency with Node.
 	res = h.call("POST", "/validate", map[string]any{
 		"id": "wf-roto", "name": "Roto", "dslVersion": "1.0",
 		"inputs": map[string]any{"type": "object", "properties": map[string]any{
@@ -61,11 +61,11 @@ func TestValidateRouteAndPlannerProjection(t *testing.T) {
 	}, "")
 	codes := strings.Join(issueCodes(res), ",")
 	if !strings.Contains(codes, "edge_invalid_to") || !strings.Contains(codes, "input_default_type_mismatch") {
-		t.Fatalf("code parity: %s", codes)
+		t.Fatalf("code consistency: %s", codes)
 	}
 
-	// 4. /validate reports the FULL issue list — no pilot carve-out here
-	// (an unsupported-for-pilot node type still surfaces; subworkflow and
+	// 4. /validate reports the FULL issue list — no runtime carve-out here
+	// (an unsupported-for-runtime node type still surfaces; subworkflow and
 	// schedule are executable, so `agent_reflection`
 	// carries the carve-out now).
 	res = h.call("POST", "/validate", map[string]any{
@@ -73,8 +73,8 @@ func TestValidateRouteAndPlannerProjection(t *testing.T) {
 		"nodes": []any{map[string]any{"id": "c", "type": "agent_reflection", "config": map[string]any{}}},
 		"edges": []any{},
 	}, "")
-	if !strings.Contains(strings.Join(issueCodes(res), ","), "node_type_unsupported_pilot") {
-		t.Fatalf("pilot carve-out must NOT hide issues on /validate: %+v", res.body)
+	if !strings.Contains(strings.Join(issueCodes(res), ","), "node_type_not_executable") {
+		t.Fatalf("runtime carve-out must NOT hide issues on /validate: %+v", res.body)
 	}
 
 	// 5. Invalid subworkflow authoring stays in the draft so this shared gate
@@ -90,7 +90,7 @@ func TestValidateRouteAndPlannerProjection(t *testing.T) {
 	res = h.call("POST", "/validate", invalidSubworkflow, "")
 	if res.status != 200 || res.body["valid"] != false ||
 		!strings.Contains(strings.Join(issueCodes(res), ","), "subworkflow_invalid_version") {
-		t.Fatalf("subworkflow validation parity: %d %+v", res.status, res.body)
+		t.Fatalf("subworkflow validation consistency: %d %+v", res.status, res.body)
 	}
 	res = h.call("POST", "/workflows/save", invalidSubworkflow, "")
 	if res.status != 400 || res.body["code"] != "workflows_validation_failed" {

@@ -29,7 +29,7 @@ func testPool(t *testing.T) *pgxpool.Pool {
 }
 
 // Fixed-window semantics over Postgres: under-limit passes, over-limit
-// carries the reference's verbatim message, the next window resets, and
+// carries the contract's verbatim message, the next window resets, and
 // buckets/keys are independent.
 func TestEnforceFixedWindow(t *testing.T) {
 	pool := testPool(t)
@@ -152,7 +152,7 @@ func TestDegradationAuditsOncePerBucketDay(t *testing.T) {
 		t.Fatal("recovered tracker must report healthy")
 	}
 
-	// The degraded row's metadata matches the reference shape (no actor).
+	// The degraded row's metadata matches the contract shape (no actor).
 	var raw string
 	_ = pool.QueryRow(ctx, `SELECT metadata::text FROM audit_logs
 		WHERE org_id = 'system' AND action = 'rate_limit.degraded'

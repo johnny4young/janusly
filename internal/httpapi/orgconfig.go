@@ -1,4 +1,4 @@
-// Org-config surface over the closed catalog, ported from the reference's
+// Org-config surface over the closed catalog, implements the contract's
 // org routes: GET lists every definition with its layered effective value
 // (tenant row → env override → catalog default, with provenance), POST
 // validates one (key, value) through the catalog pipeline — unknown keys,
@@ -96,7 +96,7 @@ func (s *V1Server) updateOrgConfigCore(r *http.Request, rc v1Request) opResult {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
 	}
 	// ai.operatorGuidance summarizes instead of echoing operator prose into
-	// the trail, like the reference.
+	// the trail, like the contract.
 	metadata := map[string]any{"key": def.Key, "value": normalized}
 	if def.Key == "ai.operatorGuidance" {
 		text, _ := normalized.(string)
@@ -128,9 +128,9 @@ func (s *V1Server) updateOrgConfigCore(r *http.Request, rc v1Request) opResult {
 		time.Now().UTC().Format(time.RFC3339Nano)))
 }
 
-// orgConfigEntryView is the reference's full config-row projection, shared
+// orgConfigEntryView is the contract's full config-row projection, shared
 // by the list read and the write echo (allowEmpty/fractional emitted only
-// when true, matching the reference's omit-false serialization).
+// when true, matching the contract's omit-false serialization).
 func orgConfigEntryView(def orgconfig.Definition, orgID string, value any, source string, updatedAt any) map[string]any {
 	view := map[string]any{
 		"key": def.Key, "category": def.Category, "description": def.Description,

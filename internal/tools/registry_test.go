@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// Cases port packages/engine/src/tools/json.ts semantics, including the
+// Cases port the source contract semantics, including the
 // prototype-pollution guards.
 
 func execute(t *testing.T, name string, input map[string]any) (map[string]any, error) {
@@ -27,7 +27,7 @@ func TestJSONParseRoundTripsAndRejectsGarbage(t *testing.T) {
 	}
 	if _, err := execute(t, "json.parse", map[string]any{"value": "{broken"}); err == nil ||
 		err.Error() != "json.parse received invalid JSON" {
-		t.Fatalf("invalid JSON message parity: %v", err)
+		t.Fatalf("invalid JSON message consistency: %v", err)
 	}
 }
 
@@ -84,7 +84,7 @@ func TestJSONMergeIsDeepAndArrayReplacing(t *testing.T) {
 func TestRegistryValidationAndCatalog(t *testing.T) {
 	if _, err := execute(t, "json.set", map[string]any{"path": "x"}); err == nil ||
 		!strings.Contains(err.Error(), "Invalid tool input for json.set") {
-		t.Fatalf("missing required field must fail with the reference shape: %v", err)
+		t.Fatalf("missing required field must fail with the contract shape: %v", err)
 	}
 	if _, err := execute(t, "ghost.tool", map[string]any{}); err == nil ||
 		err.Error() != "Unknown tool: ghost.tool" {
@@ -120,6 +120,6 @@ func TestRegistryValidationAndCatalog(t *testing.T) {
 	}
 	encoded, _ := json.Marshal(github["inputFields"])
 	if !strings.Contains(string(encoded), `"kind":"string"`) || strings.Contains(string(encoded), `"type":`) {
-		t.Fatalf("inputFields must use the reference kind wire: %s", encoded)
+		t.Fatalf("inputFields must use the contract kind wire: %s", encoded)
 	}
 }

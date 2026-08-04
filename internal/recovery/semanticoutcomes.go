@@ -1,4 +1,4 @@
-// Deterministic semantic-outcome evaluation, ported from the reference's
+// Deterministic semantic-outcome evaluation, implements the contract's
 // semantic-outcomes.ts. Pure: operator-authored expression detectors run
 // through the SAME grammar the edge conditions use, schema detectors run
 // through the shared JSON-value schema subset — no persistence, no

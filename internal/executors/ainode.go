@@ -1,4 +1,4 @@
-// The `ai` node executor, ported from the reference's node registry: the
+// The `ai` node executor, implements the contract's node registry: the
 // prompt comes from the rendered config (or a PromptOps promptRef, which
 // resolves BEFORE any token spend), the call goes through the chokepoint,
 // and the output shape is stable — {mode:"ai", response, model, usage,
@@ -166,7 +166,7 @@ func executeAiNode(ctx context.Context, in Input) (any, error) {
 		output["providerSimulated"] = true
 	}
 	if hasOutputSchema {
-		// Output contract: the text must parse as JSON. (The reference's
+		// Output contract: the text must parse as JSON. (The contract's
 		// full schema-subset validation lands with its surface; parse-level
 		// checking preserves the valid/data wire.)
 		if data, ok := ai.ParseJSONValue(result.Text); ok {
@@ -187,7 +187,7 @@ func executeAiNode(ctx context.Context, in Input) (any, error) {
 	return output, nil
 }
 
-// fallbackAiResponse ports the reference's deterministic fallback text.
+// fallbackAiResponse ports the contract's deterministic fallback text.
 func fallbackAiResponse(prompt string, context map[string]any) string {
 	keys := contextKeys(context)
 	contextLine := "No prior node context was available."

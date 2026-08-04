@@ -1,6 +1,6 @@
-// Tenant-resolved AI configuration — the pilot's analogue of the
-// reference's ai-runtime tenant client construction. internal/ai stays
-// DB-agnostic (like packages/ai); THIS package reads the org-config
+// Tenant-resolved AI configuration — the runtime's analogue of the
+// contract's ai-runtime tenant client construction. internal/ai stays
+// DB-agnostic (like the source contract); THIS package reads the org-config
 // catalog's tenant row → env → default chain and builds
 // the chokepoint client plus the per-surface settings every AI route and
 // executor shares. The API key comes from env ONLY — the catalog never
@@ -43,8 +43,8 @@ func Resolve(ctx context.Context, db orgconfig.Querier, orgID string) (ai.Client
 		MaxRetries:      int(orgconfig.LoadNumber(ctx, db, orgID, "ai.maxRetries")),
 		MaxOutputTokens: int(orgconfig.LoadNumber(ctx, db, orgID, "ai.maxOutputUnits")),
 	}
-	// The pilot's supported completion posture is Anthropic-only (the
-	// reference's operating posture too). A tenant configured onto another
+	// The runtime's supported completion posture is Anthropic-only (the
+	// contract's operating posture too). A tenant configured onto another
 	// provider gets an unconfigured client — every call degrades to the
 	// fallback contract instead of silently routing to Anthropic.
 	if provider == "anthropic" {
@@ -68,7 +68,7 @@ func TruncatePrompt(prompt string, maxChars int) (string, bool) {
 	return prompt[:cut], true
 }
 
-// simulatorBaseURL honours the reference's DOUBLE explicit gate: only
+// simulatorBaseURL honours the contract's DOUBLE explicit gate: only
 // JANUSLY_LOCAL_STACK=true AND JANUSLY_LOCAL_INTEGRATION_SIMULATOR=true
 // enable a simulated provider endpoint, and only when anthropic is in
 // the simulated list. Simulated usage persists but never bills.

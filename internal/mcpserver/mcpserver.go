@@ -1,7 +1,7 @@
-// The pilot's MCP surface: a thin in-process layer over the engine — no
+// The runtime's MCP surface: a thin in-process layer over the engine — no
 // HTTP hop — exposing the operator loop to agents. Results return as JSON
 // text plus structuredContent; EXPECTED failures (conflicts, not-found,
-// validation) come back as isError tool results, matching the reference
+// validation) come back as isError tool results, matching the contract
 // MCP server's posture, while transport/programming errors propagate.
 package mcpserver
 
@@ -37,24 +37,24 @@ type Deps struct {
 	OrgID  string
 	UserID string
 	NewID  func() string
-	// Limiter bounds MCP writes per the reference's guardMcpWrite: bucket
+	// Limiter bounds MCP writes per the contract's guardMcpWrite: bucket
 	// `mcp.<actionKey>`, org key, 60/min. Nil skips the check (tests).
 	Limiter *ratelimit.Limiter
 }
 
 // auditContext derives the audit identity for MCP-originated writes: the
-// reference's MCP proxy reaches the API with the service token and the mcp
+// contract's MCP proxy reaches the API with the service token and the mcp
 // source tag, which is exactly what the audit trail must show.
 func (d Deps) auditContext() *auth.Context {
 	return &auth.Context{OrgID: d.OrgID, UserID: d.UserID,
 		Mode: auth.ModeServiceToken, Source: auth.SourceMcp}
 }
 
-// NewServer builds the MCP server with the pilot's eight tools registered.
+// NewServer builds the MCP server with the runtime's eight tools registered.
 func NewServer(deps Deps) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "janusly",
-		Title:   "Janusly (Go pilot)",
+		Title:   "Janusly",
 		Version: "0.1.0",
 	}, nil)
 
@@ -180,7 +180,7 @@ func (d Deps) saveWorkflow(ctx context.Context, raw json.RawMessage) (*mcp.CallT
 	result := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation)
 	var blocking []domain.Issue
 	for _, issue := range result.Issues {
-		if issue.Code != domain.CodeNodeTypeUnsupportedPilot {
+		if issue.Code != domain.CodeNodeTypeNotExecutable {
 			blocking = append(blocking, issue)
 		}
 	}
@@ -502,13 +502,13 @@ func createdAtISO(at *time.Time) string {
 	return at.UTC().Format(time.RFC3339Nano)
 }
 
-// guardWrite is the two-flag write consent, ported from the reference's
+// guardWrite is the two-flag write consent, implements the contract's
 // guardMcpWrite: process-wide env opt-in AND the tenant's org-config
 // consent row must BOTH be true before any MCP write tool acts. Denials
-// return the reference's verbatim messages as expected (isError) results
-// — the pilot's MCP is in-process, so the reference's HTTP 403 surfaces
+// return the contract's verbatim messages as expected (isError) results
+// — the runtime's MCP is in-process, so the contract's HTTP 403 surfaces
 // as a tool error instead. The per-action rate limit mirrors the
-// reference's guardMcpWrite: bucket `mcp.<actionKey>`, org key, 60/min.
+// contract's guardMcpWrite: bucket `mcp.<actionKey>`, org key, 60/min.
 func (d Deps) guardWrite(ctx context.Context, actionKey string) (bool, string) {
 	if os.Getenv("JANUSLY_MCP_WRITES_ENABLED") != "true" {
 		return false, "MCP writes are disabled at the process level (JANUSLY_MCP_WRITES_ENABLED is not 'true')."

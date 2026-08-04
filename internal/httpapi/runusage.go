@@ -1,9 +1,9 @@
-// GET /run/usage — the per-run usage summary, ported from the reference:
+// GET /run/usage — the per-run usage summary, implements the contract:
 // tenancy first (an unknown or cross-org run is 403 Forbidden), then the
 // newest bounded slice of the run's usage_events aggregated into the
 // operator-safe shape {loadedRows, truncated, rowCap, llm{...},
 // memory{...}}. The aggregation tolerates malformed metadata the same
-// way the reference does — non-numeric fields simply don't count.
+// way the contract does — non-numeric fields simply don't count.
 package httpapi
 
 import (
@@ -18,7 +18,7 @@ import (
 	"github.com/johnny4young/janusly/internal/store"
 )
 
-// runUsageRowCap mirrors the reference's RUN_USAGE_ROW_CAP.
+// runUsageRowCap mirrors the contract's RUN_USAGE_ROW_CAP.
 const runUsageRowCap = 10_000
 
 type runMemoryKind struct {

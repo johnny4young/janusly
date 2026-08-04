@@ -1,6 +1,6 @@
-// Webhook trigger ingestion. The reference route
+// Webhook trigger ingestion. The contract route
 // POST /triggers/webhook/ingest resolves one unique active workflow across
-// the organization by endpoint key. The earlier pilot-specific
+// the organization by endpoint key. The earlier runtime-specific
 // POST /v1/webhooks/{workflowId} stays as a compatibility route, but both
 // enter the same normalized payload validation, trigger_events replay anchor
 // persisted BEFORE the run, (org, dedupe_key) idempotency, buffer-on-pause
@@ -37,7 +37,7 @@ import (
 	"github.com/johnny4young/janusly/internal/store"
 )
 
-// webhookIngestMaxBytes mirrors the reference's trigger-ingest JSON cap.
+// webhookIngestMaxBytes mirrors the contract's trigger-ingest JSON cap.
 const webhookIngestMaxBytes = 1 << 20
 
 type webhookIngestBody struct {
@@ -57,7 +57,7 @@ type triggerIngestRequest struct {
 	triggerType  string
 	eventPayload map[string]any
 	// dedupeKey "" means NO idempotency key: every delivery persists a new
-	// event (the upstream is the de-dup point — the reference's mcp case).
+	// event (the upstream is the de-dup point — the contract's mcp case).
 	dedupeKey string
 	// eventID overrides the generated trigger-event id — the email seam
 	// derives it BEFORE insert so attachment object keys line up with the
@@ -317,7 +317,7 @@ func (s *V1Server) ingestTriggerEventCore(ctx context.Context, in triggerIngestR
 
 	// Per-trigger storm guard (Node's step order: received → guard →
 	// buffer). Over-limit records the event as skipped and answers 429
-	// with the reference's exact body.
+	// with the contract's exact body.
 	var nodeConfig map[string]any
 	for _, node := range wf.Nodes {
 		if node.ID == nodeID {
@@ -446,8 +446,8 @@ func matchWebhookNode(wf *domain.Workflow, endpointKey string, noMatch opResult)
 }
 
 // runsRedriveCore adapts the web's POST /runs/redrive {runId, nodeId} to
-// the pilot's revive-in-place redrive: resolve the node's open dead letter
-// and claim it. The reference spawns a replay continuation run; the pilot
+// the runtime's revive-in-place redrive: resolve the node's open dead letter
+// and claim it. The contract spawns a replay continuation run; the runtime
 // revives the SAME run, so the returned runId equals the input and the web
 // simply reopens it.
 func (s *V1Server) runsRedriveCore(r *http.Request, rc v1Request) opResult {

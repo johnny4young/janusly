@@ -1,4 +1,4 @@
-// Evidence-gated Recovery Playbooks, ported from the reference's
+// Evidence-gated Recovery Playbooks, implements the contract's
 // recoveryPlaybooksRepo + the /dlq claim verifier: a playbook is a
 // MANUALLY drafted, manually activated, exact-match (workflow + failure
 // signature) recipe whose authority is always re-earned — every use runs
@@ -179,7 +179,7 @@ func deadLetterSignatureFromParts(nodeID string, nodeJSON, errorJSON []byte) str
 	}).Signature
 }
 
-// VerifyPlaybookReplayClaim ports the reference's full evidence chain: an
+// VerifyPlaybookReplayClaim ports the contract's full evidence chain: an
 // ACTIVE exact-match playbook + a FRESH succeeded validation run of this
 // dead letter's run, carrying this playbook, whose validated workflow is
 // byte-identical to the workflow the replay will run.
@@ -219,7 +219,7 @@ func (e *Engine) VerifyPlaybookReplayClaim(
 	return WorkflowsEqual(validated, workflow)
 }
 
-// workflowsEqual is the pilot's totalChanges==0 equivalent: canonical
+// workflowsEqual is the runtime's totalChanges==0 equivalent: canonical
 // re-marshal of both parsed documents and byte comparison.
 func WorkflowsEqual(a, b *domain.Workflow) bool {
 	rawA, errA := json.Marshal(a)

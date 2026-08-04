@@ -1,7 +1,7 @@
-// The MCP client chokepoint for `mcp_tool` workflow nodes, ported from
-// the reference's mcp-tool-executor: one Execute that takes
+// The MCP client chokepoint for `mcp_tool` workflow nodes, implements
+// the contract's mcp-tool-executor: one Execute that takes
 // {connectionAlias, toolName, input} and produces the typed envelope the
-// node executor consumes. The defense ladder runs in the reference's
+// node executor consumes. The defense ladder runs in the contract's
 // order — org scope, connection enabled/active, descriptor found/enabled,
 // input-schema validation, dry-run write-skip, two-flag write consent,
 // env-ref resolution (generic error, CRLF reject), per-tool rate limit
@@ -11,9 +11,9 @@
 // Transports:
 //   - stdio spawns a child with a strict env whitelist ({PATH} + resolved
 //     env refs), a fresh temp working dir, a command allowlist, a lifetime
-//     watchdog, and a redacted capped stderr capture — the reference's
+//     watchdog, and a redacted capped stderr capture — the contract's
 //     sandbox defenses.
-//   - sse / http validate the URL under the pilot's SSRF policy BEFORE
+//   - sse / http validate the URL under the runtime's SSRF policy BEFORE
 //     construction and hand the SDK an *http.Client whose dialer connects
 //     ONLY to the pinned validated address, so DNS rebinding cannot
 //     redirect a fetch or redirect to a private target. Resolved env refs
@@ -301,7 +301,7 @@ func (c *Client) dialSession(
 		return nil, nil, fmt.Errorf("unsupported mcp transport: %s", connection.Transport)
 	}
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "janusly-pilot", Version: "0.1.0"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "janusly", Version: "0.1.0"}, nil)
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
 		return nil, sandbox, err
@@ -341,7 +341,7 @@ func lookupEnvRef(name string) (string, string) {
 
 // headerInjector adds the resolved env-ref values as request headers on
 // every outbound SDK request (key = header name), mirroring the
-// reference's URL-transport credential flow.
+// contract's URL-transport credential flow.
 type headerInjector struct {
 	next    http.RoundTripper
 	headers map[string]string
@@ -568,7 +568,7 @@ func textOfContent(result *mcp.CallToolResult) string {
 	return ""
 }
 
-// validateToolInput ports the reference's JSON-Schema-subset validation:
+// validateToolInput ports the contract's JSON-Schema-subset validation:
 // object-type check, required fields, per-property primitive types, and
 // additionalProperties:false unknown-field rejection.
 func validateToolInput(schema map[string]any, value map[string]any) string {

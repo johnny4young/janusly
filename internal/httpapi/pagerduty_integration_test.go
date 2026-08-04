@@ -155,7 +155,7 @@ func TestPagerDutySignedV3Flow(t *testing.T) {
 			map[string]any{"from": "evaluate_policy", "to": "ignored_evidence",
 				"condition": "context.evaluate_policy.output.result.shouldAct === false"},
 			// Skip does NOT cascade through unconditioned edges (same
-			// readiness semantics as the reference runtime), so the whole
+			// readiness semantics as the contract runtime), so the whole
 			// mutation chain carries the policy condition.
 			map[string]any{"from": "acknowledge_incident", "to": "snooze_incident",
 				"condition": "context.evaluate_policy.output.result.shouldAct === true"},

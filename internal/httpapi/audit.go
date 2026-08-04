@@ -1,10 +1,10 @@
-// Audit-trail read surface, ported from the reference's audit routes: one
+// Audit-trail read surface, implements the contract's audit routes: one
 // keyset page of the org's audit rows, newest-first, with an optional
 // `action` PREFIX filter (so `org.scim` surfaces every SCIM action) and
 // `(createdAt, id)` DESC cursor pagination so an operator can page back
 // through history, not just the latest window. Admin-gated in the route
 // registry — the org-wide trail is a compliance surface. The wire is the
-// reference's raw page: {rows, nextCursor, hasMore}.
+// contract's raw page: {rows, nextCursor, hasMore}.
 package httpapi
 
 import (
@@ -31,7 +31,7 @@ func (s *V1Server) auditTrail(w http.ResponseWriter, r *http.Request, rc v1Reque
 	}
 	action := query.Get("action")
 	// An absent or malformed cursor reads from the top of the trail, like
-	// the reference's null-on-invalid cursor parser.
+	// the contract's null-on-invalid cursor parser.
 	beforeCreatedAt := timeFarFuture()
 	beforeID := "￿"
 	if cursor := query.Get("cursor"); cursor != "" {

@@ -1,10 +1,10 @@
 // POST /ai/patch-workflow — the Recovery dialog's AI patch, ported in the
-// pilot's cut of the reference route: budget gate → "ai" rate bucket →
+// runtime's cut of the contract route: budget gate → "ai" rate bucket →
 // tenant-scoped DLQ + run + bounded recent events as context → per-type
 // envelope (config patch) with the STRUCTURAL envelope dispatched when the
 // failing node is a write-side http/mcp_tool with no approval ancestor →
 // free-JSON suggestions → each one APPLIED and validated through the real
-// domain gate (an invalid patch never reaches the wire) → the reference
+// domain gate (an invalid patch never reaches the wire) → the contract
 // response shape with 0-2 scrubbed consideredAlternatives kept INSIDE the
 // suggestion, never in the deterministic evidence block. Every failure
 // degrades to the full-shape deterministic fallback (the original
@@ -181,7 +181,7 @@ func (s *V1Server) patchWorkflowCore(r *http.Request, rc v1Request) opResult {
 			"workflow": mergedDoc, "rationale": stringField(item, "rationale"),
 			"approachLabel": stringField(item, "approachLabel"),
 			"confidence":    confidence,
-			// Calibration disabled in the pilot: calibrated mirrors raw.
+			// Calibration disabled in the runtime: calibrated mirrors raw.
 			"calibratedConfidence":   confidence,
 			"safety":                 domain.ComputeSuggestionSafety(merged, dlq.NodeID),
 			"consideredAlternatives": sanitizeConsideredAlternatives(item["consideredAlternatives"]),

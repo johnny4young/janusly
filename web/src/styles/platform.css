@@ -258,7 +258,7 @@
     display: none;
   }
 
-  .copilot-hero {
+  .ai-studio-hero {
     display: grid;
   }
 
@@ -467,8 +467,8 @@
     width: auto;
   }
 
-  .copilot-actions .command-button,
-  .copilot-secondary-actions .command-button {
+  .ai-studio-actions .command-button,
+  .ai-studio-secondary-actions .command-button {
     flex-basis: 100%;
   }
 }
@@ -7899,7 +7899,7 @@ button.we-recovery-heatmap__cell:focus-visible {
 
 /* AI Studio CTA cost chip --------------------------------------------- */
 
-.copilot-cost-chip {
+.ai-studio-cost-chip {
   margin-left: auto;
   padding: 2px 8px;
   border-radius: var(--we-radius-pill);
@@ -7911,7 +7911,7 @@ button.we-recovery-heatmap__cell:focus-visible {
   letter-spacing: 0.02em;
 }
 
-.command-button-primary .copilot-cost-chip {
+.command-button-primary .ai-studio-cost-chip {
   background: color-mix(in srgb, var(--we-surface-1) 24%, transparent);
   color: var(--we-surface-1);
 }

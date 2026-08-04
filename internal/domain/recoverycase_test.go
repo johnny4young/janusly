@@ -30,9 +30,9 @@ func TestRecoveryCaseLadder(t *testing.T) {
 		t.Fatal("skipping the ladder must be illegal")
 	}
 	// Every open state can bail to accepted_loss or abandoned — except
-	// publishing, which only abandons (the reference's exact map).
+	// publishing, which only abandons (the contract's exact map).
 	if IsLegalRecoveryCaseTransition("publishing", "accepted_loss") {
-		t.Fatal("publishing cannot accept loss in the reference map")
+		t.Fatal("publishing cannot accept loss in the contract map")
 	}
 	if !IsLegalRecoveryCaseTransition("publishing", "abandoned") {
 		t.Fatal("publishing must be abandonable")

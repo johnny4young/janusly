@@ -1,5 +1,5 @@
-// Declared-default resolution, ported from applyInputDefaults in
-// packages/engine/src/inputs-validator.ts. The JavaScript undefined/null
+// Declared-default resolution, implements applyInputDefaults in
+// the source contract The JavaScript undefined/null
 // distinction maps to (value, present): an absent field takes its default,
 // while explicit null and false are supplied values and always win.
 package domain
@@ -43,8 +43,8 @@ func applyDefaults(schema *InputSchema, value any, present bool) (any, bool) {
 	if baseMap, ok := base.(map[string]any); ok {
 		maps.Copy(filled, baseMap)
 	}
-	// Sorted for determinism; the reference iterates declaration order, and
-	// the parity harness compares results, not fill order. Prototype-shaped
+	// Sorted for determinism; the contract iterates declaration order, and
+	// the consistency harness compares results, not fill order. Prototype-shaped
 	// keys like __proto__ are plain map data in Go — the hardening the
 	// reference needs against Object.prototype comes for free here.
 	for _, key := range sortedKeys(schema.Properties) {

@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// Grammar cases ported from the reference's csv tests: quotes, escapes,
+// Grammar cases implements the contract's csv tests: quotes, escapes,
 // embedded newlines, CRLF, BOM, trailing rows.
 func TestParseCsvGrammar(t *testing.T) {
 	rows := ParseCsv("a,b\n1,\"x,y\"\n2,\"say \"\"hi\"\"\"", true).([]any)
@@ -64,7 +64,7 @@ func TestStringifyRoundTripAndValidation(t *testing.T) {
 	}
 
 	registry := NewRegistry()
-	// Object rows without header → the reference's refinement error.
+	// Object rows without header → the contract's refinement error.
 	_, err := registry.Execute(context.Background(), "csv.stringify",
 		map[string]any{"rows": []any{map[string]any{"a": "1"}}})
 	if err == nil || !strings.Contains(err.Error(), "header is required when rows are objects") {

@@ -1,9 +1,9 @@
-// LLM usage telemetry substrate, ported from the reference's
+// LLM usage telemetry substrate, implements the contract's
 // usage-recorder seam + usage repo: a process-global Recorder registered
 // at boot (the setUsageRecorder equivalent) that the future LLM client
 // fires once per attempt — success AND fallback. Recorder failures are
 // caught and dropped: telemetry must never break the call it measures.
-// The DB writer emits the reference's exact row: metric "llm.completion",
+// The DB writer emits the contract's exact row: metric "llm.completion",
 // quantity = totalTokens, and the metadata block with explicit nulls so
 // downstream aggregation reads one stable shape.
 package usage
@@ -22,7 +22,7 @@ import (
 )
 
 // Record is the wire contract between the LLM client (producer) and the
-// data layer (writer) — the reference's UsageRecord.
+// data layer (writer) — the contract's UsageRecord.
 type Record struct {
 	OrgID      string
 	UserID     string
@@ -86,7 +86,7 @@ func Fire(ctx context.Context, record Record) {
 }
 
 // NewDBRecorder builds the production writer over the shared pool — the
-// reference's recordUsage. Registered at api/worker boot via SetRecorder.
+// contract's recordUsage. Registered at api/worker boot via SetRecorder.
 func NewDBRecorder(pool *pgxpool.Pool) Recorder {
 	return func(ctx context.Context, record Record) error {
 		quantity := 0

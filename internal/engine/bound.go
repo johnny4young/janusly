@@ -10,7 +10,7 @@ import (
 	"github.com/johnny4young/janusly/internal/grammar"
 )
 
-// Caps mirror the reference: node output state at 1 MB, the succeeded
+// Caps mirror the contract: node output state at 1 MB, the succeeded
 // event inlines the output only up to 8 KB, dead-letter errors at 64 KB,
 // and everything else uses the chokepoint default (256 KB, env
 // JANUSLY_PERSIST_MAX_BYTES).

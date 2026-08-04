@@ -1,8 +1,8 @@
-// Package domain models the workflow document and ports the Node backend's
+// Package domain models the workflow document and ports the Janusly API's
 // validation semantics: same issue codes, same messages, same check order,
 // so a document rejected by one backend is rejected identically by the other.
-// The porting source is packages/engine/src/workflow-validation.ts and
-// packages/shared/src/workflow.ts at the parity pin.
+// The porting source is the source contract and
+// the source contract at the consistency pin.
 package domain
 
 import (
@@ -29,7 +29,7 @@ type Edge struct {
 }
 
 // Workflow is the parsed document. Unknown top-level fields are ignored on
-// parse, matching the reference schema's strip behavior.
+// parse, matching the contract schema's strip behavior.
 type Workflow struct {
 	DSLVersion     string            `json:"dslVersion"`
 	ID             string            `json:"id,omitempty"`
@@ -74,9 +74,9 @@ type rawEdge struct {
 
 // Parse decodes and contract-checks a workflow document. Contract violations
 // come back as `invalid_contract` issues carrying the field path — the same
-// code the reference emits when its schema parse fails — and no workflow is
-// returned alongside them. Message wording differs from the reference's
-// schema library; code and path parity is the contract.
+// code the contract emits when its schema parse fails — and no workflow is
+// returned alongside them. Message wording differs from the contract's
+// schema library; code and path consistency is the contract.
 func Parse(raw []byte) (*Workflow, []Issue) {
 	var doc rawWorkflow
 	if err := json.Unmarshal(raw, &doc); err != nil {
@@ -112,7 +112,7 @@ func Parse(raw []byte) (*Workflow, []Issue) {
 	}
 	if doc.Recovery != nil {
 		wf.Recovery = doc.Recovery
-		// The versioned contract validates at parse time — the reference
+		// The versioned contract validates at parse time — the contract
 		// rejects an invalid contract in WorkflowSchema.parse, so the same
 		// document fails here with path-prefixed invalid_contract issues.
 		for _, problem := range ValidateRecoveryContract(doc.Recovery.Contract) {

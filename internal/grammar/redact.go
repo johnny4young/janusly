@@ -1,4 +1,4 @@
-// Value-based redaction, ported from the shared safe-persist helper: every
+// Value-based redaction, implements the shared safe-persist helper: every
 // occurrence of a tracked secret/env literal inside a value tree is replaced
 // before persistence. Callers pass the redaction list collected by
 // RenderTemplateWithRedactions.
@@ -82,8 +82,8 @@ func RedactString(s string, redactedValues []string) string {
 	return s
 }
 
-// sensitiveKeyPattern is the reference's closed list of secret-shaped object
-// keys (packages/shared/src/sensitive-keys.ts) — secret*/password*/token*
+// sensitiveKeyPattern is the contract's closed list of secret-shaped object
+// keys (the source contract) — secret*/password*/token*
 // with separator or camel-case continuation, api key, authorization, cookie,
 // x-api-key, client secret, private key.
 var sensitiveKeyPattern = regexp.MustCompile(
@@ -91,7 +91,7 @@ var sensitiveKeyPattern = regexp.MustCompile(
 )
 
 // IsSensitiveKey reports whether an object key looks like credential
-// material under the reference pattern.
+// material under the contract pattern.
 func IsSensitiveKey(key string) bool {
 	return sensitiveKeyPattern.MatchString(key)
 }

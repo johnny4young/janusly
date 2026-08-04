@@ -13,7 +13,7 @@ import (
 // The audit-trail reader: keyset pages reassemble the exact trail with no
 // repeats or skips (tight-loop writes share milliseconds, so the id
 // tie-break is exercised for real), the action PREFIX filter narrows, and
-// the wire is the reference's raw {rows, nextCursor, hasMore} page.
+// the wire is the contract's raw {rows, nextCursor, hasMore} page.
 func TestAuditTrailKeysetRead(t *testing.T) {
 	h := newAPIHarness(t)
 	pool := testPool(t)

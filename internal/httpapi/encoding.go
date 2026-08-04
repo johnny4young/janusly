@@ -44,7 +44,7 @@ func decodeBody(r *http.Request, into any) error {
 	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 2<<20)).Decode(into)
 }
 
-// decodeJSONRecord mirrors the reference's readJson + asRecord pair: it
+// decodeJSONRecord mirrors the contract's readJson + asRecord pair: it
 // enforces the caller's byte cap, preserves the standard body errors, and
 // converts valid non-object JSON into an empty record.
 func decodeJSONRecord(r *http.Request, maxBytes int64) (map[string]any, *opResult) {
@@ -75,7 +75,7 @@ func decodeJSONRecord(r *http.Request, maxBytes int64) (map[string]any, *opResul
 }
 
 // readRawBody preserves the exact signed bytes while enforcing the same hard
-// cap as the Node compatibility runtime. LimitReader alone is insufficient:
+// cap as the public API contract. LimitReader alone is insufficient:
 // it silently turns an oversized signed payload into a valid truncated prefix.
 func readRawBody(w http.ResponseWriter, r *http.Request, maxBytes int64) ([]byte, bool) {
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBytes))

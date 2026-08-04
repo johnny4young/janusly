@@ -1,5 +1,5 @@
 // Versioned, operator-owned recovery policy attached to a workflow
-// snapshot — the pure port of the reference's recovery-contract.ts. The
+// snapshot — the pure port of the contract's recovery-contract.ts. The
 // contract is declarative (failure/effect/repair boundaries later stages
 // must honor); persistence and I/O stay out. The HARD rule inherited
 // verbatim: V1 keeps semantic detection DISABLED for historical
@@ -203,7 +203,7 @@ func isAutonomyLevel(level int) bool {
 	return level >= RecoveryAutonomyMin && level <= RecoveryAutonomyMax
 }
 
-// ValidateRecoveryContract ports the reference's V1/V2 schemas + the
+// ValidateRecoveryContract ports the contract's V1/V2 schemas + the
 // shared refinement rules. Returns path-prefixed problems (empty = valid).
 func ValidateRecoveryContract(contract *RecoveryContract) []string {
 	var problems []string

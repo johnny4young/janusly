@@ -43,7 +43,7 @@ func hasProblem(problems []string, fragment string) bool {
 	return false
 }
 
-// The versioned rules ported from recovery-contract.ts.
+// The versioned rules implements recovery-contract.ts.
 func TestRecoveryContractValidation(t *testing.T) {
 	if problems := ValidateRecoveryContract(baseContract("1")); len(problems) != 0 {
 		t.Fatalf("valid v1: %v", problems)
@@ -178,7 +178,7 @@ func TestParseCircuitBreakerThreshold(t *testing.T) {
 }
 
 // The contract validates at Parse: an invalid contract yields
-// invalid_contract issues with the recovery.contract path (Node parity).
+// invalid_contract issues with the recovery.contract path (Node consistency).
 func TestWorkflowParseValidatesRecoveryContract(t *testing.T) {
 	doc := `{"id":"wf","name":"W","dslVersion":"1.0",
 		"recovery":{"contract":{"version":"1",

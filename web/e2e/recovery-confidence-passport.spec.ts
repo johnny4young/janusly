@@ -271,7 +271,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   })
   await page.getByRole('button', { name: 'Close', exact: true }).click()
 
-  // Locale parity on the playbook's own live surface (not only a unit render).
+  // Locale consistency on the playbook's own live surface (not only a unit render).
   await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
   await page.reload()
   await openWorkspaceSection(page, 'Flujos', 'Plantillas')

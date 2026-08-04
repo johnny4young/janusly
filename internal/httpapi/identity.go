@@ -24,11 +24,11 @@ func decodeIdentityRecord(r *http.Request) (map[string]any, *opResult) {
 	return decodeJSONRecord(r, identityMaxJSONBodyBytes)
 }
 
-// normalizedIdentityName mirrors the reference: trim, collapse interior
+// normalizedIdentityName mirrors the contract: trim, collapse interior
 // whitespace, 2..max chars — or empty when out of contract.
 func normalizedIdentityName(value string, maxLength int) string {
 	normalized := strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
-	// JavaScript String.length counts UTF-16 code units. Match the Node oracle
+	// JavaScript String.length counts UTF-16 code units. Match the Node baseline
 	// for non-ASCII names instead of accidentally enforcing a UTF-8 byte limit.
 	length := len(utf16.Encode([]rune(normalized)))
 	if length < 2 || length > maxLength {
@@ -229,7 +229,7 @@ func (s *V1Server) invitationAcceptCore(r *http.Request, rc identityRequest) opR
 	return selectedIdentityContext(s, r, rc, acceptedOrgID, http.StatusOK)
 }
 
-// pluginInstallCore is the reference's honest stub: persist the install
+// pluginInstallCore is the contract's honest stub: persist the install
 // row + audit — no plugin runtime exists yet, and the row says exactly
 // that.
 func (s *V1Server) pluginInstallCore(r *http.Request, rc v1Request) opResult {
@@ -261,7 +261,7 @@ func (s *V1Server) pluginInstallCore(r *http.Request, rc v1Request) opResult {
 
 func (s *V1Server) mountIdentityRoutes(mux *http.ServeMux) {
 	// Membership projection and invitation acceptance use provider identity;
-	// profile updates remain tenant-authenticated like the reference.
+	// profile updates remain tenant-authenticated like the contract.
 	mux.HandleFunc("GET /organizations", s.identity(func(w http.ResponseWriter, r *http.Request, rc identityRequest) {
 		writeUnversioned(w, s.organizationsCore(r, rc))
 	}))

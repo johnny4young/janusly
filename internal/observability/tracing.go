@@ -1,10 +1,10 @@
 // Process-global OpenTelemetry trace bootstrap + the span helper the
-// engine wraps node executions with (reference packages/engine/src/
+// engine wraps node executions with (reference the source contract
 // observability/{otel,tracer,resource,trace-exporter}.ts).
 //
 // Invariants ported:
-//   - Resource carries service.name="janusly" (the pilot's own service
-//     identity — dashboards distinguish it from the reference's
+//   - Resource carries service.name="janusly" (the runtime's own service
+//     identity — dashboards distinguish it from the contract's
 //     "janusly"), service.namespace="janusly", service.instance.id
 //     (OTEL_SERVICE_INSTANCE_ID → HOSTNAME → os.Hostname()).
 //   - Console export is the local default; OTEL_EXPORTER=otlp uses
@@ -31,10 +31,10 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// TracerName is the instrumentation-scope name every pilot span uses.
+// TracerName is the instrumentation-scope name every runtime span uses.
 const TracerName = "janusly"
 
-// serviceResource mirrors the reference's resource.ts attribute set.
+// serviceResource mirrors the contract's resource.ts attribute set.
 func serviceResource() *resource.Resource {
 	instance := os.Getenv("OTEL_SERVICE_INSTANCE_ID")
 	if instance == "" {
@@ -79,11 +79,11 @@ func InitTracing(ctx context.Context) (func(context.Context) error, error) {
 	return provider.Shutdown, nil
 }
 
-// Tracer returns the singleton pilot tracer from the global provider —
+// Tracer returns the singleton runtime tracer from the global provider —
 // a no-op unless InitTracing (or a test recorder) registered one.
 func Tracer() trace.Tracer { return otel.Tracer(TracerName) }
 
-// WithSpan runs fn inside a fresh span, mirroring the reference tracer.ts
+// WithSpan runs fn inside a fresh span, mirroring the contract tracer.ts
 // helper: attributes up front, error recorded + status set, always ended.
 func WithSpan(ctx context.Context, name string, attrs []attribute.KeyValue, fn func(context.Context) error) error {
 	ctx, span := Tracer().Start(ctx, name, trace.WithAttributes(attrs...))

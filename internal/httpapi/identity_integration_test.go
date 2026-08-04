@@ -236,7 +236,7 @@ func TestInvitationAcceptFlow(t *testing.T) {
 		t.Fatalf("wrong email must read as not found: %d %+v", res.status, res.body)
 	}
 	// The invited email accepts: one atomic state transition and the full
-	// bootstrap context, not the pilot's old accepted/organizationId summary.
+	// bootstrap context, not the runtime's old accepted/organizationId summary.
 	aliceCookie := sessionFor("Alice@Example.com", "Alice@Example.com")
 	accepted := callBrowserSession(t, h, "POST", "/auth/invitations/accept", aliceCookie,
 		map[string]any{"invitationId": invitationID}, csrfHeaders)

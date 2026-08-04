@@ -1,4 +1,4 @@
-// Workflow health score (reference packages/engine/src/workflow-health.ts
+// Workflow health score (reference the source contract
 // + workflow-slo.ts): a single 0–100 rollup across six categories with a
 // per-category breakdown, plus the declared-SLO breach evaluation. Pure
 // aggregator — no I/O; the API route supplies pre-collected signals and

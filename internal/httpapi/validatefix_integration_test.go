@@ -221,7 +221,7 @@ func TestValidateFixContinuationShape(t *testing.T) {
 	}
 
 	// Exact-identity replay: {runId, nodeId} revives the ORIGINAL run in
-	// place with the attempt re-armed to 1 (Node parity, F05 closed).
+	// place with the attempt re-armed to 1 (Node consistency, F05 closed).
 	res = h.call("POST", "/dlq/replay", map[string]any{"runId": runID, "nodeId": "calc"}, "")
 	if res.status != 200 {
 		t.Fatalf("exact-identity replay: %d %+v", res.status, res.body)

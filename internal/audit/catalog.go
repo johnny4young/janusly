@@ -1,9 +1,9 @@
 // The closed audit-action catalog, extracted mechanically from the
-// reference (apps/api/src/audit-helper.ts AuditAction union — 147 actions).
+// reference (the API contract AuditAction union — 147 actions).
 // Action is a distinct type and every write validates membership, so a
 // typo'd action is a test failure here and can never land as a silent
-// unfilterable row. Pilot-own actions (documented in the plan registry)
-// register through RegisterPilotAction.
+// unfilterable row. Runtime-own actions (documented in the plan registry)
+// register through RegisterRuntimeAction.
 package audit
 
 // Action names one auditable event from the closed catalog.
@@ -165,7 +165,7 @@ var knownActions = map[Action]bool{
 
 // rawAuditActions holds reference actions written through the RAW audit()
 // chokepoint (system-actor / skipAuth writers), which the typed
-// AuditAction union — and therefore the parity pin above — deliberately
+// AuditAction union — and therefore the consistency pin above — deliberately
 // excludes: the SCIM webhook lifecycle (scim-event-handler.ts), the public
 // WorkOS SSO lifecycle, the Slack interaction callback, the upstream-health
 // auto-pause watcher, the schedule sweep, auto-healing, and the memory consent
@@ -209,18 +209,18 @@ var rawAuditActions = map[Action]bool{
 	"workflow.resumed.upstream":         true,
 }
 
-// pilotActions holds pilot-own additions, kept separate so the parity pin
-// on the reference count stays exact.
-var pilotActions = map[Action]bool{}
+// runtimeActions holds runtime-own additions, kept separate so the consistency pin
+// on the contract count stays exact.
+var runtimeActions = map[Action]bool{}
 
-// RegisterPilotAction admits a pilot-own action name (call at init).
-func RegisterPilotAction(action Action) { pilotActions[action] = true }
+// RegisterRuntimeAction admits a runtime-own action name (call at init).
+func RegisterRuntimeAction(action Action) { runtimeActions[action] = true }
 
 // IsKnown reports catalog membership (reference typed-union, reference
-// raw-audit, or pilot-own).
+// raw-audit, or runtime-own).
 func IsKnown(action Action) bool {
-	return knownActions[action] || rawAuditActions[action] || pilotActions[action]
+	return knownActions[action] || rawAuditActions[action] || runtimeActions[action]
 }
 
-// ReferenceActionCount anchors the parity pin test.
-func ReferenceActionCount() int { return len(knownActions) }
+// CatalogActionCount anchors the consistency pin test.
+func CatalogActionCount() int { return len(knownActions) }

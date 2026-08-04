@@ -68,9 +68,9 @@ LIMIT 500;
 
 -- detection (dead letter row) → the run's terminal success event, the
 
--- pilot's equivalent of the reference's detectedAt → verifiedRecoveredAt.
+-- runtime's equivalent of the contract's detectedAt → verifiedRecoveredAt.
 
--- percentile_cont matches the reference's percentile semantics exactly.
+-- percentile_cont matches the contract's percentile semantics exactly.
 
 -- name: QueryVerifiedRecoveryStats :one
 -- The durable generation-bound facts are the only reconciliation source:
@@ -258,7 +258,7 @@ SELECT * FROM recovery_impact_rollups WHERE org_id = $1;
 
 -- Personal momentum (/recovery/my-wins): terminally successful DLQ
 -- recoveries attributed to ONE operator, production runs only (the run
--- join drops sandbox lineage exactly like the reference projection).
+-- join drops sandbox lineage exactly like the contract projection).
 -- name: CountOperatorRecoveries :one
 SELECT count(*)::int
 FROM recovery_impact_events e

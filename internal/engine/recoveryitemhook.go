@@ -1,4 +1,4 @@
-// DLQ → recovery_items auto-create hook (reference packages/engine/src/
+// DLQ → recovery_items auto-create hook (reference the source contract
 // recovery/recovery-item-hook.ts): every dead-letter insert opens (or
 // debounce-attaches to) an ownership incident so the queue view carries
 // severity/SLA from the moment of failure — no operator action required.
@@ -14,7 +14,7 @@
 //     `recovery.slaPolicies` overrides (p1=60, p2=240, p3=1440, p4=10080
 //     built-ins; per-severity range 1..43200).
 //   - The hook NEVER fails the caller — a blip degrades to "no incident",
-//     the reference posture.
+//     the contract posture.
 package engine
 
 import (
@@ -35,7 +35,7 @@ const (
 	debounceMaxSeconds = 3600
 )
 
-// slaMinutesBySeverity are the reference's built-in SLA targets.
+// slaMinutesBySeverity are the contract's built-in SLA targets.
 var slaMinutesBySeverity = map[string]float64{"p1": 60, "p2": 240, "p3": 1440, "p4": 10080}
 
 // resolveSlaTarget applies `recovery.slaPolicies` overrides (partial JSON

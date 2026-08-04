@@ -1,10 +1,10 @@
 // F1 terminal-sweep read closures: the last routes the real web
-// touches that the pilot did not yet serve on the exact wire the client
+// touches that the runtime did not yet serve on the exact wire the client
 // uses. The web's api() sends V1_READ_PATHS GETs to /v1 with the envelope
 // (templates, schedule-preview, workflows/health, run/usage,
 // memory/consent-status) and everything else raw legacy (mcp connections
 // list, recovery calibration-status). Each mount here either aliases an
-// existing core onto its missing wire or ports the reference handler
+// existing core onto its missing wire or ports the contract handler
 // verbatim; the feature-absent surfaces stay documented divergences in
 // F1-GAPS.md instead of stub routes.
 package httpapi
@@ -27,8 +27,8 @@ import (
 	"github.com/johnny4young/janusly/internal/store"
 )
 
-// The reference's 15-template catalog, extracted VERBATIM from
-// apps/api/src/templates.ts at the pin (workflowTemplates.map(
+// The contract's 15-template catalog, extracted VERBATIM from
+// the API contract at the pin (workflowTemplates.map(
 // asPublicTemplate) — includes the i18n nameCode/descriptionCode/
 // categoryCode decoration). Same embed-don't-translate posture as the
 // solution packs.
@@ -45,16 +45,16 @@ var templateCatalog = func() []map[string]any {
 }()
 
 const (
-	// calibrationWindowDays / calibrationMinSamples mirror the reference's
+	// calibrationWindowDays / calibrationMinSamples mirror the contract's
 	// DEFAULT_CALIBRATION_WINDOW_DAYS / MIN_CALIBRATION_SAMPLES.
 	calibrationWindowDays = 30
 	calibrationMinSamples = 20
 )
 
-// memoryPurgeProjection derives the reference's MemoryPurgeStatus union
-// ({status, scheduledFor}) from the pilot's durable state: consent lives
+// memoryPurgeProjection derives the contract's MemoryPurgeStatus union
+// ({status, scheduledFor}) from the runtime's durable state: consent lives
 // in org_configs (`memory.enabled` flip time) and the purge is an hourly
-// sweep, not a BullMQ job — so "scheduled" is flip time + delay while
+// sweep, so "scheduled" is flip time + delay while
 // entries remain, and "none" once nothing is left to purge.
 func (s *V1Server) memoryPurgeProjection(r *http.Request, rc v1Request, tenantEnabled bool) map[string]any {
 	none := map[string]any{"status": "none", "scheduledFor": nil}
@@ -171,7 +171,7 @@ func (s *V1Server) mountF1SweepRoutes(mux *http.ServeMux) {
 
 	// MCP connections list for the panel + tool config field (legacy raw;
 	// per-connection descriptor counts so the panel avoids N+1 fetches —
-	// the reference does the same join in the handler).
+	// the contract does the same join in the handler).
 	mux.HandleFunc("GET /mcp/connections", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		q := store.New(s.pool)
 		rows, err := q.ListMcpConnections(r.Context(), rc.orgID)

@@ -90,7 +90,7 @@ func TestMemberLifecycle(t *testing.T) {
 	// The removed member's next request dies at the resolver (seed them a
 	// viewer row first elsewhere is gone — a supabase-mode caller without
 	// a row is 401; dev-mode ghost would auto-admin, so assert via list).
-	// The reference wire is a BARE array (no envelope key) — decode raw.
+	// The contract wire is a BARE array (no envelope key) — decode raw.
 	req, _ := http.NewRequest("GET", h.server.URL+"/members", nil)
 	req.Header.Set("x-org-id", h.org)
 	req.Header.Set("x-user-id", "api-tester")

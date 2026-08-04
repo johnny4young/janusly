@@ -1,7 +1,7 @@
-// Browser-facing header policy, ported from the reference's http.ts /
+// Browser-facing header policy, implements the contract's http.ts /
 // server.ts: origins echo ONLY when allowlisted (API_ALLOWED_ORIGINS, same
 // env, same Vite-dev defaults) alongside Allow-Credentials; the method,
-// header and expose lists are the reference's verbatim; OPTIONS preflights
+// header and expose lists are the contract's verbatim; OPTIONS preflights
 // answer 204 with the full dict; and an inbound X-Request-Id is honored so
 // traces stitch across the stack.
 package httpapi
@@ -58,7 +58,7 @@ func resolveRequestID(inbound string) string {
 	return uuid.NewString()
 }
 
-// WithBrowserHeaders wraps a handler with the reference's CORS + request-id
+// WithBrowserHeaders wraps a handler with the contract's CORS + request-id
 // policy. Handlers read the resolved id via requestIDFrom.
 func WithBrowserHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

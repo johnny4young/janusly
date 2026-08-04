@@ -1,5 +1,5 @@
 // Background poller for upstream status feeds (reference
-// packages/engine/src/upstream-health-poller.ts). A single sweep visits
+// the source contract). A single sweep visits
 // every ENABLED source across all orgs on a fixed tick; per source it
 // checks whether checkIntervalSeconds has elapsed, fetches the feed
 // through the SSRF chokepoint, parses via the PURE feed helpers, and acts:

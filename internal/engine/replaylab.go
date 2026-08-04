@@ -1,4 +1,4 @@
-// Replay Lab adapters (reference packages/engine/src/adapters/
+// Replay Lab adapters (reference the source contract
 // replay-lab.ts): standalone sandbox replay of ANY historic run (whole
 // DAG from roots) and the targeted FORK (start at one node, predecessors
 // cloned from the source run's terminal state). Both write
@@ -6,7 +6,7 @@
 // write-side effects uniformly — with trace-only "replay" lineage and
 // NO workflow_versions row (sandbox runs never produce reusable
 // versions; the snapshot lives in runs.inputJson). Sandbox runs carry a
-// NULL traceId, the reference posture.
+// NULL traceId, the contract posture.
 package engine
 
 import (

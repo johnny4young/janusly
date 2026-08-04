@@ -13,15 +13,15 @@ export function AiRuntimeStatusCard({ health }: { health: AiHealth | null }) {
           {t(unavailable
             ? 'badges.health.unavailable'
             : ready
-              ? 'aiCopilot.healthOn'
-              : 'aiCopilot.healthOff')}
+              ? 'aiStudio.healthOn'
+              : 'aiStudio.healthOff')}
         </span>
       </div>
       {!unavailable && (
         <p className="helper-text">
           {ready
-            ? t('aiCopilot.healthDetailOn', { model: health.model })
-            : t('aiCopilot.healthDetailOff')}
+            ? t('aiStudio.healthDetailOn', { model: health.model })
+            : t('aiStudio.healthDetailOff')}
         </p>
       )}
     </section>

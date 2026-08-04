@@ -7,7 +7,7 @@ import (
 )
 
 // Table ports representative cases per rule from error-signature.ts,
-// in the reference's priority order.
+// in the contract's priority order.
 func TestNormalizeRules(t *testing.T) {
 	cases := []struct {
 		name string
@@ -62,7 +62,7 @@ func TestNormalizeRules(t *testing.T) {
 	}
 }
 
-// The RE2 port of the boundary lookaheads must behave like the reference:
+// The RE2 port of the boundary lookaheads must behave like the contract:
 // open-ended bodies redact greedily; fixed-length shapes need a real
 // boundary; the fine-grained GitHub PAT spans its internal underscore.
 func TestScrubSecretShapes(t *testing.T) {

@@ -1,5 +1,5 @@
 // Admin CRUD + force-run for upstream health sources (reference
-// apps/api/src/routes/upstream-health-routes.ts). The poller
+// the API contract). The poller
 // (internal/upstream) owns the derived status; these routes own the
 // operator config and the "Check now" immediate poll.
 package httpapi

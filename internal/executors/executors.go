@@ -4,7 +4,7 @@
 // under state_json.output. Pure with respect to persistence: executors never
 // touch the database — the engine owns every status transition.
 //
-// Scope contract inherited from the reference: inside a node, the `inputs.`
+// Scope contract inherited from the contract: inside a node, the `inputs.`
 // template/expression root means that node's own config; the run input is
 // reachable as `context.input.*`.
 package executors
@@ -24,7 +24,7 @@ type Input struct {
 	NodeID  string
 	Config  map[string]any
 	Context map[string]any
-	// Emit appends one run event through the engine (the reference's
+	// Emit appends one run event through the engine (the contract's
 	// appendEvent seam); nil in unit tests that don't observe events.
 	Emit func(eventType string, payload map[string]any) string
 	// ReportUnresolved feeds late-bound unresolved template paths back to
@@ -75,7 +75,7 @@ type HTTPBounds struct {
 type Func func(ctx context.Context, in Input) (any, error)
 
 // Registry returns the executable subset: node types outside this map fail
-// dispatch with the reference's "No executor" error.
+// dispatch with the contract's "No executor" error.
 func Registry() map[string]Func {
 	toolRegistry := NewToolRegistry()
 	httpExec := NewHTTPExecutor(HTTPOptions{})

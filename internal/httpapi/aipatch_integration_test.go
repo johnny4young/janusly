@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// The patch ladder: $0 fallback with the full reference shape, a valid
+// The patch ladder: $0 fallback with the full contract shape, a valid
 // config patch answered mode:"ai" with the merged workflow validated, an
 // INVALID patch never reaching the wire (degrades to no_valid_suggestions),
 // alternatives capped+scrubbed inside the suggestion with evidence

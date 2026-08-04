@@ -1,5 +1,5 @@
-// Trigger passthrough executors. Like the reference's trigger family
-// (packages/engine/src/triggers.ts), the executor never performs I/O: the
+// Trigger passthrough executors. Like the contract's trigger family
+// (the source contract), the executor never performs I/O: the
 // API ingestion seam accepts the inbound payload, persists the
 // trigger_events replay anchor, and spawns the run with the normalized
 // event as the run input. The executor just re-validates the authored
@@ -268,7 +268,7 @@ func validateTriggerRateLimit(nodeType string, config map[string]any) error {
 	return nil
 }
 
-// Storm-guard clamp, ported from the reference's shared trigger-types:
+// Storm-guard clamp, implements the contract's shared trigger-types:
 // the effective per-trigger rate limit from a node config's optional
 // rateLimitPerMin — default 60, clamped to [1, 10000].
 const (

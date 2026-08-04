@@ -1,6 +1,6 @@
-// pdf.generate — the Markdown-subset PDF tool. The pilot ships its own
+// pdf.generate — the Markdown-subset PDF tool. The runtime ships its own
 // dependency-free PDF 1.4 writer (Helvetica base fonts, multi-page line
-// layout) over the reference's markdown subset: headings 1-3, paragraphs
+// layout) over the contract's markdown subset: headings 1-3, paragraphs
 // with **bold** / *italic* runs (rendered via font switching), bulleted
 // and numbered lists, fenced code blocks (Courier), and --- rules.
 // `{{name}}` placeholders substitute BEFORE parsing; unknown ones stay
@@ -57,7 +57,7 @@ func pdfTools() []Definition {
 var placeholderPattern = regexp.MustCompile(`\{\{([A-Za-z0-9_]{1,64})\}\}`)
 
 // SubstituteVariables replaces known {{name}} placeholders; unknown ones
-// stay intact (the reference's visible-typo posture).
+// stay intact (the contract's visible-typo posture).
 func SubstituteVariables(template string, variables map[string]string) string {
 	return placeholderPattern.ReplaceAllStringFunc(template, func(match string) string {
 		name := placeholderPattern.FindStringSubmatch(match)[1]

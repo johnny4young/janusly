@@ -1,4 +1,4 @@
-// PromptOps registry runtime resolver, ported from the reference's
+// PromptOps registry runtime resolver, implements the contract's
 // prompt-resolver: the single chokepoint from a workflow author's
 // promptRef {name, version?} to a resolved template body — never inline a
 // prompt_versions read in a node executor or route. Resolution: the
@@ -22,7 +22,7 @@ import (
 	"github.com/johnny4young/janusly/internal/store"
 )
 
-// MaxIncludeDepth mirrors the reference's defensive cap.
+// MaxIncludeDepth mirrors the contract's defensive cap.
 const MaxIncludeDepth = 8
 
 // ErrPromptNotFound: the caller (the ai node) falls back to its inline

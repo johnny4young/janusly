@@ -11,14 +11,14 @@ import (
 
 // The F1 terminal-sweep closures serve the exact wires the web reads:
 // /v1-enveloped GETs for the V1_READ_PATHS members and raw legacy for the
-// rest. Shapes are pinned against the reference handlers.
+// rest. Shapes are pinned against the contract handlers.
 func TestF1SweepReadClosures(t *testing.T) {
 	h := newAPIHarness(t)
 	pool := testPool(t)
 	ctx := t.Context()
 	suffix := fmt.Sprint(time.Now().UnixNano())
 
-	// Templates: the embedded reference catalog, decorated + enveloped.
+	// Templates: the embedded contract catalog, decorated + enveloped.
 	res := h.call("GET", "/v1/templates", nil, "")
 	if res.status != 200 {
 		t.Fatalf("v1 templates: %d", res.status)
@@ -76,7 +76,7 @@ func TestF1SweepReadClosures(t *testing.T) {
 		t.Fatalf("consent status default: %+v", consent)
 	}
 
-	// Calibration status: reference shape with the pinned constants.
+	// Calibration status: contract shape with the pinned constants.
 	res = h.call("GET", "/recovery/calibration-status", nil, "")
 	if res.status != 200 || res.body["windowDays"] != float64(30) ||
 		res.body["minimumSampleSize"] != float64(20) {

@@ -1,5 +1,5 @@
 // Pluggable object store for pdf.generate (and any future tool that
-// persists binary artifacts and hands back a URL) — the reference's
+// persists binary artifacts and hands back a URL) — the contract's
 // object-store.ts shape: providers resolved from env AT CALL TIME,
 // put() NEVER throws (every failure degrades to {ok:false, error,
 // provider}), and the per-org key prefix the CALLER assembles is the
@@ -8,7 +8,7 @@
 //   - local: writes under JANUSLY_OBJECT_STORE_LOCAL_DIR, returns a
 //     file:// URL. Keys are sanitized against path traversal.
 //   - s3:    the S3-compatible SEAM — selected by env like the
-//     reference; the pilot ships the interface + selection, the SigV4
+//     reference; the runtime ships the interface + selection, the SigV4
 //     driver plugs here without touching any caller (deliberate
 //     follow-up; the envelope says so honestly).
 //   - noop:  the default — "Object store not configured", never a throw.

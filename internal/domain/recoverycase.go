@@ -1,5 +1,5 @@
-// Pure Recovery Case lifecycle and receipt contracts, ported from the
-// reference's recovery-case.ts. `dead_letters` remains the technical DLQ
+// Pure Recovery Case lifecycle and receipt contracts, implements the
+// contract's recovery-case.ts. `dead_letters` remains the technical DLQ
 // incident substrate; durable semantic incidents use `recovery_cases`.
 // This module is persistence-free: the closed state ladder, the terminal
 // set, and receipt validation live here so the store can apply them
@@ -21,7 +21,7 @@ var RecoveryCaseTerminalStates = map[string]bool{
 	"accepted_loss": true, "abandoned": true,
 }
 
-// legalRecoveryCaseTransitions ports the reference map verbatim.
+// legalRecoveryCaseTransitions ports the contract map verbatim.
 var legalRecoveryCaseTransitions = map[string][]string{
 	"detected":           {"contained", "accepted_loss", "abandoned"},
 	"contained":          {"diagnosed", "accepted_loss", "abandoned"},
@@ -80,7 +80,7 @@ type RecoveryCaseTransitionReceipt struct {
 	Reason    string                    `json:"reason,omitempty"`
 }
 
-// ValidateRecoveryCaseTransitionReceipt ports the reference schema: legal
+// ValidateRecoveryCaseTransitionReceipt ports the contract schema: legal
 // from → to, closed actor kinds (user/agent require an id), 1..100
 // evidence entries with closed kinds + bounded ids + optional sha256,
 // reason capped at 1000.

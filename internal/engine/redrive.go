@@ -36,7 +36,7 @@ type RedriveOptions struct {
 	FixWorkflowJSON   []byte
 	SignatureOverride string
 	// RequestedBy attributes the eventual terminal-impact win to the
-	// operator who initiated the replay (the reference's recoveryActorId).
+	// operator who initiated the replay (the contract's recoveryActorId).
 	RequestedBy string
 }
 
@@ -115,8 +115,8 @@ func (e *Engine) RedriveDeadLetterWithOptions(ctx context.Context, orgID, deadLe
 	}
 	// An applied fix replaces the run's workflow snapshot INSIDE the same
 	// transaction, so the revived node executes the patch and the run's
-	// recorded configuration reflects what actually ran (the reference
-	// replays the patched snapshot; the pilot's revive-in-place equivalent
+	// recorded configuration reflects what actually ran (the contract
+	// replays the patched snapshot; the runtime's revive-in-place equivalent
 	// is the snapshot swap).
 	if len(opts.FixWorkflowJSON) > 0 {
 		if err := q.UpdateRunWorkflowSnapshot(ctx, store.UpdateRunWorkflowSnapshotParams{
@@ -192,7 +192,7 @@ func (e *Engine) RedriveDeadLetterWithOptions(ctx context.Context, orgID, deadLe
 // RedriveRunNode is the exact-identity replay branch: the web's run
 // panel posts {runId, nodeId} without a dead-letter id. Same in-place
 // revival (attempt re-armed to 1) minus the dead-letter claim — the
-// reference's second /dlq/replay branch.
+// contract's second /dlq/replay branch.
 func (e *Engine) RedriveRunNode(ctx context.Context, orgID, runID, nodeID string) error {
 	tx, err := e.pool.Begin(ctx)
 	if err != nil {

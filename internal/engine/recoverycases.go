@@ -1,5 +1,5 @@
-// Durable Recovery Cases: the atomic case-transition writer, ported from
-// the reference's persistence-ports/recovery.ts posture. A state change
+// Durable Recovery Cases: the atomic case-transition writer, implements
+// the contract's persistence-ports/recovery.ts posture. A state change
 // and its append-only receipt commit or roll back TOGETHER — a transition
 // without a receipt is impossible by construction: the CAS UPDATE
 // (state = from) and the receipt INSERT run in one transaction, receipt
@@ -26,7 +26,7 @@ import (
 	"github.com/johnny4young/janusly/internal/store"
 )
 
-// StableSemanticID mirrors the reference's deterministic id helper: the
+// StableSemanticID mirrors the contract's deterministic id helper: the
 // same logical entity always gets the same id, so replayed inserts
 // conflict instead of duplicating.
 func StableSemanticID(prefix string, parts ...string) string {
@@ -138,7 +138,7 @@ func (e *Engine) TransitionRecoveryCase(
 	}
 	if inserted == 0 {
 		// The unique (case_id, to_state) index refused a re-entry: this
-		// state was already reached once. The reference's single-visit
+		// state was already reached once. The contract's single-visit
 		// posture — roll the state change back rather than advance a case
 		// without its receipt.
 		return ErrRecoveryCaseReceiptGone

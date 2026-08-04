@@ -85,7 +85,7 @@ func parseStored(def *Definition, raw json.RawMessage) (any, bool) {
 }
 
 // parseEnv interprets an env string per the definition's type; invalid or
-// out-of-range values fall through to the default (the reference's
+// out-of-range values fall through to the default (the contract's
 // posture: a bad env never half-applies).
 func parseEnv(def *Definition, raw string) (any, bool) {
 	switch def.ValueType {

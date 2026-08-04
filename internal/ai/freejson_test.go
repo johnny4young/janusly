@@ -11,7 +11,7 @@ import (
 
 const validJSON = `{"dslVersion":"1.0","id":"wf-test","name":"Test flow","nodes":[{"id":"n1","type":"http","config":{"url":"https://example.com"}}],"edges":[]}`
 
-// The reference's extraction cases, ported 1:1, plus the pilot's
+// The contract's extraction cases, ported 1:1, plus the runtime's
 // hardening family: BOM, top-level arrays, truncated output.
 func TestExtractAndParseFreeJSON(t *testing.T) {
 	// Reference case: clean JSON unchanged.
@@ -70,7 +70,7 @@ func TestExtractAndParseFreeJSON(t *testing.T) {
 	}
 }
 
-// The reference's property posture: ~1000 arbitrary strings never panic,
+// The contract's property posture: ~1000 arbitrary strings never panic,
 // extraction always returns a string, and every successful parse is
 // genuinely an object or array.
 func TestFreeJSONFuzzNeverPanics(t *testing.T) {

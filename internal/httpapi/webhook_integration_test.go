@@ -351,7 +351,7 @@ func TestFailureClustersRollup(t *testing.T) {
 	}
 }
 
-// Cursor round-trip parity: pages via the minted cursor reassemble the
+// Cursor round-trip consistency: pages via the minted cursor reassemble the
 // exact ascending timeline with no skips or repeats — including events
 // sharing one millisecond (events are WRITTEN at ms precision, so the
 // ms-ISO cursor both backends mint compares exactly).

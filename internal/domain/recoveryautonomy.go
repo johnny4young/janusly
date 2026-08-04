@@ -1,4 +1,4 @@
-// Pure recovery-autonomy policy projection, ported from the reference's
+// Pure recovery-autonomy policy projection, implements the contract's
 // recovery-autonomy.ts. A workflow contract owns the MAXIMUM autonomy
 // level; failure-specific overrides may only lower that ceiling, never
 // raise it (the contract validator enforces the ceiling). This module

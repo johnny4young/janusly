@@ -112,12 +112,12 @@ func TestFreshMigrationIsIdempotentAndComplete(t *testing.T) {
 	}
 
 	var obsoleteCount int
-	unsupportedPrefix := strings.Join([]string{"go", "pilot"}, "_") + "%"
+	unsupportedPrefix := "go\\_%"
 	if err := db.QueryRowContext(ctx, `
 		SELECT
 			(SELECT count(*) FROM pg_namespace WHERE nspname = 'drizzle') +
 			(SELECT count(*) FROM information_schema.tables
-			 WHERE table_schema = 'public' AND table_name LIKE $1)
+			 WHERE table_schema = 'public' AND table_name LIKE $1 ESCAPE '\')
 	`, unsupportedPrefix).Scan(&obsoleteCount); err != nil {
 		t.Fatalf("inspect unsupported schema objects: %v", err)
 	}

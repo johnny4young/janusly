@@ -1,4 +1,4 @@
-// The http node executor with the reference's SSRF posture: validate the
+// The http node executor with the contract's SSRF posture: validate the
 // target's scheme and hostname, resolve DNS ONCE through an injectable
 // resolver, refuse loopback/private/link-local/metadata classes, and dial
 // the exact validated address — so the rebinding class of bug (public IP at
@@ -26,7 +26,7 @@ import (
 	"time"
 )
 
-// HTTP bounds mirror the reference defaults.
+// HTTP bounds mirror the contract defaults.
 const (
 	httpDefaultTimeoutMs   = 30_000
 	httpDefaultMaxBytes    = 1_000_000
@@ -55,7 +55,7 @@ func normalizeHostname(hostname string) string {
 	return strings.TrimSuffix(h, ".")
 }
 
-// isPrivateIPv4 ports the reference's class table: 0/8, 10/8, 127/8, CGNAT
+// isPrivateIPv4 ports the contract's class table: 0/8, 10/8, 127/8, CGNAT
 // 100.64/10, link-local 169.254/16 (metadata included), 172.16/12,
 // 192.168/16, and everything from 224 up (multicast + reserved).
 func isPrivateIPv4(a, b byte) bool {
@@ -78,7 +78,7 @@ func isPrivateIPv4(a, b byte) bool {
 }
 
 // IsPrivateIP reports whether the address falls in a blocked class,
-// including IPv4-mapped IPv6 forms and the reference's IPv6 set (::1, ::,
+// including IPv4-mapped IPv6 forms and the contract's IPv6 set (::1, ::,
 // ULA fc/fd, link-local fe80, multicast ff).
 func IsPrivateIP(ip net.IP) bool {
 	if v4 := ip.To4(); v4 != nil {
@@ -122,7 +122,7 @@ func (p *pinnedDialer) dial(ctx context.Context, network, addr string) (net.Conn
 	}
 	if IsPrivateIP(pinned) {
 		// Defence in depth — the validation above already refused it.
-		return nil, fmt.Errorf("Pinned HTTP target IP is private and blocked: %s", pinned) //nolint:staticcheck // reference message is the wire contract
+		return nil, fmt.Errorf("Pinned HTTP target IP is private and blocked: %s", pinned) //nolint:staticcheck // contract message is the wire contract
 	}
 	var dialer net.Dialer
 	return dialer.DialContext(ctx, network, net.JoinHostPort(pinned.String(), port))
@@ -163,17 +163,17 @@ func normalizeHTTPOptions(opts HTTPOptions) HTTPOptions {
 // resolves and pins the first validated address.
 func (e *httpExecutor) validate(ctx context.Context, rawURL string, pins *pinnedDialer) (*url.URL, error) {
 	if strings.TrimSpace(rawURL) == "" {
-		return nil, fmt.Errorf("HTTP target url is required") //nolint:staticcheck // reference message is the wire contract
+		return nil, fmt.Errorf("HTTP target url is required") //nolint:staticcheck // contract message is the wire contract
 	}
 	target, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, err
 	}
 	if target.Scheme != "http" && target.Scheme != "https" {
-		return nil, fmt.Errorf("Unsupported HTTP target protocol: %s:", target.Scheme) //nolint:staticcheck // reference message is the wire contract
+		return nil, fmt.Errorf("Unsupported HTTP target protocol: %s:", target.Scheme) //nolint:staticcheck // contract message is the wire contract
 	}
 	if e.opts.AllowPrivate() {
-		// The explicit bypass mirrors the reference: no pinning, ordinary
+		// The explicit bypass mirrors the contract: no pinning, ordinary
 		// resolution — the operator opted out of the whole posture.
 		return target, nil
 	}
@@ -181,10 +181,10 @@ func (e *httpExecutor) validate(ctx context.Context, rawURL string, pins *pinned
 	hostname := target.Hostname()
 	normalized := normalizeHostname(hostname)
 	if privateHostnames[normalized] || strings.HasSuffix(normalized, ".localhost") {
-		return nil, fmt.Errorf("HTTP target is private and blocked: %s", hostname) //nolint:staticcheck // reference message is the wire contract
+		return nil, fmt.Errorf("HTTP target is private and blocked: %s", hostname) //nolint:staticcheck // contract message is the wire contract
 	}
 	if isPrivateHost(normalized) {
-		return nil, fmt.Errorf("HTTP target is private and blocked: %s", hostname) //nolint:staticcheck // reference message is the wire contract
+		return nil, fmt.Errorf("HTTP target is private and blocked: %s", hostname) //nolint:staticcheck // contract message is the wire contract
 	}
 	if ip := net.ParseIP(normalized); ip != nil {
 		pins.pin(hostname, ip)
@@ -198,10 +198,10 @@ func (e *httpExecutor) validate(ctx context.Context, rawURL string, pins *pinned
 		}
 	}
 	if slices.ContainsFunc(ips, IsPrivateIP) {
-		return nil, fmt.Errorf("HTTP target resolves to a private address and is blocked: %s", hostname) //nolint:staticcheck // reference message is the wire contract
+		return nil, fmt.Errorf("HTTP target resolves to a private address and is blocked: %s", hostname) //nolint:staticcheck // contract message is the wire contract
 	}
 	if len(ips) == 0 {
-		return nil, fmt.Errorf("HTTP target did not resolve to any address: %s", hostname) //nolint:staticcheck // reference message is the wire contract
+		return nil, fmt.Errorf("HTTP target did not resolve to any address: %s", hostname) //nolint:staticcheck // contract message is the wire contract
 	}
 	// Pin the first validated address: the dialer never consults DNS again.
 	pins.pin(hostname, ips[0])
@@ -227,7 +227,7 @@ type ExecErrorShape struct {
 
 func (e *ExecErrorShape) Error() string { return e.Message }
 
-// ErrorName exposes the reference error name (e.g. HttpResponseError).
+// ErrorName exposes the contract error name (e.g. HttpResponseError).
 func (e *ExecErrorShape) ErrorName() string { return e.Name }
 
 // ErrorCode exposes the classification code (e.g. E_HTTP_STATUS).
@@ -285,7 +285,7 @@ func (e *httpExecutor) execute(ctx context.Context, in Input) (any, error) {
 		Timeout:   time.Duration(timeoutMs) * time.Millisecond,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) > maxRedirects {
-				return fmt.Errorf("HTTP redirect limit exceeded; last hop %s -> %s", via[len(via)-1].URL, req.URL) //nolint:staticcheck // reference message is the wire contract
+				return fmt.Errorf("HTTP redirect limit exceeded; last hop %s -> %s", via[len(via)-1].URL, req.URL) //nolint:staticcheck // contract message is the wire contract
 			}
 			// Every hop revalidates and re-pins — a 302 to the metadata
 			// endpoint dies here, not at the socket.
@@ -293,7 +293,7 @@ func (e *httpExecutor) execute(ctx context.Context, in Input) (any, error) {
 				return err
 			}
 			// Fetch-spec credential stripping, ORIGIN-based like the
-			// reference's manual hops: Go's own redirect logic compares
+			// contract's manual hops: Go's own redirect logic compares
 			// DOMAINS (same host or subdomain keeps Authorization/Cookie on
 			// any port, and never touches Proxy-Authorization) — so a
 			// redirect to the same host on another port, a scheme
@@ -342,7 +342,7 @@ func (e *httpExecutor) execute(ctx context.Context, in Input) (any, error) {
 	defer func() { _ = res.Body.Close() }()
 
 	if res.ContentLength > int64(maxBytes) {
-		return nil, fmt.Errorf("HTTP response exceeds maxResponseBytes (Content-Length %d > cap %d)", res.ContentLength, maxBytes) //nolint:staticcheck // reference message is the wire contract
+		return nil, fmt.Errorf("HTTP response exceeds maxResponseBytes (Content-Length %d > cap %d)", res.ContentLength, maxBytes) //nolint:staticcheck // contract message is the wire contract
 	}
 
 	// Streaming opt-in: consume the body into a bounded preview instead of
@@ -377,7 +377,7 @@ func (e *httpExecutor) execute(ctx context.Context, in Input) (any, error) {
 		return nil, err
 	}
 	if len(bodyBytes) > maxBytes {
-		return nil, fmt.Errorf("HTTP response exceeds maxResponseBytes after %d bytes (cap %d)", len(bodyBytes), maxBytes) //nolint:staticcheck // reference message is the wire contract
+		return nil, fmt.Errorf("HTTP response exceeds maxResponseBytes after %d bytes (cap %d)", len(bodyBytes), maxBytes) //nolint:staticcheck // contract message is the wire contract
 	}
 
 	ok := res.StatusCode >= 200 && res.StatusCode < 300
@@ -447,7 +447,7 @@ const (
 
 // consumeStreamToPreview drains the body counting every byte (the response
 // byte cap still aborts mid-stream) while buffering only the first
-// previewCap bytes, mirroring the reference's consumeStreamToPreview.
+// previewCap bytes, mirroring the contract's consumeStreamToPreview.
 func consumeStreamToPreview(body io.Reader, previewCap, maxBytes int) (string, int, bool, error) {
 	preview := make([]byte, 0, min(previewCap, 64*1024))
 	chunk := make([]byte, 32*1024)
@@ -458,7 +458,7 @@ func consumeStreamToPreview(body io.Reader, previewCap, maxBytes int) (string, i
 		if n > 0 {
 			total += n
 			if total > maxBytes {
-				return "", 0, true, fmt.Errorf("HTTP response exceeds maxResponseBytes after %d bytes (cap %d)", total, maxBytes) //nolint:staticcheck // reference message is the wire contract
+				return "", 0, true, fmt.Errorf("HTTP response exceeds maxResponseBytes after %d bytes (cap %d)", total, maxBytes) //nolint:staticcheck // contract message is the wire contract
 			}
 			if len(preview) < previewCap {
 				take := min(n, previewCap-len(preview))

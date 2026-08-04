@@ -88,7 +88,7 @@ func TestStartRunCommitsSkeletonAtomically(t *testing.T) {
 		byNode[n.NodeID] = n
 	}
 	// The root starts queued carrying its first attempt; the successor waits
-	// pending with zero attempts — the reference's exact insert shape.
+	// pending with zero attempts — the contract's exact insert shape.
 	if root := byNode["first"]; root.Status != "queued" || root.Attempts.Int32 != 1 {
 		t.Fatalf("root shape wrong: %+v", root)
 	}
@@ -100,7 +100,7 @@ func TestStartRunCommitsSkeletonAtomically(t *testing.T) {
 		RunID: runID, BeforeCreatedAt: time.Now().Add(time.Hour), BeforeID: "zzz", PageLimit: 10,
 	})
 	// The start tx now also appends node.queued per root (the
-	// reference's initial-publication event); newest-first keyset puts it
+	// contract's initial-publication event); newest-first keyset puts it
 	// before run.started.
 	if err != nil || len(events) != 2 ||
 		events[0].Type != "node.queued" || events[0].NodeID.String != "first" ||
@@ -110,7 +110,7 @@ func TestStartRunCommitsSkeletonAtomically(t *testing.T) {
 	var payload map[string]string
 	_ = json.Unmarshal(events[1].Payload, &payload)
 	if payload["workflowVersionId"] != "wf-linear" {
-		t.Fatalf("event payload parity broken: %s", events[0].Payload)
+		t.Fatalf("event payload contract mismatch: %s", events[0].Payload)
 	}
 
 	notifyCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -195,7 +195,7 @@ func TestStartRunRejectsUnsatisfiedRequiredInput(t *testing.T) {
 		t.Fatalf("expected InputValidationError, got %v", err)
 	}
 	if len(invalid.Errors) != 1 || invalid.Errors[0] != "$.customer is required" {
-		t.Fatalf("error list parity broken: %v", invalid.Errors)
+		t.Fatalf("error list contract mismatch: %v", invalid.Errors)
 	}
 }
 

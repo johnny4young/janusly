@@ -721,7 +721,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     await waitFor(() => expect(screen.getByTestId('recovery-lab-entry')).toBeInTheDocument())
 
     fireEvent.click(screen.getByTestId('recovery-center-empty-cta-studio'))
-    expect(baseProps.onOpenTab).toHaveBeenCalledWith('copilot')
+    expect(baseProps.onOpenTab).toHaveBeenCalledWith('ai-studio')
   })
 
   it('opens Recipes when the empty-state Recipes CTA is clicked', async () => {

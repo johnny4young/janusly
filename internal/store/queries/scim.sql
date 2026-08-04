@@ -133,7 +133,7 @@ DELETE FROM scim_user_groups
 WHERE org_id = $1 AND scim_directory_id = $2 AND provider_group_id = $3;
 
 -- SCIM membership writes are keyed on (org_id, lower(email)) — the
--- user-stable join key — not (org_id, user_id); see the reference's
+-- user-stable join key — not (org_id, user_id); see the contract's
 -- upsertMembershipByEmail. The update preserves invited_by (and user_id,
 -- which the SSO backfill may have rewritten) unless a new inviter is given.
 -- The lookup matches the email COLUMN or an email-shaped user_id: the

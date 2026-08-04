@@ -11,12 +11,9 @@ import (
 	"github.com/johnny4young/janusly/internal/grammar"
 )
 
-// Verification: the pilot's "overdue checkpoint" posture. The
-// reference needs a dedicated overdue reconciler because BullMQ delayed
-// jobs can be lost; the pilot's wake-up clock lives in Postgres, so a
-// wakeup that came due while NO worker was polling simply fires on the
-// next poll — the durable clock IS the reconciler. The stalled-node
-// reaper covers the other crash class (a worker died mid-execution).
+// Verification: a wake-up that came due while no worker was polling fires on
+// the next poll because the durable PostgreSQL clock is the reconciler. The
+// stalled-node reaper covers the other crash class: a worker dying mid-run.
 func TestOverdueTimerFiresAfterPollingGap(t *testing.T) {
 	ctx, pool, eng, org := newHarness(t)
 

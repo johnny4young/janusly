@@ -62,7 +62,7 @@ func TestAiSurfacesFallbackContract(t *testing.T) {
 		}
 	}
 
-	// Review, invalid shape: the reference's explicit fail envelope.
+	// Review, invalid shape: the contract's explicit fail envelope.
 	broken := h.call("POST", "/ai/review-workflow", map[string]any{"workflow": map[string]any{"id": "x"}}, "")
 	brokenReview, _ := broken.body["review"].(map[string]any)
 	if broken.status != 200 || broken.body["mode"] != "fallback" || brokenReview["status"] != "fail" {

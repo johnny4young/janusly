@@ -105,7 +105,7 @@ func TestInvalidSessionFallsThroughButStoreFailureDoesNot(t *testing.T) {
 	}
 }
 
-// Chain precedence, ported from the reference's priority order.
+// Chain precedence, implements the contract's priority order.
 func TestProviderChainPrecedence(t *testing.T) {
 	full := makeResolver(Config{
 		SupabaseURL: "https://sb.example", SupabaseKey: "k",

@@ -57,7 +57,7 @@ func (s builtinSnippet) view() map[string]any {
 	}
 }
 
-// builtinSnippets ports the reference BUILTIN_SNIPPETS catalog (9 entries).
+// builtinSnippets ports the contract BUILTIN_SNIPPETS catalog (9 entries).
 var builtinSnippets = []builtinSnippet{
 	{ID: "builtin:retry-with-backoff", Name: "Retry with backoff", Category: "retry",
 		Description: "An HTTP call wrapped with bounded exponential-backoff retries.",
@@ -765,9 +765,9 @@ func (s *V1Server) packView(r *http.Request, rc v1Request, pack packs.SolutionPa
 			"failureMode": fixture.FailureMode, "recoveryPath": fixture.RecoveryPath,
 		})
 	}
-	// The reference's toPublicPack projection (nodeCount/failureFixtures
+	// The contract's toPublicPack projection (nodeCount/failureFixtures
 	// included — the packs panel iterates them); `configured` on each
-	// credential and the labeled `samples` list are additive pilot fields.
+	// credential and the labeled `samples` list are additive runtime fields.
 	return map[string]any{
 		"id": pack.ID, "name": pack.Name, "description": pack.Description,
 		"category": pack.Category, "version": pack.Version,

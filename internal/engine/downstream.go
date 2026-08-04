@@ -156,7 +156,7 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, event
 	return e.appendStatusChecked(ctx, events, runID, completedAt)
 }
 
-// appendStatusChecked is the reference's fan-in settle marker: every
+// appendStatusChecked is the contract's fan-in settle marker: every
 // enqueue pass that queued NOTHING re-derived the run status and says so
 // (runtime.ts). +2ms so it always sorts after the terminal run event
 // (which sits at cause+1ms).

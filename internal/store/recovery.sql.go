@@ -133,7 +133,7 @@ type CountOperatorRecoveriesParams struct {
 
 // Personal momentum (/recovery/my-wins): terminally successful DLQ
 // recoveries attributed to ONE operator, production runs only (the run
-// join drops sandbox lineage exactly like the reference projection).
+// join drops sandbox lineage exactly like the contract projection).
 func (q *Queries) CountOperatorRecoveries(ctx context.Context, arg CountOperatorRecoveriesParams) (int32, error) {
 	row := q.db.QueryRow(ctx, countOperatorRecoveries, arg.OrgID, arg.UserID, arg.Since)
 	var column_1 int32
@@ -1841,8 +1841,8 @@ type QueryVerifiedRecoveryStatsRow struct {
 // Verified-recovery north star over REAL redrives: a dead letter whose
 // replay was claimed and whose run then reached succeeded. Duration is
 // detection (dead letter row) → the run's terminal success event, the
-// pilot's equivalent of the reference's detectedAt → verifiedRecoveredAt.
-// percentile_cont matches the reference's percentile semantics exactly.
+// runtime's equivalent of the contract's detectedAt → verifiedRecoveredAt.
+// percentile_cont matches the contract's percentile semantics exactly.
 // The durable generation-bound facts are the only reconciliation source:
 // a row exists only when a claimed replay
 // reached terminal success, so initiation can never inflate the metric;

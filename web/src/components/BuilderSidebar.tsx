@@ -102,7 +102,7 @@ export function BuilderSidebar({
   const [collapsed, setCollapsed] = useState(loadCollapsedState)
   const [searchQuery, setSearchQuery] = useState('')
   const visuallyCollapsed = collapsed && !isMobile
-  const authoringMode = activeTab === 'copilot' || activeTab === 'inspector'
+  const authoringMode = activeTab === 'ai-studio' || activeTab === 'inspector'
   const normalizedQuery = searchQuery.trim().toLocaleLowerCase()
 
   useEffect(() => {
@@ -242,7 +242,7 @@ export function BuilderSidebar({
         <button
           className="sb-ai-strip"
           type="button"
-          onClick={() => onOpenTab('copilot')}
+          onClick={() => onOpenTab('ai-studio')}
           data-mobile-nav-close="true"
           title={aiHealth?.enabled ? t('sidebar.aiMode.liveHint') : t('sidebar.aiMode.localHint')}
         >

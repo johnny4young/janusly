@@ -32,7 +32,7 @@ func intPtr(v int) *int           { return &v }
 func floatPtr(v float64) *float64 { return &v }
 func resetRecorder(t *testing.T)  { t.Cleanup(func() { SetRecorder(nil) }) }
 
-// The DB recorder writes the reference's exact row: metric, quantity =
+// The DB recorder writes the contract's exact row: metric, quantity =
 // totalTokens, and the metadata block with explicit nulls where a field
 // is absent so aggregation reads one stable shape.
 func TestDBRecorderWritesReferenceShape(t *testing.T) {

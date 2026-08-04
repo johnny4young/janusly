@@ -45,7 +45,7 @@ func TestBaselineContainsCurrentRuntimeObjectsOnly(t *testing.T) {
 		}
 	}
 	for _, obsolete := range []string{
-		strings.Join([]string{"go", "pilot"}, "_"),
+		"go_",
 		"JANUSLY_" + "GO",
 		"__drizzle_migrations",
 		"CREATE SCHEMA drizzle",

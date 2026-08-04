@@ -1,6 +1,6 @@
-// Supabase Auth API verification over plain HTTP — no SDK. The reference
+// Supabase Auth API verification over plain HTTP — no SDK. The contract
 // calls supabase.auth.getUser(token), which is GET {SUPABASE_URL}/auth/v1/user
-// with the project key as apikey and the user token as Bearer; the pilot
+// with the project key as apikey and the user token as Bearer; the runtime
 // performs the same request directly.
 package auth
 

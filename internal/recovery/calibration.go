@@ -1,5 +1,5 @@
-// Confidence calibration — the PURE curve machinery ported from the
-// reference's confidence-calibration.ts: a per-(org, approach) linear
+// Confidence calibration — the PURE curve machinery implements the
+// contract's confidence-calibration.ts: a per-(org, approach) linear
 // curve maps an LLM's self-rated suggestion confidence onto the
 // empirically observed accept rate. The fit is weighted least-squares
 // over 10-point buckets; a non-positive slope is REFUSED (applying it

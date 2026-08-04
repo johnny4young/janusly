@@ -1,7 +1,7 @@
 // Replay-campaign API — named, paced, abortable DLQ cohorts. The cohort is
 // resolved server-side (never trusting a client-supplied signature): every
 // entry must be an OPEN dead letter, all sharing ONE normalized failure
-// signature, minimum two. Mirrors the reference's routes under
+// signature, minimum two. Mirrors the contract's routes under
 // /recovery/campaigns with the same codes and validation bounds.
 package httpapi
 
@@ -50,7 +50,7 @@ type cohortPreview struct {
 
 // previewCohort resolves one immutable cohort from requested DLQ ids.
 func (s *V1Server) previewCohort(r *http.Request, orgID string, requestedIDs []string) (cohortPreview, error) {
-	// Order-preserving dedupe, like the reference's Set spread.
+	// Order-preserving dedupe, like the contract's Set spread.
 	seen := map[string]bool{}
 	ids := make([]string, 0, len(requestedIDs))
 	for _, id := range requestedIDs {
@@ -207,7 +207,7 @@ func (s *V1Server) campaignCreateCore(r *http.Request, rc v1Request) opResult {
 	if detail == nil {
 		return result
 	}
-	// The due clock is the pilot's only dispatch substrate — there is no
+	// The due clock is the runtime's only dispatch substrate — there is no
 	// queue publication to lose, so this is always false.
 	detail["publicationDeferred"] = false
 	audit.Write(ctx, s.pool, rc.authContext, "recovery.campaign.created", audit.Options{
@@ -274,7 +274,7 @@ func (s *V1Server) campaignCancelCore(r *http.Request, rc v1Request, id string) 
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// Distinguish missing from no-longer-running, like the reference.
+			// Distinguish missing from no-longer-running, like the contract.
 			if _, err := store.New(s.pool).GetReplayCampaign(ctx, store.GetReplayCampaignParams{OrgID: rc.orgID, ID: id}); err != nil {
 				return opError(http.StatusNotFound, "replay_campaign_not_found", "Replay campaign not found", nil)
 			}

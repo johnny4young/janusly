@@ -11,7 +11,7 @@ import (
 )
 
 // The catalog governing for real: runs.requireSavedWorkflow forbids adhoc
-// starts with the reference's verbatim 403, while a SAVED workflow keeps
+// starts with the contract's verbatim 403, while a SAVED workflow keeps
 // running; per-org retention windows drive the tombstone purge.
 func TestOrgConfigGovernsStartAndRetention(t *testing.T) {
 	h := newAPIHarness(t)

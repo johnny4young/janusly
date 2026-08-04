@@ -22,9 +22,9 @@ const catalogProps = {
 }
 
 describe('<TemplatesPanel />', () => {
-  it('offers a Copilot CTA when no templates are loaded', () => {
+  it('offers a AI Studio CTA when no templates are loaded', () => {
     render(<TemplatesPanel templates={[]} onUseTemplate={vi.fn()} {...catalogProps} />)
-    expect(screen.getByTestId('empty-state-cta')).toHaveTextContent('Generate one with Copilot')
+    expect(screen.getByTestId('empty-state-cta')).toHaveTextContent('Generate one with AI Studio')
   })
 
   it('filters recipes with the shared catalog search', async () => {

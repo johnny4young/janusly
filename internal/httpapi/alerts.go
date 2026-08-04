@@ -1,10 +1,10 @@
-// Recovery alerting policy CRUD + recent-dispatch feed (the reference's
+// Recovery alerting policy CRUD + recent-dispatch feed (the contract's
 // alerts-routes): create/list/update/delete under admin + alerts.write,
 // reads under viewer + alerts.read. Body validation enforces the closed
 // trigger catalog, 1..5 channels from the closed destination set (webhook
 // requires an https url; slack/email/github accept their params but
 // deliver with the integrations wave), cooldown 60..86400 (default 900).
-// 422 carries the structured error list like the reference.
+// 422 carries the structured error list like the contract.
 package httpapi
 
 import (

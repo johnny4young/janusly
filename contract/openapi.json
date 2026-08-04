@@ -278,7 +278,7 @@
             "description": "Error — the v1 error envelope"
           }
         },
-        "summary": "Replay one dead letter (reference wire)"
+        "summary": "Replay one dead letter (unversioned wire)"
       }
     },
     "/memory/consent-status": {

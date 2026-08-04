@@ -1,6 +1,6 @@
-// Paced replay-campaign pump. The reference drains campaigns through
+// Paced replay-campaign pump. The contract drains campaigns through
 // delayed queue jobs with the Postgres due clock as the authority and a
-// reconciler repairing lost publications; the pilot pumps that same due
+// reconciler repairing lost publications; the runtime pumps that same due
 // clock directly — no queue mirror to repair. Invariants preserved:
 // one step performs at most one replay (pacing is never a loop sleep),
 // the dispatch claim pushes the clock forward atomically so concurrent
@@ -22,17 +22,17 @@ import (
 	"github.com/johnny4young/janusly/internal/store"
 )
 
-// The campaign pump's audit actions exist in the reference too, but are
+// The campaign pump's audit actions exist in the contract too, but are
 // written by its UNTYPED system writer (deps.audit in replay-campaign.ts),
-// so they sit outside the typed AuditAction catalog the pilot extracted —
-// they register here rather than counting against the reference pin.
+// so they sit outside the typed AuditAction catalog the runtime extracted —
+// they register here rather than counting against the contract pin.
 func init() {
-	audit.RegisterPilotAction("recovery.campaign.completed")
-	audit.RegisterPilotAction("recovery.campaign.item_replayed")
-	audit.RegisterPilotAction("recovery.campaign.item_failed")
+	audit.RegisterRuntimeAction("recovery.campaign.completed")
+	audit.RegisterRuntimeAction("recovery.campaign.item_replayed")
+	audit.RegisterRuntimeAction("recovery.campaign.item_failed")
 }
 
-// campaignSystemActor mirrors the reference's completion-audit actor.
+// campaignSystemActor mirrors the contract's completion-audit actor.
 const campaignSystemActor = "system:replay-campaign"
 
 func (e *Engine) auditCampaignCompleted(ctx context.Context, campaign store.ReplayCampaign) {

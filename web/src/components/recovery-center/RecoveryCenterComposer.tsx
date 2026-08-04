@@ -1,6 +1,6 @@
 /**
  * RecoveryCenterComposer — chat-style operator input + quick chips that
- * route to existing tabs (Runs / Inspector / Operations / Copilot).
+ * route to existing tabs (Runs / Inspector / Operations / AI Studio).
  *
  * Self-contained: owns its own `value` / `busy` / `answer` state and calls
  * `/ai/explain-workflow` (Suggest fix / What changed / Summarize / Spend)
@@ -54,7 +54,7 @@ export function RecoveryCenterComposer({
   const askWorkflow = async (prompt: string) => {
     if (nodes.length === 0) {
       addToast(runtimeT('recoveryCenter.composer.needWorkflow'), 'info')
-      onOpenTab('copilot')
+      onOpenTab('ai-studio')
       return
     }
     setBusy(true)
@@ -189,7 +189,7 @@ export function RecoveryCenterComposer({
             <button type="button" className="command-button command-button-compact" onClick={() => setAnswer(null)}>
               {t('recoveryCenter.composer.dismiss')}
             </button>
-            <button type="button" className="command-button command-button-compact" onClick={() => onOpenTab('copilot')}>
+            <button type="button" className="command-button command-button-compact" onClick={() => onOpenTab('ai-studio')}>
               {t('recoveryCenter.composer.openStudio')}
             </button>
           </div>

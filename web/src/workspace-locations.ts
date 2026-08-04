@@ -53,12 +53,12 @@ export const WORKSPACE_DESTINATION_DEFINITIONS: readonly WorkspaceDestinationDef
         tab: 'inspector',
         labelKey: 'workspace.section.inspector.label',
         helperKey: 'workspace.section.inspector.helper',
-        activeAliases: ['copilot'],
+        activeAliases: ['ai-studio'],
       },
       {
-        tab: 'copilot',
-        labelKey: 'workspace.section.copilot.label',
-        helperKey: 'workspace.section.copilot.helper',
+        tab: 'ai-studio',
+        labelKey: 'workspace.section.ai-studio.label',
+        helperKey: 'workspace.section.ai-studio.helper',
         hidden: true,
       },
       {
@@ -152,7 +152,7 @@ const DESTINATION_BY_ID = new Map(
 const DESTINATION_BY_TAB: Record<ActiveTab, WorkspaceDestination> = {
   home: 'home',
   workflows: 'workflows',
-  copilot: 'workflows',
+  'ai-studio': 'workflows',
   inspector: 'workflows',
   templates: 'workflows',
   packs: 'workflows',

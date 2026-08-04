@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// The deterministic policy ladder — exact reason order from the reference —
+// The deterministic policy ladder — exact reason order from the contract —
 // plus the ABSORBING bias: malformed working-hours policy reads as working
 // time, so it can never authorize a mutation. (The opposite, rejecting bias
 // is tested on time.window.)

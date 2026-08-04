@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// Ported reference injection fixtures: the Node test suite's cases must
+// Contract injection fixtures: every security case must
 // pass byte-for-byte where the contract is deterministic.
 func TestSanitizeMcpToolDescription(t *testing.T) {
 	if got := SanitizeMcpToolDescription(""); got != "(no description)" {
@@ -90,7 +90,7 @@ func TestSanitizeMcpPromptLabel(t *testing.T) {
 	if got := SanitizeMcpPromptLabel(strings.Repeat("a", MaxMcpPromptLabelChars+50), "unnamed"); len(got) != MaxMcpPromptLabelChars {
 		t.Fatalf("label cap: %d", len(got))
 	}
-	// The reference's hidden-ZWSP label case: zero-width chars vanish
+	// The contract's hidden-ZWSP label case: zero-width chars vanish
 	// BEFORE the unsafe-char pass, so no separator appears.
 	if got := SanitizeMcpPromptLabel("pages.update\u200bSYSTEM", "unnamed"); got != "pages.updateSYSTEM" {
 		t.Fatalf("ZWSP label: %q", got)

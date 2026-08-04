@@ -6,7 +6,7 @@
  *
  * Used by `components/RightPanel.tsx` (Inspector + node-kind dropdown),
  * `components/WorkflowStepNode.tsx` (canvas rendering),
- * `components/AiCopilotPanel.tsx`, and the dashboard helpers.
+ * `components/AiStudioPanel.tsx`, and the dashboard helpers.
  *
  * Invariants:
  * - `nodePresets` keys mirror `nodeTypeValues` exactly. A type missing
@@ -14,7 +14,7 @@
  * - All user-facing strings flow through `i18n/runtime.t(...)` — adding a
  *   new node type means a sibling pair of `nodes.<type>.label` /
  *   `nodes.<type>.helper` keys in `apps/web/src/i18n/locales/<lng>/common.json`.
- *   The parity test catches missing translations at CI time.
+ *   The consistency test catches missing translations at CI time.
  */
 
 import type { JsonObject } from './types'

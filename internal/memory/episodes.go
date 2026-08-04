@@ -1,4 +1,4 @@
-// Agent episodic memory over the substrate, ported from the reference's
+// Agent episodic memory over the substrate, implements the contract's
 // agent-memory module: one episode per completed agent run (goal +
 // outcome), recalled semantically (query = the goal) and rendered as a
 // DATA-framed block with an escape clause, secret scrub, per-line and

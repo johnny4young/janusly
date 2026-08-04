@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// SSRF matrix ported from the http-policy.ts posture: every blocked class,
+// SSRF matrix implements the http-policy.ts posture: every blocked class,
 // hostname aliases, resolved-private rejection, and the pinning guarantee.
 
 func denyAll() func() bool { return func() bool { return false } }

@@ -40,7 +40,7 @@ type ApprovalWaitingConfig struct {
 	EscalateTo        string
 }
 
-// ResolveApprovalWaitingConfig ports the Node oracle's exact optional
+// ResolveApprovalWaitingConfig ports the Node baseline's exact optional
 // ownership, deadline XOR, timeout-policy, and escalation contract.
 func ResolveApprovalWaitingConfig(config map[string]any, now time.Time) (ApprovalWaitingConfig, error) {
 	assignee := optionalWaitingLabel(config["assignee"])

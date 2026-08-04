@@ -1,4 +1,4 @@
-// Postgres DB query tools (reference packages/engine/src/db-query-tools.ts):
+// Postgres DB query tools (reference the source contract):
 // credential-backed access to CUSTOMER-owned databases from workflow tool
 // nodes.
 //
@@ -8,7 +8,7 @@
 //     inject tenant predicates; the customer's DSN/role/schema/RLS/views
 //     own row-level isolation inside the external DB.
 //   - Workflow JSON stores only the credential NAME; the DSN resolves
-//     through the Secret Store and neither the reference nor the URL is
+//     through the Secret Store and neither the contract nor the URL is
 //     ever echoed (safeDbError redacts postgres:// URLs + secret shapes).
 //   - SQL validation rejects semicolons, comments, DDL/session-control
 //     verbs, verb-class mismatches, and placeholder/param mismatches.

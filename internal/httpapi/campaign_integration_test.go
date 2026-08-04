@@ -460,7 +460,7 @@ func (h *apiHarness) callWithHeaders(method, path string, body any, org string, 
 }
 
 // Supabase mode end to end through the real middleware: a valid JWT with a
-// membership grant reads the API; a forged one gets the reference's 401.
+// membership grant reads the API; a forged one gets the contract's 401.
 func TestSupabaseModeThroughTheMiddleware(t *testing.T) {
 	fakeSb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/auth/v1/user" && r.Header.Get("Authorization") == "Bearer live-token" {
@@ -497,7 +497,7 @@ func TestSupabaseModeThroughTheMiddleware(t *testing.T) {
 }
 
 // requireRole: a seeded viewer cannot save even through dev headers (the
-// auto-grant is for missing rows only); the 403 carries the reference's
+// auto-grant is for missing rows only); the 403 carries the contract's
 // exact message.
 func TestRequireRoleGateOnSave(t *testing.T) {
 	h := newAPIHarness(t)

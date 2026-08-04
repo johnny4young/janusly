@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// Cases port packages/engine/src/inputs-validator.test.ts at the parity pin;
+// Cases port the source contract at the consistency pin;
 // each cites the original `it(...)` name it mirrors.
 
 func schemaFromJSON(t *testing.T, doc string) *InputSchema {
@@ -152,7 +152,7 @@ func TestPrototypeShapedKeysAreOwnData(t *testing.T) {
 
 // nilValue mirrors passing `undefined` from the caller side: the engine
 // substitutes an empty object before calling, but the resolver itself must
-// tolerate a bare missing top-level value the way the reference does.
+// tolerate a bare missing top-level value the way the contract does.
 func nilValue() any {
 	var v any
 	return v

@@ -1,4 +1,4 @@
-// The pilot's v1 contract manifest — the analogue of the reference's
+// The runtime's v1 contract manifest — the analogue of the contract's
 // side-effect-free V1_CONTRACT_ROUTES rule: a pure data listing of every
 // /v1 route (method, path, request/response shapes) that the OpenAPI
 // generator consumes WITHOUT importing the server. Adding a v1 route
@@ -92,7 +92,7 @@ var Routes = []Route{
 	{Method: "POST", Path: "/v1/dlq/redrive", Summary: "Redrive one dead letter",
 		Request:  obj(map[string]any{"deadLetterId": str()}, "deadLetterId"),
 		Response: obj(map[string]any{"redriven": boolT()}, "redriven")},
-	{Method: "POST", Path: "/v1/dlq/replay", Summary: "Replay one dead letter (reference wire)",
+	{Method: "POST", Path: "/v1/dlq/replay", Summary: "Replay one dead letter (unversioned wire)",
 		Request:  obj(map[string]any{"deadLetterId": str()}, "deadLetterId"),
 		Response: obj(map[string]any{"ok": boolT()}, "ok")},
 	{Method: "POST", Path: "/v1/runs/redrive", Summary: "Redrive by run and node (revive-in-place)",

@@ -25,7 +25,7 @@ const ALL_TABS: ActiveTab[] = [
   'recover',
   'workflows',
   'members',
-  'copilot',
+  'ai-studio',
   'experiments',
   'marketplace',
   'templates',
@@ -45,12 +45,12 @@ describe('CANVAS_TABS contract', () => {
     // (node-click selection). Adding a tab here costs an extra
     // canvas mount; removing one drops a layout case from the
     // contextual main-slot path. Either direction is intentional.
-    expect(CANVAS_TABS).toEqual(['copilot', 'inspector'])
+    expect(CANVAS_TABS).toEqual(['ai-studio', 'inspector'])
   })
 
   it('isCanvasTab returns true ONLY for the canvas tabs', () => {
     const canvasTabs = ALL_TABS.filter(isCanvasTab)
-    expect(canvasTabs.sort()).toEqual(['copilot', 'inspector'])
+    expect(canvasTabs.sort()).toEqual(['ai-studio', 'inspector'])
   })
 
   it('isCanvasTab returns false for every non-canvas tab (including home)', () => {
@@ -90,7 +90,7 @@ describe('getCanvasVisibility — canvas mount + visibility decision', () => {
     })
   })
 
-  it.each(['copilot', 'inspector'] as const)(
+  it.each(['ai-studio', 'inspector'] as const)(
     '%s: canvas mounted AND visible, contextual slot NOT rendered',
     (tab) => {
       expect(getCanvasVisibility(tab)).toEqual({

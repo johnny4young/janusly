@@ -1,8 +1,8 @@
 // Failure-cluster rollup — GET /dlq/clusters on both wires. Samples come
-// from dead_letters AND failed run_nodes inside the window (the reference
+// from dead_letters AND failed run_nodes inside the window (the contract
 // reads the same two surfaces); the pure aggregator in internal/signature
 // dedupes and groups them. Response: {clusters, totalSamples, windowDays},
-// where totalSamples counts RAW samples before dedup, like the reference.
+// where totalSamples counts RAW samples before dedup, like the contract.
 package httpapi
 
 import (

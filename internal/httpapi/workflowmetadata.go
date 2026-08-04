@@ -5,7 +5,7 @@
 // collection operations and the distinct dropdown feeds (both excluding
 // soft-deleted workflows).
 //
-// Postures kept from the reference: a missing metadata row GETs as
+// Postures kept from the contract: a missing metadata row GETs as
 // `metadata: null` (200, never 404); the narrow `/folder` and `/tags`
 // routes touch ONLY their column so the Flows list can't wipe the rest of
 // the row; audit rows project aiGuidanceMarkdown to {configured, bytes} —

@@ -67,7 +67,7 @@ func TestRedriveRevivesRunToSuccess(t *testing.T) {
 	var attempts int
 	_ = pool.QueryRow(ctx, "select status, attempts from run_nodes where run_id=$1 and node_id='fragile'", runID).Scan(&status, &attempts)
 	if status != "succeeded" || attempts != 1 {
-		t.Fatalf("redriven node must succeed on the RE-ARMED attempt (Node parity: reset to 1), got %s/%d", status, attempts)
+		t.Fatalf("redriven node must succeed on the re-armed attempt (reset to 1), got %s/%d", status, attempts)
 	}
 	if n := fragileRuns.Load(); n != 2 {
 		t.Fatalf("expected exactly two executions of the fragile node, got %d", n)

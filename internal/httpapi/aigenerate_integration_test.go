@@ -55,7 +55,7 @@ func TestGenerateWorkflowLadder(t *testing.T) {
 		t.Fatalf("api-transform-tool template: %+v", r.body["id"])
 	}
 
-	// Prompt cap → 413 with the reference code.
+	// Prompt cap → 413 with the contract code.
 	long := make([]byte, 5000)
 	for i := range long {
 		long[i] = 'a'

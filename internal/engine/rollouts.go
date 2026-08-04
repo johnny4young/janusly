@@ -1,5 +1,5 @@
 // Workflow deployments (baseline/canary rollouts) — the durable traffic
-// split ported from the reference's workflowRolloutsRepo: immutable
+// split implements the contract's workflowRolloutsRepo: immutable
 // version snapshots validated at create (canary must be the LATEST saved
 // version, strictly newer than baseline, with byte-identical external
 // trigger contracts), a deterministic sha256 bucket for assignment, and
@@ -47,7 +47,7 @@ var externalTriggerTypes = map[string]bool{
 	"schedule": true, "email_received": true, "file_dropped": true, "mcp_server_event": true,
 }
 
-// stableJSON renders a value with sorted object keys — the reference's
+// stableJSON renders a value with sorted object keys — the contract's
 // stableJson, so both implementations agree on the trigger contract.
 func stableJSON(value any) string {
 	switch typed := value.(type) {

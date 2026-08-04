@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// The browser policy ported from the reference: conditional origin echo,
+// The browser policy implements the contract: conditional origin echo,
 // verbatim header lists, 204 preflights, inbound request-id honored.
 
 func corsProbe(t *testing.T, method, origin, requestID string) *httptest.ResponseRecorder {
@@ -37,15 +37,15 @@ func TestPreflightAnswers204WithTheFullDict(t *testing.T) {
 		t.Fatalf("allowlisted origin must echo with credentials: %v", h)
 	}
 	if h.Get("Access-Control-Allow-Methods") != "GET,POST,DELETE,OPTIONS" {
-		t.Fatalf("methods list parity: %q", h.Get("Access-Control-Allow-Methods"))
+		t.Fatalf("methods list consistency: %q", h.Get("Access-Control-Allow-Methods"))
 	}
 	if h.Get("Access-Control-Allow-Headers") !=
 		"Content-Type, Authorization, x-org-id, x-user-id, x-janusly-csrf, x-request-id, Accept-Language, Last-Event-ID" {
-		t.Fatalf("headers list parity: %q", h.Get("Access-Control-Allow-Headers"))
+		t.Fatalf("headers list consistency: %q", h.Get("Access-Control-Allow-Headers"))
 	}
 	if h.Get("Access-Control-Expose-Headers") != "Content-Disposition, X-Request-Id" ||
 		h.Get("Vary") != "Origin" {
-		t.Fatalf("expose/vary parity: %v", h)
+		t.Fatalf("expose/vary consistency: %v", h)
 	}
 }
 

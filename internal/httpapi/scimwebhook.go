@@ -28,7 +28,7 @@ func (s *V1Server) scimWebhookHandler(w http.ResponseWriter, r *http.Request) {
 
 	if valid, reason := verifyWorkOsSignature(header, string(rawBody), os.Getenv("WORKOS_WEBHOOK_SECRET"), time.Now()); !valid {
 		// No org context yet — audit against the "default" tenant for
-		// forensics, the reference's posture.
+		// forensics, the contract's posture.
 		s.scimAudit(ctx, "default", "scim.webhook.signature_invalid", "scim_event", "", map[string]any{
 			"reason": reason,
 		})

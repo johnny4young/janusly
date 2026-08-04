@@ -1,5 +1,5 @@
 // Timezone-aware weekday/time-of-day window matching (reference
-// packages/engine/src/zoned-window.ts).
+// the source contract).
 //
 // The two hard parts of "is this instant inside a recurring local window" —
 // resolving an instant to a wall clock in an IANA zone, and windows that

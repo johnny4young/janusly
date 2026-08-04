@@ -1,5 +1,5 @@
 // Package engine implements the durable execution core. Its founding
-// invariant, inherited from the reference backend: starting a run persists
+// invariant, inherited from the contract backend: starting a run persists
 // the run row, every node row and the run.started event in ONE transaction,
 // so a partially-started run can never escape to a worker.
 package engine
@@ -50,7 +50,7 @@ func New(pool *pgxpool.Pool) *Engine {
 
 // InputValidationError reports a run-start payload that does not satisfy the
 // workflow's declared inputs. The errors list is wire contract: the API
-// returns it verbatim, matching the reference's 400 body.
+// returns it verbatim, matching the contract's 400 body.
 type InputValidationError struct {
 	Errors []string
 }
@@ -65,7 +65,7 @@ type StartInput struct {
 	// Workflow is the validated document to execute.
 	Workflow *domain.Workflow
 	// WorkflowVersionID pins the version identity; empty falls back to the
-	// workflow id and then to the generated run id, like the reference.
+	// workflow id and then to the generated run id, like the contract.
 	WorkflowVersionID string
 	// Input is the caller's payload; nil means none was supplied.
 	Input     any
@@ -101,7 +101,7 @@ type StartInput struct {
 	WorkflowRolloutVariant string
 	// TraceID, when set, carries the parent chain's correlation id
 	// (subworkflow starts). Empty = a fresh id is stamped, so every root
-	// run gets one up front — the reference start-run posture.
+	// run gets one up front — the contract start-run posture.
 	TraceID string
 }
 
@@ -151,7 +151,7 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 	// The persisted input records the configuration the run actually used:
 	// the snapshot plus the RESOLVED payload, so later readers see effective
 	// values even after the workflow's defaults change. The snapshot is the
-	// reference's workflow ENTITY shape — the doc enriched with orgId /
+	// contract's workflow ENTITY shape — the doc enriched with orgId /
 	// createdBy / metadata / input — pinned by the dual-run comparator.
 	workflowSnapshot := map[string]any{}
 	if raw, err := json.Marshal(in.Workflow); err == nil {
@@ -284,8 +284,8 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 	}); err != nil {
 		return "", fmt.Errorf("insert run.started: %w", err)
 	}
-	// The reference's initial publication appends node.queued per root
-	// (event-granularity parity). Millisecond offsets keep the
+	// The contract's initial publication appends node.queued per root
+	// (event-granularity consistency). Millisecond offsets keep the
 	// (created_at, id) keyset from ever ordering a queued event before
 	// run.started or shuffling roots between reads.
 	rootIndex := 0

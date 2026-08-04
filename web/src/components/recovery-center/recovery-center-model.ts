@@ -310,7 +310,7 @@ export function buildGreeting(args: {
   // Greeting drops the "there" filler when no name is available — a bare
   // "Good morning." reads cleaner than "Good morning, there." and avoids
   // any sense of generic auto-personalization. Suffix variants land in
-  // sibling keys so the i18n parity test holds for both shapes.
+  // sibling keys so the i18n consistency test holds for both shapes.
   const slot = args.hour < 12 ? 'morning' : args.hour < 18 ? 'afternoon' : 'evening'
   const slotKey = `recoveryCenter.greeting.${slot}${args.displayName ? '' : 'Bare'}`
   const salutation = args.displayName

@@ -1,5 +1,5 @@
-// Billing surfaces (reference apps/api/src/routes/billing-routes.ts
-// + packages/engine/src/billing.ts): bounded usage reporting (flat summary
+// Billing surfaces (reference the API contract
+// + the source contract): bounded usage reporting (flat summary
 // + closed-enum dimensional breakdown + CSV export) and the budget
 // surfaces (composite read envelope + the per-workflow override write).
 // Both usage paths read the same 30-day / 10k-row slice — the
@@ -75,7 +75,7 @@ func usagePercentile(sorted []float64, p float64) any {
 	return sorted[idx]
 }
 
-// aggregateUsageBreakdown is the reference's pure aggregator: buckets keyed
+// aggregateUsageBreakdown is the contract's pure aggregator: buckets keyed
 // `dim=value|…`, per-bucket token/call/fallback totals, cost null when NO
 // row carries a cost (never coerce-to-zero), latency p50/p95/avg.
 func aggregateUsageBreakdown(rows []store.ListUsageEventsForBillingRow, dimensions []string) []map[string]any {
@@ -345,7 +345,7 @@ func (s *V1Server) workflowBudgetCore(r *http.Request, rc v1Request) opResult {
 }
 
 func (s *V1Server) mountBillingRoutes(mux *http.ServeMux) {
-	// The reads carry no rank/permission gate in the reference — auth-only.
+	// The reads carry no rank/permission gate in the contract — auth-only.
 	mux.HandleFunc("GET /billing/usage/export", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		s.billingUsageExport(w, r, rc)
 	}))

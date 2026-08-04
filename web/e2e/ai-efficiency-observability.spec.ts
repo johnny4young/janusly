@@ -1,5 +1,5 @@
 import { openWorkflowAiAction, openWorkspaceSection } from './_helpers/workspace-navigation'
-/** Real-stack proof for AI/run efficiency in Settings, Reasoning, and Copilot. */
+/** Real-stack proof for AI/run efficiency in Settings, Reasoning, and AI Studio. */
 
 import { execFile } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
@@ -328,7 +328,7 @@ test('AI and run efficiency are observable in English and Spanish', async ({ pag
     await captureRunUsageStates(page, runId, locale)
 
     await openWorkflowAiAction(page, locale === 'en' ? 'Workflows' : 'Flujos')
-    await page.locator('.copilot-prompt').fill(locale === 'en'
+    await page.locator('.ai-studio-prompt').fill(locale === 'en'
       ? 'Draft a budget-aware approval flow.'
       : 'Arma un flujo de aprobación ajustado al presupuesto.')
     await page.getByRole('button', { name: copy[locale].draft, exact: true }).click()

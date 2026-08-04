@@ -1,11 +1,11 @@
-// Encrypted credential secret store — the pilot's port of the
-// reference's credentialSecretStore.ts. New tenant secrets are
+// Encrypted credential secret store — the runtime's port of the
+// contract's credentialSecretStore.ts. New tenant secrets are
 // envelope-encrypted in PostgreSQL (fresh 32-byte data key per value,
 // AES-256-GCM twice: value under the data key, data key under the root
 // key) while legacy environment-variable references stay readable during
 // migration.
 //
-// Invariants (verbatim from the reference):
+// Invariants (verbatim from the contract):
 //   - The root key comes from ONE process-level secret and is never
 //     persisted (JANUSLY_CREDENTIAL_MASTER_KEY inline base64/hex, or
 //     _FILE); a boot probe fails fast on a malformed key.
@@ -86,7 +86,7 @@ func ParseCredentialSecretRef(secretRef string) string {
 	return ""
 }
 
-// IsManagedCredentialSecretRef reports whether the reference belongs to
+// IsManagedCredentialSecretRef reports whether the contract belongs to
 // the PostgreSQL-backed provider.
 func IsManagedCredentialSecretRef(secretRef string) bool {
 	return ParseCredentialSecretRef(secretRef) != ""
@@ -194,7 +194,7 @@ func openAesGcm(ciphertext, key, nonce, associatedData []byte) ([]byte, error) {
 	return gcm.Open(nil, nonce, ciphertext, associatedData)
 }
 
-// splitSeal separates Go's combined ciphertext||tag into the reference's
+// splitSeal separates Go's combined ciphertext||tag into the contract's
 // two stored columns (Node stores them apart; the wire schema is shared).
 func splitSeal(sealed []byte) (ciphertext, tag []byte) {
 	boundary := len(sealed) - 16
@@ -350,7 +350,7 @@ func ResolveCredentialSecretRef(ctx context.Context, q *store.Queries, orgID, se
 }
 
 // ResolveCredentialSecret resolves by tenant, kind, and name without
-// exposing the reference — THE org-aware resolver every integration tool
+// exposing the contract — THE org-aware resolver every integration tool
 // goes through.
 func ResolveCredentialSecret(ctx context.Context, q *store.Queries, orgID, kind, name string) string {
 	credential, err := q.GetCredentialByName(ctx, store.GetCredentialByNameParams{

@@ -267,7 +267,7 @@ export function HomeInsights({
           />
           {showRecoveryLab && (
             <RecoveryLabEntry
-              onOpenStudio={() => onOpenTab('copilot')}
+              onOpenStudio={() => onOpenTab('ai-studio')}
               onOpenRecipes={() => onOpenTab('templates')}
               onStartDrill={onStartRecoveryDrill}
               onDismiss={onDismissRecoveryLab}

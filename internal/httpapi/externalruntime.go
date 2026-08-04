@@ -1,6 +1,6 @@
 // Signed lifecycle ingestion and read-only shadow projections for
 // workflows owned by EXTERNAL runtimes (reference
-// apps/api/src/routes/external-runtime-routes.ts + externalRuntimeRepo.ts
+// the API contract + externalRuntimeRepo.ts
 // + external-runtime.ts). Observation-only by contract: the CloudEvents
 // union carries no retry/resume/cancel/replay command, so shadow state can
 // never be mistaken for mutation authority, and external cases earn no
@@ -469,7 +469,7 @@ func (s *V1Server) projectExternalEvent(
 	}
 }
 
-// projectExternalRecoveryCase mirrors the reference: a failed observation
+// projectExternalRecoveryCase mirrors the contract: a failed observation
 // (re)opens the subject's case as `detected`; a succeeded observation with
 // a HIGHER sequence flips it to `observed_recovered`. Never a Janusly
 // verified recovery — external cases carry no credit.

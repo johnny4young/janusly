@@ -1,5 +1,5 @@
-// Measured Recovery Drill outcomes — the PURE composition ported from
-// the reference's buildRecoveryDrillOutcome: truthful status, duration,
+// Measured Recovery Drill outcomes — the PURE composition implements
+// the contract's buildRecoveryDrillOutcome: truthful status, duration,
 // and recurrence derived from durable facts only (the DLQ chain, the
 // terminal impact fact, explicit resolutions, and the 7-day recurrence
 // window). No wall-clock guesswork: a capped chain reports
@@ -72,7 +72,7 @@ func earliest(left, right *time.Time) *time.Time {
 }
 
 // BuildRecoveryDrillOutcome composes truthful status, duration, and
-// recurrence from durable facts — the reference's precedence verbatim:
+// recurrence from durable facts — the contract's precedence verbatim:
 // capped → measurement_incomplete; recovered wins over accepted; an open
 // latest entry is awaiting_action; a claimed-but-unresolved replay is
 // replay_in_progress.

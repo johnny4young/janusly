@@ -32,7 +32,7 @@ from the schema-validated `draftReply` field.
   "can't log in" ticket. The Slack + email steps are skipped in sandbox mode, and
   with AI configured the run pauses at the agent-review form with the draft
   prefilled for editing.
-- **Start recovery drill** executes `escalate` through the real BullMQ worker,
+- **Start recovery drill** executes `escalate` through the Janusly worker,
   retry classification, and terminal DLQ boundary. The retry policy correctly
   treats a controlled missing-secret probe as non-retryable before any Slack
   request, then the drill opens the recovery queue with measured runtime

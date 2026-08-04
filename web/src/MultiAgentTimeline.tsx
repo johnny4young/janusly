@@ -194,7 +194,7 @@ export function MultiAgentTimeline({
           icon={<Layers3 />}
           kicker={t('multiAgent.empty')}
           body={t('multiAgent.emptyHelper')}
-          cta={{ label: t('multiAgent.emptyCta'), onClick: () => setActiveTab('copilot') }}
+          cta={{ label: t('multiAgent.emptyCta'), onClick: () => setActiveTab('ai-studio') }}
           testId="multi-agent-empty"
         />
         <ul className="we-ghost-lanes" aria-hidden="true">

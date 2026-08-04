@@ -252,7 +252,7 @@ export default function App() {
       id: (current?.id ?? 0) + 1,
       action,
     }))
-    setActiveTab('copilot')
+    setActiveTab('ai-studio')
   }, [setActiveTab])
 
   // Warn on tab close / reload while the canvas holds unsaved edits. The

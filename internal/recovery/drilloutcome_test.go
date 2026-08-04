@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// The outcome precedence ported from the reference: capped wins over
+// The outcome precedence implements the contract: capped wins over
 // everything (measurement_incomplete), recovered over accepted, an open
 // latest is awaiting_action, a claimed unresolved replay is in progress —
 // and the 7-day recurrence window flows monitoring → clear / recurred.

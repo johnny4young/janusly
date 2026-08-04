@@ -150,7 +150,7 @@ func requireError(t *testing.T, res apiResponse, status int, code, message strin
 	}
 	errBody, _ := res.body["error"].(map[string]any)
 	if errBody["code"] != code || (message != "" && errBody["message"] != message) {
-		t.Fatalf("error body parity broken: %v", errBody)
+		t.Fatalf("error body contract mismatch: %v", errBody)
 	}
 }
 
@@ -168,7 +168,7 @@ func requireKeys(t *testing.T, m map[string]any, want ...string) {
 	sort.Strings(want)
 	got := keysOf(m)
 	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("key set parity broken:\n got: %v\nwant: %v", got, want)
+		t.Fatalf("key set contract mismatch:\n got: %v\nwant: %v", got, want)
 	}
 }
 
@@ -253,7 +253,7 @@ func TestStartInvalidWorkflowMatchesGoldenError(t *testing.T) {
 	requireError(t, res, 400, "invalid_input", "Invalid request body")
 	params := res.body["error"].(map[string]any)["params"].(map[string]any)
 	if params["field"] != "workflow.nodes" {
-		t.Fatalf("params.field parity broken: %v", params)
+		t.Fatalf("params.field contract mismatch: %v", params)
 	}
 }
 
@@ -321,7 +321,7 @@ func TestSaveWorkflowContract(t *testing.T) {
 	invalid := h.call("POST", "/v1/workflows/save", map[string]any{"name": "x"}, "")
 	requireError(t, invalid, 400, "invalid_input", "Invalid request body")
 	if invalid.body["error"].(map[string]any)["params"].(map[string]any)["field"] != "nodes" {
-		t.Fatalf("save invalid field parity: %v", invalid.body)
+		t.Fatalf("save invalid field consistency: %v", invalid.body)
 	}
 }
 
@@ -391,7 +391,7 @@ func TestCancelGuardsDistinguishMissingFromCrossOrg(t *testing.T) {
 	runID := started.body["data"].(map[string]any)["runId"].(string)
 
 	// Unlike run READS (indistinguishable 403), cancel splits 404 from 403 —
-	// ported from the reference route guards.
+	// implements the contract route guards.
 	requireError(t, h.call("POST", "/v1/run/cancel", map[string]any{"runId": "ghost"}, ""),
 		404, "runs_run_not_found", "Run not found")
 	requireError(t, h.call("POST", "/v1/run/cancel", map[string]any{"runId": runID}, h.org+"-x"),
@@ -443,7 +443,7 @@ func TestReplayAliasMatchesReferenceShape(t *testing.T) {
 			deadLetterID = row["id"].(string)
 		}
 	}
-	// Golden: success is {ok:true}; the conflict carries the reference's
+	// Golden: success is {ok:true}; the conflict carries the contract's
 	// full message.
 	replayed := h.call("POST", "/v1/dlq/replay", map[string]any{"deadLetterId": deadLetterID}, "")
 	requireEnvelope(t, replayed)
@@ -539,11 +539,11 @@ func TestWorkflowReadSurfaces(t *testing.T) {
 		"id", "orgId", "name", "createdBy", "createdAt", "lastRunStatus",
 		"runCount", "bufferedTriggerCount", "status", "pausedReason",
 		"tags", "folder", "deletedAt")
-	// The reference counts ONLY version-linked runs — a doc-posted
+	// The contract counts ONLY version-linked runs — a doc-posted
 	// ad-hoc run (this test's start) never counts, exactly like Node. The
 	// counted case lives in TestVersionAttributionSemantics.
 	if row["runCount"] != float64(0) || row["lastRunStatus"] != nil {
-		t.Fatalf("doc-posted runs must not count (reference semantics): %v", row)
+		t.Fatalf("doc-posted runs must not count (contract semantics): %v", row)
 	}
 
 	// Latest: nullable contract — a version row with the full key set here.
@@ -580,7 +580,7 @@ func TestWorkflowReadSurfaces(t *testing.T) {
 
 func TestLegacySupportReads(t *testing.T) {
 	h := newAPIHarness(t)
-	// /health is OPEN (no auth) with the reference's public-safe shape.
+	// /health is OPEN (no auth) with the contract's public-safe shape.
 	req, _ := http.NewRequest("GET", h.server.URL+"/health", nil)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -599,7 +599,7 @@ func TestLegacySupportReads(t *testing.T) {
 	}
 
 	// /org/config: raw legacy body — the FULL closed catalog with layered
-	// provenance, exactly what the reference answers a fresh org. The
+	// provenance, exactly what the contract answers a fresh org. The
 	// earlier empty-list stub was a divergence and is covered here.
 	cfg := h.call("GET", "/org/config", nil, "")
 	if list, ok := cfg.body["config"].([]any); !ok || len(list) != 69 {
@@ -703,7 +703,7 @@ func TestSoftDeleteTrashRestoreLifecycle(t *testing.T) {
 	requireError(t, h.call("GET", "/v1/workflows/latest?workflowId="+workflowID, nil, ""),
 		404, "workflow_not_found", "Workflow not found")
 
-	// A save NEVER resurrects a tombstone — the reference's house rule.
+	// A save NEVER resurrects a tombstone — the contract's house rule.
 	requireError(t, h.call("POST", "/v1/workflows/save", doc, ""),
 		404, "workflow_not_found", "Workflow not found")
 

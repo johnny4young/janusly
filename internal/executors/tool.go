@@ -1,5 +1,5 @@
 // The `tool` node executor: renders its input, dispatches to the registry,
-// and returns the reference's envelope shape {tool, result}. resultPolicy
+// and returns the contract's envelope shape {tool, result}. resultPolicy
 // "require_ok" fails the node on an unsuccessful envelope; the default
 // "envelope" hands the result downstream for the workflow to branch on.
 //
@@ -60,7 +60,7 @@ func NewToolExecutor(registry *tools.Registry) Func {
 		result := executeRegisteredTool(ctx, registry, name, input, in)
 		if result["ok"] == false && policy == "require_ok" {
 			message, _ := result["error"].(string)
-			return nil, fmt.Errorf("Tool %s returned an unsuccessful result: %s", name, message) //nolint:staticcheck // reference message is the wire contract
+			return nil, fmt.Errorf("Tool %s returned an unsuccessful result: %s", name, message) //nolint:staticcheck // contract message is the wire contract
 		}
 		return map[string]any{"tool": name, "result": result}, nil
 	}

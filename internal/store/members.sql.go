@@ -874,7 +874,7 @@ type UpsertInvitedIdentityMembershipParams struct {
 
 // The verified provider id is the durable membership key. Re-acceptance of a
 // newly issued invitation for the same org updates the existing grant exactly
-// like the Node oracle.
+// like the Node baseline.
 func (q *Queries) UpsertInvitedIdentityMembership(ctx context.Context, arg UpsertInvitedIdentityMembershipParams) error {
 	_, err := q.db.Exec(ctx, upsertInvitedIdentityMembership,
 		arg.ID,

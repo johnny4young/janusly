@@ -1,5 +1,5 @@
-// Persistent cross-run memory substrate over pgvector, ported from the
-// reference's memory repo: the shared memory_entries table, an Ollama
+// Persistent cross-run memory substrate over pgvector, implements the
+// contract's memory repo: the shared memory_entries table, an Ollama
 // embeddings client (bge-m3, 1024 dims), and the two-flag consent —
 // JANUSLY_MEMORY_ENABLED at the process level AND the org catalog's
 // memory.enabled AND the kind present in memory.allowedKinds. Consent off
@@ -34,7 +34,7 @@ var Kinds = map[string]bool{
 	"workflow_vector": true, "agent_episode": true,
 }
 
-// defaultRetentionDays mirrors the reference table.
+// defaultRetentionDays mirrors the contract table.
 var defaultRetentionDays = map[string]int{
 	"recovery_rationale": 180, "run_summary": 90, "runbook_fragment": 365,
 	"patch_rationale": 365, "generated_workflow": 365,
@@ -56,7 +56,7 @@ type CommitInput struct {
 	Metadata   map[string]any
 }
 
-// CommitResult mirrors the reference.
+// CommitResult mirrors the contract.
 type CommitResult struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
@@ -227,7 +227,7 @@ func embeddingConfig(ctx context.Context, pool *pgxpool.Pool, orgID string) (pro
 
 // embed calls the Ollama embeddings endpoint. The base URL is
 // operator-supplied infrastructure config (never workflow-author input),
-// so it deliberately bypasses the SSRF guard like the reference.
+// so it deliberately bypasses the SSRF guard like the contract.
 func embed(ctx context.Context, baseURL, model, text string) ([]float64, error) {
 	payload, _ := json.Marshal(map[string]any{"model": model, "prompt": text})
 	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -266,7 +266,7 @@ func vectorLiteral(embedding []float64) string {
 	return "[" + strings.Join(parts, ",") + "]"
 }
 
-// fireMemoryUsage writes the reference's memory usage row — best-effort,
+// fireMemoryUsage writes the contract's memory usage row — best-effort,
 // a telemetry failure never breaks the caller.
 func fireMemoryUsage(ctx context.Context, pool *pgxpool.Pool, metric, orgID, runID, workflowID,
 	kind, provider, model string, ok bool, reason string, latency time.Duration) {

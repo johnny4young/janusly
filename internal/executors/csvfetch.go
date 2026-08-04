@@ -4,7 +4,7 @@
 // executors (the executor registry wraps the tool registry), so this file
 // contributes the definition through tools.Registry.Register.
 //
-// Contract ported from the reference (packages/engine/src/tools/csv.ts +
+// Contract implements the contract (the source contract +
 // csv-stream.ts): one summary shape on EVERY path —
 //   - pre-stream rejection (SSRF / DNS / scheme / Content-Length):
 //     {ok:false, statusCode:0, streamTruncated:false, error}
@@ -261,7 +261,7 @@ func (e *httpExecutor) openStream(ctx context.Context, in Input) (*http.Response
 		Timeout:   time.Duration(timeoutMs) * time.Millisecond,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) > maxRedirects {
-				return fmt.Errorf("HTTP redirect limit exceeded; last hop %s -> %s", via[len(via)-1].URL, req.URL) //nolint:staticcheck // reference message is the wire contract
+				return fmt.Errorf("HTTP redirect limit exceeded; last hop %s -> %s", via[len(via)-1].URL, req.URL) //nolint:staticcheck // contract message is the wire contract
 			}
 			if _, err := e.validate(req.Context(), req.URL.String(), pins); err != nil {
 				return err
@@ -300,7 +300,7 @@ func (e *httpExecutor) openStream(ctx context.Context, in Input) (*http.Response
 	if res.ContentLength > int64(maxBytes) {
 		_ = res.Body.Close()
 		transport.CloseIdleConnections()
-		return nil, nil, fmt.Errorf("HTTP response exceeds maxResponseBytes (Content-Length %d > cap %d)", res.ContentLength, maxBytes) //nolint:staticcheck // reference message is the wire contract
+		return nil, nil, fmt.Errorf("HTTP response exceeds maxResponseBytes (Content-Length %d > cap %d)", res.ContentLength, maxBytes) //nolint:staticcheck // contract message is the wire contract
 	}
 	cleanup := func() {
 		_ = res.Body.Close()

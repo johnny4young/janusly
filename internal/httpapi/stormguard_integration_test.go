@@ -9,7 +9,7 @@ import (
 
 // The per-trigger storm guard end to end proves the compatibility contract:
 // a trigger over its configured rateLimitPerMin marks the event skipped,
-// audits trigger.event.skipped, and answers 429 with the reference's
+// audits trigger.event.skipped, and answers 429 with the contract's
 // exact body — while a distinct trigger keeps its own budget.
 func TestWebhookStormGuardSkipsOverLimit(t *testing.T) {
 	h := newAPIHarness(t)
@@ -49,7 +49,7 @@ func TestWebhookStormGuardSkipsOverLimit(t *testing.T) {
 	}
 	data := skipped.body["data"].(map[string]any)
 	if data["ok"] != false || data["skipped"] != true || data["reason"] != "rate_limited" || data["triggerEventId"] == nil {
-		t.Fatalf("skip body must match the reference: %+v", data)
+		t.Fatalf("skip body must match the contract: %+v", data)
 	}
 
 	// The event row is persisted as skipped — the payload is never lost

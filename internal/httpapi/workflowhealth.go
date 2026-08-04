@@ -163,7 +163,7 @@ func (s *V1Server) workflowHealthCore(r *http.Request, rc v1Request) opResult {
 }
 
 // parseIntegerNumber mirrors Number(...) + Number.isInteger(...) for the
-// query values the Node compatibility runtime accepts (for example `2.0`
+// query values the public API accepts (for example `2.0`
 // and `1e1`). The result is bounded to Postgres integer because workflow
 // versions use that exact storage type.
 func parseIntegerNumber(raw string) (int, bool) {

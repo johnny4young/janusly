@@ -1,4 +1,4 @@
-// Command loadgen is the pilot's self-contained load generator — the same
+// Command loadgen is the runtime's self-contained load generator — the same
 // three scenarios against either backend (they share the /v1 surface), no
 // external tooling required.
 //

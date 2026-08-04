@@ -1,5 +1,5 @@
 // Operator routes for the supervised auto-healing decision ledger
-// (reference apps/api/src/routes/auto-healing-routes.ts) plus the
+// (reference the API contract) plus the
 // cron-observability schedule-history heatmap. The scanner (engine
 // sweep) proposes + validates; every APPLY stays an operator decision —
 // CAS on status `validated` so a raced sibling click loses with 409.
@@ -135,7 +135,7 @@ func (s *V1Server) mountAutoHealingRoutes(mux *http.ServeMux) {
 		}
 
 		// Sandbox evidence that never exercised writes needs an explicit
-		// risk acknowledgement before production apply — the pilot's
+		// risk acknowledgement before production apply — the runtime's
 		// validation runs are born "static" (write sides skipped), so both
 		// labels demand the ack; only write-proving evidence skips it.
 		evidence := textOrNull(row.ValidationEvidenceLevel)

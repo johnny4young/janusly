@@ -1,7 +1,7 @@
 // Deterministic fallback templates for /ai/generate-workflow, verbatim
-// from the reference's template library — the $0 answer when no provider
+// from the contract's template library — the $0 answer when no provider
 // is configured or a generation attempt degraded. The keyword matcher is
-// the reference's exact ladder (email first: a "respond to incidents by
+// the contract's exact ladder (email first: a "respond to incidents by
 // email" prompt lands on the email skeleton, not the incident one).
 package httpapi
 
@@ -71,7 +71,7 @@ var fallbackTemplates = func() map[string]map[string]any {
 	return decoded
 }()
 
-// fallbackTemplateForPrompt is the reference's keyword ladder, verbatim
+// fallbackTemplateForPrompt is the contract's keyword ladder, verbatim
 // order: email → incident → approval → transform → http-ai-summary.
 func fallbackTemplateForPrompt(prompt string) map[string]any {
 	text := strings.ToLower(prompt)

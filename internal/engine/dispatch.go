@@ -82,7 +82,7 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 	renderOpts := d.renderOpts
 	if node.Type == "loop" {
 		// The loop's item/index scopes bind per iteration inside the
-		// executor; deferring them here mirrors the reference's
+		// executor; deferring them here mirrors the contract's
 		// renderLoopConfig split.
 		renderOpts.DeferredRoots = append([]string{"item", "index"}, renderOpts.DeferredRoots...)
 	}
@@ -155,7 +155,7 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 	}
 	execute, ok := d.registry[node.Type]
 	if !ok {
-		return nil, fmt.Errorf("No executor for node type: %s", node.Type) //nolint:staticcheck // reference message is the wire contract
+		return nil, fmt.Errorf("No executor for node type: %s", node.Type) //nolint:staticcheck // contract message is the wire contract
 	}
 	var httpBounds *executors.HTTPBounds
 	if node.Type == "http" {

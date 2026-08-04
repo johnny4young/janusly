@@ -326,7 +326,7 @@ func TestRecoveryDrillOutcomeRoutes(t *testing.T) {
 		t.Fatalf("elapsed: %+v", outcome["elapsedMs"])
 	}
 
-	// The focused route, Home section, and pilot-only dossier alias share the
+	// The focused route, Home section, and runtime-only dossier alias share the
 	// full bounded validation contract.
 	res = h.call("GET", "/recovery/validation?windowDays=365", nil, "")
 	if res.status != 200 {

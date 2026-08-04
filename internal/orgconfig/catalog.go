@@ -1,12 +1,12 @@
 // The closed org-config catalog, mechanically extracted from the
-// reference's orgConfigCatalog.ts (69 definitions): keys, categories,
+// contract's orgConfigCatalog.ts (69 definitions): keys, categories,
 // types, defaults, env overrides, ranges, allowed values, and the
 // forbidden-name/value guards that keep credential-shaped material out of
 // tenant settings. No DB access lives here — the persistence layer reads
 // and writes against this static source of truth. Five keys carry custom
-// validators in the reference (surfaceModels, operatorGuidance,
+// validators in the contract (surfaceModels, operatorGuidance,
 // memory.allowedKinds, memory.retentionDaysByKind, recovery.slaPolicies);
-// their subsystems are not in the pilot yet, so those validators are
+// their subsystems are not in the runtime yet, so those validators are
 // flagged HasDeferredValidator and arrive with their waves — the standard
 // pipeline (type, trim, forbidden-value, allowedValues, min/max,
 // allowEmpty) applies to them like every other key.
@@ -20,7 +20,7 @@ import (
 	"strings"
 )
 
-// Definition mirrors the reference's OrgConfigDefinition.
+// Definition mirrors the contract's OrgConfigDefinition.
 type Definition struct {
 	Key           string   `json:"key"`
 	Category      string   `json:"category"`
@@ -38,7 +38,7 @@ type Definition struct {
 	HasDeferredValidator bool `json:"-"`
 }
 
-// Forbidden-name / forbidden-value guards, verbatim from the reference.
+// Forbidden-name / forbidden-value guards, verbatim from the contract.
 var (
 	ForbiddenNamePattern = regexp.MustCompile(
 		`(?i)(secret|token|password|api[_-]?key|authorization|cookie|private[_-]?key|database[_-]?url|redis[_-]?url|supabase|service[_-]?role|service[_-]?token)`)
@@ -46,7 +46,7 @@ var (
 		`(?i)^(sk-|sk-ant-|xox[baprs]-|ghp_|github_pat_|ya29\.|AKIA|Bearer\s+)|^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.|-----BEGIN [A-Z ]+PRIVATE KEY-----|postgres(?:ql)?://|redis://`)
 )
 
-// Definitions is the closed catalog. Order matches the reference file.
+// Definitions is the closed catalog. Order matches the contract file.
 var Definitions = []Definition{
 	{Key: "ai.provider", Category: "ai", Description: "Default LLM provider for this tenant. Provider API keys still come from env or secret management.", ValueType: "string", Default: "anthropic", EnvKeys: []string{"JANUSLY_LLM_PROVIDER"}, AllowedValues: []string{"openai", "anthropic"}},
 	{Key: "ai.generationMode", Category: "ai", Description: "Workflow generation mechanism for /ai/generate-workflow. 'free_json' (default) has the model emit the workflow as JSON text validated server-side \u2014 higher reliability/quality and provider-agnostic. 'constrained' uses the legacy provider structured-output schema. Reversible per tenant.", ValueType: "string", Default: "free_json", EnvKeys: []string{"JANUSLY_AI_GENERATION_MODE"}, AllowedValues: []string{"constrained", "free_json"}},
@@ -124,7 +124,7 @@ func contains(values []string, want string) bool {
 }
 
 // trimFloat renders bounds without a trailing .0 so messages match the
-// reference's JS number formatting.
+// contract's JS number formatting.
 func trimFloat(v float64) string {
 	if v == float64(int64(v)) {
 		return fmt.Sprintf("%d", int64(v))
@@ -143,7 +143,7 @@ var byKey = func() map[string]*Definition {
 // Get returns the definition for a key, or nil for an unknown key.
 func Get(key string) *Definition { return byKey[key] }
 
-// Normalize runs the reference's standard validation pipeline over a raw
+// Normalize runs the contract's standard validation pipeline over a raw
 // JSON-decoded value and returns the normalized typed value.
 func Normalize(def *Definition, value any) (any, error) {
 	switch def.ValueType {

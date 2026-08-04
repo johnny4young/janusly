@@ -162,7 +162,7 @@ type BackfillOutcome struct {
 }
 
 // backfillPageLimit bounds one resume call's drain; repeated calls drain
-// the next page (the reference's capped-window posture).
+// the next page (the contract's capped-window posture).
 const backfillPageLimit = 50
 
 // ResumeWorkflowCircuitBreaker flips paused_circuit_breaker → active

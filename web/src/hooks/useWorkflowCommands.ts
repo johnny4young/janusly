@@ -100,7 +100,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
       setActiveTab('templates')
       return
     }
-    void createNewWorkflow(mode === 'describe' ? 'copilot' : 'inspector')
+    void createNewWorkflow(mode === 'describe' ? 'ai-studio' : 'inspector')
   }, [createNewWorkflow, setActiveTab])
 
   const maybeRestoreDraft = useCallback(async (

@@ -213,7 +213,7 @@ func TestResolveMemberRoleLadder(t *testing.T) {
 	seedMember(t, pool, org, "custom-user", "c@example.com", "billing-admin")
 
 	// A row's literal role wins in EVERY mode — including dev-headers
-	// (the auto-grant is for missing rows only, the reference's subtlety).
+	// (the auto-grant is for missing rows only, the contract's subtlety).
 	for _, mode := range []Mode{ModeSupabase, ModeServiceToken, ModeDevHeaders} {
 		got, err := ResolveMemberRole(ctx, q, org, "viewer-user", mode)
 		if err != nil || got == nil || got.InheritsFrom != RoleViewer {

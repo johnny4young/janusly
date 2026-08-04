@@ -1,7 +1,7 @@
 // The tool registry: typed definitions with input validation, output
 // validation and the public catalog projection the AI Studio reads
 // (name, description, required, optional, inputExample, inputFields,
-// writeSide). Ported from packages/engine/src/tool-registry.ts and its json
+// writeSide). Ported from the source contract and its json
 // tool family, including the prototype-pollution guards those tools carry.
 package tools
 
@@ -40,7 +40,7 @@ type Registry struct {
 	byName map[string]Definition
 }
 
-// NewRegistry builds the pilot's tool set.
+// NewRegistry builds the runtime's tool set.
 func NewRegistry() *Registry {
 	registry := &Registry{byName: map[string]Definition{}}
 	for _, definition := range jsonTools() {
@@ -112,7 +112,7 @@ type ErrUnknownTool struct{ Name string }
 func (e *ErrUnknownTool) Error() string { return "Unknown tool: " + e.Name }
 
 // Execute validates the input's required fields, runs the tool, and returns
-// its output. Validation failures carry the reference's message shape.
+// its output. Validation failures carry the contract's message shape.
 func (r *Registry) Execute(ctx context.Context, name string, input map[string]any) (map[string]any, error) {
 	definition, ok := r.byName[name]
 	if !ok {
@@ -125,14 +125,14 @@ func (r *Registry) Execute(ctx context.Context, name string, input map[string]an
 		}
 	}
 	if len(missing) > 0 {
-		return nil, fmt.Errorf("Invalid tool input for %s: %s", name, strings.Join(missing, ", ")) //nolint:staticcheck // reference message is the wire contract
+		return nil, fmt.Errorf("Invalid tool input for %s: %s", name, strings.Join(missing, ", ")) //nolint:staticcheck // contract message is the wire contract
 	}
 	return definition.Execute(ctx, input)
 }
 
-// prototypeKeys are the JS prototype-pollution vectors the reference tools
+// prototypeKeys are the JS prototype-pollution vectors the contract tools
 // refuse; in Go they are ordinary map keys, but refusing them keeps a
-// pilot-produced payload safe to feed back into the Node backend.
+// runtime-produced payload safe to feed back into the Janusly API.
 var prototypeKeys = map[string]bool{"__proto__": true, "prototype": true, "constructor": true}
 
 func jsonTools() []Definition {
@@ -295,7 +295,7 @@ func (r *Registry) Register(definition Definition) {
 }
 
 // IsWriteSide reports the static write-capability bit for a registered tool;
-// unknown names are read-side (the reference's registry lookup does the same).
+// unknown names are read-side (the contract's registry lookup does the same).
 func (r *Registry) IsWriteSide(name string) bool {
 	definition, ok := r.byName[name]
 	return ok && definition.WriteSide
@@ -365,7 +365,7 @@ func (r *Registry) PlannerTools(dryRun bool) []map[string]any {
 }
 
 // plannerJSONSchema derives the private planner schema from the field
-// table (the reference keeps this projection out of listTools()).
+// table (the contract keeps this projection out of listTools()).
 func plannerJSONSchema(definition Definition) map[string]any {
 	properties := map[string]any{}
 	for _, field := range definition.Fields {

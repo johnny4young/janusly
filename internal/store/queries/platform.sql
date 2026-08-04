@@ -62,7 +62,7 @@ DELETE FROM rate_limit_windows WHERE expires_at < now();
 
 -- Org-config rows for the layered catalog read. The closed catalog is
 -- ~69 keys; the 200 cap guards a pathological row count, like the
--- reference's defensive limit.
+-- contract's defensive limit.
 -- name: ListOrgConfigRows :many
 SELECT key, value_json, updated_at FROM org_configs WHERE org_id = $1 LIMIT 200;
 

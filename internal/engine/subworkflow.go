@@ -1,5 +1,5 @@
 // `subworkflow` node — calls another saved workflow as a step (reference
-// packages/engine/src/subworkflow.ts + subworkflow-terminal-reconciler.ts).
+// the source contract + subworkflow-terminal-reconciler.ts).
 //
 // Async pause-and-resume with the ATOMIC start contract: the child's
 // StartRun transaction ALSO commits the parent node's exact
@@ -85,7 +85,7 @@ func (e *Engine) computeSubworkflowDepth(ctx context.Context, runID string) (int
 		depth++
 		current = row.ParentRunID.String
 		if depth > subworkflowDepthWalkerMax {
-			return 0, fmt.Errorf("Subworkflow depth walker bounded at %d (cycle?)", subworkflowDepthWalkerMax) //nolint:staticcheck // reference message is the wire contract
+			return 0, fmt.Errorf("Subworkflow depth walker bounded at %d (cycle?)", subworkflowDepthWalkerMax) //nolint:staticcheck // contract message is the wire contract
 		}
 	}
 	return depth, nil
@@ -124,7 +124,7 @@ func (e *Engine) executeSubworkflowNode(
 		return nil, err
 	}
 	if max := e.maxSubworkflowDepth(ctx, claim.OrgID); depth >= max {
-		return nil, fmt.Errorf("Subworkflow depth limit reached (%d >= %d)", depth, max) //nolint:staticcheck // reference message is the wire contract
+		return nil, fmt.Errorf("Subworkflow depth limit reached (%d >= %d)", depth, max) //nolint:staticcheck // contract message is the wire contract
 	}
 
 	// 2. Load the child (org-scoped, active parent only). An unpinned
@@ -149,27 +149,27 @@ func (e *Engine) executeSubworkflowNode(
 				WorkflowID: workflowID, OrgID: claim.OrgID, Version: int32(*pinnedVersion),
 			})
 			if err != nil {
-				return nil, fmt.Errorf("Subworkflow not found: %s version %d (org: %s)", workflowID, *pinnedVersion, claim.OrgID) //nolint:staticcheck // reference message is the wire contract
+				return nil, fmt.Errorf("Subworkflow not found: %s version %d (org: %s)", workflowID, *pinnedVersion, claim.OrgID) //nolint:staticcheck // contract message is the wire contract
 			}
 			childWorkflow, _ = domain.Parse(row.DagJson)
 			childVersionID, childVersion = row.ID, int(row.Version)
 		} else {
 			ownerState, err := q.GetWorkflowIngestState(ctx, workflowID)
 			if err != nil || ownerState.OrgID != claim.OrgID || ownerState.DeletedAt != nil {
-				return nil, fmt.Errorf("Subworkflow not found: %s (org: %s)", workflowID, claim.OrgID) //nolint:staticcheck // reference message is the wire contract
+				return nil, fmt.Errorf("Subworkflow not found: %s (org: %s)", workflowID, claim.OrgID) //nolint:staticcheck // contract message is the wire contract
 			}
 			row, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{
 				WorkflowID: workflowID, OrgID: claim.OrgID,
 			})
 			if err != nil {
-				return nil, fmt.Errorf("Subworkflow not found: %s (org: %s)", workflowID, claim.OrgID) //nolint:staticcheck // reference message is the wire contract
+				return nil, fmt.Errorf("Subworkflow not found: %s (org: %s)", workflowID, claim.OrgID) //nolint:staticcheck // contract message is the wire contract
 			}
 			childWorkflow, _ = domain.Parse(row.DagJson)
 			childVersionID, childVersion = row.ID, int(row.Version)
 		}
 	}
 	if childWorkflow == nil {
-		return nil, fmt.Errorf("Subworkflow snapshot failed validation: %s", workflowID) //nolint:staticcheck // reference message is the wire contract
+		return nil, fmt.Errorf("Subworkflow snapshot failed validation: %s", workflowID) //nolint:staticcheck // contract message is the wire contract
 	}
 
 	// 3. Forwarded input: config.input (present, including null) wins;

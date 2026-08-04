@@ -3,7 +3,7 @@
 // {apiVersion, requestId, data|error} envelope with an X-Request-Id header;
 // unknown and cross-org runs are an indistinguishable 403 runs_forbidden;
 // error bodies carry {code, message, params?}. Dev auth mirrors the
-// reference's dev-header mode: x-org-id / x-user-id.
+// contract's dev-header mode: x-org-id / x-user-id.
 package httpapi
 
 import (
@@ -98,7 +98,7 @@ func newV1HandlerWithWorkOS(eng *engine.Engine, pool *pgxpool.Pool, client worko
 		_, _ = w.Write(contractdoc.OpenAPI)
 	})
 	// Legacy public health — the web's OperationsPage polls this every 20s.
-	// Public-safe shape from the reference: no raw bucket/error/key detail.
+	// Public-safe shape from the contract: no raw bucket/error/key detail.
 	// rateLimiter is the degradation tracker's public snapshot; queue
 	// reflects a real bounded DB probe.
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -355,7 +355,7 @@ func (s *V1Server) auth(next handlerFunc) http.HandlerFunc {
 			return
 		}
 		if resolved == nil {
-			// The reference's 401: message and code from the dispatcher's
+			// The contract's 401: message and code from the dispatcher's
 			// curated-error path.
 			writeV1Error(w, requestID, http.StatusUnauthorized, "server_request_failed",
 				"Unauthorized: missing Supabase JWT or dev headers", nil)

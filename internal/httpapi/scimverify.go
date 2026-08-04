@@ -15,7 +15,7 @@ const (
 	scimBodyMaxBytes = 1 << 20 // 1 MiB, the API's JSON body cap
 
 	// scimSignatureToleranceSeconds bounds the t= timestamp skew (±5 min),
-	// the reference's TOLERANCE_WINDOWS_SEC.WEBHOOK_SIGNATURE.
+	// the contract's TOLERANCE_WINDOWS_SEC.WEBHOOK_SIGNATURE.
 	scimSignatureToleranceSeconds = 300
 
 	// scimResyncMaxMembers caps one bulk re-sync sweep; a directory with

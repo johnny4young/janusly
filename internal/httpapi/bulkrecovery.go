@@ -82,7 +82,7 @@ func (s *V1Server) clusterMembersCore(r *http.Request, rc v1Request) opResult {
 
 // recheckDeadLetterSignature re-normalizes one DLQ row's error and
 // asserts it still matches the claimed cluster — the stale-member-list
-// defense the reference applies per row at apply time.
+// defense the contract applies per row at apply time.
 func recheckDeadLetterSignature(item store.GetDeadLetterRow, claimed string) bool {
 	var node struct {
 		Type   string         `json:"type"`

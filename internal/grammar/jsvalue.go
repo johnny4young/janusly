@@ -1,8 +1,8 @@
-// JavaScript value semantics over the JSON domain. The reference evaluator
+// JavaScript value semantics over the JSON domain. The contract evaluator
 // runs on JS values, so porting the grammar faithfully means porting the
 // coercions it leans on: undefined-versus-null, truthiness, Number(),
 // String() and UTF-16 relational string order. Kept in one file so every
-// coercion decision is auditable against the reference in one place.
+// coercion decision is auditable against the contract in one place.
 package grammar
 
 import (

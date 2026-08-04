@@ -1,6 +1,6 @@
 // Minimal five-field cron (minute hour day-of-month month day-of-week)
 // for the schedule node's due clock. Supports `*`, numbers, ranges (a-b),
-// steps (*/n, a-b/n), and comma lists — the subset the reference's
+// steps (*/n, a-b/n), and comma lists — the subset the contract's
 // validateCronExpression accepts from operators; month/weekday NAMES are
 // deliberately out (authoring stays numeric). Day-of-month and
 // day-of-week combine with OR when both are restricted, matching classic

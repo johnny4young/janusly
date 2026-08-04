@@ -11,13 +11,13 @@ import (
 	"github.com/johnny4young/janusly/internal/orgconfig"
 )
 
-// The closed catalog pinned against the reference extraction (69 keys)
+// The closed catalog pinned against the contract extraction (69 keys)
 // and the config surface end to end: layered GET with provenance, the
 // validation ladder on POST (unknown key, type, range, enum, secret-shaped
 // value), tenant-layer precedence after a write, and the admin gate.
 func TestOrgConfigCatalogSurface(t *testing.T) {
 	if len(orgconfig.Definitions) != 69 {
-		t.Fatalf("catalog must pin at the reference's 69 definitions, got %d", len(orgconfig.Definitions))
+		t.Fatalf("catalog must pin at the contract's 69 definitions, got %d", len(orgconfig.Definitions))
 	}
 	for _, key := range []string{"ai.provider", "http.timeoutMs", "runs.requireSavedWorkflow",
 		"mcp.writeConsent", "retention.deletedWorkflowsDays", "onboarding.enabled"} {

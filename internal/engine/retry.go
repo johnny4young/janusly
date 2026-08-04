@@ -1,4 +1,4 @@
-// Retry-policy evaluation, ported from the reference's pure evaluator
+// Retry-policy evaluation, implements the contract's pure evaluator
 // (core/retry-policy.ts): a serialized error maps to label strings (HTTP
 // status, status family, name/code, synthetic timeout/network), the node's
 // declared policy decides whether to retry, and the delay supports
@@ -14,7 +14,7 @@ import (
 )
 
 // ExecError is the structured executor error — the Go shape of the
-// reference's SerializedError. Executors that know their failure's identity
+// contract's SerializedError. Executors that know their failure's identity
 // (HTTP status, timeout code) return one; plain errors carry message only.
 type ExecError struct {
 	Message    string
@@ -23,7 +23,7 @@ type ExecError struct {
 	StatusCode int
 	Details    any
 	// WriteSide marks an error raised AFTER external effects may have
-	// happened (reference runtime.ts: error.writeSide) — the retry ladder
+	// happened (error.writeSide) — the retry ladder
 	// must not whole-node retry it; operator-gated replay is safer than
 	// duplicate external effects.
 	WriteSide bool
@@ -85,12 +85,12 @@ func serializeError(err error) map[string]any {
 		}
 		return out
 	}
-	// The reference wire always carries a name (every JS Error has one);
+	// The contract wire always carries a name (every JS Error has one);
 	// Go-side plain errors serialize as the base class.
 	return map[string]any{"message": err.Error(), "name": "Error"}
 }
 
-// RetryPolicy mirrors the reference's node-config retry shape.
+// RetryPolicy mirrors the contract's node-config retry shape.
 type RetryPolicy struct {
 	MaxAttempts int
 	DelayMs     float64

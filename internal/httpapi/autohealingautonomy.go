@@ -11,7 +11,7 @@ import (
 const autoHealingAutonomyFactLimit = 200
 
 // assessAutoHealingRows resolves all tenant-scoped facts in one bounded query
-// and derives the same fail-closed authority explanation as the Node oracle.
+// and derives the same fail-closed authority explanation as the Node baseline.
 // The projection explains policy only; decide/apply remains operator-owned.
 func assessAutoHealingRows(ctx context.Context, q *store.Queries, orgID string, rows []store.AutoHealingRun) ([]domain.TechnicalRecoveryAutonomyAssessment, error) {
 	if len(rows) == 0 {

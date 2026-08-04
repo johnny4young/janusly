@@ -82,7 +82,7 @@ export async function openWorkflowAiAction(
 ): Promise<void> {
   const spanish = destination === 'Flujos'
   await page.locator('.app-shell').waitFor({ state: 'visible' })
-  const copilot = page.locator('.copilot-hero')
+  const aiStudio = page.locator('.aiStudio-hero')
   const directLabels = spanish
     ? {
         generate: 'Crear borrador',
@@ -96,7 +96,7 @@ export async function openWorkflowAiAction(
         review: 'Review this flow',
         fix: 'Suggest a fix',
       }
-  if (await copilot.isVisible().catch(() => false)) {
+  if (await aiStudio.isVisible().catch(() => false)) {
     if (action !== 'generate') {
       await page.getByRole('button', { name: directLabels[action], exact: true }).click()
     }
@@ -104,7 +104,7 @@ export async function openWorkflowAiAction(
   }
 
   await openWorkspaceSection(page, destination, spanish ? 'Crear' : 'Build')
-  if (await copilot.isVisible().catch(() => false)) {
+  if (await aiStudio.isVisible().catch(() => false)) {
     if (action !== 'generate') {
       await page.getByRole('button', { name: directLabels[action], exact: true }).click()
     }

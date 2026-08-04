@@ -69,7 +69,7 @@ func New(config Config) *Client {
 }
 
 // NewFromEnv reads deployment-owned WorkOS credentials. Missing credentials
-// are reported only by the operation that needs them, matching the Node
+// are reported only by the operation that needs them, matching the lazy
 // runtime: authorization start needs the client id; callback exchange also
 // needs the secret key.
 func NewFromEnv() *Client {

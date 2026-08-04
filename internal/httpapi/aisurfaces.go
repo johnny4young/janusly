@@ -60,7 +60,7 @@ func (s *V1Server) aiHealthCore(r *http.Request, rc v1Request) opResult {
 		"provider": settings.Provider, "model": settings.Model,
 		"promptMaxChars":  settings.PromptMaxChars,
 		"rateLimitPerMin": settings.RateLimitPerMin,
-		// The pilot's completion posture is free_json (the reference's
+		// The runtime's completion posture is free_json (the contract's
 		// default generation mode).
 		"generationMode": "free_json",
 	})

@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// Run-count semantics match the reference — the Flows list counts
+// Run-count semantics match the contract — the Flows list counts
 // ONLY version-linked runs (engine-driven paths stamp real version-row
 // ids; a doc-posted ad-hoc run never counts, exactly like Node), while
 // the health attribution still sees BOTH kinds via its coalesce.
@@ -26,7 +26,7 @@ func TestVersionAttributionSemantics(t *testing.T) {
 		t.Fatalf("save: %d %+v", res.status, res.body)
 	}
 
-	// A doc-posted run: the reference's doc-id convention — never counted
+	// A doc-posted run: the contract's doc-id convention — never counted
 	// by the list summary.
 	res := h.call("POST", "/start", map[string]any{"workflow": doc}, "")
 	if res.status != 200 {

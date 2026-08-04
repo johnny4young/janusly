@@ -17,7 +17,7 @@ import (
 
 /* --------------------------------- runs ---------------------------------- */
 
-// RunView is the reference's full run key set (GET /run, GET /status).
+// RunView is the contract's full run key set (GET /run, GET /status).
 type RunView struct {
 	ID                                   string          `json:"id"`
 	OrgID                                string          `json:"orgId"`

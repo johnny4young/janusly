@@ -1,5 +1,5 @@
-// Prompt-injection hardening for MCP-discovered prose, ported from the
-// reference's sanitizeMcpToolDescription / sanitizeMcpPromptLabel:
+// Prompt-injection hardening for MCP-discovered prose, implements the
+// contract's sanitizeMcpToolDescription / sanitizeMcpPromptLabel:
 // descriptions and labels arrive from THIRD-PARTY MCP servers and are
 // treated as untrusted prompt data. The pass order is fixed — NFKC
 // normalization + Unicode-injection-block strip FIRST (zero-width, RTL

@@ -72,7 +72,7 @@ export function RecoveryItemBadge({ item, onOpen }: Props): React.ReactElement |
   const slaToneClass = slaTone(item.slaTargetAtIso, item.status)
   const remaining = formatRemaining(item.slaTargetAtIso, item.status)
 
-  // Screen-reader urgency parity. The SLA color band (red/amber/green) is the
+  // Screen-reader urgency consistency. The SLA color band (red/amber/green) is the
   // whole point of the badge, but color can't be perceived non-visually — and
   // the aria-label previously announced raw enum codes ("severity p2, status
   // acknowledged"). Announce the localized severity/status labels AND fold in a

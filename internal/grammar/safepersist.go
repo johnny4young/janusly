@@ -1,4 +1,4 @@
-// The formal jsonb persistence chokepoint, ported from the reference's
+// The formal jsonb persistence chokepoint, implements the contract's
 // shared safe-persist helper. Stacks three sanitizers into one function so
 // every jsonb-bound write shares the same gate: value-based redaction
 // (optional caller-provided resolved-secret list — defense in depth over
@@ -6,7 +6,7 @@
 // reuses IsSensitiveKey — never fork the pattern), and size bounding
 // (default 256 KB, env JANUSLY_PERSIST_MAX_BYTES, per-call override, or
 // unbounded for the DLQ snapshots replay needs verbatim). An over-cap
-// payload becomes the reference's {__truncated, originalBytes, maxBytes,
+// payload becomes the contract's {__truncated, originalBytes, maxBytes,
 // preview} sentinel. Lives in grammar so the engine AND the audit writer
 // reach it without a dependency cycle.
 package grammar
@@ -18,17 +18,17 @@ import (
 	"unicode/utf8"
 )
 
-// defaultPersistCap is the reference's DEFAULT_MAX_BYTES.
+// defaultPersistCap is the contract's DEFAULT_MAX_BYTES.
 const defaultPersistCap = 256_000
 
-// PersistUnbounded skips the truncation layer entirely (the reference's
+// PersistUnbounded skips the truncation layer entirely (the contract's
 // POSITIVE_INFINITY): DLQ workflow/node JSONs must replay byte-for-byte,
 // but still get key-redacted.
 const PersistUnbounded = -1
 
 const persistPreviewDivisor = 2
 
-// PersistOptions mirror the reference's SafePersistOptions.
+// PersistOptions mirror the contract's SafePersistOptions.
 type PersistOptions struct {
 	// RedactedValues holds per-run resolved secrets to scrub from string
 	// occurrences. Optional — engine paths usually pre-redact at dispatch.
@@ -40,7 +40,7 @@ type PersistOptions struct {
 }
 
 // DefaultPersistMaxBytes resolves the default cap: the env override when
-// set to a positive integer, the reference's 256 KB otherwise.
+// set to a positive integer, the contract's 256 KB otherwise.
 func DefaultPersistMaxBytes() int {
 	if raw := os.Getenv("JANUSLY_PERSIST_MAX_BYTES"); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
@@ -93,7 +93,7 @@ func NormalizeJSON(value any) any {
 }
 
 // BoundPersistPayload returns raw unchanged when it fits, or the
-// reference's truncation sentinel with the leading half-cap bytes as
+// contract's truncation sentinel with the leading half-cap bytes as
 // preview, cut on a rune boundary.
 func BoundPersistPayload(raw json.RawMessage, maxBytes int) json.RawMessage {
 	if len(raw) <= maxBytes {

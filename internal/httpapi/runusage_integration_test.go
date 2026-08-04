@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// /run/usage aggregates the run's usage slice into the reference shape,
+// /run/usage aggregates the run's usage slice into the contract shape,
 // and the metrics cost rollup bounds >100 provider/model groups into 100
 // exact rows plus one aggregated remainder with exact totals.
 func TestRunUsageAndCostRollup(t *testing.T) {

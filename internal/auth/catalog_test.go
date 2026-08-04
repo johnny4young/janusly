@@ -3,7 +3,7 @@ package auth
 import "testing"
 
 // The catalog is CLOSED: exactly 41 keys, every default role a built-in,
-// and the anchor cases from the reference's own matrix hold.
+// and the anchor cases from the contract's own matrix hold.
 func TestPermissionCatalogPinned(t *testing.T) {
 	if len(PermissionCatalog) != 41 {
 		t.Fatalf("catalog must hold exactly 41 keys, got %d", len(PermissionCatalog))
@@ -24,7 +24,7 @@ func TestPermissionCatalogPinned(t *testing.T) {
 		t.Fatalf("20 active categories expected, got %d", len(categories))
 	}
 
-	// Anchor rows against the reference matrix.
+	// Anchor rows against the contract matrix.
 	anchors := []struct {
 		key    string
 		role   Role

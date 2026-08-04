@@ -108,7 +108,7 @@ func (s *V1Server) resolveCredentialReferences(ctx context.Context, orgID, name 
 	return affected
 }
 
-// credentialNameFromConfig mirrors the reference's two shapes:
+// credentialNameFromConfig mirrors the contract's two shapes:
 // config.credential and config.input.credential.
 func credentialNameFromConfig(config map[string]any) string {
 	if direct, ok := config["credential"].(string); ok && direct != "" {

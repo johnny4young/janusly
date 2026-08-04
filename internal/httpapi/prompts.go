@@ -1,7 +1,7 @@
-// PromptOps registry surface — the reference's prompts routes in the
+// PromptOps registry surface — the contract's prompts routes in the
 // subset the hot-swap loop needs: create a named prompt, append immutable
 // versions, pin the active one, list. Wire shapes and error codes match
-// the reference; version numbering retries the unique-violation window
+// the contract; version numbering retries the unique-violation window
 // like every other version writer.
 package httpapi
 

@@ -398,7 +398,7 @@ func loopItemEntry(outcome loopItemOutcome) map[string]any {
 	}
 }
 
-// loopItemBudgetEntry replaces an over-budget entry with the reference's
+// loopItemBudgetEntry replaces an over-budget entry with the contract's
 // compact sentinel so the aggregate stays persistable.
 func loopItemBudgetEntry(outcome loopItemOutcome) map[string]any {
 	switch outcome.status {

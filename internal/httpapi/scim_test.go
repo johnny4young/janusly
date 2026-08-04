@@ -47,7 +47,7 @@ func signScimHeader(secret, body string, atMs int64) string {
 }
 
 // The verifier fails CLOSED (no secret rejects everything) and walks the
-// reference's exact reason ladder.
+// contract's exact reason ladder.
 func TestVerifyWorkOsSignature(t *testing.T) {
 	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 	body := `{"id":"evt_1"}`
@@ -82,7 +82,7 @@ func TestVerifyWorkOsSignature(t *testing.T) {
 	}
 }
 
-// Email extraction mirrors the reference: direct field, primary-flagged
+// Email extraction mirrors the contract: direct field, primary-flagged
 // array entry, first-entry fallback, custom_attributes nesting.
 func TestScimPrimaryEmail(t *testing.T) {
 	if got := scimPrimaryEmail(map[string]any{"email": "a@x.com"}); got != "a@x.com" {

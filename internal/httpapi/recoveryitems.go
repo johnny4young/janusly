@@ -2,7 +2,7 @@
 // bounded list, lifecycle actions under the CAS pre-state table (a
 // concurrent click's loser 409s), assign/escalate, bounded comments, and
 // the durable handoff record. Handoff DELIVERY (Slack/Linear/GitHub)
-// needs the integrations wave — the pilot records the durable dispatch
+// needs the integrations wave — the runtime records the durable dispatch
 // row with outcome delivery_failed + dispatcher_unavailable, honestly.
 package httpapi
 

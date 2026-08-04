@@ -1,5 +1,5 @@
-// Readiness rules, ported from the reference's deterministic gate
-// (packages/engine/src/workflow-readiness.ts): authoring-mistake guards
+// Readiness rules, implements the contract's deterministic gate
+// (the source contract): authoring-mistake guards
 // with severities, separate from structural validation because a workflow
 // tripping only warn-level rules still runs. Fail-level issues block the
 // production-mode start gate (JANUSLY_PRODUCTION_MODE=true); rules-only,
@@ -34,7 +34,7 @@ type ReadinessResult struct {
 // ReadinessOptions carries the seams the pure checks need from the caller.
 type ReadinessOptions struct {
 	// IsWriteSideTool classifies a tool invocation; nil means "unknown →
-	// read-side" (the reference resolves this from its tool registry).
+	// read-side" (the contract resolves this from its tool registry).
 	IsWriteSideTool func(tool string, input map[string]any) bool
 	// RequireEvalCoverage mirrors JANUSLY_REQUIRE_EVAL_COVERAGE: opt-in
 	// warn until eval tracking exists, default-off so a clean workflow can
@@ -53,7 +53,7 @@ var (
 )
 
 // CheckWorkflowReadiness runs every deterministic readiness check in the
-// reference's order and rolls the severities up. Pure; DB-layered issues
+// contract's order and rolls the severities up. Pure; DB-layered issues
 // (rollback availability) are merged by the API caller.
 func CheckWorkflowReadiness(wf *Workflow, opts ReadinessOptions) ReadinessResult {
 	var issues []ReadinessIssue
@@ -433,7 +433,7 @@ type SuggestionSafety struct {
 	ApprovalPresent  bool `json:"approvalPresent"`
 }
 
-// ComputeSuggestionSafety mirrors the reference's recoverySuggestionSafety.
+// ComputeSuggestionSafety mirrors the contract's recoverySuggestionSafety.
 func ComputeSuggestionSafety(wf *Workflow, nodeID string) SuggestionSafety {
 	if wf == nil {
 		return SuggestionSafety{WriteSide: true, ApprovalRequired: true}

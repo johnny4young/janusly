@@ -22,7 +22,7 @@ test('AI Studio local mode points operators to the supported Anthropic key in bo
   await page.goto('/')
   await openWorkflowAiAction(page, 'Workflows')
 
-  const englishHero = page.locator('.copilot-hero')
+  const englishHero = page.locator('.ai-studio-hero')
   await expect(englishHero).toContainText(
     'Configure ANTHROPIC_API_KEY for the API and worker, then restart both.',
   )
@@ -33,7 +33,7 @@ test('AI Studio local mode points operators to the supported Anthropic key in bo
   await page.reload()
   await openWorkflowAiAction(page, 'Flujos')
 
-  const spanishHero = page.locator('.copilot-hero')
+  const spanishHero = page.locator('.ai-studio-hero')
   await expect(spanishHero).toContainText(
     'Configura ANTHROPIC_API_KEY para la API y el worker y reinicia ambos.',
   )

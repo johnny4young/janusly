@@ -3,7 +3,7 @@
 // OOM, eviction) leaves its row in `running` forever, the run never reaches
 // a terminal state, and no DLQ surface exists for the operator.
 //
-// The posture is the reference's, deliberately: fail-into-DLQ, NEVER
+// The posture is the contract's, deliberately: fail-into-DLQ, NEVER
 // auto-re-execute — a stalled node may already have committed a
 // non-idempotent side effect, so the operator decides through the ordinary
 // redrive surface. The per-node terminal write is FailNode's existing CAS

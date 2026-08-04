@@ -1,4 +1,4 @@
-// Pure Recovery Item (ownership) lifecycle, ported from the reference's
+// Pure Recovery Item (ownership) lifecycle, implements the contract's
 // recovery-item.ts: the technical DLQ incident's status ladder, the
 // CAS pre-state table (concurrent operator clicks can't double-apply —
 // the loser's status is outside the allowed pre-states and 409s), the
@@ -12,7 +12,7 @@ var RecoveryItemStatuses = map[string]bool{
 }
 
 // RecoveryItemAllowedPreStates maps each action to the statuses it may
-// transition FROM (the CAS predicate), verbatim from the reference.
+// transition FROM (the CAS predicate), verbatim from the contract.
 var RecoveryItemAllowedPreStates = map[string][]string{
 	"acknowledge":      {"open", "reopened"},
 	"in_progress":      {"acknowledged", "waiting_external"},

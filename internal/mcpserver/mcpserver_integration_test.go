@@ -72,7 +72,7 @@ func newMCPSession(t *testing.T) (*mcp.ClientSession, string) {
 		_ = server.Run(context.Background(), serverTransport)
 	}()
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "parity-client", Version: "0.0.1"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "consistency-client", Version: "0.0.1"}, nil)
 	session, err := client.Connect(ctx, clientTransport, nil)
 	if err != nil {
 		t.Fatalf("connect: %v", err)

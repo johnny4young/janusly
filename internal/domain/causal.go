@@ -1,4 +1,4 @@
-// Causal-reasoning replay (reference packages/domain/src/
+// Causal-reasoning replay (reference the source contract
 // causalReasoning.ts + decisionEngine.ts scoring): given a recorded
 // decision (chosen candidate + alternatives), recompute scores under the
 // current preferences so the UI can show "why this won" without
@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-// DecisionCandidate mirrors the reference candidate profile.
+// DecisionCandidate mirrors the contract candidate profile.
 type DecisionCandidate struct {
 	NodeID       string
 	AvgCost      float64
@@ -92,7 +92,7 @@ type DecisionAlternative struct {
 	Breakdown    DecisionBreakdown `json:"breakdown"`
 }
 
-// DecisionReplayInput mirrors the reference input shape.
+// DecisionReplayInput mirrors the contract input shape.
 type DecisionReplayInput struct {
 	ChosenNodeID string
 	Candidates   []DecisionCandidate
@@ -129,7 +129,7 @@ func normalizedDecisionWeights(preferences *DecisionPreferences) (cost, latency,
 	return cost / total, latency / total, quality / total
 }
 
-// ScoreDecisionCandidate applies the reference formula: weighted cost +
+// ScoreDecisionCandidate applies the contract formula: weighted cost +
 // weighted latency + weighted (1 - quality) penalty; lower is better.
 func ScoreDecisionCandidate(candidate DecisionCandidate, preferences *DecisionPreferences) RankedDecisionCandidate {
 	weightCost, weightLatency, weightQuality := normalizedDecisionWeights(preferences)
@@ -181,7 +181,7 @@ func NormalizeDecisionCandidates(raw any) []DecisionCandidate {
 }
 
 // DecisionPreferencesFromValue projects the loose runtime context into the
-// same optional numeric preferences consumed by the reference engine.
+// same optional numeric preferences consumed by the contract engine.
 func DecisionPreferencesFromValue(value any) *DecisionPreferences {
 	object, ok := value.(map[string]any)
 	if !ok || object == nil {
@@ -206,7 +206,7 @@ func DecisionBudgetFromValue(value any) *DecisionBudget {
 }
 
 // NormalizeDecisionStrategy keeps the runtime's closed strategy enum. An
-// unknown authored value degrades to the reference's auto scoring posture.
+// unknown authored value degrades to the contract's auto scoring posture.
 func NormalizeDecisionStrategy(value any) string {
 	strategy, _ := value.(string)
 	switch strategy {
@@ -219,7 +219,7 @@ func NormalizeDecisionStrategy(value any) string {
 
 // Decide applies constraints, score weighting, the bounded reinforcement
 // bias, explicit strategy ordering, and the optional budget in the same order
-// as the Node compatibility oracle.
+// as the deterministic causal baseline.
 func Decide(input DecisionInput) DecisionOutput {
 	constrained := make([]DecisionCandidate, 0, len(input.Candidates))
 	for _, candidate := range input.Candidates {

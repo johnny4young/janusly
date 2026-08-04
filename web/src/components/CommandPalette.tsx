@@ -146,7 +146,7 @@ function buildCommands(
 
   const navCommands: Command[] = [
     { id: 'go.recover', labelKey: 'palette.nav.recover', icon: <ShieldAlert size={14} />, group: 'nav', permission: 'recovery.read', run: ({ openTab }) => { openTab('recover') } },
-    { id: 'go.copilot', labelKey: 'palette.nav.copilot', icon: <Sparkles size={14} />, group: 'nav', permission: 'ai.write', run: ({ openTab }) => { openTab('copilot') } },
+    { id: 'go.ai-studio', labelKey: 'palette.nav.ai-studio', icon: <Sparkles size={14} />, group: 'nav', permission: 'ai.write', run: ({ openTab }) => { openTab('ai-studio') } },
     { id: 'go.inspector', labelKey: 'palette.nav.inspector', icon: <GitBranch size={14} />, group: 'nav', permission: 'workflows.read', run: ({ openTab }) => { openTab('inspector') } },
     { id: 'go.runs', labelKey: 'palette.nav.runs', icon: <Activity size={14} />, group: 'nav', permission: 'runs.read', run: ({ openTab }) => { openTab('runs') } },
     { id: 'go.multiAgent', labelKey: 'palette.nav.multiAgent', icon: <Layers3 size={14} />, group: 'nav', permission: 'workflows.read', run: ({ openTab }) => { openTab('multiAgent') } },

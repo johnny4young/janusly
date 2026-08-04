@@ -1,11 +1,11 @@
 // The `multi_agent` node — a crew of agent loops over one shared context,
-// ported from the reference: sequential mode binds each agent's goal
+// implements the contract: sequential mode binds each agent's goal
 // template PER COMPLETED AGENT ({context, previousAgents} at that
 // agent's turn — the dispatcher defers the previousAgents root for this
 // node type), parallel mode NEVER defers previousAgents (every goal
 // binds once, before launch — a late binding would race). Failures honor
-// continueOnError; aggregation follows the reference's last / all /
-// first / best-effort strategies; the output shape is the reference's
+// continueOnError; aggregation follows the contract's last / all /
+// first / best-effort strategies; the output shape is the contract's
 // {mode, aggregation, count, finalAnswer, agents}.
 package executors
 
@@ -108,7 +108,7 @@ func runMultiAgent(ctx context.Context, in Input, registry *tools.Registry, http
 			results = append(results, failed)
 			emit("multi_agent.agent.failed", failed)
 			if !continueOnError {
-				return nil, fmt.Errorf("Multi-agent %s failed: %s", name, outcome.err.Error()) //nolint:staticcheck // reference message
+				return nil, fmt.Errorf("Multi-agent %s failed: %s", name, outcome.err.Error()) //nolint:staticcheck // contract message
 			}
 		}
 	} else {
@@ -209,7 +209,7 @@ func resolveCrewAgentConfig(in Input, raw any, index int, sharedContext map[stri
 	return merged, nil
 }
 
-// aggregateCrewResults ports the reference strategies verbatim.
+// aggregateCrewResults ports the contract strategies verbatim.
 func aggregateCrewResults(results []any, strategy string) any {
 	resultOf := func(item any) map[string]any {
 		entry, _ := item.(map[string]any)

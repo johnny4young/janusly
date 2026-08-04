@@ -700,7 +700,7 @@ type QueueRunNodeParams struct {
 // Dispatch plane: claims, queue publication, wakeups, locks, reaper.
 // Keep Node's existing publication outbox current while Go owns delivery.
 // It is dormant under single-owner Go execution and becomes the rollback
-// source if Node must recreate BullMQ jobs.
+// source for durable queue publication.
 func (q *Queries) QueueRunNode(ctx context.Context, arg QueueRunNodeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, queueRunNode, arg.RunID, arg.NodeID)
 	if err != nil {

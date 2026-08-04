@@ -20,7 +20,7 @@ const (
 )
 
 // ErrInvalidCSRF is intentionally uniform across missing marker and origin.
-var ErrInvalidCSRF = errors.New("Forbidden: invalid browser session origin") //nolint:staticcheck // reference message is the wire contract
+var ErrInvalidCSRF = errors.New("Forbidden: invalid browser session origin") //nolint:staticcheck // contract message is the wire contract
 
 type tokenPayload struct {
 	SessionID string `json:"sessionId"`

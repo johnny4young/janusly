@@ -1,4 +1,4 @@
-// Prompt/model experiment harness (reference packages/ai/src/
+// Prompt/model experiment harness (reference the source contract
 // experiment-runner.ts + experiment-scorer.ts). Data-agnostic on purpose:
 // the API route resolves prompt refs / model ids into flattened arms and
 // threads telemetry via the OnCall hook; the runner is pure orchestration

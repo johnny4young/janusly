@@ -8,7 +8,7 @@ import (
 )
 
 // Proves the seam end to end: workflow validation with the real grammar
-// rejects an out-of-grammar condition with the reference's message, and
+// rejects an out-of-grammar condition with the contract's message, and
 // accepts a well-formed one — no partial evaluation, ever.
 func TestDomainValidationUsesGrammarValidator(t *testing.T) {
 	invalid, issues := domain.Parse([]byte(`{"nodes":[
@@ -17,7 +17,7 @@ func TestDomainValidationUsesGrammarValidator(t *testing.T) {
 	if len(issues) > 0 {
 		t.Fatalf("fixture must parse: %+v", issues)
 	}
-	// The reference relays the validator's message verbatim
+	// The contract relays the validator's message verbatim
 	// (workflow-validation.ts:151 — `expression.message ?? "Invalid
 	// condition expression"`), so no prefix is added here either.
 	result := domain.Validate(invalid, grammar.DomainValidator)

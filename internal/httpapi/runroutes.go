@@ -68,7 +68,7 @@ func (s *V1Server) startCore(r *http.Request, rc v1Request) opResult {
 			wf = assignment.Workflow
 		}
 	}
-	// Execution needs the executable subset — here the pilot-only code IS
+	// Execution needs the executable subset — here the runtime-only code IS
 	// blocking, unlike save.
 	if result := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation); !result.Valid {
 		rejection := opError(http.StatusBadRequest, "workflows_validation_failed",
@@ -152,7 +152,7 @@ func (s *V1Server) startCore(r *http.Request, rc v1Request) opResult {
 
 const eventsPageDefault = 200
 
-// getRun serves both /v1/run and /v1/status: the reference projects the
+// getRun serves both /v1/run and /v1/status: the contract projects the
 // same {run, nodes, events, eventsCursor, eventsHasMore} data for both.
 func (s *V1Server) getRun(w http.ResponseWriter, r *http.Request, rc v1Request) {
 	writeVersioned(w, rc.id, s.getRunCore(r, rc))
@@ -199,7 +199,7 @@ func (s *V1Server) getRunCore(r *http.Request, rc v1Request) opResult {
 	if hasMore {
 		events = events[:limit]
 	}
-	// The reference returns each page ASCENDING (paginateRunEvents reverses
+	// The contract returns each page ASCENDING (paginateRunEvents reverses
 	// the DESC rows), with the cursor pointing at the page's oldest event.
 	for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
 		events[i], events[j] = events[j], events[i]
@@ -207,7 +207,7 @@ func (s *V1Server) getRunCore(r *http.Request, rc v1Request) opResult {
 	var nextCursor any
 	if hasMore && len(events) > 0 {
 		last := events[0]
-		// Millisecond ISO, exactly the reference's toISOString shape — the
+		// Millisecond ISO, exactly the contract's toISOString shape — the
 		// same precision events are WRITTEN at, so cursor comparisons are
 		// exact for cursors minted by either backend.
 		nextCursor = last.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z") + "|" + last.ID
@@ -239,7 +239,7 @@ func (s *V1Server) getRunCore(r *http.Request, rc v1Request) opResult {
 	})
 }
 
-// runView emits the reference's full run key set; columns this backend does
+// runView emits the contract's full run key set; columns this backend does
 // not populate yet surface as nulls, never as missing keys. The typed
 // RunView makes a typo'd key a compile error.
 func runView(run store.GetRunRow) RunView { return newRunView(run) }
@@ -337,7 +337,7 @@ func (s *V1Server) cancelRun(w http.ResponseWriter, r *http.Request, rc v1Reques
 	writeVersioned(w, rc.id, s.cancelCore(r, rc))
 }
 
-// cancelCore ports the reference guards exactly — and note the asymmetry
+// cancelCore ports the contract guards exactly — and note the asymmetry
 // with run READS: cancel distinguishes a missing run (404) from a cross-org
 // one (403), while reads keep both indistinguishable. The v1 contract
 // (golden-verified) validates the body shape FIRST: runId is a required
@@ -395,7 +395,7 @@ func (s *V1Server) listDeadLetters(w http.ResponseWriter, r *http.Request, rc v1
 			limit = n
 		}
 	}
-	// Server-side filters, validated like the reference: an out-of-enum
+	// Server-side filters, validated like the contract: an out-of-enum
 	// status is a 400, not an empty page.
 	status := r.URL.Query().Get("status")
 	if status != "" && !deadLetterStatuses[status] {
@@ -414,7 +414,7 @@ func (s *V1Server) listDeadLetters(w http.ResponseWriter, r *http.Request, rc v1
 		s.internal(w, rc, err)
 		return
 	}
-	// The ownership overlay travels with its dead letter (the reference
+	// The ownership overlay travels with its dead letter (the contract
 	// joins the same shape); the typed view owns the key set.
 	items := make([]DeadLetterSummaryView, 0, len(rows))
 	for _, row := range rows {
@@ -449,7 +449,7 @@ func (s *V1Server) redrive(w http.ResponseWriter, r *http.Request, rc v1Request)
 }
 
 // rollbackCore appends a prior snapshot as the new latest version with the
-// reference's pre-checks: an active parent (a tombstone behaves as
+// contract's pre-checks: an active parent (a tombstone behaves as
 // not-found for writes too), an org-and-workflow-scoped source version, a
 // well-formed source DAG, and a version-increment conflict surfaced as a
 // retryable 409.
@@ -469,7 +469,7 @@ func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 	}
 	if body.DeadLetterID == "" {
 		// The exact-identity branch: the run panel replays {runId, nodeId}
-		// without a dead-letter id (reference's second /dlq/replay form).
+		// without a dead-letter id (contract's second /dlq/replay form).
 		if body.RunID == "" || body.NodeID == "" {
 			return opError(http.StatusBadRequest, "dlq_fields_required", "runId and nodeId are required", nil)
 		}
@@ -514,7 +514,7 @@ func (s *V1Server) replayCore(r *http.Request, rc v1Request) opResult {
 		}
 		validation := domain.ValidateWithSemanticFixtures(parsed, grammar.DomainValidator, recovery.FixtureOutcomesForValidation)
 		for _, issue := range validation.Issues {
-			if issue.Code != domain.CodeNodeTypeUnsupportedPilot {
+			if issue.Code != domain.CodeNodeTypeNotExecutable {
 				return opError(http.StatusBadRequest, "dlq_workflow_schema_invalid",
 					"suggestedWorkflow failed schema validation: "+issue.Message,
 					map[string]any{"reason": issue.Message})

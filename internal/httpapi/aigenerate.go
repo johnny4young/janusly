@@ -1,5 +1,5 @@
-// POST /ai/generate-workflow — the pilot's generation surface, ported
-// from the reference route in its default free_json mode: prompt cap →
+// POST /ai/generate-workflow — the runtime's generation surface, ported
+// from the contract route in its default free_json mode: prompt cap →
 // "ai" rate bucket → budget gate → free-JSON generation against the
 // verbatim system prompt → validation through the REAL domain validator →
 // a bounded repair pass fed the actual issue codes → the wire shape
@@ -181,7 +181,7 @@ type generationMeta struct {
 	validCandidates int
 }
 
-// generateFreeJson runs the reference's free-JSON ladder: up to two
+// generateFreeJson runs the contract's free-JSON ladder: up to two
 // generation attempts (a parse failure or dropped operator references
 // nudge the retry), then up to two REPAIR attempts fed the domain
 // validator's actual issues. Returns the raw workflow JSON that passed.
@@ -280,7 +280,7 @@ func (s *V1Server) generateFreeJson(ctx context.Context, client ai.Client, promp
 	return workflowJSON, meta, nil
 }
 
-// composeRepairPrompt mirrors the reference's directed-repair framing:
+// composeRepairPrompt mirrors the contract's directed-repair framing:
 // the draft plus the exact issues, asking for a corrected object only.
 func composeRepairPrompt(prompt string, draft []byte, issues []domain.Issue) string {
 	var lines []string
@@ -324,7 +324,7 @@ func stringField(doc map[string]any, key string) string {
 func templateID(workflow map[string]any) string { return stringField(workflow, "id") }
 
 // validateGeneratedWorkflow runs the parsed doc through the REAL domain
-// gate with the save posture (pilot-unsupported runtime types are a
+// gate with the save posture (runtime-unsupported runtime types are a
 // start-time concern, not a generation one). Returns the blocking issues.
 func validateGeneratedWorkflow(raw []byte) []domain.Issue {
 	wf, parseIssues := domain.Parse(raw)
@@ -334,7 +334,7 @@ func validateGeneratedWorkflow(raw []byte) []domain.Issue {
 	result := domain.ValidateWithSemanticFixtures(wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation)
 	var blocking []domain.Issue
 	for _, issue := range result.Issues {
-		if issue.Code != domain.CodeNodeTypeUnsupportedPilot {
+		if issue.Code != domain.CodeNodeTypeNotExecutable {
 			blocking = append(blocking, issue)
 		}
 	}
@@ -359,7 +359,7 @@ func clampCandidateCount(n int) int {
 }
 
 // selectBestOfN fires n independent samples in parallel and keeps the
-// best by the reference's deterministic readiness score (fails*10 +
+// best by the contract's deterministic readiness score (fails*10 +
 // warns, lower wins, first-wins ties). A candidate that fails the
 // validity gate still counts as a last-resort winner so the repair tail
 // gets a chance; zero PARSED candidates returns nil and the caller falls

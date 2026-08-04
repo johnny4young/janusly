@@ -110,7 +110,7 @@ func TestComputeRetryDelayLadder(t *testing.T) {
 }
 
 func TestComputeRetryDelayFullJitterRange(t *testing.T) {
-	// The reference samples uniformly in [delay/2, delay] — pin both ends
+	// The contract samples uniformly in [delay/2, delay] — pin both ends
 	// with injected randomness.
 	jittered := policyFromConfig(t, map[string]any{"retry": map[string]any{
 		"delayMs": float64(1000), "jitter": true,

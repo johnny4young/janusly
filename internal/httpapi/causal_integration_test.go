@@ -10,7 +10,7 @@ import (
 )
 
 // GET /causal — org-scoped 403, event pinned to run+node+type,
-// and the replayed ranking with the reference shape.
+// and the replayed ranking with the contract shape.
 
 func TestCausalDecisionExplorer(t *testing.T) {
 	h := newAPIHarness(t)

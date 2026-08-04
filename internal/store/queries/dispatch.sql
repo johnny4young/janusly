@@ -2,7 +2,7 @@
 
 -- Keep Node's existing publication outbox current while Go owns delivery.
 -- It is dormant under single-owner Go execution and becomes the rollback
--- source if Node must recreate BullMQ jobs.
+-- source for durable queue publication.
 -- name: QueueRunNode :execrows
 UPDATE run_nodes
 SET status = 'queued', attempts = 1,

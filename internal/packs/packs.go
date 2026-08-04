@@ -1,5 +1,5 @@
 // Code-resident solution-pack catalog (reference
-// packages/solution-packs). The three pack.json files are the REFERENCE
+// the source contract). The three pack.json files are the CANONICAL
 // files embedded verbatim — a pack is never a database row; only the
 // workflow version produced by installing one is persisted. Every pack is
 // validated at init (parseable JSON, unique ids, workflowJson accepted by
@@ -40,7 +40,7 @@ type SamplePayload struct {
 
 // FailureFixture describes one curated failure scenario bundled with the
 // pack (the recovery walkthrough's raw material). Public projection =
-// id/label/description/failureMode/recoveryPath, the reference's
+// id/label/description/failureMode/recoveryPath, the contract's
 // FailureFixturePublic; failedNodeId stays internal.
 type FailureFixture struct {
 	ID           string `json:"id"`

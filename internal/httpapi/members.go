@@ -1,4 +1,4 @@
-// Member management, ported from the reference's members routes with
+// Member management, implements the contract's members routes with
 // their wire shapes verbatim: invite validation ladder (role defined for
 // the org — built-in OR custom —, email format, pending-invite 409,
 // existing-member 409), the self-modification guard on role changes and
@@ -6,7 +6,7 @@
 // rationale — with the blocked attempt audited carrying the operator's
 // raw intent), and the no-cascade member delete. Mutations pair their
 // audit rows transactionally through WithAuditTx — a strictly stronger
-// posture than the reference's post-hoc best-effort on these routes,
+// posture than the contract's post-hoc best-effort on these routes,
 // recorded in the plan registry.
 package httpapi
 
@@ -42,7 +42,7 @@ func (s *V1Server) roleDefinedForOrg(r *http.Request, orgID, roleName string) (b
 	return false, err
 }
 
-// listMembers writes the reference's BARE array wire (sendJson(rows) —
+// listMembers writes the contract's BARE array wire (sendJson(rows) —
 // no envelope key), which the dual-run comparator pinned.
 func (s *V1Server) listMembers(w http.ResponseWriter, r *http.Request, rc v1Request) {
 	rows, err := store.New(s.pool).ListOrgMembers(r.Context(), rc.orgID)

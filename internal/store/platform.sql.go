@@ -651,7 +651,7 @@ type ListOrgConfigRowsRow struct {
 
 // Org-config rows for the layered catalog read. The closed catalog is
 // ~69 keys; the 200 cap guards a pathological row count, like the
-// reference's defensive limit.
+// contract's defensive limit.
 func (q *Queries) ListOrgConfigRows(ctx context.Context, orgID string) ([]ListOrgConfigRowsRow, error) {
 	rows, err := q.db.Query(ctx, listOrgConfigRows, orgID)
 	if err != nil {

@@ -1,5 +1,5 @@
 // Signed resume tokens for surfaces that carry user-submitted data,
-// ported from the reference's secrets.ts: HMAC-SHA256 over
+// implements the contract's secrets.ts: HMAC-SHA256 over
 // `v1.<base64url(payload)>`, payload bound to (orgId, runId, nodeId,
 // purpose) with a SIGNED issuedAt + expiresAt so later policy changes
 // cannot rewrite an already-issued token's lifetime. The secret is the
@@ -28,7 +28,7 @@ const (
 )
 
 // ErrInvalid is the uniform verification failure.
-var ErrInvalid = errors.New("Invalid resume token") //nolint:staticcheck // reference message is the wire contract
+var ErrInvalid = errors.New("Invalid resume token") //nolint:staticcheck // contract message is the wire contract
 
 // Payload is the signed binding.
 type Payload struct {
@@ -57,7 +57,7 @@ type Binding struct {
 // caller resolves policy BEFORE signing).
 func Sign(binding Binding, ttlSeconds int) (string, error) {
 	if ttlSeconds < MinTTLSeconds || ttlSeconds > DefaultTTLSeconds {
-		return "", errors.New("Invalid resume token TTL") //nolint:staticcheck // reference message
+		return "", errors.New("Invalid resume token TTL") //nolint:staticcheck // contract message
 	}
 	issuedAt := time.Now().Unix()
 	payload := Payload{

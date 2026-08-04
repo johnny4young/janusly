@@ -5,7 +5,7 @@ import type { ActiveTab } from './types'
 export const TAB_PERMISSION: Partial<Record<ActiveTab, string>> = {
   home: 'recovery.read',
   recover: 'recovery.read',
-  copilot: 'ai.write',
+  'ai-studio': 'ai.write',
   experiments: 'evals.read',
   workflows: 'workflows.read',
   inspector: 'workflows.read',
@@ -23,7 +23,7 @@ export const TAB_PERMISSION: Partial<Record<ActiveTab, string>> = {
 
 export const TAB_FALLBACK_ORDER: ActiveTab[] = [
   'home',
-  'workflows', 'copilot', 'inspector', 'templates', 'packs', 'experiments',
+  'workflows', 'ai-studio', 'inspector', 'templates', 'packs', 'experiments',
   'runs', 'recover', 'reasoning', 'multiAgent',
   'operations', 'credentials', 'members', 'marketplace',
 ]

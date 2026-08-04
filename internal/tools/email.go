@@ -1,4 +1,4 @@
-// email.send — the transactional mailer tool ported from the reference's
+// email.send — the transactional mailer tool implements the contract's
 // tools/email.ts + mailer.ts. Four providers resolved AT CALL TIME:
 // resend / sendgrid (real, both egressing through the guarded Post seam
 // — no vendor SDK), simulator (explicit local-stack gate, never
@@ -55,7 +55,7 @@ func emailTools() []Definition {
 	}}
 }
 
-// simulatorEndpoint mirrors the reference's explicit local-stack gate.
+// simulatorEndpoint mirrors the contract's explicit local-stack gate.
 func simulatorEndpoint(path string) string {
 	if os.Getenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR") != "true" {
 		return ""

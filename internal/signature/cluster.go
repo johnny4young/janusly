@@ -1,5 +1,5 @@
-// Pure failure-sample aggregator, ported from the reference
-// (packages/engine/src/cluster-failures.ts): dedupe by (runId, nodeId)
+// Pure failure-sample aggregator, implements the contract
+// (the source contract): dedupe by (runId, nodeId)
 // preferring the DLQ-source sample, group by normalized signature, order
 // clusters by frequency descending then signature ascending.
 package signature
@@ -47,8 +47,8 @@ type FailureCluster struct {
 	LastSeen          string             `json:"lastSeen"`
 	SuggestedOwner    string             `json:"suggestedOwner"`
 	Samples           []ClusterSampleRef `json:"samples"`
-	// RecurredAfterRecovery is part of the reference's wire shape; the
-	// pilot has no recovery-impact substrate yet, so it is always false.
+	// RecurredAfterRecovery is part of the contract's wire shape; the
+	// runtime has no recovery-impact substrate yet, so it is always false.
 	RecurredAfterRecovery bool `json:"recurredAfterRecovery"`
 }
 

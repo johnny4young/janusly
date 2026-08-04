@@ -122,7 +122,7 @@ func TestEightWorkersExecuteFanOutExactlyOnce(t *testing.T) {
 	var parsed map[string]float64
 	_ = json.Unmarshal(payload, &parsed)
 	if parsed["nodes"] != 50 {
-		t.Fatalf("run.succeeded payload parity broken: %s", payload)
+		t.Fatalf("run.succeeded payload contract mismatch: %s", payload)
 	}
 }
 
@@ -343,10 +343,10 @@ func TestExecutorFailureFailsNodeAndRun(t *testing.T) {
 		t.Fatalf("run.failed event expected: %v", err)
 	}
 	if !strings.Contains(string(payload), `"failedNodes": 1`) && !strings.Contains(string(payload), `"failedNodes":1`) {
-		t.Fatalf("run.failed payload parity broken: %s", payload)
+		t.Fatalf("run.failed payload contract mismatch: %s", payload)
 	}
 
-	// Keyset order parity: the aggregate run.failed must sort after its
+	// Keyset order consistency: the aggregate run.failed must sort after its
 	// causal node.failed under (created_at, id).
 	var order string
 	_ = pool.QueryRow(ctx, `select string_agg(type, '>' order by created_at, id)

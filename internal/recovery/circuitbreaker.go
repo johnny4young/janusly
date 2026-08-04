@@ -1,5 +1,5 @@
-// Recovery circuit breaker — the PURE decision layer, ported from the
-// reference's core/circuit-breaker.ts. While an operator authors a patch,
+// Recovery circuit breaker — the PURE decision layer, implements the
+// contract's core/circuit-breaker.ts. While an operator authors a patch,
 // a broken workflow keeps re-executing the same doomed DAG on every tick
 // and trigger, flooding the DLQ and re-firing pre-failure write-side
 // effects. N CONSECUTIVE failed ordinary runs draw the line: the workflow

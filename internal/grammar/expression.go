@@ -1,5 +1,5 @@
 // Limited-grammar expression evaluator for condition nodes and edge
-// condition strings, ported from the reference's zero-dependency
+// condition strings, implements the contract's zero-dependency
 // recursive-descent parser: boolean composition (||, &&, !, parens),
 // comparisons (===, !==, ==, !=, >, <, >=, <=), string/collection operators
 // (contains, startsWith, matches, in), boolean/number/string/array literals,
@@ -23,7 +23,7 @@ type Scope struct {
 	Inputs  any
 }
 
-// ValidationResult mirrors the reference's wire shape for authoring-side
+// ValidationResult mirrors the contract's wire shape for authoring-side
 // validation; Code is one of empty_expression, empty_value,
 // unsupported_token, invalid_expression.
 type ValidationResult struct {
@@ -59,7 +59,7 @@ func EvaluateExpression(expression string, scope Scope) (bool, error) {
 }
 
 // ValidateExpression static-evaluates against empty scopes to surface
-// syntactic and contract errors, mapping them to the reference's codes.
+// syntactic and contract errors, mapping them to the contract's codes.
 func ValidateExpression(expression string) ValidationResult {
 	_, err := evaluateInternal(expression, Scope{Context: map[string]any{}, Inputs: map[string]any{}}, true)
 	if err == nil {

@@ -1,8 +1,8 @@
 // Consent-revocation memory purge (reference memory-purge-scheduler.ts,
 // due-clock shaped). The canonical memory policy promises: when an admin
 // flips org_configs `memory.enabled` from true to false, every
-// memory_entries row for the org is purged within 7 days. The pilot
-// enforces it with a periodic sweep instead of a BullMQ one-shot: any org
+// memory_entries row for the org is purged within 7 days. The runtime
+// enforces it with a periodic durable sweep: any org
 // whose `memory.enabled=false` flip is older than the delay AND still has
 // memory rows gets purged, audited as `memory.bulk.purged`.
 //

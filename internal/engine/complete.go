@@ -352,7 +352,7 @@ func (e *Engine) persistSemanticViolations(
 	return quarantined, nil
 }
 
-// RetryOrFail is the worker's failure decision, mirroring the reference's
+// RetryOrFail is the worker's failure decision, mirroring the contract's
 // catch block: under the node's declared retry policy an eligible failure
 // requeues the node with attempt+1 and a wake-up at the computed backoff;
 // anything else commits the terminal failure with its dead-letter capture.
@@ -416,7 +416,7 @@ func workflowFromRunInput(inputJSON []byte) (*domain.Workflow, map[string]any, e
 	return wf, envelope.Input, nil
 }
 
-// eventNow stamps run events at MILLISECOND precision — the reference's
+// eventNow stamps run events at MILLISECOND precision — the contract's
 // timestamps come from JS Dates (ms), and keyset cursors serialize as
 // millisecond ISO strings on both backends. A µs-precision row under an
 // ms-precision cursor can be skipped at a page boundary; truncating at
@@ -426,7 +426,7 @@ func eventNow() time.Time {
 }
 
 // recordRecoveryImpact credits one generation-bound terminal success INSIDE
-// the completion transaction, ported from the reference's
+// the completion transaction, implements the contract's
 // recordRecoveryImpactTx: the completing node must carry the recovery
 // claim its redrive stamped; the dead letter must still match by exact
 // identity (id + run + node); the impact event is idempotent on the

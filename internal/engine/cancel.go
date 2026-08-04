@@ -1,4 +1,4 @@
-// Run cancellation, ported from the reference: the run flips to cancelled,
+// Run cancellation, implements the contract: the run flips to cancelled,
 // every node still in a cancellable state (pending, queued, waiting) flips
 // with it — running nodes finish naturally and the post-success guard
 // absorbs their downstream scheduling — and one run.cancelled event records
@@ -14,7 +14,7 @@ import (
 
 // CancelRun commits the cancellation in one transaction under the run's
 // completion lock. Terminal-status guarding belongs to the API layer, like
-// the reference; the engine write itself is unconditional.
+// the contract; the engine write itself is unconditional.
 func (e *Engine) CancelRun(ctx context.Context, runID string, reason any) error {
 	if reason == nil {
 		reason = map[string]any{}

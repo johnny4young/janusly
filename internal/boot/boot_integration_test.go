@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func pilotDatabaseURL(t *testing.T) string {
+func runtimeDatabaseURL(t *testing.T) string {
 	t.Helper()
 	dsn := os.Getenv("JANUSLY_DATABASE_URL")
 	if dsn == "" {
@@ -24,7 +24,7 @@ func TestConnectAndProbeAgainstMigratedDatabase(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	pool, err := Connect(ctx, pilotDatabaseURL(t), 10)
+	pool, err := Connect(ctx, runtimeDatabaseURL(t), 10)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -39,9 +39,9 @@ func TestProbeFailsAgainstUnmigratedDatabase(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// The server's maintenance database exists but never carries the drizzle
+	// The server's maintenance database exists but never carries the Janusly
 	// journal, which makes it a faithful stand-in for an unmigrated target.
-	parsed, err := url.Parse(pilotDatabaseURL(t))
+	parsed, err := url.Parse(runtimeDatabaseURL(t))
 	if err != nil {
 		t.Fatalf("parse dsn: %v", err)
 	}

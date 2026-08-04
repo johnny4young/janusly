@@ -3,7 +3,7 @@
  * (`src/lib:BUILTIN_SNIPPETS`) must carry an EN + ES display name
  * and description in the catalog, plus a label for its category. A new
  * built-in added in shared without its copy keys fails here (the generic
- * parity test only catches EN↔ES drift, not a missing built-in's keys).
+ * consistency test only catches EN↔ES drift, not a missing built-in's keys).
  */
 
 import { describe, expect, it } from 'vitest'

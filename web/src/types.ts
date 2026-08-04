@@ -299,7 +299,7 @@ export function parseAiCandidateBackoff(value: unknown): AiCandidateBackoff | un
   return { from, to }
 }
 export type AiHealth = { enabled: boolean; provider?: string; model: string; timeoutMs: number; maxRetries: number }
-export type ActiveTab = 'home' | 'recover' | 'workflows' | 'members' | 'copilot' | 'experiments' | 'marketplace' | 'templates' | 'packs' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'multiAgent' | 'operations' | 'recoveryCase'
+export type ActiveTab = 'home' | 'recover' | 'workflows' | 'members' | 'ai-studio' | 'experiments' | 'marketplace' | 'templates' | 'packs' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'multiAgent' | 'operations' | 'recoveryCase'
 
 /**
  * Tabs that NEED the React Flow canvas mounted as their main slot. Today
@@ -314,7 +314,7 @@ export type ActiveTab = 'home' | 'recover' | 'workflows' | 'members' | 'copilot'
  * Adding a new tab that needs the canvas means appending to this tuple;
  * every other tab gains the contextual full-width layout for free.
  */
-export const CANVAS_TABS = ['copilot', 'inspector'] as const
+export const CANVAS_TABS = ['ai-studio', 'inspector'] as const
 
 export type CanvasTab = (typeof CANVAS_TABS)[number]
 
@@ -330,7 +330,7 @@ export const isCanvasTab = (tab: ActiveTab): tab is CanvasTab =>
  * - `home`: canvas is NOT in the DOM (the home page owns the full main
  *   slot via `RecoveryCenterPanel`). Users who only ever visit the home
  *   page never pay the React Flow runtime cost.
- * - Canvas tab (`copilot` / `inspector`): canvas mounted AND visible;
+ * - Canvas tab (`ai-studio` / `inspector`): canvas mounted AND visible;
  *   contextual slot is NOT rendered (the right rail handles the panel).
  * - Any other tab: the contextual main slot renders. The canvas stays
  *   unmounted until a canvas tab has activated it in the current non-home

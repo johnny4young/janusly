@@ -1,5 +1,5 @@
-// Hand-rolled RFC 4180 (subset) CSV helpers, ported from the reference
-// (packages/engine/src/csv.ts): comma separator, CRLF/LF terminators,
+// Hand-rolled RFC 4180 (subset) CSV helpers, implements the contract
+// (the source contract): comma separator, CRLF/LF terminators,
 // quoted fields with "" escapes that may span commas, newlines, and CHUNK
 // BOUNDARIES — the streaming state (pendingQuote / pendingCr) carries the
 // ambiguity across feeds. Chunk processing is byte-wise: every structural
@@ -319,7 +319,7 @@ func csvTools() []Definition {
 						header = append(header, text)
 					}
 				}
-				// The reference's refinement: header pairs with object rows.
+				// The contract's refinement: header pairs with object rows.
 				if len(rows) > 0 {
 					_, rowsAreArrays := rows[0].([]any)
 					if rowsAreArrays && header != nil {

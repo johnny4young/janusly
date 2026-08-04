@@ -6,7 +6,7 @@ package engine
 import "github.com/johnny4young/janusly/internal/domain"
 
 // Node statuses the runtime still schedules work for; a run whose nodes all
-// left this set is terminal. Mirrors the reference's open-status set.
+// left this set is terminal. Mirrors the contract's open-status set.
 var openNodeStatuses = map[string]bool{
 	"pending": true, "queued": true, "running": true, "waiting": true,
 }

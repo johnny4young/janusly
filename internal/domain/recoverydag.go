@@ -1,4 +1,4 @@
-// Contract-vs-DAG semantic rules, ported from the reference's
+// Contract-vs-DAG semantic rules, implements the contract's
 // workflow-validation.ts: fail-closed SAVE constraints, not best-effort
 // runtime warnings. A quarantine detector must DOMINATE every declared or
 // actual write-side effect (no root path may reach the effect without

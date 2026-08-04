@@ -12,7 +12,7 @@ import (
 )
 
 // ErrInvalid is the uniform verification failure.
-var ErrInvalid = errors.New("Invalid signed token") //nolint:staticcheck // reference message is the wire contract
+var ErrInvalid = errors.New("Invalid signed token") //nolint:staticcheck // contract message is the wire contract
 
 // Envelope is the authenticated token body. Payload remains typed at the
 // caller while purpose and lifetime are always verified here.

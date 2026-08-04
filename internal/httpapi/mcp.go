@@ -1,4 +1,4 @@
-// MCP connection admin surface — the reference's mcp-routes subset the
+// MCP connection admin surface — the contract's mcp-routes subset the
 // client loop needs: register a connection (create + discovery + audit,
 // deliberately NOT one transaction — discovery is network I/O) and the
 // per-tool flags toggle (enabled / writeSide / rateLimitPerMin /
@@ -205,7 +205,7 @@ func (s *V1Server) setMcpToolFlagsCore(r *http.Request, rc v1Request, alias, too
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
 	}
 
-	// Change-only audits, mirroring the reference actions.
+	// Change-only audits, mirroring the contract actions.
 	if hasEnabled && before.Enabled != after.Enabled {
 		action := audit.Action("mcp.tool.disabled")
 		if after.Enabled {

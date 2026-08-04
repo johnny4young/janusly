@@ -1,4 +1,4 @@
-// The Recovery dialog's sandbox gate, ported from the reference's
+// The Recovery dialog's sandbox gate, implements the contract's
 // replayDeadLetterAsValidation: a proposed fix runs as a FRESH validation
 // replay of the suggested workflow — write sides skipped, static
 // evidence, trace-only replay lineage back to the failed run — so an
@@ -70,7 +70,7 @@ func (e *Engine) ReplayDeadLetterAsValidationWithPlaybook(
 		originalInput = envelope.Input
 	}
 
-	// The CONTINUATION shape (reference parity): only the failing node
+	// The CONTINUATION shape (reference consistency): only the failing node
 	// re-executes. Ancestors copy their terminal context from the original
 	// run so templates on the failing node see the same upstream outputs;
 	// descendants stay pending (the ordinary cascade continues the

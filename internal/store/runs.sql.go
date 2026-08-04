@@ -175,7 +175,7 @@ type CountRunSemanticCasesRow struct {
 // running runs whose wake-up (if any) has passed; active = running nodes.
 // The oldest age starts at ELIGIBILITY — the latest node.queued event or
 // the retry wake-at, whichever is later. A node with neither signal has
-// unknown age and is excluded (the analogue of the reference's BullMQ
+// unknown age and is excluded (the queue eligibility
 // retry/stalled-age caveat).
 func (q *Queries) CountRunSemanticCases(ctx context.Context, arg CountRunSemanticCasesParams) (CountRunSemanticCasesRow, error) {
 	row := q.db.QueryRow(ctx, countRunSemanticCases, arg.OrgID, arg.RunID)
@@ -231,7 +231,7 @@ type DeleteExpiredRunEventsBatchParams struct {
 	BatchSize int32
 }
 
-// Batched per-org data retention (the reference's subquery+LIMIT shape):
+// Batched per-org data retention (the contract's subquery+LIMIT shape):
 // each round-trip removes at most one batch, honoring per-row legal holds.
 // run_events scopes through the parent run (it has no org column).
 func (q *Queries) DeleteExpiredRunEventsBatch(ctx context.Context, arg DeleteExpiredRunEventsBatchParams) (int64, error) {
@@ -1414,7 +1414,7 @@ type ListFailedRunNodeSamplesRow struct {
 // Event-stream signal: fired inside every transaction that appends run
 // events, so SSE subscribers re-query exactly when something committed.
 // The start-claim CAS: runs inside the run-start transaction so "event
-// claimed" and "run exists" commit or roll back together (the reference
+// claimed" and "run exists" commit or roll back together (the contract
 // claims inside startRun's transaction the same way).
 func (q *Queries) ListFailedRunNodeSamples(ctx context.Context, arg ListFailedRunNodeSamplesParams) ([]ListFailedRunNodeSamplesRow, error) {
 	rows, err := q.db.Query(ctx, listFailedRunNodeSamples, arg.OrgID, arg.FinishedAt)

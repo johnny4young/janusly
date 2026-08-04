@@ -106,7 +106,7 @@ func TestHTTPJSONProjectionRules(t *testing.T) {
 }
 
 func TestHTTPNonOKStatusFailsTheNodeClassifiably(t *testing.T) {
-	// Verified against the reference: a non-2xx response THROWS
+	// Verified against the contract: a non-2xx response THROWS
 	// (HttpResponseError) so retryOn: ["5xx"] policies can match.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -115,7 +115,7 @@ func TestHTTPNonOKStatusFailsTheNodeClassifiably(t *testing.T) {
 
 	_, err := execHTTP(t, map[string]any{"url": server.URL})
 	if err == nil || err.Error() != "HTTP failed: 503" {
-		t.Fatalf("message parity broken: %v", err)
+		t.Fatalf("message contract mismatch: %v", err)
 	}
 	var rich *ExecErrorShape
 	if !asExecErrorShape(err, &rich) || rich.Name != "HttpResponseError" ||

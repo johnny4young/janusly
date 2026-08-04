@@ -380,9 +380,9 @@ func TestInternalBuildIdentityMatchesTheFinishedBinary(t *testing.T) {
 	}
 }
 
-// The parity metric names scrape with the reference's exact spellings,
+// The consistency metric names scrape with the contract's exact spellings,
 // and a bind conflict on the internal port aborts the boot hard.
-func TestMetricsParityNamesAndBindConflict(t *testing.T) {
+func TestMetricsConsistencyNamesAndBindConflict(t *testing.T) {
 	api := bootBinary(t)
 	res, err := http.Get(api.internal + "/metrics")
 	if err != nil {

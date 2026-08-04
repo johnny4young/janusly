@@ -1,9 +1,9 @@
-// AI evidence side-channel ("Why this suggestion?"), ported from the
-// reference's shared ai-evidence module: a DETERMINISTIC projection of
+// AI evidence side-channel ("Why this suggestion?"), implements the
+// contract's shared ai-evidence module: a DETERMINISTIC projection of
 // the context the prompt composer already gathered, emitted as a
 // structured response field with NO second LLM call and NO persistence
-// (the wave card said "persisted" — the reference is response-only, and
-// the pilot ports the reality). Six closed kinds, read-time scrubbing
+// (the wave card said "persisted" — the contract is response-only, and
+// the runtime ports the reality). Six closed kinds, read-time scrubbing
 // (secret shapes re-scrubbed, control chars collapsed, fields capped,
 // weight clamped to [0,1], empty-snippet rows dropped, list bounded).
 // Audits carry only the COUNT — scrubbed rows ride the response, never
@@ -51,7 +51,7 @@ func clampLine(value string, maxChars int) string {
 	if len(runes) <= maxChars {
 		return oneLine
 	}
-	// The reference caps CHARACTERS (JS string length): rune semantics.
+	// The contract caps CHARACTERS (JS string length): rune semantics.
 	return strings.TrimRight(string(runes[:maxChars-1]), " ") + "…"
 }
 

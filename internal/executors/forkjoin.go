@@ -3,7 +3,7 @@
 // IS having multiple outgoing edges, "wait for all branches" IS the ALL-AND
 // readiness check, and the atomic single claim of the join IS the queue's
 // pending→queued transition. The executors only validate declarations and
-// shape outputs; ported from parallel-fork.ts with its verbatim messages.
+// shape outputs; implements parallel-fork.ts with its verbatim messages.
 package executors
 
 import (
@@ -22,7 +22,7 @@ const (
 )
 
 // resolveParallelForkBranches validates config.branches into the declared
-// order, throwing with the reference's descriptive messages.
+// order, throwing with the contract's descriptive messages.
 func resolveParallelForkBranches(config map[string]any) ([]map[string]any, error) {
 	raw, ok := config["branches"].([]any)
 	if !ok {

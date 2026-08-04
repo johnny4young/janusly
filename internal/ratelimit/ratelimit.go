@@ -1,7 +1,7 @@
-// Postgres-backed rate limiter — the pilot's deliberate architecture
-// divergence from the reference's Redis limiter (operator decision:
+// Postgres-backed rate limiter — the runtime's deliberate architecture
+// divergence from the contract's Redis limiter (operator decision:
 // one binary, one database; Redis returns only if business demands it).
-// Semantics are the reference's verbatim: fixed window per (name, key),
+// Semantics are the contract's verbatim: fixed window per (name, key),
 // FAIL OPEN on store errors with a "[rate-limit]" warn (never fail
 // closed — an infrastructure blip must not cascade into a wall of 429s),
 // hooks fired on every store success/error for the degradation tracker,
@@ -26,7 +26,7 @@ type Hooks struct {
 	OnSuccess func(bucket, key string)
 }
 
-// Options mirror the reference's RateLimitOptions.
+// Options mirror the contract's RateLimitOptions.
 type Options struct {
 	// Name is the bucket label (e.g. "api:start", "trigger:ingest").
 	Name string

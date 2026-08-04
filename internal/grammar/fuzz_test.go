@@ -7,7 +7,7 @@ import (
 )
 
 // Fuzz targets for the two operator-facing grammars. The properties are
-// robustness properties, not correctness oracles:
+// robustness properties, not correctness baselines:
 //
 //   1. Never panic, never hang — any input, however hostile.
 //   2. Validate/evaluate agreement: an expression that VALIDATES clean

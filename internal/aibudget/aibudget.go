@@ -1,11 +1,11 @@
-// AI cost governance, ported from the reference's checkBudget/gateBudget:
+// AI cost governance, implements the contract's checkBudget/gateBudget:
 // the monthly usage_events cost aggregate measured against the catalog's
 // org budget (ai.budgetMonthlyUsd / ai.budgetWarnPercent /
 // ai.budgetExceededPolicy). allowed=false ONLY when the policy is "block"
 // AND the spend crossed the limit; "warn" proceeds with a deduped warning
 // audit. Fail-soft everywhere: a broken spend query keeps the gate OPEN
 // (the rate-limit posture) — cost governance must never become an outage.
-// The org scope is the pilot's v1; per-workflow workflow_budgets rows are
+// The org scope is the runtime's v1; per-workflow workflow_budgets rows are
 // deferred with their surface.
 package aibudget
 
@@ -25,14 +25,14 @@ import (
 func init() {
 	// Reference actions written by its raw audit() writers — outside the
 	// typed catalog, admitted without touching the 147 pin.
-	audit.RegisterPilotAction("billing.budget.exceeded")
-	audit.RegisterPilotAction("billing.budget.warned")
+	audit.RegisterRuntimeAction("billing.budget.exceeded")
+	audit.RegisterRuntimeAction("billing.budget.warned")
 }
 
 // warnDedupWindow mirrors BUDGET_WARN_DEDUP_WINDOW_MS.
 const warnDedupWindow = 24 * time.Hour
 
-// CheckResult mirrors the reference's BudgetCheckResult.
+// CheckResult mirrors the contract's BudgetCheckResult.
 type CheckResult struct {
 	Allowed                 bool     `json:"allowed"`
 	MonthlyUsdSpent         float64  `json:"monthlyUsdSpent"`

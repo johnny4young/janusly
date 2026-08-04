@@ -69,7 +69,7 @@ func TestBillingUsageSurfaces(t *testing.T) {
 		t.Fatalf("missing wf-bill-a fallback bucket: %+v", buckets)
 	}
 
-	// Unknown dimension: the reference's stable error code.
+	// Unknown dimension: the contract's stable error code.
 	if res := h.call("GET", "/billing/usage?breakdown=color", nil, ""); res.status != 400 {
 		t.Fatalf("unknown dimension must 400: %d %+v", res.status, res.body)
 	}

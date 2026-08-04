@@ -122,7 +122,7 @@ test('AI-generated workflow result meets the accessibility floor', async ({ page
   await page.goto('/')
 
   await openWorkflowAiAction(page, 'Workflows')
-  await page.locator('.copilot-prompt').fill('Draft an API flow with human approval.')
+  await page.locator('.ai-studio-prompt').fill('Draft an API flow with human approval.')
   await page.getByRole('button', { name: 'Draft flow', exact: true }).click()
 
   const result = page.locator('.result-panel')

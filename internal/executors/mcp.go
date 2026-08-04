@@ -21,8 +21,8 @@ type McpCall struct {
 	TimeoutMs       float64
 }
 
-// McpEnvelope is the normalized per-call outcome, ported from the
-// reference's McpToolEnvelope.
+// McpEnvelope is the normalized per-call outcome, implements the
+// contract's McpToolEnvelope.
 type McpEnvelope struct {
 	OK              bool
 	Error           string

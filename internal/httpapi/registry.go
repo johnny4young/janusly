@@ -1,11 +1,11 @@
-// The pilot's annotated route registry — the Open/Closed equivalent of the
-// reference's Route[] table. Enforcement is CENTRAL: the auth middleware
+// The runtime's annotated route registry — the Open/Closed equivalent of the
+// contract's Route[] table. Enforcement is CENTRAL: the auth middleware
 // looks up the matched mux pattern (http.Request.Pattern, Go 1.22+) here
 // and runs requireRole then requirePermission, so a mount cannot forget
 // its gates — an unlisted pattern is caught by the registry completeness
 // test, not by an attacker.
 //
-// Pairs come from the reference's route annotations verbatim. Routes with an
+// Pairs come from the contract's route annotations verbatim. Routes with an
 // empty tenant gate are auth-only (membership required, no rank/permission).
 // Bootstrap identity and optional-identity routes have separate closed
 // registries below.
@@ -19,7 +19,7 @@ import (
 )
 
 // authOnlyRoutes are the ONLY patterns allowed to pass the middleware
-// with identity but no rank/permission gate (the reference's contract:
+// with identity but no rank/permission gate (the contract's contract:
 // every member reads runtime config and the catalogs). Any OTHER pattern
 // missing from routeAuthz fails CLOSED with route_not_registered — a
 // mount can no longer silently become auth-only by forgetting its entry.
@@ -31,7 +31,7 @@ var authOnlyRoutes = map[string]bool{
 	"GET /v1/tools":     true,
 	// Read-only AI posture probe (reference ai-health-route.ts has no gate).
 	"GET /ai/health": true,
-	// Billing reads carry no gate in the reference (billing-routes.ts).
+	// Billing reads carry no gate in the contract (billing-routes.ts).
 	"GET /billing/usage":        true,
 	"GET /billing/usage/export": true,
 	"GET /billing/budget":       true,
@@ -227,7 +227,7 @@ var routeAuthz = map[string]routeGate{
 	"GET /audit": {auth.RoleAdmin, "org.config.write"},
 
 	// Org config: the read is auth-only (every member sees effective
-	// settings); the write is the admin pair from the reference.
+	// settings); the write is the admin pair from the contract.
 	"POST /org/config": {auth.RoleAdmin, "org.config.write"},
 
 	// WorkOS SSO connection administration. The public start/callback routes

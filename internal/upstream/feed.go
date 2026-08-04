@@ -1,5 +1,5 @@
 // Pure feed parsing for upstream health awareness (reference
-// packages/shared/src/upstream-health.ts): map a provider's status JSON
+// the source contract): map a provider's status JSON
 // (or an HTTP probe status code) onto the closed Janusly status
 // vocabulary. Zero I/O — the poller owns the network fetch and the
 // fail-open behaviour on an unreachable feed.

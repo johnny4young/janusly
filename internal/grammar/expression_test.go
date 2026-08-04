@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// Cases port packages/shared/src/expression.test.ts at the parity pin; each
+// Cases port the source contract at the consistency pin; each
 // group cites the it(...) block it mirrors. The TS tests ARE the grammar
 // specification.
 
@@ -51,7 +51,7 @@ func TestRejectsArbitraryCodeExecution(t *testing.T) {
 	if result.Valid || result.Code != "unsupported_token" ||
 		result.Message != "Unsupported expression token: process.exit()" ||
 		result.Token != "process.exit()" {
-		t.Fatalf("wire-shape parity broken: %+v", result)
+		t.Fatalf("wire-shape contract mismatch: %+v", result)
 	}
 	for _, expr := range []string{
 		"context.http.output.ok; process.exit()",
@@ -171,7 +171,7 @@ func TestGlobBoundsAndLinearTime(t *testing.T) {
 }
 
 func TestUndefinedVersusNullDistinction(t *testing.T) {
-	// Semantics the reference inherits from JS and the port must pin: an
+	// Semantics the contract inherits from JS and the port must pin: an
 	// unresolved path is undefined, which loose-equals null but never
 	// strict-equals it, and two unresolved paths strict-equal each other.
 	scope := Scope{Context: map[string]any{"present": nil}, Inputs: map[string]any{}}
@@ -194,7 +194,7 @@ func TestUndefinedVersusNullDistinction(t *testing.T) {
 
 func TestLooseEqualityCoercions(t *testing.T) {
 	// The grammar intentionally exposes JS loose equality; pin the scalar
-	// coercion table the reference relies on.
+	// coercion table the contract relies on.
 	scope := Scope{
 		Context: map[string]any{"count": float64(5), "flag": true, "text": "5"},
 		Inputs:  map[string]any{},
@@ -246,19 +246,19 @@ func TestParenthesesAndNegation(t *testing.T) {
 		}
 	}
 
-	// Verified live against the reference evaluator: a parenthesized boolean
+	// Verified live against the contract evaluator: a parenthesized boolean
 	// group composed with a further operator is OUTSIDE the grammar — parens
 	// group only at the outermost level or after `!`. The port must reject
 	// it with the identical token error, not quietly support more.
 	_, err := EvaluateExpression("(context.http.output.statusCode === 200 || false) && !false", scope)
 	if err == nil || err.Error() != "Unsupported expression token: 200 || false" {
-		t.Fatalf("paren-group limitation parity broken: %v", err)
+		t.Fatalf("paren-group limitation contract mismatch: %v", err)
 	}
 }
 
 func TestQuotedOperatorsDoNotSplit(t *testing.T) {
 	// Operator characters inside quoted strings must not split the
-	// expression — the reference's splitter is quote-aware.
+	// expression — the contract's splitter is quote-aware.
 	scope := Scope{
 		Context: map[string]any{"note": "a && b || c"},
 		Inputs:  map[string]any{},
@@ -278,6 +278,6 @@ func TestDomainValidatorAdapter(t *testing.T) {
 	}
 	valid, message := DomainValidator("process.exit()")
 	if valid || message != "Unsupported expression token: process.exit()" {
-		t.Fatalf("adapter must relay the reference message, got %q", message)
+		t.Fatalf("adapter must relay the contract message, got %q", message)
 	}
 }

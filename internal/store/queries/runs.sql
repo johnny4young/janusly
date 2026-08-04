@@ -333,7 +333,7 @@ WHERE id = sqlc.arg(id) AND status = 'failed';
 
 -- The start-claim CAS: runs inside the run-start transaction so "event
 
--- claimed" and "run exists" commit or roll back together (the reference
+-- claimed" and "run exists" commit or roll back together (the contract
 
 -- claims inside startRun's transaction the same way).
 
@@ -379,7 +379,7 @@ WHERE org_id = $1 AND run_id = $2 AND node_id = $3 AND status = 'open'
 ORDER BY created_at DESC
 LIMIT 1;
 
--- Batched per-org data retention (the reference's subquery+LIMIT shape):
+-- Batched per-org data retention (the contract's subquery+LIMIT shape):
 
 -- each round-trip removes at most one batch, honoring per-row legal holds.
 
@@ -414,7 +414,7 @@ LIMIT $3;
 
 -- the retry wake-at, whichever is later. A node with neither signal has
 
--- unknown age and is excluded (the analogue of the reference's BullMQ
+-- unknown age and is excluded (the queue eligibility
 
 -- retry/stalled-age caveat).
 

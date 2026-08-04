@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// Every case cites the reference it ports: packages/engine/src/
-// workflow-validation.ts (wv) or packages/engine/src/inputs-validator.ts (iv)
-// at the parity pin recorded in the plan.
+// Every case cites the contract it ports: the source contract
+// workflow-validation.ts (wv) or the source contract (iv)
+// at the consistency pin recorded in the plan.
 
 func parseOK(t *testing.T, doc string) *Workflow {
 	t.Helper()
@@ -85,10 +85,10 @@ func TestDuplicateAndReservedNodeIDs(t *testing.T) {
 	requireIssue(t, result, CodeNodeIDReserved, `reserved for the run input`)
 }
 
-func TestUnsupportedVersusPilotUnsupported(t *testing.T) {
+func TestUnsupportedVersusRuntimeUnsupported(t *testing.T) {
 	// wv:114 — a type outside the platform's closed set is invalid
 	// everywhere. A type valid on the platform but outside this backend's
-	// executable subset gets the pilot-only code instead, never Node's.
+	// executable subset gets the runtime-only code instead, never Node's.
 	result := Validate(parseOK(t, `{"nodes":[
 		{"id":"a","type":"banana","config":{}},
 		{"id":"b","type":"agent_reflection","config":{}}
@@ -97,15 +97,15 @@ func TestUnsupportedVersusPilotUnsupported(t *testing.T) {
 	if unsupported.NodeID != "a" {
 		t.Fatalf("wrong node attribution: %+v", unsupported)
 	}
-	pilot := requireIssue(t, result, CodeNodeTypeUnsupportedPilot, `"agent_reflection"`)
-	if pilot.NodeID != "b" {
-		t.Fatalf("wrong node attribution: %+v", pilot)
+	runtime := requireIssue(t, result, CodeNodeTypeNotExecutable, `"agent_reflection"`)
+	if runtime.NodeID != "b" {
+		t.Fatalf("wrong node attribution: %+v", runtime)
 	}
 }
 
 func TestHTTPMissingURLTreatsJSFalsyAsMissing(t *testing.T) {
 	// wv:115 — `!node.config.url`: absent, empty string, null, false and 0
-	// all read as missing under the reference's truthiness.
+	// all read as missing under the contract's truthiness.
 	for _, config := range []string{`{}`, `{"url":""}`, `{"url":null}`, `{"url":false}`, `{"url":0}`} {
 		result := Validate(parseOK(t, `{"nodes":[{"id":"a","type":"http","config":`+config+`}],"edges":[]}`), nil)
 		requireIssue(t, result, CodeHTTPMissingURL, "HTTP node requires config.url")
@@ -191,7 +191,7 @@ func TestEdgeConditionInputsScopeGuard(t *testing.T) {
 
 func TestCycleAlsoStarvesStartNodes(t *testing.T) {
 	// wv:536-540 — a two-node loop trips both the cycle check and the
-	// missing-start check, exactly as the reference reports them.
+	// missing-start check, exactly as the contract reports them.
 	result := Validate(parseOK(t, `{"nodes":[
 		{"id":"a","type":"noop","config":{}},{"id":"b","type":"noop","config":{}}
 	],"edges":[{"from":"a","to":"b"},{"from":"b","to":"a"}]}`), nil)
@@ -199,7 +199,7 @@ func TestCycleAlsoStarvesStartNodes(t *testing.T) {
 	requireIssue(t, result, CodeMissingStartNode, "at least one start node")
 }
 
-func TestInputDefaultTypeMismatchMessageParity(t *testing.T) {
+func TestInputDefaultTypeMismatchMessageConsistency(t *testing.T) {
 	// wv:528-533 + iv walk messages — verified live against the Node API:
 	// a string field with default 42 reports exactly this composed message.
 	result := Validate(parseOK(t, `{"nodes":[{"id":"a","type":"noop","config":{}}],"edges":[],
@@ -207,7 +207,7 @@ func TestInputDefaultTypeMismatchMessageParity(t *testing.T) {
 	issue := requireIssue(t, result, CodeInputDefaultTypeMismatch, "")
 	want := "Declared default for $.start is invalid: $.start must be string, got number"
 	if issue.Message != want {
-		t.Fatalf("message parity broken:\n got: %s\nwant: %s", issue.Message, want)
+		t.Fatalf("message contract mismatch:\n got: %s\nwant: %s", issue.Message, want)
 	}
 }
 
@@ -238,7 +238,7 @@ func TestEnumAndNestedDefaultPaths(t *testing.T) {
 
 func TestDocumentationFixturesValidateClean(t *testing.T) {
 	// Acceptance fixtures from docs/workflows.md sections 2 and 6 at the
-	// parity pin: both use only subset node types and must pass untouched.
+	// consistency pin: both use only subset node types and must pass untouched.
 	for _, name := range []string{"testdata/conditional-branch.json", "testdata/approval-gate.json"} {
 		raw, err := os.ReadFile(name)
 		if err != nil {

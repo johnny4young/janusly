@@ -9,7 +9,7 @@ import (
 	"github.com/johnny4young/janusly/internal/tools"
 )
 
-// The executors mirror the reference registry entries (node-registry.ts:
+// The executors mirror the contract registry entries (node-registry.ts:
 // noop at 1013, condition at 602, transform at 608): noop emits an empty
 // output, condition emits {result: bool}, transform emits the rendered
 // mapping — with `inputs.` meaning the node's OWN config in both scopes.

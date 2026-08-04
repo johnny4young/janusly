@@ -1,4 +1,4 @@
-// Recovery alerting dispatcher — the pilot's port of the reference's
+// Recovery alerting dispatcher — the runtime's port of the contract's
 // alert subsystem core: enabled policies for (org, trigger) evaluate
 // their per-trigger parameters against the event payload, a cooldown
 // dedupe (policy + dedupe key) suppresses repeat noise, and delivery
@@ -64,7 +64,7 @@ func alertListAllows(list []string, value string) bool {
 	return slices.Contains(list, value)
 }
 
-// alertPolicyMatches evaluates the pilot-supported per-trigger parameter
+// alertPolicyMatches evaluates the runtime-supported per-trigger parameter
 // filters against the payload; an unknown parameter never blocks (the
 // policy write validated shape, matching stays permissive-by-default).
 func alertPolicyMatches(trigger string, params map[string]any, payload map[string]any) bool {

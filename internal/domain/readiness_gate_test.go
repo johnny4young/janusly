@@ -23,7 +23,7 @@ func issueByCode(result ReadinessResult, code string) *ReadinessIssue {
 	return nil
 }
 
-// Each case cites the reference rule it ports (workflow-readiness.ts).
+// Each case cites the contract rule it ports (workflow-readiness.ts).
 func TestReadinessRules(t *testing.T) {
 	writeSide := func(tool string, _ map[string]any) bool { return tool == "fake.write" }
 	opts := ReadinessOptions{IsWriteSideTool: writeSide}
@@ -135,7 +135,7 @@ func TestReadinessRollupAndMessages(t *testing.T) {
 		t.Fatalf("eval warn rollup: %+v", got)
 	}
 
-	// fail dominates warn; message text is the reference's, verbatim.
+	// fail dominates warn; message text is the contract's, verbatim.
 	failing := gateWorkflow(t, `{"nodes":[{"id":"call","type":"http",
 		"config":{"url":"https://x.test"}}],"edges":[]}`)
 	got := CheckWorkflowReadiness(failing, ReadinessOptions{})

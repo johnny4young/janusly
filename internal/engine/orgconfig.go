@@ -1,5 +1,5 @@
 // Per-tenant HTTP bound resolution over the shared org_configs table —
-// the pilot's subset of the reference's org-config catalog. Precedence per
+// the runtime's subset of the contract's org-config catalog. Precedence per
 // key, matching the catalog contract: valid tenant row → env override →
 // catalog default. Values below the catalog minimum (timeoutMs ≥ 1,
 // maxResponseBytes ≥ 1, maxRedirects ≥ 0) fall through to the next layer

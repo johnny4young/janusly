@@ -140,7 +140,7 @@ type recoveryQueueQuery struct {
 // listRecoveryQueue runs the cap-correct join. Every leg is org-scoped;
 // owner/severity filters key off the joined recovery item, so a dead
 // letter without one is excluded by those filters (its joined columns
-// are NULL → no match), mirroring the reference.
+// are NULL → no match), mirroring the contract.
 func (s *V1Server) listRecoveryQueue(ctx context.Context, orgID string, q recoveryQueueQuery) ([]recoveryQueueRow, error) {
 	args := []any{orgID}
 	arg := func(value any) string {

@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// Cases port packages/engine/src/template.test.ts at the parity pin; each
+// Cases port the source contract at the consistency pin; each
 // cites the it(...) block it mirrors.
 
 func fakeEnv(vars map[string]string) func(string) (string, bool) {
@@ -300,7 +300,7 @@ func TestCapturesEnvAndSecretValuesInTheSamePass(t *testing.T) {
 
 func TestUnresolvedTemplatePathErrorEnvelope(t *testing.T) {
 	// The strict-policy envelope: exact message, bounded paths, truncation
-	// marker — the reference's UnresolvedTemplatePathError contract.
+	// marker — the contract's UnresolvedTemplatePathError contract.
 	one := NewUnresolvedTemplatePathError([]string{"context.a.output.x"})
 	if one.Error() != "Node config contains 1 unresolved template path" || one.Truncated {
 		t.Fatalf("singular envelope broken: %v", one)

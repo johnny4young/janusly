@@ -75,11 +75,11 @@ func TestResolveWaitUntilScheduleContract(t *testing.T) {
 	both := map[string]any{"duration": "PT5S", "until": "2030-01-01T00:00:00Z"}
 	if _, err := resolveWaitUntilSchedule(both, now); err == nil ||
 		err.Error() != "wait_until accepts either config.duration or config.until, not both" {
-		t.Fatalf("conflict message parity broken: %v", err)
+		t.Fatalf("conflict message contract mismatch: %v", err)
 	}
 	if _, err := resolveWaitUntilSchedule(map[string]any{}, now); err == nil ||
 		err.Error() != "wait_until requires config.duration or config.until" {
-		t.Fatalf("missing message parity broken: %v", err)
+		t.Fatalf("missing message contract mismatch: %v", err)
 	}
 	duration, err := resolveWaitUntilSchedule(map[string]any{"duration": "PT2M"}, now)
 	if err != nil || duration.delayMs != 120_000 || duration.source != "duration" ||
@@ -123,7 +123,7 @@ func TestApprovalMetadataShape(t *testing.T) {
 	}
 	if waiting.Metadata["kind"] != "approval" || waiting.Metadata["title"] != "Ship it?" ||
 		waiting.Metadata["resumeToken"] != "r1:gate" || waiting.Metadata["assignee"] != "ops" {
-		t.Fatalf("metadata parity broken: %+v", waiting.Metadata)
+		t.Fatalf("metadata contract mismatch: %+v", waiting.Metadata)
 	}
 
 	titled, _ := Registry()["approval"](context.Background(), Input{
@@ -144,7 +144,7 @@ func TestHumanFormInitialValuesContract(t *testing.T) {
 	}
 	untitled, err := executeHumanForm(context.Background(), Input{Config: untitledConfig})
 	if err != nil || untitled.(Waiting).Metadata["title"] != "Human input required" {
-		t.Fatalf("default title parity broken: %+v err %v", untitled, err)
+		t.Fatalf("default title contract mismatch: %+v err %v", untitled, err)
 	}
 
 	config := map[string]any{
@@ -189,7 +189,7 @@ func TestWebhookMetadataShape(t *testing.T) {
 		t.Fatalf("webhook must wait indefinitely: %+v", out)
 	}
 	if waiting.Metadata["kind"] != "webhook" || waiting.Metadata["resumeToken"] != "r1:trigger" {
-		t.Fatalf("metadata parity broken: %+v", waiting.Metadata)
+		t.Fatalf("metadata contract mismatch: %+v", waiting.Metadata)
 	}
 }
 

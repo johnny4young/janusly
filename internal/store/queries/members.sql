@@ -130,7 +130,7 @@ WHERE id = $1 AND status = 'pending';
 
 -- The verified provider id is the durable membership key. Re-acceptance of a
 -- newly issued invitation for the same org updates the existing grant exactly
--- like the Node oracle.
+-- like the Node baseline.
 -- name: UpsertInvitedIdentityMembership :exec
 INSERT INTO org_members (id, org_id, user_id, email, role, invited_by)
 VALUES ($1, $2, $3, $4, $5, $6)

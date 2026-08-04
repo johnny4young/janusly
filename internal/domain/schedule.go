@@ -16,7 +16,7 @@ type ScheduleConfig struct {
 }
 
 // ResolveScheduleConfig validates and normalizes the schedule node config.
-// Field names and error messages mirror the reference implementation.
+// Field names and error messages mirror the contract implementation.
 func ResolveScheduleConfig(config map[string]any) (*ScheduleConfig, error) {
 	rawExpression, ok := config["cronExpression"]
 	expression, stringValue := rawExpression.(string)

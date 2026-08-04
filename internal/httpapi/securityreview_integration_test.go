@@ -139,12 +139,12 @@ func TestSecretScrubEndToEnd(t *testing.T) {
 
 	// The chokepoint-covered surfaces (dead-letter snapshots, node
 	// state/error, audit metadata) must never carry the raw value. NOTE the
-	// deliberate exception, shared with the reference: `runs.inputJson` is
+	// deliberate exception, shared with the contract: `runs.inputJson` is
 	// NOT in the safe-persist chokepoint — a hardcoded secret in node
 	// config persists verbatim there (replay needs the doc). The sanctioned
 	// posture is `{{secret.X}}` templates plus the production readiness
 	// gate, asserted below; the residual risk is documented in
-	// SECURITY-REVIEW.md and flagged to the reference repo.
+	// SECURITY-REVIEW.md and flagged to the contract repo.
 	surfaces := map[string]string{
 		"dlq list":   fetchRaw("/v1/dlq"),
 		"dlq detail": fetchRaw("/dlq?id=" + deadLetterID),

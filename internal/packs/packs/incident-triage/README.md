@@ -31,7 +31,7 @@ Configure the supported Anthropic provider for live classification.
   `{ severity, rationale }` JSON shape; fallback or malformed output cannot cross
   the condition guarding the issue-creation step.
 - **Start recovery drill** offers two production-shaped local paths. The
-  GitHub credential drill executes `open_issue` through the real BullMQ worker,
+  GitHub credential drill executes `open_issue` through the Janusly worker,
   retry classification, and terminal DLQ boundary; the policy correctly treats
   a controlled missing-secret probe as non-retryable before any GitHub request.
   The worker-interruption drill crosses the configured age threshold through

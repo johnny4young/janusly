@@ -67,7 +67,7 @@ func TestApprovalPausesAndResumeCompletesEndToEnd(t *testing.T) {
 	if waiting["kind"] != "approval" || waiting["reason"] != "Waiting for human approval" ||
 		waiting["title"] != "Ship it?" || waiting["assignee"] != "ops" ||
 		waiting["resumeToken"] != runID+":gate" || waiting["waitingSince"] == nil {
-		t.Fatalf("waiting checkpoint parity broken: %s", state)
+		t.Fatalf("waiting checkpoint contract mismatch: %s", state)
 	}
 	var waitingEvents int
 	_ = pool.QueryRow(ctx, "select count(*) from run_events where run_id=$1 and type='node.waiting'", runID).Scan(&waitingEvents)
@@ -75,7 +75,7 @@ func TestApprovalPausesAndResumeCompletesEndToEnd(t *testing.T) {
 		t.Fatalf("expected one node.waiting event, got %d", waitingEvents)
 	}
 
-	// Human decision: the resume completes the node with the reference's
+	// Human decision: the resume completes the node with the contract's
 	// historical EMPTY output and releases downstream work.
 	if err := eng.ResumeRun(ctx, runID, "gate"); err != nil {
 		t.Fatalf("resume: %v", err)
@@ -200,7 +200,7 @@ func TestWaitUntilAutoCompletesThroughTheClock(t *testing.T) {
 	_ = json.Unmarshal(state, &metadata)
 	if metadata["kind"] != "timer" || metadata["source"] != "duration" ||
 		metadata["durationMs"] != float64(400) || metadata["wakeAt"] == nil {
-		t.Fatalf("timer metadata parity broken: %s", state)
+		t.Fatalf("timer metadata contract mismatch: %s", state)
 	}
 	var leftover int
 	_ = pool.QueryRow(ctx, `select count(*) from run_wakeups w
@@ -243,6 +243,6 @@ func TestWaitUntilInvalidConfigFailsWithExactMessage(t *testing.T) {
 	var errorJSON []byte
 	_ = pool.QueryRow(ctx, "select error_json from run_nodes where run_id=$1 and node_id='pause'", runID).Scan(&errorJSON)
 	if !strings.Contains(string(errorJSON), "wait_until accepts either config.duration or config.until, not both") {
-		t.Fatalf("config error message parity broken: %s", errorJSON)
+		t.Fatalf("config error message contract mismatch: %s", errorJSON)
 	}
 }

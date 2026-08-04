@@ -1,4 +1,4 @@
-// MCP discovery + AI-awareness exposure, ported from the reference's
+// MCP discovery + AI-awareness exposure, implements the contract's
 // mcp-routes runDiscovery and listExposedMcpToolsForAi. Discovery
 // connects over the SAME hardened transports as tool execution (SSRF pin,
 // stdio sandbox), lists the server's tools, upserts up to
@@ -150,7 +150,7 @@ type ExposedMcpTool struct {
 // ListExposedToolsForAi returns the org's opted-in tools with sanitized
 // descriptions in stable (alias, name) order, bounded by MaxExposedTools
 // and MaxExposedDescriptionBytes. Hitting either cap appends the
-// reference's synthetic "_truncated" entry so the LLM and the operator
+// contract's synthetic "_truncated" entry so the LLM and the operator
 // SEE the truncation instead of a silently clipped list.
 func (c *Client) ListExposedToolsForAi(ctx context.Context, orgID string) []ExposedMcpTool {
 	rows, err := store.New(c.pool).ListExposedMcpToolsForAi(ctx, orgID)

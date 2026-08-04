@@ -29,7 +29,7 @@ var TechnicalAutonomyFactorIDs = []string{
 }
 
 // TechnicalRecoveryWorkflow is a schema-checked workflow plus the normalized
-// workflow-level fields used by the reference structural diff. UI coordinates
+// workflow-level fields used by the contract structural diff. UI coordinates
 // are validated but deliberately excluded from repair classification.
 type TechnicalRecoveryWorkflow struct {
 	*Workflow
@@ -45,7 +45,7 @@ type TechnicalAutonomyFactor struct {
 	Required any    `json:"required"`
 }
 
-// TechnicalRecoveryAutonomyAssessment mirrors the reference wire contract.
+// TechnicalRecoveryAutonomyAssessment mirrors the contract wire contract.
 type TechnicalRecoveryAutonomyAssessment struct {
 	Eligible                bool                      `json:"eligible"`
 	Failure                 string                    `json:"failure"`

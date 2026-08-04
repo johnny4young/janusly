@@ -1,5 +1,5 @@
 // PagerDuty incident read, deterministic policy, and mutation tools
-// (reference packages/engine/src/integration-tooling/pagerduty.ts).
+// (reference the source contract).
 //
 // The V3 flow is: signed trigger (httpapi/pagerduty.go) → authoritative
 // read (pagerduty.incident.get) → deterministic policy evaluation
@@ -79,7 +79,7 @@ func IsWithinPagerDutyWorkingHours(at time.Time, timeZone string, windows []Work
 }
 
 // pagerDutyAPIBase resolves the regional API host, honoring the explicit
-// local simulator gate (both env vars, like the reference).
+// local simulator gate (both env vars, like the contract).
 func pagerDutyAPIBase(region string) string {
 	if os.Getenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR") == "true" {
 		if raw := strings.TrimSpace(os.Getenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL")); raw != "" {
@@ -296,7 +296,7 @@ func pagerDutyTools() []Definition {
 }
 
 // executePagerDutyPolicyEvaluate is the pure decision ladder — exact
-// reason order from the reference. Malformed runtime input answers
+// reason order from the contract. Malformed runtime input answers
 // {shouldAct:false, reason:"invalid_runtime_input"}; it never errors.
 func executePagerDutyPolicyEvaluate(_ context.Context, input map[string]any) (map[string]any, error) {
 	start := time.Now()

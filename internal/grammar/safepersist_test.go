@@ -39,7 +39,7 @@ func TestSafePersistPayloadEnvOverride(t *testing.T) {
 		t.Fatalf("env cap must apply: %s (%v)", out, err)
 	}
 
-	// A malformed override falls back to the reference default.
+	// A malformed override falls back to the contract default.
 	t.Setenv("JANUSLY_PERSIST_MAX_BYTES", "not-a-number")
 	if DefaultPersistMaxBytes() != 256_000 {
 		t.Fatalf("malformed env must fall back: %d", DefaultPersistMaxBytes())
