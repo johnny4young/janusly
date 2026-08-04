@@ -192,6 +192,11 @@ func extractCommittedTree(root, destination string) error {
 		}
 		path := filepath.Join(destination, clean)
 		switch header.Typeflag {
+		case tar.TypeXGlobalHeader, tar.TypeXHeader:
+			// Git emits a global PAX header with repository metadata before
+			// ordinary entries. archive/tar exposes it as a header but applies
+			// per-file PAX records itself; neither represents a filesystem path.
+			continue
 		case tar.TypeDir:
 			if err := os.MkdirAll(path, os.FileMode(header.Mode)&0o777); err != nil {
 				return fmt.Errorf("create staged directory %s: %w", clean, err)
