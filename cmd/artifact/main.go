@@ -168,6 +168,15 @@ func extractCommittedTree(root, destination string) error {
 	if err := command.Start(); err != nil {
 		return fmt.Errorf("start git archive: %w", err)
 	}
+	finished := false
+	defer func() {
+		if finished {
+			return
+		}
+		_ = archive.Close()
+		_ = command.Process.Kill()
+		_ = command.Wait()
+	}()
 	reader := tar.NewReader(archive)
 	for {
 		header, err := reader.Next()
@@ -175,63 +184,56 @@ func extractCommittedTree(root, destination string) error {
 			break
 		}
 		if err != nil {
-			_ = command.Wait()
 			return fmt.Errorf("read git archive: %w", err)
 		}
 		clean := filepath.Clean(filepath.FromSlash(header.Name))
 		if clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-			_ = command.Wait()
 			return fmt.Errorf("git archive contains unsafe path %q", header.Name)
 		}
 		path := filepath.Join(destination, clean)
 		switch header.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(path, os.FileMode(header.Mode)&0o777); err != nil {
-				_ = command.Wait()
 				return fmt.Errorf("create staged directory %s: %w", clean, err)
 			}
 		case tar.TypeReg, tar.TypeRegA:
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-				_ = command.Wait()
 				return fmt.Errorf("create staged parent %s: %w", clean, err)
 			}
 			file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(header.Mode)&0o777)
 			if err != nil {
-				_ = command.Wait()
 				return fmt.Errorf("create staged file %s: %w", clean, err)
 			}
 			_, copyErr := io.Copy(file, reader)
 			closeErr := file.Close()
 			if copyErr != nil {
-				_ = command.Wait()
 				return fmt.Errorf("extract staged file %s: %w", clean, copyErr)
 			}
 			if closeErr != nil {
-				_ = command.Wait()
 				return fmt.Errorf("close staged file %s: %w", clean, closeErr)
 			}
 		case tar.TypeSymlink:
 			link := filepath.Clean(filepath.FromSlash(header.Linkname))
 			if filepath.IsAbs(link) || link == ".." || strings.HasPrefix(link, ".."+string(filepath.Separator)) {
-				_ = command.Wait()
 				return fmt.Errorf("git archive contains unsafe symlink %q", header.Name)
 			}
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-				_ = command.Wait()
 				return fmt.Errorf("create staged symlink parent %s: %w", clean, err)
 			}
 			if err := os.Symlink(link, path); err != nil {
-				_ = command.Wait()
 				return fmt.Errorf("create staged symlink %s: %w", clean, err)
 			}
 		default:
-			_ = command.Wait()
 			return fmt.Errorf("git archive contains unsupported entry %q", header.Name)
 		}
+	}
+	if err := archive.Close(); err != nil {
+		return fmt.Errorf("close git archive: %w", err)
 	}
 	if err := command.Wait(); err != nil {
 		return fmt.Errorf("git archive HEAD: %w", err)
 	}
+	finished = true
 	return nil
 }
 
