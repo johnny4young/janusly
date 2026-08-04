@@ -11,6 +11,7 @@ compose() {
   COMPOSE_PROJECT_NAME="$project" \
   JANUSLY_HOST_PORT="$app_port" \
   JANUSLY_POSTGRES_HOST_PORT="$postgres_port" \
+  ALLOW_PRIVATE_HTTP_TARGETS=true \
     docker compose -p "$project" "$@"
 }
 
@@ -42,4 +43,6 @@ PLAYWRIGHT_SKIP_WEB_SERVER=1 \
 JANUSLY_SMOKE=1 \
 JANUSLY_E2E_RUNTIME_BASE_URL="$origin" \
 E2E_API_URL="$origin" \
+E2E_UPSTREAM_HOST=host.docker.internal \
+E2E_UPSTREAM_BIND=0.0.0.0 \
   $pnpm_command exec playwright test e2e/janusly-smoke.spec.ts --project=chromium

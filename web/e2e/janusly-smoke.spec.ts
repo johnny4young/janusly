@@ -12,6 +12,8 @@ import {
 } from '@playwright/test'
 
 const API_URL = process.env.E2E_API_URL ?? 'http://127.0.0.1:3001'
+const UPSTREAM_HOST = process.env.E2E_UPSTREAM_HOST ?? '127.0.0.1'
+const UPSTREAM_BIND = process.env.E2E_UPSTREAM_BIND ?? '127.0.0.1'
 
 test.skip(process.env.JANUSLY_SMOKE !== '1', 'Janusly smoke runs only via run-web-smoke.mjs')
 
@@ -117,9 +119,9 @@ test('operator loop against Go: redrive and approve through the real UI', async 
     res.writeHead(500)
     res.end('down')
   })
-  await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve))
+  await new Promise<void>((resolve) => upstream.listen(0, UPSTREAM_BIND, resolve))
   const address = upstream.address()
-  const upstreamUrl = typeof address === 'object' && address ? `http://127.0.0.1:${address.port}` : ''
+  const upstreamUrl = typeof address === 'object' && address ? `http://${UPSTREAM_HOST}:${address.port}` : ''
 
   try {
     // Seed: a failing http run (lands in DLQ) and a waiting approval run.
@@ -295,9 +297,9 @@ test('recovery queue, drawer, and bulk replay against Go', async ({ page, reques
     res.writeHead(500)
     res.end('down')
   })
-  await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve))
+  await new Promise<void>((resolve) => upstream.listen(0, UPSTREAM_BIND, resolve))
   const address = upstream.address()
-  const upstreamUrl = typeof address === 'object' && address ? `http://127.0.0.1:${address.port}` : ''
+  const upstreamUrl = typeof address === 'object' && address ? `http://${UPSTREAM_HOST}:${address.port}` : ''
 
   try {
     const failing = {
