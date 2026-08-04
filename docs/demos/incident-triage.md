@@ -1,6 +1,6 @@
 # Demo: Incident triage
 
-**Template:** [`incident-triage`](../../apps/api/src/templates.ts)
+**Template:** `incident-triage` in `internal/httpapi/assets/templates.json`
 **Audience:** SRE, on-call, operations engineering managers
 **Time:** 3-5 minutes
 **Story:** "When PagerDuty wakes someone up at 2am, Janusly already filed the GitHub issue and posted the Slack ping. Here is what the operator sees, what the audit trail captures, and what happens when an integration rate-limits us."

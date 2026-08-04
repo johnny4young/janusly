@@ -1,6 +1,6 @@
 # Demo: Failed workflow recovery
 
-**Template:** [`failed-workflow-recovery`](../../apps/api/src/templates.ts)
+**Template:** `failed-workflow-recovery` in `internal/httpapi/assets/templates.json`
 **Audience:** Every buyer. The wedge demo.
 **Time:** 4-5 minutes
 **Story:** "This is what makes Janusly different. The workflow breaks — twice, on purpose — and Janusly tells you what's wrong, suggests the fix, validates it in a sandbox, and shows exactly what has to be wired before a live replay. One demo, two recovery patterns, zero developer paged."
@@ -11,7 +11,7 @@
 | --- | --- |
 | No credentials | The template ships with `requiredCredentials: []`. The secret reference `{{secret.BILLING_API_KEY}}` is **intentionally unbound** — that is the failure we recover from. |
 | Optional live-success endpoint | The checked-in URL is `https://billing.example.com/charges`. For a live green replay, change it in the Inspector to a reachable billing sandbox / RequestBin / local test endpoint and bind the replacement secret env-var before the final run. |
-| No env tweaks | The demo runs in dev mode out of the box. For production-mode (`JANUSLY_PRODUCTION_MODE=true`), the readiness gate blocks `/start` until approval is added — which is itself the demo. |
+| No env tweaks | The demo runs in dev mode out of the box. For production-mode (`JANUSLY_ENV=production`), the readiness gate blocks `/start` until approval is added — which is itself the demo. |
 | Sample payload | `{ "customer": "leah@example.com", "amountUsd": 49.00 }` |
 
 ## Run sequence (the full recovery loop)

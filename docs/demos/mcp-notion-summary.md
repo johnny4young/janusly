@@ -1,6 +1,6 @@
 # Demo: MCP Notion → AI summary → Slack
 
-**Template:** [`mcp-notion-summary`](../../apps/api/src/templates.ts)
+**Template:** `mcp-notion-summary` in `internal/httpapi/assets/templates.json`
 **Audience:** AI builders, ecosystem buyers, technical architects evaluating MCP
 **Time:** 3-5 minutes
 **Story:** "Janusly consumes external MCP servers as workflow steps. Wire a Notion MCP connection once in the admin panel, and every workflow in your org can read Notion pages with the same observability, audit, and cost story as native tools."

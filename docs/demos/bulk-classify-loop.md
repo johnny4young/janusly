@@ -1,6 +1,6 @@
 # Demo: Bulk customer classify with loop
 
-**Template:** [`bulk-classify-loop`](../../apps/api/src/templates.ts)
+**Template:** `bulk-classify-loop` in `internal/httpapi/assets/templates.json`
 **Audience:** Scale / data-volume buyers, customer-success and growth teams
 **Time:** 3-5 minutes
 **Story:** "Send a batch of customers in, get back a ranked list with one-line reasoning per row. The loop primitive normalizes the batch; the AI classifies in one grouped call; the digest mails to the customer-success team. Predictable cost, predictable latency, even at scale."

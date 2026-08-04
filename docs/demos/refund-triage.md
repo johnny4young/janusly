@@ -1,6 +1,6 @@
 # Demo: Refund triage
 
-**Template:** [`refund-triage-approval`](../../apps/api/src/templates.ts)
+**Template:** `refund-triage-approval` in `internal/httpapi/assets/templates.json`
 **Audience:** Revenue ops, finance ops, customer-support team leads
 **Time:** 3-5 minutes
 **Story:** "When a refund request comes in, the human signs off, the billing system gets a signed call, and the customer is told what happened. Janusly does the routing; the human keeps the judgment call."
