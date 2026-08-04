@@ -2,7 +2,7 @@
 // (the source contract): authoring-mistake guards
 // with severities, separate from structural validation because a workflow
 // tripping only warn-level rules still runs. Fail-level issues block the
-// production-mode start gate (JANUSLY_PRODUCTION_MODE=true); rules-only,
+// production start gate (JANUSLY_ENV=production); rules-only,
 // never an LLM.
 package domain
 

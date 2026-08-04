@@ -76,7 +76,7 @@ func TestResumeTokenMatrix(t *testing.T) {
 
 	// Production without the dedicated secret refuses to sign at all.
 	t.Setenv("JANUSLY_RESUME_TOKEN_SECRET", "")
-	t.Setenv("JANUSLY_PRODUCTION_MODE", "true")
+	t.Setenv("JANUSLY_ENV", "production")
 	if _, err := Sign(binding, 3600); err == nil || errors.Is(err, ErrInvalid) {
 		t.Fatalf("production must demand the dedicated secret: %v", err)
 	}

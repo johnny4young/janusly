@@ -1,5 +1,5 @@
 // Production-readiness surface: the deterministic gate on run start
-// (JANUSLY_PRODUCTION_MODE=true → fail-level issues reject with 422) and
+// (JANUSLY_ENV=production → fail-level issues reject with 422) and
 // the badge route POST /workflows/readiness the studio polls. Same engine
 // check for both, layered with the DB-side rollback-availability warn —
 // mirroring the contract's split (pure engine rules + API-layered issues).
@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/johnny4young/janusly/internal/config"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/executors"
 	"github.com/johnny4young/janusly/internal/grammar"
@@ -65,11 +66,11 @@ func mergeReadiness(base domain.ReadinessResult, extra []domain.ReadinessIssue) 
 	return domain.ReadinessResult{Status: status, Issues: issues}
 }
 
-// productionGate returns a non-nil rejection when the production-mode env
-// is set and the workflow carries fail-level readiness issues. Dev mode
-// (env unset) keeps existing behaviour — anything structurally valid runs.
+// productionGate returns a non-nil rejection when JANUSLY_ENV=production and
+// the workflow carries fail-level readiness issues. Development keeps the
+// structurally-valid workflow posture.
 func (s *V1Server) productionGate(ctx context.Context, orgID string, wf *domain.Workflow) *opResult {
-	if os.Getenv("JANUSLY_PRODUCTION_MODE") != "true" {
+	if !config.IsProduction(nil) {
 		return nil
 	}
 	readiness := domain.CheckWorkflowReadiness(wf, s.readinessOptions())

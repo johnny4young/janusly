@@ -41,6 +41,16 @@ type Config struct {
 	HTTPTimeout time.Duration
 }
 
+// IsProduction is the single process-environment gate for production-only
+// security and readiness behavior. No alternate configuration names are
+// accepted by the clean runtime baseline.
+func IsProduction(getenv func(string) string) bool {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	return strings.EqualFold(strings.TrimSpace(getenv("JANUSLY_ENV")), "production")
+}
+
 // defaultDatabaseURL matches the compose project in this directory.
 const defaultDatabaseURL = "postgres://janusly:janusly-local@127.0.0.1:5432/janusly"
 
@@ -71,7 +81,7 @@ func Load(getenv func(string) string) (Config, error) {
 		}
 		return v
 	}
-	production := strings.TrimSpace(getenv("JANUSLY_ENV")) == "production"
+	production := IsProduction(getenv)
 
 	cfg := Config{
 		Production:        production,

@@ -16,7 +16,7 @@ func failingHTTPWorkflow(id string) map[string]any {
 }
 
 func TestProductionGateBlocksFailLevelWorkflows(t *testing.T) {
-	t.Setenv("JANUSLY_PRODUCTION_MODE", "true")
+	t.Setenv("JANUSLY_ENV", "production")
 	h := newAPIHarness(t)
 	body := map[string]any{"workflow": failingHTTPWorkflow("wf-gate-" + h.org)}
 

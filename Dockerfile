@@ -20,14 +20,14 @@ RUN pnpm build
 FROM golang:1.26.5-bookworm AS go-build
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN --mount=type=cache,id=janusly-go-mod,target=/go/pkg/mod go mod download
+RUN --mount=type=cache,id=janusly-mod,target=/go/pkg/mod go mod download
 COPY . .
 RUN rm -rf internal/webdist/dist
 COPY --from=web-build /src/web/dist/ internal/webdist/dist/
 ARG JANUSLY_BUILD_COMMIT=0000000000000000000000000000000000000000
 ARG JANUSLY_BUILD_TREE=0000000000000000000000000000000000000000
-RUN --mount=type=cache,id=janusly-go-mod,target=/go/pkg/mod \
-    --mount=type=cache,id=janusly-go-build,target=/root/.cache/go-build \
+RUN --mount=type=cache,id=janusly-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=janusly-build,target=/root/.cache/go-build \
     CGO_ENABLED=0 go build -trimpath -buildvcs=false \
       -ldflags="-s -w -X github.com/johnny4young/janusly/internal/buildinfo.buildCommit=${JANUSLY_BUILD_COMMIT} -X github.com/johnny4young/janusly/internal/buildinfo.buildTree=${JANUSLY_BUILD_TREE}" \
       -o /out/janusly ./cmd/api

@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/johnny4young/janusly/internal/config"
 )
 
 const (
@@ -75,9 +77,7 @@ func secret() (string, error) {
 	if configured := os.Getenv(secretEnv); configured != "" {
 		return configured, nil
 	}
-	if os.Getenv("JANUSLY_ENV") == "production" ||
-		os.Getenv("JANUSLY_PRODUCTION_MODE") == "true" ||
-		os.Getenv("NODE_ENV") == "production" {
+	if config.IsProduction(nil) {
 		return "", fmt.Errorf("%s is required in production", secretEnv)
 	}
 	return devSecret, nil

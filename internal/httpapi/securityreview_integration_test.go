@@ -167,7 +167,7 @@ func TestSecretScrubEndToEnd(t *testing.T) {
 	// The REAL defense for hardcoded secrets: production mode refuses to
 	// start the workflow at all (readiness rule: secret-shaped field
 	// values must be {{secret.X}} / {{env.X}} references).
-	t.Setenv("JANUSLY_PRODUCTION_MODE", "true")
+	t.Setenv("JANUSLY_ENV", "production")
 	res = h.call("POST", "/start", map[string]any{"workflow": workflow}, "")
 	if res.status != 422 {
 		t.Fatalf("production mode must reject hardcoded secrets: %d %+v", res.status, res.body)
