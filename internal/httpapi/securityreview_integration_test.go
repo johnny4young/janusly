@@ -168,6 +168,7 @@ func TestSecretScrubEndToEnd(t *testing.T) {
 	// start the workflow at all (readiness rule: secret-shaped field
 	// values must be {{secret.X}} / {{env.X}} references).
 	t.Setenv("JANUSLY_ENV", "production")
+	t.Setenv("ALLOW_DEV_AUTH_HEADERS", "true")
 	res = h.call("POST", "/start", map[string]any{"workflow": workflow}, "")
 	if res.status != 422 {
 		t.Fatalf("production mode must reject hardcoded secrets: %d %+v", res.status, res.body)
