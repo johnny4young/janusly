@@ -1,99 +1,63 @@
 groups:
   - name: janusly-runtime
     rules:
-      - alert: JanuslyApiMetricsMissing
-        expr: absent(up{job="janusly-api"}) or up{job="janusly-api"} == 0
+      - alert: JanuslyMetricsMissing
+        expr: absent(up{job="janusly"}) or up{job="janusly"} == 0
         for: 2m
         labels:
           severity: critical
         annotations:
-          summary: Janusly API metrics are unavailable
-          description: Alloy cannot scrape the API Prometheus endpoint for two minutes.
+          summary: Janusly metrics are unavailable
+          description: The collector has not scraped the Janusly internal listener for two minutes.
 
-      - alert: JanuslyWorkerMetricsMissing
-        expr: absent(up{job="janusly-worker"}) or up{job="janusly-worker"} == 0
-        for: 2m
-        labels:
-          severity: critical
-        annotations:
-          summary: Janusly worker metrics are unavailable
-          description: Alloy cannot scrape the worker Prometheus endpoint for two minutes.
-
-      - alert: JanuslyGoMetricsMissing
-        expr: max_over_time(janusly_go_work_plane_active{job="janusly-go"}[24h]) >= 0 and up{job="janusly-go"} == 0
-        for: 2m
-        labels:
-          severity: critical
-        annotations:
-          summary: Janusly Go candidate metrics are unavailable
-          description: A previously observed Go candidate has been unreachable for two minutes.
-
-      - alert: JanuslyMutationOwnershipOverlap
-        expr: max(janusly_go_work_plane_active{job="janusly-go"}) * (max(workflow_queue_active_jobs{job="janusly-worker"}) + max(maintenance_queue_active_jobs{job="janusly-worker"})) > 0
-        for: 15s
-        labels:
-          severity: critical
-        annotations:
-          summary: Node and Go are both executing mutation work
-          description: Go owns the work plane while the Node worker still reports active workflow or maintenance jobs.
-
-      - alert: JanuslyNodeBacklogAfterGoActivation
-        expr: max(janusly_go_work_plane_active{job="janusly-go"}) * (max(workflow_queue_waiting_jobs{job="janusly-worker"}) + max(maintenance_queue_waiting_jobs{job="janusly-worker"})) > 0
-        for: 5m
-        labels:
-          severity: critical
-        annotations:
-          summary: Node queues retained work after Go activation
-          description: Go owns the work plane but the legacy BullMQ lanes still contain waiting work.
-
-      - alert: JanuslyGoQueueStalled
-        expr: max(janusly_go_queue_depth{job="janusly-go",state="queued"}) > 0
+      - alert: JanuslyQueueStalled
+        expr: max(janusly_queue_depth{job="janusly",state="queued"}) > 0
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: Go durable work has remained queued
-          description: At least one eligible Go run node has remained queued for five minutes.
+          summary: Durable workflow work remains queued
+          description: At least one eligible run task has remained queued for five minutes.
 
-      - alert: JanuslyGoTerminalFailures
-        expr: sum(increase(janusly_go_runs_terminal_total{job="janusly-go",status=~"failed|cancelled"}[5m])) > 0
+      - alert: JanuslyTerminalFailures
+        expr: sum(increase(janusly_runs_terminal_total{job="janusly",status=~"failed|cancelled"}[5m])) > 0
         labels:
           severity: warning
         annotations:
-          summary: Go terminal run failures were observed
-          description: The Go candidate recorded one or more failed or cancelled runs in five minutes.
+          summary: Terminal run failures were observed
+          description: Janusly recorded one or more failed or cancelled runs in five minutes.
 
       - alert: JanuslyWorkflowQueueWaiting
-        expr: max(workflow_queue_waiting_jobs) > 0
+        expr: max(workflow_queue_waiting_jobs{job="janusly"}) > 0
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: Customer workflow work has remained queued
-          description: At least one workflow job has remained waiting for five minutes.
+          summary: Workflow work remains queued
+          description: At least one workflow task has remained waiting for five minutes.
 
       - alert: JanuslyMaintenanceQueueWaiting
-        expr: max(maintenance_queue_waiting_jobs) > 0
+        expr: max(maintenance_queue_waiting_jobs{job="janusly"}) > 0
         for: 10m
         labels:
           severity: warning
         annotations:
-          summary: Maintenance work has remained queued
-          description: At least one maintenance job has remained waiting for ten minutes.
+          summary: Maintenance work remains queued
+          description: At least one maintenance task has remained waiting for ten minutes.
 
       - alert: JanuslyRateLimiterDegraded
-        expr: max(janusly_rate_limit_degraded_buckets) > 0
+        expr: max(janusly_rate_limit_degraded_buckets{job="janusly"}) > 0
         for: 1m
         labels:
           severity: warning
         annotations:
           summary: A Janusly rate limiter is failing open
-          description: Traffic is still allowed, but at least one Redis-backed limiter is degraded.
+          description: Traffic is still allowed while at least one rate-limit bucket is degraded.
 
-      - alert: JanuslyNodeFailuresDetected
-        expr: sum(increase(workflow_node_failures_total[5m])) > 0
+      - alert: JanuslyWorkflowTaskFailures
+        expr: sum(increase(workflow_node_failures_total{job="janusly"}[5m])) > 0
         labels:
           severity: warning
         annotations:
-          summary: Workflow node failures were observed
-          description: Janusly recorded one or more node failures during the last five minutes.
+          summary: Workflow task failures were observed
+          description: Janusly recorded one or more task failures during the last five minutes.

@@ -1,8 +1,8 @@
 /**
- * Janusly smoke: the REAL React app pointed at the Go backend
- * (VITE_API_URL) must boot, read the /v1 surfaces, and render real data.
+ * Janusly smoke: the real React app served by the Go binary must boot,
+ * read the /v1 surfaces, and render real data.
  * Guarded behind JANUSLY_SMOKE=1 so the ordinary Node e2e lane never
- * runs it; driven by go/conformance/run-web-smoke.mjs.
+ * runs it; driven by the repository E2E lane.
  */
 import {
   expect,
@@ -11,7 +11,7 @@ import {
   type Page,
 } from '@playwright/test'
 
-const API_URL = process.env.E2E_API_URL ?? 'http://127.0.0.1:4600'
+const API_URL = process.env.E2E_API_URL ?? 'http://127.0.0.1:3001'
 
 test.skip(process.env.JANUSLY_SMOKE !== '1', 'Janusly smoke runs only via run-web-smoke.mjs')
 

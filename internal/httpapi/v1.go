@@ -225,13 +225,10 @@ func newV1HandlerWithWorkOS(eng *engine.Engine, pool *pgxpool.Pool, client worko
 	server.mountBrowserSessionRoutes(mux)
 	server.mountIdentityRoutes(mux)
 	server.mountCausalRoutes(mux)
-	if webdist.Enabled() {
-		// Single-binary mode: the embedded Vite bundle rides the
-		// mux's own catch-all — every unmatched GET serves static assets
-		// or the SPA shell. Public by design (static content, no tenant
-		// data); API patterns above always win by specificity.
-		mux.Handle("GET /", webdist.Handler())
-	}
+	// The embedded Vite bundle rides the mux's own catch-all: every unmatched
+	// GET serves a static asset or the SPA shell. API patterns above always win
+	// by specificity, and static content is public by design.
+	mux.Handle("GET /", webdist.Handler())
 	shutdown := func() {
 		cancelServer()
 		server.backgroundWG.Wait()

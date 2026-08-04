@@ -25,6 +25,8 @@ function buildId(): string {
   }
 }
 
+const apiRoutePattern = '^/(?:v1|health|auth|ai|workflows|runs|run|start|status|cancel|resume|dlq|validate|org|members|roles|credentials|mcp|recovery|reports|billing|usage|memory|triggers|webhooks|pagerduty|solution-packs|templates|packs|experiments|causal|system|prompts|audit|scim|upstream|integrations|tools|directories|browser-session|identity|sso|external-runtime|rollouts|alerts|replay)(?:/|$|\\?)'
+
 export default defineConfig(({ mode }) => ({
   plugins: [
     compactI18nCatalogs({
@@ -41,6 +43,13 @@ export default defineConfig(({ mode }) => ({
   },
   server: {
     port: 5173,
+    strictPort: true,
+    proxy: {
+      [apiRoutePattern]: {
+        target: 'http://127.0.0.1:3001',
+        changeOrigin: false,
+      },
+    },
   },
   build: {
     // Sourcemaps in dev + staging so error tracking + DX stay good; off in

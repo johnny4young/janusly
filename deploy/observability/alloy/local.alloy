@@ -5,9 +5,7 @@ logging {
 
 prometheus.scrape "janusly" {
   targets = [
-    { "__address__" = "host.docker.internal:9464", "job" = "janusly-api", "instance" = "api-local" },
-    { "__address__" = "host.docker.internal:9465", "job" = "janusly-worker", "instance" = "worker-local" },
-    { "__address__" = "host.docker.internal:4601", "job" = "janusly-go", "instance" = "go-local" },
+    { "__address__" = "host.docker.internal:9464", "job" = "janusly", "instance" = "local" },
   ]
   forward_to     = [prometheus.remote_write.local.receiver]
   scrape_interval = "15s"

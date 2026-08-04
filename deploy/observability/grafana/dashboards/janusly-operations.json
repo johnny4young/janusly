@@ -42,7 +42,7 @@
       "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
       "id": 4,
       "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto", "wideLayout": true },
-      "targets": [{ "expr": "min(up{job=~\"janusly-api|janusly-worker\"})", "legendFormat": "targets", "refId": "A" }],
+      "targets": [{ "expr": "min(up{job=\"janusly\"})", "legendFormat": "runtime", "refId": "A" }],
       "title": "Janusly metrics targets",
       "type": "stat"
     },

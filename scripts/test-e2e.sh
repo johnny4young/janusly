@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+project=${JANUSLY_E2E_PROJECT:-janusly-e2e}
+app_port=${JANUSLY_E2E_PORT:-33001}
+postgres_port=${JANUSLY_E2E_POSTGRES_PORT:-35432}
+pnpm_command=${PNPM:-pnpm --ignore-workspace}
+
+compose() {
+  COMPOSE_PROJECT_NAME="$project" \
+  JANUSLY_HOST_PORT="$app_port" \
+  JANUSLY_POSTGRES_HOST_PORT="$postgres_port" \
+    docker compose -p "$project" "$@"
+}
+
+cleanup() {
+  local status=$?
+  trap - EXIT INT TERM
+  compose down --volumes --remove-orphans >/dev/null 2>&1 || true
+  exit "$status"
+}
+trap cleanup EXIT INT TERM
+
+cd "$root"
+compose up -d --wait postgres
+compose build janusly
+compose run --rm janusly migrate
+compose up -d janusly
+
+origin="http://127.0.0.1:$app_port"
+for _ in $(seq 1 120); do
+  if curl --fail --silent "$origin/healthz" >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+curl --fail --silent "$origin/healthz" >/dev/null
+
+cd "$root/web"
+PLAYWRIGHT_SKIP_WEB_SERVER=1 \
+JANUSLY_SMOKE=1 \
+JANUSLY_E2E_RUNTIME_BASE_URL="$origin" \
+E2E_API_URL="$origin" \
+  $pnpm_command exec playwright test e2e/janusly-smoke.spec.ts --project=chromium

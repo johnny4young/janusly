@@ -1,11 +1,7 @@
-// Single-binary web serving: the Vite dist embedded via go:embed
-// and served with SPA fallback + cache headers, behind an explicit env
-// flag so the API's default posture (headless) is unchanged.
-//
-// The committed dist/ holds only an honest placeholder page; `make
-// web-embed` copies the real `apps/web/dist` build in before `go build`
-// (generated assets stay out of git). The handler takes an fs.FS seam so
-// tests can pin the serving contract without a real Vite build.
+// Single-binary web serving: the Vite dist is embedded via go:embed and
+// served with SPA fallback plus cache headers. Release builds stage the
+// generated web/dist tree over the committed placeholder before compiling;
+// no generated frontend asset is written back into the Git worktree.
 //
 // Cache contract: hashed assets under /assets/ are immutable (1 year);
 // index.html and other top-level files are no-cache so a redeploy is
@@ -16,17 +12,11 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
-	"os"
 	"strings"
 )
 
 //go:embed all:dist
 var embedded embed.FS
-
-// Enabled reports whether the single-binary web flag is on.
-func Enabled() bool {
-	return os.Getenv("JANUSLY_SERVE_WEB") == "true"
-}
 
 // Handler serves the embedded production bundle.
 func Handler() http.Handler {

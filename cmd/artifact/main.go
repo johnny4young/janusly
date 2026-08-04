@@ -3,6 +3,7 @@
 package main
 
 import (
+	"archive/tar"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -41,6 +42,7 @@ func run(args []string, stdout io.Writer) error {
 	flags := flag.NewFlagSet("artifact", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	outputDir := flags.String("output-dir", "artifacts", "directory for janusly and manifest.json")
+	webDist := flags.String("web-dist", "web/dist", "built Vite directory to embed")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -84,13 +86,36 @@ func run(args []string, stdout io.Writer) error {
 	}
 	defer func() { _ = os.Remove(temporaryPath) }()
 
+	webSource := *webDist
+	if !filepath.IsAbs(webSource) {
+		webSource = filepath.Join(root, webSource)
+	}
+	if info, err := os.Stat(filepath.Join(webSource, "index.html")); err != nil || info.IsDir() {
+		return fmt.Errorf("web bundle is missing %s; build /web before creating the artifact", filepath.Join(webSource, "index.html"))
+	}
+	staging, err := os.MkdirTemp("", "janusly-artifact-source-*")
+	if err != nil {
+		return fmt.Errorf("create source staging directory: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(staging) }()
+	if err := extractCommittedTree(root, staging); err != nil {
+		return err
+	}
+	embedDestination := filepath.Join(staging, "internal", "webdist", "dist")
+	if err := os.RemoveAll(embedDestination); err != nil {
+		return fmt.Errorf("clear staged web bundle: %w", err)
+	}
+	if err := copyDirectory(webSource, embedDestination); err != nil {
+		return fmt.Errorf("stage web bundle: %w", err)
+	}
+
 	ldflags := strings.Join([]string{
 		"-s", "-w",
 		"-X", "github.com/johnny4young/janusly/internal/buildinfo.buildCommit=" + commit,
 		"-X", "github.com/johnny4young/janusly/internal/buildinfo.buildTree=" + tree,
 	}, " ")
 	build := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-ldflags", ldflags, "-o", temporaryPath, "./cmd/api")
-	build.Dir = root
+	build.Dir = staging
 	build.Env = append(os.Environ(), "CGO_ENABLED=0")
 	build.Stdout = stdout
 	build.Stderr = os.Stderr
@@ -131,6 +156,125 @@ func run(args []string, stdout io.Writer) error {
 	}
 	_, _ = fmt.Fprintf(stdout, "%s\n%s\n", binaryPath, manifestPath)
 	return nil
+}
+
+func extractCommittedTree(root, destination string) error {
+	command := exec.Command("git", "-C", root, "archive", "--format=tar", "HEAD")
+	archive, err := command.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("open git archive: %w", err)
+	}
+	command.Stderr = os.Stderr
+	if err := command.Start(); err != nil {
+		return fmt.Errorf("start git archive: %w", err)
+	}
+	reader := tar.NewReader(archive)
+	for {
+		header, err := reader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			_ = command.Wait()
+			return fmt.Errorf("read git archive: %w", err)
+		}
+		clean := filepath.Clean(filepath.FromSlash(header.Name))
+		if clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			_ = command.Wait()
+			return fmt.Errorf("git archive contains unsafe path %q", header.Name)
+		}
+		path := filepath.Join(destination, clean)
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(path, os.FileMode(header.Mode)&0o777); err != nil {
+				_ = command.Wait()
+				return fmt.Errorf("create staged directory %s: %w", clean, err)
+			}
+		case tar.TypeReg, tar.TypeRegA:
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				_ = command.Wait()
+				return fmt.Errorf("create staged parent %s: %w", clean, err)
+			}
+			file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(header.Mode)&0o777)
+			if err != nil {
+				_ = command.Wait()
+				return fmt.Errorf("create staged file %s: %w", clean, err)
+			}
+			_, copyErr := io.Copy(file, reader)
+			closeErr := file.Close()
+			if copyErr != nil {
+				_ = command.Wait()
+				return fmt.Errorf("extract staged file %s: %w", clean, copyErr)
+			}
+			if closeErr != nil {
+				_ = command.Wait()
+				return fmt.Errorf("close staged file %s: %w", clean, closeErr)
+			}
+		case tar.TypeSymlink:
+			link := filepath.Clean(filepath.FromSlash(header.Linkname))
+			if filepath.IsAbs(link) || link == ".." || strings.HasPrefix(link, ".."+string(filepath.Separator)) {
+				_ = command.Wait()
+				return fmt.Errorf("git archive contains unsafe symlink %q", header.Name)
+			}
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				_ = command.Wait()
+				return fmt.Errorf("create staged symlink parent %s: %w", clean, err)
+			}
+			if err := os.Symlink(link, path); err != nil {
+				_ = command.Wait()
+				return fmt.Errorf("create staged symlink %s: %w", clean, err)
+			}
+		default:
+			_ = command.Wait()
+			return fmt.Errorf("git archive contains unsupported entry %q", header.Name)
+		}
+	}
+	if err := command.Wait(); err != nil {
+		return fmt.Errorf("git archive HEAD: %w", err)
+	}
+	return nil
+}
+
+func copyDirectory(source, destination string) error {
+	return filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(destination, relative)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("web bundle contains non-regular file %s", relative)
+		}
+		input, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		output, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode().Perm())
+		if err != nil {
+			_ = input.Close()
+			return err
+		}
+		_, copyErr := io.Copy(output, input)
+		inputCloseErr := input.Close()
+		closeErr := output.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if inputCloseErr != nil {
+			return inputCloseErr
+		}
+		return closeErr
+	})
 }
 
 func gitValue(args ...string) (string, error) {

@@ -40,7 +40,7 @@ import {
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
-const apiUrl = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:3001'
+const apiUrl = ''
 
 /** True when both Supabase env vars are present in the build. */
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey)

@@ -4,11 +4,11 @@
  * (`x-org-id: default` / `x-user-id: dev-user`). Falls offline-cleanly
  * when the API isn't reachable, surfacing a user-friendly message.
  *
- * Used by every async data path in `apps/web/src` (App.tsx, store.ts,
+ * Used by every async data path in `web/src` (App.tsx, store.ts,
  * components/*).
  *
  * Invariants:
- * - Dev-header values match `apps/api/src/auth.ts`'s expected
+ * - Dev-header values match the Go API's expected
  *   header names. Don't drift.
  * - JSON body assumed; binary uploads aren't supported here.
  * - **In-flight dedup is part of the contract.** Two callers issuing
@@ -37,11 +37,14 @@ import { isV1ReadPath } from '@/lib/api-contract'
 import { getResolvedLocale, t } from './i18n/runtime'
 import { useWorkflowStore } from './store'
 
-export const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001'
+// Production is always same-origin. Vite proxies API routes to the Go process
+// during development, so the browser never needs a deployment-specific URL.
+export const API_URL = ''
 
 /** Build an absolute public callback URL against the same API origin as `api()`. */
 export function publicApiUrl(path: string): string {
-  return `${API_URL.replace(/\/+$/, '')}${path.startsWith('/') ? path : `/${path}`}`
+  const normalized = path.startsWith('/') ? path : `/${path}`
+  return new URL(normalized, window.location.origin).toString()
 }
 
 /**

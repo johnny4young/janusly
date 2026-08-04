@@ -122,7 +122,7 @@ describe('api', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(api('/workflows?limit=20')).resolves.toEqual([{ id: 'wf-1', name: 'Billing recovery' }])
-    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:3001/v1/workflows?limit=20')
+    expect(fetchMock.mock.calls[0][0]).toBe('/v1/workflows?limit=20')
   })
 
   it('unwraps v1 errors and preserves the correlation ID', async () => {
@@ -157,9 +157,9 @@ describe('api', () => {
     await expect(api('/tools')).resolves.toEqual([])
     await expect(api('/workflows/health?workflowId=wf-1')).resolves.toEqual([])
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
-      'http://localhost:3001/v1/templates',
-      'http://localhost:3001/v1/tools',
-      'http://localhost:3001/v1/workflows/health?workflowId=wf-1',
+      '/v1/templates',
+      '/v1/tools',
+      '/v1/workflows/health?workflowId=wf-1',
     ])
   })
 
@@ -174,8 +174,8 @@ describe('api', () => {
     await api('/workflows/save', { method: 'POST', body: '{}' })
 
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
-      'http://localhost:3001/workflows/tags',
-      'http://localhost:3001/workflows/save',
+      '/workflows/tags',
+      '/workflows/save',
     ])
   })
 
@@ -190,8 +190,8 @@ describe('api', () => {
     await api('/dlq?status=open&limit=25')
 
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
-      'http://localhost:3001/dlq?id=dead-letter-1',
-      'http://localhost:3001/v1/dlq?status=open&limit=25',
+      '/dlq?id=dead-letter-1',
+      '/v1/dlq?status=open&limit=25',
     ])
   })
 

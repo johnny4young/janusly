@@ -14,8 +14,6 @@ import { LocaleSwitcher } from '../i18n/LocaleSwitcher'
 import { useT } from '../i18n'
 import { BrandMark } from './BrandMark'
 
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001'
-
 type LoginMode = 'login' | 'signup'
 
 /** Email + password form with login/signup toggle; calls `onAuthenticated` on success. */
@@ -37,7 +35,7 @@ export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
     }
     // Leave the SPA — the API issues a 302 to WorkOS, and the callback
     // returns to /auth/sso/complete after setting the HttpOnly session cookie.
-    window.location.href = `${API_URL}/auth/sso/start?orgId=${encodeURIComponent(trimmed)}`
+    window.location.href = `/auth/sso/start?orgId=${encodeURIComponent(trimmed)}`
   }
 
   const submit = async (event: React.FormEvent) => {
