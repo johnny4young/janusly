@@ -100,8 +100,11 @@ func (e *Engine) buildIntegrationDeps(orgID, runID, nodeID string) *tools.Integr
 			})
 		},
 		Post: func(ctx context.Context, url string, headers map[string]string, body []byte) (int, string, string) {
+			// Integration writes never follow redirects: a 307/308 would
+			// replay the body (webhook HMAC headers included) to a target
+			// the caller did not sign for. The 3xx surfaces as the result.
 			result, err := executors.FetchHTTPTarget(ctx, url, executors.FetchOptions{
-				Method: "POST", Headers: headers, Body: body,
+				Method: "POST", Headers: headers, Body: body, DisableRedirects: true,
 			})
 			if err != nil {
 				return 0, "", err.Error()
