@@ -15,6 +15,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -190,17 +192,40 @@ type AdminHealth struct {
 	DegradedBuckets []AdminBucket `json:"degradedBuckets"`
 }
 
-// Public returns the public-safe snapshot.
+// Public returns the public-safe snapshot. Bucket names are collapsed to
+// their category (the segment before the first dot): full names embed
+// tenant-chosen MCP aliases and tool names, which must not leak through
+// the unauthenticated route. Admin() keeps the full names.
 func (t *Tracker) Public() PublicHealth {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	buckets := make([]PublicBucket, 0, len(t.state))
+	byCategory := map[string]*PublicBucket{}
 	for _, entry := range t.state {
-		buckets = append(buckets, PublicBucket{
-			Bucket: entry.bucket, ErrorCount: entry.errorCount,
-			FirstObservedAt: entry.firstObservedAt, LastObservedAt: entry.lastObservedAt,
-		})
+		category := entry.bucket
+		if i := strings.IndexByte(category, '.'); i > 0 {
+			category = category[:i]
+		}
+		bucket := byCategory[category]
+		if bucket == nil {
+			bucket = &PublicBucket{
+				Bucket:          category,
+				FirstObservedAt: entry.firstObservedAt, LastObservedAt: entry.lastObservedAt,
+			}
+			byCategory[category] = bucket
+		}
+		bucket.ErrorCount += entry.errorCount
+		if entry.firstObservedAt < bucket.FirstObservedAt {
+			bucket.FirstObservedAt = entry.firstObservedAt
+		}
+		if entry.lastObservedAt > bucket.LastObservedAt {
+			bucket.LastObservedAt = entry.lastObservedAt
+		}
 	}
+	buckets := make([]PublicBucket, 0, len(byCategory))
+	for _, bucket := range byCategory {
+		buckets = append(buckets, *bucket)
+	}
+	sort.Slice(buckets, func(i, j int) bool { return buckets[i].Bucket < buckets[j].Bucket })
 	return PublicHealth{Healthy: len(buckets) == 0, DegradedBuckets: buckets}
 }
 
