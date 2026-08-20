@@ -47,24 +47,58 @@ func (e *Engine) RunWorkers(ctx context.Context, concurrency int, poll time.Dura
 
 	var listeners sync.WaitGroup
 	listeners.Go(func() {
-		e.listenForWakeups(ctx, wake, logger)
+		superviseLoop(ctx, "wakeup-listener", logger, func() {
+			e.listenForWakeups(ctx, wake, logger)
+		})
 	})
 
 	var sweepers sync.WaitGroup
 	sweepers.Go(func() {
-		e.sweepWakeups(ctx, wake, poll, logger)
+		superviseLoop(ctx, "wakeup-sweeper", logger, func() {
+			e.sweepWakeups(ctx, wake, poll, logger)
+		})
 	})
 
 	var workers sync.WaitGroup
 	for range concurrency {
 		workers.Go(func() {
-			e.workerLoop(ctx, wake, poll, execute, logger)
+			superviseLoop(ctx, "worker", logger, func() {
+				e.workerLoop(ctx, wake, poll, execute, logger)
+			})
 		})
 	}
 	workers.Wait()
 	listeners.Wait()
 	sweepers.Wait()
 	return nil
+}
+
+// superviseLoop keeps one pool goroutine alive across panics, mirroring
+// boot.Runner's posture for the goroutines it cannot see: executor panics
+// are already recovered per-task, but a bug in claim plumbing or a sweep
+// must degrade one loop briefly, never take the whole process down.
+func superviseLoop(ctx context.Context, name string, logger *slog.Logger, loop func()) {
+	for ctx.Err() == nil {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("worker-pool loop panicked; restarting",
+						"loop", name, "panic", fmt.Sprint(r))
+				}
+			}()
+			loop()
+		}()
+		if ctx.Err() != nil {
+			return
+		}
+		// Reached only after a panic or an unexpected early return —
+		// back off so a hard bug cannot spin the loop hot.
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 // workerLoop claims and executes one node at a time. Claimed work executes
