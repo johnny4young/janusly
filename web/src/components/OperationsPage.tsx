@@ -70,7 +70,7 @@ const ExternalRuntimePanel = lazy(() => import('./ExternalRuntimePanel').then(mo
 
 /** Public ``/health`` rate-limiter payload — matches
  *  the public rate-limiter health response from ``internal/ratelimit``
- *  byte-for-byte. Truncated server-side so internal Redis error text +
+ *  byte-for-byte. Truncated server-side so internal store error text +
  *  bucket keys never reach the public route. */
 type RateLimiterHealth = {
   healthy: boolean
@@ -256,8 +256,8 @@ export function OperationsPage({
           setQueueSignal({
             workflow: health.workflow,
             maintenance: health.maintenance,
-            workflowUnavailableReason: payload === null ? 'redis' : 'transport',
-            maintenanceUnavailableReason: hasNullMaintenanceSnapshot(payload) ? 'redis' : 'transport',
+            workflowUnavailableReason: payload === null ? 'store' : 'transport',
+            maintenanceUnavailableReason: hasNullMaintenanceSnapshot(payload) ? 'store' : 'transport',
           })
           setQueueCheckedAt(Date.now())
         })
@@ -280,7 +280,7 @@ export function OperationsPage({
     loadHealth()
     // Infrastructure health is independent of workflow saves — poll both
     // projections on a fixed cadence instead of refiring on every
-    // platformVersion bump. A save no longer refetches it, and a Redis
+    // platformVersion bump. A save no longer refetches it, and a queue-store
     // degradation is still caught within the interval even while idle.
     const id = window.setInterval(loadHealth, 20_000)
     return () => { cancelled = true; window.clearInterval(id) }

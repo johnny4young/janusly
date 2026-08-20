@@ -12,7 +12,7 @@ export default defineConfig({
   timeout: 60_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,
-  // Every file shares one API, worker, Postgres, and Redis stack. Bounding the
+  // Every file shares one API, worker, and Postgres stack. Bounding the
   // local fan-out prevents host CPU count from turning service latency into
   // unrelated UI timeouts; Playwright already defaults CI to one worker.
   workers: process.env.CI ? 1 : 4,

@@ -74,10 +74,10 @@ describe('queue health browser boundary', () => {
     expect(status).toHaveTextContent('Workflow queue delayed; work is waiting for a worker')
   })
 
-  it('makes Redis and request failures visibly distinguishable', () => {
-    const { rerender } = render(<QueueLagChip health={null} unavailableReason="redis" />)
+  it('makes queue-store and request failures visibly distinguishable', () => {
+    const { rerender } = render(<QueueLagChip health={null} unavailableReason="store" />)
     const chip = screen.getByTestId('queue-lag-chip')
-    expect(chip).toHaveTextContent('Queue status unavailable — Redis could not be read')
+    expect(chip).toHaveTextContent('Queue status unavailable — the queue store could not be read')
 
     rerender(<QueueLagChip health={null} unavailableReason="transport" />)
     expect(chip).toHaveTextContent('Queue status unavailable — request failed')

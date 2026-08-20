@@ -3,7 +3,7 @@
  *
  * Used by `OperationsPage.tsx` with the authenticated `/system/queue`
  * snapshot. `null` means telemetry is unavailable; `unavailableReason`
- * distinguishes a successful Redis-null projection from a failed request.
+ * distinguishes a successful null queue-store projection from a failed request.
  * It never means an empty queue. The public `/health` route's coarse signal
  * is intentionally not consumed here because live queue values are admin-only.
  */
@@ -22,7 +22,7 @@ export type QueueHealthOverview = {
   maintenance: QueueHealth | null | undefined
 }
 
-export type QueueUnavailableReason = 'redis' | 'transport'
+export type QueueUnavailableReason = 'store' | 'transport'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -109,7 +109,7 @@ function QueueLagFrame({
 export function QueueLagChip({
   health,
   checkedAt,
-  unavailableReason = 'redis',
+  unavailableReason = 'store',
   kind = 'workflow',
 }: {
   health: QueueHealth | null
@@ -127,7 +127,7 @@ export function QueueLagChip({
         processing: 'operations.queueLag.processing' as const,
         delayedActive: 'operations.queueLag.delayedActive' as const,
         delayedIdle: 'operations.queueLag.delayedIdle' as const,
-        unavailableRedis: 'operations.queueLag.unavailableRedis' as const,
+        unavailableStore: 'operations.queueLag.unavailableStore' as const,
         unavailableTransport: 'operations.queueLag.unavailableTransport' as const,
       }
     : {
@@ -138,7 +138,7 @@ export function QueueLagChip({
         processing: 'operations.maintenanceQueueLag.processing' as const,
         delayedActive: 'operations.maintenanceQueueLag.delayedActive' as const,
         delayedIdle: 'operations.maintenanceQueueLag.delayedIdle' as const,
-        unavailableRedis: 'operations.maintenanceQueueLag.unavailableRedis' as const,
+        unavailableStore: 'operations.maintenanceQueueLag.unavailableStore' as const,
         unavailableTransport: 'operations.maintenanceQueueLag.unavailableTransport' as const,
       }
   const checkedLabel = typeof checkedAt === 'number'
@@ -148,8 +148,8 @@ export function QueueLagChip({
     : null
 
   if (health === null) {
-    const message = t(unavailableReason === 'redis'
-      ? keys.unavailableRedis
+    const message = t(unavailableReason === 'store'
+      ? keys.unavailableStore
       : keys.unavailableTransport)
     return (
       <QueueLagFrame

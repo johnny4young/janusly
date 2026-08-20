@@ -3,7 +3,7 @@ import { openWorkspaceSection } from './_helpers/workspace-navigation'
  * Real-browser proof for recovery momentum and truthful replay feedback.
  * Each case uses a private dev-header org and the product's own demo-failure
  * injection, so all queue, heatmap, metrics, and replay states are
- * backed by the live API, worker, Postgres, and Redis stack.
+ * backed by the live API, worker, and Postgres stack.
  */
 
 import { mkdir } from 'node:fs/promises'

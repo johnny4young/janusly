@@ -367,7 +367,7 @@ describe('<OperationsPage />', () => {
 
     await openInfrastructureSettings()
     const maintenance = await screen.findByTestId('maintenance-queue-lag-chip')
-    expect(maintenance).toHaveTextContent('Maintenance status unavailable — Redis could not be read')
+    expect(maintenance).toHaveTextContent('Maintenance status unavailable — the queue store could not be read')
     expect(maintenance).not.toHaveTextContent('request failed')
   })
 
@@ -383,11 +383,11 @@ describe('<OperationsPage />', () => {
     await openInfrastructureSettings()
     const chip = await screen.findByTestId('queue-lag-chip')
     expect(chip).toHaveAttribute('data-state', 'unavailable')
-    expect(chip).toHaveTextContent('Queue status unavailable — Redis could not be read')
+    expect(chip).toHaveTextContent('Queue status unavailable — the queue store could not be read')
     expect(screen.getByTestId('operations-rail-dot-infrastructure')).toHaveAttribute('data-severity', 'warning')
   })
 
-  it('does not diagnose an initial queue request failure as a Redis failure', async () => {
+  it('does not diagnose an initial queue request failure as a queue-store failure', async () => {
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path === '/recovery/metrics') return healthyMetrics
       if (path === '/health') return { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } }
@@ -400,7 +400,7 @@ describe('<OperationsPage />', () => {
     await openInfrastructureSettings()
     const chip = await screen.findByTestId('queue-lag-chip')
     expect(chip).toHaveTextContent('Queue status unavailable — request failed')
-    expect(chip).not.toHaveTextContent('Redis could not be read')
+    expect(chip).not.toHaveTextContent('the queue store could not be read')
   })
 
   it('hides admin queue telemetry and stops denied polling after a 403', async () => {
