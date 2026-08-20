@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -281,7 +282,7 @@ func run() error {
 	defer shutdownPublicAPI()
 	api := newHTTPServer(fmt.Sprintf(":%d", cfg.Port), publicAPI)
 	internal := newHTTPServer(
-		fmt.Sprintf("%s:%d", cfg.InternalHost, cfg.InternalPort),
+		net.JoinHostPort(cfg.InternalHost, strconv.Itoa(cfg.InternalPort)),
 		httpapi.NewInternalHandler(identity),
 	)
 

@@ -58,7 +58,7 @@ func TestLoadRejectsOutOfRangeWithRangeInMessage(t *testing.T) {
 		{"concurrency zero", "JANUSLY_WORKER_CONCURRENCY", "0", "[1, 64]"},
 		{"poll below floor", "JANUSLY_POLL_MS", "10", "[50, 5000]"},
 		{"not a number", "JANUSLY_HTTP_TIMEOUT_MS", "soon", "[1000, 600000]"},
-		{"invalid internal host", "JANUSLY_INTERNAL_HOST", "metrics.example.com", "127.0.0.1 or 0.0.0.0"},
+		{"invalid internal host", "JANUSLY_INTERNAL_HOST", "metrics.example.com", "127.0.0.1, 0.0.0.0, ::1, or ::"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -70,6 +70,20 @@ func TestLoadRejectsOutOfRangeWithRangeInMessage(t *testing.T) {
 				t.Fatalf("message must name the variable and its range, got: %v", err)
 			}
 		})
+	}
+}
+
+// IPv6 loopback and wildcard are first-class: on hosts whose private
+// network is IPv6-only, the IPv4 literals leave metrics unreachable.
+func TestInternalHostAcceptsIPv6Binds(t *testing.T) {
+	for _, host := range []string{"::1", "::"} {
+		cfg, err := Load(env(map[string]string{"JANUSLY_INTERNAL_HOST": host}))
+		if err != nil {
+			t.Fatalf("load with JANUSLY_INTERNAL_HOST=%s: %v", host, err)
+		}
+		if cfg.InternalHost != host {
+			t.Fatalf("internal host %q not preserved: %+v", host, cfg)
+		}
 	}
 }
 

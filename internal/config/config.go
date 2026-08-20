@@ -101,9 +101,14 @@ func Load(getenv func(string) string) (Config, error) {
 	if cfg.Port == cfg.InternalPort {
 		problems = append(problems, "JANUSLY_PORT and JANUSLY_INTERNAL_PORT must differ")
 	}
-	if cfg.InternalHost != "127.0.0.1" && cfg.InternalHost != "0.0.0.0" {
+	switch cfg.InternalHost {
+	case "127.0.0.1", "0.0.0.0", "::1", "::":
+		// Loopback or wildcard, IPv4 or IPv6. IPv6 matters on hosts whose
+		// private network is IPv6-only (for example Railway); anything else
+		// would silently change which peers can reach pprof and metrics.
+	default:
 		problems = append(problems, fmt.Sprintf(
-			"JANUSLY_INTERNAL_HOST must be 127.0.0.1 or 0.0.0.0, got %q", cfg.InternalHost))
+			"JANUSLY_INTERNAL_HOST must be 127.0.0.1, 0.0.0.0, ::1, or ::, got %q", cfg.InternalHost))
 	}
 	if len(problems) > 0 {
 		return Config{}, fmt.Errorf("invalid configuration: %s", strings.Join(problems, "; "))
