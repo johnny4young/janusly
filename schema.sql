@@ -2690,10 +2690,17 @@ CREATE UNIQUE INDEX routing_stats_org_node_idx ON public.routing_stats USING btr
 
 
 --
--- Name: run_events_run_created_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: run_events_run_created_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX run_events_run_created_idx ON public.run_events USING btree (run_id, created_at);
+CREATE INDEX run_events_run_created_id_idx ON public.run_events USING btree (run_id, created_at, id);
+
+
+--
+-- Name: run_nodes_failed_finished_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX run_nodes_failed_finished_idx ON public.run_nodes USING btree (finished_at DESC, run_id) WHERE (status = 'failed'::text);
 
 
 --
@@ -2701,6 +2708,13 @@ CREATE INDEX run_events_run_created_idx ON public.run_events USING btree (run_id
 --
 
 CREATE INDEX run_nodes_queue_publication_repair_idx ON public.run_nodes USING btree (queue_publication_repair_after, run_id, node_id) WHERE ((queue_publication_repair_after IS NOT NULL) AND (status = ANY (ARRAY['pending'::text, 'queued'::text])));
+
+
+--
+-- Name: run_nodes_queued_claim_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX run_nodes_queued_claim_idx ON public.run_nodes USING btree (id) WHERE (status = 'queued'::text);
 
 
 --
@@ -2736,6 +2750,13 @@ CREATE INDEX run_wakeups_due_idx ON public.run_wakeups USING btree (wake_at);
 --
 
 CREATE INDEX runs_org_created_id_idx ON public.runs USING btree (org_id, created_at DESC, id DESC);
+
+
+--
+-- Name: runs_org_status_created_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX runs_org_status_created_id_idx ON public.runs USING btree (org_id, status, created_at DESC, id DESC);
 
 
 --
