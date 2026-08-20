@@ -40,6 +40,7 @@ type QueueSelectionState = {
   replayingIds: ReadonlySet<string>
   openRecoveryItem: RecoveryQueueFilters['recoveryItems'][number] | null
   confirmBulkReplay: boolean
+  confirmBulkResolve: boolean
   bulkErrors: BulkDeadLetterError[]
   loadedIds: string[]
   allLoadedSelected: boolean
@@ -60,6 +61,7 @@ type QueueActions = {
   toggleSelectAll: () => void
   toggleSelect: (id: string) => void
   setConfirmBulkReplay: (value: boolean) => void
+  setConfirmBulkResolve: (value: boolean) => void
   bulkReplay: () => Promise<void>
   bulkResolve: () => Promise<void>
   createReplayCampaign: (ids: string[]) => void
@@ -121,6 +123,7 @@ export function DeadLetterQueueView({
     replayingIds,
     openRecoveryItem,
     confirmBulkReplay,
+    confirmBulkResolve,
     bulkErrors,
     loadedIds,
     allLoadedSelected,
@@ -316,16 +319,39 @@ export function DeadLetterQueueView({
                   <TimerReset size={12} aria-hidden="true" /> {t('replayCampaign.createCta')}
                 </button>
               )}
-              {canResolve && (
+              {/* Resolve dismisses N open failures without recovery, so it
+                  earns the same inline confirm as replay. */}
+              {canResolve && (confirmBulkResolve ? (
+                <span className="we-list-row__confirm">
+                  <span className="we-list-row__confirm-text">
+                    {t('dlq.bulkResolveConfirm', { count: selectedIds.size })}
+                  </span>
+                  <button
+                    type="button"
+                    className="small-command small-command--primary"
+                    onClick={() => { void actions.bulkResolve() }}
+                    data-testid="dlq-bulk-resolve-confirm"
+                  >
+                    {t('dlq.bulkResolveConfirmCta')}
+                  </button>
+                  <button
+                    type="button"
+                    className="small-command"
+                    onClick={() => actions.setConfirmBulkResolve(false)}
+                  >
+                    {t('common.cancel')}
+                  </button>
+                </span>
+              ) : (
                 <button
                   type="button"
                   className="small-command"
-                  onClick={() => { void actions.bulkResolve() }}
+                  onClick={() => actions.setConfirmBulkResolve(true)}
                   data-testid="dlq-bulk-resolve"
                 >
                   {t('dlq.bulkResolveCta')}
                 </button>
-              )}
+              ))}
             </>
           )}
         </div>

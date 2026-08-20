@@ -37,6 +37,7 @@ import {
   rotateApiRequestLifecycle,
   suspendApiRequestLifecycle,
 } from './api-request-lifecycle'
+import { t } from './i18n/runtime'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
@@ -291,7 +292,7 @@ export const AuthProvider = {
         headers: { 'Content-Type': 'application/json', 'x-janusly-csrf': '1' },
         body: JSON.stringify({ organizationId: orgId }),
       })
-      if (!response.ok) throw new Error('Browser session could not switch organizations')
+      if (!response.ok) throw new Error(t('auth.error.orgSwitchFailed'))
       rotateApiRequestLifecycle()
       browserSessionIdentity = { ...browserSessionIdentity, organizationId: orgId }
       writeToStorage(ACTIVE_ORG_STORAGE_KEY, orgId)

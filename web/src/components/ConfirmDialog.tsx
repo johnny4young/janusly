@@ -53,9 +53,12 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
   const resolveRef = useRef<((ok: boolean) => void) | null>(null)
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const confirmButtonRef = useRef<HTMLButtonElement | null>(null)
+  const cancelButtonRef = useRef<HTMLButtonElement | null>(null)
   useDialogFocusTrap(dialogRef, {
     active: options !== null,
-    initialFocus: confirmButtonRef,
+    // A danger confirm must not let a stray Enter fire the destructive
+    // action: focus lands on Cancel so acknowledgment is deliberate.
+    initialFocus: options?.tone === 'danger' ? cancelButtonRef : confirmButtonRef,
   })
 
   const confirm = useCallback<ConfirmFn>((next) => {
@@ -124,7 +127,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
               </div>
             </header>
             <footer className="run-input-dialog__footer">
-              <button type="button" className="command-button" onClick={() => close(false)} data-testid="confirm-dialog-cancel">
+              <button ref={cancelButtonRef} type="button" className="command-button" onClick={() => close(false)} data-testid="confirm-dialog-cancel">
                 {options.cancelLabel ?? (t('common.cancel'))}
               </button>
               <button

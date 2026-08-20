@@ -127,6 +127,7 @@ export function AuthoringPanel({
         <button
           type="button"
           data-active={scope === 'problems' ? 'true' : 'false'}
+          data-shortcut="authoring-problems"
           aria-current={scope === 'problems' ? 'page' : undefined}
           onClick={() => setScope('problems')}
         >

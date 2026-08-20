@@ -747,6 +747,7 @@ describe('<DeadLettersPanel /> — sort', () => {
     expect(screen.getByTestId('dlq-bulk-bar')).toHaveTextContent('2 selected')
 
     fireEvent.click(screen.getByTestId('dlq-bulk-resolve'))
+    fireEvent.click(screen.getByTestId('dlq-bulk-resolve-confirm'))
     await waitFor(() => {
       const call = vi.mocked(api).mock.calls.find(([p]) => p === '/dlq/bulk-resolve')
       expect(call).toBeTruthy()
@@ -772,6 +773,7 @@ describe('<DeadLettersPanel /> — sort', () => {
     fireEvent.click(await screen.findByTestId('dlq-select-row-a'))
     fireEvent.click(screen.getByTestId('dlq-select-row-b'))
     fireEvent.click(screen.getByTestId('dlq-bulk-resolve'))
+    fireEvent.click(screen.getByTestId('dlq-bulk-resolve-confirm'))
 
     await waitFor(() => {
       expect(screen.getByTestId('dlq-bulk-bar')).toHaveTextContent('1 selected')

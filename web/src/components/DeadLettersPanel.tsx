@@ -124,6 +124,7 @@ export function DeadLettersPanel({
   // Bulk replay re-runs every ticked workflow (cost + side effects), so it
   // asks for an inline confirm first instead of firing on the first click.
   const [confirmBulkReplay, setConfirmBulkReplay] = useState(false)
+  const [confirmBulkResolve, setConfirmBulkResolve] = useState(false)
   // Per-row failure reasons from the last bulk action's partial-success
   // envelope. The count toast says HOW MANY failed; this surfaces WHY (and which
   // rows), so the operator can tell a transient blip from "already replayed".
@@ -177,6 +178,7 @@ export function DeadLettersPanel({
   // clear or keep the remaining failed selections.
   const bulkResolve = async () => {
     if (!canResolve) return
+    setConfirmBulkResolve(false)
     const ids = [...selectedIds].filter((id) => !replayingIds.has(id))
     if (ids.length === 0) return
     setBulkErrors([])
@@ -607,6 +609,7 @@ export function DeadLettersPanel({
           replayingIds,
           openRecoveryItem,
           confirmBulkReplay,
+          confirmBulkResolve,
           bulkErrors,
           loadedIds,
           allLoadedSelected,
@@ -620,6 +623,7 @@ export function DeadLettersPanel({
           toggleSelectAll,
           toggleSelect,
           setConfirmBulkReplay,
+          setConfirmBulkResolve,
           bulkReplay,
           bulkResolve,
           createReplayCampaign: setCampaignDeadLetterIds,

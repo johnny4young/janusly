@@ -128,16 +128,26 @@ export function useDraftAutosave(): void {
     let timer: ReturnType<typeof setTimeout> | null = null
     let prevDirty = useWorkflowStore.getState().workflowDirty
     let prevWorkflowId = useWorkflowStore.getState().currentWorkflowId
+    let prevRevision = useWorkflowStore.getState().workflowRevision
 
     const unsubscribe = useWorkflowStore.subscribe((state) => {
-      const { workflowDirty, currentWorkflowId } = state
+      const { workflowDirty, currentWorkflowId, workflowRevision } = state
       if (workflowDirty) {
-        if (timer) clearTimeout(timer)
-        timer = setTimeout(() => {
-          const current = useWorkflowStore.getState()
-          if (!current.workflowDirty) return // saved while the debounce was pending
-          writeDraft(current.currentWorkflowId, current.getWorkflowJson())
-        }, DRAFT_WRITE_DEBOUNCE_MS)
+        // Only a workflow mutation re-arms the debounce. The store also
+        // ticks for run events, toasts, and SSE flushes; resetting on
+        // those starves the write during live runs and burns a stringify
+        // + localStorage cycle per tick.
+        const draftChanged = workflowRevision !== prevRevision
+          || workflowDirty !== prevDirty
+          || currentWorkflowId !== prevWorkflowId
+        if (draftChanged) {
+          if (timer) clearTimeout(timer)
+          timer = setTimeout(() => {
+            const current = useWorkflowStore.getState()
+            if (!current.workflowDirty) return // saved while the debounce was pending
+            writeDraft(current.currentWorkflowId, current.getWorkflowJson())
+          }, DRAFT_WRITE_DEBOUNCE_MS)
+        }
       } else if (prevDirty && currentWorkflowId === prevWorkflowId) {
         // dirty → clean on the same workflow = a successful versioned save.
         if (timer) { clearTimeout(timer); timer = null }
@@ -151,6 +161,7 @@ export function useDraftAutosave(): void {
       }
       prevDirty = workflowDirty
       prevWorkflowId = currentWorkflowId
+      prevRevision = workflowRevision
     })
 
     return () => {

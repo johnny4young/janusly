@@ -248,7 +248,19 @@ async function doApiFetch(path: string, options: RequestInit, requestScope: ApiR
     if (options.signal?.aborted) throw new DOMException('Request cancelled', 'AbortError')
     throw new Error(t('api.error.offline'))
   }
-  const rawPayload = await res.json().catch(() => ({}))
+  // A malformed error body degrades to {}, but a malformed SUCCESS body
+  // must throw: treating it as {} would let callers wipe good state with
+  // an empty snapshot (e.g. blanking run nodes on a truncated /status).
+  // Genuinely empty bodies (204, empty 200) stay {}.
+  const rawText = await res.text().catch(() => '')
+  let rawPayload: unknown = {}
+  if (rawText.trim() !== '') {
+    try {
+      rawPayload = JSON.parse(rawText)
+    } catch {
+      if (res.ok) throw new Error(t('api.error.malformedResponse'))
+    }
+  }
   const { payload, requestId: envelopeRequestId } = unwrapVersionedPayload(rawPayload, res.ok)
   const requestId = envelopeRequestId ?? res.headers.get('x-request-id') ?? undefined
 

@@ -255,7 +255,7 @@ function WorkspaceContent(props: AppWorkspaceProps) {
               {activeTab === 'inspector' && canWriteWorkflows && (
                 <WorkflowReadinessBadge
                   onOpenProblems={() => document
-                    .querySelector<HTMLButtonElement>('.authoring-scope-nav button:last-of-type')
+                    .querySelector<HTMLButtonElement>('[data-shortcut="authoring-problems"]')
                     ?.click()}
                   onResult={props.onReadinessResult}
                 />

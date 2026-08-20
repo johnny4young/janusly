@@ -690,6 +690,10 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   setStreamTransport: (streamTransport) => set({ streamTransport }),
   resetRun: () => set((state) => clearedRunProjection(state.runTransitionGeneration)),
   addToast: (message, tone = 'info') => {
+    // Polling callers can emit the same failure every tick during an
+    // outage; a visible duplicate adds noise without information, so an
+    // identical (message, tone) refreshes nothing and is dropped.
+    if (get().toasts.some((toast) => toast.message === message && toast.tone === tone)) return
     const id = crypto.randomUUID()
     set((state) => ({ toasts: [...state.toasts, { id, message, tone }] }))
     // Errors need longer on screen than success/info: an error often asks the

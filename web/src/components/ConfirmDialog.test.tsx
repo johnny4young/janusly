@@ -64,11 +64,14 @@ describe('<ConfirmProvider /> / useConfirm', () => {
     const cancel = screen.getByTestId('confirm-dialog-cancel')
     const confirm = screen.getByTestId('confirm-dialog-confirm')
 
-    await waitFor(() => expect(document.activeElement).toBe(confirm))
-    fireEvent.keyDown(document, { key: 'Tab' })
-    expect(document.activeElement).toBe(cancel)
+    // Danger tone lands on Cancel so a stray Enter cannot destroy anything.
+    await waitFor(() => expect(document.activeElement).toBe(cancel))
+    // The trap only intervenes at the edges: Shift+Tab from the first
+    // focusable wraps to the last, Tab from the last wraps back.
     fireEvent.keyDown(document, { key: 'Tab', shiftKey: true })
     expect(document.activeElement).toBe(confirm)
+    fireEvent.keyDown(document, { key: 'Tab' })
+    expect(document.activeElement).toBe(cancel)
 
     fireEvent.keyDown(window, { key: 'Escape' })
     await waitFor(() => expect(results).toEqual([false]))

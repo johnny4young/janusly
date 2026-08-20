@@ -21,6 +21,7 @@
   "common.unknown": "Desconocido",
 
   "api.error.offline": "La API de Janusly no está disponible. Inicia la API y actualiza esta vista",
+  "api.error.malformedResponse": "La API respondió con un contenido ilegible. Reintenta y revisa los logs de la API si persiste",
   "api.error.requestFailed": "La solicitud falló con estado {{status}}",
   "api.error.downloadFailed": "La descarga falló con estado {{status}}",
 
@@ -297,6 +298,7 @@
   "apiErrors.workflows_version_malformed": "La versión del workflow está mal formada",
   "apiErrors.workflows_workflow_id_required": "workflowId es obligatorio",
 
+  "auth.error.orgSwitchFailed": "La sesión del navegador no pudo cambiar de organización. Reintenta o inicia sesión de nuevo",
   "auth.login.welcomeBack": "Bienvenido de nuevo",
   "auth.login.createAccount": "Crear tu cuenta",
   "auth.login.email": "Correo electrónico",
@@ -1482,6 +1484,8 @@
   "dlq.bulkReplayCta": "Reintentar seleccionados",
   "dlq.bulkReplayConfirm": "¿Reintentar {{count}} ejecución(es) fallida(s)? Esto vuelve a ejecutar los flujos.",
   "dlq.bulkReplayConfirmCta": "Reintentar",
+  "dlq.bulkResolveConfirm": "¿Resolver {{count}} falla(s) sin recuperación? Salen de la cola como pérdidas aceptadas.",
+  "dlq.bulkResolveConfirmCta": "Resolver",
   "dlq.bulkReplaySuccess_one": "{{count}} reintento puesto en cola",
   "dlq.bulkReplaySuccess_other": "{{count}} reintentos puestos en cola",
   "dlq.bulkReplayFailed": "Falló el reintento en lote",
@@ -3261,6 +3265,7 @@
 
   "recoveryCenter.metricStripAria": "Tira de métricas de recuperación",
   "recoveryCenter.metricsUnavailable": "Métricas no disponibles — {{detail}}. El Centro de recuperación se renderiza con la información disponible.",
+  "recoveryCenter.invalidHomeResponse": "la respuesta del Home de recuperación no fue válida",
   "recoveryCenter.adHocWorkflow": "(flujo ad-hoc)",
   "recoveryCenter.errorSignatureFallback": "Falló",
 

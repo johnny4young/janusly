@@ -21,6 +21,7 @@
   "common.unknown": "Unknown",
 
   "api.error.offline": "Janusly API is offline. Start the API and refresh this view",
+  "api.error.malformedResponse": "The API answered with an unreadable response. Retry, and check the API logs if it persists",
   "api.error.requestFailed": "Request failed with {{status}}",
   "api.error.downloadFailed": "Download failed with {{status}}",
 
@@ -297,6 +298,7 @@
   "apiErrors.workflows_version_malformed": "Workflow version is malformed",
   "apiErrors.workflows_workflow_id_required": "workflowId is required",
 
+  "auth.error.orgSwitchFailed": "The browser session could not switch organizations. Retry or sign in again",
   "auth.login.welcomeBack": "Welcome back",
   "auth.login.createAccount": "Create your account",
   "auth.login.email": "Email",
@@ -1482,6 +1484,8 @@
   "dlq.bulkReplayCta": "Replay selected",
   "dlq.bulkReplayConfirm": "Replay {{count}} failed run(s)? This re-runs the workflows.",
   "dlq.bulkReplayConfirmCta": "Replay",
+  "dlq.bulkResolveConfirm": "Resolve {{count}} failure(s) without recovery? They leave the queue as accepted losses.",
+  "dlq.bulkResolveConfirmCta": "Resolve",
   "dlq.bulkReplaySuccess_one": "{{count}} replay queued",
   "dlq.bulkReplaySuccess_other": "{{count}} replays queued",
   "dlq.bulkReplayFailed": "Bulk replay failed",
@@ -3261,6 +3265,7 @@
 
   "recoveryCenter.metricStripAria": "Recovery metric strip",
   "recoveryCenter.metricsUnavailable": "Metrics unavailable — {{detail}}. The Recovery Center still renders with what we have.",
+  "recoveryCenter.invalidHomeResponse": "the recovery Home response was invalid",
   "recoveryCenter.adHocWorkflow": "(ad-hoc workflow)",
   "recoveryCenter.errorSignatureFallback": "Failed",
 

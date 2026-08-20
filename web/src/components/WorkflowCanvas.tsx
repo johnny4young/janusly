@@ -134,17 +134,23 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
     }))
   }, [edges, nodes, t])
   const ariaLabelConfig = useMemo<Partial<AriaLabelConfig>>(() => {
-    if (!observing) return {}
-    const readOnlyInstructions = t('canvas.readOnly')
-    return {
-      'node.a11yDescription.default': readOnlyInstructions,
-      'node.a11yDescription.keyboardDisabled': readOnlyInstructions,
-      'edge.a11yDescription.default': readOnlyInstructions,
+    // The zoom/fit controls are localized in BOTH modes — otherwise the
+    // authoring canvas keeps React Flow's built-in English strings in the
+    // Spanish UI. Only the read-only node/edge descriptions are
+    // observe-specific.
+    const config: Partial<AriaLabelConfig> = {
       'controls.ariaLabel': t('canvas.runMap'),
       'controls.zoomIn.ariaLabel': t('canvas.a11y.zoomIn'),
       'controls.zoomOut.ariaLabel': t('canvas.a11y.zoomOut'),
       'controls.fitView.ariaLabel': t('canvas.a11y.fitView'),
     }
+    if (observing) {
+      const readOnlyInstructions = t('canvas.readOnly')
+      config['node.a11yDescription.default'] = readOnlyInstructions
+      config['node.a11yDescription.keyboardDisabled'] = readOnlyInstructions
+      config['edge.a11yDescription.default'] = readOnlyInstructions
+    }
+    return config
   }, [observing, t])
   // Confirm before a node is removed (Delete/Backspace or the toolbar) — a
   // mis-keyed delete can otherwise drop a configured step silently. Edge-only

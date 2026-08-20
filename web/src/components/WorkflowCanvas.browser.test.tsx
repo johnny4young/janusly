@@ -512,7 +512,8 @@ describe('WorkflowCanvas (browser mode)', () => {
       )
       await findByText('Alpha step')
 
-      getByLabelText('Zoom Out').click()
+      // Localized control labels now apply in authoring mode too.
+      getByLabelText('Zoom out').click()
 
       await waitFor(() => {
         const raw = window.localStorage.getItem(STORAGE_KEY)

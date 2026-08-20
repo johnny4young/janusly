@@ -251,7 +251,7 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
         if (cancelled) return
         const snapshot = parseRecoveryHomeSnapshot(payload)
         if (!snapshot || snapshot.scope !== 'full') {
-          throw new Error('Invalid recovery Home response')
+          throw new Error(t('recoveryCenter.invalidHomeResponse'))
         }
 
         const metricsValue = readRecoveryHomeSection(
