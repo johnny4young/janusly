@@ -85,7 +85,20 @@ func newV1HandlerWithWorkOS(eng *engine.Engine, pool *pgxpool.Pool, client worko
 	})
 	server.queueCache = &queueHealthCache{read: server.readQueueSnapshot}
 	server.mcp = mcpclient.New(pool, server.limiter)
-	go server.hub.listen(serverCtx, pool)
+	go func() {
+		// The hub reconnects on connection loss itself; this recover only
+		// guards against a panic taking the whole process down — clients
+		// degrade to the poll fallback until the next (re)start.
+		for serverCtx.Err() == nil {
+			func() {
+				defer func() { _ = recover() }()
+				server.hub.listen(serverCtx, pool)
+			}()
+			if serverCtx.Err() == nil {
+				time.Sleep(time.Second)
+			}
+		}
+	}()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -24,16 +25,22 @@ import (
 )
 
 const (
-	streamRetryHintMs  = 3_000
-	streamHeartbeat    = 25 * time.Second
-	streamCatchupMax   = 500
-	streamPollFallback = time.Second
+	streamRetryHintMs = 3_000
+	streamHeartbeat   = 25 * time.Second
+	streamCatchupMax  = 500
+	// With a healthy LISTEN connection the wake channel delivers
+	// sub-second latency and the poll is pure loss insurance; only a
+	// degraded hub needs the tight cadence. At hundreds of open run
+	// views the difference is ~1000 idle queries/s versus ~70.
+	streamPollFallback         = time.Second
+	streamPollFallbackListenOK = 15 * time.Second
 )
 
 // streamHub fans Postgres run-event notifications to per-run subscribers.
 type streamHub struct {
-	mu   sync.Mutex
-	subs map[string][]chan struct{}
+	mu        sync.Mutex
+	subs      map[string][]chan struct{}
+	listening atomic.Bool
 }
 
 func newStreamHub() *streamHub {
@@ -83,6 +90,7 @@ func (h *streamHub) listen(ctx context.Context, pool *pgxpool.Pool) {
 		if err == nil {
 			conn := pooled.Hijack()
 			if _, listenErr := conn.Exec(ctx, "listen janusly_run_events"); listenErr == nil {
+				h.listening.Store(true)
 				for {
 					notification, waitErr := conn.WaitForNotification(ctx)
 					if waitErr != nil {
@@ -90,6 +98,7 @@ func (h *streamHub) listen(ctx context.Context, pool *pgxpool.Pool) {
 					}
 					h.wake(notification.Payload)
 				}
+				h.listening.Store(false)
 			}
 			_ = conn.Close(context.Background())
 		}
@@ -205,9 +214,13 @@ func (s *V1Server) streamRun(w http.ResponseWriter, r *http.Request, rc v1Reques
 			}
 		}
 
+		pollFallback := streamPollFallback
+		if s.hub.listening.Load() {
+			pollFallback = streamPollFallbackListenOK
+		}
 		select {
 		case <-wake:
-		case <-time.After(streamPollFallback):
+		case <-time.After(pollFallback):
 		case <-heartbeat.C:
 			if !write(": keep-alive\n\n") {
 				return
