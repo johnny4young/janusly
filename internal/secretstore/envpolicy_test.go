@@ -13,6 +13,10 @@ func TestReservedEnvNamesAreNeverReferenceable(t *testing.T) {
 		"SUPABASE_SERVICE_ROLE_KEY", "WORKOS_API_KEY",
 		"AWS_SECRET_ACCESS_KEY", "ALLOW_DEV_AUTH_HEADERS",
 		"DATABASE_URL", "ANTHROPIC_API_KEY", "PATH", "NODE_ENV",
+		// Platform-injected variables on managed hosts.
+		"PGPASSWORD", "PGHOST", "POSTGRES_PASSWORD", "PORT", "DYNO",
+		"RAILWAY_TOKEN", "RAILWAY_ENVIRONMENT", "RENDER_SERVICE_ID",
+		"FLY_API_TOKEN", "HEROKU_API_KEY", "NIXPACKS_METADATA",
 	} {
 		if EnvRefAllowed(name) {
 			t.Errorf("%s must never be referenceable by a tenant credential", name)

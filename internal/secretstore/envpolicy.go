@@ -42,9 +42,13 @@ const (
 )
 
 // reservedEnvPrefixes cover every namespace this process reads for its
-// own configuration and secrets.
+// own configuration and secrets, plus the namespaces managed platforms
+// inject into the process (Railway, Render, Fly.io, Heroku, PostgreSQL
+// client variables): a tenant credential must never resolve the
+// platform's own configuration.
 var reservedEnvPrefixes = []string{
 	"JANUSLY_", "SUPABASE_", "WORKOS_", "AWS_", "OTEL_", "ALLOW_",
+	"PG", "POSTGRES_", "RAILWAY_", "RENDER_", "FLY_", "HEROKU_", "NIXPACKS_",
 }
 
 // reservedEnvNames are the unprefixed variables that still carry
@@ -55,6 +59,7 @@ var reservedEnvNames = map[string]bool{
 	"ANTHROPIC_API_KEY": true, "OPENAI_API_KEY": true,
 	"RESEND_API_KEY": true, "SENDGRID_API_KEY": true,
 	"OLLAMA_BASE_URL": true, "API_ALLOWED_ORIGINS": true,
+	"PORT": true, "DYNO": true,
 }
 
 // EnvRefAllowed reports whether a legacy secretRef may be resolved.
