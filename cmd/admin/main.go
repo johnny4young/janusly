@@ -5,7 +5,7 @@
 //
 // Environment:
 //
-//	JANUSLY_ADMIN_API     target API (default http://127.0.0.1:4600)
+//	JANUSLY_ADMIN_API     target API (default http://127.0.0.1:3001)
 //	JANUSLY_ADMIN_ORG     org id (default: default)
 //	JANUSLY_ADMIN_TOKEN   service token (Authorization: Bearer); when
 //	                      empty, dev headers are used with
@@ -31,7 +31,7 @@ import (
 )
 
 var (
-	apiBase = envOr("JANUSLY_ADMIN_API", "http://127.0.0.1:4600")
+	apiBase = envOr("JANUSLY_ADMIN_API", "http://127.0.0.1:3001")
 	org     = envOr("JANUSLY_ADMIN_ORG", "default")
 	token   = os.Getenv("JANUSLY_ADMIN_TOKEN")
 	user    = envOr("JANUSLY_ADMIN_USER", "janusly-admin")

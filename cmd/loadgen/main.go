@@ -1,10 +1,9 @@
-// Command loadgen is the runtime's self-contained load generator — the same
-// three scenarios against either backend (they share the /v1 surface), no
-// external tooling required.
+// Command loadgen is the runtime's self-contained load generator — three
+// scenarios against the /v1 surface, no external tooling required.
 //
-//	loadgen -base http://localhost:4600 -scenario start  -vus 10 -duration 30s
-//	loadgen -base http://localhost:4600 -scenario list   -vus 50 -duration 30s
-//	loadgen -base http://localhost:4600 -scenario diamond -vus 10 -duration 30s
+//	loadgen -base http://localhost:3001 -scenario start  -vus 10 -duration 30s
+//	loadgen -base http://localhost:3001 -scenario list   -vus 50 -duration 30s
+//	loadgen -base http://localhost:3001 -scenario diamond -vus 10 -duration 30s
 //
 // Scenarios: start = POST /v1/start of a linear two-node workflow, polling
 // /v1/status to terminal (latency = start→terminal); list = hot GET
@@ -32,7 +31,7 @@ type sample struct {
 }
 
 func main() {
-	base := flag.String("base", "http://127.0.0.1:4600", "API origin")
+	base := flag.String("base", "http://127.0.0.1:3001", "API origin")
 	scenario := flag.String("scenario", "start", "start | list | diamond")
 	vus := flag.Int("vus", 10, "concurrent virtual users")
 	duration := flag.Duration("duration", 30*time.Second, "load duration")

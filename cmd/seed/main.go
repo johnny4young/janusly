@@ -1,10 +1,10 @@
-// make seed: a deterministic demo org driven ENTIRELY through the
+// go run ./cmd/seed: a deterministic demo org driven ENTIRELY through the
 // public API with dev headers — never direct SQL — so what the seed
 // creates is exactly what the product can create. Idempotent: workflows
 // and credentials are create-if-missing, runs are topped up only until
 // the org looks populated, and re-running is always safe.
 //
-//	JANUSLY_SEED_API   target API (default http://127.0.0.1:4600)
+//	JANUSLY_SEED_API   target API (default http://127.0.0.1:3001)
 //	JANUSLY_SEED_ORG   org id (default demo-org)
 package main
 
@@ -18,7 +18,7 @@ import (
 )
 
 var (
-	apiBase = envOr("JANUSLY_SEED_API", "http://127.0.0.1:4600")
+	apiBase = envOr("JANUSLY_SEED_API", "http://127.0.0.1:3001")
 	org     = envOr("JANUSLY_SEED_ORG", "demo-org")
 )
 
