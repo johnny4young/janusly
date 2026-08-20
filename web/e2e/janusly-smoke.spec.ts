@@ -1,7 +1,7 @@
 /**
  * Janusly smoke: the real React app served by the Go binary must boot,
  * read the /v1 surfaces, and render real data.
- * Guarded behind JANUSLY_SMOKE=1 so the ordinary Node e2e lane never
+ * Guarded behind JANUSLY_SMOKE=1 so the browser-only e2e lane never
  * runs it; driven by the repository E2E lane.
  */
 import {
@@ -15,7 +15,7 @@ const API_URL = process.env.E2E_API_URL ?? 'http://127.0.0.1:3001'
 const UPSTREAM_HOST = process.env.E2E_UPSTREAM_HOST ?? '127.0.0.1'
 const UPSTREAM_BIND = process.env.E2E_UPSTREAM_BIND ?? '127.0.0.1'
 
-test.skip(process.env.JANUSLY_SMOKE !== '1', 'Janusly smoke runs only via run-web-smoke.mjs')
+test.skip(process.env.JANUSLY_SMOKE !== '1', 'Janusly smoke runs only via scripts/test-e2e.sh')
 
 function headers(orgId: string): Record<string, string> {
   return {

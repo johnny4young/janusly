@@ -10,7 +10,8 @@ GIT_COMMIT := $(shell git rev-parse HEAD 2>/dev/null || printf '%040d' 0)
 GIT_TREE := $(shell git rev-parse 'HEAD^{tree}' 2>/dev/null || printf '%040d' 0)
 
 .PHONY: dev build artifact db-up db-down db-reset migrate generate lint test \
-	test-integration test-e2e verify vuln frontend-install frontend-build contract
+	test-integration test-e2e test-e2e-full verify vuln frontend-install \
+	frontend-build contract
 
 dev: db-up migrate
 	JANUSLY_DATABASE_URL='$(DB_URL)' PNPM='$(PNPM)' bash scripts/dev.sh
@@ -73,6 +74,12 @@ test-integration:
 
 test-e2e:
 	PNPM='$(PNPM)' bash scripts/test-e2e.sh
+
+# Opt-in: the full Playwright suite (tenant isolation, security, upgrade,
+# accessibility, ...). Requires the dev stack from `make dev` on :3001;
+# Playwright starts its own Vite server against it.
+test-e2e-full:
+	cd web && $(PNPM) exec playwright test --project=chromium
 
 verify: db-up migrate generate
 	@git diff --exit-code -- schema.sql internal/store contract || { \

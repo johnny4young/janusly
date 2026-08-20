@@ -88,6 +88,7 @@ See [local deployment](docs/local-deployment.md) and
 | `make test` | Run Go race tests and frontend unit/browser tests. |
 | `make test-integration` | Run integration tests against PostgreSQL 18. |
 | `make test-e2e` | Exercise the embedded React application and real API image. |
+| `make test-e2e-full` | Opt-in full Playwright suite against a running `make dev` stack. |
 | `make verify` | Run the complete local acceptance ladder. |
 
 ## Configuration
