@@ -247,7 +247,10 @@ SET status = 'processing', claim_token = $1,
     claimed_at = now(), attempt_count = attempt_count + 1
 WHERE replay_campaign_items.id = (
   SELECT i.id FROM replay_campaign_items i
-  WHERE i.campaign_id = $2 AND i.status = 'pending'
+  WHERE i.campaign_id = $2
+    AND (i.status = 'pending'
+         OR (i.status = 'processing'
+             AND i.claimed_at <= now() - interval '10 minutes'))
   ORDER BY i.position
   LIMIT 1
   FOR UPDATE SKIP LOCKED)
@@ -259,6 +262,10 @@ type ClaimNextReplayCampaignItemParams struct {
 	CampaignID string
 }
 
+// A processing row whose claim went stale (crash between claim and
+// settle) is re-claimable after ten minutes; the settle CAS on
+// claim_token makes the original claimant's late settle lose cleanly.
+// Without this, one crash wedges the campaign in running forever.
 func (q *Queries) ClaimNextReplayCampaignItem(ctx context.Context, arg ClaimNextReplayCampaignItemParams) (ReplayCampaignItem, error) {
 	row := q.db.QueryRow(ctx, claimNextReplayCampaignItem, arg.ClaimToken, arg.CampaignID)
 	var i ReplayCampaignItem

@@ -133,13 +133,20 @@ WHERE id = (
   FOR UPDATE SKIP LOCKED)
 RETURNING *;
 
+-- A processing row whose claim went stale (crash between claim and
+-- settle) is re-claimable after ten minutes; the settle CAS on
+-- claim_token makes the original claimant's late settle lose cleanly.
+-- Without this, one crash wedges the campaign in running forever.
 -- name: ClaimNextReplayCampaignItem :one
 UPDATE replay_campaign_items
 SET status = 'processing', claim_token = sqlc.arg(claim_token),
     claimed_at = now(), attempt_count = attempt_count + 1
 WHERE replay_campaign_items.id = (
   SELECT i.id FROM replay_campaign_items i
-  WHERE i.campaign_id = sqlc.arg(campaign_id) AND i.status = 'pending'
+  WHERE i.campaign_id = sqlc.arg(campaign_id)
+    AND (i.status = 'pending'
+         OR (i.status = 'processing'
+             AND i.claimed_at <= now() - interval '10 minutes'))
   ORDER BY i.position
   LIMIT 1
   FOR UPDATE SKIP LOCKED)
