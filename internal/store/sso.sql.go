@@ -13,6 +13,21 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cleanupExpiredSsoNonces = `-- name: CleanupExpiredSsoNonces :execrows
+DELETE FROM sso_state_nonces WHERE expires_at <= now()
+`
+
+// Expired never-consumed nonces authorize nothing; the retention sweep
+// deletes them so the unauthenticated /auth/sso/start cannot grow the
+// table without bound.
+func (q *Queries) CleanupExpiredSsoNonces(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, cleanupExpiredSsoNonces)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const consumeSsoNonce = `-- name: ConsumeSsoNonce :one
 DELETE FROM sso_state_nonces
 WHERE org_id = $1 AND nonce = $2 AND expires_at > now()

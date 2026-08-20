@@ -62,6 +62,12 @@ VALUES ($1, $2, $3, $4, 'viewer', NULL)
 ON CONFLICT (org_id, user_id) DO UPDATE
 SET email = EXCLUDED.email;
 
+-- Expired never-consumed nonces authorize nothing; the retention sweep
+-- deletes them so the unauthenticated /auth/sso/start cannot grow the
+-- table without bound.
+-- name: CleanupExpiredSsoNonces :execrows
+DELETE FROM sso_state_nonces WHERE expires_at <= now();
+
 -- DELETE ... RETURNING is the single-use claim: exactly one concurrent
 -- callback can consume a live nonce; expired rows never authorize a login.
 -- name: ConsumeSsoNonce :one

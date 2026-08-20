@@ -83,6 +83,11 @@ func (e *Engine) RunRetentionSweep(ctx context.Context, every time.Duration, ret
 		if _, err := store.New(e.pool).CleanupExpiredRateWindows(ctx); err != nil && ctx.Err() == nil {
 			logger.Error("rate-window cleanup failed", "error", err)
 		}
+		// Expired SSO nonces authorize nothing and only accumulate — the
+		// unauthenticated /auth/sso/start writes one row per request.
+		if _, err := store.New(e.pool).CleanupExpiredSsoNonces(ctx); err != nil && ctx.Err() == nil {
+			logger.Error("sso-nonce cleanup failed", "error", err)
+		}
 		// Per-org data retention (run_events / audit_logs / usage_events).
 		e.runDataRetention(ctx, logger)
 	}
