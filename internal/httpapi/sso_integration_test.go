@@ -269,6 +269,40 @@ func TestSsoStartCreatesBoundSingleUseStateAndRedirectsWithoutAuth(t *testing.T)
 	}
 }
 
+// A returning SSO login refreshes the verified email but must never touch
+// the role: overwriting it would silently demote members promoted via
+// /members/role or SCIM — and could lock an org out of its only admin.
+func TestSsoReloginPreservesPromotedRole(t *testing.T) {
+	pool := testPool(t)
+	q := store.New(pool)
+	orgID := "sso-role-" + uuid.NewString()
+	userID := "workos-user-" + uuid.NewString()
+	upsert := func(email string) {
+		t.Helper()
+		if err := q.UpsertSsoMembership(t.Context(), store.UpsertSsoMembershipParams{
+			ID: uuid.NewString(), OrgID: orgID, UserID: userID,
+			Email: pgtype.Text{String: email, Valid: true},
+		}); err != nil {
+			t.Fatalf("upsert membership: %v", err)
+		}
+	}
+	upsert("alice@acme.com")
+	if _, err := pool.Exec(t.Context(),
+		`UPDATE org_members SET role = 'admin' WHERE org_id = $1 AND user_id = $2`,
+		orgID, userID); err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	upsert("alice.new@acme.com")
+	var email, role string
+	if err := pool.QueryRow(t.Context(), `SELECT email, role FROM org_members
+		WHERE org_id = $1 AND user_id = $2`, orgID, userID).Scan(&email, &role); err != nil {
+		t.Fatalf("read membership: %v", err)
+	}
+	if email != "alice.new@acme.com" || role != "admin" {
+		t.Fatalf("relogin must refresh email and preserve role: email=%q role=%q", email, role)
+	}
+}
+
 func TestSsoCallbackAtomicallyProvisionsMembershipAuditAndSession(t *testing.T) {
 	const callbackURL = "https://api.example.com/auth/sso/callback"
 	t.Setenv("JANUSLY_RESUME_TOKEN_SECRET", "sso-callback-success-secret")

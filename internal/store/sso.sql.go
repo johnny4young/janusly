@@ -301,9 +301,7 @@ const upsertSsoMembership = `-- name: UpsertSsoMembership :exec
 INSERT INTO org_members (id, org_id, user_id, email, role, invited_by)
 VALUES ($1, $2, $3, $4, 'viewer', NULL)
 ON CONFLICT (org_id, user_id) DO UPDATE
-SET email = EXCLUDED.email,
-    role = EXCLUDED.role,
-    invited_by = NULL
+SET email = EXCLUDED.email
 `
 
 type UpsertSsoMembershipParams struct {
@@ -313,9 +311,11 @@ type UpsertSsoMembershipParams struct {
 	Email  pgtype.Text
 }
 
-// The WorkOS profile id is the durable membership key. Callback
-// provisioning intentionally mirrors the compatibility runtime: every
-// successful login refreshes the verified email and viewer grant.
+// The WorkOS profile id is the durable membership key. First login
+// provisions a viewer; a returning login refreshes the verified email
+// but MUST NOT touch the role — overwriting it would silently demote
+// members promoted via /members/role or SCIM (and could lock an org
+// out of its only admin).
 func (q *Queries) UpsertSsoMembership(ctx context.Context, arg UpsertSsoMembershipParams) error {
 	_, err := q.db.Exec(ctx, upsertSsoMembership,
 		arg.ID,
