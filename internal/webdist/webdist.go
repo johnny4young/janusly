@@ -52,19 +52,13 @@ func HandlerFor(dist fs.FS) http.Handler {
 			}
 		}
 		// SPA fallback: client-side routes render index.html.
-		index, err := dist.Open("index.html")
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		defer func() { _ = index.Close() }()
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-cache")
 		raw, err := fs.ReadFile(dist, "index.html")
 		if err != nil {
 			http.NotFound(w, r)
 			return
 		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
 		_, _ = w.Write(raw)
 	})
 }
