@@ -16,7 +16,28 @@ func TestEmbedRejectsOversizedResponse(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	if _, err := embed(context.Background(), server.URL, "model", "prompt"); err == nil {
+	if _, err := embed(context.Background(), server.URL, "model", "prompt", false); err == nil {
 		t.Fatal("oversized embedding response must fail")
+	}
+}
+
+// A tenant-supplied (org-config) base URL is org-admin input: without the
+// dev escape hatch it must pass the outbound SSRF policy, so a loopback
+// target is refused before any request is issued.
+func TestEmbedEnforcesSSRFPolicyForTenantURLs(t *testing.T) {
+	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "false")
+	requested := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requested = true
+		_, _ = w.Write([]byte(`{"embedding":[]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	_, err := embed(context.Background(), server.URL, "model", "prompt", true)
+	if err == nil {
+		t.Fatal("tenant-supplied loopback embedding URL must be refused")
+	}
+	if requested {
+		t.Fatal("the refused target must never receive a request")
 	}
 }

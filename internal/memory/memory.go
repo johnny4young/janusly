@@ -23,6 +23,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/johnny4young/janusly/internal/executors"
 	"github.com/johnny4young/janusly/internal/httpjson"
 	"github.com/johnny4young/janusly/internal/orgconfig"
 )
@@ -112,7 +113,7 @@ func consent(ctx context.Context, pool *pgxpool.Pool, orgID, kind string) (bool,
 // Commit embeds and persists one entry under consent. Never throws.
 func Commit(ctx context.Context, pool *pgxpool.Pool, input CommitInput) CommitResult {
 	startedAt := time.Now()
-	provider, model, baseURL := embeddingConfig(ctx, pool, input.OrgID)
+	provider, model, baseURL, tenantURL := embeddingConfig(ctx, pool, input.OrgID)
 	fail := func(reason string) CommitResult {
 		fireMemoryUsage(ctx, pool, "memory.commit", input.OrgID, input.RunID, input.WorkflowID,
 			input.Kind, provider, model, false, reason, time.Since(startedAt))
@@ -124,7 +125,7 @@ func Commit(ctx context.Context, pool *pgxpool.Pool, input CommitInput) CommitRe
 	if allowed, reason := consent(ctx, pool, input.OrgID, input.Kind); !allowed {
 		return fail(reason)
 	}
-	embedding, err := embed(ctx, baseURL, model, input.Content)
+	embedding, err := embed(ctx, baseURL, model, input.Content, tenantURL)
 	if err != nil {
 		return fail("embedding_failed")
 	}
@@ -149,7 +150,7 @@ func Commit(ctx context.Context, pool *pgxpool.Pool, input CommitInput) CommitRe
 // failure returns an empty list.
 func Recall(ctx context.Context, pool *pgxpool.Pool, input RecallInput) []RecallEntry {
 	startedAt := time.Now()
-	provider, model, baseURL := embeddingConfig(ctx, pool, input.OrgID)
+	provider, model, baseURL, tenantURL := embeddingConfig(ctx, pool, input.OrgID)
 	fail := func(reason string) []RecallEntry {
 		fireMemoryUsage(ctx, pool, "memory.recall", input.OrgID, input.RunID, input.WorkflowID,
 			input.Kind, provider, model, false, reason, time.Since(startedAt))
@@ -166,7 +167,7 @@ func Recall(ctx context.Context, pool *pgxpool.Pool, input RecallInput) []Recall
 	if maxBytes <= 0 {
 		maxBytes = 8192
 	}
-	embedding, err := embed(ctx, baseURL, model, input.Query)
+	embedding, err := embed(ctx, baseURL, model, input.Query, tenantURL)
 	if err != nil {
 		return fail("embedding_failed")
 	}
@@ -205,11 +206,14 @@ func Recall(ctx context.Context, pool *pgxpool.Pool, input RecallInput) []Recall
 }
 
 // embeddingConfig resolves provider/model/base URL: catalog first, env
-// defaults after (ollama / bge-m3 / OLLAMA_BASE_URL).
-func embeddingConfig(ctx context.Context, pool *pgxpool.Pool, orgID string) (provider, model, baseURL string) {
+// defaults after (ollama / bge-m3 / OLLAMA_BASE_URL). tenantURL reports
+// whether the base URL came from tenant-writable org config rather than
+// the operator's process environment.
+func embeddingConfig(ctx context.Context, pool *pgxpool.Pool, orgID string) (provider, model, baseURL string, tenantURL bool) {
 	provider, _ = orgconfig.LoadValue(ctx, pool, orgID, "memory.embeddingProvider").(string)
 	model, _ = orgconfig.LoadValue(ctx, pool, orgID, "memory.embeddingModel").(string)
 	baseURL, _ = orgconfig.LoadValue(ctx, pool, orgID, "memory.embeddingBaseUrl").(string)
+	tenantURL = baseURL != ""
 	if provider == "" {
 		provider = "ollama"
 	}
@@ -222,23 +226,34 @@ func embeddingConfig(ctx context.Context, pool *pgxpool.Pool, orgID string) (pro
 	if baseURL == "" {
 		baseURL = "http://ollama:11434"
 	}
-	return provider, model, baseURL
+	return provider, model, baseURL, tenantURL
 }
 
-// embed calls the Ollama embeddings endpoint. The base URL is
-// operator-supplied infrastructure config (never workflow-author input),
-// so it deliberately bypasses the SSRF guard like the contract.
-func embed(ctx context.Context, baseURL, model, text string) ([]float64, error) {
+// embed calls the Ollama embeddings endpoint. An operator-supplied base
+// URL (env default) may point at private infrastructure and uses the
+// plain client; a tenant-supplied org-config URL is an org-admin input,
+// so it goes through the outbound SSRF policy (validation + DNS pinning;
+// ALLOW_PRIVATE_HTTP_TARGETS keeps development loopback working).
+func embed(ctx context.Context, baseURL, model, text string, tenantURL bool) ([]float64, error) {
 	payload, _ := json.Marshal(map[string]any{"model": model, "prompt": text})
 	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	endpoint := strings.TrimRight(baseURL, "/") + "/api/embeddings"
+	client := http.DefaultClient
+	if tenantURL {
+		pinned, err := executors.NewPinnedHTTPClient(callCtx, endpoint, executors.HTTPOptions{})
+		if err != nil {
+			return nil, err
+		}
+		client = pinned
+	}
 	req, err := http.NewRequestWithContext(callCtx, http.MethodPost,
-		strings.TrimRight(baseURL, "/")+"/api/embeddings", bytes.NewReader(payload))
+		endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	res, err := http.DefaultClient.Do(req)
+	res, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
