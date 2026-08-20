@@ -185,6 +185,12 @@ func TestBootGate(t *testing.T) {
 	if err := (Config{Production: true, SupabaseURL: "https://sb"}).BootError(); err != nil {
 		t.Fatalf("supabase-configured production must boot: %v", err)
 	}
+	if err := (Config{Production: true, SupabaseURL: "https://sb", AllowDevHeaders: true}).BootError(); err == nil {
+		t.Fatal("dev headers next to a configured identity provider must refuse to boot in production")
+	}
+	if err := (Config{SupabaseURL: "https://sb", AllowDevHeaders: true}).BootError(); err != nil {
+		t.Fatalf("dev with supabase and dev headers must boot: %v", err)
+	}
 	if err := (Config{}).BootError(); err != nil {
 		t.Fatalf("dev must boot: %v", err)
 	}

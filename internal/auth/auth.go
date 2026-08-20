@@ -148,10 +148,16 @@ func ConfigFromEnv() Config {
 }
 
 // BootError is the contract's fail-fast: production without Supabase and
-// without the explicit dev-headers override must refuse to start.
+// without the explicit dev-headers override must refuse to start, and the
+// dev-headers override must never coexist with a configured identity
+// provider in production — a value carried over from staging would let
+// forgeable x-user-id headers stand next to real Supabase identities.
 func (c Config) BootError() error {
 	if c.SupabaseURL == "" && c.Production && !c.AllowDevHeaders {
 		return errProductionAuth
+	}
+	if c.Production && c.AllowDevHeaders && c.SupabaseURL != "" {
+		return errProductionDevHeaders
 	}
 	return nil
 }
@@ -163,6 +169,14 @@ func (authBootError) Error() string {
 }
 
 var errProductionAuth = authBootError{}
+
+type devHeadersBootError struct{}
+
+func (devHeadersBootError) Error() string {
+	return "ALLOW_DEV_AUTH_HEADERS=true must not be combined with Supabase auth when JANUSLY_ENV=production."
+}
+
+var errProductionDevHeaders = devHeadersBootError{}
 
 // NewResolver builds the chain over the pool.
 func NewResolver(pool *pgxpool.Pool, cfg Config) *Resolver {

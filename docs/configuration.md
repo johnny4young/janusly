@@ -11,7 +11,7 @@ in `org_configs`; secrets never do.
 | `JANUSLY_DATABASE_URL` | local `janusly` PostgreSQL URL | PostgreSQL 18 connection string. |
 | `JANUSLY_ENV` | development | Set to `production` to enable the production security and readiness posture. |
 | `JANUSLY_PORT` | `3001` | Public API and React listener. |
-| `JANUSLY_INTERNAL_HOST` | `127.0.0.1` | Internal metrics listener; only loopback or `0.0.0.0` is accepted. |
+| `JANUSLY_INTERNAL_HOST` | `127.0.0.1` | Internal metrics listener; only loopback (`127.0.0.1`, `::1`) or wildcard (`0.0.0.0`, `::`) is accepted. |
 | `JANUSLY_INTERNAL_PORT` | `9464` | Internal metrics and diagnostics port. |
 | `JANUSLY_WORKER_CONCURRENCY` | `8` | Concurrent workflow task limit, range 1–64. |
 | `JANUSLY_API_POOL_SIZE` | `10` | Public-request PostgreSQL pool size. |
@@ -30,7 +30,8 @@ When `JANUSLY_ENV=production`:
 - `JANUSLY_RESUME_TOKEN_SECRET` must be set;
 - development SSO bypass is refused;
 - development auth headers require explicit `ALLOW_DEV_AUTH_HEADERS=true` when
-  no identity provider is configured;
+  no identity provider is configured, and are refused outright when Supabase
+  is configured;
 - fail-level workflow readiness issues reject a run before it is created.
 
 Use `JANUSLY_CREDENTIAL_MASTER_KEY` or
