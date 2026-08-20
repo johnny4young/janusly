@@ -60,6 +60,30 @@ func TestDevelopmentIdentityFailsClosed(t *testing.T) {
 	}
 }
 
+// The Dockerfile and Compose default the build args to forty zeros; that
+// placeholder is a valid hex string naming no Git object, so it must fail
+// provenance instead of letting an unstamped image into production.
+func TestZeroPlaceholderIdentityFailsClosed(t *testing.T) {
+	zeros := strings.Repeat("0", 40)
+	withBuildIdentity(t, zeros, zeros)
+	path := filepath.Join(t.TempDir(), "janusly")
+	if err := os.WriteFile(path, []byte("binary"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	identity, err := fromExecutable(path)
+	if err != nil {
+		t.Fatalf("from executable: %v", err)
+	}
+	if identity.Verified {
+		t.Fatalf("all-zero identity must not verify: %+v", identity)
+	}
+	err = identity.Validate()
+	if err == nil || !strings.Contains(err.Error(), "commit is the all-zero") ||
+		!strings.Contains(err.Error(), "tree is the all-zero") {
+		t.Fatalf("expected placeholder rejection, got: %v", err)
+	}
+}
+
 func TestFromExecutableRejectsUnreadablePath(t *testing.T) {
 	withBuildIdentity(t, strings.Repeat("a", 40), strings.Repeat("b", 40))
 	_, err := fromExecutable(filepath.Join(t.TempDir(), "missing"))

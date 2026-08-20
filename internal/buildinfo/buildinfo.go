@@ -20,7 +20,15 @@ var (
 	buildTree   string
 	hex40       = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	hex64       = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	// zero40 is the build-arg placeholder of development images. It is a
+	// syntactically valid object id that names no Git object, so it must
+	// never satisfy provenance.
+	zero40 = strings.Repeat("0", 40)
 )
+
+func isRealObjectID(value string) bool {
+	return hex40.MatchString(value) && value != zero40
+}
 
 // Identity is safe for the internal operations listener. It contains no
 // environment values, paths, hostnames, or credentials.
@@ -64,8 +72,8 @@ func fromExecutable(path string) (Identity, error) {
 
 func (identity Identity) fieldsValid() bool {
 	return identity.SchemaVersion == SchemaVersion &&
-		hex40.MatchString(identity.Commit) &&
-		hex40.MatchString(identity.Tree) &&
+		isRealObjectID(identity.Commit) &&
+		isRealObjectID(identity.Tree) &&
 		hex64.MatchString(identity.ArtifactSHA256)
 }
 
@@ -81,10 +89,16 @@ func (identity Identity) Validate() error {
 	if !hex40.MatchString(identity.Commit) {
 		problems = append(problems, errors.New(
 			"build provenance commit must be 40 lowercase hexadecimal characters"))
+	} else if identity.Commit == zero40 {
+		problems = append(problems, errors.New(
+			"build provenance commit is the all-zero development placeholder"))
 	}
 	if !hex40.MatchString(identity.Tree) {
 		problems = append(problems, errors.New(
 			"build provenance tree must be 40 lowercase hexadecimal characters"))
+	} else if identity.Tree == zero40 {
+		problems = append(problems, errors.New(
+			"build provenance tree is the all-zero development placeholder"))
 	}
 	if !hex64.MatchString(identity.ArtifactSHA256) {
 		problems = append(problems, errors.New(
