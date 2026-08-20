@@ -7,14 +7,21 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/johnny4young/janusly/internal/store"
 )
 
+// ErrRunAlreadyTerminal reports a cancel that lost the race against a
+// terminal completion: the run reached succeeded/failed/timed_out (or was
+// already cancelled) before the cancellation write.
+var ErrRunAlreadyTerminal = errors.New("run is already terminal")
+
 // CancelRun commits the cancellation in one transaction under the run's
-// completion lock. Terminal-status guarding belongs to the API layer, like
-// the contract; the engine write itself is unconditional.
+// completion lock. The write itself is a CAS: the API's status pre-read
+// happens outside this lock, so a completion can commit in between —
+// losing that race must never regress a terminal run to cancelled.
 func (e *Engine) CancelRun(ctx context.Context, runID string, reason any) error {
 	if reason == nil {
 		reason = map[string]any{}
@@ -32,8 +39,12 @@ func (e *Engine) CancelRun(ctx context.Context, runID string, reason any) error 
 	if err := q.AcquireRunCompletionLock(ctx, runID); err != nil {
 		return fmt.Errorf("acquire completion lock: %w", err)
 	}
-	if err := q.CancelRun(ctx, runID); err != nil {
+	cancelled, err := q.CancelRun(ctx, runID)
+	if err != nil {
 		return fmt.Errorf("cancel run: %w", err)
+	}
+	if cancelled == 0 {
+		return ErrRunAlreadyTerminal
 	}
 	if _, err := q.CancelRunNodes(ctx, store.CancelRunNodesParams{
 		RunID: runID, StateJson: stateJSON, FinishedAt: &cancelledAt,
@@ -52,5 +63,8 @@ func (e *Engine) CancelRun(ctx context.Context, runID string, reason any) error 
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}
+	// A cancelled subworkflow child settles its waiting parent the same
+	// way any terminal child does; the reconciler is the durable backstop.
+	e.DeliverParentNotifications(ctx, runID)
 	return nil
 }

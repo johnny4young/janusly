@@ -3,9 +3,12 @@
 package engine
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/johnny4young/janusly/internal/store"
 )
 
 // Cancellation semantics: cancellable nodes flip with the run, an executing
@@ -57,6 +60,59 @@ func TestCancelFlipsRunAndCancellableNodes(t *testing.T) {
 	// A resume after cancellation loses the CAS cleanly.
 	if err := eng.ResumeRun(ctx, runID, "gate"); err == nil {
 		t.Fatal("resume after cancel must conflict")
+	}
+}
+
+// The API's status pre-read happens outside the completion lock, so a
+// completion can commit in between; the losing cancel must report the
+// conflict instead of regressing a terminal run to cancelled.
+func TestCancelRefusesTerminalRuns(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: mustParse(t, linearDoc)})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "update runs set status='succeeded' where id=$1", runID); err != nil {
+		t.Fatalf("force terminal: %v", err)
+	}
+	if err := eng.CancelRun(ctx, runID, nil); !errors.Is(err, ErrRunAlreadyTerminal) {
+		t.Fatalf("cancel of a terminal run must report the conflict, got: %v", err)
+	}
+	var status string
+	var events int
+	_ = pool.QueryRow(ctx, "select status from runs where id=$1", runID).Scan(&status)
+	_ = pool.QueryRow(ctx, "select count(*) from run_events where run_id=$1 and type='run.cancelled'", runID).Scan(&events)
+	if status != "succeeded" || events != 0 {
+		t.Fatalf("terminal run must stay intact: status=%s cancelEvents=%d", status, events)
+	}
+}
+
+// Cancelling a subworkflow child is a terminal transition like any other:
+// the cancellation write itself must arm the durable parent-notification
+// marker so the reconciler settles the waiting parent instead of orphaning
+// it. Asserted at the store layer — the engine's immediate delivery is
+// orphan-tolerant and clears the marker when the parent is gone, which is
+// exactly what the existing subworkflow tests cover.
+func TestCancelWriteArmsParentNotificationForChildren(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: mustParse(t, linearDoc)})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `update runs
+		set parent_run_id='parent-run', parent_node_id='call', parent_link_kind='subworkflow'
+		where id=$1`, runID); err != nil {
+		t.Fatalf("link parent: %v", err)
+	}
+	cancelled, err := store.New(pool).CancelRun(ctx, runID)
+	if err != nil || cancelled != 1 {
+		t.Fatalf("cancel write: rows=%d err=%v", cancelled, err)
+	}
+	var armed bool
+	_ = pool.QueryRow(ctx,
+		"select parent_notification_after is not null from runs where id=$1", runID).Scan(&armed)
+	if !armed {
+		t.Fatal("the cancellation write must arm parent_notification_after for a subworkflow child")
 	}
 }
 

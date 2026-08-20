@@ -377,6 +377,17 @@ func (s *V1Server) cancelCore(r *http.Request, rc v1Request) opResult {
 			map[string]any{"status": owner.Status})
 	}
 	if err := s.engine.CancelRun(r.Context(), body.RunID, reason); err != nil {
+		if errors.Is(err, engine.ErrRunAlreadyTerminal) {
+			// The pre-read above races the completion lock; the CAS is
+			// authoritative. Re-read for an honest status in the message.
+			status := "terminal"
+			if owner, ownerErr := store.New(s.pool).GetRunOwner(r.Context(), body.RunID); ownerErr == nil {
+				status = owner.Status
+			}
+			return opError(http.StatusConflict, "runs_already_terminal",
+				"Run is already {{status}}; cannot cancel",
+				map[string]any{"status": status})
+		}
 		return opError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Internal error: %v", err), nil)
 	}
 	audit.Write(r.Context(), s.pool, rc.authContext, "run.cancelled", audit.Options{

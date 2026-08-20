@@ -149,8 +149,20 @@ SELECT node_id, status FROM run_nodes WHERE run_id = $1;
 -- name: GetRunOwner :one
 SELECT org_id, status FROM runs WHERE id = $1;
 
--- name: CancelRun :exec
-UPDATE runs SET status = 'cancelled' WHERE id = $1;
+-- Cancellation is a terminal transition: the CAS keeps it from
+-- overwriting a run that reached succeeded/failed/timed_out between the
+-- API's status read and this write (the only regression-capable window).
+-- Arming parent_notification_after mirrors MarkRunTerminalFromRunning so
+-- a cancelled subworkflow child still settles its waiting parent.
+-- name: CancelRun :execrows
+UPDATE runs SET status = 'cancelled',
+    parent_notification_after = CASE
+      WHEN parent_run_id IS NOT NULL AND parent_node_id IS NOT NULL
+           AND (parent_link_kind = 'subworkflow'
+                OR (parent_link_kind IS NULL AND replay_mode IS NULL))
+      THEN now() ELSE parent_notification_after END
+WHERE id = $1
+  AND status NOT IN ('succeeded', 'failed', 'cancelled', 'timed_out');
 
 -- Running is deliberately excluded: an executing node finishes naturally
 
