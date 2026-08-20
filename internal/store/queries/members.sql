@@ -139,19 +139,6 @@ SET email = EXCLUDED.email,
     role = EXCLUDED.role,
     invited_by = EXCLUDED.invited_by;
 
--- name: InsertOrgMember :execrows
-INSERT INTO org_members (id, org_id, user_id, role)
-VALUES ($1, $2, $3, $4)
-ON CONFLICT DO NOTHING;
-
--- name: GetInvitationByID :one
-SELECT id, org_id, email, role, status FROM invitations WHERE id = $1;
-
--- The accept CAS: only a still-pending row flips, exactly once.
--- name: AcceptInvitation :execrows
-UPDATE invitations SET status = 'accepted', accepted_at = now()
-WHERE id = $1 AND status = 'pending';
-
 -- name: InsertInstalledPlugin :exec
 INSERT INTO installed_plugins (id, org_id, plugin_id, config_json, installed_by)
 VALUES ($1, $2, $3, $4, $5);

@@ -12,20 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const acceptInvitation = `-- name: AcceptInvitation :execrows
-UPDATE invitations SET status = 'accepted', accepted_at = now()
-WHERE id = $1 AND status = 'pending'
-`
-
-// The accept CAS: only a still-pending row flips, exactly once.
-func (q *Queries) AcceptInvitation(ctx context.Context, id string) (int64, error) {
-	result, err := q.db.Exec(ctx, acceptInvitation, id)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const countMembersInRole = `-- name: CountMembersInRole :one
 SELECT count(*)::int FROM org_members WHERE org_id = $1 AND role = $2
 `
@@ -139,31 +125,6 @@ func (q *Queries) FindPendingInvitation(ctx context.Context, arg FindPendingInvi
 	var id string
 	err := row.Scan(&id)
 	return id, err
-}
-
-const getInvitationByID = `-- name: GetInvitationByID :one
-SELECT id, org_id, email, role, status FROM invitations WHERE id = $1
-`
-
-type GetInvitationByIDRow struct {
-	ID     string
-	OrgID  string
-	Email  string
-	Role   string
-	Status string
-}
-
-func (q *Queries) GetInvitationByID(ctx context.Context, id string) (GetInvitationByIDRow, error) {
-	row := q.db.QueryRow(ctx, getInvitationByID, id)
-	var i GetInvitationByIDRow
-	err := row.Scan(
-		&i.ID,
-		&i.OrgID,
-		&i.Email,
-		&i.Role,
-		&i.Status,
-	)
-	return i, err
 }
 
 const getOrgMembership = `-- name: GetOrgMembership :one
@@ -335,32 +296,6 @@ func (q *Queries) InsertInvitation(ctx context.Context, arg InsertInvitationPara
 		arg.InvitedBy,
 	)
 	return err
-}
-
-const insertOrgMember = `-- name: InsertOrgMember :execrows
-INSERT INTO org_members (id, org_id, user_id, role)
-VALUES ($1, $2, $3, $4)
-ON CONFLICT DO NOTHING
-`
-
-type InsertOrgMemberParams struct {
-	ID     string
-	OrgID  string
-	UserID string
-	Role   string
-}
-
-func (q *Queries) InsertOrgMember(ctx context.Context, arg InsertOrgMemberParams) (int64, error) {
-	result, err := q.db.Exec(ctx, insertOrgMember,
-		arg.ID,
-		arg.OrgID,
-		arg.UserID,
-		arg.Role,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }
 
 const insertOrgRole = `-- name: InsertOrgRole :exec
