@@ -7,7 +7,7 @@
  * deliberate: existing App flows do not all announce success at the same
  * point, and this hook must preserve that observable ordering.
  *
- * Used by: `apps/web/src/App.tsx` platform mutation handlers.
+ * Used by: `web/src/App.tsx` platform mutation handlers.
  */
 
 import { useCallback } from 'react'

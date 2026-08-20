@@ -6,7 +6,7 @@
  * Supabase session, and `platformVersion` — the cross-panel reactivity
  * counter that mutations bump so independent panels refetch (AGENTS.md).
  *
- * Used by every component under `apps/web/src/`. Lives in one file
+ * Used by every component under `web/src/`. Lives in one file
  * intentionally; the project's small enough that splitting the store into
  * slices adds noise without value.
  *

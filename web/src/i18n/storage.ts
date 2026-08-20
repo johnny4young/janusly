@@ -1,6 +1,6 @@
 /**
  * Defensive localStorage shim for the user's locale preference. Mirrors the
- * try/catch shape used in `apps/web/src/auth.ts` so the same edge cases
+ * try/catch shape used in `web/src/auth.ts` so the same edge cases
  * (private-mode browsers, quota-exceeded) degrade gracefully to the sentinel
  * `'system'` value.
  */

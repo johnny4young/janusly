@@ -20,7 +20,7 @@
  *   history. Buffered events land first, then the hook reconnects immediately
  *   from the new cursor instead of silently skipping to the live tail.
  *
- * Used by `apps/web/src/App.tsx` alongside the polling effect.
+ * Used by `web/src/App.tsx` alongside the polling effect.
  *
  * Invariants:
  * - Initial timeline history comes from the regular `/status` fetch (the poll

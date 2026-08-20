@@ -22,7 +22,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// pnpm runs the package's `test` script with cwd = apps/web, which is also
+// pnpm runs the package's `test` script with cwd = web, which is also
 // vitest's default `root`. Reading from the package root is the most portable
 // way to find these files — `import.meta.url` lives behind Vite's transform
 // and resolves to a non-file URL under vitest, so file-URL helpers throw.

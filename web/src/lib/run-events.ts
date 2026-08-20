@@ -7,7 +7,7 @@
  * Used by:
  * - The workflow runtime emits
  *   them via `workflowEvent()` / `appendEvent()`.
- * - `apps/web/src/i18n/server-events.test.ts` asserts every member has a
+ * - `web/src/i18n/server-events.test.ts` asserts every member has a
  *   `runEvents.<type>` label in both the `en` and `es` catalogs, so no
  *   lifecycle event ever renders as a raw type string on the run timeline.
  *

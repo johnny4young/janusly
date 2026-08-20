@@ -11,7 +11,7 @@
  * - Do NOT emit React-Flow style objects. Visual selection state is
  *   encoded via the `selected` field that the custom edge component
  *   projects onto a `data-selected` DOM attribute; the stroke + width
- *   changes live in `apps/web/src/styles/canvas.css` keyed on
+ *   changes live in `web/src/styles/canvas.css` keyed on
  *   `.we-edge[data-selected="true"]`. The one marker object is a
  *   module-scoped constant so arrowheads stay visible without
  *   per-render allocation.
@@ -20,7 +20,7 @@
  * across `platformVersion` bumps and locale toggles, so the canvas
  * stops re-rendering N-per-tick.
  *
- * Used by `apps/web/src/App.tsx`.
+ * Used by `web/src/App.tsx`.
  */
 
 import type { EdgeMarker } from '@xyflow/react'

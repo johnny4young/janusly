@@ -2,7 +2,7 @@
  * Clipboard helpers with a legacy textarea fallback.
  *
  * Used by:
- * - `apps/web/src/components/DeadLettersPanel.tsx`
+ * - `web/src/components/DeadLettersPanel.tsx`
  *
  * The fallback is intentionally synchronous and short-lived: the textarea is
  * mounted only for the browser's copy command and is always removed afterward.

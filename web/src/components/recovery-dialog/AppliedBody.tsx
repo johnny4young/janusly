@@ -1,7 +1,7 @@
 /**
  * Failure-recovery dialog — Applied (success) step body.
  *
- * Used by: apps/web/src/components/RecoveryDialog.tsx. Owns the success
+ * Used by: web/src/components/RecoveryDialog.tsx. Owns the success
  * ribbon (single-replay or cluster "Replayed N of M" + per-row errors) and
  * mounts `RecoveryDeltaCard` when the save response carried the workflow id
  * + version, falling back to ribbon-only otherwise.

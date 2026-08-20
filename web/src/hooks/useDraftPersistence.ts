@@ -14,7 +14,7 @@
  * unreachable — it isn't in the Flows list yet).
  *
  * Used by:
- * - `apps/web/src/App.tsx` (mounts `useDraftAutosave`; reads/clears drafts on
+ * - `web/src/App.tsx` (mounts `useDraftAutosave`; reads/clears drafts on
  *   open + mount for the restore prompt).
  */
 

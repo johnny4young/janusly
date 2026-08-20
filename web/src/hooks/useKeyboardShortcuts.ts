@@ -6,7 +6,7 @@
  * listener inline.
  *
  * Used by:
- * - `apps/web/src/App.tsx`
+ * - `web/src/App.tsx`
  *
  * Shortcuts:
  *   Cmd/Ctrl+K   — toggle command palette

@@ -12,12 +12,12 @@
  * field rename is one PR, two consumers.
  *
  * Used by:
- *  - `apps/api/src/ai-evidence.ts` — assembles the rows from the same
+ *  - `internal/aievidence` — assembles the rows from the same
  *    context sources the route already loaded (feedback summary, recalled
  *    memory entries, runbook excerpt, recent similar errors, the fired
  *    signature-normalization rule, per-tool inputContract), runs every
  *    rendered string through `scrubEvidenceRow`, and bounds the list.
- *  - `apps/web/src/components/RecoveryDialog.tsx` — renders the collapsible
+ *  - `web/src/components/RecoveryDialog.tsx` — renders the collapsible
  *    "Why this suggestion?" panel with one chip per row, deep-linking by
  *    `sourceRef` (run id, recovery item id, memory entry id, tool name).
  *

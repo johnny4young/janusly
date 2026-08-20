@@ -1,7 +1,7 @@
 /**
  * Failure-recovery dialog — Review step body.
  *
- * Used by: apps/web/src/components/RecoveryDialog.tsx. Owns the review-state
+ * Used by: web/src/components/RecoveryDialog.tsx. Owns the review-state
  * UI: the fallback / no-structural-patch warnings, the per-suggestion tab
  * strip (with keyboard navigation + calibrated-confidence labels), the
  * `WorkflowDiffView` of the selected suggestion against the failing

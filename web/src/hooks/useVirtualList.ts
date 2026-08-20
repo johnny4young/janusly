@@ -27,10 +27,10 @@
  * mode.
  *
  * Used by:
- * - `apps/web/src/components/DeadLettersPanel.tsx` (primary —
+ * - `web/src/components/DeadLettersPanel.tsx` (primary —
  *   100-200 DLQ rows in the Recovery Center).
- * - `apps/web/src/components/RunHistoryList.tsx` (bounded run history).
- * - `apps/web/src/components/ReasoningPanel.tsx` (long-run event feed and
+ * - `web/src/components/RunHistoryList.tsx` (bounded run history).
+ * - `web/src/components/ReasoningPanel.tsx` (long-run event feed and
  *   programmatic first-failure navigation).
  *
  * Invariants:

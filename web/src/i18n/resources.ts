@@ -5,7 +5,7 @@
  *
  * Mirror of `lingua/src/shared/i18n/resources.ts`. Adding a new locale is
  * one more entry in `SUPPORTED_LANGUAGES`, a sibling JSON catalog under
- * `apps/web/src/i18n/locales/<lng>/common.json`, and an explicit demand loader.
+ * `web/src/i18n/locales/<lng>/common.json`, and an explicit demand loader.
  */
 
 import type enCommon from './locales/en/common.json'

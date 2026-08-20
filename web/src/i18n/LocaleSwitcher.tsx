@@ -4,8 +4,8 @@
  * (`variant="popover-row"`). Renders a labelled `<select>` with three
  * options: System (auto-detect), English, Español.
  *
- * Used by `apps/web/src/components/Login.tsx` and
- * `apps/web/src/components/UserMenu.tsx`.
+ * Used by `web/src/components/Login.tsx` and
+ * `web/src/components/UserMenu.tsx`.
  */
 
 import React from 'react'

@@ -5,7 +5,7 @@
  * model consumed by `AppWorkspace`. Focused hooks own identity, commands,
  * polling, streaming, and draft persistence.
  *
- * Used by `apps/web/src/main.tsx` — single entry point, single instance.
+ * Used by `web/src/main.tsx` — single entry point, single instance.
  *
  * Invariants:
  * - Polling at 1500ms calls `loadStatus(runId)` and merges events via the

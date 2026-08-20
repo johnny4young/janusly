@@ -4,7 +4,7 @@
  * JSON so escalation channels receive a useful single line.
  *
  * Used by:
- * - `apps/web/src/components/DeadLettersPanel.tsx`
+ * - `web/src/components/DeadLettersPanel.tsx`
  */
 
 type RecoveryErrorSummaryInput = {

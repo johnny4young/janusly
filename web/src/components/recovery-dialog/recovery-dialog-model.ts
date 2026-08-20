@@ -7,7 +7,7 @@
  * shape/diff helpers (`isActionableSuggestion`, `toWorkflow`,
  * `normalisePatchSuggestion`, `pick*`) are render-free transforms.
  *
- * Used by: apps/web/src/components/RecoveryDialog.tsx and its render bodies
+ * Used by: web/src/components/RecoveryDialog.tsx and its render bodies
  * under `./` (ReviewBody, ValidationFailedBody). Owns the
  * confidence-display + suggestion-normalisation + error-extraction logic.
  */

@@ -11,9 +11,9 @@
  * - The backend run and node persistence layer —
  *   wire-side comparisons, `inArray` clauses on cancellation paths, and
  *   terminal-status guards.
- * - `apps/api/src/routes/runs-routes.ts` — `/run/cancel`'s
+ * - `internal/httpapi/runroutes.go` — `/run/cancel`'s
  *   "already-terminal" guard.
- * - `apps/web/src/App.tsx`, `apps/web/src/components/RightPanel.tsx` —
+ * - `web/src/App.tsx`, `web/src/components/RightPanel.tsx` —
  *   active-run polling shutdown and the Cancel button's disabled state.
  *
  * Invariants:

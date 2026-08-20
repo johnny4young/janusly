@@ -1,7 +1,7 @@
 /**
  * Panels, lists, status indicators, AI surfaces, and control-plane layouts.
  *
- * Used by: apps/web/src/index.css in declaration order; do not import directly.
+ * Used by: web/src/index.css in declaration order; do not import directly.
  * Invariant: preserve module order because later feature rules intentionally refine shared primitives.
  */
 
@@ -1972,7 +1972,7 @@
 }
 
 /* Compact locale picker shared by Login (corner) and UserMenu (popover row).
-   Single source-of-styles for the i18n switcher — see apps/web/src/i18n/LocaleSwitcher.tsx. */
+   Single source-of-styles for the i18n switcher — see web/src/i18n/LocaleSwitcher.tsx. */
 .we-locale-switcher {
   display: flex;
   align-items: center;

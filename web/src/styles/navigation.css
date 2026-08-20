@@ -1,7 +1,7 @@
 /**
  * Global workspace navigation and sidebar chrome.
  *
- * Used by: apps/web/src/index.css before responsive platform overrides.
+ * Used by: web/src/index.css before responsive platform overrides.
  * Invariant: navigation remains eager because it is visible on every route;
  * canvas-only workflow styles stay demand-loaded by CanvasWorkspace.
  */

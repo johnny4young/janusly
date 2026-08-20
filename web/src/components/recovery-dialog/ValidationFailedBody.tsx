@@ -1,7 +1,7 @@
 /**
  * Failure-recovery dialog — Validation-failed step body.
  *
- * Used by: apps/web/src/components/RecoveryDialog.tsx. Owns the
+ * Used by: web/src/components/RecoveryDialog.tsx. Owns the
  * sandbox-replay-failed UI: the failure banner, the failed node's error
  * detail (extracted via `pickErrorMessage`), and the `WorkflowDiffView` of
  * the rejected suggestion. The "Iterate" action lives in the parent footer.

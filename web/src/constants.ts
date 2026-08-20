@@ -13,7 +13,7 @@
  *   here means the "Add step" UI can't seed a config.
  * - All user-facing strings flow through `i18n/runtime.t(...)` — adding a
  *   new node type means a sibling pair of `nodes.<type>.label` /
- *   `nodes.<type>.helper` keys in `apps/web/src/i18n/locales/<lng>/common.json`.
+ *   `nodes.<type>.helper` keys in `web/src/i18n/locales/<lng>/common.json`.
  *   The consistency test catches missing translations at CI time.
  */
 

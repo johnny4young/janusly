@@ -7,7 +7,7 @@
  * rendering / selection / dialogs.
  *
  * Used by:
- * - `apps/web/src/components/DeadLettersPanel.tsx`
+ * - `web/src/components/DeadLettersPanel.tsx`
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'

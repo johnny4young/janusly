@@ -13,7 +13,7 @@
  *
  * Invariants:
  * - Don't expand the grammar without updating
- *   `apps/api/src/ai-prompts.ts:GENERATE_WORKFLOW_SYSTEM_PROMPT` so the
+ *   `internal/httpapi/ai_generate_prompt.txt` so the
  *   LLM knows what's emittable. The grammar is published in the system
  *   prompt.
  * - The evaluator must NEVER do template substitution. Template values

@@ -28,12 +28,12 @@
  * Used by:
  *   - The backend failure-cluster aggregator.
  *   - The backend data layer exposes the samples.
- *   - `apps/api/src/routes/dlq-routes.ts:GET /dlq/clusters` ties them
+ *   - `internal/httpapi/clusters.go:GET /dlq/clusters` ties them
  *     together.
- *   - `apps/api/src/routes/workflows-routes.ts:GET /workflows/health/delta`
+ *   - `internal/httpapi/workflowhealth.go:GET /workflows/health/delta`
  *     runs the same-failure check against the caller-supplied prior
  *     signature.
- *   - `apps/web/src/components/RecoveryDialog.tsx` derives the prior
+ *   - `web/src/components/RecoveryDialog.tsx` derives the prior
  *     signature from the source DLQ before calling the delta route.
  *
  * Pure — no I/O, no network, no DB access. Easy to unit-test.

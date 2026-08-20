@@ -2,7 +2,7 @@
  * Dependency-free fuzzy ranking for the command palette.
  *
  * Used by:
- * - `apps/web/src/components/CommandPalette.tsx`
+ * - `web/src/components/CommandPalette.tsx`
  *
  * Exact substrings always outrank subsequence matches. Fuzzy matches reward a
  * compact span and penalize leading distance so short, memorable queries stay

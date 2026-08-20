@@ -8,7 +8,7 @@
  * fetcher inline.
  *
  * Used by:
- * - `apps/web/src/App.tsx`
+ * - `web/src/App.tsx`
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'

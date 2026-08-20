@@ -7,11 +7,11 @@
  *
  * Used by:
  *  - Backend workflow metadata storage (read + upsert)
- *  - `apps/api/src/routes/workflow-metadata-routes.ts` (GET + POST)
- *  - `apps/web/src/components/WorkflowMetadataPanel.tsx` (edit form)
- *  - `apps/web/src/components/WorkflowAboutCard.tsx` (read-only display)
+ *  - `internal/httpapi/workflowmetadata.go` (GET + POST)
+ *  - `web/src/components/WorkflowMetadataPanel.tsx` (edit form)
+ *  - `web/src/components/WorkflowAboutCard.tsx` (read-only display)
  *  - The recovery runtime (severity default)
- *  - `apps/api/src/routes/recovery-items-routes.ts` (owner default on assign)
+ *  - `internal/httpapi/recoveryitems.go` (owner default on assign)
  *
  * Invariants:
  *  - `runbookMarkdown` is capped at 32 KiB of UTF-8 data so an

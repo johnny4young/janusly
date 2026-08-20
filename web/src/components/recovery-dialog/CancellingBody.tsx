@@ -1,7 +1,7 @@
 /**
  * Failure-recovery dialog — Cancel (reject) step body.
  *
- * Used by: apps/web/src/components/RecoveryDialog.tsx. Owns the cancel UX:
+ * Used by: web/src/components/RecoveryDialog.tsx. Owns the cancel UX:
  * the quick-pick reason chips, the free-text comment textarea, and the
  * Skip / Back / Submit actions. The component never talks to the API — the
  * parent's `onSubmit` handles the `/recovery/feedback` write so the dialog

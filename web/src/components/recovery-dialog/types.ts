@@ -5,7 +5,7 @@
  * parent, pure helpers (`./helpers.ts`), and render bodies all share so
  * imports stay one-directional (parent + bodies → types, never back).
  *
- * Used by: apps/web/src/components/RecoveryDialog.tsx (the parent owns the
+ * Used by: web/src/components/RecoveryDialog.tsx (the parent owns the
  * `Step` state machine + the apply-flow callbacks; the bodies render the
  * per-step UI). Re-exports `PreSaveBeforeSnapshot` from `RecoveryDeltaCard`
  * so consumers thread the delta-card snapshot type through one import.

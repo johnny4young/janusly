@@ -8,7 +8,7 @@
  * Zod — so the browser bundle stays free of Zod runtime weight on every
  * page load. If the server-side shape changes, update both sides.
  *
- * Used by every React component in `apps/web/src/**` and the store.
+ * Used by every React component in `web/src/**` and the store.
  */
 
 import type { Edge, Node } from '@xyflow/react'

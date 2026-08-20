@@ -12,8 +12,8 @@
  * Used by:
  *  - Backend source storage (CRUD + derived status)
  *  - `internal/upstream` (poll + parse + evaluate)
- *  - `apps/api/src/routes/upstream-health-routes.ts` (admin CRUD + force-run)
- *  - `apps/web/src/components/UpstreamHealthPanel.tsx` (admin form + status list)
+ *  - `internal/httpapi/upstreamhealth.go` (admin CRUD + force-run)
+ *  - `web/src/components/UpstreamHealthPanel.tsx` (admin form + status list)
  *
  * Invariants:
  *  - `kind` is a closed enum; adding a provider means a new parser branch in

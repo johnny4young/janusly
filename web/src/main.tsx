@@ -48,7 +48,7 @@ async function mountApp(): Promise<void> {
   const { default: App } = await appModulePromise
   // `<App>` is dynamically imported so the entry chunk stays lean. The React
   // Flow provider is deliberately NOT mounted here — it lives inside the lazy
-  // `CanvasWorkspace` (`apps/web/src/components/CanvasWorkspace.tsx`), mounted
+  // `CanvasWorkspace` (`web/src/components/CanvasWorkspace.tsx`), mounted
   // only when the operator first leaves home for a canvas-bearing tab. That
   // keeps `@xyflow/react` (the bundle's heaviest dependency) off the boot
   // path, so the Recovery Center landing downloads zero React Flow. The

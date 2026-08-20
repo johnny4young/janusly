@@ -2,8 +2,8 @@
  * Shared editable-target guard for keyboard shortcut surfaces.
  *
  * Used by:
- * - `apps/web/src/hooks/useKeyboardShortcuts.ts`
- * - `apps/web/src/components/DeadLettersPanel.tsx`
+ * - `web/src/hooks/useKeyboardShortcuts.ts`
+ * - `web/src/components/DeadLettersPanel.tsx`
  *
  * Keeping this pure guard separate avoids coupling lazy operational panels to
  * the global React hook and preserves the boot chunk boundary.

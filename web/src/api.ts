@@ -111,7 +111,7 @@ function dedupKey(scope: ApiRequestScope, method: string, path: string, body: Bo
  * `serverEvents.fallback`.
  */
 export class ApiError extends Error {
-  /** Stable snake_case code from `apps/api/src/error-codes.ts`. */
+  /** Stable snake_case code emitted by the Go API (`internal/httpapi`). */
   readonly code?: string
   /** Structured interpolation values for `apiErrors.<code>` catalog templates. */
   readonly params?: Record<string, unknown>
@@ -229,13 +229,10 @@ async function doApiFetch(path: string, options: RequestInit, requestScope: ApiR
   const headers = {
     'Content-Type': 'application/json',
     'x-org-id': requestScope.activeOrg,
-    // The API's AI helpers (`/ai/patch-workflow`, `/ai/suggest-improvement`,
-    // `/ai/explain-workflow`, `/ai/explain-run`, `/ai/review-workflow`)
-    // read this header (`apps/api/src/locale.ts:localeFromRequest`) and
-    // append a one-line "respond in <language>" instruction to the LLM
-    // system prompt so the operator-facing free-form fields (rationale,
-    // explanation, message) come back in the user's UI locale. Other
-    // routes ignore the header.
+    // Sent so the API can localize operator-facing free-form AI fields
+    // (rationale, explanation, message) to the UI locale. The Go API does
+    // not consume it yet — keeping the header preserves the contract for
+    // when that localization lands. Other routes ignore the header.
     'Accept-Language': requestScope.resolvedLocale,
     ...(!browserSession && token ? { Authorization: `Bearer ${token}` } : {}),
     ...(!browserSession && !token ? { 'x-user-id': 'dev-user' } : {}),

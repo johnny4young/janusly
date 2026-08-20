@@ -7,7 +7,7 @@
  * loads the very first status snapshot. Extracted from `App`.
  *
  * Used by:
- * - `apps/web/src/App.tsx`
+ * - `web/src/App.tsx`
  *
  * Invariants:
  * - The tick is a no-op while `streamTransport === 'sse'` (read imperatively

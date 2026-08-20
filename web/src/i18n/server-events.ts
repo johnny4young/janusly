@@ -200,7 +200,7 @@ export function tTemplateCategory(template: TemplateLike): string {
 
 /**
  * Translate a server API error envelope. The envelope shape lives in
- * `apps/api/src/error-codes.ts` as `{ error, code, params? }`. The
+ * the Go API as `{ error, code, params? }`. The
  * server stays locale-blind; this helper resolves `apiErrors.<code>`
  * from the catalog, interpolates any `params`, and falls back to the
  * literal `error` string (or empty when neither is present).

@@ -11,7 +11,7 @@
  * or throw in private mode / on quota) and a corrupt or wrong-shaped value
  * degrades to null → the dashboard falls back to defaults.
  *
- * Used by `apps/web/src/components/WorkflowsDashboard.tsx`.
+ * Used by `web/src/components/WorkflowsDashboard.tsx`.
  */
 
 const KEY = 'janusly:flowsFilters'

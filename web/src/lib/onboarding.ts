@@ -10,12 +10,12 @@
  * request bodies.
  *
  * Used by:
- * - `apps/api/src/routes/onboarding-routes.ts` — derives each milestone from
+ * - `internal/httpapi/productsurface.go` onboarding routes — derives each milestone from
  *   durable org-state and composes the `OnboardingState` response.
  * - The backend onboarding store — the persisted
  *   `onboarding_progress.step` high-water column stores one of
  *   `ONBOARDING_STEPS`; `stepIndex` is the high-water comparison key.
- * - `apps/web/src/components/OnboardingBanner.tsx` — renders the ordered
+ * - `web/src/components/OnboardingBanner.tsx` — renders the ordered
  *   milestones and resolves the current step's CTA target.
  *
  * Invariants:

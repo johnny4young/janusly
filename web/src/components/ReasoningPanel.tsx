@@ -2,7 +2,7 @@
  * Searchable, virtualized run-event timeline for long workflow executions.
  *
  * Used by:
- * - `apps/web/src/components/RightPanel.tsx` — the Reasoning workspace tab.
+ * - `web/src/components/RightPanel.tsx` — the Reasoning workspace tab.
  *
  * Invariants:
  * - Events are projected chronologically before deltas are computed, then

@@ -1,7 +1,7 @@
 /**
  * Failure-recovery dialog — "Why this suggestion?" evidence panel.
  *
- * Used by: apps/web/src/components/RecoveryDialog.tsx (via ReviewBody).
+ * Used by: web/src/components/RecoveryDialog.tsx (via ReviewBody).
  * Owns the collapsible evidence list: one chip per row grouped visually by
  * `kind`, each with its `sourceRef` deep-link token, plus the render-time
  * re-scrub (defense in depth on top of the API's read-time scrub).

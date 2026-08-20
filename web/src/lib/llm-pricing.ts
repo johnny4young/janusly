@@ -13,7 +13,7 @@
  *
  * Used by:
  * - `internal/ai/pricing.go` — server-side cost recording.
- * - `apps/web/src/components/AiStudioPanel.tsx` — preview labels.
+ * - `web/src/components/AiStudioPanel.tsx` — preview labels.
  *
  * Invariants:
  * - Zero runtime deps (no node-only globals).

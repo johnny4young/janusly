@@ -11,7 +11,7 @@
  * guarded (storage may be absent in non-browser/test contexts, or throw in
  * private mode / on quota) and a corrupt or wrong-shaped value degrades to null.
  *
- * Used by `apps/web/src/components/WorkflowCanvas.tsx`.
+ * Used by `web/src/components/WorkflowCanvas.tsx`.
  */
 
 import type { Viewport } from '@xyflow/react'

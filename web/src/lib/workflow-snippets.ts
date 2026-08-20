@@ -22,9 +22,9 @@
  *
  * Used by:
  *  - Backend snippet storage (custom-snippet CRUD; validates rows)
- *  - `apps/api/src/routes/snippets-routes.ts` (list built-ins + custom; create)
- *  - `apps/web/src/components/SnippetInsertMenu.tsx` (Inspector "Insert snippet…")
- *  - `apps/web/src/App.tsx` (Cmd+K palette → insert)
+ *  - `internal/httpapi/productsurface.go` snippets routes (list built-ins + custom; create)
+ *  - `web/src/components/SnippetInsertMenu.tsx` (Inspector "Insert snippet…")
+ *  - `web/src/App.tsx` (Cmd+K palette → insert)
  *
  * Invariants:
  *  - `category` is the closed `SNIPPET_CATEGORIES` enum; adding a value is

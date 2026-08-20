@@ -1,7 +1,7 @@
 /**
  * Theme tokens, base elements, shell layout, and shared primitives.
  *
- * Used by: apps/web/src/index.css in declaration order; do not import directly.
+ * Used by: web/src/index.css in declaration order; do not import directly.
  * Invariant: preserve module order because later feature rules intentionally refine shared primitives.
  */
 

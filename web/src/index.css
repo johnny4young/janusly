@@ -10,7 +10,7 @@
 /**
  * Ordered entrypoint for Janusly's dependency-free web design system.
  *
- * Used by: apps/web/src/main.tsx.
+ * Used by: web/src/main.tsx.
  * Invariant: keep imports in this order; canvas-only React Flow styles are
  * demand-loaded by CanvasWorkspace instead of joining the Home cold path.
  */
