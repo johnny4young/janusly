@@ -14,8 +14,9 @@ DNS pinning, byte limits, and timeouts. Stdio connections enforce command and
 environment allowlists, bounded lifetime, bounded stderr, and platform resource
 limits.
 
-Write-capable external tools require both process consent and tenant consent.
-Validation runs suppress write effects.
+Write-capable external tools require both process consent
+(`JANUSLY_MCP_CLIENT_WRITES_ENABLED`) and tenant consent
+(`mcp.clientWriteConsent`). Validation runs suppress write effects.
 
 ## Server posture
 

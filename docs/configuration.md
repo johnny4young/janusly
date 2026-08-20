@@ -50,6 +50,7 @@ the database.
 | `WORKOS_API_KEY` | WorkOS server API key. |
 | `WORKOS_WEBHOOK_SECRET` | WorkOS webhook verification secret. |
 | `JANUSLY_SSO_CALLBACK_URL` | Registered WorkOS callback URL. |
+| `JANUSLY_WEB_BASE_URL` | Public web origin used for SSO redirects and browser-session cookies. |
 | `JANUSLY_SESSION_COOKIE_SECURE` | Force secure browser-session cookies. |
 | `JANUSLY_API_SERVICE_TOKEN` | Service-to-service API token. |
 | `JANUSLY_ADMIN_TOKEN` | Administrative command token. |
@@ -84,7 +85,10 @@ Outbound safety and integration settings include:
 - `JANUSLY_HTTP_MAX_RESPONSE_BYTES`
 - `JANUSLY_HTTP_MAX_REDIRECTS`
 - `JANUSLY_HTTP_STREAM_PREVIEW_BYTES`
-- `JANUSLY_MCP_WRITES_ENABLED`
+- `JANUSLY_MCP_WRITES_ENABLED` (server-side write tools) and
+  `JANUSLY_MCP_CLIENT_WRITES_ENABLED` (`mcp_tool` steps against external
+  servers)
+- `JANUSLY_PUBLIC_APP_URL` for shareable report links
 - `JANUSLY_MAILER_PROVIDER` and `JANUSLY_MAILER_FROM`
 - `RESEND_API_KEY` or `SENDGRID_API_KEY`
 - `JANUSLY_OBJECT_STORE_PROVIDER`

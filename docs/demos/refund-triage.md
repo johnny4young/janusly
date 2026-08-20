@@ -9,7 +9,7 @@
 
 | Need | How |
 | --- | --- |
-| `webhook_secret` credential | AI Studio → Credentials → New, kind `webhook_secret`, name `partner-webhook`. The shared secret lives in env (`PARTNER_WEBHOOK_SECRET`); the credential row stores only the env-var name. |
+| `webhook_secret` credential | AI Studio → Credentials → New, kind `webhook_secret`, name `partner-webhook`. Paste the shared secret; it is envelope-encrypted in PostgreSQL. An env reference (`PARTNER_WEBHOOK_SECRET`) is the restricted alternative and requires `JANUSLY_CREDENTIAL_ENV_ALLOWLIST`. |
 | Email provider key (Resend or SendGrid) | Set `RESEND_API_KEY` or `SENDGRID_API_KEY` in env. Without one, the email step falls back to the `noop` mailer — the audit row still lands, no email is delivered. The demo works either way. |
 | Sample refund payload | `{ "customer": "leah@example.com", "orderId": "ord_8421", "amountUsd": 49.00, "reason": "Charged twice for the same order" }` |
 | (Optional) endpoint to receive the signed webhook | If you want to show the billing-system side, point a test ngrok / RequestBin / local server at `billing.example.com/refunds` (edit the `process_refund` node's URL in the Inspector). |

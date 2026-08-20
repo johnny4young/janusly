@@ -1,6 +1,8 @@
 # HTTP API
 
-The canonical machine-readable contract is `contract/openapi.json`. Regenerate
+The canonical machine-readable contract is `contract/openapi.json`. It covers
+the versioned `/v1` manifest; the remaining surfaces below are served outside
+that document and are described here and in the architecture notes. Regenerate
 it with:
 
 ```bash
@@ -52,7 +54,9 @@ closed-catalog permissions.
 | Integrations | `/credentials`, `/mcp/*`, `/webhooks/*`, `/upstream/*` |
 | Operations | `/audit`, `/reports/*`, `/system/*`, `/billing/*` |
 
-Use the OpenAPI document for exact schemas and status codes.
+Use the OpenAPI document for exact schemas and status codes on `/v1` routes;
+non-`/v1` surfaces are validated by the same contract registry but are not part
+of the published document.
 
 ## Streaming
 

@@ -125,9 +125,10 @@ git diff -- schema.sql internal/store contract
 
 ## API and frontend
 
-`contract/openapi.json` is the checked-in OpenAPI 3.1 contract. The API exposes
-health, identity, workflows, runs, streaming events, recovery, MCP, integrations,
-and administrative operations. The React client lives entirely in `/web` and
+`contract/openapi.json` is the checked-in OpenAPI 3.1 contract for the
+versioned `/v1` manifest. The full API additionally exposes health, identity,
+workflows, runs, streaming events, recovery, MCP, integrations, and
+administrative operations outside that document. The React client lives entirely in `/web` and
 uses the shared HTTP origin in production.
 
 Read [API](docs/api.md), [workflows](docs/workflows.md),

@@ -9,8 +9,8 @@
 
 | Need | How |
 | --- | --- |
-| `github_token` credential | AI Studio → Credentials → New, kind `github_token`, name `bot-github`. The token's secret material lives in env (`GITHUB_TOKEN_BOT`); the credential row stores only the env-var name and the org-scoped identifier. |
-| `slack_webhook` credential | Same flow, kind `slack_webhook`, name `incidents-slack`. The webhook URL lives in env (`SLACK_WEBHOOK_INCIDENTS`). |
+| `github_token` credential | AI Studio → Credentials → New, kind `github_token`, name `bot-github`. Paste the token value; it is envelope-encrypted in PostgreSQL. An env-var reference (`GITHUB_TOKEN_BOT`) is the restricted alternative and requires `JANUSLY_CREDENTIAL_ENV_ALLOWLIST`. |
+| `slack_webhook` credential | Same flow, kind `slack_webhook`, name `incidents-slack`, with the webhook URL as the stored value (or an allowlisted `SLACK_WEBHOOK_INCIDENTS` env reference). |
 | Sample incident payload | `{ "alertName": "API p95 above 800ms", "service": "checkout-api", "severity": "high", "summary": "Checkout p95 latency exceeded 800ms for 10 consecutive minutes" }` |
 | Optional: Github repo `janusly/incidents` you can write to | The template targets that repo by default; edit the `github_issue` node's `owner`/`repo` in the Inspector to match yours. |
 
@@ -31,7 +31,7 @@
 
 ## Human-in-the-loop story
 
-The default `incident-triage` flow runs unattended — that is the point at 2am. For human-gated severity, the sibling [`customer-escalation-router`](../templates.md#customer-escalation-router--severity-routed-customer-escalation-operations) template upgrades the same pattern: AI classifies severity, condition-guarded edges fan to `low` (Slack ping), `medium` (Slack + GitHub), or `high` (HUMAN form + Slack + GitHub). Mention this as the "we have an opinion about when the human should be in the loop" beat.
+The default `incident-triage` flow runs unattended — that is the point at 2am. For human-gated severity, the sibling `customer-escalation-router` template (in the in-product template gallery) upgrades the same pattern: AI classifies severity, condition-guarded edges fan to `low` (Slack ping), `medium` (Slack + GitHub), or `high` (HUMAN form + Slack + GitHub). Mention this as the "we have an opinion about when the human should be in the loop" beat.
 
 ## Recovery story
 
