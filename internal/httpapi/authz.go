@@ -15,7 +15,10 @@ import (
 // requireRole resolves the caller's effective role and enforces the rank.
 // Returns nil when allowed; an opResult rejection otherwise.
 func (s *V1Server) requireRole(r *http.Request, rc v1Request, required auth.Role) *opResult {
-	mode := auth.ModeDevHeaders
+	// Fail closed if a caller ever reaches this without a resolved auth
+	// context: ModeSupabase never auto-grants a membership, unlike the
+	// dev-headers mode's no-membership admin fallback.
+	mode := auth.ModeSupabase
 	if rc.authContext != nil {
 		mode = rc.authContext.Mode
 	}
@@ -35,7 +38,10 @@ func (s *V1Server) requireRole(r *http.Request, rc v1Request, required auth.Role
 // requirePermission enforces the catalog layer after the rank layer, with
 // the contract's verbatim 403 ("Forbidden: requires permission <key>").
 func (s *V1Server) requirePermission(r *http.Request, rc v1Request, permission string) *opResult {
-	mode := auth.ModeDevHeaders
+	// Fail closed if a caller ever reaches this without a resolved auth
+	// context: ModeSupabase never auto-grants a membership, unlike the
+	// dev-headers mode's no-membership admin fallback.
+	mode := auth.ModeSupabase
 	if rc.authContext != nil {
 		mode = rc.authContext.Mode
 	}

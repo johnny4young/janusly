@@ -20,25 +20,6 @@ func testBuildIdentity() buildinfo.Identity {
 	}
 }
 
-func TestHealthzAnswersTruthfully(t *testing.T) {
-	srv := httptest.NewServer(NewAPIHandler())
-	defer srv.Close()
-
-	res, err := srv.Client().Get(srv.URL + "/healthz")
-	if err != nil {
-		t.Fatalf("healthz request: %v", err)
-	}
-	defer func() { _ = res.Body.Close() }()
-
-	body, _ := io.ReadAll(res.Body)
-	if res.StatusCode != 200 || strings.TrimSpace(string(body)) != `{"ok":true}` {
-		t.Fatalf("unexpected healthz response: %d %s", res.StatusCode, body)
-	}
-	if ct := res.Header.Get("Content-Type"); ct != "application/json" {
-		t.Fatalf("unexpected content type: %s", ct)
-	}
-}
-
 func TestMetricsExposeGoRuntime(t *testing.T) {
 	srv := httptest.NewServer(NewInternalHandler(testBuildIdentity()))
 	defer srv.Close()

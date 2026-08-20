@@ -14,18 +14,6 @@ import (
 	"github.com/johnny4young/janusly/internal/buildinfo"
 )
 
-// NewAPIHandler builds the public mux. Routes arrive as the engine grows;
-// the health endpoint exists from day one so process supervisors and the
-// compose healthcheck have something truthful to ask.
-func NewAPIHandler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	})
-	return mux
-}
-
 // NewInternalHandler builds the observability mux: Prometheus metrics (the
 // default registry already carries the Go runtime collectors) and the pprof
 // family for profiles.
