@@ -53,6 +53,9 @@ func fakeOllama(t *testing.T) *httptest.Server {
 // today (no rows), a dead Ollama degrades silently, and consented
 // commit/recall round-trips with runId attribution on the usage rows.
 func TestMemoryConsentAndRecall(t *testing.T) {
+	// The org-config embedding URL points at a loopback fixture, which the
+	// tenant-URL SSRF policy refuses without the documented dev escape hatch.
+	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "true")
 	pool := testPool(t)
 	ctx := context.Background()
 	org := fmt.Sprintf("org-mem-%d", time.Now().UnixNano())

@@ -251,6 +251,9 @@ func TestAgentEpisodicMemory(t *testing.T) {
 	if dsn == "" {
 		t.Skip("JANUSLY_DATABASE_URL not set")
 	}
+	// The org-config embedding URL points at a loopback fixture, which the
+	// tenant-URL SSRF policy refuses without the documented dev escape hatch.
+	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "true")
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
