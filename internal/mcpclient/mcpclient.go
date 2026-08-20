@@ -32,6 +32,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -401,6 +402,10 @@ func (c *Client) newStdioSandbox(
 	sandbox.kill = kill
 	cmd := exec.CommandContext(killCtx, command, args...)
 	cmd.Dir = tempDir
+	// Graceful stop: SIGTERM first so a well-behaved server can flush,
+	// SIGKILL after the grace window (CommandContext alone only KILLs).
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = 5 * time.Second
 	// Strict env whitelist: {PATH} + resolved refs. The child NEVER sees
 	// the worker's process env (DATABASE_URL etc.).
 	env := []string{"PATH=" + os.Getenv("PATH")}
