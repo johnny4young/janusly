@@ -127,7 +127,11 @@ func TestOnlyThisPackageImportsTheProviderSDK(t *testing.T) {
 		}
 		if entry.IsDir() {
 			name := entry.Name()
-			if name == "vendor" || name == ".git" || name == "node_modules" {
+			// `output/` and `artifacts/` are gitignored scratch trees that
+			// can hold entire nested checkouts; scanning them would judge
+			// another worktree's source as this module's.
+			if name == "vendor" || name == ".git" || name == "node_modules" ||
+				name == "output" || name == "artifacts" {
 				return filepath.SkipDir
 			}
 			return nil
