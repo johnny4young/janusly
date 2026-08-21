@@ -80,8 +80,15 @@ func (e *Engine) FailNode(ctx context.Context, claim ClaimedNode, execErr error)
 // node.failed. Executor errors must use FailNode; callers cannot replace the
 // canonical error or attempt fields.
 func (e *Engine) failNodeWithEventFields(ctx context.Context, claim ClaimedNode, execErr error, fields map[string]any) error {
-	if err := e.failNodeTx(ctx, claim, execErr, fields); err != nil {
+	committed, err := e.failNodeTx(ctx, claim, execErr, fields)
+	if err != nil {
 		return err
+	}
+	if !committed {
+		// The CAS went to someone else (a racing reaper, a cancellation).
+		// That winner owns the post-commit side effects; running them here
+		// too would page twice for one failure.
+		return nil
 	}
 	// Containment rides OUTSIDE the durable failure: a breaker fault must
 	// never break the DLQ path that already committed.
@@ -89,7 +96,7 @@ func (e *Engine) failNodeWithEventFields(ctx context.Context, claim ClaimedNode,
 	return nil
 }
 
-func (e *Engine) failNodeTx(ctx context.Context, claim ClaimedNode, execErr error, fields map[string]any) error {
+func (e *Engine) failNodeTx(ctx context.Context, claim ClaimedNode, execErr error, fields map[string]any) (bool, error) {
 	serr := serializeError(execErr)
 	eventPayload := map[string]any{"error": serr, "attempt": claim.Attempt}
 	for key, value := range fields {
@@ -99,11 +106,11 @@ func (e *Engine) failNodeTx(ctx context.Context, claim ClaimedNode, execErr erro
 	}
 	eventJSON, err := json.Marshal(eventPayload)
 	if err != nil {
-		return fmt.Errorf("marshal event payload: %w", err)
+		return false, fmt.Errorf("marshal event payload: %w", err)
 	}
 
 	failedAt := eventNow()
-	return e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries, events *runEventBuffer) error {
+	return e.inCompletionTxCommitted(ctx, claim.RunID, func(q *store.Queries, events *runEventBuffer) error {
 		run, err := q.GetRunExecution(ctx, claim.RunID)
 		if err != nil {
 			return fmt.Errorf("read run: %w", err)

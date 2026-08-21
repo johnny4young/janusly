@@ -213,13 +213,27 @@ WHERE org_id = $1 AND id = $2;
 -- name: DeleteAlertPolicy :execrows
 DELETE FROM alert_policies WHERE org_id = $1 AND id = $2;
 
--- name: CountRecentAlertDispatches :one
-SELECT count(*) FROM alert_dispatches
-WHERE org_id = $1 AND policy_id = $2 AND dedupe_key = $3 AND dispatched_at >= $4;
+-- Claim-before-deliver. The cooldown check and the record insert must be
+-- ONE atomic decision: two replicas evaluating the same trigger otherwise
+-- both observe an empty window and both page. The advisory lock
+-- serializes the (org, policy, dedupe key) triple for the claim
+-- transaction; the row lands with the fail-safe outcome and is settled
+-- after delivery, so a crash mid-delivery reads as undelivered.
+-- name: AcquireAlertDedupeLock :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0));
 
--- name: InsertAlertDispatch :exec
+-- name: ClaimAlertDispatch :execrows
 INSERT INTO alert_dispatches (id, org_id, policy_id, dedupe_key, outcome, channel_results, trigger_payload)
-VALUES ($1, $2, $3, $4, $5, $6, $7);
+SELECT sqlc.arg(id), sqlc.arg(org_id), sqlc.arg(policy_id), sqlc.arg(dedupe_key),
+       'failed', '[]'::jsonb, sqlc.arg(trigger_payload)
+WHERE NOT EXISTS (
+  SELECT 1 FROM alert_dispatches recent
+  WHERE recent.org_id = sqlc.arg(org_id) AND recent.policy_id = sqlc.arg(policy_id)
+    AND recent.dedupe_key = sqlc.arg(dedupe_key)
+    AND recent.dispatched_at >= sqlc.arg(since));
+
+-- name: SettleAlertDispatch :exec
+UPDATE alert_dispatches SET outcome = $2, channel_results = $3 WHERE id = $1;
 
 -- name: ListRecentAlertDispatches :many
 SELECT * FROM alert_dispatches

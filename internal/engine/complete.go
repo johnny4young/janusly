@@ -363,34 +363,44 @@ var errSkipCommit = errors.New("skip commit: node transition lost the compare-an
 // completion lock. The lock releases on commit, which is what guarantees a
 // concurrent sibling's readiness scan reads this transaction's writes.
 func (e *Engine) inCompletionTx(ctx context.Context, runID string, handler func(q *store.Queries, events *runEventBuffer) error) error {
+	_, err := e.inCompletionTxCommitted(ctx, runID, handler)
+	return err
+}
+
+// inCompletionTxCommitted is inCompletionTx plus whether the transaction
+// actually committed. Losing the CAS is not an error, but callers with
+// post-commit side effects (alerts, breaker evaluation) must not run them
+// on the losing path — otherwise two racing reapers page twice for one
+// failure.
+func (e *Engine) inCompletionTxCommitted(ctx context.Context, runID string, handler func(q *store.Queries, events *runEventBuffer) error) (bool, error) {
 	tx, err := e.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin: %w", err)
+		return false, fmt.Errorf("begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := store.New(e.wrapTx(tx))
 	if err := q.AcquireRunCompletionLock(ctx, runID); err != nil {
-		return fmt.Errorf("acquire completion lock: %w", err)
+		return false, fmt.Errorf("acquire completion lock: %w", err)
 	}
 	events := &runEventBuffer{}
 	if err := handler(q, events); err != nil {
 		if errors.Is(err, errSkipCommit) {
-			return nil
+			return false, nil
 		}
-		return err
+		return false, err
 	}
 	// Every buffered timeline event lands in ONE CopyFrom round trip, and
 	// the stream signal rides the same commit.
 	if err := events.flush(ctx, q); err != nil {
-		return err
+		return false, err
 	}
 	if err := q.NotifyRunEvents(ctx, runID); err != nil {
-		return fmt.Errorf("notify run events: %w", err)
+		return false, fmt.Errorf("notify run events: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit: %w", err)
+		return false, fmt.Errorf("commit: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 // scheduleDownstream runs the readiness scan: queue every ready successor

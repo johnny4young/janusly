@@ -13,6 +13,21 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const acquireAlertDedupeLock = `-- name: AcquireAlertDedupeLock :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
+`
+
+// Claim-before-deliver. The cooldown check and the record insert must be
+// ONE atomic decision: two replicas evaluating the same trigger otherwise
+// both observe an empty window and both page. The advisory lock
+// serializes the (org, policy, dedupe key) triple for the claim
+// transaction; the row lands with the fail-safe outcome and is settled
+// after delivery, so a crash mid-delivery reads as undelivered.
+func (q *Queries) AcquireAlertDedupeLock(ctx context.Context, dollar_1 string) error {
+	_, err := q.db.Exec(ctx, acquireAlertDedupeLock, dollar_1)
+	return err
+}
+
 const bumpRateWindow = `-- name: BumpRateWindow :one
 INSERT INTO rate_limit_windows (name, key, window_start, count, expires_at)
 VALUES ($1, $2, $3, 1, $4)
@@ -40,6 +55,41 @@ func (q *Queries) BumpRateWindow(ctx context.Context, arg BumpRateWindowParams) 
 	var count int32
 	err := row.Scan(&count)
 	return count, err
+}
+
+const claimAlertDispatch = `-- name: ClaimAlertDispatch :execrows
+INSERT INTO alert_dispatches (id, org_id, policy_id, dedupe_key, outcome, channel_results, trigger_payload)
+SELECT $1, $2, $3, $4,
+       'failed', '[]'::jsonb, $5
+WHERE NOT EXISTS (
+  SELECT 1 FROM alert_dispatches recent
+  WHERE recent.org_id = $2 AND recent.policy_id = $3
+    AND recent.dedupe_key = $4
+    AND recent.dispatched_at >= $6)
+`
+
+type ClaimAlertDispatchParams struct {
+	ID             string
+	OrgID          string
+	PolicyID       string
+	DedupeKey      string
+	TriggerPayload json.RawMessage
+	Since          time.Time
+}
+
+func (q *Queries) ClaimAlertDispatch(ctx context.Context, arg ClaimAlertDispatchParams) (int64, error) {
+	result, err := q.db.Exec(ctx, claimAlertDispatch,
+		arg.ID,
+		arg.OrgID,
+		arg.PolicyID,
+		arg.DedupeKey,
+		arg.TriggerPayload,
+		arg.Since,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const cleanupExpiredRateWindows = `-- name: CleanupExpiredRateWindows :execrows
@@ -86,30 +136,6 @@ func (q *Queries) CompleteOnboardingCas(ctx context.Context, arg CompleteOnboard
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const countRecentAlertDispatches = `-- name: CountRecentAlertDispatches :one
-SELECT count(*) FROM alert_dispatches
-WHERE org_id = $1 AND policy_id = $2 AND dedupe_key = $3 AND dispatched_at >= $4
-`
-
-type CountRecentAlertDispatchesParams struct {
-	OrgID        string
-	PolicyID     string
-	DedupeKey    string
-	DispatchedAt time.Time
-}
-
-func (q *Queries) CountRecentAlertDispatches(ctx context.Context, arg CountRecentAlertDispatchesParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countRecentAlertDispatches,
-		arg.OrgID,
-		arg.PolicyID,
-		arg.DedupeKey,
-		arg.DispatchedAt,
-	)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
 }
 
 const deleteAlertPolicy = `-- name: DeleteAlertPolicy :execrows
@@ -342,34 +368,6 @@ func (q *Queries) GetSnippet(ctx context.Context, arg GetSnippetParams) (Snippet
 		&i.UpdatedAt,
 	)
 	return i, err
-}
-
-const insertAlertDispatch = `-- name: InsertAlertDispatch :exec
-INSERT INTO alert_dispatches (id, org_id, policy_id, dedupe_key, outcome, channel_results, trigger_payload)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-`
-
-type InsertAlertDispatchParams struct {
-	ID             string
-	OrgID          string
-	PolicyID       string
-	DedupeKey      string
-	Outcome        string
-	ChannelResults json.RawMessage
-	TriggerPayload json.RawMessage
-}
-
-func (q *Queries) InsertAlertDispatch(ctx context.Context, arg InsertAlertDispatchParams) error {
-	_, err := q.db.Exec(ctx, insertAlertDispatch,
-		arg.ID,
-		arg.OrgID,
-		arg.PolicyID,
-		arg.DedupeKey,
-		arg.Outcome,
-		arg.ChannelResults,
-		arg.TriggerPayload,
-	)
-	return err
 }
 
 const insertAlertPolicy = `-- name: InsertAlertPolicy :exec
@@ -1246,6 +1244,21 @@ type SetOnboardingStepParams struct {
 
 func (q *Queries) SetOnboardingStep(ctx context.Context, arg SetOnboardingStepParams) error {
 	_, err := q.db.Exec(ctx, setOnboardingStep, arg.OrgID, arg.UserID, arg.Step)
+	return err
+}
+
+const settleAlertDispatch = `-- name: SettleAlertDispatch :exec
+UPDATE alert_dispatches SET outcome = $2, channel_results = $3 WHERE id = $1
+`
+
+type SettleAlertDispatchParams struct {
+	ID             string
+	Outcome        string
+	ChannelResults json.RawMessage
+}
+
+func (q *Queries) SettleAlertDispatch(ctx context.Context, arg SettleAlertDispatchParams) error {
+	_, err := q.db.Exec(ctx, settleAlertDispatch, arg.ID, arg.Outcome, arg.ChannelResults)
 	return err
 }
 

@@ -118,12 +118,12 @@ func (e *Engine) DispatchAlert(ctx context.Context, orgID, trigger string, paylo
 		if !alertPolicyMatches(trigger, params, payload) {
 			continue
 		}
-		// Cooldown: a same-key dispatch inside the window suppresses this one.
+		// Cooldown: a same-key dispatch inside the window suppresses this
+		// one. The slot is CLAIMED before delivery so concurrent replicas
+		// cannot both pass the window and both page.
 		since := time.Now().UTC().Add(-time.Duration(policy.CooldownSeconds) * time.Second)
-		recent, err := q.CountRecentAlertDispatches(ctx, store.CountRecentAlertDispatchesParams{
-			OrgID: orgID, PolicyID: policy.ID, DedupeKey: dedupeKey, DispatchedAt: since,
-		})
-		if err != nil || recent > 0 {
+		dispatchID := e.newID()
+		if !e.claimAlertDispatch(ctx, dispatchID, orgID, policy.ID, dedupeKey, since, payloadJSON) {
 			continue
 		}
 		var channels []map[string]any
@@ -161,11 +161,46 @@ func (e *Engine) DispatchAlert(ctx context.Context, orgID, trigger string, paylo
 			outcome = "delivered"
 		}
 		resultsJSON, _ := json.Marshal(results)
-		if err := q.InsertAlertDispatch(ctx, store.InsertAlertDispatchParams{
-			ID: e.newID(), OrgID: orgID, PolicyID: policy.ID, DedupeKey: dedupeKey,
-			Outcome: outcome, ChannelResults: resultsJSON, TriggerPayload: payloadJSON,
+		if err := q.SettleAlertDispatch(ctx, store.SettleAlertDispatchParams{
+			ID: dispatchID, Outcome: outcome, ChannelResults: resultsJSON,
 		}); err != nil {
 			slog.Warn("[alerts] dispatch record failed", "policyId", policy.ID, "error", err)
 		}
 	}
+}
+
+// claimAlertDispatch takes the (org, policy, dedupe key) advisory lock and
+// inserts the dispatch row only when the cooldown window is genuinely
+// empty. Reports whether THIS caller owns the delivery.
+func (e *Engine) claimAlertDispatch(
+	ctx context.Context, dispatchID, orgID, policyID, dedupeKey string,
+	since time.Time, payloadJSON []byte,
+) bool {
+	tx, err := e.pool.Begin(ctx)
+	if err != nil {
+		slog.Warn("[alerts] dispatch claim failed", "policyId", policyID, "error", err)
+		return false
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := store.New(e.wrapTx(tx))
+	if err := q.AcquireAlertDedupeLock(ctx, orgID+"|"+policyID+"|"+dedupeKey); err != nil {
+		slog.Warn("[alerts] dispatch lock failed", "policyId", policyID, "error", err)
+		return false
+	}
+	claimed, err := q.ClaimAlertDispatch(ctx, store.ClaimAlertDispatchParams{
+		ID: dispatchID, OrgID: orgID, PolicyID: policyID, DedupeKey: dedupeKey,
+		TriggerPayload: payloadJSON, Since: since,
+	})
+	if err != nil {
+		slog.Warn("[alerts] dispatch claim failed", "policyId", policyID, "error", err)
+		return false
+	}
+	if claimed == 0 {
+		return false
+	}
+	if err := tx.Commit(ctx); err != nil {
+		slog.Warn("[alerts] dispatch claim commit failed", "policyId", policyID, "error", err)
+		return false
+	}
+	return true
 }
