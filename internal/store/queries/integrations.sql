@@ -191,9 +191,23 @@ ORDER BY lower(name);
 SELECT * FROM upstream_health_sources
 WHERE org_id = $1 AND id = $2;
 
--- name: ListEnabledUpstreamHealthSources :many
-SELECT * FROM upstream_health_sources
-WHERE enabled = true;
+-- Claim-to-poll: the due check reads last_checked_at and the poller only
+-- writes it AFTER fetching, so every replica polled every due source.
+-- Stamping the clock inside the claim makes the sweep exclusive without a
+-- lock — the loser simply sees a source that is no longer due.
+-- name: ClaimDueUpstreamHealthSources :many
+UPDATE upstream_health_sources SET last_checked_at = now()
+FROM (
+  SELECT due.id FROM upstream_health_sources AS due
+  WHERE due.enabled = true
+    AND (due.last_checked_at IS NULL
+         OR due.last_checked_at <= now() - make_interval(secs => due.check_interval_seconds))
+  ORDER BY due.last_checked_at NULLS FIRST
+  LIMIT sqlc.arg(row_limit)
+  FOR UPDATE SKIP LOCKED
+) AS claimed
+WHERE upstream_health_sources.id = claimed.id
+RETURNING upstream_health_sources.*;
 
 -- name: UpdateUpstreamHealthSource :one
 UPDATE upstream_health_sources

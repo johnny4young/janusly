@@ -170,29 +170,23 @@ func listTaggedWorkflowIDs(ctx context.Context, q *store.Queries, orgID, sourceN
 	return matched
 }
 
-// IsSourceDue: interval elapsed since the last poll; never-polled → due.
-func IsSourceDue(source store.UpstreamHealthSource, now time.Time) bool {
-	if source.LastCheckedAt == nil {
-		return true
-	}
-	return now.Sub(*source.LastCheckedAt) >= time.Duration(source.CheckIntervalSeconds)*time.Second
-}
+// upstreamSweepLimit bounds one sweep; the next tick picks up the rest.
+const upstreamSweepLimit = 200
 
 // Sweep polls every enabled + due source; one bad source never stalls the
 // rest.
 func Sweep(ctx context.Context, pool *pgxpool.Pool, fetch Fetcher, logger *slog.Logger) {
-	sources, err := store.New(pool).ListEnabledUpstreamHealthSources(ctx)
+	// Claiming stamps the clock, so a concurrent replica's sweep no longer
+	// sees these sources as due: one probe per interval, not one per
+	// replica, against third-party status pages that rate-limit.
+	sources, err := store.New(pool).ClaimDueUpstreamHealthSources(ctx, upstreamSweepLimit)
 	if err != nil {
 		if ctx.Err() == nil {
-			logger.Error("upstream-health: failed to list sources", "error", err)
+			logger.Error("upstream-health: failed to claim sources", "error", err)
 		}
 		return
 	}
-	now := time.Now()
 	for _, source := range sources {
-		if !IsSourceDue(source, now) {
-			continue
-		}
 		PollOneSource(ctx, pool, source, fetch)
 	}
 }

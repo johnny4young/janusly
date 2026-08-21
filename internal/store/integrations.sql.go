@@ -13,6 +13,61 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimDueUpstreamHealthSources = `-- name: ClaimDueUpstreamHealthSources :many
+UPDATE upstream_health_sources SET last_checked_at = now()
+FROM (
+  SELECT due.id FROM upstream_health_sources AS due
+  WHERE due.enabled = true
+    AND (due.last_checked_at IS NULL
+         OR due.last_checked_at <= now() - make_interval(secs => due.check_interval_seconds))
+  ORDER BY due.last_checked_at NULLS FIRST
+  LIMIT $1
+  FOR UPDATE SKIP LOCKED
+) AS claimed
+WHERE upstream_health_sources.id = claimed.id
+RETURNING upstream_health_sources.id, upstream_health_sources.org_id, upstream_health_sources.name, upstream_health_sources.kind, upstream_health_sources.url, upstream_health_sources.expected_components, upstream_health_sources.check_interval_seconds, upstream_health_sources.enabled, upstream_health_sources.last_status, upstream_health_sources.last_degraded, upstream_health_sources.last_checked_at, upstream_health_sources.last_error_reason, upstream_health_sources.created_by, upstream_health_sources.created_at, upstream_health_sources.updated_at
+`
+
+// Claim-to-poll: the due check reads last_checked_at and the poller only
+// writes it AFTER fetching, so every replica polled every due source.
+// Stamping the clock inside the claim makes the sweep exclusive without a
+// lock — the loser simply sees a source that is no longer due.
+func (q *Queries) ClaimDueUpstreamHealthSources(ctx context.Context, rowLimit int32) ([]UpstreamHealthSource, error) {
+	rows, err := q.db.Query(ctx, claimDueUpstreamHealthSources, rowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []UpstreamHealthSource
+	for rows.Next() {
+		var i UpstreamHealthSource
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Name,
+			&i.Kind,
+			&i.Url,
+			&i.ExpectedComponents,
+			&i.CheckIntervalSeconds,
+			&i.Enabled,
+			&i.LastStatus,
+			&i.LastDegraded,
+			&i.LastCheckedAt,
+			&i.LastErrorReason,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countBufferedTriggerEvents = `-- name: CountBufferedTriggerEvents :one
 SELECT count(*) FROM trigger_events te
 WHERE te.org_id = $1 AND te.workflow_id = $2 AND te.status = 'buffered'
@@ -793,47 +848,6 @@ func (q *Queries) ListCredentials(ctx context.Context, orgID string) ([]Credenti
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ExpiresAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listEnabledUpstreamHealthSources = `-- name: ListEnabledUpstreamHealthSources :many
-SELECT id, org_id, name, kind, url, expected_components, check_interval_seconds, enabled, last_status, last_degraded, last_checked_at, last_error_reason, created_by, created_at, updated_at FROM upstream_health_sources
-WHERE enabled = true
-`
-
-func (q *Queries) ListEnabledUpstreamHealthSources(ctx context.Context) ([]UpstreamHealthSource, error) {
-	rows, err := q.db.Query(ctx, listEnabledUpstreamHealthSources)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []UpstreamHealthSource
-	for rows.Next() {
-		var i UpstreamHealthSource
-		if err := rows.Scan(
-			&i.ID,
-			&i.OrgID,
-			&i.Name,
-			&i.Kind,
-			&i.Url,
-			&i.ExpectedComponents,
-			&i.CheckIntervalSeconds,
-			&i.Enabled,
-			&i.LastStatus,
-			&i.LastDegraded,
-			&i.LastCheckedAt,
-			&i.LastErrorReason,
-			&i.CreatedBy,
-			&i.CreatedAt,
-			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
