@@ -19,6 +19,7 @@ import (
 
 	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/grammar"
+	"github.com/johnny4young/janusly/internal/orgconfig"
 )
 
 // Contract tests shaped against the captured reference goldens
@@ -602,7 +603,7 @@ func TestLegacySupportReads(t *testing.T) {
 	// provenance, exactly what the contract answers a fresh org. The
 	// earlier empty-list stub was a divergence and is covered here.
 	cfg := h.call("GET", "/org/config", nil, "")
-	if list, ok := cfg.body["config"].([]any); !ok || len(list) != 69 {
+	if list, ok := cfg.body["config"].([]any); !ok || len(list) != len(orgconfig.Definitions) {
 		t.Fatalf("org config must list the whole catalog: %v", cfg.body)
 	}
 }

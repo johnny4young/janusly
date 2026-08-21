@@ -11,13 +11,18 @@ import (
 	"github.com/johnny4young/janusly/internal/orgconfig"
 )
 
-// The closed catalog pinned against the contract extraction (69 keys)
-// and the config surface end to end: layered GET with provenance, the
-// validation ladder on POST (unknown key, type, range, enum, secret-shaped
-// value), tenant-layer precedence after a write, and the admin gate.
+// The closed catalog and the config surface end to end: layered GET with
+// provenance, the validation ladder on POST (unknown key, type, range,
+// enum, secret-shaped value), tenant-layer precedence after a write, and
+// the admin gate.
+//
+// The count is a ratchet, not a ceiling: it starts at the contract's 69
+// extracted keys, and every addition past that is a deliberate runtime
+// capability recorded here. 70 = + retention.archiveRunEvents (run-event
+// archival before the retention sweep deletes).
 func TestOrgConfigCatalogSurface(t *testing.T) {
-	if len(orgconfig.Definitions) != 69 {
-		t.Fatalf("catalog must pin at the contract's 69 definitions, got %d", len(orgconfig.Definitions))
+	if len(orgconfig.Definitions) != 70 {
+		t.Fatalf("catalog must pin at 70 definitions, got %d", len(orgconfig.Definitions))
 	}
 	for _, key := range []string{"ai.provider", "http.timeoutMs", "runs.requireSavedWorkflow",
 		"mcp.writeConsent", "retention.deletedWorkflowsDays", "onboarding.enabled"} {
@@ -38,7 +43,7 @@ func TestOrgConfigCatalogSurface(t *testing.T) {
 	// Fresh org: the full catalog with default/env provenance, no tenant rows.
 	fresh := h.call("GET", "/org/config", nil, "")
 	entries := fresh.body["config"].([]any)
-	if len(entries) != 69 {
+	if len(entries) != len(orgconfig.Definitions) {
 		t.Fatalf("GET must list the full catalog: %d", len(entries))
 	}
 	for _, raw := range entries {
