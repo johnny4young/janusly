@@ -115,7 +115,7 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 	// checkpoint), so it dispatches here instead of the executors map.
 	if node.Type == "subworkflow" {
 		replayMode := ""
-		if run, err := q.GetRunExecution(ctx, claim.RunID); err == nil && run.ReplayMode.Valid {
+		if run, err := q.GetRunReplayMode(ctx, claim.RunID); err == nil && run.ReplayMode.Valid {
 			replayMode = run.ReplayMode.String
 		}
 		return d.engine.executeSubworkflowNode(ctx, claim, renderedConfig,
@@ -163,7 +163,7 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 		httpBounds = &bounds
 	}
 	dryRun := false
-	if run, err := q.GetRunExecution(ctx, claim.RunID); err == nil && run.ReplayMode.Valid {
+	if run, err := q.GetRunReplayMode(ctx, claim.RunID); err == nil && run.ReplayMode.Valid {
 		dryRun = run.ReplayMode.String == "validation"
 	}
 	var aiDeps *executors.AIDeps
@@ -333,7 +333,7 @@ func (d *Dispatcher) buildAIDeps(ctx context.Context, claim ClaimedNode) *execut
 	pool := d.engine.pool
 	client, _ := aiconfig.Resolve(ctx, pool, claim.OrgID)
 	dryRun := false
-	if run, err := store.New(pool).GetRunExecution(ctx, claim.RunID); err == nil && run.ReplayMode.Valid {
+	if run, err := store.New(pool).GetRunReplayMode(ctx, claim.RunID); err == nil && run.ReplayMode.Valid {
 		dryRun = run.ReplayMode.String == "validation"
 	}
 	return &executors.AIDeps{
@@ -360,7 +360,7 @@ func (d *Dispatcher) buildAIDeps(ctx context.Context, claim ClaimedNode) *execut
 func (d *Dispatcher) buildMemoryDeps(ctx context.Context, claim ClaimedNode, workflowID string) *executors.MemoryDeps {
 	pool := d.engine.pool
 	dryRun := false
-	if run, err := store.New(pool).GetRunExecution(ctx, claim.RunID); err == nil && run.ReplayMode.Valid {
+	if run, err := store.New(pool).GetRunReplayMode(ctx, claim.RunID); err == nil && run.ReplayMode.Valid {
 		dryRun = run.ReplayMode.String == "validation"
 	}
 	return &executors.MemoryDeps{

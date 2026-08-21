@@ -31,6 +31,24 @@ type ClaimedNode struct {
 	// OrgID is populated from the run row at execution time so downstream
 	// per-tenant resolution (org config bounds) never re-reads the run.
 	OrgID string
+	// snapshot carries the run's parsed workflow and replay mode from the
+	// claim that is already reading them, so the dispatch and completion
+	// paths stop refetching input_json (the whole workflow snapshot, tens
+	// of KB) and reparsing it several times per node. Nil means "not
+	// preloaded" — callers fall back to reading, so hand-built claims
+	// (drills, tests) keep working unchanged.
+	snapshot *claimSnapshot
+}
+
+type claimSnapshot struct {
+	workflow   *domain.Workflow
+	replayMode string
+}
+
+// withSnapshot returns a copy of the claim carrying the parsed run.
+func (c ClaimedNode) withSnapshot(workflow *domain.Workflow, replayMode string) ClaimedNode {
+	c.snapshot = &claimSnapshot{workflow: workflow, replayMode: replayMode}
+	return c
 }
 
 type completionOptions struct {
@@ -228,15 +246,26 @@ func (e *Engine) recordRoutingOutcome(
 // the completing node. Sandbox replays (replayMode=validation) are
 // excluded: a dry-run must not create durable business-outcome cases.
 func (e *Engine) evaluateSemanticOutcome(ctx context.Context, claim ClaimedNode, output any) ([]recovery.SemanticOutcomeViolation, error) {
-	run, err := store.New(e.pool).GetRunExecution(ctx, claim.RunID)
-	if err != nil {
-		return nil, fmt.Errorf("read run for semantic evaluation: %w", err)
+	wf := claim.snapshot.workflowOr(nil)
+	if snapshot := claim.snapshot; snapshot != nil {
+		if snapshot.replayMode != "" {
+			return nil, nil
+		}
+	} else {
+		run, err := store.New(e.pool).GetRunExecution(ctx, claim.RunID)
+		if err != nil {
+			return nil, fmt.Errorf("read run for semantic evaluation: %w", err)
+		}
+		if run.ReplayMode.Valid && run.ReplayMode.String != "" {
+			return nil, nil
+		}
+		parsed, _, err := workflowFromRunInput(run.InputJson)
+		if err != nil {
+			return nil, nil
+		}
+		wf = parsed
 	}
-	if run.ReplayMode.Valid && run.ReplayMode.String != "" {
-		return nil, nil
-	}
-	wf, _, err := workflowFromRunInput(run.InputJson)
-	if err != nil || wf.Recovery == nil || wf.Recovery.Contract == nil || wf.Recovery.Contract.Version != "2" {
+	if wf == nil || wf.Recovery == nil || wf.Recovery.Contract == nil || wf.Recovery.Contract.Version != "2" {
 		return nil, nil
 	}
 	relevant := false
@@ -444,3 +473,11 @@ func eventNow() time.Time {
 // and only PRODUCTION recoveries (replay_mode null) enter the O(1)
 // north-star rollup. Replay initiation is never a recovered win — only
 // this terminal path credits.
+
+// workflowOr resolves the snapshot's workflow, tolerating a nil snapshot.
+func (c *claimSnapshot) workflowOr(fallback *domain.Workflow) *domain.Workflow {
+	if c == nil {
+		return fallback
+	}
+	return c.workflow
+}

@@ -867,6 +867,26 @@ func (q *Queries) GetRunOwner(ctx context.Context, id string) (GetRunOwnerRow, e
 	return i, err
 }
 
+const getRunReplayMode = `-- name: GetRunReplayMode :one
+SELECT status, org_id, replay_mode FROM runs WHERE id = $1
+`
+
+type GetRunReplayModeRow struct {
+	Status     string
+	OrgID      string
+	ReplayMode pgtype.Text
+}
+
+// input_json carries the whole workflow snapshot, so the callers that only
+// need to know whether this is a sandbox replay must not pay to transfer
+// it: one node cycle asks that question up to four times.
+func (q *Queries) GetRunReplayMode(ctx context.Context, id string) (GetRunReplayModeRow, error) {
+	row := q.db.QueryRow(ctx, getRunReplayMode, id)
+	var i GetRunReplayModeRow
+	err := row.Scan(&i.Status, &i.OrgID, &i.ReplayMode)
+	return i, err
+}
+
 const getRunTraceID = `-- name: GetRunTraceID :one
 SELECT trace_id FROM runs WHERE id = $1
 `

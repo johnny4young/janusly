@@ -133,6 +133,12 @@ WHERE run_id = sqlc.arg(run_id) AND node_id = sqlc.arg(node_id)
 -- name: GetRunExecution :one
 SELECT status, org_id, input_json, replay_mode FROM runs WHERE id = $1;
 
+-- input_json carries the whole workflow snapshot, so the callers that only
+-- need to know whether this is a sandbox replay must not pay to transfer
+-- it: one node cycle asks that question up to four times.
+-- name: GetRunReplayMode :one
+SELECT status, org_id, replay_mode FROM runs WHERE id = $1;
+
 -- The Node outbox deadline is the same instant as Go's retry wakeup. Node's
 -- reconciler therefore cannot publish the rollback delivery before backoff.
 -- name: RequeueRunNodeForRetry :execrows
