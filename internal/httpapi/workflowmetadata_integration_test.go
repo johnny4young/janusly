@@ -158,3 +158,81 @@ func TestWorkflowMetadataAndOrganization(t *testing.T) {
 		t.Fatalf("tombstone metadata must 404: %d", res.status)
 	}
 }
+
+// The bulk tag and folder writes are one set-based statement per click,
+// so their semantics must hold without the per-workflow read they
+// replaced: adding is idempotent, removing strips only the named tag, and
+// the folder lands on every owned workflow.
+func TestBulkTagAndFolderAssignmentSemantics(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	ctx := t.Context()
+	suffix := fmt.Sprint(time.Now().UnixNano())
+
+	wfA, wfB := "wf-bulk-a-"+suffix, "wf-bulk-b-"+suffix
+	for _, id := range []string{wfA, wfB} {
+		if res := h.call("POST", "/v1/workflows/save", map[string]any{
+			"id": id, "name": id, "dslVersion": "1.0",
+			"nodes": []any{map[string]any{"id": "n", "type": "noop", "config": map[string]any{}}},
+			"edges": []any{},
+		}, ""); res.status != 200 {
+			t.Fatalf("save %s: %+v", id, res.body)
+		}
+	}
+	tagsOf := func(id string) string {
+		var tags string
+		if err := pool.QueryRow(ctx,
+			`SELECT coalesce(tags::text, '[]') FROM workflow_metadata WHERE org_id = $1 AND workflow_id = $2`,
+			h.org, id).Scan(&tags); err != nil {
+			return "[]"
+		}
+		return tags
+	}
+	assign := func(tag string, remove bool, want float64) {
+		t.Helper()
+		res := h.call("POST", "/workflows/tags/assign", map[string]any{
+			"workflowIds": []any{wfA, wfB}, "tag": tag, "remove": remove,
+		}, "")
+		if res.status != 200 || res.body["affected"] != want {
+			t.Fatalf("assign %s remove=%v: %d %+v", tag, remove, res.status, res.body)
+		}
+	}
+
+	assign("alpha", false, 2)
+	assign("beta", false, 2)
+	// Re-adding must not duplicate: the statement is an upsert over a set.
+	assign("alpha", false, 2)
+	for _, id := range []string{wfA, wfB} {
+		if got := tagsOf(id); strings.Count(got, `"alpha"`) != 1 || !strings.Contains(got, `"beta"`) {
+			t.Fatalf("%s tags after idempotent add: %s", id, got)
+		}
+	}
+
+	assign("alpha", true, 2)
+	for _, id := range []string{wfA, wfB} {
+		got := tagsOf(id)
+		if strings.Contains(got, `"alpha"`) || !strings.Contains(got, `"beta"`) {
+			t.Fatalf("%s must keep only beta: %s", id, got)
+		}
+	}
+	// Removing an absent tag is a no-op, never an error or a wipe.
+	assign("never-applied", true, 2)
+	if got := tagsOf(wfA); !strings.Contains(got, `"beta"`) {
+		t.Fatalf("removing an absent tag must not touch the array: %s", got)
+	}
+
+	res := h.call("POST", "/workflows/folders/assign", map[string]any{
+		"workflowIds": []any{wfA, wfB, "ghost-" + suffix}, "folder": "Bulk",
+	}, "")
+	if res.status != 200 || res.body["affected"] != float64(2) {
+		t.Fatalf("folder assign must skip unowned ids: %d %+v", res.status, res.body)
+	}
+	for _, id := range []string{wfA, wfB} {
+		var folder string
+		if err := pool.QueryRow(ctx,
+			`SELECT coalesce(folder, '') FROM workflow_metadata WHERE org_id = $1 AND workflow_id = $2`,
+			h.org, id).Scan(&folder); err != nil || folder != "Bulk" {
+			t.Fatalf("%s folder: %q %v", id, folder, err)
+		}
+	}
+}

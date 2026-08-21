@@ -179,25 +179,33 @@ func (s *V1Server) mountF1SweepRoutes(mux *http.ServeMux) {
 			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
-		connections := make([]map[string]any, 0, len(rows))
+		connectionIDs := make([]string, 0, len(rows))
 		for _, row := range rows {
-			tools, err := q.ListMcpToolDescriptorsByConnection(r.Context(), row.ID)
+			connectionIDs = append(connectionIDs, row.ID)
+		}
+		// One grouped count for the whole page: the panel renders totals,
+		// so fetching every descriptor per connection was N+1 in queries
+		// and in transferred rows.
+		counts := map[string]store.CountMcpToolDescriptorsByConnectionRow{}
+		if len(connectionIDs) > 0 {
+			countRows, err := q.CountMcpToolDescriptorsByConnection(r.Context(), connectionIDs)
 			if err != nil {
 				writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 				return
 			}
-			enabled := 0
-			for _, tool := range tools {
-				if tool.Enabled {
-					enabled++
-				}
+			for _, countRow := range countRows {
+				counts[countRow.ConnectionID] = countRow
 			}
+		}
+		connections := make([]map[string]any, 0, len(rows))
+		for _, row := range rows {
+			count := counts[row.ID]
 			connections = append(connections, map[string]any{
 				"id": row.ID, "alias": row.Alias, "transport": row.Transport,
 				"enabled": row.Enabled, "status": row.Status,
 				"statusReason": textOrNull(row.StatusReason), "exposeToAi": row.ExposeToAi,
 				"lastDiscoveryAt": row.LastDiscoveryAt, "createdAt": row.CreatedAt,
-				"toolCount": len(tools), "enabledToolCount": enabled,
+				"toolCount": int(count.Total), "enabledToolCount": int(count.Enabled),
 			})
 		}
 		writeUnversioned(w, opOK(map[string]any{"connections": connections}))

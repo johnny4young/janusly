@@ -307,12 +307,16 @@ func (s *V1Server) mountWorkflowMetadataRoutes(mux *http.ServeMux) {
 			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
-		for _, workflowID := range owned {
-			_, _ = q.SetWorkflowFolderOnly(r.Context(), store.SetWorkflowFolderOnlyParams{
-				ID: s.newID(), OrgID: rc.orgID, WorkflowID: workflowID,
-				Folder:    pgtype.Text{String: body.Folder, Valid: body.Folder != ""},
-				CreatedBy: pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
-			})
+		if len(owned) > 0 {
+			if _, err := q.SetWorkflowFolderBulk(r.Context(), store.SetWorkflowFolderBulkParams{
+				OrgID:       rc.orgID,
+				WorkflowIds: owned,
+				Folder:      pgtype.Text{String: body.Folder, Valid: body.Folder != ""},
+				CreatedBy:   pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
+			}); err != nil {
+				writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+				return
+			}
 		}
 		audit.Write(r.Context(), s.pool, rc.authContext, "workflow.folder.bulk_assigned", audit.Options{
 			Metadata: map[string]any{"folder": body.Folder, "workflowIds": owned, "affected": len(owned)},
@@ -339,33 +343,25 @@ func (s *V1Server) mountWorkflowMetadataRoutes(mux *http.ServeMux) {
 			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
 		}
-		for _, workflowID := range owned {
-			current := []string{}
-			if row, err := q.GetWorkflowMetadata(r.Context(), store.GetWorkflowMetadataParams{
-				OrgID: rc.orgID, WorkflowID: workflowID,
-			}); err == nil {
-				_ = json.Unmarshal(row.Tags, &current)
+		// The add/remove is expressed on the jsonb array itself, so one
+		// statement covers the whole selection instead of a read plus a
+		// write per workflow.
+		if len(owned) > 0 {
+			var err error
+			if body.Remove {
+				_, err = q.RemoveWorkflowTagBulk(r.Context(), store.RemoveWorkflowTagBulkParams{
+					OrgID: rc.orgID, WorkflowIds: owned, Tag: body.Tag,
+				})
+			} else {
+				_, err = q.AddWorkflowTagBulk(r.Context(), store.AddWorkflowTagBulkParams{
+					OrgID: rc.orgID, WorkflowIds: owned, Tag: body.Tag,
+					CreatedBy: pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
+				})
 			}
-			next := make([]string, 0, len(current)+1)
-			present := false
-			for _, tag := range current {
-				if tag == body.Tag {
-					present = true
-					if body.Remove {
-						continue
-					}
-				}
-				next = append(next, tag)
+			if err != nil {
+				writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+				return
 			}
-			if !body.Remove && !present {
-				next = append(next, body.Tag)
-			}
-			tags, _ := json.Marshal(next)
-			_, _ = q.SetWorkflowTagsOnly(r.Context(), store.SetWorkflowTagsOnlyParams{
-				ID: s.newID(), OrgID: rc.orgID, WorkflowID: workflowID,
-				Tags:      tags,
-				CreatedBy: pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
-			})
 		}
 		audit.Write(r.Context(), s.pool, rc.authContext, "workflow.tags.bulk_assigned", audit.Options{
 			Metadata: map[string]any{"tag": body.Tag, "remove": body.Remove, "workflowIds": owned, "affected": len(owned)},

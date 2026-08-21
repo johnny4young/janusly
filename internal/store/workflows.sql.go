@@ -13,6 +13,40 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addWorkflowTagBulk = `-- name: AddWorkflowTagBulk :execrows
+INSERT INTO workflow_metadata (id, org_id, workflow_id, tags, created_by)
+SELECT gen_random_uuid()::text, $1, workflow_id,
+       jsonb_build_array($2::text), $3
+FROM unnest($4::text[]) AS workflow_id
+ON CONFLICT (org_id, workflow_id) DO UPDATE SET
+  tags = CASE
+    WHEN workflow_metadata.tags @> jsonb_build_array($2::text)
+      THEN workflow_metadata.tags
+    ELSE workflow_metadata.tags || jsonb_build_array($2::text)
+  END,
+  updated_at = now()
+`
+
+type AddWorkflowTagBulkParams struct {
+	OrgID       string
+	Tag         string
+	CreatedBy   pgtype.Text
+	WorkflowIds []string
+}
+
+func (q *Queries) AddWorkflowTagBulk(ctx context.Context, arg AddWorkflowTagBulkParams) (int64, error) {
+	result, err := q.db.Exec(ctx, addWorkflowTagBulk,
+		arg.OrgID,
+		arg.Tag,
+		arg.CreatedBy,
+		arg.WorkflowIds,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const autoRollbackRollout = `-- name: AutoRollbackRollout :one
 UPDATE workflow_rollouts
 SET status = 'rolled_back', rolled_back_reason = $2, ended_at = now(), updated_at = now()
@@ -1786,6 +1820,32 @@ func (q *Queries) QueryWorkflowHealthSignals(ctx context.Context, arg QueryWorkf
 	return i, err
 }
 
+const removeWorkflowTagBulk = `-- name: RemoveWorkflowTagBulk :execrows
+UPDATE workflow_metadata
+SET tags = COALESCE((
+      SELECT jsonb_agg(existing)
+      FROM jsonb_array_elements_text(workflow_metadata.tags) AS existing
+      WHERE existing <> $1::text), '[]'::jsonb),
+    updated_at = now()
+WHERE org_id = $2
+  AND workflow_id = ANY($3::text[])
+  AND workflow_metadata.tags @> jsonb_build_array($1::text)
+`
+
+type RemoveWorkflowTagBulkParams struct {
+	Tag         string
+	OrgID       string
+	WorkflowIds []string
+}
+
+func (q *Queries) RemoveWorkflowTagBulk(ctx context.Context, arg RemoveWorkflowTagBulkParams) (int64, error) {
+	result, err := q.db.Exec(ctx, removeWorkflowTagBulk, arg.Tag, arg.OrgID, arg.WorkflowIds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const renameWorkflowFolderBulk = `-- name: RenameWorkflowFolderBulk :execrows
 UPDATE workflow_metadata SET folder = $2, updated_at = now()
 WHERE org_id = $1 AND folder = $3
@@ -1838,6 +1898,39 @@ type RestoreWorkflowParams struct {
 
 func (q *Queries) RestoreWorkflow(ctx context.Context, arg RestoreWorkflowParams) (int64, error) {
 	result, err := q.db.Exec(ctx, restoreWorkflow, arg.ID, arg.OrgID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setWorkflowFolderBulk = `-- name: SetWorkflowFolderBulk :execrows
+INSERT INTO workflow_metadata (id, org_id, workflow_id, folder, created_by)
+SELECT gen_random_uuid()::text, $1, workflow_id,
+       $2, $3
+FROM unnest($4::text[]) AS workflow_id
+ON CONFLICT (org_id, workflow_id) DO UPDATE SET
+  folder = excluded.folder, updated_at = now()
+`
+
+type SetWorkflowFolderBulkParams struct {
+	OrgID       string
+	Folder      pgtype.Text
+	CreatedBy   pgtype.Text
+	WorkflowIds []string
+}
+
+// Bulk folder/tag assignment used to loop one (or two) statements per
+// workflow, so a single click on a large selection issued hundreds of
+// sequential round trips. These do the whole selection in one statement,
+// matching the folder/tag RENAME endpoints that were already set-based.
+func (q *Queries) SetWorkflowFolderBulk(ctx context.Context, arg SetWorkflowFolderBulkParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setWorkflowFolderBulk,
+		arg.OrgID,
+		arg.Folder,
+		arg.CreatedBy,
+		arg.WorkflowIds,
+	)
 	if err != nil {
 		return 0, err
 	}

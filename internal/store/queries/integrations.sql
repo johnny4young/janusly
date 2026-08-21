@@ -45,6 +45,16 @@ ON CONFLICT (connection_id, name) DO UPDATE SET
 -- name: ListMcpToolDescriptorsByConnection :many
 SELECT * FROM mcp_tool_descriptors WHERE connection_id = $1 ORDER BY name LIMIT 200;
 
+-- The connections panel only needs counts, and fetching every descriptor
+-- row per connection made the listing N+1 in both queries and payload.
+-- name: CountMcpToolDescriptorsByConnection :many
+SELECT d.connection_id,
+       count(*)::int AS total,
+       count(*) FILTER (WHERE d.enabled)::int AS enabled
+FROM mcp_tool_descriptors d
+WHERE d.connection_id = ANY(sqlc.arg(connection_ids)::text[])
+GROUP BY d.connection_id;
+
 -- name: SetMcpConnectionStatus :exec
 UPDATE mcp_connections
 SET status = $3, status_reason = $4, last_discovery_at = $5, updated_at = now()

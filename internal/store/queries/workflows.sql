@@ -410,6 +410,42 @@ ON CONFLICT (org_id, workflow_id) DO UPDATE SET
   tags = excluded.tags, updated_at = now()
 RETURNING *;
 
+-- Bulk folder/tag assignment used to loop one (or two) statements per
+-- workflow, so a single click on a large selection issued hundreds of
+-- sequential round trips. These do the whole selection in one statement,
+-- matching the folder/tag RENAME endpoints that were already set-based.
+-- name: SetWorkflowFolderBulk :execrows
+INSERT INTO workflow_metadata (id, org_id, workflow_id, folder, created_by)
+SELECT gen_random_uuid()::text, sqlc.arg(org_id), workflow_id,
+       sqlc.narg(folder), sqlc.narg(created_by)
+FROM unnest(sqlc.arg(workflow_ids)::text[]) AS workflow_id
+ON CONFLICT (org_id, workflow_id) DO UPDATE SET
+  folder = excluded.folder, updated_at = now();
+
+-- name: AddWorkflowTagBulk :execrows
+INSERT INTO workflow_metadata (id, org_id, workflow_id, tags, created_by)
+SELECT gen_random_uuid()::text, sqlc.arg(org_id), workflow_id,
+       jsonb_build_array(sqlc.arg(tag)::text), sqlc.narg(created_by)
+FROM unnest(sqlc.arg(workflow_ids)::text[]) AS workflow_id
+ON CONFLICT (org_id, workflow_id) DO UPDATE SET
+  tags = CASE
+    WHEN workflow_metadata.tags @> jsonb_build_array(sqlc.arg(tag)::text)
+      THEN workflow_metadata.tags
+    ELSE workflow_metadata.tags || jsonb_build_array(sqlc.arg(tag)::text)
+  END,
+  updated_at = now();
+
+-- name: RemoveWorkflowTagBulk :execrows
+UPDATE workflow_metadata
+SET tags = COALESCE((
+      SELECT jsonb_agg(existing)
+      FROM jsonb_array_elements_text(workflow_metadata.tags) AS existing
+      WHERE existing <> sqlc.arg(tag)::text), '[]'::jsonb),
+    updated_at = now()
+WHERE org_id = sqlc.arg(org_id)
+  AND workflow_id = ANY(sqlc.arg(workflow_ids)::text[])
+  AND workflow_metadata.tags @> jsonb_build_array(sqlc.arg(tag)::text);
+
 -- name: ListDistinctWorkflowTags :many
 SELECT DISTINCT jsonb_array_elements_text(m.tags)::text AS tag
 FROM workflow_metadata m

@@ -86,6 +86,43 @@ func (q *Queries) CountBufferedTriggerEvents(ctx context.Context, arg CountBuffe
 	return count, err
 }
 
+const countMcpToolDescriptorsByConnection = `-- name: CountMcpToolDescriptorsByConnection :many
+SELECT d.connection_id,
+       count(*)::int AS total,
+       count(*) FILTER (WHERE d.enabled)::int AS enabled
+FROM mcp_tool_descriptors d
+WHERE d.connection_id = ANY($1::text[])
+GROUP BY d.connection_id
+`
+
+type CountMcpToolDescriptorsByConnectionRow struct {
+	ConnectionID string
+	Total        int32
+	Enabled      int32
+}
+
+// The connections panel only needs counts, and fetching every descriptor
+// row per connection made the listing N+1 in both queries and payload.
+func (q *Queries) CountMcpToolDescriptorsByConnection(ctx context.Context, connectionIds []string) ([]CountMcpToolDescriptorsByConnectionRow, error) {
+	rows, err := q.db.Query(ctx, countMcpToolDescriptorsByConnection, connectionIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountMcpToolDescriptorsByConnectionRow
+	for rows.Next() {
+		var i CountMcpToolDescriptorsByConnectionRow
+		if err := rows.Scan(&i.ConnectionID, &i.Total, &i.Enabled); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteCredential = `-- name: DeleteCredential :execrows
 DELETE FROM credentials WHERE org_id = $1 AND id = $2
 `
