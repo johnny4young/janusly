@@ -191,14 +191,15 @@ func (q *Queries) ClaimDueReplayCampaign(ctx context.Context) (ReplayCampaign, e
 
 const claimDueScheduleEntries = `-- name: ClaimDueScheduleEntries :many
 UPDATE schedule_entries SET next_fire_at = $1
-WHERE id IN (
-  SELECT due.id FROM schedule_entries AS due
+FROM (
+  SELECT due.id, due.next_fire_at AS due_at FROM schedule_entries AS due
   WHERE due.enabled = true AND due.next_fire_at <= $2
   ORDER BY due.next_fire_at
   LIMIT $3
   FOR UPDATE SKIP LOCKED
-)
-RETURNING id, org_id, workflow_id, workflow_version_id, node_id, cron_expression, enabled, last_run_at, last_run_id, created_by, created_at, updated_at, next_fire_at
+) AS claimed
+WHERE schedule_entries.id = claimed.id
+RETURNING schedule_entries.id, schedule_entries.org_id, schedule_entries.workflow_id, schedule_entries.workflow_version_id, schedule_entries.node_id, schedule_entries.cron_expression, schedule_entries.enabled, schedule_entries.last_run_at, schedule_entries.last_run_id, schedule_entries.created_by, schedule_entries.created_at, schedule_entries.updated_at, schedule_entries.next_fire_at, claimed.due_at
 `
 
 type ClaimDueScheduleEntriesParams struct {
@@ -207,15 +208,37 @@ type ClaimDueScheduleEntriesParams struct {
 	RowLimit   int32
 }
 
-func (q *Queries) ClaimDueScheduleEntries(ctx context.Context, arg ClaimDueScheduleEntriesParams) ([]ScheduleEntry, error) {
+type ClaimDueScheduleEntriesRow struct {
+	ID                string
+	OrgID             string
+	WorkflowID        string
+	WorkflowVersionID string
+	NodeID            string
+	CronExpression    string
+	Enabled           bool
+	LastRunAt         *time.Time
+	LastRunID         pgtype.Text
+	CreatedBy         pgtype.Text
+	CreatedAt         *time.Time
+	UpdatedAt         *time.Time
+	NextFireAt        *time.Time
+	DueAt             *time.Time
+}
+
+// The claim overwrites next_fire_at with the lease, so the tick's LOGICAL
+// due time is returned alongside the row: it is the tick's durable
+// identity, and firing keys run-start idempotency on it. Without that,
+// a lease that expires mid-batch or a crash between the run insert and
+// the advance fires the same scheduled tick twice.
+func (q *Queries) ClaimDueScheduleEntries(ctx context.Context, arg ClaimDueScheduleEntriesParams) ([]ClaimDueScheduleEntriesRow, error) {
 	rows, err := q.db.Query(ctx, claimDueScheduleEntries, arg.LeaseUntil, arg.Now, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ScheduleEntry
+	var items []ClaimDueScheduleEntriesRow
 	for rows.Next() {
-		var i ScheduleEntry
+		var i ClaimDueScheduleEntriesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.OrgID,
@@ -230,6 +253,7 @@ func (q *Queries) ClaimDueScheduleEntries(ctx context.Context, arg ClaimDueSched
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.NextFireAt,
+			&i.DueAt,
 		); err != nil {
 			return nil, err
 		}

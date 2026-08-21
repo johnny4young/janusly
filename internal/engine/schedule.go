@@ -102,7 +102,7 @@ func (e *Engine) SweepDueSchedules(ctx context.Context) (fired, dropped int) {
 }
 
 // fireScheduleEntry handles one due tick; returns true when a run started.
-func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ScheduleEntry, now time.Time) bool {
+func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ClaimDueScheduleEntriesRow, now time.Time) bool {
 	q := store.New(e.pool)
 	schedule, err := cron.Parse(entry.CronExpression)
 	if err != nil {
@@ -178,15 +178,30 @@ func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ScheduleEntr
 		return false
 	}
 
+	// The tick's identity is its LOGICAL due time, not this attempt: a
+	// lease that expires mid-batch, a crash between the run insert and the
+	// advance, or a second replica claiming the same entry must all resolve
+	// to one run. dueAt is the pre-claim next_fire_at.
+	dueAt := now
+	if entry.DueAt != nil {
+		dueAt = entry.DueAt.UTC()
+	}
 	runID, err := e.StartRun(ctx, StartInput{
 		OrgID: entry.OrgID, Workflow: wf, WorkflowVersionID: entry.WorkflowVersionID,
-		CreatedBy: "system:scheduler",
+		CreatedBy:      "system:scheduler",
+		IdempotencyKey: "schedule:" + entry.ID + "@" + dueAt.Format(time.RFC3339Nano),
 		Input: map[string]any{
 			"triggeredBy": "schedule", "nodeId": entry.NodeID,
-			"scheduledAt": now.Format(time.RFC3339),
+			"scheduledAt": dueAt.Format(time.RFC3339),
 		},
 	})
 	if err != nil {
+		var replay *ErrStartIdempotencyReplay
+		if errors.As(err, &replay) {
+			// This tick already fired; only the clock advance was lost.
+			advance(replay.RunID)
+			return false
+		}
 		// The lease already pushed the clock a minute out — the next sweep
 		// retries naturally; nothing to do beyond not advancing last_run.
 		return false

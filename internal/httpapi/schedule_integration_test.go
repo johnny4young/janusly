@@ -145,3 +145,71 @@ func TestScheduleNodeDueClockLoop(t *testing.T) {
 		t.Fatalf("removing the node must deregister: %d", remaining)
 	}
 }
+
+// A tick's identity is its logical due time: a lease that expires
+// mid-batch, a crash between the run insert and the clock advance, or a
+// second replica claiming the same entry must all resolve to ONE run.
+func TestScheduleTickFiresOncePerDueTime(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	ctx := t.Context()
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	wfID := "wf-sched-once-" + suffix
+
+	workflow := map[string]any{
+		"id": wfID, "name": "Nightly once", "dslVersion": "1.0",
+		"nodes": []any{
+			map[string]any{"id": "tick", "type": "schedule",
+				"config": map[string]any{"cronExpression": "0 3 * * *"}},
+			map[string]any{"id": "step", "type": "noop", "config": map[string]any{}},
+		},
+		"edges": []any{map[string]any{"from": "tick", "to": "step"}},
+	}
+	if res := h.call("POST", "/v1/workflows/save", workflow, ""); res.status != 200 {
+		t.Fatalf("save: %+v", res.body)
+	}
+	var entryID string
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM schedule_entries WHERE org_id = $1 AND workflow_id = $2`,
+		h.org, wfID).Scan(&entryID); err != nil {
+		t.Fatalf("entry after save: %v", err)
+	}
+
+	dueAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	forceDue := func() {
+		if _, err := pool.Exec(ctx,
+			`UPDATE schedule_entries SET next_fire_at = $2 WHERE id = $1`, entryID, dueAt); err != nil {
+			t.Fatalf("force due: %v", err)
+		}
+	}
+	eng := engine.New(pool)
+
+	forceDue()
+	if fired, _ := eng.SweepDueSchedules(ctx); fired != 1 {
+		t.Fatalf("first sweep must fire the tick: %d", fired)
+	}
+	// Replay the SAME due time, as a lost lease or a second replica would.
+	forceDue()
+	if fired, _ := eng.SweepDueSchedules(ctx); fired != 0 {
+		t.Fatalf("the same due time must not fire twice: %d", fired)
+	}
+
+	var runCount int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM runs r JOIN workflow_versions wv ON wv.id = r.workflow_version_id
+		 WHERE wv.workflow_id = $1`, wfID).Scan(&runCount); err != nil {
+		t.Fatalf("count runs: %v", err)
+	}
+	if runCount != 1 {
+		t.Fatalf("one due time must produce exactly one run, got %d", runCount)
+	}
+	// A LATER due time is a different tick and fires normally.
+	if _, err := pool.Exec(ctx,
+		`UPDATE schedule_entries SET next_fire_at = $2 WHERE id = $1`,
+		entryID, dueAt.Add(time.Second)); err != nil {
+		t.Fatalf("advance due: %v", err)
+	}
+	if fired, _ := eng.SweepDueSchedules(ctx); fired != 1 {
+		t.Fatalf("a new due time must fire: %d", fired)
+	}
+}

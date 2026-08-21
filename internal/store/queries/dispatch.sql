@@ -217,13 +217,19 @@ WHERE id IN (
 )
 RETURNING id, status;
 
+-- The claim overwrites next_fire_at with the lease, so the tick's LOGICAL
+-- due time is returned alongside the row: it is the tick's durable
+-- identity, and firing keys run-start idempotency on it. Without that,
+-- a lease that expires mid-batch or a crash between the run insert and
+-- the advance fires the same scheduled tick twice.
 -- name: ClaimDueScheduleEntries :many
 UPDATE schedule_entries SET next_fire_at = sqlc.arg(lease_until)
-WHERE id IN (
-  SELECT due.id FROM schedule_entries AS due
+FROM (
+  SELECT due.id, due.next_fire_at AS due_at FROM schedule_entries AS due
   WHERE due.enabled = true AND due.next_fire_at <= sqlc.arg(now)
   ORDER BY due.next_fire_at
   LIMIT sqlc.arg(row_limit)
   FOR UPDATE SKIP LOCKED
-)
-RETURNING *;
+) AS claimed
+WHERE schedule_entries.id = claimed.id
+RETURNING schedule_entries.*, claimed.due_at;
