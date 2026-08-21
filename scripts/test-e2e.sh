@@ -7,11 +7,16 @@ app_port=${JANUSLY_E2E_PORT:-33001}
 postgres_port=${JANUSLY_E2E_POSTGRES_PORT:-35432}
 pnpm_command=${PNPM:-pnpm --ignore-workspace}
 
+# The lane must be hermetic and free: Compose auto-loads the repository
+# .env, so a developer's real ANTHROPIC_API_KEY would otherwise reach the
+# container, spend provider credits, and break the smoke spec that asserts
+# the deterministic $0 fallback. Blank the credential for this stack only.
 compose() {
   COMPOSE_PROJECT_NAME="$project" \
   JANUSLY_HOST_PORT="$app_port" \
   JANUSLY_POSTGRES_HOST_PORT="$postgres_port" \
   ALLOW_PRIVATE_HTTP_TARGETS=true \
+  ANTHROPIC_API_KEY= \
     docker compose -p "$project" "$@"
 }
 
