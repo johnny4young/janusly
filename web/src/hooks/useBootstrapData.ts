@@ -13,7 +13,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api'
-import type { AiHealth, Credential, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema } from '../types'
+import { useWorkflowStore } from '../store'
+import type { ActiveTab, AiHealth, Credential, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema } from '../types'
 
 /** The bootstrap state surface plus the manual re-fetch trigger. */
 export type BootstrapData = {
@@ -40,6 +41,13 @@ export type RunSummaryUpdateStarter = (runId: string) => RunSummaryUpdateCommitt
 // it here so the hook's return type matches what `App` passed down before the
 // extraction.
 import type { DeadLetter } from '../components/dead-letter-types'
+
+// Surfaces that render catalog data (tools, templates, solution packs,
+// credentials). Home, Recover and Runs do not.
+const catalogTabs = new Set<ActiveTab>([
+  'ai-studio', 'inspector', 'templates', 'packs', 'credentials',
+  'marketplace', 'workflows', 'experiments', 'multiAgent',
+])
 
 export function patchRunSummaryList(
   current: RunSummary[],
@@ -148,6 +156,10 @@ export function useBootstrapData(
     }
   }, [patchRunSummary])
 
+  // Latch: once a catalog surface has been opened this session, the
+  // catalogs stay in every refresh wave.
+  const catalogsNeededRef = useRef(false)
+
   const refreshPlatform = useCallback(async () => {
     const requestedScope = tenantScopeRef.current
     if (!requestedScope) return
@@ -158,11 +170,21 @@ export function useBootstrapData(
     const read = (permission: string, path: string, fallback: unknown) => allowed.has(permission)
       ? api(path)
       : Promise.resolve(fallback)
+    // Catalogs (tools, templates, packs, credentials) are authoring data
+    // that Home never renders, yet every platformVersion bump refetched
+    // them. They load the first time a surface that uses them is opened
+    // and stay in the wave from then on, so a Home-only session issues
+    // four fewer requests per refresh with no visible change.
+    const catalogsNeeded = catalogsNeededRef.current || catalogTabs.has(useWorkflowStore.getState().activeTab)
+    catalogsNeededRef.current = catalogsNeeded
+    const readCatalog = (permission: string, path: string, fallback: unknown) => catalogsNeeded
+      ? read(permission, path, fallback)
+      : Promise.resolve(null)
     const [toolData, templateData, packData, credentialData, runData, deadLetterData, usageData, aiHealthData, workflowsData] = await Promise.allSettled([
-      read('workflows.read', '/tools', []),
-      read('workflows.read', '/templates', []),
-      read('packs.read', '/solution-packs', { packs: [] }),
-      read('credentials.read', '/credentials', []),
+      readCatalog('workflows.read', '/tools', []),
+      readCatalog('workflows.read', '/templates', []),
+      readCatalog('packs.read', '/solution-packs', { packs: [] }),
+      readCatalog('credentials.read', '/credentials', []),
       read('runs.read', '/runs', []),
       read('dlq.read', '/dlq', []),
       api('/billing/usage'),
@@ -177,13 +199,19 @@ export function useBootstrapData(
       || refreshSequenceRef.current !== requestSequence
     ) return
 
-    if (toolData.status === 'fulfilled') setTools(Array.isArray(toolData.value) ? toolData.value : [])
-    if (templateData.status === 'fulfilled') setTemplates(Array.isArray(templateData.value) ? templateData.value : [])
-    if (packData.status === 'fulfilled') {
+    if (toolData.status === 'fulfilled' && toolData.value !== null) {
+      setTools(Array.isArray(toolData.value) ? toolData.value : [])
+    }
+    if (templateData.status === 'fulfilled' && templateData.value !== null) {
+      setTemplates(Array.isArray(templateData.value) ? templateData.value : [])
+    }
+    if (packData.status === 'fulfilled' && packData.value !== null) {
       const packs = (packData.value as { packs?: SolutionPackPublic[] } | null)?.packs
       setSolutionPacks(Array.isArray(packs) ? packs : [])
     }
-    if (credentialData.status === 'fulfilled') setCredentials(Array.isArray(credentialData.value) ? credentialData.value : [])
+    if (credentialData.status === 'fulfilled' && credentialData.value !== null) {
+      setCredentials(Array.isArray(credentialData.value) ? credentialData.value : [])
+    }
     if (runData.status === 'fulfilled') {
       const incoming = Array.isArray(runData.value) ? runData.value as RunSummary[] : []
       const newerPatches = [...runPatchesRef.current]

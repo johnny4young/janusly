@@ -210,6 +210,42 @@ function devAuthSubscription(): AuthSubscriptionResponse {
   }
 }
 
+// Cookie (WorkOS) sessions have no client-side expiry event: the HttpOnly
+// cookie simply stops being accepted. Without a channel of its own, an
+// expired session left the app calling a dead API forever. Listeners
+// registered here are notified once, on the first 401 that proves it.
+type BrowserSessionListener = (auth: NormalizedAuth) => void
+const browserSessionListeners = new Set<BrowserSessionListener>()
+
+function browserSessionSubscription(callback: BrowserSessionListener): AuthSubscriptionResponse {
+  browserSessionListeners.add(callback)
+  return {
+    data: {
+      subscription: {
+        id: 'browser-session-state',
+        callback: (_event: AuthChangeEvent, _session: Session | null) => undefined,
+        unsubscribe: () => {
+          browserSessionListeners.delete(callback)
+        },
+      },
+    },
+  }
+}
+
+/**
+ * Called by `api.ts` when the API rejects a request the browser session was
+ * supposed to authorize. Clears the stale identity — so later requests stop
+ * presenting a dead cookie — and tells the app, which re-renders its
+ * signed-out surface instead of looping on 401s.
+ */
+export function handleBrowserSessionExpired(): void {
+  if (!browserSessionIdentity) return
+  browserSessionIdentity = null
+  browserSessionProbe = null
+  const signedOut: NormalizedAuth = { session: null, user: null, userId: null, orgId: getActiveOrg() }
+  for (const listener of [...browserSessionListeners]) listener(signedOut)
+}
+
 /**
  * Project a Supabase session onto `NormalizedAuth`. The `orgId` field
  * comes from `getActiveOrg()` (localStorage), NOT from the Supabase JWT
@@ -314,7 +350,7 @@ export const AuthProvider = {
   onAuthStateChange: async (callback: (auth: NormalizedAuth) => void) => {
     if (await ensureBrowserSession()) {
       callback(normalizeAuth(null))
-      return devAuthSubscription()
+      return browserSessionSubscription(callback)
     }
     const client = await getSupabaseClient()
     if (!client) {

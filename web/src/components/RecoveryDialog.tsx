@@ -68,6 +68,12 @@ import type {
 
 const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'cancelled'])
 const VALIDATION_POLL_INTERVAL_MS = 1500
+// A sandbox run that never reaches a terminal status used to hold the
+// dialog open forever: ESC, the backdrop and the close button are all
+// disabled while validating, and the poll had no deadline. After this
+// budget the dialog surfaces a recoverable error the operator can close
+// or retry — the validation run itself is unaffected.
+const VALIDATION_POLL_DEADLINE_MS = 5 * 60 * 1000
 const PlaybookMatchCard = lazy(() => import('./recovery-dialog/PlaybookMatchCard').then((module) => ({
   default: module.PlaybookMatchCard,
 })))
@@ -247,7 +253,16 @@ export function RecoveryDialog({
   useEffect(() => {
     if (step.kind !== 'validating') return
     let cancelled = false
+    const startedAt = Date.now()
     const poll = async () => {
+      if (Date.now() - startedAt > VALIDATION_POLL_DEADLINE_MS) {
+        cancelled = true
+        setStep({
+          kind: 'error',
+          message: runtimeT('recoveryDialog.errors.validationTimedOut'),
+        })
+        return
+      }
       try {
         const result = await api(`/run?runId=${encodeURIComponent(step.runId)}`) as RunStatusPayload
         if (cancelled) return

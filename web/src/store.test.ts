@@ -824,4 +824,32 @@ describe('useWorkflowStore semantic workflow signals', () => {
     useWorkflowStore.getState().onNodesChange([{ id: nodeId, type: 'remove' }])
     expect(useWorkflowStore.getState().workflowRevision).toBe(2)
   })
+
+  it('never rewinds a terminal node status with a stale poll snapshot', () => {
+    const store = useWorkflowStore.getState()
+    store.setRunNodes([
+      { nodeId: 'a', status: 'running' },
+      { nodeId: 'b', status: 'pending' },
+    ])
+    // SSE applies the completion the operator watched happen.
+    store.mergeRunNode({ nodeId: 'a', status: 'succeeded' })
+    expect(useWorkflowStore.getState().runNodes[0].status).toBe('succeeded')
+
+    // A /status snapshot built BEFORE that event lands afterwards.
+    store.setRunNodes([
+      { nodeId: 'a', status: 'running' },
+      { nodeId: 'b', status: 'running' },
+    ])
+    const nodes = useWorkflowStore.getState().runNodes
+    expect(nodes.find((node) => node.nodeId === 'a')?.status).toBe('succeeded')
+    // Non-terminal nodes still take the snapshot: it is the fresher source.
+    expect(nodes.find((node) => node.nodeId === 'b')?.status).toBe('running')
+
+    // A newer terminal state always wins.
+    store.setRunNodes([{ nodeId: 'a', status: 'failed' }])
+    expect(useWorkflowStore.getState().runNodes[0].status).toBe('failed')
+    // Clearing for a new run is still a hard reset.
+    store.setRunNodes([])
+    expect(useWorkflowStore.getState().runNodes).toEqual([])
+  })
 })

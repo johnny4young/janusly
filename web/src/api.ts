@@ -28,7 +28,7 @@
  *   post-write refreshes cannot reuse pre-write snapshots.
  */
 
-import { getActiveOrg, getSupabaseAccessToken, hasBrowserSession } from './auth'
+import { getActiveOrg, getSupabaseAccessToken, handleBrowserSessionExpired, hasBrowserSession } from './auth'
 import {
   currentApiRequestLifecycle,
   resetApiRequestLifecycleForTests,
@@ -290,6 +290,11 @@ async function doApiFetch(path: string, options: RequestInit, requestScope: ApiR
     // call sites can translate via `tApiError(err)`. Plain string-message
     // consumers (`err.message`) keep working unchanged — the new fields
     // are additive.
+    // A 401 while a browser session was believed active means the HttpOnly
+    // cookie expired. Cookie mode has no expiry event of its own, so tell
+    // auth once: it drops the dead identity and the app renders its
+    // signed-out surface instead of looping on rejected requests.
+    if (res.status === 401 && hasBrowserSession()) handleBrowserSessionExpired()
     const code = typeof errorPayload?.code === 'string' ? errorPayload.code : undefined
     const rawParams = errorPayload?.params
     const params = rawParams && typeof rawParams === 'object' && !Array.isArray(rawParams)

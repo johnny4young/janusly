@@ -2278,6 +2278,7 @@
   "recoveryDialog.footer.retry": "Retry",
   "recoveryDialog.footer.working": "Working…",
   "recoveryDialog.errors.validationPolling": "Validation polling failed",
+  "recoveryDialog.errors.validationTimedOut": "The sandbox validation has not finished after five minutes. Close this and check the validation run, or try again.",
   "recoveryDialog.errors.suggestionRequest": "Suggestion request failed",
   "recoveryDialog.errors.validationRequest": "Validation request failed",
   "recoveryDialog.errors.applyFailed": "Apply failed",

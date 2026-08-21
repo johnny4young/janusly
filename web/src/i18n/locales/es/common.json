@@ -2278,6 +2278,7 @@
   "recoveryDialog.footer.retry": "Reintentar",
   "recoveryDialog.footer.working": "Trabajando…",
   "recoveryDialog.errors.validationPolling": "El sondeo de validación falló",
+  "recoveryDialog.errors.validationTimedOut": "La validación en sandbox no terminó después de cinco minutos. Cierra y revisa la ejecución de validación, o intenta de nuevo.",
   "recoveryDialog.errors.suggestionRequest": "La solicitud de sugerencia falló",
   "recoveryDialog.errors.validationRequest": "La solicitud de validación falló",
   "recoveryDialog.errors.applyFailed": "La aplicación falló",

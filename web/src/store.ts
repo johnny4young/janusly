@@ -34,6 +34,7 @@ import type { OnboardingState } from '@/lib/onboarding'
 import type { SessionContext } from './identity-context'
 import { getNodePreset } from './constants'
 import { t } from './i18n/runtime'
+import { isTerminalNodeStatus } from '@/lib/status'
 import { workflowToGraph } from './canvas-projections'
 import { PERSISTED_WORKSPACE_TABS } from './workspace-locations'
 
@@ -651,7 +652,23 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       ? { runDetail: { ...state.runDetail, ...patch, id: runId } }
       : state
   )),
-  setRunNodes: (nodes) => set({ runNodes: nodes }),
+  setRunNodes: (nodes) => set((state) => {
+    // A /status snapshot describes the run at the instant the server built
+    // it, which can predate an SSE event already applied here. Replacing
+    // wholesale would rewind a node the operator just watched finish, and
+    // with SSE connected polling stops, so the stale pill would stick.
+    // Terminal states never regress; everything else takes the snapshot.
+    if (nodes.length === 0) return { runNodes: nodes }
+    const previous = new Map(state.runNodes.map((node) => [node.nodeId, node]))
+    const runNodes = nodes.map((node) => {
+      const existing = previous.get(node.nodeId)
+      if (!existing || !isTerminalNodeStatus(existing.status) || isTerminalNodeStatus(node.status)) {
+        return node
+      }
+      return existing
+    })
+    return { runNodes }
+  }),
   mergeRunNode: (incoming) => set((state) => {
     const index = state.runNodes.findIndex((node) => node.nodeId === incoming.nodeId)
     if (index === -1) return { runNodes: [...state.runNodes, incoming] }
