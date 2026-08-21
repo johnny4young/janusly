@@ -37,7 +37,7 @@ to `127.0.0.1:3001`.
 
 ## Requirements
 
-- Go 1.26.5
+- Go 1.26.6
 - PostgreSQL 18
 - pnpm 11 for frontend development
 - Docker with Compose v2 for the supported local database and image build
