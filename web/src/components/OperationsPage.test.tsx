@@ -350,7 +350,7 @@ describe('<OperationsPage />', () => {
     expect(screen.getByTestId('operations-rail-dot-infrastructure')).toHaveAttribute('data-severity', 'warning')
   })
 
-  it('attributes an explicit null maintenance snapshot to Redis, not transport', async () => {
+  it('attributes an explicit null maintenance snapshot to the queue store, not transport', async () => {
     stubApiByPath({
       '/recovery/metrics': healthyMetrics,
       '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] }, queue: null },

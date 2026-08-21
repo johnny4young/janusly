@@ -2180,7 +2180,8 @@ button.we-ops-metric-card--button {
 }
 
 /* Queue pressure has four truthful states: clear, processing below the
- * threshold, delayed above it, and unavailable when Redis cannot be read. */
+ * threshold, delayed above it, and unavailable when the queue store
+ * cannot be read. */
 .we-ops-queue-lag-chip--clear {
   border-color: var(--we-success);
   color: var(--we-success-text);
