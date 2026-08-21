@@ -143,7 +143,9 @@ func (s *V1Server) patchWorkflowCore(r *http.Request, rc v1Request) opResult {
 	prompt := composePatchPrompt(dlq, workflowDoc)
 
 	result, aiErr := client.GenerateText(ctx, ai.GenerateTextInput{
-		System: systemPrompt, Prompt: prompt, ResponseFormat: "json",
+		// The locale rider goes AFTER the cached system prompt body so the
+		// prompt cache still hits for the shared prefix.
+		System: withLocale(systemPrompt, r), Prompt: prompt, ResponseFormat: "json",
 		ModelHint: body.Model, CacheSystemPrompt: true,
 		Context: ai.CallContext{OrgID: rc.orgID, UserID: rc.userID},
 	})

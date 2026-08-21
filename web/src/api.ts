@@ -229,10 +229,11 @@ async function doApiFetch(path: string, options: RequestInit, requestScope: ApiR
   const headers = {
     'Content-Type': 'application/json',
     'x-org-id': requestScope.activeOrg,
-    // Sent so the API can localize operator-facing free-form AI fields
-    // (rationale, explanation, message) to the UI locale. The Go API does
-    // not consume it yet — keeping the header preserves the contract for
-    // when that localization lands. Other routes ignore the header.
+    // The API's AI helpers (/ai/explain-workflow, /ai/explain-run,
+    // /ai/review-workflow, /ai/suggest-improvement, /ai/patch-workflow)
+    // read this header and instruct the model to write operator-facing
+    // free-form fields (rationale, explanation, message) in the UI
+    // locale. Other routes ignore it.
     'Accept-Language': requestScope.resolvedLocale,
     ...(!browserSession && token ? { Authorization: `Bearer ${token}` } : {}),
     ...(!browserSession && !token ? { 'x-user-id': 'dev-user' } : {}),
