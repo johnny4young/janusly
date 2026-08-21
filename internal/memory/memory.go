@@ -212,8 +212,11 @@ func Recall(ctx context.Context, pool *pgxpool.Pool, input RecallInput) []Recall
 func embeddingConfig(ctx context.Context, pool *pgxpool.Pool, orgID string) (provider, model, baseURL string, tenantURL bool) {
 	provider, _ = orgconfig.LoadValue(ctx, pool, orgID, "memory.embeddingProvider").(string)
 	model, _ = orgconfig.LoadValue(ctx, pool, orgID, "memory.embeddingModel").(string)
-	baseURL, _ = orgconfig.LoadValue(ctx, pool, orgID, "memory.embeddingBaseUrl").(string)
-	tenantURL = baseURL != ""
+	baseValue, baseSource := orgconfig.LoadValueWithSource(ctx, pool, orgID, "memory.embeddingBaseUrl")
+	baseURL, _ = baseValue.(string)
+	// Only an org_configs row is tenant input; the same key also resolves
+	// OLLAMA_BASE_URL, which is the operator's own infrastructure.
+	tenantURL = baseSource == "tenant" && baseURL != ""
 	if provider == "" {
 		provider = "ollama"
 	}

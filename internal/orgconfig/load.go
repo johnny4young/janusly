@@ -33,9 +33,20 @@ func LoadResolved(ctx context.Context, db Querier, orgID string) ([]Resolved, er
 // Failures degrade to the catalog default — config reads must never take
 // the governed operation down.
 func LoadValue(ctx context.Context, db Querier, orgID, key string) any {
+	value, _ := LoadValueWithSource(ctx, db, orgID, key)
+	return value
+}
+
+// LoadValueWithSource is LoadValue plus the resolution provenance
+// ("tenant" | "env" | "default"). Callers that must treat an org-admin
+// value differently from operator configuration need the source, not just
+// the value: an env-configured endpoint is the operator's own
+// infrastructure, while the same string set through the admin API is
+// tenant input and has to clear the outbound safety policy.
+func LoadValueWithSource(ctx context.Context, db Querier, orgID, key string) (any, string) {
 	def := Get(key)
 	if def == nil {
-		return nil
+		return nil, ""
 	}
 	raw, err := store.New(db).GetOrgConfigValue(ctx, store.GetOrgConfigValueParams{
 		OrgID: orgID, Key: key,
@@ -44,8 +55,7 @@ func LoadValue(ctx context.Context, db Querier, orgID, key string) any {
 	if err == nil {
 		tenantRows[key] = raw
 	}
-	value, _ := ResolveValue(key, tenantRows, os.LookupEnv)
-	return value
+	return ResolveValue(key, tenantRows, os.LookupEnv)
 }
 
 // LoadValues resolves SEVERAL keys with one query. Callers that need more
