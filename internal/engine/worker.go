@@ -39,6 +39,12 @@ type ExecuteFunc func(ctx context.Context, claim ClaimedNode, node domain.Node, 
 // completion; the payload (a run id) is a hint only — claims are global.
 const wakeChannel = "janusly_wake"
 
+const (
+	// idlePollBackoffSteps/Max bound how far an idle worker backs off.
+	idlePollBackoffSteps = 4
+	idlePollBackoffMax   = 2 * time.Second
+)
+
 // RunWorkers runs the pool until ctx is cancelled, then drains in-flight
 // work and returns. Concurrency and poll interval come validated from
 // config.
@@ -105,6 +111,7 @@ func superviseLoop(ctx context.Context, name string, logger *slog.Logger, loop f
 // on a context detached from cancellation so shutdown finishes what this
 // worker already owns.
 func (e *Engine) workerLoop(ctx context.Context, wake <-chan struct{}, poll time.Duration, execute ExecuteFunc, logger *slog.Logger) {
+	idle := 0
 	for {
 		if ctx.Err() != nil {
 			return
@@ -118,16 +125,36 @@ func (e *Engine) workerLoop(ctx context.Context, wake <-chan struct{}, poll time
 			claims = nil
 		}
 		if len(claims) == 0 {
+			idle++
 			select {
 			case <-wake:
-			case <-time.After(poll):
+				// A notification means work exists: poll tightly again.
+				idle = 0
+			case <-time.After(idlePollInterval(poll, idle)):
 			case <-ctx.Done():
 				return
 			}
 			continue
 		}
+		idle = 0
 		e.executeClaim(context.WithoutCancel(ctx), claims[0], execute, logger)
 	}
+}
+
+// idlePollInterval backs an idle worker off toward idlePollBackoffMax.
+// Every worker polls independently, so an idle instance otherwise issues
+// concurrency claims per interval forever — 8 workers at 250 ms is ~32
+// queue transactions a second against a queue that is empty. LISTEN
+// remains the primary wake-up, so the backoff costs latency only when a
+// notification is lost.
+func idlePollInterval(poll time.Duration, idle int) time.Duration {
+	interval := poll
+	for range min(idle, idlePollBackoffSteps) {
+		interval *= 2
+	}
+	// The backoff only ever slows polling down: an operator who configured
+	// a slower interval than the cap keeps it.
+	return min(interval, max(poll, idlePollBackoffMax))
 }
 
 // claimBatch runs the two-statement claim in one transaction: lock
