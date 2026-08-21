@@ -24,8 +24,8 @@ func TestF1SweepReadClosures(t *testing.T) {
 		t.Fatalf("v1 templates: %d", res.status)
 	}
 	templates, ok := res.body["data"].([]any)
-	if !ok || len(templates) != 15 {
-		t.Fatalf("catalog must carry the 15 reference templates: %d", len(templates))
+	if !ok || len(templates) != 17 {
+		t.Fatalf("catalog must carry the 17 reference templates: %d", len(templates))
 	}
 	first := templates[0].(map[string]any)
 	if first["nameCode"] == nil || first["workflow"] == nil || first["categoryCode"] == nil {

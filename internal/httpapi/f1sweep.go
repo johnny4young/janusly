@@ -27,11 +27,11 @@ import (
 	"github.com/johnny4young/janusly/internal/store"
 )
 
-// The contract's 15-template catalog, extracted VERBATIM from
-// the API contract at the pin (workflowTemplates.map(
-// asPublicTemplate) — includes the i18n nameCode/descriptionCode/
-// categoryCode decoration). Same embed-don't-translate posture as the
-// solution packs.
+// The reference template catalog (17 entries): the 15 extracted
+// VERBATIM from the API contract at the pin plus the horizontal
+// finance/people additions — all carrying the i18n nameCode/
+// descriptionCode/categoryCode decoration. Same embed-don't-translate
+// posture as the solution packs.
 //
 //go:embed assets/templates.json
 var templateCatalogJSON []byte

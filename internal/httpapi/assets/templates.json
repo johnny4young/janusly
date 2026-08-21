@@ -1243,5 +1243,244 @@
   "nameCode": "bulk-classify-loop.name",
   "descriptionCode": "bulk-classify-loop.description",
   "categoryCode": "data"
+ },
+ {
+  "id": "invoice-intake-approval",
+  "name": "Invoice intake → AI check → approval → accounting",
+  "description": "A webhook receives a vendor invoice, AI flags anomalies (duplicates, unusual amounts), a human approves payment, then a signed webhook posts it to the accounting system and the vendor gets a confirmation email.",
+  "category": "Finance",
+  "requiredCredentials": [
+   "webhook_secret"
+  ],
+  "workflow": {
+   "dslVersion": "1.0",
+   "id": "invoice-intake-approval",
+   "name": "Invoice intake → AI check → approval → accounting",
+   "inputs": {
+    "type": "object",
+    "required": [
+     "vendor",
+     "invoiceId",
+     "amountUsd",
+     "dueDate"
+    ],
+    "properties": {
+     "vendor": {
+      "type": "string",
+      "description": "Vendor name or account id"
+     },
+     "invoiceId": {
+      "type": "string",
+      "description": "Vendor invoice number"
+     },
+     "amountUsd": {
+      "type": "number",
+      "description": "Invoice total in USD"
+     },
+     "dueDate": {
+      "type": "string",
+      "description": "Payment due date (ISO 8601)"
+     },
+     "lineSummary": {
+      "type": "string",
+      "description": "Optional one-line summary of the line items"
+     }
+    }
+   },
+   "nodes": [
+    {
+     "id": "trigger",
+     "type": "webhook",
+     "config": {}
+    },
+    {
+     "id": "check",
+     "type": "ai",
+     "config": {
+      "prompt": "You are an accounts-payable assistant. Review this invoice for red flags: possible duplicate, amount unusual for the vendor, due date already past, or vague line items. Answer in 2 short sentences ending with RISK: low, medium, or high. Invoice: vendor={{context.trigger.output.vendor}}, invoiceId={{context.trigger.output.invoiceId}}, amountUsd={{context.trigger.output.amountUsd}}, dueDate={{context.trigger.output.dueDate}}, lines={{context.trigger.output.lineSummary}}"
+     }
+    },
+    {
+     "id": "approve_payment",
+     "type": "approval",
+     "config": {
+      "message": "Approve payment of ${{context.trigger.output.amountUsd}} to {{context.trigger.output.vendor}} (invoice {{context.trigger.output.invoiceId}}, due {{context.trigger.output.dueDate}})?\n\nAI check: {{context.check.output.response}}"
+     }
+    },
+    {
+     "id": "post_to_accounting",
+     "type": "tool",
+     "config": {
+      "tool": "webhook.send",
+      "input": {
+       "credential": "partner-webhook",
+       "url": "https://accounting.example.com/payables",
+       "payload": {
+        "vendor": "{{context.trigger.output.vendor}}",
+        "invoiceId": "{{context.trigger.output.invoiceId}}",
+        "amountUsd": "{{context.trigger.output.amountUsd}}",
+        "dueDate": "{{context.trigger.output.dueDate}}",
+        "approvedBy": "janusly-approval"
+       }
+      }
+     }
+    },
+    {
+     "id": "vendor_confirmation",
+     "type": "tool",
+     "config": {
+      "tool": "email.send",
+      "input": {
+       "to": "{{context.trigger.output.vendor}}",
+       "subject": "Invoice {{context.trigger.output.invoiceId}} approved for payment",
+       "text": "Hello,\n\nInvoice {{context.trigger.output.invoiceId}} for ${{context.trigger.output.amountUsd}} was approved and scheduled for payment by {{context.trigger.output.dueDate}}.\n\nReply to this thread if anything looks off."
+      }
+     }
+    }
+   ],
+   "edges": [
+    {
+     "from": "trigger",
+     "to": "check"
+    },
+    {
+     "from": "check",
+     "to": "approve_payment"
+    },
+    {
+     "from": "approve_payment",
+     "to": "post_to_accounting"
+    },
+    {
+     "from": "post_to_accounting",
+     "to": "vendor_confirmation"
+    }
+   ]
+  },
+  "nameCode": "invoice-intake-approval.name",
+  "descriptionCode": "invoice-intake-approval.description",
+  "categoryCode": "finance"
+ },
+ {
+  "id": "employee-onboarding-kickoff",
+  "name": "New-hire kickoff → IT access + team welcome",
+  "description": "A webhook announces a new hire, AI drafts a role-aware welcome and access checklist, then a GitHub issue tracks IT provisioning, Slack announces the start, and the new hire gets a welcome email.",
+  "category": "People",
+  "requiredCredentials": [
+   "github_token",
+   "slack_webhook"
+  ],
+  "workflow": {
+   "dslVersion": "1.0",
+   "id": "employee-onboarding-kickoff",
+   "name": "New-hire kickoff → IT access + team welcome",
+   "inputs": {
+    "type": "object",
+    "required": [
+     "name",
+     "email",
+     "role",
+     "startDate"
+    ],
+    "properties": {
+     "name": {
+      "type": "string",
+      "description": "New hire's full name"
+     },
+     "email": {
+      "type": "string",
+      "description": "New hire's email address"
+     },
+     "role": {
+      "type": "string",
+      "description": "Role or team, e.g. Backend Engineer"
+     },
+     "startDate": {
+      "type": "string",
+      "description": "First day (ISO 8601)"
+     },
+     "manager": {
+      "type": "string",
+      "description": "Optional manager name"
+     }
+    }
+   },
+   "nodes": [
+    {
+     "id": "trigger",
+     "type": "webhook",
+     "config": {}
+    },
+    {
+     "id": "draft_plan",
+     "type": "ai",
+     "config": {
+      "prompt": "You are a people-ops assistant. For a new {{context.trigger.output.role}} starting {{context.trigger.output.startDate}}, write (1) a 3-5 item IT/access checklist appropriate for the role and (2) a warm two-sentence welcome note addressed to {{context.trigger.output.name}}. Label the sections CHECKLIST and WELCOME."
+     }
+    },
+    {
+     "id": "it_access_issue",
+     "type": "tool",
+     "config": {
+      "tool": "github.create_issue",
+      "input": {
+       "credential": "bot-github",
+       "owner": "janusly",
+       "repo": "it-requests",
+       "title": "Provision access: {{context.trigger.output.name}} ({{context.trigger.output.role}}) starts {{context.trigger.output.startDate}}",
+       "body": "{{context.draft_plan.output.response}}",
+       "labels": [
+        "onboarding",
+        "auto-created"
+       ]
+      }
+     }
+    },
+    {
+     "id": "announce_team",
+     "type": "tool",
+     "config": {
+      "tool": "slack.post",
+      "input": {
+       "credential": "incidents-slack",
+       "text": "👋 {{context.trigger.output.name}} joins as {{context.trigger.output.role}} on {{context.trigger.output.startDate}}. IT provisioning: {{context.it_access_issue.output.result.url}}"
+      }
+     }
+    },
+    {
+     "id": "welcome_email",
+     "type": "tool",
+     "config": {
+      "tool": "email.send",
+      "input": {
+       "to": "{{context.trigger.output.email}}",
+       "subject": "Welcome to the team, {{context.trigger.output.name}}!",
+       "text": "Hi {{context.trigger.output.name}},\n\nWe are excited for your start on {{context.trigger.output.startDate}}. Your manager will reach out before day one, and your accounts are being prepared.\n\n{{context.draft_plan.output.response}}"
+      }
+     }
+    }
+   ],
+   "edges": [
+    {
+     "from": "trigger",
+     "to": "draft_plan"
+    },
+    {
+     "from": "draft_plan",
+     "to": "it_access_issue"
+    },
+    {
+     "from": "it_access_issue",
+     "to": "announce_team"
+    },
+    {
+     "from": "announce_team",
+     "to": "welcome_email"
+    }
+   ]
+  },
+  "nameCode": "employee-onboarding-kickoff.name",
+  "descriptionCode": "employee-onboarding-kickoff.description",
+  "categoryCode": "people"
  }
 ]
