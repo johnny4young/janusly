@@ -560,11 +560,33 @@ WHERE run_id = $1 AND status = 'failed'
 ORDER BY finished_at ASC NULLS LAST, node_id ASC
 LIMIT 1;
 
--- name: InsertAutoHealingRun :exec
+-- Claim BEFORE diagnosing. The sweep runs on every replica and its
+-- loop-breaker was a read-then-write, so overlapping ticks proposed the
+-- same repair twice and paid for two LLM diagnoses. The unique
+-- dead_letter_id index makes this claim the serialization point; the row
+-- is settled with the real proposal, or deleted when no patch is found so
+-- the candidate stays eligible.
+-- name: ClaimAutoHealingCandidate :execrows
 INSERT INTO auto_healing_runs (id, org_id, dead_letter_id, signature, status,
-                               proposed_patch_json, approach_label, confidence,
-                               loop_attempt_count, metadata)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
+                               loop_attempt_count)
+VALUES ($1, $2, $3, $4, 'diagnosing', $5)
+ON CONFLICT (dead_letter_id) WHERE status = 'diagnosing' DO NOTHING;
+
+-- name: SettleAutoHealingProposal :execrows
+UPDATE auto_healing_runs
+SET status = 'proposed', proposed_patch_json = sqlc.arg(proposed_patch_json),
+    approach_label = sqlc.arg(approach_label), confidence = sqlc.arg(confidence),
+    metadata = sqlc.arg(metadata), updated_at = now()
+WHERE id = sqlc.arg(id) AND status = 'diagnosing';
+
+-- name: DeleteAutoHealingClaim :exec
+DELETE FROM auto_healing_runs WHERE id = $1 AND status = 'diagnosing';
+
+-- A replica that died mid-diagnosis leaves its claim behind; without this
+-- the candidate would never be healable again.
+-- name: ExpireStaleAutoHealingClaims :execrows
+DELETE FROM auto_healing_runs
+WHERE status = 'diagnosing' AND updated_at < now() - interval '15 minutes';
 
 -- name: ListValidatingAutoHealingRuns :many
 SELECT ahr.id, ahr.org_id, ahr.validation_run_id, r.status AS run_status,

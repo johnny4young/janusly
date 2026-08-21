@@ -111,6 +111,41 @@ func (q *Queries) CancelRunningReplayCampaign(ctx context.Context, arg CancelRun
 	return i, err
 }
 
+const claimAutoHealingCandidate = `-- name: ClaimAutoHealingCandidate :execrows
+INSERT INTO auto_healing_runs (id, org_id, dead_letter_id, signature, status,
+                               loop_attempt_count)
+VALUES ($1, $2, $3, $4, 'diagnosing', $5)
+ON CONFLICT (dead_letter_id) WHERE status = 'diagnosing' DO NOTHING
+`
+
+type ClaimAutoHealingCandidateParams struct {
+	ID               string
+	OrgID            string
+	DeadLetterID     string
+	Signature        string
+	LoopAttemptCount int32
+}
+
+// Claim BEFORE diagnosing. The sweep runs on every replica and its
+// loop-breaker was a read-then-write, so overlapping ticks proposed the
+// same repair twice and paid for two LLM diagnoses. The unique
+// dead_letter_id index makes this claim the serialization point; the row
+// is settled with the real proposal, or deleted when no patch is found so
+// the candidate stays eligible.
+func (q *Queries) ClaimAutoHealingCandidate(ctx context.Context, arg ClaimAutoHealingCandidateParams) (int64, error) {
+	result, err := q.db.Exec(ctx, claimAutoHealingCandidate,
+		arg.ID,
+		arg.OrgID,
+		arg.DeadLetterID,
+		arg.Signature,
+		arg.LoopAttemptCount,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const completeRunNode = `-- name: CompleteRunNode :execrows
 
 
@@ -227,6 +262,15 @@ func (q *Queries) DecideAutoHealingRun(ctx context.Context, arg DecideAutoHealin
 	return result.RowsAffected(), nil
 }
 
+const deleteAutoHealingClaim = `-- name: DeleteAutoHealingClaim :exec
+DELETE FROM auto_healing_runs WHERE id = $1 AND status = 'diagnosing'
+`
+
+func (q *Queries) DeleteAutoHealingClaim(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, deleteAutoHealingClaim, id)
+	return err
+}
+
 const deleteExpiredRunEventsBatch = `-- name: DeleteExpiredRunEventsBatch :execrows
 
 
@@ -309,6 +353,21 @@ func (q *Queries) EscalateWaitingApprovalDeadline(ctx context.Context, arg Escal
 		arg.NodeID,
 		arg.ExpectedDeadlineAt,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const expireStaleAutoHealingClaims = `-- name: ExpireStaleAutoHealingClaims :execrows
+DELETE FROM auto_healing_runs
+WHERE status = 'diagnosing' AND updated_at < now() - interval '15 minutes'
+`
+
+// A replica that died mid-diagnosis leaves its claim behind; without this
+// the candidate would never be healable again.
+func (q *Queries) ExpireStaleAutoHealingClaims(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, expireStaleAutoHealingClaims)
 	if err != nil {
 		return 0, err
 	}
@@ -842,42 +901,6 @@ func (q *Queries) GetStartIdempotencyRun(ctx context.Context, arg GetStartIdempo
 	var run_id string
 	err := row.Scan(&run_id)
 	return run_id, err
-}
-
-const insertAutoHealingRun = `-- name: InsertAutoHealingRun :exec
-INSERT INTO auto_healing_runs (id, org_id, dead_letter_id, signature, status,
-                               proposed_patch_json, approach_label, confidence,
-                               loop_attempt_count, metadata)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-`
-
-type InsertAutoHealingRunParams struct {
-	ID                string
-	OrgID             string
-	DeadLetterID      string
-	Signature         string
-	Status            string
-	ProposedPatchJson json.RawMessage
-	ApproachLabel     pgtype.Text
-	Confidence        pgtype.Int4
-	LoopAttemptCount  int32
-	Metadata          json.RawMessage
-}
-
-func (q *Queries) InsertAutoHealingRun(ctx context.Context, arg InsertAutoHealingRunParams) error {
-	_, err := q.db.Exec(ctx, insertAutoHealingRun,
-		arg.ID,
-		arg.OrgID,
-		arg.DeadLetterID,
-		arg.Signature,
-		arg.Status,
-		arg.ProposedPatchJson,
-		arg.ApproachLabel,
-		arg.Confidence,
-		arg.LoopAttemptCount,
-		arg.Metadata,
-	)
-	return err
 }
 
 const insertExternalRuntimeConnection = `-- name: InsertExternalRuntimeConnection :one
@@ -2224,6 +2247,36 @@ func (q *Queries) SetRunSemanticOutcome(ctx context.Context, arg SetRunSemanticO
 		arg.ViolationCount,
 	)
 	return err
+}
+
+const settleAutoHealingProposal = `-- name: SettleAutoHealingProposal :execrows
+UPDATE auto_healing_runs
+SET status = 'proposed', proposed_patch_json = $1,
+    approach_label = $2, confidence = $3,
+    metadata = $4, updated_at = now()
+WHERE id = $5 AND status = 'diagnosing'
+`
+
+type SettleAutoHealingProposalParams struct {
+	ProposedPatchJson json.RawMessage
+	ApproachLabel     pgtype.Text
+	Confidence        pgtype.Int4
+	Metadata          json.RawMessage
+	ID                string
+}
+
+func (q *Queries) SettleAutoHealingProposal(ctx context.Context, arg SettleAutoHealingProposalParams) (int64, error) {
+	result, err := q.db.Exec(ctx, settleAutoHealingProposal,
+		arg.ProposedPatchJson,
+		arg.ApproachLabel,
+		arg.Confidence,
+		arg.Metadata,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const skipRunNode = `-- name: SkipRunNode :execrows

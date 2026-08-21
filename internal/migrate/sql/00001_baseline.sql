@@ -2078,6 +2078,13 @@ CREATE INDEX auth_sessions_user_expiry_idx ON public.auth_sessions USING btree (
 
 
 --
+-- Name: auto_healing_runs_dead_letter_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX auto_healing_runs_dead_letter_key ON public.auto_healing_runs USING btree (dead_letter_id) WHERE (status = 'diagnosing'::text);
+
+
+--
 -- Name: auto_healing_runs_org_dlq_idx; Type: INDEX; Schema: public; Owner: -
 --
 

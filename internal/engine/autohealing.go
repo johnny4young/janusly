@@ -95,6 +95,9 @@ func (e *Engine) ScanOrgForHealing(ctx context.Context, orgID string) int {
 
 func (e *Engine) scanOrgForHealing(ctx context.Context, orgID string, since time.Time) int {
 	q := store.New(e.pool)
+	// Claims left behind by a replica that died mid-diagnosis would block
+	// their candidate forever.
+	_, _ = q.ExpireStaleAutoHealingClaims(ctx)
 	rows, err := q.ListOpenDeadLettersForHealing(ctx, store.ListOpenDeadLettersForHealingParams{
 		OrgID: orgID, CreatedAt: &since,
 	})
@@ -131,28 +134,40 @@ func (e *Engine) scanOrgForHealing(ctx context.Context, orgID string, since time
 			continue
 		}
 		candidate := cluster[0]
+		// Claim BEFORE diagnosing: the sweep ticks on every replica, so an
+		// unclaimed diagnosis pays for two LLM calls and proposes the same
+		// repair twice. The claim loses cleanly against a concurrent one.
+		runID := uuid.NewString()
+		claimed, err := q.ClaimAutoHealingCandidate(ctx, store.ClaimAutoHealingCandidateParams{
+			ID: runID, OrgID: orgID, DeadLetterID: candidate.ID,
+			Signature: clusterSignature, LoopAttemptCount: int32(attempts) + 1,
+		})
+		if err != nil || claimed == 0 {
+			continue
+		}
+		abandon := func() {
+			_ = q.DeleteAutoHealingClaim(ctx, runID)
+		}
 		patch, label := deterministicHealingPatch(candidate)
 		confidence := int32(30)
 		if llmPatch, llmConfidence := e.llmHealingPatch(ctx, orgID, candidate, clusterSignature); llmPatch != nil {
 			patch, label, confidence = llmPatch, "llm_patch", llmConfidence
 		}
 		if patch == nil {
+			abandon()
 			continue
 		}
-		runID := uuid.NewString()
 		patchJSON, _ := json.Marshal(patch)
 		metadata, _ := json.Marshal(map[string]any{
 			"clusterSize": len(cluster), "nodeId": candidate.NodeID,
 		})
-		if err := q.InsertAutoHealingRun(ctx, store.InsertAutoHealingRunParams{
-			ID: runID, OrgID: orgID, DeadLetterID: candidate.ID,
-			Signature: clusterSignature, Status: "proposed",
-			ProposedPatchJson: patchJSON,
-			ApproachLabel:     pgtype.Text{String: label, Valid: true},
-			Confidence:        pgtype.Int4{Int32: confidence, Valid: true},
-			LoopAttemptCount:  int32(attempts) + 1,
-			Metadata:          metadata,
-		}); err != nil {
+		if settled, err := q.SettleAutoHealingProposal(ctx, store.SettleAutoHealingProposalParams{
+			ID: runID, ProposedPatchJson: patchJSON,
+			ApproachLabel: pgtype.Text{String: label, Valid: true},
+			Confidence:    pgtype.Int4{Int32: confidence, Valid: true},
+			Metadata:      metadata,
+		}); err != nil || settled == 0 {
+			abandon()
 			continue
 		}
 		// Sandbox validation with the PATCHED snapshot — write sides skip.
