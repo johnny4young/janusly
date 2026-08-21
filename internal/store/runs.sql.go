@@ -329,6 +329,18 @@ func (q *Queries) DeleteExternalRuntimeConnection(ctx context.Context, arg Delet
 	return i, err
 }
 
+const deleteRunEventsByID = `-- name: DeleteRunEventsByID :execrows
+DELETE FROM run_events WHERE id = ANY($1::text[])
+`
+
+func (q *Queries) DeleteRunEventsByID(ctx context.Context, ids []string) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteRunEventsByID, ids)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const escalateWaitingApprovalDeadline = `-- name: EscalateWaitingApprovalDeadline :execrows
 UPDATE run_nodes
 SET state_json = $1, waiting_repair_after = NULL
@@ -2228,6 +2240,62 @@ func (q *Queries) ReviveFailedRun(ctx context.Context, id string) (int64, error)
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const selectExpiredRunEventsBatch = `-- name: SelectExpiredRunEventsBatch :many
+SELECT re.id, re.run_id, re.node_id, re.type, re.payload, re.created_at
+FROM run_events re
+JOIN runs r ON r.id = re.run_id
+WHERE r.org_id = $1::text
+  AND re.created_at < $2::timestamptz
+  AND (re.hold_until IS NULL OR re.hold_until <= now())
+ORDER BY re.created_at, re.id
+LIMIT $3
+`
+
+type SelectExpiredRunEventsBatchParams struct {
+	TargetOrg string
+	Cutoff    time.Time
+	BatchSize int32
+}
+
+type SelectExpiredRunEventsBatchRow struct {
+	ID        string
+	RunID     string
+	NodeID    pgtype.Text
+	Type      string
+	Payload   json.RawMessage
+	CreatedAt *time.Time
+}
+
+// Archival reads the EXACT batch it will hand to the object store, and the
+// delete below takes those ids back — never a second cutoff scan, so a row
+// can never be deleted without having been exported first.
+func (q *Queries) SelectExpiredRunEventsBatch(ctx context.Context, arg SelectExpiredRunEventsBatchParams) ([]SelectExpiredRunEventsBatchRow, error) {
+	rows, err := q.db.Query(ctx, selectExpiredRunEventsBatch, arg.TargetOrg, arg.Cutoff, arg.BatchSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SelectExpiredRunEventsBatchRow
+	for rows.Next() {
+		var i SelectExpiredRunEventsBatchRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.NodeID,
+			&i.Type,
+			&i.Payload,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const setExternalRuntimeEventProjectionState = `-- name: SetExternalRuntimeEventProjectionState :exec

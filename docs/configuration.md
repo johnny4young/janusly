@@ -90,6 +90,10 @@ Outbound safety and integration settings include:
   `JANUSLY_MCP_CLIENT_WRITES_ENABLED` (`mcp_tool` steps against external
   servers)
 - `JANUSLY_PUBLIC_APP_URL` for shareable report links
+- `JANUSLY_RETENTION_ARCHIVE_RUN_EVENTS` exports expiring run events as
+  JSONL to the object store before the retention sweep deletes them; rows
+  are only deleted once their export is stored, so an unavailable store
+  halts the drain instead of losing history
 - `JANUSLY_MAILER_PROVIDER` and `JANUSLY_MAILER_FROM`
 - `RESEND_API_KEY` or `SENDGRID_API_KEY`
 - `JANUSLY_OBJECT_STORE_PROVIDER`

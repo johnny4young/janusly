@@ -101,8 +101,24 @@ func (e *Engine) ProcessDataRetentionSweep(ctx context.Context, batchSize, maxBa
 			cutoff := e.now().UTC().AddDate(0, 0, -windowDays)
 			startedAt := time.Now()
 			result := PurgeResult{CutoffAt: cutoff.Format(time.RFC3339)}
+			// Archival replaces the plain delete for run events when the
+			// tenant opted in: export first, delete exactly what was
+			// exported, and stop the table's drain if the store refuses.
+			archive := false
+			if table.name == "run_events" {
+				archived, _ := orgconfig.ResolveValue("retention.archiveRunEvents", tenantRows[orgID], os.LookupEnv)
+				archive, _ = archived.(bool)
+			}
 			for batch := 0; batch < maxBatches; batch++ {
-				deleted, err := table.deleteFn(ctx, q, orgID, cutoff, int32(batchSize))
+				var deleted int64
+				var err error
+				if archive {
+					var archivedRows int
+					archivedRows, err = e.archiveExpiredRunEvents(ctx, q, orgID, cutoff, int32(batchSize))
+					deleted = int64(archivedRows)
+				} else {
+					deleted, err = table.deleteFn(ctx, q, orgID, cutoff, int32(batchSize))
+				}
 				if err != nil {
 					return results, err
 				}

@@ -412,6 +412,22 @@ DELETE FROM run_events WHERE id IN (
     AND (re.hold_until IS NULL OR re.hold_until <= now())
   LIMIT sqlc.arg(batch_size));
 
+-- Archival reads the EXACT batch it will hand to the object store, and the
+-- delete below takes those ids back — never a second cutoff scan, so a row
+-- can never be deleted without having been exported first.
+-- name: SelectExpiredRunEventsBatch :many
+SELECT re.id, re.run_id, re.node_id, re.type, re.payload, re.created_at
+FROM run_events re
+JOIN runs r ON r.id = re.run_id
+WHERE r.org_id = sqlc.arg(target_org)::text
+  AND re.created_at < sqlc.arg(cutoff)::timestamptz
+  AND (re.hold_until IS NULL OR re.hold_until <= now())
+ORDER BY re.created_at, re.id
+LIMIT sqlc.arg(batch_size);
+
+-- name: DeleteRunEventsByID :execrows
+DELETE FROM run_events WHERE id = ANY(sqlc.arg(ids)::text[]);
+
 -- Newest bounded usage slice for one run (the /run/usage read). The
 
 -- explicit NULLS LAST matches the index order — created_at is
