@@ -384,6 +384,15 @@ LIMIT 500;
 -- name: MarkDeadLetterResolved :execrows
 UPDATE dead_letters SET status = 'resolved' WHERE org_id = $1 AND id = $2;
 
+-- Bulk resolve used to spend one existence read plus one update per id.
+-- Resolving the whole selection in one statement and RETURNING the ids it
+-- actually touched keeps the per-id error reporting exact: anything the
+-- caller listed but the statement did not return is not this org's.
+-- name: MarkDeadLettersResolved :many
+UPDATE dead_letters SET status = 'resolved'
+WHERE org_id = sqlc.arg(org_id) AND id = ANY(sqlc.arg(ids)::text[])
+RETURNING id;
+
 -- name: GetRecoveryItemForDeadLetter :one
 SELECT id, status FROM recovery_items WHERE org_id = $1 AND dead_letter_id = $2;
 

@@ -1376,6 +1376,41 @@ func (q *Queries) MarkDeadLetterResolved(ctx context.Context, arg MarkDeadLetter
 	return result.RowsAffected(), nil
 }
 
+const markDeadLettersResolved = `-- name: MarkDeadLettersResolved :many
+UPDATE dead_letters SET status = 'resolved'
+WHERE org_id = $1 AND id = ANY($2::text[])
+RETURNING id
+`
+
+type MarkDeadLettersResolvedParams struct {
+	OrgID string
+	Ids   []string
+}
+
+// Bulk resolve used to spend one existence read plus one update per id.
+// Resolving the whole selection in one statement and RETURNING the ids it
+// actually touched keeps the per-id error reporting exact: anything the
+// caller listed but the statement did not return is not this org's.
+func (q *Queries) MarkDeadLettersResolved(ctx context.Context, arg MarkDeadLettersResolvedParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, markDeadLettersResolved, arg.OrgID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markExternalRecoveryCaseRecovered = `-- name: MarkExternalRecoveryCaseRecovered :exec
 UPDATE external_recovery_cases
 SET state = 'observed_recovered', evidence_json = $5, last_observed_at = $6,

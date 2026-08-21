@@ -205,16 +205,23 @@ func (s *V1Server) bulkResolveCore(r *http.Request, rc v1Request) opResult {
 	}
 	q := store.New(s.pool)
 	errorsOut := make([]map[string]any, 0)
+	// One org-scoped statement resolves the selection; the returned ids are
+	// exactly the rows this org owns, so an id missing from them is the
+	// same "not found" the per-id read used to report.
+	touched, err := q.MarkDeadLettersResolved(r.Context(), store.MarkDeadLettersResolvedParams{
+		OrgID: rc.orgID, Ids: ids,
+	})
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	resolvedIDs := make(map[string]bool, len(touched))
+	for _, id := range touched {
+		resolvedIDs[id] = true
+	}
 	resolved := 0
 	for _, id := range ids {
-		if _, err := q.GetDeadLetter(r.Context(), store.GetDeadLetterParams{ID: id, OrgID: rc.orgID}); err != nil {
+		if !resolvedIDs[id] {
 			errorsOut = append(errorsOut, map[string]any{"deadLetterId": id, "error": "DLQ entry not found"})
-			continue
-		}
-		if _, err := q.MarkDeadLetterResolved(r.Context(), store.MarkDeadLetterResolvedParams{
-			OrgID: rc.orgID, ID: id,
-		}); err != nil {
-			errorsOut = append(errorsOut, map[string]any{"deadLetterId": id, "error": err.Error()})
 			continue
 		}
 		audit.Write(r.Context(), s.pool, rc.authContext, "dlq.resolved", audit.Options{
