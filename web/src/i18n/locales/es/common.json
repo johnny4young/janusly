@@ -2,7 +2,6 @@
   "app.loading": "Cargando Janusly…",
   "app.brand": "Janusly",
   "app.brandSubtitle": "Asegurá tu plano de control",
-
   "common.save": "Guardar",
   "common.cancel": "Cancelar",
   "confirmDialog.title": "¿Estás seguro?",
@@ -19,12 +18,10 @@
   "common.aboutSection": "Acerca de esta sección",
   "common.none": "Ninguno",
   "common.unknown": "Desconocido",
-
   "api.error.offline": "La API de Janusly no está disponible. Inicia la API y actualiza esta vista",
   "api.error.malformedResponse": "La API respondió con un contenido ilegible. Reintenta y revisa los logs de la API si persiste",
   "api.error.requestFailed": "La solicitud falló con estado {{status}}",
   "api.error.downloadFailed": "La descarga falló con estado {{status}}",
-
   "apiErrors.identity_human_required": "Usa una cuenta personal para crear una organización",
   "apiErrors.identity_email_required": "Se requiere un correo verificado de la cuenta",
   "apiErrors.identity_invitation_not_found": "Esta invitación ya no está disponible",
@@ -297,7 +294,6 @@
   "apiErrors.workflows_validation_failed": "La validación del workflow falló",
   "apiErrors.workflows_version_malformed": "La versión del workflow está mal formada",
   "apiErrors.workflows_workflow_id_required": "workflowId es obligatorio",
-
   "auth.error.orgSwitchFailed": "La sesión del navegador no pudo cambiar de organización. Reintenta o inicia sesión de nuevo",
   "auth.login.welcomeBack": "Bienvenido de nuevo",
   "auth.login.createAccount": "Crear tu cuenta",
@@ -332,7 +328,6 @@
   "auth.workspace.selectFailed": "No se pudo seleccionar el espacio de trabajo",
   "auth.workspace.createFailed": "No se pudo crear el espacio de trabajo",
   "auth.workspace.acceptFailed": "No se pudo aceptar la invitación",
-
   "auth.userMenu.language": "Idioma",
   "userMenu.dialogLabel": "Cuenta y controles del espacio",
   "userMenu.role.editor": "Editor",
@@ -533,22 +528,17 @@
   "recoveryCenter.tile.today.clean": "limpio",
   "recoveryCenter.tile.today.pending": "pendientes",
   "recoveryCenter.tile.today.openAll": "Abrir operaciones",
-
   "auth.locale.system": "Sistema",
   "auth.locale.changeLanguage": "Cambiar idioma",
-
   "layout.workflowStatus": "Estado del flujo",
   "layout.openMenu": "Abrir menú de usuario",
   "layout.closeMenu": "Cerrar menú",
   "layout.mobileNav.open": "Navegación",
   "layout.mobileNav.close": "Cerrar navegación",
   "layout.mobileNav.label": "Navegación del espacio de trabajo",
-
   "workflow.defaultName": "Flujo sin título",
-
   "canvas.edge.condition": "condición",
   "canvas.edge.connection": "De {{from}} a {{to}}",
-
   "nodeDefaults.approval.message": "Aprueba este paso del flujo.",
   "nodeDefaults.humanForm.title": "Recolectar detalles de la solicitud",
   "nodeDefaults.humanForm.description": "Pide a un operador que complete los campos que este flujo necesita antes de continuar.",
@@ -563,7 +553,6 @@
   "nodeDefaults.multiAgent.validator.role": "Revisor de QA",
   "nodeDefaults.multiAgent.validator.persona": "Revisor escéptico",
   "nodeDefaults.multiAgent.validator.goal": "Validar la salida del agente anterior e identificar problemas",
-
   "toasts.signedOut": "Sesión cerrada",
   "toasts.signOutFailed": "No se pudo cerrar sesión",
   "toasts.savedVersion": "Versión {{version}} guardada",
@@ -604,7 +593,6 @@
   "toasts.aiResponseInvalid": "La respuesta de la IA no incluyó un flujo ejecutable.",
   "toasts.noWorkflowExplanation": "No hay explicación disponible del flujo.",
   "toasts.apiNoRunId": "El API no devolvió runId",
-
   "workspace.sectionNav.aria": "Secciones de {{destination}}",
   "workspace.destination.home.label": "Inicio",
   "workspace.destination.home.helper": "Prioridades y resumen de recuperación",
@@ -684,7 +672,6 @@
   "sidebar.footer.collapse": "Colapsar barra lateral",
   "sidebar.footer.expand": "Expandir barra lateral",
   "sidebar.footer.help": "Ayuda",
-
   "rightPanel.experiments.title": "Experimentos",
   "rightPanel.experiments.description": "Compara candidatos de prompt o modelo con evaluaciones de recuperación que cuentan con consentimiento.",
   "experiments.setup.kicker": "Arnés de evaluación",
@@ -756,7 +743,6 @@
   "experiments.toast.runError": "No se pudo ejecutar el experimento",
   "experiments.toast.candidateCopied": "Referencia candidata copiada",
   "experiments.toast.copyError": "No se pudo copiar la referencia candidata",
-
   "nodes.http.label": "Llamar a una API",
   "nodes.http.helper": "Traer datos de un servicio",
   "nodes.noop.label": "No hacer nada",
@@ -810,7 +796,6 @@
   "nodes.pagerduty_incident.label": "Incidente de PagerDuty",
   "nodes.pagerduty_incident.helper": "Iniciar este flujo desde un evento V3 firmado por PagerDuty",
   "nodes.fallbackHelper": "Paso del flujo",
-
   "nodeSummary.http.empty": "Agregar una URL de request",
   "nodeSummary.ai.empty": "Agregar un prompt para Janusly",
   "nodeSummary.ai.saved": "Prompt guardado: {{name}}",
@@ -854,7 +839,6 @@
   "nodeSummary.pagerduty_incident.empty": "Definir una credencial para el webhook de PagerDuty",
   "nodeSummary.pagerduty_incident.set": "Firmado con {{credential}}",
   "nodeSummary.fallback": "Revisar la configuración del paso",
-
   "status.created": "Creada",
   "status.draft": "Borrador",
   "status.pending": "Listo",
@@ -869,11 +853,9 @@
   "status.open": "Abierto",
   "status.replayed": "Reintentado",
   "status.resolved": "Resuelto",
-
   "aiMode.ai": "IA",
   "aiMode.fallback": "Modo local",
   "aiMode.error": "Necesita atención",
-
   "canvas.flowMapSummary": "Resumen del mapa de flujo",
   "canvas.flowMap": "Mapa de flujo",
   "canvas.runMap": "Instantánea de la ejecución",
@@ -907,7 +889,6 @@
   "canvas.stepPicker.search": "Buscar pasos…",
   "canvas.stepPicker.close": "Cerrar selector de pasos",
   "canvas.stepPicker.empty": "Ningún paso coincide con esta búsqueda.",
-
   "workflowsDashboard.toastFailed": "No se pudieron cargar los flujos",
   "workflowsDashboard.loadErrorTitle": "Los flujos no están disponibles",
   "workflowsDashboard.retry": "Intentar de nuevo",
@@ -976,10 +957,10 @@
   "workflowsDashboard.paused": "Pausado",
   "workflowsDashboard.pausedByBreaker": "Cortocircuito",
   "workflowsDashboard.resumeFlow": "Reanudar",
-  "workflowsDashboard.resumeFlowTitle": "Reanuda este workflow \u2014 hazlo cuando el fallo de fondo est\u00e9 corregido",
+  "workflowsDashboard.resumeFlowTitle": "Reanuda este workflow — hazlo cuando el fallo de fondo esté corregido",
   "workflowsDashboard.resumed": "Workflow reanudado",
-  "workflowsDashboard.resumedWithBackfill": "Workflow reanudado \u2014 {{count}} eventos en espera reproducidos",
-  "workflowsDashboard.resumedWithRemaining": "Workflow reanudado \u2014 {{count}} reproducidos, {{remaining}} a\u00fan en cola",
+  "workflowsDashboard.resumedWithBackfill": "Workflow reanudado — {{count}} eventos en espera reproducidos",
+  "workflowsDashboard.resumedWithRemaining": "Workflow reanudado — {{count}} reproducidos, {{remaining}} aún en cola",
   "workflowsDashboard.continueBackfill": "Continuar eventos",
   "workflowsDashboard.continueBackfillTitle": "Volver a ejecutar los siguientes eventos en espera ({{count}} pendientes)",
   "workflowsDashboard.backfillWithRemaining": "Se volvieron a ejecutar {{count}} eventos en espera; quedan {{remaining}} en cola",
@@ -1046,21 +1027,18 @@
   "workflowsDashboard.rowTagAdded": "Se agregó {{tag}}",
   "workflowsDashboard.rowTagRemoved": "Se quitó {{tag}}",
   "workflowsDashboard.rowTagFailed": "No se pudo actualizar la etiqueta. Inténtalo de nuevo.",
-
   "budgetBanner.exceeded": "Se superó el presupuesto de IA de la {{scope}} — llamada bloqueada.",
   "budgetBanner.detail": "Llevas gastado <0>${{spent}}</0> del límite mensual de <1>${{limit}}</1>. Sube el presupuesto en Configuración → Espacio de trabajo o cambia la política a solo aviso para que sigan las llamadas de IA.",
   "budgetBanner.scope.workflow": "workflow",
   "budgetBanner.scope.org": "org",
   "budgetBanner.openSettings": "Abrir configuración de presupuesto",
   "budgetBanner.dismiss": "Descartar el aviso de presupuesto",
-
   "humanFormDialog.kicker": "Paso de formulario",
   "humanFormDialog.title": "Completar formulario",
   "humanFormDialog.description": "Envía los campos solicitados para que este flujo continúe.",
   "humanFormDialog.submit": "Enviar formulario",
   "humanFormDialog.submitting": "Enviando…",
   "humanFormDialog.close": "Cerrar formulario",
-
   "badges.readiness.unavailable": "Listo para producción no disponible",
   "badges.readiness.checking": "Comprobando…",
   "badges.readiness.productionReady": "Producción · Lista",
@@ -1069,7 +1047,6 @@
   "badges.readiness.blockers_one": "Producción · {{count}} bloqueo",
   "badges.readiness.blockers_other": "Producción · {{count}} bloqueos",
   "badges.readiness.aria": "Abrir problemas de autoría — {{summary}}",
-
   "badges.health.unavailable": "Salud no disponible",
   "badges.health.scoring": "Calculando…",
   "badges.health.label": "Flujo · {{score}} / 100",
@@ -1084,7 +1061,6 @@
   "badges.health.category.maintainability": "Mantenibilidad",
   "badges.health.category.aiRisk": "Riesgo IA",
   "badges.health.cellLabel": "{{category}}: {{score}}",
-
   "badges.slo.breachPill": "SLO incumplido",
   "badges.slo.breachAria": "El SLO del workflow está actualmente incumplido",
   "badges.slo.sectionTitle": "Contrato SLO (ventana de {{windowDays}} días)",
@@ -1095,7 +1071,6 @@
   "badges.slo.metric.stuckWaitingNodesMax": "Nodos esperando atascados (máx)",
   "badges.slo.metricPass": "objetivo {{target}} — dentro del contrato",
   "badges.slo.metricBreach": "objetivo {{target}} — incumplido",
-
   "workflowRollout.eyebrow": "Entrega progresiva",
   "workflowRollout.title": "Despliegue canary",
   "workflowRollout.description": "Envía una proporción determinista del tráfico productivo a la versión más reciente. Janusly devuelve automáticamente el tráfico a la base cuando el canary incumple su umbral de éxito.",
@@ -1166,7 +1141,6 @@
   "workflowRollout.qualification.invalidResponse": "La respuesta de calificación de resultados no es válida",
   "workflowRollout.qualification.passedToast": "La comparación del conjunto de resultados fue superada.",
   "workflowRollout.qualification.failedToast": "La comparación del conjunto de resultados encontró regresiones.",
-
   "workflowSlo.title": "SLO de confiabilidad",
   "workflowSlo.description": "Declara el contrato que este workflow debe cumplir. Los incumplimientos muestran una pastilla roja en el badge de salud.",
   "workflowSlo.field.successRatePercent": "Tasa de éxito mínima (%)",
@@ -1180,7 +1154,6 @@
   "workflowSlo.saved": "SLO guardado.",
   "workflowSlo.error": "No se pudo guardar el SLO: {{message}}",
   "workflowSlo.windowOption": "{{days}} días",
-
   "healthRationale.reliability.no_runs": "Todavía no hay ejecuciones; puntaje neutro hasta que se acumulen datos de ejecución.",
   "healthRationale.reliability.summary": "{{successCount}}/{{totalRuns}} ejecuciones terminaron bien; {{dlqOpenCount}} dead letters abiertas; {{retryCount}} eventos de reintento.",
   "healthRationale.safety.clean": "Las verificaciones de readiness pasan; no hay problemas de postura productiva.",
@@ -1198,7 +1171,6 @@
   "healthRationale.maintainability.noApproval": "sin control humano",
   "healthRationale.ai_risk.no_ai": "No hay nodos IA / agente; sin superficie de riesgo IA.",
   "healthRationale.ai_risk.summary": "{{aiNodeCount}} nodos IA/agente; {{totalTokens}} tokens consumidos; {{rawSecretCount}} hallazgos de secretos hardcodeados.",
-
   "rollback.kicker": "Reversión del flujo",
   "rollback.title": "¿Revertir a v{{version}}?",
   "rollback.description": "Esto crea una nueva versión con el contenido de v{{target}}. El historial queda intacto — v{{current}} y las versiones posteriores siguen accesibles.",
@@ -1210,7 +1182,6 @@
   "rollback.afterLabel": "v{{version}} (revirtiendo a)",
   "rollback.action": "Revertir",
   "rollback.toastSuccess": "Revertido a v{{target}} como v{{newVersion}}",
-
   "comparison.empty": "Ningún paso corrió en ninguna de las ejecuciones. Nada que comparar.",
   "comparison.summaryAria": "Resumen de la comparación de replay",
   "comparison.tableAria": "Comparación por paso",
@@ -1235,7 +1206,6 @@
   "comparison.equality.onlyBase": "Solo base",
   "comparison.equality.onlyReplay": "Solo replay",
   "comparison.missing": "ausente",
-
   "runExplain.title": "Pregúntale a Janusly sobre esta ejecución",
   "runExplain.helper": "Usa lenguaje natural. Janusly responde con IA cuando está conectada; si no, usa señales locales de la ejecución.",
   "runExplain.kicker": "Chat",
@@ -1257,7 +1227,6 @@
   "runExplain.errorQuota": "Tu cuenta de OpenAI no tiene cuota disponible. Agrega un método de pago en el dashboard de OpenAI y reintenta.",
   "runExplain.errorRate": "Se alcanzó el límite de rate. Espera unos segundos y vuelve a preguntar, o cambia a un modelo de mayor tier.",
   "runExplain.errorAuth": "El proveedor de IA rechazó la API key. Revisa ANTHROPIC_API_KEY en el .env de la raíz y reinicia make dev.",
-
   "diff.tag.secret_ref": "Secret-ref",
   "diff.tag.retry": "Reintento",
   "diff.tag.timeout": "Timeout",
@@ -1292,7 +1261,6 @@
   "diff.summary.workflowFields_other": "{{count}} campos del flujo",
   "diff.condition.when": "cuando {{condition}}",
   "diff.redacted": "[redactado]",
-
   "operations.kicker": "Configuración",
   "operations.title": "Configuración del espacio",
   "operations.intro": "Configuración y estado de los últimos {{days}} días.",
@@ -1316,7 +1284,6 @@
   "operations.cost.cache.readShare": "Entrada servida desde caché",
   "operations.cost.cache.readTokens": "Tokens leídos de caché",
   "operations.cost.cache.creationTokens": "Tokens guardados en caché",
-
   "operations.rateLimiter.label": "Limitador de solicitudes",
   "operations.rateLimiter.healthy": "Limitador de solicitudes saludable",
   "operations.rateLimiter.degraded_one": "Limitador de solicitudes degradado — {{count}} grupo sin aplicar el límite. El tráfico sigue permitido.",
@@ -1360,7 +1327,6 @@
   "runStream.label": "Conexión en vivo de la ejecución",
   "runStream.live": "En vivo",
   "runStream.polling": "Sondeo",
-
   "operations.section.railLabel": "Áreas de configuración",
   "operations.section.attentionDot": "Requiere atención",
   "operations.section.overview.label": "Buscar configuración",
@@ -1377,11 +1343,9 @@
   "operations.section.usage.helper": "Gasto, tokens y caché de prompts.",
   "operations.section.infrastructure.label": "Infraestructura",
   "operations.section.infrastructure.helper": "Streaming, límites de tráfico y colas de workers.",
-
   "settings.index.searchPlaceholder": "Buscar proveedor, credencial, miembro, alerta, cola…",
   "settings.index.noMatches.title": "No hay configuraciones coincidentes",
   "settings.index.noMatches.body": "Prueba un término más amplio como IA, cola, miembro o conexión.",
-
   "scim.heading": "Sincronización de directorio SCIM",
   "scim.loading": "Cargando directorios SCIM…",
   "scim.list.aria": "Directorios SCIM conectados",
@@ -1442,7 +1406,6 @@
   "scim.mappings.resync.hint": "Un cambio de mapeo aplica a cada miembro en su próxima sincronización del directorio. Re-sincroniza ahora para aplicar los mapeos actuales a todos los miembros activos de inmediato.",
   "scim.mappings.resync.toast": "Re-sincronizados {{members}} miembros ({{changed}} cambios de rol)",
   "scim.mappings.resync.error": "no se pudieron re-sincronizar los roles",
-
   "audit.heading": "Bitácora de auditoría",
   "audit.intro": "Cada mutación en esta org escribe una fila de auditoría — quién hizo qué, y cuándo. Filtra por un prefijo de acción; carga más para retroceder en el historial.",
   "audit.loading": "Cargando bitácora…",
@@ -1463,7 +1426,6 @@
   "audit.col.details": "Detalles",
   "audit.loadMore": "Cargar más",
   "audit.loadingMore": "Cargando…",
-
   "dlq.kicker": "Recuperación",
   "dlq.queue": "Cola de recuperación",
   "dlq.automation.title": "Automatización y patrones",
@@ -1564,7 +1526,7 @@
   "dlq.sort.sla": "SLA (más próximo primero)",
   "dlq.runMeta": "ejecución {{runIdShort}}… / intento {{attempt}}",
   "dlq.selected": "Seleccionado",
-  "dlq.deepLinkNotFound": "Ese fallo ya no est\u00e1 disponible \u2014 el enlace puede estar obsoleto o la retenci\u00f3n ya lo limpi\u00f3.",
+  "dlq.deepLinkNotFound": "Ese fallo ya no está disponible — el enlace puede estar obsoleto o la retención ya lo limpió.",
   "dlq.action.suggest": "Sugerir corrección",
   "dlq.action.retry": "Reintentar",
   "dlq.action.resolve": "Resolver",
@@ -1615,7 +1577,6 @@
   "dlq.suspectVersion.versionLabel": "v{{version}}",
   "dlq.detail.show": "Mostrar {{title}}",
   "dlq.detail.hide": "Ocultar {{title}}",
-
   "versionHistory.heading": "Historial de versiones",
   "versionHistory.compare": "Comparar",
   "versionHistory.cancelCompare": "Cancelar",
@@ -1646,7 +1607,6 @@
   "versionHistory.approach.add_observability": "Agregar observabilidad",
   "versionHistory.approach.simplify": "Simplificar",
   "versionHistory.approach.other": "Otro",
-
   "authPolicy.heading": "Políticas de autenticación",
   "authPolicy.loading": "Cargando políticas de autenticación…",
   "authPolicy.groupAccess": "Acceso",
@@ -1670,7 +1630,6 @@
   "authPolicy.errorInvalidDomain": "Dominio inválido \"{{domain}}\" — usa dominios sin prefijo, como \"acme.com\"",
   "authPolicy.errorLoad": "no se pudieron cargar las políticas de autenticación",
   "authPolicy.errorSave": "no se pudo guardar",
-
   "memoryGovernance.heading": "Gobierno de la memoria",
   "memoryGovernance.intro": "La memoria persistente requiere tanto la habilitación de la plataforma como el consentimiento de la organización. Revocar el consentimiento programa la eliminación en un plazo de siete días.",
   "memoryGovernance.loading": "Cargando el gobierno de la memoria…",
@@ -1689,7 +1648,6 @@
   "memoryGovernance.purgeScheduledSafe": "Sigue programada una eliminación para el {{date}}, pero el consentimiento renovado hará que el proceso la omita de forma segura.",
   "memoryGovernance.purgeRunning": "La memoria se está eliminando ahora.",
   "memoryGovernance.purgeUnknown": "No se pudo confirmar la programación de la eliminación. Las autorizaciones de consentimiento mantienen bloqueada la memoria.",
-
   "members.kicker": "Invitar miembro",
   "members.heading": "Sumar acceso por correo",
   "members.email": "Correo electrónico",
@@ -1718,7 +1676,6 @@
   "members.row.removeTitle": "Eliminar miembro",
   "members.row.removeConfirm": "¿Eliminar a {{member}}?",
   "members.row.removeConfirmCta": "Eliminar",
-
   "budget.kicker": "Gobernanza de costo IA",
   "budget.heading": "Configuración de presupuesto",
   "budget.intro": "Configura límites mensuales de gasto en IA. Pon 0 para desactivar el límite. Elige si Janusly solo avisa o frena nuevas llamadas cuando se alcanza el límite.",
@@ -1746,7 +1703,6 @@
   "budget.workflow.action": "Guardar presupuesto del flujo",
   "budget.workflow.toastSaved": "Presupuesto del flujo guardado",
   "budget.workflow.savedConfirm": "Presupuesto del flujo guardado.",
-
   "permissions.heading": "Permisos",
   "permissions.loading": "Cargando permisos…",
   "permissions.builtin": "(built-in)",
@@ -1782,7 +1738,6 @@
   "permissions.add.entryAria": "new-role-{{key}}",
   "permissions.add.create": "Crear rol",
   "permissions.add.creating": "Creando…",
-
   "clusters.heading": "Clusters de fallos",
   "clusters.unavailable": "Rollup de clusters no disponible — {{detail}}",
   "clusters.scoring": "Puntuando fallos recientes…",
@@ -1826,7 +1781,6 @@
   "clusters.showMoreSamples_one": "Mostrar {{count}} muestra más",
   "clusters.showMoreSamples_other": "Mostrar {{count}} muestras más",
   "clusters.showFewerSamples": "Mostrar menos muestras",
-
   "aiStudio.healthOn": "IA conectada",
   "aiStudio.healthOff": "Modo local activo",
   "aiStudio.healthDetailOn": "{{model}} puede armar flujos, explicar ejecuciones y potenciar pasos de IA.",
@@ -1922,7 +1876,6 @@
   "aiStudio.aiError.quota": "Tu cuenta de Anthropic no tiene créditos disponibles. Revisa su configuración de facturación e inténtalo de nuevo.",
   "aiStudio.aiError.rate": "Se alcanzó el límite de solicitudes. Espera unos segundos e inténtalo de nuevo, o usa un modelo con mayor capacidad.",
   "aiStudio.aiError.auth": "Anthropic rechazó la clave de API. Revisa ANTHROPIC_API_KEY en el archivo .env de la raíz y reinicia el API.",
-
   "recoveryDelta.aria": "Delta de recuperación",
   "recoveryDelta.headTitle": "Parche aplicado",
   "recoveryDelta.headSignature": "{{signature}}",
@@ -1964,7 +1917,6 @@
   "recoveryDelta.gathering": "{{current}} de {{threshold}} ejecuciones juntadas — el delta completo aparece a partir de {{threshold}}+ ejecuciones contra v{{version}}.",
   "recoveryDelta.rollbackTo": "Revertir a v{{version}}",
   "recoveryDelta.loadingVersions": "Cargando versiones…",
-
   "runInput.presets.load": "Cargar un preset",
   "runInput.presets.placeholder": "Elige un input guardado…",
   "runInput.presets.namePlaceholder": "Nombre del preset",
@@ -1989,7 +1941,6 @@
   "runInput.error.notArray": "{{label}} debe ser un array JSON",
   "runInput.error.notJson": "{{label}} debe ser JSON válido",
   "runInput.error.serverPrefix": "{{label}} {{reason}}",
-
   "replayLab.kicker": "Replay Lab",
   "replayLab.title": "Replay sandbox",
   "replayLab.description": "Vuelve a ejecutar esta ejecución en un sandbox. Las llamadas HTTP write-side y las herramientas marcadas write-side se omiten. El resultado no afecta métricas de producción ni se guarda como nueva versión.",
@@ -2011,7 +1962,6 @@
   "replayLab.errorComparison": "No se pudo cargar la comparación",
   "replayLab.errorPolling": "Falló el polling de la ejecución de replay",
   "replayLab.errorStart": "No se pudo iniciar el replay",
-
   "replayLab.fork.sectionKicker": "Bifurcar en Replay Lab",
   "replayLab.fork.sectionDescription": "Vuelve a ejecutar desde un nodo completado con una entrada modificada. Los nodos predecesores conservan su salida original.",
   "replayLab.fork.buttonStatusSucceeded": "Bifurcar en {{nodeId}} (exitoso)",
@@ -2030,7 +1980,6 @@
   "replayLab.fork.overrideNotObject": "La entrada de reemplazo debe ser un objeto JSON — los primitivos, los arreglos y null no son admitidos",
   "replayLab.fork.errorStart": "No se pudo crear la bifurcación",
   "replayLab.fork.close": "Cerrar",
-
   "reportDelivery.kicker": "Enviar reporte",
   "reportDelivery.title": "Enviar reporte de la ejecución",
   "reportDelivery.description": "Envía el mismo resumen de ejecución que genera Exportar a Slack, GitHub o un webhook firmado usando una credencial guardada.",
@@ -2070,7 +2019,6 @@
   "reportDelivery.sending": "Enviando…",
   "reportDelivery.closeButton": "Cerrar",
   "reportDelivery.retry": "Reintentar",
-
   "mcpConnections.kicker": "Conexiones MCP",
   "mcpConnections.title": "Servidores MCP externos",
   "mcpConnections.connectedCount": "{{count}} conectado(s)",
@@ -2602,16 +2550,16 @@
   "rightPanel.resilience.jitter": "Añadir variación aleatoria",
   "rightPanel.resilience.retryHelper": "Configura al menos 2 intentos de reintento para cumplir la preparación para producción. Deja un campo vacío para usar el valor predeterminado del entorno de ejecución.",
   "rightPanel.resilience.retryOn.legend": "Reintentar solo en",
-  "rightPanel.resilience.retryOn.allHelper": "Nada seleccionado \u2014 se reintenta cualquier fallo. Un error 4xx de cliente gastar\u00e1 todos los intentos.",
+  "rightPanel.resilience.retryOn.allHelper": "Nada seleccionado — se reintenta cualquier fallo. Un error 4xx de cliente gastará todos los intentos.",
   "rightPanel.resilience.retryOn.selectiveHelper": "Solo se reintentan las clases seleccionadas; otros fallos (ej. un 4xx) fallan de inmediato.",
   "rightPanel.resilience.retryOn.serverError": "Errores de servidor (5xx)",
-  "rightPanel.resilience.retryOn.serverErrorHelper": "Fallos transitorios del upstream \u2014 normalmente vale la pena reintentar.",
-  "rightPanel.resilience.retryOn.rateLimited": "L\u00edmite de tasa (429)",
-  "rightPanel.resilience.retryOn.rateLimitedHelper": "Espera y reintenta cuando el l\u00edmite se libere.",
+  "rightPanel.resilience.retryOn.serverErrorHelper": "Fallos transitorios del upstream — normalmente vale la pena reintentar.",
+  "rightPanel.resilience.retryOn.rateLimited": "Límite de tasa (429)",
+  "rightPanel.resilience.retryOn.rateLimitedHelper": "Espera y reintenta cuando el límite se libere.",
   "rightPanel.resilience.retryOn.timeout": "Timeouts",
   "rightPanel.resilience.retryOn.timeoutHelper": "La llamada o el propio nodo agotaron el tiempo.",
   "rightPanel.resilience.retryOn.network": "Errores de red",
-  "rightPanel.resilience.retryOn.networkHelper": "Conexi\u00f3n reiniciada, fallo de DNS y faltas de transporte similares.",
+  "rightPanel.resilience.retryOn.networkHelper": "Conexión reiniciada, fallo de DNS y faltas de transporte similares.",
   "rightPanel.resilience.timeoutMs": "Tiempo de espera (ms)",
   "rightPanel.resilience.timeoutHelper": "Opcional. Si queda vacío, el nodo usa el tiempo de espera predeterminado del entorno de ejecución.",
   "rightPanel.resilience.mcpTimeoutHelper": "Opcional. Las llamadas MCP usan 30 segundos por defecto y tienen un máximo de 120 segundos.",
@@ -3047,7 +2995,6 @@
   "rightPanel.reasoning.causal.rankingAria": "Clasificación actualizada de candidatos",
   "rightPanel.reasoning.causal.score": "puntuación {{score}}",
   "rightPanel.reasoning.causal.breakdown": "Costo {{cost}} · Latencia {{latency}} · Calidad {{quality}}",
-
   "multiAgent.defaultAgent": "agentes",
   "multiAgent.defaultWorkflow": "flujo",
   "multiAgent.defaultAgentName": "agente",
@@ -3084,7 +3031,6 @@
   "multiAgent.legend.success": "Completado",
   "multiAgent.legend.error": "Falló · reintento",
   "multiAgent.legend.info": "Otro",
-
   "templates.category.ai": "IA",
   "templates.category.communication": "Comunicación",
   "templates.category.data": "Datos",
@@ -3127,7 +3073,6 @@
   "templates.invoice-intake-approval.description": "Un webhook recibe una factura de proveedor, la IA marca anomalías (duplicados, montos inusuales), un humano aprueba el pago, y luego un webhook firmado la envía al sistema contable con email de confirmación al proveedor.",
   "templates.employee-onboarding-kickoff.name": "Kickoff de nuevo ingreso → accesos IT + bienvenida",
   "templates.employee-onboarding-kickoff.description": "Un webhook anuncia un nuevo ingreso, la IA redacta una bienvenida y checklist de accesos según el rol, un issue de GitHub rastrea el aprovisionamiento IT, Slack anuncia el inicio y la persona recibe su email de bienvenida.",
-
   "tools.pdf-generate.description": "Renderiza un template Markdown o HTML como PDF y lo sube al object store configurado.",
   "tools.email-send.description": "Envía un email transaccional vía el mailer configurado (Resend o SendGrid).",
   "tools.http-request.description": "Hace un request HTTP a una API externa.",
@@ -3158,7 +3103,6 @@
   "tools.crypto-sha256.description": "Calcula el digest SHA-256 de `value` (codificado en hex).",
   "tools.crypto-hmac.description": "Calcula el HMAC de `value` con `secret` (default `sha256`, `sha512` permitido).",
   "tools.crypto-uuid.description": "Genera un UUID v4 usando la fuente cripto-aleatoria de la plataforma.",
-
   "validation.workflow_missing_outputs": "El flujo no declara ningún output",
   "validation.workflow_missing_evals": "El flujo no tiene cobertura de evaluación",
   "validation.http_missing_bounds": "El paso HTTP no tiene timeout / max-bytes",
@@ -3193,7 +3137,6 @@
   "validation.loop_invalid_failure_count": "Los elementos fallidos permitidos deben ser un número entero entre 0 y 1.000",
   "validation.loop_invalid_failure_percentage": "El porcentaje de fallos permitido debe estar entre 0 y 100",
   "validation.loop_conflicting_failure_budgets": "Elige un presupuesto de fallos por cantidad o por porcentaje, no ambos",
-
   "readiness.workflow_missing_outputs": "El flujo no declara ningún output",
   "readiness.workflow_missing_evals": "El flujo no tiene cobertura de evaluación",
   "readiness.http_missing_bounds": "El paso HTTP no tiene timeout / max-bytes",
@@ -3207,9 +3150,7 @@
   "readiness.workflow_missing_rollback_version": "Rollback no disponible — solo hay una versión guardada",
   "readiness.rollback_unavailable": "Rollback no disponible — solo hay una versión guardada",
   "readiness.credential_missing": "Credencial faltante o sin secreto resuelto en este entorno",
-
   "aiReview.unknown": "Observación de la revisión IA: {{message}}",
-
   "runEvents.run.started": "Ejecución iniciada",
   "runEvents.run.succeeded": "Ejecución completada con éxito",
   "runEvents.run.failed": "Ejecución fallida",
@@ -3256,7 +3197,6 @@
   "runEvents.rollback.triggered": "Reversión activada",
   "runEvents.rollback.completed": "Reversión completada",
   "runEvents.run.status_checked": "Estado de la ejecución verificado",
-
   "failureClusters.secret_missing": "Falta el secreto: {{secretName}}",
   "failureClusters.http_error": "HTTP {{status}} en paso {{nodeType}}",
   "failureClusters.network_timeout": "Timeout de red",
@@ -3264,10 +3204,7 @@
   "failureClusters.parse_error": "Error de parsing",
   "failureClusters.tool_input": "Error en input de herramienta",
   "failureClusters.unknown": "Falla sin clasificar",
-
-
   "serverEvents.fallback": "{{message}}",
-
   "home.priority.title": "Lo que necesita de ti",
   "home.priority.clearTitle": "Estás al día",
   "home.priority.clearBody": "Ninguna aprobación, incidente de resultado o paso fallido necesita tu atención ahora.",
@@ -3278,17 +3215,14 @@
   "home.health.attention": "Necesita atención",
   "home.health.clear": "Todo encaminado",
   "home.insights.title": "Insights e historial",
-
   "recoveryCenter.metricStripAria": "Tira de métricas de recuperación",
   "recoveryCenter.metricsUnavailable": "Métricas no disponibles — {{detail}}. El Centro de recuperación se renderiza con la información disponible.",
   "recoveryCenter.invalidHomeResponse": "la respuesta del Home de recuperación no fue válida",
   "recoveryCenter.adHocWorkflow": "(flujo ad-hoc)",
   "recoveryCenter.errorSignatureFallback": "Falló",
-
   "recoveryCenter.healthRing.aria.pending": "Puntuación de salud pendiente",
   "recoveryCenter.healthRing.aria.value": "Puntuación de salud {{score}} de 100",
   "recoveryCenter.healthRing.caption": "Salud",
-
   "recoveryCenter.metric.aria": "{{label}}: {{display}}. {{rationale}}. Abrir detalle.",
   "recoveryCenter.metric.failures.label": "Fallos abiertos",
   "recoveryCenter.metric.failures.rationaleEmpty": "Nada en la cola de recuperación",
@@ -3317,7 +3251,6 @@
   "recoveryCenter.metric.durability.rationaleFallback": "Recuperaciones terminales sin otro fallo con la misma firma durante los siete días siguientes",
   "recoveryCenter.metric.sla.label": "Cumplimiento de SLA",
   "recoveryCenter.metric.sla.rationaleFallback": "Proporción de incidentes resueltos dentro de su SLA",
-
   "recoveryMetricRationale.success_rate.empty": "Todavía no hay ejecuciones terminales en la ventana.",
   "recoveryMetricRationale.success_rate.summary": "{{succeeded}} de {{terminal}} ejecuciones terminales terminaron bien.",
   "recoveryMetricRationale.mttr.empty": "No hay recuperaciones terminales en la ventana; se usa el valor alternativo cuando no hay nada que recuperar.",
@@ -3340,7 +3273,6 @@
   "recoveryMetricRationale.recurrence.empty": "Todavía no hay recuperaciones terminales disponibles para analizar recurrencias.",
   "recoveryMetricRationale.recurrence.summary": "{{held}} de {{resolved}} recuperaciones terminales no han vuelto a fallar con la misma firma durante los siete días siguientes.",
   "recoveryMetricRationale.cost.summary": "En {{providerCount}} proveedores durante los últimos {{windowDays}} días.",
-
   "recoveryCenter.greeting.morning": "Buenos días, {{who}}.",
   "recoveryCenter.greeting.afternoon": "Buenas tardes, {{who}}.",
   "recoveryCenter.greeting.evening": "Buenas noches, {{who}}.",
@@ -3373,12 +3305,10 @@
   "recoveryCenter.hero.allClearStreakOnly_one": "Racha limpia de {{count}} día · la cola está limpia",
   "recoveryCenter.hero.allClearStreakOnly_other": "Racha limpia de {{count}} días · la cola está limpia",
   "recoveryCenter.hero.allClearFallback": "La cola de recuperación está limpia. No hay fallos pendientes de revisión.",
-
   "recoveryCenter.relative.seconds": "hace {{count}}s",
   "recoveryCenter.relative.minutes": "hace {{count}}m",
   "recoveryCenter.relative.hours": "hace {{count}}h",
   "recoveryCenter.relative.days": "hace {{count}}d",
-
   "recoveryCenter.action.resolve_approvals.title_one": "Resolver {{count}} aprobación esperando entrada",
   "recoveryCenter.action.resolve_approvals.title_other": "Resolver {{count}} aprobaciones esperando entrada",
   "recoveryCenter.action.resolve_approvals.body": "Una ejecución está pausada esperando una decisión humana. Abre el formulario para completar o rechazar.",
@@ -3397,7 +3327,6 @@
   "recoveryCenter.action.review_workflow_risk.title": "Revisar el riesgo del flujo en Configuración",
   "recoveryCenter.action.review_workflow_risk.body": "La puntuación de salud está por debajo de 80. Configuración agrupa señales de confiabilidad, uso e infraestructura para atender primero el área más débil.",
   "recoveryCenter.action.review_workflow_risk.cta": "Abrir Configuración",
-
   "recoveryCenter.tile.clusters.title": "Grupos de fallos",
   "recoveryCenter.tile.clusters.kicker_one": "{{count}} muestra",
   "recoveryCenter.tile.clusters.kicker_other": "{{count}} muestras",
@@ -3533,7 +3462,6 @@
   "semanticOutcome.semantic_recovered.description": "Un reemplazo del operador pasó todas las validaciones deterministas antes de reanudar los efectos.",
   "semanticOutcome.semantic_accepted_loss.label": "Resultado aceptado",
   "semanticOutcome.semantic_accepted_loss.description": "Un operador aceptó explícitamente el resultado de negocio en lugar de reemplazarlo.",
-
   "recoveryCenter.cluster.category.secret_missing": "Secreto",
   "recoveryCenter.cluster.category.http_error": "HTTP",
   "recoveryCenter.cluster.category.network_timeout": "Timeout",
@@ -3544,7 +3472,6 @@
   "recoveryCenter.cluster.owner.ops": "ops",
   "recoveryCenter.cluster.owner.workflow_author": "autor del flujo",
   "recoveryCenter.cluster.owner.platform": "plataforma",
-
   "recoveryCenter.budget.title": "Presupuesto de IA",
   "recoveryCenter.budget.kickerUsed": "{{percent}}% usado",
   "recoveryCenter.budget.kickerNotConfigured": "Sin configurar",
@@ -3558,9 +3485,7 @@
   "recoveryCenter.budget.mtdValue": "${{spent}} / ${{limit}}",
   "recoveryCenter.budget.policyLabel": "Política:",
   "recoveryCenter.budget.overWarning": "supera el aviso",
-
   "recoveryCenter.empty.metricsUnavailableFallback": "Métricas de recuperación no disponibles",
-
   "autoHealing.card.kicker": "Auto-curación supervisada",
   "autoHealing.card.title": "Decisiones pendientes",
   "autoHealing.card.subtitle": "Parches que el sistema propuso para fallas repetidas. Revisa y aplica o rechaza.",
@@ -3622,7 +3547,6 @@
   "autoHealing.approach.add_approval": "Agregar aprobación",
   "autoHealing.approach.fix_url": "Corregir URL",
   "autoHealing.approach.other": "Otro",
-
   "recoveryCenter.value.kicker": "Panel de valor",
   "recoveryCenter.value.title": "Recuperación verificada y ahorro estimado",
   "recoveryCenter.value.subtitle": "Impacto estimado con los supuestos del operador. No es contabilidad.",
@@ -3641,7 +3565,6 @@
   "recoveryCenter.value.estimateTooltip": "Estimado con los supuestos del operador. No es contabilidad.",
   "recoveryCenter.value.export.markdown": "Markdown",
   "recoveryCenter.value.export.json": "JSON",
-
   "recoveryCenter.validation.kicker": "Evidencia controlada",
   "recoveryCenter.validation.title": "Validación de recuperación",
   "recoveryCenter.validation.subtitle": "Resultados medidos de simulacros deterministas de recuperación, separados de la salud en producción y del valor estimado.",
@@ -3668,7 +3591,6 @@
   "recoveryCenter.validation.sampleCapped": "{{limit}} simulacros más recientes",
   "recoveryCenter.validation.coverage": "Cobertura por modo de fallo",
   "recoveryCenter.validation.boundary": "Solo evidencia controlada por organización. Las organizaciones participantes, el tiempo de configuración y la disposición a pagar siguen siendo criterios externos de validación.",
-
   "slackInteractions.kicker": "Acceso de operadores desde Slack",
   "slackInteractions.title": "Acciones interactivas de recuperación",
   "slackInteractions.intro": "Permite que los operadores vinculados reconozcan, se asignen o abran trabajo de recuperación desde botones de alerta firmados. Los valores de secretos de firma permanecen en credenciales respaldadas por el entorno.",
@@ -3708,7 +3630,6 @@
   "slackInteractions.error.delete": "No se pudo eliminar la conexión interactiva de Slack",
   "slackInteractions.error.copy": "No se pudo copiar la URL de interacción",
   "slackInteractions.confirm.delete": "¿Eliminar la conexión interactiva de Slack {{name}}?",
-
   "externalRuntime.kicker": "Observador de runtime externo",
   "externalRuntime.title": "Modo sombra de workflows",
   "externalRuntime.boundary.title": "Solo lectura por diseño",
@@ -3751,7 +3672,6 @@
   "externalRuntime.error.delete": "No se pudo eliminar el observador del runtime externo",
   "externalRuntime.error.copy": "No se pudo copiar la URL del callback",
   "externalRuntime.confirm.delete": "¿Eliminar el observador de runtime externo {{name}}? Las observaciones históricas permanecerán.",
-
   "alerts.panel.title": "Políticas de alerta",
   "alerts.panel.new": "Nueva política",
   "alerts.panel.emptyKicker": "Sin alertas todavía",
@@ -3828,13 +3748,11 @@
   "alerts.recent.details": "Resultados por canal",
   "alerts.recent.channelDelivered": "entregado",
   "alerts.recent.channelFailed": "falló",
-
   "alerts.triggers.recovery_item.created": "Incidente creado",
   "alerts.triggers.recovery_item.sla_breached": "SLA de incidente incumplido",
   "alerts.triggers.workflow.schedule_anomaly": "Anomalía de horario",
   "alerts.triggers.credential.expiring": "Credencial por vencer",
   "alerts.triggers.workflow.circuit_breaker_tripped": "Cortocircuito activado",
-
   "recoveryItems.badge.open": "Incidente — severidad {{severity}}, estado {{status}}",
   "recoveryItems.badge.openSla": "Incidente — severidad {{severity}}, estado {{status}}, SLA {{sla}}",
   "recoveryItems.sla.overdue": "vencido",
@@ -3896,7 +3814,6 @@
   "recoveryEvidence.deliver.description": "Envía el reporte completo de evidencia de este incidente a Slack, un issue de GitHub o un webhook firmado.",
   "recoveryEvidence.deliver.toastSent": "Evidencia enviada a {{destination}}",
   "recoveryEvidence.deliver.successMessage": "Evidencia entregada a {{destination}}.",
-
   "recoveryHandoff.heading": "Entrega",
   "recoveryHandoff.destinations.slack": "Slack",
   "recoveryHandoff.destinations.linear": "Linear",
@@ -3918,7 +3835,6 @@
   "recoveryHandoff.toast.failed": "La entrega falló",
   "recoveryHandoff.toast.alreadyDispatched": "Ya se envió hace poco — no se mandó un mensaje nuevo",
   "recoveryHandoff.toast.skipped": "Entrega omitida (reejecución de prueba)",
-
   "aiGuidance.kicker": "Política de IA",
   "aiGuidance.title": "janusly.md de la organización",
   "aiGuidance.description": "Define preferencias limitadas que Janusly debe considerar al generar y recuperar workflows. Las reglas del sistema, seguridad, tenancy y contratos de workflow siempre tienen prioridad.",
@@ -3933,7 +3849,6 @@
   "aiGuidance.toast.saved": "Guía de IA guardada",
   "aiGuidance.error.load": "No se pudo cargar la guía de IA.",
   "aiGuidance.error.save": "No se pudo guardar la guía de IA.",
-
   "workflowMetadata.panel.title": "Acerca de este workflow",
   "workflowMetadata.panel.description": "Responsables, runbook y datos del equipo para que el próximo operador a las 3am tenga el contexto a la mano.",
   "workflowMetadata.panel.loading": "Cargando contexto del workflow…",
@@ -3970,7 +3885,6 @@
   "workflowMetadata.action.collapseRunbook": "Contraer runbook",
   "workflowMetadata.toast.saved": "Información del workflow guardada",
   "workflowMetadata.toast.saveFailed": "No se pudo guardar la información",
-
   "upstreamHealth.panel.title": "Fuentes de salud upstream",
   "upstreamHealth.panel.subtitle": "Vigila la página de estado de un proveedor. Cuando un componente referenciado se degrada, los workflows etiquetados con esta fuente se pausan automáticamente y se reanudan al recuperarse. Nunca pausamos si no podemos alcanzar el feed.",
   "upstreamHealth.panel.new": "Agregar fuente",
@@ -4014,7 +3928,6 @@
   "upstreamHealth.toast.deleted": "Fuente upstream eliminada",
   "upstreamHealth.toast.checked": "Se consultó el feed ahora",
   "upstreamHealth.toast.error": "No se pudo guardar la fuente upstream",
-
   "emptyState.alerts.kicker": "Sin alertas recientes",
   "emptyState.alerts.body": "Nada se disparó en esta ventana. Las nuevas entregas aparecen aquí cuando una política captura un evento que coincide.",
   "emptyState.clusters.kicker": "Sin fallos recurrentes",
@@ -4062,10 +3975,10 @@
   "recoveryDialog.playbook.kicker": "Playbook de recuperación comprobado",
   "recoveryDialog.playbook.never": "Nunca",
   "recoveryDialog.playbook.successfulUses": "Usos correctos",
-  "recoveryDialog.playbook.successRate": "Tasa de \u00e9xito",
+  "recoveryDialog.playbook.successRate": "Tasa de éxito",
   "recoveryDialog.playbook.successRateValue": "{{percent}}% en {{total}} resultados",
   "recoveryDialog.playbook.regressions": "Regresiones",
-  "recoveryDialog.passport.playbookSignalValueRated": "Playbook v{{version}} \u2014 {{percent}}% de \u00e9xito ({{total}} resultados)",
+  "recoveryDialog.passport.playbookSignalValueRated": "Playbook v{{version}} — {{percent}}% de éxito ({{total}} resultados)",
   "recoveryDialog.playbook.lastValidated": "Última validación",
   "recoveryDialog.playbook.revalidationRequired": "Este playbook nunca se ejecuta automáticamente. Al usarlo comienza una nueva validación en sandbox y aún se requiere Aplicar de forma explícita en producción.",
   "recoveryDialog.playbook.retire": "Retirar",
@@ -4120,5 +4033,7 @@
   "recoveryDialog.playbook.keepActive": "Mantener activo",
   "recoveryDialog.playbook.confirmRetire": "Retirar playbook",
   "recoveryDialog.playbook.regressionTitle": "Playbook retirado tras una regresión",
-  "recoveryDialog.playbook.regressionBody": "Este sandbox falló, por lo que Janusly retiró el playbook antes de que pudiera volver a usarse. Revisa el error y promueve una nueva versión solo después de una recuperación correcta."
+  "recoveryDialog.playbook.regressionBody": "Este sandbox falló, por lo que Janusly retiró el playbook antes de que pudiera volver a usarse. Revisa el error y promueve una nueva versión solo después de una recuperación correcta.",
+  "recoveryDialog.similarRuns.kicker": "Fallas pasadas similares",
+  "recoveryDialog.similarRuns.match": "{{percent}}% de similitud"
 }

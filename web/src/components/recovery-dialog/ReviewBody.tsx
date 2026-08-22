@@ -20,6 +20,7 @@ import { EvidencePanel } from './EvidencePanel'
 import { AlternativeHypothesesPanel } from './AlternativeHypothesesPanel'
 import { LearningHealthBadge } from './LearningHealthBadge'
 import { RecoveryPassportCard } from './RecoveryPassportCard'
+import { SimilarRunsCard } from './SimilarRunsCard'
 import { approachLabelDisplay, resolveConfidenceDisplay, suggestionTabKey } from './recovery-dialog-model'
 import type { PatchSuggestion, SuggestionTab } from './types'
 
@@ -99,6 +100,7 @@ export function ReviewBody({
         sandboxStatus={sandboxStatus}
         failureSignature={failureSignature}
       />
+      <SimilarRunsCard failureSignature={failureSignature} />
       {showTabs && (
         <div className="we-recovery-tabs" role="tablist" aria-label={t('recoveryDialog.review.tabsAriaLabel')}>
           {tabs.map((tab, index) => (

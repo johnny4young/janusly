@@ -2838,6 +2838,47 @@ button.we-ops-metric-card--button {
    impossible to mistake for an automatic apply. */
 .we-recovery-playbook,
 .we-recovery-playbook-promotion,
+
+/* Similar past failures (semantic run search, consent-gated). */
+.we-similar-runs {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--we-line);
+  border-radius: 10px;
+  background: var(--we-surface);
+}
+
+.we-similar-runs__header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--we-muted);
+}
+
+.we-similar-runs__list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.we-similar-runs__list li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12.5px;
+}
+
+.we-similar-runs__content { flex: 1; min-width: 0; }
+.we-similar-runs__match {
+  flex: none;
+  color: var(--we-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .we-recovery-playbook-source {
   display: grid;
   gap: 10px;

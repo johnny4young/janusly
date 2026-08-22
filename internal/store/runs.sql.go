@@ -482,6 +482,30 @@ func (q *Queries) FindLatestDeadLetterForNode(ctx context.Context, arg FindLates
 	return i, err
 }
 
+const findLatestDeadLetterForRun = `-- name: FindLatestDeadLetterForRun :one
+SELECT node_id, node_json, error_json FROM dead_letters
+WHERE org_id = $1 AND run_id = $2
+ORDER BY created_at DESC, id DESC LIMIT 1
+`
+
+type FindLatestDeadLetterForRunParams struct {
+	OrgID string
+	RunID string
+}
+
+type FindLatestDeadLetterForRunRow struct {
+	NodeID    string
+	NodeJson  json.RawMessage
+	ErrorJson json.RawMessage
+}
+
+func (q *Queries) FindLatestDeadLetterForRun(ctx context.Context, arg FindLatestDeadLetterForRunParams) (FindLatestDeadLetterForRunRow, error) {
+	row := q.db.QueryRow(ctx, findLatestDeadLetterForRun, arg.OrgID, arg.RunID)
+	var i FindLatestDeadLetterForRunRow
+	err := row.Scan(&i.NodeID, &i.NodeJson, &i.ErrorJson)
+	return i, err
+}
+
 const findLatestPatchAuditForRun = `-- name: FindLatestPatchAuditForRun :one
 SELECT created_at, metadata FROM audit_logs
 WHERE org_id = $1 AND action = 'ai.workflow.patch_suggested'

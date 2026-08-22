@@ -179,6 +179,7 @@ func (e *Engine) afterTerminalFailure(ctx context.Context, claim ClaimedNode) {
 	e.maybeTripCircuitBreaker(ctx, run.OrgID, wf.ID, claim.RunID)
 	// Rollout outcome receipt (idempotent; repair covers crash windows).
 	e.maybeRecordRolloutOutcome(ctx, claim.RunID)
+	e.maybeCommitRunSummaryMemory(ctx, claim.RunID)
 	// Alert producer: the dead letter is durable (committed with the
 	// failure tx), so the dlq.entry_created event fires here, after commit.
 	if dl, err := store.New(e.pool).FindLatestDeadLetterForNode(ctx, store.FindLatestDeadLetterForNodeParams{

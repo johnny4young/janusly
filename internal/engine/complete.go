@@ -207,6 +207,9 @@ func (e *Engine) completeNode(ctx context.Context, claim ClaimedNode, output any
 	// covers crash windows). Only meaningful when this completion rolled
 	// the run terminal — the recorder re-validates everything itself.
 	e.maybeRecordRolloutOutcome(ctx, claim.RunID)
+	// Same shape for the memory summary: fired from every completion,
+	// no-op until the run itself reads terminal.
+	e.maybeCommitRunSummaryMemory(ctx, claim.RunID)
 	return nil
 }
 

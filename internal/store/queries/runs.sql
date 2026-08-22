@@ -477,6 +477,11 @@ WHERE org_id = $1 AND id = $2 AND status = sqlc.arg(from_status);
 UPDATE runs SET input_json = jsonb_set(input_json, '{workflow}', sqlc.arg(workflow)::jsonb)
 WHERE id = $1;
 
+-- name: FindLatestDeadLetterForRun :one
+SELECT node_id, node_json, error_json FROM dead_letters
+WHERE org_id = $1 AND run_id = $2
+ORDER BY created_at DESC, id DESC LIMIT 1;
+
 -- name: FindLatestDeadLetterForNode :one
 SELECT id, node_id, attempt, node_json, error_json FROM dead_letters
 WHERE org_id = $1 AND run_id = $2 AND node_id = $3

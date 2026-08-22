@@ -79,6 +79,7 @@ type RecallEntry struct {
 	Kind       string         `json:"kind"`
 	Content    string         `json:"content"`
 	WorkflowID string         `json:"workflowId,omitempty"`
+	RunID      string         `json:"runId,omitempty"`
 	Similarity float64        `json:"similarity"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
 }
@@ -172,7 +173,7 @@ func Recall(ctx context.Context, pool *pgxpool.Pool, input RecallInput) []Recall
 		return fail("embedding_failed")
 	}
 	rows, err := pool.Query(ctx, `SELECT id, kind, content, COALESCE(workflow_id, ''),
-		  1 - (embedding <=> $3::vector) AS similarity, metadata
+		  COALESCE(run_id, ''), 1 - (embedding <=> $3::vector) AS similarity, metadata
 		FROM memory_entries
 		WHERE org_id = $1 AND kind = $2 AND retain_until > now()
 		  AND (hold_until IS NULL OR hold_until <= now())
@@ -187,7 +188,7 @@ func Recall(ctx context.Context, pool *pgxpool.Pool, input RecallInput) []Recall
 	for rows.Next() {
 		var entry RecallEntry
 		var metadataRaw []byte
-		if err := rows.Scan(&entry.ID, &entry.Kind, &entry.Content, &entry.WorkflowID, &entry.Similarity, &metadataRaw); err != nil {
+		if err := rows.Scan(&entry.ID, &entry.Kind, &entry.Content, &entry.WorkflowID, &entry.RunID, &entry.Similarity, &metadataRaw); err != nil {
 			continue
 		}
 		_ = json.Unmarshal(metadataRaw, &entry.Metadata)
