@@ -1313,6 +1313,19 @@ CREATE TABLE public.workflow_improvements (
 
 
 --
+-- Name: worker_instances; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.worker_instances (
+    instance_id text NOT NULL,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_seen_at timestamp with time zone DEFAULT now() NOT NULL,
+    worker_concurrency integer NOT NULL,
+    build_commit text
+);
+
+
+--
 -- Name: workflow_input_presets; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1988,6 +2001,14 @@ ALTER TABLE ONLY public.workflow_budgets
 
 ALTER TABLE ONLY public.workflow_improvements
     ADD CONSTRAINT workflow_improvements_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: worker_instances worker_instances_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.worker_instances
+    ADD CONSTRAINT worker_instances_pkey PRIMARY KEY (instance_id);
 
 
 --

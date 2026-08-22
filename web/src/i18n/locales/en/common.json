@@ -1321,6 +1321,8 @@
   "operations.rateLimiter.healthy": "Rate limiter healthy",
   "operations.rateLimiter.degraded_one": "Rate limiter degraded — {{count}} bucket failing open. Traffic still allowed.",
   "operations.rateLimiter.degraded_other": "Rate limiter degraded — {{count}} buckets failing open. Traffic still allowed.",
+  "operations.workerFleet.label": "Worker fleet",
+  "operations.workerFleet.body": "{{live}} live · {{stale}} stale",
   "operations.queueLag.label": "Workflow queue",
   "operations.queueLag.checkedAt": "Checked {{time}}",
   "operations.queueLag.clear": "Workflow queue clear",

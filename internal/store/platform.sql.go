@@ -178,6 +178,18 @@ func (q *Queries) DeleteExpiredAuditLogsBatch(ctx context.Context, arg DeleteExp
 	return result.RowsAffected(), nil
 }
 
+const deleteSilentWorkerInstances = `-- name: DeleteSilentWorkerInstances :execrows
+DELETE FROM worker_instances WHERE last_seen_at < now() - interval '24 hours'
+`
+
+func (q *Queries) DeleteSilentWorkerInstances(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSilentWorkerInstances)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteSnippet = `-- name: DeleteSnippet :one
 DELETE FROM snippets WHERE org_id = $1 AND id = $2 AND builtin = false
 RETURNING id, org_id, name, description, category, tags, builtin, nodes_json, edges_json, entry_node_id, created_by, created_at, updated_at
@@ -834,6 +846,38 @@ func (q *Queries) ListSnippets(ctx context.Context, orgID string) ([]Snippet, er
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkerInstances = `-- name: ListWorkerInstances :many
+SELECT instance_id, started_at, last_seen_at, worker_concurrency, build_commit
+FROM worker_instances
+ORDER BY started_at
+`
+
+func (q *Queries) ListWorkerInstances(ctx context.Context) ([]WorkerInstance, error) {
+	rows, err := q.db.Query(ctx, listWorkerInstances)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []WorkerInstance
+	for rows.Next() {
+		var i WorkerInstance
+		if err := rows.Scan(
+			&i.InstanceID,
+			&i.StartedAt,
+			&i.LastSeenAt,
+			&i.WorkerConcurrency,
+			&i.BuildCommit,
 		); err != nil {
 			return nil, err
 		}
@@ -1530,5 +1574,27 @@ func (q *Queries) UpsertOrgConfigValue(ctx context.Context, arg UpsertOrgConfigV
 		arg.ValueType,
 		arg.UpdatedBy,
 	)
+	return err
+}
+
+const upsertWorkerHeartbeat = `-- name: UpsertWorkerHeartbeat :exec
+INSERT INTO worker_instances (instance_id, worker_concurrency, build_commit)
+VALUES ($1, $2, $3)
+ON CONFLICT (instance_id) DO UPDATE SET
+  last_seen_at = now(),
+  worker_concurrency = excluded.worker_concurrency
+`
+
+type UpsertWorkerHeartbeatParams struct {
+	InstanceID        string
+	WorkerConcurrency int32
+	BuildCommit       pgtype.Text
+}
+
+// Worker-fleet heartbeats: one row per live process, beaten on an
+// interval. Staleness is derived at read time; rows silent for a day are
+// garbage from long-dead instances and ride the retention cadence out.
+func (q *Queries) UpsertWorkerHeartbeat(ctx context.Context, arg UpsertWorkerHeartbeatParams) error {
+	_, err := q.db.Exec(ctx, upsertWorkerHeartbeat, arg.InstanceID, arg.WorkerConcurrency, arg.BuildCommit)
 	return err
 }

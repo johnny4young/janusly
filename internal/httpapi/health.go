@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnny4young/janusly/internal/auth"
+	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -134,6 +136,42 @@ func (s *V1Server) mountSystemHealthRoutes(mux *http.ServeMux) {
 			},
 		}))
 	}))
+	// Worker fleet: one row per live process from the heartbeat loop.
+	// Liveness is derived here (silent past four beat intervals = stale)
+	// so the client never does clock math against the server's rows.
+	s.route(mux, "GET /system/workers", routeGate{auth.RoleAdmin, "org.config.write"},
+		func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+			rows, err := store.New(s.pool).ListWorkerInstances(r.Context())
+			if err != nil {
+				writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+				return
+			}
+			staleAfter := 4 * engine.WorkerHeartbeatInterval
+			now := time.Now()
+			instances := make([]map[string]any, 0, len(rows))
+			live := 0
+			for _, row := range rows {
+				status := "stale"
+				if now.Sub(row.LastSeenAt) <= staleAfter {
+					status = "live"
+					live++
+				}
+				entry := map[string]any{
+					"instanceId": row.InstanceID, "status": status,
+					"startedAt": row.StartedAt, "lastSeenAt": row.LastSeenAt,
+					"workerConcurrency": row.WorkerConcurrency,
+				}
+				if row.BuildCommit.Valid {
+					entry["buildCommit"] = row.BuildCommit.String
+				}
+				instances = append(instances, entry)
+			}
+			writeUnversioned(w, opOK(map[string]any{
+				"instances": instances, "liveCount": live,
+				"staleAfterSeconds": int(staleAfter.Seconds()),
+			}))
+		})
+
 	mux.HandleFunc("GET /system/rate-limiter", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(s.limiterTracker.Admin())

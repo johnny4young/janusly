@@ -37,7 +37,7 @@ import {
   type QueueUnavailableReason,
 } from './QueueLagChip'
 import { AiRuntimeStatusCard } from './AiRuntimeStatusCard'
-import { SettingsInfrastructureSection } from './SettingsInfrastructureSection'
+import { SettingsInfrastructureSection, type WorkerFleet } from './SettingsInfrastructureSection'
 import { SettingsOverview } from './SettingsOverview'
 import {
   SettingsUsageSection,
@@ -182,6 +182,7 @@ export function OperationsPage({
   const [rateLimiterHealth, setRateLimiterHealth] = useState<RateLimiterHealth | null>(null)
   const [queueSignal, setQueueSignal] = useState<QueueSignalState | undefined>(undefined)
   const [queueCheckedAt, setQueueCheckedAt] = useState<number | null>(null)
+  const [workerFleet, setWorkerFleet] = useState<WorkerFleet | null>(null)
   const [section, setSection] = useState<OpsSection>(() => loadStoredSection())
   const effectiveSection = canOpenSettingsSection(section, permissions)
     ? section
@@ -249,6 +250,22 @@ export function OperationsPage({
       // Poll the admin projection on the same cadence and preserve the last
       // successful snapshot if a later request fails.
       if (queueForbidden || !hasPermission(permissions, 'org.config.write')) return
+      api('/system/workers')
+        .then((payload) => {
+          if (cancelled) return
+          const body = payload as { instances?: Array<{ status?: string }>; liveCount?: number } | null
+          if (!body || !Array.isArray(body.instances)) {
+            setWorkerFleet(null)
+            return
+          }
+          const live = typeof body.liveCount === 'number'
+            ? body.liveCount
+            : body.instances.filter((row) => row.status === 'live').length
+          setWorkerFleet({ liveCount: live, staleCount: body.instances.length - live })
+        })
+        .catch(() => {
+          // Same posture as the queue chips: keep the last good snapshot.
+        })
       api('/system/queue')
         .then((payload) => {
           if (cancelled) return
@@ -355,6 +372,7 @@ export function OperationsPage({
                 queueCheckedAt={queueCheckedAt}
                 queueUnavailableReason={queueSignal?.workflowUnavailableReason}
                 maintenanceQueueUnavailableReason={queueSignal?.maintenanceUnavailableReason}
+                workerFleet={workerFleet}
               />
             )}
           </Suspense>

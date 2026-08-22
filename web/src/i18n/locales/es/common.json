@@ -1321,6 +1321,8 @@
   "operations.rateLimiter.healthy": "Limitador de solicitudes saludable",
   "operations.rateLimiter.degraded_one": "Limitador de solicitudes degradado — {{count}} grupo sin aplicar el límite. El tráfico sigue permitido.",
   "operations.rateLimiter.degraded_other": "Limitador de solicitudes degradado — {{count}} grupos sin aplicar el límite. El tráfico sigue permitido.",
+  "operations.workerFleet.label": "Flota de workers",
+  "operations.workerFleet.body": "{{live}} activas · {{stale}} sin señal",
   "operations.queueLag.label": "Cola de flujos",
   "operations.queueLag.checkedAt": "Verificado {{time}}",
   "operations.queueLag.clear": "Cola de flujos sin espera",

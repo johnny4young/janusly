@@ -249,6 +249,9 @@ func run() error {
 	runner.Go("workers", func(ctx context.Context) {
 		_ = eng.RunWorkers(ctx, cfg.WorkerConcurrency, cfg.PollInterval, dispatcher.Execute, logger)
 	})
+	runner.Go("worker-heartbeat", func(ctx context.Context) {
+		eng.RunWorkerHeartbeat(ctx, resourceInstanceID(), cfg.WorkerConcurrency, identity.Commit, logger)
+	})
 	runner.Go("replay-campaign-pump", func(ctx context.Context) {
 		eng.RunReplayCampaignPump(ctx, cfg.PollInterval, logger)
 	})

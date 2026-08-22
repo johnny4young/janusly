@@ -88,6 +88,10 @@ func (e *Engine) RunRetentionSweep(ctx context.Context, every time.Duration, ret
 		if _, err := store.New(e.pool).CleanupExpiredSsoNonces(ctx); err != nil && ctx.Err() == nil {
 			logger.Error("sso-nonce cleanup failed", "error", err)
 		}
+		// Heartbeat rows silent for a day belong to long-dead instances.
+		if _, err := store.New(e.pool).DeleteSilentWorkerInstances(ctx); err != nil && ctx.Err() == nil {
+			logger.Error("worker-instance cleanup failed", "error", err)
+		}
 		// Per-org data retention (run_events / audit_logs / usage_events).
 		e.runDataRetention(ctx, logger)
 	}

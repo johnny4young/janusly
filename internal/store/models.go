@@ -924,6 +924,14 @@ type VerifiedDomain struct {
 	CreatedAt   *time.Time
 }
 
+type WorkerInstance struct {
+	InstanceID        string
+	StartedAt         time.Time
+	LastSeenAt        time.Time
+	WorkerConcurrency int32
+	BuildCommit       pgtype.Text
+}
+
 type Workflow struct {
 	ID           string
 	OrgID        string

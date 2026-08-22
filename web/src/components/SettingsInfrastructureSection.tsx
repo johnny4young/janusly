@@ -11,6 +11,11 @@ type RateLimiterHealth = {
   degradedBuckets: Array<{ bucket: string }>
 }
 
+export type WorkerFleet = {
+  liveCount: number
+  staleCount: number
+}
+
 export function SettingsInfrastructureSection({
   rateLimiterHealth,
   queueHealth,
@@ -18,6 +23,7 @@ export function SettingsInfrastructureSection({
   queueCheckedAt,
   queueUnavailableReason,
   maintenanceQueueUnavailableReason,
+  workerFleet,
 }: {
   rateLimiterHealth: RateLimiterHealth | null
   queueHealth: QueueHealth | null | undefined
@@ -25,6 +31,7 @@ export function SettingsInfrastructureSection({
   queueCheckedAt: number | null
   queueUnavailableReason?: QueueUnavailableReason
   maintenanceQueueUnavailableReason?: QueueUnavailableReason
+  workerFleet?: WorkerFleet | null
 }) {
   const { t } = useT()
   const rateLimiterTone = rateLimiterHealth === null
@@ -68,6 +75,36 @@ export function SettingsInfrastructureSection({
           />
         ) : <span className="we-pill" data-tone="neutral">{t('common.unknown')}</span>}
       </div>
+      {workerFleet !== undefined && (
+        <div className="we-infrastructure-card__queue" data-testid="worker-fleet-row">
+          <div>
+            <strong>{t('operations.workerFleet.label')}</strong>
+            <span>
+              {workerFleet === null
+                ? t('common.unknown')
+                : t('operations.workerFleet.body', {
+                    live: workerFleet.liveCount, stale: workerFleet.staleCount,
+                  })}
+            </span>
+          </div>
+          <span
+            className="we-pill"
+            data-tone={workerFleet === null
+              ? 'neutral'
+              : workerFleet.liveCount === 0
+                ? 'danger'
+                : workerFleet.staleCount > 0 ? 'warning' : 'success'}
+          >
+            {workerFleet === null
+              ? t('common.unknown')
+              : workerFleet.liveCount === 0
+                ? t('vitals.severity.unhealthy')
+                : workerFleet.staleCount > 0
+                  ? t('vitals.severity.warn')
+                  : t('vitals.severity.healthy')}
+          </span>
+        </div>
+      )}
       <div className="we-infrastructure-card__queue">
         <strong>{t('operations.maintenanceQueueLag.label')}</strong>
         {maintenanceQueueHealth !== undefined ? (

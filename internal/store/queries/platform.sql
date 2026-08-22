@@ -388,3 +388,21 @@ SELECT
 -- name: GetOrgConfigRevokedAt :one
 SELECT updated_at FROM org_configs
 WHERE org_id = $1 AND key = 'memory.enabled' AND value_json = 'false'::jsonb;
+
+-- Worker-fleet heartbeats: one row per live process, beaten on an
+-- interval. Staleness is derived at read time; rows silent for a day are
+-- garbage from long-dead instances and ride the retention cadence out.
+-- name: UpsertWorkerHeartbeat :exec
+INSERT INTO worker_instances (instance_id, worker_concurrency, build_commit)
+VALUES ($1, $2, $3)
+ON CONFLICT (instance_id) DO UPDATE SET
+  last_seen_at = now(),
+  worker_concurrency = excluded.worker_concurrency;
+
+-- name: ListWorkerInstances :many
+SELECT instance_id, started_at, last_seen_at, worker_concurrency, build_commit
+FROM worker_instances
+ORDER BY started_at;
+
+-- name: DeleteSilentWorkerInstances :execrows
+DELETE FROM worker_instances WHERE last_seen_at < now() - interval '24 hours';
