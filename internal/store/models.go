@@ -137,6 +137,7 @@ type DeadLetter struct {
 	CreatedAt        *time.Time
 	ReplayClaimToken pgtype.Text
 	ReplayClaimedAt  *time.Time
+	ReplayMode       pgtype.Text
 }
 
 type EvalDataset struct {

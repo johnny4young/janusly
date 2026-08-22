@@ -416,8 +416,8 @@ func (q *Queries) GetRecoveryItemForDeadLetter(ctx context.Context, arg GetRecov
 }
 
 const insertDeadLetter = `-- name: InsertDeadLetter :exec
-INSERT INTO dead_letters (id, org_id, run_id, node_id, attempt, workflow_json, node_json, error_json)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO dead_letters (id, org_id, run_id, node_id, attempt, workflow_json, node_json, error_json, replay_mode)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 `
 
 type InsertDeadLetterParams struct {
@@ -429,8 +429,13 @@ type InsertDeadLetterParams struct {
 	WorkflowJson json.RawMessage
 	NodeJson     json.RawMessage
 	ErrorJson    json.RawMessage
+	ReplayMode   pgtype.Text
 }
 
+// replay_mode is copied from the failing run: a sandbox validation's
+// failure is evidence for its dialog or drill, never operator work, so
+// the operator listings exclude marked rows while direct-by-id reads
+// (the dialog, drills, replay) still find them.
 func (q *Queries) InsertDeadLetter(ctx context.Context, arg InsertDeadLetterParams) error {
 	_, err := q.db.Exec(ctx, insertDeadLetter,
 		arg.ID,
@@ -441,6 +446,7 @@ func (q *Queries) InsertDeadLetter(ctx context.Context, arg InsertDeadLetterPara
 		arg.WorkflowJson,
 		arg.NodeJson,
 		arg.ErrorJson,
+		arg.ReplayMode,
 	)
 	return err
 }
@@ -766,6 +772,7 @@ LEFT JOIN workflow_versions wv ON wv.id = r.workflow_version_id
 LEFT JOIN recovery_items ri ON ri.org_id = dl.org_id AND ri.dead_letter_id = dl.id
 LEFT JOIN workflow_metadata wm ON wm.org_id = ri.org_id AND wm.workflow_id = ri.workflow_id
 WHERE dl.org_id = $1
+  AND dl.replay_mode IS NULL
   AND ($2::text IS NULL OR dl.status = $2)
   AND ($3::text IS NULL OR dl.node_id = $3)
   AND ($4::text IS NULL
@@ -809,6 +816,7 @@ type ListDeadLetterSummariesRow struct {
 }
 
 // DLQ, recovery items/cases, playbooks, campaigns, clustering, healing.
+// Validation-mode rows are dialog/drill evidence, not operator work.
 func (q *Queries) ListDeadLetterSummaries(ctx context.Context, arg ListDeadLetterSummariesParams) ([]ListDeadLetterSummariesRow, error) {
 	rows, err := q.db.Query(ctx, listDeadLetterSummaries,
 		arg.OrgID,
@@ -996,6 +1004,7 @@ SELECT dl.id, dl.run_id, dl.node_id, dl.error_json, dl.created_at, r.input_json
 FROM dead_letters dl
 JOIN runs r ON r.id = dl.run_id
 WHERE dl.org_id = $1 AND dl.created_at >= $2 AND dl.status = 'open'
+  AND dl.replay_mode IS NULL
 ORDER BY dl.created_at DESC
 LIMIT 500
 `

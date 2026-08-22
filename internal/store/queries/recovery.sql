@@ -1,5 +1,6 @@
 -- DLQ, recovery items/cases, playbooks, campaigns, clustering, healing.
 
+-- Validation-mode rows are dialog/drill evidence, not operator work.
 -- name: ListDeadLetterSummaries :many
 SELECT dl.id, dl.org_id, dl.run_id, dl.node_id, dl.attempt, dl.error_json,
        dl.status, dl.replayed_at, dl.created_at,
@@ -21,6 +22,7 @@ LEFT JOIN workflow_versions wv ON wv.id = r.workflow_version_id
 LEFT JOIN recovery_items ri ON ri.org_id = dl.org_id AND ri.dead_letter_id = dl.id
 LEFT JOIN workflow_metadata wm ON wm.org_id = ri.org_id AND wm.workflow_id = ri.workflow_id
 WHERE dl.org_id = $1
+  AND dl.replay_mode IS NULL
   AND (sqlc.narg(filter_status)::text IS NULL OR dl.status = sqlc.narg(filter_status))
   AND (sqlc.narg(filter_node_id)::text IS NULL OR dl.node_id = sqlc.narg(filter_node_id))
   AND (sqlc.narg(filter_workflow_id)::text IS NULL
@@ -29,9 +31,13 @@ WHERE dl.org_id = $1
 ORDER BY dl.created_at DESC, dl.id DESC
 LIMIT sqlc.arg(page_limit);
 
+-- replay_mode is copied from the failing run: a sandbox validation's
+-- failure is evidence for its dialog or drill, never operator work, so
+-- the operator listings exclude marked rows while direct-by-id reads
+-- (the dialog, drills, replay) still find them.
 -- name: InsertDeadLetter :exec
-INSERT INTO dead_letters (id, org_id, run_id, node_id, attempt, workflow_json, node_json, error_json)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+INSERT INTO dead_letters (id, org_id, run_id, node_id, attempt, workflow_json, node_json, error_json, replay_mode)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
 
 -- name: GetDeadLetter :one
 SELECT id, org_id, run_id, node_id, attempt, workflow_json, node_json,
@@ -378,6 +384,7 @@ SELECT dl.id, dl.run_id, dl.node_id, dl.error_json, dl.created_at, r.input_json
 FROM dead_letters dl
 JOIN runs r ON r.id = dl.run_id
 WHERE dl.org_id = $1 AND dl.created_at >= $2 AND dl.status = 'open'
+  AND dl.replay_mode IS NULL
 ORDER BY dl.created_at DESC
 LIMIT 500;
 

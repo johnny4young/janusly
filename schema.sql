@@ -205,7 +205,8 @@ CREATE TABLE public.dead_letters (
     replayed_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now(),
     replay_claim_token text,
-    replay_claimed_at timestamp with time zone
+    replay_claimed_at timestamp with time zone,
+    replay_mode text
 );
 
 

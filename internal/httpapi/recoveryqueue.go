@@ -147,7 +147,8 @@ func (s *V1Server) listRecoveryQueue(ctx context.Context, orgID string, q recove
 		args = append(args, value)
 		return fmt.Sprintf("$%d", len(args))
 	}
-	where := []string{"dl.org_id = $1"}
+	// Validation-mode rows are dialog/drill evidence, not operator work.
+	where := []string{"dl.org_id = $1", "dl.replay_mode IS NULL"}
 	if q.status != "" {
 		where = append(where, "dl.status = "+arg(q.status))
 	}

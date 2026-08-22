@@ -222,8 +222,16 @@ func (e *Engine) insertDeadLetter(ctx context.Context, q *store.Queries, claim C
 		WorkflowJson: workflowJSON,
 		NodeJson:     nodeJSON,
 		ErrorJson:    errorJSON,
+		ReplayMode:   run.ReplayMode,
 	}); err != nil {
 		return fmt.Errorf("insert dead letter: %w", err)
+	}
+	if run.ReplayMode.Valid && run.ReplayMode.String != "" {
+		// A sandbox validation's failure is evidence for its dialog or
+		// drill: the row exists for direct-by-id reads, but it must not
+		// open an operator incident — a dry-run cannot create durable
+		// business-outcome work.
+		return nil
 	}
 	// Ownership hook: the incident opens with its dead letter (same tx);
 	// blips degrade to "no incident", never a failed completion.
