@@ -241,3 +241,56 @@ func s3PresignGet(cfg s3Config, key string, at time.Time) string {
 	query.Set("X-Amz-Signature", signature)
 	return base.Scheme + "://" + base.Host + path + "?" + query.Encode()
 }
+
+// s3Get mirrors s3Put with a signed GET; 404/NoSuchKey maps to the
+// distinct NotFound outcome so append flows can start from empty.
+func s3Get(ctx context.Context, key string, maxBytes int64) GetResult {
+	cfg, configErr := loadS3Config()
+	if configErr != "" {
+		return GetResult{Ok: false, Provider: "s3", Error: configErr}
+	}
+	base, path, err := cfg.objectURL(key)
+	if err != nil {
+		return GetResult{Ok: false, Provider: "s3", Error: err.Error()}
+	}
+	now := sigv4Now()
+	payloadHash := sha256Hex(nil)
+	headers := map[string]string{
+		"host":                 base.Host,
+		"x-amz-date":           now.UTC().Format("20060102T150405Z"),
+		"x-amz-content-sha256": payloadHash,
+	}
+	signed := []string{"host", "x-amz-content-sha256", "x-amz-date"}
+	signature, scope := signV4(http.MethodGet, path, url.Values{}, headers, signed, payloadHash, cfg.secret, cfg.region, now)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		base.Scheme+"://"+base.Host+path, nil)
+	if err != nil {
+		return GetResult{Ok: false, Provider: "s3", Error: "s3 request build failed"}
+	}
+	request.Header.Set("X-Amz-Date", headers["x-amz-date"])
+	request.Header.Set("X-Amz-Content-Sha256", payloadHash)
+	request.Header.Set("Authorization", fmt.Sprintf(
+		"AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s",
+		cfg.accessKey, scope, strings.Join(signed, ";"), signature))
+	response, err := s3HTTPClient.Do(request)
+	if err != nil {
+		return GetResult{Ok: false, Provider: "s3", Error: "s3 get failed: " + err.Error()}
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode == http.StatusNotFound {
+		return GetResult{Ok: false, NotFound: true, Provider: "s3"}
+	}
+	if response.StatusCode < 200 || response.StatusCode > 299 {
+		raw, _ := io.ReadAll(io.LimitReader(response.Body, 512))
+		return GetResult{Ok: false, Provider: "s3",
+			Error: fmt.Sprintf("s3 get status %d: %s", response.StatusCode, strings.TrimSpace(string(raw)))}
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxBytes+1))
+	if err != nil {
+		return GetResult{Ok: false, Provider: "s3", Error: "s3 body read failed"}
+	}
+	if int64(len(body)) > maxBytes {
+		return GetResult{Ok: false, Provider: "s3", Error: "object exceeds the read limit"}
+	}
+	return GetResult{Ok: true, Provider: "s3", Body: body}
+}

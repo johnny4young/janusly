@@ -92,11 +92,11 @@ func TestRegistryValidationAndCatalog(t *testing.T) {
 	}
 	// 4 json tools + 3 buffered csv tools + vector pair + text.uppercase
 	// + webhook.send + github.create_issue + slack.post + email.send + pdf.generate
-	// (integration chokepoint)
+	// + sheet.append (integration chokepoint)
 	// + time.window + 4 pagerduty.* + 4 db.*; csv.fetch registers from the
 	// executors package on top of this base set.
 	catalog := NewRegistry().Catalog()
-	if len(catalog) != 24 {
+	if len(catalog) != 25 {
 		t.Fatalf("catalog size: %d", len(catalog))
 	}
 	first := catalog[0]

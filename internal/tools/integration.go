@@ -78,6 +78,7 @@ var integrationToolNames = map[string]bool{
 	"slack.post":                     true,
 	"email.send":                     true,
 	"pdf.generate":                   true,
+	"sheet.append":                   true,
 	"pagerduty.incident.get":         true,
 	"pagerduty.incident.acknowledge": true,
 	"pagerduty.incident.snooze":      true,
@@ -183,6 +184,8 @@ func ExecuteIntegrationTool(ctx context.Context, name string, input map[string]a
 		return executeEmailSend(ctx, input, deps)
 	case "pdf.generate":
 		return executePdfGenerate(ctx, input, deps)
+	case "sheet.append":
+		return executeSheetAppend(ctx, input, deps)
 	case "pagerduty.incident.get", "pagerduty.incident.acknowledge", "pagerduty.incident.snooze":
 		return executePagerDutyAPICall(ctx, name, input, deps)
 	case "db.schema.describe", "db.query.read", "db.query.write", "db.query.transaction":

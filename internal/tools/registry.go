@@ -58,6 +58,9 @@ func NewRegistry() *Registry {
 	for _, definition := range emailTools() {
 		registry.byName[definition.Name] = definition
 	}
+	for _, definition := range sheetTools() {
+		registry.byName[definition.Name] = definition
+	}
 	for _, definition := range pdfTools() {
 		registry.byName[definition.Name] = definition
 	}
