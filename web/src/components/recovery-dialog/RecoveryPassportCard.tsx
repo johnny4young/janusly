@@ -40,7 +40,12 @@ export function RecoveryPassportCard({
   })
   const signature = suggestion.recoveryPassport?.failureSignature ?? failureSignature
   const prior = suggestion.recoveryPassport?.priorSameSignatureOutcome ?? null
-  const occurrenceCount = dlq.recovery?.occurrenceCount ?? 1
+  // Debounce folds every occurrence of one signature into a single
+  // incident, which is linked to just one of the dead letters. Defaulting
+  // the siblings to 1 asserted a blast radius the runtime never measured —
+  // on the screen whose whole job is to size the impact before acting. An
+  // unknown count is shown as unknown.
+  const occurrenceCount = dlq.recovery?.occurrenceCount ?? null
   const evidenceKinds = new Set(evidence.map((row) => row.kind)).size
   const confidence = selected.calibratedConfidence ?? selected.confidence
   const VerdictIcon = evaluation.verdict === 'safe_to_apply'
@@ -69,7 +74,10 @@ export function RecoveryPassportCard({
       <dl className="we-recovery-passport__facts">
         <div>
           <dt>{t('recoveryDialog.passport.failure')}</dt>
-          <dd><code>{signature}</code> · {t('recoveryDialog.passport.occurrences', { count: occurrenceCount })}</dd>
+          <dd>
+            <code>{signature}</code>
+            {occurrenceCount !== null && ` · ${t('recoveryDialog.passport.occurrences', { count: occurrenceCount })}`}
+          </dd>
         </div>
         <div>
           <dt>{t('recoveryDialog.passport.suspectVersion')}</dt>

@@ -56,6 +56,37 @@ describe('<RecoveryPassportCard /> (browser smoke)', () => {
     expect(getComputedStyle(passport).display).not.toBe('none')
   })
 
+  // Debounce links the incident to one dead letter of a cluster; the
+  // siblings carry no projection. The passport must say nothing about
+  // blast radius rather than assert a single occurrence it never measured.
+  it('omits the occurrence count when the incident projection is absent', async () => {
+    const { recovery: _linked, ...unlinked } = dlq
+    render(<RecoveryPassportCard
+      dlq={unlinked as DeadLetter}
+      suggestion={{
+        mode: 'ai',
+        suggestedWorkflow: dlq.workflowJson as never,
+        rationale: 'Added retry',
+        suggestions: [],
+        evidence: [{ kind: 'signature_rule', sourceRef: 'network_timeout', snippet: 'Matched timeout' }],
+      }}
+      selected={{
+        workflow: dlq.workflowJson as never,
+        rationale: 'Added retry',
+        approachLabel: 'add_retry',
+        confidence: 100,
+        safety: { writeSide: false, approvalRequired: false, approvalPresent: true },
+      }}
+      actionable
+      sandboxStatus="passed"
+      failureSignature="Network timeout on http node"
+    />)
+
+    const passport = await screen.findByTestId('recovery-confidence-passport')
+    expect(passport).toHaveTextContent('Network timeout on http node')
+    expect(passport).not.toHaveTextContent('occurrence')
+  })
+
   it('renders the blocked fallback verdict in Spanish', async () => {
     initI18n('es')
     render(<RecoveryPassportCard
