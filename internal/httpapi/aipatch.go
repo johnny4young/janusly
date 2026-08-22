@@ -37,6 +37,9 @@ import (
 const patchSystemPrompt = `You suggest minimal fixes for a failed workflow node. Output ONLY a JSON object:
 {"suggestions":[{"patchedConfig":{...},"rationale":"...","approachLabel":"config_fix|retry_tuning|url_fix|auth_fix|other","confidence":0.0-1.0,"consideredAlternatives":[{"approach":"...","rejectedBecause":"..."}]}]}
 1-3 suggestions, each a COMPLETE replacement config for the failing node only.
+RETRY/TIMEOUT SCHEMA (the runtime honors ONLY these keys — anything else is ignored):
+"retry":{"maxAttempts":int,"delayMs":number,"maxDelayMs":number,"backoff":"fixed"|"exponential","jitter":bool,"retryOn":[codes],"ignoreOn":[codes]} and top-level "timeoutMs":number.
+Never emit timeout, retries, maxRetries, initialDelayMs, or backoffMultiplier.
 Do not invent secrets — reference them as {{secret.NAME}}. consideredAlternatives is optional, at most 2.`
 
 const structuralPatchSystemPrompt = `You suggest a STRUCTURAL guard for a write-side workflow node that lacks human approval. Output ONLY a JSON object:
@@ -234,6 +237,7 @@ func applyPatchSuggestion(original *domain.Workflow, nodeID string, item map[str
 		if !ok {
 			return nil
 		}
+		normalizePatchedConfig(patched)
 		for i := range copied.Nodes {
 			if copied.Nodes[i].ID == nodeID {
 				copied.Nodes[i].Config = patched
@@ -269,6 +273,52 @@ func applyPatchSuggestion(original *domain.Workflow, nodeID string, item map[str
 	}
 	copied.Edges = append(copied.Edges, domain.Edge{From: approvalID, To: nodeID})
 	return copied
+}
+
+// normalizePatchedConfig maps the retry/timeout aliases models keep
+// inventing onto the ONLY keys the engine reads. Without this, a patch
+// whose whole point was "add backoff and a longer timeout" validates and
+// applies while silently dropping both — the suggestion's intent and its
+// effect diverge (observed live with claude-haiku: backoffMultiplier,
+// initialDelayMs and timeout were all ignored). Canonical keys always
+// win; aliases are consumed, never left behind.
+func normalizePatchedConfig(config map[string]any) {
+	if value, ok := config["timeout"].(float64); ok {
+		if _, present := config["timeoutMs"]; !present {
+			config["timeoutMs"] = value
+		}
+		delete(config, "timeout")
+	}
+	retry, ok := config["retry"].(map[string]any)
+	if !ok {
+		return
+	}
+	moveNumber := func(alias, canonical string) {
+		value, ok := retry[alias].(float64)
+		if !ok {
+			delete(retry, alias)
+			return
+		}
+		if _, present := retry[canonical]; !present {
+			retry[canonical] = value
+		}
+		delete(retry, alias)
+	}
+	moveNumber("retries", "maxAttempts")
+	moveNumber("maxRetries", "maxAttempts")
+	moveNumber("initialDelayMs", "delayMs")
+	moveNumber("delay", "delayMs")
+	moveNumber("maxDelay", "maxDelayMs")
+	if multiplier, ok := retry["backoffMultiplier"].(float64); ok {
+		if _, present := retry["backoff"]; !present {
+			if multiplier > 1 {
+				retry["backoff"] = "exponential"
+			} else {
+				retry["backoff"] = "fixed"
+			}
+		}
+	}
+	delete(retry, "backoffMultiplier")
 }
 
 func cloneWorkflow(wf *domain.Workflow) *domain.Workflow {
