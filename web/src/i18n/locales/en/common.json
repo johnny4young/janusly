@@ -1963,6 +1963,12 @@
   "recoveryDelta.rollbackTo": "Roll back to v{{version}}",
   "recoveryDelta.loadingVersions": "Loading versions…",
 
+  "runInput.presets.load": "Load a preset",
+  "runInput.presets.placeholder": "Choose a saved input…",
+  "runInput.presets.namePlaceholder": "Preset name",
+  "runInput.presets.save": "Save preset",
+  "runInput.presets.saved": "Preset saved",
+  "runInput.presets.saveFailed": "Could not save the preset",
   "runInput.kicker": "Run input",
   "runInput.title": "Start workflow",
   "runInput.description": "Provide the values this workflow needs. Janusly checks them again before starting.",

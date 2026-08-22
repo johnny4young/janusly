@@ -226,6 +226,7 @@ func newV1HandlerWithWorkOS(eng *engine.Engine, pool *pgxpool.Pool, client worko
 	server.mountProductSurfaceRoutes(mux)
 	server.mountWorkflowHealthRoutes(mux)
 	server.mountWorkflowMetadataRoutes(mux)
+	server.mountInputPresetRoutes(mux)
 	server.mountEvalRoutes(mux)
 	server.mountScimRoutes(mux)
 	server.mountF1SweepRoutes(mux)

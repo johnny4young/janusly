@@ -206,3 +206,37 @@ describe('<RunInputDialog />', () => {
     expect(screen.getByRole('button', { name: /Close form/i })).toBeInTheDocument()
   })
 })
+
+describe('<RunInputDialog /> presets', () => {
+  it('renders no preset strip when the seam is unset (human forms unchanged)', () => {
+    render(<RunInputDialog {...makeProps()} />)
+    expect(screen.queryByTestId('run-input-presets')).not.toBeInTheDocument()
+  })
+
+  it('loads a preset into the form fields', () => {
+    render(<RunInputDialog {...makeProps({
+      presets: [{ name: 'VIP refund', input: { invoiceId: 'INV-777' } }],
+    })} />)
+    fireEvent.change(screen.getByTestId('run-input-preset-select'), {
+      target: { value: 'VIP refund' },
+    })
+    expect(screen.getByLabelText(/Invoice ID/i)).toHaveValue('INV-777')
+  })
+
+  it('saves only a VALID current value under the typed name', async () => {
+    const onSavePreset = vi.fn().mockResolvedValue(undefined)
+    render(<RunInputDialog {...makeProps({ presets: [], onSavePreset })} />)
+
+    // Empty required field: the save must surface the error, not persist.
+    fireEvent.change(screen.getByTestId('run-input-preset-name'), {
+      target: { value: 'draft' },
+    })
+    fireEvent.click(screen.getByTestId('run-input-preset-save'))
+    expect(onSavePreset).not.toHaveBeenCalled()
+    expect(screen.getByText(/Invoice ID is required/i)).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText(/Invoice ID/i), { target: { value: 'INV-9' } })
+    fireEvent.click(screen.getByTestId('run-input-preset-save'))
+    expect(onSavePreset).toHaveBeenCalledWith('draft', { invoiceId: 'INV-9' })
+  })
+})

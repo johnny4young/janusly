@@ -24,6 +24,8 @@ import { BrandMark } from './components/BrandMark'
 import { Login } from './components/Login'
 import { WorkspaceGate } from './components/WorkspaceGate'
 import { isSupabaseConfigured } from './auth'
+import { api } from './api'
+import type { RunInputPreset } from './components/RunInputDialog'
 import { useWorkflowStore } from './store'
 import { useAppStore } from './hooks/useAppStore'
 import { useAppCommands } from './hooks/useAppCommands'
@@ -187,6 +189,43 @@ export default function App() {
   const [runInputOpen, setRunInputOpen] = useState(false)
   const [runInputServerErrors, setRunInputServerErrors] = useState<string[]>([])
   const [runInputSubmitting, setRunInputSubmitting] = useState(false)
+  // Named presets load when the dialog opens for a SAVED workflow; unsaved
+  // drafts have no server identity to hang presets on, so the seam stays
+  // unset and the dialog renders without the preset strip.
+  const [runInputPresets, setRunInputPresets] = useState<RunInputPreset[] | undefined>(undefined)
+  useEffect(() => {
+    if (!runInputOpen || !currentWorkflowSaved || !currentWorkflowId) {
+      setRunInputPresets(undefined)
+      return
+    }
+    let cancelled = false
+    api(`/workflows/${encodeURIComponent(currentWorkflowId)}/input-presets`)
+      .then((response) => {
+        if (cancelled) return
+        const presets = (response as { presets?: Array<{ name: string; input: unknown }> })?.presets
+        setRunInputPresets(Array.isArray(presets)
+          ? presets.map((preset) => ({ name: preset.name, input: preset.input }))
+          : [])
+      })
+      .catch(() => {
+        if (!cancelled) setRunInputPresets(undefined)
+      })
+    return () => { cancelled = true }
+  }, [runInputOpen, currentWorkflowId, currentWorkflowSaved])
+  const saveRunInputPreset = useCallback(async (name: string, input: unknown) => {
+    try {
+      await api(`/workflows/${encodeURIComponent(currentWorkflowId)}/input-presets`, {
+        method: 'PUT', body: JSON.stringify({ name, input }),
+      })
+      const refreshed = await api(`/workflows/${encodeURIComponent(currentWorkflowId)}/input-presets`) as {
+        presets?: Array<{ name: string; input: unknown }>
+      }
+      setRunInputPresets((refreshed.presets ?? []).map((preset) => ({ name: preset.name, input: preset.input })))
+      addToast(t('runInput.presets.saved'), 'success')
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : t('runInput.presets.saveFailed'), 'error')
+    }
+  }, [addToast, currentWorkflowId, t])
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [semanticBlockerRunIds, setSemanticBlockerRunIds] = useState<string[]>([])
   const [activityRecoveryId, setActivityRecoveryId] = useState<string | null>(null)
@@ -559,6 +598,10 @@ export default function App() {
         submitting: runInputSubmitting,
         onSubmit: submitRunInput,
         onCancel: () => setRunInputOpen(false),
+        ...(runInputPresets !== undefined ? {
+          presets: runInputPresets,
+          onSavePreset: saveRunInputPreset,
+        } : {}),
       } : null}
       palette={{
         visible: paletteOpen,

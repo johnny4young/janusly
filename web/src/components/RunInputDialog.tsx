@@ -65,6 +65,19 @@ export type RunInputDialogProps = {
   onSubmit: (input: unknown) => void | Promise<void>
   /** Cancel via the close button, the backdrop, or ESC. */
   onCancel: () => void
+  /**
+   * Named input presets for this workflow. Optional: run flows pass them;
+   * other schema-driven forms (human forms) leave the seam unset and the
+   * dialog renders exactly as before.
+   */
+  presets?: RunInputPreset[]
+  /** Persist the CURRENT form value under a name; resolves the fresh list. */
+  onSavePreset?: (name: string, input: unknown) => void | Promise<void>
+}
+
+export type RunInputPreset = {
+  name: string
+  input: unknown
 }
 
 export function RunInputDialog({
@@ -81,6 +94,8 @@ export function RunInputDialog({
   submitting = false,
   onSubmit,
   onCancel,
+  presets,
+  onSavePreset,
 }: RunInputDialogProps) {
   const { t } = useT()
   const resolvedKicker = kicker ?? (t('runInput.kicker'))
@@ -91,6 +106,8 @@ export function RunInputDialog({
   const isObjectRoot = inputs.type === 'object' && inputs.properties
   const [state, setState] = useState<RunInputFormState>(() => initialRunInputState(inputs, initialValue))
   const [localErrors, setLocalErrors] = useState<RunInputErrorMap>({})
+  const [presetName, setPresetName] = useState('')
+  const [presetBusy, setPresetBusy] = useState(false)
   const firstFieldRef = useRef<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null>(null)
   const dialogRef = useRef<HTMLDivElement | null>(null)
   useDialogFocusTrap(dialogRef, { initialFocus: firstFieldRef })
@@ -184,6 +201,63 @@ export function RunInputDialog({
         </header>
 
         <form className="run-input-dialog__body" onSubmit={handleSubmit}>
+          {presets !== undefined && (
+            <div className="run-input-presets" data-testid="run-input-presets">
+              {presets.length > 0 && (
+                <label className="run-input-presets__load">
+                  <span className="helper-text">{t('runInput.presets.load')}</span>
+                  <select
+                    data-testid="run-input-preset-select"
+                    value=""
+                    disabled={submitting || presetBusy}
+                    onChange={(event) => {
+                      const chosen = presets.find((preset) => preset.name === event.target.value)
+                      if (chosen) setState(initialRunInputState(inputs, chosen.input))
+                    }}
+                  >
+                    <option value="">{t('runInput.presets.placeholder')}</option>
+                    {presets.map((preset) => (
+                      <option key={preset.name} value={preset.name}>{preset.name}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {onSavePreset && (
+                <div className="run-input-presets__save">
+                  <input
+                    type="text"
+                    data-testid="run-input-preset-name"
+                    placeholder={t('runInput.presets.namePlaceholder')}
+                    maxLength={60}
+                    value={presetName}
+                    disabled={submitting || presetBusy}
+                    onChange={(event) => setPresetName(event.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="small-command"
+                    data-testid="run-input-preset-save"
+                    disabled={submitting || presetBusy || presetName.trim() === ''}
+                    onClick={() => {
+                      // Presets persist only a VALID value: reusing the same
+                      // parser as submit keeps saved shapes runnable.
+                      const { value, errors } = parseRunInputState(state, inputs)
+                      if (Object.keys(errors).length > 0) {
+                        setLocalErrors(errors)
+                        return
+                      }
+                      setPresetBusy(true)
+                      void Promise.resolve(onSavePreset(presetName.trim(), value))
+                        .then(() => setPresetName(''))
+                        .finally(() => setPresetBusy(false))
+                    }}
+                  >
+                    {t('runInput.presets.save')}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           {formLevelServerErrors.length > 0 && (
             <div className="run-input-form-error" role="alert">
               <AlertCircle size={14} aria-hidden="true" />

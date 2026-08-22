@@ -144,6 +144,23 @@ func (q *Queries) CountRecentWorkflowRunStatuses(ctx context.Context, arg CountR
 	return items, nil
 }
 
+const countWorkflowInputPresets = `-- name: CountWorkflowInputPresets :one
+SELECT count(*) FROM workflow_input_presets
+WHERE org_id = $1 AND workflow_id = $2
+`
+
+type CountWorkflowInputPresetsParams struct {
+	OrgID      string
+	WorkflowID string
+}
+
+func (q *Queries) CountWorkflowInputPresets(ctx context.Context, arg CountWorkflowInputPresetsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countWorkflowInputPresets, arg.OrgID, arg.WorkflowID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countWorkflowVersions = `-- name: CountWorkflowVersions :one
 SELECT COALESCE(MAX(version), 0)::int FROM workflow_versions
 WHERE workflow_id = $1 AND org_id = $2
@@ -173,6 +190,25 @@ type DeleteWorkflowFolderBulkParams struct {
 
 func (q *Queries) DeleteWorkflowFolderBulk(ctx context.Context, arg DeleteWorkflowFolderBulkParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteWorkflowFolderBulk, arg.OrgID, arg.Folder)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteWorkflowInputPreset = `-- name: DeleteWorkflowInputPreset :execrows
+DELETE FROM workflow_input_presets
+WHERE org_id = $1 AND workflow_id = $2 AND name = $3
+`
+
+type DeleteWorkflowInputPresetParams struct {
+	OrgID      string
+	WorkflowID string
+	Name       string
+}
+
+func (q *Queries) DeleteWorkflowInputPreset(ctx context.Context, arg DeleteWorkflowInputPresetParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteWorkflowInputPreset, arg.OrgID, arg.WorkflowID, arg.Name)
 	if err != nil {
 		return 0, err
 	}
@@ -1394,6 +1430,54 @@ func (q *Queries) ListUnrecordedRolloutOutcomes(ctx context.Context, pageLimit i
 	return items, nil
 }
 
+const listWorkflowInputPresets = `-- name: ListWorkflowInputPresets :many
+SELECT id, name, input_json, created_by, updated_at
+FROM workflow_input_presets
+WHERE org_id = $1 AND workflow_id = $2
+ORDER BY name
+`
+
+type ListWorkflowInputPresetsParams struct {
+	OrgID      string
+	WorkflowID string
+}
+
+type ListWorkflowInputPresetsRow struct {
+	ID        string
+	Name      string
+	InputJson json.RawMessage
+	CreatedBy pgtype.Text
+	UpdatedAt time.Time
+}
+
+// Named run-input presets: bounded per workflow, unique by name, always
+// org-scoped. The upsert is the save path from the run dialog.
+func (q *Queries) ListWorkflowInputPresets(ctx context.Context, arg ListWorkflowInputPresetsParams) ([]ListWorkflowInputPresetsRow, error) {
+	rows, err := q.db.Query(ctx, listWorkflowInputPresets, arg.OrgID, arg.WorkflowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListWorkflowInputPresetsRow
+	for rows.Next() {
+		var i ListWorkflowInputPresetsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.InputJson,
+			&i.CreatedBy,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWorkflowRows = `-- name: ListWorkflowRows :many
 SELECT w.id, w.org_id, w.name, w.created_by, w.created_at, w.status,
        w.paused_reason, w.deleted_at,
@@ -2043,6 +2127,51 @@ func (q *Queries) SoftDeleteWorkflow(ctx context.Context, arg SoftDeleteWorkflow
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const upsertWorkflowInputPreset = `-- name: UpsertWorkflowInputPreset :one
+INSERT INTO workflow_input_presets (id, org_id, workflow_id, name, input_json, created_by)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (org_id, workflow_id, name) DO UPDATE SET
+  input_json = excluded.input_json, updated_at = now()
+RETURNING id, name, input_json, created_by, updated_at
+`
+
+type UpsertWorkflowInputPresetParams struct {
+	ID         string
+	OrgID      string
+	WorkflowID string
+	Name       string
+	InputJson  json.RawMessage
+	CreatedBy  pgtype.Text
+}
+
+type UpsertWorkflowInputPresetRow struct {
+	ID        string
+	Name      string
+	InputJson json.RawMessage
+	CreatedBy pgtype.Text
+	UpdatedAt time.Time
+}
+
+func (q *Queries) UpsertWorkflowInputPreset(ctx context.Context, arg UpsertWorkflowInputPresetParams) (UpsertWorkflowInputPresetRow, error) {
+	row := q.db.QueryRow(ctx, upsertWorkflowInputPreset,
+		arg.ID,
+		arg.OrgID,
+		arg.WorkflowID,
+		arg.Name,
+		arg.InputJson,
+		arg.CreatedBy,
+	)
+	var i UpsertWorkflowInputPresetRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.InputJson,
+		&i.CreatedBy,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const upsertWorkflowMetadata = `-- name: UpsertWorkflowMetadata :one

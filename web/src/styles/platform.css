@@ -1173,6 +1173,37 @@
   overflow-y: auto;
 }
 
+/* Named input presets: a quiet strip above the form — load one into the
+   fields, or save the current values under a name. */
+.run-input-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--we-border);
+  border-radius: 10px;
+  background: var(--we-surface-2);
+}
+
+.run-input-presets__load {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+}
+
+.run-input-presets__save {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.run-input-presets__save input {
+  width: 170px;
+}
+
 .run-input-dialog__footer {
   display: flex;
   justify-content: flex-end;

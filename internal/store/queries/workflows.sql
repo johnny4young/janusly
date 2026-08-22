@@ -487,3 +487,26 @@ WHERE org_id = $1 AND id = ANY(sqlc.arg(ids)::text[]) AND deleted_at IS NULL;
 
 -- name: GetWorkflowSeverityDefault :one
 SELECT severity_default FROM workflow_metadata WHERE org_id = $1 AND workflow_id = $2;
+
+-- Named run-input presets: bounded per workflow, unique by name, always
+-- org-scoped. The upsert is the save path from the run dialog.
+-- name: ListWorkflowInputPresets :many
+SELECT id, name, input_json, created_by, updated_at
+FROM workflow_input_presets
+WHERE org_id = $1 AND workflow_id = $2
+ORDER BY name;
+
+-- name: CountWorkflowInputPresets :one
+SELECT count(*) FROM workflow_input_presets
+WHERE org_id = $1 AND workflow_id = $2;
+
+-- name: UpsertWorkflowInputPreset :one
+INSERT INTO workflow_input_presets (id, org_id, workflow_id, name, input_json, created_by)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (org_id, workflow_id, name) DO UPDATE SET
+  input_json = excluded.input_json, updated_at = now()
+RETURNING id, name, input_json, created_by, updated_at;
+
+-- name: DeleteWorkflowInputPreset :execrows
+DELETE FROM workflow_input_presets
+WHERE org_id = $1 AND workflow_id = $2 AND name = $3;

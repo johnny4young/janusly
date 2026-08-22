@@ -1963,6 +1963,12 @@
   "recoveryDelta.rollbackTo": "Revertir a v{{version}}",
   "recoveryDelta.loadingVersions": "Cargando versiones…",
 
+  "runInput.presets.load": "Cargar un preset",
+  "runInput.presets.placeholder": "Elige un input guardado…",
+  "runInput.presets.namePlaceholder": "Nombre del preset",
+  "runInput.presets.save": "Guardar preset",
+  "runInput.presets.saved": "Preset guardado",
+  "runInput.presets.saveFailed": "No se pudo guardar el preset",
   "runInput.kicker": "Entrada de la ejecución",
   "runInput.title": "Iniciar flujo",
   "runInput.description": "Provee los valores que necesita este flujo. Janusly los comprueba de nuevo antes de iniciar.",

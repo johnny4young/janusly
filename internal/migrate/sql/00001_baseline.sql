@@ -1313,6 +1313,22 @@ CREATE TABLE public.workflow_improvements (
 
 
 --
+-- Name: workflow_input_presets; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.workflow_input_presets (
+    id text NOT NULL,
+    org_id text NOT NULL,
+    workflow_id text NOT NULL,
+    name text NOT NULL,
+    input_json jsonb NOT NULL,
+    created_by text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
 -- Name: workflow_metadata; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1972,6 +1988,14 @@ ALTER TABLE ONLY public.workflow_budgets
 
 ALTER TABLE ONLY public.workflow_improvements
     ADD CONSTRAINT workflow_improvements_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: workflow_input_presets workflow_input_presets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.workflow_input_presets
+    ADD CONSTRAINT workflow_input_presets_pkey PRIMARY KEY (id);
 
 
 --
@@ -3021,6 +3045,13 @@ CREATE UNIQUE INDEX workflow_budgets_org_workflow_idx ON public.workflow_budgets
 --
 
 CREATE INDEX workflow_improvements_org_workflow_idx ON public.workflow_improvements USING btree (org_id, workflow_id, created_at DESC NULLS LAST);
+
+
+--
+-- Name: workflow_input_presets_org_wf_name_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX workflow_input_presets_org_wf_name_key ON public.workflow_input_presets USING btree (org_id, workflow_id, name);
 
 
 --

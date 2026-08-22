@@ -962,6 +962,17 @@ type WorkflowImprovement struct {
 	CreatedAt     *time.Time
 }
 
+type WorkflowInputPreset struct {
+	ID         string
+	OrgID      string
+	WorkflowID string
+	Name       string
+	InputJson  json.RawMessage
+	CreatedBy  pgtype.Text
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
 type WorkflowMetadatum struct {
 	ID                 string
 	OrgID              string
