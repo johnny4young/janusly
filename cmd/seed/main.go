@@ -143,7 +143,7 @@ func main() {
 	ensureWorkflow("demo-report", map[string]any{
 		"id": "demo-report", "name": "Demo · nightly report", "dslVersion": "1.0",
 		"nodes": []any{
-			map[string]any{"id": "tick", "type": "schedule", "config": map[string]any{"cron": "0 3 * * *"}},
+			map[string]any{"id": "tick", "type": "schedule", "config": map[string]any{"cronExpression": "0 3 * * *"}},
 			map[string]any{"id": "build", "type": "noop", "config": map[string]any{}},
 		},
 		"edges": []any{map[string]any{"from": "tick", "to": "build"}},
