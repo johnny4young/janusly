@@ -32,3 +32,14 @@ docs/proposals/
 docs/marketing/
 
 default.profraw
+
+# `go build ./cmd/<name>` drops the executable in the repository root.
+# The documented helper commands (seed, admin, loadgen, mcp, contract,
+# artifact) would otherwise show up as untracked litter after every build.
+/admin
+/api
+/artifact
+/contract
+/loadgen
+/mcp
+/seed
