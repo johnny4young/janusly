@@ -8,6 +8,7 @@ const WorkflowRolloutPanel = lazy(() => import('./WorkflowRolloutPanel').then((m
 const WorkflowSloPanel = lazy(() => import('./WorkflowSloPanel').then((module) => ({ default: module.WorkflowSloPanel })))
 const ScheduleHistoryPanel = lazy(() => import('./ScheduleHistoryPanel').then((module) => ({ default: module.ScheduleHistoryPanel })))
 const WorkflowMetadataPanel = lazy(() => import('./WorkflowMetadataPanel').then((module) => ({ default: module.WorkflowMetadataPanel })))
+const WorkflowStatusPageCard = lazy(() => import('./WorkflowStatusPageCard').then((module) => ({ default: module.WorkflowStatusPageCard })))
 
 type WorkflowOperationsSection = 'versions' | 'deployment' | 'reliability' | 'schedule' | 'about'
 
@@ -17,7 +18,12 @@ const VersionsControl = () => <VersionHistoryPanel />
 const DeploymentControl = ({ readOnly }: ControlProps) => <WorkflowRolloutPanel readOnly={readOnly} />
 const ReliabilityControl = ({ readOnly }: ControlProps) => <WorkflowSloPanel readOnly={readOnly} />
 const ScheduleControl = () => <ScheduleHistoryPanel />
-const AboutControl = ({ readOnly }: ControlProps) => <WorkflowMetadataPanel readOnly={readOnly} />
+const AboutControl = ({ readOnly }: ControlProps) => (
+  <>
+    <WorkflowMetadataPanel readOnly={readOnly} />
+    <WorkflowStatusPageCard />
+  </>
+)
 
 type SectionDefinition = {
   id: WorkflowOperationsSection

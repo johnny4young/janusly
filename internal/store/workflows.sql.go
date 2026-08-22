@@ -215,6 +215,23 @@ func (q *Queries) DeleteWorkflowInputPreset(ctx context.Context, arg DeleteWorkf
 	return result.RowsAffected(), nil
 }
 
+const deleteWorkflowStatusPage = `-- name: DeleteWorkflowStatusPage :execrows
+DELETE FROM workflow_status_pages WHERE org_id = $1 AND workflow_id = $2
+`
+
+type DeleteWorkflowStatusPageParams struct {
+	OrgID      string
+	WorkflowID string
+}
+
+func (q *Queries) DeleteWorkflowStatusPage(ctx context.Context, arg DeleteWorkflowStatusPageParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteWorkflowStatusPage, arg.OrgID, arg.WorkflowID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteWorkflowTagBulk = `-- name: DeleteWorkflowTagBulk :execrows
 UPDATE workflow_metadata
 SET tags = tags - $2::text, updated_at = now()
@@ -288,6 +305,26 @@ func (q *Queries) FindWorkflowRecoveryQualification(ctx context.Context, arg Fin
 		&i.CreatedBy,
 		&i.CreatedAt,
 	)
+	return i, err
+}
+
+const findWorkflowStatusPageByToken = `-- name: FindWorkflowStatusPageByToken :one
+SELECT sp.org_id, sp.workflow_id, w.name AS workflow_name
+FROM workflow_status_pages sp
+JOIN workflows w ON w.org_id = sp.org_id AND w.id = sp.workflow_id
+WHERE sp.token = $1 AND w.deleted_at IS NULL
+`
+
+type FindWorkflowStatusPageByTokenRow struct {
+	OrgID        string
+	WorkflowID   string
+	WorkflowName string
+}
+
+func (q *Queries) FindWorkflowStatusPageByToken(ctx context.Context, token string) (FindWorkflowStatusPageByTokenRow, error) {
+	row := q.db.QueryRow(ctx, findWorkflowStatusPageByToken, token)
+	var i FindWorkflowStatusPageByTokenRow
+	err := row.Scan(&i.OrgID, &i.WorkflowID, &i.WorkflowName)
 	return i, err
 }
 
@@ -502,6 +539,26 @@ func (q *Queries) GetRunForRolloutOutcome(ctx context.Context, id string) (GetRu
 	return i, err
 }
 
+const getStatusPageLastSuccess = `-- name: GetStatusPageLastSuccess :one
+SELECT max(r.created_at)::timestamptz AS last_success
+FROM runs r
+JOIN workflow_versions wv ON wv.id = r.workflow_version_id
+WHERE r.org_id = $1 AND wv.workflow_id = $2 AND r.replay_mode IS NULL
+  AND r.status = 'succeeded'
+`
+
+type GetStatusPageLastSuccessParams struct {
+	OrgID      string
+	WorkflowID string
+}
+
+func (q *Queries) GetStatusPageLastSuccess(ctx context.Context, arg GetStatusPageLastSuccessParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, getStatusPageLastSuccess, arg.OrgID, arg.WorkflowID)
+	var last_success time.Time
+	err := row.Scan(&last_success)
+	return last_success, err
+}
+
 const getWorkflow = `-- name: GetWorkflow :one
 SELECT id, org_id, name, status, paused_reason, created_by, created_at, deleted_at
 FROM workflows
@@ -680,6 +737,28 @@ func (q *Queries) GetWorkflowSeverityDefault(ctx context.Context, arg GetWorkflo
 	var severity_default pgtype.Text
 	err := row.Scan(&severity_default)
 	return severity_default, err
+}
+
+const getWorkflowStatusPage = `-- name: GetWorkflowStatusPage :one
+SELECT token, created_at FROM workflow_status_pages
+WHERE org_id = $1 AND workflow_id = $2
+`
+
+type GetWorkflowStatusPageParams struct {
+	OrgID      string
+	WorkflowID string
+}
+
+type GetWorkflowStatusPageRow struct {
+	Token     string
+	CreatedAt time.Time
+}
+
+func (q *Queries) GetWorkflowStatusPage(ctx context.Context, arg GetWorkflowStatusPageParams) (GetWorkflowStatusPageRow, error) {
+	row := q.db.QueryRow(ctx, getWorkflowStatusPage, arg.OrgID, arg.WorkflowID)
+	var i GetWorkflowStatusPageRow
+	err := row.Scan(&i.Token, &i.CreatedAt)
+	return i, err
 }
 
 const getWorkflowVersionAnyWorkflow = `-- name: GetWorkflowVersionAnyWorkflow :one
@@ -1385,6 +1464,49 @@ func (q *Queries) ListScheduleEntriesForWorkflow(ctx context.Context, arg ListSc
 			&i.UpdatedAt,
 			&i.NextFireAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStatusPageDailyStats = `-- name: ListStatusPageDailyStats :many
+SELECT date_trunc('day', r.created_at)::timestamptz AS day,
+       count(*) FILTER (WHERE r.status = 'succeeded')::int AS succeeded,
+       count(*) FILTER (WHERE r.status = 'failed')::int AS failed
+FROM runs r
+JOIN workflow_versions wv ON wv.id = r.workflow_version_id
+WHERE r.org_id = $1 AND wv.workflow_id = $2 AND r.replay_mode IS NULL
+  AND r.status IN ('succeeded', 'failed')
+  AND r.created_at >= now() - interval '7 days'
+GROUP BY 1 ORDER BY 1
+`
+
+type ListStatusPageDailyStatsParams struct {
+	OrgID      string
+	WorkflowID string
+}
+
+type ListStatusPageDailyStatsRow struct {
+	Day       time.Time
+	Succeeded int32
+	Failed    int32
+}
+
+func (q *Queries) ListStatusPageDailyStats(ctx context.Context, arg ListStatusPageDailyStatsParams) ([]ListStatusPageDailyStatsRow, error) {
+	rows, err := q.db.Query(ctx, listStatusPageDailyStats, arg.OrgID, arg.WorkflowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListStatusPageDailyStatsRow
+	for rows.Next() {
+		var i ListStatusPageDailyStatsRow
+		if err := rows.Scan(&i.Day, &i.Succeeded, &i.Failed); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -2239,4 +2361,26 @@ func (q *Queries) UpsertWorkflowMetadata(ctx context.Context, arg UpsertWorkflow
 		&i.AiGuidanceMarkdown,
 	)
 	return i, err
+}
+
+const upsertWorkflowStatusPage = `-- name: UpsertWorkflowStatusPage :exec
+INSERT INTO workflow_status_pages (org_id, workflow_id, token)
+VALUES ($1, $2, $3)
+ON CONFLICT (org_id, workflow_id)
+DO UPDATE SET token = EXCLUDED.token, created_at = now()
+`
+
+type UpsertWorkflowStatusPageParams struct {
+	OrgID      string
+	WorkflowID string
+	Token      string
+}
+
+// Public status pages: one opaque unguessable token per workflow. The
+// token row IS the enablement — deleting it revokes the public URL
+// immediately. Public reads join through workflows so a tombstoned
+// workflow's page dies with it.
+func (q *Queries) UpsertWorkflowStatusPage(ctx context.Context, arg UpsertWorkflowStatusPageParams) error {
+	_, err := q.db.Exec(ctx, upsertWorkflowStatusPage, arg.OrgID, arg.WorkflowID, arg.Token)
+	return err
 }

@@ -231,6 +231,7 @@ func newV1HandlerWithWorkOS(eng *engine.Engine, pool *pgxpool.Pool, client worko
 	server.mountScimRoutes(mux)
 	server.mountF1SweepRoutes(mux)
 	server.mountRunSearchRoutes(mux)
+	server.mountStatusPageRoutes(mux)
 	server.mountAiPatchRoutes(mux)
 	server.mountAiSurfaceRoutes(mux)
 	server.mountBillingRoutes(mux)

@@ -1046,6 +1046,13 @@ type WorkflowRolloutOutcome struct {
 	CreatedAt  time.Time
 }
 
+type WorkflowStatusPage struct {
+	OrgID      string
+	WorkflowID string
+	Token      string
+	CreatedAt  time.Time
+}
+
 type WorkflowVersion struct {
 	ID                    string
 	OrgID                 string

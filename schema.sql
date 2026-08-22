@@ -1349,6 +1349,18 @@ CREATE TABLE public.worker_instances (
 
 
 --
+-- Name: workflow_status_pages; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.workflow_status_pages (
+    org_id text NOT NULL,
+    workflow_id text NOT NULL,
+    token text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
 -- Name: workflow_input_presets; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2040,6 +2052,14 @@ ALTER TABLE ONLY public.workflow_improvements
 
 ALTER TABLE ONLY public.worker_instances
     ADD CONSTRAINT worker_instances_pkey PRIMARY KEY (instance_id);
+
+
+--
+-- Name: workflow_status_pages workflow_status_pages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.workflow_status_pages
+    ADD CONSTRAINT workflow_status_pages_pkey PRIMARY KEY (org_id, workflow_id);
 
 
 --
@@ -3097,6 +3117,13 @@ CREATE UNIQUE INDEX workflow_budgets_org_workflow_idx ON public.workflow_budgets
 --
 
 CREATE INDEX workflow_improvements_org_workflow_idx ON public.workflow_improvements USING btree (org_id, workflow_id, created_at DESC NULLS LAST);
+
+
+--
+-- Name: workflow_status_pages_token_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX workflow_status_pages_token_key ON public.workflow_status_pages USING btree (token);
 
 
 --

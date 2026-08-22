@@ -2839,6 +2839,47 @@ button.we-ops-metric-card--button {
 .we-recovery-playbook,
 .we-recovery-playbook-promotion,
 
+
+/* Public status page admin card (workflow tools > About). */
+.we-status-page-card {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 14px 16px;
+}
+
+.we-status-page-card__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.we-status-page-card__hint {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--we-muted);
+}
+
+.we-status-page-card__url {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.we-status-page-card__url code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.we-status-page-card__actions {
+  display: flex;
+  gap: 8px;
+}
+
 /* Similar past failures (semantic run search, consent-gated). */
 .we-similar-runs {
   display: grid;

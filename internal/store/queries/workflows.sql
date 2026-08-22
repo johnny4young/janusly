@@ -510,3 +510,44 @@ RETURNING id, name, input_json, created_by, updated_at;
 -- name: DeleteWorkflowInputPreset :execrows
 DELETE FROM workflow_input_presets
 WHERE org_id = $1 AND workflow_id = $2 AND name = $3;
+
+-- Public status pages: one opaque unguessable token per workflow. The
+-- token row IS the enablement — deleting it revokes the public URL
+-- immediately. Public reads join through workflows so a tombstoned
+-- workflow's page dies with it.
+-- name: UpsertWorkflowStatusPage :exec
+INSERT INTO workflow_status_pages (org_id, workflow_id, token)
+VALUES ($1, $2, $3)
+ON CONFLICT (org_id, workflow_id)
+DO UPDATE SET token = EXCLUDED.token, created_at = now();
+
+-- name: GetWorkflowStatusPage :one
+SELECT token, created_at FROM workflow_status_pages
+WHERE org_id = $1 AND workflow_id = $2;
+
+-- name: DeleteWorkflowStatusPage :execrows
+DELETE FROM workflow_status_pages WHERE org_id = $1 AND workflow_id = $2;
+
+-- name: FindWorkflowStatusPageByToken :one
+SELECT sp.org_id, sp.workflow_id, w.name AS workflow_name
+FROM workflow_status_pages sp
+JOIN workflows w ON w.org_id = sp.org_id AND w.id = sp.workflow_id
+WHERE sp.token = $1 AND w.deleted_at IS NULL;
+
+-- name: ListStatusPageDailyStats :many
+SELECT date_trunc('day', r.created_at)::timestamptz AS day,
+       count(*) FILTER (WHERE r.status = 'succeeded')::int AS succeeded,
+       count(*) FILTER (WHERE r.status = 'failed')::int AS failed
+FROM runs r
+JOIN workflow_versions wv ON wv.id = r.workflow_version_id
+WHERE r.org_id = $1 AND wv.workflow_id = $2 AND r.replay_mode IS NULL
+  AND r.status IN ('succeeded', 'failed')
+  AND r.created_at >= now() - interval '7 days'
+GROUP BY 1 ORDER BY 1;
+
+-- name: GetStatusPageLastSuccess :one
+SELECT max(r.created_at)::timestamptz AS last_success
+FROM runs r
+JOIN workflow_versions wv ON wv.id = r.workflow_version_id
+WHERE r.org_id = $1 AND wv.workflow_id = $2 AND r.replay_mode IS NULL
+  AND r.status = 'succeeded';

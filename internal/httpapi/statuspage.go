@@ -1,0 +1,209 @@
+// Public workflow status pages.
+//
+// An org admin mints one opaque token per workflow; the resulting
+// /public/status/{token} page is readable without authentication. The
+// row IS the enablement: rotating replaces the token (old links die),
+// deleting revokes the page. The public payload is deliberately minimal
+// — workflow name, verdict, seven daily aggregate bars, last success —
+// and never carries run ids, node internals, or error text, because
+// those can quote tenant data. Lookups by unknown token answer a uniform
+// 404 with no tenant signal.
+package httpapi
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"html"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/johnny4young/janusly/internal/audit"
+	"github.com/johnny4young/janusly/internal/auth"
+	"github.com/johnny4young/janusly/internal/store"
+)
+
+func (s *V1Server) mountStatusPageRoutes(mux *http.ServeMux) {
+	adminGate := routeGate{auth.RoleAdmin, "org.config.write"}
+
+	s.route(mux, "GET /workflows/{workflowId}/status-page", adminGate, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		workflowID := r.PathValue("workflowId")
+		if !s.ownsActiveWorkflow(r, rc.orgID, workflowID) {
+			writeUnversioned(w, opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil))
+			return
+		}
+		row, err := store.New(s.pool).GetWorkflowStatusPage(r.Context(), store.GetWorkflowStatusPageParams{
+			OrgID: rc.orgID, WorkflowID: workflowID,
+		})
+		if err != nil {
+			writeUnversioned(w, opOK(map[string]any{"enabled": false}))
+			return
+		}
+		writeUnversioned(w, opOK(statusPageAdminView(row.Token, row.CreatedAt)))
+	})
+
+	s.route(mux, "POST /workflows/{workflowId}/status-page", adminGate, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		workflowID := r.PathValue("workflowId")
+		if !s.ownsActiveWorkflow(r, rc.orgID, workflowID) {
+			writeUnversioned(w, opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil))
+			return
+		}
+		raw := make([]byte, 32)
+		if _, err := rand.Read(raw); err != nil {
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+			return
+		}
+		token := hex.EncodeToString(raw)
+		if err := store.New(s.pool).UpsertWorkflowStatusPage(r.Context(), store.UpsertWorkflowStatusPageParams{
+			OrgID: rc.orgID, WorkflowID: workflowID, Token: token,
+		}); err != nil {
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+			return
+		}
+		audit.Write(r.Context(), s.pool, rc.authContext, "workflow.status_page.rotated", audit.Options{
+			TargetType: "workflow", TargetID: workflowID,
+		})
+		writeUnversioned(w, opOK(statusPageAdminView(token, time.Now().UTC())))
+	})
+
+	s.route(mux, "DELETE /workflows/{workflowId}/status-page", adminGate, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		workflowID := r.PathValue("workflowId")
+		if !s.ownsActiveWorkflow(r, rc.orgID, workflowID) {
+			writeUnversioned(w, opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil))
+			return
+		}
+		revoked, err := store.New(s.pool).DeleteWorkflowStatusPage(r.Context(), store.DeleteWorkflowStatusPageParams{
+			OrgID: rc.orgID, WorkflowID: workflowID,
+		})
+		if err != nil {
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+			return
+		}
+		if revoked > 0 {
+			audit.Write(r.Context(), s.pool, rc.authContext, "workflow.status_page.revoked", audit.Options{
+				TargetType: "workflow", TargetID: workflowID,
+			})
+		}
+		writeUnversioned(w, opOK(map[string]any{"enabled": false}))
+	})
+
+	// Public, unauthenticated by design (like the SSO start/callback pair):
+	// authorization is possession of the unguessable 256-bit token.
+	mux.HandleFunc("GET /public/status/{token}", s.servePublicStatusPage)
+}
+
+func statusPageAdminView(token string, createdAt time.Time) map[string]any {
+	return map[string]any{
+		"enabled":   true,
+		"token":     token,
+		"path":      "/public/status/" + token,
+		"createdAt": createdAt.UTC().Format(time.RFC3339),
+	}
+}
+
+func (s *V1Server) servePublicStatusPage(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
+	// Cheap shape gate before touching the database.
+	if len(token) != 64 || strings.Trim(token, "0123456789abcdef") != "" {
+		http.NotFound(w, r)
+		return
+	}
+	page, err := store.New(s.pool).FindWorkflowStatusPageByToken(r.Context(), token)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	days, err := store.New(s.pool).ListStatusPageDailyStats(r.Context(), store.ListStatusPageDailyStatsParams{
+		OrgID: page.OrgID, WorkflowID: page.WorkflowID,
+	})
+	if err != nil {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	// max() over zero successes is NULL; the scan error is the "never
+	// succeeded" case and keeps the dash label.
+	lastSuccess, lastSuccessErr := store.New(s.pool).GetStatusPageLastSuccess(r.Context(), store.GetStatusPageLastSuccessParams{
+		OrgID: page.OrgID, WorkflowID: page.WorkflowID,
+	})
+
+	succeeded, failed := 0, 0
+	for _, day := range days {
+		succeeded += int(day.Succeeded)
+		failed += int(day.Failed)
+	}
+	verdict, tone := "Operational", "#16a34a"
+	switch {
+	case succeeded+failed == 0:
+		verdict, tone = "No recent runs", "#64748b"
+	case failed > 0 && succeeded == 0:
+		verdict, tone = "Failing", "#dc2626"
+	case failed > 0:
+		verdict, tone = "Degraded", "#d97706"
+	}
+
+	var bars strings.Builder
+	for _, day := range days {
+		total := day.Succeeded + day.Failed
+		rate := 0
+		if total > 0 {
+			rate = int(day.Succeeded) * 100 / int(total)
+		}
+		barTone := "#16a34a"
+		if day.Failed > 0 {
+			barTone = "#d97706"
+		}
+		if day.Succeeded == 0 && day.Failed > 0 {
+			barTone = "#dc2626"
+		}
+		fmt.Fprintf(&bars,
+			`<div class="day" title="%s: %d ok / %d failed"><div class="bar" style="height:%d%%;background:%s"></div><span>%s</span></div>`,
+			day.Day.Format("Jan 2"), day.Succeeded, day.Failed, max(rate, 6), barTone, day.Day.Format("01/02"))
+	}
+	lastSuccessLabel := "—"
+	if lastSuccessErr == nil && !lastSuccess.IsZero() {
+		lastSuccessLabel = lastSuccess.UTC().Format("2006-01-02 15:04 UTC")
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=60")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Robots-Tag", "noindex")
+	fmt.Fprintf(w, publicStatusPageHTML,
+		html.EscapeString(page.WorkflowName), tone, html.EscapeString(verdict),
+		html.EscapeString(page.WorkflowName), succeeded+failed, succeeded,
+		html.EscapeString(lastSuccessLabel), bars.String())
+}
+
+const publicStatusPageHTML = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>%s — status</title>
+<style>
+  body{margin:0;font:15px/1.5 system-ui,sans-serif;background:#f8fafc;color:#0f172a;
+       display:grid;place-items:center;min-height:100vh}
+  main{width:min(560px,92vw);background:#fff;border:1px solid #e2e8f0;border-radius:14px;
+       padding:28px 32px;box-shadow:0 1px 3px rgba(15,23,42,.06)}
+  .verdict{display:inline-flex;align-items:center;gap:8px;font-weight:600;color:%s}
+  .verdict::before{content:"";width:10px;height:10px;border-radius:50%%;background:currentColor}
+  h1{font-size:19px;margin:6px 0 18px}
+  dl{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin:0 0 20px}
+  dt{font-size:12px;color:#64748b}dd{margin:0;font-weight:600;font-variant-numeric:tabular-nums}
+  .days{display:flex;gap:8px;align-items:flex-end;height:74px}
+  .day{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;height:100%%}
+  .day .bar{width:100%%;border-radius:4px 4px 0 0;min-height:4px}
+  .day span{font-size:10px;color:#94a3b8}
+  footer{margin-top:22px;font-size:12px;color:#94a3b8}
+</style></head><body><main>
+<span class="verdict">%s</span>
+<h1>%s</h1>
+<dl>
+  <div><dt>Runs (7 days)</dt><dd>%d</dd></div>
+  <div><dt>Succeeded</dt><dd>%d</dd></div>
+  <div><dt>Last success</dt><dd>%s</dd></div>
+</dl>
+<div class="days">%s</div>
+<footer>Powered by Janusly</footer>
+</main></body></html>
+`
