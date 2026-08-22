@@ -125,6 +125,13 @@ path.react-flow__edge-path.we-edge[data-on-error="true"][data-selected="true"] {
   font-size: 13px;
 }
 
+.canvas-toolbar__history {
+  display: inline-flex;
+  gap: 4px;
+  margin-right: 10px;
+}
+
+
 
 /* Virtualized list container — used by `useVirtualList`. Becomes the
  * scroll surface for unbounded operator lists (DLQ rows + future

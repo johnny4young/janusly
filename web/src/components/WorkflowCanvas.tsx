@@ -19,7 +19,8 @@ import { useConfirm } from './ConfirmDialog'
 import { formatStatusLabel, getNodeLabel, nodeTypes } from '../constants'
 import { readCanvasViewport, writeCanvasViewport } from '../canvas-viewport'
 import { useT } from '../i18n'
-import { registerNodePlacementResolver } from '../store'
+import { registerNodePlacementResolver, useWorkflowStore } from '../store'
+import { Redo2, Undo2 } from 'lucide-react'
 import { hasNodePaletteDrag, readNodePaletteDrag } from '../canvas-node-drag'
 import { CanvasStepPicker } from './CanvasStepPicker'
 import '@xyflow/react/dist/style.css'
@@ -64,6 +65,26 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
   const confirmDialog = useConfirm()
   const observing = mode === 'observe'
   const editing = active && !observing && !readOnly
+  const canUndo = useWorkflowStore((s) => s.historyPast.length > 0)
+  const canRedo = useWorkflowStore((s) => s.historyFuture.length > 0)
+  const undoCanvas = useWorkflowStore((s) => s.undoCanvas)
+  const redoCanvas = useWorkflowStore((s) => s.redoCanvas)
+
+  // Cmd/Ctrl+Z undoes, Shift restores — but never while the operator is
+  // typing in a field (the browser's own text undo wins there).
+  useEffect(() => {
+    if (!editing) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'z') return
+      const target = event.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+      event.preventDefault()
+      if (event.shiftKey) redoCanvas()
+      else undoCanvas()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [editing, undoCanvas, redoCanvas])
   const frameRef = useRef<HTMLDivElement | null>(null)
   const { getZoom, screenToFlowPosition } = useReactFlow<WorkflowGraphNode, WorkflowGraphEdge>()
   const resolveNodeTopLeft = useCallback((screenPoint: { x: number; y: number }) => {
@@ -224,6 +245,30 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
           <strong>{t('canvas.steps', { count: nodes.length })}</strong>
         </div>
         <div className="canvas-toolbar__meta">
+          {editing && (
+            <div className="canvas-toolbar__history" role="group" aria-label={t('canvas.history.aria')}>
+              <button
+                type="button"
+                className="small-command"
+                disabled={!canUndo}
+                onClick={undoCanvas}
+                title={t('canvas.history.undo')}
+                aria-label={t('canvas.history.undo')}
+              >
+                <Undo2 size={13} />
+              </button>
+              <button
+                type="button"
+                className="small-command"
+                disabled={!canRedo}
+                onClick={redoCanvas}
+                title={t('canvas.history.redo')}
+                aria-label={t('canvas.history.redo')}
+              >
+                <Redo2 size={13} />
+              </button>
+            </div>
+          )}
           <span>{t('canvas.paths', { count: edges.length })}</span>
           {observing && <span className="we-pill" data-tone="info">{t('canvas.readOnly')}</span>}
         </div>

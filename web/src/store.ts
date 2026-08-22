@@ -169,6 +169,12 @@ type WorkflowStore = {
   /** Monotonic semantic-workflow revision. Canvas position/selection changes
    * never increment it; authoring checks use it to invalidate stale findings. */
   workflowRevision: number
+  /** Undo/redo snapshots of the canvas graph (semantic mutations only —
+   *  position drags fold into the next semantic snapshot). */
+  historyPast: Array<{ nodes: WorkflowGraphNode[]; edges: WorkflowGraphEdge[] }>
+  historyFuture: Array<{ nodes: WorkflowGraphNode[]; edges: WorkflowGraphEdge[] }>
+  undoCanvas: () => void
+  redoCanvas: () => void
   /** Declared input shape — surfaced in the Inspector + validated at run start. */
   currentWorkflowInputs: WorkflowDefinition['inputs']
   /** Declared output projection map — engine renders templates at terminal status. */
@@ -372,6 +378,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   currentWorkflowSaved: false,
   workflowDirty: false,
   workflowRevision: 0,
+  historyPast: [],
+  historyFuture: [],
   currentWorkflowInputs: undefined,
   currentWorkflowOutputs: undefined,
   currentWorkflowTemplatePolicy: undefined,
@@ -495,6 +503,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       edges: graph.edges,
       selectedNodeId: null,
       selectedEdgeId: null,
+      historyPast: [],
+      historyFuture: [],
       ...clearedRunProjection(state.runTransitionGeneration),
       workflowRevision: state.workflowRevision + 1,
     }))
@@ -534,6 +544,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       edges: [],
       selectedNodeId: null,
       selectedEdgeId: null,
+      historyPast: [],
+      historyFuture: [],
       ...clearedRunProjection(state.runTransitionGeneration),
       activeTab: 'inspector',
       workflowRevision: state.workflowRevision + 1,
@@ -645,6 +657,39 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       : edge),
   })),
 
+  // Undo/redo restore whole-graph snapshots. Restores touch the history
+  // arrays inside the same set() that bumps workflowRevision — that is the
+  // signal the capture subscriber uses to NOT re-capture the restore.
+  undoCanvas: () => set((state) => {
+    const previous = state.historyPast[state.historyPast.length - 1]
+    if (!previous) return state
+    return {
+      historyPast: state.historyPast.slice(0, -1),
+      historyFuture: [...state.historyFuture, { nodes: state.nodes, edges: state.edges }],
+      nodes: previous.nodes,
+      edges: previous.edges,
+      selectedNodeId: null,
+      selectedEdgeId: null,
+      workflowDirty: true,
+      workflowRevision: state.workflowRevision + 1,
+    }
+  }),
+
+  redoCanvas: () => set((state) => {
+    const next = state.historyFuture[state.historyFuture.length - 1]
+    if (!next) return state
+    return {
+      historyFuture: state.historyFuture.slice(0, -1),
+      historyPast: [...state.historyPast, { nodes: state.nodes, edges: state.edges }],
+      nodes: next.nodes,
+      edges: next.edges,
+      selectedNodeId: null,
+      selectedEdgeId: null,
+      workflowDirty: true,
+      workflowRevision: state.workflowRevision + 1,
+    }
+  }),
+
   // Flipping an edge to on-error clears its condition: the failure IS the
   // gate, and the server validator rejects the combination anyway.
   updateEdgeOnError: (id, onError) => set((state) => ({
@@ -750,6 +795,24 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   clearBudgetBlocked: () => set({ budgetBlocked: null }),
   setOnboarding: (onboarding) => set({ onboarding }),
 }))
+
+/** Undo history depth cap — old snapshots fall off the far end. */
+const CANVAS_HISTORY_CAP = 50
+
+// Canvas history capture: every semantic mutation (workflowRevision bump)
+// records the PRE-mutation graph. A set() that also touched the history
+// arrays (undo/redo restores, hydrate/new resets) opts itself out —
+// restores must not re-capture and workflow switches must not leak
+// snapshots across documents.
+useWorkflowStore.subscribe((state, previous) => {
+  if (state.workflowRevision === previous.workflowRevision) return
+  if (state.historyPast !== previous.historyPast || state.historyFuture !== previous.historyFuture) return
+  useWorkflowStore.setState({
+    historyPast: [...previous.historyPast, { nodes: previous.nodes, edges: previous.edges }]
+      .slice(-CANVAS_HISTORY_CAP),
+    historyFuture: [],
+  })
+})
 
 /**
  * Test-only: cancel any pending coalesced bump and reset the module

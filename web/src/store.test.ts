@@ -787,6 +787,33 @@ describe('useWorkflowStore semantic workflow signals', () => {
     expect(useWorkflowStore.getState().edges[0].data?.onError).toBeUndefined()
   })
 
+  it('undo/redo restore semantic snapshots and hydrate clears history', () => {
+    // Two semantic mutations → two undo levels.
+    useWorkflowStore.getState().addNode('http')
+    useWorkflowStore.getState().addNode('noop')
+    expect(useWorkflowStore.getState().nodes).toHaveLength(2)
+    expect(useWorkflowStore.getState().historyPast.length).toBeGreaterThanOrEqual(2)
+
+    useWorkflowStore.getState().undoCanvas()
+    expect(useWorkflowStore.getState().nodes).toHaveLength(1)
+    useWorkflowStore.getState().undoCanvas()
+    expect(useWorkflowStore.getState().nodes).toHaveLength(0)
+    expect(useWorkflowStore.getState().historyFuture).toHaveLength(2)
+
+    // Redo walks forward again.
+    useWorkflowStore.getState().redoCanvas()
+    expect(useWorkflowStore.getState().nodes).toHaveLength(1)
+
+    // A fresh mutation after undo clears the redo branch.
+    useWorkflowStore.getState().addNode('http')
+    expect(useWorkflowStore.getState().historyFuture).toHaveLength(0)
+
+    // Loading another workflow never leaks snapshots across documents.
+    useWorkflowStore.getState().hydrateWorkflow({ id: 'wf_other', name: 'Other', nodes: [], edges: [] })
+    expect(useWorkflowStore.getState().historyPast).toHaveLength(0)
+    expect(useWorkflowStore.getState().historyFuture).toHaveLength(0)
+  })
+
   it('hydrateWorkflow and newWorkflow reset the flag', () => {
     useWorkflowStore.getState().addNode('http')
     expect(useWorkflowStore.getState().workflowDirty).toBe(true)
