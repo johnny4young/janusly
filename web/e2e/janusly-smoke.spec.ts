@@ -431,3 +431,64 @@ test('every workspace tab mounts against Go without page errors', async ({ page,
     expect(pageErrors, `tab ${tab} page errors: ${pageErrors.join('; ')}`).toHaveLength(0)
   }
 })
+
+test('first kilometer against Go: Home cluster CTA lands on an actionable recovery dialog', async ({ page, request }) => {
+  test.setTimeout(120_000)
+  const orgId = `go-firstkm-${Date.now()}`
+  const pageErrors: string[] = []
+  page.on('pageerror', (error) => pageErrors.push(String(error)))
+
+  // Two failures sharing one signature: the shape Home's primary CTA
+  // ("Recover all N matching failures in one pass") is built for.
+  const flaky = {
+    id: `firstkm-flaky-${orgId}`,
+    name: 'First km flaky ingest',
+    nodes: [{ id: 'fetch', type: 'http', config: {
+      url: 'https://firstkm.invalid/feed', retry: { maxAttempts: 1 },
+    } }],
+    edges: [],
+  }
+  await request.post(`${API_URL}/workflows/save`, { headers: headers(orgId), data: flaky })
+  const waitFailed = async (runId: string) => {
+    const deadline = Date.now() + 30_000
+    for (;;) {
+      const res = await request.get(`${API_URL}/v1/status?runId=${runId}`, { headers: headers(orgId) })
+      const body = await res.json() as { data?: { run?: { status?: string } } }
+      if (body.data?.run?.status === 'failed') return
+      if (Date.now() > deadline) throw new Error(`run ${runId} never failed`)
+      await new Promise((r) => setTimeout(r, 150))
+    }
+  }
+  for (let i = 0; i < 2; i += 1) {
+    const started = await request.post(`${API_URL}/start`, {
+      headers: headers(orgId), data: { workflow: flaky },
+    })
+    const { runId } = await started.json() as { runId: string }
+    await waitFailed(runId)
+  }
+
+  await preparePage(page, orgId)
+  await page.getByRole('button', { name: 'Home', exact: true }).click()
+
+  // The CTA promises action on the cluster; it must land where the
+  // Recovery dialog lives, never on a read-only copy of the data.
+  await page.getByRole('button', { name: 'Open clusters', exact: true }).click()
+  await expect(page.getByText('Recovery case').first()).toBeVisible()
+
+  await page.getByRole('button', { name: 'Suggest fix', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Generate suggestion' })).toBeVisible()
+  await page.getByRole('button', { name: 'Generate suggestion' }).click()
+
+  // The container has no provider key on purpose: the dialog must stay
+  // honest — a passport verdict and a blocked candidate, never an
+  // invented patch and never a fabricated occurrence count.
+  const passport = page.getByTestId('recovery-confidence-passport')
+  await expect(passport).toBeVisible()
+  await expect(passport).toHaveAttribute('data-verdict', 'unsafe')
+  // Debounce links the incident to one dead letter of the pair: the
+  // linked one reads "2 occurrences", its sibling shows no count at all.
+  // What must never render for a cluster of two is an invented
+  // "1 occurrence".
+  await expect(passport).not.toContainText('1 occurrence')
+  expect(pageErrors).toEqual([])
+})

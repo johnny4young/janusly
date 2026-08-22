@@ -11,11 +11,17 @@ pnpm_command=${PNPM:-pnpm --ignore-workspace}
 # .env, so a developer's real ANTHROPIC_API_KEY would otherwise reach the
 # container, spend provider credits, and break the smoke spec that asserts
 # the deterministic $0 fallback. Blank the credential for this stack only.
+# The master key is a fixed throwaway for this isolated stack: without
+# one the seeder's credential writes are refused, which would leave the
+# documented first-run path untested.
+e2e_master_key="e2e0000000000000000000000000000000000000000000000000000000000000"
+
 compose() {
   COMPOSE_PROJECT_NAME="$project" \
   JANUSLY_HOST_PORT="$app_port" \
   JANUSLY_POSTGRES_HOST_PORT="$postgres_port" \
   ALLOW_PRIVATE_HTTP_TARGETS=true \
+  JANUSLY_CREDENTIAL_MASTER_KEY="$e2e_master_key" \
   ANTHROPIC_API_KEY= \
     docker compose -p "$project" "$@"
 }
@@ -42,6 +48,11 @@ for _ in $(seq 1 120); do
   sleep 1
 done
 curl --fail --silent "$origin/healthz" >/dev/null
+
+# The seeder IS the documented first-run path; running it here means a
+# regression in it fails CI instead of the next fresh install. Idempotent
+# by design, so re-running against a warm stack is safe.
+(cd "$root" && JANUSLY_SEED_API="$origin" JANUSLY_SEED_ORG=default go run ./cmd/seed)
 
 cd "$root/web"
 PLAYWRIGHT_SKIP_WEB_SERVER=1 \

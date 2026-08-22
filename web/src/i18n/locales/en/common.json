@@ -1256,7 +1256,7 @@
   "runExplain.failed": "Failed to explain run.",
   "runExplain.errorQuota": "Your OpenAI account has no quota left. Add a payment method in your OpenAI dashboard and retry.",
   "runExplain.errorRate": "Rate limit reached. Wait a few seconds and ask again, or switch to a higher-tier model.",
-  "runExplain.errorAuth": "OpenAI rejected the API key. Check the value in the root .env and restart the API.",
+  "runExplain.errorAuth": "The AI provider rejected the API key. Check ANTHROPIC_API_KEY in the root .env and restart make dev.",
 
   "diff.tag.secret_ref": "Secret-ref",
   "diff.tag.retry": "Retry",
@@ -2807,6 +2807,7 @@
   "activity.filter.needs_action": "Needs action",
   "activity.filter.failed": "Failed",
   "activity.filter.recovered": "Recovered",
+  "activity.rowAria": "{{kind}}: {{workflow}} — {{status}}. Next: {{nextAction}}",
   "activity.kind.run": "Run",
   "activity.kind.recovery": "Recovery",
   "activity.nextAction.watch": "Watch progress",

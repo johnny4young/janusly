@@ -1256,7 +1256,7 @@
   "runExplain.failed": "No se pudo explicar la ejecución.",
   "runExplain.errorQuota": "Tu cuenta de OpenAI no tiene cuota disponible. Agrega un método de pago en el dashboard de OpenAI y reintenta.",
   "runExplain.errorRate": "Se alcanzó el límite de rate. Espera unos segundos y vuelve a preguntar, o cambia a un modelo de mayor tier.",
-  "runExplain.errorAuth": "OpenAI rechazó la API key. Revisa el valor en el .env de la raíz y reinicia la API.",
+  "runExplain.errorAuth": "El proveedor de IA rechazó la API key. Revisa ANTHROPIC_API_KEY en el .env de la raíz y reinicia make dev.",
 
   "diff.tag.secret_ref": "Secret-ref",
   "diff.tag.retry": "Reintento",
@@ -2807,6 +2807,7 @@
   "activity.filter.needs_action": "Requiere acción",
   "activity.filter.failed": "Falló",
   "activity.filter.recovered": "Recuperado",
+  "activity.rowAria": "{{kind}}: {{workflow}} — {{status}}. Siguiente: {{nextAction}}",
   "activity.kind.run": "Ejecución",
   "activity.kind.recovery": "Recuperación",
   "activity.nextAction.watch": "Ver progreso",

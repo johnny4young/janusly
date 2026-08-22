@@ -123,6 +123,12 @@ function ActivityRow({
         className="list-card-row"
         aria-pressed={selected}
         onClick={onSelect}
+        aria-label={t('activity.rowAria', {
+          kind: t(`activity.kind.${item.kind}`),
+          workflow: workflowName,
+          status: displayedStatus,
+          nextAction: t(`activity.nextAction.${item.nextAction}`),
+        })}
       >
         <span className="we-activity-row__primary">
           <span className="we-activity-row__kind">
