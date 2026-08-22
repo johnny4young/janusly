@@ -8,6 +8,7 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -176,11 +177,7 @@ func presetHoldsSecretShapedValue(value any) bool {
 			}
 		}
 	case []any:
-		for _, nested := range typed {
-			if presetHoldsSecretShapedValue(nested) {
-				return true
-			}
-		}
+		return slices.ContainsFunc(typed, presetHoldsSecretShapedValue)
 	}
 	return false
 }

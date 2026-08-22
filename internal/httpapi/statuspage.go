@@ -169,7 +169,7 @@ func (s *V1Server) servePublicStatusPage(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Cache-Control", "public, max-age=60")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Robots-Tag", "noindex")
-	fmt.Fprintf(w, publicStatusPageHTML,
+	_, _ = fmt.Fprintf(w, publicStatusPageHTML,
 		html.EscapeString(page.WorkflowName), tone, html.EscapeString(verdict),
 		html.EscapeString(page.WorkflowName), succeeded+failed, succeeded,
 		html.EscapeString(lastSuccessLabel), bars.String())
