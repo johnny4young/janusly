@@ -598,11 +598,15 @@ function useRecoveryCenterController(props: RecoveryCenterPanelProps) {
       else props.onOpenTab('runs')
       return
     }
-    if (action.id === 'triage_failures') {
+    // A cluster is acted on the same way a single failure is — from the
+    // recovery queue, where the Recovery dialog its copy promises lives.
+    if (action.id === 'triage_failures' || action.id === 'recover_cluster') {
       props.onOpenRecoveryQueue(openDeadLetters[0]?.id)
       return
     }
-    props.onOpenTab('operations')
+    // Everything else follows the action's declared destination. Hardcoding
+    // one here let the model and the UI disagree silently.
+    props.onOpenTab(action.ctaTab)
   }, [
     openDeadLetters,
     props.onOpenRecoveryCase,

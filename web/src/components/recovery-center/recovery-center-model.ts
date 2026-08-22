@@ -253,7 +253,11 @@ export function computeRecommendedActions(signals: RecommendedActionSignals): Re
       title: runtimeT('recoveryCenter.action.recover_cluster.title', { count: signals.topClusterFrequency }),
       body: runtimeT('recoveryCenter.action.recover_cluster.body'),
       ctaLabel: runtimeT('recoveryCenter.action.recover_cluster.cta'),
-      ctaTab: 'operations',
+      // The copy promises "apply one fix to all of them via the Recovery
+      // dialog", which only opens from the recovery queue. Settings shows
+      // the same clusters read-only, so sending the operator there stranded
+      // them one destination short of the action.
+      ctaTab: 'recover',
       severity: 'cobalt',
     })
   } else if (signals.openFailures > 0) {

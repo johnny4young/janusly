@@ -293,7 +293,7 @@ describe('computeRecommendedActions', () => {
     }))
     expect(actions[0]!.id).toBe('recover_cluster')
     expect(actions[0]!.severity).toBe('cobalt')
-    expect(actions[0]!.ctaTab).toBe('operations')
+    expect(actions[0]!.ctaTab).toBe('recover')
     expect(actions[0]!.title).toContain('Recover all 4')
     expect(actions.some((action) => action.id === 'triage_failures')).toBe(false)
   })
@@ -910,7 +910,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     expect(baseProps.onOpenRecoveryQueue).toHaveBeenCalledWith('dlq-1')
   })
 
-  it('routes clustered recovery work to operations', async () => {
+  it('routes clustered recovery work to the recovery queue', async () => {
     mockRecoveryApi(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
@@ -926,7 +926,11 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       deadLetters={populatedDlq as never}
     />)
     fireEvent.click(await screen.findByTestId('recovery-center-action-cta-recover_cluster'))
-    expect(baseProps.onOpenTab).toHaveBeenCalledWith('operations')
+    // The recovery queue is where a cluster can actually be acted on; the
+    // Settings copy of the card is read-only. Handing over the first open
+    // dead letter lands the operator on the row, not just the destination.
+    expect(baseProps.onOpenRecoveryQueue).toHaveBeenCalled()
+    expect(baseProps.onOpenTab).not.toHaveBeenCalledWith('operations')
   })
 
   it('opens an active workflow directly in Activity', async () => {
