@@ -7,6 +7,9 @@ import type { DeadLetter } from './DeadLettersPanel'
 vi.mock('../api', () => ({
   api: vi.fn(),
 }))
+// The similar-runs card owns its own suite; here it must not consume the
+// dialog's mockResolvedValueOnce chains with its semantic-search fetch.
+vi.mock('./recovery-dialog/SimilarRunsCard', () => ({ SimilarRunsCard: () => null }))
 
 const baseDlq: DeadLetter = {
   id: 'dlq-1',

@@ -22,6 +22,11 @@ import (
 var (
 	skippedEdgeState   = json.RawMessage(`{"skipped":{"reason":"Condition not met"}}`)
 	skippedEdgePayload = json.RawMessage(`{"reason":"Condition not met"}`)
+	// A doomed node sits behind an edge that can no longer fire: an
+	// on-error edge whose source succeeded, or a normal edge whose
+	// source failed with the failure handled elsewhere.
+	skippedBranchState   = json.RawMessage(`{"skipped":{"reason":"Branch not taken"}}`)
+	skippedBranchPayload = json.RawMessage(`{"reason":"Branch not taken"}`)
 )
 
 func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, events *runEventBuffer, runID string, completedAt time.Time) error {
@@ -71,12 +76,19 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, event
 	for changed := true; changed; {
 		changed = false
 		for _, node := range wf.Nodes {
-			if statuses[node.ID] != "pending" || !depsSatisfied(wf, node.ID, statuses) {
+			if statuses[node.ID] != "pending" {
 				continue
 			}
-			if !edgeAllowsRun(wf, node.ID, runContext) {
+			doomed := depsDoomed(wf, node.ID, statuses)
+			if !doomed && !depsSatisfied(wf, node.ID, statuses) {
+				continue
+			}
+			if doomed || !edgeAllowsRun(wf, node.ID, runContext) {
 				skippedAt := eventNow()
-				stateJSON := skippedEdgeState
+				stateJSON, payload, reason := skippedEdgeState, skippedEdgePayload, "Condition not met"
+				if doomed {
+					stateJSON, payload, reason = skippedBranchState, skippedBranchPayload, "Branch not taken"
+				}
 				rows, err := q.SkipRunNode(ctx, store.SkipRunNodeParams{
 					RunID: runID, NodeID: node.ID,
 					StateJson: stateJSON, FinishedAt: &skippedAt,
@@ -85,7 +97,6 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, event
 					return fmt.Errorf("skip node %s: %w", node.ID, err)
 				}
 				if rows > 0 {
-					payload := skippedEdgePayload
 					events.add(e.newID(), runID, node.ID, "node.skipped", payload, skippedAt)
 				}
 				metricNodeCompletions.WithLabelValues("skipped").Inc()
@@ -93,7 +104,7 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, event
 				if runContext != nil {
 					runContext[node.ID] = map[string]any{
 						"status": "skipped", "attempts": float64(0),
-						"state":  map[string]any{"skipped": map[string]any{"reason": "Condition not met"}},
+						"state":  map[string]any{"skipped": map[string]any{"reason": reason}},
 						"output": map[string]any{}, "error": nil,
 					}
 				}
@@ -122,20 +133,24 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, event
 		return nil
 	}
 
-	anyFailed, anyOpen := false, false
+	anyUnhandledFailed, anyOpen := false, false
 	total := 0
-	failedNodes := 0
-	for _, status := range statuses {
+	failedNodes, handledFailures := 0, 0
+	for nodeID, status := range statuses {
 		total++
 		if status == "failed" {
-			anyFailed = true
 			failedNodes++
+			if nodeFailureHandled(wf, nodeID) {
+				handledFailures++
+			} else {
+				anyUnhandledFailed = true
+			}
 		}
 		if openNodeStatuses[status] {
 			anyOpen = true
 		}
 	}
-	if anyFailed {
+	if anyUnhandledFailed {
 		if err := e.flipRunTerminal(ctx, q, events, runID, "failed",
 			map[string]any{"failedNodes": failedNodes}, completedAt, nil); err != nil {
 			return err
@@ -147,8 +162,12 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, event
 		if len(wf.Outputs) > 0 {
 			outputJSON, _ = json.Marshal(projectOutputs(wf.Outputs, runContext, runInput))
 		}
+		payload := map[string]any{"nodes": total}
+		if handledFailures > 0 {
+			payload["handledFailures"] = handledFailures
+		}
 		if err := e.flipRunTerminal(ctx, q, events, runID, "succeeded",
-			map[string]any{"nodes": total}, completedAt, outputJSON); err != nil {
+			payload, completedAt, outputJSON); err != nil {
 			return err
 		}
 		return e.appendStatusChecked(ctx, events, runID, completedAt)

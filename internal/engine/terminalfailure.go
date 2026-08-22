@@ -80,7 +80,7 @@ func (e *Engine) FailNode(ctx context.Context, claim ClaimedNode, execErr error)
 // node.failed. Executor errors must use FailNode; callers cannot replace the
 // canonical error or attempt fields.
 func (e *Engine) failNodeWithEventFields(ctx context.Context, claim ClaimedNode, execErr error, fields map[string]any) error {
-	committed, err := e.failNodeTx(ctx, claim, execErr, fields)
+	committed, handled, err := e.failNodeTx(ctx, claim, execErr, fields)
 	if err != nil {
 		return err
 	}
@@ -90,13 +90,23 @@ func (e *Engine) failNodeWithEventFields(ctx context.Context, claim ClaimedNode,
 		// too would page twice for one failure.
 		return nil
 	}
+	if handled {
+		// A handled failure is not an incident: no breaker, no DLQ alert.
+		// The run continues; terminal bookkeeping fires from whichever
+		// completion settles it. The rollout receipt and memory summary
+		// still run here because the handled branch may have settled the
+		// run terminal inside this very transaction.
+		e.maybeRecordRolloutOutcome(ctx, claim.RunID)
+		e.maybeCommitRunSummaryMemory(ctx, claim.RunID)
+		return nil
+	}
 	// Containment rides OUTSIDE the durable failure: a breaker fault must
 	// never break the DLQ path that already committed.
 	e.afterTerminalFailure(ctx, claim)
 	return nil
 }
 
-func (e *Engine) failNodeTx(ctx context.Context, claim ClaimedNode, execErr error, fields map[string]any) (bool, error) {
+func (e *Engine) failNodeTx(ctx context.Context, claim ClaimedNode, execErr error, fields map[string]any) (committed, handled bool, err error) {
 	serr := serializeError(execErr)
 	eventPayload := map[string]any{"error": serr, "attempt": claim.Attempt}
 	for key, value := range fields {
@@ -106,11 +116,11 @@ func (e *Engine) failNodeTx(ctx context.Context, claim ClaimedNode, execErr erro
 	}
 	eventJSON, err := json.Marshal(eventPayload)
 	if err != nil {
-		return false, fmt.Errorf("marshal event payload: %w", err)
+		return false, false, fmt.Errorf("marshal event payload: %w", err)
 	}
 
 	failedAt := eventNow()
-	return e.inCompletionTxCommitted(ctx, claim.RunID, func(q *store.Queries, events *runEventBuffer) error {
+	committed, err = e.inCompletionTxCommitted(ctx, claim.RunID, func(q *store.Queries, events *runEventBuffer) error {
 		run, err := q.GetRunExecution(ctx, claim.RunID)
 		if err != nil {
 			return fmt.Errorf("read run: %w", err)
@@ -139,6 +149,22 @@ func (e *Engine) failNodeTx(ctx context.Context, claim ClaimedNode, execErr erro
 			return fmt.Errorf("clear wakeup: %w", err)
 		}
 
+		// A failure with an on-error route is HANDLED: the author declared
+		// it expected. No dead letter (there is nothing for an operator to
+		// recover — the workflow recovers itself), no terminal flip; the
+		// error branch schedules inside this same transaction.
+		if wf, _, wfErr := workflowFromRunInput(run.InputJson); wfErr == nil && run.Status == "running" &&
+			nodeFailureHandled(wf, claim.NodeID) {
+			handled = true
+			handledPayload := map[string]any{"error": serr, "attempt": claim.Attempt, "handled": true}
+			handledJSON, err := json.Marshal(handledPayload)
+			if err != nil {
+				return fmt.Errorf("marshal handled payload: %w", err)
+			}
+			events.add(e.newID(), claim.RunID, claim.NodeID, "node.failed", handledJSON, failedAt)
+			return e.scheduleDownstream(ctx, q, events, claim.RunID, failedAt)
+		}
+
 		if err := e.insertDeadLetter(ctx, q, claim, run, serr, failedAt); err != nil {
 			return err
 		}
@@ -161,6 +187,7 @@ func (e *Engine) failNodeTx(ctx context.Context, claim ClaimedNode, execErr erro
 		return e.flipRunTerminal(ctx, q, events, claim.RunID, "failed",
 			map[string]any{"failedNodes": failedNodes}, failedAt, nil)
 	})
+	return committed, handled, err
 }
 
 // afterTerminalFailure runs the breaker evaluation OUTSIDE the completion

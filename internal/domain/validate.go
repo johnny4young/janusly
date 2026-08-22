@@ -28,6 +28,7 @@ const (
 	CodeEdgeInvalidTo               = "edge_invalid_to"
 	CodeEdgeInvalidCondition        = "edge_invalid_condition"
 	CodeEdgeConditionInputsScope    = "edge_condition_inputs_scope"
+	CodeEdgeOnErrorCondition        = "edge_on_error_condition"
 	CodeInputDefaultTypeMismatch    = "input_default_type_mismatch"
 	CodeScheduleInvalidCron         = "schedule_invalid_cron"
 	CodeHumanFormInvalidSchema      = "human_form_invalid_schema"
@@ -272,6 +273,13 @@ func ValidateWithSemanticFixtures(wf *Workflow, validExpression ExpressionValida
 		}
 		if !nodeIDs[edge.To] {
 			push(Issue{Code: CodeEdgeInvalidTo, Message: "Edge target does not exist: " + edge.To, EdgeID: edgeID})
+		}
+		if edge.OnError && edge.Condition != "" {
+			push(Issue{
+				Code:    CodeEdgeOnErrorCondition,
+				Message: "An on-error edge cannot also carry a condition — it already fires only when the source node fails",
+				EdgeID:  edgeID,
+			})
 		}
 		if edge.Condition != "" {
 			if ok, msg := validExpression(edge.Condition); !ok {

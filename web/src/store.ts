@@ -244,6 +244,7 @@ type WorkflowStore = {
   updateWorkflowOutputs: (outputs: WorkflowDefinition['outputs']) => void
   updateWorkflowTemplatePolicy: (policy: WorkflowDefinition['templatePolicy']) => void
   updateEdgeCondition: (id: string, condition: string | null) => void
+  updateEdgeOnError: (id: string, onError: boolean) => void
 
   setRunId: (id: string | null) => void
   setRunDetail: (run: RunSummary | null) => void
@@ -341,6 +342,7 @@ function graphToWorkflow(
       from: edge.source,
       to: edge.target,
       condition: edge.data?.condition || undefined,
+      ...(edge.data?.onError ? { onError: true } : {}),
     })),
     ...(inputs ? { inputs } : {}),
     ...(outputs ? { outputs } : {}),
@@ -639,6 +641,25 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           label: condition ? 'condition' : undefined,
           animated: Boolean(condition),
           data: { ...edge.data, condition: condition ?? undefined },
+        }
+      : edge),
+  })),
+
+  // Flipping an edge to on-error clears its condition: the failure IS the
+  // gate, and the server validator rejects the combination anyway.
+  updateEdgeOnError: (id, onError) => set((state) => ({
+    workflowDirty: true,
+    workflowRevision: state.workflowRevision + 1,
+    edges: state.edges.map((edge) => edge.id === id
+      ? {
+          ...edge,
+          label: onError ? undefined : edge.label,
+          animated: onError ? false : edge.animated,
+          data: {
+            ...edge.data,
+            onError: onError || undefined,
+            condition: onError ? undefined : edge.data?.condition,
+          },
         }
       : edge),
   })),

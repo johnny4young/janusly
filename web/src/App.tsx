@@ -406,6 +406,7 @@ export default function App() {
     submitRunInput,
     suggestWorkflowImprovement,
     updateEdgeCondition,
+    updateEdgeOnError,
     useTemplate,
     validateWorkflow,
   } = useAppCommands({
@@ -509,6 +510,7 @@ export default function App() {
           onUpdateNodeConfig: updateSelectedNodeConfig,
           onUpdateNodeType: updateSelectedNodeType,
           onUpdateEdgeCondition: updateEdgeCondition,
+          onUpdateEdgeOnError: updateEdgeOnError,
           onValidateWorkflow: validateWorkflow,
           onInsertSnippet: () => setSnippetMenuOpen(true),
           onGenerateWorkflow: generateWorkflow,

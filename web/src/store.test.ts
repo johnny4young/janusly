@@ -769,6 +769,24 @@ describe('useWorkflowStore semantic workflow signals', () => {
     expect(useWorkflowStore.getState().workflowDirty).toBe(true)
   })
 
+  it('updateEdgeOnError marks the route and clears its condition', () => {
+    useWorkflowStore.setState({
+      edges: [{
+        id: 'e0', source: 'a', target: 'b',
+        data: { condition: 'context.a.output.ready' },
+      }],
+      workflowDirty: false,
+    })
+    useWorkflowStore.getState().updateEdgeOnError('e0', true)
+    const flipped = useWorkflowStore.getState().edges[0]
+    expect(flipped.data?.onError).toBe(true)
+    expect(flipped.data?.condition).toBeUndefined()
+    expect(useWorkflowStore.getState().workflowDirty).toBe(true)
+
+    useWorkflowStore.getState().updateEdgeOnError('e0', false)
+    expect(useWorkflowStore.getState().edges[0].data?.onError).toBeUndefined()
+  })
+
   it('hydrateWorkflow and newWorkflow reset the flag', () => {
     useWorkflowStore.getState().addNode('http')
     expect(useWorkflowStore.getState().workflowDirty).toBe(true)

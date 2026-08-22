@@ -105,6 +105,27 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   color: var(--we-primary);
 }
 
+/* On-error routes read as the exception path: dashed + danger-toned. */
+path.react-flow__edge-path.we-edge[data-on-error="true"] {
+  stroke: var(--we-danger);
+  stroke-dasharray: 6 4;
+}
+path.react-flow__edge-path.we-edge[data-on-error="true"][data-selected="true"] {
+  stroke: var(--we-danger);
+}
+.we-edge-label[data-on-error="true"] {
+  border-color: var(--we-danger);
+  color: var(--we-danger);
+}
+
+.we-edge-on-error-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+
 /* Virtualized list container — used by `useVirtualList`. Becomes the
  * scroll surface for unbounded operator lists (DLQ rows + future
  * panels). `overscroll-behavior: contain` prevents the scroll chain

@@ -34,7 +34,7 @@ type WorkflowNodeData = {
   helper?: string
   hasValidationError?: boolean
 }
-type WorkflowEdgeData = { condition?: string }
+type WorkflowEdgeData = { condition?: string; onError?: boolean }
 export type ValidationIssue = { code: string; message: string; nodeId?: string; edgeId?: string }
 export type ReadinessIssue = ValidationIssue & {
   severity: 'warn' | 'fail'
@@ -380,7 +380,7 @@ export type WorkflowDefinition = {
   name?: string
   metadata?: JsonObject
   nodes: Array<{ id: string; type: string; label?: string; config: JsonObject }>
-  edges: Array<{ from: string; to: string; condition?: string }>
+  edges: Array<{ from: string; to: string; condition?: string; onError?: boolean }>
   /** Typed inputs surfaced in the Inspector + validated at run start. */
   inputs?: WorkflowInputSchemaShape
   /** Output projection map; engine renders each template at terminal `succeeded`. */
@@ -403,4 +403,4 @@ export type WorkflowImprovementResult = {
   aiError?: string
 }
 export type WorkflowGraphNode = Node<WorkflowNodeData>
-export type WorkflowGraphEdge = Edge<WorkflowEdgeData & { hasCondition?: boolean }>
+export type WorkflowGraphEdge = Edge<WorkflowEdgeData & { hasCondition?: boolean; hasOnError?: boolean }>

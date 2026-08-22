@@ -36,6 +36,7 @@ export function WorkflowEdge(props: EdgeProps<WorkflowGraphEdge>) {
     targetPosition,
   })
   const hasCondition = Boolean(data?.hasCondition)
+  const hasOnError = Boolean(data?.hasOnError)
   // Directed "from → to" label so the connection is reachable without seeing the
   // arrow (screen readers, dense graphs). Endpoint labels resolve at render time
   // via getNodeLabel so a locale toggle re-renders the edge, not the projection.
@@ -50,15 +51,17 @@ export function WorkflowEdge(props: EdgeProps<WorkflowGraphEdge>) {
         path={edgePath}
         className="we-edge"
         data-selected={selected ? 'true' : 'false'}
+        data-on-error={hasOnError ? 'true' : 'false'}
         markerEnd={markerEnd}
         aria-label={connectionLabel}
         role="img"
       />
-      {hasCondition ? (
+      {hasCondition || hasOnError ? (
         <EdgeLabelRenderer>
           <div
             className="we-edge-label"
             data-selected={selected ? 'true' : 'false'}
+            data-on-error={hasOnError ? 'true' : 'false'}
             style={{
               // The transform-only inline style is React Flow's standard
               // pattern for label positioning (foreign-object portals);
@@ -66,7 +69,7 @@ export function WorkflowEdge(props: EdgeProps<WorkflowGraphEdge>) {
               transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
             }}
           >
-            {t('canvas.edge.condition')}
+            {hasOnError ? t('canvas.edge.onError') : t('canvas.edge.condition')}
           </div>
         </EdgeLabelRenderer>
       ) : null}

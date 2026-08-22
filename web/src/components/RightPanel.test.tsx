@@ -34,6 +34,7 @@ function props(overrides: Partial<RightPanelProps> = {}): RightPanelProps {
       onUpdateNodeConfig: vi.fn(),
       onUpdateNodeType: vi.fn(),
       onUpdateEdgeCondition: vi.fn(),
+    onUpdateEdgeOnError: vi.fn(),
       onValidateWorkflow: vi.fn(async () => true),
       onInsertSnippet: vi.fn(),
       onGenerateWorkflow: vi.fn(async () => ({ mode: 'fallback' as const, workflow: { dslVersion: '1.0' as const, id: 'wf', name: 'Workflow', nodes: [], edges: [] } })),

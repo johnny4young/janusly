@@ -33,7 +33,7 @@ import type { JsonObject, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNo
  * keeping the flag a boolean (not the resolved string) is what lets
  * the upstream memo skip re-projection on locale toggles.
  */
-export type EdgeData = { condition?: string; hasCondition?: boolean }
+export type EdgeData = { condition?: string; onError?: boolean; hasCondition?: boolean; hasOnError?: boolean }
 
 /**
  * Stable arrow marker shared by every projected workflow edge. Keeping
@@ -167,7 +167,7 @@ export function workflowToGraph(workflow: WorkflowDefinition): {
     target: edge.to,
     label: edge.condition ? 'condition' : undefined,
     animated: Boolean(edge.condition),
-    data: { condition: edge.condition },
+    data: { condition: edge.condition, onError: edge.onError },
   }))
 
   return { nodes, edges }
@@ -193,13 +193,14 @@ export function projectVisibleEdges(
 ): WorkflowGraphEdge[] {
   return edges.map((edge) => {
     const hasCondition = Boolean(edge.data?.condition)
+    const hasOnError = Boolean(edge.data?.onError)
     return {
       ...edge,
       type: 'workflowEdge',
       animated: hasCondition,
       selected: selectedEdgeId === edge.id,
       markerEnd: WORKFLOW_EDGE_MARKER_END,
-      data: { ...edge.data, hasCondition },
+      data: { ...edge.data, hasCondition, hasOnError },
     }
   })
 }

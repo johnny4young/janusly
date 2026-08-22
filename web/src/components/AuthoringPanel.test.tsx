@@ -35,6 +35,7 @@ function model(overrides: Partial<AuthoringPanelModel> = {}): AuthoringPanelMode
     onUpdateNodeConfig: vi.fn(),
     onUpdateNodeType: vi.fn(),
     onUpdateEdgeCondition: vi.fn(),
+    onUpdateEdgeOnError: vi.fn(),
     onValidateWorkflow: vi.fn(async () => true),
     onInsertSnippet: vi.fn(),
     ...overrides,

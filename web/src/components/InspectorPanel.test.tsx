@@ -37,6 +37,7 @@ function renderPanel(overrides: Partial<Parameters<typeof InspectorPanel>[0]> = 
     onUpdateNodeConfig: vi.fn(),
     onUpdateNodeType: vi.fn(),
     onUpdateEdgeCondition: vi.fn(),
+    onUpdateEdgeOnError: vi.fn(),
     onInsertSnippet: vi.fn(),
     ...overrides,
   }
@@ -56,6 +57,7 @@ function renderPanelWithConfirm(overrides: Partial<Parameters<typeof InspectorPa
     onUpdateNodeConfig: vi.fn(),
     onUpdateNodeType: vi.fn(),
     onUpdateEdgeCondition: vi.fn(),
+    onUpdateEdgeOnError: vi.fn(),
     onInsertSnippet: vi.fn(),
     ...overrides,
   }

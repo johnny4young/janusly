@@ -26,6 +26,10 @@ type Edge struct {
 	From      string `json:"from"`
 	To        string `json:"to"`
 	Condition string `json:"condition,omitempty"`
+	// OnError routes this edge only when the source node fails terminally
+	// (retries exhausted). A failure with at least one on-error edge is
+	// HANDLED: the run keeps going down the error branch instead of dying.
+	OnError bool `json:"onError,omitempty"`
 }
 
 // Workflow is the parsed document. Unknown top-level fields are ignored on
@@ -70,6 +74,7 @@ type rawEdge struct {
 	From      *string `json:"from"`
 	To        *string `json:"to"`
 	Condition *string `json:"condition"`
+	OnError   *bool   `json:"onError"`
 }
 
 // Parse decodes and contract-checks a workflow document. Contract violations
@@ -186,6 +191,9 @@ func Parse(raw []byte) (*Workflow, []Issue) {
 				if edge.Condition == "" {
 					contract(path+".condition", "expected a non-empty string")
 				}
+			}
+			if e.OnError != nil {
+				edge.OnError = *e.OnError
 			}
 			wf.Edges = append(wf.Edges, edge)
 		}

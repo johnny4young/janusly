@@ -61,6 +61,7 @@ export function useAppStore() {
     setEventsPagination: state.setEventsPagination,
     addToast: state.addToast,
     updateEdgeCondition: state.updateEdgeCondition,
+    updateEdgeOnError: state.updateEdgeOnError,
     bumpPlatformVersion: state.bumpPlatformVersion,
   })))
 }

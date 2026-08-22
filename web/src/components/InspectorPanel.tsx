@@ -47,6 +47,7 @@ type InspectorPanelProps = {
   onUpdateNodeConfig: (config: Record<string, unknown>) => void
   onUpdateNodeType: (type: string) => void
   onUpdateEdgeCondition: (edgeId: string, condition: string) => void
+  onUpdateEdgeOnError: (edgeId: string, onError: boolean) => void
   /** Opens the "Insert snippet…" dialog. */
   onInsertSnippet: () => void
 }
@@ -68,6 +69,7 @@ export function InspectorPanel({
   onUpdateNodeConfig,
   onUpdateNodeType,
   onUpdateEdgeCondition,
+  onUpdateEdgeOnError,
   onInsertSnippet,
 }: InspectorPanelProps) {
   const { t } = useT()
@@ -306,18 +308,29 @@ export function InspectorPanel({
         <div className="section-kicker">{t('rightPanel.inspector.pathKicker')}</div>
         <h3>{t('rightPanel.inspector.pathTitle', { source: selectedEdge.source, target: selectedEdge.target })}</h3>
         <fieldset className="we-fieldset" disabled={readOnly}>
-          <BranchRuleEditor
-            key={selectedEdge.id}
-            id={`edge-${selectedEdge.id}-branch-rule`}
-            label={t('rightPanel.inspector.runOnlyWhen')}
-            value={selectedEdge.data?.condition ?? ''}
-            onChange={(value) => onUpdateEdgeCondition(selectedEdge.id, value)}
-            nodes={workflowNodes}
-            edges={workflowEdges}
-            targetNodeId={selectedEdge.source}
-            mode="edge"
-            workflowInputs={currentWorkflowInputs}
-          />
+          <label className="we-edge-on-error-toggle">
+            <input
+              type="checkbox"
+              checked={Boolean(selectedEdge.data?.onError)}
+              onChange={(event) => onUpdateEdgeOnError(selectedEdge.id, event.target.checked)}
+            />
+            <span>{t('rightPanel.inspector.onErrorToggle')}</span>
+          </label>
+          <p className="helper-text">{t('rightPanel.inspector.onErrorHint')}</p>
+          {!selectedEdge.data?.onError && (
+            <BranchRuleEditor
+              key={selectedEdge.id}
+              id={`edge-${selectedEdge.id}-branch-rule`}
+              label={t('rightPanel.inspector.runOnlyWhen')}
+              value={selectedEdge.data?.condition ?? ''}
+              onChange={(value) => onUpdateEdgeCondition(selectedEdge.id, value)}
+              nodes={workflowNodes}
+              edges={workflowEdges}
+              targetNodeId={selectedEdge.source}
+              mode="edge"
+              workflowInputs={currentWorkflowInputs}
+            />
+          )}
         </fieldset>
       </section>
     )

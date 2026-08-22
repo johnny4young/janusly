@@ -37,6 +37,7 @@ export type AuthoringPanelModel = {
   onUpdateNodeConfig: (config: Record<string, unknown>) => void
   onUpdateNodeType: (type: string) => void
   onUpdateEdgeCondition: (edgeId: string, condition: string) => void
+  onUpdateEdgeOnError: (edgeId: string, onError: boolean) => void
   onValidateWorkflow(): Promise<boolean>
   onInsertSnippet: () => void
 }
@@ -166,6 +167,7 @@ export function AuthoringPanel({
           onUpdateNodeConfig={model.onUpdateNodeConfig}
           onUpdateNodeType={model.onUpdateNodeType}
           onUpdateEdgeCondition={model.onUpdateEdgeCondition}
+          onUpdateEdgeOnError={model.onUpdateEdgeOnError}
           onInsertSnippet={model.onInsertSnippet}
         />
       )}
@@ -189,6 +191,7 @@ export function AuthoringPanel({
             onUpdateNodeConfig={model.onUpdateNodeConfig}
             onUpdateNodeType={model.onUpdateNodeType}
             onUpdateEdgeCondition={model.onUpdateEdgeCondition}
+            onUpdateEdgeOnError={model.onUpdateEdgeOnError}
             onInsertSnippet={model.onInsertSnippet}
           />
           <WorkflowOperationsPanel readOnly={!canWrite} />

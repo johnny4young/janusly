@@ -67,6 +67,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     newWorkflow,
     setActiveTab,
     updateEdgeCondition: storeUpdateEdgeCondition,
+    updateEdgeOnError: storeUpdateEdgeOnError,
   } = store
   const canWriteWorkflows = permissions.includes('workflows.write')
   const confirm = useConfirm()
@@ -313,6 +314,10 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     storeUpdateEdgeCondition(edgeId, condition || null)
   }, [storeUpdateEdgeCondition])
 
+  const updateEdgeOnError = useCallback((edgeId: string, onError: boolean) => {
+    storeUpdateEdgeOnError(edgeId, onError)
+  }, [storeUpdateEdgeOnError])
+
   const useTemplate = useCallback((workflow: WorkflowDefinition) => {
     void (async () => {
       if (!await confirmReplaceCanvas()) return
@@ -340,6 +345,7 @@ export function useWorkflowCommands(options: AppCommandsOptions) {
     saveWorkflow,
     suggestWorkflowImprovement,
     updateEdgeCondition,
+    updateEdgeOnError,
     useTemplate,
     validateWorkflow,
   }

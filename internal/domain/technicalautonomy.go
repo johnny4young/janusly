@@ -384,6 +384,7 @@ func equalTechnicalEdgeSets(left, right []Edge) bool {
 		From      string
 		To        string
 		Condition string
+		OnError   bool
 	}
 	counts := make(map[edgeKey]int, len(left))
 	for _, edge := range left {
