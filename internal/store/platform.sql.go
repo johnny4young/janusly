@@ -92,6 +92,21 @@ func (q *Queries) ClaimAlertDispatch(ctx context.Context, arg ClaimAlertDispatch
 	return result.RowsAffected(), nil
 }
 
+const claimWeeklyDigest = `-- name: ClaimWeeklyDigest :execrows
+INSERT INTO org_digest_state (org_id, last_sent_at)
+VALUES ($1, now())
+ON CONFLICT (org_id) DO UPDATE SET last_sent_at = now()
+WHERE org_digest_state.last_sent_at <= now() - interval '167 hours'
+`
+
+func (q *Queries) ClaimWeeklyDigest(ctx context.Context, orgID string) (int64, error) {
+	result, err := q.db.Exec(ctx, claimWeeklyDigest, orgID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const cleanupExpiredRateWindows = `-- name: CleanupExpiredRateWindows :execrows
 DELETE FROM rate_limit_windows WHERE expires_at < now()
 `
@@ -382,6 +397,34 @@ func (q *Queries) GetSnippet(ctx context.Context, arg GetSnippetParams) (Snippet
 	return i, err
 }
 
+const getWeeklyDigestStats = `-- name: GetWeeklyDigestStats :one
+SELECT
+  (SELECT count(*) FROM runs r
+    WHERE r.org_id = $1 AND r.replay_mode IS NULL
+      AND r.created_at >= now() - interval '7 days'
+      AND r.status = 'succeeded')::int AS succeeded,
+  (SELECT count(*) FROM runs r
+    WHERE r.org_id = $1 AND r.replay_mode IS NULL
+      AND r.created_at >= now() - interval '7 days'
+      AND r.status = 'failed')::int AS failed,
+  (SELECT count(*) FROM dead_letters dl
+    WHERE dl.org_id = $1 AND dl.status = 'open'
+      AND dl.replay_mode IS NULL)::int AS open_dead_letters
+`
+
+type GetWeeklyDigestStatsRow struct {
+	Succeeded       int32
+	Failed          int32
+	OpenDeadLetters int32
+}
+
+func (q *Queries) GetWeeklyDigestStats(ctx context.Context, orgID string) (GetWeeklyDigestStatsRow, error) {
+	row := q.db.QueryRow(ctx, getWeeklyDigestStats, orgID)
+	var i GetWeeklyDigestStatsRow
+	err := row.Scan(&i.Succeeded, &i.Failed, &i.OpenDeadLetters)
+	return i, err
+}
+
 const insertAlertPolicy = `-- name: InsertAlertPolicy :exec
 INSERT INTO alert_policies (id, org_id, name, trigger, parameters, channels, cooldown_seconds, enabled, created_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -649,6 +692,33 @@ func (q *Queries) ListEnabledAlertPolicies(ctx context.Context, arg ListEnabledA
 	return items, nil
 }
 
+const listOrgAdminEmails = `-- name: ListOrgAdminEmails :many
+SELECT DISTINCT email::text AS email FROM org_members
+WHERE org_id = $1 AND role = 'admin'
+  AND email IS NOT NULL AND email <> ''
+ORDER BY 1
+`
+
+func (q *Queries) ListOrgAdminEmails(ctx context.Context, orgID string) ([]string, error) {
+	rows, err := q.db.Query(ctx, listOrgAdminEmails, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var email string
+		if err := rows.Scan(&email); err != nil {
+			return nil, err
+		}
+		items = append(items, email)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrgConfigRows = `-- name: ListOrgConfigRows :many
 SELECT key, value_json, updated_at FROM org_configs WHERE org_id = $1 LIMIT 200
 `
@@ -850,6 +920,36 @@ func (q *Queries) ListSnippets(ctx context.Context, orgID string) ([]Snippet, er
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWeeklyDigestOptIns = `-- name: ListWeeklyDigestOptIns :many
+SELECT org_id FROM org_configs
+WHERE key = 'digest.weeklyEnabled' AND value_json = 'true'::jsonb
+ORDER BY org_id
+`
+
+// Weekly digest: tenant opt-in via org config; the state row is the
+// multi-replica claim. The upsert only wins when the last send is at
+// least a week old (minus one hour of scheduling slack under the hourly
+// maintenance sweep), so competing replicas cannot double-send.
+func (q *Queries) ListWeeklyDigestOptIns(ctx context.Context) ([]string, error) {
+	rows, err := q.db.Query(ctx, listWeeklyDigestOptIns)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var org_id string
+		if err := rows.Scan(&org_id); err != nil {
+			return nil, err
+		}
+		items = append(items, org_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

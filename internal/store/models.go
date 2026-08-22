@@ -391,6 +391,11 @@ type OrgConfig struct {
 	UpdatedAt   *time.Time
 }
 
+type OrgDigestState struct {
+	OrgID      string
+	LastSentAt time.Time
+}
+
 type OrgMember struct {
 	ID        string
 	OrgID     string

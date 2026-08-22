@@ -406,3 +406,38 @@ ORDER BY started_at;
 
 -- name: DeleteSilentWorkerInstances :execrows
 DELETE FROM worker_instances WHERE last_seen_at < now() - interval '24 hours';
+
+-- Weekly digest: tenant opt-in via org config; the state row is the
+-- multi-replica claim. The upsert only wins when the last send is at
+-- least a week old (minus one hour of scheduling slack under the hourly
+-- maintenance sweep), so competing replicas cannot double-send.
+-- name: ListWeeklyDigestOptIns :many
+SELECT org_id FROM org_configs
+WHERE key = 'digest.weeklyEnabled' AND value_json = 'true'::jsonb
+ORDER BY org_id;
+
+-- name: ClaimWeeklyDigest :execrows
+INSERT INTO org_digest_state (org_id, last_sent_at)
+VALUES ($1, now())
+ON CONFLICT (org_id) DO UPDATE SET last_sent_at = now()
+WHERE org_digest_state.last_sent_at <= now() - interval '167 hours';
+
+-- name: ListOrgAdminEmails :many
+SELECT DISTINCT email::text AS email FROM org_members
+WHERE org_id = $1 AND role = 'admin'
+  AND email IS NOT NULL AND email <> ''
+ORDER BY 1;
+
+-- name: GetWeeklyDigestStats :one
+SELECT
+  (SELECT count(*) FROM runs r
+    WHERE r.org_id = $1 AND r.replay_mode IS NULL
+      AND r.created_at >= now() - interval '7 days'
+      AND r.status = 'succeeded')::int AS succeeded,
+  (SELECT count(*) FROM runs r
+    WHERE r.org_id = $1 AND r.replay_mode IS NULL
+      AND r.created_at >= now() - interval '7 days'
+      AND r.status = 'failed')::int AS failed,
+  (SELECT count(*) FROM dead_letters dl
+    WHERE dl.org_id = $1 AND dl.status = 'open'
+      AND dl.replay_mode IS NULL)::int AS open_dead_letters;

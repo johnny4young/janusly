@@ -561,6 +561,16 @@ CREATE TABLE public.org_configs (
 
 
 --
+-- Name: org_digest_state; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.org_digest_state (
+    org_id text NOT NULL,
+    last_sent_at timestamp with time zone NOT NULL
+);
+
+
+--
 -- Name: org_members; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1700,6 +1710,14 @@ ALTER TABLE ONLY public.onboarding_progress
 
 ALTER TABLE ONLY public.org_configs
     ADD CONSTRAINT org_configs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: org_digest_state org_digest_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.org_digest_state
+    ADD CONSTRAINT org_digest_state_pkey PRIMARY KEY (org_id);
 
 
 --

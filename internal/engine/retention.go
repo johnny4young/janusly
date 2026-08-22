@@ -94,5 +94,8 @@ func (e *Engine) RunRetentionSweep(ctx context.Context, every time.Duration, ret
 		}
 		// Per-org data retention (run_events / audit_logs / usage_events).
 		e.runDataRetention(ctx, logger)
+		// Weekly digests ride the same cadence; the state-row claim keeps
+		// them weekly and single-sender regardless of replica count.
+		e.processWeeklyDigests(ctx, logger)
 	}
 }

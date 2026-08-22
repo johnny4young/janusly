@@ -19,10 +19,11 @@ import (
 // The count is a ratchet, not a ceiling: it starts at the contract's 69
 // extracted keys, and every addition past that is a deliberate runtime
 // capability recorded here. 70 = + retention.archiveRunEvents (run-event
-// archival before the retention sweep deletes).
+// archival before the retention sweep deletes); 71 = + digest.weeklyEnabled
+// (weekly admin digest opt-in).
 func TestOrgConfigCatalogSurface(t *testing.T) {
-	if len(orgconfig.Definitions) != 70 {
-		t.Fatalf("catalog must pin at 70 definitions, got %d", len(orgconfig.Definitions))
+	if len(orgconfig.Definitions) != 71 {
+		t.Fatalf("catalog must pin at 71 definitions, got %d", len(orgconfig.Definitions))
 	}
 	for _, key := range []string{"ai.provider", "http.timeoutMs", "runs.requireSavedWorkflow",
 		"mcp.writeConsent", "retention.deletedWorkflowsDays", "onboarding.enabled"} {
