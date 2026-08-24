@@ -71,12 +71,17 @@ func WithBrowserHeaders(next http.Handler) http.Handler {
 			headers.Set("Access-Control-Allow-Origin", origin)
 			headers.Set("Access-Control-Allow-Credentials", "true")
 		}
-		headers.Set("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
+		headers.Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
 		headers.Set("Access-Control-Allow-Headers",
 			"Content-Type, Authorization, x-org-id, x-user-id, x-janusly-csrf, x-request-id, Accept-Language, Last-Event-ID")
 		headers.Set("Access-Control-Expose-Headers", "Content-Disposition, X-Request-Id")
 		headers.Set("X-Request-Id", requestID)
 		headers.Set("Vary", "Origin")
+		headers.Set("X-Content-Type-Options", "nosniff")
+		headers.Set("X-Frame-Options", "DENY")
+		headers.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		headers.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		headers.Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https: wss:; form-action 'self'")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

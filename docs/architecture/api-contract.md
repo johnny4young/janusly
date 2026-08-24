@@ -13,3 +13,9 @@ current contract; new public reads should prefer explicit `/v1` metadata.
 
 Run `make generate` after contract changes and require a clean diff on a second
 run.
+
+Public workflow status pages use a 256-bit bearer token at
+`/public/status/{token}`. The token is revealed only by the enable/rotate
+response; PostgreSQL stores its SHA-256 digest, so a later admin read can report
+and revoke enablement but cannot reconstruct the public URL. Public payloads are
+aggregate-only and intentionally omit tenant ids, run ids, and error bodies.

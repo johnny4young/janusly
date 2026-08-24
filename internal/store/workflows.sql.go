@@ -326,22 +326,22 @@ func (q *Queries) FindWorkflowRecoveryQualification(ctx context.Context, arg Fin
 	return i, err
 }
 
-const findWorkflowStatusPageByToken = `-- name: FindWorkflowStatusPageByToken :one
+const findWorkflowStatusPageByTokenDigest = `-- name: FindWorkflowStatusPageByTokenDigest :one
 SELECT sp.org_id, sp.workflow_id, w.name AS workflow_name
 FROM workflow_status_pages sp
 JOIN workflows w ON w.org_id = sp.org_id AND w.id = sp.workflow_id
-WHERE sp.token = $1 AND w.deleted_at IS NULL
+WHERE sp.token_digest = $1 AND w.deleted_at IS NULL
 `
 
-type FindWorkflowStatusPageByTokenRow struct {
+type FindWorkflowStatusPageByTokenDigestRow struct {
 	OrgID        string
 	WorkflowID   string
 	WorkflowName string
 }
 
-func (q *Queries) FindWorkflowStatusPageByToken(ctx context.Context, token string) (FindWorkflowStatusPageByTokenRow, error) {
-	row := q.db.QueryRow(ctx, findWorkflowStatusPageByToken, token)
-	var i FindWorkflowStatusPageByTokenRow
+func (q *Queries) FindWorkflowStatusPageByTokenDigest(ctx context.Context, tokenDigest string) (FindWorkflowStatusPageByTokenDigestRow, error) {
+	row := q.db.QueryRow(ctx, findWorkflowStatusPageByTokenDigest, tokenDigest)
+	var i FindWorkflowStatusPageByTokenDigestRow
 	err := row.Scan(&i.OrgID, &i.WorkflowID, &i.WorkflowName)
 	return i, err
 }
@@ -758,7 +758,7 @@ func (q *Queries) GetWorkflowSeverityDefault(ctx context.Context, arg GetWorkflo
 }
 
 const getWorkflowStatusPage = `-- name: GetWorkflowStatusPage :one
-SELECT token, created_at FROM workflow_status_pages
+SELECT created_at FROM workflow_status_pages
 WHERE org_id = $1 AND workflow_id = $2
 `
 
@@ -767,16 +767,11 @@ type GetWorkflowStatusPageParams struct {
 	WorkflowID string
 }
 
-type GetWorkflowStatusPageRow struct {
-	Token     string
-	CreatedAt time.Time
-}
-
-func (q *Queries) GetWorkflowStatusPage(ctx context.Context, arg GetWorkflowStatusPageParams) (GetWorkflowStatusPageRow, error) {
+func (q *Queries) GetWorkflowStatusPage(ctx context.Context, arg GetWorkflowStatusPageParams) (time.Time, error) {
 	row := q.db.QueryRow(ctx, getWorkflowStatusPage, arg.OrgID, arg.WorkflowID)
-	var i GetWorkflowStatusPageRow
-	err := row.Scan(&i.Token, &i.CreatedAt)
-	return i, err
+	var created_at time.Time
+	err := row.Scan(&created_at)
+	return created_at, err
 }
 
 const getWorkflowVersionAnyWorkflow = `-- name: GetWorkflowVersionAnyWorkflow :one
@@ -1493,15 +1488,30 @@ func (q *Queries) ListScheduleEntriesForWorkflow(ctx context.Context, arg ListSc
 }
 
 const listStatusPageDailyStats = `-- name: ListStatusPageDailyStats :many
-SELECT date_trunc('day', r.created_at)::timestamptz AS day,
-       count(*) FILTER (WHERE r.status = 'succeeded')::int AS succeeded,
-       count(*) FILTER (WHERE r.status = 'failed')::int AS failed
-FROM runs r
-JOIN workflow_versions wv ON wv.id = r.workflow_version_id
-WHERE r.org_id = $1 AND wv.workflow_id = $2 AND r.replay_mode IS NULL
-  AND r.status IN ('succeeded', 'failed')
-  AND r.created_at >= now() - interval '7 days'
-GROUP BY 1 ORDER BY 1
+WITH days AS (
+  SELECT generate_series(
+    date_trunc('day', now()) - interval '6 days',
+    date_trunc('day', now()),
+    interval '1 day'
+  )::timestamptz AS day
+), counts AS (
+  SELECT date_trunc('day', r.created_at)::timestamptz AS day,
+         count(*) FILTER (WHERE r.status = 'succeeded')::int AS succeeded,
+         count(*) FILTER (WHERE r.status = 'failed')::int AS failed
+  FROM runs r
+  JOIN workflow_versions wv
+    ON wv.org_id = r.org_id AND wv.id = r.workflow_version_id
+  WHERE r.org_id = $1 AND wv.workflow_id = $2 AND r.replay_mode IS NULL
+    AND r.status IN ('succeeded', 'failed')
+    AND r.created_at >= date_trunc('day', now()) - interval '6 days'
+  GROUP BY 1
+)
+SELECT days.day,
+       coalesce(counts.succeeded, 0)::int AS succeeded,
+       coalesce(counts.failed, 0)::int AS failed
+FROM days
+LEFT JOIN counts USING (day)
+ORDER BY days.day
 `
 
 type ListStatusPageDailyStatsParams struct {
@@ -2382,16 +2392,16 @@ func (q *Queries) UpsertWorkflowMetadata(ctx context.Context, arg UpsertWorkflow
 }
 
 const upsertWorkflowStatusPage = `-- name: UpsertWorkflowStatusPage :exec
-INSERT INTO workflow_status_pages (org_id, workflow_id, token)
+INSERT INTO workflow_status_pages (org_id, workflow_id, token_digest)
 VALUES ($1, $2, $3)
 ON CONFLICT (org_id, workflow_id)
-DO UPDATE SET token = EXCLUDED.token, created_at = now()
+DO UPDATE SET token_digest = EXCLUDED.token_digest, created_at = now()
 `
 
 type UpsertWorkflowStatusPageParams struct {
-	OrgID      string
-	WorkflowID string
-	Token      string
+	OrgID       string
+	WorkflowID  string
+	TokenDigest string
 }
 
 // Public status pages: one opaque unguessable token per workflow. The
@@ -2399,7 +2409,7 @@ type UpsertWorkflowStatusPageParams struct {
 // immediately. Public reads join through workflows so a tombstoned
 // workflow's page dies with it.
 func (q *Queries) UpsertWorkflowStatusPage(ctx context.Context, arg UpsertWorkflowStatusPageParams) error {
-	_, err := q.db.Exec(ctx, upsertWorkflowStatusPage, arg.OrgID, arg.WorkflowID, arg.Token)
+	_, err := q.db.Exec(ctx, upsertWorkflowStatusPage, arg.OrgID, arg.WorkflowID, arg.TokenDigest)
 	return err
 }
 

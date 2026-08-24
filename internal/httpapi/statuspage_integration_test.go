@@ -40,6 +40,19 @@ func TestWorkflowStatusPageLifecycle(t *testing.T) {
 	if minted.status != 200 || len(token) != 64 {
 		t.Fatalf("mint: %d %+v", minted.status, minted.body)
 	}
+	var storedDigest string
+	if err := pool.QueryRow(ctx, `SELECT token_digest FROM workflow_status_pages
+		WHERE org_id = $1 AND workflow_id = $2`, h.org, wfID).Scan(&storedDigest); err != nil {
+		t.Fatalf("stored status token digest: %v", err)
+	}
+	if storedDigest == token || storedDigest != statusPageTokenDigest(token) {
+		t.Fatal("the database must persist only the public token digest")
+	}
+	// Admin reads can manage an existing page but never recover its bearer
+	// secret after the one-time mint response.
+	if read := h.call("GET", "/workflows/"+wfID+"/status-page", nil, ""); read.body["enabled"] != true || read.body["token"] != nil || read.body["path"] != nil {
+		t.Fatalf("existing status page must not reveal bearer token: %+v", read.body)
+	}
 
 	// Another org's admin cannot reach the workflow at all.
 	if res := h.call("POST", "/workflows/"+wfID+"/status-page", nil, "org-intruder-"+suffix); res.status != http.StatusNotFound {
@@ -75,6 +88,9 @@ func TestWorkflowStatusPageLifecycle(t *testing.T) {
 	}
 	if !strings.Contains(page, "Operational") {
 		t.Fatalf("one success must read operational: %.300s", page)
+	}
+	if strings.Count(page, `class="day"`) != 7 {
+		t.Fatalf("status page must render seven daily bars: %.300s", page)
 	}
 	if strings.Contains(page, "run-status-"+suffix) || strings.Contains(page, h.org) {
 		t.Fatal("the public page must not leak run ids or tenant ids")

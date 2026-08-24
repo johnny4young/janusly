@@ -12,12 +12,16 @@ package httpapi
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"html"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/auth"
@@ -36,11 +40,18 @@ func (s *V1Server) mountStatusPageRoutes(mux *http.ServeMux) {
 		row, err := store.New(s.pool).GetWorkflowStatusPage(r.Context(), store.GetWorkflowStatusPageParams{
 			OrgID: rc.orgID, WorkflowID: workflowID,
 		})
-		if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
 			writeUnversioned(w, opOK(map[string]any{"enabled": false}))
 			return
 		}
-		writeUnversioned(w, opOK(statusPageAdminView(row.Token, row.CreatedAt)))
+		if err != nil {
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+			return
+		}
+		// Public tokens are one-time reveal values. Only the digest is stored,
+		// so an existing page can be managed but its bearer URL cannot be
+		// reconstructed after the mint response.
+		writeUnversioned(w, opOK(statusPageAdminView("", row)))
 	})
 
 	s.route(mux, "POST /workflows/{workflowId}/status-page", adminGate, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
@@ -56,7 +67,7 @@ func (s *V1Server) mountStatusPageRoutes(mux *http.ServeMux) {
 		}
 		token := hex.EncodeToString(raw)
 		if err := store.New(s.pool).UpsertWorkflowStatusPage(r.Context(), store.UpsertWorkflowStatusPageParams{
-			OrgID: rc.orgID, WorkflowID: workflowID, Token: token,
+			OrgID: rc.orgID, WorkflowID: workflowID, TokenDigest: statusPageTokenDigest(token),
 		}); err != nil {
 			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 			return
@@ -94,12 +105,19 @@ func (s *V1Server) mountStatusPageRoutes(mux *http.ServeMux) {
 }
 
 func statusPageAdminView(token string, createdAt time.Time) map[string]any {
-	return map[string]any{
-		"enabled":   true,
-		"token":     token,
-		"path":      "/public/status/" + token,
-		"createdAt": createdAt.UTC().Format(time.RFC3339),
+	view := map[string]any{
+		"enabled": true, "createdAt": createdAt.UTC().Format(time.RFC3339),
 	}
+	if token != "" {
+		view["token"] = token
+		view["path"] = "/public/status/" + token
+	}
+	return view
+}
+
+func statusPageTokenDigest(token string) string {
+	digest := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(digest[:])
 }
 
 func (s *V1Server) servePublicStatusPage(w http.ResponseWriter, r *http.Request) {
@@ -109,7 +127,7 @@ func (s *V1Server) servePublicStatusPage(w http.ResponseWriter, r *http.Request)
 		http.NotFound(w, r)
 		return
 	}
-	page, err := store.New(s.pool).FindWorkflowStatusPageByToken(r.Context(), token)
+	page, err := store.New(s.pool).FindWorkflowStatusPageByTokenDigest(r.Context(), statusPageTokenDigest(token))
 	if err != nil {
 		http.NotFound(w, r)
 		return

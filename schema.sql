@@ -1365,7 +1365,7 @@ CREATE TABLE public.worker_instances (
 CREATE TABLE public.workflow_status_pages (
     org_id text NOT NULL,
     workflow_id text NOT NULL,
-    token text NOT NULL,
+    token_digest text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
@@ -3138,10 +3138,10 @@ CREATE INDEX workflow_improvements_org_workflow_idx ON public.workflow_improveme
 
 
 --
--- Name: workflow_status_pages_token_key; Type: INDEX; Schema: public; Owner: -
+-- Name: workflow_status_pages_token_digest_key; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX workflow_status_pages_token_key ON public.workflow_status_pages USING btree (token);
+CREATE UNIQUE INDEX workflow_status_pages_token_digest_key ON public.workflow_status_pages USING btree (token_digest);
 
 
 --

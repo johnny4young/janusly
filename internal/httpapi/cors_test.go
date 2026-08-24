@@ -7,7 +7,7 @@ import (
 )
 
 // The browser policy implements the contract: conditional origin echo,
-// verbatim header lists, 204 preflights, inbound request-id honored.
+// bounded header lists, browser hardening, 204 preflights, inbound request-id honored.
 
 func corsProbe(t *testing.T, method, origin, requestID string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -36,7 +36,7 @@ func TestPreflightAnswers204WithTheFullDict(t *testing.T) {
 		h.Get("Access-Control-Allow-Credentials") != "true" {
 		t.Fatalf("allowlisted origin must echo with credentials: %v", h)
 	}
-	if h.Get("Access-Control-Allow-Methods") != "GET,POST,DELETE,OPTIONS" {
+	if h.Get("Access-Control-Allow-Methods") != "GET,POST,PUT,DELETE,OPTIONS" {
 		t.Fatalf("methods list consistency: %q", h.Get("Access-Control-Allow-Methods"))
 	}
 	if h.Get("Access-Control-Allow-Headers") !=
@@ -46,6 +46,23 @@ func TestPreflightAnswers204WithTheFullDict(t *testing.T) {
 	if h.Get("Access-Control-Expose-Headers") != "Content-Disposition, X-Request-Id" ||
 		h.Get("Vary") != "Origin" {
 		t.Fatalf("expose/vary consistency: %v", h)
+	}
+}
+
+func TestBrowserSecurityHeadersAreAlwaysPresent(t *testing.T) {
+	h := corsProbe(t, http.MethodGet, "", "").Header()
+	for name, want := range map[string]string{
+		"X-Content-Type-Options": "nosniff",
+		"X-Frame-Options":        "DENY",
+		"Referrer-Policy":        "strict-origin-when-cross-origin",
+		"Permissions-Policy":     "camera=(), microphone=(), geolocation=()",
+	} {
+		if got := h.Get(name); got != want {
+			t.Errorf("%s: got %q want %q", name, got, want)
+		}
+	}
+	if got := h.Get("Content-Security-Policy"); got == "" {
+		t.Fatal("browser responses must carry a content security policy")
 	}
 }
 
