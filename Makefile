@@ -11,7 +11,8 @@ GIT_TREE := $(shell git rev-parse 'HEAD^{tree}' 2>/dev/null || printf '%040d' 0)
 
 .PHONY: dev build artifact db-up db-down db-reset migrate generate lint test \
 	test-integration test-e2e test-e2e-full verify vuln frontend-install \
-	frontend-build contract qualify-local qualify-local-selftest
+	frontend-build contract qualify-local qualify-local-selftest backup-local \
+	restore-local recovery-local-selftest
 
 dev: db-up migrate
 	JANUSLY_DATABASE_URL='$(DB_URL)' PNPM='$(PNPM)' bash scripts/dev.sh
@@ -75,7 +76,7 @@ test-integration:
 test-e2e:
 	PNPM='$(PNPM)' bash scripts/test-e2e.sh
 
-# Opt-in: the full Playwright suite (tenant isolation, security, upgrade,
+# Opt-in: the full Playwright suite (tenant isolation, security, recovery,
 # accessibility, ...). Requires the dev stack from `make dev` on :3001;
 # Playwright starts its own Vite server against it.
 test-e2e-full:
@@ -86,6 +87,15 @@ qualify-local-selftest:
 
 qualify-local:
 	CONFIRM='$(CONFIRM)' bash scripts/qualification-local.sh '$(or $(PROFILE),all)'
+
+recovery-local-selftest:
+	bash scripts/postgres-local-recovery.test.sh
+
+backup-local:
+	@bash scripts/postgres-local-recovery.sh backup '$(or $(OUTPUT),output/backups/$$(date -u +%Y%m%dT%H%M%SZ))'
+
+restore-local:
+	@CONFIRM='$(CONFIRM)' bash scripts/postgres-local-recovery.sh restore '$(INPUT)'
 
 verify: db-up migrate generate
 	@git diff --exit-code -- schema.sql internal/store contract || { \

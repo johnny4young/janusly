@@ -249,11 +249,14 @@ async function assertTenantLists(
   expect(credentials.map(({ name }) => name)).toContain(expected.credentialName)
   expect(credentials.map(({ name }) => name)).not.toContain(absent.credentialName)
 
-  const invitations = await getJson<Array<{ id: string; orgId: string }>>(
+  const invitationResponse = await getJson<{
+    invitations: Array<{ id: string; orgId: string }>
+  }>(
     request,
     '/members/invitations',
     headers,
   )
+  const { invitations } = invitationResponse
   expectOnlyOrg(invitations, expected.orgId)
   expect(invitations.map(({ id }) => id)).toContain(expected.invitationId)
   expect(invitations.map(({ id }) => id)).not.toContain(absent.invitationId)

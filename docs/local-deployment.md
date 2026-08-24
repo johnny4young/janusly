@@ -60,6 +60,37 @@ make migrate
 The reset target scopes deletion to the configured Compose project. It must not
 be adapted to delete unrelated volumes or containers.
 
+## Local PostgreSQL backup and restore
+
+The local recovery helper creates a PostgreSQL custom-format backup plus a
+manifest containing its checksum, PostgreSQL major, migration/source
+fingerprints, Git provenance, and (when managed credentials exist) only a
+one-way fingerprint of the high-entropy credential root key. It never records
+the key itself; the manifest and dump must still be protected as sensitive.
+
+```bash
+export JANUSLY_CREDENTIAL_MASTER_KEY='the-key-used-by-this-stack'
+make backup-local OUTPUT=output/backups/before-maintenance
+```
+
+A restore is intentionally fail-closed: the Janusly service must be stopped,
+the target must be an empty PostgreSQL 18 database, the checkout must match the
+schema fingerprint, the dump checksum must pass, and the credential key must
+match. The explicit confirmation guard is required.
+
+```bash
+docker compose stop janusly
+# Start a new empty PostgreSQL 18 target before restoring.
+make restore-local INPUT=output/backups/before-maintenance CONFIRM=restore
+docker compose run --rm janusly migrate
+docker compose up -d janusly
+```
+
+This package covers the Janusly application database. Supabase identities and
+the credential root key are separate operator-owned systems and require their
+own provider backup and escrow procedures. Protect the backup directory as
+sensitive data even though managed credential values remain encrypted.
+
 ## Production checklist
 
 1. Set `JANUSLY_ENV=production`.
@@ -70,7 +101,8 @@ be adapted to delete unrelated volumes or containers.
    are acceptable in the environment.
 6. Inject real Git commit/tree build arguments.
 7. Keep port `9464` private; expose port `3001` through TLS termination.
-8. Configure backups for PostgreSQL and the credential root key.
+8. Configure provider-grade backups for PostgreSQL, Supabase identity, and the
+   credential root key; test restoration into an isolated empty target.
 9. Run the image as its built-in non-root user.
 10. Verify `/healthz`, `/health`, the React shell, and a controlled workflow.
 

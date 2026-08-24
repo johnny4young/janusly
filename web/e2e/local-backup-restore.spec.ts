@@ -1,16 +1,19 @@
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
 import { expectNoBlockingAccessibilityViolations } from './_helpers/accessibility'
+import { openWorkspaceSection } from './_helpers/workspace-navigation'
 
-const enabled = process.env.JANUSLY_LOCAL_UPGRADE_E2E === '1'
-const phase = process.env.JANUSLY_UPGRADE_PHASE
+const enabled = process.env.JANUSLY_LOCAL_BACKUP_RESTORE_E2E === '1'
+const phase = process.env.JANUSLY_BACKUP_RESTORE_PHASE
 const evidenceDir = process.env.JANUSLY_EVIDENCE_DIR
-const apiUrl = process.env.JANUSLY_UPGRADE_API_URL ?? 'http://127.0.0.1:7311'
-const email = process.env.JANUSLY_UPGRADE_EMAIL ?? 'owner@upgrade.local'
-const password = process.env.JANUSLY_UPGRADE_PASSWORD ?? 'Upgrade-identity-2026!'
-const organizationName = process.env.JANUSLY_UPGRADE_ORG_NAME ?? 'Upgrade Lab'
-const workflowId = process.env.JANUSLY_UPGRADE_WORKFLOW_ID ?? 'upgrade-workflow'
-const workflowName = process.env.JANUSLY_UPGRADE_WORKFLOW_NAME ?? 'Upgrade workflow'
+const apiUrl = process.env.JANUSLY_BACKUP_RESTORE_API_URL ?? 'http://127.0.0.1:7310'
+const email = process.env.JANUSLY_BACKUP_RESTORE_EMAIL ?? 'owner@recovery.local'
+const password = process.env.JANUSLY_BACKUP_RESTORE_PASSWORD ?? 'Recovery-identity-2026!'
+const organizationName = process.env.JANUSLY_BACKUP_RESTORE_ORG_NAME ?? 'Recovery Lab'
+const workflowId = process.env.JANUSLY_BACKUP_RESTORE_WORKFLOW_ID ?? 'recovery-workflow'
+const workflowName = process.env.JANUSLY_BACKUP_RESTORE_WORKFLOW_NAME ?? 'Recovered workflow'
+const credentialName = process.env.JANUSLY_BACKUP_RESTORE_CREDENTIAL_NAME ?? 'recovered-credential'
+const credentialSecret = process.env.JANUSLY_BACKUP_RESTORE_SECRET ?? 'recovery-secret-value'
 
 function guardBrowserErrors(page: Page) {
   const errors: string[] = []
@@ -100,11 +103,17 @@ async function openPersistedWorkflow(page: Page) {
   await expect(row).toContainText(workflowName)
 }
 
-test('application data survives forward migration and previous-version rollback', async ({ page }) => {
+async function openPersistedCredential(page: Page) {
+  await openWorkspaceSection(page, 'Settings', 'Connections')
+  await expect(page.getByText(credentialName)).toBeVisible()
+  await expect(page.locator('body')).not.toContainText(credentialSecret)
+}
+
+test('application data and managed credential metadata survive a guarded PostgreSQL restore', async ({ page }) => {
   test.setTimeout(120_000)
   test.skip(
-    !enabled || !['baseline', 'upgraded', 'rollback', 'rolled-forward'].includes(phase ?? ''),
-    'requires the destructive local upgrade harness',
+    !enabled || !['seed', 'restored'].includes(phase ?? ''),
+    'requires the destructive local backup/restore harness',
   )
   const browserErrors = guardBrowserErrors(page)
   await page.addInitScript(() => {
@@ -113,14 +122,14 @@ test('application data survives forward migration and previous-version rollback'
     }
   })
 
-  if (phase === 'baseline') {
+  if (phase === 'seed') {
     await page.goto('/')
     await page.getByRole('button', { name: 'Need an account? Sign up' }).click()
     await page.getByLabel('Email').fill(email)
     await page.getByLabel('Password').fill(password)
     await page.getByRole('button', { name: 'Sign up', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Set up your workspace' })).toBeVisible()
-    await page.getByLabel('Your name').fill('Upgrade Owner')
+    await page.getByLabel('Your name').fill('Recovery Owner')
     await page.getByLabel('Organization name').fill(organizationName)
     await page.getByRole('button', { name: 'Create workspace' }).click()
     await expect(page.getByRole('button', { name: 'Open user menu' })).toBeVisible()
@@ -134,37 +143,35 @@ test('application data survives forward migration and previous-version rollback'
     }
     await postFromSession(page, '/workflows/save', workflow)
     await postFromSession(page, '/start', workflow)
+    await postFromSession(page, '/credentials', {
+      name: credentialName,
+      kind: 'generic',
+      secretValue: credentialSecret,
+    })
+    // These setup writes intentionally bypass the shell's mutation commands,
+    // so reload once to obtain a fresh server snapshot before capturing the
+    // pre-backup evidence.
+    await page.reload()
+    await expect(page.getByRole('button', { name: 'Open user menu' })).toBeVisible()
     await openPersistedWorkflow(page)
-    await expectHealthySurface(page, 'pre-upgrade application')
-    await capture(page, 'upgrade-baseline-en')
+    await openPersistedCredential(page)
+    await expectHealthySurface(page, 'application before PostgreSQL backup')
+    await capture(page, 'backup-seed-en')
   } else {
     await signIn(page)
     await expect(page.locator('.bottom-status-bar')).toContainText(organizationName)
     await openPersistedWorkflow(page)
-    await expectHealthySurface(
-      page,
-      phase === 'upgraded'
-        ? 'upgraded application'
-        : phase === 'rollback'
-          ? 'rolled-back application'
-          : 'rolled-forward application',
-    )
-    await capture(
-      page,
-      phase === 'upgraded'
-        ? 'upgrade-current-en'
-        : phase === 'rollback'
-          ? 'upgrade-rollback-en'
-          : 'upgrade-rolled-forward-en',
-    )
+    await openPersistedCredential(page)
+    await expectHealthySurface(page, 'application after PostgreSQL restore')
+    await capture(page, 'backup-restored-en')
 
-    if (phase === 'upgraded') {
-      await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
-      await page.reload()
-      await expect(page.getByTestId(`workflows-row-${workflowId}`)).toContainText(workflowName)
-      await expectHealthySurface(page, 'upgraded application in Spanish')
-      await capture(page, 'upgrade-current-es')
-    }
+    await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
+    await page.reload()
+    await page.getByRole('button', { name: 'Flujos', exact: true }).click()
+    await expect(page.getByTestId(`workflows-row-${workflowId}`)).toContainText(workflowName)
+    await expect(page.locator('body')).not.toContainText(credentialSecret)
+    await expectHealthySurface(page, 'restored application in Spanish')
+    await capture(page, 'backup-restored-es')
   }
 
   expect(browserErrors).toEqual([])

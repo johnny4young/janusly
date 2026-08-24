@@ -124,6 +124,7 @@ export function useBootstrapData(
   const [deadLetters, setDeadLetters] = useState<DeadLetter[]>([])
   const [usage, setUsage] = useState<Record<string, number>>({})
   const [aiHealth, setAiHealth] = useState<AiHealth | null>(null)
+  const activeTab = useWorkflowStore(state => state.activeTab)
   const tenantScopeRef = useRef<string | null>(tenantScope)
   const permissionsRef = useRef<ReadonlySet<string>>(new Set(permissions))
   const refreshSequenceRef = useRef(0)
@@ -253,6 +254,14 @@ export function useBootstrapData(
     setAiHealth(null)
     if (tenantScope) void refreshPlatform()
   }, [tenantScope, permissionKey, refreshPlatform])
+
+  useEffect(() => {
+    if (!tenantScope || catalogsNeededRef.current || !catalogTabs.has(activeTab)) return
+    // The initial Home wave intentionally skips authoring catalogs. Opening
+    // the first catalog surface is the missing demand signal: fetch now rather
+    // than waiting for an unrelated mutation or terminal run to refresh it.
+    void refreshPlatform()
+  }, [activeTab, refreshPlatform, tenantScope])
 
   return {
     tools,

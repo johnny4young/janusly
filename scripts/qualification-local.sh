@@ -8,6 +8,7 @@ auth_project=janusly-qualification-auth
 app_port=${JANUSLY_QUALIFICATION_APP_PORT:-7310}
 postgres_port=${JANUSLY_QUALIFICATION_POSTGRES_PORT:-7438}
 metrics_port=${JANUSLY_QUALIFICATION_METRICS_PORT:-7464}
+credential_master_key=0a6ee99978435f3e242e19aa61839045c6c1a5f1f5e63558f9d40706702570c7
 origin="http://127.0.0.1:${app_port}"
 supabase_public_url=http://127.0.0.1:7431
 supabase_internal_url=http://host.docker.internal:7431
@@ -22,7 +23,7 @@ usage() {
   cat <<'EOF'
 usage: scripts/qualification-local.sh PROFILE
 
-PROFILE: clean | identity | security | tenant | all | selftest
+PROFILE: clean | identity | security | tenant | recovery | all | selftest
 
 Destructive profiles require CONFIRM=reset. They may remove only the fixed
 janusly-qualification-app Compose project and janusly-qualification-auth
@@ -37,7 +38,7 @@ die() {
 
 validate_configuration() {
   case "$profile" in
-    clean|identity|security|tenant|all|selftest) ;;
+    clean|identity|security|tenant|recovery|all|selftest) ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; die "unknown profile: $profile" ;;
   esac
@@ -45,8 +46,9 @@ validate_configuration() {
     die "JANUSLY_QUALIFICATION_PROJECT must start with janusly-qualification-"
   [[ "$project" != janusly ]] || die "refusing the ordinary development Compose project"
   for port in "$app_port" "$postgres_port" "$metrics_port"; do
-    [[ "$port" =~ ^[0-9]+$ ]] && ((port >= 1024 && port <= 65535)) ||
+    if [[ ! "$port" =~ ^[0-9]+$ ]] || ((port < 1024 || port > 65535)); then
       die "qualification ports must be integers in 1024..65535"
+    fi
   done
   [[ "$app_port" != "$postgres_port" && "$app_port" != "$metrics_port" && "$postgres_port" != "$metrics_port" ]] ||
     die "qualification ports must be distinct"
@@ -73,7 +75,7 @@ compose() {
   JANUSLY_BUILD_TREE="$(git -C "$root" rev-parse 'HEAD^{tree}')" \
   JANUSLY_BUILD_ID="$(git -C "$root" rev-parse --short HEAD)" \
   JANUSLY_RESUME_TOKEN_SECRET=qualification-resume-token-secret-not-for-production \
-  JANUSLY_CREDENTIAL_MASTER_KEY=0a6ee99978435f3e242e19aa61839045c6c1a5f1f5e63558f9d40706702570c7 \
+  JANUSLY_CREDENTIAL_MASTER_KEY="$credential_master_key" \
   JANUSLY_WEB_BASE_URL="$origin" \
   JANUSLY_BROWSER_CONNECT_ORIGINS="$supabase_public_url" \
   API_ALLOWED_ORIGINS="http://127.0.0.1:${app_port},http://localhost:${app_port}" \
@@ -82,7 +84,7 @@ compose() {
   SUPABASE_SERVICE_ROLE_KEY="${SUPABASE_SERVICE_ROLE_KEY:-}" \
   VITE_SUPABASE_URL="$supabase_public_url" \
   VITE_SUPABASE_ANON_KEY="${VITE_SUPABASE_ANON_KEY:-}" \
-  ANTHROPIC_API_KEY= \
+  ANTHROPIC_API_KEY='' \
     docker compose -f "$root/docker-compose.yml" -p "$project" "$@"
 }
 
@@ -101,7 +103,7 @@ capture_diagnostics() {
 }
 
 write_summary() {
-  local finished_at
+  local finished_at checksum_tmp
   finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   mkdir -p "$evidence_root"
   jq -n \
@@ -114,7 +116,17 @@ write_summary() {
     --arg supabaseVersion "$(HOME="$supabase_home" SUPABASE_TELEMETRY_DISABLED=1 DO_NOT_TRACK=1 "$supabase_bin" --version 2>/dev/null || printf unknown)" \
     '{status:$status,profile:$profile,git:{commit:$commit,tree:$tree},finishedAt:$finishedAt,appOrigin:$appOrigin,supabaseVersion:$supabaseVersion,providerCalls:0,providerCostUsd:0}' \
     >"$evidence_root/summary.json"
-  (cd "$evidence_root" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 shasum -a 256 >SHA256SUMS)
+  checksum_tmp=$(mktemp "${TMPDIR:-/tmp}/janusly-qualification-sums.XXXXXX")
+  if ! (
+    cd "$evidence_root"
+    find . -type f ! -name SHA256SUMS -print0 |
+      sort -z |
+      xargs -0 shasum -a 256
+  ) >"$checksum_tmp"; then
+    rm -f "$checksum_tmp"
+    return 1
+  fi
+  mv "$checksum_tmp" "$evidence_root/SHA256SUMS"
 }
 
 cleanup() {
@@ -148,8 +160,8 @@ start_supabase() {
 }
 
 wait_for_app() {
-  local attempt
-  for attempt in $(seq 1 120); do
+  local _
+  for _ in $(seq 1 120); do
     if curl --fail --silent "$origin/healthz" >/dev/null; then return 0; fi
     sleep 1
   done
@@ -202,6 +214,69 @@ run_profile() {
     tenant)
       run_spec e2e/local-tenant-isolation.spec.ts JANUSLY_LOCAL_TENANT_ISOLATION_E2E=1 JANUSLY_TENANT_API_URL="$origin"
       ;;
+    recovery)
+      run_spec e2e/local-backup-restore.spec.ts \
+        JANUSLY_LOCAL_BACKUP_RESTORE_E2E=1 \
+        JANUSLY_BACKUP_RESTORE_PHASE=seed \
+        JANUSLY_BACKUP_RESTORE_API_URL="$origin"
+      local backup_dir="$evidence_root/database-backup"
+      COMPOSE_PROJECT_NAME="$project" \
+      JANUSLY_RECOVERY_COMPOSE_FILE="$root/docker-compose.yml" \
+      JANUSLY_CREDENTIAL_MASTER_KEY="$credential_master_key" \
+        "$root/scripts/postgres-local-recovery.sh" backup "$backup_dir" \
+        >"$evidence_root/backup-result.json"
+      compose down --volumes --remove-orphans
+      compose up -d --wait postgres
+      if COMPOSE_PROJECT_NAME="$project" \
+        JANUSLY_RECOVERY_COMPOSE_FILE="$root/docker-compose.yml" \
+        JANUSLY_CREDENTIAL_MASTER_KEY=qualification-wrong-key \
+        CONFIRM=restore \
+          "$root/scripts/postgres-local-recovery.sh" restore "$backup_dir" \
+          >"$evidence_root/wrong-key-refusal.log" 2>&1; then
+        die "restore accepted a mismatched credential key"
+      fi
+      grep -F "credential master key does not match the backup" \
+        "$evidence_root/wrong-key-refusal.log" >/dev/null ||
+        die "restore failed for an unexpected reason with the wrong key"
+      local tampered_dir="$evidence_root/tampered-backup"
+      cp -R "$backup_dir" "$tampered_dir"
+      printf 'tampered\n' >>"$tampered_dir/database.dump"
+      if COMPOSE_PROJECT_NAME="$project" \
+        JANUSLY_RECOVERY_COMPOSE_FILE="$root/docker-compose.yml" \
+        JANUSLY_CREDENTIAL_MASTER_KEY="$credential_master_key" \
+        CONFIRM=restore \
+          "$root/scripts/postgres-local-recovery.sh" restore "$tampered_dir" \
+          >"$evidence_root/checksum-refusal.log" 2>&1; then
+        die "restore accepted a tampered dump"
+      fi
+      grep -F "backup dump checksum mismatch" \
+        "$evidence_root/checksum-refusal.log" >/dev/null ||
+        die "restore failed for an unexpected reason with the tampered dump"
+      COMPOSE_PROJECT_NAME="$project" \
+      JANUSLY_RECOVERY_COMPOSE_FILE="$root/docker-compose.yml" \
+      JANUSLY_CREDENTIAL_MASTER_KEY="$credential_master_key" \
+      CONFIRM=restore \
+        "$root/scripts/postgres-local-recovery.sh" restore "$backup_dir" \
+        >"$evidence_root/restore-result.json"
+      if COMPOSE_PROJECT_NAME="$project" \
+        JANUSLY_RECOVERY_COMPOSE_FILE="$root/docker-compose.yml" \
+        JANUSLY_CREDENTIAL_MASTER_KEY="$credential_master_key" \
+        CONFIRM=restore \
+          "$root/scripts/postgres-local-recovery.sh" restore "$backup_dir" \
+          >"$evidence_root/nonempty-refusal.log" 2>&1; then
+        die "restore accepted a non-empty target"
+      fi
+      grep -F "restore target is not empty" \
+        "$evidence_root/nonempty-refusal.log" >/dev/null ||
+        die "restore failed for an unexpected reason on a non-empty target"
+      compose run --rm janusly migrate
+      compose up -d janusly
+      wait_for_app
+      run_spec e2e/local-backup-restore.spec.ts \
+        JANUSLY_LOCAL_BACKUP_RESTORE_E2E=1 \
+        JANUSLY_BACKUP_RESTORE_PHASE=restored \
+        JANUSLY_BACKUP_RESTORE_API_URL="$origin"
+      ;;
   esac
 }
 
@@ -220,7 +295,7 @@ started=1
 start_app
 
 if [[ "$profile" == all ]]; then
-  for selected in clean identity security tenant; do run_profile "$selected"; done
+  for selected in clean identity security tenant recovery; do run_profile "$selected"; done
 else
   run_profile "$profile"
 fi

@@ -19,3 +19,19 @@ impact attribution, and feedback.
 
 Implementation is divided between `internal/recovery`, `internal/engine`, and
 recovery handlers in `internal/httpapi`.
+
+## Data-plane recovery boundary
+
+Workflow recovery does not replace database disaster recovery. The local
+operator drill uses `scripts/postgres-local-recovery.sh` to verify a
+checksum-bound PostgreSQL 18 custom-format backup against an empty isolated
+target. It binds the package to the single embedded migration source and, when
+managed credentials exist, to a one-way fingerprint of the high-entropy
+credential root key. Restore refuses a running application, a non-empty
+database, a different PostgreSQL major, schema drift, checksum drift, or a
+mismatched key.
+
+The application database, Supabase identities, and the credential root key are
+three distinct recovery domains. Production operators must back up and test
+each domain with its provider controls; the repository helper is a local drill,
+not a substitute for managed point-in-time recovery.

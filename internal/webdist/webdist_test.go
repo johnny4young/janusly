@@ -47,6 +47,16 @@ func TestHandlerServingContract(t *testing.T) {
 		t.Fatalf("spa caching: %q", spa.Header().Get("Cache-Control"))
 	}
 
+	for _, path := range []string{"/api/unknown", "/internal/unknown", "/v1/unknown"} {
+		unknownServerRoute := get(path)
+		if unknownServerRoute.Code != 404 {
+			t.Fatalf("reserved server route %s: got %d, want 404", path, unknownServerRoute.Code)
+		}
+		if body, _ := io.ReadAll(unknownServerRoute.Body); string(body) == "<html>app shell</html>" {
+			t.Fatalf("reserved server route %s must not serve the SPA shell", path)
+		}
+	}
+
 	logo := get("/logo.svg")
 	if logo.Code != 200 || logo.Header().Get("Cache-Control") != "no-cache" {
 		t.Fatalf("top-level file: %d %q", logo.Code, logo.Header().Get("Cache-Control"))

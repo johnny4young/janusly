@@ -73,7 +73,7 @@ describe('useBootstrapData tenant boundary', () => {
     // Opening an authoring surface latches them back on for the session.
     apiMock.mockClear()
     useWorkflowStore.setState({ activeTab: 'ai-studio' })
-    await act(async () => { await result.current.refreshPlatform() })
+    await waitFor(() => expect(apiMock.mock.calls.map(([path]) => path)).toContain('/credentials'))
     const authoringPaths = apiMock.mock.calls.map(([path]) => path)
     for (const catalog of ['/tools', '/templates', '/solution-packs', '/credentials']) {
       expect(authoringPaths).toContain(catalog)

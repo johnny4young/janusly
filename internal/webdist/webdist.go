@@ -51,6 +51,16 @@ func HandlerFor(dist fs.FS) http.Handler {
 				return
 			}
 		}
+		// Versioned and internal server namespaces are never client routes.
+		// Without this boundary, an undeclared API probe would receive the
+		// HTML shell with HTTP 200, hiding route/configuration mistakes behind
+		// an apparently successful response.
+		firstSegment := strings.SplitN(path, "/", 2)[0]
+		switch firstSegment {
+		case "api", "internal", "v1":
+			http.NotFound(w, r)
+			return
+		}
 		// SPA fallback: client-side routes render index.html.
 		raw, err := fs.ReadFile(dist, "index.html")
 		if err != nil {
