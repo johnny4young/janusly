@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { WorkflowInputSchemaShape } from '../types'
 import { RunInputDialog } from './RunInputDialog'
@@ -238,5 +238,27 @@ describe('<RunInputDialog /> presets', () => {
     fireEvent.change(screen.getByLabelText(/Invoice ID/i), { target: { value: 'INV-9' } })
     fireEvent.click(screen.getByTestId('run-input-preset-save'))
     expect(onSavePreset).toHaveBeenCalledWith('draft', { invoiceId: 'INV-9' })
+  })
+
+  it('keeps the name after a failed save so the operator can retry', async () => {
+    const onSavePreset = vi.fn().mockRejectedValue(new Error('offline'))
+    render(<RunInputDialog {...makeProps({ presets: [], onSavePreset })} />)
+    fireEvent.change(screen.getByLabelText(/Invoice ID/i), { target: { value: 'INV-9' } })
+    fireEvent.change(screen.getByTestId('run-input-preset-name'), { target: { value: 'retry me' } })
+    fireEvent.click(screen.getByTestId('run-input-preset-save'))
+    await waitFor(() => expect(onSavePreset).toHaveBeenCalled())
+    expect(screen.getByTestId('run-input-preset-name')).toHaveValue('retry me')
+  })
+
+  it('deletes the selected preset and clears the selection only on success', async () => {
+    const onDeletePreset = vi.fn().mockResolvedValue(undefined)
+    render(<RunInputDialog {...makeProps({
+      presets: [{ name: 'VIP refund', input: { invoiceId: 'INV-777' } }],
+      onDeletePreset,
+    })} />)
+    fireEvent.change(screen.getByTestId('run-input-preset-select'), { target: { value: 'VIP refund' } })
+    fireEvent.click(screen.getByTestId('run-input-preset-delete'))
+    await waitFor(() => expect(onDeletePreset).toHaveBeenCalledWith('VIP refund'))
+    expect(screen.getByTestId('run-input-preset-select')).toHaveValue('')
   })
 })

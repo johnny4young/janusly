@@ -224,6 +224,19 @@ export default function App() {
       addToast(t('runInput.presets.saved'), 'success')
     } catch (error) {
       addToast(error instanceof Error ? error.message : t('runInput.presets.saveFailed'), 'error')
+      throw error
+    }
+  }, [addToast, currentWorkflowId, t])
+  const deleteRunInputPreset = useCallback(async (name: string) => {
+    try {
+      await api(`/workflows/${encodeURIComponent(currentWorkflowId)}/input-presets/${encodeURIComponent(name)}`, {
+        method: 'DELETE',
+      })
+      setRunInputPresets((current) => current?.filter((preset) => preset.name !== name))
+      addToast(t('runInput.presets.deleted'), 'success')
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : t('runInput.presets.deleteFailed'), 'error')
+      throw error
     }
   }, [addToast, currentWorkflowId, t])
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -603,6 +616,7 @@ export default function App() {
         ...(runInputPresets !== undefined ? {
           presets: runInputPresets,
           onSavePreset: saveRunInputPreset,
+          onDeletePreset: deleteRunInputPreset,
         } : {}),
       } : null}
       palette={{

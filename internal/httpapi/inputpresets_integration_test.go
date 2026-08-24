@@ -4,6 +4,7 @@ package httpapi
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 )
@@ -82,5 +83,66 @@ func TestInputPresetLifecycle(t *testing.T) {
 	}
 	if res := h.call("DELETE", base+"/VIP refund", nil, ""); res.status != 404 {
 		t.Fatalf("double delete must 404: %d", res.status)
+	}
+}
+
+// The 20-row bound must hold across replicas, not merely across sequential
+// requests in one process. Two different names racing for the final slot are
+// serialized by the tenant/workflow advisory lock.
+func TestInputPresetLimitIsAtomic(t *testing.T) {
+	h := newAPIHarnessWithoutWorkers(t)
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	wfID := "wf-preset-race-" + suffix
+	if res := h.call("POST", "/v1/workflows/save", map[string]any{
+		"id": wfID, "name": wfID, "dslVersion": "1.0",
+		"nodes": []any{map[string]any{"id": "n", "type": "noop", "config": map[string]any{}}},
+		"edges": []any{},
+	}, ""); res.status != 200 {
+		t.Fatalf("save: %+v", res.body)
+	}
+	base := "/workflows/" + wfID + "/input-presets"
+	for i := range inputPresetMaxPerWorkflow - 1 {
+		if res := h.call("PUT", base, map[string]any{
+			"name": fmt.Sprintf("seed-%02d", i), "input": map[string]any{"value": i},
+		}, ""); res.status != 200 {
+			t.Fatalf("fill preset %d: %d %+v", i, res.status, res.body)
+		}
+	}
+
+	start := make(chan struct{})
+	results := make(chan apiResponse, 2)
+	var wg sync.WaitGroup
+	for _, name := range []string{"racer-a", "racer-b"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			results <- h.call("PUT", base, map[string]any{
+				"name": name, "input": map[string]any{"value": name},
+			}, "")
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+
+	accepted, refused := 0, 0
+	for result := range results {
+		switch {
+		case result.status == 200:
+			accepted++
+		case result.status == 422 && result.body["code"] == "input_preset_limit":
+			refused++
+		default:
+			t.Fatalf("unexpected concurrent result: %d %+v", result.status, result.body)
+		}
+	}
+	if accepted != 1 || refused != 1 {
+		t.Fatalf("one final slot: accepted=%d refused=%d", accepted, refused)
+	}
+	list := h.call("GET", base, nil, "")
+	presets, _ := list.body["presets"].([]any)
+	if len(presets) != inputPresetMaxPerWorkflow {
+		t.Fatalf("cap exceeded: got %d presets", len(presets))
 	}
 }

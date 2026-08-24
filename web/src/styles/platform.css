@@ -1193,6 +1193,12 @@
   min-width: 180px;
 }
 
+.run-input-presets__load-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
 .run-input-presets__save {
   display: flex;
   align-items: center;

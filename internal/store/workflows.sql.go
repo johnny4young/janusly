@@ -13,6 +13,24 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const acquireWorkflowInputPresetLock = `-- name: AcquireWorkflowInputPresetLock :exec
+SELECT pg_advisory_xact_lock(hashtextextended(
+  $1::text || E'\x1f' || $2::text || E'\x1finput-presets', 0))
+`
+
+type AcquireWorkflowInputPresetLockParams struct {
+	OrgID      string
+	WorkflowID string
+}
+
+// Serialize the bounded read+upsert across processes. A row lock cannot
+// protect the empty set, so the transaction takes one tenant/workflow-scoped
+// advisory lock before checking the count.
+func (q *Queries) AcquireWorkflowInputPresetLock(ctx context.Context, arg AcquireWorkflowInputPresetLockParams) error {
+	_, err := q.db.Exec(ctx, acquireWorkflowInputPresetLock, arg.OrgID, arg.WorkflowID)
+	return err
+}
+
 const addWorkflowTagBulk = `-- name: AddWorkflowTagBulk :execrows
 INSERT INTO workflow_metadata (id, org_id, workflow_id, tags, created_by)
 SELECT gen_random_uuid()::text, $1, workflow_id,
@@ -2383,4 +2401,24 @@ type UpsertWorkflowStatusPageParams struct {
 func (q *Queries) UpsertWorkflowStatusPage(ctx context.Context, arg UpsertWorkflowStatusPageParams) error {
 	_, err := q.db.Exec(ctx, upsertWorkflowStatusPage, arg.OrgID, arg.WorkflowID, arg.Token)
 	return err
+}
+
+const workflowInputPresetExists = `-- name: WorkflowInputPresetExists :one
+SELECT EXISTS (
+  SELECT 1 FROM workflow_input_presets
+  WHERE org_id = $1 AND workflow_id = $2 AND name = $3
+)
+`
+
+type WorkflowInputPresetExistsParams struct {
+	OrgID      string
+	WorkflowID string
+	Name       string
+}
+
+func (q *Queries) WorkflowInputPresetExists(ctx context.Context, arg WorkflowInputPresetExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, workflowInputPresetExists, arg.OrgID, arg.WorkflowID, arg.Name)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }

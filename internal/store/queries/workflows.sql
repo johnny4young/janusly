@@ -500,6 +500,19 @@ ORDER BY name;
 SELECT count(*) FROM workflow_input_presets
 WHERE org_id = $1 AND workflow_id = $2;
 
+-- Serialize the bounded read+upsert across processes. A row lock cannot
+-- protect the empty set, so the transaction takes one tenant/workflow-scoped
+-- advisory lock before checking the count.
+-- name: AcquireWorkflowInputPresetLock :exec
+SELECT pg_advisory_xact_lock(hashtextextended(
+  sqlc.arg(org_id)::text || E'\x1f' || sqlc.arg(workflow_id)::text || E'\x1finput-presets', 0));
+
+-- name: WorkflowInputPresetExists :one
+SELECT EXISTS (
+  SELECT 1 FROM workflow_input_presets
+  WHERE org_id = $1 AND workflow_id = $2 AND name = $3
+);
+
 -- name: UpsertWorkflowInputPreset :one
 INSERT INTO workflow_input_presets (id, org_id, workflow_id, name, input_json, created_by)
 VALUES ($1, $2, $3, $4, $5, $6)

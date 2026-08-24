@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"unicode/utf16"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -73,7 +74,7 @@ func (s *V1Server) mountInputPresetRoutes(mux *http.ServeMux) {
 			if err := decodeBody(r, &body); err == nil {
 				name = strings.TrimSpace(body.Name)
 			}
-			if name == "" || len(name) > inputPresetNameMaxChars || len(body.Input) == 0 {
+			if name == "" || len(utf16.Encode([]rune(name))) > inputPresetNameMaxChars || len(body.Input) == 0 {
 				writeUnversioned(w, opError(http.StatusUnprocessableEntity, "input_preset_invalid",
 					"name (1-60 chars) and input are required", nil))
 				return
@@ -97,7 +98,19 @@ func (s *V1Server) mountInputPresetRoutes(mux *http.ServeMux) {
 					"preset input looks like credential material; reference secrets from credentials instead", nil))
 				return
 			}
-			q := store.New(s.pool)
+			tx, err := s.pool.Begin(r.Context())
+			if err != nil {
+				writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+				return
+			}
+			defer func() { _ = tx.Rollback(r.Context()) }()
+			q := store.New(tx)
+			if err := q.AcquireWorkflowInputPresetLock(r.Context(), store.AcquireWorkflowInputPresetLockParams{
+				OrgID: rc.orgID, WorkflowID: workflowID,
+			}); err != nil {
+				writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+				return
+			}
 			count, err := q.CountWorkflowInputPresets(r.Context(), store.CountWorkflowInputPresetsParams{
 				OrgID: rc.orgID, WorkflowID: workflowID,
 			})
@@ -107,17 +120,12 @@ func (s *V1Server) mountInputPresetRoutes(mux *http.ServeMux) {
 			}
 			if count >= inputPresetMaxPerWorkflow {
 				// Replacing an existing name is still allowed at the cap.
-				existing, err := q.ListWorkflowInputPresets(r.Context(), store.ListWorkflowInputPresetsParams{
-					OrgID: rc.orgID, WorkflowID: workflowID,
+				replaces, err := q.WorkflowInputPresetExists(r.Context(), store.WorkflowInputPresetExistsParams{
+					OrgID: rc.orgID, WorkflowID: workflowID, Name: name,
 				})
-				replaces := false
-				if err == nil {
-					for _, row := range existing {
-						if row.Name == name {
-							replaces = true
-							break
-						}
-					}
+				if err != nil {
+					writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+					return
 				}
 				if !replaces {
 					writeUnversioned(w, opError(http.StatusUnprocessableEntity, "input_preset_limit",
@@ -131,6 +139,10 @@ func (s *V1Server) mountInputPresetRoutes(mux *http.ServeMux) {
 				CreatedBy: pgtype.Text{String: rc.userID, Valid: rc.userID != ""},
 			})
 			if err != nil {
+				writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+				return
+			}
+			if err := tx.Commit(r.Context()); err != nil {
 				writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
 				return
 			}

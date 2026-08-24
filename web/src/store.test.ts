@@ -814,6 +814,17 @@ describe('useWorkflowStore semantic workflow signals', () => {
     expect(useWorkflowStore.getState().historyFuture).toHaveLength(0)
   })
 
+  it('does not create canvas undo levels for workflow metadata-only edits', () => {
+    useWorkflowStore.getState().setWorkflowName('Renamed workflow')
+    useWorkflowStore.getState().updateWorkflowInputs({
+      type: 'object', properties: { invoiceId: { type: 'string' } },
+    })
+    useWorkflowStore.getState().updateWorkflowOutputs({ result: 'ok' })
+    useWorkflowStore.getState().updateWorkflowTemplatePolicy('strict')
+    expect(useWorkflowStore.getState().historyPast).toHaveLength(0)
+    expect(useWorkflowStore.getState().historyFuture).toHaveLength(0)
+  })
+
   it('hydrateWorkflow and newWorkflow reset the flag', () => {
     useWorkflowStore.getState().addNode('http')
     expect(useWorkflowStore.getState().workflowDirty).toBe(true)

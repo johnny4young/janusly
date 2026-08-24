@@ -23,7 +23,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
-import { AlertCircle, Play, Workflow, X } from 'lucide-react'
+import { AlertCircle, Play, Trash2, Workflow, X } from 'lucide-react'
 import type { WorkflowInputSchemaShape } from '../types'
 import { useT } from '../i18n'
 import {
@@ -73,6 +73,8 @@ export type RunInputDialogProps = {
   presets?: RunInputPreset[]
   /** Persist the CURRENT form value under a name; resolves the fresh list. */
   onSavePreset?: (name: string, input: unknown) => void | Promise<void>
+  /** Delete a saved preset by name. */
+  onDeletePreset?: (name: string) => void | Promise<void>
 }
 
 export type RunInputPreset = {
@@ -96,6 +98,7 @@ export function RunInputDialog({
   onCancel,
   presets,
   onSavePreset,
+  onDeletePreset,
 }: RunInputDialogProps) {
   const { t } = useT()
   const resolvedKicker = kicker ?? (t('runInput.kicker'))
@@ -107,6 +110,7 @@ export function RunInputDialog({
   const [state, setState] = useState<RunInputFormState>(() => initialRunInputState(inputs, initialValue))
   const [localErrors, setLocalErrors] = useState<RunInputErrorMap>({})
   const [presetName, setPresetName] = useState('')
+  const [selectedPresetName, setSelectedPresetName] = useState('')
   const [presetBusy, setPresetBusy] = useState(false)
   const firstFieldRef = useRef<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null>(null)
   const dialogRef = useRef<HTMLDivElement | null>(null)
@@ -204,23 +208,48 @@ export function RunInputDialog({
           {presets !== undefined && (
             <div className="run-input-presets" data-testid="run-input-presets">
               {presets.length > 0 && (
-                <label className="run-input-presets__load">
-                  <span className="helper-text">{t('runInput.presets.load')}</span>
-                  <select
-                    data-testid="run-input-preset-select"
-                    value=""
-                    disabled={submitting || presetBusy}
-                    onChange={(event) => {
-                      const chosen = presets.find((preset) => preset.name === event.target.value)
-                      if (chosen) setState(initialRunInputState(inputs, chosen.input))
-                    }}
-                  >
-                    <option value="">{t('runInput.presets.placeholder')}</option>
-                    {presets.map((preset) => (
-                      <option key={preset.name} value={preset.name}>{preset.name}</option>
-                    ))}
-                  </select>
-                </label>
+                <div className="run-input-presets__load-row">
+                  <label className="run-input-presets__load">
+                    <span className="helper-text">{t('runInput.presets.load')}</span>
+                    <select
+                      data-testid="run-input-preset-select"
+                      value={selectedPresetName}
+                      disabled={submitting || presetBusy}
+                      onChange={(event) => {
+                        const nextName = event.target.value
+                        setSelectedPresetName(nextName)
+                        const chosen = presets.find((preset) => preset.name === nextName)
+                        if (chosen) setState(initialRunInputState(inputs, chosen.input))
+                      }}
+                    >
+                      <option value="">{t('runInput.presets.placeholder')}</option>
+                      {presets.map((preset) => (
+                        <option key={preset.name} value={preset.name}>{preset.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {onDeletePreset && (
+                    <button
+                      type="button"
+                      className="small-command"
+                      data-testid="run-input-preset-delete"
+                      aria-label={t('runInput.presets.deleteAria', { name: selectedPresetName })}
+                      disabled={submitting || presetBusy || selectedPresetName === ''}
+                      onClick={() => {
+                        const name = selectedPresetName
+                        if (!name) return
+                        setPresetBusy(true)
+                        void Promise.resolve(onDeletePreset(name))
+                          .then(() => setSelectedPresetName(''))
+                          .catch(() => undefined)
+                          .finally(() => setPresetBusy(false))
+                      }}
+                    >
+                      <Trash2 size={13} aria-hidden="true" />
+                      <span>{t('runInput.presets.delete')}</span>
+                    </button>
+                  )}
+                </div>
               )}
               {onSavePreset && (
                 <div className="run-input-presets__save">
@@ -249,6 +278,7 @@ export function RunInputDialog({
                       setPresetBusy(true)
                       void Promise.resolve(onSavePreset(presetName.trim(), value))
                         .then(() => setPresetName(''))
+                        .catch(() => undefined)
                         .finally(() => setPresetBusy(false))
                     }}
                   >

@@ -807,6 +807,10 @@ const CANVAS_HISTORY_CAP = 50
 useWorkflowStore.subscribe((state, previous) => {
   if (state.workflowRevision === previous.workflowRevision) return
   if (state.historyPast !== previous.historyPast || state.historyFuture !== previous.historyFuture) return
+  // workflowRevision also invalidates readiness for metadata such as the
+  // workflow name and typed I/O. Canvas history is intentionally narrower:
+  // never add an undo level when the graph references did not change.
+  if (state.nodes === previous.nodes && state.edges === previous.edges) return
   useWorkflowStore.setState({
     historyPast: [...previous.historyPast, { nodes: previous.nodes, edges: previous.edges }]
       .slice(-CANVAS_HISTORY_CAP),
