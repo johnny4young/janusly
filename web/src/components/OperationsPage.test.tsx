@@ -307,6 +307,7 @@ describe('<OperationsPage />', () => {
       '/recovery/metrics': healthyMetrics,
       '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] }, queue: { degraded: true } },
       '/system/queue': { waiting: 3, active: 2, oldestWaitingSeconds: 91, warnSeconds: 60 },
+      '/system/workers': { status: 'degraded', staleAfterSeconds: 60 },
     })
 
     render(<OperationsPage />)
@@ -319,6 +320,9 @@ describe('<OperationsPage />', () => {
     expect(chip).toHaveAttribute('data-state', 'delayed')
     expect(chip).toHaveTextContent('Queue delayed')
     expect(chip).toHaveTextContent('Jobs are still processing')
+    const fleet = screen.getByTestId('worker-fleet-row')
+    expect(fleet).toHaveTextContent('Some execution workers have stopped reporting.')
+    expect(fleet).not.toHaveTextContent(/live|stale|instance|commit/i)
     expect(screen.getByTestId('operations-rail-dot-infrastructure')).toHaveAttribute('data-severity', 'warning')
   })
 

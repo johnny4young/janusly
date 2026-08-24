@@ -53,3 +53,16 @@ func TestRequireBuildProvenanceOnlyFailsClosedInProduction(t *testing.T) {
 		t.Fatalf("production rejected verified provenance: %v", err)
 	}
 }
+
+func TestResourceInstanceIDIsBootUniqueUnlessExplicit(t *testing.T) {
+	t.Setenv("OTEL_SERVICE_INSTANCE_ID", "")
+	t.Setenv("HOSTNAME", "worker-a")
+	first, second := resourceInstanceID(), resourceInstanceID()
+	if first == second || !strings.HasPrefix(first, "worker-a-") || !strings.HasPrefix(second, "worker-a-") {
+		t.Fatalf("automatic instance ids must be host-attributed and boot-unique: %q %q", first, second)
+	}
+	t.Setenv("OTEL_SERVICE_INSTANCE_ID", "operator-instance-7")
+	if got := resourceInstanceID(); got != "operator-instance-7" {
+		t.Fatalf("explicit OTel instance id must win, got %q", got)
+	}
+}

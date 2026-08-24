@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// The worker fleet surface: heartbeats upsert one row per instance, the
-// admin route derives liveness server-side, and silent rows read stale.
+// The worker fleet surface derives liveness server-side but a tenant admin
+// receives only health, never global platform topology or build identity.
 func TestWorkerFleetSurface(t *testing.T) {
 	h := newAPIHarness(t)
 	pool := testPool(t)
@@ -35,17 +35,13 @@ func TestWorkerFleetSurface(t *testing.T) {
 	if res.status != 200 {
 		t.Fatalf("list workers: %d %+v", res.status, res.body)
 	}
-	instances, _ := res.body["instances"].([]any)
-	byID := map[string]map[string]any{}
-	for _, raw := range instances {
-		row := raw.(map[string]any)
-		byID[row["instanceId"].(string)] = row
+	if res.body["status"] != "degraded" {
+		t.Fatalf("one live and one silent instance must read degraded: %+v", res.body)
 	}
-	if byID[liveID] == nil || byID[liveID]["status"] != "live" || byID[liveID]["buildCommit"] != "abc123" {
-		t.Fatalf("live instance projection: %+v", byID[liveID])
-	}
-	if byID[staleID] == nil || byID[staleID]["status"] != "stale" {
-		t.Fatalf("a silent instance must read stale: %+v", byID[staleID])
+	for _, forbidden := range []string{"instances", "liveCount", "staleCount", "buildCommit", "instanceId"} {
+		if _, exposed := res.body[forbidden]; exposed {
+			t.Fatalf("tenant response exposed %s: %+v", forbidden, res.body)
+		}
 	}
 	if res.body["staleAfterSeconds"] == nil {
 		t.Fatalf("the staleness contract must be stated: %+v", res.body)

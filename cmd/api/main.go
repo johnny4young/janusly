@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/johnny4young/janusly/internal/auth"
@@ -231,12 +232,13 @@ func run() error {
 			Name: metric.name, Help: metric.help,
 		}, func() float64 { return 0 }))
 	}
+	instanceID := resourceInstanceID()
 	resourceInfo := prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "target_info",
 		Help: "OTel Resource identity for this process.",
 		ConstLabels: prometheus.Labels{
 			"service_name": "janusly", "service_namespace": "janusly",
-			"service_instance_id": resourceInstanceID(),
+			"service_instance_id": instanceID,
 		},
 	})
 	resourceInfo.Set(1)
@@ -250,7 +252,7 @@ func run() error {
 		_ = eng.RunWorkers(ctx, cfg.WorkerConcurrency, cfg.PollInterval, dispatcher.Execute, logger)
 	})
 	runner.Go("worker-heartbeat", func(ctx context.Context) {
-		eng.RunWorkerHeartbeat(ctx, resourceInstanceID(), cfg.WorkerConcurrency, identity.Commit, logger)
+		eng.RunWorkerHeartbeat(ctx, instanceID, cfg.WorkerConcurrency, identity.Commit, logger)
 	})
 	runner.Go("replay-campaign-pump", func(ctx context.Context) {
 		eng.RunReplayCampaignPump(ctx, cfg.PollInterval, logger)
@@ -319,18 +321,20 @@ func run() error {
 	return errors.Join(problems...)
 }
 
-// resourceInstanceID resolves the per-process identity like the
-// OTel Resource: explicit env, then HOSTNAME, then the OS.
+// resourceInstanceID resolves one boot identity. An explicit OTel instance ID
+// is already required to be process-unique; automatic host/container fallbacks
+// append a UUID so an immediate restart cannot inherit stale started/build
+// metadata from a previous process on the same host.
 func resourceInstanceID() string {
 	if id := os.Getenv("OTEL_SERVICE_INSTANCE_ID"); id != "" {
 		return id
 	}
-	if id := os.Getenv("HOSTNAME"); id != "" {
-		return id
+	base := os.Getenv("HOSTNAME")
+	if base == "" {
+		base, _ = os.Hostname()
 	}
-	host, err := os.Hostname()
-	if err != nil {
-		return "unknown"
+	if base == "" {
+		base = "janusly"
 	}
-	return host
+	return base + "-" + uuid.NewString()
 }

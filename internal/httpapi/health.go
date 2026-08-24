@@ -136,9 +136,9 @@ func (s *V1Server) mountSystemHealthRoutes(mux *http.ServeMux) {
 			},
 		}))
 	}))
-	// Worker fleet: one row per live process from the heartbeat loop.
-	// Liveness is derived here (silent past four beat intervals = stale)
-	// so the client never does clock math against the server's rows.
+	// Tenant operators receive only a coarse fleet-health state. Instance IDs,
+	// build commits, start times, concurrency, and replica counts are global
+	// platform topology and must not cross the tenant-admin boundary.
 	s.route(mux, "GET /system/workers", routeGate{auth.RoleAdmin, "org.config.write"},
 		func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 			rows, err := store.New(s.pool).ListWorkerInstances(r.Context())
@@ -148,26 +148,23 @@ func (s *V1Server) mountSystemHealthRoutes(mux *http.ServeMux) {
 			}
 			staleAfter := 4 * engine.WorkerHeartbeatInterval
 			now := time.Now()
-			instances := make([]map[string]any, 0, len(rows))
 			live := 0
+			stale := 0
 			for _, row := range rows {
-				status := "stale"
 				if now.Sub(row.LastSeenAt) <= staleAfter {
-					status = "live"
 					live++
+				} else {
+					stale++
 				}
-				entry := map[string]any{
-					"instanceId": row.InstanceID, "status": status,
-					"startedAt": row.StartedAt, "lastSeenAt": row.LastSeenAt,
-					"workerConcurrency": row.WorkerConcurrency,
-				}
-				if row.BuildCommit.Valid {
-					entry["buildCommit"] = row.BuildCommit.String
-				}
-				instances = append(instances, entry)
+			}
+			status := "healthy"
+			if live == 0 {
+				status = "unhealthy"
+			} else if stale > 0 {
+				status = "degraded"
 			}
 			writeUnversioned(w, opOK(map[string]any{
-				"instances": instances, "liveCount": live,
+				"status":            status,
 				"staleAfterSeconds": int(staleAfter.Seconds()),
 			}))
 		})

@@ -12,8 +12,7 @@ type RateLimiterHealth = {
 }
 
 export type WorkerFleet = {
-  liveCount: number
-  staleCount: number
+  status: 'healthy' | 'degraded' | 'unhealthy'
 }
 
 export function SettingsInfrastructureSection({
@@ -82,24 +81,22 @@ export function SettingsInfrastructureSection({
             <span>
               {workerFleet === null
                 ? t('common.unknown')
-                : t('operations.workerFleet.body', {
-                    live: workerFleet.liveCount, stale: workerFleet.staleCount,
-                  })}
+                : t(`operations.workerFleet.${workerFleet.status}`)}
             </span>
           </div>
           <span
             className="we-pill"
             data-tone={workerFleet === null
               ? 'neutral'
-              : workerFleet.liveCount === 0
+              : workerFleet.status === 'unhealthy'
                 ? 'danger'
-                : workerFleet.staleCount > 0 ? 'warning' : 'success'}
+                : workerFleet.status === 'degraded' ? 'warning' : 'success'}
           >
             {workerFleet === null
               ? t('common.unknown')
-              : workerFleet.liveCount === 0
+              : workerFleet.status === 'unhealthy'
                 ? t('vitals.severity.unhealthy')
-                : workerFleet.staleCount > 0
+                : workerFleet.status === 'degraded'
                   ? t('vitals.severity.warn')
                   : t('vitals.severity.healthy')}
           </span>

@@ -14,6 +14,11 @@ Rate limits and workflow queue state are PostgreSQL-backed so multiple Janusly
 instances share one durable view. A store error keeps the documented fail-open
 traffic posture while emitting degradation evidence.
 
+Each process heartbeat uses one boot-unique instance identity. PostgreSQL keeps
+the detailed instance/build/concurrency rows for platform telemetry, while the
+tenant-admin `/system/workers` route returns only `healthy`, `degraded`, or
+`unhealthy`; global replica topology never crosses the tenant boundary.
+
 The opt-in weekly operations digest is also multi-replica safe. One leased
 `org_digest_state` batch records each successful admin recipient before the
 provider call moves on. Partial failures release the lease with backoff and a

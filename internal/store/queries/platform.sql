@@ -397,7 +397,8 @@ INSERT INTO worker_instances (instance_id, worker_concurrency, build_commit)
 VALUES ($1, $2, $3)
 ON CONFLICT (instance_id) DO UPDATE SET
   last_seen_at = now(),
-  worker_concurrency = excluded.worker_concurrency;
+  worker_concurrency = excluded.worker_concurrency,
+  build_commit = excluded.build_commit;
 
 -- name: ListWorkerInstances :many
 SELECT instance_id, started_at, last_seen_at, worker_concurrency, build_commit

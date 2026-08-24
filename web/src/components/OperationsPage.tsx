@@ -253,15 +253,12 @@ export function OperationsPage({
       api('/system/workers')
         .then((payload) => {
           if (cancelled) return
-          const body = payload as { instances?: Array<{ status?: string }>; liveCount?: number } | null
-          if (!body || !Array.isArray(body.instances)) {
+          const body = payload as { status?: 'healthy' | 'degraded' | 'unhealthy' } | null
+          if (!body || !['healthy', 'degraded', 'unhealthy'].includes(body.status ?? '')) {
             setWorkerFleet(null)
             return
           }
-          const live = typeof body.liveCount === 'number'
-            ? body.liveCount
-            : body.instances.filter((row) => row.status === 'live').length
-          setWorkerFleet({ liveCount: live, staleCount: body.instances.length - live })
+          setWorkerFleet({ status: body.status! })
         })
         .catch(() => {
           // Same posture as the queue chips: keep the last good snapshot.
