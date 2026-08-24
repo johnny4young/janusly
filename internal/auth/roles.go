@@ -48,29 +48,39 @@ func ResolveMemberRole(ctx context.Context, q *store.Queries, orgID, userID stri
 		OrgID: orgID, UserID: userID,
 	})
 	if err == nil && membership.Role != "" {
-		if IsBuiltinRole(membership.Role) {
-			return &ResolvedRole{Name: membership.Role, InheritsFrom: Role(membership.Role)}, nil
-		}
-		// Custom role: rank comes from the defining org_roles row's
-		// inheritsFrom. A custom name whose defining row was deleted (or
-		// whose inheritance is out of the closed enum) fails closed.
-		orgRole, roleErr := q.GetOrgRole(ctx, store.GetOrgRoleParams{
-			OrgID: orgID, Name: membership.Role,
-		})
-		if roleErr == nil && IsBuiltinRole(orgRole.InheritsFrom) {
-			return &ResolvedRole{Name: orgRole.Name, InheritsFrom: Role(orgRole.InheritsFrom)}, nil
-		}
-		if roleErr != nil && !errorsIsNoRows(roleErr) {
-			return nil, roleErr
-		}
-		return nil, nil
+		return ResolveRoleFromMembership(ctx, q, orgID, membership.Role, mode)
 	}
 	if err != nil && !errorsIsNoRows(err) {
 		return nil, err
 	}
-	// No org_members row: the admin auto-grant exists ONLY for dev-headers.
-	if mode == ModeDevHeaders {
-		return &ResolvedRole{Name: string(RoleAdmin), InheritsFrom: RoleAdmin}, nil
+	return ResolveRoleFromMembership(ctx, q, orgID, "", mode)
+}
+
+// ResolveRoleFromMembership resolves a membership literal already read by the
+// centralized request resolver. Authorization middleware uses this seam so it
+// does not repeat the same org_members lookup for the role and permission
+// checks on every request.
+func ResolveRoleFromMembership(ctx context.Context, q *store.Queries, orgID, membershipRole string, mode Mode) (*ResolvedRole, error) {
+	if membershipRole == "" {
+		// No org_members row: the admin auto-grant exists ONLY for dev-headers.
+		if mode == ModeDevHeaders {
+			return &ResolvedRole{Name: string(RoleAdmin), InheritsFrom: RoleAdmin}, nil
+		}
+		return nil, nil
+	}
+	if IsBuiltinRole(membershipRole) {
+		return &ResolvedRole{Name: membershipRole, InheritsFrom: Role(membershipRole)}, nil
+	}
+	// Custom role: rank comes from the defining org_roles row's inheritsFrom.
+	// A deleted definition or invalid inheritance fails closed.
+	orgRole, err := q.GetOrgRole(ctx, store.GetOrgRoleParams{
+		OrgID: orgID, Name: membershipRole,
+	})
+	if err == nil && IsBuiltinRole(orgRole.InheritsFrom) {
+		return &ResolvedRole{Name: orgRole.Name, InheritsFrom: Role(orgRole.InheritsFrom)}, nil
+	}
+	if err != nil && !errorsIsNoRows(err) {
+		return nil, err
 	}
 	return nil, nil
 }

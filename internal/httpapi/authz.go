@@ -12,58 +12,28 @@ import (
 	"github.com/johnny4young/janusly/internal/store"
 )
 
-// requireRole resolves the caller's effective role and enforces the rank.
-// Returns nil when allowed; an opResult rejection otherwise.
-func (s *V1Server) requireRole(r *http.Request, rc v1Request, required auth.Role) *opResult {
+func (s *V1Server) resolvedGateRole(r *http.Request, rc v1Request) (*auth.ResolvedRole, *opResult) {
 	// Fail closed if a caller ever reaches this without a resolved auth
 	// context: ModeSupabase never auto-grants a membership, unlike the
 	// dev-headers mode's no-membership admin fallback.
-	mode := auth.ModeSupabase
-	if rc.authContext != nil {
-		mode = rc.authContext.Mode
+	q := store.New(s.pool)
+	var resolved *auth.ResolvedRole
+	var err error
+	if rc.authContext == nil {
+		// Defensive and test seam: ordinary middleware always carries the
+		// centralized context, but a direct core invocation must retain the
+		// old fail-closed membership resolution rather than infer a role.
+		resolved, err = auth.ResolveMemberRole(r.Context(), q, rc.orgID, rc.userID, auth.ModeSupabase)
+	} else {
+		resolved, err = auth.ResolveRoleFromMembership(
+			r.Context(), q, rc.orgID, rc.authContext.MembershipRole, rc.authContext.Mode,
+		)
 	}
-	resolved, err := auth.ResolveMemberRole(r.Context(), store.New(s.pool), rc.orgID, rc.userID, mode)
 	if err != nil {
 		rejection := opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
-		return &rejection
+		return nil, &rejection
 	}
-	if resolved == nil || auth.Rank[resolved.InheritsFrom] < auth.Rank[required] {
-		rejection := opError(http.StatusForbidden, "server_request_failed",
-			"Forbidden: requires "+string(required)+" role", nil)
-		return &rejection
-	}
-	return nil
-}
-
-// requirePermission enforces the catalog layer after the rank layer, with
-// the contract's verbatim 403 ("Forbidden: requires permission <key>").
-func (s *V1Server) requirePermission(r *http.Request, rc v1Request, permission string) *opResult {
-	// Fail closed if a caller ever reaches this without a resolved auth
-	// context: ModeSupabase never auto-grants a membership, unlike the
-	// dev-headers mode's no-membership admin fallback.
-	mode := auth.ModeSupabase
-	if rc.authContext != nil {
-		mode = rc.authContext.Mode
-	}
-	resolved, err := auth.ResolveMemberRole(r.Context(), store.New(s.pool), rc.orgID, rc.userID, mode)
-	if err != nil {
-		rejection := opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
-		return &rejection
-	}
-	var effective map[string]bool
-	if resolved != nil {
-		effective, err = auth.EffectivePermissions(r.Context(), store.New(s.pool), rc.orgID, resolved)
-		if err != nil {
-			rejection := opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
-			return &rejection
-		}
-	}
-	if resolved == nil || !effective[permission] {
-		rejection := opError(http.StatusForbidden, "server_request_failed",
-			"Forbidden: requires permission "+permission, nil)
-		return &rejection
-	}
-	return nil
+	return resolved, nil
 }
 
 // routeGate is one registry annotation: when both are set, BOTH must pass,
@@ -74,14 +44,31 @@ type routeGate struct {
 }
 
 func (s *V1Server) checkGate(r *http.Request, rc v1Request, gate routeGate) *opResult {
+	resolved, rejection := s.resolvedGateRole(r, rc)
+	if rejection != nil {
+		return rejection
+	}
 	if gate.role != "" {
-		if rejection := s.requireRole(r, rc, gate.role); rejection != nil {
-			return rejection
+		if resolved == nil || auth.Rank[resolved.InheritsFrom] < auth.Rank[gate.role] {
+			denied := opError(http.StatusForbidden, "server_request_failed",
+				"Forbidden: requires "+string(gate.role)+" role", nil)
+			return &denied
 		}
 	}
 	if gate.permission != "" {
-		if rejection := s.requirePermission(r, rc, gate.permission); rejection != nil {
-			return rejection
+		var effective map[string]bool
+		if resolved != nil {
+			var err error
+			effective, err = auth.EffectivePermissions(r.Context(), store.New(s.pool), rc.orgID, resolved)
+			if err != nil {
+				failed := opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
+				return &failed
+			}
+		}
+		if resolved == nil || !effective[gate.permission] {
+			denied := opError(http.StatusForbidden, "server_request_failed",
+				"Forbidden: requires permission "+gate.permission, nil)
+			return &denied
 		}
 	}
 	return nil

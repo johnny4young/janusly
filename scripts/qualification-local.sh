@@ -18,16 +18,26 @@ stamp=$(date -u +%Y%m%dT%H%M%SZ)
 evidence_root=${JANUSLY_EVIDENCE_DIR:-$root/output/qualification/$stamp/$profile}
 status=failed
 started=0
+uses_supabase=1
+janusly_env=production
+allow_dev_auth_headers=false
+browser_connect_origins=$supabase_public_url
+runtime_supabase_url=$supabase_internal_url
+runtime_supabase_service_role_key=${SUPABASE_SERVICE_ROLE_KEY:-}
+build_supabase_url=$supabase_public_url
+build_supabase_anon_key=${VITE_SUPABASE_ANON_KEY:-}
+otel_exporter=
 
 usage() {
   cat <<'EOF'
 usage: scripts/qualification-local.sh PROFILE
 
-PROFILE: clean | identity | security | tenant | recovery | all | selftest
+PROFILE: clean | identity | security | tenant | recovery | load | all | selftest
 
 Destructive profiles require CONFIRM=reset. They may remove only the fixed
 janusly-qualification-app Compose project and janusly-qualification-auth
-Supabase project.
+Supabase project. The long-running load profile is intentionally excluded from
+all and must be selected explicitly.
 EOF
 }
 
@@ -38,7 +48,7 @@ die() {
 
 validate_configuration() {
   case "$profile" in
-    clean|identity|security|tenant|recovery|all|selftest) ;;
+    clean|identity|security|tenant|recovery|load|all|selftest) ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; die "unknown profile: $profile" ;;
   esac
@@ -52,8 +62,10 @@ validate_configuration() {
   done
   [[ "$app_port" != "$postgres_port" && "$app_port" != "$metrics_port" && "$postgres_port" != "$metrics_port" ]] ||
     die "qualification ports must be distinct"
-  [[ -x "$supabase_bin" ]] ||
-    die "Supabase CLI is missing; run make frontend-install"
+  if ((uses_supabase)); then
+    [[ -x "$supabase_bin" ]] ||
+      die "Supabase CLI is missing; run make frontend-install"
+  fi
 }
 
 supabase() {
@@ -70,21 +82,22 @@ compose() {
   JANUSLY_POSTGRES_HOST_PORT="$postgres_port" \
   JANUSLY_INTERNAL_HOST_PORT="$metrics_port" \
   JANUSLY_INTERNAL_HOST=0.0.0.0 \
-  JANUSLY_ENV=production \
+  JANUSLY_ENV="$janusly_env" \
   JANUSLY_BUILD_COMMIT="$(git -C "$root" rev-parse HEAD)" \
   JANUSLY_BUILD_TREE="$(git -C "$root" rev-parse 'HEAD^{tree}')" \
   JANUSLY_BUILD_ID="$(git -C "$root" rev-parse --short HEAD)" \
   JANUSLY_RESUME_TOKEN_SECRET=qualification-resume-token-secret-not-for-production \
   JANUSLY_CREDENTIAL_MASTER_KEY="$credential_master_key" \
   JANUSLY_WEB_BASE_URL="$origin" \
-  JANUSLY_BROWSER_CONNECT_ORIGINS="$supabase_public_url" \
+  JANUSLY_BROWSER_CONNECT_ORIGINS="$browser_connect_origins" \
   API_ALLOWED_ORIGINS="http://127.0.0.1:${app_port},http://localhost:${app_port}" \
-  ALLOW_DEV_AUTH_HEADERS=false \
-  SUPABASE_URL="$supabase_internal_url" \
-  SUPABASE_SERVICE_ROLE_KEY="${SUPABASE_SERVICE_ROLE_KEY:-}" \
-  VITE_SUPABASE_URL="$supabase_public_url" \
-  VITE_SUPABASE_ANON_KEY="${VITE_SUPABASE_ANON_KEY:-}" \
+  ALLOW_DEV_AUTH_HEADERS="$allow_dev_auth_headers" \
+  SUPABASE_URL="$runtime_supabase_url" \
+  SUPABASE_SERVICE_ROLE_KEY="$runtime_supabase_service_role_key" \
+  VITE_SUPABASE_URL="$build_supabase_url" \
+  VITE_SUPABASE_ANON_KEY="$build_supabase_anon_key" \
   ANTHROPIC_API_KEY='' \
+  OTEL_EXPORTER="$otel_exporter" \
     docker compose -f "$root/docker-compose.yml" -p "$project" "$@"
 }
 
@@ -113,7 +126,13 @@ write_summary() {
     --arg tree "$(git -C "$root" rev-parse 'HEAD^{tree}')" \
     --arg finishedAt "$finished_at" \
     --arg appOrigin "$origin" \
-    --arg supabaseVersion "$(HOME="$supabase_home" SUPABASE_TELEMETRY_DISABLED=1 DO_NOT_TRACK=1 "$supabase_bin" --version 2>/dev/null || printf unknown)" \
+    --arg supabaseVersion "$(
+      if ((uses_supabase)); then
+        HOME="$supabase_home" SUPABASE_TELEMETRY_DISABLED=1 DO_NOT_TRACK=1 "$supabase_bin" --version 2>/dev/null || printf unknown
+      else
+        printf not-used
+      fi
+    )" \
     '{status:$status,profile:$profile,git:{commit:$commit,tree:$tree},finishedAt:$finishedAt,appOrigin:$appOrigin,supabaseVersion:$supabaseVersion,providerCalls:0,providerCostUsd:0}' \
     >"$evidence_root/summary.json"
   checksum_tmp=$(mktemp "${TMPDIR:-/tmp}/janusly-qualification-sums.XXXXXX")
@@ -137,7 +156,9 @@ cleanup() {
   fi
   if [[ ${JANUSLY_QUALIFICATION_KEEP_STACK:-0} != 1 ]]; then
     compose down --volumes --remove-orphans >/dev/null 2>&1 || true
-    supabase stop --project-id "$auth_project" --no-backup >/dev/null 2>&1 || true
+    if ((uses_supabase)); then
+      supabase stop --project-id "$auth_project" --no-backup >/dev/null 2>&1 || true
+    fi
   fi
   if ((exit_status == 0)); then status=passed; fi
   write_summary || true
@@ -147,7 +168,9 @@ cleanup() {
 reset_stacks() {
   [[ ${CONFIRM:-} == reset ]] || die "destructive profiles require CONFIRM=reset"
   compose down --volumes --remove-orphans >/dev/null 2>&1 || true
-  supabase stop --project-id "$auth_project" --no-backup >/dev/null 2>&1 || true
+  if ((uses_supabase)); then
+    supabase stop --project-id "$auth_project" --no-backup >/dev/null 2>&1 || true
+  fi
 }
 
 start_supabase() {
@@ -277,8 +300,36 @@ run_profile() {
         JANUSLY_BACKUP_RESTORE_PHASE=restored \
         JANUSLY_BACKUP_RESTORE_API_URL="$origin"
       ;;
+    load)
+      local load_evidence="$evidence_root/load"
+      JANUSLY_LOAD_ORIGIN="$origin" \
+      JANUSLY_LOAD_METRICS_ORIGIN="http://127.0.0.1:${metrics_port}" \
+      JANUSLY_LOAD_COMPOSE_PROJECT="$project" \
+      JANUSLY_LOAD_COMPOSE_FILE="$root/docker-compose.yml" \
+      JANUSLY_LOAD_EVIDENCE_DIR="$load_evidence" \
+        "$root/scripts/load-soak-local.sh"
+      local expected_runs
+      expected_runs=$(jq -er '.expectedRuns | select(. > 0)' "$load_evidence/summary.json")
+      run_spec e2e/local-load-soak.spec.ts \
+        JANUSLY_LOCAL_LOAD_SOAK_E2E=1 \
+        JANUSLY_LOAD_EXPECTED_RUNS="$expected_runs" \
+        JANUSLY_LOAD_WORKFLOW_NAME="${JANUSLY_LOAD_WORKFLOW_NAME:-Load soak workflow}" \
+        JANUSLY_LOCAL_ORG_ID="${JANUSLY_LOAD_ORG_ID:-default}"
+      ;;
   esac
 }
+
+if [[ "$profile" == load ]]; then
+  uses_supabase=0
+  janusly_env=development
+  allow_dev_auth_headers=true
+  browser_connect_origins=
+  runtime_supabase_url=
+  runtime_supabase_service_role_key=
+  build_supabase_url=
+  build_supabase_anon_key=
+  otel_exporter=none
+fi
 
 validate_configuration
 if [[ "$profile" == selftest ]]; then
@@ -290,7 +341,9 @@ mkdir -p "$evidence_root"
 chmod 700 "$evidence_root"
 trap cleanup EXIT INT TERM
 reset_stacks
-start_supabase
+if ((uses_supabase)); then
+  start_supabase
+fi
 started=1
 start_app
 

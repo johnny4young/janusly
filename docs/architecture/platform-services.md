@@ -10,6 +10,41 @@ channels, with bounded reconnect cursors.
 The internal listener exposes Prometheus metrics and verified build identity on
 `127.0.0.1:9464` by default. Public health returns only safe bounded status.
 
+## Local load and soak qualification
+
+`make qualify-local PROFILE=load CONFIRM=reset` runs the deliberately long,
+isolated load qualification. It is not part of `PROFILE=all`: the explicit
+profile runs three sequential scenarios with 2-minute warmups and 20-minute
+measurements, then allows six minutes for pools and goroutines to settle. The
+stack binds only to loopback, uses a Compose project whose name starts with
+`janusly-qualification-`, runs without Supabase or provider credentials, and
+enables development auth headers only for this disposable profile.
+
+The executable load generator retains a fixed-size atomic latency histogram,
+caps response bodies, and refuses non-loopback targets without an additional
+opt-in. Qualification fails on request errors, undrained queues, p95/p99 latency
+budgets, a 512 MiB peak RSS ceiling, or post-settle growth beyond the recorded
+RSS, heap, goroutine, and PostgreSQL-connection baselines. Burst PostgreSQL
+connections become eligible for retirement after five idle minutes and are
+checked every 30 seconds, so the post-settle comparison measures steady state
+rather than pgx's 30-minute default. The profile also checks the
+drained runtime in Chromium at desktop and compact widths, in English and
+Spanish. Use `JANUSLY_LOAD_WARMUP_DURATION`,
+`JANUSLY_LOAD_MEASURE_DURATION`, and `JANUSLY_LOAD_SETTLE_SECONDS` together with
+`JANUSLY_LOAD_SMOKE=1` only for a local smoke; post-settle budgets remain visible
+but are required only by the default-duration qualification evidence. The load
+profile disables console trace export so exporter I/O does not distort the
+runtime under test.
+
+The measured p95/p99 ceilings are 1.5/5 seconds for start-to-terminal, 750/1500
+milliseconds for the 50-VU shared-tenant run list, and 2/5 seconds for the
+diamond workflow. The list load includes the real centralized membership,
+policy, role, and permission boundary on every request; the smoke baseline must
+remain below the ceiling rather than replacing it with an unauthenticated query
+benchmark. The gate reuses the membership literal already resolved for the
+request instead of performing duplicate membership reads for rank and
+permission checks.
+
 Rate limits and workflow queue state are PostgreSQL-backed so multiple Janusly
 instances share one durable view. A store error keeps the documented fail-open
 traffic posture while emitting degradation evidence.

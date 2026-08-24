@@ -1,80 +1,253 @@
-// Command loadgen is the runtime's self-contained load generator — three
-// scenarios against the /v1 surface, no external tooling required.
+// Command loadgen is the runtime's bounded local load generator. It drives
+// three scenarios against the /v1 surface without retaining an unbounded
+// latency slice in memory.
 //
-//	loadgen -base http://localhost:3001 -scenario start  -vus 10 -duration 30s
-//	loadgen -base http://localhost:3001 -scenario list   -vus 50 -duration 30s
-//	loadgen -base http://localhost:3001 -scenario diamond -vus 10 -duration 30s
+//	loadgen -base http://127.0.0.1:3001 -scenario start -vus 10 -duration 30s -allow-dev-auth
+//	loadgen -base http://127.0.0.1:3001 -scenario list -vus 50 -duration 30s -allow-dev-auth
+//	loadgen -base http://127.0.0.1:3001 -scenario diamond -vus 10 -duration 30s -allow-dev-auth
 //
-// Scenarios: start = POST /v1/start of a linear two-node workflow, polling
-// /v1/status to terminal (latency = start→terminal); list = hot GET
-// /v1/runs?limit=50; diamond = the F09 fan-out/fan-in, reporting completed
-// node transitions per second. Output: one JSON summary on stdout.
+// Dev-header mode is opt-in and non-loopback targets require a second explicit
+// opt-in. Output is one JSON summary on stdout.
 package main
 
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"math"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
-	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
-type sample struct {
-	latency time.Duration
-	err     bool
+const (
+	maxResponseBytes = 1 << 20
+	maxLatencyMs     = 90_000
+)
+
+type latencyHistogram struct {
+	buckets   []atomic.Uint64
+	count     atomic.Uint64
+	errors    atomic.Uint64
+	totalNano atomic.Uint64
+	minNano   atomic.Uint64
+	maxNano   atomic.Uint64
+}
+
+func newLatencyHistogram() *latencyHistogram {
+	h := &latencyHistogram{buckets: make([]atomic.Uint64, maxLatencyMs+2)}
+	h.minNano.Store(math.MaxUint64)
+	return h
+}
+
+func (h *latencyHistogram) record(latency time.Duration, failed bool) {
+	if latency < 0 {
+		latency = 0
+	}
+	nanos := uint64(latency)
+	bucket := int((latency + time.Millisecond - 1) / time.Millisecond)
+	if bucket > maxLatencyMs {
+		bucket = maxLatencyMs + 1
+	}
+	h.buckets[bucket].Add(1)
+	h.count.Add(1)
+	h.totalNano.Add(nanos)
+	if failed {
+		h.errors.Add(1)
+	}
+	for current := h.minNano.Load(); nanos < current && !h.minNano.CompareAndSwap(current, nanos); current = h.minNano.Load() {
+	}
+	for current := h.maxNano.Load(); nanos > current && !h.maxNano.CompareAndSwap(current, nanos); current = h.maxNano.Load() {
+	}
+}
+
+func (h *latencyHistogram) percentile(p float64) float64 {
+	count := h.count.Load()
+	if count == 0 {
+		return 0
+	}
+	rank := uint64(math.Ceil(p * float64(count)))
+	if rank == 0 {
+		rank = 1
+	}
+	var seen uint64
+	for index := range h.buckets {
+		seen += h.buckets[index].Load()
+		if seen >= rank {
+			return float64(index)
+		}
+	}
+	return float64(maxLatencyMs + 1)
+}
+
+func (h *latencyHistogram) summary(elapsed time.Duration) map[string]any {
+	count := h.count.Load()
+	minimum := h.minNano.Load()
+	if minimum == math.MaxUint64 {
+		minimum = 0
+	}
+	rate := 0.0
+	if elapsed > 0 {
+		rate = float64(count) / elapsed.Seconds()
+	}
+	average := 0.0
+	if count > 0 {
+		average = float64(h.totalNano.Load()) / float64(count) / float64(time.Millisecond)
+	}
+	return map[string]any{
+		"iterations": count,
+		"errors":     h.errors.Load(),
+		"errorRate":  ratio(h.errors.Load(), count),
+		"ratePerSec": rate,
+		"minMs":      float64(minimum) / float64(time.Millisecond),
+		"avgMs":      average,
+		"maxMs":      float64(h.maxNano.Load()) / float64(time.Millisecond),
+		"p50Ms":      h.percentile(0.50),
+		"p95Ms":      h.percentile(0.95),
+		"p99Ms":      h.percentile(0.99),
+	}
+}
+
+func ratio(numerator, denominator uint64) float64 {
+	if denominator == 0 {
+		return 0
+	}
+	return float64(numerator) / float64(denominator)
+}
+
+func validateBase(raw string, allowNonLoopback bool) (string, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return "", fmt.Errorf("base must be an absolute HTTP(S) origin")
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
+		return "", fmt.Errorf("base must not include credentials, a path, query, or fragment")
+	}
+	host := parsed.Hostname()
+	loopback := strings.EqualFold(host, "localhost")
+	if ip := net.ParseIP(host); ip != nil {
+		loopback = ip.IsLoopback()
+	}
+	if !loopback && !allowNonLoopback {
+		return "", fmt.Errorf("non-loopback base requires -allow-non-loopback")
+	}
+	return strings.TrimSuffix(parsed.String(), "/"), nil
+}
+
+type config struct {
+	base, scenario, org, user, workflowName string
+	vus                                     int
+	duration                                time.Duration
+	allowDevAuth, allowNonLoopback          bool
+}
+
+func parseConfig() (config, error) {
+	cfg := config{}
+	flag.StringVar(&cfg.base, "base", "http://127.0.0.1:3001", "API origin")
+	flag.StringVar(&cfg.scenario, "scenario", "start", "start | list | diamond")
+	flag.IntVar(&cfg.vus, "vus", 10, "concurrent virtual users")
+	flag.DurationVar(&cfg.duration, "duration", 30*time.Second, "load duration")
+	flag.StringVar(&cfg.org, "org", fmt.Sprintf("load-%d", time.Now().UnixNano()), "organization id")
+	flag.StringVar(&cfg.user, "user", "loadgen", "dev-header user id")
+	flag.StringVar(&cfg.workflowName, "workflow-name", "Load soak workflow", "workflow name used by start scenarios")
+	flag.BoolVar(&cfg.allowDevAuth, "allow-dev-auth", false, "explicitly allow forgeable local dev headers")
+	flag.BoolVar(&cfg.allowNonLoopback, "allow-non-loopback", false, "explicitly allow a non-loopback API origin")
+	flag.Parse()
+
+	var problems []string
+	base, err := validateBase(cfg.base, cfg.allowNonLoopback)
+	if err != nil {
+		problems = append(problems, err.Error())
+	} else {
+		cfg.base = base
+	}
+	if cfg.scenario != "start" && cfg.scenario != "list" && cfg.scenario != "diamond" {
+		problems = append(problems, "scenario must be start, list, or diamond")
+	}
+	if cfg.vus < 1 || cfg.vus > 500 {
+		problems = append(problems, "vus must be in 1..500")
+	}
+	if cfg.duration < time.Second || cfg.duration > 24*time.Hour {
+		problems = append(problems, "duration must be in 1s..24h")
+	}
+	if strings.TrimSpace(cfg.org) == "" || strings.TrimSpace(cfg.user) == "" || strings.TrimSpace(cfg.workflowName) == "" {
+		problems = append(problems, "org, user, and workflow-name must be non-empty")
+	}
+	if !cfg.allowDevAuth {
+		problems = append(problems, "local dev-header load requires -allow-dev-auth")
+	}
+	if len(problems) > 0 {
+		return config{}, errors.New(strings.Join(problems, "; "))
+	}
+	return cfg, nil
 }
 
 func main() {
-	base := flag.String("base", "http://127.0.0.1:3001", "API origin")
-	scenario := flag.String("scenario", "start", "start | list | diamond")
-	vus := flag.Int("vus", 10, "concurrent virtual users")
-	duration := flag.Duration("duration", 30*time.Second, "load duration")
-	org := flag.String("org", fmt.Sprintf("load-%d", time.Now().UnixNano()), "org id")
-	flag.Parse()
-
-	transport := &http.Transport{
-		MaxIdleConns: 512, MaxIdleConnsPerHost: 512,
-		IdleConnTimeout: 90 * time.Second,
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, "loadgen:", err)
+		os.Exit(2)
 	}
+}
+
+func run() error {
+	cfg, err := parseConfig()
+	if err != nil {
+		return err
+	}
+	transport := &http.Transport{
+		MaxIdleConns:        512,
+		MaxIdleConnsPerHost: 512,
+		IdleConnTimeout:     90 * time.Second,
+	}
+	defer transport.CloseIdleConnections()
 	client := &http.Client{Timeout: 60 * time.Second, Transport: transport}
-	var mu sync.Mutex
-	var samples []sample
+	recorder := newLatencyHistogram()
 	var nodesCompleted atomic.Int64
 
-	record := func(latency time.Duration, err bool) {
-		mu.Lock()
-		samples = append(samples, sample{latency, err})
-		mu.Unlock()
-	}
-
 	call := func(method, path string, body any) (map[string]any, error) {
-		var reader *bytes.Reader
+		var raw []byte
 		if body != nil {
-			raw, _ := json.Marshal(body)
-			reader = bytes.NewReader(raw)
-		} else {
-			reader = bytes.NewReader(nil)
+			var marshalErr error
+			raw, marshalErr = json.Marshal(body)
+			if marshalErr != nil {
+				return nil, marshalErr
+			}
 		}
-		req, err := http.NewRequest(method, *base+path, reader)
+		req, err := http.NewRequest(method, cfg.base+path, bytes.NewReader(raw))
 		if err != nil {
 			return nil, err
 		}
+		req.Header.Set("accept", "application/json")
 		req.Header.Set("content-type", "application/json")
-		req.Header.Set("x-org-id", *org)
-		req.Header.Set("x-user-id", "loadgen")
+		req.Header.Set("x-org-id", cfg.org)
+		req.Header.Set("x-user-id", cfg.user)
 		res, err := client.Do(req)
 		if err != nil {
 			return nil, err
 		}
-		defer func() { _ = res.Body.Close() }()
+		responseBody, readErr := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes+1))
+		closeErr := res.Body.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		if closeErr != nil {
+			return nil, closeErr
+		}
+		if len(responseBody) > maxResponseBytes {
+			return nil, fmt.Errorf("response exceeds %d bytes", maxResponseBytes)
+		}
 		var parsed map[string]any
-		_ = json.NewDecoder(res.Body).Decode(&parsed)
+		if err := json.Unmarshal(responseBody, &parsed); err != nil {
+			return nil, fmt.Errorf("decode status %d: %w", res.StatusCode, err)
+		}
 		if res.StatusCode >= 400 {
 			return parsed, fmt.Errorf("status %d", res.StatusCode)
 		}
@@ -82,6 +255,7 @@ func main() {
 	}
 
 	linear := map[string]any{
+		"dslVersion": "1.0", "id": "load-linear", "name": cfg.workflowName,
 		"nodes": []any{
 			map[string]any{"id": "first", "type": "noop", "config": map[string]any{}},
 			map[string]any{"id": "shape", "type": "transform", "config": map[string]any{
@@ -91,6 +265,7 @@ func main() {
 		"edges": []any{map[string]any{"from": "first", "to": "shape"}},
 	}
 	diamond := map[string]any{
+		"dslVersion": "1.0", "id": "load-diamond", "name": cfg.workflowName,
 		"nodes": []any{
 			map[string]any{"id": "root", "type": "noop", "config": map[string]any{}},
 			map[string]any{"id": "left", "type": "transform", "config": map[string]any{"mapping": map[string]any{"side": "left"}}},
@@ -112,45 +287,47 @@ func main() {
 		pollDeadline := startAt.Add(90 * time.Second)
 		res, err := call("POST", "/v1/start", map[string]any{"workflow": workflow})
 		if err != nil {
-			record(time.Since(startAt), true)
+			recorder.record(time.Since(startAt), true)
 			return
 		}
 		data, _ := res["data"].(map[string]any)
 		runID, _ := data["runId"].(string)
 		if runID == "" {
-			record(time.Since(startAt), true)
+			recorder.record(time.Since(startAt), true)
 			return
 		}
 		for {
 			if time.Now().After(pollDeadline) {
-				record(time.Since(startAt), true)
+				recorder.record(time.Since(startAt), true)
 				return
 			}
-			res, err := call("GET", "/v1/status?runId="+runID, nil)
+			res, err := call("GET", "/v1/status?runId="+url.QueryEscape(runID), nil)
 			if err != nil {
-				record(time.Since(startAt), true)
+				recorder.record(time.Since(startAt), true)
 				return
 			}
-			run, _ := res["data"].(map[string]any)["run"].(map[string]any)
+			data, _ := res["data"].(map[string]any)
+			run, _ := data["run"].(map[string]any)
 			switch run["status"] {
 			case "succeeded":
-				record(time.Since(startAt), false)
+				recorder.record(time.Since(startAt), false)
 				nodesCompleted.Add(nodes)
 				return
 			case "failed", "cancelled":
-				record(time.Since(startAt), true)
+				recorder.record(time.Since(startAt), true)
 				return
 			}
 			time.Sleep(20 * time.Millisecond)
 		}
 	}
 
-	deadline := time.Now().Add(*duration)
+	begun := time.Now()
+	deadline := begun.Add(cfg.duration)
 	var wg sync.WaitGroup
-	for v := 0; v < *vus; v++ {
+	for range cfg.vus {
 		wg.Go(func() {
 			for time.Now().Before(deadline) {
-				switch *scenario {
+				switch cfg.scenario {
 				case "start":
 					runToTerminal(linear, 2)
 				case "diamond":
@@ -158,41 +335,27 @@ func main() {
 				case "list":
 					startAt := time.Now()
 					_, err := call("GET", "/v1/runs?limit=50", nil)
-					record(time.Since(startAt), err != nil)
-				default:
-					fmt.Fprintln(os.Stderr, "unknown scenario", *scenario)
-					os.Exit(2)
+					recorder.record(time.Since(startAt), err != nil)
 				}
 			}
 		})
 	}
-	begun := time.Now()
 	wg.Wait()
 	elapsed := time.Since(begun)
 
-	sort.Slice(samples, func(i, j int) bool { return samples[i].latency < samples[j].latency })
-	errs := 0
-	for _, s := range samples {
-		if s.err {
-			errs++
-		}
-	}
-	pct := func(p float64) float64 {
-		if len(samples) == 0 {
-			return math.NaN()
-		}
-		idx := max(int(math.Ceil(p*float64(len(samples))))-1, 0)
-		return samples[idx].latency.Seconds() * 1000
-	}
-	out := map[string]any{
-		"scenario": *scenario, "vus": *vus, "durationSec": elapsed.Seconds(),
-		"iterations": len(samples), "errors": errs,
-		"ratePerSec": float64(len(samples)) / elapsed.Seconds(),
-		"p50Ms":      pct(0.50), "p95Ms": pct(0.95), "p99Ms": pct(0.99),
-	}
-	if *scenario == "diamond" || *scenario == "start" {
+	out := recorder.summary(elapsed)
+	out["scenario"] = cfg.scenario
+	out["vus"] = cfg.vus
+	out["durationSec"] = elapsed.Seconds()
+	out["requestedDurationSec"] = cfg.duration.Seconds()
+	out["organization"] = cfg.org
+	if cfg.scenario == "diamond" || cfg.scenario == "start" {
 		out["nodesPerSec"] = float64(nodesCompleted.Load()) / elapsed.Seconds()
 	}
-	raw, _ := json.Marshal(out)
+	raw, err := json.Marshal(out)
+	if err != nil {
+		return err
+	}
 	fmt.Println(string(raw))
+	return nil
 }

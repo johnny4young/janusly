@@ -9,8 +9,14 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+const (
+	poolMaxConnIdleTime   = 5 * time.Minute
+	poolHealthCheckPeriod = 30 * time.Second
 )
 
 // NewLogger returns the process-wide structured logger: JSON on stdout, so
@@ -25,14 +31,10 @@ func NewLogger() *slog.Logger {
 // claim/completion transactions — separating them keeps pollers from
 // starving executors (the load tests' 50-VU cliff).
 func Connect(ctx context.Context, databaseURL string, maxConns int) (*pgxpool.Pool, error) {
-	cfg, err := pgxpool.ParseConfig(databaseURL)
+	cfg, err := poolConfig(databaseURL, maxConns)
 	if err != nil {
 		return nil, fmt.Errorf("parse database url: %w", err)
 	}
-	if maxConns < 1 {
-		maxConns = 10
-	}
-	cfg.MaxConns = int32(maxConns)
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("open pool: %w", err)
@@ -42,6 +44,24 @@ func Connect(ctx context.Context, databaseURL string, maxConns int) (*pgxpool.Po
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
 	return pool, nil
+}
+
+func poolConfig(databaseURL string, maxConns int) (*pgxpool.Config, error) {
+	cfg, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	if maxConns < 1 {
+		maxConns = 10
+	}
+	cfg.MaxConns = int32(maxConns)
+	// pgx defaults idle connections to 30 minutes. After a short traffic
+	// spike that keeps two whole process pools unnecessarily expanded. A
+	// five-minute idle window preserves reuse while a frequent health check
+	// returns burst capacity before the local six-minute soak settle ends.
+	cfg.MaxConnIdleTime = poolMaxConnIdleTime
+	cfg.HealthCheckPeriod = poolHealthCheckPeriod
+	return cfg, nil
 }
 
 // ErrNotMigrated reports a database behind the embedded Goose baseline.

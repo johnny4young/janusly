@@ -24,5 +24,8 @@ if "$root/scripts/qualification-local.sh" unknown >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "qualification harness selftest passed"
+help=$("$root/scripts/qualification-local.sh" --help)
+grep -F "load | all" <<<"$help" >/dev/null
+grep -F "load profile is intentionally excluded" <<<"$help" >/dev/null
 
+echo "qualification harness selftest passed"
