@@ -92,19 +92,44 @@ func (q *Queries) ClaimAlertDispatch(ctx context.Context, arg ClaimAlertDispatch
 	return result.RowsAffected(), nil
 }
 
-const claimWeeklyDigest = `-- name: ClaimWeeklyDigest :execrows
-INSERT INTO org_digest_state (org_id, last_sent_at)
-VALUES ($1, now())
-ON CONFLICT (org_id) DO UPDATE SET last_sent_at = now()
-WHERE org_digest_state.last_sent_at <= now() - interval '167 hours'
+const claimWeeklyDigest = `-- name: ClaimWeeklyDigest :one
+INSERT INTO org_digest_state
+  (org_id, batch_started_at, delivered_recipients, lease_token, lease_expires_at, attempts)
+VALUES ($1, now(), '{}'::text[], $2::text, now() + interval '5 minutes', 1)
+ON CONFLICT (org_id) DO UPDATE SET
+  batch_started_at = CASE WHEN org_digest_state.batch_started_at IS NULL THEN now()
+                          ELSE org_digest_state.batch_started_at END,
+  delivered_recipients = CASE WHEN org_digest_state.batch_started_at IS NULL THEN '{}'::text[]
+                              ELSE org_digest_state.delivered_recipients END,
+  lease_token = excluded.lease_token,
+  lease_expires_at = excluded.lease_expires_at,
+  attempts = CASE WHEN org_digest_state.batch_started_at IS NULL THEN 1
+                  ELSE org_digest_state.attempts + 1 END,
+  next_attempt_at = now(),
+  last_error = NULL,
+  updated_at = now()
+WHERE (
+    org_digest_state.batch_started_at IS NULL
+    AND (org_digest_state.last_sent_at IS NULL
+         OR org_digest_state.last_sent_at <= now() - interval '167 hours')
+  ) OR (
+    org_digest_state.batch_started_at IS NOT NULL
+    AND org_digest_state.next_attempt_at <= now()
+    AND (org_digest_state.lease_expires_at IS NULL OR org_digest_state.lease_expires_at <= now())
+  )
+RETURNING coalesce(lease_token, '')::text AS lease_token
 `
 
-func (q *Queries) ClaimWeeklyDigest(ctx context.Context, orgID string) (int64, error) {
-	result, err := q.db.Exec(ctx, claimWeeklyDigest, orgID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+type ClaimWeeklyDigestParams struct {
+	OrgID      string
+	LeaseToken string
+}
+
+func (q *Queries) ClaimWeeklyDigest(ctx context.Context, arg ClaimWeeklyDigestParams) (string, error) {
+	row := q.db.QueryRow(ctx, claimWeeklyDigest, arg.OrgID, arg.LeaseToken)
+	var lease_token string
+	err := row.Scan(&lease_token)
+	return lease_token, err
 }
 
 const cleanupExpiredRateWindows = `-- name: CleanupExpiredRateWindows :execrows
@@ -147,6 +172,27 @@ type CompleteOnboardingCasParams struct {
 
 func (q *Queries) CompleteOnboardingCas(ctx context.Context, arg CompleteOnboardingCasParams) (int64, error) {
 	result, err := q.db.Exec(ctx, completeOnboardingCas, arg.OrgID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const completeWeeklyDigest = `-- name: CompleteWeeklyDigest :execrows
+UPDATE org_digest_state
+SET last_sent_at = now(), batch_started_at = NULL,
+    delivered_recipients = '{}'::text[], lease_token = NULL, lease_expires_at = NULL,
+    attempts = 0, next_attempt_at = now(), last_error = NULL, updated_at = now()
+WHERE org_id = $1 AND lease_token = $2::text
+`
+
+type CompleteWeeklyDigestParams struct {
+	OrgID      string
+	LeaseToken string
+}
+
+func (q *Queries) CompleteWeeklyDigest(ctx context.Context, arg CompleteWeeklyDigestParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completeWeeklyDigest, arg.OrgID, arg.LeaseToken)
 	if err != nil {
 		return 0, err
 	}
@@ -309,6 +355,23 @@ func (q *Queries) GetAlertPolicy(ctx context.Context, arg GetAlertPolicyParams) 
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getClaimedWeeklyDigestRecipients = `-- name: GetClaimedWeeklyDigestRecipients :one
+SELECT delivered_recipients FROM org_digest_state
+WHERE org_id = $1 AND lease_token = $2::text
+`
+
+type GetClaimedWeeklyDigestRecipientsParams struct {
+	OrgID      string
+	LeaseToken string
+}
+
+func (q *Queries) GetClaimedWeeklyDigestRecipients(ctx context.Context, arg GetClaimedWeeklyDigestRecipientsParams) ([]string, error) {
+	row := q.db.QueryRow(ctx, getClaimedWeeklyDigestRecipients, arg.OrgID, arg.LeaseToken)
+	var delivered_recipients []string
+	err := row.Scan(&delivered_recipients)
+	return delivered_recipients, err
 }
 
 const getOnboardingProgress = `-- name: GetOnboardingProgress :one
@@ -694,7 +757,10 @@ func (q *Queries) ListEnabledAlertPolicies(ctx context.Context, arg ListEnabledA
 
 const listOrgAdminEmails = `-- name: ListOrgAdminEmails :many
 SELECT DISTINCT email::text AS email FROM org_members
-WHERE org_id = $1 AND role = 'admin'
+LEFT JOIN org_roles ON org_roles.org_id = org_members.org_id
+  AND org_roles.name = org_members.role
+WHERE org_members.org_id = $1
+  AND (org_members.role = 'admin' OR org_roles.inherits_from = 'admin')
   AND email IS NOT NULL AND email <> ''
 ORDER BY 1
 `
@@ -933,10 +999,7 @@ WHERE key = 'digest.weeklyEnabled' AND value_json = 'true'::jsonb
 ORDER BY org_id
 `
 
-// Weekly digest: tenant opt-in via org config; the state row is the
-// multi-replica claim. The upsert only wins when the last send is at
-// least a week old (minus one hour of scheduling slack under the hourly
-// maintenance sweep), so competing replicas cannot double-send.
+// Weekly digest: tenant opt-in plus a leased, resumable per-recipient batch.
 func (q *Queries) ListWeeklyDigestOptIns(ctx context.Context) ([]string, error) {
 	rows, err := q.db.Query(ctx, listWeeklyDigestOptIns)
 	if err != nil {
@@ -1272,6 +1335,46 @@ func (q *Queries) QueryTimeToFirstAction(ctx context.Context, arg QueryTimeToFir
 	return i, err
 }
 
+const recordWeeklyDigestRecipient = `-- name: RecordWeeklyDigestRecipient :execrows
+UPDATE org_digest_state
+SET delivered_recipients = array_append(delivered_recipients, $1::text), updated_at = now()
+WHERE org_id = $2 AND lease_token = $3::text
+  AND NOT ($1::text = ANY(delivered_recipients))
+`
+
+type RecordWeeklyDigestRecipientParams struct {
+	Recipient  string
+	OrgID      string
+	LeaseToken string
+}
+
+func (q *Queries) RecordWeeklyDigestRecipient(ctx context.Context, arg RecordWeeklyDigestRecipientParams) (int64, error) {
+	result, err := q.db.Exec(ctx, recordWeeklyDigestRecipient, arg.Recipient, arg.OrgID, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const renewWeeklyDigestLease = `-- name: RenewWeeklyDigestLease :execrows
+UPDATE org_digest_state
+SET lease_expires_at = now() + interval '5 minutes', updated_at = now()
+WHERE org_id = $1 AND lease_token = $2::text
+`
+
+type RenewWeeklyDigestLeaseParams struct {
+	OrgID      string
+	LeaseToken string
+}
+
+func (q *Queries) RenewWeeklyDigestLease(ctx context.Context, arg RenewWeeklyDigestLeaseParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renewWeeklyDigestLease, arg.OrgID, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const resolveOnboardingSignals = `-- name: ResolveOnboardingSignals :one
 SELECT
   EXISTS(SELECT 1 FROM credentials c WHERE c.org_id = $1
@@ -1346,6 +1449,27 @@ type ResumeWorkflowCircuitBreakerParams struct {
 
 func (q *Queries) ResumeWorkflowCircuitBreaker(ctx context.Context, arg ResumeWorkflowCircuitBreakerParams) (int64, error) {
 	result, err := q.db.Exec(ctx, resumeWorkflowCircuitBreaker, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const retryWeeklyDigest = `-- name: RetryWeeklyDigest :execrows
+UPDATE org_digest_state
+SET lease_token = NULL, lease_expires_at = NULL,
+    next_attempt_at = now() + interval '1 hour', last_error = $1::text, updated_at = now()
+WHERE org_id = $2 AND lease_token = $3::text
+`
+
+type RetryWeeklyDigestParams struct {
+	LastError  string
+	OrgID      string
+	LeaseToken string
+}
+
+func (q *Queries) RetryWeeklyDigest(ctx context.Context, arg RetryWeeklyDigestParams) (int64, error) {
+	result, err := q.db.Exec(ctx, retryWeeklyDigest, arg.LastError, arg.OrgID, arg.LeaseToken)
 	if err != nil {
 		return 0, err
 	}

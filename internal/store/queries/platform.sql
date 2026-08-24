@@ -407,24 +407,73 @@ ORDER BY started_at;
 -- name: DeleteSilentWorkerInstances :execrows
 DELETE FROM worker_instances WHERE last_seen_at < now() - interval '24 hours';
 
--- Weekly digest: tenant opt-in via org config; the state row is the
--- multi-replica claim. The upsert only wins when the last send is at
--- least a week old (minus one hour of scheduling slack under the hourly
--- maintenance sweep), so competing replicas cannot double-send.
+-- Weekly digest: tenant opt-in plus a leased, resumable per-recipient batch.
 -- name: ListWeeklyDigestOptIns :many
 SELECT org_id FROM org_configs
 WHERE key = 'digest.weeklyEnabled' AND value_json = 'true'::jsonb
 ORDER BY org_id;
 
--- name: ClaimWeeklyDigest :execrows
-INSERT INTO org_digest_state (org_id, last_sent_at)
-VALUES ($1, now())
-ON CONFLICT (org_id) DO UPDATE SET last_sent_at = now()
-WHERE org_digest_state.last_sent_at <= now() - interval '167 hours';
+-- name: ClaimWeeklyDigest :one
+INSERT INTO org_digest_state
+  (org_id, batch_started_at, delivered_recipients, lease_token, lease_expires_at, attempts)
+VALUES (sqlc.arg(org_id), now(), '{}'::text[], sqlc.arg(lease_token)::text, now() + interval '5 minutes', 1)
+ON CONFLICT (org_id) DO UPDATE SET
+  batch_started_at = CASE WHEN org_digest_state.batch_started_at IS NULL THEN now()
+                          ELSE org_digest_state.batch_started_at END,
+  delivered_recipients = CASE WHEN org_digest_state.batch_started_at IS NULL THEN '{}'::text[]
+                              ELSE org_digest_state.delivered_recipients END,
+  lease_token = excluded.lease_token,
+  lease_expires_at = excluded.lease_expires_at,
+  attempts = CASE WHEN org_digest_state.batch_started_at IS NULL THEN 1
+                  ELSE org_digest_state.attempts + 1 END,
+  next_attempt_at = now(),
+  last_error = NULL,
+  updated_at = now()
+WHERE (
+    org_digest_state.batch_started_at IS NULL
+    AND (org_digest_state.last_sent_at IS NULL
+         OR org_digest_state.last_sent_at <= now() - interval '167 hours')
+  ) OR (
+    org_digest_state.batch_started_at IS NOT NULL
+    AND org_digest_state.next_attempt_at <= now()
+    AND (org_digest_state.lease_expires_at IS NULL OR org_digest_state.lease_expires_at <= now())
+  )
+RETURNING coalesce(lease_token, '')::text AS lease_token;
+
+-- name: GetClaimedWeeklyDigestRecipients :one
+SELECT delivered_recipients FROM org_digest_state
+WHERE org_id = sqlc.arg(org_id) AND lease_token = sqlc.arg(lease_token)::text;
+
+-- name: RecordWeeklyDigestRecipient :execrows
+UPDATE org_digest_state
+SET delivered_recipients = array_append(delivered_recipients, sqlc.arg(recipient)::text), updated_at = now()
+WHERE org_id = sqlc.arg(org_id) AND lease_token = sqlc.arg(lease_token)::text
+  AND NOT (sqlc.arg(recipient)::text = ANY(delivered_recipients));
+
+-- name: RenewWeeklyDigestLease :execrows
+UPDATE org_digest_state
+SET lease_expires_at = now() + interval '5 minutes', updated_at = now()
+WHERE org_id = sqlc.arg(org_id) AND lease_token = sqlc.arg(lease_token)::text;
+
+-- name: RetryWeeklyDigest :execrows
+UPDATE org_digest_state
+SET lease_token = NULL, lease_expires_at = NULL,
+    next_attempt_at = now() + interval '1 hour', last_error = sqlc.arg(last_error)::text, updated_at = now()
+WHERE org_id = sqlc.arg(org_id) AND lease_token = sqlc.arg(lease_token)::text;
+
+-- name: CompleteWeeklyDigest :execrows
+UPDATE org_digest_state
+SET last_sent_at = now(), batch_started_at = NULL,
+    delivered_recipients = '{}'::text[], lease_token = NULL, lease_expires_at = NULL,
+    attempts = 0, next_attempt_at = now(), last_error = NULL, updated_at = now()
+WHERE org_id = sqlc.arg(org_id) AND lease_token = sqlc.arg(lease_token)::text;
 
 -- name: ListOrgAdminEmails :many
 SELECT DISTINCT email::text AS email FROM org_members
-WHERE org_id = $1 AND role = 'admin'
+LEFT JOIN org_roles ON org_roles.org_id = org_members.org_id
+  AND org_roles.name = org_members.role
+WHERE org_members.org_id = $1
+  AND (org_members.role = 'admin' OR org_roles.inherits_from = 'admin')
   AND email IS NOT NULL AND email <> ''
 ORDER BY 1;
 

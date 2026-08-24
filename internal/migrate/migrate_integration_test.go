@@ -101,7 +101,7 @@ func TestFreshMigrationIsIdempotentAndComplete(t *testing.T) {
 		t.Fatalf("migration version = %d, want 1", current)
 	}
 
-	for _, relation := range []string{"rate_limit_windows", "run_start_idempotency", "run_summary_memory_jobs", "run_wakeups"} {
+	for _, relation := range []string{"org_digest_state", "rate_limit_windows", "run_start_idempotency", "run_summary_memory_jobs", "run_wakeups"} {
 		var found bool
 		if err := db.QueryRowContext(ctx, `SELECT to_regclass('public.' || $1) IS NOT NULL`, relation).Scan(&found); err != nil {
 			t.Fatalf("inspect relation %s: %v", relation, err)

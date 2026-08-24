@@ -392,8 +392,16 @@ type OrgConfig struct {
 }
 
 type OrgDigestState struct {
-	OrgID      string
-	LastSentAt time.Time
+	OrgID               string
+	LastSentAt          *time.Time
+	BatchStartedAt      *time.Time
+	DeliveredRecipients []string
+	LeaseToken          pgtype.Text
+	LeaseExpiresAt      *time.Time
+	Attempts            int32
+	NextAttemptAt       time.Time
+	LastError           pgtype.Text
+	UpdatedAt           time.Time
 }
 
 type OrgMember struct {

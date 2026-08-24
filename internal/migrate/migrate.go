@@ -111,6 +111,7 @@ func assertBaseline(ctx context.Context, db *sql.DB) error {
 		"public.run_summary_memory_jobs",
 		"public.run_wakeups",
 		"public.rate_limit_windows",
+		"public.org_digest_state",
 		"public.schedule_entries",
 	} {
 		var found sql.NullString
@@ -130,6 +131,7 @@ func assertBaseline(ctx context.Context, db *sql.DB) error {
 		{"run_summary_memory_jobs", []string{"org_id", "run_id", "attempts", "next_attempt_at", "lease_token", "lease_expires_at", "completed_at"}},
 		{"run_wakeups", []string{"run_node_id", "wake_at", "reason"}},
 		{"rate_limit_windows", []string{"name", "key", "window_start", "count", "expires_at"}},
+		{"org_digest_state", []string{"org_id", "last_sent_at", "batch_started_at", "delivered_recipients", "lease_token", "lease_expires_at", "next_attempt_at"}},
 		{"schedule_entries", []string{"next_fire_at"}},
 	}
 	for _, requirement := range requiredColumns {

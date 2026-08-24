@@ -597,7 +597,15 @@ CREATE TABLE public.org_configs (
 
 CREATE TABLE public.org_digest_state (
     org_id text NOT NULL,
-    last_sent_at timestamp with time zone NOT NULL
+    last_sent_at timestamp with time zone,
+    batch_started_at timestamp with time zone,
+    delivered_recipients text[] DEFAULT '{}'::text[] NOT NULL,
+    lease_token text,
+    lease_expires_at timestamp with time zone,
+    attempts integer DEFAULT 0 NOT NULL,
+    next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_error text,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 

@@ -21,3 +21,8 @@ Best-effort semantic indexing has its own durable queue,
 lease tokens protect finalization from stale workers, while a partial unique
 index on `memory_entries (org_id, run_id, kind)` is the final `run_summary`
 deduplication boundary.
+
+Weekly digest delivery uses `org_digest_state` as a resumable batch rather than
+as a pre-send timestamp. Its lease token is the multi-replica claim and
+`delivered_recipients` is the per-address receipt set, so provider failures do
+not either skip the week or resend addresses that already succeeded.

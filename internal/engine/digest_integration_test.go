@@ -54,9 +54,16 @@ func TestWeeklyDigestSendsOncePerWeekToAdmins(t *testing.T) {
 	}
 
 	seed("digest.weeklyEnabled", "true", "boolean")
-	// Two admins and one viewer; only admins receive.
+	// Built-in admins, custom roles inheriting admin, and one viewer; only
+	// admin-ranked memberships receive.
+	if _, err := pool.Exec(ctx, `INSERT INTO org_roles
+		(id, org_id, name, inherits_from, description, is_builtin)
+		VALUES ($1, $2, 'operations-admin', 'admin', 'test', false)`, org+"-digest-role", org); err != nil {
+		t.Fatalf("seed custom admin role: %v", err)
+	}
 	for i, row := range []struct{ role, email string }{
-		{"admin", "ada@example.com"}, {"admin", "grace@example.com"}, {"viewer", "eve@example.com"},
+		{"admin", "ada@example.com"}, {"admin", "grace@example.com"},
+		{"operations-admin", "linus@example.com"}, {"viewer", "eve@example.com"},
 	} {
 		if _, err := pool.Exec(ctx, `INSERT INTO org_members (id, org_id, user_id, email, role)
 			VALUES ($1, $2, $3, $4, $5)`,
@@ -86,10 +93,10 @@ func TestWeeklyDigestSendsOncePerWeekToAdmins(t *testing.T) {
 		to, _ = sent[0]["to"].(string)
 	}
 	mu.Unlock()
-	if firstBatch != 2 {
+	if firstBatch != 3 {
 		t.Fatalf("both admins and only admins receive: %d", firstBatch)
 	}
-	if to != "ada@example.com" && to != "grace@example.com" {
+	if to != "ada@example.com" && to != "grace@example.com" && to != "linus@example.com" {
 		t.Fatalf("recipient must be an admin: %q", to)
 	}
 	for _, needle := range []string{"Runs: 4", "3 succeeded", "1 failed", "75% success", "recovery: 1"} {
@@ -118,12 +125,101 @@ func TestWeeklyDigestSendsOncePerWeekToAdmins(t *testing.T) {
 		mu.Lock()
 		count := len(sent)
 		mu.Unlock()
-		if count == firstBatch+2 || time.Now().After(deadline) {
-			if count != firstBatch+2 {
+		if count == firstBatch+3 || time.Now().After(deadline) {
+			if count != firstBatch+3 {
 				t.Fatalf("aged claim must send again: %d", count)
 			}
 			break
 		}
 		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+// A partial provider outage records each successful recipient before releasing
+// the lease. The next sweep resumes only the failed address and completes the
+// week instead of either skipping it or duplicating the first email.
+func TestWeeklyDigestResumesPartialDelivery(t *testing.T) {
+	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "true")
+	ctx, pool, eng, org := newHarness(t)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	var mu sync.Mutex
+	requests := make([]string, 0, 3)
+	failGrace := true
+	capture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		to, _ := payload["to"].(string)
+		mu.Lock()
+		requests = append(requests, to)
+		shouldFail := to == "grace@example.com" && failGrace
+		if shouldFail {
+			failGrace = false
+		}
+		mu.Unlock()
+		if shouldFail {
+			http.Error(w, "temporary provider outage", http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "sim-ok"})
+	}))
+	t.Cleanup(capture.Close)
+	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR_URL", capture.URL)
+
+	for _, row := range []struct{ key, value, valueType string }{
+		{"email.provider", `"simulator"`, "string"},
+		{"digest.weeklyEnabled", "true", "boolean"},
+	} {
+		if _, err := pool.Exec(ctx, `INSERT INTO org_configs
+			(id, org_id, key, value_json, category, description, value_type)
+			VALUES ($1, $2, $3, $4, 'email', 'test', $5)`,
+			org+"-"+row.key, org, row.key, row.value, row.valueType); err != nil {
+			t.Fatalf("seed %s: %v", row.key, err)
+		}
+	}
+	for i, email := range []string{"ada@example.com", "grace@example.com"} {
+		if _, err := pool.Exec(ctx, `INSERT INTO org_members (id, org_id, user_id, email, role)
+			VALUES ($1, $2, $3, $4, 'admin')`,
+			fmt.Sprintf("%s-retry-m%d", org, i), org, fmt.Sprintf("%s-retry-u%d", org, i), email); err != nil {
+			t.Fatalf("seed admin: %v", err)
+		}
+	}
+
+	eng.processWeeklyDigests(ctx, logger)
+	var delivered []string
+	var completed bool
+	if err := pool.QueryRow(ctx, `SELECT delivered_recipients, last_sent_at IS NOT NULL
+		FROM org_digest_state WHERE org_id = $1`, org).Scan(&delivered, &completed); err != nil {
+		t.Fatalf("read partial state: %v", err)
+	}
+	if completed || len(delivered) != 1 || delivered[0] != "ada@example.com" {
+		t.Fatalf("partial success must remain resumable: completed=%v delivered=%v", completed, delivered)
+	}
+
+	// Backoff suppresses an immediate retry.
+	eng.processWeeklyDigests(ctx, logger)
+	mu.Lock()
+	requestCount := len(requests)
+	mu.Unlock()
+	if requestCount != 2 {
+		t.Fatalf("backoff must suppress immediate retry, requests=%v", requests)
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE org_digest_state
+		SET next_attempt_at = now() - interval '1 second' WHERE org_id = $1`, org); err != nil {
+		t.Fatalf("age retry: %v", err)
+	}
+	eng.processWeeklyDigests(ctx, logger)
+	mu.Lock()
+	gotRequests := append([]string(nil), requests...)
+	mu.Unlock()
+	if fmt.Sprint(gotRequests) != "[ada@example.com grace@example.com grace@example.com]" {
+		t.Fatalf("retry must send only the failed recipient: %v", gotRequests)
+	}
+	var batchOpen bool
+	if err := pool.QueryRow(ctx, `SELECT batch_started_at IS NOT NULL
+		FROM org_digest_state WHERE org_id = $1`, org).Scan(&batchOpen); err != nil || batchOpen {
+		t.Fatalf("successful retry must complete batch: open=%v err=%v", batchOpen, err)
 	}
 }
