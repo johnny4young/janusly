@@ -1,4 +1,8 @@
-import { openWorkspaceSection } from './_helpers/workspace-navigation'
+import {
+  addCanvasStep,
+  openWorkflowCreation,
+  openWorkspaceSection,
+} from './_helpers/workspace-navigation'
 import { mkdir } from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
 
@@ -7,9 +11,12 @@ const persistenceOnly = process.env.JANUSLY_LOCAL_IDENTITY_PERSISTENCE_ONLY === 
 const evidenceDir = process.env.JANUSLY_EVIDENCE_DIR
 const ownerEmail = process.env.JANUSLY_IDENTITY_OWNER_EMAIL ?? 'owner@identity.local'
 const memberEmail = process.env.JANUSLY_IDENTITY_MEMBER_EMAIL ?? 'member@identity.local'
+const invitedViewerEmail = process.env.JANUSLY_IDENTITY_VIEWER_EMAIL ?? 'viewer@identity.local'
 const password = process.env.JANUSLY_IDENTITY_PASSWORD ?? 'Local-identity-2026!'
 const organizationName = process.env.JANUSLY_IDENTITY_ORG_NAME ?? 'Identity Lab'
 const secondaryOrganizationName = `${organizationName} Secondary`
+const editorWorkflowName = 'Identity editor workflow'
+const adminWorkflowName = 'Identity delegated admin workflow'
 
 function guardBrowserErrors(page: Page) {
   const errors: string[] = []
@@ -65,8 +72,30 @@ async function openTeam(page: Page) {
   await expect(page.getByText('Invite member')).toBeVisible()
 }
 
+async function createAndRunWorkflow(page: Page, workflowName: string) {
+  await page.getByRole('button', { name: 'Workflows', exact: true }).click()
+  await openWorkflowCreation(page)
+  await page.getByRole('button', { name: /^Start blank\b/ }).click()
+  await page.getByRole('textbox', { name: 'Name' }).fill(workflowName)
+  await addCanvasStep(page, 'Do nothing')
+  await page.getByRole('button', { name: 'Validate', exact: true }).click()
+  await expect(page.getByText('Flow is ready to run')).toBeVisible()
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page.getByText(/Saved version \d+/)).toBeVisible()
+  await page.getByRole('button', { name: 'Run', exact: true }).click()
+  await expect(page.getByText(/Run started:/)).toBeVisible()
+  await openWorkspaceSection(page, 'Workflows', 'Build')
+  await expect(
+    page.locator('.workflow-node').filter({ hasText: 'Do nothing' }).filter({ hasText: 'Done' }),
+  ).toBeVisible({ timeout: 30_000 })
+}
+
+function memberRow(page: Page, email: string) {
+  return page.locator('[data-testid^="members-row-"]').filter({ hasText: email })
+}
+
 test('real local identity covers onboarding, organizations, roles, and truthful permission UX', async ({ page }) => {
-  test.setTimeout(120_000)
+  test.setTimeout(240_000)
   test.skip(!enabled || persistenceOnly, 'requires the persistent local Supabase identity profile')
   const browserErrors = guardBrowserErrors(page)
   await page.addInitScript(() => window.localStorage.setItem('janusly:locale', 'en'))
@@ -129,14 +158,50 @@ test('real local identity covers onboarding, organizations, roles, and truthful 
   await signIn(page, memberEmail)
   await page.getByRole('button', { name: 'Workflows', exact: true }).click()
   await expect(page.getByRole('button', { name: 'New workflow', exact: true }).first()).toBeEnabled()
-  await page.getByRole('button', { name: 'New workflow', exact: true }).first().click()
-  await page.getByRole('button', { name: /^Start blank\b/ }).click()
-  await expect(page.getByRole('button', { name: 'New', exact: true })).toBeEnabled()
-  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
-  await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeEnabled()
+  await createAndRunWorkflow(page, editorWorkflowName)
   await openTeam(page)
   await expect(page.getByRole('button', { name: 'Invite', exact: true })).toBeDisabled()
   await capture(page, 'identity-editor-permissions')
+  await signOut(page)
+
+  await signIn(page, ownerEmail)
+  await openTeam(page)
+  const ownerRow = memberRow(page, ownerEmail)
+  await expect(ownerRow.getByText('Owner', { exact: true })).toBeVisible()
+  await expect(page.getByLabel(`Role for ${ownerEmail}`)).toBeDisabled()
+  await expect(page.getByLabel(`Remove ${ownerEmail}`)).toHaveCount(0)
+  await page.getByLabel(`Role for ${memberEmail}`).selectOption('admin')
+  await expect(page.getByText('Role updated')).toBeVisible()
+  await signOut(page)
+
+  await signIn(page, memberEmail)
+  await openTeam(page)
+  await page.getByLabel('Email').fill(invitedViewerEmail)
+  await page.getByRole('button', { name: 'Invite', exact: true }).click()
+  await expect(page.getByText(`Invited ${invitedViewerEmail}`)).toBeVisible()
+  await expect(page.getByLabel(`Role for ${ownerEmail}`)).toBeDisabled()
+  await expect(page.getByLabel(`Remove ${ownerEmail}`)).toHaveCount(0)
+  await createAndRunWorkflow(page, adminWorkflowName)
+  await capture(page, 'identity-admin-workflow')
+  await signOut(page)
+
+  await signIn(page, ownerEmail)
+  await openTeam(page)
+  await page.getByLabel(`Transfer ownership to ${memberEmail}`).click()
+  await expect(page.getByText(`Make ${memberEmail} the organization owner?`)).toBeVisible()
+  await page.getByRole('button', { name: 'Transfer ownership', exact: true }).click()
+  await expect(page.getByText('Organization ownership transferred')).toBeVisible()
+  await expect(memberRow(page, memberEmail).getByText('Owner', { exact: true })).toBeVisible()
+  await expect(page.getByLabel(`Role for ${memberEmail}`)).toBeDisabled()
+  await expect(page.getByLabel(`Remove ${memberEmail}`)).toHaveCount(0)
+  await expect(page.getByLabel(`Transfer ownership to ${ownerEmail}`)).toHaveCount(0)
+  await capture(page, 'identity-owner-transferred')
+  await signOut(page)
+
+  await signIn(page, memberEmail)
+  await openTeam(page)
+  await expect(memberRow(page, memberEmail).getByText('Owner', { exact: true })).toBeVisible()
+  await capture(page, 'identity-delegated-owner')
 
   expect(browserErrors).toEqual([])
 })
@@ -150,8 +215,19 @@ test('local identity and organization membership survive a complete stack restar
   await signIn(page, memberEmail)
   await expect(page.getByRole('button', { name: 'Open user menu' })).toBeVisible()
   await expect(page.locator('.bottom-status-bar')).toContainText(organizationName)
+  await openTeam(page)
+  await expect(memberRow(page, memberEmail).getByText('Owner', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Workflows', exact: true }).click()
   await expect(page.getByRole('button', { name: 'New workflow', exact: true }).first()).toBeEnabled()
+  await expect(page.locator('[data-testid^="workflows-row-"]').filter({ hasText: editorWorkflowName })).toBeVisible()
+  await expect(page.locator('[data-testid^="workflows-row-"]').filter({ hasText: adminWorkflowName })).toBeVisible()
+  await openWorkspaceSection(page, 'Activity', 'Runs')
+  const history = page.getByTestId('runs-history-virtual-list')
+  for (const workflowName of [editorWorkflowName, adminWorkflowName]) {
+    const run = history.getByRole('article').filter({ hasText: workflowName }).first()
+    await expect(run).toBeVisible({ timeout: 30_000 })
+    await expect(run.locator('[data-status="succeeded"]')).toBeVisible()
+  }
   await capture(page, 'identity-persisted-after-restart')
 
   expect(browserErrors).toEqual([])
