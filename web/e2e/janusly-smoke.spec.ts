@@ -79,6 +79,9 @@ test('the real web boots against Go and renders live data', async ({ page, reque
   const orgId = `go-smoke-${Date.now()}`
   const pageErrors: string[] = []
   page.on('pageerror', (error) => pageErrors.push(String(error)))
+  page.on('console', (message) => {
+    if (message.type() === 'error') pageErrors.push(message.text())
+  })
 
   await seed(request, orgId)
   await preparePage(page, orgId)

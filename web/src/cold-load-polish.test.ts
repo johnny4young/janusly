@@ -3,10 +3,10 @@
  *
  * Two contracts pinned here:
  *
- * (1) The `<link rel="preload" as="style">` in `index.html` MUST point at
- *     the exact same `href` as the `<link rel="stylesheet">` below it.
- *     If they diverge, the browser issues two fetches instead of one and
- *     the preload becomes wasted bandwidth instead of a head-start.
+ * (1) `index.html` MUST NOT load external styles or fonts. Production CSP
+ *     intentionally allows styles and fonts from self only; keeping a remote
+ *     font link here produces a blocked request and a console error on every
+ *     cold load. The CSS font stacks provide the offline/system fallback.
  *
  * (2) The ordered CSS modules imported by `index.css` MUST contain a universal
  *     `@media (prefers-reduced-motion: reduce)` block with `!important` on
@@ -61,23 +61,15 @@ function listSourceFiles(dir: string): string[] {
     });
 }
 
-describe("font preload link", () => {
-  it("preload href matches stylesheet href byte-for-byte", () => {
-    const preloadMatch = indexHtml.match(
-      /<link\s+rel="preload"\s+as="style"\s+href="([^"]+)"\s*\/>/,
-    );
-    const stylesheetMatch = indexHtml.match(
-      /<link\s+href="([^"]+)"\s+rel="stylesheet"\s*\/>/,
-    );
-    expect(preloadMatch?.[1], "preload link not found in index.html").toBeDefined();
-    expect(stylesheetMatch?.[1], "stylesheet link not found in index.html").toBeDefined();
-    expect(preloadMatch![1]).toBe(stylesheetMatch![1]);
+describe("production font boundary", () => {
+  it("keeps the document free of external font and stylesheet dependencies", () => {
+    expect(indexHtml).not.toMatch(/fonts\.(?:googleapis|gstatic)\.com/);
+    expect(indexHtml).not.toMatch(/<link\b[^>]*\b(?:href|src)="https?:\/\//);
   });
 
-  it("preload uses the google fonts host (sanity check)", () => {
-    expect(indexHtml).toMatch(
-      /<link\s+rel="preload"\s+as="style"\s+href="https:\/\/fonts\.googleapis\.com\/css2\?/,
-    );
+  it("retains local system font fallbacks", () => {
+    expect(joinedCssBundleSource).toContain('--font-sans: "Inter Tight", "Avenir Next", "Inter", "Segoe UI", system-ui');
+    expect(joinedCssBundleSource).toContain('--font-mono: "JetBrains Mono", "SF Mono", "Menlo", monospace');
   });
 });
 
