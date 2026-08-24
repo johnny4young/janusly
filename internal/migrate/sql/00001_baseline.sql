@@ -441,6 +441,24 @@ CREATE TABLE public.run_wakeups (
 
 
 --
+-- Name: run_summary_memory_jobs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.run_summary_memory_jobs (
+    org_id text NOT NULL,
+    run_id text NOT NULL,
+    attempts integer DEFAULT 0 NOT NULL,
+    next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
+    lease_token text,
+    lease_expires_at timestamp with time zone,
+    completed_at timestamp with time zone,
+    last_error text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
 -- Name: installed_plugins; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1650,6 +1668,14 @@ ALTER TABLE ONLY public.run_wakeups
 
 
 --
+-- Name: run_summary_memory_jobs run_summary_memory_jobs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.run_summary_memory_jobs
+    ADD CONSTRAINT run_summary_memory_jobs_pkey PRIMARY KEY (org_id, run_id);
+
+
+--
 -- Name: installed_plugins installed_plugins_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2407,6 +2433,13 @@ CREATE INDEX run_wakeups_due_idx ON public.run_wakeups USING btree (wake_at);
 
 
 --
+-- Name: run_summary_memory_jobs_due_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX run_summary_memory_jobs_due_idx ON public.run_summary_memory_jobs USING btree (next_attempt_at, lease_expires_at) WHERE (completed_at IS NULL);
+
+
+--
 -- Name: installed_plugins_org_plugin_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2453,6 +2486,13 @@ CREATE INDEX memory_entries_org_kind_created_idx ON public.memory_entries USING 
 --
 
 CREATE INDEX memory_entries_org_retain_until_idx ON public.memory_entries USING btree (org_id, retain_until);
+
+
+--
+-- Name: memory_entries_run_summary_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX memory_entries_run_summary_key ON public.memory_entries USING btree (org_id, run_id, kind) WHERE ((kind = 'run_summary'::text) AND (run_id IS NOT NULL));
 
 
 --

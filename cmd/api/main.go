@@ -273,6 +273,9 @@ func run() error {
 	runner.Go("memory-consent-purge", func(ctx context.Context) {
 		eng.RunMemoryConsentPurgeSweep(ctx, time.Hour, logger)
 	})
+	runner.Go("run-summary-memory", func(ctx context.Context) {
+		eng.RunRunSummaryMemorySweep(ctx, time.Second, logger)
+	})
 	// Reaper cadence/threshold are env-tunable for HA deployments.
 	runner.Go("stalled-node-reaper", func(ctx context.Context) {
 		eng.StartReaper(ctx,

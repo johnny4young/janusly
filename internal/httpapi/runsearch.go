@@ -8,9 +8,11 @@ package httpapi
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/memory"
+	"github.com/johnny4young/janusly/internal/ratelimit"
 )
 
 const runSearchMaxQueryChars = 500
@@ -29,11 +31,17 @@ func (s *V1Server) runSemanticSearchCore(r *http.Request, rc v1Request) opResult
 	if query == "" {
 		return opError(http.StatusBadRequest, "invalid_request", "q is required", nil)
 	}
-	if len(query) > runSearchMaxQueryChars {
-		query = query[:runSearchMaxQueryChars]
+	queryRunes := []rune(query)
+	if len(queryRunes) > runSearchMaxQueryChars {
+		query = string(queryRunes[:runSearchMaxQueryChars])
 	}
 	if !memory.Enabled(r.Context(), s.pool, rc.orgID) {
 		return opOK(map[string]any{"enabled": false, "entries": []memory.RecallEntry{}})
+	}
+	if limitErr := s.limiter.Enforce(r.Context(), rc.orgID, ratelimit.Options{
+		Name: "memory.run_semantic_search", Max: 30, Window: time.Minute,
+	}); limitErr != nil {
+		return opError(http.StatusTooManyRequests, "rate_limited", limitErr.Error(), nil)
 	}
 	entries := memory.Recall(r.Context(), s.pool, memory.RecallInput{
 		OrgID: rc.orgID, Kind: "run_summary", Query: query,

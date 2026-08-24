@@ -721,6 +721,19 @@ type RunStartIdempotency struct {
 	CreatedAt      time.Time
 }
 
+type RunSummaryMemoryJob struct {
+	OrgID          string
+	RunID          string
+	Attempts       int32
+	NextAttemptAt  time.Time
+	LeaseToken     pgtype.Text
+	LeaseExpiresAt *time.Time
+	CompletedAt    *time.Time
+	LastError      pgtype.Text
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 type RunWakeup struct {
 	RunNodeID string
 	WakeAt    time.Time

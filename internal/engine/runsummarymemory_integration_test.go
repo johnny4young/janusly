@@ -3,11 +3,14 @@
 package engine
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -20,9 +23,23 @@ func TestRunSummaryMemoryCommit(t *testing.T) {
 	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "true")
 	t.Setenv("JANUSLY_MEMORY_ENABLED", "true")
 	ctx, pool, eng, org := newHarness(t)
+	sweepCtx, stopSweep := context.WithCancel(context.Background())
+	sweepDone := make(chan struct{})
+	go func() {
+		defer close(sweepDone)
+		eng.RunRunSummaryMemorySweep(sweepCtx, 10*time.Millisecond, quietLogger())
+	}()
+	t.Cleanup(func() { stopSweep(); <-sweepDone })
 
 	// Deterministic embedding fixture (fake Ollama).
+	var embeddingCalls atomic.Int32
+	var embeddingFailures atomic.Int32
 	embedder := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		embeddingCalls.Add(1)
+		if embeddingFailures.Add(-1) >= 0 {
+			http.Error(w, "temporary embedding outage", http.StatusServiceUnavailable)
+			return
+		}
 		vector := make([]float64, 1024)
 		vector[0] = 1
 		_ = json.NewEncoder(w).Encode(map[string]any{"embedding": vector})
@@ -76,7 +93,15 @@ func TestRunSummaryMemoryCommit(t *testing.T) {
 		 '{}', 'open')`, failedRun+"-dl", org, failedRun); err != nil {
 		t.Fatalf("seed dead letter: %v", err)
 	}
-	eng.maybeCommitRunSummaryMemory(ctx, failedRun)
+	var enqueueWG sync.WaitGroup
+	for range 12 {
+		enqueueWG.Add(1)
+		go func() {
+			defer enqueueWG.Done()
+			eng.maybeCommitRunSummaryMemory(ctx, failedRun)
+		}()
+	}
+	enqueueWG.Wait()
 	waitForSummary(failedRun)
 	var content string
 	if err := pool.QueryRow(ctx, `SELECT content FROM memory_entries
@@ -95,6 +120,15 @@ func TestRunSummaryMemoryCommit(t *testing.T) {
 	if n := countSummaries(failedRun); n != 1 {
 		t.Fatalf("summary must stay deduplicated, got %d", n)
 	}
+	if calls := embeddingCalls.Load(); calls != 1 {
+		t.Fatalf("durable dedupe must embed once, got %d calls", calls)
+	}
+	var jobs, completed int
+	if err := pool.QueryRow(ctx, `SELECT count(*), count(completed_at)
+		FROM run_summary_memory_jobs WHERE org_id = $1 AND run_id = $2`, org, failedRun).
+		Scan(&jobs, &completed); err != nil || jobs != 1 || completed != 1 {
+		t.Fatalf("one completed durable job: jobs=%d completed=%d err=%v", jobs, completed, err)
+	}
 
 	// 3. Non-terminal and validation runs leave nothing.
 	runningRun := "run-summary-running-" + org
@@ -106,5 +140,29 @@ func TestRunSummaryMemoryCommit(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	if countSummaries(runningRun) != 0 || countSummaries(validationRun) != 0 {
 		t.Fatal("running and validation runs must leave no memory trace")
+	}
+	var ineligibleJobs int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM run_summary_memory_jobs
+		WHERE org_id = $1 AND run_id = ANY($2::text[])`, org, []string{runningRun, validationRun}).Scan(&ineligibleJobs)
+	if ineligibleJobs != 0 {
+		t.Fatalf("ineligible runs must not enqueue summary jobs: %d", ineligibleJobs)
+	}
+
+	// 4. A transient embedding outage does not lose the summary: the durable
+	// job releases its lease, backs off, and succeeds on the next attempt.
+	retryRun := "run-summary-retry-" + org
+	seedRun(retryRun, "succeeded", "")
+	embeddingFailures.Store(1)
+	beforeRetryCalls := embeddingCalls.Load()
+	eng.maybeCommitRunSummaryMemory(ctx, retryRun)
+	waitForSummary(retryRun)
+	var retryAttempts int
+	if err := pool.QueryRow(ctx, `SELECT attempts FROM run_summary_memory_jobs
+		WHERE org_id = $1 AND run_id = $2`, org, retryRun).Scan(&retryAttempts); err != nil {
+		t.Fatalf("read retry attempts: %v", err)
+	}
+	if retryAttempts != 2 || embeddingCalls.Load()-beforeRetryCalls != 2 {
+		t.Fatalf("transient failure must retry once: attempts=%d embeddingCalls=%d",
+			retryAttempts, embeddingCalls.Load()-beforeRetryCalls)
 	}
 }

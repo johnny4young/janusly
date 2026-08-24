@@ -133,14 +133,22 @@ func Commit(ctx context.Context, pool *pgxpool.Pool, input CommitInput) CommitRe
 	retention := defaultRetentionDays[input.Kind]
 	metadataJSON, _ := json.Marshal(input.Metadata)
 	id := uuid.NewString()
-	_, err = pool.Exec(ctx, `INSERT INTO memory_entries
+	tag, err := pool.Exec(ctx, `INSERT INTO memory_entries
 		(id, org_id, workflow_id, run_id, kind, content, embedding, embedding_provider,
 		 embedding_model, embedding_dimension, metadata, retain_until)
-		VALUES ($1, $2, NULLIF($3,''), NULLIF($4,''), $5, $6, $7::vector, $8, $9, $10, $11, now() + ($12 || ' days')::interval)`,
+		VALUES ($1, $2, NULLIF($3,''), NULLIF($4,''), $5, $6, $7::vector, $8, $9, $10, $11, now() + ($12 || ' days')::interval)
+		ON CONFLICT (org_id, run_id, kind)
+		WHERE kind = 'run_summary' AND run_id IS NOT NULL
+		DO NOTHING`,
 		id, input.OrgID, input.WorkflowID, input.RunID, input.Kind, input.Content,
 		vectorLiteral(embedding), provider, model, embeddingDimension, metadataJSON, fmt.Sprint(retention))
 	if err != nil {
 		return fail("persist_failed")
+	}
+	if tag.RowsAffected() == 0 {
+		// A durable producer may redeliver after an expired lease. The unique
+		// run-summary key turns that replay into success without another row.
+		id = ""
 	}
 	fireMemoryUsage(ctx, pool, "memory.commit", input.OrgID, input.RunID, input.WorkflowID,
 		input.Kind, provider, model, true, "", time.Since(startedAt))

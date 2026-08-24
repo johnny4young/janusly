@@ -14,5 +14,12 @@ before calling the client.
 - Retrieved memory and run evidence are scrubbed and framed as untrusted data.
 - Model judgments never grant permissions or direct write authority.
 
+Terminal run summaries do not spawn request- or worker-owned goroutines.
+Completion enqueues one row in `run_summary_memory_jobs`; a supervised sweep
+claims jobs with expiring leases, applies bounded retry, and drains an in-flight
+claim on shutdown. `memory_entries` has a final unique run-summary key so lease
+redelivery is idempotent. Semantic-search reads are tenant-rate-limited before
+embedding work.
+
 HTTP surfaces live in `internal/httpapi/aigenerate.go`, `aipatch.go`, and
 `aisurfaces.go`. Workflow AI execution lives in `internal/executors`.

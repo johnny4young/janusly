@@ -15,3 +15,9 @@ Queries live in `internal/store/queries`, generated types and methods live in
 The durable workflow queue uses PostgreSQL rows plus `janusly_wake` and
 `janusly_run_events` notifications. Notifications reduce latency but do not
 replace polling or durable state.
+
+Best-effort semantic indexing has its own durable queue,
+`run_summary_memory_jobs`. `(org_id, run_id)` is the producer idempotency key;
+lease tokens protect finalization from stale workers, while a partial unique
+index on `memory_entries (org_id, run_id, kind)` is the final `run_summary`
+deduplication boundary.

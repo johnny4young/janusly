@@ -108,6 +108,7 @@ func assertBaseline(ctx context.Context, db *sql.DB) error {
 		"public.runs",
 		"public.run_nodes",
 		"public.run_start_idempotency",
+		"public.run_summary_memory_jobs",
 		"public.run_wakeups",
 		"public.rate_limit_windows",
 		"public.schedule_entries",
@@ -126,6 +127,7 @@ func assertBaseline(ctx context.Context, db *sql.DB) error {
 		columns  []string
 	}{
 		{"run_start_idempotency", []string{"org_id", "idempotency_key", "run_id", "created_at"}},
+		{"run_summary_memory_jobs", []string{"org_id", "run_id", "attempts", "next_attempt_at", "lease_token", "lease_expires_at", "completed_at"}},
 		{"run_wakeups", []string{"run_node_id", "wake_at", "reason"}},
 		{"rate_limit_windows", []string{"name", "key", "window_start", "count", "expires_at"}},
 		{"schedule_entries", []string{"next_fire_at"}},
