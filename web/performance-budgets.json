@@ -87,7 +87,7 @@
     "index.css": 40.68,
     "index.js": 0.82,
     "McpConnectionsPanel.js": 3.07,
-    "MembersPanel.js": 2.15,
+    "MembersPanel.js": 2.4,
     "MemoryGovernancePanel.js": 0.83,
     "MultiAgentTimeline.js": 1.78,
     "OperationsPage.js": 5.37,
@@ -131,6 +131,7 @@
     "WorkflowRecoveryQualification.js": 1.81,
     "WorkflowRolloutPanel.js": 2.69,
     "WorkflowRolloutStatus.js": 0.66,
-    "WorkflowSloPanel.js": 1.22
+    "WorkflowSloPanel.js": 1.22,
+    "WorkflowStatusPageCard.js": 1.19
   }
 }
