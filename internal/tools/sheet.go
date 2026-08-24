@@ -4,10 +4,9 @@
 // keys), later appends align to the SHEET'S existing header so columns
 // stay stable no matter what shape later rows arrive in.
 //
-// Honest limits, stated up front: appends are read-modify-write with no
-// object-store locking, so two simultaneous appends to one sheet can lose
-// rows (last writer wins) — serialize writers per sheet when that
-// matters. Sheets are bounded at 8 MiB.
+// Appends hold a tenant/sheet advisory lock across object read+write, so every
+// Janusly replica sharing PostgreSQL observes one serialized append stream.
+// Sheets are bounded at 8 MiB.
 package tools
 
 import (
@@ -15,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/johnny4young/janusly/internal/objectstore"
 )
@@ -22,6 +22,8 @@ import (
 const (
 	sheetMaxBytes       = 8 << 20
 	sheetMaxRowsPerCall = 1000
+	sheetMaxColumns     = 200
+	sheetMaxHeaderRunes = 120
 )
 
 // sheetObjectKey namespaces the sheet under its tenant; the name is
@@ -40,6 +42,119 @@ func sheetObjectKey(orgID, name string) string {
 		name += ".csv"
 	}
 	return "orgs/" + orgID + "/sheets/" + name
+}
+
+func normalizeSheetHeader(raw any, present bool) ([]string, string) {
+	if !present {
+		return nil, ""
+	}
+	cells, ok := raw.([]any)
+	if !ok || len(cells) == 0 || len(cells) > sheetMaxColumns {
+		return nil, "sheet.append header must contain 1 to 200 strings"
+	}
+	header := make([]string, 0, len(cells))
+	for _, cell := range cells {
+		text, ok := cell.(string)
+		if !ok {
+			return nil, "sheet.append header must contain only strings"
+		}
+		header = append(header, strings.TrimSpace(text))
+	}
+	if errMessage := validateSheetHeader(header); errMessage != "" {
+		return nil, errMessage
+	}
+	return header, ""
+}
+
+func validateSheetHeader(header []string) string {
+	if len(header) == 0 || len(header) > sheetMaxColumns {
+		return "sheet.append header must contain 1 to 200 columns"
+	}
+	seen := make(map[string]bool, len(header))
+	for _, name := range header {
+		if name == "" || utf8.RuneCountInString(name) > sheetMaxHeaderRunes || strings.ContainsAny(name, "\r\n") {
+			return "sheet.append header names must be non-empty, single-line, and at most 120 characters"
+		}
+		if seen[name] {
+			return "sheet.append header names must be unique"
+		}
+		seen[name] = true
+	}
+	return ""
+}
+
+func sheetSafeCell(value any) any {
+	text, ok := value.(string)
+	if !ok {
+		return value
+	}
+	formulaCandidate := strings.TrimLeft(text, " \t\r")
+	if formulaCandidate == "" {
+		return text
+	}
+	switch formulaCandidate[0] {
+	case '=', '+', '-', '@':
+		// Leading apostrophe is the spreadsheet convention for literal text.
+		// Keep the original whitespace/content after it for round-trip clarity.
+		return "'" + text
+	default:
+		return text
+	}
+}
+
+// normalizeSheetRows makes every row compatible with the effective sheet
+// shape. With a header, object rows align by key and array rows align by
+// index; without a header, every row must be an equally-wide array.
+func normalizeSheetRows(rows []any, header []string) ([]any, string) {
+	normalized := make([]any, 0, len(rows))
+	if header != nil {
+		for _, raw := range rows {
+			switch row := raw.(type) {
+			case map[string]any:
+				copyRow := make(map[string]any, len(header))
+				for _, name := range header {
+					copyRow[name] = sheetSafeCell(row[name])
+				}
+				normalized = append(normalized, copyRow)
+			case []any:
+				if len(row) > len(header) {
+					return nil, "sheet.append row has more cells than the sheet header"
+				}
+				copyRow := make(map[string]any, len(header))
+				for index, name := range header {
+					if index < len(row) {
+						copyRow[name] = sheetSafeCell(row[index])
+					}
+				}
+				normalized = append(normalized, copyRow)
+			default:
+				return nil, "sheet.append rows must contain only objects or arrays"
+			}
+		}
+		return normalized, ""
+	}
+
+	width := -1
+	for _, raw := range rows {
+		row, ok := raw.([]any)
+		if !ok {
+			return nil, "sheet.append object rows require a header"
+		}
+		if len(row) == 0 || len(row) > sheetMaxColumns {
+			return nil, "sheet.append rows must contain 1 to 200 cells"
+		}
+		if width == -1 {
+			width = len(row)
+		} else if len(row) != width {
+			return nil, "sheet.append array rows must have a consistent width"
+		}
+		copyRow := make([]any, len(row))
+		for index, value := range row {
+			copyRow[index] = sheetSafeCell(value)
+		}
+		normalized = append(normalized, copyRow)
+	}
+	return normalized, ""
 }
 
 // sheetHeaderFor resolves the header for a FRESH sheet: explicit header
@@ -64,7 +179,7 @@ func sheetTools() []Definition {
 		Name: "sheet.append",
 		Description: "Append rows to a named per-organization CSV sheet in the object store. " +
 			"Creates the sheet on first append; later appends keep the sheet's existing columns. " +
-			"Concurrent appends to one sheet are last-writer-wins.",
+			"Appends to the same sheet are serialized across Janusly replicas.",
 		Required: []string{"name", "rows"},
 		Optional: []string{"header"},
 		Fields: []Field{
@@ -118,14 +233,25 @@ func executeSheetAppend(ctx context.Context, input map[string]any, deps *Integra
 			return map[string]any{"ok": false, "provider": "noop", "error": errMessage}
 		}
 	}
-	var explicitHeader []string
-	if raw, present := input["header"].([]any); present {
-		for _, cell := range raw {
-			if text, ok := cell.(string); ok {
-				explicitHeader = append(explicitHeader, text)
-			}
-		}
+	rawHeader, headerPresent := input["header"]
+	explicitHeader, headerError := normalizeSheetHeader(rawHeader, headerPresent)
+	if headerError != "" {
+		record(false, headerError)
+		return map[string]any{"ok": false, "provider": "noop", "error": headerError}
 	}
+	if deps == nil || deps.Lock == nil {
+		record(false, "sheet lock unavailable")
+		return map[string]any{"ok": false, "provider": "noop", "error": "sheet lock unavailable"}
+	}
+	release, lockError := deps.Lock(ctx, "sheet.append:"+key)
+	if lockError != "" || release == nil {
+		if lockError == "" {
+			lockError = "sheet lock unavailable"
+		}
+		record(false, lockError)
+		return map[string]any{"ok": false, "provider": "noop", "error": lockError}
+	}
+	defer release()
 
 	existing := objectstore.Get(ctx, "", key, sheetMaxBytes)
 	var body string
@@ -138,7 +264,16 @@ func executeSheetAppend(ctx context.Context, input map[string]any, deps *Integra
 		if parsed := parseCsvRows(firstLine); len(parsed) > 0 {
 			effective = parsed[0]
 		}
-		rendered := StringifyCsv(rows, effective)
+		if errMessage := validateSheetHeader(effective); errMessage != "" {
+			record(false, "existing sheet header is invalid")
+			return map[string]any{"ok": false, "provider": existing.Provider, "error": "existing sheet header is invalid"}
+		}
+		normalizedRows, errMessage := normalizeSheetRows(rows, effective)
+		if errMessage != "" {
+			record(false, errMessage)
+			return map[string]any{"ok": false, "provider": existing.Provider, "error": errMessage}
+		}
+		rendered := StringifyCsv(normalizedRows, effective)
 		if effective != nil {
 			// StringifyCsv re-renders the header line; the sheet already
 			// carries it.
@@ -154,7 +289,19 @@ func executeSheetAppend(ctx context.Context, input map[string]any, deps *Integra
 		}
 		body = current + "\n" + rendered + "\n"
 	case existing.NotFound:
-		body = StringifyCsv(rows, sheetHeaderFor(rows, explicitHeader)) + "\n"
+		effective := sheetHeaderFor(rows, explicitHeader)
+		if effective != nil {
+			if errMessage := validateSheetHeader(effective); errMessage != "" {
+				record(false, errMessage)
+				return map[string]any{"ok": false, "provider": existing.Provider, "error": errMessage}
+			}
+		}
+		normalizedRows, errMessage := normalizeSheetRows(rows, effective)
+		if errMessage != "" {
+			record(false, errMessage)
+			return map[string]any{"ok": false, "provider": existing.Provider, "error": errMessage}
+		}
+		body = StringifyCsv(normalizedRows, effective) + "\n"
 	default:
 		record(false, existing.Error)
 		return map[string]any{"ok": false, "provider": existing.Provider, "error": existing.Error}

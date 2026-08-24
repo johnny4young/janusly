@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -139,6 +140,32 @@ func (e *Engine) buildIntegrationDeps(orgID, runID, nodeID string) *tools.Integr
 			return "orgs/" + orgID + "/pdf/" + e.newID() + "/" + filename
 		},
 		OrgID: func() string { return orgID },
+		Lock: func(ctx context.Context, resource string) (func(), string) {
+			connection, err := e.pool.Acquire(ctx)
+			if err != nil {
+				return nil, "resource lock unavailable"
+			}
+			lockKey := orgID + "\x1f" + resource
+			if _, err := connection.Exec(ctx,
+				`SELECT pg_advisory_lock(hashtextextended($1, 0))`, lockKey); err != nil {
+				connection.Release()
+				return nil, "resource lock unavailable"
+			}
+			var once sync.Once
+			return func() {
+				once.Do(func() {
+					releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					if _, err := connection.Exec(releaseCtx,
+						`SELECT pg_advisory_unlock(hashtextextended($1, 0))`, lockKey); err != nil {
+						// Never return a connection that may still own a session
+						// advisory lock to the pool.
+						_ = connection.Conn().Close(releaseCtx)
+					}
+					connection.Release()
+				})
+			}, ""
+		},
 		RateLimitPerMin: func(family string, fallback int) int {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()

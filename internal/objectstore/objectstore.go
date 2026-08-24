@@ -16,6 +16,7 @@ package objectstore
 
 import (
 	"context"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -82,10 +83,21 @@ func Put(ctx context.Context, providerOverride, key string, body []byte, content
 		if err := os.MkdirAll(filepath.Dir(absDestination), 0o755); err != nil {
 			return PutResult{Ok: false, Provider: "local", Error: "object store mkdir failed"}
 		}
-		if err := os.WriteFile(absDestination, body, 0o644); err != nil {
+		// Resolve the parent after creating it: a pre-existing symlink inside
+		// the configured root must not redirect writes outside the store.
+		resolvedRoot, err := filepath.EvalSymlinks(absRoot)
+		if err != nil {
+			return PutResult{Ok: false, Provider: "local", Error: "object store root unavailable"}
+		}
+		resolvedParent, err := filepath.EvalSymlinks(filepath.Dir(absDestination))
+		if err != nil || !pathWithinRoot(resolvedRoot, resolvedParent) {
+			return PutResult{Ok: false, Provider: "local", Error: "object store key escapes the root"}
+		}
+		resolvedDestination := filepath.Join(resolvedParent, filepath.Base(absDestination))
+		if err := atomicWriteFile(resolvedDestination, body, 0o644); err != nil {
 			return PutResult{Ok: false, Provider: "local", Error: "object store write failed"}
 		}
-		fileURL := url.URL{Scheme: "file", Path: filepath.ToSlash(absDestination)}
+		fileURL := url.URL{Scheme: "file", Path: filepath.ToSlash(resolvedDestination)}
 		return PutResult{Ok: true, Provider: "local", URL: fileURL.String(), Key: safeKey}
 	case "s3":
 		// The real SigV4 driver: hand-rolled signing, path-style
@@ -131,11 +143,30 @@ func Get(ctx context.Context, providerOverride, key string, maxBytes int64) GetR
 		if err != nil || !strings.HasPrefix(absSource, absRoot+string(os.PathSeparator)) {
 			return GetResult{Ok: false, Provider: "local", Error: "object store key escapes the root"}
 		}
-		body, err := os.ReadFile(absSource)
+		resolvedRoot, err := filepath.EvalSymlinks(absRoot)
+		if err != nil {
+			return GetResult{Ok: false, Provider: "local", Error: "object store root unavailable"}
+		}
+		resolvedSource, err := filepath.EvalSymlinks(absSource)
 		if err != nil {
 			if os.IsNotExist(err) {
 				return GetResult{Ok: false, NotFound: true, Provider: "local"}
 			}
+			return GetResult{Ok: false, Provider: "local", Error: "object store read failed"}
+		}
+		if !pathWithinRoot(resolvedRoot, resolvedSource) {
+			return GetResult{Ok: false, Provider: "local", Error: "object store key escapes the root"}
+		}
+		file, err := os.Open(resolvedSource)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return GetResult{Ok: false, NotFound: true, Provider: "local"}
+			}
+			return GetResult{Ok: false, Provider: "local", Error: "object store read failed"}
+		}
+		defer file.Close()
+		body, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+		if err != nil {
 			return GetResult{Ok: false, Provider: "local", Error: "object store read failed"}
 		}
 		if int64(len(body)) > maxBytes {
@@ -148,4 +179,46 @@ func Get(ctx context.Context, providerOverride, key string, maxBytes int64) GetR
 		return GetResult{Ok: false, Provider: "noop",
 			Error: "Object store not configured. Set JANUSLY_OBJECT_STORE_PROVIDER=local|s3 and its settings."}
 	}
+}
+
+func pathWithinRoot(root, candidate string) bool {
+	relative, err := filepath.Rel(root, candidate)
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(os.PathSeparator))
+}
+
+// atomicWriteFile prevents readers and process crashes from observing a
+// truncated local object. The temporary file lives in the destination
+// directory so rename is atomic on the same filesystem.
+func atomicWriteFile(destination string, body []byte, mode os.FileMode) (returnErr error) {
+	temporary, err := os.CreateTemp(filepath.Dir(destination), ".janusly-object-*")
+	if err != nil {
+		return err
+	}
+	temporaryName := temporary.Name()
+	defer func() {
+		_ = temporary.Close()
+		if returnErr != nil {
+			_ = os.Remove(temporaryName)
+		}
+	}()
+	if err := temporary.Chmod(mode); err != nil {
+		return err
+	}
+	if _, err := temporary.Write(body); err != nil {
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(temporaryName, destination); err != nil {
+		return err
+	}
+	if directory, err := os.Open(filepath.Dir(destination)); err == nil {
+		_ = directory.Sync()
+		_ = directory.Close()
+	}
+	return nil
 }

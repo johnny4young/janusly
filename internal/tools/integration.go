@@ -56,6 +56,10 @@ type IntegrationDeps struct {
 	PdfKey PdfKeyBuilder
 	// OrgID exposes the tenant for pool keying (db.* tools); nil-safe.
 	OrgID func() string
+	// Lock serializes a tenant resource across every process sharing the
+	// durable PostgreSQL control plane. Callers must defer the returned
+	// release function. sheet.append uses it around object read+write.
+	Lock func(ctx context.Context, resource string) (release func(), errMessage string)
 }
 
 const webhookSignatureHeader = "x-janusly-signature"

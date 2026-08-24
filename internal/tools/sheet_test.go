@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -12,7 +13,46 @@ func sheetDeps(t *testing.T, org string) *IntegrationDeps {
 	t.Helper()
 	t.Setenv("JANUSLY_OBJECT_STORE_PROVIDER", "local")
 	t.Setenv("JANUSLY_OBJECT_STORE_LOCAL_DIR", t.TempDir())
-	return &IntegrationDeps{OrgID: func() string { return org }}
+	var lock sync.Mutex
+	return &IntegrationDeps{
+		OrgID: func() string { return org },
+		Lock: func(context.Context, string) (func(), string) {
+			lock.Lock()
+			return lock.Unlock, ""
+		},
+	}
+}
+
+func TestSheetAppendValidatesShapeAndNeutralizesFormulas(t *testing.T) {
+	deps := sheetDeps(t, "org-safe-sheet")
+	root := os.Getenv("JANUSLY_OBJECT_STORE_LOCAL_DIR")
+	result := executeSheetAppend(context.Background(), map[string]any{
+		"name": "safe", "header": []any{"account", "value"},
+		"rows": []any{[]any{"  =cmd|' /C calc'!A0", float64(-42)}},
+	}, deps)
+	if result["ok"] != true {
+		t.Fatalf("explicit-header array row: %+v", result)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "orgs", "org-safe-sheet", "sheets", "safe.csv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(raw); !strings.Contains(got, "'  =cmd") || !strings.Contains(got, ",-42") {
+		t.Fatalf("string formulas must be literal while numeric negatives remain numeric: %q", got)
+	}
+
+	for name, header := range map[string]any{
+		"non-string": []any{"a", float64(2)},
+		"duplicate":  []any{"a", "a"},
+		"empty":      []any{"a", " "},
+	} {
+		bad := executeSheetAppend(context.Background(), map[string]any{
+			"name": name, "header": header, "rows": []any{map[string]any{"a": "x"}},
+		}, deps)
+		if bad["ok"] != false {
+			t.Fatalf("%s header must fail closed: %+v", name, bad)
+		}
+	}
 }
 
 // First append creates the sheet with a derived header; later appends
