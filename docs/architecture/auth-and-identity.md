@@ -12,5 +12,13 @@ Authorization has two layers: minimum role rank and a closed permission
 catalog. When both are configured, both must pass. Custom roles derive a rank
 and a bounded permission set from organization-owned configuration.
 
+Every organization has one durable `owner_user_id`, created atomically with
+the founder's built-in `admin` membership. Owner is authority metadata, not a
+fourth mutable role: admins can be delegated normally, but no human, SSO, or
+SCIM path can demote, re-key, or remove the owner membership. Only the current
+owner can transfer ownership to an existing member; transfer promotes that
+member to built-in `admin` in the same audited transaction and leaves the
+previous owner as an admin.
+
 WorkOS SSO and SCIM webhook handling are signed, idempotent, and audited.
 Production behavior is selected only by `JANUSLY_ENV=production`.

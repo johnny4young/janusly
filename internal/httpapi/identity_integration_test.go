@@ -25,7 +25,7 @@ func TestIdentitySurfaces(t *testing.T) {
 
 	// Memberships: seed one named org membership + assert the projection.
 	orgB := "org-b-" + suffix
-	if _, err := pool.Exec(ctx, `INSERT INTO organizations (id, name, plan) VALUES ($1, 'Beta Corp', 'pro')`, orgB); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO organizations (id, owner_user_id, name, plan) VALUES ($1, $2, 'Beta Corp', 'pro')`, orgB, "seed-owner-"+suffix); err != nil {
 		t.Fatalf("seed org: %v", err)
 	}
 	member := "member-" + suffix
@@ -43,7 +43,7 @@ func TestIdentitySurfaces(t *testing.T) {
 	found := false
 	for _, raw := range rows {
 		row := raw.(map[string]any)
-		if row["id"] == orgB && row["name"] == "Beta Corp" && row["plan"] == "pro" && row["role"] == "editor" {
+		if row["id"] == orgB && row["name"] == "Beta Corp" && row["plan"] == "pro" && row["role"] == "editor" && row["isOwner"] == false {
 			found = true
 		}
 	}
@@ -123,12 +123,12 @@ func TestOrganizationBootstrapCommitsFounderProfileAndAudit(t *testing.T) {
 	organization := organizations[0].(map[string]any)
 	if organization["id"] != orgID || organization["name"] != "Bootstrap Org" ||
 		organization["plan"] != "free" || organization["role"] != "admin" ||
-		organization["developmentFallback"] != false {
+		organization["developmentFallback"] != false || organization["isOwner"] != true {
 		t.Fatalf("organization projection: %+v", organization)
 	}
 
-	var orgName, plan, role, memberEmail, profileName, profileEmail string
-	if err := pool.QueryRow(ctx, `SELECT name, plan FROM organizations WHERE id = $1`, orgID).Scan(&orgName, &plan); err != nil {
+	var orgName, plan, ownerUserID, role, memberEmail, profileName, profileEmail string
+	if err := pool.QueryRow(ctx, `SELECT name, plan, owner_user_id FROM organizations WHERE id = $1`, orgID).Scan(&orgName, &plan, &ownerUserID); err != nil {
 		t.Fatalf("organization row: %v", err)
 	}
 	if err := pool.QueryRow(ctx,
@@ -139,10 +139,10 @@ func TestOrganizationBootstrapCommitsFounderProfileAndAudit(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT name, email FROM users WHERE id = $1`, founderID).Scan(&profileName, &profileEmail); err != nil {
 		t.Fatalf("founder profile: %v", err)
 	}
-	if orgName != "Bootstrap Org" || plan != "free" || role != "admin" || memberEmail != founderEmail ||
+	if orgName != "Bootstrap Org" || plan != "free" || ownerUserID != founderID || role != "admin" || memberEmail != founderEmail ||
 		profileName != "Ada Founder" || profileEmail != founderEmail {
-		t.Fatalf("bootstrap rows: org=%q plan=%q role=%q memberEmail=%q profile=%q/%q",
-			orgName, plan, role, memberEmail, profileName, profileEmail)
+		t.Fatalf("bootstrap rows: org=%q plan=%q owner=%q role=%q memberEmail=%q profile=%q/%q",
+			orgName, plan, ownerUserID, role, memberEmail, profileName, profileEmail)
 	}
 	var auditCount int
 	var targetType, targetID string
@@ -173,7 +173,7 @@ func TestOrganizationBootstrapRollsBackProfileOnOrganizationFailure(t *testing.T
 	collision := "collision-" + suffix
 	orgID := "org_" + collision
 	userID := "rollback-" + suffix + "@example.com"
-	if _, err := pool.Exec(ctx, `INSERT INTO organizations (id, name) VALUES ($1, 'Existing')`, orgID); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO organizations (id, owner_user_id, name) VALUES ($1, 'existing-owner', 'Existing')`, orgID); err != nil {
 		t.Fatalf("seed collision: %v", err)
 	}
 	server := &V1Server{pool: pool, newID: func() string { return collision }}

@@ -9,6 +9,7 @@ export type SessionOrganization = {
   permissions: string[]
   usable: boolean
   developmentFallback: boolean
+  isOwner: boolean
 }
 
 export type SessionContext = {

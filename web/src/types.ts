@@ -232,7 +232,7 @@ export type SemanticCaseResolution = {
   resolvedCaseIds: string[]
 }
 export type OrgRole = 'viewer' | 'editor' | 'admin'
-export type OrgMember = { id: string; orgId: string; userId: string; email?: string; role: OrgRole; invitedBy?: string; createdAt?: string }
+export type OrgMember = { id: string; orgId: string; userId: string; email?: string; role: string; isOwner: boolean; invitedBy?: string; createdAt?: string }
 
 export type McpTransport = 'stdio' | 'sse' | 'http'
 export type McpConnectionStatus = 'pending' | 'active' | 'failed' | 'disabled'

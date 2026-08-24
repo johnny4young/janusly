@@ -28,11 +28,11 @@ const multiOrganizationContext: SessionContext = {
   organizations: [
     {
       id: 'org-a', name: 'Acme Operations', plan: 'team', role: 'admin', roleBase: 'admin',
-      permissions: ['workflows.read'], usable: true, developmentFallback: false,
+      permissions: ['workflows.read'], usable: true, developmentFallback: false, isOwner: false,
     },
     {
       id: 'org-b', name: 'Beta Support', plan: 'free', role: 'viewer', roleBase: 'viewer',
-      permissions: ['workflows.read'], usable: true, developmentFallback: false,
+      permissions: ['workflows.read'], usable: true, developmentFallback: false, isOwner: false,
     },
   ],
   invitations: [],

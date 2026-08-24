@@ -132,6 +132,7 @@ func assertBaseline(ctx context.Context, db *sql.DB) error {
 		{"run_wakeups", []string{"run_node_id", "wake_at", "reason"}},
 		{"rate_limit_windows", []string{"name", "key", "window_start", "count", "expires_at"}},
 		{"org_digest_state", []string{"org_id", "last_sent_at", "batch_started_at", "delivered_recipients", "lease_token", "lease_expires_at", "next_attempt_at"}},
+		{"organizations", []string{"id", "owner_user_id", "name", "plan"}},
 		{"schedule_entries", []string{"next_fire_at"}},
 	}
 	for _, requirement := range requiredColumns {

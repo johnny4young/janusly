@@ -26,3 +26,8 @@ Weekly digest delivery uses `org_digest_state` as a resumable batch rather than
 as a pre-send timestamp. Its lease token is the multi-replica claim and
 `delivered_recipients` is the per-address receipt set, so provider failures do
 not either skip the week or resend addresses that already succeeded.
+
+`organizations.owner_user_id` is the durable organization authority. Database
+triggers protect the matching `org_members` row from role/user-id mutation or
+deletion across every write path; the HTTP layer adds owner-specific errors and
+an audited transactional transfer operation.

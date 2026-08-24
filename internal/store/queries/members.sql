@@ -26,16 +26,29 @@ FROM org_roles
 WHERE org_id = $1 AND name = $2;
 
 -- name: ListOrgMembers :many
-SELECT id, org_id, user_id, email, role, invited_by, created_at
-FROM org_members WHERE org_id = $1
-ORDER BY created_at, id;
+SELECT member.id, member.org_id, member.user_id, member.email, member.role,
+  member.invited_by, member.created_at,
+  coalesce(organization.owner_user_id = member.user_id, false) AS is_owner
+FROM org_members member
+LEFT JOIN organizations organization ON organization.id = member.org_id
+WHERE member.org_id = $1
+ORDER BY member.created_at, member.id;
 
 -- name: UpdateOrgMemberRole :execrows
 UPDATE org_members SET role = $3
-WHERE org_id = $1 AND user_id = $2;
+WHERE org_id = $1 AND user_id = $2
+  AND user_id <> coalesce((SELECT owner_user_id FROM organizations WHERE id = $1), '');
 
 -- name: DeleteOrgMember :execrows
-DELETE FROM org_members WHERE org_id = $1 AND user_id = $2;
+DELETE FROM org_members WHERE org_id = $1 AND user_id = $2
+  AND user_id <> coalesce((SELECT owner_user_id FROM organizations WHERE id = $1), '');
+
+-- name: LockOrganizationOwner :one
+SELECT coalesce((SELECT owner_user_id FROM organizations WHERE id = $1 FOR UPDATE), '')::text AS owner_user_id;
+
+-- name: TransferOrganizationOwner :execrows
+UPDATE organizations SET owner_user_id = sqlc.arg(new_owner_user_id)::text
+WHERE id = sqlc.arg(org_id)::text AND owner_user_id = sqlc.arg(current_owner_user_id)::text;
 
 -- name: FindOrgMemberRowByEmail :one
 SELECT id FROM org_members WHERE org_id = $1 AND email = $2;
@@ -57,7 +70,8 @@ VALUES ($1, $2, $3, $4, $5);
 -- profile upsert, the invitation-accept CAS, and the plugin stub row.
 
 -- name: ListUserMemberships :many
-SELECT m.org_id, m.role, coalesce(o.name, m.org_id) AS organization_name, o.plan
+SELECT m.org_id, m.role, coalesce(o.name, m.org_id) AS organization_name, o.plan,
+  coalesce(o.owner_user_id = m.user_id, false) AS is_owner
 FROM org_members m
 LEFT JOIN organizations o ON o.id = m.org_id
 WHERE m.user_id = $1
@@ -67,7 +81,8 @@ LIMIT 50;
 -- Identity bootstrap uses one extra row to report truncation without an
 -- unbounded count. The LEFT JOIN preserves orphan-tolerant membership truth.
 -- name: ListIdentityMemberships :many
-SELECT m.org_id, m.role, o.name AS organization_name, o.plan AS organization_plan
+SELECT m.org_id, m.role, o.name AS organization_name, o.plan AS organization_plan,
+  coalesce(o.owner_user_id = m.user_id, false) AS is_owner
 FROM org_members m
 LEFT JOIN organizations o ON o.id = m.org_id
 WHERE m.user_id = $1
@@ -106,8 +121,8 @@ SET name = coalesce(EXCLUDED.name, users.name),
 RETURNING id, name, email;
 
 -- name: InsertIdentityOrganization :exec
-INSERT INTO organizations (id, name, plan)
-VALUES ($1, $2, 'free');
+INSERT INTO organizations (id, owner_user_id, name, plan)
+VALUES ($1, $2, $3, 'free');
 
 -- Founder membership is a strict insert: the organization id is new inside
 -- the same transaction, so a conflict is a real invariant violation.

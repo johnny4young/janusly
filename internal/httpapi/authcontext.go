@@ -67,7 +67,7 @@ func (s *V1Server) authContextCore(ctx context.Context, rc identityRequest) opRe
 			"id": row.OrgID, "name": displayName(row.OrganizationName.String, row.OrgID),
 			"plan": textOrNull(row.OrganizationPlan), "role": roleName,
 			"roleBase": roleBase, "permissions": permissionKeys,
-			"usable": resolved != nil, "developmentFallback": false,
+			"usable": resolved != nil, "developmentFallback": false, "isOwner": row.IsOwner,
 		})
 	}
 
@@ -96,7 +96,7 @@ func (s *V1Server) authContextCore(ctx context.Context, rc identityRequest) opRe
 			organizations = append([]map[string]any{{
 				"id": identity.OrgHint, "name": identity.OrgHint, "plan": nil,
 				"role": roleName, "roleBase": roleBase, "permissions": permissionKeys,
-				"usable": true, "developmentFallback": true,
+				"usable": true, "developmentFallback": true, "isOwner": false,
 			}}, organizations...)
 		}
 	}

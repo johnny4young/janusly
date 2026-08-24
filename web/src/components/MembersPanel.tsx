@@ -12,14 +12,14 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { AlertCircle, CircleCheck, Info, Trash2, UserPlus } from 'lucide-react'
+import { AlertCircle, CircleCheck, Crown, Info, Trash2, UserPlus } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState } from './EmptyState'
 import { useWorkflowStore } from '../store'
 import type { OrgMember, OrgRole } from '../types'
 import { tApiError, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
-import { sessionCan } from '../identity-context'
+import { currentSessionOrganization, sessionCan } from '../identity-context'
 
 type OrgRoleEntry = {
   name: string
@@ -53,6 +53,7 @@ export function MembersPanel() {
   const bumpPlatformVersion = useWorkflowStore(state => state.bumpPlatformVersion)
   const platformVersion = useWorkflowStore(state => state.platformVersion)
   const identityContext = useWorkflowStore(state => state.identityContext)
+  const setIdentityContext = useWorkflowStore(state => state.setIdentityContext)
   const [members, setMembers] = useState<OrgMember[]>([])
   const [orgRoles, setOrgRoles] = useState<OrgRoleEntry[]>([
     { name: 'viewer', isBuiltin: true, inheritsFrom: 'viewer', description: null },
@@ -65,10 +66,12 @@ export function MembersPanel() {
   // Inline two-step confirm before removing a member (no native confirm()):
   // holds the userId whose Remove is awaiting confirmation.
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null)
+  const [confirmTransferId, setConfirmTransferId] = useState<string | null>(null)
   const trimmedEmail = email.trim()
   const emailInvalid = trimmedEmail.length > 0 && !emailPattern.test(trimmedEmail)
   const canManageMembers = sessionCan(identityContext, 'members.write')
   const canSetRoles = sessionCan(identityContext, 'members.role_set')
+  const currentOrganization = currentSessionOrganization(identityContext)
   const canInvite = canManageMembers && emailPattern.test(trimmedEmail) && !pending
   const roleLabel = (name: string) => name === 'viewer' || name === 'editor' || name === 'admin'
     ? t(`userMenu.role.${name}`)
@@ -154,6 +157,31 @@ export function MembersPanel() {
     }
   }
 
+  const transferOwnership = async (userId: string) => {
+    setConfirmTransferId(null)
+    try {
+      await api('/organizations/owner', {
+        method: 'POST',
+        body: JSON.stringify({ userId }),
+      })
+      if (identityContext?.currentOrganizationId) {
+        setIdentityContext({
+          ...identityContext,
+          organizations: identityContext.organizations.map(organization => (
+            organization.id === identityContext.currentOrganizationId
+              ? { ...organization, isOwner: false }
+              : organization
+          )),
+        })
+      }
+      addToast(t('members.toastOwnershipTransferred'), 'success')
+      bumpPlatformVersion()
+      await load()
+    } catch (error) {
+      addToast(tApiError(error) || t('members.transferFailed'), 'error')
+    }
+  }
+
   return (
     <div className="panel-list">
       <section className="we-card">
@@ -233,13 +261,24 @@ export function MembersPanel() {
             const label = member.email ?? member.userId
             const initials = (label.includes('@') ? label.split('@')[0] : label).slice(0, 2).toUpperCase()
             const isAdmin = member.role === 'admin'
+            const memberRole = orgRoles.find(entry => entry.name === member.role)
+            const canReceiveOwnership = currentOrganization?.isOwner === true
+              && !member.isOwner
+              && (member.role === 'admin' || memberRole?.inheritsFrom === 'admin')
             return (
               <li key={member.id}>
                 <div className="we-list-row" data-testid={`members-row-${member.userId}`} data-severity={isAdmin ? 'cobalt' : undefined}>
                   <span className="we-list-row__avatar" aria-hidden="true">{initials}</span>
                   <div className="we-list-row__body">
-                    <strong>{label}</strong>
-                    <small>{describeRole(member.role, orgRoles.find(r => r.name === member.role))}</small>
+                    <strong>
+                      {label}
+                      {member.isOwner && (
+                        <span className="mode-pill mode-pill-neutral" data-testid={`members-owner-${member.userId}`}>
+                          <Crown size={12} aria-hidden="true" /> {t('members.owner')}
+                        </span>
+                      )}
+                    </strong>
+                    <small>{describeRole(member.role, memberRole)}</small>
                   </div>
                   <div className="we-list-row__meta">
                     <select
@@ -247,7 +286,7 @@ export function MembersPanel() {
                       value={member.role}
                       onChange={(event) => updateRole(member.userId, event.target.value)}
                       aria-label={t('members.row.roleAria', { member: label })}
-                      disabled={!canSetRoles}
+                      disabled={!canSetRoles || member.isOwner}
                     >
                       {orgRoles.map(option => (
                         <option key={option.name} value={option.name}>
@@ -255,7 +294,36 @@ export function MembersPanel() {
                         </option>
                       ))}
                     </select>
-                    {!canManageMembers ? null : confirmRemoveId === member.userId ? (
+                    {canReceiveOwnership && (confirmTransferId === member.userId ? (
+                      <span className="we-list-row__confirm">
+                        <span className="we-list-row__confirm-text">
+                          {t('members.row.transferConfirm', { member: label })}
+                        </span>
+                        <button
+                          type="button"
+                          className="small-command danger"
+                          onClick={() => transferOwnership(member.userId)}
+                          data-testid={`members-transfer-confirm-${member.userId}`}
+                        >
+                          {t('members.row.transferConfirmCta')}
+                        </button>
+                        <button type="button" className="small-command" onClick={() => setConfirmTransferId(null)}>
+                          {t('common.cancel')}
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="small-command"
+                        onClick={() => setConfirmTransferId(member.userId)}
+                        aria-label={t('members.row.transferAria', { member: label })}
+                        title={t('members.row.transferTitle')}
+                        data-testid={`members-transfer-${member.userId}`}
+                      >
+                        <Crown size={14} aria-hidden="true" />
+                      </button>
+                    ))}
+                    {!canManageMembers || member.isOwner ? null : confirmRemoveId === member.userId ? (
                       <span className="we-list-row__confirm">
                         <span className="we-list-row__confirm-text">
                           {t('members.row.removeConfirm', { member: label })}

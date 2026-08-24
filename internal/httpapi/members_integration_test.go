@@ -110,6 +110,102 @@ func TestMemberLifecycle(t *testing.T) {
 	}
 }
 
+func TestOrganizationOwnerDelegationProtectionAndTransfer(t *testing.T) {
+	h := newAPIHarness(t)
+	pool := testPool(t)
+	ctx := context.Background()
+	ownerID := "api-tester"
+	adminID := "delegated-admin"
+	if _, err := pool.Exec(ctx, `INSERT INTO organizations (id, owner_user_id, name)
+		VALUES ($1, $2, 'Owner Test')`, h.org, ownerID); err != nil {
+		t.Fatalf("seed owner organization: %v", err)
+	}
+	for _, member := range []struct{ id, userID, email string }{
+		{h.org + "-owner", ownerID, "owner@example.com"},
+		{h.org + "-admin", adminID, "admin@example.com"},
+	} {
+		if _, err := pool.Exec(ctx, `INSERT INTO org_members (id, org_id, user_id, email, role)
+			VALUES ($1, $2, $3, $4, 'admin')`, member.id, h.org, member.userID, member.email); err != nil {
+			t.Fatalf("seed member: %v", err)
+		}
+	}
+
+	// The wire projection tells the UI which row is structurally protected.
+	req, _ := http.NewRequest("GET", h.server.URL+"/members", nil)
+	req.Header.Set("x-org-id", h.org)
+	req.Header.Set("x-user-id", ownerID)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("list members: %v", err)
+	}
+	defer res.Body.Close()
+	var members []map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&members); err != nil {
+		t.Fatalf("decode members: %v", err)
+	}
+	ownerProjected := false
+	for _, member := range members {
+		if member["userId"] == ownerID && member["isOwner"] == true {
+			ownerProjected = true
+		}
+	}
+	if !ownerProjected {
+		t.Fatalf("owner flag missing from member projection: %+v", members)
+	}
+
+	adminHeaders := map[string]string{"x-user-id": adminID}
+	if blocked := h.callWithHeaders("POST", "/members/role", map[string]any{
+		"userId": ownerID, "role": "viewer",
+	}, h.org, adminHeaders); blocked.status != http.StatusConflict || blocked.body["code"] != "organization_owner_protected" {
+		t.Fatalf("delegated admin demoted owner: %d %+v", blocked.status, blocked.body)
+	}
+	if blocked := h.callWithHeaders("DELETE", "/members?userId="+ownerID, nil, h.org, adminHeaders); blocked.status != http.StatusConflict || blocked.body["code"] != "organization_owner_protected" {
+		t.Fatalf("delegated admin removed owner: %d %+v", blocked.status, blocked.body)
+	}
+	if blocked := h.callWithHeaders("POST", "/organizations/owner", map[string]any{
+		"userId": adminID,
+	}, h.org, adminHeaders); blocked.status != http.StatusForbidden || blocked.body["code"] != "organization_owner_required" {
+		t.Fatalf("non-owner transferred ownership: %d %+v", blocked.status, blocked.body)
+	}
+
+	transferred := h.call("POST", "/organizations/owner", map[string]any{"userId": adminID}, h.org)
+	if transferred.status != 200 || transferred.body["ownerUserId"] != adminID {
+		t.Fatalf("owner transfer: %d %+v", transferred.status, transferred.body)
+	}
+	var ownerUserID, oldRole, newRole string
+	if err := pool.QueryRow(ctx, `SELECT owner_user_id FROM organizations WHERE id = $1`, h.org).Scan(&ownerUserID); err != nil {
+		t.Fatalf("read transferred owner: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT role FROM org_members WHERE org_id = $1 AND user_id = $2`, h.org, ownerID).Scan(&oldRole); err != nil {
+		t.Fatalf("read previous owner role: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT role FROM org_members WHERE org_id = $1 AND user_id = $2`, h.org, adminID).Scan(&newRole); err != nil {
+		t.Fatalf("read new owner role: %v", err)
+	}
+	if ownerUserID != adminID || oldRole != "admin" || newRole != "admin" {
+		t.Fatalf("transfer invariant: owner=%q oldRole=%q newRole=%q", ownerUserID, oldRole, newRole)
+	}
+
+	// The former owner remains an admin but cannot demote the new owner.
+	if blocked := h.call("POST", "/members/role", map[string]any{
+		"userId": adminID, "role": "viewer",
+	}, h.org); blocked.status != http.StatusConflict || blocked.body["code"] != "organization_owner_protected" {
+		t.Fatalf("former owner demoted new owner: %d %+v", blocked.status, blocked.body)
+	}
+	if changed := h.callWithHeaders("POST", "/members/role", map[string]any{
+		"userId": ownerID, "role": "viewer",
+	}, h.org, adminHeaders); changed.status != 200 {
+		t.Fatalf("new owner could not manage previous owner: %d %+v", changed.status, changed.body)
+	}
+
+	// Defense in depth: bypassing HTTP and writing the membership directly is
+	// still refused by the database trigger used by SSO/SCIM paths too.
+	if _, err := pool.Exec(ctx, `UPDATE org_members SET role = 'viewer'
+		WHERE org_id = $1 AND user_id = $2`, h.org, adminID); err == nil {
+		t.Fatal("database allowed direct owner demotion")
+	}
+}
+
 func seedMemberRow(t *testing.T, pool *pgxpool.Pool, org, userID, email, role string) {
 	t.Helper()
 	if _, err := pool.Exec(context.Background(),

@@ -8,6 +8,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -30,6 +31,7 @@ func (q *Queries) CountMembersInRole(ctx context.Context, arg CountMembersInRole
 
 const deleteOrgMember = `-- name: DeleteOrgMember :execrows
 DELETE FROM org_members WHERE org_id = $1 AND user_id = $2
+  AND user_id <> coalesce((SELECT owner_user_id FROM organizations WHERE id = $1), '')
 `
 
 type DeleteOrgMemberParams struct {
@@ -236,17 +238,18 @@ func (q *Queries) InsertFounderMembership(ctx context.Context, arg InsertFounder
 }
 
 const insertIdentityOrganization = `-- name: InsertIdentityOrganization :exec
-INSERT INTO organizations (id, name, plan)
-VALUES ($1, $2, 'free')
+INSERT INTO organizations (id, owner_user_id, name, plan)
+VALUES ($1, $2, $3, 'free')
 `
 
 type InsertIdentityOrganizationParams struct {
-	ID   string
-	Name string
+	ID          string
+	OwnerUserID string
+	Name        string
 }
 
 func (q *Queries) InsertIdentityOrganization(ctx context.Context, arg InsertIdentityOrganizationParams) error {
-	_, err := q.db.Exec(ctx, insertIdentityOrganization, arg.ID, arg.Name)
+	_, err := q.db.Exec(ctx, insertIdentityOrganization, arg.ID, arg.OwnerUserID, arg.Name)
 	return err
 }
 
@@ -368,7 +371,8 @@ func (q *Queries) ListIdentityInvitations(ctx context.Context, email string) ([]
 }
 
 const listIdentityMemberships = `-- name: ListIdentityMemberships :many
-SELECT m.org_id, m.role, o.name AS organization_name, o.plan AS organization_plan
+SELECT m.org_id, m.role, o.name AS organization_name, o.plan AS organization_plan,
+  coalesce(o.owner_user_id = m.user_id, false) AS is_owner
 FROM org_members m
 LEFT JOIN organizations o ON o.id = m.org_id
 WHERE m.user_id = $1
@@ -381,6 +385,7 @@ type ListIdentityMembershipsRow struct {
 	Role             string
 	OrganizationName pgtype.Text
 	OrganizationPlan pgtype.Text
+	IsOwner          interface{}
 }
 
 // Identity bootstrap uses one extra row to report truncation without an
@@ -399,6 +404,7 @@ func (q *Queries) ListIdentityMemberships(ctx context.Context, userID string) ([
 			&i.Role,
 			&i.OrganizationName,
 			&i.OrganizationPlan,
+			&i.IsOwner,
 		); err != nil {
 			return nil, err
 		}
@@ -446,20 +452,35 @@ func (q *Queries) ListOrgInvitations(ctx context.Context, orgID string) ([]Invit
 }
 
 const listOrgMembers = `-- name: ListOrgMembers :many
-SELECT id, org_id, user_id, email, role, invited_by, created_at
-FROM org_members WHERE org_id = $1
-ORDER BY created_at, id
+SELECT member.id, member.org_id, member.user_id, member.email, member.role,
+  member.invited_by, member.created_at,
+  coalesce(organization.owner_user_id = member.user_id, false) AS is_owner
+FROM org_members member
+LEFT JOIN organizations organization ON organization.id = member.org_id
+WHERE member.org_id = $1
+ORDER BY member.created_at, member.id
 `
 
-func (q *Queries) ListOrgMembers(ctx context.Context, orgID string) ([]OrgMember, error) {
+type ListOrgMembersRow struct {
+	ID        string
+	OrgID     string
+	UserID    string
+	Email     pgtype.Text
+	Role      string
+	InvitedBy pgtype.Text
+	CreatedAt *time.Time
+	IsOwner   interface{}
+}
+
+func (q *Queries) ListOrgMembers(ctx context.Context, orgID string) ([]ListOrgMembersRow, error) {
 	rows, err := q.db.Query(ctx, listOrgMembers, orgID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OrgMember
+	var items []ListOrgMembersRow
 	for rows.Next() {
-		var i OrgMember
+		var i ListOrgMembersRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.OrgID,
@@ -468,6 +489,7 @@ func (q *Queries) ListOrgMembers(ctx context.Context, orgID string) ([]OrgMember
 			&i.Role,
 			&i.InvitedBy,
 			&i.CreatedAt,
+			&i.IsOwner,
 		); err != nil {
 			return nil, err
 		}
@@ -563,7 +585,8 @@ func (q *Queries) ListOrgRoles(ctx context.Context, orgID string) ([]ListOrgRole
 
 const listUserMemberships = `-- name: ListUserMemberships :many
 
-SELECT m.org_id, m.role, coalesce(o.name, m.org_id) AS organization_name, o.plan
+SELECT m.org_id, m.role, coalesce(o.name, m.org_id) AS organization_name, o.plan,
+  coalesce(o.owner_user_id = m.user_id, false) AS is_owner
 FROM org_members m
 LEFT JOIN organizations o ON o.id = m.org_id
 WHERE m.user_id = $1
@@ -576,6 +599,7 @@ type ListUserMembershipsRow struct {
 	Role             string
 	OrganizationName string
 	Plan             pgtype.Text
+	IsOwner          interface{}
 }
 
 // Identity surfaces: the caller's memberships with org names,
@@ -594,6 +618,7 @@ func (q *Queries) ListUserMemberships(ctx context.Context, userID string) ([]Lis
 			&i.Role,
 			&i.OrganizationName,
 			&i.Plan,
+			&i.IsOwner,
 		); err != nil {
 			return nil, err
 		}
@@ -603,6 +628,17 @@ func (q *Queries) ListUserMemberships(ctx context.Context, userID string) ([]Lis
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockOrganizationOwner = `-- name: LockOrganizationOwner :one
+SELECT coalesce((SELECT owner_user_id FROM organizations WHERE id = $1 FOR UPDATE), '')::text AS owner_user_id
+`
+
+func (q *Queries) LockOrganizationOwner(ctx context.Context, id string) (string, error) {
+	row := q.db.QueryRow(ctx, lockOrganizationOwner, id)
+	var owner_user_id string
+	err := row.Scan(&owner_user_id)
+	return owner_user_id, err
 }
 
 const lockPendingIdentityInvitation = `-- name: LockPendingIdentityInvitation :one
@@ -691,9 +727,29 @@ func (q *Queries) RevokePendingInvitation(ctx context.Context, arg RevokePending
 	return result.RowsAffected(), nil
 }
 
+const transferOrganizationOwner = `-- name: TransferOrganizationOwner :execrows
+UPDATE organizations SET owner_user_id = $1::text
+WHERE id = $2::text AND owner_user_id = $3::text
+`
+
+type TransferOrganizationOwnerParams struct {
+	NewOwnerUserID     string
+	OrgID              string
+	CurrentOwnerUserID string
+}
+
+func (q *Queries) TransferOrganizationOwner(ctx context.Context, arg TransferOrganizationOwnerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, transferOrganizationOwner, arg.NewOwnerUserID, arg.OrgID, arg.CurrentOwnerUserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateOrgMemberRole = `-- name: UpdateOrgMemberRole :execrows
 UPDATE org_members SET role = $3
 WHERE org_id = $1 AND user_id = $2
+  AND user_id <> coalesce((SELECT owner_user_id FROM organizations WHERE id = $1), '')
 `
 
 type UpdateOrgMemberRoleParams struct {

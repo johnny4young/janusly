@@ -18,7 +18,7 @@ beforeEach(() => {
       profile: { name: 'Ada Operator', email: 'ada@example.com' },
       organizations: [{
         id: 'default', name: 'Acme Operations', plan: 'team', role: 'editor', roleBase: 'editor',
-        permissions: ['workflows.read'], usable: true, developmentFallback: false,
+        permissions: ['workflows.read'], usable: true, developmentFallback: false, isOwner: false,
       }],
       invitations: [],
       currentOrganizationId: 'default',

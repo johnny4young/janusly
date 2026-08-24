@@ -22,6 +22,7 @@ function setupApi(opts: { roles?: unknown; members?: unknown[] }) {
     }
     if (path === '/members/invite' && init?.method === 'POST') return { id: 'inv-1', status: 'pending' }
     if (path === '/members/role' && init?.method === 'POST') return { ok: true }
+    if (path === '/organizations/owner' && init?.method === 'POST') return { ok: true, ownerUserId: 'user-1' }
     if (path.startsWith('/members?userId=') && init?.method === 'DELETE') return { ok: true }
     return null
   })
@@ -49,6 +50,7 @@ describe('<MembersPanel /> dynamic role list', () => {
           permissions: ['members.read', 'members.write', 'members.role_set'],
           usable: true,
           developmentFallback: false,
+          isOwner: true,
         }],
         invitations: [],
         currentOrganizationId: 'default',
@@ -117,7 +119,7 @@ describe('<MembersPanel /> dynamic role list', () => {
 
   it('bumps platformVersion after changing a member role', async () => {
     setupApi({
-      members: [{ id: 'm-1', orgId: 'default', userId: 'user-1', email: 'ada@example.com', role: 'viewer' }],
+      members: [{ id: 'm-1', orgId: 'default', userId: 'user-1', email: 'ada@example.com', role: 'viewer', isOwner: false }],
     })
     render(<MembersPanel />)
     await waitFor(() => {
@@ -135,7 +137,7 @@ describe('<MembersPanel /> dynamic role list', () => {
 
   it('requires inline confirmation before removing a member', async () => {
     setupApi({
-      members: [{ id: 'm-1', orgId: 'default', userId: 'user-1', email: 'ada@example.com', role: 'viewer' }],
+      members: [{ id: 'm-1', orgId: 'default', userId: 'user-1', email: 'ada@example.com', role: 'viewer', isOwner: false }],
     })
     render(<MembersPanel />)
     await waitFor(() => {
@@ -150,6 +152,33 @@ describe('<MembersPanel /> dynamic role list', () => {
       expect(api).toHaveBeenCalledWith('/members?userId=user-1', { method: 'DELETE' })
     })
     await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(1))
+  })
+
+  it('protects the owner row and confirms an explicit transfer to an admin', async () => {
+    setupApi({
+      members: [
+        { id: 'm-owner', orgId: 'default', userId: 'admin-user', email: 'owner@example.com', role: 'admin', isOwner: true },
+        { id: 'm-next', orgId: 'default', userId: 'user-1', email: 'next@example.com', role: 'admin', isOwner: false },
+      ],
+    })
+    render(<MembersPanel />)
+
+    expect(await screen.findByTestId('members-owner-admin-user')).toHaveTextContent('Owner')
+    expect(screen.getByLabelText('Role for owner@example.com')).toBeDisabled()
+    expect(screen.queryByLabelText('Remove owner@example.com')).toBeNull()
+
+    fireEvent.click(screen.getByLabelText('Transfer ownership to next@example.com'))
+    expect(api).not.toHaveBeenCalledWith('/organizations/owner', expect.anything())
+    fireEvent.click(screen.getByTestId('members-transfer-confirm-user-1'))
+    await waitFor(() => {
+      expect(api).toHaveBeenCalledWith('/organizations/owner', {
+        method: 'POST',
+        body: JSON.stringify({ userId: 'user-1' }),
+      })
+    })
+    await waitFor(() => {
+      expect(useWorkflowStore.getState().identityContext?.organizations[0]?.isOwner).toBe(false)
+    })
   })
 
   it('resets the invite role to viewer after a successful invite', async () => {
@@ -178,7 +207,7 @@ describe('<MembersPanel /> dynamic role list', () => {
 
   it('keeps member mutations unavailable without their effective permissions', async () => {
     setupApi({
-      members: [{ id: 'm-1', orgId: 'default', userId: 'user-1', email: 'ada@example.com', role: 'viewer' }],
+      members: [{ id: 'm-1', orgId: 'default', userId: 'user-1', email: 'ada@example.com', role: 'viewer', isOwner: false }],
     })
     useWorkflowStore.setState((state) => ({
       identityContext: state.identityContext

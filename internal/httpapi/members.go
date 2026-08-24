@@ -27,6 +27,17 @@ import (
 
 var emailPattern = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
 
+func init() {
+	audit.RegisterRuntimeAction("organization.owner.transferred")
+}
+
+var (
+	errOrganizationOwnerProtected = errors.New("organization owner membership is protected")
+	errOrganizationOwnerRequired  = errors.New("organization owner required")
+	errOrganizationOwnerSame      = errors.New("organization owner unchanged")
+	errOwnerTargetNotFound        = errors.New("owner target not found")
+)
+
 // roleDefinedForOrg accepts built-ins or org-defined custom roles.
 func (s *V1Server) roleDefinedForOrg(r *http.Request, orgID, roleName string) (bool, error) {
 	if auth.IsBuiltinRole(roleName) {
@@ -56,6 +67,7 @@ func (s *V1Server) listMembers(w http.ResponseWriter, r *http.Request, rc v1Requ
 			"id": row.ID, "orgId": row.OrgID, "userId": row.UserID,
 			"email": textOrNull(row.Email), "role": row.Role,
 			"invitedBy": textOrNull(row.InvitedBy), "createdAt": timeOrNull(row.CreatedAt),
+			"isOwner": row.IsOwner,
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -197,7 +209,15 @@ func (s *V1Server) setMemberRoleCore(r *http.Request, rc v1Request) opResult {
 	}
 	var updated int64
 	err = audit.WithAuditTx(r.Context(), s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
-		rows, err := store.New(tx).UpdateOrgMemberRole(r.Context(), store.UpdateOrgMemberRoleParams{
+		q := store.New(tx)
+		ownerUserID, err := q.LockOrganizationOwner(r.Context(), rc.orgID)
+		if err != nil {
+			return err
+		}
+		if ownerUserID != "" && ownerUserID == body.UserID {
+			return errOrganizationOwnerProtected
+		}
+		rows, err := q.UpdateOrgMemberRole(r.Context(), store.UpdateOrgMemberRoleParams{
 			OrgID: rc.orgID, UserID: body.UserID, Role: roleName,
 		})
 		if err != nil {
@@ -212,6 +232,9 @@ func (s *V1Server) setMemberRoleCore(r *http.Request, rc v1Request) opResult {
 			Metadata: map[string]any{"role": roleName},
 		})
 	})
+	if errors.Is(err, errOrganizationOwnerProtected) {
+		return opError(http.StatusConflict, "organization_owner_protected", "The organization owner cannot be demoted", nil)
+	}
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
 	}
@@ -233,21 +256,105 @@ func (s *V1Server) removeMemberCore(r *http.Request, rc v1Request) opResult {
 		})
 		return opError(http.StatusBadRequest, "self_membership_modification", "Cannot modify your own membership", nil)
 	}
+	var removed int64
 	err := audit.WithAuditTx(r.Context(), s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
+		q := store.New(tx)
+		ownerUserID, err := q.LockOrganizationOwner(r.Context(), rc.orgID)
+		if err != nil {
+			return err
+		}
+		if ownerUserID != "" && ownerUserID == userID {
+			return errOrganizationOwnerProtected
+		}
 		// No cascade: ONLY the membership row goes; workflows, runs, and
 		// audit rows stay (audit is append-only). The session dies on the
 		// target's next request via the resolver.
-		if _, err := store.New(tx).DeleteOrgMember(r.Context(), store.DeleteOrgMemberParams{
+		rows, err := q.DeleteOrgMember(r.Context(), store.DeleteOrgMemberParams{
 			OrgID: rc.orgID, UserID: userID,
-		}); err != nil {
+		})
+		if err != nil {
 			return err
+		}
+		removed = rows
+		if rows == 0 {
+			return nil
 		}
 		return txAudit("member.removed", audit.Options{TargetType: "member", TargetID: userID})
 	})
+	if errors.Is(err, errOrganizationOwnerProtected) {
+		return opError(http.StatusConflict, "organization_owner_protected", "The organization owner cannot be removed", nil)
+	}
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error: "+err.Error(), nil)
 	}
+	if removed == 0 {
+		return opError(http.StatusNotFound, "member_not_found", "Member not found", nil)
+	}
 	return opOK(map[string]any{"ok": true})
+}
+
+func (s *V1Server) transferOrganizationOwnerCore(r *http.Request, rc v1Request) opResult {
+	var body struct {
+		UserID string `json:"userId"`
+	}
+	if err := decodeBody(r, &body); err != nil || strings.TrimSpace(body.UserID) == "" {
+		return opError(http.StatusBadRequest, "members_user_id_required", "userId is required", nil)
+	}
+	body.UserID = strings.TrimSpace(body.UserID)
+	err := audit.WithAuditTx(r.Context(), s.pool, rc.authContext, func(tx pgx.Tx, txAudit audit.TxAudit) error {
+		q := store.New(tx)
+		currentOwner, err := q.LockOrganizationOwner(r.Context(), rc.orgID)
+		if err != nil {
+			return err
+		}
+		if currentOwner == "" || currentOwner != rc.userID {
+			return errOrganizationOwnerRequired
+		}
+		if body.UserID == currentOwner {
+			return errOrganizationOwnerSame
+		}
+		if _, err := q.GetOrgMembership(r.Context(), store.GetOrgMembershipParams{
+			OrgID: rc.orgID, UserID: body.UserID,
+		}); errors.Is(err, pgx.ErrNoRows) {
+			return errOwnerTargetNotFound
+		} else if err != nil {
+			return err
+		}
+		if rows, err := q.UpdateOrgMemberRole(r.Context(), store.UpdateOrgMemberRoleParams{
+			OrgID: rc.orgID, UserID: body.UserID, Role: "admin",
+		}); err != nil || rows != 1 {
+			if err != nil {
+				return err
+			}
+			return errOwnerTargetNotFound
+		}
+		rows, err := q.TransferOrganizationOwner(r.Context(), store.TransferOrganizationOwnerParams{
+			OrgID: rc.orgID, CurrentOwnerUserID: currentOwner, NewOwnerUserID: body.UserID,
+		})
+		if err != nil {
+			return err
+		}
+		if rows != 1 {
+			return errOrganizationOwnerRequired
+		}
+		return txAudit("organization.owner.transferred", audit.Options{
+			TargetType: "organization", TargetID: rc.orgID,
+			Metadata: map[string]any{"previousOwnerUserId": currentOwner, "newOwnerUserId": body.UserID},
+		})
+	})
+	if errors.Is(err, errOrganizationOwnerRequired) {
+		return opError(http.StatusForbidden, "organization_owner_required", "Only the organization owner can transfer ownership", nil)
+	}
+	if errors.Is(err, errOrganizationOwnerSame) {
+		return opError(http.StatusBadRequest, "organization_owner_same", "This member already owns the organization", nil)
+	}
+	if errors.Is(err, errOwnerTargetNotFound) {
+		return opError(http.StatusNotFound, "member_not_found", "Member not found", nil)
+	}
+	if err != nil {
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	return opOK(map[string]any{"ok": true, "ownerUserId": body.UserID})
 }
 
 func (s *V1Server) mountMemberRoutes(mux *http.ServeMux) {
@@ -267,4 +374,8 @@ func (s *V1Server) mountMemberRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /members", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeUnversioned(w, s.removeMemberCore(r, rc))
 	}))
+	s.route(mux, "POST /organizations/owner", routeGate{auth.RoleAdmin, "members.role_set"},
+		func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+			writeUnversioned(w, s.transferOrganizationOwnerCore(r, rc))
+		})
 }

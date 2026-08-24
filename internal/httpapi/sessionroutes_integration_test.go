@@ -68,7 +68,7 @@ func TestBrowserSessionRoutesAndIdentityDispatcher(t *testing.T) {
 	orgA := "browser-org-a-" + uuid.NewString()
 	orgB := "browser-org-b-" + uuid.NewString()
 	for orgID, name := range map[string]string{orgA: "Alpha Operations", orgB: "Beta Operations"} {
-		if _, err := pool.Exec(ctx, `INSERT INTO organizations (id, name) VALUES ($1, $2)`, orgID, name); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO organizations (id, owner_user_id, name) VALUES ($1, $2, $3)`, orgID, "seed-owner-"+orgID, name); err != nil {
 			t.Fatalf("seed organization: %v", err)
 		}
 	}

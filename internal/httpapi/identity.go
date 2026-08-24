@@ -94,7 +94,7 @@ func (s *V1Server) organizationCreateCore(r *http.Request, rc identityRequest) o
 			return err
 		}
 		if err := q.InsertIdentityOrganization(ctx, store.InsertIdentityOrganizationParams{
-			ID: orgID, Name: organizationName,
+			ID: orgID, OwnerUserID: identity.UserID, Name: organizationName,
 		}); err != nil {
 			return err
 		}
@@ -105,7 +105,7 @@ func (s *V1Server) organizationCreateCore(r *http.Request, rc identityRequest) o
 		}
 		return txAudit(orgID, "org.created", audit.Options{
 			TargetType: "organization", TargetID: orgID,
-			Metadata: map[string]any{"name": organizationName, "plan": "free", "founderRole": "admin"},
+			Metadata: map[string]any{"name": organizationName, "plan": "free", "founderRole": "admin", "ownerUserId": identity.UserID},
 		})
 	})
 	if err != nil {
@@ -126,7 +126,7 @@ func (s *V1Server) organizationsCore(r *http.Request, rc identityRequest) opResu
 	for _, row := range rows {
 		organizations = append(organizations, map[string]any{
 			"id": row.OrgID, "name": row.OrganizationName, "plan": textOrNullString(row.Plan),
-			"role": row.Role,
+			"role": row.Role, "isOwner": row.IsOwner,
 		})
 	}
 	return opOK(map[string]any{"organizations": organizations})

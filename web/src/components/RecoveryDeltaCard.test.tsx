@@ -67,7 +67,7 @@ describe('<RecoveryDeltaCard />', () => {
         profile: { name: null, email: null },
         organizations: [{
           id: 'default', name: 'Default', plan: null, role: 'editor', roleBase: 'editor',
-          permissions: ['workflows.read', 'workflows.write'], usable: true, developmentFallback: false,
+          permissions: ['workflows.read', 'workflows.write'], usable: true, developmentFallback: false, isOwner: false,
         }],
         invitations: [],
         currentOrganizationId: 'default',

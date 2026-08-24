@@ -430,6 +430,7 @@ type OrgRole struct {
 
 type Organization struct {
 	ID                   string
+	OwnerUserID          string
 	Name                 string
 	Plan                 string
 	StripeCustomerID     pgtype.Text

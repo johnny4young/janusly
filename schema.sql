@@ -618,12 +618,50 @@ CREATE TABLE public.org_roles (
 
 CREATE TABLE public.organizations (
     id text NOT NULL,
+    owner_user_id text NOT NULL,
     name text NOT NULL,
     plan text DEFAULT 'free'::text NOT NULL,
     stripe_customer_id text,
     stripe_subscription_id text,
     created_at timestamp with time zone DEFAULT now()
 );
+
+
+-- The organization owner is a durable authority, not a mutable role label.
+-- Every membership write path (human, invitation, SSO, or SCIM) crosses this
+-- trigger, so no subsystem can demote, re-key, or remove the owner's grant.
+CREATE FUNCTION public.protect_organization_owner_membership() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM public.organizations organization
+        WHERE organization.id = OLD.org_id
+          AND organization.owner_user_id = OLD.user_id
+    ) THEN
+        IF TG_OP = 'DELETE' THEN
+            RAISE EXCEPTION 'organization owner membership is protected'
+                USING ERRCODE = '23514';
+        ELSIF NEW.user_id IS DISTINCT FROM OLD.user_id
+              OR NEW.role IS DISTINCT FROM OLD.role THEN
+            RAISE EXCEPTION 'organization owner membership is protected'
+                USING ERRCODE = '23514';
+        END IF;
+    END IF;
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER protect_organization_owner_membership_delete
+BEFORE DELETE ON public.org_members
+FOR EACH ROW EXECUTE FUNCTION public.protect_organization_owner_membership();
+
+CREATE TRIGGER protect_organization_owner_membership_update
+BEFORE UPDATE OF user_id, role ON public.org_members
+FOR EACH ROW EXECUTE FUNCTION public.protect_organization_owner_membership();
 
 
 --

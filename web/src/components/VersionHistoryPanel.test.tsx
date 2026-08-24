@@ -39,7 +39,7 @@ function setPermissions(permissions: string[], role = 'editor', roleBase: 'viewe
       profile: { name: null, email: null },
       organizations: [{
         id: 'default', name: 'Default', plan: null, role, roleBase, permissions,
-        usable: true, developmentFallback: false,
+        usable: true, developmentFallback: false, isOwner: false,
       }],
       invitations: [],
       currentOrganizationId: 'default',

@@ -160,7 +160,7 @@ func TestWithIdentityAuditTxBindsActorAndDynamicOrganization(t *testing.T) {
 
 	err := WithIdentityAuditTx(context.Background(), pool, identity, func(tx pgx.Tx, audit IdentityTxAudit) error {
 		if _, err := tx.Exec(context.Background(),
-			`INSERT INTO organizations (id, name) VALUES ($1, 'Bootstrap Org')`, org); err != nil {
+			`INSERT INTO organizations (id, owner_user_id, name) VALUES ($1, $2, 'Bootstrap Org')`, org, identity.UserID); err != nil {
 			return err
 		}
 		return audit(org, "org.created", Options{
