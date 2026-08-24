@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -63,6 +64,33 @@ func TestBrowserSecurityHeadersAreAlwaysPresent(t *testing.T) {
 	}
 	if got := h.Get("Content-Security-Policy"); got == "" {
 		t.Fatal("browser responses must carry a content security policy")
+	}
+}
+
+func TestBrowserConnectOriginsAdmitOnlyExplicitLoopbackHTTP(t *testing.T) {
+	t.Setenv("JANUSLY_BROWSER_CONNECT_ORIGINS", strings.Join([]string{
+		"http://127.0.0.1:7431",
+		"http://localhost:7431",
+		"http://[::1]:7431",
+		"http://attacker.example:7431",
+		"http://127.0.0.1:7431/path",
+		"https://redundant.example",
+	}, ","))
+
+	policy := corsProbe(t, http.MethodGet, "", "").Header().Get("Content-Security-Policy")
+	for _, allowed := range []string{
+		"http://127.0.0.1:7431",
+		"http://localhost:7431",
+		"http://[::1]:7431",
+	} {
+		if !strings.Contains(policy, allowed) {
+			t.Errorf("policy omitted explicit loopback origin %q: %s", allowed, policy)
+		}
+	}
+	for _, rejected := range []string{"attacker.example", "/path", "redundant.example"} {
+		if strings.Contains(policy, rejected) {
+			t.Errorf("policy admitted invalid source %q: %s", rejected, policy)
+		}
 	}
 }
 

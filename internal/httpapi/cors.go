@@ -8,7 +8,9 @@ package httpapi
 
 import (
 	"context"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -58,6 +60,33 @@ func resolveRequestID(inbound string) string {
 	return uuid.NewString()
 }
 
+func browserConnectSources() string {
+	sources := []string{"'self'", "https:", "wss:"}
+	seen := map[string]bool{"'self'": true, "https:": true, "wss:": true}
+	for raw := range strings.SplitSeq(os.Getenv("JANUSLY_BROWSER_CONNECT_ORIGINS"), ",") {
+		candidate := strings.TrimSpace(raw)
+		if candidate == "" {
+			continue
+		}
+		parsed, err := url.Parse(candidate)
+		if err != nil || parsed.Scheme != "http" || parsed.Host == "" || parsed.User != nil ||
+			(parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
+			continue
+		}
+		hostname := strings.ToLower(parsed.Hostname())
+		ip := net.ParseIP(hostname)
+		if hostname != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			continue
+		}
+		origin := parsed.Scheme + "://" + parsed.Host
+		if !seen[origin] {
+			sources = append(sources, origin)
+			seen[origin] = true
+		}
+	}
+	return strings.Join(sources, " ")
+}
+
 // WithBrowserHeaders wraps a handler with the contract's CORS + request-id
 // policy. Handlers read the resolved id via requestIDFrom.
 func WithBrowserHeaders(next http.Handler) http.Handler {
@@ -81,7 +110,7 @@ func WithBrowserHeaders(next http.Handler) http.Handler {
 		headers.Set("X-Frame-Options", "DENY")
 		headers.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		headers.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		headers.Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https: wss:; form-action 'self'")
+		headers.Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src "+browserConnectSources()+"; form-action 'self'")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

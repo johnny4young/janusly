@@ -1,0 +1,148 @@
+# Local identity lab for destructive qualification only. Janusly's durable
+# database remains the separate PostgreSQL 18 service in docker-compose.yml.
+project_id = "janusly-qualification-auth"
+
+[api]
+enabled = true
+port = 7431
+schemas = ["graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 100
+
+[api.tls]
+enabled = false
+
+[db]
+port = 7432
+shadow_port = 7430
+health_timeout = "2m"
+# Supabase CLI 2.115.0 currently provisions its local Auth database on 17.
+# This is not Janusly's PostgreSQL runtime contract.
+major_version = 17
+
+[db.pooler]
+enabled = false
+port = 7439
+pool_mode = "transaction"
+default_pool_size = 5
+max_client_conn = 20
+
+[db.migrations]
+enabled = false
+schema_paths = []
+
+[db.seed]
+enabled = false
+sql_paths = []
+
+[db.network_restrictions]
+enabled = false
+allowed_cidrs = ["127.0.0.1/32"]
+allowed_cidrs_v6 = ["::1/128"]
+
+[realtime]
+enabled = false
+
+[studio]
+enabled = false
+port = 7433
+api_url = "http://127.0.0.1:7431"
+
+[local_smtp]
+enabled = false
+port = 7434
+
+[storage]
+enabled = false
+file_size_limit = "1MiB"
+
+[storage.s3_protocol]
+enabled = false
+
+[storage.analytics]
+enabled = false
+max_namespaces = 1
+max_tables = 1
+max_catalogs = 1
+
+[storage.vector]
+enabled = false
+max_buckets = 1
+max_indexes = 1
+
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:7310"
+additional_redirect_urls = ["http://localhost:7310"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+enable_signup = true
+enable_anonymous_sign_ins = false
+enable_manual_linking = false
+minimum_password_length = 8
+password_requirements = ""
+
+[auth.rate_limit]
+email_sent = 2
+sms_sent = 2
+anonymous_users = 2
+token_refresh = 150
+sign_in_sign_ups = 100
+token_verifications = 100
+web3 = 2
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = false
+secure_password_change = false
+max_frequency = "1s"
+otp_length = 6
+otp_expiry = 3600
+
+[auth.sms]
+enable_signup = false
+enable_confirmations = false
+template = "Your code is {{ .Code }}"
+max_frequency = "5s"
+
+[auth.mfa]
+max_enrolled_factors = 2
+
+[auth.mfa.totp]
+enroll_enabled = false
+verify_enabled = false
+
+[auth.mfa.phone]
+enroll_enabled = false
+verify_enabled = false
+otp_length = 6
+template = "Your code is {{ .Code }}"
+max_frequency = "5s"
+
+[auth.external.apple]
+enabled = false
+client_id = ""
+secret = "env(SUPABASE_AUTH_EXTERNAL_APPLE_SECRET)"
+redirect_uri = ""
+url = ""
+
+[edge_runtime]
+enabled = false
+policy = "per_worker"
+inspector_port = 7438
+deno_version = 2
+
+[analytics]
+enabled = false
+port = 7437
+backend = "postgres"
+
+[experimental]
+orioledb_version = ""
+s3_host = "env(S3_HOST)"
+s3_region = "env(S3_REGION)"
+s3_access_key = "env(S3_ACCESS_KEY)"
+s3_secret_key = "env(S3_SECRET_KEY)"
+

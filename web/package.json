@@ -47,15 +47,16 @@
     "@vitest/browser": "4.1.10",
     "@vitest/browser-playwright": "4.1.10",
     "jsdom": "29.1.1",
+    "nanoid": "3.3.16",
     "oxc-parser": "0.140.0",
     "oxlint": "1.74.0",
+    "playwright": "1.61.1",
+    "playwright-core": "1.61.1",
+    "rolldown": "1.1.5",
+    "supabase": "2.115.0",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.1.5",
-    "vitest": "4.1.10",
-    "nanoid": "3.3.16",
-    "rolldown": "1.1.5",
-    "playwright": "1.61.1",
-    "playwright-core": "1.61.1"
+    "vitest": "4.1.10"
   }
 }

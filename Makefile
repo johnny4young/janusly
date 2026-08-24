@@ -11,7 +11,7 @@ GIT_TREE := $(shell git rev-parse 'HEAD^{tree}' 2>/dev/null || printf '%040d' 0)
 
 .PHONY: dev build artifact db-up db-down db-reset migrate generate lint test \
 	test-integration test-e2e test-e2e-full verify vuln frontend-install \
-	frontend-build contract
+	frontend-build contract qualify-local qualify-local-selftest
 
 dev: db-up migrate
 	JANUSLY_DATABASE_URL='$(DB_URL)' PNPM='$(PNPM)' bash scripts/dev.sh
@@ -80,6 +80,12 @@ test-e2e:
 # Playwright starts its own Vite server against it.
 test-e2e-full:
 	cd web && $(PNPM) exec playwright test --project=chromium
+
+qualify-local-selftest:
+	bash scripts/qualification-local.test.sh
+
+qualify-local:
+	CONFIRM='$(CONFIRM)' bash scripts/qualification-local.sh '$(or $(PROFILE),all)'
 
 verify: db-up migrate generate
 	@git diff --exit-code -- schema.sql internal/store contract || { \
