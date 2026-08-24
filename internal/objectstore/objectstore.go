@@ -164,9 +164,9 @@ func Get(ctx context.Context, providerOverride, key string, maxBytes int64) GetR
 			}
 			return GetResult{Ok: false, Provider: "local", Error: "object store read failed"}
 		}
-		defer file.Close()
 		body, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
-		if err != nil {
+		closeErr := file.Close()
+		if err != nil || closeErr != nil {
 			return GetResult{Ok: false, Provider: "local", Error: "object store read failed"}
 		}
 		if int64(len(body)) > maxBytes {
