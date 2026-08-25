@@ -33,6 +33,13 @@ RUN --mount=type=cache,id=janusly-mod,target=/go/pkg/mod \
       -o /out/janusly ./cmd/api
 
 FROM gcr.io/distroless/static-debian12:nonroot
+ARG JANUSLY_BUILD_COMMIT=0000000000000000000000000000000000000000
+ARG JANUSLY_BUILD_TREE=0000000000000000000000000000000000000000
+LABEL org.opencontainers.image.title="Janusly" \
+      org.opencontainers.image.description="AI operator for business workflows" \
+      org.opencontainers.image.source="https://github.com/johnny4young/janusly" \
+      org.opencontainers.image.revision="${JANUSLY_BUILD_COMMIT}" \
+      io.janusly.source-tree="${JANUSLY_BUILD_TREE}"
 COPY --from=go-build --chown=nonroot:nonroot /out/janusly /janusly
 USER nonroot:nonroot
 EXPOSE 3001

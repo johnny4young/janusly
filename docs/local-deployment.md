@@ -29,6 +29,8 @@ The root `Dockerfile` has three responsibilities:
 3. copy only `janusly` into a non-root minimal image.
 
 Build provenance is injected with exact 40-character Git commit and tree IDs.
+The build refuses a dirty checkout so those labels cannot misrepresent local
+changes as the current commit.
 
 ```bash
 make build
@@ -44,6 +46,9 @@ docker compose up -d janusly
 
 The migration command is intentionally explicit. A serving process refuses to
 start on an empty or incomplete schema.
+
+For the locally qualified Railway shape, cost model, environment contract, and
+remaining online gates, see [Railway deployment and cost qualification](railway.md).
 
 ## Fresh databases only
 

@@ -80,7 +80,11 @@ export function AiStudioPanel({
   onOpenRuns,
   onOpenTemplates,
 }: AiStudioPanelProps) {
-  const { t } = useT()
+  const { t, i18n } = useT()
+  // `t` is intentionally reference-stable; the resolved locale is therefore
+  // the dependency that invalidates translated memo values after an in-app
+  // language switch.
+  const locale = i18n.resolvedLanguage
 
   const starterPrompts = [
     t('aiStudio.starter1'),
@@ -150,7 +154,7 @@ export function AiStudioPanel({
       body: t('aiStudio.useCase.causal.body'),
       state: t('aiStudio.useCase.causal.alwaysOn'),
     },
-  ], [health?.enabled, t])
+  ], [health?.enabled, locale, t])
 
   const readinessSteps = useMemo(() => [
     {
@@ -173,7 +177,7 @@ export function AiStudioPanel({
         : t('aiStudio.readiness.healthBodyOff'),
       ready: Boolean(health?.enabled),
     },
-  ], [health, t])
+  ], [health, locale, t])
 
   const generate = async () => {
     const trimmed = prompt.trim()

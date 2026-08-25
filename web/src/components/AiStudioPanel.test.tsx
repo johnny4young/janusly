@@ -142,4 +142,16 @@ describe('<AiStudioPanel />', () => {
     expect(screen.getByText('El archivo .env de la raíz contiene ANTHROPIC_API_KEY')).toBeInTheDocument()
     expect(screen.queryByText(/OPENAI_API_KEY/i)).not.toBeInTheDocument()
   })
+
+  it('refreshes memoized provider guidance after an in-app locale switch', async () => {
+    renderPanel()
+    expect(screen.getByText('Root .env has ANTHROPIC_API_KEY')).toBeInTheDocument()
+    expect(screen.getByText('Prompt to workflow')).toBeInTheDocument()
+
+    await act(async () => { await changeAppLanguage('es') })
+
+    expect(screen.getByText('El archivo .env de la raíz contiene ANTHROPIC_API_KEY')).toBeInTheDocument()
+    expect(screen.getByText('Prompt → workflow')).toBeInTheDocument()
+    expect(screen.queryByText('Root .env has ANTHROPIC_API_KEY')).not.toBeInTheDocument()
+  })
 })

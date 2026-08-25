@@ -70,7 +70,8 @@ docker compose up -d janusly
 
 Open <http://127.0.0.1:3001>. Production should set `JANUSLY_ENV=production`,
 inject exact Git commit/tree build arguments, and provide the required secrets.
-See [local deployment](docs/local-deployment.md) and
+See [local deployment](docs/local-deployment.md),
+[Railway deployment and cost qualification](docs/railway.md), and
 [configuration](docs/configuration.md).
 
 ## Common commands

@@ -18,6 +18,7 @@ services:
       - postgres_data:/var/lib/postgresql
 
   janusly:
+    image: ${IMAGE:-janusly:local}
     build:
       context: .
       args:
@@ -30,7 +31,10 @@ services:
     environment:
       JANUSLY_DATABASE_URL: postgres://janusly:janusly-local@postgres:5432/janusly?sslmode=disable
       JANUSLY_ENV: ${JANUSLY_ENV:-development}
-      JANUSLY_PORT: 3001
+      # Railway's router reads PORT while Janusly deliberately reads only its
+      # own stable contract. Keep both aligned without adding a runtime alias.
+      PORT: ${PORT:-3001}
+      JANUSLY_PORT: ${JANUSLY_PORT:-3001}
       JANUSLY_INTERNAL_HOST: ${JANUSLY_INTERNAL_HOST:-127.0.0.1}
       JANUSLY_INTERNAL_PORT: 9464
       JANUSLY_WORKER_CONCURRENCY: ${JANUSLY_WORKER_CONCURRENCY:-8}

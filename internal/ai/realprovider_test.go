@@ -36,26 +36,35 @@ func TestBoundedRealAnthropicProvider(t *testing.T) {
 		APIKey: key, Model: DefaultModel, TimeoutMs: 45_000,
 		MaxRetries: 0, MaxOutputTokens: 32,
 	})
-	prompts := []string{
-		"Reply with only JANUSLY_PROVIDER_OK.",
-		"Reply with only JANUSLY_FALLBACK_READY.",
+	cases := []struct {
+		prompt string
+		want   string
+	}{
+		{prompt: "Reply with only JANUSLY_PROVIDER_OK.", want: "JANUSLY_PROVIDER_OK"},
+		{prompt: "Reply with only JANUSLY_FALLBACK_READY.", want: "JANUSLY_FALLBACK_READY"},
 	}
 	totalCost := 0.0
 	totalTokens := 0
-	for index, prompt := range prompts {
+	for index, testCase := range cases {
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		result, aiErr := client.GenerateText(ctx, GenerateTextInput{
 			System: "Follow the requested exact short reply. Do not add punctuation.",
-			Prompt: prompt, MaxOutputUnits: 32,
+			Prompt: testCase.prompt, MaxOutputUnits: 32,
 		})
 		cancel()
 		if aiErr != nil {
 			t.Fatalf("real provider call %d failed: class=%s message=%s", index+1, aiErr.Class, aiErr.Message)
 		}
-		if result == nil || strings.TrimSpace(result.Text) == "" || result.Provider != "anthropic" || result.ProviderSimulated {
+		if result == nil || result.Provider != "anthropic" || result.ProviderSimulated || result.Model != DefaultModel {
 			t.Fatalf("real provider call %d returned invalid result: %+v", index+1, result)
 		}
-		if result.CostUsd == nil || *result.CostUsd < 0 {
+		if got := strings.TrimSpace(result.Text); got != testCase.want {
+			t.Fatalf("real provider call %d response = %q, want %q", index+1, got, testCase.want)
+		}
+		if result.Usage.InputTokens <= 0 || result.Usage.OutputTokens <= 0 || result.Usage.TotalTokens <= 0 {
+			t.Fatalf("real provider call %d lacks measured token usage: %+v", index+1, result.Usage)
+		}
+		if result.CostUsd == nil || *result.CostUsd <= 0 {
 			t.Fatalf("real provider call %d lacks priced usage: %+v", index+1, result)
 		}
 		totalCost += *result.CostUsd
@@ -65,5 +74,5 @@ func TestBoundedRealAnthropicProvider(t *testing.T) {
 		t.Fatalf("real provider spend %.8f exceeded cap %.2f", totalCost, maxUSD)
 	}
 	t.Logf("real_provider calls=%d model=%s tokens=%d cost_usd=%s",
-		len(prompts), DefaultModel, totalTokens, fmt.Sprintf("%.8f", totalCost))
+		len(cases), DefaultModel, totalTokens, fmt.Sprintf("%.8f", totalCost))
 }
