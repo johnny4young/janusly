@@ -96,6 +96,39 @@ func New(cfg Config) (*Client, error) {
 // DoJSON sends one request and decodes a bounded JSON object response. HTTP
 // error statuses are returned to the caller with their decoded API envelope.
 func (c *Client) DoJSON(ctx context.Context, method, path string, body any) (int, map[string]any, error) {
+	status, raw, err := c.do(ctx, method, path, body)
+	if err != nil {
+		return status, nil, err
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return status, nil, fmt.Errorf("decode API response: %w", err)
+	}
+	if decoded == nil {
+		return status, nil, errors.New("API response must be a JSON object")
+	}
+	return status, decoded, nil
+}
+
+// DoJSONArray sends one request and decodes the legacy unversioned list shape
+// used by a small number of public routes. Keeping this separate preserves the
+// fail-closed object contract for every API-envelope call.
+func (c *Client) DoJSONArray(ctx context.Context, method, path string, body any) (int, []map[string]any, error) {
+	status, raw, err := c.do(ctx, method, path, body)
+	if err != nil {
+		return status, nil, err
+	}
+	var decoded []map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return status, nil, fmt.Errorf("decode API response: %w", err)
+	}
+	if decoded == nil {
+		return status, nil, errors.New("API response must be a JSON array")
+	}
+	return status, decoded, nil
+}
+
+func (c *Client) do(ctx context.Context, method, path string, body any) (int, []byte, error) {
 	ref, err := url.ParseRequestURI(path)
 	if err != nil || !strings.HasPrefix(path, "/") || ref.IsAbs() || ref.Host != "" {
 		return 0, nil, errors.New("API path must be an absolute-path reference")
@@ -141,12 +174,5 @@ func (c *Client) DoJSON(ctx context.Context, method, path string, body any) (int
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return response.StatusCode, nil, errors.New("API response is empty")
 	}
-	var decoded map[string]any
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return response.StatusCode, nil, fmt.Errorf("decode API response: %w", err)
-	}
-	if decoded == nil {
-		return response.StatusCode, nil, errors.New("API response must be a JSON object")
-	}
-	return response.StatusCode, decoded, nil
+	return response.StatusCode, raw, nil
 }

@@ -84,6 +84,36 @@ func TestClientRejectsUnsafeOrInvalidResponses(t *testing.T) {
 	}
 }
 
+func TestClientDecodesExplicitJSONArrayWithoutWeakeningObjects(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `[{"name":"one"},{"name":"two"}]`)
+	}))
+	defer server.Close()
+	client := newTestClient(t, Config{BaseURL: server.URL})
+	status, rows, err := client.DoJSONArray(context.Background(), http.MethodGet, "/credentials", nil)
+	if err != nil || status != http.StatusOK || len(rows) != 2 || rows[1]["name"] != "two" {
+		t.Fatalf("response = %d %+v, err=%v", status, rows, err)
+	}
+	if _, _, err := client.DoJSON(context.Background(), http.MethodGet, "/credentials", nil); err == nil {
+		t.Fatal("object decoder accepted an array")
+	}
+}
+
+func TestClientJSONArrayRejectsObjectAndNull(t *testing.T) {
+	for _, body := range []string{`{}`, `null`} {
+		t.Run(body, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.WriteString(w, body)
+			}))
+			defer server.Close()
+			client := newTestClient(t, Config{BaseURL: server.URL})
+			if _, _, err := client.DoJSONArray(context.Background(), http.MethodGet, "/x", nil); err == nil {
+				t.Fatalf("array decoder accepted %s", body)
+			}
+		})
+	}
+}
+
 func TestClientTimeoutAndRedirectBoundary(t *testing.T) {
 	t.Run("timeout", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

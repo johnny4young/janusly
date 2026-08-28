@@ -40,6 +40,15 @@ func call(method, path string, body any) (int, map[string]any) {
 	return status, decoded
 }
 
+func callArray(method, path string) (int, []map[string]any) {
+	status, decoded, err := client.DoJSONArray(context.Background(), method, path, nil)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "seed: API call failed at", apiBase+":", err)
+		os.Exit(1)
+	}
+	return status, decoded
+}
+
 func withQuery(path string, values url.Values) string {
 	return path + "?" + values.Encode()
 }
@@ -71,15 +80,11 @@ func main() {
 	fmt.Printf("seeding %s as org %q\n", apiBase, org)
 
 	// 1. Dummy credentials (create-if-missing by name).
-	_, credentials := call("GET", "/credentials", nil)
+	_, credentials := callArray("GET", "/credentials")
 	existing := map[string]bool{}
-	if rows, ok := credentials["credentials"].([]any); ok {
-		for _, raw := range rows {
-			if row, ok := raw.(map[string]any); ok {
-				if name, ok := row["name"].(string); ok {
-					existing[name] = true
-				}
-			}
+	for _, row := range credentials {
+		if name, ok := row["name"].(string); ok {
+			existing[name] = true
 		}
 	}
 	for name, kind := range map[string]string{
