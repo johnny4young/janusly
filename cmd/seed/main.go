@@ -9,17 +9,19 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
+	"context"
 	"fmt"
-	"net/http"
+	"net/url"
 	"os"
 	"time"
+
+	"github.com/johnny4young/janusly/internal/runbookclient"
 )
 
 var (
 	apiBase = envOr("JANUSLY_SEED_API", "http://127.0.0.1:3001")
 	org     = envOr("JANUSLY_SEED_ORG", "demo-org")
+	client  *runbookclient.Client
 )
 
 func envOr(key, fallback string) string {
@@ -30,30 +32,16 @@ func envOr(key, fallback string) string {
 }
 
 func call(method, path string, body any) (int, map[string]any) {
-	var reader *bytes.Reader
-	if body != nil {
-		raw, _ := json.Marshal(body)
-		reader = bytes.NewReader(raw)
-	} else {
-		reader = bytes.NewReader(nil)
-	}
-	request, err := http.NewRequest(method, apiBase+path, reader)
+	status, decoded, err := client.DoJSON(context.Background(), method, path, body)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "request:", err)
+		fmt.Fprintln(os.Stderr, "seed: API call failed at", apiBase+":", err)
 		os.Exit(1)
 	}
-	request.Header.Set("content-type", "application/json")
-	request.Header.Set("x-org-id", org)
-	request.Header.Set("x-user-id", "seed")
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "seed: API unreachable at", apiBase, "— run `make run` first:", err)
-		os.Exit(1)
-	}
-	defer func() { _ = response.Body.Close() }()
-	var decoded map[string]any
-	_ = json.NewDecoder(response.Body).Decode(&decoded)
-	return response.StatusCode, decoded
+	return status, decoded
+}
+
+func withQuery(path string, values url.Values) string {
+	return path + "?" + values.Encode()
 }
 
 func must(status int, decoded map[string]any) map[string]any {
@@ -65,7 +53,7 @@ func must(status int, decoded map[string]any) map[string]any {
 }
 
 func ensureWorkflow(id string, doc map[string]any) {
-	if status, _ := call("GET", "/v1/workflows/latest?workflowId="+id, nil); status == 200 {
+	if status, _ := call("GET", withQuery("/v1/workflows/latest", url.Values{"workflowId": {id}}), nil); status == 200 {
 		fmt.Println("  workflow", id, "already present")
 		return
 	}
@@ -74,6 +62,12 @@ func ensureWorkflow(id string, doc map[string]any) {
 }
 
 func main() {
+	var err error
+	client, err = runbookclient.New(runbookclient.Config{BaseURL: apiBase, OrgID: org, UserID: "seed"})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "seed: configuration:", err)
+		os.Exit(1)
+	}
 	fmt.Printf("seeding %s as org %q\n", apiBase, org)
 
 	// 1. Dummy credentials (create-if-missing by name).
@@ -180,7 +174,7 @@ func main() {
 		deadline := time.Now().Add(60 * time.Second)
 		for _, id := range started {
 			for {
-				_, statusBody := call("GET", "/v1/status?runId="+id, nil)
+				_, statusBody := call("GET", withQuery("/v1/status", url.Values{"runId": {id}}), nil)
 				status := ""
 				if data, ok := statusBody["data"].(map[string]any); ok {
 					if run, ok := data["run"].(map[string]any); ok {
@@ -218,7 +212,7 @@ func main() {
 // the document, so the seed reads it back through the same API the web
 // uses (never a local copy — what got saved is what runs).
 func startSaved(workflowID string, input map[string]any) string {
-	latest := must(call("GET", "/v1/workflows/latest?workflowId="+workflowID, nil))
+	latest := must(call("GET", withQuery("/v1/workflows/latest", url.Values{"workflowId": {workflowID}}), nil))
 	var doc any
 	if data, ok := latest["data"].(map[string]any); ok {
 		doc = data["dagJson"]

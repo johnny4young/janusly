@@ -7,7 +7,8 @@
 //
 //	JANUSLY_ADMIN_API     target API (default http://127.0.0.1:3001)
 //	JANUSLY_ADMIN_ORG     org id (default: default)
-//	JANUSLY_ADMIN_TOKEN   service token (Authorization: Bearer); when
+//	JANUSLY_ADMIN_TOKEN   service token (Authorization: Bearer), falling
+//	                      back to JANUSLY_API_SERVICE_TOKEN; when both are
 //	                      empty, dev headers are used with
 //	                      JANUSLY_ADMIN_USER (default janusly-admin)
 //
@@ -22,19 +23,22 @@
 package main
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"net/http"
+	"net/url"
 	"os"
+
+	"github.com/johnny4young/janusly/internal/runbookclient"
 )
 
 var (
 	apiBase = envOr("JANUSLY_ADMIN_API", "http://127.0.0.1:3001")
 	org     = envOr("JANUSLY_ADMIN_ORG", "default")
-	token   = os.Getenv("JANUSLY_ADMIN_TOKEN")
+	token   = envOr("JANUSLY_ADMIN_TOKEN", os.Getenv("JANUSLY_API_SERVICE_TOKEN"))
 	user    = envOr("JANUSLY_ADMIN_USER", "janusly-admin")
+	client  *runbookclient.Client
 )
 
 func envOr(key, fallback string) string {
@@ -45,32 +49,15 @@ func envOr(key, fallback string) string {
 }
 
 func call(method, path string, body any) (int, map[string]any) {
-	var reader *bytes.Reader
-	if body != nil {
-		raw, _ := json.Marshal(body)
-		reader = bytes.NewReader(raw)
-	} else {
-		reader = bytes.NewReader(nil)
-	}
-	request, err := http.NewRequest(method, apiBase+path, reader)
+	status, decoded, err := client.DoJSON(context.Background(), method, path, body)
 	if err != nil {
-		fail("request: %v", err)
+		fail("API call failed at %s: %v", apiBase, err)
 	}
-	request.Header.Set("content-type", "application/json")
-	request.Header.Set("x-org-id", org)
-	if token != "" {
-		request.Header.Set("Authorization", "Bearer "+token)
-	} else {
-		request.Header.Set("x-user-id", user)
-	}
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		fail("API unreachable at %s: %v", apiBase, err)
-	}
-	defer func() { _ = response.Body.Close() }()
-	var decoded map[string]any
-	_ = json.NewDecoder(response.Body).Decode(&decoded)
-	return response.StatusCode, decoded
+	return status, decoded
+}
+
+func withQuery(path string, values url.Values) string {
+	return path + "?" + values.Encode()
 }
 
 func fail(format string, args ...any) {
@@ -89,6 +76,13 @@ func emit(asJSON bool, payload map[string]any, human func()) {
 }
 
 func main() {
+	var err error
+	client, err = runbookclient.New(runbookclient.Config{
+		BaseURL: apiBase, OrgID: org, UserID: user, BearerToken: token,
+	})
+	if err != nil {
+		fail("configuration: %v", err)
+	}
 	if len(os.Args) < 2 {
 		fail("usage: janusly-admin <redrive|schedules|credentials|runs> … (--json anywhere for scripting)")
 	}
@@ -143,7 +137,7 @@ func cmdSchedules(args []string) {
 		if *workflow == "" {
 			fail("schedules list needs --workflow <id> (entries are per-workflow)")
 		}
-		status, decoded := call("GET", "/workflows/"+*workflow+"/schedule-history", nil)
+		status, decoded := call("GET", "/workflows/"+url.PathEscape(*workflow)+"/schedule-history", nil)
 		if status != 200 {
 			fail("schedule history failed: %d %+v", status, decoded)
 		}
@@ -159,7 +153,7 @@ func cmdSchedules(args []string) {
 		// schedules from the current version. The dedicated resync ride is
 		// the restore route for tombstones; for live workflows the engine
 		// resyncs on every save, so we touch the latest version.
-		status, decoded := call("GET", "/v1/workflows/latest?workflowId="+*workflow, nil)
+		status, decoded := call("GET", withQuery("/v1/workflows/latest", url.Values{"workflowId": {*workflow}}), nil)
 		if status != 200 {
 			fail("workflow not found: %d %+v", status, decoded)
 		}
@@ -214,7 +208,7 @@ func cmdRuns(args []string) {
 	if *runID == "" {
 		fail("runs inspect needs --run <id>")
 	}
-	status, decoded := call("GET", "/v1/run?runId="+*runID, nil)
+	status, decoded := call("GET", withQuery("/v1/run", url.Values{"runId": {*runID}}), nil)
 	if status != 200 {
 		fail("run inspect failed: %d %+v", status, decoded)
 	}
