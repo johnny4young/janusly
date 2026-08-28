@@ -133,3 +133,24 @@ make artifact
 The artifact builder requires a clean Git tree. It stages committed source and
 the generated web bundle in a temporary directory, writes `janusly` plus
 `manifest.json`, and leaves the worktree unchanged.
+
+## Supply-chain evidence
+
+Build the production image and its local evidence bundle from a clean checkout:
+
+```bash
+make supply-chain IMAGE=janusly:supply-chain
+```
+
+The target fixes BuildKit's SBOM scanner and the standalone Syft generator by
+digest, requests `mode=max` BuildKit provenance, and writes a Docker image
+archive, BuildKit metadata, image inspection, runtime provenance, an SPDX 2.3
+JSON SBOM, a summary, and `SHA256SUMS` under
+`artifacts/supply-chain/`. It verifies the current commit/tree, the non-root
+runtime user, OCI labels, provenance materials, and a non-empty SBOM before
+publishing the directory.
+
+This evidence is **not signed** and the target does not push or publish the
+image. Signing and registry attestations remain an explicit release operation.
+Base/runtime images and CI Actions are pinned by digest or commit; updates are
+reviewed changes rather than mutable tag resolution at qualification time.

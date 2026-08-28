@@ -81,6 +81,7 @@ See [local deployment](docs/local-deployment.md),
 | `make dev` | Run the Go runtime and Vite development server. |
 | `make build` | Build the single production image. |
 | `make artifact` | Produce `artifacts/janusly` and `manifest.json`. |
+| `make supply-chain` | Build the image plus checksummed provenance metadata and an SPDX SBOM. |
 | `make db-up` / `make db-down` | Start or stop the project PostgreSQL service. |
 | `make db-reset CONFIRM=reset` | Remove only this Compose project's volumes. |
 | `make migrate` | Apply the embedded PostgreSQL 18 baseline. |

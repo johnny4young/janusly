@@ -20,12 +20,12 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: 11.17.0
           run_install: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24.18.0
           cache: pnpm
@@ -45,13 +45,13 @@ jobs:
     name: Backend
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: 1.26.6
           cache: true
       - name: Format
-        run: test -z "$(gofmt -l $(find cmd internal e2e -name '*.go' -type f))"
+        run: test -z "$(find cmd internal e2e -name '*.go' -type f -exec gofmt -l {} +)"
       - name: Build
         run: go build ./...
       - name: Generated contract and SQL
@@ -59,7 +59,7 @@ jobs:
           go tool sqlc generate
           go run ./cmd/contract
           git diff --exit-code -- schema.sql internal/store contract
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84 # v6.5.2
         with:
           version: v2.7.2
           args: --timeout=10m
@@ -73,7 +73,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: pgvector/pgvector:pg18
+        image: pgvector/pgvector:pg18@sha256:12a379b47ad65289572ea0756efc11b7c241a6662833e8af7038cd3b73d647e0
         env:
           POSTGRES_USER: janusly
           POSTGRES_PASSWORD: janusly-local
@@ -88,8 +88,8 @@ jobs:
     env:
       JANUSLY_DATABASE_URL: postgres://janusly:janusly-local@127.0.0.1:5432/janusly?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: 1.26.6
           cache: true
@@ -101,12 +101,12 @@ jobs:
     name: Single-runtime E2E
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: 11.17.0
           run_install: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24.18.0
           cache: pnpm
@@ -120,16 +120,16 @@ jobs:
     runs-on: ubuntu-latest
     needs: [frontend, backend, integration, e2e]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: 1.26.6
           cache: true
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: 11.17.0
           run_install: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24.18.0
           cache: pnpm
@@ -138,11 +138,13 @@ jobs:
       - run: pnpm --dir web build
       - run: go run ./cmd/artifact
       - run: ./artifacts/janusly provenance
-      - uses: actions/upload-artifact@v4
+      - run: make supply-chain IMAGE=janusly:supply-chain-${{ github.sha }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: janusly-${{ github.sha }}
           path: |
             artifacts/janusly
             artifacts/manifest.json
+            artifacts/supply-chain/
           if-no-files-found: error
           retention-days: 14

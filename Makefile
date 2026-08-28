@@ -9,7 +9,7 @@ ARTIFACT_DIR ?= artifacts
 GIT_COMMIT := $(shell git rev-parse HEAD 2>/dev/null || printf '%040d' 0)
 GIT_TREE := $(shell git rev-parse 'HEAD^{tree}' 2>/dev/null || printf '%040d' 0)
 
-.PHONY: dev build artifact db-up db-down db-reset migrate generate lint test \
+.PHONY: dev build artifact supply-chain db-up db-down db-reset migrate generate lint test \
 	test-integration test-e2e test-e2e-full verify verify-current-db vuln frontend-install \
 	frontend-audit frontend-build contract qualify-local qualify-local-selftest backup-local \
 	restore-local recovery-local-selftest load-soak-local-selftest \
@@ -28,6 +28,9 @@ build:
 
 artifact: frontend-build
 	go run ./cmd/artifact -output-dir '$(ARTIFACT_DIR)'
+
+supply-chain:
+	SUPPLY_CHAIN_DIR='$(ARTIFACT_DIR)/supply-chain' IMAGE='$(IMAGE)' bash scripts/supply-chain-local.sh
 
 db-up:
 	$(COMPOSE) up -d --wait postgres
@@ -94,6 +97,7 @@ qualify-local-selftest:
 	bash scripts/assert-clean-source.test.sh
 	bash scripts/oci-railway-local.test.sh
 	bash scripts/private-metrics-local.test.sh
+	bash scripts/supply-chain-local.test.sh
 	bash scripts/real-provider-local.test.sh
 
 load-soak-local-selftest:

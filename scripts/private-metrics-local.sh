@@ -4,7 +4,7 @@ set -Eeuo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 project=${JANUSLY_PRIVATE_METRICS_PROJECT:-janusly-qualification-metrics-${UID:-0}-$$}
 image=${IMAGE:-janusly:qualification}
-postgres_image=${JANUSLY_PRIVATE_METRICS_POSTGRES_IMAGE:-pgvector/pgvector:pg18}
+postgres_image=${JANUSLY_PRIVATE_METRICS_POSTGRES_IMAGE:-pgvector/pgvector:pg18@sha256:12a379b47ad65289572ea0756efc11b7c241a6662833e8af7038cd3b73d647e0}
 probe_image=${JANUSLY_PRIVATE_METRICS_PROBE_IMAGE:-alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc}
 app_port=${JANUSLY_PRIVATE_METRICS_APP_PORT:-7330}
 network=${project}-private

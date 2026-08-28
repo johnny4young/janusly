@@ -2,7 +2,7 @@ name: ${COMPOSE_PROJECT_NAME:-janusly}
 
 services:
   postgres:
-    image: pgvector/pgvector:pg18
+    image: pgvector/pgvector:pg18@sha256:12a379b47ad65289572ea0756efc11b7c241a6662833e8af7038cd3b73d647e0
     environment:
       POSTGRES_USER: janusly
       POSTGRES_PASSWORD: janusly-local
@@ -65,7 +65,7 @@ services:
     restart: unless-stopped
 
   ollama:
-    image: ollama/ollama:0.24.0
+    image: ollama/ollama:0.24.0@sha256:a6149234667efc71d37766d61c1a16f24c33e4cd7a0bf4125c44a7e47e2419c4
     profiles: ["embeddings"]
     environment:
       OLLAMA_EMBED_MODEL: ${JANUSLY_EMBEDDING_MODEL:-bge-m3}
