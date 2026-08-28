@@ -130,6 +130,8 @@ database_url='postgres://janusly:janusly-local@postgres:5432/janusly?sslmode=dis
 docker run --rm --network "$network" \
   --env JANUSLY_ENV=production \
   --env JANUSLY_DATABASE_URL="$database_url" \
+  --env JANUSLY_RESUME_TOKEN_SECRET=qualification-resume-token-secret-not-for-production \
+  --env JANUSLY_CREDENTIAL_MASTER_KEY=0a6ee99978435f3e242e19aa61839045c6c1a5f1f5e63558f9d40706702570c7 \
   "$image" migrate >/dev/null
 
 docker run -d --name "$app" --network "$network" --network-alias janusly \
