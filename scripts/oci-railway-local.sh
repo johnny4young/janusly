@@ -68,10 +68,25 @@ validate_configuration() {
     die 'qualification ports must be distinct'
 }
 
-wait_for_app() {
+wait_for_ready() {
   local _
   for _ in $(seq 1 120); do
-    if curl --fail --silent --max-time 3 "$origin/healthz" >/dev/null; then return 0; fi
+    if curl --fail --silent --max-time 3 "$origin/readyz" >/dev/null; then return 0; fi
+    sleep 1
+  done
+  return 1
+}
+
+wait_for_not_ready() {
+  local _
+  for _ in $(seq 1 30); do
+    if ready_status=$(curl --silent --show-error --max-time 3 \
+      --output "$evidence_dir/readyz-database-down.json" --write-out '%{http_code}' \
+      "$origin/readyz"); then
+      if [[ "$ready_status" == 503 ]]; then return 0; fi
+    else
+      ready_status=000
+    fi
     sleep 1
   done
   return 1
@@ -159,13 +174,25 @@ compose up -d --wait postgres
 started=1
 compose run --rm --no-deps janusly migrate
 compose up -d --no-build janusly
-wait_for_app || die 'production OCI did not become healthy'
+wait_for_ready || die 'production OCI did not become ready'
 
 curl --fail --silent --show-error "$origin/healthz" >"$evidence_dir/healthz.json"
+curl --fail --silent --show-error "$origin/readyz" >"$evidence_dir/readyz.json"
 curl --fail --silent --show-error "$origin/health" >"$evidence_dir/health.json"
 curl --fail --silent --show-error "$origin/" >"$evidence_dir/index.html"
 grep -F '<div id="root"></div>' "$evidence_dir/index.html" >/dev/null ||
   die 'production OCI did not serve the React shell'
+
+# Prove the operational contract: liveness reports the process while
+# readiness removes it from traffic until PostgreSQL recovers.
+compose stop postgres >/dev/null
+curl --fail --silent --show-error "$origin/healthz" >"$evidence_dir/healthz-database-down.json"
+wait_for_not_ready || die "readiness returned $ready_status while PostgreSQL was down"
+jq -e '.ok == false and length == 1' "$evidence_dir/readyz-database-down.json" >/dev/null ||
+  die 'readiness failure leaked details or returned the wrong envelope'
+compose up -d --wait postgres >/dev/null
+wait_for_ready || die 'production OCI readiness did not recover after PostgreSQL restart'
+curl --fail --silent --show-error "$origin/readyz" >"$evidence_dir/readyz-recovered.json"
 
 curl --fail --silent --show-error \
   -H 'Content-Type: application/json' \

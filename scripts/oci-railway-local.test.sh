@@ -4,6 +4,9 @@ set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 script="$root/scripts/oci-railway-local.sh"
 bash -n "$script"
+grep -F '"$origin/readyz"' "$script" >/dev/null
+grep -F 'compose stop postgres' "$script" >/dev/null
+grep -F 'readiness returned $ready_status while PostgreSQL was down' "$script" >/dev/null
 
 result=$(JANUSLY_OCI_SELFTEST=1 "$script")
 jq -e '.project | startswith("janusly-qualification-oci-")' <<<"$result" >/dev/null

@@ -34,6 +34,41 @@ type workosClient interface {
 	ExchangeCode(context.Context, string, string) (workos.Profile, error)
 }
 
+type readinessProbe func(context.Context) error
+
+const readinessTimeout = time.Second
+
+func writeOperationalStatus(w http.ResponseWriter, status int, ok bool) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	if ok {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+		return
+	}
+	_, _ = w.Write([]byte(`{"ok":false}`))
+}
+
+func healthzHandler(w http.ResponseWriter, _ *http.Request) {
+	writeOperationalStatus(w, http.StatusOK, true)
+}
+
+func readyzHandler(timeout time.Duration, probe readinessProbe) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if probe == nil {
+			writeOperationalStatus(w, http.StatusServiceUnavailable, false)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
+		defer cancel()
+		if err := probe(ctx); err != nil {
+			writeOperationalStatus(w, http.StatusServiceUnavailable, false)
+			return
+		}
+		writeOperationalStatus(w, http.StatusOK, true)
+	}
+}
+
 // V1Server owns the /v1 route surface over one engine and pool.
 type V1Server struct {
 	engine         *engine.Engine
@@ -51,7 +86,7 @@ type V1Server struct {
 	backgroundWG   sync.WaitGroup
 }
 
-// NewV1Handler mounts the v1 routes plus /healthz. The stream hub's
+// NewV1Handler mounts the v1 routes plus the operational health surfaces. The stream hub's
 // LISTEN connection lives for the process (the production shape).
 func NewV1Handler(eng *engine.Engine, pool *pgxpool.Pool) http.Handler {
 	handler, _ := NewV1HandlerWithShutdown(eng, pool)
@@ -100,10 +135,8 @@ func newV1HandlerWithWorkOS(eng *engine.Engine, pool *pgxpool.Pool, client worko
 		}
 	}()
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	})
+	mux.HandleFunc("GET /healthz", healthzHandler)
+	mux.HandleFunc("GET /readyz", readyzHandler(readinessTimeout, pool.Ping))
 	// Public generated contract. Exact mux patterns win before the embedded
 	// SPA catch-all and the bytes are the same artifact `make ci` drift-checks.
 	mux.HandleFunc("GET /v1/openapi.json", func(w http.ResponseWriter, _ *http.Request) {

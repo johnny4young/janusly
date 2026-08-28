@@ -45,7 +45,7 @@ closed-catalog permissions.
 
 | Area | Representative routes |
 | --- | --- |
-| Health | `GET /healthz`, `GET /health` |
+| Health | `GET /healthz` (liveness), `GET /readyz` (database readiness), `GET /health` (safe operational summary) |
 | Identity | `/auth/session`, `/identity`, `/members`, `/roles` |
 | Workflows | `/v1/workflows`, `/workflows/save`, `/workflows/readiness` |
 | Runs | `/v1/start`, `/v1/run`, `/runs/:id/stream`, `/cancel`, `/resume` |

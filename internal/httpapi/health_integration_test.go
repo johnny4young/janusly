@@ -4,6 +4,7 @@ package httpapi
 
 import (
 	"context"
+	"net/http"
 	"testing"
 	"time"
 )
@@ -47,6 +48,10 @@ func TestTwoTierQueueHealth(t *testing.T) {
 	// It deliberately owns no workers: a worker racing this read would claim
 	// the seeded queued row and make an observability assertion nondeterministic.
 	h := newAPIHarnessWithoutWorkers(t)
+	ready := h.call("GET", "/readyz", nil, "")
+	if ready.status != http.StatusOK || ready.body["ok"] != true {
+		t.Fatalf("database readiness: %d %+v", ready.status, ready.body)
+	}
 
 	// Admin detail: the stale node counts, its age measured from the
 	// queued event, maintenance projected as a drained in-process lane.

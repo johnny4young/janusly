@@ -109,7 +109,7 @@ sensitive data even though managed credential values remain encrypted.
 8. Configure provider-grade backups for PostgreSQL, Supabase identity, and the
    credential root key; test restoration into an isolated empty target.
 9. Run the image as its built-in non-root user.
-10. Verify `/healthz`, `/health`, the React shell, and a controlled workflow.
+10. Verify `/healthz`, `/readyz`, `/health`, the React shell, and a controlled workflow.
 
 ## Optional embeddings
 

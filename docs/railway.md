@@ -58,7 +58,8 @@ and real Chromium. It does **not** push or deploy anything.
 4. Deploy the immutable OCI image to a Janusly service.
 5. Reference the database's private `DATABASE_URL`; do not use
    `DATABASE_PUBLIC_URL` for service-to-service traffic.
-6. Configure `/healthz` as the healthcheck path.
+6. Configure `/readyz` as the healthcheck path. `/healthz` is process
+   liveness and intentionally remains green during a PostgreSQL outage.
 7. Configure `/janusly migrate` as the pre-deploy command.
 8. Set both `PORT=3001` and `JANUSLY_PORT=3001`. Janusly deliberately does not
    treat platform-specific `PORT` as an application configuration alias.
@@ -182,7 +183,7 @@ Do not call the product online-qualified until all of these are recorded:
 
 - immutable pushed image digest matches the locally qualified image;
 - Railway environment uses PostgreSQL 18 and private networking;
-- migration, `/healthz`, `/health`, login, Owner/admin delegation, workflow
+- migration, `/healthz`, `/readyz`, `/health`, login, Owner/admin delegation, workflow
   authoring, execution, approval, and no-key fallback pass on the public URL;
 - a controlled Anthropic workflow passes with a tenant budget;
 - Railway hard-limit behavior and alert delivery are exercised;
