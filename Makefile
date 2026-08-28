@@ -11,7 +11,7 @@ GIT_TREE := $(shell git rev-parse 'HEAD^{tree}' 2>/dev/null || printf '%040d' 0)
 
 .PHONY: dev build artifact db-up db-down db-reset migrate generate lint test \
 	test-integration test-e2e test-e2e-full verify vuln frontend-install \
-	frontend-build contract qualify-local qualify-local-selftest backup-local \
+	frontend-audit frontend-build contract qualify-local qualify-local-selftest backup-local \
 	restore-local recovery-local-selftest load-soak-local-selftest \
 	qualify-oci-local qualify-real-provider
 
@@ -58,6 +58,9 @@ frontend-install:
 
 frontend-build:
 	cd web && $(PNPM) build
+
+frontend-audit:
+	cd web && $(PNPM) audit:ci
 
 lint:
 	@unformatted=$$(gofmt -l $$(find cmd internal e2e -name '*.go' -type f)); \
@@ -119,6 +122,7 @@ verify: db-up migrate generate
 	}
 	$(MAKE) lint
 	$(MAKE) vuln
+	$(MAKE) frontend-audit
 	$(MAKE) test
 	$(MAKE) test-integration
 	$(MAKE) frontend-build

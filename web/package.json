@@ -21,9 +21,10 @@
     "test:accessibility": "playwright test --config playwright.config.ts accessibility.spec.ts",
     "test:performance": "playwright test --config playwright.performance.config.ts",
     "test:e2e": "playwright test --config playwright.config.ts",
+    "audit:ci": "pnpm audit --audit-level=moderate",
     "bundle-report": "node scripts/bundle-report.mjs",
     "bundle-check": "node scripts/bundle-report.mjs --check --markdown ../artifacts/web-bundle-report.md --json ../artifacts/web-bundle-report.json",
-    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:scripts && pnpm test:browser && pnpm build && pnpm bundle-check"
+    "verify": "pnpm audit:ci && pnpm lint && pnpm typecheck && pnpm test && pnpm test:scripts && pnpm test:browser && pnpm build && pnpm bundle-check"
   },
   "dependencies": {
     "@supabase/auth-js": "2.110.7",
@@ -47,7 +48,7 @@
     "@vitest/browser": "4.1.10",
     "@vitest/browser-playwright": "4.1.10",
     "jsdom": "29.1.1",
-    "nanoid": "3.3.16",
+    "nanoid": "3.3.18",
     "oxc-parser": "0.140.0",
     "oxlint": "1.74.0",
     "playwright": "1.61.1",

@@ -20,6 +20,9 @@ output
 web/playwright-report
 web/test-results
 web/.vitest-attachments
+web/.design-sync
+web/.ds-sync
+web/ds-bundle
 docs/private
 docs/proposals
 docs/marketing
