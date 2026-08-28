@@ -3,9 +3,9 @@ import type { RunSummary } from '../types'
 
 const OUTCOME_TONES: Record<
   NonNullable<RunSummary['outcomeStatus']>,
-  'danger' | 'warn' | 'success' | 'neutral'
+  'danger' | 'warning' | 'success' | 'neutral'
 > = {
-  semantic_violation: 'warn',
+  semantic_violation: 'warning',
   semantic_quarantined: 'danger',
   semantic_recovered: 'success',
   semantic_accepted_loss: 'neutral',

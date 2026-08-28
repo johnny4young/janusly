@@ -1,0 +1,73 @@
+{
+  "pkg": "@janusly/web",
+  "globalName": "JanuslyDS",
+  "projectId": "49922e29-d20c-45a1-936b-8e3f3f44a351",
+  "shape": "package",
+  "srcDir": "src",
+  "tsconfig": "tsconfig.json",
+  "buildCmd": "pnpm build && cat dist/assets/index-*.css dist/assets/CanvasWorkspace-*.css > .design-sync/compiled.css && cp .design-sync/compiled.css node_modules/@janusly/web/ds-compiled.css && npx tsc -p tsconfig.app.json --declaration --emitDeclarationOnly --outDir types && node .design-sync/gen-dts-barrel.mjs",
+  "cssEntry": "ds-compiled.css",
+  "extraEntries": [
+    "./.design-sync/ds-bootstrap.ts"
+  ],
+  "extraFonts": [
+    ".design-sync/fonts/inter-tight.css",
+    ".design-sync/fonts/jetbrains-mono.css"
+  ],
+  "componentSrcMap": {
+    "App": null,
+    "AppWorkspace": null,
+    "Layout": null,
+    "ConfirmProvider": null,
+    "I18nNamespaceGate": null
+  },
+  "dtsPropsFor": {
+    "MemoryGovernancePanel": "/** This component takes no props — it reads its data from the Janusly store. */",
+    "CalibrationHealthTile": "/** This component takes no props — it reads its data from the Janusly store. */",
+    "AuditLogPanel": "/** This component takes no props — it reads its data from the Janusly store. */",
+    "SlackInteractionsPanel": "/** This component takes no props — it reads its data from the Janusly store. */",
+    "AiGuidanceSettingsPanel": "/** This component takes no props — it reads its data from the Janusly store. */",
+    "WorkflowStatusPageCard": "/** This component takes no props — it reads its data from the Janusly store. */",
+    "BudgetSettingsPanel": "/** This component takes no props — it reads its data from the Janusly store. */",
+    "MembersPanel": "/** This component takes no props — it reads its data from the Janusly store. */",
+    "VersionHistoryPanel": "/** This component takes no props — it reads its data from the Janusly store. */",
+    "ExperimentsPanel": "/** This component takes no props — it reads its data from the Janusly store. */",
+    "OnboardingReplayButton": "/** This component takes no props — it reads its data from the Janusly store. */",
+    "AuthPolicySettingsPanel": "/** This component takes no props — it reads its data from the Janusly store. */",
+    "ToastRenderer": "/** This component takes no props — it reads its data from the Janusly store. */",
+    "RecentAlertsCard": "/** This component takes no props — it reads its data from the Janusly store. */",
+    "ErrorBoundary": "children: React.ReactNode;\n  /** Rendered in place of the subtree when it throws. A function receives `{ reset }` so the fallback can clear the error itself. */\n  fallback: React.ReactNode | ((context: { reset: () => void }) => React.ReactNode);\n  /** Changing this clears a tripped fallback (workflow id, active tab, …), so a render error doesn't strand the operator until a full reload. */\n  resetKey?: string | number;\n  /** Prefix for the diagnostic console line, e.g. `canvas` or `panel:runs`. */\n  logTag?: string;"
+  },
+  "overrides": {
+    "HealthRing": {
+      "cardMode": "column"
+    },
+    "RunInputDialog": {
+      "cardMode": "single",
+      "primaryStory": "Prefilled"
+    },
+    "HumanFormDialog": {
+      "cardMode": "single",
+      "primaryStory": "Default"
+    },
+    "ShortcutsModal": {
+      "cardMode": "single",
+      "primaryStory": "Open"
+    },
+    "Login": {
+      "cardMode": "single",
+      "primaryStory": "Default",
+      "viewport": "1100x820"
+    },
+    "ReasoningPanel": {
+      "cardMode": "column"
+    },
+    "RunWorkspaceNavigation": {
+      "cardMode": "column"
+    }
+  },
+  "libOverrides": {
+    "source-kit.mjs": "keep src/main.tsx out of the synth entry — it boots the app and inlines raw Tailwind source CSS"
+  },
+  "readmeHeader": ".design-sync/conventions.md"
+}
