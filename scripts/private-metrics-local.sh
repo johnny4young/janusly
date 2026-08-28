@@ -86,6 +86,9 @@ wait_for_ready() {
   local _
   for _ in $(seq 1 120); do
     if curl --fail --silent --max-time 3 "$origin/readyz" >/dev/null; then return 0; fi
+    if [[ $(docker inspect --format '{{.State.Running}}' "$app" 2>/dev/null || true) != true ]]; then
+      return 1
+    fi
     sleep 1
   done
   return 1
@@ -145,7 +148,7 @@ docker run -d --name "$app" --network "$network" --network-alias janusly \
   --env JANUSLY_CREDENTIAL_MASTER_KEY=0a6ee99978435f3e242e19aa61839045c6c1a5f1f5e63558f9d40706702570c7 \
   --env JANUSLY_WEB_BASE_URL="$origin" \
   --env API_ALLOWED_ORIGINS="$origin" \
-  --env ALLOW_DEV_AUTH_HEADERS=false \
+  --env ALLOW_DEV_AUTH_HEADERS=true \
   --env ANTHROPIC_API_KEY= \
   --env OTEL_EXPORTER=none \
   "$image" >/dev/null
