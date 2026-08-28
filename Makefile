@@ -13,7 +13,7 @@ GIT_TREE := $(shell git rev-parse 'HEAD^{tree}' 2>/dev/null || printf '%040d' 0)
 	test-integration test-e2e test-e2e-full verify verify-current-db vuln frontend-install \
 	frontend-audit frontend-build contract qualify-local qualify-local-selftest backup-local \
 	restore-local recovery-local-selftest load-soak-local-selftest \
-	qualify-oci-local qualify-real-provider
+	qualify-oci-local qualify-private-metrics-local qualify-real-provider
 
 dev: db-up migrate
 	JANUSLY_DATABASE_URL='$(DB_URL)' PNPM='$(PNPM)' bash scripts/dev.sh
@@ -93,6 +93,7 @@ qualify-local-selftest:
 	bash scripts/load-soak-local.test.sh
 	bash scripts/assert-clean-source.test.sh
 	bash scripts/oci-railway-local.test.sh
+	bash scripts/private-metrics-local.test.sh
 	bash scripts/real-provider-local.test.sh
 
 load-soak-local-selftest:
@@ -103,6 +104,9 @@ qualify-local:
 
 qualify-oci-local:
 	CONFIRM='$(CONFIRM)' IMAGE='$(IMAGE)' bash scripts/oci-railway-local.sh
+
+qualify-private-metrics-local:
+	CONFIRM='$(CONFIRM)' IMAGE='$(IMAGE)' bash scripts/private-metrics-local.sh
 
 qualify-real-provider:
 	bash scripts/real-provider-local.sh

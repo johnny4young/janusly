@@ -63,7 +63,11 @@ and real Chromium. It does **not** push or deploy anything.
 7. Configure `/janusly migrate` as the pre-deploy command.
 8. Set both `PORT=3001` and `JANUSLY_PORT=3001`. Janusly deliberately does not
    treat platform-specific `PORT` as an application configuration alias.
-9. Keep internal metrics port `9464` private. Expose only the public service.
+9. Keep internal port `9464` private. For a separate Alloy service set Janusly
+   `JANUSLY_INTERNAL_HOST=0.0.0.0`, expose only `3001`, and set Alloy
+   `JANUSLY_METRICS_ADDRESS` to the Janusly private DNS name plus `:9464`.
+   Use `deploy/observability/alloy/railway.alloy`; the internal listener also
+   carries build identity and pprof and must never receive a public domain.
 10. Keep Serverless off and start with one replica. Multiple replicas require a
     separate online qualification of scheduler/worker behavior and capacity.
 

@@ -9,6 +9,10 @@ channels, with bounded reconnect cursors.
 
 The internal listener exposes Prometheus metrics and verified build identity on
 `127.0.0.1:9464` by default. Public health returns only safe bounded status.
+When a separate collector runs on a managed platform, bind the listener to
+`0.0.0.0` only inside that platform's private service network and publish no
+host/public route for `9464`. The listener also carries build identity and
+pprof, so peers able to reach it belong to the privileged operator plane.
 
 ## Local load and soak qualification
 

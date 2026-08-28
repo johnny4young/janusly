@@ -63,6 +63,17 @@ docker compose \
 Set `JANUSLY_METRICS_ADDRESS` when the runtime is not reachable at
 `host.docker.internal:9464`.
 
+## Railway private collector
+
+Use `deploy/observability/alloy/railway.alloy` for a separate Alloy service.
+Set Janusly `JANUSLY_INTERNAL_HOST=0.0.0.0`, but publish only port `3001`; set
+Alloy `JANUSLY_METRICS_ADDRESS` to the Janusly private DNS address on `9464`.
+The internal listener includes pprof and build identity in addition to metrics,
+so it is part of the privileged operator plane and must not have a public
+domain. `make qualify-private-metrics-local CONFIRM=reset
+IMAGE=janusly:qualification` proves the equivalent container-network boundary
+without contacting Grafana Cloud.
+
 ## Alerting
 
 `deploy/observability/prometheus/rules.yml` alerts on missing runtime metrics,
