@@ -10,7 +10,7 @@ GIT_COMMIT := $(shell git rev-parse HEAD 2>/dev/null || printf '%040d' 0)
 GIT_TREE := $(shell git rev-parse 'HEAD^{tree}' 2>/dev/null || printf '%040d' 0)
 
 .PHONY: dev build artifact db-up db-down db-reset migrate generate lint test \
-	test-integration test-e2e test-e2e-full verify vuln frontend-install \
+	test-integration test-e2e test-e2e-full verify verify-current-db vuln frontend-install \
 	frontend-audit frontend-build contract qualify-local qualify-local-selftest backup-local \
 	restore-local recovery-local-selftest load-soak-local-selftest \
 	qualify-oci-local qualify-real-provider
@@ -88,6 +88,7 @@ test-e2e-full:
 	cd web && $(PNPM) exec playwright test --project=chromium
 
 qualify-local-selftest:
+	bash scripts/verify-isolated.test.sh
 	bash scripts/qualification-local.test.sh
 	bash scripts/load-soak-local.test.sh
 	bash scripts/assert-clean-source.test.sh
@@ -115,7 +116,13 @@ backup-local:
 restore-local:
 	@CONFIRM='$(CONFIRM)' bash scripts/postgres-local-recovery.sh restore '$(INPUT)'
 
-verify: db-up migrate generate
+verify:
+	bash scripts/verify-isolated.sh
+
+# Internal seam used by scripts/verify-isolated.sh after it has created and
+# migrated a fresh PostgreSQL 18 database. Callers that opt into this target
+# own the lifecycle and schema state of DB_URL.
+verify-current-db: generate
 	@git diff --exit-code -- schema.sql internal/store contract || { \
 		echo "Generated SQLC or OpenAPI files drifted; run make generate and commit the result."; \
 		exit 1; \
