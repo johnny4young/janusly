@@ -1,6 +1,6 @@
 # Railway deployment and cost qualification
 
-> Status as of 2026-08-24: **locally qualified, not deployed to Railway**.
+> Status as of 2026-08-27: **locally qualified, not deployed to Railway**.
 > The repository can prove the production OCI image and keyless runtime on an
 > isolated machine. Only a real Railway pilot can prove platform networking,
 > measured usage, provider backups, and an online business margin.
@@ -101,6 +101,7 @@ The following is a planning snapshot, not a quote. Verify it before spending:
 
 | Item | Public price |
 |---|---:|
+| Free Trial | USD 0, one-time USD 5 credit expiring after 30 days |
 | Free plan | USD 0/month, USD 1 monthly usage credit |
 | Hobby plan | USD 5/month minimum, including USD 5 of usage |
 | Pro plan | USD 20/month minimum, including USD 20 of usage |
@@ -121,8 +122,13 @@ railway_usage = RAM_GB * 10
               + egress_GB * 0.05
               + volume_GB * 0.15
 
-railway_bill = max(plan_minimum, railway_usage)
+paid_plan_bill = max(plan_fee, railway_usage)
 ```
+
+That last equality applies to Hobby/Pro because their monthly fee is included
+usage rather than an extra fee on top of the same amount. Trial and Free use
+their own credit/limit rules. Billing is metered per second; the monthly
+constants above are comparison rates.
 
 Do not size from limits. Size from measured average consumption. Local load
 evidence measured the Janusly process, but it is not a Railway quote and does
@@ -152,14 +158,15 @@ not predicted utilization.
 
 ```bash
 railway usage limit status
-railway usage limit set --target workspace --soft 75 --hard 125
+railway usage limit set --target workspace --soft 7.50 --hard 10
 ```
 
 A hard limit controls downside by taking workloads offline. That may be right
 for a private pilot, but it is not a high-availability policy. The official
-recommendation is to deploy on Trial/Hobby, run for one representative week,
-read **Estimated Usage** in Workspace Usage, and extrapolate only after the
-traffic mix is representative.
+minimum hard limit is USD 10, and compute and Railway Agent limits are separate.
+The recommendation here is to deploy on Trial/Hobby, run for one representative
+week, read **Estimated Usage** in Workspace Usage, and extrapolate only after
+the traffic mix is representative.
 
 ## Profitability worksheet
 
