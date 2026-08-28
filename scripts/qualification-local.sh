@@ -177,9 +177,15 @@ start_supabase() {
   supabase start --exclude realtime,storage-api,imgproxy,mailpit,postgrest,postgres-meta,studio,edge-runtime,logflare,vector,supavisor >/dev/null
   local auth_status
   auth_status=$(supabase status -o json)
-  VITE_SUPABASE_ANON_KEY=$(jq -er '.ANON_KEY // .PUBLISHABLE_KEY // .anon_key // .publishable_key' <<<"$auth_status")
-  SUPABASE_SERVICE_ROLE_KEY=$(jq -er '.SERVICE_ROLE_KEY // .SECRET_KEY // .service_role_key // .secret_key' <<<"$auth_status")
-  export VITE_SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY
+  configure_supabase_status "$auth_status"
+}
+
+configure_supabase_status() {
+  local auth_status=$1
+  build_supabase_anon_key=$(jq -er '.ANON_KEY // .PUBLISHABLE_KEY // .anon_key // .publishable_key' <<<"$auth_status")
+  runtime_supabase_service_role_key=$(jq -er '.SERVICE_ROLE_KEY // .SECRET_KEY // .service_role_key // .secret_key' <<<"$auth_status")
+  export VITE_SUPABASE_ANON_KEY="$build_supabase_anon_key"
+  export SUPABASE_SERVICE_ROLE_KEY="$runtime_supabase_service_role_key"
 }
 
 wait_for_app() {
@@ -333,7 +339,15 @@ fi
 
 validate_configuration
 if [[ "$profile" == selftest ]]; then
-  printf '{"project":"%s","authProject":"%s","origin":"%s"}\n' "$project" "$auth_project" "$origin"
+  if [[ -n ${JANUSLY_QUALIFICATION_SUPABASE_STATUS_JSON:-} ]]; then
+    configure_supabase_status "$JANUSLY_QUALIFICATION_SUPABASE_STATUS_JSON"
+  fi
+  jq -n \
+    --arg project "$project" \
+    --arg authProject "$auth_project" \
+    --arg origin "$origin" \
+    --argjson supabaseConfigured "$([[ -n "$build_supabase_anon_key" && -n "$runtime_supabase_service_role_key" ]] && printf true || printf false)" \
+    '{project:$project,authProject:$authProject,origin:$origin,supabaseConfigured:$supabaseConfigured}'
   exit 0
 fi
 

@@ -8,8 +8,14 @@ output=$("$root/scripts/qualification-local.sh" selftest)
 jq -e '
   .project == "janusly-qualification-app" and
   .authProject == "janusly-qualification-auth" and
-  .origin == "http://127.0.0.1:7310"
+  .origin == "http://127.0.0.1:7310" and
+  .supabaseConfigured == false
 ' <<<"$output" >/dev/null
+
+configured=$(JANUSLY_QUALIFICATION_SUPABASE_STATUS_JSON='{"ANON_KEY":"publishable-test","SERVICE_ROLE_KEY":"secret-test"}' \
+  "$root/scripts/qualification-local.sh" selftest)
+jq -e '.supabaseConfigured == true and (has("anonKey") | not) and (has("serviceRoleKey") | not)' \
+  <<<"$configured" >/dev/null
 
 if JANUSLY_QUALIFICATION_PROJECT=janusly "$root/scripts/qualification-local.sh" selftest >/dev/null 2>&1; then
   echo "selftest accepted the ordinary development project" >&2
