@@ -33,3 +33,20 @@ embedding work.
 HTTP surfaces live in `internal/httpapi/aigenerate.go`, `aiassurance.go`,
 `aipatch.go`, and `aisurfaces.go`. Workflow AI execution lives in
 `internal/executors`.
+
+## Qualification layers
+
+`internal/httpapi/testdata/workflow-assurance-golden.json` is the provider-free
+golden set for deterministic compilation. It covers single and multiple intent
+outputs, English and Spanish resilience intent, conservative effect
+classification, authored output preservation, and preservation of the
+qualified V2 flagship.
+
+The opt-in `make qualify-real-provider` profile is deliberately separate from
+ordinary tests. With explicit consent and `ANTHROPIC_API_KEY`, it runs one
+Janusly product-generation case through the real system prompt, parse/repair
+ladder, assurance compiler, domain validator, and readiness gate. The test has
+a local hard ceiling of two Anthropic calls, zero SDK retries, a USD 1 maximum,
+redacted logs, measured token/cost accounting, and checksummed evidence. A
+green provider profile proves that bounded case only; it is not a general model
+quality or production-readiness certification.

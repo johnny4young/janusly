@@ -83,13 +83,14 @@ chmod 700 "$evidence_dir"
 raw_log=$(mktemp "${TMPDIR:-/tmp}/janusly-real-provider.XXXXXX")
 trap write_summary EXIT INT TERM
 
-# Deliberately one process, one test, one attempt. The tagged Go test owns the
-# exact two provider calls and sets MaxRetries=0; this shell never retries it.
+# Deliberately one process, one product test, one attempt. The tagged Go test
+# owns a hard maximum of two provider calls and sets MaxRetries=0; this shell
+# never retries it.
 if ! JANUSLY_REAL_PROVIDER_CONSENT=1 \
   JANUSLY_REAL_PROVIDER_MAX_USD="$max_usd" \
   go test -tags realprovider \
     -run '^TestBoundedRealAnthropicProvider$' \
-    -count=1 -v ./internal/ai >"$raw_log" 2>&1; then
+    -count=1 -v ./internal/httpapi >"$raw_log" 2>&1; then
   redact <"$raw_log" >"$evidence_dir/provider-test.log"
   cat "$evidence_dir/provider-test.log" >&2
   exit 1
@@ -102,7 +103,7 @@ result_line=$(grep -E 'real_provider calls=[0-9]+ model=[^ ]+ tokens=[0-9]+ cost
 calls=$(sed -E 's/.* calls=([0-9]+) .*/\1/' <<<"$result_line")
 tokens=$(sed -E 's/.* tokens=([0-9]+) .*/\1/' <<<"$result_line")
 cost_usd=$(sed -E 's/.* cost_usd=([0-9.]+).*/\1/' <<<"$result_line")
-[[ "$calls" == 2 ]] || die "expected exactly 2 provider calls, observed $calls"
+[[ "$calls" =~ ^[12]$ ]] || die "expected one or two provider calls, observed $calls"
 [[ "$tokens" =~ ^[1-9][0-9]*$ ]] || die 'provider token accounting was not positive'
 awk -v cost="$cost_usd" -v cap="$max_usd" 'BEGIN { exit !(cost > 0 && cost <= cap) }' ||
   die "provider cost $cost_usd exceeded cap $max_usd"

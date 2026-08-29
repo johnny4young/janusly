@@ -40,6 +40,19 @@ import (
 //go:embed ai_generate_prompt.txt
 var generateSystemPrompt string
 
+func (s *V1Server) resolvedGenerateSystemPrompt(ctx context.Context, orgID string) string {
+	systemPrompt := generateSystemPrompt
+	// The nil-pool path exists only for the explicitly tagged, bounded
+	// real-provider product qualification. Production always has a pool.
+	if s == nil || s.pool == nil {
+		return systemPrompt
+	}
+	if guidance := aiguidance.Load(ctx, s.pool, orgID, ""); guidance != "" {
+		systemPrompt += "\n\n" + guidance
+	}
+	return systemPrompt
+}
+
 // Reference constants.
 const (
 	freeJsonMaxAttempts = 2
@@ -201,10 +214,7 @@ func (s *V1Server) generateFreeJson(ctx context.Context, client ai.Client, promp
 
 	// Operator guidance (janusly.md) appends as a fenced DATA section —
 	// empty guidance leaves the base prompt byte-for-byte unchanged.
-	systemPrompt := generateSystemPrompt
-	if guidance := aiguidance.Load(ctx, s.pool, rc.orgID, ""); guidance != "" {
-		systemPrompt = generateSystemPrompt + "\n\n" + guidance
-	}
+	systemPrompt := s.resolvedGenerateSystemPrompt(ctx, rc.orgID)
 
 	generate := func(currentPrompt string) (string, *ai.AIError) {
 		result, aiErr := client.GenerateText(ctx, ai.GenerateTextInput{
@@ -402,10 +412,7 @@ func clampCandidateCount(n int) int {
 // to the single-shot ladder.
 func (s *V1Server) selectBestOfN(ctx context.Context, client ai.Client, prompt, modelHint string,
 	callContext ai.CallContext, n int, meta *generationMeta) ([]byte, int) {
-	systemPrompt := generateSystemPrompt
-	if guidance := aiguidance.Load(ctx, s.pool, callContext.OrgID, ""); guidance != "" {
-		systemPrompt = generateSystemPrompt + "\n\n" + guidance
-	}
+	systemPrompt := s.resolvedGenerateSystemPrompt(ctx, callContext.OrgID)
 	type candidate struct {
 		raw      []byte
 		model    string
