@@ -5,6 +5,7 @@ package httpapi
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -82,10 +83,14 @@ func TestBoundedRealAnthropicProvider(t *testing.T) {
 		maxUSD = parsed
 	}
 
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DisableKeepAlives = true
+	providerHTTPClient := &http.Client{Transport: transport}
+	t.Cleanup(transport.CloseIdleConnections)
 	client := &boundedProductClient{
 		delegate: ai.New(ai.Config{
 			APIKey: key, Model: ai.DefaultModel, TimeoutMs: 45_000,
-			MaxRetries: 0, MaxOutputTokens: 1_200,
+			MaxRetries: 0, MaxOutputTokens: 1_200, HTTPClient: providerHTTPClient,
 		}),
 		maxCalls: 2,
 	}

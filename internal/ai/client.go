@@ -109,6 +109,10 @@ type Config struct {
 	APIKey  string
 	Model   string
 	BaseURL string
+	// HTTPClient optionally supplies an owned transport. Production leaves
+	// this nil and uses the SDK default; bounded qualifications inject one so
+	// they can close idle HTTP/2 connections before goleak evaluates the process.
+	HTTPClient *http.Client
 	// TimeoutMs bounds one SDK call end to end.
 	TimeoutMs int
 	// MaxRetries is the SDK-level retry count.
@@ -149,6 +153,9 @@ func New(cfg Config) Client {
 	}
 	if cfg.BaseURL != "" {
 		options = append(options, option.WithBaseURL(cfg.BaseURL))
+	}
+	if cfg.HTTPClient != nil {
+		options = append(options, option.WithHTTPClient(cfg.HTTPClient))
 	}
 	return &anthropicClient{cfg: cfg, client: anthropic.NewClient(options...)}
 }
