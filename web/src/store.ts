@@ -181,6 +181,9 @@ type WorkflowStore = {
   currentWorkflowOutputs: WorkflowDefinition['outputs']
   /** Opt-in strict handling for unresolved node-config templates. */
   currentWorkflowTemplatePolicy: WorkflowDefinition['templatePolicy']
+  /** Workflow metadata and recovery policy must survive hydrate → edit → save. */
+  currentWorkflowMetadata: WorkflowDefinition['metadata']
+  currentWorkflowRecovery: WorkflowDefinition['recovery']
   nodes: WorkflowGraphNode[]
   edges: WorkflowGraphEdge[]
   selectedNodeId: string | null
@@ -334,6 +337,8 @@ function graphToWorkflow(
   inputs: WorkflowDefinition['inputs'],
   outputs: WorkflowDefinition['outputs'],
   templatePolicy: WorkflowDefinition['templatePolicy'],
+  metadata: WorkflowDefinition['metadata'],
+  recovery: WorkflowDefinition['recovery'],
 ): WorkflowDefinition {
   return {
     id,
@@ -353,6 +358,8 @@ function graphToWorkflow(
     ...(inputs ? { inputs } : {}),
     ...(outputs ? { outputs } : {}),
     ...(templatePolicy ? { templatePolicy } : {}),
+    ...(metadata ? { metadata } : {}),
+    ...(recovery ? { recovery } : {}),
     ui: {
       positions: Object.fromEntries(nodes
         .filter(node => Number.isFinite(node.position.x) && Number.isFinite(node.position.y))
@@ -383,6 +390,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   currentWorkflowInputs: undefined,
   currentWorkflowOutputs: undefined,
   currentWorkflowTemplatePolicy: undefined,
+  currentWorkflowMetadata: undefined,
+  currentWorkflowRecovery: undefined,
   nodes: [],
   edges: [],
   selectedNodeId: null,
@@ -499,6 +508,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       currentWorkflowInputs: workflow.inputs,
       currentWorkflowOutputs: workflow.outputs,
       currentWorkflowTemplatePolicy: workflow.templatePolicy,
+      currentWorkflowMetadata: workflow.metadata ? structuredClone(workflow.metadata) : undefined,
+      currentWorkflowRecovery: workflow.recovery ? structuredClone(workflow.recovery) : undefined,
       nodes: graph.nodes,
       edges: graph.edges,
       selectedNodeId: null,
@@ -527,6 +538,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       state.currentWorkflowInputs,
       state.currentWorkflowOutputs,
       state.currentWorkflowTemplatePolicy,
+      state.currentWorkflowMetadata,
+      state.currentWorkflowRecovery,
     )
   },
 
@@ -540,6 +553,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       currentWorkflowInputs: undefined,
       currentWorkflowOutputs: undefined,
       currentWorkflowTemplatePolicy: undefined,
+      currentWorkflowMetadata: undefined,
+      currentWorkflowRecovery: undefined,
       nodes: [],
       edges: [],
       selectedNodeId: null,

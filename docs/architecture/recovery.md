@@ -16,6 +16,13 @@ impact attribution, and feedback.
 - AI patches are suggestions. Deterministic evidence, permissions, and
   operator action retain authority.
 - Playbooks require exact workflow/signature matching and fresh validation.
+- Recovery Contract V1 describes technical failure, evidence, effect, repair,
+  approval, autonomy, verification, and recurrence boundaries. V1 semantic
+  detection is always disabled.
+- Recovery Contract V2 adds deterministic semantic detectors and immutable
+  pass/violation fixtures. These fixtures are the Qualification Contract; they
+  must replay before save and an exact version-pair qualification receipt gates
+  rollout when either side is V2.
 
 Implementation is divided between `internal/recovery`, `internal/engine`, and
 recovery handlers in `internal/httpapi`.

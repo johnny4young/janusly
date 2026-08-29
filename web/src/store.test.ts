@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { __resetBumpCoalesceForTests, registerFlowOps, registerNodePlacementResolver, useWorkflowStore } from './store'
+import type { WorkflowDefinition } from './types'
 
 const initialState = useWorkflowStore.getState()
 
@@ -144,6 +145,43 @@ describe('useWorkflowStore', () => {
     useWorkflowStore.getState().newWorkflow()
     expect(useWorkflowStore.getState().currentWorkflowTemplatePolicy).toBeUndefined()
     expect(useWorkflowStore.getState().getWorkflowJson()).not.toHaveProperty('templatePolicy')
+  })
+
+  it('preserves metadata and the versioned recovery contract across editor round-trips', () => {
+    const recovery = {
+      circuitBreaker: 3,
+      contract: {
+        version: '1',
+        failure: {
+          technical: { terminalNodeFailure: true, stalledNode: true },
+          semantic: { mode: 'disabled' },
+        },
+        evidence: { required: ['failure_snapshot', 'audit_trail', 'terminal_outcome'] },
+        effects: [],
+        repairs: { allowed: ['retry', 'config_patch'] },
+        validation: { minimumEvidenceLevel: 'static' },
+        approval: { productionMutation: 'required', permission: 'recovery.write' },
+        autonomyLevel: 1,
+        verification: { kind: 'generation_bound_terminal_success' },
+        recurrence: { windowDays: 7 },
+      },
+    } satisfies NonNullable<WorkflowDefinition['recovery']>
+    useWorkflowStore.getState().hydrateWorkflow({
+      id: 'wf-assured',
+      metadata: { tags: ['assured'], owner: 'ops' },
+      recovery,
+      nodes: [{ id: 'n1', type: 'noop', config: {} }],
+      edges: [],
+    })
+
+    expect(useWorkflowStore.getState().getWorkflowJson()).toMatchObject({
+      metadata: { tags: ['assured'], owner: 'ops' },
+      recovery,
+    })
+
+    useWorkflowStore.getState().newWorkflow()
+    expect(useWorkflowStore.getState().getWorkflowJson()).not.toHaveProperty('metadata')
+    expect(useWorkflowStore.getState().getWorkflowJson()).not.toHaveProperty('recovery')
   })
 
   it('serializes trimmed custom labels and editor positions', () => {

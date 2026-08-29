@@ -59,6 +59,33 @@ describe('<AiStudioPanel />', () => {
     expect(screen.getByText(/ZZGENERATED/)).toBeInTheDocument()
   })
 
+  it('shows the executable assurance contracts present in a generated draft', async () => {
+    renderPanel(vi.fn(async () => ({
+      mode: 'ai' as const,
+      workflow: {
+        name: 'Qualified flow', nodes: [], edges: [],
+        outputs: { result: '{{context.done.output}}' },
+        recovery: {
+          circuitBreaker: 3,
+          contract: {
+            version: '2',
+            failure: {
+              technical: { terminalNodeFailure: true, stalledNode: true },
+              semantic: { mode: 'deterministic', detectors: [], evaluationFixtures: [] },
+            },
+          },
+        },
+      } as unknown as WorkflowDefinition,
+    })))
+
+    fireEvent.click(screen.getByRole('button', { name: /Draft flow/i }))
+
+    const summary = await screen.findByTestId('workflow-assurance-summary')
+    expect(summary).toHaveTextContent('Intent contract')
+    expect(summary).toHaveTextContent('Recovery contract')
+    expect(summary).toHaveTextContent('Qualification contract')
+  })
+
   it('explains when the AI budget warning reduces Best-of-N candidates', async () => {
     renderPanel(vi.fn(async () => ({
       mode: 'ai' as const,

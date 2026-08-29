@@ -47,6 +47,20 @@ func TestGenerateWorkflowLadder(t *testing.T) {
 	if _, present := res.body["aiError"]; present {
 		t.Fatal("no-key fallback must NOT carry aiError (evals skip contract)")
 	}
+	if outputs, ok := res.body["outputs"].(map[string]any); !ok || outputs["result"] != "{{context.done.output}}" {
+		t.Fatalf("fallback must carry a compiled intent contract: %#v", res.body["outputs"])
+	}
+	recoverable := h.call("POST", "/ai/generate-workflow", map[string]any{
+		"prompt": "Pause for human approval in a resilient, recoverable workflow",
+	}, "")
+	recoveryDoc, ok := recoverable.body["recovery"].(map[string]any)
+	if recoverable.status != 200 || !ok || recoveryDoc["contract"] == nil {
+		t.Fatalf("keyless recovery contract: %d %#v", recoverable.status, recoverable.body)
+	}
+	contract := recoveryDoc["contract"].(map[string]any)
+	if contract["version"] != "1" || contract["autonomyLevel"] != float64(1) {
+		t.Fatalf("keyless recovery must be conservative V1: %#v", contract)
+	}
 	// The other two eval-locked templates.
 	if r := h.call("POST", "/ai/generate-workflow", map[string]any{"prompt": "Fetch a webhook URL and summarize the response with AI"}, ""); r.body["id"] != "http-ai-summary" {
 		t.Fatalf("http-ai-summary template: %+v", r.body["id"])
@@ -94,6 +108,9 @@ func TestGenerateWorkflowLadder(t *testing.T) {
 	if generated.status != 200 || generated.body["mode"] != "ai" || generated.body["id"] != "gen-1" {
 		t.Fatalf("ai mode: %d %+v", generated.status, generated.body)
 	}
+	if outputs, ok := generated.body["outputs"].(map[string]any); !ok || outputs["result"] != "{{context.a.output}}" {
+		t.Fatalf("AI result must carry compiled intent output: %#v", generated.body["outputs"])
+	}
 
 	// Repair: draft with a dangling edge → issues fed back → fixed draft.
 	repaired := h.call("POST", "/ai/generate-workflow", map[string]any{"prompt": "two noops"}, "")
@@ -113,6 +130,13 @@ func TestGenerateWorkflowLadder(t *testing.T) {
 		WHERE org_id = $1 AND action = 'ai.workflow.generated' AND metadata @> '{"mode":"ai"}'`, h.org).Scan(&aiAudits)
 	if aiAudits != 2 {
 		t.Fatalf("ai generations must audit: %d", aiAudits)
+	}
+	var compiledAudits int
+	_ = pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_logs
+		WHERE org_id = $1 AND action = 'ai.workflow.generated'
+		  AND metadata @> '{"mode":"ai","intentContractAdded":true}'`, h.org).Scan(&compiledAudits)
+	if compiledAudits != 2 {
+		t.Fatalf("assurance compilation must be auditable: %d", compiledAudits)
 	}
 
 	// Hard provider failure: the template comes back WITH the aiError.

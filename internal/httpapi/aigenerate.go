@@ -8,10 +8,10 @@
 // attempted, WITHOUT aiError when no provider is configured — that
 // distinction is what lets `pnpm evals` skip ai-mode cases at $0.
 //
-// This route includes Best-of-N and bounded operator guidance. It does
-// not apply few-shot exemplars, PromptOps selection, second-pass noop
-// promotion, or the deterministic PagerDuty recipe; a budget-blocked
-// PagerDuty prompt therefore answers 402 here rather than emitting it.
+// This route includes Best-of-N, bounded operator guidance, and a typed
+// assurance compiler for intent outputs plus explicitly requested technical
+// recovery. It never auto-promotes placeholders or invents V2 semantic
+// qualification criteria; a budget-blocked request answers 402.
 package httpapi
 
 import (
@@ -128,10 +128,13 @@ func (s *V1Server) generateWorkflowCore(r *http.Request, rc v1Request) opResult 
 	// the evals harness reads that as "no key reachable" and skips ai-mode
 	// cases, keeping a keyless run green at zero cost.
 	if !client.Configured() {
-		fallback := fallbackTemplateForPrompt(body.Prompt)
+		fallback, compilation := compiledFallbackForPrompt(body.Prompt)
 		audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.generated", audit.Options{
 			TargetType: "ai", TargetID: templateID(fallback),
-			Metadata: map[string]any{"mode": "fallback", "error": "AI provider not configured", "generationMode": "free_json"},
+			Metadata: map[string]any{
+				"mode": "fallback", "error": "AI provider not configured", "generationMode": "free_json",
+				"intentContractAdded": compilation.AddedOutputs, "recoveryContractAdded": compilation.AddedRecoveryContract,
+			},
 		})
 		return opOK(withMode(fallback, "fallback", ""))
 	}
@@ -150,10 +153,13 @@ func (s *V1Server) generateWorkflowCore(r *http.Request, rc v1Request) opResult 
 	}
 	workflowJSON, meta, aiErr := s.generateFreeJson(ctx, client, body.Prompt, body.Model, rc, candidateTarget)
 	if aiErr != nil {
-		fallback := fallbackTemplateForPrompt(body.Prompt)
+		fallback, compilation := compiledFallbackForPrompt(body.Prompt)
 		audit.Write(ctx, s.pool, rc.authContext, "ai.workflow.generated", audit.Options{
 			TargetType: "ai", TargetID: templateID(fallback),
-			Metadata: map[string]any{"mode": "fallback", "error": aiErr.Error(), "generationMode": "free_json"},
+			Metadata: map[string]any{
+				"mode": "fallback", "error": aiErr.Error(), "generationMode": "free_json",
+				"intentContractAdded": compilation.AddedOutputs, "recoveryContractAdded": compilation.AddedRecoveryContract,
+			},
 		})
 		return opOK(withMode(fallback, "fallback", aiErr.Error()))
 	}
@@ -167,18 +173,21 @@ func (s *V1Server) generateWorkflowCore(r *http.Request, rc v1Request) opResult 
 			"model": meta.model, "provider": meta.provider,
 			"attempts": meta.attempts, "repairAttempts": meta.repairAttempts,
 			"candidateCount": meta.candidateCount, "validCandidates": meta.validCandidates,
+			"intentContractAdded": meta.intentContractAdded, "recoveryContractAdded": meta.recoveryContractAdded,
 		},
 	})
 	return opOK(withMode(workflowDoc, "ai", ""))
 }
 
 type generationMeta struct {
-	model           string
-	provider        string
-	attempts        int
-	repairAttempts  int
-	candidateCount  int
-	validCandidates int
+	model                 string
+	provider              string
+	attempts              int
+	repairAttempts        int
+	candidateCount        int
+	validCandidates       int
+	intentContractAdded   bool
+	recoveryContractAdded bool
 }
 
 // generateFreeJson runs the contract's free-JSON ladder: up to two
@@ -277,7 +286,34 @@ func (s *V1Server) generateFreeJson(ctx context.Context, client ai.Client, promp
 		return nil, meta, &ai.AIError{Class: "invalid_output",
 			Message: "generated workflow failed validation: " + issueSummary(issues)}
 	}
-	return workflowJSON, meta, nil
+	compiled, compilation, err := compileWorkflowAssurance(prompt, workflowJSON)
+	if err != nil {
+		return nil, meta, &ai.AIError{Class: "invalid_output", Message: err.Error()}
+	}
+	meta.intentContractAdded = compilation.AddedOutputs
+	meta.recoveryContractAdded = compilation.AddedRecoveryContract
+	return compiled, meta, nil
+}
+
+// compiledFallbackForPrompt isolates request-specific compilation from the
+// process-global fallback catalog. Catalog documents are startup-validated;
+// an impossible compiler failure still degrades to an independent deep copy.
+func compiledFallbackForPrompt(prompt string) (map[string]any, assuranceCompilation) {
+	template := fallbackTemplateForPrompt(prompt)
+	raw, err := json.Marshal(template)
+	if err == nil {
+		if compiled, meta, compileErr := compileWorkflowAssurance(prompt, raw); compileErr == nil {
+			var document map[string]any
+			if json.Unmarshal(compiled, &document) == nil && document != nil {
+				return document, meta
+			}
+		}
+	}
+	copy := map[string]any{}
+	if raw, err := json.Marshal(template); err == nil {
+		_ = json.Unmarshal(raw, &copy)
+	}
+	return copy, assuranceCompilation{}
 }
 
 // composeRepairPrompt mirrors the contract's directed-repair framing:

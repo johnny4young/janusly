@@ -56,7 +56,7 @@ type AiStudioPanelProps = {
 }
 
 type ResultState =
-  | { kind: 'workflow'; mode: AiMode; title: string; body: string; aiError?: string; bonBackoff?: AiCandidateBackoff }
+  | { kind: 'workflow'; mode: AiMode; title: string; body: string; assurance: WorkflowAssuranceState; aiError?: string; bonBackoff?: AiCandidateBackoff }
   | { kind: 'explanation'; mode: AiMode; title: string; body: string; aiError?: string }
   | { kind: 'review'; mode: AiMode; title: string; review: ReviewFindings; aiError?: string }
   | { kind: 'fix'; mode: AiMode; title: string; suggestions: WorkflowImprovementSuggestion[]; aiError?: string }
@@ -65,6 +65,21 @@ const MODE_COPY_KEYS: Record<AiMode, string> = {
   ai: 'aiStudio.modeCopy.ai',
   fallback: 'aiStudio.modeCopy.fallback',
   error: 'aiStudio.modeCopy.error',
+}
+
+type WorkflowAssuranceState = {
+  intent: boolean
+  recovery: boolean
+  qualification: boolean
+}
+
+function workflowAssuranceState(workflow: WorkflowDefinition): WorkflowAssuranceState {
+  const contract = workflow.recovery?.contract
+  return {
+    intent: Object.keys(workflow.outputs ?? {}).length > 0,
+    recovery: Boolean(contract),
+    qualification: contract?.version === '2',
+  }
 }
 
 /** Renders the AI Studio panel: prompt → workflow generator + explain-current-workflow surface. */
@@ -200,6 +215,7 @@ export function AiStudioPanel({
         body: t('aiStudio.draftedBody', {
           name: response.workflow.name ?? response.workflow.id ?? (t('aiStudio.untitledWorkflow')),
         }),
+        assurance: workflowAssuranceState(response.workflow),
         aiError: response.aiError,
         bonBackoff: response.bonBackoff,
       })
@@ -209,6 +225,7 @@ export function AiStudioPanel({
         mode: 'error',
         title: t('aiStudio.draftFailed'),
         body: error instanceof Error ? error.message : (t('aiStudio.draftFailedBody')),
+        assurance: { intent: false, recovery: false, qualification: false },
       })
     } finally {
       setLoading(null)
@@ -398,6 +415,18 @@ export function AiStudioPanel({
           )}
           <p className="helper-text">{t(MODE_COPY_KEYS[result.mode])}</p>
           <div className="result-body">{result.body}</div>
+          {result.kind === 'workflow' && result.assurance.intent && (
+            <div className="ai-assurance-summary" role="status" data-testid="workflow-assurance-summary">
+              <span className="helper-text">{t('aiStudio.assurance.heading')}</span>
+              <span className="mode-pill mode-pill-ai">{t('aiStudio.assurance.intent')}</span>
+              {result.assurance.recovery && (
+                <span className="mode-pill mode-pill-ai">{t('aiStudio.assurance.recovery')}</span>
+              )}
+              {result.assurance.qualification && (
+                <span className="mode-pill mode-pill-ai">{t('aiStudio.assurance.qualification')}</span>
+              )}
+            </div>
+          )}
           {result.kind === 'workflow' && result.bonBackoff && (
             <div className="issue" role="status" data-testid="ai-candidate-backoff">
               <strong>{t('aiStudio.backoff.title')}</strong>{' '}

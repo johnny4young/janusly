@@ -12,6 +12,7 @@
  */
 
 import type { Edge, Node } from '@xyflow/react'
+import type { WorkflowRecovery } from './lib/recovery-contract'
 
 export type JsonObject = Record<string, unknown>
 export type RunNode = {
@@ -387,6 +388,8 @@ export type WorkflowDefinition = {
   outputs?: Record<string, string>
   /** Missing template paths stay empty by default; strict fails before node execution. */
   templatePolicy?: 'lenient' | 'strict'
+  /** Versioned recovery policy and optional circuit-breaker settings. */
+  recovery?: WorkflowRecovery
   /** Editor-only layout metadata; runtime consumers ignore it. */
   ui?: { positions?: Record<string, { x: number; y: number }> }
 }
