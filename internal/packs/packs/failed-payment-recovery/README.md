@@ -8,6 +8,24 @@ your collections channel.
 
 `webhook_received` → `ai` (schema-validated draft) → `approval` → `webhook.send` (retry charge) → `slack.post` (notify team)
 
+## Executable assurance
+
+This is Janusly's qualified flagship pack rather than a best-effort recipe:
+
+- The workflow `inputs` and `outputs` are its Intent Contract.
+- Recovery Contract V2 declares the technical failure boundary, the approval,
+  payment mutation and notification effects, the allowed repair classes, the
+  evidence that must be retained, and a conservative autonomy ceiling of 2.
+- The `outreach_message_present` semantic detector quarantines an empty AI
+  message before any approval or payment effect can run.
+- One passing and one violating immutable fixture exercise that detector at
+  startup through the same evaluator used by workflow validation. A malformed
+  fixture or a detector that does not dominate the declared effects makes the
+  embedded pack fail closed during application startup.
+- Validation must reach `writes_skipped`, and any production mutation still
+  requires `recovery.write` plus explicit operator approval. The pack does not
+  claim autonomous payment repair.
+
 Send authenticated events to `POST /triggers/webhook/ingest` with
 `endpointKey: "failed-payment-recovery"`, a stable upstream `eventId`, and the
 payment fields under `payload`. Retried deliveries with the same identity

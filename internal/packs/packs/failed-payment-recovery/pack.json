@@ -3,7 +3,7 @@
   "name": "Failed payment recovery",
   "description": "When a charge fails, draft a dunning outreach, gate it behind a human approval, retry the charge through your billing system, and notify the collections channel.",
   "category": "payment_recovery",
-  "version": "1.2.0",
+  "version": "2.0.0",
   "requiredCredentials": [
     {
       "name": "billing_webhook",
@@ -66,6 +66,104 @@
               }
             }
           }
+        }
+      }
+    },
+    "recovery": {
+      "circuitBreaker": 3,
+      "contract": {
+        "version": "2",
+        "failure": {
+          "technical": {
+            "terminalNodeFailure": true,
+            "stalledNode": true
+          },
+          "semantic": {
+            "mode": "deterministic",
+            "detectors": [
+              {
+                "id": "outreach_message_present",
+                "sourceNodeId": "draft_outreach",
+                "kind": "expression",
+                "passWhen": "context.draft_outreach.output.data.message != \"\"",
+                "action": "quarantine",
+                "message": "The dunning outreach must contain a non-empty message before approval or payment effects."
+              }
+            ],
+            "evaluationFixtures": [
+              {
+                "id": "outreach_message_pass",
+                "sourceNodeId": "draft_outreach",
+                "output": {
+                  "data": {
+                    "message": "Please update your payment method so we can retry invoice inv_10428."
+                  }
+                },
+                "expected": "pass"
+              },
+              {
+                "id": "outreach_message_violation",
+                "sourceNodeId": "draft_outreach",
+                "output": {
+                  "data": {
+                    "message": ""
+                  }
+                },
+                "expected": "violation"
+              }
+            ]
+          }
+        },
+        "evidence": {
+          "required": [
+            "failure_snapshot",
+            "audit_trail",
+            "validation_receipt",
+            "terminal_outcome"
+          ]
+        },
+        "effects": [
+          {
+            "nodeId": "approval",
+            "kind": "human_action",
+            "idempotency": "unavailable",
+            "receipt": "manual"
+          },
+          {
+            "nodeId": "retry_charge",
+            "kind": "financial_mutation",
+            "idempotency": "unavailable",
+            "receipt": "runtime"
+          },
+          {
+            "nodeId": "notify_team",
+            "kind": "notification",
+            "idempotency": "unavailable",
+            "receipt": "runtime"
+          }
+        ],
+        "repairs": {
+          "allowed": [
+            "retry",
+            "config_patch",
+            "rollback",
+            "credential_rotation",
+            "upstream_wait"
+          ]
+        },
+        "validation": {
+          "minimumEvidenceLevel": "writes_skipped"
+        },
+        "approval": {
+          "productionMutation": "required",
+          "permission": "recovery.write"
+        },
+        "autonomyLevel": 2,
+        "verification": {
+          "kind": "generation_bound_terminal_success"
+        },
+        "recurrence": {
+          "windowDays": 7
         }
       }
     },

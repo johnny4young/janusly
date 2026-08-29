@@ -86,15 +86,38 @@ func TestProductSurfaceLoop(t *testing.T) {
 	}
 	packID := "incident-triage"
 	var pack map[string]any
+	var flagship map[string]any
 	for _, raw := range res.body["packs"].([]any) {
 		candidate := raw.(map[string]any)
 		if candidate["id"] == packID {
 			pack = candidate
 			break
 		}
+		if candidate["id"] == "failed-payment-recovery" {
+			flagship = candidate
+		}
 	}
 	if pack == nil {
 		t.Fatalf("incident pack missing from catalog: %+v", res.body)
+	}
+	if flagship == nil {
+		// The loop may have encountered incident-triage first; find the flagship
+		// independently so catalog order never becomes an assertion.
+		for _, raw := range res.body["packs"].([]any) {
+			candidate := raw.(map[string]any)
+			if candidate["id"] == "failed-payment-recovery" {
+				flagship = candidate
+				break
+			}
+		}
+	}
+	if flagship == nil {
+		t.Fatalf("qualified flagship missing from catalog: %+v", res.body)
+	}
+	assurance := flagship["assurance"].(map[string]any)
+	if assurance["intentContract"] != true || assurance["recoveryContractVersion"] != "2" ||
+		assurance["qualificationFixtureCount"] != float64(2) {
+		t.Fatalf("flagship assurance projection: %+v", assurance)
 	}
 	// Dependency hints carry EXISTENCE only.
 	deps := pack["requiredCredentials"].([]any)
@@ -269,6 +292,54 @@ func TestProductSurfaceLoop(t *testing.T) {
 	if res = h.call("POST", "/onboarding", map[string]any{"action": "restart"}, ""); res.status != 200 ||
 		res.body["completed"] == true {
 		t.Fatalf("restart must reopen: %d %+v", res.status, res.body)
+	}
+}
+
+// The failed-payment flagship closes the assurance loop without a provider:
+// the catalog exposes executable contracts, installation preserves V2, an
+// exact installed-version pair qualifies through immutable fixtures, and the
+// curated missing-credential drill crosses the real DLQ boundary.
+func TestFailedPaymentFlagshipAssuranceLoop(t *testing.T) {
+	h := newAPIHarness(t)
+	packID := "failed-payment-recovery"
+
+	detail := h.call("GET", "/solution-packs/"+packID, nil, "")
+	if detail.status != 200 {
+		t.Fatalf("detail: %d %+v", detail.status, detail.body)
+	}
+	pack := detail.body["pack"].(map[string]any)
+	workflow := pack["workflow"].(map[string]any)
+	recoveryDoc := workflow["recovery"].(map[string]any)
+	contract := recoveryDoc["contract"].(map[string]any)
+	semantic := contract["failure"].(map[string]any)["semantic"].(map[string]any)
+	if contract["version"] != "2" || len(semantic["evaluationFixtures"].([]any)) != 2 {
+		t.Fatalf("flagship contract: %+v", contract)
+	}
+
+	first := h.call("POST", "/workflows/import-pack", map[string]any{"packId": packID}, "")
+	second := h.call("POST", "/workflows/import-pack", map[string]any{"packId": packID}, "")
+	if first.status != 201 || second.status != 201 || first.body["workflowId"] != second.body["workflowId"] {
+		t.Fatalf("install pair: first=%d %+v second=%d %+v", first.status, first.body, second.status, second.body)
+	}
+	workflowID := first.body["workflowId"].(string)
+	qualification := h.call("POST", "/workflows/"+workflowID+"/rollout/qualification", map[string]any{
+		"baselineVersionId":  first.body["versionId"],
+		"candidateVersionId": second.body["versionId"],
+	}, "")
+	if qualification.status != 200 {
+		t.Fatalf("qualification: %d %+v", qualification.status, qualification.body)
+	}
+	receipt := qualification.body["qualification"].(map[string]any)
+	if receipt["mode"] != "compare" || receipt["status"] != "passed" || receipt["datasetDigest"] == "" {
+		t.Fatalf("qualification receipt: %+v", receipt)
+	}
+
+	drill := h.call("POST", "/solution-packs/"+packID+"/inject-failure", map[string]any{
+		"fixtureId": "billing_secret_unbound",
+	}, "")
+	if drill.status != 200 || drill.body["failureMode"] != "credential_unavailable" ||
+		drill.body["recoveryPath"] != "runtime_failure" || drill.body["deadLetterId"] == "" {
+		t.Fatalf("flagship recovery drill: %d %+v", drill.status, drill.body)
 	}
 }
 

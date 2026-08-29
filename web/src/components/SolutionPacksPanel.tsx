@@ -18,7 +18,7 @@
  */
 
 import { useMemo, useState } from 'react'
-import { AlertTriangle, Bug, Download, KeyRound, Package, Play, Search } from 'lucide-react'
+import { AlertTriangle, Bug, Download, KeyRound, Package, Play, Search, ShieldCheck } from 'lucide-react'
 import type { Credential, SolutionPackPublic } from '../types'
 import { EmptyView, PanelChrome, PanelSearch } from './panel-primitives'
 import { useWorkflowStore } from '../store'
@@ -118,6 +118,27 @@ export function SolutionPacksPanel({
               </div>
               <strong>{packName}</strong>
               <span>{packDescription}</span>
+              {pack.assurance.intentContract && (
+                <div
+                  className="we-pack-pills"
+                  data-testid={`pack-assurance-${pack.id}`}
+                  aria-label={t('packs.assurance.aria')}
+                >
+                  <span className="mode-pill mode-pill-ai">
+                    <ShieldCheck size={11} aria-hidden="true" /> {t('packs.assurance.intent')}
+                  </span>
+                  {pack.assurance.recoveryContractVersion && (
+                    <span className="mode-pill mode-pill-ai">
+                      {t('packs.assurance.recovery', { version: pack.assurance.recoveryContractVersion })}
+                    </span>
+                  )}
+                  {pack.assurance.qualificationFixtureCount > 0 && (
+                    <span className="mode-pill mode-pill-ai">
+                      {t('packs.assurance.qualification', { count: pack.assurance.qualificationFixtureCount })}
+                    </span>
+                  )}
+                </div>
+              )}
 
               {(pack.requiredCredentials.length > 0 || pack.requiredOrgConfigs.length > 0) && (
                 <>

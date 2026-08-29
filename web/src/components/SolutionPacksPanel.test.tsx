@@ -10,6 +10,11 @@ const PACK: SolutionPackPublic = {
   description: 'Classify an alert and notify responders.',
   category: 'incident_triage',
   version: '1.2.0',
+  assurance: {
+    intentContract: true,
+    recoveryContractVersion: '2',
+    qualificationFixtureCount: 2,
+  },
   requiredCredentials: [
     { name: 'ops_slack', kind: 'slack_webhook', purpose: 'Pages your on-call channel' },
   ],
@@ -82,6 +87,16 @@ describe('<SolutionPacksPanel />', () => {
     const matchingChip = container.querySelector('.we-param')
     expect(matchingChip).toHaveClass('we-param--optional')
     expect(matchingChip).toHaveAccessibleName('ops_slack configured (slack_webhook)')
+  })
+
+  it('shows the executable assurance included with a qualified pack', () => {
+    renderPanel([])
+
+    const assurance = screen.getByTestId('pack-assurance-incident-triage')
+    expect(assurance).toHaveAccessibleName('Executable assurance included')
+    expect(assurance).toHaveTextContent('Intent contract')
+    expect(assurance).toHaveTextContent('Recovery V2')
+    expect(assurance).toHaveTextContent('2 qualification fixtures')
   })
 
   it('filters out non-matching packs and offers clear-filter', () => {

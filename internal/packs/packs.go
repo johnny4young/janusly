@@ -13,6 +13,8 @@ import (
 	"fmt"
 
 	"github.com/johnny4young/janusly/internal/domain"
+	"github.com/johnny4young/janusly/internal/grammar"
+	"github.com/johnny4young/janusly/internal/recovery"
 )
 
 //go:embed packs/*/pack.json
@@ -66,7 +68,10 @@ type SolutionPack struct {
 
 	// NodeCount is computed at init from the parsed workflow (the public
 	// catalog projection needs it without re-parsing per request).
-	NodeCount int `json:"-"`
+	NodeCount                 int    `json:"-"`
+	IntentContract            bool   `json:"-"`
+	RecoveryContractVersion   string `json:"-"`
+	QualificationFixtureCount int    `json:"-"`
 }
 
 var (
@@ -95,7 +100,20 @@ func init() {
 		if wf == nil {
 			panic(fmt.Sprintf("solution-packs: %s: workflowJson failed the domain parser", entry.Name()))
 		}
+		validation := domain.ValidateWithSemanticFixtures(
+			wf, grammar.DomainValidator, recovery.FixtureOutcomesForValidation,
+		)
+		if !validation.Valid {
+			panic(fmt.Sprintf("solution-packs: %s: workflowJson failed validation: %+v", entry.Name(), validation.Issues))
+		}
 		pack.NodeCount = len(wf.Nodes)
+		pack.IntentContract = len(wf.Outputs) > 0
+		if wf.Recovery != nil && wf.Recovery.Contract != nil {
+			pack.RecoveryContractVersion = wf.Recovery.Contract.Version
+			if wf.Recovery.Contract.Version == "2" {
+				pack.QualificationFixtureCount = len(wf.Recovery.Contract.Failure.Semantic.EvaluationFixtures)
+			}
+		}
 		if _, duplicate := byID[pack.ID]; duplicate {
 			panic(fmt.Sprintf("solution-packs: duplicate id %s", pack.ID))
 		}

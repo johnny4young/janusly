@@ -124,6 +124,11 @@ export type SolutionPackPublic = {
   description: string
   category: string
   version: string
+  assurance: {
+    intentContract: boolean
+    recoveryContractVersion: '' | '1' | '2'
+    qualificationFixtureCount: number
+  }
   requiredCredentials: PackRequiredCredential[]
   requiredOrgConfigs: PackRequiredOrgConfig[]
   nodeCount: number

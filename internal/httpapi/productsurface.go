@@ -771,6 +771,11 @@ func (s *V1Server) packView(r *http.Request, rc v1Request, pack packs.SolutionPa
 	return map[string]any{
 		"id": pack.ID, "name": pack.Name, "description": pack.Description,
 		"category": pack.Category, "version": pack.Version,
+		"assurance": map[string]any{
+			"intentContract":            pack.IntentContract,
+			"recoveryContractVersion":   pack.RecoveryContractVersion,
+			"qualificationFixtureCount": pack.QualificationFixtureCount,
+		},
 		"requiredCredentials": credentials, "requiredOrgConfigs": pack.RequiredOrgConfigs,
 		"samples": samples, "sampleCount": len(pack.SamplePayloads),
 		"nodeCount": pack.NodeCount, "failureCount": len(pack.FailureFixtures),
