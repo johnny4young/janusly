@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -142,9 +143,20 @@ func (c *Client) resolveEnvRefs(connection store.McpConnection) (map[string]stri
 
 // ExposedMcpTool is one AI-awareness entry: sanitized label + prose.
 type ExposedMcpTool struct {
-	ConnectionAlias string `json:"connectionAlias"`
-	ToolName        string `json:"toolName"`
-	Description     string `json:"description"`
+	ConnectionAlias string                 `json:"connectionAlias"`
+	ToolName        string                 `json:"toolName"`
+	Description     string                 `json:"description"`
+	WriteSide       bool                   `json:"writeSide"`
+	InputFields     []ExposedMcpInputField `json:"inputFields"`
+}
+
+// ExposedMcpInputField is the prompt-safe projection of one input-schema
+// property. External descriptions, examples and nested schema prose are never
+// passed to the model; only bounded names, primitive types and requiredness.
+type ExposedMcpInputField struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Required bool   `json:"required"`
 }
 
 // ListExposedToolsForAi returns the org's opted-in tools with sanitized
@@ -162,8 +174,18 @@ func (c *Client) ListExposedToolsForAi(ctx context.Context, orgID string) []Expo
 	truncated := 0
 	for index, row := range rows {
 		if len(out) >= MaxExposedTools {
-			truncated = len(rows) - index
+			truncated += len(rows) - index
 			break
+		}
+		// Runtime config needs the canonical alias and tool name byte-for-byte.
+		// Never hand the model a lossy sanitized label that would look callable
+		// but fail descriptor lookup at execution time. Unsafe legacy rows remain
+		// available to operators in the Inspector, just not to AI generation.
+		alias := signature.SanitizeMcpPromptLabel(row.Alias, "")
+		toolName := signature.SanitizeMcpPromptLabel(row.Name, "")
+		if alias != row.Alias || toolName != row.Name {
+			truncated++
+			continue
 		}
 		description := signature.SanitizeMcpToolDescription(row.Description.String)
 		// Guidance-specific secret shapes stack over the signature scrub
@@ -171,13 +193,15 @@ func (c *Client) ListExposedToolsForAi(ctx context.Context, orgID string) []Expo
 		description = aiguidance.ScrubGuidanceSecrets(description)
 		projected := totalBytes + len(description)
 		if projected > MaxExposedDescriptionBytes {
-			truncated = len(rows) - index
+			truncated += len(rows) - index
 			break
 		}
 		out = append(out, ExposedMcpTool{
-			ConnectionAlias: signature.SanitizeMcpPromptLabel(row.Alias, "unnamed"),
-			ToolName:        signature.SanitizeMcpPromptLabel(row.Name, "unnamed"),
+			ConnectionAlias: alias,
+			ToolName:        toolName,
 			Description:     description,
+			WriteSide:       row.WriteSide,
+			InputFields:     projectMcpInputFields(row.InputSchema),
 		})
 		totalBytes = projected
 	}
@@ -188,4 +212,48 @@ func (c *Client) ListExposedToolsForAi(ctx context.Context, orgID string) []Expo
 		})
 	}
 	return out
+}
+
+const maxExposedInputFields = 30
+
+func projectMcpInputFields(raw json.RawMessage) []ExposedMcpInputField {
+	var schema struct {
+		Properties map[string]struct {
+			Type string `json:"type"`
+		} `json:"properties"`
+		Required []string `json:"required"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &schema) != nil {
+		return []ExposedMcpInputField{}
+	}
+	required := map[string]bool{}
+	for _, name := range schema.Required {
+		required[name] = true
+	}
+	names := make([]string, 0, len(schema.Properties))
+	for name := range schema.Properties {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	fields := make([]ExposedMcpInputField, 0, min(len(names), maxExposedInputFields))
+	for _, name := range names {
+		if len(fields) == maxExposedInputFields {
+			break
+		}
+		promptName := signature.SanitizeMcpPromptLabel(name, "")
+		if promptName != name {
+			continue
+		}
+		fieldType := schema.Properties[name].Type
+		switch fieldType {
+		case "string", "number", "integer", "boolean", "object", "array":
+		default:
+			fieldType = "unknown"
+		}
+		fields = append(fields, ExposedMcpInputField{
+			Name: promptName,
+			Type: fieldType, Required: required[name],
+		})
+	}
+	return fields
 }

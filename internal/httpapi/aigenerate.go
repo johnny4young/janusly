@@ -50,6 +50,11 @@ func (s *V1Server) resolvedGenerateSystemPrompt(ctx context.Context, orgID strin
 	if guidance := aiguidance.Load(ctx, s.pool, orgID, ""); guidance != "" {
 		systemPrompt += "\n\n" + guidance
 	}
+	if s.mcp != nil {
+		if catalog := composeExposedMcpToolsPrompt(s.mcp.ListExposedToolsForAi(ctx, orgID)); catalog != "" {
+			systemPrompt += "\n\n" + catalog
+		}
+	}
 	return systemPrompt
 }
 

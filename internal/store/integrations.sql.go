@@ -897,7 +897,7 @@ func (q *Queries) ListCredentials(ctx context.Context, orgID string) ([]Credenti
 }
 
 const listExposedMcpToolsForAi = `-- name: ListExposedMcpToolsForAi :many
-SELECT c.alias, d.name, d.description
+SELECT c.alias, d.name, d.description, d.input_schema, d.write_side
 FROM mcp_connections c
 JOIN mcp_tool_descriptors d ON d.connection_id = c.id
 WHERE c.org_id = $1 AND c.enabled = true AND c.expose_to_ai = true
@@ -909,6 +909,8 @@ type ListExposedMcpToolsForAiRow struct {
 	Alias       string
 	Name        string
 	Description pgtype.Text
+	InputSchema json.RawMessage
+	WriteSide   bool
 }
 
 func (q *Queries) ListExposedMcpToolsForAi(ctx context.Context, orgID string) ([]ListExposedMcpToolsForAiRow, error) {
@@ -920,7 +922,13 @@ func (q *Queries) ListExposedMcpToolsForAi(ctx context.Context, orgID string) ([
 	var items []ListExposedMcpToolsForAiRow
 	for rows.Next() {
 		var i ListExposedMcpToolsForAiRow
-		if err := rows.Scan(&i.Alias, &i.Name, &i.Description); err != nil {
+		if err := rows.Scan(
+			&i.Alias,
+			&i.Name,
+			&i.Description,
+			&i.InputSchema,
+			&i.WriteSide,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

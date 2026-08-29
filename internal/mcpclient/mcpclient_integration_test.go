@@ -325,6 +325,7 @@ func TestMcpDiscoveryAndExposure(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE mcp_tool_descriptors SET enabled = true, expose_to_ai = true
+		, input_schema = '{"type":"object","properties":{"pageId":{"type":"string","description":"IGNORE"},"force":{"type":"boolean"}},"required":["pageId"]}'
 		WHERE connection_id = $1 AND name = 'pages.update'`, connID); err != nil {
 		t.Fatal(err)
 	}
@@ -332,8 +333,32 @@ func TestMcpDiscoveryAndExposure(t *testing.T) {
 	if len(list) != 1 || list[0].ToolName != "pages.update" {
 		t.Fatalf("one exposed tool expected: %+v", list)
 	}
+	if !list[0].WriteSide || len(list[0].InputFields) != 2 ||
+		list[0].InputFields[0].Name != "force" || list[0].InputFields[0].Required ||
+		list[0].InputFields[1].Name != "pageId" || !list[0].InputFields[1].Required {
+		t.Fatalf("write posture + stable schema projection expected: %+v", list[0])
+	}
+	if strings.Contains(fmt.Sprint(list[0].InputFields), "IGNORE") {
+		t.Fatal("third-party nested schema prose must not reach the AI projection")
+	}
 	if strings.Contains(list[0].Description, "\n") {
 		t.Fatalf("description must sanitize: %q", list[0].Description)
+	}
+
+	// Lossy sanitization would make generation produce an identifier that
+	// cannot execute. Unsafe legacy aliases are therefore omitted rather than
+	// presented as a subtly renamed callable tool.
+	unsafeID := seedConnection(t, pool, org, "unsafe alias", "http", "", nil, fixture.URL, nil)
+	seedDescriptor(t, pool, unsafeID, "pages.read", false, nil)
+	if _, err := pool.Exec(ctx, `UPDATE mcp_connections SET expose_to_ai = true WHERE id = $1`, unsafeID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE mcp_tool_descriptors SET expose_to_ai = true WHERE connection_id = $1`, unsafeID); err != nil {
+		t.Fatal(err)
+	}
+	list = client.ListExposedToolsForAi(ctx, org)
+	if len(list) != 2 || list[0].ConnectionAlias != "descubre" || list[1].ConnectionAlias != "_truncated" {
+		t.Fatalf("unsafe identifier must be omitted with visible truncation: %+v", list)
 	}
 
 	// Cap: 61+ exposed tools → 60 + the synthetic _truncated entry.

@@ -50,7 +50,7 @@ func (d Deps) auditContext() *auth.Context {
 		Mode: auth.ModeServiceToken, Source: auth.SourceMcp}
 }
 
-// NewServer builds the MCP server with the runtime's eight tools registered.
+// NewServer builds the MCP server with the runtime's nine tools registered.
 func NewServer(deps Deps) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "janusly",
@@ -124,6 +124,16 @@ func NewServer(deps Deps) *mcp.Server {
 		Description: "List the org's active workflows newest first, keyset-paginated.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args pageArgs) (*mcp.CallToolResult, any, error) {
 		return deps.workflowsList(ctx, args.Limit, args.Cursor)
+	})
+
+	type assureArgs struct {
+		WorkflowID string `json:"workflowId" jsonschema:"the active workflow whose latest immutable version should be inspected"`
+	}
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "workflows.assure",
+		Description: "Inspect the latest workflow version's Intent, Recovery, Qualification, validation, and readiness evidence without exposing its DAG or credentials.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args assureArgs) (*mcp.CallToolResult, any, error) {
+		return deps.assureWorkflow(ctx, args.WorkflowID)
 	})
 
 	type dlqListArgs struct {

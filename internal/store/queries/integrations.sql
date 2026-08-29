@@ -61,7 +61,7 @@ SET status = $3, status_reason = $4, last_discovery_at = $5, updated_at = now()
 WHERE org_id = $1 AND id = $2;
 
 -- name: ListExposedMcpToolsForAi :many
-SELECT c.alias, d.name, d.description
+SELECT c.alias, d.name, d.description, d.input_schema, d.write_side
 FROM mcp_connections c
 JOIN mcp_tool_descriptors d ON d.connection_id = c.id
 WHERE c.org_id = $1 AND c.enabled = true AND c.expose_to_ai = true

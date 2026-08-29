@@ -22,6 +22,7 @@ import (
 
 	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/grammar"
+	"github.com/johnny4young/janusly/internal/packs"
 )
 
 // An SDK client drives the failure→redrive cycle through the in-process
@@ -107,7 +108,7 @@ func TestAgentDrivesFailureRedriveCycleOverMCP(t *testing.T) {
 	for _, tool := range tools.Tools {
 		names[tool.Name] = true
 	}
-	for _, want := range []string{"workflows.save", "runs.start", "runs.status", "runs.inspect", "runs.list", "workflows.list", "dlq.list", "dlq.redrive"} {
+	for _, want := range []string{"workflows.save", "workflows.assure", "runs.start", "runs.status", "runs.inspect", "runs.list", "workflows.list", "dlq.list", "dlq.redrive"} {
 		if !names[want] {
 			t.Fatalf("tool %s missing; got %v", want, names)
 		}
@@ -221,6 +222,54 @@ func TestAgentDrivesFailureRedriveCycleOverMCP(t *testing.T) {
 	ghost, _ := callTool(t, session, "runs.status", map[string]any{"runId": "ghost"})
 	if !ghost.IsError {
 		t.Fatal("unknown run must be an isError result")
+	}
+}
+
+func TestMcpWorkflowAssuranceProjection(t *testing.T) {
+	session, orgID := newMCPSession(t)
+	pack := packs.Get("failed-payment-recovery")
+	if pack == nil {
+		t.Fatal("flagship pack missing")
+	}
+	var workflow map[string]any
+	if err := json.Unmarshal(pack.WorkflowJSON, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	workflowID := fmt.Sprintf("mcp-assure-%d", time.Now().UnixNano())
+	workflow["id"] = workflowID
+	if res, _ := callTool(t, session, "workflows.save", map[string]any{"workflow": workflow}); res.IsError {
+		t.Fatalf("save flagship: %s", res.Content[0].(*mcp.TextContent).Text)
+	}
+
+	res, assured := callTool(t, session, "workflows.assure", map[string]any{"workflowId": workflowID})
+	if res.IsError || assured["status"] != "qualified" || assured["version"] != float64(1) {
+		t.Fatalf("assurance projection: error=%v payload=%+v", res.IsError, assured)
+	}
+	intent := assured["intent"].(map[string]any)
+	recoveryContract := assured["recovery"].(map[string]any)
+	qualification := assured["qualification"].(map[string]any)
+	if intent["declared"] != true || recoveryContract["version"] != "2" ||
+		qualification["status"] != "qualified" || qualification["fixturesReplayPassed"] != true {
+		t.Fatalf("assurance evidence incomplete: intent=%+v recovery=%+v qualification=%+v",
+			intent, recoveryContract, qualification)
+	}
+	raw, _ := json.Marshal(assured)
+	for _, forbidden := range []string{`"nodes"`, `"edges"`, `"config"`, "billing_webhook", "billing_slack"} {
+		if strings.Contains(string(raw), forbidden) {
+			t.Fatalf("assurance projection leaked DAG/config %q: %s", forbidden, raw)
+		}
+	}
+
+	// Tenant invisibility: even a real workflow/version in another org is
+	// indistinguishable from an unknown id to this scoped MCP session.
+	pool := poolForTest(t)
+	foreignID := "foreign-" + workflowID
+	if _, err := pool.Exec(t.Context(), `INSERT INTO workflows (id, org_id, name) VALUES ($1, $2, 'foreign')`, foreignID, orgID+"-foreign"); err != nil {
+		t.Fatal(err)
+	}
+	foreign, _ := callTool(t, session, "workflows.assure", map[string]any{"workflowId": foreignID})
+	if !foreign.IsError || foreign.Content[0].(*mcp.TextContent).Text != "workflow not found" {
+		t.Fatal("foreign workflow must remain invisible")
 	}
 }
 
