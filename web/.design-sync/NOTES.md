@@ -287,8 +287,129 @@ investigate it rather than assuming it is benign.
   `--font-sans` chain, not the primary. `Inter Tight` (the primary) and
   `JetBrains Mono` do ship, so nothing actually renders in a substitute. Not
   worth resolving.
-- `[RENDER_THIN] RecoveryCenterTile` — the tile is genuinely a few lines of
-  text; it has no authored preview yet, so it shows the floor card.
+That is now the **only** warn the build emits: `package-validate.mjs` exits 0
+with `168/168 previews render cleanly` and **zero** components on the
+typographic floor card.
+
+## Authoring round 2 — taking the floor card to zero
+
+The first sync left 49 components on the typographic floor card. This round
+authored all of them (plus a few that were rendering but poorly), reaching
+**168/168 rendering cleanly, zero floor cards, 113 authored previews all graded
+`good`**. The findings worth keeping:
+
+### Store-gated components need a seed, and a card has ONE store
+
+Several components render `null` until the app store holds something —
+`ToastRenderer` needs a toast, `OnboardingBanner` an active onboarding row,
+`WorkflowStatusPageCard` a selected *and saved* workflow, `RunStreamChip` a
+`runId` **and** a non-idle transport. That state arrives at runtime, never from
+props, so a preview has no other way in.
+
+`ds-bootstrap.ts` re-exports the zustand store as `__previewStore`, and
+`previews/_stage.tsx` wraps it in a `<Seed patch={…}>` helper that applies the
+patch in a `useState` initializer (once, before children read it).
+
+**The store is a singleton per card page.** Preview cells are not iframed, so
+two stories on one card cannot hold different store states — the last seed
+wins and both cells render it. Store-gated components therefore ship a **single
+story**; props-driven ones keep their variants.
+
+### React Flow is previewable after all — with one exception
+
+The first round recorded the canvas components as impossible (two copies of
+`@xyflow/react`: the preview compiles against `node_modules`, the component
+comes from the bundle). That is only half right.
+
+`CanvasWorkspace` **is** `<ReactFlowProvider><WorkflowCanvas /></ReactFlowProvider>`,
+so mounting it puts provider and consumer in the same module instance and the
+canvas renders. `RunObservationWorkspace` brings its own provider too. Both now
+have real cards, and `WorkflowCanvas` / `WorkflowStepNode` / `WorkflowEdge` are
+previewed *through* `CanvasWorkspace` — React Flow instantiates the real node
+and edge components from the graph, so those cards show the actual components.
+
+Two things are required and easy to miss:
+
+- **Real height.** React Flow measures its container on mount; inside a
+  content-sized cell it mounts and draws nothing. Every canvas preview wraps in
+  a `div` with an explicit `height`.
+- **Registered type keys.** Nodes need `type: 'workflowStep'` and edges
+  `type: 'workflowEdge'`. Without them React Flow silently falls back to its own
+  default renderers — the graph still draws, so this does **not** fail any check,
+  but the card is no longer showing Janusly's components. An edge missing the
+  key renders as a plain line with no condition/on-error label.
+
+### Fixture gaps that render as content, not as errors
+
+None of these failed a check; each was caught by reading the card.
+
+- `RunObservationWorkspace` projects its canvas from `run.inputJson.workflow`.
+  Without the snapshot the canvas half is simply blank.
+- `ReviewBody` diffs against `dlq.workflowJson` and crashes on `{}`. A
+  `DeadLetter` fixture without it is not a valid fixture.
+- `EvidenceRow` is `{ kind, snippet, sourceRef }` — a `{ kind, summary }` row is
+  scrubbed away and disappears.
+- Edge `condition` strings are parsed by a **limited grammar**: comparisons,
+  boolean composition, and dotted paths that must start with `context.` or
+  `inputs.`. A bare word (`mismatch`) renders an inline validation error.
+- Built-in snippet ids must be `builtin:<slug>` for a slug the catalog carries
+  (`snippets.builtin.<slug>.name`); an invented slug renders the raw dotted key.
+- Contradictory flags read as broken copy: `WorkspaceGate` with
+  `selectionRequired: true` **and** an empty organization list renders "your
+  account belongs to more than one organization" above nothing.
+
+### Two sweeps worth re-running instead of re-reading 40 sheets
+
+Both run off `ds-bundle/.render-check.json` after `package-validate.mjs`:
+
+```sh
+# 1. placeholder garbage that reached the DOM
+node -e "const rc=require('./ds-bundle/.render-check.json');const bad=/undefined|NaN|\[object Object\]|Infinity/;
+for(const r of rc) if((r.texts||[]).some(t=>bad.test(t))) console.log(r.name)"
+
+# 2. raw i18n keys (filter by real catalog prefixes; hostnames are false hits)
+node -e "const rc=require('./ds-bundle/.render-check.json');const cat=require('./src/i18n/locales/en/common.json');
+const pre=new Set(Object.keys(cat).map(k=>k.split('.')[0]));
+for(const r of rc) for(const t of (r.texts||[])) for(const m of t.matchAll(/\b([a-z][a-zA-Z0-9]*(?:\.[a-zA-Z0-9_-]+){1,5})\b/g))
+  if(pre.has(m[1].split('.')[0])) console.log(r.name, m[1])"
+```
+
+The first found three components rendering `undefined` / `[object Object]`; the
+second confirmed no leaked keys. `r.texts` is **not** one entry per story
+(counts only line up for some components), so it is a good garbage detector and
+a bad blank-cell detector.
+
+### Read the DOM, not the sheet, for anything small
+
+Twice this round a downscaled contact sheet read wrong — a relative time that
+said "just now" was actually "2d ago", and `AuthoringPanel`'s `ReadOnly` cell
+looked identical to `WithoutAi` until a probe showed the whole step form wrapped
+in `fieldset[disabled]` (note: an input inside a disabled fieldset does **not**
+have `.disabled === true`; query `fieldset[disabled]` or match `:disabled`).
+Serve the bundle and probe:
+
+```sh
+node .ds-sync/storybook/http-serve.mjs ./ds-bundle
+```
+
+### One production defect found, one filed
+
+- **Fixed earlier:** `SemanticOutcomePill` emitted `data-tone="warn"`, which
+  matches no CSS rule. A ratchet test now greps `platform.css` for the tones the
+  pill stylesheet actually defines.
+- **Filed, not fixed:** `RecoveryDialog`'s cluster line prints the match count
+  twice — "matches 3 3 open DLQ entries", and "matches 3 of 31 3 open DLQ
+  entries" when capped. A stray `<strong>` repeats what the counted i18n string
+  already renders. The `ClusterMode` preview documents the defect so nobody
+  copies the composition.
+
+### Layout overrides are grade-safe
+
+`cardMode` and `primaryStory` are deliberately excluded from the grade key
+(`KEY_RECIPE = 7` in `lib/sync-hashes.mjs`), so adding them to `cfg.overrides`
+to clear `[GRID_OVERFLOW]` carries every existing grade forward. `viewport` and
+`skip` are keyed and do wipe grades. A render that actually changes is caught by
+`renderHash` regardless.
 
 ## Re-sync risks
 
@@ -310,21 +431,24 @@ What can silently go stale, roughly in order of how likely it is to bite:
   and `src/i18n/runtime`. Nothing is inlined, so it stays current on its own,
   but a move or an API change breaks it with **dotted i18n keys in the cards**
   rather than a build error.
-- **The `fetch` stub is a compatibility surface.** It answers
-  `/workflows/schedule-preview` specifically. If another component starts
-  deriving *validity* from a server response, its card will show a false error
-  until the stub learns that route.
+- **The `fetch` stub is a content surface, not just a crash guard.** It now
+  routes ~20 endpoints (see `ROUTES` in `ds-bootstrap.ts`). A component that
+  starts reading a route the table does not answer gets `{}`, and the failure
+  mode depends on how it reads: a guarded component renders an honest empty
+  state, an unguarded one throws (`FailureClustersCard` destructured
+  `clusters.length` off `{}` and took its whole card down). Anything that
+  *derives* content from a response — a cron's validity, a cohort's eligible
+  count, a health score — shows something false until the stub learns the
+  route.
 - **`cfg.dtsPropsFor.ErrorBoundary` is hand-written** from a non-exported local
   `Props` type in `src/components/ErrorBoundary.tsx`. Nothing detects drift —
   re-read it on any refactor of that file.
-- **Only partially verified:** the 49 components still on the floor card were
-  never visually graded (they render, and the render check passes, but no
-  authored preview exists). The heavy recovery-dialog components
-  (`AppliedBody`, `DeadLetterDetail`, `DeadLetterQueueView`, `ReviewBody`,
-  `ValidationFailedBody`, `RecoveryPassportCard`, `RunWorkspace`,
-  `BranchRuleEditor`, `CancellingBody`) need deep domain fixtures
-  (`DeadLetter`, `PatchSuggestion`, virtual-list state) and are the natural
-  next batch — the repo's own test files are the best fixture source.
+- **113 of 168 components have an authored, graded preview; 55 do not.** The
+  55 render through the converter's default no-props card, pass the render
+  check, and ship **ungraded** — that is the same state the first sync left
+  them in, not a regression. The known-weak one is `QueueLagChip`, whose
+  default state is "queue status unavailable" because it reads the queue store
+  rather than an endpoint the stub can answer.
 - **Build assumptions:** node 24 (`.nvmrc`), pnpm 11.17, playwright 1.61.1 with
   chromium-1228 already cached, and the Google-Fonts woff2 files committed under
   `.design-sync/fonts/` (never re-fetched, so the build is reproducible offline).
