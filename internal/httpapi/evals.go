@@ -9,22 +9,55 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/ai"
+	"github.com/johnny4young/janusly/internal/aibudget"
 	"github.com/johnny4young/janusly/internal/aiconfig"
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/experiment"
+	"github.com/johnny4young/janusly/internal/prompts"
+	"github.com/johnny4young/janusly/internal/ratelimit"
 	"github.com/johnny4young/janusly/internal/signature"
 	"github.com/johnny4young/janusly/internal/store"
 )
+
+// experimentGuardedClient applies governance to every logical model call,
+// including LLM-judge calls hidden inside the scorer. The evaluation client
+// beneath it has SDK retries disabled, preserving the admitted call ceiling.
+type experimentGuardedClient struct {
+	inner    ai.Client
+	generate func(context.Context, ai.GenerateTextInput) (*ai.GenerateTextResult, *ai.AIError)
+}
+
+func (c experimentGuardedClient) Configured() bool {
+	return c.inner != nil && c.inner.Configured()
+}
+
+func (c experimentGuardedClient) GenerateText(ctx context.Context, input ai.GenerateTextInput) (*ai.GenerateTextResult, *ai.AIError) {
+	return c.generate(ctx, input)
+}
+
+func parseExperimentPromptRef(ref string) (string, int) {
+	name := strings.TrimSpace(ref)
+	version := 0
+	if at := strings.LastIndexByte(name, '@'); at > 0 && at < len(name)-1 {
+		if parsed, err := strconv.Atoi(name[at+1:]); err == nil && parsed > 0 {
+			name, version = name[:at], parsed
+		}
+	}
+	return name, version
+}
 
 func evalDatasetView(row store.EvalDataset) map[string]any {
 	return map[string]any{
@@ -235,7 +268,13 @@ func (s *V1Server) mountEvalRoutes(mux *http.ServeMux) {
 		for _, row := range rows {
 			views = append(views, experimentView(row))
 		}
-		writeUnversioned(w, opOK(map[string]any{"experiments": views}))
+		writeUnversioned(w, opOK(map[string]any{
+			"experiments": views,
+			"limits": map[string]any{
+				"maxProviderCalls":  experiment.MaxProviderCallsPerRun,
+				"maxArmOutputUnits": experiment.MaxArmOutputUnits,
+			},
+		}))
 	}))
 
 	mux.HandleFunc("GET /experiments/{id}", s.auth(func(w http.ResponseWriter, r *http.Request, rc v1Request) {
@@ -261,6 +300,7 @@ func (s *V1Server) mountEvalRoutes(mux *http.ServeMux) {
 		if err := decodeBody(r, &body); err != nil || strings.TrimSpace(body.Name) == "" ||
 			len(body.Name) > 120 || body.EvalDatasetID == "" ||
 			body.ControlRef == "" || body.CandidateRef == "" ||
+			len(body.ControlRef) > 256 || len(body.CandidateRef) > 256 ||
 			(body.Kind != "model" && body.Kind != "prompt") {
 			writeUnversioned(w, opError(http.StatusBadRequest, "experiment_invalid_body",
 				"name, kind (model|prompt), controlRef, candidateRef, and evalDatasetId are required", nil))
@@ -281,6 +321,20 @@ func (s *V1Server) mountEvalRoutes(mux *http.ServeMux) {
 			return
 		}
 		rows, _ := q.ListEvalExamples(ctx, store.ListEvalExamplesParams{OrgID: rc.orgID, DatasetID: dataset.ID})
+		if len(rows) == 0 {
+			writeUnversioned(w, opError(http.StatusUnprocessableEntity, "experiment_dataset_empty",
+				"The evaluation dataset has no examples", nil))
+			return
+		}
+		providerCallEstimate := experiment.EstimateProviderCalls(len(rows), body.ScorerKind)
+		if providerCallEstimate > experiment.MaxProviderCallsPerRun {
+			writeUnversioned(w, opError(http.StatusUnprocessableEntity, "experiment_call_limit_exceeded",
+				"The experiment plan exceeds the provider call limit", map[string]any{
+					"providerCallEstimate": providerCallEstimate,
+					"maxProviderCalls":     experiment.MaxProviderCallsPerRun,
+				}))
+			return
+		}
 		examples := make([]experiment.Example, 0, len(rows))
 		for _, row := range rows {
 			examples = append(examples, experiment.Example{
@@ -288,14 +342,45 @@ func (s *V1Server) mountEvalRoutes(mux *http.ServeMux) {
 				Expected: row.ExpectedApproachLabel,
 			})
 		}
-		// kind=model: refs ARE model hints. kind=prompt: refs are system
-		// prompts (the runtime's flattened-arm shape; PromptOps refs resolve
-		// upstream in the contract).
+		client, settings := aiconfig.ResolveForEvaluation(ctx, s.pool, rc.orgID)
+
+		// kind=model: refs are model hints. kind=prompt: refs resolve through
+		// the tenant's PromptOps registry, including an optional name@version.
+		// Literal refs are deliberately not sent to the provider as fake prompts.
 		controlArm, candidateArm := experiment.Arm{}, experiment.Arm{}
 		if body.Kind == "model" {
 			controlArm.ModelHint, candidateArm.ModelHint = body.ControlRef, body.CandidateRef
 		} else {
-			controlArm.SystemPrompt, candidateArm.SystemPrompt = body.ControlRef, body.CandidateRef
+			controlName, controlVersion := parseExperimentPromptRef(body.ControlRef)
+			candidateName, candidateVersion := parseExperimentPromptRef(body.CandidateRef)
+			controlPrompt, controlErr := prompts.ResolveTemplate(ctx, s.pool, rc.orgID, controlName, controlVersion, nil)
+			candidatePrompt, candidateErr := prompts.ResolveTemplate(ctx, s.pool, rc.orgID, candidateName, candidateVersion, nil)
+			if controlErr != nil || candidateErr != nil {
+				writeUnversioned(w, opError(http.StatusUnprocessableEntity, "experiment_prompt_ref_invalid",
+					"Control and candidate must reference resolvable PromptOps prompts", nil))
+				return
+			}
+			if settings.PromptMaxChars > 0 &&
+				(len(controlPrompt) > settings.PromptMaxChars || len(candidatePrompt) > settings.PromptMaxChars) {
+				writeUnversioned(w, opError(http.StatusRequestEntityTooLarge, "experiment_prompt_too_long",
+					"Resolved experiment prompt exceeds the tenant AI prompt limit",
+					map[string]any{"maxChars": settings.PromptMaxChars}))
+				return
+			}
+			controlArm.SystemPrompt, candidateArm.SystemPrompt = controlPrompt, candidatePrompt
+		}
+
+		gate := aibudget.Gate(ctx, s.pool, rc.orgID, rc.userID, "experiment.run.call")
+		if !gate.Allowed {
+			writeUnversioned(w, opResult{status: http.StatusPaymentRequired, data: map[string]any{
+				"error": "budget_exceeded", "code": "budget_exceeded",
+				"params": map[string]any{
+					"monthlyUsdSpent": gate.MonthlyUsdSpent, "monthlyUsdLimit": gate.MonthlyUsdLimit,
+					"policy": gate.Policy, "warningPercent": gate.WarningPercent,
+				},
+				"budget": gate,
+			}})
+			return
 		}
 
 		experimentID := s.newID()
@@ -310,11 +395,26 @@ func (s *V1Server) mountEvalRoutes(mux *http.ServeMux) {
 		}
 		audit.Write(ctx, s.pool, rc.authContext, "experiment.run.started", audit.Options{
 			TargetType: "experiment", TargetID: experimentID,
-			Metadata: map[string]any{"kind": body.Kind, "scorerKind": body.ScorerKind, "exampleCount": len(examples)},
+			Metadata: map[string]any{
+				"kind": body.Kind, "scorerKind": body.ScorerKind, "exampleCount": len(examples),
+				"providerCallEstimate": providerCallEstimate,
+				"maxProviderCalls":     experiment.MaxProviderCallsPerRun,
+			},
 		})
 
-		client, _ := aiconfig.Resolve(ctx, s.pool, rc.orgID)
-		summary := experiment.Run(ctx, client, body.ScorerKind, controlArm, candidateArm, examples,
+		guardedClient := experimentGuardedClient{
+			inner: client,
+			generate: func(callCtx context.Context, input ai.GenerateTextInput) (*ai.GenerateTextResult, *ai.AIError) {
+				if limitErr := s.limiter.Enforce(callCtx, rc.orgID, ratelimit.Options{
+					Name: "ai", Max: settings.RateLimitPerMin, Window: time.Minute,
+				}); limitErr != nil {
+					return nil, &ai.AIError{Class: "rate_limit", Message: limitErr.Error()}
+				}
+				return aibudget.GuardedGenerateText(callCtx, s.pool, client, rc.userID,
+					"experiment.run.call", input)
+			},
+		}
+		summary := experiment.Run(ctx, guardedClient, body.ScorerKind, controlArm, candidateArm, examples,
 			ai.CallContext{OrgID: rc.orgID, UserID: rc.userID}, nil)
 		summaryJSON, _ := json.Marshal(summary)
 		if _, err := q.CompleteExperiment(ctx, store.CompleteExperimentParams{
@@ -336,7 +436,21 @@ func (s *V1Server) mountEvalRoutes(mux *http.ServeMux) {
 				Metadata: map[string]any{"scoreDelta": summary.ScoreDelta},
 			})
 		}
-		writeUnversioned(w, opOK(map[string]any{"experimentId": experimentID, "summary": summary}))
+		completed, err := q.GetExperiment(ctx, store.GetExperimentParams{OrgID: rc.orgID, ID: experimentID})
+		if err != nil {
+			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
+			return
+		}
+		writeUnversioned(w, opOK(map[string]any{
+			"experimentId": experimentID,
+			"experiment":   experimentView(completed),
+			"summary":      summary,
+			"plan": map[string]any{
+				"providerCallEstimate": providerCallEstimate,
+				"maxProviderCalls":     experiment.MaxProviderCallsPerRun,
+				"maxArmOutputUnits":    experiment.MaxArmOutputUnits,
+			},
+		}))
 	}))
 }
 

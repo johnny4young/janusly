@@ -7,6 +7,18 @@ import (
 	"github.com/johnny4young/janusly/internal/ai"
 )
 
+func TestEstimateProviderCalls(t *testing.T) {
+	if got := EstimateProviderCalls(5, "string_equality"); got != 10 {
+		t.Fatalf("two arm calls per example: %d", got)
+	}
+	if got := EstimateProviderCalls(5, "llm_judge"); got != MaxProviderCallsPerRun {
+		t.Fatalf("judge must account for two additional score calls: %d", got)
+	}
+	if got := EstimateProviderCalls(0, "llm_judge"); got != 0 {
+		t.Fatalf("empty plan: %d", got)
+	}
+}
+
 func TestScorers(t *testing.T) {
 	ctx := context.Background()
 	// string_equality: forgiving whitespace/case.

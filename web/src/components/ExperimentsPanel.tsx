@@ -13,14 +13,14 @@
  *   other server-data panels refresh through the shared store contract.
  */
 
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { ChartNoAxesCombined, FlaskConical, Play, Plus, RefreshCw } from 'lucide-react'
 
 import { api } from '../api'
 import { tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
 import { ExperimentSummaryDetail } from './experiments/ExperimentSummary'
-import { asRecord, formatDate, INITIAL_RUN_FORM, updateExperiment, type EvalDataset, type Experiment, type ExperimentKind, type RunForm } from './experiments/types'
+import { asRecord, DEFAULT_MAX_PROVIDER_CALLS, estimateProviderCalls, formatDate, INITIAL_RUN_FORM, updateExperiment, type EvalDataset, type Experiment, type ExperimentKind, type RunForm } from './experiments/types'
 import { EmptyView } from './panel-primitives'
 
 export function ExperimentsPanel(): React.ReactElement {
@@ -31,6 +31,8 @@ export function ExperimentsPanel(): React.ReactElement {
   const [experiments, setExperiments] = useState<Experiment[]>([])
   const [datasets, setDatasets] = useState<EvalDataset[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [maxProviderCalls, setMaxProviderCalls] = useState(DEFAULT_MAX_PROVIDER_CALLS)
   const [selected, setSelected] = useState<Experiment | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [runForm, setRunForm] = useState<RunForm>(INITIAL_RUN_FORM)
@@ -43,19 +45,31 @@ export function ExperimentsPanel(): React.ReactElement {
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    Promise.all([
-      api('/experiments').catch(() => ({ experiments: [] })),
-      api('/eval/datasets').catch(() => ({ datasets: [] })),
-    ]).then(([experimentsResponse, datasetsResponse]) => {
+    Promise.allSettled([
+      api('/experiments'),
+      api('/eval/datasets'),
+    ]).then(([experimentsResult, datasetsResult]) => {
       if (cancelled) return
+      const experimentsResponse = experimentsResult.status === 'fulfilled' ? experimentsResult.value : null
+      const datasetsResponse = datasetsResult.status === 'fulfilled' ? datasetsResult.value : null
       const experimentList = asRecord(experimentsResponse)?.experiments
       const datasetList = asRecord(datasetsResponse)?.datasets
       setExperiments(Array.isArray(experimentList) ? experimentList as Experiment[] : [])
+      const limits = asRecord(asRecord(experimentsResponse)?.limits)
+      const serverMaxProviderCalls = limits?.maxProviderCalls
+      setMaxProviderCalls(typeof serverMaxProviderCalls === 'number' && serverMaxProviderCalls > 0
+        ? serverMaxProviderCalls
+        : DEFAULT_MAX_PROVIDER_CALLS)
       const nextDatasets = Array.isArray(datasetList) ? datasetList as EvalDataset[] : []
       setDatasets(nextDatasets)
       setRunForm((current) => current.evalDatasetId || nextDatasets.length === 0
         ? current
         : { ...current, evalDatasetId: nextDatasets[0]!.id })
+      const errors = [experimentsResult, datasetsResult]
+        .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+        .map((result) => tApiError(result.reason))
+        .filter(Boolean)
+      setLoadError(errors.length > 0 ? errors.join(' · ') : null)
       setLoading(false)
     })
     return () => { cancelled = true }
@@ -117,15 +131,12 @@ export function ExperimentsPanel(): React.ReactElement {
           candidateRef: runForm.candidateRef.trim(),
           evalDatasetId: runForm.evalDatasetId,
           scorerKind: runForm.scorerKind,
-          ...(runForm.scorerKind === 'llm_judge' && runForm.judgeModelHint.trim()
-            ? { judgeModelHint: runForm.judgeModelHint.trim() }
-            : {}),
         }),
       }))
       const experiment = response?.experiment as Experiment | undefined
       const summary = response?.summary
       if (!experiment) throw new Error(t('experiments.toast.runError'))
-      const completed = { ...experiment, summaryJson: summary ?? experiment.summaryJson }
+      const completed = { ...experiment, summary: summary ?? experiment.summary }
       detailRequestId.current += 1
       setExperiments((current) => updateExperiment(current, completed))
       setSelected(completed)
@@ -148,7 +159,16 @@ export function ExperimentsPanel(): React.ReactElement {
     }
   }
 
-  const canRun = Boolean(runForm.name.trim() && runForm.controlRef.trim() && runForm.candidateRef.trim() && runForm.evalDatasetId)
+  const selectedDataset = useMemo(
+    () => datasets.find((dataset) => dataset.id === runForm.evalDatasetId) ?? null,
+    [datasets, runForm.evalDatasetId],
+  )
+  const providerCallEstimate = estimateProviderCalls(selectedDataset?.exampleCount ?? 0, runForm.scorerKind)
+  const callPlanAllowed = providerCallEstimate > 0 && providerCallEstimate <= maxProviderCalls
+  const canRun = Boolean(
+    runForm.name.trim() && runForm.controlRef.trim() && runForm.candidateRef.trim()
+    && runForm.evalDatasetId && callPlanAllowed,
+  )
 
   return (
     <div className="we-experiments" data-testid="experiments-panel">
@@ -168,7 +188,6 @@ export function ExperimentsPanel(): React.ReactElement {
           <select id="experiment-kind" className="text-field" value={runForm.kind} onChange={(event) => setRunForm((current) => ({ ...current, kind: event.target.value as ExperimentKind }))}>
             <option value="prompt">{t('experiments.kind.prompt')}</option>
             <option value="model">{t('experiments.kind.model')}</option>
-            <option value="prompt_and_model">{t('experiments.kind.promptAndModel')}</option>
           </select>
           <p className="helper-text we-experiments__ref-hint">{t(`experiments.refHint.${runForm.kind}`)}</p>
           <label className="field-label" htmlFor="experiment-control">{t('experiments.field.control')}</label>
@@ -186,15 +205,22 @@ export function ExperimentsPanel(): React.ReactElement {
             <option value="json_schema">{t('experiments.scorer.jsonSchema')}</option>
             <option value="llm_judge">{t('experiments.scorer.llmJudge')}</option>
           </select>
-          {runForm.scorerKind === 'llm_judge' && (
-            <>
-              <label className="field-label" htmlFor="experiment-judge-model">{t('experiments.field.judgeModel')}</label>
-              <input id="experiment-judge-model" className="text-field" value={runForm.judgeModelHint} onChange={(event) => setRunForm((current) => ({ ...current, judgeModelHint: event.target.value }))} />
-            </>
+          {selectedDataset && (
+            <p
+              id="experiment-call-plan"
+              className={`helper-text${callPlanAllowed ? '' : ' helper-text--error'}`}
+              role={callPlanAllowed ? 'status' : 'alert'}
+            >
+              {selectedDataset.exampleCount === 0
+                ? t('experiments.plan.empty')
+                : providerCallEstimate > maxProviderCalls
+                  ? t('experiments.plan.exceeds', { count: providerCallEstimate, max: maxProviderCalls })
+                  : t('experiments.plan.calls', { count: providerCallEstimate, max: maxProviderCalls })}
+            </p>
           )}
         </div>
         <div className="form-actions">
-          <button type="button" className="we-button we-button--primary" onClick={() => void runExperiment()} disabled={!canRun || running}>
+          <button type="button" className="we-button we-button--primary" onClick={() => void runExperiment()} disabled={!canRun || running} aria-describedby={selectedDataset ? 'experiment-call-plan' : undefined}>
             <Play size={14} aria-hidden="true" />
             {running ? t('experiments.action.running') : t('experiments.action.run')}
           </button>
@@ -232,6 +258,12 @@ export function ExperimentsPanel(): React.ReactElement {
             <RefreshCw size={14} aria-hidden="true" />
           </button>
         </div>
+        {loadError && (
+          <div className="run-input-form-error" role="alert">
+            <span>{loadError || t('experiments.load.error')}</span>
+            <button type="button" className="we-button we-button--ghost" onClick={() => bumpPlatformVersion()}>{t('common.retry')}</button>
+          </div>
+        )}
         {loading ? <p className="helper-text">{t('common.loading')}</p> : experiments.length === 0 ? (
           <EmptyView icon={<ChartNoAxesCombined size={22} />} title={t('experiments.history.empty.title')} body={t('experiments.history.empty.body')} />
         ) : (

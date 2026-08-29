@@ -14,7 +14,7 @@
 
 import { getResolvedLocale } from '../../i18n'
 
-export type ExperimentKind = 'prompt' | 'model' | 'prompt_and_model'
+export type ExperimentKind = 'prompt' | 'model'
 export type ExperimentStatus = 'pending' | 'running' | 'completed' | 'failed'
 export type Recommendation = 'promote_candidate' | 'keep_control' | 'inconclusive'
 
@@ -27,7 +27,7 @@ export type Experiment = {
   evalDatasetId: string
   scorerKind: string
   status: ExperimentStatus
-  summaryJson: unknown
+  summary: unknown
   createdAt: string | null
   completedAt: string | null
 }
@@ -65,7 +65,6 @@ export type RunForm = {
   candidateRef: string
   evalDatasetId: string
   scorerKind: 'string_equality' | 'json_schema' | 'llm_judge'
-  judgeModelHint: string
 }
 
 export const INITIAL_RUN_FORM: RunForm = {
@@ -75,7 +74,13 @@ export const INITIAL_RUN_FORM: RunForm = {
   candidateRef: '',
   evalDatasetId: '',
   scorerKind: 'string_equality',
-  judgeModelHint: '',
+}
+
+export const DEFAULT_MAX_PROVIDER_CALLS = 20
+
+export function estimateProviderCalls(exampleCount: number, scorerKind: RunForm['scorerKind']): number {
+  if (!Number.isFinite(exampleCount) || exampleCount <= 0) return 0
+  return Math.floor(exampleCount) * (scorerKind === 'llm_judge' ? 4 : 2)
 }
 
 export function asRecord(value: unknown): Record<string, unknown> | null {

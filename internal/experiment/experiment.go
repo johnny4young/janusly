@@ -9,8 +9,8 @@
 //     {aiError} and the side scores 0 — the run NEVER throws; a nil
 //     client completes deterministically ("llm_not_configured").
 //   - Promotion is RECOMMENDATION-ONLY: the summary's recommendation is
-//     advisory; the runner mutates no production state. Cost is reported
-//     but never a gate — "too expensive" is a per-org judgment call.
+//     advisory; the runner mutates no production state. The HTTP boundary
+//     applies the budget/rate gates and rejects plans above the call cap.
 //   - ScoreOutput never errors: every failure path resolves to a [0,1]
 //     score, with judgedByLlm/fallbackReason for observability.
 package experiment
@@ -34,10 +34,32 @@ const (
 	MinScoreDelta = 0.05
 	// MaxExamplesPerRun bounds cost + latency of a single run.
 	MaxExamplesPerRun = 200
+	// MaxProviderCallsPerRun is the HTTP experiment plan ceiling. It is
+	// intentionally below the default 30/min AI rate so one comparison
+	// cannot monopolize the tenant's provider allowance.
+	MaxProviderCallsPerRun = 20
+	// MaxArmOutputUnits bounds each control/candidate completion. Judge calls
+	// already use their narrower 16-unit score-only cap.
+	MaxArmOutputUnits = 256
 )
 
 // ScorerKinds is the closed scorer set.
 var ScorerKinds = map[string]bool{"string_equality": true, "json_schema": true, "llm_judge": true}
+
+// EstimateProviderCalls returns the maximum provider calls required by a
+// plan. Every example needs one control and one candidate completion; the
+// LLM judge adds one score call per side. The evaluation client disables SDK
+// retries, so this estimate also bounds provider request attempts.
+func EstimateProviderCalls(exampleCount int, scorerKind string) int {
+	if exampleCount <= 0 {
+		return 0
+	}
+	perExample := 2
+	if scorerKind == "llm_judge" {
+		perExample = 4
+	}
+	return exampleCount * perExample
+}
 
 // Arm is one resolved comparison side.
 type Arm struct {
@@ -209,10 +231,15 @@ func runArm(ctx context.Context, client ai.Client, arm Arm, input string, callCo
 		return armOutcome{provider: "unknown", model: orUnknown(arm.ModelHint), aiError: "llm_not_configured"}
 	}
 	result, aiErr := client.GenerateText(ctx, ai.GenerateTextInput{
-		System: arm.SystemPrompt, Prompt: input, ModelHint: arm.ModelHint, Context: callContext,
+		System: arm.SystemPrompt, Prompt: input, ModelHint: arm.ModelHint,
+		MaxOutputUnits: MaxArmOutputUnits, Context: callContext,
 	})
 	if aiErr != nil || result == nil {
-		return armOutcome{provider: "unknown", model: orUnknown(arm.ModelHint), aiError: aiErr.Error()}
+		message := "provider returned no result"
+		if aiErr != nil {
+			message = aiErr.Error()
+		}
+		return armOutcome{provider: "unknown", model: orUnknown(arm.ModelHint), aiError: message}
 	}
 	return armOutcome{
 		output: result.Text, provider: result.Provider, model: result.Model,

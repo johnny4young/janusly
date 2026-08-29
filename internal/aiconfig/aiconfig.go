@@ -28,6 +28,18 @@ type Settings struct {
 // Resolve builds the tenant's chokepoint client + settings from the
 // catalog. db is any store.DBTX (pool or tx).
 func Resolve(ctx context.Context, db orgconfig.Querier, orgID string) (ai.Client, Settings) {
+	return resolve(ctx, db, orgID, nil)
+}
+
+// ResolveForEvaluation builds the same tenant client with SDK retries
+// disabled. Experiment admission counts provider attempts before execution;
+// hidden transport retries would violate that cost envelope.
+func ResolveForEvaluation(ctx context.Context, db orgconfig.Querier, orgID string) (ai.Client, Settings) {
+	zero := 0
+	return resolve(ctx, db, orgID, &zero)
+}
+
+func resolve(ctx context.Context, db orgconfig.Querier, orgID string, maxRetriesOverride *int) (ai.Client, Settings) {
 	provider, _ := orgconfig.LoadValue(ctx, db, orgID, "ai.provider").(string)
 	model, _ := orgconfig.LoadValue(ctx, db, orgID, "ai.anthropic.model").(string)
 	settings := Settings{
@@ -42,6 +54,9 @@ func Resolve(ctx context.Context, db orgconfig.Querier, orgID string) (ai.Client
 		TimeoutMs:       int(orgconfig.LoadNumber(ctx, db, orgID, "ai.timeoutMs")),
 		MaxRetries:      int(orgconfig.LoadNumber(ctx, db, orgID, "ai.maxRetries")),
 		MaxOutputTokens: int(orgconfig.LoadNumber(ctx, db, orgID, "ai.maxOutputUnits")),
+	}
+	if maxRetriesOverride != nil {
+		cfg.MaxRetries = *maxRetriesOverride
 	}
 	// The runtime's supported completion posture is Anthropic-only (the
 	// contract's operating posture too). A tenant configured onto another

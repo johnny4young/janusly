@@ -5,6 +5,7 @@ package httpapi
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -43,6 +44,28 @@ func TestAiSurfacesFallbackContract(t *testing.T) {
 	}
 	if text, _ := explained.body["explanation"].(string); !strings.Contains(text, "2 nodes") {
 		t.Fatalf("fallback explanation must narrate the DAG: %+v", explained.body)
+	}
+
+	// The operator question is a real contract, not ignored UI decoration.
+	spend := h.call("POST", "/ai/explain-workflow", map[string]any{
+		"workflow": workflow, "prompt": "Where is my spend going?",
+	}, "")
+	spendText, _ := spend.body["explanation"].(string)
+	if spend.status != 200 || !strings.Contains(spendText, "Static cost drivers") || strings.Contains(spendText, "$0") {
+		t.Fatalf("spend fallback must be evidence-bounded and distinct: %d %+v", spend.status, spend.body)
+	}
+	changed := h.call("POST", "/ai/explain-workflow", map[string]any{
+		"workflow": workflow, "prompt": "What changed in this version?",
+	}, "")
+	if text, _ := changed.body["explanation"].(string); !strings.Contains(text, "only the current draft") {
+		t.Fatalf("change fallback must not invent a baseline: %+v", changed.body)
+	}
+	fixed := h.call("POST", "/ai/explain-workflow", map[string]any{
+		"workflow": workflow, "prompt": "Suggest the highest-impact reliability fix",
+	}, "")
+	if text, _ := fixed.body["explanation"].(string); !strings.Contains(text, "external_node_missing_retry") &&
+		!strings.Contains(text, "has no retry policy") {
+		t.Fatalf("fix fallback must use deterministic readiness: %+v", fixed.body)
 	}
 
 	// Review: the deterministic readiness engine IS the fallback review.
@@ -123,6 +146,39 @@ func TestAiSurfacesFallbackContract(t *testing.T) {
 		if count == 0 {
 			t.Fatalf("fallback path must audit %s", action)
 		}
+	}
+}
+
+func TestExplainWorkflowAiReceivesOperatorQuestion(t *testing.T) {
+	h := newAPIHarness(t)
+	var providerRequest string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		providerRequest = string(raw)
+		w.Header().Set("content-type", "application/json")
+		_, _ = fmt.Fprint(w, anthropicReply("Grounded answer"))
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("JANUSLY_LOCAL_STACK", "true")
+	t.Setenv("JANUSLY_LOCAL_INTEGRATION_SIMULATOR", "true")
+	t.Setenv("JANUSLY_LLM_SIMULATED_PROVIDERS", "anthropic")
+	t.Setenv("JANUSLY_LLM_SIMULATOR_BASE_URL", server.URL)
+
+	question := "Which exact node should I harden first?"
+	res := h.call("POST", "/ai/explain-workflow", map[string]any{
+		"workflow": map[string]any{
+			"id": "question-contract", "name": "Question contract", "dslVersion": "1.0",
+			"nodes": []any{map[string]any{"id": "start", "type": "noop", "config": map[string]any{}}},
+			"edges": []any{},
+		},
+		"prompt": question,
+	}, "")
+	if res.status != 200 || res.body["mode"] != "ai" || res.body["explanation"] != "Grounded answer" {
+		t.Fatalf("AI explain response: %d %+v", res.status, res.body)
+	}
+	if !strings.Contains(providerRequest, question) || !strings.Contains(providerRequest, "UNTRUSTED DATA") {
+		t.Fatalf("provider request must include the exact framed question: %s", providerRequest)
 	}
 }
 

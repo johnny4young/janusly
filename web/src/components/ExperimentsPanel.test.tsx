@@ -28,7 +28,7 @@ const experiment = {
   evalDatasetId: 'dataset-1',
   scorerKind: 'string_equality',
   status: 'completed',
-  summaryJson: summary,
+  summary,
   createdAt: '2026-07-10T12:00:00.000Z',
   completedAt: '2026-07-10T12:01:00.000Z',
 }
@@ -153,7 +153,7 @@ describe('<ExperimentsPanel />', () => {
   })
 
   it('renders a valid aggregate summary when its legacy display reason is absent', async () => {
-    const experimentWithoutReason = { ...experiment, summaryJson: { ...summary, recommendationReason: undefined } }
+    const experimentWithoutReason = { ...experiment, summary: { ...summary, recommendationReason: undefined } }
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path === '/experiments') return { experiments: [experimentWithoutReason] }
       if (path === '/eval/datasets') return { datasets: [] }
@@ -166,5 +166,34 @@ describe('<ExperimentsPanel />', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Triage candidate/i }))
 
     expect(await screen.findByText('Candidate scored 30.0 points higher on average.')).toBeInTheDocument()
+  })
+
+  it('shows the provider-call plan and blocks an oversized LLM-judge run', async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === '/experiments') return { experiments: [], limits: { maxProviderCalls: 20 } }
+      if (path === '/eval/datasets') return { datasets: [{ id: 'dataset-1', name: 'Six cases', description: '', exampleCount: 6 }] }
+      return {}
+    })
+
+    render(<ExperimentsPanel />)
+
+    await screen.findByRole('option', { name: 'Six cases · 6 examples' })
+    fireEvent.change(screen.getByLabelText('Experiment name'), { target: { value: 'Judge candidate' } })
+    fireEvent.change(screen.getByLabelText('Control reference'), { target: { value: 'model-a' } })
+    fireEvent.change(screen.getByLabelText('Candidate reference'), { target: { value: 'model-b' } })
+    fireEvent.change(screen.getByLabelText('Scorer'), { target: { value: 'llm_judge' } })
+
+    expect(screen.getByRole('alert')).toHaveTextContent('This plan needs 24 provider calls')
+    expect(screen.getByRole('button', { name: 'Run comparison' })).toBeDisabled()
+    expect(screen.queryByLabelText('Judge model override')).not.toBeInTheDocument()
+  })
+
+  it('surfaces initial API failures instead of presenting them as empty data', async () => {
+    vi.mocked(api).mockRejectedValue(new Error('network unavailable'))
+
+    render(<ExperimentsPanel />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/network unavailable/i)
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
   })
 })

@@ -37,7 +37,7 @@ export function ExperimentSummaryDetail({
   onCopyCandidate: () => void
 }): React.ReactElement {
   const { t } = useT()
-  const summary = parseSummary(experiment.summaryJson)
+  const summary = parseSummary(experiment.summary)
 
   return (
     <section className="we-card we-experiments__detail" aria-labelledby="experiment-detail-title" data-testid="experiment-detail">
