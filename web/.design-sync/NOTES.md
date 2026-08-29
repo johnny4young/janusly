@@ -397,11 +397,13 @@ node .ds-sync/storybook/http-serve.mjs ./ds-bundle
 - **Fixed earlier:** `SemanticOutcomePill` emitted `data-tone="warn"`, which
   matches no CSS rule. A ratchet test now greps `platform.css` for the tones the
   pill stylesheet actually defines.
-- **Filed, not fixed:** `RecoveryDialog`'s cluster line prints the match count
-  twice — "matches 3 3 open DLQ entries", and "matches 3 of 31 3 open DLQ
-  entries" when capped. A stray `<strong>` repeats what the counted i18n string
-  already renders. The `ClusterMode` preview documents the defect so nobody
-  copies the composition.
+- **Also fixed:** `RecoveryDialog`'s cluster line printed the match count twice
+  — "matches 3 3 open DLQ entries", and "matches 3 of 31 3 open DLQ entries"
+  when capped — because a `<strong>` and a counted i18n string each rendered it.
+  The counted `clusterEntries` key was replaced with a noun-only
+  `clusterEntriesNoun`, so the number lives only in the `<strong>`. The noun
+  agrees with the **total** when capped, not the visible slice: one entry out of
+  thirty-one is still "entries". Three regression tests cover it.
 
 ### Layout overrides are grade-safe
 

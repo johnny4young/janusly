@@ -704,6 +704,82 @@ describe('<RecoveryDialog />', () => {
       expect(body.deadLetterIds).toHaveLength(10)
     })
 
+    // Regression: the cluster line used to print the match count twice —
+    // "matches 4 4 open DLQ entries" — because the <strong> and the counted
+    // i18n string each rendered it. The count belongs to the <strong> alone.
+    describe('idle cluster line', () => {
+      // `baseDlq.attempt` is 3, so the member count is deliberately 4: a naive
+      // occurrence check against 3 would pass on the "after 3 attempts" clause.
+      const members = ['dlq-1', 'dlq-2', 'dlq-3', 'dlq-4']
+
+      const clusterLine = (container: HTMLElement) => {
+        const line = [...container.querySelectorAll('p.helper-text')]
+          .find(node => /pattern matches/i.test(node.textContent ?? ''))
+        expect(line, 'idle cluster line not rendered').toBeDefined()
+        return (line!.textContent ?? '').replace(/\s+/g, ' ').trim()
+      }
+
+      it('names the match count once when the member list is complete', () => {
+        const { container } = render(
+          <RecoveryDialog
+            dlq={baseDlq}
+            onClose={vi.fn()}
+            clusterMembers={members}
+            clusterSignature="Network timeout on http node"
+          />,
+        )
+
+        const text = clusterLine(container)
+        expect(text).toMatch(/matches 4 open DLQ entries/)
+        expect(text.match(/\b4\b/g)).toHaveLength(1)
+      })
+
+      it('names visible-of-total once when the member list is capped', () => {
+        const { container } = render(
+          <RecoveryDialog
+            dlq={baseDlq}
+            onClose={vi.fn()}
+            clusterMembers={members}
+            clusterSignature="Network timeout on http node"
+            clusterMembersCapped
+            clusterMembersTotal={31}
+          />,
+        )
+
+        const text = clusterLine(container)
+        expect(text).toMatch(/matches 4 of 31 open DLQ entries/)
+        expect(text.match(/\b4\b/g)).toHaveLength(1)
+        expect(text.match(/\b31\b/g)).toHaveLength(1)
+      })
+
+      // The noun agrees with the set being described, not with the slice shown:
+      // one visible entry out of 31 is still "entries".
+      it('pluralises against the total when capped, and against the count when not', () => {
+        const capped = render(
+          <RecoveryDialog
+            dlq={baseDlq}
+            onClose={vi.fn()}
+            clusterMembers={['dlq-1']}
+            clusterSignature="Network timeout on http node"
+            clusterMembersCapped
+            clusterMembersTotal={31}
+          />,
+        )
+        expect(clusterLine(capped.container)).toMatch(/matches 1 of 31 open DLQ entries/)
+        capped.unmount()
+
+        const single = render(
+          <RecoveryDialog
+            dlq={baseDlq}
+            onClose={vi.fn()}
+            clusterMembers={['dlq-1']}
+            clusterSignature="Network timeout on http node"
+          />,
+        )
+        expect(clusterLine(single.container)).toMatch(/matches 1 open DLQ entry\b/)
+      })
+    })
+
     it('shows the two-step cluster progress (validate → replay N) while validating', async () => {
       vi.mocked(api)
         .mockResolvedValueOnce(aiSuggestion)

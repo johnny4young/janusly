@@ -633,7 +633,13 @@ export function RecoveryDialog({
                       ? t('recoveryDialog.idle.clusterMatchOf', { visible: clusterMemberCount, total: clusterVisibleTotal })
                       : clusterMemberCount}
                   </strong>
-                  {' '}{t('recoveryDialog.idle.clusterEntries', { count: clusterMemberCount })} —{' '}
+                  {/* Noun only — the count is already in the <strong> above, and a
+                      counted string here would print it twice. Agreement follows the
+                      set being described: the capped form reads "1 of 31 open DLQ
+                      entries", so the total governs, not the visible slice. */}
+                  {' '}{t('recoveryDialog.idle.clusterEntriesNoun', {
+                    count: clusterMembersCapped ? clusterVisibleTotal : clusterMemberCount,
+                  })} —{' '}
                   {clusterMembersCapped
                     ? t('recoveryDialog.idle.clusterReplayCapped')
                     : t('recoveryDialog.idle.clusterReplayAll')}

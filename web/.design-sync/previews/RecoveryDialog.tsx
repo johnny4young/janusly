@@ -11,11 +11,9 @@ import { Stage } from './_stage'
  * why `clusterMembersCapped` and `clusterMembersTotal` exist: the operator has
  * to know they are acting on 200 incidents when only 50 are listed.
  *
- * Known copy defect in cluster mode, visible in the second cell: the match
- * count is printed twice — "matches 3 3 open DLQ entries" uncapped, and
- * "matches 3 of 31 3 open DLQ entries" when the member list is capped. A stray
- * emphasis element repeats what the counted string already renders. Do not
- * copy that composition; it is filed for repair.
+ * The cluster line puts the count in one place — an emphasised "3 of 31" —
+ * and follows it with a noun that agrees with the total, not the visible
+ * slice: one entry out of thirty-one is still "entries".
  */
 
 /** A single incident. */
@@ -27,7 +25,11 @@ export function SingleIncident() {
   )
 }
 
-/** Cluster mode: one patch applied to every dead letter sharing the signature. */
+/**
+ * Cluster mode with the member list capped below the true total: one patch
+ * covers every dead letter sharing the signature, and the operator is told they
+ * are acting on 31 incidents while only 3 are listed.
+ */
 export function ClusterMode() {
   return (
     <Stage minHeight={820}>
@@ -36,7 +38,8 @@ export function ClusterMode() {
         onClose={() => {}}
         clusterSignature="HTTP 503 from billing.acme.com"
         clusterMembers={['dlq_4f2a91', 'dlq_7c1e08', 'dlq_2b9f44']}
-        clusterMembersTotal={3}
+        clusterMembersCapped
+        clusterMembersTotal={31}
       />
     </Stage>
   )
