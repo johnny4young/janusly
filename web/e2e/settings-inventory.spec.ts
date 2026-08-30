@@ -150,7 +150,7 @@ test('Settings and Connections are inventory-first in English and Spanish', asyn
     await createCredential(page, orgId, {
       name: environmentName,
       kind: 'slack_webhook',
-      secretRef: `JANUSLY_E2E_MISSING_${stamp.replaceAll('-', '_').toUpperCase()}`,
+      secretRef: `JANUSLY_CRED_E2E_MISSING_${stamp.replaceAll('-', '_').toUpperCase()}`,
     })
 
     await page.addInitScript(({ activeOrg, selectedLocale }) => {

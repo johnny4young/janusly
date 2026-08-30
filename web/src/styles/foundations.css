@@ -126,7 +126,29 @@
   --we-shadow-ink-28: color-mix(in srgb, var(--we-ink) 28%, transparent);
   --we-shadow-ink-35: color-mix(in srgb, var(--we-ink) 35%, transparent);
   --we-shadow-ink-45: color-mix(in srgb, var(--we-ink) 45%, transparent);
+
+  /* Semantic layout scale for the operator UI. Feature styles may compose
+     these values, but should not introduce one-off spacing or control sizes. */
+  --we-space-1: 4px;
+  --we-space-2: 8px;
+  --we-space-3: 12px;
+  --we-space-4: 16px;
+  --we-space-6: 24px;
+  --we-space-8: 32px;
+  --we-control-sm: 32px;
+  --we-control-md: 40px;
+  --we-control-lg: 44px;
+  --we-radius-sm: 8px;
+  --we-radius-md: 12px;
+  --we-radius-lg: 16px;
   --we-radius-pill: 999px;
+  --we-shadow-sm: 0 1px 2px var(--we-shadow-ink-04), 0 1px 3px var(--we-shadow-ink-04);
+  --we-shadow-md: 0 12px 28px var(--we-shadow-ink-14);
+  --we-focus-ring: 0 0 0 3px var(--we-primary-ring);
+  --we-z-sticky: 20;
+  --we-z-popover: 40;
+  --we-z-dialog: 60;
+  --we-z-toast: 80;
 }
 
 /* --------------------------------------------------------------------------

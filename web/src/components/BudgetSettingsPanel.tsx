@@ -21,6 +21,9 @@ import { AlertTriangle, CheckCircle2, Coins, Info, Save, ShieldAlert } from "luc
 import { api } from "../api";
 import { useWorkflowStore } from "../store";
 import { tApiError, useT } from "../i18n";
+import { Button } from "./ui/Button";
+import { FormActions, FormField, FormSection } from "./ui/Form";
+import { StatusSummary } from "./ui/StatusSummary";
 
 type OrgBudgetForm = {
   monthlyUsd: string;
@@ -281,178 +284,182 @@ export function BudgetSettingsPanel() {
       </div>
 
       {error && (
-        <div className="run-input-form-error" role="alert">
-          <AlertTriangle size={14} aria-hidden="true" />
-          <span>{error}</span>
-        </div>
+        <StatusSummary
+          role="alert"
+          tone="danger"
+          icon={<AlertTriangle size={16} />}
+          title={error}
+        />
       )}
 
-      <fieldset className="we-budget-settings__fields" disabled={loading || saving}>
-        <legend className="section-kicker">{t("budget.org")}</legend>
-        <label className="we-field">
-          <span>{t("budget.field.monthly")}</span>
-          <input
-            type="number"
-            min={0}
-            step={0.01}
-            value={form.monthlyUsd}
-            onChange={(event) => setForm((prev) => ({ ...prev, monthlyUsd: event.target.value }))}
-            data-testid="budget-org-monthly"
-            aria-invalid={orgMonthlyInvalid}
-            aria-describedby={orgMonthlyInvalid ? "budget-org-monthly-error" : undefined}
-          />
-          <small>{orgBudgetDisabled ? t("budget.field.monthlyHintOff") : t("budget.field.monthlyHintOn")}</small>
-          {orgMonthlyInvalid && (
-            <span id="budget-org-monthly-error" className="helper-text helper-text--error" role="alert">
-              <AlertTriangle size={13} aria-hidden="true" /> {t("budget.errorMonthly")}
-            </span>
+      <FormSection title={t("budget.org")} description={budgetIntro} disabled={loading || saving}>
+        <FormField
+          id="budget-org-monthly"
+          label={t("budget.field.monthly")}
+          hint={orgBudgetDisabled ? t("budget.field.monthlyHintOff") : t("budget.field.monthlyHintOn")}
+          error={orgMonthlyInvalid ? t("budget.errorMonthly") : undefined}
+        >
+          {(controlProps) => (
+            <input
+              {...controlProps}
+              type="number"
+              min={0}
+              step={0.01}
+              value={form.monthlyUsd}
+              onChange={(event) => setForm((prev) => ({ ...prev, monthlyUsd: event.target.value }))}
+              data-testid="budget-org-monthly"
+            />
           )}
-        </label>
-        <label className="we-field">
-          <span>{t("budget.field.warn")}</span>
-          <input
-            type="number"
-            min={0}
-            max={100}
-            step={1}
-            value={form.warnPercent}
-            onChange={(event) => setForm((prev) => ({ ...prev, warnPercent: event.target.value }))}
-            data-testid="budget-org-warn"
-            aria-invalid={orgWarnInvalid}
-            aria-describedby={orgWarnInvalid ? "budget-org-warn-error" : undefined}
-          />
-          <small>{t("budget.field.warnHint")}</small>
-          {orgWarnInvalid && (
-            <span id="budget-org-warn-error" className="helper-text helper-text--error" role="alert">
-              <AlertTriangle size={13} aria-hidden="true" /> {t("budget.errorWarn")}
-            </span>
+        </FormField>
+        <FormField
+          id="budget-org-warn"
+          label={t("budget.field.warn")}
+          hint={t("budget.field.warnHint")}
+          error={orgWarnInvalid ? t("budget.errorWarn") : undefined}
+        >
+          {(controlProps) => (
+            <input
+              {...controlProps}
+              type="number"
+              min={0}
+              max={100}
+              step={1}
+              value={form.warnPercent}
+              onChange={(event) => setForm((prev) => ({ ...prev, warnPercent: event.target.value }))}
+              data-testid="budget-org-warn"
+            />
           )}
-        </label>
-        <label className="we-field">
-          <span>{t("budget.field.policy")}</span>
-          <select
-            value={form.policy}
-            onChange={(event) => setForm((prev) => ({ ...prev, policy: event.target.value === "block" ? "block" : "warn" }))}
-            data-testid="budget-org-policy"
-          >
-            <option value="warn">{t("budget.policy.warnLabel")}</option>
-            <option value="block">{t("budget.policy.blockLabel")}</option>
-          </select>
-        </label>
-        <div className="we-budget-settings__actions">
-          <button
-            type="button"
-            className="command-button command-button-primary"
+        </FormField>
+        <FormField id="budget-org-policy" label={t("budget.field.policy")}>
+          {(controlProps) => (
+            <select
+              {...controlProps}
+              value={form.policy}
+              onChange={(event) => setForm((prev) => ({ ...prev, policy: event.target.value === "block" ? "block" : "warn" }))}
+              data-testid="budget-org-policy"
+            >
+              <option value="warn">{t("budget.policy.warnLabel")}</option>
+              <option value="block">{t("budget.policy.blockLabel")}</option>
+            </select>
+          )}
+        </FormField>
+        <FormActions>
+          <Button
+            variant="primary"
             onClick={saveOrgBudget}
             disabled={saving || loading || orgMonthlyInvalid || orgWarnInvalid}
+            loading={saving}
+            loadingLabel={t("budget.saving")}
+            leadingIcon={<Save size={15} />}
             data-testid="budget-org-save"
           >
-            <Save size={14} aria-hidden="true" />
-            {saving ? t("budget.saving") : t("budget.action.saveOrg")}
-          </button>
-        </div>
-      </fieldset>
+            {t("budget.action.saveOrg")}
+          </Button>
+        </FormActions>
+      </FormSection>
 
-      <fieldset className="we-budget-settings__fields" disabled={workflows.length === 0 || wfSaving}>
-        <legend className="section-kicker">{t("budget.workflow.title")}</legend>
+      <FormSection title={t("budget.workflow.title")} disabled={workflows.length === 0 || wfSaving}>
         {workflows.length === 0 ? (
           <p className="helper-text">{t("budget.workflow.empty")}</p>
         ) : (
           <>
-            <label className="we-field">
-              <span>{t("budget.workflow.label")}</span>
-              <select
-                value={selectedWorkflowId}
-                onChange={(event) => setSelectedWorkflowId(event.target.value)}
-                data-testid="budget-workflow-select"
-              >
-                <option value="">{t("budget.workflow.pick")}</option>
-                {workflows.map((wf) => (
-                  <option key={wf.id} value={wf.id ?? ""}>{wf.name ?? wf.id}</option>
-                ))}
-              </select>
-              {wfExisting && (
-                <small>{t("budget.workflow.current", { usd: wfExisting.monthlyUsd.toFixed(2) })}</small>
+            <FormField
+              id="budget-workflow-select"
+              label={t("budget.workflow.label")}
+              hint={wfExisting ? t("budget.workflow.current", { usd: wfExisting.monthlyUsd.toFixed(2) }) : undefined}
+            >
+              {(controlProps) => (
+                <select
+                  {...controlProps}
+                  value={selectedWorkflowId}
+                  onChange={(event) => setSelectedWorkflowId(event.target.value)}
+                  data-testid="budget-workflow-select"
+                >
+                  <option value="">{t("budget.workflow.pick")}</option>
+                  {workflows.map((wf) => (
+                    <option key={wf.id} value={wf.id ?? ""}>{wf.name ?? wf.id}</option>
+                  ))}
+                </select>
               )}
-            </label>
-            <label className="we-field">
-              <span>{t("budget.field.monthly")}</span>
-              <input
-                type="number"
-                min={0}
-                step={0.01}
-                value={wfMonthly}
-                onChange={(event) => setWfMonthly(event.target.value)}
-                disabled={!selectedWorkflowId}
-                data-testid="budget-workflow-monthly"
-                aria-invalid={wfMonthlyInvalid}
-                aria-describedby={wfMonthlyInvalid ? "budget-workflow-monthly-error" : undefined}
-              />
-              {wfMonthlyInvalid && (
-                <span id="budget-workflow-monthly-error" className="helper-text helper-text--error" role="alert">
-                  <AlertTriangle size={13} aria-hidden="true" /> {t("budget.errorMonthly")}
-                </span>
+            </FormField>
+            <FormField
+              id="budget-workflow-monthly"
+              label={t("budget.field.monthly")}
+              error={wfMonthlyInvalid ? t("budget.errorMonthly") : undefined}
+            >
+              {(controlProps) => (
+                <input
+                  {...controlProps}
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={wfMonthly}
+                  onChange={(event) => setWfMonthly(event.target.value)}
+                  disabled={!selectedWorkflowId}
+                  data-testid="budget-workflow-monthly"
+                />
               )}
-            </label>
-            <label className="we-field">
-              <span>{t("budget.field.warn")}</span>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                step={1}
-                value={wfWarnPercent}
-                onChange={(event) => setWfWarnPercent(event.target.value)}
-                disabled={!selectedWorkflowId}
-                data-testid="budget-workflow-warn"
-                aria-invalid={wfWarnInvalid}
-                aria-describedby={wfWarnInvalid ? "budget-workflow-warn-error" : undefined}
-              />
-              {wfWarnInvalid && (
-                <span id="budget-workflow-warn-error" className="helper-text helper-text--error" role="alert">
-                  <AlertTriangle size={13} aria-hidden="true" /> {t("budget.errorWarn")}
-                </span>
+            </FormField>
+            <FormField
+              id="budget-workflow-warn"
+              label={t("budget.field.warn")}
+              error={wfWarnInvalid ? t("budget.errorWarn") : undefined}
+            >
+              {(controlProps) => (
+                <input
+                  {...controlProps}
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={wfWarnPercent}
+                  onChange={(event) => setWfWarnPercent(event.target.value)}
+                  disabled={!selectedWorkflowId}
+                  data-testid="budget-workflow-warn"
+                />
               )}
-            </label>
-            <label className="we-field">
-              <span>{t("budget.field.policy")}</span>
-              <select
-                value={wfPolicy}
-                onChange={(event) => setWfPolicy(event.target.value === "block" ? "block" : "warn")}
-                disabled={!selectedWorkflowId}
-                data-testid="budget-workflow-policy"
-              >
-                <option value="warn">{t("budget.policy.warnLabel")}</option>
-                <option value="block">{t("budget.policy.blockLabel")}</option>
-              </select>
-            </label>
+            </FormField>
+            <FormField id="budget-workflow-policy" label={t("budget.field.policy")}>
+              {(controlProps) => (
+                <select
+                  {...controlProps}
+                  value={wfPolicy}
+                  onChange={(event) => setWfPolicy(event.target.value === "block" ? "block" : "warn")}
+                  disabled={!selectedWorkflowId}
+                  data-testid="budget-workflow-policy"
+                >
+                  <option value="warn">{t("budget.policy.warnLabel")}</option>
+                  <option value="block">{t("budget.policy.blockLabel")}</option>
+                </select>
+              )}
+            </FormField>
             {wfStatus === "saved" && (
-              <div className="run-input-form-success" role="status">
-                <CheckCircle2 size={14} aria-hidden="true" />
-                <span>{t("budget.workflow.savedConfirm")}</span>
-              </div>
+              <StatusSummary
+                role="status"
+                tone="success"
+                icon={<CheckCircle2 size={16} />}
+                title={t("budget.workflow.savedConfirm")}
+              />
             )}
             {wfStatus && wfStatus !== "saved" && (
-              <div className="run-input-form-error" role="alert">
-                <ShieldAlert size={14} aria-hidden="true" />
-                <span>{wfStatus}</span>
-              </div>
+              <StatusSummary role="alert" tone="danger" icon={<ShieldAlert size={16} />} title={wfStatus} />
             )}
-            <div className="we-budget-settings__actions">
-              <button
-                type="button"
-                className="command-button command-button-primary"
+            <FormActions>
+              <Button
+                variant="primary"
                 onClick={saveWorkflowBudget}
                 disabled={!selectedWorkflowId || wfSaving || wfMonthlyInvalid || wfWarnInvalid}
+                loading={wfSaving}
+                loadingLabel={t("budget.saving")}
+                leadingIcon={<Save size={15} />}
                 data-testid="budget-workflow-save"
               >
-                <Save size={14} aria-hidden="true" />
-                {wfSaving ? t("budget.saving") : t("budget.workflow.action")}
-              </button>
-            </div>
+                {t("budget.workflow.action")}
+              </Button>
+            </FormActions>
           </>
         )}
-      </fieldset>
+      </FormSection>
     </section>
   );
 }

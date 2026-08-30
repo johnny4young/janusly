@@ -3335,11 +3335,6 @@
   background: linear-gradient(135deg, var(--we-primary-soft), color-mix(in srgb, var(--we-accent) 8%, var(--we-primary-soft) 92%));
 }
 
-.we-budget-settings__fields {
-  border-radius: 10px;
-  background: var(--we-surface-2);
-}
-
 .we-field input,
 .we-field select,
 .we-field textarea {

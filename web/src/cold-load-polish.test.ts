@@ -36,6 +36,7 @@ const expectedLocalCssImports = [
   "./styles/navigation.css",
   "./styles/workflow.css",
   "./styles/platform.css",
+  "./styles/ui-system.css",
   "./styles/accessibility.css",
 ];
 const deferredCanvasCssImport = "../styles/canvas.css";

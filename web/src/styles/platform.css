@@ -6383,60 +6383,6 @@ button.we-recovery-heatmap__cell:focus-visible {
   flex-shrink: 0;
 }
 
-.we-budget-settings__fields {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 14px;
-  border-radius: 10px;
-  border: 1px solid var(--we-line);
-  background: var(--we-surface-1);
-}
-
-.we-budget-settings__fields legend {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--we-text-2);
-  padding: 0 8px;
-}
-
-.we-budget-settings__fields .we-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.we-budget-settings__fields .we-field span {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--we-text-2);
-}
-
-.we-budget-settings__fields .we-field input,
-.we-budget-settings__fields .we-field select {
-  padding: 8px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--we-line);
-  background: var(--we-surface-1);
-  color: var(--we-text-1);
-  font-size: 13px;
-}
-
-.we-budget-settings__fields .we-field small {
-  color: var(--we-text-2);
-  font-size: 11px;
-}
-
-.we-budget-settings__actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
 .we-budget-settings__header {
   display: flex;
   align-items: center;

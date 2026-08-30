@@ -23,6 +23,8 @@ import { useWorkflowStore } from '../store'
 import type { Credential } from '../types'
 import { CredentialRotateModal } from './CredentialRotateModal'
 import { EmptyView, PanelChrome } from './panel-primitives'
+import { Button } from './ui/Button'
+import { FieldStack, FormField } from './ui/Form'
 
 const CREDENTIAL_ENV_VAR_NAME = /^[A-Z][A-Z0-9_]*$/
 const CONNECTION_ROW_HEIGHT = 166
@@ -129,94 +131,104 @@ function CredentialCreateDialog({
           }}
         >
           <div className="run-input-dialog__body">
-            <fieldset className="we-fieldset" disabled={submitting}>
-              <label>
-                <span className="field-label">{t('rightPanel.credentials.nameLabel')}</span>
-                <input
-                  ref={nameRef}
-                  className="text-field"
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  autoComplete="off"
-                />
-              </label>
-              <label>
-                <span className="field-label">{t('rightPanel.credentials.kindLabel')}</span>
-                <select className="text-field" value={kind} onChange={(event) => setKind(event.target.value)}>
-                  {CREDENTIAL_KINDS.map((option) => <option key={option} value={option}>{option}</option>)}
-                </select>
-              </label>
-              <label>
-                <span className="field-label">{t('rightPanel.credentials.storageLabel')}</span>
-                <select
-                  className="text-field"
-                  value={storage}
-                  onChange={(event) => setStorage(event.target.value as 'managed' | 'environment')}
-                >
-                  <option value="managed">{t('rightPanel.credentials.storage.managed')}</option>
-                  <option value="environment">{t('rightPanel.credentials.storage.environment')}</option>
-                </select>
-              </label>
-              <label>
-                <span className="field-label">
-                  {storage === 'managed'
-                    ? t('rightPanel.credentials.valueLabel')
-                    : t('rightPanel.credentials.envLabel')}
-                </span>
-                {storage === 'managed' ? (
+            <FieldStack disabled={submitting} labelledBy="credential-create-title">
+              <FormField
+                id="credential-name"
+                label={t('rightPanel.credentials.nameLabel')}
+                required
+              >
+                {(controlProps) => (
                   <input
+                    {...controlProps}
+                    ref={nameRef}
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    autoComplete="off"
+                    required
+                  />
+                )}
+              </FormField>
+              <FormField id="credential-kind" label={t('rightPanel.credentials.kindLabel')}>
+                {(controlProps) => (
+                  <select {...controlProps} value={kind} onChange={(event) => setKind(event.target.value)}>
+                    {CREDENTIAL_KINDS.map((option) => <option key={option} value={option}>{option}</option>)}
+                  </select>
+                )}
+              </FormField>
+              <FormField id="credential-storage" label={t('rightPanel.credentials.storageLabel')}>
+                {(controlProps) => (
+                  <select
+                    {...controlProps}
+                    value={storage}
+                    onChange={(event) => setStorage(event.target.value as 'managed' | 'environment')}
+                  >
+                    <option value="managed">{t('rightPanel.credentials.storage.managed')}</option>
+                    <option value="environment">{t('rightPanel.credentials.storage.environment')}</option>
+                  </select>
+                )}
+              </FormField>
+              <FormField
+                id="credential-secret"
+                label={storage === 'managed'
+                  ? t('rightPanel.credentials.valueLabel')
+                  : t('rightPanel.credentials.envLabel')}
+                required
+                hint={storage === 'managed' ? t('credentialRotation.field.newSecretValueHelp') : undefined}
+                error={storage === 'environment' && refInvalid ? (
+                  <><AlertCircle size={13} aria-hidden="true" /> {t('rightPanel.credentials.envInvalid')}</>
+                ) : undefined}
+              >
+                {(controlProps) => storage === 'managed' ? (
+                  <input
+                    {...controlProps}
                     type="password"
                     autoComplete="new-password"
-                    className="text-field"
-                    aria-label={t('rightPanel.credentials.valueLabel')}
                     value={secretValue}
                     onChange={(event) => setSecretValue(event.target.value)}
                     placeholder={t('rightPanel.credentials.valuePlaceholder')}
+                    required
                   />
                 ) : (
                   <input
-                    className={`text-field${refInvalid ? ' text-field--error' : ''}`}
-                    aria-label={t('rightPanel.credentials.envLabel')}
+                    {...controlProps}
                     value={secretRef}
                     onChange={(event) => setSecretRef(event.target.value)}
                     placeholder={t('rightPanel.credentials.envPlaceholder')}
-                    aria-invalid={refInvalid}
-                    aria-describedby={refInvalid ? 'credential-secret-error' : undefined}
+                    required
                   />
                 )}
-                {storage === 'managed' && (
-                  <span className="helper-text">
-                    {t('credentialRotation.field.newSecretValueHelp')}
-                  </span>
+              </FormField>
+              <FormField
+                id="credential-expiry"
+                label={t('rightPanel.credentials.expiryLabel')}
+                hint={t('rightPanel.credentials.expiryHint')}
+              >
+                {(controlProps) => (
+                  <input
+                    {...controlProps}
+                    type="date"
+                    value={expiresAt}
+                    onChange={(event) => setExpiresAt(event.target.value)}
+                  />
                 )}
-                {storage === 'environment' && refInvalid && (
-                  <span id="credential-secret-error" className="helper-text helper-text--error" role="alert">
-                    <AlertCircle size={13} aria-hidden="true" /> {t('rightPanel.credentials.envInvalid')}
-                  </span>
-                )}
-              </label>
-              <label>
-                <span className="field-label">{t('rightPanel.credentials.expiryLabel')}</span>
-                <input
-                  type="date"
-                  className="text-field"
-                  aria-label={t('rightPanel.credentials.expiryLabel')}
-                  value={expiresAt}
-                  onChange={(event) => setExpiresAt(event.target.value)}
-                />
-                <span className="helper-text">{t('rightPanel.credentials.expiryHint')}</span>
-              </label>
-            </fieldset>
+              </FormField>
+            </FieldStack>
           </div>
 
           <footer className="run-input-dialog__footer">
-            <button type="button" className="command-button" onClick={onClose} disabled={submitting}>
+            <Button variant="ghost" onClick={onClose} disabled={submitting}>
               {t('common.cancel')}
-            </button>
-            <button type="submit" className="command-button command-button-primary" disabled={!canSubmit || submitting}>
-              <Plus size={14} aria-hidden="true" />
-              <span>{submitting ? t('common.working') : t('rightPanel.credentials.addButton')}</span>
-            </button>
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={!canSubmit || submitting}
+              loading={submitting}
+              loadingLabel={t('common.working')}
+              leadingIcon={<Plus size={15} />}
+            >
+              {t('rightPanel.credentials.addButton')}
+            </Button>
           </footer>
         </form>
       </div>
