@@ -10,7 +10,10 @@
  * fallback.
  */
 
+import { AlertTriangle } from 'lucide-react'
 import { useT } from '../i18n'
+import { Button } from './ui/Button'
+import { StatusSummary } from './ui/StatusSummary'
 
 type PanelErrorFallbackProps = {
   /** Clears the boundary so the subtree re-renders in place. */
@@ -21,13 +24,13 @@ export function PanelErrorFallback({ onRetry }: PanelErrorFallbackProps) {
   const { t } = useT()
   return (
     <div className="panel-list" role="alert" data-testid="panel-error-fallback">
-      <div className="we-card">
-        <strong>{t('panel.error.title')}</strong>
-        <p className="helper-text">{t('panel.error.body')}</p>
-        <button type="button" className="command-button" onClick={onRetry}>
-          {t('panel.error.retry')}
-        </button>
-      </div>
+      <StatusSummary
+        icon={<AlertTriangle size={16} />}
+        tone="danger"
+        title={t('panel.error.title')}
+        description={t('panel.error.body')}
+        actions={<Button size="sm" onClick={onRetry}>{t('panel.error.retry')}</Button>}
+      />
     </div>
   )
 }

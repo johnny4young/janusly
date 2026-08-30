@@ -37,6 +37,8 @@ import {
   type RunInputErrorMap,
   type RunInputFormState,
 } from './run-input-model'
+import { Button } from './ui/Button'
+import { FormField, type FormControlProps } from './ui/Form'
 
 export type RunInputDialogProps = {
   /** Declared `inputs` schema for the current workflow. Required because the dialog is only mounted when inputs exist. */
@@ -229,9 +231,9 @@ export function RunInputDialog({
                     </select>
                   </label>
                   {onDeletePreset && (
-                    <button
-                      type="button"
-                      className="small-command"
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       data-testid="run-input-preset-delete"
                       aria-label={t('runInput.presets.deleteAria', { name: selectedPresetName })}
                       disabled={submitting || presetBusy || selectedPresetName === ''}
@@ -244,10 +246,10 @@ export function RunInputDialog({
                           .catch(() => undefined)
                           .finally(() => setPresetBusy(false))
                       }}
+                      leadingIcon={<Trash2 size={13} />}
                     >
-                      <Trash2 size={13} aria-hidden="true" />
-                      <span>{t('runInput.presets.delete')}</span>
-                    </button>
+                      {t('runInput.presets.delete')}
+                    </Button>
                   )}
                 </div>
               )}
@@ -262,9 +264,9 @@ export function RunInputDialog({
                     disabled={submitting || presetBusy}
                     onChange={(event) => setPresetName(event.target.value)}
                   />
-                  <button
-                    type="button"
-                    className="small-command"
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     data-testid="run-input-preset-save"
                     disabled={submitting || presetBusy || presetName.trim() === ''}
                     onClick={() => {
@@ -283,7 +285,7 @@ export function RunInputDialog({
                     }}
                   >
                     {t('runInput.presets.save')}
-                  </button>
+                  </Button>
                 </div>
               )}
             </div>
@@ -323,17 +325,18 @@ export function RunInputDialog({
           )}
 
           <footer className="run-input-dialog__footer">
-            <button type="button" className="command-button" onClick={handleCancel} disabled={submitting}>
+            <Button variant="secondary" onClick={handleCancel} disabled={submitting}>
               {t('runInput.cancel')}
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
-              className="command-button command-button-primary"
-              disabled={submitting}
+              variant="primary"
+              loading={submitting}
+              loadingLabel={resolvedSubmittingLabel}
+              leadingIcon={<Play size={14} />}
             >
-              <Play size={14} aria-hidden="true" />
-              <span>{submitting ? resolvedSubmittingLabel : resolvedSubmitLabel}</span>
-            </button>
+              {resolvedSubmitLabel}
+            </Button>
           </footer>
         </form>
       </div>
@@ -391,7 +394,7 @@ function FieldRouter(props: FieldProps) {
   if (schema.type === 'object' && schema.properties) {
     return (
       <fieldset className="run-input-fieldset">
-        <legend className="field-label run-input-field-label">
+        <legend className="ui-field__label run-input-field-label">
           <span>{props.label ?? inputDisplayLabel(props.path)}</span>
           <small data-required={props.required ? 'true' : 'false'} aria-hidden="true">
             {props.required ? t('runInput.required') : t('runInput.optional')}
@@ -426,7 +429,6 @@ function PrimitiveOrArrayField({
 }: FieldProps) {
   const { t } = useT()
   const inputId = `run-input-${path || 'root'}`
-  const errorId = `${inputId}-error`
   const error = errors[path]
   const displayLabel = label ?? inputDisplayLabel(path)
   const value = getRunInputValue(state, path)
@@ -438,131 +440,118 @@ function PrimitiveOrArrayField({
     clearLocalError(path)
   }
 
-  const labelNode = (
-    <label className="field-label run-input-field-label" htmlFor={inputId}>
-      <span>{displayLabel}</span>
-      <small data-required={required ? 'true' : 'false'} aria-hidden="true">
-        {required ? t('runInput.required') : t('runInput.optional')}
-      </small>
-    </label>
-  )
-
-  let control: React.ReactNode
-
-  if (schema.type === 'string' && Array.isArray(schema.enum) && schema.enum.length > 0) {
-    control = (
-      <select
-        id={inputId}
-        className="text-field"
-        value={typeof value === 'string' ? value : ''}
-        onChange={(event) => setValue(event.target.value)}
-        aria-required={required || undefined}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={error ? errorId : undefined}
-        ref={firstFieldRef as React.MutableRefObject<HTMLSelectElement | null> | undefined}
-      >
-        <option value="">{t('runInput.select')}</option>
-        {schema.enum.map((option) => {
-          const text = typeof option === 'string' ? option : JSON.stringify(option)
-          return (
-            <option key={text} value={text}>
-              {text}
-            </option>
-          )
-        })}
-      </select>
-    )
-  } else if (schema.type === 'string') {
-    control = (
-      <input
-        id={inputId}
-        className="text-field"
-        type="text"
-        value={typeof value === 'string' ? value : ''}
-        onChange={(event) => setValue(event.target.value)}
-        aria-required={required || undefined}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={error ? errorId : undefined}
-        ref={firstFieldRef as React.MutableRefObject<HTMLInputElement | null> | undefined}
-      />
-    )
-  } else if (schema.type === 'number') {
-    control = (
-      <input
-        id={inputId}
-        className="text-field"
-        type="number"
-        value={typeof value === 'string' || typeof value === 'number' ? String(value) : ''}
-        onChange={(event) => setValue(event.target.value)}
-        aria-required={required || undefined}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={error ? errorId : undefined}
-        ref={firstFieldRef as React.MutableRefObject<HTMLInputElement | null> | undefined}
-      />
-    )
-  } else if (schema.type === 'boolean') {
-    control = (
-      <select
-        id={inputId}
-        className="text-field"
-        value={value === true ? 'true' : value === false ? 'false' : ''}
-        onChange={(event) => {
-          const selected = event.target.value
-          setValue(selected === '' ? undefined : selected === 'true')
-        }}
-        aria-required={required || undefined}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={error ? errorId : undefined}
-        ref={firstFieldRef as React.MutableRefObject<HTMLSelectElement | null> | undefined}
-      >
-        <option value="">{t('runInput.select')}</option>
-        <option value="true">{t('runInput.booleanTrue')}</option>
-        <option value="false">{t('runInput.booleanFalse')}</option>
-      </select>
-    )
-  } else if (schema.type === 'array') {
-    control = (
-      <textarea
-        id={inputId}
-        className="code-field code-field-short"
-        value={typeof value === 'string' ? value : value === undefined ? '' : JSON.stringify(value, null, 2)}
-        onChange={(event) => setValue(event.target.value)}
-        placeholder='["a", "b", "c"]'
-        aria-required={required || undefined}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={error ? errorId : undefined}
-        ref={firstFieldRef as React.MutableRefObject<HTMLTextAreaElement | null> | undefined}
-      />
-    )
-  } else {
+  const renderControl = (controlProps: FormControlProps) => {
+    if (schema.type === 'string' && Array.isArray(schema.enum) && schema.enum.length > 0) {
+      return (
+        <select
+          {...controlProps}
+          value={typeof value === 'string' ? value : ''}
+          onChange={(event) => setValue(event.target.value)}
+          aria-required={required || undefined}
+          ref={firstFieldRef as React.MutableRefObject<HTMLSelectElement | null> | undefined}
+        >
+          <option value="">{t('runInput.select')}</option>
+          {schema.enum.map((option) => {
+            const text = typeof option === 'string' ? option : JSON.stringify(option)
+            return (
+              <option key={text} value={text}>
+                {text}
+              </option>
+            )
+          })}
+        </select>
+      )
+    }
+    if (schema.type === 'string') {
+      return (
+        <input
+          {...controlProps}
+          type="text"
+          value={typeof value === 'string' ? value : ''}
+          onChange={(event) => setValue(event.target.value)}
+          aria-required={required || undefined}
+          ref={firstFieldRef as React.MutableRefObject<HTMLInputElement | null> | undefined}
+        />
+      )
+    }
+    if (schema.type === 'number') {
+      return (
+        <input
+          {...controlProps}
+          type="number"
+          value={typeof value === 'string' || typeof value === 'number' ? String(value) : ''}
+          onChange={(event) => setValue(event.target.value)}
+          aria-required={required || undefined}
+          ref={firstFieldRef as React.MutableRefObject<HTMLInputElement | null> | undefined}
+        />
+      )
+    }
+    if (schema.type === 'boolean') {
+      return (
+        <select
+          {...controlProps}
+          value={value === true ? 'true' : value === false ? 'false' : ''}
+          onChange={(event) => {
+            const selected = event.target.value
+            setValue(selected === '' ? undefined : selected === 'true')
+          }}
+          aria-required={required || undefined}
+          ref={firstFieldRef as React.MutableRefObject<HTMLSelectElement | null> | undefined}
+        >
+          <option value="">{t('runInput.select')}</option>
+          <option value="true">{t('runInput.booleanTrue')}</option>
+          <option value="false">{t('runInput.booleanFalse')}</option>
+        </select>
+      )
+    }
+    if (schema.type === 'array') {
+      return (
+        <textarea
+          {...controlProps}
+          className="ui-config-code ui-config-code--short"
+          value={typeof value === 'string' ? value : value === undefined ? '' : JSON.stringify(value, null, 2)}
+          onChange={(event) => setValue(event.target.value)}
+          placeholder='["a", "b", "c"]'
+          aria-required={required || undefined}
+          ref={firstFieldRef as React.MutableRefObject<HTMLTextAreaElement | null> | undefined}
+        />
+      )
+    }
     // Object without properties or unknown — fall back to JSON textarea so
     // the field is still usable instead of vanishing silently.
-    control = (
+    return (
       <textarea
-        id={inputId}
-        className="code-field code-field-short"
+        {...controlProps}
+        className="ui-config-code ui-config-code--short"
         value={typeof value === 'string' ? value : value === undefined ? '' : JSON.stringify(value, null, 2)}
         onChange={(event) => setValue(event.target.value)}
         placeholder='{ "key": "value" }'
         aria-required={required || undefined}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={error ? errorId : undefined}
         ref={firstFieldRef as React.MutableRefObject<HTMLTextAreaElement | null> | undefined}
       />
     )
   }
 
   return (
-    <div className="config-field-row">
-      {labelNode}
-      {schema.description && <p className="helper-text">{schema.description}</p>}
-      {control}
-      {error && (
-        <p className="run-input-field-error" id={errorId} role="alert">
+    <FormField
+      id={inputId}
+      label={(
+        <span className="run-input-field-label">
+          <span>{displayLabel}</span>
+          <small data-required={required ? 'true' : 'false'} aria-hidden="true">
+            {required ? t('runInput.required') : t('runInput.optional')}
+          </small>
+        </span>
+      )}
+      hint={schema.description}
+      error={error ? (
+        <>
           <AlertCircle size={12} aria-hidden="true" />
           <span>{error}</span>
-        </p>
-      )}
-    </div>
+        </>
+      ) : undefined}
+    >
+      {renderControl}
+    </FormField>
   )
 }

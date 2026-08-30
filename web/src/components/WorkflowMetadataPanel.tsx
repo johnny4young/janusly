@@ -13,6 +13,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { AlertCircle } from 'lucide-react'
 
 import {
   RECOVERY_ITEM_SEVERITIES,
@@ -27,6 +28,9 @@ import { containsOperatorGuidanceSecret } from '@/lib/operator-guidance'
 import { api } from '../api'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
+import { Button } from './ui/Button'
+import { FormActions, FormField } from './ui/Form'
+import { StatusSummary } from './ui/StatusSummary'
 
 type WorkflowMetadataForm = {
   owners: string[]
@@ -264,181 +268,205 @@ export function WorkflowMetadataPanel({ workflowId: explicit, readOnly = false }
       <p className="helper-text">{t('workflowMetadata.panel.description')}</p>
       {loadError && (
         <div data-testid="workflow-metadata-load-error">
-          <p className="helper-text we-helper-text--error" role="alert">{loadError}</p>
-          <button
-            type="button"
-            className="command-button"
-            onClick={() => setReloadNonce((value) => value + 1)}
-            disabled={saving || loading}
-            data-testid="workflow-metadata-retry"
-          >
-            {t('workflowMetadata.action.retry')}
-          </button>
+          <StatusSummary
+            icon={<AlertCircle size={16} />}
+            tone="danger"
+            role="alert"
+            title={loadError}
+            actions={(
+              <Button
+                size="sm"
+                onClick={() => setReloadNonce((value) => value + 1)}
+                disabled={saving || loading}
+                data-testid="workflow-metadata-retry"
+              >
+                {t('workflowMetadata.action.retry')}
+              </Button>
+            )}
+          />
         </div>
       )}
       <form className="we-workflow-metadata-panel__form" onSubmit={onSave}>
-        <label className="we-field">
-          <span>{t('workflowMetadata.field.owners')}</span>
-          <input
-            type="text"
-            value={ownersRaw}
-            onChange={(e) => {
-              dirtyRef.current = true
-              setOwnersRaw(e.target.value)
-            }}
-            placeholder={t('workflowMetadata.field.ownersPlaceholder')}
-            disabled={editorDisabled}
-            data-testid="workflow-metadata-owners"
-          />
-          <span className="helper-text">{t('workflowMetadata.field.ownersHelp')}</span>
-        </label>
-
-        <label className="we-field">
-          <span>{t('workflowMetadata.field.description')}</span>
-          <input
-            type="text"
-            value={form.description}
-            maxLength={2000}
-            onChange={(e) => updateForm('description', e.target.value)}
-            disabled={editorDisabled}
-          />
-        </label>
-
-        <label className="we-field">
-          <span>{t('workflowMetadata.field.tags')}</span>
-          <input
-            type="text"
-            value={tagsRaw}
-            onChange={(e) => {
-              dirtyRef.current = true
-              setTagsRaw(e.target.value)
-            }}
-            placeholder={t('workflowMetadata.field.tagsPlaceholder')}
-            disabled={editorDisabled}
-          />
-        </label>
-
-        <label className="we-field">
-          <span>{t('workflowMetadata.field.folder')}</span>
-          <input
-            type="text"
-            value={form.folder}
-            maxLength={WORKFLOW_METADATA_FOLDER_MAX_LENGTH}
-            onChange={(e) => updateForm('folder', e.target.value)}
-            placeholder={t('workflowMetadata.field.folderPlaceholder')}
-            disabled={editorDisabled}
-            data-testid="workflow-metadata-folder"
-          />
-        </label>
-
-        <label className="we-field">
-          <span>{t('workflowMetadata.field.slackChannel')}</span>
-          <input
-            type="text"
-            value={form.slackChannel}
-            maxLength={80}
-            onChange={(e) => updateForm('slackChannel', e.target.value)}
-            placeholder={t('workflowMetadata.field.slackChannelPlaceholder')}
-            disabled={editorDisabled}
-          />
-        </label>
-
-        <label className="we-field">
-          <span>{t('workflowMetadata.field.linearProject')}</span>
-          <input
-            type="text"
-            value={form.linearProject}
-            maxLength={200}
-            onChange={(e) => updateForm('linearProject', e.target.value)}
-            placeholder={t('workflowMetadata.field.linearProjectPlaceholder')}
-            disabled={editorDisabled}
-          />
-        </label>
-
-        <label className="we-field">
-          <span>{t('workflowMetadata.field.severityDefault')}</span>
-          <select
-            value={form.severityDefault}
-            onChange={(e) => updateForm('severityDefault', e.target.value as RecoveryItemSeverity | '')}
-            disabled={editorDisabled}
-            data-testid="workflow-metadata-severity"
-          >
-            <option value="">{t('workflowMetadata.field.severityDefaultNone')}</option>
-            {RECOVERY_ITEM_SEVERITIES.map((s) => (
-              <option key={s} value={s}>
-                {s.toUpperCase()}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="we-field">
-          <span>
-            {t('workflowMetadata.field.aiGuidance')}
-            <span className="helper-text">
-              {' '}
-              ({aiGuidanceByteLength.toLocaleString(getResolvedLocale())}/{WORKFLOW_METADATA_AI_GUIDANCE_MAX_BYTES.toLocaleString(getResolvedLocale())}{' '}
-              {t('workflowMetadata.field.runbookUnit')})
-            </span>
-          </span>
-          <textarea
-            rows={7}
-            value={form.aiGuidanceMarkdown}
-            onChange={(e) => updateForm('aiGuidanceMarkdown', e.target.value)}
-            placeholder={t('workflowMetadata.field.aiGuidancePlaceholder')}
-            disabled={editorDisabled}
-            aria-invalid={aiGuidanceOverCap || aiGuidanceHasSecret}
-            data-testid="workflow-metadata-ai-guidance"
-          />
-          <span className="helper-text">{t('workflowMetadata.field.aiGuidanceHelp')}</span>
-          {aiGuidanceOverCap && (
-            <span className="helper-text we-helper-text--error">
-              {t('workflowMetadata.field.aiGuidanceOverCap')}
-            </span>
+        <FormField
+          id="workflow-metadata-owners"
+          label={t('workflowMetadata.field.owners')}
+          hint={t('workflowMetadata.field.ownersHelp')}
+        >
+          {controlProps => (
+            <input
+              {...controlProps}
+              type="text"
+              value={ownersRaw}
+              onChange={(e) => {
+                dirtyRef.current = true
+                setOwnersRaw(e.target.value)
+              }}
+              placeholder={t('workflowMetadata.field.ownersPlaceholder')}
+              disabled={editorDisabled}
+              data-testid="workflow-metadata-owners"
+            />
           )}
-          {aiGuidanceHasSecret && (
-            <span className="helper-text we-helper-text--error">
-              {t('workflowMetadata.field.aiGuidanceSecret')}
-            </span>
-          )}
-        </label>
+        </FormField>
 
-        <label className="we-field">
-          <span>
-            {t('workflowMetadata.field.runbook')}
-            <span className="helper-text">
-              {' '}
-              ({runbookByteLength.toLocaleString(getResolvedLocale())}/{WORKFLOW_METADATA_RUNBOOK_MAX_BYTES.toLocaleString(getResolvedLocale())}{' '}
-              {t('workflowMetadata.field.runbookUnit')})
-            </span>
-          </span>
-          <textarea
-            rows={10}
-            value={form.runbookMarkdown}
-            onChange={(e) => updateForm('runbookMarkdown', e.target.value)}
-            placeholder={t('workflowMetadata.field.runbookPlaceholder')}
-            disabled={editorDisabled}
-            data-testid="workflow-metadata-runbook"
-          />
-          {runbookOverCap && (
-            <span className="helper-text we-helper-text--error">
-              {t('workflowMetadata.field.runbookOverCap')}
-            </span>
+        <FormField id="workflow-metadata-description" label={t('workflowMetadata.field.description')}>
+          {controlProps => (
+            <input
+              {...controlProps}
+              type="text"
+              value={form.description}
+              maxLength={2000}
+              onChange={(e) => updateForm('description', e.target.value)}
+              disabled={editorDisabled}
+            />
           )}
-        </label>
+        </FormField>
 
-        <div className="we-workflow-metadata-panel__actions">
-          <button
+        <FormField id="workflow-metadata-tags" label={t('workflowMetadata.field.tags')}>
+          {controlProps => (
+            <input
+              {...controlProps}
+              type="text"
+              value={tagsRaw}
+              onChange={(e) => {
+                dirtyRef.current = true
+                setTagsRaw(e.target.value)
+              }}
+              placeholder={t('workflowMetadata.field.tagsPlaceholder')}
+              disabled={editorDisabled}
+            />
+          )}
+        </FormField>
+
+        <FormField id="workflow-metadata-folder" label={t('workflowMetadata.field.folder')}>
+          {controlProps => (
+            <input
+              {...controlProps}
+              type="text"
+              value={form.folder}
+              maxLength={WORKFLOW_METADATA_FOLDER_MAX_LENGTH}
+              onChange={(e) => updateForm('folder', e.target.value)}
+              placeholder={t('workflowMetadata.field.folderPlaceholder')}
+              disabled={editorDisabled}
+              data-testid="workflow-metadata-folder"
+            />
+          )}
+        </FormField>
+
+        <FormField id="workflow-metadata-slack-channel" label={t('workflowMetadata.field.slackChannel')}>
+          {controlProps => (
+            <input
+              {...controlProps}
+              type="text"
+              value={form.slackChannel}
+              maxLength={80}
+              onChange={(e) => updateForm('slackChannel', e.target.value)}
+              placeholder={t('workflowMetadata.field.slackChannelPlaceholder')}
+              disabled={editorDisabled}
+            />
+          )}
+        </FormField>
+
+        <FormField id="workflow-metadata-linear-project" label={t('workflowMetadata.field.linearProject')}>
+          {controlProps => (
+            <input
+              {...controlProps}
+              type="text"
+              value={form.linearProject}
+              maxLength={200}
+              onChange={(e) => updateForm('linearProject', e.target.value)}
+              placeholder={t('workflowMetadata.field.linearProjectPlaceholder')}
+              disabled={editorDisabled}
+            />
+          )}
+        </FormField>
+
+        <FormField id="workflow-metadata-severity" label={t('workflowMetadata.field.severityDefault')}>
+          {controlProps => (
+            <select
+              {...controlProps}
+              value={form.severityDefault}
+              onChange={(e) => updateForm('severityDefault', e.target.value as RecoveryItemSeverity | '')}
+              disabled={editorDisabled}
+              data-testid="workflow-metadata-severity"
+            >
+              <option value="">{t('workflowMetadata.field.severityDefaultNone')}</option>
+              {RECOVERY_ITEM_SEVERITIES.map((s) => (
+                <option key={s} value={s}>{s.toUpperCase()}</option>
+              ))}
+            </select>
+          )}
+        </FormField>
+
+        <FormField
+          id="workflow-metadata-ai-guidance"
+          label={(
+            <>
+              {t('workflowMetadata.field.aiGuidance')}
+              <span className="helper-text">
+                {' '}({aiGuidanceByteLength.toLocaleString(getResolvedLocale())}/{WORKFLOW_METADATA_AI_GUIDANCE_MAX_BYTES.toLocaleString(getResolvedLocale())}{' '}
+                {t('workflowMetadata.field.runbookUnit')})
+              </span>
+            </>
+          )}
+          hint={t('workflowMetadata.field.aiGuidanceHelp')}
+          error={(aiGuidanceOverCap || aiGuidanceHasSecret)
+            ? [
+                aiGuidanceOverCap ? t('workflowMetadata.field.aiGuidanceOverCap') : null,
+                aiGuidanceHasSecret ? t('workflowMetadata.field.aiGuidanceSecret') : null,
+              ].filter(Boolean).join(' ')
+            : undefined}
+        >
+          {controlProps => (
+            <textarea
+              {...controlProps}
+              rows={7}
+              value={form.aiGuidanceMarkdown}
+              onChange={(e) => updateForm('aiGuidanceMarkdown', e.target.value)}
+              placeholder={t('workflowMetadata.field.aiGuidancePlaceholder')}
+              disabled={editorDisabled}
+              data-testid="workflow-metadata-ai-guidance"
+            />
+          )}
+        </FormField>
+
+        <FormField
+          id="workflow-metadata-runbook"
+          label={(
+            <>
+              {t('workflowMetadata.field.runbook')}
+              <span className="helper-text">
+                {' '}({runbookByteLength.toLocaleString(getResolvedLocale())}/{WORKFLOW_METADATA_RUNBOOK_MAX_BYTES.toLocaleString(getResolvedLocale())}{' '}
+                {t('workflowMetadata.field.runbookUnit')})
+              </span>
+            </>
+          )}
+          error={runbookOverCap ? t('workflowMetadata.field.runbookOverCap') : undefined}
+        >
+          {controlProps => (
+            <textarea
+              {...controlProps}
+              rows={10}
+              value={form.runbookMarkdown}
+              onChange={(e) => updateForm('runbookMarkdown', e.target.value)}
+              placeholder={t('workflowMetadata.field.runbookPlaceholder')}
+              disabled={editorDisabled}
+              data-testid="workflow-metadata-runbook"
+            />
+          )}
+        </FormField>
+
+        <FormActions className="we-workflow-metadata-panel__actions">
+          <Button
             type="submit"
-            className="command-button command-button-primary"
+            variant="primary"
+            loading={saving}
+            loadingLabel={t('workflowMetadata.action.saving')}
             disabled={readOnly || loadState !== 'ready' || saving || runbookOverCap || aiGuidanceOverCap || aiGuidanceHasSecret}
             data-testid="workflow-metadata-save"
           >
-            {saving
-              ? (t('workflowMetadata.action.saving'))
-              : (t('workflowMetadata.action.save'))}
-          </button>
-        </div>
+            {t('workflowMetadata.action.save')}
+          </Button>
+        </FormActions>
       </form>
     </section>
   )

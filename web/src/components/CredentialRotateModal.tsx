@@ -19,6 +19,9 @@ import { AlertCircle, CheckCircle2, KeyRound, X } from 'lucide-react'
 import { api } from '../api'
 import { tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
+import { Button } from './ui/Button'
+import { FormField } from './ui/Form'
+import { StatusSummary } from './ui/StatusSummary'
 
 /** One workflow touched by the rotation, with the referencing node ids. */
 type AffectedWorkflow = {
@@ -191,113 +194,114 @@ export function CredentialRotateModal({ credentialName, onClose }: CredentialRot
                   ))}
                 </ul>
               )}
-              <label className="field-label" htmlFor="credential-rotate-storage">
-                {t('rightPanel.credentials.storageLabel')}
-              </label>
-              <select
-                id="credential-rotate-storage"
-                className="text-field"
-                value={storage}
-                disabled={step.kind === 'rotating'}
-                onChange={(event) => setStorage(event.target.value as 'managed' | 'environment')}
-              >
-                <option value="managed">{t('rightPanel.credentials.storage.managed')}</option>
-                <option value="environment">{t('rightPanel.credentials.storage.environment')}</option>
-              </select>
-              <label className="field-label" htmlFor="credential-rotate-newref">
-                {storage === 'managed'
+              <FormField id="credential-rotate-storage" label={t('rightPanel.credentials.storageLabel')}>
+                {controlProps => (
+                  <select
+                    {...controlProps}
+                    value={storage}
+                    disabled={step.kind === 'rotating'}
+                    onChange={(event) => setStorage(event.target.value as 'managed' | 'environment')}
+                  >
+                    <option value="managed">{t('rightPanel.credentials.storage.managed')}</option>
+                    <option value="environment">{t('rightPanel.credentials.storage.environment')}</option>
+                  </select>
+                )}
+              </FormField>
+              <FormField
+                id="credential-rotate-newref"
+                label={storage === 'managed'
                   ? t('credentialRotation.field.newSecretValue')
                   : t('credentialRotation.field.newSecretRef')}
-              </label>
-              {storage === 'managed' ? (
-                <input
-                  id="credential-rotate-newref"
-                  type="password"
-                  autoComplete="new-password"
-                  className="text-field"
-                  value={newSecretValue}
-                  onChange={(event) => setNewSecretValue(event.target.value)}
-                  placeholder={t('rightPanel.credentials.valuePlaceholder')}
-                  disabled={step.kind === 'rotating'}
-                  data-testid="credential-rotate-newvalue"
-                />
-              ) : (
-                <input
-                  id="credential-rotate-newref"
-                  className="text-field"
-                  value={newSecretRef}
-                  onChange={(event) => setNewSecretRef(event.target.value)}
-                  placeholder={t('credentialRotation.field.newSecretRefPlaceholder')}
-                  disabled={step.kind === 'rotating'}
-                  data-testid="credential-rotate-newref"
-                />
-              )}
-              <span className="helper-text">
-                {storage === 'managed'
+                hint={storage === 'managed'
                   ? t('credentialRotation.field.newSecretValueHelp')
                   : t('credentialRotation.field.newSecretRefHelp')}
-              </span>
+                required
+              >
+                {controlProps => storage === 'managed' ? (
+                  <input
+                    {...controlProps}
+                    type="password"
+                    autoComplete="new-password"
+                    value={newSecretValue}
+                    onChange={(event) => setNewSecretValue(event.target.value)}
+                    placeholder={t('rightPanel.credentials.valuePlaceholder')}
+                    disabled={step.kind === 'rotating'}
+                    data-testid="credential-rotate-newvalue"
+                  />
+                ) : (
+                  <input
+                    {...controlProps}
+                    value={newSecretRef}
+                    onChange={(event) => setNewSecretRef(event.target.value)}
+                    placeholder={t('credentialRotation.field.newSecretRefPlaceholder')}
+                    disabled={step.kind === 'rotating'}
+                    data-testid="credential-rotate-newref"
+                  />
+                )}
+              </FormField>
             </>
           )}
 
           {step.kind === 'done' && (
-            <div className="we-recovery-warning" role="status">
-              <CheckCircle2 size={14} aria-hidden="true" />
-              <div>{t('credentialRotation.done', { count: step.count })}</div>
-            </div>
+            <StatusSummary
+              icon={<CheckCircle2 size={16} />}
+              tone="success"
+              role="status"
+              title={t('credentialRotation.done', { count: step.count })}
+            />
           )}
 
           {step.kind === 'error' && (
-            <div className="we-recovery-error" role="alert">
-              <AlertCircle size={14} aria-hidden="true" />
-              <div>{step.message}</div>
-            </div>
+            <StatusSummary
+              icon={<AlertCircle size={16} />}
+              tone="danger"
+              role="alert"
+              title={step.message}
+            />
           )}
         </div>
 
         <footer className="run-input-dialog__footer">
           {step.kind === 'preview' && (
             <>
-              <button type="button" className="command-button" onClick={onClose}>
+              <Button variant="secondary" onClick={onClose}>
                 {t('common.cancel')}
-              </button>
-              <button
-                type="button"
-                className="command-button command-button-primary"
+              </Button>
+              <Button
+                variant="primary"
                 onClick={() => void rotate(step.affected, step.ifMatch)}
                 disabled={!secretValid}
+                leadingIcon={<KeyRound size={14} />}
               >
-                <KeyRound size={14} aria-hidden="true" />
-                <span>{t('credentialRotation.action.rotate')}</span>
-              </button>
+                {t('credentialRotation.action.rotate')}
+              </Button>
             </>
           )}
 
           {(step.kind === 'loading' || step.kind === 'rotating') && (
-            <button type="button" className="command-button" disabled>
+            <Button loading loadingLabel={t('common.working')}>
               {t('common.working')}
-            </button>
+            </Button>
           )}
 
           {step.kind === 'error' && (
             <>
-              <button type="button" className="command-button" onClick={onClose}>
+              <Button variant="secondary" onClick={onClose}>
                 {t('common.close')}
-              </button>
-              <button
-                type="button"
-                className="command-button command-button-primary"
+              </Button>
+              <Button
+                variant="primary"
                 onClick={() => void loadPreview()}
               >
                 {t('credentialRotation.action.previewAgain')}
-              </button>
+              </Button>
             </>
           )}
 
           {step.kind === 'done' && (
-            <button type="button" className="command-button command-button-primary" onClick={onClose}>
+            <Button variant="primary" onClick={onClose}>
               {t('common.close')}
-            </button>
+            </Button>
           )}
         </footer>
       </div>

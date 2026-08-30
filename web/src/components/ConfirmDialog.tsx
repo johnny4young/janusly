@@ -17,6 +17,7 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { AlertTriangle } from 'lucide-react'
 import { useT } from '../i18n'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
+import { Button } from './ui/Button'
 
 /**
  * One confirm() invocation's copy + styling. `body` is the already-localized
@@ -127,18 +128,17 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
               </div>
             </header>
             <footer className="run-input-dialog__footer">
-              <button ref={cancelButtonRef} type="button" className="command-button" onClick={() => close(false)} data-testid="confirm-dialog-cancel">
+              <Button ref={cancelButtonRef} variant="secondary" onClick={() => close(false)} data-testid="confirm-dialog-cancel">
                 {options.cancelLabel ?? (t('common.cancel'))}
-              </button>
-              <button
+              </Button>
+              <Button
                 ref={confirmButtonRef}
-                type="button"
-                className={`command-button ${options.tone === 'danger' ? 'command-button-danger' : 'command-button-primary'}`}
+                variant={options.tone === 'danger' ? 'danger' : 'primary'}
                 onClick={() => close(true)}
                 data-testid="confirm-dialog-confirm"
               >
                 {options.confirmLabel ?? (t('confirmDialog.confirm'))}
-              </button>
+              </Button>
             </footer>
           </div>
         </div>

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { Button } from './ui/Button'
 
 export type EmptyStateProps = {
   icon: ReactNode
@@ -25,14 +26,15 @@ export function EmptyState({ icon, kicker, body, cta, testId }: EmptyStateProps)
         <span className="we-empty-state__body">{body}</span>
       </div>
       {cta ? (
-        <button
-          type="button"
-          className="we-btn we-btn--ghost we-btn--sm we-empty-state__cta"
+        <Button
+          variant="ghost"
+          size="sm"
+          className="we-empty-state__cta"
           onClick={cta.onClick}
           data-testid="empty-state-cta"
         >
           {cta.label}
-        </button>
+        </Button>
       ) : null}
     </div>
   )

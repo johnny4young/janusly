@@ -1263,15 +1263,6 @@
   color: var(--we-primary);
 }
 
-.run-input-field-error {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--we-danger-text);
-  margin: 4px 0 0;
-}
-
 .run-input-form-error {
   display: flex;
   align-items: flex-start;
@@ -7848,25 +7839,6 @@ button.we-recovery-heatmap__cell:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.we-workflow-metadata-panel .we-field {
-  color: var(--we-muted);
-  display: flex;
-  flex-direction: column;
-  font-size: 12px;
-  font-weight: 650;
-  gap: 6px;
-}
-
-.we-workflow-metadata-panel .we-field textarea {
-  min-height: 156px;
-  resize: vertical;
-}
-
-.we-helper-text--error {
-  color: var(--we-danger-text);
-  font-weight: 700;
 }
 
 .we-workflow-metadata-panel__actions {

@@ -18,31 +18,15 @@
     "command-button",
     "command-button-primary"
   ],
-  "components/ConfirmDialog.tsx": [
-    "command-button",
-    "command-button-danger",
-    "command-button-primary"
-  ],
   "components/ConnectionsPanel.tsx": [
     "command-button",
     "command-button-primary",
     "text-field",
     "text-field--compact"
   ],
-  "components/CredentialRotateModal.tsx": [
-    "command-button",
-    "command-button-primary",
-    "field-label",
-    "text-field"
-  ],
   "components/DeadLetterQueueView.tsx": [
     "field-label",
     "text-field"
-  ],
-  "components/EmptyState.tsx": [
-    "we-btn",
-    "we-btn--ghost",
-    "we-btn--sm"
   ],
   "components/experiments/ExperimentSummary.tsx": [
     "we-button",
@@ -84,9 +68,6 @@
   "components/OnboardingBanner.tsx": [
     "command-button",
     "command-button-primary"
-  ],
-  "components/PanelErrorFallback.tsx": [
-    "command-button"
   ],
   "components/ReasoningPanel.tsx": [
     "command-button"
@@ -171,12 +152,6 @@
   "components/RunHistoryList.tsx": [
     "text-field"
   ],
-  "components/RunInputDialog.tsx": [
-    "command-button",
-    "command-button-primary",
-    "field-label",
-    "text-field"
-  ],
   "components/ScimDirectorySettingsPanel.tsx": [
     "we-button",
     "we-button--ghost",
@@ -225,11 +200,6 @@
     "text-field",
     "text-field--compact",
     "text-field--error"
-  ],
-  "components/WorkflowMetadataPanel.tsx": [
-    "command-button",
-    "command-button-primary",
-    "we-field"
   ],
   "components/WorkflowRecoveryQualification.tsx": [
     "command-button"

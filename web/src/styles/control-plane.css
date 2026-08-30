@@ -420,11 +420,6 @@
   }
 }
 
-.config-field-row {
-  display: grid;
-  gap: 2px;
-}
-
 .we-cron-preview {
   min-height: 20px;
   margin-top: 6px;
