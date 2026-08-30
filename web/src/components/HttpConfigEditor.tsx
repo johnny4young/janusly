@@ -11,6 +11,7 @@ import {
   readConfigNumber,
   readConfigString,
 } from './quick-config-fields'
+import { FormDisclosure, FormField } from './ui/Form'
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const
 const METHODS_WITH_BODY = new Set<string>(['POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'])
@@ -55,29 +56,29 @@ export function HttpConfigEditor({
     <section className="quick-config" data-testid="http-config">
       <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
       <div className="we-http-request-row">
-        <div className="config-field-row we-http-request-row__method">
-          <label className="field-label" htmlFor={methodId}>{t('rightPanel.resilience.httpMethod')}</label>
-          <select
-            id={methodId}
-            className="text-field"
-            value={method}
-            onChange={(event) => patch({ method: event.target.value })}
-          >
-            {HTTP_METHODS.map((option) => <option key={option} value={option}>{option}</option>)}
-          </select>
-        </div>
-        <div className="config-field-row we-http-request-row__url">
-          <label className="field-label" htmlFor={urlId}>{t('rightPanel.quickConfig.requestUrl')}</label>
-          <input
-            id={urlId}
-            className="text-field"
-            type="url"
-            inputMode="url"
-            value={readConfigString(config, 'url')}
-            placeholder="https://api.example.com"
-            onChange={(event) => patch({ url: event.target.value })}
-          />
-        </div>
+        <FormField className="we-http-request-row__method" id={methodId} label={t('rightPanel.resilience.httpMethod')}>
+          {controlProps => (
+            <select
+              {...controlProps}
+              value={method}
+              onChange={(event) => patch({ method: event.target.value })}
+            >
+              {HTTP_METHODS.map((option) => <option key={option} value={option}>{option}</option>)}
+            </select>
+          )}
+        </FormField>
+        <FormField className="we-http-request-row__url" id={urlId} label={t('rightPanel.quickConfig.requestUrl')}>
+          {controlProps => (
+            <input
+              {...controlProps}
+              type="url"
+              inputMode="url"
+              value={readConfigString(config, 'url')}
+              placeholder="https://api.example.com"
+              onChange={(event) => patch({ url: event.target.value })}
+            />
+          )}
+        </FormField>
       </div>
 
       {(bodySupported || bodyConfigured) && (
@@ -104,22 +105,22 @@ export function HttpConfigEditor({
         </>
       )}
 
-      <details
-        className="we-config-disclosure"
+      <FormDisclosure
         data-testid="http-options"
         open={optionsOpen}
         onToggle={(event) => setOptionsOpen(event.currentTarget.open)}
-      >
-        <summary>
-          <span>
-            <strong>{t('rightPanel.quickConfig.requestOptions')}</strong>
-            <small>{optionCount > 0
-              ? t('rightPanel.quickConfig.configuredOptions', { count: optionCount })
-              : t('rightPanel.quickConfig.defaultOptions')}</small>
+        summary={(
+          <span className="ui-config-disclosure-summary">
+            <span>
+              <strong>{t('rightPanel.quickConfig.requestOptions')}</strong>
+              <small>{optionCount > 0
+                ? t('rightPanel.quickConfig.configuredOptions', { count: optionCount })
+                : t('rightPanel.quickConfig.defaultOptions')}</small>
+            </span>
+            <ChevronDown size={15} aria-hidden="true" />
           </span>
-          <ChevronDown size={15} aria-hidden="true" />
-        </summary>
-        <div className="we-config-disclosure__body">
+        )}
+      >
           <OptionalJsonConfigField
             scope={nodeId}
             label={t('rightPanel.resilience.headers')}
@@ -130,23 +131,21 @@ export function HttpConfigEditor({
               else patch({ headers })
             }}
           />
-          <div className="config-field-row">
-            <label className="field-label" htmlFor={fieldId(nodeId, 'response mode')}>
-              {t('rightPanel.quickConfig.responseMode')}
-            </label>
-            <select
-              id={fieldId(nodeId, 'response mode')}
-              className="text-field"
-              value={responseMode}
-              onChange={(event) => {
-                if (event.target.value === 'stream') patch({ bodyMode: 'stream' })
-                else replaceKeys(['bodyMode', 'streamPreviewBytes'], {})
-              }}
-            >
-              <option value="buffer">{t('rightPanel.quickConfig.responseBuffered')}</option>
-              <option value="stream">{t('rightPanel.quickConfig.responseStream')}</option>
-            </select>
-          </div>
+          <FormField id={fieldId(nodeId, 'response mode')} label={t('rightPanel.quickConfig.responseMode')}>
+            {controlProps => (
+              <select
+                {...controlProps}
+                value={responseMode}
+                onChange={(event) => {
+                  if (event.target.value === 'stream') patch({ bodyMode: 'stream' })
+                  else replaceKeys(['bodyMode', 'streamPreviewBytes'], {})
+                }}
+              >
+                <option value="buffer">{t('rightPanel.quickConfig.responseBuffered')}</option>
+                <option value="stream">{t('rightPanel.quickConfig.responseStream')}</option>
+              </select>
+            )}
+          </FormField>
           {responseMode === 'stream' && (
             <OptionalNumberConfigField
               scope={nodeId}
@@ -166,8 +165,7 @@ export function HttpConfigEditor({
               ? 'rightPanel.quickConfig.responseStreamHelper'
               : 'rightPanel.quickConfig.responseBufferedHelper')}
           </p>
-        </div>
-      </details>
+      </FormDisclosure>
 
       <p className="helper-text" data-testid="http-json-contract-helper">
         <Trans i18nKey="rightPanel.quickConfig.httpJsonHelper" components={{ code: <code /> }} />

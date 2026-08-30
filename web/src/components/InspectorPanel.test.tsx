@@ -108,12 +108,12 @@ describe('<InspectorPanel /> selection-change hygiene', () => {
 
     const jsonField = document.getElementById('node-config') as HTMLTextAreaElement
     fireEvent.blur(jsonField, { target: { value: '{ not json' } })
-    expect(document.querySelector('.issue-error')).not.toBeNull()
+    expect(screen.getByRole('alert')).toBeInTheDocument()
 
     rerender(<InspectorPanel {...props} selectedNode={makeNode('node-b')} />)
 
     // Node B never had a parse error; node A's banner must not follow it.
-    expect(document.querySelector('.issue-error')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('refreshes Advanced JSON when the same selected node receives a new kind and config', () => {

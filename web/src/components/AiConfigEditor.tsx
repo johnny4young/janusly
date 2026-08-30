@@ -11,6 +11,7 @@ import {
   readConfigString,
   TextareaConfigField,
 } from './quick-config-fields'
+import { FormDisclosure, FormField } from './ui/Form'
 
 type AiResponseMode = 'text' | 'json' | 'structured'
 type PromptSource = 'inline' | 'saved'
@@ -153,28 +154,26 @@ export function AiConfigEditor({
     <section className="quick-config" data-testid="ai-config">
       <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
 
-      <div className="config-field-row">
-        <label className="field-label" htmlFor={promptSourceId}>
-          {t('rightPanel.quickConfig.ai.promptSource')}
-        </label>
-        <select
-          id={promptSourceId}
-          className="text-field"
-          value={promptSource}
-          onChange={(event) => {
-            const source = event.target.value as PromptSource
-            setPromptSource(source)
-            if (source === 'inline') {
-              replaceKeys(['promptRef', 'variables'], { prompt: readConfigString(config, 'prompt') })
-            } else {
-              replaceKeys(['prompt'], {})
-            }
-          }}
-        >
-          <option value="inline">{t('rightPanel.quickConfig.ai.promptInline')}</option>
-          <option value="saved">{t('rightPanel.quickConfig.ai.promptSaved')}</option>
-        </select>
-      </div>
+      <FormField id={promptSourceId} label={t('rightPanel.quickConfig.ai.promptSource')}>
+        {controlProps => (
+          <select
+            {...controlProps}
+            value={promptSource}
+            onChange={(event) => {
+              const source = event.target.value as PromptSource
+              setPromptSource(source)
+              if (source === 'inline') {
+                replaceKeys(['promptRef', 'variables'], { prompt: readConfigString(config, 'prompt') })
+              } else {
+                replaceKeys(['prompt'], {})
+              }
+            }}
+          >
+            <option value="inline">{t('rightPanel.quickConfig.ai.promptInline')}</option>
+            <option value="saved">{t('rightPanel.quickConfig.ai.promptSaved')}</option>
+          </select>
+        )}
+      </FormField>
 
       {promptSource === 'inline' ? (
         <TextareaConfigField
@@ -185,29 +184,27 @@ export function AiConfigEditor({
         />
       ) : (
         <>
-          <div className="config-field-row">
-            <label className="field-label" htmlFor={promptNameId}>
-              {t('rightPanel.quickConfig.ai.savedPrompt')}
-            </label>
-            <select
-              id={promptNameId}
-              className="text-field"
-              value={promptRef?.name ?? ''}
-              disabled={promptsLoading && promptOptions.length === 0}
-              onChange={(event) => {
-                const name = event.target.value
-                if (!name) replaceKeys(['prompt', 'promptRef', 'variables'], {})
-                else replaceKeys(['prompt', 'promptRef', 'variables'], { promptRef: { name } })
-              }}
-            >
-              <option value="">{t(promptsLoading
-                ? 'rightPanel.quickConfig.ai.promptsLoading'
-                : 'rightPanel.quickConfig.ai.pickPrompt')}</option>
-              {promptOptions.map((prompt) => (
-                <option key={prompt.name} value={prompt.name}>{prompt.name}</option>
-              ))}
-            </select>
-          </div>
+          <FormField id={promptNameId} label={t('rightPanel.quickConfig.ai.savedPrompt')}>
+            {controlProps => (
+              <select
+                {...controlProps}
+                value={promptRef?.name ?? ''}
+                disabled={promptsLoading && promptOptions.length === 0}
+                onChange={(event) => {
+                  const name = event.target.value
+                  if (!name) replaceKeys(['prompt', 'promptRef', 'variables'], {})
+                  else replaceKeys(['prompt', 'promptRef', 'variables'], { promptRef: { name } })
+                }}
+              >
+                <option value="">{t(promptsLoading
+                  ? 'rightPanel.quickConfig.ai.promptsLoading'
+                  : 'rightPanel.quickConfig.ai.pickPrompt')}</option>
+                {promptOptions.map((prompt) => (
+                  <option key={prompt.name} value={prompt.name}>{prompt.name}</option>
+                ))}
+              </select>
+            )}
+          </FormField>
           {selectedPrompt?.description && <p className="helper-text">{selectedPrompt.description}</p>}
           {!promptsLoading && promptsUnavailable && (
             <p className="helper-text" data-testid="ai-prompts-empty">
@@ -222,22 +219,20 @@ export function AiConfigEditor({
         </>
       )}
 
-      <div className="config-field-row">
-        <label className="field-label" htmlFor={responseModeId}>
-          {t('rightPanel.quickConfig.ai.responseMode')}
-        </label>
-        <select
-          id={responseModeId}
-          className="text-field"
-          value={responseMode}
-          aria-describedby={outputHelperId}
-          onChange={(event) => changeResponseMode(event.target.value as AiResponseMode)}
-        >
-          <option value="text">{t('rightPanel.quickConfig.ai.responseText')}</option>
-          <option value="json">{t('rightPanel.quickConfig.ai.responseJson')}</option>
-          <option value="structured">{t('rightPanel.quickConfig.ai.responseStructured')}</option>
-        </select>
-      </div>
+      <FormField id={responseModeId} label={t('rightPanel.quickConfig.ai.responseMode')}>
+        {controlProps => (
+          <select
+            {...controlProps}
+            value={responseMode}
+            aria-describedby={outputHelperId}
+            onChange={(event) => changeResponseMode(event.target.value as AiResponseMode)}
+          >
+            <option value="text">{t('rightPanel.quickConfig.ai.responseText')}</option>
+            <option value="json">{t('rightPanel.quickConfig.ai.responseJson')}</option>
+            <option value="structured">{t('rightPanel.quickConfig.ai.responseStructured')}</option>
+          </select>
+        )}
+      </FormField>
 
       {responseMode === 'structured' && (
         <OptionalJsonConfigField
@@ -259,22 +254,22 @@ export function AiConfigEditor({
         />
       </p>
 
-      <details
-        className="we-config-disclosure"
+      <FormDisclosure
         data-testid="ai-options"
         open={advancedOpen}
         onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
-      >
-        <summary>
-          <span>
-            <strong>{t('rightPanel.quickConfig.ai.advanced')}</strong>
-            <small>{configuredAdvancedCount > 0
-              ? t('rightPanel.quickConfig.configuredOptions', { count: configuredAdvancedCount })
-              : t('rightPanel.quickConfig.defaultOptions')}</small>
+        summary={(
+          <span className="ui-config-disclosure-summary">
+            <span>
+              <strong>{t('rightPanel.quickConfig.ai.advanced')}</strong>
+              <small>{configuredAdvancedCount > 0
+                ? t('rightPanel.quickConfig.configuredOptions', { count: configuredAdvancedCount })
+                : t('rightPanel.quickConfig.defaultOptions')}</small>
+            </span>
+            <ChevronDown size={15} aria-hidden="true" />
           </span>
-          <ChevronDown size={15} aria-hidden="true" />
-        </summary>
-        <div className="we-config-disclosure__body">
+        )}
+      >
           {promptSource === 'saved' && promptRef && (
             <>
               <OptionalNumberConfigField
@@ -302,25 +297,25 @@ export function AiConfigEditor({
               />
             </>
           )}
-          <div className="config-field-row">
-            <label className="field-label" htmlFor={modelId}>
-              {t('rightPanel.quickConfig.ai.model')}
-            </label>
-            <input
-              id={modelId}
-              className="text-field"
-              value={readConfigString(config, 'model')}
-              placeholder={t('rightPanel.quickConfig.ai.modelPlaceholder')}
-              onChange={(event) => {
-                const model = event.target.value
-                if (!model) replaceKeys(['model'], {})
-                else patch({ model })
-              }}
-            />
-          </div>
-          <p className="helper-text">{t('rightPanel.quickConfig.ai.modelHelper')}</p>
-        </div>
-      </details>
+          <FormField
+            id={modelId}
+            label={t('rightPanel.quickConfig.ai.model')}
+            hint={t('rightPanel.quickConfig.ai.modelHelper')}
+          >
+            {controlProps => (
+              <input
+                {...controlProps}
+                value={readConfigString(config, 'model')}
+                placeholder={t('rightPanel.quickConfig.ai.modelPlaceholder')}
+                onChange={(event) => {
+                  const model = event.target.value
+                  if (!model) replaceKeys(['model'], {})
+                  else patch({ model })
+                }}
+              />
+            )}
+          </FormField>
+      </FormDisclosure>
 
       <p className="helper-text" data-testid="ai-fallback-helper">
         {t('rightPanel.quickConfig.ai.fallbackHelper')}

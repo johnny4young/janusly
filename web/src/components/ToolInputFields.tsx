@@ -14,6 +14,7 @@ import {
   type ParsedToolInputDraft,
   type ToolInputDraftError,
 } from './tool-input-model'
+import { FormDisclosure, FormField } from './ui/Form'
 
 const MULTILINE_FIELDS = /^(body|content|html|payload|query|sql|template|text)$/i
 
@@ -43,7 +44,6 @@ function ToolInputField({
   const label = tToolInputLabel(field.name, inputDisplayLabel(field.name))
   const id = fieldId(scope, field.name)
   const datalistId = `${id}-options`
-  const errorId = `${id}-error`
   const options = field.kind === 'boolean' ? ['true', 'false'] : field.options
 
   const commit = (value: string) => {
@@ -56,48 +56,41 @@ function ToolInputField({
     onChange(field, parsed)
   }
 
-  const common = {
-    id,
-    defaultValue: draft,
-    onBlur: (event: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => commit(event.currentTarget.value),
-    'aria-required': field.required || undefined,
-    'aria-invalid': error ? true : undefined,
-    'aria-describedby': error ? errorId : undefined,
-  } as const
-
-  const control = field.kind === 'json' || (field.kind === 'string' && MULTILINE_FIELDS.test(field.name))
-    ? <textarea {...common} className="code-field code-field-short" />
-    : (
+  return (
+    <FormField
+      id={id}
+      label={label}
+      required={field.required}
+      error={error ? t(errorKey(error), { label }) : undefined}
+    >
+      {controlProps => (
         <>
-          <input
-            {...common}
-            className="text-field"
-            inputMode={field.kind === 'number' || field.kind === 'integer' ? 'decimal' : undefined}
-            list={options?.length ? datalistId : undefined}
-          />
-          {options?.length && (
+          {field.kind === 'json' || (field.kind === 'string' && MULTILINE_FIELDS.test(field.name)) ? (
+            <textarea
+              {...controlProps}
+              className="ui-config-code ui-config-code--short"
+              defaultValue={draft}
+              aria-required={field.required || undefined}
+              onBlur={(event) => commit(event.currentTarget.value)}
+            />
+          ) : (
+            <input
+              {...controlProps}
+              defaultValue={draft}
+              aria-required={field.required || undefined}
+              inputMode={field.kind === 'number' || field.kind === 'integer' ? 'decimal' : undefined}
+              list={options?.length ? datalistId : undefined}
+              onBlur={(event) => commit(event.currentTarget.value)}
+            />
+          )}
+          {options?.length ? (
             <datalist id={datalistId}>
               {options.map(option => <option key={option}>{option}</option>)}
             </datalist>
-          )}
+          ) : null}
         </>
-      )
-
-  return (
-    <div className="config-field-row">
-      <label className="field-label run-input-field-label" htmlFor={id}>
-        <span>{label}</span>
-        <small data-required={field.required ? 'true' : 'false'} aria-hidden="true">
-          {t(field.required ? 'runInput.required' : 'runInput.optional')}
-        </small>
-      </label>
-      {control}
-      {error && (
-        <p className="run-input-field-error" id={errorId} role="alert">
-          {t(errorKey(error), { label })}
-        </p>
       )}
-    </div>
+    </FormField>
   )
 }
 
@@ -127,7 +120,7 @@ export function ToolInputFields({
   }
 
   return (
-    <div className="form-grid">
+    <div className="ui-config-stack">
       {!objectInput && (
         <div className="issue issue-error" role="alert">
           {t('rightPanel.quickConfig.toolInputObjectRequired')}
@@ -147,20 +140,21 @@ export function ToolInputFields({
         )
       })}
 
-      <details className="we-config-disclosure">
-        <summary>
-          <strong>{t('rightPanel.inspector.advancedJsonSummary')}</strong>
-          <ChevronDown size={15} aria-hidden="true" />
-        </summary>
-        <div className="we-config-disclosure__body">
+      <FormDisclosure
+        summary={(
+          <span className="ui-config-disclosure-summary">
+            <strong>{t('rightPanel.inspector.advancedJsonSummary')}</strong>
+            <ChevronDown size={15} aria-hidden="true" />
+          </span>
+        )}
+      >
           <JsonConfigField
             scope={`${scope}-advanced`}
             label={t('rightPanel.quickConfig.toolInput')}
             value={input}
             onChange={onChange}
           />
-        </div>
-      </details>
+      </FormDisclosure>
     </div>
   )
 }

@@ -23,6 +23,8 @@ import {
   RESILIENCE_FOCUS_EVENT,
 } from './resilience-focus-bus'
 import { readRetryOnClasses, RETRY_CLASSES, toggleRetryClass } from './resilience-retry-classes'
+import { FormDisclosure, FormField } from './ui/Form'
+import { SwitchField } from './ui/SwitchField'
 
 type ResilienceNodeType = 'http' | 'tool' | 'agent' | 'mcp_tool'
 
@@ -99,21 +101,23 @@ export function ResilienceFieldset({
   const backoff = readBackoff(retry.backoff)
 
   return (
-    <details
-      className="we-config-disclosure we-resilience-disclosure"
+    <FormDisclosure
+      className="we-resilience-disclosure"
       data-testid="resilience-disclosure"
       open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
-    >
-      <summary>
-        <span>
-          <strong>{t('rightPanel.resilience.legend')}</strong>
-          <small>{configuredCount > 0
-            ? t('rightPanel.resilience.configuredSummary', { count: configuredCount })
-            : t('rightPanel.resilience.defaultSummary')}</small>
+      summary={(
+        <span className="ui-config-disclosure-summary">
+          <span>
+            <strong>{t('rightPanel.resilience.legend')}</strong>
+            <small>{configuredCount > 0
+              ? t('rightPanel.resilience.configuredSummary', { count: configuredCount })
+              : t('rightPanel.resilience.defaultSummary')}</small>
+          </span>
+          <ChevronDown size={15} aria-hidden="true" />
         </span>
-        <ChevronDown size={15} aria-hidden="true" />
-      </summary>
+      )}
+    >
       <fieldset
         ref={fieldsetRef}
         className="we-resilience-fieldset"
@@ -148,34 +152,31 @@ export function ResilienceFieldset({
             placeholder="30000"
             onChange={(value) => patchRetry({ maxDelayMs: value })}
           />
-          <div className="config-field-row">
-            <label className="field-label" htmlFor={fieldId(nodeId, 'retry backoff')}>{t('rightPanel.resilience.backoff')}</label>
-            <select
-              id={fieldId(nodeId, 'retry backoff')}
-              className="text-field"
-              value={backoff}
-              onChange={(event) => patchRetry({ backoff: event.target.value || undefined })}
-            >
-              <option value="">{t('rightPanel.resilience.backoffDefault')}</option>
-              <option value="fixed">{t('rightPanel.resilience.backoffFixed')}</option>
-              <option value="exponential">{t('rightPanel.resilience.backoffExponential')}</option>
-            </select>
-          </div>
+          <FormField id={fieldId(nodeId, 'retry backoff')} label={t('rightPanel.resilience.backoff')}>
+            {controlProps => (
+              <select
+                {...controlProps}
+                value={backoff}
+                onChange={(event) => patchRetry({ backoff: event.target.value || undefined })}
+              >
+                <option value="">{t('rightPanel.resilience.backoffDefault')}</option>
+                <option value="fixed">{t('rightPanel.resilience.backoffFixed')}</option>
+                <option value="exponential">{t('rightPanel.resilience.backoffExponential')}</option>
+              </select>
+            )}
+          </FormField>
         </div>
-        <label className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={retry.jitter === true}
-            onChange={(event) => patchRetry({ jitter: event.target.checked })}
-          />
-          <span>{t('rightPanel.resilience.jitter')}</span>
-        </label>
+        <SwitchField
+          checked={retry.jitter === true}
+          label={t('rightPanel.resilience.jitter')}
+          onChange={(event) => patchRetry({ jitter: event.target.checked })}
+        />
 
         {/* With no classes selected the runtime retries every error. Choosing
             classes narrows retries to transient failures so client errors fail
             without consuming the full attempt budget. */}
         <div className="we-resilience-fieldset__retry-on" data-testid="resilience-retry-on">
-          <span className="field-label">{t('rightPanel.resilience.retryOn.legend')}</span>
+          <strong className="ui-field__label">{t('rightPanel.resilience.retryOn.legend')}</strong>
           {RETRY_CLASSES.map((retryClass) => (
             <label key={retryClass.key} className="checkbox-row" title={t(retryClass.helperKey)}>
               <input
@@ -247,6 +248,6 @@ export function ResilienceFieldset({
           </>
         )}
       </fieldset>
-    </details>
+    </FormDisclosure>
   )
 }

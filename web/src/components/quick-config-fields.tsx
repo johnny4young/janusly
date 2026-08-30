@@ -12,6 +12,7 @@
 import { useEffect, useState } from 'react'
 import type { JsonObject } from '../types'
 import { useT } from '../i18n'
+import { FormField, type FormControlProps } from './ui/Form'
 
 export function fieldId(scope: string, label: string) {
   return `${scope}-${label.toLowerCase().replaceAll(' ', '-')}`
@@ -31,23 +32,34 @@ export function asJsonObject(value: unknown) {
   return value && typeof value === 'object' ? value : {}
 }
 
+function mergeDescribedBy(controlProps: FormControlProps, externalId?: string) {
+  return [controlProps['aria-describedby'], externalId].filter(Boolean).join(' ') || undefined
+}
+
 export function TextConfigField({ scope, label, value, onChange, describedBy }: { scope: string; label: string; value: string; onChange: (value: string) => void; describedBy?: string }) {
   const id = fieldId(scope, label)
   return (
-    <div className="config-field-row">
-      <label className="field-label" htmlFor={id}>{label}</label>
-      <input id={id} className="text-field" value={value} aria-describedby={describedBy} onChange={event => onChange(event.target.value)} />
-    </div>
+    <FormField id={id} label={label}>
+      {controlProps => (
+        <input
+          {...controlProps}
+          value={value}
+          aria-describedby={mergeDescribedBy(controlProps, describedBy)}
+          onChange={event => onChange(event.target.value)}
+        />
+      )}
+    </FormField>
   )
 }
 
 export function NumberConfigField({ scope, label, value, onChange }: { scope: string; label: string; value: number; onChange: (value: number) => void }) {
   const id = fieldId(scope, label)
   return (
-    <div className="config-field-row">
-      <label className="field-label" htmlFor={id}>{label}</label>
-      <input id={id} className="text-field" type="number" min={1} value={value} onChange={event => onChange(Number(event.target.value) || 1)} />
-    </div>
+    <FormField id={id} label={label}>
+      {controlProps => (
+        <input {...controlProps} type="number" min={1} value={value} onChange={event => onChange(Number(event.target.value) || 1)} />
+      )}
+    </FormField>
   )
 }
 
@@ -81,45 +93,46 @@ export function OptionalNumberConfigField({
   // Clamp on BLUR, not per keystroke: clamping mid-typing mangles multi-digit
   // entry (with min=2, typing "10" becomes 1 → clamped "2" → "20").
   return (
-    <div className="config-field-row">
-      <label className="field-label" htmlFor={id}>{label}</label>
-      <input
-        id={id}
-        className="text-field"
-        type="number"
-        min={min}
-        max={max}
-        step={step}
-        value={draft}
-        placeholder={placeholder}
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={() => {
-          if (draft.trim() === '') {
-            if (value !== null) onChange(undefined)
-            return
-          }
-          const parsed = Number(draft)
-          if (!Number.isFinite(parsed)) {
-            setDraft(value === null ? '' : String(value))
-            return
-          }
-          const normalized = step === 'any' ? parsed : Math.round(parsed / step) * step
-          const bounded = Math.max(min, Math.min(max ?? Number.POSITIVE_INFINITY, normalized))
-          setDraft(String(bounded))
-          if (bounded !== value) onChange(bounded)
-        }}
-      />
-    </div>
+    <FormField id={id} label={label}>
+      {controlProps => (
+        <input
+          {...controlProps}
+          type="number"
+          min={min}
+          max={max}
+          step={step}
+          value={draft}
+          placeholder={placeholder}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={() => {
+            if (draft.trim() === '') {
+              if (value !== null) onChange(undefined)
+              return
+            }
+            const parsed = Number(draft)
+            if (!Number.isFinite(parsed)) {
+              setDraft(value === null ? '' : String(value))
+              return
+            }
+            const normalized = step === 'any' ? parsed : Math.round(parsed / step) * step
+            const bounded = Math.max(min, Math.min(max ?? Number.POSITIVE_INFINITY, normalized))
+            setDraft(String(bounded))
+            if (bounded !== value) onChange(bounded)
+          }}
+        />
+      )}
+    </FormField>
   )
 }
 
 export function TextareaConfigField({ scope, label, value, onChange }: { scope: string; label: string; value: string; onChange: (value: string) => void }) {
   const id = fieldId(scope, label)
   return (
-    <div className="config-field-row">
-      <label className="field-label" htmlFor={id}>{label}</label>
-      <textarea id={id} className="code-field code-field-short" value={value} onChange={event => onChange(event.target.value)} />
-    </div>
+    <FormField id={id} label={label}>
+      {controlProps => (
+        <textarea {...controlProps} className="ui-config-code ui-config-code--short" value={value} onChange={event => onChange(event.target.value)} />
+      )}
+    </FormField>
   )
 }
 
@@ -141,24 +154,24 @@ export function JsonConfigField({ scope, label, value, onChange }: { scope: stri
   }, [value])
 
   return (
-    <div className="config-field-row">
-      <label className="field-label" htmlFor={id}>{label}</label>
-      <textarea
-        id={id}
-        className="code-field code-field-short"
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={(event) => {
-          try {
-            onChange(JSON.parse(event.target.value))
-            setError(null)
-          } catch {
-            setError(t('rightPanel.jsonField.invalidJson'))
-          }
-        }}
-      />
-      {error && <div className="issue issue-error">{error}</div>}
-    </div>
+    <FormField id={id} label={label} error={error}>
+      {controlProps => (
+        <textarea
+          {...controlProps}
+          className="ui-config-code ui-config-code--short"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={(event) => {
+            try {
+              onChange(JSON.parse(event.target.value))
+              setError(null)
+            } catch {
+              setError(t('rightPanel.jsonField.invalidJson'))
+            }
+          }}
+        />
+      )}
+    </FormField>
   )
 }
 
@@ -182,7 +195,6 @@ export function OptionalJsonConfigField({
   const serializedValue = value === undefined ? '' : JSON.stringify(value, null, 2)
   const [draft, setDraft] = useState(serializedValue)
   const id = fieldId(scope, label)
-  const errorId = `${id}-error`
 
   useEffect(() => {
     setDraft((current) => {
@@ -199,33 +211,31 @@ export function OptionalJsonConfigField({
   }, [serializedValue, value])
 
   return (
-    <div className="config-field-row">
-      <label className="field-label" htmlFor={id}>{label}</label>
-      <textarea
-        id={id}
-        className="code-field code-field-short"
-        value={draft}
-        placeholder={placeholder}
-        aria-describedby={describedBy}
-        aria-invalid={error ? true : undefined}
-        aria-errormessage={error ? errorId : undefined}
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={(event) => {
-          const next = event.target.value.trim()
-          if (!next) {
-            if (value !== undefined) onChange(undefined)
-            setError(null)
-            return
-          }
-          try {
-            onChange(JSON.parse(next))
-            setError(null)
-          } catch {
-            setError(t('rightPanel.jsonField.invalidJson'))
-          }
-        }}
-      />
-      {error && <div id={errorId} className="issue issue-error" role="alert">{error}</div>}
-    </div>
+    <FormField id={id} label={label} error={error}>
+      {controlProps => (
+        <textarea
+          {...controlProps}
+          className="ui-config-code ui-config-code--short"
+          value={draft}
+          placeholder={placeholder}
+          aria-describedby={mergeDescribedBy(controlProps, describedBy)}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={(event) => {
+            const next = event.target.value.trim()
+            if (!next) {
+              if (value !== undefined) onChange(undefined)
+              setError(null)
+              return
+            }
+            try {
+              onChange(JSON.parse(next))
+              setError(null)
+            } catch {
+              setError(t('rightPanel.jsonField.invalidJson'))
+            }
+          }}
+        />
+      )}
+    </FormField>
   )
 }

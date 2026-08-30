@@ -1,4 +1,4 @@
-import { useId, type AriaAttributes, type ReactNode } from 'react'
+import { useId, type AriaAttributes, type DetailsHTMLAttributes, type ReactNode } from 'react'
 
 export type FormControlProps = {
   id: string
@@ -124,13 +124,13 @@ export function FormDisclosure({
   children,
   className,
   summary,
-}: {
+  ...detailsProps
+}: Omit<DetailsHTMLAttributes<HTMLDetailsElement>, 'children'> & {
   children: ReactNode
-  className?: string
   summary: ReactNode
 }) {
   return (
-    <details className={['ui-form-disclosure', className].filter(Boolean).join(' ')}>
+    <details {...detailsProps} className={['ui-form-disclosure', className].filter(Boolean).join(' ')}>
       <summary className="ui-form-disclosure__summary">{summary}</summary>
       <div className="ui-form-disclosure__body">{children}</div>
     </details>

@@ -4,6 +4,8 @@ import { readConfigString } from './quick-config-fields'
 import { ResilienceFieldset } from './ResilienceFieldset'
 import { ToolInputEditor } from './ToolInputEditor'
 import { ToolPicker } from './ToolPicker'
+import { Button } from './ui/Button'
+import { FormActions } from './ui/Form'
 
 export function ToolConfigEditor({
   nodeId,
@@ -40,15 +42,15 @@ export function ToolConfigEditor({
             onChange={input => patch({ input })}
           />
           {matchedTool?.inputExample && (
-            <div className="form-actions">
-              <button
-                type="button"
-                className="we-btn we-btn--ghost we-btn--sm"
+            <FormActions>
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => patch({ input: matchedTool.inputExample })}
               >
                 {t('rightPanel.quickConfig.toolRestoreExample')}
-              </button>
-            </div>
+              </Button>
+            </FormActions>
           )}
           <p className="helper-text">{t('rightPanel.quickConfig.toolChangeHelper')}</p>
         </>

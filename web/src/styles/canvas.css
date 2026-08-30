@@ -118,13 +118,6 @@ path.react-flow__edge-path.we-edge[data-on-error="true"][data-selected="true"] {
   color: var(--we-danger);
 }
 
-.we-edge-on-error-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-}
-
 .canvas-toolbar__history {
   display: inline-flex;
   gap: 4px;

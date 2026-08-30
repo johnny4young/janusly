@@ -60,7 +60,9 @@ describe('<ToolConfigEditor /> browser smoke', () => {
     const picker = screen.getByLabelText('Tool')
     const input = await screen.findByLabelText(/^Credential/)
     const bounds = [search, picker, input].map(field => field.getBoundingClientRect())
-    expect(bounds.every(({ width, height }) => width >= 400 && height > 0)).toBe(true)
+    // The semantic quick-setup card intentionally insets controls from its
+    // 420px frame while keeping catalog and input fields aligned.
+    expect(bounds.every(({ width, height }) => width >= 380 && height > 0)).toBe(true)
     expect(Math.max(...bounds.map(({ left }) => left)) - Math.min(...bounds.map(({ left }) => left)))
       .toBeLessThanOrEqual(1)
     expect(Math.max(...bounds.map(({ right }) => right)) - Math.min(...bounds.map(({ right }) => right)))

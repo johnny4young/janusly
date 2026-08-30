@@ -8465,7 +8465,6 @@ button.we-authoring-problems__row:focus-visible {
 .text-field--error,
 .we-field input[aria-invalid="true"] { border-color: var(--we-danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--we-danger) 16%, transparent); }
 .helper-text--error { color: var(--we-danger-text); display: inline-flex; align-items: center; gap: 5px; }
-.helper-text--hint { color: var(--we-primary); display: inline-flex; align-items: center; gap: 5px; }
 
 /* described role radio-cards (invite form) */
 .we-role-options { display: flex; flex-direction: column; gap: 6px; }

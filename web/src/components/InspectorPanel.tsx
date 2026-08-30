@@ -27,6 +27,9 @@ import {
   type AuthoringFocusRequest,
 } from './authoring-focus-bus'
 import { loadWorkflowIoEditor } from './workflow-io-loader'
+import { Button } from './ui/Button'
+import { FieldStack, FormActions, FormDisclosure, FormField } from './ui/Form'
+import { SwitchField } from './ui/SwitchField'
 
 const WorkflowIoEditor = React.lazy(() => loadWorkflowIoEditor().then(module => ({ default: module.WorkflowIoEditor })))
 
@@ -171,7 +174,7 @@ export function InspectorPanel({
     }
 
     return (
-      <section ref={entityRef} className="we-card" tabIndex={-1} data-testid={`inspector-node-${selectedNode.id}`}>
+      <section ref={entityRef} className="we-card ui-inspector-card" tabIndex={-1} data-testid={`inspector-node-${selectedNode.id}`}>
         <div className="split-row">
           <div>
             <div className="section-kicker">{t('rightPanel.inspector.stepKicker')}</div>
@@ -214,89 +217,103 @@ export function InspectorPanel({
         )}
 
         <AiUsageFooter stateJson={nodeStatus?.stateJson} />
+        <FieldStack disabled={readOnly} className="ui-inspector-fields">
+          <div className="ui-inspector-basics">
+            <FormField
+              id="node-label"
+              label={t('rightPanel.inspector.stepNameLabel')}
+              hint={t('rightPanel.inspector.stepNameHelper')}
+            >
+              {controlProps => (
+                <input
+                  {...controlProps}
+                  value={selectedNode.data.label ?? ''}
+                  maxLength={80}
+                  placeholder={getNodeLabel(selectedNode.data.type)}
+                  onChange={(event) => updateNodeLabel(selectedNode.id, event.target.value)}
+                />
+              )}
+            </FormField>
+            <FormField
+              id="node-type"
+              label={t('rightPanel.inspector.stepKindLabel')}
+              hint={t('rightPanel.inspector.stepKindWarning')}
+            >
+              {controlProps => (
+                <select
+                  {...controlProps}
+                  value={selectedNode.data.type}
+                  aria-busy={typeChangePending}
+                  disabled={typeChangePending}
+                  onChange={(event) => { void requestNodeTypeChange(event.target.value) }}
+                >
+                  {nodeTypes.map(type => <option key={type} value={type}>{getNodeLabel(type)}</option>)}
+                </select>
+              )}
+            </FormField>
+          </div>
 
+          <FormActions className="ui-inspector-actions">
+            <Button
+              variant="ghost"
+              size="sm"
+              leadingIcon={<CopyPlus size={14} />}
+              onClick={() => duplicateNode(selectedNode.id)}
+            >
+              {t('rightPanel.inspector.duplicateStep')}
+            </Button>
+          </FormActions>
 
-        <fieldset className="we-fieldset" disabled={readOnly}>
-        <div className="form-grid">
-          <label className="field-label" htmlFor="node-label">{t('rightPanel.inspector.stepNameLabel')}</label>
-          <input
-            id="node-label"
-            className="text-field"
-            value={selectedNode.data.label ?? ''}
-            maxLength={80}
-            placeholder={getNodeLabel(selectedNode.data.type)}
-            aria-describedby="node-label-helper"
-            onChange={(event) => updateNodeLabel(selectedNode.id, event.target.value)}
+          <QuickConfigEditor
+            key={selectedNode.id}
+            nodeId={selectedNode.id}
+            type={selectedNode.data.type}
+            config={selectedNode.data.config ?? {}}
+            tools={tools}
+            workflowNodes={workflowNodes}
+            workflowEdges={workflowEdges}
+            workflowInputs={currentWorkflowInputs}
+            workflows={workflows}
+            currentWorkflowId={currentWorkflowId}
+            onUpdate={onUpdateNodeConfig}
           />
-          <span id="node-label-helper" className="helper-text helper-text--hint">{t('rightPanel.inspector.stepNameHelper')}</span>
-          <label className="field-label" htmlFor="node-type">{t('rightPanel.inspector.stepKindLabel')}</label>
-          <select
-            id="node-type"
-            className="text-field"
-            value={selectedNode.data.type}
-            aria-busy={typeChangePending}
-            onChange={(event) => { void requestNodeTypeChange(event.target.value) }}
+
+          <Button
+            variant="secondary"
+            size="sm"
+            className="ui-inspector-snippet"
+            data-testid="inspector-insert-snippet"
+            leadingIcon={<Layers size={14} />}
+            onClick={onInsertSnippet}
           >
-            {nodeTypes.map(type => <option key={type} value={type}>{getNodeLabel(type)}</option>)}
-          </select>
-          <span className="helper-text helper-text--hint">{t('rightPanel.inspector.stepKindWarning')}</span>
-        </div>
+            {t('snippets.menu.trigger')}
+          </Button>
 
-        <button
-          type="button"
-          className="we-btn we-btn--ghost we-inspector-duplicate-btn"
-          onClick={() => duplicateNode(selectedNode.id)}
-        >
-          <CopyPlus size={14} aria-hidden="true" />
-          <span>{t('rightPanel.inspector.duplicateStep')}</span>
-        </button>
+          <FormDisclosure summary={t('rightPanel.inspector.advancedJsonSummary')} className="ui-inspector-json">
+            <p id="node-config-hint" className="ui-field__hint">{t('rightPanel.inspector.advancedJsonHelper')}</p>
+            <textarea
+              id="node-config"
+              className="ui-config-code ui-inspector-json__control"
+              data-ui-control
+              value={jsonDraft}
+              aria-label={t('rightPanel.inspector.advancedJsonSummary')}
+              aria-describedby="node-config-hint"
+              aria-invalid={Boolean(jsonError) || undefined}
+              onChange={(event) => setJsonDraft(event.target.value)}
+              onBlur={(event) => {
+                try {
+                  const parsed = JSON.parse(event.target.value) as Record<string, unknown>
+                  onUpdateNodeConfig(parsed)
+                  setJsonError(null)
+                } catch (error) {
+                  setJsonError(error instanceof Error ? error.message : (t('rightPanel.inspector.invalidJson')))
+                }
+              }}
+            />
+            {jsonError && <div className="ui-field__error" role="alert">{jsonError}</div>}
+          </FormDisclosure>
+        </FieldStack>
 
-        <QuickConfigEditor
-          key={selectedNode.id}
-          nodeId={selectedNode.id}
-          type={selectedNode.data.type}
-          config={selectedNode.data.config ?? {}}
-          tools={tools}
-          workflowNodes={workflowNodes}
-          workflowEdges={workflowEdges}
-          workflowInputs={currentWorkflowInputs}
-          workflows={workflows}
-          currentWorkflowId={currentWorkflowId}
-          onUpdate={onUpdateNodeConfig}
-        />
-
-        <button
-          type="button"
-          className="we-btn we-btn--ghost we-inspector-snippet-btn"
-          data-testid="inspector-insert-snippet"
-          onClick={onInsertSnippet}
-        >
-          <Layers size={14} aria-hidden="true" />
-          <span>{t('snippets.menu.trigger')}</span>
-        </button>
-
-        <details className="advanced-config">
-          <summary>{t('rightPanel.inspector.advancedJsonSummary')}</summary>
-          <p className="helper-text">{t('rightPanel.inspector.advancedJsonHelper')}</p>
-          <textarea
-            id="node-config"
-            className="code-field"
-            value={jsonDraft}
-            onChange={(event) => setJsonDraft(event.target.value)}
-            onBlur={(event) => {
-              try {
-                const parsed = JSON.parse(event.target.value) as Record<string, unknown>
-                onUpdateNodeConfig(parsed)
-                setJsonError(null)
-              } catch (error) {
-                setJsonError(error instanceof Error ? error.message : (t('rightPanel.inspector.invalidJson')))
-              }
-            }}
-          />
-        </details>
-        </fieldset>
-
-        {jsonError && <div className="issue issue-error">{jsonError}</div>}
         {nodeIssues.map(issue => <div key={`${issue.code}-${issue.message}`} className="issue issue-error">{issue.message}</div>)}
       </section>
     )
@@ -304,19 +321,16 @@ export function InspectorPanel({
 
   if (selectedEdge) {
     return (
-      <section ref={entityRef} className="we-card" tabIndex={-1} data-testid={`inspector-edge-${selectedEdge.id}`}>
+      <section ref={entityRef} className="we-card ui-inspector-card" tabIndex={-1} data-testid={`inspector-edge-${selectedEdge.id}`}>
         <div className="section-kicker">{t('rightPanel.inspector.pathKicker')}</div>
         <h3>{t('rightPanel.inspector.pathTitle', { source: selectedEdge.source, target: selectedEdge.target })}</h3>
-        <fieldset className="we-fieldset" disabled={readOnly}>
-          <label className="we-edge-on-error-toggle">
-            <input
-              type="checkbox"
-              checked={Boolean(selectedEdge.data?.onError)}
-              onChange={(event) => onUpdateEdgeOnError(selectedEdge.id, event.target.checked)}
-            />
-            <span>{t('rightPanel.inspector.onErrorToggle')}</span>
-          </label>
-          <p className="helper-text">{t('rightPanel.inspector.onErrorHint')}</p>
+        <FieldStack disabled={readOnly} className="ui-inspector-fields">
+          <SwitchField
+            checked={Boolean(selectedEdge.data?.onError)}
+            label={t('rightPanel.inspector.onErrorToggle')}
+            hint={t('rightPanel.inspector.onErrorHint')}
+            onChange={(event) => onUpdateEdgeOnError(selectedEdge.id, event.target.checked)}
+          />
           {!selectedEdge.data?.onError && (
             <BranchRuleEditor
               key={selectedEdge.id}
@@ -331,7 +345,7 @@ export function InspectorPanel({
               workflowInputs={currentWorkflowInputs}
             />
           )}
-        </fieldset>
+        </FieldStack>
       </section>
     )
   }
@@ -339,7 +353,7 @@ export function InspectorPanel({
   return (
     <>
       <React.Suspense fallback={<section className="we-card"><p className="helper-text">{t('common.working')}</p></section>}>
-        <fieldset className="we-fieldset" disabled={readOnly}>
+        <FieldStack disabled={readOnly}>
           <WorkflowIoEditor
             workflowId={currentWorkflowId ?? 'unsaved-workflow'}
             inputs={currentWorkflowInputs}
@@ -349,22 +363,23 @@ export function InspectorPanel({
             onChangeOutputs={updateWorkflowOutputs}
             onChangeTemplatePolicy={updateWorkflowTemplatePolicy}
           />
-        </fieldset>
+        </FieldStack>
       </React.Suspense>
       <section className="we-card">
         <div className="empty-panel">
           <GitBranch size={24} aria-hidden="true" />
           <strong>{t('rightPanel.inspector.emptyTitle')}</strong>
           <p>{t('rightPanel.inspector.emptyBody')}</p>
-          <button
-            type="button"
-            className="we-btn we-btn--ghost we-inspector-snippet-btn"
+          <Button
+            variant="secondary"
+            size="sm"
+            className="ui-inspector-snippet"
             data-testid="inspector-insert-snippet-empty"
+            leadingIcon={<Layers size={14} />}
             onClick={onInsertSnippet}
           >
-            <Layers size={14} aria-hidden="true" />
-            <span>{t('snippets.menu.trigger')}</span>
-          </button>
+            {t('snippets.menu.trigger')}
+          </Button>
         </div>
       </section>
     </>

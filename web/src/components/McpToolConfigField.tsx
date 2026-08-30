@@ -26,6 +26,7 @@ import {
   JsonConfigField,
   readConfigString,
 } from './quick-config-fields'
+import { FormField } from './ui/Form'
 
 export function McpToolConfigField({ scope, config, onPatch }: { scope: string; config: JsonObject; onPatch: (next: Record<string, unknown>) => void }) {
   const { t } = useT()
@@ -88,47 +89,49 @@ export function McpToolConfigField({ scope, config, onPatch }: { scope: string; 
   return (
     <section className="quick-config">
       <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
-      <div className="form-grid">
-        <label className="field-label" htmlFor={aliasFieldId}>{t('rightPanel.mcpInspector.connection')}</label>
-        <select
-          id={aliasFieldId}
-          className="text-field"
-          value={selectedAlias}
-          onChange={(event) => onPatch({ connectionAlias: event.target.value, toolName: '' })}
-        >
-          {!selectedAlias && <option value="">{t('rightPanel.mcpInspector.pickConnection')}</option>}
-          {selectedAlias && !knownAlias && <option value={selectedAlias}>{t('rightPanel.mcpInspector.notActiveSuffix', { alias: selectedAlias })}</option>}
-          {connections.map((connection) => (
-            <option key={connection.id} value={connection.alias}>{t('rightPanel.mcpInspector.connectionOption', { alias: connection.alias, transport: connection.transport })}</option>
-          ))}
-        </select>
-        {!loading && connections.length === 0 && (
-          <p className="helper-text">{t('rightPanel.mcpInspector.noActiveConnections')}</p>
+      <FormField
+        id={aliasFieldId}
+        label={t('rightPanel.mcpInspector.connection')}
+        hint={!loading && connections.length === 0 ? t('rightPanel.mcpInspector.noActiveConnections') : undefined}
+      >
+        {controlProps => (
+          <select
+            {...controlProps}
+            value={selectedAlias}
+            onChange={(event) => onPatch({ connectionAlias: event.target.value, toolName: '' })}
+          >
+            {!selectedAlias && <option value="">{t('rightPanel.mcpInspector.pickConnection')}</option>}
+            {selectedAlias && !knownAlias && <option value={selectedAlias}>{t('rightPanel.mcpInspector.notActiveSuffix', { alias: selectedAlias })}</option>}
+            {connections.map((connection) => (
+              <option key={connection.id} value={connection.alias}>{t('rightPanel.mcpInspector.connectionOption', { alias: connection.alias, transport: connection.transport })}</option>
+            ))}
+          </select>
         )}
-      </div>
-      <div className="form-grid">
-        <label className="field-label" htmlFor={toolFieldId}>{t('rightPanel.mcpInspector.tool')}</label>
-        <select
-          id={toolFieldId}
-          className="text-field"
-          value={selectedTool}
-          onChange={(event) => onPatch({ toolName: event.target.value })}
-          disabled={!selectedAlias}
-        >
-          {!selectedTool && <option value="">{t('rightPanel.mcpInspector.pickTool')}</option>}
-          {selectedTool && !knownTool && <option value={selectedTool}>{t('rightPanel.mcpInspector.notEnabledSuffix', { name: selectedTool })}</option>}
-          {tools.map((tool) => (
-            <option key={tool.id} value={tool.name}>
-              {tool.writeSide
-                ? t('rightPanel.mcpInspector.toolWriteSideOption', { name: tool.name })
-                : tool.name}
-            </option>
-          ))}
-        </select>
-        {selectedAlias && tools.length === 0 && !loading && (
-          <p className="helper-text">{t('rightPanel.mcpInspector.noEnabledTools')}</p>
+      </FormField>
+      <FormField
+        id={toolFieldId}
+        label={t('rightPanel.mcpInspector.tool')}
+        hint={selectedAlias && tools.length === 0 && !loading ? t('rightPanel.mcpInspector.noEnabledTools') : undefined}
+      >
+        {controlProps => (
+          <select
+            {...controlProps}
+            value={selectedTool}
+            onChange={(event) => onPatch({ toolName: event.target.value })}
+            disabled={!selectedAlias}
+          >
+            {!selectedTool && <option value="">{t('rightPanel.mcpInspector.pickTool')}</option>}
+            {selectedTool && !knownTool && <option value={selectedTool}>{t('rightPanel.mcpInspector.notEnabledSuffix', { name: selectedTool })}</option>}
+            {tools.map((tool) => (
+              <option key={tool.id} value={tool.name}>
+                {tool.writeSide
+                  ? t('rightPanel.mcpInspector.toolWriteSideOption', { name: tool.name })
+                  : tool.name}
+              </option>
+            ))}
+          </select>
         )}
-      </div>
+      </FormField>
       <JsonConfigField scope={scope} label={t('rightPanel.mcpInspector.toolInput')} value={asJsonObject(config.input)} onChange={(value) => onPatch({ input: value })} />
     </section>
   )

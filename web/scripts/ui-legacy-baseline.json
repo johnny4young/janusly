@@ -1,8 +1,4 @@
 {
-  "components/AiConfigEditor.tsx": [
-    "field-label",
-    "text-field"
-  ],
   "components/AiStudioPanel.tsx": [
     "command-button",
     "command-button-primary"
@@ -17,10 +13,6 @@
     "we-button",
     "we-button--ghost",
     "we-field"
-  ],
-  "components/BranchRuleEditor.tsx": [
-    "field-label",
-    "text-field"
   ],
   "components/BudgetBlockedBanner.tsx": [
     "command-button",
@@ -78,25 +70,10 @@
   "components/FlowsFilterBar.tsx": [
     "text-field"
   ],
-  "components/HttpConfigEditor.tsx": [
-    "field-label",
-    "text-field"
-  ],
-  "components/InspectorPanel.tsx": [
-    "field-label",
-    "text-field",
-    "we-btn",
-    "we-btn--ghost",
-    "we-fieldset"
-  ],
   "components/Login.tsx": [
     "command-button",
     "command-button-primary",
     "command-button-secondary",
-    "field-label",
-    "text-field"
-  ],
-  "components/McpToolConfigField.tsx": [
     "field-label",
     "text-field"
   ],
@@ -110,15 +87,6 @@
   ],
   "components/PanelErrorFallback.tsx": [
     "command-button"
-  ],
-  "components/quick-config-fields.tsx": [
-    "field-label",
-    "text-field"
-  ],
-  "components/QuickConfigEditor.tsx": [
-    "field-label",
-    "text-field",
-    "text-field--error"
   ],
   "components/ReasoningPanel.tsx": [
     "command-button"
@@ -189,10 +157,6 @@
     "command-button-primary",
     "we-field"
   ],
-  "components/ResilienceFieldset.tsx": [
-    "field-label",
-    "text-field"
-  ],
   "components/RollbackConfirmDialog.tsx": [
     "command-button",
     "command-button-primary"
@@ -238,23 +202,6 @@
     "field-label",
     "text-field",
     "text-field--compact"
-  ],
-  "components/TimingConfigEditors.tsx": [
-    "field-label",
-    "text-field"
-  ],
-  "components/ToolConfigEditor.tsx": [
-    "we-btn",
-    "we-btn--ghost",
-    "we-btn--sm"
-  ],
-  "components/ToolInputFields.tsx": [
-    "field-label",
-    "text-field"
-  ],
-  "components/ToolPicker.tsx": [
-    "field-label",
-    "text-field"
   ],
   "components/UpstreamHealthPanel.tsx": [
     "we-btn",

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { tToolDescription, useT } from '../i18n'
 import type { ToolSchema } from '../types'
 import { fieldId } from './quick-config-fields'
+import { FormField } from './ui/Form'
 
 function exampleFor(tool: ToolSchema | undefined): Record<string, unknown> {
   return tool?.inputExample ?? {}
@@ -45,44 +46,42 @@ export function ToolPicker({
     : filteredTools
 
   return (
-    <div className="form-grid" data-testid="tool-picker">
-      <div className="config-field-row">
-        <label className="field-label" htmlFor={searchId}>
-          {t('rightPanel.quickConfig.toolSearch')}
-        </label>
-        <input
-          id={searchId}
-          className="text-field"
-          type="search"
-          value={query}
-          placeholder={t('rightPanel.quickConfig.toolSearchPlaceholder')}
-          onChange={event => setQuery(event.target.value)}
-        />
-      </div>
-      <div className="config-field-row">
-        <label className="field-label" htmlFor={toolNameId}>{t('rightPanel.quickConfig.tool')}</label>
-        <select
-          id={toolNameId}
-          className="text-field"
-          value={selectedTool}
-          onChange={(event) => {
-            const next = event.target.value
-            onChange(next, exampleFor(tools.find(tool => tool.name === next)))
-          }}
-        >
-          {!selectedTool && <option value="">{t('rightPanel.quickConfig.pickTool')}</option>}
-          {showCurrentToolOption && (
-            <option value={selectedTool}>
-              {tools.length > 0
-                ? t('rightPanel.quickConfig.toolNotRegistered', { name: selectedTool })
-                : t('rightPanel.quickConfig.toolLoading', { name: selectedTool })}
-            </option>
-          )}
-          {visibleTools.map(tool => (
-            <option key={tool.name} value={tool.name}>{tool.name}</option>
-          ))}
-        </select>
-      </div>
+    <div className="ui-config-stack" data-testid="tool-picker">
+      <FormField id={searchId} label={t('rightPanel.quickConfig.toolSearch')}>
+        {controlProps => (
+          <input
+            {...controlProps}
+            type="search"
+            value={query}
+            placeholder={t('rightPanel.quickConfig.toolSearchPlaceholder')}
+            onChange={event => setQuery(event.target.value)}
+          />
+        )}
+      </FormField>
+      <FormField id={toolNameId} label={t('rightPanel.quickConfig.tool')}>
+        {controlProps => (
+          <select
+            {...controlProps}
+            value={selectedTool}
+            onChange={(event) => {
+              const next = event.target.value
+              onChange(next, exampleFor(tools.find(tool => tool.name === next)))
+            }}
+          >
+            {!selectedTool && <option value="">{t('rightPanel.quickConfig.pickTool')}</option>}
+            {showCurrentToolOption && (
+              <option value={selectedTool}>
+                {tools.length > 0
+                  ? t('rightPanel.quickConfig.toolNotRegistered', { name: selectedTool })
+                  : t('rightPanel.quickConfig.toolLoading', { name: selectedTool })}
+              </option>
+            )}
+            {visibleTools.map(tool => (
+              <option key={tool.name} value={tool.name}>{tool.name}</option>
+            ))}
+          </select>
+        )}
+      </FormField>
 
       {query.trim() && filteredTools.length === 0 && (
         <p className="helper-text" data-testid="tool-search-empty">

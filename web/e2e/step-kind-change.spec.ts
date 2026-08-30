@@ -164,8 +164,8 @@ for (const contract of LOCALES) {
     expect(config).not.toHaveProperty('method')
     expect(config).not.toHaveProperty('maxResponseBytes')
     await hideUnrelatedOverlays(page)
-    await capture(inspector.locator('.form-grid'), `web-${contract.locale}-step-kind-applied`)
-    await capture(inspector.locator('.advanced-config'), `web-${contract.locale}-step-kind-config-preserved`)
+    await capture(inspector.locator('.ui-inspector-basics'), `web-${contract.locale}-step-kind-applied`)
+    await capture(inspector.locator('.ui-inspector-json'), `web-${contract.locale}-step-kind-config-preserved`)
 
     const saveResponse = page.waitForResponse((response) => {
       const url = new URL(response.url())

@@ -37,6 +37,8 @@ import {
   TextareaConfigField,
   TextConfigField,
 } from './quick-config-fields'
+import { FormField } from './ui/Form'
+import { SwitchField } from './ui/SwitchField'
 
 // Mirrors `src/lib.workflowVersionMax` without importing the runtime
 // barrel into this lazy authoring chunk and perturbing the production split.
@@ -60,7 +62,6 @@ function SubworkflowVersionField({ nodeId, value, onChange }: {
   const [draft, setDraft] = useState(renderedValue)
   const [invalid, setInvalid] = useState(Boolean(renderedValue) && !isPositiveVersion(renderedValue))
   const id = fieldId(nodeId, 'subworkflow version')
-  const helperId = `${id}-helper`
 
   useEffect(() => {
     setDraft(renderedValue)
@@ -87,56 +88,57 @@ function SubworkflowVersionField({ nodeId, value, onChange }: {
   }
 
   return (
-    <div className="config-field-row" data-testid="subworkflow-version-field">
-      <label className="field-label" htmlFor={id}>{t('rightPanel.quickConfig.subworkflowVersion')}</label>
-      <input
+    <div data-testid="subworkflow-version-field">
+      <FormField
         id={id}
-        className={`text-field${invalid ? ' text-field--error' : ''}`}
-        type="number"
-        inputMode="numeric"
-        min="1"
-        max={SUBWORKFLOW_VERSION_MAX}
-        step="1"
-        value={draft}
-        placeholder={t('rightPanel.quickConfig.subworkflowVersionPlaceholder')}
-        aria-describedby={helperId}
-        aria-invalid={invalid || undefined}
-        aria-errormessage={invalid ? helperId : undefined}
-        onChange={event => {
-          const next = event.target.value
-          const normalized = next.trim()
-          const nextInvalid = Boolean(normalized) && !isPositiveVersion(normalized)
-          setDraft(next)
-          setInvalid(nextInvalid)
-          if (nextInvalid) {
-            // Keep malformed authoring in the canonical workflow draft so
-            // global validation blocks Cmd/Ctrl+S instead of saving the last
-            // valid version hidden behind this local input state.
-            if (value !== normalized) onChange(normalized)
-            return
-          }
-          if (!normalized) {
-            if (value !== undefined) onChange(undefined)
-            return
-          }
-          const version = Number(normalized)
-          if (value !== version) onChange(version)
-        }}
-        onBlur={commit}
-        onKeyDown={event => {
-          if (event.key === 'Enter') {
-            event.preventDefault()
-            commit()
-          }
-        }}
-      />
-      <p id={helperId} className={invalid ? 'helper-text helper-text--error' : 'helper-text'}>
-        {invalid
-          ? t('rightPanel.quickConfig.subworkflowVersionInvalid')
-          : draft.trim()
+        label={t('rightPanel.quickConfig.subworkflowVersion')}
+        error={invalid ? t('rightPanel.quickConfig.subworkflowVersionInvalid') : undefined}
+        hint={!invalid
+          ? draft.trim()
             ? t('rightPanel.quickConfig.subworkflowVersionPinnedHelper', { version: draft.trim() })
-            : t('rightPanel.quickConfig.subworkflowVersionLatestHelper')}
-      </p>
+            : t('rightPanel.quickConfig.subworkflowVersionLatestHelper')
+          : undefined}
+      >
+        {controlProps => (
+          <input
+            {...controlProps}
+            type="number"
+            inputMode="numeric"
+            min="1"
+            max={SUBWORKFLOW_VERSION_MAX}
+            step="1"
+            value={draft}
+            placeholder={t('rightPanel.quickConfig.subworkflowVersionPlaceholder')}
+            onChange={event => {
+              const next = event.target.value
+              const normalized = next.trim()
+              const nextInvalid = Boolean(normalized) && !isPositiveVersion(normalized)
+              setDraft(next)
+              setInvalid(nextInvalid)
+              if (nextInvalid) {
+                // Keep malformed authoring in the canonical workflow draft so
+                // global validation blocks Cmd/Ctrl+S instead of saving the last
+                // valid version hidden behind this local input state.
+                if (value !== normalized) onChange(normalized)
+                return
+              }
+              if (!normalized) {
+                if (value !== undefined) onChange(undefined)
+                return
+              }
+              const version = Number(normalized)
+              if (value !== version) onChange(version)
+            }}
+            onBlur={commit}
+            onKeyDown={event => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                commit()
+              }
+            }}
+          />
+        )}
+      </FormField>
     </div>
   )
 }
@@ -191,29 +193,32 @@ export function QuickConfigEditor({
       <section className="quick-config">
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
         <TextareaConfigField scope={nodeId} label={type === 'multi_agent' ? (t('rightPanel.quickConfig.teamGoal')) : (t('rightPanel.quickConfig.agentGoal'))} value={readConfigString(config, 'goal')} onChange={value => patch({ goal: value })} />
-        <div className="config-field-row">
-          <label className="field-label" htmlFor={plannerId}>{t('rightPanel.quickConfig.planner')}</label>
-          <select id={plannerId} className="text-field" value={readConfigString(config, 'planner') || 'rules'} onChange={event => patch({ planner: event.target.value })}>
-            <option value="rules">{t('rightPanel.quickConfig.plannerRules')}</option>
-            <option value="openai">{t('rightPanel.quickConfig.plannerOpenai')}</option>
-          </select>
-        </div>
-        {type === 'multi_agent' && (
-          <div className="config-field-row">
-            <label className="field-label" htmlFor={teamModeId}>{t('rightPanel.quickConfig.teamMode')}</label>
-            <select id={teamModeId} className="text-field" value={readConfigString(config, 'mode') || 'sequential'} onChange={event => patch({ mode: event.target.value })}>
-              <option value="sequential">{t('rightPanel.quickConfig.teamModeSequential')}</option>
-              <option value="parallel">{t('rightPanel.quickConfig.teamModeParallel')}</option>
+        <FormField id={plannerId} label={t('rightPanel.quickConfig.planner')}>
+          {controlProps => (
+            <select {...controlProps} value={readConfigString(config, 'planner') || 'rules'} onChange={event => patch({ planner: event.target.value })}>
+              <option value="rules">{t('rightPanel.quickConfig.plannerRules')}</option>
+              <option value="openai">{t('rightPanel.quickConfig.plannerOpenai')}</option>
             </select>
-          </div>
+          )}
+        </FormField>
+        {type === 'multi_agent' && (
+          <FormField id={teamModeId} label={t('rightPanel.quickConfig.teamMode')}>
+            {controlProps => (
+              <select {...controlProps} value={readConfigString(config, 'mode') || 'sequential'} onChange={event => patch({ mode: event.target.value })}>
+                <option value="sequential">{t('rightPanel.quickConfig.teamModeSequential')}</option>
+                <option value="parallel">{t('rightPanel.quickConfig.teamModeParallel')}</option>
+              </select>
+            )}
+          </FormField>
         )}
         {type === 'agent' && <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.inputValue')} value={readConfigString(config, 'value')} onChange={value => patch({ value })} />}
         <NumberConfigField scope={nodeId} label={t('rightPanel.quickConfig.maxSteps')} value={readConfigNumber(config, 'maxSteps') ?? 3} onChange={value => patch({ maxSteps: value })} />
         {type === 'multi_agent' && (
-          <label className="checkbox-row">
-            <input type="checkbox" checked={config.reflection !== false} onChange={event => patch({ reflection: event.target.checked })} />
-            <span>{t('rightPanel.quickConfig.reflection')}</span>
-          </label>
+          <SwitchField
+            checked={config.reflection !== false}
+            label={t('rightPanel.quickConfig.reflection')}
+            onChange={event => patch({ reflection: event.target.checked })}
+          />
         )}
         {type === 'agent' && <ResilienceFieldset nodeId={nodeId} nodeType="agent" config={config} onPatch={patch} />}
       </section>
@@ -249,25 +254,31 @@ export function QuickConfigEditor({
     const choices = workflows.filter(workflow => workflow.id !== currentWorkflowId)
     const workflowId = fieldId(nodeId, 'subworkflow workflow')
     const workflowListId = `${workflowId}-choices`
-    const workflowHelperId = `${workflowId}-helper`
     const isSelfReference = Boolean(selectedWorkflowId && currentWorkflowId && selectedWorkflowId === currentWorkflowId)
     return (
       <section className="quick-config">
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
-        <div className="config-field-row">
-          <label className="field-label" htmlFor={workflowId}>{t('rightPanel.quickConfig.workflowId')}</label>
-          <input
-            id={workflowId}
-            className="text-field"
-            list={workflowListId}
-            value={selectedWorkflowId}
-            placeholder={t('rightPanel.quickConfig.pickWorkflow')}
-            autoComplete="off"
-            aria-describedby={workflowHelperId}
-            aria-invalid={isSelfReference || undefined}
-            aria-errormessage={isSelfReference ? workflowHelperId : undefined}
-            onChange={event => replaceKeys(['workflowId', 'version'], { workflowId: event.target.value })}
-          />
+        <FormField
+          id={workflowId}
+          label={t('rightPanel.quickConfig.workflowId')}
+          error={isSelfReference ? t('rightPanel.quickConfig.subworkflowSelfReference') : undefined}
+          hint={!isSelfReference
+            ? choices.length > 0
+              ? t('rightPanel.quickConfig.subworkflowHelper')
+              : t('rightPanel.quickConfig.noSubworkflowChoices')
+            : undefined}
+        >
+          {controlProps => (
+            <input
+              {...controlProps}
+              list={workflowListId}
+              value={selectedWorkflowId}
+              placeholder={t('rightPanel.quickConfig.pickWorkflow')}
+              autoComplete="off"
+              onChange={event => replaceKeys(['workflowId', 'version'], { workflowId: event.target.value })}
+            />
+          )}
+        </FormField>
           <datalist id={workflowListId}>
             {choices.map(workflow => (
               <option
@@ -277,14 +288,6 @@ export function QuickConfigEditor({
               />
             ))}
           </datalist>
-          <p id={workflowHelperId} className={isSelfReference ? 'helper-text helper-text--error' : 'helper-text'}>
-            {isSelfReference
-              ? t('rightPanel.quickConfig.subworkflowSelfReference')
-              : choices.length > 0
-                ? t('rightPanel.quickConfig.subworkflowHelper')
-                : t('rightPanel.quickConfig.noSubworkflowChoices')}
-          </p>
-        </div>
         <SubworkflowVersionField
           nodeId={nodeId}
           value={config.version}
@@ -312,36 +315,36 @@ export function QuickConfigEditor({
     return (
       <section className="quick-config" data-testid="loop-config">
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
-        <div className="config-field-row">
-          <label className="field-label" htmlFor={modeId}>{t('rightPanel.quickConfig.loopMode')}</label>
-          <select
-            id={modeId}
-            className="text-field"
-            value={mode}
-            onChange={event => {
-              if (event.target.value === 'for_each') {
-                patch({
-                  mode: 'for_each',
-                  tool: readConfigString(config, 'tool') || 'text.uppercase',
-                  input: config.input ?? { value: '{{item}}' },
-                  concurrency: readConfigNumber(config, 'concurrency') ?? LOOP_DEFAULT_CONCURRENCY,
-                  ...(readConfigNumber(config, 'toleratedFailureCount') === null
-                    && readConfigNumber(config, 'toleratedFailurePercentage') === null
-                    ? { toleratedFailureCount: 0 }
-                    : {}),
-                })
-              } else {
-                patch({
-                  mode: 'map',
-                  mapping: config.mapping ?? { value: '{{item}}', index: '{{index}}' },
-                })
-              }
-            }}
-          >
-            <option value="map">{t('rightPanel.quickConfig.loopModeMap')}</option>
-            <option value="for_each">{t('rightPanel.quickConfig.loopModeForEach')}</option>
-          </select>
-        </div>
+        <FormField id={modeId} label={t('rightPanel.quickConfig.loopMode')}>
+          {controlProps => (
+            <select
+              {...controlProps}
+              value={mode}
+              onChange={event => {
+                if (event.target.value === 'for_each') {
+                  patch({
+                    mode: 'for_each',
+                    tool: readConfigString(config, 'tool') || 'text.uppercase',
+                    input: config.input ?? { value: '{{item}}' },
+                    concurrency: readConfigNumber(config, 'concurrency') ?? LOOP_DEFAULT_CONCURRENCY,
+                    ...(readConfigNumber(config, 'toleratedFailureCount') === null
+                      && readConfigNumber(config, 'toleratedFailurePercentage') === null
+                      ? { toleratedFailureCount: 0 }
+                      : {}),
+                  })
+                } else {
+                  patch({
+                    mode: 'map',
+                    mapping: config.mapping ?? { value: '{{item}}', index: '{{index}}' },
+                  })
+                }
+              }}
+            >
+              <option value="map">{t('rightPanel.quickConfig.loopModeMap')}</option>
+              <option value="for_each">{t('rightPanel.quickConfig.loopModeForEach')}</option>
+            </select>
+          )}
+        </FormField>
         <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.items')} value={readConfigString(config, 'items')} onChange={value => patch({ items: value })} />
         {mode === 'map' ? (
           <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.itemMapping')} value={asJsonObject(config.mapping)} onChange={value => patch({ mapping: value })} />
@@ -369,24 +372,24 @@ export function QuickConfigEditor({
               placeholder={String(LOOP_DEFAULT_CONCURRENCY)}
               onChange={value => patch({ concurrency: value ?? LOOP_DEFAULT_CONCURRENCY })}
             />
-            <div className="config-field-row">
-              <label className="field-label" htmlFor={failureBudgetModeId}>{t('rightPanel.quickConfig.loopFailureBudget')}</label>
-              <select
-                id={failureBudgetModeId}
-                className="text-field"
-                value={failureBudgetMode}
-                onChange={event => {
-                  if (event.target.value === 'percentage') {
-                    replaceKeys(['toleratedFailureCount', 'toleratedFailurePercentage'], { toleratedFailurePercentage: 0 })
-                  } else {
-                    replaceKeys(['toleratedFailureCount', 'toleratedFailurePercentage'], { toleratedFailureCount: 0 })
-                  }
-                }}
-              >
-                <option value="count">{t('rightPanel.quickConfig.loopFailureBudgetCount')}</option>
-                <option value="percentage">{t('rightPanel.quickConfig.loopFailureBudgetPercentage')}</option>
-              </select>
-            </div>
+            <FormField id={failureBudgetModeId} label={t('rightPanel.quickConfig.loopFailureBudget')}>
+              {controlProps => (
+                <select
+                  {...controlProps}
+                  value={failureBudgetMode}
+                  onChange={event => {
+                    if (event.target.value === 'percentage') {
+                      replaceKeys(['toleratedFailureCount', 'toleratedFailurePercentage'], { toleratedFailurePercentage: 0 })
+                    } else {
+                      replaceKeys(['toleratedFailureCount', 'toleratedFailurePercentage'], { toleratedFailureCount: 0 })
+                    }
+                  }}
+                >
+                  <option value="count">{t('rightPanel.quickConfig.loopFailureBudgetCount')}</option>
+                  <option value="percentage">{t('rightPanel.quickConfig.loopFailureBudgetPercentage')}</option>
+                </select>
+              )}
+            </FormField>
             {failureBudgetMode === 'percentage' ? (
               <OptionalNumberConfigField
                 scope={nodeId}
@@ -513,15 +516,12 @@ export function QuickConfigEditor({
           value={readConfigString(config, 'aliasKey')}
           onChange={value => patch({ aliasKey: value })}
         />
-        <div className="config-field-row">
-          <label className="field-label" htmlFor={fieldId(nodeId, 'DkimRequired')}>{t('rightPanel.quickConfig.emailDkimRequired')}</label>
-          <input
-            id={fieldId(nodeId, 'DkimRequired')}
-            type="checkbox"
-            checked={dkimRequired}
-            onChange={event => patch({ dkimRequired: event.target.checked })}
-          />
-        </div>
+        <SwitchField
+          id={fieldId(nodeId, 'DkimRequired')}
+          checked={dkimRequired}
+          label={t('rightPanel.quickConfig.emailDkimRequired')}
+          onChange={event => patch({ dkimRequired: event.target.checked })}
+        />
         <p className="helper-text">{t('rightPanel.quickConfig.emailReceivedHelper')}</p>
       </section>
     )
@@ -590,16 +590,17 @@ export function QuickConfigEditor({
           max={10_000}
           onChange={value => patch({ rateLimitPerMin: value })}
         />
-        <label className="field-label" htmlFor={fieldId(nodeId, 'PagerDuty callback')}>
-          {t('rightPanel.quickConfig.pagerdutyCallback')}
-        </label>
-        <input
-          id={fieldId(nodeId, 'PagerDuty callback')}
-          className="text-field mono"
-          readOnly
-          value={callbackUrl}
-          placeholder={t('rightPanel.quickConfig.pagerdutyCallbackUnavailable')}
-        />
+        <FormField id={fieldId(nodeId, 'PagerDuty callback')} label={t('rightPanel.quickConfig.pagerdutyCallback')}>
+          {controlProps => (
+            <input
+              {...controlProps}
+              className="mono"
+              readOnly
+              value={callbackUrl}
+              placeholder={t('rightPanel.quickConfig.pagerdutyCallbackUnavailable')}
+            />
+          )}
+        </FormField>
         <p className="helper-text">{t('rightPanel.quickConfig.pagerdutyIncidentHelper')}</p>
       </section>
     )
