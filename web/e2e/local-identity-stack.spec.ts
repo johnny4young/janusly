@@ -130,7 +130,7 @@ test('real local identity covers onboarding, organizations, roles, and truthful 
   await expect(page.locator('.bottom-status-bar')).toContainText(organizationName)
 
   await openTeam(page)
-  await page.getByLabel('Email').fill(memberEmail)
+  await page.getByRole('textbox', { name: 'Email', exact: true }).fill(memberEmail)
   await page.getByRole('button', { name: 'Invite', exact: true }).click()
   await expect(page.getByText(`Invited ${memberEmail}`)).toBeVisible()
   await signOut(page)
@@ -176,7 +176,7 @@ test('real local identity covers onboarding, organizations, roles, and truthful 
 
   await signIn(page, memberEmail)
   await openTeam(page)
-  await page.getByLabel('Email').fill(invitedViewerEmail)
+  await page.getByRole('textbox', { name: 'Email', exact: true }).fill(invitedViewerEmail)
   await page.getByRole('button', { name: 'Invite', exact: true }).click()
   await expect(page.getByText(`Invited ${invitedViewerEmail}`)).toBeVisible()
   await expect(page.getByLabel(`Role for ${ownerEmail}`)).toBeDisabled()
