@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { Button } from './Button'
-import { FieldStack, FormActions, FormField, FormSection } from './Form'
+import { FieldStack, FormActions, FormDisclosure, FormField, FormGrid, FormSection } from './Form'
 import { StatusSummary } from './StatusSummary'
 
 describe('semantic UI primitives', () => {
@@ -55,6 +55,19 @@ describe('semantic UI primitives', () => {
     )
 
     expect(screen.getByRole('group', { name: 'Create credential' })).toBeVisible()
+  })
+
+  it('keeps advanced fields collapsed while preserving native disclosure semantics', () => {
+    render(
+      <FormGrid>
+        <FormDisclosure summary="Advanced settings"><input aria-label="Environment reference" /></FormDisclosure>
+      </FormGrid>,
+    )
+
+    const disclosure = screen.getByText('Advanced settings').closest('details')
+    expect(disclosure).not.toHaveAttribute('open')
+    fireEvent.click(screen.getByText('Advanced settings'))
+    expect(disclosure).toHaveAttribute('open')
   })
 
   it('renders status summaries with explicit live-region semantics only when requested', () => {

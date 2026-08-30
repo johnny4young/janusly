@@ -1,6 +1,7 @@
 /** Organization-wide janusly.md guidance editor for AI authoring/recovery. */
 
 import { useEffect, useRef, useState } from 'react'
+import { RefreshCw, Save } from 'lucide-react'
 import {
   AI_OPERATOR_GUIDANCE_SCOPE_MAX_BYTES,
   containsOperatorGuidanceSecret,
@@ -9,6 +10,9 @@ import {
 import { api } from '../api'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
+import { Button } from './ui/Button'
+import { FormActions, FormField } from './ui/Form'
+import { StatusSummary } from './ui/StatusSummary'
 
 type OrgConfigEntry = { key: string; value: string | number | boolean }
 type GuidanceLoadState = 'loading' | 'ready' | 'error'
@@ -82,6 +86,13 @@ export function AiGuidanceSettingsPanel() {
   const byteLength = new TextEncoder().encode(guidance).byteLength
   const overCap = byteLength > AI_OPERATOR_GUIDANCE_SCOPE_MAX_BYTES
   const hasSecret = containsOperatorGuidanceSecret(guidance)
+  const validationError = overCap || hasSecret ? (
+    <>
+      {overCap ? t('aiGuidance.field.overCap') : null}
+      {overCap && hasSecret ? ' · ' : null}
+      {hasSecret ? t('aiGuidance.field.secret') : null}
+    </>
+  ) : undefined
 
   const save = async () => {
     if (saving || overCap || hasSecret || loadState !== 'ready') return
@@ -112,52 +123,63 @@ export function AiGuidanceSettingsPanel() {
       <div className="section-kicker">{t('aiGuidance.kicker')}</div>
       <h3 id="ai-guidance-settings-title">{t('aiGuidance.title')}</h3>
       <p className="helper-text">{t('aiGuidance.description')}</p>
-      <label className="we-field">
-        <span>
-          {t('aiGuidance.field.label')}{' '}
-          <span className="helper-text">
-            ({byteLength.toLocaleString(getResolvedLocale())}/{AI_OPERATOR_GUIDANCE_SCOPE_MAX_BYTES.toLocaleString(getResolvedLocale())} {t('workflowMetadata.field.runbookUnit')})
-          </span>
-        </span>
-        <textarea
-          rows={8}
-          value={guidance}
-          onChange={event => {
-            dirtyRef.current = true
-            setGuidance(event.target.value)
-          }}
-          placeholder={t('aiGuidance.field.placeholder')}
-          disabled={loadState !== 'ready' || saving}
-          aria-invalid={overCap || hasSecret}
-          data-testid="ai-guidance-org-input"
+      {error && (
+        <StatusSummary
+          role="alert"
+          tone="danger"
+          title={error}
+          actions={(
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setReloadNonce(value => value + 1)}
+              disabled={saving || loadState === 'loading'}
+              leadingIcon={<RefreshCw size={14} />}
+              data-testid="ai-guidance-org-retry"
+            >
+              {t('aiGuidance.action.retry')}
+            </Button>
+          )}
         />
-        <span className="helper-text">{t('aiGuidance.field.help')}</span>
-        {overCap && <span className="helper-text we-helper-text--error">{t('aiGuidance.field.overCap')}</span>}
-        {hasSecret && <span className="helper-text we-helper-text--error">{t('aiGuidance.field.secret')}</span>}
-      </label>
-      {error && <p className="helper-text we-helper-text--error" role="alert">{error}</p>}
-      <div className="we-ai-guidance-settings__actions">
-        {error && (
-          <button
-            type="button"
-            className="command-button"
-            onClick={() => setReloadNonce(value => value + 1)}
-            disabled={saving || loadState === 'loading'}
-            data-testid="ai-guidance-org-retry"
-          >
-            {t('aiGuidance.action.retry')}
-          </button>
+      )}
+      <FormField
+        id="ai-guidance-org"
+        label={t('aiGuidance.field.label')}
+        hint={(
+          <>
+            {t('aiGuidance.field.help')} · {byteLength.toLocaleString(getResolvedLocale())}/{AI_OPERATOR_GUIDANCE_SCOPE_MAX_BYTES.toLocaleString(getResolvedLocale())} {t('workflowMetadata.field.runbookUnit')}
+          </>
         )}
-        <button
-          type="button"
-          className="command-button command-button-primary"
+        error={validationError}
+      >
+        {(controlProps) => (
+          <textarea
+            {...controlProps}
+            rows={8}
+            value={guidance}
+            onChange={event => {
+              dirtyRef.current = true
+              setGuidance(event.target.value)
+            }}
+            placeholder={t('aiGuidance.field.placeholder')}
+            disabled={loadState !== 'ready' || saving}
+            data-testid="ai-guidance-org-input"
+          />
+        )}
+      </FormField>
+      <FormActions>
+        <Button
+          variant="primary"
           onClick={() => void save()}
           disabled={loadState !== 'ready' || saving || overCap || hasSecret}
+          loading={saving}
+          loadingLabel={t('aiGuidance.action.saving')}
+          leadingIcon={<Save size={15} />}
           data-testid="ai-guidance-org-save"
         >
-          {saving ? t('aiGuidance.action.saving') : t('aiGuidance.action.save')}
-        </button>
-      </div>
+          {t('aiGuidance.action.save')}
+        </Button>
+      </FormActions>
     </section>
   )
 }

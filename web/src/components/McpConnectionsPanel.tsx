@@ -28,6 +28,9 @@ import { tApiError, Trans, useT } from '../i18n'
 import { useConfirm } from './ConfirmDialog'
 import { isLikelyHttpUrl } from '../url'
 import { t as runtimeT } from '../i18n/runtime'
+import { Button } from './ui/Button'
+import { FormActions, FormDisclosure, FormField, FormGrid, FormSection } from './ui/Form'
+import { StatusSummary } from './ui/StatusSummary'
 
 type ConnectionListEntry = McpConnection & { toolCount?: number; enabledToolCount?: number }
 
@@ -278,11 +281,15 @@ export function McpConnectionsPanel({ canWrite = true }: { canWrite?: boolean } 
     (urlNeeded ? trimmedUrl.length > 0 && !urlInvalid : form.command.trim().length > 0)
 
   return (
-    <section className="we-card">
+    <section
+      className="we-card"
+      aria-labelledby="mcp-connections-title"
+      data-testid="mcp-connections-panel"
+    >
       <div className="split-row">
         <div>
           <div className="section-kicker">{t('mcpConnections.kicker')}</div>
-          <strong>{t('mcpConnections.title')}</strong>
+          <h3 id="mcp-connections-title">{t('mcpConnections.title')}</h3>
         </div>
         <span className="mode-pill mode-pill-neutral">{t('mcpConnections.connectedCount', { count: connections.length })}</span>
       </div>
@@ -293,87 +300,125 @@ export function McpConnectionsPanel({ canWrite = true }: { canWrite?: boolean } 
         />
       </p>
 
-      {error && <div className="form-error">{error}</div>}
-
-      {canWrite && <form onSubmit={create} className="form-stack">
-        <div className="split-row">
-          <div style={{ flex: 1 }}>
-            <label className="field-label" htmlFor="mcp-alias">{t('mcpConnections.form.alias')}</label>
-            <input
-              id="mcp-alias"
-              className="text-field"
-              value={form.alias}
-              onChange={(event) => patchForm({ alias: event.target.value })}
-              placeholder={t('mcpConnections.form.aliasPlaceholder')}
-              autoComplete="off"
-            />
-          </div>
-          <div style={{ flex: 1 }}>
-            <label className="field-label" htmlFor="mcp-transport">{t('mcpConnections.form.transport')}</label>
-            <select
-              id="mcp-transport"
-              className="text-field"
-              value={form.transport}
-              onChange={(event) => patchForm({ transport: event.target.value as McpTransport })}
-            >
-              <option value="stdio">{t('mcpConnections.form.transportStdio')}</option>
-              <option value="sse">{t('mcpConnections.form.transportSse')}</option>
-              <option value="http">{t('mcpConnections.form.transportHttp')}</option>
-            </select>
-          </div>
-        </div>
-        {form.transport === 'stdio' ? (
-          <>
-            <label className="field-label" htmlFor="mcp-command">{t('mcpConnections.form.command')}</label>
-            <input
-              id="mcp-command"
-              className="text-field"
-              value={form.command}
-              onChange={(event) => patchForm({ command: event.target.value })}
-              placeholder={t('mcpConnections.form.commandPlaceholder')}
-            />
-            <label className="field-label" htmlFor="mcp-args">{t('mcpConnections.form.args')}</label>
-            <input
-              id="mcp-args"
-              className="text-field"
-              value={form.args}
-              onChange={(event) => patchForm({ args: event.target.value })}
-              placeholder={t('mcpConnections.form.argsPlaceholder')}
-            />
-          </>
-        ) : (
-          <>
-            <label className="field-label" htmlFor="mcp-url">{t('mcpConnections.form.url')}</label>
-            <input
-              id="mcp-url"
-              className={`text-field${urlInvalid ? ' text-field--error' : ''}`}
-              value={form.url}
-              onChange={(event) => patchForm({ url: event.target.value })}
-              placeholder={t('mcpConnections.form.urlPlaceholder')}
-              aria-invalid={urlInvalid}
-              aria-describedby={urlInvalid ? 'mcp-url-error' : undefined}
-            />
-            {urlInvalid && (
-              <span id="mcp-url-error" className="helper-text helper-text--error" role="alert">
-                <AlertCircle size={13} aria-hidden="true" /> {t('mcpConnections.errors.urlInvalid')}
-              </span>
-            )}
-          </>
-        )}
-        <label className="field-label" htmlFor="mcp-env-refs">{t('mcpConnections.form.envRefs')}</label>
-        <textarea
-          id="mcp-env-refs"
-          className="text-field"
-          rows={3}
-          value={form.envRefsText}
-          onChange={(event) => patchForm({ envRefsText: event.target.value })}
-          placeholder={t('mcpConnections.form.envRefsPlaceholder')}
+      {error && (
+        <StatusSummary
+          role="alert"
+          tone="danger"
+          icon={<AlertCircle size={16} />}
+          title={error}
         />
-        <button type="submit" className="command-button command-button-primary" disabled={!canSubmit}>
-          <Plug size={15} aria-hidden="true" />
-          <span>{saving ? t('mcpConnections.form.submitting') : t('mcpConnections.form.submit')}</span>
-        </button>
-      </form>}
+      )}
+
+      {canWrite && (
+        <form onSubmit={create}>
+          <FormSection
+            title={t('mcpConnections.form.sectionTitle')}
+            description={t('mcpConnections.form.sectionDescription')}
+            disabled={saving}
+          >
+            <FormGrid>
+              <FormField id="mcp-alias" label={t('mcpConnections.form.alias')} required>
+                {(controlProps) => (
+                  <input
+                    {...controlProps}
+                    value={form.alias}
+                    onChange={(event) => patchForm({ alias: event.target.value })}
+                    placeholder={t('mcpConnections.form.aliasPlaceholder')}
+                    autoComplete="off"
+                    required
+                  />
+                )}
+              </FormField>
+              <FormField id="mcp-transport" label={t('mcpConnections.form.transport')}>
+                {(controlProps) => (
+                  <select
+                    {...controlProps}
+                    value={form.transport}
+                    onChange={(event) => patchForm({ transport: event.target.value as McpTransport })}
+                  >
+                    <option value="stdio">{t('mcpConnections.form.transportStdio')}</option>
+                    <option value="sse">{t('mcpConnections.form.transportSse')}</option>
+                    <option value="http">{t('mcpConnections.form.transportHttp')}</option>
+                  </select>
+                )}
+              </FormField>
+            </FormGrid>
+            {form.transport === 'stdio' ? (
+              <FormGrid>
+                <FormField id="mcp-command" label={t('mcpConnections.form.command')} required>
+                  {(controlProps) => (
+                    <input
+                      {...controlProps}
+                      value={form.command}
+                      onChange={(event) => patchForm({ command: event.target.value })}
+                      placeholder={t('mcpConnections.form.commandPlaceholder')}
+                      required
+                    />
+                  )}
+                </FormField>
+                <FormField id="mcp-args" label={t('mcpConnections.form.args')}>
+                  {(controlProps) => (
+                    <input
+                      {...controlProps}
+                      value={form.args}
+                      onChange={(event) => patchForm({ args: event.target.value })}
+                      placeholder={t('mcpConnections.form.argsPlaceholder')}
+                    />
+                  )}
+                </FormField>
+              </FormGrid>
+            ) : (
+              <FormField
+                id="mcp-url"
+                label={t('mcpConnections.form.url')}
+                required
+                error={urlInvalid ? (
+                  <><AlertCircle size={13} aria-hidden="true" /> {t('mcpConnections.errors.urlInvalid')}</>
+                ) : undefined}
+              >
+                {(controlProps) => (
+                  <input
+                    {...controlProps}
+                    value={form.url}
+                    onChange={(event) => patchForm({ url: event.target.value })}
+                    placeholder={t('mcpConnections.form.urlPlaceholder')}
+                    required
+                  />
+                )}
+              </FormField>
+            )}
+            <FormDisclosure summary={t('mcpConnections.form.advancedEnvRefs')}>
+              <FormField
+                id="mcp-env-refs"
+                label={t('mcpConnections.form.envRefs')}
+                hint={t('mcpConnections.form.envRefsHint')}
+              >
+                {(controlProps) => (
+                  <textarea
+                    {...controlProps}
+                    rows={3}
+                    value={form.envRefsText}
+                    onChange={(event) => patchForm({ envRefsText: event.target.value })}
+                    placeholder={t('mcpConnections.form.envRefsPlaceholder')}
+                  />
+                )}
+              </FormField>
+            </FormDisclosure>
+            <FormActions>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={!canSubmit}
+                loading={saving}
+                loadingLabel={t('mcpConnections.form.submitting')}
+                leadingIcon={<Plug size={15} />}
+              >
+                {t('mcpConnections.form.submit')}
+              </Button>
+            </FormActions>
+          </FormSection>
+        </form>
+      )}
 
       {loading ? (
         <LoadingSkeleton rows={3} label={t('mcpConnections.list.loading')} />

@@ -109,3 +109,30 @@ export function FieldStack({
     </fieldset>
   )
 }
+
+export function FormGrid({
+  children,
+  className,
+}: {
+  children: ReactNode
+  className?: string
+}) {
+  return <div className={['ui-form-grid', className].filter(Boolean).join(' ')}>{children}</div>
+}
+
+export function FormDisclosure({
+  children,
+  className,
+  summary,
+}: {
+  children: ReactNode
+  className?: string
+  summary: ReactNode
+}) {
+  return (
+    <details className={['ui-form-disclosure', className].filter(Boolean).join(' ')}>
+      <summary className="ui-form-disclosure__summary">{summary}</summary>
+      <div className="ui-form-disclosure__body">{children}</div>
+    </details>
+  )
+}

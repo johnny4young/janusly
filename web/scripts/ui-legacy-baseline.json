@@ -3,11 +3,6 @@
     "field-label",
     "text-field"
   ],
-  "components/AiGuidanceSettingsPanel.tsx": [
-    "command-button",
-    "command-button-primary",
-    "we-field"
-  ],
   "components/AiStudioPanel.tsx": [
     "command-button",
     "command-button-primary"
@@ -106,13 +101,6 @@
     "command-button-secondary",
     "field-label",
     "text-field"
-  ],
-  "components/McpConnectionsPanel.tsx": [
-    "command-button",
-    "command-button-primary",
-    "field-label",
-    "text-field",
-    "text-field--error"
   ],
   "components/McpToolConfigField.tsx": [
     "field-label",

@@ -7840,25 +7840,8 @@ button.we-recovery-heatmap__cell:focus-visible {
   gap: 10px;
 }
 
-.we-ai-guidance-settings .we-field {
-  color: var(--we-muted);
-  display: flex;
-  flex-direction: column;
-  font-size: 12px;
-  font-weight: 650;
-  gap: 6px;
-}
-
-.we-ai-guidance-settings .we-field textarea {
+.we-ai-guidance-settings [data-ui-control] {
   min-height: 180px;
-  resize: vertical;
-}
-
-.we-ai-guidance-settings__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
 }
 
 .we-workflow-metadata-panel__form {

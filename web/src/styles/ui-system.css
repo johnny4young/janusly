@@ -141,6 +141,30 @@
   gap: var(--we-space-4);
 }
 
+.ui-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  align-items: start;
+  gap: var(--we-space-4);
+}
+
+.ui-form-disclosure {
+  border: 1px solid var(--we-line);
+  border-radius: var(--we-radius-sm);
+  background: var(--we-surface);
+}
+
+.ui-form-disclosure__summary {
+  padding: var(--we-space-3) var(--we-space-4);
+  color: var(--we-ink-soft);
+  font-size: 13px;
+  font-weight: 680;
+  cursor: pointer;
+}
+
+.ui-form-disclosure__summary:focus-visible { outline: none; box-shadow: var(--we-focus-ring); border-radius: var(--we-radius-sm); }
+.ui-form-disclosure__body { padding: var(--we-space-2) var(--we-space-4) var(--we-space-4); }
+
 .ui-form-actions {
   display: flex;
   align-items: center;
