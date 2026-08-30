@@ -24,6 +24,9 @@ import { api } from "../api";
 import { useWorkflowStore } from "../store";
 import { tApiError, useT } from "../i18n";
 import { useConfirm } from "./ConfirmDialog";
+import { Button } from "./ui/Button";
+import { FormActions, FormField, FormGrid } from "./ui/Form";
+import { StatusSummary } from "./ui/StatusSummary";
 
 type Role = "viewer" | "editor" | "admin";
 
@@ -39,8 +42,8 @@ type RoleEntry = {
   isBuiltin: boolean;
   inheritsFrom: Role;
   description: string | null;
-  grantedPermissions: string[];
-  isOverride: boolean;
+  grantedPermissions: string[] | null;
+  isOverride?: boolean;
 };
 
 const ROLE_ORDER: Role[] = ["viewer", "editor", "admin"];
@@ -80,7 +83,8 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
       .then(([catalogResp, rolesResp]) => {
         if (cancelled) return;
         const c = (catalogResp as { catalog?: CatalogEntry[]; mandatoryAdminPermissions?: string[] }) ?? {};
-        setCatalog(c.catalog ?? []);
+        const catalogEntries = c.catalog ?? [];
+        setCatalog(catalogEntries);
         setMandatoryAdmin(c.mandatoryAdminPermissions ?? []);
         const r = (rolesResp as { roles?: RoleEntry[] }) ?? {};
         setRoles(r.roles ?? []);
@@ -93,7 +97,14 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
           const next: Record<string, Set<string>> = { ...prev };
           for (const role of r.roles ?? []) {
             if (!(role.name in next)) {
-              next[role.name] = new Set(role.grantedPermissions);
+              const granted = Array.isArray(role.grantedPermissions)
+                ? role.grantedPermissions
+                : role.isBuiltin
+                  ? catalogEntries
+                    .filter((entry) => entry.defaultRoles.includes(role.name as Role))
+                    .map((entry) => entry.key)
+                  : [];
+              next[role.name] = new Set(granted);
             }
           }
           return next;
@@ -231,22 +242,25 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
   const canCreateRole = trimmedNewRoleName.length > 0 && !newRoleNameInvalid && !creating;
 
   return (
-    <section className="we-budget-settings" aria-labelledby="permissions-heading">
+    <section className="we-budget-settings" aria-labelledby="permissions-heading" data-testid="permission-grants-panel">
       <header className="we-budget-settings__header">
         <KeyRound size={18} aria-hidden="true" />
         <h3 id="permissions-heading">{t("permissions.heading")}</h3>
       </header>
 
       {error && (
-        <div className="we-budget-settings__error" role="alert">
-          {error}
-        </div>
+        <StatusSummary role="alert" tone="danger" icon={<AlertCircle size={16} />} title={error} />
       )}
 
       {[...builtins, ...customs].map((role) => {
         const isAdminBuiltin = role.isBuiltin && role.name === "admin";
+        const grantedCount = editing[role.name]?.size ?? 0;
         return (
-          <article key={role.name} className="we-permissions-role-card">
+          <article
+            key={role.name}
+            className="we-permissions-role-card"
+            data-testid={`permissions-role-${role.name}`}
+          >
             <header>
               <h4>
                 <code>{role.name}</code>
@@ -255,6 +269,16 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
               </h4>
               {role.description && <p>{role.description}</p>}
             </header>
+            <div className="we-permissions-role-summary">
+              <span className="mode-pill mode-pill-neutral">
+                {t("permissions.summary", { granted: grantedCount, total: catalog.length })}
+              </span>
+              <span>
+                {role.isBuiltin
+                  ? t("permissions.summaryBuiltin")
+                  : t("permissions.summaryCustom", { base: role.inheritsFrom })}
+              </span>
+            </div>
             <div className="we-permissions-grid">
               {grouped.map(([category, entries]) => (
                 <div key={category} className="we-permissions-grid__category">
@@ -280,34 +304,39 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
               ))}
             </div>
             <footer>
-              <button
-                type="button"
-                className="we-button we-button--primary"
+              <Button
+                size="sm"
+                variant="primary"
                 onClick={() => saveRole(role)}
                 disabled={!canWrite || savingRole === role.name}
+                loading={savingRole === role.name}
+                loadingLabel={t("permissions.save")}
+                leadingIcon={<Save size={14} />}
               >
-                <Save size={14} aria-hidden="true" /> {t("permissions.save")}
-              </button>
+                {t("permissions.save")}
+              </Button>
               {role.isBuiltin && role.isOverride && (
-                <button
-                  type="button"
-                  className="we-button we-button--ghost"
+                <Button
+                  size="sm"
+                  variant="secondary"
                   onClick={() => revertBuiltin(role)}
                   disabled={!canWrite}
+                  leadingIcon={<RotateCcw size={14} />}
                 >
-                  <RotateCcw size={14} aria-hidden="true" /> {t("permissions.revert")}
-                </button>
+                  {t("permissions.revert")}
+                </Button>
               )}
               {!role.isBuiltin && (
-                <button
-                  type="button"
-                  className="we-button we-button--ghost"
+                <Button
+                  size="sm"
+                  variant="danger"
                   onClick={() => deleteCustom(role)}
                   disabled={!canWrite}
                   aria-label={t("permissions.deleteAria", { role: role.name })}
+                  leadingIcon={<Trash2 size={14} />}
                 >
-                  <Trash2 size={14} aria-hidden="true" /> {t("permissions.delete")}
-                </button>
+                  {t("permissions.delete")}
+                </Button>
               )}
             </footer>
           </article>
@@ -319,47 +348,57 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
           <h4>{t("permissions.add.heading")}</h4>
           <p>{t("permissions.add.intro")}</p>
         </header>
-        <form className="we-budget-settings__form" onSubmit={createRole} noValidate>
-          <label className="we-field">
-            <span className="we-field__label">{t("permissions.add.name")}</span>
-            <input
-              type="text"
-              className="we-field__input"
-              value={newRoleName}
-              onChange={(e) => setNewRoleName(e.target.value)}
-              placeholder={t("permissions.add.namePlaceholder")}
-              maxLength={32}
-              aria-invalid={newRoleNameInvalid}
-              aria-describedby={newRoleNameInvalid ? "new-role-name-error" : undefined}
-            />
-            {newRoleNameInvalid && (
-              <span id="new-role-name-error" className="helper-text helper-text--error" role="alert">
-                <AlertCircle size={13} aria-hidden="true" /> {t("permissions.errorName")}
-              </span>
-            )}
-          </label>
-          <label className="we-field">
-            <span className="we-field__label">{t("permissions.add.inherits")}</span>
-            <select
-              className="we-field__input"
-              value={newRoleInherits}
-              onChange={(e) => setNewRoleInherits(e.target.value as Role)}
+        <form className="ui-form-layout" onSubmit={createRole} noValidate>
+          <FormGrid>
+            <FormField
+              id="new-role-name"
+              label={t("permissions.add.name")}
+              required
+              error={newRoleNameInvalid ? (
+                <><AlertCircle size={13} aria-hidden="true" /> {t("permissions.errorName")}</>
+              ) : undefined}
             >
-              <option value="viewer">{t("permissions.add.inheritOption.viewer")}</option>
-              <option value="editor">{t("permissions.add.inheritOption.editor")}</option>
-              <option value="admin">{t("permissions.add.inheritOption.admin")}</option>
-            </select>
-          </label>
-          <label className="we-field">
-            <span className="we-field__label">{t("permissions.add.description")}</span>
-            <input
-              type="text"
-              className="we-field__input"
-              value={newRoleDescription}
-              onChange={(e) => setNewRoleDescription(e.target.value)}
-              maxLength={240}
-            />
-          </label>
+              {(controlProps) => (
+                <input
+                  {...controlProps}
+                  type="text"
+                  value={newRoleName}
+                  onChange={(e) => setNewRoleName(e.target.value)}
+                  placeholder={t("permissions.add.namePlaceholder")}
+                  maxLength={32}
+                  required
+                />
+              )}
+            </FormField>
+            <FormField id="new-role-inherits" label={t("permissions.add.inherits")}>
+              {(controlProps) => (
+                <select
+                  {...controlProps}
+                  value={newRoleInherits}
+                  onChange={(e) => setNewRoleInherits(e.target.value as Role)}
+                >
+                  <option value="viewer">{t("permissions.add.inheritOption.viewer")}</option>
+                  <option value="editor">{t("permissions.add.inheritOption.editor")}</option>
+                  <option value="admin">{t("permissions.add.inheritOption.admin")}</option>
+                </select>
+              )}
+            </FormField>
+            <FormField id="new-role-description" label={t("permissions.add.description")}>
+              {(controlProps) => (
+                <input
+                  {...controlProps}
+                  type="text"
+                  value={newRoleDescription}
+                  onChange={(e) => setNewRoleDescription(e.target.value)}
+                  maxLength={240}
+                />
+              )}
+            </FormField>
+          </FormGrid>
+          <div className="we-permissions-role-summary">
+            <strong>{t("permissions.add.permissions")}</strong>
+            <span>{t("permissions.add.permissionSummary", { granted: newRolePermissions.size, total: catalog.length })}</span>
+          </div>
           <div className="we-permissions-grid">
             {grouped.map(([category, entries]) => (
               <div key={category} className="we-permissions-grid__category">
@@ -378,9 +417,18 @@ export function PermissionGrantsPanel({ canWrite = true }: { canWrite?: boolean 
               </div>
             ))}
           </div>
-          <button type="submit" className="we-button we-button--primary" disabled={!canCreateRole}>
-            <Plus size={14} aria-hidden="true" /> {creating ? t("permissions.add.creating") : t("permissions.add.create")}
-          </button>
+          <FormActions>
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={!canCreateRole}
+              loading={creating}
+              loadingLabel={t("permissions.add.creating")}
+              leadingIcon={<Plus size={15} />}
+            >
+              {t("permissions.add.create")}
+            </Button>
+          </FormActions>
         </form>
       </article>}
     </section>

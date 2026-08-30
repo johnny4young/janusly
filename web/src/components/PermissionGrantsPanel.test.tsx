@@ -63,6 +63,21 @@ describe('<PermissionGrantsPanel />', () => {
     })
   })
 
+  it('derives effective built-in grants when the API uses null for catalog defaults', async () => {
+    setupApi(CATALOG, {
+      roles: ROLES_DEFAULT.roles.map(role => ({ ...role, grantedPermissions: null })),
+    })
+    render(<PermissionGrantsPanel />)
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('viewer - workflows.read')).toBeChecked()
+    })
+    expect(screen.getByLabelText('viewer - workflows.write')).not.toBeChecked()
+    expect(screen.getByLabelText('editor - workflows.write')).toBeChecked()
+    expect(screen.getByLabelText('admin - org.permissions.write')).toBeChecked()
+    expect(screen.getByText('5 of 5 enabled')).toBeInTheDocument()
+  })
+
   it('renders a custom role alongside built-ins', async () => {
     setupApi(CATALOG, ROLES_WITH_CUSTOM)
     render(<PermissionGrantsPanel />)

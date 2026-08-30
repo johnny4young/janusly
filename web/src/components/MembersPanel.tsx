@@ -20,6 +20,8 @@ import type { OrgMember, OrgRole } from '../types'
 import { tApiError, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { currentSessionOrganization, sessionCan } from '../identity-context'
+import { Button } from './ui/Button'
+import { FieldStack, FormActions, FormField } from './ui/Form'
 
 type OrgRoleEntry = {
   name: string
@@ -184,66 +186,79 @@ export function MembersPanel() {
 
   return (
     <div className="panel-list">
-      <section className="we-card">
+      <section className="we-card" aria-labelledby="members-invite-title" data-testid="members-invite-panel">
         <div className="split-row">
           <div>
             <div className="section-kicker">{t('members.kicker')}</div>
-            <strong>{t('members.heading')}</strong>
+            <h3 id="members-invite-title">{t('members.heading')}</h3>
           </div>
           <span className="mode-pill mode-pill-neutral">
             {t('members.inviteAs', { role: roleLabel(role) })}
           </span>
         </div>
-        <fieldset className="we-fieldset" disabled={!canManageMembers}>
-          <label className="field-label" htmlFor="member-email">{t('members.email')}</label>
-          <input
+        <FieldStack disabled={!canManageMembers} labelledBy="members-invite-title">
+          <FormField
             id="member-email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder={t('members.emailPlaceholder')}
-            className={`text-field${emailInvalid ? ' text-field--error' : ''}`}
-            type="email"
-            autoComplete="off"
-            aria-invalid={emailInvalid}
-            aria-describedby={emailInvalid ? 'member-email-error' : undefined}
-          />
-          {emailInvalid && (
-            <span id="member-email-error" className="helper-text helper-text--error" role="alert">
-              <AlertCircle size={13} aria-hidden="true" /> {t('members.invalidEmail')}
-            </span>
-          )}
-          <span className="field-label">{t('members.role')}</span>
-          <div className="we-role-options" role="radiogroup" aria-label={t('members.role')}>
-            {orgRoles.map(option => {
-              const selected = role === option.name
-              return (
-                <label key={option.name} className="we-role-option" data-selected={selected}>
-                  <input
-                    type="radio"
-                    name="invite-role"
-                    value={option.name}
-                    checked={selected}
-                    onChange={() => setRole(option.name)}
-                  />
-                  <span className="we-role-option__copy">
-                    <span className="we-role-option__name">
-                      {roleLabel(option.name)}{option.isBuiltin ? '' : (t('members.role.customSuffix'))}
+            label={t('members.email')}
+            required
+            error={emailInvalid ? (
+              <><AlertCircle size={13} aria-hidden="true" /> {t('members.invalidEmail')}</>
+            ) : undefined}
+          >
+            {(controlProps) => (
+              <input
+                {...controlProps}
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder={t('members.emailPlaceholder')}
+                type="email"
+                autoComplete="off"
+                required
+              />
+            )}
+          </FormField>
+          <div className="ui-field">
+            <span className="ui-field__label" id="member-role-label">{t('members.role')}</span>
+            <div className="we-role-options" role="radiogroup" aria-labelledby="member-role-label">
+              {orgRoles.map(option => {
+                const selected = role === option.name
+                return (
+                  <label key={option.name} className="we-role-option" data-selected={selected}>
+                    <input
+                      type="radio"
+                      name="invite-role"
+                      value={option.name}
+                      checked={selected}
+                      onChange={() => setRole(option.name)}
+                    />
+                    <span className="we-role-option__copy">
+                      <span className="we-role-option__name">
+                        {roleLabel(option.name)}{option.isBuiltin ? '' : (t('members.role.customSuffix'))}
+                      </span>
+                      <span className="we-role-option__desc">{describeRole(option.name, option)}</span>
                     </span>
-                    <span className="we-role-option__desc">{describeRole(option.name, option)}</span>
-                  </span>
-                  <span className="we-role-option__radio" aria-hidden="true" />
-                </label>
-              )
-            })}
+                    <span className="we-role-option__radio" aria-hidden="true" />
+                  </label>
+                )
+              })}
+            </div>
+            <span className="ui-field__hint">
+              <Info size={13} aria-hidden="true" /> {t('members.leastPrivilege')}
+            </span>
           </div>
-          <span className="helper-text helper-text--hint">
-            <Info size={13} aria-hidden="true" /> {t('members.leastPrivilege')}
-          </span>
-        </fieldset>
-        <button onClick={invite} className="command-button command-button-primary" disabled={!canInvite}>
-          <UserPlus size={15} aria-hidden="true" />
-          <span>{pending ? t('members.inviting') : t('members.invite')}</span>
-        </button>
+        </FieldStack>
+        <FormActions>
+          <Button
+            onClick={invite}
+            variant="primary"
+            disabled={!canInvite}
+            loading={pending}
+            loadingLabel={t('members.inviting')}
+            leadingIcon={<UserPlus size={15} />}
+          >
+            {t('members.invite')}
+          </Button>
+        </FormActions>
       </section>
 
       {members.length === 0 && (

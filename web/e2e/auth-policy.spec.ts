@@ -8,10 +8,7 @@ test('Settings auth policy panel validates and saves org settings', async ({ pag
 
   await expect(page.getByRole('heading', { name: 'Authentication policies', exact: true })).toBeVisible()
 
-  const domainInput = page
-    .locator('label')
-    .filter({ hasText: 'Allowed email domains' })
-    .getByRole('textbox')
+  const domainInput = page.getByRole('textbox', { name: /Allowed email domains/i })
   const mfaToggle = page.getByRole('checkbox', { name: /Require multi-factor authentication/i })
   const ttlInput = page.getByRole('spinbutton', { name: /Session TTL/i })
   const resumeTtlInput = page.getByRole('spinbutton', { name: /Human-form link TTL/i })

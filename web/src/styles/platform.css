@@ -7896,6 +7896,16 @@ button.we-recovery-heatmap__cell:focus-visible {
   font-size: 12px;
 }
 
+.we-permissions-role-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--we-text-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .we-permissions-role-card footer {
   display: flex;
   flex-wrap: wrap;

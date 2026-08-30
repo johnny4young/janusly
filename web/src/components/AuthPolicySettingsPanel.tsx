@@ -15,10 +15,14 @@
  */
 
 import React, { useEffect, useState } from "react";
-import { CheckCircle2, ShieldCheck, Save } from "lucide-react";
+import { ShieldCheck, Save } from "lucide-react";
 import { api } from "../api";
 import { useWorkflowStore } from "../store";
 import { useT } from "../i18n";
+import { Button } from "./ui/Button";
+import { FormActions, FormField, FormSection } from "./ui/Form";
+import { StatusSummary } from "./ui/StatusSummary";
+import { SwitchField } from "./ui/SwitchField";
 
 const KEYS = {
   allowedEmailDomains: "auth.allowedEmailDomains",
@@ -188,113 +192,95 @@ export function AuthPolicySettingsPanel() {
     Number.isInteger(resumeTtlNumber) && resumeTtlNumber >= RESUME_TTL_MIN && resumeTtlNumber <= RESUME_TTL_MAX;
 
   return (
-    <section className="we-budget-settings" aria-labelledby="auth-policy-heading">
+    <section className="we-budget-settings" aria-labelledby="auth-policy-heading" data-testid="auth-policy-settings">
       <header className="we-budget-settings__header">
         <ShieldCheck size={18} aria-hidden="true" />
         <h3 id="auth-policy-heading">{t("authPolicy.heading")}</h3>
       </header>
 
       {loading ? (
-        <p className="we-budget-settings__status">{t("authPolicy.loading")}</p>
+        <StatusSummary title={t("authPolicy.loading")} />
       ) : (
-        <form className="we-budget-settings__form" onSubmit={save} noValidate>
-          <fieldset className="we-fieldset">
-            <legend>{t("authPolicy.groupAccess")}</legend>
-            <label className="we-field">
-              <span className="we-field__label">{t("authPolicy.allowedDomains")}</span>
-              <input
-                type="text"
-                className="we-field__input"
-                placeholder={t("authPolicy.allowedDomainsPlaceholder")}
-                value={form.allowedEmailDomains}
-                onChange={(e) => setForm({ ...form, allowedEmailDomains: e.target.value })}
-              />
-              <small className="we-field__hint">{t("authPolicy.allowedDomainsHint")}</small>
-            </label>
-
-          </fieldset>
-
-          <fieldset className="we-fieldset">
-            <legend>{t("authPolicy.groupSecurity")}</legend>
-            <label className="we-field we-field--checkbox">
-              <input
-                type="checkbox"
-                checked={form.mfaRequired}
-                onChange={(e) => setForm({ ...form, mfaRequired: e.target.checked })}
-              />
-              <span className="we-field__label">{t("authPolicy.mfaRequired")}</span>
-              <small className="we-field__hint">{t("authPolicy.mfaRequiredHint")}</small>
-            </label>
-
-            <label className="we-field">
-              <span className="we-field__label">{t("authPolicy.sessionTtl")}</span>
-              <input
-                type="number"
-                className="we-field__input"
-                min={SESSION_TTL_MIN}
-                max={SESSION_TTL_MAX}
-                step={60}
-                value={form.sessionTtlSeconds}
-                onChange={(e) => setForm({ ...form, sessionTtlSeconds: e.target.value })}
-                aria-invalid={!ttlValid}
-                aria-describedby={!ttlValid ? "auth-ttl-error" : undefined}
-              />
-              <small className="we-field__hint">
-                {t("authPolicy.sessionTtlHint", { defaultTtl: SESSION_TTL_DEFAULT, min: SESSION_TTL_MIN, max: SESSION_TTL_MAX })}
-              </small>
-              {!ttlValid && (
-                <small id="auth-ttl-error" className="helper-text helper-text--error" role="alert">
-                  {t("authPolicy.errorTtlRange", { min: SESSION_TTL_MIN, max: SESSION_TTL_MAX })}
-                </small>
+        <form className="ui-form-layout" onSubmit={save} noValidate>
+          <FormSection title={t("authPolicy.groupAccess")}>
+            <FormField
+              id="auth-allowed-domains"
+              label={t("authPolicy.allowedDomains")}
+              hint={t("authPolicy.allowedDomainsHint")}
+            >
+              {(controlProps) => (
+                <input
+                  {...controlProps}
+                  type="text"
+                  placeholder={t("authPolicy.allowedDomainsPlaceholder")}
+                  value={form.allowedEmailDomains}
+                  onChange={(e) => setForm({ ...form, allowedEmailDomains: e.target.value })}
+                />
               )}
-            </label>
+            </FormField>
+          </FormSection>
 
-            <label className="we-field">
-              <span className="we-field__label">{t("authPolicy.resumeTtl")}</span>
-              <input
-                type="number"
-                className="we-field__input"
-                min={RESUME_TTL_MIN}
-                max={RESUME_TTL_MAX}
-                step={60}
-                value={form.humanFormResumeTtlSeconds}
-                onChange={(e) => setForm({ ...form, humanFormResumeTtlSeconds: e.target.value })}
-                aria-invalid={!resumeTtlValid}
-                aria-describedby={!resumeTtlValid ? "auth-resume-ttl-error" : undefined}
-              />
-              <small className="we-field__hint">
-                {t("authPolicy.resumeTtlHint", { defaultTtl: RESUME_TTL_DEFAULT, min: RESUME_TTL_MIN, max: RESUME_TTL_MAX })}
-              </small>
-              {!resumeTtlValid && (
-                <small id="auth-resume-ttl-error" className="helper-text helper-text--error" role="alert">
-                  {t("authPolicy.errorResumeTtlRange", { min: RESUME_TTL_MIN, max: RESUME_TTL_MAX })}
-                </small>
+          <FormSection title={t("authPolicy.groupSecurity")}>
+            <SwitchField
+              checked={form.mfaRequired}
+              onChange={(e) => setForm({ ...form, mfaRequired: e.target.checked })}
+              label={t("authPolicy.mfaRequired")}
+              hint={t("authPolicy.mfaRequiredHint")}
+            />
+            <FormField
+              id="auth-session-ttl"
+              label={t("authPolicy.sessionTtl")}
+              hint={t("authPolicy.sessionTtlHint", { defaultTtl: SESSION_TTL_DEFAULT, min: SESSION_TTL_MIN, max: SESSION_TTL_MAX })}
+              error={!ttlValid ? t("authPolicy.errorTtlRange", { min: SESSION_TTL_MIN, max: SESSION_TTL_MAX }) : undefined}
+            >
+              {(controlProps) => (
+                <input
+                  {...controlProps}
+                  type="number"
+                  min={SESSION_TTL_MIN}
+                  max={SESSION_TTL_MAX}
+                  step={60}
+                  value={form.sessionTtlSeconds}
+                  onChange={(e) => setForm({ ...form, sessionTtlSeconds: e.target.value })}
+                />
               )}
-            </label>
-          </fieldset>
+            </FormField>
+            <FormField
+              id="auth-resume-ttl"
+              label={t("authPolicy.resumeTtl")}
+              hint={t("authPolicy.resumeTtlHint", { defaultTtl: RESUME_TTL_DEFAULT, min: RESUME_TTL_MIN, max: RESUME_TTL_MAX })}
+              error={!resumeTtlValid ? t("authPolicy.errorResumeTtlRange", { min: RESUME_TTL_MIN, max: RESUME_TTL_MAX }) : undefined}
+            >
+              {(controlProps) => (
+                <input
+                  {...controlProps}
+                  type="number"
+                  min={RESUME_TTL_MIN}
+                  max={RESUME_TTL_MAX}
+                  step={60}
+                  value={form.humanFormResumeTtlSeconds}
+                  onChange={(e) => setForm({ ...form, humanFormResumeTtlSeconds: e.target.value })}
+                />
+              )}
+            </FormField>
+          </FormSection>
 
           {error && (
-            <div className="we-budget-settings__error" role="alert">
-              {error}
-            </div>
+            <StatusSummary role="alert" tone="danger" title={error} />
           )}
 
-          <button
-            type="submit"
-            className="we-button we-button--primary we-budget-settings__save"
-            disabled={saving || !ttlValid || !resumeTtlValid}
-          >
-            {saving ? (
-              <>{t("authPolicy.saving")}</>
-            ) : (
-              <>
-                <Save size={14} aria-hidden="true" /> {t("authPolicy.save")}
-              </>
-            )}
-            {!saving && form.allowedEmailDomains.trim().length > 0 && (
-              <CheckCircle2 size={14} aria-hidden="true" />
-            )}
-          </button>
+          <FormActions>
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={saving || !ttlValid || !resumeTtlValid}
+              loading={saving}
+              loadingLabel={t("authPolicy.saving")}
+              leadingIcon={<Save size={15} />}
+            >
+              {t("authPolicy.save")}
+            </Button>
+          </FormActions>
         </form>
       )}
     </section>

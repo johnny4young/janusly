@@ -18,6 +18,9 @@ import type { SessionContext } from '../identity-context'
 import { tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
 import { BrandMark } from './BrandMark'
+import { Button } from './ui/Button'
+import { FormField, FormGrid } from './ui/Form'
+import { StatusSummary } from './ui/StatusSummary'
 
 type WorkspaceGateProps = {
   context: SessionContext
@@ -141,7 +144,7 @@ export function WorkspaceGate({ context }: WorkspaceGateProps) {
           </p>
         </div>
 
-        {error && <div className="issue issue-error" role="alert">{error}</div>}
+        {error && <StatusSummary role="alert" tone="danger" title={error} />}
 
         {context.organizations.length > 0 && (
           <section className="workspace-gate__section" aria-labelledby="workspace-list-title">
@@ -204,40 +207,45 @@ export function WorkspaceGate({ context }: WorkspaceGateProps) {
               </div>
               <Plus size={18} aria-hidden="true" />
             </div>
-            <div className="workspace-gate__fields">
-              <label>
-                <span>{t('auth.workspace.profileName')}</span>
-                <input
-                  className="text-field"
-                  value={profileName}
-                  onChange={(event) => setProfileName(event.target.value)}
-                  autoComplete="name"
-                  maxLength={100}
-                  placeholder={t('auth.workspace.profileNamePlaceholder')}
-                />
-              </label>
-              <label>
-                <span>{t('auth.workspace.organizationName')}</span>
-                <input
-                  className="text-field"
-                  value={organizationName}
-                  onChange={(event) => setOrganizationName(event.target.value)}
-                  autoComplete="organization"
-                  required
-                  minLength={2}
-                  maxLength={80}
-                  placeholder={t('auth.workspace.organizationNamePlaceholder')}
-                />
-              </label>
-            </div>
-            <button
+            <FormGrid>
+              <FormField id="workspace-profile-name" label={t('auth.workspace.profileName')}>
+                {(controlProps) => (
+                  <input
+                    {...controlProps}
+                    value={profileName}
+                    onChange={(event) => setProfileName(event.target.value)}
+                    autoComplete="name"
+                    maxLength={100}
+                    placeholder={t('auth.workspace.profileNamePlaceholder')}
+                  />
+                )}
+              </FormField>
+              <FormField id="workspace-organization-name" label={t('auth.workspace.organizationName')} required>
+                {(controlProps) => (
+                  <input
+                    {...controlProps}
+                    value={organizationName}
+                    onChange={(event) => setOrganizationName(event.target.value)}
+                    autoComplete="organization"
+                    required
+                    minLength={2}
+                    maxLength={80}
+                    placeholder={t('auth.workspace.organizationNamePlaceholder')}
+                  />
+                )}
+              </FormField>
+            </FormGrid>
+            <Button
               type="submit"
-              className="command-button command-button-primary workspace-gate__create-action"
+              className="workspace-gate__create-action"
+              variant="primary"
               disabled={pendingKey !== null || organizationName.trim().length < 2}
+              loading={pendingKey === 'create'}
+              loadingLabel={t('common.working')}
+              leadingIcon={<Plus size={15} />}
             >
-              <Plus size={15} aria-hidden="true" />
-              <span>{pendingKey === 'create' ? t('common.working') : t('auth.workspace.createAction')}</span>
-            </button>
+              {t('auth.workspace.createAction')}
+            </Button>
           </form>
         )}
       </section>

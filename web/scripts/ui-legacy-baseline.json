@@ -18,12 +18,6 @@
     "we-button--ghost",
     "we-field"
   ],
-  "components/AuthPolicySettingsPanel.tsx": [
-    "we-button",
-    "we-button--primary",
-    "we-field",
-    "we-fieldset"
-  ],
   "components/BranchRuleEditor.tsx": [
     "field-label",
     "text-field"
@@ -107,13 +101,8 @@
     "text-field"
   ],
   "components/MembersPanel.tsx": [
-    "command-button",
-    "command-button-primary",
-    "field-label",
     "text-field",
-    "text-field--compact",
-    "text-field--error",
-    "we-fieldset"
+    "text-field--compact"
   ],
   "components/OnboardingBanner.tsx": [
     "command-button",
@@ -121,12 +110,6 @@
   ],
   "components/PanelErrorFallback.tsx": [
     "command-button"
-  ],
-  "components/PermissionGrantsPanel.tsx": [
-    "we-button",
-    "we-button--ghost",
-    "we-button--primary",
-    "we-field"
   ],
   "components/quick-config-fields.tsx": [
     "field-label",
@@ -322,11 +305,6 @@
     "command-button-primary",
     "we-field",
     "we-fieldset"
-  ],
-  "components/WorkspaceGate.tsx": [
-    "command-button",
-    "command-button-primary",
-    "text-field"
   ],
   "i18n/LocaleSwitcher.tsx": [
     "text-field"

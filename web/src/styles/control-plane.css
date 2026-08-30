@@ -3727,21 +3727,6 @@
   color: var(--we-primary);
 }
 
-.workspace-gate__fields {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.workspace-gate__fields label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  color: var(--we-ink-muted);
-  font-size: 11px;
-  font-weight: 650;
-}
-
 .workspace-gate__create-action {
   margin-top: 14px;
 }
@@ -3751,6 +3736,5 @@
   .workspace-gate__card { padding: 18px; }
   .workspace-gate__header { align-items: flex-start; }
   .workspace-gate__signout span { display: none; }
-  .workspace-gate__list,
-  .workspace-gate__fields { grid-template-columns: 1fr; }
+  .workspace-gate__list { grid-template-columns: 1fr; }
 }

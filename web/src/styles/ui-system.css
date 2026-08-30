@@ -148,6 +148,8 @@
   gap: var(--we-space-4);
 }
 
+.ui-form-layout { display: grid; gap: var(--we-space-6); }
+
 .ui-form-disclosure {
   border: 1px solid var(--we-line);
   border-radius: var(--we-radius-sm);
@@ -164,6 +166,52 @@
 
 .ui-form-disclosure__summary:focus-visible { outline: none; box-shadow: var(--we-focus-ring); border-radius: var(--we-radius-sm); }
 .ui-form-disclosure__body { padding: var(--we-space-2) var(--we-space-4) var(--we-space-4); }
+
+.ui-switch-field {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--we-space-3);
+  padding: var(--we-space-3) var(--we-space-4);
+  border: 1px solid var(--we-line);
+  border-radius: var(--we-radius-sm);
+  background: var(--we-surface);
+  cursor: pointer;
+}
+
+.ui-switch-field__control { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
+.ui-switch-field__track {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  margin-top: 1px;
+  border: 1px solid var(--we-line-strong);
+  border-radius: var(--we-radius-pill);
+  background: var(--we-surface-muted);
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.ui-switch-field__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--we-surface);
+  box-shadow: 0 1px 4px var(--we-shadow-ink-20);
+  transition: transform 140ms ease;
+}
+
+.ui-switch-field__control:checked + .ui-switch-field__track { border-color: var(--we-primary); background: var(--we-primary); }
+.ui-switch-field__control:checked + .ui-switch-field__track .ui-switch-field__thumb { transform: translateX(16px); }
+.ui-switch-field__control:focus-visible + .ui-switch-field__track { box-shadow: var(--we-focus-ring); }
+.ui-switch-field:has(.ui-switch-field__control:disabled) { cursor: not-allowed; opacity: 0.62; }
+.ui-switch-field__copy { display: grid; gap: var(--we-space-1); }
+.ui-switch-field__label { color: var(--we-ink); font-size: 13px; font-weight: 680; }
+.ui-switch-field__hint { color: var(--we-muted); font-size: 12px; line-height: 1.45; }
 
 .ui-form-actions {
   display: flex;

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { Button } from './Button'
 import { FieldStack, FormActions, FormDisclosure, FormField, FormGrid, FormSection } from './Form'
 import { StatusSummary } from './StatusSummary'
+import { SwitchField } from './SwitchField'
 
 describe('semantic UI primitives', () => {
   it('keeps native button behavior and exposes one loading state', () => {
@@ -76,5 +77,15 @@ describe('semantic UI primitives', () => {
 
     view.rerender(<StatusSummary title="Connection failed" tone="danger" role="alert" />)
     expect(screen.getByRole('alert')).toHaveTextContent('Connection failed')
+  })
+
+  it('presents native checkbox behavior as a labelled switch', () => {
+    const onChange = vi.fn()
+    render(<SwitchField label="Require MFA" hint="The provider enforces this policy." onChange={onChange} />)
+
+    const control = screen.getByRole('checkbox', { name: 'Require MFA' })
+    fireEvent.click(control)
+    expect(onChange).toHaveBeenCalledOnce()
+    expect(control.getAttribute('aria-describedby')).toBeTruthy()
   })
 })
